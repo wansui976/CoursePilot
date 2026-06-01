@@ -94,7 +94,7 @@ describe("Home", () => {
     fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
-    expect(screen.getByText("课程视频")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回课程视频" })).toBeInTheDocument();
     expect(screen.getByText("学习工作台")).toBeInTheDocument();
     expect(screen.getByText("下一步：处理视频生成文稿和学习资料")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: video.title })).toBeInTheDocument();
@@ -106,5 +106,19 @@ describe("Home", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "开始处理" }));
     await waitFor(() => expect(mockIpc.pipeline.process).toHaveBeenCalledWith(video.id));
+  });
+
+  it("collapses the library columns after selecting a video so the player keeps usable width", async () => {
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+
+    expect(screen.queryByText("课程库")).not.toBeInTheDocument();
+    expect(screen.queryByText("课程视频")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "返回课程视频" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("学习资料面板")).toHaveClass("w-[40vw]");
   });
 });

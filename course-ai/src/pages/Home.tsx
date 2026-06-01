@@ -1,5 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Clock3, Film, ListVideo, Sparkles } from "lucide-react";
+import {
+  CheckCircle2,
+  Clock3,
+  Film,
+  ListVideo,
+  PanelLeftOpen,
+  Settings,
+  Sparkles,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { CourseSidebar } from "@/components/CourseSidebar";
 import { ImportVideoButton } from "@/components/ImportVideoDialog";
@@ -40,66 +48,99 @@ export function Home() {
 
   return (
     <div className="relative flex h-full overflow-hidden bg-[#0b0b0c]">
-      <CourseSidebar
-        selectedCourseId={selectedCourseId}
-        onSelect={(id) => {
-          setSelectedCourseId(id);
-          setSelectedVideoId(null);
-        }}
-        onOpenSettings={() => setShowSettings(true)}
-      />
-      <section className="flex h-full w-[250px] flex-col border-r border-white/10 bg-[#151515]">
-        <div className="border-b border-white/10 px-4 py-4">
-          <div className="mb-3 flex items-center gap-2">
-            <ListVideo className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-semibold text-white">课程视频</h2>
-          </div>
-          {selectedCourseId ? (
-            <ImportVideoButton courseId={selectedCourseId} />
-          ) : (
-            <div className="rounded-md border border-white/8 bg-white/[0.04] p-3 text-xs leading-relaxed text-white/48">
-              先在左侧添加或选择课程，再导入本地视频。
+      {selectedVideo ? (
+        <aside className="flex h-full w-16 flex-shrink-0 flex-col items-center border-r border-white/10 bg-[#111] py-3">
+          <button
+            className="flex h-11 w-11 items-center justify-center rounded-md text-white/62 hover:bg-white/8 hover:text-white"
+            onClick={() => setSelectedVideoId(null)}
+            title="返回课程视频"
+            aria-label="返回课程视频"
+          >
+            <PanelLeftOpen className="h-5 w-5" />
+          </button>
+          <div className="my-3 h-px w-8 bg-white/10" />
+          <button
+            className="flex h-11 w-11 items-center justify-center rounded-md text-white/62 hover:bg-white/8 hover:text-white"
+            onClick={() => setSelectedVideoId(null)}
+            title="课程视频"
+            aria-label="课程视频"
+          >
+            <ListVideo className="h-5 w-5" />
+          </button>
+          <div className="flex-1" />
+          <button
+            className="flex h-11 w-11 items-center justify-center rounded-md text-white/62 hover:bg-white/8 hover:text-white"
+            onClick={() => setShowSettings(true)}
+            title="设置"
+            aria-label="设置"
+          >
+            <Settings className="h-5 w-5" />
+          </button>
+        </aside>
+      ) : (
+        <>
+          <CourseSidebar
+            selectedCourseId={selectedCourseId}
+            onSelect={(id) => {
+              setSelectedCourseId(id);
+              setSelectedVideoId(null);
+            }}
+            onOpenSettings={() => setShowSettings(true)}
+          />
+          <section className="flex h-full w-[250px] flex-col border-r border-white/10 bg-[#151515]">
+            <div className="border-b border-white/10 px-4 py-4">
+              <div className="mb-3 flex items-center gap-2">
+                <ListVideo className="h-4 w-4 text-primary" />
+                <h2 className="text-sm font-semibold text-white">课程视频</h2>
+              </div>
+              {selectedCourseId ? (
+                <ImportVideoButton courseId={selectedCourseId} />
+              ) : (
+                <div className="rounded-md border border-white/8 bg-white/[0.04] p-3 text-xs leading-relaxed text-white/48">
+                  先在左侧添加或选择课程，再导入本地视频。
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
-          {videos.map((video) => (
-            <li key={video.id}>
-              <button
-                onClick={() => setSelectedVideoId(video.id)}
-                className={`w-full rounded-md px-3 py-2.5 text-left transition ${
-                  video.id === selectedVideoId
-                    ? "bg-white/12 text-white shadow-sm"
-                    : "text-white/62 hover:bg-white/6 hover:text-white"
-                }`}
-              >
-                <span className="flex items-start gap-2">
-                  <Film className="mt-0.5 h-4 w-4 flex-shrink-0 text-white/35" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">
-                      {video.title}
+            <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+              {videos.map((video) => (
+                <li key={video.id}>
+                  <button
+                    onClick={() => setSelectedVideoId(video.id)}
+                    className={`w-full rounded-md px-3 py-2.5 text-left transition ${
+                      video.id === selectedVideoId
+                        ? "bg-white/12 text-white shadow-sm"
+                        : "text-white/62 hover:bg-white/6 hover:text-white"
+                    }`}
+                  >
+                    <span className="flex items-start gap-2">
+                      <Film className="mt-0.5 h-4 w-4 flex-shrink-0 text-white/35" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">
+                          {video.title}
+                        </span>
+                        <span className="mt-1 flex items-center gap-2 text-xs text-white/38">
+                          <span>{statusLabel[video.processed_status]}</span>
+                          {video.duration_ms && (
+                            <>
+                              <span className="h-1 w-1 rounded-full bg-white/25" />
+                              <span>{formatMs(video.duration_ms)}</span>
+                            </>
+                          )}
+                        </span>
+                      </span>
                     </span>
-                    <span className="mt-1 flex items-center gap-2 text-xs text-white/38">
-                      <span>{statusLabel[video.processed_status]}</span>
-                      {video.duration_ms && (
-                        <>
-                          <span className="h-1 w-1 rounded-full bg-white/25" />
-                          <span>{formatMs(video.duration_ms)}</span>
-                        </>
-                      )}
-                    </span>
-                  </span>
-                </span>
-              </button>
-            </li>
-          ))}
-          {selectedCourseId && videos.length === 0 && (
-            <li className="rounded-md border border-white/8 bg-white/[0.04] p-4 text-sm leading-relaxed text-white/50">
-              这个课程还没有视频。导入后会在这里形成学习列表。
-            </li>
-          )}
-        </ul>
-      </section>
+                  </button>
+                </li>
+              ))}
+              {selectedCourseId && videos.length === 0 && (
+                <li className="rounded-md border border-white/8 bg-white/[0.04] p-4 text-sm leading-relaxed text-white/50">
+                  这个课程还没有视频。导入后会在这里形成学习列表。
+                </li>
+              )}
+            </ul>
+          </section>
+        </>
+      )}
       <main className="flex min-w-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col bg-black">
           {selectedVideo ? (
@@ -158,7 +199,10 @@ export function Home() {
           )}
         </div>
         {selectedVideo && (
-          <div className="w-[460px] flex-shrink-0 border-l border-white/10 bg-[#171717]">
+          <div
+            aria-label="学习资料面板"
+            className="w-[40vw] min-w-[300px] max-w-[460px] flex-shrink-0 border-l border-white/10 bg-[#171717]"
+          >
             <TabsPanel videoId={selectedVideo.id} />
           </div>
         )}
