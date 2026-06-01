@@ -16,6 +16,16 @@ pub const WHISPER: BinarySpec = BinarySpec {
     candidates_on_path: &["whisper-cli", "whisper-cpp", "main"],
 };
 
+pub const TESSERACT: BinarySpec = BinarySpec {
+    name: "tesseract",
+    candidates_on_path: &["tesseract"],
+};
+
+pub const YTDLP: BinarySpec = BinarySpec {
+    name: "yt-dlp",
+    candidates_on_path: &["yt-dlp", "youtube-dl"],
+};
+
 pub fn resolve(spec: &BinarySpec, sidecar_dir: Option<&PathBuf>) -> AppResult<PathBuf> {
     if let Some(dir) = sidecar_dir {
         let path = dir.join(spec.name);

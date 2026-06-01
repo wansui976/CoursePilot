@@ -43,21 +43,26 @@
 
 ---
 
-## 待在你的开发机完成（联网 / 带工具 / 可打包）
+## Phase 3b — RAG / OCR（✅ 代码完成并验证，运行时需外部二进制）
 
-### Phase 3b — OCR / RAG / PiP
-- **截字 OCR**：装 `tesseract` + `chi_sim.traineddata`；实现 `cmd_ocr_region`（ffmpeg 截帧→裁剪→tesseract）。骨架思路见 `docs/superpowers/plans/2026-06-01-phase3-courseware.md`。
-- **RAG**：字幕切 chunk 这一步**已完成并单测**（`src-tauri/src/pipeline/rag.rs` 的 `chunk_transcript`，带时间戳重叠分块）。剩余：加 `fastembed`(BGE-M3, ONNX) + `sqlite-vec`，把 chunk→embed→存向量；问答召回 top-K→复用 Phase 2 `Provider`→`[ref:N]` 引用渲染；顶部搜索框 + 跨视频 scope。
-- **PiP 合成**：ffmpeg overlay 把讲师小窗叠到 slide。
+- **RAG**（✅ 完整实现，避开 ONNX/sqlite-vec）：
+  - 嵌入走 **OpenAI 兼容 `/embeddings` HTTP 接口**（`Provider::embed`），向量以 JSON 存普通表（migration 0004），**余弦相似度用纯 Rust 算**，top-K 检索 → 复用 Provider 作答 → `[ref:N]` 引用。
+  - 命令 `cmd_build_embeddings` / `cmd_rag_query`；前端头部 `RagSearchPanel`（提问 + 建索引 + 引用跳转）。
+  - 以 Mock 嵌入完整单测。**运行时前提**：RAG 任务的 Profile 须为 OpenAI 兼容且其端点提供 `/embeddings`（嵌入模型默认 `text-embedding-3-small`，可用 setting `rag_embed_model` 改）。
+- **截字 OCR**（✅ 代码完成）：`cmd_ocr_region`（ffmpeg 截/裁帧 → tesseract），SlidesPanel「截字」按钮。arg 构造纯函数单测。**运行时需装 `tesseract` + `chi_sim` 语言包**（沙箱未装，故无集成测试）。
 
-### Phase 4b — B 站 / 打磨 / 打包
-- **B 站下载**：装 `yt-dlp`；实现 sidecar 命令（URL→下载→入库），Cookies/代理配置。
+## Phase 4b — B 站下载（✅ 代码完成，运行时需 yt-dlp）
+
+- `cmd_import_bilibili`（yt-dlp sidecar → 下载到课程目录 → 登记为视频，读 setting `bilibili_cookies`）；导入框加 URL 下载入口。arg 构造纯函数单测。**运行时需装 `yt-dlp`**。
+
+## 仍待你的开发机完成
+
+- **PiP 讲师小窗合成**：ffmpeg overlay（可选增强，未做）。
+- **导出补全**：脑图 PNG/SVG（markmap 前端导出）、笔记 PDF（浏览器打印）。
 - **重试 / 取消**：基于现有 `processing_jobs` 状态机扩展前端按钮。
-- **导出补全**：脑图 PNG/SVG（markmap 前端导出）、笔记 PDF（浏览器打印或 PDF 库）。
-- **安装包**：`pnpm tauri build` 产出 macOS dmg / Windows msi（需各平台工具链与签名）。
-
-### 发行前安全加固（重要）
-- 把 API Key 从 `settings` 表迁回 **系统钥匙串**（`keyring` crate）。改动隔离在 `llm/keychain.rs`。
+- **安装包**：`pnpm tauri build` 产出 macOS dmg / Windows msi（需各平台工具链与签名；本沙箱无 GUI/签名链）。
+- **安全加固（重要）**：把 API Key 从 `settings` 表迁回 **系统钥匙串**（`keyring` crate）；改动隔离在 `llm/keychain.rs`。
+- **运行时工具**：在你的机器上装 `tesseract`(+chi_sim)、`yt-dlp`，OCR 与 B 站下载即可用。
 
 ---
 

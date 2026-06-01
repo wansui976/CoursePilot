@@ -28,12 +28,24 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: ["screenshots", videoId] }),
   });
+  const ocr = useMutation<string, unknown, void>({
+    mutationFn: () => ipc.tools.ocr(videoId, Math.floor(currentMs)),
+  });
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
         <span className="text-sm text-white/60">课件页</span>
         <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={ocr.isPending}
+            onClick={() => ocr.mutate()}
+            title="对当前帧整屏 OCR（需安装 tesseract）"
+          >
+            {ocr.isPending ? "识别中…" : "截字"}
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -60,6 +72,20 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
         <p className="px-3 py-2 text-xs text-red-400">
           {String(extract.error)}
         </p>
+      )}
+      {ocr.isError && (
+        <p className="px-3 py-2 text-xs text-red-400">{String(ocr.error)}</p>
+      )}
+      {ocr.data !== undefined && (
+        <div className="border-b border-white/10 px-3 py-2 text-xs">
+          <div className="mb-1 text-white/40">OCR 结果（点击复制）</div>
+          <button
+            className="block w-full whitespace-pre-wrap text-left text-white/80 hover:text-white"
+            onClick={() => void navigator.clipboard.writeText(ocr.data ?? "")}
+          >
+            {ocr.data || "（未识别到文字）"}
+          </button>
+        </div>
       )}
       <div className="flex-1 overflow-y-auto p-3">
         {slides.length === 0 ? (

@@ -4,6 +4,7 @@ pub mod export;
 pub mod rag;
 pub mod settings;
 pub mod slides;
+pub mod tools;
 pub mod transcripts;
 pub mod videos;
 pub mod whisper;

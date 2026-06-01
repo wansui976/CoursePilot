@@ -1,6 +1,8 @@
 pub mod ai;
 pub mod asr;
 pub mod audio;
+pub mod download;
+pub mod ocr;
 pub mod rag;
 pub mod slides;
 

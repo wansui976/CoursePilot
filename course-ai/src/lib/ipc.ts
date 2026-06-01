@@ -94,4 +94,17 @@ export const ipc = {
     notes: (videoId: string): Promise<string> =>
       invoke("cmd_export_notes", { videoId }),
   },
+  tools: {
+    ocr: (
+      videoId: string,
+      atMs: number,
+      x = 0,
+      y = 0,
+      w = 0,
+      h = 0,
+    ): Promise<string> =>
+      invoke("cmd_ocr_region", { videoId, atMs, x, y, w, h }),
+    importBilibili: (courseId: string, url: string): Promise<Video> =>
+      invoke("cmd_import_bilibili", { courseId, url }),
+  },
 };
