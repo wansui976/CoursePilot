@@ -47,7 +47,7 @@
 
 ### Phase 3b — OCR / RAG / PiP
 - **截字 OCR**：装 `tesseract` + `chi_sim.traineddata`；实现 `cmd_ocr_region`（ffmpeg 截帧→裁剪→tesseract）。骨架思路见 `docs/superpowers/plans/2026-06-01-phase3-courseware.md`。
-- **RAG**：加 `fastembed`(BGE-M3, ONNX) + `sqlite-vec`；字幕切 chunk→embed→存向量；问答召回 top-K→复用 Phase 2 `Provider`→`[ref:N]` 引用渲染；顶部搜索框 + 跨视频 scope。
+- **RAG**：字幕切 chunk 这一步**已完成并单测**（`src-tauri/src/pipeline/rag.rs` 的 `chunk_transcript`，带时间戳重叠分块）。剩余：加 `fastembed`(BGE-M3, ONNX) + `sqlite-vec`，把 chunk→embed→存向量；问答召回 top-K→复用 Phase 2 `Provider`→`[ref:N]` 引用渲染；顶部搜索框 + 跨视频 scope。
 - **PiP 合成**：ffmpeg overlay 把讲师小窗叠到 slide。
 
 ### Phase 4b — B 站 / 打磨 / 打包

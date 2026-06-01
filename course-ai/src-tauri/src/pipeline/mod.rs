@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod asr;
 pub mod audio;
+pub mod rag;
 pub mod slides;
 
 use crate::commands::courses::AppState;
