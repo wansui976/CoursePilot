@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 import { WhisperModelsPanel } from "./WhisperModelsPanel";
+import { LlmSettingsPanel } from "./LlmSettingsPanel";
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [root, setRoot] = useState("");
@@ -30,7 +31,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-[520px] rounded border border-white/10 bg-zinc-900 p-6 shadow-xl">
+      <div className="max-h-[80vh] w-[520px] overflow-y-auto rounded border border-white/10 bg-zinc-900 p-6 shadow-xl">
         <h2 className="mb-4 text-lg">设置</h2>
         <label className="mb-1 block text-sm">
           默认数据根目录（留空 = 跟视频同目录的 .courseai/）
@@ -59,6 +60,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           <option value="large-v3-turbo">large-v3-turbo</option>
         </select>
         <WhisperModelsPanel />
+        <div className="my-4 border-t border-white/10" />
+        <LlmSettingsPanel />
         <div className="mt-6 text-right">
           <Button onClick={onClose}>关闭</Button>
         </div>
