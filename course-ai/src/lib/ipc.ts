@@ -4,6 +4,8 @@ import type {
   Course,
   Job,
   LlmProfile,
+  Screenshot,
+  Slide,
   TranscriptSegment,
   Video,
 } from "./types";
@@ -70,5 +72,15 @@ export const ipc = {
       invoke("cmd_get_quiz", { videoId }),
     getMindmap: (videoId: string): Promise<string | null> =>
       invoke("cmd_get_mindmap", { videoId }),
+  },
+  slides: {
+    extract: (videoId: string, threshold?: number): Promise<number> =>
+      invoke("cmd_extract_slides", { videoId, threshold }),
+    list: (videoId: string): Promise<Slide[]> =>
+      invoke("cmd_get_slides", { videoId }),
+    capture: (videoId: string, atMs: number): Promise<Screenshot> =>
+      invoke("cmd_capture_frame", { videoId, atMs }),
+    screenshots: (videoId: string): Promise<Screenshot[]> =>
+      invoke("cmd_get_screenshots", { videoId }),
   },
 };

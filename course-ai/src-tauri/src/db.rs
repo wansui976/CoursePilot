@@ -70,7 +70,14 @@ mod tests {
         let db = Db::connect_and_migrate(&dir.path().join("test.db"))
             .await
             .unwrap();
-        for table in ["chapters", "notes", "quizzes", "mindmaps"] {
+        for table in [
+            "chapters",
+            "notes",
+            "quizzes",
+            "mindmaps",
+            "slides",
+            "screenshots",
+        ] {
             let row: (String,) = sqlx::query_as(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
             )

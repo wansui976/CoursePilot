@@ -82,3 +82,22 @@ export interface QuizQuestion {
   explanation?: string;
   ref_ms?: number;
 }
+
+export interface Slide {
+  id: number;
+  video_id: string;
+  image_path: string;
+  composed_path: string | null;
+  start_ms: number;
+  end_ms: number | null;
+  page_no: number;
+  ocr_text: string | null;
+}
+
+export interface Screenshot {
+  id: number;
+  video_id: string;
+  image_path: string;
+  at_ms: number;
+  created_at: number;
+}

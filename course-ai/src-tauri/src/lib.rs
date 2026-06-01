@@ -12,6 +12,9 @@ use crate::commands::ai::{
     cmd_get_quiz, cmd_has_api_key, cmd_save_llm_profiles, cmd_save_notes, cmd_set_api_key,
 };
 use crate::commands::courses::{cmd_create_course, cmd_delete_course, cmd_list_courses, AppState};
+use crate::commands::slides::{
+    cmd_capture_frame, cmd_extract_slides, cmd_get_screenshots, cmd_get_slides,
+};
 use crate::commands::settings::{cmd_get_setting, cmd_set_setting};
 use crate::commands::transcripts::cmd_list_transcripts;
 use crate::commands::videos::{cmd_add_local_video, cmd_list_videos};
@@ -61,7 +64,11 @@ pub fn run() {
             cmd_save_notes,
             cmd_get_quiz,
             cmd_get_mindmap,
-            cmd_generate_ai
+            cmd_generate_ai,
+            cmd_extract_slides,
+            cmd_get_slides,
+            cmd_capture_frame,
+            cmd_get_screenshots
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

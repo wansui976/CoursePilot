@@ -2,6 +2,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TranscriptPanel } from "./TranscriptPanel";
 import { NotesPanel } from "./NotesPanel";
 import { ChaptersPanel } from "./ChaptersPanel";
+import { SlidesPanel } from "./SlidesPanel";
 
 const TABS = ["视频", "笔记", "AI看", "课件", "文稿"] as const;
 
@@ -28,8 +29,8 @@ export function TabsPanel({ videoId }: { videoId: string }) {
       <TabsContent value="AI看" className="flex-1 overflow-hidden">
         <ChaptersPanel videoId={videoId} />
       </TabsContent>
-      <TabsContent value="课件" className="p-4 text-white/40">
-        Phase 3 接入
+      <TabsContent value="课件" className="flex-1 overflow-hidden">
+        <SlidesPanel videoId={videoId} />
       </TabsContent>
       <TabsContent value="文稿" className="flex-1 overflow-hidden">
         <TranscriptPanel videoId={videoId} />
