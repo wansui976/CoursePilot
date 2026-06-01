@@ -45,5 +45,20 @@ cd src-tauri && cargo test
 - Whisper model download manager
 - Default storage root and model settings
 
-Phases 2-4 cover LLM notes, quizzes, mind maps, courseware extraction, OCR,
-RAG, Bilibili download, and installer packaging.
+## Phase 2 Scope (AI core)
+
+- Unified `Provider` LLM layer with OpenAI-compatible and Anthropic backends
+  (Anthropic uses prompt caching on the transcript block)
+- LLM profile management and per-task routing in Settings
+- Notes tab: TipTap editor with AI-generated notes, clickable `[mm:ss]`
+  timestamp nodes, and debounced autosave
+- AI看 tab: AI-generated chapter list with seek-on-click
+- AI quiz and AI mindmap (rendered with markmap), both transcript-derived
+
+> **API key storage:** keys are currently kept in the SQLite `settings` table
+> (`llm_key_*`). The intended production target is the OS keychain via the
+> `keyring` crate; the swap is isolated to `src-tauri/src/llm/keychain.rs` and
+> should be done before release.
+
+Phases 3-4 cover courseware extraction, OCR, RAG, Bilibili download, and
+installer packaging.

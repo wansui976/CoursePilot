@@ -63,4 +63,22 @@ mod tests {
             .unwrap();
         assert_eq!(value.0, "bar");
     }
+
+    #[tokio::test]
+    async fn ai_tables_exist_after_migration() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        for table in ["chapters", "notes", "quizzes", "mindmaps"] {
+            let row: (String,) = sqlx::query_as(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            )
+            .bind(table)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+            assert_eq!(&row.0, table);
+        }
+    }
 }
