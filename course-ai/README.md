@@ -60,5 +60,17 @@ cd src-tauri && cargo test
 > `keyring` crate; the swap is isolated to `src-tauri/src/llm/keychain.rs` and
 > should be done before release.
 
-Phases 3-4 cover courseware extraction, OCR, RAG, Bilibili download, and
-installer packaging.
+## Phase 3 / 4 Scope
+
+- **课件 (slides)**: ffmpeg scene-change frame extraction, 课件 tab grid, 视频截图
+- **OCR (截字)**: ffmpeg crop + tesseract (runtime needs `tesseract` + `chi_sim`)
+- **RAG**: OpenAI-compatible `/embeddings` + pure-Rust cosine top-K retrieval
+  (no ONNX/sqlite-vec), `[ref:N]` citations, header search box
+- **Export**: subtitles SRT/VTT, notes Markdown, mindmap SVG
+- **Bilibili / URL download**: yt-dlp sidecar (runtime needs `yt-dlp`)
+- **Pipeline retry** on failed stages
+
+See `docs/superpowers/STATUS.md` for the full implementation status, the two
+documented spec deviations (enum provider, settings-table key storage), and
+what still needs your machine (installer packaging, keychain hardening,
+optional PiP, and the runtime binaries `tesseract` / `yt-dlp`).
