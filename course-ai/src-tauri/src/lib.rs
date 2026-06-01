@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod db;
 pub mod error;
+pub mod export;
 pub mod jobs;
 pub mod llm;
 pub mod pipeline;
@@ -12,6 +13,7 @@ use crate::commands::ai::{
     cmd_get_quiz, cmd_has_api_key, cmd_save_llm_profiles, cmd_save_notes, cmd_set_api_key,
 };
 use crate::commands::courses::{cmd_create_course, cmd_delete_course, cmd_list_courses, AppState};
+use crate::commands::export::{cmd_export_notes, cmd_export_subtitles};
 use crate::commands::slides::{
     cmd_capture_frame, cmd_extract_slides, cmd_get_screenshots, cmd_get_slides,
 };
@@ -68,7 +70,9 @@ pub fn run() {
             cmd_extract_slides,
             cmd_get_slides,
             cmd_capture_frame,
-            cmd_get_screenshots
+            cmd_get_screenshots,
+            cmd_export_subtitles,
+            cmd_export_notes
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

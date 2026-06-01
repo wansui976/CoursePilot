@@ -83,4 +83,10 @@ export const ipc = {
     screenshots: (videoId: string): Promise<Screenshot[]> =>
       invoke("cmd_get_screenshots", { videoId }),
   },
+  export: {
+    subtitles: (videoId: string, format: "srt" | "vtt"): Promise<string> =>
+      invoke("cmd_export_subtitles", { videoId, format }),
+    notes: (videoId: string): Promise<string> =>
+      invoke("cmd_export_notes", { videoId }),
+  },
 };
