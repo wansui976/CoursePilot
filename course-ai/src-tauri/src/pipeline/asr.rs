@@ -46,7 +46,7 @@ pub async fn run_whisper(
         .arg(model)
         .args(["-f"])
         .arg(audio)
-        .args(["-oj", "-pp"]);
+        .args(["-oj", "-ojf", "-pp"]);
     if let Some(lang) = language {
         command.args(["-l", lang]);
     }
@@ -110,6 +110,7 @@ pub async fn store_transcripts(db: &Db, video_id: &str, json: &WhisperJson) -> A
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn parses_minimal_whisper_json() {
@@ -122,5 +123,25 @@ mod tests {
         assert_eq!(json.transcription.len(), 2);
         assert_eq!(json.transcription[0].offsets.to, 900);
         assert_eq!(json.transcription[1].text.trim(), "world");
+    }
+
+    #[tokio::test]
+    async fn run_whisper_reads_homebrew_fixture_when_available() {
+        let model = Path::new(
+            "/opt/homebrew/Cellar/whisper-cpp/1.8.5/share/whisper-cpp/for-tests-ggml-tiny.bin",
+        );
+        let audio = Path::new("/opt/homebrew/Cellar/whisper-cpp/1.8.5/share/whisper-cpp/jfk.wav");
+        if which::which("whisper-cli").is_err() || !model.is_file() || !audio.is_file() {
+            eprintln!("skipping: no Homebrew whisper-cpp fixture");
+            return;
+        }
+
+        let dir = tempdir().unwrap();
+        let local_audio = dir.path().join("jfk.wav");
+        std::fs::copy(audio, &local_audio).unwrap();
+
+        let json = run_whisper(&local_audio, model, Some("en")).await.unwrap();
+        assert!(json.transcription.len() <= 32);
+        assert!(local_audio.with_file_name("jfk.wav.json").is_file());
     }
 }
