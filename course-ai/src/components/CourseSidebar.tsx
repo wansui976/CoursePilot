@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { Settings } from "lucide-react";
+import { FolderOpen, Library, Plus, Settings } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
@@ -29,30 +29,44 @@ export function CourseSidebar({
   });
 
   return (
-    <aside className="flex h-full w-56 flex-col gap-2 border-r border-white/10 p-3">
-      <Button size="sm" onClick={() => create.mutate()}>
-        + 添加课程
-      </Button>
-      <div className="flex-1 overflow-y-auto">
+    <aside className="flex h-full w-[220px] flex-col border-r border-white/10 bg-[#111]">
+      <div className="border-b border-white/10 px-4 py-4">
+        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white/90">
+          <Library className="h-4 w-4 text-primary" />
+          课程库
+        </div>
+        <Button className="w-full" size="sm" onClick={() => create.mutate()}>
+          <Plus className="h-4 w-4" />
+          添加课程
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
         {courses.map((course) => (
           <button
             key={course.id}
             onClick={() => onSelect(course.id)}
-            className={`w-full rounded px-2 py-1.5 text-left text-sm ${
-              course.id === selectedCourseId ? "bg-white/10" : "hover:bg-white/5"
+            className={`mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm ${
+              course.id === selectedCourseId
+                ? "bg-white/12 text-white"
+                : "text-white/62 hover:bg-white/6 hover:text-white"
             }`}
           >
-            {course.name}
+            <FolderOpen className="h-4 w-4 flex-shrink-0 text-white/35" />
+            <span className="truncate">{course.name}</span>
           </button>
         ))}
         {courses.length === 0 && (
-          <p className="px-2 py-4 text-xs text-white/40">还没有课程</p>
+          <div className="px-2 py-5 text-xs leading-relaxed text-white/45">
+            选择一个课程文件夹后，视频会按课程归档。
+          </div>
         )}
       </div>
-      <Button size="sm" variant="ghost" onClick={onOpenSettings}>
-        <Settings className="h-4 w-4" />
-        设置
-      </Button>
+      <div className="border-t border-white/10 p-3">
+        <Button className="w-full justify-start" size="sm" variant="ghost" onClick={onOpenSettings}>
+          <Settings className="h-4 w-4" />
+          设置
+        </Button>
+      </div>
     </aside>
   );
 }

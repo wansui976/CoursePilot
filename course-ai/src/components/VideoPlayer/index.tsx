@@ -27,7 +27,7 @@ export function VideoPlayer({ filePath }: { filePath: string }) {
       <video
         ref={ref}
         src={convertFileSrc(filePath)}
-        className="min-h-0 flex-1 object-contain"
+        className="min-h-0 flex-1 bg-black object-contain"
         onTimeUpdate={(event) =>
           setCurrentMs(Math.floor(event.currentTarget.currentTime * 1000))
         }

@@ -1,4 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { Download, FileVideo } from "lucide-react";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -35,12 +36,13 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
 
   return (
     <div className="space-y-2">
-      <Button size="sm" onClick={() => local.mutate()}>
-        + 导入视频
+      <Button className="w-full" size="sm" onClick={() => local.mutate()}>
+        <FileVideo className="h-4 w-4" />
+        导入本地视频
       </Button>
       <div className="flex gap-1">
         <input
-          className="min-w-0 flex-1 rounded bg-zinc-800 px-2 py-1 text-xs"
+          className="min-w-0 flex-1 rounded-md border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white outline-none placeholder:text-white/28 focus:border-primary/70"
           placeholder="B站/视频 URL"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
@@ -52,7 +54,8 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
           onClick={() => bili.mutate()}
           title="需安装 yt-dlp；仅供个人学习使用"
         >
-          {bili.isPending ? "下载中…" : "下载"}
+          <Download className="h-3.5 w-3.5" />
+          {bili.isPending ? "下载中" : "下载"}
         </Button>
       </div>
       {bili.isError && (
