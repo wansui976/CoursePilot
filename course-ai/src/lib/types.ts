@@ -42,3 +42,43 @@ export interface Job {
   started_at: number | null;
   finished_at: number | null;
 }
+
+export type ProviderKind = "openai" | "anthropic";
+
+export interface LlmProfile {
+  id: string;
+  name: string;
+  kind: ProviderKind;
+  base_url: string;
+  model: string;
+}
+
+export interface TaskRouting {
+  notes: string | null;
+  chapters: string | null;
+  quiz: string | null;
+  mindmap: string | null;
+  rag: string | null;
+  vision_ocr: string | null;
+}
+
+export interface Chapter {
+  id: number;
+  video_id: string;
+  title: string;
+  summary: string | null;
+  start_ms: number;
+  end_ms: number;
+  order_index: number;
+}
+
+export type AiTask = "chapters" | "notes" | "quiz" | "mindmap";
+
+export interface QuizQuestion {
+  type: "single" | "multi" | "judge";
+  stem: string;
+  options?: string[];
+  answer: string | string[] | boolean;
+  explanation?: string;
+  ref_ms?: number;
+}

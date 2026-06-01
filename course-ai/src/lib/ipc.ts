@@ -1,5 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Course, Job, TranscriptSegment, Video } from "./types";
+import type {
+  Chapter,
+  Course,
+  Job,
+  LlmProfile,
+  TranscriptSegment,
+  Video,
+} from "./types";
 
 export interface WhisperModel {
   id: string;
@@ -42,5 +49,26 @@ export const ipc = {
   transcripts: {
     list: (videoId: string): Promise<TranscriptSegment[]> =>
       invoke("cmd_list_transcripts", { videoId }),
+  },
+  ai: {
+    getProfiles: (): Promise<LlmProfile[]> => invoke("cmd_get_llm_profiles"),
+    saveProfiles: (profilesJson: string, routingJson: string): Promise<void> =>
+      invoke("cmd_save_llm_profiles", { profilesJson, routingJson }),
+    setApiKey: (profileId: string, apiKey: string): Promise<void> =>
+      invoke("cmd_set_api_key", { profileId, apiKey }),
+    hasApiKey: (profileId: string): Promise<boolean> =>
+      invoke("cmd_has_api_key", { profileId }),
+    generate: (videoId: string, task: string): Promise<void> =>
+      invoke("cmd_generate_ai", { videoId, task }),
+    getChapters: (videoId: string): Promise<Chapter[]> =>
+      invoke("cmd_get_chapters", { videoId }),
+    getNotes: (videoId: string): Promise<string | null> =>
+      invoke("cmd_get_notes", { videoId }),
+    saveNotes: (videoId: string, contentJson: string): Promise<void> =>
+      invoke("cmd_save_notes", { videoId, contentJson }),
+    getQuiz: (videoId: string): Promise<string | null> =>
+      invoke("cmd_get_quiz", { videoId }),
+    getMindmap: (videoId: string): Promise<string | null> =>
+      invoke("cmd_get_mindmap", { videoId }),
   },
 };
