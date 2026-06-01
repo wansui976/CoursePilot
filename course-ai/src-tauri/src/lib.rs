@@ -6,9 +6,7 @@ pub mod pipeline;
 pub mod sidecar;
 pub mod storage;
 
-use crate::commands::courses::{
-    cmd_create_course, cmd_delete_course, cmd_list_courses, AppState,
-};
+use crate::commands::courses::{cmd_create_course, cmd_delete_course, cmd_list_courses, AppState};
 use crate::commands::settings::{cmd_get_setting, cmd_set_setting};
 use crate::commands::transcripts::cmd_list_transcripts;
 use crate::commands::videos::{cmd_add_local_video, cmd_list_videos};

@@ -16,12 +16,12 @@ pub async fn set_setting(db: &Db, key: &str, value: &str) -> AppResult<()> {
 }
 
 pub async fn get_setting(db: &Db, key: &str) -> AppResult<Option<String>> {
-    Ok(sqlx::query_scalar::<_, String>(
-        "SELECT value FROM settings WHERE key=?",
+    Ok(
+        sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key=?")
+            .bind(key)
+            .fetch_optional(&db.pool)
+            .await?,
     )
-    .bind(key)
-    .fetch_optional(&db.pool)
-    .await?)
 }
 
 #[tauri::command]
@@ -34,10 +34,7 @@ pub async fn cmd_set_setting(
 }
 
 #[tauri::command]
-pub async fn cmd_get_setting(
-    state: State<'_, AppState>,
-    key: String,
-) -> AppResult<Option<String>> {
+pub async fn cmd_get_setting(state: State<'_, AppState>, key: String) -> AppResult<Option<String>> {
     get_setting(&state.db, &key).await
 }
 

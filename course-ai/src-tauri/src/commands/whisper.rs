@@ -57,9 +57,7 @@ pub fn model_path(app_data: &Path, id: &str) -> PathBuf {
 }
 
 #[tauri::command]
-pub async fn cmd_list_whisper_models(
-    app: tauri::AppHandle,
-) -> AppResult<Vec<(ModelInfo, bool)>> {
+pub async fn cmd_list_whisper_models(app: tauri::AppHandle) -> AppResult<Vec<(ModelInfo, bool)>> {
     let data_dir = app
         .path()
         .app_data_dir()

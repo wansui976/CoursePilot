@@ -34,14 +34,16 @@ pub async fn ensure_jobs(db: &Db, video_id: &str) -> AppResult<Vec<Job>> {
             continue;
         }
         let id = Uuid::new_v4().to_string();
-        sqlx::query("INSERT INTO processing_jobs(id,video_id,stage,status,progress) VALUES (?,?,?,?,?)")
-            .bind(&id)
-            .bind(video_id)
-            .bind(stage)
-            .bind("pending")
-            .bind(0.0)
-            .execute(&db.pool)
-            .await?;
+        sqlx::query(
+            "INSERT INTO processing_jobs(id,video_id,stage,status,progress) VALUES (?,?,?,?,?)",
+        )
+        .bind(&id)
+        .bind(video_id)
+        .bind(stage)
+        .bind("pending")
+        .bind(0.0)
+        .execute(&db.pool)
+        .await?;
         output.push(Job {
             id,
             video_id: video_id.into(),
@@ -57,11 +59,13 @@ pub async fn ensure_jobs(db: &Db, video_id: &str) -> AppResult<Vec<Job>> {
 }
 
 pub async fn start(db: &Db, job_id: &str) -> AppResult<()> {
-    sqlx::query("UPDATE processing_jobs SET status='running', started_at=?, message=NULL WHERE id=?")
-        .bind(Utc::now().timestamp_millis())
-        .bind(job_id)
-        .execute(&db.pool)
-        .await?;
+    sqlx::query(
+        "UPDATE processing_jobs SET status='running', started_at=?, message=NULL WHERE id=?",
+    )
+    .bind(Utc::now().timestamp_millis())
+    .bind(job_id)
+    .execute(&db.pool)
+    .await?;
     Ok(())
 }
 

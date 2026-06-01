@@ -84,9 +84,7 @@ mod tests {
 
     async fn fresh_db() -> Db {
         let db_path = std::env::temp_dir().join(format!("course-ai-test-{}.db", Uuid::new_v4()));
-        Db::connect_and_migrate(&db_path)
-            .await
-            .unwrap()
+        Db::connect_and_migrate(&db_path).await.unwrap()
     }
 
     #[tokio::test]

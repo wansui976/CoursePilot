@@ -115,7 +115,13 @@ pub async fn cmd_add_local_video(
     .await?
     .filter(|value| !value.trim().is_empty())
     .map(PathBuf::from);
-    add_local_video(&state.db, &course_id, PathBuf::from(file_path), override_root).await
+    add_local_video(
+        &state.db,
+        &course_id,
+        PathBuf::from(file_path),
+        override_root,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -161,9 +167,7 @@ mod tests {
         let db = Db::connect_and_migrate(&dir.path().join("test.db"))
             .await
             .unwrap();
-        let course = create_course(&db, "c".into(), "/x".into())
-            .await
-            .unwrap();
+        let course = create_course(&db, "c".into(), "/x".into()).await.unwrap();
         let err = add_local_video(&db, &course.id, "/nonexistent.mp4".into(), None).await;
         assert!(matches!(err, Err(AppError::NotFound(_))));
     }
