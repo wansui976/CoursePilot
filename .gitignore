@@ -1,0 +1,29 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Tauri / Rust
+**/target/
+**/.cargo/
+
+# Node
+node_modules/
+.pnpm-store/
+dist/
+dist-ssr/
+
+# Vite
+.vite/
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Env / secrets
+.env
+.env.local
+*.log
+
+# App data
+.courseai/
