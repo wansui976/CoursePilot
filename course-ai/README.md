@@ -17,6 +17,10 @@ On macOS, the intended setup is:
 brew install ffmpeg whisper-cpp
 ```
 
+The in-app model downloader uses a ModelScope mirror for GGML model files so
+first setup remains usable on networks where Hugging Face is slow or
+unreachable.
+
 ## Develop
 
 ```bash

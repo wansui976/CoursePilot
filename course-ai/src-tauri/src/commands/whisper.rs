@@ -19,31 +19,31 @@ pub const MODELS: &[ModelInfo] = &[
         id: "tiny",
         display_name: "Tiny (75MB)",
         size_bytes: 77_700_000,
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+        url: "https://modelscope.cn/models/cjc1887415157/whisper.cpp/resolve/master/ggml-tiny.bin",
     },
     ModelInfo {
         id: "base",
         display_name: "Base (142MB)",
         size_bytes: 148_000_000,
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+        url: "https://modelscope.cn/models/cjc1887415157/whisper.cpp/resolve/master/ggml-base.bin",
     },
     ModelInfo {
         id: "small",
         display_name: "Small (466MB)",
         size_bytes: 488_000_000,
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+        url: "https://modelscope.cn/models/cjc1887415157/whisper.cpp/resolve/master/ggml-small.bin",
     },
     ModelInfo {
         id: "medium",
         display_name: "Medium (1.5GB)",
         size_bytes: 1_530_000_000,
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
+        url: "https://modelscope.cn/models/cjc1887415157/whisper.cpp/resolve/master/ggml-medium.bin",
     },
     ModelInfo {
         id: "large-v3-turbo",
         display_name: "Large v3 Turbo (q5_0, 574MB)",
         size_bytes: 574_000_000,
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+        url: "https://modelscope.cn/models/cjc1887415157/whisper.cpp/resolve/master/ggml-large-v3-turbo-q5_0.bin",
     },
 ];
 
