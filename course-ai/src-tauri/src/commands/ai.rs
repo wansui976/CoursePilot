@@ -171,6 +171,11 @@ pub async fn cmd_generate_ai(
         AiTask::Notes => ai::generate_notes(&db, &provider, &model, &video_id).await?,
         AiTask::Quiz => ai::generate_quiz(&db, &provider, &model, &video_id).await?,
         AiTask::Mindmap => ai::generate_mindmap(&db, &provider, &model, &video_id).await?,
+        AiTask::Rag => {
+            return Err(AppError::Other(
+                "RAG 不通过 cmd_generate_ai 触发；用 cmd_build_embeddings / cmd_rag_query".into(),
+            ))
+        }
     }
     Ok(())
 }

@@ -101,3 +101,15 @@ export interface Screenshot {
   at_ms: number;
   created_at: number;
 }
+
+export interface Citation {
+  index: number;
+  text: string;
+  start_ms: number;
+  end_ms: number;
+}
+
+export interface RagAnswer {
+  answer: string;
+  citations: Citation[];
+}

@@ -34,6 +34,7 @@ pub enum AiTask {
     Chapters,
     Quiz,
     Mindmap,
+    Rag,
 }
 
 pub fn parse_profiles(json: Option<&str>) -> AppResult<Vec<LlmProfile>> {
@@ -61,6 +62,7 @@ pub fn resolve_profile<'a>(
         AiTask::Chapters => &routing.chapters,
         AiTask::Quiz => &routing.quiz,
         AiTask::Mindmap => &routing.mindmap,
+        AiTask::Rag => &routing.rag,
     };
     if let Some(id) = wanted {
         if let Some(p) = profiles.iter().find(|p| &p.id == id) {

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { CourseSidebar } from "@/components/CourseSidebar";
 import { ImportVideoButton } from "@/components/ImportVideoDialog";
 import { JobProgress } from "@/components/JobProgress";
+import { RagSearchPanel } from "@/components/RagSearchPanel";
 import { SettingsPanel } from "@/components/SettingsDialog";
 import { TabsPanel } from "@/components/TabsPanel";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,7 @@ export function Home() {
             <>
               <div className="flex items-center gap-3 border-b border-white/10 p-2">
                 <h2 className="flex-1 truncate text-sm">{selectedVideo.title}</h2>
+                <RagSearchPanel videoId={selectedVideo.id} />
                 <Button
                   size="sm"
                   onClick={() => void ipc.pipeline.process(selectedVideo.id)}

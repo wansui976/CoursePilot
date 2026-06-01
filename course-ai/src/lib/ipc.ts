@@ -4,6 +4,7 @@ import type {
   Course,
   Job,
   LlmProfile,
+  RagAnswer,
   Screenshot,
   Slide,
   TranscriptSegment,
@@ -72,6 +73,10 @@ export const ipc = {
       invoke("cmd_get_quiz", { videoId }),
     getMindmap: (videoId: string): Promise<string | null> =>
       invoke("cmd_get_mindmap", { videoId }),
+    buildEmbeddings: (videoId: string): Promise<number> =>
+      invoke("cmd_build_embeddings", { videoId }),
+    ragQuery: (videoId: string, query: string): Promise<RagAnswer> =>
+      invoke("cmd_rag_query", { videoId, query }),
   },
   slides: {
     extract: (videoId: string, threshold?: number): Promise<number> =>

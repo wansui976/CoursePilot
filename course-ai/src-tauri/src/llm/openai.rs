@@ -65,6 +65,56 @@ pub async fn complete(
     parse_openai_response(&v)
 }
 
+pub fn build_embeddings_body(model: &str, inputs: &[String]) -> Value {
+    json!({ "model": model, "input": inputs })
+}
+
+pub fn parse_embeddings_response(v: &Value) -> AppResult<Vec<Vec<f32>>> {
+    let data = v
+        .get("data")
+        .and_then(|d| d.as_array())
+        .ok_or_else(|| AppError::Other(format!("unexpected embeddings response: {v}")))?;
+    let mut out = Vec::with_capacity(data.len());
+    for item in data {
+        let vec = item
+            .get("embedding")
+            .and_then(|e| e.as_array())
+            .ok_or_else(|| AppError::Other("embedding item missing 'embedding'".into()))?
+            .iter()
+            .map(|n| n.as_f64().unwrap_or(0.0) as f32)
+            .collect();
+        out.push(vec);
+    }
+    Ok(out)
+}
+
+pub async fn embed(
+    base_url: &str,
+    api_key: &str,
+    client: &reqwest::Client,
+    model: &str,
+    inputs: &[String],
+) -> AppResult<Vec<Vec<f32>>> {
+    let url = format!("{}/embeddings", base_url.trim_end_matches('/'));
+    let resp = client
+        .post(url)
+        .bearer_auth(api_key)
+        .json(&build_embeddings_body(model, inputs))
+        .send()
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!("OpenAI embeddings {status}: {body}")));
+    }
+    let v: Value = resp
+        .json()
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    parse_embeddings_response(&v)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +155,17 @@ mod tests {
     #[test]
     fn parse_errors_on_bad_shape() {
         assert!(parse_openai_response(&serde_json::json!({"x": 1})).is_err());
+    }
+
+    #[test]
+    fn builds_and_parses_embeddings() {
+        let body = build_embeddings_body("text-embedding-3-small", &["a".into(), "b".into()]);
+        assert_eq!(body["input"].as_array().unwrap().len(), 2);
+        let v = serde_json::json!({
+            "data": [{"embedding": [0.1, 0.2]}, {"embedding": [0.3, 0.4]}]
+        });
+        let parsed = parse_embeddings_response(&v).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[1], vec![0.3f32, 0.4f32]);
     }
 }

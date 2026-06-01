@@ -71,6 +71,33 @@ impl Provider {
     pub fn supports_vision(&self) -> bool {
         false
     }
+
+    /// 文本嵌入。OpenAI 兼容端点用 `/embeddings`；Anthropic 无嵌入 API；
+    /// Mock 返回确定性向量（相似文本→相似向量），便于离线单测 RAG。
+    pub async fn embed(&self, model: &str, inputs: &[String]) -> AppResult<Vec<Vec<f32>>> {
+        match self {
+            Provider::OpenAi {
+                base_url,
+                api_key,
+                client,
+            } => openai::embed(base_url, api_key, client, model, inputs).await,
+            Provider::Anthropic { .. } => Err(crate::error::AppError::Config(
+                "Anthropic 不支持嵌入；请为 RAG 任务选用 OpenAI 兼容 Profile".into(),
+            )),
+            Provider::Mock { .. } => Ok(inputs.iter().map(|s| mock_embed(s)).collect()),
+        }
+    }
+}
+
+/// 确定性伪嵌入：把文本散列进固定维向量并归一化。仅用于离线测试。
+pub fn mock_embed(text: &str) -> Vec<f32> {
+    const DIM: usize = 16;
+    let mut v = vec![0f32; DIM];
+    for (i, b) in text.bytes().enumerate() {
+        v[i % DIM] += b as f32;
+    }
+    let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-6);
+    v.iter().map(|x| x / norm).collect()
 }
 
 #[cfg(test)]

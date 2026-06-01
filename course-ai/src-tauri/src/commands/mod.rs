@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod courses;
 pub mod export;
+pub mod rag;
 pub mod settings;
 pub mod slides;
 pub mod transcripts;

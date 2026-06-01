@@ -14,6 +14,7 @@ use crate::commands::ai::{
 };
 use crate::commands::courses::{cmd_create_course, cmd_delete_course, cmd_list_courses, AppState};
 use crate::commands::export::{cmd_export_notes, cmd_export_subtitles};
+use crate::commands::rag::{cmd_build_embeddings, cmd_rag_query};
 use crate::commands::slides::{
     cmd_capture_frame, cmd_extract_slides, cmd_get_screenshots, cmd_get_slides,
 };
@@ -72,7 +73,9 @@ pub fn run() {
             cmd_capture_frame,
             cmd_get_screenshots,
             cmd_export_subtitles,
-            cmd_export_notes
+            cmd_export_notes,
+            cmd_build_embeddings,
+            cmd_rag_query
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
