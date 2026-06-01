@@ -1,0 +1,113 @@
+use crate::db::Db;
+use crate::error::AppResult;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
+use tauri::State;
+use uuid::Uuid;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub db: Db,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Course {
+    pub id: String,
+    pub name: String,
+    pub root_path: String,
+    pub cover_image: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+pub async fn create_course(db: &Db, name: String, root_path: String) -> AppResult<Course> {
+    let now = Utc::now().timestamp_millis();
+    let id = Uuid::new_v4().to_string();
+    sqlx::query("INSERT INTO courses (id,name,root_path,created_at,updated_at) VALUES (?,?,?,?,?)")
+        .bind(&id)
+        .bind(&name)
+        .bind(&root_path)
+        .bind(now)
+        .bind(now)
+        .execute(&db.pool)
+        .await?;
+    Ok(Course {
+        id,
+        name,
+        root_path,
+        cover_image: None,
+        created_at: now,
+        updated_at: now,
+    })
+}
+
+pub async fn list_courses(db: &Db) -> AppResult<Vec<Course>> {
+    Ok(sqlx::query_as::<_, Course>(
+        "SELECT id,name,root_path,cover_image,created_at,updated_at
+         FROM courses ORDER BY updated_at DESC",
+    )
+    .fetch_all(&db.pool)
+    .await?)
+}
+
+pub async fn delete_course(db: &Db, id: String) -> AppResult<()> {
+    sqlx::query("DELETE FROM courses WHERE id=?")
+        .bind(id)
+        .execute(&db.pool)
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cmd_create_course(
+    state: State<'_, AppState>,
+    name: String,
+    root_path: String,
+) -> AppResult<Course> {
+    create_course(&state.db, name, root_path).await
+}
+
+#[tauri::command]
+pub async fn cmd_list_courses(state: State<'_, AppState>) -> AppResult<Vec<Course>> {
+    list_courses(&state.db).await
+}
+
+#[tauri::command]
+pub async fn cmd_delete_course(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    delete_course(&state.db, id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn fresh_db() -> Db {
+        let db_path = std::env::temp_dir().join(format!("course-ai-test-{}.db", Uuid::new_v4()));
+        Db::connect_and_migrate(&db_path)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn create_then_list_returns_one() {
+        let db = fresh_db().await;
+        let course = create_course(&db, "申论".into(), "/tmp/shenlun".into())
+            .await
+            .unwrap();
+        let list = list_courses(&db).await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, course.id);
+        assert_eq!(list[0].name, "申论");
+    }
+
+    #[tokio::test]
+    async fn delete_removes_course() {
+        let db = fresh_db().await;
+        let course = create_course(&db, "x".into(), "/tmp/x".into())
+            .await
+            .unwrap();
+        delete_course(&db, course.id).await.unwrap();
+        assert_eq!(list_courses(&db).await.unwrap().len(), 0);
+    }
+}
