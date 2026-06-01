@@ -24,6 +24,17 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
     void mmRef.current.fit();
   }, [md]);
 
+  function exportSvg() {
+    if (!svgRef.current) return;
+    const xml = new XMLSerializer().serializeToString(svgRef.current);
+    const blob = new Blob([xml], { type: "image/svg+xml" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "mindmap.svg";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   if (!md) {
     return (
       <p className="p-4 text-sm text-white/40">
@@ -31,5 +42,17 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
       </p>
     );
   }
-  return <svg ref={svgRef} className="h-full w-full" />;
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex justify-end px-2 py-1">
+        <button
+          className="text-xs text-primary hover:underline"
+          onClick={exportSvg}
+        >
+          导出 SVG
+        </button>
+      </div>
+      <svg ref={svgRef} className="min-h-0 flex-1 w-full" />
+    </div>
+  );
 }

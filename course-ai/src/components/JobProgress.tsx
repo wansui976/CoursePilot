@@ -31,8 +31,20 @@ export function JobProgress({ videoId }: { videoId: string }) {
   );
   if (list.length === 0) return <p className="text-xs text-white/40">未开始</p>;
 
+  const hasFailed = list.some((job) => job.status === "failed");
+
   return (
     <ul className="space-y-1">
+      {hasFailed && (
+        <li className="flex justify-end">
+          <button
+            className="rounded border border-white/15 px-2 py-0.5 text-xs text-primary hover:bg-white/5"
+            onClick={() => void ipc.pipeline.process(videoId)}
+          >
+            重试
+          </button>
+        </li>
+      )}
       {list.map((job) => (
         <li key={job.stage} className="text-xs">
           <div className="flex justify-between">
