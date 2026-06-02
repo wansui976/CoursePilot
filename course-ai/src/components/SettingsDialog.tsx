@@ -1,9 +1,75 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { AudioLines, Check, FolderCog, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 import { WhisperModelsPanel } from "./WhisperModelsPanel";
 import { LlmSettingsPanel } from "./LlmSettingsPanel";
+
+const FIELD =
+  "w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] outline-none transition placeholder:text-[var(--text-faint)] focus:border-[var(--accent-text)] focus:ring-2 focus:ring-[var(--accent-text)]/25";
+
+function Section({
+  icon,
+  title,
+  desc,
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  desc?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-card)]">
+      <div className="flex items-start gap-3">
+        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--accent-weak)] text-[var(--accent-text)]">
+          {icon}
+        </div>
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-[var(--text-strong)]">{title}</h3>
+          {desc && <p className="mt-0.5 text-xs text-[var(--text-muted)]">{desc}</p>}
+        </div>
+      </div>
+      <div className="space-y-4">{children}</div>
+    </section>
+  );
+}
+
+function Field({
+  label,
+  htmlFor,
+  hint,
+  children,
+}: {
+  label: string;
+  htmlFor?: string;
+  hint?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label
+        htmlFor={htmlFor}
+        className="block text-[13px] font-medium text-[var(--text-strong)]"
+      >
+        {label}
+      </label>
+      {children}
+      {hint && <p className="text-xs text-[var(--text-muted)]">{hint}</p>}
+    </div>
+  );
+}
+
+function SavedBadge({ text }: { text: string }) {
+  if (!text) return null;
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--status-ok-bg)] px-2 py-0.5 text-xs font-medium text-[var(--status-ok)]">
+      <Check className="h-3 w-3" />
+      {text}
+    </span>
+  );
+}
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [root, setRoot] = useState("");
@@ -75,131 +141,182 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="max-h-[80vh] w-[520px] overflow-y-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-rail)] p-6 text-[var(--text-normal)] shadow-[var(--shadow-pop)]">
-        <h2 className="mb-4 text-lg font-semibold text-[var(--text-strong)]">设置</h2>
-        <label className="mb-1 block text-sm">
-          默认数据根目录（留空 = 跟视频同目录的 .courseai/）
-        </label>
-        <div className="mb-4 flex items-center gap-2">
-          <input
-            className="flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
-            value={root}
-            readOnly
-            placeholder="未设置"
-          />
-          <Button size="sm" variant="outline" onClick={pickRoot}>
-            选择
-          </Button>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[86vh] w-[560px] max-w-full flex-col overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-rail)] text-[var(--text-normal)] shadow-[var(--shadow-pop)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 头部 */}
+        <header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-4">
+          <div>
+            <h2 className="text-base font-semibold text-[var(--text-strong)]">设置</h2>
+            <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+              存储位置、语音识别与大模型配置
+            </p>
+          </div>
+          <button
+            aria-label="关闭设置"
+            onClick={onClose}
+            className="grid h-8 w-8 place-items-center rounded-lg text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+
+        {/* 内容 */}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
+          <Section
+            icon={<FolderCog className="h-4 w-4" />}
+            title="存储"
+            desc="转写、字幕、课件等产物的存放位置"
+          >
+            <Field
+              label="默认数据根目录"
+              hint="留空 = 跟视频同目录的 .courseai/"
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  className={FIELD}
+                  value={root}
+                  readOnly
+                  placeholder="未设置"
+                />
+                <Button size="sm" variant="outline" onClick={pickRoot}>
+                  选择
+                </Button>
+              </div>
+            </Field>
+          </Section>
+
+          <Section
+            icon={<AudioLines className="h-4 w-4" />}
+            title="语音识别"
+            desc="选择把视频转写成文字的引擎"
+          >
+            <Field label="语音识别后端" htmlFor="asr-backend">
+              <select
+                id="asr-backend"
+                value={asrBackend}
+                onChange={(event) => void changeAsrBackend(event.target.value)}
+                className={FIELD}
+              >
+                <option value="whisper">本地 Whisper</option>
+                <option value="volcengine">火山录音文件识别</option>
+                <option value="aliyun">阿里云 DashScope 录音文件识别</option>
+              </select>
+            </Field>
+
+            {asrBackend === "whisper" && (
+              <>
+                <Field label="默认 Whisper 模型" htmlFor="whisper-model">
+                  <select
+                    id="whisper-model"
+                    value={model}
+                    onChange={(event) => void changeModel(event.target.value)}
+                    className={FIELD}
+                  >
+                    <option value="tiny">tiny</option>
+                    <option value="base">base</option>
+                    <option value="small">small</option>
+                    <option value="medium">medium</option>
+                    <option value="large-v3-turbo">large-v3-turbo</option>
+                  </select>
+                </Field>
+                <WhisperModelsPanel />
+              </>
+            )}
+
+            {asrBackend === "volcengine" && (
+              <>
+                <Field label="火山 ASR App ID" htmlFor="volcengine-asr-app-id">
+                  <input
+                    id="volcengine-asr-app-id"
+                    type="text"
+                    className={FIELD}
+                    value={volcengineAppId}
+                    placeholder="控制台「应用」的 App ID"
+                    onChange={(event) => setVolcengineAppId(event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label="火山 ASR Access Token"
+                  htmlFor="volcengine-asr-token"
+                  hint="留空 = 不修改"
+                >
+                  <input
+                    id="volcengine-asr-token"
+                    type="password"
+                    className={FIELD}
+                    value={volcengineToken}
+                    placeholder="••••••••"
+                    onChange={(event) => setVolcengineToken(event.target.value)}
+                  />
+                </Field>
+                <div className="flex items-center gap-3">
+                  <Button size="sm" variant="outline" onClick={saveVolcengineKey}>
+                    保存火山 ASR 凭证
+                  </Button>
+                  <SavedBadge text={volcengineSaved} />
+                </div>
+              </>
+            )}
+
+            {asrBackend === "aliyun" && (
+              <>
+                <Field label="识别模型" htmlFor="aliyun-asr-model">
+                  <select
+                    id="aliyun-asr-model"
+                    value={aliyunModel}
+                    onChange={(event) => void changeAliyunModel(event.target.value)}
+                    className={FIELD}
+                  >
+                    <option value="qwen3-asr-flash-filetrans">
+                      千问3-ASR-Flash-Filetrans
+                    </option>
+                    <option value="fun-asr">Fun-ASR</option>
+                    <option value="paraformer-v2">Paraformer-v2</option>
+                  </select>
+                </Field>
+                <Field
+                  label="百炼 API Key"
+                  htmlFor="dashscope-key"
+                  hint="留空 = 不修改"
+                >
+                  <input
+                    id="dashscope-key"
+                    type="password"
+                    className={FIELD}
+                    value={dashscopeKey}
+                    placeholder="••••••••"
+                    onChange={(event) => setDashscopeKey(event.target.value)}
+                  />
+                </Field>
+                <div className="flex items-center gap-3">
+                  <Button size="sm" variant="outline" onClick={saveDashscopeKey}>
+                    保存百炼 API Key
+                  </Button>
+                  <SavedBadge text={dashscopeSaved} />
+                </div>
+              </>
+            )}
+          </Section>
+
+          <Section
+            icon={<Sparkles className="h-4 w-4" />}
+            title="大模型"
+            desc="用于生成笔记、出题、脑图与问答"
+          >
+            <LlmSettingsPanel />
+          </Section>
         </div>
-        <label className="mb-1 block text-sm" htmlFor="asr-backend">
-          语音识别后端
-        </label>
-        <select
-          id="asr-backend"
-          value={asrBackend}
-          onChange={(event) => void changeAsrBackend(event.target.value)}
-          className="mb-4 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
-        >
-          <option value="whisper">本地 Whisper</option>
-          <option value="volcengine">火山录音文件识别</option>
-          <option value="aliyun">阿里云 DashScope 录音文件识别</option>
-        </select>
-        {asrBackend === "whisper" && (
-          <>
-            <label className="mb-1 block text-sm" htmlFor="whisper-model">
-              默认 Whisper 模型
-            </label>
-            <select
-              id="whisper-model"
-              value={model}
-              onChange={(event) => void changeModel(event.target.value)}
-              className="mb-4 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
-            >
-              <option value="tiny">tiny</option>
-              <option value="base">base</option>
-              <option value="small">small</option>
-              <option value="medium">medium</option>
-              <option value="large-v3-turbo">large-v3-turbo</option>
-            </select>
-            <WhisperModelsPanel />
-          </>
-        )}
-        {asrBackend === "volcengine" && (
-          <div className="mb-4 space-y-2">
-            <label className="block text-sm" htmlFor="volcengine-asr-app-id">
-              火山 ASR App ID
-            </label>
-            <input
-              id="volcengine-asr-app-id"
-              type="text"
-              className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
-              value={volcengineAppId}
-              placeholder="控制台「应用」的 App ID"
-              onChange={(event) => setVolcengineAppId(event.target.value)}
-            />
-            <label className="block text-sm" htmlFor="volcengine-asr-token">
-              火山 ASR Access Token
-            </label>
-            <input
-              id="volcengine-asr-token"
-              type="password"
-              className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
-              value={volcengineToken}
-              placeholder="留空 = 不修改"
-              onChange={(event) => setVolcengineToken(event.target.value)}
-            />
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={saveVolcengineKey}>
-                保存火山 ASR 凭证
-              </Button>
-              {volcengineSaved && (
-                <span className="text-xs text-emerald-500">{volcengineSaved}</span>
-              )}
-            </div>
-          </div>
-        )}
-        {asrBackend === "aliyun" && (
-          <div className="mb-4 space-y-2">
-            <label className="block text-sm" htmlFor="aliyun-asr-model">
-              识别模型
-            </label>
-            <select
-              id="aliyun-asr-model"
-              value={aliyunModel}
-              onChange={(event) => void changeAliyunModel(event.target.value)}
-              className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
-            >
-              <option value="qwen3-asr-flash-filetrans">千问3-ASR-Flash-Filetrans</option>
-              <option value="fun-asr">Fun-ASR</option>
-              <option value="paraformer-v2">Paraformer-v2</option>
-            </select>
-            <label className="block text-sm" htmlFor="dashscope-key">
-              百炼 API Key
-            </label>
-            <input
-              id="dashscope-key"
-              type="password"
-              className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
-              value={dashscopeKey}
-              placeholder="留空 = 不修改"
-              onChange={(event) => setDashscopeKey(event.target.value)}
-            />
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={saveDashscopeKey}>
-                保存百炼 API Key
-              </Button>
-              {dashscopeSaved && (
-                <span className="text-xs text-emerald-500">{dashscopeSaved}</span>
-              )}
-            </div>
-          </div>
-        )}
-        <div className="my-4 border-t border-[var(--border-subtle)]" />
-        <LlmSettingsPanel />
-        <div className="mt-6 text-right">
+
+        {/* 底部 */}
+        <footer className="flex items-center justify-end gap-2 border-t border-[var(--border-subtle)] px-5 py-3">
           <Button onClick={onClose}>关闭</Button>
-        </div>
+        </footer>
       </div>
     </div>
   );

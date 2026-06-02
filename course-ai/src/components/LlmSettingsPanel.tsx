@@ -12,6 +12,9 @@ const DEFAULT_BASE: Record<ProviderKind, string> = {
   anthropic: "https://api.anthropic.com",
 };
 
+const FIELD =
+  "w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] outline-none transition placeholder:text-[var(--text-faint)] focus:border-[var(--accent-text)] focus:ring-2 focus:ring-[var(--accent-text)]/25";
+
 export function LlmSettingsPanel() {
   const [profiles, setProfiles] = useState<LlmProfile[]>([]);
   const [keys, setKeys] = useState<Record<string, string>>({});
@@ -52,27 +55,32 @@ export function LlmSettingsPanel() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">LLM 配置</h3>
+        <p className="text-xs text-[var(--text-muted)]">
+          可添加多个 OpenAI 兼容或 Anthropic 服务
+        </p>
         <Button size="sm" variant="outline" onClick={add}>
           新增
         </Button>
       </div>
       {profiles.length === 0 && (
-        <p className="text-xs text-[var(--text-faint)]">
+        <p className="rounded-lg border border-dashed border-[var(--border-subtle)] px-3 py-4 text-center text-xs text-[var(--text-faint)]">
           还没有配置。点「新增」添加一个 OpenAI 兼容或 Anthropic 配置。
         </p>
       )}
       {profiles.map((p) => (
-        <div key={p.id} className="space-y-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3">
+        <div
+          key={p.id}
+          className="space-y-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-input)] p-3"
+        >
           <div className="flex gap-2">
             <input
-              className="flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
+              className={`${FIELD} flex-1`}
               value={p.name}
               placeholder="名称"
               onChange={(e) => update(p.id, { name: e.target.value })}
             />
             <select
-              className="rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
+              className={`${FIELD} w-auto`}
               value={p.kind}
               onChange={(e) => {
                 const kind = e.target.value as ProviderKind;
@@ -84,20 +92,20 @@ export function LlmSettingsPanel() {
             </select>
           </div>
           <input
-            className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
+            className={FIELD}
             value={p.base_url}
             placeholder="Base URL"
             onChange={(e) => update(p.id, { base_url: e.target.value })}
           />
           <input
-            className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
+            className={FIELD}
             value={p.model}
             placeholder="模型名（如 gpt-4o / claude-sonnet-4-6）"
             onChange={(e) => update(p.id, { model: e.target.value })}
           />
           <input
             type="password"
-            className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
+            className={FIELD}
             value={keys[p.id] ?? ""}
             placeholder="API Key（留空＝不修改）"
             onChange={(e) =>
@@ -105,7 +113,7 @@ export function LlmSettingsPanel() {
             }
           />
           <button
-            className="text-xs text-red-500 hover:underline"
+            className="text-xs text-[var(--text-muted)] transition hover:text-red-500"
             onClick={() =>
               setProfiles((ps) => ps.filter((x) => x.id !== p.id))
             }
@@ -114,11 +122,15 @@ export function LlmSettingsPanel() {
           </button>
         </div>
       ))}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
         <Button size="sm" onClick={save}>
           保存 LLM 配置
         </Button>
-        {savedMsg && <span className="text-xs text-emerald-500">{savedMsg}</span>}
+        {savedMsg && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-[var(--status-ok-bg)] px-2 py-0.5 text-xs font-medium text-[var(--status-ok)]">
+            {savedMsg}
+          </span>
+        )}
       </div>
     </div>
   );
