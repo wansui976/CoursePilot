@@ -147,19 +147,30 @@ pub async fn cmd_get_mindmap(
 
 // ---------- generation ----------
 
+/// 解析某个任务要用的 LLM Provider；未配置 Profile 或 API Key 时返回 None，
+/// 供自动流水线「有就跑、没有就跳过」地复用，而不报致命错误。
+pub async fn provider_for_db(
+    db: &crate::db::Db,
+    task: AiTask,
+) -> AppResult<Option<(crate::llm::Provider, String)>> {
+    let profiles = parse_profiles(get_setting(db, "llm_profiles").await?.as_deref())?;
+    let routing = parse_routing(get_setting(db, "llm_task_routing").await?.as_deref())?;
+    let Some(profile) = resolve_profile(&profiles, &routing, task).cloned() else {
+        return Ok(None);
+    };
+    let Some(key) = keychain::get_api_key(db, &profile.id).await? else {
+        return Ok(None);
+    };
+    Ok(Some((build_provider(&profile, key), profile.model.clone())))
+}
+
 async fn provider_for(
     state: &AppState,
     task: AiTask,
 ) -> AppResult<(crate::llm::Provider, String)> {
-    let profiles = parse_profiles(get_setting(&state.db, "llm_profiles").await?.as_deref())?;
-    let routing = parse_routing(get_setting(&state.db, "llm_task_routing").await?.as_deref())?;
-    let profile = resolve_profile(&profiles, &routing, task)
-        .ok_or_else(|| AppError::Config("尚未配置任何 LLM Profile（设置 → LLM）".into()))?
-        .clone();
-    let key = keychain::get_api_key(&state.db, &profile.id)
-        .await?
-        .ok_or_else(|| AppError::Config(format!("Profile「{}」未设置 API Key", profile.name)))?;
-    Ok((build_provider(&profile, key), profile.model.clone()))
+    provider_for_db(&state.db, task).await?.ok_or_else(|| {
+        AppError::Config("尚未配置可用的 LLM Profile / API Key（设置 → 大模型）".into())
+    })
 }
 
 #[tauri::command]

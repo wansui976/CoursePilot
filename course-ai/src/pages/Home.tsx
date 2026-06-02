@@ -138,25 +138,31 @@ export function Home() {
     setVideo(selectedVideoId);
   }, [selectedVideoId, setVideo]);
 
+  // ASR 完成后：章节、笔记由后端流水线作为可见任务自动续跑（见 pipeline::run_ai_followups），
+  // 这里只补做不在后端任务队列里的「摘要 + 课件抽取」，并在后端章节/笔记任务完成时刷新面板。
   useEffect(() => {
     queuedVideoIds.forEach((videoId) => {
-      const asrJob = jobsByVideo[videoId]?.asr;
-      if (asrJob?.status !== "done" || generatedAfterAsr.current.has(videoId)) {
-        return;
+      const jobs = jobsByVideo[videoId];
+      if (!jobs) return;
+      if (jobs.asr?.status === "done" && !generatedAfterAsr.current.has(videoId)) {
+        generatedAfterAsr.current.add(videoId);
+        void Promise.allSettled([
+          ipc.ai.generate(videoId, "summary"),
+          ipc.slides.extract(videoId),
+        ]).then(() => {
+          queryClient.invalidateQueries({ queryKey: ["summary", videoId] });
+          queryClient.invalidateQueries({ queryKey: ["slides", videoId] });
+        });
       }
-      generatedAfterAsr.current.add(videoId);
-      void Promise.allSettled([
-        ipc.ai.generate(videoId, "summary"),
-        ipc.ai.generate(videoId, "chapters"),
-        ipc.ai.generate(videoId, "notes"),
-        ipc.slides.extract(videoId),
-      ]).then(() => {
-        queryClient.invalidateQueries({ queryKey: ["videos", selectedCourseId] });
-        queryClient.invalidateQueries({ queryKey: ["summary", videoId] });
-        queryClient.invalidateQueries({ queryKey: ["chapters", videoId] });
-        queryClient.invalidateQueries({ queryKey: ["notes", videoId] });
-        queryClient.invalidateQueries({ queryKey: ["slides", videoId] });
-      });
+      // 后端章节/笔记任务完成 → 刷新对应面板（各刷一次）。
+      for (const stage of ["chapters", "notes"] as const) {
+        const key = `${videoId}:${stage}`;
+        if (jobs[stage]?.status === "done" && !generatedAfterAsr.current.has(key)) {
+          generatedAfterAsr.current.add(key);
+          queryClient.invalidateQueries({ queryKey: [stage, videoId] });
+          queryClient.invalidateQueries({ queryKey: ["videos", selectedCourseId] });
+        }
+      }
     });
   }, [jobsByVideo, queryClient, queuedVideoIds, selectedCourseId]);
 

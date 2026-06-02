@@ -314,7 +314,85 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
         }
     }
 
+    // 字幕就绪后自动续跑「章节 → 笔记」。这些是增值步骤，失败不影响视频已 done 的状态。
+    run_ai_followups(&app, &db, &video_id, &jobs_list).await;
+
     Ok(())
+}
+
+/// ASR 之后自动生成章节、笔记。尽力而为：未配置大模型或单步失败都只标记该 job，
+/// 不回滚视频状态、不中断其余步骤。
+async fn run_ai_followups(
+    app: &AppHandle,
+    db: &crate::db::Db,
+    video_id: &str,
+    jobs_list: &[jobs::Job],
+) {
+    use crate::llm::profiles::AiTask;
+    for (stage, task) in [("chapters", AiTask::Chapters), ("notes", AiTask::Notes)] {
+        let Some(job) = jobs_list.iter().find(|j| j.stage == stage) else {
+            continue;
+        };
+        let _ = jobs::start(db, &job.id).await;
+        emit_stage(app, video_id, &job.id, stage, "running", 0.1, Some("生成中"));
+
+        let (provider, model) = match crate::commands::ai::provider_for_db(db, task).await {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                let msg = "未配置大模型，已跳过自动生成（可在设置→大模型配置后手动生成）";
+                let _ = jobs::cancel(db, &job.id, msg).await;
+                emit_stage(app, video_id, &job.id, stage, "canceled", 0.0, Some(msg));
+                continue;
+            }
+            Err(error) => {
+                let msg = error.to_string();
+                let _ = jobs::fail(db, &job.id, &msg).await;
+                emit_stage(app, video_id, &job.id, stage, "failed", 0.0, Some(&msg));
+                continue;
+            }
+        };
+
+        let result = match task {
+            AiTask::Chapters => ai::generate_chapters(db, &provider, &model, video_id)
+                .await
+                .map(|_| ()),
+            AiTask::Notes => ai::generate_notes(db, &provider, &model, video_id).await,
+            _ => Ok(()),
+        };
+        match result {
+            Ok(()) => {
+                let _ = jobs::finish(db, &job.id).await;
+                emit_stage(app, video_id, &job.id, stage, "done", 1.0, None);
+            }
+            Err(error) => {
+                let msg = error.to_string();
+                let _ = jobs::fail(db, &job.id, &msg).await;
+                emit_stage(app, video_id, &job.id, stage, "failed", 0.0, Some(&msg));
+            }
+        }
+    }
+}
+
+fn emit_stage(
+    app: &AppHandle,
+    video_id: &str,
+    job_id: &str,
+    stage: &str,
+    status: &str,
+    progress: f64,
+    message: Option<&str>,
+) {
+    emit_update(
+        app,
+        JobEvent {
+            video_id: video_id.to_string(),
+            job_id: job_id.to_string(),
+            stage: stage.to_string(),
+            status: status.to_string(),
+            progress,
+            message: message.map(str::to_string),
+        },
+    );
 }
 
 async fn fail_asr<T>(

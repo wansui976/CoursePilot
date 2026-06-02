@@ -2,10 +2,26 @@ import { useEffect } from "react";
 import { ipc } from "@/lib/ipc";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 
+// 流水线顺序与中文标签（与后端 jobs::STAGES 对应）。
+const STAGE_ORDER = ["audio", "asr", "chapters", "notes"];
 const STAGE_LABEL: Record<string, string> = {
   audio: "提取音频",
   asr: "语音识别",
+  chapters: "生成章节",
+  notes: "生成笔记",
 };
+const STATUS_LABEL: Record<string, string> = {
+  pending: "待处理",
+  running: "进行中",
+  done: "完成",
+  failed: "失败",
+  canceled: "已跳过",
+};
+
+function stageRank(stage: string): number {
+  const i = STAGE_ORDER.indexOf(stage);
+  return i === -1 ? STAGE_ORDER.length : i;
+}
 
 const EMPTY_JOBS: Record<string, JobUpdate> = {};
 
@@ -28,8 +44,8 @@ export function JobProgress({ videoId }: { videoId: string }) {
     });
   }, [setOne, videoId]);
 
-  const list = Object.values(jobs).sort((a, b) =>
-    a.stage.localeCompare(b.stage),
+  const list = Object.values(jobs).sort(
+    (a, b) => stageRank(a.stage) - stageRank(b.stage),
   );
   if (list.length === 0) return <p className="text-xs text-[var(--text-faint)]">未开始</p>;
 
@@ -54,7 +70,7 @@ export function JobProgress({ videoId }: { videoId: string }) {
             <span
               className={job.status === "failed" ? "text-red-400" : "text-[var(--text-muted)]"}
             >
-              {job.status} {Math.floor(job.progress * 100)}%
+              {STATUS_LABEL[job.status] ?? job.status} {Math.floor(job.progress * 100)}%
             </span>
           </div>
           <div className="h-1 overflow-hidden rounded bg-[var(--surface-card-hover)]">
