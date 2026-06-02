@@ -66,6 +66,8 @@ foreach ($lang in @("eng", "chi_sim")) {
   $trainedData = Join-Path $tesseractRoot "tessdata\$lang.traineddata"
   if (Test-Path $trainedData) {
     Copy-Item $trainedData $tessdataOut -Force
+  } elseif ($lang -eq "chi_sim") {
+    Download-File "https://github.com/tesseract-ocr/tessdata_fast/raw/main/chi_sim.traineddata" (Join-Path $tessdataOut "chi_sim.traineddata")
   } else {
     Write-Warning "Missing $trainedData"
   }
