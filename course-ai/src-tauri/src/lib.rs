@@ -23,7 +23,7 @@ use crate::commands::slides::{
     cmd_read_slide_image,
 };
 use crate::commands::tools::{cmd_import_bilibili, cmd_ocr_region};
-use crate::commands::transcripts::cmd_list_transcripts;
+use crate::commands::transcripts::{cmd_list_transcripts, cmd_update_transcript};
 use crate::commands::videos::{
     cmd_add_local_video, cmd_delete_video, cmd_ensure_playable, cmd_list_videos, cmd_media_url,
     cmd_update_video_title, cmd_video_cover,
@@ -74,6 +74,7 @@ pub fn run() {
             cmd_list_jobs,
             cmd_process_video,
             cmd_list_transcripts,
+            cmd_update_transcript,
             cmd_get_llm_profiles,
             cmd_save_llm_profiles,
             cmd_set_api_key,
