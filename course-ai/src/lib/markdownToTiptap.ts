@@ -17,20 +17,39 @@ interface Node {
 // 匹配 [mm:ss] / [mmm:ss] / [hh:mm:ss]（分钟位允许 1-3 位，兼容长视频）。
 export const TIMESTAMP_RE = /\[(\d{1,3}:\d{2}(?::\d{2})?)\]/g;
 
-/** 把一段文本切成「粗体 / 时间戳 / 纯文本」的内联节点。 */
+// 数学公式定界符：\[..\] 与 $$..$$ 为行间公式，\(..\) 与 $..$ 为行内公式。
+const MATH_RE =
+  /\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g;
+
+/** 把一段文本切成「数学公式 / 粗体 / 时间戳 / 纯文本」的内联节点。 */
 function inline(text: string): Node[] {
   const nodes: Node[] = [];
-  // 先按 **粗体** 切分，再在非粗体片段里识别时间戳。
+  const re = new RegExp(MATH_RE.source, "g");
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) nodes.push(...inlineRich(text.slice(last, m.index)));
+    const display = m[1] !== undefined || m[3] !== undefined;
+    const latex = (m[1] ?? m[2] ?? m[3] ?? m[4] ?? "").trim();
+    nodes.push({ type: "math", attrs: { latex, display } });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) nodes.push(...inlineRich(text.slice(last)));
+  return nodes.length ? nodes : [{ type: "text", text: text || " " }];
+}
+
+/** 在非公式文本里识别 **粗体** 与时间戳。 */
+function inlineRich(text: string): Node[] {
+  const nodes: Node[] = [];
   for (const part of text.split(/(\*\*[^*]+\*\*)/g)) {
     if (!part) continue;
     if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-      const inner = part.slice(2, -2);
-      nodes.push({ type: "text", text: inner, marks: [{ type: "bold" }] });
+      nodes.push({ type: "text", text: part.slice(2, -2), marks: [{ type: "bold" }] });
       continue;
     }
     nodes.push(...inlinePlain(part));
   }
-  return nodes.length ? nodes : [{ type: "text", text: text || " " }];
+  return nodes;
 }
 
 /** 在纯文本里识别 [mm:ss] 时间戳，渲染为可点击的 timestamp 节点。 */

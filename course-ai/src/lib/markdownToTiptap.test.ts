@@ -59,6 +59,25 @@ describe("markdownToTiptap", () => {
     expect(doc.content![0].content).toHaveLength(2);
   });
 
+  it("parses inline \\(...\\) math into a math node", () => {
+    const doc = markdownToTiptap("令 \\(x=a\\cos\\theta\\) 即可");
+    const para = doc.content![0];
+    const math = para.content!.find((n) => n.type === "math");
+    expect(math!.attrs!.latex).toBe("x=a\\cos\\theta");
+    expect(math!.attrs!.display).toBe(false);
+  });
+
+  it("parses display \\[...\\] and $$...$$ math", () => {
+    const a = markdownToTiptap("\\[E=mc^2\\]");
+    const ma = a.content![0].content!.find((n) => n.type === "math");
+    expect(ma!.attrs!.display).toBe(true);
+    expect(ma!.attrs!.latex).toBe("E=mc^2");
+
+    const b = markdownToTiptap("$$a^2+b^2$$");
+    const mb = b.content![0].content!.find((n) => n.type === "math");
+    expect(mb!.attrs!.display).toBe(true);
+  });
+
   it("parses a markdown table into a table node", () => {
     const md = "| 知识点 | 难度 |\n| --- | --- |\n| 概括题 | 高 |\n| 对策题 | 中 |";
     const doc = markdownToTiptap(md);

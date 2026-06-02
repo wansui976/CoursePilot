@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 import { markdownToTiptap } from "@/lib/markdownToTiptap";
 import { TimestampNode, installTimestampClick } from "./notes/timestampNode";
+import { MathNode } from "./notes/mathNode";
 import { QuizPanel } from "./QuizPanel";
 import { MindmapPanel } from "./MindmapPanel";
 import { RagSearchPanel } from "./RagSearchPanel";
@@ -48,6 +49,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     extensions: [
       StarterKit,
       TimestampNode,
+      MathNode,
       Table.configure({ resizable: false }),
       TableRow,
       TableHeader,
