@@ -15,7 +15,9 @@ use crate::commands::ai::{
     cmd_set_api_key,
 };
 use crate::commands::courses::{cmd_create_course, cmd_delete_course, cmd_list_courses, AppState};
-use crate::commands::export::{cmd_export_notes, cmd_export_subtitles};
+use crate::commands::export::{
+    cmd_export_mindmap, cmd_export_notes, cmd_export_quiz, cmd_export_subtitles,
+};
 use crate::commands::rag::{cmd_rag_query, cmd_search_transcript};
 use crate::commands::settings::{cmd_get_setting, cmd_set_setting};
 use crate::commands::slides::{
@@ -93,6 +95,8 @@ pub fn run() {
             cmd_get_screenshots,
             cmd_export_subtitles,
             cmd_export_notes,
+            cmd_export_quiz,
+            cmd_export_mindmap,
             cmd_rag_query,
             cmd_search_transcript,
             cmd_ocr_region,

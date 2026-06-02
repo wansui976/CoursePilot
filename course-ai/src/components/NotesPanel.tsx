@@ -116,6 +116,15 @@ export function NotesPanel({ videoId }: { videoId: string }) {
           {view === "notes" && savedAt && (
             <span className="text-xs text-[var(--text-faint)]">已保存 {savedAt}</span>
           )}
+          {view === "notes" && (
+            <button
+              className="text-xs text-primary hover:underline"
+              onClick={() => void ipc.export.notes(videoId)}
+              title="导出笔记 Markdown 到视频数据目录"
+            >
+              导出 MD
+            </button>
+          )}
           {currentTask && (
             <Button
               size="sm"
