@@ -86,7 +86,23 @@ brew install ffmpeg whisper-cpp tesseract yt-dlp
 
 ## 云端服务配置
 
+### 火山 ASR
+
 如需使用火山 ASR，请先在火山引擎控制台开通[录音文件识别大模型-标准版试用服务](https://console.volcengine.com/speech/service/10012)，再在应用设置中填写对应的 App ID 和 Access Token。
+
+### 阿里云 OCR（统一识别）
+
+应用的「截字」功能默认使用本地 `tesseract`，也可切换为阿里云 OCR「统一识别」（RecognizeAllText），识别效果更好、无需本地安装语言包。配置步骤如下：
+
+1. **开通服务**：用阿里云账号登录 [文字识别 OCR 控制台](https://ocr.console.aliyun.com/overview)，按页面提示开通服务（统一识别按调用量计费，新用户通常有免费额度）。
+
+2. **获取 AccessKey ID / Secret**：进入 [AccessKey 管理页](https://ram.console.aliyun.com/profile/access-keys) 创建或查看 AccessKey。
+   - 页面会显示 **AccessKey ID**，并在**创建时一次性**显示 **AccessKey Secret**（请妥善保存，关闭后无法再次查看；遗失只能重新创建）。
+   - 出于安全考虑，建议在 [RAM 控制台](https://ram.console.aliyun.com/users) 新建一个 RAM 子用户，授予 `AliyunOCRFullAccess` 权限后，使用该子用户的 AccessKey，避免直接使用主账号密钥。
+
+3. **填入应用**：打开应用 **设置 → 图文识别 (OCR)**，把「OCR 引擎」切换为「阿里云 OCR 统一识别」，填写 AccessKey ID 与 AccessKey Secret，并按需选择识别类型（默认「通用文字识别（高精版）」），保存即可。
+
+> 注意：阿里云 OCR 使用的是账号级 **AccessKey ID / Secret**，与语音识别用的阿里云 DashScope（百炼）API Key 是两套不同的凭证，请勿混用。
 
 ## 说明
 
