@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import "katex/dist/katex.min.css";
 import "./globals.css";
 import { startJobListener } from "@/stores/jobs";
 
