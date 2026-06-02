@@ -20,6 +20,9 @@ jobs:
     runs-on: windows-latest
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL || 'http://timestamp.digicert.com' }}
 
     steps:
       - name: Checkout
@@ -44,6 +47,39 @@ jobs:
       - name: Install frontend dependencies
         working-directory: course-ai
         run: pnpm install --frozen-lockfile
+
+      - name: Prepare Windows sidecars
+        shell: pwsh
+        run: .\.github\scripts\prepare-windows-sidecars.ps1
+
+      - name: Import Windows signing certificate
+        if: env.WINDOWS_CERTIFICATE != '' && env.WINDOWS_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path certificate | Out-Null
+          Set-Content -Path certificate\certificate.base64.txt -Value $env:WINDOWS_CERTIFICATE
+          certutil -decode certificate\certificate.base64.txt certificate\certificate.pfx
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath certificate\certificate.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          if (-not $cert.Thumbprint) {
+            throw "Imported Windows signing certificate has no thumbprint"
+          }
+
+          $configPath = "course-ai\src-tauri\tauri.windows.conf.json"
+          $config = Get-Content $configPath -Raw | ConvertFrom-Json
+          if (-not $config.bundle.windows) {
+            $config.bundle | Add-Member -MemberType NoteProperty -Name windows -Value ([pscustomobject]@{})
+          }
+          $config.bundle.windows | Add-Member -Force -MemberType NoteProperty -Name certificateThumbprint -Value $cert.Thumbprint
+          $config.bundle.windows | Add-Member -Force -MemberType NoteProperty -Name digestAlgorithm -Value "sha256"
+          $config.bundle.windows | Add-Member -Force -MemberType NoteProperty -Name timestampUrl -Value $env:WINDOWS_TIMESTAMP_URL
+          $config | ConvertTo-Json -Depth 20 | Set-Content $configPath
+
+      - name: Report unsigned Windows build
+        if: env.WINDOWS_CERTIFICATE == '' || env.WINDOWS_CERTIFICATE_PASSWORD == ''
+        shell: pwsh
+        run: |
+          Write-Warning "WINDOWS_CERTIFICATE/WINDOWS_CERTIFICATE_PASSWORD secrets are not set; Windows bundles will be unsigned."
 
       - name: Build and upload Windows bundles
         uses: tauri-apps/tauri-action@v0.6.2

@@ -28,5 +28,9 @@ dist-ssr/
 # App data
 .courseai/
 
+# Downloaded release sidecars
+course-ai/src-tauri/binaries/*
+!course-ai/src-tauri/binaries/.gitkeep
+
 # Local Codex/Superpowers scratch state
 **/.superpowers/

@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "externalBin": [
+      "binaries/ffmpeg",
+      "binaries/yt-dlp",
+      "binaries/whisper-cli",
+      "binaries/tesseract"
+    ],
+    "resources": {
+      "binaries/*.dll": "binaries/",
+      "binaries/tessdata/*": "binaries/tessdata/"
+    }
+  }
+}
