@@ -38,19 +38,25 @@ export function WhisperModelsPanel() {
   }, []);
 
   return (
-    <div className="space-y-2">
-      <h3 className="text-sm font-medium">Whisper 模型</h3>
+    <div className="space-y-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] p-3">
+      <h4 className="mb-1 text-xs font-medium text-[var(--text-muted)]">
+        Whisper 模型
+      </h4>
       {rows.map(([model, installed]) => {
         const item = progress[model.id];
         const pct = item && item.total ? Math.floor((item.received / item.total) * 100) : 0;
         return (
           <div
             key={model.id}
-            className="flex items-center justify-between gap-3 py-1 text-sm"
+            className="flex items-center justify-between gap-3 py-1 text-sm text-[var(--text-normal)]"
           >
-            <span>
-              {model.display_name}{" "}
-              {installed && <span className="text-green-400">已安装</span>}
+            <span className="flex items-center gap-2">
+              {model.display_name}
+              {installed && (
+                <span className="inline-flex items-center rounded-full bg-[var(--status-ok-bg)] px-1.5 py-0.5 text-xs font-medium text-[var(--status-ok)]">
+                  已安装
+                </span>
+              )}
             </span>
             {!installed && (
               <Button
