@@ -7,8 +7,11 @@ import { CaptionOverlay } from "./CaptionOverlay";
 import { Controls } from "./Controls";
 
 export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) {
+  const regionRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLVideoElement>(null);
+  const [videoAspect, setVideoAspect] = useState(16 / 9);
+  const [region, setRegion] = useState({ w: 0, h: 0 });
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
   const [volume, setVolume] = useState(1);
@@ -34,6 +37,32 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
   useLayoutEffect(() => {
     ref.current?.setAttribute("webkit-playsinline", "true");
   }, []);
+
+  // 跟踪播放区实际尺寸，据此把舞台收成视频的真实宽高比，做到「完整不裁剪 + 不留黑边」。
+  useEffect(() => {
+    const el = regionRef.current;
+    if (!el) return;
+    const update = () => setRegion({ w: el.clientWidth, h: el.clientHeight });
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // 在播放区内，求与视频同比例、尽可能大的居中矩形；视频铺满它即完整无黑边。
+  const aspect = videoAspect > 0 ? videoAspect : 16 / 9;
+  const stageBox = (() => {
+    const { w, h } = region;
+    if (!w || !h) return null;
+    let boxW = w;
+    let boxH = w / aspect;
+    if (boxH > h) {
+      boxH = h;
+      boxW = h * aspect;
+    }
+    return { width: Math.round(boxW), height: Math.round(boxH) };
+  })();
 
   useEffect(() => {
     if (!ref.current || !seekRequest) return;
@@ -82,30 +111,49 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
           : "h-full min-h-0 bg-transparent"
       }`}
     >
-      <div ref={stageRef} className="relative min-h-0 w-full min-w-0 flex-1">
-        <video
-          ref={ref}
-          aria-label="课程视频播放器"
-          src={src}
-          playsInline
-          disablePictureInPicture
-          className="h-full w-full bg-black object-cover"
-          onTimeUpdate={(event) =>
-            setCurrentMs(Math.floor(event.currentTarget.currentTime * 1000))
+      <div
+        ref={regionRef}
+        className={`relative flex min-h-0 w-full min-w-0 flex-1 items-center justify-center overflow-hidden ${
+          fullscreen ? "bg-black" : "bg-[var(--surface-stage)]"
+        }`}
+      >
+        <div
+          ref={stageRef}
+          className={`relative overflow-hidden ${fullscreen ? "" : "rounded-[14px]"}`}
+          style={
+            stageBox
+              ? { width: stageBox.width, height: stageBox.height }
+              : { width: "100%", height: "100%" }
           }
-          onLoadedMetadata={(event) =>
-            setDurationMs(Math.floor(event.currentTarget.duration * 1000))
-          }
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          onVolumeChange={(event) => {
-            setVolume(event.currentTarget.volume);
-            setMuted(event.currentTarget.muted);
-          }}
-        />
-        {captionsOn && caption && (
-          <CaptionOverlay text={caption} stageRef={stageRef} />
-        )}
+        >
+          <video
+            ref={ref}
+            aria-label="课程视频播放器"
+            src={src}
+            playsInline
+            disablePictureInPicture
+            className="h-full w-full bg-black object-contain"
+            onTimeUpdate={(event) =>
+              setCurrentMs(Math.floor(event.currentTarget.currentTime * 1000))
+            }
+            onLoadedMetadata={(event) => {
+              setDurationMs(Math.floor(event.currentTarget.duration * 1000));
+              const { videoWidth, videoHeight } = event.currentTarget;
+              if (videoWidth > 0 && videoHeight > 0) {
+                setVideoAspect(videoWidth / videoHeight);
+              }
+            }}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            onVolumeChange={(event) => {
+              setVolume(event.currentTarget.volume);
+              setMuted(event.currentTarget.muted);
+            }}
+          />
+          {captionsOn && caption && (
+            <CaptionOverlay text={caption} stageRef={stageRef} />
+          )}
+        </div>
       </div>
       <Controls
         playing={playing}
