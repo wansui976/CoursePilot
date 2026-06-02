@@ -9,6 +9,7 @@ const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
     transcripts: {
       list: vi.fn(),
+      update: vi.fn(),
     },
     export: {
       subtitles: vi.fn(),

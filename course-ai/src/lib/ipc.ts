@@ -62,6 +62,8 @@ export const ipc = {
   transcripts: {
     list: (videoId: string): Promise<TranscriptSegment[]> =>
       invoke("cmd_list_transcripts", { videoId }),
+    update: (segmentId: number, text: string): Promise<void> =>
+      invoke("cmd_update_transcript", { segmentId, text }),
   },
   ai: {
     getProfiles: (): Promise<LlmProfile[]> => invoke("cmd_get_llm_profiles"),

@@ -32,3 +32,19 @@ pub async fn cmd_list_transcripts(
 ) -> AppResult<Vec<TranscriptSegment>> {
     list_segments(&state.db, &video_id).await
 }
+
+/// 人工纠正某条字幕的文本（ASR 难免有错）。改动直接落库，
+/// 后续生成的笔记/章节/摘要都会用到更正后的文稿。
+#[tauri::command]
+pub async fn cmd_update_transcript(
+    state: State<'_, AppState>,
+    segment_id: i64,
+    text: String,
+) -> AppResult<()> {
+    sqlx::query("UPDATE transcripts SET text=? WHERE id=?")
+        .bind(text.trim())
+        .bind(segment_id)
+        .execute(&state.db.pool)
+        .await?;
+    Ok(())
+}
