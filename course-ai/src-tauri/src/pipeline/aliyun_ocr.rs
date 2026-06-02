@@ -126,11 +126,31 @@ pub fn extract_content(payload: &Value) -> AppResult<String> {
         Value::Object(_) => data.clone(),
         _ => return Err(AppError::Pipeline("aliyun ocr: 响应缺少 Data".into())),
     };
-    // 首选整段 content；为空时回退拼接逐词结果（prism_wordsInfo[].word）。
+    // 首选整段 content（部分识别类型直接给）。
     let content = inner["content"].as_str().unwrap_or("").trim();
     if !content.is_empty() {
         return Ok(content.to_string());
     }
+    // 统一识别（RecognizeAllText）的实际结构：
+    // Data.SubImages[].BlockInfo.BlockDetails[].BlockContent，逐块按行拼接。
+    if let Some(subs) = inner["SubImages"].as_array() {
+        let mut parts = Vec::new();
+        for sub in subs {
+            if let Some(blocks) = sub["BlockInfo"]["BlockDetails"].as_array() {
+                for block in blocks {
+                    if let Some(t) = block["BlockContent"].as_str() {
+                        if !t.trim().is_empty() {
+                            parts.push(t.trim().to_string());
+                        }
+                    }
+                }
+            }
+        }
+        if !parts.is_empty() {
+            return Ok(parts.join("\n"));
+        }
+    }
+    // 兜底：逐词结果（prism_wordsInfo[].word）。
     if let Some(words) = inner["prism_wordsInfo"].as_array() {
         let joined: String = words
             .iter()
@@ -332,6 +352,28 @@ mod tests {
     fn extract_content_from_data_object() {
         let payload = json!({ "Data": { "content": "abc" } });
         assert_eq!(extract_content(&payload).unwrap(), "abc");
+    }
+
+    #[test]
+    fn extract_content_from_recognizealltext_subimages_blocks() {
+        // RecognizeAllText 统一识别的真实结构：SubImages → BlockInfo.BlockDetails → BlockContent。
+        let payload = json!({
+            "Data": {
+                "SubImages": [{
+                    "SubImageId": 0,
+                    "BlockInfo": {
+                        "BlockDetails": [
+                            { "BlockId": 0, "BlockContent": "第一行文字", "BlockConfidence": 99 },
+                            { "BlockId": 1, "BlockContent": "第二行文字", "BlockConfidence": 98 }
+                        ]
+                    }
+                }]
+            }
+        });
+        assert_eq!(
+            extract_content(&payload).unwrap(),
+            "第一行文字\n第二行文字"
+        );
     }
 
     #[test]
