@@ -1,6 +1,6 @@
-# CoursePilot 课镜
+# CoursePilot 
 
-CoursePilot（课镜）是一款本地优先的 AI 课程视频学习工作台。它可以把课程视频转成可检索、可复习、可继续加工的学习资料：字幕、章节、笔记、摘要、课件截图、OCR 文本、脑图、练习题和课程问答都围绕同一节视频展开。
+CoursePilot是一款本地优先的 AI 课程视频学习工作台。它可以把课程视频转成可检索、可复习、可继续加工的学习资料：字幕、章节、笔记、摘要、课件截图、OCR 文本、脑图、练习题和课程问答都围绕同一节视频展开。
 
 项目适合个人学习场景，尤其是长课程、网课录屏、B 站课程和本地视频资料整理。
 
@@ -83,6 +83,10 @@ brew install ffmpeg whisper-cpp tesseract yt-dlp
 - `whisper-cli` 用于本地语音识别。
 - `tesseract` 用于 OCR。
 - `yt-dlp` 用于 Bilibili / URL 视频下载。
+
+## 云端服务配置
+
+如需使用火山 ASR，请先在火山引擎控制台开通[录音文件识别大模型-标准版试用服务](https://console.volcengine.com/speech/service/10012)，再在应用设置中填写对应的 App ID 和 Access Token。
 
 ## 说明
 
