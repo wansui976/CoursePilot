@@ -99,7 +99,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
             variant="outline"
             disabled={ocr.isPending}
             onClick={() => ocr.mutate()}
-            title="对当前帧整屏 OCR（需安装 tesseract）"
+            title="对当前帧整屏 OCR（引擎在设置里选择：本地 Tesseract 或 阿里云 OCR）"
           >
             {ocr.isPending ? "识别中…" : "截字"}
           </Button>

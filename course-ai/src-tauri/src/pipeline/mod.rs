@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod aliyun_asr;
+pub mod aliyun_ocr;
 pub mod asr;
 pub mod audio;
 pub mod download;

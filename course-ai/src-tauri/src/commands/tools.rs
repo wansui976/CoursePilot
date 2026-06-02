@@ -2,13 +2,14 @@ use crate::commands::courses::AppState;
 use crate::commands::settings::get_setting;
 use crate::commands::videos::{add_local_video, Video};
 use crate::error::AppResult;
-use crate::pipeline::{download, ocr};
+use crate::pipeline::{aliyun_ocr, download, ocr};
 use std::path::{Path, PathBuf};
 use tauri::State;
 
 const DEFAULT_OCR_LANGS: &str = "chi_sim+eng";
 
 /// 对视频某时刻的（可选）区域做 OCR，返回识别文本。w/h 为 0 表示整帧。
+/// 后端由设置 `ocr_backend` 决定：tesseract（本地，默认）或 aliyun（阿里云统一识别）。
 #[tauri::command]
 pub async fn cmd_ocr_region(
     state: State<'_, AppState>,
@@ -23,6 +24,33 @@ pub async fn cmd_ocr_region(
         .bind(&video_id)
         .fetch_one(&state.db.pool)
         .await?;
+    let rect = ocr::Rect { x, y, w, h };
+    let backend = get_setting(&state.db, "ocr_backend")
+        .await?
+        .unwrap_or_else(|| "tesseract".to_string());
+
+    if backend == "aliyun" {
+        let access_key_id = get_setting(&state.db, "aliyun_ocr_access_key_id")
+            .await?
+            .unwrap_or_default();
+        let access_key_secret = get_setting(&state.db, "aliyun_ocr_access_key_secret")
+            .await?
+            .unwrap_or_default();
+        let ocr_type = get_setting(&state.db, "aliyun_ocr_type")
+            .await?
+            .unwrap_or_else(|| aliyun_ocr::DEFAULT_TYPE.to_string());
+        let image = ocr::grab_frame(
+            Path::new(&video.file_path),
+            Path::new(&video.data_dir),
+            at_ms,
+            rect,
+        )
+        .await?;
+        let bytes = tokio::fs::read(&image).await?;
+        return aliyun_ocr::run_aliyun_ocr(&bytes, &access_key_id, &access_key_secret, &ocr_type)
+            .await;
+    }
+
     let langs = get_setting(&state.db, "ocr_langs")
         .await?
         .unwrap_or_else(|| DEFAULT_OCR_LANGS.to_string());
@@ -30,7 +58,7 @@ pub async fn cmd_ocr_region(
         Path::new(&video.file_path),
         Path::new(&video.data_dir),
         at_ms,
-        ocr::Rect { x, y, w, h },
+        rect,
         &langs,
     )
     .await

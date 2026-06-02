@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState, type ReactNode } from "react";
-import { AudioLines, Check, FolderCog, Sparkles, X } from "lucide-react";
+import { AudioLines, Check, FolderCog, ScanText, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 import { WhisperModelsPanel } from "./WhisperModelsPanel";
@@ -81,6 +81,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [dashscopeKey, setDashscopeKey] = useState("");
   const [dashscopeSaved, setDashscopeSaved] = useState("");
   const [aliyunModel, setAliyunModel] = useState("qwen3-asr-flash-filetrans");
+  const [ocrBackend, setOcrBackend] = useState("tesseract");
+  const [ocrType, setOcrType] = useState("Advanced");
+  const [ocrKeyId, setOcrKeyId] = useState("");
+  const [ocrSecret, setOcrSecret] = useState("");
+  const [ocrSaved, setOcrSaved] = useState("");
 
   useEffect(() => {
     void ipc.settings.get("default_storage_root").then((value) => setRoot(value ?? ""));
@@ -96,6 +101,15 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     void ipc.settings
       .get("aliyun_asr_model")
       .then((value) => setAliyunModel(value ?? "qwen3-asr-flash-filetrans"));
+    void ipc.settings
+      .get("ocr_backend")
+      .then((value) => setOcrBackend(value ?? "tesseract"));
+    void ipc.settings
+      .get("aliyun_ocr_type")
+      .then((value) => setOcrType(value ?? "Advanced"));
+    void ipc.settings
+      .get("aliyun_ocr_access_key_id")
+      .then((value) => setOcrKeyId(value ?? ""));
   }, []);
 
   async function pickRoot() {
@@ -138,6 +152,27 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     setDashscopeKey("");
     setDashscopeSaved("已保存");
     setTimeout(() => setDashscopeSaved(""), 1500);
+  }
+
+  async function changeOcrBackend(value: string) {
+    setOcrBackend(value);
+    await ipc.settings.set("ocr_backend", value);
+  }
+
+  async function changeOcrType(value: string) {
+    setOcrType(value);
+    await ipc.settings.set("aliyun_ocr_type", value);
+  }
+
+  async function saveOcrCreds() {
+    const keyId = ocrKeyId.trim();
+    const secret = ocrSecret.trim();
+    if (keyId) await ipc.settings.set("aliyun_ocr_access_key_id", keyId);
+    if (secret) await ipc.settings.set("aliyun_ocr_access_key_secret", secret);
+    if (!keyId && !secret) return;
+    setOcrSecret("");
+    setOcrSaved("已保存");
+    setTimeout(() => setOcrSaved(""), 1500);
   }
 
   return (
@@ -299,6 +334,73 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     保存百炼 API Key
                   </Button>
                   <SavedBadge text={dashscopeSaved} />
+                </div>
+              </>
+            )}
+          </Section>
+
+          <Section
+            icon={<ScanText className="h-4 w-4" />}
+            title="图文识别 (OCR)"
+            desc="对课件帧「截字」时使用的文字识别引擎"
+          >
+            <Field label="OCR 引擎" htmlFor="ocr-backend">
+              <select
+                id="ocr-backend"
+                value={ocrBackend}
+                onChange={(event) => void changeOcrBackend(event.target.value)}
+                className={FIELD}
+              >
+                <option value="tesseract">本地 Tesseract</option>
+                <option value="aliyun">阿里云 OCR 统一识别</option>
+              </select>
+            </Field>
+
+            {ocrBackend === "aliyun" && (
+              <>
+                <Field label="识别类型" htmlFor="aliyun-ocr-type">
+                  <select
+                    id="aliyun-ocr-type"
+                    value={ocrType}
+                    onChange={(event) => void changeOcrType(event.target.value)}
+                    className={FIELD}
+                  >
+                    <option value="Advanced">通用文字识别（高精版）</option>
+                    <option value="General">通用文字识别</option>
+                    <option value="HandWriting">手写文字识别</option>
+                    <option value="MultiLanguage">多语言识别</option>
+                    <option value="Table">表格识别</option>
+                  </select>
+                </Field>
+                <Field label="AccessKey ID" htmlFor="aliyun-ocr-key-id">
+                  <input
+                    id="aliyun-ocr-key-id"
+                    type="text"
+                    className={FIELD}
+                    value={ocrKeyId}
+                    placeholder="阿里云 RAM 账号 AccessKey ID"
+                    onChange={(event) => setOcrKeyId(event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label="AccessKey Secret"
+                  htmlFor="aliyun-ocr-secret"
+                  hint="留空 = 不修改；需在阿里云控制台开通「文字识别 OCR」"
+                >
+                  <input
+                    id="aliyun-ocr-secret"
+                    type="password"
+                    className={FIELD}
+                    value={ocrSecret}
+                    placeholder="••••••••"
+                    onChange={(event) => setOcrSecret(event.target.value)}
+                  />
+                </Field>
+                <div className="flex items-center gap-3">
+                  <Button size="sm" variant="outline" onClick={saveOcrCreds}>
+                    保存阿里云 OCR 凭证
+                  </Button>
+                  <SavedBadge text={ocrSaved} />
                 </div>
               </>
             )}
