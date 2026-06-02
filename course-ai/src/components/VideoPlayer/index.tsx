@@ -89,7 +89,7 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
           src={src}
           playsInline
           disablePictureInPicture
-          className="h-full w-full bg-black object-contain"
+          className="h-full w-full bg-black object-cover"
           onTimeUpdate={(event) =>
             setCurrentMs(Math.floor(event.currentTarget.currentTime * 1000))
           }
