@@ -170,9 +170,11 @@ pub async fn generate_notes(
     let md = provider.complete(&req).await?.content;
     let md = strip_code_fence(&md).to_string();
     let now = chrono::Utc::now().timestamp_millis();
+    // 重新生成时清掉用户编辑过的 content_json，否则它会盖住新生成的 content_md
+    //（cmd_get_notes 优先返回 content_json），表现为「点了生成却没变化」。
     sqlx::query(
         "INSERT INTO notes(video_id,content_md,ai_generated_at) VALUES (?,?,?)
-         ON CONFLICT(video_id) DO UPDATE SET content_md=excluded.content_md, ai_generated_at=excluded.ai_generated_at",
+         ON CONFLICT(video_id) DO UPDATE SET content_md=excluded.content_md, ai_generated_at=excluded.ai_generated_at, content_json=NULL",
     )
     .bind(video_id)
     .bind(md)
@@ -305,5 +307,36 @@ mod tests {
             .await
             .unwrap();
         assert!(n.0.contains("要点"));
+    }
+
+    #[tokio::test]
+    async fn regenerating_notes_clears_user_edited_json() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        // 模拟用户编辑（含「删空」）后保存的 content_json。
+        sqlx::query("INSERT INTO notes(video_id,content_json) VALUES (?,?)")
+            .bind(&vid)
+            .bind(r#"{"type":"doc","content":[{"type":"paragraph"}]}"#)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        generate_notes(
+            &db,
+            &Provider::Mock {
+                canned: "# 新笔记\n- 重新生成的要点".into(),
+            },
+            "m",
+            &vid,
+        )
+        .await
+        .unwrap();
+        // 重新生成后 content_json 必须被清空，否则会盖住新的 content_md。
+        let row: (Option<String>, Option<String>) =
+            sqlx::query_as("SELECT content_json, content_md FROM notes WHERE video_id=?")
+                .bind(&vid)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert!(row.0.is_none(), "content_json should be cleared on regenerate");
+        assert!(row.1.unwrap().contains("重新生成的要点"));
     }
 }

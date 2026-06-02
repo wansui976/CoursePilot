@@ -86,6 +86,8 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   const generate = useMutation({
     mutationFn: (task: "notes" | "quiz" | "mindmap") =>
       ipc.ai.generate(videoId, task),
+    // 取消可能挂起的自动保存，避免「删空笔记后生成」时旧的空内容把新笔记盖回去。
+    onMutate: () => clearTimeout(saveTimer.current),
     onSuccess: (_d, task) => {
       qc.invalidateQueries({ queryKey: [task, videoId] });
     },
