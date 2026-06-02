@@ -36,7 +36,8 @@ pub fn build_crop_vf(rect: Rect) -> Option<String> {
     }
 }
 
-async fn grab_frame(video: &Path, out_dir: &Path, at_ms: i64, rect: Rect) -> AppResult<PathBuf> {
+/// 截取视频某时刻的（可选裁剪）帧为 PNG，供本地或云端 OCR 复用。
+pub async fn grab_frame(video: &Path, out_dir: &Path, at_ms: i64, rect: Rect) -> AppResult<PathBuf> {
     std::fs::create_dir_all(out_dir)?;
     let out = out_dir.join(format!("ocr_{at_ms}.png"));
     let seconds = at_ms as f64 / 1000.0;
