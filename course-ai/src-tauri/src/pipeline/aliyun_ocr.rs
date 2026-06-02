@@ -63,7 +63,8 @@ pub async fn run_aliyun_ocr(
         .post(&url)
         .header("Authorization", &authorization)
         .header("content-type", "application/octet-stream")
-        .header("host", HOST)
+        // host 头由 reqwest 按 URL 自动添加，且与签名里的 host 取值一致，
+        // 这里不手动设置，避免出现重复 Host 头导致签名校验失败。
         .header("x-acs-action", ACTION)
         .header("x-acs-content-sha256", &body_hash)
         .header("x-acs-date", &date)
@@ -75,15 +76,18 @@ pub async fn run_aliyun_ocr(
         .map_err(|e| AppError::Pipeline(format!("aliyun ocr request: {e}")))?;
 
     let status = resp.status();
-    let payload: Value = resp
-        .json()
+    let raw = resp
+        .text()
         .await
-        .map_err(|e| AppError::Pipeline(format!("aliyun ocr decode: {e}")))?;
-    if !status.is_success() {
-        let code = payload["Code"].as_str().unwrap_or("");
-        let message = payload["Message"].as_str().unwrap_or("");
-        let hint = if status.as_u16() == 403 {
-            "（鉴权失败：请核对 AccessKey、并确认已开通文字识别 OCR 服务）"
+        .map_err(|e| AppError::Pipeline(format!("aliyun ocr read body: {e}")))?;
+    let payload: Value = serde_json::from_str(&raw)
+        .map_err(|e| AppError::Pipeline(format!("aliyun ocr decode: {e}；原始响应：{}", truncate(&raw, 300))))?;
+    // 网关一般用 HTTP 状态码报错，但也兜底识别 body 里的 Code/Message。
+    let code = payload["Code"].as_str().unwrap_or("");
+    let message = payload["Message"].as_str().unwrap_or("");
+    if !status.is_success() || (!code.is_empty() && payload.get("Data").is_none()) {
+        let hint = if status.as_u16() == 403 || code.contains("Forbidden") || code.contains("NoPermission") {
+            "（鉴权/权限失败：请核对 AccessKey、并确认已开通「文字识别 OCR」服务且 RAM 已授权）"
         } else {
             ""
         };
@@ -92,7 +96,24 @@ pub async fn run_aliyun_ocr(
             status.as_u16()
         )));
     }
-    extract_content(&payload)
+    let text = extract_content(&payload)?;
+    if text.is_empty() {
+        // 成功但没取到文字：把原始响应抛出来，便于定位（字段结构/空白帧）。
+        return Err(AppError::Pipeline(format!(
+            "aliyun OCR 未提取到文字。原始响应：{}",
+            truncate(&raw, 600)
+        )));
+    }
+    Ok(text)
+}
+
+fn truncate(s: &str, max_chars: usize) -> String {
+    let t: String = s.chars().take(max_chars).collect();
+    if s.chars().count() > max_chars {
+        format!("{t}…")
+    } else {
+        t
+    }
 }
 
 /// 从 RecognizeAllText 响应里取出整段识别文本。
@@ -105,7 +126,22 @@ pub fn extract_content(payload: &Value) -> AppResult<String> {
         Value::Object(_) => data.clone(),
         _ => return Err(AppError::Pipeline("aliyun ocr: 响应缺少 Data".into())),
     };
-    Ok(inner["content"].as_str().unwrap_or("").trim().to_string())
+    // 首选整段 content；为空时回退拼接逐词结果（prism_wordsInfo[].word）。
+    let content = inner["content"].as_str().unwrap_or("").trim();
+    if !content.is_empty() {
+        return Ok(content.to_string());
+    }
+    if let Some(words) = inner["prism_wordsInfo"].as_array() {
+        let joined: String = words
+            .iter()
+            .filter_map(|w| w["word"].as_str())
+            .collect::<Vec<_>>()
+            .join("");
+        if !joined.trim().is_empty() {
+            return Ok(joined.trim().to_string());
+        }
+    }
+    Ok(String::new())
 }
 
 // ---------- V3 签名（纯函数，便于单测） ----------
@@ -296,5 +332,22 @@ mod tests {
     fn extract_content_from_data_object() {
         let payload = json!({ "Data": { "content": "abc" } });
         assert_eq!(extract_content(&payload).unwrap(), "abc");
+    }
+
+    #[test]
+    fn extract_content_falls_back_to_words_when_content_empty() {
+        let payload = json!({
+            "Data": {
+                "content": "",
+                "prism_wordsInfo": [{ "word": "你好" }, { "word": "世界" }]
+            }
+        });
+        assert_eq!(extract_content(&payload).unwrap(), "你好世界");
+    }
+
+    #[test]
+    fn extract_content_empty_when_nothing_found() {
+        let payload = json!({ "Data": { "content": "" } });
+        assert_eq!(extract_content(&payload).unwrap(), "");
     }
 }
