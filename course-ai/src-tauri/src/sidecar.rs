@@ -1,4 +1,5 @@
 use crate::error::{AppError, AppResult};
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 pub struct BinarySpec {
@@ -28,8 +29,12 @@ pub const YTDLP: BinarySpec = BinarySpec {
 
 pub fn resolve(spec: &BinarySpec, sidecar_dir: Option<&PathBuf>) -> AppResult<PathBuf> {
     if let Some(dir) = sidecar_dir {
-        let path = dir.join(spec.name);
-        if path.is_file() {
+        if let Some(path) = find_in_dir(spec, dir) {
+            return Ok(path);
+        }
+    }
+    for dir in bundled_sidecar_dirs() {
+        if let Some(path) = find_in_dir(spec, &dir) {
             return Ok(path);
         }
     }
@@ -44,6 +49,57 @@ pub fn resolve(spec: &BinarySpec, sidecar_dir: Option<&PathBuf>) -> AppResult<Pa
     )))
 }
 
+fn find_in_dir(spec: &BinarySpec, dir: &std::path::Path) -> Option<PathBuf> {
+    candidate_file_names(spec)
+        .into_iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.is_file())
+}
+
+fn bundled_sidecar_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            dirs.push(dir.to_path_buf());
+            dirs.push(dir.join("resources"));
+            dirs.push(dir.join("../Resources"));
+        }
+    }
+    dirs
+}
+
+fn candidate_file_names(spec: &BinarySpec) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut names = Vec::new();
+    for base in std::iter::once(spec.name).chain(spec.candidates_on_path.iter().copied()) {
+        push_name(&mut names, &mut seen, base.to_string());
+        push_name(&mut names, &mut seen, format!("{base}.exe"));
+        if let Some(triple) = target_triple() {
+            push_name(&mut names, &mut seen, format!("{base}-{triple}"));
+            push_name(&mut names, &mut seen, format!("{base}-{triple}.exe"));
+        }
+    }
+    names
+}
+
+fn push_name(names: &mut Vec<String>, seen: &mut HashSet<String>, name: String) {
+    if seen.insert(name.clone()) {
+        names.push(name);
+    }
+}
+
+fn target_triple() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", "x86_64") => Some("x86_64-pc-windows-msvc"),
+        ("windows", "aarch64") => Some("aarch64-pc-windows-msvc"),
+        ("macos", "x86_64") => Some("x86_64-apple-darwin"),
+        ("macos", "aarch64") => Some("aarch64-apple-darwin"),
+        ("linux", "x86_64") => Some("x86_64-unknown-linux-gnu"),
+        ("linux", "aarch64") => Some("aarch64-unknown-linux-gnu"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -55,6 +111,19 @@ mod tests {
     fn prefers_sidecar_dir_over_path() {
         let dir = tempdir().unwrap();
         let fake = dir.path().join("ffmpeg");
+        File::create(&fake).unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let resolved = resolve(&FFMPEG, Some(&dir.path().to_path_buf())).unwrap();
+        assert_eq!(resolved, fake);
+    }
+
+    #[test]
+    fn resolves_target_suffixed_sidecar() {
+        let dir = tempdir().unwrap();
+        let fake = dir
+            .path()
+            .join(format!("ffmpeg-{}", target_triple().unwrap()));
         File::create(&fake).unwrap();
         fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
 
