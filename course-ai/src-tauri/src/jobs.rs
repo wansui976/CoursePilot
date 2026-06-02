@@ -6,7 +6,8 @@ use sqlx::FromRow;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
-pub const STAGES: &[&str] = &["audio", "asr"];
+// 流水线阶段顺序：抽音频 → 语音识别 → 生成章节 → 生成笔记。
+pub const STAGES: &[&str] = &["audio", "asr", "chapters", "notes"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Job {
@@ -102,6 +103,19 @@ pub async fn fail(db: &Db, job_id: &str, err: &str) -> AppResult<()> {
         .bind(job_id)
         .execute(&db.pool)
         .await?;
+    Ok(())
+}
+
+/// 跳过/取消某步（如未配置大模型）：用 canceled 而非 failed，避免红色报错与触发整条重试。
+pub async fn cancel(db: &Db, job_id: &str, msg: &str) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE processing_jobs SET status='canceled', message=?, finished_at=? WHERE id=?",
+    )
+    .bind(msg)
+    .bind(Utc::now().timestamp_millis())
+    .bind(job_id)
+    .execute(&db.pool)
+    .await?;
     Ok(())
 }
 
