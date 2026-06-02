@@ -45,4 +45,28 @@ describe("markdownToTiptap", () => {
     const ts = para.content!.find((n) => n.type === "timestamp");
     expect(ts!.attrs!.ms).toBe((105 * 60 + 30) * 1000);
   });
+
+  it("parses **bold** as a bold mark", () => {
+    const doc = markdownToTiptap("这是**重点**内容");
+    const para = doc.content![0];
+    const bold = para.content!.find((n) => n.marks?.some((m) => m.type === "bold"));
+    expect(bold!.text).toBe("重点");
+  });
+
+  it("parses ordered list", () => {
+    const doc = markdownToTiptap("1. 一\n2. 二");
+    expect(doc.content![0].type).toBe("orderedList");
+    expect(doc.content![0].content).toHaveLength(2);
+  });
+
+  it("parses a markdown table into a table node", () => {
+    const md = "| 知识点 | 难度 |\n| --- | --- |\n| 概括题 | 高 |\n| 对策题 | 中 |";
+    const doc = markdownToTiptap(md);
+    const table = doc.content!.find((n) => n.type === "table");
+    expect(table).toBeTruthy();
+    // 表头 + 两行数据
+    expect(table!.content).toHaveLength(3);
+    expect(table!.content![0].content![0].type).toBe("tableHeader");
+    expect(table!.content![1].content![0].type).toBe("tableCell");
+  });
 });

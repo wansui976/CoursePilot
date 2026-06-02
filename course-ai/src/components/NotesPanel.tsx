@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { Table } from "@tiptap/extension-table";
+import { TableRow } from "@tiptap/extension-table-row";
+import { TableHeader } from "@tiptap/extension-table-header";
+import { TableCell } from "@tiptap/extension-table-cell";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 import { markdownToTiptap } from "@/lib/markdownToTiptap";
@@ -41,11 +45,18 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   }
 
   const editor = useEditor({
-    extensions: [StarterKit, TimestampNode],
+    extensions: [
+      StarterKit,
+      TimestampNode,
+      Table.configure({ resizable: false }),
+      TableRow,
+      TableHeader,
+      TableCell,
+    ],
     content: { type: "doc", content: [{ type: "paragraph" }] },
     editorProps: {
       attributes: {
-        class: "prose prose-invert max-w-none p-4 focus:outline-none",
+        class: "tiptap-notes max-w-none p-4 focus:outline-none",
       },
     },
     onUpdate: ({ editor }) => debounceSave(JSON.stringify(editor.getJSON())),

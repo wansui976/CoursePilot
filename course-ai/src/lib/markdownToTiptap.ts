@@ -11,68 +11,170 @@ interface Node {
   attrs?: Record<string, unknown>;
   content?: Node[];
   text?: string;
+  marks?: { type: string }[];
 }
 
 // 匹配 [mm:ss] / [mmm:ss] / [hh:mm:ss]（分钟位允许 1-3 位，兼容长视频）。
 export const TIMESTAMP_RE = /\[(\d{1,3}:\d{2}(?::\d{2})?)\]/g;
-const TS = TIMESTAMP_RE;
 
+/** 把一段文本切成「粗体 / 时间戳 / 纯文本」的内联节点。 */
 function inline(text: string): Node[] {
   const nodes: Node[] = [];
+  // 先按 **粗体** 切分，再在非粗体片段里识别时间戳。
+  for (const part of text.split(/(\*\*[^*]+\*\*)/g)) {
+    if (!part) continue;
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      const inner = part.slice(2, -2);
+      nodes.push({ type: "text", text: inner, marks: [{ type: "bold" }] });
+      continue;
+    }
+    nodes.push(...inlinePlain(part));
+  }
+  return nodes.length ? nodes : [{ type: "text", text: text || " " }];
+}
+
+/** 在纯文本里识别 [mm:ss] 时间戳，渲染为可点击的 timestamp 节点。 */
+function inlinePlain(text: string): Node[] {
+  const nodes: Node[] = [];
+  const re = new RegExp(TIMESTAMP_RE.source, "g");
   let last = 0;
-  for (const match of text.matchAll(TS)) {
-    const idx = match.index ?? 0;
-    if (idx > last) nodes.push({ type: "text", text: text.slice(last, idx) });
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    if (match.index > last) {
+      nodes.push({ type: "text", text: text.slice(last, match.index) });
+    }
     nodes.push({
       type: "timestamp",
       attrs: { ms: parseTimestamp(match[1]), label: match[1] },
     });
-    last = idx + match[0].length;
+    last = match.index + match[0].length;
   }
   if (last < text.length) nodes.push({ type: "text", text: text.slice(last) });
-  return nodes.length ? nodes : [{ type: "text", text: text || " " }];
+  return nodes;
+}
+
+/** 一行是不是表格行：以 | 开头/结尾。 */
+function isTableRow(line: string): boolean {
+  const t = line.trim();
+  return t.startsWith("|") && t.lastIndexOf("|") > 0;
+}
+
+/** 分隔行：|---|:--:|---| 这种只含 - : | 空格的行。 */
+function isTableDivider(line: string): boolean {
+  const t = line.trim();
+  return isTableRow(t) && /^\|?[\s:\-|]+\|?$/.test(t) && t.includes("-");
+}
+
+function splitCells(line: string): string[] {
+  const t = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+  return t.split("|").map((c) => c.trim());
+}
+
+function cell(type: "tableHeader" | "tableCell", text: string): Node {
+  return { type, content: [{ type: "paragraph", content: inline(text) }] };
+}
+
+/** 从 lines[start] 开始尽量吃下一张表格，返回 [表格节点, 下一行索引]。 */
+function parseTable(lines: string[], start: number): [Node, number] {
+  const header = splitCells(lines[start]);
+  let i = start + 2; // 跳过表头 + 分隔行
+  const rows: Node[] = [
+    { type: "tableRow", content: header.map((c) => cell("tableHeader", c)) },
+  ];
+  while (i < lines.length && isTableRow(lines[i]) && !isTableDivider(lines[i])) {
+    const cells = splitCells(lines[i]);
+    // 列数对齐到表头，避免空单元格丢失。
+    while (cells.length < header.length) cells.push("");
+    rows.push({
+      type: "tableRow",
+      content: cells
+        .slice(0, header.length)
+        .map((c) => cell("tableCell", c)),
+    });
+    i += 1;
+  }
+  return [{ type: "table", content: rows }, i];
 }
 
 export function markdownToTiptap(md: string): Node {
   const lines = md.replace(/\r\n/g, "\n").split("\n");
   const content: Node[] = [];
-  let listBuffer: Node[] = [];
+  let bulletBuffer: Node[] = [];
+  let orderedBuffer: Node[] = [];
 
-  const flushList = () => {
-    if (listBuffer.length) {
-      content.push({ type: "bulletList", content: listBuffer });
-      listBuffer = [];
+  const flushBullets = () => {
+    if (bulletBuffer.length) {
+      content.push({ type: "bulletList", content: bulletBuffer });
+      bulletBuffer = [];
     }
   };
+  const flushOrdered = () => {
+    if (orderedBuffer.length) {
+      content.push({ type: "orderedList", content: orderedBuffer });
+      orderedBuffer = [];
+    }
+  };
+  const flushLists = () => {
+    flushBullets();
+    flushOrdered();
+  };
 
-  for (const raw of lines) {
+  for (let idx = 0; idx < lines.length; idx++) {
+    const raw = lines[idx];
     const line = raw.trimEnd();
     if (!line.trim()) {
-      flushList();
+      flushLists();
       continue;
     }
-    const heading = line.match(/^(#{1,3})\s+(.*)$/);
+
+    // 表格：表头行后紧跟分隔行才认定为表格。
+    if (
+      isTableRow(line) &&
+      idx + 1 < lines.length &&
+      isTableDivider(lines[idx + 1])
+    ) {
+      flushLists();
+      const [table, next] = parseTable(lines, idx);
+      content.push(table);
+      idx = next - 1;
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
-      flushList();
+      flushLists();
       content.push({
         type: "heading",
-        attrs: { level: heading[1].length },
+        attrs: { level: Math.min(heading[1].length, 6) },
         content: inline(heading[2]),
       });
       continue;
     }
-    const bullet = line.match(/^[-*]\s+(.*)$/);
+
+    const ordered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (ordered) {
+      flushBullets();
+      orderedBuffer.push({
+        type: "listItem",
+        content: [{ type: "paragraph", content: inline(ordered[1]) }],
+      });
+      continue;
+    }
+
+    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
     if (bullet) {
-      listBuffer.push({
+      flushOrdered();
+      bulletBuffer.push({
         type: "listItem",
         content: [{ type: "paragraph", content: inline(bullet[1]) }],
       });
       continue;
     }
-    flushList();
+
+    flushLists();
     content.push({ type: "paragraph", content: inline(line) });
   }
-  flushList();
+  flushLists();
   return {
     type: "doc",
     content: content.length ? content : [{ type: "paragraph" }],

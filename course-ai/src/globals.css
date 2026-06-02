@@ -255,3 +255,92 @@ button {
       box-shadow 0.16s ease;
   }
 }
+
+/* AI 图文笔记编辑器：因未引入 typography 插件，这里用主题变量自定义 Markdown 排版，
+   兼顾深浅两种主题，并让表格、列表、标题、时间戳都有清晰可读的样式。 */
+.tiptap-notes {
+  color: var(--text-normal);
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+.tiptap-notes h1,
+.tiptap-notes h2,
+.tiptap-notes h3,
+.tiptap-notes h4 {
+  color: var(--text-strong);
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 1.1em 0 0.5em;
+}
+.tiptap-notes h1 {
+  font-size: 1.4rem;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.tiptap-notes h2 {
+  font-size: 1.18rem;
+}
+.tiptap-notes h3 {
+  font-size: 1.05rem;
+}
+.tiptap-notes h4 {
+  font-size: 0.95rem;
+}
+.tiptap-notes p {
+  margin: 0.5em 0;
+}
+.tiptap-notes strong {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+.tiptap-notes ul,
+.tiptap-notes ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+.tiptap-notes ul {
+  list-style: disc;
+}
+.tiptap-notes ol {
+  list-style: decimal;
+}
+.tiptap-notes li {
+  margin: 0.25em 0;
+}
+.tiptap-notes li > p {
+  margin: 0;
+}
+.tiptap-notes blockquote {
+  margin: 0.6em 0;
+  padding-left: 0.9em;
+  border-left: 3px solid var(--border-subtle);
+  color: var(--text-muted);
+}
+.tiptap-notes code {
+  background: var(--surface-input);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.85em;
+}
+.tiptap-notes table {
+  width: 100%;
+  margin: 0.8em 0;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  overflow: hidden;
+}
+.tiptap-notes th,
+.tiptap-notes td {
+  border: 1px solid var(--border-subtle);
+  padding: 0.45em 0.7em;
+  text-align: left;
+  vertical-align: top;
+}
+.tiptap-notes th {
+  background: var(--surface-card-hover);
+  color: var(--text-strong);
+  font-weight: 600;
+}
+.tiptap-notes td > p {
+  margin: 0;
+}
