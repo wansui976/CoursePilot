@@ -102,6 +102,77 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
 
   const toggleFullscreen = () => void setVideoFullscreen(!fullscreen);
 
+  // 键盘快捷键：空格/K 播放暂停，←→ 快退快进 5s，J/L 10s，↑↓ 调音量，
+  // M 静音，F 全屏，C 字幕。聚焦输入框时不拦截，避免影响打字。
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      const video = ref.current;
+      if (!video) return;
+      const clamp = (v: number) => Math.min(1, Math.max(0, v));
+      switch (event.key) {
+        case " ":
+        case "k":
+        case "K":
+          event.preventDefault();
+          if (video.paused) void video.play();
+          else video.pause();
+          break;
+        case "ArrowLeft":
+          event.preventDefault();
+          video.currentTime = Math.max(0, video.currentTime - 5);
+          break;
+        case "ArrowRight":
+          event.preventDefault();
+          video.currentTime = video.currentTime + 5;
+          break;
+        case "j":
+        case "J":
+          video.currentTime = Math.max(0, video.currentTime - 10);
+          break;
+        case "l":
+        case "L":
+          video.currentTime = video.currentTime + 10;
+          break;
+        case "ArrowUp":
+          event.preventDefault();
+          setMuted(false);
+          setVolume((v) => clamp(v + 0.1));
+          break;
+        case "ArrowDown":
+          event.preventDefault();
+          setVolume((v) => clamp(v - 0.1));
+          break;
+        case "m":
+        case "M":
+          setMuted((v) => !v);
+          break;
+        case "f":
+        case "F":
+          event.preventDefault();
+          toggleFullscreen();
+          break;
+        case "c":
+        case "C":
+          setCaptionsOn((v) => !v);
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullscreen]);
+
   return (
     <div
       aria-label="课程视频舞台"
