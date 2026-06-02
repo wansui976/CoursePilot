@@ -22,6 +22,7 @@ pub struct LlmProfile {
 pub struct TaskRouting {
     pub notes: Option<String>,
     pub chapters: Option<String>,
+    pub summary: Option<String>,
     pub quiz: Option<String>,
     pub mindmap: Option<String>,
     pub rag: Option<String>,
@@ -32,6 +33,7 @@ pub struct TaskRouting {
 pub enum AiTask {
     Notes,
     Chapters,
+    Summary,
     Quiz,
     Mindmap,
     Rag,
@@ -60,6 +62,7 @@ pub fn resolve_profile<'a>(
     let wanted = match task {
         AiTask::Notes => &routing.notes,
         AiTask::Chapters => &routing.chapters,
+        AiTask::Summary => &routing.summary,
         AiTask::Quiz => &routing.quiz,
         AiTask::Mindmap => &routing.mindmap,
         AiTask::Rag => &routing.rag,

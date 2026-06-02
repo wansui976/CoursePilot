@@ -1,16 +1,53 @@
 pub mod ai;
+pub mod aliyun_asr;
 pub mod asr;
 pub mod audio;
 pub mod download;
 pub mod ocr;
+pub mod playable;
 pub mod rag;
 pub mod slides;
+pub mod volcengine_asr;
+pub mod volcengine_auc;
 
 use crate::commands::courses::AppState;
 use crate::commands::videos::Video;
 use crate::error::{AppError, AppResult};
 use crate::jobs::{self, emit_update, JobEvent};
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AsrBackend {
+    Whisper,
+    Volcengine,
+    Aliyun,
+}
+
+fn asr_backend_or_default(value: Option<String>) -> AsrBackend {
+    match value.as_deref().map(str::trim) {
+        Some("volcengine") => AsrBackend::Volcengine,
+        Some("aliyun") => AsrBackend::Aliyun,
+        _ => AsrBackend::Whisper,
+    }
+}
+
+fn select_whisper_model(app_data: &Path, preferred_id: &str) -> Option<(String, PathBuf)> {
+    let preferred_path = crate::commands::whisper::model_path(app_data, preferred_id);
+    if crate::commands::whisper::is_model_available(&preferred_path) {
+        return Some((preferred_id.to_string(), preferred_path));
+    }
+    crate::commands::whisper::MODELS.iter().find_map(|model| {
+        let path = crate::commands::whisper::model_path(app_data, model.id);
+        crate::commands::whisper::is_model_available(&path).then(|| (model.id.to_string(), path))
+    })
+}
+
+fn whisper_language_or_default(value: Option<String>) -> String {
+    value
+        .filter(|language| !language.trim().is_empty())
+        .unwrap_or_else(|| "zh".into())
+}
 
 pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
     let state = app.state::<AppState>();
@@ -98,51 +135,149 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
         .ok_or_else(|| AppError::Pipeline("missing asr job".into()))?
         .clone();
     jobs::start(&db, &asr_job.id).await?;
-    emit_update(
-        &app,
-        JobEvent {
-            video_id: video_id.clone(),
-            job_id: asr_job.id.clone(),
-            stage: "asr".into(),
-            status: "running".into(),
-            progress: 0.05,
-            message: Some("loading model".into()),
-        },
-    );
-
-    let model_id: String =
-        sqlx::query_scalar("SELECT value FROM settings WHERE key='whisper_model'")
-            .fetch_optional(&db.pool)
-            .await?
-            .unwrap_or_else(|| "large-v3-turbo".into());
-    let app_data = app.path().app_data_dir().expect("app_data_dir");
-    let model_path = crate::commands::whisper::model_path(&app_data, &model_id);
-    if !model_path.is_file() {
-        let msg = format!("model not installed: {model_id}. Open Settings -> Whisper to download.");
-        mark_failed(&db, &video_id).await?;
-        jobs::fail(&db, &asr_job.id, &msg).await?;
-        emit_update(
-            &app,
-            JobEvent {
-                video_id,
-                job_id: asr_job.id,
-                stage: "asr".into(),
-                status: "failed".into(),
-                progress: 0.0,
-                message: Some(msg.clone()),
-            },
-        );
-        return Err(AppError::Pipeline(msg));
-    }
+    emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.05, "准备识别引擎").await?;
 
     let audio_path = data_dir.join("audio.wav");
-    let lang =
-        sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key='whisper_language'")
+    let backend = asr_backend_or_default(
+        sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key='asr_backend'")
             .fetch_optional(&db.pool)
+            .await?,
+    );
+
+    let asr_result = match backend {
+        AsrBackend::Whisper => {
+            let model_id: String =
+                sqlx::query_scalar("SELECT value FROM settings WHERE key='whisper_model'")
+                    .fetch_optional(&db.pool)
+                    .await?
+                    .unwrap_or_else(|| "large-v3-turbo".into());
+            let app_data = app.path().app_data_dir().expect("app_data_dir");
+            let Some((active_model_id, model_path)) = select_whisper_model(&app_data, &model_id)
+            else {
+                return fail_asr(
+                    &app,
+                    &db,
+                    &video_id,
+                    &asr_job.id,
+                    "no valid whisper model installed. Open Settings -> Whisper to download one."
+                        .to_string(),
+                )
+                .await;
+            };
+            if active_model_id != model_id {
+                emit_running_progress(
+                    &app,
+                    &db,
+                    &video_id,
+                    &asr_job.id,
+                    0.08,
+                    &format!("使用可用模型：{active_model_id}"),
+                )
+                .await?;
+            }
+
+            let lang = whisper_language_or_default(
+                sqlx::query_scalar::<_, String>(
+                    "SELECT value FROM settings WHERE key='whisper_language'",
+                )
+                .fetch_optional(&db.pool)
+                .await?,
+            );
+            emit_running_progress(
+                &app,
+                &db,
+                &video_id,
+                &asr_job.id,
+                0.18,
+                &format!("Whisper 识别中（{lang}）"),
+            )
             .await?;
-    match asr::run_whisper(&audio_path, &model_path, lang.as_deref()).await {
+            asr::run_whisper(&audio_path, &model_path, Some(&lang)).await
+        }
+        AsrBackend::Volcengine => {
+            let app_id = sqlx::query_scalar::<_, String>(
+                "SELECT value FROM settings WHERE key='volcengine_asr_app_id'",
+            )
+            .fetch_optional(&db.pool)
+            .await?
+            .unwrap_or_default();
+            let access_token = sqlx::query_scalar::<_, String>(
+                "SELECT value FROM settings WHERE key='volcengine_asr_access_token'",
+            )
+            .fetch_optional(&db.pool)
+            .await?
+            .unwrap_or_default();
+            emit_running_progress(
+                &app,
+                &db,
+                &video_id,
+                &asr_job.id,
+                0.16,
+                "压缩音频，准备上传",
+            )
+            .await?;
+            // 整段 base64 上传：1 小时 WAV ≈150MB 会触发 413，先压成 MP3（≈28MB）。
+            match audio::wav_to_mp3(&audio_path).await {
+                Ok(mp3) => {
+                    emit_running_progress(
+                        &app,
+                        &db,
+                        &video_id,
+                        &asr_job.id,
+                        0.28,
+                        "云端识别中（火山引擎）",
+                    )
+                    .await?;
+                    volcengine_auc::run_volcengine_file(&mp3, &app_id, &access_token).await
+                }
+                Err(e) => Err(e),
+            }
+        }
+        AsrBackend::Aliyun => {
+            let api_key = sqlx::query_scalar::<_, String>(
+                "SELECT value FROM settings WHERE key='dashscope_api_key'",
+            )
+            .fetch_optional(&db.pool)
+            .await?
+            .unwrap_or_default();
+            let model = sqlx::query_scalar::<_, String>(
+                "SELECT value FROM settings WHERE key='aliyun_asr_model'",
+            )
+            .fetch_optional(&db.pool)
+            .await?
+            .unwrap_or_else(|| aliyun_asr::DEFAULT_MODEL.to_string());
+            emit_running_progress(
+                &app,
+                &db,
+                &video_id,
+                &asr_job.id,
+                0.16,
+                "压缩音频，准备上传",
+            )
+            .await?;
+            match audio::wav_to_mp3(&audio_path).await {
+                Ok(mp3) => {
+                    emit_running_progress(
+                        &app,
+                        &db,
+                        &video_id,
+                        &asr_job.id,
+                        0.28,
+                        &format!("云端识别中（阿里云 {model}）"),
+                    )
+                    .await?;
+                    aliyun_asr::run_aliyun(&mp3, &api_key, &model).await
+                }
+                Err(e) => Err(e),
+            }
+        }
+    };
+
+    match asr_result {
         Ok(json) => {
+            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.92, "解析识别结果").await?;
             let count = asr::store_transcripts(&db, &video_id, &json).await?;
+            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.96, "写入字幕").await?;
             jobs::finish(&db, &asr_job.id).await?;
             emit_update(
                 &app,
@@ -178,6 +313,52 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
         }
     }
 
+    Ok(())
+}
+
+async fn fail_asr<T>(
+    app: &AppHandle,
+    db: &crate::db::Db,
+    video_id: &str,
+    job_id: &str,
+    message: String,
+) -> AppResult<T> {
+    mark_failed(db, video_id).await?;
+    jobs::fail(db, job_id, &message).await?;
+    emit_update(
+        app,
+        JobEvent {
+            video_id: video_id.to_string(),
+            job_id: job_id.to_string(),
+            stage: "asr".into(),
+            status: "failed".into(),
+            progress: 0.0,
+            message: Some(message.clone()),
+        },
+    );
+    Err(AppError::Pipeline(message))
+}
+
+async fn emit_running_progress(
+    app: &AppHandle,
+    db: &crate::db::Db,
+    video_id: &str,
+    job_id: &str,
+    progress: f64,
+    message: &str,
+) -> AppResult<()> {
+    jobs::update_progress(db, job_id, progress, Some(message)).await?;
+    emit_update(
+        app,
+        JobEvent {
+            video_id: video_id.to_string(),
+            job_id: job_id.to_string(),
+            stage: "asr".into(),
+            status: "running".into(),
+            progress,
+            message: Some(message.to_string()),
+        },
+    );
     Ok(())
 }
 
@@ -276,5 +457,40 @@ mod tests {
 
         assert!(inserted > 0, "expected at least one transcript segment");
         assert!(rows.iter().any(|row| row.text.contains("country")));
+    }
+
+    #[test]
+    fn selected_invalid_model_falls_back_to_available_model() {
+        let dir = tempdir().unwrap();
+        let base = crate::commands::whisper::model_path(dir.path(), "base");
+        std::fs::create_dir_all(base.parent().unwrap()).unwrap();
+        std::fs::write(&base, b"<!DOCTYPE HTML><html>403 Forbidden</html>").unwrap();
+        let tiny = crate::commands::whisper::model_path(dir.path(), "tiny");
+        std::fs::write(&tiny, b"lmggtest").unwrap();
+
+        let (id, path) = select_whisper_model(dir.path(), "base").unwrap();
+        assert_eq!(id, "tiny");
+        assert_eq!(path, tiny);
+    }
+
+    #[test]
+    fn whisper_language_defaults_to_chinese() {
+        assert_eq!(whisper_language_or_default(None), "zh");
+        assert_eq!(whisper_language_or_default(Some("".into())), "zh");
+        assert_eq!(whisper_language_or_default(Some("en".into())), "en");
+    }
+
+    #[test]
+    fn asr_backend_defaults_to_whisper() {
+        assert_eq!(asr_backend_or_default(None), AsrBackend::Whisper);
+        assert_eq!(asr_backend_or_default(Some("".into())), AsrBackend::Whisper);
+        assert_eq!(
+            asr_backend_or_default(Some("volcengine".into())),
+            AsrBackend::Volcengine
+        );
+        assert_eq!(
+            asr_backend_or_default(Some("unknown".into())),
+            AsrBackend::Whisper
+        );
     }
 }

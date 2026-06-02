@@ -137,6 +137,28 @@ pub async fn generate_mindmap(
     Ok(())
 }
 
+pub async fn generate_summary(
+    db: &Db,
+    provider: &Provider,
+    model: &str,
+    video_id: &str,
+) -> AppResult<()> {
+    let transcript = transcript_text(db, video_id).await?;
+    let req = crate::llm::prompts::summary_request(model, &transcript);
+    let md = provider.complete(&req).await?.content;
+    let md = strip_code_fence(&md).to_string();
+    sqlx::query(
+        "INSERT INTO summaries(video_id,content_md,generated_at) VALUES (?,?,?)
+         ON CONFLICT(video_id) DO UPDATE SET content_md=excluded.content_md, generated_at=excluded.generated_at",
+    )
+    .bind(video_id)
+    .bind(md)
+    .bind(chrono::Utc::now().timestamp_millis())
+    .execute(&db.pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn generate_notes(
     db: &Db,
     provider: &Provider,
@@ -265,12 +287,11 @@ mod tests {
         )
         .await
         .unwrap();
-        let q: (String,) =
-            sqlx::query_as("SELECT questions_json FROM quizzes WHERE video_id=?")
-                .bind(&vid)
-                .fetch_one(&db.pool)
-                .await
-                .unwrap();
+        let q: (String,) = sqlx::query_as("SELECT questions_json FROM quizzes WHERE video_id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
         assert!(q.0.contains("judge"));
         let m: (String,) = sqlx::query_as("SELECT markmap_md FROM mindmaps WHERE video_id=?")
             .bind(&vid)

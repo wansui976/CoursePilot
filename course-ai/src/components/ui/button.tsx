@@ -11,9 +11,11 @@ const buttonVariants = cva(
         default: "bg-primary text-white hover:opacity-90",
         destructive: "bg-red-600 text-white hover:bg-red-500",
         outline:
-          "border border-white/15 bg-transparent text-white hover:bg-white/10",
-        secondary: "bg-white/10 text-white hover:bg-white/15",
-        ghost: "text-white hover:bg-white/10",
+          "border border-[var(--border-subtle)] bg-transparent text-[var(--text-strong)] hover:bg-[var(--surface-card-hover)]",
+        secondary:
+          "bg-[var(--surface-card-active)] text-[var(--text-strong)] hover:bg-[var(--surface-card-hover)]",
+        ghost:
+          "text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]",
       },
       size: {
         default: "h-9 px-4 py-2",

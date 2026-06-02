@@ -1,14 +1,16 @@
 import { useEffect } from "react";
 import { ipc } from "@/lib/ipc";
-import { useJobs } from "@/stores/jobs";
+import { useJobs, type JobUpdate } from "@/stores/jobs";
 
 const STAGE_LABEL: Record<string, string> = {
   audio: "提取音频",
   asr: "语音识别",
 };
 
+const EMPTY_JOBS: Record<string, JobUpdate> = {};
+
 export function JobProgress({ videoId }: { videoId: string }) {
-  const jobs = useJobs((s) => s.byVideo[videoId] ?? {});
+  const jobs = useJobs((s) => s.byVideo[videoId] ?? EMPTY_JOBS);
   const setOne = useJobs((s) => s.setOne);
 
   useEffect(() => {
@@ -29,7 +31,7 @@ export function JobProgress({ videoId }: { videoId: string }) {
   const list = Object.values(jobs).sort((a, b) =>
     a.stage.localeCompare(b.stage),
   );
-  if (list.length === 0) return <p className="text-xs text-white/40">未开始</p>;
+  if (list.length === 0) return <p className="text-xs text-[var(--text-faint)]">未开始</p>;
 
   const hasFailed = list.some((job) => job.status === "failed");
 
@@ -38,7 +40,7 @@ export function JobProgress({ videoId }: { videoId: string }) {
       {hasFailed && (
         <li className="flex justify-end">
           <button
-            className="rounded border border-white/15 px-2 py-0.5 text-xs text-primary hover:bg-white/5"
+            className="rounded border border-[var(--border-subtle)] px-2 py-0.5 text-xs text-primary hover:bg-[var(--surface-card)]"
             onClick={() => void ipc.pipeline.process(videoId)}
           >
             重试
@@ -50,18 +52,18 @@ export function JobProgress({ videoId }: { videoId: string }) {
           <div className="flex justify-between">
             <span>{STAGE_LABEL[job.stage] ?? job.stage}</span>
             <span
-              className={job.status === "failed" ? "text-red-400" : "text-white/60"}
+              className={job.status === "failed" ? "text-red-400" : "text-[var(--text-muted)]"}
             >
               {job.status} {Math.floor(job.progress * 100)}%
             </span>
           </div>
-          <div className="h-1 overflow-hidden rounded bg-white/10">
+          <div className="h-1 overflow-hidden rounded bg-[var(--surface-card-hover)]">
             <div
               className="h-1 bg-primary"
               style={{ width: `${job.progress * 100}%` }}
             />
           </div>
-          {job.message && <p className="text-white/40">{job.message}</p>}
+          {job.message && <p className="text-[var(--text-faint)]">{job.message}</p>}
         </li>
       ))}
     </ul>

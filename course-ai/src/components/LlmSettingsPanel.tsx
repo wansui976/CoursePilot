@@ -58,21 +58,21 @@ export function LlmSettingsPanel() {
         </Button>
       </div>
       {profiles.length === 0 && (
-        <p className="text-xs text-white/40">
+        <p className="text-xs text-[var(--text-faint)]">
           还没有配置。点「新增」添加一个 OpenAI 兼容或 Anthropic 配置。
         </p>
       )}
       {profiles.map((p) => (
-        <div key={p.id} className="space-y-2 rounded border border-white/10 p-3">
+        <div key={p.id} className="space-y-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3">
           <div className="flex gap-2">
             <input
-              className="flex-1 rounded bg-zinc-800 px-2 py-1 text-sm"
+              className="flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
               value={p.name}
               placeholder="名称"
               onChange={(e) => update(p.id, { name: e.target.value })}
             />
             <select
-              className="rounded bg-zinc-800 px-2 py-1 text-sm"
+              className="rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
               value={p.kind}
               onChange={(e) => {
                 const kind = e.target.value as ProviderKind;
@@ -84,20 +84,20 @@ export function LlmSettingsPanel() {
             </select>
           </div>
           <input
-            className="w-full rounded bg-zinc-800 px-2 py-1 text-sm"
+            className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
             value={p.base_url}
             placeholder="Base URL"
             onChange={(e) => update(p.id, { base_url: e.target.value })}
           />
           <input
-            className="w-full rounded bg-zinc-800 px-2 py-1 text-sm"
+            className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
             value={p.model}
             placeholder="模型名（如 gpt-4o / claude-sonnet-4-6）"
             onChange={(e) => update(p.id, { model: e.target.value })}
           />
           <input
             type="password"
-            className="w-full rounded bg-zinc-800 px-2 py-1 text-sm"
+            className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
             value={keys[p.id] ?? ""}
             placeholder="API Key（留空＝不修改）"
             onChange={(e) =>
@@ -105,7 +105,7 @@ export function LlmSettingsPanel() {
             }
           />
           <button
-            className="text-xs text-red-400 hover:underline"
+            className="text-xs text-red-500 hover:underline"
             onClick={() =>
               setProfiles((ps) => ps.filter((x) => x.id !== p.id))
             }
@@ -118,7 +118,7 @@ export function LlmSettingsPanel() {
         <Button size="sm" onClick={save}>
           保存 LLM 配置
         </Button>
-        {savedMsg && <span className="text-xs text-green-400">{savedMsg}</span>}
+        {savedMsg && <span className="text-xs text-emerald-500">{savedMsg}</span>}
       </div>
     </div>
   );

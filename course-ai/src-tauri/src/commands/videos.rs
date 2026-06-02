@@ -102,6 +102,33 @@ pub async fn list_videos(db: &Db, course_id: &str) -> AppResult<Vec<Video>> {
     .await?)
 }
 
+pub async fn update_video_title(db: &Db, id: &str, title: String) -> AppResult<Video> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(AppError::Other("视频标题不能为空".into()));
+    }
+    let video = sqlx::query_as::<_, Video>(
+        "UPDATE videos SET title=? WHERE id=? RETURNING *",
+    )
+    .bind(title)
+    .bind(id)
+    .fetch_optional(&db.pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("video {id}")))?;
+    Ok(video)
+}
+
+pub async fn delete_video(db: &Db, id: &str) -> AppResult<()> {
+    let result = sqlx::query("DELETE FROM videos WHERE id=?")
+        .bind(id)
+        .execute(&db.pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound(format!("video {id}")));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn cmd_add_local_video(
     state: State<'_, AppState>,
@@ -130,6 +157,88 @@ pub async fn cmd_list_videos(
     course_id: String,
 ) -> AppResult<Vec<Video>> {
     list_videos(&state.db, &course_id).await
+}
+
+#[tauri::command]
+pub async fn cmd_update_video_title(
+    state: State<'_, AppState>,
+    id: String,
+    title: String,
+) -> AppResult<Video> {
+    update_video_title(&state.db, &id, title).await
+}
+
+#[tauri::command]
+pub async fn cmd_delete_video(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    delete_video(&state.db, &id).await
+}
+
+/// 返回一个 WebView 可正常播放（含音轨）的路径：非 faststart 的 MP4 会被
+/// 快速转封装成 data_dir/playable.mp4，避免大文件「有画面、没声音」。
+#[tauri::command]
+pub async fn cmd_ensure_playable(
+    state: State<'_, AppState>,
+    video_id: String,
+) -> AppResult<String> {
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
+            .bind(&video_id)
+            .fetch_optional(&state.db.pool)
+            .await?;
+    let (file_path, data_dir) =
+        row.ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    let path = crate::pipeline::playable::ensure_playable(
+        std::path::Path::new(&file_path),
+        std::path::Path::new(&data_dir),
+    )
+    .await?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 返回一个 WebView 可播放的 http://127.0.0.1 媒体 URL（带完整 Range 支持），
+/// 绕开 asset 协议在 macOS WKWebView 下「大文件没声音/放不了」的限制。
+/// 顺带对非 faststart 的文件做一次转封装，让起播更快。
+#[tauri::command]
+pub async fn cmd_media_url(
+    state: State<'_, AppState>,
+    media: State<'_, crate::media_server::MediaServer>,
+    video_id: String,
+) -> AppResult<String> {
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
+            .bind(&video_id)
+            .fetch_optional(&state.db.pool)
+            .await?;
+    let (file_path, data_dir) =
+        row.ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    let path = crate::pipeline::playable::ensure_playable(
+        std::path::Path::new(&file_path),
+        std::path::Path::new(&data_dir),
+    )
+    .await?;
+    media.register(&video_id, path);
+    Ok(media.url(&video_id))
+}
+
+/// 视频封面（首帧）字节，前端转 blob 显示。首次调用时用 ffmpeg 截首帧并缓存。
+#[tauri::command]
+pub async fn cmd_video_cover(
+    state: State<'_, AppState>,
+    video_id: String,
+) -> AppResult<Vec<u8>> {
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
+            .bind(&video_id)
+            .fetch_optional(&state.db.pool)
+            .await?;
+    let (file_path, data_dir) =
+        row.ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    let cover = crate::pipeline::slides::ensure_cover(
+        std::path::Path::new(&file_path),
+        std::path::Path::new(&data_dir),
+    )
+    .await?;
+    Ok(tokio::fs::read(&cover).await?)
 }
 
 #[cfg(test)]

@@ -60,7 +60,9 @@ pub async fn ensure_jobs(db: &Db, video_id: &str) -> AppResult<Vec<Job>> {
 
 pub async fn start(db: &Db, job_id: &str) -> AppResult<()> {
     sqlx::query(
-        "UPDATE processing_jobs SET status='running', started_at=?, message=NULL WHERE id=?",
+        "UPDATE processing_jobs
+         SET status='running', progress=0.0, message=NULL, started_at=?, finished_at=NULL
+         WHERE id=?",
     )
     .bind(Utc::now().timestamp_millis())
     .bind(job_id)
@@ -173,5 +175,12 @@ mod tests {
         let after_audio = after.iter().find(|job| job.stage == "audio").unwrap();
         assert_eq!(after_audio.status, "done");
         assert!((after_audio.progress - 1.0).abs() < 1e-6);
+
+        start(&db, &audio.id).await.unwrap();
+        let restarted = list_for_video(&db, &video.id).await.unwrap();
+        let restarted_audio = restarted.iter().find(|job| job.stage == "audio").unwrap();
+        assert_eq!(restarted_audio.status, "running");
+        assert_eq!(restarted_audio.finished_at, None);
+        assert!(restarted_audio.progress < 1e-6);
     }
 }

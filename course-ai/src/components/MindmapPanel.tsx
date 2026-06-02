@@ -37,7 +37,7 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
 
   if (!md) {
     return (
-      <p className="p-4 text-sm text-white/40">
+      <p className="p-4 text-sm text-[var(--text-faint)]">
         还没有脑图，点右上角「生成AI脑图」。
       </p>
     );

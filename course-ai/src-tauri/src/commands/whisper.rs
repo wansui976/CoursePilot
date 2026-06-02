@@ -1,10 +1,13 @@
 use crate::commands::courses::AppState;
 use crate::error::{AppError, AppResult};
+use crate::pipeline::asr;
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager, State};
 use tokio::io::AsyncWriteExt;
+
+const DOWNLOAD_USER_AGENT: &str = "CourseAI/0.1 (https://dev.courseai.app)";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ModelInfo {
@@ -56,6 +59,10 @@ pub fn model_path(app_data: &Path, id: &str) -> PathBuf {
     app_data.join("whisper").join(file_name)
 }
 
+pub fn is_model_available(path: &Path) -> bool {
+    asr::is_probably_whisper_model(path)
+}
+
 #[tauri::command]
 pub async fn cmd_list_whisper_models(app: tauri::AppHandle) -> AppResult<Vec<(ModelInfo, bool)>> {
     let data_dir = app
@@ -64,7 +71,10 @@ pub async fn cmd_list_whisper_models(app: tauri::AppHandle) -> AppResult<Vec<(Mo
         .map_err(|error| AppError::Config(error.to_string()))?;
     Ok(MODELS
         .iter()
-        .map(|model| (model.clone(), model_path(&data_dir, model.id).is_file()))
+        .map(|model| {
+            let path = model_path(&data_dir, model.id);
+            (model.clone(), is_model_available(&path))
+        })
         .collect())
 }
 
@@ -97,8 +107,16 @@ pub async fn cmd_download_whisper_model(
         std::fs::create_dir_all(parent)?;
     }
 
-    let resp = reqwest::get(info.url)
+    let client = reqwest::Client::builder()
+        .user_agent(DOWNLOAD_USER_AGENT)
+        .build()
+        .map_err(|error| AppError::Other(error.to_string()))?;
+    let resp = client
+        .get(info.url)
+        .send()
         .await
+        .map_err(|error| AppError::Other(error.to_string()))?
+        .error_for_status()
         .map_err(|error| AppError::Other(error.to_string()))?;
     let total = resp.content_length().unwrap_or(info.size_bytes);
     let mut stream = resp.bytes_stream();
@@ -123,6 +141,7 @@ pub async fn cmd_download_whisper_model(
     }
     file.flush().await?;
     drop(file);
+    asr::validate_whisper_model(&tmp)?;
     tokio::fs::rename(&tmp, &path).await?;
     app.emit(
         "whisper:download",
@@ -163,5 +182,16 @@ mod tests {
             path,
             PathBuf::from("/tmp/app/whisper/ggml-large-v3-turbo-q5_0.bin")
         );
+    }
+
+    #[test]
+    fn invalid_html_model_is_not_available() {
+        let dir = tempfile::tempdir().unwrap();
+        let app_data = dir.path();
+        let path = model_path(app_data, "base");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"<!DOCTYPE HTML><html>403 Forbidden</html>").unwrap();
+
+        assert!(!is_model_available(&path));
     }
 }

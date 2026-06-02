@@ -1,6 +1,9 @@
-export function parseTimestamp(mmss: string): number {
-  const [m, s] = mmss.split(":").map(Number);
-  return (m * 60 + s) * 1000;
+// 字幕用「总分钟:秒」拼时间戳，长视频分钟可达三位（如 105:30）；
+// LLM 也可能写成 hh:mm:ss。统一按「从右到左每段 ×60」折算成毫秒。
+export function parseTimestamp(clock: string): number {
+  const parts = clock.split(":").map(Number);
+  if (parts.some((n) => Number.isNaN(n))) return 0;
+  return parts.reduce((acc, n) => acc * 60 + n, 0) * 1000;
 }
 
 interface Node {
@@ -10,7 +13,9 @@ interface Node {
   text?: string;
 }
 
-const TS = /\[(\d{1,2}:\d{2})\]/g;
+// 匹配 [mm:ss] / [mmm:ss] / [hh:mm:ss]（分钟位允许 1-3 位，兼容长视频）。
+export const TIMESTAMP_RE = /\[(\d{1,3}:\d{2}(?::\d{2})?)\]/g;
+const TS = TIMESTAMP_RE;
 
 function inline(text: string): Node[] {
   const nodes: Node[] = [];

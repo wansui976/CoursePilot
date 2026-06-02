@@ -21,6 +21,26 @@ pub async fn extract_audio(video: &Path, out_dir: &Path) -> AppResult<PathBuf> {
     Ok(out)
 }
 
+/// 从已抽好的 16kHz 单声道 WAV 转成低码率 MP3（mono/16kHz/48kbps）。
+/// 云端录音文件识别要走 base64 data URI 上传，WAV 太大（1 小时≈115MB），
+/// 压成 MP3 后 1 小时≈20MB，base64 ≈28MB，单次 POST 可接受。
+pub async fn wav_to_mp3(wav: &Path) -> AppResult<PathBuf> {
+    let out = wav.with_file_name("audio.mp3");
+    let ffmpeg = resolve(&FFMPEG, None)?;
+    let status = Command::new(&ffmpeg)
+        .args(["-y", "-i"])
+        .arg(wav)
+        .args(["-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k"])
+        .arg(&out)
+        .status()
+        .await
+        .map_err(|error| AppError::Pipeline(format!("ffmpeg mp3 spawn: {error}")))?;
+    if !status.success() {
+        return Err(AppError::Pipeline(format!("ffmpeg mp3 failed: {status}")));
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

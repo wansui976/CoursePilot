@@ -18,8 +18,8 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-        <span className="text-sm text-white/60">重点章节</span>
+      <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2">
+        <span className="text-sm text-[var(--text-muted)]">重点章节</span>
         <Button
           size="sm"
           variant="outline"
@@ -40,20 +40,20 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
       )}
       <div className="flex-1 space-y-2 overflow-y-auto p-3">
         {chapters.length === 0 && (
-          <p className="text-sm text-white/40">还没有章节，点右上角「AI 生成」。</p>
+          <p className="text-sm text-[var(--text-faint)]">还没有章节，点右上角「AI 生成」。</p>
         )}
         {chapters.map((c) => (
           <button
             key={c.id}
             onClick={() => requestSeek(c.start_ms)}
-            className="block w-full rounded px-2 py-2 text-left hover:bg-white/5"
+            className="block w-full rounded px-2 py-2 text-left hover:bg-[var(--surface-card)]"
           >
             <div className="flex items-baseline gap-2">
               <span className="text-xs text-primary">{formatMs(c.start_ms)}</span>
               <span className="text-sm">{c.title}</span>
             </div>
             {c.summary && (
-              <p className="mt-0.5 text-xs text-white/40">{c.summary}</p>
+              <p className="mt-0.5 text-xs text-[var(--text-faint)]">{c.summary}</p>
             )}
           </button>
         ))}

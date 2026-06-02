@@ -54,7 +54,9 @@ async fn grab_frame(video: &Path, out_dir: &Path, at_ms: i64, rect: Rect) -> App
         .await
         .map_err(|e| AppError::Pipeline(format!("ffmpeg spawn: {e}")))?;
     if !status.success() {
-        return Err(AppError::Pipeline(format!("ffmpeg ocr frame failed: {status}")));
+        return Err(AppError::Pipeline(format!(
+            "ffmpeg ocr frame failed: {status}"
+        )));
     }
     Ok(out)
 }

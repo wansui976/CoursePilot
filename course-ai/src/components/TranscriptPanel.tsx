@@ -38,37 +38,49 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   }, [activeIdx]);
 
   if (segments.length === 0) {
-    return <p className="p-4 text-sm text-white/40">字幕生成中或尚未开始</p>;
+    return <p className="p-4 text-sm text-[var(--text-muted)]">字幕生成中或尚未开始</p>;
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-white/10 px-3 py-1.5 text-xs">
-        <span className="text-white/40">导出：</span>
-        <button className="text-primary hover:underline" onClick={() => void exportSubs("srt")}>
+    <div className="flex h-full flex-col text-[var(--text-normal)]">
+      <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-1.5 text-xs">
+        <span className="text-[var(--text-muted)]">导出：</span>
+        <button
+          className="text-primary hover:underline"
+          onClick={() => void exportSubs("srt")}
+        >
           SRT
         </button>
-        <button className="text-primary hover:underline" onClick={() => void exportSubs("vtt")}>
+        <button
+          className="text-primary hover:underline"
+          onClick={() => void exportSubs("vtt")}
+        >
           VTT
         </button>
-        {exportMsg && <span className="ml-2 truncate text-white/40">{exportMsg}</span>}
+        {exportMsg && (
+          <span className="ml-2 truncate text-[var(--text-muted)]">
+            {exportMsg}
+          </span>
+        )}
       </div>
       <div ref={listRef} className="flex-1 space-y-2 overflow-y-auto p-3">
-      {segments.map((segment, index) => (
-        <button
-          key={segment.id}
-          data-idx={index}
-          onClick={() => requestSeek(segment.start_ms)}
-          className={`w-full rounded px-2 py-1 text-left text-sm leading-relaxed ${
-            index === activeIdx ? "bg-primary/20" : "hover:bg-white/5"
-          }`}
-        >
-          <span className="mr-2 text-xs text-white/40">
-            {formatMs(segment.start_ms)}
-          </span>
-          <span>{segment.text}</span>
-        </button>
-      ))}
+        {segments.map((segment, index) => (
+          <button
+            key={segment.id}
+            data-idx={index}
+            onClick={() => requestSeek(segment.start_ms)}
+            className={`w-full rounded px-2 py-1 text-left text-sm leading-relaxed ${
+              index === activeIdx
+                ? "bg-primary/20"
+                : "hover:bg-[var(--surface-card-hover)]"
+            }`}
+          >
+            <span className="mr-2 text-xs text-[var(--text-muted)]">
+              {formatMs(segment.start_ms)}
+            </span>
+            <span>{segment.text}</span>
+          </button>
+        ))}
       </div>
     </div>
   );

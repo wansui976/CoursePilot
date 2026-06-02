@@ -5,8 +5,14 @@
 
 use crate::error::{AppError, AppResult};
 use crate::sidecar::{resolve, YTDLP};
+use reqwest::Url;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
+
+const BILIBILI_REFERER: &str = "https://www.bilibili.com/";
+const BROWSER_USER_AGENT: &str =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
+     (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 
 /// 构造 yt-dlp 参数：输出到 out_template，合并为 mp4，可选 cookies。
 pub fn build_ytdlp_args(url: &str, out_template: &str, cookies: Option<&str>) -> Vec<String> {
@@ -17,6 +23,12 @@ pub fn build_ytdlp_args(url: &str, out_template: &str, cookies: Option<&str>) ->
         "mp4".to_string(),
         "--no-playlist".to_string(),
     ];
+    if is_bilibili_url(url) {
+        args.push("--user-agent".to_string());
+        args.push(BROWSER_USER_AGENT.to_string());
+        args.push("--referer".to_string());
+        args.push(BILIBILI_REFERER.to_string());
+    }
     if let Some(c) = cookies {
         if !c.trim().is_empty() {
             args.push("--cookies".to_string());
@@ -25,6 +37,14 @@ pub fn build_ytdlp_args(url: &str, out_template: &str, cookies: Option<&str>) ->
     }
     args.push(url.to_string());
     args
+}
+
+fn is_bilibili_url(url: &str) -> bool {
+    Url::parse(url)
+        .ok()
+        .and_then(|url| url.host_str().map(|host| host.to_ascii_lowercase()))
+        .map(|host| host == "b23.tv" || host == "bilibili.com" || host.ends_with(".bilibili.com"))
+        .unwrap_or(false)
 }
 
 /// 下载到 out_dir，返回落地的 mp4 路径。
@@ -87,5 +107,18 @@ mod tests {
     fn ytdlp_args_ignore_blank_cookies() {
         let args = build_ytdlp_args("u", "t", Some("   "));
         assert!(!args.contains(&"--cookies".to_string()));
+    }
+
+    #[test]
+    fn ytdlp_args_add_bilibili_headers() {
+        let args = build_ytdlp_args(
+            "https://www.bilibili.com/video/BV1Gp5u6JEpc/?p=3",
+            "t",
+            None,
+        );
+        let ua_pos = args.iter().position(|a| a == "--user-agent").unwrap();
+        assert!(args[ua_pos + 1].contains("Mozilla/5.0"));
+        let referer_pos = args.iter().position(|a| a == "--referer").unwrap();
+        assert_eq!(args[referer_pos + 1], "https://www.bilibili.com/");
     }
 }

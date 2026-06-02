@@ -5,7 +5,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 
-export function ImportVideoButton({ courseId }: { courseId: string }) {
+export function ImportVideoButton({
+  courseId,
+  showLinkImport = true,
+}: {
+  courseId: string;
+  showLinkImport?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [url, setUrl] = useState("");
   const invalidate = () =>
@@ -35,31 +41,38 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
   });
 
   return (
-    <div className="space-y-2">
-      <Button className="w-full" size="sm" onClick={() => local.mutate()}>
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <Button
+        className="flex-none"
+        size="sm"
+        onClick={() => local.mutate()}
+      >
         <FileVideo className="h-4 w-4" />
         导入本地视频
       </Button>
-      <div className="flex gap-1">
-        <input
-          className="min-w-0 flex-1 rounded-md border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white outline-none placeholder:text-white/28 focus:border-primary/70"
-          placeholder="B站/视频 URL"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!url.trim() || bili.isPending}
-          onClick={() => bili.mutate()}
-          title="需安装 yt-dlp；仅供个人学习使用"
-        >
-          <Download className="h-3.5 w-3.5" />
-          {bili.isPending ? "下载中" : "下载"}
-        </Button>
-      </div>
-      {bili.isError && (
-        <p className="text-xs text-red-400">{String(bili.error)}</p>
+      {showLinkImport && (
+        <div className="flex min-w-[220px] flex-1 gap-1">
+          <input
+            aria-label="视频链接"
+            className="min-w-0 flex-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-1.5 text-xs text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)] focus:border-primary/70"
+            placeholder="B 站 / 视频链接…"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!url.trim() || bili.isPending}
+            onClick={() => bili.mutate()}
+            title="需安装 yt-dlp；仅供个人学习使用"
+          >
+            <Download className="h-3.5 w-3.5" />
+            {bili.isPending ? "下载中" : "下载"}
+          </Button>
+        </div>
+      )}
+      {showLinkImport && bili.isError && (
+        <p className="basis-full text-xs text-red-400">{String(bili.error)}</p>
       )}
     </div>
   );

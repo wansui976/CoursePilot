@@ -5,6 +5,14 @@ describe("parseTimestamp", () => {
   it("parses mm:ss to ms", () => {
     expect(parseTimestamp("01:05")).toBe(65000);
   });
+
+  it("parses long-video minutes beyond 59 (字幕用总分钟)", () => {
+    expect(parseTimestamp("105:30")).toBe((105 * 60 + 30) * 1000);
+  });
+
+  it("parses hh:mm:ss to ms", () => {
+    expect(parseTimestamp("01:45:30")).toBe((1 * 3600 + 45 * 60 + 30) * 1000);
+  });
 });
 
 describe("markdownToTiptap", () => {
@@ -29,5 +37,12 @@ describe("markdownToTiptap", () => {
     const para = doc.content![0];
     const ts = para.content!.find((n) => n.type === "timestamp");
     expect(ts!.attrs!.ms).toBe(65000);
+  });
+
+  it("turns long-video [mmm:ss] into a timestamp node", () => {
+    const doc = markdownToTiptap("要点 [105:30]");
+    const para = doc.content![0];
+    const ts = para.content!.find((n) => n.type === "timestamp");
+    expect(ts!.attrs!.ms).toBe((105 * 60 + 30) * 1000);
   });
 });

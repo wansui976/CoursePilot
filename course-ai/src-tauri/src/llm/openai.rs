@@ -1,6 +1,30 @@
 use crate::error::{AppError, AppResult};
 use crate::llm::{ChatRequest, ChatResponse};
+use reqwest::header::CONTENT_TYPE;
 use serde_json::{json, Value};
+
+fn body_snippet(body: &str) -> String {
+    const MAX: usize = 500;
+    let compact = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    compact.chars().take(MAX).collect()
+}
+
+pub fn normalize_openai_base_url(base_url: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    match reqwest::Url::parse(trimmed) {
+        Ok(url) if url.path() == "/" => format!("{trimmed}/v1"),
+        _ => trimmed.to_string(),
+    }
+}
+
+fn parse_json_response(body: &str, content_type: &str) -> AppResult<Value> {
+    serde_json::from_str(body).map_err(|error| {
+        AppError::Other(format!(
+            "OpenAI response is not JSON ({content_type}): {error}. Body: {}",
+            body_snippet(body)
+        ))
+    })
+}
 
 /// 把 ChatRequest 转成 OpenAI /chat/completions body。
 /// cacheable_context 与 system 合并进首条 system 消息。
@@ -45,7 +69,7 @@ pub async fn complete(
     client: &reqwest::Client,
     req: &ChatRequest,
 ) -> AppResult<ChatResponse> {
-    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
     let resp = client
         .post(url)
         .bearer_auth(api_key)
@@ -53,15 +77,25 @@ pub async fn complete(
         .send()
         .await
         .map_err(|e| AppError::Other(e.to_string()))?;
+    let content_type = resp
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!("OpenAI {status}: {body}")));
+        return Err(AppError::Other(format!(
+            "OpenAI {status}: {}",
+            body_snippet(&body)
+        )));
     }
-    let v: Value = resp
-        .json()
+    let body = resp
+        .text()
         .await
         .map_err(|e| AppError::Other(e.to_string()))?;
+    let v = parse_json_response(&body, &content_type)?;
     parse_openai_response(&v)
 }
 
@@ -95,7 +129,7 @@ pub async fn embed(
     model: &str,
     inputs: &[String],
 ) -> AppResult<Vec<Vec<f32>>> {
-    let url = format!("{}/embeddings", base_url.trim_end_matches('/'));
+    let url = format!("{}/embeddings", normalize_openai_base_url(base_url));
     let resp = client
         .post(url)
         .bearer_auth(api_key)
@@ -103,15 +137,25 @@ pub async fn embed(
         .send()
         .await
         .map_err(|e| AppError::Other(e.to_string()))?;
+    let content_type = resp
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!("OpenAI embeddings {status}: {body}")));
+        return Err(AppError::Other(format!(
+            "OpenAI embeddings {status}: {}",
+            body_snippet(&body)
+        )));
     }
-    let v: Value = resp
-        .json()
+    let body = resp
+        .text()
         .await
         .map_err(|e| AppError::Other(e.to_string()))?;
+    let v = parse_json_response(&body, &content_type)?;
     parse_embeddings_response(&v)
 }
 
@@ -142,6 +186,25 @@ mod tests {
         assert!(msgs[0]["content"].as_str().unwrap().contains("TRANSCRIPT"));
         assert_eq!(msgs[1]["role"], "user");
         assert_eq!(body["model"], "gpt-4o");
+    }
+
+    #[test]
+    fn normalizes_bare_openai_compatible_host_to_v1() {
+        assert_eq!(
+            normalize_openai_base_url("https://codex.ciii.club"),
+            "https://codex.ciii.club/v1"
+        );
+        assert_eq!(
+            normalize_openai_base_url("https://api.openai.com/v1/"),
+            "https://api.openai.com/v1"
+        );
+    }
+
+    #[test]
+    fn parse_json_response_reports_html_body() {
+        let err = parse_json_response("<!doctype html><html></html>", "text/html").unwrap_err();
+        assert!(err.to_string().contains("not JSON"));
+        assert!(err.to_string().contains("<!doctype html>"));
     }
 
     #[test]

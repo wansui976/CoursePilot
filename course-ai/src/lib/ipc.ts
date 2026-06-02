@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   Chapter,
+  Citation,
   Course,
   Job,
   LlmProfile,
@@ -30,6 +31,15 @@ export const ipc = {
       invoke("cmd_list_videos", { courseId }),
     addLocal: (courseId: string, filePath: string): Promise<Video> =>
       invoke("cmd_add_local_video", { courseId, filePath }),
+    ensurePlayable: (videoId: string): Promise<string> =>
+      invoke("cmd_ensure_playable", { videoId }),
+    mediaUrl: (videoId: string): Promise<string> =>
+      invoke("cmd_media_url", { videoId }),
+    cover: (videoId: string): Promise<number[]> =>
+      invoke("cmd_video_cover", { videoId }),
+    updateTitle: (id: string, title: string): Promise<Video> =>
+      invoke("cmd_update_video_title", { id, title }),
+    delete: (id: string): Promise<void> => invoke("cmd_delete_video", { id }),
   },
   settings: {
     get: (key: string): Promise<string | null> =>
@@ -67,16 +77,18 @@ export const ipc = {
       invoke("cmd_get_chapters", { videoId }),
     getNotes: (videoId: string): Promise<string | null> =>
       invoke("cmd_get_notes", { videoId }),
+    getSummary: (videoId: string): Promise<string | null> =>
+      invoke("cmd_get_summary", { videoId }),
     saveNotes: (videoId: string, contentJson: string): Promise<void> =>
       invoke("cmd_save_notes", { videoId, contentJson }),
     getQuiz: (videoId: string): Promise<string | null> =>
       invoke("cmd_get_quiz", { videoId }),
     getMindmap: (videoId: string): Promise<string | null> =>
       invoke("cmd_get_mindmap", { videoId }),
-    buildEmbeddings: (videoId: string): Promise<number> =>
-      invoke("cmd_build_embeddings", { videoId }),
     ragQuery: (videoId: string, query: string): Promise<RagAnswer> =>
       invoke("cmd_rag_query", { videoId, query }),
+    searchTranscript: (videoId: string, query: string): Promise<Citation[]> =>
+      invoke("cmd_search_transcript", { videoId, query }),
   },
   slides: {
     extract: (videoId: string, threshold?: number): Promise<number> =>
@@ -87,6 +99,8 @@ export const ipc = {
       invoke("cmd_capture_frame", { videoId, atMs }),
     screenshots: (videoId: string): Promise<Screenshot[]> =>
       invoke("cmd_get_screenshots", { videoId }),
+    image: (videoId: string, imagePath: string): Promise<number[]> =>
+      invoke("cmd_read_slide_image", { videoId, imagePath }),
   },
   export: {
     subtitles: (videoId: string, format: "srt" | "vtt"): Promise<string> =>

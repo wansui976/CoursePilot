@@ -4,24 +4,30 @@ pub mod error;
 pub mod export;
 pub mod jobs;
 pub mod llm;
+pub mod media_server;
 pub mod pipeline;
 pub mod sidecar;
 pub mod storage;
 
 use crate::commands::ai::{
     cmd_generate_ai, cmd_get_chapters, cmd_get_llm_profiles, cmd_get_mindmap, cmd_get_notes,
-    cmd_get_quiz, cmd_has_api_key, cmd_save_llm_profiles, cmd_save_notes, cmd_set_api_key,
+    cmd_get_quiz, cmd_get_summary, cmd_has_api_key, cmd_save_llm_profiles, cmd_save_notes,
+    cmd_set_api_key,
 };
 use crate::commands::courses::{cmd_create_course, cmd_delete_course, cmd_list_courses, AppState};
 use crate::commands::export::{cmd_export_notes, cmd_export_subtitles};
-use crate::commands::rag::{cmd_build_embeddings, cmd_rag_query};
+use crate::commands::rag::{cmd_rag_query, cmd_search_transcript};
+use crate::commands::settings::{cmd_get_setting, cmd_set_setting};
 use crate::commands::slides::{
     cmd_capture_frame, cmd_extract_slides, cmd_get_screenshots, cmd_get_slides,
+    cmd_read_slide_image,
 };
 use crate::commands::tools::{cmd_import_bilibili, cmd_ocr_region};
-use crate::commands::settings::{cmd_get_setting, cmd_set_setting};
 use crate::commands::transcripts::cmd_list_transcripts;
-use crate::commands::videos::{cmd_add_local_video, cmd_list_videos};
+use crate::commands::videos::{
+    cmd_add_local_video, cmd_delete_video, cmd_ensure_playable, cmd_list_videos, cmd_media_url,
+    cmd_update_video_title, cmd_video_cover,
+};
 use crate::commands::whisper::{cmd_download_whisper_model, cmd_list_whisper_models};
 use crate::db::Db;
 use crate::jobs::cmd_list_jobs;
@@ -43,6 +49,10 @@ pub fn run() {
                     .await
                     .expect("db init");
                 handle.manage(AppState { db });
+                let media = crate::media_server::start()
+                    .await
+                    .expect("media server start");
+                handle.manage(media);
             });
             Ok(())
         })
@@ -52,6 +62,11 @@ pub fn run() {
             cmd_delete_course,
             cmd_add_local_video,
             cmd_list_videos,
+            cmd_update_video_title,
+            cmd_delete_video,
+            cmd_ensure_playable,
+            cmd_media_url,
+            cmd_video_cover,
             cmd_set_setting,
             cmd_get_setting,
             cmd_list_whisper_models,
@@ -68,15 +83,17 @@ pub fn run() {
             cmd_save_notes,
             cmd_get_quiz,
             cmd_get_mindmap,
+            cmd_get_summary,
             cmd_generate_ai,
             cmd_extract_slides,
             cmd_get_slides,
+            cmd_read_slide_image,
             cmd_capture_frame,
             cmd_get_screenshots,
             cmd_export_subtitles,
             cmd_export_notes,
-            cmd_build_embeddings,
             cmd_rag_query,
+            cmd_search_transcript,
             cmd_ocr_region,
             cmd_import_bilibili
         ])

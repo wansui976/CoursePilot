@@ -8,13 +8,16 @@ import { markdownToTiptap } from "@/lib/markdownToTiptap";
 import { TimestampNode, installTimestampClick } from "./notes/timestampNode";
 import { QuizPanel } from "./QuizPanel";
 import { MindmapPanel } from "./MindmapPanel";
+import { RagSearchPanel } from "./RagSearchPanel";
 
-type View = "notes" | "quiz" | "mindmap";
-const VIEWS: { key: View; label: string; task: "notes" | "quiz" | "mindmap" }[] =
+type View = "notes" | "quiz" | "mindmap" | "ask" | "search";
+const VIEWS: { key: View; label: string; task?: "notes" | "quiz" | "mindmap" }[] =
   [
     { key: "notes", label: "AI笔记", task: "notes" },
     { key: "quiz", label: "AI出题", task: "quiz" },
     { key: "mindmap", label: "AI脑图", task: "mindmap" },
+    { key: "ask", label: "提问" },
+    { key: "search", label: "搜索文稿" },
   ];
 
 export function NotesPanel({ videoId }: { videoId: string }) {
@@ -76,10 +79,11 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   });
 
   const current = VIEWS.find((v) => v.key === view)!;
+  const currentTask = current.task;
 
   return (
     <div ref={rootRef} className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2">
+      <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
         {VIEWS.map((v) => (
           <button
             key={v.key}
@@ -87,7 +91,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
             className={`rounded px-2 py-1 text-xs ${
               view === v.key
                 ? "bg-primary/20 text-primary"
-                : "text-white/50 hover:bg-white/5"
+                : "text-[var(--text-muted)] hover:bg-[var(--surface-card)]"
             }`}
           >
             {v.label}
@@ -95,16 +99,18 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         ))}
         <div className="ml-auto flex items-center gap-2">
           {view === "notes" && savedAt && (
-            <span className="text-xs text-white/30">已保存 {savedAt}</span>
+            <span className="text-xs text-[var(--text-faint)]">已保存 {savedAt}</span>
           )}
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={generate.isPending}
-            onClick={() => generate.mutate(current.task)}
-          >
-            {generate.isPending ? "生成中…" : `生成${current.label}`}
-          </Button>
+          {currentTask && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={generate.isPending}
+              onClick={() => generate.mutate(currentTask)}
+            >
+              {generate.isPending ? "生成中…" : `生成${current.label}`}
+            </Button>
+          )}
         </div>
       </div>
       {generate.isError && (
@@ -116,6 +122,8 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         {view === "notes" && <EditorContent editor={editor} />}
         {view === "quiz" && <QuizPanel videoId={videoId} />}
         {view === "mindmap" && <MindmapPanel videoId={videoId} />}
+        {view === "ask" && <RagSearchPanel videoId={videoId} mode="ask" />}
+        {view === "search" && <RagSearchPanel videoId={videoId} mode="search" />}
       </div>
     </div>
   );

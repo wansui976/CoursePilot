@@ -24,7 +24,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
 
   if (questions.length === 0) {
     return (
-      <p className="p-4 text-sm text-white/40">
+      <p className="p-4 text-sm text-[var(--text-faint)]">
         还没有题目，点右上角「生成AI出题」。
       </p>
     );
@@ -33,13 +33,13 @@ export function QuizPanel({ videoId }: { videoId: string }) {
   return (
     <div className="space-y-4 p-4">
       {questions.map((q, i) => (
-        <div key={i} className="rounded border border-white/10 p-3">
+        <div key={i} className="rounded border border-[var(--border-subtle)] p-3">
           <div className="mb-2 text-sm">
-            <span className="mr-1 text-white/40">{i + 1}.</span>
+            <span className="mr-1 text-[var(--text-faint)]">{i + 1}.</span>
             {q.stem}
           </div>
           {q.options && (
-            <ul className="mb-2 space-y-1 text-sm text-white/70">
+            <ul className="mb-2 space-y-1 text-sm text-[var(--text-normal)]">
               {q.options.map((opt, j) => (
                 <li key={j}>
                   {String.fromCharCode(65 + j)}. {opt}
@@ -59,7 +59,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
                 答案：{JSON.stringify(q.answer)}
               </div>
               {q.explanation && (
-                <div className="text-white/60">{q.explanation}</div>
+                <div className="text-[var(--text-muted)]">{q.explanation}</div>
               )}
               {typeof q.ref_ms === "number" && (
                 <button

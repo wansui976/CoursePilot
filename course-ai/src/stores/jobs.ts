@@ -8,6 +8,7 @@ export interface JobUpdate {
   status: "pending" | "running" | "done" | "failed" | "canceled";
   progress: number;
   message: string | null;
+  updatedAt?: number;
 }
 
 interface State {
@@ -22,7 +23,10 @@ export const useJobs = create<State>((set) => ({
     set((s) => ({
       byVideo: {
         ...s.byVideo,
-        [u.video_id]: { ...(s.byVideo[u.video_id] || {}), [u.stage]: u },
+        [u.video_id]: {
+          ...(s.byVideo[u.video_id] || {}),
+          [u.stage]: { ...u, updatedAt: Date.now() },
+        },
       },
     })),
   resetVideo: (id) =>

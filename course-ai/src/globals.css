@@ -1,11 +1,92 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: oklch(0.11 0 0);
+  --color-background: #0a0c10;
   --color-foreground: oklch(0.985 0 0);
-  --color-primary: oklch(0.66 0.18 255);
-  --color-muted: oklch(0.25 0 0);
-  --color-border: oklch(1 0 0 / 10%);
+  --color-primary: oklch(0.64 0.19 256);
+  --color-muted: oklch(0.25 0.01 256);
+  --color-border: rgb(255 255 255 / 0.1);
+  --color-ring: oklch(0.64 0.19 256);
+}
+
+/* 浅色（默认）：参考稿冷灰面板与蓝色点缀。 */
+:root {
+  color-scheme: light;
+
+  --surface-app: #f3f4f6;
+  --surface-rail: #fafafb;
+  --surface-sidebar: #fafafb;
+  --surface-panel: #ffffff;
+  --surface-header: #ffffff;
+  --surface-card: #ffffff;
+  --surface-card-hover: #f0f1f4;
+  --surface-card-active: #eef3fd;
+  --surface-input: #fafafb;
+  --surface-stage: #0f1115;
+  --surface-titlebar: linear-gradient(#fbfbfc, #f2f3f5);
+
+  --border-subtle: #e9eaee;
+  --border-faint: #f0f1f4;
+  --border-titlebar: #e9eaee;
+
+  --text-strong: #1c1e24;
+  --text-normal: #565b66;
+  --text-muted: #8b909b;
+  --text-faint: #aeb2bb;
+
+  --accent-weak: #eef3fd;
+  --accent-weak-2: #e3ecfc;
+  --accent-text: #2a63d8;
+  --status-ok: #1f9d6b;
+  --status-ok-bg: #e9f6f0;
+  --status-warn: #c98a1e;
+  --status-warn-bg: #faf2e0;
+
+  --scrollbar-thumb: #e0e2e8;
+  --scrollbar-thumb-hover: #d0d3da;
+
+  --shadow-card: 0 1px 2px rgb(20 24 40 / 0.05), 0 4px 14px rgb(20 24 40 / 0.04);
+  --shadow-pop: 0 8px 30px rgb(20 24 40 / 0.1);
+}
+
+/* 深色：沿用当前冷调近黑层级，覆盖默认浅色变量。 */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface-app: #0a0c10;
+  --surface-rail: #0f1217;
+  --surface-sidebar: #12161c;
+  --surface-panel: #151a21;
+  --surface-header: #0e1116;
+  --surface-card: rgb(255 255 255 / 0.035);
+  --surface-card-hover: rgb(255 255 255 / 0.07);
+  --surface-card-active: rgb(74 132 255 / 0.16);
+  --surface-input: rgb(255 255 255 / 0.06);
+  --surface-stage: #0f1115;
+  --surface-titlebar: #0f1217;
+
+  --border-subtle: rgb(255 255 255 / 0.1);
+  --border-faint: rgb(255 255 255 / 0.06);
+  --border-titlebar: rgb(255 255 255 / 0.1);
+
+  --text-strong: rgb(244 247 255 / 0.96);
+  --text-normal: rgb(228 234 245 / 0.72);
+  --text-muted: rgb(220 228 242 / 0.5);
+  --text-faint: rgb(214 224 240 / 0.38);
+
+  --accent-weak: rgb(74 132 255 / 0.16);
+  --accent-weak-2: rgb(74 132 255 / 0.24);
+  --accent-text: #8fb3ff;
+  --status-ok: #34d399;
+  --status-ok-bg: rgb(31 157 107 / 0.14);
+  --status-warn: #fbbf24;
+  --status-warn-bg: rgb(201 138 30 / 0.16);
+
+  --scrollbar-thumb: rgb(255 255 255 / 0.14);
+  --scrollbar-thumb-hover: rgb(255 255 255 / 0.26);
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-pop: 0 12px 32px -8px rgb(0 0 0 / 0.6);
 }
 
 html,
@@ -13,12 +94,15 @@ body,
 #root {
   height: 100%;
   margin: 0;
-  background: var(--color-background);
-  color: var(--color-foreground);
+  background: var(--surface-app);
+  color: var(--text-strong);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
+    "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -33,4 +117,141 @@ button {
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* 细一点、跟随主题的滚动条。 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+/* 键盘聚焦才显示的统一焦点环（无障碍）。 */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.course-video-progress,
+.course-video-volume {
+  --progress-percent: 0%;
+  --video-control-blue: #3b82f6;
+  --video-track: rgb(255 255 255 / 0.22);
+  appearance: none;
+  cursor: pointer;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--video-control-blue) 0 var(--progress-percent),
+    var(--video-track) var(--progress-percent) 100%
+  );
+}
+
+.course-video-progress {
+  height: 7px;
+}
+
+.course-video-volume {
+  height: 4px;
+}
+
+.course-video-progress::-webkit-slider-runnable-track,
+.course-video-volume::-webkit-slider-runnable-track {
+  height: 100%;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.course-video-progress::-webkit-slider-thumb,
+.course-video-volume::-webkit-slider-thumb {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: var(--video-control-blue);
+  box-shadow: 0 0 0 4px rgb(59 130 246 / 0.22);
+}
+
+.course-video-progress::-webkit-slider-thumb {
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+
+.course-video-progress:hover::-webkit-slider-thumb,
+.course-video-progress:focus-visible::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -3.5px;
+  opacity: 1;
+}
+
+.course-video-volume::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+}
+
+.course-video-progress::-moz-range-track,
+.course-video-volume::-moz-range-track {
+  height: 100%;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.course-video-progress::-moz-range-thumb,
+.course-video-volume::-moz-range-thumb {
+  border: 0;
+  border-radius: 999px;
+  background: var(--video-control-blue);
+}
+
+.course-video-progress::-moz-range-thumb {
+  width: 0;
+  height: 0;
+}
+
+.course-video-progress:hover::-moz-range-thumb,
+.course-video-progress:focus-visible::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+}
+
+.course-video-volume::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+}
+
+/* 平滑的颜色过渡：悬停态 + 主题切换。只动颜色类属性，不引起重排。 */
+@media (prefers-reduced-motion: no-preference) {
+  button,
+  a,
+  [role="tab"],
+  input[type="range"],
+  [data-theme] aside,
+  [data-theme] section,
+  [data-theme] header {
+    transition:
+      background-color 0.16s ease,
+      border-color 0.16s ease,
+      color 0.16s ease,
+      box-shadow 0.16s ease;
+  }
 }

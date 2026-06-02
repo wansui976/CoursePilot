@@ -120,6 +120,19 @@ pub async fn cmd_get_quiz(
 }
 
 #[tauri::command]
+pub async fn cmd_get_summary(
+    state: State<'_, AppState>,
+    video_id: String,
+) -> AppResult<Option<String>> {
+    Ok(
+        sqlx::query_scalar("SELECT content_md FROM summaries WHERE video_id=?")
+            .bind(&video_id)
+            .fetch_optional(&state.db.pool)
+            .await?,
+    )
+}
+
+#[tauri::command]
 pub async fn cmd_get_mindmap(
     state: State<'_, AppState>,
     video_id: String,
@@ -158,6 +171,7 @@ pub async fn cmd_generate_ai(
     let ai_task = match task.as_str() {
         "chapters" => AiTask::Chapters,
         "notes" => AiTask::Notes,
+        "summary" => AiTask::Summary,
         "quiz" => AiTask::Quiz,
         "mindmap" => AiTask::Mindmap,
         other => return Err(AppError::Other(format!("unknown task {other}"))),
@@ -169,6 +183,7 @@ pub async fn cmd_generate_ai(
             ai::generate_chapters(&db, &provider, &model, &video_id).await?;
         }
         AiTask::Notes => ai::generate_notes(&db, &provider, &model, &video_id).await?,
+        AiTask::Summary => ai::generate_summary(&db, &provider, &model, &video_id).await?,
         AiTask::Quiz => ai::generate_quiz(&db, &provider, &model, &video_id).await?,
         AiTask::Mindmap => ai::generate_mindmap(&db, &provider, &model, &video_id).await?,
         AiTask::Rag => {
