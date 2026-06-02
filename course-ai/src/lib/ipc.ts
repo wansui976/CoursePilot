@@ -109,6 +109,10 @@ export const ipc = {
       invoke("cmd_export_subtitles", { videoId, format }),
     notes: (videoId: string): Promise<string> =>
       invoke("cmd_export_notes", { videoId }),
+    quiz: (videoId: string): Promise<string> =>
+      invoke("cmd_export_quiz", { videoId }),
+    mindmap: (videoId: string): Promise<string> =>
+      invoke("cmd_export_mindmap", { videoId }),
   },
   tools: {
     ocr: (

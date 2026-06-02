@@ -44,7 +44,14 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
   }
   return (
     <div className="flex h-full flex-col">
-      <div className="flex justify-end px-2 py-1">
+      <div className="flex items-center justify-end gap-3 px-2 py-1">
+        <button
+          className="text-xs text-primary hover:underline"
+          onClick={() => void ipc.export.mindmap(videoId)}
+          title="导出 Markmap 大纲 .md 到视频数据目录"
+        >
+          导出 MD
+        </button>
         <button
           className="text-xs text-primary hover:underline"
           onClick={exportSvg}

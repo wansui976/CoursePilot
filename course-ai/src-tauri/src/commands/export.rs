@@ -2,7 +2,7 @@ use crate::commands::courses::AppState;
 use crate::commands::transcripts::list_segments;
 use crate::commands::videos::Video;
 use crate::error::{AppError, AppResult};
-use crate::export::{to_srt, to_vtt};
+use crate::export::{quiz_to_anki, to_srt, to_vtt};
 use std::path::Path;
 use tauri::State;
 
@@ -50,6 +50,40 @@ pub async fn cmd_export_notes(state: State<'_, AppState>, video_id: String) -> A
     let dir = Path::new(&video.data_dir);
     std::fs::create_dir_all(dir)?;
     let path = dir.join("notes.md");
+    std::fs::write(&path, md)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 导出测验为 Anki 可导入的 TSV（正面=题干+选项，背面=答案+解析），返回文件路径。
+#[tauri::command]
+pub async fn cmd_export_quiz(state: State<'_, AppState>, video_id: String) -> AppResult<String> {
+    let json: Option<String> =
+        sqlx::query_scalar("SELECT questions_json FROM quizzes WHERE video_id=?")
+            .bind(&video_id)
+            .fetch_optional(&state.db.pool)
+            .await?;
+    let json = json.ok_or_else(|| AppError::NotFound("no quiz to export".into()))?;
+    let tsv = quiz_to_anki(&json)?;
+    let video = load_video(&state, &video_id).await?;
+    let dir = Path::new(&video.data_dir);
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join("quiz-anki.txt");
+    std::fs::write(&path, tsv)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 导出脑图 Markdown（Markmap 大纲），返回文件路径。
+#[tauri::command]
+pub async fn cmd_export_mindmap(state: State<'_, AppState>, video_id: String) -> AppResult<String> {
+    let md: Option<String> = sqlx::query_scalar("SELECT markmap_md FROM mindmaps WHERE video_id=?")
+        .bind(&video_id)
+        .fetch_optional(&state.db.pool)
+        .await?;
+    let md = md.ok_or_else(|| AppError::NotFound("no mindmap to export".into()))?;
+    let video = load_video(&state, &video_id).await?;
+    let dir = Path::new(&video.data_dir);
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join("mindmap.md");
     std::fs::write(&path, md)?;
     Ok(path.to_string_lossy().to_string())
 }
