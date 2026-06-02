@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
@@ -152,7 +153,17 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
       )}
       {ocr.data !== undefined && (
         <div className="border-b border-[var(--border-subtle)] px-3 py-2 text-xs">
-          <div className="mb-1 text-[var(--text-faint)]">OCR 结果（点击复制）</div>
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[var(--text-faint)]">OCR 结果（点击复制）</span>
+            <button
+              aria-label="关闭 OCR 结果"
+              title="关闭"
+              onClick={() => ocr.reset()}
+              className="grid h-5 w-5 place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
           <button
             className="block w-full whitespace-pre-wrap text-left text-[var(--text-normal)] hover:text-[var(--text-strong)]"
             onClick={() => void navigator.clipboard.writeText(ocr.data ?? "")}
