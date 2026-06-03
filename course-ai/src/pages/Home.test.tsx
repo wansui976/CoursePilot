@@ -35,7 +35,7 @@ const { mockIpc } = vi.hoisted(() => ({
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: vi.fn() }));
 vi.mock("@/components/ImportVideoDialog", () => ({
-  ImportVideoButton: () => <button>导入本地视频</button>,
+  ImportVideoButton: () => <button>导入</button>,
 }));
 vi.mock("@/components/JobProgress", () => ({
   JobProgress: () => <div>处理进度</div>,
@@ -143,10 +143,9 @@ describe("Home", () => {
 
     expect(screen.getByRole("heading", { name: "课程视频" })).toBeInTheDocument();
     expect(await screen.findByText("申论课程 · 1 个视频")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "导入本地视频" })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("B 站 / 视频链接…")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "下载" })).toBeInTheDocument();
-    expect(screen.getByText("最近添加")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导入" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "网格视图" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "列表视图" })).toBeInTheDocument();
     expect(screen.getByText("待处理")).toBeInTheDocument();
     expect(screen.getByText("01:45:18")).toBeInTheDocument();
   });

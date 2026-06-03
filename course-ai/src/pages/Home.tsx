@@ -1,9 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   ChevronLeft,
-  Download,
   Film,
+  LayoutGrid,
+  List,
   ListVideo,
   MoreHorizontal,
   Moon,
@@ -21,9 +22,9 @@ import { ImportVideoButton } from "@/components/ImportVideoDialog";
 import { SettingsPanel } from "@/components/SettingsDialog";
 import { TabsPanel } from "@/components/TabsPanel";
 import { VideoCover } from "@/components/VideoCover";
-import { Button } from "@/components/ui/button";
 import { VideoPlayer } from "@/components/VideoPlayer";
 import { ipc } from "@/lib/ipc";
+import type { Video } from "@/lib/types";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
@@ -48,6 +49,16 @@ type ThemeMode = "dark" | "light";
 
 const THEME_STORAGE_KEY = "course-ai-theme";
 const PANEL_WIDTH_STORAGE_KEY = "course-ai-study-panel-width";
+const VIEW_STORAGE_KEY = "course-ai-home-view";
+
+type LibraryView = "grid" | "list";
+
+function readInitialView(): LibraryView {
+  if (typeof window === "undefined") return "grid";
+  return window.localStorage.getItem(VIEW_STORAGE_KEY) === "list"
+    ? "list"
+    : "grid";
+}
 
 function readInitialTheme(): ThemeMode {
   if (typeof window === "undefined") return "light";
@@ -68,7 +79,7 @@ export function Home() {
   const [showSettings, setShowSettings] = useState(false);
   const [showRecycleBin, setShowRecycleBin] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(readInitialTheme);
-  const [videoLink, setVideoLink] = useState("");
+  const [view, setView] = useState<LibraryView>(readInitialView);
   const [openMenuVideoId, setOpenMenuVideoId] = useState<string | null>(null);
   const [renamingVideo, setRenamingVideo] = useState<{
     id: string;
@@ -106,14 +117,11 @@ export function Home() {
   const selectedCourse = courses.find(
     (course) => course.id === selectedCourseId,
   );
-  const importLink = useMutation({
-    mutationFn: () =>
-      ipc.tools.importBilibili(selectedCourseId!, videoLink.trim()),
-    onSuccess: () => {
-      setVideoLink("");
-      queryClient.invalidateQueries({ queryKey: ["videos", selectedCourseId] });
-    },
-  });
+
+  function changeView(next: LibraryView) {
+    setView(next);
+    window.localStorage.setItem(VIEW_STORAGE_KEY, next);
+  }
 
   const selectedVideo = videos.find((video) => video.id === selectedVideoId);
   const queuedVideos = queuedVideoIds
@@ -339,6 +347,204 @@ export function Home() {
     );
   }
 
+  // 视频卡片上的「⋯」操作按钮（网格/列表共用）。
+  function videoOptionsButton(video: Video) {
+    return (
+      <button
+        type="button"
+        aria-label="视频操作"
+        className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-panel)] text-[var(--text-muted)] shadow hover:text-[var(--text-strong)]"
+        onClick={() =>
+          setOpenMenuVideoId((id) => (id === video.id ? null : video.id))
+        }
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+    );
+  }
+
+  function videoMenu(video: Video) {
+    if (openMenuVideoId !== video.id) return null;
+    return (
+      <div
+        role="menu"
+        className="absolute right-3 top-12 z-10 w-32 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 text-sm shadow-[var(--shadow-pop)]"
+      >
+        <button
+          type="button"
+          role="menuitem"
+          className="block w-full px-3 py-2 text-left hover:bg-[var(--surface-card-hover)]"
+          onClick={() => {
+            setOpenMenuVideoId(null);
+            setRenamingVideo({ id: video.id, title: video.title });
+          }}
+        >
+          修改标题
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="block w-full px-3 py-2 text-left text-red-500 hover:bg-[var(--surface-card-hover)]"
+          onClick={() => {
+            setOpenMenuVideoId(null);
+            void deleteVideo(video.id);
+          }}
+        >
+          删除
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="block w-full px-3 py-2 text-left hover:bg-[var(--surface-card-hover)]"
+          onClick={() => {
+            setOpenMenuVideoId(null);
+            startProcessing(video.id);
+          }}
+        >
+          {video.processed_status === "done" ? "重新处理" : "开始处理"}
+        </button>
+      </div>
+    );
+  }
+
+  function videoRenameBox(video: Video) {
+    if (renamingVideo?.id !== video.id) return null;
+    return (
+      <div
+        role="dialog"
+        aria-label="修改标题"
+        className="absolute inset-x-3 top-12 z-20 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-2 shadow-[var(--shadow-pop)]"
+      >
+        <label className="sr-only" htmlFor={`rename-${video.id}`}>
+          视频标题
+        </label>
+        <input
+          id={`rename-${video.id}`}
+          aria-label="视频标题"
+          className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1.5 text-xs text-[var(--text-strong)] outline-none focus:border-primary/70"
+          value={renamingVideo.title}
+          onChange={(event) =>
+            setRenamingVideo({ id: video.id, title: event.target.value })
+          }
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void saveRenamedVideo();
+            if (event.key === "Escape") setRenamingVideo(null);
+          }}
+        />
+        <div className="mt-2 flex justify-end gap-1">
+          <button
+            type="button"
+            aria-label="取消修改标题"
+            className="flex h-7 w-7 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)]"
+            onClick={() => setRenamingVideo(null)}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            aria-label="保存标题"
+            className="flex h-7 w-7 items-center justify-center rounded bg-primary text-primary-foreground disabled:opacity-50"
+            disabled={!renamingVideo.title.trim()}
+            onClick={() => void saveRenamedVideo()}
+          >
+            <Check className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function statusBadge(video: Video) {
+    return (
+      <span
+        data-testid="video-status-badge"
+        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+          statusMeta[video.processed_status].className
+        }`}
+      >
+        {statusMeta[video.processed_status].label}
+      </span>
+    );
+  }
+
+  function renderVideoGridCard(video: Video) {
+    return (
+      <article
+        key={video.id}
+        className="group relative min-w-0 overflow-hidden rounded-xl border border-[var(--border-faint)] bg-[var(--surface-card)] text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[var(--border-subtle)] hover:bg-[var(--surface-card-hover)] hover:shadow-[var(--shadow-pop)]"
+      >
+        <button
+          className="block w-full text-left"
+          aria-label={`打开视频：${video.title}`}
+          onClick={() => setSelectedVideoId(video.id)}
+        >
+          <span className="relative flex aspect-video items-center justify-center overflow-hidden bg-[var(--surface-stage)] text-white">
+            <VideoCover
+              videoId={video.id}
+              className="absolute inset-0 h-full w-full"
+            />
+            <span className="relative flex h-12 w-12 items-center justify-center rounded-full bg-black/35 text-white shadow-lg backdrop-blur-sm transition group-hover:bg-primary">
+              <Play className="h-5 w-5 fill-current" />
+            </span>
+          </span>
+          <span className="block space-y-2.5 p-4">
+            <span className="block truncate text-[15px] font-semibold text-[var(--text-strong)]">
+              {video.title}
+            </span>
+            <span className="flex items-center justify-between gap-2">
+              <span className="text-xs text-[var(--text-muted)]">
+                {video.duration_ms ? formatMs(video.duration_ms) : "00:00"}
+              </span>
+              {statusBadge(video)}
+            </span>
+          </span>
+        </button>
+        {videoOptionsButton(video)}
+        {videoMenu(video)}
+        {videoRenameBox(video)}
+      </article>
+    );
+  }
+
+  function renderVideoListRow(video: Video) {
+    return (
+      <article
+        key={video.id}
+        className="group relative overflow-hidden rounded-xl border border-[var(--border-faint)] bg-[var(--surface-card)] transition hover:border-[var(--border-subtle)] hover:bg-[var(--surface-card-hover)]"
+      >
+        <button
+          className="flex w-full items-center gap-3 p-2.5 pr-12 text-left"
+          aria-label={`打开视频：${video.title}`}
+          onClick={() => setSelectedVideoId(video.id)}
+        >
+          <span className="relative flex aspect-video w-36 flex-none items-center justify-center overflow-hidden rounded-lg bg-[var(--surface-stage)] text-white">
+            <VideoCover
+              videoId={video.id}
+              className="absolute inset-0 h-full w-full"
+            />
+            <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur-sm transition group-hover:bg-primary">
+              <Play className="h-4 w-4 fill-current" />
+            </span>
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold text-[var(--text-strong)]">
+              {video.title}
+            </span>
+            <span className="mt-1.5 flex items-center gap-2">
+              <span className="text-xs text-[var(--text-muted)]">
+                {video.duration_ms ? formatMs(video.duration_ms) : "00:00"}
+              </span>
+              {statusBadge(video)}
+            </span>
+          </span>
+        </button>
+        {videoOptionsButton(video)}
+        {videoMenu(video)}
+        {videoRenameBox(video)}
+      </article>
+    );
+  }
+
   return (
     <div
       data-theme={theme}
@@ -445,7 +651,7 @@ export function Home() {
               </>
             ) : (
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <header className="flex flex-none flex-wrap items-center justify-between gap-4 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-5">
+                <header className="flex flex-none items-center justify-between gap-4 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-5">
                   <div className="min-w-0">
                     <h1 className="text-2xl font-semibold text-[var(--text-strong)]">
                       课程视频
@@ -457,52 +663,35 @@ export function Home() {
                     </p>
                   </div>
                   {selectedCourseId && (
-                    <div className="flex min-w-[320px] flex-1 flex-wrap items-center justify-end gap-2">
-                      <ImportVideoButton
-                        courseId={selectedCourseId}
-                        showLinkImport={false}
-                      />
-                      <div className="flex min-w-[220px] max-w-[360px] flex-1 gap-1">
-                        <input
-                          aria-label="视频链接"
-                          className="min-w-0 flex-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-1.5 text-xs text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)] focus:border-primary/70"
-                          placeholder="B 站 / 视频链接…"
-                          value={videoLink}
-                          onChange={(event) =>
-                            setVideoLink(event.target.value)
-                          }
-                        />
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={!videoLink.trim() || importLink.isPending}
-                          onClick={() => importLink.mutate()}
-                          title="需安装 yt-dlp；仅供个人学习使用"
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          {importLink.isPending ? "下载中" : "下载"}
-                        </Button>
-                      </div>
-                      {importLink.isError && (
-                        <p className="basis-full text-right text-xs text-red-400">
-                          {String(importLink.error)}
-                        </p>
+                    <div className="flex flex-none items-center gap-2">
+                      {videos.length > 0 && (
+                        <div className="flex items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] p-0.5">
+                          {(
+                            [
+                              ["grid", LayoutGrid, "网格视图"],
+                              ["list", List, "列表视图"],
+                            ] as const
+                          ).map(([key, Icon, label]) => (
+                            <button
+                              key={key}
+                              aria-label={label}
+                              aria-pressed={view === key}
+                              onClick={() => changeView(key)}
+                              className={`grid h-7 w-7 place-items-center rounded-md transition ${
+                                view === key
+                                  ? "bg-[var(--surface-card-active)] text-primary shadow-sm"
+                                  : "text-[var(--text-muted)] hover:text-[var(--text-strong)]"
+                              }`}
+                            >
+                              <Icon className="h-4 w-4" />
+                            </button>
+                          ))}
+                        </div>
                       )}
+                      <ImportVideoButton courseId={selectedCourseId} />
                     </div>
                   )}
                 </header>
-                {selectedCourseId && (
-                  <>
-                    <div className="flex flex-none items-center justify-between gap-3 border-b border-[var(--border-faint)] bg-[var(--surface-app)] px-7 py-3">
-                      <span className="text-sm font-medium text-[var(--text-normal)]">
-                        最近添加
-                      </span>
-                      <span className="text-xs text-[var(--text-faint)]">
-                        {videos.length} 个视频
-                      </span>
-                    </div>
-                  </>
-                )}
                 <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
                   {!selectedCourseId || videos.length === 0 ? (
                     <div className="flex h-full min-h-[320px] items-center justify-center">
@@ -520,149 +709,13 @@ export function Home() {
                         </p>
                       </div>
                     </div>
+                  ) : view === "list" ? (
+                    <div className="mx-auto flex max-w-3xl flex-col gap-2">
+                      {videos.map((video) => renderVideoListRow(video))}
+                    </div>
                   ) : (
-                    <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
-                      {videos.map((video) => (
-                        <article
-                          key={video.id}
-                          className="group relative min-w-0 overflow-hidden rounded-md border border-[var(--border-faint)] bg-[var(--surface-card)] text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[var(--border-subtle)] hover:bg-[var(--surface-card-hover)] hover:shadow-[var(--shadow-pop)]"
-                        >
-                          <button
-                            className="block w-full text-left"
-                            aria-label={`打开视频：${video.title}`}
-                            onClick={() => setSelectedVideoId(video.id)}
-                          >
-                          <span className="relative flex aspect-video items-center justify-center overflow-hidden bg-[var(--surface-stage)] text-white">
-                            <VideoCover
-                              videoId={video.id}
-                              className="absolute inset-0 h-full w-full"
-                            />
-                            <span className="relative flex h-11 w-11 items-center justify-center rounded-full bg-black/35 text-white shadow-lg backdrop-blur-sm transition group-hover:bg-primary">
-                              <Play className="h-5 w-5 fill-current" />
-                            </span>
-                          </span>
-                          <span className="block space-y-3 p-3.5">
-                            <span className="block truncate text-sm font-semibold text-[var(--text-strong)]">
-                              {video.title}
-                            </span>
-                            <span className="flex items-center justify-between gap-2">
-                              <span className="text-xs text-[var(--text-muted)]">
-                                {video.duration_ms
-                                  ? formatMs(video.duration_ms)
-                                  : "00:00"}
-                              </span>
-                              <span
-                                data-testid="video-status-badge"
-                                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                                  statusMeta[video.processed_status].className
-                                }`}
-                              >
-                                {statusMeta[video.processed_status].label}
-                              </span>
-                            </span>
-                          </span>
-                          </button>
-                          <button
-                            type="button"
-                            aria-label="视频操作"
-                            className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-panel)] text-[var(--text-muted)] shadow hover:text-[var(--text-strong)]"
-                            onClick={() =>
-                              setOpenMenuVideoId((id) => (id === video.id ? null : video.id))
-                            }
-                          >
-                            <MoreHorizontal className="h-4 w-4" />
-                          </button>
-                          {openMenuVideoId === video.id && (
-                            <div
-                              role="menu"
-                              className="absolute right-3 top-12 z-10 w-32 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 text-sm shadow-[var(--shadow-pop)]"
-                            >
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="block w-full px-3 py-2 text-left hover:bg-[var(--surface-card-hover)]"
-                                onClick={() => {
-                                  setOpenMenuVideoId(null);
-                                  setRenamingVideo({
-                                    id: video.id,
-                                    title: video.title,
-                                  });
-                                }}
-                              >
-                                修改标题
-                              </button>
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="block w-full px-3 py-2 text-left text-red-500 hover:bg-[var(--surface-card-hover)]"
-                                onClick={() => {
-                                  setOpenMenuVideoId(null);
-                                  void deleteVideo(video.id);
-                                }}
-                              >
-                                删除
-                              </button>
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="block w-full px-3 py-2 text-left hover:bg-[var(--surface-card-hover)]"
-                                onClick={() => {
-                                  setOpenMenuVideoId(null);
-                                  startProcessing(video.id);
-                                }}
-                              >
-                                {video.processed_status === "done" ? "重新处理" : "开始处理"}
-                              </button>
-                            </div>
-                          )}
-                          {renamingVideo?.id === video.id && (
-                            <div
-                              role="dialog"
-                              aria-label="修改标题"
-                              className="absolute inset-x-3 top-12 z-20 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-2 shadow-[var(--shadow-pop)]"
-                            >
-                              <label className="sr-only" htmlFor={`rename-${video.id}`}>
-                                视频标题
-                              </label>
-                              <input
-                                id={`rename-${video.id}`}
-                                aria-label="视频标题"
-                                className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1.5 text-xs text-[var(--text-strong)] outline-none focus:border-primary/70"
-                                value={renamingVideo.title}
-                                onChange={(event) =>
-                                  setRenamingVideo({
-                                    id: video.id,
-                                    title: event.target.value,
-                                  })
-                                }
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") void saveRenamedVideo();
-                                  if (event.key === "Escape") setRenamingVideo(null);
-                                }}
-                              />
-                              <div className="mt-2 flex justify-end gap-1">
-                                <button
-                                  type="button"
-                                  aria-label="取消修改标题"
-                                  className="flex h-7 w-7 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)]"
-                                  onClick={() => setRenamingVideo(null)}
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  aria-label="保存标题"
-                                  className="flex h-7 w-7 items-center justify-center rounded bg-primary text-primary-foreground disabled:opacity-50"
-                                  disabled={!renamingVideo.title.trim()}
-                                  onClick={() => void saveRenamedVideo()}
-                                >
-                                  <Check className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </article>
-                      ))}
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-5">
+                      {videos.map((video) => renderVideoGridCard(video))}
                     </div>
                   )}
                 </div>
