@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { X } from "lucide-react";
+import { Camera, Images, ScanText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
+import { getSlidesSensitivity, sensitivityToThreshold } from "@/lib/slides";
 import { usePlayer } from "@/stores/player";
 
 function SlideImage({
@@ -48,25 +49,10 @@ function SlideImage({
   return <img src={src} alt={alt} className={className} />;
 }
 
-// 灵敏度(0~100)→ 亮度差阈值。灵敏度越高、阈值越低、抓的页越多。
-function sensitivityToThreshold(sensitivity: number) {
-  return Math.round(8 + ((100 - sensitivity) / 100) * 42); // 灵敏度100→8，0→50
-}
-
 export function SlidesPanel({ videoId }: { videoId: string }) {
   const qc = useQueryClient();
   const requestSeek = usePlayer((s) => s.requestSeek);
   const currentMs = usePlayer((s) => s.currentMs);
-  const [sensitivity, setSensitivity] = useState(() => {
-    const saved = Number(localStorage.getItem("slides-sensitivity"));
-    return Number.isFinite(saved) && saved > 0 ? saved : 50;
-  });
-  const threshold = sensitivityToThreshold(sensitivity);
-
-  function changeSensitivity(value: number) {
-    setSensitivity(value);
-    localStorage.setItem("slides-sensitivity", String(value));
-  }
 
   const { data: slides = [] } = useQuery({
     queryKey: ["slides", videoId],
@@ -78,13 +64,14 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   });
 
   const extract = useMutation({
-    mutationFn: () => ipc.slides.extract(videoId, threshold),
+    // 灵敏度在「设置 → 课件提取」里调，这里取当前值换算成阈值。
+    mutationFn: () =>
+      ipc.slides.extract(videoId, sensitivityToThreshold(getSlidesSensitivity())),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["slides", videoId] }),
   });
   const capture = useMutation({
     mutationFn: () => ipc.slides.capture(videoId, Math.floor(currentMs)),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["screenshots", videoId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["screenshots", videoId] }),
   });
   const ocr = useMutation<string, unknown, void>({
     mutationFn: () => ipc.tools.ocr(videoId, Math.floor(currentMs)),
@@ -92,69 +79,55 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2">
-        <span className="text-sm text-[var(--text-muted)]">课件页</span>
-        <div className="flex gap-2">
+      <div className="flex flex-none items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-3 py-2.5">
+        <span className="text-sm font-medium text-[var(--text-strong)]">课件页</span>
+        <div className="flex items-center gap-1.5">
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             disabled={ocr.isPending}
             onClick={() => ocr.mutate()}
             title="对当前帧整屏 OCR（引擎在设置里选择：本地 Tesseract 或 阿里云 OCR）"
           >
-            {ocr.isPending ? "识别中…" : "截字"}
+            <ScanText className="h-3.5 w-3.5" />
+            {ocr.isPending ? "识别中…" : "截图OCR"}
           </Button>
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             disabled={capture.isPending}
             onClick={() => capture.mutate()}
+            title="把当前帧存为截图"
           >
-            {capture.isPending ? "截图中…" : "截当前帧"}
+            <Camera className="h-3.5 w-3.5" />
+            {capture.isPending ? "截图中…" : "截图"}
           </Button>
           <Button
             size="sm"
-            variant="outline"
             disabled={extract.isPending}
             onClick={() => extract.mutate()}
+            title="按画面变化自动识别换页（灵敏度在设置里调）"
           >
-            {extract.isPending
-              ? "提取中…"
-              : slides.length
-                ? "重新提取"
-                : "提取课件"}
+            <Images className="h-3.5 w-3.5" />
+            {extract.isPending ? "提取中…" : slides.length ? "重新提取" : "提取课件"}
           </Button>
         </div>
       </div>
-      <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-muted)]">
-        <span className="whitespace-nowrap">灵敏度</span>
-        <span className="text-[var(--text-faint)]">低</span>
-        <input
-          aria-label="课件提取灵敏度"
-          type="range"
-          min={0}
-          max={100}
-          step={5}
-          value={sensitivity}
-          onChange={(event) => changeSensitivity(Number(event.target.value))}
-          className="h-1 flex-1 accent-primary"
-          title={`差异阈值 ${threshold}（越低越敏感）`}
-        />
-        <span className="text-[var(--text-faint)]">高</span>
-        <span className="w-14 text-right text-[var(--text-faint)]">阈值 {threshold}</span>
-      </div>
+
       {extract.isError && (
-        <p className="px-3 py-2 text-xs text-red-400">
+        <p className="flex-none px-3 py-2 text-xs text-red-400">
           {String(extract.error)}
         </p>
       )}
       {ocr.isError && (
-        <p className="px-3 py-2 text-xs text-red-400">{String(ocr.error)}</p>
+        <p className="flex-none px-3 py-2 text-xs text-red-400">{String(ocr.error)}</p>
       )}
       {ocr.data !== undefined && (
-        <div className="border-b border-[var(--border-subtle)] px-3 py-2 text-xs">
+        <div className="flex-none border-b border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-xs">
           <div className="mb-1 flex items-center justify-between">
-            <span className="text-[var(--text-faint)]">OCR 结果（点击复制）</span>
+            <span className="font-medium text-[var(--text-muted)]">
+              OCR 结果（点击复制）
+            </span>
             <button
               aria-label="关闭 OCR 结果"
               title="关闭"
@@ -165,25 +138,34 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
             </button>
           </div>
           <button
-            className="block w-full whitespace-pre-wrap text-left text-[var(--text-normal)] hover:text-[var(--text-strong)]"
+            className="block max-h-40 w-full overflow-y-auto whitespace-pre-wrap text-left text-[var(--text-normal)] hover:text-[var(--text-strong)]"
             onClick={() => void navigator.clipboard.writeText(ocr.data ?? "")}
           >
             {ocr.data || "（未识别到文字）"}
           </button>
         </div>
       )}
-      <div className="flex-1 overflow-y-auto p-3">
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {slides.length === 0 ? (
-          <p className="text-sm text-[var(--text-faint)]">
-            还没有课件页，点右上角「提取课件」（按画面亮度变化自动识别换页）。
-          </p>
+          <div className="flex h-full min-h-[220px] items-center justify-center">
+            <div className="max-w-xs text-center">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl border border-[var(--border-faint)] bg-[var(--surface-card)] text-primary">
+                <Images className="h-6 w-6" />
+              </div>
+              <p className="text-sm text-[var(--text-muted)]">
+                还没有课件页。点右上角「提取课件」按画面变化自动识别换页，
+                或用「截图」「截图OCR」单独抓取当前帧。
+              </p>
+            </div>
+          </div>
         ) : (
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2.5">
             {slides.map((s) => (
               <button
                 key={s.id}
                 onClick={() => requestSeek(s.start_ms)}
-                className="group overflow-hidden rounded border border-[var(--border-subtle)] text-left hover:border-primary"
+                className="group overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] text-left transition hover:border-primary hover:shadow-[var(--shadow-card)]"
               >
                 <SlideImage
                   videoId={videoId}
@@ -191,8 +173,11 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
                   alt={`page ${s.page_no}`}
                   className="aspect-video w-full object-cover"
                 />
-                <div className="px-2 py-1 text-xs text-[var(--text-muted)]">
-                  P{s.page_no + 1} · {formatMs(s.start_ms)}
+                <div className="flex items-center justify-between px-2 py-1.5 text-xs text-[var(--text-muted)]">
+                  <span className="font-medium text-[var(--text-normal)]">
+                    P{s.page_no + 1}
+                  </span>
+                  <span>{formatMs(s.start_ms)}</span>
                 </div>
               </button>
             ))}
@@ -200,9 +185,11 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
         )}
 
         {shots.length > 0 && (
-          <div className="mt-4">
-            <div className="mb-2 text-xs text-[var(--text-faint)]">我的截图</div>
-            <div className="flex gap-2 overflow-x-auto">
+          <div className="mt-5">
+            <div className="mb-2 text-xs font-medium text-[var(--text-muted)]">
+              我的截图
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-1">
               {shots.map((sh) => (
                 <button
                   key={sh.id}
@@ -214,7 +201,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
                     videoId={videoId}
                     imagePath={sh.image_path}
                     alt={`shot ${sh.at_ms}`}
-                    className="h-16 rounded border border-[var(--border-subtle)] hover:border-primary"
+                    className="h-16 rounded-lg border border-[var(--border-subtle)] hover:border-primary"
                   />
                 </button>
               ))}

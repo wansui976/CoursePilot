@@ -1,8 +1,21 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState, type ReactNode } from "react";
-import { AudioLines, Check, ChevronLeft, FolderCog, ScanText, Sparkles } from "lucide-react";
+import {
+  AudioLines,
+  Check,
+  ChevronLeft,
+  FolderCog,
+  Images,
+  ScanText,
+  Sparkles,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
+import {
+  getSlidesSensitivity,
+  sensitivityToThreshold,
+  setSlidesSensitivity,
+} from "@/lib/slides";
 import { WhisperModelsPanel } from "./WhisperModelsPanel";
 import { LlmSettingsPanel } from "./LlmSettingsPanel";
 
@@ -86,6 +99,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [ocrKeyId, setOcrKeyId] = useState("");
   const [ocrSecret, setOcrSecret] = useState("");
   const [ocrSaved, setOcrSaved] = useState("");
+  const [slidesSensitivity, setSlidesSensitivityState] = useState(() =>
+    getSlidesSensitivity(),
+  );
 
   useEffect(() => {
     void ipc.settings.get("default_storage_root").then((value) => setRoot(value ?? ""));
@@ -398,6 +414,41 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
               </>
             )}
+          </Section>
+
+          <Section
+            icon={<Images className="h-4 w-4" />}
+            title="课件提取"
+            desc="按画面变化自动识别换页的灵敏度"
+          >
+            <Field
+              label="灵敏度"
+              hint={`灵敏度越高抓取的课件页越多（当前差异阈值 ${sensitivityToThreshold(
+                slidesSensitivity,
+              )}）`}
+            >
+              <div className="flex items-center gap-3 text-xs text-[var(--text-muted)]">
+                <span>低</span>
+                <input
+                  aria-label="课件提取灵敏度"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={slidesSensitivity}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    setSlidesSensitivityState(value);
+                    setSlidesSensitivity(value);
+                  }}
+                  className="h-1 flex-1 accent-primary"
+                />
+                <span>高</span>
+                <span className="w-8 text-right tabular-nums text-[var(--text-faint)]">
+                  {slidesSensitivity}
+                </span>
+              </div>
+            </Field>
           </Section>
 
           <Section

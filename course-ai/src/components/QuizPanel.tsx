@@ -32,15 +32,6 @@ export function QuizPanel({ videoId }: { videoId: string }) {
 
   return (
     <div className="space-y-4 p-4">
-      <div className="flex justify-end">
-        <button
-          className="text-xs text-primary hover:underline"
-          onClick={() => void ipc.export.quiz(videoId)}
-          title="导出为 Anki 可导入的 TSV（quiz-anki.txt）到视频数据目录"
-        >
-          导出 Anki
-        </button>
-      </div>
       {questions.map((q, i) => (
         <div key={i} className="rounded border border-[var(--border-subtle)] p-3">
           <div className="mb-2 text-sm">

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Pencil, X } from "lucide-react";
+import { ExportMenu } from "./ExportMenu";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
@@ -16,7 +17,6 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   const currentMs = usePlayer((s) => s.currentMs);
   const requestSeek = usePlayer((s) => s.requestSeek);
   const listRef = useRef<HTMLDivElement>(null);
-  const [exportMsg, setExportMsg] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
 
@@ -38,15 +38,6 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     update.mutate({ id: editingId, text: draft });
   }
 
-  async function exportSubs(format: "srt" | "vtt") {
-    try {
-      const path = await ipc.export.subtitles(videoId, format);
-      setExportMsg(`已导出 ${path}`);
-    } catch (error) {
-      setExportMsg(String(error));
-    }
-    setTimeout(() => setExportMsg(""), 4000);
-  }
   const activeIdx = segments.findIndex(
     (segment) => currentMs >= segment.start_ms && currentMs < segment.end_ms,
   );
@@ -65,26 +56,16 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
 
   return (
     <div className="flex h-full flex-col text-[var(--text-normal)]">
-      <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-1.5 text-xs">
-        <span className="text-[var(--text-muted)]">导出：</span>
-        <button
-          className="text-primary hover:underline"
-          onClick={() => void exportSubs("srt")}
-        >
-          SRT
-        </button>
-        <button
-          className="text-primary hover:underline"
-          onClick={() => void exportSubs("vtt")}
-        >
-          VTT
-        </button>
-        <span className="ml-auto text-[var(--text-faint)]">悬停可纠错</span>
-        {exportMsg && (
-          <span className="ml-2 truncate text-[var(--text-muted)]">
-            {exportMsg}
-          </span>
-        )}
+      <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2 text-xs">
+        <span className="text-[var(--text-faint)]">悬停文稿可纠错</span>
+        <div className="ml-auto">
+          <ExportMenu
+            items={[
+              { label: "SRT 字幕", run: () => ipc.export.subtitles(videoId, "srt") },
+              { label: "VTT 字幕", run: () => ipc.export.subtitles(videoId, "vtt") },
+            ]}
+          />
+        </div>
       </div>
       <div ref={listRef} className="flex-1 space-y-1 overflow-y-auto p-3">
         {segments.map((segment, index) => {

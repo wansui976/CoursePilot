@@ -36,7 +36,12 @@ const { mockIpc } = vi.hoisted(() => ({
       extract: vi.fn(),
       capture: vi.fn(),
     },
-    export: { subtitles: vi.fn(), notes: vi.fn() },
+    export: {
+      subtitles: vi.fn(),
+      notes: vi.fn(),
+      quiz: vi.fn(),
+      mindmap: vi.fn(),
+    },
     tools: { ocr: vi.fn(), importBilibili: vi.fn() },
   },
 }));

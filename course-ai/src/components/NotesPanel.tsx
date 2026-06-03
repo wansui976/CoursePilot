@@ -7,6 +7,7 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { Button } from "@/components/ui/button";
+import { ExportMenu, type ExportItem } from "./ExportMenu";
 import { ipc } from "@/lib/ipc";
 import { markdownToTiptap } from "@/lib/markdownToTiptap";
 import { TimestampNode, installTimestampClick } from "./notes/timestampNode";
@@ -29,7 +30,6 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   const [view, setView] = useState<View>("notes");
   const qc = useQueryClient();
   const rootRef = useRef<HTMLDivElement>(null);
-  const [savedAt, setSavedAt] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const { data: notesContent } = useQuery({
@@ -39,9 +39,8 @@ export function NotesPanel({ videoId }: { videoId: string }) {
 
   function debounceSave(json: string) {
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      await ipc.ai.saveNotes(videoId, json);
-      setSavedAt(new Date().toLocaleTimeString());
+    saveTimer.current = setTimeout(() => {
+      void ipc.ai.saveNotes(videoId, json);
     }, 800);
   }
 
@@ -96,6 +95,15 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   const current = VIEWS.find((v) => v.key === view)!;
   const currentTask = current.task;
 
+  const exportItems: ExportItem[] =
+    view === "notes"
+      ? [{ label: "Markdown", run: () => ipc.export.notes(videoId) }]
+      : view === "quiz"
+        ? [{ label: "Anki", run: () => ipc.export.quiz(videoId) }]
+        : view === "mindmap"
+          ? [{ label: "Markdown", run: () => ipc.export.mindmap(videoId) }]
+          : [];
+
   return (
     <div ref={rootRef} className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
@@ -113,18 +121,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
           </button>
         ))}
         <div className="ml-auto flex items-center gap-2">
-          {view === "notes" && savedAt && (
-            <span className="text-xs text-[var(--text-faint)]">已保存 {savedAt}</span>
-          )}
-          {view === "notes" && (
-            <button
-              className="text-xs text-primary hover:underline"
-              onClick={() => void ipc.export.notes(videoId)}
-              title="导出笔记 Markdown 到视频数据目录"
-            >
-              导出 MD
-            </button>
-          )}
+          <ExportMenu items={exportItems} />
           {currentTask && (
             <Button
               size="sm"
