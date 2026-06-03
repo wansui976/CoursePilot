@@ -2,8 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   ChevronLeft,
-  CheckCircle2,
-  Clock3,
   Download,
   Film,
   ListVideo,
@@ -44,13 +42,6 @@ const statusMeta = {
     className: "text-[var(--status-ok)] bg-[var(--status-ok-bg)]",
   },
   failed: { label: "处理失败", className: "text-red-600 bg-red-50" },
-} as const;
-
-const selectedStatusText = {
-  pending: "待处理 · 尚未生成资料",
-  processing: "处理中 · 正在生成资料",
-  done: "已处理 · 资料已生成",
-  failed: "处理失败 · 可重新处理",
 } as const;
 
 type ThemeMode = "dark" | "light";
@@ -424,14 +415,6 @@ export function Home() {
                     <h1 className="truncate text-xl font-semibold text-[var(--text-strong)]">
                       {selectedVideo.title}
                     </h1>
-                    <p className="mt-2 flex w-fit items-center gap-2 rounded-full bg-[var(--surface-card)] px-2.5 py-1 text-xs text-[var(--text-muted)]">
-                      {selectedVideo.processed_status === "done" ? (
-                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                      ) : (
-                        <Clock3 className="h-3.5 w-3.5 text-primary" />
-                      )}
-                      {selectedStatusText[selectedVideo.processed_status]}
-                    </p>
                   </div>
                 </div>
                 <div className="min-h-0 flex-1">

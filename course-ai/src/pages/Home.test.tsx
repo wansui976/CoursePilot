@@ -159,7 +159,6 @@ describe("Home", () => {
 
     expect(screen.getByRole("button", { name: "返回课程库" })).toBeInTheDocument();
     expect(screen.getByText("学习工作台")).toBeInTheDocument();
-    expect(screen.getByText("待处理 · 尚未生成资料")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: video.title })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "开始处理" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("课程问答")).not.toBeInTheDocument();
