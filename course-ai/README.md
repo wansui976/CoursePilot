@@ -64,8 +64,8 @@ cd src-tauri && cargo test
 
 - **课件 (slides)**: ffmpeg scene-change frame extraction, 课件 tab grid, 视频截图
 - **OCR (截字)**: ffmpeg crop + tesseract (runtime needs `tesseract` + `chi_sim`)
-- **RAG**: OpenAI-compatible `/embeddings` + pure-Rust cosine top-K retrieval
-  (no ONNX/sqlite-vec), `[ref:N]` citations, header search box
+- **课程问答 / 文稿搜索**: ask mode sends transcript context to the configured
+  LLM; search mode does local transcript keyword matching
 - **Export**: subtitles SRT/VTT, notes Markdown, mindmap SVG
 - **Bilibili / URL download**: yt-dlp sidecar (runtime needs `yt-dlp`)
 - **Pipeline retry** on failed stages
