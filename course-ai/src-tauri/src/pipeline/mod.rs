@@ -26,6 +26,25 @@ enum AsrBackend {
     Aliyun,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TranscriptCorrectionOutcome {
+    Applied,
+    NoProvider,
+    Failed,
+}
+
+fn asr_done_message(count: usize, outcome: TranscriptCorrectionOutcome) -> String {
+    match outcome {
+        TranscriptCorrectionOutcome::Applied => format!("{count} segments"),
+        TranscriptCorrectionOutcome::NoProvider => {
+            format!("{count} segments；未配置大模型，当前为原始文稿")
+        }
+        TranscriptCorrectionOutcome::Failed => {
+            format!("{count} segments；AI 纠错失败，已保留原始文稿")
+        }
+    }
+}
+
 fn asr_backend_or_default(value: Option<String>) -> AsrBackend {
     match value.as_deref().map(str::trim) {
         Some("volcengine") => AsrBackend::Volcengine,
@@ -283,8 +302,34 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
     match asr_result {
         Ok(json) => {
             emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.92, "解析识别结果").await?;
+            asr::store_raw_transcript_backup(&db, &video_id, &json).await?;
+            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.95, "写入原始文稿")
+                .await?;
             let count = asr::store_transcripts(&db, &video_id, &json).await?;
-            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.96, "写入字幕").await?;
+            let final_message = match crate::commands::ai::first_available_provider_for_db(&db)
+                .await?
+            {
+                Some((provider, model)) => {
+                    emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.98, "正在 AI 纠正文稿")
+                        .await?;
+                    match transcript_correction::autocorrect_transcript(
+                        &db,
+                        &provider,
+                        &model,
+                        &video_id,
+                    )
+                    .await
+                    {
+                        Ok(()) => asr_done_message(count, TranscriptCorrectionOutcome::Applied),
+                        Err(error) => {
+                            eprintln!("transcript correction skipped after failure: {error}");
+                            asr_done_message(count, TranscriptCorrectionOutcome::Failed)
+                        }
+                    }
+                }
+                None => asr_done_message(count, TranscriptCorrectionOutcome::NoProvider),
+            };
+            jobs::update_progress(&db, &asr_job.id, 1.0, Some(&final_message)).await?;
             jobs::finish(&db, &asr_job.id).await?;
             emit_update(
                 &app,
@@ -294,7 +339,7 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
                     stage: "asr".into(),
                     status: "done".into(),
                     progress: 1.0,
-                    message: Some(format!("{count} segments")),
+                    message: Some(final_message),
                 },
             );
             sqlx::query("UPDATE videos SET processed_status='done' WHERE id=?")
@@ -627,5 +672,11 @@ mod tests {
             asr_backend_or_default(Some("unknown".into())),
             AsrBackend::Whisper
         );
+    }
+
+    #[test]
+    fn asr_done_message_mentions_raw_transcript_when_no_provider_exists() {
+        let msg = asr_done_message(12, TranscriptCorrectionOutcome::NoProvider);
+        assert_eq!(msg, "12 segments；未配置大模型，当前为原始文稿");
     }
 }
