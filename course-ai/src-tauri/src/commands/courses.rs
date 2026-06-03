@@ -59,6 +59,16 @@ pub async fn delete_course(db: &Db, id: String) -> AppResult<()> {
     Ok(())
 }
 
+pub async fn rename_course(db: &Db, id: String, name: String) -> AppResult<()> {
+    sqlx::query("UPDATE courses SET name=?, updated_at=? WHERE id=?")
+        .bind(name)
+        .bind(Utc::now().timestamp_millis())
+        .bind(id)
+        .execute(&db.pool)
+        .await?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn cmd_create_course(
     state: State<'_, AppState>,
@@ -76,6 +86,15 @@ pub async fn cmd_list_courses(state: State<'_, AppState>) -> AppResult<Vec<Cours
 #[tauri::command]
 pub async fn cmd_delete_course(state: State<'_, AppState>, id: String) -> AppResult<()> {
     delete_course(&state.db, id).await
+}
+
+#[tauri::command]
+pub async fn cmd_rename_course(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+) -> AppResult<()> {
+    rename_course(&state.db, id, name).await
 }
 
 #[cfg(test)]
@@ -107,5 +126,18 @@ mod tests {
             .unwrap();
         delete_course(&db, course.id).await.unwrap();
         assert_eq!(list_courses(&db).await.unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn rename_updates_course_name() {
+        let db = fresh_db().await;
+        let course = create_course(&db, "旧名".into(), "/tmp/x".into())
+            .await
+            .unwrap();
+        rename_course(&db, course.id.clone(), "新名".into())
+            .await
+            .unwrap();
+        let list = list_courses(&db).await.unwrap();
+        assert_eq!(list[0].name, "新名");
     }
 }
