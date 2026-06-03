@@ -5,7 +5,6 @@ import {
   Film,
   LayoutGrid,
   List,
-  ListVideo,
   MoreHorizontal,
   Moon,
   Play,
@@ -210,9 +209,9 @@ export function Home() {
     await queryClient.invalidateQueries({ queryKey: ["trash"] });
   }
 
-  // 设置 / 回收站作为主区域整页，与处理队列一致；互斥切换并取消选中视频。
+  // 设置 / 回收站作为主区域整页，与处理队列一致；互斥切换。保留当前选中的视频，
+  // 这样从控制台打开设置、点「返回」能回到原来的视频工作台，而不是退回首页。
   function openMainView(view: "settings" | "recycle") {
-    setSelectedVideoId(null);
     setQueueOpen(false);
     setShowSettings(view === "settings");
     setShowRecycleBin(view === "recycle");
@@ -555,21 +554,15 @@ export function Home() {
           <aside className="flex h-full w-14 flex-shrink-0 flex-col items-center border-r border-[var(--border-subtle)] bg-[var(--surface-rail)] py-3">
             <button
               className="flex h-11 w-11 items-center justify-center rounded-md text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
-              onClick={() => setSelectedVideoId(null)}
+              onClick={() => {
+                setShowSettings(false);
+                setShowRecycleBin(false);
+                setSelectedVideoId(null);
+              }}
               title="返回课程库"
               aria-label="返回课程库"
             >
               <ChevronLeft className="h-5 w-5" />
-            </button>
-            <div className="my-3 h-px w-8 bg-[var(--border-subtle)]" />
-            <button
-              className="flex h-11 w-11 items-center justify-center rounded-md bg-[var(--surface-card-active)] text-primary hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
-              onClick={() => setSelectedVideoId(null)}
-              title="课程视频"
-              aria-label="课程视频"
-              aria-current="page"
-            >
-              <ListVideo className="h-5 w-5" />
             </button>
             <div className="flex-1" />
             <button
@@ -585,7 +578,11 @@ export function Home() {
               )}
             </button>
             <button
-              className="flex h-11 w-11 items-center justify-center rounded-md text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+              className={`flex h-11 w-11 items-center justify-center rounded-md hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] ${
+                showSettings
+                  ? "bg-[var(--surface-card-active)] text-primary"
+                  : "text-[var(--text-normal)]"
+              }`}
               onClick={() => openMainView("settings")}
               title="设置"
               aria-label="设置"

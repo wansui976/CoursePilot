@@ -1,8 +1,9 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import {
   AudioLines,
   Check,
+  ChevronDown,
   ChevronLeft,
   FolderCog,
   Images,
@@ -21,6 +22,33 @@ import { LlmSettingsPanel } from "./LlmSettingsPanel";
 
 const FIELD =
   "w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] outline-none transition placeholder:text-[var(--text-faint)] focus:border-[var(--accent-text)] focus:ring-2 focus:ring-[var(--accent-text)]/25";
+
+/** 统一外观的下拉框：去掉原生箭头，加自定义 chevron，和输入框风格一致。 */
+function Select({
+  id,
+  value,
+  onChange,
+  children,
+}: {
+  id?: string;
+  value: string;
+  onChange: (event: ChangeEvent<HTMLSelectElement>) => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="relative">
+      <select
+        id={id}
+        value={value}
+        onChange={onChange}
+        className={`${FIELD} cursor-pointer appearance-none pr-9`}
+      >
+        {children}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
+    </div>
+  );
+}
 
 function Section({
   icon,
@@ -242,33 +270,31 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             desc="选择把视频转写成文字的引擎"
           >
             <Field label="语音识别后端" htmlFor="asr-backend">
-              <select
+              <Select
                 id="asr-backend"
                 value={asrBackend}
                 onChange={(event) => void changeAsrBackend(event.target.value)}
-                className={FIELD}
               >
                 <option value="whisper">本地 Whisper</option>
                 <option value="volcengine">火山录音文件识别</option>
                 <option value="aliyun">阿里云 DashScope 录音文件识别</option>
-              </select>
+              </Select>
             </Field>
 
             {asrBackend === "whisper" && (
               <>
                 <Field label="默认 Whisper 模型" htmlFor="whisper-model">
-                  <select
+                  <Select
                     id="whisper-model"
                     value={model}
                     onChange={(event) => void changeModel(event.target.value)}
-                    className={FIELD}
-                  >
+              >
                     <option value="tiny">tiny</option>
                     <option value="base">base</option>
                     <option value="small">small</option>
                     <option value="medium">medium</option>
                     <option value="large-v3-turbo">large-v3-turbo</option>
-                  </select>
+                  </Select>
                 </Field>
                 <WhisperModelsPanel />
               </>
@@ -312,18 +338,17 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             {asrBackend === "aliyun" && (
               <>
                 <Field label="识别模型" htmlFor="aliyun-asr-model">
-                  <select
+                  <Select
                     id="aliyun-asr-model"
                     value={aliyunModel}
                     onChange={(event) => void changeAliyunModel(event.target.value)}
-                    className={FIELD}
-                  >
+              >
                     <option value="qwen3-asr-flash-filetrans">
                       千问3-ASR-Flash-Filetrans
                     </option>
                     <option value="fun-asr">Fun-ASR</option>
                     <option value="paraformer-v2">Paraformer-v2</option>
-                  </select>
+                  </Select>
                 </Field>
                 <Field
                   label="百炼 API Key"
@@ -355,32 +380,30 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             desc="对课件帧「截字」时使用的文字识别引擎"
           >
             <Field label="OCR 引擎" htmlFor="ocr-backend">
-              <select
+              <Select
                 id="ocr-backend"
                 value={ocrBackend}
                 onChange={(event) => void changeOcrBackend(event.target.value)}
-                className={FIELD}
               >
                 <option value="tesseract">本地 Tesseract</option>
                 <option value="aliyun">阿里云 OCR 统一识别</option>
-              </select>
+              </Select>
             </Field>
 
             {ocrBackend === "aliyun" && (
               <>
                 <Field label="识别类型" htmlFor="aliyun-ocr-type">
-                  <select
+                  <Select
                     id="aliyun-ocr-type"
                     value={ocrType}
                     onChange={(event) => void changeOcrType(event.target.value)}
-                    className={FIELD}
-                  >
+              >
                     <option value="Advanced">通用文字识别（高精版）</option>
                     <option value="General">通用文字识别</option>
                     <option value="HandWriting">手写文字识别</option>
                     <option value="MultiLanguage">多语言识别</option>
                     <option value="Table">表格识别</option>
-                  </select>
+                  </Select>
                 </Field>
                 <Field label="AccessKey ID" htmlFor="aliyun-ocr-key-id">
                   <input
