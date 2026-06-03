@@ -8,6 +8,7 @@ pub async fn extract_audio(video: &Path, out_dir: &Path) -> AppResult<PathBuf> {
     let out = out_dir.join("audio.wav");
     let ffmpeg = resolve(&FFMPEG, None)?;
     let status = Command::new(&ffmpeg)
+        .kill_on_drop(true)
         .args(["-y", "-i"])
         .arg(video)
         .args(["-vn", "-ac", "1", "-ar", "16000", "-f", "wav"])
@@ -28,6 +29,7 @@ pub async fn wav_to_mp3(wav: &Path) -> AppResult<PathBuf> {
     let out = wav.with_file_name("audio.mp3");
     let ffmpeg = resolve(&FFMPEG, None)?;
     let status = Command::new(&ffmpeg)
+        .kill_on_drop(true)
         .args(["-y", "-i"])
         .arg(wav)
         .args(["-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k"])

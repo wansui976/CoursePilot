@@ -303,40 +303,56 @@ export function Home() {
                 const progress = displayProgress(active);
                 const percent = Math.floor(progress * 100);
                 const message = active?.message || stageLabel(active?.stage);
+                const canCancel =
+                  active?.status === "running" || active?.status === "pending";
                 return (
-                  <button
+                  <div
                     key={video.id}
-                    onClick={() => openQueuedVideo(video.id)}
-                    className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left shadow-[var(--shadow-card)] transition hover:bg-[var(--surface-card-hover)]"
+                    className="relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]"
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0 truncate text-sm font-medium text-[var(--text-strong)]">
-                        {video.title}
+                    <button
+                      onClick={() => openQueuedVideo(video.id)}
+                      className={`block w-full px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)] ${
+                        canCancel ? "pr-20" : ""
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 truncate text-sm font-medium text-[var(--text-strong)]">
+                          {video.title}
+                        </div>
+                        <span className="shrink-0 tabular-nums text-xs text-[var(--text-muted)]">
+                          {percent}%
+                        </span>
                       </div>
-                      <span className="shrink-0 tabular-nums text-xs text-[var(--text-muted)]">
-                        {percent}%
-                      </span>
-                    </div>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded bg-[var(--surface-card-hover)]">
+                      <div className="mt-2 h-1.5 overflow-hidden rounded bg-[var(--surface-card-hover)]">
+                        <div
+                          className={
+                            active?.status === "failed"
+                              ? "h-full bg-red-500"
+                              : "h-full bg-primary"
+                          }
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
                       <div
                         className={
                           active?.status === "failed"
-                            ? "h-full bg-red-500"
-                            : "h-full bg-primary"
+                            ? "mt-1.5 truncate text-xs text-red-500"
+                            : "mt-1.5 truncate text-xs text-[var(--text-muted)]"
                         }
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
-                    <div
-                      className={
-                        active?.status === "failed"
-                          ? "mt-1.5 truncate text-xs text-red-500"
-                          : "mt-1.5 truncate text-xs text-[var(--text-muted)]"
-                      }
-                    >
-                      {message}
-                    </div>
-                  </button>
+                      >
+                        {message}
+                      </div>
+                    </button>
+                    {canCancel && (
+                      <button
+                        onClick={() => void ipc.pipeline.cancel(video.id)}
+                        className="absolute right-3 top-3 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs text-[var(--text-muted)] transition hover:text-red-500"
+                      >
+                        取消
+                      </button>
+                    )}
+                  </div>
                 );
               })}
             </div>
