@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 import type { LlmProfile, ProviderKind } from "@/lib/types";
@@ -79,17 +80,20 @@ export function LlmSettingsPanel() {
               placeholder="名称"
               onChange={(e) => update(p.id, { name: e.target.value })}
             />
-            <select
-              className={`${FIELD} w-auto`}
-              value={p.kind}
-              onChange={(e) => {
-                const kind = e.target.value as ProviderKind;
-                update(p.id, { kind, base_url: DEFAULT_BASE[kind] });
-              }}
-            >
-              <option value="openai">OpenAI 兼容</option>
-              <option value="anthropic">Anthropic</option>
-            </select>
+            <div className="relative">
+              <select
+                className={`${FIELD} w-auto cursor-pointer appearance-none pr-9`}
+                value={p.kind}
+                onChange={(e) => {
+                  const kind = e.target.value as ProviderKind;
+                  update(p.id, { kind, base_url: DEFAULT_BASE[kind] });
+                }}
+              >
+                <option value="openai">OpenAI 兼容</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
+            </div>
           </div>
           <input
             className={FIELD}

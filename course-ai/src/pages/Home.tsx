@@ -442,7 +442,7 @@ export function Home() {
           <button
             type="button"
             aria-label="保存标题"
-            className="flex h-7 w-7 items-center justify-center rounded bg-primary text-primary-foreground disabled:opacity-50"
+            className="flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] text-[var(--text-strong)] hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
             disabled={!renamingVideo.title.trim()}
             onClick={() => void saveRenamedVideo()}
           >
@@ -482,7 +482,7 @@ export function Home() {
               videoId={video.id}
               className="absolute inset-0 h-full w-full"
             />
-            <span className="relative flex h-12 w-12 items-center justify-center rounded-full bg-black/35 text-white shadow-lg backdrop-blur-sm transition group-hover:bg-primary">
+            <span className="relative flex h-12 w-12 items-center justify-center rounded-full bg-black/35 text-white shadow-lg backdrop-blur-sm transition group-hover:bg-black/60">
               <Play className="h-5 w-5 fill-current" />
             </span>
           </span>
@@ -521,7 +521,7 @@ export function Home() {
               videoId={video.id}
               className="absolute inset-0 h-full w-full"
             />
-            <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur-sm transition group-hover:bg-primary">
+            <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur-sm transition group-hover:bg-black/60">
               <Play className="h-4 w-4 fill-current" />
             </span>
           </span>
