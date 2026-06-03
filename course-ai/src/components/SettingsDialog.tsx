@@ -116,6 +116,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [root, setRoot] = useState("");
   const [model, setModel] = useState("large-v3-turbo");
   const [asrBackend, setAsrBackend] = useState("whisper");
+  const [asrLanguage, setAsrLanguage] = useState("zh");
   const [volcengineAppId, setVolcengineAppId] = useState("");
   const [volcengineToken, setVolcengineToken] = useState("");
   const [volcengineSaved, setVolcengineSaved] = useState("");
@@ -139,6 +140,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     void ipc.settings
       .get("asr_backend")
       .then((value) => setAsrBackend(value ?? "whisper"));
+    void ipc.settings
+      .get("asr_language")
+      .then((value) => setAsrLanguage(value ?? "zh"));
     void ipc.settings
       .get("volcengine_asr_app_id")
       .then((value) => setVolcengineAppId(value ?? ""));
@@ -172,6 +176,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   async function changeAsrBackend(value: string) {
     setAsrBackend(value);
     await ipc.settings.set("asr_backend", value);
+  }
+
+  async function changeAsrLanguage(value: string) {
+    setAsrLanguage(value);
+    await ipc.settings.set("asr_language", value);
   }
 
   async function saveVolcengineKey() {
@@ -278,6 +287,29 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <option value="whisper">本地 Whisper</option>
                 <option value="volcengine">火山录音文件识别</option>
                 <option value="aliyun">阿里云 DashScope 录音文件识别</option>
+              </Select>
+            </Field>
+
+            <Field
+              label="识别语言"
+              htmlFor="asr-language"
+              hint="对本地 Whisper 与阿里云 paraformer-v2 / fun-asr 生效；火山及通义千问 ASR 为自动识别"
+            >
+              <Select
+                id="asr-language"
+                value={asrLanguage}
+                onChange={(event) => void changeAsrLanguage(event.target.value)}
+              >
+                <option value="auto">自动检测</option>
+                <option value="zh">中文</option>
+                <option value="en">英语</option>
+                <option value="ja">日语</option>
+                <option value="ko">韩语</option>
+                <option value="yue">粤语</option>
+                <option value="fr">法语</option>
+                <option value="de">德语</option>
+                <option value="es">西班牙语</option>
+                <option value="ru">俄语</option>
               </Select>
             </Field>
 

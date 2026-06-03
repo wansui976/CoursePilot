@@ -22,7 +22,12 @@ const MAX_POLLS: u32 = 600; // 3s × 600 ≈ 30 分钟上限
 /// 默认模型；可被设置覆盖。
 pub const DEFAULT_MODEL: &str = "qwen3-asr-flash-filetrans";
 
-pub async fn run_aliyun(audio_mp3: &Path, api_key: &str, model: &str) -> AppResult<WhisperJson> {
+pub async fn run_aliyun(
+    audio_mp3: &Path,
+    api_key: &str,
+    model: &str,
+    language: Option<&str>,
+) -> AppResult<WhisperJson> {
     let api_key = api_key.trim();
     if api_key.is_empty() {
         return Err(AppError::Config(
@@ -34,6 +39,8 @@ pub async fn run_aliyun(audio_mp3: &Path, api_key: &str, model: &str) -> AppResu
     } else {
         model.trim()
     };
+    // 仅 paraformer-v2 / fun-asr 支持 language_hints；其它模型（如 qwen3-asr）自动识别。
+    let language_hint = language.filter(|_| supports_language_hints(model));
 
     let bytes = tokio::fs::read(audio_mp3).await?;
     let data_uri = format!("data:audio/mpeg;base64,{}", base64_encode(&bytes));
@@ -44,7 +51,7 @@ pub async fn run_aliyun(audio_mp3: &Path, api_key: &str, model: &str) -> AppResu
         .post(SUBMIT_URL)
         .bearer_auth(api_key)
         .header("X-DashScope-Async", "enable")
-        .json(&build_submit_body(model, &data_uri))
+        .json(&build_submit_body(model, &data_uri, language_hint))
         .send()
         .await
         .map_err(|error| AppError::Pipeline(format!("dashscope submit: {error}")))?;
@@ -92,11 +99,20 @@ pub async fn run_aliyun(audio_mp3: &Path, api_key: &str, model: &str) -> AppResu
     ))
 }
 
-pub fn build_submit_body(model: &str, file_url: &str) -> Value {
-    json!({
+/// 这些模型支持 language_hints 语言提示；其它模型自动识别语言。
+pub fn supports_language_hints(model: &str) -> bool {
+    model.contains("paraformer") || model.contains("fun-asr")
+}
+
+pub fn build_submit_body(model: &str, file_url: &str, language_hint: Option<&str>) -> Value {
+    let mut body = json!({
         "model": model,
         "input": { "file_urls": [file_url] },
-    })
+    });
+    if let Some(lang) = language_hint {
+        body["parameters"] = json!({ "language_hints": [lang] });
+    }
+    body
 }
 
 /// fun-asr / paraformer 结果在 output.results[]，qwen3-asr-flash-filetrans 在 output.result。
@@ -212,9 +228,23 @@ mod tests {
 
     #[test]
     fn submit_body_uses_file_urls() {
-        let body = build_submit_body("fun-asr", "data:audio/mpeg;base64,QUJD");
+        let body = build_submit_body("fun-asr", "data:audio/mpeg;base64,QUJD", None);
         assert_eq!(body["model"], "fun-asr");
         assert_eq!(body["input"]["file_urls"][0], "data:audio/mpeg;base64,QUJD");
+        assert!(body.get("parameters").is_none());
+    }
+
+    #[test]
+    fn submit_body_adds_language_hints_when_set() {
+        let body = build_submit_body("paraformer-v2", "u", Some("en"));
+        assert_eq!(body["parameters"]["language_hints"][0], "en");
+    }
+
+    #[test]
+    fn language_hints_only_for_supported_models() {
+        assert!(supports_language_hints("paraformer-v2"));
+        assert!(supports_language_hints("fun-asr"));
+        assert!(!supports_language_hints("qwen3-asr-flash-filetrans"));
     }
 
     #[test]

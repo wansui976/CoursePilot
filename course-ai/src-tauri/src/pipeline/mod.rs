@@ -179,7 +179,7 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
 
             let lang = whisper_language_or_default(
                 sqlx::query_scalar::<_, String>(
-                    "SELECT value FROM settings WHERE key='whisper_language'",
+                    "SELECT value FROM settings WHERE key='asr_language'",
                 )
                 .fetch_optional(&db.pool)
                 .await?,
@@ -242,6 +242,16 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
             .fetch_optional(&db.pool)
             .await?
             .unwrap_or_else(|| aliyun_asr::DEFAULT_MODEL.to_string());
+            let language = sqlx::query_scalar::<_, String>(
+                "SELECT value FROM settings WHERE key='asr_language'",
+            )
+            .fetch_optional(&db.pool)
+            .await?;
+            // 「自动检测」或未设置时不传语言提示，让模型自动识别。
+            let language = language
+                .as_deref()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && *l != "auto");
             emit_running_progress(
                 &app,
                 &db,
@@ -262,7 +272,7 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
                         &format!("云端识别中（阿里云 {model}）"),
                     )
                     .await?;
-                    aliyun_asr::run_aliyun(&mp3, &api_key, &model).await
+                    aliyun_asr::run_aliyun(&mp3, &api_key, &model, language).await
                 }
                 Err(e) => Err(e),
             }
