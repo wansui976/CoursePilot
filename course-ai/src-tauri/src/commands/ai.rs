@@ -164,6 +164,22 @@ pub async fn provider_for_db(
     Ok(Some((build_provider(&profile, key), profile.model.clone())))
 }
 
+pub async fn first_available_provider_for_db(
+    db: &crate::db::Db,
+) -> AppResult<Option<(crate::llm::Provider, String)>> {
+    let profiles = parse_profiles(get_setting(db, "llm_profiles").await?.as_deref())?;
+    for profile in profiles {
+        let Some(key) = keychain::get_api_key(db, &profile.id).await? else {
+            continue;
+        };
+        if key.trim().is_empty() {
+            continue;
+        }
+        return Ok(Some((build_provider(&profile, key), profile.model.clone())));
+    }
+    Ok(None)
+}
+
 async fn provider_for(
     state: &AppState,
     task: AiTask,
@@ -204,4 +220,36 @@ pub async fn cmd_generate_ai(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::settings::set_setting;
+    use crate::db::Db;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn first_available_provider_skips_profiles_without_keys() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        set_setting(
+            &db,
+            "llm_profiles",
+            r#"[
+              {"id":"no-key","name":"A","kind":"openai","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini"},
+              {"id":"with-key","name":"B","kind":"openai","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini"}
+            ]"#,
+        )
+        .await
+        .unwrap();
+        keychain::set_api_key(&db, "with-key", "sk-test")
+            .await
+            .unwrap();
+
+        let (_, model) = first_available_provider_for_db(&db).await.unwrap().unwrap();
+        assert_eq!(model, "gpt-4o-mini");
+    }
 }
