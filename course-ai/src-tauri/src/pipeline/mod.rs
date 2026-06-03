@@ -202,12 +202,10 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
             .fetch_optional(&db.pool)
             .await?
             .unwrap_or_default();
-            let access_token = sqlx::query_scalar::<_, String>(
-                "SELECT value FROM settings WHERE key='volcengine_asr_access_token'",
-            )
-            .fetch_optional(&db.pool)
-            .await?
-            .unwrap_or_default();
+            let access_token =
+                crate::llm::keychain::get_secret_or_legacy(&db, "volcengine_asr_access_token")
+                    .await?
+                    .unwrap_or_default();
             emit_running_progress(
                 &app,
                 &db,
@@ -235,12 +233,9 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
             }
         }
         AsrBackend::Aliyun => {
-            let api_key = sqlx::query_scalar::<_, String>(
-                "SELECT value FROM settings WHERE key='dashscope_api_key'",
-            )
-            .fetch_optional(&db.pool)
-            .await?
-            .unwrap_or_default();
+            let api_key = crate::llm::keychain::get_secret_or_legacy(&db, "dashscope_api_key")
+                .await?
+                .unwrap_or_default();
             let model = sqlx::query_scalar::<_, String>(
                 "SELECT value FROM settings WHERE key='aliyun_asr_model'",
             )

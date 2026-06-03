@@ -49,6 +49,11 @@ export const ipc = {
   trash: {
     list: (): Promise<TrashedVideo[]> => invoke("cmd_list_trash"),
   },
+  secrets: {
+    // 保存敏感凭证（ASR/OCR 密钥）到密钥存储。
+    set: (name: string, value: string): Promise<void> =>
+      invoke("cmd_set_secret", { name, value }),
+  },
   settings: {
     get: (key: string): Promise<string | null> =>
       invoke("cmd_get_setting", { key }),
