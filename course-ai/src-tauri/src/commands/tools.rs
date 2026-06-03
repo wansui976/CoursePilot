@@ -33,9 +33,12 @@ pub async fn cmd_ocr_region(
         let access_key_id = get_setting(&state.db, "aliyun_ocr_access_key_id")
             .await?
             .unwrap_or_default();
-        let access_key_secret = get_setting(&state.db, "aliyun_ocr_access_key_secret")
-            .await?
-            .unwrap_or_default();
+        let access_key_secret = crate::llm::keychain::get_secret_or_legacy(
+            &state.db,
+            "aliyun_ocr_access_key_secret",
+        )
+        .await?
+        .unwrap_or_default();
         let ocr_type = get_setting(&state.db, "aliyun_ocr_type")
             .await?
             .unwrap_or_else(|| aliyun_ocr::DEFAULT_TYPE.to_string());

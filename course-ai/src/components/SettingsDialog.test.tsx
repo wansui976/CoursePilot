@@ -8,6 +8,9 @@ const { mockIpc } = vi.hoisted(() => ({
       get: vi.fn(),
       set: vi.fn(),
     },
+    secrets: {
+      set: vi.fn(),
+    },
   },
 }));
 
@@ -28,6 +31,7 @@ describe("SettingsPanel", () => {
       return null;
     });
     mockIpc.settings.set.mockResolvedValue(undefined);
+    mockIpc.secrets.set.mockResolvedValue(undefined);
   });
 
   it("lets users select Volcengine ASR and save App ID + Access Token, hiding only the token", async () => {
@@ -52,7 +56,8 @@ describe("SettingsPanel", () => {
         "app-123",
       ),
     );
-    expect(mockIpc.settings.set).toHaveBeenCalledWith(
+    // 密钥（Access Token）走密钥存储，而非明文 settings。
+    expect(mockIpc.secrets.set).toHaveBeenCalledWith(
       "volcengine_asr_access_token",
       "secret-token",
     );

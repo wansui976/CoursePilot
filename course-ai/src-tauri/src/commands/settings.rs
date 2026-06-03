@@ -38,6 +38,16 @@ pub async fn cmd_get_setting(state: State<'_, AppState>, key: String) -> AppResu
     get_setting(&state.db, &key).await
 }
 
+/// 保存一项敏感凭证（ASR/OCR 密钥）到密钥存储，与 LLM key 同一套机制。
+#[tauri::command]
+pub async fn cmd_set_secret(
+    state: State<'_, AppState>,
+    name: String,
+    value: String,
+) -> AppResult<()> {
+    crate::llm::keychain::set_secret(&state.db, &name, &value).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

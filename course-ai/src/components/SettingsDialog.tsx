@@ -178,7 +178,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     const appId = volcengineAppId.trim();
     const token = volcengineToken.trim();
     if (appId) await ipc.settings.set("volcengine_asr_app_id", appId);
-    if (token) await ipc.settings.set("volcengine_asr_access_token", token);
+    if (token) await ipc.secrets.set("volcengine_asr_access_token", token);
     if (!appId && !token) return;
     setVolcengineToken("");
     setVolcengineSaved("已保存");
@@ -192,7 +192,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   async function saveDashscopeKey() {
     if (!dashscopeKey.trim()) return;
-    await ipc.settings.set("dashscope_api_key", dashscopeKey.trim());
+    await ipc.secrets.set("dashscope_api_key", dashscopeKey.trim());
     setDashscopeKey("");
     setDashscopeSaved("已保存");
     setTimeout(() => setDashscopeSaved(""), 1500);
@@ -212,7 +212,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     const keyId = ocrKeyId.trim();
     const secret = ocrSecret.trim();
     if (keyId) await ipc.settings.set("aliyun_ocr_access_key_id", keyId);
-    if (secret) await ipc.settings.set("aliyun_ocr_access_key_secret", secret);
+    if (secret) await ipc.secrets.set("aliyun_ocr_access_key_secret", secret);
     if (!keyId && !secret) return;
     setOcrSecret("");
     setOcrSaved("已保存");

@@ -21,7 +21,7 @@ use crate::commands::export::{
     cmd_export_mindmap, cmd_export_notes, cmd_export_quiz, cmd_export_subtitles,
 };
 use crate::commands::rag::{cmd_rag_query, cmd_search_transcript};
-use crate::commands::settings::{cmd_get_setting, cmd_set_setting};
+use crate::commands::settings::{cmd_get_setting, cmd_set_secret, cmd_set_setting};
 use crate::commands::slides::{
     cmd_capture_frame, cmd_extract_slides, cmd_get_screenshots, cmd_get_slides,
     cmd_read_slide_image,
@@ -81,6 +81,7 @@ pub fn run() {
             cmd_video_cover,
             cmd_set_setting,
             cmd_get_setting,
+            cmd_set_secret,
             cmd_list_whisper_models,
             cmd_download_whisper_model,
             cmd_list_jobs,
