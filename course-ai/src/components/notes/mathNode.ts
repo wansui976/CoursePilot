@@ -1,5 +1,7 @@
 import { mergeAttributes, Node } from "@tiptap/core";
 import katex from "katex";
+// 跟随笔记分包加载，避免 KaTeX 样式进入首屏主包。
+import "katex/dist/katex.min.css";
 
 /**
  * 行内数学公式节点（KaTeX 渲染）。作为 atom inline 节点保存 latex 源码，

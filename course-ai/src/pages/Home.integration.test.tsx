@@ -124,7 +124,8 @@ describe("Home selected-video integration", () => {
     expect(screen.getByRole("tab", { name: "课件" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "笔记" }));
-    expect(screen.getByRole("button", { name: "AI笔记" })).toBeInTheDocument();
+    // 笔记面板按需懒加载，等它挂载。
+    expect(await screen.findByRole("button", { name: "AI笔记" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "AI出题" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "AI脑图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "提问" })).toBeInTheDocument();

@@ -1,4 +1,3 @@
-import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -10,11 +9,18 @@ import { Button } from "@/components/ui/button";
 import { ExportMenu, type ExportItem } from "./ExportMenu";
 import { ipc } from "@/lib/ipc";
 import { markdownToTiptap } from "@/lib/markdownToTiptap";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { TimestampNode, installTimestampClick } from "./notes/timestampNode";
 import { MathNode } from "./notes/mathNode";
-import { QuizPanel } from "./QuizPanel";
-import { MindmapPanel } from "./MindmapPanel";
 import { RagSearchPanel } from "./RagSearchPanel";
+
+// markmap 较重，仅在切到「脑图」时才加载。
+const QuizPanel = lazy(() =>
+  import("./QuizPanel").then((m) => ({ default: m.QuizPanel })),
+);
+const MindmapPanel = lazy(() =>
+  import("./MindmapPanel").then((m) => ({ default: m.MindmapPanel })),
+);
 
 type View = "notes" | "quiz" | "mindmap" | "ask" | "search";
 const VIEWS: { key: View; label: string; task?: "notes" | "quiz" | "mindmap" }[] =
@@ -141,8 +147,16 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       )}
       <div className="flex-1 overflow-y-auto">
         {view === "notes" && <EditorContent editor={editor} />}
-        {view === "quiz" && <QuizPanel videoId={videoId} />}
-        {view === "mindmap" && <MindmapPanel videoId={videoId} />}
+        {(view === "quiz" || view === "mindmap") && (
+          <Suspense
+            fallback={
+              <div className="p-4 text-sm text-[var(--text-faint)]">加载中…</div>
+            }
+          >
+            {view === "quiz" && <QuizPanel videoId={videoId} />}
+            {view === "mindmap" && <MindmapPanel videoId={videoId} />}
+          </Suspense>
+        )}
         {view === "ask" && <RagSearchPanel videoId={videoId} mode="ask" />}
         {view === "search" && <RagSearchPanel videoId={videoId} mode="search" />}
       </div>
