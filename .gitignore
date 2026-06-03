@@ -34,3 +34,4 @@ course-ai/src-tauri/binaries/*
 
 # Local Codex/Superpowers scratch state
 **/.superpowers/
+.worktrees/
