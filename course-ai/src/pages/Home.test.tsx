@@ -182,7 +182,7 @@ describe("Home", () => {
     expect(screen.getByLabelText("学习资料面板")).toHaveClass("min-w-[380px]");
   });
 
-  it("starts processing from the homepage video card menu and shows the queue in the left sidebar", async () => {
+  it("starts processing from the homepage video card menu and shows the queue page", async () => {
     renderHome();
 
     fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
@@ -197,11 +197,11 @@ describe("Home", () => {
     const sidebar = screen.getByRole("complementary", { name: "课程侧栏" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "处理队列" }));
     expect(
-      within(screen.getByLabelText("处理队列面板")).getByText(video.title),
+      within(screen.getByLabelText("处理队列页面")).getByText(video.title),
     ).toBeInTheDocument();
   });
 
-  it("shows detailed ASR progress text in the left processing queue", async () => {
+  it("shows detailed ASR progress text in the processing queue page", async () => {
     renderHome();
 
     fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
