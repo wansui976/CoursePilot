@@ -24,17 +24,6 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
     void mmRef.current.fit();
   }, [md]);
 
-  function exportSvg() {
-    if (!svgRef.current) return;
-    const xml = new XMLSerializer().serializeToString(svgRef.current);
-    const blob = new Blob([xml], { type: "image/svg+xml" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "mindmap.svg";
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
-
   if (!md) {
     return (
       <p className="p-4 text-sm text-[var(--text-faint)]">
@@ -44,21 +33,6 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
   }
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-end gap-3 px-2 py-1">
-        <button
-          className="text-xs text-primary hover:underline"
-          onClick={() => void ipc.export.mindmap(videoId)}
-          title="导出 Markmap 大纲 .md 到视频数据目录"
-        >
-          导出 MD
-        </button>
-        <button
-          className="text-xs text-primary hover:underline"
-          onClick={exportSvg}
-        >
-          导出 SVG
-        </button>
-      </div>
       <svg ref={svgRef} className="min-h-0 flex-1 w-full" />
     </div>
   );
