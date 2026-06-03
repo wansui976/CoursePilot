@@ -1,7 +1,6 @@
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RotateCcw, Trash2, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ChevronLeft, RotateCcw, Trash2 } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import type { TrashedVideo } from "@/lib/types";
 
@@ -40,34 +39,28 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="flex max-h-[80vh] w-[560px] max-w-full flex-col overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-rail)] text-[var(--text-normal)] shadow-[var(--shadow-pop)]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-4">
-          <div>
-            <h2 className="flex items-center gap-2 text-base font-semibold text-[var(--text-strong)]">
-              <Trash2 className="h-4 w-4" />
-              回收站
-            </h2>
-            <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-              删除的视频保留 30 天，到期自动清除；期间可恢复
-            </p>
-          </div>
-          <button
-            aria-label="关闭回收站"
-            onClick={onClose}
-            className="grid h-8 w-8 place-items-center rounded-lg text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </header>
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
+      <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-4">
+        <button
+          aria-label="返回"
+          onClick={onClose}
+          className="grid h-8 w-8 flex-none place-items-center rounded-lg text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <div className="min-w-0">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-[var(--text-strong)]">
+            <Trash2 className="h-4 w-4" />
+            回收站
+          </h2>
+          <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+            删除的视频保留 30 天，到期自动清除；期间可恢复
+          </p>
+        </div>
+      </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
+        <div className="mx-auto max-w-2xl">
           {isLoading ? (
             <p className="p-4 text-sm text-[var(--text-faint)]">加载中…</p>
           ) : items.length === 0 ? (
@@ -109,12 +102,6 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
             </ul>
           )}
         </div>
-
-        <footer className="flex items-center justify-end border-t border-[var(--border-subtle)] px-5 py-3">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            关闭
-          </Button>
-        </footer>
       </div>
     </div>
   );

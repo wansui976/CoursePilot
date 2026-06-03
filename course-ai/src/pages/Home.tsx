@@ -202,6 +202,14 @@ export function Home() {
     await queryClient.invalidateQueries({ queryKey: ["trash"] });
   }
 
+  // 设置 / 回收站作为主区域整页，与处理队列一致；互斥切换并取消选中视频。
+  function openMainView(view: "settings" | "recycle") {
+    setSelectedVideoId(null);
+    setQueueOpen(false);
+    setShowSettings(view === "settings");
+    setShowRecycleBin(view === "recycle");
+  }
+
   function beginStudyPanelResize(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault();
     const startX = event.clientX;
@@ -372,7 +380,7 @@ export function Home() {
             </button>
             <button
               className="flex h-11 w-11 items-center justify-center rounded-md text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
-              onClick={() => setShowSettings(true)}
+              onClick={() => openMainView("settings")}
               title="设置"
               aria-label="设置"
             >
@@ -386,8 +394,10 @@ export function Home() {
               setSelectedCourseId(id);
               setSelectedVideoId(null);
               setQueueOpen(false);
+              setShowSettings(false);
+              setShowRecycleBin(false);
             }}
-            onOpenSettings={() => setShowSettings(true)}
+            onOpenSettings={() => openMainView("settings")}
             onToggleTheme={toggleTheme}
             theme={theme}
             themeToggleLabel={themeToggleLabel}
@@ -395,14 +405,20 @@ export function Home() {
             queueCount={queuedVideoIds.length}
             onToggleQueue={() => {
               setSelectedVideoId(null);
+              setShowSettings(false);
+              setShowRecycleBin(false);
               setQueueOpen((open) => !open);
             }}
-            onOpenRecycleBin={() => setShowRecycleBin(true)}
+            onOpenRecycleBin={() => openMainView("recycle")}
           />
         )}
         <main className="flex min-w-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col bg-[var(--surface-app)]">
-            {queueOpen ? (
+            {showSettings ? (
+              <SettingsPanel onClose={() => setShowSettings(false)} />
+            ) : showRecycleBin ? (
+              <RecycleBin onClose={() => setShowRecycleBin(false)} />
+            ) : queueOpen ? (
               renderProcessingQueuePage()
             ) : selectedVideo ? (
               <>
@@ -673,8 +689,6 @@ export function Home() {
           )}
         </main>
       </div>
-      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
-      {showRecycleBin && <RecycleBin onClose={() => setShowRecycleBin(false)} />}
     </div>
   );
 }
