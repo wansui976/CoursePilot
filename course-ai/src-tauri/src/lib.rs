@@ -29,8 +29,8 @@ use crate::commands::slides::{
 use crate::commands::tools::{cmd_import_bilibili, cmd_ocr_region};
 use crate::commands::transcripts::{cmd_list_transcripts, cmd_update_transcript};
 use crate::commands::videos::{
-    cmd_add_local_video, cmd_delete_video, cmd_ensure_playable, cmd_list_videos, cmd_media_url,
-    cmd_update_video_title, cmd_video_cover,
+    cmd_add_local_video, cmd_delete_video, cmd_ensure_playable, cmd_list_trash, cmd_list_videos,
+    cmd_media_url, cmd_purge_video, cmd_restore_video, cmd_update_video_title, cmd_video_cover,
 };
 use crate::commands::whisper::{cmd_download_whisper_model, cmd_list_whisper_models};
 use crate::db::Db;
@@ -52,6 +52,10 @@ pub fn run() {
                 let db = Db::connect_and_migrate(&data_dir.join("courseai.db"))
                     .await
                     .expect("db init");
+                // 启动时清理过期回收站（超过保留期的视频永久删除）。
+                if let Err(error) = crate::commands::videos::purge_expired_trash(&db).await {
+                    tracing::warn!("purge expired trash failed: {error}");
+                }
                 handle.manage(AppState { db });
                 let media = crate::media_server::start()
                     .await
@@ -65,6 +69,9 @@ pub fn run() {
             cmd_list_courses,
             cmd_delete_course,
             cmd_rename_course,
+            cmd_restore_video,
+            cmd_purge_video,
+            cmd_list_trash,
             cmd_add_local_video,
             cmd_list_videos,
             cmd_update_video_title,

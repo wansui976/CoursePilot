@@ -9,6 +9,7 @@ import type {
   Screenshot,
   Slide,
   TranscriptSegment,
+  TrashedVideo,
   Video,
 } from "./types";
 
@@ -42,6 +43,11 @@ export const ipc = {
     updateTitle: (id: string, title: string): Promise<Video> =>
       invoke("cmd_update_video_title", { id, title }),
     delete: (id: string): Promise<void> => invoke("cmd_delete_video", { id }),
+    restore: (id: string): Promise<void> => invoke("cmd_restore_video", { id }),
+    purge: (id: string): Promise<void> => invoke("cmd_purge_video", { id }),
+  },
+  trash: {
+    list: (): Promise<TrashedVideo[]> => invoke("cmd_list_trash"),
   },
   settings: {
     get: (key: string): Promise<string | null> =>

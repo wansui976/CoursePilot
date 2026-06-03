@@ -42,7 +42,7 @@ const { mockIpc } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => `asset://${path}`,
 }));

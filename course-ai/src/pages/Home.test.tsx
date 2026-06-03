@@ -33,7 +33,7 @@ const { mockIpc } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: vi.fn() }));
 vi.mock("@/components/ImportVideoDialog", () => ({
   ImportVideoButton: () => <button>导入本地视频</button>,
 }));

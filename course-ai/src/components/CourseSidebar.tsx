@@ -1,4 +1,4 @@
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm as confirmDialog, open } from "@tauri-apps/plugin-dialog";
 import {
   ClipboardList,
   FolderOpen,
@@ -27,6 +27,7 @@ export function CourseSidebar({
   queueCount = 0,
   onToggleQueue,
   queuePanel,
+  onOpenRecycleBin,
 }: {
   selectedCourseId: string | null;
   onSelect: (id: string) => void;
@@ -38,6 +39,7 @@ export function CourseSidebar({
   queueCount?: number;
   onToggleQueue?: () => void;
   queuePanel?: ReactNode;
+  onOpenRecycleBin?: () => void;
 }) {
   const queryClient = useQueryClient();
   const { data: courses = [] } = useQuery({
@@ -55,13 +57,11 @@ export function CourseSidebar({
   });
 
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [confirmFor, setConfirmFor] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
 
   function closeMenu() {
     setMenuFor(null);
-    setConfirmFor(null);
   }
 
   const rename = useMutation({
@@ -89,6 +89,14 @@ export function CourseSidebar({
     const name = renameDraft.trim();
     if (renamingId && name) rename.mutate({ id: renamingId, name });
     setRenamingId(null);
+  }
+  async function confirmDelete(id: string, name: string) {
+    closeMenu();
+    const ok = await confirmDialog(
+      `删除课程「${name}」？\n该课程下的视频会移入回收站，可在 30 天内恢复。`,
+      { title: "删除课程", kind: "warning", okLabel: "删除", cancelLabel: "取消" },
+    );
+    if (ok) remove.mutate(id);
   }
 
   return (
@@ -181,7 +189,6 @@ export function CourseSidebar({
                 aria-label="课程操作"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setConfirmFor(null);
                   setMenuFor((id) => (id === course.id ? null : course.id));
                 }}
                 className={`mr-1 grid h-7 w-7 flex-none place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card)] hover:text-[var(--text-strong)] ${
@@ -192,46 +199,20 @@ export function CourseSidebar({
               </button>
               {menuFor === course.id && (
                 <div className="absolute right-1 top-full z-20 mt-1 w-36 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 shadow-[var(--shadow-pop)]">
-                  {confirmFor === course.id ? (
-                    <>
-                      <div className="px-3 py-1.5 text-xs text-[var(--text-muted)]">
-                        删除「{course.name}」？
-                      </div>
-                      <button
-                        onClick={() => {
-                          remove.mutate(course.id);
-                          closeMenu();
-                        }}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-500 hover:bg-[var(--surface-card-hover)]"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        确认删除
-                      </button>
-                      <button
-                        onClick={() => setConfirmFor(null)}
-                        className="w-full px-3 py-1.5 text-left text-sm text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)]"
-                      >
-                        取消
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => startRename(course.id, course.name)}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                        重命名
-                      </button>
-                      <button
-                        onClick={() => setConfirmFor(course.id)}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-500 hover:bg-[var(--surface-card-hover)]"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        删除
-                      </button>
-                    </>
-                  )}
+                  <button
+                    onClick={() => startRename(course.id, course.name)}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    重命名
+                  </button>
+                  <button
+                    onClick={() => void confirmDelete(course.id, course.name)}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-500 hover:bg-[var(--surface-card-hover)]"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    删除
+                  </button>
                 </div>
               )}
             </div>
@@ -257,6 +238,17 @@ export function CourseSidebar({
             <Sun className="h-4 w-4" />
           )}
         </Button>
+        {onOpenRecycleBin && (
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onOpenRecycleBin}
+            title="回收站"
+            aria-label="回收站"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )}
         <Button
           className="min-w-0 flex-1 justify-start"
           size="sm"

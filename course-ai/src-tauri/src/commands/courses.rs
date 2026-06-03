@@ -45,15 +45,24 @@ pub async fn create_course(db: &Db, name: String, root_path: String) -> AppResul
 pub async fn list_courses(db: &Db) -> AppResult<Vec<Course>> {
     Ok(sqlx::query_as::<_, Course>(
         "SELECT id,name,root_path,cover_image,created_at,updated_at
-         FROM courses ORDER BY updated_at DESC",
+         FROM courses WHERE deleted_at IS NULL ORDER BY updated_at DESC",
     )
     .fetch_all(&db.pool)
     .await?)
 }
 
+/// 删除课程：把课程的视频移入回收站（软删除），并软删除课程本身。
+/// 不直接 DELETE 课程行，否则 FK 级联会把回收站里的视频一并硬删除。
 pub async fn delete_course(db: &Db, id: String) -> AppResult<()> {
-    sqlx::query("DELETE FROM courses WHERE id=?")
-        .bind(id)
+    let now = Utc::now().timestamp_millis();
+    sqlx::query("UPDATE videos SET deleted_at=? WHERE course_id=? AND deleted_at IS NULL")
+        .bind(now)
+        .bind(&id)
+        .execute(&db.pool)
+        .await?;
+    sqlx::query("UPDATE courses SET deleted_at=? WHERE id=?")
+        .bind(now)
+        .bind(&id)
         .execute(&db.pool)
         .await?;
     Ok(())
