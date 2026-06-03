@@ -16,7 +16,9 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { CourseSidebar } from "@/components/CourseSidebar";
+import { RecycleBin } from "@/components/RecycleBin";
 import { ImportVideoButton } from "@/components/ImportVideoDialog";
 import { SettingsPanel } from "@/components/SettingsDialog";
 import { TabsPanel } from "@/components/TabsPanel";
@@ -73,6 +75,7 @@ export function Home() {
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showRecycleBin, setShowRecycleBin] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(readInitialTheme);
   const [videoLink, setVideoLink] = useState("");
   const [openMenuVideoId, setOpenMenuVideoId] = useState<string | null>(null);
@@ -196,11 +199,16 @@ export function Home() {
   }
 
   async function deleteVideo(videoId: string) {
-    if (!window.confirm("确定删除这个视频及其学习资料吗？")) return;
+    const ok = await confirmDialog(
+      "删除这个视频？\n它会移入回收站，可在 30 天内恢复。",
+      { title: "删除视频", kind: "warning", okLabel: "删除", cancelLabel: "取消" },
+    );
+    if (!ok) return;
     await ipc.videos.delete(videoId);
     setQueuedVideoIds((ids) => ids.filter((id) => id !== videoId));
     if (selectedVideoId === videoId) setSelectedVideoId(null);
     await queryClient.invalidateQueries({ queryKey: ["videos", selectedCourseId] });
+    await queryClient.invalidateQueries({ queryKey: ["trash"] });
   }
 
   function beginStudyPanelResize(event: ReactPointerEvent<HTMLDivElement>) {
@@ -382,6 +390,7 @@ export function Home() {
             queueCount={queuedVideoIds.length}
             onToggleQueue={() => setQueueOpen((open) => !open)}
             queuePanel={renderProcessingQueue()}
+            onOpenRecycleBin={() => setShowRecycleBin(true)}
           />
         )}
         <main className="flex min-w-0 flex-1">
@@ -664,6 +673,7 @@ export function Home() {
         </main>
       </div>
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+      {showRecycleBin && <RecycleBin onClose={() => setShowRecycleBin(false)} />}
     </div>
   );
 }

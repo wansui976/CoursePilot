@@ -32,6 +32,15 @@ export interface TranscriptSegment {
   text: string;
 }
 
+export interface TrashedVideo {
+  id: string;
+  title: string;
+  course_id: string;
+  course_name: string;
+  deleted_at: number;
+  expires_at: number;
+}
+
 export interface Job {
   id: string;
   video_id: string;

@@ -95,11 +95,26 @@ pub async fn add_local_video(
 
 pub async fn list_videos(db: &Db, course_id: &str) -> AppResult<Vec<Video>> {
     Ok(sqlx::query_as::<_, Video>(
-        "SELECT * FROM videos WHERE course_id=? ORDER BY order_index ASC",
+        "SELECT * FROM videos WHERE course_id=? AND deleted_at IS NULL ORDER BY order_index ASC",
     )
     .bind(course_id)
     .fetch_all(&db.pool)
     .await?)
+}
+
+/// 回收站保留天数；到期后由 purge_expired_trash 永久删除。
+pub const TRASH_RETENTION_DAYS: i64 = 30;
+const DAY_MS: i64 = 86_400_000;
+
+/// 回收站里的一条视频（含所属课程名与到期时间，便于前端展示）。
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct TrashedVideo {
+    pub id: String,
+    pub title: String,
+    pub course_id: String,
+    pub course_name: String,
+    pub deleted_at: i64,
+    pub expires_at: i64,
 }
 
 pub async fn update_video_title(db: &Db, id: &str, title: String) -> AppResult<Video> {
@@ -118,8 +133,10 @@ pub async fn update_video_title(db: &Db, id: &str, title: String) -> AppResult<V
     Ok(video)
 }
 
+/// 软删除：移入回收站（置 deleted_at），可在 30 天内恢复。
 pub async fn delete_video(db: &Db, id: &str) -> AppResult<()> {
-    let result = sqlx::query("DELETE FROM videos WHERE id=?")
+    let result = sqlx::query("UPDATE videos SET deleted_at=? WHERE id=? AND deleted_at IS NULL")
+        .bind(Utc::now().timestamp_millis())
         .bind(id)
         .execute(&db.pool)
         .await?;
@@ -127,6 +144,66 @@ pub async fn delete_video(db: &Db, id: &str) -> AppResult<()> {
         return Err(AppError::NotFound(format!("video {id}")));
     }
     Ok(())
+}
+
+/// 从回收站恢复视频；若其课程也被软删除，一并恢复课程。
+pub async fn restore_video(db: &Db, id: &str) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE courses SET deleted_at=NULL
+         WHERE id=(SELECT course_id FROM videos WHERE id=?)",
+    )
+    .bind(id)
+    .execute(&db.pool)
+    .await?;
+    let result = sqlx::query("UPDATE videos SET deleted_at=NULL WHERE id=?")
+        .bind(id)
+        .execute(&db.pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound(format!("video {id}")));
+    }
+    Ok(())
+}
+
+/// 永久删除单个视频（连带其转写/笔记等衍生数据，经 FK 级联）。
+pub async fn purge_video(db: &Db, id: &str) -> AppResult<()> {
+    sqlx::query("DELETE FROM videos WHERE id=?")
+        .bind(id)
+        .execute(&db.pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn list_trashed(db: &Db) -> AppResult<Vec<TrashedVideo>> {
+    let retention = TRASH_RETENTION_DAYS * DAY_MS;
+    Ok(sqlx::query_as::<_, TrashedVideo>(
+        "SELECT v.id, v.title, v.course_id, c.name AS course_name,
+                v.deleted_at AS deleted_at, v.deleted_at + ? AS expires_at
+         FROM videos v JOIN courses c ON v.course_id=c.id
+         WHERE v.deleted_at IS NOT NULL
+         ORDER BY v.deleted_at DESC",
+    )
+    .bind(retention)
+    .fetch_all(&db.pool)
+    .await?)
+}
+
+/// 清理过期回收站：删除超过保留期的视频，再删掉没有任何视频的已软删课程。
+pub async fn purge_expired_trash(db: &Db) -> AppResult<u64> {
+    let cutoff = Utc::now().timestamp_millis() - TRASH_RETENTION_DAYS * DAY_MS;
+    let result =
+        sqlx::query("DELETE FROM videos WHERE deleted_at IS NOT NULL AND deleted_at < ?")
+            .bind(cutoff)
+            .execute(&db.pool)
+            .await?;
+    sqlx::query(
+        "DELETE FROM courses
+         WHERE deleted_at IS NOT NULL
+           AND id NOT IN (SELECT DISTINCT course_id FROM videos)",
+    )
+    .execute(&db.pool)
+    .await?;
+    Ok(result.rows_affected())
 }
 
 #[tauri::command]
@@ -171,6 +248,23 @@ pub async fn cmd_update_video_title(
 #[tauri::command]
 pub async fn cmd_delete_video(state: State<'_, AppState>, id: String) -> AppResult<()> {
     delete_video(&state.db, &id).await
+}
+
+#[tauri::command]
+pub async fn cmd_restore_video(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    restore_video(&state.db, &id).await
+}
+
+#[tauri::command]
+pub async fn cmd_purge_video(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    purge_video(&state.db, &id).await
+}
+
+#[tauri::command]
+pub async fn cmd_list_trash(state: State<'_, AppState>) -> AppResult<Vec<TrashedVideo>> {
+    // 列表前先清掉过期项，保证用户看到的都是仍可恢复的。
+    purge_expired_trash(&state.db).await?;
+    list_trashed(&state.db).await
 }
 
 /// 返回一个 WebView 可正常播放（含音轨）的路径：非 faststart 的 MP4 会被
@@ -279,5 +373,55 @@ mod tests {
         let course = create_course(&db, "c".into(), "/x".into()).await.unwrap();
         let err = add_local_video(&db, &course.id, "/nonexistent.mp4".into(), None).await;
         assert!(matches!(err, Err(AppError::NotFound(_))));
+    }
+
+    async fn seed_video(dir: &tempfile::TempDir) -> (Db, String, String) {
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let video_path = dir.path().join("01.mp4");
+        std::fs::write(&video_path, b"fake").unwrap();
+        let video = add_local_video(&db, &course.id, video_path, None)
+            .await
+            .unwrap();
+        (db, course.id, video.id)
+    }
+
+    #[tokio::test]
+    async fn delete_moves_to_trash_and_restore_brings_back() {
+        let dir = tempdir().unwrap();
+        let (db, course_id, video_id) = seed_video(&dir).await;
+
+        delete_video(&db, &video_id).await.unwrap();
+        // 删除后不在课程列表，但在回收站，且有到期时间。
+        assert!(list_videos(&db, &course_id).await.unwrap().is_empty());
+        let trash = list_trashed(&db).await.unwrap();
+        assert_eq!(trash.len(), 1);
+        assert_eq!(trash[0].course_name, "c");
+        assert!(trash[0].expires_at > trash[0].deleted_at);
+
+        restore_video(&db, &video_id).await.unwrap();
+        assert_eq!(list_videos(&db, &course_id).await.unwrap().len(), 1);
+        assert!(list_trashed(&db).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn purge_expired_removes_old_but_keeps_recent() {
+        let dir = tempdir().unwrap();
+        let (db, _course_id, video_id) = seed_video(&dir).await;
+        // 把 deleted_at 调到 31 天前，应被清理。
+        let old = Utc::now().timestamp_millis() - 31 * DAY_MS;
+        sqlx::query("UPDATE videos SET deleted_at=? WHERE id=?")
+            .bind(old)
+            .bind(&video_id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        let removed = purge_expired_trash(&db).await.unwrap();
+        assert_eq!(removed, 1);
+        assert!(list_trashed(&db).await.unwrap().is_empty());
     }
 }
