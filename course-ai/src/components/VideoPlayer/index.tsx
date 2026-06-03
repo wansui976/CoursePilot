@@ -6,10 +6,15 @@ import { usePlayer } from "@/stores/player";
 import { CaptionOverlay } from "./CaptionOverlay";
 import { Controls } from "./Controls";
 
+const posKey = (id: string) => `video-pos:${id}`;
+// 距片尾 15s 内不再续播（视为看完），从头开始。
+const RESUME_TAIL_GUARD = 15;
+
 export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) {
   const regionRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLVideoElement>(null);
+  const lastSavedRef = useRef(0);
   const [videoAspect, setVideoAspect] = useState(16 / 9);
   const [region, setRegion] = useState({ w: 0, h: 0 });
   const [playing, setPlaying] = useState(false);
@@ -204,18 +209,49 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
             playsInline
             disablePictureInPicture
             className="h-full w-full bg-black object-contain"
-            onTimeUpdate={(event) =>
-              setCurrentMs(Math.floor(event.currentTarget.currentTime * 1000))
-            }
+            onTimeUpdate={(event) => {
+              const t = event.currentTarget.currentTime;
+              setCurrentMs(Math.floor(t * 1000));
+              // 每 5 秒（或回退时）记录一次进度，避免频繁写 localStorage。
+              if (Math.abs(t - lastSavedRef.current) >= 5) {
+                lastSavedRef.current = t;
+                const dur = event.currentTarget.duration;
+                if (dur && t > dur - RESUME_TAIL_GUARD) {
+                  localStorage.removeItem(posKey(videoId));
+                } else if (t > 2) {
+                  localStorage.setItem(posKey(videoId), String(t));
+                }
+              }
+            }}
             onLoadedMetadata={(event) => {
-              setDurationMs(Math.floor(event.currentTarget.duration * 1000));
-              const { videoWidth, videoHeight } = event.currentTarget;
+              const video = event.currentTarget;
+              setDurationMs(Math.floor(video.duration * 1000));
+              const { videoWidth, videoHeight } = video;
               if (videoWidth > 0 && videoHeight > 0) {
                 setVideoAspect(videoWidth / videoHeight);
               }
+              // 断点续播：恢复上次离开的位置。
+              const saved = Number(localStorage.getItem(posKey(videoId)));
+              if (
+                Number.isFinite(saved) &&
+                saved > 2 &&
+                video.duration &&
+                saved < video.duration - RESUME_TAIL_GUARD
+              ) {
+                video.currentTime = saved;
+                lastSavedRef.current = saved;
+              }
             }}
             onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
+            onPause={(event) => {
+              setPlaying(false);
+              const t = event.currentTarget.currentTime;
+              const dur = event.currentTarget.duration;
+              if (t > 2 && (!dur || t < dur - RESUME_TAIL_GUARD)) {
+                localStorage.setItem(posKey(videoId), String(t));
+                lastSavedRef.current = t;
+              }
+            }}
             onVolumeChange={(event) => {
               setVolume(event.currentTarget.volume);
               setMuted(event.currentTarget.muted);
