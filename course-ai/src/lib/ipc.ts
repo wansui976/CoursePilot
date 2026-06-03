@@ -25,6 +25,8 @@ export const ipc = {
     create: (name: string, rootPath: string): Promise<Course> =>
       invoke("cmd_create_course", { name, rootPath }),
     delete: (id: string): Promise<void> => invoke("cmd_delete_course", { id }),
+    rename: (id: string, name: string): Promise<void> =>
+      invoke("cmd_rename_course", { id, name }),
   },
   videos: {
     list: (courseId: string): Promise<Video[]> =>

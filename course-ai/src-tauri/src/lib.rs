@@ -14,7 +14,9 @@ use crate::commands::ai::{
     cmd_get_quiz, cmd_get_summary, cmd_has_api_key, cmd_save_llm_profiles, cmd_save_notes,
     cmd_set_api_key,
 };
-use crate::commands::courses::{cmd_create_course, cmd_delete_course, cmd_list_courses, AppState};
+use crate::commands::courses::{
+    cmd_create_course, cmd_delete_course, cmd_list_courses, cmd_rename_course, AppState,
+};
 use crate::commands::export::{
     cmd_export_mindmap, cmd_export_notes, cmd_export_quiz, cmd_export_subtitles,
 };
@@ -62,6 +64,7 @@ pub fn run() {
             cmd_create_course,
             cmd_list_courses,
             cmd_delete_course,
+            cmd_rename_course,
             cmd_add_local_video,
             cmd_list_videos,
             cmd_update_video_title,
