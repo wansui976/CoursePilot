@@ -111,7 +111,6 @@ describe("Home selected-video integration", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
-    expect(screen.getByText("学习工作台")).toBeInTheDocument();
     expect(screen.getByText(video.title)).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "AI 概览" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "笔记" })).toBeInTheDocument();

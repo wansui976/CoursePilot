@@ -406,16 +406,11 @@ export function Home() {
               renderProcessingQueuePage()
             ) : selectedVideo ? (
               <>
-                <div className="flex min-h-24 items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-5 py-4">
-                  <div className="min-w-0 flex-1">
-                    <p className="mb-1 flex items-center gap-2 text-xs font-medium text-[var(--text-faint)]">
-                      <Sparkles className="h-3.5 w-3.5 text-primary" />
-                      学习工作台
-                    </p>
-                    <h1 className="truncate text-xl font-semibold text-[var(--text-strong)]">
-                      {selectedVideo.title}
-                    </h1>
-                  </div>
+                <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-5 py-2.5">
+                  <Sparkles className="h-4 w-4 flex-none text-primary" />
+                  <h1 className="min-w-0 flex-1 truncate text-base font-semibold text-[var(--text-strong)]">
+                    {selectedVideo.title}
+                  </h1>
                 </div>
                 <div className="min-h-0 flex-1">
                   {mediaSrc ? (
