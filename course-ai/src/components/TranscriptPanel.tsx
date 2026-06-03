@@ -93,7 +93,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                   <button
                     onClick={save}
                     disabled={update.isPending}
-                    className="inline-flex items-center gap-1 rounded bg-primary px-2 py-1 text-white hover:opacity-90 disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2 py-1 text-[var(--text-strong)] hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
                   >
                     <Check className="h-3 w-3" />
                     保存
