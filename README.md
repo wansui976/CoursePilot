@@ -84,11 +84,72 @@ brew install ffmpeg whisper-cpp tesseract yt-dlp
 - `tesseract` 用于 OCR。
 - `yt-dlp` 用于 Bilibili / URL 视频下载。
 
+## 使用前准备
+
+第一次使用前，建议先确认下面几项：
+
+1. **本地依赖已安装**：至少保证 `ffmpeg`、`whisper-cli`、`tesseract`、`yt-dlp` 可用。
+2. **准备课程来源**：可以是本地视频文件，也可以是 Bilibili / 其他视频链接。
+3. **决定是否使用纯离线模式**：
+   - 只做本地转写、课件抽帧、本地 OCR，可以不配置任何云端 API。
+   - 如需自动生成摘要、章节、笔记、练习题、脑图、课程问答等 AI 能力，需要先在应用 **设置 → 大模型** 中配置可用的 LLM Profile 和 API Key。
+4. **按需配置语音识别后端**：
+   - 想完全本地运行：使用 `whisper.cpp`。
+   - 想用云端识别：可在 **设置 → 语音识别** 中配置火山 / 阿里云 DashScope 等后端。
+5. **按需配置 OCR**：
+   - 默认可直接使用本地 `tesseract`。
+   - 若想要更好的截字效果，可在 **设置 → 图文识别 (OCR)** 中切到阿里云 OCR 并填写凭证。
+
+## 使用流程
+
+推荐按下面的顺序使用本应用：
+
+1. **新建课程**：打开应用后，在左侧课程栏选择或创建一个课程文件夹。
+2. **导入视频**：进入课程后，点击“导入”，选择：
+   - **上传本地视频**
+   - **下载网络视频（B 站 / 链接）**
+3. **等待处理完成**：导入后应用会依次处理视频，常见步骤包括：
+   - 抽取音频
+   - 语音识别
+   - 自动生成章节
+   - 自动生成笔记
+4. **查看学习材料**：处理完成后，可在右侧工作区使用：
+   - **AI 概览**：看摘要、整体要点
+   - **笔记**：生成或编辑 AI 笔记、脑图
+   - **文稿**：查看字幕与时间戳，点击可跳转播放
+   - **课件**：抽取视频画面、做截图或截图 OCR
+5. **继续深加工**：
+   - 对当前课程视频提问
+   - 在文稿里做关键词搜索
+   - 截图并插入笔记
+   - 导出字幕、笔记、脑图等资料
+
+## 使用说明
+
+- **不配置大模型也能用**：本地导入、播放、字幕转写、课件抽帧、本地 OCR 这些能力可以先用起来。
+- **自动 AI 生成依赖大模型配置**：如果没有在 **设置 → 大模型** 中配置可用 Profile / API Key，自动章节、摘要、笔记、问答等 AI 功能会被跳过或无法调用。
+- **当前课程问答并不依赖 embeddings**：这版实现里，“课程问答”是把课程字幕作为上下文直接交给 LLM 回答；“文稿搜索”则是本地关键词匹配，不需要额外配置 OpenAI-compatible embeddings。
+- **OCR 与 ASR 凭证不同**：阿里云 OCR 用的是 AccessKey ID / Secret；阿里云 DashScope 语音识别用的是 API Key，二者不能混用。
+
 ## 云端服务配置
 
 ### 火山 ASR
 
 如需使用火山 ASR，请先在火山引擎控制台开通[录音文件识别大模型-标准版试用服务](https://console.volcengine.com/speech/service/10012)，再在应用设置中填写对应的 App ID 和 Access Token。
+
+### DeepSeek API
+
+如需使用 DeepSeek 作为大模型服务，可按以下步骤配置：
+
+1. **注册 / 登录**：打开 [DeepSeek Platform](https://platform.deepseek.com/) 并完成注册或登录。
+2. **申请 API Key**：进入平台中的 API Keys 页面，创建一个新的 API Key。
+3. **充值额度**：如页面提示余额不足，可在平台里的 Top Up 页面完成充值后再调用 API。
+4. **填入应用**：打开应用 **设置 → 大模型**，新增一个 OpenAI-compatible Profile：
+   - **Base URL**：`https://api.deepseek.com`
+   - **API Key**：填入刚申请的 DeepSeek API Key
+   - **Model**：填写你准备使用的 DeepSeek 模型名
+
+> DeepSeek 的接口可按 OpenAI-compatible 方式接入，因此在 CoursePilot 中选择 OpenAI-compatible 即可。
 
 ### 阿里云 OCR（统一识别）
 
