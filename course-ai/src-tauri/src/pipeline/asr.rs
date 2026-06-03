@@ -1,7 +1,7 @@
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::sidecar::{resolve, WHISPER};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
@@ -29,6 +29,15 @@ pub struct Offsets {
 pub struct TokenObj {
     pub text: String,
     pub offsets: Offsets,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TranscriptBackupSegment {
+    segment_idx: i64,
+    start_ms: i64,
+    end_ms: i64,
+    text: String,
+    words_json: String,
 }
 
 pub fn parse_whisper_json(input: &str) -> AppResult<WhisperJson> {
@@ -151,9 +160,58 @@ pub async fn store_transcripts(db: &Db, video_id: &str, json: &WhisperJson) -> A
     Ok(count)
 }
 
+pub async fn store_raw_transcript_backup(
+    db: &Db,
+    video_id: &str,
+    json: &WhisperJson,
+) -> AppResult<()> {
+    let segments: Vec<TranscriptBackupSegment> = json
+        .transcription
+        .iter()
+        .enumerate()
+        .map(|(idx, segment)| -> AppResult<TranscriptBackupSegment> {
+            let words_json = serde_json::to_string(
+                &segment
+                    .tokens
+                    .iter()
+                    .map(|token| {
+                        serde_json::json!({
+                            "text": token.text,
+                            "from": token.offsets.from,
+                            "to": token.offsets.to,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            )?;
+            Ok(TranscriptBackupSegment {
+                segment_idx: idx as i64,
+                start_ms: segment.offsets.from,
+                end_ms: segment.offsets.to,
+                text: segment.text.trim().to_string(),
+                words_json,
+            })
+        })
+        .collect::<AppResult<Vec<_>>>()?;
+
+    sqlx::query(
+        "INSERT INTO transcript_backups(video_id,source,segments_json,created_at)
+         VALUES (?,?,?,?)",
+    )
+    .bind(video_id)
+    .bind("raw_asr")
+    .bind(serde_json::to_string(&segments)?)
+    .bind(chrono::Utc::now().timestamp_millis())
+    .execute(&db.pool)
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::courses::create_course;
+    use crate::commands::videos::add_local_video;
+    use crate::db::Db;
     use tempfile::tempdir;
 
     #[test]
@@ -200,6 +258,46 @@ mod tests {
             whisper_json_path(Path::new("/tmp/course/audio.wav")),
             PathBuf::from("/tmp/course/audio.wav.json")
         );
+    }
+
+    #[tokio::test]
+    async fn store_raw_backup_persists_full_asr_snapshot() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let vpath = dir.path().join("v.mp4");
+        std::fs::write(&vpath, b"x").unwrap();
+        let video = add_local_video(&db, &course.id, vpath, None).await.unwrap();
+        let json = WhisperJson {
+            transcription: vec![WhisperSegment {
+                text: " 原始结果 ".into(),
+                offsets: Offsets { from: 0, to: 1200 },
+                tokens: vec![TokenObj {
+                    text: "原始结果".into(),
+                    offsets: Offsets { from: 0, to: 1200 },
+                }],
+            }],
+        };
+
+        store_raw_transcript_backup(&db, &video.id, &json)
+            .await
+            .unwrap();
+
+        let row: (String, String) = sqlx::query_as(
+            "SELECT source, segments_json FROM transcript_backups WHERE video_id=?",
+        )
+        .bind(&video.id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+
+        assert_eq!(row.0, "raw_asr");
+        assert!(row.1.contains("\"start_ms\":0"));
+        assert!(row.1.contains("\"text\":\"原始结果\""));
     }
 
     #[tokio::test]
