@@ -12,7 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 
@@ -26,7 +26,6 @@ export function CourseSidebar({
   queueOpen = false,
   queueCount = 0,
   onToggleQueue,
-  queuePanel,
   onOpenRecycleBin,
 }: {
   selectedCourseId: string | null;
@@ -38,7 +37,6 @@ export function CourseSidebar({
   queueOpen?: boolean;
   queueCount?: number;
   onToggleQueue?: () => void;
-  queuePanel?: ReactNode;
   onOpenRecycleBin?: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -141,7 +139,6 @@ export function CourseSidebar({
           </Button>
         )}
       </div>
-      {queueOpen && queuePanel}
       <div className="mt-6 mb-2 px-1 text-xs font-medium text-[var(--text-faint)]">
         我的课程
       </div>

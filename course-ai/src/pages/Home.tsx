@@ -261,68 +261,81 @@ export function Home() {
     );
   }
 
-  function renderProcessingQueue() {
+  function openQueuedVideo(videoId: string) {
+    setQueueOpen(false);
+    setSelectedVideoId(videoId);
+  }
+
+  function renderProcessingQueuePage() {
     return (
       <div
-        aria-label="处理队列面板"
-        className="mt-3 flex max-h-64 flex-none flex-col overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)]"
+        aria-label="处理队列页面"
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
-        <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2">
-          <span className="text-sm font-medium text-[var(--text-strong)]">
-            处理队列
+        <header className="flex flex-none items-center justify-between gap-4 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-5">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold text-[var(--text-strong)]">
+              处理队列
+            </h1>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">
+              抽音频 → 语音识别 → 生成章节 → 生成笔记
+            </p>
+          </div>
+          <span className="rounded-full bg-[var(--surface-card)] px-2.5 py-1 text-xs text-[var(--text-muted)]">
+            {queuedVideos.length} 个任务
           </span>
-          <span className="text-xs text-[var(--text-faint)]">
-            {queuedVideos.length}
-          </span>
-        </div>
-        {queuedVideos.length === 0 ? (
-          <p className="px-3 py-3 text-xs text-[var(--text-faint)]">
-            暂无正在处理的视频。
-          </p>
-        ) : (
-          <div className="min-h-0 space-y-2 overflow-y-auto p-2">
-            {queuedVideos.map((video) => {
-              const active = activeJobFor(video.id);
-              const progress = displayProgress(active);
-              const percent = Math.floor(progress * 100);
-              const message = active?.message || stageLabel(active?.stage);
-              return (
-                <div
-                  key={video.id}
-                  className="rounded border border-[var(--border-faint)] bg-[var(--surface-card)] px-2.5 py-2"
-                >
-                  <div className="truncate text-xs font-medium text-[var(--text-strong)]">
-                    {video.title}
-                  </div>
-                  <div className="mt-1 flex items-center justify-between gap-2 text-xs">
-                    <span
-                      className={
-                        active?.status === "failed"
-                          ? "min-w-0 truncate text-red-500"
-                          : "min-w-0 truncate text-[var(--text-muted)]"
-                      }
-                    >
-                      {message}
-                    </span>
-                    <span className="shrink-0 tabular-nums text-[var(--text-muted)]">
-                      {percent}%
-                    </span>
-                  </div>
-                  <div className="mt-2 h-1 overflow-hidden rounded bg-[var(--surface-card-hover)]">
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
+          {queuedVideos.length === 0 ? (
+            <div className="flex h-full min-h-[240px] items-center justify-center text-sm text-[var(--text-faint)]">
+              暂无正在处理的视频。导入或处理视频后会出现在这里。
+            </div>
+          ) : (
+            <div className="mx-auto flex max-w-3xl flex-col gap-3">
+              {queuedVideos.map((video) => {
+                const active = activeJobFor(video.id);
+                const progress = displayProgress(active);
+                const percent = Math.floor(progress * 100);
+                const message = active?.message || stageLabel(active?.stage);
+                return (
+                  <button
+                    key={video.id}
+                    onClick={() => openQueuedVideo(video.id)}
+                    className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left shadow-[var(--shadow-card)] transition hover:bg-[var(--surface-card-hover)]"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 truncate text-sm font-medium text-[var(--text-strong)]">
+                        {video.title}
+                      </div>
+                      <span className="shrink-0 tabular-nums text-xs text-[var(--text-muted)]">
+                        {percent}%
+                      </span>
+                    </div>
+                    <div className="mt-2 h-1.5 overflow-hidden rounded bg-[var(--surface-card-hover)]">
+                      <div
+                        className={
+                          active?.status === "failed"
+                            ? "h-full bg-red-500"
+                            : "h-full bg-primary"
+                        }
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
                     <div
                       className={
                         active?.status === "failed"
-                          ? "h-full bg-red-500"
-                          : "h-full bg-primary"
+                          ? "mt-1.5 truncate text-xs text-red-500"
+                          : "mt-1.5 truncate text-xs text-[var(--text-muted)]"
                       }
-                      style={{ width: `${percent}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                    >
+                      {message}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -381,6 +394,7 @@ export function Home() {
             onSelect={(id) => {
               setSelectedCourseId(id);
               setSelectedVideoId(null);
+              setQueueOpen(false);
             }}
             onOpenSettings={() => setShowSettings(true)}
             onToggleTheme={toggleTheme}
@@ -388,14 +402,18 @@ export function Home() {
             themeToggleLabel={themeToggleLabel}
             queueOpen={queueOpen}
             queueCount={queuedVideoIds.length}
-            onToggleQueue={() => setQueueOpen((open) => !open)}
-            queuePanel={renderProcessingQueue()}
+            onToggleQueue={() => {
+              setSelectedVideoId(null);
+              setQueueOpen((open) => !open);
+            }}
             onOpenRecycleBin={() => setShowRecycleBin(true)}
           />
         )}
         <main className="flex min-w-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col bg-[var(--surface-app)]">
-            {selectedVideo ? (
+            {queueOpen ? (
+              renderProcessingQueuePage()
+            ) : selectedVideo ? (
               <>
                 <div className="flex min-h-24 items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-5 py-4">
                   <div className="min-w-0 flex-1">
