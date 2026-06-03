@@ -8,6 +8,7 @@ pub mod ocr;
 pub mod playable;
 pub mod rag;
 pub mod slides;
+pub mod transcript_correction;
 pub mod volcengine_asr;
 pub mod volcengine_auc;
 

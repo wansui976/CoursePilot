@@ -100,6 +100,25 @@ pub fn summary_request(model: &str, transcript: &str) -> ChatRequest {
     )
 }
 
+pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatRequest {
+    ChatRequest {
+        model: model.to_string(),
+        system: Some(
+            "你是课程字幕纠错助手。只输出 JSON 数组，不要任何解释、标题或代码围栏。\
+             只修正识别错误、病句、断句、标点和少量口语赘词；不要补充新知识，不要补充视频里没说过的内容。\
+             输出每项必须只有 start_ms、end_ms、text 三个字段。"
+                .into(),
+        ),
+        cacheable_context: None,
+        messages: vec![ChatMessage {
+            role: "user".into(),
+            content: format!("按原顺序纠正这些分段，尽量保持时间戳不变：\n{batch_json}"),
+        }],
+        temperature: 0.1,
+        max_tokens: 2048,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,6 +158,23 @@ mod tests {
             assert!(
                 system.contains(required) || user.contains(required),
                 "notes prompt should mention {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn transcript_correction_prompt_requires_compact_json_output() {
+        let req = transcript_correction_request(
+            "m",
+            r#"[{"start_ms":0,"end_ms":1000,"text":"嗯 今天讲概率"}]"#,
+        );
+        let system = req.system.unwrap();
+        let user = &req.messages[0].content;
+
+        for required in ["只输出 JSON", "start_ms", "end_ms", "text", "不要补充新知识"] {
+            assert!(
+                system.contains(required) || user.contains(required),
+                "correction prompt should mention {required}"
             );
         }
     }
