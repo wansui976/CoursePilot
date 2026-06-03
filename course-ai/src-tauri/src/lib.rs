@@ -35,7 +35,7 @@ use crate::commands::videos::{
 use crate::commands::whisper::{cmd_download_whisper_model, cmd_list_whisper_models};
 use crate::db::Db;
 use crate::jobs::cmd_list_jobs;
-use crate::pipeline::cmd_process_video;
+use crate::pipeline::{cmd_cancel_processing, cmd_process_video, ProcessingTasks};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -57,6 +57,7 @@ pub fn run() {
                     tracing::warn!("purge expired trash failed: {error}");
                 }
                 handle.manage(AppState { db });
+                handle.manage(ProcessingTasks::default());
                 let media = crate::media_server::start()
                     .await
                     .expect("media server start");
@@ -86,6 +87,7 @@ pub fn run() {
             cmd_download_whisper_model,
             cmd_list_jobs,
             cmd_process_video,
+            cmd_cancel_processing,
             cmd_list_transcripts,
             cmd_update_transcript,
             cmd_get_llm_profiles,

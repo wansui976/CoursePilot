@@ -444,13 +444,63 @@ async fn mark_failed(db: &crate::db::Db, video_id: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// 正在运行的流水线任务句柄，按 video_id 索引，用于取消。
+#[derive(Default)]
+pub struct ProcessingTasks(pub std::sync::Mutex<std::collections::HashMap<String, tauri::async_runtime::JoinHandle<()>>>);
+
 #[tauri::command]
 pub async fn cmd_process_video(app: AppHandle, video_id: String) -> AppResult<()> {
-    tauri::async_runtime::spawn(async move {
-        if let Err(error) = run_all(app, video_id).await {
+    // 同一视频若已有任务在跑，先中止旧的。
+    if let Some(old) = app
+        .state::<ProcessingTasks>()
+        .0
+        .lock()
+        .unwrap()
+        .remove(&video_id)
+    {
+        old.abort();
+    }
+    let task_app = app.clone();
+    let task_video = video_id.clone();
+    let handle = tauri::async_runtime::spawn(async move {
+        if let Err(error) = run_all(task_app, task_video).await {
             tracing::error!("pipeline failed: {error:?}");
         }
     });
+    app.state::<ProcessingTasks>()
+        .0
+        .lock()
+        .unwrap()
+        .insert(video_id, handle);
+    Ok(())
+}
+
+/// 取消某视频正在进行的处理：把 running/pending 的步骤标为「已取消」并中止任务
+/// （ffmpeg/whisper 子进程因 kill_on_drop 会被杀掉）。
+#[tauri::command]
+pub async fn cmd_cancel_processing(app: AppHandle, video_id: String) -> AppResult<()> {
+    let db = app.state::<AppState>().db.clone();
+    for job in jobs::list_for_video(&db, &video_id).await? {
+        if job.status == "running" || job.status == "pending" {
+            jobs::cancel(&db, &job.id, "已取消").await?;
+            emit_stage(&app, &video_id, &job.id, &job.stage, "canceled", job.progress, Some("已取消"));
+        }
+    }
+    sqlx::query(
+        "UPDATE videos SET processed_status='pending' WHERE id=? AND processed_status='processing'",
+    )
+    .bind(&video_id)
+    .execute(&db.pool)
+    .await?;
+    if let Some(handle) = app
+        .state::<ProcessingTasks>()
+        .0
+        .lock()
+        .unwrap()
+        .remove(&video_id)
+    {
+        handle.abort();
+    }
     Ok(())
 }
 

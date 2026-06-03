@@ -69,6 +69,8 @@ export const ipc = {
   pipeline: {
     process: (videoId: string): Promise<void> =>
       invoke("cmd_process_video", { videoId }),
+    cancel: (videoId: string): Promise<void> =>
+      invoke("cmd_cancel_processing", { videoId }),
     jobs: (videoId: string): Promise<Job[]> =>
       invoke("cmd_list_jobs", { videoId }),
   },

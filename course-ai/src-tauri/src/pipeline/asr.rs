@@ -88,6 +88,7 @@ pub async fn run_whisper(
     let bin = resolve(&WHISPER, None)?;
     let mut command = Command::new(&bin);
     command
+        .kill_on_drop(true)
         .args(["-m"])
         .arg(model)
         .args(["-f"])
