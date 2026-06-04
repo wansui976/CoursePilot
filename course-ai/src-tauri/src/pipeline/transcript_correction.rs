@@ -30,13 +30,42 @@ fn load_correction_segments(
 /// 解析模型返回，逐段对齐回原始分段。**时间戳一律取原始分段的**（不信任模型回显，
 /// 避免模型把某个时间戳改错一位就导致整批失败），只采用模型纠正后的 text。
 /// 仅在「JSON 非法 / 段数不符 / 文本为空」时判为失败。
+/// 模型把 LaTeX（\(、\sqrt 等）放进 JSON 字符串时，常常没按 JSON 规则把反斜杠
+/// 写成 \\，导致「invalid escape」整批解析失败。这里只对字符串内的「非法单反斜杠」
+/// 补成 \\，合法转义（\" \\ \/ \b \f \n \r \t \u）原样保留。仅在严格解析失败后兜底调用。
+fn repair_json_backslashes(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() + 16);
+    let mut chars = input.chars().peekable();
+    let mut in_string = false;
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                in_string = !in_string;
+                out.push('"');
+            }
+            '\\' if in_string => match chars.peek() {
+                Some('"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | 'u') => {
+                    out.push('\\');
+                    out.push(chars.next().unwrap());
+                }
+                _ => out.push_str("\\\\"),
+            },
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 pub fn parse_corrections(
     raw: &[CorrectionSegment],
     content: &str,
 ) -> AppResult<Vec<CorrectionSegment>> {
-    let parsed: Vec<CorrectionSegment> =
-        serde_json::from_str(crate::pipeline::ai::strip_code_fence(content))
-            .map_err(AppError::Json)?;
+    let cleaned = crate::pipeline::ai::strip_code_fence(content);
+    // 先按标准 JSON 解析；失败再修复 LaTeX 反斜杠转义后重试。
+    let parsed: Vec<CorrectionSegment> = match serde_json::from_str(cleaned) {
+        Ok(value) => value,
+        Err(_) => serde_json::from_str(&repair_json_backslashes(cleaned)).map_err(AppError::Json)?,
+    };
 
     if parsed.len() != raw.len() {
         return Err(AppError::Other(format!(
@@ -240,6 +269,20 @@ mod tests {
         assert_eq!(out[0].start_ms, 0);
         assert_eq!(out[0].end_ms, 1000);
         assert_eq!(out[0].text, "纠正文");
+    }
+
+    #[test]
+    fn parse_corrections_repairs_unescaped_latex_backslashes() {
+        let raw = vec![CorrectionSegment {
+            start_ms: 0,
+            end_ms: 1000,
+            text: "原文".into(),
+        }];
+        // 真实失败样本：LaTeX 反斜杠没按 JSON 转义（单反斜杠），严格解析会 invalid escape。
+        let content = r#"[{"start_ms":0,"end_ms":1000,"text":"速度 \(\sqrt{1-v^2/c^2}\)"}]"#;
+        let out = parse_corrections(&raw, content).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].text, r"速度 \(\sqrt{1-v^2/c^2}\)");
     }
 
     #[test]
