@@ -28,7 +28,9 @@ use crate::commands::slides::{
     cmd_capture_frame, cmd_extract_slides, cmd_get_screenshots, cmd_get_slides,
     cmd_read_slide_image,
 };
-use crate::commands::tools::{cmd_import_bilibili, cmd_ocr_region};
+use crate::commands::tools::{
+    cmd_import_bilibili, cmd_ocr_region, cmd_probe_bilibili, cmd_set_bilibili_cookies,
+};
 use crate::commands::transcripts::{cmd_list_transcripts, cmd_update_transcript};
 use crate::commands::videos::{
     cmd_add_local_video, cmd_delete_video, cmd_ensure_playable, cmd_list_trash, cmd_list_videos,
@@ -120,7 +122,9 @@ pub fn run() {
             cmd_rag_query,
             cmd_search_transcript,
             cmd_ocr_region,
-            cmd_import_bilibili
+            cmd_import_bilibili,
+            cmd_probe_bilibili,
+            cmd_set_bilibili_cookies
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
