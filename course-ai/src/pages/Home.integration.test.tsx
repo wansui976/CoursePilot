@@ -17,7 +17,7 @@ const { mockIpc } = vi.hoisted(() => ({
       updateTitle: vi.fn(),
       delete: vi.fn(),
     },
-    pipeline: { process: vi.fn(), jobs: vi.fn() },
+    pipeline: { process: vi.fn(), jobs: vi.fn(), recorrect: vi.fn() },
     transcripts: { list: vi.fn() },
     ai: {
       buildEmbeddings: vi.fn(),
