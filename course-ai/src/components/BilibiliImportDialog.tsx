@@ -68,8 +68,13 @@ export function BilibiliImportDialog({
         quality,
         useSub ? subLang : undefined,
       ),
-    onSuccess: () => {
+    onSuccess: (video, useSub) => {
       queryClient.invalidateQueries({ queryKey: ["videos", courseId] });
+      // 选用了字幕：立即跑流水线，让字幕被消化成文稿（ASR 阶段会走字幕分支、
+      // 跳过语音识别），用户无需再手动「开始处理」。
+      if (useSub) {
+        void ipc.pipeline.process(video.id);
+      }
       onClose();
     },
     onError: (e) => setError(String(e)),
