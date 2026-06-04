@@ -88,14 +88,38 @@ pub async fn overwrite_transcript_texts(
 async fn correct_batch(
     provider: &Provider,
     model: &str,
+    video_id: &str,
     batch: &[CorrectionSegment],
 ) -> AppResult<Vec<CorrectionSegment>> {
-    let req = crate::llm::prompts::transcript_correction_request(
-        model,
-        &serde_json::to_string(batch)?,
-    );
-    let resp = provider.complete(&req).await?;
-    parse_corrections(batch, &resp.content)
+    let batch_json = serde_json::to_string_pretty(batch)?;
+    let req = crate::llm::prompts::transcript_correction_request(model, &batch_json);
+    match provider.complete(&req).await {
+        Ok(resp) => {
+            let parsed = parse_corrections(batch, &resp.content);
+            let status = match &parsed {
+                Ok(_) => "已应用".to_string(),
+                Err(error) => format!("解析失败，保留原文: {error}"),
+            };
+            crate::dev_log::record(
+                "transcript_correction",
+                video_id,
+                &batch_json,
+                &resp.content,
+                &status,
+            );
+            parsed
+        }
+        Err(error) => {
+            crate::dev_log::record(
+                "transcript_correction",
+                video_id,
+                &batch_json,
+                &format!("<调用失败> {error}"),
+                "调用失败，保留原文",
+            );
+            Err(error)
+        }
+    }
 }
 
 pub async fn autocorrect_transcript(
@@ -115,7 +139,7 @@ pub async fn autocorrect_transcript(
     // 逐批纠错：某批失败（截断/格式不符/调用出错）只保留该批原文并继续，
     // 不再因为一批就丢弃整段视频的纠错成果。
     for batch in segments.chunks(CORRECTION_BATCH_SIZE) {
-        match correct_batch(provider, model, batch).await {
+        match correct_batch(provider, model, video_id, batch).await {
             Ok(fixed) => {
                 corrected.extend(fixed);
                 any_ok = true;

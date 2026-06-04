@@ -3,6 +3,7 @@ import type {
   Chapter,
   Citation,
   Course,
+  DevLogEntry,
   Job,
   LlmProfile,
   RagAnswer,
@@ -53,6 +54,10 @@ export const ipc = {
     // 保存敏感凭证（ASR/OCR 密钥）到密钥存储。
     set: (name: string, value: string): Promise<void> =>
       invoke("cmd_set_secret", { name, value }),
+  },
+  dev: {
+    logs: (): Promise<DevLogEntry[]> => invoke("cmd_get_dev_logs"),
+    clearLogs: (): Promise<void> => invoke("cmd_clear_dev_logs"),
   },
   settings: {
     get: (key: string): Promise<string | null> =>

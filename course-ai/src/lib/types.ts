@@ -32,6 +32,16 @@ export interface TranscriptSegment {
   text: string;
 }
 
+export interface DevLogEntry {
+  id: number;
+  at_ms: number;
+  kind: string;
+  video_id: string;
+  request: string;
+  response: string;
+  status: string;
+}
+
 export interface TrashedVideo {
   id: string;
   title: string;

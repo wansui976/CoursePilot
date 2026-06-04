@@ -9,6 +9,7 @@ import {
   Images,
   ScanText,
   Sparkles,
+  Terminal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
@@ -112,7 +113,13 @@ function SavedBadge({ text }: { text: string }) {
   );
 }
 
-export function SettingsPanel({ onClose }: { onClose: () => void }) {
+export function SettingsPanel({
+  onClose,
+  onOpenDevConsole,
+}: {
+  onClose: () => void;
+  onOpenDevConsole?: () => void;
+}) {
   const [root, setRoot] = useState("");
   const [model, setModel] = useState("large-v3-turbo");
   const [asrBackend, setAsrBackend] = useState("whisper");
@@ -513,6 +520,19 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           >
             <LlmSettingsPanel />
           </Section>
+
+          {onOpenDevConsole && (
+            <Section
+              icon={<Terminal className="h-4 w-4" />}
+              title="开发者"
+              desc="查看 AI 文稿纠错的请求与回复，确认纠错是否真的实施"
+            >
+              <Button variant="outline" size="sm" onClick={onOpenDevConsole}>
+                <Terminal className="h-3.5 w-3.5" />
+                打开开发控制台
+              </Button>
+            </Section>
+          )}
         </div>
       </div>
     </div>

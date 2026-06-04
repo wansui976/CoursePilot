@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod db;
+pub mod dev_log;
 pub mod error;
 pub mod export;
 pub mod jobs;
@@ -22,6 +23,7 @@ use crate::commands::export::{
 };
 use crate::commands::rag::{cmd_rag_query, cmd_search_transcript};
 use crate::commands::settings::{cmd_get_setting, cmd_set_secret, cmd_set_setting};
+use crate::dev_log::{cmd_clear_dev_logs, cmd_get_dev_logs};
 use crate::commands::slides::{
     cmd_capture_frame, cmd_extract_slides, cmd_get_screenshots, cmd_get_slides,
     cmd_read_slide_image,
@@ -83,6 +85,8 @@ pub fn run() {
             cmd_set_setting,
             cmd_get_setting,
             cmd_set_secret,
+            cmd_get_dev_logs,
+            cmd_clear_dev_logs,
             cmd_list_whisper_models,
             cmd_download_whisper_model,
             cmd_list_jobs,
