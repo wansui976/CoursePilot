@@ -6,7 +6,7 @@
 ## 背景与目标
 
 导入 B站视频时，若该视频自带字幕（UP 主手打的 CC 字幕，或 B站 AI 字幕
-`ai-zh`），应让用户选择**直接使用该字幕作为文稿**，而不是重新做语音转写
+`ai-zh`），应让用户选择**直接是否使用该字幕作为文稿**，而不是重新做语音转写
 （ASR）。字幕本身带时间轴，质量通常不差于本地 ASR，且省去转写耗时与算力。
 若视频没有自带字幕，则回退到用户已配置的「抽音频 + ASR」方式。
 
@@ -34,26 +34,37 @@
 2. **cookie 引导**（仅当未配置 cookie 时）：说明用 *Get cookies.txt LOCALLY*
    导出 cookies.txt 的步骤 + 「选择 cookies.txt」文件选择器。选中后把文件复制进
    appdata（稳定路径），写入 `bilibili_cookies` 设置。
-3. **探测**：后端用 cookie 跑 `yt-dlp -J`，拿到标题 + 字幕轨列表。
-   - **探到字幕** → 列出可选轨（如 `ai-zh` / `zh-Hans`），默认按「手打CC优先 >
-     AI字幕 > 其它」预选，问「检测到自带字幕，用它替代 AI 转写？」
-     → [使用所选字幕] / [不用，走语音转写]。
-   - **没探到** → 提示「未检测到自带字幕，将用语音转写」，直接走转写。
-4. 确认后触发下载 + 入库 + 跑流水线。
+3. **探测**：后端用 cookie 跑 `yt-dlp -J`，拿到标题 + 字幕轨列表 + 可选清晰度档位。
+4. **确认页**（一屏，含两组选择）：
+   - **清晰度**：列出探测到的可选档位（如 1080P / 720P / 480P / 360P，外加
+     「最高可用」），默认预选最高可用。实际可达档位受 cookie 登录态影响，故以
+     带 cookie 探测的结果为准。
+   - **字幕**：
+     - **探到字幕** → 列出可选轨（如 `ai-zh` / `zh-Hans`），默认按「手打CC优先 >
+       AI字幕 > 其它」预选，问「检测到自带字幕，用它替代 AI 转写？」
+       → [使用所选字幕] / [不用，走语音转写]。
+     - **没探到** → 提示「未检测到自带字幕，将用语音转写」。
+5. 确认后按所选清晰度（+ 可选字幕）触发下载 + 入库 + 跑流水线。
 
 ## 后端：探测 + 下载（`pipeline/download.rs`）
 
-- 新增 `probe(url, cookies) -> ProbeResult { title, tracks: Vec<SubtitleTrack> }`：
-  跑 `yt-dlp -J --skip-download`，解析输出 JSON 的 `subtitles` map（B站 AI/CC
-  字幕都在此），每轨产出 `SubtitleTrack { lang, name, auto }`。JSON 解析为纯函数，
-  单测覆盖。
+- 新增 `probe(url, cookies) -> ProbeResult { title, tracks: Vec<SubtitleTrack>,
+  qualities: Vec<u32> }`：跑 `yt-dlp -J --skip-download`，解析输出 JSON：
+  - `subtitles` map（B站 AI/CC 字幕都在此）→ 每轨产出 `SubtitleTrack { lang,
+    name, auto }`。
+  - `formats` 数组的 `height` → 去重降序得 `qualities`（如 `[1080, 720, 480, 360]`）。
+  JSON 解析为纯函数，单测覆盖。
 - 新增 `pick_default_track(tracks) -> Option<&SubtitleTrack>`：优选规则
   手打中文 CC（`zh-Hans`/`zh-CN`/`zh`，非 auto）> AI 中文（`ai-zh`）> 第一条。
+- `build_ytdlp_args` 增参 `max_height: Option<u32>`：给定时加
+  `-f "bv*[height<=H]+ba/b[height<=H]"` 选档；`None`（最高可用）则不加、用 yt-dlp
+  默认取最优。
 - 下载分支：
-  - **用字幕**：`build_ytdlp_args` 增参 `--write-subs --sub-langs <lang>
-    --convert-subs srt`，一趟把 mp4 + `<title>.<lang>.srt` 落到课程目录。
-  - **不用字幕**：维持现状。
-- 下载后定位到落地的 `.srt` 路径，连同 mp4 路径回传。
+  - **用字幕**：再加 `--write-subs --sub-langs <lang> --convert-subs srt`，一趟把
+    mp4 + 字幕文件落到课程目录。yt-dlp 落地的字幕命名为 `<title>.<lang>.srt`
+    （例：`example.ai-zh.srt`）。
+  - **不用字幕**：仅按清晰度下载。
+- 下载后定位到落地的 mp4 与（若有）`<title>.<lang>.srt` 路径回传。
 
 ## 字幕解析（`pipeline/subtitle.rs`）
 
@@ -95,18 +106,22 @@ ALTER TABLE videos ADD COLUMN subtitle_lang TEXT;   -- 轨道语言（ai-zh / zh
 
 ## 命令 / IPC
 
-- 新 `cmd_probe_bilibili(course_id, url) -> ProbeResult`：确保 cookie 后探测字幕轨。
-- 改 `cmd_import_bilibili`：增参「选用字幕轨 lang（可空）」。选了则带 `--write-subs`
-  下载并写 `subtitle_path`/`subtitle_lang`，否则维持现状。
+- 新 `cmd_probe_bilibili(course_id, url) -> ProbeResult`：确保 cookie 后探测字幕轨
+  与可选清晰度。
+- 改 `cmd_import_bilibili`：增参「选用字幕轨 lang（可空）」与「清晰度 max_height
+  （可空=最高可用）」。选了字幕则带 `--write-subs` 下载并写 `subtitle_path`/
+  `subtitle_lang`；清晰度透传给 `build_ytdlp_args`。
 - 新 `cmd_set_bilibili_cookies(file_path)`：复制 cookies.txt 进 appdata 并写设置。
 - 前端 `ipc.tools.*` 增对应封装；`BilibiliImportDialog` 调用之。
 
 ## 测试
 
 - `parse_srt`：标准 / 多行 / 空行 / 不规范时间轴的容错。
-- `probe` JSON 解析：B站 `-J` 样例（含 `subtitles` 多轨）→ 轨列表；无字幕样例 → 空。
+- `probe` JSON 解析：B站 `-J` 样例（含 `subtitles` 多轨 + `formats` 多档 `height`）
+  → 轨列表 + 清晰度降序去重；无字幕样例 → 空轨。
 - `pick_default_track`：CC > AI > 其它的优选。
-- `build_ytdlp_args`：带 `--write-subs --sub-langs` 分支。
+- `build_ytdlp_args`：带 `--write-subs --sub-langs` 分支；带 `max_height` 时含
+  `-f "bv*[height<=H]+ba/b[height<=H]"`，`None` 时不含 `-f`。
 - 流水线：mock 一个带 `subtitle_path` 的 video → 走解析分支、不调 whisper、写入文稿。
 
 ## 范围 / YAGNI
