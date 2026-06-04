@@ -23,6 +23,8 @@ pub struct Video {
     pub order_index: i64,
     pub data_dir: String,
     pub processed_status: String,
+    pub subtitle_path: Option<String>,
+    pub subtitle_lang: Option<String>,
     pub created_at: i64,
 }
 
@@ -66,6 +68,8 @@ pub async fn add_local_video(
         order_index,
         data_dir: data_dir.to_string_lossy().to_string(),
         processed_status: "pending".into(),
+        subtitle_path: None,
+        subtitle_lang: None,
         created_at: now,
     };
 
@@ -406,6 +410,29 @@ mod tests {
         restore_video(&db, &video_id).await.unwrap();
         assert_eq!(list_videos(&db, &course_id).await.unwrap().len(), 1);
         assert!(list_trashed(&db).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn videos_table_has_subtitle_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = crate::commands::courses::create_course(
+            &db, "c".into(), dir.path().to_string_lossy().into())
+            .await.unwrap();
+        let vpath = dir.path().join("v.mp4");
+        std::fs::write(&vpath, b"x").unwrap();
+        let video = add_local_video(&db, &course.id, vpath, None).await.unwrap();
+
+        sqlx::query("UPDATE videos SET subtitle_path=?, subtitle_lang=? WHERE id=?")
+            .bind("/tmp/x.ai-zh.srt").bind("ai-zh").bind(&video.id)
+            .execute(&db.pool).await.unwrap();
+
+        let got: Video = sqlx::query_as("SELECT * FROM videos WHERE id=?")
+            .bind(&video.id).fetch_one(&db.pool).await.unwrap();
+        assert_eq!(got.subtitle_lang.as_deref(), Some("ai-zh"));
+        assert_eq!(got.subtitle_path.as_deref(), Some("/tmp/x.ai-zh.srt"));
     }
 
     #[tokio::test]
