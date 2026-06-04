@@ -4,6 +4,15 @@ use crate::commands::transcripts::TranscriptSegment;
 use crate::error::{AppError, AppResult};
 use serde_json::Value;
 
+/// 字幕里去掉 LaTeX 公式定界符（\( \) \[ \]），只留公式内容，避免反斜杠噪声。
+/// 文稿面板用 KaTeX 渲染这些定界符；字幕是纯文本，去掉定界符更干净。
+fn strip_math_delimiters(text: &str) -> String {
+    text.replace("\\(", "")
+        .replace("\\)", "")
+        .replace("\\[", "")
+        .replace("\\]", "")
+}
+
 fn format_time(ms: i64, sep: char) -> String {
     let ms = ms.max(0);
     let h = ms / 3_600_000;
@@ -22,7 +31,7 @@ pub fn to_srt(segments: &[TranscriptSegment]) -> String {
             format_time(seg.start_ms, ','),
             format_time(seg.end_ms, ',')
         ));
-        out.push_str(seg.text.trim());
+        out.push_str(strip_math_delimiters(seg.text.trim()).trim());
         out.push_str("\n\n");
     }
     out
@@ -36,7 +45,7 @@ pub fn to_vtt(segments: &[TranscriptSegment]) -> String {
             format_time(seg.start_ms, '.'),
             format_time(seg.end_ms, '.')
         ));
-        out.push_str(seg.text.trim());
+        out.push_str(strip_math_delimiters(seg.text.trim()).trim());
         out.push_str("\n\n");
     }
     out
@@ -132,6 +141,15 @@ mod tests {
         let vtt = to_vtt(&[seg(0, 1500, "hi")]);
         assert!(vtt.starts_with("WEBVTT\n\n"));
         assert!(vtt.contains("00:00:00.000 --> 00:00:01.500\nhi"));
+    }
+
+    #[test]
+    fn subtitles_strip_latex_delimiters() {
+        let srt = to_srt(&[seg(0, 1000, r"速度公式 \(\sqrt{1-v^2/c^2}\) 很重要")]);
+        assert!(srt.contains(r"速度公式 \sqrt{1-v^2/c^2} 很重要"));
+        assert!(!srt.contains(r"\("));
+        let vtt = to_vtt(&[seg(0, 1000, r"行间 \[E=mc^2\] 结束")]);
+        assert!(vtt.contains("行间 E=mc^2 结束"));
     }
 
     #[test]

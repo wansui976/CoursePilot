@@ -531,6 +531,23 @@ pub async fn cmd_process_video(app: AppHandle, video_id: String) -> AppResult<()
     Ok(())
 }
 
+/// 仅重新 AI 纠错：视频已有字幕时用。先把原始 ASR 稿写回，再重跑纠错，
+/// 不重新抽音频、不重新识别。未配置大模型则报错。
+#[tauri::command]
+pub async fn cmd_recorrect_transcript(
+    state: tauri::State<'_, AppState>,
+    video_id: String,
+) -> AppResult<()> {
+    let db = state.db.clone();
+    let (provider, model) = crate::commands::ai::first_available_provider_for_db(&db)
+        .await?
+        .ok_or_else(|| {
+            AppError::Config("未配置大模型，无法纠错（请到设置 → 大模型 配置）".into())
+        })?;
+    transcript_correction::restore_raw_transcript(&db, &video_id).await?;
+    transcript_correction::autocorrect_transcript(&db, &provider, &model, &video_id).await
+}
+
 /// 取消某视频正在进行的处理：把 running/pending 的步骤标为「已取消」并中止任务
 /// （ffmpeg/whisper 子进程因 kill_on_drop 会被杀掉）。
 #[tauri::command]

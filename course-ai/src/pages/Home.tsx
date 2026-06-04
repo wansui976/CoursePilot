@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   ChevronLeft,
@@ -183,6 +183,13 @@ export function Home() {
     setQueuedVideoIds((ids) => (ids.includes(videoId) ? ids : [videoId, ...ids]));
     void ipc.pipeline.process(videoId);
   }
+
+  // 已有字幕时「仅重新纠错」：不重新识别，回到原始稿后重跑 AI 纠错，完成后刷新文稿。
+  const recorrect = useMutation({
+    mutationFn: (videoId: string) => ipc.pipeline.recorrect(videoId),
+    onSuccess: (_d, videoId) =>
+      queryClient.invalidateQueries({ queryKey: ["transcripts", videoId] }),
+  });
 
   async function saveRenamedVideo() {
     if (!renamingVideo) return;
@@ -416,10 +423,19 @@ export function Home() {
           className="block w-full px-3 py-2 text-left hover:bg-[var(--surface-card-hover)]"
           onClick={() => {
             setOpenMenuVideoId(null);
-            startProcessing(video.id);
+            // 已有字幕（处理完成）→ 仅重新 AI 纠错；否则跑完整处理。
+            if (video.processed_status === "done") {
+              recorrect.mutate(video.id);
+            } else {
+              startProcessing(video.id);
+            }
           }}
         >
-          {video.processed_status === "done" ? "重新处理" : "开始处理"}
+          {video.processed_status === "done"
+            ? recorrect.isPending && recorrect.variables === video.id
+              ? "纠错中…"
+              : "重新纠错"
+            : "开始处理"}
         </button>
       </div>
     );

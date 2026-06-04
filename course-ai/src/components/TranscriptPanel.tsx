@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Pencil, X } from "lucide-react";
 import { ExportMenu } from "./ExportMenu";
+import { MathText } from "./MathText";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
@@ -127,7 +128,9 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                 <span className="mr-2 text-xs text-[var(--text-muted)]">
                   {formatMs(segment.start_ms)}
                 </span>
-                <span>{segment.text}</span>
+                <span>
+                  <MathText text={segment.text} />
+                </span>
               </button>
               <button
                 aria-label="编辑这句文稿"

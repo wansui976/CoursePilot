@@ -76,6 +76,9 @@ export const ipc = {
       invoke("cmd_process_video", { videoId }),
     cancel: (videoId: string): Promise<void> =>
       invoke("cmd_cancel_processing", { videoId }),
+    // 已有字幕时「仅重新纠错」：回到原始稿 + 重跑 AI 纠错，不重新识别。
+    recorrect: (videoId: string): Promise<void> =>
+      invoke("cmd_recorrect_transcript", { videoId }),
     jobs: (videoId: string): Promise<Job[]> =>
       invoke("cmd_list_jobs", { videoId }),
   },

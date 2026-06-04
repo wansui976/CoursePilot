@@ -122,6 +122,38 @@ async fn correct_batch(
     }
 }
 
+#[derive(Deserialize)]
+struct RawBackupSegment {
+    segment_idx: i64,
+    text: String,
+}
+
+/// 把最近一份原始 ASR 快照（transcript_backups source=raw_asr）写回 transcripts.text。
+/// 用于「仅重新纠错」：先回到原始稿，再重跑纠错，避免在已纠错文本上反复改写。
+/// 没有备份时返回 false（沿用当前文本）。
+pub async fn restore_raw_transcript(db: &Db, video_id: &str) -> AppResult<bool> {
+    let raw: Option<String> = sqlx::query_scalar(
+        "SELECT segments_json FROM transcript_backups
+         WHERE video_id=? AND source='raw_asr' ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(video_id)
+    .fetch_optional(&db.pool)
+    .await?;
+    let Some(json) = raw else {
+        return Ok(false);
+    };
+    let segments: Vec<RawBackupSegment> = serde_json::from_str(&json)?;
+    for segment in &segments {
+        sqlx::query("UPDATE transcripts SET text=? WHERE video_id=? AND segment_idx=?")
+            .bind(segment.text.trim())
+            .bind(video_id)
+            .bind(segment.segment_idx)
+            .execute(&db.pool)
+            .await?;
+    }
+    Ok(true)
+}
+
 pub async fn autocorrect_transcript(
     db: &Db,
     provider: &Provider,
@@ -248,6 +280,34 @@ mod tests {
             .unwrap();
         let joined = crate::pipeline::ai::transcript_text(&db, &vid).await.unwrap();
         assert!(joined.contains("纠正后的第一部分"));
+    }
+
+    #[tokio::test]
+    async fn restore_raw_transcript_writes_backup_text_back() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        // 模拟一份原始 ASR 备份，文本与当前不同。
+        let backup = r#"[{"segment_idx":0,"start_ms":0,"end_ms":5000,"text":"原始未纠错文本","words_json":"[]"}]"#;
+        sqlx::query(
+            "INSERT INTO transcript_backups(video_id,source,segments_json,created_at) VALUES (?,?,?,?)",
+        )
+        .bind(&vid)
+        .bind("raw_asr")
+        .bind(backup)
+        .bind(1_i64)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let restored = restore_raw_transcript(&db, &vid).await.unwrap();
+        assert!(restored);
+        let joined = crate::pipeline::ai::transcript_text(&db, &vid).await.unwrap();
+        assert!(joined.contains("原始未纠错文本"));
+    }
+
+    #[tokio::test]
+    async fn restore_raw_transcript_is_noop_without_backup() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        assert!(!restore_raw_transcript(&db, &vid).await.unwrap());
     }
 
     #[tokio::test]
