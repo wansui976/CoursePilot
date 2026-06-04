@@ -108,20 +108,24 @@ pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatReque
              只修正识别错误、病句、标点和少量口语赘词；不要补充新知识，不要补充视频里没说过的内容。\
              重点规范断句与标点：把零碎、粘连或断错的口语文本整理成通顺完整的句子，\
              正确使用中文逗号、句号、问号、顿号等标点，句子开头规范、首字不丢；\
-             但每段只在本段内纠正，不要跨段搬移文字、不要合并或拆分分段、不要改变段数。\
+             但每段只在本段内纠正，不要跨段搬移文字、不要合并或拆分分段。\
              把被识别成文字的数学/物理/化学表达还原成 LaTeX 公式，用行内定界符 \\( ... \\) 包裹\
              （较长的独立公式可用 \\[ ... \\]）：\
              例如「m 零」→ \\(m_0\\)、「v 方」→ \\(v^2\\)、「c 的平方」→ \\(c^2\\)、\
              「根号下一减 v 方比 c 方」→ \\(\\sqrt{1-v^2/c^2}\\)，「比/除以」用分式或 /。\
              只把公式部分写成 LaTeX，其余仍是普通中文文本，不要整段包成公式；含义不确定时保留原文。\
-             输出每项只有 start_ms、end_ms、text 三个字段，start_ms/end_ms 原样照抄输入。\
-             数组长度必须与输入完全相同，逐段一一对应，不要合并、拆分或漏掉任何分段。"
+             只返回需要修改的分段；不需要修改的分段不要返回。\
+             输出每项只有 start_ms、end_ms、originaltext、replacedtext 四个字段。\
+             start_ms/end_ms 必须原样照抄输入；originaltext 必须原样照抄输入 text；\
+             replacedtext 写纠正后的文本。若本批没有需要修改的内容，输出空数组 []。"
                 .into(),
         ),
         cacheable_context: None,
         messages: vec![ChatMessage {
             role: "user".into(),
-            content: format!("按原顺序纠正这些分段，时间戳照抄：\n{batch_json}"),
+            content: format!(
+                "找出这些分段里需要修改的条目，只返回修改 patch，时间戳和 originaltext 照抄：\n{batch_json}"
+            ),
         }],
         temperature: 0.1,
         // 一批约 40 段，输出含时间戳回显；4096 是 Anthropic 的输出上限（OpenAI 不发此值）。
@@ -181,7 +185,14 @@ mod tests {
         let system = req.system.unwrap();
         let user = &req.messages[0].content;
 
-        for required in ["只输出 JSON", "start_ms", "end_ms", "text", "不要补充新知识"] {
+        for required in [
+            "只输出 JSON",
+            "start_ms",
+            "end_ms",
+            "originaltext",
+            "replacedtext",
+            "不要补充新知识",
+        ] {
             assert!(
                 system.contains(required) || user.contains(required),
                 "correction prompt should mention {required}"
