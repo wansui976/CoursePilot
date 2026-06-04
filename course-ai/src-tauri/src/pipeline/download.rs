@@ -36,7 +36,10 @@ pub fn build_ytdlp_args(
     }
     if let Some(lang) = sub_lang {
         if !lang.trim().is_empty() {
+            // B站 AI 字幕（ai-zh）在 yt-dlp 里需 --write-auto-subs 才会拉取；
+            // 普通 CC 字幕走 --write-subs。两者都带，覆盖不同视频。
             args.push("--write-subs".to_string());
+            args.push("--write-auto-subs".to_string());
             args.push("--sub-langs".to_string());
             args.push(lang.to_string());
             args.push("--convert-subs".to_string());
@@ -135,26 +138,53 @@ pub struct ProbeResult {
     pub qualities: Vec<u32>, // 可选清晰度高度，降序去重
 }
 
-/// 解析 `yt-dlp -J` 输出：标题、字幕轨（subtitles map）、清晰度（formats.height）。
+/// 常见语言码 → 友好显示名；未知码原样返回。
+fn friendly_lang_name(lang: &str) -> String {
+    match lang {
+        "ai-zh" => "AI 中文",
+        "zh-Hans" | "zh-CN" | "zh" => "中文（简体）",
+        "zh-Hant" | "zh-TW" | "zh-HK" => "中文（繁体）",
+        "en" | "en-US" | "en-GB" => "English",
+        other => other,
+    }
+    .to_string()
+}
+
+/// 从 subtitles / automatic_captions map 收集字幕轨。
+/// 跳过 danmaku（弹幕，非字幕）与已收过的 lang；automatic_captions 一律标记 auto。
+fn collect_tracks(map: Option<&serde_json::Value>, from_auto: bool, out: &mut Vec<SubtitleTrack>) {
+    let Some(obj) = map.and_then(|m| m.as_object()) else {
+        return;
+    };
+    for (lang, entries) in obj {
+        if lang == "danmaku" || out.iter().any(|t| t.lang == *lang) {
+            continue;
+        }
+        let auto = from_auto || lang.starts_with("ai-");
+        let name = entries
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|e| e.get("name"))
+            .and_then(|n| n.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| friendly_lang_name(lang));
+        out.push(SubtitleTrack {
+            lang: lang.clone(),
+            name,
+            auto,
+        });
+    }
+}
+
+/// 解析 `yt-dlp -J` 输出：标题、字幕轨（subtitles + automatic_captions）、清晰度（formats.height）。
 pub fn parse_probe_json(json: &str) -> AppResult<ProbeResult> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(AppError::Json)?;
     let title = v.get("title").and_then(|t| t.as_str()).unwrap_or("video").to_string();
 
     let mut tracks = Vec::new();
-    if let Some(subs) = v.get("subtitles").and_then(|s| s.as_object()) {
-        for (lang, entries) in subs {
-            // B站 AI 字幕语言码以 "ai-" 开头。
-            let auto = lang.starts_with("ai-");
-            let name = entries
-                .as_array()
-                .and_then(|a| a.first())
-                .and_then(|e| e.get("name"))
-                .and_then(|n| n.as_str())
-                .unwrap_or(lang)
-                .to_string();
-            tracks.push(SubtitleTrack { lang: lang.clone(), name, auto });
-        }
-    }
+    // B站 AI 字幕可能落在 subtitles 或 automatic_captions，两者都收。
+    collect_tracks(v.get("subtitles"), false, &mut tracks);
+    collect_tracks(v.get("automatic_captions"), true, &mut tracks);
     tracks.sort_by(|a, b| a.lang.cmp(&b.lang));
 
     let mut qualities: Vec<u32> = Vec::new();
@@ -188,7 +218,18 @@ pub fn pick_default_track(tracks: &[SubtitleTrack]) -> Option<&SubtitleTrack> {
 pub async fn probe(url: &str, cookies: Option<&str>) -> AppResult<ProbeResult> {
     let ytdlp = resolve(&YTDLP, None)?;
     let mut cmd = Command::new(&ytdlp);
-    cmd.args(["-J", "--skip-download", "--no-playlist"]);
+    // 关键：B站 extractor 只在请求写字幕时才去拉字幕列表；不带这些 flag 时
+    // subtitles/automatic_captions 会是空的（这正是「有字幕却检测不到」的根因）。
+    // -J 隐含 --simulate，不会真的把字幕写到磁盘。
+    cmd.args([
+        "-J",
+        "--skip-download",
+        "--no-playlist",
+        "--write-subs",
+        "--write-auto-subs",
+        "--sub-langs",
+        "all",
+    ]);
     if is_bilibili_url(url) {
         cmd.args(["--user-agent", BROWSER_USER_AGENT, "--referer", BILIBILI_REFERER]);
     }
@@ -295,6 +336,27 @@ mod tests {
         let r = parse_probe_json(json).unwrap();
         assert!(r.tracks.is_empty());
         assert_eq!(r.qualities, vec![480]);
+    }
+
+    // 真实 B站响应：ai-zh 落在 subtitles、还混了 danmaku 弹幕轨；
+    // 另有视频把 AI 字幕放在 automatic_captions。两者都要收，danmaku 要滤掉。
+    #[test]
+    fn parse_probe_filters_danmaku_and_merges_auto_captions() {
+        let json = r#"{
+            "title": "t",
+            "subtitles": { "danmaku": [{"ext":"xml"}], "ai-zh": [{"ext":"srt"}] },
+            "automatic_captions": { "en": [{"ext":"srt"}] },
+            "formats": [{"height": 720}]
+        }"#;
+        let r = parse_probe_json(json).unwrap();
+        let langs: Vec<&str> = r.tracks.iter().map(|t| t.lang.as_str()).collect();
+        assert!(!langs.contains(&"danmaku"), "danmaku 应被过滤");
+        assert!(langs.contains(&"ai-zh"));
+        assert!(langs.contains(&"en"));
+        let ai = r.tracks.iter().find(|t| t.lang == "ai-zh").unwrap();
+        assert!(ai.auto);
+        assert_eq!(ai.name, "AI 中文"); // 无 name 字段时用友好名
+        assert!(r.tracks.iter().find(|t| t.lang == "en").unwrap().auto); // 来自 automatic_captions
     }
 
     #[test]
