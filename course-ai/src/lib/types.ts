@@ -21,6 +21,20 @@ export interface Video {
   data_dir: string;
   processed_status: "pending" | "processing" | "done" | "failed";
   created_at: number;
+  subtitle_path?: string | null;
+  subtitle_lang?: string | null;
+}
+
+export interface SubtitleTrack {
+  lang: string;
+  name: string;
+  auto: boolean;
+}
+
+export interface ProbeResult {
+  title: string;
+  tracks: SubtitleTrack[];
+  qualities: number[];
 }
 
 export interface TranscriptSegment {

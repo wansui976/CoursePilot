@@ -6,6 +6,7 @@ import type {
   DevLogEntry,
   Job,
   LlmProfile,
+  ProbeResult,
   RagAnswer,
   Screenshot,
   Slide,
@@ -147,7 +148,16 @@ export const ipc = {
       h = 0,
     ): Promise<string> =>
       invoke("cmd_ocr_region", { videoId, atMs, x, y, w, h }),
-    importBilibili: (courseId: string, url: string): Promise<Video> =>
-      invoke("cmd_import_bilibili", { courseId, url }),
+    importBilibili: (
+      courseId: string,
+      url: string,
+      maxHeight?: number,
+      subLang?: string,
+    ): Promise<Video> =>
+      invoke("cmd_import_bilibili", { courseId, url, maxHeight, subLang }),
+    probeBilibili: (url: string): Promise<ProbeResult> =>
+      invoke("cmd_probe_bilibili", { url }),
+    setBilibiliCookies: (filePath: string): Promise<void> =>
+      invoke("cmd_set_bilibili_cookies", { filePath }),
   },
 };
