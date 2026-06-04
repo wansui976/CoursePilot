@@ -1,4 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { MATH_RE } from "@/lib/markdownToTiptap";
+
+// KaTeX 较重，仅在字幕真含公式时按需加载，避免拖累播放器首屏。
+const MathText = lazy(() =>
+  import("@/components/MathText").then((m) => ({ default: m.MathText })),
+);
+
+function hasMath(text: string): boolean {
+  return new RegExp(MATH_RE.source).test(text);
+}
+
+/** 渲染字幕文本：含 LaTeX 公式时用 KaTeX，否则纯文本。加载前先去掉定界符兜底。 */
+function CaptionText({ text }: { text: string }) {
+  if (!hasMath(text)) return <>{text}</>;
+  return (
+    <Suspense fallback={<>{text.replace(/\\[()[\]]/g, "")}</>}>
+      <MathText text={text} />
+    </Suspense>
+  );
+}
 
 /** 字幕框：位置和大小都用相对画面的比例（0~1）存，这样全屏/缩放都自适应。 */
 type Box = { left: number; top: number; width: number; height: number };
@@ -7,6 +27,9 @@ type Corner = "nw" | "ne" | "sw" | "se";
 const STORAGE_KEY = "caption-box";
 const DEFAULT_BOX: Box = { left: 0.08, top: 0.8, width: 0.84, height: 0.14 };
 const MIN = 0.05;
+const CAPTION_SAFE_LINES = 2;
+const CAPTION_LINE_HEIGHT = 1.375; // Tailwind `leading-snug`
+const CAPTION_SAFE_HEIGHT_RATIO = 0.9;
 
 function clamp(v: number, lo: number, hi: number) {
   if (hi < lo) hi = lo;
@@ -137,8 +160,13 @@ export function CaptionOverlay({
     };
   }
 
-  // 字号跟着字幕框高度走，所以拖角变大 = 字变大。
-  const fontSize = clamp(stageHeight * box.height * 0.5, 12, 120);
+  // 字幕框负责可视区域；字号只在这个区域里受限自适应，给两行字幕留出安全余量，避免高框时把字顶到边上。
+  const fontSize = clamp(
+    (stageHeight * box.height * CAPTION_SAFE_HEIGHT_RATIO) /
+      (CAPTION_SAFE_LINES * CAPTION_LINE_HEIGHT),
+    12,
+    120,
+  );
 
   return (
     <div
@@ -155,7 +183,7 @@ export function CaptionOverlay({
         className="flex h-full w-full cursor-move items-center justify-center overflow-hidden rounded bg-black/70 px-3 text-center leading-snug text-white shadow-lg ring-1 ring-transparent group-hover:ring-white/30"
         style={{ fontSize }}
       >
-        {text}
+        <CaptionText text={text} />
       </div>
       {(Object.keys(CORNER_CLASS) as Corner[]).map((corner) => (
         <span
