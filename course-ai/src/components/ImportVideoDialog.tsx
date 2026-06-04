@@ -1,10 +1,14 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { ChevronDown, Download, FileVideo, Plus } from "lucide-react";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
-import { BilibiliImportDialog } from "./BilibiliImportDialog";
+
+// 按需懒加载：下载向导只在用户点击时才需要，避免把它（及 plugin-dialog 等）压进首屏 eager 包。
+const BilibiliImportDialog = lazy(() =>
+  import("./BilibiliImportDialog").then((m) => ({ default: m.BilibiliImportDialog })),
+);
 
 /** 单一「导入」入口：点开后可选「上传本地视频」或「下载网络视频（B 站 / 链接）」。 */
 export function ImportVideoButton({ courseId }: { courseId: string }) {
@@ -81,7 +85,9 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
         </>
       )}
       {showBili && (
-        <BilibiliImportDialog courseId={courseId} onClose={() => setShowBili(false)} />
+        <Suspense fallback={null}>
+          <BilibiliImportDialog courseId={courseId} onClose={() => setShowBili(false)} />
+        </Suspense>
       )}
     </div>
   );
