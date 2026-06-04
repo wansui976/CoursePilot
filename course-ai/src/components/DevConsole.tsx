@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, RefreshCw, Terminal, Trash2 } from "lucide-react";
+import { Check, ChevronLeft, Copy, RefreshCw, Terminal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 import type { DevLogEntry } from "@/lib/types";
@@ -67,6 +67,26 @@ export function DevConsole({ onClose }: { onClose: () => void }) {
     mutationFn: ipc.dev.clearLogs,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["dev-logs"] }),
   });
+  const [copied, setCopied] = useState(false);
+
+  const applied = logs.filter((l) => l.status.startsWith("已应用")).length;
+  const failed = logs.length - applied;
+
+  async function copyAll() {
+    const text = logs
+      .map(
+        (l) =>
+          `[${new Date(l.at_ms).toLocaleTimeString()}] ${l.status}\n请求:\n${l.request}\n回复:\n${l.response}\n`,
+      )
+      .join("\n----------\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
@@ -85,8 +105,22 @@ export function DevConsole({ onClose }: { onClose: () => void }) {
           </h2>
           <p className="mt-0.5 text-xs text-[var(--text-muted)]">
             AI 文稿纠错的请求与回复（每 3 秒刷新，仅保留最近 200 条，重启清空）
+            {logs.length > 0 && (
+              <>
+                {" · 共 "}
+                {logs.length}
+                {" 条 · "}
+                <span className="text-[var(--status-ok)]">已应用 {applied}</span>
+                {" · "}
+                <span className={failed > 0 ? "text-red-500" : ""}>失败 {failed}</span>
+              </>
+            )}
           </p>
         </div>
+        <Button size="sm" variant="outline" disabled={logs.length === 0} onClick={copyAll}>
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? "已复制" : "复制全部"}
+        </Button>
         <Button
           size="sm"
           variant="outline"
