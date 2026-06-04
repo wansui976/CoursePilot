@@ -46,6 +46,21 @@ describe("markdownToTiptap", () => {
     expect(ts!.attrs!.ms).toBe((105 * 60 + 30) * 1000);
   });
 
+  it("turns a time range [mm:ss-mm:ss] into one timestamp at the start", () => {
+    const doc = markdownToTiptap("要点 [72:48-72:52]");
+    const para = doc.content![0];
+    const stamps = para.content!.filter((n) => n.type === "timestamp");
+    expect(stamps).toHaveLength(1);
+    expect(stamps[0].attrs!.ms).toBe((72 * 60 + 48) * 1000);
+    expect(stamps[0].attrs!.label).toBe("72:48");
+    // 「-72:52」尾巴被吞掉，不应作为纯文本漏出。
+    const text = para.content!
+      .filter((n) => n.type === "text")
+      .map((n) => n.text)
+      .join("");
+    expect(text).not.toContain("72:52");
+  });
+
   it("parses **bold** as a bold mark", () => {
     const doc = markdownToTiptap("这是**重点**内容");
     const para = doc.content![0];
