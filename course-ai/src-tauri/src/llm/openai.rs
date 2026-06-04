@@ -42,11 +42,13 @@ pub fn build_openai_body(req: &ChatRequest) -> Value {
     for m in &req.messages {
         messages.push(json!({"role": m.role, "content": m.content}));
     }
+    // OpenAI 规范里 max_tokens 是可选的：省略它，模型就用自身的最大输出预算，
+    // 避免我们这边写死的上限把长输出（出题/纠错的 JSON）截断。Anthropic 那边
+    // max_tokens 是必填，仍照常发送（见 anthropic.rs）。
     json!({
         "model": req.model,
         "messages": messages,
         "temperature": req.temperature,
-        "max_tokens": req.max_tokens,
     })
 }
 
@@ -186,6 +188,13 @@ mod tests {
         assert!(msgs[0]["content"].as_str().unwrap().contains("TRANSCRIPT"));
         assert_eq!(msgs[1]["role"], "user");
         assert_eq!(body["model"], "gpt-4o");
+    }
+
+    #[test]
+    fn body_omits_max_tokens_so_model_uses_full_budget() {
+        // OpenAI 规范 max_tokens 可选；不发送，避免人为截断长输出。
+        let body = build_openai_body(&sample_req());
+        assert!(body.get("max_tokens").is_none());
     }
 
     #[test]
