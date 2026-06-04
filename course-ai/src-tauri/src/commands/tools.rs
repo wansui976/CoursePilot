@@ -80,7 +80,8 @@ pub async fn cmd_import_bilibili(
         .await?;
     let cookies = get_setting(&state.db, "bilibili_cookies").await?;
     let out_dir = PathBuf::from(&root_path);
-    let file = download::download(&url, &out_dir, cookies.as_deref()).await?;
+    let result = download::download(&url, &out_dir, cookies.as_deref(), None, None).await?;
+    let file = result.video;
     let mut video = add_local_video(&state.db, &course_id, file, None).await?;
     // 记录来源。
     sqlx::query("UPDATE videos SET source_type='bilibili', source_uri=? WHERE id=?")
