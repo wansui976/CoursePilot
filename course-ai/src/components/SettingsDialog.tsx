@@ -124,6 +124,7 @@ export function SettingsPanel({
   const [model, setModel] = useState("large-v3-turbo");
   const [asrBackend, setAsrBackend] = useState("whisper");
   const [asrLanguage, setAsrLanguage] = useState("zh");
+  const [correctionConcurrency, setCorrectionConcurrency] = useState("8");
   const [volcengineAppId, setVolcengineAppId] = useState("");
   const [volcengineToken, setVolcengineToken] = useState("");
   const [volcengineSaved, setVolcengineSaved] = useState("");
@@ -150,6 +151,9 @@ export function SettingsPanel({
     void ipc.settings
       .get("asr_language")
       .then((value) => setAsrLanguage(value ?? "zh"));
+    void ipc.settings
+      .get("asr_correction_concurrency")
+      .then((value) => setCorrectionConcurrency(value ?? "8"));
     void ipc.settings
       .get("volcengine_asr_app_id")
       .then((value) => setVolcengineAppId(value ?? ""));
@@ -188,6 +192,14 @@ export function SettingsPanel({
   async function changeAsrLanguage(value: string) {
     setAsrLanguage(value);
     await ipc.settings.set("asr_language", value);
+  }
+
+  async function changeCorrectionConcurrency(value: string) {
+    setCorrectionConcurrency(value);
+    const n = Number(value);
+    if (Number.isFinite(n) && n >= 1) {
+      await ipc.settings.set("asr_correction_concurrency", String(Math.min(2500, Math.floor(n))));
+    }
   }
 
   async function saveVolcengineKey() {
@@ -318,6 +330,25 @@ export function SettingsPanel({
                 <option value="es">西班牙语</option>
                 <option value="ru">俄语</option>
               </Select>
+            </Field>
+
+            <Field
+              label="AI 纠错并发数"
+              htmlFor="asr-correction-concurrency"
+              hint="字幕分批并发交给大模型纠错；越大越快，但受模型并发上限约束（如 DeepSeek-flash 2500 / pro 500，普通端点建议 5~16）。实际并发还受分批数量限制。"
+            >
+              <input
+                id="asr-correction-concurrency"
+                type="number"
+                min={1}
+                max={2500}
+                step={1}
+                className={FIELD}
+                value={correctionConcurrency}
+                onChange={(event) =>
+                  void changeCorrectionConcurrency(event.target.value)
+                }
+              />
             </Field>
 
             {asrBackend === "whisper" && (

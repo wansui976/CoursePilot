@@ -8,9 +8,21 @@ use serde::{Deserialize, Serialize};
 // 一批的段数。Anthropic 输出上限 4096，约 40 段（含时间戳回显）仍安全；
 // OpenAI 已不发 max_tokens（无上限）。批太大时若被截断也只丢这一批（保留原文）。
 const CORRECTION_BATCH_SIZE: usize = 40;
-// 并发批数：批之间相互独立，并发跑可大幅缩短 1 小时视频的纠错耗时；
-// 取 5 兼顾速度与接口限流。
-const CORRECTION_CONCURRENCY: usize = 5;
+// 默认并发批数；可被设置 asr_correction_concurrency 覆盖。批之间相互独立，
+// 并发跑可大幅缩短长视频的纠错耗时。DeepSeek 等高并发模型可调到很大
+// （flash 2500 / pro 500）；普通端点保守些以免触发限流。
+const DEFAULT_CORRECTION_CONCURRENCY: usize = 8;
+
+/// 读取 AI 纠错并发数设置，限制在 1..=2500（实际有效值还受批数量上限约束）。
+async fn correction_concurrency(db: &Db) -> usize {
+    crate::commands::settings::get_setting(db, "asr_correction_concurrency")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|n| n.clamp(1, 2500))
+        .unwrap_or(DEFAULT_CORRECTION_CONCURRENCY)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CorrectionSegment {
@@ -168,6 +180,7 @@ pub async fn autocorrect_transcript(
         return Err(AppError::NotFound(format!("no transcript for {video_id}")));
     }
 
+    let concurrency = correction_concurrency(db).await;
     let segments = load_correction_segments(&rows);
     // 用拥有所有权的批，避免在 async 闭包里借用引用形参（HRTB 生命周期问题）。
     let batches: Vec<Vec<CorrectionSegment>> = segments
@@ -187,7 +200,7 @@ pub async fn autocorrect_transcript(
                 }
             }
         })
-        .buffered(CORRECTION_CONCURRENCY)
+        .buffered(concurrency)
         .collect()
         .await;
 
