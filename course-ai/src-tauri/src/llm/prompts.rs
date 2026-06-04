@@ -29,7 +29,7 @@ pub fn chapters_request(model: &str, transcript: &str) -> ChatRequest {
          2. 第一章 start_ms 从视频开头附近开始，最后一章 end_ms 接近视频结尾。\
          3. start_ms/end_ms 取自字幕里对应句子的毫秒时间，不要凭空编造。\
          4. 标题要具体，写出该段的主题，避免「介绍」「内容」这类空泛词。",
-        2048,
+        4096,
     )
 }
 
@@ -69,7 +69,7 @@ pub fn quiz_request(model: &str, transcript: &str) -> ChatRequest {
          2. single 至少 4 个选项；multi 有 2 个及以上正确项；judge 不要给 options。\
          3. answer 必须与 options 完全一致（用选项原文，不要用字母 A/B/C）。\
          4. explanation 说明为什么对、错在哪，并指出依据；ref_ms 取自相关字幕的毫秒时间。",
-        2048,
+        4096,
     )
 }
 
@@ -82,7 +82,7 @@ pub fn mindmap_request(model: &str, transcript: &str) -> ChatRequest {
          1. 用一个一级标题（# 视频主题）作根节点；二级标题（##）是主要模块，对应各章节/大主题。\
          2. 在每个模块下用 - 列表展开具体知识点，必要时再嵌套子列表，整体保持 3-4 层、层次清晰。\
          3. 每个节点用精炼短语（不要整句），只保留字幕真正讲到的内容，覆盖全片要点不遗漏主线。",
-        2048,
+        4096,
     )
 }
 

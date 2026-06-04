@@ -36,6 +36,42 @@ pub fn strip_code_fence(s: &str) -> &str {
     t.trim().strip_suffix("```").unwrap_or(t).trim()
 }
 
+/// 模型把 LaTeX（\(、\sqrt 等）放进 JSON 字符串时，常常没按 JSON 规则把反斜杠
+/// 写成 \\，导致「invalid escape」。这里只把字符串内的「非法单反斜杠」补成 \\，
+/// 合法转义（\" \\ \/ \b \f \n \r \t \u）原样保留。仅在严格解析失败后兜底调用。
+pub fn repair_json_backslashes(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() + 16);
+    let mut chars = input.chars().peekable();
+    let mut in_string = false;
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                in_string = !in_string;
+                out.push('"');
+            }
+            '\\' if in_string => match chars.peek() {
+                Some('"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | 'u') => {
+                    out.push('\\');
+                    out.push(chars.next().unwrap());
+                }
+                _ => out.push_str("\\\\"),
+            },
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// 宽松解析 LLM 返回的 JSON：先严格解析，失败再修复 LaTeX 反斜杠转义后重试。
+/// 适用于含数学公式（LaTeX）的章节/出题等结构化输出。
+pub fn parse_lenient_json<T: serde::de::DeserializeOwned>(content: &str) -> AppResult<T> {
+    let cleaned = strip_code_fence(content);
+    match serde_json::from_str(cleaned) {
+        Ok(value) => Ok(value),
+        Err(_) => serde_json::from_str(&repair_json_backslashes(cleaned)).map_err(AppError::Json),
+    }
+}
+
 #[derive(Debug, Serialize, serde::Deserialize)]
 pub struct ChapterDraft {
     pub title: String,
@@ -46,12 +82,12 @@ pub struct ChapterDraft {
 }
 
 pub fn parse_chapters(content: &str) -> AppResult<Vec<ChapterDraft>> {
-    serde_json::from_str(strip_code_fence(content)).map_err(AppError::Json)
+    parse_lenient_json(content)
 }
 
 /// quiz 仅校验是合法 JSON 数组，原样落库（前端按约定字段渲染）。
 pub fn validate_quiz_json(content: &str) -> AppResult<String> {
-    let v: serde_json::Value = serde_json::from_str(strip_code_fence(content))?;
+    let v: serde_json::Value = parse_lenient_json(content)?;
     if !v.is_array() {
         return Err(AppError::Other("quiz output is not a JSON array".into()));
     }
@@ -231,6 +267,17 @@ mod tests {
     fn validates_quiz_array() {
         assert!(validate_quiz_json(r#"[{"stem":"q"}]"#).is_ok());
         assert!(validate_quiz_json(r#"{"not":"array"}"#).is_err());
+    }
+
+    #[test]
+    fn quiz_and_chapters_tolerate_unescaped_latex_backslashes() {
+        // 题干里含未转义的 LaTeX 反斜杠，严格 JSON 会失败，宽松解析应修复。
+        let quiz = r#"[{"type":"single","stem":"求 \(v^2\) 的值","options":["1"],"answer":"1"}]"#;
+        assert!(validate_quiz_json(quiz).is_ok());
+        let chapters = r#"[{"title":"速度变换 \(v_x'\)","summary":"s","start_ms":0,"end_ms":1000}]"#;
+        let drafts = parse_chapters(chapters).unwrap();
+        assert_eq!(drafts.len(), 1);
+        assert!(drafts[0].title.contains(r"\(v_x'\)"));
     }
 
     #[tokio::test]
