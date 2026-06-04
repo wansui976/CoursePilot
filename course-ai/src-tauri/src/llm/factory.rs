@@ -3,7 +3,12 @@ use crate::llm::Provider;
 
 /// 由 profile + 明文 key 构造 Provider。key 由调用方从 keychain（settings 表）取出。
 pub fn build_provider(profile: &LlmProfile, api_key: String) -> Provider {
-    let client = reqwest::Client::new();
+    // 给请求设超时，避免端点卡住时一直挂着（默认 reqwest 无超时，会无限等待）。
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .connect_timeout(std::time::Duration::from_secs(20))
+        .build()
+        .unwrap_or_default();
     match profile.kind {
         ProviderKind::Openai => Provider::OpenAi {
             base_url: profile.base_url.clone(),

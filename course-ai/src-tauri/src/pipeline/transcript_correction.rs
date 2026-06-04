@@ -100,25 +100,32 @@ pub async fn overwrite_transcript_texts(
     Ok(())
 }
 
-async fn correct_batch(
+// 每批的最大尝试次数。失败（限流/超时/解析不符）后重试，给一次机会，
+// 而不是一遇错就保留原文导致「只处理了一部分」。
+const CORRECTION_MAX_ATTEMPTS: usize = 3;
+
+/// 单次尝试：调用模型并解析，结果记入开发控制台（含第几次尝试）。
+async fn correct_batch_once(
     provider: &Provider,
     model: &str,
     video_id: &str,
     batch: &[CorrectionSegment],
+    batch_json: &str,
+    attempt: usize,
 ) -> AppResult<Vec<CorrectionSegment>> {
-    let batch_json = serde_json::to_string_pretty(batch)?;
-    let req = crate::llm::prompts::transcript_correction_request(model, &batch_json);
+    let req = crate::llm::prompts::transcript_correction_request(model, batch_json);
     match provider.complete(&req).await {
         Ok(resp) => {
             let parsed = parse_corrections(batch, &resp.content);
             let status = match &parsed {
-                Ok(_) => "已应用".to_string(),
-                Err(error) => format!("解析失败，保留原文: {error}"),
+                Ok(_) if attempt == 1 => "已应用".to_string(),
+                Ok(_) => format!("已应用（第 {attempt} 次重试成功）"),
+                Err(error) => format!("解析失败（第 {attempt} 次）: {error}"),
             };
             crate::dev_log::record(
                 "transcript_correction",
                 video_id,
-                &batch_json,
+                batch_json,
                 &resp.content,
                 &status,
             );
@@ -128,13 +135,36 @@ async fn correct_batch(
             crate::dev_log::record(
                 "transcript_correction",
                 video_id,
-                &batch_json,
+                batch_json,
                 &format!("<调用失败> {error}"),
-                "调用失败，保留原文",
+                &format!("调用失败（第 {attempt} 次）"),
             );
             Err(error)
         }
     }
+}
+
+async fn correct_batch(
+    provider: &Provider,
+    model: &str,
+    video_id: &str,
+    batch: &[CorrectionSegment],
+) -> AppResult<Vec<CorrectionSegment>> {
+    let batch_json = serde_json::to_string_pretty(batch)?;
+    let mut last_err: Option<AppError> = None;
+    for attempt in 1..=CORRECTION_MAX_ATTEMPTS {
+        match correct_batch_once(provider, model, video_id, batch, &batch_json, attempt).await {
+            Ok(fixed) => return Ok(fixed),
+            Err(error) => {
+                last_err = Some(error);
+                if attempt < CORRECTION_MAX_ATTEMPTS {
+                    // 退避，缓解限流：第 1 次失败等 0.5s，第 2 次等 1s。
+                    tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
+                }
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| AppError::Pipeline("transcript correction failed".into())))
 }
 
 #[derive(Deserialize)]
