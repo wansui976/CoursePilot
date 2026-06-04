@@ -4,6 +4,13 @@ import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import type { QuizQuestion } from "@/lib/types";
+import { MathText } from "./MathText";
+
+function answerText(answer: QuizQuestion["answer"]): string {
+  if (Array.isArray(answer)) return answer.join("、");
+  if (typeof answer === "boolean") return answer ? "正确" : "错误";
+  return answer;
+}
 
 export function QuizPanel({ videoId }: { videoId: string }) {
   const requestSeek = usePlayer((s) => s.requestSeek);
@@ -36,13 +43,13 @@ export function QuizPanel({ videoId }: { videoId: string }) {
         <div key={i} className="rounded border border-[var(--border-subtle)] p-3">
           <div className="mb-2 text-sm">
             <span className="mr-1 text-[var(--text-faint)]">{i + 1}.</span>
-            {q.stem}
+            <MathText text={q.stem} />
           </div>
           {q.options && (
             <ul className="mb-2 space-y-1 text-sm text-[var(--text-normal)]">
               {q.options.map((opt, j) => (
                 <li key={j}>
-                  {String.fromCharCode(65 + j)}. {opt}
+                  {String.fromCharCode(65 + j)}. <MathText text={opt} />
                 </li>
               ))}
             </ul>
@@ -56,10 +63,12 @@ export function QuizPanel({ videoId }: { videoId: string }) {
           {revealed[i] && (
             <div className="mt-2 space-y-1 text-sm">
               <div className="text-green-400">
-                答案：{JSON.stringify(q.answer)}
+                答案：<MathText text={answerText(q.answer)} />
               </div>
               {q.explanation && (
-                <div className="text-[var(--text-muted)]">{q.explanation}</div>
+                <div className="text-[var(--text-muted)]">
+                  <MathText text={q.explanation} />
+                </div>
               )}
               {typeof q.ref_ms === "number" && (
                 <button
