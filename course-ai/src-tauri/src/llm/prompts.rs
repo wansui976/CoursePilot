@@ -106,16 +106,18 @@ pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatReque
         system: Some(
             "你是课程字幕纠错助手。只输出 JSON 数组，不要任何解释、标题或代码围栏。\
              只修正识别错误、病句、断句、标点和少量口语赘词；不要补充新知识，不要补充视频里没说过的内容。\
-             输出每项必须只有 start_ms、end_ms、text 三个字段。"
+             输出每项只有 start_ms、end_ms、text 三个字段，start_ms/end_ms 原样照抄输入。\
+             数组长度必须与输入完全相同，逐段一一对应，不要合并、拆分或漏掉任何分段。"
                 .into(),
         ),
         cacheable_context: None,
         messages: vec![ChatMessage {
             role: "user".into(),
-            content: format!("按原顺序纠正这些分段，尽量保持时间戳不变：\n{batch_json}"),
+            content: format!("按原顺序纠正这些分段，时间戳照抄：\n{batch_json}"),
         }],
         temperature: 0.1,
-        max_tokens: 2048,
+        // 一批最多 20 段，输出含时间戳回显，4096 给足余量避免 JSON 被截断。
+        max_tokens: 4096,
     }
 }
 

@@ -4,7 +4,9 @@ use crate::error::{AppError, AppResult};
 use crate::llm::Provider;
 use serde::{Deserialize, Serialize};
 
-const CORRECTION_BATCH_SIZE: usize = 60;
+// 一批的段数。输出要回显时间戳 + 纠正文本，批太大时 LLM 输出会超过 max_tokens
+// 被截断成非法 JSON（这是「AI 纠错失败」的主因），故保持较小。
+const CORRECTION_BATCH_SIZE: usize = 20;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CorrectionSegment {
@@ -25,28 +27,39 @@ fn load_correction_segments(
         .collect()
 }
 
+/// 解析模型返回，逐段对齐回原始分段。**时间戳一律取原始分段的**（不信任模型回显，
+/// 避免模型把某个时间戳改错一位就导致整批失败），只采用模型纠正后的 text。
+/// 仅在「JSON 非法 / 段数不符 / 文本为空」时判为失败。
 pub fn parse_corrections(
     raw: &[CorrectionSegment],
     content: &str,
 ) -> AppResult<Vec<CorrectionSegment>> {
-    let corrected: Vec<CorrectionSegment> =
+    let parsed: Vec<CorrectionSegment> =
         serde_json::from_str(crate::pipeline::ai::strip_code_fence(content))
             .map_err(AppError::Json)?;
 
-    if corrected.len() != raw.len() {
-        return Err(AppError::Other("segment count mismatch".into()));
+    if parsed.len() != raw.len() {
+        return Err(AppError::Other(format!(
+            "segment count mismatch: expected {}, got {}",
+            raw.len(),
+            parsed.len()
+        )));
     }
 
-    for (expected, actual) in raw.iter().zip(&corrected) {
-        if expected.start_ms != actual.start_ms || expected.end_ms != actual.end_ms {
-            return Err(AppError::Other("timestamp mismatch".into()));
-        }
-        if actual.text.trim().is_empty() {
+    let mut out = Vec::with_capacity(raw.len());
+    for (orig, corr) in raw.iter().zip(&parsed) {
+        let text = corr.text.trim();
+        if text.is_empty() {
             return Err(AppError::Other("empty corrected transcript text".into()));
         }
+        out.push(CorrectionSegment {
+            start_ms: orig.start_ms,
+            end_ms: orig.end_ms,
+            text: text.to_string(),
+        });
     }
 
-    Ok(corrected)
+    Ok(out)
 }
 
 pub async fn overwrite_transcript_texts(
@@ -72,6 +85,19 @@ pub async fn overwrite_transcript_texts(
     Ok(())
 }
 
+async fn correct_batch(
+    provider: &Provider,
+    model: &str,
+    batch: &[CorrectionSegment],
+) -> AppResult<Vec<CorrectionSegment>> {
+    let req = crate::llm::prompts::transcript_correction_request(
+        model,
+        &serde_json::to_string(batch)?,
+    );
+    let resp = provider.complete(&req).await?;
+    parse_corrections(batch, &resp.content)
+}
+
 pub async fn autocorrect_transcript(
     db: &Db,
     provider: &Provider,
@@ -85,13 +111,26 @@ pub async fn autocorrect_transcript(
 
     let segments = load_correction_segments(&rows);
     let mut corrected = Vec::with_capacity(segments.len());
+    let mut any_ok = false;
+    // 逐批纠错：某批失败（截断/格式不符/调用出错）只保留该批原文并继续，
+    // 不再因为一批就丢弃整段视频的纠错成果。
     for batch in segments.chunks(CORRECTION_BATCH_SIZE) {
-        let req = crate::llm::prompts::transcript_correction_request(
-            model,
-            &serde_json::to_string(batch)?,
-        );
-        let resp = provider.complete(&req).await?;
-        corrected.extend(parse_corrections(batch, &resp.content)?);
+        match correct_batch(provider, model, batch).await {
+            Ok(fixed) => {
+                corrected.extend(fixed);
+                any_ok = true;
+            }
+            Err(error) => {
+                eprintln!("transcript correction batch failed, keeping original: {error}");
+                corrected.extend_from_slice(batch);
+            }
+        }
+    }
+
+    if !any_ok {
+        return Err(AppError::Pipeline(
+            "所有分段纠错均失败（模型输出可能被截断或格式不符）".into(),
+        ));
     }
 
     overwrite_transcript_texts(db, video_id, &corrected).await
@@ -127,20 +166,79 @@ mod tests {
     }
 
     #[test]
-    fn parse_corrections_rejects_timestamp_drift() {
+    fn parse_corrections_keeps_original_timestamps_despite_drift() {
         let raw = vec![CorrectionSegment {
             start_ms: 0,
             end_ms: 1000,
             text: "原文".into(),
         }];
 
-        let err = parse_corrections(
+        // 模型把时间戳改错了，但我们采用原始时间戳，只取纠正后的文本。
+        let out = parse_corrections(
             &raw,
             r#"[{"start_ms":0,"end_ms":2000,"text":"纠正文"}]"#,
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(err.to_string().contains("timestamp mismatch"));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].start_ms, 0);
+        assert_eq!(out[0].end_ms, 1000);
+        assert_eq!(out[0].text, "纠正文");
+    }
+
+    #[test]
+    fn parse_corrections_rejects_count_mismatch() {
+        let raw = vec![CorrectionSegment {
+            start_ms: 0,
+            end_ms: 1000,
+            text: "原文".into(),
+        }];
+        let err = parse_corrections(
+            &raw,
+            r#"[{"start_ms":0,"end_ms":1000,"text":"a"},{"start_ms":1000,"end_ms":2000,"text":"b"}]"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("segment count mismatch"));
+    }
+
+    #[test]
+    fn parse_corrections_rejects_empty_text() {
+        let raw = vec![CorrectionSegment {
+            start_ms: 0,
+            end_ms: 1000,
+            text: "原文".into(),
+        }];
+        let err = parse_corrections(&raw, r#"[{"start_ms":0,"end_ms":1000,"text":"  "}]"#)
+            .unwrap_err();
+        assert!(err.to_string().contains("empty"));
+    }
+
+    #[tokio::test]
+    async fn autocorrect_applies_corrected_text_via_mock() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let provider = Provider::Mock {
+            canned: r#"[{"start_ms":0,"end_ms":5000,"text":"纠正后的第一部分"}]"#.into(),
+        };
+        autocorrect_transcript(&db, &provider, "m", &vid)
+            .await
+            .unwrap();
+        let joined = crate::pipeline::ai::transcript_text(&db, &vid).await.unwrap();
+        assert!(joined.contains("纠正后的第一部分"));
+    }
+
+    #[tokio::test]
+    async fn autocorrect_errs_and_keeps_original_when_all_batches_fail() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let provider = Provider::Mock {
+            canned: "这不是 JSON".into(),
+        };
+        let err = autocorrect_transcript(&db, &provider, "m", &vid)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("所有分段纠错均失败"));
+        // 原始文稿未被破坏。
+        let joined = crate::pipeline::ai::transcript_text(&db, &vid).await.unwrap();
+        assert!(joined.contains("讲解第一部分"));
     }
 
     #[tokio::test]
