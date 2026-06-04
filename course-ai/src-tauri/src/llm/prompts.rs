@@ -121,7 +121,7 @@ pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatReque
             content: format!("按原顺序纠正这些分段，时间戳照抄：\n{batch_json}"),
         }],
         temperature: 0.1,
-        // 一批最多 20 段，输出含时间戳回显，4096 给足余量避免 JSON 被截断。
+        // 一批约 40 段，输出含时间戳回显；4096 是 Anthropic 的输出上限（OpenAI 不发此值）。
         max_tokens: 4096,
     }
 }
