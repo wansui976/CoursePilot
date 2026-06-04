@@ -106,6 +106,11 @@ pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatReque
         system: Some(
             "你是课程字幕纠错助手。只输出 JSON 数组，不要任何解释、标题或代码围栏。\
              只修正识别错误、病句、断句、标点和少量口语赘词；不要补充新知识，不要补充视频里没说过的内容。\
+             把被识别成文字的数学/物理/化学表达还原成规范记号，用 Unicode 纯文本，不要 LaTeX、不要代码：\
+             下标用 ₀₁₂₃…（例：「m 零」→ m₀、「x 下标 i」→ xᵢ），上标/次方用 ²³ⁿ…（例：「v 方」→ v²、「c 的平方」→ c²），\
+             根号用 √ 并加括号（例：「根号下一减 v 方比 c 方」→ √(1−v²/c²)），\
+             分数/「比」「除以」用 /，并按需使用 × ÷ ± ≈ ≤ ≥ ≠ ∑ ∫ → ° 和希腊字母 α β γ θ λ μ π σ ω 等；\
+             记号要保持纯文本可读（字幕里也能正常显示），仍贴近原话，含义不确定时就保留原文。\
              输出每项只有 start_ms、end_ms、text 三个字段，start_ms/end_ms 原样照抄输入。\
              数组长度必须与输入完全相同，逐段一一对应，不要合并、拆分或漏掉任何分段。"
                 .into(),
@@ -176,6 +181,18 @@ mod tests {
         for required in ["只输出 JSON", "start_ms", "end_ms", "text", "不要补充新知识"] {
             assert!(
                 system.contains(required) || user.contains(required),
+                "correction prompt should mention {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn transcript_correction_prompt_normalizes_spoken_math() {
+        let system = transcript_correction_request("m", "[]").system.unwrap();
+        // 必须指示把口述的数学/物理表达还原成 Unicode 规范记号，且不用 LaTeX。
+        for required in ["数学", "Unicode", "下标", "根号", "m₀", "√"] {
+            assert!(
+                system.contains(required),
                 "correction prompt should mention {required}"
             );
         }
