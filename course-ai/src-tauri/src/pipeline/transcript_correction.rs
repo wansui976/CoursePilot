@@ -2,11 +2,15 @@ use crate::commands::transcripts::list_segments;
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::llm::Provider;
+use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 
-// 一批的段数。输出要回显时间戳 + 纠正文本，批太大时 LLM 输出会超过 max_tokens
-// 被截断成非法 JSON（这是「AI 纠错失败」的主因），故保持较小。
-const CORRECTION_BATCH_SIZE: usize = 20;
+// 一批的段数。Anthropic 输出上限 4096，约 40 段（含时间戳回显）仍安全；
+// OpenAI 已不发 max_tokens（无上限）。批太大时若被截断也只丢这一批（保留原文）。
+const CORRECTION_BATCH_SIZE: usize = 40;
+// 并发批数：批之间相互独立，并发跑可大幅缩短 1 小时视频的纠错耗时；
+// 取 5 兼顾速度与接口限流。
+const CORRECTION_CONCURRENCY: usize = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CorrectionSegment {
@@ -165,21 +169,33 @@ pub async fn autocorrect_transcript(
     }
 
     let segments = load_correction_segments(&rows);
+    // 用拥有所有权的批，避免在 async 闭包里借用引用形参（HRTB 生命周期问题）。
+    let batches: Vec<Vec<CorrectionSegment>> = segments
+        .chunks(CORRECTION_BATCH_SIZE)
+        .map(<[_]>::to_vec)
+        .collect();
+
+    // 并发跑各批（buffered 保持原顺序）：批之间独立，并发后 1 小时视频快很多。
+    // 某批失败（截断/格式不符/调用出错）只保留该批原文，不丢弃整段成果。
+    let results: Vec<(bool, Vec<CorrectionSegment>)> = futures_util::stream::iter(batches)
+        .map(|batch| async move {
+            match correct_batch(provider, model, video_id, &batch).await {
+                Ok(fixed) => (true, fixed),
+                Err(error) => {
+                    eprintln!("transcript correction batch failed, keeping original: {error}");
+                    (false, batch)
+                }
+            }
+        })
+        .buffered(CORRECTION_CONCURRENCY)
+        .collect()
+        .await;
+
     let mut corrected = Vec::with_capacity(segments.len());
     let mut any_ok = false;
-    // 逐批纠错：某批失败（截断/格式不符/调用出错）只保留该批原文并继续，
-    // 不再因为一批就丢弃整段视频的纠错成果。
-    for batch in segments.chunks(CORRECTION_BATCH_SIZE) {
-        match correct_batch(provider, model, video_id, batch).await {
-            Ok(fixed) => {
-                corrected.extend(fixed);
-                any_ok = true;
-            }
-            Err(error) => {
-                eprintln!("transcript correction batch failed, keeping original: {error}");
-                corrected.extend_from_slice(batch);
-            }
-        }
+    for (ok, part) in results {
+        any_ok |= ok;
+        corrected.extend(part);
     }
 
     if !any_ok {
