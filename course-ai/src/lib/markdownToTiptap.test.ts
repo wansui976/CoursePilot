@@ -78,6 +78,22 @@ describe("markdownToTiptap", () => {
     expect(mb!.attrs!.display).toBe(true);
   });
 
+  it("parses a multi-line \\[..\\] display block with blank lines", () => {
+    // 用户真实案例：\[ 与 \] 在不同行，中间还有空行。
+    const md =
+      "\\[\n\n  v_x' = \\frac{v_x - u}{1}, \\quad\n\n  v_y' = \\frac{v_y}{\\gamma}\n\n  \\]";
+    const doc = markdownToTiptap(md);
+    const para = doc.content!.find((n) =>
+      n.content?.some((c) => c.type === "math"),
+    );
+    const math = para!.content!.find((c) => c.type === "math");
+    expect(math!.attrs!.display).toBe(true);
+    expect(math!.attrs!.latex).toContain("v_x' = \\frac{v_x - u}{1}");
+    expect(math!.attrs!.latex).toContain("v_y' = \\frac{v_y}{\\gamma}");
+    // 块内空行必须剔除（数学模式不允许空行，否则 KaTeX 报错）。
+    expect(math!.attrs!.latex).not.toContain("\n\n");
+  });
+
   it("parses a markdown table into a table node", () => {
     const md = "| 知识点 | 难度 |\n| --- | --- |\n| 概括题 | 高 |\n| 对策题 | 中 |";
     const doc = markdownToTiptap(md);
