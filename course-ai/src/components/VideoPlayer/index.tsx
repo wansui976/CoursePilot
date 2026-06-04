@@ -66,7 +66,11 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
       boxH = h;
       boxW = h * aspect;
     }
-    return { width: Math.round(boxW), height: Math.round(boxH) };
+    // 对齐到整数物理像素：暂停时的静态帧是按物理像素栅格化的，舞台落在半像素上会被
+    // 重采样而发虚。先按 devicePixelRatio 取整再换回 CSS 像素，让缩放尽量无损。
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    const snap = (v: number) => Math.round(v * dpr) / dpr;
+    return { width: snap(boxW), height: snap(boxH) };
   })();
 
   useEffect(() => {
@@ -209,6 +213,13 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
             playsInline
             disablePictureInPicture
             className="h-full w-full bg-black object-contain"
+            // 提升到独立 GPU 合成层：暂停后让这一帧留在自己的层上，减少回退到
+            // 「栅格化再缩放」的软化；backface-visibility 进一步固定层、避免半像素抖动。
+            style={{
+              transform: "translateZ(0)",
+              willChange: "transform",
+              backfaceVisibility: "hidden",
+            }}
             onTimeUpdate={(event) => {
               const t = event.currentTarget.currentTime;
               setCurrentMs(Math.floor(t * 1000));
