@@ -4,7 +4,7 @@
 //! arg 构造为纯函数，单测覆盖。仅供个人学习使用。
 
 use crate::error::{AppError, AppResult};
-use crate::sidecar::{resolve, YTDLP};
+use crate::sidecar::{resolve, FFMPEG, YTDLP};
 use reqwest::Url;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -62,6 +62,16 @@ pub fn build_ytdlp_args(
     args
 }
 
+/// 解析 ffmpeg sidecar 路径，供 yt-dlp 合并 DASH 流 / 转字幕用（尽力而为）。
+/// B站只提供分离的 video-only + audio 流，必须靠 ffmpeg 合并；打包后 yt-dlp 是
+/// sidecar，不会自动找到同样是 sidecar 的 ffmpeg，故须显式用 --ffmpeg-location 指给它。
+fn ffmpeg_location_args() -> Vec<String> {
+    match resolve(&FFMPEG, None) {
+        Ok(path) => vec!["--ffmpeg-location".to_string(), path.to_string_lossy().to_string()],
+        Err(_) => Vec::new(),
+    }
+}
+
 fn is_bilibili_url(url: &str) -> bool {
     Url::parse(url)
         .ok()
@@ -89,6 +99,7 @@ pub async fn download(
     let ytdlp = resolve(&YTDLP, None)?;
     let args = build_ytdlp_args(url, &template.to_string_lossy(), cookies, max_height, sub_lang);
     let output = Command::new(&ytdlp)
+        .args(ffmpeg_location_args())
         .args(&args)
         .output()
         .await
