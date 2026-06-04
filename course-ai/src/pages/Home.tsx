@@ -17,6 +17,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { CourseSidebar } from "@/components/CourseSidebar";
 import { RecycleBin } from "@/components/RecycleBin";
+import { DevConsole } from "@/components/DevConsole";
 import { ImportVideoButton } from "@/components/ImportVideoDialog";
 import { SettingsPanel } from "@/components/SettingsDialog";
 import { TabsPanel } from "@/components/TabsPanel";
@@ -77,6 +78,7 @@ export function Home() {
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showRecycleBin, setShowRecycleBin] = useState(false);
+  const [showDevConsole, setShowDevConsole] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(readInitialTheme);
   const [view, setView] = useState<LibraryView>(readInitialView);
   const [openMenuVideoId, setOpenMenuVideoId] = useState<string | null>(null);
@@ -211,10 +213,11 @@ export function Home() {
 
   // 设置 / 回收站作为主区域整页，与处理队列一致；互斥切换。保留当前选中的视频，
   // 这样从控制台打开设置、点「返回」能回到原来的视频工作台，而不是退回首页。
-  function openMainView(view: "settings" | "recycle") {
+  function openMainView(view: "settings" | "recycle" | "dev") {
     setQueueOpen(false);
     setShowSettings(view === "settings");
     setShowRecycleBin(view === "recycle");
+    setShowDevConsole(view === "dev");
   }
 
   function beginStudyPanelResize(event: ReactPointerEvent<HTMLDivElement>) {
@@ -573,6 +576,7 @@ export function Home() {
               onClick={() => {
                 setShowSettings(false);
                 setShowRecycleBin(false);
+                setShowDevConsole(false);
                 setSelectedVideoId(null);
               }}
               title="返回课程库"
@@ -615,6 +619,7 @@ export function Home() {
               setQueueOpen(false);
               setShowSettings(false);
               setShowRecycleBin(false);
+              setShowDevConsole(false);
             }}
             onOpenSettings={() => openMainView("settings")}
             onToggleTheme={toggleTheme}
@@ -626,6 +631,7 @@ export function Home() {
               setSelectedVideoId(null);
               setShowSettings(false);
               setShowRecycleBin(false);
+              setShowDevConsole(false);
               setQueueOpen((open) => !open);
             }}
             onOpenRecycleBin={() => openMainView("recycle")}
@@ -634,9 +640,14 @@ export function Home() {
         <main className="flex min-w-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col bg-[var(--surface-app)]">
             {showSettings ? (
-              <SettingsPanel onClose={() => setShowSettings(false)} />
+              <SettingsPanel
+                onClose={() => setShowSettings(false)}
+                onOpenDevConsole={() => openMainView("dev")}
+              />
             ) : showRecycleBin ? (
               <RecycleBin onClose={() => setShowRecycleBin(false)} />
+            ) : showDevConsole ? (
+              <DevConsole onClose={() => setShowDevConsole(false)} />
             ) : queueOpen ? (
               renderProcessingQueuePage()
             ) : selectedVideo ? (
