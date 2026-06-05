@@ -681,7 +681,20 @@ export function Home() {
                 </div>
                 <div className="min-h-0 flex-1">
                   {mediaSrc ? (
-                    <VideoPlayer src={mediaSrc} videoId={selectedVideo.id} />
+                    <VideoPlayer
+                      src={mediaSrc}
+                      videoId={selectedVideo.id}
+                      crop={
+                        selectedVideo.crop_top != null
+                          ? {
+                              top: selectedVideo.crop_top,
+                              right: selectedVideo.crop_right ?? 0,
+                              bottom: selectedVideo.crop_bottom ?? 0,
+                              left: selectedVideo.crop_left ?? 0,
+                            }
+                          : null
+                      }
+                    />
                   ) : (
                     <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">
                       正在准备播放…

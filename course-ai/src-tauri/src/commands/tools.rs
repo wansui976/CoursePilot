@@ -107,6 +107,7 @@ pub async fn cmd_import_bilibili(
         video.subtitle_path = Some(p);
         video.subtitle_lang = Some(lang.to_string());
     }
+    crate::commands::videos::apply_detected_crop(&state.db, &mut video).await;
     Ok(video)
 }
 

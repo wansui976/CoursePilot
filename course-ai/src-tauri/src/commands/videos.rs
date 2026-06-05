@@ -25,6 +25,11 @@ pub struct Video {
     pub processed_status: String,
     pub subtitle_path: Option<String>,
     pub subtitle_lang: Option<String>,
+    // 自带黑边的四边裁剪占比（0~1），导入时 cropdetect 探测；NULL=未探测/无黑边。
+    pub crop_top: Option<f64>,
+    pub crop_right: Option<f64>,
+    pub crop_bottom: Option<f64>,
+    pub crop_left: Option<f64>,
     pub created_at: i64,
 }
 
@@ -70,6 +75,10 @@ pub async fn add_local_video(
         processed_status: "pending".into(),
         subtitle_path: None,
         subtitle_lang: None,
+        crop_top: None,
+        crop_right: None,
+        crop_bottom: None,
+        crop_left: None,
         created_at: now,
     };
 
@@ -223,13 +232,29 @@ pub async fn cmd_add_local_video(
     .await?
     .filter(|value| !value.trim().is_empty())
     .map(PathBuf::from);
-    add_local_video(
+    let mut video = add_local_video(
         &state.db,
         &course_id,
         PathBuf::from(file_path),
         override_root,
     )
-    .await
+    .await?;
+    apply_detected_crop(&state.db, &mut video).await;
+    Ok(video)
+}
+
+/// 导入后用 ffmpeg cropdetect 探测黑边并写库，同时回填到返回的 Video，
+/// 让前端拿到结果即可显示裁剪。尽力而为：失败/无黑边静默跳过。
+pub async fn apply_detected_crop(db: &Db, video: &mut Video) {
+    let path = PathBuf::from(&video.file_path);
+    if let Some(c) =
+        crate::pipeline::crop_detect::detect_and_store_crop(db, &video.id, path).await
+    {
+        video.crop_top = Some(c.top);
+        video.crop_right = Some(c.right);
+        video.crop_bottom = Some(c.bottom);
+        video.crop_left = Some(c.left);
+    }
 }
 
 #[tauri::command]

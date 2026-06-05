@@ -1,4 +1,25 @@
-# 视频自动裁黑边（非破坏式、前端实现）
+# 视频自动裁黑边（非破坏式）
+
+> **2026-06-05 方案修订**：**检测**从「前端 canvas 逐帧扫描」改为「后端 **ffmpeg `cropdetect`**」。
+> 原因：播放器走本地 HTTP 媒体服务（`http://127.0.0.1`，与应用跨源），离屏 `<video>` + canvas
+> 读像素受 CORS 限制、且对非方形像素(SAR)视频不稳。改为**导入/下载时**用 ffmpeg cropdetect
+> 探测一次，把四边占比 insets（0~1）写入 `videos` 表（迁移 `0010_crop.sql`），播放器从视频记录
+> 读出 insets，**复用原有 `cropStyle`/`contentAspect` 显示裁剪**（渲染层不变，仍非破坏式、带开关）。
+>
+> 落地要点：
+> - 后端 `pipeline/crop_detect.rs`：`detect_crop`(跑 ffmpeg cropdetect 采样一段) +
+>   `parse_cropdetect`(解析整帧分辨率与最后一个 `crop=W:H:X:Y` → insets) + `detect_and_store_crop`(写库)。
+>   cropdetect 在时间窗内累积非黑包围盒，天然保守、不误切内容；insets 为比例，与 SAR 无关。
+> - `commands/videos.rs::apply_detected_crop` 在 `cmd_add_local_video` 与 `cmd_import_bilibili` 末尾调用。
+> - 前端：`Video` 增 `crop_top/right/bottom/left`；`Home` 把 insets 作 `crop` prop 传给 `VideoPlayer`；
+>   删除前端 canvas 检测（`useBlackBarCrop`、`detectBlackBars`），保留 `cropStyle`/`contentAspect`/`Insets`。
+> - 渲染修复仍生效：`object-fit: fill` 防 SAR 视频内部补黑；开关移入播放栏「裁黑边」文字按钮。
+>
+> 下文为初版（前端 canvas 检测）设计，渲染/开关部分仍适用，检测部分以本修订为准。
+
+---
+
+# 视频自动裁黑边（非破坏式、前端实现 — 初版，检测部分已被上方修订取代）
 
 ## 背景与目标
 
