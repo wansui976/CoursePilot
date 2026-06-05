@@ -1,29 +1,45 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { contentAspect, cropStyle, NO_INSETS } from "@/lib/blackBars";
+import { contentAspect, cropStyle, type Insets, NO_INSETS } from "@/lib/blackBars";
 import { ipc } from "@/lib/ipc";
 import { usePlayer } from "@/stores/player";
 import { CaptionOverlay } from "./CaptionOverlay";
 import { Controls } from "./Controls";
-import { useBlackBarCrop } from "./useBlackBarCrop";
 
 const posKey = (id: string) => `video-pos:${id}`;
 // 距片尾 15s 内不再续播（视为看完），从头开始。
 const RESUME_TAIL_GUARD = 15;
 
-export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) {
+export function VideoPlayer({
+  src,
+  videoId,
+  crop: cropProp,
+}: {
+  src: string;
+  videoId: string;
+  // 导入时 ffmpeg cropdetect 探测到的四边黑边占比；无则不裁。
+  crop?: Insets | null;
+}) {
   const regionRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLVideoElement>(null);
   const lastSavedRef = useRef(0);
   const [videoAspect, setVideoAspect] = useState(16 / 9);
-  const { crop, hasBars } = useBlackBarCrop(src);
+  const setCurrentMs = usePlayer((s) => s.setCurrentMs);
+  const setDurationMs = usePlayer((s) => s.setDurationMs);
+  const currentMs = usePlayer((s) => s.currentMs);
+  const durationMs = usePlayer((s) => s.durationMs);
+  const seekRequest = usePlayer((s) => s.seekRequest);
+  const crop = cropProp ?? NO_INSETS;
+  const hasBars =
+    !!cropProp &&
+    (crop.top > 0 || crop.right > 0 || crop.bottom > 0 || crop.left > 0);
   const [cropEnabled, setCropEnabled] = useState(true);
-  // 检测到黑边即默认开启；换视频 / 检测结果变化时复位为新视频的判定。
+  // 检测到黑边即默认开启；换视频时复位为该视频的判定。
   useEffect(() => {
     setCropEnabled(hasBars);
-  }, [src, hasBars]);
+  }, [videoId, hasBars]);
   const activeCrop = cropEnabled ? crop : NO_INSETS;
   const [region, setRegion] = useState({ w: 0, h: 0 });
   const [playing, setPlaying] = useState(false);
@@ -32,11 +48,8 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
   const [muted, setMuted] = useState(false);
   const [captionsOn, setCaptionsOn] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
-  const setCurrentMs = usePlayer((s) => s.setCurrentMs);
-  const setDurationMs = usePlayer((s) => s.setDurationMs);
-  const currentMs = usePlayer((s) => s.currentMs);
-  const durationMs = usePlayer((s) => s.durationMs);
-  const seekRequest = usePlayer((s) => s.seekRequest);
+  const dpr =
+    typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
 
   const { data: segments = [] } = useQuery({
     queryKey: ["transcripts", videoId],
@@ -234,7 +247,10 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
               willChange: "transform",
               backfaceVisibility: "hidden",
               ...(stageBox
-                ? { ...cropStyle(stageBox, activeCrop), objectFit: "fill" as const }
+                ? {
+                    ...cropStyle(stageBox, activeCrop, dpr),
+                    objectFit: "fill" as const,
+                  }
                 : {}),
             }}
             onTimeUpdate={(event) => {
