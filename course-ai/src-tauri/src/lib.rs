@@ -33,8 +33,9 @@ use crate::commands::tools::{
 };
 use crate::commands::transcripts::{cmd_list_transcripts, cmd_update_transcript};
 use crate::commands::videos::{
-    cmd_add_local_video, cmd_delete_video, cmd_ensure_playable, cmd_list_trash, cmd_list_videos,
-    cmd_media_url, cmd_purge_video, cmd_restore_video, cmd_update_video_title, cmd_video_cover,
+    cmd_add_local_video, cmd_delete_video, cmd_ensure_crop, cmd_ensure_playable, cmd_list_trash,
+    cmd_list_videos, cmd_media_url, cmd_purge_video, cmd_restore_video, cmd_update_video_title,
+    cmd_video_cover,
 };
 use crate::commands::whisper::{cmd_download_whisper_model, cmd_list_whisper_models};
 use crate::db::Db;
@@ -84,6 +85,7 @@ pub fn run() {
             cmd_update_video_title,
             cmd_delete_video,
             cmd_ensure_playable,
+            cmd_ensure_crop,
             cmd_media_url,
             cmd_video_cover,
             cmd_set_setting,

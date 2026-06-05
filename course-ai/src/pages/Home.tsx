@@ -137,6 +137,18 @@ export function Home() {
     enabled: !!selectedVideo,
   });
 
+  // 兜底：打开尚无 crop 记录的视频（多为本功能上线前导入的旧视频）时，后台补测一次黑边
+  // 并写库，完成后刷新列表让裁剪生效。每个 id 仅触发一次，已测过的（crop_top 非空）跳过。
+  const cropEnsured = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const v = selectedVideo;
+    if (!v || v.crop_top != null || cropEnsured.current.has(v.id)) return;
+    cropEnsured.current.add(v.id);
+    void ipc.videos.ensureCrop(v.id).then(() => {
+      queryClient.invalidateQueries({ queryKey: ["videos", selectedCourseId] });
+    });
+  }, [selectedVideo, selectedCourseId, queryClient]);
+
   useEffect(() => {
     setVideo(selectedVideoId);
   }, [selectedVideoId, setVideo]);
