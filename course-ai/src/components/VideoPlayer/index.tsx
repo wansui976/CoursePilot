@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Crop } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { contentAspect, cropStyle, NO_INSETS } from "@/lib/blackBars";
 import { ipc } from "@/lib/ipc";
@@ -227,11 +226,16 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
             // 「栅格化再缩放」的软化；backface-visibility 进一步固定层、避免半像素抖动。
             // stageBox 就绪时叠加 cropStyle（绝对定位 + 放大负偏移）把黑边推出包裹层；
             // 无裁剪时 cropStyle 等价于铺满 stageBox，与原渲染一致。
+            // object-fit:fill：我们已把元素尺寸按内容宽高比算好（W/H==内容比例），
+            // fill 让画面恰好铺满元素、不留 UA 默认 object-fit:contain 的内部黑边
+            //（尤其遇到非方形像素/SAR 视频，contain 会在框内补黑、裁剪后表现为侧边黑块）。
             style={{
               transform: "translateZ(0)",
               willChange: "transform",
               backfaceVisibility: "hidden",
-              ...(stageBox ? cropStyle(stageBox, activeCrop) : {}),
+              ...(stageBox
+                ? { ...cropStyle(stageBox, activeCrop), objectFit: "fill" as const }
+                : {}),
             }}
             onTimeUpdate={(event) => {
               const t = event.currentTarget.currentTime;
@@ -284,19 +288,6 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
           {captionsOn && caption && (
             <CaptionOverlay text={caption} stageRef={stageRef} />
           )}
-          {hasBars && (
-            <button
-              type="button"
-              aria-label={cropEnabled ? "显示原画（还原黑边）" : "裁掉黑边"}
-              title={cropEnabled ? "显示原画（还原黑边）" : "裁掉黑边"}
-              onClick={() => setCropEnabled((v) => !v)}
-              className={`absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg text-white/90 transition hover:bg-white/10 hover:text-white ${
-                cropEnabled ? "bg-black/40" : "bg-black/20"
-              }`}
-            >
-              <Crop className="h-4 w-4" />
-            </button>
-          )}
         </div>
       </div>
       <Controls
@@ -308,6 +299,9 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
         muted={muted}
         captionsOn={captionsOn}
         fullscreen={fullscreen}
+        showCrop={hasBars}
+        cropOn={cropEnabled}
+        onToggleCrop={() => setCropEnabled((v) => !v)}
         onToggleCaptions={() => setCaptionsOn((on) => !on)}
         onPlayPause={() => {
           const video = ref.current;

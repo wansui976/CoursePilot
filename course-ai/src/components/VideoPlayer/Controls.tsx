@@ -22,6 +22,9 @@ export function Controls({
   muted,
   captionsOn,
   fullscreen,
+  showCrop,
+  cropOn,
+  onToggleCrop,
   onToggleCaptions,
   onPlayPause,
   onSeek,
@@ -38,6 +41,10 @@ export function Controls({
   muted: boolean;
   captionsOn: boolean;
   fullscreen: boolean;
+  // 仅在检测到自带黑边时显示「裁黑边」开关。
+  showCrop: boolean;
+  cropOn: boolean;
+  onToggleCrop: () => void;
   onToggleCaptions: () => void;
   onPlayPause: () => void;
   onSeek: (ms: number) => void;
@@ -132,6 +139,16 @@ export function Controls({
         >
           字幕
         </button>
+        {showCrop && (
+          <button
+            type="button"
+            onClick={onToggleCrop}
+            title={cropOn ? "显示原画（保留黑边）" : "裁掉黑边"}
+            className={`${textButtonClass} ${cropOn ? "text-[#3b82f6]" : ""}`}
+          >
+            裁黑边
+          </button>
+        )}
         <Button
           size="icon"
           variant="ghost"
