@@ -26,6 +26,7 @@ export function VideoPlayer({
   const ref = useRef<HTMLVideoElement>(null);
   const lastSavedRef = useRef(0);
   const [videoAspect, setVideoAspect] = useState(16 / 9);
+  const [videoDims, setVideoDims] = useState({ w: 0, h: 0 }); // 调试：真实像素尺寸
   const setCurrentMs = usePlayer((s) => s.setCurrentMs);
   const setDurationMs = usePlayer((s) => s.setDurationMs);
   const currentMs = usePlayer((s) => s.currentMs);
@@ -275,6 +276,7 @@ export function VideoPlayer({
               const { videoWidth, videoHeight } = video;
               if (videoWidth > 0 && videoHeight > 0) {
                 setVideoAspect(videoWidth / videoHeight);
+                setVideoDims({ w: videoWidth, h: videoHeight });
               }
               // 断点续播：恢复上次离开的位置。
               const saved = Number(localStorage.getItem(posKey(videoId)));
@@ -306,6 +308,24 @@ export function VideoPlayer({
           {captionsOn && caption && (
             <CaptionOverlay text={caption} stageRef={stageRef} />
           )}
+          {/* 临时调试读数：定位裁剪偏移/比例问题用，定位后会删除。 */}
+          <div className="pointer-events-none absolute left-1 top-1 z-20 whitespace-pre rounded bg-black/70 px-1.5 py-1 font-mono text-[10px] leading-tight text-lime-300">
+            {[
+              `region ${region.w}x${region.h}`,
+              `video ${videoDims.w}x${videoDims.h} ar=${videoAspect.toFixed(4)}`,
+              `crop T${crop.top.toFixed(3)} R${crop.right.toFixed(3)} B${crop.bottom.toFixed(3)} L${crop.left.toFixed(3)}`,
+              `on=${cropEnabled} hasBars=${hasBars}`,
+              stageBox
+                ? `stage ${Math.round(stageBox.width)}x${Math.round(stageBox.height)}`
+                : "stage null",
+              stageBox
+                ? (() => {
+                    const s = cropStyle(stageBox, activeCrop, dpr);
+                    return `vid w=${Math.round(Number(s.width))} h=${Math.round(Number(s.height))} l=${Math.round(Number(s.left))} t=${Math.round(Number(s.top))}`;
+                  })()
+                : "",
+            ].join("\n")}
+          </div>
         </div>
       </div>
       <Controls
