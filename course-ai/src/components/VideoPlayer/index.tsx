@@ -1,10 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Crop } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { contentAspect, cropStyle, NO_INSETS } from "@/lib/blackBars";
 import { ipc } from "@/lib/ipc";
 import { usePlayer } from "@/stores/player";
 import { CaptionOverlay } from "./CaptionOverlay";
 import { Controls } from "./Controls";
+import { useBlackBarCrop } from "./useBlackBarCrop";
 
 const posKey = (id: string) => `video-pos:${id}`;
 // 距片尾 15s 内不再续播（视为看完），从头开始。
@@ -16,6 +19,13 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
   const ref = useRef<HTMLVideoElement>(null);
   const lastSavedRef = useRef(0);
   const [videoAspect, setVideoAspect] = useState(16 / 9);
+  const { crop, hasBars } = useBlackBarCrop(src);
+  const [cropEnabled, setCropEnabled] = useState(true);
+  // 检测到黑边即默认开启；换视频 / 检测结果变化时复位为新视频的判定。
+  useEffect(() => {
+    setCropEnabled(hasBars);
+  }, [src, hasBars]);
+  const activeCrop = cropEnabled ? crop : NO_INSETS;
   const [region, setRegion] = useState({ w: 0, h: 0 });
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
@@ -56,7 +66,7 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
   }, []);
 
   // 在播放区内，求与视频同比例、尽可能大的居中矩形；视频铺满它即完整无黑边。
-  const aspect = videoAspect > 0 ? videoAspect : 16 / 9;
+  const aspect = contentAspect(videoAspect > 0 ? videoAspect : 16 / 9, activeCrop);
   const stageBox = (() => {
     const { w, h } = region;
     if (!w || !h) return null;
@@ -212,13 +222,16 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
             src={src}
             playsInline
             disablePictureInPicture
-            className="h-full w-full bg-black object-contain"
+            className={stageBox ? "bg-black" : "h-full w-full bg-black object-contain"}
             // 提升到独立 GPU 合成层：暂停后让这一帧留在自己的层上，减少回退到
             // 「栅格化再缩放」的软化；backface-visibility 进一步固定层、避免半像素抖动。
+            // stageBox 就绪时叠加 cropStyle（绝对定位 + 放大负偏移）把黑边推出包裹层；
+            // 无裁剪时 cropStyle 等价于铺满 stageBox，与原渲染一致。
             style={{
               transform: "translateZ(0)",
               willChange: "transform",
               backfaceVisibility: "hidden",
+              ...(stageBox ? cropStyle(stageBox, activeCrop) : {}),
             }}
             onTimeUpdate={(event) => {
               const t = event.currentTarget.currentTime;
@@ -270,6 +283,19 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
           />
           {captionsOn && caption && (
             <CaptionOverlay text={caption} stageRef={stageRef} />
+          )}
+          {hasBars && (
+            <button
+              type="button"
+              aria-label={cropEnabled ? "显示原画（还原黑边）" : "裁掉黑边"}
+              title={cropEnabled ? "显示原画（还原黑边）" : "裁掉黑边"}
+              onClick={() => setCropEnabled((v) => !v)}
+              className={`absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg text-white/90 transition hover:bg-white/10 hover:text-white ${
+                cropEnabled ? "bg-black/40" : "bg-black/20"
+              }`}
+            >
+              <Crop className="h-4 w-4" />
+            </button>
           )}
         </div>
       </div>
