@@ -239,10 +239,11 @@ export function VideoPlayer({
             // 「栅格化再缩放」的软化；backface-visibility 进一步固定层、避免半像素抖动。
             // stageBox 就绪时叠加 cropStyle（绝对定位 + 放大负偏移）把黑边推出包裹层；
             // 无裁剪时 cropStyle 等价于铺满 stageBox，与原渲染一致。
-            // object-fit:cover：元素尺寸已按内容宽高比算好（W/H==内容显示比例）。
-            // cover 等比缩放铺满元素——既不像 fill 那样拉伸变形，也不像 contain 那样在框内
-            // 补黑；常见方形像素下与精确铺满一致，遇到 SAR/比例微差时只对称裁掉极小一丝，
-            // 始终保持画面比例不变。黑边仍由 cropStyle 的负偏移推出包裹层。
+            // object-fit:contain：元素尺寸已按内容宽高比算好（W/H==内容显示比例）。
+            // contain 等比缩放、永不拉伸（不变形）、且**永不裁掉内容**——对文档/讲义这类
+            // 边缘文字不能丢的内容最稳；常见方形像素下与精确铺满一致，仅当视频真实显示比例
+            // 与 videoWidth/Height 推算的比例有微差时，在框内留一丝黑边（可接受）。
+            // 黑边仍由 cropStyle 的负偏移推出包裹层。
             style={{
               transform: "translateZ(0)",
               willChange: "transform",
@@ -250,7 +251,7 @@ export function VideoPlayer({
               ...(stageBox
                 ? {
                     ...cropStyle(stageBox, activeCrop, dpr),
-                    objectFit: "cover" as const,
+                    objectFit: "contain" as const,
                   }
                 : {}),
             }}
