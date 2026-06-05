@@ -244,17 +244,38 @@ pub async fn cmd_add_local_video(
 }
 
 /// 导入后用 ffmpeg cropdetect 探测黑边并写库，同时回填到返回的 Video，
-/// 让前端拿到结果即可显示裁剪。尽力而为：失败/无黑边静默跳过。
+/// 让前端拿到结果即可显示裁剪。无黑边写 0（标记已探测）；ffmpeg 没跑成则保持 NULL。
 pub async fn apply_detected_crop(db: &Db, video: &mut Video) {
     let path = PathBuf::from(&video.file_path);
-    if let Some(c) =
-        crate::pipeline::crop_detect::detect_and_store_crop(db, &video.id, path).await
-    {
-        video.crop_top = Some(c.top);
-        video.crop_right = Some(c.right);
-        video.crop_bottom = Some(c.bottom);
-        video.crop_left = Some(c.left);
+    let c = crate::pipeline::crop_detect::ensure_crop(db, &video.id, path).await;
+    video.crop_top = Some(c.top);
+    video.crop_right = Some(c.right);
+    video.crop_bottom = Some(c.bottom);
+    video.crop_left = Some(c.left);
+}
+
+/// 打开视频时的兜底：若该视频还没有 crop 记录（crop_top IS NULL，多为导入早于本功能的旧视频），
+/// 后台补测一次黑边并写库；已测过的直接返回库里的值。返回四边占比（无黑边为 0）。
+#[tauri::command]
+pub async fn cmd_ensure_crop(
+    state: State<'_, AppState>,
+    video_id: String,
+) -> AppResult<crate::pipeline::crop_detect::CropInsets> {
+    let row = sqlx::query_as::<_, (Option<f64>, Option<f64>, Option<f64>, Option<f64>, String)>(
+        "SELECT crop_top,crop_right,crop_bottom,crop_left,file_path FROM videos WHERE id=?",
+    )
+    .bind(&video_id)
+    .fetch_one(&state.db.pool)
+    .await?;
+    if let (Some(top), right, bottom, left, _) = (row.0, row.1, row.2, row.3, &row.4) {
+        return Ok(crate::pipeline::crop_detect::CropInsets {
+            top,
+            right: right.unwrap_or(0.0),
+            bottom: bottom.unwrap_or(0.0),
+            left: left.unwrap_or(0.0),
+        });
     }
+    Ok(crate::pipeline::crop_detect::ensure_crop(&state.db, &video_id, PathBuf::from(row.4)).await)
 }
 
 #[tauri::command]

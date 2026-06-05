@@ -10,7 +10,7 @@ use crate::sidecar::{resolve, FFMPEG};
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
 pub struct CropInsets {
     pub top: f64,
     pub right: f64,
@@ -18,8 +18,16 @@ pub struct CropInsets {
     pub left: f64,
 }
 
-/// 跑 ffmpeg cropdetect 采样一段，解析出四边黑边占比；无黑边/失败返回 None。
-pub async fn detect_crop(path: &Path) -> Option<CropInsets> {
+/// 无黑边（也用作「已探测、无黑边」的写库标记值）。
+pub const NO_CROP: CropInsets = CropInsets {
+    top: 0.0,
+    right: 0.0,
+    bottom: 0.0,
+    left: 0.0,
+};
+
+/// 跑一遍 ffmpeg cropdetect，返回 stderr 文本；**spawn 失败返回 None**（区分「跑过」与「没跑成」）。
+async fn run_cropdetect(path: &Path) -> Option<String> {
     let ffmpeg = resolve(&FFMPEG, None).ok()?;
     let output = Command::new(&ffmpeg)
         .kill_on_drop(true)
@@ -37,17 +45,23 @@ pub async fn detect_crop(path: &Path) -> Option<CropInsets> {
         .output()
         .await
         .ok()?;
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    parse_cropdetect(&stderr)
+    Some(String::from_utf8_lossy(&output.stderr).into_owned())
 }
 
-/// 探测并写库（尽力而为：失败/无黑边都静默跳过）。返回探测到的 insets 供调用方回填。
-pub async fn detect_and_store_crop(
-    db: &crate::db::Db,
-    video_id: &str,
-    path: PathBuf,
-) -> Option<CropInsets> {
-    let insets = detect_crop(&path).await?;
+/// 跑 cropdetect 并解析出四边黑边占比；无黑边/失败返回 None。
+pub async fn detect_crop(path: &Path) -> Option<CropInsets> {
+    parse_cropdetect(&run_cropdetect(path).await?)
+}
+
+/// 探测并写库，返回 insets（无黑边为 0）。
+///
+/// 只要 ffmpeg **跑过**（无论是否检出黑边）就写库——无黑边写 0，把该视频标记为「已探测」，
+/// 避免每次打开都重跑。仅当 ffmpeg 没跑成（spawn 失败）时不写库（保持 NULL，下次再试）。
+pub async fn ensure_crop(db: &crate::db::Db, video_id: &str, path: PathBuf) -> CropInsets {
+    let Some(stderr) = run_cropdetect(&path).await else {
+        return NO_CROP;
+    };
+    let insets = parse_cropdetect(&stderr).unwrap_or(NO_CROP);
     let _ = sqlx::query(
         "UPDATE videos SET crop_top=?,crop_right=?,crop_bottom=?,crop_left=? WHERE id=?",
     )
@@ -58,7 +72,7 @@ pub async fn detect_and_store_crop(
     .bind(video_id)
     .execute(&db.pool)
     .await;
-    Some(insets)
+    insets
 }
 
 /// 从 ffmpeg stderr 里找整帧分辨率（"Video: ... WxH"）。
