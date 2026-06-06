@@ -223,11 +223,16 @@ export function VideoPlayer({
         <div
           ref={stageRef}
           className={`relative overflow-hidden ${fullscreen ? "" : "rounded-[14px]"}`}
-          style={
-            stageBox
+          // 让舞台框自身成为合成/裁剪上下文：WKWebView 会把开了 translateZ 的 <video>
+          // 提升成硬件层，该层默认不被父级 overflow:hidden 裁住（裁剪后会溢出/错位）。
+          // 给父级也加 transform + isolate，强制把视频层裁进这个框内。
+          style={{
+            ...(stageBox
               ? { width: stageBox.width, height: stageBox.height }
-              : { width: "100%", height: "100%" }
-          }
+              : { width: "100%", height: "100%" }),
+            transform: "translateZ(0)",
+            isolation: "isolate",
+          }}
         >
           <video
             ref={ref}
