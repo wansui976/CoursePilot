@@ -1,9 +1,12 @@
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+#[cfg(not(target_os = "android"))]
 use crate::sidecar::{resolve, FFMPEG};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+#[cfg(not(target_os = "android"))]
 use tokio::io::AsyncReadExt;
+#[cfg(not(target_os = "android"))]
 use tokio::process::Command;
 
 #[derive(Debug, Clone, Serialize)]
@@ -14,16 +17,24 @@ pub struct SlideFrame {
 }
 
 // 抽帧分析参数。把视频降到很小的灰度帧来比对换页，既快又抗噪。
+// 仅桌面端（ffmpeg 抽帧+换页检测）使用；Android 上课件提取走屏蔽分支。
+#[cfg(not(target_os = "android"))]
 const SAMPLE_W: usize = 128;
+#[cfg(not(target_os = "android"))]
 const SAMPLE_H: usize = 72;
+#[cfg(not(target_os = "android"))]
 const SAMPLE_FPS: i64 = 1; // 每秒采 1 帧
+#[cfg(not(target_os = "android"))]
 const SAMPLE_INTERVAL_MS: i64 = 1000 / SAMPLE_FPS;
 // 亮度 RMS 差阈值的上下限（0~255 量纲）。动态阈值取相邻差的中位数后钳到这区间：
 // 静态讲义中位数通常很小→落到下限 10，能滤掉光标/噪声；动态内容则自动抬高。
+#[cfg(not(target_os = "android"))]
 const THRESHOLD_MIN: f64 = 10.0;
+#[cfg(not(target_os = "android"))]
 const THRESHOLD_MAX: f64 = 60.0;
 
 /// RGB→Rec.709 亮度（与参考算法 video-to-ppt 一致）。
+#[cfg(not(target_os = "android"))]
 fn luminance_frame(rgb: &[u8]) -> Vec<u8> {
     rgb.chunks_exact(3)
         .map(|p| {
@@ -34,6 +45,7 @@ fn luminance_frame(rgb: &[u8]) -> Vec<u8> {
 }
 
 /// 两帧亮度的均方根差（RMS）。
+#[cfg(not(target_os = "android"))]
 fn rms_diff(a: &[u8], b: &[u8]) -> f64 {
     if a.is_empty() {
         return 0.0;
@@ -49,6 +61,7 @@ fn rms_diff(a: &[u8], b: &[u8]) -> f64 {
     (sum / a.len() as f64).sqrt()
 }
 
+#[cfg(not(target_os = "android"))]
 fn median(mut values: Vec<f64>) -> f64 {
     if values.is_empty() {
         return 0.0;
@@ -62,6 +75,7 @@ fn median(mut values: Vec<f64>) -> f64 {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 fn short_stderr(stderr: &[u8]) -> String {
     let text = String::from_utf8_lossy(stderr);
     let lines: Vec<&str> = text.lines().rev().take(12).collect();
@@ -69,6 +83,7 @@ fn short_stderr(stderr: &[u8]) -> String {
 }
 
 /// 让 ffmpeg 把视频降采样成一串小灰度帧（rgb24 原始流走管道），逐帧读出亮度，避免落地大文件。
+#[cfg(not(target_os = "android"))]
 async fn sample_luma_frames(video: &Path) -> AppResult<Vec<Vec<u8>>> {
     let ffmpeg = resolve(&FFMPEG, None)?;
     let mut child = Command::new(&ffmpeg)
@@ -108,6 +123,7 @@ async fn sample_luma_frames(video: &Path) -> AppResult<Vec<Vec<u8>>> {
 
 /// 算出每个换页所在的采样帧下标。第 0 帧永远是第一页；之后某帧相对上一帧的亮度 RMS
 /// 差超过阈值、且与"上一张已保存页"也明显不同（去重渐变/动画回弹），才算新的一页。
+#[cfg(not(target_os = "android"))]
 pub fn detect_slide_indices(frames: &[Vec<u8>], threshold: f64) -> Vec<usize> {
     if frames.is_empty() {
         return Vec::new();
@@ -125,11 +141,26 @@ pub fn detect_slide_indices(frames: &[Vec<u8>], threshold: f64) -> Vec<usize> {
 }
 
 /// 动态阈值：相邻帧亮度差的中位数，钳到 [THRESHOLD_MIN, THRESHOLD_MAX]。
+#[cfg(not(target_os = "android"))]
 pub fn dynamic_threshold(frames: &[Vec<u8>]) -> f64 {
     let diffs: Vec<f64> = frames.windows(2).map(|w| rms_diff(&w[0], &w[1])).collect();
     median(diffs).clamp(THRESHOLD_MIN, THRESHOLD_MAX)
 }
 
+/// Android：用原生 MediaMetadataRetriever 截一帧落地 JPEG（无 ffmpeg）。
+#[cfg(target_os = "android")]
+async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> {
+    crate::mobile_files::export_frame_jpeg(
+        video.to_string_lossy().to_string(),
+        at_ms,
+        out.to_string_lossy().to_string(),
+    )
+    .await
+    .map(|_| ())
+    .map_err(AppError::Pipeline)
+}
+
+#[cfg(not(target_os = "android"))]
 async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> {
     let seconds = at_ms as f64 / 1000.0;
     let ffmpeg = resolve(&FFMPEG, None)?;
@@ -158,8 +189,21 @@ async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> 
     Ok(())
 }
 
+/// Android：课件提取依赖 ffmpeg 抽帧+换页检测，移动端暂不支持，直接屏蔽并提示。
+#[cfg(target_os = "android")]
+pub async fn extract_slides(
+    _video: &Path,
+    _out_dir: &Path,
+    _threshold_override: Option<f64>,
+) -> AppResult<Vec<SlideFrame>> {
+    Err(AppError::Config(
+        "移动端暂不支持自动提取课件，请在桌面端生成后同步".into(),
+    ))
+}
+
 /// 抽课件页：降采样灰度帧 → 亮度 RMS 差 + 动态阈值找换页点 → 为每页截一张全分辨率图。
 /// `threshold_override` 给定时直接用作亮度阈值（0~255 量纲），否则按视频内容自适应。
+#[cfg(not(target_os = "android"))]
 pub async fn extract_slides(
     video: &Path,
     out_dir: &Path,
