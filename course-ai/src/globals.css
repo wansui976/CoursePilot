@@ -105,6 +105,17 @@ body,
   text-rendering: optimizeLegibility;
 }
 
+/* 安卓 targetSdk 35+ 强制 edge-to-edge：WebView 铺到状态栏/导航栏/刘海之下。
+   用 env(safe-area-inset-*) 把整个应用挤进安全区，留白处露出应用底色而非被遮挡。
+   桌面端这些 env() 恒为 0，等于无影响。需配合 index.html 的 viewport-fit=cover。 */
+#root {
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+}
+
 button,
 input,
 select {
