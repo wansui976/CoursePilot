@@ -40,6 +40,96 @@ struct TranscriptBackupSegment {
     words_json: String,
 }
 
+/// 通用文稿段：whisper 与字幕共用，写入 transcripts / transcript_backups。
+pub struct StoredSegment {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub text: String,
+    pub words_json: String,
+}
+
+/// 覆盖式写入 transcripts。
+pub async fn store_segments(db: &Db, video_id: &str, segs: &[StoredSegment]) -> AppResult<usize> {
+    sqlx::query("DELETE FROM transcripts WHERE video_id=?")
+        .bind(video_id)
+        .execute(&db.pool)
+        .await?;
+    for (idx, seg) in segs.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text,words_json)
+             VALUES (?,?,?,?,?,?)",
+        )
+        .bind(video_id)
+        .bind(idx as i64)
+        .bind(seg.start_ms)
+        .bind(seg.end_ms)
+        .bind(seg.text.trim())
+        .bind(&seg.words_json)
+        .execute(&db.pool)
+        .await?;
+    }
+    Ok(segs.len())
+}
+
+/// 存一份原始文稿快照到 transcript_backups，`source` 区分来源（raw_asr / bilibili_sub）。
+pub async fn store_segments_backup(
+    db: &Db,
+    video_id: &str,
+    source: &str,
+    segs: &[StoredSegment],
+) -> AppResult<()> {
+    let backup: Vec<TranscriptBackupSegment> = segs
+        .iter()
+        .enumerate()
+        .map(|(idx, seg)| TranscriptBackupSegment {
+            segment_idx: idx as i64,
+            start_ms: seg.start_ms,
+            end_ms: seg.end_ms,
+            text: seg.text.trim().to_string(),
+            words_json: seg.words_json.clone(),
+        })
+        .collect();
+    sqlx::query(
+        "INSERT INTO transcript_backups(video_id,source,segments_json,created_at)
+         VALUES (?,?,?,?)",
+    )
+    .bind(video_id)
+    .bind(source)
+    .bind(serde_json::to_string(&backup)?)
+    .bind(chrono::Utc::now().timestamp_millis())
+    .execute(&db.pool)
+    .await?;
+    Ok(())
+}
+
+/// 把 whisper JSON 转成通用段（words_json 由 tokens 序列化）。
+fn whisper_to_segments(json: &WhisperJson) -> AppResult<Vec<StoredSegment>> {
+    json.transcription
+        .iter()
+        .map(|segment| -> AppResult<StoredSegment> {
+            let words_json = serde_json::to_string(
+                &segment
+                    .tokens
+                    .iter()
+                    .map(|token| {
+                        serde_json::json!({
+                            "text": token.text,
+                            "from": token.offsets.from,
+                            "to": token.offsets.to,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            )?;
+            Ok(StoredSegment {
+                start_ms: segment.offsets.from,
+                end_ms: segment.offsets.to,
+                text: segment.text.trim().to_string(),
+                words_json,
+            })
+        })
+        .collect()
+}
+
 pub fn parse_whisper_json(input: &str) -> AppResult<WhisperJson> {
     serde_json::from_str(input).map_err(AppError::Json)
 }
@@ -124,40 +214,8 @@ pub async fn run_whisper(
 }
 
 pub async fn store_transcripts(db: &Db, video_id: &str, json: &WhisperJson) -> AppResult<usize> {
-    sqlx::query("DELETE FROM transcripts WHERE video_id=?")
-        .bind(video_id)
-        .execute(&db.pool)
-        .await?;
-    let mut count = 0;
-    for (idx, segment) in json.transcription.iter().enumerate() {
-        let words_json = serde_json::to_string(
-            &segment
-                .tokens
-                .iter()
-                .map(|token| {
-                    serde_json::json!({
-                        "text": token.text,
-                        "from": token.offsets.from,
-                        "to": token.offsets.to,
-                    })
-                })
-                .collect::<Vec<_>>(),
-        )?;
-        sqlx::query(
-            "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text,words_json)
-             VALUES (?,?,?,?,?,?)",
-        )
-        .bind(video_id)
-        .bind(idx as i64)
-        .bind(segment.offsets.from)
-        .bind(segment.offsets.to)
-        .bind(segment.text.trim())
-        .bind(words_json)
-        .execute(&db.pool)
-        .await?;
-        count += 1;
-    }
-    Ok(count)
+    let segs = whisper_to_segments(json)?;
+    store_segments(db, video_id, &segs).await
 }
 
 pub async fn store_raw_transcript_backup(
@@ -165,45 +223,8 @@ pub async fn store_raw_transcript_backup(
     video_id: &str,
     json: &WhisperJson,
 ) -> AppResult<()> {
-    let segments: Vec<TranscriptBackupSegment> = json
-        .transcription
-        .iter()
-        .enumerate()
-        .map(|(idx, segment)| -> AppResult<TranscriptBackupSegment> {
-            let words_json = serde_json::to_string(
-                &segment
-                    .tokens
-                    .iter()
-                    .map(|token| {
-                        serde_json::json!({
-                            "text": token.text,
-                            "from": token.offsets.from,
-                            "to": token.offsets.to,
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-            )?;
-            Ok(TranscriptBackupSegment {
-                segment_idx: idx as i64,
-                start_ms: segment.offsets.from,
-                end_ms: segment.offsets.to,
-                text: segment.text.trim().to_string(),
-                words_json,
-            })
-        })
-        .collect::<AppResult<Vec<_>>>()?;
-
-    sqlx::query(
-        "INSERT INTO transcript_backups(video_id,source,segments_json,created_at)
-         VALUES (?,?,?,?)",
-    )
-    .bind(video_id)
-    .bind("raw_asr")
-    .bind(serde_json::to_string(&segments)?)
-    .bind(chrono::Utc::now().timestamp_millis())
-    .execute(&db.pool)
-    .await?;
-    Ok(())
+    let segs = whisper_to_segments(json)?;
+    store_segments_backup(db, video_id, "raw_asr", &segs).await
 }
 
 #[cfg(test)]
@@ -298,6 +319,31 @@ mod tests {
         assert_eq!(row.0, "raw_asr");
         assert!(row.1.contains("\"start_ms\":0"));
         assert!(row.1.contains("\"text\":\"原始结果\""));
+    }
+
+    #[tokio::test]
+    async fn store_segments_writes_transcripts_and_backup() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await.unwrap();
+        let vpath = dir.path().join("v.mp4");
+        std::fs::write(&vpath, b"x").unwrap();
+        let video = add_local_video(&db, &course.id, vpath, None).await.unwrap();
+
+        let segs = vec![StoredSegment {
+            start_ms: 0, end_ms: 1200, text: " 字幕句 ".into(), words_json: "[]".into(),
+        }];
+        let n = store_segments(&db, &video.id, &segs).await.unwrap();
+        store_segments_backup(&db, &video.id, "bilibili_sub", &segs).await.unwrap();
+        assert_eq!(n, 1);
+
+        let text: String = sqlx::query_scalar("SELECT text FROM transcripts WHERE video_id=?")
+            .bind(&video.id).fetch_one(&db.pool).await.unwrap();
+        assert_eq!(text, "字幕句");
+        let source: String = sqlx::query_scalar("SELECT source FROM transcript_backups WHERE video_id=?")
+            .bind(&video.id).fetch_one(&db.pool).await.unwrap();
+        assert_eq!(source, "bilibili_sub");
     }
 
     #[tokio::test]

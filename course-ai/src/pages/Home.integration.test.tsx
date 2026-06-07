@@ -125,10 +125,10 @@ describe("Home selected-video integration", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "笔记" }));
     // 笔记面板按需懒加载，等它挂载。
-    expect(await screen.findByRole("button", { name: "AI笔记" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "AI出题" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "AI脑图" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "笔记" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "出题" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "脑图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "提问" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "搜索文稿" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "搜索" })).toBeInTheDocument();
   });
 });

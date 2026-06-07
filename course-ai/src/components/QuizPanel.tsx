@@ -32,7 +32,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
   if (questions.length === 0) {
     return (
       <p className="p-4 text-sm text-[var(--text-faint)]">
-        还没有题目，点右上角「生成AI出题」。
+        还没有题目，点右上角「生成题目」。
       </p>
     );
   }

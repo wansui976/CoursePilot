@@ -3,12 +3,14 @@ pub mod aliyun_asr;
 pub mod aliyun_ocr;
 pub mod asr;
 pub mod audio;
+pub mod crop_detect;
 pub mod download;
 pub mod ocr;
 pub mod playable;
 pub mod rag;
 pub mod slides;
 pub mod transcript_correction;
+pub mod subtitle;
 pub mod volcengine_asr;
 pub mod volcengine_auc;
 
@@ -157,6 +159,57 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
         .clone();
     jobs::start(&db, &asr_job.id).await?;
     emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.05, "准备识别引擎").await?;
+
+    // 若该视频带「待用 B站字幕」，直接用字幕作文稿，跳过语音转写。
+    if let Some(sub_path) = video
+        .subtitle_path
+        .clone()
+        .filter(|p| std::path::Path::new(p).is_file())
+    {
+        emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.3, "导入 B站自带字幕").await?;
+        let srt_text = tokio::fs::read_to_string(&sub_path).await?;
+
+        // 是否对字幕走 AI 纠错：设置开关 + 有可用大模型。
+        let autocorrect = sqlx::query_scalar::<_, String>(
+            "SELECT value FROM settings WHERE key='subtitle_autocorrect'",
+        )
+        .fetch_optional(&db.pool)
+        .await?
+        .map(|v| v != "false")
+        .unwrap_or(true);
+        let correct = if autocorrect {
+            crate::commands::ai::first_available_provider_for_db(&db).await?
+        } else {
+            None
+        };
+        if correct.is_some() {
+            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.6, "正在 AI 纠正字幕").await?;
+        }
+
+        let count = subtitle::ingest_subtitle(&db, &video_id, &srt_text, correct).await?;
+
+        // 消化完成：清空 path（保留 lang 作来源展示），标记完成。
+        sqlx::query("UPDATE videos SET subtitle_path=NULL, processed_status='done' WHERE id=?")
+            .bind(&video_id)
+            .execute(&db.pool)
+            .await?;
+        let msg = format!("{count} segments（来源：B站字幕）");
+        jobs::update_progress(&db, &asr_job.id, 1.0, Some(&msg)).await?;
+        jobs::finish(&db, &asr_job.id).await?;
+        emit_update(
+            &app,
+            JobEvent {
+                video_id: video_id.clone(),
+                job_id: asr_job.id.clone(),
+                stage: "asr".into(),
+                status: "done".into(),
+                progress: 1.0,
+                message: Some(msg),
+            },
+        );
+        run_ai_followups(&app, &db, &video_id, &jobs_list).await;
+        return Ok(());
+    }
 
     let audio_path = data_dir.join("audio.wav");
     let backend = asr_backend_or_default(

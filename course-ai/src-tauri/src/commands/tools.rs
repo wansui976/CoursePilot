@@ -67,12 +67,14 @@ pub async fn cmd_ocr_region(
     .await
 }
 
-/// 下载 B 站 / URL 视频到课程目录并登记为本地视频。
+/// 下载 B 站 / URL 视频到课程目录并登记。可选清晰度上限与字幕轨。
 #[tauri::command]
 pub async fn cmd_import_bilibili(
     state: State<'_, AppState>,
     course_id: String,
     url: String,
+    max_height: Option<u32>,
+    sub_lang: Option<String>,
 ) -> AppResult<Video> {
     let root_path: String = sqlx::query_scalar("SELECT root_path FROM courses WHERE id=?")
         .bind(&course_id)
@@ -80,9 +82,15 @@ pub async fn cmd_import_bilibili(
         .await?;
     let cookies = get_setting(&state.db, "bilibili_cookies").await?;
     let out_dir = PathBuf::from(&root_path);
-    let file = download::download(&url, &out_dir, cookies.as_deref()).await?;
-    let mut video = add_local_video(&state.db, &course_id, file, None).await?;
-    // 记录来源。
+    let result = download::download(
+        &url,
+        &out_dir,
+        cookies.as_deref(),
+        max_height,
+        sub_lang.as_deref(),
+    )
+    .await?;
+    let mut video = add_local_video(&state.db, &course_id, result.video, None).await?;
     sqlx::query("UPDATE videos SET source_type='bilibili', source_uri=? WHERE id=?")
         .bind(&url)
         .bind(&video.id)
@@ -90,5 +98,49 @@ pub async fn cmd_import_bilibili(
         .await?;
     video.source_type = "bilibili".into();
     video.source_uri = Some(url);
+    // 若下到了字幕，挂到 video 上供流水线消化。
+    if let (Some(lang), Some(sub_path)) = (sub_lang.as_deref(), result.subtitle.as_ref()) {
+        let p = sub_path.to_string_lossy().to_string();
+        sqlx::query("UPDATE videos SET subtitle_path=?, subtitle_lang=? WHERE id=?")
+            .bind(&p).bind(lang).bind(&video.id)
+            .execute(&state.db.pool).await?;
+        video.subtitle_path = Some(p);
+        video.subtitle_lang = Some(lang.to_string());
+    }
+    crate::commands::videos::apply_detected_crop(&state.db, &mut video).await;
     Ok(video)
+}
+
+/// 探测 B站视频的自带字幕轨与可选清晰度（带 cookie）。
+#[tauri::command]
+pub async fn cmd_probe_bilibili(
+    state: State<'_, AppState>,
+    url: String,
+) -> AppResult<download::ProbeResult> {
+    let cookies = get_setting(&state.db, "bilibili_cookies").await?;
+    download::probe(&url, cookies.as_deref()).await
+}
+
+/// 把用户选的 cookies.txt 复制进 appdata（稳定路径），写入 bilibili_cookies 设置。
+#[tauri::command]
+pub async fn cmd_set_bilibili_cookies(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    file_path: String,
+) -> AppResult<()> {
+    use tauri::Manager;
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| crate::error::AppError::Config(format!("app_data_dir: {e}")))?;
+    let dest_dir = app_data.join("cookies");
+    std::fs::create_dir_all(&dest_dir)?;
+    let dest = dest_dir.join("bilibili.txt");
+    std::fs::copy(&file_path, &dest)?;
+    crate::commands::settings::set_setting(
+        &state.db,
+        "bilibili_cookies",
+        &dest.to_string_lossy(),
+    )
+    .await
 }

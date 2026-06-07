@@ -22,6 +22,9 @@ export function Controls({
   muted,
   captionsOn,
   fullscreen,
+  showCrop,
+  cropOn,
+  onToggleCrop,
   onToggleCaptions,
   onPlayPause,
   onSeek,
@@ -38,6 +41,9 @@ export function Controls({
   muted: boolean;
   captionsOn: boolean;
   fullscreen: boolean;
+  showCrop: boolean;
+  cropOn: boolean;
+  onToggleCrop: () => void;
   onToggleCaptions: () => void;
   onPlayPause: () => void;
   onSeek: (ms: number) => void;
@@ -131,6 +137,20 @@ export function Controls({
           className={`${textButtonClass} ${captionsOn ? "text-[#3b82f6]" : ""}`}
         >
           字幕
+        </button>
+        <button
+          type="button"
+          onClick={onToggleCrop}
+          title={
+            showCrop
+              ? cropOn
+                ? "显示原画（保留黑边）"
+                : "裁掉黑边"
+              : "裁掉黑边"
+          }
+          className={`${textButtonClass} ${cropOn ? "text-[#3b82f6]" : ""}`}
+        >
+          裁黑边
         </button>
         <Button
           size="icon"
