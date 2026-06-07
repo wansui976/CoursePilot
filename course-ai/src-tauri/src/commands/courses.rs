@@ -24,6 +24,7 @@ pub struct Course {
 pub async fn create_course(db: &Db, name: String, root_path: String) -> AppResult<Course> {
     let now = Utc::now().timestamp_millis();
     let id = Uuid::new_v4().to_string();
+    std::fs::create_dir_all(&root_path)?;
     sqlx::query("INSERT INTO courses (id,name,root_path,created_at,updated_at) VALUES (?,?,?,?,?)")
         .bind(&id)
         .bind(&name)
@@ -148,5 +149,15 @@ mod tests {
             .unwrap();
         let list = list_courses(&db).await.unwrap();
         assert_eq!(list[0].name, "新名");
+    }
+
+    #[tokio::test]
+    async fn create_ensures_root_dir_exists() {
+        let db = fresh_db().await;
+        let dir = std::env::temp_dir().join(format!("course-ai-course-{}", Uuid::new_v4()));
+        let course = create_course(&db, "Android 课程".into(), dir.to_string_lossy().into())
+            .await
+            .unwrap();
+        assert!(std::path::Path::new(&course.root_path).is_dir());
     }
 }

@@ -1,10 +1,14 @@
-# CourseAI Desktop
+# CourseAI
 
-Phase 1 MVP for a local course-video learning assistant. The app imports local
-videos, extracts audio with ffmpeg, runs local whisper.cpp ASR, and displays a
-clickable transcript synced to video playback.
+Local course-video learning assistant for desktop first, with Android as a
+separate mobile target.
 
-## Prerequisites
+## Targets
+
+- Desktop: full local pipeline with video import, ASR, OCR, downloads, and export
+- Android: mobile shell and UI reuse, with desktop-only binaries replaced or offloaded
+
+## Desktop Prerequisites
 
 - Node.js 20 or newer and pnpm
 - Rust stable and Tauri desktop prerequisites for your OS
@@ -21,19 +25,63 @@ The in-app model downloader uses a ModelScope mirror for GGML model files so
 first setup remains usable on networks where Hugging Face is slow or
 unreachable.
 
-## Develop
+## Desktop Develop
 
 ```bash
 pnpm install
 pnpm tauri dev
 ```
 
-## Test
+## Desktop Test
 
 ```bash
 pnpm test
 cd src-tauri && cargo test
 ```
+
+## Android Build
+
+This repo now includes Android-specific Tauri config in
+`src-tauri/tauri.android.conf.json` and Android bundle settings in
+`src-tauri/tauri.conf.json`.
+
+On this machine the Android SDK is installed at
+`/opt/homebrew/share/android-commandlinetools`. Use the same environment when
+building from a fresh shell:
+
+```bash
+export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+export ANDROID_SDK_ROOT=/opt/homebrew/share/android-commandlinetools
+export ANDROID_NDK_HOME=/opt/homebrew/share/android-commandlinetools/ndk/29.0.13113456
+export NDK_HOME="$ANDROID_NDK_HOME"
+export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin:$PATH"
+
+pnpm tauri android build
+pnpm tauri android build --debug
+```
+
+The verified build outputs are:
+
+- Debug APK: `src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`
+- Release APK: `src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk`
+- Release AAB: `src-tauri/gen/android/app/build/outputs/bundle/universalRelease/app-universal-release.aab`
+
+The debug APK is signed for local install/testing. The release APK is unsigned
+and must be signed before distribution.
+
+The current codebase still depends on desktop-only runtime pieces for:
+
+- `ffmpeg`
+- `whisper-cli`
+- `tesseract`
+- `yt-dlp`
+
+Those code paths return a clear unsupported error on Android for now. Replacing
+them with Android-native or cloud-backed flows is still required before the
+mobile app has full feature parity with desktop.
+
+On Android, creating a course now stores it under the app's private data
+directory instead of opening a folder picker.
 
 ## Phase 1 Scope
 

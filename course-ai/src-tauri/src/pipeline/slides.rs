@@ -17,20 +17,14 @@ pub struct SlideFrame {
 }
 
 // 抽帧分析参数。把视频降到很小的灰度帧来比对换页，既快又抗噪。
-// 仅桌面端（ffmpeg 抽帧+换页检测）使用；Android 上课件提取走屏蔽分支。
-#[cfg(not(target_os = "android"))]
+// 桌面端用 ffmpeg 生成低分辨率帧；Android 用原生 MediaMetadataRetriever 生成同尺寸亮度帧。
 const SAMPLE_W: usize = 128;
-#[cfg(not(target_os = "android"))]
 const SAMPLE_H: usize = 72;
-#[cfg(not(target_os = "android"))]
 const SAMPLE_FPS: i64 = 1; // 每秒采 1 帧
-#[cfg(not(target_os = "android"))]
 const SAMPLE_INTERVAL_MS: i64 = 1000 / SAMPLE_FPS;
 // 亮度 RMS 差阈值的上下限（0~255 量纲）。动态阈值取相邻差的中位数后钳到这区间：
 // 静态讲义中位数通常很小→落到下限 10，能滤掉光标/噪声；动态内容则自动抬高。
-#[cfg(not(target_os = "android"))]
 const THRESHOLD_MIN: f64 = 10.0;
-#[cfg(not(target_os = "android"))]
 const THRESHOLD_MAX: f64 = 60.0;
 
 /// RGB→Rec.709 亮度（与参考算法 video-to-ppt 一致）。
@@ -45,7 +39,6 @@ fn luminance_frame(rgb: &[u8]) -> Vec<u8> {
 }
 
 /// 两帧亮度的均方根差（RMS）。
-#[cfg(not(target_os = "android"))]
 fn rms_diff(a: &[u8], b: &[u8]) -> f64 {
     if a.is_empty() {
         return 0.0;
@@ -61,7 +54,6 @@ fn rms_diff(a: &[u8], b: &[u8]) -> f64 {
     (sum / a.len() as f64).sqrt()
 }
 
-#[cfg(not(target_os = "android"))]
 fn median(mut values: Vec<f64>) -> f64 {
     if values.is_empty() {
         return 0.0;
@@ -123,7 +115,6 @@ async fn sample_luma_frames(video: &Path) -> AppResult<Vec<Vec<u8>>> {
 
 /// 算出每个换页所在的采样帧下标。第 0 帧永远是第一页；之后某帧相对上一帧的亮度 RMS
 /// 差超过阈值、且与"上一张已保存页"也明显不同（去重渐变/动画回弹），才算新的一页。
-#[cfg(not(target_os = "android"))]
 pub fn detect_slide_indices(frames: &[Vec<u8>], threshold: f64) -> Vec<usize> {
     if frames.is_empty() {
         return Vec::new();
@@ -141,10 +132,65 @@ pub fn detect_slide_indices(frames: &[Vec<u8>], threshold: f64) -> Vec<usize> {
 }
 
 /// 动态阈值：相邻帧亮度差的中位数，钳到 [THRESHOLD_MIN, THRESHOLD_MAX]。
-#[cfg(not(target_os = "android"))]
 pub fn dynamic_threshold(frames: &[Vec<u8>]) -> f64 {
     let diffs: Vec<f64> = frames.windows(2).map(|w| rms_diff(&w[0], &w[1])).collect();
     median(diffs).clamp(THRESHOLD_MIN, THRESHOLD_MAX)
+}
+
+#[cfg(target_os = "android")]
+fn decode_base64(input: &str) -> AppResult<Vec<u8>> {
+    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    let mut buffer = 0_u32;
+    let mut bits = 0_u8;
+    for byte in input.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => break,
+            b'\r' | b'\n' | b'\t' | b' ' => continue,
+            _ => {
+                return Err(AppError::Pipeline(format!(
+                    "android luma frame decode: invalid base64 byte {byte}"
+                )))
+            }
+        };
+        buffer = (buffer << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((buffer >> bits) & 0xff) as u8);
+            buffer &= (1 << bits) - 1;
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(target_os = "android")]
+async fn sample_android_luma_frames(video: &Path) -> AppResult<(Vec<Vec<u8>>, i64)> {
+    let response = crate::mobile_files::export_luma_frames(
+        video.to_string_lossy().to_string(),
+        SAMPLE_W as i64,
+        SAMPLE_H as i64,
+        SAMPLE_INTERVAL_MS,
+    )
+    .await
+    .map_err(AppError::Pipeline)?;
+    let expected = SAMPLE_W * SAMPLE_H;
+    let mut frames = Vec::with_capacity(response.frames.len());
+    for encoded in response.frames {
+        let frame = decode_base64(&encoded)?;
+        if frame.len() != expected {
+            return Err(AppError::Pipeline(format!(
+                "android luma frame size mismatch: expected {expected}, got {}",
+                frame.len()
+            )));
+        }
+        frames.push(frame);
+    }
+    Ok((frames, response.interval_ms))
 }
 
 /// Android：用原生 MediaMetadataRetriever 截一帧落地 JPEG（无 ffmpeg）。
@@ -189,16 +235,42 @@ async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> 
     Ok(())
 }
 
-/// Android：课件提取依赖 ffmpeg 抽帧+换页检测，移动端暂不支持，直接屏蔽并提示。
+/// Android：用原生低分辨率亮度抽帧 + 共享换页检测算法提取课件页。
 #[cfg(target_os = "android")]
 pub async fn extract_slides(
-    _video: &Path,
-    _out_dir: &Path,
-    _threshold_override: Option<f64>,
+    video: &Path,
+    out_dir: &Path,
+    threshold_override: Option<f64>,
 ) -> AppResult<Vec<SlideFrame>> {
-    Err(AppError::Config(
-        "移动端暂不支持自动提取课件，请在桌面端生成后同步".into(),
-    ))
+    let slides_dir = out_dir.join("slides");
+    let _ = std::fs::remove_dir_all(&slides_dir);
+    std::fs::create_dir_all(&slides_dir)?;
+
+    let (frames, interval_ms) = sample_android_luma_frames(video).await?;
+    if frames.is_empty() {
+        let fallback = slides_dir.join("0001.jpg");
+        capture_jpeg_at(video, &fallback, 0).await?;
+        return Ok(vec![SlideFrame {
+            page_no: 0,
+            image_path: fallback.to_string_lossy().to_string(),
+            start_ms: 0,
+        }]);
+    }
+
+    let threshold = threshold_override.unwrap_or_else(|| dynamic_threshold(&frames));
+    let indices = detect_slide_indices(&frames, threshold);
+    let mut out = Vec::new();
+    for (page, &idx) in indices.iter().enumerate() {
+        let start_ms = idx as i64 * interval_ms;
+        let image = slides_dir.join(format!("{:04}.jpg", page + 1));
+        capture_jpeg_at(video, &image, start_ms).await?;
+        out.push(SlideFrame {
+            page_no: page as i64,
+            image_path: image.to_string_lossy().to_string(),
+            start_ms,
+        });
+    }
+    Ok(out)
 }
 
 /// 抽课件页：降采样灰度帧 → 亮度 RMS 差 + 动态阈值找换页点 → 为每页截一张全分辨率图。

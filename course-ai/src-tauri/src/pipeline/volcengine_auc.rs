@@ -26,6 +26,7 @@ const MAX_POLLS: u32 = 600; // 3s × 600 ≈ 30 分钟上限
 
 pub async fn run_volcengine_file(
     audio: &Path,
+    format: &str,
     app_id: &str,
     access_token: &str,
 ) -> AppResult<WhisperJson> {
@@ -42,7 +43,7 @@ pub async fn run_volcengine_file(
     let client = reqwest::Client::new();
 
     // ---- 1. 提交任务 ----
-    let body = build_submit_body(&request_id, &base64_encode(&audio_bytes));
+    let body = build_submit_body(&request_id, &base64_encode(&audio_bytes), format);
     let resp = client
         .post(SUBMIT_URL)
         .header("X-Api-App-Key", app_id)
@@ -82,8 +83,8 @@ pub async fn run_volcengine_file(
                 })?;
                 return response_payload_to_transcript(&payload);
             }
-            // 2000000x（排队 / 处理中）继续等；其余视为失败。
-            Some(code) if code.starts_with("2000000") => {
+            // 仅排队 / 处理中继续等；20000003 等终态错误要立即返回。
+            Some(code) if is_pending_status(code) => {
                 tokio::time::sleep(POLL_INTERVAL).await;
             }
             other => {
@@ -101,12 +102,12 @@ pub async fn run_volcengine_file(
     ))
 }
 
-pub fn build_submit_body(request_id: &str, audio_base64: &str) -> Value {
+pub fn build_submit_body(request_id: &str, audio_base64: &str, format: &str) -> Value {
     json!({
         "user": { "uid": request_id },
         "audio": {
             "data": audio_base64,
-            "format": "mp3",
+            "format": format,
         },
         "request": {
             "model_name": "bigmodel",
@@ -116,6 +117,10 @@ pub fn build_submit_body(request_id: &str, audio_base64: &str) -> Value {
             "show_utterances": true,
         },
     })
+}
+
+fn is_pending_status(code: &str) -> bool {
+    matches!(code, "20000001" | "20000002")
 }
 
 fn submit_error(
@@ -185,13 +190,19 @@ mod tests {
 
     #[test]
     fn submit_body_uses_auc_bigmodel_defaults() {
-        let body = build_submit_body("req-1", "QUJD");
+        let body = build_submit_body("req-1", "QUJD", "m4a");
         assert_eq!(body["audio"]["data"], "QUJD");
-        // 整段上传走压缩后的 MP3，避免长视频 WAV base64 触发 413。
-        assert_eq!(body["audio"]["format"], "mp3");
+        assert_eq!(body["audio"]["format"], "m4a");
         assert_eq!(body["request"]["model_name"], "bigmodel");
         assert_eq!(body["request"]["show_utterances"], true);
         assert_eq!(body["user"]["uid"], "req-1");
+    }
+
+    #[test]
+    fn terminal_no_speech_status_is_not_treated_as_pending() {
+        assert!(is_pending_status("20000001"));
+        assert!(is_pending_status("20000002"));
+        assert!(!is_pending_status("20000003"));
     }
 
     #[test]

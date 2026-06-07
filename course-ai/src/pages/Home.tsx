@@ -9,7 +9,6 @@ import {
   Moon,
   Play,
   Settings,
-  Sparkles,
   Sun,
   X,
 } from "lucide-react";
@@ -70,7 +69,7 @@ function readInitialTheme(): ThemeMode {
 function readPanelWidth() {
   if (typeof window === "undefined") return 480;
   const saved = Number(window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY));
-  return Number.isFinite(saved) ? Math.min(720, Math.max(360, saved)) : 480;
+  return Number.isFinite(saved) ? Math.min(720, Math.max(280, saved)) : 420;
 }
 
 export function Home() {
@@ -229,10 +228,11 @@ export function Home() {
 
   function beginStudyPanelResize(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
     const startX = event.clientX;
     const startWidth = studyPanelWidth;
     const onMove = (move: PointerEvent) => {
-      const next = Math.min(720, Math.max(360, startWidth - (move.clientX - startX)));
+      const next = Math.min(720, Math.max(280, startWidth - (move.clientX - startX)));
       setStudyPanelWidth(next);
       window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(next));
     };
@@ -667,28 +667,15 @@ export function Home() {
             ) : queueOpen ? (
               renderProcessingQueuePage()
             ) : selectedVideo ? (
-              <>
-                <div className="flex min-h-24 items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-4 py-3 sm:px-5 sm:py-4">
-                  <div className="min-w-0 flex-1">
-                    <p className="mb-1 flex items-center gap-2 text-xs font-medium text-[var(--text-faint)]">
-                      <Sparkles className="h-3.5 w-3.5 text-primary" />
-                      学习工作台
-                    </p>
-                    <h1 className="truncate text-lg font-semibold text-[var(--text-strong)] sm:text-xl">
-                      {selectedVideo.title}
-                    </h1>
+              <div className="flex min-h-0 min-w-0 flex-1">
+                {mediaSrc ? (
+                  <VideoPlayer src={mediaSrc} videoId={selectedVideo.id} />
+                ) : (
+                  <div className="flex h-full min-w-0 flex-1 items-center justify-center bg-black text-sm text-white/40">
+                    正在准备播放…
                   </div>
-                </div>
-                <div className="flex min-h-0 min-w-0 flex-1">
-                  {mediaSrc ? (
-                    <VideoPlayer src={mediaSrc} videoId={selectedVideo.id} />
-                  ) : (
-                    <div className="flex h-full min-w-0 flex-1 items-center justify-center bg-black text-sm text-white/40">
-                      正在准备播放…
-                    </div>
-                  )}
-                </div>
-              </>
+                )}
+              </div>
             ) : (
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 <header className="flex flex-none items-center justify-between gap-4 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-5">
@@ -768,12 +755,12 @@ export function Home() {
                 role="separator"
                 aria-label="调整学习资料宽度"
                 aria-orientation="vertical"
-                className="w-1 cursor-col-resize bg-transparent hover:bg-primary/40"
+                className="w-3 cursor-col-resize touch-none bg-transparent hover:bg-primary/30 active:bg-primary/40"
                 onPointerDown={beginStudyPanelResize}
               />
               <aside
                 aria-label="学习资料面板"
-                className="flex min-w-[380px] max-w-[720px] flex-none flex-col border-l border-[var(--border-subtle)] bg-[var(--surface-app)]"
+                className="flex min-w-[280px] max-w-[720px] flex-none flex-col border-l border-[var(--border-subtle)] bg-[var(--surface-app)]"
                 style={{ width: studyPanelWidth }}
               >
                 <TabsPanel videoId={selectedVideo.id} />

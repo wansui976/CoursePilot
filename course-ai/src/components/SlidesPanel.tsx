@@ -4,7 +4,6 @@ import { Camera, Images, ScanText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
-import { isAndroid } from "@/lib/mobileFiles";
 import { getSlidesSensitivity, sensitivityToThreshold } from "@/lib/slides";
 import { usePlayer } from "@/stores/player";
 
@@ -105,13 +104,9 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
           </Button>
           <Button
             size="sm"
-            disabled={extract.isPending || isAndroid}
+            disabled={extract.isPending}
             onClick={() => extract.mutate()}
-            title={
-              isAndroid
-                ? "移动端暂不支持自动提取课件，请在桌面端生成后同步"
-                : "按画面变化自动识别换页（灵敏度在设置里调）"
-            }
+            title="按画面变化自动识别换页（灵敏度在设置里调）"
           >
             <Images className="h-3.5 w-3.5" />
             {extract.isPending ? "提取中…" : slides.length ? "重新提取" : "提取课件"}
@@ -159,9 +154,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
                 <Images className="h-6 w-6" />
               </div>
               <p className="text-sm text-[var(--text-muted)]">
-                {isAndroid
-                  ? "移动端暂不支持自动提取课件，请在桌面端生成后同步；仍可用「截图」「截图OCR」单独抓取当前帧。"
-                  : "还没有课件页。点右上角「提取课件」按画面变化自动识别换页，或用「截图」「截图OCR」单独抓取当前帧。"}
+                还没有课件页。点右上角「提取课件」按画面变化自动识别换页，或用「截图」「截图OCR」单独抓取当前帧。
               </p>
             </div>
           </div>

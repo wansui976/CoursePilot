@@ -4,8 +4,10 @@
 //! 在缺二进制时返回明确错误；arg 构造为纯函数，单测覆盖。
 
 use crate::error::{AppError, AppResult};
+#[cfg(not(target_os = "android"))]
 use crate::sidecar::{resolve, FFMPEG, TESSERACT};
 use std::path::{Path, PathBuf};
+#[cfg(not(target_os = "android"))]
 use tokio::process::Command;
 
 /// 像素矩形；w 或 h 为 0 表示整帧。
@@ -37,7 +39,27 @@ pub fn build_crop_vf(rect: Rect) -> Option<String> {
 }
 
 /// 截取视频某时刻的（可选裁剪）帧为 PNG，供本地或云端 OCR 复用。
-pub async fn grab_frame(video: &Path, out_dir: &Path, at_ms: i64, rect: Rect) -> AppResult<PathBuf> {
+#[cfg(target_os = "android")]
+pub async fn grab_frame(
+    video: &Path,
+    out_dir: &Path,
+    at_ms: i64,
+    rect: Rect,
+) -> AppResult<PathBuf> {
+    if build_crop_vf(rect).is_some() {
+        return Err(AppError::Config("移动端截图 OCR 暂不支持区域裁剪".into()));
+    }
+    crate::pipeline::slides::capture_frame(video, out_dir, at_ms).await
+}
+
+/// 截取视频某时刻的（可选）帧为 PNG，供本地或云端 OCR 复用。
+#[cfg(not(target_os = "android"))]
+pub async fn grab_frame(
+    video: &Path,
+    out_dir: &Path,
+    at_ms: i64,
+    rect: Rect,
+) -> AppResult<PathBuf> {
     std::fs::create_dir_all(out_dir)?;
     let out = out_dir.join(format!("ocr_{at_ms}.png"));
     let seconds = at_ms as f64 / 1000.0;
@@ -62,6 +84,20 @@ pub async fn grab_frame(video: &Path, out_dir: &Path, at_ms: i64, rect: Rect) ->
     Ok(out)
 }
 
+#[cfg(target_os = "android")]
+pub async fn run_ocr(
+    _video: &Path,
+    _out_dir: &Path,
+    _at_ms: i64,
+    _rect: Rect,
+    _langs: &str,
+) -> AppResult<String> {
+    Err(AppError::Config(
+        "移动端本地 Tesseract OCR 不可用，请在设置中选择阿里云 OCR".into(),
+    ))
+}
+
+#[cfg(not(target_os = "android"))]
 pub async fn run_ocr(
     video: &Path,
     out_dir: &Path,

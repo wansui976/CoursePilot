@@ -15,6 +15,22 @@ const BROWSER_USER_AGENT: &str =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
      (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 
+pub fn android_ytdlp_unavailable_message() -> &'static str {
+    "Android 暂不支持 B站/URL 下载：yt-dlp 与 ffmpeg 是桌面端 CLI。请先导入本地文件，再使用云端 ASR。"
+}
+
+#[cfg(target_os = "android")]
+fn ensure_ytdlp_supported() -> AppResult<()> {
+    Err(AppError::Config(
+        android_ytdlp_unavailable_message().into(),
+    ))
+}
+
+#[cfg(not(target_os = "android"))]
+fn ensure_ytdlp_supported() -> AppResult<()> {
+    Ok(())
+}
+
 /// 构造 yt-dlp 参数：输出 mp4，可选 cookies、清晰度上限、字幕轨。
 pub fn build_ytdlp_args(
     url: &str,
@@ -94,6 +110,7 @@ pub async fn download(
     max_height: Option<u32>,
     sub_lang: Option<&str>,
 ) -> AppResult<DownloadResult> {
+    ensure_ytdlp_supported()?;
     std::fs::create_dir_all(out_dir)?;
     let template = out_dir.join("%(title).80s.%(ext)s");
     let ytdlp = resolve(&YTDLP, None)?;
@@ -227,6 +244,7 @@ pub fn pick_default_track(tracks: &[SubtitleTrack]) -> Option<&SubtitleTrack> {
 
 /// 用 yt-dlp 探测视频元信息（字幕轨 + 清晰度）。
 pub async fn probe(url: &str, cookies: Option<&str>) -> AppResult<ProbeResult> {
+    ensure_ytdlp_supported()?;
     let ytdlp = resolve(&YTDLP, None)?;
     let mut cmd = Command::new(&ytdlp);
     // 关键：B站 extractor 只在请求写字幕时才去拉字幕列表；不带这些 flag 时
@@ -266,6 +284,15 @@ pub async fn probe(url: &str, cookies: Option<&str>) -> AppResult<ProbeResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn android_ytdlp_unavailable_message_points_to_native_import_and_cloud_asr() {
+        let message = android_ytdlp_unavailable_message();
+
+        assert!(message.contains("Android"));
+        assert!(message.contains("本地文件"));
+        assert!(message.contains("云端 ASR"));
+    }
 
     #[test]
     fn ytdlp_args_basic() {

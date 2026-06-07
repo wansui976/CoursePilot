@@ -14,9 +14,9 @@ import { useState, type CSSProperties } from "react";
 
 const SPEEDS = [2, 1.5, 1.25, 1, 0.75, 0.5];
 const iconButtonClass =
-  "flex h-9 w-9 items-center justify-center rounded-lg text-white/90 transition hover:bg-white/10 hover:text-white";
+  "flex h-8 w-8 flex-none items-center justify-center rounded-md text-white/90 transition hover:bg-white/10 hover:text-white sm:h-9 sm:w-9";
 const textButtonClass =
-  "inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-sm font-medium text-white/85 transition hover:bg-white/10 hover:text-white";
+  "inline-flex h-8 flex-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2 text-xs font-medium text-white/85 transition hover:bg-white/10 hover:text-white sm:h-9 sm:text-sm";
 
 function formatRate(rate: number) {
   return Number.isInteger(rate) ? rate.toFixed(1) : String(rate);
@@ -62,7 +62,7 @@ export function Controls({
   const volumePercent = muted ? 0 : Math.min(100, Math.max(0, volume * 100));
 
   return (
-    <div className="shrink-0 bg-black/95 px-3 pb-2.5 pt-2 text-white sm:px-4">
+    <div className="w-full shrink-0 bg-black/95 px-2 pb-1.5 pt-1.5 text-white sm:px-4 sm:pb-2.5 sm:pt-2">
       <input
         aria-label="播放进度"
         type="range"
@@ -77,18 +77,18 @@ export function Controls({
           } as CSSProperties
         }
       />
-      <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-2 text-sm text-white/75 sm:flex-nowrap sm:gap-2">
+      <div className="mt-1.5 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto text-xs text-white/75 sm:mt-2 sm:gap-2 sm:text-sm">
         <Button
           size="icon"
           variant="ghost"
           onClick={onPlayPause}
           aria-label={playing ? "暂停" : "播放"}
           title={playing ? "暂停" : "播放"}
-          className="h-9 w-9 rounded-lg text-white hover:bg-white/10 hover:text-white"
+          className="h-8 w-8 flex-none rounded-md text-white hover:bg-white/10 hover:text-white sm:h-9 sm:w-9"
         >
           {playing ? <Pause className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5 fill-current" />}
         </Button>
-        <span className="whitespace-nowrap text-sm font-medium tabular-nums text-white/85">
+        <span className="flex-none whitespace-nowrap text-xs font-medium tabular-nums text-white/85 sm:text-sm">
           {formatMs(currentMs)} / {formatMs(durationMs)}
         </span>
 
@@ -160,7 +160,7 @@ export function Controls({
           step={0.05}
           value={muted ? 0 : volume}
           onChange={(event) => onVolume(Number(event.target.value))}
-          className="course-video-volume hidden w-16 sm:block"
+          className="course-video-volume hidden w-16 flex-none sm:block"
           style={
             {
               "--progress-percent": `${volumePercent}%`,
