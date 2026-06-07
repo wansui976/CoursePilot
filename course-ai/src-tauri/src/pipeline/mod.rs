@@ -3,7 +3,6 @@ pub mod aliyun_asr;
 pub mod aliyun_ocr;
 pub mod asr;
 pub mod audio;
-pub mod crop_detect;
 pub mod download;
 pub mod ocr;
 pub mod playable;
@@ -51,7 +50,19 @@ fn asr_backend_or_default(value: Option<String>) -> AsrBackend {
     match value.as_deref().map(str::trim) {
         Some("volcengine") => AsrBackend::Volcengine,
         Some("aliyun") => AsrBackend::Aliyun,
-        _ => AsrBackend::Whisper,
+        _ => default_asr_backend(),
+    }
+}
+
+fn default_asr_backend() -> AsrBackend {
+    default_asr_backend_for_os(std::env::consts::OS)
+}
+
+fn default_asr_backend_for_os(os: &str) -> AsrBackend {
+    if os == "android" {
+        AsrBackend::Aliyun
+    } else {
+        AsrBackend::Whisper
     }
 }
 
@@ -100,6 +111,19 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
         );
     }
 
+    let backend = asr_backend_or_default(
+        sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key='asr_backend'")
+            .fetch_optional(&db.pool)
+            .await?,
+    );
+    let audio_purpose = match backend {
+        AsrBackend::Whisper => audio::AudioPurpose::Whisper,
+        AsrBackend::Volcengine => {
+            audio::AudioPurpose::CloudAsr(audio::CloudAsrProvider::Volcengine)
+        }
+        AsrBackend::Aliyun => audio::AudioPurpose::CloudAsr(audio::CloudAsrProvider::Aliyun),
+    };
+
     let audio_job = jobs_list
         .iter()
         .find(|job| job.stage == "audio")
@@ -119,8 +143,15 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
     );
 
     let data_dir = std::path::PathBuf::from(&video.data_dir);
-    match audio::extract_audio(std::path::Path::new(&video.file_path), &data_dir).await {
-        Ok(_) => {
+    let prepared_audio = match audio::prepare_for_asr(
+        &app,
+        std::path::Path::new(&video.file_path),
+        &data_dir,
+        audio_purpose,
+    )
+    .await
+    {
+        Ok(audio) => {
             jobs::finish(&db, &audio_job.id).await?;
             emit_update(
                 &app,
@@ -133,6 +164,7 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
                     message: None,
                 },
             );
+            audio
         }
         Err(error) => {
             mark_failed(&db, &video_id).await?;
@@ -150,7 +182,7 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
             );
             return Err(error);
         }
-    }
+    };
 
     let asr_job = jobs_list
         .iter()
@@ -211,13 +243,6 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
         return Ok(());
     }
 
-    let audio_path = data_dir.join("audio.wav");
-    let backend = asr_backend_or_default(
-        sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key='asr_backend'")
-            .fetch_optional(&db.pool)
-            .await?,
-    );
-
     let asr_result = match backend {
         AsrBackend::Whisper => {
             let model_id: String =
@@ -266,7 +291,7 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
                 &format!("Whisper 识别中（{lang}）"),
             )
             .await?;
-            asr::run_whisper(&audio_path, &model_path, Some(&lang)).await
+            asr::run_whisper(&prepared_audio.path, &model_path, Some(&lang)).await
         }
         AsrBackend::Volcengine => {
             let app_id = sqlx::query_scalar::<_, String>(
@@ -285,25 +310,25 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
                 &video_id,
                 &asr_job.id,
                 0.16,
-                "压缩音频，准备上传",
+                "准备上传音频",
             )
             .await?;
-            // 整段 base64 上传：1 小时 WAV ≈150MB 会触发 413，先压成 MP3（≈28MB）。
-            match audio::wav_to_mp3(&audio_path).await {
-                Ok(mp3) => {
-                    emit_running_progress(
-                        &app,
-                        &db,
-                        &video_id,
-                        &asr_job.id,
-                        0.28,
-                        "云端识别中（火山引擎）",
-                    )
-                    .await?;
-                    volcengine_auc::run_volcengine_file(&mp3, &app_id, &access_token).await
-                }
-                Err(e) => Err(e),
-            }
+            emit_running_progress(
+                &app,
+                &db,
+                &video_id,
+                &asr_job.id,
+                0.28,
+                "云端识别中（火山引擎）",
+            )
+            .await?;
+            volcengine_auc::run_volcengine_file(
+                &prepared_audio.path,
+                &prepared_audio.format,
+                &app_id,
+                &access_token,
+            )
+            .await
         }
         AsrBackend::Aliyun => {
             let api_key = crate::llm::keychain::get_secret_or_legacy(&db, "dashscope_api_key")
@@ -331,24 +356,26 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
                 &video_id,
                 &asr_job.id,
                 0.16,
-                "压缩音频，准备上传",
+                "准备上传音频",
             )
             .await?;
-            match audio::wav_to_mp3(&audio_path).await {
-                Ok(mp3) => {
-                    emit_running_progress(
-                        &app,
-                        &db,
-                        &video_id,
-                        &asr_job.id,
-                        0.28,
-                        &format!("云端识别中（阿里云 {model}）"),
-                    )
-                    .await?;
-                    aliyun_asr::run_aliyun(&mp3, &api_key, &model, language).await
-                }
-                Err(e) => Err(e),
-            }
+            emit_running_progress(
+                &app,
+                &db,
+                &video_id,
+                &asr_job.id,
+                0.28,
+                &format!("云端识别中（阿里云 {model}）"),
+            )
+            .await?;
+            aliyun_asr::run_aliyun(
+                &prepared_audio.path,
+                &prepared_audio.mime,
+                &api_key,
+                &model,
+                language,
+            )
+            .await
         }
     };
 
@@ -742,6 +769,12 @@ mod tests {
             asr_backend_or_default(Some("unknown".into())),
             AsrBackend::Whisper
         );
+    }
+
+    #[test]
+    fn android_asr_backend_defaults_to_aliyun_cloud_asr() {
+        assert_eq!(default_asr_backend_for_os("android"), AsrBackend::Aliyun);
+        assert_eq!(default_asr_backend_for_os("macos"), AsrBackend::Whisper);
     }
 
     #[test]

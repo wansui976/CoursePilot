@@ -6,6 +6,7 @@ pub mod export;
 pub mod jobs;
 pub mod llm;
 pub mod media_server;
+pub mod mobile_files;
 pub mod pipeline;
 pub mod sidecar;
 pub mod storage;
@@ -33,7 +34,7 @@ use crate::commands::tools::{
 };
 use crate::commands::transcripts::{cmd_list_transcripts, cmd_update_transcript};
 use crate::commands::videos::{
-    cmd_add_local_video, cmd_delete_video, cmd_ensure_crop, cmd_ensure_playable, cmd_list_trash,
+    cmd_add_local_video, cmd_delete_video, cmd_ensure_playable, cmd_list_trash,
     cmd_list_videos, cmd_media_url, cmd_purge_video, cmd_restore_video, cmd_update_video_title,
     cmd_video_cover,
 };
@@ -51,6 +52,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(mobile_files::init())
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
@@ -85,7 +87,6 @@ pub fn run() {
             cmd_update_video_title,
             cmd_delete_video,
             cmd_ensure_playable,
-            cmd_ensure_crop,
             cmd_media_url,
             cmd_video_cover,
             cmd_set_setting,
