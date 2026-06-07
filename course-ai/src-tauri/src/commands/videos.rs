@@ -23,6 +23,13 @@ pub struct Video {
     pub order_index: i64,
     pub data_dir: String,
     pub processed_status: String,
+    pub subtitle_path: Option<String>,
+    pub subtitle_lang: Option<String>,
+    // 自带黑边的四边裁剪占比（0~1），导入时 cropdetect 探测；NULL=未探测/无黑边。
+    pub crop_top: Option<f64>,
+    pub crop_right: Option<f64>,
+    pub crop_bottom: Option<f64>,
+    pub crop_left: Option<f64>,
     pub created_at: i64,
 }
 
@@ -66,6 +73,12 @@ pub async fn add_local_video(
         order_index,
         data_dir: data_dir.to_string_lossy().to_string(),
         processed_status: "pending".into(),
+        subtitle_path: None,
+        subtitle_lang: None,
+        crop_top: None,
+        crop_right: None,
+        crop_bottom: None,
+        crop_left: None,
         created_at: now,
     };
 
@@ -219,13 +232,50 @@ pub async fn cmd_add_local_video(
     .await?
     .filter(|value| !value.trim().is_empty())
     .map(PathBuf::from);
-    add_local_video(
+    let mut video = add_local_video(
         &state.db,
         &course_id,
         PathBuf::from(file_path),
         override_root,
     )
-    .await
+    .await?;
+    apply_detected_crop(&state.db, &mut video).await;
+    Ok(video)
+}
+
+/// 导入后用 ffmpeg cropdetect 探测黑边并写库，同时回填到返回的 Video，
+/// 让前端拿到结果即可显示裁剪。无黑边写 0（标记已探测）；ffmpeg 没跑成则保持 NULL。
+pub async fn apply_detected_crop(db: &Db, video: &mut Video) {
+    let path = PathBuf::from(&video.file_path);
+    let c = crate::pipeline::crop_detect::ensure_crop(db, &video.id, path).await;
+    video.crop_top = Some(c.top);
+    video.crop_right = Some(c.right);
+    video.crop_bottom = Some(c.bottom);
+    video.crop_left = Some(c.left);
+}
+
+/// 打开视频时的兜底：若该视频还没有 crop 记录（crop_top IS NULL，多为导入早于本功能的旧视频），
+/// 后台补测一次黑边并写库；已测过的直接返回库里的值。返回四边占比（无黑边为 0）。
+#[tauri::command]
+pub async fn cmd_ensure_crop(
+    state: State<'_, AppState>,
+    video_id: String,
+) -> AppResult<crate::pipeline::crop_detect::CropInsets> {
+    let row = sqlx::query_as::<_, (Option<f64>, Option<f64>, Option<f64>, Option<f64>, String)>(
+        "SELECT crop_top,crop_right,crop_bottom,crop_left,file_path FROM videos WHERE id=?",
+    )
+    .bind(&video_id)
+    .fetch_one(&state.db.pool)
+    .await?;
+    if let (Some(top), right, bottom, left, _) = (row.0, row.1, row.2, row.3, &row.4) {
+        return Ok(crate::pipeline::crop_detect::CropInsets {
+            top,
+            right: right.unwrap_or(0.0),
+            bottom: bottom.unwrap_or(0.0),
+            left: left.unwrap_or(0.0),
+        });
+    }
+    Ok(crate::pipeline::crop_detect::ensure_crop(&state.db, &video_id, PathBuf::from(row.4)).await)
 }
 
 #[tauri::command]
@@ -406,6 +456,29 @@ mod tests {
         restore_video(&db, &video_id).await.unwrap();
         assert_eq!(list_videos(&db, &course_id).await.unwrap().len(), 1);
         assert!(list_trashed(&db).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn videos_table_has_subtitle_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = crate::commands::courses::create_course(
+            &db, "c".into(), dir.path().to_string_lossy().into())
+            .await.unwrap();
+        let vpath = dir.path().join("v.mp4");
+        std::fs::write(&vpath, b"x").unwrap();
+        let video = add_local_video(&db, &course.id, vpath, None).await.unwrap();
+
+        sqlx::query("UPDATE videos SET subtitle_path=?, subtitle_lang=? WHERE id=?")
+            .bind("/tmp/x.ai-zh.srt").bind("ai-zh").bind(&video.id)
+            .execute(&db.pool).await.unwrap();
+
+        let got: Video = sqlx::query_as("SELECT * FROM videos WHERE id=?")
+            .bind(&video.id).fetch_one(&db.pool).await.unwrap();
+        assert_eq!(got.subtitle_lang.as_deref(), Some("ai-zh"));
+        assert_eq!(got.subtitle_path.as_deref(), Some("/tmp/x.ai-zh.srt"));
     }
 
     #[tokio::test]

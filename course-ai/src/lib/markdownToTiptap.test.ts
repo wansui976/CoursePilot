@@ -46,6 +46,45 @@ describe("markdownToTiptap", () => {
     expect(ts!.attrs!.ms).toBe((105 * 60 + 30) * 1000);
   });
 
+  it("turns a time range [mm:ss-mm:ss] into one timestamp at the start", () => {
+    const doc = markdownToTiptap("要点 [72:48-72:52]");
+    const para = doc.content![0];
+    const stamps = para.content!.filter((n) => n.type === "timestamp");
+    expect(stamps).toHaveLength(1);
+    expect(stamps[0].attrs!.ms).toBe((72 * 60 + 48) * 1000);
+    expect(stamps[0].attrs!.label).toBe("72:48");
+    // 「-72:52」尾巴被吞掉，不应作为纯文本漏出。
+    const text = para.content!
+      .filter((n) => n.type === "text")
+      .map((n) => n.text)
+      .join("");
+    expect(text).not.toContain("72:52");
+  });
+
+  it.each([
+    ["en dash", "[09:01–09:20]"],
+    ["em dash", "[09:01—09:20]"],
+    ["figure dash", "[09:01‒09:20]"],
+    ["horizontal bar", "[09:01―09:20]"],
+    ["minus sign", "[09:01−09:20]"],
+    ["fullwidth hyphen", "[09:01－09:20]"],
+    ["tilde", "[09:01~09:20]"],
+    ["fullwidth tilde", "[09:01～09:20]"],
+    ["wave dash", "[09:01〜09:20]"],
+  ])("parses a time range joined by %s into one timestamp", (_name, range) => {
+    const doc = markdownToTiptap(`要点 ${range}`);
+    const para = doc.content![0];
+    const stamps = para.content!.filter((n) => n.type === "timestamp");
+    expect(stamps).toHaveLength(1);
+    expect(stamps[0].attrs!.ms).toBe((9 * 60 + 1) * 1000);
+    expect(stamps[0].attrs!.label).toBe("09:01");
+    const text = para.content!
+      .filter((n) => n.type === "text")
+      .map((n) => n.text)
+      .join("");
+    expect(text).not.toContain("09:20");
+  });
+
   it("parses **bold** as a bold mark", () => {
     const doc = markdownToTiptap("这是**重点**内容");
     const para = doc.content![0];

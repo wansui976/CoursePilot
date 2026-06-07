@@ -122,6 +122,7 @@ async fn handle(mut stream: TcpStream, registry: Registry) -> std::io::Result<()
          Accept-Ranges: bytes\r\n\
          Content-Length: {len}\r\n\
          Cache-Control: no-store\r\n\
+         Access-Control-Allow-Origin: *\r\n\
          Connection: close\r\n",
         ct = content_type(&path),
     );
@@ -236,5 +237,51 @@ mod tests {
         assert_eq!(content_type(Path::new("a.mp4")), "video/mp4");
         assert_eq!(content_type(Path::new("a.MOV")), "video/mp4");
         assert_eq!(content_type(Path::new("a.webm")), "video/webm");
+    }
+
+    // 前端「自动裁黑边」用一个离屏 <video crossOrigin="anonymous"> 加载本服务的
+    // 同一 URL，再把帧画进 canvas 读像素检测黑边。视频走 http://127.0.0.1（与
+    // WKWebView 应用同源不同），属跨源；canvas 读像素要求响应带 CORS 头，否则
+    // crossOrigin 模式加载会被 CORS 拦截（loadedmetadata 不触发）、或 canvas 被
+    // 污染、getImageData 抛错。故响应必须带 Access-Control-Allow-Origin。
+    #[tokio::test]
+    async fn response_includes_cors_header_for_canvas_pixel_access() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpStream;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("clip.mp4");
+        std::fs::write(&path, b"fake-mp4-bytes").unwrap();
+
+        let server = start().await.unwrap();
+        server.register("vid1", path);
+
+        let mut stream = TcpStream::connect(("127.0.0.1", server.port))
+            .await
+            .unwrap();
+        stream
+            .write_all(b"GET /m/vid1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            .await
+            .unwrap();
+
+        let mut resp = Vec::new();
+        let mut tmp = [0_u8; 1024];
+        loop {
+            let n = stream.read(&mut tmp).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            resp.extend_from_slice(&tmp[..n]);
+            if resp.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let head = String::from_utf8_lossy(&resp).to_lowercase();
+        assert!(
+            head.contains("access-control-allow-origin: *"),
+            "media response must send a CORS header so the off-screen \
+             <video crossOrigin=anonymous> can read canvas pixels for \
+             black-bar detection; got headers:\n{head}"
+        );
     }
 }

@@ -100,12 +100,23 @@ pub fn summary_request(model: &str, transcript: &str) -> ChatRequest {
     )
 }
 
-pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatRequest {
+pub fn transcript_correction_request(
+    model: &str,
+    full_transcript: &str,
+    batch_json: &str,
+) -> ChatRequest {
     ChatRequest {
         model: model.to_string(),
         system: Some(
             "你是课程字幕纠错助手。只输出 JSON 数组，不要任何解释、标题或代码围栏。\
-             只修正识别错误、病句、标点和少量口语赘词；不要补充新知识，不要补充视频里没说过的内容。\
+             我们会随附这个视频的整篇字幕作为背景，帮助你判断视频的类型、主题、领域、\
+             专有名词与上下文；请据此对「本批分段」做语境化纠错——只输出 user 消息里\
+             给出的这一批分段的修改，不要纠正、也不要把背景里其它分段的内容搬进输出。\
+             修正识别错误、病句、标点和口语赘词；并结合上下文语境，把明显不合理、\
+             读不通、前后矛盾或同音/近音误识的语句，改成符合语境、表意通顺的说法\
+             （根据上下文推断说话人原本要表达的意思，让句子读得通、讲得对）；\
+             但以还原说话人原意为限，不要补充新知识、不要补充视频里没说过的内容、不要自由扩写发挥；\
+             语境不足以确定原意时，保留原文不强改。\
              重点规范断句与标点：把零碎、粘连或断错的口语文本整理成通顺完整的句子，\
              正确使用中文逗号、句号、问号、顿号等标点，句子开头规范、首字不丢；\
              但每段只在本段内纠正，不要跨段搬移文字、不要合并或拆分分段。\
@@ -120,14 +131,19 @@ pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatReque
              replacedtext 写纠正后的文本。若本批没有需要修改的内容，输出空数组 []。"
                 .into(),
         ),
-        cacheable_context: None,
+        cacheable_context: Some(format!(
+            "【仅作背景，请勿纠正、也不要复制到输出】这个视频的完整字幕（每行 [mm:ss] 文本）：\n{full_transcript}"
+        )),
         messages: vec![ChatMessage {
             role: "user".into(),
             content: format!(
-                "找出这些分段里需要修改的条目，只返回修改 patch，时间戳和 originaltext 照抄：\n{batch_json}"
+                "下面是需要纠错的这一批分段。结合上面整篇字幕的语境，找出需要修改的条目，\
+                 只返回修改 patch，时间戳和 originaltext 照抄：\n{batch_json}"
             ),
         }],
-        temperature: 0.1,
+        // 0.1 过于保守、几乎只改错字；0.4 让模型敢于结合语境改写读不通的句子，
+        // 又不至于自由发挥（配合「不补充新知识」护栏与严格的 originaltext 比对）。
+        temperature: 0.4,
         // 一批约 40 段，输出含时间戳回显；4096 是 Anthropic 的输出上限（OpenAI 不发此值）。
         max_tokens: 4096,
     }
@@ -180,6 +196,7 @@ mod tests {
     fn transcript_correction_prompt_requires_compact_json_output() {
         let req = transcript_correction_request(
             "m",
+            "[00:00] 嗯 今天讲概率\n[00:05] 接着讲条件概率",
             r#"[{"start_ms":0,"end_ms":1000,"text":"嗯 今天讲概率"}]"#,
         );
         let system = req.system.unwrap();
@@ -198,11 +215,17 @@ mod tests {
                 "correction prompt should mention {required}"
             );
         }
+
+        // 整篇字幕作为背景上下文随请求发送（可缓存），供模型理解视频主题/语境。
+        let context = req.cacheable_context.unwrap();
+        assert!(context.contains("接着讲条件概率"));
     }
 
     #[test]
     fn transcript_correction_prompt_restores_math_as_latex() {
-        let system = transcript_correction_request("m", "[]").system.unwrap();
+        let system = transcript_correction_request("m", "[00:00] 背景字幕", "[]")
+            .system
+            .unwrap();
         // 必须指示把口述的数学/物理表达还原成 LaTeX 行内公式。
         for required in ["数学", "LaTeX", r"\(", r"\sqrt", r"m_0"] {
             assert!(

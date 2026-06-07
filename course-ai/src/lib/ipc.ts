@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { Insets } from "./blackBars";
 import type {
   Chapter,
   Citation,
@@ -6,6 +7,7 @@ import type {
   DevLogEntry,
   Job,
   LlmProfile,
+  ProbeResult,
   RagAnswer,
   Screenshot,
   Slide,
@@ -37,6 +39,9 @@ export const ipc = {
       invoke("cmd_add_local_video", { courseId, filePath }),
     ensurePlayable: (videoId: string): Promise<string> =>
       invoke("cmd_ensure_playable", { videoId }),
+    // 打开视频时兜底补测黑边（旧视频无 crop 记录时），返回四边占比（无黑边为 0）。
+    ensureCrop: (videoId: string): Promise<Insets> =>
+      invoke("cmd_ensure_crop", { videoId }),
     mediaUrl: (videoId: string): Promise<string> =>
       invoke("cmd_media_url", { videoId }),
     cover: (videoId: string): Promise<number[]> =>
@@ -147,7 +152,16 @@ export const ipc = {
       h = 0,
     ): Promise<string> =>
       invoke("cmd_ocr_region", { videoId, atMs, x, y, w, h }),
-    importBilibili: (courseId: string, url: string): Promise<Video> =>
-      invoke("cmd_import_bilibili", { courseId, url }),
+    importBilibili: (
+      courseId: string,
+      url: string,
+      maxHeight?: number,
+      subLang?: string,
+    ): Promise<Video> =>
+      invoke("cmd_import_bilibili", { courseId, url, maxHeight, subLang }),
+    probeBilibili: (url: string): Promise<ProbeResult> =>
+      invoke("cmd_probe_bilibili", { url }),
+    setBilibiliCookies: (filePath: string): Promise<void> =>
+      invoke("cmd_set_bilibili_cookies", { filePath }),
   },
 };

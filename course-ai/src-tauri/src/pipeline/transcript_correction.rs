@@ -51,6 +51,18 @@ fn load_correction_segments(
         .collect()
 }
 
+/// 把整篇字幕拼成「[mm:ss] 文本」逐行的背景上下文，供每批纠错时理解视频主题/语境。
+fn full_transcript_context(segments: &[CorrectionSegment]) -> String {
+    segments
+        .iter()
+        .map(|s| {
+            let secs = s.start_ms / 1000;
+            format!("[{:02}:{:02}] {}", secs / 60, secs % 60, s.text.trim())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// 解析模型返回的 patch 列表，并用 start_ms/end_ms/originaltext 校验是否写错段。
 /// 模型只返回需要修改的条目；未返回的分段保持原文。
 pub fn parse_corrections(
@@ -133,11 +145,13 @@ async fn correct_batch_once(
     provider: &Provider,
     model: &str,
     video_id: &str,
+    full_transcript: &str,
     batch: &[CorrectionSegment],
     batch_json: &str,
     attempt: usize,
 ) -> AppResult<Vec<CorrectionSegment>> {
-    let req = crate::llm::prompts::transcript_correction_request(model, batch_json);
+    let req =
+        crate::llm::prompts::transcript_correction_request(model, full_transcript, batch_json);
     match provider.complete(&req).await {
         Ok(resp) => {
             let parsed = parse_corrections(batch, &resp.content);
@@ -172,12 +186,23 @@ async fn correct_batch(
     provider: &Provider,
     model: &str,
     video_id: &str,
+    full_transcript: &str,
     batch: &[CorrectionSegment],
 ) -> AppResult<Vec<CorrectionSegment>> {
     let batch_json = serde_json::to_string_pretty(batch)?;
     let mut last_err: Option<AppError> = None;
     for attempt in 1..=CORRECTION_MAX_ATTEMPTS {
-        match correct_batch_once(provider, model, video_id, batch, &batch_json, attempt).await {
+        match correct_batch_once(
+            provider,
+            model,
+            video_id,
+            full_transcript,
+            batch,
+            &batch_json,
+            attempt,
+        )
+        .await
+        {
             Ok(fixed) => return Ok(fixed),
             Err(error) => {
                 last_err = Some(error);
@@ -259,6 +284,9 @@ pub async fn autocorrect_transcript(
 
     let concurrency = correction_concurrency(db).await;
     let segments = load_correction_segments(&rows);
+    // 整篇字幕作为背景上下文随每批发送（可缓存），让模型知道视频主题/领域再语境化纠错。
+    // 用 Arc 在并发批间共享，避免对大字符串逐批克隆。
+    let full_transcript = std::sync::Arc::new(full_transcript_context(&segments));
     // 用拥有所有权的批，避免在 async 闭包里借用引用形参（HRTB 生命周期问题）。
     let batches: Vec<Vec<CorrectionSegment>> = segments
         .chunks(CORRECTION_BATCH_SIZE)
@@ -268,14 +296,17 @@ pub async fn autocorrect_transcript(
     // 并发跑各批（buffered 保持原顺序）：批之间独立，并发后 1 小时视频快很多。
     // 任一批失败（截断/格式不符/调用出错）都不落库部分成果，避免正式文稿半纠错半原文。
     let results: Vec<(bool, Vec<CorrectionSegment>)> = futures_util::stream::iter(batches)
-        .map(|batch| async move {
-            match correct_batch(provider, model, video_id, &batch).await {
-                Ok(fixed) => (true, fixed),
-                Err(error) => {
-                    eprintln!(
-                        "transcript correction batch failed, keeping raw transcript: {error}"
-                    );
-                    (false, batch)
+        .map(|batch| {
+            let full = full_transcript.clone();
+            async move {
+                match correct_batch(provider, model, video_id, &full, &batch).await {
+                    Ok(fixed) => (true, fixed),
+                    Err(error) => {
+                        eprintln!(
+                            "transcript correction batch failed, keeping raw transcript: {error}"
+                        );
+                        (false, batch)
+                    }
                 }
             }
         })
