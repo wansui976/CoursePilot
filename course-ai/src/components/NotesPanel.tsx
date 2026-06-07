@@ -23,14 +23,18 @@ const MindmapPanel = lazy(() =>
 );
 
 type View = "notes" | "quiz" | "mindmap" | "ask" | "search";
-const VIEWS: { key: View; label: string; task?: "notes" | "quiz" | "mindmap" }[] =
-  [
-    { key: "notes", label: "AI笔记", task: "notes" },
-    { key: "quiz", label: "AI出题", task: "quiz" },
-    { key: "mindmap", label: "AI脑图", task: "mindmap" },
-    { key: "ask", label: "提问" },
-    { key: "search", label: "搜索文稿" },
-  ];
+const VIEWS: {
+  key: View;
+  label: string;
+  generateLabel?: string;
+  task?: "notes" | "quiz" | "mindmap";
+}[] = [
+  { key: "notes", label: "笔记", generateLabel: "笔记", task: "notes" },
+  { key: "quiz", label: "出题", generateLabel: "题目", task: "quiz" },
+  { key: "mindmap", label: "脑图", generateLabel: "脑图", task: "mindmap" },
+  { key: "ask", label: "提问" },
+  { key: "search", label: "搜索" },
+];
 
 export function NotesPanel({ videoId }: { videoId: string }) {
   const [view, setView] = useState<View>("notes");
@@ -135,7 +139,9 @@ export function NotesPanel({ videoId }: { videoId: string }) {
               disabled={generate.isPending}
               onClick={() => generate.mutate(currentTask)}
             >
-              {generate.isPending ? "生成中…" : `生成${current.label}`}
+              {generate.isPending
+                ? "生成中…"
+                : `生成${current.generateLabel ?? current.label}`}
             </Button>
           )}
         </div>
