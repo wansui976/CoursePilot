@@ -679,11 +679,11 @@ export function Home() {
                     </h1>
                   </div>
                 </div>
-                <div className="flex min-h-0 flex-1">
+                <div className="flex min-h-0 min-w-0 flex-1">
                   {mediaSrc ? (
                     <VideoPlayer src={mediaSrc} videoId={selectedVideo.id} />
                   ) : (
-                    <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">
+                    <div className="flex h-full min-w-0 flex-1 items-center justify-center bg-black text-sm text-white/40">
                       正在准备播放…
                     </div>
                   )}

@@ -194,7 +194,7 @@ export function VideoPlayer({
       className={`flex flex-col ${
         fullscreen
           ? "fixed inset-0 z-50 bg-black"
-          : "h-full min-h-0 bg-transparent"
+          : "h-full min-h-0 w-full min-w-0 flex-1 bg-transparent"
       }`}
     >
       <div
