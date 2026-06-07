@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Controls } from "./Controls";
 
 describe("Controls", () => {
-  it("always shows the black-bar crop toggle", () => {
+  it("renders the caption toggle", () => {
     render(
       <Controls
         playing={false}
@@ -15,9 +15,6 @@ describe("Controls", () => {
         muted={false}
         captionsOn={true}
         fullscreen={false}
-        showCrop={false}
-        cropOn={false}
-        onToggleCrop={vi.fn()}
         onToggleCaptions={vi.fn()}
         onPlayPause={vi.fn()}
         onSeek={vi.fn()}
@@ -28,6 +25,6 @@ describe("Controls", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "裁黑边" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "字幕" })).toBeInTheDocument();
   });
 });

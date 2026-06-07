@@ -12,6 +12,7 @@ import {
   Terminal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { asrBackendOrDefault, defaultAsrBackend } from "@/lib/asrDefaults";
 import { ipc } from "@/lib/ipc";
 import {
   getSlidesSensitivity,
@@ -122,7 +123,7 @@ export function SettingsPanel({
 }) {
   const [root, setRoot] = useState("");
   const [model, setModel] = useState("large-v3-turbo");
-  const [asrBackend, setAsrBackend] = useState("whisper");
+  const [asrBackend, setAsrBackend] = useState(defaultAsrBackend);
   const [asrLanguage, setAsrLanguage] = useState("zh");
   const [correctionConcurrency, setCorrectionConcurrency] = useState("8");
   const [subtitleAutocorrect, setSubtitleAutocorrect] = useState(true);
@@ -148,7 +149,7 @@ export function SettingsPanel({
       .then((value) => setModel(value ?? "large-v3-turbo"));
     void ipc.settings
       .get("asr_backend")
-      .then((value) => setAsrBackend(value ?? "whisper"));
+      .then((value) => setAsrBackend(asrBackendOrDefault(value)));
     void ipc.settings
       .get("asr_language")
       .then((value) => setAsrLanguage(value ?? "zh"));

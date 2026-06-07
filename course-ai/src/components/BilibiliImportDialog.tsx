@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
+import { isAndroid, persistPickedFile } from "@/lib/mobileFiles";
 import type { ProbeResult } from "@/lib/types";
 
 type Step = "url" | "cookie" | "probing" | "confirm";
@@ -42,13 +43,25 @@ export function BilibiliImportDialog({
   };
 
   const pickCookie = async () => {
+    setError(null);
     const file = await open({
       multiple: false,
-      filters: [{ name: "cookies.txt", extensions: ["txt"] }],
+      pickerMode: isAndroid ? "document" : undefined,
+      filters: [
+        {
+          name: "cookies.txt",
+          extensions: isAndroid ? ["text/plain"] : ["txt"],
+        },
+      ],
     });
     if (!file || Array.isArray(file)) return;
-    await ipc.tools.setBilibiliCookies(file);
-    void runProbe();
+    try {
+      const stable = await persistPickedFile(file, "cookies", "cookies.txt");
+      await ipc.tools.setBilibiliCookies(stable);
+      void runProbe();
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   const startUrl = async () => {

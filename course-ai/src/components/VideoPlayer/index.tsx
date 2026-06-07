@@ -1,13 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import {
-  contentAspect,
-  cropStyle,
-  displayCropInsets,
-  type Insets,
-  NO_INSETS,
-} from "@/lib/blackBars";
 import { ipc } from "@/lib/ipc";
 import { usePlayer } from "@/stores/player";
 import { CaptionOverlay } from "./CaptionOverlay";
@@ -20,12 +13,9 @@ const RESUME_TAIL_GUARD = 15;
 export function VideoPlayer({
   src,
   videoId,
-  crop: cropProp,
 }: {
   src: string;
   videoId: string;
-  // 导入时 ffmpeg cropdetect 探测到的四边黑边占比；无则不裁。
-  crop?: Insets | null;
 }) {
   const regionRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -37,16 +27,6 @@ export function VideoPlayer({
   const currentMs = usePlayer((s) => s.currentMs);
   const durationMs = usePlayer((s) => s.durationMs);
   const seekRequest = usePlayer((s) => s.seekRequest);
-  const crop = cropProp ?? NO_INSETS;
-  const hasBars =
-    !!cropProp &&
-    (crop.top > 0 || crop.right > 0 || crop.bottom > 0 || crop.left > 0);
-  const [cropEnabled, setCropEnabled] = useState(true);
-  // 检测到黑边即默认开启；换视频时复位为该视频的判定。
-  useEffect(() => {
-    setCropEnabled(hasBars);
-  }, [videoId, hasBars]);
-  const activeCrop = cropEnabled ? displayCropInsets(crop) : NO_INSETS;
   const [region, setRegion] = useState({ w: 0, h: 0 });
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
@@ -54,8 +34,6 @@ export function VideoPlayer({
   const [muted, setMuted] = useState(false);
   const [captionsOn, setCaptionsOn] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
-  const dpr =
-    typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
 
   const { data: segments = [] } = useQuery({
     queryKey: ["transcripts", videoId],
@@ -84,7 +62,7 @@ export function VideoPlayer({
   }, []);
 
   // 在播放区内，求与视频同比例、尽可能大的居中矩形；视频铺满它即完整无黑边。
-  const aspect = contentAspect(videoAspect > 0 ? videoAspect : 16 / 9, activeCrop);
+  const aspect = videoAspect > 0 ? videoAspect : 16 / 9;
   const stageBox = (() => {
     const { w, h } = region;
     if (!w || !h) return null;
@@ -226,18 +204,14 @@ export function VideoPlayer({
         <div
           ref={stageRef}
           className={`relative overflow-hidden ${fullscreen ? "" : "rounded-[14px]"}`}
-          // 让舞台框自身成为合成/裁剪上下文：WKWebView 会把 <video> 提升成硬件层，
-          // 该层默认不被父级 overflow:hidden 裁住（裁剪放大后会溢出，盖到右侧 AI 栏上）。
-          // clip-path 在合成器层面硬裁，可靠地把视频层钉死在本框内；transform+isolate
-          // 建立独立合成上下文。舞台宽恒 ≤ 播放区宽，故裁后绝不会越界到 AI 栏。
-          style={{
-            ...(stageBox
+          // 舞台框尺寸恒等于视频的显示矩形（与视频同宽高比、在播放区内居中取最大），
+          // 故宽恒 ≤ 播放区宽，永不越界到右侧 AI 栏。尺寸由 region(ResizeObserver) 推导，
+          // 随窗口/面板宽度实时回流。不再加 transform 提层，避免硬件层缓存住旧尺寸。
+          style={
+            stageBox
               ? { width: stageBox.width, height: stageBox.height }
-              : { width: "100%", height: "100%" }),
-            transform: "translateZ(0)",
-            isolation: "isolate",
-            clipPath: fullscreen ? "inset(0)" : "inset(0 round 14px)",
-          }}
+              : { width: "100%", height: "100%" }
+          }
         >
           <video
             ref={ref}
@@ -245,25 +219,8 @@ export function VideoPlayer({
             src={src}
             playsInline
             disablePictureInPicture
-            className={stageBox ? "bg-black" : "h-full w-full bg-black object-contain"}
-            // 不再给 <video> 加 translateZ/will-change 自提层：那会把它锁成一张缓存层，
-            // 舞台缩小（拖动 AI 栏）时不及时重排，看着「没跟着变」，还会盖到 AI 栏上。
-            // 裁剪溢出改由舞台的 clip-path 在合成器层面硬裁。
-            // stageBox 就绪时叠加 cropStyle（绝对定位 + 放大负偏移）把黑边推出包裹层；
-            // 无裁剪时 cropStyle 等价于铺满 stageBox，与原渲染一致。
-            // object-fit:contain：元素尺寸已按内容宽高比算好（W/H==内容显示比例）。
-            // contain 等比缩放、永不拉伸（不变形）、且**永不裁掉内容**——对文档/讲义这类
-            // 边缘文字不能丢的内容最稳；常见方形像素下与精确铺满一致，仅当视频真实显示比例
-            // 与 videoWidth/Height 推算的比例有微差时，在框内留一丝黑边（可接受）。
-            // 黑边仍由 cropStyle 的负偏移推出包裹层。
-            style={{
-              ...(stageBox
-                ? {
-                    ...cropStyle(stageBox, activeCrop, dpr),
-                    objectFit: "contain" as const,
-                  }
-                : {}),
-            }}
+            // 普通在流块级元素：铺满舞台、等比缩放不裁不变形。舞台已是视频比例，故无黑边。
+            className="h-full w-full bg-black object-contain"
             onTimeUpdate={(event) => {
               const t = event.currentTarget.currentTime;
               setCurrentMs(Math.floor(t * 1000));
@@ -326,9 +283,6 @@ export function VideoPlayer({
         muted={muted}
         captionsOn={captionsOn}
         fullscreen={fullscreen}
-        showCrop={hasBars}
-        cropOn={cropEnabled}
-        onToggleCrop={() => setCropEnabled((v) => !v)}
         onToggleCaptions={() => setCaptionsOn((on) => !on)}
         onPlayPause={() => {
           const video = ref.current;

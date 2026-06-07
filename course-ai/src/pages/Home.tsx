@@ -137,18 +137,6 @@ export function Home() {
     enabled: !!selectedVideo,
   });
 
-  // 兜底：打开尚无 crop 记录的视频（多为本功能上线前导入的旧视频）时，后台补测一次黑边
-  // 并写库，完成后刷新列表让裁剪生效。每个 id 仅触发一次，已测过的（crop_top 非空）跳过。
-  const cropEnsured = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const v = selectedVideo;
-    if (!v || v.crop_top != null || cropEnsured.current.has(v.id)) return;
-    cropEnsured.current.add(v.id);
-    void ipc.videos.ensureCrop(v.id).then(() => {
-      queryClient.invalidateQueries({ queryKey: ["videos", selectedCourseId] });
-    });
-  }, [selectedVideo, selectedCourseId, queryClient]);
-
   useEffect(() => {
     setVideo(selectedVideoId);
   }, [selectedVideoId, setVideo]);
@@ -680,33 +668,20 @@ export function Home() {
               renderProcessingQueuePage()
             ) : selectedVideo ? (
               <>
-                <div className="flex min-h-24 items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-5 py-4">
+                <div className="flex min-h-24 items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-4 py-3 sm:px-5 sm:py-4">
                   <div className="min-w-0 flex-1">
                     <p className="mb-1 flex items-center gap-2 text-xs font-medium text-[var(--text-faint)]">
                       <Sparkles className="h-3.5 w-3.5 text-primary" />
                       学习工作台
                     </p>
-                    <h1 className="truncate text-xl font-semibold text-[var(--text-strong)]">
+                    <h1 className="truncate text-lg font-semibold text-[var(--text-strong)] sm:text-xl">
                       {selectedVideo.title}
                     </h1>
                   </div>
                 </div>
-                <div className="min-h-0 flex-1">
+                <div className="flex min-h-0 flex-1">
                   {mediaSrc ? (
-                    <VideoPlayer
-                      src={mediaSrc}
-                      videoId={selectedVideo.id}
-                      crop={
-                        selectedVideo.crop_top != null
-                          ? {
-                              top: selectedVideo.crop_top,
-                              right: selectedVideo.crop_right ?? 0,
-                              bottom: selectedVideo.crop_bottom ?? 0,
-                              left: selectedVideo.crop_left ?? 0,
-                            }
-                          : null
-                      }
-                    />
+                    <VideoPlayer src={mediaSrc} videoId={selectedVideo.id} />
                   ) : (
                     <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">
                       正在准备播放…

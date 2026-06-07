@@ -113,6 +113,11 @@ select {
 
 button {
   color: inherit;
+  touch-action: manipulation;
+}
+
+input[type="range"] {
+  touch-action: manipulation;
 }
 
 * {

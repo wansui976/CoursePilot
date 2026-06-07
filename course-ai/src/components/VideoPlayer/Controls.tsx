@@ -1,13 +1,22 @@
 import { Button } from "@/components/ui/button";
 import { formatMs } from "@/lib/time";
-import { Maximize, Minimize, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import {
+  Captions,
+  Gauge,
+  Maximize,
+  Minimize,
+  Pause,
+  Play,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import { useState, type CSSProperties } from "react";
 
 const SPEEDS = [2, 1.5, 1.25, 1, 0.75, 0.5];
 const iconButtonClass =
   "flex h-9 w-9 items-center justify-center rounded-lg text-white/90 transition hover:bg-white/10 hover:text-white";
 const textButtonClass =
-  "h-9 whitespace-nowrap rounded-lg px-2 text-sm font-medium text-white/85 transition hover:bg-white/10 hover:text-white";
+  "inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-sm font-medium text-white/85 transition hover:bg-white/10 hover:text-white";
 
 function formatRate(rate: number) {
   return Number.isInteger(rate) ? rate.toFixed(1) : String(rate);
@@ -22,9 +31,6 @@ export function Controls({
   muted,
   captionsOn,
   fullscreen,
-  showCrop,
-  cropOn,
-  onToggleCrop,
   onToggleCaptions,
   onPlayPause,
   onSeek,
@@ -41,9 +47,6 @@ export function Controls({
   muted: boolean;
   captionsOn: boolean;
   fullscreen: boolean;
-  showCrop: boolean;
-  cropOn: boolean;
-  onToggleCrop: () => void;
   onToggleCaptions: () => void;
   onPlayPause: () => void;
   onSeek: (ms: number) => void;
@@ -59,7 +62,7 @@ export function Controls({
   const volumePercent = muted ? 0 : Math.min(100, Math.max(0, volume * 100));
 
   return (
-    <div className="shrink-0 bg-black/95 px-4 pb-2.5 pt-2 text-white">
+    <div className="shrink-0 bg-black/95 px-3 pb-2.5 pt-2 text-white sm:px-4">
       <input
         aria-label="播放进度"
         type="range"
@@ -74,7 +77,7 @@ export function Controls({
           } as CSSProperties
         }
       />
-      <div className="mt-2 flex items-center gap-2 text-sm text-white/75">
+      <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-2 text-sm text-white/75 sm:flex-nowrap sm:gap-2">
         <Button
           size="icon"
           variant="ghost"
@@ -85,13 +88,13 @@ export function Controls({
         >
           {playing ? <Pause className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5 fill-current" />}
         </Button>
-        <span className="whitespace-nowrap text-sm font-medium tabular-nums tracking-wide text-white/85">
+        <span className="whitespace-nowrap text-sm font-medium tabular-nums text-white/85">
           {formatMs(currentMs)} / {formatMs(durationMs)}
         </span>
 
-        <div className="min-w-2 flex-1" />
+        <div className="hidden min-w-2 flex-1 sm:block" />
 
-        <button type="button" className={`${textButtonClass} hidden sm:block`}>
+        <button type="button" className={`${textButtonClass} hidden sm:inline-flex`}>
           1080P 高清
         </button>
         <div className="relative">
@@ -102,7 +105,8 @@ export function Controls({
             aria-expanded={speedOpen}
             onClick={() => setSpeedOpen((open) => !open)}
           >
-            倍速
+            <Gauge className="h-4 w-4 sm:hidden" />
+            <span className="hidden sm:inline">倍速</span>
           </button>
           {speedOpen && (
             <div
@@ -136,21 +140,8 @@ export function Controls({
           title={captionsOn ? "关闭字幕" : "开启字幕"}
           className={`${textButtonClass} ${captionsOn ? "text-[#3b82f6]" : ""}`}
         >
-          字幕
-        </button>
-        <button
-          type="button"
-          onClick={onToggleCrop}
-          title={
-            showCrop
-              ? cropOn
-                ? "显示原画（保留黑边）"
-                : "裁掉黑边"
-              : "裁掉黑边"
-          }
-          className={`${textButtonClass} ${cropOn ? "text-[#3b82f6]" : ""}`}
-        >
-          裁黑边
+          <Captions className="h-4 w-4 sm:hidden" />
+          <span className="hidden sm:inline">字幕</span>
         </button>
         <Button
           size="icon"

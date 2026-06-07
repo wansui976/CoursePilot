@@ -4,6 +4,7 @@ import { lazy, Suspense, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
+import { isAndroid, persistPickedFile } from "@/lib/mobileFiles";
 
 // 按需懒加载：下载向导只在用户点击时才需要，避免把它（及 plugin-dialog 等）压进首屏 eager 包。
 const BilibiliImportDialog = lazy(() =>
@@ -15,22 +16,32 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const [showBili, setShowBili] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["videos", courseId] });
 
   const local = useMutation({
     mutationFn: async () => {
+      setUploadError(null);
       const file = await open({
         directory: false,
         multiple: false,
+        pickerMode: isAndroid ? "document" : undefined,
         filters: [
-          { name: "Video", extensions: ["mp4", "mkv", "mov", "webm", "m4v"] },
+          {
+            name: "Video",
+            extensions: isAndroid
+              ? ["video/*"]
+              : ["mp4", "mkv", "mov", "webm", "m4v"],
+          },
         ],
       });
       if (!file || Array.isArray(file)) return null;
-      return ipc.videos.addLocal(courseId, file);
+      const stable = await persistPickedFile(file, "videos", "video.mp4");
+      return ipc.videos.addLocal(courseId, stable);
     },
     onSuccess: invalidate,
+    onError: (e) => setUploadError(String(e)),
   });
 
   return (
@@ -47,6 +58,7 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
             <button
               onClick={() => {
                 setMenuOpen(false);
+                setUploadError(null);
                 local.mutate();
               }}
               className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-[var(--surface-card-hover)]"
@@ -83,6 +95,11 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
             </button>
           </div>
         </>
+      )}
+      {uploadError && (
+        <div className="absolute left-0 top-full mt-1.5 max-w-72 text-xs text-red-400">
+          {uploadError}
+        </div>
       )}
       {showBili && (
         <Suspense fallback={null}>

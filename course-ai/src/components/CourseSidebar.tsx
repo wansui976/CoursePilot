@@ -1,4 +1,5 @@
 import { confirm as confirmDialog, open } from "@tauri-apps/plugin-dialog";
+import { appDataDir, join } from "@tauri-apps/api/path";
 import {
   ClipboardList,
   FolderOpen,
@@ -45,18 +46,17 @@ export function CourseSidebar({
     queryFn: ipc.courses.list,
   });
   const create = useMutation({
-    mutationFn: async () => {
-      const dir = await open({ directory: true, multiple: false });
-      if (!dir || Array.isArray(dir)) return null;
-      const name = dir.split(/[\\/]/).pop() || "Untitled";
-      return ipc.courses.create(name, dir);
-    },
+    mutationFn: ({ name, rootPath }: { name: string; rootPath: string }) =>
+      ipc.courses.create(name, rootPath),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["courses"] }),
   });
 
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createDraft, setCreateDraft] = useState("新课程");
+  const isAndroid = /Android/i.test(navigator.userAgent);
 
   function closeMenu() {
     setMenuFor(null);
@@ -88,6 +88,20 @@ export function CourseSidebar({
     if (renamingId && name) rename.mutate({ id: renamingId, name });
     setRenamingId(null);
   }
+  async function submitCreateCourse() {
+    const name = createDraft.trim();
+    if (!name) return;
+    const base = await appDataDir();
+    const safe = name
+      .replace(/[\\/<>:"|?*\u0000-\u001f]/g, "_")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 48) || "course";
+    const rootPath = await join(base, "courses", `${safe}-${Date.now().toString(36)}`);
+    create.mutate({ name, rootPath });
+    setCreateOpen(false);
+  }
+
   async function confirmDelete(id: string, name: string) {
     closeMenu();
     const ok = await confirmDialog(
@@ -112,7 +126,17 @@ export function CourseSidebar({
           className="h-10 w-full border border-dashed border-[var(--border-subtle)] bg-transparent text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
           size="sm"
           variant="outline"
-          onClick={() => create.mutate()}
+          onClick={async () => {
+            if (isAndroid) {
+              setCreateDraft("新课程");
+              setCreateOpen(true);
+              return;
+            }
+            const dir = await open({ directory: true, multiple: false });
+            if (!dir || Array.isArray(dir)) return;
+            const name = dir.split(/[\\/]/).pop() || "Untitled";
+            create.mutate({ name, rootPath: dir });
+          }}
         >
           <Plus className="h-4 w-4" />
           新建课程
@@ -256,6 +280,37 @@ export function CourseSidebar({
           设置
         </Button>
       </div>
+      {createOpen && (
+        <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/35 p-4 sm:items-center">
+          <div className="w-full max-w-sm rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-4 shadow-[var(--shadow-pop)]">
+            <div className="mb-3 text-sm font-semibold text-[var(--text-strong)]">
+              新建课程
+            </div>
+            <input
+              autoFocus
+              value={createDraft}
+              onChange={(e) => setCreateDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void submitCreateCourse();
+                if (e.key === "Escape") setCreateOpen(false);
+              }}
+              className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] outline-none focus:border-[var(--accent-text)] focus:ring-2 focus:ring-[var(--accent-text)]/25"
+              placeholder="课程名称"
+            />
+            <p className="mt-2 text-xs text-[var(--text-muted)]">
+              Android 会把课程创建在应用私有目录里。
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>
+                取消
+              </Button>
+              <Button size="sm" onClick={() => void submitCreateCourse()}>
+                创建
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
