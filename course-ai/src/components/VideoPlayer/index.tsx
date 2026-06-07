@@ -1,7 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { contentAspect, cropStyle, type Insets, NO_INSETS } from "@/lib/blackBars";
+import {
+  contentAspect,
+  cropStyle,
+  displayCropInsets,
+  type Insets,
+  NO_INSETS,
+} from "@/lib/blackBars";
 import { ipc } from "@/lib/ipc";
 import { usePlayer } from "@/stores/player";
 import { CaptionOverlay } from "./CaptionOverlay";
@@ -26,7 +32,6 @@ export function VideoPlayer({
   const ref = useRef<HTMLVideoElement>(null);
   const lastSavedRef = useRef(0);
   const [videoAspect, setVideoAspect] = useState(16 / 9);
-  const [videoDims, setVideoDims] = useState({ w: 0, h: 0 }); // 调试：真实像素尺寸
   const setCurrentMs = usePlayer((s) => s.setCurrentMs);
   const setDurationMs = usePlayer((s) => s.setDurationMs);
   const currentMs = usePlayer((s) => s.currentMs);
@@ -41,7 +46,7 @@ export function VideoPlayer({
   useEffect(() => {
     setCropEnabled(hasBars);
   }, [videoId, hasBars]);
-  const activeCrop = cropEnabled ? crop : NO_INSETS;
+  const activeCrop = cropEnabled ? displayCropInsets(crop) : NO_INSETS;
   const [region, setRegion] = useState({ w: 0, h: 0 });
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
@@ -216,22 +221,22 @@ export function VideoPlayer({
     >
       <div
         ref={regionRef}
-        className={`relative flex min-h-0 w-full min-w-0 flex-1 items-center justify-center overflow-hidden ${
-          fullscreen ? "bg-black" : "bg-[var(--surface-stage)]"
-        }`}
+        className="relative flex min-h-0 w-full min-w-0 flex-1 items-center justify-center overflow-hidden bg-black"
       >
         <div
           ref={stageRef}
           className={`relative overflow-hidden ${fullscreen ? "" : "rounded-[14px]"}`}
-          // 让舞台框自身成为合成/裁剪上下文：WKWebView 会把开了 translateZ 的 <video>
-          // 提升成硬件层，该层默认不被父级 overflow:hidden 裁住（裁剪后会溢出/错位）。
-          // 给父级也加 transform + isolate，强制把视频层裁进这个框内。
+          // 让舞台框自身成为合成/裁剪上下文：WKWebView 会把 <video> 提升成硬件层，
+          // 该层默认不被父级 overflow:hidden 裁住（裁剪放大后会溢出，盖到右侧 AI 栏上）。
+          // clip-path 在合成器层面硬裁，可靠地把视频层钉死在本框内；transform+isolate
+          // 建立独立合成上下文。舞台宽恒 ≤ 播放区宽，故裁后绝不会越界到 AI 栏。
           style={{
             ...(stageBox
               ? { width: stageBox.width, height: stageBox.height }
               : { width: "100%", height: "100%" }),
             transform: "translateZ(0)",
             isolation: "isolate",
+            clipPath: fullscreen ? "inset(0)" : "inset(0 round 14px)",
           }}
         >
           <video
@@ -241,8 +246,9 @@ export function VideoPlayer({
             playsInline
             disablePictureInPicture
             className={stageBox ? "bg-black" : "h-full w-full bg-black object-contain"}
-            // 提升到独立 GPU 合成层：暂停后让这一帧留在自己的层上，减少回退到
-            // 「栅格化再缩放」的软化；backface-visibility 进一步固定层、避免半像素抖动。
+            // 不再给 <video> 加 translateZ/will-change 自提层：那会把它锁成一张缓存层，
+            // 舞台缩小（拖动 AI 栏）时不及时重排，看着「没跟着变」，还会盖到 AI 栏上。
+            // 裁剪溢出改由舞台的 clip-path 在合成器层面硬裁。
             // stageBox 就绪时叠加 cropStyle（绝对定位 + 放大负偏移）把黑边推出包裹层；
             // 无裁剪时 cropStyle 等价于铺满 stageBox，与原渲染一致。
             // object-fit:contain：元素尺寸已按内容宽高比算好（W/H==内容显示比例）。
@@ -251,9 +257,6 @@ export function VideoPlayer({
             // 与 videoWidth/Height 推算的比例有微差时，在框内留一丝黑边（可接受）。
             // 黑边仍由 cropStyle 的负偏移推出包裹层。
             style={{
-              transform: "translateZ(0)",
-              willChange: "transform",
-              backfaceVisibility: "hidden",
               ...(stageBox
                 ? {
                     ...cropStyle(stageBox, activeCrop, dpr),
@@ -281,7 +284,6 @@ export function VideoPlayer({
               const { videoWidth, videoHeight } = video;
               if (videoWidth > 0 && videoHeight > 0) {
                 setVideoAspect(videoWidth / videoHeight);
-                setVideoDims({ w: videoWidth, h: videoHeight });
               }
               // 断点续播：恢复上次离开的位置。
               const saved = Number(localStorage.getItem(posKey(videoId)));
@@ -313,24 +315,6 @@ export function VideoPlayer({
           {captionsOn && caption && (
             <CaptionOverlay text={caption} stageRef={stageRef} />
           )}
-          {/* 临时调试读数：定位裁剪偏移/比例问题用，定位后会删除。 */}
-          <div className="pointer-events-none absolute left-1 top-1 z-20 whitespace-pre rounded bg-black/70 px-1.5 py-1 font-mono text-[10px] leading-tight text-lime-300">
-            {[
-              `region ${region.w}x${region.h}`,
-              `video ${videoDims.w}x${videoDims.h} ar=${videoAspect.toFixed(4)}`,
-              `crop T${crop.top.toFixed(3)} R${crop.right.toFixed(3)} B${crop.bottom.toFixed(3)} L${crop.left.toFixed(3)}`,
-              `on=${cropEnabled} hasBars=${hasBars}`,
-              stageBox
-                ? `stage ${Math.round(stageBox.width)}x${Math.round(stageBox.height)}`
-                : "stage null",
-              stageBox
-                ? (() => {
-                    const s = cropStyle(stageBox, activeCrop, dpr);
-                    return `vid w=${Math.round(Number(s.width))} h=${Math.round(Number(s.height))} l=${Math.round(Number(s.left))} t=${Math.round(Number(s.top))}`;
-                  })()
-                : "",
-            ].join("\n")}
-          </div>
         </div>
       </div>
       <Controls
