@@ -87,10 +87,10 @@ pub fn parse_corrections(
             )));
         }
 
+        // replacedtext 为空是合法的「整段删除」：当一段全是语气词/口头禅（如「哎。」）
+        // 时，模型按提示词把它清空。这里保留分段（时间戳不变，满足下游行数一致校验），
+        // 只把文本置空——该时间段不再显示字幕，也不污染文稿/笔记。
         let text = patch.replacedtext.trim();
-        if text.is_empty() {
-            return Err(AppError::Other("empty corrected transcript text".into()));
-        }
         out[index] = CorrectionSegment {
             start_ms: orig.start_ms,
             end_ms: orig.end_ms,
@@ -392,18 +392,31 @@ mod tests {
     }
 
     #[test]
-    fn parse_corrections_rejects_empty_replacement() {
-        let raw = vec![CorrectionSegment {
-            start_ms: 0,
-            end_ms: 1000,
-            text: "原文".into(),
-        }];
-        let err = parse_corrections(
+    fn parse_corrections_allows_empty_replacement_to_drop_filler() {
+        // 整段是语气词时模型回空串 → 视为删除，该段文本置空、分段保留。
+        let raw = vec![
+            CorrectionSegment {
+                start_ms: 0,
+                end_ms: 1000,
+                text: "哎。".into(),
+            },
+            CorrectionSegment {
+                start_ms: 1000,
+                end_ms: 2000,
+                text: "正文".into(),
+            },
+        ];
+        let out = parse_corrections(
             &raw,
-            r#"[{"start_ms":0,"end_ms":1000,"originaltext":"原文","replacedtext":"  "}]"#,
+            r#"[{"start_ms":0,"end_ms":1000,"originaltext":"哎。","replacedtext":""}]"#,
         )
-        .unwrap_err();
-        assert!(err.to_string().contains("empty"));
+        .unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].text, "");
+        assert_eq!(out[0].start_ms, 0);
+        assert_eq!(out[0].end_ms, 1000);
+        // 未被 patch 的分段保持原样。
+        assert_eq!(out[1].text, "正文");
     }
 
     #[test]
