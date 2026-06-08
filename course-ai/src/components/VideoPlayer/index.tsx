@@ -2,11 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ipc } from "@/lib/ipc";
+import { posKey, durKey } from "@/lib/playback";
 import { usePlayer } from "@/stores/player";
 import { CaptionOverlay } from "./CaptionOverlay";
 import { Controls } from "./Controls";
 
-const posKey = (id: string) => `video-pos:${id}`;
 // 距片尾 15s 内不再续播（视为看完），从头开始。
 const RESUME_TAIL_GUARD = 15;
 
@@ -237,6 +237,10 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
             onLoadedMetadata={(event) => {
               const video = event.currentTarget;
               setDurationMs(Math.floor(video.duration * 1000));
+              // 记录总时长，供首页显示「时长 + 进度条」（DB 里 duration_ms 常为空）。
+              if (Number.isFinite(video.duration) && video.duration > 0) {
+                localStorage.setItem(durKey(videoId), String(video.duration));
+              }
               const { videoWidth, videoHeight } = video;
               if (videoWidth > 0 && videoHeight > 0) {
                 setVideoAspect(videoWidth / videoHeight);
