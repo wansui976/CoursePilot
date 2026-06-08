@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
+import { persistPickedFile } from "@/lib/mobileFiles";
 
 /** 单一「导入」入口：点开后可选「上传本地视频」或「下载网络视频（B 站 / 链接）」。 */
 export function ImportVideoButton({ courseId }: { courseId: string }) {
@@ -23,7 +24,9 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
         ],
       });
       if (!file || Array.isArray(file)) return null;
-      return ipc.videos.addLocal(courseId, file);
+      const fallbackName = file.split(/[\\/]/).pop() || "video.mp4";
+      const persisted = await persistPickedFile(file, "videos", fallbackName);
+      return ipc.videos.addLocal(courseId, persisted);
     },
     onSuccess: invalidate,
   });

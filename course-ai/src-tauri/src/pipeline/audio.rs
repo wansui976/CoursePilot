@@ -3,6 +3,135 @@ use crate::sidecar::{resolve, FFMPEG};
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedAudio {
+    pub path: PathBuf,
+    pub mime: String,
+    pub format: String,
+}
+
+impl PreparedAudio {
+    pub fn new(
+        path: impl Into<PathBuf>,
+        mime: impl Into<String>,
+        format: impl Into<String>,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            mime: mime.into(),
+            format: format.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioPurpose {
+    Whisper,
+    CloudAsr(CloudAsrProvider),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloudAsrProvider {
+    Volcengine,
+    Aliyun,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AndroidExportFormat {
+    pub format: &'static str,
+    pub mime: &'static str,
+}
+
+impl CloudAsrProvider {
+    pub fn android_export_format(self) -> AndroidExportFormat {
+        match self {
+            CloudAsrProvider::Aliyun => AndroidExportFormat {
+                format: "m4a",
+                mime: "audio/mp4",
+            },
+            CloudAsrProvider::Volcengine => AndroidExportFormat {
+                format: "wav",
+                mime: "audio/wav",
+            },
+        }
+    }
+}
+
+pub async fn prepare_for_asr(
+    app: &tauri::AppHandle,
+    video: &Path,
+    out_dir: &Path,
+    purpose: AudioPurpose,
+) -> AppResult<PreparedAudio> {
+    match purpose {
+        AudioPurpose::Whisper => prepare_whisper_audio(app, video, out_dir).await,
+        AudioPurpose::CloudAsr(provider) => {
+            prepare_cloud_audio(app, video, out_dir, provider).await
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+async fn prepare_whisper_audio(
+    _app: &tauri::AppHandle,
+    _video: &Path,
+    _out_dir: &Path,
+) -> AppResult<PreparedAudio> {
+    Err(AppError::Config(
+        "Android 暂不支持本地 Whisper，请在设置里选择火山或阿里云云端 ASR".into(),
+    ))
+}
+
+#[cfg(not(target_os = "android"))]
+async fn prepare_whisper_audio(
+    _app: &tauri::AppHandle,
+    video: &Path,
+    out_dir: &Path,
+) -> AppResult<PreparedAudio> {
+    let wav = extract_audio(video, out_dir).await?;
+    Ok(PreparedAudio::new(wav, "audio/wav", "wav"))
+}
+
+#[cfg(target_os = "android")]
+async fn prepare_cloud_audio(
+    app: &tauri::AppHandle,
+    video: &Path,
+    out_dir: &Path,
+    provider: CloudAsrProvider,
+) -> AppResult<PreparedAudio> {
+    let target = provider.android_export_format();
+    let exported = crate::mobile_files::export_audio_for_asr(
+        app.clone(),
+        video.to_string_lossy().to_string(),
+        out_dir.to_string_lossy().to_string(),
+        target.format.to_string(),
+    )
+    .await
+    .map_err(AppError::Pipeline)?;
+    Ok(PreparedAudio::new(
+        exported.path,
+        exported.mime,
+        exported.format,
+    ))
+}
+
+#[cfg(not(target_os = "android"))]
+async fn prepare_cloud_audio(
+    _app: &tauri::AppHandle,
+    video: &Path,
+    out_dir: &Path,
+    provider: CloudAsrProvider,
+) -> AppResult<PreparedAudio> {
+    let wav = extract_audio(video, out_dir).await?;
+    match provider {
+        CloudAsrProvider::Volcengine => Ok(PreparedAudio::new(wav, "audio/wav", "wav")),
+        CloudAsrProvider::Aliyun => {
+            let mp3 = wav_to_mp3(&wav).await?;
+            Ok(PreparedAudio::new(mp3, "audio/mpeg", "mp3"))
+        }
+    }
+}
+
 pub async fn extract_audio(video: &Path, out_dir: &Path) -> AppResult<PathBuf> {
     std::fs::create_dir_all(out_dir)?;
     let out = out_dir.join("audio.wav");
@@ -48,6 +177,33 @@ mod tests {
     use super::*;
     use std::process::Command as StdCommand;
     use tempfile::tempdir;
+
+    #[test]
+    fn prepared_audio_records_path_mime_and_provider_format() {
+        let audio = PreparedAudio::new("/tmp/course/audio.m4a", "audio/mp4", "m4a");
+
+        assert_eq!(audio.path, PathBuf::from("/tmp/course/audio.m4a"));
+        assert_eq!(audio.mime, "audio/mp4");
+        assert_eq!(audio.format, "m4a");
+    }
+
+    #[test]
+    fn android_cloud_export_target_matches_provider_format_support() {
+        assert_eq!(
+            CloudAsrProvider::Aliyun.android_export_format(),
+            AndroidExportFormat {
+                format: "m4a",
+                mime: "audio/mp4"
+            }
+        );
+        assert_eq!(
+            CloudAsrProvider::Volcengine.android_export_format(),
+            AndroidExportFormat {
+                format: "wav",
+                mime: "audio/wav"
+            }
+        );
+    }
 
     #[tokio::test]
     async fn extracts_wav_from_generated_video() {

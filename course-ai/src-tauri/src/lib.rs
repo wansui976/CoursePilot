@@ -6,6 +6,7 @@ pub mod export;
 pub mod jobs;
 pub mod llm;
 pub mod media_server;
+pub mod mobile_files;
 pub mod pipeline;
 pub mod sidecar;
 pub mod storage;
@@ -23,7 +24,6 @@ use crate::commands::export::{
 };
 use crate::commands::rag::{cmd_rag_query, cmd_search_transcript};
 use crate::commands::settings::{cmd_get_setting, cmd_set_secret, cmd_set_setting};
-use crate::dev_log::{cmd_clear_dev_logs, cmd_get_dev_logs};
 use crate::commands::slides::{
     cmd_capture_frame, cmd_extract_slides, cmd_get_screenshots, cmd_get_slides,
     cmd_read_slide_image,
@@ -36,6 +36,7 @@ use crate::commands::videos::{
 };
 use crate::commands::whisper::{cmd_download_whisper_model, cmd_list_whisper_models};
 use crate::db::Db;
+use crate::dev_log::{cmd_clear_dev_logs, cmd_get_dev_logs};
 use crate::jobs::cmd_list_jobs;
 use crate::pipeline::{
     cmd_cancel_processing, cmd_process_video, cmd_recorrect_transcript, ProcessingTasks,
@@ -48,6 +49,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(mobile_files::init())
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {

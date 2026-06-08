@@ -23,7 +23,8 @@ const MAX_POLLS: u32 = 600; // 3s × 600 ≈ 30 分钟上限
 pub const DEFAULT_MODEL: &str = "qwen3-asr-flash-filetrans";
 
 pub async fn run_aliyun(
-    audio_mp3: &Path,
+    audio: &Path,
+    mime: &str,
     api_key: &str,
     model: &str,
     language: Option<&str>,
@@ -42,8 +43,8 @@ pub async fn run_aliyun(
     // 仅 paraformer-v2 / fun-asr 支持 language_hints；其它模型（如 qwen3-asr）自动识别。
     let language_hint = language.filter(|_| supports_language_hints(model));
 
-    let bytes = tokio::fs::read(audio_mp3).await?;
-    let data_uri = format!("data:audio/mpeg;base64,{}", base64_encode(&bytes));
+    let bytes = tokio::fs::read(audio).await?;
+    let data_uri = audio_data_uri(mime, &bytes);
     let client = reqwest::Client::new();
 
     // ---- 1. 提交任务 ----
@@ -97,6 +98,10 @@ pub async fn run_aliyun(
     Err(AppError::Pipeline(
         "dashscope 录音文件识别轮询超时（超过 30 分钟仍未完成）".into(),
     ))
+}
+
+pub fn audio_data_uri(mime: &str, bytes: &[u8]) -> String {
+    format!("data:{mime};base64,{}", base64_encode(bytes))
 }
 
 /// 这些模型支持 language_hints 语言提示；其它模型自动识别语言。
@@ -232,6 +237,14 @@ mod tests {
         assert_eq!(body["model"], "fun-asr");
         assert_eq!(body["input"]["file_urls"][0], "data:audio/mpeg;base64,QUJD");
         assert!(body.get("parameters").is_none());
+    }
+
+    #[test]
+    fn audio_data_uri_keeps_supplied_mime() {
+        assert_eq!(
+            audio_data_uri("audio/mp4", b"ABC"),
+            "data:audio/mp4;base64,QUJD"
+        );
     }
 
     #[test]

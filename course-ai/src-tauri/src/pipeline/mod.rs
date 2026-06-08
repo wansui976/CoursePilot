@@ -60,7 +60,19 @@ fn asr_backend_or_default(value: Option<String>) -> AsrBackend {
     match value.as_deref().map(str::trim) {
         Some("volcengine") => AsrBackend::Volcengine,
         Some("aliyun") => AsrBackend::Aliyun,
-        _ => AsrBackend::Whisper,
+        _ => default_asr_backend(),
+    }
+}
+
+fn default_asr_backend() -> AsrBackend {
+    default_asr_backend_for_os(std::env::consts::OS)
+}
+
+fn default_asr_backend_for_os(os: &str) -> AsrBackend {
+    if os == "android" {
+        AsrBackend::Aliyun
+    } else {
+        AsrBackend::Whisper
     }
 }
 
@@ -109,6 +121,19 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
         );
     }
 
+    let backend = asr_backend_or_default(
+        sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key='asr_backend'")
+            .fetch_optional(&db.pool)
+            .await?,
+    );
+    let audio_purpose = match backend {
+        AsrBackend::Whisper => audio::AudioPurpose::Whisper,
+        AsrBackend::Volcengine => {
+            audio::AudioPurpose::CloudAsr(audio::CloudAsrProvider::Volcengine)
+        }
+        AsrBackend::Aliyun => audio::AudioPurpose::CloudAsr(audio::CloudAsrProvider::Aliyun),
+    };
+
     let audio_job = jobs_list
         .iter()
         .find(|job| job.stage == "audio")
@@ -128,8 +153,15 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
     );
 
     let data_dir = std::path::PathBuf::from(&video.data_dir);
-    match audio::extract_audio(std::path::Path::new(&video.file_path), &data_dir).await {
-        Ok(_) => {
+    let prepared_audio = match audio::prepare_for_asr(
+        &app,
+        std::path::Path::new(&video.file_path),
+        &data_dir,
+        audio_purpose,
+    )
+    .await
+    {
+        Ok(audio) => {
             jobs::finish(&db, &audio_job.id).await?;
             emit_update(
                 &app,
@@ -142,6 +174,7 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
                     message: None,
                 },
             );
+            audio
         }
         Err(error) => {
             mark_failed(&db, &video_id).await?;
@@ -159,7 +192,7 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
             );
             return Err(error);
         }
-    }
+    };
 
     let asr_job = jobs_list
         .iter()
@@ -169,12 +202,7 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
     jobs::start(&db, &asr_job.id).await?;
     emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.05, "准备识别引擎").await?;
 
-    let audio_path = data_dir.join("audio.wav");
-    let backend = asr_backend_or_default(
-        sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key='asr_backend'")
-            .fetch_optional(&db.pool)
-            .await?,
-    );
+    let audio_path = prepared_audio.path.clone();
 
     let asr_result = match backend {
         AsrBackend::Whisper => {
@@ -273,13 +301,12 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
             .await?
             .map(|raw| split_terms(&raw))
             .unwrap_or_default();
-            let course_name = sqlx::query_scalar::<_, String>(
-                "SELECT name FROM courses WHERE id=?",
-            )
-            .bind(&video.course_id)
-            .fetch_optional(&db.pool)
-            .await?
-            .unwrap_or_default();
+            let course_name =
+                sqlx::query_scalar::<_, String>("SELECT name FROM courses WHERE id=?")
+                    .bind(&video.course_id)
+                    .fetch_optional(&db.pool)
+                    .await?
+                    .unwrap_or_default();
             let custom_context = sqlx::query_scalar::<_, String>(
                 "SELECT value FROM settings WHERE key='volcengine_asr_context'",
             )
@@ -340,30 +367,24 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
                 .as_deref()
                 .map(str::trim)
                 .filter(|l| !l.is_empty() && *l != "auto");
+            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.16, "准备上传音频").await?;
             emit_running_progress(
                 &app,
                 &db,
                 &video_id,
                 &asr_job.id,
-                0.16,
-                "压缩音频，准备上传",
+                0.28,
+                &format!("云端识别中（阿里云 {model}）"),
             )
             .await?;
-            match audio::wav_to_mp3(&audio_path).await {
-                Ok(mp3) => {
-                    emit_running_progress(
-                        &app,
-                        &db,
-                        &video_id,
-                        &asr_job.id,
-                        0.28,
-                        &format!("云端识别中（阿里云 {model}）"),
-                    )
-                    .await?;
-                    aliyun_asr::run_aliyun(&mp3, &api_key, &model, language).await
-                }
-                Err(e) => Err(e),
-            }
+            aliyun_asr::run_aliyun(
+                &audio_path,
+                &prepared_audio.mime,
+                &api_key,
+                &model,
+                language,
+            )
+            .await
         }
     };
 
@@ -371,32 +392,34 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
         Ok(json) => {
             emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.92, "解析识别结果").await?;
             asr::store_raw_transcript_backup(&db, &video_id, &json).await?;
-            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.95, "写入原始文稿")
-                .await?;
+            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.95, "写入原始文稿").await?;
             let count = asr::store_transcripts(&db, &video_id, &json).await?;
-            let final_message = match crate::commands::ai::first_available_provider_for_db(&db)
-                .await?
-            {
-                Some((provider, model)) => {
-                    emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.98, "正在 AI 纠正文稿")
+            let final_message =
+                match crate::commands::ai::first_available_provider_for_db(&db).await? {
+                    Some((provider, model)) => {
+                        emit_running_progress(
+                            &app,
+                            &db,
+                            &video_id,
+                            &asr_job.id,
+                            0.98,
+                            "正在 AI 纠正文稿",
+                        )
                         .await?;
-                    match transcript_correction::autocorrect_transcript(
-                        &db,
-                        &provider,
-                        &model,
-                        &video_id,
-                    )
-                    .await
-                    {
-                        Ok(()) => asr_done_message(count, TranscriptCorrectionOutcome::Applied),
-                        Err(error) => {
-                            eprintln!("transcript correction skipped after failure: {error}");
-                            asr_done_message(count, TranscriptCorrectionOutcome::Failed)
+                        match transcript_correction::autocorrect_transcript(
+                            &db, &provider, &model, &video_id,
+                        )
+                        .await
+                        {
+                            Ok(()) => asr_done_message(count, TranscriptCorrectionOutcome::Applied),
+                            Err(error) => {
+                                eprintln!("transcript correction skipped after failure: {error}");
+                                asr_done_message(count, TranscriptCorrectionOutcome::Failed)
+                            }
                         }
                     }
-                }
-                None => asr_done_message(count, TranscriptCorrectionOutcome::NoProvider),
-            };
+                    None => asr_done_message(count, TranscriptCorrectionOutcome::NoProvider),
+                };
             jobs::update_progress(&db, &asr_job.id, 1.0, Some(&final_message)).await?;
             jobs::finish(&db, &asr_job.id).await?;
             emit_update(
@@ -459,7 +482,15 @@ async fn run_ai_followups(
             continue;
         };
         let _ = jobs::start(db, &job.id).await;
-        emit_stage(app, video_id, &job.id, stage, "running", 0.1, Some("生成中"));
+        emit_stage(
+            app,
+            video_id,
+            &job.id,
+            stage,
+            "running",
+            0.1,
+            Some("生成中"),
+        );
 
         let (provider, model) = match crate::commands::ai::provider_for_db(db, task).await {
             Ok(Some(p)) => p,
@@ -579,7 +610,9 @@ async fn mark_failed(db: &crate::db::Db, video_id: &str) -> AppResult<()> {
 
 /// 正在运行的流水线任务句柄，按 video_id 索引，用于取消。
 #[derive(Default)]
-pub struct ProcessingTasks(pub std::sync::Mutex<std::collections::HashMap<String, tauri::async_runtime::JoinHandle<()>>>);
+pub struct ProcessingTasks(
+    pub std::sync::Mutex<std::collections::HashMap<String, tauri::async_runtime::JoinHandle<()>>>,
+);
 
 #[tauri::command]
 pub async fn cmd_process_video(app: AppHandle, video_id: String) -> AppResult<()> {
@@ -633,7 +666,15 @@ pub async fn cmd_cancel_processing(app: AppHandle, video_id: String) -> AppResul
     for job in jobs::list_for_video(&db, &video_id).await? {
         if job.status == "running" || job.status == "pending" {
             jobs::cancel(&db, &job.id, "已取消").await?;
-            emit_stage(&app, &video_id, &job.id, &job.stage, "canceled", job.progress, Some("已取消"));
+            emit_stage(
+                &app,
+                &video_id,
+                &job.id,
+                &job.stage,
+                "canceled",
+                job.progress,
+                Some("已取消"),
+            );
         }
     }
     sqlx::query(
@@ -766,6 +807,12 @@ mod tests {
             asr_backend_or_default(Some("unknown".into())),
             AsrBackend::Whisper
         );
+    }
+
+    #[test]
+    fn android_asr_backend_defaults_to_aliyun() {
+        assert_eq!(default_asr_backend_for_os("android"), AsrBackend::Aliyun);
+        assert_eq!(default_asr_backend_for_os("macos"), AsrBackend::Whisper);
     }
 
     #[test]

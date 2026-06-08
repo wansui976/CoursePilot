@@ -1,0 +1,21 @@
+{
+  "build": {
+    "devUrl": "http://10.0.2.2:1420"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "course-ai",
+        "width": 1080,
+        "height": 1920,
+        "resizable": true
+      }
+    ]
+  },
+  "bundle": {
+    "android": {
+      "minSdkVersion": 24,
+      "debugApplicationIdSuffix": ".debug"
+    }
+  }
+}
