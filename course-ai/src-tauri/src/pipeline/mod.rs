@@ -45,6 +45,17 @@ fn asr_done_message(count: usize, outcome: TranscriptCorrectionOutcome) -> Strin
     }
 }
 
+/// 把用户填的热词（按行，或中英文逗号、顿号分隔）切成去空、去重的词表。
+fn split_terms(raw: &str) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    raw.split(|c: char| matches!(c, '\n' | '\r' | ',' | '，' | '、'))
+        .map(str::trim)
+        .filter(|term| !term.is_empty())
+        .filter(|term| seen.insert(term.to_string()))
+        .map(str::to_string)
+        .collect()
+}
+
 fn asr_backend_or_default(value: Option<String>) -> AsrBackend {
     match value.as_deref().map(str::trim) {
         Some("volcengine") => AsrBackend::Volcengine,
@@ -252,6 +263,44 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
             .await?
             .and_then(|value| value.trim().parse::<usize>().ok())
             .unwrap_or(volcengine_auc::DEFAULT_CONCURRENCY);
+
+            // 热词 + 上下文：默认把「标题 / 课程名」放进上下文，再追加用户在设置里填的
+            // 自定义上下文与热词，拼成 request.context 一起下发，帮助模型转录更准。
+            let hotwords: Vec<String> = sqlx::query_scalar::<_, String>(
+                "SELECT value FROM settings WHERE key='volcengine_asr_hotwords'",
+            )
+            .fetch_optional(&db.pool)
+            .await?
+            .map(|raw| split_terms(&raw))
+            .unwrap_or_default();
+            let course_name = sqlx::query_scalar::<_, String>(
+                "SELECT name FROM courses WHERE id=?",
+            )
+            .bind(&video.course_id)
+            .fetch_optional(&db.pool)
+            .await?
+            .unwrap_or_default();
+            let custom_context = sqlx::query_scalar::<_, String>(
+                "SELECT value FROM settings WHERE key='volcengine_asr_context'",
+            )
+            .fetch_optional(&db.pool)
+            .await?
+            .unwrap_or_default();
+            let mut context_lines: Vec<String> = Vec::new();
+            if !video.title.trim().is_empty() {
+                context_lines.push(format!("标题：{}", video.title.trim()));
+            }
+            if !course_name.trim().is_empty() {
+                context_lines.push(format!("课程：{}", course_name.trim()));
+            }
+            context_lines.extend(
+                custom_context
+                    .lines()
+                    .map(|line| line.trim().to_string())
+                    .filter(|line| !line.is_empty()),
+            );
+            let context = volcengine_auc::build_context_json(&hotwords, &context_lines);
+
             emit_running_progress(
                 &app,
                 &db,
@@ -267,6 +316,7 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
                 &access_token,
                 chunk_secs,
                 concurrency,
+                context,
             )
             .await
         }

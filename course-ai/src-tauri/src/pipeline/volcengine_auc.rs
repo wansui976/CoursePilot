@@ -37,11 +37,12 @@ pub async fn run_volcengine_file(
     audio: &Path,
     app_id: &str,
     access_token: &str,
+    context: Option<&str>,
 ) -> AppResult<WhisperJson> {
     let (app_id, access_token) = check_credentials(app_id, access_token)?;
     let audio_bytes = tokio::fs::read(audio).await?;
     let client = reqwest::Client::new();
-    recognize_bytes_with_retry(&client, &app_id, &access_token, &audio_bytes).await
+    recognize_bytes_with_retry(&client, &app_id, &access_token, &audio_bytes, context).await
 }
 
 /// 分段并行识别：把长音频按固定时长切成多段 MP3，分别提交、并行轮询，再按各段
@@ -53,6 +54,7 @@ pub async fn run_volcengine_file_chunked(
     access_token: &str,
     chunk_secs: u64,
     concurrency: usize,
+    context: Option<String>,
 ) -> AppResult<WhisperJson> {
     let (app_id, access_token) = check_credentials(app_id, access_token)?;
     let chunk_secs = if chunk_secs == 0 {
@@ -85,7 +87,9 @@ pub async fn run_volcengine_file_chunked(
         };
         let client = reqwest::Client::new();
         let bytes = tokio::fs::read(&single).await?;
-        let out = recognize_bytes_with_retry(&client, &app_id, &access_token, &bytes).await;
+        let out =
+            recognize_bytes_with_retry(&client, &app_id, &access_token, &bytes, context.as_deref())
+                .await;
         let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
         return out;
     }
@@ -96,10 +100,17 @@ pub async fn run_volcengine_file_chunked(
             let client = client.clone();
             let app_id = app_id.clone();
             let access_token = access_token.clone();
+            let context = context.clone();
             async move {
                 let bytes = tokio::fs::read(&path).await?;
-                let json =
-                    recognize_bytes_with_retry(&client, &app_id, &access_token, &bytes).await?;
+                let json = recognize_bytes_with_retry(
+                    &client,
+                    &app_id,
+                    &access_token,
+                    &bytes,
+                    context.as_deref(),
+                )
+                .await?;
                 Ok((idx, json))
             }
         }),
@@ -135,11 +146,12 @@ async fn recognize_bytes(
     app_id: &str,
     access_token: &str,
     audio_bytes: &[u8],
+    context: Option<&str>,
 ) -> AppResult<WhisperJson> {
     let request_id = Uuid::new_v4().to_string();
 
     // ---- 1. 提交任务 ----
-    let body = build_submit_body(&request_id, &base64_encode(audio_bytes));
+    let body = build_submit_body(&request_id, &base64_encode(audio_bytes), context);
     let resp = client
         .post(SUBMIT_URL)
         .header("X-Api-App-Key", app_id)
@@ -204,10 +216,11 @@ async fn recognize_bytes_with_retry(
     app_id: &str,
     access_token: &str,
     audio_bytes: &[u8],
+    context: Option<&str>,
 ) -> AppResult<WhisperJson> {
     let mut attempt = 0u32;
     loop {
-        match recognize_bytes(client, app_id, access_token, audio_bytes).await {
+        match recognize_bytes(client, app_id, access_token, audio_bytes, context).await {
             Ok(value) => return Ok(value),
             Err(error) => {
                 if attempt >= MAX_RETRIES {
@@ -293,21 +306,62 @@ fn merge_chunk_transcripts(mut parts: Vec<(usize, WhisperJson)>, chunk_ms: i64) 
     }
 }
 
-pub fn build_submit_body(request_id: &str, audio_base64: &str) -> Value {
+pub fn build_submit_body(request_id: &str, audio_base64: &str, context: Option<&str>) -> Value {
+    let mut request = json!({
+        "model_name": "bigmodel",
+        "enable_itn": true,
+        "enable_punc": true,
+        "enable_ddc": true,
+        "show_utterances": true,
+    });
+    // 热词 + 上下文：作为 request.context 字符串透传（见 build_context_json）。
+    if let Some(ctx) = context.filter(|c| !c.is_empty()) {
+        request["context"] = Value::String(ctx.to_string());
+    }
     json!({
         "user": { "uid": request_id },
         "audio": {
             "data": audio_base64,
             "format": "mp3",
         },
-        "request": {
-            "model_name": "bigmodel",
-            "enable_itn": true,
-            "enable_punc": true,
-            "enable_ddc": true,
-            "show_utterances": true,
-        },
+        "request": request,
     })
+}
+
+/// 把热词与上下文行拼成火山 `context` 字段所需的 JSON 字符串：
+/// - 有热词 → `"hotwords":[{"word":..}]`（热词直传，最多 5000 词）；
+/// - 有上下文 → `"context_type":"dialog_ctx","context_data":[{"text":..}]`；
+/// 两者都有就合并进同一个对象；都为空则返回 None（此时不下发 context）。
+/// 空白项会被过滤；上下文 800 tokens / 20 轮的上限由服务端按新到旧截断，这里不强截。
+pub fn build_context_json(hotwords: &[String], context_lines: &[String]) -> Option<String> {
+    let hotwords: Vec<&str> = hotwords
+        .iter()
+        .map(|w| w.trim())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let context_lines: Vec<&str> = context_lines
+        .iter()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect();
+    if hotwords.is_empty() && context_lines.is_empty() {
+        return None;
+    }
+    let mut obj = serde_json::Map::new();
+    if !hotwords.is_empty() {
+        obj.insert(
+            "hotwords".into(),
+            Value::Array(hotwords.iter().map(|w| json!({ "word": w })).collect()),
+        );
+    }
+    if !context_lines.is_empty() {
+        obj.insert("context_type".into(), Value::String("dialog_ctx".into()));
+        obj.insert(
+            "context_data".into(),
+            Value::Array(context_lines.iter().map(|l| json!({ "text": l })).collect()),
+        );
+    }
+    serde_json::to_string(&Value::Object(obj)).ok()
 }
 
 fn submit_error(
@@ -377,13 +431,52 @@ mod tests {
 
     #[test]
     fn submit_body_uses_auc_bigmodel_defaults() {
-        let body = build_submit_body("req-1", "QUJD");
+        let body = build_submit_body("req-1", "QUJD", None);
         assert_eq!(body["audio"]["data"], "QUJD");
         // 整段上传走压缩后的 MP3，避免长视频 WAV base64 触发 413。
         assert_eq!(body["audio"]["format"], "mp3");
         assert_eq!(body["request"]["model_name"], "bigmodel");
         assert_eq!(body["request"]["show_utterances"], true);
         assert_eq!(body["user"]["uid"], "req-1");
+        // 没传 context 时 request 里不应出现该字段。
+        assert!(body["request"].get("context").is_none());
+    }
+
+    #[test]
+    fn submit_body_embeds_context_string_in_request() {
+        let body = build_submit_body("req-1", "QUJD", Some("{\"hotwords\":[]}"));
+        assert_eq!(body["request"]["context"], "{\"hotwords\":[]}");
+        // 空串视为不带 context。
+        let empty = build_submit_body("req-1", "QUJD", Some(""));
+        assert!(empty["request"].get("context").is_none());
+    }
+
+    #[test]
+    fn build_context_json_combines_hotwords_and_dialog() {
+        let json =
+            build_context_json(&["焓变".into(), "  ".into()], &["标题：概括题".into()]).unwrap();
+        let value: Value = serde_json::from_str(&json).unwrap();
+        // 空白热词被过滤，只剩一个。
+        assert_eq!(value["hotwords"].as_array().unwrap().len(), 1);
+        assert_eq!(value["hotwords"][0]["word"], "焓变");
+        assert_eq!(value["context_type"], "dialog_ctx");
+        assert_eq!(value["context_data"][0]["text"], "标题：概括题");
+    }
+
+    #[test]
+    fn build_context_json_only_one_side_or_none() {
+        // 只有热词。
+        let hw = build_context_json(&["勒沙特列".into()], &[]).unwrap();
+        let v: Value = serde_json::from_str(&hw).unwrap();
+        assert!(v.get("hotwords").is_some());
+        assert!(v.get("context_type").is_none());
+        // 只有上下文。
+        let ctx = build_context_json(&[], &["课程：申论".into()]).unwrap();
+        let v: Value = serde_json::from_str(&ctx).unwrap();
+        assert!(v.get("hotwords").is_none());
+        assert_eq!(v["context_type"], "dialog_ctx");
+        // 都为空（含纯空白）→ None。
+        assert!(build_context_json(&["   ".into()], &["".into()]).is_none());
     }
 
     #[test]
