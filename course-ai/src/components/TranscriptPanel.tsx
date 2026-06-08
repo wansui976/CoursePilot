@@ -71,6 +71,9 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
       <div ref={listRef} className="flex-1 space-y-1 overflow-y-auto p-3">
         {segments.map((segment, index) => {
           const isEditing = editingId === segment.id;
+          // 被纠错清空的分段（整段语气词，如「哎。」）不显示空行；仍保留在库里
+          // 以维持「重新纠错」所需的行数对齐。正在编辑的行不隐藏。
+          if (!isEditing && !segment.text.trim()) return null;
           if (isEditing) {
             return (
               <div
