@@ -5,11 +5,15 @@
 //! 这里检测 moov 是否在 mdat 之前；若不是，用 ffmpeg 仅转封装（不重编码）生成一个
 //! faststart 的 playable.mp4 给播放器用。
 
-use crate::error::{AppError, AppResult};
+#[cfg(not(target_os = "android"))]
+use crate::error::AppError;
+use crate::error::AppResult;
+#[cfg(not(target_os = "android"))]
 use crate::sidecar::{resolve, FFMPEG};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+#[cfg(not(target_os = "android"))]
 use tokio::process::Command;
 
 /// 扫描 MP4 顶层 box，判断 `moov` 是否排在 `mdat` 之前（即已 faststart）。
@@ -51,6 +55,15 @@ pub fn is_faststart(path: &Path) -> AppResult<bool> {
 /// 返回一个可在 WebView 中正常播放的路径：
 /// 原文件已 faststart → 原样返回；否则生成（并缓存）data_dir/playable.mp4。
 /// 转封装失败时退回原文件（至少画面能放）。
+#[cfg(target_os = "android")]
+pub async fn ensure_playable(original: &Path, _data_dir: &Path) -> AppResult<PathBuf> {
+    Ok(original.to_path_buf())
+}
+
+/// 返回一个可在 WebView 中正常播放的路径：
+/// 原文件已 faststart → 原样返回；否则生成（并缓存）data_dir/playable.mp4。
+/// 转封装失败时退回原文件（至少画面能放）。
+#[cfg(not(target_os = "android"))]
 pub async fn ensure_playable(original: &Path, data_dir: &Path) -> AppResult<PathBuf> {
     if is_faststart(original).unwrap_or(true) {
         return Ok(original.to_path_buf());
