@@ -128,6 +128,9 @@ export function SettingsPanel({
   const [volcengineAppId, setVolcengineAppId] = useState("");
   const [volcengineToken, setVolcengineToken] = useState("");
   const [volcengineSaved, setVolcengineSaved] = useState("");
+  const [volcengineHotwords, setVolcengineHotwords] = useState("");
+  const [volcengineContext, setVolcengineContext] = useState("");
+  const [volcengineCtxSaved, setVolcengineCtxSaved] = useState("");
   const [dashscopeKey, setDashscopeKey] = useState("");
   const [dashscopeSaved, setDashscopeSaved] = useState("");
   const [aliyunModel, setAliyunModel] = useState("qwen3-asr-flash-filetrans");
@@ -157,6 +160,12 @@ export function SettingsPanel({
     void ipc.settings
       .get("volcengine_asr_app_id")
       .then((value) => setVolcengineAppId(value ?? ""));
+    void ipc.settings
+      .get("volcengine_asr_hotwords")
+      .then((value) => setVolcengineHotwords(value ?? ""));
+    void ipc.settings
+      .get("volcengine_asr_context")
+      .then((value) => setVolcengineContext(value ?? ""));
     void ipc.settings
       .get("aliyun_asr_model")
       .then((value) => setAliyunModel(value ?? "qwen3-asr-flash-filetrans"));
@@ -211,6 +220,13 @@ export function SettingsPanel({
     setVolcengineToken("");
     setVolcengineSaved("已保存");
     setTimeout(() => setVolcengineSaved(""), 1500);
+  }
+
+  async function saveVolcengineContext() {
+    await ipc.settings.set("volcengine_asr_hotwords", volcengineHotwords.trim());
+    await ipc.settings.set("volcengine_asr_context", volcengineContext.trim());
+    setVolcengineCtxSaved("已保存");
+    setTimeout(() => setVolcengineCtxSaved(""), 1500);
   }
 
   async function changeAliyunModel(value: string) {
@@ -401,6 +417,38 @@ export function SettingsPanel({
                     保存火山 ASR 凭证
                   </Button>
                   <SavedBadge text={volcengineSaved} />
+                </div>
+                <Field
+                  label="热词"
+                  htmlFor="volcengine-asr-hotwords"
+                  hint="一行一个（也可用逗号/顿号分隔），最多 5000 词；专有名词、人名、术语"
+                >
+                  <textarea
+                    id="volcengine-asr-hotwords"
+                    className={`${FIELD} min-h-[72px] resize-y`}
+                    value={volcengineHotwords}
+                    placeholder={"勒沙特列原理\n焓变\n范德华力"}
+                    onChange={(event) => setVolcengineHotwords(event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label="上下文"
+                  htmlFor="volcengine-asr-context"
+                  hint="视频标题、课程名会自动加入；此处可补充口音/领域/场景等（约 800 tokens 上限，一行一条）"
+                >
+                  <textarea
+                    id="volcengine-asr-context"
+                    className={`${FIELD} min-h-[72px] resize-y`}
+                    value={volcengineContext}
+                    placeholder={"本片为高中化学反应原理课\n讲师有四川口音"}
+                    onChange={(event) => setVolcengineContext(event.target.value)}
+                  />
+                </Field>
+                <div className="flex items-center gap-3">
+                  <Button size="sm" variant="outline" onClick={saveVolcengineContext}>
+                    保存热词与上下文
+                  </Button>
+                  <SavedBadge text={volcengineCtxSaved} />
                 </div>
               </>
             )}
