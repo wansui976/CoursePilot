@@ -35,13 +35,13 @@ export function TabsPanel({ videoId }: { videoId: string }) {
       onValueChange={(value) => setActiveTab(value as Tab)}
       className="flex h-full flex-col bg-[var(--surface-panel)] text-[var(--text-normal)]"
     >
-      <TabsList className="flex h-14 items-end justify-around border-b border-[var(--border-subtle)] bg-[var(--surface-panel)] px-4">
+      <TabsList className="flex h-12 items-end justify-around border-b border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2.5 sm:h-14 sm:px-4">
         {TABS.map((tab) => (
           <TabsTrigger
             key={tab}
             value={tab}
             onClick={() => setActiveTab(tab)}
-            className="border-b-[3px] border-transparent px-1 pb-3 text-base font-semibold text-[var(--text-muted)] data-[state=active]:border-primary data-[state=active]:text-[var(--text-strong)]"
+            className="border-b-[3px] border-transparent px-1 pb-3 text-sm font-semibold text-[var(--text-muted)] data-[state=active]:border-primary data-[state=active]:text-[var(--text-strong)] sm:text-base"
           >
             {tab}
           </TabsTrigger>

@@ -1,19 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Book,
   Check,
   ChevronLeft,
   Film,
   LayoutGrid,
   List,
-  MoreHorizontal,
+  Menu,
   Moon,
+  MoreHorizontal,
   Play,
   Settings,
-  Sparkles,
   Sun,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { CourseSidebar } from "@/components/CourseSidebar";
 import { RecycleBin } from "@/components/RecycleBin";
@@ -23,26 +24,19 @@ import { SettingsPanel } from "@/components/SettingsDialog";
 import { TabsPanel } from "@/components/TabsPanel";
 import { VideoCover } from "@/components/VideoCover";
 import { VideoPlayer } from "@/components/VideoPlayer";
+import { useDeviceLayout } from "@/lib/deviceLayout";
 import { ipc } from "@/lib/ipc";
 import type { Video } from "@/lib/types";
 import { formatMs } from "@/lib/time";
+import { readPlaybackProgress } from "@/lib/playback";
 import { usePlayer } from "@/stores/player";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 
 const statusMeta = {
-  pending: {
-    label: "待处理",
-    className: "text-[var(--text-muted)] bg-[var(--border-faint)]",
-  },
-  processing: {
-    label: "处理中",
-    className: "text-[var(--status-warn)] bg-[var(--status-warn-bg)]",
-  },
-  done: {
-    label: "已处理",
-    className: "text-[var(--status-ok)] bg-[var(--status-ok-bg)]",
-  },
-  failed: { label: "处理失败", className: "text-red-600 bg-red-50" },
+  pending: { label: "待处理" },
+  processing: { label: "处理中" },
+  done: { label: "已处理" },
+  failed: { label: "处理失败" },
 } as const;
 
 type ThemeMode = "dark" | "light";
@@ -81,6 +75,7 @@ export function Home() {
   const [showDevConsole, setShowDevConsole] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(readInitialTheme);
   const [view, setView] = useState<LibraryView>(readInitialView);
+  const [libraryDrawerOpen, setLibraryDrawerOpen] = useState(false);
   const [openMenuVideoId, setOpenMenuVideoId] = useState<string | null>(null);
   const [renamingVideo, setRenamingVideo] = useState<{
     id: string;
@@ -95,8 +90,14 @@ export function Home() {
   const jobsByVideo = useJobs((s) => s.byVideo);
   const resetJobs = useJobs((s) => s.resetVideo);
   const generatedAfterAsr = useRef<Set<string>>(new Set());
+  const deviceLayout = useDeviceLayout();
   const isLightTheme = theme === "light";
   const themeToggleLabel = isLightTheme ? "切换到夜晚模式" : "切换到白天模式";
+  const isPhoneDevice = deviceLayout === "phone";
+  const isWorkbenchWide =
+    deviceLayout === "desktop" ||
+    deviceLayout === "laptop" ||
+    deviceLayout === "tablet-landscape";
 
   const toggleTheme = () => {
     setTheme((current) => {
@@ -141,24 +142,21 @@ export function Home() {
     setVideo(selectedVideoId);
   }, [selectedVideoId, setVideo]);
 
-  // ASR 完成后：章节、笔记由后端流水线作为可见任务自动续跑（见 pipeline::run_ai_followups），
-  // 这里只补做不在后端任务队列里的「摘要 + 课件抽取」，并在后端章节/笔记任务完成时刷新面板。
+  // ASR 完成后：章节、摘要、笔记、出题、脑图全部由后端流水线作为可见任务自动续跑
+  // （见 pipeline::run_ai_followups），用户无需手动点「生成」。这里只补做不在后端任务
+  // 队列里的「课件抽取」，并在各 AI 任务完成时刷新对应面板。
   useEffect(() => {
     queuedVideoIds.forEach((videoId) => {
       const jobs = jobsByVideo[videoId];
       if (!jobs) return;
       if (jobs.asr?.status === "done" && !generatedAfterAsr.current.has(videoId)) {
         generatedAfterAsr.current.add(videoId);
-        void Promise.allSettled([
-          ipc.ai.generate(videoId, "summary"),
-          ipc.slides.extract(videoId),
-        ]).then(() => {
-          queryClient.invalidateQueries({ queryKey: ["summary", videoId] });
+        void ipc.slides.extract(videoId).finally(() => {
           queryClient.invalidateQueries({ queryKey: ["slides", videoId] });
         });
       }
-      // 后端章节/笔记任务完成 → 刷新对应面板（各刷一次）。
-      for (const stage of ["chapters", "notes"] as const) {
+      // 后端各 AI 任务完成 → 刷新对应面板（各刷一次）。
+      for (const stage of ["chapters", "summary", "notes", "quiz", "mindmap"] as const) {
         const key = `${videoId}:${stage}`;
         if (jobs[stage]?.status === "done" && !generatedAfterAsr.current.has(key)) {
           generatedAfterAsr.current.add(key);
@@ -280,6 +278,41 @@ export function Home() {
   function openQueuedVideo(videoId: string) {
     setQueueOpen(false);
     setSelectedVideoId(videoId);
+  }
+
+  function openLibraryDrawer() {
+    setLibraryDrawerOpen(true);
+  }
+
+  function closeLibraryDrawer() {
+    setLibraryDrawerOpen(false);
+  }
+
+  function selectCourse(id: string) {
+    setSelectedCourseId(id);
+    setSelectedVideoId(null);
+    setQueueOpen(false);
+    setShowSettings(false);
+    setShowRecycleBin(false);
+    setShowDevConsole(false);
+    closeLibraryDrawer();
+  }
+
+  function toggleQueue() {
+    setSelectedVideoId(null);
+    setShowSettings(false);
+    setShowRecycleBin(false);
+    setShowDevConsole(false);
+    setQueueOpen((open) => !open);
+    closeLibraryDrawer();
+  }
+
+  function returnToLibrary() {
+    setSelectedVideoId(null);
+    setQueueOpen(false);
+    setShowSettings(false);
+    setShowRecycleBin(false);
+    setShowDevConsole(false);
   }
 
   function renderProcessingQueuePage() {
@@ -489,46 +522,58 @@ export function Home() {
   }
 
   function statusBadge(video: Video) {
+    const status = video.processed_status;
     return (
       <span
         data-testid="video-status-badge"
-        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-          statusMeta[video.processed_status].className
-        }`}
+        className={`ca-chip ${status}`}
       >
-        {statusMeta[video.processed_status].label}
+        <span className="dot" />
+        {statusMeta[status].label}
       </span>
     );
   }
 
   function renderVideoGridCard(video: Video) {
+    const progress = readPlaybackProgress(video.id);
+    const durationMs =
+      video.duration_ms ??
+      (progress.durationSec ? Math.round(progress.durationSec * 1000) : null);
     return (
       <article
         key={video.id}
-        className="group relative min-w-0 overflow-hidden rounded-xl border border-[var(--border-faint)] bg-[var(--surface-card)] text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[var(--border-subtle)] hover:bg-[var(--surface-card-hover)] hover:shadow-[var(--shadow-pop)]"
+        className="ca-card group relative"
       >
         <button
           className="block w-full text-left"
           aria-label={`打开视频：${video.title}`}
           onClick={() => setSelectedVideoId(video.id)}
         >
-          <span className="relative flex aspect-video items-center justify-center overflow-hidden bg-[var(--surface-stage)] text-white">
+          <span className="ca-thumb">
             <VideoCover
               videoId={video.id}
               className="absolute inset-0 h-full w-full"
             />
-            <span className="relative flex h-12 w-12 items-center justify-center rounded-full bg-black/35 text-white shadow-lg backdrop-blur-sm transition group-hover:bg-black/60">
+            <span className="play">
               <Play className="h-5 w-5 fill-current" />
             </span>
+            <span className="dur">
+              {durationMs ? formatMs(durationMs) : "00:00"}
+            </span>
+            {progress.ratio > 0 && progress.ratio < 0.995 && (
+              <span
+                className="ov-bar"
+                aria-label={`已观看 ${Math.round(progress.ratio * 100)}%`}
+              >
+                <i style={{ width: `${progress.ratio * 100}%` }} />
+              </span>
+            )}
           </span>
-          <span className="block space-y-2.5 p-4">
-            <span className="block truncate text-[15px] font-semibold text-[var(--text-strong)]">
+          <span className="ca-card-body">
+            <span className="ca-card-title">
               {video.title}
             </span>
-            <span className="flex items-center justify-between gap-2">
-              <span className="text-xs text-[var(--text-muted)]">
-                {video.duration_ms ? formatMs(video.duration_ms) : "00:00"}
-              </span>
+            <span className="ca-card-foot">
               {statusBadge(video)}
             </span>
           </span>
@@ -541,36 +586,46 @@ export function Home() {
   }
 
   function renderVideoListRow(video: Video) {
+    const progress = readPlaybackProgress(video.id);
+    const durationMs =
+      video.duration_ms ??
+      (progress.durationSec ? Math.round(progress.durationSec * 1000) : null);
+    const durationText = durationMs ? formatMs(durationMs) : "00:00";
     return (
       <article
         key={video.id}
-        className="group relative overflow-hidden rounded-xl border border-[var(--border-faint)] bg-[var(--surface-card)] transition hover:border-[var(--border-subtle)] hover:bg-[var(--surface-card-hover)]"
+        className="ca-row group relative"
       >
         <button
-          className="flex w-full items-center gap-3 p-2.5 pr-12 text-left"
+          className="row-button"
           aria-label={`打开视频：${video.title}`}
           onClick={() => setSelectedVideoId(video.id)}
         >
-          <span className="relative flex aspect-video w-36 flex-none items-center justify-center overflow-hidden rounded-lg bg-[var(--surface-stage)] text-white">
-            <VideoCover
-              videoId={video.id}
-              className="absolute inset-0 h-full w-full"
-            />
-            <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur-sm transition group-hover:bg-black/60">
-              <Play className="h-4 w-4 fill-current" />
-            </span>
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold text-[var(--text-strong)]">
-              {video.title}
-            </span>
-            <span className="mt-1.5 flex items-center gap-2">
-              <span className="text-xs text-[var(--text-muted)]">
-                {video.duration_ms ? formatMs(video.duration_ms) : "00:00"}
+          <span className="row-main">
+            <span className="row-thumb">
+              <VideoCover
+                videoId={video.id}
+                className="absolute inset-0 h-full w-full"
+              />
+              <span className="play">
+                <Play className="h-4 w-4 fill-current" />
               </span>
-              {statusBadge(video)}
+              {progress.ratio > 0 && progress.ratio < 0.995 && (
+                <span
+                  className="ov-bar"
+                  aria-label={`已观看 ${Math.round(progress.ratio * 100)}%`}
+                >
+                  <i style={{ width: `${progress.ratio * 100}%` }} />
+                </span>
+              )}
+            </span>
+            <span className="row-name">
+              <span className="t">{video.title}</span>
+              <span className="s">{durationText}</span>
             </span>
           </span>
+          <span className="c-dur">{durationText}</span>
+          <span className="c-status">{statusBadge(video)}</span>
         </button>
         {videoOptionsButton(video)}
         {videoMenu(video)}
@@ -579,209 +634,262 @@ export function Home() {
     );
   }
 
+  function renderCourseVideoLibrary() {
+    return (
+      <div className="ca-main-col">
+        <header className="ca-topbar">
+          <div className="tb-lead">
+            {isPhoneDevice && (
+              <button
+                type="button"
+                className="hamb"
+                onClick={openLibraryDrawer}
+                title="打开课程库"
+                aria-label="打开课程库"
+              >
+                <Menu className="h-5 w-5" />
+              </button>
+            )}
+            <div className="tb-titles">
+              <h1>课程视频</h1>
+              <div className="sub">
+                {selectedCourse
+                  ? `${selectedCourse.name} · ${videos.length} 个视频`
+                  : "选择课程后导入或管理视频"}
+              </div>
+            </div>
+          </div>
+          {selectedCourseId && (
+            <div className="tb-actions">
+              {videos.length > 0 && (
+                <div className="ca-seg">
+                  {(
+                    [
+                      ["grid", LayoutGrid, "网格视图"],
+                      ["list", List, "列表视图"],
+                    ] as const
+                  ).map(([key, Icon, label]) => (
+                    <button
+                      key={key}
+                      aria-label={label}
+                      aria-pressed={view === key}
+                      onClick={() => changeView(key)}
+                      className={view === key ? "on" : ""}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </button>
+                  ))}
+                </div>
+              )}
+              <ImportVideoButton courseId={selectedCourseId} />
+            </div>
+          )}
+        </header>
+        <div className="ca-scroll">
+          {!selectedCourseId || videos.length === 0 ? (
+            <div className="flex h-full min-h-[320px] items-center justify-center">
+              <div className="max-w-sm text-center">
+                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-md border border-[var(--border-faint)] bg-[var(--surface-card)] text-primary">
+                  <Film className="h-7 w-7" />
+                </div>
+                <h2 className="text-base font-semibold text-[var(--text-strong)]">
+                  {selectedCourseId ? "还没有视频" : "选择课程开始"}
+                </h2>
+                <p className="mt-2 text-sm leading-relaxed text-[var(--text-muted)]">
+                  {selectedCourseId
+                    ? "导入本地视频或粘贴视频链接后，会在这里形成课程视频列表。"
+                    : "从左侧选择课程后导入或管理视频。"}
+                </p>
+              </div>
+            </div>
+          ) : view === "list" ? (
+            <div className="ca-list">
+              <div className="ca-list-head">
+                <span>名称</span>
+                <span className="h-dur">时长</span>
+                <span className="h-status">状态</span>
+              </div>
+              {videos.map((video) => renderVideoListRow(video))}
+            </div>
+          ) : (
+            <div className="ca-grid">
+              {videos.map((video) => renderVideoGridCard(video))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderSelectedVideoWorkspace() {
+    if (!selectedVideo) return null;
+
+    return (
+      <div
+        aria-label="学习工作台响应布局"
+        data-layout={isWorkbenchWide ? "wide" : "stacked"}
+        className="ca-wb"
+        style={
+          isWorkbenchWide
+            ? ({ "--study-panel-width": `${studyPanelWidth}px` } as CSSProperties)
+            : undefined
+        }
+      >
+        <section aria-label="学习工作台" className="ca-player-col">
+          <header className="ca-wb-head">
+            <div className="wb-title-row">
+              {isPhoneDevice && (
+                <button
+                  type="button"
+                  className="hamb"
+                  onClick={openLibraryDrawer}
+                  title="打开课程库"
+                  aria-label="打开课程库"
+                >
+                  <Menu className="h-5 w-5" />
+                </button>
+              )}
+              <div className="min-w-0">
+                <h1 className="wb-title">{selectedVideo.title}</h1>
+              </div>
+            </div>
+          </header>
+          <div className="ca-stage-wrap">
+            <div className="ca-stage">
+              {mediaSrc ? (
+                <VideoPlayer src={mediaSrc} videoId={selectedVideo.id} />
+              ) : (
+                <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">
+                  正在准备播放…
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+        {isWorkbenchWide && (
+          <div
+            role="separator"
+            aria-label="调整学习资料宽度"
+            aria-orientation="vertical"
+            className="ca-resizer"
+            onPointerDown={beginStudyPanelResize}
+          />
+        )}
+        <aside
+          aria-label="学习资料面板"
+          className="ca-panel-col"
+        >
+          <TabsPanel videoId={selectedVideo.id} />
+        </aside>
+      </div>
+    );
+  }
+
+  function renderRail() {
+    return (
+      <nav className="ca-rail" aria-label="工具栏">
+        <span className="rail-logo">
+          <Book className="h-[18px] w-[18px]" />
+        </span>
+        <button
+          className="rail-btn"
+          title="返回课程库"
+          aria-label="返回课程库"
+          onClick={returnToLibrary}
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <button className="rail-btn active" title="课程视频">
+          <List className="h-5 w-5" />
+        </button>
+        <div className="rail-sp" />
+        <button
+          className="rail-btn"
+          title={themeToggleLabel}
+          aria-label={themeToggleLabel}
+          onClick={toggleTheme}
+        >
+          {isLightTheme ? <Moon className="h-[19px] w-[19px]" /> : <Sun className="h-[19px] w-[19px]" />}
+        </button>
+        <button
+          className="rail-btn"
+          title="设置"
+          aria-label="设置"
+          onClick={() => openMainView("settings")}
+        >
+          <Settings className="h-[19px] w-[19px]" />
+        </button>
+      </nav>
+    );
+  }
+
+  function renderSidebar(drawer = false) {
+    return (
+      <CourseSidebar
+        className={drawer ? "h-full border-0" : undefined}
+        selectedCourseId={selectedCourseId}
+        onSelect={selectCourse}
+        onOpenSettings={() => {
+          openMainView("settings");
+          closeLibraryDrawer();
+        }}
+        onToggleTheme={toggleTheme}
+        theme={theme}
+        themeToggleLabel={themeToggleLabel}
+        queueOpen={queueOpen}
+        queueCount={queuedVideoIds.length}
+        onToggleQueue={toggleQueue}
+        onOpenRecycleBin={() => {
+          openMainView("recycle");
+          closeLibraryDrawer();
+        }}
+        onCloseDrawer={drawer ? closeLibraryDrawer : undefined}
+      />
+    );
+  }
+
+  const isWorkbenchView = !!selectedVideo && !showSettings && !showRecycleBin && !showDevConsole && !queueOpen;
+
   return (
     <div
       data-theme={theme}
-      className="flex h-full overflow-hidden bg-[var(--surface-app)] text-[var(--text-strong)]"
+      data-device={deviceLayout}
+      data-view={isWorkbenchView ? "workbench" : "library"}
+      className={`ca-app ${libraryDrawerOpen ? "drawer-open" : ""}`}
     >
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        {selectedVideo ? (
-          <aside className="flex h-full w-14 flex-shrink-0 flex-col items-center border-r border-[var(--border-subtle)] bg-[var(--surface-rail)] py-3">
-            <button
-              className="flex h-11 w-11 items-center justify-center rounded-md text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
-              onClick={() => {
-                setShowSettings(false);
-                setShowRecycleBin(false);
-                setShowDevConsole(false);
-                setSelectedVideoId(null);
-              }}
-              title="返回课程库"
-              aria-label="返回课程库"
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            <div className="flex-1" />
-            <button
-              className="flex h-11 w-11 items-center justify-center rounded-md text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
-              onClick={toggleTheme}
-              title={themeToggleLabel}
-              aria-label={themeToggleLabel}
-            >
-              {isLightTheme ? (
-                <Moon className="h-5 w-5" />
-              ) : (
-                <Sun className="h-5 w-5" />
-              )}
-            </button>
-            <button
-              className={`flex h-11 w-11 items-center justify-center rounded-md hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] ${
-                showSettings
-                  ? "bg-[var(--surface-card-active)] text-primary"
-                  : "text-[var(--text-normal)]"
-              }`}
-              onClick={() => openMainView("settings")}
-              title="设置"
-              aria-label="设置"
-            >
-              <Settings className="h-5 w-5" />
-            </button>
-          </aside>
-        ) : (
-          <CourseSidebar
-            selectedCourseId={selectedCourseId}
-            onSelect={(id) => {
-              setSelectedCourseId(id);
-              setSelectedVideoId(null);
-              setQueueOpen(false);
-              setShowSettings(false);
-              setShowRecycleBin(false);
-              setShowDevConsole(false);
-            }}
-            onOpenSettings={() => openMainView("settings")}
-            onToggleTheme={toggleTheme}
-            theme={theme}
-            themeToggleLabel={themeToggleLabel}
-            queueOpen={queueOpen}
-            queueCount={queuedVideoIds.length}
-            onToggleQueue={() => {
-              setSelectedVideoId(null);
-              setShowSettings(false);
-              setShowRecycleBin(false);
-              setShowDevConsole(false);
-              setQueueOpen((open) => !open);
-            }}
-            onOpenRecycleBin={() => openMainView("recycle")}
+      {isPhoneDevice && (
+        <>
+          <div
+            className="ca-scrim"
+            onClick={closeLibraryDrawer}
           />
+          <aside
+            aria-label="课程库抽屉"
+            className={`ca-drawer ${libraryDrawerOpen ? "translate-x-0" : ""}`}
+          >
+            {renderSidebar(true)}
+          </aside>
+        </>
+      )}
+      {isWorkbenchView ? renderRail() : !isPhoneDevice ? renderSidebar() : null}
+      <main className="ca-main">
+        {showSettings ? (
+          <SettingsPanel
+            onClose={() => setShowSettings(false)}
+            onOpenDevConsole={() => openMainView("dev")}
+          />
+        ) : showRecycleBin ? (
+          <RecycleBin onClose={() => setShowRecycleBin(false)} />
+        ) : showDevConsole ? (
+          <DevConsole onClose={() => setShowDevConsole(false)} />
+        ) : queueOpen ? (
+          renderProcessingQueuePage()
+        ) : selectedVideo ? (
+          renderSelectedVideoWorkspace()
+        ) : (
+          renderCourseVideoLibrary()
         )}
-        <main className="flex min-w-0 flex-1">
-          <div className="flex min-w-0 flex-1 flex-col bg-[var(--surface-app)]">
-            {showSettings ? (
-              <SettingsPanel
-                onClose={() => setShowSettings(false)}
-                onOpenDevConsole={() => openMainView("dev")}
-              />
-            ) : showRecycleBin ? (
-              <RecycleBin onClose={() => setShowRecycleBin(false)} />
-            ) : showDevConsole ? (
-              <DevConsole onClose={() => setShowDevConsole(false)} />
-            ) : queueOpen ? (
-              renderProcessingQueuePage()
-            ) : selectedVideo ? (
-              <>
-                <div className="flex min-h-24 items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-5 py-4">
-                  <div className="min-w-0 flex-1">
-                    <p className="mb-1 flex items-center gap-2 text-xs font-medium text-[var(--text-faint)]">
-                      <Sparkles className="h-3.5 w-3.5 text-primary" />
-                      学习工作台
-                    </p>
-                    <h1 className="truncate text-xl font-semibold text-[var(--text-strong)]">
-                      {selectedVideo.title}
-                    </h1>
-                  </div>
-                </div>
-                <div className="min-h-0 flex-1">
-                  {mediaSrc ? (
-                    <VideoPlayer src={mediaSrc} videoId={selectedVideo.id} />
-                  ) : (
-                    <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">
-                      正在准备播放…
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <header className="flex flex-none items-center justify-between gap-4 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-5">
-                  <div className="min-w-0">
-                    <h1 className="text-2xl font-semibold text-[var(--text-strong)]">
-                      课程视频
-                    </h1>
-                    <p className="mt-1 text-sm text-[var(--text-muted)]">
-                      {selectedCourse
-                        ? `${selectedCourse.name} · ${videos.length} 个视频`
-                        : "选择课程后导入或管理视频"}
-                    </p>
-                  </div>
-                  {selectedCourseId && (
-                    <div className="flex flex-none items-center gap-2">
-                      {videos.length > 0 && (
-                        <div className="flex items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] p-0.5">
-                          {(
-                            [
-                              ["grid", LayoutGrid, "网格视图"],
-                              ["list", List, "列表视图"],
-                            ] as const
-                          ).map(([key, Icon, label]) => (
-                            <button
-                              key={key}
-                              aria-label={label}
-                              aria-pressed={view === key}
-                              onClick={() => changeView(key)}
-                              className={`grid h-7 w-7 place-items-center rounded-md transition ${
-                                view === key
-                                  ? "bg-[var(--surface-card-active)] text-primary shadow-sm"
-                                  : "text-[var(--text-muted)] hover:text-[var(--text-strong)]"
-                              }`}
-                            >
-                              <Icon className="h-4 w-4" />
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      <ImportVideoButton courseId={selectedCourseId} />
-                    </div>
-                  )}
-                </header>
-                <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
-                  {!selectedCourseId || videos.length === 0 ? (
-                    <div className="flex h-full min-h-[320px] items-center justify-center">
-                      <div className="max-w-sm text-center">
-                        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-md border border-[var(--border-faint)] bg-[var(--surface-card)] text-primary">
-                          <Film className="h-7 w-7" />
-                        </div>
-                        <h2 className="text-base font-semibold text-[var(--text-strong)]">
-                          {selectedCourseId ? "还没有视频" : "选择课程开始"}
-                        </h2>
-                        <p className="mt-2 text-sm leading-relaxed text-[var(--text-muted)]">
-                          {selectedCourseId
-                            ? "导入本地视频或粘贴视频链接后，会在这里形成课程视频列表。"
-                            : "从左侧选择课程后导入或管理视频。"}
-                        </p>
-                      </div>
-                    </div>
-                  ) : view === "list" ? (
-                    <div className="mx-auto flex max-w-3xl flex-col gap-2">
-                      {videos.map((video) => renderVideoListRow(video))}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-5">
-                      {videos.map((video) => renderVideoGridCard(video))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-          {selectedVideo && (
-            <>
-              <div
-                role="separator"
-                aria-label="调整学习资料宽度"
-                aria-orientation="vertical"
-                className="w-1 cursor-col-resize bg-transparent hover:bg-primary/40"
-                onPointerDown={beginStudyPanelResize}
-              />
-              <aside
-                aria-label="学习资料面板"
-                className="flex min-w-[380px] max-w-[720px] flex-none flex-col border-l border-[var(--border-subtle)] bg-[var(--surface-app)]"
-                style={{ width: studyPanelWidth }}
-              >
-                <TabsPanel videoId={selectedVideo.id} />
-              </aside>
-            </>
-          )}
-        </main>
-      </div>
+      </main>
     </div>
   );
 }

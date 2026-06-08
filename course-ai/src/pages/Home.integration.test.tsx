@@ -47,6 +47,10 @@ const { mockIpc } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
+const mockUseDeviceLayout = vi.hoisted(() => ({
+  useDeviceLayout: vi.fn(),
+}));
+vi.mock("@/lib/deviceLayout", () => mockUseDeviceLayout);
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => `asset://${path}`,
@@ -94,6 +98,7 @@ function renderHome() {
 
 describe("Home selected-video integration", () => {
   beforeEach(() => {
+    mockUseDeviceLayout.useDeviceLayout.mockReturnValue("desktop");
     mockIpc.courses.list.mockResolvedValue([course]);
     mockIpc.videos.list.mockResolvedValue([video]);
     mockIpc.videos.mediaUrl.mockResolvedValue("http://127.0.0.1:1234/m/video-1");
@@ -111,12 +116,13 @@ describe("Home selected-video integration", () => {
   });
 
   it("keeps visible learning UI when the real selected-video panels mount", async () => {
-    renderHome();
+    const { container } = renderHome();
 
     fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
-    expect(screen.getByText("学习工作台")).toBeInTheDocument();
+    expect(container.firstElementChild).toHaveAttribute("data-device", "desktop");
+    expect(screen.getByRole("region", { name: "学习工作台" })).toBeInTheDocument();
     expect(screen.getByText(video.title)).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "AI 概览" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "笔记" })).toBeInTheDocument();
@@ -125,10 +131,48 @@ describe("Home selected-video integration", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "笔记" }));
     // 笔记面板按需懒加载，等它挂载。
-    expect(await screen.findByRole("button", { name: "AI笔记" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "AI出题" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "AI脑图" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "笔记" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "出题" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "脑图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "提问" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "搜索文稿" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "搜索" })).toBeInTheDocument();
+  });
+
+  it("switches the selected-video shell to a stacked layout on narrow screens", async () => {
+    mockUseDeviceLayout.useDeviceLayout.mockReturnValue("phone");
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+
+    expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
+      "data-layout",
+      "stacked",
+    );
+    expect(screen.getByRole("button", { name: "打开课程库" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "打开课程库" }));
+
+    expect(screen.getByLabelText("课程库抽屉")).toHaveClass("translate-x-0");
+    expect(screen.getByRole("button", { name: "关闭课程库" })).toBeInTheDocument();
+    expect(screen.getByLabelText("学习资料面板")).toBeInTheDocument();
+  });
+
+  it("shows a rail instead of the full sidebar for iPad landscape workspaces", async () => {
+    mockUseDeviceLayout.useDeviceLayout.mockReturnValue("tablet-landscape");
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+
+    expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
+      "data-layout",
+      "wide",
+    );
+    expect(screen.getByRole("navigation", { name: "工具栏" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回课程库" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "打开课程库" })).not.toBeInTheDocument();
   });
 });
