@@ -37,15 +37,18 @@ describe("SettingsPanel", () => {
   it("lets users select Volcengine ASR and save App ID + Access Token, hiding only the token", async () => {
     render(<SettingsPanel onClose={() => undefined} />);
 
-    const backend = await screen.findByLabelText("语音识别后端");
-    expect(backend).toHaveValue("volcengine");
-    expect(screen.getByLabelText("火山 ASR App ID")).toHaveAttribute("type", "text");
-    expect(screen.getByLabelText("火山 ASR Access Token")).toHaveAttribute("type", "password");
+    // 设置改成「侧栏分类 + 分组卡片」后，语音识别相关项在「语音识别」分类下。
+    fireEvent.click(await screen.findByRole("button", { name: "语音识别" }));
 
-    fireEvent.change(screen.getByLabelText("火山 ASR App ID"), {
+    const backend = await screen.findByLabelText("识别后端");
+    expect(backend).toHaveValue("volcengine");
+    expect(screen.getByLabelText("App ID")).toHaveAttribute("type", "text");
+    expect(screen.getByLabelText("Access Token")).toHaveAttribute("type", "password");
+
+    fireEvent.change(screen.getByLabelText("App ID"), {
       target: { value: "app-123" },
     });
-    fireEvent.change(screen.getByLabelText("火山 ASR Access Token"), {
+    fireEvent.change(screen.getByLabelText("Access Token"), {
       target: { value: "secret-token" },
     });
     fireEvent.click(screen.getByRole("button", { name: "保存火山 ASR 凭证" }));

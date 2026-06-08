@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronLeft,
   FolderCog,
-  Images,
   ScanText,
   Sparkles,
   Terminal,
@@ -51,54 +50,98 @@ function Select({
   );
 }
 
-function Section({
-  icon,
-  title,
-  desc,
+type SettingsCategory = "storage" | "asr" | "llm" | "courseware" | "dev";
+
+const CATEGORY_META: Record<
+  SettingsCategory,
+  { label: string; icon: ReactNode; tint: string }
+> = {
+  storage: { label: "存储", icon: <FolderCog className="h-3.5 w-3.5" />, tint: "#8e8e93" },
+  asr: { label: "语音识别", icon: <AudioLines className="h-3.5 w-3.5" />, tint: "#2f6cea" },
+  llm: { label: "大模型", icon: <Sparkles className="h-3.5 w-3.5" />, tint: "#a855f7" },
+  courseware: { label: "课件 / OCR", icon: <ScanText className="h-3.5 w-3.5" />, tint: "#f59e0b" },
+  dev: { label: "开发者", icon: <Terminal className="h-3.5 w-3.5" />, tint: "#64748b" },
+};
+
+/** 苹果系统设置风格的分组卡片：小标题 + 圆角卡片（行间细分隔线）+ 脚注。 */
+function Group({
+  header,
+  footnote,
   children,
 }: {
-  icon: ReactNode;
-  title: string;
-  desc?: string;
+  header?: string;
+  footnote?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <section className="space-y-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-card)]">
-      <div className="flex items-start gap-3">
-        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--accent-weak)] text-[var(--accent-text)]">
-          {icon}
-        </div>
-        <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-[var(--text-strong)]">{title}</h3>
-          {desc && <p className="mt-0.5 text-xs text-[var(--text-muted)]">{desc}</p>}
-        </div>
+    <div className="mb-6">
+      {header && (
+        <h3 className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+          {header}
+        </h3>
+      )}
+      <div className="divide-y divide-[var(--border-faint)] overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]">
+        {children}
       </div>
-      <div className="space-y-4">{children}</div>
-    </section>
+      {footnote && (
+        <p className="mt-2 px-1 text-xs leading-relaxed text-[var(--text-muted)]">{footnote}</p>
+      )}
+    </div>
   );
 }
 
-function Field({
+/** 一行设置：标签在左、控件在右（紧凑）。hint 作为标签下的小字说明。 */
+function Row({
   label,
-  htmlFor,
   hint,
+  htmlFor,
   children,
 }: {
   label: string;
+  hint?: ReactNode;
   htmlFor?: string;
-  hint?: string;
   children: ReactNode;
 }) {
   return (
-    <div className="space-y-1.5">
-      <label
-        htmlFor={htmlFor}
-        className="block text-[13px] font-medium text-[var(--text-strong)]"
-      >
-        {label}
-      </label>
-      {children}
-      {hint && <p className="text-xs text-[var(--text-muted)]">{hint}</p>}
+    <div className="flex items-center justify-between gap-4 px-4 py-2.5">
+      <div className="min-w-0">
+        <label
+          htmlFor={htmlFor}
+          className="block text-[13px] font-medium text-[var(--text-strong)]"
+        >
+          {label}
+        </label>
+        {hint && <p className="mt-0.5 text-xs leading-relaxed text-[var(--text-muted)]">{hint}</p>}
+      </div>
+      <div className="flex-none">{children}</div>
+    </div>
+  );
+}
+
+/** 整行铺开的设置（控件较宽或多行时用）：标签在上、控件占满整行。 */
+function StackRow({
+  label,
+  hint,
+  htmlFor,
+  children,
+}: {
+  label?: string;
+  hint?: ReactNode;
+  htmlFor?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="px-4 py-3">
+      {label && (
+        <label
+          htmlFor={htmlFor}
+          className="block text-[13px] font-medium text-[var(--text-strong)]"
+        >
+          {label}
+        </label>
+      )}
+      {hint && <p className="mt-0.5 text-xs leading-relaxed text-[var(--text-muted)]">{hint}</p>}
+      <div className={label || hint ? "mt-2" : ""}>{children}</div>
     </div>
   );
 }
@@ -120,6 +163,7 @@ export function SettingsPanel({
   onClose: () => void;
   onOpenDevConsole?: () => void;
 }) {
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>("storage");
   const [root, setRoot] = useState("");
   const [model, setModel] = useState("large-v3-turbo");
   const [asrBackend, setAsrBackend] = useState("whisper");
@@ -263,10 +307,13 @@ export function SettingsPanel({
     setTimeout(() => setOcrSaved(""), 1500);
   }
 
+  const categories: SettingsCategory[] = ["storage", "asr", "llm", "courseware"];
+  if (onOpenDevConsole) categories.push("dev");
+
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
       {/* 头部 */}
-      <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-4">
+      <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-5 py-3.5">
         <button
           aria-label="返回"
           onClick={onClose}
@@ -274,344 +321,388 @@ export function SettingsPanel({
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
-        <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-[var(--text-strong)]">设置</h2>
-          <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-            存储位置、语音识别与大模型配置
-          </p>
-        </div>
+        <h2 className="text-[15px] font-semibold text-[var(--text-strong)]">设置</h2>
       </header>
 
-      {/* 内容 */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
-        <div className="mx-auto max-w-2xl space-y-4">
-          <Section
-            icon={<FolderCog className="h-4 w-4" />}
-            title="存储"
-            desc="转写、字幕、课件等产物的存放位置"
-          >
-            <Field
-              label="默认数据根目录"
-              hint="留空 = 跟视频同目录的 .courseai/"
-            >
-              <div className="flex items-center gap-2">
-                <input
-                  className={FIELD}
-                  value={root}
-                  readOnly
-                  placeholder="未设置"
-                />
-                <Button size="sm" variant="outline" onClick={pickRoot}>
-                  选择
-                </Button>
-              </div>
-            </Field>
-          </Section>
-
-          <Section
-            icon={<AudioLines className="h-4 w-4" />}
-            title="语音识别"
-            desc="选择把视频转写成文字的引擎"
-          >
-            <Field label="语音识别后端" htmlFor="asr-backend">
-              <Select
-                id="asr-backend"
-                value={asrBackend}
-                onChange={(event) => void changeAsrBackend(event.target.value)}
+      {/* 侧栏分类 + 右侧分组卡片 */}
+      <div className="flex min-h-0 flex-1">
+        <nav
+          aria-label="设置分类"
+          className="flex w-52 flex-none flex-col gap-0.5 overflow-y-auto border-r border-[var(--border-subtle)] bg-[var(--surface-sidebar)] p-3"
+        >
+          {categories.map((key) => {
+            const meta = CATEGORY_META[key];
+            const active = key === activeCategory;
+            return (
+              <button
+                key={key}
+                onClick={() => setActiveCategory(key)}
+                aria-current={active ? "page" : undefined}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition ${
+                  active
+                    ? "bg-[var(--accent-weak)] font-medium text-[var(--accent-text)]"
+                    : "text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
+                }`}
               >
-                <option value="whisper">本地 Whisper</option>
-                <option value="volcengine">火山录音文件识别</option>
-                <option value="aliyun">阿里云 DashScope 录音文件识别</option>
-              </Select>
-            </Field>
-
-            <Field
-              label="识别语言"
-              htmlFor="asr-language"
-              hint="对本地 Whisper 与阿里云 paraformer-v2 / fun-asr 生效；火山及通义千问 ASR 为自动识别"
-            >
-              <Select
-                id="asr-language"
-                value={asrLanguage}
-                onChange={(event) => void changeAsrLanguage(event.target.value)}
-              >
-                <option value="auto">自动检测</option>
-                <option value="zh">中文</option>
-                <option value="en">英语</option>
-                <option value="ja">日语</option>
-                <option value="ko">韩语</option>
-                <option value="yue">粤语</option>
-                <option value="fr">法语</option>
-                <option value="de">德语</option>
-                <option value="es">西班牙语</option>
-                <option value="ru">俄语</option>
-              </Select>
-            </Field>
-
-            <Field
-              label="AI 纠错并发数"
-              htmlFor="asr-correction-concurrency"
-              hint="字幕分批并发交给大模型纠错；越大越快，但受模型并发上限约束（如 DeepSeek-flash 2500 / pro 500，普通端点建议 5~16）。实际并发还受分批数量限制。"
-            >
-              <input
-                id="asr-correction-concurrency"
-                type="number"
-                min={1}
-                max={2500}
-                step={1}
-                className={FIELD}
-                value={correctionConcurrency}
-                onChange={(event) =>
-                  void changeCorrectionConcurrency(event.target.value)
-                }
-              />
-            </Field>
-
-            {asrBackend === "whisper" && (
-              <>
-                <Field label="默认 Whisper 模型" htmlFor="whisper-model">
-                  <Select
-                    id="whisper-model"
-                    value={model}
-                    onChange={(event) => void changeModel(event.target.value)}
-              >
-                    <option value="tiny">tiny</option>
-                    <option value="base">base</option>
-                    <option value="small">small</option>
-                    <option value="medium">medium</option>
-                    <option value="large-v3-turbo">large-v3-turbo</option>
-                  </Select>
-                </Field>
-                <WhisperModelsPanel />
-              </>
-            )}
-
-            {asrBackend === "volcengine" && (
-              <>
-                <Field label="火山 ASR App ID" htmlFor="volcengine-asr-app-id">
-                  <input
-                    id="volcengine-asr-app-id"
-                    type="text"
-                    className={FIELD}
-                    value={volcengineAppId}
-                    placeholder="控制台「应用」的 App ID"
-                    onChange={(event) => setVolcengineAppId(event.target.value)}
-                  />
-                </Field>
-                <Field
-                  label="火山 ASR Access Token"
-                  htmlFor="volcengine-asr-token"
-                  hint="留空 = 不修改"
+                <span
+                  className="grid h-6 w-6 flex-none place-items-center rounded-md text-white"
+                  style={{ background: meta.tint }}
                 >
-                  <input
-                    id="volcengine-asr-token"
-                    type="password"
-                    className={FIELD}
-                    value={volcengineToken}
-                    placeholder="••••••••"
-                    onChange={(event) => setVolcengineToken(event.target.value)}
-                  />
-                </Field>
-                <div className="flex items-center gap-3">
-                  <Button size="sm" variant="outline" onClick={saveVolcengineKey}>
-                    保存火山 ASR 凭证
-                  </Button>
-                  <SavedBadge text={volcengineSaved} />
-                </div>
-                <Field
-                  label="热词"
-                  htmlFor="volcengine-asr-hotwords"
-                  hint="一行一个（也可用逗号/顿号分隔），最多 5000 词；专有名词、人名、术语"
-                >
-                  <textarea
-                    id="volcengine-asr-hotwords"
-                    className={`${FIELD} min-h-[72px] resize-y`}
-                    value={volcengineHotwords}
-                    placeholder={"勒沙特列原理\n焓变\n范德华力"}
-                    onChange={(event) => setVolcengineHotwords(event.target.value)}
-                  />
-                </Field>
-                <Field
-                  label="上下文"
-                  htmlFor="volcengine-asr-context"
-                  hint="视频标题、课程名会自动加入；此处可补充口音/领域/场景等（约 800 tokens 上限，一行一条）"
-                >
-                  <textarea
-                    id="volcengine-asr-context"
-                    className={`${FIELD} min-h-[72px] resize-y`}
-                    value={volcengineContext}
-                    placeholder={"本片为高中化学反应原理课\n讲师有四川口音"}
-                    onChange={(event) => setVolcengineContext(event.target.value)}
-                  />
-                </Field>
-                <div className="flex items-center gap-3">
-                  <Button size="sm" variant="outline" onClick={saveVolcengineContext}>
-                    保存热词与上下文
-                  </Button>
-                  <SavedBadge text={volcengineCtxSaved} />
-                </div>
-              </>
-            )}
-
-            {asrBackend === "aliyun" && (
-              <>
-                <Field label="识别模型" htmlFor="aliyun-asr-model">
-                  <Select
-                    id="aliyun-asr-model"
-                    value={aliyunModel}
-                    onChange={(event) => void changeAliyunModel(event.target.value)}
-              >
-                    <option value="qwen3-asr-flash-filetrans">
-                      千问3-ASR-Flash-Filetrans
-                    </option>
-                    <option value="fun-asr">Fun-ASR</option>
-                    <option value="paraformer-v2">Paraformer-v2</option>
-                  </Select>
-                </Field>
-                <Field
-                  label="百炼 API Key"
-                  htmlFor="dashscope-key"
-                  hint="留空 = 不修改"
-                >
-                  <input
-                    id="dashscope-key"
-                    type="password"
-                    className={FIELD}
-                    value={dashscopeKey}
-                    placeholder="••••••••"
-                    onChange={(event) => setDashscopeKey(event.target.value)}
-                  />
-                </Field>
-                <div className="flex items-center gap-3">
-                  <Button size="sm" variant="outline" onClick={saveDashscopeKey}>
-                    保存百炼 API Key
-                  </Button>
-                  <SavedBadge text={dashscopeSaved} />
-                </div>
-              </>
-            )}
-          </Section>
-
-          <Section
-            icon={<ScanText className="h-4 w-4" />}
-            title="图文识别 (OCR)"
-            desc="对课件帧「截字」时使用的文字识别引擎"
-          >
-            <Field label="OCR 引擎" htmlFor="ocr-backend">
-              <Select
-                id="ocr-backend"
-                value={ocrBackend}
-                onChange={(event) => void changeOcrBackend(event.target.value)}
-              >
-                <option value="tesseract">本地 Tesseract</option>
-                <option value="aliyun">阿里云 OCR 统一识别</option>
-              </Select>
-            </Field>
-
-            {ocrBackend === "aliyun" && (
-              <>
-                <Field label="识别类型" htmlFor="aliyun-ocr-type">
-                  <Select
-                    id="aliyun-ocr-type"
-                    value={ocrType}
-                    onChange={(event) => void changeOcrType(event.target.value)}
-              >
-                    <option value="Advanced">通用文字识别（高精版）</option>
-                    <option value="General">通用文字识别</option>
-                    <option value="HandWriting">手写文字识别</option>
-                    <option value="MultiLanguage">多语言识别</option>
-                    <option value="Table">表格识别</option>
-                  </Select>
-                </Field>
-                <Field label="AccessKey ID" htmlFor="aliyun-ocr-key-id">
-                  <input
-                    id="aliyun-ocr-key-id"
-                    type="text"
-                    className={FIELD}
-                    value={ocrKeyId}
-                    placeholder="阿里云 RAM 账号 AccessKey ID"
-                    onChange={(event) => setOcrKeyId(event.target.value)}
-                  />
-                </Field>
-                <Field
-                  label="AccessKey Secret"
-                  htmlFor="aliyun-ocr-secret"
-                  hint="留空 = 不修改；需在阿里云控制台开通「文字识别 OCR」"
-                >
-                  <input
-                    id="aliyun-ocr-secret"
-                    type="password"
-                    className={FIELD}
-                    value={ocrSecret}
-                    placeholder="••••••••"
-                    onChange={(event) => setOcrSecret(event.target.value)}
-                  />
-                </Field>
-                <div className="flex items-center gap-3">
-                  <Button size="sm" variant="outline" onClick={saveOcrCreds}>
-                    保存阿里云 OCR 凭证
-                  </Button>
-                  <SavedBadge text={ocrSaved} />
-                </div>
-              </>
-            )}
-          </Section>
-
-          <Section
-            icon={<Images className="h-4 w-4" />}
-            title="课件提取"
-            desc="按画面变化自动识别换页的灵敏度"
-          >
-            <Field
-              label="灵敏度"
-              hint={`灵敏度越高抓取的课件页越多（当前差异阈值 ${sensitivityToThreshold(
-                slidesSensitivity,
-              )}）`}
-            >
-              <div className="flex items-center gap-3 text-xs text-[var(--text-muted)]">
-                <span>低</span>
-                <input
-                  aria-label="课件提取灵敏度"
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={5}
-                  value={slidesSensitivity}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    setSlidesSensitivityState(value);
-                    setSlidesSensitivity(value);
-                  }}
-                  className="h-1 flex-1 accent-primary"
-                />
-                <span>高</span>
-                <span className="w-8 text-right tabular-nums text-[var(--text-faint)]">
-                  {slidesSensitivity}
+                  {meta.icon}
                 </span>
-              </div>
-            </Field>
-          </Section>
+                {meta.label}
+              </button>
+            );
+          })}
+        </nav>
 
-          <Section
-            icon={<Sparkles className="h-4 w-4" />}
-            title="大模型"
-            desc="用于生成笔记、出题、脑图与问答"
-          >
-            <LlmSettingsPanel />
-          </Section>
+        <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
+          <div className="mx-auto max-w-2xl">
+            <h2 className="mb-5 text-xl font-semibold text-[var(--text-strong)]">
+              {CATEGORY_META[activeCategory].label}
+            </h2>
 
-          {onOpenDevConsole && (
-            <Section
-              icon={<Terminal className="h-4 w-4" />}
-              title="开发者"
-              desc="查看 AI 文稿纠错的请求与回复，确认纠错是否真的实施"
-            >
-              <Button variant="outline" size="sm" onClick={onOpenDevConsole}>
-                <Terminal className="h-3.5 w-3.5" />
-                打开开发控制台
-              </Button>
-            </Section>
-          )}
+            {activeCategory === "storage" && (
+              <Group
+                header="存储位置"
+                footnote="转写、字幕、课件等产物的存放位置；留空 = 跟视频同目录的 .courseai/。"
+              >
+                <StackRow label="默认数据根目录">
+                  <div className="flex items-center gap-2">
+                    <input className={FIELD} value={root} readOnly placeholder="未设置" />
+                    <Button size="sm" variant="outline" onClick={pickRoot}>
+                      选择
+                    </Button>
+                  </div>
+                </StackRow>
+              </Group>
+            )}
+
+            {activeCategory === "asr" && (
+              <>
+                <Group header="识别引擎">
+                  <Row label="识别后端" htmlFor="asr-backend">
+                    <div className="w-56">
+                      <Select
+                        id="asr-backend"
+                        value={asrBackend}
+                        onChange={(event) => void changeAsrBackend(event.target.value)}
+                      >
+                        <option value="whisper">本地 Whisper</option>
+                        <option value="volcengine">火山录音文件识别</option>
+                        <option value="aliyun">阿里云 DashScope 录音文件识别</option>
+                      </Select>
+                    </div>
+                  </Row>
+                  <Row
+                    label="识别语言"
+                    htmlFor="asr-language"
+                    hint="对本地 Whisper 与阿里云 paraformer-v2 / fun-asr 生效；火山及通义千问 ASR 为自动识别"
+                  >
+                    <div className="w-40">
+                      <Select
+                        id="asr-language"
+                        value={asrLanguage}
+                        onChange={(event) => void changeAsrLanguage(event.target.value)}
+                      >
+                        <option value="auto">自动检测</option>
+                        <option value="zh">中文</option>
+                        <option value="en">英语</option>
+                        <option value="ja">日语</option>
+                        <option value="ko">韩语</option>
+                        <option value="yue">粤语</option>
+                        <option value="fr">法语</option>
+                        <option value="de">德语</option>
+                        <option value="es">西班牙语</option>
+                        <option value="ru">俄语</option>
+                      </Select>
+                    </div>
+                  </Row>
+                  <Row
+                    label="AI 纠错并发数"
+                    htmlFor="asr-correction-concurrency"
+                    hint="字幕分批并发交给大模型纠错；越大越快，但受模型并发上限约束（DeepSeek-flash 2500 / pro 500，普通端点建议 5~16）。"
+                  >
+                    <input
+                      id="asr-correction-concurrency"
+                      type="number"
+                      min={1}
+                      max={2500}
+                      step={1}
+                      className={`${FIELD} w-24 text-right`}
+                      value={correctionConcurrency}
+                      onChange={(event) =>
+                        void changeCorrectionConcurrency(event.target.value)
+                      }
+                    />
+                  </Row>
+                </Group>
+
+                {asrBackend === "whisper" && (
+                  <Group header="本地 Whisper">
+                    <Row label="默认 Whisper 模型" htmlFor="whisper-model">
+                      <div className="w-44">
+                        <Select
+                          id="whisper-model"
+                          value={model}
+                          onChange={(event) => void changeModel(event.target.value)}
+                        >
+                          <option value="tiny">tiny</option>
+                          <option value="base">base</option>
+                          <option value="small">small</option>
+                          <option value="medium">medium</option>
+                          <option value="large-v3-turbo">large-v3-turbo</option>
+                        </Select>
+                      </div>
+                    </Row>
+                    <StackRow label="模型下载">
+                      <WhisperModelsPanel />
+                    </StackRow>
+                  </Group>
+                )}
+
+                {asrBackend === "volcengine" && (
+                  <Group header="火山引擎">
+                    <Row label="App ID" htmlFor="volcengine-asr-app-id">
+                      <input
+                        id="volcengine-asr-app-id"
+                        type="text"
+                        className={`${FIELD} w-64`}
+                        value={volcengineAppId}
+                        placeholder="控制台「应用」的 App ID"
+                        onChange={(event) => setVolcengineAppId(event.target.value)}
+                      />
+                    </Row>
+                    <Row
+                      label="Access Token"
+                      htmlFor="volcengine-asr-token"
+                      hint="留空 = 不修改"
+                    >
+                      <input
+                        id="volcengine-asr-token"
+                        type="password"
+                        className={`${FIELD} w-64`}
+                        value={volcengineToken}
+                        placeholder="••••••••"
+                        onChange={(event) => setVolcengineToken(event.target.value)}
+                      />
+                    </Row>
+                    <StackRow>
+                      <div className="flex items-center gap-3">
+                        <Button size="sm" variant="outline" onClick={saveVolcengineKey}>
+                          保存火山 ASR 凭证
+                        </Button>
+                        <SavedBadge text={volcengineSaved} />
+                      </div>
+                    </StackRow>
+                    <StackRow
+                      label="热词"
+                      htmlFor="volcengine-asr-hotwords"
+                      hint="一行一个（也可用逗号/顿号分隔），最多 5000 词；专有名词、人名、术语"
+                    >
+                      <textarea
+                        id="volcengine-asr-hotwords"
+                        className={`${FIELD} min-h-[72px] resize-y`}
+                        value={volcengineHotwords}
+                        placeholder={"勒沙特列原理\n焓变\n范德华力"}
+                        onChange={(event) => setVolcengineHotwords(event.target.value)}
+                      />
+                    </StackRow>
+                    <StackRow
+                      label="上下文"
+                      htmlFor="volcengine-asr-context"
+                      hint="视频标题、课程名会自动加入；此处可补充口音/领域/场景等（约 800 tokens 上限，一行一条）"
+                    >
+                      <textarea
+                        id="volcengine-asr-context"
+                        className={`${FIELD} min-h-[72px] resize-y`}
+                        value={volcengineContext}
+                        placeholder={"本片为高中化学反应原理课\n讲师有四川口音"}
+                        onChange={(event) => setVolcengineContext(event.target.value)}
+                      />
+                    </StackRow>
+                    <StackRow>
+                      <div className="flex items-center gap-3">
+                        <Button size="sm" variant="outline" onClick={saveVolcengineContext}>
+                          保存热词与上下文
+                        </Button>
+                        <SavedBadge text={volcengineCtxSaved} />
+                      </div>
+                    </StackRow>
+                  </Group>
+                )}
+
+                {asrBackend === "aliyun" && (
+                  <Group header="阿里云 DashScope">
+                    <Row label="识别模型" htmlFor="aliyun-asr-model">
+                      <div className="w-64">
+                        <Select
+                          id="aliyun-asr-model"
+                          value={aliyunModel}
+                          onChange={(event) => void changeAliyunModel(event.target.value)}
+                        >
+                          <option value="qwen3-asr-flash-filetrans">
+                            千问3-ASR-Flash-Filetrans
+                          </option>
+                          <option value="fun-asr">Fun-ASR</option>
+                          <option value="paraformer-v2">Paraformer-v2</option>
+                        </Select>
+                      </div>
+                    </Row>
+                    <Row
+                      label="百炼 API Key"
+                      htmlFor="dashscope-key"
+                      hint="留空 = 不修改"
+                    >
+                      <input
+                        id="dashscope-key"
+                        type="password"
+                        className={`${FIELD} w-64`}
+                        value={dashscopeKey}
+                        placeholder="••••••••"
+                        onChange={(event) => setDashscopeKey(event.target.value)}
+                      />
+                    </Row>
+                    <StackRow>
+                      <div className="flex items-center gap-3">
+                        <Button size="sm" variant="outline" onClick={saveDashscopeKey}>
+                          保存百炼 API Key
+                        </Button>
+                        <SavedBadge text={dashscopeSaved} />
+                      </div>
+                    </StackRow>
+                  </Group>
+                )}
+              </>
+            )}
+
+            {activeCategory === "llm" && (
+              <Group header="大模型" footnote="用于生成笔记、出题、脑图与问答。">
+                <StackRow>
+                  <LlmSettingsPanel />
+                </StackRow>
+              </Group>
+            )}
+
+            {activeCategory === "courseware" && (
+              <>
+                <Group
+                  header="图文识别 (OCR)"
+                  footnote="对课件帧「截字」时使用的文字识别引擎。"
+                >
+                  <Row label="OCR 引擎" htmlFor="ocr-backend">
+                    <div className="w-56">
+                      <Select
+                        id="ocr-backend"
+                        value={ocrBackend}
+                        onChange={(event) => void changeOcrBackend(event.target.value)}
+                      >
+                        <option value="tesseract">本地 Tesseract</option>
+                        <option value="aliyun">阿里云 OCR 统一识别</option>
+                      </Select>
+                    </div>
+                  </Row>
+
+                  {ocrBackend === "aliyun" && (
+                    <>
+                      <Row label="识别类型" htmlFor="aliyun-ocr-type">
+                        <div className="w-56">
+                          <Select
+                            id="aliyun-ocr-type"
+                            value={ocrType}
+                            onChange={(event) => void changeOcrType(event.target.value)}
+                          >
+                            <option value="Advanced">通用文字识别（高精版）</option>
+                            <option value="General">通用文字识别</option>
+                            <option value="HandWriting">手写文字识别</option>
+                            <option value="MultiLanguage">多语言识别</option>
+                            <option value="Table">表格识别</option>
+                          </Select>
+                        </div>
+                      </Row>
+                      <Row label="AccessKey ID" htmlFor="aliyun-ocr-key-id">
+                        <input
+                          id="aliyun-ocr-key-id"
+                          type="text"
+                          className={`${FIELD} w-64`}
+                          value={ocrKeyId}
+                          placeholder="阿里云 RAM 账号 AccessKey ID"
+                          onChange={(event) => setOcrKeyId(event.target.value)}
+                        />
+                      </Row>
+                      <Row
+                        label="AccessKey Secret"
+                        htmlFor="aliyun-ocr-secret"
+                        hint="留空 = 不修改；需在阿里云控制台开通「文字识别 OCR」"
+                      >
+                        <input
+                          id="aliyun-ocr-secret"
+                          type="password"
+                          className={`${FIELD} w-64`}
+                          value={ocrSecret}
+                          placeholder="••••••••"
+                          onChange={(event) => setOcrSecret(event.target.value)}
+                        />
+                      </Row>
+                      <StackRow>
+                        <div className="flex items-center gap-3">
+                          <Button size="sm" variant="outline" onClick={saveOcrCreds}>
+                            保存阿里云 OCR 凭证
+                          </Button>
+                          <SavedBadge text={ocrSaved} />
+                        </div>
+                      </StackRow>
+                    </>
+                  )}
+                </Group>
+
+                <Group
+                  header="课件提取"
+                  footnote={`灵敏度越高抓取的课件页越多（当前差异阈值 ${sensitivityToThreshold(
+                    slidesSensitivity,
+                  )}）。`}
+                >
+                  <StackRow label="换页灵敏度">
+                    <div className="flex items-center gap-3 text-xs text-[var(--text-muted)]">
+                      <span>低</span>
+                      <input
+                        aria-label="课件提取灵敏度"
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={5}
+                        value={slidesSensitivity}
+                        onChange={(event) => {
+                          const value = Number(event.target.value);
+                          setSlidesSensitivityState(value);
+                          setSlidesSensitivity(value);
+                        }}
+                        className="h-1 flex-1 accent-primary"
+                      />
+                      <span>高</span>
+                      <span className="w-8 text-right tabular-nums text-[var(--text-faint)]">
+                        {slidesSensitivity}
+                      </span>
+                    </div>
+                  </StackRow>
+                </Group>
+              </>
+            )}
+
+            {activeCategory === "dev" && onOpenDevConsole && (
+              <Group
+                header="开发者"
+                footnote="查看 AI 文稿纠错的请求与回复，确认纠错是否真的实施。"
+              >
+                <StackRow>
+                  <Button variant="outline" size="sm" onClick={onOpenDevConsole}>
+                    <Terminal className="h-3.5 w-3.5" />
+                    打开开发控制台
+                  </Button>
+                </StackRow>
+              </Group>
+            )}
+          </div>
         </div>
       </div>
     </div>
