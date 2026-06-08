@@ -54,34 +54,27 @@ function readAccent(): AccentKey {
   return ACCENTS.some((a) => a.key === value) ? (value as AccentKey) : "multi";
 }
 
-const ACCENT_VARS = [
-  "--accent",
-  "--accent-press",
-  "--accent-text",
-  "--accent-weak",
-  "--accent-weak-2",
-];
-
-/** 把选中的强调色写到 :root 的 CSS 变量上（随明暗派生 text/weak）。 */
-function applyAccent(accentKey: AccentKey, effective: EffectiveTheme) {
-  if (typeof document === "undefined") return;
-  const root = document.documentElement;
-  const entry = ACCENTS.find((a) => a.key === accentKey);
-  if (!entry || accentKey === "multi") {
-    for (const name of ACCENT_VARS) root.style.removeProperty(name);
-    return;
-  }
-  const { accent, press } = entry;
-  root.style.setProperty("--accent", accent);
-  root.style.setProperty("--accent-press", press);
-  root.style.setProperty(
-    "--accent-text",
-    effective === "dark"
-      ? `color-mix(in srgb, ${accent} 62%, white)`
-      : `color-mix(in srgb, ${accent} 86%, black)`,
-  );
-  root.style.setProperty("--accent-weak", `color-mix(in srgb, ${accent} 14%, transparent)`);
-  root.style.setProperty("--accent-weak-2", `color-mix(in srgb, ${accent} 24%, transparent)`);
+/** 选中强调色对应的 CSS 变量(随明暗派生 text/weak)。
+ *  多色/默认返回空对象，交还给 globals.css 里 .ca-app 定义的默认蓝。
+ *  注意：.ca-app 在 CSS 里本地重定义了 --accent，所以必须把这些变量作为内联
+ *  style 写在 .ca-app 元素上(内联优先级最高)才能覆盖，写到 :root 会被它遮蔽。 */
+export function accentVars(
+  accent: AccentKey,
+  effective: EffectiveTheme,
+): Record<string, string> {
+  const entry = ACCENTS.find((a) => a.key === accent);
+  if (!entry || accent === "multi") return {};
+  const { accent: base, press } = entry;
+  return {
+    "--accent": base,
+    "--accent-press": press,
+    "--accent-text":
+      effective === "dark"
+        ? `color-mix(in srgb, ${base} 62%, white)`
+        : `color-mix(in srgb, ${base} 86%, black)`,
+    "--accent-weak": `color-mix(in srgb, ${base} 14%, transparent)`,
+    "--accent-weak-2": `color-mix(in srgb, ${base} 24%, transparent)`,
+  };
 }
 
 interface ThemeState {
@@ -103,13 +96,10 @@ export const useTheme = create<ThemeState>((set, get) => ({
   accent: readAccent(),
   setPref: (pref) => {
     if (typeof window !== "undefined") window.localStorage.setItem(THEME_KEY, pref);
-    const effective = resolveEffective(pref);
-    applyAccent(get().accent, effective);
-    set({ pref, effective });
+    set({ pref, effective: resolveEffective(pref) });
   },
   setAccent: (accent) => {
     if (typeof window !== "undefined") window.localStorage.setItem(ACCENT_KEY, accent);
-    applyAccent(accent, get().effective);
     set({ accent });
   },
   toggle: () => {
@@ -117,10 +107,7 @@ export const useTheme = create<ThemeState>((set, get) => ({
   },
   sync: () => {
     const pref = readPref();
-    const accent = readAccent();
-    const effective = resolveEffective(pref);
-    applyAccent(accent, effective);
-    set({ pref, effective, accent });
+    set({ pref, accent: readAccent(), effective: resolveEffective(pref) });
   },
 }));
 
@@ -129,13 +116,7 @@ if (typeof window !== "undefined" && window.matchMedia) {
   window
     .matchMedia("(prefers-color-scheme: dark)")
     .addEventListener?.("change", () => {
-      const { pref, accent } = useTheme.getState();
-      if (pref !== "auto") return;
-      const effective = resolveEffective("auto");
-      applyAccent(accent, effective);
-      useTheme.setState({ effective });
+      if (useTheme.getState().pref !== "auto") return;
+      useTheme.setState({ effective: resolveEffective("auto") });
     });
 }
-
-// 首屏即把已保存的强调色应用上（data-theme 由 Home 渲染到 .ca-app）。
-applyAccent(readAccent(), resolveEffective(readPref()));
