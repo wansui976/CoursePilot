@@ -232,25 +232,43 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
                 &video_id,
                 &asr_job.id,
                 0.16,
-                "压缩音频，准备上传",
+                "切分音频，准备分段上传",
             )
             .await?;
-            // 整段 base64 上传：1 小时 WAV ≈150MB 会触发 413，先压成 MP3（≈28MB）。
-            match audio::wav_to_mp3(&audio_path).await {
-                Ok(mp3) => {
-                    emit_running_progress(
-                        &app,
-                        &db,
-                        &video_id,
-                        &asr_job.id,
-                        0.28,
-                        "云端识别中（火山引擎）",
-                    )
-                    .await?;
-                    volcengine_auc::run_volcengine_file(&mp3, &app_id, &access_token).await
-                }
-                Err(e) => Err(e),
-            }
+            // 分段并行上传：把长音频切成多段 MP3 分别提交、并行识别，再按时间偏移合并，
+            // 比整段上传快很多（服务端并行处理 + 单段体积小，避免 413）。段长/并发可在
+            // 设置里覆盖；默认 5 分钟一段、4 路并发，每段指数回退重试两次。
+            let chunk_secs = sqlx::query_scalar::<_, String>(
+                "SELECT value FROM settings WHERE key='volcengine_asr_chunk_secs'",
+            )
+            .fetch_optional(&db.pool)
+            .await?
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .unwrap_or(volcengine_auc::DEFAULT_CHUNK_SECS);
+            let concurrency = sqlx::query_scalar::<_, String>(
+                "SELECT value FROM settings WHERE key='volcengine_asr_concurrency'",
+            )
+            .fetch_optional(&db.pool)
+            .await?
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .unwrap_or(volcengine_auc::DEFAULT_CONCURRENCY);
+            emit_running_progress(
+                &app,
+                &db,
+                &video_id,
+                &asr_job.id,
+                0.28,
+                "云端分段识别中（火山引擎）",
+            )
+            .await?;
+            volcengine_auc::run_volcengine_file_chunked(
+                &audio_path,
+                &app_id,
+                &access_token,
+                chunk_secs,
+                concurrency,
+            )
+            .await
         }
         AsrBackend::Aliyun => {
             let api_key = crate::llm::keychain::get_secret_or_legacy(&db, "dashscope_api_key")

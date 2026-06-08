@@ -10,9 +10,12 @@
 use crate::error::{AppError, AppResult};
 use crate::pipeline::asr::WhisperJson;
 use crate::pipeline::volcengine_asr::response_payload_to_transcript;
+use crate::sidecar::{resolve, FFMPEG};
+use futures_util::stream::StreamExt;
 use serde_json::{json, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+use tokio::process::Command;
 use uuid::Uuid;
 
 const SUBMIT_URL: &str = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit";
@@ -24,25 +27,119 @@ const MESSAGE_HEADER: &str = "X-Api-Message";
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 const MAX_POLLS: u32 = 600; // 3s × 600 ≈ 30 分钟上限
 
+/// 分段识别默认参数：5 分钟一段、并发 4 路、每段指数回退重试两次。
+pub const DEFAULT_CHUNK_SECS: u64 = 300;
+pub const DEFAULT_CONCURRENCY: usize = 4;
+const MAX_RETRIES: u32 = 2;
+
+/// 整段上传识别（短音频或关闭分段时用）。内部带指数回退重试两次。
 pub async fn run_volcengine_file(
     audio: &Path,
     app_id: &str,
     access_token: &str,
 ) -> AppResult<WhisperJson> {
-    let app_id = app_id.trim();
-    let access_token = access_token.trim();
+    let (app_id, access_token) = check_credentials(app_id, access_token)?;
+    let audio_bytes = tokio::fs::read(audio).await?;
+    let client = reqwest::Client::new();
+    recognize_bytes_with_retry(&client, &app_id, &access_token, &audio_bytes).await
+}
+
+/// 分段并行识别：把长音频按固定时长切成多段 MP3，分别提交、并行轮询，再按各段
+/// 的时间偏移合并。相比整段上传更快——服务端可并行处理、单次上传体积也更小。
+/// 每段都带「指数回退重试两次」，个别分段抖动不会让整条任务失败。
+pub async fn run_volcengine_file_chunked(
+    wav: &Path,
+    app_id: &str,
+    access_token: &str,
+    chunk_secs: u64,
+    concurrency: usize,
+) -> AppResult<WhisperJson> {
+    let (app_id, access_token) = check_credentials(app_id, access_token)?;
+    let chunk_secs = if chunk_secs == 0 {
+        DEFAULT_CHUNK_SECS
+    } else {
+        chunk_secs
+    };
+    let concurrency = concurrency.clamp(1, 16);
+
+    // 切片到临时目录；无论成功失败都清理。
+    let chunk_dir = wav.with_file_name("vc_chunks");
+    let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
+    tokio::fs::create_dir_all(&chunk_dir).await?;
+    let split = split_audio_to_mp3(wav, &chunk_dir, chunk_secs).await;
+    let chunks = match split {
+        Ok(c) => c,
+        Err(error) => {
+            let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
+            return Err(error);
+        }
+    };
+    // 只有一段就直接整段走（省去合并），仍带重试。
+    if chunks.len() <= 1 {
+        let single = match chunks.first() {
+            Some(path) => path.clone(),
+            None => {
+                let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
+                return Err(AppError::Pipeline("音频切片为空，无法识别".into()));
+            }
+        };
+        let client = reqwest::Client::new();
+        let bytes = tokio::fs::read(&single).await?;
+        let out = recognize_bytes_with_retry(&client, &app_id, &access_token, &bytes).await;
+        let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
+        return out;
+    }
+
+    let client = reqwest::Client::new();
+    let results: Vec<AppResult<(usize, WhisperJson)>> = futures_util::stream::iter(
+        chunks.into_iter().enumerate().map(|(idx, path)| {
+            let client = client.clone();
+            let app_id = app_id.clone();
+            let access_token = access_token.clone();
+            async move {
+                let bytes = tokio::fs::read(&path).await?;
+                let json =
+                    recognize_bytes_with_retry(&client, &app_id, &access_token, &bytes).await?;
+                Ok((idx, json))
+            }
+        }),
+    )
+    .buffer_unordered(concurrency)
+    .collect()
+    .await;
+
+    let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
+
+    // 任一段重试两次后仍失败 → 整体失败（避免悄悄丢字幕）。
+    let mut parts: Vec<(usize, WhisperJson)> = Vec::with_capacity(results.len());
+    for result in results {
+        parts.push(result?);
+    }
+    Ok(merge_chunk_transcripts(parts, chunk_secs as i64 * 1000))
+}
+
+fn check_credentials(app_id: &str, access_token: &str) -> AppResult<(String, String)> {
+    let app_id = app_id.trim().to_string();
+    let access_token = access_token.trim().to_string();
     if app_id.is_empty() || access_token.is_empty() {
         return Err(AppError::Config(
             "missing Volcengine ASR credentials：请在设置里填写 App ID 与 Access Token".into(),
         ));
     }
+    Ok((app_id, access_token))
+}
 
-    let audio_bytes = tokio::fs::read(audio).await?;
+/// 一次「提交 + 轮询」完整识别一段音频字节。
+async fn recognize_bytes(
+    client: &reqwest::Client,
+    app_id: &str,
+    access_token: &str,
+    audio_bytes: &[u8],
+) -> AppResult<WhisperJson> {
     let request_id = Uuid::new_v4().to_string();
-    let client = reqwest::Client::new();
 
     // ---- 1. 提交任务 ----
-    let body = build_submit_body(&request_id, &base64_encode(&audio_bytes));
+    let body = build_submit_body(&request_id, &base64_encode(audio_bytes));
     let resp = client
         .post(SUBMIT_URL)
         .header("X-Api-App-Key", app_id)
@@ -99,6 +196,101 @@ pub async fn run_volcengine_file(
     Err(AppError::Pipeline(
         "volcengine 录音文件识别轮询超时（超过 30 分钟仍未返回结果）".into(),
     ))
+}
+
+/// 在 recognize_bytes 外包一层指数回退重试：失败后等 2s、4s 再试，最多重试两次。
+async fn recognize_bytes_with_retry(
+    client: &reqwest::Client,
+    app_id: &str,
+    access_token: &str,
+    audio_bytes: &[u8],
+) -> AppResult<WhisperJson> {
+    let mut attempt = 0u32;
+    loop {
+        match recognize_bytes(client, app_id, access_token, audio_bytes).await {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                if attempt >= MAX_RETRIES {
+                    return Err(error);
+                }
+                let backoff = Duration::from_secs(2u64.pow(attempt + 1));
+                tracing::warn!(
+                    "volcengine 分段识别第 {} 次失败：{error}；{:?} 后重试",
+                    attempt + 1,
+                    backoff
+                );
+                tokio::time::sleep(backoff).await;
+                attempt += 1;
+            }
+        }
+    }
+}
+
+/// 用 ffmpeg segment 复用器把 WAV 一刀切成多段定长 MP3（mono/16kHz/48kbps），
+/// 返回按文件名排序的分片路径。第 i 段的起始时间约为 i × chunk_secs。
+async fn split_audio_to_mp3(
+    wav: &Path,
+    out_dir: &Path,
+    chunk_secs: u64,
+) -> AppResult<Vec<PathBuf>> {
+    let ffmpeg = resolve(&FFMPEG, None)?;
+    let pattern = out_dir.join("chunk_%04d.mp3");
+    let status = Command::new(&ffmpeg)
+        .kill_on_drop(true)
+        .args(["-y", "-i"])
+        .arg(wav)
+        .args([
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-b:a",
+            "48k",
+            "-f",
+            "segment",
+            "-segment_time",
+            &chunk_secs.to_string(),
+        ])
+        .arg(&pattern)
+        .status()
+        .await
+        .map_err(|error| AppError::Pipeline(format!("ffmpeg segment spawn: {error}")))?;
+    if !status.success() {
+        return Err(AppError::Pipeline(format!("ffmpeg segment failed: {status}")));
+    }
+    let mut files = Vec::new();
+    let mut entries = tokio::fs::read_dir(out_dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("mp3") {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// 把各分段的识别结果按时间偏移（第 i 段 +i×chunk_ms）平移后合并、按起始时间排序。
+fn merge_chunk_transcripts(mut parts: Vec<(usize, WhisperJson)>, chunk_ms: i64) -> WhisperJson {
+    parts.sort_by_key(|(idx, _)| *idx);
+    let mut merged = Vec::new();
+    for (idx, json) in parts {
+        let offset = idx as i64 * chunk_ms;
+        for mut segment in json.transcription {
+            segment.offsets.from += offset;
+            segment.offsets.to += offset;
+            for token in &mut segment.tokens {
+                token.offsets.from += offset;
+                token.offsets.to += offset;
+            }
+            merged.push(segment);
+        }
+    }
+    merged.sort_by_key(|segment| segment.offsets.from);
+    WhisperJson {
+        transcription: merged,
+    }
 }
 
 pub fn build_submit_body(request_id: &str, audio_base64: &str) -> Value {
@@ -192,6 +384,36 @@ mod tests {
         assert_eq!(body["request"]["model_name"], "bigmodel");
         assert_eq!(body["request"]["show_utterances"], true);
         assert_eq!(body["user"]["uid"], "req-1");
+    }
+
+    #[test]
+    fn merges_chunks_with_time_offset() {
+        let chunk0: WhisperJson = serde_json::from_value(json!({
+            "transcription": [{
+                "text": "第一段",
+                "offsets": { "from": 100, "to": 900 },
+                "tokens": [{ "text": "第", "offsets": { "from": 100, "to": 300 } }]
+            }]
+        }))
+        .unwrap();
+        let chunk1: WhisperJson = serde_json::from_value(json!({
+            "transcription": [{
+                "text": "第二段",
+                "offsets": { "from": 50, "to": 700 },
+                "tokens": []
+            }]
+        }))
+        .unwrap();
+
+        // 故意乱序传入，验证按 idx 排序后再平移合并。
+        let merged = merge_chunk_transcripts(vec![(1, chunk1), (0, chunk0)], 300_000);
+        assert_eq!(merged.transcription.len(), 2);
+        // 第 0 段不偏移。
+        assert_eq!(merged.transcription[0].offsets.from, 100);
+        assert_eq!(merged.transcription[0].tokens[0].offsets.from, 100);
+        // 第 1 段整体 +300000ms（含其 token）。
+        assert_eq!(merged.transcription[1].offsets.from, 300_050);
+        assert_eq!(merged.transcription[1].offsets.to, 300_700);
     }
 
     #[test]
