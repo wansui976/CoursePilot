@@ -31,6 +31,7 @@ import { formatMs } from "@/lib/time";
 import { readPlaybackProgress } from "@/lib/playback";
 import { usePlayer } from "@/stores/player";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
+import { useTheme } from "@/stores/theme";
 
 const statusMeta = {
   pending: { label: "待处理" },
@@ -39,9 +40,6 @@ const statusMeta = {
   failed: { label: "处理失败" },
 } as const;
 
-type ThemeMode = "dark" | "light";
-
-const THEME_STORAGE_KEY = "course-ai-theme";
 const PANEL_WIDTH_STORAGE_KEY = "course-ai-study-panel-width";
 const VIEW_STORAGE_KEY = "course-ai-home-view";
 
@@ -52,13 +50,6 @@ function readInitialView(): LibraryView {
   return window.localStorage.getItem(VIEW_STORAGE_KEY) === "list"
     ? "list"
     : "grid";
-}
-
-function readInitialTheme(): ThemeMode {
-  if (typeof window === "undefined") return "light";
-  return window.localStorage.getItem(THEME_STORAGE_KEY) === "dark"
-    ? "dark"
-    : "light";
 }
 
 function readPanelWidth() {
@@ -73,7 +64,8 @@ export function Home() {
   const [showSettings, setShowSettings] = useState(false);
   const [showRecycleBin, setShowRecycleBin] = useState(false);
   const [showDevConsole, setShowDevConsole] = useState(false);
-  const [theme, setTheme] = useState<ThemeMode>(readInitialTheme);
+  const theme = useTheme((s) => s.effective);
+  const toggleTheme = useTheme((s) => s.toggle);
   const [view, setView] = useState<LibraryView>(readInitialView);
   const [libraryDrawerOpen, setLibraryDrawerOpen] = useState(false);
   const [openMenuVideoId, setOpenMenuVideoId] = useState<string | null>(null);
@@ -98,14 +90,6 @@ export function Home() {
     deviceLayout === "desktop" ||
     deviceLayout === "laptop" ||
     deviceLayout === "tablet-landscape";
-
-  const toggleTheme = () => {
-    setTheme((current) => {
-      const next = current === "light" ? "dark" : "light";
-      window.localStorage.setItem(THEME_STORAGE_KEY, next);
-      return next;
-    });
-  };
 
   const { data: videos = [] } = useQuery({
     queryKey: ["videos", selectedCourseId],
@@ -137,6 +121,11 @@ export function Home() {
     queryFn: () => ipc.videos.mediaUrl(selectedVideo!.id),
     enabled: !!selectedVideo,
   });
+
+  // 启动时按已保存的偏好同步主题与强调色（auto 解析系统明暗）。
+  useEffect(() => {
+    useTheme.getState().sync();
+  }, []);
 
   useEffect(() => {
     setVideo(selectedVideoId);
