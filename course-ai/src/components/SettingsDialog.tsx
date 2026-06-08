@@ -6,12 +6,14 @@ import {
   ChevronDown,
   ChevronLeft,
   FolderCog,
+  Palette,
   ScanText,
   Sparkles,
   Terminal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
+import { ACCENTS, useTheme, type ThemePref } from "@/stores/theme";
 import {
   getSlidesSensitivity,
   sensitivityToThreshold,
@@ -50,18 +52,62 @@ function Select({
   );
 }
 
-type SettingsCategory = "storage" | "asr" | "llm" | "courseware" | "dev";
+type SettingsCategory =
+  | "appearance"
+  | "storage"
+  | "asr"
+  | "llm"
+  | "courseware"
+  | "dev";
 
 const CATEGORY_META: Record<
   SettingsCategory,
   { label: string; icon: ReactNode; tint: string }
 > = {
+  appearance: { label: "外观", icon: <Palette className="h-3.5 w-3.5" />, tint: "#e0568f" },
   storage: { label: "存储", icon: <FolderCog className="h-3.5 w-3.5" />, tint: "#8e8e93" },
   asr: { label: "语音识别", icon: <AudioLines className="h-3.5 w-3.5" />, tint: "#2f6cea" },
   llm: { label: "大模型", icon: <Sparkles className="h-3.5 w-3.5" />, tint: "#a855f7" },
   courseware: { label: "课件 / OCR", icon: <ScanText className="h-3.5 w-3.5" />, tint: "#f59e0b" },
   dev: { label: "开发者", icon: <Terminal className="h-3.5 w-3.5" />, tint: "#64748b" },
 };
+
+const THEME_OPTIONS: { key: ThemePref; label: string }[] = [
+  { key: "light", label: "浅色" },
+  { key: "dark", label: "深色" },
+  { key: "auto", label: "自动" },
+];
+
+/** 外观主题的小缩略图（仿一个迷你窗口）。auto 用左浅右深的斜分。 */
+function ThemeMock({ pref }: { pref: ThemePref }) {
+  const light = { bg: "#e9eaf0", bar: "#f7f8fa", win: "#ffffff", line: "#d7dae2" };
+  const dark = { bg: "#1b1e25", bar: "#23262e", win: "#2c2f38", line: "#3a3e48" };
+  if (pref === "auto") {
+    return (
+      <span className="relative block h-full w-full overflow-hidden">
+        <span className="absolute inset-0" style={{ background: light.bg }} />
+        <span
+          className="absolute inset-0"
+          style={{ clipPath: "polygon(100% 0, 0 100%, 100% 100%)", background: dark.bg }}
+        />
+        <span
+          className="absolute left-1.5 top-1.5 h-1.5 w-7 rounded-full"
+          style={{ background: "var(--accent, #2f6cea)" }}
+        />
+      </span>
+    );
+  }
+  const c = pref === "dark" ? dark : light;
+  return (
+    <span className="relative block h-full w-full" style={{ background: c.bg }}>
+      <span className="absolute left-1.5 top-1.5 h-1.5 w-7 rounded-full" style={{ background: "var(--accent, #2f6cea)" }} />
+      <span
+        className="absolute bottom-1.5 left-1.5 right-1.5 top-4 rounded-[3px]"
+        style={{ background: c.win, boxShadow: `inset 0 0 0 1px ${c.line}` }}
+      />
+    </span>
+  );
+}
 
 /** 苹果系统设置风格的分组卡片：小标题 + 圆角卡片（行间细分隔线）+ 脚注。 */
 function Group({
@@ -163,7 +209,11 @@ export function SettingsPanel({
   onClose: () => void;
   onOpenDevConsole?: () => void;
 }) {
-  const [activeCategory, setActiveCategory] = useState<SettingsCategory>("storage");
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>("appearance");
+  const themePref = useTheme((s) => s.pref);
+  const setThemePref = useTheme((s) => s.setPref);
+  const accent = useTheme((s) => s.accent);
+  const setAccent = useTheme((s) => s.setAccent);
   const [root, setRoot] = useState("");
   const [model, setModel] = useState("large-v3-turbo");
   const [asrBackend, setAsrBackend] = useState("whisper");
@@ -307,7 +357,13 @@ export function SettingsPanel({
     setTimeout(() => setOcrSaved(""), 1500);
   }
 
-  const categories: SettingsCategory[] = ["storage", "asr", "llm", "courseware"];
+  const categories: SettingsCategory[] = [
+    "appearance",
+    "storage",
+    "asr",
+    "llm",
+    "courseware",
+  ];
   if (onOpenDevConsole) categories.push("dev");
 
   return (
@@ -361,6 +417,82 @@ export function SettingsPanel({
             <h2 className="mb-5 text-xl font-semibold text-[var(--text-strong)]">
               {CATEGORY_META[activeCategory].label}
             </h2>
+
+            {activeCategory === "appearance" && (
+              <>
+                <Group header="外观">
+                  <StackRow>
+                    <div className="flex gap-6">
+                      {THEME_OPTIONS.map((opt) => {
+                        const active = themePref === opt.key;
+                        return (
+                          <button
+                            key={opt.key}
+                            onClick={() => setThemePref(opt.key)}
+                            className="flex flex-col items-center gap-2"
+                            aria-pressed={active}
+                          >
+                            <span
+                              className={`block h-14 w-20 overflow-hidden rounded-lg ring-2 transition ${
+                                active
+                                  ? "ring-[var(--accent)]"
+                                  : "ring-[var(--border-subtle)] hover:ring-[var(--text-faint)]"
+                              }`}
+                            >
+                              <ThemeMock pref={opt.key} />
+                            </span>
+                            <span
+                              className={`text-xs ${
+                                active
+                                  ? "font-medium text-[var(--text-strong)]"
+                                  : "text-[var(--text-muted)]"
+                              }`}
+                            >
+                              {opt.label}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </StackRow>
+                </Group>
+
+                <Group
+                  header="强调色"
+                  footnote="影响按钮、选中态等点缀色；「多色」即默认蓝。"
+                >
+                  <StackRow>
+                    <div className="flex flex-wrap items-center gap-3">
+                      {ACCENTS.map((option) => {
+                        const selected = accent === option.key;
+                        return (
+                          <button
+                            key={option.key}
+                            onClick={() => setAccent(option.key)}
+                            title={option.label}
+                            aria-label={option.label}
+                            aria-pressed={selected}
+                            className={`grid h-7 w-7 place-items-center rounded-full ring-2 ring-offset-2 ring-offset-[var(--surface-card)] transition ${
+                              selected ? "ring-[var(--text-muted)]" : "ring-transparent"
+                            }`}
+                          >
+                            <span
+                              className="h-5 w-5 rounded-full"
+                              style={{
+                                background:
+                                  option.key === "multi"
+                                    ? "conic-gradient(from 210deg, #f25555, #f2a13d, #f2d83d, #5cc46b, #3d8bf2, #a05cf2, #f25590, #f25555)"
+                                    : option.accent,
+                              }}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </StackRow>
+                </Group>
+              </>
+            )}
 
             {activeCategory === "storage" && (
               <Group
