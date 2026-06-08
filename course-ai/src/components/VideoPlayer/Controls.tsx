@@ -85,9 +85,6 @@ export function Controls({
 
         <div className="min-w-2 flex-1" />
 
-        <button type="button" className={`${textButtonClass} hidden sm:block`}>
-          1080P 高清
-        </button>
         <div className="relative">
           <button
             type="button"
