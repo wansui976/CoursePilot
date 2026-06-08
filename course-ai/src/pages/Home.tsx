@@ -31,7 +31,7 @@ import { formatMs } from "@/lib/time";
 import { readPlaybackProgress } from "@/lib/playback";
 import { usePlayer } from "@/stores/player";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
-import { useTheme } from "@/stores/theme";
+import { accentVars, useTheme } from "@/stores/theme";
 
 const statusMeta = {
   pending: { label: "待处理" },
@@ -65,6 +65,7 @@ export function Home() {
   const [showRecycleBin, setShowRecycleBin] = useState(false);
   const [showDevConsole, setShowDevConsole] = useState(false);
   const theme = useTheme((s) => s.effective);
+  const accent = useTheme((s) => s.accent);
   const toggleTheme = useTheme((s) => s.toggle);
   const [view, setView] = useState<LibraryView>(readInitialView);
   const [libraryDrawerOpen, setLibraryDrawerOpen] = useState(false);
@@ -844,6 +845,7 @@ export function Home() {
       data-theme={theme}
       data-device={deviceLayout}
       data-view={isWorkbenchView ? "workbench" : "library"}
+      style={accentVars(accent, theme) as CSSProperties}
       className={`ca-app ${libraryDrawerOpen ? "drawer-open" : ""}`}
     >
       {isPhoneDevice && (

@@ -137,6 +137,16 @@ describe("Home", () => {
     expect(screen.getByRole("button", { name: "切换到夜晚模式" })).toBeInTheDocument();
   });
 
+  it("applies the chosen accent color as a CSS var on the app root", () => {
+    // .ca-app 在 CSS 里本地定义了 --accent，必须把强调色写成 .ca-app 的内联 style 才生效。
+    localStorage.setItem("course-ai-accent", "green");
+
+    const { container } = renderHome();
+    const root = container.firstElementChild as HTMLElement;
+
+    expect(root.style.getPropertyValue("--accent")).toBe("#34a853");
+  });
+
   it("shows the faithful course-library homepage after selecting a course", async () => {
     renderHome();
 
