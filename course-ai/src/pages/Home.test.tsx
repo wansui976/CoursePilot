@@ -145,6 +145,8 @@ describe("Home", () => {
     const root = container.firstElementChild as HTMLElement;
 
     expect(root.style.getPropertyValue("--accent")).toBe("#34a853");
+    // Tailwind primary 系列也应跟随强调色。
+    expect(root.style.getPropertyValue("--color-primary")).toBe("#34a853");
   });
 
   it("shows the faithful course-library homepage after selecting a course", async () => {

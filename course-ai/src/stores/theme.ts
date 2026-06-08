@@ -74,6 +74,9 @@ export function accentVars(
         : `color-mix(in srgb, ${base} 86%, black)`,
     "--accent-weak": `color-mix(in srgb, ${base} 14%, transparent)`,
     "--accent-weak-2": `color-mix(in srgb, ${base} 24%, transparent)`,
+    // Tailwind 的 primary 系列(bg-primary/text-primary/accent-primary 等)走这个
+    // @theme 令牌,一并联动,让用 primary 的元素也跟随强调色。
+    "--color-primary": base,
   };
 }
 
