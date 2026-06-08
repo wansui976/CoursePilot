@@ -24,6 +24,8 @@ dist-ssr/
 .env
 .env.local
 *.log
+*cookies*.txt
+*Cookies*.txt
 
 # App data
 .courseai/
