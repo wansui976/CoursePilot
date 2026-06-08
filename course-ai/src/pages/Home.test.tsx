@@ -158,7 +158,7 @@ describe("Home", () => {
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     expect(screen.getByRole("button", { name: "返回课程库" })).toBeInTheDocument();
-    expect(screen.getByText("学习工作台")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "学习工作台" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: video.title })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "开始处理" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("课程问答")).not.toBeInTheDocument();
@@ -167,18 +167,16 @@ describe("Home", () => {
     expect(screen.getByRole("separator", { name: "调整学习资料宽度" })).toBeInTheDocument();
   });
 
-  it("collapses the library columns after selecting a video so the player keeps usable width", async () => {
+  it("shows a rail with back button next to the learning workspace on wide screens", async () => {
     renderHome();
 
     fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
-    expect(screen.queryByText("课程库")).not.toBeInTheDocument();
-    expect(screen.queryByText("课程视频")).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "返回课程库" }),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText("学习资料面板")).toHaveClass("min-w-[380px]");
+    expect(screen.getByRole("navigation", { name: "工具栏" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回课程库" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "学习工作台" })).toBeInTheDocument();
+    expect(screen.getByLabelText("学习资料面板")).toBeInTheDocument();
   });
 
   it("starts processing from the homepage video card menu and shows the queue page", async () => {

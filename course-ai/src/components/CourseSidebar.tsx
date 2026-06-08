@@ -10,11 +10,13 @@ import {
   Settings,
   Sun,
   Trash2,
+  X,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
+import { cn } from "@/lib/utils";
 
 export function CourseSidebar({
   selectedCourseId,
@@ -27,6 +29,8 @@ export function CourseSidebar({
   queueCount = 0,
   onToggleQueue,
   onOpenRecycleBin,
+  onCloseDrawer,
+  className,
 }: {
   selectedCourseId: string | null;
   onSelect: (id: string) => void;
@@ -38,6 +42,8 @@ export function CourseSidebar({
   queueCount?: number;
   onToggleQueue?: () => void;
   onOpenRecycleBin?: () => void;
+  onCloseDrawer?: () => void;
+  className?: string;
 }) {
   const queryClient = useQueryClient();
   const { data: courses = [] } = useQuery({
@@ -100,16 +106,33 @@ export function CourseSidebar({
   return (
     <aside
       aria-label="课程侧栏"
-      className="flex h-full w-[250px] flex-none flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-sidebar)] px-3.5 py-[18px]"
+      className={cn(
+        "ca-side",
+        className,
+      )}
     >
       <div className="flex-none">
-        <div className="mb-4 flex items-center gap-2 text-[15px] font-semibold text-[var(--text-strong)]">
-          <Library className="h-4 w-4 text-primary" />
-          课程库
+        <div className="ca-brand">
+          <div className="logo">
+            <Library className="h-4 w-4" />
+          </div>
+          <div className="label">
+            <h1>课程库</h1>
+          </div>
+          {onCloseDrawer && (
+            <button
+              type="button"
+              aria-label="关闭课程库"
+              className="ca-icon-btn ml-auto"
+              onClick={onCloseDrawer}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
         <Button
           aria-label="新建课程"
-          className="h-10 w-full border border-dashed border-[var(--border-subtle)] bg-transparent text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+          className="ca-new-btn"
           size="sm"
           variant="outline"
           onClick={() => create.mutate()}
@@ -120,11 +143,7 @@ export function CourseSidebar({
         {onToggleQueue && (
           <Button
             aria-label="处理队列"
-            className={`mt-2 h-9 w-full justify-start ${
-              queueOpen
-                ? "bg-[var(--surface-card-active)] text-[var(--text-strong)]"
-                : "text-[var(--text-normal)]"
-            }`}
+            className={`ca-nav-item mt-2 ${queueOpen ? "active" : ""}`}
             size="sm"
             variant="ghost"
             onClick={onToggleQueue}
@@ -139,10 +158,10 @@ export function CourseSidebar({
           </Button>
         )}
       </div>
-      <div className="mt-6 mb-2 px-1 text-xs font-medium text-[var(--text-faint)]">
+      <div className="ca-nav-label">
         我的课程
       </div>
-      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+      <div className="ca-nav">
         {menuFor && (
           // 透明背板：点菜单外区域即关闭。
           <div className="fixed inset-0 z-10" onClick={closeMenu} />
@@ -169,18 +188,14 @@ export function CourseSidebar({
           return (
             <div
               key={course.id}
-              className={`group relative flex items-center rounded-md transition ${
-                selected
-                  ? "bg-[var(--surface-card-active)] text-[var(--text-strong)] shadow-sm"
-                  : "text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
-              }`}
+              className={`ca-nav-item group relative ${selected ? "active" : ""}`}
             >
               <button
                 onClick={() => onSelect(course.id)}
-                className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2.5 text-left text-sm"
+                className="ca-nav-button"
               >
-                <FolderOpen className="h-4 w-4 flex-none text-[var(--text-faint)]" />
-                <span className="min-w-0 flex-1 truncate">{course.name}</span>
+                <FolderOpen className="ic h-4 w-4" />
+                <span className="nm">{course.name}</span>
               </button>
               <button
                 aria-label="课程操作"
@@ -221,7 +236,7 @@ export function CourseSidebar({
           </div>
         )}
       </div>
-      <div className="mt-4 flex flex-none items-center gap-2 border-t border-[var(--border-subtle)] pt-3">
+      <div className="mt-4 flex flex-none flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-3">
         <Button
           size="icon"
           variant="ghost"
