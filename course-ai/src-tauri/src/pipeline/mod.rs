@@ -380,7 +380,13 @@ async fn run_ai_followups(
     jobs_list: &[jobs::Job],
 ) {
     use crate::llm::profiles::AiTask;
-    for (stage, task) in [("chapters", AiTask::Chapters), ("notes", AiTask::Notes)] {
+    for (stage, task) in [
+        ("chapters", AiTask::Chapters),
+        ("summary", AiTask::Summary),
+        ("notes", AiTask::Notes),
+        ("quiz", AiTask::Quiz),
+        ("mindmap", AiTask::Mindmap),
+    ] {
         let Some(job) = jobs_list.iter().find(|j| j.stage == stage) else {
             continue;
         };
@@ -407,7 +413,10 @@ async fn run_ai_followups(
             AiTask::Chapters => ai::generate_chapters(db, &provider, &model, video_id)
                 .await
                 .map(|_| ()),
+            AiTask::Summary => ai::generate_summary(db, &provider, &model, video_id).await,
             AiTask::Notes => ai::generate_notes(db, &provider, &model, video_id).await,
+            AiTask::Quiz => ai::generate_quiz(db, &provider, &model, video_id).await,
+            AiTask::Mindmap => ai::generate_mindmap(db, &provider, &model, video_id).await,
             _ => Ok(()),
         };
         match result {

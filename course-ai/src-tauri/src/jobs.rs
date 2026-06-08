@@ -6,8 +6,11 @@ use sqlx::FromRow;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
-// 流水线阶段顺序：抽音频 → 语音识别 → 生成章节 → 生成笔记。
-pub const STAGES: &[&str] = &["audio", "asr", "chapters", "notes"];
+// 流水线阶段顺序：抽音频 → 语音识别 → 章节 → 摘要 → 笔记 → 出题 → 脑图。
+// 字幕之后的 AI 产物全部由流水线自动生成，用户无需手动点「生成」。
+pub const STAGES: &[&str] = &[
+    "audio", "asr", "chapters", "summary", "notes", "quiz", "mindmap",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Job {

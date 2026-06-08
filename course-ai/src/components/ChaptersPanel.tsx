@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
+import { PanelActions } from "./PanelActions";
 
 export function ChaptersPanel({ videoId }: { videoId: string }) {
   const qc = useQueryClient();
@@ -17,30 +17,16 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
   });
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2">
-        <span className="text-sm text-[var(--text-muted)]">重点章节</span>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={generate.isPending}
-          onClick={() => generate.mutate()}
-        >
-          {generate.isPending
-            ? "生成中…"
-            : chapters.length
-              ? "重新生成"
-              : "AI 生成"}
-        </Button>
-      </div>
-      {generate.isError && (
-        <p className="px-3 py-2 text-xs text-red-400">
-          {String(generate.error)}
-        </p>
-      )}
-      <div className="flex-1 space-y-2 overflow-y-auto p-3">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0 px-3 pt-2 text-sm text-[var(--text-muted)]">重点章节</div>
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-12 pt-1">
+        {generate.isError && (
+          <p className="pb-1 text-xs text-red-400">{String(generate.error)}</p>
+        )}
         {chapters.length === 0 && (
-          <p className="text-sm text-[var(--text-faint)]">还没有章节，点右上角「AI 生成」。</p>
+          <p className="text-sm text-[var(--text-faint)]">
+            还没有章节，字幕就绪后会自动生成，也可点右下角重新生成。
+          </p>
         )}
         {chapters.map((c) => (
           <button
@@ -58,6 +44,11 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
           </button>
         ))}
       </div>
+      <PanelActions
+        onRegenerate={() => generate.mutate()}
+        regenerating={generate.isPending}
+        hasContent={chapters.length > 0}
+      />
     </div>
   );
 }
