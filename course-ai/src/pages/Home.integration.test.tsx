@@ -13,6 +13,7 @@ const { mockIpc } = vi.hoisted(() => ({
       addLocal: vi.fn(),
       mediaUrl: vi.fn(),
       ensurePlayable: vi.fn(),
+      ensureCrop: vi.fn(),
       cover: vi.fn(),
       updateTitle: vi.fn(),
       delete: vi.fn(),
@@ -97,6 +98,7 @@ describe("Home selected-video integration", () => {
     mockIpc.courses.list.mockResolvedValue([course]);
     mockIpc.videos.list.mockResolvedValue([video]);
     mockIpc.videos.mediaUrl.mockResolvedValue("http://127.0.0.1:1234/m/video-1");
+    mockIpc.videos.ensureCrop.mockResolvedValue({ top: 0, right: 0, bottom: 0, left: 0 });
     mockIpc.videos.cover.mockResolvedValue([]);
     mockIpc.pipeline.jobs.mockResolvedValue([]);
     mockIpc.pipeline.process.mockResolvedValue(undefined);
