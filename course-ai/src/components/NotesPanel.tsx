@@ -5,8 +5,8 @@ import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
-import { Button } from "@/components/ui/button";
-import { ExportMenu, type ExportItem } from "./ExportMenu";
+import { type ExportItem } from "./ExportMenu";
+import { PanelActions } from "./PanelActions";
 import { ipc } from "@/lib/ipc";
 import { markdownToTiptap } from "@/lib/markdownToTiptap";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
@@ -25,11 +25,11 @@ const MindmapPanel = lazy(() =>
 type View = "notes" | "quiz" | "mindmap" | "ask" | "search";
 const VIEWS: { key: View; label: string; task?: "notes" | "quiz" | "mindmap" }[] =
   [
-    { key: "notes", label: "AI笔记", task: "notes" },
-    { key: "quiz", label: "AI出题", task: "quiz" },
-    { key: "mindmap", label: "AI脑图", task: "mindmap" },
+    { key: "notes", label: "笔记", task: "notes" },
+    { key: "quiz", label: "出题", task: "quiz" },
+    { key: "mindmap", label: "脑图", task: "mindmap" },
     { key: "ask", label: "提问" },
-    { key: "search", label: "搜索文稿" },
+    { key: "search", label: "搜索" },
   ];
 
 export function NotesPanel({ videoId }: { videoId: string }) {
@@ -111,7 +111,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
           : [];
 
   return (
-    <div ref={rootRef} className="flex h-full flex-col">
+    <div ref={rootRef} className="relative flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
         {VIEWS.map((v) => (
           <button
@@ -126,26 +126,13 @@ export function NotesPanel({ videoId }: { videoId: string }) {
             {v.label}
           </button>
         ))}
-        <div className="ml-auto flex items-center gap-2">
-          <ExportMenu items={exportItems} />
-          {currentTask && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={generate.isPending}
-              onClick={() => generate.mutate(currentTask)}
-            >
-              {generate.isPending ? "生成中…" : `生成${current.label}`}
-            </Button>
-          )}
-        </div>
       </div>
       {generate.isError && (
         <p className="px-3 py-2 text-xs text-red-400">
           {String(generate.error)}
         </p>
       )}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto pb-12">
         {view === "notes" && <EditorContent editor={editor} />}
         {(view === "quiz" || view === "mindmap") && (
           <Suspense
@@ -160,6 +147,14 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         {view === "ask" && <RagSearchPanel videoId={videoId} mode="ask" />}
         {view === "search" && <RagSearchPanel videoId={videoId} mode="search" />}
       </div>
+      {currentTask && (
+        <PanelActions
+          onRegenerate={() => generate.mutate(currentTask)}
+          regenerating={generate.isPending}
+          hasContent={view === "notes" ? !!notesContent : undefined}
+          exportItems={exportItems}
+        />
+      )}
     </div>
   );
 }

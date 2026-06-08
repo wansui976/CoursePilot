@@ -32,7 +32,7 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
   if (!md) {
     return (
       <p className="p-4 text-sm text-[var(--text-faint)]">
-        还没有脑图，点右上角「生成AI脑图」。
+        还没有脑图，字幕就绪后会自动生成，也可点右下角重新生成。
       </p>
     );
   }

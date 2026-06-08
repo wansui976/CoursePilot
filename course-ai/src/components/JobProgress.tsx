@@ -3,12 +3,15 @@ import { ipc } from "@/lib/ipc";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 
 // 流水线顺序与中文标签（与后端 jobs::STAGES 对应）。
-const STAGE_ORDER = ["audio", "asr", "chapters", "notes"];
+const STAGE_ORDER = ["audio", "asr", "chapters", "summary", "notes", "quiz", "mindmap"];
 const STAGE_LABEL: Record<string, string> = {
   audio: "提取音频",
   asr: "语音识别",
   chapters: "生成章节",
+  summary: "生成摘要",
   notes: "生成笔记",
+  quiz: "生成出题",
+  mindmap: "生成脑图",
 };
 const STATUS_LABEL: Record<string, string> = {
   pending: "待处理",
