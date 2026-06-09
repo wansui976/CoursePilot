@@ -1060,6 +1060,44 @@ button {
   display: none;
 }
 
+/* 手机横屏：宽而矮，竖排会让 16:9 视频高过屏幕、把资料面板挤没。改成左右并排
+   ——视频占左侧填满高度，资料面板固定在右侧并独立滚动（像横屏看视频边看笔记）。
+   放在所有 phone 竖排规则之后，靠源码顺序覆盖。 */
+@media (orientation: landscape) {
+  .ca-app[data-device="phone"] .ca-wb {
+    flex-direction: row;
+  }
+
+  .ca-app[data-device="phone"] .ca-player-col {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+    border-bottom: none;
+  }
+
+  .ca-app[data-device="phone"] .ca-panel-col {
+    flex: 0 0 min(46%, 460px);
+    min-height: 0;
+    border-left: 1px solid var(--line);
+  }
+
+  /* 视频不再强制 16:9 占满整宽，改为填满左栏高度（黑边留白即可）。 */
+  .ca-app[data-device="phone"] .ca-stage-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    padding: 10px 14px 14px;
+  }
+
+  .ca-app[data-device="phone"] .ca-stage {
+    aspect-ratio: auto;
+  }
+
+  .ca-app[data-device="phone"] .ca-wb-head {
+    padding: 10px 14px 0;
+  }
+}
+
 .course-video-progress,
 .course-video-volume {
   --progress-percent: 0%;
