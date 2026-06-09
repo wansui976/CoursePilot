@@ -14,7 +14,8 @@ import {
   Sun,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { onBackButtonPress } from "@tauri-apps/api/app";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { CourseSidebar } from "@/components/CourseSidebar";
 import { RecycleBin } from "@/components/RecycleBin";
@@ -32,6 +33,7 @@ import { readPlaybackProgress } from "@/lib/playback";
 import { usePlayer } from "@/stores/player";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 import { accentVars, useTheme } from "@/stores/theme";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const statusMeta = {
   pending: { label: "待处理" },
@@ -91,6 +93,15 @@ export function Home() {
     deviceLayout === "desktop" ||
     deviceLayout === "laptop" ||
     deviceLayout === "tablet-landscape";
+  const studyPanelWidthForLayout =
+    deviceLayout === "tablet-landscape"
+      ? Math.min(studyPanelWidth, 420)
+      : studyPanelWidth;
+  const isAndroidDevice =
+    deviceLayout === "phone" ||
+    deviceLayout === "tablet-portrait" ||
+    deviceLayout === "tablet-landscape";
+  const androidBackGuard = useRef(0);
 
   const { data: videos = [] } = useQuery({
     queryKey: ["videos", selectedCourseId],
@@ -131,6 +142,68 @@ export function Home() {
   useEffect(() => {
     setVideo(selectedVideoId);
   }, [selectedVideoId, setVideo]);
+
+  const goBackOneLevel = useCallback(() => {
+    const now = Date.now();
+    if (now - androidBackGuard.current < 250) return;
+    androidBackGuard.current = now;
+
+    if (libraryDrawerOpen) {
+      closeLibraryDrawer();
+      return;
+    }
+    if (showSettings || showRecycleBin || showDevConsole) {
+      setShowSettings(false);
+      setShowRecycleBin(false);
+      setShowDevConsole(false);
+      return;
+    }
+    if (queueOpen) {
+      setSelectedVideoId(null);
+      setQueueOpen(false);
+      return;
+    }
+    if (selectedVideoId) {
+      returnToLibrary();
+      return;
+    }
+    openLibraryDrawer();
+  }, [
+    libraryDrawerOpen,
+    queueOpen,
+    selectedVideoId,
+    showDevConsole,
+    showRecycleBin,
+    showSettings,
+  ]);
+
+  useEffect(() => {
+    if (!isAndroidDevice) return;
+
+    let cancelled = false;
+    let closeListener: (() => void) | null = null;
+    let backListener: { unregister: () => Promise<void> } | null = null;
+
+    void (async () => {
+      closeListener = await getCurrentWindow().onCloseRequested((event) => {
+        event.preventDefault();
+        goBackOneLevel();
+      });
+      backListener = await onBackButtonPress(() => {
+        goBackOneLevel();
+      });
+      if (cancelled) {
+        closeListener?.();
+        void backListener.unregister();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      closeListener?.();
+      void backListener?.unregister();
+    };
+  }, [goBackOneLevel, isAndroidDevice]);
 
   // ASR 完成后：章节、摘要、笔记、出题、脑图全部由后端流水线作为可见任务自动续跑
   // （见 pipeline::run_ai_followups），用户无需手动点「生成」。这里只补做不在后端任务
@@ -311,14 +384,25 @@ export function Home() {
         aria-label="处理队列页面"
         className="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
-        <header className="flex flex-none items-center justify-between gap-4 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-5">
-          <div className="min-w-0">
-            <h1 className="text-2xl font-semibold text-[var(--text-strong)]">
-              处理队列
-            </h1>
-            <p className="mt-1 text-sm text-[var(--text-muted)]">
-              抽音频 → 语音识别 → 生成章节 → 生成笔记
-            </p>
+        <header className="flex flex-none items-start justify-between gap-4 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-5">
+          <div className="flex min-w-0 items-start gap-3">
+            <button
+              type="button"
+              className="ca-icon-btn mt-0.5"
+              onClick={goBackOneLevel}
+              aria-label="返回上一菜单"
+              title="返回上一菜单"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <div className="min-w-0">
+              <h1 className="text-2xl font-semibold text-[var(--text-strong)]">
+                处理队列
+              </h1>
+              <p className="mt-1 text-sm text-[var(--text-muted)]">
+                抽音频 → 语音识别 → 生成章节 → 生成笔记
+              </p>
+            </div>
           </div>
           <span className="rounded-full bg-[var(--surface-card)] px-2.5 py-1 text-xs text-[var(--text-muted)]">
             {queuedVideos.length} 个任务
@@ -721,7 +805,7 @@ export function Home() {
         className="ca-wb"
         style={
           isWorkbenchWide
-            ? ({ "--study-panel-width": `${studyPanelWidth}px` } as CSSProperties)
+            ? ({ "--study-panel-width": `${studyPanelWidthForLayout}px` } as CSSProperties)
             : undefined
         }
       >
@@ -729,15 +813,26 @@ export function Home() {
           <header className="ca-wb-head">
             <div className="wb-title-row">
               {isPhoneDevice && (
-                <button
-                  type="button"
-                  className="hamb"
-                  onClick={openLibraryDrawer}
-                  title="打开课程库"
-                  aria-label="打开课程库"
-                >
-                  <Menu className="h-5 w-5" />
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="hamb"
+                    onClick={returnToLibrary}
+                    title="返回课程库"
+                    aria-label="返回课程库"
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    className="hamb"
+                    onClick={openLibraryDrawer}
+                    title="打开课程库"
+                    aria-label="打开课程库"
+                  >
+                    <Menu className="h-5 w-5" />
+                  </button>
+                </>
               )}
               <div className="min-w-0">
                 <h1 className="wb-title">{selectedVideo.title}</h1>
@@ -862,7 +957,7 @@ export function Home() {
           </aside>
         </>
       )}
-      {isWorkbenchView ? renderRail() : !isPhoneDevice ? renderSidebar() : null}
+      {isPhoneDevice ? null : isWorkbenchView ? renderRail() : renderSidebar()}
       <main className="ca-main">
         {showSettings ? (
           <SettingsPanel
