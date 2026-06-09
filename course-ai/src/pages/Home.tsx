@@ -618,7 +618,6 @@ export function Home() {
 
   function renderVideoGridCard(video: Video) {
     const progress = readPlaybackProgress(video.id);
-    const canContinue = progress.positionSec > 2 && progress.ratio < 0.995;
     const durationMs =
       video.duration_ms ??
       (progress.durationSec ? Math.round(progress.durationSec * 1000) : null);
@@ -661,16 +660,6 @@ export function Home() {
             </span>
           </span>
         </button>
-        {canContinue && (
-          <button
-            type="button"
-            aria-label={`继续学习：${video.title}`}
-            className="absolute left-3 top-3 z-10 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-white shadow transition hover:bg-primary/90"
-            onClick={() => openVideo(video.id)}
-          >
-            继续学习
-          </button>
-        )}
         {videoOptionsButton(video)}
         {videoMenu(video)}
         {videoRenameBox(video)}
@@ -680,7 +669,6 @@ export function Home() {
 
   function renderVideoListRow(video: Video) {
     const progress = readPlaybackProgress(video.id);
-    const canContinue = progress.positionSec > 2 && progress.ratio < 0.995;
     const durationMs =
       video.duration_ms ??
       (progress.durationSec ? Math.round(progress.durationSec * 1000) : null);
@@ -721,16 +709,6 @@ export function Home() {
           <span className="c-dur">{durationText}</span>
           <span className="c-status">{statusBadge(video)}</span>
         </button>
-        {canContinue && (
-          <button
-            type="button"
-            aria-label={`继续学习：${video.title}`}
-            className="absolute right-14 top-1/2 z-10 -translate-y-1/2 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-medium text-primary transition hover:bg-primary/20"
-            onClick={() => openVideo(video.id)}
-          >
-            继续学习
-          </button>
-        )}
         {videoOptionsButton(video)}
         {videoMenu(video)}
         {videoRenameBox(video)}
@@ -969,7 +947,6 @@ export function Home() {
     <div
       ref={appRef}
       data-theme={theme}
-      data-device={bucket === "wide" ? "desktop" : "phone"}
       data-bucket={bucket}
       data-view={isWorkbenchView ? "workbench" : "library"}
       style={accentVars(accent, theme) as CSSProperties}
