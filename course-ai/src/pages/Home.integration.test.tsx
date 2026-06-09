@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Home } from "./Home";
 import type { Course, Video } from "@/lib/types";
 
@@ -47,13 +47,23 @@ const { mockIpc } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
-const mockUseDeviceLayout = vi.hoisted(() => ({
-  useDeviceLayout: vi.fn(),
+const mockUseContainerWidth = vi.hoisted(() => ({
+  useContainerWidth: vi.fn(),
 }));
-vi.mock("@/lib/deviceLayout", () => mockUseDeviceLayout);
+const mockBackButtonPress = vi.hoisted(() => ({
+  onBackButtonPress: vi.fn(),
+}));
+const mockCurrentWindow = vi.hoisted(() => ({
+  onCloseRequested: vi.fn(),
+}));
+vi.mock("@/lib/useContainerWidth", () => mockUseContainerWidth);
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => `asset://${path}`,
+}));
+vi.mock("@tauri-apps/api/app", () => mockBackButtonPress);
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => mockCurrentWindow as never,
 }));
 
 const course: Course = {
@@ -97,8 +107,18 @@ function renderHome() {
 }
 
 describe("Home selected-video integration", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
-    mockUseDeviceLayout.useDeviceLayout.mockReturnValue("desktop");
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("wide");
+    mockBackButtonPress.onBackButtonPress.mockReset();
+    mockCurrentWindow.onCloseRequested.mockReset();
+    mockBackButtonPress.onBackButtonPress.mockImplementation(async () => ({
+      unregister: vi.fn(),
+    }));
+    mockCurrentWindow.onCloseRequested.mockImplementation(async () => vi.fn());
     mockIpc.courses.list.mockResolvedValue([course]);
     mockIpc.videos.list.mockResolvedValue([video]);
     mockIpc.videos.mediaUrl.mockResolvedValue("http://127.0.0.1:1234/m/video-1");
@@ -139,7 +159,7 @@ describe("Home selected-video integration", () => {
   });
 
   it("switches the selected-video shell to a stacked layout on narrow screens", async () => {
-    mockUseDeviceLayout.useDeviceLayout.mockReturnValue("phone");
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
 
     renderHome();
 
@@ -160,7 +180,7 @@ describe("Home selected-video integration", () => {
   });
 
   it("shows a rail instead of the full sidebar for iPad landscape workspaces", async () => {
-    mockUseDeviceLayout.useDeviceLayout.mockReturnValue("tablet-landscape");
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("wide");
 
     renderHome();
 
@@ -174,5 +194,38 @@ describe("Home selected-video integration", () => {
     expect(screen.getByRole("navigation", { name: "工具栏" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "返回课程库" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "打开课程库" })).not.toBeInTheDocument();
+  });
+
+  it("returns from the queue page when Android back is pressed", async () => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
+    vi.stubGlobal("navigator", { userAgent: "Android" });
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
+    fireEvent.click(
+      within(screen.getByRole("complementary", { name: "课程侧栏" })).getByRole("button", {
+        name: "处理队列",
+      }),
+    );
+
+    expect(screen.getByLabelText("处理队列页面")).toBeInTheDocument();
+
+    await waitFor(() => expect(mockBackButtonPress.onBackButtonPress).toHaveBeenCalled());
+    const handler = mockBackButtonPress.onBackButtonPress.mock.calls[
+      mockBackButtonPress.onBackButtonPress.mock.calls.length - 1
+    ]?.[0] as
+      | ((payload: { canGoBack: boolean }) => void)
+      | undefined;
+    expect(handler).toBeTypeOf("function");
+
+    act(() => {
+      handler?.({ canGoBack: false });
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByLabelText("处理队列页面")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("heading", { name: "课程视频" })).toBeInTheDocument();
   });
 });
