@@ -25,11 +25,12 @@ import { SettingsPanel } from "@/components/SettingsDialog";
 import { TabsPanel } from "@/components/TabsPanel";
 import { VideoCover } from "@/components/VideoCover";
 import { VideoPlayer } from "@/components/VideoPlayer";
-import { useDeviceLayout } from "@/lib/deviceLayout";
+import { useContainerWidth } from "@/lib/useContainerWidth";
 import { ipc } from "@/lib/ipc";
 import type { Video } from "@/lib/types";
 import { formatMs } from "@/lib/time";
 import { readPlaybackProgress } from "@/lib/playback";
+import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { usePlayer } from "@/stores/player";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 import { accentVars, useTheme } from "@/stores/theme";
@@ -85,22 +86,18 @@ export function Home() {
   const jobsByVideo = useJobs((s) => s.byVideo);
   const resetJobs = useJobs((s) => s.resetVideo);
   const generatedAfterAsr = useRef<Set<string>>(new Set());
-  const deviceLayout = useDeviceLayout();
+  const appRef = useRef<HTMLDivElement>(null);
+  const bucket = useContainerWidth(appRef);
   const isLightTheme = theme === "light";
   const themeToggleLabel = isLightTheme ? "切换到夜晚模式" : "切换到白天模式";
-  const isPhoneDevice = deviceLayout === "phone";
-  const isWorkbenchWide =
-    deviceLayout === "desktop" ||
-    deviceLayout === "laptop" ||
-    deviceLayout === "tablet-landscape";
-  const studyPanelWidthForLayout =
-    deviceLayout === "tablet-landscape"
-      ? Math.min(studyPanelWidth, 420)
-      : studyPanelWidth;
-  const isAndroidDevice =
-    deviceLayout === "phone" ||
-    deviceLayout === "tablet-portrait" ||
-    deviceLayout === "tablet-landscape";
+  // 窄屏（compact 手机竖 + medium 手机横/小平板）走非宽屏布局；wide 走主从。
+  const isPhoneDevice = bucket !== "wide";
+  const isWorkbenchWide = bucket === "wide";
+  const studyPanelWidthForLayout = studyPanelWidth;
+  // 硬件返回键是「平台能力」（仅 Android 有），与布局宽度无关：用 UA 判平台，
+  // 避免在桌面拦截窗口关闭。
+  const isAndroidPlatform =
+    typeof navigator !== "undefined" && /android/i.test(navigator.userAgent);
   const androidBackGuard = useRef(0);
 
   const { data: videos = [] } = useQuery({
@@ -119,6 +116,14 @@ export function Home() {
   function changeView(next: LibraryView) {
     setView(next);
     window.localStorage.setItem(VIEW_STORAGE_KEY, next);
+  }
+
+  function openVideo(videoId: string) {
+    const savedWidth = readVideoResumeState(videoId).studyPanelWidth;
+    setStudyPanelWidth(
+      savedWidth != null ? Math.min(720, Math.max(360, savedWidth)) : readPanelWidth(),
+    );
+    setSelectedVideoId(videoId);
   }
 
   const selectedVideo = videos.find((video) => video.id === selectedVideoId);
@@ -178,7 +183,7 @@ export function Home() {
   ]);
 
   useEffect(() => {
-    if (!isAndroidDevice) return;
+    if (!isAndroidPlatform) return;
 
     let cancelled = false;
     let closeListener: (() => void) | null = null;
@@ -203,7 +208,7 @@ export function Home() {
       closeListener?.();
       void backListener?.unregister();
     };
-  }, [goBackOneLevel, isAndroidDevice]);
+  }, [goBackOneLevel, isAndroidPlatform]);
 
   // ASR 完成后：章节、摘要、笔记、出题、脑图全部由后端流水线作为可见任务自动续跑
   // （见 pipeline::run_ai_followups），用户无需手动点「生成」。这里只补做不在后端任务
@@ -296,6 +301,9 @@ export function Home() {
       const next = Math.min(720, Math.max(360, startWidth - (move.clientX - startX)));
       setStudyPanelWidth(next);
       window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(next));
+      if (selectedVideoId) {
+        writeVideoResumeState(selectedVideoId, { studyPanelWidth: next });
+      }
     };
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
@@ -340,7 +348,7 @@ export function Home() {
 
   function openQueuedVideo(videoId: string) {
     setQueueOpen(false);
-    setSelectedVideoId(videoId);
+    openVideo(videoId);
   }
 
   function openLibraryDrawer() {
@@ -414,7 +422,7 @@ export function Home() {
               暂无正在处理的视频。导入或处理视频后会出现在这里。
             </div>
           ) : (
-            <div className="mx-auto flex max-w-3xl flex-col gap-3">
+            <div className="flex w-full flex-col gap-3">
               {queuedVideos.map((video) => {
                 const active = activeJobFor(video.id);
                 const progress = displayProgress(active);
@@ -610,6 +618,7 @@ export function Home() {
 
   function renderVideoGridCard(video: Video) {
     const progress = readPlaybackProgress(video.id);
+    const canContinue = progress.positionSec > 2 && progress.ratio < 0.995;
     const durationMs =
       video.duration_ms ??
       (progress.durationSec ? Math.round(progress.durationSec * 1000) : null);
@@ -621,7 +630,7 @@ export function Home() {
         <button
           className="block w-full text-left"
           aria-label={`打开视频：${video.title}`}
-          onClick={() => setSelectedVideoId(video.id)}
+          onClick={() => openVideo(video.id)}
         >
           <span className="ca-thumb">
             <VideoCover
@@ -652,6 +661,16 @@ export function Home() {
             </span>
           </span>
         </button>
+        {canContinue && (
+          <button
+            type="button"
+            aria-label={`继续学习：${video.title}`}
+            className="absolute left-3 top-3 z-10 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-white shadow transition hover:bg-primary/90"
+            onClick={() => openVideo(video.id)}
+          >
+            继续学习
+          </button>
+        )}
         {videoOptionsButton(video)}
         {videoMenu(video)}
         {videoRenameBox(video)}
@@ -661,6 +680,7 @@ export function Home() {
 
   function renderVideoListRow(video: Video) {
     const progress = readPlaybackProgress(video.id);
+    const canContinue = progress.positionSec > 2 && progress.ratio < 0.995;
     const durationMs =
       video.duration_ms ??
       (progress.durationSec ? Math.round(progress.durationSec * 1000) : null);
@@ -673,7 +693,7 @@ export function Home() {
         <button
           className="row-button"
           aria-label={`打开视频：${video.title}`}
-          onClick={() => setSelectedVideoId(video.id)}
+          onClick={() => openVideo(video.id)}
         >
           <span className="row-main">
             <span className="row-thumb">
@@ -701,6 +721,16 @@ export function Home() {
           <span className="c-dur">{durationText}</span>
           <span className="c-status">{statusBadge(video)}</span>
         </button>
+        {canContinue && (
+          <button
+            type="button"
+            aria-label={`继续学习：${video.title}`}
+            className="absolute right-14 top-1/2 z-10 -translate-y-1/2 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-medium text-primary transition hover:bg-primary/20"
+            onClick={() => openVideo(video.id)}
+          >
+            继续学习
+          </button>
+        )}
         {videoOptionsButton(video)}
         {videoMenu(video)}
         {videoRenameBox(video)}
@@ -937,8 +967,10 @@ export function Home() {
 
   return (
     <div
+      ref={appRef}
       data-theme={theme}
-      data-device={deviceLayout}
+      data-device={bucket === "wide" ? "desktop" : "phone"}
+      data-bucket={bucket}
       data-view={isWorkbenchView ? "workbench" : "library"}
       style={accentVars(accent, theme) as CSSProperties}
       className={`ca-app ${libraryDrawerOpen ? "drawer-open" : ""}`}
