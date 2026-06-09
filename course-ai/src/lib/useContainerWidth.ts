@@ -45,8 +45,8 @@ export function useContainerWidth(ref: RefObject<HTMLElement | null>): WidthBuck
     }
     const el = ref.current;
     const measure = () => {
-      const width = (el?.clientWidth || widthFromWindow()) | 0;
-      setBucket(bucketForWidth(width > 0 ? width : widthFromWindow()));
+      // el 脱离文档（clientWidth 0）时退回窗口宽度;都未知则 bucketForWidth(0)=compact。
+      setBucket(bucketForWidth(el?.clientWidth || widthFromWindow()));
     };
     measure();
     if (!el) return;
