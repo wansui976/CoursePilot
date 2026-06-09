@@ -42,6 +42,8 @@ const { mockIpc } = vi.hoisted(() => ({
       quiz: vi.fn(),
       mindmap: vi.fn(),
     },
+    settings: { get: vi.fn(), set: vi.fn() },
+    secrets: { set: vi.fn() },
     tools: { ocr: vi.fn(), importBilibili: vi.fn() },
   },
 }));
@@ -133,6 +135,9 @@ describe("Home selected-video integration", () => {
     mockIpc.ai.getSummary.mockResolvedValue(null);
     mockIpc.slides.list.mockResolvedValue([]);
     mockIpc.slides.screenshots.mockResolvedValue([]);
+    mockIpc.settings.get.mockResolvedValue(null);
+    mockIpc.settings.set.mockResolvedValue(undefined);
+    mockIpc.secrets.set.mockResolvedValue(undefined);
   });
 
   it("keeps visible learning UI when the real selected-video panels mount", async () => {
@@ -170,12 +175,9 @@ describe("Home selected-video integration", () => {
       "data-layout",
       "stacked",
     );
-    expect(screen.getByRole("button", { name: "打开课程库" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "打开课程库" }));
-
-    expect(screen.getByLabelText("课程库抽屉")).toHaveClass("translate-x-0");
-    expect(screen.getByRole("button", { name: "关闭课程库" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "打开课程库" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("学习资料面板")).toBeInTheDocument();
   });
 
@@ -203,11 +205,7 @@ describe("Home selected-video integration", () => {
     renderHome();
 
     fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
-    fireEvent.click(
-      within(screen.getByRole("complementary", { name: "课程侧栏" })).getByRole("button", {
-        name: "处理队列",
-      }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "队列" }));
 
     expect(screen.getByLabelText("处理队列页面")).toBeInTheDocument();
 
@@ -227,5 +225,22 @@ describe("Home selected-video integration", () => {
       expect(screen.queryByLabelText("处理队列页面")).not.toBeInTheDocument(),
     );
     expect(screen.getByRole("heading", { name: "课程视频" })).toBeInTheDocument();
+  });
+
+  it("uses bottom tabs and course-list drill-down on a compact screen", async () => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
+    renderHome();
+
+    const nav = await screen.findByRole("navigation", { name: "主导航" });
+    expect(within(nav).getByRole("button", { name: "课程" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "队列" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "设置" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "课程侧栏" })).toHaveClass(
+      "ca-course-screen",
+    );
+
+    fireEvent.click(within(nav).getByRole("button", { name: "设置" }));
+
+    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
   });
 });
