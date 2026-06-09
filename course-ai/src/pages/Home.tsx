@@ -6,7 +6,6 @@ import {
   Film,
   LayoutGrid,
   List,
-  Menu,
   Moon,
   MoreHorizontal,
   Play,
@@ -25,6 +24,7 @@ import { SettingsPanel } from "@/components/SettingsDialog";
 import { TabsPanel } from "@/components/TabsPanel";
 import { VideoCover } from "@/components/VideoCover";
 import { VideoPlayer } from "@/components/VideoPlayer";
+import { BottomTabBar, type CompactTab } from "@/components/BottomTabBar";
 import { useContainerWidth } from "@/lib/useContainerWidth";
 import { ipc } from "@/lib/ipc";
 import type { Video } from "@/lib/types";
@@ -71,7 +71,6 @@ export function Home() {
   const accent = useTheme((s) => s.accent);
   const toggleTheme = useTheme((s) => s.toggle);
   const [view, setView] = useState<LibraryView>(readInitialView);
-  const [libraryDrawerOpen, setLibraryDrawerOpen] = useState(false);
   const [openMenuVideoId, setOpenMenuVideoId] = useState<string | null>(null);
   const [renamingVideo, setRenamingVideo] = useState<{
     id: string;
@@ -80,6 +79,7 @@ export function Home() {
   const [queueOpen, setQueueOpen] = useState(false);
   const [queueTick, setQueueTick] = useState(0);
   const [queuedVideoIds, setQueuedVideoIds] = useState<string[]>([]);
+  const [compactTab, setCompactTab] = useState<CompactTab>("courses");
   const [studyPanelWidth, setStudyPanelWidth] = useState(readPanelWidth);
   const queryClient = useQueryClient();
   const setVideo = usePlayer((s) => s.setVideo);
@@ -153,10 +153,6 @@ export function Home() {
     if (now - androidBackGuard.current < 250) return;
     androidBackGuard.current = now;
 
-    if (libraryDrawerOpen) {
-      closeLibraryDrawer();
-      return;
-    }
     if (showSettings || showRecycleBin || showDevConsole) {
       setShowSettings(false);
       setShowRecycleBin(false);
@@ -172,10 +168,14 @@ export function Home() {
       returnToLibrary();
       return;
     }
-    openLibraryDrawer();
+    // 窄屏「课程」Tab:选了课程→退回课程列表;已在列表根层则不拦截(交系统)。
+    if (selectedCourseId) {
+      setSelectedCourseId(null);
+      return;
+    }
   }, [
-    libraryDrawerOpen,
     queueOpen,
+    selectedCourseId,
     selectedVideoId,
     showDevConsole,
     showRecycleBin,
@@ -351,14 +351,6 @@ export function Home() {
     openVideo(videoId);
   }
 
-  function openLibraryDrawer() {
-    setLibraryDrawerOpen(true);
-  }
-
-  function closeLibraryDrawer() {
-    setLibraryDrawerOpen(false);
-  }
-
   function selectCourse(id: string) {
     setSelectedCourseId(id);
     setSelectedVideoId(null);
@@ -366,7 +358,6 @@ export function Home() {
     setShowSettings(false);
     setShowRecycleBin(false);
     setShowDevConsole(false);
-    closeLibraryDrawer();
   }
 
   function toggleQueue() {
@@ -375,7 +366,6 @@ export function Home() {
     setShowRecycleBin(false);
     setShowDevConsole(false);
     setQueueOpen((open) => !open);
-    closeLibraryDrawer();
   }
 
   function returnToLibrary() {
@@ -384,6 +374,27 @@ export function Home() {
     setShowSettings(false);
     setShowRecycleBin(false);
     setShowDevConsole(false);
+  }
+
+  // 窄屏底部 Tab 切换:课程→回到课程下钻当前层;队列/设置→打开对应整页。
+  function selectCompactTab(tab: CompactTab) {
+    setCompactTab(tab);
+    if (tab === "courses") {
+      setQueueOpen(false);
+      setShowSettings(false);
+      setShowRecycleBin(false);
+      setShowDevConsole(false);
+    } else if (tab === "queue") {
+      setShowSettings(false);
+      setShowRecycleBin(false);
+      setShowDevConsole(false);
+      setQueueOpen(true);
+    } else {
+      setQueueOpen(false);
+      setShowRecycleBin(false);
+      setShowDevConsole(false);
+      setShowSettings(true);
+    }
   }
 
   function renderProcessingQueuePage() {
@@ -725,11 +736,11 @@ export function Home() {
               <button
                 type="button"
                 className="hamb"
-                onClick={openLibraryDrawer}
-                title="打开课程库"
-                aria-label="打开课程库"
+                onClick={() => setSelectedCourseId(null)}
+                title="返回课程库"
+                aria-label="返回课程库"
               >
-                <Menu className="h-5 w-5" />
+                <ChevronLeft className="h-5 w-5" />
               </button>
             )}
             <div className="tb-titles">
@@ -821,26 +832,15 @@ export function Home() {
           <header className="ca-wb-head">
             <div className="wb-title-row">
               {isPhoneDevice && (
-                <>
-                  <button
-                    type="button"
-                    className="hamb"
-                    onClick={returnToLibrary}
-                    title="返回课程库"
-                    aria-label="返回课程库"
-                  >
-                    <ChevronLeft className="h-5 w-5" />
-                  </button>
-                  <button
-                    type="button"
-                    className="hamb"
-                    onClick={openLibraryDrawer}
-                    title="打开课程库"
-                    aria-label="打开课程库"
-                  >
-                    <Menu className="h-5 w-5" />
-                  </button>
-                </>
+                <button
+                  type="button"
+                  className="hamb"
+                  onClick={returnToLibrary}
+                  title="返回"
+                  aria-label="返回"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
               )}
               <div className="min-w-0">
                 <h1 className="wb-title">{selectedVideo.title}</h1>
@@ -924,7 +924,6 @@ export function Home() {
         onSelect={selectCourse}
         onOpenSettings={() => {
           openMainView("settings");
-          closeLibraryDrawer();
         }}
         onToggleTheme={toggleTheme}
         theme={theme}
@@ -934,14 +933,37 @@ export function Home() {
         onToggleQueue={toggleQueue}
         onOpenRecycleBin={() => {
           openMainView("recycle");
-          closeLibraryDrawer();
         }}
-        onCloseDrawer={drawer ? closeLibraryDrawer : undefined}
+      />
+    );
+  }
+
+  // 窄屏「课程」Tab 的根页:整屏课程列表(复用 CourseSidebar 的增删改),回收站置于右上。
+  function renderCourseListScreen() {
+    return (
+      <CourseSidebar
+        variant="screen"
+        selectedCourseId={selectedCourseId}
+        onSelect={selectCourse}
+        theme={theme}
+        themeToggleLabel={themeToggleLabel}
+        onOpenRecycleBin={() => openMainView("recycle")}
       />
     );
   }
 
   const isWorkbenchView = !!selectedVideo && !showSettings && !showRecycleBin && !showDevConsole && !queueOpen;
+  // 窄屏底部 Tab 仅在「非工作台」时显示(工作台全屏沉浸)。
+  const showBottomTab = isPhoneDevice && !isWorkbenchView;
+  // 窄屏「课程」Tab 根层(未选课程、未开队列/设置/回收/控制台)→ 整屏课程列表。
+  const showCourseListScreen =
+    isPhoneDevice &&
+    compactTab === "courses" &&
+    !selectedCourseId &&
+    !queueOpen &&
+    !showSettings &&
+    !showRecycleBin &&
+    !showDevConsole;
 
   return (
     <div
@@ -950,22 +972,8 @@ export function Home() {
       data-bucket={bucket}
       data-view={isWorkbenchView ? "workbench" : "library"}
       style={accentVars(accent, theme) as CSSProperties}
-      className={`ca-app ${libraryDrawerOpen ? "drawer-open" : ""}`}
+      className="ca-app"
     >
-      {isPhoneDevice && (
-        <>
-          <div
-            className="ca-scrim"
-            onClick={closeLibraryDrawer}
-          />
-          <aside
-            aria-label="课程库抽屉"
-            className={`ca-drawer ${libraryDrawerOpen ? "translate-x-0" : ""}`}
-          >
-            {renderSidebar(true)}
-          </aside>
-        </>
-      )}
       {isPhoneDevice ? null : isWorkbenchView ? renderRail() : renderSidebar()}
       <main className="ca-main">
         {showSettings ? (
@@ -981,10 +989,19 @@ export function Home() {
           renderProcessingQueuePage()
         ) : selectedVideo ? (
           renderSelectedVideoWorkspace()
+        ) : showCourseListScreen ? (
+          renderCourseListScreen()
         ) : (
           renderCourseVideoLibrary()
         )}
       </main>
+      {showBottomTab && (
+        <BottomTabBar
+          active={compactTab}
+          queueCount={queuedVideoIds.length}
+          onSelect={selectCompactTab}
+        />
+      )}
     </div>
   );
 }
