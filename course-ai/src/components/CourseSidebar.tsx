@@ -1,4 +1,4 @@
-import { confirm as confirmDialog, open } from "@tauri-apps/plugin-dialog";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import {
   ClipboardList,
   FolderOpen,
@@ -16,7 +16,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
+import { pickDirectoryPath } from "@/lib/mobileFiles";
 import { cn } from "@/lib/utils";
+
+function nextCourseName(courses: { name: string }[]) {
+  const names = new Set(courses.map((course) => course.name));
+  if (!names.has("新课程")) return "新课程";
+  let index = 2;
+  while (names.has(`新课程 ${index}`)) index += 1;
+  return `新课程 ${index}`;
+}
 
 export function CourseSidebar({
   selectedCourseId,
@@ -31,11 +40,12 @@ export function CourseSidebar({
   onOpenRecycleBin,
   onCloseDrawer,
   className,
+  variant = "sidebar",
 }: {
   selectedCourseId: string | null;
   onSelect: (id: string) => void;
-  onOpenSettings: () => void;
-  onToggleTheme: () => void;
+  onOpenSettings?: () => void;
+  onToggleTheme?: () => void;
   theme: "dark" | "light";
   themeToggleLabel: string;
   queueOpen?: boolean;
@@ -44,6 +54,7 @@ export function CourseSidebar({
   onOpenRecycleBin?: () => void;
   onCloseDrawer?: () => void;
   className?: string;
+  variant?: "sidebar" | "screen";
 }) {
   const queryClient = useQueryClient();
   const { data: courses = [] } = useQuery({
@@ -52,9 +63,9 @@ export function CourseSidebar({
   });
   const create = useMutation({
     mutationFn: async () => {
-      const dir = await open({ directory: true, multiple: false });
-      if (!dir || Array.isArray(dir)) return null;
-      const name = dir.split(/[\\/]/).pop() || "Untitled";
+      const name = nextCourseName(courses);
+      const dir = await pickDirectoryPath(["courses", name]);
+      if (!dir) return null;
       return ipc.courses.create(name, dir);
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["courses"] }),
@@ -107,7 +118,7 @@ export function CourseSidebar({
     <aside
       aria-label="课程侧栏"
       className={cn(
-        "ca-side",
+        variant === "screen" ? "ca-course-screen" : "ca-side",
         className,
       )}
     >
@@ -127,6 +138,17 @@ export function CourseSidebar({
               onClick={onCloseDrawer}
             >
               <X className="h-4 w-4" />
+            </button>
+          )}
+          {variant === "screen" && onOpenRecycleBin && (
+            <button
+              type="button"
+              aria-label="回收站"
+              title="回收站"
+              className="ca-icon-btn ml-auto"
+              onClick={onOpenRecycleBin}
+            >
+              <Trash2 className="h-4 w-4" />
             </button>
           )}
         </div>
@@ -236,41 +258,43 @@ export function CourseSidebar({
           </div>
         )}
       </div>
-      <div className="mt-4 flex flex-none flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-3">
-        <Button
-          size="icon"
-          variant="ghost"
-          onClick={onToggleTheme}
-          title={themeToggleLabel}
-          aria-label={themeToggleLabel}
-        >
-          {theme === "light" ? (
-            <Moon className="h-4 w-4" />
-          ) : (
-            <Sun className="h-4 w-4" />
-          )}
-        </Button>
-        {onOpenRecycleBin && (
+      {variant !== "screen" && (
+        <div className="mt-4 flex flex-none flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-3">
           <Button
             size="icon"
             variant="ghost"
-            onClick={onOpenRecycleBin}
-            title="回收站"
-            aria-label="回收站"
+            onClick={onToggleTheme}
+            title={themeToggleLabel}
+            aria-label={themeToggleLabel}
           >
-            <Trash2 className="h-4 w-4" />
+            {theme === "light" ? (
+              <Moon className="h-4 w-4" />
+            ) : (
+              <Sun className="h-4 w-4" />
+            )}
           </Button>
-        )}
-        <Button
-          className="min-w-0 flex-1 justify-start"
-          size="sm"
-          variant="ghost"
-          onClick={onOpenSettings}
-        >
-          <Settings className="h-4 w-4" />
-          设置
-        </Button>
-      </div>
+          {onOpenRecycleBin && (
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={onOpenRecycleBin}
+              title="回收站"
+              aria-label="回收站"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
+          <Button
+            className="min-w-0 flex-1 justify-start"
+            size="sm"
+            variant="ghost"
+            onClick={onOpenSettings}
+          >
+            <Settings className="h-4 w-4" />
+            设置
+          </Button>
+        </div>
+      )}
     </aside>
   );
 }
