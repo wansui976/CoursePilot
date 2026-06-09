@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import {
   AudioLines,
   Check,
@@ -12,7 +12,7 @@ import {
   Terminal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useDeviceLayout } from "@/lib/deviceLayout";
+import { useContainerWidth } from "@/lib/useContainerWidth";
 import { ipc } from "@/lib/ipc";
 import { ACCENTS, useTheme, type ThemePref } from "@/stores/theme";
 import {
@@ -214,8 +214,9 @@ export function SettingsPanel({
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>("appearance");
   // 竖屏（手机 / 平板竖屏）：取消左侧分类栏，改成「分类列表 → 进入某分类」的下钻，
   // 顶部左上角放返回按钮 + 当前层级标题。entered=false 显示分类列表，true 显示该分类详情。
-  const deviceLayout = useDeviceLayout();
-  const compact = deviceLayout === "phone" || deviceLayout === "tablet-portrait";
+  // 设置面板自身随 .ca-app 宽度走窄屏下钻；非宽屏即紧凑。
+  const settingsRef = useRef<HTMLDivElement>(null);
+  const compact = useContainerWidth(settingsRef) !== "wide";
   const [entered, setEntered] = useState(false);
   const themePref = useTheme((s) => s.pref);
   const setThemePref = useTheme((s) => s.setPref);
@@ -379,7 +380,10 @@ export function SettingsPanel({
   const onHeaderBack = inDetail ? () => setEntered(false) : onClose;
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
+    <div
+      ref={settingsRef}
+      className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]"
+    >
       {/* 头部 */}
       <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-5 py-3.5">
         <button
