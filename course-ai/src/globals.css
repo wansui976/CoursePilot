@@ -936,142 +936,139 @@ button {
   overflow: hidden;
 }
 
-.ca-app[data-device="tablet-portrait"] .ca-wb {
-  display: block;
-  overflow-y: auto;
+/* ===== 窄屏（compact 手机竖 + medium 手机横/小平板）响应式 ===== */
+
+/* 窄屏共享：隐藏拖拽分隔条（无主从两栏可拖） */
+.ca-app[data-bucket="compact"] .ca-resizer,
+.ca-app[data-bucket="medium"] .ca-resizer {
+  display: none;
 }
 
-/* 手机竖屏：视频钉在顶部（标题 + 16:9 画面），下方资料面板填满余下高度并独立
-   滚动（类似 YouTube）。整页不滚动，避免内部用 h-full 的标签面板高度塌陷。 */
-.ca-app[data-device="phone"] .ca-wb {
+/* ---- compact（手机竖屏）：视频钉顶（标题 + 16:9），资料面板填满余下高度独立滚动 ---- */
+.ca-app[data-bucket="compact"] .ca-wb {
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.ca-app[data-device="phone"] .ca-player-col {
+.ca-app[data-bucket="compact"] .ca-player-col {
   flex: 0 0 auto;
-}
-
-.ca-app[data-device="phone"] .ca-panel-col {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.ca-app[data-device="tablet-portrait"] .ca-player-col,
-.ca-app[data-device="phone"] .ca-player-col {
   border-bottom: 1px solid var(--line);
   overflow: visible;
 }
 
-.ca-app[data-device="tablet-portrait"] .ca-stage-wrap,
-.ca-app[data-device="phone"] .ca-stage-wrap {
-  display: block;
+.ca-app[data-bucket="compact"] .ca-panel-col {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
-.ca-app[data-device="tablet-portrait"] .ca-stage,
-.ca-app[data-device="phone"] .ca-stage {
+.ca-app[data-bucket="compact"] .ca-stage-wrap {
+  display: block;
+  padding: 12px 16px 16px;
+}
+
+.ca-app[data-bucket="compact"] .ca-stage {
   aspect-ratio: 16 / 9;
 }
 
-.ca-app[data-device="tablet-portrait"] .ca-resizer,
-.ca-app[data-device="phone"] .ca-resizer {
-  display: none;
+.ca-app[data-bucket="compact"] .ca-wb-head {
+  padding: 14px 16px 0;
 }
 
-.ca-app[data-device="phone"] .ca-topbar {
+/* ---- medium（手机横屏 / 小平板）：左右并排——视频左栏填满高度，资料面板固定右栏独立滚动 ---- */
+.ca-app[data-bucket="medium"] .ca-wb {
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+.ca-app[data-bucket="medium"] .ca-player-col {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ca-app[data-bucket="medium"] .ca-panel-col {
+  flex: 0 0 min(46%, 460px);
+  min-height: 0;
+  border-left: 1px solid var(--line);
+}
+
+.ca-app[data-bucket="medium"] .ca-stage-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 10px 14px 14px;
+}
+
+.ca-app[data-bucket="medium"] .ca-stage {
+  aspect-ratio: auto;
+}
+
+.ca-app[data-bucket="medium"] .ca-wb-head {
+  padding: 10px 14px 0;
+}
+
+/* ---- 共享紧凑 chrome（compact + medium）：顶栏 / 滚动区 / 抽屉 / 标题 / 网格 / 列表 / 触控 ---- */
+.ca-app[data-bucket="compact"] .ca-topbar,
+.ca-app[data-bucket="medium"] .ca-topbar {
   padding: 16px 16px 12px;
 }
 
-.ca-app[data-device="phone"] .ca-scroll {
+.ca-app[data-bucket="compact"] .ca-scroll,
+.ca-app[data-bucket="medium"] .ca-scroll {
   padding: 8px 16px 30px;
 }
 
-.ca-app[data-device="phone"] .ca-drawer .ca-side {
+.ca-app[data-bucket="compact"] .ca-drawer .ca-side,
+.ca-app[data-bucket="medium"] .ca-drawer .ca-side {
   padding-top: calc(16px + env(safe-area-inset-top, 0px));
 }
 
-.ca-app[data-device="phone"] .tb-lead {
+.ca-app[data-bucket="compact"] .tb-lead,
+.ca-app[data-bucket="medium"] .tb-lead {
   align-items: flex-start;
 }
 
-.ca-app[data-device="phone"] .tb-titles .sub {
+.ca-app[data-bucket="compact"] .tb-titles .sub,
+.ca-app[data-bucket="medium"] .tb-titles .sub {
   white-space: normal;
 }
 
-.ca-app[data-device="phone"] .tb-actions {
+.ca-app[data-bucket="compact"] .tb-actions,
+.ca-app[data-bucket="medium"] .tb-actions {
   width: 100%;
   margin-left: 0;
   justify-content: flex-end;
   flex-wrap: wrap;
 }
 
-.ca-app[data-device="phone"] .ca-grid {
+.ca-app[data-bucket="compact"] .ca-grid,
+.ca-app[data-bucket="medium"] .ca-grid {
   grid-template-columns: 1fr;
 }
 
-.ca-app[data-device="phone"] .ca-wb-head {
-  padding: 14px 16px 0;
-}
-
-.ca-app[data-device="phone"] .wb-title {
+.ca-app[data-bucket="compact"] .wb-title,
+.ca-app[data-bucket="medium"] .wb-title {
   font-size: 17px;
 }
 
-.ca-app[data-device="phone"] .ca-stage-wrap {
-  padding: 12px 16px 16px;
-}
-
-.ca-app[data-device="phone"] .hamb {
+.ca-app[data-bucket="compact"] .hamb,
+.ca-app[data-bucket="medium"] .hamb {
   width: 44px;
   height: 44px;
 }
 
-.ca-app[data-device="phone"] .ca-row .row-button {
+.ca-app[data-bucket="compact"] .ca-row .row-button,
+.ca-app[data-bucket="medium"] .ca-row .row-button {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.ca-app[data-device="phone"] .ca-list-head .h-dur,
-.ca-app[data-device="phone"] .ca-row .c-dur {
+.ca-app[data-bucket="compact"] .ca-list-head .h-dur,
+.ca-app[data-bucket="compact"] .ca-row .c-dur,
+.ca-app[data-bucket="medium"] .ca-list-head .h-dur,
+.ca-app[data-bucket="medium"] .ca-row .c-dur {
   display: none;
-}
-
-/* 手机横屏：宽而矮，竖排会让 16:9 视频高过屏幕、把资料面板挤没。改成左右并排
-   ——视频占左侧填满高度，资料面板固定在右侧并独立滚动（像横屏看视频边看笔记）。
-   放在所有 phone 竖排规则之后，靠源码顺序覆盖。 */
-@media (orientation: landscape) {
-  .ca-app[data-device="phone"] .ca-wb {
-    flex-direction: row;
-  }
-
-  .ca-app[data-device="phone"] .ca-player-col {
-    flex: 1 1 0;
-    min-height: 0;
-    overflow: hidden;
-    border-bottom: none;
-  }
-
-  .ca-app[data-device="phone"] .ca-panel-col {
-    flex: 0 0 min(46%, 460px);
-    min-height: 0;
-    border-left: 1px solid var(--line);
-  }
-
-  /* 视频不再强制 16:9 占满整宽，改为填满左栏高度（黑边留白即可）。 */
-  .ca-app[data-device="phone"] .ca-stage-wrap {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    padding: 10px 14px 14px;
-  }
-
-  .ca-app[data-device="phone"] .ca-stage {
-    aspect-ratio: auto;
-  }
-
-  .ca-app[data-device="phone"] .ca-wb-head {
-    padding: 10px 14px 0;
-  }
 }
 
 .course-video-progress,
