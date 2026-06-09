@@ -13,8 +13,12 @@ const { mockIpc } = vi.hoisted(() => ({
     },
   },
 }));
+const { pickDirectoryPathMock } = vi.hoisted(() => ({
+  pickDirectoryPathMock: vi.fn(),
+}));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
+vi.mock("@/lib/mobileFiles", () => ({ pickDirectoryPath: pickDirectoryPathMock }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("./WhisperModelsPanel", () => ({
   WhisperModelsPanel: () => <div>Whisper 下载</div>,
@@ -32,6 +36,7 @@ describe("SettingsPanel", () => {
     });
     mockIpc.settings.set.mockResolvedValue(undefined);
     mockIpc.secrets.set.mockResolvedValue(undefined);
+    pickDirectoryPathMock.mockResolvedValue("/data/user/0/dev.courseai.app.debug/storage");
   });
 
   it("lets users select Volcengine ASR and save App ID + Access Token, hiding only the token", async () => {
@@ -63,6 +68,23 @@ describe("SettingsPanel", () => {
     expect(mockIpc.secrets.set).toHaveBeenCalledWith(
       "volcengine_asr_access_token",
       "secret-token",
+    );
+  });
+
+  it("saves the app-data storage root on Android", async () => {
+    render(<SettingsPanel onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "存储" }));
+    fireEvent.click(screen.getByRole("button", { name: "选择" }));
+
+    await waitFor(() =>
+      expect(pickDirectoryPathMock).toHaveBeenCalledWith(["storage"]),
+    );
+    await waitFor(() =>
+      expect(mockIpc.settings.set).toHaveBeenCalledWith(
+        "default_storage_root",
+        "/data/user/0/dev.courseai.app.debug/storage",
+      ),
     );
   });
 });

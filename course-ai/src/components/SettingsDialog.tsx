@@ -1,10 +1,10 @@
-import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import {
   AudioLines,
   Check,
   ChevronDown,
   ChevronLeft,
+  ChevronRight,
   FolderCog,
   Palette,
   ScanText,
@@ -12,6 +12,7 @@ import {
   Terminal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useDeviceLayout } from "@/lib/deviceLayout";
 import { ipc } from "@/lib/ipc";
 import { ACCENTS, useTheme, type ThemePref } from "@/stores/theme";
 import {
@@ -19,6 +20,7 @@ import {
   sensitivityToThreshold,
   setSlidesSensitivity,
 } from "@/lib/slides";
+import { pickDirectoryPath } from "@/lib/mobileFiles";
 import { WhisperModelsPanel } from "./WhisperModelsPanel";
 import { LlmSettingsPanel } from "./LlmSettingsPanel";
 
@@ -149,7 +151,7 @@ function Row({
   children: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-2.5">
+    <div className="flex flex-col gap-1.5 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <div className="min-w-0">
         <label
           htmlFor={htmlFor}
@@ -159,7 +161,7 @@ function Row({
         </label>
         {hint && <p className="mt-0.5 text-xs leading-relaxed text-[var(--text-muted)]">{hint}</p>}
       </div>
-      <div className="flex-none">{children}</div>
+      <div className="w-full sm:w-auto sm:flex-none">{children}</div>
     </div>
   );
 }
@@ -210,6 +212,11 @@ export function SettingsPanel({
   onOpenDevConsole?: () => void;
 }) {
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>("appearance");
+  // 竖屏（手机 / 平板竖屏）：取消左侧分类栏，改成「分类列表 → 进入某分类」的下钻，
+  // 顶部左上角放返回按钮 + 当前层级标题。entered=false 显示分类列表，true 显示该分类详情。
+  const deviceLayout = useDeviceLayout();
+  const compact = deviceLayout === "phone" || deviceLayout === "tablet-portrait";
+  const [entered, setEntered] = useState(false);
   const themePref = useTheme((s) => s.pref);
   const setThemePref = useTheme((s) => s.setPref);
   const accent = useTheme((s) => s.accent);
@@ -275,7 +282,7 @@ export function SettingsPanel({
   }, []);
 
   async function pickRoot() {
-    const dir = await open({ directory: true, multiple: false });
+    const dir = await pickDirectoryPath(["storage"]);
     if (typeof dir === "string") {
       setRoot(dir);
       await ipc.settings.set("default_storage_root", dir);
@@ -366,57 +373,99 @@ export function SettingsPanel({
   ];
   if (onOpenDevConsole) categories.push("dev");
 
+  // 竖屏下钻时：进入了某分类则顶栏显示该分类名 + 返回到分类列表；否则显示「设置」+ 关闭。
+  const inDetail = compact && entered;
+  const headerTitle = inDetail ? CATEGORY_META[activeCategory].label : "设置";
+  const onHeaderBack = inDetail ? () => setEntered(false) : onClose;
+
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
       {/* 头部 */}
       <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-5 py-3.5">
         <button
           aria-label="返回"
-          onClick={onClose}
+          onClick={onHeaderBack}
           className="grid h-8 w-8 flex-none place-items-center rounded-lg text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
-        <h2 className="text-[15px] font-semibold text-[var(--text-strong)]">设置</h2>
+        <h2 className="text-[15px] font-semibold text-[var(--text-strong)]">{headerTitle}</h2>
       </header>
 
-      {/* 侧栏分类 + 右侧分组卡片 */}
+      {/* 侧栏分类 + 右侧分组卡片；竖屏改为「分类列表 → 下钻」 */}
       <div className="flex min-h-0 flex-1">
-        <nav
-          aria-label="设置分类"
-          className="flex w-52 flex-none flex-col gap-0.5 overflow-y-auto border-r border-[var(--border-subtle)] bg-[var(--surface-sidebar)] p-3"
-        >
-          {categories.map((key) => {
-            const meta = CATEGORY_META[key];
-            const active = key === activeCategory;
-            return (
-              <button
-                key={key}
-                onClick={() => setActiveCategory(key)}
-                aria-current={active ? "page" : undefined}
-                className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition ${
-                  active
-                    ? "bg-[var(--accent-weak)] font-medium text-[var(--accent-text)]"
-                    : "text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
-                }`}
-              >
-                <span
-                  className="grid h-6 w-6 flex-none place-items-center rounded-md text-white"
-                  style={{ background: meta.tint }}
+        {!compact && (
+          <nav
+            aria-label="设置分类"
+            className="flex w-52 flex-none flex-col gap-0.5 overflow-y-auto border-r border-[var(--border-subtle)] bg-[var(--surface-sidebar)] p-3"
+          >
+            {categories.map((key) => {
+              const meta = CATEGORY_META[key];
+              const active = key === activeCategory;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setActiveCategory(key)}
+                  aria-current={active ? "page" : undefined}
+                  className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition ${
+                    active
+                      ? "bg-[var(--accent-weak)] font-medium text-[var(--accent-text)]"
+                      : "text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
+                  }`}
                 >
-                  {meta.icon}
-                </span>
-                {meta.label}
-              </button>
-            );
-          })}
-        </nav>
+                  <span
+                    className="grid h-6 w-6 flex-none place-items-center rounded-md text-white"
+                    style={{ background: meta.tint }}
+                  >
+                    {meta.icon}
+                  </span>
+                  {meta.label}
+                </button>
+              );
+            })}
+          </nav>
+        )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
+        {compact && !entered ? (
+          <nav
+            aria-label="设置分类"
+            className="min-h-0 flex-1 overflow-y-auto px-4 py-5"
+          >
+            <div className="mx-auto max-w-2xl divide-y divide-[var(--border-faint)] overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]">
+              {categories.map((key) => {
+                const meta = CATEGORY_META[key];
+                return (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      setActiveCategory(key);
+                      setEntered(true);
+                    }}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
+                  >
+                    <span
+                      className="grid h-7 w-7 flex-none place-items-center rounded-md text-white"
+                      style={{ background: meta.tint }}
+                    >
+                      {meta.icon}
+                    </span>
+                    <span className="flex-1 text-[15px] text-[var(--text-strong)]">
+                      {meta.label}
+                    </span>
+                    <ChevronRight className="h-4 w-4 flex-none text-[var(--text-faint)]" />
+                  </button>
+                );
+              })}
+            </div>
+          </nav>
+        ) : (
+        <div className={`min-h-0 flex-1 overflow-y-auto ${compact ? "px-4 py-5" : "px-8 py-6"}`}>
           <div className="mx-auto max-w-2xl">
-            <h2 className="mb-5 text-xl font-semibold text-[var(--text-strong)]">
-              {CATEGORY_META[activeCategory].label}
-            </h2>
+            {!compact && (
+              <h2 className="mb-5 text-xl font-semibold text-[var(--text-strong)]">
+                {CATEGORY_META[activeCategory].label}
+              </h2>
+            )}
 
             {activeCategory === "appearance" && (
               <>
@@ -514,7 +563,7 @@ export function SettingsPanel({
               <>
                 <Group header="识别引擎">
                   <Row label="识别后端" htmlFor="asr-backend">
-                    <div className="w-56">
+                    <div className="w-full sm:w-56">
                       <Select
                         id="asr-backend"
                         value={asrBackend}
@@ -531,7 +580,7 @@ export function SettingsPanel({
                     htmlFor="asr-language"
                     hint="对本地 Whisper 与阿里云 paraformer-v2 / fun-asr 生效；火山及通义千问 ASR 为自动识别"
                   >
-                    <div className="w-40">
+                    <div className="w-full sm:w-40">
                       <Select
                         id="asr-language"
                         value={asrLanguage}
@@ -573,7 +622,7 @@ export function SettingsPanel({
                 {asrBackend === "whisper" && (
                   <Group header="本地 Whisper">
                     <Row label="默认 Whisper 模型" htmlFor="whisper-model">
-                      <div className="w-44">
+                      <div className="w-full sm:w-44">
                         <Select
                           id="whisper-model"
                           value={model}
@@ -599,7 +648,7 @@ export function SettingsPanel({
                       <input
                         id="volcengine-asr-app-id"
                         type="text"
-                        className={`${FIELD} w-64`}
+                        className={`${FIELD} w-full sm:w-64`}
                         value={volcengineAppId}
                         placeholder="控制台「应用」的 App ID"
                         onChange={(event) => setVolcengineAppId(event.target.value)}
@@ -613,7 +662,7 @@ export function SettingsPanel({
                       <input
                         id="volcengine-asr-token"
                         type="password"
-                        className={`${FIELD} w-64`}
+                        className={`${FIELD} w-full sm:w-64`}
                         value={volcengineToken}
                         placeholder="••••••••"
                         onChange={(event) => setVolcengineToken(event.target.value)}
@@ -667,7 +716,7 @@ export function SettingsPanel({
                 {asrBackend === "aliyun" && (
                   <Group header="阿里云 DashScope">
                     <Row label="识别模型" htmlFor="aliyun-asr-model">
-                      <div className="w-64">
+                      <div className="w-full sm:w-64">
                         <Select
                           id="aliyun-asr-model"
                           value={aliyunModel}
@@ -689,7 +738,7 @@ export function SettingsPanel({
                       <input
                         id="dashscope-key"
                         type="password"
-                        className={`${FIELD} w-64`}
+                        className={`${FIELD} w-full sm:w-64`}
                         value={dashscopeKey}
                         placeholder="••••••••"
                         onChange={(event) => setDashscopeKey(event.target.value)}
@@ -723,7 +772,7 @@ export function SettingsPanel({
                   footnote="对课件帧「截字」时使用的文字识别引擎。"
                 >
                   <Row label="OCR 引擎" htmlFor="ocr-backend">
-                    <div className="w-56">
+                    <div className="w-full sm:w-56">
                       <Select
                         id="ocr-backend"
                         value={ocrBackend}
@@ -738,7 +787,7 @@ export function SettingsPanel({
                   {ocrBackend === "aliyun" && (
                     <>
                       <Row label="识别类型" htmlFor="aliyun-ocr-type">
-                        <div className="w-56">
+                        <div className="w-full sm:w-56">
                           <Select
                             id="aliyun-ocr-type"
                             value={ocrType}
@@ -756,7 +805,7 @@ export function SettingsPanel({
                         <input
                           id="aliyun-ocr-key-id"
                           type="text"
-                          className={`${FIELD} w-64`}
+                          className={`${FIELD} w-full sm:w-64`}
                           value={ocrKeyId}
                           placeholder="阿里云 RAM 账号 AccessKey ID"
                           onChange={(event) => setOcrKeyId(event.target.value)}
@@ -770,7 +819,7 @@ export function SettingsPanel({
                         <input
                           id="aliyun-ocr-secret"
                           type="password"
-                          className={`${FIELD} w-64`}
+                          className={`${FIELD} w-full sm:w-64`}
                           value={ocrSecret}
                           placeholder="••••••••"
                           onChange={(event) => setOcrSecret(event.target.value)}
@@ -836,6 +885,7 @@ export function SettingsPanel({
             )}
           </div>
         </div>
+        )}
       </div>
     </div>
   );
