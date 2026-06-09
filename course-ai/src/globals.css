@@ -200,12 +200,17 @@ button {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.ca-app[data-device="phone"] .ca-main,
+.ca-app[data-device="tablet-portrait"] .ca-main {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
+}
+
 .ca-app[data-view="workbench"] {
   grid-template-columns: 56px minmax(0, 1fr);
 }
 
 .ca-app[data-view="workbench"][data-device="phone"] {
-  grid-template-columns: 56px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .ca-rail {
@@ -296,6 +301,27 @@ button {
 .ca-app[data-device="tablet-portrait"] .ca-side {
   width: 240px;
   flex-basis: 240px;
+  padding-top: calc(16px + env(safe-area-inset-top, 0px));
+}
+
+.ca-app[data-device="tablet-portrait"] .ca-rail {
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+}
+
+.ca-app[data-device="tablet-portrait"] .ca-topbar {
+  padding: 18px 22px 12px;
+}
+
+.ca-app[data-device="tablet-portrait"] .ca-scroll {
+  padding: 10px 22px 28px;
+}
+
+.ca-app[data-device="tablet-portrait"] .tb-titles .sub {
+  white-space: normal;
+}
+
+.ca-app[data-device="tablet-portrait"] .tb-actions {
+  flex-wrap: wrap;
 }
 
 .ca-brand {
@@ -934,10 +960,26 @@ button {
   overflow: hidden;
 }
 
-.ca-app[data-device="tablet-portrait"] .ca-wb,
-.ca-app[data-device="phone"] .ca-wb {
+.ca-app[data-device="tablet-portrait"] .ca-wb {
   display: block;
   overflow-y: auto;
+}
+
+/* 手机竖屏：视频钉在顶部（标题 + 16:9 画面），下方资料面板填满余下高度并独立
+   滚动（类似 YouTube）。整页不滚动，避免内部用 h-full 的标签面板高度塌陷。 */
+.ca-app[data-device="phone"] .ca-wb {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ca-app[data-device="phone"] .ca-player-col {
+  flex: 0 0 auto;
+}
+
+.ca-app[data-device="phone"] .ca-panel-col {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .ca-app[data-device="tablet-portrait"] .ca-player-col,
@@ -969,10 +1011,23 @@ button {
   padding: 8px 16px 30px;
 }
 
+.ca-app[data-device="phone"] .ca-drawer .ca-side {
+  padding-top: calc(16px + env(safe-area-inset-top, 0px));
+}
+
+.ca-app[data-device="phone"] .tb-lead {
+  align-items: flex-start;
+}
+
+.ca-app[data-device="phone"] .tb-titles .sub {
+  white-space: normal;
+}
+
 .ca-app[data-device="phone"] .tb-actions {
   width: 100%;
   margin-left: 0;
   justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .ca-app[data-device="phone"] .ca-grid {
@@ -991,8 +1046,9 @@ button {
   padding: 12px 16px 16px;
 }
 
-.ca-app[data-device="phone"] .ca-panel-col {
-  display: flex;
+.ca-app[data-device="phone"] .hamb {
+  width: 44px;
+  height: 44px;
 }
 
 .ca-app[data-device="phone"] .ca-row .row-button {
