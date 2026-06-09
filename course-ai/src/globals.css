@@ -196,12 +196,13 @@ button {
   --accent-text: #7aa6ff;
 }
 
-.ca-app[data-device="phone"] {
+.ca-app[data-bucket="compact"],
+.ca-app[data-bucket="medium"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.ca-app[data-device="phone"] .ca-main,
-.ca-app[data-device="tablet-portrait"] .ca-main {
+.ca-app[data-bucket="compact"] .ca-main,
+.ca-app[data-bucket="medium"] .ca-main {
   padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
 }
 
@@ -209,7 +210,8 @@ button {
   grid-template-columns: 56px minmax(0, 1fr);
 }
 
-.ca-app[data-view="workbench"][data-device="phone"] {
+.ca-app[data-view="workbench"][data-bucket="compact"],
+.ca-app[data-view="workbench"][data-bucket="medium"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -296,32 +298,6 @@ button {
   flex-direction: column;
   padding: 16px 14px 14px;
   z-index: 40;
-}
-
-.ca-app[data-device="tablet-portrait"] .ca-side {
-  width: 240px;
-  flex-basis: 240px;
-  padding-top: calc(16px + env(safe-area-inset-top, 0px));
-}
-
-.ca-app[data-device="tablet-portrait"] .ca-rail {
-  padding-top: calc(12px + env(safe-area-inset-top, 0px));
-}
-
-.ca-app[data-device="tablet-portrait"] .ca-topbar {
-  padding: 18px 22px 12px;
-}
-
-.ca-app[data-device="tablet-portrait"] .ca-scroll {
-  padding: 10px 22px 28px;
-}
-
-.ca-app[data-device="tablet-portrait"] .tb-titles .sub {
-  white-space: normal;
-}
-
-.ca-app[data-device="tablet-portrait"] .tb-actions {
-  flex-wrap: wrap;
 }
 
 .ca-brand {
