@@ -433,42 +433,6 @@ button {
   color: var(--text-1);
 }
 
-.ca-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 45;
-  background: rgb(15 18 28 / 0.42);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.26s;
-  backdrop-filter: blur(1px);
-}
-
-.ca-app.drawer-open .ca-scrim {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.ca-drawer {
-  position: fixed;
-  inset: 0 auto 0 0;
-  z-index: 50;
-  width: min(88vw, 280px);
-  transform: translateX(-100%);
-  box-shadow: var(--shadow-pop);
-  transition: transform 0.28s var(--ease);
-}
-
-.ca-drawer.translate-x-0 {
-  transform: translateX(0);
-}
-
-.ca-drawer .ca-side {
-  width: 100%;
-  height: 100%;
-  flex-basis: auto;
-  border-right: 1px solid var(--line);
-}
 
 .ca-topbar {
   display: flex;
@@ -1020,10 +984,6 @@ button {
   padding: 8px 16px 30px;
 }
 
-.ca-app[data-bucket="compact"] .ca-drawer .ca-side,
-.ca-app[data-bucket="medium"] .ca-drawer .ca-side {
-  padding-top: calc(16px + env(safe-area-inset-top, 0px));
-}
 
 .ca-app[data-bucket="compact"] .tb-lead,
 .ca-app[data-bucket="medium"] .tb-lead {
@@ -1043,9 +1003,12 @@ button {
   flex-wrap: wrap;
 }
 
-.ca-app[data-bucket="compact"] .ca-grid,
+.ca-app[data-bucket="compact"] .ca-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .ca-app[data-bucket="medium"] .ca-grid {
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .ca-app[data-bucket="compact"] .wb-title,
@@ -1264,4 +1227,78 @@ button {
 }
 .tiptap-notes td > p {
   margin: 0;
+}
+
+/* ===================== 窄屏底部 Tab + 整屏课程列表(P1) ===================== */
+
+/* 底部主导航 */
+.ca-bottom-tab {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.ca-bottom-tab-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: var(--text-3);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.ca-bottom-tab-btn.on {
+  color: var(--accent);
+}
+
+.ca-bottom-tab-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.ca-bottom-tab-badge {
+  position: absolute;
+  top: -5px;
+  left: 12px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* 有底部 Tab 时,窄屏「非工作台」主区底部留出 Tab 高度(含安全区) */
+.ca-app[data-bucket="compact"][data-view="library"] .ca-main,
+.ca-app[data-bucket="medium"][data-view="library"] .ca-main {
+  padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+}
+
+/* 整屏课程列表(CourseSidebar variant="screen") */
+.ca-course-screen {
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 16px 16px;
 }
