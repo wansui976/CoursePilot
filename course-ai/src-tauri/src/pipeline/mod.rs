@@ -328,24 +328,50 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
             );
             let context = volcengine_auc::build_context_json(&hotwords, &context_lines);
 
-            emit_running_progress(
-                &app,
-                &db,
-                &video_id,
-                &asr_job.id,
-                0.28,
-                "云端分段识别中（火山引擎）",
-            )
-            .await?;
-            volcengine_auc::run_volcengine_file_chunked(
-                &audio_path,
-                &app_id,
-                &access_token,
-                chunk_secs,
-                concurrency,
-                context,
-            )
-            .await
+            // Android 没有可用的 ffmpeg 来切片，整段直传原生导出的音频（format 如实标注）；
+            // 桌面端走 ffmpeg 分段并行上传更快、也避免长音频 WAV base64 触发 413。
+            #[cfg(target_os = "android")]
+            {
+                let _ = (chunk_secs, concurrency);
+                emit_running_progress(
+                    &app,
+                    &db,
+                    &video_id,
+                    &asr_job.id,
+                    0.28,
+                    "云端识别中（火山引擎）",
+                )
+                .await?;
+                volcengine_auc::run_volcengine_file(
+                    &audio_path,
+                    &app_id,
+                    &access_token,
+                    context.as_deref(),
+                    &prepared_audio.format,
+                )
+                .await
+            }
+            #[cfg(not(target_os = "android"))]
+            {
+                emit_running_progress(
+                    &app,
+                    &db,
+                    &video_id,
+                    &asr_job.id,
+                    0.28,
+                    "云端分段识别中（火山引擎）",
+                )
+                .await?;
+                volcengine_auc::run_volcengine_file_chunked(
+                    &audio_path,
+                    &app_id,
+                    &access_token,
+                    chunk_secs,
+                    concurrency,
+                    context,
+                )
+                .await
+            }
         }
         AsrBackend::Aliyun => {
             let api_key = crate::llm::keychain::get_secret_or_legacy(&db, "dashscope_api_key")

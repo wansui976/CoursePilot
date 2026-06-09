@@ -32,17 +32,19 @@ pub const DEFAULT_CHUNK_SECS: u64 = 300;
 pub const DEFAULT_CONCURRENCY: usize = 4;
 const MAX_RETRIES: u32 = 2;
 
-/// 整段上传识别（短音频或关闭分段时用）。内部带指数回退重试两次。
+/// 整段上传识别（短音频、关闭分段，或 Android 无 ffmpeg 切片时用）。内部带指数回退
+/// 重试两次。`format` 必须与音频真实容器一致（wav / mp3 …），会写进提交体的 audio.format。
 pub async fn run_volcengine_file(
     audio: &Path,
     app_id: &str,
     access_token: &str,
     context: Option<&str>,
+    format: &str,
 ) -> AppResult<WhisperJson> {
     let (app_id, access_token) = check_credentials(app_id, access_token)?;
     let audio_bytes = tokio::fs::read(audio).await?;
     let client = reqwest::Client::new();
-    recognize_bytes_with_retry(&client, &app_id, &access_token, &audio_bytes, context).await
+    recognize_bytes_with_retry(&client, &app_id, &access_token, &audio_bytes, context, format).await
 }
 
 /// 分段并行识别：把长音频按固定时长切成多段 MP3，分别提交、并行轮询，再按各段
@@ -87,9 +89,15 @@ pub async fn run_volcengine_file_chunked(
         };
         let client = reqwest::Client::new();
         let bytes = tokio::fs::read(&single).await?;
-        let out =
-            recognize_bytes_with_retry(&client, &app_id, &access_token, &bytes, context.as_deref())
-                .await;
+        let out = recognize_bytes_with_retry(
+            &client,
+            &app_id,
+            &access_token,
+            &bytes,
+            context.as_deref(),
+            "mp3",
+        )
+        .await;
         let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
         return out;
     }
@@ -109,6 +117,7 @@ pub async fn run_volcengine_file_chunked(
                     &access_token,
                     &bytes,
                     context.as_deref(),
+                    "mp3",
                 )
                 .await?;
                 Ok((idx, json))
@@ -147,11 +156,12 @@ async fn recognize_bytes(
     access_token: &str,
     audio_bytes: &[u8],
     context: Option<&str>,
+    format: &str,
 ) -> AppResult<WhisperJson> {
     let request_id = Uuid::new_v4().to_string();
 
     // ---- 1. 提交任务 ----
-    let body = build_submit_body(&request_id, &base64_encode(audio_bytes), context);
+    let body = build_submit_body(&request_id, &base64_encode(audio_bytes), context, format);
     let resp = client
         .post(SUBMIT_URL)
         .header("X-Api-App-Key", app_id)
@@ -217,10 +227,11 @@ async fn recognize_bytes_with_retry(
     access_token: &str,
     audio_bytes: &[u8],
     context: Option<&str>,
+    format: &str,
 ) -> AppResult<WhisperJson> {
     let mut attempt = 0u32;
     loop {
-        match recognize_bytes(client, app_id, access_token, audio_bytes, context).await {
+        match recognize_bytes(client, app_id, access_token, audio_bytes, context, format).await {
             Ok(value) => return Ok(value),
             Err(error) => {
                 if attempt >= MAX_RETRIES {
@@ -306,7 +317,12 @@ fn merge_chunk_transcripts(mut parts: Vec<(usize, WhisperJson)>, chunk_ms: i64) 
     }
 }
 
-pub fn build_submit_body(request_id: &str, audio_base64: &str, context: Option<&str>) -> Value {
+pub fn build_submit_body(
+    request_id: &str,
+    audio_base64: &str,
+    context: Option<&str>,
+    format: &str,
+) -> Value {
     let mut request = json!({
         "model_name": "bigmodel",
         "enable_itn": true,
@@ -322,7 +338,7 @@ pub fn build_submit_body(request_id: &str, audio_base64: &str, context: Option<&
         "user": { "uid": request_id },
         "audio": {
             "data": audio_base64,
-            "format": "mp3",
+            "format": format,
         },
         "request": request,
     })
@@ -431,9 +447,9 @@ mod tests {
 
     #[test]
     fn submit_body_uses_auc_bigmodel_defaults() {
-        let body = build_submit_body("req-1", "QUJD", None);
+        let body = build_submit_body("req-1", "QUJD", None, "mp3");
         assert_eq!(body["audio"]["data"], "QUJD");
-        // 整段上传走压缩后的 MP3，避免长视频 WAV base64 触发 413。
+        // format 透传：桌面分段走 MP3；Android 整段直传 WAV 时会传 "wav"。
         assert_eq!(body["audio"]["format"], "mp3");
         assert_eq!(body["request"]["model_name"], "bigmodel");
         assert_eq!(body["request"]["show_utterances"], true);
@@ -443,11 +459,18 @@ mod tests {
     }
 
     #[test]
+    fn submit_body_honors_explicit_audio_format() {
+        // Android 整段直传原生导出的 WAV 时，format 必须如实标成 "wav"。
+        let body = build_submit_body("req-1", "QUJD", None, "wav");
+        assert_eq!(body["audio"]["format"], "wav");
+    }
+
+    #[test]
     fn submit_body_embeds_context_string_in_request() {
-        let body = build_submit_body("req-1", "QUJD", Some("{\"hotwords\":[]}"));
+        let body = build_submit_body("req-1", "QUJD", Some("{\"hotwords\":[]}"), "mp3");
         assert_eq!(body["request"]["context"], "{\"hotwords\":[]}");
         // 空串视为不带 context。
-        let empty = build_submit_body("req-1", "QUJD", Some(""));
+        let empty = build_submit_body("req-1", "QUJD", Some(""), "mp3");
         assert!(empty["request"].get("context").is_none());
     }
 
