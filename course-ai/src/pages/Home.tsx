@@ -925,7 +925,7 @@ export function Home() {
           aria-label={themeToggleLabel}
           onClick={toggleTheme}
         >
-          {isLightTheme ? <Moon className="h-[19px] w-[19px]" /> : <Sun className="h-[19px] w-[19px]" />}
+          {isLightTheme ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
         </button>
         <button
           className="rail-btn"
@@ -933,7 +933,7 @@ export function Home() {
           aria-label="设置"
           onClick={() => openMainView("settings")}
         >
-          <Settings className="h-[19px] w-[19px]" />
+          <Settings className="h-5 w-5" />
         </button>
       </nav>
     );
