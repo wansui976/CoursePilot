@@ -4,13 +4,14 @@ import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import { Transformer } from "markmap-lib";
 import { Markmap } from "markmap-view";
 import { ipc } from "@/lib/ipc";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const transformer = new Transformer();
 
 export function MindmapPanel({ videoId }: { videoId: string }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const mmRef = useRef<Markmap | undefined>(undefined);
-  const { data: md } = useQuery({
+  const { data: md, isLoading } = useQuery({
     queryKey: ["mindmap", videoId],
     queryFn: () => ipc.ai.getMindmap(videoId),
   });
@@ -29,6 +30,13 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
     void mmRef.current?.rescale(scale);
   }
 
+  if (isLoading) {
+    return (
+      <div className="h-full p-4" role="status" aria-label="加载中…">
+        <Skeleton className="h-full min-h-[200px] w-full" />
+      </div>
+    );
+  }
   if (!md) {
     return (
       <p className="p-4 text-sm text-[var(--text-faint)]">

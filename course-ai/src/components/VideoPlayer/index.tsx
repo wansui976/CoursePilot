@@ -4,13 +4,22 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ipc } from "@/lib/ipc";
 import { posKey, durKey } from "@/lib/playback";
 import { usePlayer } from "@/stores/player";
+import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
 import { CaptionOverlay } from "./CaptionOverlay";
 import { Controls } from "./Controls";
 
 // 距片尾 15s 内不再续播（视为看完），从头开始。
 const RESUME_TAIL_GUARD = 15;
 
-export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) {
+export function VideoPlayer({
+  src,
+  videoId,
+  immersive = false,
+}: {
+  src: string;
+  videoId: string;
+  immersive?: boolean;
+}) {
   const regionRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLVideoElement>(null);
@@ -23,6 +32,9 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
   const [muted, setMuted] = useState(false);
   const [captionsOn, setCaptionsOn] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
+  // 沉浸式（手机）默认隐藏控制栏，点视频才显示；桌面默认常显。
+  const [controlsVisible, setControlsVisible] = useState(!immersive);
+  const hideControlsTimer = useRef<number | undefined>(undefined);
   const setCurrentMs = usePlayer((s) => s.setCurrentMs);
   const setDurationMs = usePlayer((s) => s.setDurationMs);
   const currentMs = usePlayer((s) => s.currentMs);
@@ -38,6 +50,12 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
   const caption = segments.find(
     (segment) => currentMs >= segment.start_ms && currentMs < segment.end_ms,
   )?.text;
+
+  // 字幕跳转用：始终持有按 start_ms 排好序的最新分句，供键盘处理器读取（避免闭包过期）。
+  const segmentsRef = useRef<typeof segments>([]);
+  useEffect(() => {
+    segmentsRef.current = [...segments].sort((a, b) => a.start_ms - b.start_ms);
+  }, [segments]);
 
   useLayoutEffect(() => {
     ref.current?.setAttribute("webkit-playsinline", "true");
@@ -111,8 +129,73 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
 
   const toggleFullscreen = () => void setVideoFullscreen(!fullscreen);
 
-  // 键盘快捷键：空格/K 播放暂停，←→ 快退快进 5s，J/L 10s，↑↓ 调音量，
-  // M 静音，F 全屏，C 字幕。聚焦输入框时不拦截，避免影响打字。
+  // 沉浸式（手机）控制栏：默认显示，播放 3 秒后自动隐藏；点视频切换显隐；暂停时常显。
+  function clearHideTimer() {
+    if (hideControlsTimer.current) window.clearTimeout(hideControlsTimer.current);
+  }
+  function scheduleHideControls() {
+    clearHideTimer();
+    if (!immersive) return;
+    hideControlsTimer.current = window.setTimeout(() => {
+      if (ref.current && !ref.current.paused) setControlsVisible(false);
+    }, 3000);
+  }
+  function revealControls() {
+    setControlsVisible(true);
+    scheduleHideControls();
+  }
+  function toggleControls() {
+    if (controlsVisible) {
+      clearHideTimer();
+      setControlsVisible(false);
+    } else {
+      revealControls();
+    }
+  }
+
+  useEffect(() => {
+    if (!immersive) {
+      setControlsVisible(true);
+      clearHideTimer();
+      return;
+    }
+    // 沉浸式：默认隐藏，等用户点视频再显示。
+    setControlsVisible(false);
+    clearHideTimer();
+    return clearHideTimer;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [immersive]);
+
+  // 跳到上一句/下一句字幕的开头；该视频还没有字幕时回退到 ±10s 快退/快进。
+  const jumpSubtitle = (dir: -1 | 1) => {
+    const video = ref.current;
+    if (!video) return;
+    const segs = segmentsRef.current;
+    if (segs.length === 0) {
+      video.currentTime =
+        dir < 0
+          ? Math.max(0, video.currentTime - 10)
+          : video.currentTime + 10;
+      return;
+    }
+    const nowMs = video.currentTime * 1000;
+    if (dir > 0) {
+      const next = segs.find((s) => s.start_ms > nowMs);
+      video.currentTime = next
+        ? next.start_ms / 1000
+        : video.duration || video.currentTime;
+    } else {
+      let targetMs = 0;
+      for (const s of segs) {
+        if (s.start_ms < nowMs) targetMs = s.start_ms;
+        else break;
+      }
+      video.currentTime = Math.max(0, targetMs / 1000);
+    }
+  };
+
+  // 键盘快捷键：动作 → 按键的映射在设置里可改（见 stores/shortcuts）。空格在未被
+  // 占用时永远兜底为播放/暂停。聚焦输入框时不拦截，避免影响打字。
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -124,56 +207,48 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
       ) {
         return;
       }
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       const video = ref.current;
       if (!video) return;
+      const bindings = useShortcuts.getState().bindings;
+      const action =
+        actionForKey(bindings, event.key) ??
+        (normalizeKey(event.key) === " " ? "playPause" : null);
+      if (!action) return;
+      event.preventDefault();
       const clamp = (v: number) => Math.min(1, Math.max(0, v));
-      switch (event.key) {
-        case " ":
-        case "k":
-        case "K":
-          event.preventDefault();
+      switch (action) {
+        case "playPause":
           if (video.paused) void video.play();
           else video.pause();
           break;
-        case "ArrowLeft":
-          event.preventDefault();
+        case "seekBack":
           video.currentTime = Math.max(0, video.currentTime - 5);
           break;
-        case "ArrowRight":
-          event.preventDefault();
+        case "seekForward":
           video.currentTime = video.currentTime + 5;
           break;
-        case "j":
-        case "J":
-          video.currentTime = Math.max(0, video.currentTime - 10);
+        case "prevSubtitle":
+          jumpSubtitle(-1);
           break;
-        case "l":
-        case "L":
-          video.currentTime = video.currentTime + 10;
+        case "nextSubtitle":
+          jumpSubtitle(1);
           break;
-        case "ArrowUp":
-          event.preventDefault();
+        case "volumeUp":
           setMuted(false);
           setVolume((v) => clamp(v + 0.1));
           break;
-        case "ArrowDown":
-          event.preventDefault();
+        case "volumeDown":
           setVolume((v) => clamp(v - 0.1));
           break;
-        case "m":
-        case "M":
+        case "mute":
           setMuted((v) => !v);
           break;
-        case "f":
-        case "F":
-          event.preventDefault();
+        case "fullscreen":
           toggleFullscreen();
           break;
-        case "c":
-        case "C":
+        case "captions":
           setCaptionsOn((v) => !v);
-          break;
-        default:
           break;
       }
     };
@@ -188,11 +263,12 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
       className={`flex flex-col ${
         fullscreen
           ? "fixed inset-0 z-50 bg-black"
-          : "h-full min-h-0 bg-transparent"
+          : "relative h-full min-h-0 bg-transparent"
       }`}
     >
       <div
         ref={regionRef}
+        onClick={immersive ? toggleControls : undefined}
         className={`relative flex min-h-0 w-full min-w-0 flex-1 items-center justify-center overflow-hidden ${
           fullscreen ? "bg-black" : "bg-[var(--surface-stage)]"
         }`}
@@ -257,9 +333,14 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
                 lastSavedRef.current = saved;
               }
             }}
-            onPlay={() => setPlaying(true)}
+            onPlay={() => {
+              setPlaying(true);
+              scheduleHideControls();
+            }}
             onPause={(event) => {
               setPlaying(false);
+              setControlsVisible(true);
+              clearHideTimer();
               const t = event.currentTarget.currentTime;
               const dur = event.currentTarget.duration;
               if (t > 2 && (!dur || t < dur - RESUME_TAIL_GUARD)) {
@@ -277,36 +358,50 @@ export function VideoPlayer({ src, videoId }: { src: string; videoId: string }) 
           )}
         </div>
       </div>
-      <Controls
-        playing={playing}
-        currentMs={currentMs}
-        durationMs={durationMs}
-        rate={rate}
-        volume={volume}
-        muted={muted}
-        captionsOn={captionsOn}
-        fullscreen={fullscreen}
-        onToggleCaptions={() => setCaptionsOn((on) => !on)}
-        onPlayPause={() => {
-          const video = ref.current;
-          if (!video) return;
-          if (video.paused) {
-            void video.play();
-          } else {
-            video.pause();
-          }
-        }}
-        onSeek={(ms) => {
-          if (ref.current) ref.current.currentTime = ms / 1000;
-        }}
-        onRate={setRate}
-        onVolume={(value) => {
-          setVolume(value);
-          setMuted(value === 0);
-        }}
-        onMuteToggle={() => setMuted((value) => !value)}
-        onFullscreenToggle={toggleFullscreen}
-      />
+      <div
+        aria-label="视频播放控制栏"
+        aria-hidden={immersive && !controlsVisible}
+        onClick={immersive ? (e) => e.stopPropagation() : undefined}
+        onPointerDown={immersive ? () => revealControls() : undefined}
+        className={
+          immersive
+            ? `absolute inset-x-0 bottom-0 z-10 transition-opacity duration-200 ${
+                controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
+              }`
+            : "shrink-0"
+        }
+      >
+        <Controls
+          playing={playing}
+          currentMs={currentMs}
+          durationMs={durationMs}
+          rate={rate}
+          volume={volume}
+          muted={muted}
+          captionsOn={captionsOn}
+          fullscreen={fullscreen}
+          onToggleCaptions={() => setCaptionsOn((on) => !on)}
+          onPlayPause={() => {
+            const video = ref.current;
+            if (!video) return;
+            if (video.paused) {
+              void video.play();
+            } else {
+              video.pause();
+            }
+          }}
+          onSeek={(ms) => {
+            if (ref.current) ref.current.currentTime = ms / 1000;
+          }}
+          onRate={setRate}
+          onVolume={(value) => {
+            setVolume(value);
+            setMuted(value === 0);
+          }}
+          onMuteToggle={() => setMuted((value) => !value)}
+          onFullscreenToggle={toggleFullscreen}
+        />
+      </div>
     </div>
   );
 }

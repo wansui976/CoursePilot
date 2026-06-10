@@ -6,9 +6,11 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { type ExportItem } from "./ExportMenu";
+import { TextSkeleton } from "@/components/ui/skeleton";
 import { PanelActions } from "./PanelActions";
 import { ipc } from "@/lib/ipc";
 import { markdownToTiptap } from "@/lib/markdownToTiptap";
+import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { TimestampNode, installTimestampClick } from "./notes/timestampNode";
 import { MathNode } from "./notes/mathNode";
@@ -36,6 +38,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   const [view, setView] = useState<View>("notes");
   const qc = useQueryClient();
   const rootRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const { data: notesContent } = useQuery({
@@ -88,6 +91,29 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     if (rootRef.current) return installTimestampClick(rootRef.current);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (view === "notes" && scrollerRef.current) {
+        writeVideoResumeState(videoId, {
+          notesScrollTop: scrollerRef.current.scrollTop,
+        });
+      }
+    };
+  }, [videoId, view]);
+
+  useEffect(() => {
+    if (view !== "notes" || !scrollerRef.current) return;
+    const savedScrollTop = readVideoResumeState(videoId).notesScrollTop;
+    scrollerRef.current.scrollTop = savedScrollTop;
+  }, [notesContent, videoId, view]);
+
+  function rememberNotesScroll() {
+    if (view !== "notes" || !scrollerRef.current) return;
+    writeVideoResumeState(videoId, {
+      notesScrollTop: scrollerRef.current.scrollTop,
+    });
+  }
+
   const generate = useMutation({
     mutationFn: (task: "notes" | "quiz" | "mindmap") =>
       ipc.ai.generate(videoId, task),
@@ -132,14 +158,15 @@ export function NotesPanel({ videoId }: { videoId: string }) {
           {String(generate.error)}
         </p>
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto pb-12">
+      <div
+        ref={scrollerRef}
+        aria-label="笔记内容滚动区"
+        className="min-h-0 flex-1 overflow-y-auto pb-12"
+        onScroll={rememberNotesScroll}
+      >
         {view === "notes" && <EditorContent editor={editor} />}
         {(view === "quiz" || view === "mindmap") && (
-          <Suspense
-            fallback={
-              <div className="p-4 text-sm text-[var(--text-faint)]">加载中…</div>
-            }
-          >
+          <Suspense fallback={<TextSkeleton lines={5} />}>
             {view === "quiz" && <QuizPanel videoId={videoId} />}
             {view === "mindmap" && <MindmapPanel videoId={videoId} />}
           </Suspense>

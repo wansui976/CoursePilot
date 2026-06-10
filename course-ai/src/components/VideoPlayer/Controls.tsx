@@ -1,13 +1,13 @@
 import { Button } from "@/components/ui/button";
 import { formatMs } from "@/lib/time";
-import { Maximize, Minimize, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { Check, Maximize, Minimize, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { useState, type CSSProperties } from "react";
 
 const SPEEDS = [2, 1.5, 1.25, 1, 0.75, 0.5];
 const iconButtonClass =
-  "flex h-9 w-9 items-center justify-center rounded-lg text-white/90 transition hover:bg-white/10 hover:text-white";
+  "flex h-7 w-7 items-center justify-center rounded-lg text-white/90 transition hover:bg-white/10 hover:text-white";
 const textButtonClass =
-  "h-9 whitespace-nowrap rounded-lg px-2 text-sm font-medium text-white/85 transition hover:bg-white/10 hover:text-white";
+  "h-7 whitespace-nowrap rounded-lg px-2 text-[13px] font-medium text-white/85 transition hover:bg-white/10 hover:text-white";
 
 function formatRate(rate: number) {
   return Number.isInteger(rate) ? rate.toFixed(1) : String(rate);
@@ -53,7 +53,7 @@ export function Controls({
   const volumePercent = muted ? 0 : Math.min(100, Math.max(0, volume * 100));
 
   return (
-    <div className="shrink-0 bg-black/95 px-4 pb-2.5 pt-2 text-white">
+    <div className="shrink-0 bg-black/95 px-3 pb-1 pt-1 text-white">
       <input
         aria-label="播放进度"
         type="range"
@@ -65,19 +65,20 @@ export function Controls({
         style={
           {
             "--progress-percent": `${progressPercent}%`,
+            "--video-control-color": "var(--accent)",
           } as CSSProperties
         }
       />
-      <div className="mt-2 flex items-center gap-2 text-sm text-white/75">
+      <div className="ca-player-controls mt-1 flex items-center gap-1.5 text-sm text-white/75">
         <Button
           size="icon"
           variant="ghost"
           onClick={onPlayPause}
           aria-label={playing ? "暂停" : "播放"}
           title={playing ? "暂停" : "播放"}
-          className="h-9 w-9 rounded-lg text-white hover:bg-white/10 hover:text-white"
+          className="h-7 w-7 rounded-lg text-white hover:bg-white/10 hover:text-white"
         >
-          {playing ? <Pause className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5 fill-current" />}
+          {playing ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}
         </Button>
         <span className="whitespace-nowrap text-sm font-medium tabular-nums tracking-wide text-white/85">
           {formatMs(currentMs)} / {formatMs(durationMs)}
@@ -107,14 +108,17 @@ export function Controls({
                   type="button"
                   role="menuitemradio"
                   aria-checked={rate === speed}
-                  className={`block w-full px-4 py-1.5 text-center text-sm font-medium ${
-                    rate === speed ? "text-[#3b82f6]" : "text-white"
+                  className={`flex w-full items-center justify-center gap-1.5 px-4 py-1.5 text-sm font-medium ${
+                    rate === speed ? "text-[var(--accent)]" : "text-white"
                   } hover:bg-white/10`}
                   onClick={() => {
                     onRate(speed);
                     setSpeedOpen(false);
                   }}
                 >
+                  <span className="flex w-3.5 flex-none justify-center">
+                    {rate === speed && <Check className="h-3.5 w-3.5" />}
+                  </span>
                   {formatRate(speed)}x
                 </button>
               ))}
@@ -124,8 +128,9 @@ export function Controls({
         <button
           type="button"
           onClick={onToggleCaptions}
+          aria-pressed={captionsOn}
           title={captionsOn ? "关闭字幕" : "开启字幕"}
-          className={`${textButtonClass} ${captionsOn ? "text-[#3b82f6]" : ""}`}
+          className={`${textButtonClass} ${captionsOn ? "text-[var(--accent)]" : ""}`}
         >
           字幕
         </button>
@@ -136,7 +141,7 @@ export function Controls({
           title={muted ? "取消静音" : "静音"}
           className={iconButtonClass}
         >
-          {muted || volume === 0 ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+          {muted || volume === 0 ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
         </Button>
         <input
           aria-label="音量"
@@ -150,6 +155,7 @@ export function Controls({
           style={
             {
               "--progress-percent": `${volumePercent}%`,
+              "--video-control-color": "var(--accent)",
             } as CSSProperties
           }
         />
@@ -161,7 +167,7 @@ export function Controls({
           title={fullscreen ? "退出全屏" : "全屏"}
           className={iconButtonClass}
         >
-          {fullscreen ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
+          {fullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
         </Button>
       </div>
     </div>

@@ -87,4 +87,21 @@ describe("SettingsPanel", () => {
       ),
     );
   });
+
+  it("lets users choose the first accent color from a color picker", () => {
+    render(<SettingsPanel onClose={() => undefined} />);
+
+    const picker = screen.getByLabelText("自定义强调色");
+    const swatch = picker.parentElement?.querySelector("span") as HTMLElement;
+
+    expect(picker.parentElement).toHaveAttribute("title", "多色");
+    expect(swatch.style.background).toContain("conic-gradient");
+
+    fireEvent.change(picker, {
+      target: { value: "#123456" },
+    });
+
+    expect(localStorage.getItem("course-ai-accent")).toBe("custom");
+    expect(localStorage.getItem("course-ai-custom-accent")).toBe("#123456");
+  });
 });

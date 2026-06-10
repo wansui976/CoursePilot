@@ -4,6 +4,7 @@ import { Check, Pencil, X } from "lucide-react";
 import { ExportMenu } from "./ExportMenu";
 import { MathText } from "./MathText";
 import { ipc } from "@/lib/ipc";
+import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 
@@ -51,6 +52,18 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     element?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [activeIdx, editingId]);
 
+  useEffect(() => {
+    if (activeIdx >= 0 || !listRef.current) return;
+    listRef.current.scrollTop = readVideoResumeState(videoId).transcriptScrollTop;
+  }, [activeIdx, segments.length, videoId]);
+
+  function rememberTranscriptScroll() {
+    if (!listRef.current) return;
+    writeVideoResumeState(videoId, {
+      transcriptScrollTop: listRef.current.scrollTop,
+    });
+  }
+
   if (segments.length === 0) {
     return <p className="p-4 text-sm text-[var(--text-muted)]">字幕生成中或尚未开始</p>;
   }
@@ -68,7 +81,12 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
           />
         </div>
       </div>
-      <div ref={listRef} className="flex-1 space-y-1 overflow-y-auto p-3">
+      <div
+        ref={listRef}
+        aria-label="文稿内容滚动区"
+        className="flex-1 space-y-1 overflow-y-auto p-3"
+        onScroll={rememberTranscriptScroll}
+      >
         {segments.map((segment, index) => {
           const isEditing = editingId === segment.id;
           // 被纠错清空的分段（整段语气词，如「哎。」）不显示空行；仍保留在库里
@@ -79,7 +97,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
               <div
                 key={segment.id}
                 data-idx={index}
-                className="rounded bg-[var(--surface-card)] p-2"
+                className="ca-transcript-row rounded bg-[var(--surface-card)] p-2"
               >
                 <textarea
                   aria-label="编辑文稿"
@@ -118,7 +136,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
             <div
               key={segment.id}
               data-idx={index}
-              className={`group flex items-start gap-1 rounded ${
+              className={`ca-transcript-row group flex items-start gap-1 rounded ${
                 index === activeIdx
                   ? "bg-primary/20"
                   : "hover:bg-[var(--surface-card-hover)]"

@@ -41,10 +41,25 @@ describe("VideoPlayer", () => {
     expect(screen.getByRole("button", { name: "字幕" })).toBeInTheDocument();
   });
 
-  it("uses a blue themed video progress bar", () => {
+  it("uses the active accent color for video progress controls", () => {
     renderPlayer();
 
-    expect(screen.getByLabelText("播放进度")).toHaveClass("course-video-progress");
+    expect(screen.getByLabelText("播放进度")).toHaveStyle({
+      "--video-control-color": "var(--accent)",
+    });
+    expect(screen.getByRole("button", { name: "字幕" })).toHaveClass(
+      "text-[var(--accent)]",
+    );
+  });
+
+  it("keeps the video control bar in its own row below the video", () => {
+    renderPlayer();
+
+    const controls = screen.getByLabelText("视频播放控制栏");
+
+    expect(controls).toHaveClass("shrink-0");
+    expect(controls).not.toHaveClass("absolute", "opacity-0", "pointer-events-none");
+    expect(controls).not.toHaveAttribute("data-visible");
   });
 
   it("does not wrap the video in an extra rounded black frame", () => {

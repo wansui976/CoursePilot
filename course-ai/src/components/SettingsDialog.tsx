@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FolderCog,
+  Keyboard,
   Palette,
   ScanText,
   Sparkles,
@@ -15,6 +16,12 @@ import { Button } from "@/components/ui/button";
 import { useContainerWidth } from "@/lib/useContainerWidth";
 import { ipc } from "@/lib/ipc";
 import { ACCENTS, useTheme, type ThemePref } from "@/stores/theme";
+import {
+  SHORTCUT_ACTIONS,
+  keyLabel,
+  useShortcuts,
+  type ShortcutAction,
+} from "@/stores/shortcuts";
 import {
   getSlidesSensitivity,
   sensitivityToThreshold,
@@ -56,6 +63,7 @@ function Select({
 
 type SettingsCategory =
   | "appearance"
+  | "shortcuts"
   | "storage"
   | "asr"
   | "llm"
@@ -67,6 +75,7 @@ const CATEGORY_META: Record<
   { label: string; icon: ReactNode; tint: string }
 > = {
   appearance: { label: "外观", icon: <Palette className="h-3.5 w-3.5" />, tint: "#e0568f" },
+  shortcuts: { label: "快捷键", icon: <Keyboard className="h-3.5 w-3.5" />, tint: "#10b981" },
   storage: { label: "存储", icon: <FolderCog className="h-3.5 w-3.5" />, tint: "#8e8e93" },
   asr: { label: "语音识别", icon: <AudioLines className="h-3.5 w-3.5" />, tint: "#2f6cea" },
   llm: { label: "大模型", icon: <Sparkles className="h-3.5 w-3.5" />, tint: "#a855f7" },
@@ -221,7 +230,32 @@ export function SettingsPanel({
   const themePref = useTheme((s) => s.pref);
   const setThemePref = useTheme((s) => s.setPref);
   const accent = useTheme((s) => s.accent);
+  const customAccent = useTheme((s) => s.customAccent);
   const setAccent = useTheme((s) => s.setAccent);
+  const setCustomAccent = useTheme((s) => s.setCustomAccent);
+  const bindings = useShortcuts((s) => s.bindings);
+  const setBinding = useShortcuts((s) => s.setBinding);
+  const resetBindings = useShortcuts((s) => s.resetBindings);
+  // 正在为哪个动作录入新按键（null = 不在录入）。录入时下一次按键即写入；Esc 取消。
+  const [capturing, setCapturing] = useState<ShortcutAction | null>(null);
+
+  useEffect(() => {
+    if (!capturing) return;
+    const onKey = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        setCapturing(null);
+        return;
+      }
+      // 单按修饰键不作为快捷键。
+      if (["Shift", "Control", "Alt", "Meta"].includes(event.key)) return;
+      setBinding(capturing, event.key);
+      setCapturing(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [capturing, setBinding]);
   const [root, setRoot] = useState("");
   const [model, setModel] = useState("large-v3-turbo");
   const [asrBackend, setAsrBackend] = useState("whisper");
@@ -367,6 +401,7 @@ export function SettingsPanel({
 
   const categories: SettingsCategory[] = [
     "appearance",
+    "shortcuts",
     "storage",
     "asr",
     "llm",
@@ -512,12 +547,38 @@ export function SettingsPanel({
 
                 <Group
                   header="强调色"
-                  footnote="影响按钮、选中态等点缀色；「多色」即默认蓝。"
+                  footnote="影响按钮、选中态等点缀色；第一颗颜色可从系统色板自选。"
                 >
                   <StackRow>
                     <div className="flex flex-wrap items-center gap-3">
                       {ACCENTS.map((option) => {
                         const selected = accent === option.key;
+                        if (option.key === "custom") {
+                          return (
+                            <label
+                              key={option.key}
+                              title={option.label}
+                              className={`relative grid h-7 w-7 cursor-pointer place-items-center rounded-full ring-2 ring-offset-2 ring-offset-[var(--surface-card)] transition ${
+                                selected ? "ring-[var(--text-muted)]" : "ring-transparent"
+                              }`}
+                            >
+                              <input
+                                aria-label="自定义强调色"
+                                type="color"
+                                value={customAccent}
+                                onChange={(event) => setCustomAccent(event.target.value)}
+                                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                              />
+                              <span
+                                className="h-5 w-5 rounded-full"
+                                style={{
+                                  background:
+                                    "conic-gradient(from 210deg, #f25555, #f2a13d, #f2d83d, #5cc46b, #3d8bf2, #a05cf2, #f25590, #f25555)",
+                                }}
+                              />
+                            </label>
+                          );
+                        }
                         return (
                           <button
                             key={option.key}
@@ -531,12 +592,7 @@ export function SettingsPanel({
                           >
                             <span
                               className="h-5 w-5 rounded-full"
-                              style={{
-                                background:
-                                  option.key === "multi"
-                                    ? "conic-gradient(from 210deg, #f25555, #f2a13d, #f2d83d, #5cc46b, #3d8bf2, #a05cf2, #f25590, #f25555)"
-                                    : option.accent,
-                              }}
+                              style={{ background: option.accent }}
                             />
                           </button>
                         );
@@ -545,6 +601,35 @@ export function SettingsPanel({
                   </StackRow>
                 </Group>
               </>
+            )}
+
+            {activeCategory === "shortcuts" && (
+              <Group
+                header="播放快捷键"
+                footnote="点右侧按键后，按下新键即可重设；Esc 取消。同一个键改绑到别的动作时，原动作会被清空。聚焦输入框时快捷键不生效。"
+              >
+                {SHORTCUT_ACTIONS.map(({ action, label, hint }) => (
+                  <Row key={action} label={label} hint={hint}>
+                    <button
+                      type="button"
+                      onClick={() => setCapturing(action)}
+                      aria-label={`设置「${label}」快捷键`}
+                      className={`min-w-[88px] rounded-lg border px-3 py-1.5 text-center text-sm font-medium transition ${
+                        capturing === action
+                          ? "border-[var(--accent-text)] bg-[var(--accent-weak)] text-[var(--accent-text)]"
+                          : "border-[var(--border-subtle)] bg-[var(--surface-input)] text-[var(--text-strong)] hover:border-[var(--text-faint)]"
+                      }`}
+                    >
+                      {capturing === action ? "按下按键…" : keyLabel(bindings[action])}
+                    </button>
+                  </Row>
+                ))}
+                <StackRow>
+                  <Button variant="outline" size="sm" onClick={resetBindings}>
+                    恢复默认
+                  </Button>
+                </StackRow>
+              </Group>
             )}
 
             {activeCategory === "storage" && (

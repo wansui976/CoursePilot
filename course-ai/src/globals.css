@@ -31,8 +31,8 @@
 
   --text-strong: #1c1e24;
   --text-normal: #565b66;
-  --text-muted: #8b909b;
-  --text-faint: #aeb2bb;
+  --text-muted: #6b7280;
+  --text-faint: #868b95;
 
   --accent-weak: #eef3fd;
   --accent-weak-2: #e3ecfc;
@@ -175,6 +175,13 @@ button {
   --r-sm: 8px;
   --r-md: 12px;
   --r-lg: 16px;
+  /* 层级刻度（从低到高），新增浮层时请引用这些变量而非裸写数字： */
+  --z-rail: 5; /* 工作台细侧栏 */
+  --z-flyout-scrim: 30; /* 课程视频弹层遮罩 */
+  --z-flyout: 31; /* 课程视频弹层 */
+  --z-sidebar: 40; /* 宽屏完整侧栏 */
+  --z-bottom-tab: 45; /* 窄屏底部 Tab */
+  --z-fullscreen: 50; /* 播放器全屏 */
   --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   --ease: cubic-bezier(.22, .61, .36, 1);
@@ -224,7 +231,7 @@ button {
   align-items: center;
   padding: 12px 0;
   gap: 4px;
-  z-index: 5;
+  z-index: var(--z-rail);
 }
 
 .ca-rail .rail-logo {
@@ -269,6 +276,95 @@ button {
   flex: 1;
 }
 
+/* 工作台「课程视频」弹出层：贴着 56px 细侧栏右侧，列出同课程全部视频 */
+.ca-rail-flyout-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-flyout-scrim);
+}
+
+.ca-rail-flyout {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 56px;
+  z-index: var(--z-flyout);
+  width: min(300px, 70vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
+}
+
+.ca-rail-flyout-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 12px 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ca-rail-flyout-head .t {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ca-rail-flyout-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ca-rail-flyout-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 9px;
+  text-align: left;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.ca-rail-flyout-item:hover {
+  background: var(--bg-sunken);
+  color: var(--text-1);
+}
+
+.ca-rail-flyout-item.on {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+.ca-rail-flyout-item .nm {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ca-rail-flyout-empty {
+  padding: 16px 12px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
 .ca-main {
   min-width: 0;
   min-height: 0;
@@ -297,7 +393,7 @@ button {
   display: flex;
   flex-direction: column;
   padding: 16px 14px 14px;
-  z-index: 40;
+  z-index: var(--z-sidebar);
 }
 
 .ca-brand {
@@ -793,7 +889,7 @@ button {
   min-height: 0;
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 1px var(--study-panel-width, 480px);
+  grid-template-columns: minmax(0, 1fr) 8px var(--study-panel-width, 480px);
   overflow: hidden;
 }
 
@@ -859,10 +955,27 @@ button {
 }
 
 .ca-stage-wrap {
+  position: relative;
   flex: 1;
   min-height: 0;
   padding: 16px 24px 22px;
   display: flex;
+}
+
+/* 手机工作台：去掉标题行后，返回键浮在视频左上角（避让横屏刘海安全区）。 */
+.ca-back-fab {
+  position: absolute;
+  z-index: 5;
+  left: max(16px, env(safe-area-inset-left, 0px));
+  top: 12px;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.45);
+  color: #fff;
+  backdrop-filter: blur(4px);
 }
 
 .ca-stage {
@@ -881,13 +994,65 @@ button {
 }
 
 .ca-resizer {
-  width: 1px;
+  position: relative;
+  width: 8px;
+  flex: none;
   cursor: col-resize;
-  background: var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  /* 触摸拖拽时禁止浏览器把手势当成滚动 */
+  touch-action: none;
 }
 
-.ca-resizer:hover {
+/* 可见竖条：用居中的伪元素，拖动时可超出 8px 轨道变粗而不挤动布局 */
+.ca-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 8px;
+  transform: translateX(-50%);
+  background: var(--line);
+  transition: width 0.14s, background 0.12s;
+}
+
+/* 中间的「抓手」短条：平时灰色较小，悬停略大，拖动时明显放大并高亮 */
+.ca-resizer::before {
+  content: "";
+  position: relative;
+  z-index: 1;
+  width: 4px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--text-3);
+  opacity: 0.55;
+  transition: width 0.14s, height 0.14s, background 0.12s, opacity 0.12s;
+}
+
+.ca-resizer:hover::after {
+  background: var(--bg-sunken);
+}
+
+.ca-resizer:hover::before {
+  height: 40px;
+  opacity: 0.9;
+}
+
+/* 拖动中（鼠标按住或手指拖拽，由 JS 加 .is-resizing）：抓手短条明显变粗变长、高亮；竖条保持细 */
+.ca-resizer.is-resizing::after,
+.ca-resizer:active::after {
+  background: var(--bg-sunken);
+}
+
+.ca-resizer.is-resizing::before,
+.ca-resizer:active::before {
+  width: 10px;
+  height: 64px;
   background: var(--accent);
+  opacity: 1;
 }
 
 .ca-panel-col {
@@ -902,9 +1067,8 @@ button {
 
 /* ===== 窄屏（compact 手机竖 + medium 手机横/小平板）响应式 ===== */
 
-/* 窄屏共享：隐藏拖拽分隔条（无主从两栏可拖） */
-.ca-app[data-bucket="compact"] .ca-resizer,
-.ca-app[data-bucket="medium"] .ca-resizer {
+/* compact（竖屏）是上下堆叠，没有左右两栏可拖，隐藏分隔条；medium 横屏并排则保留。 */
+.ca-app[data-bucket="compact"] .ca-resizer {
   display: none;
 }
 
@@ -953,7 +1117,8 @@ button {
 }
 
 .ca-app[data-bucket="medium"] .ca-panel-col {
-  flex: 0 0 min(46%, 460px);
+  /* 默认 min(46%, 460px)；拖动后用 --study-panel-width，并夹在 [280px, 60%] 防止挤没视频。 */
+  flex: 0 0 clamp(280px, var(--study-panel-width, min(46%, 460px)), 60%);
   min-height: 0;
   border-left: 1px solid var(--line);
 }
@@ -962,15 +1127,11 @@ button {
   flex: 1;
   min-height: 0;
   display: flex;
-  padding: 10px 14px 14px;
+  padding: 6px 12px 10px;
 }
 
 .ca-app[data-bucket="medium"] .ca-stage {
   aspect-ratio: auto;
-}
-
-.ca-app[data-bucket="medium"] .ca-wb-head {
-  padding: 10px 14px 0;
 }
 
 /* ---- 共享紧凑 chrome（compact + medium）：顶栏 / 滚动区 / 抽屉 / 标题 / 网格 / 列表 / 触控 ---- */
@@ -1011,11 +1172,6 @@ button {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.ca-app[data-bucket="compact"] .wb-title,
-.ca-app[data-bucket="medium"] .wb-title {
-  font-size: 17px;
-}
-
 .ca-app[data-bucket="compact"] .hamb,
 .ca-app[data-bucket="medium"] .hamb {
   width: 44px;
@@ -1037,20 +1193,20 @@ button {
 .course-video-progress,
 .course-video-volume {
   --progress-percent: 0%;
-  --video-control-blue: #3b82f6;
+  --video-control-color: var(--accent);
   --video-track: rgb(255 255 255 / 0.22);
   appearance: none;
   cursor: pointer;
   border-radius: 999px;
   background: linear-gradient(
     to right,
-    var(--video-control-blue) 0 var(--progress-percent),
+    var(--video-control-color) 0 var(--progress-percent),
     var(--video-track) var(--progress-percent) 100%
   );
 }
 
 .course-video-progress {
-  height: 7px;
+  height: 5px;
 }
 
 .course-video-volume {
@@ -1069,8 +1225,8 @@ button {
   appearance: none;
   border: 0;
   border-radius: 999px;
-  background: var(--video-control-blue);
-  box-shadow: 0 0 0 4px rgb(59 130 246 / 0.22);
+  background: var(--video-control-color);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--video-control-color) 22%, transparent);
 }
 
 .course-video-progress::-webkit-slider-thumb {
@@ -1104,7 +1260,7 @@ button {
 .course-video-volume::-moz-range-thumb {
   border: 0;
   border-radius: 999px;
-  background: var(--video-control-blue);
+  background: var(--video-control-color);
 }
 
 .course-video-progress::-moz-range-thumb {
@@ -1121,6 +1277,50 @@ button {
 .course-video-volume::-moz-range-thumb {
   width: 12px;
   height: 12px;
+}
+
+/* 触控设备（无 hover）：控制栏走紧凑高度（约原来一半），命中区放宽到 30px；
+   进度条拇指常显、轨道略加高，便于拇指拖动（默认拇指靠 hover/focus 才出现，触屏摸不到）。 */
+@media (pointer: coarse) {
+  .ca-player-controls button {
+    min-height: 30px;
+    min-width: 30px;
+  }
+
+  .course-video-progress {
+    height: 8px;
+  }
+
+  .course-video-progress::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+    margin-top: -2px;
+    opacity: 1;
+  }
+
+  .course-video-progress::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+/* 长文稿性能：跳过视口外字幕行的布局/绘制（DOM 仍在，纠错/跟随/恢复滚动不受影响）。
+   contain-intrinsic-size 给未渲染行一个高度估值，避免滚动条跳动。 */
+.ca-transcript-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 38px;
+}
+
+/* 用户要求减少动效时：全局兜底，几乎关掉所有过渡与动画（前庭敏感友好）。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* 平滑的颜色过渡：悬停态 + 主题切换。只动颜色类属性，不引起重排。 */
@@ -1237,7 +1437,7 @@ button {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 45;
+  z-index: var(--z-bottom-tab);
   display: flex;
   align-items: stretch;
   background: var(--bg-panel);
