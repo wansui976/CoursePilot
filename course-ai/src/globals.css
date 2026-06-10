@@ -970,8 +970,8 @@ button {
   top: 12px;
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 999px;
   background: rgb(0 0 0 / 0.45);
   color: #fff;
@@ -1501,4 +1501,58 @@ button {
   flex-direction: column;
   background: var(--bg-sidebar);
   padding: calc(16px + env(safe-area-inset-top, 0px)) 16px 16px;
+}
+
+/* ===================== 触摸按压反馈（P0） =====================
+   hover 在触屏不触发，给可点元素补 :active 即时反馈；并去掉系统默认点按高亮。
+   放在文件末尾，确保 :active 在桌面同时 hover 时也能覆盖各处 :hover。 */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 去掉触屏 300ms 点击延迟（仍允许滚动/缩放手势）。 */
+button,
+a,
+[role="button"],
+[role="tab"] {
+  touch-action: manipulation;
+}
+
+/* 卡片本就有 transform 过渡：按压轻微缩放 */
+.ca-card:active {
+  transform: scale(0.985);
+}
+
+/* 列表行 / 侧栏项 / rail 按钮本就有背景过渡：按压加深背景 */
+.ca-row:active {
+  background: var(--surface-card-active);
+}
+
+.ca-nav-item:active,
+.rail-btn:active {
+  background: var(--bg-sunken);
+}
+
+/* 本无过渡的图标按钮 / 底部 Tab：补过渡 + 按压态 */
+.hamb,
+.ca-back-fab,
+.ca-bottom-tab-btn {
+  transition:
+    transform 0.1s,
+    background-color 0.12s,
+    opacity 0.12s;
+}
+
+.hamb:active {
+  transform: scale(0.92);
+  background: var(--bg-sunken);
+}
+
+.ca-back-fab:active {
+  transform: scale(0.92);
+  background: rgb(0 0 0 / 0.62);
+}
+
+.ca-bottom-tab-btn:active {
+  opacity: 0.55;
 }
