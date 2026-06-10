@@ -32,8 +32,8 @@ export function VideoPlayer({
   const [muted, setMuted] = useState(false);
   const [captionsOn, setCaptionsOn] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
-  // 沉浸式（手机）默认隐藏控制栏，点视频才显示；桌面默认常显。
-  const [controlsVisible, setControlsVisible] = useState(!immersive);
+  // 控制栏可见性：桌面常显；沉浸式（手机）进入时先显示一下、随后自动隐藏，之后点视频切换。
+  const [controlsVisible, setControlsVisible] = useState(true);
   const hideControlsTimer = useRef<number | undefined>(undefined);
   const setCurrentMs = usePlayer((s) => s.setCurrentMs);
   const setDurationMs = usePlayer((s) => s.setDurationMs);
@@ -159,9 +159,13 @@ export function VideoPlayer({
       clearHideTimer();
       return;
     }
-    // 沉浸式：默认隐藏，等用户点视频再显示。
-    setControlsVisible(false);
+    // 沉浸式：进入时先显示一下让用户知道有控制栏，2.5s 后自动收起（无论是否在播放）。
+    setControlsVisible(true);
     clearHideTimer();
+    hideControlsTimer.current = window.setTimeout(
+      () => setControlsVisible(false),
+      2500,
+    );
     return clearHideTimer;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [immersive]);
