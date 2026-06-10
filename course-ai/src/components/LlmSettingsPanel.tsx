@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 import type { LlmProfile, ProviderKind } from "@/lib/types";
@@ -31,6 +31,7 @@ export function LlmSettingsPanel() {
   const [profiles, setProfiles] = useState<LlmProfile[]>([]);
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [hasKey, setHasKey] = useState<Record<string, boolean>>({});
+  const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState("");
 
@@ -187,15 +188,26 @@ export function LlmSettingsPanel() {
               onChange={(e) => update(p.id, { model: e.target.value })}
             />
             <div className="flex items-center gap-2">
-              <input
-                type="password"
-                className={FIELD}
-                value={keys[p.id] ?? ""}
-                placeholder={
-                  hasKey[p.id] ? "已配置 ••••••（留空＝不修改）" : "API Key"
-                }
-                onChange={(e) => setKeys((k) => ({ ...k, [p.id]: e.target.value }))}
-              />
+              <div className="relative flex-1">
+                <input
+                  type={showKey[p.id] ? "text" : "password"}
+                  className={`${FIELD} pr-10`}
+                  value={keys[p.id] ?? ""}
+                  placeholder={
+                    hasKey[p.id] ? "已配置 ••••••（留空＝不修改）" : "API Key"
+                  }
+                  onChange={(e) => setKeys((k) => ({ ...k, [p.id]: e.target.value }))}
+                />
+                <button
+                  type="button"
+                  aria-label={showKey[p.id] ? "隐藏 API Key" : "显示 API Key"}
+                  title={showKey[p.id] ? "隐藏" : "显示"}
+                  onClick={() => setShowKey((s) => ({ ...s, [p.id]: !s[p.id] }))}
+                  className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded text-[var(--text-muted)] transition hover:text-[var(--text-strong)]"
+                >
+                  {showKey[p.id] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               {hasKey[p.id] && !keys[p.id] && (
                 <span className="inline-flex flex-none items-center gap-1 rounded-full bg-[var(--status-ok-bg)] px-2 py-1 text-xs font-medium text-[var(--status-ok)]">
                   <Check className="h-3 w-3" />
