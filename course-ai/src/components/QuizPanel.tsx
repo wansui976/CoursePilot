@@ -4,6 +4,7 @@ import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import type { QuizQuestion } from "@/lib/types";
+import { Skeleton } from "@/components/ui/skeleton";
 import { MathText } from "./MathText";
 
 function answerText(answer: QuizQuestion["answer"]): string {
@@ -15,7 +16,7 @@ function answerText(answer: QuizQuestion["answer"]): string {
 export function QuizPanel({ videoId }: { videoId: string }) {
   const requestSeek = usePlayer((s) => s.requestSeek);
   const [revealed, setRevealed] = useState<Record<number, boolean>>({});
-  const { data: raw } = useQuery({
+  const { data: raw, isLoading } = useQuery({
     queryKey: ["quiz", videoId],
     queryFn: () => ipc.ai.getQuiz(videoId),
   });
@@ -29,6 +30,15 @@ export function QuizPanel({ videoId }: { videoId: string }) {
     }
   }, [raw]);
 
+  if (isLoading) {
+    return (
+      <div className="space-y-4 p-4" role="status" aria-label="加载中…">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-24 w-full" />
+        ))}
+      </div>
+    );
+  }
   if (questions.length === 0) {
     return (
       <p className="p-4 text-sm text-[var(--text-faint)]">

@@ -4,6 +4,9 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Home } from "./Home";
 import type { Course, Video } from "@/lib/types";
+import { durKey, posKey } from "@/lib/playback";
+import { writeVideoResumeState } from "@/lib/resumeState";
+import { displayTitle } from "@/lib/videoTitle";
 import { useJobs } from "@/stores/jobs";
 
 const { mockIpc } = vi.hoisted(() => ({
@@ -149,6 +152,17 @@ describe("Home", () => {
     expect(root.style.getPropertyValue("--color-primary")).toBe("#34a853");
   });
 
+  it("applies the user's custom accent color as a CSS var on the app root", () => {
+    localStorage.setItem("course-ai-accent", "custom");
+    localStorage.setItem("course-ai-custom-accent", "#123456");
+
+    const { container } = renderHome();
+    const root = container.firstElementChild as HTMLElement;
+
+    expect(root.style.getPropertyValue("--accent")).toBe("#123456");
+    expect(root.style.getPropertyValue("--color-primary")).toBe("#123456");
+  });
+
   it("shows the faithful course-library homepage after selecting a course", async () => {
     renderHome();
 
@@ -171,12 +185,40 @@ describe("Home", () => {
 
     expect(screen.getByRole("button", { name: "返回课程库" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "学习工作台" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: video.title })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: displayTitle(video.title) })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "开始处理" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("课程问答")).not.toBeInTheDocument();
     expect(await screen.findByLabelText("视频播放器")).toBeInTheDocument();
     expect(screen.getByLabelText("学习资料面板")).toBeInTheDocument();
     expect(screen.getByRole("separator", { name: "调整学习资料宽度" })).toBeInTheDocument();
+  });
+
+  it("does not show a separate continue-learning button for saved playback progress", async () => {
+    localStorage.setItem(posKey(video.id), "600");
+    localStorage.setItem(durKey(video.id), "3600");
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    await screen.findByText(displayTitle(video.title));
+
+    expect(
+      screen.queryByRole("button", { name: `继续学习：${video.title}` }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("已观看 17%")).toBeInTheDocument();
+  });
+
+  it("restores the saved study panel width for the selected video", async () => {
+    writeVideoResumeState(video.id, { studyPanelWidth: 620 });
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+
+    expect(screen.getByLabelText("学习工作台响应布局")).toHaveStyle({
+      "--study-panel-width": "620px",
+    });
   });
 
   it("shows a rail with back button next to the learning workspace on wide screens", async () => {
@@ -206,8 +248,31 @@ describe("Home", () => {
     const sidebar = screen.getByRole("complementary", { name: "课程侧栏" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "处理队列" }));
     expect(
-      within(screen.getByLabelText("处理队列页面")).getByText(video.title),
+      within(screen.getByLabelText("处理队列页面")).getByText(displayTitle(video.title)),
     ).toBeInTheDocument();
+  });
+
+  it("lets the processing queue task list use the full main width", async () => {
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /视频操作/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "开始处理" }));
+    await waitFor(() => expect(mockIpc.pipeline.process).toHaveBeenCalledWith(video.id));
+
+    fireEvent.click(
+      within(screen.getByRole("complementary", { name: "课程侧栏" })).getByRole("button", {
+        name: "处理队列",
+      }),
+    );
+
+    const queuePage = screen.getByLabelText("处理队列页面");
+    const queueTitle = within(queuePage).getByText(displayTitle(video.title));
+    const queueList = queueTitle.closest(".flex-col");
+
+    expect(queueTitle).toBeInTheDocument();
+    expect(queueList).toHaveClass("w-full");
+    expect(queueList).not.toHaveClass("max-w-3xl");
   });
 
   it("shows detailed ASR progress text in the processing queue page", async () => {

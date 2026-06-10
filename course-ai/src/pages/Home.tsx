@@ -29,6 +29,7 @@ import { useContainerWidth } from "@/lib/useContainerWidth";
 import { ipc } from "@/lib/ipc";
 import type { Video } from "@/lib/types";
 import { formatMs } from "@/lib/time";
+import { displayTitle } from "@/lib/videoTitle";
 import { readPlaybackProgress } from "@/lib/playback";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { usePlayer } from "@/stores/player";
@@ -69,6 +70,7 @@ export function Home() {
   const [showDevConsole, setShowDevConsole] = useState(false);
   const theme = useTheme((s) => s.effective);
   const accent = useTheme((s) => s.accent);
+  const customAccent = useTheme((s) => s.customAccent);
   const toggleTheme = useTheme((s) => s.toggle);
   const [view, setView] = useState<LibraryView>(readInitialView);
   const [openMenuVideoId, setOpenMenuVideoId] = useState<string | null>(null);
@@ -81,6 +83,9 @@ export function Home() {
   const [queuedVideoIds, setQueuedVideoIds] = useState<string[]>([]);
   const [compactTab, setCompactTab] = useState<CompactTab>("courses");
   const [studyPanelWidth, setStudyPanelWidth] = useState(readPanelWidth);
+  const [isResizingPanel, setIsResizingPanel] = useState(false);
+  // 工作台左侧栏「课程视频」菜单：点开后在侧栏旁弹出同课程的全部视频。
+  const [railVideosOpen, setRailVideosOpen] = useState(false);
   const queryClient = useQueryClient();
   const setVideo = usePlayer((s) => s.setVideo);
   const jobsByVideo = useJobs((s) => s.byVideo);
@@ -93,6 +98,8 @@ export function Home() {
   // 窄屏（compact 手机竖 + medium 手机横/小平板）走非宽屏布局；wide 走主从。
   const isPhoneDevice = bucket !== "wide";
   const isWorkbenchWide = bucket === "wide";
+  // 工作台左右并排（medium 手机横屏 + wide）时才有可拖的竖向分隔条；compact 竖屏是上下堆叠，没有。
+  const showResizer = bucket !== "compact";
   const studyPanelWidthForLayout = studyPanelWidth;
   // 硬件返回键是「平台能力」（仅 Android 有），与布局宽度无关：用 UA 判平台，
   // 避免在桌面拦截窗口关闭。
@@ -295,10 +302,15 @@ export function Home() {
 
   function beginStudyPanelResize(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault();
+    setIsResizingPanel(true);
     const startX = event.clientX;
     const startWidth = studyPanelWidth;
+    // 按工作台实际宽度限制：面板最小 280，且至少给视频留 320，避免小屏（手机横屏）被挤没。
+    const containerW = event.currentTarget.parentElement?.clientWidth ?? 0;
+    const minPanel = 280;
+    const maxPanel = containerW > 0 ? Math.max(minPanel, containerW - 320) : 720;
     const onMove = (move: PointerEvent) => {
-      const next = Math.min(720, Math.max(360, startWidth - (move.clientX - startX)));
+      const next = Math.min(maxPanel, Math.max(minPanel, startWidth - (move.clientX - startX)));
       setStudyPanelWidth(next);
       window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(next));
       if (selectedVideoId) {
@@ -306,6 +318,7 @@ export function Home() {
       }
     };
     const onUp = () => {
+      setIsResizingPanel(false);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
@@ -369,6 +382,7 @@ export function Home() {
   }
 
   function returnToLibrary() {
+    setRailVideosOpen(false);
     setSelectedVideoId(null);
     setQueueOpen(false);
     setShowSettings(false);
@@ -418,9 +432,6 @@ export function Home() {
               <h1 className="text-2xl font-semibold text-[var(--text-strong)]">
                 处理队列
               </h1>
-              <p className="mt-1 text-sm text-[var(--text-muted)]">
-                抽音频 → 语音识别 → 生成章节 → 生成笔记
-              </p>
             </div>
           </div>
           <span className="rounded-full bg-[var(--surface-card)] px-2.5 py-1 text-xs text-[var(--text-muted)]">
@@ -454,7 +465,7 @@ export function Home() {
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0 truncate text-sm font-medium text-[var(--text-strong)]">
-                          {video.title}
+                          {displayTitle(video.title)}
                         </div>
                         <span className="shrink-0 tabular-nums text-xs text-[var(--text-muted)]">
                           {percent}%
@@ -639,7 +650,7 @@ export function Home() {
       >
         <button
           className="block w-full text-left"
-          aria-label={`打开视频：${video.title}`}
+          aria-label={`打开视频：${displayTitle(video.title)}`}
           onClick={() => openVideo(video.id)}
         >
           <span className="ca-thumb">
@@ -664,7 +675,7 @@ export function Home() {
           </span>
           <span className="ca-card-body">
             <span className="ca-card-title">
-              {video.title}
+              {displayTitle(video.title)}
             </span>
             <span className="ca-card-foot">
               {statusBadge(video)}
@@ -691,7 +702,7 @@ export function Home() {
       >
         <button
           className="row-button"
-          aria-label={`打开视频：${video.title}`}
+          aria-label={`打开视频：${displayTitle(video.title)}`}
           onClick={() => openVideo(video.id)}
         >
           <span className="row-main">
@@ -713,7 +724,7 @@ export function Home() {
               )}
             </span>
             <span className="row-name">
-              <span className="t">{video.title}</span>
+              <span className="t">{displayTitle(video.title)}</span>
               <span className="s">{durationText}</span>
             </span>
           </span>
@@ -823,34 +834,40 @@ export function Home() {
         data-layout={isWorkbenchWide ? "wide" : "stacked"}
         className="ca-wb"
         style={
-          isWorkbenchWide
+          showResizer
             ? ({ "--study-panel-width": `${studyPanelWidthForLayout}px` } as CSSProperties)
             : undefined
         }
       >
         <section aria-label="学习工作台" className="ca-player-col">
-          <header className="ca-wb-head">
-            <div className="wb-title-row">
-              {isPhoneDevice && (
-                <button
-                  type="button"
-                  className="hamb"
-                  onClick={returnToLibrary}
-                  title="返回"
-                  aria-label="返回"
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </button>
-              )}
-              <div className="min-w-0">
-                <h1 className="wb-title">{selectedVideo.title}</h1>
+          {!isPhoneDevice && (
+            <header className="ca-wb-head">
+              <div className="wb-title-row">
+                <div className="min-w-0">
+                  <h1 className="wb-title">{displayTitle(selectedVideo.title)}</h1>
+                </div>
               </div>
-            </div>
-          </header>
+            </header>
+          )}
           <div className="ca-stage-wrap">
+            {isPhoneDevice && (
+              <button
+                type="button"
+                className="ca-back-fab"
+                onClick={returnToLibrary}
+                title="返回"
+                aria-label="返回"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+            )}
             <div className="ca-stage">
               {mediaSrc ? (
-                <VideoPlayer src={mediaSrc} videoId={selectedVideo.id} />
+                <VideoPlayer
+                  src={mediaSrc}
+                  videoId={selectedVideo.id}
+                  immersive={isPhoneDevice}
+                />
               ) : (
                 <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">
                   正在准备播放…
@@ -859,12 +876,12 @@ export function Home() {
             </div>
           </div>
         </section>
-        {isWorkbenchWide && (
+        {showResizer && (
           <div
             role="separator"
             aria-label="调整学习资料宽度"
             aria-orientation="vertical"
-            className="ca-resizer"
+            className={`ca-resizer ${isResizingPanel ? "is-resizing" : ""}`}
             onPointerDown={beginStudyPanelResize}
           />
         )}
@@ -892,7 +909,13 @@ export function Home() {
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
-        <button className="rail-btn active" title="课程视频">
+        <button
+          className={`rail-btn ${railVideosOpen ? "active" : ""}`}
+          title="课程视频"
+          aria-label="课程视频"
+          aria-expanded={railVideosOpen}
+          onClick={() => setRailVideosOpen((open) => !open)}
+        >
           <List className="h-5 w-5" />
         </button>
         <div className="rail-sp" />
@@ -913,6 +936,51 @@ export function Home() {
           <Settings className="h-[19px] w-[19px]" />
         </button>
       </nav>
+    );
+  }
+
+  // 工作台左侧栏「课程视频」菜单：在侧栏右侧弹出同课程的全部视频，点选即切换。
+  function renderRailVideoFlyout() {
+    return (
+      <>
+        <div
+          className="ca-rail-flyout-scrim"
+          onClick={() => setRailVideosOpen(false)}
+        />
+        <div className="ca-rail-flyout" role="dialog" aria-label="课程视频列表">
+          <div className="ca-rail-flyout-head">
+            <span className="t">{selectedCourse?.name ?? "课程视频"}</span>
+            <button
+              type="button"
+              className="ca-icon-btn"
+              aria-label="关闭"
+              onClick={() => setRailVideosOpen(false)}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="ca-rail-flyout-list">
+            {videos.map((video) => (
+              <button
+                key={video.id}
+                type="button"
+                className={`ca-rail-flyout-item ${video.id === selectedVideoId ? "on" : ""}`}
+                aria-current={video.id === selectedVideoId ? "true" : undefined}
+                onClick={() => {
+                  openVideo(video.id);
+                  setRailVideosOpen(false);
+                }}
+              >
+                <Play className="h-3.5 w-3.5 flex-none" />
+                <span className="nm">{displayTitle(video.title)}</span>
+              </button>
+            ))}
+            {videos.length === 0 && (
+              <div className="ca-rail-flyout-empty">该课程暂无视频</div>
+            )}
+          </div>
+        </div>
+      </>
     );
   }
 
@@ -971,10 +1039,11 @@ export function Home() {
       data-theme={theme}
       data-bucket={bucket}
       data-view={isWorkbenchView ? "workbench" : "library"}
-      style={accentVars(accent, theme) as CSSProperties}
+      style={accentVars(accent, theme, customAccent) as CSSProperties}
       className="ca-app"
     >
       {isPhoneDevice ? null : isWorkbenchView ? renderRail() : renderSidebar()}
+      {!isPhoneDevice && isWorkbenchView && railVideosOpen && renderRailVideoFlyout()}
       <main className="ca-main">
         {showSettings ? (
           <SettingsPanel

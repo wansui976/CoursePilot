@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Home } from "./Home";
 import type { Course, Video } from "@/lib/types";
+import { displayTitle } from "@/lib/videoTitle";
 
 const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
@@ -148,7 +149,7 @@ describe("Home selected-video integration", () => {
 
     expect(container.firstElementChild).toHaveAttribute("data-bucket", "wide");
     expect(screen.getByRole("region", { name: "学习工作台" })).toBeInTheDocument();
-    expect(screen.getByText(video.title)).toBeInTheDocument();
+    expect(screen.getByText(displayTitle(video.title))).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "AI 概览" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "笔记" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "文稿" })).toBeInTheDocument();

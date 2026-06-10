@@ -52,6 +52,9 @@ jobs:
         working-directory: course-ai
         run: pnpm install --frozen-lockfile
 
+      - name: Prepare macOS sidecars
+        run: ./.github/scripts/prepare-macos-sidecars.sh
+
       - name: Build macOS bundles
         working-directory: course-ai
         run: pnpm tauri build --bundles app,dmg

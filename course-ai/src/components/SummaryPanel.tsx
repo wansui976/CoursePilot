@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "@/lib/ipc";
 import { withClickableTimestamps } from "@/lib/clickableTimestamps";
 import { usePlayer } from "@/stores/player";
+import { TextSkeleton } from "@/components/ui/skeleton";
 import { PanelActions } from "./PanelActions";
 
 /** 极简 Markdown 渲染：## 小标题、- 列表、空行分段、**加粗**、[mm:ss] 跳转。够摘要用，避免再引依赖。 */
@@ -73,7 +74,7 @@ function renderInline(text: string, onSeek: (ms: number) => void) {
 export function SummaryPanel({ videoId }: { videoId: string }) {
   const qc = useQueryClient();
   const requestSeek = usePlayer((s) => s.requestSeek);
-  const { data: summary } = useQuery({
+  const { data: summary, isLoading } = useQuery({
     queryKey: ["summary", videoId],
     queryFn: () => ipc.ai.getSummary(videoId),
   });
@@ -89,7 +90,9 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
         {generate.isError && (
           <p className="pb-2 text-xs text-red-400">{String(generate.error)}</p>
         )}
-        {summary ? (
+        {isLoading ? (
+          <TextSkeleton lines={5} className="p-0" />
+        ) : summary ? (
           renderMarkdown(summary, requestSeek)
         ) : (
           <p className="text-sm text-[var(--text-faint)]">

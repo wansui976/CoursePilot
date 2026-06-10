@@ -2,6 +2,7 @@ import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, RotateCcw, Trash2 } from "lucide-react";
 import { ipc } from "@/lib/ipc";
+import { displayTitle } from "@/lib/videoTitle";
 import type { TrashedVideo } from "@/lib/types";
 
 function daysLeft(expiresAt: number): number {
@@ -76,7 +77,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
                 >
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm text-[var(--text-strong)]">
-                      {item.title}
+                      {displayTitle(item.title)}
                     </div>
                     <div className="text-xs text-[var(--text-muted)]">
                       {item.course_name} · 剩余 {daysLeft(item.expires_at)} 天

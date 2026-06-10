@@ -165,7 +165,7 @@ export function CourseSidebar({
         {onToggleQueue && (
           <Button
             aria-label="处理队列"
-            className={`ca-nav-item mt-2 ${queueOpen ? "active" : ""}`}
+            className={`ca-nav-item mt-2 w-full justify-start ${queueOpen ? "active" : ""}`}
             size="sm"
             variant="ghost"
             onClick={onToggleQueue}

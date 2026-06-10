@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>course-ai · 学习工作台（自适应）</title>
+<link rel="stylesheet" href="wb-styles.css" />
+<style>
+  /* ===================== PREVIEW SHELL ===================== */
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: #0c0d10; color: #e9eaee; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .preview { height: 100vh; display: flex; flex-direction: column; }
+  .pv-bar { flex: 0 0 auto; height: 54px; display: flex; align-items: center; gap: 18px; padding: 0 18px; background: #15171c; border-bottom: 1px solid #23262d; }
+  .pv-brand { display: flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 600; letter-spacing: .02em; color: #c7cad2; }
+  .pv-brand .dot { width: 9px; height: 9px; border-radius: 50%; background: #2f6cea; box-shadow: 0 0 8px rgba(47,108,234,.7); }
+  .pv-brand .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: #7c828d; font-weight: 500; }
+  .pv-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; color: #5b616c; margin-right: -8px; }
+  #deviceBar { display: inline-flex; gap: 4px; }
+  #deviceBar button { border: 1px solid #2a2e36; background: #1a1d23; color: #9aa0ab; cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 550; height: 32px; padding: 0 11px; border-radius: 7px; transition: background .14s, color .14s, border-color .14s; white-space: nowrap; }
+  #deviceBar button:hover { color: #e9eaee; border-color: #3a3f49; }
+  #deviceBar button.on { background: #23262d; color: #fff; border-color: #444b57; }
+  .pv-readout { margin-left: auto; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: #7c828d; background: #1a1d23; border: 1px solid #23262d; padding: 6px 12px; border-radius: 7px; white-space: nowrap; }
+  .pv-stage { flex: 1; min-height: 0; padding: 0; display: flex; align-items: stretch; justify-content: center; background: radial-gradient(120% 80% at 50% 0%, #14161b 0%, #0c0d10 70%); overflow: hidden; }
+  .pv-stage.padded { padding: 26px; }
+  #frame { height: 100%; width: 100%; min-width: 0; flex: 1 1 auto; display: flex; overflow: hidden; container: app / inline-size; transition: width .3s cubic-bezier(.22,.61,.36,1); }
+  #frame.boxed { flex: 0 0 auto; height: calc(100% - 52px); margin: auto; border-radius: 16px; box-shadow: 0 30px 80px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.04); outline: 6px solid #1a1d23; }
+  .pv-stage.padded #app { border-radius: 11px; }
+</style>
+</head>
+<body>
+  <div class="preview">
+    <div class="pv-bar">
+      <div class="pv-brand"><span class="dot"></span>course-ai <span class="mono">/ 学习工作台 · 自适应</span></div>
+      <span class="pv-label">设备</span>
+      <div id="deviceBar">
+        <button data-device="fit">自适应</button>
+        <button data-device="desktop">桌面</button>
+        <button data-device="laptop">笔记本</button>
+        <button data-device="ipadL">iPad 横</button>
+        <button data-device="ipadP">iPad 竖</button>
+        <button data-device="phone">手机</button>
+      </div>
+      <div class="pv-readout" id="readout">自适应</div>
+    </div>
+
+    <div class="pv-stage" id="stage-host">
+      <div id="frame">
+
+        <!-- ░░░░░░░░░░░░░░░░░░░░  APP  ░░░░░░░░░░░░░░░░░░░░ -->
+        <div class="app" id="app" data-theme="light">
+          <div class="wb">
+
+            <!-- ===== icon rail ===== -->
+            <nav class="rail">
+              <span class="rail-logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
+              <button class="rail-btn" title="返回课程库"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+              <button class="rail-btn active" title="课程视频"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></button>
+              <div class="rail-sp"></div>
+              <button class="rail-btn" id="railDark" title="深色模式"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
+              <button class="rail-btn" title="设置"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg></button>
+            </nav>
+
+            <!-- ===== stack: player | panel ===== -->
+            <div class="stack">
+
+              <!-- ----- player column ----- -->
+              <section class="player-col">
+                <div class="wb-head">
+                  <div class="wb-eyebrow"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>学习工作台</div>
+                  <div class="wb-title-row">
+                    <div class="wb-title">01.【申论之根】底层逻辑.mp4</div>
+                    <span class="done-chip"><span class="dot"></span>已处理 · 资料已生成</span>
+                  </div>
+                </div>
+
+                <div class="ask">
+                  <div class="ask-wrap">
+                    <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z"/></svg></span>
+                    <input class="ask-input" placeholder="向 AI 提问这节课，例如「概括题的得分点有哪些？」" />
+                  </div>
+                  <button class="btn btn-primary ask-send"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>提问</button>
+                </div>
+
+                <div class="stage-wrap">
+                  <div class="stage" id="stage">
+                    <div class="frame"><div class="ph-doc"></div><div class="ph-cam"></div><span class="ph-label">录播画面 · 16:9</span></div>
+                    <div class="big-play" id="bigPlay"><svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg></div>
+                    <div class="controls" id="controls">
+                      <div class="scrub" id="scrub"><div class="scrub-track"><div class="scrub-fill" id="scrubFill"></div><div class="scrub-handle" id="scrubHandle"></div></div></div>
+                      <div class="ctrl-row">
+                        <button class="ctrl" id="playBtn"><svg id="playIcon" width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg></button>
+                        <button class="ctrl" title="上一节"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="19 20 9 12 19 4 19 20"/><rect x="5" y="4" width="2" height="16"/></svg></button>
+                        <button class="ctrl" title="下一节"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 4 15 12 5 20 5 4"/><rect x="17" y="4" width="2" height="16"/></svg></button>
+                        <span class="time"><span id="curTime">00:00</span> <span class="sep">/</span> 1:45:19</span>
+                        <div class="ctrl-sp"></div>
+                        <button class="pill" id="speedBtn">1.0×</button>
+                        <button class="pill on" id="ccBtn">字幕</button>
+                        <button class="ctrl" title="音量"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14"/></svg></button>
+                        <button class="ctrl" title="全屏"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <!-- ----- panel column ----- -->
+              <section class="panel-col">
+                <div class="tabs" id="tabs">
+                  <div class="tab active" data-pane="overview">AI 概览</div>
+                  <div class="tab" data-pane="notes">笔记</div>
+                  <div class="tab" data-pane="transcript">文稿</div>
+                  <div class="tab" data-pane="slides">课件</div>
+                </div>
+
+                <div class="panel-scroll">
+                  <!-- OVERVIEW -->
+                  <div class="pane active" data-pane="overview">
+                    <div class="ov-sec-head"><h3>整体摘要</h3><button class="ghost-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>重新生成</button></div>
+                    <p class="ov-sum">本节课围绕申论概括题中的"主要做法"展开，以一道国考真题为例，讲解如何通过审题、粗读、精读和缩句找到得分点。课程重点训练"底层思维"：先搭建材料逻辑框架，再从材料中提取"动词 + 事情"，最后用总括词组织答案。</p>
+                    <div class="divider"></div>
+                    <div class="ov-sec-head"><h3>核心要点</h3></div>
+                    <ul class="ov-points">
+                      <li><span class="num">1</span><span>审题先看阅读范围，"根据材料一"意味着只需处理材料一，其余材料原则上不读。</span></li>
+                      <li><span class="num">2</span><span>"做法、对策、经验"本质上都属于概括对策类题，核心是寻找"动词 + 事情"。</span></li>
+                      <li><span class="num">3</span><span>答案讲究"全面、准确、有条理"；字数充足时坚持"宁滥不缺"，把可能相关的要点写进去。</span></li>
+                      <li><span class="num">4</span><span>约 70% 的答案可依靠材料原词原句，其余部分需要规范的概括能力。</span></li>
+                    </ul>
+                    <div class="divider"></div>
+                    <div class="ov-sec-head"><h3>重点章节</h3><button class="ghost-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>重新生成</button></div>
+                    <div class="chapters">
+                      <div class="chapter" data-t="0"><span class="ts">00:00</span><div><h4>开场与课程目标</h4><p>说明本课将结合国考申论真题讲解底层思维，帮助学员提升解题能力。</p></div></div>
+                      <div class="chapter" data-t="177"><span class="ts">02:57</span><div><h4>审题方法与答题要求</h4><p>围绕"根据材料一""概括主要做法"等题干信息，讲解阅读范围、对策类型、得分点预估与字数判断。</p></div></div>
+                      <div class="chapter" data-t="550"><span class="ts">09:10</span><div><h4>粗读材料锁定框架</h4><p>通过段首句、段尾句、高频词和主体等粗读方法，初步划分六个话题框架。</p></div></div>
+                      <div class="chapter" data-t="1482"><span class="ts">24:42</span><div><h4>精读前三段提炼做法</h4><p>逐句精读前三个自然段，示范如何从材料中筛选"动词 + 事情"并提炼要点。</p></div></div>
+                    </div>
+                  </div>
+
+                  <!-- NOTES -->
+                  <div class="pane" data-pane="notes">
+                    <div class="sub-bar">
+                      <div class="seg" id="notesSeg"><button class="on" data-sub="ainote">AI 笔记</button><button data-sub="quiz">AI 出题</button><button data-sub="mind">AI 脑图</button></div>
+                      <div class="spacer"></div>
+                      <span class="saved">已保存 12:59</span>
+                    </div>
+                    <div style="display:flex;justify-content:flex-end;margin:-8px 0 14px;"><button class="ghost-btn" id="genBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg><span id="genLabel">生成 AI 笔记</span></button></div>
+
+                    <div class="notes" data-sub="ainote">
+                      <h2>申论概括题：底层思维与作答方法</h2>
+                      <h3>课程目标与题型定位</h3>
+                      <ul class="note-list">
+                        <li>以一道"概括主要做法"真题为例，重点训练从材料中提炼做法、组织答案、控制字数。<span class="tchip" data-t="144"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>02:24</span></li>
+                        <li>题干含"根据材料 X"时优先锁定指定材料；未明确"根据"则需按问题反推材料范围。<span class="tchip" data-t="180"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>03:00</span></li>
+                        <li>"做法、对策、经验"可统一理解为"概括对策类题"，核心是寻找"动词 + 事情"。<span class="tchip" data-t="229"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>03:49</span></li>
+                      </ul>
+                      <h3>字数与得分点判断</h3>
+                      <ul class="note-list">
+                        <li>本题 10 分、250 字，经验上大概率有 5 个左右要点，常见范围 3–7 个。</li>
+                        <li>平均每点约 50 字属相对宽松；若每点 ≤ 40 字，则需高度压缩，只写核心"动词 + 事情"。<span class="tchip" data-t="329"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>05:29</span></li>
+                      </ul>
+                      <h3>审题三要求：全面 · 准确 · 有条理</h3>
+                      <ul class="note-list">
+                        <li><strong>全面</strong>：要点一个都不能少；申论阅卷多写、写错一般不直接扣分，少写才会失分。<span class="tchip" data-t="396"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>06:36</span></li>
+                        <li><strong>准确</strong>：材料表述规范时尽量原词原句摘抄；口语化或不规范时转化为规范表达。<span class="tchip" data-t="460"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>07:40</span></li>
+                        <li><strong>有条理</strong>：写出总括词，总括词通常占分较高。<span class="tchip" data-t="483"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>08:03</span></li>
+                      </ul>
+                    </div>
+
+                    <div class="notes" data-sub="quiz" style="display:none;">
+                      <div class="q-card"><div class="q-stem"><span class="qn">1.</span><span>遇到"概括主要做法 / 对策 / 经验"等题型时，阅读材料主要应抓什么？</span></div><div class="q-opts"><div class="q-opt"><span class="mk">A</span><span>背景原因和影响结果</span></div><div class="q-opt" data-correct><span class="mk">B</span><span>动词 + 事情</span></div><div class="q-opt"><span class="mk">C</span><span>人物身份和时间地点</span></div><div class="q-opt"><span class="mk">D</span><span>材料中的所有形容词</span></div></div><div class="q-foot"><button class="q-reveal">显示答案</button><span class="q-ans">正确答案：B</span></div></div>
+                      <div class="q-card"><div class="q-stem"><span class="qn">2.</span><span>关于申论答案中的"全面"，本节课的核心理解是什么？</span></div><div class="q-opts"><div class="q-opt"><span class="mk">A</span><span>语言必须优美</span></div><div class="q-opt"><span class="mk">B</span><span>每一点都要写得很长</span></div><div class="q-opt" data-correct><span class="mk">C</span><span>要点一个都不少</span></div><div class="q-opt"><span class="mk">D</span><span>只写最确定的点</span></div></div><div class="q-foot"><button class="q-reveal">显示答案</button><span class="q-ans">正确答案：C</span></div></div>
+                      <div class="q-card"><div class="q-stem"><span class="qn">3.</span><span>粗读材料时，可以重点关注哪些内容？（多选）</span></div><div class="q-opts"><div class="q-opt" data-correct><span class="mk">A</span><span>段首句</span></div><div class="q-opt" data-correct><span class="mk">B</span><span>段尾句</span></div><div class="q-opt" data-correct><span class="mk">C</span><span>高频词</span></div><div class="q-opt" data-correct><span class="mk">D</span><span>关联词、关键词</span></div><div class="q-opt"><span class="mk">E</span><span>每个例子的完整细节</span></div></div><div class="q-foot"><button class="q-reveal">显示答案</button><span class="q-ans">正确答案：A B C D</span></div></div>
+                    </div>
+
+                    <div class="notes" data-sub="mind" style="display:none;">
+                      <div class="mind">
+                        <div class="root">申论概括题 · 底层逻辑</div>
+                        <div class="branch"><div class="node">审题</div><div class="leaf">阅读范围：根据材料 X → 锁定指定材料</div><div class="leaf">题型识别：做法 / 对策 / 经验 = 概括对策类</div><div class="leaf">得分点预估：分值、字数 → 推点数</div></div>
+                        <div class="branch"><div class="node">读材料</div><div class="leaf">粗读：段首尾句、高频词、主体 → 搭框架</div><div class="leaf">精读：逐句提取"动词 + 事情"</div></div>
+                        <div class="branch"><div class="node">组织答案</div><div class="leaf">全面：要点不缺；宁滥不缺</div><div class="leaf">准确：原词原句 / 规范转化</div><div class="leaf">有条理：总括词领起，占分高</div></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- TRANSCRIPT -->
+                  <div class="pane" data-pane="transcript">
+                    <div class="tx-bar"><span class="lbl">逐句文稿 · 点击跳转</span><div class="spacer" style="flex:1;"></div><span class="tx-export">导出 SRT</span><span class="tx-export">导出 VTT</span></div>
+                    <div id="txList">
+                      <div class="tx-line" data-t="0"><span class="tx-ts">00:00</span><span class="tx-txt">我先调一下这个色哈。</span></div>
+                      <div class="tx-line" data-t="2"><span class="tx-ts">00:02</span><span class="tx-txt">推迟几分钟给大家上线。</span></div>
+                      <div class="tx-line" data-t="4"><span class="tx-ts">00:04</span><span class="tx-txt">然后我看一下，应该大家比较喜欢的这个颜色呢，是这个颜色是吧？</span></div>
+                      <div class="tx-line" data-t="10"><span class="tx-ts">00:10</span><span class="tx-txt">我们大约两分钟之后，听回放的同学呢，往后播个两分钟也就开始了。</span></div>
+                      <div class="tx-line" data-t="15"><span class="tx-ts">00:15</span><span class="tx-txt">两分钟之后给大家直播啊，今天晚上的话还是一鼓作气把它搞定，行吗？</span></div>
+                      <div class="tx-line" data-t="19"><span class="tx-ts">00:19</span><span class="tx-txt">你们都是哪个城市的？</span></div>
+                      <div class="tx-line" data-t="28"><span class="tx-ts">00:28</span><span class="tx-txt">反正我也知道大家也不容易，你们能够支持我，我也觉得很难得。</span></div>
+                      <div class="tx-line" data-t="45"><span class="tx-ts">00:45</span><span class="tx-txt">OK，带着大家呢，扎扎实实走。</span></div>
+                      <div class="tx-line" data-t="144"><span class="tx-ts">02:24</span><span class="tx-txt">那今天我们就以这道概括主要做法的真题为例，来讲讲申论概括题的底层思维。</span></div>
+                      <div class="tx-line" data-t="180"><span class="tx-ts">03:00</span><span class="tx-txt">你看到题干里有"根据材料一"，那就优先锁定材料一，其他材料原则上不用看。</span></div>
+                    </div>
+                  </div>
+
+                  <!-- SLIDES -->
+                  <div class="pane" data-pane="slides">
+                    <div class="sl-bar"><button class="ghost-btn">截字</button><button class="ghost-btn">截当前帧</button><button class="ghost-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>重新提取</button><div class="spacer"></div><div class="slider-wrap">灵敏度<input type="range" min="1" max="32" value="16" /><span style="font-family:var(--mono);">16</span></div></div>
+                    <div class="sl-grid">
+                      <div class="slide blank"><div class="sl-thumb"></div><div class="sl-cap"><span class="pg">P1 · 开场（空白页）</span><span class="at">00:00</span></div></div>
+                      <div class="slide"><div class="sl-thumb"><div class="sl-cam"></div></div><div class="sl-cap"><span class="pg">P2 · 课程封面</span><span class="at">00:35</span></div></div>
+                      <div class="slide"><div class="sl-thumb"><div class="sl-cam"></div></div><div class="sl-cap"><span class="pg">P3 · 题目与要求</span><span class="at">02:25</span></div></div>
+                      <div class="slide"><div class="sl-thumb"><div class="sl-cam"></div></div><div class="sl-cap"><span class="pg">P4 · 给定资料一</span><span class="at">10:37</span></div></div>
+                      <div class="slide"><div class="sl-thumb"><div class="sl-cam"></div></div><div class="sl-cap"><span class="pg">P5 · 粗读框架</span><span class="at">24:42</span></div></div>
+                      <div class="slide"><div class="sl-thumb"><div class="sl-cam"></div></div><div class="sl-cap"><span class="pg">P6 · 精读批注</span><span class="at">31:08</span></div></div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+            </div><!-- /stack -->
+          </div><!-- /wb -->
+        </div>
+        <!-- ░░░░░░░░░░░░░░░░░░░░  /APP  ░░░░░░░░░░░░░░░░░░░░ -->
+
+      </div>
+    </div>
+  </div>
+
+  <script src="wb-app.js"></script>
+</body>
+</html>

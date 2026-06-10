@@ -149,4 +149,26 @@ mod tests {
         };
         assert!(resolve(&spec, None).is_err());
     }
+
+    #[test]
+    fn ytdlp_is_configured_as_bundled_sidecar() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let tauri_config = fs::read_to_string(manifest_dir.join("tauri.macos.conf.json")).unwrap();
+        let config: serde_json::Value = serde_json::from_str(&tauri_config).unwrap();
+        let external_bin = config
+            .pointer("/bundle/externalBin")
+            .and_then(|value| value.as_array())
+            .expect("bundle.externalBin should be configured");
+        assert!(
+            external_bin
+                .iter()
+                .any(|value| value.as_str() == Some("binaries/yt-dlp")),
+            "bundle.externalBin should include binaries/yt-dlp"
+        );
+        assert_eq!(
+            config.pointer("/bundle/macOS/hardenedRuntime"),
+            Some(&serde_json::Value::Bool(false)),
+            "PyInstaller-based yt-dlp cannot run when Tauri re-signs the sidecar with hardened runtime"
+        );
+    }
 }

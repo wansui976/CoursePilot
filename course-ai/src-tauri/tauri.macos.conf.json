@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/yt-dlp"],
+    "macOS": {
+      "hardenedRuntime": false
+    }
+  }
+}

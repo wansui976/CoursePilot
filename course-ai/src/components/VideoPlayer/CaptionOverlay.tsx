@@ -180,7 +180,7 @@ export function CaptionOverlay({
     >
       <div
         onPointerDown={startMove}
-        className="flex h-full w-full cursor-move items-center justify-center overflow-hidden rounded bg-black/70 px-3 text-center leading-snug text-white shadow-lg ring-1 ring-transparent group-hover:ring-white/30"
+        className="flex h-full w-full cursor-move items-center justify-center overflow-hidden rounded bg-black/70 px-3 text-center leading-snug text-white shadow-lg ring-1 ring-transparent [text-shadow:0_1px_2px_rgba(0,0,0,0.9)] group-hover:ring-white/30"
         style={{ fontSize }}
       >
         <CaptionText text={text} />
