@@ -84,6 +84,8 @@ export function Home() {
   const [compactTab, setCompactTab] = useState<CompactTab>("courses");
   const [studyPanelWidth, setStudyPanelWidth] = useState(readPanelWidth);
   const [isResizingPanel, setIsResizingPanel] = useState(false);
+  // 拖动期间的实时宽度（用 ref，不触发重渲染；松手才提交到 state）。
+  const liveWidthRef = useRef(studyPanelWidth);
   // 工作台左侧栏「课程视频」菜单：点开后在侧栏旁弹出同课程的全部视频。
   const [railVideosOpen, setRailVideosOpen] = useState(false);
   const queryClient = useQueryClient();
@@ -100,7 +102,9 @@ export function Home() {
   const isWorkbenchWide = bucket === "wide";
   // 工作台左右并排（medium 手机横屏 + wide）时才有可拖的竖向分隔条；compact 竖屏是上下堆叠，没有。
   const showResizer = bucket !== "compact";
-  const studyPanelWidthForLayout = studyPanelWidth;
+  const studyPanelWidthForLayout = isResizingPanel
+    ? liveWidthRef.current
+    : studyPanelWidth;
   // 硬件返回键是「平台能力」（仅 Android 有），与布局宽度无关：用 UA 判平台，
   // 避免在桌面拦截窗口关闭。
   const isAndroidPlatform =
@@ -154,6 +158,18 @@ export function Home() {
   useEffect(() => {
     setVideo(selectedVideoId);
   }, [selectedVideoId, setVideo]);
+
+  // 卡片「⋯」菜单:点菜单与触发按钮之外的任意位置即收起(都打了 data-video-menu)。
+  useEffect(() => {
+    if (!openMenuVideoId) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("[data-video-menu]")) return;
+      setOpenMenuVideoId(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [openMenuVideoId]);
 
   const goBackOneLevel = useCallback(() => {
     const now = Date.now();
@@ -302,23 +318,33 @@ export function Home() {
 
   function beginStudyPanelResize(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault();
-    setIsResizingPanel(true);
+    // 拖动期间直接改 .ca-wb 上的 CSS 变量（不触发 React 重渲染、不写 storage），
+    // 松手时才提交一次 state + 持久化，避免每次 pointermove 重渲染整个工作台。
+    const wb = event.currentTarget.parentElement as HTMLElement | null;
     const startX = event.clientX;
     const startWidth = studyPanelWidth;
+    liveWidthRef.current = startWidth;
+    // 冻结右侧面板内容宽度：拖动期间内容不随列宽连续 reflow（长文稿尤其卡），
+    // 松手后（去掉 is-resizing-panel 类）再一次性回流到最终宽度。
+    wb?.style.setProperty("--panel-frozen-width", `${startWidth}px`);
+    setIsResizingPanel(true);
     // 按工作台实际宽度限制：面板最小 280，且至少给视频留 320，避免小屏（手机横屏）被挤没。
-    const containerW = event.currentTarget.parentElement?.clientWidth ?? 0;
+    const containerW = wb?.clientWidth ?? 0;
     const minPanel = 280;
     const maxPanel = containerW > 0 ? Math.max(minPanel, containerW - 320) : 720;
     const onMove = (move: PointerEvent) => {
       const next = Math.min(maxPanel, Math.max(minPanel, startWidth - (move.clientX - startX)));
-      setStudyPanelWidth(next);
-      window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(next));
-      if (selectedVideoId) {
-        writeVideoResumeState(selectedVideoId, { studyPanelWidth: next });
-      }
+      liveWidthRef.current = next;
+      wb?.style.setProperty("--study-panel-width", `${next}px`);
     };
     const onUp = () => {
       setIsResizingPanel(false);
+      const finalWidth = liveWidthRef.current;
+      setStudyPanelWidth(finalWidth);
+      window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(finalWidth));
+      if (selectedVideoId) {
+        writeVideoResumeState(selectedVideoId, { studyPanelWidth: finalWidth });
+      }
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
@@ -475,7 +501,7 @@ export function Home() {
                         <div
                           className={
                             active?.status === "failed"
-                              ? "h-full bg-red-500"
+                              ? "h-full bg-[var(--status-err)]"
                               : "h-full bg-primary"
                           }
                           style={{ width: `${percent}%` }}
@@ -484,7 +510,7 @@ export function Home() {
                       <div
                         className={
                           active?.status === "failed"
-                            ? "mt-1.5 truncate text-xs text-red-500"
+                            ? "mt-1.5 truncate text-xs text-[var(--status-err)]"
                             : "mt-1.5 truncate text-xs text-[var(--text-muted)]"
                         }
                       >
@@ -494,7 +520,7 @@ export function Home() {
                     {canCancel && (
                       <button
                         onClick={() => void ipc.pipeline.cancel(video.id)}
-                        className="absolute right-3 top-3 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs text-[var(--text-muted)] transition hover:text-red-500"
+                        className="absolute right-3 top-3 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
                       >
                         取消
                       </button>
@@ -515,6 +541,9 @@ export function Home() {
       <button
         type="button"
         aria-label="视频操作"
+        aria-haspopup="menu"
+        aria-expanded={openMenuVideoId === video.id}
+        data-video-menu
         className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-panel)] text-[var(--text-muted)] shadow hover:text-[var(--text-strong)]"
         onClick={() =>
           setOpenMenuVideoId((id) => (id === video.id ? null : video.id))
@@ -530,6 +559,7 @@ export function Home() {
     return (
       <div
         role="menu"
+        data-video-menu
         className="absolute right-3 top-12 z-10 w-32 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 text-sm shadow-[var(--shadow-pop)]"
       >
         <button
@@ -546,7 +576,7 @@ export function Home() {
         <button
           type="button"
           role="menuitem"
-          className="block w-full px-3 py-2 text-left text-red-500 hover:bg-[var(--surface-card-hover)]"
+          className="mt-1 block w-full border-t border-[var(--border-subtle)] px-3 py-2 pt-2.5 text-left text-[var(--status-err)] hover:bg-[var(--surface-card-hover)]"
           onClick={() => {
             setOpenMenuVideoId(null);
             void deleteVideo(video.id);
@@ -832,7 +862,7 @@ export function Home() {
       <div
         aria-label="学习工作台响应布局"
         data-layout={isWorkbenchWide ? "wide" : "stacked"}
-        className="ca-wb"
+        className={`ca-wb ${isResizingPanel ? "is-resizing-panel" : ""}`}
         style={
           showResizer
             ? ({ "--study-panel-width": `${studyPanelWidthForLayout}px` } as CSSProperties)
