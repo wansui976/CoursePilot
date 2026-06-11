@@ -42,6 +42,7 @@ export function TabsPanel({ videoId }: { videoId: string }) {
     <Tabs
       value={activeTab}
       onValueChange={(value) => changeTab(value as Tab)}
+      data-study-tab={activeTab}
       className="flex h-full flex-col bg-[var(--surface-panel)] text-[var(--text-normal)]"
     >
       <TabsList className="flex h-12 items-end justify-around border-b border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2.5 sm:h-14 sm:px-4">
@@ -50,7 +51,7 @@ export function TabsPanel({ videoId }: { videoId: string }) {
             key={tab}
             value={tab}
             onClick={() => changeTab(tab)}
-            className="border-b-[3px] border-transparent px-1 pb-3 text-sm font-semibold text-[var(--text-muted)] data-[state=active]:border-primary data-[state=active]:text-[var(--text-strong)] sm:text-base"
+            className="border-b-[3px] border-transparent px-1 pb-3 text-sm font-semibold text-[var(--text-muted)] transition-colors data-[state=active]:border-primary data-[state=active]:text-[var(--text-strong)] sm:text-base"
           >
             {tab}
           </TabsTrigger>
