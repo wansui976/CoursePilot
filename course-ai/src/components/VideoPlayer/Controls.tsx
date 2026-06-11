@@ -1,7 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { formatMs } from "@/lib/time";
+import { usePlayer } from "@/stores/player";
 import { Check, Maximize, Minimize, Pause, Play, Volume2, VolumeX } from "lucide-react";
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 const SPEEDS = [2, 1.5, 1.25, 1, 0.75, 0.5];
 const iconButtonClass =
@@ -15,8 +16,6 @@ function formatRate(rate: number) {
 
 export function Controls({
   playing,
-  currentMs,
-  durationMs,
   rate,
   volume,
   muted,
@@ -31,8 +30,6 @@ export function Controls({
   onFullscreenToggle,
 }: {
   playing: boolean;
-  currentMs: number;
-  durationMs: number;
   rate: number;
   volume: number;
   muted: boolean;
@@ -46,7 +43,22 @@ export function Controls({
   onMuteToggle: () => void;
   onFullscreenToggle: () => void;
 }) {
+  // 只让这个小组件订阅进度（每秒约 4 次重渲染），不波及整个播放器。
+  const currentMs = usePlayer((s) => s.currentMs);
+  const durationMs = usePlayer((s) => s.durationMs);
   const [speedOpen, setSpeedOpen] = useState(false);
+
+  // 倍速菜单:点菜单与触发按钮之外即收起(都打了 data-speed-menu)。
+  useEffect(() => {
+    if (!speedOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("[data-speed-menu]")) return;
+      setSpeedOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [speedOpen]);
   const safeDuration = Math.max(0, durationMs);
   const progressPercent =
     safeDuration > 0 ? Math.min(100, Math.max(0, (currentMs / safeDuration) * 100)) : 0;
@@ -86,7 +98,7 @@ export function Controls({
 
         <div className="min-w-2 flex-1" />
 
-        <div className="relative">
+        <div className="relative" data-speed-menu>
           <button
             type="button"
             className={textButtonClass}
