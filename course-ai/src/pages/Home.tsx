@@ -555,7 +555,7 @@ export function Home() {
         aria-haspopup="menu"
         aria-expanded={openMenuVideoId === video.id}
         data-video-menu
-        className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-panel)] text-[var(--text-muted)] shadow hover:text-[var(--text-strong)]"
+        className="ca-touch-44 absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-panel)] text-[var(--text-muted)] shadow hover:text-[var(--text-strong)]"
         onClick={() =>
           setOpenMenuVideoId((id) => (id === video.id ? null : video.id))
         }
@@ -649,7 +649,7 @@ export function Home() {
           <button
             type="button"
             aria-label="取消修改标题"
-            className="flex h-7 w-7 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)]"
+            className="ca-touch-44 flex h-7 w-7 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)]"
             onClick={() => setRenamingVideo(null)}
           >
             <X className="h-3.5 w-3.5" />
@@ -657,7 +657,7 @@ export function Home() {
           <button
             type="button"
             aria-label="保存标题"
-            className="flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] text-[var(--text-strong)] hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
+            className="ca-touch-44 flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] text-[var(--text-strong)] hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
             disabled={!renamingVideo.title.trim()}
             onClick={() => void saveRenamedVideo()}
           >
