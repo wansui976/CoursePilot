@@ -352,6 +352,17 @@ export function Home() {
     window.addEventListener("pointerup", onUp);
   }
 
+  // 双击分隔条:把面板宽度复位到默认值(480),省去手动拖回。
+  function resetStudyPanelWidth() {
+    const next = 480;
+    liveWidthRef.current = next;
+    setStudyPanelWidth(next);
+    window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(next));
+    if (selectedVideoId) {
+      writeVideoResumeState(selectedVideoId, { studyPanelWidth: next });
+    }
+  }
+
   function stageLabel(stage?: string) {
     if (stage === "audio") return "提取音频";
     if (stage === "asr") return "语音识别";
@@ -622,6 +633,8 @@ export function Home() {
         <input
           id={`rename-${video.id}`}
           aria-label="视频标题"
+          autoFocus
+          onFocus={(event) => event.currentTarget.select()}
           className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1.5 text-xs text-[var(--text-strong)] outline-none focus:border-primary/70"
           value={renamingVideo.title}
           onChange={(event) =>
@@ -911,8 +924,10 @@ export function Home() {
             role="separator"
             aria-label="调整学习资料宽度"
             aria-orientation="vertical"
+            title="拖动调整宽度,双击重置"
             className={`ca-resizer ${isResizingPanel ? "is-resizing" : ""}`}
             onPointerDown={beginStudyPanelResize}
+            onDoubleClick={resetStudyPanelWidth}
           />
         )}
         <aside
