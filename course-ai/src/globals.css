@@ -159,6 +159,12 @@ button {
   border-radius: 6px;
 }
 
+/* 提问输入框：外层药丸已用 focus-within 显示聚焦，内层 input 不再叠加主色焦点环。
+   规则同样未分层且特异性更高，可压过上面的全局 :focus-visible。 */
+.ca-ask-input:focus-visible {
+  outline: none;
+}
+
 /* UI 重构 reference shell: scoped class names mirror the files in ../UI 重构. */
 .ca-app {
   --accent: #2f6cea;
