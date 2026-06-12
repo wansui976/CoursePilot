@@ -119,16 +119,17 @@ pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatReque
              「根号下一减 v 方比 c 方」→ \\(\\sqrt{1-v^2/c^2}\\)，「比/除以」用分式或 /。\
              只把公式部分写成 LaTeX，其余仍是普通中文文本，不要整段包成公式；含义不确定时保留原文。\
              只返回需要修改的分段；不需要修改的分段不要返回。\
-             输出每项只有 start_ms、end_ms、originaltext、replacedtext 四个字段。\
-             start_ms/end_ms 必须原样照抄输入；originaltext 必须原样照抄输入 text；\
-             replacedtext 写纠正后的文本。若本批没有需要修改的内容，输出空数组 []。"
+             输入每项有 id、text 两个字段。输出每项只有 id、replacedtext 两个字段：\
+             id 原样照抄该分段输入的 id（仅用于定位，切勿改动或编造，更不要用时间戳）；\
+             replacedtext 写纠正后的文本；若整段都是无实义语气词，replacedtext 给空串 \"\" 表示删除。\
+             不要输出 start_ms、end_ms、originaltext 或原文。若本批没有需要修改的内容，输出空数组 []。"
                 .into(),
         ),
         cacheable_context: None,
         messages: vec![ChatMessage {
             role: "user".into(),
             content: format!(
-                "找出这些分段里需要修改的条目，只返回修改 patch，时间戳和 originaltext 照抄：\n{batch_json}"
+                "下面是带 id 的分段，找出需要修改的条目，只返回 [{{\"id\":<原 id>,\"replacedtext\":\"...\"}}]，id 照抄：\n{batch_json}"
             ),
         }],
         temperature: 0.1,
@@ -191,11 +192,9 @@ mod tests {
 
         for required in [
             "只输出 JSON",
-            "start_ms",
-            "end_ms",
-            "originaltext",
+            "id",
             "replacedtext",
-            "不要补充新知识",
+            "不要补充视频里没说过的内容",
         ] {
             assert!(
                 system.contains(required) || user.contains(required),

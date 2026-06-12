@@ -5,9 +5,10 @@ use crate::llm::Provider;
 use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 
-// 一批的段数。模型只返回需要修改的 patch，40 段通常能给足上下文且不至于太长。
+// 一批的段数。模型只返回需要修改的 patch（按 id 引用）。批越大越容易输出截断、
+// id 越界/串位，故取 20 段：上下文够用，又把单批漂移与截断概率压低。
 // OpenAI 已不发 max_tokens（无上限）；Anthropic 仍使用请求里的 max_tokens。
-const CORRECTION_BATCH_SIZE: usize = 40;
+const CORRECTION_BATCH_SIZE: usize = 20;
 // 默认并发批数；可被设置 asr_correction_concurrency 覆盖。批之间相互独立，
 // 并发跑可大幅缩短长视频的纠错耗时。DeepSeek 等高并发模型可调到很大
 // （flash 2500 / pro 500）；普通端点保守些以免触发限流。
@@ -31,12 +32,32 @@ pub struct CorrectionSegment {
     pub text: String,
 }
 
+// 发给模型的请求项：只给 id + 文本。模型据 id 引用分段，无需回抄时间戳/原文，
+// 从根上消除「时间戳串位 / 原文抄错 / 字段名抄错」这三类批量失败。
+#[derive(Debug, Clone, Serialize)]
+struct CorrectionRequestItem<'a> {
+    id: usize,
+    text: &'a str,
+}
+
+fn build_batch_request_json(batch: &[CorrectionSegment]) -> AppResult<String> {
+    let items: Vec<CorrectionRequestItem> = batch
+        .iter()
+        .enumerate()
+        .map(|(id, seg)| CorrectionRequestItem {
+            id,
+            text: &seg.text,
+        })
+        .collect();
+    Ok(serde_json::to_string_pretty(&items)?)
+}
+
+// 模型回的 patch：只认 id 与 replacedtext。其余字段（哪怕模型多回了原文/时间戳）
+// 一律忽略。replacedtext 缺失则该条反序列化失败 → 单条跳过，不会误把整段清空。
 #[derive(Debug, Clone, Deserialize)]
 struct CorrectionPatch {
-    pub start_ms: i64,
-    pub end_ms: i64,
-    pub originaltext: String,
-    pub replacedtext: String,
+    id: usize,
+    replacedtext: String,
 }
 
 fn load_correction_segments(
@@ -51,50 +72,38 @@ fn load_correction_segments(
         .collect()
 }
 
-/// 解析模型返回的 patch 列表，并用 start_ms/end_ms/originaltext 校验是否写错段。
-/// 模型只返回需要修改的条目；未返回的分段保持原文。
+/// 解析模型返回的 patch 列表。按批内 id 定位分段，单条异常（id 越界/重复/字段缺失）
+/// 一律跳过而不拖垮整批；只有当整体连合法 JSON 数组都解析不出（多为输出截断）时才报错。
+/// 模型只返回需要修改的条目；未返回或被跳过的分段保持原文。
 pub fn parse_corrections(
     raw: &[CorrectionSegment],
     content: &str,
 ) -> AppResult<Vec<CorrectionSegment>> {
     // 宽松解析：先严格 JSON，失败再修复 LaTeX 反斜杠转义后重试（与章节/出题共用）。
-    let patches: Vec<CorrectionPatch> = crate::pipeline::ai::parse_lenient_json(content)?;
+    // 先收成 Value 数组，再逐条尝试转 patch——这样单条结构异常不会废掉整批。
+    let values: Vec<serde_json::Value> = crate::pipeline::ai::parse_lenient_json(content)?;
     let mut out = raw.to_vec();
     let mut seen = std::collections::HashSet::new();
 
-    for patch in patches {
-        let key = (patch.start_ms, patch.end_ms);
-        if !seen.insert(key) {
-            return Err(AppError::Other(format!(
-                "duplicate correction patch for {}-{}",
-                patch.start_ms, patch.end_ms
-            )));
-        }
-
-        let Some((index, orig)) = raw.iter().enumerate().find(|(_, segment)| {
-            segment.start_ms == patch.start_ms && segment.end_ms == patch.end_ms
-        }) else {
-            return Err(AppError::Other(format!(
-                "timestamp mismatch: {}-{} not found in batch",
-                patch.start_ms, patch.end_ms
-            )));
+    for value in values {
+        let Ok(patch) = serde_json::from_value::<CorrectionPatch>(value) else {
+            continue; // 单条字段缺失/类型不符 → 跳过
         };
-
-        if orig.text.trim() != patch.originaltext.trim() {
-            return Err(AppError::Other(format!(
-                "original text mismatch at {}-{}",
-                patch.start_ms, patch.end_ms
-            )));
+        if patch.id >= raw.len() {
+            continue; // id 越界（串位/编造）→ 跳过
+        }
+        if !seen.insert(patch.id) {
+            continue; // 同一 id 重复 patch → 只取首次
         }
 
+        let orig = &raw[patch.id];
         // replacedtext 为空是合法的「整段删除」：当一段全是语气词/口头禅（如「哎。」）
         // 时，模型按提示词把它清空。这里保留分段（时间戳不变，满足下游行数一致校验），
         // 只把文本置空——该时间段不再显示字幕，也不污染文稿/笔记。
-        let text = patch.replacedtext.trim();
-        out[index] = CorrectionSegment {
+        out[patch.id] = CorrectionSegment {
             start_ms: orig.start_ms,
             end_ms: orig.end_ms,
-            text: text.to_string(),
+            text: patch.replacedtext.trim().to_string(),
         };
     }
 
@@ -174,7 +183,7 @@ async fn correct_batch(
     video_id: &str,
     batch: &[CorrectionSegment],
 ) -> AppResult<Vec<CorrectionSegment>> {
-    let batch_json = serde_json::to_string_pretty(batch)?;
+    let batch_json = build_batch_request_json(batch)?;
     let mut last_err: Option<AppError> = None;
     for attempt in 1..=CORRECTION_MAX_ATTEMPTS {
         match correct_batch_once(provider, model, video_id, batch, &batch_json, attempt).await {
@@ -196,15 +205,18 @@ fn assemble_corrections(
     results: Vec<(bool, Vec<CorrectionSegment>)>,
 ) -> AppResult<Vec<CorrectionSegment>> {
     let failed_count = results.iter().filter(|(ok, _)| !*ok).count();
+    // 仅当「全部批次」都失败时才整体报错（多为模型/网络不可用）。
+    // 否则：成功批应用纠正结果，失败批沿用其原始分段，二者按顺序拼回——
+    // 失败批保留原文，但已识别成功的批次照常落库，不再因个别批失败而整篇放弃。
     if failed_count == results.len() {
         return Err(AppError::Pipeline(
             "所有分段纠错均失败（模型输出可能被截断或格式不符）".into(),
         ));
     }
     if failed_count > 0 {
-        return Err(AppError::Pipeline(format!(
-            "部分分段纠错失败（失败批次 {failed_count} 个），已保留原始文稿"
-        )));
+        eprintln!(
+            "transcript correction: {failed_count} batch(es) failed and kept raw; applying the rest"
+        );
     }
 
     let mut corrected = Vec::new();
@@ -332,11 +344,7 @@ mod tests {
             },
         ];
 
-        let out = parse_corrections(
-            &raw,
-            r#"[{"start_ms":0,"end_ms":1000,"originaltext":"原文","replacedtext":"纠正文"}]"#,
-        )
-        .unwrap();
+        let out = parse_corrections(&raw, r#"[{"id":0,"replacedtext":"纠正文"}]"#).unwrap();
 
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].start_ms, 0);
@@ -346,20 +354,42 @@ mod tests {
     }
 
     #[test]
-    fn parse_corrections_rejects_original_mismatch() {
+    fn parse_corrections_skips_out_of_range_id() {
         let raw = vec![CorrectionSegment {
             start_ms: 0,
             end_ms: 1000,
             text: "原文".into(),
         }];
 
-        let err = parse_corrections(
-            &raw,
-            r#"[{"start_ms":0,"end_ms":1000,"originaltext":"别的原文","replacedtext":"纠正文"}]"#,
-        )
-        .unwrap_err();
+        // id 越界（模型串位/编造）：跳过该条，整批不失败，分段保持原文。
+        let out = parse_corrections(&raw, r#"[{"id":5,"replacedtext":"纠正文"}]"#).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].text, "原文");
+    }
 
-        assert!(err.to_string().contains("original text mismatch"));
+    #[test]
+    fn parse_corrections_skips_malformed_item_keeps_valid() {
+        let raw = vec![
+            CorrectionSegment {
+                start_ms: 0,
+                end_ms: 1000,
+                text: "第一段".into(),
+            },
+            CorrectionSegment {
+                start_ms: 1000,
+                end_ms: 2000,
+                text: "第二段".into(),
+            },
+        ];
+
+        // 第二条缺 replacedtext（结构异常）→ 单条跳过；第一条照常应用。
+        let out = parse_corrections(
+            &raw,
+            r#"[{"id":0,"replacedtext":"改了"},{"id":1}]"#,
+        )
+        .unwrap();
+        assert_eq!(out[0].text, "改了");
+        assert_eq!(out[1].text, "第二段");
     }
 
     #[test]
@@ -370,25 +400,22 @@ mod tests {
             text: "原文".into(),
         }];
         // 真实失败样本：LaTeX 反斜杠没按 JSON 转义（单反斜杠），严格解析会 invalid escape。
-        let content = r#"[{"start_ms":0,"end_ms":1000,"originaltext":"原文","replacedtext":"速度 \(\sqrt{1-v^2/c^2}\)"}]"#;
+        let content = r#"[{"id":0,"replacedtext":"速度 \(\sqrt{1-v^2/c^2}\)"}]"#;
         let out = parse_corrections(&raw, content).unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].text, r"速度 \(\sqrt{1-v^2/c^2}\)");
     }
 
     #[test]
-    fn parse_corrections_rejects_unknown_timestamp() {
+    fn parse_corrections_errors_on_non_json_output() {
         let raw = vec![CorrectionSegment {
             start_ms: 0,
             end_ms: 1000,
             text: "原文".into(),
         }];
-        let err = parse_corrections(
-            &raw,
-            r#"[{"start_ms":0,"end_ms":2000,"originaltext":"原文","replacedtext":"纠正文"}]"#,
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("timestamp mismatch"));
+        // 整体不是合法 JSON 数组（多为输出截断）→ 本批失败，交由上层保留原文。
+        let err = parse_corrections(&raw, "对不起，我无法处理").unwrap_err();
+        assert!(!err.to_string().is_empty());
     }
 
     #[test]
@@ -406,11 +433,7 @@ mod tests {
                 text: "正文".into(),
             },
         ];
-        let out = parse_corrections(
-            &raw,
-            r#"[{"start_ms":0,"end_ms":1000,"originaltext":"哎。","replacedtext":""}]"#,
-        )
-        .unwrap();
+        let out = parse_corrections(&raw, r#"[{"id":0,"replacedtext":""}]"#).unwrap();
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].text, "");
         assert_eq!(out[0].start_ms, 0);
@@ -420,8 +443,9 @@ mod tests {
     }
 
     #[test]
-    fn assemble_corrections_rejects_partial_batch_failure() {
-        let err = assemble_corrections(vec![
+    fn assemble_corrections_applies_successful_batches_on_partial_failure() {
+        // 一批成功一批失败：成功批用纠正结果，失败批沿用原文，整体仍应用（不再整篇放弃）。
+        let out = assemble_corrections(vec![
             (
                 true,
                 vec![CorrectionSegment {
@@ -439,16 +463,32 @@ mod tests {
                 }],
             ),
         ])
-        .unwrap_err();
+        .unwrap();
 
-        assert!(err.to_string().contains("部分分段纠错失败"));
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].text, "第一段已纠正");
+        assert_eq!(out[1].text, "第二段原文");
+    }
+
+    #[test]
+    fn assemble_corrections_errors_only_when_all_failed() {
+        let err = assemble_corrections(vec![(
+            false,
+            vec![CorrectionSegment {
+                start_ms: 0,
+                end_ms: 1000,
+                text: "原文".into(),
+            }],
+        )])
+        .unwrap_err();
+        assert!(err.to_string().contains("所有分段纠错均失败"));
     }
 
     #[tokio::test]
     async fn autocorrect_applies_corrected_text_via_mock() {
         let (db, vid, _d) = seed_video_with_transcript().await;
         let provider = Provider::Mock {
-            canned: r#"[{"start_ms":0,"end_ms":5000,"originaltext":"讲解第一部分","replacedtext":"纠正后的第一部分"}]"#.into(),
+            canned: r#"[{"id":0,"replacedtext":"纠正后的第一部分"}]"#.into(),
         };
         autocorrect_transcript(&db, &provider, "m", &vid)
             .await
