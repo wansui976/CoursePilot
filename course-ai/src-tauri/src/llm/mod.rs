@@ -25,6 +25,14 @@ pub struct ChatRequest {
     pub max_tokens: u32,
 }
 
+/// 把 temperature 量化到 2 位小数再发给服务端。
+/// f32 字面量(如 0.1)加宽到 f64 序列化会出现 0.10000000149011612 这类长小数,
+/// 智谱 GLM 等严格服务端会报「temperature 参数非法：限制小数点 2 位」。四舍五入到
+/// 2 位对所有 provider 都安全(0.1→0.1、0.3→0.3)。
+pub fn round_temperature(temperature: f32) -> f64 {
+    (temperature as f64 * 100.0).round() / 100.0
+}
+
 #[derive(Debug, Clone)]
 pub struct ChatResponse {
     pub content: String,
