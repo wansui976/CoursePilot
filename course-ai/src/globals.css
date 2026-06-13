@@ -68,9 +68,9 @@
   --surface-stage: #0f1115;
   --surface-titlebar: #0f1217;
 
-  --border-subtle: rgb(255 255 255 / 0.1);
-  --border-faint: rgb(255 255 255 / 0.06);
-  --border-titlebar: rgb(255 255 255 / 0.1);
+  --border-subtle: rgb(255 255 255 / 0.06);
+  --border-faint: rgb(255 255 255 / 0.04);
+  --border-titlebar: rgb(255 255 255 / 0.06);
 
   --text-strong: rgb(244 247 255 / 0.96);
   --text-normal: rgb(228 234 245 / 0.72);
@@ -261,8 +261,8 @@ button {
 }
 
 .ca-rail .rail-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 10px;
   display: flex;
   align-items: center;
@@ -274,9 +274,11 @@ button {
   background: transparent;
 }
 
+@media (hover: hover) {
 .ca-rail .rail-btn:hover {
   background: var(--bg-sunken);
   color: var(--text-1);
+}
 }
 
 .ca-rail .rail-btn.active {
@@ -352,9 +354,11 @@ button {
   transition: background 0.12s, color 0.12s;
 }
 
+@media (hover: hover) {
 .ca-rail-flyout-item:hover {
   background: var(--bg-sunken);
   color: var(--text-1);
+}
 }
 
 .ca-rail-flyout-item.on {
@@ -439,7 +443,7 @@ button {
 
 .ca-new-btn {
   width: 100%;
-  height: 40px;
+  height: 44px;
   margin-bottom: 18px;
   border: 1px solid transparent !important;
   border-radius: var(--r-sm) !important;
@@ -477,7 +481,7 @@ button {
 }
 
 .ca-nav-item {
-  min-height: 38px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -490,8 +494,10 @@ button {
   position: relative;
 }
 
+@media (hover: hover) {
 .ca-nav-item:hover {
   background: var(--bg-sunken);
+}
 }
 
 .ca-nav-item.active {
@@ -503,7 +509,7 @@ button {
 .ca-nav-button {
   min-width: 0;
   flex: 1;
-  height: 38px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -527,8 +533,8 @@ button {
 }
 
 .ca-icon-btn {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   border-radius: 8px;
   display: grid;
   place-items: center;
@@ -536,9 +542,11 @@ button {
   transition: background 0.12s, color 0.12s;
 }
 
+@media (hover: hover) {
 .ca-icon-btn:hover {
   background: var(--bg-sunken);
   color: var(--text-1);
+}
 }
 
 
@@ -571,8 +579,10 @@ button {
   cursor: pointer;
 }
 
+@media (hover: hover) {
 .hamb:hover {
   background: var(--bg-sunken);
+}
 }
 
 .tb-titles {
@@ -622,8 +632,10 @@ button {
   transition: background 0.12s, color 0.12s;
 }
 
+@media (hover: hover) {
 .ca-seg button:hover {
   color: var(--text-1);
+}
 }
 
 .ca-seg button.on {
@@ -657,10 +669,12 @@ button {
   transition: transform 0.16s var(--ease), box-shadow 0.16s, border-color 0.16s;
 }
 
+@media (hover: hover) {
 .ca-card:hover {
   transform: translateY(-4px);
   box-shadow: 0 10px 26px rgb(20 24 40 / 0.1);
   border-color: #dde0e6;
+}
 }
 
 .ca-thumb {
@@ -805,9 +819,11 @@ button {
   transition: background 0.12s, box-shadow 0.12s;
 }
 
+@media (hover: hover) {
 .ca-row:hover {
   background: var(--bg-panel);
   box-shadow: var(--shadow-card);
+}
 }
 
 .ca-row .row-button {
@@ -941,9 +957,11 @@ button {
   transition: background 0.12s, color 0.12s;
 }
 
+@media (hover: hover) {
 .rail-btn:hover {
   background: var(--bg-sunken);
   color: var(--text-1);
+}
 }
 
 .ca-stage-wrap {
@@ -1282,12 +1300,12 @@ button {
   height: 12px;
 }
 
-/* 触控设备（无 hover）：控制栏走紧凑高度（约原来一半），命中区放宽到 30px；
+/* 触控设备（无 hover）：控制栏走紧凑高度，命中区放宽到 44px；
    进度条拇指常显、轨道略加高，便于拇指拖动（默认拇指靠 hover/focus 才出现，触屏摸不到）。 */
 @media (pointer: coarse) {
   .ca-player-controls button {
-    min-height: 30px;
-    min-width: 30px;
+    min-height: 44px;
+    min-width: 44px;
   }
 
   .course-video-progress {
@@ -1311,6 +1329,14 @@ button {
   .ca-touch-44 {
     min-width: 44px;
     min-height: 44px;
+  }
+
+  /* iOS 会在聚焦 font-size<16px 的输入框时自动放大整页(聚焦后页面跳动、失焦不复原)。
+     触屏上把表单控件统一撑到 16px，从根上避免聚焦缩放。桌面(fine pointer)不受影响。 */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
   }
 }
 
