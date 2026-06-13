@@ -32,6 +32,7 @@ import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { readPlaybackProgress } from "@/lib/playback";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
+import { isTablet } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 import { accentVars, useTheme } from "@/stores/theme";
@@ -97,11 +98,12 @@ export function Home() {
   const bucket = useContainerWidth(appRef);
   const isLightTheme = theme === "light";
   const themeToggleLabel = isLightTheme ? "切换到夜晚模式" : "切换到白天模式";
-  // 窄屏（compact 手机竖 + medium 手机横/小平板）走非宽屏布局；wide 走主从。
-  const isPhoneDevice = bucket !== "wide";
-  const isWorkbenchWide = bucket === "wide";
-  // 工作台左右并排（medium 手机横屏 + wide）时才有可拖的竖向分隔条；compact 竖屏是上下堆叠，没有。
-  const showResizer = bucket !== "compact";
+  const tabletDevice = isTablet();
+  // 手机窄屏走底部 Tab/沉浸工作台；iPad 即使竖屏为 medium，也保留平板主从结构。
+  const isPhoneDevice = bucket !== "wide" && !tabletDevice;
+  const isWorkbenchWide = bucket === "wide" || tabletDevice;
+  // 工作台左右并排时才有可拖的竖向分隔条；手机竖屏上下堆叠时隐藏。
+  const showResizer = bucket !== "compact" || tabletDevice;
   const studyPanelWidthForLayout = isResizingPanel
     ? liveWidthRef.current
     : studyPanelWidth;
@@ -154,6 +156,10 @@ export function Home() {
   useEffect(() => {
     useTheme.getState().sync();
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   useEffect(() => {
     setVideo(selectedVideoId);
@@ -237,7 +243,9 @@ export function Home() {
   // （见 pipeline::run_ai_followups），用户无需手动点「生成」。这里只补做不在后端任务
   // 队列里的「课件抽取」，并在各 AI 任务完成时刷新对应面板。
   useEffect(() => {
-    queuedVideoIds.forEach((videoId) => {
+    // 注意：以 jobsByVideo 为遍历源，而非 queuedVideoIds——这样视频处理完成
+    // 出队后，后端续跑的 AI 任务完成时仍能刷新对应面板。
+    Object.keys(jobsByVideo).forEach((videoId) => {
       const jobs = jobsByVideo[videoId];
       if (!jobs) return;
       if (jobs.asr?.status === "done" && !generatedAfterAsr.current.has(videoId)) {
@@ -256,7 +264,24 @@ export function Home() {
         }
       }
     });
-  }, [jobsByVideo, queryClient, queuedVideoIds, selectedCourseId]);
+  }, [jobsByVideo, queryClient, selectedCourseId]);
+
+  // 处理完成（asr 完成或被取消）后把视频移出处理队列；失败的保留以显示错误。
+  // 留一点时间让用户看到 100% 再消失。后端续跑的 AI 任务在后台继续，不影响视频已可用。
+  useEffect(() => {
+    const timers: number[] = [];
+    queuedVideoIds.forEach((videoId) => {
+      const active = activeJobFor(videoId);
+      if (active?.status === "done" || active?.status === "canceled") {
+        timers.push(
+          window.setTimeout(() => {
+            setQueuedVideoIds((ids) => ids.filter((id) => id !== videoId));
+          }, 1200),
+        );
+      }
+    });
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [jobsByVideo, queuedVideoIds]);
 
   useEffect(() => {
     if (!queueOpen || queuedVideoIds.length === 0) return;
@@ -579,7 +604,7 @@ export function Home() {
           className="block w-full px-3 py-2 text-left hover:bg-[var(--surface-card-hover)]"
           onClick={() => {
             setOpenMenuVideoId(null);
-            setRenamingVideo({ id: video.id, title: video.title });
+            setRenamingVideo({ id: video.id, title: displayTitle(video.title) });
           }}
         >
           修改标题
@@ -701,9 +726,6 @@ export function Home() {
               videoId={video.id}
               className="absolute inset-0 h-full w-full"
             />
-            <span className="play">
-              <Play className="h-5 w-5 fill-current" />
-            </span>
             <span className="dur">
               {durationMs ? formatMs(durationMs) : "00:00"}
             </span>
@@ -754,9 +776,6 @@ export function Home() {
                 videoId={video.id}
                 className="absolute inset-0 h-full w-full"
               />
-              <span className="play">
-                <Play className="h-4 w-4 fill-current" />
-              </span>
               {progress.ratio > 0 && progress.ratio < 0.995 && (
                 <span
                   className="ov-bar"
@@ -1053,6 +1072,9 @@ export function Home() {
 
   // 窄屏「课程」Tab 的根页:整屏课程列表(复用 CourseSidebar 的增删改),回收站置于右上。
   function renderCourseListScreen() {
+    if (tabletDevice) {
+      return renderSidebar();
+    }
     return (
       <CourseSidebar
         variant="screen"
@@ -1083,6 +1105,7 @@ export function Home() {
       ref={appRef}
       data-theme={theme}
       data-bucket={bucket}
+      data-device={tabletDevice ? "tablet" : "phone-or-desktop"}
       data-view={isWorkbenchView ? "workbench" : "library"}
       style={accentVars(accent, theme, customAccent) as CSSProperties}
       className="ca-app"
