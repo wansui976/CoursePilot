@@ -51,7 +51,7 @@ pub fn build_openai_body(req: &ChatRequest) -> Value {
     json!({
         "model": req.model,
         "messages": messages,
-        "temperature": req.temperature,
+        "temperature": crate::llm::round_temperature(req.temperature),
     })
 }
 
@@ -198,6 +198,16 @@ mod tests {
         );
         assert_eq!(msgs[1]["role"], "user");
         assert_eq!(body["model"], "gpt-4o");
+    }
+
+    #[test]
+    fn body_quantizes_temperature_to_two_decimals_for_strict_servers() {
+        // f32 0.1 加宽到 f64 会变成 0.10000000149011612，GLM 等会拒收。
+        let mut req = sample_req();
+        req.temperature = 0.1;
+        let body = build_openai_body(&req);
+        let serialized = serde_json::to_string(&body["temperature"]).unwrap();
+        assert_eq!(serialized, "0.1");
     }
 
     #[test]
