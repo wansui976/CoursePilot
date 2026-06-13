@@ -173,7 +173,7 @@ export function CourseSidebar({
             <ClipboardList className="h-4 w-4" />
             处理队列
             {queueCount > 0 && (
-              <span className="ml-auto rounded-full bg-primary/15 px-1.5 py-0.5 text-[11px] text-primary">
+              <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/15 px-1.5 text-[11px] leading-none text-primary">
                 {queueCount}
               </span>
             )}
