@@ -28,10 +28,13 @@ fn parse_json_response(body: &str, content_type: &str) -> AppResult<Value> {
 
 /// 把 ChatRequest 转成 OpenAI /chat/completions body。
 /// cacheable_context 与 system 合并进首条 system 消息。
+/// 注意：cacheable_context（整篇字幕）放在最前面，按任务变化的 system 指令放在其后。
+/// DeepSeek/OpenAI 按消息前缀自动缓存，同一视频的多个 AI 任务字幕逐字节相同，
+/// 把它当共享前缀，后续任务即可命中缓存（约便宜 4 倍），不再每个任务重算整篇字幕。
 pub fn build_openai_body(req: &ChatRequest) -> Value {
     let mut messages: Vec<Value> = Vec::new();
     let system = match (&req.system, &req.cacheable_context) {
-        (Some(s), Some(c)) => Some(format!("{s}\n\n{c}")),
+        (Some(s), Some(c)) => Some(format!("{c}\n\n{s}")),
         (Some(s), None) => Some(s.clone()),
         (None, Some(c)) => Some(c.clone()),
         (None, None) => None,
@@ -185,7 +188,14 @@ mod tests {
         let body = build_openai_body(&sample_req());
         let msgs = body["messages"].as_array().unwrap();
         assert_eq!(msgs[0]["role"], "system");
-        assert!(msgs[0]["content"].as_str().unwrap().contains("TRANSCRIPT"));
+        let system = msgs[0]["content"].as_str().unwrap();
+        assert!(system.contains("TRANSCRIPT"));
+        assert!(system.contains("you are helpful"));
+        // 可缓存的字幕必须排在按任务变化的指令之前，作为共享前缀供缓存命中。
+        assert!(
+            system.find("TRANSCRIPT").unwrap() < system.find("you are helpful").unwrap(),
+            "cacheable context must precede the task-specific system prompt"
+        );
         assert_eq!(msgs[1]["role"], "user");
         assert_eq!(body["model"], "gpt-4o");
     }
