@@ -88,7 +88,7 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
       <div className="shrink-0 px-3 pt-2 text-sm text-[var(--text-muted)]">整体摘要</div>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-12 pt-1">
         {generate.isError && (
-          <p className="pb-2 text-xs text-red-400">{String(generate.error)}</p>
+          <p className="pb-2 text-xs text-[var(--status-err)]">{String(generate.error)}</p>
         )}
         {isLoading ? (
           <TextSkeleton lines={5} className="p-0" />

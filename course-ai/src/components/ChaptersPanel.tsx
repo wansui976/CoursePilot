@@ -21,7 +21,7 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
       <div className="shrink-0 px-3 pt-2 text-sm text-[var(--text-muted)]">重点章节</div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-12 pt-1">
         {generate.isError && (
-          <p className="pb-1 text-xs text-red-400">{String(generate.error)}</p>
+          <p className="pb-1 text-xs text-[var(--status-err)]">{String(generate.error)}</p>
         )}
         {chapters.length === 0 && (
           <p className="text-sm text-[var(--text-faint)]">

@@ -216,7 +216,7 @@ export function LlmSettingsPanel() {
               )}
             </div>
             <button
-              className="text-xs text-[var(--text-muted)] transition hover:text-red-500"
+              className="text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
               onClick={() => remove(p.id)}
             >
               删除此配置

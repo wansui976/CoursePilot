@@ -125,7 +125,7 @@ export function RagSearchPanel({
       </div>
 
       {(ask.isError || search.isError) && (
-        <p className="border-b border-[var(--border-subtle)] px-3 py-2 text-xs text-red-500">
+        <p className="border-b border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--status-err)]">
           {String(ask.error || search.error)}
         </p>
       )}

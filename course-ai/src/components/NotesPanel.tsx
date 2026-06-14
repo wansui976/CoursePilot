@@ -154,7 +154,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         ))}
       </div>
       {generate.isError && (
-        <p className="px-3 py-2 text-xs text-red-400">
+        <p className="px-3 py-2 text-xs text-[var(--status-err)]">
           {String(generate.error)}
         </p>
       )}

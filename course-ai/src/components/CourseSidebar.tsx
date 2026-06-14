@@ -242,7 +242,7 @@ export function CourseSidebar({
                   </button>
                   <button
                     onClick={() => void confirmDelete(course.id, course.name)}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-500 hover:bg-[var(--surface-card-hover)]"
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--status-err)] hover:bg-[var(--surface-card-hover)]"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     删除

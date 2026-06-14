@@ -71,7 +71,7 @@ export function JobProgress({ videoId }: { videoId: string }) {
           <div className="flex justify-between">
             <span>{STAGE_LABEL[job.stage] ?? job.stage}</span>
             <span
-              className={job.status === "failed" ? "text-red-400" : "text-[var(--text-muted)]"}
+              className={job.status === "failed" ? "text-[var(--status-err)]" : "text-[var(--text-muted)]"}
             >
               {STATUS_LABEL[job.status] ?? job.status} {Math.floor(job.progress * 100)}%
             </span>
