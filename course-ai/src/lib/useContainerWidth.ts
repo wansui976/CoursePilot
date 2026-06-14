@@ -20,6 +20,38 @@ export function coarsePointer(): boolean {
   return window.matchMedia("(pointer: coarse)").matches;
 }
 
+/**
+ * 是否竖屏，随旋转实时更新。
+ * 必须独立于宽度档位：12.9" iPad 竖屏(1024)与横屏(1366)都落在 wide 档，
+ * 旋转时 bucket 不变、不会触发重渲染，需单独监听 orientation。
+ */
+export function useIsPortrait(): boolean {
+  const [portrait, setPortrait] = useState<boolean>(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return false;
+    }
+    return window.matchMedia("(orientation: portrait)").matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const mq = window.matchMedia("(orientation: portrait)");
+    const onChange = () => setPortrait(mq.matches);
+    onChange();
+    // 旧 Safari/WebView 只有 addListener。
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+    else mq.addListener(onChange);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", onChange);
+      else mq.removeListener(onChange);
+    };
+  }, []);
+
+  return portrait;
+}
+
 function widthFromWindow(): number {
   if (typeof window === "undefined") return 0;
   return window.innerWidth || 0;
