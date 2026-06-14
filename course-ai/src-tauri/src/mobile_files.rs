@@ -68,7 +68,7 @@ struct ExportFrameJpegResponse {
     path: String,
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExportLumaFramesRequest {
@@ -78,7 +78,7 @@ struct ExportLumaFramesRequest {
     interval_ms: i64,
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MobileLumaFrames {
@@ -113,8 +113,8 @@ pub async fn export_frame_jpeg(
     Ok(response.path)
 }
 
-/// 原生低分辨率亮度抽帧，供 Android 自动课件提取复用 Rust 换页检测算法。
-#[cfg(target_os = "android")]
+/// 原生低分辨率亮度抽帧，供 Android / iOS 自动课件提取复用同一套 Rust 换页检测算法。
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn export_luma_frames(
     source_path: String,
     sample_width: i64,

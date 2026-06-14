@@ -137,7 +137,7 @@ pub fn dynamic_threshold(frames: &[Vec<u8>]) -> f64 {
     median(diffs).clamp(THRESHOLD_MIN, THRESHOLD_MAX)
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 fn decode_base64(input: &str) -> AppResult<Vec<u8>> {
     let mut out = Vec::with_capacity(input.len() * 3 / 4);
     let mut buffer = 0_u32;
@@ -153,7 +153,7 @@ fn decode_base64(input: &str) -> AppResult<Vec<u8>> {
             b'\r' | b'\n' | b'\t' | b' ' => continue,
             _ => {
                 return Err(AppError::Pipeline(format!(
-                    "android luma frame decode: invalid base64 byte {byte}"
+                    "mobile luma frame decode: invalid base64 byte {byte}"
                 )))
             }
         };
@@ -168,8 +168,10 @@ fn decode_base64(input: &str) -> AppResult<Vec<u8>> {
     Ok(out)
 }
 
-#[cfg(target_os = "android")]
-async fn sample_android_luma_frames(video: &Path) -> AppResult<(Vec<Vec<u8>>, i64)> {
+/// 移动端（Android: MediaMetadataRetriever；iOS: AVAssetImageGenerator）原生低分辨率
+/// 亮度抽帧，供课件提取复用同一套 Rust 换页检测算法。
+#[cfg(any(target_os = "android", target_os = "ios"))]
+async fn sample_mobile_luma_frames(video: &Path) -> AppResult<(Vec<Vec<u8>>, i64)> {
     let response = crate::mobile_files::export_luma_frames(
         video.to_string_lossy().to_string(),
         SAMPLE_W as i64,
@@ -184,7 +186,7 @@ async fn sample_android_luma_frames(video: &Path) -> AppResult<(Vec<Vec<u8>>, i6
         let frame = decode_base64(&encoded)?;
         if frame.len() != expected {
             return Err(AppError::Pipeline(format!(
-                "android luma frame size mismatch: expected {expected}, got {}",
+                "mobile luma frame size mismatch: expected {expected}, got {}",
                 frame.len()
             )));
         }
@@ -193,21 +195,9 @@ async fn sample_android_luma_frames(video: &Path) -> AppResult<(Vec<Vec<u8>>, i6
     Ok((frames, response.interval_ms))
 }
 
-/// Android：用原生 MediaMetadataRetriever 截一帧落地 JPEG（无 ffmpeg）。
-#[cfg(target_os = "android")]
-async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> {
-    crate::mobile_files::export_frame_jpeg(
-        video.to_string_lossy().to_string(),
-        at_ms,
-        out.to_string_lossy().to_string(),
-    )
-    .await
-    .map(|_| ())
-    .map_err(AppError::Pipeline)
-}
-
-/// iOS：用原生 AVAssetImageGenerator 截一帧落地 JPEG（无 ffmpeg）。
-#[cfg(target_os = "ios")]
+/// 移动端原生截一帧落地 JPEG（无 ffmpeg）：
+/// Android 走 MediaMetadataRetriever，iOS 走 AVAssetImageGenerator。
+#[cfg(any(target_os = "android", target_os = "ios"))]
 async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> {
     crate::mobile_files::export_frame_jpeg(
         video.to_string_lossy().to_string(),
@@ -248,8 +238,9 @@ async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> 
     Ok(())
 }
 
-/// Android：用原生低分辨率亮度抽帧 + 共享换页检测算法提取课件页。
-#[cfg(target_os = "android")]
+/// 移动端（Android / iOS）：用原生低分辨率亮度抽帧 + 共享换页检测算法提取课件页，
+/// 再为每页用原生截帧落地一张全分辨率图。无 ffmpeg。
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn extract_slides(
     video: &Path,
     out_dir: &Path,
@@ -259,7 +250,7 @@ pub async fn extract_slides(
     let _ = std::fs::remove_dir_all(&slides_dir);
     std::fs::create_dir_all(&slides_dir)?;
 
-    let (frames, interval_ms) = sample_android_luma_frames(video).await?;
+    let (frames, interval_ms) = sample_mobile_luma_frames(video).await?;
     if frames.is_empty() {
         let fallback = slides_dir.join("0001.jpg");
         capture_jpeg_at(video, &fallback, 0).await?;
@@ -327,15 +318,6 @@ pub async fn extract_slides(
     Ok(out)
 }
 
-#[cfg(target_os = "ios")]
-pub async fn extract_slides(
-    _video: &Path,
-    _out_dir: &Path,
-    _threshold_override: Option<f64>,
-) -> AppResult<Vec<SlideFrame>> {
-    Err(AppError::Config("移动端暂不支持课件自动抽取".into()))
-}
-
 pub async fn store_slides(db: &Db, video_id: &str, frames: &[SlideFrame]) -> AppResult<usize> {
     sqlx::query("DELETE FROM slides WHERE video_id=?")
         .bind(video_id)
@@ -381,13 +363,14 @@ pub async fn capture_frame(video: &Path, out_dir: &Path, at_ms: i64) -> AppResul
     Ok(out)
 }
 
-#[cfg(target_os = "ios")]
-pub async fn capture_frame(
-    _video: &Path,
-    _out_dir: &Path,
-    _at_ms: i64,
-) -> AppResult<PathBuf> {
-    Err(AppError::Config("移动端暂不支持课件截图".into()))
+/// 移动端（Android / iOS）：用原生截帧落地截图，无 ffmpeg。
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub async fn capture_frame(video: &Path, out_dir: &Path, at_ms: i64) -> AppResult<PathBuf> {
+    let shots_dir = out_dir.join("screenshots");
+    std::fs::create_dir_all(&shots_dir)?;
+    let out = shots_dir.join(format!("{at_ms}.jpg"));
+    capture_jpeg_at(video, &out, at_ms).await?;
+    Ok(out)
 }
 
 #[cfg(test)]

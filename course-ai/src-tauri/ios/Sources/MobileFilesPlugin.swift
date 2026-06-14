@@ -17,6 +17,13 @@ struct ExportFrameJpegArgs: Decodable {
   let outPath: String
 }
 
+struct ExportLumaFramesArgs: Decodable {
+  let sourcePath: String
+  let sampleWidth: Int
+  let sampleHeight: Int
+  let intervalMs: Int64
+}
+
 final class MobileFilesPlugin: Plugin {
   private let workQueue = DispatchQueue(label: "dev.courseai.mobile-files")
   private let audioWriterQueue = DispatchQueue(label: "dev.courseai.mobile-files.audio-writer")
@@ -56,6 +63,126 @@ final class MobileFilesPlugin: Plugin {
         }
       }
     }
+  }
+
+  // 课件自动提取：按固定间隔原生抽一串低分辨率亮度帧（桌面端用 ffmpeg，iOS 用
+  // AVAssetImageGenerator 批量取帧），交给 Rust 端复用同一套换页检测算法。
+  @objc public func exportLumaFrames(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(ExportLumaFramesArgs.self)
+    workQueue.async {
+      do {
+        let result = try self.exportLumaFrames(args)
+        invoke.resolve([
+          "intervalMs": result.intervalMs,
+          "frames": result.frames,
+        ])
+      } catch {
+        if let nsError = error as NSError? {
+          invoke.reject("\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)")
+        } else {
+          invoke.reject(error.localizedDescription)
+        }
+      }
+    }
+  }
+
+  private func exportLumaFrames(_ args: ExportLumaFramesArgs) throws -> (
+    intervalMs: Int64, frames: [String]
+  ) {
+    let width = max(16, min(512, args.sampleWidth))
+    let height = max(16, min(512, args.sampleHeight))
+    let intervalMs = max(250, args.intervalMs)
+    let asset = AVURLAsset(url: URL(fileURLWithPath: args.sourcePath))
+    let durationMs = try loadedDurationMs(of: asset)
+
+    // 采样时刻：0、interval、2·interval…直到时长；至少取一帧（极短/读不到时长时取首帧）。
+    var times: [NSValue] = []
+    var atMs: Int64 = 0
+    repeat {
+      times.append(NSValue(time: CMTime(value: CMTimeValue(atMs), timescale: 1000)))
+      atMs += intervalMs
+    } while atMs <= durationMs
+    if times.isEmpty { times = [NSValue(time: .zero)] }
+
+    let generator = AVAssetImageGenerator(asset: asset)
+    generator.appliesPreferredTrackTransform = true
+    // 抽样不要求精确时间，放宽容差让 AVFoundation 复用最近关键帧、显著提速。
+    generator.requestedTimeToleranceBefore = CMTime(seconds: 0.4, preferredTimescale: 600)
+    generator.requestedTimeToleranceAfter = CMTime(seconds: 0.4, preferredTimescale: 600)
+    // 先粗降采样加速解码，亮度计算时再精确缩到 width×height。
+    generator.maximumSize = CGSize(width: width * 2, height: height * 2)
+
+    var lumaByMs: [Int64: [UInt8]] = [:]
+    let lock = NSLock()
+    let group = DispatchGroup()
+    for _ in times { group.enter() }
+    generator.generateCGImagesAsynchronously(forTimes: times) {
+      requested, image, _, _, _ in
+      defer { group.leave() }
+      guard let image = image else { return }
+      let luma = self.cgImageToLuma(image, width: width, height: height)
+      let ms = Int64((CMTimeGetSeconds(requested) * 1000.0).rounded())
+      lock.lock()
+      lumaByMs[ms] = luma
+      lock.unlock()
+    }
+    group.wait()
+
+    // 按时间顺序组装；个别时刻取帧失败时沿用上一帧（视作未换页），保持与 interval 对齐的连续序列。
+    let blank = [UInt8](repeating: 0, count: width * height)
+    var frames: [String] = []
+    var prev: [UInt8]?
+    var ms: Int64 = 0
+    for _ in times {
+      let luma = lumaByMs[ms] ?? prev ?? blank
+      frames.append(Data(luma).base64EncodedString())
+      prev = luma
+      ms += intervalMs
+    }
+    return (intervalMs, frames)
+  }
+
+  /// 把一帧解码图画进 width×height 的 RGBA 位图，按 Rec.709 权重算亮度（与 Android / ffmpeg 一致）。
+  private func cgImageToLuma(_ image: CGImage, width: Int, height: Int) -> [UInt8] {
+    let count = width * height
+    let blank = [UInt8](repeating: 0, count: count)
+    guard
+      let ctx = CGContext(
+        data: nil,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: width * 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { return blank }
+    ctx.interpolationQuality = .medium
+    ctx.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
+    guard let data = ctx.data else { return blank }
+    let ptr = data.bindMemory(to: UInt8.self, capacity: count * 4)
+    var out = [UInt8](repeating: 0, count: count)
+    for i in 0..<count {
+      let r = Double(ptr[i * 4])
+      let g = Double(ptr[i * 4 + 1])
+      let b = Double(ptr[i * 4 + 2])
+      out[i] = UInt8(max(0.0, min(255.0, (0.2126 * r + 0.7152 * g + 0.0722 * b).rounded())))
+    }
+    return out
+  }
+
+  /// 异步加载并取视频时长（毫秒）。iOS 16+ 同步访问未加载的 duration 会得 0，故先异步加载。
+  private func loadedDurationMs(of asset: AVURLAsset) throws -> Int64 {
+    let semaphore = DispatchSemaphore(value: 0)
+    asset.loadValuesAsynchronously(forKeys: ["duration"]) { semaphore.signal() }
+    semaphore.wait()
+    var loadError: NSError?
+    guard asset.statusOfValue(forKey: "duration", error: &loadError) == .loaded else {
+      if let loadError = loadError { throw loadError }
+      throw MobileFilesError.cannotReadVideo
+    }
+    let seconds = CMTimeGetSeconds(asset.duration)
+    guard seconds.isFinite, seconds > 0 else { return 0 }
+    return Int64((seconds * 1000.0).rounded())
   }
 
   private func exportFrameJpeg(_ args: ExportFrameJpegArgs) throws {
@@ -221,6 +348,7 @@ enum MobileFilesError: LocalizedError {
   case cannotReadAudio
   case cannotWriteAudio
   case cannotWriteImage
+  case cannotReadVideo
 
   var errorDescription: String? {
     switch self {
@@ -234,6 +362,8 @@ enum MobileFilesError: LocalizedError {
       return "Failed to write WAV audio"
     case .cannotWriteImage:
       return "Failed to encode cover image"
+    case .cannotReadVideo:
+      return "Failed to read video for slide extraction"
     }
   }
 }
