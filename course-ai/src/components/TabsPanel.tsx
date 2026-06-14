@@ -69,7 +69,7 @@ export function TabsPanel({ videoId }: { videoId: string }) {
             key={tab}
             value={tab}
             onClick={() => changeTab(tab)}
-            className="border-b-[3px] border-transparent px-1 pb-3 text-sm font-semibold text-[var(--text-muted)] transition-colors data-[state=active]:border-primary data-[state=active]:text-[var(--text-strong)] sm:text-base"
+            className="ca-touch-44 border-b-[3px] border-transparent px-2 pb-3 text-sm font-semibold text-[var(--text-muted)] transition-colors data-[state=active]:border-primary data-[state=active]:text-[var(--text-strong)] sm:text-base"
           >
             {tab}
           </TabsTrigger>

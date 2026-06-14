@@ -2,10 +2,16 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ipc, type WhisperModel } from "@/lib/ipc";
+import { isMobile } from "@/lib/platform";
 
 type Row = [WhisperModel, boolean];
 
 export function WhisperModelsPanel() {
+  if (isMobile()) return null;
+  return <WhisperModelsPanelDesktop />;
+}
+
+function WhisperModelsPanelDesktop() {
   const [rows, setRows] = useState<Row[]>([]);
   const [progress, setProgress] = useState<
     Record<string, { received: number; total: number; done: boolean }>

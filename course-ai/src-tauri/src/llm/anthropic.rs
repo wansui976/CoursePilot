@@ -23,7 +23,7 @@ pub fn build_anthropic_body(req: &ChatRequest) -> Value {
     json!({
         "model": req.model,
         "max_tokens": req.max_tokens,
-        "temperature": req.temperature,
+        "temperature": crate::llm::round_temperature(req.temperature),
         "system": system_blocks,
         "messages": messages,
     })

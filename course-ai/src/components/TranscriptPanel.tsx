@@ -185,7 +185,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                 aria-label="编辑这句文稿"
                 title="纠错"
                 onClick={() => startEdit(segment.id, segment.text)}
-                className="mt-1 mr-1 grid h-6 w-6 shrink-0 place-items-center rounded text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
+                className="ca-touch-44 mt-1 mr-1 grid h-6 w-6 shrink-0 place-items-center rounded text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
               >
                 <Pencil className="h-3.5 w-3.5" />
               </button>

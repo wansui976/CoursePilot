@@ -100,6 +100,7 @@ function renderHome() {
 describe("Home", () => {
   beforeEach(() => {
     localStorage.clear();
+    document.documentElement.removeAttribute("data-theme");
     useJobs.getState().resetVideo(video.id);
     mockIpc.courses.list.mockResolvedValue([course]);
     mockIpc.videos.list.mockResolvedValue([video]);
@@ -127,6 +128,7 @@ describe("Home", () => {
     fireEvent.click(screen.getByRole("button", { name: "切换到夜晚模式" }));
 
     expect(container.firstElementChild).toHaveAttribute("data-theme", "dark");
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
     expect(localStorage.getItem("course-ai-theme")).toBe("dark");
     expect(screen.getByRole("button", { name: "切换到白天模式" })).toBeInTheDocument();
   });

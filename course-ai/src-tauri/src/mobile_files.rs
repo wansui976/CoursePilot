@@ -3,20 +3,22 @@ use tauri::{
     AppHandle, Runtime,
 };
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 use serde::{Deserialize, Serialize};
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 use tauri::Manager;
 
 #[cfg(target_os = "android")]
 const PLUGIN_IDENTIFIER: &str = "dev.courseai.mobilefiles";
+#[cfg(target_os = "ios")]
+tauri::ios_plugin_binding!(init_plugin_mobile_files);
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 struct MobileFiles<R: Runtime>(tauri::plugin::PluginHandle<R>);
 
 // 流水线深处（如 slides::capture_jpeg_at）拿不到 AppHandle，这里在插件初始化时存一份，
-// 供原生截帧等无 State 入口的调用读取。仅 Android 需要。
-#[cfg(target_os = "android")]
+// 供原生截帧等无 State 入口的调用读取。Android 与 iOS 都需要（封面/截帧走原生）。
+#[cfg(any(target_os = "android", target_os = "ios"))]
 static APP_HANDLE: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 
 #[cfg(target_os = "android")]
@@ -34,7 +36,7 @@ struct PersistPickedFileResponse {
     path: String,
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExportAudioForAsrRequest {
@@ -43,7 +45,7 @@ struct ExportAudioForAsrRequest {
     preferred_format: String,
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Debug, Deserialize)]
 pub struct MobileAudioExport {
     pub path: String,
@@ -51,7 +53,7 @@ pub struct MobileAudioExport {
     pub format: String,
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExportFrameJpegRequest {
@@ -60,13 +62,13 @@ struct ExportFrameJpegRequest {
     out_path: String,
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Deserialize)]
 struct ExportFrameJpegResponse {
     path: String,
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExportLumaFramesRequest {
@@ -76,7 +78,7 @@ struct ExportLumaFramesRequest {
     interval_ms: i64,
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MobileLumaFrames {
@@ -84,9 +86,10 @@ pub struct MobileLumaFrames {
     pub frames: Vec<String>,
 }
 
-/// 原生截帧（MediaMetadataRetriever）落地一张 JPEG，替代桌面端 ffmpeg。
-/// 用初始化时存下的全局 AppHandle，因调用点（slides 流水线）没有 State/AppHandle。
-#[cfg(target_os = "android")]
+/// 原生截帧落地一张 JPEG，替代桌面端 ffmpeg（Android: MediaMetadataRetriever；
+/// iOS: AVAssetImageGenerator）。用初始化时存下的全局 AppHandle，因调用点
+/// （slides 流水线 capture_jpeg_at）没有 State/AppHandle。
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn export_frame_jpeg(
     source_path: String,
     at_ms: i64,
@@ -110,8 +113,8 @@ pub async fn export_frame_jpeg(
     Ok(response.path)
 }
 
-/// 原生低分辨率亮度抽帧，供 Android 自动课件提取复用 Rust 换页检测算法。
-#[cfg(target_os = "android")]
+/// 原生低分辨率亮度抽帧，供 Android / iOS 自动课件提取复用同一套 Rust 换页检测算法。
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn export_luma_frames(
     source_path: String,
     sample_width: i64,
@@ -136,7 +139,7 @@ pub async fn export_luma_frames(
         .map_err(|error| error.to_string())
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn export_audio_for_asr<R: Runtime>(
     app: AppHandle<R>,
     source_path: String,
@@ -196,6 +199,12 @@ pub fn init() -> TauriPlugin<tauri::Wry> {
             {
                 let handle =
                     _api.register_android_plugin(PLUGIN_IDENTIFIER, "MobileFilesPlugin")?;
+                _app.manage(MobileFiles(handle));
+                let _ = APP_HANDLE.set(_app.clone());
+            }
+            #[cfg(target_os = "ios")]
+            {
+                let handle = _api.register_ios_plugin(init_plugin_mobile_files)?;
                 _app.manage(MobileFiles(handle));
                 let _ = APP_HANDLE.set(_app.clone());
             }

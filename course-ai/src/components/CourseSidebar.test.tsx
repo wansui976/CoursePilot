@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CourseSidebar } from "./CourseSidebar";
 
 const { mockIpc, pickDirectoryPathMock } = vi.hoisted(() => ({
@@ -50,6 +50,10 @@ describe("CourseSidebar", () => {
     );
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("creates a default course under app data on Android", async () => {
     renderSidebar();
 
@@ -64,6 +68,43 @@ describe("CourseSidebar", () => {
         "/data/user/0/dev.courseai.app.debug/courses/新课程",
       ),
     );
+  });
+
+  it("creates a default course under app data on iPadOS desktop-class user agents", async () => {
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+      platform: "MacIntel",
+      maxTouchPoints: 5,
+    });
+    renderSidebar();
+
+    fireEvent.click(screen.getByRole("button", { name: "新建课程" }));
+
+    await waitFor(() =>
+      expect(mockIpc.courses.create).toHaveBeenCalledWith(
+        "新课程",
+        "/data/user/0/dev.courseai.app.debug/courses/新课程",
+      ),
+    );
+  });
+
+  it("shows a loading state while creating a course", async () => {
+    pickDirectoryPathMock.mockResolvedValueOnce(
+      "/data/user/0/dev.courseai.app.debug/courses/新课程",
+    );
+    mockIpc.courses.create.mockImplementation(
+      () => new Promise(() => undefined),
+    );
+
+    renderSidebar();
+
+    fireEvent.click(screen.getByRole("button", { name: "新建课程" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "新建课程" })).toBeDisabled(),
+    );
+    expect(screen.getByRole("button", { name: "新建课程" })).toHaveTextContent("创建中");
   });
 
   it("lets the processing queue nav item span the sidebar width", () => {

@@ -7,6 +7,7 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { type ExportItem } from "./ExportMenu";
 import { TextSkeleton } from "@/components/ui/skeleton";
+import { ErrorNote } from "@/components/ui/ErrorNote";
 import { PanelActions } from "./PanelActions";
 import { ipc } from "@/lib/ipc";
 import { markdownToTiptap } from "@/lib/markdownToTiptap";
@@ -143,7 +144,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
           <button
             key={v.key}
             onClick={() => setView(v.key)}
-            className={`rounded px-2 py-1 text-xs ${
+            className={`ca-touch-44 rounded px-2 py-1 text-xs ${
               view === v.key
                 ? "bg-primary/20 text-primary"
                 : "text-[var(--text-muted)] hover:bg-[var(--surface-card)]"
@@ -154,26 +155,33 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         ))}
       </div>
       {generate.isError && (
-        <p className="px-3 py-2 text-xs text-[var(--status-err)]">
-          {String(generate.error)}
-        </p>
+        <ErrorNote
+          className="mx-3 mb-2"
+          error={generate.error}
+          onRetry={currentTask ? () => generate.mutate(currentTask) : undefined}
+        />
       )}
-      <div
-        ref={scrollerRef}
-        aria-label="笔记内容滚动区"
-        className="min-h-0 flex-1 overflow-y-auto pb-12"
-        onScroll={rememberNotesScroll}
-      >
-        {view === "notes" && <EditorContent editor={editor} />}
-        {(view === "quiz" || view === "mindmap") && (
-          <Suspense fallback={<TextSkeleton lines={5} />}>
-            {view === "quiz" && <QuizPanel videoId={videoId} />}
-            {view === "mindmap" && <MindmapPanel videoId={videoId} />}
-          </Suspense>
-        )}
-        {view === "ask" && <RagSearchPanel videoId={videoId} mode="ask" />}
-        {view === "search" && <RagSearchPanel videoId={videoId} mode="search" />}
-      </div>
+      {view === "ask" || view === "search" ? (
+        // 问答/搜索自带满高布局 + 底部输入栏，不套外层滚动容器（否则底部输入栏会被 pb 挤上去）。
+        <div className="min-h-0 flex-1">
+          <RagSearchPanel videoId={videoId} mode={view} />
+        </div>
+      ) : (
+        <div
+          ref={scrollerRef}
+          aria-label="笔记内容滚动区"
+          className="min-h-0 flex-1 overflow-y-auto pb-12"
+          onScroll={rememberNotesScroll}
+        >
+          {view === "notes" && <EditorContent editor={editor} />}
+          {(view === "quiz" || view === "mindmap") && (
+            <Suspense fallback={<TextSkeleton lines={5} />}>
+              {view === "quiz" && <QuizPanel videoId={videoId} />}
+              {view === "mindmap" && <MindmapPanel videoId={videoId} />}
+            </Suspense>
+          )}
+        </div>
+      )}
       {currentTask && (
         <PanelActions
           onRegenerate={() => generate.mutate(currentTask)}
