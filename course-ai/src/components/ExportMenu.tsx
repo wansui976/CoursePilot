@@ -85,7 +85,7 @@ export function ExportMenu({
               <button
                 key={item.label}
                 onClick={() => void run(item)}
-                className="block w-full px-3 py-1.5 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
+                className="ca-touch-44 block w-full px-3 py-1.5 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
               >
                 {item.label}
               </button>

@@ -5,6 +5,7 @@ use crate::storage::video_data_dir;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use std::borrow::Cow;
 use std::path::PathBuf;
 use tauri::State;
 use uuid::Uuid;
@@ -26,6 +27,76 @@ pub struct Video {
     pub created_at: i64,
 }
 
+fn percent_decode(input: &str) -> Cow<'_, str> {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut changed = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                out.push(((hi << 4) | lo) as u8);
+                changed = true;
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    if changed {
+        String::from_utf8(out)
+            .map(Cow::Owned)
+            .unwrap_or(Cow::Borrowed(input))
+    } else {
+        Cow::Borrowed(input)
+    }
+}
+
+fn display_title_from_path(file_path: &std::path::Path) -> String {
+    let raw = file_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("untitled");
+    strip_file_provider_suffix(&percent_decode(raw)).into_owned()
+}
+
+fn strip_file_provider_suffix(input: &str) -> Cow<'_, str> {
+    let Some(dot) = input.rfind('.') else {
+        return Cow::Borrowed(input);
+    };
+    let stem = &input[..dot];
+    let extension = &input[dot..];
+    let Some(suffix_dot) = stem.rfind('.') else {
+        return Cow::Borrowed(input);
+    };
+    let suffix = &stem[suffix_dot + 1..];
+    let Some((_prefix, uuid)) = suffix.split_once('-') else {
+        return Cow::Borrowed(input);
+    };
+    if uuid.len() != 36 {
+        return Cow::Borrowed(input);
+    }
+    let uuid_like = uuid.chars().enumerate().all(|(idx, ch)| {
+        matches!(idx, 8 | 13 | 18 | 23) && ch == '-'
+            || !matches!(idx, 8 | 13 | 18 | 23) && ch.is_ascii_hexdigit()
+    });
+    let prefix_like = !suffix.starts_with('-')
+        && suffix
+            .split_once('-')
+            .map(|(prefix, _)| {
+                !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_hexdigit())
+            })
+            .unwrap_or(false);
+    if uuid_like && prefix_like {
+        Cow::Owned(format!("{}{}", &stem[..suffix_dot], extension))
+    } else {
+        Cow::Borrowed(input)
+    }
+}
+
 pub async fn add_local_video(
     db: &Db,
     course_id: &str,
@@ -40,11 +111,7 @@ pub async fn add_local_video(
     }
 
     let id = Uuid::new_v4().to_string();
-    let title = file_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("untitled")
-        .to_string();
+    let title = display_title_from_path(&file_path);
     let data_dir = video_data_dir(&file_path, &id, override_root.as_deref());
     std::fs::create_dir_all(&data_dir)?;
     let now = Utc::now().timestamp_millis();
@@ -122,14 +189,12 @@ pub async fn update_video_title(db: &Db, id: &str, title: String) -> AppResult<V
     if title.is_empty() {
         return Err(AppError::Other("视频标题不能为空".into()));
     }
-    let video = sqlx::query_as::<_, Video>(
-        "UPDATE videos SET title=? WHERE id=? RETURNING *",
-    )
-    .bind(title)
-    .bind(id)
-    .fetch_optional(&db.pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound(format!("video {id}")))?;
+    let video = sqlx::query_as::<_, Video>("UPDATE videos SET title=? WHERE id=? RETURNING *")
+        .bind(title)
+        .bind(id)
+        .fetch_optional(&db.pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("video {id}")))?;
     Ok(video)
 }
 
@@ -191,11 +256,10 @@ pub async fn list_trashed(db: &Db) -> AppResult<Vec<TrashedVideo>> {
 /// 清理过期回收站：删除超过保留期的视频，再删掉没有任何视频的已软删课程。
 pub async fn purge_expired_trash(db: &Db) -> AppResult<u64> {
     let cutoff = Utc::now().timestamp_millis() - TRASH_RETENTION_DAYS * DAY_MS;
-    let result =
-        sqlx::query("DELETE FROM videos WHERE deleted_at IS NOT NULL AND deleted_at < ?")
-            .bind(cutoff)
-            .execute(&db.pool)
-            .await?;
+    let result = sqlx::query("DELETE FROM videos WHERE deleted_at IS NOT NULL AND deleted_at < ?")
+        .bind(cutoff)
+        .execute(&db.pool)
+        .await?;
     sqlx::query(
         "DELETE FROM courses
          WHERE deleted_at IS NOT NULL
@@ -316,10 +380,7 @@ pub async fn cmd_media_url(
 
 /// 视频封面（首帧）字节，前端转 blob 显示。首次调用时用 ffmpeg 截首帧并缓存。
 #[tauri::command]
-pub async fn cmd_video_cover(
-    state: State<'_, AppState>,
-    video_id: String,
-) -> AppResult<Vec<u8>> {
+pub async fn cmd_video_cover(state: State<'_, AppState>, video_id: String) -> AppResult<Vec<u8>> {
     let row: Option<(String, String)> =
         sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
             .bind(&video_id)
@@ -362,6 +423,27 @@ mod tests {
         let list = list_videos(&db, &course.id).await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].order_index, 1);
+    }
+
+    #[tokio::test]
+    async fn add_local_decodes_ios_percent_encoded_file_provider_title() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let video_path = dir.path().join(
+            "%E9%81%93%E5%BE%B7%E6%B0%B4%E5%B9%B3%E9%AB%98%EF%BC%8C%E5%AF%BC%E8%87%B4%E5%AD%A6%E6%9C%AF%E9%80%A0%E5%81%87%E5%A4%9A%EF%BC%9F.f30080-6A1CC6C8-C5A4-4BC9-AFAC-3A402347A35E.mp4",
+        );
+        std::fs::write(&video_path, b"fake").unwrap();
+
+        let video = add_local_video(&db, &course.id, video_path, None)
+            .await
+            .unwrap();
+
+        assert_eq!(video.title, "道德水平高，导致学术造假多？.mp4");
     }
 
     #[tokio::test]

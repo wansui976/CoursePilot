@@ -72,6 +72,11 @@ export interface LlmProfile {
   model: string;
 }
 
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface TaskRouting {
   notes: string | null;
   chapters: string | null;

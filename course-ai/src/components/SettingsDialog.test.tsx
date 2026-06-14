@@ -16,9 +16,18 @@ const { mockIpc } = vi.hoisted(() => ({
 const { pickDirectoryPathMock } = vi.hoisted(() => ({
   pickDirectoryPathMock: vi.fn(),
 }));
+const mockUseContainerWidth = vi.hoisted(() => ({
+  useContainerWidth: vi.fn(() => "wide"),
+}));
+const mockPlatform = vi.hoisted(() => ({
+  isMobile: vi.fn(() => false),
+  isTablet: vi.fn(() => false),
+}));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@/lib/mobileFiles", () => ({ pickDirectoryPath: pickDirectoryPathMock }));
+vi.mock("@/lib/useContainerWidth", () => mockUseContainerWidth);
+vi.mock("@/lib/platform", () => mockPlatform);
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("./WhisperModelsPanel", () => ({
   WhisperModelsPanel: () => <div>Whisper 下载</div>,
@@ -29,6 +38,9 @@ vi.mock("./LlmSettingsPanel", () => ({
 
 describe("SettingsPanel", () => {
   beforeEach(() => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("wide");
+    mockPlatform.isMobile.mockReturnValue(false);
+    mockPlatform.isTablet.mockReturnValue(false);
     mockIpc.settings.get.mockImplementation(async (key: string) => {
       if (key === "asr_backend") return "volcengine";
       if (key === "whisper_model") return "large-v3-turbo";
@@ -103,5 +115,28 @@ describe("SettingsPanel", () => {
 
     expect(localStorage.getItem("course-ai-accent")).toBe("custom");
     expect(localStorage.getItem("course-ai-custom-accent")).toBe("#123456");
+  });
+
+  it("uses the tablet category sidebar on iPad while keeping mobile cloud backend choices", async () => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("medium");
+    mockPlatform.isMobile.mockReturnValue(true);
+    mockPlatform.isTablet.mockReturnValue(true);
+    mockIpc.settings.get.mockImplementation(async (key: string) => {
+      if (key === "asr_backend") return "volcengine";
+      return null;
+    });
+
+    render(<SettingsPanel onClose={() => undefined} />);
+
+    expect(await screen.findByRole("navigation", { name: "设置分类" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "外观", level: 2 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "语音识别" }));
+
+    const backend = await screen.findByLabelText("识别后端");
+    expect(backend).toHaveValue("volcengine");
+    expect(screen.queryByRole("option", { name: "本地 Whisper" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "火山录音文件识别" })).toBeInTheDocument();
+    expect(screen.getByLabelText("App ID")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "课件" })).not.toBeInTheDocument();
   });
 });

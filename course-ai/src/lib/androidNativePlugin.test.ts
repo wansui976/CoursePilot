@@ -6,6 +6,10 @@ const pluginSourcePath = join(
   process.cwd(),
   "src-tauri/gen/android/app/src/main/java/dev/courseai/mobilefiles/MobileFilesPlugin.kt",
 );
+const iosPluginSourcePath = join(
+  process.cwd(),
+  "src-tauri/ios/Sources/MobileFilesPlugin.swift",
+);
 
 function commandBody(source: string, commandName: string) {
   const start = source.indexOf(`fun ${commandName}(invoke: Invoke)`);
@@ -50,15 +54,19 @@ describe("Android native plugin threading", () => {
     expect(captureStart).toBeGreaterThan(backgroundStart);
   });
 
-  it("keeps Android slide extraction enabled in the Rust pipeline", () => {
+  it("keeps mobile (Android + iOS) slide extraction enabled in the Rust pipeline", () => {
     const source = readFileSync(
       join(process.cwd(), "src-tauri/src/pipeline/slides.rs"),
       "utf8",
     );
 
-    expect(source).toContain("sample_android_luma_frames");
+    // 课件提取现已对 Android 与 iOS 同时启用：共用原生亮度抽帧 + 同一套换页检测。
+    expect(source).toContain("sample_mobile_luma_frames");
     expect(source).toContain("export_luma_frames");
-    expect(source).not.toContain("移动端暂不支持自动提取课件，请在桌面端生成后同步");
+    expect(source).toContain(
+      'cfg(any(target_os = "android", target_os = "ios"))',
+    );
+    expect(source).not.toContain("移动端暂不支持课件自动抽取");
   });
 
   it("uses native frame capture for Android OCR screenshots", () => {
@@ -69,6 +77,25 @@ describe("Android native plugin threading", () => {
 
     expect(source).toContain("#[cfg(target_os = \"android\")]");
     expect(source).toContain("slides::capture_frame");
-    expect(source).toContain("移动端本地 Tesseract OCR 不可用");
+    expect(source).toContain("移动端 OCR 暂不可用");
+  });
+});
+
+describe("iOS native plugin audio export", () => {
+  it("writes WAV samples on a separate queue to avoid blocking the export queue", () => {
+    const source = readFileSync(iosPluginSourcePath, "utf8");
+
+    expect(source).toContain("audioWriterQueue");
+    expect(source).toContain("requestMediaDataWhenReady(on: audioWriterQueue)");
+    expect(source).not.toContain("requestMediaDataWhenReady(on: workQueue)");
+  });
+
+  it("exports ASR WAV as 16 kHz mono PCM", () => {
+    const source = readFileSync(iosPluginSourcePath, "utf8");
+
+    expect(source).toContain("AVSampleRateKey: 16000");
+    expect(source).toContain("AVNumberOfChannelsKey: 1");
+    expect(source).toContain("audio/wav");
+    expect(source).toContain("\"format\": result.format");
   });
 });

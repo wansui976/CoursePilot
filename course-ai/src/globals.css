@@ -79,9 +79,9 @@
   --surface-stage: #0f1115;
   --surface-titlebar: #0f1217;
 
-  --border-subtle: rgb(255 255 255 / 0.1);
-  --border-faint: rgb(255 255 255 / 0.06);
-  --border-titlebar: rgb(255 255 255 / 0.1);
+  --border-subtle: rgb(255 255 255 / 0.06);
+  --border-faint: rgb(255 255 255 / 0.04);
+  --border-titlebar: rgb(255 255 255 / 0.06);
 
   --text-strong: rgb(244 247 255 / 0.96);
   --text-normal: rgb(228 234 245 / 0.72);
@@ -114,6 +114,8 @@ body,
   color: var(--text-strong);
   font-family: var(--font-app);
   overflow: hidden;
+  /* iOS：禁掉最外层橡皮筋/下拉刷新——壳层不滚动，内部滚动到底也不该把弹跳甩给页面。 */
+  overscroll-behavior: none;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -179,6 +181,12 @@ select:focus-visible {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-text) 25%, transparent);
 }
 
+/* 提问输入框：外层药丸已用 focus-within 显示聚焦，内层 input 不再叠加主色焦点环/描边。 */
+.ca-ask-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 /* UI 重构 reference shell: scoped class names mirror the files in ../UI 重构. */
 .ca-app {
   --accent: #2f6cea;
@@ -228,13 +236,13 @@ select:focus-visible {
   --accent-text: #7aa6ff;
 }
 
-.ca-app[data-bucket="compact"],
-.ca-app[data-bucket="medium"] {
+.ca-app[data-bucket="compact"]:not([data-device="tablet"]),
+.ca-app[data-bucket="medium"]:not([data-device="tablet"]) {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.ca-app[data-bucket="compact"] .ca-main,
-.ca-app[data-bucket="medium"] .ca-main {
+.ca-app[data-bucket="compact"]:not([data-device="tablet"]) .ca-main,
+.ca-app[data-bucket="medium"]:not([data-device="tablet"]) .ca-main {
   padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
 }
 
@@ -242,8 +250,8 @@ select:focus-visible {
   grid-template-columns: 56px minmax(0, 1fr);
 }
 
-.ca-app[data-view="workbench"][data-bucket="compact"],
-.ca-app[data-view="workbench"][data-bucket="medium"] {
+.ca-app[data-view="workbench"][data-bucket="compact"]:not([data-device="tablet"]),
+.ca-app[data-view="workbench"][data-bucket="medium"]:not([data-device="tablet"]) {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -274,8 +282,8 @@ select:focus-visible {
 }
 
 .ca-rail .rail-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 10px;
   display: flex;
   align-items: center;
@@ -287,9 +295,11 @@ select:focus-visible {
   background: transparent;
 }
 
+@media (hover: hover) {
 .ca-rail .rail-btn:hover {
   background: var(--bg-sunken);
   color: var(--text-1);
+}
 }
 
 .ca-rail .rail-btn.active {
@@ -365,9 +375,11 @@ select:focus-visible {
   transition: background 0.12s, color 0.12s;
 }
 
+@media (hover: hover) {
 .ca-rail-flyout-item:hover {
   background: var(--bg-sunken);
   color: var(--text-1);
+}
 }
 
 .ca-rail-flyout-item.on {
@@ -452,7 +464,7 @@ select:focus-visible {
 
 .ca-new-btn {
   width: 100%;
-  height: 40px;
+  height: 44px;
   margin-bottom: 18px;
   border: 1px solid transparent !important;
   border-radius: var(--r-sm) !important;
@@ -490,7 +502,7 @@ select:focus-visible {
 }
 
 .ca-nav-item {
-  min-height: 38px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -503,8 +515,10 @@ select:focus-visible {
   position: relative;
 }
 
+@media (hover: hover) {
 .ca-nav-item:hover {
   background: var(--bg-sunken);
+}
 }
 
 .ca-nav-item.active {
@@ -516,7 +530,7 @@ select:focus-visible {
 .ca-nav-button {
   min-width: 0;
   flex: 1;
-  height: 38px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -540,8 +554,8 @@ select:focus-visible {
 }
 
 .ca-icon-btn {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   border-radius: 8px;
   display: grid;
   place-items: center;
@@ -549,9 +563,11 @@ select:focus-visible {
   transition: background 0.12s, color 0.12s;
 }
 
+@media (hover: hover) {
 .ca-icon-btn:hover {
   background: var(--bg-sunken);
   color: var(--text-1);
+}
 }
 
 
@@ -584,8 +600,10 @@ select:focus-visible {
   cursor: pointer;
 }
 
+@media (hover: hover) {
 .hamb:hover {
   background: var(--bg-sunken);
+}
 }
 
 .tb-titles {
@@ -635,8 +653,10 @@ select:focus-visible {
   transition: background 0.12s, color 0.12s;
 }
 
+@media (hover: hover) {
 .ca-seg button:hover {
   color: var(--text-1);
+}
 }
 
 .ca-seg button.on {
@@ -670,10 +690,12 @@ select:focus-visible {
   transition: transform 0.16s var(--ease), box-shadow 0.16s, border-color 0.16s;
 }
 
+@media (hover: hover) {
 .ca-card:hover {
   transform: translateY(-4px);
   box-shadow: 0 10px 26px rgb(20 24 40 / 0.1);
   border-color: #dde0e6;
+}
 }
 
 .ca-thumb {
@@ -685,21 +707,6 @@ select:focus-visible {
   align-items: center;
   justify-content: center;
   color: #fff;
-}
-
-.ca-thumb .play,
-.row-thumb .play {
-  position: relative;
-  z-index: 2;
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  background: rgb(255 255 255 / 0.92);
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 16px rgb(20 30 60 / 0.25);
 }
 
 .ca-thumb .dur {
@@ -833,9 +840,11 @@ select:focus-visible {
   transition: background 0.12s, box-shadow 0.12s;
 }
 
+@media (hover: hover) {
 .ca-row:hover {
   background: var(--bg-panel);
   box-shadow: var(--shadow-card);
+}
 }
 
 .ca-row .row-button {
@@ -859,11 +868,6 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.row-thumb .play {
-  width: 20px;
-  height: 20px;
 }
 
 .ca-row .row-main {
@@ -964,8 +968,8 @@ select:focus-visible {
 }
 
 .rail-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 10px;
   display: flex;
   align-items: center;
@@ -974,9 +978,11 @@ select:focus-visible {
   transition: background 0.12s, color 0.12s;
 }
 
+@media (hover: hover) {
 .rail-btn:hover {
   background: var(--bg-sunken);
   color: var(--text-1);
+}
 }
 
 .ca-stage-wrap {
@@ -1139,35 +1145,63 @@ select:focus-visible {
   padding: 14px 16px 0;
 }
 
-/* ---- medium（手机横屏 / 小平板）：左右并排——视频左栏填满高度，资料面板固定右栏独立滚动 ---- */
+/* ---- medium 竖屏（iPad Air 11" 竖屏等）：上下堆叠 ---- */
 .ca-app[data-bucket="medium"] .ca-wb {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   overflow: hidden;
 }
 
 .ca-app[data-bucket="medium"] .ca-player-col {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow: hidden;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+  overflow: visible;
 }
 
 .ca-app[data-bucket="medium"] .ca-panel-col {
-  /* 默认 min(46%, 460px)；拖动后用 --study-panel-width，并夹在 [280px, 60%] 防止挤没视频。 */
-  flex: 0 0 clamp(280px, var(--study-panel-width, min(46%, 460px)), 60%);
+  flex: 1 1 auto;
   min-height: 0;
-  border-left: 1px solid var(--line);
 }
 
 .ca-app[data-bucket="medium"] .ca-stage-wrap {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  padding: 6px 12px 10px;
+  display: block;
+  padding: 12px 16px 16px;
 }
 
 .ca-app[data-bucket="medium"] .ca-stage {
-  aspect-ratio: auto;
+  aspect-ratio: 16 / 9;
+}
+
+/* ---- medium 横屏（手机横屏 / 小平板横屏）：左右并排 ---- */
+@media (orientation: landscape) {
+  .ca-app[data-bucket="medium"] .ca-wb {
+    flex-direction: row;
+  }
+
+  .ca-app[data-bucket="medium"] .ca-player-col {
+    flex: 1 1 0;
+    min-height: 0;
+    border-bottom: none;
+    overflow: hidden;
+  }
+
+  .ca-app[data-bucket="medium"] .ca-panel-col {
+    /* 默认 min(46%, 460px)；拖动后用 --study-panel-width，并夹在 [280px, 60%] 防止挤没视频。 */
+    flex: 0 0 clamp(280px, var(--study-panel-width, min(46%, 460px)), 60%);
+    min-height: 0;
+    border-left: 1px solid var(--line);
+  }
+
+  .ca-app[data-bucket="medium"] .ca-stage-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    padding: 6px 12px 10px;
+  }
+
+  .ca-app[data-bucket="medium"] .ca-stage {
+    aspect-ratio: auto;
+  }
 }
 
 /* ---- 共享紧凑 chrome（compact + medium）：顶栏 / 滚动区 / 抽屉 / 标题 / 网格 / 列表 / 触控 ---- */
@@ -1315,12 +1349,12 @@ select:focus-visible {
   height: 12px;
 }
 
-/* 触控设备（无 hover）：控制栏走紧凑高度（约原来一半），命中区放宽到 30px；
+/* 触控设备（无 hover）：控制栏走紧凑高度，命中区放宽到 44px；
    进度条拇指常显、轨道略加高，便于拇指拖动（默认拇指靠 hover/focus 才出现，触屏摸不到）。 */
 @media (pointer: coarse) {
   .ca-player-controls button {
-    min-height: 30px;
-    min-width: 30px;
+    min-height: 44px;
+    min-width: 44px;
   }
 
   .course-video-progress {
@@ -1344,6 +1378,14 @@ select:focus-visible {
   .ca-touch-44 {
     min-width: 44px;
     min-height: 44px;
+  }
+
+  /* iOS 会在聚焦 font-size<16px 的输入框时自动放大整页(聚焦后页面跳动、失焦不复原)。
+     触屏上把表单控件统一撑到 16px，从根上避免聚焦缩放。桌面(fine pointer)不受影响。 */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
   }
 }
 
@@ -1681,4 +1723,52 @@ a,
 
 .ca-bottom-tab-btn:active {
   opacity: 0.55;
+}
+
+/* ===================== iOS 触控收尾 ===================== */
+
+/* 滚动链隔离：任一内部滚动区到底后不把弹跳/滚动传给祖先（嵌套滚动、堆叠工作台尤其明显）。
+   只阻断链接，不改变正常滚动手感。 */
+.overflow-y-auto,
+.overflow-auto,
+.ca-scroll,
+.ca-nav,
+.ca-rail-flyout-list {
+  overscroll-behavior: contain;
+}
+
+/* 长按 callout：iOS 上长按可点元素会弹出系统「拷贝/查询/分享」菜单。关掉它即可，
+   不影响文本选择——所以这条可以宽泛地覆盖到所有按钮/链接（含文稿可点行）。 */
+button,
+a,
+[role="button"],
+[role="tab"] {
+  -webkit-touch-callout: none;
+}
+
+/* 误选中 / 放大镜：长按纯控件（图标键、导航、卡片、分段器等）会触发文字放大镜或选中
+   控件文案，毫无意义。只对这些「非正文」chrome 关掉文本选择；刻意排除裸 button / a，
+   保留文稿可点行、幻灯片文本等正文仍可长按选词复制。 */
+[role="button"],
+[role="tab"],
+.ca-card,
+.ca-row,
+.ca-nav-item,
+.ca-rail-flyout-item,
+.rail-btn,
+.ca-icon-btn,
+.ca-bottom-tab-btn,
+.hamb,
+.ca-back-fab,
+.ca-seg,
+.ca-chip {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 视频元素：禁掉长按弹出的「存储图片/拷贝」菜单，避免观看时误触打断。 */
+video {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }

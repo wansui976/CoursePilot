@@ -5,9 +5,10 @@
 
 use crate::error::{AppError, AppResult};
 #[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::sidecar::{resolve, FFMPEG, TESSERACT};
 use std::path::{Path, PathBuf};
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tokio::process::Command;
 
 /// 像素矩形；w 或 h 为 0 表示整帧。
@@ -53,7 +54,7 @@ pub async fn grab_frame(
 }
 
 /// 截取视频某时刻的（可选）帧为 PNG，供本地或云端 OCR 复用。
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn grab_frame(
     video: &Path,
     out_dir: &Path,
@@ -84,7 +85,7 @@ pub async fn grab_frame(
     Ok(out)
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn run_ocr(
     _video: &Path,
     _out_dir: &Path,
@@ -92,12 +93,20 @@ pub async fn run_ocr(
     _rect: Rect,
     _langs: &str,
 ) -> AppResult<String> {
-    Err(AppError::Config(
-        "移动端本地 Tesseract OCR 不可用，请在设置中选择阿里云 OCR".into(),
-    ))
+    Err(AppError::Config("移动端 OCR 暂不可用，请先在桌面端完成截字".into()))
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub async fn grab_frame(
+    _video: &Path,
+    _out_dir: &Path,
+    _at_ms: i64,
+    _rect: Rect,
+) -> AppResult<PathBuf> {
+    Err(AppError::Config("移动端不支持本地 ffmpeg 截帧".into()))
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn run_ocr(
     video: &Path,
     out_dir: &Path,

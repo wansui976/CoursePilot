@@ -5,10 +5,12 @@ import { Transformer } from "markmap-lib";
 import { Markmap } from "markmap-view";
 import { ipc } from "@/lib/ipc";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useTheme } from "@/stores/theme";
 
 const transformer = new Transformer();
 
 export function MindmapPanel({ videoId }: { videoId: string }) {
+  const theme = useTheme((s) => s.effective);
   const svgRef = useRef<SVGSVGElement>(null);
   const mmRef = useRef<Markmap | undefined>(undefined);
   const { data: md, isLoading } = useQuery({
@@ -45,7 +47,9 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
     );
   }
   return (
-    <div className="relative flex h-full flex-col">
+    <div
+      className={`relative flex h-full flex-col ${theme === "dark" ? "markmap-dark" : ""}`}
+    >
       <div className="absolute right-2 top-2 z-10 flex flex-col gap-1">
         {(
           [
@@ -59,7 +63,7 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
             aria-label={label}
             title={label}
             onClick={onClick}
-            className="grid h-8 w-8 place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] text-[var(--text-muted)] shadow-sm transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+            className="ca-touch-44 grid h-8 w-8 place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] text-[var(--text-muted)] shadow-sm transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
           >
             <Icon className="h-4 w-4" />
           </button>

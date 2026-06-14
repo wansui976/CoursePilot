@@ -94,7 +94,7 @@ export function DevConsole({ onClose }: { onClose: () => void }) {
         <button
           aria-label="返回"
           onClick={onClose}
-          className="grid h-8 w-8 flex-none place-items-center rounded-lg text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+          className="ca-icon-btn ca-touch-44 ml-0"
         >
           <ChevronLeft className="h-5 w-5" />
         </button>

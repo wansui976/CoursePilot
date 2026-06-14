@@ -4,6 +4,7 @@ import { ipc } from "@/lib/ipc";
 import { withClickableTimestamps } from "@/lib/clickableTimestamps";
 import { usePlayer } from "@/stores/player";
 import { TextSkeleton } from "@/components/ui/skeleton";
+import { ErrorNote } from "@/components/ui/ErrorNote";
 import { PanelActions } from "./PanelActions";
 
 /** 极简 Markdown 渲染：## 小标题、- 列表、空行分段、**加粗**、[mm:ss] 跳转。够摘要用，避免再引依赖。 */
@@ -88,7 +89,11 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
       <div className="shrink-0 px-3 pt-2 text-sm text-[var(--text-muted)]">整体摘要</div>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-12 pt-1">
         {generate.isError && (
-          <p className="pb-2 text-xs text-[var(--status-err)]">{String(generate.error)}</p>
+          <ErrorNote
+            className="mb-2"
+            error={generate.error}
+            onRetry={() => generate.mutate()}
+          />
         )}
         {isLoading ? (
           <TextSkeleton lines={5} className="p-0" />

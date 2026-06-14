@@ -55,7 +55,7 @@ pub fn is_faststart(path: &Path) -> AppResult<bool> {
 /// 返回一个可在 WebView 中正常播放的路径：
 /// 原文件已 faststart → 原样返回；否则生成（并缓存）data_dir/playable.mp4。
 /// 转封装失败时退回原文件（至少画面能放）。
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn ensure_playable(original: &Path, _data_dir: &Path) -> AppResult<PathBuf> {
     Ok(original.to_path_buf())
 }
@@ -63,7 +63,7 @@ pub async fn ensure_playable(original: &Path, _data_dir: &Path) -> AppResult<Pat
 /// 返回一个可在 WebView 中正常播放的路径：
 /// 原文件已 faststart → 原样返回；否则生成（并缓存）data_dir/playable.mp4。
 /// 转封装失败时退回原文件（至少画面能放）。
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn ensure_playable(original: &Path, data_dir: &Path) -> AppResult<PathBuf> {
     if is_faststart(original).unwrap_or(true) {
         return Ok(original.to_path_buf());

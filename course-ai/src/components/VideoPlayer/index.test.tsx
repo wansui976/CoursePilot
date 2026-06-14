@@ -38,11 +38,13 @@ describe("VideoPlayer", () => {
 
   it("exposes a 字幕 toggle in the controls", () => {
     renderPlayer();
+    fireEvent.mouseEnter(screen.getByLabelText("课程视频舞台"));
     expect(screen.getByRole("button", { name: "字幕" })).toBeInTheDocument();
   });
 
   it("uses the active accent color for video progress controls", () => {
     renderPlayer();
+    fireEvent.mouseEnter(screen.getByLabelText("课程视频舞台"));
 
     expect(screen.getByLabelText("播放进度")).toHaveStyle({
       "--video-control-color": "var(--accent)",
@@ -52,14 +54,24 @@ describe("VideoPlayer", () => {
     );
   });
 
-  it("keeps the video control bar in its own row below the video", () => {
+  it("hides the desktop control bar until the video is hovered", async () => {
     renderPlayer();
 
+    const stage = screen.getByLabelText("课程视频舞台");
     const controls = screen.getByLabelText("视频播放控制栏");
 
     expect(controls).toHaveClass("shrink-0");
-    expect(controls).not.toHaveClass("absolute", "opacity-0", "pointer-events-none");
-    expect(controls).not.toHaveAttribute("data-visible");
+    expect(controls).toHaveClass("invisible", "opacity-0", "pointer-events-none");
+
+    fireEvent.mouseEnter(stage);
+
+    expect(controls).not.toHaveClass("invisible", "opacity-0", "pointer-events-none");
+
+    fireEvent.mouseLeave(stage);
+
+    await waitFor(() =>
+      expect(controls).toHaveClass("invisible", "opacity-0", "pointer-events-none"),
+    );
   });
 
   it("does not wrap the video in an extra rounded black frame", () => {
@@ -73,6 +85,7 @@ describe("VideoPlayer", () => {
     setFullscreen.mockResolvedValue(undefined);
 
     renderPlayer();
+    fireEvent.mouseEnter(screen.getByLabelText("课程视频舞台"));
 
     fireEvent.click(screen.getByRole("button", { name: "全屏" }));
     await waitFor(() => expect(setFullscreen).toHaveBeenCalledWith(true));
@@ -84,6 +97,7 @@ describe("VideoPlayer", () => {
     setFullscreen.mockResolvedValue(undefined);
 
     renderPlayer();
+    fireEvent.mouseEnter(screen.getByLabelText("课程视频舞台"));
 
     fireEvent.click(screen.getByRole("button", { name: "全屏" }));
     fireEvent.click(await screen.findByRole("button", { name: "退出全屏" }));

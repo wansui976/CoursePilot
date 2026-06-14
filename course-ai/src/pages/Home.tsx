@@ -25,13 +25,14 @@ import { TabsPanel } from "@/components/TabsPanel";
 import { VideoCover } from "@/components/VideoCover";
 import { VideoPlayer } from "@/components/VideoPlayer";
 import { BottomTabBar, type CompactTab } from "@/components/BottomTabBar";
-import { useContainerWidth } from "@/lib/useContainerWidth";
+import { coarsePointer, useContainerWidth, useIsPortrait } from "@/lib/useContainerWidth";
 import { ipc } from "@/lib/ipc";
 import type { Video } from "@/lib/types";
 import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { readPlaybackProgress } from "@/lib/playback";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
+import { isTablet } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 import { accentVars, useTheme } from "@/stores/theme";
@@ -97,11 +98,16 @@ export function Home() {
   const bucket = useContainerWidth(appRef);
   const isLightTheme = theme === "light";
   const themeToggleLabel = isLightTheme ? "切换到夜晚模式" : "切换到白天模式";
-  // 窄屏（compact 手机竖 + medium 手机横/小平板）走非宽屏布局；wide 走主从。
-  const isPhoneDevice = bucket !== "wide";
-  const isWorkbenchWide = bucket === "wide";
-  // 工作台左右并排（medium 手机横屏 + wide）时才有可拖的竖向分隔条；compact 竖屏是上下堆叠，没有。
-  const showResizer = bucket !== "compact";
+  const tabletDevice = isTablet();
+  const portrait = useIsPortrait();
+  // 触控优先：iOS/iPad 竖屏一律走底部 Tab / 上下叠放布局；只有横屏才保留桌面式左右分栏。
+  // 方向必须单独判断:12.9" iPad 竖屏宽 1024 会落入 wide 档,只看 bucket 仍会被当宽屏左右布局。
+  const stackedPortrait = portrait && (tabletDevice || coarsePointer());
+  const isWorkbenchWide = bucket === "wide" && !stackedPortrait;
+  const tabletWide = tabletDevice && isWorkbenchWide;
+  const isPhoneDevice = !isWorkbenchWide;
+  // 只有横屏宽布局才保留可拖的竖向分隔条。
+  const showResizer = isWorkbenchWide;
   const studyPanelWidthForLayout = isResizingPanel
     ? liveWidthRef.current
     : studyPanelWidth;
@@ -154,6 +160,10 @@ export function Home() {
   useEffect(() => {
     useTheme.getState().sync();
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   useEffect(() => {
     setVideo(selectedVideoId);
@@ -237,7 +247,9 @@ export function Home() {
   // （见 pipeline::run_ai_followups），用户无需手动点「生成」。这里只补做不在后端任务
   // 队列里的「课件抽取」，并在各 AI 任务完成时刷新对应面板。
   useEffect(() => {
-    queuedVideoIds.forEach((videoId) => {
+    // 注意：以 jobsByVideo 为遍历源，而非 queuedVideoIds——这样视频处理完成
+    // 出队后，后端续跑的 AI 任务完成时仍能刷新对应面板。
+    Object.keys(jobsByVideo).forEach((videoId) => {
       const jobs = jobsByVideo[videoId];
       if (!jobs) return;
       if (jobs.asr?.status === "done" && !generatedAfterAsr.current.has(videoId)) {
@@ -256,7 +268,24 @@ export function Home() {
         }
       }
     });
-  }, [jobsByVideo, queryClient, queuedVideoIds, selectedCourseId]);
+  }, [jobsByVideo, queryClient, selectedCourseId]);
+
+  // 处理完成（asr 完成或被取消）后把视频移出处理队列；失败的保留以显示错误。
+  // 留一点时间让用户看到 100% 再消失。后端续跑的 AI 任务在后台继续，不影响视频已可用。
+  useEffect(() => {
+    const timers: number[] = [];
+    queuedVideoIds.forEach((videoId) => {
+      const active = activeJobFor(videoId);
+      if (active?.status === "done" || active?.status === "canceled") {
+        timers.push(
+          window.setTimeout(() => {
+            setQueuedVideoIds((ids) => ids.filter((id) => id !== videoId));
+          }, 1200),
+        );
+      }
+    });
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [jobsByVideo, queuedVideoIds]);
 
   useEffect(() => {
     if (!queueOpen || queuedVideoIds.length === 0) return;
@@ -540,7 +569,7 @@ export function Home() {
                     {canCancel && (
                       <button
                         onClick={() => void ipc.pipeline.cancel(video.id)}
-                        className="absolute right-3 top-3 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
+                        className="ca-touch-44 absolute right-3 top-3 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
                       >
                         取消
                       </button>
@@ -585,10 +614,10 @@ export function Home() {
         <button
           type="button"
           role="menuitem"
-          className="block w-full px-3 py-2 text-left hover:bg-[var(--surface-card-hover)]"
+          className="ca-touch-44 block w-full px-3 py-2 text-left hover:bg-[var(--surface-card-hover)]"
           onClick={() => {
             setOpenMenuVideoId(null);
-            setRenamingVideo({ id: video.id, title: video.title });
+            setRenamingVideo({ id: video.id, title: displayTitle(video.title) });
           }}
         >
           修改标题
@@ -596,7 +625,7 @@ export function Home() {
         <button
           type="button"
           role="menuitem"
-          className="mt-1 block w-full border-t border-[var(--border-subtle)] px-3 py-2 pt-2.5 text-left text-[var(--status-err)] hover:bg-[var(--surface-card-hover)]"
+          className="ca-touch-44 mt-1 block w-full border-t border-[var(--border-subtle)] px-3 py-2 pt-2.5 text-left text-[var(--status-err)] hover:bg-[var(--surface-card-hover)]"
           onClick={() => {
             setOpenMenuVideoId(null);
             void deleteVideo(video.id);
@@ -607,7 +636,7 @@ export function Home() {
         <button
           type="button"
           role="menuitem"
-          className="block w-full px-3 py-2 text-left hover:bg-[var(--surface-card-hover)]"
+          className="ca-touch-44 block w-full px-3 py-2 text-left hover:bg-[var(--surface-card-hover)]"
           onClick={() => {
             setOpenMenuVideoId(null);
             // 已有字幕（处理完成）→ 仅重新 AI 纠错；否则跑完整处理。
@@ -644,7 +673,7 @@ export function Home() {
           aria-label="视频标题"
           autoFocus
           onFocus={(event) => event.currentTarget.select()}
-          className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1.5 text-xs text-[var(--text-strong)] outline-none"
+          className="min-h-11 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1.5 text-xs text-[var(--text-strong)] outline-none"
           value={renamingVideo.title}
           onChange={(event) =>
             setRenamingVideo({ id: video.id, title: event.target.value })
@@ -710,9 +739,6 @@ export function Home() {
               videoId={video.id}
               className="absolute inset-0 h-full w-full"
             />
-            <span className="play">
-              <Play className="h-5 w-5 fill-current" />
-            </span>
             <span className="dur">
               {durationMs ? formatMs(durationMs) : "00:00"}
             </span>
@@ -763,9 +789,6 @@ export function Home() {
                 videoId={video.id}
                 className="absolute inset-0 h-full w-full"
               />
-              <span className="play">
-                <Play className="h-4 w-4 fill-current" />
-              </span>
               {progress.ratio > 0 && progress.ratio < 0.995 && (
                 <span
                   className="ov-bar"
@@ -1063,6 +1086,9 @@ export function Home() {
 
   // 窄屏「课程」Tab 的根页:整屏课程列表(复用 CourseSidebar 的增删改),回收站置于右上。
   function renderCourseListScreen() {
+    if (tabletWide) {
+      return renderSidebar();
+    }
     return (
       <CourseSidebar
         variant="screen"
@@ -1109,6 +1135,7 @@ export function Home() {
       ref={appRef}
       data-theme={theme}
       data-bucket={bucket}
+      data-device={tabletWide ? "tablet" : "phone-or-desktop"}
       data-view={isWorkbenchView ? "workbench" : "library"}
       style={accentVars(accent, theme, customAccent) as CSSProperties}
       className="ca-app"

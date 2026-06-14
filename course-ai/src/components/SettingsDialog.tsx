@@ -11,6 +11,7 @@ import {
   ScanText,
   Sparkles,
   Terminal,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useContainerWidth } from "@/lib/useContainerWidth";
@@ -27,6 +28,9 @@ import {
   sensitivityToThreshold,
   setSlidesSensitivity,
 } from "@/lib/slides";
+import { defaultAsrBackend, normalizeAsrBackend } from "@/lib/asrDefaults";
+import { defaultOcrBackend, normalizeOcrBackend } from "@/lib/ocrDefaults";
+import { isMobile, isTablet } from "@/lib/platform";
 import { pickDirectoryPath } from "@/lib/mobileFiles";
 import { WhisperModelsPanel } from "./WhisperModelsPanel";
 import { LlmSettingsPanel } from "./LlmSettingsPanel";
@@ -205,9 +209,17 @@ function StackRow({
 
 function SavedBadge({ text }: { text: string }) {
   if (!text) return null;
+  // 文案含「失败」时按错误态(红色)展示，让保存失败不再无声无息。
+  const isError = text.includes("失败");
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--status-ok-bg)] px-2 py-0.5 text-xs font-medium text-[var(--status-ok)]">
-      <Check className="h-3 w-3" />
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+        isError
+          ? "bg-[var(--status-err-bg)] text-[var(--status-err)]"
+          : "bg-[var(--status-ok-bg)] text-[var(--status-ok)]"
+      }`}
+    >
+      {isError ? <X className="h-3 w-3" /> : <Check className="h-3 w-3" />}
       {text}
     </span>
   );
@@ -220,12 +232,14 @@ export function SettingsPanel({
   onClose: () => void;
   onOpenDevConsole?: () => void;
 }) {
+  const mobile = isMobile();
+  const tablet = isTablet();
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>("appearance");
   // 竖屏（手机 / 平板竖屏）：取消左侧分类栏，改成「分类列表 → 进入某分类」的下钻，
   // 顶部左上角放返回按钮 + 当前层级标题。entered=false 显示分类列表，true 显示该分类详情。
   // 设置面板自身随 .ca-app 宽度走窄屏下钻；非宽屏即紧凑。
   const settingsRef = useRef<HTMLDivElement>(null);
-  const compact = useContainerWidth(settingsRef) !== "wide";
+  const compact = useContainerWidth(settingsRef) !== "wide" && !tablet;
   const [entered, setEntered] = useState(false);
   const themePref = useTheme((s) => s.pref);
   const setThemePref = useTheme((s) => s.setPref);
@@ -258,7 +272,7 @@ export function SettingsPanel({
   }, [capturing, setBinding]);
   const [root, setRoot] = useState("");
   const [model, setModel] = useState("large-v3-turbo");
-  const [asrBackend, setAsrBackend] = useState("whisper");
+  const [asrBackend, setAsrBackend] = useState(defaultAsrBackend());
   const [asrLanguage, setAsrLanguage] = useState("zh");
   const [correctionConcurrency, setCorrectionConcurrency] = useState("8");
   const [volcengineAppId, setVolcengineAppId] = useState("");
@@ -270,7 +284,7 @@ export function SettingsPanel({
   const [dashscopeKey, setDashscopeKey] = useState("");
   const [dashscopeSaved, setDashscopeSaved] = useState("");
   const [aliyunModel, setAliyunModel] = useState("qwen3-asr-flash-filetrans");
-  const [ocrBackend, setOcrBackend] = useState("tesseract");
+  const [ocrBackend, setOcrBackend] = useState(defaultOcrBackend());
   const [ocrType, setOcrType] = useState("Advanced");
   const [ocrKeyId, setOcrKeyId] = useState("");
   const [ocrSecret, setOcrSecret] = useState("");
@@ -286,7 +300,7 @@ export function SettingsPanel({
       .then((value) => setModel(value ?? "large-v3-turbo"));
     void ipc.settings
       .get("asr_backend")
-      .then((value) => setAsrBackend(value ?? "whisper"));
+      .then((value) => setAsrBackend(normalizeAsrBackend(value)));
     void ipc.settings
       .get("asr_language")
       .then((value) => setAsrLanguage(value ?? "zh"));
@@ -307,7 +321,7 @@ export function SettingsPanel({
       .then((value) => setAliyunModel(value ?? "qwen3-asr-flash-filetrans"));
     void ipc.settings
       .get("ocr_backend")
-      .then((value) => setOcrBackend(value ?? "tesseract"));
+      .then((value) => setOcrBackend(normalizeOcrBackend(value)));
     void ipc.settings
       .get("aliyun_ocr_type")
       .then((value) => setOcrType(value ?? "Advanced"));
@@ -330,8 +344,9 @@ export function SettingsPanel({
   }
 
   async function changeAsrBackend(value: string) {
-    setAsrBackend(value);
-    await ipc.settings.set("asr_backend", value);
+    const next = normalizeAsrBackend(value);
+    setAsrBackend(next);
+    await ipc.settings.set("asr_backend", next);
   }
 
   async function changeAsrLanguage(value: string) {
@@ -359,10 +374,16 @@ export function SettingsPanel({
   }
 
   async function saveVolcengineContext() {
-    await ipc.settings.set("volcengine_asr_hotwords", volcengineHotwords.trim());
-    await ipc.settings.set("volcengine_asr_context", volcengineContext.trim());
-    setVolcengineCtxSaved("已保存");
-    setTimeout(() => setVolcengineCtxSaved(""), 1500);
+    try {
+      await ipc.settings.set("volcengine_asr_hotwords", volcengineHotwords.trim());
+      await ipc.settings.set("volcengine_asr_context", volcengineContext.trim());
+      setVolcengineCtxSaved("已保存");
+      setTimeout(() => setVolcengineCtxSaved(""), 1500);
+    } catch (error) {
+      // 不再无声失败：把后端写入错误直接显示出来，便于定位（例如 DB 不可写）。
+      setVolcengineCtxSaved(`保存失败：${error}`);
+      setTimeout(() => setVolcengineCtxSaved(""), 6000);
+    }
   }
 
   async function changeAliyunModel(value: string) {
@@ -379,8 +400,9 @@ export function SettingsPanel({
   }
 
   async function changeOcrBackend(value: string) {
-    setOcrBackend(value);
-    await ipc.settings.set("ocr_backend", value);
+    const next = normalizeOcrBackend(value);
+    setOcrBackend(next);
+    await ipc.settings.set("ocr_backend", next);
   }
 
   async function changeOcrType(value: string) {
@@ -405,8 +427,8 @@ export function SettingsPanel({
     "storage",
     "asr",
     "llm",
-    "courseware",
   ];
+  if (!mobile) categories.push("courseware");
   if (onOpenDevConsole) categories.push("dev");
 
   // 竖屏下钻时：进入了某分类则顶栏显示该分类名 + 返回到分类列表；否则显示「设置」+ 关闭。
@@ -424,7 +446,7 @@ export function SettingsPanel({
         <button
           aria-label="返回"
           onClick={onHeaderBack}
-          className="grid h-8 w-8 flex-none place-items-center rounded-lg text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+          className="ca-icon-btn ca-touch-44 ml-0"
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
@@ -558,7 +580,7 @@ export function SettingsPanel({
                             <label
                               key={option.key}
                               title={option.label}
-                              className={`relative grid h-7 w-7 cursor-pointer place-items-center rounded-full ring-2 ring-offset-2 ring-offset-[var(--surface-card)] transition ${
+                              className={`ca-touch-44 relative grid h-7 w-7 cursor-pointer place-items-center rounded-full ring-2 ring-offset-2 ring-offset-[var(--surface-card)] transition ${
                                 selected ? "ring-[var(--text-muted)]" : "ring-transparent"
                               }`}
                             >
@@ -586,7 +608,7 @@ export function SettingsPanel({
                             title={option.label}
                             aria-label={option.label}
                             aria-pressed={selected}
-                            className={`grid h-7 w-7 place-items-center rounded-full ring-2 ring-offset-2 ring-offset-[var(--surface-card)] transition ${
+                            className={`ca-touch-44 grid h-7 w-7 place-items-center rounded-full ring-2 ring-offset-2 ring-offset-[var(--surface-card)] transition ${
                               selected ? "ring-[var(--text-muted)]" : "ring-transparent"
                             }`}
                           >
@@ -614,7 +636,7 @@ export function SettingsPanel({
                       type="button"
                       onClick={() => setCapturing(action)}
                       aria-label={`设置「${label}」快捷键`}
-                      className={`min-w-[88px] rounded-lg border px-3 py-1.5 text-center text-sm font-medium transition ${
+                      className={`min-h-11 min-w-[88px] rounded-lg border px-3 py-1.5 text-center text-sm font-medium transition ${
                         capturing === action
                           ? "border-[var(--accent-text)] bg-[var(--accent-weak)] text-[var(--accent-text)]"
                           : "border-[var(--border-subtle)] bg-[var(--surface-input)] text-[var(--text-strong)] hover:border-[var(--text-faint)]"
@@ -658,7 +680,7 @@ export function SettingsPanel({
                         value={asrBackend}
                         onChange={(event) => void changeAsrBackend(event.target.value)}
                       >
-                        <option value="whisper">本地 Whisper</option>
+                        {!mobile && <option value="whisper">本地 Whisper</option>}
                         <option value="volcengine">火山录音文件识别</option>
                         <option value="aliyun">阿里云 DashScope 录音文件识别</option>
                       </Select>
@@ -667,7 +689,11 @@ export function SettingsPanel({
                   <Row
                     label="识别语言"
                     htmlFor="asr-language"
-                    hint="对本地 Whisper 与阿里云 paraformer-v2 / fun-asr 生效；火山及通义千问 ASR 为自动识别"
+                    hint={
+                      mobile
+                        ? "移动端使用云端 ASR，自动识别语言"
+                        : "对本地 Whisper 与阿里云 paraformer-v2 / fun-asr 生效；火山及通义千问 ASR 为自动识别"
+                    }
                   >
                     <div className="w-full sm:w-40">
                       <Select
@@ -708,7 +734,7 @@ export function SettingsPanel({
                   </Row>
                 </Group>
 
-                {asrBackend === "whisper" && (
+                {!mobile && asrBackend === "whisper" && (
                   <Group header="本地 Whisper">
                     <Row label="默认 Whisper 模型" htmlFor="whisper-model">
                       <div className="w-full sm:w-44">
@@ -854,7 +880,7 @@ export function SettingsPanel({
               </Group>
             )}
 
-            {activeCategory === "courseware" && (
+            {!mobile && activeCategory === "courseware" && (
               <>
                 <Group
                   header="图文识别 (OCR)"
@@ -867,7 +893,7 @@ export function SettingsPanel({
                         value={ocrBackend}
                         onChange={(event) => void changeOcrBackend(event.target.value)}
                       >
-                        <option value="tesseract">本地 Tesseract</option>
+                        {!mobile && <option value="tesseract">本地 Tesseract</option>}
                         <option value="aliyun">阿里云 OCR 统一识别</option>
                       </Select>
                     </div>
