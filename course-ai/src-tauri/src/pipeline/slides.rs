@@ -1,12 +1,12 @@
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::sidecar::{resolve, FFMPEG};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tokio::io::AsyncReadExt;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tokio::process::Command;
 
 #[derive(Debug, Clone, Serialize)]
@@ -28,7 +28,7 @@ const THRESHOLD_MIN: f64 = 10.0;
 const THRESHOLD_MAX: f64 = 60.0;
 
 /// RGB→Rec.709 亮度（与参考算法 video-to-ppt 一致）。
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn luminance_frame(rgb: &[u8]) -> Vec<u8> {
     rgb.chunks_exact(3)
         .map(|p| {
@@ -67,7 +67,7 @@ fn median(mut values: Vec<f64>) -> f64 {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn short_stderr(stderr: &[u8]) -> String {
     let text = String::from_utf8_lossy(stderr);
     let lines: Vec<&str> = text.lines().rev().take(12).collect();
@@ -75,7 +75,7 @@ fn short_stderr(stderr: &[u8]) -> String {
 }
 
 /// 让 ffmpeg 把视频降采样成一串小灰度帧（rgb24 原始流走管道），逐帧读出亮度，避免落地大文件。
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 async fn sample_luma_frames(video: &Path) -> AppResult<Vec<Vec<u8>>> {
     let ffmpeg = resolve(&FFMPEG, None)?;
     let mut child = Command::new(&ffmpeg)
@@ -206,7 +206,20 @@ async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> 
     .map_err(AppError::Pipeline)
 }
 
-#[cfg(not(target_os = "android"))]
+/// iOS：用原生 AVAssetImageGenerator 截一帧落地 JPEG（无 ffmpeg）。
+#[cfg(target_os = "ios")]
+async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> {
+    crate::mobile_files::export_frame_jpeg(
+        video.to_string_lossy().to_string(),
+        at_ms,
+        out.to_string_lossy().to_string(),
+    )
+    .await
+    .map(|_| ())
+    .map_err(AppError::Pipeline)
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> {
     let seconds = at_ms as f64 / 1000.0;
     let ffmpeg = resolve(&FFMPEG, None)?;
@@ -275,7 +288,7 @@ pub async fn extract_slides(
 
 /// 抽课件页：降采样灰度帧 → 亮度 RMS 差 + 动态阈值找换页点 → 为每页截一张全分辨率图。
 /// `threshold_override` 给定时直接用作亮度阈值（0~255 量纲），否则按视频内容自适应。
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn extract_slides(
     video: &Path,
     out_dir: &Path,
@@ -314,6 +327,15 @@ pub async fn extract_slides(
     Ok(out)
 }
 
+#[cfg(target_os = "ios")]
+pub async fn extract_slides(
+    _video: &Path,
+    _out_dir: &Path,
+    _threshold_override: Option<f64>,
+) -> AppResult<Vec<SlideFrame>> {
+    Err(AppError::Config("移动端暂不支持课件自动抽取".into()))
+}
+
 pub async fn store_slides(db: &Db, video_id: &str, frames: &[SlideFrame]) -> AppResult<usize> {
     sqlx::query("DELETE FROM slides WHERE video_id=?")
         .bind(video_id)
@@ -350,12 +372,22 @@ pub async fn ensure_cover(video: &Path, data_dir: &Path) -> AppResult<PathBuf> {
 }
 
 /// 在 at_ms 处截一帧到 screenshots/，返回落地路径。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn capture_frame(video: &Path, out_dir: &Path, at_ms: i64) -> AppResult<PathBuf> {
     let shots_dir = out_dir.join("screenshots");
     std::fs::create_dir_all(&shots_dir)?;
     let out = shots_dir.join(format!("{at_ms}.jpg"));
     capture_jpeg_at(video, &out, at_ms).await?;
     Ok(out)
+}
+
+#[cfg(target_os = "ios")]
+pub async fn capture_frame(
+    _video: &Path,
+    _out_dir: &Path,
+    _at_ms: i64,
+) -> AppResult<PathBuf> {
+    Err(AppError::Config("移动端暂不支持课件截图".into()))
 }
 
 #[cfg(test)]

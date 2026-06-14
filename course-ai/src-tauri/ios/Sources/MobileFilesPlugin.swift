@@ -2,12 +2,19 @@ import AVFoundation
 import Foundation
 import SwiftRs
 import Tauri
+import UIKit
 import WebKit
 
 struct ExportAudioForAsrArgs: Decodable {
   let sourcePath: String
   let outDir: String
   let preferredFormat: String
+}
+
+struct ExportFrameJpegArgs: Decodable {
+  let sourcePath: String
+  let atMs: Int64
+  let outPath: String
 }
 
 final class MobileFilesPlugin: Plugin {
@@ -25,9 +32,54 @@ final class MobileFilesPlugin: Plugin {
           "format": result.format,
         ])
       } catch {
-        invoke.reject(error.localizedDescription)
+        if let nsError = error as NSError? {
+          invoke.reject("\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)")
+        } else {
+          invoke.reject(error.localizedDescription)
+        }
       }
     }
+  }
+
+  // 视频首帧/封面：桌面端用 ffmpeg，iOS 改用原生 AVAssetImageGenerator 截一帧落地 JPEG。
+  @objc public func exportFrameJpeg(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(ExportFrameJpegArgs.self)
+    workQueue.async {
+      do {
+        try self.exportFrameJpeg(args)
+        invoke.resolve(["path": args.outPath])
+      } catch {
+        if let nsError = error as NSError? {
+          invoke.reject("\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)")
+        } else {
+          invoke.reject(error.localizedDescription)
+        }
+      }
+    }
+  }
+
+  private func exportFrameJpeg(_ args: ExportFrameJpegArgs) throws {
+    let source = URL(fileURLWithPath: args.sourcePath)
+    let output = URL(fileURLWithPath: args.outPath)
+    try FileManager.default.createDirectory(
+      at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
+    if FileManager.default.fileExists(atPath: output.path) {
+      try FileManager.default.removeItem(at: output)
+    }
+
+    let asset = AVURLAsset(url: source)
+    let generator = AVAssetImageGenerator(asset: asset)
+    generator.appliesPreferredTrackTransform = true
+    // 封面不要求精确时间；放宽容差到 ±1s，避免关键帧稀疏时取帧失败。
+    generator.requestedTimeToleranceBefore = CMTime(seconds: 1, preferredTimescale: 600)
+    generator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
+
+    let time = CMTime(value: CMTimeValue(max(0, args.atMs)), timescale: 1000)
+    let cgImage = try generator.copyCGImage(at: time, actualTime: nil)
+    guard let data = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.8) else {
+      throw MobileFilesError.cannotWriteImage
+    }
+    try data.write(to: output)
   }
 
   private func exportAudioForAsr(_ args: ExportAudioForAsrArgs) throws -> (path: String, mime: String, format: String) {
@@ -168,6 +220,7 @@ enum MobileFilesError: LocalizedError {
   case noAudioTrack
   case cannotReadAudio
   case cannotWriteAudio
+  case cannotWriteImage
 
   var errorDescription: String? {
     switch self {
@@ -179,6 +232,8 @@ enum MobileFilesError: LocalizedError {
       return "Failed to decode audio track"
     case .cannotWriteAudio:
       return "Failed to write WAV audio"
+    case .cannotWriteImage:
+      return "Failed to encode cover image"
     }
   }
 }
