@@ -1082,6 +1082,9 @@
         }
       }
     </style>
+    <!-- GSAP(免费):仅作增强层,CDN 不可用时页面照常完整显示 -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/ScrollTrigger.min.js" defer></script>
   </head>
 
   <body>
@@ -1688,7 +1691,16 @@
         pointerFineQuery.addListener(clearMotionValues);
       }
 
-      enableMotion();
+      function bootstrap() {
+        if (window.__cpBooted) return;
+        window.__cpBooted = true;
+        enableMotion();
+      }
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", bootstrap);
+      } else {
+        bootstrap();
+      }
     </script>
   </body>
 </html>

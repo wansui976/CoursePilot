@@ -22,6 +22,9 @@ required_text = [
     "promo-hero.png",
     "promo-workbench.png",
     "og-image.png",
+    "gsap@3.13",
+    "ScrollTrigger.min.js",
+    "DOMContentLoaded",
 ]
 
 missing = [text for text in required_text if text not in html]
