@@ -38,7 +38,6 @@ export function VideoPlayer({
   const setCurrentMs = usePlayer((s) => s.setCurrentMs);
   const setDurationMs = usePlayer((s) => s.setDurationMs);
   const currentMs = usePlayer((s) => s.currentMs);
-  const durationMs = usePlayer((s) => s.durationMs);
   const seekRequest = usePlayer((s) => s.seekRequest);
 
   const { data: segments = [] } = useQuery({
@@ -377,8 +376,6 @@ export function VideoPlayer({
       >
         <Controls
           playing={playing}
-          currentMs={currentMs}
-          durationMs={durationMs}
           rate={rate}
           volume={volume}
           muted={muted}
