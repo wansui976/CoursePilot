@@ -27,6 +27,9 @@ required_text = [
     "DOMContentLoaded",
     "class=\"aurora\"",
     "auroraDrift",
+    "coursepilot-intro-played",
+    "playHeroIntro",
+    "hero-word",
 ]
 
 missing = [text for text in required_text if text not in html]

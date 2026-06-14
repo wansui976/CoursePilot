@@ -112,6 +112,13 @@
         transform: translate3d(0, 0, 0) scale(1);
         filter: blur(0);
       }
+      html.intro-active [data-hero-section] [data-animate] {
+        transition: none !important;
+      }
+      .hero-word {
+        display: inline-block;
+        will-change: opacity, transform, filter;
+      }
       html.motion-ready [data-animate="hero"] {
         transform: translate3d(0, 42px, 0) scale(0.985);
       }
@@ -1581,6 +1588,77 @@
     <script>
       document.getElementById("year").textContent = new Date().getFullYear();
 
+      const INTRO_KEY = "coursepilot-intro-played";
+      const heroSection = document.querySelector("[data-hero-section]");
+      const heroItems = heroSection
+        ? Array.from(heroSection.querySelectorAll("[data-animate]"))
+        : [];
+
+      function hasGSAP() {
+        return typeof window.gsap !== "undefined";
+      }
+
+      function splitHeadline() {
+        const h1 = heroSection && heroSection.querySelector("h1.hero-display");
+        if (!h1 || h1.dataset.split === "1") return [];
+        h1.dataset.split = "1";
+        const words = [];
+        h1.childNodes.forEach((node) => {
+          if (node.nodeType === Node.TEXT_NODE) {
+            const frag = document.createDocumentFragment();
+            node.textContent.split(/(\s+)/).forEach((part) => {
+              if (part.trim() === "") {
+                frag.appendChild(document.createTextNode(part));
+              } else {
+                const span = document.createElement("span");
+                span.className = "hero-word";
+                span.textContent = part;
+                frag.appendChild(span);
+                words.push(span);
+              }
+            });
+            h1.replaceChild(frag, node);
+          }
+          // <br> 等元素节点原样保留
+        });
+        return words;
+      }
+
+      function playHeroIntro() {
+        const tl = window.gsap.timeline({
+          defaults: { ease: "power3.out" },
+          onComplete: () => {
+            document.documentElement.classList.remove("intro-active");
+            heroItems.forEach((el) => {
+              el.classList.add("is-visible");
+              window.gsap.set(el, { clearProps: "opacity,transform,filter" });
+            });
+            window.gsap.set(".hero-word", { clearProps: "opacity,transform,filter" });
+            const shot = heroSection.querySelector(".product-shot");
+            if (shot) shot.classList.add("is-visible");
+          },
+        });
+
+        const words = splitHeadline();
+        const eyebrow = heroSection.querySelector(".eyebrow");
+        const lead = heroSection.querySelector(".lead");
+        const cta = heroSection.querySelector(".cta-row");
+        const caption = heroSection.querySelector(".caption");
+        const shot = heroSection.querySelector(".product-shot");
+
+        document.documentElement.classList.add("intro-active");
+        document.querySelectorAll(".aurora").forEach((el) => el.classList.add("is-lit"));
+
+        if (eyebrow) tl.fromTo(eyebrow, { opacity: 0, y: 18, filter: "blur(8px)" }, { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.6 }, 0.05);
+        if (words.length) tl.fromTo(words, { opacity: 0, y: 30, filter: "blur(10px)" }, { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.7, stagger: 0.08 }, 0.15);
+        if (lead) tl.fromTo(lead, { opacity: 0, y: 22, filter: "blur(8px)" }, { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.6 }, "-=0.35");
+        if (cta) tl.fromTo(cta, { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.5 }, "-=0.35");
+        if (caption) tl.fromTo(caption, { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.45 }, "-=0.3");
+        if (shot) tl.fromTo(shot, { opacity: 0, y: 90, scale: 0.82, filter: "blur(14px)" }, { opacity: 1, y: 0, scale: 1, filter: "blur(0px)", duration: 1.0, onComplete: () => shot.classList.add("is-visible") }, "-=0.45");
+
+        return tl;
+      }
+
       const reducedMotionQuery = matchMedia("(prefers-reduced-motion: reduce)");
       const animatedItems = Array.from(document.querySelectorAll("[data-animate]"));
       const parallaxItems = Array.from(document.querySelectorAll("[data-parallax]"));
@@ -1672,14 +1750,7 @@
         item.addEventListener("pointerleave", resetProductPointer);
       });
 
-      function enableMotion() {
-        if (reducedMotionQuery.matches) {
-          revealImmediately();
-          updateNavState();
-          return;
-        }
-
-        document.documentElement.classList.add("motion-ready");
+      function observeReveals(items) {
         const observer = new IntersectionObserver(
           (entries) => {
             entries.forEach((entry) => {
@@ -1691,8 +1762,38 @@
           },
           { rootMargin: "0px 0px -12% 0px", threshold: 0.12 }
         );
+        items.forEach((item) => observer.observe(item));
+      }
 
-        animatedItems.forEach((item) => observer.observe(item));
+      function enableMotion() {
+        if (reducedMotionQuery.matches) {
+          revealImmediately();
+          updateNavState();
+          return;
+        }
+
+        document.documentElement.classList.add("motion-ready");
+
+        const heroSet = new Set(heroItems);
+        const restItems = animatedItems.filter((el) => !heroSet.has(el));
+        const introPlayed = sessionStorage.getItem(INTRO_KEY) === "1";
+
+        if (hasGSAP() && heroSection && !introPlayed) {
+          playHeroIntro();
+          try {
+            sessionStorage.setItem(INTRO_KEY, "1");
+          } catch (e) {
+            /* 隐私模式下 sessionStorage 不可用,忽略 */
+          }
+          observeReveals(restItems);
+        } else {
+          heroItems.forEach((el) => el.classList.add("is-visible"));
+          document.querySelectorAll(".aurora").forEach((el) => el.classList.add("is-lit"));
+          const shot = heroSection && heroSection.querySelector(".product-shot");
+          if (shot) shot.classList.add("is-visible");
+          observeReveals(restItems);
+        }
+
         updateNavState();
         requestStageUpdate();
       }
