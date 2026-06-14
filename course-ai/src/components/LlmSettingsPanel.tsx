@@ -14,7 +14,7 @@ const DEFAULT_BASE: Record<ProviderKind, string> = {
 };
 
 const FIELD =
-  "w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] outline-none transition placeholder:text-[var(--text-faint)] focus:border-[var(--accent-text)] focus:ring-2 focus:ring-[var(--accent-text)]/25";
+  "w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] outline-none transition placeholder:text-[var(--text-faint)]";
 
 // 当前默认模型用 routing 实现：把所有任务都路由到选中的 profile。
 const ROUTING_TASKS = [

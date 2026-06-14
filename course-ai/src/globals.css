@@ -168,6 +168,17 @@ button {
   border-radius: 6px;
 }
 
+/* 表单控件统一聚焦态：柔和主色描边 + 细 ring,替代各处不一致的 focus 写法;
+   也兜底那些只写了 outline-none、本来键盘聚焦时看不到焦点的输入框(a11y)。
+   优先于上面的通用焦点环（同样未分层但选择器更贴合 input）。 */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+  border-color: var(--accent-text);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-text) 25%, transparent);
+}
+
 /* UI 重构 reference shell: scoped class names mirror the files in ../UI 重构. */
 .ca-app {
   --accent: #2f6cea;

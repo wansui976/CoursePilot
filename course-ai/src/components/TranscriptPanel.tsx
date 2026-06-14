@@ -108,7 +108,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
                     if (e.key === "Escape") setEditingId(null);
                   }}
-                  className="w-full resize-y rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)] outline-none focus:border-[var(--accent-text)]"
+                  className="w-full resize-y rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)] outline-none"
                   rows={2}
                 />
                 <div className="mt-1 flex items-center gap-2 text-xs">
