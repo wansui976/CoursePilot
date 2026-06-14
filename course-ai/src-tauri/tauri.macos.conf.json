@@ -1,6 +1,6 @@
 {
   "bundle": {
-    "externalBin": ["binaries/yt-dlp"],
+    "externalBin": ["binaries/ffmpeg", "binaries/yt-dlp"],
     "macOS": {
       "hardenedRuntime": false
     }

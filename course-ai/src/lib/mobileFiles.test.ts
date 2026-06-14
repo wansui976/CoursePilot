@@ -62,6 +62,57 @@ describe("persistPickedFile", () => {
     expect(mkdirMock).not.toHaveBeenCalled();
     expect(copyFileMock).not.toHaveBeenCalled();
   });
+
+  it("copies picked files into app data on iOS", async () => {
+    vi.stubGlobal("navigator", { userAgent: "iPhone" });
+    appDataDirMock.mockResolvedValue("/private/var/mobile/Containers/Data/Application/APP");
+    joinMock.mockImplementation(async (...parts: string[]) => parts.join("/"));
+    copyFileMock.mockResolvedValue(undefined);
+    mkdirMock.mockResolvedValue(undefined);
+
+    const { persistPickedFile } = await import("./mobileFiles");
+    const result = await persistPickedFile(
+      "/private/var/mobile/Containers/Shared/AppGroup/file.mov",
+      "videos",
+      "clip.mov",
+    );
+
+    expect(result).toBe("/private/var/mobile/Containers/Data/Application/APP/videos/clip.mov");
+    expect(copyFileMock).toHaveBeenCalledWith(
+      "/private/var/mobile/Containers/Shared/AppGroup/file.mov",
+      "/private/var/mobile/Containers/Data/Application/APP/videos/clip.mov",
+    );
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("mobileCategoryDir", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    appDataDirMock.mockReset();
+    joinMock.mockReset();
+    mkdirMock.mockReset();
+    appDataDirMock.mockResolvedValue("/data/user/0/dev.courseai.app.debug");
+    joinMock.mockImplementation(async (...parts: string[]) => parts.join("/"));
+    mkdirMock.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("creates a category directory inside app data on iOS", async () => {
+    vi.stubGlobal("navigator", { userAgent: "iPhone" });
+
+    const { mobileCategoryDir } = await import("./mobileFiles");
+    const result = await mobileCategoryDir("videos");
+
+    expect(result).toBe("/data/user/0/dev.courseai.app.debug/videos");
+    expect(mkdirMock).toHaveBeenCalledWith(
+      "/data/user/0/dev.courseai.app.debug/videos",
+      { recursive: true },
+    );
+  });
 });
 
 describe("pickDirectoryPath", () => {
@@ -97,6 +148,39 @@ describe("pickDirectoryPath", () => {
     expect(invokeMock).not.toHaveBeenCalledWith(
       "plugin:mobile-files|resolve_picked_directory",
       expect.anything(),
+    );
+  });
+
+  it("uses an app-data directory on iOS without opening a picker", async () => {
+    vi.stubGlobal("navigator", { userAgent: "iPhone" });
+
+    const { pickDirectoryPath } = await import("./mobileFiles");
+    const result = await pickDirectoryPath(["courses", "新课程"]);
+
+    expect(result).toBe("/data/user/0/dev.courseai.app.debug/courses/新课程");
+    expect(openMock).not.toHaveBeenCalled();
+    expect(mkdirMock).toHaveBeenCalledWith(
+      "/data/user/0/dev.courseai.app.debug/courses/新课程",
+      { recursive: true },
+    );
+  });
+
+  it("uses an app-data directory on iPadOS desktop-class user agents", async () => {
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+      platform: "MacIntel",
+      maxTouchPoints: 5,
+    });
+
+    const { pickDirectoryPath } = await import("./mobileFiles");
+    const result = await pickDirectoryPath(["courses", "新课程"]);
+
+    expect(result).toBe("/data/user/0/dev.courseai.app.debug/courses/新课程");
+    expect(openMock).not.toHaveBeenCalled();
+    expect(mkdirMock).toHaveBeenCalledWith(
+      "/data/user/0/dev.courseai.app.debug/courses/新课程",
+      { recursive: true },
     );
   });
 });

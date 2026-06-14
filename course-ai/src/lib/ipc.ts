@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ChatMessage,
   Chapter,
   Citation,
   Course,
@@ -110,8 +111,11 @@ export const ipc = {
       invoke("cmd_get_quiz", { videoId }),
     getMindmap: (videoId: string): Promise<string | null> =>
       invoke("cmd_get_mindmap", { videoId }),
-    ragQuery: (videoId: string, query: string): Promise<RagAnswer> =>
-      invoke("cmd_rag_query", { videoId, query }),
+    ragQuery: (
+      videoId: string,
+      query: string,
+      history: ChatMessage[] = [],
+    ): Promise<RagAnswer> => invoke("cmd_rag_query", { videoId, query, history }),
     searchTranscript: (videoId: string, query: string): Promise<Citation[]> =>
       invoke("cmd_search_transcript", { videoId, query }),
   },

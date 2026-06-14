@@ -3,6 +3,7 @@ import {
   ClipboardList,
   FolderOpen,
   Library,
+  Loader2,
   MoreHorizontal,
   Moon,
   Pencil,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { ErrorNote } from "@/components/ui/ErrorNote";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 import { pickDirectoryPath } from "@/lib/mobileFiles";
@@ -61,19 +63,12 @@ export function CourseSidebar({
     queryKey: ["courses"],
     queryFn: ipc.courses.list,
   });
-  const create = useMutation({
-    mutationFn: async () => {
-      const name = nextCourseName(courses);
-      const dir = await pickDirectoryPath(["courses", name]);
-      if (!dir) return null;
-      return ipc.courses.create(name, dir);
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["courses"] }),
-  });
 
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [creatingCourse, setCreatingCourse] = useState(false);
+  const [createError, setCreateError] = useState<Error | null>(null);
 
   function closeMenu() {
     setMenuFor(null);
@@ -112,6 +107,23 @@ export function CourseSidebar({
       { title: "删除课程", kind: "warning", okLabel: "删除", cancelLabel: "取消" },
     );
     if (ok) remove.mutate(id);
+  }
+
+  async function handleCreateCourse() {
+    if (creatingCourse) return;
+    const name = nextCourseName(courses);
+    try {
+      setCreateError(null);
+      setCreatingCourse(true);
+      const dir = await pickDirectoryPath(["courses", name]);
+      if (!dir) return;
+      await ipc.courses.create(name, dir);
+      await queryClient.invalidateQueries({ queryKey: ["courses"] });
+    } catch (error) {
+      setCreateError(error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      setCreatingCourse(false);
+    }
   }
 
   return (
@@ -157,11 +169,17 @@ export function CourseSidebar({
           className="ca-new-btn"
           size="sm"
           variant="outline"
-          onClick={() => create.mutate()}
+          disabled={creatingCourse}
+          onClick={() => void handleCreateCourse()}
         >
-          <Plus className="h-4 w-4" />
-          新建课程
+          {creatingCourse ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Plus className="h-4 w-4" />
+          )}
+          {creatingCourse ? "创建中" : "新建课程"}
         </Button>
+        {createError && <ErrorNote className="mt-2" error={createError} />}
         {onToggleQueue && (
           <Button
             aria-label="处理队列"
@@ -225,7 +243,7 @@ export function CourseSidebar({
                   e.stopPropagation();
                   setMenuFor((id) => (id === course.id ? null : course.id));
                 }}
-                className={`mr-1 grid h-7 w-7 flex-none place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card)] hover:text-[var(--text-strong)] ${
+                className={`ca-touch-44 mr-1 grid h-7 w-7 flex-none place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card)] hover:text-[var(--text-strong)] ${
                   menuFor === course.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                 }`}
               >
@@ -235,14 +253,14 @@ export function CourseSidebar({
                 <div className="absolute right-1 top-full z-20 mt-1 w-36 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 shadow-[var(--shadow-pop)]">
                   <button
                     onClick={() => startRename(course.id, course.name)}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
+                    className="ca-touch-44 flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
                   >
                     <Pencil className="h-3.5 w-3.5" />
                     重命名
                   </button>
                   <button
                     onClick={() => void confirmDelete(course.id, course.name)}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-500 hover:bg-[var(--surface-card-hover)]"
+                    className="ca-touch-44 flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-500 hover:bg-[var(--surface-card-hover)]"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     删除

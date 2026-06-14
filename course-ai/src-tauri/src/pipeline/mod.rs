@@ -33,6 +33,12 @@ enum TranscriptCorrectionOutcome {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VolcengineUploadMode {
+    WholeFile,
+    Chunked,
+}
+
 fn asr_done_message(count: usize, outcome: TranscriptCorrectionOutcome) -> String {
     match outcome {
         TranscriptCorrectionOutcome::Applied => format!("{count} segments"),
@@ -57,22 +63,35 @@ fn split_terms(raw: &str) -> Vec<String> {
 }
 
 fn asr_backend_or_default(value: Option<String>) -> AsrBackend {
+    asr_backend_for_os(value, std::env::consts::OS)
+}
+
+fn asr_backend_for_os(value: Option<String>, os: &str) -> AsrBackend {
     match value.as_deref().map(str::trim) {
         Some("volcengine") => AsrBackend::Volcengine,
         Some("aliyun") => AsrBackend::Aliyun,
-        _ => default_asr_backend(),
+        Some("whisper") if !is_mobile_os(os) => AsrBackend::Whisper,
+        _ => default_asr_backend_for_os(os),
     }
 }
 
-fn default_asr_backend() -> AsrBackend {
-    default_asr_backend_for_os(std::env::consts::OS)
-}
-
 fn default_asr_backend_for_os(os: &str) -> AsrBackend {
-    if os == "android" {
+    if is_mobile_os(os) {
         AsrBackend::Aliyun
     } else {
         AsrBackend::Whisper
+    }
+}
+
+fn is_mobile_os(os: &str) -> bool {
+    os == "android" || os == "ios"
+}
+
+fn volcengine_upload_mode_for_os(os: &str) -> VolcengineUploadMode {
+    if is_mobile_os(os) {
+        VolcengineUploadMode::WholeFile
+    } else {
+        VolcengineUploadMode::Chunked
     }
 }
 
@@ -139,6 +158,35 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
         .find(|job| job.stage == "audio")
         .ok_or_else(|| AppError::Pipeline("missing audio job".into()))?
         .clone();
+    let asr_job = jobs_list
+        .iter()
+        .find(|job| job.stage == "asr")
+        .ok_or_else(|| AppError::Pipeline("missing asr job".into()))?
+        .clone();
+
+    // 断点续跑：若「识别」已完成（字幕已落库），跳过抽音频 + 识别，直接续跑 AI 步骤。
+    if asr_job.status == "done" {
+        sqlx::query("UPDATE videos SET processed_status='done' WHERE id=?")
+            .bind(&video_id)
+            .execute(&db.pool)
+            .await?;
+        for done_job in [&audio_job, &asr_job] {
+            emit_update(
+                &app,
+                JobEvent {
+                    video_id: video_id.clone(),
+                    job_id: done_job.id.clone(),
+                    stage: done_job.stage.clone(),
+                    status: "done".into(),
+                    progress: 1.0,
+                    message: None,
+                },
+            );
+        }
+        run_ai_followups(&app, &db, &video_id, &jobs_list).await;
+        return Ok(());
+    }
+
     jobs::start(&db, &audio_job.id).await?;
     emit_update(
         &app,
@@ -194,11 +242,6 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
         }
     };
 
-    let asr_job = jobs_list
-        .iter()
-        .find(|job| job.stage == "asr")
-        .ok_or_else(|| AppError::Pipeline("missing asr job".into()))?
-        .clone();
     jobs::start(&db, &asr_job.id).await?;
     emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.05, "准备识别引擎").await?;
 
@@ -328,49 +371,47 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
             );
             let context = volcengine_auc::build_context_json(&hotwords, &context_lines);
 
-            // Android 没有可用的 ffmpeg 来切片，整段直传原生导出的音频（format 如实标注）；
-            // 桌面端走 ffmpeg 分段并行上传更快、也避免长音频 WAV base64 触发 413。
-            #[cfg(target_os = "android")]
-            {
-                let _ = (chunk_secs, concurrency);
-                emit_running_progress(
-                    &app,
-                    &db,
-                    &video_id,
-                    &asr_job.id,
-                    0.28,
-                    "云端识别中（火山引擎）",
-                )
-                .await?;
-                volcengine_auc::run_volcengine_file(
-                    &audio_path,
-                    &app_id,
-                    &access_token,
-                    context.as_deref(),
-                    &prepared_audio.format,
-                )
-                .await
-            }
-            #[cfg(not(target_os = "android"))]
-            {
-                emit_running_progress(
-                    &app,
-                    &db,
-                    &video_id,
-                    &asr_job.id,
-                    0.28,
-                    "云端分段识别中（火山引擎）",
-                )
-                .await?;
-                volcengine_auc::run_volcengine_file_chunked(
-                    &audio_path,
-                    &app_id,
-                    &access_token,
-                    chunk_secs,
-                    concurrency,
-                    context,
-                )
-                .await
+            match volcengine_upload_mode_for_os(std::env::consts::OS) {
+                VolcengineUploadMode::WholeFile => {
+                    let _ = (chunk_secs, concurrency);
+                    emit_running_progress(
+                        &app,
+                        &db,
+                        &video_id,
+                        &asr_job.id,
+                        0.28,
+                        "云端识别中（火山引擎）",
+                    )
+                    .await?;
+                    volcengine_auc::run_volcengine_file(
+                        &audio_path,
+                        &app_id,
+                        &access_token,
+                        context.as_deref(),
+                        &prepared_audio.format,
+                    )
+                    .await
+                }
+                VolcengineUploadMode::Chunked => {
+                    emit_running_progress(
+                        &app,
+                        &db,
+                        &video_id,
+                        &asr_job.id,
+                        0.28,
+                        "云端分段识别中（火山引擎）",
+                    )
+                    .await?;
+                    volcengine_auc::run_volcengine_file_chunked(
+                        &audio_path,
+                        &app_id,
+                        &access_token,
+                        chunk_secs,
+                        concurrency,
+                        context,
+                    )
+                    .await
+                }
             }
         }
         AsrBackend::Aliyun => {
@@ -507,6 +548,11 @@ async fn run_ai_followups(
         let Some(job) = jobs_list.iter().find(|j| j.stage == stage) else {
             continue;
         };
+        // 断点续跑：该步骤已完成则跳过，不重复调用大模型（也避免重复写库）。
+        if job.status == "done" {
+            emit_stage(app, video_id, &job.id, stage, "done", 1.0, None);
+            continue;
+        }
         let _ = jobs::start(db, &job.id).await;
         emit_stage(
             app,
@@ -838,7 +884,40 @@ mod tests {
     #[test]
     fn android_asr_backend_defaults_to_aliyun() {
         assert_eq!(default_asr_backend_for_os("android"), AsrBackend::Aliyun);
+        assert_eq!(default_asr_backend_for_os("ios"), AsrBackend::Aliyun);
         assert_eq!(default_asr_backend_for_os("macos"), AsrBackend::Whisper);
+    }
+
+    #[test]
+    fn mobile_accepts_volcengine_cloud_asr_selection() {
+        assert_eq!(
+            asr_backend_for_os(Some("volcengine".into()), "ios"),
+            AsrBackend::Volcengine
+        );
+        assert_eq!(
+            asr_backend_for_os(Some("volcengine".into()), "android"),
+            AsrBackend::Volcengine
+        );
+        assert_eq!(
+            asr_backend_for_os(Some("whisper".into()), "ios"),
+            AsrBackend::Aliyun
+        );
+    }
+
+    #[test]
+    fn mobile_uses_whole_file_for_volcengine_upload() {
+        assert_eq!(
+            volcengine_upload_mode_for_os("ios"),
+            VolcengineUploadMode::WholeFile
+        );
+        assert_eq!(
+            volcengine_upload_mode_for_os("android"),
+            VolcengineUploadMode::WholeFile
+        );
+        assert_eq!(
+            volcengine_upload_mode_for_os("macos"),
+            VolcengineUploadMode::Chunked
+        );
     }
 
     #[test]

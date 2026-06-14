@@ -18,6 +18,17 @@ describe("ASR defaults", () => {
     expect(asrBackendOrDefault(null)).toBe("aliyun");
   });
 
+  it("defaults iOS to Aliyun cloud ASR but preserves Volcengine", async () => {
+    vi.stubGlobal("navigator", { userAgent: "iPhone" });
+
+    const { asrBackendOrDefault, defaultAsrBackend } = await import("./asrDefaults");
+
+    expect(defaultAsrBackend()).toBe("aliyun");
+    expect(asrBackendOrDefault(undefined)).toBe("aliyun");
+    expect(asrBackendOrDefault("volcengine")).toBe("volcengine");
+    expect(asrBackendOrDefault("whisper")).toBe("aliyun");
+  });
+
   it("keeps desktop default on local Whisper", async () => {
     vi.stubGlobal("navigator", { userAgent: "Macintosh" });
 

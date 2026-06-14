@@ -4,7 +4,7 @@ import { ExportMenu, type ExportItem } from "./ExportMenu";
 /** 面板右下角悬浮的图标操作（重新生成 / 导出）。内容由流水线自动生成，
  *  这些按钮只是给需要手动重跑或导出的用户用，做成纯图标贴边放置，避免抢占内容区。 */
 export const panelActionButtonClass =
-  "grid h-8 w-8 place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)]/90 text-[var(--text-muted)] shadow-sm backdrop-blur transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] disabled:cursor-not-allowed disabled:opacity-40";
+  "ca-touch-44 grid h-8 w-8 place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)]/90 text-[var(--text-muted)] shadow-sm backdrop-blur transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] disabled:cursor-not-allowed disabled:opacity-40";
 
 export function PanelActions({
   onRegenerate,

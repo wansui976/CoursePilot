@@ -1,9 +1,16 @@
-import { isAndroid } from "./mobileFiles";
+import { isMobile } from "./platform";
 
 export function defaultAsrBackend() {
-  return isAndroid ? "aliyun" : "whisper";
+  return isMobile() ? "aliyun" : "whisper";
+}
+
+export function normalizeAsrBackend(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (trimmed === "aliyun" || trimmed === "volcengine") return trimmed;
+  if (!isMobile() && trimmed === "whisper") return trimmed;
+  return defaultAsrBackend();
 }
 
 export function asrBackendOrDefault(value: string | null | undefined) {
-  return value?.trim() || defaultAsrBackend();
+  return normalizeAsrBackend(value);
 }

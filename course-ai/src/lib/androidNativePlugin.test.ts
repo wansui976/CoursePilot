@@ -6,6 +6,10 @@ const pluginSourcePath = join(
   process.cwd(),
   "src-tauri/gen/android/app/src/main/java/dev/courseai/mobilefiles/MobileFilesPlugin.kt",
 );
+const iosPluginSourcePath = join(
+  process.cwd(),
+  "src-tauri/ios/Sources/MobileFilesPlugin.swift",
+);
 
 function commandBody(source: string, commandName: string) {
   const start = source.indexOf(`fun ${commandName}(invoke: Invoke)`);
@@ -69,6 +73,25 @@ describe("Android native plugin threading", () => {
 
     expect(source).toContain("#[cfg(target_os = \"android\")]");
     expect(source).toContain("slides::capture_frame");
-    expect(source).toContain("移动端本地 Tesseract OCR 不可用");
+    expect(source).toContain("移动端 OCR 暂不可用");
+  });
+});
+
+describe("iOS native plugin audio export", () => {
+  it("writes WAV samples on a separate queue to avoid blocking the export queue", () => {
+    const source = readFileSync(iosPluginSourcePath, "utf8");
+
+    expect(source).toContain("audioWriterQueue");
+    expect(source).toContain("requestMediaDataWhenReady(on: audioWriterQueue)");
+    expect(source).not.toContain("requestMediaDataWhenReady(on: workQueue)");
+  });
+
+  it("exports ASR WAV as 16 kHz mono PCM", () => {
+    const source = readFileSync(iosPluginSourcePath, "utf8");
+
+    expect(source).toContain("AVSampleRateKey: 16000");
+    expect(source).toContain("AVNumberOfChannelsKey: 1");
+    expect(source).toContain("audio/wav");
+    expect(source).toContain("\"format\": result.format");
   });
 });

@@ -100,9 +100,9 @@ export function Home() {
   const themeToggleLabel = isLightTheme ? "切换到夜晚模式" : "切换到白天模式";
   const tabletDevice = isTablet();
   const portrait = useIsPortrait();
-  // 触控优先：触屏设备竖屏一律走底部 Tab / 上下叠放布局；只有横屏才保留桌面式左右分栏。
+  // 触控优先：iOS/iPad 竖屏一律走底部 Tab / 上下叠放布局；只有横屏才保留桌面式左右分栏。
   // 方向必须单独判断:12.9" iPad 竖屏宽 1024 会落入 wide 档,只看 bucket 仍会被当宽屏左右布局。
-  const stackedPortrait = coarsePointer() && portrait;
+  const stackedPortrait = portrait && (tabletDevice || coarsePointer());
   const isWorkbenchWide = bucket === "wide" && !stackedPortrait;
   const tabletWide = tabletDevice && isWorkbenchWide;
   const isPhoneDevice = !isWorkbenchWide;

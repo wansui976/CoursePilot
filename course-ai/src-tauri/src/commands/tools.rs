@@ -1,12 +1,24 @@
 use crate::commands::courses::AppState;
 use crate::commands::settings::get_setting;
 use crate::commands::videos::{add_local_video, Video};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::pipeline::{aliyun_ocr, download, ocr};
 use std::path::{Path, PathBuf};
 use tauri::State;
 
 const DEFAULT_OCR_LANGS: &str = "chi_sim+eng";
+
+fn is_mobile_os(os: &str) -> bool {
+    os == "android" || os == "ios"
+}
+
+fn default_ocr_backend() -> &'static str {
+    if is_mobile_os(std::env::consts::OS) {
+        "aliyun"
+    } else {
+        "tesseract"
+    }
+}
 
 /// 对视频某时刻的（可选）区域做 OCR，返回识别文本。w/h 为 0 表示整帧。
 /// 后端由设置 `ocr_backend` 决定：tesseract（本地，默认）或 aliyun（阿里云统一识别）。
@@ -20,6 +32,11 @@ pub async fn cmd_ocr_region(
     w: i64,
     h: i64,
 ) -> AppResult<String> {
+    if is_mobile_os(std::env::consts::OS) {
+        return Err(AppError::Config(
+            "移动端暂不支持本地 OCR 截字".into(),
+        ));
+    }
     let video: Video = sqlx::query_as("SELECT * FROM videos WHERE id=?")
         .bind(&video_id)
         .fetch_one(&state.db.pool)
@@ -27,7 +44,14 @@ pub async fn cmd_ocr_region(
     let rect = ocr::Rect { x, y, w, h };
     let backend = get_setting(&state.db, "ocr_backend")
         .await?
-        .unwrap_or_else(|| "tesseract".to_string());
+        .filter(|value| {
+            if is_mobile_os(std::env::consts::OS) {
+                value.trim() == "aliyun"
+            } else {
+                true
+            }
+        })
+        .unwrap_or_else(|| default_ocr_backend().to_string());
 
     if backend == "aliyun" {
         let access_key_id = get_setting(&state.db, "aliyun_ocr_access_key_id")
@@ -74,6 +98,11 @@ pub async fn cmd_import_bilibili(
     course_id: String,
     url: String,
 ) -> AppResult<Video> {
+    if is_mobile_os(std::env::consts::OS) {
+        return Err(crate::error::AppError::Config(
+            "移动端暂不支持 B 站 / 网络视频下载，请先在桌面端导入后同步到移动端".into(),
+        ));
+    }
     let root_path: String = sqlx::query_scalar("SELECT root_path FROM courses WHERE id=?")
         .bind(&course_id)
         .fetch_one(&state.db.pool)
