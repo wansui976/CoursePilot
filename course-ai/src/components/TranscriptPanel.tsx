@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Pencil, X } from "lucide-react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { Button } from "@/components/ui/button";
 import { ExportMenu } from "./ExportMenu";
 import { MathText } from "./MathText";
@@ -17,11 +18,18 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     refetchInterval: (query) =>
       query.state.data && query.state.data.length > 0 ? false : 2000,
   });
-  const currentMs = usePlayer((s) => s.currentMs);
   const requestSeek = usePlayer((s) => s.requestSeek);
-  const listRef = useRef<HTMLDivElement>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
+  // 跟随播放的活动行下标。只在「跨段」时更新（见下方订阅），不随每个进度 tick 重渲染。
+  const [activeRowIndex, setActiveRowIndex] = useState(-1);
+
+  // 仅渲染非空分段：空段是纠错清空的语气词，原本也不显示（且无法被点开编辑）。
+  const rows = useMemo(
+    () => segments.filter((segment) => segment.text.trim() !== ""),
+    [segments],
+  );
 
   const update = useMutation({
     mutationFn: ({ id, text }: { id: number; text: string }) =>
@@ -41,29 +49,37 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     update.mutate({ id: editingId, text: draft });
   }
 
-  const activeIdx = segments.findIndex(
-    (segment) => currentMs >= segment.start_ms && currentMs < segment.end_ms,
-  );
-
+  // 跟随播放：订阅进度，只在活动行真正变化时 setState，避免每个 tick 重渲染可见行。
   useEffect(() => {
-    if (activeIdx < 0 || editingId != null) return;
-    const element = listRef.current?.querySelector<HTMLElement>(
-      `[data-idx="${activeIdx}"]`,
-    );
-    element?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [activeIdx, editingId]);
+    const compute = (ms: number) => {
+      const idx = rows.findIndex(
+        (segment) => ms >= segment.start_ms && ms < segment.end_ms,
+      );
+      setActiveRowIndex((prev) => (prev === idx ? prev : idx));
+    };
+    compute(usePlayer.getState().currentMs);
+    return usePlayer.subscribe((state) => compute(state.currentMs));
+  }, [rows]);
 
+  // 活动行变化时滚到列表中部（编辑时不打扰用户）。虚拟列表用 scrollToIndex 而非 DOM 查询。
   useEffect(() => {
-    if (activeIdx >= 0 || !listRef.current) return;
-    listRef.current.scrollTop = readVideoResumeState(videoId).transcriptScrollTop;
-  }, [activeIdx, segments.length, videoId]);
-
-  function rememberTranscriptScroll() {
-    if (!listRef.current) return;
-    writeVideoResumeState(videoId, {
-      transcriptScrollTop: listRef.current.scrollTop,
+    if (activeRowIndex < 0 || editingId != null) return;
+    virtuosoRef.current?.scrollToIndex({
+      index: activeRowIndex,
+      align: "center",
+      behavior: "smooth",
     });
-  }
+  }, [activeRowIndex, editingId]);
+
+  // 滚动位置恢复：记录顶部可见行下标，节流写入，切走 / 换视频时再补一次。
+  const topIndexRef = useRef(readVideoResumeState(videoId).transcriptTopIndex);
+  const saveTimer = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+      writeVideoResumeState(videoId, { transcriptTopIndex: topIndexRef.current });
+    };
+  }, [videoId]);
 
   if (segments.length === 0) {
     return <p className="p-4 text-sm text-[var(--text-muted)]">字幕生成中或尚未开始</p>;
@@ -82,24 +98,35 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
           />
         </div>
       </div>
-      <div
-        ref={listRef}
+      <Virtuoso
+        ref={virtuosoRef}
         aria-label="文稿内容滚动区"
-        className="flex-1 space-y-1 overflow-y-auto p-3"
-        onScroll={rememberTranscriptScroll}
-      >
-        {segments.map((segment, index) => {
+        data={rows}
+        className="min-h-0 flex-1"
+        // 初次挂载时恢复到上次离开的行（夹在有效范围内）。
+        initialTopMostItemIndex={Math.min(
+          topIndexRef.current,
+          Math.max(0, rows.length - 1),
+        )}
+        components={{
+          Header: () => <div className="h-2" />,
+          Footer: () => <div className="h-3" />,
+        }}
+        rangeChanged={(range) => {
+          topIndexRef.current = range.startIndex;
+          if (saveTimer.current) return;
+          saveTimer.current = window.setTimeout(() => {
+            saveTimer.current = undefined;
+            writeVideoResumeState(videoId, {
+              transcriptTopIndex: topIndexRef.current,
+            });
+          }, 400);
+        }}
+        itemContent={(index, segment) => {
           const isEditing = editingId === segment.id;
-          // 被纠错清空的分段（整段语气词，如「哎。」）不显示空行；仍保留在库里
-          // 以维持「重新纠错」所需的行数对齐。正在编辑的行不隐藏。
-          if (!isEditing && !segment.text.trim()) return null;
           if (isEditing) {
             return (
-              <div
-                key={segment.id}
-                data-idx={index}
-                className="ca-transcript-row rounded bg-[var(--surface-card)] p-2"
-              >
+              <div className="ca-transcript-row rounded bg-[var(--surface-card)] mx-3 my-0.5 p-2">
                 <textarea
                   aria-label="编辑文稿"
                   autoFocus
@@ -137,10 +164,8 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
           }
           return (
             <div
-              key={segment.id}
-              data-idx={index}
-              className={`ca-transcript-row group flex items-start gap-1 rounded ${
-                index === activeIdx
+              className={`ca-transcript-row group mx-3 my-0.5 flex items-start gap-1 rounded ${
+                index === activeRowIndex
                   ? "bg-primary/20"
                   : "hover:bg-[var(--surface-card-hover)]"
               }`}
@@ -166,8 +191,8 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
               </button>
             </div>
           );
-        })}
-      </div>
+        }}
+      />
     </div>
   );
 }
