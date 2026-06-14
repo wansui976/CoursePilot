@@ -115,12 +115,12 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
       </div>
 
       {extract.isError && (
-        <p className="flex-none px-3 py-2 text-xs text-red-400">
+        <p className="flex-none px-3 py-2 text-xs text-[var(--status-err)]">
           {String(extract.error)}
         </p>
       )}
       {ocr.isError && (
-        <p className="flex-none px-3 py-2 text-xs text-red-400">{String(ocr.error)}</p>
+        <p className="flex-none px-3 py-2 text-xs text-[var(--status-err)]">{String(ocr.error)}</p>
       )}
       {ocr.data !== undefined && (
         <div className="flex-none border-b border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-xs">

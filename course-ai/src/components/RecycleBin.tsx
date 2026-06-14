@@ -93,7 +93,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
                   </button>
                   <button
                     onClick={() => void confirmPurge(item)}
-                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-red-500 transition hover:bg-[var(--surface-card-hover)]"
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)]"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     彻底删除

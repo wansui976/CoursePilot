@@ -100,7 +100,7 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
                 </Button>
               </div>
               {network.isError && (
-                <p className="mt-1 text-xs text-red-400">{String(network.error)}</p>
+                <p className="mt-1 text-xs text-[var(--status-err)]">{String(network.error)}</p>
               )}
             </div>
           </div>
