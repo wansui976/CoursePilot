@@ -278,7 +278,7 @@ export function VideoPlayer({
       >
         <div
           ref={stageRef}
-          className={`relative overflow-hidden ${fullscreen ? "" : "rounded-[14px]"}`}
+          className={`relative overflow-hidden ${fullscreen ? "" : "rounded-xl"}`}
           style={
             stageBox
               ? { width: stageBox.width, height: stageBox.height }
