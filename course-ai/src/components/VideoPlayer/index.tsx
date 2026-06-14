@@ -32,14 +32,20 @@ export function VideoPlayer({
   const [muted, setMuted] = useState(false);
   const [captionsOn, setCaptionsOn] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
-  // 控制栏可见性：桌面常显；沉浸式（手机）进入时先显示一下、随后自动隐藏，之后点视频切换。
+  // 控制栏可见性：桌面默认收起、悬停视频后展开；沉浸式（手机）进入时先显示一下、
+  // 随后自动隐藏，之后点视频切换。
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [desktopControlsVisible, setDesktopControlsVisible] = useState(false);
   const hideControlsTimer = useRef<number | undefined>(undefined);
+  const desktopHideTimer = useRef<number | undefined>(undefined);
+  // 沉浸式单/双击判定：单击切控制栏、双击左右两侧 ±10s（中间播放/暂停）。
+  const tapRef = useRef<{ t: number; timer?: number }>({ t: 0 });
   const setCurrentMs = usePlayer((s) => s.setCurrentMs);
   const setDurationMs = usePlayer((s) => s.setDurationMs);
-  const currentMs = usePlayer((s) => s.currentMs);
-  const durationMs = usePlayer((s) => s.durationMs);
   const seekRequest = usePlayer((s) => s.seekRequest);
+  // 不在这里订阅 currentMs（否则播放时整个播放器每秒重渲染 4 次）。
+  // 进度由 Controls 自己订阅；字幕只在「跨段」时更新。
+  const [caption, setCaption] = useState<string | undefined>(undefined);
 
   const { data: segments = [] } = useQuery({
     queryKey: ["transcripts", videoId],
@@ -47,14 +53,24 @@ export function VideoPlayer({
     refetchInterval: (query) =>
       query.state.data && query.state.data.length > 0 ? false : 2000,
   });
-  const caption = segments.find(
-    (segment) => currentMs >= segment.start_ms && currentMs < segment.end_ms,
-  )?.text;
 
   // 字幕跳转用：始终持有按 start_ms 排好序的最新分句，供键盘处理器读取（避免闭包过期）。
   const segmentsRef = useRef<typeof segments>([]);
   useEffect(() => {
     segmentsRef.current = [...segments].sort((a, b) => a.start_ms - b.start_ms);
+  }, [segments]);
+
+  // 跟随播放进度更新字幕：订阅播放器 store，但只在字幕文本变化时才 setState，
+  // 避免每个 currentMs tick 都重渲染。
+  useEffect(() => {
+    const compute = (ms: number) => {
+      const text = segmentsRef.current.find(
+        (segment) => ms >= segment.start_ms && ms < segment.end_ms,
+      )?.text;
+      setCaption((prev) => (prev === text ? prev : text));
+    };
+    compute(usePlayer.getState().currentMs);
+    return usePlayer.subscribe((state) => compute(state.currentMs));
   }, [segments]);
 
   useLayoutEffect(() => {
@@ -133,6 +149,9 @@ export function VideoPlayer({
   function clearHideTimer() {
     if (hideControlsTimer.current) window.clearTimeout(hideControlsTimer.current);
   }
+  function clearDesktopHideTimer() {
+    if (desktopHideTimer.current) window.clearTimeout(desktopHideTimer.current);
+  }
   function scheduleHideControls() {
     clearHideTimer();
     if (!immersive) return;
@@ -152,11 +171,60 @@ export function VideoPlayer({
       revealControls();
     }
   }
+  function clearTapTimer() {
+    if (tapRef.current.timer) window.clearTimeout(tapRef.current.timer);
+    tapRef.current = { t: 0 };
+  }
+  // 沉浸式（手机）点视频：区分单/双击。单击延后 240ms 才切控制栏，期间若来第二击则
+  // 判为双击——按落点在视频左/中/右执行 后退10s / 播放暂停 / 前进10s。桌面不走这套。
+  function handleStageTap(event: React.MouseEvent<HTMLDivElement>) {
+    if (!immersive) return;
+    const now = Date.now();
+    const prev = tapRef.current;
+    if (now - prev.t < 240) {
+      if (prev.timer) window.clearTimeout(prev.timer);
+      tapRef.current = { t: 0 };
+      const video = ref.current;
+      if (!video) return;
+      const rect = regionRef.current?.getBoundingClientRect();
+      const zone = rect && rect.width ? (event.clientX - rect.left) / rect.width : 0.5;
+      if (zone < 0.4) {
+        video.currentTime = Math.max(0, video.currentTime - 10);
+        revealControls();
+      } else if (zone > 0.6) {
+        video.currentTime = video.currentTime + 10;
+        revealControls();
+      } else if (video.paused) {
+        void video.play();
+      } else {
+        video.pause();
+      }
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      tapRef.current = { t: 0 };
+      toggleControls();
+    }, 240);
+    tapRef.current = { t: now, timer };
+  }
+  function revealDesktopControls() {
+    if (immersive) return;
+    clearDesktopHideTimer();
+    setDesktopControlsVisible(true);
+  }
+  function scheduleDesktopHideControls() {
+    if (immersive) return;
+    clearDesktopHideTimer();
+    desktopHideTimer.current = window.setTimeout(() => {
+      setDesktopControlsVisible(false);
+    }, 80);
+  }
 
   useEffect(() => {
     if (!immersive) {
-      setControlsVisible(true);
+      setDesktopControlsVisible(false);
       clearHideTimer();
+      clearDesktopHideTimer();
       return;
     }
     // 沉浸式：进入时先显示一下让用户知道有控制栏，2.5s 后自动收起（无论是否在播放）。
@@ -169,6 +237,15 @@ export function VideoPlayer({
     return clearHideTimer;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [immersive]);
+
+  useEffect(
+    () => () => {
+      clearHideTimer();
+      clearDesktopHideTimer();
+      clearTapTimer();
+    },
+    [],
+  );
 
   // 跳到上一句/下一句字幕的开头；该视频还没有字幕时回退到 ±10s 快退/快进。
   const jumpSubtitle = (dir: -1 | 1) => {
@@ -263,7 +340,6 @@ export function VideoPlayer({
 
   return (
     <div
-      aria-label="课程视频舞台"
       className={`flex flex-col ${
         fullscreen
           ? "fixed inset-0 z-50 bg-black"
@@ -272,7 +348,10 @@ export function VideoPlayer({
     >
       <div
         ref={regionRef}
-        onClick={immersive ? toggleControls : undefined}
+        aria-label="课程视频舞台"
+        onClick={immersive ? handleStageTap : undefined}
+        onMouseEnter={!immersive ? revealDesktopControls : undefined}
+        onMouseLeave={!immersive ? scheduleDesktopHideControls : undefined}
         className={`relative flex min-h-0 w-full min-w-0 flex-1 items-center justify-center overflow-hidden ${
           fullscreen ? "bg-black" : "bg-[var(--surface-stage)]"
         }`}
@@ -364,21 +443,25 @@ export function VideoPlayer({
       </div>
       <div
         aria-label="视频播放控制栏"
-        aria-hidden={immersive && !controlsVisible}
+        aria-hidden={immersive ? !controlsVisible : !desktopControlsVisible}
         onClick={immersive ? (e) => e.stopPropagation() : undefined}
+        onMouseEnter={!immersive ? revealDesktopControls : undefined}
+        onMouseLeave={!immersive ? scheduleDesktopHideControls : undefined}
         onPointerDown={immersive ? () => revealControls() : undefined}
         className={
           immersive
             ? `absolute inset-x-0 bottom-0 z-10 transition-opacity duration-200 ${
                 controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
               }`
-            : "shrink-0"
+            : `shrink-0 transition-opacity duration-200 ${
+                desktopControlsVisible
+                  ? "opacity-100"
+                  : "pointer-events-none invisible opacity-0"
+              }`
         }
       >
         <Controls
           playing={playing}
-          currentMs={currentMs}
-          durationMs={durationMs}
           rate={rate}
           volume={volume}
           muted={muted}
