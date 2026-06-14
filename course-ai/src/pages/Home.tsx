@@ -25,6 +25,10 @@ import { TabsPanel } from "@/components/TabsPanel";
 import { VideoCover } from "@/components/VideoCover";
 import { VideoPlayer } from "@/components/VideoPlayer";
 import { BottomTabBar, type CompactTab } from "@/components/BottomTabBar";
+import { Badge, type BadgeTone } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
+import { IconButton } from "@/components/ui/icon-button";
+import { Menu, MenuItem } from "@/components/ui/menu";
 import { coarsePointer, useContainerWidth, useIsPortrait } from "@/lib/useContainerWidth";
 import { ipc } from "@/lib/ipc";
 import type { Video } from "@/lib/types";
@@ -44,6 +48,13 @@ const statusMeta = {
   done: { label: "已处理" },
   failed: { label: "处理失败" },
 } as const;
+
+const statusTone: Record<Video["processed_status"], BadgeTone> = {
+  pending: "neutral",
+  processing: "processing",
+  done: "success",
+  failed: "danger",
+};
 
 const PANEL_WIDTH_STORAGE_KEY = "course-ai-study-panel-width";
 const VIEW_STORAGE_KEY = "course-ai-home-view";
@@ -494,24 +505,23 @@ export function Home() {
       >
         <header className="flex flex-none items-start justify-between gap-4 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-5">
           <div className="flex min-w-0 items-start gap-3">
-            <button
-              type="button"
-              className="ca-icon-btn mt-0.5"
+            <IconButton
+              className="mt-0.5"
               onClick={goBackOneLevel}
               aria-label="返回上一菜单"
               title="返回上一菜单"
             >
               <ChevronLeft className="h-4 w-4" />
-            </button>
+            </IconButton>
             <div className="min-w-0">
               <h1 className="text-2xl font-semibold text-[var(--text-strong)]">
                 处理队列
               </h1>
             </div>
           </div>
-          <span className="rounded-full bg-[var(--surface-card)] px-2.5 py-1 text-xs text-[var(--text-muted)]">
+          <Badge tone="neutral" dot={false}>
             {queuedVideos.length} 个任务
-          </span>
+          </Badge>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
           {queuedVideos.length === 0 ? (
@@ -587,56 +597,51 @@ export function Home() {
   // 视频卡片上的「⋯」操作按钮（网格/列表共用）。
   function videoOptionsButton(video: Video) {
     return (
-      <button
+      <IconButton
         type="button"
         aria-label="视频操作"
         aria-haspopup="menu"
         aria-expanded={openMenuVideoId === video.id}
         data-video-menu
-        className="ca-touch-44 absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-panel)] text-[var(--text-muted)] shadow hover:text-[var(--text-strong)]"
+        className="ca-touch-44 absolute right-3 top-3 h-8 w-8 rounded-full bg-[var(--surface-panel)] shadow"
         onClick={() =>
           setOpenMenuVideoId((id) => (id === video.id ? null : video.id))
         }
       >
         <MoreHorizontal className="h-4 w-4" />
-      </button>
+      </IconButton>
     );
   }
 
   function videoMenu(video: Video) {
     if (openMenuVideoId !== video.id) return null;
     return (
-      <div
-        role="menu"
+      <Menu
+        aria-label="视频操作菜单"
         data-video-menu
-        className="absolute right-3 top-12 z-10 w-32 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 text-sm shadow-[var(--shadow-pop)]"
+        className="absolute right-3 top-12 z-10 w-32"
       >
-        <button
-          type="button"
-          role="menuitem"
-          className="ca-touch-44 block w-full px-3 py-2 text-left hover:bg-[var(--surface-card-hover)]"
+        <MenuItem
+          className="ca-touch-44"
           onClick={() => {
             setOpenMenuVideoId(null);
             setRenamingVideo({ id: video.id, title: displayTitle(video.title) });
           }}
         >
           修改标题
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          className="ca-touch-44 mt-1 block w-full border-t border-[var(--border-subtle)] px-3 py-2 pt-2.5 text-left text-[var(--status-err)] hover:bg-[var(--surface-card-hover)]"
+        </MenuItem>
+        <MenuItem
+          tone="danger"
+          className="ca-touch-44 mt-1 border-t border-[var(--border-subtle)] pt-2.5"
           onClick={() => {
             setOpenMenuVideoId(null);
             void deleteVideo(video.id);
           }}
         >
           删除
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          className="ca-touch-44 block w-full px-3 py-2 text-left hover:bg-[var(--surface-card-hover)]"
+        </MenuItem>
+        <MenuItem
+          className="ca-touch-44"
           onClick={() => {
             setOpenMenuVideoId(null);
             // 已有字幕（处理完成）→ 仅重新 AI 纠错；否则跑完整处理。
@@ -652,8 +657,8 @@ export function Home() {
               ? "纠错中…"
               : "重新纠错"
             : "开始处理"}
-        </button>
-      </div>
+        </MenuItem>
+      </Menu>
     );
   }
 
@@ -709,13 +714,12 @@ export function Home() {
   function statusBadge(video: Video) {
     const status = video.processed_status;
     return (
-      <span
+      <Badge
         data-testid="video-status-badge"
-        className={`ca-chip ${status}`}
+        tone={statusTone[status]}
       >
-        <span className="dot" />
         {statusMeta[status].label}
-      </span>
+      </Badge>
     );
   }
 
@@ -867,19 +871,15 @@ export function Home() {
         <div className="ca-scroll">
           {!selectedCourseId || videos.length === 0 ? (
             <div className="flex h-full min-h-[320px] items-center justify-center">
-              <div className="max-w-sm text-center">
-                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-md border border-[var(--border-faint)] bg-[var(--surface-card)] text-primary">
-                  <Film className="h-7 w-7" />
-                </div>
-                <h2 className="text-base font-semibold text-[var(--text-strong)]">
-                  {selectedCourseId ? "还没有视频" : "选择课程开始"}
-                </h2>
-                <p className="mt-2 text-sm leading-relaxed text-[var(--text-muted)]">
-                  {selectedCourseId
+              <EmptyState
+                icon={<Film className="h-7 w-7" />}
+                title={selectedCourseId ? "还没有视频" : "选择课程开始"}
+                description={
+                  selectedCourseId
                     ? "导入本地视频或粘贴视频链接后，会在这里形成课程视频列表。"
-                    : "从左侧选择课程后导入或管理视频。"}
-                </p>
-              </div>
+                    : "从左侧选择课程后导入或管理视频。"
+                }
+              />
             </div>
           ) : view === "list" ? (
             <div className="ca-list">
@@ -1028,14 +1028,12 @@ export function Home() {
         <div className="ca-rail-flyout" role="dialog" aria-label="课程视频列表">
           <div className="ca-rail-flyout-head">
             <span className="t">{selectedCourse?.name ?? "课程视频"}</span>
-            <button
-              type="button"
-              className="ca-icon-btn"
+            <IconButton
               aria-label="关闭"
               onClick={() => setRailVideosOpen(false)}
             >
               <X className="h-4 w-4" />
-            </button>
+            </IconButton>
           </div>
           <div className="ca-rail-flyout-list">
             {videos.map((video) => (

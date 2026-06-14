@@ -770,6 +770,7 @@ select:focus-visible {
   gap: 8px;
 }
 
+.ca-badge,
 .ca-chip {
   display: inline-flex;
   align-items: center;
@@ -781,39 +782,123 @@ select:focus-visible {
   border-radius: 20px;
 }
 
+.ca-badge .dot,
 .ca-chip .dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
 }
 
+.ca-badge.success,
 .ca-chip.done {
   color: var(--status-ok);
   background: var(--status-ok-bg);
 }
 
+.ca-badge.success .dot,
 .ca-chip.done .dot {
   background: var(--status-ok);
 }
 
+.ca-badge.neutral,
 .ca-chip.pending,
 .ca-chip.failed {
   color: var(--text-3);
   background: var(--bg-sunken);
 }
 
+.ca-badge.neutral .dot,
 .ca-chip.pending .dot,
 .ca-chip.failed .dot {
   background: var(--text-4);
 }
 
+.ca-badge.warning,
+.ca-badge.processing,
 .ca-chip.processing {
   color: var(--status-warn);
   background: var(--status-warn-bg);
 }
 
+.ca-badge.warning .dot,
+.ca-badge.processing .dot,
 .ca-chip.processing .dot {
   background: var(--status-warn);
+}
+
+.ca-badge.danger {
+  color: var(--status-err);
+  background: var(--status-err-bg);
+}
+
+.ca-badge.danger .dot {
+  background: var(--status-err);
+}
+
+.ca-menu {
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-panel);
+  padding: 4px 0;
+  font-size: 14px;
+  box-shadow: var(--shadow-pop);
+}
+
+.ca-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  color: var(--text-1);
+  transition: background 0.12s, color 0.12s;
+}
+
+.ca-menu-item:hover {
+  background: var(--bg-sunken);
+}
+
+.ca-menu-item.danger {
+  color: var(--status-err);
+}
+
+.ca-empty-state {
+  max-width: 360px;
+  margin: 0 auto;
+  text-align: center;
+  color: var(--text-3);
+}
+
+.ca-empty-state-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-soft);
+  background: var(--bg-panel);
+  color: var(--accent);
+}
+
+.ca-empty-state-title {
+  color: var(--text-1);
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.ca-empty-state-description {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-3);
+}
+
+.ca-empty-state-action {
+  margin-top: 14px;
+  display: flex;
+  justify-content: center;
 }
 
 .ca-list {

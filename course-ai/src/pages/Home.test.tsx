@@ -179,6 +179,18 @@ describe("Home", () => {
     expect(screen.getByText("01:45:18")).toBeInTheDocument();
   });
 
+  it("uses the shared empty-state language when a selected course has no videos", async () => {
+    mockIpc.videos.list.mockResolvedValueOnce([]);
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+
+    const emptyState = await screen.findByRole("status");
+    expect(emptyState).toHaveClass("ca-empty-state");
+    expect(within(emptyState).getByRole("heading", { name: "还没有视频" })).toBeInTheDocument();
+  });
+
   it("turns a selected course and video into the reference-style learning workspace", async () => {
     renderHome();
 
