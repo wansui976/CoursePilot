@@ -31,6 +31,7 @@ required_text = [
     "playHeroIntro",
     "hero-word",
     "scroll-progress",
+    "ScrollTrigger.create",
 ]
 
 missing = [text for text in required_text if text not in html]
