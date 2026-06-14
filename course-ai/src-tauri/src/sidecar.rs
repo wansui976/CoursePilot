@@ -162,6 +162,12 @@ mod tests {
         assert!(
             external_bin
                 .iter()
+                .any(|value| value.as_str() == Some("binaries/ffmpeg")),
+            "bundle.externalBin should include binaries/ffmpeg"
+        );
+        assert!(
+            external_bin
+                .iter()
                 .any(|value| value.as_str() == Some("binaries/yt-dlp")),
             "bundle.externalBin should include binaries/yt-dlp"
         );

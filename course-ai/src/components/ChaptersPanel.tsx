@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
+import { ErrorNote } from "@/components/ui/ErrorNote";
 import { PanelActions } from "./PanelActions";
 
 export function ChaptersPanel({ videoId }: { videoId: string }) {
@@ -21,7 +22,11 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
       <div className="shrink-0 px-3 pt-2 text-sm text-[var(--text-muted)]">重点章节</div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-12 pt-1">
         {generate.isError && (
-          <p className="pb-1 text-xs text-red-400">{String(generate.error)}</p>
+          <ErrorNote
+            className="mb-2"
+            error={generate.error}
+            onRetry={() => generate.mutate()}
+          />
         )}
         {chapters.length === 0 && (
           <p className="text-sm text-[var(--text-faint)]">

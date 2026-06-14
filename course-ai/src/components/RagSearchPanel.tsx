@@ -367,7 +367,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
               onClick={() => void onClearClick()}
               aria-label="清空对话"
               title="清空对话"
-              className="inline-flex flex-none items-center rounded-full text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
+              className="ca-touch-44 inline-flex flex-none items-center justify-center rounded-full text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
             >
               <Trash2 className="h-4 w-4" />
             </button>
@@ -392,7 +392,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
             disabled={busy || !query.trim()}
             aria-label="发送"
             title="发送（Enter）"
-            className="grid h-8 w-8 flex-none place-items-center rounded-full bg-primary text-white transition hover:opacity-90 disabled:bg-[var(--surface-card-active)] disabled:text-[var(--text-muted)] disabled:hover:opacity-100"
+            className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full bg-primary text-white transition hover:opacity-90 disabled:bg-[var(--surface-card-active)] disabled:text-[var(--text-muted)] disabled:hover:opacity-100"
           >
             {busy ? (
               <Loader2 className="h-4 w-4 animate-spin" />

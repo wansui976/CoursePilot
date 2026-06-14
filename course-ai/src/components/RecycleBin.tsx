@@ -45,7 +45,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
         <button
           aria-label="返回"
           onClick={onClose}
-          className="grid h-8 w-8 flex-none place-items-center rounded-lg text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+          className="ca-icon-btn ca-touch-44 ml-0"
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
@@ -86,14 +86,14 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
                   <button
                     onClick={() => restore.mutate(item.id)}
                     disabled={restore.isPending}
-                    className="inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] px-2 py-1 text-xs text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
+                    className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
                     恢复
                   </button>
                   <button
                     onClick={() => void confirmPurge(item)}
-                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-red-500 transition hover:bg-[var(--surface-card-hover)]"
+                    className="ca-touch-44 inline-flex items-center gap-1 rounded-md px-3 py-2 text-xs text-red-500 transition hover:bg-[var(--surface-card-hover)]"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     彻底删除

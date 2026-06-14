@@ -16,11 +16,24 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     refetchInterval: (query) =>
       query.state.data && query.state.data.length > 0 ? false : 2000,
   });
-  const currentMs = usePlayer((s) => s.currentMs);
   const requestSeek = usePlayer((s) => s.requestSeek);
   const listRef = useRef<HTMLDivElement>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
+  // 当前所在字幕段下标。订阅播放进度，但只在「跨段」时才 setState，
+  // 避免每次 currentMs（约 4Hz）都重渲染整列表（长文稿尤其卡）。
+  const [activeIdx, setActiveIdx] = useState(-1);
+
+  useEffect(() => {
+    const compute = (ms: number) => {
+      const idx = segments.findIndex(
+        (segment) => ms >= segment.start_ms && ms < segment.end_ms,
+      );
+      setActiveIdx((prev) => (prev === idx ? prev : idx));
+    };
+    compute(usePlayer.getState().currentMs);
+    return usePlayer.subscribe((state) => compute(state.currentMs));
+  }, [segments]);
 
   const update = useMutation({
     mutationFn: ({ id, text }: { id: number; text: string }) =>
@@ -39,10 +52,6 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     if (editingId == null) return;
     update.mutate({ id: editingId, text: draft });
   }
-
-  const activeIdx = segments.findIndex(
-    (segment) => currentMs >= segment.start_ms && currentMs < segment.end_ms,
-  );
 
   useEffect(() => {
     if (activeIdx < 0 || editingId != null) return;
@@ -115,14 +124,14 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                   <button
                     onClick={save}
                     disabled={update.isPending}
-                    className="inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2 py-1 text-[var(--text-strong)] hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
+                    className="ca-touch-44 inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-[var(--text-strong)] hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
                   >
                     <Check className="h-3 w-3" />
                     保存
                   </button>
                   <button
                     onClick={() => setEditingId(null)}
-                    className="inline-flex items-center gap-1 rounded px-2 py-1 text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)]"
+                    className="ca-touch-44 inline-flex items-center gap-1 rounded px-3 py-2 text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)]"
                   >
                     <X className="h-3 w-3" />
                     取消
@@ -157,7 +166,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                 aria-label="编辑这句文稿"
                 title="纠错"
                 onClick={() => startEdit(segment.id, segment.text)}
-                className="mt-1 mr-1 grid h-6 w-6 shrink-0 place-items-center rounded text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
+                className="ca-touch-44 mt-1 mr-1 grid h-6 w-6 shrink-0 place-items-center rounded text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
               >
                 <Pencil className="h-3.5 w-3.5" />
               </button>

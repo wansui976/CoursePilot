@@ -81,20 +81,45 @@ fn ask_request(
     model: &str,
     system: &str,
     context: Option<String>,
-    user: &str,
+    messages: Vec<ChatMessage>,
     max_tokens: u32,
 ) -> ChatRequest {
     ChatRequest {
         model: model.to_string(),
         system: Some(system.to_string()),
         cacheable_context: context,
-        messages: vec![ChatMessage {
-            role: "user".into(),
-            content: user.to_string(),
-        }],
+        messages,
         temperature: 0.2,
         max_tokens,
     }
+}
+
+pub fn build_chat_messages(history: &[ChatMessage], query: &str) -> Vec<ChatMessage> {
+    let mut messages = Vec::with_capacity(history.len() + 1);
+    messages.extend(history.iter().cloned());
+    messages.push(ChatMessage {
+        role: "user".into(),
+        content: query.to_string(),
+    });
+    messages
+}
+
+fn summarize_history(history: &[ChatMessage]) -> String {
+    if history.is_empty() {
+        return String::new();
+    }
+    history
+        .iter()
+        .map(|message| {
+            let speaker = if message.role == "assistant" {
+                "助手"
+            } else {
+                "用户"
+            };
+            format!("{speaker}: {}", message.content)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// 按行边界把长文稿切成不超过 `limit` 字符的若干段。
@@ -115,7 +140,10 @@ fn split_by_chars(text: &str, limit: usize) -> Vec<String> {
 }
 
 const ASK_SYSTEM: &str = "你是基于课程视频字幕的问答助手。严格遵守：\
-1. 只依据给出的字幕回答，不要引入字幕之外的知识；字幕里没有就直说「视频里没有讲到」，绝不编造。\
+1. 优先依据给出的字幕回答（按第 2 条标注 [mm:ss] 出处，这部分不要引入字幕之外的知识）。\
+   如果字幕里没有相关内容，先用一句「视频里没有讲到这个内容。」明确说明，\
+   再另起一段用你自己的知识尽量回答，并在这段开头标注「（以下回答来自大模型，非视频内容）」；\
+   这段补充回答属于模型知识，不要编造 [mm:ss] 时间戳。\
 2. 字幕每行以 [mm:ss] 时间戳开头。回答时，凡是来自视频的结论，都要在该句话后面紧跟对应的 [mm:ss] 出处，\
    时间戳格式必须和字幕里完全一致（直接照抄那一行行首的 [mm:ss]），方便点击跳转；涉及多处就标多个。\
    只能用单个时间点 [mm:ss]，每个方括号里只放一个时间；\
@@ -130,8 +158,10 @@ pub async fn answer(
     chat_model: &str,
     video_id: &str,
     query: &str,
+    history: &[ChatMessage],
 ) -> AppResult<RagAnswer> {
     let transcript = crate::pipeline::ai::transcript_text(db, video_id).await?;
+    let messages = build_chat_messages(history, query);
 
     let answer = if transcript.chars().count() <= SINGLE_CALL_CHAR_LIMIT {
         let req = ask_request(
@@ -140,12 +170,12 @@ pub async fn answer(
             Some(format!(
                 "课程视频完整字幕（每行 [mm:ss] 文本）：\n{transcript}"
             )),
-            query,
+            messages,
             1024,
         );
         provider.complete(&req).await?.content
     } else {
-        map_reduce_answer(provider, chat_model, &transcript, query).await?
+        map_reduce_answer(provider, chat_model, &transcript, query, history).await?
     };
 
     Ok(RagAnswer {
@@ -159,9 +189,11 @@ async fn map_reduce_answer(
     chat_model: &str,
     transcript: &str,
     query: &str,
+    history: &[ChatMessage],
 ) -> AppResult<String> {
     let parts = split_by_chars(transcript, PART_CHAR_LIMIT);
     let mut partials = Vec::new();
+    let messages = build_chat_messages(history, query);
     for part in &parts {
         let req = ask_request(
             chat_model,
@@ -169,7 +201,7 @@ async fn map_reduce_answer(
 有相关信息时，每条结论后紧跟字幕里照抄的 [mm:ss] 出处，时间戳格式与字幕完全一致；\
 只用单个时间点 [mm:ss]，不要写成时间段 [mm:ss-mm:ss]。",
             Some(format!("字幕片段：\n{part}")),
-            query,
+            messages.clone(),
             512,
         );
         let content = provider.complete(&req).await?.content;
@@ -180,18 +212,36 @@ async fn map_reduce_answer(
     }
 
     if partials.is_empty() {
-        return Ok("字幕里没有讲到这个内容。".to_string());
+        // 字幕完全没覆盖：明说没讲到，再用模型自身知识补充作答（标注来源）。
+        let req = ask_request(
+            chat_model,
+            "课程字幕里没有讲到用户的问题。请先用一句「视频里没有讲到这个内容。」开头，\
+另起一段用你自己的知识尽量回答，并在该段开头标注「（以下回答来自大模型，非视频内容）」；不要编造时间戳。",
+            None,
+            build_chat_messages(history, query),
+            1024,
+        );
+        return Ok(provider.complete(&req).await?.content);
     }
     if partials.len() == 1 {
         return Ok(partials.pop().unwrap());
     }
     let joined = partials.join("\n---\n");
+    let history_summary = summarize_history(history);
+    let prompt = if history_summary.is_empty() {
+        format!("问题：{query}\n\n各片段回答：\n{joined}")
+    } else {
+        format!("历史对话：\n{history_summary}\n\n问题：{query}\n\n各片段回答：\n{joined}")
+    };
     let req = ask_request(
         chat_model,
         "把下面来自同一视频不同片段、针对同一问题的多段回答，综合成一个完整、不重复、条理清晰、按时间顺序的最终回答。\
 原样保留每条结论后的 [mm:ss] 时间标注，只用单个时间点，不要改写成时间段 [mm:ss-mm:ss]，不要改写时间戳格式。",
         None,
-        &format!("问题：{query}\n\n各片段回答：\n{joined}"),
+        vec![ChatMessage {
+            role: "user".into(),
+            content: prompt,
+        }],
         1024,
     );
     Ok(provider.complete(&req).await?.content)
@@ -298,6 +348,25 @@ mod tests {
         assert!(keyword_search_segments(&segs, "   ", 10).is_empty());
     }
 
+    #[test]
+    fn build_chat_messages_appends_current_query_after_history() {
+        let history = vec![
+            ChatMessage {
+                role: "user".into(),
+                content: "第一轮问题".into(),
+            },
+            ChatMessage {
+                role: "assistant".into(),
+                content: "第一轮回答".into(),
+            },
+        ];
+        let messages = build_chat_messages(&history, "第二轮问题");
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[1].role, "assistant");
+        assert_eq!(messages[2].content, "第二轮问题");
+    }
+
     async fn seed() -> (Db, String, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db = Db::connect_and_migrate(&dir.path().join("t.db"))
@@ -338,11 +407,33 @@ mod tests {
         let provider = Provider::Mock {
             canned: "光合作用是…… [00:00]".into(),
         };
-        let ans = answer(&db, &provider, "chat", &vid, "光合作用是什么")
+        let ans = answer(&db, &provider, "chat", &vid, "光合作用是什么", &[])
             .await
             .unwrap();
         assert_eq!(ans.answer, "光合作用是…… [00:00]");
         assert!(ans.citations.is_empty());
+    }
+
+    #[tokio::test]
+    async fn answer_accepts_chat_history_context() {
+        let (db, vid, _d) = seed().await;
+        let provider = Provider::Mock {
+            canned: "续问回答 [00:00]".into(),
+        };
+        let history = vec![
+            ChatMessage {
+                role: "user".into(),
+                content: "第一轮问题".into(),
+            },
+            ChatMessage {
+                role: "assistant".into(),
+                content: "第一轮回答".into(),
+            },
+        ];
+        let ans = answer(&db, &provider, "chat", &vid, "第二轮问题", &history)
+            .await
+            .unwrap();
+        assert_eq!(ans.answer, "续问回答 [00:00]");
     }
 
     #[tokio::test]

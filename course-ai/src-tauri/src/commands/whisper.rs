@@ -50,6 +50,10 @@ pub const MODELS: &[ModelInfo] = &[
     },
 ];
 
+fn is_mobile_os(os: &str) -> bool {
+    os == "android" || os == "ios"
+}
+
 pub fn model_path(app_data: &Path, id: &str) -> PathBuf {
     let file_name = MODELS
         .iter()
@@ -65,6 +69,9 @@ pub fn is_model_available(path: &Path) -> bool {
 
 #[tauri::command]
 pub async fn cmd_list_whisper_models(app: tauri::AppHandle) -> AppResult<Vec<(ModelInfo, bool)>> {
+    if is_mobile_os(std::env::consts::OS) {
+        return Ok(Vec::new());
+    }
     let data_dir = app
         .path()
         .app_data_dir()
@@ -93,6 +100,11 @@ pub async fn cmd_download_whisper_model(
     _state: State<'_, AppState>,
     id: String,
 ) -> AppResult<()> {
+    if is_mobile_os(std::env::consts::OS) {
+        return Err(AppError::Config(
+            "移动端不支持下载本地 Whisper 模型，请改用云端 ASR".into(),
+        ));
+    }
     let info = MODELS
         .iter()
         .find(|model| model.id == id)

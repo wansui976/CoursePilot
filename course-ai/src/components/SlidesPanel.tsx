@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Images, ScanText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ErrorNote } from "@/components/ui/ErrorNote";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { getSlidesSensitivity, sensitivityToThreshold } from "@/lib/slides";
@@ -52,7 +53,8 @@ function SlideImage({
 export function SlidesPanel({ videoId }: { videoId: string }) {
   const qc = useQueryClient();
   const requestSeek = usePlayer((s) => s.requestSeek);
-  const currentMs = usePlayer((s) => s.currentMs);
+  // 不订阅 currentMs（避免播放时每秒 4 次重渲染）；点「截图/OCR」时按需读取当前进度。
+  const currentMs = () => usePlayer.getState().currentMs;
 
   const { data: slides = [] } = useQuery({
     queryKey: ["slides", videoId],
@@ -70,11 +72,11 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["slides", videoId] }),
   });
   const capture = useMutation({
-    mutationFn: () => ipc.slides.capture(videoId, Math.floor(currentMs)),
+    mutationFn: () => ipc.slides.capture(videoId, Math.floor(currentMs())),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["screenshots", videoId] }),
   });
   const ocr = useMutation<string, unknown, void>({
-    mutationFn: () => ipc.tools.ocr(videoId, Math.floor(currentMs)),
+    mutationFn: () => ipc.tools.ocr(videoId, Math.floor(currentMs())),
   });
 
   return (
@@ -115,12 +117,18 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
       </div>
 
       {extract.isError && (
-        <p className="flex-none px-3 py-2 text-xs text-red-400">
-          {String(extract.error)}
-        </p>
+        <ErrorNote
+          className="mx-3 mb-2 flex-none"
+          error={extract.error}
+          onRetry={() => extract.mutate()}
+        />
       )}
       {ocr.isError && (
-        <p className="flex-none px-3 py-2 text-xs text-red-400">{String(ocr.error)}</p>
+        <ErrorNote
+          className="mx-3 mb-2 flex-none"
+          error={ocr.error}
+          onRetry={() => ocr.mutate()}
+        />
       )}
       {ocr.data !== undefined && (
         <div className="flex-none border-b border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-xs">
@@ -132,7 +140,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
               aria-label="关闭 OCR 结果"
               title="关闭"
               onClick={() => ocr.reset()}
-              className="grid h-5 w-5 place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+              className="ca-touch-44 grid h-5 w-5 place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
             >
               <X className="h-3.5 w-3.5" />
             </button>

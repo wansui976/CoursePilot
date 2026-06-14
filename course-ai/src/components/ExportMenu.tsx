@@ -85,7 +85,7 @@ export function ExportMenu({
               <button
                 key={item.label}
                 onClick={() => void run(item)}
-                className="block w-full px-3 py-1.5 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
+                className="ca-touch-44 block w-full px-3 py-1.5 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
               >
                 {item.label}
               </button>
@@ -96,7 +96,7 @@ export function ExportMenu({
       {msg && (
         <div
           className={`absolute right-0 z-30 max-w-[260px] truncate rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs shadow-[var(--shadow-pop)] ${popClass} ${
-            msg.error ? "text-red-500" : "text-[var(--status-ok)]"
+            msg.error ? "text-[var(--status-err)]" : "text-[var(--status-ok)]"
           }`}
           title={msg.text}
         >

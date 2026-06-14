@@ -287,10 +287,26 @@ describe("Home selected-video integration", () => {
     expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
   });
 
-  // 12.9" iPad 竖屏宽达 1024 会落入 wide 档；必须靠 orientation 仍判为上下叠放。
+  // 12.9" iPad 竖屏宽达 1024 会落入 medium/wide 档；必须靠 orientation 仍判为上下叠放。
   it("stacks the workspace on a wide iPad in portrait", async () => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("medium");
+    mockUseContainerWidth.useIsPortrait.mockReturnValue(true);
+    mockPlatform.isTablet.mockReturnValue(true);
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+
+    expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
+      "data-layout",
+      "stacked",
+    );
+  });
+
+  it("still stacks the workspace on an iPad portrait even when pointer media queries are unavailable", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("wide");
-    mockUseContainerWidth.coarsePointer.mockReturnValue(true);
+    mockUseContainerWidth.coarsePointer.mockReturnValue(false);
     mockUseContainerWidth.useIsPortrait.mockReturnValue(true);
     mockPlatform.isTablet.mockReturnValue(true);
 
