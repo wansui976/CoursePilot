@@ -635,7 +635,7 @@ export function Home() {
           aria-label="视频标题"
           autoFocus
           onFocus={(event) => event.currentTarget.select()}
-          className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1.5 text-xs text-[var(--text-strong)] outline-none focus:border-primary/70"
+          className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1.5 text-xs text-[var(--text-strong)] outline-none"
           value={renamingVideo.title}
           onChange={(event) =>
             setRenamingVideo({ id: video.id, title: event.target.value })

@@ -79,7 +79,7 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
               <div className="flex gap-1">
                 <input
                   aria-label="视频链接"
-                  className="min-w-0 flex-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2.5 py-1.5 text-xs text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)] focus:border-primary/70"
+                  className="min-w-0 flex-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2.5 py-1.5 text-xs text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)]"
                   placeholder="B 站 / 视频链接…"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
