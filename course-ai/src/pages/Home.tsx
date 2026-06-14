@@ -332,12 +332,21 @@ export function Home() {
     const containerW = wb?.clientWidth ?? 0;
     const minPanel = 280;
     const maxPanel = containerW > 0 ? Math.max(minPanel, containerW - 320) : 720;
-    const onMove = (move: PointerEvent) => {
-      const next = Math.min(maxPanel, Math.max(minPanel, startWidth - (move.clientX - startX)));
+    // rAF 合帧：一帧内多次 pointermove 只写一次 CSS 变量（即只触发一次网格重排）。
+    let raf = 0;
+    let pendingX = startX;
+    const apply = () => {
+      raf = 0;
+      const next = Math.min(maxPanel, Math.max(minPanel, startWidth - (pendingX - startX)));
       liveWidthRef.current = next;
       wb?.style.setProperty("--study-panel-width", `${next}px`);
     };
+    const onMove = (move: PointerEvent) => {
+      pendingX = move.clientX;
+      if (!raf) raf = requestAnimationFrame(apply);
+    };
     const onUp = () => {
+      if (raf) cancelAnimationFrame(raf);
       setIsResizingPanel(false);
       const finalWidth = liveWidthRef.current;
       setStudyPanelWidth(finalWidth);
@@ -910,6 +919,7 @@ export function Home() {
                   src={mediaSrc}
                   videoId={selectedVideo.id}
                   immersive={isPhoneDevice}
+                  resizing={isResizingPanel}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">
