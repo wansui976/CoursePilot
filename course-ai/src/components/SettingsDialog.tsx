@@ -131,17 +131,17 @@ function Group({
   children: ReactNode;
 }) {
   return (
-    <div className="mb-6">
+    <div className="mb-7">
       {header && (
-        <h3 className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        <h3 className="mb-2 px-4 text-[13px] font-semibold text-[var(--text-muted)]">
           {header}
         </h3>
       )}
-      <div className="divide-y divide-[var(--border-faint)] overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]">
+      <div className="divide-y divide-[var(--border-faint)] overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)]">
         {children}
       </div>
       {footnote && (
-        <p className="mt-2 px-1 text-xs leading-relaxed text-[var(--text-muted)]">{footnote}</p>
+        <p className="mt-2 px-4 text-xs leading-relaxed text-[var(--text-muted)]">{footnote}</p>
       )}
     </div>
   );
@@ -160,11 +160,11 @@ function Row({
   children: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-1.5 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+    <div className="flex min-h-[44px] flex-col gap-1.5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <div className="min-w-0">
         <label
           htmlFor={htmlFor}
-          className="block text-[13px] font-medium text-[var(--text-strong)]"
+          className="block text-[14px] font-medium tracking-[-0.01em] text-[var(--text-strong)]"
         >
           {label}
         </label>
@@ -188,11 +188,11 @@ function StackRow({
   children: ReactNode;
 }) {
   return (
-    <div className="px-4 py-3">
+    <div className="px-4 py-3.5">
       {label && (
         <label
           htmlFor={htmlFor}
-          className="block text-[13px] font-medium text-[var(--text-strong)]"
+          className="block text-[14px] font-medium tracking-[-0.01em] text-[var(--text-strong)]"
         >
           {label}
         </label>
@@ -453,7 +453,7 @@ export function SettingsPanel({
                   }`}
                 >
                   <span
-                    className="grid h-6 w-6 flex-none place-items-center rounded-md text-white"
+                    className="grid h-6 w-6 flex-none place-items-center rounded-[6px] text-white"
                     style={{ background: meta.tint }}
                   >
                     {meta.icon}
@@ -470,7 +470,7 @@ export function SettingsPanel({
             aria-label="设置分类"
             className="min-h-0 flex-1 overflow-y-auto px-4 py-5"
           >
-            <div className="mx-auto max-w-2xl divide-y divide-[var(--border-faint)] overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]">
+            <div className="mx-auto max-w-2xl divide-y divide-[var(--border-faint)] overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)]">
               {categories.map((key) => {
                 const meta = CATEGORY_META[key];
                 return (
@@ -480,10 +480,10 @@ export function SettingsPanel({
                       setActiveCategory(key);
                       setEntered(true);
                     }}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
+                    className="flex min-h-[52px] w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)] active:bg-[var(--surface-card-active)]"
                   >
                     <span
-                      className="grid h-7 w-7 flex-none place-items-center rounded-md text-white"
+                      className="grid h-7 w-7 flex-none place-items-center rounded-[7px] text-white"
                       style={{ background: meta.tint }}
                     >
                       {meta.icon}
@@ -501,7 +501,7 @@ export function SettingsPanel({
         <div className={`min-h-0 flex-1 overflow-y-auto ${compact ? "px-4 py-5" : "px-8 py-6"}`}>
           <div className="mx-auto max-w-2xl">
             {!compact && (
-              <h2 className="mb-5 text-xl font-semibold text-[var(--text-strong)]">
+              <h2 className="mb-5 text-[22px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">
                 {CATEGORY_META[activeCategory].label}
               </h2>
             )}
