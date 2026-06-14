@@ -182,16 +182,16 @@
         border-radius: var(--r-xs);
       }
 
-      /* ---------------- 全局黑色导航（44px） ---------------- */
+      /* ---------------- 全局白色导航（44px） ---------------- */
       .global-nav {
         position: sticky;
         top: 0;
         z-index: 100;
         height: 44px;
-        background: rgba(0, 0, 0, 0.92);
+        background: rgba(255, 255, 255, 0.86);
         backdrop-filter: saturate(180%) blur(18px);
         -webkit-backdrop-filter: saturate(180%) blur(18px);
-        color: var(--body-on-dark);
+        color: var(--ink);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -203,11 +203,11 @@
         border-bottom: 1px solid transparent;
       }
       .global-nav.nav-scrolled {
-        background: rgba(0, 0, 0, 0.72);
+        background: rgba(255, 255, 255, 0.72);
         backdrop-filter: saturate(180%) blur(26px);
         -webkit-backdrop-filter: saturate(180%) blur(26px);
-        border-bottom-color: rgba(255, 255, 255, 0.12);
-        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+        border-bottom-color: rgba(0, 0, 0, 0.1);
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08);
       }
       .scroll-progress {
         position: fixed;
@@ -234,7 +234,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        color: var(--body-on-dark);
+        color: var(--ink);
         font-family: var(--font-display);
         font-size: 17px;
         font-weight: 600;
@@ -252,7 +252,7 @@
         margin-left: 8px;
       }
       .global-nav__links a {
-        color: var(--body-on-dark);
+        color: var(--ink);
         font-size: 12px;
         font-weight: 400;
         letter-spacing: -0.12px;
@@ -323,12 +323,12 @@
         color: var(--ink);
       }
       .tile--dark {
-        background: var(--tile-1);
-        color: var(--body-on-dark);
+        background: var(--canvas);
+        color: var(--ink);
       }
       .tile--dark-2 {
-        background: var(--tile-2);
-        color: var(--body-on-dark);
+        background: var(--parchment);
+        color: var(--ink);
       }
 
       .eyebrow {
@@ -341,7 +341,7 @@
       }
       .tile--dark .eyebrow,
       .tile--dark-2 .eyebrow {
-        color: var(--primary-on-dark);
+        color: var(--primary);
       }
 
       h1,
@@ -370,7 +370,7 @@
       }
       .tile--dark .lead,
       .tile--dark-2 .lead {
-        color: var(--body-muted);
+        color: var(--ink-muted-80);
       }
       .caption {
         font-size: 14px;
@@ -379,7 +379,7 @@
         color: var(--ink-muted-48);
       }
       .tile--dark .caption {
-        color: var(--body-muted);
+        color: var(--ink-muted-48);
       }
 
       /* ---------------- 按钮 ---------------- */
@@ -425,7 +425,7 @@
         color: var(--primary);
       }
       .tile--dark .text-link {
-        color: var(--primary-on-dark);
+        color: var(--primary);
       }
       .text-link::after {
         content: " ›";
@@ -781,12 +781,8 @@
         text-align: left;
       }
       .capability {
-        border-top: 1px solid rgba(255, 255, 255, 0.18);
+        border-top: 1px solid var(--hairline);
         padding-top: var(--s-md);
-      }
-      .tile--light .capability,
-      .tile--parchment .capability {
-        border-top-color: var(--hairline);
       }
       .capability strong {
         display: block;
@@ -799,10 +795,6 @@
         font-size: 14px;
         line-height: 1.45;
         letter-spacing: -0.224px;
-        color: var(--body-muted);
-      }
-      .tile--light .capability p,
-      .tile--parchment .capability p {
         color: var(--ink-muted-80);
       }
 
