@@ -32,11 +32,29 @@ export function TabsPanel({ videoId }: { videoId: string }) {
   const [activeTab, setActiveTab] = useState<Tab>(
     () => readVideoResumeState(videoId).activeTab ?? "AI 概览",
   );
+  // 保活：记录访问过的标签。访问过的面板用 forceMount 常驻 DOM（非活动时隐藏），
+  // 再切回时不必重建重组件（tiptap/markmap）或上千行文稿 DOM —— 切换从此瞬时完成。
+  // 未访问过的不渲染，保持懒加载、不拖累首屏。
+  const [visited, setVisited] = useState<Set<Tab>>(() => new Set([activeTab]));
 
   function changeTab(tab: Tab) {
+    if (tab !== activeTab && !visited.has(tab)) {
+      setVisited((prev) => {
+        const next = new Set(prev);
+        next.add(tab);
+        return next;
+      });
+    }
     setActiveTab(tab);
     writeVideoResumeState(videoId, { activeTab: tab });
   }
+
+  const panels: { tab: Tab; node: React.ReactNode }[] = [
+    { tab: "AI 概览", node: <AiViewPanel videoId={videoId} /> },
+    { tab: "笔记", node: <NotesPanel videoId={videoId} /> },
+    { tab: "文稿", node: <TranscriptPanel videoId={videoId} /> },
+    { tab: "课件", node: <SlidesPanel videoId={videoId} /> },
+  ];
 
   return (
     <Tabs
@@ -57,26 +75,19 @@ export function TabsPanel({ videoId }: { videoId: string }) {
           </TabsTrigger>
         ))}
       </TabsList>
-      <TabsContent value="AI 概览" className="min-h-0 flex-1 overflow-hidden">
-        <Suspense fallback={<PanelFallback />}>
-          <AiViewPanel videoId={videoId} />
-        </Suspense>
-      </TabsContent>
-      <TabsContent value="笔记" className="min-h-0 flex-1 overflow-hidden">
-        <Suspense fallback={<PanelFallback />}>
-          <NotesPanel videoId={videoId} />
-        </Suspense>
-      </TabsContent>
-      <TabsContent value="文稿" className="min-h-0 flex-1 overflow-hidden">
-        <Suspense fallback={<PanelFallback />}>
-          <TranscriptPanel videoId={videoId} />
-        </Suspense>
-      </TabsContent>
-      <TabsContent value="课件" className="min-h-0 flex-1 overflow-hidden">
-        <Suspense fallback={<PanelFallback />}>
-          <SlidesPanel videoId={videoId} />
-        </Suspense>
-      </TabsContent>
+      {panels.map(({ tab, node }) => (
+        <TabsContent
+          key={tab}
+          value={tab}
+          // 访问过即常驻：Radix 在非活动时不再卸载，由 data-[state=inactive]:hidden 隐藏。
+          forceMount={visited.has(tab) ? true : undefined}
+          className="ca-tab-content min-h-0 flex-1 overflow-hidden data-[state=inactive]:hidden"
+        >
+          {visited.has(tab) ? (
+            <Suspense fallback={<PanelFallback />}>{node}</Suspense>
+          ) : null}
+        </TabsContent>
+      ))}
     </Tabs>
   );
 }

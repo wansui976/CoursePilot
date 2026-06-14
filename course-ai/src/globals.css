@@ -1430,6 +1430,22 @@ select:focus-visible {
   }
 }
 
+/* 学习标签切换：内容变为活动时轻微淡入，补上此前「无过渡的瞬切」。只动透明度不位移。 */
+@keyframes ca-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-tab-content[data-state="active"] {
+    animation: ca-fade-in 0.18s ease;
+  }
+}
+
 /* AI 图文笔记编辑器：因未引入 typography 插件，这里用主题变量自定义 Markdown 排版，
    兼顾深浅两种主题，并让表格、列表、标题、时间戳都有清晰可读的样式。 */
 .tiptap-notes {
