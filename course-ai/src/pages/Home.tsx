@@ -1088,6 +1088,22 @@ export function Home() {
     !showRecycleBin &&
     !showDevConsole;
 
+  // 主区当前视图的「类型」标识，作为入场动画的重挂 key（顺序须与下方主区条件渲染一致）。
+  // 注意：工作台统一为 "workbench"，不含视频 id —— 切换视频不重挂、播放器状态保留。
+  const mainViewKey = showSettings
+    ? "settings"
+    : showRecycleBin
+      ? "recycle"
+      : showDevConsole
+        ? "dev"
+        : queueOpen
+          ? "queue"
+          : selectedVideo
+            ? "workbench"
+            : showCourseListScreen
+              ? "courselist"
+              : "library";
+
   return (
     <div
       ref={appRef}
@@ -1100,24 +1116,28 @@ export function Home() {
       {isPhoneDevice ? null : isWorkbenchView ? renderRail() : renderSidebar()}
       {!isPhoneDevice && isWorkbenchView && railVideosOpen && renderRailVideoFlyout()}
       <main className="ca-main">
-        {showSettings ? (
-          <SettingsPanel
-            onClose={() => setShowSettings(false)}
-            onOpenDevConsole={() => openMainView("dev")}
-          />
-        ) : showRecycleBin ? (
-          <RecycleBin onClose={() => setShowRecycleBin(false)} />
-        ) : showDevConsole ? (
-          <DevConsole onClose={() => setShowDevConsole(false)} />
-        ) : queueOpen ? (
-          renderProcessingQueuePage()
-        ) : selectedVideo ? (
-          renderSelectedVideoWorkspace()
-        ) : showCourseListScreen ? (
-          renderCourseListScreen()
-        ) : (
-          renderCourseVideoLibrary()
-        )}
+        {/* key=视图类型(而非视频 id):切换顶层视图时重挂以重播入场动画;在工作台内
+            切换视频时 key 不变,播放器与面板状态保留、不被打断。 */}
+        <div key={mainViewKey} className="ca-view">
+          {showSettings ? (
+            <SettingsPanel
+              onClose={() => setShowSettings(false)}
+              onOpenDevConsole={() => openMainView("dev")}
+            />
+          ) : showRecycleBin ? (
+            <RecycleBin onClose={() => setShowRecycleBin(false)} />
+          ) : showDevConsole ? (
+            <DevConsole onClose={() => setShowDevConsole(false)} />
+          ) : queueOpen ? (
+            renderProcessingQueuePage()
+          ) : selectedVideo ? (
+            renderSelectedVideoWorkspace()
+          ) : showCourseListScreen ? (
+            renderCourseListScreen()
+          ) : (
+            renderCourseVideoLibrary()
+          )}
+        </div>
       </main>
       {showBottomTab && (
         <BottomTabBar
