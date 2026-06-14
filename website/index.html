@@ -123,6 +123,9 @@
       }
       .hero-word {
         display: inline-block;
+      }
+      /* 仅在开场期间提升合成层,结束后释放,避免长期占用 */
+      html.intro-active .hero-word {
         will-change: opacity, transform, filter;
       }
       html.motion-ready [data-animate="hero"] {
