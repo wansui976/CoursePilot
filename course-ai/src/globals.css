@@ -1400,6 +1400,36 @@ select:focus-visible {
   }
 }
 
+/* 顶层视图入场：进入工作台 / 课程库 / 队列 / 设置等时，整块内容轻微淡入上移，
+   与首页卡片的灵动观感一致，不再是生硬的瞬切。由 React 的 key=视图类型 触发重挂
+   来重播动画——切换视频不改 key，故不会打断播放器（音量/倍速/进度保留）。
+   用 backwards 只在动画开始前应用 from 态、结束后不留存 transform，避免给 .ca-wb
+   留下 transform 而把全屏视频的 fixed 定位困在工作台内。 */
+@keyframes ca-view-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ca-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-view {
+    animation: ca-view-in 0.24s var(--ease) backwards;
+  }
+}
+
 /* AI 图文笔记编辑器：因未引入 typography 插件，这里用主题变量自定义 Markdown 排版，
    兼顾深浅两种主题，并让表格、列表、标题、时间戳都有清晰可读的样式。 */
 .tiptap-notes {
