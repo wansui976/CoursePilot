@@ -55,8 +55,10 @@ if studio_missing:
     raise SystemExit(f"Missing screenshot studio mock data: {studio_missing}")
 
 generator_required_text = [
-    "generated realistic mock screenshots",
-    "深度学习入门：梯度下降与反向传播",
+    "generated realistic screenshots from real CoursePilot UI",
+    "real-screenshots",
+    "ai-overview.png",
+    "notes.png",
     "promo-hero.png",
     "promo-workbench.png",
     "og-image.png",
@@ -65,6 +67,13 @@ generator_required_text = [
 generator_missing = [text for text in generator_required_text if text not in generator]
 if generator_missing:
     raise SystemExit(f"Missing screenshot generator content: {generator_missing}")
+
+for source in ["ai-overview.png", "notes.png", "quiz.png", "mindmap.png", "transcript.png", "qa.png"]:
+    path = root / "real-screenshots" / source
+    if not path.exists() or path.stat().st_size < 10_000:
+        raise SystemExit(f"Missing or tiny real screenshot source: {source}")
+    if path.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
+        raise SystemExit(f"Real screenshot source is not a PNG file: {source}")
 
 for asset in ["promo-hero.png", "promo-workbench.png", "og-image.png"]:
     path = root / asset

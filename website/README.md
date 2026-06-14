@@ -11,13 +11,19 @@ python3 -m http.server 8000   # 然后打开 http://localhost:8000
 
 ## 宣传截图资产
 
-当前主页直接引用三张由 `screenshot-studio.html` 生成的真实 UI 模拟宣传图：
+当前主页直接引用三张由真实 CoursePilot UI 截图生成的宣传图：
 
 - `promo-hero.png`：首屏产品介绍图。
 - `promo-workbench.png`：工作台 / 课件 / OCR 联动介绍图。
 - `og-image.png`：Open Graph / 社交分享卡片，`index.html` 的 `og:image` 指向它。
 
-重新生成时，先启动本地静态服务，再打开 `screenshot-studio.html`，分别截图 `#hero-shot`、`#workbench-shot` 和 `#og-shot`。这个 studio 页面填入了模拟课程、字幕、笔记、课件、OCR、问答和导出数据，只作为宣传截图源使用。
+原始截图保存在 `real-screenshots/`，包括 AI 概览、笔记、出题、脑图、文稿和提问界面。重新生成时运行：
+
+```bash
+python3 website/generate_mock_screenshots.py
+```
+
+`screenshot-studio.html` 仍保留为备用的静态模拟截图源，但当前宣传图优先使用真实产品截图。
 
 ## 动效
 
