@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Pencil, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ExportMenu } from "./ExportMenu";
 import { MathText } from "./MathText";
 import { ipc } from "@/lib/ipc";
@@ -112,21 +113,23 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                   rows={2}
                 />
                 <div className="mt-1 flex items-center gap-2 text-xs">
-                  <button
+                  <Button
+                    variant="default"
+                    size="sm"
                     onClick={save}
                     disabled={update.isPending}
-                    className="inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2 py-1 text-[var(--text-strong)] hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
                   >
                     <Check className="h-3 w-3" />
                     保存
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => setEditingId(null)}
-                    className="inline-flex items-center gap-1 rounded px-2 py-1 text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)]"
                   >
                     <X className="h-3 w-3" />
                     取消
-                  </button>
+                  </Button>
                   <span className="text-[var(--text-faint)]">⌘/Ctrl+Enter 保存</span>
                 </div>
               </div>
