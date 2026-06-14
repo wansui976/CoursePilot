@@ -32,6 +32,18 @@ export const ACCENTS: { key: AccentKey; label: string; accent: string; press: st
   { key: "gray", label: "灰", accent: "#8a8f99", press: "#767b85" },
 ];
 
+let themeAnimTimer: ReturnType<typeof setTimeout> | undefined;
+/** 切换明暗前给 <html> 加一层短暂过渡类，让整树颜色一起淡变；尊重 reduce-motion。
+ *  时长需与 globals.css 的 .theme-animating 过渡(0.3s)对齐，多留一点余量再摘类。 */
+function beginThemeTransition(): void {
+  if (typeof document === "undefined") return;
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  const root = document.documentElement;
+  root.classList.add("theme-animating");
+  if (themeAnimTimer) clearTimeout(themeAnimTimer);
+  themeAnimTimer = setTimeout(() => root.classList.remove("theme-animating"), 360);
+}
+
 function systemDark(): boolean {
   return (
     typeof window !== "undefined" &&
@@ -120,7 +132,10 @@ export const useTheme = create<ThemeState>((set, get) => ({
   customAccent: readCustomAccent(),
   setPref: (pref) => {
     if (typeof window !== "undefined") window.localStorage.setItem(THEME_KEY, pref);
-    set({ pref, effective: resolveEffective(pref) });
+    const next = resolveEffective(pref);
+    // 实际明暗变了才播放过渡（如 light→auto 但系统也是 light，则无需动画）。
+    if (next !== get().effective) beginThemeTransition();
+    set({ pref, effective: next });
   },
   setAccent: (accent) => {
     if (typeof window !== "undefined") window.localStorage.setItem(ACCENT_KEY, accent);
@@ -155,6 +170,8 @@ if (typeof window !== "undefined" && window.matchMedia) {
     .matchMedia("(prefers-color-scheme: dark)")
     .addEventListener?.("change", () => {
       if (useTheme.getState().pref !== "auto") return;
-      useTheme.setState({ effective: resolveEffective("auto") });
+      const next = resolveEffective("auto");
+      if (next !== useTheme.getState().effective) beginThemeTransition();
+      useTheme.setState({ effective: next });
     });
 }

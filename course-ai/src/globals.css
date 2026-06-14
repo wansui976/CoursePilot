@@ -1366,20 +1366,37 @@ select:focus-visible {
   }
 }
 
-/* 平滑的颜色过渡：悬停态 + 主题切换。只动颜色类属性，不引起重排。 */
+/* 平滑的颜色过渡：悬停态。只动颜色类属性，不引起重排。 */
 @media (prefers-reduced-motion: no-preference) {
   button,
   a,
   [role="tab"],
-  input[type="range"],
-  [data-theme] aside,
-  [data-theme] section,
-  [data-theme] header {
+  input[type="range"] {
     transition:
       background-color 0.16s ease,
       border-color 0.16s ease,
       color 0.16s ease,
       box-shadow 0.16s ease;
+  }
+}
+
+/* 明暗切换：切换瞬间由 JS 给 <html> 加 .theme-animating(~300ms)，让整树颜色一起淡变，
+   避免「按钮淡变、背景/文字/卡片却瞬间跳变」的先后错位。只在这段窗口内对全树挂过渡，
+   平时不挂(否则会拖累 hover/拖动等交互)。不动 transform，避免位移。reduce-motion 时
+   JS 直接不加这个类。 */
+@media (prefers-reduced-motion: no-preference) {
+  html.theme-animating,
+  html.theme-animating *,
+  html.theme-animating *::before,
+  html.theme-animating *::after {
+    transition:
+      background-color 0.3s ease,
+      border-color 0.3s ease,
+      color 0.3s ease,
+      fill 0.3s ease,
+      stroke 0.3s ease,
+      box-shadow 0.3s ease !important;
+    transition-delay: 0s !important;
   }
 }
 
