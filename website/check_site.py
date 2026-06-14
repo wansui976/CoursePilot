@@ -3,6 +3,8 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parent
 html = (root / "index.html").read_text(encoding="utf-8")
+studio = (root / "screenshot-studio.html").read_text(encoding="utf-8")
+generator = (root / "generate_mock_screenshots.py").read_text(encoding="utf-8")
 
 required_text = [
     "课程视频学习工作台",
@@ -37,6 +39,32 @@ if html.count("data-parallax") < 2:
 
 if "matchMedia(\"(prefers-reduced-motion: reduce)\")" not in html:
     raise SystemExit("Expected JavaScript to respect reduced motion preferences")
+
+studio_required_text = [
+    "真实 UI 截图工作室",
+    "深度学习入门：梯度下降与反向传播",
+    "损失函数的梯度指出当前点上升最快方向",
+    "课件 18 / 32",
+    "本节可复习材料",
+    "回答按句标注出处",
+    "导出 Markdown",
+]
+
+studio_missing = [text for text in studio_required_text if text not in studio]
+if studio_missing:
+    raise SystemExit(f"Missing screenshot studio mock data: {studio_missing}")
+
+generator_required_text = [
+    "generated realistic mock screenshots",
+    "深度学习入门：梯度下降与反向传播",
+    "promo-hero.png",
+    "promo-workbench.png",
+    "og-image.png",
+]
+
+generator_missing = [text for text in generator_required_text if text not in generator]
+if generator_missing:
+    raise SystemExit(f"Missing screenshot generator content: {generator_missing}")
 
 for asset in ["promo-hero.png", "promo-workbench.png", "og-image.png"]:
     path = root / asset

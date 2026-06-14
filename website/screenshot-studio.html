@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CoursePilot 真实 UI 截图工作室</title>
+    <style>
+      :root {
+        --primary: #0066cc;
+        --primary-on-dark: #2997ff;
+        --ink: #1d1d1f;
+        --muted: #6e6e73;
+        --canvas: #ffffff;
+        --parchment: #f5f5f7;
+        --tile: #272729;
+        --line: #e6e6ea;
+        --soft: #f1f2f5;
+        --panel: #fbfbfd;
+        --shadow: rgba(0, 0, 0, 0.22) 3px 5px 30px 0;
+        --font-display: "SF Pro Display", system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+        --font-text: "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--parchment);
+        color: var(--ink);
+        font-family: var(--font-text);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .studio-note {
+        padding: 24px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .shot-canvas {
+        width: 1440px;
+        height: 900px;
+        display: grid;
+        place-items: center;
+        padding: 64px 88px;
+        background: var(--parchment);
+      }
+
+      .shot-canvas--dark {
+        background: var(--tile);
+      }
+
+      .app-window {
+        width: 1180px;
+        height: 720px;
+        overflow: hidden;
+        border-radius: 18px;
+        background: var(--canvas);
+        box-shadow: var(--shadow);
+      }
+
+      .traffic {
+        height: 38px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 16px;
+        background: #f5f5f7;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+      }
+
+      .app-body {
+        height: calc(100% - 38px);
+        display: grid;
+        grid-template-columns: 238px minmax(0, 1fr) 374px;
+        background: var(--canvas);
+      }
+
+      .sidebar {
+        background: #f6f7f9;
+        border-right: 1px solid var(--line);
+        padding: 18px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .sidebar h2,
+      .panel-title,
+      .course-title {
+        margin: 0;
+        font-family: var(--font-display);
+        letter-spacing: -0.28px;
+      }
+
+      .sidebar h2 {
+        font-size: 17px;
+      }
+
+      .course-card {
+        border: 1px solid transparent;
+        border-radius: 10px;
+        padding: 12px;
+        color: var(--muted);
+      }
+
+      .course-card.active {
+        background: var(--canvas);
+        border-color: var(--line);
+        color: var(--ink);
+      }
+
+      .course-card strong {
+        display: block;
+        font-size: 14px;
+        line-height: 1.2;
+        margin-bottom: 5px;
+      }
+
+      .course-card span {
+        display: block;
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .queue {
+        margin-top: auto;
+        border-top: 1px solid var(--line);
+        padding-top: 14px;
+      }
+
+      .queue p {
+        margin: 0 0 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .tiny-progress {
+        height: 5px;
+        border-radius: 999px;
+        background: #e8e8ed;
+        overflow: hidden;
+      }
+
+      .tiny-progress span {
+        display: block;
+        width: 72%;
+        height: 100%;
+        background: var(--primary);
+      }
+
+      .player {
+        background: #101114;
+        color: #fff;
+        display: grid;
+        grid-template-rows: 70px minmax(0, 1fr) 136px;
+      }
+
+      .player-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 18px 22px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .course-title {
+        font-size: 18px;
+        color: #fff;
+      }
+
+      .badge-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .badge {
+        border-radius: 999px;
+        padding: 5px 9px;
+        background: rgba(41, 151, 255, 0.14);
+        color: var(--primary-on-dark);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .slide-stage {
+        display: grid;
+        place-items: center;
+        padding: 28px;
+      }
+
+      .slide {
+        width: 520px;
+        height: 292px;
+        border-radius: 12px;
+        background: var(--parchment);
+        color: var(--ink);
+        padding: 34px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 14px;
+      }
+
+      .slide .pill {
+        align-self: flex-start;
+        border-radius: 999px;
+        padding: 6px 12px;
+        background: rgba(0, 102, 204, 0.1);
+        color: var(--primary);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .slide h1 {
+        margin: 0;
+        font-family: var(--font-display);
+        font-size: 34px;
+        line-height: 1.06;
+        letter-spacing: -0.374px;
+      }
+
+      .slide p {
+        margin: 0;
+        color: #333;
+        font-size: 15px;
+        line-height: 1.5;
+      }
+
+      .captions {
+        padding: 16px 22px 18px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .caption-text {
+        margin: 0 0 14px;
+        text-align: center;
+        font-size: 15px;
+        color: rgba(255, 255, 255, 0.88);
+      }
+
+      .progress {
+        height: 5px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.16);
+        overflow: hidden;
+      }
+
+      .progress span {
+        display: block;
+        height: 100%;
+        width: 42%;
+        background: var(--primary-on-dark);
+      }
+
+      .time-row {
+        margin-top: 11px;
+        display: flex;
+        justify-content: space-between;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 12px;
+      }
+
+      .right-panel {
+        border-left: 1px solid var(--line);
+        background: var(--canvas);
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 18px;
+        padding: 16px 18px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .tab {
+        padding-bottom: 12px;
+        border-bottom: 3px solid transparent;
+        color: var(--muted);
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .tab.active {
+        color: var(--ink);
+        border-bottom-color: var(--primary);
+      }
+
+      .panel-content {
+        padding: 18px;
+        display: grid;
+        align-content: start;
+        gap: 12px;
+      }
+
+      .panel-title {
+        font-size: 16px;
+      }
+
+      .note-card,
+      .transcript-card,
+      .qa-card,
+      .slide-card {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 13px;
+        background: var(--canvas);
+      }
+
+      .note-card h3,
+      .qa-card h3 {
+        margin: 0 0 8px;
+        font-size: 15px;
+      }
+
+      .note-card p,
+      .qa-card p,
+      .transcript-card p,
+      .slide-card p {
+        margin: 0;
+        color: #333;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .time {
+        color: var(--primary);
+        font-weight: 600;
+      }
+
+      .materials {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 9px;
+      }
+
+      .material {
+        border-radius: 9px;
+        background: var(--soft);
+        padding: 10px;
+      }
+
+      .material strong {
+        display: block;
+        font-size: 13px;
+      }
+
+      .material span {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .workbench .app-body {
+        grid-template-columns: 220px minmax(0, 1fr) 430px;
+      }
+
+      .slides-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+      }
+
+      .thumb {
+        height: 86px;
+        border-radius: 9px;
+        background: var(--parchment);
+        border: 1px solid var(--line);
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 7px;
+      }
+
+      .thumb strong {
+        font-size: 12px;
+      }
+
+      .thumb span {
+        height: 6px;
+        border-radius: 999px;
+        background: #dcdce1;
+      }
+
+      .og-canvas {
+        width: 1200px;
+        height: 630px;
+        display: grid;
+        grid-template-columns: 0.9fr 1.1fr;
+        gap: 34px;
+        align-items: center;
+        padding: 58px 66px;
+        background: var(--parchment);
+      }
+
+      .og-copy h1 {
+        margin: 0;
+        font-family: var(--font-display);
+        font-size: 56px;
+        line-height: 1.06;
+        letter-spacing: -0.56px;
+      }
+
+      .og-copy p {
+        margin: 18px 0 0;
+        color: #333;
+        font-size: 24px;
+        line-height: 1.28;
+      }
+
+      .og-mini {
+        width: 600px;
+        height: 420px;
+        border-radius: 16px;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: var(--shadow);
+        transform: scale(0.9);
+        transform-origin: center;
+      }
+
+      .og-mini .app-body {
+        grid-template-columns: 124px 1fr 178px;
+      }
+
+      .og-mini .traffic {
+        height: 28px;
+      }
+
+      .og-mini .player {
+        grid-template-rows: 42px 1fr 76px;
+      }
+
+      .og-mini .slide {
+        width: 260px;
+        height: 146px;
+        padding: 18px;
+      }
+
+      .og-mini .slide h1 {
+        font-size: 18px;
+      }
+
+      .og-mini .slide p,
+      .og-mini .sidebar,
+      .og-mini .right-panel {
+        font-size: 9px;
+      }
+
+      .og-mini .sidebar {
+        padding: 10px 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <p class="studio-note">真实 UI 截图工作室：此页只用于生成 CoursePilot 官网宣传图，包含模拟数据，不作为公开导航入口。</p>
+
+    <section class="shot-canvas" id="hero-shot" aria-label="CoursePilot 真实工作台模拟截图">
+      <div class="app-window">
+        <div class="traffic">
+          <span class="dot" style="background:#ff5f57"></span>
+          <span class="dot" style="background:#febc2e"></span>
+          <span class="dot" style="background:#28c840"></span>
+        </div>
+        <div class="app-body">
+          <aside class="sidebar">
+            <h2>课程库</h2>
+            <div class="course-card active">
+              <strong>深度学习入门：梯度下降与反向传播</strong>
+              <span>12 个视频 · 已完成 9 个 · 8.6 小时</span>
+            </div>
+            <div class="course-card">
+              <strong>B 站公开课：线性代数</strong>
+              <span>Bilibili / URL 下载 · 正在转写第 4 讲</span>
+            </div>
+            <div class="course-card">
+              <strong>本地录屏：React 进阶</strong>
+              <span>本地 whisper.cpp · 离线处理</span>
+            </div>
+            <div class="queue">
+              <p>处理队列 · 字幕纠错 72%</p>
+              <div class="tiny-progress"><span></span></div>
+            </div>
+          </aside>
+
+          <main class="player">
+            <div class="player-head">
+              <h2 class="course-title">06 梯度下降的直观理解</h2>
+              <div class="badge-row">
+                <span class="badge">AI 概览</span>
+                <span class="badge">字幕同步</span>
+                <span class="badge">断点续播</span>
+              </div>
+            </div>
+            <div class="slide-stage">
+              <div class="slide">
+                <span class="pill">L(θ) → min</span>
+                <h1>梯度下降的直观理解</h1>
+                <p>每次沿着损失函数下降最快的方向迈一步，直到找到足够好的参数。</p>
+              </div>
+            </div>
+            <div class="captions">
+              <p class="caption-text">“损失函数的梯度指出当前点上升最快方向，反方向就是最直接的下降路径。”</p>
+              <div class="progress"><span></span></div>
+              <div class="time-row">
+                <span>12:48 / 31:20</span>
+                <span>点击字幕时间戳可跳回视频</span>
+              </div>
+            </div>
+          </main>
+
+          <aside class="right-panel">
+            <div class="tabs">
+              <span class="tab active">AI 概览</span>
+              <span class="tab">笔记</span>
+              <span class="tab">文稿</span>
+              <span class="tab">课件</span>
+            </div>
+            <div class="panel-content">
+              <h2 class="panel-title">本节可复习材料</h2>
+              <div class="materials">
+                <div class="material"><strong>章节</strong><span>6 段 · 可跳转</span></div>
+                <div class="material"><strong>图文笔记</strong><span>1 篇 · 已保存</span></div>
+                <div class="material"><strong>脑图</strong><span>14 个节点</span></div>
+                <div class="material"><strong>练习题</strong><span>5 道自测</span></div>
+              </div>
+              <div class="note-card">
+                <h3>为什么梯度下降有效</h3>
+                <p>损失函数的梯度指出当前点上升最快方向，反方向就是最直接的下降路径。<span class="time">[12:48]</span></p>
+              </div>
+              <div class="qa-card">
+                <h3>问：学习率太大会怎样？</h3>
+                <p>每一步会越过低点，参数在谷底两侧来回跳，甚至发散。回答按句标注出处。<span class="time">[14:22]</span></p>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="shot-canvas shot-canvas--dark" id="workbench-shot" aria-label="CoursePilot 课件与 OCR 工作台模拟截图">
+      <div class="app-window workbench">
+        <div class="traffic">
+          <span class="dot" style="background:#ff5f57"></span>
+          <span class="dot" style="background:#febc2e"></span>
+          <span class="dot" style="background:#28c840"></span>
+        </div>
+        <div class="app-body">
+          <aside class="sidebar">
+            <h2>资料</h2>
+            <div class="course-card active">
+              <strong>课件截图</strong>
+              <span>课件 18 / 32 · 自动换页</span>
+            </div>
+            <div class="course-card">
+              <strong>文稿</strong>
+              <span>1,246 句 · 本地搜索</span>
+            </div>
+            <div class="course-card">
+              <strong>导出</strong>
+              <span>导出 Markdown · SRT / VTT / SVG</span>
+            </div>
+          </aside>
+
+          <main class="player">
+            <div class="player-head">
+              <h2 class="course-title">18 反向传播：链式法则</h2>
+              <div class="badge-row">
+                <span class="badge">截图 OCR</span>
+                <span class="badge">课件抽取</span>
+              </div>
+            </div>
+            <div class="slide-stage">
+              <div class="slide">
+                <span class="pill">Screenshot OCR</span>
+                <h1>反向传播：链式法则</h1>
+                <p>从输出层向输入层逐层传递梯度，复用中间节点的局部导数。</p>
+              </div>
+            </div>
+            <div class="captions">
+              <p class="caption-text">截图已插入笔记 · OCR 识别 38 个字 · 与字幕时间点绑定</p>
+              <div class="progress"><span style="width:66%"></span></div>
+              <div class="time-row">
+                <span>课件 18 / 32</span>
+                <span>自动抽帧 · 框选截图 · 本地或阿里云 OCR</span>
+              </div>
+            </div>
+          </main>
+
+          <aside class="right-panel">
+            <div class="tabs">
+              <span class="tab">AI 概览</span>
+              <span class="tab active">笔记</span>
+              <span class="tab">文稿</span>
+              <span class="tab">课件</span>
+            </div>
+            <div class="panel-content">
+              <h2 class="panel-title">图文笔记</h2>
+              <div class="note-card">
+                <h3>反向传播的关键</h3>
+                <p>把复杂函数拆成局部计算图，沿计算图反向累乘梯度。截图已和字幕时间点绑定。<span class="time">[18:06]</span></p>
+              </div>
+              <div class="transcript-card">
+                <p>“链式法则让我们不用重新计算每一个参数的影响，而是复用中间节点的局部导数……” <span class="time">[18:06]</span></p>
+              </div>
+              <div class="slides-grid">
+                <div class="thumb"><strong>16 损失函数</strong><span style="width:80%"></span><span style="width:56%"></span></div>
+                <div class="thumb"><strong>17 计算图</strong><span style="width:72%"></span><span style="width:64%"></span></div>
+                <div class="thumb"><strong>18 链式法则</strong><span style="width:90%"></span><span style="width:42%"></span></div>
+                <div class="thumb"><strong>19 参数更新</strong><span style="width:66%"></span><span style="width:74%"></span></div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="og-canvas" id="og-shot" aria-label="CoursePilot Open Graph 分享图">
+      <div class="og-copy">
+        <h1>把课程视频变成可复习资料。</h1>
+        <p>字幕、章节、笔记、课件截图、课程问答，都围绕同一节课展开。</p>
+      </div>
+      <div class="og-mini app-window">
+        <div class="traffic">
+          <span class="dot" style="background:#ff5f57"></span>
+          <span class="dot" style="background:#febc2e"></span>
+          <span class="dot" style="background:#28c840"></span>
+        </div>
+        <div class="app-body">
+          <aside class="sidebar">
+            <div class="course-card active"><strong>机器学习导论</strong><span>12 个视频</span></div>
+            <div class="course-card"><strong>B 站公开课</strong><span>下载完成</span></div>
+          </aside>
+          <main class="player">
+            <div class="player-head"><h2 class="course-title">梯度下降</h2></div>
+            <div class="slide-stage">
+              <div class="slide">
+                <span class="pill">L(θ) → min</span>
+                <h1>梯度下降</h1>
+                <p>沿反梯度方向更新参数。</p>
+              </div>
+            </div>
+            <div class="captions"><div class="progress"><span></span></div></div>
+          </main>
+          <aside class="right-panel">
+            <div class="tabs"><span class="tab active">AI 概览</span><span class="tab">笔记</span></div>
+            <div class="panel-content">
+              <div class="note-card"><h3>本节要点</h3><p>章节、笔记、脑图、练习题已生成。</p></div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </body>
+</html>
