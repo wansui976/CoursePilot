@@ -241,6 +241,37 @@
         border-radius: var(--r-pill);
       }
 
+      /* ---------------- 极光背景层(克制、低饱和,只在浅色 Hero 内) ---------------- */
+      .aurora {
+        position: absolute;
+        inset: -25% -10% auto -10%;
+        height: 150%;
+        z-index: 0;
+        pointer-events: none;
+        opacity: 0;
+        filter: blur(60px);
+        background:
+          radial-gradient(40% 50% at 22% 30%, rgba(41, 151, 255, 0.28), transparent 70%),
+          radial-gradient(38% 46% at 78% 22%, rgba(0, 102, 204, 0.22), transparent 72%),
+          radial-gradient(45% 55% at 60% 78%, rgba(120, 180, 255, 0.18), transparent 70%);
+        background-size: 160% 160%;
+        animation: auroraDrift 22s ease-in-out infinite alternate;
+        transition: opacity 1.4s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .aurora.is-lit {
+        opacity: 1;
+      }
+      @keyframes auroraDrift {
+        0% {
+          background-position: 0% 0%;
+          transform: translate3d(0, 0, 0) scale(1);
+        }
+        100% {
+          background-position: 100% 100%;
+          transform: translate3d(0, -3%, 0) scale(1.08);
+        }
+      }
+
       /* ---------------- 通用 tile（整幅、80px、靠换色分段） ---------------- */
       .tile {
         padding: var(--s-section) 22px;
@@ -1060,6 +1091,10 @@
         html {
           scroll-behavior: auto;
         }
+        .aurora {
+          animation: none !important;
+          opacity: 0.5;
+        }
         html.motion-ready [data-animate],
         html.motion-ready [data-animate].is-visible,
         html.motion-ready [data-parallax],
@@ -1112,8 +1147,9 @@
 
     <main id="top">
       <!-- ============ Hero ============ -->
-      <section class="tile tile--parchment">
-        <div class="tile__inner">
+      <section class="tile tile--parchment" data-hero-section style="position: relative; overflow: hidden;">
+        <div class="aurora" aria-hidden="true"></div>
+        <div class="tile__inner" style="position: relative; z-index: 1;">
           <p class="eyebrow" data-animate="hero" style="--motion-delay: 80ms">CoursePilot</p>
           <h1 class="hero-display" data-animate="hero" style="--motion-delay: 160ms">把课程视频<br />整理成可复习资料。</h1>
           <p class="lead" data-animate="hero" style="--motion-delay: 240ms">
@@ -1557,6 +1593,7 @@
           item.classList.add("is-visible");
         });
         clearMotionValues();
+        document.querySelectorAll(".aurora").forEach((el) => el.classList.add("is-lit"));
       }
 
       function updateNavState() {

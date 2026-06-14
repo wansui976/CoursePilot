@@ -25,6 +25,8 @@ required_text = [
     "gsap@3.13",
     "ScrollTrigger.min.js",
     "DOMContentLoaded",
+    "class=\"aurora\"",
+    "auroraDrift",
 ]
 
 missing = [text for text in required_text if text not in html]
