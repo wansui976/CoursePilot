@@ -15,10 +15,13 @@ export function VideoPlayer({
   src,
   videoId,
   immersive = false,
+  resizing = false,
 }: {
   src: string;
   videoId: string;
   immersive?: boolean;
+  // 工作台分隔条正在拖动:拖动期间冻结舞台尺寸,避免暂停静帧每帧重新栅格化导致卡顿。
+  resizing?: boolean;
 }) {
   const regionRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -61,16 +64,46 @@ export function VideoPlayer({
   }, []);
 
   // 跟踪播放区实际尺寸，据此把舞台收成视频的真实宽高比，做到「完整不裁剪 + 不留黑边」。
+  const resizingRef = useRef(resizing);
   useEffect(() => {
     const el = regionRef.current;
     if (!el) return;
-    const update = () => setRegion({ w: el.clientWidth, h: el.clientHeight });
+    const update = () => {
+      // 拖动分隔条期间不重算舞台尺寸：否则网格每帧重排，暂停的静帧会被反复栅格化（卡顿来源）。
+      if (resizingRef.current) return;
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      // 等值守卫：尺寸没变就不 setState，避免无谓重渲染。
+      setRegion((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
+    };
     update();
     if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(update);
+    // rAF 合帧：一帧内多次 resize 只算一次。
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        update();
+      });
+    });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
   }, []);
+
+  // 分隔条拖动状态翻转：拖动中冻结舞台尺寸，松手后一次性贴合最终宽度。
+  useEffect(() => {
+    resizingRef.current = resizing;
+    if (resizing) return;
+    const el = regionRef.current;
+    if (!el) return;
+    const w = el.clientWidth;
+    const h = el.clientHeight;
+    setRegion((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
+  }, [resizing]);
 
   // 在播放区内，求与视频同比例、尽可能大的居中矩形；视频铺满它即完整无黑边。
   const aspect = videoAspect > 0 ? videoAspect : 16 / 9;
