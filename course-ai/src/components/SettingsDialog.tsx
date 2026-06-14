@@ -275,6 +275,7 @@ export function SettingsPanel({
   const [asrBackend, setAsrBackend] = useState(defaultAsrBackend());
   const [asrLanguage, setAsrLanguage] = useState("zh");
   const [correctionConcurrency, setCorrectionConcurrency] = useState("8");
+  const [subtitleAutocorrect, setSubtitleAutocorrect] = useState(true);
   const [volcengineAppId, setVolcengineAppId] = useState("");
   const [volcengineToken, setVolcengineToken] = useState("");
   const [volcengineSaved, setVolcengineSaved] = useState("");
@@ -307,6 +308,9 @@ export function SettingsPanel({
     void ipc.settings
       .get("asr_correction_concurrency")
       .then((value) => setCorrectionConcurrency(value ?? "8"));
+    void ipc.settings
+      .get("subtitle_autocorrect")
+      .then((value) => setSubtitleAutocorrect(value !== "false"));
     void ipc.settings
       .get("volcengine_asr_app_id")
       .then((value) => setVolcengineAppId(value ?? ""));
@@ -360,6 +364,11 @@ export function SettingsPanel({
     if (Number.isFinite(n) && n >= 1) {
       await ipc.settings.set("asr_correction_concurrency", String(Math.min(2500, Math.floor(n))));
     }
+  }
+
+  async function changeSubtitleAutocorrect(value: boolean) {
+    setSubtitleAutocorrect(value);
+    await ipc.settings.set("subtitle_autocorrect", value ? "true" : "false");
   }
 
   async function saveVolcengineKey() {
@@ -729,6 +738,21 @@ export function SettingsPanel({
                       value={correctionConcurrency}
                       onChange={(event) =>
                         void changeCorrectionConcurrency(event.target.value)
+                      }
+                    />
+                  </Row>
+                  <Row
+                    label="导入字幕后用 AI 纠错"
+                    htmlFor="subtitle-autocorrect"
+                    hint="导入 B 站自带字幕后，是否像 ASR 文稿一样交给大模型纠正错别字、标点并还原数学公式。关闭则字幕原样使用。"
+                  >
+                    <input
+                      id="subtitle-autocorrect"
+                      type="checkbox"
+                      className="h-4 w-4 accent-[var(--accent)]"
+                      checked={subtitleAutocorrect}
+                      onChange={(event) =>
+                        void changeSubtitleAutocorrect(event.target.checked)
                       }
                     />
                   </Row>

@@ -21,6 +21,25 @@ export interface Video {
   data_dir: string;
   processed_status: "pending" | "processing" | "done" | "failed";
   created_at: number;
+  subtitle_path?: string | null;
+  subtitle_lang?: string | null;
+  // 自带黑边四边裁剪占比（0~1），导入时 cropdetect 探测；缺省/NULL=无黑边。
+  crop_top?: number | null;
+  crop_right?: number | null;
+  crop_bottom?: number | null;
+  crop_left?: number | null;
+}
+
+export interface SubtitleTrack {
+  lang: string;
+  name: string;
+  auto: boolean;
+}
+
+export interface ProbeResult {
+  title: string;
+  tracks: SubtitleTrack[];
+  qualities: number[];
 }
 
 export interface TranscriptSegment {
