@@ -115,6 +115,12 @@
       html.intro-active [data-hero-section] [data-animate] {
         transition: none !important;
       }
+      /* 开场时让标题容器保持中性,真正的逐词动画交给内部 .hero-word */
+      html.intro-active [data-hero-section] h1.hero-display[data-animate] {
+        opacity: 1;
+        transform: none;
+        filter: none;
+      }
       .hero-word {
         display: inline-block;
         will-change: opacity, transform, filter;
@@ -1776,7 +1782,12 @@
 
         const heroSet = new Set(heroItems);
         const restItems = animatedItems.filter((el) => !heroSet.has(el));
-        const introPlayed = sessionStorage.getItem(INTRO_KEY) === "1";
+        let introPlayed = false;
+        try {
+          introPlayed = sessionStorage.getItem(INTRO_KEY) === "1";
+        } catch (e) {
+          /* 隐私模式下 sessionStorage 不可读,按未播放处理 */
+        }
 
         if (hasGSAP() && heroSection && !introPlayed) {
           playHeroIntro();
