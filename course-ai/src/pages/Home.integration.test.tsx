@@ -52,6 +52,15 @@ const { mockIpc } = vi.hoisted(() => ({
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 const mockUseContainerWidth = vi.hoisted(() => ({
   useContainerWidth: vi.fn(),
+  coarsePointer: vi.fn(() => false),
+  useIsPortrait: vi.fn(() => false),
+}));
+const mockPlatform = vi.hoisted(() => ({
+  isTablet: vi.fn(() => false),
+  isMobile: vi.fn(() => false),
+  isAndroid: vi.fn(() => false),
+  isIOS: vi.fn(() => false),
+  isDesktop: vi.fn(() => true),
 }));
 const mockBackButtonPress = vi.hoisted(() => ({
   onBackButtonPress: vi.fn(),
@@ -60,6 +69,7 @@ const mockCurrentWindow = vi.hoisted(() => ({
   onCloseRequested: vi.fn(),
 }));
 vi.mock("@/lib/useContainerWidth", () => mockUseContainerWidth);
+vi.mock("@/lib/platform", () => mockPlatform);
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => `asset://${path}`,
@@ -116,6 +126,9 @@ describe("Home selected-video integration", () => {
 
   beforeEach(() => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("wide");
+    mockUseContainerWidth.coarsePointer.mockReturnValue(false);
+    mockUseContainerWidth.useIsPortrait.mockReturnValue(false);
+    mockPlatform.isTablet.mockReturnValue(false);
     mockBackButtonPress.onBackButtonPress.mockReset();
     mockCurrentWindow.onCloseRequested.mockReset();
     mockBackButtonPress.onBackButtonPress.mockImplementation(async () => ({
@@ -243,5 +256,70 @@ describe("Home selected-video integration", () => {
     fireEvent.click(within(nav).getByRole("button", { name: "设置" }));
 
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+  });
+
+  it("uses the phone-style library layout on iPad portrait", async () => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("medium");
+    mockPlatform.isTablet.mockReturnValue(true);
+
+    renderHome();
+
+    expect(await screen.findByRole("complementary", { name: "课程侧栏" })).toHaveClass(
+      "ca-course-screen",
+    );
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+  });
+
+  it("uses the stacked workspace on iPad portrait", async () => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("medium");
+    mockPlatform.isTablet.mockReturnValue(true);
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+
+    expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
+      "data-layout",
+      "stacked",
+    );
+    expect(screen.queryByRole("navigation", { name: "工具栏" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
+  });
+
+  // 12.9" iPad 竖屏宽达 1024 会落入 wide 档；必须靠 orientation 仍判为上下叠放。
+  it("stacks the workspace on a wide iPad in portrait", async () => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("wide");
+    mockUseContainerWidth.coarsePointer.mockReturnValue(true);
+    mockUseContainerWidth.useIsPortrait.mockReturnValue(true);
+    mockPlatform.isTablet.mockReturnValue(true);
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+
+    expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
+      "data-layout",
+      "stacked",
+    );
+  });
+
+  // 横屏 iPad(wide)继续保留桌面式左右分栏。
+  it("keeps the split workspace on a wide iPad in landscape", async () => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("wide");
+    mockUseContainerWidth.coarsePointer.mockReturnValue(true);
+    mockUseContainerWidth.useIsPortrait.mockReturnValue(false);
+    mockPlatform.isTablet.mockReturnValue(true);
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+
+    expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
+      "data-layout",
+      "wide",
+    );
   });
 });
