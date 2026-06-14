@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 本地 cookie 文件（含登录态，禁止提交）
+*_cookies*.txt
+cookies*.txt
