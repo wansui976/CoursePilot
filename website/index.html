@@ -209,6 +209,19 @@
         border-bottom-color: rgba(255, 255, 255, 0.12);
         box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
       }
+      .scroll-progress {
+        position: fixed;
+        top: 44px;
+        left: 0;
+        height: 2px;
+        width: 100%;
+        transform: scaleX(0);
+        transform-origin: 0 50%;
+        background: linear-gradient(90deg, var(--primary), var(--primary-on-dark));
+        z-index: 99;
+        pointer-events: none;
+        transition: transform 0.1s linear;
+      }
       .global-nav__inner {
         width: 100%;
         max-width: 1024px;
@@ -1132,6 +1145,9 @@
         * {
           transition: none !important;
         }
+        .scroll-progress {
+          transition: none !important;
+        }
       }
     </style>
     <!-- GSAP(免费):仅作增强层,CDN 不可用时页面照常完整显示 -->
@@ -1161,6 +1177,7 @@
         <a class="nav-cta" href="#download">下载</a>
       </div>
     </nav>
+    <div class="scroll-progress" aria-hidden="true"></div>
 
     <main id="top">
       <!-- ============ Hero ============ -->
@@ -1686,6 +1703,12 @@
 
       function updateNavState() {
         nav.classList.toggle("nav-scrolled", window.scrollY > 8);
+        const progress = document.querySelector(".scroll-progress");
+        if (progress) {
+          const max = document.documentElement.scrollHeight - window.innerHeight;
+          const ratio = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+          progress.style.transform = `scaleX(${ratio.toFixed(4)})`;
+        }
       }
 
       function clamp(value, min, max) {
