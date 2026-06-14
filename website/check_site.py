@@ -30,6 +30,7 @@ required_text = [
     "coursepilot-intro-played",
     "playHeroIntro",
     "hero-word",
+    "scroll-progress",
 ]
 
 missing = [text for text in required_text if text not in html]
