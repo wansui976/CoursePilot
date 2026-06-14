@@ -98,27 +98,43 @@
 
       html.motion-ready [data-animate] {
         opacity: 0;
-        transform: translate3d(0, 28px, 0);
+        transform: translate3d(0, 34px, 0) scale(0.992);
+        filter: blur(10px);
         transition:
-          opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
-          transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+          opacity 1s cubic-bezier(0.16, 1, 0.3, 1),
+          transform 1s cubic-bezier(0.16, 1, 0.3, 1),
+          filter 1s cubic-bezier(0.16, 1, 0.3, 1);
         transition-delay: var(--motion-delay, 0ms);
-        will-change: opacity, transform;
+        will-change: opacity, transform, filter;
       }
       html.motion-ready [data-animate].is-visible {
         opacity: 1;
-        transform: translate3d(0, 0, 0);
+        transform: translate3d(0, 0, 0) scale(1);
+        filter: blur(0);
+      }
+      html.motion-ready [data-animate="hero"] {
+        transform: translate3d(0, 42px, 0) scale(0.985);
       }
       html.motion-ready [data-animate="scale"] {
-        transform: translate3d(0, 36px, 0) scale(0.985);
+        transform:
+          perspective(1200px)
+          translate3d(0, calc(48px + var(--motion-y, 0px)), 0)
+          rotateX(var(--tilt-x, 0deg))
+          rotateY(var(--tilt-y, 0deg))
+          scale(0.975);
       }
       html.motion-ready [data-animate="scale"].is-visible {
-        transform: translate3d(0, var(--parallax-y, 0px), 0) scale(1);
+        transform:
+          perspective(1200px)
+          translate3d(0, var(--motion-y, 0px), 0)
+          rotateX(var(--tilt-x, 0deg))
+          rotateY(var(--tilt-y, 0deg))
+          scale(var(--motion-scale, 1));
       }
       html.motion-ready [data-parallax] {
-        transform: translate3d(0, var(--parallax-y, 0px), 0);
         transition:
-          opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
+          opacity 1s cubic-bezier(0.16, 1, 0.3, 1),
+          filter 1s cubic-bezier(0.16, 1, 0.3, 1),
           transform 0.18s ease-out;
       }
 
@@ -165,12 +181,17 @@
         justify-content: center;
         transition:
           background-color 0.28s ease,
-          border-color 0.28s ease;
+          border-color 0.28s ease,
+          box-shadow 0.28s ease,
+          backdrop-filter 0.28s ease;
         border-bottom: 1px solid transparent;
       }
       .global-nav.nav-scrolled {
-        background: rgba(0, 0, 0, 0.78);
+        background: rgba(0, 0, 0, 0.72);
+        backdrop-filter: saturate(180%) blur(26px);
+        -webkit-backdrop-filter: saturate(180%) blur(26px);
         border-bottom-color: rgba(255, 255, 255, 0.12);
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
       }
       .global-nav__inner {
         width: 100%;
@@ -352,6 +373,12 @@
 
       /* ---------------- 应用界面样机（充当“产品图”，吃唯一投影） ---------------- */
       .product-shot {
+        --motion-y: 0px;
+        --tilt-x: 0deg;
+        --tilt-y: 0deg;
+        --motion-scale: 1;
+        --shine-x: 50%;
+        --shine-y: 18%;
         width: min(1120px, 100%);
         margin-top: var(--s-xl);
         border-radius: var(--r-lg);
@@ -360,6 +387,23 @@
         box-shadow: var(--product-shadow);
         position: relative;
         isolation: isolate;
+        transform-style: preserve-3d;
+      }
+      .product-shot::before {
+        content: "";
+        position: absolute;
+        inset: -20%;
+        z-index: 0;
+        pointer-events: none;
+        background:
+          radial-gradient(circle at var(--shine-x) var(--shine-y), rgba(255, 255, 255, 0.2), transparent 30%),
+          radial-gradient(circle at 50% 100%, rgba(41, 151, 255, 0.14), transparent 38%);
+        opacity: 0;
+        transform: translateZ(-1px);
+        transition: opacity 1s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .product-shot.is-visible::before {
+        opacity: 1;
       }
       .product-shot::after {
         content: "";
@@ -374,11 +418,11 @@
         opacity: 0;
         transform: skewX(-12deg) translateX(0);
         transition:
-          opacity 1.2s ease,
-          transform 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+          opacity 1.8s ease,
+          transform 1.8s cubic-bezier(0.16, 1, 0.3, 1);
       }
       .product-shot.is-visible::after {
-        opacity: 0.8;
+        opacity: 0.62;
         transform: skewX(-12deg) translateX(780%);
       }
       .product-shot--wide {
@@ -387,6 +431,38 @@
       .shot-frame {
         scroll-margin-top: 64px;
       }
+
+      @keyframes mockPulse {
+        0%,
+        100% {
+          opacity: 0.72;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.018);
+        }
+      }
+
+      @keyframes progressSheen {
+        0% {
+          transform: translateX(-120%);
+        }
+        100% {
+          transform: translateX(220%);
+        }
+      }
+
+      @keyframes lineBreath {
+        0%,
+        100% {
+          opacity: 0.52;
+        }
+        50% {
+          opacity: 0.82;
+        }
+      }
+
       .mock__bar {
         height: 36px;
         background: #f5f5f7;
@@ -395,6 +471,8 @@
         gap: 7px;
         padding: 0 14px;
         border-bottom: 1px solid var(--divider-soft);
+        position: relative;
+        z-index: 1;
       }
       .mock__dot {
         width: 11px;
@@ -406,6 +484,8 @@
         grid-template-columns: 220px minmax(0, 1.38fr) minmax(300px, 0.92fr);
         min-height: 520px;
         text-align: left;
+        position: relative;
+        z-index: 1;
       }
       .mock__rail {
         background: #f6f7f9;
@@ -499,6 +579,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
+        animation: mockPulse 3.8s ease-in-out infinite;
       }
       .mock__play::after {
         content: "";
@@ -536,6 +617,16 @@
         width: 42%;
         height: 100%;
         background: var(--primary-on-dark);
+        position: relative;
+        overflow: hidden;
+      }
+      .stage-progress span::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+        transform: translateX(-120%);
+        animation: progressSheen 4.8s ease-in-out infinite;
       }
       .stage-meta {
         display: flex;
@@ -568,6 +659,7 @@
       .mock__tab.is-active {
         color: var(--ink);
         border-bottom-color: var(--primary);
+        box-shadow: 0 8px 24px rgba(0, 102, 204, 0.1);
       }
       .mock__content {
         padding: 18px;
@@ -597,6 +689,7 @@
         height: 9px;
         border-radius: var(--r-pill);
         background: var(--divider-soft);
+        animation: lineBreath 4.5s ease-in-out infinite;
       }
       .mock__chip {
         align-self: flex-start;
@@ -607,6 +700,7 @@
         padding: 3px 9px;
         border-radius: var(--r-pill);
         letter-spacing: 0;
+        box-shadow: 0 0 0 1px rgba(0, 102, 204, 0.1), 0 8px 24px rgba(0, 102, 204, 0.1);
       }
       .timestamp {
         color: var(--primary);
@@ -978,6 +1072,11 @@
         .product-shot::after {
           display: none;
         }
+        .mock__play,
+        .stage-progress span::after,
+        .mock__line {
+          animation: none !important;
+        }
         * {
           transition: none !important;
         }
@@ -1012,17 +1111,17 @@
       <!-- ============ Hero ============ -->
       <section class="tile tile--parchment">
         <div class="tile__inner">
-          <p class="eyebrow" data-animate style="--motion-delay: 80ms">CoursePilot</p>
-          <h1 class="hero-display" data-animate style="--motion-delay: 160ms">把课程视频<br />整理成可复习资料。</h1>
-          <p class="lead" data-animate style="--motion-delay: 240ms">
+          <p class="eyebrow" data-animate="hero" style="--motion-delay: 80ms">CoursePilot</p>
+          <h1 class="hero-display" data-animate="hero" style="--motion-delay: 160ms">把课程视频<br />整理成可复习资料。</h1>
+          <p class="lead" data-animate="hero" style="--motion-delay: 240ms">
             把本地视频拖进来，或用 Bilibili / URL 下载。CoursePilot 会转写并纠错字幕，整理章节，生成笔记、脑图、练习题和课件截图。处理完后，你会得到一套能搜、能问、能继续复习的资料。
           </p>
-          <div class="cta-row" data-animate style="--motion-delay: 320ms">
+          <div class="cta-row" data-animate="hero" style="--motion-delay: 320ms">
             <a class="btn-pill" href="#download">查看下载方式</a>
             <a class="btn-pill btn-dark-link" href="https://github.com/wansui976/CoursePilot">GitHub 源码</a>
             <a class="text-link" href="#workbench">看看流程</a>
           </div>
-          <p class="caption" data-animate style="--motion-delay: 380ms">macOS · iPhone · iPad · Android · 资料存在本地 · AI 功能使用你自己的 API Key</p>
+          <p class="caption" data-animate="hero" style="--motion-delay: 380ms">macOS · iPhone · iPad · Android · 资料存在本地 · AI 功能使用你自己的 API Key</p>
 
           <!-- Screenshot source: website/promo-hero.png -->
           <div class="product-shot shot-frame" id="promo-hero" data-animate="scale" data-parallax role="img" aria-label="CoursePilot 学习工作台界面预览：左侧课程库，中间播放课程视频，右侧为 AI 概览 / 笔记 / 文稿 / 课件 标签">
@@ -1446,30 +1545,91 @@
       const animatedItems = Array.from(document.querySelectorAll("[data-animate]"));
       const parallaxItems = Array.from(document.querySelectorAll("[data-parallax]"));
       const nav = document.querySelector(".global-nav");
+      const pointerFineQuery = matchMedia("(hover: hover) and (pointer: fine)");
+      let stageTicking = false;
 
       function revealImmediately() {
         document.documentElement.classList.remove("motion-ready");
         animatedItems.forEach((item) => {
           item.classList.add("is-visible");
-          item.style.removeProperty("--parallax-y");
         });
+        clearMotionValues();
       }
 
       function updateNavState() {
         nav.classList.toggle("nav-scrolled", window.scrollY > 8);
       }
 
-      function updateParallax() {
-        if (reducedMotionQuery.matches) return;
+      function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+      }
+
+      function clearMotionValues() {
+        parallaxItems.forEach((item) => {
+          item.style.removeProperty("--motion-y");
+          item.style.removeProperty("--motion-scale");
+          item.style.removeProperty("--tilt-x");
+          item.style.removeProperty("--tilt-y");
+          item.style.removeProperty("--shine-x");
+          item.style.removeProperty("--shine-y");
+        });
+      }
+
+      function updateProductStage() {
+        stageTicking = false;
+
+        if (reducedMotionQuery.matches) {
+          clearMotionValues();
+          return;
+        }
+
         const viewportCenter = window.innerHeight / 2;
         parallaxItems.forEach((item) => {
           const rect = item.getBoundingClientRect();
-          const itemCenter = rect.top + rect.height / 2;
-          const distance = itemCenter - viewportCenter;
-          const offset = Math.max(-18, Math.min(18, distance * -0.035));
-          item.style.setProperty("--parallax-y", `${offset.toFixed(2)}px`);
+          const distance = rect.top + rect.height / 2 - viewportCenter;
+          const progress = clamp(distance / window.innerHeight, -1, 1);
+          const y = progress * -18;
+          const scale = 1 + (1 - Math.abs(progress)) * 0.012;
+
+          item.style.setProperty("--motion-y", `${y.toFixed(2)}px`);
+          item.style.setProperty("--motion-scale", scale.toFixed(3));
         });
       }
+
+      function requestStageUpdate() {
+        if (stageTicking) return;
+        stageTicking = true;
+        requestAnimationFrame(updateProductStage);
+      }
+
+      function handleProductPointer(event) {
+        if (!pointerFineQuery.matches || reducedMotionQuery.matches) return;
+
+        const item = event.currentTarget;
+        const rect = item.getBoundingClientRect();
+        const x = (event.clientX - rect.left) / rect.width;
+        const y = (event.clientY - rect.top) / rect.height;
+        const rotateY = (x - 0.5) * 5.5;
+        const rotateX = (0.5 - y) * 4.5;
+
+        item.style.setProperty("--tilt-x", `${rotateX.toFixed(2)}deg`);
+        item.style.setProperty("--tilt-y", `${rotateY.toFixed(2)}deg`);
+        item.style.setProperty("--shine-x", `${(x * 100).toFixed(1)}%`);
+        item.style.setProperty("--shine-y", `${(y * 100).toFixed(1)}%`);
+      }
+
+      function resetProductPointer(event) {
+        const item = event.currentTarget;
+        item.style.setProperty("--tilt-x", "0deg");
+        item.style.setProperty("--tilt-y", "0deg");
+        item.style.setProperty("--shine-x", "50%");
+        item.style.setProperty("--shine-y", "18%");
+      }
+
+      parallaxItems.forEach((item) => {
+        item.addEventListener("pointermove", handleProductPointer, { passive: true });
+        item.addEventListener("pointerleave", resetProductPointer);
+      });
 
       function enableMotion() {
         if (reducedMotionQuery.matches) {
@@ -1493,29 +1653,26 @@
 
         animatedItems.forEach((item) => observer.observe(item));
         updateNavState();
-        updateParallax();
+        requestStageUpdate();
       }
 
-      let ticking = false;
       window.addEventListener(
         "scroll",
         () => {
-          if (ticking) return;
-          ticking = true;
-          requestAnimationFrame(() => {
-            updateNavState();
-            updateParallax();
-            ticking = false;
-          });
+          updateNavState();
+          requestStageUpdate();
         },
         { passive: true }
       );
+      window.addEventListener("resize", requestStageUpdate);
 
       function handleReducedMotionChange() {
         if (reducedMotionQuery.matches) {
           revealImmediately();
+          clearMotionValues();
         } else {
-          enableMotion();
+          document.documentElement.classList.add("motion-ready");
+          requestStageUpdate();
         }
       }
 
@@ -1523,6 +1680,12 @@
         reducedMotionQuery.addEventListener("change", handleReducedMotionChange);
       } else if (typeof reducedMotionQuery.addListener === "function") {
         reducedMotionQuery.addListener(handleReducedMotionChange);
+      }
+
+      if (typeof pointerFineQuery.addEventListener === "function") {
+        pointerFineQuery.addEventListener("change", clearMotionValues);
+      } else if (typeof pointerFineQuery.addListener === "function") {
+        pointerFineQuery.addListener(clearMotionValues);
       }
 
       enableMotion();
