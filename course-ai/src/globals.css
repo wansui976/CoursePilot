@@ -1347,12 +1347,9 @@ select:focus-visible {
   }
 }
 
-/* 长文稿性能：跳过视口外字幕行的布局/绘制（DOM 仍在，纠错/跟随/恢复滚动不受影响）。
-   contain-intrinsic-size 给未渲染行一个高度估值，避免滚动条跳动。 */
-.ca-transcript-row {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 38px;
-}
+/* 长文稿性能现由 react-virtuoso 虚拟列表负责（DOM 里只保留可见的几十行）。
+   注意：不要再给 .ca-transcript-row 加 content-visibility，否则会让 Virtuoso 测到
+   占位高度而非真实行高，破坏滚动定位。 */
 
 /* 用户要求减少动效时：全局兜底，几乎关掉所有过渡与动画（前庭敏感友好）。 */
 @media (prefers-reduced-motion: reduce) {
