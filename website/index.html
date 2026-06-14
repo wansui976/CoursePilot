@@ -1728,6 +1728,7 @@
 
       function updateProductStage() {
         stageTicking = false;
+        if (window.__cpScrub) return; // GSAP scrub 已接管,避免双重驱动
 
         if (reducedMotionQuery.matches) {
           clearMotionValues();
@@ -1832,6 +1833,27 @@
         }
 
         updateNavState();
+
+        if (hasGSAP() && typeof window.ScrollTrigger !== "undefined") {
+          window.gsap.registerPlugin(window.ScrollTrigger);
+          window.__cpScrub = true; // 标记:由 GSAP 接管产品图位移,跳过 rAF
+          parallaxItems.forEach((item) => {
+            window.ScrollTrigger.create({
+              trigger: item,
+              start: "top bottom",
+              end: "bottom top",
+              scrub: 0.6,
+              onUpdate: (self) => {
+                const p = self.progress; // 0..1 across the viewport pass
+                const y = 26 - p * 52; // +26px -> -26px
+                const scale = 0.985 + p * 0.027; // 0.985 -> 1.012
+                item.style.setProperty("--motion-y", `${y.toFixed(2)}px`);
+                item.style.setProperty("--motion-scale", scale.toFixed(3));
+              },
+            });
+          });
+        }
+
         requestStageUpdate();
       }
 
