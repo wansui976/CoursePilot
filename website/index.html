@@ -1696,6 +1696,7 @@
 
       function revealImmediately() {
         document.documentElement.classList.remove("motion-ready");
+        document.documentElement.classList.remove("intro-active");
         animatedItems.forEach((item) => {
           item.classList.add("is-visible");
         });
