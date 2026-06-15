@@ -207,7 +207,8 @@ export function CourseSidebar({
           <div className="fixed inset-0 z-10" onClick={closeMenu} />
         )}
         {courses.map((course) => {
-          const selected = course.id === selectedCourseId;
+          // 队列是当前视图时，课程不再算「选中」，避免与队列项同时高亮。
+          const selected = course.id === selectedCourseId && !queueOpen;
           if (renamingId === course.id) {
             return (
               <input
