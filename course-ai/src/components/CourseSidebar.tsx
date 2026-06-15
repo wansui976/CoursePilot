@@ -1,4 +1,4 @@
-import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
+import { confirm as confirmDialog, message as messageDialog } from "@tauri-apps/plugin-dialog";
 import {
   ClipboardList,
   FolderOpen,
@@ -89,6 +89,21 @@ export function CourseSidebar({
       }
     },
   });
+  const relink = useMutation({
+    mutationFn: ({ id, root }: { id: string; root: string }) =>
+      ipc.courses.relinkRoot(id, root),
+    onSuccess: async (res, { id }) => {
+      await queryClient.invalidateQueries({ queryKey: ["courses"] });
+      await queryClient.invalidateQueries({ queryKey: ["videos", id] });
+      await queryClient.invalidateQueries({ queryKey: ["media-url"] });
+      const lines = [`已重连 ${res.relinked}/${res.total} 个视频`];
+      if (res.missing.length)
+        lines.push(`缺失 ${res.missing.length} 个：${res.missing.join("、")}`);
+      if (res.ambiguous.length)
+        lines.push(`重名跳过 ${res.ambiguous.length} 个：${res.ambiguous.join("、")}`);
+      await messageDialog(lines.join("\n"), { title: "重新选择根目录" });
+    },
+  });
 
   function startRename(id: string, name: string) {
     closeMenu();
@@ -107,6 +122,13 @@ export function CourseSidebar({
       { title: "删除课程", kind: "warning", okLabel: "删除", cancelLabel: "取消" },
     );
     if (ok) remove.mutate(id);
+  }
+
+  async function handleRelinkRoot(id: string, name: string) {
+    closeMenu();
+    const dir = await pickDirectoryPath(["courses", name]);
+    if (!dir) return;
+    relink.mutate({ id, root: dir });
   }
 
   async function handleCreateCourse() {
@@ -258,6 +280,13 @@ export function CourseSidebar({
                   >
                     <Pencil className="h-3.5 w-3.5" />
                     重命名
+                  </button>
+                  <button
+                    onClick={() => void handleRelinkRoot(course.id, course.name)}
+                    className="ca-touch-44 flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    重新选择根目录
                   </button>
                   <button
                     onClick={() => void confirmDelete(course.id, course.name)}

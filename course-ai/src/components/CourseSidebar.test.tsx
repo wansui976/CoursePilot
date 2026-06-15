@@ -12,6 +12,7 @@ const { mockIpc, pickDirectoryPathMock } = vi.hoisted(() => ({
       create: vi.fn(),
       rename: vi.fn(),
       delete: vi.fn(),
+      relinkRoot: vi.fn(),
     },
   },
   pickDirectoryPathMock: vi.fn(),
@@ -19,7 +20,7 @@ const { mockIpc, pickDirectoryPathMock } = vi.hoisted(() => ({
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@/lib/mobileFiles", () => ({ pickDirectoryPath: pickDirectoryPathMock }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: vi.fn(), message: vi.fn() }));
 
 function renderSidebar(overrides: Partial<ComponentProps<typeof CourseSidebar>> = {}) {
   const queryClient = new QueryClient({
@@ -45,6 +46,12 @@ describe("CourseSidebar", () => {
   beforeEach(() => {
     mockIpc.courses.list.mockResolvedValue([]);
     mockIpc.courses.create.mockResolvedValue(undefined);
+    mockIpc.courses.relinkRoot.mockResolvedValue({
+      total: 2,
+      relinked: 1,
+      ambiguous: [],
+      missing: ["b"],
+    });
     pickDirectoryPathMock.mockResolvedValue(
       "/data/user/0/dev.courseai.app.debug/courses/新课程",
     );
@@ -139,5 +146,22 @@ describe("CourseSidebar", () => {
 
     const course = await screen.findByRole("button", { name: "线性代数" });
     expect(course.closest(".ca-nav-item")).toHaveClass("active");
+  });
+
+  it("relinks a course root through the directory picker", async () => {
+    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
+    pickDirectoryPathMock.mockResolvedValue("/new/root");
+    renderSidebar({ onToggleQueue: () => undefined });
+
+    await screen.findByRole("button", { name: "线性代数" });
+    fireEvent.click(screen.getByRole("button", { name: "课程操作" }));
+    fireEvent.click(screen.getByRole("button", { name: "重新选择根目录" }));
+
+    await waitFor(() =>
+      expect(pickDirectoryPathMock).toHaveBeenCalledWith(["courses", "线性代数"]),
+    );
+    await waitFor(() =>
+      expect(mockIpc.courses.relinkRoot).toHaveBeenCalledWith("c1", "/new/root"),
+    );
   });
 });
