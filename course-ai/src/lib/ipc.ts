@@ -10,6 +10,7 @@ import type {
   LlmProfile,
   ProbeResult,
   RagAnswer,
+  RelinkResult,
   Screenshot,
   Slide,
   TranscriptSegment,
@@ -32,6 +33,8 @@ export const ipc = {
     delete: (id: string): Promise<void> => invoke("cmd_delete_course", { id }),
     rename: (id: string, name: string): Promise<void> =>
       invoke("cmd_rename_course", { id, name }),
+    relinkRoot: (courseId: string, newRoot: string): Promise<RelinkResult> =>
+      invoke("cmd_relink_course_root", { courseId, newRoot }),
   },
   videos: {
     list: (courseId: string): Promise<Video[]> =>

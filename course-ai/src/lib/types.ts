@@ -156,3 +156,10 @@ export interface RagAnswer {
   answer: string;
   citations: Citation[];
 }
+
+export interface RelinkResult {
+  total: number;
+  relinked: number;
+  ambiguous: string[];
+  missing: string[];
+}
