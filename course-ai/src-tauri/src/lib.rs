@@ -17,7 +17,8 @@ use crate::commands::ai::{
     cmd_set_api_key,
 };
 use crate::commands::courses::{
-    cmd_create_course, cmd_delete_course, cmd_list_courses, cmd_rename_course, AppState,
+    cmd_create_course, cmd_delete_course, cmd_list_courses, cmd_relink_course_root,
+    cmd_rename_course, AppState,
 };
 use crate::commands::export::{
     cmd_export_mindmap, cmd_export_notes, cmd_export_quiz, cmd_export_subtitles,
@@ -79,6 +80,7 @@ pub fn run() {
             cmd_list_courses,
             cmd_delete_course,
             cmd_rename_course,
+            cmd_relink_course_root,
             cmd_restore_video,
             cmd_purge_video,
             cmd_list_trash,
