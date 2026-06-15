@@ -114,4 +114,30 @@ describe("CourseSidebar", () => {
       "w-full",
     );
   });
+
+  it("clears the selected course highlight while the processing queue is open", async () => {
+    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
+    renderSidebar({
+      selectedCourseId: "c1",
+      queueOpen: true,
+      onToggleQueue: () => undefined,
+    });
+
+    const course = await screen.findByRole("button", { name: "线性代数" });
+    // 队列是当前视图时，下方已选课程不应再保留蓝色高亮。
+    expect(course.closest(".ca-nav-item")).not.toHaveClass("active");
+    expect(screen.getByRole("button", { name: "处理队列" })).toHaveClass("active");
+  });
+
+  it("highlights the selected course when the queue is closed", async () => {
+    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
+    renderSidebar({
+      selectedCourseId: "c1",
+      queueOpen: false,
+      onToggleQueue: () => undefined,
+    });
+
+    const course = await screen.findByRole("button", { name: "线性代数" });
+    expect(course.closest(".ca-nav-item")).toHaveClass("active");
+  });
 });
