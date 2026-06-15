@@ -154,6 +154,46 @@
           transform 0.18s ease-out;
       }
 
+      /* 暗色 tile：光标跟随的柔和白光高光（非第二强调色，pointer-fine 才点亮）。 */
+      .spotlight {
+        position: relative;
+        overflow: hidden;
+        isolation: isolate;
+      }
+      .spotlight::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.45s ease;
+        background: radial-gradient(
+          440px circle at var(--spot-x, 50%) var(--spot-y, 50%),
+          rgba(255, 255, 255, 0.1),
+          transparent 60%
+        );
+      }
+      .spotlight.is-lit::before {
+        opacity: 1;
+      }
+      .spotlight > * {
+        position: relative;
+        z-index: 1;
+      }
+
+      /* 磁吸 CTA：指针靠近时按钮轻微跟随 + 柔光（由 JS 设 transform）。 */
+      [data-magnetic] {
+        transition:
+          transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1),
+          background-color 0.2s ease,
+          box-shadow 0.35s ease;
+      }
+      [data-magnetic].is-magnetic {
+        box-shadow: 0 10px 30px -10px
+          color-mix(in srgb, var(--primary) 65%, transparent);
+      }
+
       body {
         font-family: var(--font-text);
         font-size: 17px;
@@ -1260,8 +1300,8 @@
             把本地视频拖进来，或粘贴 Bilibili / URL 下载。CoursePilot 会转写字幕、纠错、分好章节，再生成笔记、脑图和练习题。处理完，你就有了一套能搜、能问、能复习的资料。
           </p>
           <div class="cta-row" data-animate="hero" style="--motion-delay: 320ms">
-            <a class="btn-pill" href="#download">查看下载方式</a>
-            <a class="btn-pill btn-dark-link" href="https://github.com/wansui976/CoursePilot">GitHub 源码</a>
+            <a class="btn-pill" href="#download" data-magnetic>查看下载方式</a>
+            <a class="btn-pill btn-dark-link" href="https://github.com/wansui976/CoursePilot" data-magnetic>GitHub 源码</a>
             <a class="text-link" href="#workbench">看看流程</a>
           </div>
           <p class="caption" data-animate="hero" style="--motion-delay: 380ms">macOS · iPhone · iPad · Android · 资料存在本地 · AI 功能使用你自己的 API Key</p>
@@ -1331,7 +1371,7 @@
       </section>
 
       <!-- ============ AI 学习资料（dark） ============ -->
-      <section class="tile tile--dark" id="features">
+      <section class="tile tile--dark spotlight" id="features">
         <div class="tile__inner">
           <p class="eyebrow" data-animate>学习资料</p>
           <h2 class="display-lg" data-animate>视频看完，资料也整理好了。</h2>
@@ -1617,12 +1657,12 @@
       </section>
 
       <!-- ============ 下载 ============ -->
-      <section class="tile tile--dark" id="download">
+      <section class="tile tile--dark spotlight" id="download">
         <div class="tile__inner">
           <h2 class="display-lg" data-animate>先从源码跑起来。</h2>
           <p class="lead" data-animate>移动版还在准备上架。桌面版可以先从 GitHub 源码构建；等商店链接可用，这里会换成正式下载入口。</p>
           <div class="cta-row" data-animate>
-            <a class="btn-pill" href="https://github.com/wansui976/CoursePilot">打开 wansui976/CoursePilot</a>
+            <a class="btn-pill" href="https://github.com/wansui976/CoursePilot" data-magnetic>打开 wansui976/CoursePilot</a>
             <a class="text-link" href="https://github.com/wansui976/CoursePilot/releases">查看发布版本</a>
           </div>
           <div class="store-row" data-animate>
@@ -1983,6 +2023,56 @@
       } else {
         bootstrap();
       }
+
+      // ---- 暗色 tile 光标聚光 + 磁吸 CTA（复用上面的 reduced-motion / pointer 判断）----
+      (function () {
+        const spotlightTiles = Array.from(document.querySelectorAll(".spotlight"));
+        const magneticItems = Array.from(document.querySelectorAll("[data-magnetic]"));
+
+        function onSpotlight(event) {
+          if (!pointerFineQuery.matches || reducedMotionQuery.matches) return;
+          const tile = event.currentTarget;
+          const rect = tile.getBoundingClientRect();
+          tile.style.setProperty(
+            "--spot-x",
+            `${(((event.clientX - rect.left) / rect.width) * 100).toFixed(1)}%`
+          );
+          tile.style.setProperty(
+            "--spot-y",
+            `${(((event.clientY - rect.top) / rect.height) * 100).toFixed(1)}%`
+          );
+          tile.classList.add("is-lit");
+        }
+        function offSpotlight(event) {
+          event.currentTarget.classList.remove("is-lit");
+        }
+
+        function onMagnet(event) {
+          if (!pointerFineQuery.matches || reducedMotionQuery.matches) return;
+          const btn = event.currentTarget;
+          const rect = btn.getBoundingClientRect();
+          const mx = (event.clientX - rect.left - rect.width / 2) / rect.width;
+          const my = (event.clientY - rect.top - rect.height / 2) / rect.height;
+          btn.style.transform = `translate(${(mx * 9).toFixed(1)}px, ${(
+            my * 9
+          ).toFixed(1)}px)`;
+          btn.classList.add("is-magnetic");
+        }
+        function offMagnet(event) {
+          const btn = event.currentTarget;
+          btn.style.transform = "";
+          btn.classList.remove("is-magnetic");
+        }
+
+        spotlightTiles.forEach((tile) => {
+          tile.addEventListener("pointermove", onSpotlight, { passive: true });
+          tile.addEventListener("pointerleave", offSpotlight);
+        });
+        magneticItems.forEach((btn) => {
+          btn.addEventListener("pointermove", onMagnet, { passive: true });
+          btn.addEventListener("pointerleave", offMagnet);
+        });
+      })();
     </script>
   </body>
 </html>
