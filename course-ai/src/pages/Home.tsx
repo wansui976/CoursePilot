@@ -296,6 +296,8 @@ export function Home() {
       }
     });
     return () => timers.forEach((timer) => window.clearTimeout(timer));
+    // activeJobFor 只读 jobsByVideo，已在依赖里；它本身每次渲染重建，加进去反而每帧重跑。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobsByVideo, queuedVideoIds]);
 
   useEffect(() => {

@@ -207,7 +207,7 @@ export function VideoPlayer({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [fullscreen]);
 
   const toggleFullscreen = () => void setVideoFullscreen(!fullscreen);
@@ -435,7 +435,7 @@ export function VideoPlayer({
       2500,
     );
     return clearHideTimer;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [immersive]);
 
   useEffect(
