@@ -21,6 +21,14 @@ export function BilibiliImportDialog({
   const [quality, setQuality] = useState<number | undefined>(undefined);
   const [subLang, setSubLang] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  // cookie 步骤是「首次缺失」还是「登录态失效需重导」，用于切换引导文案。
+  const [cookieReason, setCookieReason] = useState<"missing" | "expired">(
+    "missing",
+  );
+
+  // B站的 412 / 需要登录 / cookie 相关报错，多半是没导入或 cookie 过期。
+  const looksLikeCookieError = (msg: string) =>
+    /412|precondition|forbidden|403|login|cookie|需要登录|风控/i.test(msg);
 
   const runProbe = async () => {
     setError(null);
@@ -36,8 +44,16 @@ export function BilibiliImportDialog({
       setSubLang(def?.lang);
       setStep("confirm");
     } catch (e) {
-      setError(String(e));
-      setStep("url");
+      const msg = String(e);
+      // cookie 过期/风控（如 HTTP 412）：回到 cookie 步骤引导重新导出导入。
+      if (looksLikeCookieError(msg)) {
+        setError(msg);
+        setCookieReason("expired");
+        setStep("cookie");
+      } else {
+        setError(msg);
+        setStep("url");
+      }
     }
   };
 
@@ -53,8 +69,12 @@ export function BilibiliImportDialog({
   };
 
   const startUrl = async () => {
-    const cookie = await ipc.settings.get("bilibili_cookies");
-    if (!cookie) {
+    setError(null);
+    // 只有确实导入了 cookies.txt（文件存在且非空）才放行；否则先引导导入，
+    // 避免设置里残留旧路径却在下载时报 412。
+    const hasCookies = await ipc.tools.hasBilibiliCookies();
+    if (!hasCookies) {
+      setCookieReason("missing");
       setStep("cookie");
     } else {
       void runProbe();
@@ -78,7 +98,15 @@ export function BilibiliImportDialog({
       }
       onClose();
     },
-    onError: (e) => setError(String(e)),
+    onError: (e) => {
+      const msg = String(e);
+      setError(msg);
+      // 下载阶段的 412 / 需要登录，同样引导重新导入 cookies。
+      if (looksLikeCookieError(msg)) {
+        setCookieReason("expired");
+        setStep("cookie");
+      }
+    },
   });
 
   return (
@@ -117,15 +145,30 @@ export function BilibiliImportDialog({
 
         {step === "cookie" && (
           <div className="space-y-3 text-sm text-[var(--text-muted)]">
-            <p>
-              B站自带字幕与高清晰度通常需要登录态。请用浏览器扩展
-              <b className="text-[var(--text-strong)]">
-                {" "}
-                Get cookies.txt LOCALLY{" "}
-              </b>
-              在 bilibili.com 导出 cookies.txt，然后选择它。
-            </p>
-            {error && <p className="text-xs text-red-400">{error}</p>}
+            {cookieReason === "expired" ? (
+              <p>
+                B站登录态可能已失效（下载报错 <b>HTTP 412</b> 等），需要重新导出
+                cookies.txt 再导入。
+              </p>
+            ) : (
+              <p>B站自带字幕与高清晰度通常需要登录态，请先导入 cookies.txt。</p>
+            )}
+            <ol className="list-decimal space-y-1 pl-5 text-xs leading-relaxed">
+              <li>
+                Chrome 安装扩展
+                <b className="text-[var(--text-strong)]">
+                  {" "}
+                  Get cookies.txt LOCALLY{" "}
+                </b>
+              </li>
+              <li>登录 bilibili.com，点扩展图标导出 cookies.txt</li>
+              <li>回到这里选择刚导出的 cookies.txt</li>
+            </ol>
+            {error && (
+              <p className="whitespace-pre-wrap break-words text-xs text-red-400">
+                {error}
+              </p>
+            )}
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="outline" onClick={() => setStep("url")}>
                 返回
