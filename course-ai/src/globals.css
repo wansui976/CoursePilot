@@ -920,6 +920,12 @@ select:focus-visible {
   border-bottom: 1px solid var(--line);
 }
 
+/* 「时长/状态」表头右对齐，和行内右对齐的时长文本与状态徽标上下对齐。 */
+.ca-list-head .h-dur,
+.ca-list-head .h-status {
+  text-align: right;
+}
+
 .ca-row {
   border-bottom: 1px solid var(--line-soft);
   border-radius: 10px;
