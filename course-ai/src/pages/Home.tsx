@@ -36,7 +36,7 @@ import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { readPlaybackProgress } from "@/lib/playback";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
-import { isTablet } from "@/lib/platform";
+import { isIOS, isTablet } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 import { accentVars, useTheme } from "@/stores/theme";
@@ -941,7 +941,7 @@ export function Home() {
                 <VideoPlayer
                   src={mediaSrc}
                   videoId={selectedVideo.id}
-                  immersive={isPhoneDevice}
+                  immersive={isIOS()}
                   resizing={isResizingPanel}
                 />
               ) : (

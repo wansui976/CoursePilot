@@ -44,7 +44,15 @@ pub async fn run_volcengine_file(
     let (app_id, access_token) = check_credentials(app_id, access_token)?;
     let audio_bytes = tokio::fs::read(audio).await?;
     let client = reqwest::Client::new();
-    recognize_bytes_with_retry(&client, &app_id, &access_token, &audio_bytes, context, format).await
+    recognize_bytes_with_retry(
+        &client,
+        &app_id,
+        &access_token,
+        &audio_bytes,
+        context,
+        format,
+    )
+    .await
 }
 
 /// 分段并行识别：把长音频按固定时长切成多段 MP3，分别提交、并行轮询，再按各段
@@ -103,8 +111,8 @@ pub async fn run_volcengine_file_chunked(
     }
 
     let client = reqwest::Client::new();
-    let results: Vec<AppResult<(usize, WhisperJson)>> = futures_util::stream::iter(
-        chunks.into_iter().enumerate().map(|(idx, path)| {
+    let results: Vec<AppResult<(usize, WhisperJson)>> =
+        futures_util::stream::iter(chunks.into_iter().enumerate().map(|(idx, path)| {
             let client = client.clone();
             let app_id = app_id.clone();
             let access_token = access_token.clone();
@@ -122,11 +130,10 @@ pub async fn run_volcengine_file_chunked(
                 .await?;
                 Ok((idx, json))
             }
-        }),
-    )
-    .buffer_unordered(concurrency)
-    .collect()
-    .await;
+        }))
+        .buffer_unordered(concurrency)
+        .collect()
+        .await;
 
     let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
 
@@ -281,7 +288,9 @@ async fn split_audio_to_mp3(
         .await
         .map_err(|error| AppError::Pipeline(format!("ffmpeg segment spawn: {error}")))?;
     if !status.success() {
-        return Err(AppError::Pipeline(format!("ffmpeg segment failed: {status}")));
+        return Err(AppError::Pipeline(format!(
+            "ffmpeg segment failed: {status}"
+        )));
     }
     let mut files = Vec::new();
     let mut entries = tokio::fs::read_dir(out_dir).await?;

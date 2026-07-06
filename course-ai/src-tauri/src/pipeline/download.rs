@@ -71,7 +71,10 @@ pub fn build_ytdlp_args(
 /// sidecar，不会自动找到同样是 sidecar 的 ffmpeg，故须显式用 --ffmpeg-location 指给它。
 fn ffmpeg_location_args() -> Vec<String> {
     match resolve(&FFMPEG, None) {
-        Ok(path) => vec!["--ffmpeg-location".to_string(), path.to_string_lossy().to_string()],
+        Ok(path) => vec![
+            "--ffmpeg-location".to_string(),
+            path.to_string_lossy().to_string(),
+        ],
         Err(_) => Vec::new(),
     }
 }
@@ -106,7 +109,13 @@ pub async fn download(
     std::fs::create_dir_all(out_dir)?;
     let template = out_dir.join("%(title).80s.%(ext)s");
     let ytdlp = resolve(&YTDLP, None)?;
-    let args = build_ytdlp_args(url, &template.to_string_lossy(), cookies, max_height, sub_lang);
+    let args = build_ytdlp_args(
+        url,
+        &template.to_string_lossy(),
+        cookies,
+        max_height,
+        sub_lang,
+    );
     let output = Command::new(&ytdlp)
         .args(ffmpeg_location_args())
         .args(&args)
@@ -135,7 +144,10 @@ fn newest_with_ext(out_dir: &Path, ext: &str) -> AppResult<Option<PathBuf>> {
     for entry in std::fs::read_dir(out_dir)? {
         let path = entry?.path();
         if path.extension().map(|e| e == ext).unwrap_or(false) {
-            let mtime = path.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+            let mtime = path
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
             if newest.as_ref().map(|(t, _)| mtime > *t).unwrap_or(true) {
                 newest = Some((mtime, path));
             }
@@ -199,7 +211,11 @@ fn collect_tracks(map: Option<&serde_json::Value>, from_auto: bool, out: &mut Ve
 /// 解析 `yt-dlp -J` 输出：标题、字幕轨（subtitles + automatic_captions）、清晰度（formats.height）。
 pub fn parse_probe_json(json: &str) -> AppResult<ProbeResult> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(AppError::Json)?;
-    let title = v.get("title").and_then(|t| t.as_str()).unwrap_or("video").to_string();
+    let title = v
+        .get("title")
+        .and_then(|t| t.as_str())
+        .unwrap_or("video")
+        .to_string();
 
     let mut tracks = Vec::new();
     // B站 AI 字幕可能落在 subtitles 或 automatic_captions，两者都收。
@@ -221,7 +237,11 @@ pub fn parse_probe_json(json: &str) -> AppResult<ProbeResult> {
     qualities.dedup();
     qualities.reverse();
 
-    Ok(ProbeResult { title, tracks, qualities })
+    Ok(ProbeResult {
+        title,
+        tracks,
+        qualities,
+    })
 }
 
 /// 优选默认字幕轨：手打中文 CC > AI 中文 > 第一条。
@@ -230,7 +250,9 @@ pub fn pick_default_track(tracks: &[SubtitleTrack]) -> Option<&SubtitleTrack> {
     if manual_zh.is_some() {
         return manual_zh;
     }
-    let ai_zh = tracks.iter().find(|t| t.lang == "ai-zh" || (t.auto && t.lang.contains("zh")));
+    let ai_zh = tracks
+        .iter()
+        .find(|t| t.lang == "ai-zh" || (t.auto && t.lang.contains("zh")));
     ai_zh.or_else(|| tracks.first())
 }
 
@@ -251,7 +273,12 @@ pub async fn probe(url: &str, cookies: Option<&str>) -> AppResult<ProbeResult> {
         "all",
     ]);
     if is_bilibili_url(url) {
-        cmd.args(["--user-agent", BROWSER_USER_AGENT, "--referer", BILIBILI_REFERER]);
+        cmd.args([
+            "--user-agent",
+            BROWSER_USER_AGENT,
+            "--referer",
+            BILIBILI_REFERER,
+        ]);
     }
     if let Some(c) = cookies {
         if !c.trim().is_empty() {
@@ -278,7 +305,13 @@ mod tests {
 
     #[test]
     fn ytdlp_args_basic() {
-        let args = build_ytdlp_args("https://b23.tv/x", "/out/%(title)s.%(ext)s", None, None, None);
+        let args = build_ytdlp_args(
+            "https://b23.tv/x",
+            "/out/%(title)s.%(ext)s",
+            None,
+            None,
+            None,
+        );
         assert!(args.contains(&"--merge-output-format".to_string()));
         assert!(args.contains(&"mp4".to_string()));
         assert_eq!(args.last().unwrap(), "https://b23.tv/x");
@@ -315,7 +348,13 @@ mod tests {
 
     #[test]
     fn ytdlp_args_with_quality_and_subs() {
-        let args = build_ytdlp_args("https://www.bilibili.com/video/BV1x", "t", None, Some(720), Some("ai-zh"));
+        let args = build_ytdlp_args(
+            "https://www.bilibili.com/video/BV1x",
+            "t",
+            None,
+            Some(720),
+            Some("ai-zh"),
+        );
         let f = args.iter().position(|a| a == "-f").unwrap();
         assert_eq!(args[f + 1], "bv*[height<=720]+ba/b[height<=720]");
         assert!(args.contains(&"--write-subs".to_string()));
@@ -382,15 +421,35 @@ mod tests {
     #[test]
     fn pick_default_prefers_manual_zh_then_ai() {
         let tracks = vec![
-            SubtitleTrack { lang: "en".into(), name: "EN".into(), auto: false },
-            SubtitleTrack { lang: "ai-zh".into(), name: "AI".into(), auto: true },
-            SubtitleTrack { lang: "zh-Hans".into(), name: "CC".into(), auto: false },
+            SubtitleTrack {
+                lang: "en".into(),
+                name: "EN".into(),
+                auto: false,
+            },
+            SubtitleTrack {
+                lang: "ai-zh".into(),
+                name: "AI".into(),
+                auto: true,
+            },
+            SubtitleTrack {
+                lang: "zh-Hans".into(),
+                name: "CC".into(),
+                auto: false,
+            },
         ];
         assert_eq!(pick_default_track(&tracks).unwrap().lang, "zh-Hans");
 
         let tracks2 = vec![
-            SubtitleTrack { lang: "en".into(), name: "EN".into(), auto: false },
-            SubtitleTrack { lang: "ai-zh".into(), name: "AI".into(), auto: true },
+            SubtitleTrack {
+                lang: "en".into(),
+                name: "EN".into(),
+                auto: false,
+            },
+            SubtitleTrack {
+                lang: "ai-zh".into(),
+                name: "AI".into(),
+                auto: true,
+            },
         ];
         assert_eq!(pick_default_track(&tracks2).unwrap().lang, "ai-zh");
     }

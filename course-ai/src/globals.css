@@ -1111,7 +1111,7 @@ select:focus-visible {
 
 .ca-resizer {
   position: relative;
-  width: 8px;
+  width: 18px;
   flex: none;
   cursor: col-resize;
   display: flex;
@@ -1120,6 +1120,9 @@ select:focus-visible {
   background: transparent;
   /* 触摸拖拽时禁止浏览器把手势当成滚动 */
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* 可见竖条：用居中的伪元素，拖动时可超出 8px 轨道变粗而不挤动布局 */
@@ -1129,7 +1132,7 @@ select:focus-visible {
   top: 0;
   bottom: 0;
   left: 50%;
-  width: 8px;
+  width: 10px;
   transform: translateX(-50%);
   background: var(--line);
   transition: width 0.14s, background 0.12s;
@@ -1140,8 +1143,8 @@ select:focus-visible {
   content: "";
   position: relative;
   z-index: 1;
-  width: 4px;
-  height: 28px;
+  width: 6px;
+  height: 34px;
   border-radius: 999px;
   background: var(--text-3);
   opacity: 0.55;
@@ -1153,7 +1156,7 @@ select:focus-visible {
 }
 
 .ca-resizer:hover::before {
-  height: 40px;
+  height: 48px;
   opacity: 0.9;
 }
 
@@ -1165,8 +1168,8 @@ select:focus-visible {
 
 .ca-resizer.is-resizing::before,
 .ca-resizer:active::before {
-  width: 10px;
-  height: 64px;
+  width: 12px;
+  height: 72px;
   background: var(--accent);
   opacity: 1;
 }
@@ -1463,6 +1466,18 @@ select:focus-visible {
   .ca-touch-44 {
     min-width: 44px;
     min-height: 44px;
+  }
+
+  /* 学习工作台里的小图标按钮：触屏下再放大一档，避免只点到图标边缘。 */
+  .ca-workbench-touch {
+    min-width: 48px;
+    min-height: 48px;
+  }
+
+  /* 工作台顶部 tab：触屏下放宽命中区，点到文字旁边也算。 */
+  .ca-study-tab-trigger {
+    min-width: 72px;
+    min-height: 48px;
   }
 
   /* iOS 会在聚焦 font-size<16px 的输入框时自动放大整页(聚焦后页面跳动、失焦不复原)。

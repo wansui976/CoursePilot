@@ -33,9 +33,7 @@ pub async fn cmd_ocr_region(
     h: i64,
 ) -> AppResult<String> {
     if is_mobile_os(std::env::consts::OS) {
-        return Err(AppError::Config(
-            "移动端暂不支持本地 OCR 截字".into(),
-        ));
+        return Err(AppError::Config("移动端暂不支持本地 OCR 截字".into()));
     }
     let video: Video = sqlx::query_as("SELECT * FROM videos WHERE id=?")
         .bind(&video_id)
@@ -57,12 +55,10 @@ pub async fn cmd_ocr_region(
         let access_key_id = get_setting(&state.db, "aliyun_ocr_access_key_id")
             .await?
             .unwrap_or_default();
-        let access_key_secret = crate::llm::keychain::get_secret_or_legacy(
-            &state.db,
-            "aliyun_ocr_access_key_secret",
-        )
-        .await?
-        .unwrap_or_default();
+        let access_key_secret =
+            crate::llm::keychain::get_secret_or_legacy(&state.db, "aliyun_ocr_access_key_secret")
+                .await?
+                .unwrap_or_default();
         let ocr_type = get_setting(&state.db, "aliyun_ocr_type")
             .await?
             .unwrap_or_else(|| aliyun_ocr::DEFAULT_TYPE.to_string());
@@ -131,8 +127,11 @@ pub async fn cmd_import_bilibili(
     if let (Some(lang), Some(sub_path)) = (sub_lang.as_deref(), result.subtitle.as_ref()) {
         let p = sub_path.to_string_lossy().to_string();
         sqlx::query("UPDATE videos SET subtitle_path=?, subtitle_lang=? WHERE id=?")
-            .bind(&p).bind(lang).bind(&video.id)
-            .execute(&state.db.pool).await?;
+            .bind(&p)
+            .bind(lang)
+            .bind(&video.id)
+            .execute(&state.db.pool)
+            .await?;
         video.subtitle_path = Some(p);
         video.subtitle_lang = Some(lang.to_string());
     }
@@ -166,10 +165,6 @@ pub async fn cmd_set_bilibili_cookies(
     std::fs::create_dir_all(&dest_dir)?;
     let dest = dest_dir.join("bilibili.txt");
     std::fs::copy(&file_path, &dest)?;
-    crate::commands::settings::set_setting(
-        &state.db,
-        "bilibili_cookies",
-        &dest.to_string_lossy(),
-    )
-    .await
+    crate::commands::settings::set_setting(&state.db, "bilibili_cookies", &dest.to_string_lossy())
+        .await
 }

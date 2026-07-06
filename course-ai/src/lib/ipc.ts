@@ -39,8 +39,11 @@ export const ipc = {
   videos: {
     list: (courseId: string): Promise<Video[]> =>
       invoke("cmd_list_videos", { courseId }),
-    addLocal: (courseId: string, filePath: string): Promise<Video> =>
-      invoke("cmd_add_local_video", { courseId, filePath }),
+    addLocal: (
+      courseId: string,
+      filePath: string,
+      durationMs?: number | null,
+    ): Promise<Video> => invoke("cmd_add_local_video", { courseId, filePath, durationMs }),
     ensurePlayable: (videoId: string): Promise<string> =>
       invoke("cmd_ensure_playable", { videoId }),
     // 打开视频时兜底补测黑边（旧视频无 crop 记录时），返回四边占比（无黑边为 0）。

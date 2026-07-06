@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import UniformTypeIdentifiers
 import SwiftRs
 import Tauri
 import UIKit
@@ -24,9 +25,54 @@ struct ExportLumaFramesArgs: Decodable {
   let intervalMs: Int64
 }
 
+struct PersistPickedFileArgs: Decodable {
+  let sourceUri: String
+  let category: String
+  let fallbackName: String
+}
+
+struct ShareFileArgs: Decodable {
+  let sourcePath: String
+  let mime: String
+}
+
+struct PickAndPersistFileArgs: Decodable {
+  let category: String
+  let fallbackName: String
+  let allowedExtensions: [String]
+  let prompt: String?
+}
+
+struct PickAndPersistFileResult: Encodable {
+  let path: String
+  let durationMs: Int64
+}
+
 final class MobileFilesPlugin: Plugin {
   private let workQueue = DispatchQueue(label: "dev.courseai.mobile-files")
   private let audioWriterQueue = DispatchQueue(label: "dev.courseai.mobile-files.audio-writer")
+  private var pendingPicker: UIDocumentPickerViewController?
+  private var pendingPickerDelegate: DocumentPickerDelegate?
+  fileprivate var pendingPickerHandled = false
+
+  @objc public func persistPickedFile(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(PersistPickedFileArgs.self)
+    workQueue.async {
+      do {
+        let result = try self.persistPickedFile(args)
+        invoke.resolve([
+          "path": result.path,
+          "durationMs": result.durationMs,
+        ])
+      } catch {
+        if let nsError = error as NSError? {
+          invoke.reject("\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)")
+        } else {
+          invoke.reject(error.localizedDescription)
+        }
+      }
+    }
+  }
 
   @objc public func exportAudioForAsr(_ invoke: Invoke) throws {
     let args = try invoke.parseArgs(ExportAudioForAsrArgs.self)
@@ -76,6 +122,37 @@ final class MobileFilesPlugin: Plugin {
           "intervalMs": result.intervalMs,
           "frames": result.frames,
         ])
+      } catch {
+        if let nsError = error as NSError? {
+          invoke.reject("\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)")
+        } else {
+          invoke.reject(error.localizedDescription)
+        }
+      }
+    }
+  }
+
+  @objc public func shareFile(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(ShareFileArgs.self)
+    DispatchQueue.main.async {
+      do {
+        try self.shareFile(args)
+        invoke.resolve([: ])
+      } catch {
+        if let nsError = error as NSError? {
+          invoke.reject("\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)")
+        } else {
+          invoke.reject(error.localizedDescription)
+        }
+      }
+    }
+  }
+
+  @objc public func pickAndPersistFile(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(PickAndPersistFileArgs.self)
+    DispatchQueue.main.async {
+      do {
+        try self.pickAndPersistFile(args, invoke: invoke)
       } catch {
         if let nsError = error as NSError? {
           invoke.reject("\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)")
@@ -140,6 +217,222 @@ final class MobileFilesPlugin: Plugin {
       ms += intervalMs
     }
     return (intervalMs, frames)
+  }
+
+  private func persistPickedFile(_ args: PersistPickedFileArgs) throws -> PickAndPersistFileResult {
+    let source = localFileURL(from: args.sourceUri)
+    let destinationDir = try pickedDirectory(category: args.category)
+    let fallback = sanitizedFileName(args.fallbackName, fallback: "video")
+    let sourceName = sanitizedFileName(source.lastPathComponent, fallback: fallback)
+    let destination = uniqueDestination(in: destinationDir, preferredName: sourceName)
+
+    let didStart = source.startAccessingSecurityScopedResource()
+    defer {
+      if didStart {
+        source.stopAccessingSecurityScopedResource()
+      }
+    }
+    try FileManager.default.copyItem(at: source, to: destination)
+    let durationMs = try loadedDurationMs(of: AVURLAsset(url: destination))
+    return PickAndPersistFileResult(path: destination.path, durationMs: durationMs)
+  }
+
+  private func pickAndPersistFile(_ args: PickAndPersistFileArgs, invoke: Invoke) throws {
+    let resolvedTypes = args.allowedExtensions.isEmpty
+      ? [UTType.movie]
+      : args.allowedExtensions.compactMap { UTType(filenameExtension: $0) }
+    let types = resolvedTypes.isEmpty ? [UTType.movie] : resolvedTypes
+    let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
+    picker.allowsMultipleSelection = false
+    picker.modalPresentationStyle = .formSheet
+    let delegate = DocumentPickerDelegate(
+      plugin: self,
+      invoke: invoke,
+      category: args.category,
+      fallbackName: args.fallbackName)
+    picker.delegate = delegate
+    pendingPicker = picker
+    pendingPickerDelegate = delegate
+    pendingPickerHandled = false
+
+    guard let presenter = rootPresenter() else {
+      pendingPicker = nil
+      pendingPickerDelegate = nil
+      pendingPickerHandled = false
+      throw NSError(
+        domain: "dev.courseai.mobile-files",
+        code: 500,
+        userInfo: [NSLocalizedDescriptionKey: "Unable to present file picker"])
+    }
+    presenter.present(picker, animated: true)
+  }
+
+  func handlePickedFile(
+    _ url: URL,
+    invoke: Invoke,
+    category: String,
+    fallbackName: String
+  ) {
+    if pendingPickerHandled {
+      return
+    }
+    pendingPickerHandled = true
+    workQueue.async {
+      do {
+        let result = try self.persistPickedFile(url: url, category: category, fallbackName: fallbackName)
+        DispatchQueue.main.async {
+          self.pendingPicker = nil
+          self.pendingPickerDelegate = nil
+          invoke.resolve([
+            "path": result.path,
+            "durationMs": result.durationMs,
+          ])
+        }
+      } catch {
+        DispatchQueue.main.async {
+          self.pendingPicker = nil
+          self.pendingPickerDelegate = nil
+          if let nsError = error as NSError? {
+            invoke.reject("\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)")
+          } else {
+            invoke.reject(error.localizedDescription)
+          }
+        }
+      }
+    }
+  }
+
+  private func persistPickedFile(
+    url source: URL,
+    category: String,
+    fallbackName: String
+  ) throws -> PickAndPersistFileResult {
+    let destinationDir = try pickedDirectory(category: category)
+    let fallback = sanitizedFileName(fallbackName, fallback: "video")
+    let sourceName = sanitizedFileName(source.lastPathComponent, fallback: fallback)
+    let destination = uniqueDestination(in: destinationDir, preferredName: sourceName)
+
+    let coordinator = NSFileCoordinator()
+    var coordinationError: NSError?
+    var copyError: Error?
+    coordinator.coordinate(readingItemAt: source, options: [], error: &coordinationError) { coordinatedURL in
+      let didStart = coordinatedURL.startAccessingSecurityScopedResource()
+      defer {
+        if didStart {
+          coordinatedURL.stopAccessingSecurityScopedResource()
+        }
+      }
+      do {
+        if FileManager.default.fileExists(atPath: destination.path) {
+          try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.copyItem(at: coordinatedURL, to: destination)
+      } catch {
+        copyError = error
+      }
+    }
+    if let coordinationError {
+      throw coordinationError
+    }
+    if let copyError {
+      throw copyError
+    }
+    let durationMs = try loadedDurationMs(of: AVURLAsset(url: destination))
+    return PickAndPersistFileResult(path: destination.path, durationMs: durationMs)
+  }
+
+  private func shareFile(_ args: ShareFileArgs) throws {
+    let url = URL(fileURLWithPath: args.sourcePath)
+    guard FileManager.default.fileExists(atPath: url.path) else {
+      throw NSError(
+        domain: "dev.courseai.mobile-files",
+        code: 404,
+        userInfo: [NSLocalizedDescriptionKey: "Share file not found"])
+    }
+    let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    if let root = UIApplication.shared.connectedScenes
+      .compactMap({ $0 as? UIWindowScene })
+      .flatMap({ $0.windows })
+      .first(where: { $0.isKeyWindow })?.rootViewController
+    {
+      controller.popoverPresentationController?.sourceView = root.view
+      controller.popoverPresentationController?.sourceRect = CGRect(
+        x: UIScreen.main.bounds.midX,
+        y: UIScreen.main.bounds.midY,
+        width: 0,
+        height: 0)
+      controller.popoverPresentationController?.permittedArrowDirections = []
+      root.present(controller, animated: true)
+      return
+    }
+    throw NSError(
+      domain: "dev.courseai.mobile-files",
+      code: 500,
+      userInfo: [NSLocalizedDescriptionKey: "Unable to present share sheet"])
+  }
+
+  private func localFileURL(from sourceUri: String) -> URL {
+    let assetPrefix = "asset://localhost"
+    if sourceUri.hasPrefix(assetPrefix) {
+      let start = sourceUri.index(sourceUri.startIndex, offsetBy: assetPrefix.count)
+      let assetPath = String(sourceUri[start...])
+      return URL(fileURLWithPath: assetPath.removingPercentEncoding ?? assetPath)
+    }
+    if let url = URL(string: sourceUri), url.scheme == "file" {
+      return url
+    }
+    return URL(fileURLWithPath: sourceUri.removingPercentEncoding ?? sourceUri)
+  }
+
+  private func pickedDirectory(category: String) throws -> URL {
+    let appSupport = try FileManager.default.url(
+      for: .applicationSupportDirectory,
+      in: .userDomainMask,
+      appropriateFor: nil,
+      create: true)
+    let safeCategory = sanitizedFileName(category, fallback: "files")
+    let directory = appSupport.appendingPathComponent("picked", isDirectory: true)
+      .appendingPathComponent(safeCategory, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+  }
+
+  private func sanitizedFileName(_ name: String, fallback: String) -> String {
+    let decoded = name.removingPercentEncoding ?? name
+    let stripped = decoded.split(separator: "/").last.map(String.init) ?? decoded
+    let invalid = CharacterSet(charactersIn: "/:")
+      .union(.newlines)
+      .union(.controlCharacters)
+    let cleaned = stripped
+      .components(separatedBy: invalid)
+      .joined(separator: "_")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return cleaned.isEmpty ? fallback : cleaned
+  }
+
+  private func uniqueDestination(in directory: URL, preferredName: String) -> URL {
+    let ext = (preferredName as NSString).pathExtension
+    let stem = (preferredName as NSString).deletingPathExtension
+    var candidate = directory.appendingPathComponent(preferredName)
+    var index = 1
+    while FileManager.default.fileExists(atPath: candidate.path) {
+      let name = ext.isEmpty ? "\(stem)-\(index)" : "\(stem)-\(index).\(ext)"
+      candidate = directory.appendingPathComponent(name)
+      index += 1
+    }
+    return candidate
+  }
+
+  private func rootPresenter() -> UIViewController? {
+    let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+    let keyWindow = scenes.flatMap { $0.windows }.first(where: { $0.isKeyWindow })
+    return keyWindow?.rootViewController
+  }
+
+  func clearPendingPicker() {
+    pendingPicker = nil
+    pendingPickerDelegate = nil
+    pendingPickerHandled = false
   }
 
   /// 把一帧解码图画进 width×height 的 RGBA 位图，按 Rec.709 权重算亮度（与 Android / ffmpeg 一致）。
@@ -339,6 +632,37 @@ final class MobileFilesPlugin: Plugin {
     if writer.status != .completed {
       throw MobileFilesError.cannotWriteAudio
     }
+  }
+}
+
+final class DocumentPickerDelegate: NSObject, UIDocumentPickerDelegate {
+  private weak var plugin: MobileFilesPlugin?
+  private let invoke: Invoke
+  private let category: String
+  private let fallbackName: String
+
+  init(plugin: MobileFilesPlugin, invoke: Invoke, category: String, fallbackName: String) {
+    self.plugin = plugin
+    self.invoke = invoke
+    self.category = category
+    self.fallbackName = fallbackName
+  }
+
+  func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+    controller.dismiss(animated: true)
+    guard let url = urls.first, let plugin else {
+      invoke.reject("No file selected")
+      return
+    }
+    plugin.handlePickedFile(url, invoke: invoke, category: category, fallbackName: fallbackName)
+  }
+
+  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    guard let plugin, !plugin.pendingPickerHandled else {
+      return
+    }
+    plugin.clearPendingPicker()
+    invoke.resolve(["path": NSNull()])
   }
 }
 

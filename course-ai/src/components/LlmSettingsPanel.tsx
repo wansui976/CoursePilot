@@ -203,9 +203,9 @@ export function LlmSettingsPanel() {
                   aria-label={showKey[p.id] ? "隐藏 API Key" : "显示 API Key"}
                   title={showKey[p.id] ? "隐藏" : "显示"}
                   onClick={() => setShowKey((s) => ({ ...s, [p.id]: !s[p.id] }))}
-                  className="ca-touch-44 absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded text-[var(--text-muted)] transition hover:text-[var(--text-strong)]"
+                  className="ca-touch-44 ca-workbench-touch absolute right-2 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded text-[var(--text-muted)] transition hover:text-[var(--text-strong)]"
                 >
-                  {showKey[p.id] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showKey[p.id] ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                 </button>
               </div>
               {hasKey[p.id] && !keys[p.id] && (

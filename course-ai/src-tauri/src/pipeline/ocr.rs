@@ -93,7 +93,9 @@ pub async fn run_ocr(
     _rect: Rect,
     _langs: &str,
 ) -> AppResult<String> {
-    Err(AppError::Config("移动端 OCR 暂不可用，请先在桌面端完成截字".into()))
+    Err(AppError::Config(
+        "移动端 OCR 暂不可用，请先在桌面端完成截字".into(),
+    ))
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]

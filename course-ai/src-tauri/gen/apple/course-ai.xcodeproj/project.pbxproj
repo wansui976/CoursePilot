@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		01C94543AB5A60D400F0FA6F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 7919E1277F043231350D350B /* LaunchScreen.storyboard */; };
-		4DCC0013FCFBAA8AB6287564 /* libapp.a in Resources */ = {isa = PBXBuildFile; fileRef = A98571109752A26853E563F6 /* libapp.a */; };
 		614952CA97648BFE458A15F0 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 8B92F7107AAAD22E5876F46C /* libapp.a */; };
 		86D2D1CC9D4B980BB666CA34 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8ACB6FE5A0AFBACEB2B621F2 /* MetalKit.framework */; };
 		A41A7F943E3389707C443AB8 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4C523DF21CC35F02AB80EAEB /* CoreGraphics.framework */; };
@@ -38,6 +37,7 @@
 		53E9A89565B82A527937D720 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		54F7158007E928EA1DE59837 /* videos.rs */ = {isa = PBXFileReference; path = videos.rs; sourceTree = "<group>"; };
 		62BF5B4CB615CBAAD548E376 /* playable.rs */ = {isa = PBXFileReference; path = playable.rs; sourceTree = "<group>"; };
+		654E237CFF1EB4BBD2D61248 /* subtitle.rs */ = {isa = PBXFileReference; path = subtitle.rs; sourceTree = "<group>"; };
 		68898FB511AA8FBF0BDD714F /* anthropic.rs */ = {isa = PBXFileReference; path = anthropic.rs; sourceTree = "<group>"; };
 		6A548B63B67F6C4C322EC4F8 /* course-ai_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "course-ai_iOS.entitlements"; sourceTree = "<group>"; };
 		6BAEF70551F2F12F62CEB0B7 /* aliyun_asr.rs */ = {isa = PBXFileReference; path = aliyun_asr.rs; sourceTree = "<group>"; };
@@ -63,12 +63,12 @@
 		A4745C607647C457546B30CF /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
 		A69292E349BF266D832BE341 /* keychain.rs */ = {isa = PBXFileReference; path = keychain.rs; sourceTree = "<group>"; };
 		A97DBABFC852D7848DDEFE2A /* transcripts.rs */ = {isa = PBXFileReference; path = transcripts.rs; sourceTree = "<group>"; };
-		A98571109752A26853E563F6 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		B809B40E30CBCC20973D68F4 /* factory.rs */ = {isa = PBXFileReference; path = factory.rs; sourceTree = "<group>"; };
 		B92E36528DDA3661AB5250EB /* rag.rs */ = {isa = PBXFileReference; path = rag.rs; sourceTree = "<group>"; };
 		BCF9E8B50D0C2BE657EF43DF /* prompts.rs */ = {isa = PBXFileReference; path = prompts.rs; sourceTree = "<group>"; };
 		BF27086E65A4E874EEE47737 /* export.rs */ = {isa = PBXFileReference; path = export.rs; sourceTree = "<group>"; };
 		BF556E79CA712CC2C95EDA05 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		C1A960C0267BE7D9802CCD98 /* crop_detect.rs */ = {isa = PBXFileReference; path = crop_detect.rs; sourceTree = "<group>"; };
 		C570DFE91554405F1BB5DF2C /* ai.rs */ = {isa = PBXFileReference; path = ai.rs; sourceTree = "<group>"; };
 		C85B7A806C022A75A1267534 /* settings.rs */ = {isa = PBXFileReference; path = settings.rs; sourceTree = "<group>"; };
 		CC9FD13BA31BC3ABC98E528A /* mobile_files.rs */ = {isa = PBXFileReference; path = mobile_files.rs; sourceTree = "<group>"; };
@@ -104,14 +104,6 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		0BC27E1197B595CB7A1F2C9A /* arm64 */ = {
-			isa = PBXGroup;
-			children = (
-				DE47FEB303E3A5D350DF7EA1 /* debug */,
-			);
-			path = arm64;
-			sourceTree = "<group>";
-		};
 		1A4FE5869E5803B95E7B2EC8 /* llm */ = {
 			isa = PBXGroup;
 			children = (
@@ -149,12 +141,14 @@
 				8C697D00FDB914D9F9C171A0 /* aliyun_ocr.rs */,
 				8827E60C96389E9C0390A81D /* asr.rs */,
 				0E48D0CF1F0D3C511CE71A7A /* audio.rs */,
+				C1A960C0267BE7D9802CCD98 /* crop_detect.rs */,
 				DB4C67C402A987A0D1A22A4E /* download.rs */,
 				A4745C607647C457546B30CF /* mod.rs */,
 				6D0A26B8137D8146B4BEEF72 /* ocr.rs */,
 				62BF5B4CB615CBAAD548E376 /* playable.rs */,
 				B92E36528DDA3661AB5250EB /* rag.rs */,
 				D001F9B6B5902764627E74BA /* slides.rs */,
+				654E237CFF1EB4BBD2D61248 /* subtitle.rs */,
 				3CC0459CA2D96C08CE7D3501 /* transcript_correction.rs */,
 				90049C97D1F548FA2D8D7E90 /* volcengine_asr.rs */,
 				92D623BCDD4486B71EF0F4D3 /* volcengine_auc.rs */,
@@ -205,14 +199,6 @@
 			path = "course-ai";
 			sourceTree = "<group>";
 		};
-		7B4839FD830B6B3CD3603DC4 /* Externals */ = {
-			isa = PBXGroup;
-			children = (
-				0BC27E1197B595CB7A1F2C9A /* arm64 */,
-			);
-			path = Externals;
-			sourceTree = "<group>";
-		};
 		82D70679B9593A690F43D30E = {
 			isa = PBXGroup;
 			children = (
@@ -220,7 +206,6 @@
 				DD478A730AA0F12D0031D59B /* Assets.xcassets */,
 				7919E1277F043231350D350B /* LaunchScreen.storyboard */,
 				9509954F695DB12E036FC8D1 /* course-ai_iOS */,
-				7B4839FD830B6B3CD3603DC4 /* Externals */,
 				4C584AB6020DE5B45F37E030 /* Sources */,
 				FE99BD8F1E5779525699E12A /* src */,
 				2AC278A4C170ECD21C874598 /* Frameworks */,
@@ -235,14 +220,6 @@
 				2F5DE34096187B688209009B /* Info.plist */,
 			);
 			path = "course-ai_iOS";
-			sourceTree = "<group>";
-		};
-		DE47FEB303E3A5D350DF7EA1 /* debug */ = {
-			isa = PBXGroup;
-			children = (
-				A98571109752A26853E563F6 /* libapp.a */,
-			);
-			path = debug;
 			sourceTree = "<group>";
 		};
 		FA0B640BE7143543B2C86C21 /* bindings */ = {
@@ -273,13 +250,6 @@
 			);
 			name = src;
 			path = ../../src;
-			sourceTree = "<group>";
-		};
-		"TEMP_BE6D5A5A-EACE-4038-81AB-9370D79F9067" /* x86_64 */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = x86_64;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -314,6 +284,10 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					861F23968F8E9B049C90790A = {
+						DevelopmentTeam = D4572P92SB;
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = 4AED97BF718A97D419CF72A0 /* Build configuration list for PBXProject "course-ai" */;
@@ -343,7 +317,6 @@
 				EE6C01C277826007D7E0F834 /* Assets.xcassets in Resources */,
 				01C94543AB5A60D400F0FA6F /* LaunchScreen.storyboard in Resources */,
 				F377BF2A2AEAA6BF06AE3C15 /* assets in Resources */,
-				4DCC0013FCFBAA8AB6287564 /* libapp.a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -451,6 +424,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "course-ai_iOS/course-ai_iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = D4572P92SB;
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -545,6 +520,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "course-ai_iOS/course-ai_iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = D4572P92SB;
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
 				FRAMEWORK_SEARCH_PATHS = (

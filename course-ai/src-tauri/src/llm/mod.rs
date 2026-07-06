@@ -52,9 +52,7 @@ pub enum Provider {
         client: reqwest::Client,
     },
     /// 测试 / 离线用：返回预置内容。
-    Mock {
-        canned: String,
-    },
+    Mock { canned: String },
 }
 
 impl Provider {

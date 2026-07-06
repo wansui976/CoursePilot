@@ -37,7 +37,11 @@ pub fn parse_srt(input: &str) -> Vec<SubSegment> {
     let mut out = Vec::new();
     // 按空行分块。
     for block in input.split("\n\n") {
-        let lines: Vec<&str> = block.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        let lines: Vec<&str> = block
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
         // 找到含 "-->" 的时间轴行，其后的行是文本。
         let Some(arrow_idx) = lines.iter().position(|l| l.contains("-->")) else {
             continue;
@@ -46,8 +50,7 @@ pub fn parse_srt(input: &str) -> Vec<SubSegment> {
             Some(pair) => pair,
             None => continue,
         };
-        let (Some(start_ms), Some(end_ms)) =
-            (parse_srt_time(start_tok), parse_srt_time(end_tok))
+        let (Some(start_ms), Some(end_ms)) = (parse_srt_time(start_tok), parse_srt_time(end_tok))
         else {
             continue;
         };
@@ -55,7 +58,11 @@ pub fn parse_srt(input: &str) -> Vec<SubSegment> {
         if text.is_empty() {
             continue;
         }
-        out.push(SubSegment { start_ms, end_ms, text });
+        out.push(SubSegment {
+            start_ms,
+            end_ms,
+            text,
+        });
     }
     out
 }
@@ -94,7 +101,14 @@ mod tests {
         let srt = "1\n00:00:01,200 --> 00:00:03,400\n你好世界\n\n2\n00:00:03,400 --> 00:00:05,000\n第二句";
         let segs = parse_srt(srt);
         assert_eq!(segs.len(), 2);
-        assert_eq!(segs[0], SubSegment { start_ms: 1200, end_ms: 3400, text: "你好世界".into() });
+        assert_eq!(
+            segs[0],
+            SubSegment {
+                start_ms: 1200,
+                end_ms: 3400,
+                text: "你好世界".into()
+            }
+        );
         assert_eq!(segs[1].start_ms, 3400);
     }
 
@@ -118,19 +132,31 @@ mod tests {
     #[tokio::test]
     async fn ingest_writes_segments_without_correction() {
         let dir = tempfile::tempdir().unwrap();
-        let db = crate::db::Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        let db = crate::db::Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
         let course = crate::commands::courses::create_course(
-            &db, "c".into(), dir.path().to_string_lossy().into()).await.unwrap();
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
         let vpath = dir.path().join("v.mp4");
         std::fs::write(&vpath, b"x").unwrap();
         let video = crate::commands::videos::add_local_video(&db, &course.id, vpath, None)
-            .await.unwrap();
+            .await
+            .unwrap();
 
-        let srt = "1\n00:00:00,000 --> 00:00:01,000\n第一句\n\n2\n00:00:01,000 --> 00:00:02,000\n第二句";
+        let srt =
+            "1\n00:00:00,000 --> 00:00:01,000\n第一句\n\n2\n00:00:01,000 --> 00:00:02,000\n第二句";
         let n = ingest_subtitle(&db, &video.id, srt, None).await.unwrap();
         assert_eq!(n, 2);
         let cnt: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transcripts WHERE video_id=?")
-            .bind(&video.id).fetch_one(&db.pool).await.unwrap();
+            .bind(&video.id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
         assert_eq!(cnt, 2);
     }
 }

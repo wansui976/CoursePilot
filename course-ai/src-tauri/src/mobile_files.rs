@@ -21,7 +21,7 @@ struct MobileFiles<R: Runtime>(tauri::plugin::PluginHandle<R>);
 #[cfg(any(target_os = "android", target_os = "ios"))]
 static APP_HANDLE: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistPickedFileRequest {
@@ -30,10 +30,12 @@ struct PersistPickedFileRequest {
     fallback_name: String,
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct PersistPickedFileResponse {
     path: String,
+    duration_ms: Option<i64>,
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -84,6 +86,32 @@ struct ExportLumaFramesRequest {
 pub struct MobileLumaFrames {
     pub interval_ms: i64,
     pub frames: Vec<String>,
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ShareFileRequest {
+    source_path: String,
+    mime: String,
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PickAndPersistFileRequest {
+    category: String,
+    fallback_name: String,
+    allowed_extensions: Vec<String>,
+    prompt: Option<String>,
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PickAndPersistFileResponse {
+    path: Option<String>,
+    duration_ms: Option<i64>,
 }
 
 /// 原生截帧落地一张 JPEG，替代桌面端 ffmpeg（Android: MediaMetadataRetriever；
@@ -161,13 +189,77 @@ pub async fn export_audio_for_asr<R: Runtime>(
 }
 
 #[tauri::command]
+pub async fn pick_and_persist_file<R: Runtime>(
+    app: AppHandle<R>,
+    category: String,
+    fallback_name: String,
+    allowed_extensions: Vec<String>,
+    prompt: Option<String>,
+) -> Result<Option<serde_json::Value>, String> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let mobile_files = app.state::<MobileFiles<R>>();
+        let response = mobile_files
+            .0
+            .run_mobile_plugin::<PickAndPersistFileResponse>(
+                "pickAndPersistFile",
+                PickAndPersistFileRequest {
+                    category,
+                    fallback_name,
+                    allowed_extensions,
+                    prompt,
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(response.path.map(|path| {
+            serde_json::json!({
+                "path": path,
+                "durationMs": response.duration_ms,
+            })
+        }))
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = (app, category, fallback_name, allowed_extensions, prompt);
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+pub async fn share_file<R: Runtime>(
+    app: AppHandle<R>,
+    source_path: String,
+    mime: String,
+) -> Result<(), String> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let mobile_files = app.state::<MobileFiles<R>>();
+        mobile_files
+            .0
+            .run_mobile_plugin::<serde_json::Value>(
+                "shareFile",
+                ShareFileRequest { source_path, mime },
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = (app, source_path, mime);
+        Ok(())
+    }
+}
+
+#[tauri::command]
 async fn persist_picked_file<R: Runtime>(
     app: AppHandle<R>,
     source_uri: String,
     category: String,
     fallback_name: String,
 ) -> Result<String, String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let mobile_files = app.state::<MobileFiles<R>>();
         let response = mobile_files
@@ -184,16 +276,50 @@ async fn persist_picked_file<R: Runtime>(
         Ok(response.path)
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = (app, category, fallback_name);
         Ok(source_uri)
     }
 }
 
+#[cfg(test)]
+fn normalize_ios_picked_file_uri(source_uri: &str) -> String {
+    if let Some(rest) = source_uri.strip_prefix("asset://localhost") {
+        return percent_decode_path(rest);
+    }
+
+    if let Some(rest) = source_uri.strip_prefix("file://") {
+        return percent_decode_path(rest);
+    }
+
+    percent_decode_path(source_uri)
+}
+
+#[cfg(test)]
+fn percent_decode_path(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                out.push(((hi << 4) | lo) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
+}
+
 pub fn init() -> TauriPlugin<tauri::Wry> {
     PluginBuilder::new("mobile-files")
-        .invoke_handler(tauri::generate_handler![persist_picked_file])
+    .invoke_handler(tauri::generate_handler![persist_picked_file, pick_and_persist_file, share_file])
         .setup(|_app, _api| {
             #[cfg(target_os = "android")]
             {
@@ -211,4 +337,29 @@ pub fn init() -> TauriPlugin<tauri::Wry> {
             Ok(())
         })
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_ios_picked_file_uri;
+
+    #[test]
+    fn normalizes_ios_asset_file_urls_back_to_file_paths() {
+        assert_eq!(
+            normalize_ios_picked_file_uri(
+                "asset://localhost/private/var/mobile/Containers/Data/Application/APP/Library/Caches/clip%20one.mov"
+            ),
+            "/private/var/mobile/Containers/Data/Application/APP/Library/Caches/clip one.mov"
+        );
+    }
+
+    #[test]
+    fn normalizes_ios_file_urls_back_to_file_paths() {
+        assert_eq!(
+            normalize_ios_picked_file_uri(
+                "file:///private/var/mobile/Containers/Data/Application/APP/tmp/clip.mov"
+            ),
+            "/private/var/mobile/Containers/Data/Application/APP/tmp/clip.mov"
+        );
+    }
 }

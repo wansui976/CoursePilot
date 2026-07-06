@@ -140,9 +140,9 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
               aria-label="关闭 OCR 结果"
               title="关闭"
               onClick={() => ocr.reset()}
-              className="ca-touch-44 grid h-5 w-5 place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+              className="ca-touch-44 ca-workbench-touch grid h-9 w-9 place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-5 w-5" />
             </button>
           </div>
           <button

@@ -180,10 +180,7 @@ pub async fn first_available_provider_for_db(
     Ok(None)
 }
 
-async fn provider_for(
-    state: &AppState,
-    task: AiTask,
-) -> AppResult<(crate::llm::Provider, String)> {
+async fn provider_for(state: &AppState, task: AiTask) -> AppResult<(crate::llm::Provider, String)> {
     provider_for_db(&state.db, task).await?.ok_or_else(|| {
         AppError::Config("尚未配置可用的 LLM Profile / API Key（设置 → 大模型）".into())
     })

@@ -48,7 +48,9 @@ pub async fn get_secret_or_legacy(db: &Db, name: &str) -> AppResult<Option<Strin
     if let Some(value) = get_secret(db, name).await? {
         return Ok(Some(value));
     }
-    Ok(get_setting(db, name).await?.filter(|v| !v.trim().is_empty()))
+    Ok(get_setting(db, name)
+        .await?
+        .filter(|v| !v.trim().is_empty()))
 }
 
 #[cfg(test)]
@@ -82,13 +84,19 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            get_secret_or_legacy(&db, "dashscope_api_key").await.unwrap(),
+            get_secret_or_legacy(&db, "dashscope_api_key")
+                .await
+                .unwrap(),
             Some("legacy-plain".into())
         );
         // 写入密钥后：读到新值，且历史明文被清空。
-        set_secret(&db, "dashscope_api_key", "sk-new").await.unwrap();
+        set_secret(&db, "dashscope_api_key", "sk-new")
+            .await
+            .unwrap();
         assert_eq!(
-            get_secret_or_legacy(&db, "dashscope_api_key").await.unwrap(),
+            get_secret_or_legacy(&db, "dashscope_api_key")
+                .await
+                .unwrap(),
             Some("sk-new".into())
         );
         assert_eq!(
