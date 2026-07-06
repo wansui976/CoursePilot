@@ -67,7 +67,7 @@ pub fn run() {
                 if let Err(error) = crate::commands::videos::purge_expired_trash(&db).await {
                     tracing::warn!("purge expired trash failed: {error}");
                 }
-                handle.manage(AppState { db });
+                handle.manage(AppState::new(db));
                 handle.manage(ProcessingTasks::default());
                 let media = crate::media_server::start()
                     .await
