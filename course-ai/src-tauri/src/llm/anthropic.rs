@@ -110,6 +110,8 @@ pub async fn complete_stream(
         .post(url)
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
+        // 显式声明接收 SSE，避免中间代理把流式响应缓冲后一次性返回。
+        .header(reqwest::header::ACCEPT, "text/event-stream")
         .json(&body)
         .send()
         .await

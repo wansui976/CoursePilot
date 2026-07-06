@@ -197,6 +197,9 @@ pub async fn complete_stream(
         .post(url)
         .bearer_auth(api_key)
         .header(CONTENT_TYPE, "application/json")
+        // 显式声明接收 SSE：部分 OpenAI 兼容服务/反向代理只有在收到该头时才真正流式，
+        // 否则会把整个响应缓冲后一次返回（表现为「答案一次性蹦出、不逐字」）。
+        .header(reqwest::header::ACCEPT, "text/event-stream")
         .json(&body)
         .send()
         .await
