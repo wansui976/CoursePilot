@@ -24,7 +24,9 @@ export function QuizPanel({ videoId }: { videoId: string }) {
   const questions = useMemo<QuizQuestion[]>(() => {
     if (!raw) return [];
     try {
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      // 校验前生成的旧题库可能不是数组（如 {"questions":[...]}），非数组直接当空，避免渲染时崩溃。
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }

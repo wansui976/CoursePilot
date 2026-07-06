@@ -60,4 +60,15 @@ describe("QuizPanel", () => {
       expect(container.querySelectorAll(".katex").length).toBeGreaterThanOrEqual(5);
     });
   });
+
+  it("shows the empty state (not a crash) when stored quiz JSON is not an array", async () => {
+    // 旧数据 / 校验前生成的题库可能不是数组（如 {"questions":[...]}）。
+    mockIpc.ai.getQuiz.mockResolvedValue('{"questions":[]}');
+
+    renderQuizPanel();
+
+    expect(
+      await screen.findByText(/还没有题目/),
+    ).toBeInTheDocument();
+  });
 });
