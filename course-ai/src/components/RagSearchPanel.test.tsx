@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RagSearchPanel } from "./RagSearchPanel";
 
-const { mockIpc, mockConfirm } = vi.hoisted(() => ({
+const { mockIpc, mockConfirm, platformMock } = vi.hoisted(() => ({
   mockIpc: {
     ai: {
       ragQueryStream: vi.fn(),
@@ -13,10 +13,18 @@ const { mockIpc, mockConfirm } = vi.hoisted(() => ({
     },
   },
   mockConfirm: vi.fn(),
+  platformMock: { mobile: false },
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: mockConfirm }));
+vi.mock("@/lib/platform", () => ({
+  isMobile: () => platformMock.mobile,
+  isAndroid: () => platformMock.mobile,
+  isIOS: () => false,
+  isTablet: () => false,
+  isDesktop: () => !platformMock.mobile,
+}));
 
 type StreamEvent =
   | { type: "status"; text: string }
@@ -62,6 +70,7 @@ describe("RagSearchPanel", () => {
     mockIpc.ai.cancelRagQuery.mockReset();
     mockIpc.ai.searchTranscript.mockReset();
     mockConfirm.mockReset();
+    platformMock.mobile = false;
   });
 
   it("renders ask turns as chat bubbles and sends the previous turn as context", async () => {
@@ -299,5 +308,43 @@ describe("RagSearchPanel", () => {
       expect(scrollSpy.mock.calls.length).toBeGreaterThan(before),
     );
     box.finish?.();
+  });
+
+  it("renders an icon-only copy button that copies the answer (desktop)", async () => {
+    const writeText = vi.fn();
+    Object.assign(navigator, { clipboard: { writeText } });
+    mockIpc.ai.ragQueryStream.mockImplementation(streamResolving("要复制的答案"));
+
+    renderAskPanel();
+    const input = screen.getByLabelText("聊天内容");
+    fireEvent.change(input, { target: { value: "问题" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    const copyBtn = await screen.findByRole("button", { name: "复制回答" });
+    // 只保留图标：按钮无「复制/已复制」文字。
+    expect(copyBtn.textContent).toBe("");
+    fireEvent.click(copyBtn);
+    expect(writeText).toHaveBeenCalledWith("要复制的答案");
+  });
+
+  it("reveals the copy button on long-press on touch devices", async () => {
+    platformMock.mobile = true;
+    mockIpc.ai.ragQueryStream.mockImplementation(streamResolving("答案"));
+
+    renderAskPanel();
+    const input = screen.getByLabelText("聊天内容");
+    fireEvent.change(input, { target: { value: "问题" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    const bubble = await screen.findByRole("article", { name: "AI 回复" });
+    const copyBtn = screen.getByRole("button", { name: "复制回答" });
+    // 触屏默认隐藏（不可点）。
+    expect(copyBtn.className).toContain("opacity-0");
+
+    // 长按气泡 ~0.5s 后显示（用真实计时器，避免 fake timers 全局泄漏）。
+    fireEvent.touchStart(bubble);
+    await waitFor(() => expect(copyBtn.className).toContain("opacity-100"), {
+      timeout: 1500,
+    });
   });
 });
