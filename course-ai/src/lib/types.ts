@@ -163,3 +163,9 @@ export interface RelinkResult {
   ambiguous: string[];
   missing: string[];
 }
+
+/** 问答流式事件：与后端 rag::AskEvent 对应（tag = "type"）。 */
+export type AskEvent =
+  | { type: "status"; text: string }
+  | { type: "token"; delta: string }
+  | { type: "done"; answer: string };

@@ -5,12 +5,47 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 use tauri::State;
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: Db,
+    /// 进行中的问答请求 id → 取消标志。停止生成时置位。
+    pub rag_cancels: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+}
+
+impl AppState {
+    pub fn new(db: Db) -> Self {
+        Self {
+            db,
+            rag_cancels: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// 登记一个新请求的取消标志并返回它（供流式循环轮询）。
+    pub fn register_cancel(&self, id: &str) -> Arc<AtomicBool> {
+        let flag = Arc::new(AtomicBool::new(false));
+        self.rag_cancels
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), flag.clone());
+        flag
+    }
+
+    /// 置位对应请求的取消标志（不存在则忽略）。
+    pub fn cancel_rag(&self, id: &str) {
+        if let Some(flag) = self.rag_cancels.lock().unwrap().get(id) {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    /// 请求结束后移除登记，避免表无限增长。
+    pub fn unregister_cancel(&self, id: &str) {
+        self.rag_cancels.lock().unwrap().remove(id);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -277,6 +312,19 @@ mod tests {
     async fn fresh_db() -> Db {
         let db_path = std::env::temp_dir().join(format!("course-ai-test-{}.db", Uuid::new_v4()));
         Db::connect_and_migrate(&db_path).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn register_then_cancel_sets_flag() {
+        use std::sync::atomic::Ordering;
+        let state = AppState::new(fresh_db().await);
+        let flag = state.register_cancel("req-1");
+        assert!(!flag.load(Ordering::SeqCst));
+        state.cancel_rag("req-1");
+        assert!(flag.load(Ordering::SeqCst));
+        state.unregister_cancel("req-1");
+        // 注销后再取消不 panic、也不影响旧 flag。
+        state.cancel_rag("req-1");
     }
 
     #[tokio::test]

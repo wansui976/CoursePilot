@@ -8,6 +8,19 @@ use crate::db::Db;
 use crate::error::AppResult;
 use crate::llm::{ChatMessage, ChatRequest, Provider};
 use serde::Serialize;
+use std::sync::atomic::AtomicBool;
+
+/// 问答流式推送给前端的事件。tag="type"，字段 lowercase：status/token/done。
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum AskEvent {
+    /// 阶段提示，如「正在通读各段…」。
+    Status { text: String },
+    /// 增量文本。
+    Token { delta: String },
+    /// 最终（已清洗）完整答案。
+    Done { answer: String },
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Chunk {
@@ -276,6 +289,158 @@ pub async fn answer(
     })
 }
 
+/// 流式问答：短视频直接流式；长视频先发状态提示，仅综合步流式。
+/// 结束时对累积文本清洗时间戳数组，发 Done 并返回。
+#[allow(clippy::too_many_arguments)] // 编排入口：db/provider/model/video/query/history/cancel/on_event 各有其义。
+pub async fn answer_stream(
+    db: &Db,
+    provider: &Provider,
+    chat_model: &str,
+    video_id: &str,
+    query: &str,
+    history: &[ChatMessage],
+    cancel: &AtomicBool,
+    on_event: &mut (dyn FnMut(AskEvent) + Send),
+) -> AppResult<RagAnswer> {
+    let transcript = crate::pipeline::ai::transcript_text(db, video_id).await?;
+    let messages = build_chat_messages(history, query);
+
+    let raw = if transcript.chars().count() <= SINGLE_CALL_CHAR_LIMIT {
+        let req = ask_request(
+            chat_model,
+            ASK_SYSTEM,
+            Some(format!(
+                "课程视频完整字幕（每行 [mm:ss] 文本）：\n{transcript}"
+            )),
+            messages,
+            1024,
+        );
+        provider
+            .complete_stream(&req, cancel, &mut |d| {
+                on_event(AskEvent::Token {
+                    delta: d.to_string(),
+                })
+            })
+            .await?
+    } else {
+        map_reduce_answer_stream(
+            provider, chat_model, &transcript, query, history, cancel, on_event,
+        )
+        .await?
+    };
+
+    let answer = strip_timestamp_arrays(&raw);
+    on_event(AskEvent::Done {
+        answer: answer.clone(),
+    });
+    Ok(RagAnswer {
+        answer,
+        citations: Vec::new(),
+    })
+}
+
+/// 长视频流式：map 各段（非流式）后综合步流式。返回未清洗的累积文本。
+async fn map_reduce_answer_stream(
+    provider: &Provider,
+    chat_model: &str,
+    transcript: &str,
+    query: &str,
+    history: &[ChatMessage],
+    cancel: &AtomicBool,
+    on_event: &mut (dyn FnMut(AskEvent) + Send),
+) -> AppResult<String> {
+    use std::sync::atomic::Ordering;
+    on_event(AskEvent::Status {
+        text: "正在通读各段…".into(),
+    });
+    let parts = split_by_chars(transcript, PART_CHAR_LIMIT);
+    let mut partials = Vec::new();
+    let messages = build_chat_messages(history, query);
+    for part in &parts {
+        if cancel.load(Ordering::SeqCst) {
+            break;
+        }
+        let req = ask_request(
+            chat_model,
+            "你是课程字幕问答助手。仅根据这部分字幕回答问题；若这部分完全没有相关信息，只回复 NONE，不要解释。\
+有相关信息时，每条结论后紧跟字幕里照抄的 [mm:ss] 出处，时间戳格式与字幕完全一致；\
+只用单个时间点 [mm:ss]，不要写成时间段 [mm:ss-mm:ss]。",
+            Some(format!("字幕片段：\n{part}")),
+            messages.clone(),
+            512,
+        );
+        let content = provider.complete(&req).await?.content;
+        let trimmed = content.trim();
+        if !trimmed.is_empty() && !trimmed.to_uppercase().starts_with("NONE") {
+            partials.push(content);
+        }
+    }
+
+    // 未覆盖：流式兜底（模型自身知识）。
+    if partials.is_empty() {
+        let req = ask_request(
+            chat_model,
+            "课程字幕里没有讲到用户的问题。请先用一句「视频里没有讲到这个内容。」开头，\
+另起一段用你自己的知识尽量回答，并在该段开头标注「（以下回答来自大模型，非视频内容）」；不要编造时间戳。",
+            None,
+            build_chat_messages(history, query),
+            1024,
+        );
+        return provider
+            .complete_stream(&req, cancel, &mut |d| {
+                on_event(AskEvent::Token {
+                    delta: d.to_string(),
+                })
+            })
+            .await;
+    }
+
+    // 只有一段命中：不再额外调用 LLM，直接把它按词切成 Token 逐词发。
+    if partials.len() == 1 {
+        let text = partials.pop().unwrap();
+        for (i, word) in text.split_whitespace().enumerate() {
+            if cancel.load(Ordering::SeqCst) {
+                break;
+            }
+            let piece = if i == 0 {
+                word.to_string()
+            } else {
+                format!(" {word}")
+            };
+            on_event(AskEvent::Token { delta: piece });
+        }
+        return Ok(text);
+    }
+
+    // 多段：综合步流式。
+    let joined = partials.join("\n---\n");
+    let history_summary = summarize_history(history);
+    let prompt = if history_summary.is_empty() {
+        format!("问题：{query}\n\n各片段回答：\n{joined}")
+    } else {
+        format!("历史对话：\n{history_summary}\n\n问题：{query}\n\n各片段回答：\n{joined}")
+    };
+    let req = ask_request(
+        chat_model,
+        "把下面来自同一视频不同片段、针对同一问题的多段回答，综合成一个完整、不重复、条理清晰、按时间顺序的最终回答。\
+原样保留每条结论后的 [mm:ss] 时间标注，只用单个时间点，不要改写成时间段 [mm:ss-mm:ss]，不要改写时间戳格式；\
+绝对不要把多个时间戳合并进同一个方括号，不要输出形如 [01:10, 01:15, 01:18] 的时间戳数组/列表。",
+        None,
+        vec![ChatMessage {
+            role: "user".into(),
+            content: prompt,
+        }],
+        1024,
+    );
+    provider
+        .complete_stream(&req, cancel, &mut |d| {
+            on_event(AskEvent::Token {
+                delta: d.to_string(),
+            })
+        })
+        .await
+}
+
 async fn map_reduce_answer(
     provider: &Provider,
     chat_model: &str,
@@ -533,6 +698,33 @@ mod tests {
             .unwrap();
         assert_eq!(ans.answer, "光合作用是…… [00:00]");
         assert!(ans.citations.is_empty());
+    }
+
+    #[tokio::test]
+    async fn answer_stream_emits_tokens_then_cleaned_done() {
+        use std::sync::atomic::AtomicBool;
+        let (db, vid, _d) = seed().await;
+        let provider = Provider::Mock {
+            // 含一个时间戳数组，done 时应被清洗掉。
+            canned: "参数方程 [01:10, 01:15, 01:18] 是重点 [00:05]".into(),
+        };
+        let cancel = AtomicBool::new(false);
+        let mut events: Vec<AskEvent> = Vec::new();
+        let ans = answer_stream(
+            &db, &provider, "m", &vid, "问题", &[], &cancel, &mut |e| events.push(e),
+        )
+        .await
+        .unwrap();
+
+        assert!(events.iter().any(|e| matches!(e, AskEvent::Token { .. })));
+        match events.last().unwrap() {
+            AskEvent::Done { answer } => {
+                assert!(!answer.contains("[01:10, 01:15"), "时间戳数组应被清洗");
+                assert!(answer.contains("[00:05]"), "单个时间戳保留");
+            }
+            other => panic!("最后一个事件应为 Done，实际 {other:?}"),
+        }
+        assert_eq!(ans.answer, "参数方程 是重点 [00:05]");
     }
 
     #[tokio::test]

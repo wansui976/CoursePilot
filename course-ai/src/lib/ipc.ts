@@ -1,6 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, Channel } from "@tauri-apps/api/core";
 import type { Insets } from "./blackBars";
 import type {
+  AskEvent,
   ChatMessage,
   Chapter,
   Citation,
@@ -127,6 +128,25 @@ export const ipc = {
       query: string,
       history: ChatMessage[] = [],
     ): Promise<RagAnswer> => invoke("cmd_rag_query", { videoId, query, history }),
+    ragQueryStream: (
+      videoId: string,
+      query: string,
+      history: ChatMessage[],
+      requestId: string,
+      onEvent: (e: AskEvent) => void,
+    ): Promise<RagAnswer> => {
+      const channel = new Channel<AskEvent>();
+      channel.onmessage = onEvent;
+      return invoke("cmd_rag_query_stream", {
+        videoId,
+        query,
+        history,
+        requestId,
+        channel,
+      });
+    },
+    cancelRagQuery: (requestId: string): Promise<void> =>
+      invoke("cmd_cancel_rag_query", { requestId }),
     searchTranscript: (videoId: string, query: string): Promise<Citation[]> =>
       invoke("cmd_search_transcript", { videoId, query }),
   },

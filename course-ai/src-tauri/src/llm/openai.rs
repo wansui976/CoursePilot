@@ -1,7 +1,9 @@
 use crate::error::{AppError, AppResult};
 use crate::llm::{ChatRequest, ChatResponse};
+use futures_util::StreamExt;
 use reqwest::header::CONTENT_TYPE;
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 fn body_snippet(body: &str) -> String {
     const MAX: usize = 500;
@@ -164,10 +166,93 @@ pub async fn embed(
     parse_embeddings_response(&v)
 }
 
+/// 解析一行 OpenAI SSE：仅当是 `data: {json}` 且含 choices[0].delta.content 时返回该增量。
+pub fn parse_openai_sse_line(line: &str) -> Option<String> {
+    let data = line.strip_prefix("data:")?.trim();
+    if data.is_empty() || data == "[DONE]" {
+        return None;
+    }
+    let v: Value = serde_json::from_str(data).ok()?;
+    v.get("choices")?
+        .get(0)?
+        .get("delta")?
+        .get("content")?
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+pub async fn complete_stream(
+    base_url: &str,
+    api_key: &str,
+    client: &reqwest::Client,
+    req: &ChatRequest,
+    cancel: &AtomicBool,
+    on_token: &mut (dyn FnMut(&str) + Send),
+) -> AppResult<String> {
+    let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
+    let mut body = build_openai_body(req);
+    body["stream"] = json!(true);
+    let resp = client
+        .post(url)
+        .bearer_auth(api_key)
+        .header(CONTENT_TYPE, "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!(
+            "OpenAI {status}: {}",
+            body_snippet(&text)
+        )));
+    }
+    let mut acc = String::new();
+    let mut buf = String::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        if cancel.load(Ordering::SeqCst) {
+            break;
+        }
+        let bytes = chunk.map_err(|e| AppError::Other(e.to_string()))?;
+        buf.push_str(&String::from_utf8_lossy(&bytes));
+        // 按行处理，保留最后一段不完整行到下次。
+        while let Some(pos) = buf.find('\n') {
+            let line: String = buf.drain(..=pos).collect();
+            if let Some(delta) = parse_openai_sse_line(line.trim_end()) {
+                if cancel.load(Ordering::SeqCst) {
+                    return Ok(acc);
+                }
+                on_token(&delta);
+                acc.push_str(&delta);
+            }
+        }
+    }
+    Ok(acc)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::llm::ChatMessage;
+
+    #[test]
+    fn parses_openai_delta_lines() {
+        assert_eq!(
+            parse_openai_sse_line(r#"data: {"choices":[{"delta":{"content":"你好"}}]}"#),
+            Some("你好".to_string())
+        );
+        assert_eq!(parse_openai_sse_line("data: [DONE]"), None);
+        assert_eq!(parse_openai_sse_line(": comment"), None);
+        assert_eq!(parse_openai_sse_line(""), None);
+        // role-only delta（无 content）不产出。
+        assert_eq!(
+            parse_openai_sse_line(r#"data: {"choices":[{"delta":{"role":"assistant"}}]}"#),
+            None
+        );
+    }
 
     fn sample_req() -> ChatRequest {
         ChatRequest {
