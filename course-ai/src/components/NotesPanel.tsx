@@ -93,10 +93,12 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   }, []);
 
   useEffect(() => {
+    // 把 ref 快照进闭包：cleanup 运行时 scrollerRef.current 可能已被 React 置空。
+    const scroller = scrollerRef.current;
     return () => {
-      if (view === "notes" && scrollerRef.current) {
+      if (view === "notes" && scroller) {
         writeVideoResumeState(videoId, {
-          notesScrollTop: scrollerRef.current.scrollTop,
+          notesScrollTop: scroller.scrollTop,
         });
       }
     };
