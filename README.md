@@ -224,10 +224,6 @@ brew install ffmpeg whisper-cpp tesseract yt-dlp
 
 > 注意：阿里云 OCR 使用的是账号级 **AccessKey ID / Secret**，与语音识别用的阿里云 DashScope（百炼）API Key 是两套不同的凭证，请勿混用。
 
-## 说明
-
-CoursePilot 默认把学习资料保存在本地，适合个人课程资料整理和学习辅助。云端 ASR、LLM、Embedding 等能力需要在设置中配置对应服务的 API Key。
-
 ## License
 
 MIT
