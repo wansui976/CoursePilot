@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useMutationState } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
-import { Check, Copy, Loader2, Send, Sparkles, Trash2, User } from "lucide-react";
+import { Check, Copy, Send, Sparkles, Square, Trash2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { MathText } from "@/components/MathText";
@@ -9,7 +9,7 @@ import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { withClickableTimestamps } from "@/lib/clickableTimestamps";
 import { usePlayer } from "@/stores/player";
-import type { ChatMessage, Citation, RagAnswer } from "@/lib/types";
+import type { AskEvent, ChatMessage, Citation, RagAnswer } from "@/lib/types";
 
 /**
  * 渲染回答：先用 KaTeX 解析 \(..\)/\[..\]/$..$ 数学公式，非公式片段里再把
@@ -149,8 +149,17 @@ function AskChatPanel({ videoId }: { videoId: string }) {
   const [query, setQueryState] = useState(() => readDraft(videoId));
   const [history, setHistory] = useState<AskTurn[]>(() => readAskHistory(videoId));
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // 进行中的流式回答（本轮 requestId + 状态提示 + 已累积文本）。
+  const [streaming, setStreaming] = useState<{
+    requestId: string;
+    status: string;
+    text: string;
+  } | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const tailRef = useRef<HTMLDivElement>(null);
+  // 组件卸载后不再 setState（后台请求仍会跑完并落库）。
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // 草稿同步落 localStorage，切走再回来不丢已输入内容。
   const setQuery = (value: string) => {
@@ -166,17 +175,37 @@ function AskChatPanel({ videoId }: { videoId: string }) {
   const ask = useMutation<RagAnswer, unknown, AskRequest>({
     mutationKey: ["rag-ask", videoId],
     // 直接在 mutationFn 内落库：即使提问途中切到别的页面、组件已卸载，
-    // 请求仍会跑完并把回答写入历史，切回来即可见。
+    // 请求仍会跑完并把回答写入历史，切回来即可见。token 通过 onEvent 实时渲染。
     mutationFn: async ({ query, history }) => {
-      const answer = await ipc.ai.ragQuery(videoId, query, history);
+      const requestId = crypto.randomUUID();
+      if (mountedRef.current) setStreaming({ requestId, status: "", text: "" });
+      const answer = await ipc.ai.ragQueryStream(
+        videoId,
+        query,
+        history,
+        requestId,
+        (e: AskEvent) => {
+          if (!mountedRef.current) return;
+          setStreaming((prev) => {
+            if (!prev || prev.requestId !== requestId) return prev;
+            if (e.type === "status") return { ...prev, status: e.text };
+            if (e.type === "token") return { ...prev, text: prev.text + e.delta };
+            return prev; // done：最终答案由落库 + 历史渲染接管
+          });
+        },
+      );
       const next = [
         ...readAskHistory(videoId),
         { id: crypto.randomUUID(), query, answer: answer.answer },
       ];
       writeAskHistory(videoId, next);
+      if (mountedRef.current) setStreaming(null);
       return answer;
     },
     onSuccess: () => setHistory(readAskHistory(videoId)),
+    onError: () => {
+      if (mountedRef.current) setStreaming(null);
+    },
   });
 
   // 全局 MutationCache 跨组件卸载存活：切回来据此恢复「我的提问 + 思考中」。
@@ -336,21 +365,39 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                 </p>
               </div>
             </div>
-            {busy && (
-              <div className="flex items-start gap-2">
-                {aiAvatar}
-                <div className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-3">
-                  <span
-                    className="ca-typing inline-flex items-center gap-1 text-[var(--text-muted)]"
-                    aria-label="思考中"
+            {busy &&
+              (streaming && streaming.text ? (
+                <div className="flex items-start gap-2">
+                  {aiAvatar}
+                  <div
+                    role="article"
+                    aria-label="AI 回复"
+                    className="min-w-0 max-w-[82%] rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2"
                   >
-                    <i className="ca-typing-dot" />
-                    <i className="ca-typing-dot" style={{ animationDelay: "0.15s" }} />
-                    <i className="ca-typing-dot" style={{ animationDelay: "0.3s" }} />
-                  </span>
+                    <AnswerText text={streaming.text} onSeek={requestSeek} />
+                  </div>
                 </div>
-              </div>
-            )}
+              ) : (
+                <div className="flex items-start gap-2">
+                  {aiAvatar}
+                  <div className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-3">
+                    {streaming?.status ? (
+                      <span className="text-xs text-[var(--text-muted)]">
+                        {streaming.status}
+                      </span>
+                    ) : (
+                      <span
+                        className="ca-typing inline-flex items-center gap-1 text-[var(--text-muted)]"
+                        aria-label="思考中"
+                      >
+                        <i className="ca-typing-dot" />
+                        <i className="ca-typing-dot" style={{ animationDelay: "0.15s" }} />
+                        <i className="ca-typing-dot" style={{ animationDelay: "0.3s" }} />
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
             {ask.isError && (
               <div className="flex items-start gap-2">
                 {aiAvatar}
@@ -393,20 +440,28 @@ function AskChatPanel({ videoId }: { videoId: string }) {
             }}
             className="ca-ask-input min-w-0 flex-1 bg-transparent text-sm leading-relaxed text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)]"
           />
-          <button
-            type="button"
-            onClick={() => submit()}
-            disabled={busy || !query.trim()}
-            aria-label="发送"
-            title="发送（Enter）"
-            className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full bg-primary text-white transition hover:opacity-90 disabled:bg-[var(--surface-card-active)] disabled:text-[var(--text-muted)] disabled:hover:opacity-100"
-          >
-            {busy ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
+          {streaming ? (
+            <button
+              type="button"
+              onClick={() => void ipc.ai.cancelRagQuery(streaming.requestId)}
+              aria-label="停止生成"
+              title="停止生成"
+              className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full bg-[var(--status-err)] text-white transition hover:opacity-90"
+            >
+              <Square className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => submit()}
+              disabled={busy || !query.trim()}
+              aria-label="发送"
+              title="发送（Enter）"
+              className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full bg-primary text-white transition hover:opacity-90 disabled:bg-[var(--surface-card-active)] disabled:text-[var(--text-muted)] disabled:hover:opacity-100"
+            >
               <Send className="h-4 w-4" />
-            )}
-          </button>
+            </button>
+          )}
         </div>
       </div>
     </div>
