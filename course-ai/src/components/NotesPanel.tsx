@@ -50,6 +50,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   function debounceSave(json: string) {
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
+      saveTimer.current = undefined;
       void ipc.ai.saveNotes(videoId, json);
     }, 800);
   }
@@ -87,6 +88,18 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     }
     editor.commands.setContent(markdownToTiptap(notesContent));
   }, [editor, notesContent]);
+
+  // 切走视频 / 卸载前：若去抖窗口内还有未落库的编辑，立刻刷盘，避免丢失。
+  // cleanup 在 videoId 变化时以「旧 videoId + 旧内容」运行，正好把上一条编辑存回原视频。
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current !== undefined) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = undefined;
+        if (editor) void ipc.ai.saveNotes(videoId, JSON.stringify(editor.getJSON()));
+      }
+    };
+  }, [videoId, editor]);
 
   useEffect(() => {
     if (rootRef.current) return installTimestampClick(rootRef.current);
