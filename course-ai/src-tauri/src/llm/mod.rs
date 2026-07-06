@@ -7,6 +7,7 @@ pub mod prompts;
 
 use crate::error::AppResult;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -74,6 +75,45 @@ impl Provider {
         }
     }
 
+    /// 流式补全：每收到一段文本先查 `cancel`（true 则停止并返回已累积），
+    /// 否则调 `on_token(delta)` 并累积。返回累积全文。
+    pub async fn complete_stream(
+        &self,
+        req: &ChatRequest,
+        cancel: &AtomicBool,
+        on_token: &mut dyn FnMut(&str),
+    ) -> AppResult<String> {
+        match self {
+            Provider::OpenAi {
+                base_url,
+                api_key,
+                client,
+            } => openai::complete_stream(base_url, api_key, client, req, cancel, on_token).await,
+            Provider::Anthropic {
+                base_url,
+                api_key,
+                client,
+            } => anthropic::complete_stream(base_url, api_key, client, req, cancel, on_token).await,
+            Provider::Mock { canned } => {
+                let mut acc = String::new();
+                // 按空白切成词，逐词回调，模拟流式；每词前查取消。
+                for (i, word) in canned.split_whitespace().enumerate() {
+                    if cancel.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let piece = if i == 0 {
+                        word.to_string()
+                    } else {
+                        format!(" {word}")
+                    };
+                    on_token(&piece);
+                    acc.push_str(&piece);
+                }
+                Ok(acc)
+            }
+        }
+    }
+
     pub fn supports_vision(&self) -> bool {
         false
     }
@@ -127,5 +167,49 @@ mod tests {
             max_tokens: 100,
         };
         assert_eq!(provider.complete(&req).await.unwrap().content, "hello");
+    }
+
+    fn stream_req() -> ChatRequest {
+        ChatRequest {
+            model: "m".into(),
+            system: None,
+            cacheable_context: None,
+            messages: vec![],
+            temperature: 0.2,
+            max_tokens: 64,
+        }
+    }
+
+    #[tokio::test]
+    async fn mock_complete_stream_emits_chunks_and_accumulates() {
+        use std::sync::atomic::AtomicBool;
+        let p = Provider::Mock {
+            canned: "结论 一 二 三".into(),
+        };
+        let cancel = AtomicBool::new(false);
+        let mut chunks: Vec<String> = Vec::new();
+        let full = p
+            .complete_stream(&stream_req(), &cancel, &mut |d| chunks.push(d.to_string()))
+            .await
+            .unwrap();
+        assert!(chunks.len() >= 2, "应分多段回调");
+        assert_eq!(full, chunks.concat());
+        assert_eq!(full, "结论 一 二 三");
+    }
+
+    #[tokio::test]
+    async fn mock_complete_stream_stops_on_cancel() {
+        use std::sync::atomic::AtomicBool;
+        let p = Provider::Mock {
+            canned: "a b c d e".into(),
+        };
+        let cancel = AtomicBool::new(true); // 一开始就取消
+        let mut chunks = 0;
+        let full = p
+            .complete_stream(&stream_req(), &cancel, &mut |_| chunks += 1)
+            .await
+            .unwrap();
+        assert_eq!(chunks, 0, "已取消则不产出");
+        assert_eq!(full, "");
     }
 }
