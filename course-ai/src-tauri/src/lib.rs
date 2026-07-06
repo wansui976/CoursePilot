@@ -23,7 +23,9 @@ use crate::commands::courses::{
 use crate::commands::export::{
     cmd_export_mindmap, cmd_export_notes, cmd_export_quiz, cmd_export_subtitles,
 };
-use crate::commands::rag::{cmd_rag_query, cmd_search_transcript};
+use crate::commands::rag::{
+    cmd_cancel_rag_query, cmd_rag_query, cmd_rag_query_stream, cmd_search_transcript,
+};
 use crate::commands::settings::{cmd_get_setting, cmd_set_secret, cmd_set_setting};
 use crate::commands::slides::{
     cmd_capture_frame, cmd_extract_slides, cmd_get_screenshots, cmd_get_slides,
@@ -127,6 +129,8 @@ pub fn run() {
             cmd_export_quiz,
             cmd_export_mindmap,
             cmd_rag_query,
+            cmd_rag_query_stream,
+            cmd_cancel_rag_query,
             cmd_search_transcript,
             cmd_ocr_region,
             cmd_import_bilibili,

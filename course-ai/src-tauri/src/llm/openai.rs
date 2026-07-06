@@ -188,7 +188,7 @@ pub async fn complete_stream(
     client: &reqwest::Client,
     req: &ChatRequest,
     cancel: &AtomicBool,
-    on_token: &mut dyn FnMut(&str),
+    on_token: &mut (dyn FnMut(&str) + Send),
 ) -> AppResult<String> {
     let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
     let mut body = build_openai_body(req);

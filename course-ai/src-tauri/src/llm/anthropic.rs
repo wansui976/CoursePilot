@@ -101,7 +101,7 @@ pub async fn complete_stream(
     client: &reqwest::Client,
     req: &ChatRequest,
     cancel: &AtomicBool,
-    on_token: &mut dyn FnMut(&str),
+    on_token: &mut (dyn FnMut(&str) + Send),
 ) -> AppResult<String> {
     let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
     let mut body = build_anthropic_body(req);

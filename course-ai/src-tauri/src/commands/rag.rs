@@ -6,6 +6,8 @@ use crate::llm::keychain;
 use crate::llm::profiles::{parse_profiles, parse_routing, resolve_profile, AiTask};
 use crate::llm::ChatMessage;
 use crate::pipeline::rag;
+use crate::pipeline::rag::AskEvent;
+use tauri::ipc::Channel;
 use tauri::State;
 
 /// 解析问答用的 provider + chat 模型。
@@ -40,6 +42,36 @@ pub async fn cmd_rag_query(
         &history,
     )
     .await
+}
+
+/// 流式向这节课提问：token 通过 channel 实时推送，返回最终（已清洗）答案。
+#[tauri::command]
+pub async fn cmd_rag_query_stream(
+    state: State<'_, AppState>,
+    video_id: String,
+    query: String,
+    history: Vec<ChatMessage>,
+    request_id: String,
+    channel: Channel<AskEvent>,
+) -> AppResult<rag::RagAnswer> {
+    let (provider, chat_model) = rag_provider(&state).await?;
+    let cancel = state.register_cancel(&request_id);
+    let result = rag::answer_stream(
+        &state.db,
+        &provider,
+        &chat_model,
+        &video_id,
+        &query,
+        &history,
+        &cancel,
+        &mut |event| {
+            // 发送失败（前端已断开）忽略：后台仍跑完并由调用方落库。
+            let _ = channel.send(event);
+        },
+    )
+    .await;
+    state.unregister_cancel(&request_id);
+    result
 }
 
 /// 停止一个进行中的问答请求：置位其取消标志，流式循环会尽快停下并保留已生成部分。
