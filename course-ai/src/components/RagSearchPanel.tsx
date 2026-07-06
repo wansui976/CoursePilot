@@ -4,13 +4,17 @@ import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { Check, Copy, Loader2, Send, Sparkles, Trash2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/ui/ErrorNote";
+import { MathText } from "@/components/MathText";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { withClickableTimestamps } from "@/lib/clickableTimestamps";
 import { usePlayer } from "@/stores/player";
 import type { ChatMessage, Citation, RagAnswer } from "@/lib/types";
 
-/** 把回答里的 [mm:ss] 时间戳渲染成可点击跳转的标记，其余按纯文本保留换行。 */
+/**
+ * 渲染回答：先用 KaTeX 解析 \(..\)/\[..\]/$..$ 数学公式，非公式片段里再把
+ * [mm:ss] 时间戳渲染成可点击跳转的标记，其余按纯文本保留换行。
+ */
 function AnswerText({
   text,
   onSeek,
@@ -20,7 +24,10 @@ function AnswerText({
 }) {
   return (
     <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-normal)]">
-      {withClickableTimestamps(text, onSeek)}
+      <MathText
+        text={text}
+        renderText={(segment, key) => withClickableTimestamps(segment, onSeek, key)}
+      />
     </p>
   );
 }
