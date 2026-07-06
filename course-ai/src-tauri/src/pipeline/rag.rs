@@ -6,7 +6,7 @@
 use crate::commands::transcripts::{list_segments, TranscriptSegment};
 use crate::db::Db;
 use crate::error::AppResult;
-use crate::llm::{ChatMessage, ChatRequest, Provider};
+use crate::llm::{ChatMessage, ChatRequest, Provider, StreamPiece};
 use serde::Serialize;
 use std::sync::atomic::AtomicBool;
 
@@ -16,6 +16,8 @@ use std::sync::atomic::AtomicBool;
 pub enum AskEvent {
     /// 阶段提示，如「正在通读各段…」。
     Status { text: String },
+    /// 推理模型的「思考」增量（流式展示，不计入最终答案）。
+    Reasoning { delta: String },
     /// 增量文本。
     Token { delta: String },
     /// 最终（已清洗）完整答案。
@@ -316,10 +318,13 @@ pub async fn answer_stream(
             1024,
         );
         provider
-            .complete_stream(&req, cancel, &mut |d| {
-                on_event(AskEvent::Token {
+            .complete_stream(&req, cancel, &mut |piece| match piece {
+                StreamPiece::Content(d) => on_event(AskEvent::Token {
                     delta: d.to_string(),
-                })
+                }),
+                StreamPiece::Reasoning(r) => on_event(AskEvent::Reasoning {
+                    delta: r.to_string(),
+                }),
             })
             .await?
     } else {
@@ -387,10 +392,13 @@ async fn map_reduce_answer_stream(
             1024,
         );
         return provider
-            .complete_stream(&req, cancel, &mut |d| {
-                on_event(AskEvent::Token {
+            .complete_stream(&req, cancel, &mut |piece| match piece {
+                StreamPiece::Content(d) => on_event(AskEvent::Token {
                     delta: d.to_string(),
-                })
+                }),
+                StreamPiece::Reasoning(r) => on_event(AskEvent::Reasoning {
+                    delta: r.to_string(),
+                }),
             })
             .await;
     }
@@ -433,10 +441,13 @@ async fn map_reduce_answer_stream(
         1024,
     );
     provider
-        .complete_stream(&req, cancel, &mut |d| {
-            on_event(AskEvent::Token {
+        .complete_stream(&req, cancel, &mut |piece| match piece {
+            StreamPiece::Content(d) => on_event(AskEvent::Token {
                 delta: d.to_string(),
-            })
+            }),
+            StreamPiece::Reasoning(r) => on_event(AskEvent::Reasoning {
+                delta: r.to_string(),
+            }),
         })
         .await
 }
