@@ -173,5 +173,7 @@ export const ipc = {
       invoke("cmd_probe_bilibili", { url }),
     setBilibiliCookies: (filePath: string): Promise<void> =>
       invoke("cmd_set_bilibili_cookies", { filePath }),
+    hasBilibiliCookies: (): Promise<boolean> =>
+      invoke("cmd_has_bilibili_cookies"),
   },
 };

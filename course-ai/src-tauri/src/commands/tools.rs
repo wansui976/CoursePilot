@@ -149,6 +149,19 @@ pub async fn cmd_probe_bilibili(
     download::probe(&url, cookies.as_deref()).await
 }
 
+/// 是否已导入可用的 B站 cookies.txt：不仅设置里存了路径，且该文件仍存在且非空。
+/// 设置只保存文件路径，文件可能被删/移走，故必须落到磁盘校验，避免「过了下一步却 412」。
+#[tauri::command]
+pub async fn cmd_has_bilibili_cookies(state: State<'_, AppState>) -> AppResult<bool> {
+    let path = match get_setting(&state.db, "bilibili_cookies").await? {
+        Some(p) if !p.is_empty() => p,
+        _ => return Ok(false),
+    };
+    Ok(std::fs::metadata(&path)
+        .map(|m| m.is_file() && m.len() > 0)
+        .unwrap_or(false))
+}
+
 /// 把用户选的 cookies.txt 复制进 appdata（稳定路径），写入 bilibili_cookies 设置。
 #[tauri::command]
 pub async fn cmd_set_bilibili_cookies(
