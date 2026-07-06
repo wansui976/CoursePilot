@@ -52,7 +52,10 @@ function historyKey(videoId: string, mode: RagMode) {
 function readSearchHistory(videoId: string, mode: RagMode): SearchHistoryEntry[] {
   try {
     const raw = localStorage.getItem(historyKey(videoId, mode));
-    return raw ? (JSON.parse(raw) as SearchHistoryEntry[]) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    // 存量数据损坏时可能不是数组，非数组直接当空，避免下游 .map 崩溃。
+    return Array.isArray(parsed) ? (parsed as SearchHistoryEntry[]) : [];
   } catch {
     return [];
   }
