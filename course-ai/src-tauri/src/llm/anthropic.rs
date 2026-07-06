@@ -1,6 +1,8 @@
 use crate::error::{AppError, AppResult};
 use crate::llm::{ChatRequest, ChatResponse};
+use futures_util::StreamExt;
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Anthropic Messages body。system 为数组：固定指令 + 可缓存字幕块（带 cache_control）。
 pub fn build_anthropic_body(req: &ChatRequest) -> Value {
@@ -72,22 +74,95 @@ pub async fn complete(
     parse_anthropic_response(&v)
 }
 
-// 占位：真实 SSE 实现见 Task 4。
+/// 解析一行 Anthropic SSE：仅 content_block_delta 的 text_delta 返回其 text。
+pub fn parse_anthropic_sse_line(line: &str) -> Option<String> {
+    let data = line.strip_prefix("data:")?.trim();
+    if data.is_empty() {
+        return None;
+    }
+    let v: Value = serde_json::from_str(data).ok()?;
+    if v.get("type").and_then(|t| t.as_str()) != Some("content_block_delta") {
+        return None;
+    }
+    let delta = v.get("delta")?;
+    if delta.get("type").and_then(|t| t.as_str()) != Some("text_delta") {
+        return None;
+    }
+    delta
+        .get("text")?
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
 pub async fn complete_stream(
-    _base_url: &str,
-    _api_key: &str,
-    _client: &reqwest::Client,
-    _req: &ChatRequest,
-    _cancel: &std::sync::atomic::AtomicBool,
-    _on_token: &mut dyn FnMut(&str),
+    base_url: &str,
+    api_key: &str,
+    client: &reqwest::Client,
+    req: &ChatRequest,
+    cancel: &AtomicBool,
+    on_token: &mut dyn FnMut(&str),
 ) -> AppResult<String> {
-    Err(AppError::Other("not implemented".into()))
+    let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+    let mut body = build_anthropic_body(req);
+    body["stream"] = json!(true);
+    let resp = client
+        .post(url)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!("Anthropic {status}: {text}")));
+    }
+    let mut acc = String::new();
+    let mut buf = String::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        if cancel.load(Ordering::SeqCst) {
+            break;
+        }
+        let bytes = chunk.map_err(|e| AppError::Other(e.to_string()))?;
+        buf.push_str(&String::from_utf8_lossy(&bytes));
+        while let Some(pos) = buf.find('\n') {
+            let line: String = buf.drain(..=pos).collect();
+            if let Some(delta) = parse_anthropic_sse_line(line.trim_end()) {
+                if cancel.load(Ordering::SeqCst) {
+                    return Ok(acc);
+                }
+                on_token(&delta);
+                acc.push_str(&delta);
+            }
+        }
+    }
+    Ok(acc)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::llm::ChatMessage;
+
+    #[test]
+    fn parses_anthropic_delta_lines() {
+        assert_eq!(
+            parse_anthropic_sse_line(
+                r#"data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"你好"}}"#
+            ),
+            Some("你好".to_string())
+        );
+        // 非 text_delta 事件不产出。
+        assert_eq!(
+            parse_anthropic_sse_line(r#"data: {"type":"message_start"}"#),
+            None
+        );
+        assert_eq!(parse_anthropic_sse_line("event: ping"), None);
+        assert_eq!(parse_anthropic_sse_line(""), None);
+    }
 
     #[test]
     fn body_marks_context_cacheable() {
