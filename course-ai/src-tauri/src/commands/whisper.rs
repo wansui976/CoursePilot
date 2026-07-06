@@ -59,7 +59,7 @@ pub fn model_path(app_data: &Path, id: &str) -> PathBuf {
         .iter()
         .find(|model| model.id == id)
         .and_then(|model| model.url.rsplit('/').next())
-        .unwrap_or_else(|| "ggml-unknown.bin");
+        .unwrap_or("ggml-unknown.bin");
     app_data.join("whisper").join(file_name)
 }
 

@@ -56,7 +56,7 @@ fn asr_done_message(count: usize, outcome: TranscriptCorrectionOutcome) -> Strin
 /// 把用户填的热词（按行，或中英文逗号、顿号分隔）切成去空、去重的词表。
 fn split_terms(raw: &str) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
-    raw.split(|c: char| matches!(c, '\n' | '\r' | ',' | '，' | '、'))
+    raw.split(['\n', '\r', ',', '，', '、'])
         .map(str::trim)
         .filter(|term| !term.is_empty())
         .filter(|term| seen.insert(term.to_string()))

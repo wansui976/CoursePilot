@@ -5,6 +5,7 @@
 //!   1. POST .../audio/asr/transcription（X-DashScope-Async: enable）提交，拿 task_id；
 //!   2. GET  .../tasks/{task_id} 轮询，直到 task_status=SUCCEEDED；
 //!   3. 下载 transcription_url 指向的 JSON，映射成内部字幕结构。
+//!
 //! 本地文件没有公网 URL，改用 base64 data URI 作为 file_urls 传入。
 
 use crate::error::{AppError, AppResult};

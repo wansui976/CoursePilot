@@ -4,6 +4,7 @@
 //! 与流式（sauc）不同，这是 REST「提交 + 轮询」整文件识别：
 //!   1. POST /submit 上传整段音频（base64），拿到由 X-Api-Request-Id 标识的任务；
 //!   2. POST /query 轮询，直到 X-Api-Status-Code = 20000000（完成）拿结果。
+//!
 //! 鉴权同样是 App Key + Access Key 两段头；资源 ID 用 volc.bigasr.auc。
 //! 对「处理已录好的课程视频」这个场景，比流式协议更稳、更简单。
 
@@ -356,6 +357,7 @@ pub fn build_submit_body(
 /// 把热词与上下文行拼成火山 `context` 字段所需的 JSON 字符串：
 /// - 有热词 → `"hotwords":[{"word":..}]`（热词直传，最多 5000 词）；
 /// - 有上下文 → `"context_type":"dialog_ctx","context_data":[{"text":..}]`；
+///
 /// 两者都有就合并进同一个对象；都为空则返回 None（此时不下发 context）。
 /// 空白项会被过滤；上下文 800 tokens / 20 轮的上限由服务端按新到旧截断，这里不强截。
 pub fn build_context_json(hotwords: &[String], context_lines: &[String]) -> Option<String> {
