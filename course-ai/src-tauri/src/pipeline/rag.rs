@@ -149,7 +149,98 @@ const ASK_SYSTEM: &str = "你是基于课程视频字幕的问答助手。严格
    只能用单个时间点 [mm:ss]，每个方括号里只放一个时间；\
    绝对不要写成时间段（不要 [mm:ss-mm:ss]、不要 [mm:ss~mm:ss]、不要 [mm:ss 到 mm:ss]），\
    要表示一段就照抄起始那一行的 [mm:ss]，也不要加 ▶ 等符号。\
+   更不要把多个时间戳塞进同一个方括号，绝对不要输出形如 [01:10, 01:15, 01:18] 的时间戳数组/列表；\
+   每个出处都必须紧跟在对应结论那句话后面单独成一个 [mm:ss]，不要在句尾或段末堆一串时间点。\
 3. 回答要直接、有条理：先给结论，再展开要点；要点多时用简短的分行或「- 」列表，不要长篇大论，不要寒暄。";
+
+/// 删除回答里形如 [01:10, 01:15, 01:18] 的「时间戳数组」——一个方括号里塞了多个
+/// 逗号/顿号分隔的时间点。前端只把单个 [mm:ss] 渲染成可点击跳转，这种数组无法点击、
+/// 只是噪音，故整体删除；单个 [mm:ss] 出处保留不动。
+fn strip_timestamp_arrays(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '[' {
+            if let Some(mut end) = match_timestamp_array(&chars, i) {
+                // 命中：丢掉整个方括号，并去掉紧邻的一个空格（优先前导，否则后随），
+                // 避免留下多余空格。end 指向 ']' 之后。
+                if out.ends_with([' ', '\t']) {
+                    out.pop();
+                } else if end < chars.len() && matches!(chars[end], ' ' | '\t') {
+                    end += 1;
+                }
+                i = end;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+/// 分隔时间戳的字符（逗号、顿号、分号、空白）。
+fn is_ts_separator(c: char) -> bool {
+    matches!(c, ' ' | '\t' | ',' | '，' | '、' | '；' | ';')
+}
+
+/// 若 `chars[start] == '['` 且括号内是「≥2 个时间点、以分隔符相连」，返回 `']'` 之后的下标。
+fn match_timestamp_array(chars: &[char], start: usize) -> Option<usize> {
+    let mut i = start + 1;
+    let mut count = 0;
+    loop {
+        while i < chars.len() && is_ts_separator(chars[i]) {
+            i += 1;
+        }
+        match match_timestamp(chars, i) {
+            Some(next) => {
+                count += 1;
+                i = next;
+            }
+            None => break,
+        }
+    }
+    while i < chars.len() && is_ts_separator(chars[i]) {
+        i += 1;
+    }
+    if count >= 2 && i < chars.len() && chars[i] == ']' {
+        Some(i + 1)
+    } else {
+        None
+    }
+}
+
+/// 匹配 mm:ss / h:mm:ss / hh:mm:ss，返回结束后的下标。
+fn match_timestamp(chars: &[char], start: usize) -> Option<usize> {
+    let mut i = take_digits(chars, start, 1, 3)?;
+    if i >= chars.len() || chars[i] != ':' {
+        return None;
+    }
+    i = take_digits(chars, i + 1, 2, 2)?;
+    // 可选的 :ss
+    if i < chars.len() && chars[i] == ':' {
+        if let Some(next) = take_digits(chars, i + 1, 2, 2) {
+            i = next;
+        }
+    }
+    Some(i)
+}
+
+/// 从 `start` 起吞掉 `min..=max` 位数字，返回结束下标；不足 `min` 位则失败。
+fn take_digits(chars: &[char], start: usize, min: usize, max: usize) -> Option<usize> {
+    let mut i = start;
+    let mut n = 0;
+    while i < chars.len() && n < max && chars[i].is_ascii_digit() {
+        i += 1;
+        n += 1;
+    }
+    if n >= min {
+        Some(i)
+    } else {
+        None
+    }
+}
 
 /// 整篇字幕作为上下文回答；视频很长时分段问、再综合。
 pub async fn answer(
@@ -179,7 +270,8 @@ pub async fn answer(
     };
 
     Ok(RagAnswer {
-        answer,
+        // 兜底清掉模型偶尔仍会输出的 [01:10, 01:15, ...] 时间戳数组。
+        answer: strip_timestamp_arrays(&answer),
         citations: Vec::new(),
     })
 }
@@ -236,7 +328,8 @@ async fn map_reduce_answer(
     let req = ask_request(
         chat_model,
         "把下面来自同一视频不同片段、针对同一问题的多段回答，综合成一个完整、不重复、条理清晰、按时间顺序的最终回答。\
-原样保留每条结论后的 [mm:ss] 时间标注，只用单个时间点，不要改写成时间段 [mm:ss-mm:ss]，不要改写时间戳格式。",
+原样保留每条结论后的 [mm:ss] 时间标注，只用单个时间点，不要改写成时间段 [mm:ss-mm:ss]，不要改写时间戳格式；\
+绝对不要把多个时间戳合并进同一个方括号，不要输出形如 [01:10, 01:15, 01:18] 的时间戳数组/列表。",
         None,
         vec![ChatMessage {
             role: "user".into(),
@@ -346,6 +439,34 @@ mod tests {
     fn keyword_search_empty_query_returns_nothing() {
         let segs = [seg(0, 0, 1000, "任意内容")];
         assert!(keyword_search_segments(&segs, "   ", 10).is_empty());
+    }
+
+    #[test]
+    fn strips_timestamp_arrays_but_keeps_single_stamps() {
+        // 一个方括号里堆多个时间点 → 整体删除。
+        assert_eq!(
+            strip_timestamp_arrays("参数方程的关键节点 [01:10, 01:15, 01:18, 01:23]。"),
+            "参数方程的关键节点。"
+        );
+        // 单个 [mm:ss] 出处保留不动。
+        assert_eq!(
+            strip_timestamp_arrays("先给出参数方程 [01:10]，再推导 [02:05]。"),
+            "先给出参数方程 [01:10]，再推导 [02:05]。"
+        );
+        // 中文逗号、含小时的时间点，同样识别为数组并删除。
+        assert_eq!(
+            strip_timestamp_arrays("时间点：[00:05，01:02:30、03:00] 之后展开"),
+            "时间点：之后展开"
+        );
+    }
+
+    #[test]
+    fn leaves_non_timestamp_brackets_alone() {
+        // 普通方括号内容不受影响。
+        assert_eq!(
+            strip_timestamp_arrays("参考文献 [1, 2, 3] 与 [见附录]"),
+            "参考文献 [1, 2, 3] 与 [见附录]"
+        );
     }
 
     #[test]
