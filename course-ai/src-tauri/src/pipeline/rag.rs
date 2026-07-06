@@ -22,6 +22,8 @@ pub enum AskEvent {
     Token { delta: String },
     /// 最终（已清洗）完整答案。
     Done { answer: String },
+    /// 出错（后台任务里失败，命令已提前返回，只能靠事件通知前端）。
+    Error { message: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

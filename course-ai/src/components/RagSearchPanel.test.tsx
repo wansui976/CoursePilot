@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import { StrictMode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -389,5 +390,49 @@ describe("RagSearchPanel", () => {
     await waitFor(() => expect(copyBtn.className).toContain("opacity-100"), {
       timeout: 1500,
     });
+  });
+
+  it("streams under React StrictMode (mounted gate must survive double-mount)", async () => {
+    // 回归：main.tsx 里 App 包在 <StrictMode>，dev 下组件「挂载→卸载→再挂载」。
+    // mountedRef 若只在 cleanup 置 false、不在 body 置回 true，重挂载后永久为
+    // false，所有流式事件被静默丢弃——表现为「三个点不动，答案最后一次性蹦出」。
+    const box: { finish?: () => void } = {};
+    mockIpc.ai.ragQueryStream.mockImplementation(
+      (
+        _v: string,
+        _q: string,
+        _h: unknown,
+        _id: string,
+        onEvent: (e: StreamEvent) => void,
+      ) =>
+        new Promise((resolve) => {
+          onEvent({ type: "reasoning", delta: "先想想…" });
+          onEvent({ type: "token", delta: "答案开头" });
+          box.finish = () => resolve({ answer: "答案开头", citations: [] });
+        }),
+    );
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <StrictMode>
+        <QueryClientProvider client={queryClient}>
+          <div data-theme="light">
+            <RagSearchPanel videoId="video-1" mode="ask" />
+          </div>
+        </QueryClientProvider>
+      </StrictMode>,
+    );
+
+    const input = screen.getByLabelText("聊天内容");
+    fireEvent.change(input, { target: { value: "问题" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    // 流式进行中：思考过程与已生成的正文都应实时可见。
+    expect(await screen.findByText("思考过程")).toBeInTheDocument();
+    expect(screen.getByText("先想想…")).toBeInTheDocument();
+    expect(screen.getByText("答案开头")).toBeInTheDocument();
+    box.finish?.();
   });
 });
