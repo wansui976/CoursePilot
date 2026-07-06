@@ -4,16 +4,15 @@ import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { Check, Copy, Send, Sparkles, Square, Trash2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/ui/ErrorNote";
-import { MathText } from "@/components/MathText";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
-import { withClickableTimestamps } from "@/lib/clickableTimestamps";
+import { renderMarkdown } from "@/lib/renderMarkdown";
 import { usePlayer } from "@/stores/player";
 import type { AskEvent, ChatMessage, Citation, RagAnswer } from "@/lib/types";
 
 /**
- * 渲染回答：先用 KaTeX 解析 \(..\)/\[..\]/$..$ 数学公式，非公式片段里再把
- * [mm:ss] 时间戳渲染成可点击跳转的标记，其余按纯文本保留换行。
+ * 渲染回答：解析 Markdown（标题/列表/加粗）+ KaTeX 公式 + [mm:ss] 可点击跳转。
+ * 首/末块外边距归零，贴合气泡内边距。
  */
 function AnswerText({
   text,
@@ -22,17 +21,13 @@ function AnswerText({
 }: {
   text: string;
   onSeek: (ms: number) => void;
-  /** 可选：渲染在文本末尾、同一段落内的内联元素（如流式生成光标）。 */
+  /** 可选：渲染在最后一个块末尾的内联元素（如流式生成光标）。 */
   trailing?: ReactNode;
 }) {
   return (
-    <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-normal)]">
-      <MathText
-        text={text}
-        renderText={(segment, key) => withClickableTimestamps(segment, onSeek, key)}
-      />
-      {trailing}
-    </p>
+    <div className="text-sm leading-relaxed text-[var(--text-normal)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+      {renderMarkdown(text, onSeek, trailing)}
+    </div>
   );
 }
 
