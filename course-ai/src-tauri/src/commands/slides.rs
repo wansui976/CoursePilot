@@ -157,7 +157,7 @@ mod tests {
         let db = Db::connect_and_migrate(&dir.path().join("test.db"))
             .await
             .unwrap();
-        let state = AppState { db };
+        let state = AppState::new(db);
         let course = create_course(&state.db, "c".into(), dir.path().to_string_lossy().into())
             .await
             .unwrap();
