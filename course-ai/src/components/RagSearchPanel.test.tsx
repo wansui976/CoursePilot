@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RagSearchPanel } from "./RagSearchPanel";
 
@@ -236,6 +236,68 @@ describe("RagSearchPanel", () => {
     fireEvent.click(stop);
     expect(mockIpc.ai.cancelRagQuery).toHaveBeenCalledTimes(1);
     // 收尾，避免悬挂 promise。
+    box.finish?.();
+  });
+
+  it("shows a streaming caret while generating", async () => {
+    const box: { finish?: () => void } = {};
+    mockIpc.ai.ragQueryStream.mockImplementation(
+      (
+        _v: string,
+        _q: string,
+        _h: unknown,
+        _id: string,
+        onEvent: (e: StreamEvent) => void,
+      ) =>
+        new Promise((resolve) => {
+          onEvent({ type: "token", delta: "生成中" });
+          box.finish = () => resolve({ answer: "生成中", citations: [] });
+        }),
+    );
+
+    renderAskPanel();
+    const input = screen.getByLabelText("聊天内容");
+    fireEvent.change(input, { target: { value: "问题" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    // 流式进行中，末尾光标可见。
+    expect(await screen.findByTestId("stream-caret")).toBeInTheDocument();
+    box.finish?.();
+  });
+
+  it("auto-scrolls as tokens stream in", async () => {
+    const scrollSpy = vi.fn();
+    // jsdom 默认没实现 scrollIntoView；装一个 spy 以断言被调用。
+    Element.prototype.scrollIntoView = scrollSpy;
+
+    const box: { on?: (e: StreamEvent) => void; finish?: () => void } = {};
+    mockIpc.ai.ragQueryStream.mockImplementation(
+      (
+        _v: string,
+        _q: string,
+        _h: unknown,
+        _id: string,
+        onEvent: (e: StreamEvent) => void,
+      ) =>
+        new Promise((resolve) => {
+          box.on = onEvent;
+          box.finish = () => resolve({ answer: "第一段第二段", citations: [] });
+          onEvent({ type: "token", delta: "第一段" });
+        }),
+    );
+
+    renderAskPanel();
+    const input = screen.getByLabelText("聊天内容");
+    fireEvent.change(input, { target: { value: "问题" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    await screen.findByText("第一段");
+    const before = scrollSpy.mock.calls.length;
+    // 再来一段 token：文本增长（history/busy 未变）也应再次滚动到底。
+    act(() => box.on?.({ type: "token", delta: "第二段" }));
+    await waitFor(() =>
+      expect(scrollSpy.mock.calls.length).toBeGreaterThan(before),
+    );
     box.finish?.();
   });
 });
