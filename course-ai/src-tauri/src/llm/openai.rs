@@ -164,6 +164,18 @@ pub async fn embed(
     parse_embeddings_response(&v)
 }
 
+// 占位：真实 SSE 实现见 Task 3。
+pub async fn complete_stream(
+    _base_url: &str,
+    _api_key: &str,
+    _client: &reqwest::Client,
+    _req: &ChatRequest,
+    _cancel: &std::sync::atomic::AtomicBool,
+    _on_token: &mut dyn FnMut(&str),
+) -> AppResult<String> {
+    Err(AppError::Other("not implemented".into()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
