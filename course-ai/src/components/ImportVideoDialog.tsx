@@ -2,6 +2,7 @@ import { ChevronDown, Download, FileVideo, Plus } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
 import { pickPersistedFile } from "@/lib/mobileFiles";
 import { isMobile } from "@/lib/platform";
@@ -41,7 +42,7 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
       invalidate();
     },
     onError: (error) => {
-      setImportError(error instanceof Error ? error.message : String(error));
+      setImportError(humanizeError(error));
     },
   });
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Check, ChevronDown, Download, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { humanizeError } from "@/lib/errors";
 import { isMobile, shareFile } from "@/lib/mobileFiles";
 import { panelActionButtonClass } from "./PanelActions";
 
@@ -47,7 +48,7 @@ export function ExportMenu({
       await shareFile(sourcePath, item.mime ?? "application/octet-stream");
       setMsg({ text: `已分享 · ${shorten(sourcePath)}` });
     } catch (error) {
-      setMsg({ text: String(error), error: true });
+      setMsg({ text: humanizeError(error), error: true });
     } finally {
       setBusy(false);
       setTimeout(() => setMsg(null), 4000);
@@ -61,7 +62,7 @@ export function ExportMenu({
       const path = await item.run();
       setMsg({ text: `已导出 · ${shorten(path)}` });
     } catch (error) {
-      setMsg({ text: String(error), error: true });
+      setMsg({ text: humanizeError(error), error: true });
     } finally {
       setBusy(false);
       setTimeout(() => setMsg(null), 4000);

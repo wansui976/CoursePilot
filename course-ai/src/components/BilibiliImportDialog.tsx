@@ -2,6 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
 import type { ProbeResult } from "@/lib/types";
 
@@ -131,7 +132,7 @@ export function BilibiliImportDialog({
               value={url}
               onChange={(e) => setUrl(e.target.value)}
             />
-            {error && <p className="text-xs text-red-400">{error}</p>}
+            {error && <p className="text-xs text-red-400">{humanizeError(error)}</p>}
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="outline" onClick={onClose}>
                 取消
@@ -166,7 +167,7 @@ export function BilibiliImportDialog({
             </ol>
             {error && (
               <p className="whitespace-pre-wrap break-words text-xs text-red-400">
-                {error}
+                {humanizeError(error)}
               </p>
             )}
             <div className="flex justify-end gap-2">
@@ -236,7 +237,7 @@ export function BilibiliImportDialog({
               </p>
             )}
 
-            {error && <p className="text-xs text-red-400">{error}</p>}
+            {error && <p className="text-xs text-red-400">{humanizeError(error)}</p>}
             <div className="flex justify-end gap-2">
               {probe.tracks.length > 0 && (
                 <Button
