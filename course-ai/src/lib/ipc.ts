@@ -1,4 +1,5 @@
-import { invoke, Channel } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { Insets } from "./blackBars";
 import type {
   AskEvent,
@@ -128,22 +129,37 @@ export const ipc = {
       query: string,
       history: ChatMessage[] = [],
     ): Promise<RagAnswer> => invoke("cmd_rag_query", { videoId, query, history }),
-    ragQueryStream: (
+    ragQueryStream: async (
       videoId: string,
       query: string,
       history: ChatMessage[],
       requestId: string,
       onEvent: (e: AskEvent) => void,
     ): Promise<RagAnswer> => {
-      const channel = new Channel<AskEvent>();
-      channel.onmessage = onEvent;
-      return invoke("cmd_rag_query_stream", {
-        videoId,
-        query,
-        history,
-        requestId,
-        channel,
+      // 命令会立刻返回、把流式活儿丢后台跑，事件（含最终 done / error）走全局事件实时到达。
+      // 先注册监听再 invoke（避免漏掉早到的事件）；答案从 done 事件拿，不再靠命令返回值。
+      let resolveAnswer!: (a: RagAnswer) => void;
+      let rejectAnswer!: (e: unknown) => void;
+      const answer = new Promise<RagAnswer>((res, rej) => {
+        resolveAnswer = res;
+        rejectAnswer = rej;
       });
+      const unlisten = await listen<AskEvent>(`ask-stream:${requestId}`, (evt) => {
+        const e = evt.payload;
+        if (e.type === "done") resolveAnswer({ answer: e.answer, citations: [] });
+        else if (e.type === "error") rejectAnswer(new Error(e.message));
+        else onEvent(e);
+      });
+      try {
+        // 命令本身只在「配置错误（未配 Profile 等）」时才 reject。
+        await invoke("cmd_rag_query_stream", { videoId, query, history, requestId });
+        return await answer;
+      } catch (err) {
+        rejectAnswer(err);
+        throw err;
+      } finally {
+        unlisten();
+      }
     },
     cancelRagQuery: (requestId: string): Promise<void> =>
       invoke("cmd_cancel_rag_query", { requestId }),
