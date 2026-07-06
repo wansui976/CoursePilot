@@ -166,8 +166,16 @@ function AskChatPanel({ videoId }: { videoId: string }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const tailRef = useRef<HTMLDivElement>(null);
   // 组件卸载后不再 setState（后台请求仍会跑完并落库）。
+  // 注意：必须在 effect 体里显式置回 true——React StrictMode(dev) 会「挂载→卸载→
+  // 再挂载」，若只有 cleanup 置 false，二次挂载后 ref 永久为 false，所有流式事件
+  // 会在入口被静默丢弃（表现为：三个点不动、答案最后一次性蹦出）。
   const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // 草稿同步落 localStorage，切走再回来不丢已输入内容。
   const setQuery = (value: string) => {

@@ -7,8 +7,7 @@ use crate::llm::profiles::{parse_profiles, parse_routing, resolve_profile, AiTas
 use crate::llm::ChatMessage;
 use crate::pipeline::rag;
 use crate::pipeline::rag::AskEvent;
-use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{Emitter, State};
 
 /// 解析问答用的 provider + chat 模型。
 async fn rag_provider(state: &AppState) -> AppResult<(crate::llm::Provider, String)> {
@@ -44,34 +43,52 @@ pub async fn cmd_rag_query(
     .await
 }
 
-/// 流式向这节课提问：token 通过 channel 实时推送，返回最终（已清洗）答案。
+/// 流式向这节课提问。**关键：命令立即返回，真正的流式活儿丢到后台 spawn 任务里跑。**
+/// Tauri 会把「一个 await 了很久的命令」内部发的事件憋到命令返回才一起投递（Channel 和
+/// app.emit 都如此），导致「不流式、最后一次性出」。后台任务发的事件则实时投递（进度条
+/// job:update 就是这样）。答案与错误都通过 `ask-stream:<request_id>` 事件（done/error）送达。
 #[tauri::command]
 pub async fn cmd_rag_query_stream(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     video_id: String,
     query: String,
     history: Vec<ChatMessage>,
     request_id: String,
-    channel: Channel<AskEvent>,
-) -> AppResult<rag::RagAnswer> {
+) -> AppResult<()> {
+    // provider 解析放在返回前：配置错误（未配 Profile 等）能立刻通过命令返回值报给前端。
     let (provider, chat_model) = rag_provider(&state).await?;
+    let db = state.db.clone();
     let cancel = state.register_cancel(&request_id);
-    let result = rag::answer_stream(
-        &state.db,
-        &provider,
-        &chat_model,
-        &video_id,
-        &query,
-        &history,
-        &cancel,
-        &mut |event| {
-            // 发送失败（前端已断开）忽略：后台仍跑完并由调用方落库。
-            let _ = channel.send(event);
-        },
-    )
-    .await;
-    state.unregister_cancel(&request_id);
-    result
+    let cancels = state.rag_cancels.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let event_name = format!("ask-stream:{request_id}");
+        let result = rag::answer_stream(
+            &db,
+            &provider,
+            &chat_model,
+            &video_id,
+            &query,
+            &history,
+            &cancel,
+            &mut |event| {
+                let _ = app.emit(&event_name, event);
+            },
+        )
+        .await;
+        // 成功时 answer_stream 内部已发 Done；失败时命令已返回，只能用 error 事件通知前端。
+        if let Err(error) = result {
+            let _ = app.emit(
+                &event_name,
+                AskEvent::Error {
+                    message: error.to_string(),
+                },
+            );
+        }
+        cancels.lock().unwrap().remove(&request_id);
+    });
+    Ok(())
 }
 
 /// 停止一个进行中的问答请求：置位其取消标志，流式循环会尽快停下并保留已生成部分。
