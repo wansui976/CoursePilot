@@ -167,5 +167,6 @@ export interface RelinkResult {
 /** 问答流式事件：与后端 rag::AskEvent 对应（tag = "type"）。 */
 export type AskEvent =
   | { type: "status"; text: string }
+  | { type: "reasoning"; delta: string }
   | { type: "token"; delta: string }
   | { type: "done"; answer: string };

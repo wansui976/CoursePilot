@@ -156,10 +156,11 @@ function AskChatPanel({ videoId }: { videoId: string }) {
   const touch = isMobile();
   const [revealedCopyId, setRevealedCopyId] = useState<string | null>(null);
   const longPressRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  // 进行中的流式回答（本轮 requestId + 状态提示 + 已累积文本）。
+  // 进行中的流式回答（本轮 requestId + 状态提示 + 推理思考 + 已累积文本）。
   const [streaming, setStreaming] = useState<{
     requestId: string;
     status: string;
+    reasoning: string;
     text: string;
   } | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -185,7 +186,8 @@ function AskChatPanel({ videoId }: { videoId: string }) {
     // 请求仍会跑完并把回答写入历史，切回来即可见。token 通过 onEvent 实时渲染。
     mutationFn: async ({ query, history }) => {
       const requestId = crypto.randomUUID();
-      if (mountedRef.current) setStreaming({ requestId, status: "", text: "" });
+      if (mountedRef.current)
+        setStreaming({ requestId, status: "", reasoning: "", text: "" });
       const answer = await ipc.ai.ragQueryStream(
         videoId,
         query,
@@ -196,6 +198,8 @@ function AskChatPanel({ videoId }: { videoId: string }) {
           setStreaming((prev) => {
             if (!prev || prev.requestId !== requestId) return prev;
             if (e.type === "status") return { ...prev, status: e.text };
+            if (e.type === "reasoning")
+              return { ...prev, reasoning: prev.reasoning + e.delta };
             if (e.type === "token") return { ...prev, text: prev.text + e.delta };
             return prev; // done：最终答案由落库 + 历史渲染接管
           });
@@ -389,37 +393,50 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                 </p>
               </div>
             </div>
-            {busy &&
-              (streaming && streaming.text ? (
-                <div className="flex items-start gap-2">
-                  {aiAvatar}
-                  <div
-                    role="article"
-                    aria-label="AI 回复"
-                    className="min-w-0 max-w-[82%] rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2"
-                  >
-                    <AnswerText
-                      text={streaming.text}
-                      onSeek={requestSeek}
-                      trailing={
-                        <span
-                          data-testid="stream-caret"
-                          className="ca-stream-caret"
-                          aria-hidden="true"
-                        />
-                      }
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-start gap-2">
-                  {aiAvatar}
-                  <div className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-3">
-                    {streaming?.status ? (
+            {busy && (
+              <div className="flex items-start gap-2">
+                {aiAvatar}
+                <div className="min-w-0 max-w-[82%] space-y-1.5">
+                  {/* 推理模型的「思考过程」：流式实时展示、可折叠、灰色小字。 */}
+                  {streaming?.reasoning && (
+                    <details
+                      open
+                      className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card-hover)] px-2.5 py-1.5"
+                    >
+                      <summary className="cursor-pointer select-none text-xs text-[var(--text-faint)]">
+                        思考过程
+                      </summary>
+                      <div className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-muted)]">
+                        {streaming.reasoning}
+                      </div>
+                    </details>
+                  )}
+                  {streaming?.text ? (
+                    <div
+                      role="article"
+                      aria-label="AI 回复"
+                      className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2"
+                    >
+                      <AnswerText
+                        text={streaming.text}
+                        onSeek={requestSeek}
+                        trailing={
+                          <span
+                            data-testid="stream-caret"
+                            className="ca-stream-caret"
+                            aria-hidden="true"
+                          />
+                        }
+                      />
+                    </div>
+                  ) : streaming?.status ? (
+                    <div className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-3">
                       <span className="text-xs text-[var(--text-muted)]">
                         {streaming.status}
                       </span>
-                    ) : (
+                    </div>
+                  ) : streaming?.reasoning ? null : (
+                    <div className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-3">
                       <span
                         className="ca-typing inline-flex items-center gap-1 text-[var(--text-muted)]"
                         aria-label="思考中"
@@ -428,10 +445,11 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                         <i className="ca-typing-dot" style={{ animationDelay: "0.15s" }} />
                         <i className="ca-typing-dot" style={{ animationDelay: "0.3s" }} />
                       </span>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
-              ))}
+              </div>
+            )}
             {ask.isError && (
               <div className="flex items-start gap-2">
                 {aiAvatar}

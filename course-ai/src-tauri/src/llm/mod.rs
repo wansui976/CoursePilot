@@ -34,6 +34,12 @@ pub fn round_temperature(temperature: f32) -> f64 {
     (temperature as f64 * 100.0).round() / 100.0
 }
 
+/// 流式片段：正式回答内容，或推理模型的「思考」内容（不计入最终答案）。
+pub enum StreamPiece<'a> {
+    Content(&'a str),
+    Reasoning(&'a str),
+}
+
 #[derive(Debug, Clone)]
 pub struct ChatResponse {
     pub content: String,
@@ -75,25 +81,25 @@ impl Provider {
         }
     }
 
-    /// 流式补全：每收到一段文本先查 `cancel`（true 则停止并返回已累积），
-    /// 否则调 `on_token(delta)` 并累积。返回累积全文。
+    /// 流式补全：每收到一段先查 `cancel`（true 则停止并返回已累积内容），否则调
+    /// `on_piece`（Content=正式内容并累积；Reasoning=推理思考，不累积）。返回累积内容全文。
     pub async fn complete_stream(
         &self,
         req: &ChatRequest,
         cancel: &AtomicBool,
-        on_token: &mut (dyn FnMut(&str) + Send),
+        on_piece: &mut (dyn FnMut(StreamPiece) + Send),
     ) -> AppResult<String> {
         match self {
             Provider::OpenAi {
                 base_url,
                 api_key,
                 client,
-            } => openai::complete_stream(base_url, api_key, client, req, cancel, on_token).await,
+            } => openai::complete_stream(base_url, api_key, client, req, cancel, on_piece).await,
             Provider::Anthropic {
                 base_url,
                 api_key,
                 client,
-            } => anthropic::complete_stream(base_url, api_key, client, req, cancel, on_token).await,
+            } => anthropic::complete_stream(base_url, api_key, client, req, cancel, on_piece).await,
             Provider::Mock { canned } => {
                 let mut acc = String::new();
                 // 按空白切成词，逐词回调，模拟流式；每词前查取消。
@@ -106,7 +112,7 @@ impl Provider {
                     } else {
                         format!(" {word}")
                     };
-                    on_token(&piece);
+                    on_piece(StreamPiece::Content(&piece));
                     acc.push_str(&piece);
                 }
                 Ok(acc)
@@ -189,7 +195,11 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let mut chunks: Vec<String> = Vec::new();
         let full = p
-            .complete_stream(&stream_req(), &cancel, &mut |d| chunks.push(d.to_string()))
+            .complete_stream(&stream_req(), &cancel, &mut |piece| {
+                if let StreamPiece::Content(d) = piece {
+                    chunks.push(d.to_string());
+                }
+            })
             .await
             .unwrap();
         assert!(chunks.len() >= 2, "应分多段回调");

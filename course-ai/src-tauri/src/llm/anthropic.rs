@@ -1,5 +1,5 @@
 use crate::error::{AppError, AppResult};
-use crate::llm::{ChatRequest, ChatResponse};
+use crate::llm::{ChatRequest, ChatResponse, StreamPiece};
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -101,7 +101,7 @@ pub async fn complete_stream(
     client: &reqwest::Client,
     req: &ChatRequest,
     cancel: &AtomicBool,
-    on_token: &mut (dyn FnMut(&str) + Send),
+    on_piece: &mut (dyn FnMut(StreamPiece) + Send),
 ) -> AppResult<String> {
     let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
     let mut body = build_anthropic_body(req);
@@ -136,7 +136,7 @@ pub async fn complete_stream(
                 if cancel.load(Ordering::SeqCst) {
                     return Ok(acc);
                 }
-                on_token(&delta);
+                on_piece(StreamPiece::Content(&delta));
                 acc.push_str(&delta);
             }
         }
