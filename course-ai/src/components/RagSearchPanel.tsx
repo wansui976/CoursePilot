@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useMutationState } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { Check, Copy, Send, Sparkles, Square, Trash2, User } from "lucide-react";
@@ -18,9 +18,12 @@ import type { AskEvent, ChatMessage, Citation, RagAnswer } from "@/lib/types";
 function AnswerText({
   text,
   onSeek,
+  trailing,
 }: {
   text: string;
   onSeek: (ms: number) => void;
+  /** 可选：渲染在文本末尾、同一段落内的内联元素（如流式生成光标）。 */
+  trailing?: ReactNode;
 }) {
   return (
     <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-normal)]">
@@ -28,6 +31,7 @@ function AnswerText({
         text={text}
         renderText={(segment, key) => withClickableTimestamps(segment, onSeek, key)}
       />
+      {trailing}
     </p>
   );
 }
@@ -230,7 +234,8 @@ function AskChatPanel({ videoId }: { videoId: string }) {
     const tail = tailRef.current;
     if (!tail || typeof tail.scrollIntoView !== "function") return;
     tail.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [history, busy, ask.isError]);
+    // 依赖含 streaming?.text：逐字生成、气泡变高时跟随滚动到底，避免最新内容被输入框挡住。
+  }, [history, busy, ask.isError, streaming?.text]);
 
   const submit = (raw?: string) => {
     const trimmed = (raw ?? query).trim();
@@ -374,7 +379,17 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                     aria-label="AI 回复"
                     className="min-w-0 max-w-[82%] rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2"
                   >
-                    <AnswerText text={streaming.text} onSeek={requestSeek} />
+                    <AnswerText
+                      text={streaming.text}
+                      onSeek={requestSeek}
+                      trailing={
+                        <span
+                          data-testid="stream-caret"
+                          className="ca-stream-caret"
+                          aria-hidden="true"
+                        />
+                      }
+                    />
                   </div>
                 </div>
               ) : (
@@ -446,7 +461,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
               onClick={() => void ipc.ai.cancelRagQuery(streaming.requestId)}
               aria-label="停止生成"
               title="停止生成"
-              className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full bg-[var(--status-err)] text-white transition hover:opacity-90"
+              className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full bg-[var(--surface-card-active)] text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)]"
             >
               <Square className="h-3.5 w-3.5" />
             </button>
