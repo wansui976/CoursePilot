@@ -911,7 +911,8 @@ select:focus-visible {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 96px 120px;
   gap: 16px;
-  padding: 0 14px 10px;
+  /* 右侧留出与行内一致的空间（行尾有绝对定位的「操作」按钮），让表头列与行内列对齐。 */
+  padding: 0 54px 10px 14px;
   color: var(--text-4);
   font-size: 11.5px;
   font-weight: 600;
@@ -938,7 +939,9 @@ select:focus-visible {
   grid-template-columns: minmax(0, 1fr) 96px 120px;
   gap: 16px;
   align-items: center;
-  padding: 12px 46px 12px 14px;
+  /* 右内边距要盖过行尾绝对定位的「操作」按钮（right:12px + 宽 32px = 44px）再留出间隙，
+     否则右对齐的状态徽标会和三个点按钮重叠。 */
+  padding: 12px 54px 12px 14px;
   text-align: left;
 }
 
