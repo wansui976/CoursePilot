@@ -8,6 +8,7 @@ import { MathText } from "@/components/MathText";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { withClickableTimestamps } from "@/lib/clickableTimestamps";
+import { isMobile } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
 import type { AskEvent, ChatMessage, Citation, RagAnswer } from "@/lib/types";
 
@@ -156,6 +157,10 @@ function AskChatPanel({ videoId }: { videoId: string }) {
   const [query, setQueryState] = useState(() => readDraft(videoId));
   const [history, setHistory] = useState<AskTurn[]>(() => readAskHistory(videoId));
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // 触屏（安卓/iOS）没有 hover：改为长按气泡才显示复制按钮，记住当前显示的那条。
+  const touch = isMobile();
+  const [revealedCopyId, setRevealedCopyId] = useState<string | null>(null);
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // 进行中的流式回答（本轮 requestId + 状态提示 + 已累积文本）。
   const [streaming, setStreaming] = useState<{
     requestId: string;
@@ -265,8 +270,23 @@ function AskChatPanel({ videoId }: { videoId: string }) {
   const copyAnswer = (id: string, text: string) => {
     void navigator.clipboard?.writeText(text);
     setCopiedId(id);
+    setRevealedCopyId(null); // 复制后收起（触屏）
     window.setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1500);
   };
+
+  // 触屏长按气泡才显示复制按钮：按住 ~0.5s 触发；移动/抬手/取消都作废（不打断滚动）。
+  const longPressProps = (id: string) =>
+    touch
+      ? {
+          onTouchStart: () => {
+            clearTimeout(longPressRef.current);
+            longPressRef.current = setTimeout(() => setRevealedCopyId(id), 500);
+          },
+          onTouchEnd: () => clearTimeout(longPressRef.current),
+          onTouchMove: () => clearTimeout(longPressRef.current),
+          onTouchCancel: () => clearTimeout(longPressRef.current),
+        }
+      : {};
 
   const aiAvatar = (
     <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full bg-primary/15 text-primary">
@@ -331,29 +351,30 @@ function AskChatPanel({ videoId }: { videoId: string }) {
               <div
                 role="article"
                 aria-label="AI 回复"
-                className="min-w-0 max-w-[82%] rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2"
+                className="group relative min-w-0 max-w-[82%] rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2"
+                {...longPressProps(turn.id)}
               >
                 <AnswerText text={turn.answer} onSeek={requestSeek} />
-                <div className="mt-1.5 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => copyAnswer(turn.id, turn.answer)}
-                    aria-label="复制回答"
-                    className="inline-flex flex-none items-center gap-1 rounded px-1 text-[10px] text-[var(--text-muted)] transition hover:text-[var(--text-strong)]"
-                  >
-                    {copiedId === turn.id ? (
-                      <>
-                        <Check className="h-3 w-3" />
-                        已复制
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="h-3 w-3" />
-                        复制
-                      </>
-                    )}
-                  </button>
-                </div>
+                {/* 复制：仅图标、小尺寸。桌面 hover 气泡显示；触屏长按显示。 */}
+                <button
+                  type="button"
+                  onClick={() => copyAnswer(turn.id, turn.answer)}
+                  aria-label="复制回答"
+                  title="复制"
+                  className={`absolute bottom-1 right-1 grid h-6 w-6 flex-none place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-card)] text-[var(--text-muted)] shadow-sm transition hover:text-[var(--text-strong)] ${
+                    touch
+                      ? revealedCopyId === turn.id
+                        ? "opacity-100"
+                        : "pointer-events-none opacity-0"
+                      : "pointer-events-none opacity-0 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
+                  }`}
+                >
+                  {copiedId === turn.id ? (
+                    <Check className="h-3.5 w-3.5" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                </button>
               </div>
             </div>
           </div>
