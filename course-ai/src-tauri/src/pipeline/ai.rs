@@ -274,7 +274,8 @@ mod tests {
         // 题干里含未转义的 LaTeX 反斜杠，严格 JSON 会失败，宽松解析应修复。
         let quiz = r#"[{"type":"single","stem":"求 \(v^2\) 的值","options":["1"],"answer":"1"}]"#;
         assert!(validate_quiz_json(quiz).is_ok());
-        let chapters = r#"[{"title":"速度变换 \(v_x'\)","summary":"s","start_ms":0,"end_ms":1000}]"#;
+        let chapters =
+            r#"[{"title":"速度变换 \(v_x'\)","summary":"s","start_ms":0,"end_ms":1000}]"#;
         let drafts = parse_chapters(chapters).unwrap();
         assert_eq!(drafts.len(), 1);
         assert!(drafts[0].title.contains(r"\(v_x'\)"));
@@ -383,7 +384,10 @@ mod tests {
                 .fetch_one(&db.pool)
                 .await
                 .unwrap();
-        assert!(row.0.is_none(), "content_json should be cleared on regenerate");
+        assert!(
+            row.0.is_none(),
+            "content_json should be cleared on regenerate"
+        );
         assert!(row.1.unwrap().contains("重新生成的要点"));
     }
 }

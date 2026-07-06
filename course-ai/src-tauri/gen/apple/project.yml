@@ -12,6 +12,8 @@ settingGroups:
     base:
       PRODUCT_NAME: course-ai
       PRODUCT_BUNDLE_IDENTIFIER: dev.courseai.app
+      CODE_SIGN_STYLE: Automatic
+      DEVELOPMENT_TEAM: D4572P92SB
 targetTemplates:
   app:
     type: application
@@ -30,7 +32,6 @@ targets:
     sources:
       - path: Sources
       - path: Assets.xcassets
-      - path: Externals
       - path: course-ai_iOS
       - path: assets
         buildPhase: resources
@@ -56,6 +57,8 @@ targets:
         NSLocalNetworkUsageDescription: 需要访问本地开发服务器以加载课程库界面
         NSBonjourServices:
           - _http._tcp
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     entitlements:
       path: course-ai_iOS/course-ai_iOS.entitlements
     scheme:

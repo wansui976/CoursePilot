@@ -9,8 +9,8 @@ pub mod ocr;
 pub mod playable;
 pub mod rag;
 pub mod slides;
-pub mod transcript_correction;
 pub mod subtitle;
+pub mod transcript_correction;
 pub mod volcengine_asr;
 pub mod volcengine_auc;
 
@@ -270,7 +270,8 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
             None
         };
         if correct.is_some() {
-            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.6, "正在 AI 纠正字幕").await?;
+            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.6, "正在 AI 纠正字幕")
+                .await?;
         }
 
         let count = subtitle::ingest_subtitle(&db, &video_id, &srt_text, correct).await?;

@@ -8,7 +8,7 @@ fn main() {
         tauri_build::Attributes::new().plugin(
             "mobile-files",
             tauri_build::InlinedPlugin::new()
-                .commands(&["persist_picked_file"])
+                .commands(&["persist_picked_file", "pick_and_persist_file", "share_file"])
                 .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
         ),
     )

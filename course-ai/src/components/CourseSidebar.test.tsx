@@ -5,7 +5,7 @@ import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CourseSidebar } from "./CourseSidebar";
 
-const { mockIpc, pickDirectoryPathMock } = vi.hoisted(() => ({
+const { mockIpc, pickDirectoryPathMock, isIOSMock } = vi.hoisted(() => ({
   mockIpc: {
     courses: {
       list: vi.fn(),
@@ -16,10 +16,14 @@ const { mockIpc, pickDirectoryPathMock } = vi.hoisted(() => ({
     },
   },
   pickDirectoryPathMock: vi.fn(),
+  isIOSMock: vi.fn(),
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
-vi.mock("@/lib/mobileFiles", () => ({ pickDirectoryPath: pickDirectoryPathMock }));
+vi.mock("@/lib/mobileFiles", () => ({
+  pickDirectoryPath: pickDirectoryPathMock,
+  isIOS: isIOSMock,
+}));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: vi.fn(), message: vi.fn() }));
 
 function renderSidebar(overrides: Partial<ComponentProps<typeof CourseSidebar>> = {}) {
@@ -44,6 +48,7 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof CourseSidebar>> 
 
 describe("CourseSidebar", () => {
   beforeEach(() => {
+    isIOSMock.mockReturnValue(false);
     mockIpc.courses.list.mockResolvedValue([]);
     mockIpc.courses.create.mockResolvedValue(undefined);
     mockIpc.courses.relinkRoot.mockResolvedValue({
@@ -163,5 +168,39 @@ describe("CourseSidebar", () => {
     await waitFor(() =>
       expect(mockIpc.courses.relinkRoot).toHaveBeenCalledWith("c1", "/new/root"),
     );
+  });
+
+  it("shows the course actions button by default on iPadOS", async () => {
+    isIOSMock.mockReturnValue(true);
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+      platform: "MacIntel",
+      maxTouchPoints: 5,
+    });
+    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
+    renderSidebar({ onToggleQueue: () => undefined });
+
+    await screen.findByRole("button", { name: "线性代数" });
+    expect(screen.getByRole("button", { name: "课程操作" })).toHaveClass("opacity-100");
+  });
+
+  it("opens the course actions menu after a left swipe on iPadOS", async () => {
+    isIOSMock.mockReturnValue(true);
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+      platform: "MacIntel",
+      maxTouchPoints: 5,
+    });
+    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
+    renderSidebar({ onToggleQueue: () => undefined });
+
+    const course = await screen.findByRole("button", { name: "线性代数" });
+    fireEvent.pointerDown(course.parentElement!, { pointerType: "touch", clientX: 200, clientY: 30 });
+    fireEvent.pointerMove(course.parentElement!, { pointerType: "touch", clientX: 140, clientY: 36 });
+    fireEvent.pointerUp(course.parentElement!, { pointerType: "touch", clientX: 140, clientY: 36 });
+
+    expect(await screen.findByRole("button", { name: "重命名" })).toBeInTheDocument();
   });
 });

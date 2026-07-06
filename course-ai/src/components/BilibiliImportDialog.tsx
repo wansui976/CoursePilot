@@ -44,6 +44,7 @@ export function BilibiliImportDialog({
   const pickCookie = async () => {
     const file = await open({
       multiple: false,
+      pickerMode: "document",
       filters: [{ name: "cookies.txt", extensions: ["txt"] }],
     });
     if (!file || Array.isArray(file)) return;

@@ -128,13 +128,12 @@ mod tests {
             "screenshots",
             "embeddings",
         ] {
-            let row: (String,) = sqlx::query_as(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            )
-            .bind(table)
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
+            let row: (String,) =
+                sqlx::query_as("SELECT name FROM sqlite_master WHERE type='table' AND name=?")
+                    .bind(table)
+                    .fetch_one(&db.pool)
+                    .await
+                    .unwrap();
             assert_eq!(&row.0, table);
         }
     }

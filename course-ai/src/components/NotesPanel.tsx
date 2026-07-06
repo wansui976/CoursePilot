@@ -130,11 +130,11 @@ export function NotesPanel({ videoId }: { videoId: string }) {
 
   const exportItems: ExportItem[] =
     view === "notes"
-      ? [{ label: "Markdown", run: () => ipc.export.notes(videoId) }]
+      ? [{ label: "Markdown", run: () => ipc.export.notes(videoId), mime: "text/markdown", saveAs: "notes.md" }]
       : view === "quiz"
-        ? [{ label: "Anki", run: () => ipc.export.quiz(videoId) }]
+        ? [{ label: "Anki", run: () => ipc.export.quiz(videoId), mime: "text/plain", saveAs: "quiz-anki.txt" }]
         : view === "mindmap"
-          ? [{ label: "Markdown", run: () => ipc.export.mindmap(videoId) }]
+          ? [{ label: "Markdown", run: () => ipc.export.mindmap(videoId), mime: "text/markdown", saveAs: "mindmap.md" }]
           : [];
 
   return (

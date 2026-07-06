@@ -6,7 +6,9 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use std::borrow::Cow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use tauri::Manager;
 use tauri::State;
 use uuid::Uuid;
 
@@ -102,6 +104,94 @@ fn strip_file_provider_suffix(input: &str) -> Cow<'_, str> {
     } else {
         Cow::Borrowed(input)
     }
+}
+
+#[cfg(any(test, target_os = "android", target_os = "ios"))]
+fn is_mobile_transient_video_path(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    text.contains("/Library/Caches/")
+        || text.contains("/tmp/")
+        || text.contains("/Library/tmp/")
+        || text.contains("/TemporaryItems/")
+}
+
+#[cfg(any(test, target_os = "android", target_os = "ios"))]
+fn unique_stable_video_path(directory: &Path, preferred_name: &str) -> PathBuf {
+    let fallback = if preferred_name.trim().is_empty() {
+        "video"
+    } else {
+        preferred_name
+    };
+    let mut candidate = directory.join(fallback);
+    if !candidate.exists() {
+        return candidate;
+    }
+
+    let stem = Path::new(fallback)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("video");
+    let extension = Path::new(fallback)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    for index in 1.. {
+        let file_name = if extension.is_empty() {
+            format!("{stem}-{index}")
+        } else {
+            format!("{stem}-{index}.{extension}")
+        };
+        candidate = directory.join(file_name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    unreachable!("unbounded index loop always returns");
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+async fn stabilize_mobile_video_file(
+    app: &tauri::AppHandle,
+    db: &Db,
+    video_id: &str,
+    file_path: &str,
+) -> AppResult<String> {
+    let source = PathBuf::from(file_path);
+    if !is_mobile_transient_video_path(&source) || !source.is_file() {
+        return Ok(file_path.to_string());
+    }
+
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| AppError::Config(format!("app_data_dir: {error}")))?
+        .join("picked")
+        .join("videos");
+    std::fs::create_dir_all(&directory)?;
+    let preferred_name = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("video");
+    let destination = unique_stable_video_path(&directory, preferred_name);
+    std::fs::copy(&source, &destination)?;
+    let stable_path = destination.to_string_lossy().to_string();
+    sqlx::query("UPDATE videos SET file_path=? WHERE id=?")
+        .bind(&stable_path)
+        .bind(video_id)
+        .execute(&db.pool)
+        .await?;
+    Ok(stable_path)
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+async fn stabilize_mobile_video_file(
+    _app: &tauri::AppHandle,
+    _db: &Db,
+    _video_id: &str,
+    file_path: &str,
+) -> AppResult<String> {
+    Ok(file_path.to_string())
 }
 
 pub async fn add_local_video(
@@ -285,10 +375,13 @@ pub async fn purge_expired_trash(db: &Db) -> AppResult<u64> {
 
 #[tauri::command]
 pub async fn cmd_add_local_video(
+    _app: tauri::AppHandle,
     state: State<'_, AppState>,
     course_id: String,
     file_path: String,
+    duration_ms: Option<i64>,
 ) -> AppResult<Video> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let override_root = sqlx::query_scalar::<_, String>(
         "SELECT value FROM settings WHERE key='default_storage_root'",
     )
@@ -296,13 +389,24 @@ pub async fn cmd_add_local_video(
     .await?
     .filter(|value| !value.trim().is_empty())
     .map(PathBuf::from);
-    let mut video = add_local_video(
-        &state.db,
-        &course_id,
-        PathBuf::from(file_path),
-        override_root,
-    )
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let override_root = Some(
+        _app.path()
+            .app_data_dir()
+            .map_err(|error| AppError::Config(format!("app_data_dir: {error}")))?
+            .join("videos"),
+    );
+
+    let mut video = add_local_video(&state.db, &course_id, PathBuf::from(file_path), override_root)
     .await?;
+    if duration_ms.is_some() {
+        sqlx::query("UPDATE videos SET duration_ms=? WHERE id=?")
+            .bind(duration_ms)
+            .bind(&video.id)
+            .execute(&state.db.pool)
+            .await?;
+        video.duration_ms = duration_ms;
+    }
     apply_detected_crop(&state.db, &mut video).await;
     Ok(video)
 }
@@ -385,6 +489,7 @@ pub async fn cmd_list_trash(state: State<'_, AppState>) -> AppResult<Vec<Trashed
 /// 快速转封装成 data_dir/playable.mp4，避免大文件「有画面、没声音」。
 #[tauri::command]
 pub async fn cmd_ensure_playable(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     video_id: String,
 ) -> AppResult<String> {
@@ -395,6 +500,7 @@ pub async fn cmd_ensure_playable(
             .await?;
     let (file_path, data_dir) =
         row.ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    let file_path = stabilize_mobile_video_file(&app, &state.db, &video_id, &file_path).await?;
     let path = crate::pipeline::playable::ensure_playable(
         std::path::Path::new(&file_path),
         std::path::Path::new(&data_dir),
@@ -408,6 +514,7 @@ pub async fn cmd_ensure_playable(
 /// 顺带对非 faststart 的文件做一次转封装，让起播更快。
 #[tauri::command]
 pub async fn cmd_media_url(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     media: State<'_, crate::media_server::MediaServer>,
     video_id: String,
@@ -419,6 +526,7 @@ pub async fn cmd_media_url(
             .await?;
     let (file_path, data_dir) =
         row.ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    let file_path = stabilize_mobile_video_file(&app, &state.db, &video_id, &file_path).await?;
     let path = crate::pipeline::playable::ensure_playable(
         std::path::Path::new(&file_path),
         std::path::Path::new(&data_dir),
@@ -497,6 +605,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn add_local_persists_import_duration() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let video_path = dir.path().join("01.mp4");
+        std::fs::write(&video_path, b"fake").unwrap();
+
+        let mut video = add_local_video(&db, &course.id, video_path, None)
+            .await
+            .unwrap();
+        let duration_ms = Some(12_345);
+        sqlx::query("UPDATE videos SET duration_ms=? WHERE id=?")
+            .bind(duration_ms)
+            .bind(&video.id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        video.duration_ms = duration_ms;
+
+        let got: Video = sqlx::query_as("SELECT * FROM videos WHERE id=?")
+            .bind(&video.id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(got.duration_ms, duration_ms);
+        assert_eq!(video.duration_ms, duration_ms);
+    }
+
+    #[tokio::test]
+    async fn update_title_keeps_original_file_path_and_derived_data_dir() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let video_path = dir.path().join("01.mp4");
+        std::fs::write(&video_path, b"fake").unwrap();
+        let video = add_local_video(&db, &course.id, video_path, None)
+            .await
+            .unwrap();
+
+        let renamed = update_video_title(&db, &video.id, "新标题".into())
+            .await
+            .unwrap();
+
+        assert_eq!(renamed.title, "新标题");
+        assert_eq!(renamed.file_path, video.file_path);
+        assert_eq!(renamed.data_dir, video.data_dir);
+    }
+
+    #[test]
+    fn detects_ios_cache_and_tmp_video_paths_as_transient() {
+        assert!(is_mobile_transient_video_path(Path::new(
+            "/private/var/mobile/Containers/Data/Application/APP/Library/Caches/clip.mov"
+        )));
+        assert!(is_mobile_transient_video_path(Path::new(
+            "/private/var/mobile/Containers/Data/Application/APP/tmp/clip.mov"
+        )));
+        assert!(!is_mobile_transient_video_path(Path::new(
+            "/private/var/mobile/Containers/Data/Application/APP/Library/Application Support/picked/videos/clip.mov"
+        )));
+    }
+
+    #[test]
+    fn picks_unique_stable_video_path_without_overwriting_existing_files() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("clip.mp4"), b"one").unwrap();
+        std::fs::write(dir.path().join("clip-1.mp4"), b"two").unwrap();
+
+        assert_eq!(
+            unique_stable_video_path(dir.path(), "clip.mp4"),
+            dir.path().join("clip-2.mp4")
+        );
+    }
+
+    #[tokio::test]
     async fn rejects_missing_file() {
         let dir = tempdir().unwrap();
         let db = Db::connect_and_migrate(&dir.path().join("test.db"))
@@ -547,18 +737,29 @@ mod tests {
             .await
             .unwrap();
         let course = crate::commands::courses::create_course(
-            &db, "c".into(), dir.path().to_string_lossy().into())
-            .await.unwrap();
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
         let vpath = dir.path().join("v.mp4");
         std::fs::write(&vpath, b"x").unwrap();
         let video = add_local_video(&db, &course.id, vpath, None).await.unwrap();
 
         sqlx::query("UPDATE videos SET subtitle_path=?, subtitle_lang=? WHERE id=?")
-            .bind("/tmp/x.ai-zh.srt").bind("ai-zh").bind(&video.id)
-            .execute(&db.pool).await.unwrap();
+            .bind("/tmp/x.ai-zh.srt")
+            .bind("ai-zh")
+            .bind(&video.id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
 
         let got: Video = sqlx::query_as("SELECT * FROM videos WHERE id=?")
-            .bind(&video.id).fetch_one(&db.pool).await.unwrap();
+            .bind(&video.id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
         assert_eq!(got.subtitle_lang.as_deref(), Some("ai-zh"));
         assert_eq!(got.subtitle_path.as_deref(), Some("/tmp/x.ai-zh.srt"));
     }

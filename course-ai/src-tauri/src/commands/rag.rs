@@ -2,9 +2,9 @@ use crate::commands::courses::AppState;
 use crate::commands::settings::get_setting;
 use crate::error::{AppError, AppResult};
 use crate::llm::factory::build_provider;
-use crate::llm::ChatMessage;
 use crate::llm::keychain;
 use crate::llm::profiles::{parse_profiles, parse_routing, resolve_profile, AiTask};
+use crate::llm::ChatMessage;
 use crate::pipeline::rag;
 use tauri::State;
 
@@ -31,7 +31,15 @@ pub async fn cmd_rag_query(
     history: Vec<ChatMessage>,
 ) -> AppResult<rag::RagAnswer> {
     let (provider, chat_model) = rag_provider(&state).await?;
-    rag::answer(&state.db, &provider, &chat_model, &video_id, &query, &history).await
+    rag::answer(
+        &state.db,
+        &provider,
+        &chat_model,
+        &video_id,
+        &query,
+        &history,
+    )
+    .await
 }
 
 /// 本地关键词搜索文稿（无需 LLM / 联网），结果可点击跳转。

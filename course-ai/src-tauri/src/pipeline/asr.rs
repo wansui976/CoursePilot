@@ -308,13 +308,12 @@ mod tests {
             .await
             .unwrap();
 
-        let row: (String, String) = sqlx::query_as(
-            "SELECT source, segments_json FROM transcript_backups WHERE video_id=?",
-        )
-        .bind(&video.id)
-        .fetch_one(&db.pool)
-        .await
-        .unwrap();
+        let row: (String, String) =
+            sqlx::query_as("SELECT source, segments_json FROM transcript_backups WHERE video_id=?")
+                .bind(&video.id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
 
         assert_eq!(row.0, "raw_asr");
         assert!(row.1.contains("\"start_ms\":0"));
@@ -324,25 +323,40 @@ mod tests {
     #[tokio::test]
     async fn store_segments_writes_transcripts_and_backup() {
         let dir = tempdir().unwrap();
-        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
         let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
-            .await.unwrap();
+            .await
+            .unwrap();
         let vpath = dir.path().join("v.mp4");
         std::fs::write(&vpath, b"x").unwrap();
         let video = add_local_video(&db, &course.id, vpath, None).await.unwrap();
 
         let segs = vec![StoredSegment {
-            start_ms: 0, end_ms: 1200, text: " 字幕句 ".into(), words_json: "[]".into(),
+            start_ms: 0,
+            end_ms: 1200,
+            text: " 字幕句 ".into(),
+            words_json: "[]".into(),
         }];
         let n = store_segments(&db, &video.id, &segs).await.unwrap();
-        store_segments_backup(&db, &video.id, "bilibili_sub", &segs).await.unwrap();
+        store_segments_backup(&db, &video.id, "bilibili_sub", &segs)
+            .await
+            .unwrap();
         assert_eq!(n, 1);
 
         let text: String = sqlx::query_scalar("SELECT text FROM transcripts WHERE video_id=?")
-            .bind(&video.id).fetch_one(&db.pool).await.unwrap();
+            .bind(&video.id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
         assert_eq!(text, "字幕句");
-        let source: String = sqlx::query_scalar("SELECT source FROM transcript_backups WHERE video_id=?")
-            .bind(&video.id).fetch_one(&db.pool).await.unwrap();
+        let source: String =
+            sqlx::query_scalar("SELECT source FROM transcript_backups WHERE video_id=?")
+                .bind(&video.id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
         assert_eq!(source, "bilibili_sub");
     }
 

@@ -1,10 +1,9 @@
-import { open } from "@tauri-apps/plugin-dialog";
 import { ChevronDown, Download, FileVideo, Plus } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
-import { persistPickedFile } from "@/lib/mobileFiles";
+import { pickPersistedFile } from "@/lib/mobileFiles";
 import { isMobile } from "@/lib/platform";
 
 // 按需懒加载：下载向导只在用户点击时才需要，避免把它（及 plugin-dialog 等）压进首屏 eager 包。
@@ -17,6 +16,7 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const [showBili, setShowBili] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
   // 移动端无 yt-dlp sidecar，隐藏「下载网络视频」入口。
   const mobile = isMobile();
   const invalidate = () =>
@@ -24,20 +24,25 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
 
   const local = useMutation({
     mutationFn: async () => {
-      const file = await open({
-        directory: false,
-        multiple: false,
+      setImportError(null);
+      const persisted = await pickPersistedFile({
+        category: "videos",
+        fallbackName: "video.mp4",
         filters: [
           { name: "Video", extensions: ["mp4", "mkv", "mov", "webm", "m4v"] },
         ],
+        prompt: "选择本地视频",
       });
-      if (!file || Array.isArray(file)) return null;
-      // 移动端需先把选中的文件落地到沙箱可读路径（桌面端透传原路径）。
-      const fallbackName = file.split(/[\\/]/).pop() || "video.mp4";
-      const persisted = await persistPickedFile(file, "videos", fallbackName);
-      return ipc.videos.addLocal(courseId, persisted);
+      if (!persisted) return null;
+      return ipc.videos.addLocal(courseId, persisted.path, persisted.durationMs);
     },
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setImportError(null);
+      invalidate();
+    },
+    onError: (error) => {
+      setImportError(error instanceof Error ? error.message : String(error));
+    },
   });
 
   return (
@@ -98,6 +103,14 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
         <Suspense fallback={null}>
           <BilibiliImportDialog courseId={courseId} onClose={() => setShowBili(false)} />
         </Suspense>
+      )}
+      {importError && (
+        <div
+          role="alert"
+          className="absolute right-0 top-full z-20 mt-2 max-w-80 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 shadow-[var(--shadow-pop)]"
+        >
+          导入失败：{importError}
+        </div>
       )}
     </div>
   );

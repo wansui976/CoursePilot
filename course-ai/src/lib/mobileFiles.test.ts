@@ -63,12 +63,11 @@ describe("persistPickedFile", () => {
     expect(copyFileMock).not.toHaveBeenCalled();
   });
 
-  it("copies picked files into app data on iOS", async () => {
+  it("uses the iOS mobile plugin so Photos picker files are persisted natively", async () => {
     vi.stubGlobal("navigator", { userAgent: "iPhone" });
-    appDataDirMock.mockResolvedValue("/private/var/mobile/Containers/Data/Application/APP");
-    joinMock.mockImplementation(async (...parts: string[]) => parts.join("/"));
-    copyFileMock.mockResolvedValue(undefined);
-    mkdirMock.mockResolvedValue(undefined);
+    invokeMock.mockResolvedValue(
+      "/private/var/mobile/Containers/Data/Application/APP/Library/Application Support/picked/videos/clip.mov",
+    );
 
     const { persistPickedFile } = await import("./mobileFiles");
     const result = await persistPickedFile(
@@ -77,12 +76,19 @@ describe("persistPickedFile", () => {
       "clip.mov",
     );
 
-    expect(result).toBe("/private/var/mobile/Containers/Data/Application/APP/videos/clip.mov");
-    expect(copyFileMock).toHaveBeenCalledWith(
-      "/private/var/mobile/Containers/Shared/AppGroup/file.mov",
-      "/private/var/mobile/Containers/Data/Application/APP/videos/clip.mov",
+    expect(result).toBe(
+      "/private/var/mobile/Containers/Data/Application/APP/Library/Application Support/picked/videos/clip.mov",
     );
-    expect(invokeMock).not.toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith(
+      "plugin:mobile-files|persist_picked_file",
+      {
+        sourceUri: "/private/var/mobile/Containers/Shared/AppGroup/file.mov",
+        category: "videos",
+        fallbackName: "clip.mov",
+      },
+    );
+    expect(mkdirMock).not.toHaveBeenCalled();
+    expect(copyFileMock).not.toHaveBeenCalled();
   });
 });
 
@@ -182,5 +188,45 @@ describe("pickDirectoryPath", () => {
       "/data/user/0/dev.courseai.app.debug/courses/新课程",
       { recursive: true },
     );
+  });
+});
+
+describe("pickPersistedFile", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    appDataDirMock.mockReset();
+    copyFileMock.mockReset();
+    invokeMock.mockReset();
+    joinMock.mockReset();
+    mkdirMock.mockReset();
+    openMock.mockReset();
+    appDataDirMock.mockResolvedValue("/data/user/0/dev.courseai.app.debug");
+    joinMock.mockImplementation(async (...parts: string[]) => parts.join("/"));
+    mkdirMock.mockResolvedValue(undefined);
+    copyFileMock.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("uses the document picker for fallback file selection", async () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0" });
+    openMock.mockResolvedValue("/Users/me/Downloads/clip.mov");
+
+    const { pickPersistedFile } = await import("./mobileFiles");
+    const result = await pickPersistedFile({
+      category: "videos",
+      fallbackName: "video.mp4",
+      filters: [{ name: "Video", extensions: ["mp4", "mov"] }],
+    });
+
+    expect(result).toEqual({ path: "/Users/me/Downloads/clip.mov", durationMs: null });
+    expect(openMock).toHaveBeenCalledWith({
+      directory: false,
+      multiple: false,
+      pickerMode: "document",
+      filters: [{ name: "Video", extensions: ["mp4", "mov"] }],
+    });
   });
 });

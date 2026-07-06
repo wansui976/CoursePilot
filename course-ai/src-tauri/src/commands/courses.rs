@@ -188,8 +188,10 @@ pub async fn relink_course_root(
         .collect();
 
     let outcomes = match_videos_to_files(&keys, &scanned);
-    let title_of: HashMap<&str, &str> =
-        videos.iter().map(|(id, t, _)| (id.as_str(), t.as_str())).collect();
+    let title_of: HashMap<&str, &str> = videos
+        .iter()
+        .map(|(id, t, _)| (id.as_str(), t.as_str()))
+        .collect();
 
     let now = Utc::now().timestamp_millis();
     let mut tx = db.pool.begin().await?;
@@ -315,10 +317,26 @@ mod tests {
     #[test]
     fn matcher_handles_unique_missing_ambiguous_and_case() {
         let videos = vec![
-            VideoKey { id: "u".into(), title: "u".into(), basename_lower: "a.mp4".into() },
-            VideoKey { id: "m".into(), title: "m".into(), basename_lower: "b.mp4".into() },
-            VideoKey { id: "d".into(), title: "d".into(), basename_lower: "c.mp4".into() },
-            VideoKey { id: "ci".into(), title: "ci".into(), basename_lower: "e.mp4".into() },
+            VideoKey {
+                id: "u".into(),
+                title: "u".into(),
+                basename_lower: "a.mp4".into(),
+            },
+            VideoKey {
+                id: "m".into(),
+                title: "m".into(),
+                basename_lower: "b.mp4".into(),
+            },
+            VideoKey {
+                id: "d".into(),
+                title: "d".into(),
+                basename_lower: "c.mp4".into(),
+            },
+            VideoKey {
+                id: "ci".into(),
+                title: "ci".into(),
+                basename_lower: "e.mp4".into(),
+            },
         ];
         let scanned = vec![
             PathBuf::from("/x/a.mp4"),
@@ -337,7 +355,9 @@ mod tests {
     #[tokio::test]
     async fn relink_updates_matched_paths_and_root() {
         let db = fresh_db().await;
-        let course = create_course(&db, "ml".into(), "/old".into()).await.unwrap();
+        let course = create_course(&db, "ml".into(), "/old".into())
+            .await
+            .unwrap();
         for (vid, fp) in [("v1", "/old/a.mp4"), ("v2", "/old/b.mp4")] {
             sqlx::query(
                 "INSERT INTO videos (id,course_id,title,source_type,file_path,data_dir,created_at)

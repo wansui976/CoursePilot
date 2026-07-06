@@ -1,12 +1,15 @@
 import { useState } from "react";
-import { Check, ChevronDown, Download } from "lucide-react";
+import { Check, ChevronDown, Download, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { isMobile, shareFile } from "@/lib/mobileFiles";
 import { panelActionButtonClass } from "./PanelActions";
 
 export interface ExportItem {
   label: string;
   /** 执行导出，返回落地文件路径（用于反馈）。 */
   run: () => Promise<string>;
+  mime?: string;
+  saveAs?: string;
 }
 
 /**
@@ -31,9 +34,25 @@ export function ExportMenu({
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
 
   if (items.length === 0) return null;
-  const single = items.length === 1;
+  const mobile = isMobile();
+  const directShare = mobile && items.length === 1;
   const up = placement === "up";
   const popClass = up ? "bottom-full mb-1" : "top-full mt-1";
+
+  async function share(item: ExportItem) {
+    setOpen(false);
+    setBusy(true);
+    try {
+      const sourcePath = await item.run();
+      await shareFile(sourcePath, item.mime ?? "application/octet-stream");
+      setMsg({ text: `已分享 · ${shorten(sourcePath)}` });
+    } catch (error) {
+      setMsg({ text: String(error), error: true });
+    } finally {
+      setBusy(false);
+      setTimeout(() => setMsg(null), 4000);
+    }
+  }
 
   async function run(item: ExportItem) {
     setOpen(false);
@@ -55,40 +74,62 @@ export function ExportMenu({
         <button
           type="button"
           disabled={disabled || busy}
-          onClick={() => (single ? void run(items[0]) : setOpen((o) => !o))}
-          aria-label="导出"
-          title="导出到视频数据目录"
+          onClick={() => {
+            if (directShare) {
+              void share(items[0]);
+              return;
+            }
+            setOpen((o) => !o);
+          }}
+          aria-label={directShare ? "导出并分享" : "导出"}
+          title={directShare ? "导出并分享" : "导出"}
           className={panelActionButtonClass}
         >
-          <Download className={`h-4 w-4 ${busy ? "animate-pulse" : ""}`} />
+          {directShare ? (
+            <Share2 className={`h-4 w-4 ${busy ? "animate-pulse" : ""}`} />
+          ) : (
+            <Download className={`h-4 w-4 ${busy ? "animate-pulse" : ""}`} />
+          )}
         </button>
       ) : (
         <Button
           size="sm"
           variant="outline"
           disabled={disabled || busy}
-          onClick={() => (single ? void run(items[0]) : setOpen((o) => !o))}
-          title="导出到视频数据目录"
+          onClick={() => {
+            if (directShare) {
+              void share(items[0]);
+              return;
+            }
+            setOpen((o) => !o);
+          }}
+          title={directShare ? "导出并分享" : "导出"}
         >
-          <Download className="h-3.5 w-3.5" />
-          {busy ? "导出中…" : "导出"}
-          {!single && <ChevronDown className="h-3 w-3 opacity-70" />}
+          {directShare ? (
+            <Share2 className="h-3.5 w-3.5" />
+          ) : (
+            <Download className="h-3.5 w-3.5" />
+          )}
+          {busy ? (directShare ? "分享中…" : "导出中…") : directShare ? "导出" : "导出"}
+          {!directShare && <ChevronDown className="h-3 w-3 opacity-70" />}
         </Button>
       )}
-      {open && !single && (
+      {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div
             className={`absolute right-0 z-20 w-40 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 shadow-[var(--shadow-pop)] ${popClass}`}
           >
             {items.map((item) => (
-              <button
-                key={item.label}
-                onClick={() => void run(item)}
-                className="ca-touch-44 block w-full px-3 py-1.5 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
-              >
-                {item.label}
-              </button>
+              <div key={item.label} className="flex items-center">
+                <button
+                  type="button"
+                  onClick={() => void (mobile ? share(item) : run(item))}
+                  className="ca-touch-44 flex-1 px-3 py-1.5 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
+                >
+                  {item.label}
+                </button>
+              </div>
             ))}
           </div>
         </>

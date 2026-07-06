@@ -383,11 +383,7 @@ mod tests {
         ];
 
         // 第二条缺 replacedtext（结构异常）→ 单条跳过；第一条照常应用。
-        let out = parse_corrections(
-            &raw,
-            r#"[{"id":0,"replacedtext":"改了"},{"id":1}]"#,
-        )
-        .unwrap();
+        let out = parse_corrections(&raw, r#"[{"id":0,"replacedtext":"改了"},{"id":1}]"#).unwrap();
         assert_eq!(out[0].text, "改了");
         assert_eq!(out[1].text, "第二段");
     }

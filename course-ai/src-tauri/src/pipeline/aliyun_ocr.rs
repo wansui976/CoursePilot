@@ -45,7 +45,10 @@ pub async fn run_aliyun_ocr(
 
     // 参与签名的头：host + 所有 x-acs-* + content-type。
     let headers = vec![
-        ("content-type".to_string(), "application/octet-stream".to_string()),
+        (
+            "content-type".to_string(),
+            "application/octet-stream".to_string(),
+        ),
         ("host".to_string(), HOST.to_string()),
         ("x-acs-action".to_string(), ACTION.to_string()),
         ("x-acs-content-sha256".to_string(), body_hash.clone()),
@@ -54,8 +57,13 @@ pub async fn run_aliyun_ocr(
         ("x-acs-version".to_string(), VERSION.to_string()),
     ];
 
-    let authorization =
-        build_authorization(access_key_id, access_key_secret, &query, &headers, &body_hash);
+    let authorization = build_authorization(
+        access_key_id,
+        access_key_secret,
+        &query,
+        &headers,
+        &body_hash,
+    );
 
     let url = format!("https://{HOST}/?{}", canonical_query_string(&query));
     let client = reqwest::Client::new();
@@ -80,13 +88,20 @@ pub async fn run_aliyun_ocr(
         .text()
         .await
         .map_err(|e| AppError::Pipeline(format!("aliyun ocr read body: {e}")))?;
-    let payload: Value = serde_json::from_str(&raw)
-        .map_err(|e| AppError::Pipeline(format!("aliyun ocr decode: {e}；原始响应：{}", truncate(&raw, 300))))?;
+    let payload: Value = serde_json::from_str(&raw).map_err(|e| {
+        AppError::Pipeline(format!(
+            "aliyun ocr decode: {e}；原始响应：{}",
+            truncate(&raw, 300)
+        ))
+    })?;
     // 网关一般用 HTTP 状态码报错，但也兜底识别 body 里的 Code/Message。
     let code = payload["Code"].as_str().unwrap_or("");
     let message = payload["Message"].as_str().unwrap_or("");
     if !status.is_success() || (!code.is_empty() && payload.get("Data").is_none()) {
-        let hint = if status.as_u16() == 403 || code.contains("Forbidden") || code.contains("NoPermission") {
+        let hint = if status.as_u16() == 403
+            || code.contains("Forbidden")
+            || code.contains("NoPermission")
+        {
             "（鉴权/权限失败：请核对 AccessKey、并确认已开通「文字识别 OCR」服务且 RAM 已授权）"
         } else {
             ""
@@ -181,8 +196,14 @@ fn build_authorization(
         signed_headers,
         body_hash
     );
-    let string_to_sign = format!("{ALGORITHM}\n{}", hex_lower(&sha256(canonical_request.as_bytes())));
-    let signature = hex_lower(&hmac_sha256(access_key_secret.as_bytes(), string_to_sign.as_bytes()));
+    let string_to_sign = format!(
+        "{ALGORITHM}\n{}",
+        hex_lower(&sha256(canonical_request.as_bytes()))
+    );
+    let signature = hex_lower(&hmac_sha256(
+        access_key_secret.as_bytes(),
+        string_to_sign.as_bytes(),
+    ));
     format!(
         "{ALGORITHM} Credential={access_key_id},SignedHeaders={signed_headers},Signature={signature}"
     )
@@ -286,10 +307,7 @@ mod tests {
     #[test]
     fn hmac_sha256_known_vector() {
         // RFC 标准测试向量。
-        let mac = hmac_sha256(
-            b"key",
-            b"The quick brown fox jumps over the lazy dog",
-        );
+        let mac = hmac_sha256(b"key", b"The quick brown fox jumps over the lazy dog");
         assert_eq!(
             hex_lower(&mac),
             "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
@@ -370,10 +388,7 @@ mod tests {
                 }]
             }
         });
-        assert_eq!(
-            extract_content(&payload).unwrap(),
-            "第一行文字\n第二行文字"
-        );
+        assert_eq!(extract_content(&payload).unwrap(), "第一行文字\n第二行文字");
     }
 
     #[test]

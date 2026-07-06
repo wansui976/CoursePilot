@@ -5,15 +5,15 @@
 //! 这里检测 moov 是否在 mdat 之前；若不是，用 ffmpeg 仅转封装（不重编码）生成一个
 //! faststart 的 playable.mp4 给播放器用。
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::error::AppError;
 use crate::error::AppResult;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::sidecar::{resolve, FFMPEG};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tokio::process::Command;
 
 /// 扫描 MP4 顶层 box，判断 `moov` 是否排在 `mdat` 之前（即已 faststart）。

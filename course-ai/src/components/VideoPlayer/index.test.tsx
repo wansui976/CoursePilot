@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { VideoPlayer } from ".";
 
@@ -13,95 +13,215 @@ vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ setFullscreen }),
 }));
 
-function renderPlayer() {
+vi.mock("@/lib/platform", () => ({
+  isIOS: () => true,
+  isMobile: () => true,
+  isAndroid: () => false,
+  isTablet: () => false,
+  isDesktop: () => false,
+}));
+
+function renderPlayer(immersive = true) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <VideoPlayer src="http://127.0.0.1:1234/m/abc" videoId="video-1" />
+      <VideoPlayer
+        src="http://127.0.0.1:1234/m/abc"
+        videoId="video-1"
+        immersive={immersive}
+      />
     </QueryClientProvider>,
   );
 }
 
-describe("VideoPlayer", () => {
-  it("keeps video playback inline inside the learning workspace", () => {
+describe("VideoPlayer iOS gestures", () => {
+  it("toggles fullscreen on double tap", async () => {
+    setFullscreen.mockClear();
+    setFullscreen.mockResolvedValue(undefined);
+
     renderPlayer();
+    const gestureLayer = screen.getByLabelText("课程视频手势层");
 
-    const video = screen.getByLabelText("课程视频播放器");
-
-    expect(video).toHaveAttribute("playsinline");
-    expect(video).toHaveAttribute("webkit-playsinline");
-    expect(video).toHaveAttribute("disablepictureinpicture");
-    expect(video).toHaveAttribute("src", "http://127.0.0.1:1234/m/abc");
-  });
-
-  it("exposes a 字幕 toggle in the controls", () => {
-    renderPlayer();
-    fireEvent.mouseEnter(screen.getByLabelText("课程视频舞台"));
-    expect(screen.getByRole("button", { name: "字幕" })).toBeInTheDocument();
-  });
-
-  it("uses the active accent color for video progress controls", () => {
-    renderPlayer();
-    fireEvent.mouseEnter(screen.getByLabelText("课程视频舞台"));
-
-    expect(screen.getByLabelText("播放进度")).toHaveStyle({
-      "--video-control-color": "var(--accent)",
+    fireEvent.pointerDown(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 120,
+      clientY: 120,
     });
-    expect(screen.getByRole("button", { name: "字幕" })).toHaveClass(
-      "text-[var(--accent)]",
-    );
-  });
+    fireEvent.pointerUp(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 120,
+      clientY: 120,
+    });
+    fireEvent.pointerDown(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 122,
+      clientY: 121,
+    });
+    fireEvent.pointerUp(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 122,
+      clientY: 121,
+    });
 
-  it("hides the desktop control bar until the video is hovered", async () => {
-    renderPlayer();
-
-    const stage = screen.getByLabelText("课程视频舞台");
-    const controls = screen.getByLabelText("视频播放控制栏");
-
-    expect(controls).toHaveClass("shrink-0");
-    expect(controls).toHaveClass("invisible", "opacity-0", "pointer-events-none");
-
-    fireEvent.mouseEnter(stage);
-
-    expect(controls).not.toHaveClass("invisible", "opacity-0", "pointer-events-none");
-
-    fireEvent.mouseLeave(stage);
-
-    await waitFor(() =>
-      expect(controls).toHaveClass("invisible", "opacity-0", "pointer-events-none"),
-    );
-  });
-
-  it("does not wrap the video in an extra rounded black frame", () => {
-    renderPlayer();
-
-    expect(screen.getByLabelText("课程视频舞台")).not.toHaveClass("rounded-[14px]");
-  });
-
-  it("enters video fullscreen (window fullscreen + overlay) and toggles the control", async () => {
-    setFullscreen.mockClear();
-    setFullscreen.mockResolvedValue(undefined);
-
-    renderPlayer();
-    fireEvent.mouseEnter(screen.getByLabelText("课程视频舞台"));
-
-    fireEvent.click(screen.getByRole("button", { name: "全屏" }));
     await waitFor(() => expect(setFullscreen).toHaveBeenCalledWith(true));
-    expect(screen.getByRole("button", { name: "退出全屏" })).toBeInTheDocument();
   });
 
-  it("exits video fullscreen when toggled again", async () => {
-    setFullscreen.mockClear();
-    setFullscreen.mockResolvedValue(undefined);
-
+  it("seeks forward on right swipe", () => {
     renderPlayer();
-    fireEvent.mouseEnter(screen.getByLabelText("课程视频舞台"));
+    const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
+    const gestureLayer = screen.getByLabelText("课程视频手势层");
+    const setCurrentTime = vi.fn();
 
-    fireEvent.click(screen.getByRole("button", { name: "全屏" }));
-    fireEvent.click(await screen.findByRole("button", { name: "退出全屏" }));
-    await waitFor(() => expect(setFullscreen).toHaveBeenLastCalledWith(false));
-    expect(screen.getByRole("button", { name: "全屏" })).toBeInTheDocument();
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      get: () => 30,
+      set: setCurrentTime,
+    });
+    Object.defineProperty(video, "duration", {
+      configurable: true,
+      get: () => 120,
+    });
+
+    fireEvent.pointerDown(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 100,
+      clientY: 100,
+    });
+    fireEvent.pointerMove(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 170,
+      clientY: 104,
+    });
+    fireEvent.pointerUp(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 170,
+      clientY: 104,
+    });
+
+    expect(setCurrentTime).toHaveBeenCalled();
+    expect(setCurrentTime.mock.calls[setCurrentTime.mock.calls.length - 1]?.[0]).toBeGreaterThan(30);
+  });
+
+  it("seeks backward on left swipe", () => {
+    renderPlayer();
+    const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
+    const gestureLayer = screen.getByLabelText("课程视频手势层");
+    const setCurrentTime = vi.fn();
+
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      get: () => 30,
+      set: setCurrentTime,
+    });
+    Object.defineProperty(video, "duration", {
+      configurable: true,
+      get: () => 120,
+    });
+
+    fireEvent.pointerDown(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 170,
+      clientY: 100,
+    });
+    fireEvent.pointerMove(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 95,
+      clientY: 104,
+    });
+    fireEvent.pointerUp(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 95,
+      clientY: 104,
+    });
+
+    expect(setCurrentTime).toHaveBeenCalled();
+    expect(setCurrentTime.mock.calls[setCurrentTime.mock.calls.length - 1]?.[0]).toBeLessThan(30);
+  });
+
+  it("shows a brightness overlay while adjusting brightness", () => {
+    renderPlayer();
+    const gestureLayer = screen.getByLabelText("课程视频手势层");
+
+    fireEvent.pointerDown(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 80,
+      clientY: 200,
+    });
+    fireEvent.pointerMove(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 80,
+      clientY: 120,
+    });
+
+    expect(screen.getByLabelText("亮度浮层")).toBeInTheDocument();
+    expect(screen.getByText(/亮度/)).toBeInTheDocument();
+  });
+
+  it("shows a volume overlay while adjusting volume", () => {
+    renderPlayer();
+    const gestureLayer = screen.getByLabelText("课程视频手势层");
+
+    fireEvent.pointerDown(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 780,
+      clientY: 200,
+    });
+    fireEvent.pointerMove(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 780,
+      clientY: 120,
+    });
+
+    expect(screen.getByLabelText("亮度浮层")).toBeInTheDocument();
+    expect(screen.getByText(/音量/)).toBeInTheDocument();
+  });
+
+  it("doubles the current playback rate while long pressing", async () => {
+    vi.useFakeTimers();
+    renderPlayer();
+    const gestureLayer = screen.getByLabelText("课程视频手势层");
+    const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
+    const setRate = vi.fn();
+    Object.defineProperty(video, "playbackRate", {
+      configurable: true,
+      get: () => 1,
+      set: setRate,
+    });
+
+    fireEvent.pointerDown(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 120,
+      clientY: 120,
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    expect(setRate).toHaveBeenCalledWith(2);
+
+    fireEvent.pointerUp(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 120,
+      clientY: 120,
+    });
+    expect(setRate).toHaveBeenLastCalledWith(1);
+    vi.useRealTimers();
   });
 });

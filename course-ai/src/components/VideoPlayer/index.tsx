@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ipc } from "@/lib/ipc";
 import { posKey, durKey } from "@/lib/playback";
+import { isIOS } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
 import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
 import { CaptionOverlay } from "./CaptionOverlay";
@@ -10,6 +11,30 @@ import { Controls } from "./Controls";
 
 // 距片尾 15s 内不再续播（视为看完），从头开始。
 const RESUME_TAIL_GUARD = 15;
+const TAP_DELAY_MS = 240;
+const LONG_PRESS_MS = 360;
+const TAP_MOVE_TOLERANCE_PX = 12;
+const AXIS_LOCK_PX = 16;
+const SCRUB_MS_PER_PIXEL = 100;
+const BRIGHTNESS_STEP = 0.0025;
+const VOLUME_STEP = 0.0025;
+
+type GestureMode = "idle" | "brightness" | "volume" | "scrub";
+
+type GestureState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  startRate: number;
+  startVolume: number;
+  startBrightness: number;
+  mode: GestureMode;
+  side: "left" | "right";
+  tapTimer?: number;
+  longPressTimer?: number;
+  longPressActive: boolean;
+  swiped: boolean;
+};
 
 export function VideoPlayer({
   src,
@@ -43,12 +68,19 @@ export function VideoPlayer({
   const desktopHideTimer = useRef<number | undefined>(undefined);
   // 沉浸式单/双击判定：单击切控制栏、双击左右两侧 ±10s（中间播放/暂停）。
   const tapRef = useRef<{ t: number; timer?: number }>({ t: 0 });
+  const gestureRef = useRef<GestureState | null>(null);
   const setCurrentMs = usePlayer((s) => s.setCurrentMs);
   const setDurationMs = usePlayer((s) => s.setDurationMs);
   const seekRequest = usePlayer((s) => s.seekRequest);
   // 不在这里订阅 currentMs（否则播放时整个播放器每秒重渲染 4 次）。
   // 进度由 Controls 自己订阅；字幕只在「跨段」时更新。
   const [caption, setCaption] = useState<string | undefined>(undefined);
+  const [brightness, setBrightness] = useState(1);
+  const [gestureHint, setGestureHint] = useState<{
+    kind: "brightness" | "volume" | "scrub";
+    value: number;
+  } | null>(null);
+  const gestureHintTimerRef = useRef<number | undefined>(undefined);
 
   const { data: segments = [] } = useQuery({
     queryKey: ["transcripts", videoId],
@@ -155,6 +187,8 @@ export function VideoPlayer({
     ref.current.muted = muted || volume === 0;
   }, [muted, volume]);
 
+  const isIosImmersive = immersive && isIOS();
+
   // 视频全屏：CSS 把播放器铺满视口（盖住应用其它 UI），同时让窗口铺满物理屏幕，
   // 视觉上就是纯视频全屏，而非「程序全屏」。WKWebView 不支持元素级全屏，所以走这套。
   const setVideoFullscreen = async (next: boolean) => {
@@ -207,6 +241,139 @@ export function VideoPlayer({
   function clearTapTimer() {
     if (tapRef.current.timer) window.clearTimeout(tapRef.current.timer);
     tapRef.current = { t: 0 };
+  }
+  function clearGestureTimer(gesture: GestureState | null) {
+    if (!gesture) return;
+    if (gesture.tapTimer) window.clearTimeout(gesture.tapTimer);
+    if (gesture.longPressTimer) window.clearTimeout(gesture.longPressTimer);
+  }
+  function revealGestureHint(kind: "brightness" | "volume" | "scrub", value: number) {
+    setGestureHint({ kind, value });
+    if (gestureHintTimerRef.current) window.clearTimeout(gestureHintTimerRef.current);
+    gestureHintTimerRef.current = window.setTimeout(() => setGestureHint(null), 650);
+  }
+  function handleIosPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (!isIosImmersive || event.pointerType === "mouse") return;
+    clearGestureTimer(gestureRef.current);
+    const video = ref.current;
+    const width = window.innerWidth || event.currentTarget.getBoundingClientRect().width || 0;
+    const gesture: GestureState = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startRate: video?.playbackRate ?? rate,
+      startVolume: volume,
+      startBrightness: brightness,
+      mode: "idle",
+      side: event.clientX < width / 2 ? "left" : "right",
+      longPressActive: false,
+      swiped: false,
+    };
+    gestureRef.current = gesture;
+    const target = event.currentTarget;
+    if ("setPointerCapture" in target) {
+      try {
+        target.setPointerCapture(event.pointerId);
+      } catch {
+        // Safari/测试环境可能不支持，忽略即可。
+      }
+    }
+    gesture.longPressTimer = window.setTimeout(() => {
+      const current = gestureRef.current;
+      const activeVideo = ref.current;
+      if (!current || current.pointerId !== event.pointerId || !activeVideo) return;
+      if (current.swiped || current.longPressActive) return;
+      current.longPressActive = true;
+      setRate(current.startRate * 2);
+    }, LONG_PRESS_MS);
+  }
+  function handleIosPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId || !isIosImmersive) return;
+    const dx = event.clientX - gesture.startX;
+    const dy = event.clientY - gesture.startY;
+    const adx = Math.abs(dx);
+    const ady = Math.abs(dy);
+    if (adx > TAP_MOVE_TOLERANCE_PX || ady > TAP_MOVE_TOLERANCE_PX) {
+      if (gesture.longPressTimer) {
+        window.clearTimeout(gesture.longPressTimer);
+        gesture.longPressTimer = undefined;
+      }
+    }
+    if (gesture.mode === "idle") {
+      if (adx < AXIS_LOCK_PX && ady < AXIS_LOCK_PX) return;
+      gesture.mode = adx > ady ? "scrub" : gesture.side === "left" ? "brightness" : "volume";
+    }
+    if (gesture.mode === "brightness") {
+      const next = Math.min(
+        1,
+        Math.max(0, gesture.startBrightness + (gesture.startY - event.clientY) * BRIGHTNESS_STEP),
+      );
+      setBrightness(next);
+      revealGestureHint("brightness", next);
+      return;
+    }
+    if (gesture.mode === "volume") {
+      const next = Math.min(
+        1,
+        Math.max(0, gesture.startVolume + (gesture.startY - event.clientY) * VOLUME_STEP),
+      );
+      setVolume(next);
+      setMuted(next === 0);
+      revealGestureHint("volume", next);
+      return;
+    }
+    if (gesture.mode === "scrub") {
+      gesture.swiped = true;
+      const video = ref.current;
+      if (!video) return;
+      const next = video.currentTime + (dx * SCRUB_MS_PER_PIXEL) / 1000;
+      if (Number.isFinite(video.duration) && video.duration > 0) {
+        video.currentTime = Math.min(video.duration, Math.max(0, next));
+      } else {
+        video.currentTime = Math.max(0, next);
+      }
+      revealGestureHint("scrub", next);
+    }
+  }
+  function handleIosPointerUp(event: React.PointerEvent<HTMLDivElement>) {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId || !isIosImmersive) return;
+    clearGestureTimer(gesture);
+    const dx = event.clientX - gesture.startX;
+    const dy = event.clientY - gesture.startY;
+    const adx = Math.abs(dx);
+    const ady = Math.abs(dy);
+    if (gesture.longPressActive) {
+      setRate(gesture.startRate);
+      revealControls();
+    } else if (gesture.mode === "scrub" || (gesture.swiped && adx > ady)) {
+      revealControls();
+    } else {
+      const now = Date.now();
+      const prev = tapRef.current;
+      if (now - prev.t < TAP_DELAY_MS) {
+        if (prev.timer) window.clearTimeout(prev.timer);
+        tapRef.current = { t: 0 };
+        void setVideoFullscreen(!fullscreen);
+      } else {
+        const timer = window.setTimeout(() => {
+          tapRef.current = { t: 0 };
+          toggleControls();
+        }, TAP_DELAY_MS);
+        tapRef.current = { t: now, timer };
+      }
+    }
+    gestureRef.current = null;
+  }
+  function handleIosPointerCancel(event: React.PointerEvent<HTMLDivElement>) {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId || !isIosImmersive) return;
+    clearGestureTimer(gesture);
+    if (gesture.longPressActive) {
+      setRate(gesture.startRate);
+    }
+    gestureRef.current = null;
   }
   // 沉浸式（手机）点视频：区分单/双击。单击延后 240ms 才切控制栏，期间若来第二击则
   // 判为双击——按落点在视频左/中/右执行 后退10s / 播放暂停 / 前进10s。桌面不走这套。
@@ -276,6 +443,7 @@ export function VideoPlayer({
       clearHideTimer();
       clearDesktopHideTimer();
       clearTapTimer();
+      if (gestureHintTimerRef.current) window.clearTimeout(gestureHintTimerRef.current);
     },
     [],
   );
@@ -382,18 +550,18 @@ export function VideoPlayer({
       <div
         ref={regionRef}
         aria-label="课程视频舞台"
-        onClick={immersive ? handleStageTap : undefined}
+        onClick={immersive && !isIosImmersive ? handleStageTap : undefined}
         onMouseEnter={!immersive ? revealDesktopControls : undefined}
         onMouseLeave={!immersive ? scheduleDesktopHideControls : undefined}
         className={`relative flex min-h-0 w-full min-w-0 flex-1 items-center justify-center overflow-hidden ${
           fullscreen ? "bg-black" : "bg-[var(--surface-stage)]"
         }`}
       >
-        <div
-          ref={stageRef}
-          className={`relative overflow-hidden ${fullscreen ? "" : "rounded-xl"}`}
-          style={
-            stageBox
+      <div
+        ref={stageRef}
+        className={`relative overflow-hidden ${fullscreen ? "" : "rounded-xl"}`}
+        style={
+          stageBox
               ? { width: stageBox.width, height: stageBox.height }
               : { width: "100%", height: "100%" }
           }
@@ -404,13 +572,14 @@ export function VideoPlayer({
             src={src}
             playsInline
             disablePictureInPicture
-            className="h-full w-full bg-black object-contain"
+            className={`h-full w-full bg-black object-contain ${isIosImmersive ? "pointer-events-none" : ""}`}
             // 提升到独立 GPU 合成层：暂停后让这一帧留在自己的层上，减少回退到
             // 「栅格化再缩放」的软化；backface-visibility 进一步固定层、避免半像素抖动。
             style={{
               transform: "translateZ(0)",
               willChange: "transform",
               backfaceVisibility: "hidden",
+              filter: `brightness(${brightness})`,
             }}
             onTimeUpdate={(event) => {
               const t = event.currentTarget.currentTime;
@@ -464,11 +633,34 @@ export function VideoPlayer({
                 lastSavedRef.current = t;
               }
             }}
-            onVolumeChange={(event) => {
-              setVolume(event.currentTarget.volume);
-              setMuted(event.currentTarget.muted);
-            }}
+              onVolumeChange={(event) => {
+                setVolume(event.currentTarget.volume);
+                setMuted(event.currentTarget.muted);
+              }}
           />
+          {isIosImmersive && (
+            <div
+              aria-label="课程视频手势层"
+              className="absolute inset-0 z-10"
+              onPointerDown={handleIosPointerDown}
+              onPointerMove={handleIosPointerMove}
+              onPointerUp={handleIosPointerUp}
+              onPointerCancel={handleIosPointerCancel}
+              style={{ touchAction: "none" }}
+            />
+          )}
+          {gestureHint && (
+            <div
+              aria-label="亮度浮层"
+              className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/20 text-white"
+            >
+              <div className="rounded-lg bg-black/70 px-4 py-2 text-sm font-medium">
+                {gestureHint.kind === "brightness" && `亮度 ${(gestureHint.value * 100).toFixed(0)}%`}
+                {gestureHint.kind === "volume" && `音量 ${(gestureHint.value * 100).toFixed(0)}%`}
+                {gestureHint.kind === "scrub" && "进度调整"}
+              </div>
+            </div>
+          )}
           {captionsOn && caption && (
             <CaptionOverlay text={caption} stageRef={stageRef} />
           )}

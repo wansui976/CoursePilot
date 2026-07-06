@@ -14,11 +14,16 @@ import {
   X,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
-import { pickDirectoryPath } from "@/lib/mobileFiles";
+import { isIOS, pickDirectoryPath } from "@/lib/mobileFiles";
 import { cn } from "@/lib/utils";
 
 function nextCourseName(courses: { name: string }[]) {
@@ -69,9 +74,29 @@ export function CourseSidebar({
   const [renameDraft, setRenameDraft] = useState("");
   const [creatingCourse, setCreatingCourse] = useState(false);
   const [createError, setCreateError] = useState<Error | null>(null);
+  const [swipedCourseId, setSwipedCourseId] = useState<string | null>(null);
+  const swipeStart = useRef<{ id: string; x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (menuFor && menuFor !== swipedCourseId) {
+      setSwipedCourseId(menuFor);
+    }
+  }, [menuFor, swipedCourseId]);
+
+  useEffect(() => {
+    if (!isIOS()) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("[data-course-menu]")) return;
+      setSwipedCourseId(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, []);
 
   function closeMenu() {
     setMenuFor(null);
+    setSwipedCourseId(null);
   }
 
   const rename = useMutation({
@@ -146,6 +171,28 @@ export function CourseSidebar({
     } finally {
       setCreatingCourse(false);
     }
+  }
+
+  function startSwipe(courseId: string, event: ReactPointerEvent<HTMLDivElement>) {
+    if (!isIOS()) return;
+    if (event.pointerType === "mouse") return;
+    swipeStart.current = { id: courseId, x: event.clientX, y: event.clientY };
+  }
+
+  function trackSwipe(courseId: string, event: ReactPointerEvent<HTMLDivElement>) {
+    const start = swipeStart.current;
+    if (!start || start.id !== courseId) return;
+    if (event.pointerType === "mouse") return;
+    const dx = start.x - event.clientX;
+    const dy = Math.abs(start.y - event.clientY);
+    if (dx > 30 && dy < 18) {
+      setSwipedCourseId(courseId);
+      setMenuFor(courseId);
+    }
+  }
+
+  function endSwipe() {
+    swipeStart.current = null;
   }
 
   return (
@@ -252,6 +299,11 @@ export function CourseSidebar({
             <div
               key={course.id}
               className={`ca-nav-item group relative ${selected ? "active" : ""}`}
+              style={{ touchAction: "pan-y" }}
+              onPointerDown={(event) => startSwipe(course.id, event)}
+              onPointerMove={(event) => trackSwipe(course.id, event)}
+              onPointerUp={endSwipe}
+              onPointerCancel={endSwipe}
             >
               <button
                 onClick={() => onSelect(course.id)}
@@ -262,37 +314,44 @@ export function CourseSidebar({
               </button>
               <button
                 aria-label="课程操作"
+                data-course-menu
+                onPointerDown={(event) => event.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   setMenuFor((id) => (id === course.id ? null : course.id));
                 }}
-                className={`ca-touch-44 mr-1 grid h-7 w-7 flex-none place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card)] hover:text-[var(--text-strong)] ${
-                  menuFor === course.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                className={`ca-touch-44 mr-1 grid h-9 w-9 flex-none place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card)] hover:text-[var(--text-strong)] ${
+                  isIOS() || menuFor === course.id || swipedCourseId === course.id
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100"
                 }`}
               >
-                <MoreHorizontal className="h-4 w-4" />
+                <MoreHorizontal className="h-5 w-5" />
               </button>
-              {menuFor === course.id && (
-                <div className="absolute right-1 top-full z-20 mt-1 w-36 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 shadow-[var(--shadow-pop)]">
+              {(menuFor === course.id || swipedCourseId === course.id) && (
+                <div
+                  data-course-menu
+                  className="absolute right-1 top-full z-20 mt-1 w-40 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 shadow-[var(--shadow-pop)]"
+                >
                   <button
                     onClick={() => startRename(course.id, course.name)}
-                    className="ca-touch-44 flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
+                    className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
                   >
-                    <Pencil className="h-3.5 w-3.5" />
+                    <Pencil className="h-4 w-4" />
                     重命名
                   </button>
                   <button
                     onClick={() => void handleRelinkRoot(course.id, course.name)}
-                    className="ca-touch-44 flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
+                    className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
                   >
-                    <FolderOpen className="h-3.5 w-3.5" />
+                    <FolderOpen className="h-4 w-4" />
                     重新选择根目录
                   </button>
                   <button
                     onClick={() => void confirmDelete(course.id, course.name)}
-                    className="ca-touch-44 flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--status-err)] hover:bg-[var(--surface-card-hover)]"
+                    className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--status-err)] hover:bg-[var(--surface-card-hover)]"
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <Trash2 className="h-4 w-4" />
                     删除
                   </button>
                 </div>
