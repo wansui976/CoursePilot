@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NotesPanel } from "./NotesPanel";
 import { readVideoResumeState } from "@/lib/resumeState";
 
-const { mockIpc } = vi.hoisted(() => ({
+const { mockIpc, editorCapture } = vi.hoisted(() => ({
   mockIpc: {
     ai: {
       getNotes: vi.fn(),
@@ -17,6 +17,9 @@ const { mockIpc } = vi.hoisted(() => ({
       quiz: vi.fn(),
       mindmap: vi.fn(),
     },
+  },
+  editorCapture: {
+    onUpdate: undefined as undefined | ((p: { editor: unknown }) => void),
   },
 }));
 
@@ -33,12 +36,15 @@ vi.mock("./notes/timestampNode", () => ({
 vi.mock("./notes/mathNode", () => ({ MathNode: {} }));
 vi.mock("@tiptap/react", () => ({
   EditorContent: () => <div>笔记正文</div>,
-  useEditor: () => ({
-    commands: {
-      setContent: vi.fn(),
-    },
-    getJSON: () => ({ type: "doc", content: [] }),
-  }),
+  useEditor: (opts: { onUpdate?: (p: { editor: unknown }) => void }) => {
+    editorCapture.onUpdate = opts?.onUpdate;
+    return {
+      commands: {
+        setContent: vi.fn(),
+      },
+      getJSON: () => ({ type: "doc", content: [{ type: "paragraph" }] }),
+    };
+  },
 }));
 
 function renderNotesPanel(videoId = "video-1", instanceKey = "one") {
@@ -130,5 +136,24 @@ describe("NotesPanel", () => {
     const secondScroller = await screen.findByLabelText("笔记内容滚动区");
 
     expect(secondScroller.scrollTop).toBe(0);
+  });
+
+  it("flushes the pending note save on unmount (no data loss in the debounce window)", () => {
+    // 不用 fake timers（会全局泄漏、拖垮并行的其它用例）：真实 800ms 定时器在本
+    // 同步用例里根本来不及触发，所以卸载后若立刻看到 saveNotes，就证明是刷盘而非去抖。
+    mockIpc.ai.getNotes.mockReturnValue(new Promise(() => {})); // 保持 pending，不加载覆盖
+    const { unmount } = renderNotesPanel("video-1", "flush");
+
+    // 模拟一次编辑：安排去抖保存（800ms 未到）。
+    act(() => {
+      editorCapture.onUpdate?.({
+        editor: { getJSON: () => ({ type: "doc", content: [{ type: "paragraph" }] }) },
+      });
+    });
+    expect(mockIpc.ai.saveNotes).not.toHaveBeenCalled();
+
+    // 卸载应立刻把未落库的编辑刷盘，而不是丢弃待发的定时器。
+    unmount();
+    expect(mockIpc.ai.saveNotes).toHaveBeenCalledWith("video-1", expect.any(String));
   });
 });

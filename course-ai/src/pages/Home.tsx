@@ -309,7 +309,14 @@ export function Home() {
   }, [queueOpen, queuedVideoIds.length]);
 
   function startProcessing(videoId: string) {
-    generatedAfterAsr.current.delete(videoId);
+    // 清掉这个视频的全部「已处理」标记：不仅 videoId，还有各 AI 阶段的
+    // `${videoId}:${stage}`。否则重新处理后，阶段键仍在集合里，后端续跑的
+    // 章节/摘要/笔记/出题/脑图完成时不会触发面板刷新，用户会看到旧内容。
+    for (const key of [...generatedAfterAsr.current]) {
+      if (key === videoId || key.startsWith(`${videoId}:`)) {
+        generatedAfterAsr.current.delete(key);
+      }
+    }
     resetJobs(videoId);
     setQueuedVideoIds((ids) => (ids.includes(videoId) ? ids : [videoId, ...ids]));
     void ipc.pipeline.process(videoId);
