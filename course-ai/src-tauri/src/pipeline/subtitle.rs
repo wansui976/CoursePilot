@@ -35,6 +35,9 @@ fn parse_srt_time(token: &str) -> Option<i64> {
 /// 解析 SRT 文本为段落。容错：忽略空块、缺时间轴块；多行文本用空格拼接。
 pub fn parse_srt(input: &str) -> Vec<SubSegment> {
     let mut out = Vec::new();
+    // 先归一化换行：SRT 标准/ffmpeg 常用 CRLF，块分隔 \r\n\r\n 里没有 \n\n，
+    // 不归一化会导致整份字幕被当成一个块、只解析出一段。
+    let input = input.replace("\r\n", "\n").replace('\r', "\n");
     // 按空行分块。
     for block in input.split("\n\n") {
         let lines: Vec<&str> = block
@@ -110,6 +113,18 @@ mod tests {
             }
         );
         assert_eq!(segs[1].start_ms, 3400);
+    }
+
+    #[test]
+    fn parses_crlf_srt() {
+        // SRT 标准用 CRLF；yt-dlp/ffmpeg 落地的字幕常带 \r\n，块分隔为 \r\n\r\n。
+        let srt = "1\r\n00:00:01,200 --> 00:00:03,400\r\n你好世界\r\n\r\n2\r\n00:00:03,400 --> 00:00:05,000\r\n第二句";
+        let segs = parse_srt(srt);
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0].start_ms, 1200);
+        assert_eq!(segs[0].text, "你好世界");
+        assert_eq!(segs[1].start_ms, 3400);
+        assert_eq!(segs[1].text, "第二句");
     }
 
     #[test]
