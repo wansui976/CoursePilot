@@ -72,6 +72,25 @@ describe("RagSearchPanel", () => {
     ]);
   });
 
+  it("renders LaTeX in the answer with KaTeX instead of raw delimiters", async () => {
+    mockIpc.ai.ragQuery.mockResolvedValueOnce({
+      answer: "设 \\(M_0(x_0, y_0)\\)，倾斜角 \\(\\alpha\\)。",
+      citations: [],
+    });
+
+    renderAskPanel();
+
+    const input = screen.getByLabelText("聊天内容");
+    fireEvent.change(input, { target: { value: "参数方程" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    const bubble = await screen.findByRole("article", { name: "AI 回复" });
+    // KaTeX 渲染出 .katex 元素，而不是把 \(..\) 定界符当作纯文本显示。
+    expect(bubble.querySelector(".katex")).not.toBeNull();
+    expect(bubble.textContent).not.toContain("\\(");
+    expect(bubble.textContent).not.toContain("\\)");
+  });
+
   it("offers suggested questions on empty state and sends one on tap", async () => {
     mockIpc.ai.ragQuery.mockResolvedValueOnce({ answer: "概要", citations: [] });
 
