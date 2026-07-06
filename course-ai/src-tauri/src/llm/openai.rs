@@ -1,5 +1,5 @@
 use crate::error::{AppError, AppResult};
-use crate::llm::{ChatRequest, ChatResponse};
+use crate::llm::{ChatRequest, ChatResponse, StreamPiece};
 use futures_util::StreamExt;
 use reqwest::header::CONTENT_TYPE;
 use serde_json::{json, Value};
@@ -167,19 +167,29 @@ pub async fn embed(
 }
 
 /// 解析一行 OpenAI SSE：仅当是 `data: {json}` 且含 choices[0].delta.content 时返回该增量。
-pub fn parse_openai_sse_line(line: &str) -> Option<String> {
+/// 解析一行 OpenAI SSE，返回 `(是否为推理内容, 增量文本)`。
+/// content 优先；推理模型（DeepSeek-R1 等）的思考在 `delta.reasoning_content`
+/// （部分实现叫 `reasoning`）。两者都没有则 None。
+pub fn parse_openai_sse_line(line: &str) -> Option<(bool, String)> {
     let data = line.strip_prefix("data:")?.trim();
     if data.is_empty() || data == "[DONE]" {
         return None;
     }
     let v: Value = serde_json::from_str(data).ok()?;
-    v.get("choices")?
-        .get(0)?
-        .get("delta")?
-        .get("content")?
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
+    let delta = v.get("choices")?.get(0)?.get("delta")?;
+    if let Some(content) = delta.get("content").and_then(Value::as_str) {
+        if !content.is_empty() {
+            return Some((false, content.to_string()));
+        }
+    }
+    for field in ["reasoning_content", "reasoning"] {
+        if let Some(r) = delta.get(field).and_then(Value::as_str) {
+            if !r.is_empty() {
+                return Some((true, r.to_string()));
+            }
+        }
+    }
+    None
 }
 
 pub async fn complete_stream(
@@ -188,7 +198,7 @@ pub async fn complete_stream(
     client: &reqwest::Client,
     req: &ChatRequest,
     cancel: &AtomicBool,
-    on_token: &mut (dyn FnMut(&str) + Send),
+    on_piece: &mut (dyn FnMut(StreamPiece) + Send),
 ) -> AppResult<String> {
     let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
     let mut body = build_openai_body(req);
@@ -200,6 +210,9 @@ pub async fn complete_stream(
         // 显式声明接收 SSE：部分 OpenAI 兼容服务/反向代理只有在收到该头时才真正流式，
         // 否则会把整个响应缓冲后一次返回（表现为「答案一次性蹦出、不逐字」）。
         .header(reqwest::header::ACCEPT, "text/event-stream")
+        // 阻止中间代理对 SSE 流启用压缩：压缩会让代理缓冲完整响应后再发送，
+        // 导致 bytes_stream 一次性收到全文，token 逐字推送失效。
+        .header("Accept-Encoding", "identity")
         .json(&body)
         .send()
         .await
@@ -224,14 +237,21 @@ pub async fn complete_stream(
         // 按行处理，保留最后一段不完整行到下次。
         while let Some(pos) = buf.find('\n') {
             let line: String = buf.drain(..=pos).collect();
-            if let Some(delta) = parse_openai_sse_line(line.trim_end()) {
+            if let Some((reasoning, delta)) = parse_openai_sse_line(line.trim_end()) {
                 if cancel.load(Ordering::SeqCst) {
                     return Ok(acc);
                 }
-                on_token(&delta);
-                acc.push_str(&delta);
+                if reasoning {
+                    // 推理模型的「思考」内容：流式给前端展示，但不计入最终答案。
+                    on_piece(StreamPiece::Reasoning(&delta));
+                } else {
+                    on_piece(StreamPiece::Content(&delta));
+                    acc.push_str(&delta);
+                }
             }
         }
+        // 每个 chunk 处理完后主动 yield，让 Tokio 把累积的 channel.send 投递到前端。
+        tokio::task::yield_now().await;
     }
     Ok(acc)
 }
@@ -245,7 +265,19 @@ mod tests {
     fn parses_openai_delta_lines() {
         assert_eq!(
             parse_openai_sse_line(r#"data: {"choices":[{"delta":{"content":"你好"}}]}"#),
-            Some("你好".to_string())
+            Some((false, "你好".to_string()))
+        );
+        // 推理模型的思考走 reasoning_content，标记为 reasoning=true。
+        assert_eq!(
+            parse_openai_sse_line(
+                r#"data: {"choices":[{"delta":{"reasoning_content":"先想想"}}]}"#
+            ),
+            Some((true, "先想想".to_string()))
+        );
+        // 别名 reasoning 也支持。
+        assert_eq!(
+            parse_openai_sse_line(r#"data: {"choices":[{"delta":{"reasoning":"嗯"}}]}"#),
+            Some((true, "嗯".to_string()))
         );
         assert_eq!(parse_openai_sse_line("data: [DONE]"), None);
         assert_eq!(parse_openai_sse_line(": comment"), None);
