@@ -28,6 +28,7 @@ vi.mock("@/lib/platform", () => ({
 
 type StreamEvent =
   | { type: "status"; text: string }
+  | { type: "reasoning"; delta: string }
   | { type: "token"; delta: string }
   | { type: "done"; answer: string };
 
@@ -260,6 +261,33 @@ describe("RagSearchPanel", () => {
     fireEvent.click(stop);
     expect(mockIpc.ai.cancelRagQuery).toHaveBeenCalledTimes(1);
     // 收尾，避免悬挂 promise。
+    box.finish?.();
+  });
+
+  it("streams reasoning-model thinking into a 思考过程 area", async () => {
+    const box: { finish?: () => void } = {};
+    mockIpc.ai.ragQueryStream.mockImplementation(
+      (
+        _v: string,
+        _q: string,
+        _h: unknown,
+        _id: string,
+        onEvent: (e: StreamEvent) => void,
+      ) =>
+        new Promise((resolve) => {
+          onEvent({ type: "reasoning", delta: "先分析题目…" });
+          box.finish = () => resolve({ answer: "答案", citations: [] });
+        }),
+    );
+
+    renderAskPanel();
+    const input = screen.getByLabelText("聊天内容");
+    fireEvent.change(input, { target: { value: "问题" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    // 思考阶段：显示「思考过程」并流式展示推理内容（此时还没有正式答案）。
+    expect(await screen.findByText("思考过程")).toBeInTheDocument();
+    expect(screen.getByText("先分析题目…")).toBeInTheDocument();
     box.finish?.();
   });
 
