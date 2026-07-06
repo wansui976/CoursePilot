@@ -1786,6 +1786,34 @@ a,
   animation: ca-typing-dot 1.1s infinite ease-in-out;
 }
 
+/* 流式生成时的末尾光标：默认稳定显示，无减弱动效偏好时闪烁。 */
+@keyframes ca-stream-caret {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.ca-stream-caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  border-radius: 1px;
+  opacity: 0.7;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-stream-caret {
+    animation: ca-stream-caret 1s steps(1, end) infinite;
+  }
+}
+
 /* 卡片本就有 transform 过渡：按压轻微缩放 */
 .ca-card:active {
   transform: scale(0.985);
