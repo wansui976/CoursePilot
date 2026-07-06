@@ -124,6 +124,21 @@ describe("RagSearchPanel", () => {
     expect(bubble.textContent).not.toContain("\\)");
   });
 
+  it("renders markdown (bold + list) in the answer", async () => {
+    mockIpc.ai.ragQueryStream.mockImplementation(
+      streamResolving("**重点**：\n- 第一条\n- 第二条"),
+    );
+
+    renderAskPanel();
+    const input = screen.getByLabelText("聊天内容");
+    fireEvent.change(input, { target: { value: "总结" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    const bubble = await screen.findByRole("article", { name: "AI 回复" });
+    expect(bubble.querySelector("strong")?.textContent).toBe("重点");
+    expect(bubble.querySelectorAll("ul > li")).toHaveLength(2);
+  });
+
   it("offers suggested questions on empty state and sends one on tap", async () => {
     mockIpc.ai.ragQueryStream.mockImplementation(streamResolving("概要"));
 
