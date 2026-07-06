@@ -89,8 +89,11 @@ describe("BilibiliImportDialog", () => {
     });
     fireEvent.click(screen.getByText("下一步"));
 
-    // 412 多为登录态失效：回到 cookie 步骤引导重新导出导入。
-    expect(await screen.findByText(/HTTP 412/)).toBeInTheDocument();
+    // 412 多为登录态失效：回到 cookie 步骤引导重新导出导入，
+    // 并把原始报错映射成人话（而不是原样抛 yt-dlp 英文）。
+    expect(
+      await screen.findByText(/服务器拒绝了请求（HTTP 412）/),
+    ).toBeInTheDocument();
     expect(screen.getByText("选择 cookies.txt")).toBeInTheDocument();
   });
 });
