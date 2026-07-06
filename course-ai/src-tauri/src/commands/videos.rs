@@ -6,7 +6,11 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use std::borrow::Cow;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+// Path 只被移动端/测试用的路径工具函数引用（见下方同 cfg 的函数），
+// 桌面正式构建里用不到，跟着一起 gate 免得报未使用导入。
+#[cfg(any(test, target_os = "android", target_os = "ios"))]
+use std::path::Path;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use tauri::Manager;
 use tauri::State;

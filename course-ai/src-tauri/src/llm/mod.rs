@@ -98,7 +98,7 @@ impl Provider {
 /// 确定性伪嵌入：把文本散列进固定维向量并归一化。仅用于离线测试。
 pub fn mock_embed(text: &str) -> Vec<f32> {
     const DIM: usize = 16;
-    let mut v = vec![0f32; DIM];
+    let mut v = [0f32; DIM];
     for (i, b) in text.bytes().enumerate() {
         v[i % DIM] += b as f32;
     }

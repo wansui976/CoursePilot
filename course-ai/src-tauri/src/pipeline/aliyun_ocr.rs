@@ -4,6 +4,7 @@
 //! 走阿里云 OpenAPI 网关，鉴权用 V3 签名（ACS3-HMAC-SHA256）：
 //!   - 图片二进制作为 HTTP body；识别类型等参数放查询串（Type=...）；
 //!   - 用 AccessKey ID / Secret 计算 Authorization 头。
+//!
 //! 这里不引第三方 SDK，HMAC-SHA256 用已有的 sha2 手写实现，零新增依赖。
 
 use crate::error::{AppError, AppResult};

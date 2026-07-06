@@ -44,16 +44,11 @@ pub async fn start() -> std::io::Result<MediaServer> {
         registry: registry.clone(),
     };
     tokio::spawn(async move {
-        loop {
-            match listener.accept().await {
-                Ok((stream, _)) => {
-                    let reg = registry.clone();
-                    tokio::spawn(async move {
-                        let _ = handle(stream, reg).await;
-                    });
-                }
-                Err(_) => break,
-            }
+        while let Ok((stream, _)) = listener.accept().await {
+            let reg = registry.clone();
+            tokio::spawn(async move {
+                let _ = handle(stream, reg).await;
+            });
         }
     });
     Ok(server)

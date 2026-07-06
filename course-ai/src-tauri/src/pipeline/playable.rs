@@ -104,7 +104,7 @@ mod tests {
             let size = (8 + payload_len) as u32;
             let mut v = size.to_be_bytes().to_vec();
             v.extend_from_slice(kind);
-            v.extend(std::iter::repeat(0).take(payload_len));
+            v.extend(std::iter::repeat_n(0, payload_len));
             v
         }
         let mut f = File::create(path).unwrap();
