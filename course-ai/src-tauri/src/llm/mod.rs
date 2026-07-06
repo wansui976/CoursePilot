@@ -81,7 +81,7 @@ impl Provider {
         &self,
         req: &ChatRequest,
         cancel: &AtomicBool,
-        on_token: &mut dyn FnMut(&str),
+        on_token: &mut (dyn FnMut(&str) + Send),
     ) -> AppResult<String> {
         match self {
             Provider::OpenAi {

@@ -291,6 +291,7 @@ pub async fn answer(
 
 /// 流式问答：短视频直接流式；长视频先发状态提示，仅综合步流式。
 /// 结束时对累积文本清洗时间戳数组，发 Done 并返回。
+#[allow(clippy::too_many_arguments)] // 编排入口：db/provider/model/video/query/history/cancel/on_event 各有其义。
 pub async fn answer_stream(
     db: &Db,
     provider: &Provider,
@@ -299,7 +300,7 @@ pub async fn answer_stream(
     query: &str,
     history: &[ChatMessage],
     cancel: &AtomicBool,
-    on_event: &mut dyn FnMut(AskEvent),
+    on_event: &mut (dyn FnMut(AskEvent) + Send),
 ) -> AppResult<RagAnswer> {
     let transcript = crate::pipeline::ai::transcript_text(db, video_id).await?;
     let messages = build_chat_messages(history, query);
@@ -346,7 +347,7 @@ async fn map_reduce_answer_stream(
     query: &str,
     history: &[ChatMessage],
     cancel: &AtomicBool,
-    on_event: &mut dyn FnMut(AskEvent),
+    on_event: &mut (dyn FnMut(AskEvent) + Send),
 ) -> AppResult<String> {
     use std::sync::atomic::Ordering;
     on_event(AskEvent::Status {
