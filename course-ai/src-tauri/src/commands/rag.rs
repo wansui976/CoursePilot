@@ -42,6 +42,16 @@ pub async fn cmd_rag_query(
     .await
 }
 
+/// 停止一个进行中的问答请求：置位其取消标志，流式循环会尽快停下并保留已生成部分。
+#[tauri::command]
+pub async fn cmd_cancel_rag_query(
+    state: State<'_, AppState>,
+    request_id: String,
+) -> AppResult<()> {
+    state.cancel_rag(&request_id);
+    Ok(())
+}
+
 /// 本地关键词搜索文稿（无需 LLM / 联网），结果可点击跳转。
 #[tauri::command]
 pub async fn cmd_search_transcript(

@@ -9,6 +9,18 @@ use crate::error::AppResult;
 use crate::llm::{ChatMessage, ChatRequest, Provider};
 use serde::Serialize;
 
+/// 问答流式推送给前端的事件。tag="type"，字段 lowercase：status/token/done。
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum AskEvent {
+    /// 阶段提示，如「正在通读各段…」。
+    Status { text: String },
+    /// 增量文本。
+    Token { delta: String },
+    /// 最终（已清洗）完整答案。
+    Done { answer: String },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Chunk {
     pub text: String,
