@@ -34,6 +34,9 @@ dist-ssr/
 course-ai/src-tauri/binaries/*
 !course-ai/src-tauri/binaries/.gitkeep
 
+# Local helper scripts
+course-ai/scripts/
+
 # Local Codex/Superpowers scratch state
 **/.superpowers/
 .worktrees/

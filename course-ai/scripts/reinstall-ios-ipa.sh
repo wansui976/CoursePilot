@@ -117,10 +117,12 @@ for device in devices:
     name = properties.get("name") or "(unnamed)"
     identifier = device.get("identifier") or hardware.get("udid") or ""
     tunnel = connection.get("tunnelState") or "unknown"
+    pairing = connection.get("pairingState") or "unknown"
+    transport = connection.get("transportType") or "unknown"
     ddi = bool(properties.get("ddiServicesAvailable"))
-    physical_ios.append((name, identifier, tunnel, ddi))
+    physical_ios.append((name, identifier, tunnel, pairing, transport, ddi))
 
-    if identifier and (ddi or tunnel == "connected"):
+    if identifier and (ddi or tunnel == "connected" or (pairing == "paired" and transport != "unknown")):
         available.append((name, identifier))
 
 if len(available) == 1:
@@ -136,9 +138,9 @@ if len(available) > 1:
 print("No available physical iOS device found.", file=sys.stderr)
 if physical_ios:
     print("Known physical iOS devices:", file=sys.stderr)
-    for name, identifier, tunnel, ddi in physical_ios:
-        state = "available" if (ddi or tunnel == "connected") else "unavailable"
-        print(f"  {name}: {identifier} ({state}, tunnel={tunnel}, ddi={ddi})", file=sys.stderr)
+    for name, identifier, tunnel, pairing, transport, ddi in physical_ios:
+        state = "available" if (ddi or tunnel == "connected" or (pairing == "paired" and transport != "unknown")) else "unavailable"
+        print(f"  {name}: {identifier} ({state}, pairing={pairing}, transport={transport}, tunnel={tunnel}, ddi={ddi})", file=sys.stderr)
 else:
     print("No physical iOS devices are known to devicectl.", file=sys.stderr)
 print("Unlock the iPad, keep it trusted, reconnect USB if needed, then retry.", file=sys.stderr)
