@@ -16,6 +16,9 @@ use crate::commands::ai::{
     cmd_get_quiz, cmd_get_summary, cmd_has_api_key, cmd_save_llm_profiles, cmd_save_notes,
     cmd_set_api_key,
 };
+use crate::commands::clips::{
+    cmd_add_clip, cmd_list_clips, cmd_update_clip, cmd_delete_clip,
+};
 use crate::commands::courses::{
     cmd_create_course, cmd_delete_course, cmd_list_courses, cmd_relink_course_root,
     cmd_rename_course, AppState,
@@ -108,6 +111,10 @@ pub fn run() {
             cmd_recorrect_transcript,
             cmd_list_transcripts,
             cmd_update_transcript,
+            cmd_add_clip,
+            cmd_list_clips,
+            cmd_update_clip,
+            cmd_delete_clip,
             cmd_get_llm_profiles,
             cmd_save_llm_profiles,
             cmd_set_api_key,
