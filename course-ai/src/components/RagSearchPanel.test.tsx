@@ -292,6 +292,37 @@ describe("RagSearchPanel", () => {
     box.finish?.();
   });
 
+  it("keeps the reasoning with the answer in history after completion", async () => {
+    mockIpc.ai.ragQueryStream.mockImplementation(
+      async (
+        _v: string,
+        _q: string,
+        _h: unknown,
+        _id: string,
+        onEvent: (e: StreamEvent) => void,
+      ) => {
+        onEvent({ type: "reasoning", delta: "推理片段" });
+        onEvent({ type: "token", delta: "最终答案" });
+        onEvent({ type: "done", answer: "最终答案" });
+        return { answer: "最终答案", citations: [] };
+      },
+    );
+
+    renderAskPanel();
+    const input = screen.getByLabelText("聊天内容");
+    fireEvent.change(input, { target: { value: "问题" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    // 完成落库后：答案 + 思考过程都随该轮保留（思考默认折叠但内容在 DOM 里）。
+    await waitFor(() => {
+      const bubble = screen.getByRole("article", { name: "AI 回复" });
+      expect(bubble).toHaveTextContent("思考过程");
+    });
+    const bubble = screen.getByRole("article", { name: "AI 回复" });
+    expect(bubble).toHaveTextContent("推理片段");
+    expect(bubble).toHaveTextContent("最终答案");
+  });
+
   it("shows a streaming caret while generating", async () => {
     const box: { finish?: () => void } = {};
     mockIpc.ai.ragQueryStream.mockImplementation(
