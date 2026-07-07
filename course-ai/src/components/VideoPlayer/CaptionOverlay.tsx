@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MATH_RE } from "@/lib/markdownToTiptap";
 
 // KaTeX 较重，仅在字幕真含公式时按需加载，避免拖累播放器首屏。
@@ -74,7 +74,8 @@ export function CaptionOverlay({
   // 拖动/缩放期间置真：此时字幕跟手直改 top/left，不抬升、也不过渡，避免抽搐。
   const [dragging, setDragging] = useState(false);
 
-  useEffect(() => {
+  // 用 layout effect 在绘制前同步量高，首帧字号即正确（避免先小后大的跳变）。
+  useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const update = () => setStageHeight(el.clientHeight);
@@ -187,6 +188,9 @@ export function CaptionOverlay({
     !dragging && bottomInset > 0
       ? clamp(captionBottomPx - safeBottomPx, 0, box.top * stageHeight)
       : 0;
+
+  // 段间空文本：组件保持挂载（stageHeight 不丢），仅不显示字幕框。
+  if (!text.trim()) return null;
 
   return (
     <div
