@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useMutationState } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { Check, Copy, Send, Sparkles, Square, Trash2, User } from "lucide-react";
@@ -14,8 +14,9 @@ import type { AskEvent, ChatMessage, Citation, RagAnswer } from "@/lib/types";
 /**
  * 渲染回答：解析 Markdown（标题/列表/加粗）+ KaTeX 公式 + [mm:ss] 可点击跳转。
  * 首/末块外边距归零，贴合气泡内边距。
+ * memo：解析（尤其 KaTeX）不便宜，输入框打字等无关重渲染不应让历史里每条回答都重新解析。
  */
-function AnswerText({
+const AnswerText = memo(function AnswerText({
   text,
   onSeek,
   trailing,
@@ -30,6 +31,35 @@ function AnswerText({
       {renderMarkdown(text, onSeek, trailing)}
     </div>
   );
+});
+
+// 流式生成光标：模块级常量，保证引用稳定，不破坏 AnswerText 的 memo。
+const STREAM_CARET = (
+  <span data-testid="stream-caret" className="ca-stream-caret" aria-hidden="true" />
+);
+
+/**
+ * 节流值：高频变化的输入至多每 ms 毫秒向外吐一次。
+ * 用于流式回答——token 每秒来几十个，若每个都全文重跑 Markdown+KaTeX 解析是 O(n²)，
+ * 长答案会明显掉帧；节流后解析次数降一个数量级以上，视觉上仍是流畅打字机。
+ */
+function useThrottledValue<T>(value: T, ms: number): T {
+  const [throttled, setThrottled] = useState(value);
+  const lastRef = useRef(0);
+  useEffect(() => {
+    const wait = lastRef.current + ms - Date.now();
+    if (wait <= 0) {
+      lastRef.current = Date.now();
+      setThrottled(value);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      lastRef.current = Date.now();
+      setThrottled(value);
+    }, wait);
+    return () => window.clearTimeout(timer);
+  }, [value, ms]);
+  return throttled;
 }
 
 type RagMode = "ask" | "search";
@@ -259,12 +289,20 @@ function AskChatPanel({ videoId }: { videoId: string }) {
     prevBusy.current = busy;
   }, [busy, videoId]);
 
+  // 流式文本节流后再渲染：每个 token 只累积状态，Markdown+KaTeX 全文解析至多 150ms 一次。
+  const throttledStreamText = useThrottledValue(streaming?.text ?? "", 150);
+
   useEffect(() => {
     const tail = tailRef.current;
     if (!tail || typeof tail.scrollIntoView !== "function") return;
-    tail.scrollIntoView({ block: "end", behavior: "smooth" });
-    // 依赖含 streaming?.text：逐字生成、气泡变高时跟随滚动到底，避免最新内容被输入框挡住。
-  }, [history, busy, ask.isError, streaming?.text]);
+    // 流式期间用 auto（即时）：smooth 会被每次更新反复重启动画，反而卡顿。
+    tail.scrollIntoView({
+      block: "end",
+      behavior: streaming ? "auto" : "smooth",
+    });
+    // 依赖节流后的流式文本：逐字生成、气泡变高时跟随滚动到底，避免最新内容被输入框挡住。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history, busy, ask.isError, throttledStreamText]);
 
   const submit = (raw?: string) => {
     const trimmed = (raw ?? query).trim();
@@ -451,15 +489,10 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                       className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2"
                     >
                       <AnswerText
-                        text={streaming.text}
+                        // 渲染节流值（150ms 一次全文解析）；节流值还没跟上时先用当前值兜底。
+                        text={throttledStreamText || streaming.text}
                         onSeek={requestSeek}
-                        trailing={
-                          <span
-                            data-testid="stream-caret"
-                            className="ca-stream-caret"
-                            aria-hidden="true"
-                          />
-                        }
+                        trailing={STREAM_CARET}
                       />
                     </div>
                   ) : streaming?.status ? (
