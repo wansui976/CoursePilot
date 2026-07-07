@@ -36,7 +36,13 @@ type RagMode = "ask" | "search";
 type SearchHistoryEntry =
   | { id: string; mode: "ask"; query: string; answer: string }
   | { id: string; mode: "search"; query: string; citations: Citation[] };
-type AskTurn = { id: string; query: string; answer: string };
+type AskTurn = {
+  id: string;
+  query: string;
+  answer: string;
+  /** 推理模型的思考过程；随答案一起保留，答案出来后折叠展示。旧记录没有。 */
+  reasoning?: string;
+};
 type AskRequest = { query: string; history: ChatMessage[] };
 
 const ASK_HISTORY_LIMIT = 6;
@@ -194,6 +200,8 @@ function AskChatPanel({ videoId }: { videoId: string }) {
     // 请求仍会跑完并把回答写入历史，切回来即可见。token 通过 onEvent 实时渲染。
     mutationFn: async ({ query, history }) => {
       const requestId = crypto.randomUUID();
+      // 思考内容也累积到局部变量：随答案一起落库、保留下来（不受组件卸载影响）。
+      let reasoningAcc = "";
       if (mountedRef.current)
         setStreaming({ requestId, status: "", reasoning: "", text: "" });
       const answer = await ipc.ai.ragQueryStream(
@@ -202,6 +210,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
         history,
         requestId,
         (e: AskEvent) => {
+          if (e.type === "reasoning") reasoningAcc += e.delta;
           if (!mountedRef.current) return;
           setStreaming((prev) => {
             if (!prev || prev.requestId !== requestId) return prev;
@@ -215,7 +224,12 @@ function AskChatPanel({ videoId }: { videoId: string }) {
       );
       const next = [
         ...readAskHistory(videoId),
-        { id: crypto.randomUUID(), query, answer: answer.answer },
+        {
+          id: crypto.randomUUID(),
+          query,
+          answer: answer.answer,
+          reasoning: reasoningAcc || undefined,
+        },
       ];
       writeAskHistory(videoId, next);
       if (mountedRef.current) setStreaming(null);
@@ -361,6 +375,17 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                 className="group relative min-w-0 max-w-[82%] rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2"
                 {...longPressProps(turn.id)}
               >
+                {/* 推理模型的思考过程：随答案保留，默认折叠、可展开。 */}
+                {turn.reasoning && (
+                  <details className="mb-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card-hover)] px-2.5 py-1.5">
+                    <summary className="cursor-pointer select-none text-xs text-[var(--text-faint)]">
+                      思考过程
+                    </summary>
+                    <div className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-muted)]">
+                      {turn.reasoning}
+                    </div>
+                  </details>
+                )}
                 <AnswerText text={turn.answer} onSeek={requestSeek} />
                 {/* 复制：仅图标、小尺寸。桌面 hover 气泡显示；触屏长按显示。 */}
                 <button
