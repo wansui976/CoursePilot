@@ -53,18 +53,26 @@ const CORNER_CLASS: Record<Corner, string> = {
   se: "right-0 bottom-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize",
 };
 
+// 字幕底边与控制栏顶边之间再留一点呼吸空隙。
+const CAPTION_BAR_GAP = 8;
+
 export function CaptionOverlay({
   text,
   containerRef,
+  bottomInset = 0,
 }: {
   text: string;
   // 定位参照容器：「舞台」区域（含黑边），字幕可在其内任意拖动/缩放。
   containerRef: React.RefObject<HTMLDivElement | null>;
+  // 底部控制栏遮住舞台底部的像素数：字幕落入此区时上移，浮在控制栏之上。
+  bottomInset?: number;
 }) {
   const [box, setBox] = useState<Box>(loadBox);
   const boxRef = useRef(box);
   boxRef.current = box;
   const [stageHeight, setStageHeight] = useState(0);
+  // 拖动/缩放期间置真：此时字幕跟手直改 top/left，不抬升、也不过渡，避免抽搐。
+  const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -90,8 +98,10 @@ export function CaptionOverlay({
       event.stopPropagation();
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
+      setDragging(true);
       const move = (ev: PointerEvent) => handler(ev, rect);
       const up = () => {
+        setDragging(false);
         window.removeEventListener("pointermove", move);
         window.removeEventListener("pointerup", up);
       };
@@ -169,14 +179,26 @@ export function CaptionOverlay({
     120,
   );
 
+  // 字幕上移量：仅当控制栏可见（bottomInset>0）且字幕底边探入其遮挡区时才抬起，
+  // 且不超过其顶边余量（避免顶出画面）。拖动/缩放期间不抬升——字幕直接跟手，松手后再归位。
+  const captionBottomPx = (box.top + box.height) * stageHeight;
+  const safeBottomPx = stageHeight - bottomInset - CAPTION_BAR_GAP;
+  const lift =
+    !dragging && bottomInset > 0
+      ? clamp(captionBottomPx - safeBottomPx, 0, box.top * stageHeight)
+      : 0;
+
   return (
     <div
-      className="group absolute touch-none select-none"
+      className="group absolute touch-none select-none transition-transform duration-200"
       style={{
         left: `${box.left * 100}%`,
         top: `${box.top * 100}%`,
         width: `${box.width * 100}%`,
         height: `${box.height * 100}%`,
+        transform: lift > 0 ? `translateY(${-lift}px)` : undefined,
+        // 拖动时关掉 transform 过渡，避免位置追着 200ms 缓动走而抖动。
+        transition: dragging ? "none" : undefined,
       }}
     >
       <div
