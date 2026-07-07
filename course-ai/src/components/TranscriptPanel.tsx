@@ -26,6 +26,8 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   // 用户手动滚动时间戳：其后一小段窗口内暂停「跟随播放自动居中」，避免与手滚打架而抽搐。
   const userScrollRef = useRef(0);
   const [scrollerEl, setScrollerEl] = useState<HTMLElement | null>(null);
+  // 当前可视行区间（来自 Virtuoso rangeChanged）：活动行已在其中就不自动滚动。
+  const visibleRangeRef = useRef({ startIndex: 0, endIndex: 0 });
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   // 跟随播放的活动行下标。只在「跨段」时更新（见下方订阅），不随每个进度 tick 重渲染。
@@ -83,11 +85,14 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     };
   }, [scrollerEl]);
 
-  // 活动行变化时滚到列表中部（编辑时不打扰用户）。虚拟列表用 scrollToIndex 而非 DOM 查询。
-  // 用户刚手动滚过则暂停自动居中，等停手一小会儿再恢复跟随，避免自动滚动与手滚互相拉扯。
+  // 活动行变化时才考虑滚动（编辑时不打扰用户）。虚拟列表用 scrollToIndex 而非 DOM 查询。
+  // 三重防抖动：① 用户刚手动滚过则暂停自动居中；② 活动行已在可视区内就不动
+  // （避免每跨一句都把列表往中间拽的周期性抽搐）；③ 仅当活动行滚出可视区才居中。
   useEffect(() => {
     if (activeRowIndex < 0 || editingId != null) return;
     if (Date.now() - userScrollRef.current < FOLLOW_PAUSE_MS) return;
+    const { startIndex, endIndex } = visibleRangeRef.current;
+    if (activeRowIndex >= startIndex && activeRowIndex <= endIndex) return;
     virtuosoRef.current?.scrollToIndex({
       index: activeRowIndex,
       align: "center",
@@ -142,6 +147,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
           Footer: () => <div className="h-3" />,
         }}
         rangeChanged={(range) => {
+          visibleRangeRef.current = range;
           topIndexRef.current = range.startIndex;
           if (saveTimer.current) return;
           saveTimer.current = window.setTimeout(() => {
