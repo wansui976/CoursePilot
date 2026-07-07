@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   Chapter,
   Citation,
+  Clip,
   Course,
   DevLogEntry,
   Job,
@@ -177,6 +178,25 @@ export const ipc = {
       invoke("cmd_get_screenshots", { videoId }),
     image: (videoId: string, imagePath: string): Promise<number[]> =>
       invoke("cmd_read_slide_image", { videoId, imagePath }),
+  },
+  clips: {
+    list: (videoId: string): Promise<Clip[]> =>
+      invoke("cmd_list_clips", { videoId }),
+    add: (
+      videoId: string,
+      startMs: number,
+      endMs: number,
+      note: string,
+    ): Promise<Clip> =>
+      invoke("cmd_add_clip", { videoId, startMs, endMs, note }),
+    update: (
+      id: number,
+      startMs: number,
+      endMs: number,
+      note: string,
+    ): Promise<void> =>
+      invoke("cmd_update_clip", { id, startMs, endMs, note }),
+    delete: (id: number): Promise<void> => invoke("cmd_delete_clip", { id }),
   },
   export: {
     subtitles: (videoId: string, format: "srt" | "vtt"): Promise<string> =>

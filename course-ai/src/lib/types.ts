@@ -145,6 +145,15 @@ export interface Screenshot {
   created_at: number;
 }
 
+export interface Clip {
+  id: number;
+  video_id: string;
+  start_ms: number;
+  end_ms: number;
+  note: string;
+  created_at: number;
+}
+
 export interface Citation {
   index: number;
   text: string;
