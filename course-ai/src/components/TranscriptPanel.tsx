@@ -13,9 +13,13 @@ import type { TranscriptSegment } from "@/lib/types";
 // 手动滚动后暂停「跟随播放自动居中」的时长；停手超过该窗口才恢复跟随。
 const FOLLOW_PAUSE_MS = 4000;
 
+// content-visibility 按「块」而非按行：每块行数。块少两个数量级，滚动时浏览器的可见性
+// 簿记开销小得多；快滑时整块（约一屏半）一次性渲染进来，而不是一行行往外挤，基本不见空白。
+const CHUNK_SIZE = 30;
+
 // 单行文稿：memo 化，只有活动态变化的行才重渲染（换句时仅两行更新，避免整表重排）。
-// 长文稿的性能由 CSS content-visibility 承担（见 globals.css .ca-transcript-row）——
-// 浏览器原生跳过屏外行的渲染，滚动是原生的，不存在虚拟列表那种量高回改 scrollTop 的抽搐。
+// 长文稿性能由块级 content-visibility 承担（见 globals.css .ca-transcript-chunk）——
+// 浏览器原生跳过屏外块的渲染，滚动是原生的，不存在虚拟列表那种量高回改 scrollTop 的抽搐。
 const TranscriptRow = memo(function TranscriptRow({
   index,
   segment,
@@ -30,7 +34,7 @@ const TranscriptRow = memo(function TranscriptRow({
   onEdit: (id: number, text: string) => void;
 }) {
   return (
-    <div className="ca-transcript-row px-3 py-0.5">
+    <div className="px-3 py-0.5">
       <div
         data-row={index}
         className={`group flex items-start gap-1 rounded ${
@@ -84,6 +88,14 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     () => segments.filter((segment) => segment.text.trim() !== ""),
     [segments],
   );
+  // 按块分组，块级 content-visibility（见 CHUNK_SIZE 注释）。
+  const chunks = useMemo(() => {
+    const out: TranscriptSegment[][] = [];
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      out.push(rows.slice(i, i + CHUNK_SIZE));
+    }
+    return out;
+  }, [rows]);
 
   const update = useMutation({
     mutationFn: ({ id, text }: { id: number; text: string }) =>
@@ -208,9 +220,12 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
         onScroll={onScroll}
         className="min-h-0 flex-1 overflow-y-auto py-2"
       >
-        {rows.map((segment, index) =>
-          editingId === segment.id ? (
-            <div key={segment.id} className="ca-transcript-row px-3 py-0.5">
+        {chunks.map((chunk, chunkIndex) => (
+          <div key={chunkIndex} className="ca-transcript-chunk">
+            {chunk.map((segment, i) => {
+              const index = chunkIndex * CHUNK_SIZE + i;
+              return editingId === segment.id ? (
+            <div key={segment.id} className="px-3 py-0.5">
               <div className="rounded bg-[var(--surface-card)] p-2">
                 <textarea
                   aria-label="编辑文稿"
@@ -255,8 +270,10 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
               onSeek={requestSeek}
               onEdit={startEdit}
             />
-          ),
-        )}
+          );
+            })}
+          </div>
+        ))}
       </div>
     </div>
   );
