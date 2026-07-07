@@ -50,7 +50,10 @@ export function VideoPlayer({
 }) {
   const regionRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLVideoElement>(null);
+  // 控制栏实测高度：字幕据此在控制栏显示时上移，浮在其上方（控制栏悬浮遮住舞台底部）。
+  const [controlsHeight, setControlsHeight] = useState(0);
   const lastSavedRef = useRef(0);
   const [videoAspect, setVideoAspect] = useState(16 / 9);
   const [region, setRegion] = useState({ w: 0, h: 0 });
@@ -110,6 +113,18 @@ export function VideoPlayer({
 
   useLayoutEffect(() => {
     ref.current?.setAttribute("webkit-playsinline", "true");
+  }, []);
+
+  // 跟踪控制栏高度，供字幕避让（控制栏内容/换行时高度会变）。
+  useEffect(() => {
+    const el = controlsRef.current;
+    if (!el) return;
+    const update = () => setControlsHeight(el.offsetHeight);
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   // 跟踪播放区实际尺寸，据此把舞台收成视频的真实宽高比，做到「完整不裁剪 + 不留黑边」。
@@ -662,12 +677,22 @@ export function VideoPlayer({
             </div>
           )}
         </div>
-        {/* 字幕定位相对「舞台」区域（含黑边），因此可拖到整个舞台内任意处，不限于视频画面框。 */}
+        {/* 字幕定位相对「舞台」区域（含黑边），因此可拖到整个舞台内任意处，不限于视频画面框。
+            控制栏悬浮遮住舞台底部 controlsHeight 像素，可见时把落入该区的字幕上移浮到其上方。 */}
         {captionsOn && caption && (
-          <CaptionOverlay text={caption} containerRef={regionRef} />
+          <CaptionOverlay
+            text={caption}
+            containerRef={regionRef}
+            bottomInset={
+              (immersive ? controlsVisible : desktopControlsVisible)
+                ? controlsHeight
+                : 0
+            }
+          />
         )}
       </div>
       <div
+        ref={controlsRef}
         aria-label="视频播放控制栏"
         aria-hidden={immersive ? !controlsVisible : !desktopControlsVisible}
         onClick={immersive ? (e) => e.stopPropagation() : undefined}
