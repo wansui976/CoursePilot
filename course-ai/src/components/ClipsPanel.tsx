@@ -71,7 +71,12 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
         )}
       </div>
 
-      {add.isError && <ErrorNote error={add.error} className="mt-2" />}
+      {(add.isError || update.isError || remove.isError) && (
+        <ErrorNote
+          error={add.error ?? update.error ?? remove.error}
+          className="mt-2"
+        />
+      )}
 
       <div className="mt-3 min-h-0 flex-1 overflow-auto">
         {clips.length === 0 ? (
