@@ -10,6 +10,9 @@ import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 
+// 手动滚动后暂停「跟随播放自动居中」的时长；停手超过该窗口才恢复跟随。
+const FOLLOW_PAUSE_MS = 4000;
+
 export function TranscriptPanel({ videoId }: { videoId: string }) {
   const qc = useQueryClient();
   const { data: segments = [] } = useQuery({
@@ -20,6 +23,9 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   });
   const requestSeek = usePlayer((s) => s.requestSeek);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  // 用户手动滚动时间戳：其后一小段窗口内暂停「跟随播放自动居中」，避免与手滚打架而抽搐。
+  const userScrollRef = useRef(0);
+  const [scrollerEl, setScrollerEl] = useState<HTMLElement | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   // 跟随播放的活动行下标。只在「跨段」时更新（见下方订阅），不随每个进度 tick 重渲染。
@@ -61,9 +67,27 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     return usePlayer.subscribe((state) => compute(state.currentMs));
   }, [rows]);
 
+  // 手动滚动时打时间戳：wheel / 触摸滑动都算。挂在 Virtuoso 的滚动容器上，
+  // 程序化 scrollToIndex 不会触发这些事件，所以只会捕获用户的真实滚动意图。
+  useEffect(() => {
+    const el = scrollerEl;
+    if (!el) return;
+    const mark = () => {
+      userScrollRef.current = Date.now();
+    };
+    el.addEventListener("wheel", mark, { passive: true });
+    el.addEventListener("touchmove", mark, { passive: true });
+    return () => {
+      el.removeEventListener("wheel", mark);
+      el.removeEventListener("touchmove", mark);
+    };
+  }, [scrollerEl]);
+
   // 活动行变化时滚到列表中部（编辑时不打扰用户）。虚拟列表用 scrollToIndex 而非 DOM 查询。
+  // 用户刚手动滚过则暂停自动居中，等停手一小会儿再恢复跟随，避免自动滚动与手滚互相拉扯。
   useEffect(() => {
     if (activeRowIndex < 0 || editingId != null) return;
+    if (Date.now() - userScrollRef.current < FOLLOW_PAUSE_MS) return;
     virtuosoRef.current?.scrollToIndex({
       index: activeRowIndex,
       align: "center",
@@ -100,6 +124,9 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
       </div>
       <Virtuoso
         ref={virtuosoRef}
+        scrollerRef={(el) => {
+          setScrollerEl(el as HTMLElement | null);
+        }}
         aria-label="文稿内容滚动区"
         data={rows}
         className="min-h-0 flex-1"
