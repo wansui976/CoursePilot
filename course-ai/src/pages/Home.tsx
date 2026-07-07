@@ -617,12 +617,12 @@ export function Home() {
         aria-haspopup="menu"
         aria-expanded={openMenuVideoId === video.id}
         data-video-menu
-        className="ca-touch-44 absolute right-3 top-3 h-8 w-8 rounded-full bg-[var(--surface-panel)] shadow"
+        className="ca-touch-44 absolute right-3 top-3 h-7 w-7 rounded-full bg-[var(--surface-panel)] shadow"
         onClick={() =>
           setOpenMenuVideoId((id) => (id === video.id ? null : video.id))
         }
       >
-        <MoreHorizontal className="h-4 w-4" />
+        <MoreHorizontal className="h-3.5 w-3.5" />
       </IconButton>
     );
   }
