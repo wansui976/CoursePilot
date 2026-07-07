@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod clips;
 pub mod courses;
 pub mod export;
 pub mod rag;

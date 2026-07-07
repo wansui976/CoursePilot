@@ -20,8 +20,11 @@ const TranscriptPanel = lazy(() =>
 const SlidesPanel = lazy(() =>
   import("./SlidesPanel").then((m) => ({ default: m.SlidesPanel })),
 );
+const ClipsPanel = lazy(() =>
+  import("./ClipsPanel").then((m) => ({ default: m.ClipsPanel })),
+);
 
-const TABS = ["AI 概览", "笔记", "文稿", "课件"] as const;
+const TABS = ["AI 概览", "笔记", "文稿", "课件", "片段"] as const;
 type Tab = StudyTab;
 
 function PanelFallback() {
@@ -54,6 +57,7 @@ export function TabsPanel({ videoId }: { videoId: string }) {
     { tab: "笔记", node: <NotesPanel videoId={videoId} /> },
     { tab: "文稿", node: <TranscriptPanel videoId={videoId} /> },
     { tab: "课件", node: <SlidesPanel videoId={videoId} /> },
+    { tab: "片段", node: <ClipsPanel videoId={videoId} /> },
   ];
 
   return (

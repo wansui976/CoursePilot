@@ -1,6 +1,6 @@
 const RESUME_PREFIX = "course-ai-resume:";
 
-export type StudyTab = "AI 概览" | "笔记" | "文稿" | "课件";
+export type StudyTab = "AI 概览" | "笔记" | "文稿" | "课件" | "片段";
 
 export interface VideoResumeState {
   activeTab: StudyTab | null;
@@ -36,7 +36,8 @@ function isStudyTab(value: unknown): value is StudyTab {
     value === "AI 概览" ||
     value === "笔记" ||
     value === "文稿" ||
-    value === "课件"
+    value === "课件" ||
+    value === "片段"
   );
 }
 
