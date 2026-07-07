@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Pencil, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ExportMenu } from "./ExportMenu";
 import { MathText } from "./MathText";
@@ -52,9 +52,10 @@ const TranscriptRow = memo(function TranscriptRow({
           aria-label="编辑这句文稿"
           title="纠错"
           onClick={() => onEdit(segment.id, segment.text)}
-          className="ca-touch-44 ca-workbench-touch mt-1 mr-1 grid h-9 w-9 shrink-0 place-items-center rounded text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
+          // 用轻量字形代替 lucide SVG：每行少一棵 SVG 子树，屏外行渲染更快、快滑空白更小。
+          className="ca-touch-44 ca-workbench-touch mt-1 mr-1 grid h-9 w-9 shrink-0 place-items-center rounded text-[17px] leading-none text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
         >
-          <Pencil className="h-4.5 w-4.5" />
+          <span aria-hidden="true">✎</span>
         </button>
       </div>
     </div>
