@@ -130,6 +130,8 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
         aria-label="文稿内容滚动区"
         data={rows}
         className="min-h-0 flex-1"
+        // 视口外多渲染一屏并预先量高，滚动（尤其惯性收尾）时行高已知、不再回改 scrollTop 而抖动。
+        increaseViewportBy={{ top: 400, bottom: 400 }}
         // 初次挂载时恢复到上次离开的行（夹在有效范围内）。
         initialTopMostItemIndex={Math.min(
           topIndexRef.current,
@@ -153,7 +155,9 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
           const isEditing = editingId === segment.id;
           if (isEditing) {
             return (
-              <div className="ca-transcript-row rounded bg-[var(--surface-card)] mx-3 my-0.5 p-2">
+              // 外层用 padding 撑间距（Virtuoso 量高不含 margin，行用 margin 会量错致抖动）。
+              <div className="px-3 py-0.5">
+              <div className="ca-transcript-row rounded bg-[var(--surface-card)] p-2">
                 <textarea
                   aria-label="编辑文稿"
                   autoFocus
@@ -187,11 +191,13 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                   <span className="text-[var(--text-faint)]">⌘/Ctrl+Enter 保存</span>
                 </div>
               </div>
+              </div>
             );
           }
           return (
+            <div className="px-3 py-0.5">
             <div
-              className={`ca-transcript-row group mx-3 my-0.5 flex items-start gap-1 rounded ${
+              className={`ca-transcript-row group flex items-start gap-1 rounded ${
                 index === activeRowIndex
                   ? "bg-primary/20"
                   : "hover:bg-[var(--surface-card-hover)]"
@@ -216,6 +222,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
               >
                 <Pencil className="h-4.5 w-4.5" />
               </button>
+            </div>
             </div>
           );
         }}
