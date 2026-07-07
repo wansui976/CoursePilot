@@ -678,10 +678,12 @@ export function VideoPlayer({
             ? `absolute inset-x-0 bottom-0 z-10 transition-opacity duration-200 ${
                 controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
               }`
-            : `shrink-0 transition-opacity duration-200 ${
+            : // 桌面控制栏改为绝对定位悬浮在视频底边:收起时不再占据列布局高度,
+              // 视频舞台(flex-1)直接铺到容器底部,不留空隙;悬停时浮现,不引起重排。
+              `absolute inset-x-0 bottom-0 z-10 transition-opacity duration-200 ${
                 desktopControlsVisible
                   ? "opacity-100"
-                  : "pointer-events-none invisible opacity-0"
+                  : "pointer-events-none opacity-0"
               }`
         }
       >
