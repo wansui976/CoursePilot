@@ -709,6 +709,18 @@ select:focus-visible {
   color: #fff;
 }
 
+/* 处理状态徽标：覆盖在封面左上角（与右下角的时长对角呼应）。 */
+.ca-thumb .st {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 2;
+}
+
+.ca-thumb .st .ca-badge {
+  box-shadow: 0 1px 3px rgb(15 18 28 / 0.35);
+}
+
 .ca-thumb .dur {
   position: absolute;
   right: 8px;
@@ -761,13 +773,6 @@ select:focus-visible {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-}
-
-.ca-card-foot {
-  margin-top: auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .ca-badge,
