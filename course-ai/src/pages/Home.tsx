@@ -757,6 +757,7 @@ export function Home() {
               videoId={video.id}
               className="absolute inset-0 h-full w-full"
             />
+            <span className="st">{statusBadge(video)}</span>
             <span className="dur">
               {durationMs ? formatMs(durationMs) : "00:00"}
             </span>
@@ -772,9 +773,6 @@ export function Home() {
           <span className="ca-card-body">
             <span className="ca-card-title">
               {displayTitle(video.title)}
-            </span>
-            <span className="ca-card-foot">
-              {statusBadge(video)}
             </span>
           </span>
         </button>
