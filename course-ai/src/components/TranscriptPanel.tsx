@@ -13,10 +13,6 @@ import type { TranscriptSegment } from "@/lib/types";
 // 手动滚动后暂停「跟随播放自动居中」的时长；停手超过该窗口才恢复跟随。
 const FOLLOW_PAUSE_MS = 4000;
 
-// 超过该行数才启用 content-visibility（屏外行不渲染以省开销）。低于则整表实渲染——
-// 快速滑动也不会出现屏外行「还没渲染出来」的空白，代价只是一次挂载多建些 DOM。
-const CONTENT_VISIBILITY_ROWS = 1200;
-
 // 单行文稿：memo 化，只有活动态变化的行才重渲染（换句时仅两行更新，避免整表重排）。
 // 长文稿的性能由 CSS content-visibility 承担（见 globals.css .ca-transcript-row）——
 // 浏览器原生跳过屏外行的渲染，滚动是原生的，不存在虚拟列表那种量高回改 scrollTop 的抽搐。
@@ -24,19 +20,17 @@ const TranscriptRow = memo(function TranscriptRow({
   index,
   segment,
   active,
-  dense,
   onSeek,
   onEdit,
 }: {
   index: number;
   segment: TranscriptSegment;
   active: boolean;
-  dense: boolean;
   onSeek: (ms: number) => void;
   onEdit: (id: number, text: string) => void;
 }) {
   return (
-    <div className={`${dense ? "ca-transcript-row " : ""}px-3 py-0.5`}>
+    <div className="ca-transcript-row px-3 py-0.5">
       <div
         data-row={index}
         className={`group flex items-start gap-1 rounded ${
@@ -89,8 +83,6 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     () => segments.filter((segment) => segment.text.trim() !== ""),
     [segments],
   );
-  // 超长文稿才用 content-visibility 省渲染；常见长度整表实渲染，快滑无空白。
-  const dense = rows.length > CONTENT_VISIBILITY_ROWS;
 
   const update = useMutation({
     mutationFn: ({ id, text }: { id: number; text: string }) =>
@@ -217,10 +209,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
       >
         {rows.map((segment, index) =>
           editingId === segment.id ? (
-            <div
-              key={segment.id}
-              className={`${dense ? "ca-transcript-row " : ""}px-3 py-0.5`}
-            >
+            <div key={segment.id} className="ca-transcript-row px-3 py-0.5">
               <div className="rounded bg-[var(--surface-card)] p-2">
                 <textarea
                   aria-label="编辑文稿"
@@ -262,7 +251,6 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
               index={index}
               segment={segment}
               active={index === activeRowIndex}
-              dense={dense}
               onSeek={requestSeek}
               onEdit={startEdit}
             />
