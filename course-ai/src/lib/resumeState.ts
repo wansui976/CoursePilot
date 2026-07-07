@@ -5,9 +5,8 @@ export type StudyTab = "AI 概览" | "笔记" | "文稿" | "课件" | "片段";
 export interface VideoResumeState {
   activeTab: StudyTab | null;
   notesScrollTop: number;
+  /** 文稿滚动位置（像素 scrollTop）。文稿改回原生滚动后按此恢复。 */
   transcriptScrollTop: number;
-  /** 文稿虚拟列表的顶部可见行下标（虚拟化后用行号恢复位置，像素 scrollTop 不再可靠）。 */
-  transcriptTopIndex: number;
   studyPanelWidth: number | null;
 }
 
@@ -15,7 +14,6 @@ const DEFAULT_RESUME_STATE: VideoResumeState = {
   activeTab: null,
   notesScrollTop: 0,
   transcriptScrollTop: 0,
-  transcriptTopIndex: 0,
   studyPanelWidth: null,
 };
 
@@ -50,7 +48,6 @@ export function readVideoResumeState(videoId: string): VideoResumeState {
       activeTab: isStudyTab(parsed.activeTab) ? parsed.activeTab : null,
       notesScrollTop: Math.max(0, finiteNumber(parsed.notesScrollTop, 0)),
       transcriptScrollTop: Math.max(0, finiteNumber(parsed.transcriptScrollTop, 0)),
-      transcriptTopIndex: Math.max(0, finiteNumber(parsed.transcriptTopIndex, 0)),
       studyPanelWidth: finiteNullableNumber(parsed.studyPanelWidth),
     };
   } catch {
