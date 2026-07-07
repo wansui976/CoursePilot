@@ -1134,28 +1134,26 @@ select:focus-visible {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* 分隔线：贯穿全高的细竖条作分隔；拖动（JS 加 .is-resizing）时高亮为强调色。
-   绝对定位 + translateX(-50%) 居中，变宽不挤动两侧布局。 */
+/* 可见竖条：用居中的伪元素，拖动时可超出 8px 轨道变粗而不挤动布局 */
 .ca-resizer::after {
   content: "";
   position: absolute;
   top: 0;
   bottom: 0;
   left: 50%;
-  width: 2px;
+  width: 10px;
   transform: translateX(-50%);
-  border-radius: 999px;
   background: var(--line);
   transition: width 0.14s, background 0.12s;
 }
 
-/* 中间「抓手」短条：平时小而淡，悬停变长变清晰，拖动时放大并高亮。 */
+/* 中间的「抓手」短条：平时灰色较小，悬停略大，拖动时明显放大并高亮 */
 .ca-resizer::before {
   content: "";
   position: relative;
   z-index: 1;
-  width: 4px;
-  height: 32px;
+  width: 6px;
+  height: 34px;
   border-radius: 999px;
   background: var(--text-3);
   opacity: 0.55;
@@ -1163,23 +1161,24 @@ select:focus-visible {
 }
 
 .ca-resizer:hover::after {
-  background: var(--text-3);
+  background: var(--bg-sunken);
 }
 
 .ca-resizer:hover::before {
-  height: 44px;
+  height: 48px;
   opacity: 0.9;
 }
 
+/* 拖动中（鼠标按住或手指拖拽，由 JS 加 .is-resizing）：抓手短条明显变粗变长、高亮；竖条保持细 */
 .ca-resizer.is-resizing::after,
 .ca-resizer:active::after {
-  background: var(--accent);
+  background: var(--bg-sunken);
 }
 
 .ca-resizer.is-resizing::before,
 .ca-resizer:active::before {
-  width: 6px;
-  height: 64px;
+  width: 12px;
+  height: 72px;
   background: var(--accent);
   opacity: 1;
 }
