@@ -50,10 +50,7 @@ export function VideoPlayer({
 }) {
   const regionRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
-  const controlsRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLVideoElement>(null);
-  // 控制栏实测高度：字幕据此在控制栏显示时上移，浮在其上方（控制栏悬浮遮住视频底边）。
-  const [controlsHeight, setControlsHeight] = useState(0);
   const lastSavedRef = useRef(0);
   const [videoAspect, setVideoAspect] = useState(16 / 9);
   const [region, setRegion] = useState({ w: 0, h: 0 });
@@ -113,18 +110,6 @@ export function VideoPlayer({
 
   useLayoutEffect(() => {
     ref.current?.setAttribute("webkit-playsinline", "true");
-  }, []);
-
-  // 跟踪控制栏高度，供字幕避让（控制栏内容/换行时高度会变）。
-  useEffect(() => {
-    const el = controlsRef.current;
-    if (!el) return;
-    const update = () => setControlsHeight(el.offsetHeight);
-    update();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
   }, []);
 
   // 跟踪播放区实际尺寸，据此把舞台收成视频的真实宽高比，做到「完整不裁剪 + 不留黑边」。
@@ -677,29 +662,11 @@ export function VideoPlayer({
             </div>
           )}
           {captionsOn && caption && (
-            <CaptionOverlay
-              text={caption}
-              stageRef={stageRef}
-              // 控制栏可见时字幕上移，浮在控制栏上方。传给字幕的是「控制栏遮住舞台底部的像素数」：
-              // 控制栏贴容器底边，视频舞台居中，若上下有黑边则控制栏未必触及舞台底部，需扣掉半个黑边。
-              bottomInset={
-                (immersive ? controlsVisible : desktopControlsVisible)
-                  ? Math.max(
-                      0,
-                      controlsHeight -
-                        Math.max(
-                          0,
-                          (region.h - (stageBox?.height ?? region.h)) / 2,
-                        ),
-                    )
-                  : 0
-              }
-            />
+            <CaptionOverlay text={caption} stageRef={stageRef} />
           )}
         </div>
       </div>
       <div
-        ref={controlsRef}
         aria-label="视频播放控制栏"
         aria-hidden={immersive ? !controlsVisible : !desktopControlsVisible}
         onClick={immersive ? (e) => e.stopPropagation() : undefined}
