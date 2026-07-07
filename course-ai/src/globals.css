@@ -1503,9 +1503,13 @@ select:focus-visible {
   }
 }
 
-/* 长文稿性能现由 react-virtuoso 虚拟列表负责（DOM 里只保留可见的几十行）。
-   注意：不要再给 .ca-transcript-row 加 content-visibility，否则会让 Virtuoso 测到
-   占位高度而非真实行高，破坏滚动定位。 */
+/* 长文稿改回原生滚动：性能由 content-visibility 承担——浏览器原生跳过屏外行的布局/绘制，
+   滚进视口时才渲染，滚动流畅且不像 JS 虚拟列表那样量高回改 scrollTop 而抽搐。
+   contain-intrinsic-size 给屏外行预留一个近似高度（auto=记住上次实测），使滚动条稳定。 */
+.ca-transcript-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 44px;
+}
 
 /* 用户要求减少动效时：全局兜底，几乎关掉所有过渡与动画（前庭敏感友好）。 */
 @media (prefers-reduced-motion: reduce) {
