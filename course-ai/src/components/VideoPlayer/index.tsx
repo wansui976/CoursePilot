@@ -661,10 +661,11 @@ export function VideoPlayer({
               </div>
             </div>
           )}
-          {captionsOn && caption && (
-            <CaptionOverlay text={caption} stageRef={stageRef} />
-          )}
         </div>
+        {/* 字幕定位相对「舞台」区域（含黑边），因此可拖到整个舞台内任意处，不限于视频画面框。 */}
+        {captionsOn && caption && (
+          <CaptionOverlay text={caption} containerRef={regionRef} />
+        )}
       </div>
       <div
         aria-label="视频播放控制栏"
