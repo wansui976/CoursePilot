@@ -151,6 +151,11 @@ export function Home() {
     setStudyPanelWidth(
       savedWidth != null ? Math.min(720, Math.max(360, savedWidth)) : readPanelWidth(),
     );
+    // 打开视频即回到工作台：合上可能叠在主区的设置/回收站/控制台/队列整页。
+    setShowSettings(false);
+    setShowRecycleBin(false);
+    setShowDevConsole(false);
+    setQueueOpen(false);
     setSelectedVideoId(videoId);
   }
 
@@ -1015,9 +1020,10 @@ export function Home() {
           {isLightTheme ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
         </button>
         <button
-          className="rail-btn"
+          className={`rail-btn ${showSettings ? "active" : ""}`}
           title="设置"
           aria-label="设置"
+          aria-pressed={showSettings}
           onClick={() => openMainView("settings")}
         >
           <Settings className="h-5 w-5" />
@@ -1109,6 +1115,9 @@ export function Home() {
   }
 
   const isWorkbenchView = !!selectedVideo && !showSettings && !showRecycleBin && !showDevConsole && !queueOpen;
+  // 桌面：进入某个视频的工作台会话后，即便在主区叠开设置/回收站/控制台/队列整页，
+  // 左侧仍保持窄工具栏（rail），不回退成首页的宽侧栏——设置只是覆盖主区，会话仍在。
+  const inVideoSession = !!selectedVideo;
   // 窄屏底部 Tab 仅在「非工作台」时显示(工作台全屏沉浸)。
   const showBottomTab = isPhoneDevice && !isWorkbenchView;
   // 窄屏「课程」Tab 根层(未选课程、未开队列/设置/回收/控制台)→ 整屏课程列表。
@@ -1143,12 +1152,12 @@ export function Home() {
       data-theme={theme}
       data-bucket={bucket}
       data-device={tabletWide ? "tablet" : "phone-or-desktop"}
-      data-view={isWorkbenchView ? "workbench" : "library"}
+      data-view={isWorkbenchView || (!isPhoneDevice && inVideoSession) ? "workbench" : "library"}
       style={accentVars(accent, theme, customAccent) as CSSProperties}
       className="ca-app"
     >
-      {isPhoneDevice ? null : isWorkbenchView ? renderRail() : renderSidebar()}
-      {!isPhoneDevice && isWorkbenchView && railVideosOpen && renderRailVideoFlyout()}
+      {isPhoneDevice ? null : inVideoSession ? renderRail() : renderSidebar()}
+      {!isPhoneDevice && inVideoSession && railVideosOpen && renderRailVideoFlyout()}
       <main className="ca-main">
         {/* key=视图类型(而非视频 id):切换顶层视图时重挂以重播入场动画;在工作台内
             切换视频时 key 不变,播放器与面板状态保留、不被打断。 */}
