@@ -53,12 +53,18 @@ const CORNER_CLASS: Record<Corner, string> = {
   se: "right-0 bottom-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize",
 };
 
+// 字幕底边与控制栏顶边之间再留一点呼吸空隙。
+const CAPTION_BAR_GAP = 8;
+
 export function CaptionOverlay({
   text,
   stageRef,
+  bottomInset = 0,
 }: {
   text: string;
   stageRef: React.RefObject<HTMLDivElement | null>;
+  /** 控制栏遮住舞台底部的像素数：字幕若落在此区域内则上移让开，浮在控制栏上方。 */
+  bottomInset?: number;
 }) {
   const [box, setBox] = useState<Box>(loadBox);
   const boxRef = useRef(box);
@@ -168,14 +174,24 @@ export function CaptionOverlay({
     120,
   );
 
+  // 字幕上移量：仅当字幕底边探入控制栏遮挡区时才抬起，且不超过其顶边余量（避免顶出画面）。
+  const captionBottomPx = (box.top + box.height) * stageHeight;
+  const safeBottomPx = stageHeight - bottomInset - CAPTION_BAR_GAP;
+  const lift = clamp(
+    captionBottomPx - safeBottomPx,
+    0,
+    box.top * stageHeight,
+  );
+
   return (
     <div
-      className="group absolute touch-none select-none"
+      className="group absolute touch-none select-none transition-transform duration-200"
       style={{
         left: `${box.left * 100}%`,
         top: `${box.top * 100}%`,
         width: `${box.width * 100}%`,
         height: `${box.height * 100}%`,
+        transform: lift > 0 ? `translateY(${-lift}px)` : undefined,
       }}
     >
       <div
