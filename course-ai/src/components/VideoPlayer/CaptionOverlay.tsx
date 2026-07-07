@@ -55,10 +55,11 @@ const CORNER_CLASS: Record<Corner, string> = {
 
 export function CaptionOverlay({
   text,
-  stageRef,
+  containerRef,
 }: {
   text: string;
-  stageRef: React.RefObject<HTMLDivElement | null>;
+  // 定位参照容器：「舞台」区域（含黑边），字幕可在其内任意拖动/缩放。
+  containerRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const [box, setBox] = useState<Box>(loadBox);
   const boxRef = useRef(box);
@@ -66,14 +67,14 @@ export function CaptionOverlay({
   const [stageHeight, setStageHeight] = useState(0);
 
   useEffect(() => {
-    const el = stageRef.current;
+    const el = containerRef.current;
     if (!el) return;
     const update = () => setStageHeight(el.clientHeight);
     update();
     const observer = new ResizeObserver(update);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [stageRef]);
+  }, [containerRef]);
 
   useEffect(() => {
     try {
@@ -87,7 +88,7 @@ export function CaptionOverlay({
     return (event: React.PointerEvent) => {
       event.preventDefault();
       event.stopPropagation();
-      const rect = stageRef.current?.getBoundingClientRect();
+      const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
       const move = (ev: PointerEvent) => handler(ev, rect);
       const up = () => {
