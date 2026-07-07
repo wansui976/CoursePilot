@@ -44,7 +44,9 @@ describe("CaptionOverlay", () => {
       value: 400,
     });
 
-    render(<CaptionOverlay text="这是一条字幕测试" stageRef={{ current: stage }} />);
+    render(
+      <CaptionOverlay text="这是一条字幕测试" containerRef={{ current: stage }} />,
+    );
 
     const caption = screen.getByText("这是一条字幕测试");
     const fontSize = Number.parseFloat(window.getComputedStyle(caption).fontSize);
