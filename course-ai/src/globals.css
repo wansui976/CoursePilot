@@ -1503,9 +1503,10 @@ select:focus-visible {
   }
 }
 
-/* 长文稿改回原生滚动：性能由 content-visibility 承担——浏览器原生跳过屏外行的布局/绘制，
-   滚进视口时才渲染，滚动流畅且不像 JS 虚拟列表那样量高回改 scrollTop 而抽搐。
-   contain-intrinsic-size 给屏外行预留一个近似高度（auto=记住上次实测），使滚动条稳定。 */
+/* 文稿改回原生滚动（无 JS 虚拟列表的量高回改，故不抽搐）。仅超长文稿（见组件阈值）才给行
+   加 .ca-transcript-row：用 content-visibility 让浏览器原生跳过屏外行的布局/绘制以省开销
+   （代价是极快滑动时屏外行可能来不及渲染而短暂空白）；常见长度不加此类、整表实渲染、快滑无空白。
+   contain-intrinsic-size 给屏外行预留近似高度（auto=记住上次实测），使滚动条稳定。 */
 .ca-transcript-row {
   content-visibility: auto;
   contain-intrinsic-size: auto 44px;
