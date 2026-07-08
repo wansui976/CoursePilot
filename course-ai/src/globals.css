@@ -223,6 +223,7 @@ select:focus-visible {
   min-height: 0;
   display: grid;
   grid-template-columns: 256px minmax(0, 1fr);
+  transition: grid-template-columns 0.18s var(--ease);
   background: var(--bg-app);
   color: var(--text-1);
   font-family: var(--font);
@@ -246,13 +247,9 @@ select:focus-visible {
   padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
 }
 
-.ca-app[data-view="workbench"] {
+/* 侧栏折叠时首列收成 56px 图标栏;展开回 256px。列宽随折叠切换做一次性过渡。 */
+.ca-app[data-sidebar="collapsed"] {
   grid-template-columns: 56px minmax(0, 1fr);
-}
-
-.ca-app[data-view="workbench"][data-bucket="compact"]:not([data-device="tablet"]),
-.ca-app[data-view="workbench"][data-bucket="medium"]:not([data-device="tablet"]) {
-  grid-template-columns: minmax(0, 1fr);
 }
 
 .ca-rail {
@@ -309,6 +306,34 @@ select:focus-visible {
 
 .ca-rail .rail-sp {
   flex: 1;
+}
+
+/* rail-logo 在工作台是「返回课程库」按钮：抹掉 button 默认样式。 */
+.ca-rail button.rail-logo {
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* 折叠态队列计数徽标：钉在按钮右上角。 */
+.ca-rail .rail-btn {
+  position: relative;
+}
+
+.ca-rail .rail-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
 }
 
 /* 工作台「课程视频」弹出层：贴着 56px 细侧栏右侧，列出同课程全部视频 */
@@ -551,6 +576,55 @@ select:focus-visible {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 工作台展开态：选中课程条目下内联的视频列表（缩进对齐课程名文字）。 */
+.ca-side-videos {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 6px;
+  padding-left: 26px;
+}
+
+.ca-side-video {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ca-side-video .nm {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .ca-side-video:hover {
+    background: var(--bg-sunken);
+    color: var(--text-1);
+  }
+}
+
+.ca-side-video.on {
+  background: var(--accent-weak);
+  color: var(--accent-text);
+}
+
+.ca-side-videos-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-4);
 }
 
 .ca-icon-btn {
