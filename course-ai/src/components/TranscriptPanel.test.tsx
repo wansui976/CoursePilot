@@ -66,6 +66,14 @@ describe("TranscriptPanel", () => {
     );
   });
 
+  it("tags the scroller as theme-heavy so theme switches skip the fade", async () => {
+    renderTranscriptPanel();
+    await screen.findByText("00:01");
+
+    // theme.ts 按 [data-theme-heavy] 判定「重 DOM 在场 → 瞬切」;文稿滚动区必须带此标记。
+    expect(screen.getByLabelText("文稿内容滚动区")).toHaveAttribute("data-theme-heavy");
+  });
+
   it("persists the transcript scroll position while scrolling", async () => {
     renderTranscriptPanel();
     await screen.findByText("00:01");
