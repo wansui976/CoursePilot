@@ -1,21 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Book,
   Check,
   ChevronLeft,
   Film,
   LayoutGrid,
   List,
-  Moon,
   MoreHorizontal,
-  Play,
-  Settings,
-  Sun,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { onBackButtonPress } from "@tauri-apps/api/app";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
+import { AppSidebar } from "@/components/AppSidebar";
 import { CourseSidebar } from "@/components/CourseSidebar";
 import { RecycleBin } from "@/components/RecycleBin";
 import { DevConsole } from "@/components/DevConsole";
@@ -77,6 +73,27 @@ function readPanelWidth() {
   return Number.isFinite(saved) ? Math.min(720, Math.max(360, saved)) : 480;
 }
 
+const SIDEBAR_COLLAPSED_KEY = "course-ai-sidebar-collapsed";
+
+type SidebarCollapsed = { library: boolean; workbench: boolean };
+
+// 首次默认：课程库展开（选课要概览）、工作台折叠（看视频省空间）。
+function readSidebarCollapsed(): SidebarCollapsed {
+  const fallback: SidebarCollapsed = { library: false, workbench: true };
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<SidebarCollapsed>;
+    return {
+      library: parsed.library === true,
+      workbench: parsed.workbench !== false,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 export function Home() {
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
@@ -101,8 +118,8 @@ export function Home() {
   const [isResizingPanel, setIsResizingPanel] = useState(false);
   // 拖动期间的实时宽度（用 ref，不触发重渲染；松手才提交到 state）。
   const liveWidthRef = useRef(studyPanelWidth);
-  // 工作台左侧栏「课程视频」菜单：点开后在侧栏旁弹出同课程的全部视频。
-  const [railVideosOpen, setRailVideosOpen] = useState(false);
+  // 统一侧栏折叠状态：分视图记忆（课程库 / 工作台）。
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<SidebarCollapsed>(readSidebarCollapsed);
   const queryClient = useQueryClient();
   const setVideo = usePlayer((s) => s.setVideo);
   const jobsByVideo = useJobs((s) => s.byVideo);
@@ -496,7 +513,6 @@ export function Home() {
   }
 
   function returnToLibrary() {
-    setRailVideosOpen(false);
     setSelectedVideoId(null);
     setQueueOpen(false);
     setShowSettings(false);
@@ -999,121 +1015,8 @@ export function Home() {
     );
   }
 
-  function renderRail() {
-    return (
-      <nav className="ca-rail" aria-label="工具栏">
-        <span className="rail-logo">
-          <Book className="h-[18px] w-[18px]" />
-        </span>
-        <button
-          className="rail-btn"
-          title="返回课程库"
-          aria-label="返回课程库"
-          onClick={returnToLibrary}
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-        <button
-          className={`rail-btn ${railVideosOpen ? "active" : ""}`}
-          title="课程视频"
-          aria-label="课程视频"
-          aria-expanded={railVideosOpen}
-          onClick={() => setRailVideosOpen((open) => !open)}
-        >
-          <List className="h-5 w-5" />
-        </button>
-        <div className="rail-sp" />
-        <button
-          className="rail-btn"
-          title={themeToggleLabel}
-          aria-label={themeToggleLabel}
-          onClick={toggleTheme}
-        >
-          {isLightTheme ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
-        </button>
-        <button
-          className={`rail-btn ${showSettings ? "active" : ""}`}
-          title="设置"
-          aria-label="设置"
-          aria-pressed={showSettings}
-          onClick={() => openMainView("settings")}
-        >
-          <Settings className="h-5 w-5" />
-        </button>
-      </nav>
-    );
-  }
-
-  // 工作台左侧栏「课程视频」菜单：在侧栏右侧弹出同课程的全部视频，点选即切换。
-  function renderRailVideoFlyout() {
-    return (
-      <>
-        <div
-          className="ca-rail-flyout-scrim"
-          onClick={() => setRailVideosOpen(false)}
-        />
-        <div className="ca-rail-flyout" role="dialog" aria-label="课程视频列表">
-          <div className="ca-rail-flyout-head">
-            <span className="t">{selectedCourse?.name ?? "课程视频"}</span>
-            <IconButton
-              aria-label="关闭"
-              onClick={() => setRailVideosOpen(false)}
-            >
-              <X className="h-4 w-4" />
-            </IconButton>
-          </div>
-          <div className="ca-rail-flyout-list">
-            {videos.map((video) => (
-              <button
-                key={video.id}
-                type="button"
-                className={`ca-rail-flyout-item ${video.id === selectedVideoId ? "on" : ""}`}
-                aria-current={video.id === selectedVideoId ? "true" : undefined}
-                onClick={() => {
-                  openVideo(video.id);
-                  setRailVideosOpen(false);
-                }}
-              >
-                <Play className="h-3.5 w-3.5 flex-none" />
-                <span className="nm">{displayTitle(video.title)}</span>
-              </button>
-            ))}
-            {videos.length === 0 && (
-              <div className="ca-rail-flyout-empty">该课程暂无视频</div>
-            )}
-          </div>
-        </div>
-      </>
-    );
-  }
-
-  function renderSidebar(drawer = false) {
-    return (
-      <CourseSidebar
-        className={drawer ? "h-full border-0" : undefined}
-        selectedCourseId={selectedCourseId}
-        onSelect={selectCourse}
-        onOpenSettings={() => {
-          openMainView("settings");
-        }}
-        onToggleTheme={toggleTheme}
-        theme={theme}
-        themeToggleLabel={themeToggleLabel}
-        queueOpen={queueOpen}
-        queueCount={queuedVideoIds.length}
-        onToggleQueue={toggleQueue}
-        onOpenRecycleBin={() => {
-          openMainView("recycle");
-        }}
-      />
-    );
-  }
-
   // 窄屏「课程」Tab 的根页:整屏课程列表(复用 CourseSidebar 的增删改),回收站置于右上。
   function renderCourseListScreen() {
-    if (tabletWide) {
-      return renderSidebar();
-    }
     return (
       <CourseSidebar
         variant="screen"
@@ -1130,6 +1033,15 @@ export function Home() {
   // 桌面：进入某个视频的工作台会话后，即便在主区叠开设置/回收站/控制台/队列整页，
   // 左侧仍保持窄工具栏（rail），不回退成首页的宽侧栏——设置只是覆盖主区，会话仍在。
   const inVideoSession = !!selectedVideo;
+  const sidebarView: "library" | "workbench" = inVideoSession ? "workbench" : "library";
+  const sidebarIsCollapsed = sidebarCollapsed[sidebarView];
+  function toggleSidebarCollapsed() {
+    setSidebarCollapsed((prev) => {
+      const next = { ...prev, [sidebarView]: !prev[sidebarView] };
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
   // 窄屏底部 Tab 仅在「非工作台」时显示(工作台全屏沉浸)。
   const showBottomTab = isPhoneDevice && !isWorkbenchView;
   // 窄屏「课程」Tab 根层(未选课程、未开队列/设置/回收/控制台)→ 整屏课程列表。
@@ -1165,11 +1077,32 @@ export function Home() {
       data-bucket={bucket}
       data-device={tabletWide ? "tablet" : "phone-or-desktop"}
       data-view={isWorkbenchView || (!isPhoneDevice && inVideoSession) ? "workbench" : "library"}
+      data-sidebar={isPhoneDevice ? undefined : sidebarIsCollapsed ? "collapsed" : "expanded"}
       style={accentVars(accent, theme, customAccent) as CSSProperties}
       className="ca-app"
     >
-      {isPhoneDevice ? null : inVideoSession ? renderRail() : renderSidebar()}
-      {!isPhoneDevice && inVideoSession && railVideosOpen && renderRailVideoFlyout()}
+      {isPhoneDevice ? null : (
+        <AppSidebar
+          view={sidebarView}
+          collapsed={sidebarIsCollapsed}
+          onToggleCollapsed={toggleSidebarCollapsed}
+          selectedCourseId={selectedCourseId}
+          onSelectCourse={selectCourse}
+          courseName={selectedCourse?.name}
+          videos={videos}
+          selectedVideoId={selectedVideoId}
+          onOpenVideo={openVideo}
+          onBackToLibrary={returnToLibrary}
+          theme={theme}
+          themeToggleLabel={themeToggleLabel}
+          onToggleTheme={toggleTheme}
+          onOpenSettings={() => openMainView("settings")}
+          onOpenRecycleBin={() => openMainView("recycle")}
+          queueOpen={queueOpen}
+          queueCount={queuedVideoIds.length}
+          onToggleQueue={toggleQueue}
+        />
+      )}
       <main className="ca-main">
         {/* key=视图类型(而非视频 id):切换顶层视图时重挂以重播入场动画;在工作台内
             切换视频时 key 不变,播放器与面板状态保留、不被打断。 */}

@@ -223,6 +223,7 @@ select:focus-visible {
   min-height: 0;
   display: grid;
   grid-template-columns: 256px minmax(0, 1fr);
+  transition: grid-template-columns 0.18s var(--ease);
   background: var(--bg-app);
   color: var(--text-1);
   font-family: var(--font);
@@ -246,13 +247,9 @@ select:focus-visible {
   padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
 }
 
-.ca-app[data-view="workbench"] {
+/* 侧栏折叠时首列收成 56px 图标栏;展开回 256px。列宽随折叠切换做一次性过渡。 */
+.ca-app[data-sidebar="collapsed"] {
   grid-template-columns: 56px minmax(0, 1fr);
-}
-
-.ca-app[data-view="workbench"][data-bucket="compact"]:not([data-device="tablet"]),
-.ca-app[data-view="workbench"][data-bucket="medium"]:not([data-device="tablet"]) {
-  grid-template-columns: minmax(0, 1fr);
 }
 
 .ca-rail {
