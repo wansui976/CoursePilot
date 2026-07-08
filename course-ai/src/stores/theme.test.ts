@@ -23,6 +23,7 @@ describe("theme store light/dark transition", () => {
 
   afterEach(() => {
     delete vtDocument.startViewTransition;
+    document.querySelectorAll("[data-theme-heavy]").forEach((el) => el.remove());
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
@@ -73,5 +74,36 @@ describe("theme store light/dark transition", () => {
     expect(useTheme.getState().effective).toBe("light");
     expect(startViewTransition).not.toHaveBeenCalled();
     expect(document.documentElement.classList.contains("theme-animating")).toBe(false);
+  });
+
+  it("switches instantly when a visible heavy-DOM element is present", () => {
+    // 文稿等大 DOM 在场时,任何动画(VT 双全屏快照/全树过渡)都会放大成本 —— 必须瞬切。
+    const startViewTransition = vi.fn((cb: () => void) => cb());
+    vtDocument.startViewTransition = startViewTransition;
+    const heavy = document.createElement("div");
+    heavy.setAttribute("data-theme-heavy", "");
+    (heavy as HTMLElement & { checkVisibility: () => boolean }).checkVisibility = () => true;
+    document.body.appendChild(heavy);
+
+    useTheme.getState().toggle();
+
+    expect(useTheme.getState().effective).toBe("dark");
+    expect(startViewTransition).not.toHaveBeenCalled();
+    expect(document.documentElement.classList.contains("theme-animating")).toBe(false);
+  });
+
+  it("keeps the fade when the heavy-DOM element is hidden", () => {
+    // TabsPanel 非活动 tab 用 display:none 隐藏,checkVisibility 为 false → 不算在场。
+    const startViewTransition = vi.fn((cb: () => void) => cb());
+    vtDocument.startViewTransition = startViewTransition;
+    const heavy = document.createElement("div");
+    heavy.setAttribute("data-theme-heavy", "");
+    (heavy as HTMLElement & { checkVisibility: () => boolean }).checkVisibility = () => false;
+    document.body.appendChild(heavy);
+
+    useTheme.getState().toggle();
+
+    expect(useTheme.getState().effective).toBe("dark");
+    expect(startViewTransition).toHaveBeenCalledTimes(1);
   });
 });

@@ -34,15 +34,27 @@ export const ACCENTS: { key: AccentKey; label: string; accent: string; press: st
 ];
 
 let themeAnimTimer: ReturnType<typeof setTimeout> | undefined;
-/** 应用明暗切换(mutate 里做真正的状态变更),按能力选动画:
- *  1. View Transitions:新旧两张快照在合成器上交叉淡化——一次重算一次重绘,
- *     文稿等数千节点的大 DOM 也不掉帧;
- *  2. 不支持时退回全树过渡类(html.theme-animating,~0.3s)——逐元素起过渡,
- *     大 DOM 下整屏逐帧重绘,是打开文稿时切主题卡顿的来源,仅作兜底;
- *  3. reduce-motion:直接切,不做动画。 */
+
+/** 有可见的大 DOM(标了 data-theme-heavy,如打开的文稿)在场时瞬切:任何动画方案在
+ *  数千节点上都会放大成本(VT 双全屏快照 / 全树逐元素过渡)。轻场景才保留渐变。
+ *  引擎无 checkVisibility 时按「存在即算」保守处理(宁可瞬切不冒卡顿风险)。 */
+function hasVisibleHeavyDom(): boolean {
+  for (const el of document.querySelectorAll<HTMLElement>("[data-theme-heavy]")) {
+    if (typeof el.checkVisibility !== "function" || el.checkVisibility()) return true;
+  }
+  return false;
+}
+
+/** 应用明暗切换(mutate 里做真正的状态变更),按能力与场景选动画:
+ *  1. reduce-motion:直接切,不做动画;
+ *  2. 可见的重 DOM(data-theme-heavy,如打开的文稿)在场:直接切——
+ *     一次重算 + 一次绘制是理论最小成本,任何动画都只会在这之上加码;
+ *  3. View Transitions:新旧两张快照在合成器上交叉淡化,轻场景观感最佳;
+ *  4. 兜底:全树过渡类(html.theme-animating,~0.3s)。 */
 function applyThemeChange(mutate: () => void): void {
   if (typeof document === "undefined") return mutate();
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return mutate();
+  if (hasVisibleHeavyDom()) return mutate();
   if (typeof document.startViewTransition === "function") {
     // flushSync:让 React 在快照回调内同步提交 data-theme,否则新快照可能截到旧画面。
     document.startViewTransition(() => flushSync(mutate));
