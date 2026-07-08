@@ -37,13 +37,14 @@ const TranscriptRow = memo(function TranscriptRow({
     <div className="px-3 py-0.5">
       <div
         data-row={index}
-        className={`group flex items-start gap-1 rounded ${
+        className={`group relative rounded ${
           active ? "bg-primary/20" : "hover:bg-[var(--surface-card-hover)]"
         }`}
       >
+        {/* 文字占满整行宽度：纠错按钮改为绝对定位在右下角，不再在行内流式占位。 */}
         <button
           onClick={() => onSeek(segment.start_ms)}
-          className="min-w-0 flex-1 px-2 py-1 text-left text-sm leading-relaxed"
+          className="block w-full px-2 py-1 text-left text-sm leading-relaxed"
         >
           <span className="mr-2 text-xs text-[var(--text-muted)]">
             {formatMs(segment.start_ms)}
@@ -57,7 +58,8 @@ const TranscriptRow = memo(function TranscriptRow({
           title="纠错"
           onClick={() => onEdit(segment.id, segment.text)}
           // 用轻量字形代替 lucide SVG：每行少一棵 SVG 子树，屏外行渲染更快、快滑空白更小。
-          className="ca-touch-44 ca-workbench-touch mt-1 mr-1 grid h-9 w-9 shrink-0 place-items-center rounded text-[17px] leading-none text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
+          // 悬停才出现且盖在文字上方，给实底背景 + 细边保证可读。
+          className="ca-touch-44 ca-workbench-touch absolute bottom-0.5 right-1 grid h-7 w-7 place-items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] text-[15px] leading-none text-[var(--text-muted)] opacity-0 shadow-sm transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
         >
           <span aria-hidden="true">✎</span>
         </button>
