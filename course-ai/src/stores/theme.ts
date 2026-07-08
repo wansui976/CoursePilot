@@ -1,3 +1,4 @@
+import { flushSync } from "react-dom";
 import { create } from "zustand";
 
 export type ThemePref = "light" | "dark" | "auto";
@@ -33,15 +34,25 @@ export const ACCENTS: { key: AccentKey; label: string; accent: string; press: st
 ];
 
 let themeAnimTimer: ReturnType<typeof setTimeout> | undefined;
-/** 切换明暗前给 <html> 加一层短暂过渡类，让整树颜色一起淡变；尊重 reduce-motion。
- *  时长需与 globals.css 的 .theme-animating 过渡(0.3s)对齐，多留一点余量再摘类。 */
-function beginThemeTransition(): void {
-  if (typeof document === "undefined") return;
-  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+/** 应用明暗切换(mutate 里做真正的状态变更),按能力选动画:
+ *  1. View Transitions:新旧两张快照在合成器上交叉淡化——一次重算一次重绘,
+ *     文稿等数千节点的大 DOM 也不掉帧;
+ *  2. 不支持时退回全树过渡类(html.theme-animating,~0.3s)——逐元素起过渡,
+ *     大 DOM 下整屏逐帧重绘,是打开文稿时切主题卡顿的来源,仅作兜底;
+ *  3. reduce-motion:直接切,不做动画。 */
+function applyThemeChange(mutate: () => void): void {
+  if (typeof document === "undefined") return mutate();
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return mutate();
+  if (typeof document.startViewTransition === "function") {
+    // flushSync:让 React 在快照回调内同步提交 data-theme,否则新快照可能截到旧画面。
+    document.startViewTransition(() => flushSync(mutate));
+    return;
+  }
   const root = document.documentElement;
   root.classList.add("theme-animating");
   if (themeAnimTimer) clearTimeout(themeAnimTimer);
   themeAnimTimer = setTimeout(() => root.classList.remove("theme-animating"), 360);
+  mutate();
 }
 
 function systemDark(): boolean {
@@ -134,8 +145,8 @@ export const useTheme = create<ThemeState>((set, get) => ({
     if (typeof window !== "undefined") window.localStorage.setItem(THEME_KEY, pref);
     const next = resolveEffective(pref);
     // 实际明暗变了才播放过渡（如 light→auto 但系统也是 light，则无需动画）。
-    if (next !== get().effective) beginThemeTransition();
-    set({ pref, effective: next });
+    if (next !== get().effective) applyThemeChange(() => set({ pref, effective: next }));
+    else set({ pref, effective: next });
   },
   setAccent: (accent) => {
     if (typeof window !== "undefined") window.localStorage.setItem(ACCENT_KEY, accent);
@@ -171,7 +182,7 @@ if (typeof window !== "undefined" && window.matchMedia) {
     .addEventListener?.("change", () => {
       if (useTheme.getState().pref !== "auto") return;
       const next = resolveEffective("auto");
-      if (next !== useTheme.getState().effective) beginThemeTransition();
-      useTheme.setState({ effective: next });
+      if (next === useTheme.getState().effective) return;
+      applyThemeChange(() => useTheme.setState({ effective: next }));
     });
 }
