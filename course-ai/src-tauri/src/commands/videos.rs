@@ -541,8 +541,13 @@ pub async fn cmd_media_url(
 }
 
 /// 视频封面（首帧）字节，前端转 blob 显示。首次调用时用 ffmpeg 截首帧并缓存。
+/// 返回 ipc::Response（原始二进制）：Vec<u8> 会被序列化成 JSON 数字数组，
+/// 几十 KB 的 JPEG 膨胀成数倍大的 JSON 再解析，库一大首页明显变慢。
 #[tauri::command]
-pub async fn cmd_video_cover(state: State<'_, AppState>, video_id: String) -> AppResult<Vec<u8>> {
+pub async fn cmd_video_cover(
+    state: State<'_, AppState>,
+    video_id: String,
+) -> AppResult<tauri::ipc::Response> {
     let row: Option<(String, String)> =
         sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
             .bind(&video_id)
@@ -555,7 +560,7 @@ pub async fn cmd_video_cover(state: State<'_, AppState>, video_id: String) -> Ap
         std::path::Path::new(&data_dir),
     )
     .await?;
-    Ok(tokio::fs::read(&cover).await?)
+    Ok(tauri::ipc::Response::new(tokio::fs::read(&cover).await?))
 }
 
 #[cfg(test)]

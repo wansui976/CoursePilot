@@ -131,16 +131,17 @@ pub async fn cmd_get_screenshots(
     )
 }
 
+// 返回 ipc::Response（原始二进制），避免 Vec<u8> 被序列化成 JSON 数字数组（见 cmd_video_cover）。
 #[tauri::command]
 pub async fn cmd_read_slide_image(
     state: State<'_, AppState>,
     video_id: String,
     image_path: String,
-) -> AppResult<Vec<u8>> {
+) -> AppResult<tauri::ipc::Response> {
     if !image_path_is_registered(&state, &video_id, &image_path).await? {
         return Err(AppError::NotFound("slide image".into()));
     }
-    Ok(tokio::fs::read(image_path).await?)
+    Ok(tauri::ipc::Response::new(tokio::fs::read(image_path).await?))
 }
 
 #[cfg(test)]
