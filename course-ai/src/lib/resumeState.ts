@@ -7,6 +7,9 @@ export interface VideoResumeState {
   notesScrollTop: number;
   /** 文稿滚动位置（像素 scrollTop）。文稿改回原生滚动后按此恢复。 */
   transcriptScrollTop: number;
+  /** @deprecated 旧版虚拟列表存的顶部行号。只读透传给 TranscriptPanel 做一次性迁移
+   *（换算成 transcriptScrollTop 后清零），不再写入新值。 */
+  transcriptTopIndex: number;
   studyPanelWidth: number | null;
 }
 
@@ -14,6 +17,7 @@ const DEFAULT_RESUME_STATE: VideoResumeState = {
   activeTab: null,
   notesScrollTop: 0,
   transcriptScrollTop: 0,
+  transcriptTopIndex: 0,
   studyPanelWidth: null,
 };
 
@@ -48,6 +52,7 @@ export function readVideoResumeState(videoId: string): VideoResumeState {
       activeTab: isStudyTab(parsed.activeTab) ? parsed.activeTab : null,
       notesScrollTop: Math.max(0, finiteNumber(parsed.notesScrollTop, 0)),
       transcriptScrollTop: Math.max(0, finiteNumber(parsed.transcriptScrollTop, 0)),
+      transcriptTopIndex: Math.max(0, finiteNumber(parsed.transcriptTopIndex, 0)),
       studyPanelWidth: finiteNullableNumber(parsed.studyPanelWidth),
     };
   } catch {

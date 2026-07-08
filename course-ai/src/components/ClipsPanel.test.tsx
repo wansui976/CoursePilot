@@ -27,11 +27,15 @@ function renderPanel() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
+  const ui = (videoId: string) => (
     <QueryClientProvider client={queryClient}>
-      <ClipsPanel videoId="video-1" />
-    </QueryClientProvider>,
+      <ClipsPanel videoId={videoId} />
+    </QueryClientProvider>
   );
+  const view = render(ui("video-1"));
+  // 模拟 TabsPanel 保活下的换视频：同一实例仅 prop 变化，不重挂。
+  const switchVideo = (videoId: string) => view.rerender(ui(videoId));
+  return { ...view, switchVideo };
 }
 
 describe("ClipsPanel", () => {
@@ -60,6 +64,20 @@ describe("ClipsPanel", () => {
     await waitFor(() =>
       expect(mockIpc.clips.add).toHaveBeenCalledWith("video-1", 5000, 8000, ""),
     );
+  });
+
+  it("discards the pending start mark when switching videos", async () => {
+    const { switchVideo } = renderPanel();
+    player.currentMs = 5000;
+    fireEvent.click(await screen.findByRole("button", { name: "标记起点" }));
+
+    switchVideo("video-2");
+
+    // 起点标记属于 video-1：在新视频里按钮回到「标记起点」，不会拼出跨视频片段。
+    const button = await screen.findByRole("button", { name: "标记起点" });
+    player.currentMs = 8000;
+    fireEvent.click(button);
+    expect(mockIpc.clips.add).not.toHaveBeenCalled();
   });
 
   it("jumps to a clip's start via requestSeek", async () => {

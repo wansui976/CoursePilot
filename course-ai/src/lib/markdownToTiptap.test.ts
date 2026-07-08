@@ -112,6 +112,18 @@ describe("markdownToTiptap", () => {
     expect(math[1].attrs!.latex).toBe("M_0");
   });
 
+  it("keeps ** inside inline math as part of the formula", () => {
+    const doc = markdownToTiptap("\\(a**b**c\\)");
+    const para = doc.content![0];
+    const math = para.content!.filter((n) => n.type === "math");
+
+    expect(math).toHaveLength(1);
+    expect(math[0].attrs!.latex).toBe("a**b**c");
+    expect(
+      para.content!.some((n) => n.marks?.some((m) => m.type === "bold")),
+    ).toBe(false);
+  });
+
   it("parses ordered list", () => {
     const doc = markdownToTiptap("1. 一\n2. 二");
     expect(doc.content![0].type).toBe("orderedList");

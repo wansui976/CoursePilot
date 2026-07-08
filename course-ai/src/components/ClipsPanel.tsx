@@ -13,7 +13,14 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
   const requestSeek = usePlayer((s) => s.requestSeek);
   // 懒读播放进度（不订阅，避免每秒重渲染）。
   const nowMs = () => Math.floor(usePlayer.getState().currentMs);
-  const [pendingStart, setPendingStart] = useState<number | null>(null);
+  // 起点标记连同 videoId 一起存：组件被 TabsPanel 保活，换视频只变 prop 不重挂，
+  // 别的视频里标的起点在当前视频必须视为不存在，否则会拼出跨视频的错误片段。
+  const [pending, setPending] = useState<{ videoId: string; ms: number } | null>(
+    null,
+  );
+  const pendingStart = pending?.videoId === videoId ? pending.ms : null;
+  const setPendingStart = (ms: number | null) =>
+    setPending(ms == null ? null : { videoId, ms });
 
   const { data: clips = [] } = useQuery({
     queryKey: ["clips", videoId],
