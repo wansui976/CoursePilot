@@ -156,4 +156,23 @@ describe("AppSidebar", () => {
     await screen.findByRole("button", { name: /申论课程/ });
     expect(screen.queryByRole("button", { name: /底层逻辑/ })).not.toBeInTheDocument();
   });
+
+  it("lets the processing queue nav item span the sidebar width", () => {
+    renderSidebar();
+    expect(screen.getByRole("button", { name: "处理队列" })).toHaveClass("w-full");
+  });
+
+  it("clears the selected course highlight while the processing queue is open", async () => {
+    renderSidebar({ selectedCourseId: "course-1", queueOpen: true });
+    const item = await screen.findByRole("button", { name: /申论课程/ });
+    // 队列是当前视图时，下方已选课程不应再保留蓝色高亮。
+    expect(item.closest(".ca-nav-item")).not.toHaveClass("active");
+    expect(screen.getByRole("button", { name: "处理队列" })).toHaveClass("active");
+  });
+
+  it("highlights the selected course when the queue is closed", async () => {
+    renderSidebar({ selectedCourseId: "course-1", queueOpen: false });
+    const item = await screen.findByRole("button", { name: /申论课程/ });
+    expect(item.closest(".ca-nav-item")).toHaveClass("active");
+  });
 });
