@@ -1017,6 +1017,9 @@ select:focus-visible {
   min-height: 0;
   flex: 1;
   display: grid;
+  /* 列定义须与 Home.tsx 拖动分隔条时内联写的 grid-template-columns 保持一致：
+     拖动期间内联直写整条列定义（只失效 .ca-wb 自身样式），不改继承型 CSS 变量，
+     否则每帧全子树样式重算，文稿打开时明显卡顿。 */
   grid-template-columns: minmax(0, 1fr) 8px var(--study-panel-width, 480px);
   overflow: hidden;
 }
