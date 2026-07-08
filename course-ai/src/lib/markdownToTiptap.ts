@@ -53,17 +53,30 @@ function inlineMath(text: string): Node[] {
   return nodes.length ? nodes : [{ type: "text", text: text || " " }];
 }
 
-/** 把一段文本切成「粗体 / 数学公式 / 时间戳 / 纯文本」的内联节点。 */
+/** 把一段文本切成「粗体 / 数学公式 / 时间戳 / 纯文本」的内联节点。
+ *  粗体可以包住公式（**\(t\) 的意义**），公式里也可能出现 **（如 \(a**b**c\)）——
+ *  因此 ** 只有整对都落在公式区间之外才算粗体定界符，否则原样交给公式解析。 */
 function inline(text: string): Node[] {
-  const nodes: Node[] = [];
-  for (const part of text.split(/(\*\*[^*]+\*\*)/g)) {
-    if (!part) continue;
-    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-      nodes.push(...inlineMath(part.slice(2, -2)).map(withBoldMark));
-      continue;
-    }
-    nodes.push(...inlineMath(part));
+  const mathRanges: Array<[number, number]> = [];
+  const mre = new RegExp(MATH_RE.source, "g");
+  let mm: RegExpExecArray | null;
+  while ((mm = mre.exec(text)) !== null) {
+    mathRanges.push([mm.index, mm.index + mm[0].length]);
   }
+  const insideMath = (i: number) =>
+    mathRanges.some(([start, end]) => i > start && i < end);
+
+  const nodes: Node[] = [];
+  const bre = /\*\*[^*]+\*\*/g;
+  let last = 0;
+  let bm: RegExpExecArray | null;
+  while ((bm = bre.exec(text)) !== null) {
+    if (insideMath(bm.index) || insideMath(bm.index + bm[0].length)) continue;
+    if (bm.index > last) nodes.push(...inlineMath(text.slice(last, bm.index)));
+    nodes.push(...inlineMath(bm[0].slice(2, -2)).map(withBoldMark));
+    last = bm.index + bm[0].length;
+  }
+  if (last < text.length) nodes.push(...inlineMath(text.slice(last)));
   return nodes.length ? nodes : [{ type: "text", text: text || " " }];
 }
 

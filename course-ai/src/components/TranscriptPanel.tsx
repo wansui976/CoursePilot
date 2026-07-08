@@ -128,20 +128,37 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     return usePlayer.subscribe((state) => compute(state.currentMs));
   }, [rows]);
 
-  // 手动滚动打时间戳：wheel / 触摸滑动都算。程序化 scrollTo 不触发这些事件，只捕获真实手滚。
+  // 手动滚动打时间戳：wheel / 触摸滑动 / 滚动条拖拽 / 键盘翻页都算。程序化 scrollTo
+  // 不触发这些事件，只捕获真实手滚。滚动条拖拽不产生 wheel，只能靠「pointer 按住期间
+  // 出现的 scroll 事件」识别（见 onScroll）。
+  // 依赖 hasRows：字幕异步到达前 scroller 尚未挂载（组件早退），到达后需重跑本效果补挂监听。
+  const pointerDownRef = useRef(false);
+  const hasRows = rows.length > 0;
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
     const mark = () => {
       userScrollRef.current = Date.now();
     };
+    const pointerDown = () => {
+      pointerDownRef.current = true;
+    };
+    const pointerUp = () => {
+      pointerDownRef.current = false;
+    };
     el.addEventListener("wheel", mark, { passive: true });
     el.addEventListener("touchmove", mark, { passive: true });
+    el.addEventListener("pointerdown", pointerDown, { passive: true });
+    el.addEventListener("keydown", mark);
+    window.addEventListener("pointerup", pointerUp, { passive: true });
     return () => {
       el.removeEventListener("wheel", mark);
       el.removeEventListener("touchmove", mark);
+      el.removeEventListener("pointerdown", pointerDown);
+      el.removeEventListener("keydown", mark);
+      window.removeEventListener("pointerup", pointerUp);
     };
-  }, []);
+  }, [hasRows]);
 
   // 活动行变化时才考虑滚动（编辑时不打扰用户）。刚手动滚过则暂停；活动行已完整可见则不动，
   // 仅当它滚出可视区才平滑居中——原生 scrollTo，不做任何量高回改，故不抽搐。
@@ -164,20 +181,48 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     scroller.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
   }, [activeRowIndex, editingId]);
 
-  // 滚动位置恢复：挂载后跳回上次的像素 scrollTop；滚动时节流写入，切走 / 换视频时再补一次。
-  const savedScrollTop = useRef(readVideoResumeState(videoId).transcriptScrollTop);
-  const restoredRef = useRef(false);
+  // 滚动位置恢复：每个视频各恢复一次（组件被 TabsPanel 保活，换视频只变 prop 不重挂，
+  // 必须按 videoId 重读、重恢复，否则新视频既不恢复位置、又会被写入旧视频的 scrollTop）。
+  // 滚动时节流写入，切走 / 换视频时再补一次。
+  const savedScrollTop = useRef(0);
+  const restoredForRef = useRef<string | null>(null);
   const saveTimer = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (restoredRef.current || rows.length === 0) return;
+    if (restoredForRef.current === videoId) return;
+    const saved = readVideoResumeState(videoId);
+    // 先记下本视频已存的值：即使字幕还没加载就切走，卸载写入也只会原值写回，不会污染。
+    savedScrollTop.current = saved.transcriptScrollTop;
+    if (rows.length === 0) return;
     const scroller = scrollerRef.current;
     if (!scroller) return;
+    // 旧版虚拟列表存的是顶部行号：换算成该行的像素偏移，一次性迁移后清零。
+    if (saved.transcriptScrollTop === 0 && saved.transcriptTopIndex > 0) {
+      const row = scroller.querySelector<HTMLElement>(
+        `[data-row="${Math.min(saved.transcriptTopIndex, rows.length - 1)}"]`,
+      );
+      if (row) {
+        savedScrollTop.current = Math.max(
+          0,
+          scroller.scrollTop +
+            row.getBoundingClientRect().top -
+            scroller.getBoundingClientRect().top,
+        );
+        writeVideoResumeState(videoId, {
+          transcriptScrollTop: savedScrollTop.current,
+          transcriptTopIndex: 0,
+        });
+      }
+    }
     scroller.scrollTop = savedScrollTop.current;
-    restoredRef.current = true;
-  }, [rows.length]);
+    restoredForRef.current = videoId;
+  }, [videoId, rows.length]);
   useEffect(() => {
     return () => {
-      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+      if (saveTimer.current) {
+        window.clearTimeout(saveTimer.current);
+        // 必须归位：否则换视频后 onScroll 一直以为有定时器在跑，节流写入永久失效。
+        saveTimer.current = undefined;
+      }
       writeVideoResumeState(videoId, {
         transcriptScrollTop: savedScrollTop.current,
       });
@@ -187,6 +232,8 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   function onScroll() {
     const scroller = scrollerRef.current;
     if (!scroller) return;
+    // pointer 按住期间的滚动 = 拖滚动条（wheel/touchmove 捕获不到），也算手动滚动。
+    if (pointerDownRef.current) userScrollRef.current = Date.now();
     savedScrollTop.current = scroller.scrollTop;
     if (saveTimer.current) return;
     saveTimer.current = window.setTimeout(() => {
