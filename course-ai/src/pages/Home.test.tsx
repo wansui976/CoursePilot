@@ -207,6 +207,58 @@ describe("Home", () => {
     expect(screen.getByRole("separator", { name: "调整学习资料宽度" })).toBeInTheDocument();
   });
 
+  it("resizes the study panel via inline grid-template-columns, not per-frame CSS var writes", async () => {
+    // 拖动期间必须内联写 grid-template-columns 而不是每帧改 --study-panel-width：
+    // 自定义属性向整棵工作台子树继承，每帧一写会让全量文稿 DOM（数千节点）做样式
+    // 重算——这就是右侧打开文稿时拖动分隔条卡顿的来源。
+    const rafSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((cb) => {
+        cb(0);
+        return 1;
+      });
+    try {
+      localStorage.setItem("course-ai-study-panel-width", "480");
+      renderHome();
+      fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+      const separator = screen.getByRole("separator", {
+        name: "调整学习资料宽度",
+      });
+      const wb = separator.parentElement as HTMLElement;
+
+      fireEvent.pointerDown(separator, { clientX: 800 });
+      fireEvent.pointerMove(window, { clientX: 700 });
+
+      // 每帧只写内联 grid-template-columns（样式失效被限制在 .ca-wb 自身）……
+      expect(wb.style.gridTemplateColumns).toBe("minmax(0, 1fr) 8px 580px");
+      // ……继承型自定义属性保持拖动前的值，不再每帧变化。
+      expect(wb.style.getPropertyValue("--study-panel-width")).toBe("480px");
+
+      fireEvent.pointerUp(window);
+
+      // 松手：撤掉内联覆盖，宽度交还给稳态的 CSS 变量。
+      expect(wb.style.gridTemplateColumns).toBe("");
+      expect(wb.style.getPropertyValue("--study-panel-width")).toBe("580px");
+      expect(localStorage.getItem("course-ai-study-panel-width")).toBe("580");
+    } finally {
+      rafSpy.mockRestore();
+    }
+  });
+
+  it("defaults the study panel width to 480 when nothing is saved", async () => {
+    // 回归：Number(null) === 0 是有限数，曾被夹成下限 360，导致本意的默认 480 不可达。
+    renderHome();
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+
+    const separator = screen.getByRole("separator", {
+      name: "调整学习资料宽度",
+    });
+    const wb = separator.parentElement as HTMLElement;
+    expect(wb.style.getPropertyValue("--study-panel-width")).toBe("480px");
+  });
+
   it("does not show a separate continue-learning button for saved playback progress", async () => {
     localStorage.setItem(posKey(video.id), "600");
     localStorage.setItem(durKey(video.id), "3600");

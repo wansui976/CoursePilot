@@ -70,7 +70,10 @@ function readInitialView(): LibraryView {
 
 function readPanelWidth() {
   if (typeof window === "undefined") return 480;
-  const saved = Number(window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY));
+  // 没存过要走默认 480：Number(null) 是 0（有限数），不先判空会被下面夹成下限 360。
+  const raw = window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
+  if (!raw) return 480;
+  const saved = Number(raw);
   return Number.isFinite(saved) ? Math.min(720, Math.max(360, saved)) : 480;
 }
 
@@ -386,14 +389,21 @@ export function Home() {
     const containerW = wb?.clientWidth ?? 0;
     const minPanel = 280;
     const maxPanel = containerW > 0 ? Math.max(minPanel, containerW - 320) : 720;
-    // rAF 合帧：一帧内多次 pointermove 只写一次 CSS 变量（即只触发一次网格重排）。
+    // rAF 合帧：一帧内多次 pointermove 只写一次（即只触发一次网格重排）。
     let raf = 0;
     let pendingX = startX;
     const apply = () => {
       raf = 0;
       const next = Math.min(maxPanel, Math.max(minPanel, startWidth - (pendingX - startX)));
       liveWidthRef.current = next;
-      wb?.style.setProperty("--study-panel-width", `${next}px`);
+      // 内联写 grid-template-columns（须与 globals.css 的 .ca-wb 列定义一致），
+      // 而不是每帧改 --study-panel-width：自定义属性向整棵工作台子树继承，每帧一写
+      // 会让全量文稿 DOM（数千节点）做样式重算——文稿打开时拖动卡顿的来源；
+      // contain 只隔离布局/绘制，挡不住继承失效。内联属性只失效 .ca-wb 自身样式。
+      wb?.style.setProperty(
+        "grid-template-columns",
+        `minmax(0, 1fr) 8px ${next}px`,
+      );
     };
     const onMove = (move: PointerEvent) => {
       pendingX = move.clientX;
@@ -404,6 +414,10 @@ export function Home() {
       setIsResizingPanel(false);
       const finalWidth = liveWidthRef.current;
       setStudyPanelWidth(finalWidth);
+      // 先把最终宽度写回稳态变量、再撤掉拖动期的内联覆盖：与 React 提交先后无关，
+      // 计算宽度始终等于 finalWidth，不会闪动。
+      wb?.style.setProperty("--study-panel-width", `${finalWidth}px`);
+      wb?.style.removeProperty("grid-template-columns");
       window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(finalWidth));
       if (selectedVideoId) {
         writeVideoResumeState(selectedVideoId, { studyPanelWidth: finalWidth });
