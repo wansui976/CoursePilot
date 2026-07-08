@@ -1019,11 +1019,8 @@ export function Home() {
   function renderCourseListScreen() {
     return (
       <CourseSidebar
-        variant="screen"
         selectedCourseId={selectedCourseId}
         onSelect={selectCourse}
-        theme={theme}
-        themeToggleLabel={themeToggleLabel}
         onOpenRecycleBin={() => openMainView("recycle")}
       />
     );
