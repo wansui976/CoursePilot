@@ -999,10 +999,10 @@ select:focus-visible {
   border-bottom: 1px solid var(--line);
 }
 
-/* 「时长/状态」表头右对齐，和行内右对齐的时长文本与状态徽标上下对齐。 */
+/* 「时长/状态」表头文字居中。 */
 .ca-list-head .h-dur,
 .ca-list-head .h-status {
-  text-align: right;
+  text-align: center;
 }
 
 .ca-row {
@@ -1083,7 +1083,7 @@ select:focus-visible {
 
 .ca-row .c-status {
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
 }
 
 .ca-wb {
@@ -1616,10 +1616,18 @@ select:focus-visible {
   }
 }
 
-/* 明暗切换：切换瞬间由 JS 给 <html> 加 .theme-animating(~300ms)，让整树颜色一起淡变，
-   避免「按钮淡变、背景/文字/卡片却瞬间跳变」的先后错位。只在这段窗口内对全树挂过渡，
-   平时不挂(否则会拖累 hover/拖动等交互)。不动 transform，避免位移。reduce-motion 时
-   JS 直接不加这个类。 */
+/* 明暗切换首选 View Transitions(theme.ts):两张快照 GPU 交叉淡化,一次重绘,
+   打开文稿等大 DOM 时不掉帧;时长与旧全树过渡对齐。 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.3s;
+}
+
+/* 明暗切换兜底(引擎不支持 View Transitions 时)：切换瞬间由 JS 给 <html> 加
+   .theme-animating(~300ms)，让整树颜色一起淡变，避免「按钮淡变、背景/文字/卡片
+   却瞬间跳变」的先后错位。只在这段窗口内对全树挂过渡，平时不挂(否则会拖累
+   hover/拖动等交互)。注意:全树逐元素过渡在大 DOM 下逐帧整屏重绘,开销大,
+   仅作兜底。reduce-motion 时 JS 直接不加这个类。 */
 @media (prefers-reduced-motion: no-preference) {
   html.theme-animating,
   html.theme-animating *,
