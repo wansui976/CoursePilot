@@ -581,6 +581,55 @@ select:focus-visible {
   text-overflow: ellipsis;
 }
 
+/* 工作台展开态：选中课程条目下内联的视频列表（缩进对齐课程名文字）。 */
+.ca-side-videos {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 6px;
+  padding-left: 26px;
+}
+
+.ca-side-video {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ca-side-video .nm {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .ca-side-video:hover {
+    background: var(--bg-sunken);
+    color: var(--text-1);
+  }
+}
+
+.ca-side-video.on {
+  background: var(--accent-weak);
+  color: var(--accent-text);
+}
+
+.ca-side-videos-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-4);
+}
+
 .ca-icon-btn {
   width: 44px;
   height: 44px;

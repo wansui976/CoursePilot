@@ -136,4 +136,24 @@ describe("AppSidebar", () => {
     // 选择后弹层关闭
     expect(screen.queryByRole("dialog", { name: "课程视频列表" })).not.toBeInTheDocument();
   });
+
+  it("workbench expanded: inlines the current course videos under the selected course", async () => {
+    const onOpenVideo = vi.fn();
+    renderSidebar({
+      view: "workbench",
+      videos: [video],
+      selectedVideoId: "video-1",
+      onOpenVideo,
+    });
+    const item = await screen.findByRole("button", { name: /底层逻辑/ });
+    expect(item).toHaveAttribute("aria-current", "true");
+    fireEvent.click(item);
+    expect(onOpenVideo).toHaveBeenCalledWith("video-1");
+  });
+
+  it("library expanded: does not inline videos", async () => {
+    renderSidebar({ videos: [video] });
+    await screen.findByRole("button", { name: /申论课程/ });
+    expect(screen.queryByRole("button", { name: /底层逻辑/ })).not.toBeInTheDocument();
+  });
 });

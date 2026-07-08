@@ -238,6 +238,27 @@ export function AppSidebar({
           selectedCourseId={selectedCourseId}
           onSelect={onSelectCourse}
           queueOpen={queueOpen}
+          selectedCourseExtra={
+            view === "workbench" ? (
+              <div className="ca-side-videos" aria-label="课程视频列表">
+                {videos.map((video) => (
+                  <button
+                    key={video.id}
+                    type="button"
+                    className={`ca-side-video ${video.id === selectedVideoId ? "on" : ""}`}
+                    aria-current={video.id === selectedVideoId ? "true" : undefined}
+                    onClick={() => onOpenVideo?.(video.id)}
+                  >
+                    <Play className="h-3.5 w-3.5 flex-none" />
+                    <span className="nm">{displayTitle(video.title)}</span>
+                  </button>
+                ))}
+                {videos.length === 0 && (
+                  <div className="ca-side-videos-empty">该课程暂无视频</div>
+                )}
+              </div>
+            ) : undefined
+          }
         />
       </div>
       <div className="mt-4 flex flex-none flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-3">
