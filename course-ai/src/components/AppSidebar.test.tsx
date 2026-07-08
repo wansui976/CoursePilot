@@ -27,6 +27,21 @@ const course = {
   created_at: 1,
   updated_at: 1,
 };
+const video = {
+  id: "video-1",
+  course_id: "course-1",
+  title: "01.底层逻辑.mp4",
+  source_type: "local",
+  source_uri: null,
+  file_path: "/tmp/v.mp4",
+  duration_ms: 1000,
+  width: null,
+  height: null,
+  order_index: 0,
+  data_dir: "/tmp/d",
+  processed_status: "pending",
+  created_at: 1,
+} as const;
 
 function baseProps(overrides: Partial<Parameters<typeof AppSidebar>[0]> = {}) {
   return {
@@ -81,5 +96,44 @@ describe("AppSidebar", () => {
     expect(screen.getByText("4")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "折叠侧栏" }));
     expect(onToggleCollapsed).toHaveBeenCalled();
+  });
+
+  it("renders the collapsed rail with all tool entries", () => {
+    renderSidebar({ collapsed: true, queueCount: 2 });
+    const rail = screen.getByRole("navigation", { name: "工具栏" });
+    expect(rail).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开侧栏" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "处理队列" })).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "切换到夜晚模式" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "回收站" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
+    // 课程库折叠态没有「返回课程库」与「课程视频」
+    expect(screen.queryByRole("button", { name: "返回课程库" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "课程视频" })).not.toBeInTheDocument();
+  });
+
+  it("workbench collapsed rail: logo goes back, list button opens the video flyout", () => {
+    const onBackToLibrary = vi.fn();
+    const onOpenVideo = vi.fn();
+    renderSidebar({
+      collapsed: true,
+      view: "workbench",
+      courseName: "申论课程",
+      videos: [video],
+      selectedVideoId: "video-1",
+      onBackToLibrary,
+      onOpenVideo,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "返回课程库" }));
+    expect(onBackToLibrary).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "课程视频" }));
+    const flyout = screen.getByRole("dialog", { name: "课程视频列表" });
+    expect(flyout).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /底层逻辑/ }));
+    expect(onOpenVideo).toHaveBeenCalledWith("video-1");
+    // 选择后弹层关闭
+    expect(screen.queryByRole("dialog", { name: "课程视频列表" })).not.toBeInTheDocument();
   });
 });
