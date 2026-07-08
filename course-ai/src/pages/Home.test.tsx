@@ -299,6 +299,46 @@ describe("Home", () => {
     expect(screen.getByLabelText("学习资料面板")).toBeInTheDocument();
   });
 
+  it("collapses the workbench sidebar by default and remembers expansion per view", async () => {
+    const { container } = renderHome();
+    const app = container.firstElementChild as HTMLElement;
+    // 课程库默认展开
+    expect(app).toHaveAttribute("data-sidebar", "expanded");
+    expect(screen.getByRole("complementary", { name: "课程侧栏" })).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+    // 工作台默认折叠:图标栏 + 返回按钮
+    expect(app).toHaveAttribute("data-sidebar", "collapsed");
+    expect(screen.getByRole("navigation", { name: "工具栏" })).toBeInTheDocument();
+
+    // 展开工作台侧栏 → 记忆写入 localStorage
+    fireEvent.click(screen.getByRole("button", { name: "展开侧栏" }));
+    expect(app).toHaveAttribute("data-sidebar", "expanded");
+    expect(
+      JSON.parse(localStorage.getItem("course-ai-sidebar-collapsed") as string),
+    ).toEqual({ library: false, workbench: false });
+
+    // 回课程库仍展开(分视图记忆互不影响)
+    fireEvent.click(screen.getByRole("button", { name: /申论课程/ }));
+    expect(app).toHaveAttribute("data-sidebar", "expanded");
+  });
+
+  it("workbench expanded sidebar lists the course videos inline", async () => {
+    localStorage.setItem(
+      "course-ai-sidebar-collapsed",
+      JSON.stringify({ library: false, workbench: false }),
+    );
+    renderHome();
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+
+    const sidebar = screen.getByRole("complementary", { name: "课程侧栏" });
+    expect(
+      within(sidebar).getByRole("button", { name: /底层逻辑/ }),
+    ).toHaveAttribute("aria-current", "true");
+  });
+
   it("starts processing from the homepage video card menu and shows the queue page", async () => {
     renderHome();
 

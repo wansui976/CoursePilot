@@ -36,10 +36,6 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof CourseSidebar>> 
       <CourseSidebar
         selectedCourseId={null}
         onSelect={() => undefined}
-        onOpenSettings={() => undefined}
-        onToggleTheme={() => undefined}
-        theme="light"
-        themeToggleLabel="切换到夜晚模式"
         {...overrides}
       />
     </QueryClientProvider>,
@@ -119,44 +115,10 @@ describe("CourseSidebar", () => {
     expect(screen.getByRole("button", { name: "新建课程" })).toHaveTextContent("创建中");
   });
 
-  it("lets the processing queue nav item span the sidebar width", () => {
-    renderSidebar({ onToggleQueue: () => undefined });
-
-    expect(screen.getByRole("button", { name: "处理队列" })).toHaveClass(
-      "w-full",
-    );
-  });
-
-  it("clears the selected course highlight while the processing queue is open", async () => {
-    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
-    renderSidebar({
-      selectedCourseId: "c1",
-      queueOpen: true,
-      onToggleQueue: () => undefined,
-    });
-
-    const course = await screen.findByRole("button", { name: "线性代数" });
-    // 队列是当前视图时，下方已选课程不应再保留蓝色高亮。
-    expect(course.closest(".ca-nav-item")).not.toHaveClass("active");
-    expect(screen.getByRole("button", { name: "处理队列" })).toHaveClass("active");
-  });
-
-  it("highlights the selected course when the queue is closed", async () => {
-    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
-    renderSidebar({
-      selectedCourseId: "c1",
-      queueOpen: false,
-      onToggleQueue: () => undefined,
-    });
-
-    const course = await screen.findByRole("button", { name: "线性代数" });
-    expect(course.closest(".ca-nav-item")).toHaveClass("active");
-  });
-
   it("relinks a course root through the directory picker", async () => {
     mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
     pickDirectoryPathMock.mockResolvedValue("/new/root");
-    renderSidebar({ onToggleQueue: () => undefined });
+    renderSidebar();
 
     await screen.findByRole("button", { name: "线性代数" });
     fireEvent.click(screen.getByRole("button", { name: "课程操作" }));
@@ -179,7 +141,7 @@ describe("CourseSidebar", () => {
       maxTouchPoints: 5,
     });
     mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
-    renderSidebar({ onToggleQueue: () => undefined });
+    renderSidebar();
 
     await screen.findByRole("button", { name: "线性代数" });
     expect(screen.getByRole("button", { name: "课程操作" })).toHaveClass("opacity-100");
@@ -194,7 +156,7 @@ describe("CourseSidebar", () => {
       maxTouchPoints: 5,
     });
     mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
-    renderSidebar({ onToggleQueue: () => undefined });
+    renderSidebar();
 
     const course = await screen.findByRole("button", { name: "线性代数" });
     fireEvent.pointerDown(course.parentElement!, { pointerType: "touch", clientX: 200, clientY: 30 });
