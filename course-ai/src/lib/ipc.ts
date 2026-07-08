@@ -54,7 +54,8 @@ export const ipc = {
       invoke("cmd_ensure_crop", { videoId }),
     mediaUrl: (videoId: string): Promise<string> =>
       invoke("cmd_media_url", { videoId }),
-    cover: (videoId: string): Promise<number[]> =>
+    // 原始二进制（后端 ipc::Response），不是 JSON 数字数组。
+    cover: (videoId: string): Promise<ArrayBuffer> =>
       invoke("cmd_video_cover", { videoId }),
     updateTitle: (id: string, title: string): Promise<Video> =>
       invoke("cmd_update_video_title", { id, title }),
@@ -176,7 +177,8 @@ export const ipc = {
       invoke("cmd_capture_frame", { videoId, atMs }),
     screenshots: (videoId: string): Promise<Screenshot[]> =>
       invoke("cmd_get_screenshots", { videoId }),
-    image: (videoId: string, imagePath: string): Promise<number[]> =>
+    // 原始二进制（后端 ipc::Response），不是 JSON 数字数组。
+    image: (videoId: string, imagePath: string): Promise<ArrayBuffer> =>
       invoke("cmd_read_slide_image", { videoId, imagePath }),
   },
   clips: {

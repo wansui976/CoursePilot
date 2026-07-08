@@ -92,6 +92,26 @@ describe("markdownToTiptap", () => {
     expect(bold!.text).toBe("重点");
   });
 
+  it("parses bold labels that contain inline math", () => {
+    const doc = markdownToTiptap("- **\\(t\\) 的几何意义**：定点 \\(M_0\\)");
+    const list = doc.content![0];
+    const para = list.content![0].content![0];
+    const text = para.content!
+      .filter((n) => n.type === "text")
+      .map((n) => n.text)
+      .join("");
+    const boldText = para.content!
+      .filter((n) => n.marks?.some((m) => m.type === "bold"))
+      .map((n) => n.text)
+      .join("");
+    const math = para.content!.filter((n) => n.type === "math");
+
+    expect(text).not.toContain("**");
+    expect(boldText).toBe(" 的几何意义");
+    expect(math[0].attrs!.latex).toBe("t");
+    expect(math[1].attrs!.latex).toBe("M_0");
+  });
+
   it("parses ordered list", () => {
     const doc = markdownToTiptap("1. 一\n2. 二");
     expect(doc.content![0].type).toBe("orderedList");

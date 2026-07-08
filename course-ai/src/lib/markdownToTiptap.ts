@@ -30,35 +30,41 @@ export const TIMESTAMP_RE = new RegExp(
 export const MATH_RE =
   /\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g;
 
-/** 把一段文本切成「数学公式 / 粗体 / 时间戳 / 纯文本」的内联节点。 */
-function inline(text: string): Node[] {
+function withBoldMark(node: Node): Node {
+  if (node.type !== "text") return node;
+  if (node.marks?.some((m) => m.type === "bold")) return node;
+  return { ...node, marks: [...(node.marks ?? []), { type: "bold" }] };
+}
+
+/** 把非粗体文本切成「数学公式 / 时间戳 / 纯文本」的内联节点。 */
+function inlineMath(text: string): Node[] {
   const nodes: Node[] = [];
   const re = new RegExp(MATH_RE.source, "g");
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    if (m.index > last) nodes.push(...inlineRich(text.slice(last, m.index)));
+    if (m.index > last) nodes.push(...inlinePlain(text.slice(last, m.index)));
     const display = m[1] !== undefined || m[3] !== undefined;
     const latex = (m[1] ?? m[2] ?? m[3] ?? m[4] ?? "").trim();
     nodes.push({ type: "math", attrs: { latex, display } });
     last = m.index + m[0].length;
   }
-  if (last < text.length) nodes.push(...inlineRich(text.slice(last)));
+  if (last < text.length) nodes.push(...inlinePlain(text.slice(last)));
   return nodes.length ? nodes : [{ type: "text", text: text || " " }];
 }
 
-/** 在非公式文本里识别 **粗体** 与时间戳。 */
-function inlineRich(text: string): Node[] {
+/** 把一段文本切成「粗体 / 数学公式 / 时间戳 / 纯文本」的内联节点。 */
+function inline(text: string): Node[] {
   const nodes: Node[] = [];
   for (const part of text.split(/(\*\*[^*]+\*\*)/g)) {
     if (!part) continue;
     if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-      nodes.push({ type: "text", text: part.slice(2, -2), marks: [{ type: "bold" }] });
+      nodes.push(...inlineMath(part.slice(2, -2)).map(withBoldMark));
       continue;
     }
-    nodes.push(...inlinePlain(part));
+    nodes.push(...inlineMath(part));
   }
-  return nodes;
+  return nodes.length ? nodes : [{ type: "text", text: text || " " }];
 }
 
 /** 在纯文本里识别 [mm:ss] 时间戳，渲染为可点击的 timestamp 节点。 */

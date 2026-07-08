@@ -1,8 +1,11 @@
 import { Film } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ipc } from "@/lib/ipc";
 
-/** 视频封面（首帧）。后端按需用 ffmpeg 截首帧并缓存；加载中/失败回退到图标。 */
+/** 视频封面（首帧）。后端按需用 ffmpeg 截首帧并缓存；加载中/失败回退到图标。
+ *  字节走 Query 缓存（staleTime: Infinity）：首页 ↔ 工作台切换整区重挂时，
+ *  封面直接取缓存，不再每次全量走一遍 IPC。 */
 export function VideoCover({
   videoId,
   className,
@@ -10,33 +13,28 @@ export function VideoCover({
   videoId: string;
   className: string;
 }) {
+  const { data } = useQuery({
+    queryKey: ["video-cover", videoId],
+    queryFn: () => ipc.videos.cover(videoId),
+    staleTime: Infinity,
+    gcTime: 30 * 60_000,
+    retry: false,
+  });
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
-    let active = true;
-    let objectUrl: string | null = null;
-    setSrc(null);
-    ipc.videos
-      .cover(videoId)
-      .then((bytes) => {
-        if (!active || bytes.length === 0) return;
-        try {
-          objectUrl = URL.createObjectURL(
-            new Blob([new Uint8Array(bytes)], { type: "image/jpeg" }),
-          );
-          setSrc(objectUrl);
-        } catch {
-          setSrc(null);
-        }
-      })
-      .catch(() => {
-        if (active) setSrc(null);
-      });
+    if (!data) return;
+    const bytes = new Uint8Array(data);
+    if (bytes.byteLength === 0) return;
+    const objectUrl = URL.createObjectURL(
+      new Blob([bytes], { type: "image/jpeg" }),
+    );
+    setSrc(objectUrl);
     return () => {
-      active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      URL.revokeObjectURL(objectUrl);
+      setSrc(null);
     };
-  }, [videoId]);
+  }, [data]);
 
   if (!src) {
     return (

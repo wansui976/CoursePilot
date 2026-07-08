@@ -19,29 +19,27 @@ function SlideImage({
   alt: string;
   className: string;
 }) {
+  // 字节走 Query 缓存（staleTime: Infinity）：切 tab 重挂时不再逐张重新走 IPC。
+  const { data } = useQuery({
+    queryKey: ["slide-image", videoId, imagePath],
+    queryFn: () => ipc.slides.image(videoId, imagePath),
+    staleTime: Infinity,
+    gcTime: 30 * 60_000,
+    retry: false,
+  });
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
-    let active = true;
-    let objectUrl: string | null = null;
-    setSrc(null);
-    ipc.slides
-      .image(videoId, imagePath)
-      .then((bytes) => {
-        if (!active) return;
-        objectUrl = URL.createObjectURL(
-          new Blob([new Uint8Array(bytes)], { type: "image/jpeg" }),
-        );
-        setSrc(objectUrl);
-      })
-      .catch(() => {
-        if (active) setSrc(null);
-      });
+    if (!data) return;
+    const objectUrl = URL.createObjectURL(
+      new Blob([new Uint8Array(data)], { type: "image/jpeg" }),
+    );
+    setSrc(objectUrl);
     return () => {
-      active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      URL.revokeObjectURL(objectUrl);
+      setSrc(null);
     };
-  }, [imagePath, videoId]);
+  }, [data]);
 
   if (!src) {
     return <div aria-label={alt} className={`${className} bg-[var(--surface-card)]`} />;
