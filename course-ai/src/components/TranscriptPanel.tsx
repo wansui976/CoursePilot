@@ -266,6 +266,9 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
       <div
         ref={scrollerRef}
         aria-label="文稿内容滚动区"
+        // 大 DOM 标记:可见时主题切换走瞬切(见 stores/theme.ts hasVisibleHeavyDom),
+        // 避免 VT 双全屏快照/全树过渡在数千节点上造成冻结;tab 非活动(display:none)不算在场。
+        data-theme-heavy=""
         onScroll={onScroll}
         className="min-h-0 flex-1 overflow-y-auto py-2"
       >
