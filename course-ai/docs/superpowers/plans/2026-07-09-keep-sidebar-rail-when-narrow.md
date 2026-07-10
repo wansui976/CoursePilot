@@ -19,9 +19,10 @@
   const finePointer = !coarsePointer();
   const desktopNarrow = finePointer && !tabletDevice && bucket !== "wide";
   const isWorkbenchWide = (bucket === "wide" || desktopNarrow) && !stackedPortrait;
-  const forceRailCollapse = desktopNarrow;
+  const forceRailCollapse = desktopNarrow && inVideoSession;
   const sidebarIsCollapsed = forceRailCollapse || sidebarCollapsed[sidebarView];
   ```
+- 强制细栏**仅限工作台**（已打开视频）：折叠态课程库细栏无课程列表，强制折叠会导致无法选课，故课程库视图保持侧栏为用户偏好（默认展开）；工作台细栏自带视频飞出层+返回，导航完整。`inVideoSession = !!selectedVideo` 已存在。
 - 强制细栏时锁定展开：`AppSidebar` 收到 `lockCollapsed` 为真且 `collapsed` 为真时，不渲染「展开侧栏」按钮。
 
 ---
@@ -198,11 +199,13 @@ Expected: FAIL —— 第一个新用例找不到「工具栏」（当前 medium
   const isWorkbenchWide = (bucket === "wide" || desktopNarrow) && !stackedPortrait;
   const tabletWide = tabletDevice && isWorkbenchWide;
   const isPhoneDevice = !isWorkbenchWide;
-  // 窄桌面强制折叠侧栏(锁定展开),展开偏好仍记住、拉宽到 wide 后恢复。
-  const forceRailCollapse = desktopNarrow;
 ```
 
-- [ ] **Step 4: 强制折叠 + 传 lockCollapsed**
+（`forceRailCollapse` 需要 `inVideoSession`，在下方与 `sidebarIsCollapsed` 同处定义。）
+
+另外把 3 个既有手机版用例（`compact`/Android 且原为精确指针）补上 `mockUseContainerWidth.coarsePointer.mockReturnValue(true);`，以真实的触控设备表达手机版路径（精确指针的窄桌面现改为保留侧栏细栏）。
+
+- [ ] **Step 4: 工作台强制折叠 + 传 lockCollapsed**
 
 `src/pages/Home.tsx`，把 `sidebarIsCollapsed` 一行：
 
@@ -210,9 +213,12 @@ Expected: FAIL —— 第一个新用例找不到「工具栏」（当前 medium
   const sidebarIsCollapsed = sidebarCollapsed[sidebarView];
 ```
 
-改为：
+改为（在其前定义 `forceRailCollapse`，此处 `inVideoSession` 已存在）：
 
 ```tsx
+  // 窄桌面只在工作台(已打开视频)强制折成细栏并锁定展开——课程库折叠态无课程列表,
+  // 故课程库保持用户偏好(默认展开)、课程仍可选、侧栏不消失;展开偏好拉宽后恢复。
+  const forceRailCollapse = desktopNarrow && inVideoSession;
   const sidebarIsCollapsed = forceRailCollapse || sidebarCollapsed[sidebarView];
 ```
 
