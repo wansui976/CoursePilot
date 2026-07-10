@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import {
   AudioLines,
   Check,
@@ -225,6 +225,22 @@ function SavedBadge({ text }: { text: string }) {
   );
 }
 
+/** 查询某项凭证「是否已配置」（只回布尔、不回读明文），供密钥字段旁显示「已配置」。
+ *  refresh() 在保存成功后调用，把状态刷新为最新。 */
+function useSecretConfigured(name: string) {
+  const [configured, setConfigured] = useState(false);
+  const refresh = useCallback(() => {
+    ipc.secrets
+      .has(name)
+      .then(setConfigured)
+      .catch(() => {});
+  }, [name]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+  return { configured, refresh };
+}
+
 export function SettingsPanel({
   onClose,
   onOpenDevConsole,
@@ -240,6 +256,11 @@ export function SettingsPanel({
   // 设置面板自身随 .ca-app 宽度走窄屏下钻；非宽屏即紧凑。
   const settingsRef = useRef<HTMLDivElement>(null);
   const compact = useContainerWidth(settingsRef) !== "wide" && !tablet;
+  // 密钥字段是否已配置：保存后清空输入框，靠这个在字段旁回显「已配置」，
+  // 让用户知道当前确实存了凭证（不回读明文）。
+  const volcSecret = useSecretConfigured("volcengine_asr_access_token");
+  const dashSecret = useSecretConfigured("dashscope_api_key");
+  const ocrSecret2 = useSecretConfigured("aliyun_ocr_access_key_secret");
   const [entered, setEntered] = useState(false);
   const themePref = useTheme((s) => s.pref);
   const setThemePref = useTheme((s) => s.setPref);
@@ -377,6 +398,7 @@ export function SettingsPanel({
     if (appId) await ipc.settings.set("volcengine_asr_app_id", appId);
     if (token) await ipc.secrets.set("volcengine_asr_access_token", token);
     if (!appId && !token) return;
+    if (token) volcSecret.refresh();
     setVolcengineToken("");
     setVolcengineSaved("已保存");
     setTimeout(() => setVolcengineSaved(""), 1500);
@@ -403,6 +425,7 @@ export function SettingsPanel({
   async function saveDashscopeKey() {
     if (!dashscopeKey.trim()) return;
     await ipc.secrets.set("dashscope_api_key", dashscopeKey.trim());
+    dashSecret.refresh();
     setDashscopeKey("");
     setDashscopeSaved("已保存");
     setTimeout(() => setDashscopeSaved(""), 1500);
@@ -425,6 +448,7 @@ export function SettingsPanel({
     if (keyId) await ipc.settings.set("aliyun_ocr_access_key_id", keyId);
     if (secret) await ipc.secrets.set("aliyun_ocr_access_key_secret", secret);
     if (!keyId && !secret) return;
+    if (secret) ocrSecret2.refresh();
     setOcrSecret("");
     setOcrSaved("已保存");
     setTimeout(() => setOcrSaved(""), 1500);
@@ -796,7 +820,7 @@ export function SettingsPanel({
                     <Row
                       label="Access Token"
                       htmlFor="volcengine-asr-token"
-                      hint="留空 = 不修改"
+                      hint={volcSecret.configured ? "已配置 · 留空 = 不修改" : "留空 = 不修改"}
                     >
                       <input
                         id="volcengine-asr-token"
@@ -872,7 +896,7 @@ export function SettingsPanel({
                     <Row
                       label="百炼 API Key"
                       htmlFor="dashscope-key"
-                      hint="留空 = 不修改"
+                      hint={dashSecret.configured ? "已配置 · 留空 = 不修改" : "留空 = 不修改"}
                     >
                       <input
                         id="dashscope-key"
@@ -953,7 +977,11 @@ export function SettingsPanel({
                       <Row
                         label="AccessKey Secret"
                         htmlFor="aliyun-ocr-secret"
-                        hint="留空 = 不修改；需在阿里云控制台开通「文字识别 OCR」"
+                        hint={
+                          ocrSecret2.configured
+                            ? "已配置 · 留空 = 不修改；需在阿里云控制台开通「文字识别 OCR」"
+                            : "留空 = 不修改；需在阿里云控制台开通「文字识别 OCR」"
+                        }
                       >
                         <input
                           id="aliyun-ocr-secret"

@@ -10,6 +10,7 @@ const { mockIpc } = vi.hoisted(() => ({
     },
     secrets: {
       set: vi.fn(),
+      has: vi.fn(),
     },
   },
 }));
@@ -48,6 +49,7 @@ describe("SettingsPanel", () => {
     });
     mockIpc.settings.set.mockResolvedValue(undefined);
     mockIpc.secrets.set.mockResolvedValue(undefined);
+    mockIpc.secrets.has.mockResolvedValue(false);
     pickDirectoryPathMock.mockResolvedValue("/data/user/0/dev.courseai.app.debug/storage");
   });
 
@@ -81,6 +83,19 @@ describe("SettingsPanel", () => {
       "volcengine_asr_access_token",
       "secret-token",
     );
+  });
+
+  it("shows a 已配置 hint when a secret is already stored", async () => {
+    mockIpc.secrets.has.mockResolvedValue(true);
+    render(<SettingsPanel onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "语音识别" }));
+
+    // 已配置的密钥字段在提示里回显「已配置」，即使输入框为空也让用户确信已存。
+    expect(
+      await screen.findByText("已配置 · 留空 = 不修改"),
+    ).toBeInTheDocument();
+    expect(mockIpc.secrets.has).toHaveBeenCalledWith("volcengine_asr_access_token");
   });
 
   it("saves the app-data storage root on Android", async () => {

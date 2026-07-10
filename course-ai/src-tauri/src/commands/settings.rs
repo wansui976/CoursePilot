@@ -48,6 +48,14 @@ pub async fn cmd_set_secret(
     crate::llm::keychain::set_secret(&state.db, &name, &value).await
 }
 
+/// 是否已配置某项敏感凭证：只回布尔、不回读明文，供设置页显示「已配置」。
+#[tauri::command]
+pub async fn cmd_has_secret(state: State<'_, AppState>, name: String) -> AppResult<bool> {
+    Ok(crate::llm::keychain::get_secret_or_legacy(&state.db, &name)
+        .await?
+        .is_some())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

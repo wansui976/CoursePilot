@@ -29,7 +29,9 @@ use crate::commands::export::{
 use crate::commands::rag::{
     cmd_cancel_rag_query, cmd_rag_query, cmd_rag_query_stream, cmd_search_transcript,
 };
-use crate::commands::settings::{cmd_get_setting, cmd_set_secret, cmd_set_setting};
+use crate::commands::settings::{
+    cmd_get_setting, cmd_has_secret, cmd_set_secret, cmd_set_setting,
+};
 use crate::commands::slides::{
     cmd_capture_frame, cmd_extract_slides, cmd_get_screenshots, cmd_get_slides,
     cmd_read_slide_image,
@@ -101,6 +103,7 @@ pub fn run() {
             cmd_set_setting,
             cmd_get_setting,
             cmd_set_secret,
+            cmd_has_secret,
             cmd_get_dev_logs,
             cmd_clear_dev_logs,
             cmd_list_whisper_models,
