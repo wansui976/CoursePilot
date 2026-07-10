@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useState, type RefObject } from "react";
 
 export type WidthBucket = "compact" | "medium" | "wide";
 
@@ -70,7 +70,9 @@ function initialBucket(): WidthBucket {
 export function useContainerWidth(ref: RefObject<HTMLElement | null>): WidthBucket {
   const [bucket, setBucket] = useState<WidthBucket>(initialBucket);
 
-  useEffect(() => {
+  // useLayoutEffect：首次测量在浏览器绘制前同步完成，避免先按窗口宽度（initialBucket）
+  // 渲染一帧、再被 ResizeObserver 纠正成实际容器宽度而闪一下（如设置页先闪宽屏详情再切窄屏列表）。
+  useLayoutEffect(() => {
     if (typeof ResizeObserver === "undefined") {
       setBucket(initialBucket());
       return;
