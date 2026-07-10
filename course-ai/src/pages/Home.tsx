@@ -134,7 +134,11 @@ export function Home() {
   // 触控优先：iOS/iPad 竖屏一律走底部 Tab / 上下叠放布局；只有横屏才保留桌面式左右分栏。
   // 方向必须单独判断:12.9" iPad 竖屏宽 1024 会落入 wide 档,只看 bucket 仍会被当宽屏左右布局。
   const stackedPortrait = portrait && (tabletDevice || coarsePointer());
-  const isWorkbenchWide = bucket === "wide" && !stackedPortrait;
+  // 桌面(精确指针、非平板)任意窄宽度都保留左右布局,只把侧栏强制折成细栏;
+  // 手机版仅留给触控设备(coarse pointer)、平板(isTablet)与竖屏平板(stackedPortrait)。
+  const finePointer = !coarsePointer();
+  const desktopNarrow = finePointer && !tabletDevice && bucket !== "wide";
+  const isWorkbenchWide = (bucket === "wide" || desktopNarrow) && !stackedPortrait;
   const tabletWide = tabletDevice && isWorkbenchWide;
   const isPhoneDevice = !isWorkbenchWide;
   // 只有横屏宽布局才保留可拖的竖向分隔条。
@@ -1031,7 +1035,11 @@ export function Home() {
   // 左侧仍保持窄工具栏（rail），不回退成首页的宽侧栏——设置只是覆盖主区，会话仍在。
   const inVideoSession = !!selectedVideo;
   const sidebarView: "library" | "workbench" = inVideoSession ? "workbench" : "library";
-  const sidebarIsCollapsed = sidebarCollapsed[sidebarView];
+  // 窄桌面只在工作台(已打开视频)强制折成细栏并锁定展开——该细栏自带视频飞出层+返回,
+  // 导航完整;课程库视图折叠态无课程列表,故保持用户偏好(默认展开),课程仍可选、侧栏不消失。
+  // 展开偏好仍记住,拉宽到 wide 后恢复。
+  const forceRailCollapse = desktopNarrow && inVideoSession;
+  const sidebarIsCollapsed = forceRailCollapse || sidebarCollapsed[sidebarView];
   function toggleSidebarCollapsed() {
     setSidebarCollapsed((prev) => {
       const next = { ...prev, [sidebarView]: !prev[sidebarView] };
@@ -1082,6 +1090,7 @@ export function Home() {
         <AppSidebar
           view={sidebarView}
           collapsed={sidebarIsCollapsed}
+          lockCollapsed={forceRailCollapse}
           onToggleCollapsed={toggleSidebarCollapsed}
           selectedCourseId={selectedCourseId}
           onSelectCourse={selectCourse}
