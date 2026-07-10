@@ -238,13 +238,15 @@ select:focus-visible {
   --accent-text: #7aa6ff;
 }
 
-.ca-app[data-bucket="compact"]:not([data-device="tablet"]),
-.ca-app[data-bucket="medium"]:not([data-device="tablet"]) {
+/* 窄屏单列仅用于「手机版」(无侧栏,data-sidebar 未设)。桌面窄屏仍渲染侧栏(细栏/展开),
+   带 data-sidebar,必须保留左右两列,否则侧栏会掉进单列、叠到主区上方。 */
+.ca-app[data-bucket="compact"]:not([data-device="tablet"]):not([data-sidebar]),
+.ca-app[data-bucket="medium"]:not([data-device="tablet"]):not([data-sidebar]) {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.ca-app[data-bucket="compact"]:not([data-device="tablet"]) .ca-main,
-.ca-app[data-bucket="medium"]:not([data-device="tablet"]) .ca-main {
+.ca-app[data-bucket="compact"]:not([data-device="tablet"]):not([data-sidebar]) .ca-main,
+.ca-app[data-bucket="medium"]:not([data-device="tablet"]):not([data-sidebar]) .ca-main {
   padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
 }
 
