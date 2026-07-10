@@ -125,6 +125,7 @@ describe("AppSidebar", () => {
       onBackToLibrary,
       onOpenVideo,
     });
+    expect(screen.queryByRole("button", { name: "处理队列" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "返回课程库" }));
     expect(onBackToLibrary).toHaveBeenCalled();
 

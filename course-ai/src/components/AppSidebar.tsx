@@ -97,15 +97,17 @@ export function AppSidebar({
           >
             <PanelLeftOpen className="h-5 w-5" />
           </button>
-          <button
-            className={`rail-btn ${queueOpen ? "active" : ""}`}
-            title="处理队列"
-            aria-label="处理队列"
-            onClick={onToggleQueue}
-          >
-            <ClipboardList className="h-5 w-5" />
-            {queueCount > 0 && <span className="rail-badge">{queueCount}</span>}
-          </button>
+          {view === "library" && (
+            <button
+              className={`rail-btn ${queueOpen ? "active" : ""}`}
+              title="处理队列"
+              aria-label="处理队列"
+              onClick={onToggleQueue}
+            >
+              <ClipboardList className="h-5 w-5" />
+              {queueCount > 0 && <span className="rail-badge">{queueCount}</span>}
+            </button>
+          )}
           {view === "workbench" && (
             <button
               className={`rail-btn ${videosOpen ? "active" : ""}`}
