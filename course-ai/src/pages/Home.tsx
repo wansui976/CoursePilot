@@ -118,6 +118,9 @@ export function Home() {
   const [isResizingPanel, setIsResizingPanel] = useState(false);
   // 拖动期间的实时宽度（用 ref，不触发重渲染；松手才提交到 state）。
   const liveWidthRef = useRef(studyPanelWidth);
+  // 拖拽 resize 的监听清理：中途卸载（快速切换视频/返回）时也要摘掉 window 上的监听，
+  // 否则残留的 pointermove/pointerup 会引用已解绑的 DOM 节点。
+  const resizeAbortRef = useRef<AbortController | null>(null);
   // 统一侧栏折叠状态：分视图记忆（课程库 / 工作台）。
   const [sidebarCollapsed, setSidebarCollapsed] = useState<SidebarCollapsed>(readSidebarCollapsed);
   const queryClient = useQueryClient();
@@ -172,10 +175,7 @@ export function Home() {
       savedWidth != null ? Math.min(720, Math.max(360, savedWidth)) : readPanelWidth(),
     );
     // 打开视频即回到工作台：合上可能叠在主区的设置/回收站/控制台/队列整页。
-    setShowSettings(false);
-    setShowRecycleBin(false);
-    setShowDevConsole(false);
-    setQueueOpen(false);
+    closeMainOverlays();
     setSelectedVideoId(videoId);
   }
 
@@ -216,6 +216,9 @@ export function Home() {
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [openMenuVideoId]);
+
+  // 兜底：若拖拽 resize 进行中组件被卸载，卸载时摘掉残留的 window 监听。
+  useEffect(() => () => resizeAbortRef.current?.abort(), []);
 
   const goBackOneLevel = useCallback(() => {
     const now = Date.now();
@@ -383,6 +386,15 @@ export function Home() {
 
   // 设置 / 回收站作为主区域整页，与处理队列一致；互斥切换。保留当前选中的视频，
   // 这样从控制台打开设置、点「返回」能回到原来的视频工作台，而不是退回首页。
+  // 收起主区所有整页浮层（设置/回收站/控制台/队列）。新增浮层态时只改这一处，
+  // 避免在各处手写「四个 setXxx(false)」漏改而出现两页同显。
+  function closeMainOverlays() {
+    setShowSettings(false);
+    setShowRecycleBin(false);
+    setShowDevConsole(false);
+    setQueueOpen(false);
+  }
+
   function openMainView(view: "settings" | "recycle" | "dev") {
     setQueueOpen(false);
     setShowSettings(view === "settings");
@@ -439,11 +451,17 @@ export function Home() {
       if (selectedVideoId) {
         writeVideoResumeState(selectedVideoId, { studyPanelWidth: finalWidth });
       }
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
+      // abort() 一并摘掉下面用同一 signal 注册的 pointermove/pointerup。
+      resizeAbortRef.current?.abort();
+      resizeAbortRef.current = null;
     };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    // 用 AbortController 统一管理监听：onUp 里 abort，组件卸载时的 effect 也 abort，
+    // 两条路径都能确保监听不残留（中途卸载不再泄漏对已解绑 DOM 的引用）。
+    resizeAbortRef.current?.abort();
+    const controller = new AbortController();
+    resizeAbortRef.current = controller;
+    window.addEventListener("pointermove", onMove, { signal: controller.signal });
+    window.addEventListener("pointerup", onUp, { signal: controller.signal });
   }
 
   // 双击分隔条:把面板宽度复位到默认值(480),省去手动拖回。
@@ -498,47 +516,33 @@ export function Home() {
   function selectCourse(id: string) {
     setSelectedCourseId(id);
     setSelectedVideoId(null);
-    setQueueOpen(false);
-    setShowSettings(false);
-    setShowRecycleBin(false);
-    setShowDevConsole(false);
+    closeMainOverlays();
   }
 
   function toggleQueue() {
+    // 先算出目标态再收起全部：closeMainOverlays 会把 queueOpen 置 false，
+    // 这里用当前渲染的 queueOpen 求反，最终以 setQueueOpen 覆盖，保留「再点收起」的切换语义。
+    const willOpen = !queueOpen;
     setSelectedVideoId(null);
-    setShowSettings(false);
-    setShowRecycleBin(false);
-    setShowDevConsole(false);
-    setQueueOpen((open) => !open);
+    closeMainOverlays();
+    setQueueOpen(willOpen);
   }
 
   function returnToLibrary() {
     setSelectedVideoId(null);
-    setQueueOpen(false);
-    setShowSettings(false);
-    setShowRecycleBin(false);
-    setShowDevConsole(false);
+    closeMainOverlays();
   }
 
   // 窄屏底部 Tab 切换:课程→回到课程下钻当前层;队列/设置→打开对应整页。
   function selectCompactTab(tab: CompactTab) {
     setCompactTab(tab);
-    if (tab === "courses") {
-      setQueueOpen(false);
-      setShowSettings(false);
-      setShowRecycleBin(false);
-      setShowDevConsole(false);
-    } else if (tab === "queue") {
-      setShowSettings(false);
-      setShowRecycleBin(false);
-      setShowDevConsole(false);
+    closeMainOverlays();
+    if (tab === "queue") {
       setQueueOpen(true);
-    } else {
-      setQueueOpen(false);
-      setShowRecycleBin(false);
-      setShowDevConsole(false);
+    } else if (tab === "settings") {
       setShowSettings(true);
     }
+    // tab === "courses"：closeMainOverlays 已收起全部，无需再开任何整页。
   }
 
   function renderProcessingQueuePage() {
