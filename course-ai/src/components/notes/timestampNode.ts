@@ -26,7 +26,7 @@ export const TimestampNode = Node.create({
       mergeAttributes(HTMLAttributes, {
         "data-ms": String(ms),
         class:
-          "cursor-pointer rounded bg-primary/20 px-1 text-xs text-primary align-middle",
+          "ca-ts-chip cursor-pointer rounded bg-primary/20 px-1 text-xs text-primary align-middle",
       }),
       `▶ ${HTMLAttributes.label || formatMs(ms)}`,
     ];

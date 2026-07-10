@@ -16,6 +16,8 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { TimestampNode, installTimestampClick } from "./notes/timestampNode";
 import { MathNode } from "./notes/mathNode";
 import { RagSearchPanel } from "./RagSearchPanel";
+import { TimestampToggle } from "./TimestampToggle";
+import { useTimestampPrefs } from "@/stores/timestampPrefs";
 
 // markmap 较重，仅在切到「脑图」时才加载。
 const QuizPanel = lazy(() =>
@@ -37,6 +39,7 @@ const VIEWS: { key: View; label: string; task?: "notes" | "quiz" | "mindmap" }[]
 
 export function NotesPanel({ videoId }: { videoId: string }) {
   const [view, setView] = useState<View>("notes");
+  const showTimestamps = useTimestampPrefs((s) => s.showTimestamps);
   const qc = useQueryClient();
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -153,7 +156,12 @@ export function NotesPanel({ videoId }: { videoId: string }) {
           : [];
 
   return (
-    <div ref={rootRef} className="relative flex h-full flex-col">
+    <div
+      ref={rootRef}
+      data-notes-root=""
+      {...(showTimestamps ? {} : { "data-hide-timestamps": "" })}
+      className="relative flex h-full flex-col"
+    >
       <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
         {VIEWS.map((v) => (
           <button
@@ -180,6 +188,13 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         // 问答/搜索自带满高布局 + 底部输入栏，不套外层滚动容器（否则底部输入栏会被 pb 挤上去）。
         <div className="min-h-0 flex-1">
           <RagSearchPanel videoId={videoId} mode={view} />
+          {view === "ask" && (
+            <div className="pointer-events-none absolute bottom-[68px] right-3 z-10">
+              <div className="pointer-events-auto">
+                <TimestampToggle />
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div
@@ -199,6 +214,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       )}
       {currentTask && (
         <PanelActions
+          leading={view === "notes" ? <TimestampToggle /> : undefined}
           onRegenerate={() => generate.mutate(currentTask)}
           regenerating={generate.isPending}
           hasContent={view === "notes" ? !!notesContent : undefined}

@@ -1590,6 +1590,12 @@ select:focus-visible {
   contain-intrinsic-size: auto 1200px;
 }
 
+/* 笔记 / 提问的时间戳开关：根节点挂 data-hide-timestamps 时，纯 CSS 收起所有
+   ▶ 时间戳片，tiptap 与问答都不必重渲染（见 stores/timestampPrefs.ts）。 */
+[data-hide-timestamps] .ca-ts-chip {
+  display: none;
+}
+
 /* 用户要求减少动效时：全局兜底，几乎关掉所有过渡与动画（前庭敏感友好）。 */
 @media (prefers-reduced-motion: reduce) {
   *,

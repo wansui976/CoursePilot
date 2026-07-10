@@ -125,6 +125,7 @@ describe("AppSidebar", () => {
       onBackToLibrary,
       onOpenVideo,
     });
+    expect(screen.queryByRole("button", { name: "处理队列" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "返回课程库" }));
     expect(onBackToLibrary).toHaveBeenCalled();
 
@@ -147,8 +148,15 @@ describe("AppSidebar", () => {
     });
     const item = await screen.findByRole("button", { name: /底层逻辑/ });
     expect(item).toHaveAttribute("aria-current", "true");
+    expect(item.querySelector("svg")).not.toBeInTheDocument();
     fireEvent.click(item);
     expect(onOpenVideo).toHaveBeenCalledWith("video-1");
+  });
+
+  it("workbench expanded: hides course creation and processing queue entries", () => {
+    renderSidebar({ view: "workbench" });
+    expect(screen.queryByRole("button", { name: "新建课程" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "处理队列" })).not.toBeInTheDocument();
   });
 
   it("library expanded: does not inline videos", async () => {

@@ -97,15 +97,17 @@ export function AppSidebar({
           >
             <PanelLeftOpen className="h-5 w-5" />
           </button>
-          <button
-            className={`rail-btn ${queueOpen ? "active" : ""}`}
-            title="处理队列"
-            aria-label="处理队列"
-            onClick={onToggleQueue}
-          >
-            <ClipboardList className="h-5 w-5" />
-            {queueCount > 0 && <span className="rail-badge">{queueCount}</span>}
-          </button>
+          {view === "library" && (
+            <button
+              className={`rail-btn ${queueOpen ? "active" : ""}`}
+              title="处理队列"
+              aria-label="处理队列"
+              onClick={onToggleQueue}
+            >
+              <ClipboardList className="h-5 w-5" />
+              {queueCount > 0 && <span className="rail-badge">{queueCount}</span>}
+            </button>
+          )}
           {view === "workbench" && (
             <button
               className={`rail-btn ${videosOpen ? "active" : ""}`}
@@ -200,37 +202,41 @@ export function AppSidebar({
             <PanelLeftClose className="h-4 w-4" />
           </button>
         </div>
-        <Button
-          aria-label="新建课程"
-          className="ca-new-btn"
-          size="sm"
-          variant="outline"
-          disabled={creatingCourse}
-          onClick={() => void createCourse()}
-        >
-          {creatingCourse ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Plus className="h-4 w-4" />
-          )}
-          {creatingCourse ? "创建中" : "新建课程"}
-        </Button>
-        {createError && <ErrorNote className="mt-2" error={createError} />}
-        <Button
-          aria-label="处理队列"
-          className={`ca-nav-item mt-2 w-full justify-start ${queueOpen ? "active" : ""}`}
-          size="sm"
-          variant="ghost"
-          onClick={onToggleQueue}
-        >
-          <ClipboardList className="h-4 w-4" />
-          处理队列
-          {queueCount > 0 && (
-            <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/15 px-1.5 text-[11px] leading-none text-primary">
-              {queueCount}
-            </span>
-          )}
-        </Button>
+        {view === "library" && (
+          <>
+            <Button
+              aria-label="新建课程"
+              className="ca-new-btn"
+              size="sm"
+              variant="outline"
+              disabled={creatingCourse}
+              onClick={() => void createCourse()}
+            >
+              {creatingCourse ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Plus className="h-4 w-4" />
+              )}
+              {creatingCourse ? "创建中" : "新建课程"}
+            </Button>
+            {createError && <ErrorNote className="mt-2" error={createError} />}
+            <Button
+              aria-label="处理队列"
+              className={`ca-nav-item mt-2 w-full justify-start ${queueOpen ? "active" : ""}`}
+              size="sm"
+              variant="ghost"
+              onClick={onToggleQueue}
+            >
+              <ClipboardList className="h-4 w-4" />
+              处理队列
+              {queueCount > 0 && (
+                <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/15 px-1.5 text-[11px] leading-none text-primary">
+                  {queueCount}
+                </span>
+              )}
+            </Button>
+          </>
+        )}
       </div>
       <div className="ca-nav-label">我的课程</div>
       <div className="ca-nav">
@@ -249,7 +255,6 @@ export function AppSidebar({
                     aria-current={video.id === selectedVideoId ? "true" : undefined}
                     onClick={() => onOpenVideo?.(video.id)}
                   >
-                    <Play className="h-3.5 w-3.5 flex-none" />
                     <span className="nm">{displayTitle(video.title)}</span>
                   </button>
                 ))}
