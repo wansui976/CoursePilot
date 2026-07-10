@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NotesPanel } from "./NotesPanel";
 import { readVideoResumeState } from "@/lib/resumeState";
+import { useTimestampPrefs } from "@/stores/timestampPrefs";
 
 const { mockIpc, editorCapture } = vi.hoisted(() => ({
   mockIpc: {
@@ -74,6 +75,26 @@ describe("NotesPanel", () => {
     mockIpc.ai.getNotes.mockResolvedValue(
       JSON.stringify({ type: "doc", content: [{ type: "paragraph" }] }),
     );
+    useTimestampPrefs.setState({ showTimestamps: true });
+  });
+
+  it("shows a timestamp toggle in the notes view", async () => {
+    renderNotesPanel("video-1", "toggle-present");
+    expect(
+      await screen.findByRole("button", { name: "隐藏时间戳" }),
+    ).toBeInTheDocument();
+  });
+
+  it("flips data-hide-timestamps on the panel root when toggled", async () => {
+    const { container } = renderNotesPanel("video-1", "toggle-attr");
+    const toggle = await screen.findByRole("button", { name: "隐藏时间戳" });
+    const root = container.querySelector<HTMLElement>("[data-notes-root]");
+    expect(root).not.toBeNull();
+    expect(root).not.toHaveAttribute("data-hide-timestamps");
+
+    fireEvent.click(toggle);
+
+    expect(root).toHaveAttribute("data-hide-timestamps");
   });
 
   it("restores the last notes scroll position for each video when remounted", async () => {
