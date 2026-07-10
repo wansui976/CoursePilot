@@ -44,7 +44,7 @@ const { mockIpc } = vi.hoisted(() => ({
       mindmap: vi.fn(),
     },
     settings: { get: vi.fn(), set: vi.fn() },
-    secrets: { set: vi.fn() },
+    secrets: { set: vi.fn(), has: vi.fn() },
     tools: { ocr: vi.fn(), importBilibili: vi.fn() },
   },
 }));
@@ -152,6 +152,7 @@ describe("Home selected-video integration", () => {
     mockIpc.settings.get.mockResolvedValue(null);
     mockIpc.settings.set.mockResolvedValue(undefined);
     mockIpc.secrets.set.mockResolvedValue(undefined);
+    mockIpc.secrets.has.mockResolvedValue(false);
   });
 
   it("keeps visible learning UI when the real selected-video panels mount", async () => {
