@@ -27,9 +27,9 @@
 
 ```ts
 const finePointer = !coarsePointer();
-// 桌面(精确指针)任意窄宽度都保留左右布局,只把侧栏强制折成细栏;
-// 手机版仅留给触控设备(coarse pointer)与竖屏平板(stackedPortrait)。
-const desktopNarrow = finePointer && bucket !== "wide";
+// 桌面(精确指针、非平板)任意窄宽度都保留左右布局,只把侧栏强制折成细栏;
+// 手机版仅留给触控设备(coarse pointer)、平板(isTablet)与竖屏平板(stackedPortrait)。
+const desktopNarrow = finePointer && !tabletDevice && bucket !== "wide";
 const isWorkbenchWide = (bucket === "wide" || desktopNarrow) && !stackedPortrait;
 const isPhoneDevice = !isWorkbenchWide;
 
@@ -38,10 +38,12 @@ const forceRailCollapse = desktopNarrow;
 const sidebarIsCollapsed = forceRailCollapse || sidebarCollapsed[sidebarView];
 ```
 
+（`tabletDevice = isTablet()` 已在 `Home.tsx` 中存在。加入 `!tabletDevice` 是为了保证平板即便偶发上报精确指针也**不**被当作桌面窄屏，触控/平板路径原样不变。）
+
 ### 净效果推导
 
-- **精确指针（桌面鼠标）**：`stackedPortrait` 恒为 false（既非平板也非 coarse），故 `isWorkbenchWide = (wide || desktopNarrow) = true` 恒真 → **永远桌面左右布局，永远有侧栏**。窄于 wide 时 `forceRailCollapse` 为真 → 侧栏细栏。
-- **触控 / 平板（coarse pointer）**：`finePointer` 为 false → `desktopNarrow` 为 false → `isWorkbenchWide = bucket === "wide" && !stackedPortrait`，与现状**完全一致**。
+- **精确指针 + 非平板（桌面鼠标）**：`stackedPortrait` 恒为 false，故 `isWorkbenchWide = (wide || desktopNarrow) = true` 恒真 → **永远桌面左右布局，永远有侧栏**。窄于 wide 时 `forceRailCollapse` 为真 → 侧栏细栏。
+- **触控（coarse pointer）或平板（isTablet）**：`desktopNarrow` 为 false → `isWorkbenchWide = bucket === "wide" && !stackedPortrait`，与现状**完全一致**。
 
 ### 折叠切换锁定
 
