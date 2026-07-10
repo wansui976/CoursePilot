@@ -70,6 +70,8 @@ export const ipc = {
     // 保存敏感凭证（ASR/OCR 密钥）到密钥存储。
     set: (name: string, value: string): Promise<void> =>
       invoke("cmd_set_secret", { name, value }),
+    // 是否已配置某项凭证（只回布尔、不回读明文），供设置页显示「已配置」。
+    has: (name: string): Promise<boolean> => invoke("cmd_has_secret", { name }),
   },
   dev: {
     logs: (): Promise<DevLogEntry[]> => invoke("cmd_get_dev_logs"),
