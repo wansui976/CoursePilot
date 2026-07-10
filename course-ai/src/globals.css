@@ -1077,7 +1077,7 @@ select:focus-visible {
   font-family: var(--mono);
   color: var(--text-3);
   font-size: 12.5px;
-  text-align: right;
+  text-align: center;
   font-variant-numeric: tabular-nums;
 }
 
