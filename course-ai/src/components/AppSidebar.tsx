@@ -27,6 +27,7 @@ export function AppSidebar({
   view,
   collapsed,
   onToggleCollapsed,
+  lockCollapsed = false,
   selectedCourseId,
   onSelectCourse,
   courseName,
@@ -46,6 +47,8 @@ export function AppSidebar({
   view: "library" | "workbench";
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  /** 窄桌面强制折叠时锁定展开：为真则细栏内不显示「展开侧栏」按钮。 */
+  lockCollapsed?: boolean;
   selectedCourseId: string | null;
   onSelectCourse: (id: string) => void;
   courseName?: string;
@@ -89,14 +92,16 @@ export function AppSidebar({
               <Book className="h-[18px] w-[18px]" />
             </span>
           )}
-          <button
-            className="rail-btn"
-            title="展开侧栏"
-            aria-label="展开侧栏"
-            onClick={onToggleCollapsed}
-          >
-            <PanelLeftOpen className="h-5 w-5" />
-          </button>
+          {!lockCollapsed && (
+            <button
+              className="rail-btn"
+              title="展开侧栏"
+              aria-label="展开侧栏"
+              onClick={onToggleCollapsed}
+            >
+              <PanelLeftOpen className="h-5 w-5" />
+            </button>
+          )}
           {view === "library" && (
             <button
               className={`rail-btn ${queueOpen ? "active" : ""}`}
