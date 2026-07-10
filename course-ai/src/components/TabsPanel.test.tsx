@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TabsPanel } from "./TabsPanel";
 
@@ -9,8 +9,9 @@ vi.mock("./AiViewPanel", () => ({
 vi.mock("./NotesPanel", () => ({
   NotesPanel: () => <div>笔记内容</div>,
 }));
+const transcriptPanel = vi.fn(() => <div>文稿内容</div>);
 vi.mock("./TranscriptPanel", () => ({
-  TranscriptPanel: () => <div>文稿内容</div>,
+  TranscriptPanel: () => transcriptPanel(),
 }));
 vi.mock("./SlidesPanel", () => ({
   SlidesPanel: () => <div>课件内容</div>,
@@ -19,6 +20,7 @@ vi.mock("./SlidesPanel", () => ({
 describe("TabsPanel", () => {
   beforeEach(() => {
     localStorage.clear();
+    transcriptPanel.mockClear();
   });
 
   it("restores the active study tab for the video when remounted", () => {
@@ -37,5 +39,17 @@ describe("TabsPanel", () => {
       "data-state",
       "active",
     );
+  });
+
+  it("does not rerender an opened transcript when its parent updates with the same video", async () => {
+    const { rerender } = render(<TabsPanel videoId="video-1" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "文稿" }));
+    await screen.findByText("文稿内容");
+    expect(transcriptPanel).toHaveBeenCalledTimes(1);
+
+    rerender(<TabsPanel videoId="video-1" />);
+
+    await waitFor(() => expect(transcriptPanel).toHaveBeenCalledTimes(1));
   });
 });

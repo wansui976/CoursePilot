@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, memo, Suspense, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TextSkeleton } from "@/components/ui/skeleton";
 import {
@@ -31,7 +31,7 @@ function PanelFallback() {
   return <TextSkeleton lines={6} />;
 }
 
-export function TabsPanel({ videoId }: { videoId: string }) {
+export const TabsPanel = memo(function TabsPanel({ videoId }: { videoId: string }) {
   const [activeTab, setActiveTab] = useState<Tab>(
     () => readVideoResumeState(videoId).activeTab ?? "AI 概览",
   );
@@ -94,4 +94,4 @@ export function TabsPanel({ videoId }: { videoId: string }) {
       ))}
     </Tabs>
   );
-}
+});
