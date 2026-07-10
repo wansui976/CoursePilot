@@ -33,12 +33,14 @@ const desktopNarrow = finePointer && !tabletDevice && bucket !== "wide";
 const isWorkbenchWide = (bucket === "wide" || desktopNarrow) && !stackedPortrait;
 const isPhoneDevice = !isWorkbenchWide;
 
-// 窄桌面强制折叠(无论用户存的偏好),并锁定展开。
-const forceRailCollapse = desktopNarrow;
+// 窄桌面 + 已打开视频(工作台)才强制折叠并锁定展开;课程库视图保持用户偏好(默认展开)。
+const forceRailCollapse = desktopNarrow && inVideoSession;
 const sidebarIsCollapsed = forceRailCollapse || sidebarCollapsed[sidebarView];
 ```
 
 （`tabletDevice = isTablet()` 已在 `Home.tsx` 中存在。加入 `!tabletDevice` 是为了保证平板即便偶发上报精确指针也**不**被当作桌面窄屏，触控/平板路径原样不变。）
+
+**为何强制折叠仅限工作台：** 折叠态的**课程库**细栏不含课程列表（课程只在展开侧栏或手机版课程屏里出现），若在课程库也强制折叠会导致无法选课。故课程库视图（未打开视频）保留侧栏为用户偏好状态（默认展开，课程可选、侧栏也不消失）；只有**工作台**（已打开视频）才强制折成细栏——该细栏自带视频飞出层 + 返回，导航完整。`inVideoSession = !!selectedVideo` 已在 `Home.tsx` 中存在。
 
 ### 净效果推导
 
