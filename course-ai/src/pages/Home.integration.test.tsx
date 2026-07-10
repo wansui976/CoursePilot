@@ -179,6 +179,18 @@ describe("Home selected-video integration", () => {
     expect(screen.getByRole("button", { name: "搜索" })).toBeInTheDocument();
   });
 
+  it("shows an error with retry when the videos query fails", async () => {
+    mockIpc.videos.list.mockRejectedValue(new Error("boom"));
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
+
+    // 失败不再静默留空：出现错误提示 + 重试按钮。
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByRole("button", { name: "重试" })).toBeInTheDocument();
+  });
+
   it("switches the selected-video shell to a stacked layout on narrow screens", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
 
