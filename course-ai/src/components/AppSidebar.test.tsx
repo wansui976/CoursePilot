@@ -152,6 +152,12 @@ describe("AppSidebar", () => {
     expect(onOpenVideo).toHaveBeenCalledWith("video-1");
   });
 
+  it("workbench expanded: hides course creation and processing queue entries", () => {
+    renderSidebar({ view: "workbench" });
+    expect(screen.queryByRole("button", { name: "新建课程" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "处理队列" })).not.toBeInTheDocument();
+  });
+
   it("library expanded: does not inline videos", async () => {
     renderSidebar({ videos: [video] });
     await screen.findByRole("button", { name: /申论课程/ });
