@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { RefreshCw } from "lucide-react";
 import { ExportMenu, type ExportItem } from "./ExportMenu";
 
@@ -11,15 +12,18 @@ export function PanelActions({
   regenerating,
   hasContent,
   exportItems = [],
+  leading,
 }: {
   onRegenerate?: () => void;
   regenerating?: boolean;
   hasContent?: boolean;
   exportItems?: ExportItem[];
+  leading?: ReactNode;
 }) {
-  if (!onRegenerate && exportItems.length === 0) return null;
+  if (!leading && !onRegenerate && exportItems.length === 0) return null;
   return (
     <div className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5">
+      {leading}
       {exportItems.length > 0 && (
         <ExportMenu items={exportItems} icon placement="up" />
       )}
