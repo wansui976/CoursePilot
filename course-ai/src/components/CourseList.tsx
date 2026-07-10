@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { ipc } from "@/lib/ipc";
+import { ErrorNote } from "@/components/ui/ErrorNote";
 import { isIOS, pickDirectoryPath } from "@/lib/mobileFiles";
 
 function nextCourseName(courses: { name: string }[]) {
@@ -64,7 +65,12 @@ export function CourseList({
   selectedCourseExtra?: ReactNode;
 }) {
   const queryClient = useQueryClient();
-  const { data: courses = [] } = useQuery({
+  const {
+    data: courses = [],
+    isError: coursesError,
+    error: coursesErrorObj,
+    refetch: refetchCourses,
+  } = useQuery({
     queryKey: ["courses"],
     queryFn: ipc.courses.list,
   });
@@ -270,11 +276,15 @@ export function CourseList({
           </Fragment>
         );
       })}
-      {courses.length === 0 && (
-        <div className="rounded-md border border-[var(--border-faint)] bg-[var(--surface-card)] px-3 py-4 text-xs leading-relaxed text-[var(--text-muted)]">
-          选择一个课程文件夹后，视频会按课程归档。
-        </div>
-      )}
+      {courses.length === 0 &&
+        (coursesError ? (
+          // 课程加载失败：显示错误 + 重试，而不是伪装成「还没有课程」。
+          <ErrorNote error={coursesErrorObj} onRetry={() => refetchCourses()} />
+        ) : (
+          <div className="rounded-md border border-[var(--border-faint)] bg-[var(--surface-card)] px-3 py-4 text-xs leading-relaxed text-[var(--text-muted)]">
+            选择一个课程文件夹后，视频会按课程归档。
+          </div>
+        ))}
     </>
   );
 }

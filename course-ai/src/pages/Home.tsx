@@ -23,6 +23,7 @@ import { VideoPlayer } from "@/components/VideoPlayer";
 import { BottomTabBar, type CompactTab } from "@/components/BottomTabBar";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorNote } from "@/components/ui/ErrorNote";
 import { IconButton } from "@/components/ui/icon-button";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import { coarsePointer, useContainerWidth, useIsPortrait } from "@/lib/useContainerWidth";
@@ -151,7 +152,12 @@ export function Home() {
     typeof navigator !== "undefined" && /android/i.test(navigator.userAgent);
   const androidBackGuard = useRef(0);
 
-  const { data: videos = [] } = useQuery({
+  const {
+    data: videos = [],
+    isError: videosError,
+    error: videosErrorObj,
+    refetch: refetchVideos,
+  } = useQuery({
     queryKey: ["videos", selectedCourseId],
     queryFn: () => ipc.videos.list(selectedCourseId!),
     enabled: !!selectedCourseId,
@@ -915,7 +921,16 @@ export function Home() {
           )}
         </header>
         <div className="ca-scroll">
-          {!selectedCourseId || videos.length === 0 ? (
+          {selectedCourseId && videosError ? (
+            // 加载失败不再静默留空：显示错误 + 重试，用户能看到问题也能自助恢复。
+            <div className="flex h-full min-h-[320px] items-center justify-center p-4">
+              <ErrorNote
+                error={videosErrorObj}
+                onRetry={() => refetchVideos()}
+                className="max-w-md"
+              />
+            </div>
+          ) : !selectedCourseId || videos.length === 0 ? (
             <div className="flex h-full min-h-[320px] items-center justify-center">
               <EmptyState
                 icon={<Film className="h-7 w-7" />}
