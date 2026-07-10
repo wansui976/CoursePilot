@@ -113,22 +113,6 @@ describe("AppSidebar", () => {
     expect(screen.queryByRole("button", { name: "课程视频" })).not.toBeInTheDocument();
   });
 
-  it("hides the expand button in the collapsed rail when collapse is locked", () => {
-    renderSidebar({ collapsed: true, lockCollapsed: true });
-    // 细栏仍在，但「展开侧栏」按钮被隐藏（窄桌面强制折叠，不允许展开）。
-    expect(screen.getByRole("navigation", { name: "工具栏" })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "展开侧栏" }),
-    ).not.toBeInTheDocument();
-    // 其它工具项照常在场。
-    expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
-  });
-
-  it("still shows the expand button in the collapsed rail when not locked", () => {
-    renderSidebar({ collapsed: true, lockCollapsed: false });
-    expect(screen.getByRole("button", { name: "展开侧栏" })).toBeInTheDocument();
-  });
-
   it("workbench collapsed rail: logo goes back, list button opens the video flyout", () => {
     const onBackToLibrary = vi.fn();
     const onOpenVideo = vi.fn();

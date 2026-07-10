@@ -181,8 +181,6 @@ describe("Home selected-video integration", () => {
 
   it("switches the selected-video shell to a stacked layout on narrow screens", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
-    // 窄屏手机版由触控指针驱动（精确指针的窄桌面改为保留侧栏细栏）。
-    mockUseContainerWidth.coarsePointer.mockReturnValue(true);
 
     renderHome();
 
@@ -218,7 +216,6 @@ describe("Home selected-video integration", () => {
 
   it("returns from the queue page when Android back is pressed", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
-    mockUseContainerWidth.coarsePointer.mockReturnValue(true);
     vi.stubGlobal("navigator", { userAgent: "Android" });
 
     renderHome();
@@ -248,7 +245,6 @@ describe("Home selected-video integration", () => {
 
   it("uses bottom tabs and course-list drill-down on a compact screen", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
-    mockUseContainerWidth.coarsePointer.mockReturnValue(true);
     renderHome();
 
     const nav = await screen.findByRole("navigation", { name: "主导航" });
@@ -325,48 +321,6 @@ describe("Home selected-video integration", () => {
       "data-layout",
       "stacked",
     );
-  });
-
-  // 桌面(精确指针、非平板)窄窗口:保留左右布局 + 侧栏细栏,不切手机版。
-  it("keeps the collapsed sidebar rail on a narrow desktop instead of dropping it", async () => {
-    mockUseContainerWidth.useContainerWidth.mockReturnValue("medium");
-    mockUseContainerWidth.coarsePointer.mockReturnValue(false);
-    mockUseContainerWidth.useIsPortrait.mockReturnValue(false);
-    mockPlatform.isTablet.mockReturnValue(false);
-
-    renderHome();
-
-    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
-    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
-
-    // 侧栏细栏在场（不是手机版）。
-    expect(screen.getByRole("navigation", { name: "工具栏" })).toBeInTheDocument();
-    // 工作台仍是桌面左右布局。
-    expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
-      "data-layout",
-      "wide",
-    );
-    // 强制细栏锁定：细栏里没有「展开侧栏」按钮。
-    expect(
-      screen.queryByRole("button", { name: "展开侧栏" }),
-    ).not.toBeInTheDocument();
-  });
-
-  // 触控(coarse pointer)窄窗口:仍是手机版,无桌面 rail —— 回归保护。
-  it("still uses the phone layout on a narrow touch device", async () => {
-    mockUseContainerWidth.useContainerWidth.mockReturnValue("medium");
-    mockUseContainerWidth.coarsePointer.mockReturnValue(true);
-    mockUseContainerWidth.useIsPortrait.mockReturnValue(false);
-    mockPlatform.isTablet.mockReturnValue(false);
-
-    renderHome();
-
-    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
-    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
-
-    expect(
-      screen.queryByRole("navigation", { name: "工具栏" }),
-    ).not.toBeInTheDocument();
   });
 
   // 横屏 iPad(wide)继续保留桌面式左右分栏。
