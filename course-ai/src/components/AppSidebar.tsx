@@ -249,7 +249,6 @@ export function AppSidebar({
                     aria-current={video.id === selectedVideoId ? "true" : undefined}
                     onClick={() => onOpenVideo?.(video.id)}
                   >
-                    <Play className="h-3.5 w-3.5 flex-none" />
                     <span className="nm">{displayTitle(video.title)}</span>
                   </button>
                 ))}
