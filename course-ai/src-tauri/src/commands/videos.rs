@@ -211,6 +211,20 @@ pub async fn add_local_video(
         )));
     }
 
+    // 防重导入：同课程已存在相同文件的「未删除」视频时，直接返回它，不再新建重复行。
+    // 这正是回收站里出现「同一文件多条」的根源——同一文件被导入多次生成了多条视频。
+    let file_path_str = file_path.to_string_lossy().to_string();
+    if let Some(existing) = sqlx::query_as::<_, Video>(
+        "SELECT * FROM videos WHERE course_id=? AND file_path=? AND deleted_at IS NULL LIMIT 1",
+    )
+    .bind(course_id)
+    .bind(&file_path_str)
+    .fetch_optional(&db.pool)
+    .await?
+    {
+        return Ok(existing);
+    }
+
     let id = Uuid::new_v4().to_string();
     let title = display_title_from_path(&file_path);
     let data_dir = video_data_dir(&file_path, &id, override_root.as_deref());
@@ -737,6 +751,19 @@ mod tests {
         restore_video(&db, &video_id).await.unwrap();
         assert_eq!(list_videos(&db, &course_id).await.unwrap().len(), 1);
         assert!(list_trashed(&db).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn add_local_video_is_idempotent_for_the_same_file() {
+        let dir = tempdir().unwrap();
+        let (db, course_id, video_id) = seed_video(&dir).await;
+
+        // 再次导入同课程下的同一文件：返回已存在的视频，不新建重复行（防重导入）。
+        let again = add_local_video(&db, &course_id, dir.path().join("01.mp4"), None)
+            .await
+            .unwrap();
+        assert_eq!(again.id, video_id);
+        assert_eq!(list_videos(&db, &course_id).await.unwrap().len(), 1);
     }
 
     #[tokio::test]
