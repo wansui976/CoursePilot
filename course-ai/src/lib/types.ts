@@ -66,6 +66,7 @@ export interface TrashedVideo {
   title: string;
   course_id: string;
   course_name: string;
+  duration_ms: number | null;
   deleted_at: number;
   expires_at: number;
 }

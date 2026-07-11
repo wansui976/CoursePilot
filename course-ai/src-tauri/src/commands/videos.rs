@@ -333,6 +333,7 @@ pub struct TrashedVideo {
     pub title: String,
     pub course_id: String,
     pub course_name: String,
+    pub duration_ms: Option<i64>,
     pub deleted_at: i64,
     pub expires_at: i64,
 }
@@ -395,7 +396,7 @@ pub async fn purge_video(db: &Db, id: &str) -> AppResult<()> {
 pub async fn list_trashed(db: &Db) -> AppResult<Vec<TrashedVideo>> {
     let retention = TRASH_RETENTION_DAYS * DAY_MS;
     Ok(sqlx::query_as::<_, TrashedVideo>(
-        "SELECT v.id, v.title, v.course_id, c.name AS course_name,
+        "SELECT v.id, v.title, v.course_id, c.name AS course_name, v.duration_ms,
                 v.deleted_at AS deleted_at, v.deleted_at + ? AS expires_at
          FROM videos v JOIN courses c ON v.course_id=c.id
          WHERE v.deleted_at IS NOT NULL
@@ -808,6 +809,8 @@ mod tests {
         assert_eq!(trash.len(), 1);
         assert_eq!(trash[0].course_name, "c");
         assert!(trash[0].expires_at > trash[0].deleted_at);
+        // 回收站行要展示时长（seed 视频没写 duration，允许为 None 但字段必须存在）。
+        assert_eq!(trash[0].duration_ms, None);
 
         restore_video(&db, &video_id).await.unwrap();
         assert_eq!(list_videos(&db, &course_id).await.unwrap().len(), 1);
