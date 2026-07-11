@@ -62,9 +62,14 @@ export const ipc = {
     delete: (id: string): Promise<void> => invoke("cmd_delete_video", { id }),
     restore: (id: string): Promise<void> => invoke("cmd_restore_video", { id }),
     purge: (id: string): Promise<void> => invoke("cmd_purge_video", { id }),
+    // 手动排序：orderedIds 须为该课程当前全部视频 id 的新顺序。
+    reorder: (courseId: string, orderedIds: string[]): Promise<void> =>
+      invoke("cmd_reorder_videos", { courseId, orderedIds }),
   },
   trash: {
     list: (): Promise<TrashedVideo[]> => invoke("cmd_list_trash"),
+    // 清空回收站，返回清除数量。
+    purgeAll: (): Promise<number> => invoke("cmd_purge_trash"),
   },
   secrets: {
     // 保存敏感凭证（ASR/OCR 密钥）到密钥存储。
