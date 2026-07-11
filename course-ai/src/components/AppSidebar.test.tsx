@@ -113,29 +113,20 @@ describe("AppSidebar", () => {
     expect(screen.queryByRole("button", { name: "课程视频" })).not.toBeInTheDocument();
   });
 
-  it("workbench collapsed rail: logo goes back, list button opens the video flyout", () => {
+  it("workbench collapsed rail: logo goes back, and drops the library queue button", () => {
     const onBackToLibrary = vi.fn();
-    const onOpenVideo = vi.fn();
     renderSidebar({
       collapsed: true,
       view: "workbench",
-      courseName: "申论课程",
       videos: [video],
       selectedVideoId: "video-1",
       onBackToLibrary,
-      onOpenVideo,
     });
     expect(screen.queryByRole("button", { name: "处理队列" })).not.toBeInTheDocument();
+    // 「课程视频」按钮及其弹层已移除;视频列表改由展开态侧栏内联提供。
+    expect(screen.queryByRole("button", { name: "课程视频" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "返回课程库" }));
     expect(onBackToLibrary).toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "课程视频" }));
-    const flyout = screen.getByRole("dialog", { name: "课程视频列表" });
-    expect(flyout).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /底层逻辑/ }));
-    expect(onOpenVideo).toHaveBeenCalledWith("video-1");
-    // 选择后弹层关闭
-    expect(screen.queryByRole("dialog", { name: "课程视频列表" })).not.toBeInTheDocument();
   });
 
   it("workbench expanded: inlines the current course videos under the selected course", async () => {

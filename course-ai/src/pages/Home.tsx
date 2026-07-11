@@ -1104,7 +1104,6 @@ export function Home() {
           onToggleCollapsed={toggleSidebarCollapsed}
           selectedCourseId={selectedCourseId}
           onSelectCourse={selectCourse}
-          courseName={selectedCourse?.name}
           videos={videos}
           selectedVideoId={selectedVideoId}
           onOpenVideo={openVideo}

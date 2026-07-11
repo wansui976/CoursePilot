@@ -2,22 +2,17 @@ import {
   Book,
   ClipboardList,
   Library,
-  List,
   Loader2,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
-  Play,
   Plus,
   Settings,
   Sun,
   Trash2,
-  X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/ui/ErrorNote";
-import { IconButton } from "@/components/ui/icon-button";
 import { CourseList, useCreateCourse } from "@/components/CourseList";
 import { displayTitle } from "@/lib/videoTitle";
 import type { Video } from "@/lib/types";
@@ -29,7 +24,6 @@ export function AppSidebar({
   onToggleCollapsed,
   selectedCourseId,
   onSelectCourse,
-  courseName,
   videos = [],
   selectedVideoId = null,
   onOpenVideo,
@@ -48,7 +42,6 @@ export function AppSidebar({
   onToggleCollapsed: () => void;
   selectedCourseId: string | null;
   onSelectCourse: (id: string) => void;
-  courseName?: string;
   videos?: Video[];
   selectedVideoId?: string | null;
   onOpenVideo?: (id: string) => void;
@@ -63,12 +56,6 @@ export function AppSidebar({
   onToggleQueue: () => void;
 }) {
   const { createCourse, creatingCourse, createError } = useCreateCourse();
-
-  // 折叠态「课程视频」弹层开关;离开工作台自动关(组件跨视图常驻,不重挂)。
-  const [videosOpen, setVideosOpen] = useState(false);
-  useEffect(() => {
-    if (view !== "workbench") setVideosOpen(false);
-  }, [view]);
 
   if (collapsed) {
     return (
@@ -108,17 +95,6 @@ export function AppSidebar({
               {queueCount > 0 && <span className="rail-badge">{queueCount}</span>}
             </button>
           )}
-          {view === "workbench" && (
-            <button
-              className={`rail-btn ${videosOpen ? "active" : ""}`}
-              title="课程视频"
-              aria-label="课程视频"
-              aria-expanded={videosOpen}
-              onClick={() => setVideosOpen((open) => !open)}
-            >
-              <List className="h-5 w-5" />
-            </button>
-          )}
           <div className="rail-sp" />
           <button
             className="rail-btn"
@@ -145,39 +121,6 @@ export function AppSidebar({
             <Settings className="h-5 w-5" />
           </button>
         </nav>
-        {view === "workbench" && videosOpen && (
-          <>
-            <div className="ca-rail-flyout-scrim" onClick={() => setVideosOpen(false)} />
-            <div className="ca-rail-flyout" role="dialog" aria-label="课程视频列表">
-              <div className="ca-rail-flyout-head">
-                <span className="t">{courseName ?? "课程视频"}</span>
-                <IconButton aria-label="关闭" onClick={() => setVideosOpen(false)}>
-                  <X className="h-4 w-4" />
-                </IconButton>
-              </div>
-              <div className="ca-rail-flyout-list">
-                {videos.map((video) => (
-                  <button
-                    key={video.id}
-                    type="button"
-                    className={`ca-rail-flyout-item ${video.id === selectedVideoId ? "on" : ""}`}
-                    aria-current={video.id === selectedVideoId ? "true" : undefined}
-                    onClick={() => {
-                      onOpenVideo?.(video.id);
-                      setVideosOpen(false);
-                    }}
-                  >
-                    <Play className="h-3.5 w-3.5 flex-none" />
-                    <span className="nm">{displayTitle(video.title)}</span>
-                  </button>
-                ))}
-                {videos.length === 0 && (
-                  <div className="ca-rail-flyout-empty">该课程暂无视频</div>
-                )}
-              </div>
-            </div>
-          </>
-        )}
       </>
     );
   }
