@@ -30,6 +30,18 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
     mutationFn: (id: string) => ipc.videos.purge(id),
     onSuccess: refresh,
   });
+  const purgeAll = useMutation({
+    mutationFn: () => ipc.trash.purgeAll(),
+    onSuccess: refresh,
+  });
+
+  async function confirmPurgeAll() {
+    const ok = await confirmDialog(
+      `清空回收站？共 ${items.length} 个视频。\n此操作无法撤销。`,
+      { title: "清空回收站", kind: "warning", okLabel: "清空", cancelLabel: "取消" },
+    );
+    if (ok) purgeAll.mutate();
+  }
 
   async function confirmPurge(item: TrashedVideo) {
     const ok = await confirmDialog(
@@ -58,6 +70,16 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
             删除的视频保留 30 天，到期自动清除；期间可恢复
           </p>
         </div>
+        {items.length > 0 && (
+          <button
+            onClick={() => void confirmPurgeAll()}
+            disabled={purgeAll.isPending}
+            className="ca-touch-44 ml-auto inline-flex flex-none items-center gap-1 rounded-md px-3 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            清空回收站
+          </button>
+        )}
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
