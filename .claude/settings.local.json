@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sudo -n true)",
+      "Bash(ls -la /workspace/..)",
+      "Bash(/usr/local/bin/pnpm --version)",
+      "Read(//usr/local/lib/node_modules/corepack/dist/**)",
+      "Bash(whisper-cli --help)",
+      "Read(//usr/local/bin/**)",
+      "Read(//opt/**)",
+      "Bash(ffmpeg -version)",
+      "Bash(pkg-config --list-all)",
+      "Bash(pkg-config --modversion openssl)",
+      "Bash(curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs)",
+      "Bash(sh -s -- -y --default-toolchain stable --profile minimal)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git config *)",
+      "Bash(pnpm -v)",
+      "Bash(cargo --version)",
+      "Bash(ls src-tauri/target)",
+      "Bash(timeout 580 cargo test --lib)",
+      "WebFetch(domain:www.volcengine.com)",
+      "Bash(CARGO_HOME=/home/node/.cargo cargo test volcengine)",
+      "Bash(pnpm vitest *)",
+      "Bash(node -e \"console.log\\(process.platform, process.arch\\)\")",
+      "Bash(pnpm add *)",
+      "Bash(pnpm install *)",
+      "Bash(CARGO_HOME=/home/node/.cargo cargo test ai:: summary prompts)",
+      "Bash(CARGO_HOME=/home/node/.cargo cargo test)",
+      "Bash(pnpm tsc *)",
+      "Bash(CARGO_HOME=/home/node/.cargo cargo test asr)",
+      "Bash(cargo check *)",
+      "Bash(pnpm exec *)",
+      "Skill(code-review)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "sequential-thinking"
+  ]
+}
