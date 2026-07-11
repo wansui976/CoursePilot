@@ -18,6 +18,7 @@ import { DevConsole } from "@/components/DevConsole";
 import { ImportVideoButton } from "@/components/ImportVideoDialog";
 import { SettingsPanel } from "@/components/SettingsDialog";
 import { TabsPanel } from "@/components/TabsPanel";
+import { SortableVideoItem, SortableVideos } from "@/components/SortableVideos";
 import { VideoCover } from "@/components/VideoCover";
 import { VideoPlayer } from "@/components/VideoPlayer";
 import { BottomTabBar, type CompactTab } from "@/components/BottomTabBar";
@@ -169,6 +170,25 @@ export function Home() {
   const selectedCourse = courses.find(
     (course) => course.id === selectedCourseId,
   );
+
+  const reorderVideos = useMutation({
+    mutationFn: (orderedIds: string[]) =>
+      ipc.videos.reorder(selectedCourseId!, orderedIds),
+    // 乐观更新：拖放一松手就按新顺序渲染；后端失败时 onError 拉回真实顺序。
+    onMutate: (orderedIds) => {
+      queryClient.setQueryData<Video[]>(["videos", selectedCourseId], (old) => {
+        if (!old) return old;
+        const byId = new Map(old.map((video) => [video.id, video]));
+        const next = orderedIds.flatMap((id) => byId.get(id) ?? []);
+        return next.length === old.length ? next : old;
+      });
+    },
+    onError: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["videos", selectedCourseId],
+      });
+    },
+  });
 
   function changeView(next: LibraryView) {
     setView(next);
@@ -943,18 +963,40 @@ export function Home() {
               />
             </div>
           ) : view === "list" ? (
-            <div className="ca-list">
-              <div className="ca-list-head">
-                <span>名称</span>
-                <span className="h-dur">时长</span>
-                <span className="h-status">状态</span>
+            <SortableVideos
+              ids={videos.map((video) => video.id)}
+              layout="list"
+              disabled={renamingVideo !== null}
+              onReorder={(orderedIds) => reorderVideos.mutate(orderedIds)}
+            >
+              <div className="ca-list">
+                <div className="ca-list-head">
+                  <span>名称</span>
+                  <span className="h-dur">时长</span>
+                  <span className="h-status">状态</span>
+                </div>
+                {videos.map((video) => (
+                  <SortableVideoItem key={video.id} id={video.id}>
+                    {renderVideoListRow(video)}
+                  </SortableVideoItem>
+                ))}
               </div>
-              {videos.map((video) => renderVideoListRow(video))}
-            </div>
+            </SortableVideos>
           ) : (
-            <div className="ca-grid">
-              {videos.map((video) => renderVideoGridCard(video))}
-            </div>
+            <SortableVideos
+              ids={videos.map((video) => video.id)}
+              layout="grid"
+              disabled={renamingVideo !== null}
+              onReorder={(orderedIds) => reorderVideos.mutate(orderedIds)}
+            >
+              <div className="ca-grid">
+                {videos.map((video) => (
+                  <SortableVideoItem key={video.id} id={video.id}>
+                    {renderVideoGridCard(video)}
+                  </SortableVideoItem>
+                ))}
+              </div>
+            </SortableVideos>
           )}
         </div>
       </div>
