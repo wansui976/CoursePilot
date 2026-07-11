@@ -70,6 +70,28 @@ pub fn parse_srt(input: &str) -> Vec<SubSegment> {
     out
 }
 
+/// 该视频是否应做字幕 AI 纠错：视频级偏好（B站导入时勾选）优先，
+/// NULL 回落全局设置 subtitle_autocorrect（默认开）。是否有可用 LLM 由调用方再判。
+pub async fn autocorrect_enabled(db: &Db, video_id: &str) -> AppResult<bool> {
+    let per_video: Option<Option<bool>> =
+        sqlx::query_scalar("SELECT subtitle_autocorrect FROM videos WHERE id=?")
+            .bind(video_id)
+            .fetch_optional(&db.pool)
+            .await?;
+    if let Some(Some(preference)) = per_video {
+        return Ok(preference);
+    }
+    Ok(
+        sqlx::query_scalar::<_, String>(
+            "SELECT value FROM settings WHERE key='subtitle_autocorrect'",
+        )
+        .fetch_optional(&db.pool)
+        .await?
+        .map(|value| value != "false")
+        .unwrap_or(true),
+    )
+}
+
 /// 消化一份 SRT 字幕：解析 → 存原始快照(bilibili_sub) → 写文稿 →（可选）AI 纠错。
 /// 返回写入的段数。
 pub async fn ingest_subtitle(
@@ -142,6 +164,63 @@ mod tests {
         assert_eq!(segs.len(), 2);
         assert_eq!(segs[0].start_ms, 1500);
         assert_eq!(segs[1].start_ms, 60_000);
+    }
+
+    async fn seed_video_for_gate(
+        dir: &tempfile::TempDir,
+    ) -> (crate::db::Db, String) {
+        let db = crate::db::Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let vpath = dir.path().join("v.mp4");
+        std::fs::write(&vpath, b"x").unwrap();
+        let video = crate::commands::videos::add_local_video(&db, &course.id, vpath, None)
+            .await
+            .unwrap();
+        (db, video.id)
+    }
+
+    #[tokio::test]
+    async fn autocorrect_gate_prefers_per_video_over_global() {
+        let dir = tempfile::tempdir().unwrap();
+        let (db, video_id) = seed_video_for_gate(&dir).await;
+
+        // 都未设置：默认开。
+        assert!(autocorrect_enabled(&db, &video_id).await.unwrap());
+
+        // 全局关、视频未设置 → 跟随全局：关。
+        sqlx::query("INSERT INTO settings(key,value) VALUES('subtitle_autocorrect','false')")
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        assert!(!autocorrect_enabled(&db, &video_id).await.unwrap());
+
+        // 视频级 true 覆盖全局 false。
+        sqlx::query("UPDATE videos SET subtitle_autocorrect=1 WHERE id=?")
+            .bind(&video_id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        assert!(autocorrect_enabled(&db, &video_id).await.unwrap());
+
+        // 视频级 false 覆盖全局 true。
+        sqlx::query("UPDATE settings SET value='true' WHERE key='subtitle_autocorrect'")
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE videos SET subtitle_autocorrect=0 WHERE id=?")
+            .bind(&video_id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        assert!(!autocorrect_enabled(&db, &video_id).await.unwrap());
     }
 
     #[tokio::test]

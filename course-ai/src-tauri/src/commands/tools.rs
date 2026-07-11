@@ -95,6 +95,7 @@ pub async fn cmd_import_bilibili(
     url: String,
     max_height: Option<u32>,
     sub_lang: Option<String>,
+    subtitle_autocorrect: Option<bool>,
 ) -> AppResult<Video> {
     if is_mobile_os(std::env::consts::OS) {
         return Err(crate::error::AppError::Config(
@@ -123,17 +124,22 @@ pub async fn cmd_import_bilibili(
         .await?;
     video.source_type = "bilibili".into();
     video.source_uri = Some(url);
-    // 若下到了字幕，挂到 video 上供流水线消化。
+    // 若下到了字幕，挂到 video 上供流水线消化；一并记录导入时选的纠错偏好
+    // （NULL = 跟随全局设置），后续「重新处理」也按它来。
     if let (Some(lang), Some(sub_path)) = (sub_lang.as_deref(), result.subtitle.as_ref()) {
         let p = sub_path.to_string_lossy().to_string();
-        sqlx::query("UPDATE videos SET subtitle_path=?, subtitle_lang=? WHERE id=?")
-            .bind(&p)
-            .bind(lang)
-            .bind(&video.id)
-            .execute(&state.db.pool)
-            .await?;
+        sqlx::query(
+            "UPDATE videos SET subtitle_path=?, subtitle_lang=?, subtitle_autocorrect=? WHERE id=?",
+        )
+        .bind(&p)
+        .bind(lang)
+        .bind(subtitle_autocorrect)
+        .bind(&video.id)
+        .execute(&state.db.pool)
+        .await?;
         video.subtitle_path = Some(p);
         video.subtitle_lang = Some(lang.to_string());
+        video.subtitle_autocorrect = subtitle_autocorrect;
     }
     crate::commands::videos::apply_detected_crop(&state.db, &mut video).await;
     Ok(video)

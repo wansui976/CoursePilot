@@ -232,8 +232,16 @@ export const ipc = {
       url: string,
       maxHeight?: number,
       subLang?: string,
+      // 本次导入的字幕 AI 纠错偏好；undefined = 跟随全局设置。
+      subtitleAutocorrect?: boolean,
     ): Promise<Video> =>
-      invoke("cmd_import_bilibili", { courseId, url, maxHeight, subLang }),
+      invoke("cmd_import_bilibili", {
+        courseId,
+        url,
+        maxHeight,
+        subLang,
+        subtitleAutocorrect,
+      }),
     probeBilibili: (url: string): Promise<ProbeResult> =>
       invoke("cmd_probe_bilibili", { url }),
     setBilibiliCookies: (filePath: string): Promise<void> =>
