@@ -32,6 +32,8 @@ pub struct Video {
     pub processed_status: String,
     pub subtitle_path: Option<String>,
     pub subtitle_lang: Option<String>,
+    // 视频级字幕 AI 纠错偏好；NULL = 跟随全局设置。
+    pub subtitle_autocorrect: Option<bool>,
     // 自带黑边的四边裁剪占比（0~1），导入时 cropdetect 探测；NULL=未探测/无黑边。
     pub crop_top: Option<f64>,
     pub crop_right: Option<f64>,
@@ -250,6 +252,7 @@ pub async fn add_local_video(
         processed_status: "pending".into(),
         subtitle_path: None,
         subtitle_lang: None,
+        subtitle_autocorrect: None,
         crop_top: None,
         crop_right: None,
         crop_bottom: None,

@@ -256,14 +256,8 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
         emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.3, "导入 B站自带字幕").await?;
         let srt_text = tokio::fs::read_to_string(&sub_path).await?;
 
-        // 是否对字幕走 AI 纠错：设置开关 + 有可用大模型。
-        let autocorrect = sqlx::query_scalar::<_, String>(
-            "SELECT value FROM settings WHERE key='subtitle_autocorrect'",
-        )
-        .fetch_optional(&db.pool)
-        .await?
-        .map(|v| v != "false")
-        .unwrap_or(true);
+        // 是否对字幕走 AI 纠错：视频级偏好（导入时勾选）> 全局开关，再要求有可用大模型。
+        let autocorrect = subtitle::autocorrect_enabled(&db, &video_id).await?;
         let correct = if autocorrect {
             crate::commands::ai::first_available_provider_for_db(&db).await?
         } else {

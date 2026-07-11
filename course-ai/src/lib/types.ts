@@ -23,6 +23,8 @@ export interface Video {
   created_at: number;
   subtitle_path?: string | null;
   subtitle_lang?: string | null;
+  // 视频级字幕 AI 纠错偏好（B站导入时勾选）；缺省/NULL = 跟随全局设置。
+  subtitle_autocorrect?: boolean | null;
   // 自带黑边四边裁剪占比（0~1），导入时 cropdetect 探测；缺省/NULL=无黑边。
   crop_top?: number | null;
   crop_right?: number | null;

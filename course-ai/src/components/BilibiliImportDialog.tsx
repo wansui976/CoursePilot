@@ -21,6 +21,8 @@ export function BilibiliImportDialog({
   const [probe, setProbe] = useState<ProbeResult | null>(null);
   const [quality, setQuality] = useState<number | undefined>(undefined);
   const [subLang, setSubLang] = useState<string | undefined>(undefined);
+  // 本次导入是否对字幕做 AI 纠错；探测成功后用全局设置初始化为默认值。
+  const [autocorrect, setAutocorrect] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // cookie 步骤是「首次缺失」还是「登录态失效需重导」，用于切换引导文案。
   const [cookieReason, setCookieReason] = useState<"missing" | "expired">(
@@ -43,6 +45,11 @@ export function BilibiliImportDialog({
         r.tracks.find((t) => t.lang === "ai-zh") ??
         r.tracks[0];
       setSubLang(def?.lang);
+      // 纠错勾选默认值取全局设置（未设置视为开，与流水线一致）。
+      const globalAutocorrect = await ipc.settings
+        .get("subtitle_autocorrect")
+        .catch(() => null);
+      setAutocorrect(globalAutocorrect !== "false");
       setStep("confirm");
     } catch (e) {
       const msg = String(e);
@@ -89,6 +96,8 @@ export function BilibiliImportDialog({
         url.trim(),
         quality,
         useSub ? subLang : undefined,
+        // 纠错偏好只对带字幕导入有意义；不带字幕不写偏好（保持 NULL）。
+        useSub ? autocorrect : undefined,
       ),
     onSuccess: (video, useSub) => {
       queryClient.invalidateQueries({ queryKey: ["videos", courseId] });
@@ -230,6 +239,18 @@ export function BilibiliImportDialog({
                     </option>
                   ))}
                 </select>
+                <label className="mt-2 flex items-center gap-2 text-xs text-[var(--text-normal)]">
+                  <input
+                    type="checkbox"
+                    checked={autocorrect}
+                    onChange={(e) => setAutocorrect(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-[var(--accent,#888)]"
+                  />
+                  下载后用 AI 纠错字幕
+                </label>
+                <p className="mt-1 text-xs text-[var(--text-faint)]">
+                  未配置大模型时将跳过纠错
+                </p>
               </div>
             ) : (
               <p className="text-xs text-[var(--text-faint)]">
