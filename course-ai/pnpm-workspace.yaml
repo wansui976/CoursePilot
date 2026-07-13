@@ -1,2 +1,14 @@
 allowBuilds:
   esbuild: true
+
+# 项目目录在 Mac 与 Linux 开发容器间共享同一份 node_modules：
+# 同时安装两个平台的原生二进制（tauri-cli/esbuild/rollup 等可选依赖），
+# 任何一边 install 后另一边仍可直接运行，不再互相破坏。
+supportedArchitectures:
+  os:
+    - darwin
+    - linux
+  cpu:
+    - arm64
+  libc:
+    - glibc
