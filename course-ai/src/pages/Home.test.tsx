@@ -425,7 +425,7 @@ describe("Home", () => {
     const sidebar = screen.getByRole("complementary", { name: "课程侧栏" });
     expect(
       within(sidebar).getByRole("button", { name: /底层逻辑/ }),
-    ).toHaveAttribute("aria-current", "true");
+    ).toHaveAttribute("aria-current", "page");
   });
 
   it("recovers backend processing tasks after the home view remounts", async () => {
