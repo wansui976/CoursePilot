@@ -110,6 +110,8 @@ export function Home() {
   const customAccent = useTheme((s) => s.customAccent);
   const toggleTheme = useTheme((s) => s.toggle);
   const [view, setView] = useState<LibraryView>(readInitialView);
+  // 库内标题过滤（前端过滤，不落存储；切课程时清空）。
+  const [videoQuery, setVideoQuery] = useState("");
   const [openMenuVideoId, setOpenMenuVideoId] = useState<string | null>(null);
   const [renamingVideo, setRenamingVideo] = useState<{
     id: string;
@@ -180,6 +182,14 @@ export function Home() {
   const selectedCourse = courses.find(
     (course) => course.id === selectedCourseId,
   );
+
+  const normalizedQuery = videoQuery.trim().toLowerCase();
+  // 过滤只影响展示；排序、菜单上移/下移等按全量 videos 计算。
+  const visibleVideos = normalizedQuery
+    ? videos.filter((video) =>
+        displayTitle(video.title).toLowerCase().includes(normalizedQuery),
+      )
+    : videos;
 
   const reorderVideos = useMutation({
     mutationFn: (orderedIds: string[]) =>
@@ -563,12 +573,14 @@ export function Home() {
   function selectCourse(id: string) {
     setSelectedCourseId(id);
     setSelectedVideoId(null);
+    setVideoQuery("");
     closeMainOverlays();
   }
 
   function clearCourseSelection() {
     setSelectedCourseId(null);
     setSelectedVideoId(null);
+    setVideoQuery("");
     closeMainOverlays();
   }
 
@@ -735,12 +747,13 @@ export function Home() {
         >
           修改标题
         </MenuItem>
-        {index > 0 && (
+        {/* 过滤态下移动的是全量列表位置、界面上看不出效果，藏掉避免困惑。 */}
+        {!normalizedQuery && index > 0 && (
           <MenuItem className="ca-touch-44" onClick={() => moveTo(index - 1)}>
             上移
           </MenuItem>
         )}
-        {index !== -1 && index < videos.length - 1 && (
+        {!normalizedQuery && index !== -1 && index < videos.length - 1 && (
           <MenuItem className="ca-touch-44" onClick={() => moveTo(index + 1)}>
             下移
           </MenuItem>
@@ -973,6 +986,18 @@ export function Home() {
           {selectedCourseId && (
             <div className="tb-actions">
               {videos.length > 0 && (
+                <input
+                  aria-label="搜索视频"
+                  placeholder="搜索视频"
+                  className="tb-search"
+                  value={videoQuery}
+                  onChange={(event) => setVideoQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setVideoQuery("");
+                  }}
+                />
+              )}
+              {videos.length > 0 && (
                 <div className="ca-seg">
                   {(
                     [
@@ -1023,11 +1048,20 @@ export function Home() {
                 }
               />
             </div>
+          ) : visibleVideos.length === 0 ? (
+            <div className="flex h-full min-h-[320px] items-center justify-center">
+              <EmptyState
+                icon={<Film className="h-7 w-7" />}
+                title="没有匹配的视频"
+                description={`没有标题包含「${videoQuery.trim()}」的视频。`}
+              />
+            </div>
           ) : view === "list" ? (
             <SortableVideos
-              ids={videos.map((video) => video.id)}
+              ids={visibleVideos.map((video) => video.id)}
               layout="list"
-              disabled={renamingVideo !== null}
+              // 过滤态禁用拖拽：子集顺序映射不回全量，后端也会按 id 全集校验拒绝。
+              disabled={renamingVideo !== null || normalizedQuery !== ""}
               onReorder={(orderedIds) => reorderVideos.mutate(orderedIds)}
             >
               <div className="ca-list">
@@ -1036,7 +1070,7 @@ export function Home() {
                   <span className="h-dur">时长</span>
                   <span className="h-status">状态</span>
                 </div>
-                {videos.map((video) => (
+                {visibleVideos.map((video) => (
                   <SortableVideoItem key={video.id} id={video.id}>
                     {renderVideoListRow(video)}
                   </SortableVideoItem>
@@ -1045,13 +1079,13 @@ export function Home() {
             </SortableVideos>
           ) : (
             <SortableVideos
-              ids={videos.map((video) => video.id)}
+              ids={visibleVideos.map((video) => video.id)}
               layout="grid"
-              disabled={renamingVideo !== null}
+              disabled={renamingVideo !== null || normalizedQuery !== ""}
               onReorder={(orderedIds) => reorderVideos.mutate(orderedIds)}
             >
               <div className="ca-grid">
-                {videos.map((video) => (
+                {visibleVideos.map((video) => (
                   <SortableVideoItem key={video.id} id={video.id}>
                     {renderVideoGridCard(video)}
                   </SortableVideoItem>

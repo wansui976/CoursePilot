@@ -623,6 +623,24 @@ select:focus-visible {
   flex: 0 0 auto;
 }
 
+/* 顶栏搜索框：与视图切换段同高，窄屏靠 topbar 的 flex-wrap 换行。 */
+.tb-search {
+  width: 160px;
+  height: 38px;
+  flex: 0 1 auto;
+  min-width: 0;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-input);
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--text-1);
+}
+
+.tb-search::placeholder {
+  color: var(--text-4);
+}
+
 .ca-seg {
   display: inline-flex;
   background: var(--bg-sunken);
