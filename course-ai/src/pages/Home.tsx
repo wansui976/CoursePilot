@@ -711,6 +711,15 @@ export function Home() {
 
   function videoMenu(video: Video) {
     if (openMenuVideoId !== video.id) return null;
+    const index = videos.findIndex((item) => item.id === video.id);
+    // 拖拽排序的键盘/无障碍替代：与相邻项交换位置，走同一个乐观更新 mutation。
+    const moveTo = (targetIndex: number) => {
+      setOpenMenuVideoId(null);
+      const ids = videos.map((item) => item.id);
+      const [moved] = ids.splice(index, 1);
+      ids.splice(targetIndex, 0, moved);
+      reorderVideos.mutate(ids);
+    };
     return (
       <Menu
         aria-label="视频操作菜单"
@@ -726,16 +735,16 @@ export function Home() {
         >
           修改标题
         </MenuItem>
-        <MenuItem
-          tone="danger"
-          className="ca-touch-44 mt-1 border-t border-[var(--border-subtle)] pt-2.5"
-          onClick={() => {
-            setOpenMenuVideoId(null);
-            void deleteVideo(video.id);
-          }}
-        >
-          删除
-        </MenuItem>
+        {index > 0 && (
+          <MenuItem className="ca-touch-44" onClick={() => moveTo(index - 1)}>
+            上移
+          </MenuItem>
+        )}
+        {index !== -1 && index < videos.length - 1 && (
+          <MenuItem className="ca-touch-44" onClick={() => moveTo(index + 1)}>
+            下移
+          </MenuItem>
+        )}
         <MenuItem
           className="ca-touch-44"
           onClick={() => {
@@ -753,6 +762,17 @@ export function Home() {
               ? "纠错中…"
               : "重新纠错"
             : "开始处理"}
+        </MenuItem>
+        {/* 危险操作放最后并用分隔线隔开，避免夹在常规操作中间被误点。 */}
+        <MenuItem
+          tone="danger"
+          className="ca-touch-44 mt-1 border-t border-[var(--border-subtle)] pt-2.5"
+          onClick={() => {
+            setOpenMenuVideoId(null);
+            void deleteVideo(video.id);
+          }}
+        >
+          删除
         </MenuItem>
       </Menu>
     );

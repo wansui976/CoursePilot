@@ -21,6 +21,7 @@ const { mockIpc } = vi.hoisted(() => ({
       cover: vi.fn(),
       updateTitle: vi.fn(),
       delete: vi.fn(),
+      reorder: vi.fn(),
     },
     pipeline: {
       process: vi.fn(),
@@ -119,6 +120,8 @@ describe("Home", () => {
     mockIpc.videos.cover.mockResolvedValue([]);
     mockIpc.videos.updateTitle.mockResolvedValue({ ...video, title: "重命名.mp4" });
     mockIpc.videos.delete.mockResolvedValue(undefined);
+    mockIpc.videos.reorder.mockReset();
+    mockIpc.videos.reorder.mockResolvedValue(undefined);
     mockIpc.pipeline.process.mockResolvedValue(undefined);
     mockIpc.pipeline.jobs.mockResolvedValue([]);
     mockIpc.ai.generate.mockResolvedValue(undefined);
@@ -497,6 +500,44 @@ describe("Home", () => {
     await waitFor(() =>
       expect(mockIpc.videos.updateTitle).toHaveBeenCalledWith(video.id, "重命名.mp4"),
     );
+  });
+
+  it("offers move up/down in the video menu as a keyboard-accessible reorder path", async () => {
+    // 拖拽排序没有键盘替代（刻意去掉了 dnd-kit 的键盘支持），菜单里补上移/下移。
+    const video2: Video = {
+      ...video,
+      id: "video-2",
+      title: "02.第二课.mp4",
+      order_index: 1,
+    };
+    mockIpc.videos.list.mockResolvedValueOnce([video, video2]);
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    await screen.findByText(displayTitle(video2.title));
+
+    fireEvent.click(screen.getAllByRole("button", { name: "视频操作" })[0]);
+    // 第一个视频没有「上移」，只有「下移」。
+    expect(screen.queryByRole("menuitem", { name: "上移" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "下移" }));
+
+    await waitFor(() =>
+      expect(mockIpc.videos.reorder).toHaveBeenCalledWith("course-1", [
+        "video-2",
+        "video-1",
+      ]),
+    );
+  });
+
+  it("keeps the destructive delete action last in the video menu", async () => {
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /视频操作/ }));
+
+    const items = screen.getAllByRole("menuitem");
+    expect(items[items.length - 1]).toHaveTextContent("删除");
   });
 
   it("keeps the status badge away from the video action menu", async () => {
