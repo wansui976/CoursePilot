@@ -28,6 +28,19 @@ export interface WhisperModel {
   url: string;
 }
 
+/** 学习统计：按本地日聚合的观看毫秒。 */
+export interface DayTotal {
+  day: string;
+  watched_ms: number;
+}
+
+/** 学习统计：每门课累计观看毫秒与最近学习时刻。 */
+export interface CourseTotal {
+  course_id: string;
+  watched_ms: number;
+  last_ts: number;
+}
+
 export const ipc = {
   courses: {
     list: (): Promise<Course[]> => invoke("cmd_list_courses"),
@@ -70,6 +83,16 @@ export const ipc = {
     list: (): Promise<TrashedVideo[]> => invoke("cmd_list_trash"),
     // 清空回收站，返回清除数量。
     purgeAll: (): Promise<number> => invoke("cmd_purge_trash"),
+  },
+  stats: {
+    // 记一段实际观看毫秒（<=0 后端忽略）。
+    logWatch: (videoId: string, watchedMs: number): Promise<void> =>
+      invoke("cmd_log_watch", { videoId, watchedMs }),
+    // [fromTs,toTs] 内按本地日聚合的观看毫秒（升序）。
+    dailyTotals: (fromTs: number, toTs: number): Promise<DayTotal[]> =>
+      invoke("cmd_daily_totals", { fromTs, toTs }),
+    // 每门课累计观看时长与最近学习时刻。
+    courseTotals: (): Promise<CourseTotal[]> => invoke("cmd_course_totals"),
   },
   secrets: {
     // 保存敏感凭证（ASR/OCR 密钥）到密钥存储。
