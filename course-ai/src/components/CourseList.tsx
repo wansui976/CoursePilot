@@ -60,6 +60,7 @@ export function CourseList({
 }: {
   selectedCourseId: string | null;
   onSelect: (id: string) => void;
+  onClearSelection?: () => void;
   queueOpen?: boolean;
   /** 渲染在「选中课程」条目正下方(工作台内联视频列表插槽)。 */
   selectedCourseExtra?: ReactNode;
@@ -115,6 +116,7 @@ export function CourseList({
       if (id === selectedCourseId) {
         const next = courses.find((course) => course.id !== id);
         if (next) onSelect(next.id);
+        else onClearSelection?.();
       }
     },
   });

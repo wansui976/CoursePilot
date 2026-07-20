@@ -1,12 +1,16 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VideoPlayer } from ".";
 
 const setFullscreen = vi.hoisted(() => vi.fn());
+const mockEnsureCrop = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/ipc", () => ({
-  ipc: { transcripts: { list: vi.fn().mockResolvedValue([]) } },
+  ipc: {
+    transcripts: { list: vi.fn().mockResolvedValue([]) },
+    videos: { ensureCrop: mockEnsureCrop },
+  },
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -20,6 +24,11 @@ vi.mock("@/lib/platform", () => ({
   isTablet: () => false,
   isDesktop: () => false,
 }));
+
+beforeEach(() => {
+  mockEnsureCrop.mockReset();
+  mockEnsureCrop.mockResolvedValue({ top: 0, right: 0, bottom: 0, left: 0 });
+});
 
 function renderPlayer(immersive = true) {
   const queryClient = new QueryClient({
@@ -109,6 +118,48 @@ describe("VideoPlayer iOS gestures", () => {
 
     expect(setCurrentTime).toHaveBeenCalled();
     expect(setCurrentTime.mock.calls[setCurrentTime.mock.calls.length - 1]?.[0]).toBeGreaterThan(30);
+  });
+
+  it("bases repeated scrub moves on the initial time", () => {
+    renderPlayer();
+    const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
+    const gestureLayer = screen.getByLabelText("课程视频手势层");
+    const setCurrentTime = vi.fn();
+    let currentTime = 30;
+
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      get: () => currentTime,
+      set: (value: number) => {
+        currentTime = value;
+        setCurrentTime(value);
+      },
+    });
+    Object.defineProperty(video, "duration", {
+      configurable: true,
+      get: () => 120,
+    });
+
+    fireEvent.pointerDown(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 100,
+      clientY: 100,
+    });
+    fireEvent.pointerMove(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 120,
+      clientY: 104,
+    });
+    fireEvent.pointerMove(gestureLayer, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 130,
+      clientY: 104,
+    });
+
+    expect(setCurrentTime.mock.calls.map(([value]) => value)).toEqual([32, 33]);
   });
 
   it("seeks backward on left swipe", () => {

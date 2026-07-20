@@ -308,6 +308,20 @@ describe("Home", () => {
     expect(screen.getByLabelText("已观看 17%")).toBeInTheDocument();
   });
 
+  it("marks fully watched videos instead of leaving them identical to unwatched", async () => {
+    // ratio ≥ 0.995 时进度条隐藏；没有任何标记的话「看完」和「没看过」长一样。
+    localStorage.setItem(posKey(video.id), "3600");
+    localStorage.setItem(durKey(video.id), "3600");
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    await screen.findByText(displayTitle(video.title));
+
+    expect(screen.getByText("已看完")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/已观看/)).not.toBeInTheDocument();
+  });
+
   it("restores the saved study panel width for the selected video", async () => {
     writeVideoResumeState(video.id, { studyPanelWidth: 620 });
 

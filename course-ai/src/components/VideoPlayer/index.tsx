@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { NO_INSETS, contentAspect, cropStyle } from "@/lib/blackBars";
 import { ipc } from "@/lib/ipc";
 import { posKey, durKey } from "@/lib/playback";
 import { isIOS } from "@/lib/platform";
@@ -25,6 +26,7 @@ type GestureState = {
   pointerId: number;
   startX: number;
   startY: number;
+  startTime: number;
   startRate: number;
   startVolume: number;
   startBrightness: number;
@@ -56,6 +58,7 @@ export function VideoPlayer({
   const [controlsHeight, setControlsHeight] = useState(0);
   const lastSavedRef = useRef(0);
   const [videoAspect, setVideoAspect] = useState(16 / 9);
+  const [videoMetadataReady, setVideoMetadataReady] = useState(false);
   const [region, setRegion] = useState({ w: 0, h: 0 });
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
@@ -90,6 +93,12 @@ export function VideoPlayer({
     queryFn: () => ipc.transcripts.list(videoId),
     refetchInterval: (query) =>
       query.state.data && query.state.data.length > 0 ? false : 2000,
+  });
+  const { data: cropInsets = NO_INSETS } = useQuery({
+    queryKey: ["video-crop", videoId],
+    queryFn: () => ipc.videos.ensureCrop(videoId),
+    staleTime: Infinity,
+    retry: false,
   });
 
   // 字幕跳转用：始终持有按 start_ms 排好序的最新分句，供键盘处理器读取（避免闭包过期）。
@@ -169,8 +178,19 @@ export function VideoPlayer({
     setRegion((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
   }, [resizing]);
 
+  useEffect(() => {
+    setVideoAspect(16 / 9);
+    setVideoMetadataReady(false);
+  }, [videoId]);
+
   // 在播放区内，求与视频同比例、尽可能大的居中矩形；视频铺满它即完整无黑边。
-  const aspect = videoAspect > 0 ? videoAspect : 16 / 9;
+  const effectiveCrop = videoMetadataReady ? cropInsets : NO_INSETS;
+  const aspect =
+    videoMetadataReady && videoAspect > 0
+      ? contentAspect(videoAspect, effectiveCrop)
+      : videoAspect > 0
+        ? videoAspect
+        : 16 / 9;
   const stageBox = (() => {
     const { w, h } = region;
     if (!w || !h) return null;
@@ -276,6 +296,7 @@ export function VideoPlayer({
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
+      startTime: video?.currentTime ?? 0,
       startRate: video?.playbackRate ?? rate,
       startVolume: volume,
       startBrightness: brightness,
@@ -342,7 +363,7 @@ export function VideoPlayer({
       gesture.swiped = true;
       const video = ref.current;
       if (!video) return;
-      const next = video.currentTime + (dx * SCRUB_MS_PER_PIXEL) / 1000;
+      const next = gesture.startTime + (dx * SCRUB_MS_PER_PIXEL) / 1000;
       if (Number.isFinite(video.duration) && video.duration > 0) {
         video.currentTime = Math.min(video.duration, Math.max(0, next));
       } else {
@@ -591,6 +612,7 @@ export function VideoPlayer({
             // 提升到独立 GPU 合成层：暂停后让这一帧留在自己的层上，减少回退到
             // 「栅格化再缩放」的软化；backface-visibility 进一步固定层、避免半像素抖动。
             style={{
+              ...(stageBox ? cropStyle(stageBox, effectiveCrop) : {}),
               transform: "translateZ(0)",
               willChange: "transform",
               backfaceVisibility: "hidden",
@@ -620,6 +642,7 @@ export function VideoPlayer({
               const { videoWidth, videoHeight } = video;
               if (videoWidth > 0 && videoHeight > 0) {
                 setVideoAspect(videoWidth / videoHeight);
+                setVideoMetadataReady(true);
               }
               // 断点续播：恢复上次离开的位置。
               const saved = Number(localStorage.getItem(posKey(videoId)));
