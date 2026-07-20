@@ -56,11 +56,18 @@ pub async fn cmd_rag_query_stream(
     history: Vec<ChatMessage>,
     request_id: String,
 ) -> AppResult<()> {
-    // provider 解析放在返回前：配置错误（未配 Profile 等）能立刻通过命令返回值报给前端。
-    let (provider, chat_model) = rag_provider(&state).await?;
-    let db = state.db.clone();
+    // 必须在首次 await 前登记：前端提交后会立即显示“停止”，配置读取期间也应可取消。
     let cancel = state.register_cancel(&request_id);
-    let cancels = state.rag_cancels.clone();
+    // provider 解析放在返回前：配置错误（未配 Profile 等）能立刻通过命令返回值报给前端。
+    let (provider, chat_model) = match rag_provider(&state).await {
+        Ok(provider) => provider,
+        Err(error) => {
+            state.unregister_cancel(&request_id, &cancel);
+            return Err(error);
+        }
+    };
+    let db = state.db.clone();
+    let task_state = state.inner().clone();
 
     tauri::async_runtime::spawn(async move {
         let event_name = format!("ask-stream:{request_id}");
@@ -86,17 +93,14 @@ pub async fn cmd_rag_query_stream(
                 },
             );
         }
-        cancels.lock().unwrap().remove(&request_id);
+        task_state.unregister_cancel(&request_id, &cancel);
     });
     Ok(())
 }
 
 /// 停止一个进行中的问答请求：置位其取消标志，流式循环会尽快停下并保留已生成部分。
 #[tauri::command]
-pub async fn cmd_cancel_rag_query(
-    state: State<'_, AppState>,
-    request_id: String,
-) -> AppResult<()> {
+pub async fn cmd_cancel_rag_query(state: State<'_, AppState>, request_id: String) -> AppResult<()> {
     state.cancel_rag(&request_id);
     Ok(())
 }

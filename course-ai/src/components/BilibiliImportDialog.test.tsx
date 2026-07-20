@@ -20,13 +20,17 @@ vi.mock("@/lib/ipc", () => ({
   ipc: { tools: mockTools, settings: mockSettings, pipeline: mockPipeline },
 }));
 
-function renderDialog() {
+function renderDialog(onStartProcessing?: Parameters<typeof BilibiliImportDialog>[0]["onStartProcessing"]) {
   const qc = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={qc}>
-      <BilibiliImportDialog courseId="c1" onClose={() => {}} />
+      <BilibiliImportDialog
+        courseId="c1"
+        onClose={() => {}}
+        onStartProcessing={onStartProcessing}
+      />
     </QueryClientProvider>,
   );
 }
@@ -85,6 +89,20 @@ describe("BilibiliImportDialog", () => {
     expect(await screen.findByText("示例视频")).toBeInTheDocument();
   });
 
+  it("shows cookie-check failures instead of leaving an unhandled rejection", async () => {
+    mockTools.hasBilibiliCookies.mockRejectedValue(new Error("cookie check failed"));
+    renderDialog();
+
+    fireEvent.change(screen.getByLabelText("视频链接"), {
+      target: { value: "https://b23.tv/abc" },
+    });
+    fireEvent.click(screen.getByText("下一步"));
+
+    expect(await screen.findByText(/cookie check failed/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下一步" })).toBeEnabled();
+    expect(mockTools.probeBilibili).not.toHaveBeenCalled();
+  });
+
   it("shows the AI-correct checkbox for subtitle imports, defaulting from the global setting", async () => {
     mockTools.hasBilibiliCookies.mockResolvedValue(true);
     mockSettings.get.mockResolvedValue("false"); // 全局设置关 → 默认不勾选
@@ -139,6 +157,28 @@ describe("BilibiliImportDialog", () => {
         false,
       ),
     );
+  });
+
+  it("hands subtitle auto-processing back to the home queue", async () => {
+    const onStartProcessing = vi.fn();
+    mockTools.hasBilibiliCookies.mockResolvedValue(true);
+    mockTools.probeBilibili.mockResolvedValue({
+      title: "示例视频",
+      qualities: [1080],
+      tracks: [{ lang: "zh-CN", name: "中文（中国）", auto: false }],
+    });
+    const imported = { id: "v1", title: "示例视频" };
+    mockTools.importBilibili.mockResolvedValue(imported);
+    renderDialog(onStartProcessing);
+
+    fireEvent.change(screen.getByLabelText("视频链接"), {
+      target: { value: "https://b23.tv/abc" },
+    });
+    fireEvent.click(screen.getByText("下一步"));
+    fireEvent.click(await screen.findByText("用所选字幕下载"));
+
+    await waitFor(() => expect(onStartProcessing).toHaveBeenCalledWith(imported));
+    expect(mockPipeline.process).not.toHaveBeenCalled();
   });
 
   it("omits the checkbox and the preference when the video has no subtitles", async () => {

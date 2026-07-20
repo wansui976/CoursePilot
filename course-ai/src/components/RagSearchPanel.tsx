@@ -527,7 +527,13 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                 <ErrorNote
                   className="min-w-0 flex-1"
                   error={ask.error}
-                  onRetry={() => ask.variables && ask.mutate(ask.variables)}
+                  onRetry={() =>
+                    ask.variables &&
+                    ask.mutate({
+                      ...ask.variables,
+                      requestId: crypto.randomUUID(),
+                    })
+                  }
                 />
               </div>
             )}

@@ -1,4 +1,4 @@
-use crate::commands::courses::AppState;
+use crate::commands::courses::{ensure_active_course, AppState};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::storage::video_data_dir;
@@ -212,6 +212,7 @@ pub async fn add_local_video(
             file_path.display()
         )));
     }
+    ensure_active_course(db, course_id).await?;
 
     // 防重导入：同课程已存在相同文件的「未删除」视频时，直接返回它，不再新建重复行。
     // 这正是回收站里出现「同一文件多条」的根源——同一文件被导入多次生成了多条视频。
@@ -296,11 +297,7 @@ pub async fn list_videos(db: &Db, course_id: &str) -> AppResult<Vec<Video>> {
 /// 手动排序：按 ordered_ids 的顺序重写该课程视频的 order_index（0,1,2…）。
 /// ordered_ids 必须与该课程当前未删除视频的 id 集合完全一致（不多、不少、不重复），
 /// 否则拒绝——防止并发导入/删除后按过期列表覆盖掉新视频的位置。
-pub async fn reorder_videos(
-    db: &Db,
-    course_id: &str,
-    ordered_ids: Vec<String>,
-) -> AppResult<()> {
+pub async fn reorder_videos(db: &Db, course_id: &str, ordered_ids: Vec<String>) -> AppResult<()> {
     let mut current: Vec<String> =
         sqlx::query_scalar("SELECT id FROM videos WHERE course_id=? AND deleted_at IS NULL")
             .bind(course_id)
@@ -370,29 +367,49 @@ pub async fn delete_video(db: &Db, id: &str) -> AppResult<()> {
 
 /// 从回收站恢复视频；若其课程也被软删除，一并恢复课程。
 pub async fn restore_video(db: &Db, id: &str) -> AppResult<()> {
-    sqlx::query(
-        "UPDATE courses SET deleted_at=NULL
-         WHERE id=(SELECT course_id FROM videos WHERE id=?)",
+    let mut tx = db.pool.begin().await?;
+    let course_id = sqlx::query_scalar::<_, String>(
+        "UPDATE videos SET deleted_at=NULL
+         WHERE id=? AND deleted_at IS NOT NULL
+         RETURNING course_id",
     )
     .bind(id)
-    .execute(&db.pool)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("trashed video {id}")))?;
+    sqlx::query(
+        "UPDATE courses SET deleted_at=NULL
+         WHERE id=?",
+    )
+    .bind(course_id)
+    .execute(&mut *tx)
     .await?;
-    let result = sqlx::query("UPDATE videos SET deleted_at=NULL WHERE id=?")
-        .bind(id)
-        .execute(&db.pool)
-        .await?;
-    if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(format!("video {id}")));
-    }
+    tx.commit().await?;
     Ok(())
 }
 
 /// 永久删除单个视频（连带其转写/笔记等衍生数据，经 FK 级联）。
 pub async fn purge_video(db: &Db, id: &str) -> AppResult<()> {
-    sqlx::query("DELETE FROM videos WHERE id=?")
-        .bind(id)
-        .execute(&db.pool)
-        .await?;
+    let mut tx = db.pool.begin().await?;
+    let course_id = sqlx::query_scalar::<_, String>(
+        "DELETE FROM videos
+         WHERE id=? AND deleted_at IS NOT NULL
+         RETURNING course_id",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("trashed video {id}")))?;
+    sqlx::query(
+        "DELETE FROM courses
+         WHERE id=? AND deleted_at IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM videos WHERE course_id=?)",
+    )
+    .bind(&course_id)
+    .bind(&course_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -412,33 +429,37 @@ pub async fn list_trashed(db: &Db) -> AppResult<Vec<TrashedVideo>> {
 
 /// 清空回收站：永久删除全部软删视频，再删掉没有任何视频的已软删课程。返回清除数量。
 pub async fn purge_trash(db: &Db) -> AppResult<u64> {
+    let mut tx = db.pool.begin().await?;
     let result = sqlx::query("DELETE FROM videos WHERE deleted_at IS NOT NULL")
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await?;
     sqlx::query(
         "DELETE FROM courses
          WHERE deleted_at IS NOT NULL
            AND id NOT IN (SELECT DISTINCT course_id FROM videos)",
     )
-    .execute(&db.pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(result.rows_affected())
 }
 
 /// 清理过期回收站：删除超过保留期的视频，再删掉没有任何视频的已软删课程。
 pub async fn purge_expired_trash(db: &Db) -> AppResult<u64> {
     let cutoff = Utc::now().timestamp_millis() - TRASH_RETENTION_DAYS * DAY_MS;
+    let mut tx = db.pool.begin().await?;
     let result = sqlx::query("DELETE FROM videos WHERE deleted_at IS NOT NULL AND deleted_at < ?")
         .bind(cutoff)
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await?;
     sqlx::query(
         "DELETE FROM courses
          WHERE deleted_at IS NOT NULL
            AND id NOT IN (SELECT DISTINCT course_id FROM videos)",
     )
-    .execute(&db.pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(result.rows_affected())
 }
 
@@ -466,7 +487,12 @@ pub async fn cmd_add_local_video(
             .join("videos"),
     );
 
-    let mut video = add_local_video(&state.db, &course_id, PathBuf::from(file_path), override_root)
+    let mut video = add_local_video(
+        &state.db,
+        &course_id,
+        PathBuf::from(file_path),
+        override_root,
+    )
     .await?;
     if duration_ms.is_some() {
         sqlx::query("UPDATE videos SET duration_ms=? WHERE id=?")
@@ -533,7 +559,12 @@ pub async fn cmd_update_video_title(
 }
 
 #[tauri::command]
-pub async fn cmd_delete_video(state: State<'_, AppState>, id: String) -> AppResult<()> {
+pub async fn cmd_delete_video(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<()> {
+    crate::pipeline::cancel_processing(&app, &id).await?;
     delete_video(&state.db, &id).await
 }
 
@@ -543,7 +574,12 @@ pub async fn cmd_restore_video(state: State<'_, AppState>, id: String) -> AppRes
 }
 
 #[tauri::command]
-pub async fn cmd_purge_video(state: State<'_, AppState>, id: String) -> AppResult<()> {
+pub async fn cmd_purge_video(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<()> {
+    crate::pipeline::cancel_processing(&app, &id).await?;
     purge_video(&state.db, &id).await
 }
 
@@ -821,6 +857,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn restore_and_purge_reject_active_videos() {
+        let dir = tempdir().unwrap();
+        let (db, course_id, video_id) = seed_video(&dir).await;
+
+        let restore_err = restore_video(&db, &video_id).await.unwrap_err();
+        assert!(matches!(restore_err, AppError::NotFound(_)));
+        let purge_err = purge_video(&db, &video_id).await.unwrap_err();
+        assert!(matches!(purge_err, AppError::NotFound(_)));
+        assert_eq!(list_videos(&db, &course_id).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn purging_last_video_removes_its_deleted_course() {
+        let dir = tempdir().unwrap();
+        let (db, course_id, video_id) = seed_video(&dir).await;
+        crate::commands::courses::delete_course(&db, course_id.clone())
+            .await
+            .unwrap();
+
+        purge_video(&db, &video_id).await.unwrap();
+
+        let course_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM courses WHERE id=?")
+            .bind(course_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(course_count, 0);
+    }
+
+    #[tokio::test]
     async fn add_local_video_is_idempotent_for_the_same_file() {
         let dir = tempdir().unwrap();
         let (db, course_id, video_id) = seed_video(&dir).await;
@@ -831,6 +897,28 @@ mod tests {
             .unwrap();
         assert_eq!(again.id, video_id);
         assert_eq!(list_videos(&db, &course_id).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn add_local_video_rejects_deleted_course() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        crate::commands::courses::delete_course(&db, course.id.clone())
+            .await
+            .unwrap();
+        let video_path = dir.path().join("late.mp4");
+        std::fs::write(&video_path, b"fake").unwrap();
+
+        let err = add_local_video(&db, &course.id, video_path, None)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, AppError::NotFound(_)));
     }
 
     #[tokio::test]

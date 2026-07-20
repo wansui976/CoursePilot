@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
-import type { ProbeResult } from "@/lib/types";
+import type { ProbeResult, Video } from "@/lib/types";
 
 type Step = "url" | "cookie" | "probing" | "confirm";
 type ImportRequest = {
@@ -17,9 +17,11 @@ type ImportRequest = {
 export function BilibiliImportDialog({
   courseId,
   onClose,
+  onStartProcessing,
 }: {
   courseId: string;
   onClose: () => void;
+  onStartProcessing?: (video: Video) => void;
 }) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>("url");
@@ -30,6 +32,7 @@ export function BilibiliImportDialog({
   // 本次导入是否对字幕做 AI 纠错；探测成功后用全局设置初始化为默认值。
   const [autocorrect, setAutocorrect] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [preparing, setPreparing] = useState(false);
   // cookie 步骤是「首次缺失」还是「登录态失效需重导」，用于切换引导文案。
   const [cookieReason, setCookieReason] = useState<"missing" | "expired">(
     "missing",
@@ -72,26 +75,45 @@ export function BilibiliImportDialog({
   };
 
   const pickCookie = async () => {
-    const file = await open({
-      multiple: false,
-      pickerMode: "document",
-      filters: [{ name: "cookies.txt", extensions: ["txt"] }],
-    });
-    if (!file || Array.isArray(file)) return;
-    await ipc.tools.setBilibiliCookies(file);
-    void runProbe();
+    if (preparing) return;
+    setError(null);
+    setPreparing(true);
+    try {
+      const file = await open({
+        multiple: false,
+        pickerMode: "document",
+        filters: [{ name: "cookies.txt", extensions: ["txt"] }],
+      });
+      if (!file || Array.isArray(file)) return;
+      await ipc.tools.setBilibiliCookies(file);
+      await runProbe();
+    } catch (e) {
+      setError(String(e));
+      setStep("cookie");
+    } finally {
+      setPreparing(false);
+    }
   };
 
   const startUrl = async () => {
+    if (preparing) return;
     setError(null);
-    // 只有确实导入了 cookies.txt（文件存在且非空）才放行；否则先引导导入，
-    // 避免设置里残留旧路径却在下载时报 412。
-    const hasCookies = await ipc.tools.hasBilibiliCookies();
-    if (!hasCookies) {
-      setCookieReason("missing");
-      setStep("cookie");
-    } else {
-      void runProbe();
+    setPreparing(true);
+    try {
+      // 只有确实导入了 cookies.txt（文件存在且非空）才放行；否则先引导导入，
+      // 避免设置里残留旧路径却在下载时报 412。
+      const hasCookies = await ipc.tools.hasBilibiliCookies();
+      if (!hasCookies) {
+        setCookieReason("missing");
+        setStep("cookie");
+      } else {
+        await runProbe();
+      }
+    } catch (e) {
+      setError(String(e));
+      setStep("url");
+    } finally {
+      setPreparing(false);
     }
   };
 
@@ -110,7 +132,8 @@ export function BilibiliImportDialog({
       // 选用了字幕：立即跑流水线，让字幕被消化成文稿（ASR 阶段会走字幕分支、
       // 跳过语音识别），用户无需再手动「开始处理」。
       if (request.useSub) {
-        void ipc.pipeline.process(video.id);
+        if (onStartProcessing) onStartProcessing(video);
+        else void ipc.pipeline.process(video.id);
       }
       onClose();
     },
@@ -152,8 +175,12 @@ export function BilibiliImportDialog({
               <Button size="sm" variant="outline" onClick={onClose}>
                 取消
               </Button>
-              <Button size="sm" disabled={!url.trim()} onClick={startUrl}>
-                下一步
+              <Button
+                size="sm"
+                disabled={!url.trim() || preparing}
+                onClick={startUrl}
+              >
+                {preparing ? "检查中…" : "下一步"}
               </Button>
             </div>
           </div>
@@ -189,8 +216,8 @@ export function BilibiliImportDialog({
               <Button size="sm" variant="outline" onClick={() => setStep("url")}>
                 返回
               </Button>
-              <Button size="sm" onClick={pickCookie}>
-                选择 cookies.txt
+              <Button size="sm" disabled={preparing} onClick={pickCookie}>
+                {preparing ? "导入中…" : "选择 cookies.txt"}
               </Button>
             </div>
           </div>
