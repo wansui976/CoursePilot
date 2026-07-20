@@ -296,6 +296,42 @@ describe("Home", () => {
     expect(wb.style.getPropertyValue("--study-panel-width")).toBe("480px");
   });
 
+  it("offers a continue-last banner after opening a video and returning to the library", async () => {
+    localStorage.setItem(posKey(video.id), "600");
+    localStorage.setItem(durKey(video.id), "3600");
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    // 打开视频会记录「该课程最近打开的视频」……
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+    await screen.findByRole("region", { name: "学习工作台" });
+    fireEvent.click(screen.getByRole("button", { name: "返回课程库" }));
+
+    // ……回到课程库后顶部给「继续上次」横幅，点击直达工作台（播放器自带断点续播）。
+    const banner = await screen.findByRole("button", { name: /继续上次/ });
+    expect(banner).toHaveTextContent(displayTitle(video.title));
+    expect(banner).toHaveTextContent("看到 10:00");
+
+    fireEvent.click(banner);
+    expect(await screen.findByRole("region", { name: "学习工作台" })).toBeInTheDocument();
+  });
+
+  it("hides the continue banner when the last video was watched through", async () => {
+    localStorage.setItem(posKey(video.id), "3600");
+    localStorage.setItem(durKey(video.id), "3600");
+    localStorage.setItem(`course-ai-last-video:${course.id}`, video.id);
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    await screen.findByText(displayTitle(video.title));
+
+    expect(
+      screen.queryByRole("button", { name: /继续上次/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it("does not show a separate continue-learning button for saved playback progress", async () => {
     localStorage.setItem(posKey(video.id), "600");
     localStorage.setItem(durKey(video.id), "3600");

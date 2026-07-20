@@ -6,6 +6,7 @@ import {
   LayoutGrid,
   List,
   MoreHorizontal,
+  Play,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
@@ -32,7 +33,11 @@ import { ipc } from "@/lib/ipc";
 import type { Video } from "@/lib/types";
 import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
-import { readPlaybackProgress } from "@/lib/playback";
+import {
+  readLastVideoId,
+  readPlaybackProgress,
+  writeLastVideoId,
+} from "@/lib/playback";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { isIOS, isTablet } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
@@ -216,6 +221,12 @@ export function Home() {
   }
 
   function openVideo(videoId: string) {
+    // 记录「该课程最近打开的视频」，回到课程库时给「继续上次」横幅。
+    // 用视频自己的 course_id（队列打开跨课程视频时 selectedCourseId 还是旧值）。
+    const target =
+      videos.find((video) => video.id === videoId) ??
+      queuedVideos.find((video) => video.id === videoId);
+    if (target) writeLastVideoId(target.course_id, videoId);
     const savedWidth = readVideoResumeState(videoId).studyPanelWidth;
     setStudyPanelWidth(
       savedWidth != null ? Math.min(720, Math.max(360, savedWidth)) : readPanelWidth(),
@@ -957,6 +968,32 @@ export function Home() {
     );
   }
 
+  // 「继续上次」横幅：该课程最近打开、且看了但没看完的视频，一键回到工作台
+  // （播放器自带断点续播）。搜索过滤时不显示（那会儿用户在找别的）。
+  function renderContinueBanner() {
+    if (!selectedCourseId || normalizedQuery) return null;
+    const lastId = readLastVideoId(selectedCourseId);
+    if (!lastId) return null;
+    const lastVideo = videos.find((video) => video.id === lastId);
+    if (!lastVideo) return null;
+    const progress = readPlaybackProgress(lastId);
+    if (progress.ratio <= 0 || progress.ratio >= WATCHED_RATIO) return null;
+    return (
+      <button
+        type="button"
+        className="ca-continue"
+        onClick={() => openVideo(lastId)}
+      >
+        <Play className="ic h-4 w-4" />
+        <span className="lbl">继续上次</span>
+        <span className="ttl">{displayTitle(lastVideo.title)}</span>
+        <span className="pos">
+          看到 {formatMs(Math.round(progress.positionSec * 1000))}
+        </span>
+      </button>
+    );
+  }
+
   function renderCourseVideoLibrary() {
     return (
       <div className="ca-main-col">
@@ -1022,6 +1059,7 @@ export function Home() {
           )}
         </header>
         <div className="ca-scroll">
+          {!videosError && renderContinueBanner()}
           {selectedCourseId && videosError ? (
             // 加载失败不再静默留空：显示错误 + 重试，用户能看到问题也能自助恢复。
             <div className="flex h-full min-h-[320px] items-center justify-center p-4">

@@ -4,9 +4,28 @@
 // 首页据此在封面上显示「看到哪了」的进度条，并补全 DB 里缺失的时长。
 const POS_PREFIX = "video-pos:";
 const DUR_PREFIX = "video-dur:";
+// - course-ai-last-video:<courseId>  该课程最近打开的视频（「继续上次」横幅的依据）
+const LAST_VIDEO_PREFIX = "course-ai-last-video:";
 
 export const posKey = (id: string) => POS_PREFIX + id;
 export const durKey = (id: string) => DUR_PREFIX + id;
+export const lastVideoKey = (courseId: string) => LAST_VIDEO_PREFIX + courseId;
+
+export function readLastVideoId(courseId: string): string | null {
+  try {
+    return localStorage.getItem(lastVideoKey(courseId));
+  } catch {
+    return null;
+  }
+}
+
+export function writeLastVideoId(courseId: string, videoId: string) {
+  try {
+    localStorage.setItem(lastVideoKey(courseId), videoId);
+  } catch {
+    // localStorage 不可用时静默放弃（只是少个横幅）。
+  }
+}
 
 export interface PlaybackProgress {
   /** 上次离开位置（秒），无记录为 0 */

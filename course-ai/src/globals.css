@@ -681,6 +681,61 @@ select:focus-visible {
   padding: 10px 30px 34px;
 }
 
+/* 「继续上次」横幅：课程库顶部一条，点击直达最近看的视频。 */
+.ca-continue {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 16px;
+  padding: 11px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--accent-weak);
+  color: var(--text-1);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+@media (hover: hover) {
+.ca-continue:hover {
+  background: var(--accent-weak-2);
+  border-color: var(--line-strong);
+}
+}
+
+.ca-continue .ic {
+  flex: 0 0 auto;
+  color: var(--accent-text);
+}
+
+.ca-continue .lbl {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--accent-text);
+}
+
+.ca-continue .ttl {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 550;
+}
+
+.ca-continue .pos {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
 .ca-grid {
   display: grid;
   gap: 18px;
