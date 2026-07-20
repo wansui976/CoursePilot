@@ -6,6 +6,7 @@ import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { VideoCover } from "@/components/VideoCover";
+import { ErrorNote } from "@/components/ui/ErrorNote";
 import type { TrashedVideo } from "@/lib/types";
 
 function daysLeft(expiresAt: number): number {
@@ -134,6 +135,13 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
 
   const busy =
     restoreMany.isPending || purgeMany.isPending || purgeAll.isPending;
+  // 恢复/删除失败以前是静默吞掉的：汇总最近一次操作错误，显式提示，别让用户以为成功了。
+  const opError =
+    restore.error ??
+    purge.error ??
+    restoreMany.error ??
+    purgeMany.error ??
+    purgeAll.error;
 
   function renderRow(item: TrashedVideo) {
     const left = daysLeft(item.expires_at);
@@ -256,8 +264,11 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
         <div className="mx-auto max-w-2xl">
+          {opError && <ErrorNote error={opError} className="mb-4" />}
           {isLoading ? (
-            <p className="p-4 text-sm text-[var(--text-faint)]">加载中…</p>
+            <p role="status" className="p-4 text-sm text-[var(--text-faint)]">
+              加载中…
+            </p>
           ) : items.length === 0 ? (
             <p className="p-6 text-center text-sm text-[var(--text-faint)]">
               回收站是空的

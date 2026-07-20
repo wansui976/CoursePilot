@@ -202,4 +202,15 @@ describe("RecycleBin 清空回收站", () => {
       screen.queryByRole("button", { name: "清空回收站" }),
     ).not.toBeInTheDocument();
   });
+
+  it("surfaces an alert when purge-all fails instead of failing silently", async () => {
+    mockIpc.trash.list.mockResolvedValue([trashedVideo("v1", "申论", 26)]);
+    mockIpc.trash.purgeAll.mockRejectedValue(new Error("磁盘忙"));
+    confirmMock.mockResolvedValue(true);
+    renderBin();
+
+    fireEvent.click(await screen.findByRole("button", { name: "清空回收站" }));
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+  });
 });
