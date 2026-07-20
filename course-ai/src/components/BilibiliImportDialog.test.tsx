@@ -232,4 +232,27 @@ describe("BilibiliImportDialog", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("选择 cookies.txt")).toBeInTheDocument();
   });
+
+  it("exposes modal dialog semantics labelled by its title", () => {
+    mockTools.hasBilibiliCookies.mockResolvedValue(true);
+    renderDialog();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveAccessibleName("下载 B站视频");
+  });
+
+  it("closes on Escape", () => {
+    mockTools.hasBilibiliCookies.mockResolvedValue(true);
+    const onClose = vi.fn();
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <BilibiliImportDialog courseId="c1" onClose={onClose} />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalled();
+  });
 });

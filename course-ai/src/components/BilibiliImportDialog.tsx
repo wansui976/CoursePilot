@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { humanizeError } from "@/lib/errors";
@@ -148,16 +148,32 @@ export function BilibiliImportDialog({
     },
   });
 
+  // 模态框基本无障碍：Esc 关闭（下载中不关，避免误触中断正在进行的导入）。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !importMutation.isPending) onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [importMutation.isPending]);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bili-import-title"
         className="w-[420px] rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-5 shadow-[var(--shadow-pop)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-3 text-sm font-semibold text-[var(--text-strong)]">
+        <h2
+          id="bili-import-title"
+          className="mb-3 text-sm font-semibold text-[var(--text-strong)]"
+        >
           下载 B站视频
         </h2>
 
@@ -165,12 +181,13 @@ export function BilibiliImportDialog({
           <div className="space-y-3">
             <input
               aria-label="视频链接"
+              autoFocus
               className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm outline-none focus:border-primary/70"
               placeholder="B 站 / 视频链接…"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
             />
-            {error && <p className="text-xs text-red-400">{humanizeError(error)}</p>}
+            {error && <p className="text-xs text-[var(--status-err)]">{humanizeError(error)}</p>}
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="outline" onClick={onClose}>
                 取消
@@ -208,7 +225,7 @@ export function BilibiliImportDialog({
               <li>回到这里选择刚导出的 cookies.txt</li>
             </ol>
             {error && (
-              <p className="whitespace-pre-wrap break-words text-xs text-red-400">
+              <p className="whitespace-pre-wrap break-words text-xs text-[var(--status-err)]">
                 {humanizeError(error)}
               </p>
             )}
@@ -291,7 +308,7 @@ export function BilibiliImportDialog({
               </p>
             )}
 
-            {error && <p className="text-xs text-red-400">{humanizeError(error)}</p>}
+            {error && <p className="text-xs text-[var(--status-err)]">{humanizeError(error)}</p>}
             <div className="flex justify-end gap-2">
               {probe.tracks.length > 0 && (
                 <Button
