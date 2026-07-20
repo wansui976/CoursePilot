@@ -198,7 +198,7 @@ export function AppSidebar({
                     key={video.id}
                     type="button"
                     className={`ca-side-video ${video.id === selectedVideoId ? "on" : ""}`}
-                    aria-current={video.id === selectedVideoId ? "true" : undefined}
+                    aria-current={video.id === selectedVideoId ? "page" : undefined}
                     onClick={() => onOpenVideo?.(video.id)}
                   >
                     <span className="nm">{displayTitle(video.title)}</span>
