@@ -24,7 +24,7 @@ export const SHORTCUT_ACTIONS: {
   { action: "prevSubtitle", label: "上一句字幕", hint: "无字幕时回退到快退 10 秒" },
   { action: "nextSubtitle", label: "下一句字幕", hint: "无字幕时回退到快进 10 秒" },
   { action: "seekBack", label: "快退 5 秒", hint: "长按连续快退" },
-  { action: "seekForward", label: "快进 5 秒", hint: "长按 3 倍速快进" },
+  { action: "seekForward", label: "快进 5 秒", hint: "长按 2 倍速快进" },
   { action: "volumeUp", label: "音量 +" },
   { action: "volumeDown", label: "音量 -" },
   { action: "mute", label: "静音" },

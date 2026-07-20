@@ -523,10 +523,12 @@ export function VideoPlayer({
   // 键盘快捷键：动作 → 按键的映射在设置里可改（见 stores/shortcuts）。空格在未被
   // 占用时永远兜底为播放/暂停。聚焦输入框时不拦截，避免影响打字。
   // 快退/快进键是 B 站式长短按：短按 ±5s（松键提交）；按住 ≥200ms 进入扫描——
-  // 快进 = 3 倍速播放、快退 = 周期回退，松开恢复原倍速。
+  // 快进 = 2 倍速播放、快退 = 周期回退，松开恢复原倍速。
+  // 2x 是 macOS WKWebView 完整逐帧解码的上限：超过 2x AVFoundation 会降级成
+  // 只渲染关键帧（约 1 秒 1 帧）；Blink（网页版/Windows）没有这个限制。
   useEffect(() => {
     const KEY_HOLD_MS = 200;
-    const KEY_HOLD_RATE = 3;
+    const KEY_HOLD_RATE = 2;
     const KEY_REWIND_TICK_MS = 200;
     const KEY_REWIND_STEP_S = 0.8;
 

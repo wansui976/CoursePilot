@@ -295,7 +295,7 @@ describe("VideoPlayer iOS gestures", () => {
     expect(setCurrentTime).toHaveBeenCalledWith(105);
   });
 
-  it("fast-forwards at 3x while the right arrow is held and restores on release", async () => {
+  it("fast-forwards at 2x while the right arrow is held and restores on release", async () => {
     vi.useFakeTimers();
     try {
       renderPlayer();
@@ -324,14 +324,14 @@ describe("VideoPlayer iOS gestures", () => {
         await vi.advanceTimersByTimeAsync(220);
       });
 
-      expect(setRate).toHaveBeenCalledWith(3);
-      expect(screen.getByText("3x 快进中")).toBeInTheDocument();
+      expect(setRate).toHaveBeenCalledWith(2);
+      expect(screen.getByText("2x 快进中")).toBeInTheDocument();
 
       fireEvent.keyUp(window, { key: "ArrowRight" });
       expect(setRate).toHaveBeenLastCalledWith(1);
       // 长按结束不追加短按的 +5s。
       expect(setCurrentTime).not.toHaveBeenCalled();
-      expect(screen.queryByText("3x 快进中")).not.toBeInTheDocument();
+      expect(screen.queryByText("2x 快进中")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
