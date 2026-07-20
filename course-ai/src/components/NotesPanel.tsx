@@ -162,27 +162,31 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       {...(showTimestamps ? {} : { "data-hide-timestamps": "" })}
       className="relative flex h-full flex-col"
     >
-      {/* 互斥的视图切换按钮组：用 aria-pressed 传达选中态。不用 role="tab"——外层
-          学习资料标签已有同名「笔记」tab，再嵌一层 tablist 会造成无障碍名重复。 */}
-      <div
-        role="group"
-        aria-label="学习工具"
-        className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2"
-      >
-        {VIEWS.map((v) => (
-          <button
-            key={v.key}
-            aria-pressed={view === v.key}
-            onClick={() => setView(v.key)}
-            className={`ca-touch-44 rounded px-2 py-1 text-xs ${
-              view === v.key
-                ? "bg-primary/20 text-primary"
-                : "text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)]"
-            }`}
-          >
-            {v.label}
-          </button>
-        ))}
+      {/* 互斥视图切换：做成 segmented control（凹槽轨道 + 凸起选中段），读作一个
+          整体控件，与外层下划线大字标签形成清晰的层级区分，而非两套割裂的标签样式。
+          用 aria-pressed 传达选中态；不用 role="tab"——外层已有同名「笔记」tab，
+          再嵌一层 tablist 会造成无障碍名重复。 */}
+      <div className="border-b border-[var(--border-subtle)] px-3 py-2">
+        <div
+          role="group"
+          aria-label="学习工具"
+          className="inline-flex items-center gap-0.5 rounded-lg bg-[var(--surface-card)] p-0.5"
+        >
+          {VIEWS.map((v) => (
+            <button
+              key={v.key}
+              aria-pressed={view === v.key}
+              onClick={() => setView(v.key)}
+              className={`ca-touch-44 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                view === v.key
+                  ? "bg-[var(--surface-panel)] text-[var(--text-strong)] shadow-sm"
+                  : "text-[var(--text-muted)] hover:text-[var(--text-normal)]"
+              }`}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
       </div>
       {generate.isError && (
         <ErrorNote
