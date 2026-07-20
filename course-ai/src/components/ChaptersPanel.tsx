@@ -3,12 +3,13 @@ import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import { ErrorNote } from "@/components/ui/ErrorNote";
+import { TextSkeleton } from "@/components/ui/skeleton";
 import { PanelActions } from "./PanelActions";
 
 export function ChaptersPanel({ videoId }: { videoId: string }) {
   const qc = useQueryClient();
   const requestSeek = usePlayer((s) => s.requestSeek);
-  const { data: chapters = [] } = useQuery({
+  const { data: chapters = [], isLoading } = useQuery({
     queryKey: ["chapters", videoId],
     queryFn: () => ipc.ai.getChapters(videoId),
   });
@@ -28,16 +29,18 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
             onRetry={() => generate.mutate()}
           />
         )}
-        {chapters.length === 0 && (
+        {isLoading ? (
+          <TextSkeleton lines={4} className="p-0" />
+        ) : chapters.length === 0 ? (
           <p className="text-sm text-[var(--text-faint)]">
-            还没有章节，字幕就绪后会自动生成，也可点右下角重新生成。
+            还没有章节，字幕就绪后会自动生成，也可点右下角生成。
           </p>
-        )}
+        ) : null}
         {chapters.map((c) => (
           <button
             key={c.id}
             onClick={() => requestSeek(c.start_ms)}
-            className="block w-full rounded px-2 py-2 text-left hover:bg-[var(--surface-card)]"
+            className="block w-full rounded px-2 py-2 text-left hover:bg-[var(--surface-card-hover)]"
           >
             <div className="flex items-baseline gap-2">
               <span className="text-xs text-primary">{formatMs(c.start_ms)}</span>
