@@ -225,6 +225,7 @@ export function CourseList({
             >
               <button
                 onClick={() => onSelect(course.id)}
+                aria-current={selected ? "page" : undefined}
                 className="ca-nav-button"
               >
                 <FolderOpen className="ic h-4 w-4" />
@@ -241,7 +242,8 @@ export function CourseList({
                 className={`ca-touch-44 mr-1 grid h-9 w-9 flex-none place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card)] hover:text-[var(--text-strong)] ${
                   isIOS() || menuFor === course.id || swipedCourseId === course.id
                     ? "opacity-100"
-                    : "opacity-0 group-hover:opacity-100"
+                    : // 键盘聚焦本行时也显现（group-focus-within），否则 Tab 到的是不可见控件。
+                      "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
                 }`}
               >
                 <MoreHorizontal className="h-5 w-5" />
