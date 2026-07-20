@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RagSearchPanel } from "./RagSearchPanel";
+import { useInlineAsk } from "@/stores/inlineAsk";
 
 const { mockIpc, mockConfirm, platformMock } = vi.hoisted(() => ({
   mockIpc: {
@@ -76,6 +77,40 @@ describe("RagSearchPanel", () => {
     mockIpc.ai.searchTranscript.mockReset();
     mockConfirm.mockReset();
     platformMock.mobile = false;
+    useInlineAsk.setState({ pending: null });
+  });
+
+  it("shows a context pill and injects the selected transcript into the next question", async () => {
+    mockIpc.ai.ragQueryStream.mockImplementation(streamResolving("已解释"));
+    renderAskPanel();
+
+    act(() => useInlineAsk.getState().askAbout("贝叶斯定理", 5000));
+
+    // 药丸出现，带出处时间戳与所选文字。
+    expect(await screen.findByText(/基于所选 00:05：贝叶斯定理/)).toBeInTheDocument();
+
+    const input = screen.getByLabelText("聊天内容");
+    fireEvent.change(input, { target: { value: "这是什么意思" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => expect(mockIpc.ai.ragQueryStream).toHaveBeenCalled());
+    const sentQuery = mockIpc.ai.ragQueryStream.mock.calls[0][1] as string;
+    expect(sentQuery).toContain("贝叶斯定理");
+    expect(sentQuery).toContain("这是什么意思");
+
+    // 消费后药丸清除。
+    expect(screen.queryByText(/基于所选/)).not.toBeInTheDocument();
+    expect(useInlineAsk.getState().pending).toBeNull();
+  });
+
+  it("clears the context pill when its ✕ is clicked", async () => {
+    renderAskPanel();
+    act(() => useInlineAsk.getState().askAbout("某段文字", null));
+
+    fireEvent.click(await screen.findByRole("button", { name: "移除所选上下文" }));
+
+    expect(screen.queryByText(/基于所选/)).not.toBeInTheDocument();
+    expect(useInlineAsk.getState().pending).toBeNull();
   });
 
   it("renders ask turns as chat bubbles and sends the previous turn as context", async () => {

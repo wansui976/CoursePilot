@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TextSkeleton } from "@/components/ui/skeleton";
 import {
@@ -6,6 +6,7 @@ import {
   type StudyTab,
   writeVideoResumeState,
 } from "@/lib/resumeState";
+import { useInlineAsk } from "@/stores/inlineAsk";
 
 // 重组件（tiptap / markmap / katex）按需懒加载，缩小首屏主包体积。
 const AiViewPanel = lazy(() =>
@@ -53,6 +54,13 @@ export const TabsPanel = memo(function TabsPanel({ videoId }: { videoId: string 
     setActiveTab(tab);
     writeVideoResumeState(videoId, { activeTab: tab });
   }
+
+  // 就地追问：用户在文稿里「问 AI」后跳到「学习」标签（提问视图由 NotesPanel 切换）。
+  const pendingAsk = useInlineAsk((s) => s.pending);
+  useEffect(() => {
+    if (pendingAsk) changeTab("学习");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAsk]);
 
   const panels: { tab: Tab; node: React.ReactNode }[] = [
     { tab: "AI 概览", node: <AiViewPanel videoId={videoId} /> },

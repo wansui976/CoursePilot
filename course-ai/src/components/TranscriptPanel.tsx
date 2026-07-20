@@ -10,6 +10,7 @@ import { ipc } from "@/lib/ipc";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
+import { useInlineAsk } from "@/stores/inlineAsk";
 import type { TranscriptSegment } from "@/lib/types";
 
 // 手动滚动后暂停「跟随播放自动居中」的时长；停手超过该窗口才恢复跟随。
@@ -45,7 +46,12 @@ const TranscriptRow = memo(function TranscriptRow({
       >
         {/* 文字占满整行宽度：纠错按钮改为绝对定位在右下角，不再在行内流式占位。 */}
         <button
-          onClick={() => onSeek(segment.start_ms)}
+          onClick={() => {
+            // 划选文字后抬手会触发这次 click——此时有非空选区，别误触跳转（留给「问 AI」）。
+            const sel = window.getSelection();
+            if (sel && !sel.isCollapsed) return;
+            onSeek(segment.start_ms);
+          }}
           className="block w-full px-2 py-1 text-left text-sm leading-relaxed"
         >
           <span className="mr-2 text-xs text-[var(--text-muted)]">
@@ -85,6 +91,13 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   const userScrollRef = useRef(0);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
+  // 就地追问：文稿里选中文字后，在选区上方浮出「问 AI」按钮。
+  const [askAnchor, setAskAnchor] = useState<{
+    left: number;
+    top: number;
+    text: string;
+    startMs: number | null;
+  } | null>(null);
   // 跟随播放的活动行下标。只在「跨段」时更新（见下方订阅），不随每个进度 tick 重渲染。
   const [activeRowIndex, setActiveRowIndex] = useState(-1);
 
@@ -249,6 +262,30 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     }, 400);
   }
 
+  // 选区结束（抬手）后计算「问 AI」浮层锚点：取选中文本 + 选区所在句的时间戳。
+  function refreshAskAnchor() {
+    const sel = window.getSelection();
+    const scroller = scrollerRef.current;
+    if (!sel || sel.isCollapsed || !scroller) {
+      setAskAnchor(null);
+      return;
+    }
+    const text = sel.toString().trim();
+    if (!text || !sel.anchorNode || !scroller.contains(sel.anchorNode)) {
+      setAskAnchor(null);
+      return;
+    }
+    const anchorEl =
+      sel.anchorNode.nodeType === Node.ELEMENT_NODE
+        ? (sel.anchorNode as Element)
+        : sel.anchorNode.parentElement;
+    const rowEl = anchorEl?.closest<HTMLElement>("[data-row]");
+    const index = rowEl ? Number(rowEl.getAttribute("data-row")) : -1;
+    const startMs = index >= 0 && rows[index] ? rows[index].start_ms : null;
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    setAskAnchor({ left: rect.left + rect.width / 2, top: rect.top, text, startMs });
+  }
+
   if (segments.length === 0) {
     return <p className="p-4 text-sm text-[var(--text-muted)]">字幕生成中或尚未开始</p>;
   }
@@ -274,7 +311,13 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
         // 大 DOM 标记:可见时主题切换走瞬切(见 stores/theme.ts hasVisibleHeavyDom),
         // 避免 VT 双全屏快照/全树过渡在数千节点上造成冻结;tab 非活动(display:none)不算在场。
         data-theme-heavy=""
-        onScroll={onScroll}
+        onScroll={() => {
+          onScroll();
+          setAskAnchor(null);
+        }}
+        onMouseDown={() => setAskAnchor(null)}
+        onMouseUp={refreshAskAnchor}
+        onTouchEnd={refreshAskAnchor}
         className="min-h-0 flex-1 overflow-y-auto py-2"
       >
         {chunks.map((chunk, chunkIndex) => (
@@ -336,6 +379,23 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
           </div>
         ))}
       </div>
+      {askAnchor && (
+        <button
+          type="button"
+          // 选区上方浮出；fixed + 视口坐标，不受滚动容器裁剪。
+          className="fixed z-50 -translate-x-1/2 -translate-y-full rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-white shadow-lg"
+          style={{ left: askAnchor.left, top: askAnchor.top - 6 }}
+          // 别让按钮抢焦点而清掉选区（文本/时间戳已存进 askAnchor，读取本就安全）。
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            useInlineAsk.getState().askAbout(askAnchor.text, askAnchor.startMs);
+            window.getSelection()?.removeAllRanges();
+            setAskAnchor(null);
+          }}
+        >
+          问 AI
+        </button>
+      )}
     </div>
   );
 }

@@ -18,6 +18,7 @@ import { MathNode } from "./notes/mathNode";
 import { RagSearchPanel } from "./RagSearchPanel";
 import { TimestampToggle } from "./TimestampToggle";
 import { useTimestampPrefs } from "@/stores/timestampPrefs";
+import { useInlineAsk } from "@/stores/inlineAsk";
 
 // markmap 较重，仅在切到「脑图」时才加载。
 const QuizPanel = lazy(() =>
@@ -39,6 +40,11 @@ const VIEWS: { key: View; label: string; task?: "notes" | "quiz" | "mindmap" }[]
 
 export function NotesPanel({ videoId }: { videoId: string }) {
   const [view, setView] = useState<View>("notes");
+  // 就地追问：待处理上下文出现时自动切到「提问」视图（外层标签由 TabsPanel 切换）。
+  const pendingAsk = useInlineAsk((s) => s.pending);
+  useEffect(() => {
+    if (pendingAsk) setView("ask");
+  }, [pendingAsk]);
   const showTimestamps = useTimestampPrefs((s) => s.showTimestamps);
   const qc = useQueryClient();
   const rootRef = useRef<HTMLDivElement>(null);
