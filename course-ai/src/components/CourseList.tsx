@@ -55,6 +55,7 @@ export function useCreateCourse() {
 export function CourseList({
   selectedCourseId,
   onSelect,
+  onClearSelection,
   queueOpen = false,
   selectedCourseExtra,
 }: {
