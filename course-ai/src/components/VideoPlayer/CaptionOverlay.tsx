@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { MATH_RE } from "@/lib/markdownToTiptap";
 
 // KaTeX 较重，仅在字幕真含公式时按需加载，避免拖累播放器首屏。
@@ -64,7 +64,8 @@ export function CaptionOverlay({
   text: string;
   // 定位参照容器：「舞台」区域（含黑边），字幕可在其内任意拖动/缩放。
   containerRef: React.RefObject<HTMLDivElement | null>;
-  // 底部控制栏遮住舞台底部的像素数：字幕落入此区时上移，浮在控制栏之上。
+  // 底部控制栏的占位高度（像素）：字幕落入此区时上移，保证永远在控制栏上方。
+  // 传实测高度而非「可见时才传」——控制栏是悬浮出没的，字幕位置不应随之跳动。
   bottomInset?: number;
 }) {
   const [box, setBox] = useState<Box>(loadBox);
@@ -74,12 +75,18 @@ export function CaptionOverlay({
   // 拖动/缩放期间置真：此时字幕跟手直改 top/left，不抬升、也不过渡，避免抽搐。
   const [dragging, setDragging] = useState(false);
 
-  // 用 layout effect 在绘制前同步量高，首帧字号即正确（避免先小后大的跳变）。
-  useLayoutEffect(() => {
+  // 必须用 passive effect 量高：containerRef 指向「祖先」节点，React 提交顺序里
+  // 子组件的 layout effect 先于祖先 host ref 附上——layout 阶段读 ref 永远是 null，
+  // 且 deps 不变不会重跑，stageHeight 会永远卡在 0（字号恒为最小、避让失效）。
+  // passive effect 在 ref 全部附上后运行；组件随播放器常驻挂载、首帧字幕文本为空，
+  // 不存在「先小后大」的首帧跳变。
+  useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const update = () => setStageHeight(el.clientHeight);
     update();
+    // jsdom / 极旧 WebView 无 ResizeObserver：至少量一次，尺寸变化不再跟踪。
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(update);
     observer.observe(el);
     return () => observer.disconnect();
@@ -180,7 +187,7 @@ export function CaptionOverlay({
     120,
   );
 
-  // 字幕上移量：仅当控制栏可见（bottomInset>0）且字幕底边探入其遮挡区时才抬起，
+  // 字幕上移量：字幕底边探入控制栏占位区（bottomInset）时抬起，
   // 且不超过其顶边余量（避免顶出画面）。拖动/缩放期间不抬升——字幕直接跟手，松手后再归位。
   const captionBottomPx = (box.top + box.height) * stageHeight;
   const safeBottomPx = stageHeight - bottomInset - CAPTION_BAR_GAP;

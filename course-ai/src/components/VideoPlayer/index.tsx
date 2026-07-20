@@ -701,18 +701,16 @@ export function VideoPlayer({
           )}
         </div>
         {/* 字幕定位相对「舞台」区域（含黑边），因此可拖到整个舞台内任意处，不限于视频画面框。
-            控制栏悬浮遮住舞台底部 controlsHeight 像素，可见时把落入该区的字幕上移浮到其上方。 */}
+            控制栏悬浮遮住舞台底部 controlsHeight 像素：字幕**常年**避开该占位区，
+            而不是等控制栏可见才躲——否则每次唤出控制栏都先盖住字幕、等过渡完才让开，
+            字幕还会随控制栏出没上下跳。 */}
         {/* 只按 captionsOn 挂载（不按 caption），换句时不卸载重挂——避免重挂时先以 0 高度
             算出最小字号、量到真实高度后再瞬间变大的跳变。空文本时组件内部返回 null。 */}
         {captionsOn && (
           <CaptionOverlay
             text={caption ?? ""}
             containerRef={regionRef}
-            bottomInset={
-              (immersive ? controlsVisible : desktopControlsVisible)
-                ? controlsHeight
-                : 0
-            }
+            bottomInset={controlsHeight}
           />
         )}
       </div>
