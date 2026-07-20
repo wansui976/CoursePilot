@@ -5,6 +5,7 @@ pub mod export;
 pub mod rag;
 pub mod settings;
 pub mod slides;
+pub mod stats;
 pub mod tools;
 pub mod transcripts;
 pub mod videos;

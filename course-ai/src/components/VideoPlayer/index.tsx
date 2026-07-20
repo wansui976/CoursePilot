@@ -5,6 +5,7 @@ import { NO_INSETS, contentAspect, cropStyle } from "@/lib/blackBars";
 import { ipc } from "@/lib/ipc";
 import { posKey, durKey } from "@/lib/playback";
 import { isIOS } from "@/lib/platform";
+import { useWatchLogger } from "@/lib/useWatchLogger";
 import { usePlayer } from "@/stores/player";
 import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
 import { CaptionOverlay } from "./CaptionOverlay";
@@ -61,6 +62,8 @@ export function VideoPlayer({
   const [videoMetadataReady, setVideoMetadataReady] = useState(false);
   const [region, setRegion] = useState({ w: 0, h: 0 });
   const [playing, setPlaying] = useState(false);
+  // 把「播放中时长」记入学习事件日志（供仪表盘统计 / 间隔重复排期）。
+  useWatchLogger(videoId, playing);
   const [rate, setRate] = useState(1);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);

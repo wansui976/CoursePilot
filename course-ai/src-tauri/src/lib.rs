@@ -32,6 +32,7 @@ use crate::commands::slides::{
     cmd_capture_frame, cmd_extract_slides, cmd_get_screenshots, cmd_get_slides,
     cmd_read_slide_image,
 };
+use crate::commands::stats::{cmd_course_totals, cmd_daily_totals, cmd_log_watch};
 use crate::commands::tools::{
     cmd_has_bilibili_cookies, cmd_import_bilibili, cmd_ocr_region, cmd_probe_bilibili,
     cmd_set_bilibili_cookies,
@@ -149,6 +150,9 @@ pub fn run() {
             cmd_import_bilibili,
             cmd_probe_bilibili,
             cmd_set_bilibili_cookies,
+            cmd_log_watch,
+            cmd_daily_totals,
+            cmd_course_totals,
             cmd_has_bilibili_cookies
         ])
         .run(tauri::generate_context!())
