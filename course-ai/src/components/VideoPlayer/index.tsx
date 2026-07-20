@@ -83,10 +83,18 @@ export function VideoPlayer({
   const [caption, setCaption] = useState<string | undefined>(undefined);
   const [brightness, setBrightness] = useState(1);
   const [gestureHint, setGestureHint] = useState<{
-    kind: "brightness" | "volume" | "scrub";
+    kind: "brightness" | "volume" | "scrub" | "rate" | "rewind";
     value: number;
   } | null>(null);
   const gestureHintTimerRef = useRef<number | undefined>(undefined);
+  // 方向键长按快进/快退（B 站式）的进行中状态（见键盘快捷键 effect）。
+  const keyScanRef = useRef<{
+    action: "seekBack" | "seekForward";
+    engaged: boolean;
+    timer: number;
+    interval?: number;
+    prevRate?: number;
+  } | null>(null);
 
   const { data: segments = [] } = useQuery({
     queryKey: ["transcripts", videoId],
@@ -514,7 +522,34 @@ export function VideoPlayer({
 
   // 键盘快捷键：动作 → 按键的映射在设置里可改（见 stores/shortcuts）。空格在未被
   // 占用时永远兜底为播放/暂停。聚焦输入框时不拦截，避免影响打字。
+  // 快退/快进键是 B 站式长短按：短按 ±5s（松键提交）；按住 ≥300ms 进入扫描——
+  // 快进 = 3 倍速播放、快退 = 周期回退，松开恢复原倍速。
   useEffect(() => {
+    const KEY_HOLD_MS = 300;
+    const KEY_HOLD_RATE = 3;
+    const KEY_REWIND_TICK_MS = 200;
+    const KEY_REWIND_STEP_S = 0.8;
+
+    // 结束长按流程。commitTap（keyup）：未进入扫描则补上短按 ±5s；
+    // blur/卸载不补——用户没有完成一次「按一下」，且失焦后 keyup 会丢。
+    const endKeyScan = (commitTap: boolean) => {
+      const scan = keyScanRef.current;
+      if (!scan) return;
+      keyScanRef.current = null;
+      window.clearTimeout(scan.timer);
+      if (scan.interval) window.clearInterval(scan.interval);
+      const video = ref.current;
+      if (scan.engaged) {
+        if (video && scan.prevRate != null) video.playbackRate = scan.prevRate;
+        setGestureHint(null);
+      } else if (commitTap && video) {
+        video.currentTime =
+          scan.action === "seekBack"
+            ? Math.max(0, video.currentTime - 5)
+            : video.currentTime + 5;
+      }
+    };
+
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (
@@ -541,11 +576,33 @@ export function VideoPlayer({
           else video.pause();
           break;
         case "seekBack":
-          video.currentTime = Math.max(0, video.currentTime - 5);
+        case "seekForward": {
+          // 系统 auto-repeat 不打断长按流程；一次只允许一个方向键在按住。
+          if (event.repeat || keyScanRef.current) break;
+          const timer = window.setTimeout(() => {
+            const scan = keyScanRef.current;
+            const v = ref.current;
+            if (!scan || !v) return;
+            scan.engaged = true;
+            if (scan.action === "seekForward") {
+              scan.prevRate = v.playbackRate;
+              v.playbackRate = KEY_HOLD_RATE;
+              // 暂停中长按 = 直接以倍速开播（对齐 B 站）。
+              if (v.paused) void v.play();
+              setGestureHint({ kind: "rate", value: KEY_HOLD_RATE });
+            } else {
+              scan.interval = window.setInterval(() => {
+                const vv = ref.current;
+                if (vv) {
+                  vv.currentTime = Math.max(0, vv.currentTime - KEY_REWIND_STEP_S);
+                }
+              }, KEY_REWIND_TICK_MS);
+              setGestureHint({ kind: "rewind", value: 0 });
+            }
+          }, KEY_HOLD_MS);
+          keyScanRef.current = { action, engaged: false, timer };
           break;
-        case "seekForward":
-          video.currentTime = video.currentTime + 5;
-          break;
+        }
         case "prevSubtitle":
           jumpSubtitle(-1);
           break;
@@ -570,8 +627,23 @@ export function VideoPlayer({
           break;
       }
     };
+    const onKeyUp = (event: KeyboardEvent) => {
+      const scan = keyScanRef.current;
+      if (!scan) return;
+      const action = actionForKey(useShortcuts.getState().bindings, event.key);
+      if (action === scan.action) endKeyScan(true);
+    };
+    const onBlur = () => endKeyScan(false);
+
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+      endKeyScan(false);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullscreen]);
 
@@ -696,6 +768,8 @@ export function VideoPlayer({
                 {gestureHint.kind === "brightness" && `亮度 ${(gestureHint.value * 100).toFixed(0)}%`}
                 {gestureHint.kind === "volume" && `音量 ${(gestureHint.value * 100).toFixed(0)}%`}
                 {gestureHint.kind === "scrub" && "进度调整"}
+                {gestureHint.kind === "rate" && `${gestureHint.value}x 快进中`}
+                {gestureHint.kind === "rewind" && "快退中"}
               </div>
             </div>
           )}
