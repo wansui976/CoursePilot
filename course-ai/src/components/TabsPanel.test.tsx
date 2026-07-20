@@ -1,7 +1,8 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TabsPanel } from "./TabsPanel";
+import { useInlineAsk } from "@/stores/inlineAsk";
 
 vi.mock("./AiViewPanel", () => ({
   AiViewPanel: () => <div>AI 概览内容</div>,
@@ -21,6 +22,23 @@ describe("TabsPanel", () => {
   beforeEach(() => {
     localStorage.clear();
     transcriptPanel.mockClear();
+    useInlineAsk.setState({ pending: null });
+  });
+
+  it("jumps to the 学习 tab when an inline-ask context is dispatched", () => {
+    render(<TabsPanel videoId="video-1" />);
+    // 初始在「AI 概览」。
+    expect(screen.getByRole("tab", { name: "学习" })).toHaveAttribute(
+      "data-state",
+      "inactive",
+    );
+
+    act(() => useInlineAsk.getState().askAbout("贝叶斯定理", 5000));
+
+    expect(screen.getByRole("tab", { name: "学习" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
   });
 
   it("restores the active study tab for the video when remounted", () => {

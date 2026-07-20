@@ -9,6 +9,7 @@ import { formatMs } from "@/lib/time";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { isMobile } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
+import { useInlineAsk } from "@/stores/inlineAsk";
 import type { AskEvent, ChatMessage, Citation, RagAnswer } from "@/lib/types";
 
 /**
@@ -201,6 +202,10 @@ function AskChatPanel({ videoId }: { videoId: string }) {
   } | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const tailRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // 就地追问：文稿选区带来的上下文；显示成药丸、提交时注入、消费后清除。
+  const pendingAsk = useInlineAsk((s) => s.pending);
+  const clearAsk = useInlineAsk((s) => s.clear);
   // 组件卸载后不再 setState（后台请求仍会跑完并落库）。
   // 注意：必须在 effect 体里显式置回 true——React StrictMode(dev) 会「挂载→卸载→
   // 再挂载」，若只有 cleanup 置 false，二次挂载后 ref 永久为 false，所有流式事件
@@ -308,13 +313,24 @@ function AskChatPanel({ videoId }: { videoId: string }) {
   const submit = (raw?: string) => {
     const trimmed = (raw ?? query).trim();
     if (!trimmed || busy) return;
+    // 有选区上下文时，把它作为强前缀拼进本轮问题（带时间戳出处），然后清除药丸。
+    const pending = useInlineAsk.getState().pending;
+    const finalQuery = pending
+      ? `【所选文稿${pending.startMs != null ? ` ${formatMs(pending.startMs)}` : ""}】${pending.text}\n\n${trimmed}`
+      : trimmed;
     ask.mutate({
-      query: trimmed,
+      query: finalQuery,
       history: buildAskContext(history),
       requestId: crypto.randomUUID(),
     });
     setQuery("");
+    clearAsk();
   };
+
+  // 上下文药丸出现时聚焦输入框：文稿选区 → 跳到提问，用户可直接开始打字。
+  useEffect(() => {
+    if (pendingAsk) inputRef.current?.focus();
+  }, [pendingAsk]);
 
   const clearChat = () => {
     setHistory([]);
@@ -543,6 +559,23 @@ function AskChatPanel({ videoId }: { videoId: string }) {
       </div>
 
       <div className="flex-none border-t border-[var(--border-subtle)] p-2.5">
+        {pendingAsk && (
+          <div className="mb-1.5 flex items-start gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-muted)]">
+            <span className="min-w-0 flex-1 truncate">
+              基于所选
+              {pendingAsk.startMs != null ? ` ${formatMs(pendingAsk.startMs)}` : ""}：
+              {pendingAsk.text}
+            </span>
+            <button
+              type="button"
+              aria-label="移除所选上下文"
+              onClick={clearAsk}
+              className="ca-touch-44 flex-none text-[var(--text-faint)] transition hover:text-[var(--text-strong)]"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <div className="flex items-center gap-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 transition focus-within:border-[var(--accent-text)]">
           {history.length > 0 && (
             <button
@@ -556,6 +589,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
             </button>
           )}
           <input
+            ref={inputRef}
             aria-label="聊天内容"
             type="text"
             placeholder="继续追问…"

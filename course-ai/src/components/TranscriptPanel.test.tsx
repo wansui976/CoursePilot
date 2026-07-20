@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptPanel } from "./TranscriptPanel";
+import { useInlineAsk } from "@/stores/inlineAsk";
 import type { TranscriptSegment } from "@/lib/types";
 
 const { mockIpc } = vi.hoisted(() => ({
@@ -56,6 +57,35 @@ describe("TranscriptPanel", () => {
   beforeEach(() => {
     localStorage.clear();
     mockIpc.transcripts.list.mockResolvedValue(makeSegments(60));
+    useInlineAsk.setState({ pending: null });
+  });
+
+  it("offers 问 AI on a selection and dispatches the text with its timestamp", async () => {
+    renderTranscriptPanel("inline-ask");
+    const textEl = await screen.findByText("第 1 句文稿内容");
+
+    // jsdom 选区支持有限：直接 stub getSelection 返回一个落在第 1 行的非折叠选区。
+    const fakeSelection = {
+      isCollapsed: false,
+      anchorNode: textEl.firstChild ?? textEl,
+      toString: () => "第 1 句文稿内容",
+      getRangeAt: () => ({
+        getBoundingClientRect: () => ({ left: 100, width: 40, top: 200 }),
+      }),
+      removeAllRanges: () => {},
+    };
+    vi.spyOn(window, "getSelection").mockReturnValue(
+      fakeSelection as unknown as Selection,
+    );
+
+    fireEvent.mouseUp(screen.getByLabelText("文稿内容滚动区"));
+    fireEvent.click(await screen.findByRole("button", { name: "问 AI" }));
+
+    // 第 1 行 start_ms = 1000。
+    expect(useInlineAsk.getState().pending).toEqual({
+      text: "第 1 句文稿内容",
+      startMs: 1000,
+    });
   });
 
   it("uses theme-aware muted text for segment timestamps", async () => {
