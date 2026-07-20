@@ -26,6 +26,7 @@ const { mockIpc } = vi.hoisted(() => ({
     pipeline: {
       process: vi.fn(),
       jobs: vi.fn(),
+      active: vi.fn(),
       recorrect: vi.fn(),
     },
     ai: {
@@ -124,6 +125,7 @@ describe("Home", () => {
     mockIpc.videos.reorder.mockResolvedValue(undefined);
     mockIpc.pipeline.process.mockResolvedValue(undefined);
     mockIpc.pipeline.jobs.mockResolvedValue([]);
+    mockIpc.pipeline.active.mockResolvedValue([]);
     mockIpc.ai.generate.mockResolvedValue(undefined);
     mockIpc.slides.extract.mockResolvedValue(0);
   });
@@ -424,6 +426,32 @@ describe("Home", () => {
     expect(
       within(sidebar).getByRole("button", { name: /底层逻辑/ }),
     ).toHaveAttribute("aria-current", "true");
+  });
+
+  it("recovers backend processing tasks after the home view remounts", async () => {
+    mockIpc.pipeline.active.mockResolvedValue([video]);
+    mockIpc.pipeline.jobs.mockResolvedValue([
+      {
+        id: "asr-job",
+        video_id: video.id,
+        stage: "asr",
+        status: "running",
+        progress: 0.35,
+        message: "恢复中的识别任务",
+        started_at: null,
+        finished_at: null,
+      },
+    ]);
+    renderHome();
+
+    await waitFor(() => expect(mockIpc.pipeline.jobs).toHaveBeenCalledWith(video.id));
+    const sidebar = await screen.findByRole("complementary", { name: "课程侧栏" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "处理队列" }));
+
+    const queuePage = screen.getByLabelText("处理队列页面");
+    expect(within(queuePage).getByText(displayTitle(video.title))).toBeInTheDocument();
+    expect(within(queuePage).getByText("恢复中的识别任务")).toBeInTheDocument();
+    expect(within(queuePage).getByText("35%")).toBeInTheDocument();
   });
 
   it("starts processing from the homepage video card menu and shows the queue page", async () => {

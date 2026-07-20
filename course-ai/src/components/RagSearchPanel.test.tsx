@@ -298,6 +298,24 @@ describe("RagSearchPanel", () => {
     box.finish?.();
   });
 
+  it("uses a fresh request id when retrying a failed answer", async () => {
+    mockIpc.ai.ragQueryStream
+      .mockRejectedValueOnce(new Error("网络失败"))
+      .mockImplementationOnce(streamResolving("重试成功"));
+
+    renderAskPanel();
+    const input = screen.getByLabelText("聊天内容");
+    fireEvent.change(input, { target: { value: "问题" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "重试" }));
+    expect(await screen.findByText("重试成功")).toBeInTheDocument();
+
+    const firstId = mockIpc.ai.ragQueryStream.mock.calls[0]?.[3];
+    const retryId = mockIpc.ai.ragQueryStream.mock.calls[1]?.[3];
+    expect(firstId).not.toBe(retryId);
+  });
+
   it("streams reasoning-model thinking into a 思考过程 area", async () => {
     const box: { finish?: () => void } = {};
     mockIpc.ai.ragQueryStream.mockImplementation(

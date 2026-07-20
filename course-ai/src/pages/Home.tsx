@@ -138,6 +138,7 @@ export function Home() {
   const queryClient = useQueryClient();
   const setVideo = usePlayer((s) => s.setVideo);
   const jobsByVideo = useJobs((s) => s.byVideo);
+  const setJob = useJobs((s) => s.setOne);
   const resetJobs = useJobs((s) => s.resetVideo);
   const generatedAfterAsr = useRef<Set<string>>(new Set());
   const appRef = useRef<HTMLDivElement>(null);
@@ -184,9 +185,36 @@ export function Home() {
     queryKey: ["courses"],
     queryFn: ipc.courses.list,
   });
+  const { data: activeProcessingVideos = [] } = useQuery({
+    queryKey: ["processing-videos"],
+    queryFn: ipc.pipeline.active,
+  });
   const selectedCourse = courses.find(
     (course) => course.id === selectedCourseId,
   );
+
+  useEffect(() => {
+    if (activeProcessingVideos.length === 0) return;
+    setQueuedVideos((items) => {
+      const known = new Set(items.map((item) => item.id));
+      const recovered = activeProcessingVideos.filter((video) => !known.has(video.id));
+      return recovered.length > 0 ? [...recovered, ...items] : items;
+    });
+    for (const video of activeProcessingVideos) {
+      void ipc.pipeline.jobs(video.id).then((rows) => {
+        rows.forEach((job) =>
+          setJob({
+            video_id: job.video_id,
+            job_id: job.id,
+            stage: job.stage,
+            status: job.status,
+            progress: job.progress,
+            message: job.message,
+          }),
+        );
+      });
+    }
+  }, [activeProcessingVideos, setJob]);
 
   const normalizedQuery = videoQuery.trim().toLowerCase();
   // 过滤只影响展示；排序、菜单上移/下移等按全量 videos 计算。
@@ -1054,7 +1082,10 @@ export function Home() {
                   ))}
                 </div>
               )}
-              <ImportVideoButton courseId={selectedCourseId} />
+              <ImportVideoButton
+                courseId={selectedCourseId}
+                onStartProcessing={startProcessing}
+              />
             </div>
           )}
         </header>
@@ -1081,7 +1112,10 @@ export function Home() {
                 }
                 action={
                   selectedCourseId ? (
-                    <ImportVideoButton courseId={selectedCourseId} />
+                    <ImportVideoButton
+                      courseId={selectedCourseId}
+                      onStartProcessing={startProcessing}
+                    />
                   ) : undefined
                 }
               />

@@ -138,6 +138,28 @@ describe("RecycleBin 分组与批量操作", () => {
     expect(mockIpc.videos.purge).not.toHaveBeenCalled();
   });
 
+  it("refreshes after a partially failed batch purge", async () => {
+    const items = [
+      trashedVideo("v1", "申论", 26),
+      trashedVideo("v2", "申论", 26),
+    ];
+    mockIpc.trash.list
+      .mockResolvedValueOnce(items)
+      .mockResolvedValueOnce([items[1]]);
+    mockIpc.videos.purge
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("purge failed"));
+    confirmMock.mockResolvedValue(true);
+    renderBin();
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择 申论 全部" }));
+    fireEvent.click(screen.getByRole("button", { name: "彻底删除所选" }));
+
+    await waitFor(() => expect(mockIpc.trash.list).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("checkbox", { name: "选择 v1.mp4" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "选择 v2.mp4" })).toBeInTheDocument();
+  });
+
   it("highlights items expiring within 3 days", async () => {
     mockIpc.trash.list.mockResolvedValue([
       trashedVideo("v1", "申论", 2),

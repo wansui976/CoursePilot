@@ -16,9 +16,7 @@ use crate::commands::ai::{
     cmd_get_quiz, cmd_get_summary, cmd_has_api_key, cmd_save_llm_profiles, cmd_save_notes,
     cmd_set_api_key,
 };
-use crate::commands::clips::{
-    cmd_add_clip, cmd_list_clips, cmd_update_clip, cmd_delete_clip,
-};
+use crate::commands::clips::{cmd_add_clip, cmd_delete_clip, cmd_list_clips, cmd_update_clip};
 use crate::commands::courses::{
     cmd_create_course, cmd_delete_course, cmd_list_courses, cmd_relink_course_root,
     cmd_rename_course, AppState,
@@ -29,9 +27,7 @@ use crate::commands::export::{
 use crate::commands::rag::{
     cmd_cancel_rag_query, cmd_rag_query, cmd_rag_query_stream, cmd_search_transcript,
 };
-use crate::commands::settings::{
-    cmd_get_setting, cmd_has_secret, cmd_set_secret, cmd_set_setting,
-};
+use crate::commands::settings::{cmd_get_setting, cmd_has_secret, cmd_set_secret, cmd_set_setting};
 use crate::commands::slides::{
     cmd_capture_frame, cmd_extract_slides, cmd_get_screenshots, cmd_get_slides,
     cmd_read_slide_image,
@@ -51,7 +47,8 @@ use crate::db::Db;
 use crate::dev_log::{cmd_clear_dev_logs, cmd_get_dev_logs};
 use crate::jobs::cmd_list_jobs;
 use crate::pipeline::{
-    cmd_cancel_processing, cmd_process_video, cmd_recorrect_transcript, ProcessingTasks,
+    cmd_cancel_processing, cmd_list_processing_videos, cmd_process_video, cmd_recorrect_transcript,
+    ProcessingTasks,
 };
 use tauri::Manager;
 
@@ -70,6 +67,9 @@ pub fn run() {
                 let db = Db::connect_and_migrate(&data_dir.join("courseai.db"))
                     .await
                     .expect("db init");
+                if let Err(error) = crate::pipeline::recover_interrupted_processing(&db).await {
+                    tracing::warn!("recover interrupted processing failed: {error}");
+                }
                 // 启动时清理过期回收站（超过保留期的视频永久删除）。
                 if let Err(error) = crate::commands::videos::purge_expired_trash(&db).await {
                     tracing::warn!("purge expired trash failed: {error}");
@@ -113,6 +113,7 @@ pub fn run() {
             cmd_list_jobs,
             cmd_process_video,
             cmd_cancel_processing,
+            cmd_list_processing_videos,
             cmd_recorrect_transcript,
             cmd_list_transcripts,
             cmd_update_transcript,

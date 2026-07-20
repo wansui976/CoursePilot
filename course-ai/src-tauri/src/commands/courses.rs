@@ -42,9 +42,16 @@ impl AppState {
         }
     }
 
-    /// 请求结束后移除登记，避免表无限增长。
-    pub fn unregister_cancel(&self, id: &str) {
-        self.rag_cancels.lock().unwrap().remove(id);
+    /// 请求结束后仅移除自己的登记，避免同 id 的新请求被旧任务收尾误删。
+    pub fn unregister_cancel(&self, id: &str, expected: &Arc<AtomicBool>) {
+        let mut cancels = self.rag_cancels.lock().unwrap();
+        let is_current = cancels
+            .get(id)
+            .map(|flag| Arc::ptr_eq(flag, expected))
+            .unwrap_or(false);
+        if is_current {
+            cancels.remove(id);
+        }
     }
 }
 
@@ -59,11 +66,15 @@ pub struct Course {
 }
 
 pub async fn create_course(db: &Db, name: String, root_path: String) -> AppResult<Course> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::Other("课程名称不能为空".into()));
+    }
     let now = Utc::now().timestamp_millis();
     let id = Uuid::new_v4().to_string();
     sqlx::query("INSERT INTO courses (id,name,root_path,created_at,updated_at) VALUES (?,?,?,?,?)")
         .bind(&id)
-        .bind(&name)
+        .bind(name)
         .bind(&root_path)
         .bind(now)
         .bind(now)
@@ -71,7 +82,7 @@ pub async fn create_course(db: &Db, name: String, root_path: String) -> AppResul
         .await?;
     Ok(Course {
         id,
-        name,
+        name: name.to_string(),
         root_path,
         cover_image: None,
         created_at: now,
@@ -88,30 +99,56 @@ pub async fn list_courses(db: &Db) -> AppResult<Vec<Course>> {
     .await?)
 }
 
+pub async fn ensure_active_course(db: &Db, id: &str) -> AppResult<()> {
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM courses WHERE id=? AND deleted_at IS NULL)",
+    )
+    .bind(id)
+    .fetch_one(&db.pool)
+    .await?;
+    if !exists {
+        return Err(AppError::NotFound(format!("course {id}")));
+    }
+    Ok(())
+}
+
 /// 删除课程：把课程的视频移入回收站（软删除），并软删除课程本身。
 /// 不直接 DELETE 课程行，否则 FK 级联会把回收站里的视频一并硬删除。
 pub async fn delete_course(db: &Db, id: String) -> AppResult<()> {
     let now = Utc::now().timestamp_millis();
+    let mut tx = db.pool.begin().await?;
     sqlx::query("UPDATE videos SET deleted_at=? WHERE course_id=? AND deleted_at IS NULL")
         .bind(now)
         .bind(&id)
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await?;
-    sqlx::query("UPDATE courses SET deleted_at=? WHERE id=?")
+    let result = sqlx::query("UPDATE courses SET deleted_at=? WHERE id=? AND deleted_at IS NULL")
         .bind(now)
         .bind(&id)
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound(format!("course {id}")));
+    }
+    tx.commit().await?;
     Ok(())
 }
 
 pub async fn rename_course(db: &Db, id: String, name: String) -> AppResult<()> {
-    sqlx::query("UPDATE courses SET name=?, updated_at=? WHERE id=?")
-        .bind(name)
-        .bind(Utc::now().timestamp_millis())
-        .bind(id)
-        .execute(&db.pool)
-        .await?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::Other("课程名称不能为空".into()));
+    }
+    let result =
+        sqlx::query("UPDATE courses SET name=?, updated_at=? WHERE id=? AND deleted_at IS NULL")
+            .bind(name)
+            .bind(Utc::now().timestamp_millis())
+            .bind(&id)
+            .execute(&db.pool)
+            .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound(format!("course {id}")));
+    }
     Ok(())
 }
 
@@ -181,9 +218,12 @@ fn scan_files_recursive(root: &Path) -> AppResult<Vec<PathBuf>> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
                 stack.push(path);
-            } else if path.is_file() {
+            } else if file_type.is_file() {
                 out.push(path);
             }
         }
@@ -198,6 +238,7 @@ pub async fn relink_course_root(
     course_id: &str,
     new_root: String,
 ) -> AppResult<RelinkResult> {
+    ensure_active_course(db, course_id).await?;
     let root = PathBuf::from(&new_root);
     let scanned = scan_files_recursive(&root)?;
 
@@ -230,12 +271,18 @@ pub async fn relink_course_root(
 
     let now = Utc::now().timestamp_millis();
     let mut tx = db.pool.begin().await?;
-    sqlx::query("UPDATE courses SET root_path=?, updated_at=? WHERE id=?")
-        .bind(&new_root)
-        .bind(now)
-        .bind(course_id)
-        .execute(&mut *tx)
-        .await?;
+    let result = sqlx::query(
+        "UPDATE courses SET root_path=?, updated_at=?
+         WHERE id=? AND deleted_at IS NULL",
+    )
+    .bind(&new_root)
+    .bind(now)
+    .bind(course_id)
+    .execute(&mut *tx)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound(format!("course {course_id}")));
+    }
 
     let mut relinked = 0usize;
     let mut ambiguous = Vec::new();
@@ -292,7 +339,19 @@ pub async fn cmd_list_courses(state: State<'_, AppState>) -> AppResult<Vec<Cours
 }
 
 #[tauri::command]
-pub async fn cmd_delete_course(state: State<'_, AppState>, id: String) -> AppResult<()> {
+pub async fn cmd_delete_course(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<()> {
+    let video_ids: Vec<String> =
+        sqlx::query_scalar("SELECT id FROM videos WHERE course_id=? AND deleted_at IS NULL")
+            .bind(&id)
+            .fetch_all(&state.db.pool)
+            .await?;
+    for video_id in video_ids {
+        crate::pipeline::cancel_processing(&app, &video_id).await?;
+    }
     delete_course(&state.db, id).await
 }
 
@@ -322,9 +381,24 @@ mod tests {
         assert!(!flag.load(Ordering::SeqCst));
         state.cancel_rag("req-1");
         assert!(flag.load(Ordering::SeqCst));
-        state.unregister_cancel("req-1");
+        state.unregister_cancel("req-1", &flag);
         // 注销后再取消不 panic、也不影响旧 flag。
         state.cancel_rag("req-1");
+    }
+
+    #[tokio::test]
+    async fn stale_request_cannot_unregister_new_cancel_flag() {
+        use std::sync::atomic::Ordering;
+        let state = AppState::new(fresh_db().await);
+        let old = state.register_cancel("req-1");
+        let current = state.register_cancel("req-1");
+
+        state.unregister_cancel("req-1", &old);
+        state.cancel_rag("req-1");
+
+        assert!(!old.load(Ordering::SeqCst));
+        assert!(current.load(Ordering::SeqCst));
+        state.unregister_cancel("req-1", &current);
     }
 
     #[tokio::test]
@@ -340,6 +414,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_and_rename_reject_blank_course_names() {
+        let db = fresh_db().await;
+        let err = create_course(&db, "   ".into(), "/tmp/x".into())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::Other(_)));
+
+        let course = create_course(&db, "  旧名  ".into(), "/tmp/x".into())
+            .await
+            .unwrap();
+        let list = list_courses(&db).await.unwrap();
+        assert_eq!(list[0].name, "旧名");
+
+        let err = rename_course(&db, course.id.clone(), "  ".into())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::Other(_)));
+
+        rename_course(&db, course.id, "  新名  ".into())
+            .await
+            .unwrap();
+        let list = list_courses(&db).await.unwrap();
+        assert_eq!(list[0].name, "新名");
+    }
+
+    #[tokio::test]
     async fn delete_removes_course() {
         let db = fresh_db().await;
         let course = create_course(&db, "x".into(), "/tmp/x".into())
@@ -347,6 +447,29 @@ mod tests {
             .unwrap();
         delete_course(&db, course.id).await.unwrap();
         assert_eq!(list_courses(&db).await.unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn delete_missing_course_reports_not_found() {
+        let db = fresh_db().await;
+        let err = delete_course(&db, "missing".into()).await.unwrap_err();
+        assert!(matches!(err, AppError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn relink_rejects_deleted_course() {
+        let db = fresh_db().await;
+        let course = create_course(&db, "c".into(), "/tmp/x".into())
+            .await
+            .unwrap();
+        delete_course(&db, course.id.clone()).await.unwrap();
+        let root = tempfile::tempdir().unwrap();
+
+        let err = relink_course_root(&db, &course.id, root.path().to_string_lossy().to_string())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, AppError::NotFound(_)));
     }
 
     #[tokio::test]
@@ -398,6 +521,20 @@ mod tests {
         assert_eq!(get("m"), MatchOutcome::Missing);
         assert_eq!(get("d"), MatchOutcome::Ambiguous);
         assert_eq!(get("ci"), MatchOutcome::Relinked(PathBuf::from("/z/E.MP4")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scanner_does_not_follow_directory_symlinks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sub = tmp.path().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("a.mp4"), b"x").unwrap();
+        std::os::unix::fs::symlink(tmp.path(), sub.join("loop")).unwrap();
+
+        let files = scan_files_recursive(tmp.path()).unwrap();
+
+        assert_eq!(files, vec![sub.join("a.mp4")]);
     }
 
     #[tokio::test]

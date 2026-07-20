@@ -18,7 +18,12 @@ const { mockIpc } = vi.hoisted(() => ({
       updateTitle: vi.fn(),
       delete: vi.fn(),
     },
-    pipeline: { process: vi.fn(), jobs: vi.fn(), recorrect: vi.fn() },
+    pipeline: {
+      process: vi.fn(),
+      jobs: vi.fn(),
+      active: vi.fn(),
+      recorrect: vi.fn(),
+    },
     transcripts: { list: vi.fn() },
     ai: {
       buildEmbeddings: vi.fn(),
@@ -140,6 +145,7 @@ describe("Home selected-video integration", () => {
     mockIpc.videos.mediaUrl.mockResolvedValue("http://127.0.0.1:1234/m/video-1");
     mockIpc.videos.cover.mockResolvedValue([]);
     mockIpc.pipeline.jobs.mockResolvedValue([]);
+    mockIpc.pipeline.active.mockResolvedValue([]);
     mockIpc.pipeline.process.mockResolvedValue(undefined);
     mockIpc.transcripts.list.mockResolvedValue([]);
     mockIpc.ai.getChapters.mockResolvedValue([]);

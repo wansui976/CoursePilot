@@ -102,10 +102,12 @@ pub async fn cmd_import_bilibili(
             "移动端暂不支持 B 站 / 网络视频下载，请先在桌面端导入后同步到移动端".into(),
         ));
     }
-    let root_path: String = sqlx::query_scalar("SELECT root_path FROM courses WHERE id=?")
-        .bind(&course_id)
-        .fetch_one(&state.db.pool)
-        .await?;
+    let root_path: String =
+        sqlx::query_scalar("SELECT root_path FROM courses WHERE id=? AND deleted_at IS NULL")
+            .bind(&course_id)
+            .fetch_optional(&state.db.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("course {course_id}")))?;
     let cookies = get_setting(&state.db, "bilibili_cookies").await?;
     let out_dir = PathBuf::from(&root_path);
     let result = download::download(

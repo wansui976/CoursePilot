@@ -93,13 +93,14 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
     mutationFn: async (ids: string[]) => {
       for (const id of ids) await ipc.videos.restore(id);
     },
-    onSuccess: refresh,
+    // 前面的条目可能已成功、后面的条目才失败；无论结果都要同步真实列表。
+    onSettled: refresh,
   });
   const purgeMany = useMutation({
     mutationFn: async (ids: string[]) => {
       for (const id of ids) await ipc.videos.purge(id);
     },
-    onSuccess: refresh,
+    onSettled: refresh,
   });
   const purgeAll = useMutation({
     mutationFn: () => ipc.trash.purgeAll(),

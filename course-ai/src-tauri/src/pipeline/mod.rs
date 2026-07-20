@@ -20,6 +20,7 @@ use crate::error::{AppError, AppResult};
 use crate::jobs::{self, emit_update, JobEvent};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AsrBackend {
@@ -117,7 +118,7 @@ fn whisper_language_or_default(value: Option<String>) -> String {
 pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
     let state = app.state::<AppState>();
     let db = state.db.clone();
-    let video: Video = sqlx::query_as("SELECT * FROM videos WHERE id=?")
+    let video: Video = sqlx::query_as("SELECT * FROM videos WHERE id=? AND deleted_at IS NULL")
         .bind(&video_id)
         .fetch_one(&db.pool)
         .await?;
@@ -728,36 +729,128 @@ async fn mark_failed(db: &crate::db::Db, video_id: &str) -> AppResult<()> {
     Ok(())
 }
 
+pub async fn recover_interrupted_processing(db: &crate::db::Db) -> AppResult<()> {
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut tx = db.pool.begin().await?;
+    sqlx::query(
+        "UPDATE processing_jobs
+         SET status='failed', message='应用已重启，处理被中断，请重试', finished_at=?
+         WHERE status='running'",
+    )
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE videos SET processed_status='pending'
+         WHERE processed_status='processing'",
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 /// 正在运行的流水线任务句柄，按 video_id 索引，用于取消。
 #[derive(Default)]
-pub struct ProcessingTasks(
-    pub std::sync::Mutex<std::collections::HashMap<String, tauri::async_runtime::JoinHandle<()>>>,
-);
+pub struct ProcessingTasks {
+    tasks: std::sync::Mutex<std::collections::HashMap<String, ProcessingTask>>,
+}
+
+struct ProcessingTask {
+    run_id: String,
+    handle: tauri::async_runtime::JoinHandle<()>,
+}
+
+impl ProcessingTasks {
+    fn video_ids(&self) -> Vec<String> {
+        self.tasks.lock().unwrap().keys().cloned().collect()
+    }
+
+    fn take(&self, video_id: &str) -> Option<tauri::async_runtime::JoinHandle<()>> {
+        self.tasks
+            .lock()
+            .unwrap()
+            .remove(video_id)
+            .map(|task| task.handle)
+    }
+
+    fn insert(
+        &self,
+        video_id: String,
+        run_id: String,
+        handle: tauri::async_runtime::JoinHandle<()>,
+    ) {
+        self.tasks
+            .lock()
+            .unwrap()
+            .insert(video_id, ProcessingTask { run_id, handle });
+    }
+
+    fn remove_if_current(&self, video_id: &str, run_id: &str) {
+        let mut tasks = self.tasks.lock().unwrap();
+        let is_current = tasks
+            .get(video_id)
+            .map(|task| task.run_id == run_id)
+            .unwrap_or(false);
+        if is_current {
+            tasks.remove(video_id);
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn cmd_list_processing_videos(app: AppHandle) -> AppResult<Vec<Video>> {
+    let active_ids: std::collections::HashSet<String> = app
+        .state::<ProcessingTasks>()
+        .video_ids()
+        .into_iter()
+        .collect();
+    if active_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let db = app.state::<AppState>().db.clone();
+    let mut videos: Vec<Video> =
+        sqlx::query_as("SELECT * FROM videos WHERE deleted_at IS NULL ORDER BY created_at DESC")
+            .fetch_all(&db.pool)
+            .await?;
+    videos.retain(|video| active_ids.contains(&video.id));
+    Ok(videos)
+}
 
 #[tauri::command]
 pub async fn cmd_process_video(app: AppHandle, video_id: String) -> AppResult<()> {
-    // 同一视频若已有任务在跑，先中止旧的。
-    if let Some(old) = app
-        .state::<ProcessingTasks>()
-        .0
-        .lock()
-        .unwrap()
-        .remove(&video_id)
-    {
+    let db = app.state::<AppState>().db.clone();
+    let active: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM videos WHERE id=? AND deleted_at IS NULL)")
+            .bind(&video_id)
+            .fetch_one(&db.pool)
+            .await?;
+    if !active {
+        return Err(AppError::NotFound(format!("video {video_id}")));
+    }
+
+    // 同一视频若已有任务在跑，先中止并等待旧任务完全退出，避免新旧任务并发写 job。
+    if let Some(old) = app.state::<ProcessingTasks>().take(&video_id) {
         old.abort();
+        let _ = old.await;
     }
     let task_app = app.clone();
     let task_video = video_id.clone();
+    let run_id = Uuid::new_v4().to_string();
+    let task_run_id = run_id.clone();
+    let (start_tx, start_rx) = tokio::sync::oneshot::channel::<()>();
     let handle = tauri::async_runtime::spawn(async move {
-        if let Err(error) = run_all(task_app, task_video).await {
+        let _ = start_rx.await;
+        if let Err(error) = run_all(task_app.clone(), task_video.clone()).await {
             tracing::error!("pipeline failed: {error:?}");
         }
+        task_app
+            .state::<ProcessingTasks>()
+            .remove_if_current(&task_video, &task_run_id);
     });
     app.state::<ProcessingTasks>()
-        .0
-        .lock()
-        .unwrap()
-        .insert(video_id, handle);
+        .insert(video_id, run_id, handle);
+    let _ = start_tx.send(());
     Ok(())
 }
 
@@ -778,17 +871,20 @@ pub async fn cmd_recorrect_transcript(
     transcript_correction::autocorrect_transcript(&db, &provider, &model, &video_id).await
 }
 
-/// 取消某视频正在进行的处理：把 running/pending 的步骤标为「已取消」并中止任务
+/// 取消某视频正在进行的处理：先中止并等待任务退出，再把 running/pending 步骤标为「已取消」
 /// （ffmpeg/whisper 子进程因 kill_on_drop 会被杀掉）。
-#[tauri::command]
-pub async fn cmd_cancel_processing(app: AppHandle, video_id: String) -> AppResult<()> {
+pub async fn cancel_processing(app: &AppHandle, video_id: &str) -> AppResult<()> {
+    if let Some(handle) = app.state::<ProcessingTasks>().take(video_id) {
+        handle.abort();
+        let _ = handle.await;
+    }
     let db = app.state::<AppState>().db.clone();
-    for job in jobs::list_for_video(&db, &video_id).await? {
+    for job in jobs::list_for_video(&db, video_id).await? {
         if job.status == "running" || job.status == "pending" {
             jobs::cancel(&db, &job.id, "已取消").await?;
             emit_stage(
-                &app,
-                &video_id,
+                app,
+                video_id,
                 &job.id,
                 &job.stage,
                 "canceled",
@@ -800,19 +896,15 @@ pub async fn cmd_cancel_processing(app: AppHandle, video_id: String) -> AppResul
     sqlx::query(
         "UPDATE videos SET processed_status='pending' WHERE id=? AND processed_status='processing'",
     )
-    .bind(&video_id)
+    .bind(video_id)
     .execute(&db.pool)
     .await?;
-    if let Some(handle) = app
-        .state::<ProcessingTasks>()
-        .0
-        .lock()
-        .unwrap()
-        .remove(&video_id)
-    {
-        handle.abort();
-    }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn cmd_cancel_processing(app: AppHandle, video_id: String) -> AppResult<()> {
+    cancel_processing(&app, &video_id).await
 }
 
 #[cfg(test)]
@@ -829,6 +921,48 @@ mod tests {
         let path = std::path::Path::new(&home)
             .join("Library/Application Support/dev.courseai.app/whisper/ggml-tiny.bin");
         path.is_file().then_some(path)
+    }
+
+    #[tokio::test]
+    async fn startup_recovery_marks_interrupted_work_retryable() {
+        let dir = tempdir().unwrap();
+        let db = crate::db::Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let video_path = dir.path().join("v.mp4");
+        std::fs::write(&video_path, b"fake").unwrap();
+        let video = add_local_video(&db, &course.id, video_path, None)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE videos SET processed_status='processing' WHERE id=?")
+            .bind(&video.id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        let job_list = jobs::ensure_jobs(&db, &video.id).await.unwrap();
+        let audio = job_list.iter().find(|job| job.stage == "audio").unwrap();
+        jobs::start(&db, &audio.id).await.unwrap();
+
+        recover_interrupted_processing(&db).await.unwrap();
+
+        let video_status: String =
+            sqlx::query_scalar("SELECT processed_status FROM videos WHERE id=?")
+                .bind(&video.id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(video_status, "pending");
+        let recovered = jobs::list_for_video(&db, &video.id).await.unwrap();
+        let audio = recovered.iter().find(|job| job.stage == "audio").unwrap();
+        assert_eq!(audio.status, "failed");
+        assert!(audio
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("应用已重启"));
     }
 
     #[tokio::test]

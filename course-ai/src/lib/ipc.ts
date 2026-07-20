@@ -104,6 +104,7 @@ export const ipc = {
       invoke("cmd_recorrect_transcript", { videoId }),
     jobs: (videoId: string): Promise<Job[]> =>
       invoke("cmd_list_jobs", { videoId }),
+    active: (): Promise<Video[]> => invoke("cmd_list_processing_videos"),
   },
   transcripts: {
     list: (videoId: string): Promise<TranscriptSegment[]> =>
