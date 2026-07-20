@@ -530,6 +530,40 @@ describe("Home", () => {
     );
   });
 
+  it("filters videos by title from the topbar search box", async () => {
+    const video2: Video = {
+      ...video,
+      id: "video-2",
+      title: "02.第二课.mp4",
+      order_index: 1,
+    };
+    mockIpc.videos.list.mockResolvedValueOnce([video, video2]);
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    await screen.findByText(displayTitle(video2.title));
+
+    const search = screen.getByLabelText("搜索视频");
+    fireEvent.change(search, { target: { value: "第二课" } });
+    expect(screen.queryByText(displayTitle(video.title))).not.toBeInTheDocument();
+    expect(screen.getByText(displayTitle(video2.title))).toBeInTheDocument();
+
+    // 过滤态下排序无意义（子集顺序映射不回全量）：菜单里的上移/下移也不给。
+    // 「0」同时命中「01.…」「02.…」两条（过滤按 displayTitle，不含扩展名）。
+    fireEvent.change(search, { target: { value: "0" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "视频操作" })[0]);
+    expect(screen.queryByRole("menuitem", { name: "下移" })).not.toBeInTheDocument();
+
+    // 无匹配给明确的空态，而不是一片空白。
+    fireEvent.change(search, { target: { value: "不存在的标题" } });
+    expect(screen.getByText("没有匹配的视频")).toBeInTheDocument();
+
+    // Escape 清空过滤。
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(await screen.findByText(displayTitle(video.title))).toBeInTheDocument();
+  });
+
   it("keeps the destructive delete action last in the video menu", async () => {
     renderHome();
 
