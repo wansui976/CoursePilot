@@ -278,6 +278,99 @@ describe("VideoPlayer iOS gestures", () => {
     vi.useRealTimers();
   });
 
+  it("seeks +5s on a short right-arrow tap (committed on release)", () => {
+    renderPlayer();
+    const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
+    const setCurrentTime = vi.fn();
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      get: () => 100,
+      set: setCurrentTime,
+    });
+
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    // 需要区分长短按：短按的 seek 在松键时提交。
+    expect(setCurrentTime).not.toHaveBeenCalled();
+    fireEvent.keyUp(window, { key: "ArrowRight" });
+    expect(setCurrentTime).toHaveBeenCalledWith(105);
+  });
+
+  it("fast-forwards at 3x while the right arrow is held and restores on release", async () => {
+    vi.useFakeTimers();
+    try {
+      renderPlayer();
+      const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
+      const setCurrentTime = vi.fn();
+      const setRate = vi.fn();
+      let rateValue = 1;
+      Object.defineProperty(video, "currentTime", {
+        configurable: true,
+        get: () => 100,
+        set: setCurrentTime,
+      });
+      Object.defineProperty(video, "playbackRate", {
+        configurable: true,
+        get: () => rateValue,
+        set: (v: number) => {
+          rateValue = v;
+          setRate(v);
+        },
+      });
+
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+      // 系统 auto-repeat 的 keydown 不应打断长按流程。
+      fireEvent.keyDown(window, { key: "ArrowRight", repeat: true });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(320);
+      });
+
+      expect(setRate).toHaveBeenCalledWith(3);
+      expect(screen.getByText("3x 快进中")).toBeInTheDocument();
+
+      fireEvent.keyUp(window, { key: "ArrowRight" });
+      expect(setRate).toHaveBeenLastCalledWith(1);
+      // 长按结束不追加短按的 +5s。
+      expect(setCurrentTime).not.toHaveBeenCalled();
+      expect(screen.queryByText("3x 快进中")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rewinds continuously while the left arrow is held", async () => {
+    vi.useFakeTimers();
+    try {
+      renderPlayer();
+      const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
+      const setCurrentTime = vi.fn();
+      Object.defineProperty(video, "currentTime", {
+        configurable: true,
+        get: () => 100,
+        set: setCurrentTime,
+      });
+
+      fireEvent.keyDown(window, { key: "ArrowLeft" });
+      await act(async () => {
+        // 300ms 进入扫描后再过 2 个回退周期（各 200ms）。
+        await vi.advanceTimersByTimeAsync(300 + 410);
+      });
+
+      expect(setCurrentTime).toHaveBeenCalledTimes(2);
+      expect(setCurrentTime).toHaveBeenCalledWith(100 - 0.8);
+      expect(screen.getByText("快退中")).toBeInTheDocument();
+
+      fireEvent.keyUp(window, { key: "ArrowLeft" });
+      setCurrentTime.mockClear();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600);
+      });
+      // 松开后扫描停止、也不补 ±5s。
+      expect(setCurrentTime).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps the caption above the control bar zone even while controls are hidden", async () => {
     // 控制栏是悬浮出现的：如果字幕只在控制栏「可见时」才避让，唤出控制栏的
     // 瞬间它会先盖住字幕、等 200ms 过渡才让开。字幕必须常年避开控制栏占位区。
