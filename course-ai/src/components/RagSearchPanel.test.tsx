@@ -517,4 +517,34 @@ describe("RagSearchPanel", () => {
     expect(screen.getByText("答案开头")).toBeInTheDocument();
     box.finish?.();
   });
+
+  it("search mode: labels the results region and offers retry on failure", async () => {
+    mockIpc.ai.searchTranscript
+      .mockRejectedValueOnce(new Error("索引未就绪"))
+      .mockResolvedValueOnce([]);
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <div data-theme="light">
+          <RagSearchPanel videoId="video-1" mode="search" />
+        </div>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByLabelText("搜索结果")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("搜索文稿内容"), {
+      target: { value: "关键词" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
+
+    const retry = await screen.findByRole("button", { name: "重试" });
+    fireEvent.click(retry);
+
+    // 重试用同一 query 再次调用（第一次失败、第二次成功）。
+    await waitFor(() =>
+      expect(mockIpc.ai.searchTranscript).toHaveBeenCalledTimes(2),
+    );
+    expect(mockIpc.ai.searchTranscript).toHaveBeenNthCalledWith(2, "video-1", "关键词");
+  });
 });

@@ -648,8 +648,17 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
         </Button>
       </div>
 
-      {search.isError && <ErrorNote className="mx-3 mb-2" error={search.error} />}
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+      {search.isError && (
+        <ErrorNote
+          className="mx-3 mb-2"
+          error={search.error}
+          onRetry={() => search.variables && search.mutate(search.variables)}
+        />
+      )}
+      <div
+        aria-label="搜索结果"
+        className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3"
+      >
         {history.length === 0 && (
           <p className="text-sm text-[var(--text-faint)]">还没有搜索历史。</p>
         )}
