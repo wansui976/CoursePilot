@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VideoPlayer } from ".";
+import { ipc } from "@/lib/ipc";
+import { usePlayer } from "@/stores/player";
 
 const setFullscreen = vi.hoisted(() => vi.fn());
 const mockEnsureCrop = vi.hoisted(() => vi.fn());
@@ -274,5 +276,51 @@ describe("VideoPlayer iOS gestures", () => {
     });
     expect(setRate).toHaveBeenLastCalledWith(1);
     vi.useRealTimers();
+  });
+
+  it("keeps the caption above the control bar zone even while controls are hidden", async () => {
+    // 控制栏是悬浮出现的：如果字幕只在控制栏「可见时」才避让，唤出控制栏的
+    // 瞬间它会先盖住字幕、等 200ms 过渡才让开。字幕必须常年避开控制栏占位区。
+    // 舞台高 400、控制栏高 64：默认字幕框底边 0.94*400=376 落入占位区
+    // （400-64-8=328 以下），即使控制栏未显示也要上移 376-328=48px。
+    localStorage.removeItem("caption-box");
+    const offsetDesc = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight",
+    )!;
+    const clientDesc = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "clientHeight",
+    )!;
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get: () => 64,
+    });
+    Object.defineProperty(Element.prototype, "clientHeight", {
+      configurable: true,
+      get: () => 400,
+    });
+    try {
+      vi.mocked(ipc.transcripts.list).mockResolvedValueOnce([
+        {
+          id: 1,
+          video_id: "video-1",
+          segment_idx: 0,
+          start_ms: 0,
+          end_ms: 5000,
+          text: "这句字幕不能被控制栏挡住",
+        },
+      ]);
+      act(() => usePlayer.getState().setCurrentMs(1000));
+
+      renderPlayer(false);
+
+      const caption = await screen.findByText("这句字幕不能被控制栏挡住");
+      const group = caption.parentElement as HTMLElement;
+      expect(group.style.transform).toBe("translateY(-48px)");
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetDesc);
+      Object.defineProperty(Element.prototype, "clientHeight", clientDesc);
+    }
   });
 });

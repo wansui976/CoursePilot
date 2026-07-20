@@ -52,5 +52,7 @@ describe("CaptionOverlay", () => {
     const fontSize = Number.parseFloat(window.getComputedStyle(caption).fontSize);
 
     expect(fontSize).toBeLessThan(80);
+    // 量高必须真的生效：若 stageHeight 卡在 0，字号会退到最小 12，这条测试就白测了。
+    expect(fontSize).toBeGreaterThan(12);
   });
 });
