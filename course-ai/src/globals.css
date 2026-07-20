@@ -623,6 +623,64 @@ select:focus-visible {
   flex: 0 0 auto;
 }
 
+/* 现代滑条（iOS 风）：白色圆形滑块 + 阴影；已滑过段用强调色填充（--slider-fill
+   由组件按当前值内联写入），未滑过段灰轨。深浅主题都保持白色滑块。 */
+.ca-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--accent) var(--slider-fill, 0%),
+    var(--surface-card-hover) var(--slider-fill, 0%)
+  );
+  outline-offset: 6px;
+  cursor: pointer;
+}
+
+.ca-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  box-shadow:
+    0 0 0 0.5px rgb(15 18 28 / 0.12),
+    0 1px 4px rgb(15 18 28 / 0.3);
+  transition: transform 0.12s var(--ease);
+}
+
+.ca-slider::-webkit-slider-thumb:active {
+  transform: scale(1.12);
+}
+
+.ca-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  box-shadow:
+    0 0 0 0.5px rgb(15 18 28 / 0.12),
+    0 1px 4px rgb(15 18 28 / 0.3);
+  transition: transform 0.12s var(--ease);
+}
+
+.ca-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-card-hover);
+}
+
+.ca-slider::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
 /* 顶栏搜索框：与视图切换段同高，窄屏靠 topbar 的 flex-wrap 换行。 */
 .tb-search {
   width: 160px;
