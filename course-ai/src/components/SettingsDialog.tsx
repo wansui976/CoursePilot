@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from "react";
 import {
   AudioLines,
   Check,
@@ -1119,7 +1119,8 @@ export function SettingsPanel({
                           setSlidesSensitivityState(value);
                           setSlidesSensitivity(value);
                         }}
-                        className="h-1 flex-1 accent-primary"
+                        className="ca-slider flex-1"
+                        style={{ "--slider-fill": `${slidesSensitivity}%` } as CSSProperties}
                       />
                       <span>高</span>
                       <span className="w-8 text-right tabular-nums text-[var(--text-faint)]">

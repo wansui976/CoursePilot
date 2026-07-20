@@ -196,6 +196,18 @@ describe("SettingsPanel", () => {
     expect(await screen.findByText(/保存失败/)).toBeInTheDocument();
   });
 
+  it("renders the slides sensitivity slider in the modern styled variant", async () => {
+    render(<SettingsPanel onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "课件 / OCR" }));
+    const slider = await screen.findByLabelText("课件提取灵敏度");
+
+    // 自绘滑条：ca-slider 负责白色滑块与轨道；--slider-fill 驱动已滑过段的填充。
+    expect(slider).toHaveClass("ca-slider");
+    fireEvent.change(slider, { target: { value: "80" } });
+    expect((slider as HTMLElement).style.getPropertyValue("--slider-fill")).toBe("80%");
+  });
+
   it("lets users choose the first accent color from a color picker", () => {
     render(<SettingsPanel onClose={() => undefined} />);
 
