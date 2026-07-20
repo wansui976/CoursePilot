@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { Check, ChevronDown, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
@@ -34,6 +35,7 @@ export function LlmSettingsPanel() {
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -78,28 +80,45 @@ export function LlmSettingsPanel() {
     setActiveId((current) => current ?? id);
   }
 
-  function remove(id: string) {
-    setProfiles((ps) => ps.filter((p) => p.id !== id));
-    setActiveId((current) => (current === id ? null : current));
+  // 删除已保存的配置是破坏性操作（保存后连同 Key 路由一起消失）：先确认。
+  async function remove(profile: LlmProfile) {
+    const ok = await confirmDialog(`删除配置「${profile.name}」？`, {
+      title: "删除 LLM 配置",
+      kind: "warning",
+      okLabel: "删除",
+      cancelLabel: "取消",
+    });
+    if (!ok) return;
+    setProfiles((ps) => ps.filter((p) => p.id !== profile.id));
+    setActiveId((current) => (current === profile.id ? null : current));
   }
 
   async function save() {
-    const routing: Record<string, string> = {};
-    if (activeId && profiles.some((p) => p.id === activeId)) {
-      for (const task of ROUTING_TASKS) routing[task] = activeId;
+    setSaving(true);
+    try {
+      const routing: Record<string, string> = {};
+      if (activeId && profiles.some((p) => p.id === activeId)) {
+        for (const task of ROUTING_TASKS) routing[task] = activeId;
+      }
+      await ipc.ai.saveProfiles(JSON.stringify(profiles), JSON.stringify(routing));
+      for (const [id, key] of Object.entries(keys)) {
+        if (key) await ipc.ai.setApiKey(id, key);
+      }
+      setHasKey((flags) => {
+        const next = { ...flags };
+        for (const [id, key] of Object.entries(keys)) if (key) next[id] = true;
+        return next;
+      });
+      setKeys({});
+      setSavedMsg("已保存");
+      setTimeout(() => setSavedMsg(""), 1500);
+    } catch (error) {
+      // 保存失败要说出来：否则界面上的配置和库里的从此各说各话。
+      setSavedMsg(`保存失败：${error}`);
+      setTimeout(() => setSavedMsg(""), 6000);
+    } finally {
+      setSaving(false);
     }
-    await ipc.ai.saveProfiles(JSON.stringify(profiles), JSON.stringify(routing));
-    for (const [id, key] of Object.entries(keys)) {
-      if (key) await ipc.ai.setApiKey(id, key);
-    }
-    setHasKey((flags) => {
-      const next = { ...flags };
-      for (const [id, key] of Object.entries(keys)) if (key) next[id] = true;
-      return next;
-    });
-    setKeys({});
-    setSavedMsg("已保存");
-    setTimeout(() => setSavedMsg(""), 1500);
   }
 
   const effectiveActive =
@@ -155,6 +174,7 @@ export function LlmSettingsPanel() {
                 {isActive ? "使用中" : "设为默认"}
               </button>
               <input
+                aria-label="配置名称"
                 className={`${FIELD} flex-1`}
                 value={p.name}
                 placeholder="名称"
@@ -176,12 +196,14 @@ export function LlmSettingsPanel() {
               </div>
             </div>
             <input
+              aria-label="Base URL"
               className={FIELD}
               value={p.base_url}
               placeholder="Base URL"
               onChange={(e) => update(p.id, { base_url: e.target.value })}
             />
             <input
+              aria-label="模型名"
               className={FIELD}
               value={p.model}
               placeholder="模型名（如 gpt-4o / claude-sonnet-4-6）"
@@ -190,6 +212,7 @@ export function LlmSettingsPanel() {
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
                 <input
+                  aria-label="API Key"
                   type={showKey[p.id] ? "text" : "password"}
                   className={`${FIELD} pr-10`}
                   value={keys[p.id] ?? ""}
@@ -217,7 +240,7 @@ export function LlmSettingsPanel() {
             </div>
             <button
               className="text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
-              onClick={() => remove(p.id)}
+              onClick={() => void remove(p)}
             >
               删除此配置
             </button>
@@ -225,11 +248,17 @@ export function LlmSettingsPanel() {
         );
       })}
       <div className="flex items-center gap-3">
-        <Button size="sm" onClick={save}>
+        <Button size="sm" disabled={saving} onClick={save}>
           保存 LLM 配置
         </Button>
         {savedMsg && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-[var(--status-ok-bg)] px-2 py-0.5 text-xs font-medium text-[var(--status-ok)]">
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+              savedMsg.includes("失败")
+                ? "bg-[var(--status-err-bg)] text-[var(--status-err)]"
+                : "bg-[var(--status-ok-bg)] text-[var(--status-ok)]"
+            }`}
+          >
             {savedMsg}
           </span>
         )}

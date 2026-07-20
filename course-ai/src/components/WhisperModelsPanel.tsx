@@ -6,6 +6,12 @@ import { isMobile } from "@/lib/platform";
 
 type Row = [WhisperModel, boolean];
 
+function formatBytes(bytes: number) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  return `${bytes} B`;
+}
+
 export function WhisperModelsPanel() {
   if (isMobile()) return null;
   return <WhisperModelsPanelDesktop />;
@@ -58,6 +64,10 @@ function WhisperModelsPanelDesktop() {
           >
             <span className="flex items-center gap-2">
               {model.display_name}
+              {/* 体积帮助用户在下载前掂量（large 类模型 GB 级）。 */}
+              <span className="text-xs text-[var(--text-faint)]">
+                {formatBytes(model.size_bytes)}
+              </span>
               {installed && (
                 <span className="inline-flex items-center rounded-full bg-[var(--status-ok-bg)] px-1.5 py-0.5 text-xs font-medium text-[var(--status-ok)]">
                   已安装

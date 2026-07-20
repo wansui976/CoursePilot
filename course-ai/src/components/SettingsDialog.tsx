@@ -32,6 +32,7 @@ import { defaultAsrBackend, normalizeAsrBackend } from "@/lib/asrDefaults";
 import { defaultOcrBackend, normalizeOcrBackend } from "@/lib/ocrDefaults";
 import { isMobile, isTablet } from "@/lib/platform";
 import { pickDirectoryPath } from "@/lib/mobileFiles";
+import { Switch } from "@/components/ui/switch";
 import { WhisperModelsPanel } from "./WhisperModelsPanel";
 import { LlmSettingsPanel } from "./LlmSettingsPanel";
 
@@ -314,6 +315,19 @@ export function SettingsPanel({
   const [slidesSensitivity, setSlidesSensitivityState] = useState(() =>
     getSlidesSensitivity(),
   );
+  // 即时保存（改了立刻写库）的设置失败时不能无声无息：界面已显示新值、库里却没存。
+  // 统一走 saveSetting，失败在详情区顶部给错误条；下一次保存成功后自动清除。
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const saveSetting = useCallback(async (key: string, value: string) => {
+    try {
+      await ipc.settings.set(key, value);
+      setSaveError(null);
+    } catch (error) {
+      setSaveError(String(error));
+    }
+  }, []);
+  // 凭证保存进行中：禁用保存按钮防连点。
+  const [savingCred, setSavingCred] = useState<"volc" | "ctx" | "dash" | "ocr" | null>(null);
 
   useEffect(() => {
     void ipc.settings.get("default_storage_root").then((value) => setRoot(value ?? ""));
@@ -359,99 +373,146 @@ export function SettingsPanel({
     const dir = await pickDirectoryPath(["storage"]);
     if (typeof dir === "string") {
       setRoot(dir);
-      await ipc.settings.set("default_storage_root", dir);
+      await saveSetting("default_storage_root", dir);
     }
+  }
+
+  // 「留空 = 跟视频同目录」是文档承诺，必须给清空手段。
+  async function clearRoot() {
+    setRoot("");
+    await saveSetting("default_storage_root", "");
   }
 
   async function changeModel(value: string) {
     setModel(value);
-    await ipc.settings.set("whisper_model", value);
+    await saveSetting("whisper_model", value);
   }
 
   async function changeAsrBackend(value: string) {
     const next = normalizeAsrBackend(value);
     setAsrBackend(next);
-    await ipc.settings.set("asr_backend", next);
+    await saveSetting("asr_backend", next);
   }
 
   async function changeAsrLanguage(value: string) {
     setAsrLanguage(value);
-    await ipc.settings.set("asr_language", value);
+    await saveSetting("asr_language", value);
   }
 
   async function changeCorrectionConcurrency(value: string) {
     setCorrectionConcurrency(value);
     const n = Number(value);
     if (Number.isFinite(n) && n >= 1) {
-      await ipc.settings.set("asr_correction_concurrency", String(Math.min(2500, Math.floor(n))));
+      await saveSetting("asr_correction_concurrency", String(Math.min(2500, Math.floor(n))));
     }
+  }
+
+  // 失焦时把非法值（0/空/超限）夹回有效区间并落库，不留「显示 0 实存 8」的脱节。
+  async function normalizeCorrectionConcurrency() {
+    const n = Number(correctionConcurrency);
+    const next = Number.isFinite(n)
+      ? String(Math.min(2500, Math.max(1, Math.floor(n))))
+      : "8";
+    setCorrectionConcurrency(next);
+    await saveSetting("asr_correction_concurrency", next);
   }
 
   async function changeSubtitleAutocorrect(value: boolean) {
     setSubtitleAutocorrect(value);
-    await ipc.settings.set("subtitle_autocorrect", value ? "true" : "false");
+    await saveSetting("subtitle_autocorrect", value ? "true" : "false");
   }
 
   async function saveVolcengineKey() {
     const appId = volcengineAppId.trim();
     const token = volcengineToken.trim();
-    if (appId) await ipc.settings.set("volcengine_asr_app_id", appId);
-    if (token) await ipc.secrets.set("volcengine_asr_access_token", token);
     if (!appId && !token) return;
-    if (token) volcSecret.refresh();
-    setVolcengineToken("");
-    setVolcengineSaved("已保存");
-    setTimeout(() => setVolcengineSaved(""), 1500);
+    setSavingCred("volc");
+    try {
+      if (appId) await ipc.settings.set("volcengine_asr_app_id", appId);
+      if (token) await ipc.secrets.set("volcengine_asr_access_token", token);
+      if (token) {
+        volcSecret.refresh();
+        setVolcengineToken("");
+      }
+      setVolcengineSaved("已保存");
+      setTimeout(() => setVolcengineSaved(""), 1500);
+    } catch (error) {
+      // 不再无声失败：把后端写入错误直接显示出来，便于定位（例如 DB 不可写）。
+      setVolcengineSaved(`保存失败：${error}`);
+      setTimeout(() => setVolcengineSaved(""), 6000);
+    } finally {
+      setSavingCred(null);
+    }
   }
 
   async function saveVolcengineContext() {
+    setSavingCred("ctx");
     try {
       await ipc.settings.set("volcengine_asr_hotwords", volcengineHotwords.trim());
       await ipc.settings.set("volcengine_asr_context", volcengineContext.trim());
       setVolcengineCtxSaved("已保存");
       setTimeout(() => setVolcengineCtxSaved(""), 1500);
     } catch (error) {
-      // 不再无声失败：把后端写入错误直接显示出来，便于定位（例如 DB 不可写）。
       setVolcengineCtxSaved(`保存失败：${error}`);
       setTimeout(() => setVolcengineCtxSaved(""), 6000);
+    } finally {
+      setSavingCred(null);
     }
   }
 
   async function changeAliyunModel(value: string) {
     setAliyunModel(value);
-    await ipc.settings.set("aliyun_asr_model", value);
+    await saveSetting("aliyun_asr_model", value);
   }
 
   async function saveDashscopeKey() {
     if (!dashscopeKey.trim()) return;
-    await ipc.secrets.set("dashscope_api_key", dashscopeKey.trim());
-    dashSecret.refresh();
-    setDashscopeKey("");
-    setDashscopeSaved("已保存");
-    setTimeout(() => setDashscopeSaved(""), 1500);
+    setSavingCred("dash");
+    try {
+      await ipc.secrets.set("dashscope_api_key", dashscopeKey.trim());
+      dashSecret.refresh();
+      setDashscopeKey("");
+      setDashscopeSaved("已保存");
+      setTimeout(() => setDashscopeSaved(""), 1500);
+    } catch (error) {
+      setDashscopeSaved(`保存失败：${error}`);
+      setTimeout(() => setDashscopeSaved(""), 6000);
+    } finally {
+      setSavingCred(null);
+    }
   }
 
   async function changeOcrBackend(value: string) {
     const next = normalizeOcrBackend(value);
     setOcrBackend(next);
-    await ipc.settings.set("ocr_backend", next);
+    await saveSetting("ocr_backend", next);
   }
 
   async function changeOcrType(value: string) {
     setOcrType(value);
-    await ipc.settings.set("aliyun_ocr_type", value);
+    await saveSetting("aliyun_ocr_type", value);
   }
 
   async function saveOcrCreds() {
     const keyId = ocrKeyId.trim();
     const secret = ocrSecret.trim();
-    if (keyId) await ipc.settings.set("aliyun_ocr_access_key_id", keyId);
-    if (secret) await ipc.secrets.set("aliyun_ocr_access_key_secret", secret);
     if (!keyId && !secret) return;
-    if (secret) ocrSecret2.refresh();
-    setOcrSecret("");
-    setOcrSaved("已保存");
-    setTimeout(() => setOcrSaved(""), 1500);
+    setSavingCred("ocr");
+    try {
+      if (keyId) await ipc.settings.set("aliyun_ocr_access_key_id", keyId);
+      if (secret) await ipc.secrets.set("aliyun_ocr_access_key_secret", secret);
+      if (secret) {
+        ocrSecret2.refresh();
+        setOcrSecret("");
+      }
+      setOcrSaved("已保存");
+      setTimeout(() => setOcrSaved(""), 1500);
+    } catch (error) {
+      setOcrSaved(`保存失败：${error}`);
+      setTimeout(() => setOcrSaved(""), 6000);
+    } finally {
+      setSavingCred(null);
+    }
   }
 
   const categories: SettingsCategory[] = [
@@ -559,6 +620,15 @@ export function SettingsPanel({
               <h2 className="mb-5 text-[22px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">
                 {CATEGORY_META[activeCategory].label}
               </h2>
+            )}
+
+            {saveError && (
+              <div
+                role="alert"
+                className="mb-4 rounded-lg border border-[var(--status-err)] bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)]"
+              >
+                设置保存失败：{saveError}
+              </div>
             )}
 
             {activeCategory === "appearance" && (
@@ -698,6 +768,11 @@ export function SettingsPanel({
                     <Button size="sm" variant="outline" onClick={pickRoot}>
                       选择
                     </Button>
+                    {root && (
+                      <Button size="sm" variant="ghost" onClick={() => void clearRoot()}>
+                        清除
+                      </Button>
+                    )}
                   </div>
                 </StackRow>
               </Group>
@@ -763,6 +838,7 @@ export function SettingsPanel({
                       onChange={(event) =>
                         void changeCorrectionConcurrency(event.target.value)
                       }
+                      onBlur={() => void normalizeCorrectionConcurrency()}
                     />
                   </Row>
                   <Row
@@ -770,13 +846,11 @@ export function SettingsPanel({
                     htmlFor="subtitle-autocorrect"
                     hint="导入 B 站自带字幕后，是否像 ASR 文稿一样交给大模型纠正错别字、标点并还原数学公式。关闭则字幕原样使用。"
                   >
-                    <input
+                    <Switch
                       id="subtitle-autocorrect"
-                      type="checkbox"
-                      className="h-4 w-4 accent-[var(--accent)]"
                       checked={subtitleAutocorrect}
-                      onChange={(event) =>
-                        void changeSubtitleAutocorrect(event.target.checked)
+                      onCheckedChange={(next) =>
+                        void changeSubtitleAutocorrect(next)
                       }
                     />
                   </Row>
@@ -833,7 +907,12 @@ export function SettingsPanel({
                     </Row>
                     <StackRow>
                       <div className="flex items-center gap-3">
-                        <Button size="sm" variant="outline" onClick={saveVolcengineKey}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={savingCred !== null}
+                          onClick={saveVolcengineKey}
+                        >
                           保存火山 ASR 凭证
                         </Button>
                         <SavedBadge text={volcengineSaved} />
@@ -867,7 +946,12 @@ export function SettingsPanel({
                     </StackRow>
                     <StackRow>
                       <div className="flex items-center gap-3">
-                        <Button size="sm" variant="outline" onClick={saveVolcengineContext}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={savingCred !== null}
+                          onClick={saveVolcengineContext}
+                        >
                           保存热词与上下文
                         </Button>
                         <SavedBadge text={volcengineCtxSaved} />
@@ -909,7 +993,12 @@ export function SettingsPanel({
                     </Row>
                     <StackRow>
                       <div className="flex items-center gap-3">
-                        <Button size="sm" variant="outline" onClick={saveDashscopeKey}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={savingCred !== null}
+                          onClick={saveDashscopeKey}
+                        >
                           保存百炼 API Key
                         </Button>
                         <SavedBadge text={dashscopeSaved} />
@@ -994,7 +1083,12 @@ export function SettingsPanel({
                       </Row>
                       <StackRow>
                         <div className="flex items-center gap-3">
-                          <Button size="sm" variant="outline" onClick={saveOcrCreds}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={savingCred !== null}
+                            onClick={saveOcrCreds}
+                          >
                             保存阿里云 OCR 凭证
                           </Button>
                           <SavedBadge text={ocrSaved} />
