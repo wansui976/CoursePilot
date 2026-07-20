@@ -9,6 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { ipc } from "@/lib/ipc";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { isIOS, pickDirectoryPath } from "@/lib/mobileFiles";
@@ -78,10 +79,20 @@ export function CourseList({
   });
 
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  // 打开时记录触发按钮的屏幕坐标：菜单 portal 到 body 用 fixed 定位，
+  // 不再被 `.ca-nav`（overflow-y:auto）滚动容器裁掉。
+  const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
+  const menuButtonRefs = useRef(new Map<string, HTMLButtonElement | null>());
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [swipedCourseId, setSwipedCourseId] = useState<string | null>(null);
   const swipeStart = useRef<{ id: string; x: number; y: number } | null>(null);
+
+  function openMenuFor(courseId: string, button?: HTMLButtonElement | null) {
+    const el = button ?? menuButtonRefs.current.get(courseId);
+    if (el) setMenuAnchor(el.getBoundingClientRect());
+    setMenuFor(courseId);
+  }
 
   useEffect(() => {
     if (menuFor && menuFor !== swipedCourseId) {
@@ -102,6 +113,7 @@ export function CourseList({
 
   function closeMenu() {
     setMenuFor(null);
+    setMenuAnchor(null);
     setSwipedCourseId(null);
   }
 
@@ -177,7 +189,7 @@ export function CourseList({
     const dy = Math.abs(start.y - event.clientY);
     if (dx > 30 && dy < 18) {
       setSwipedCourseId(courseId);
-      setMenuFor(courseId);
+      openMenuFor(courseId);
     }
   }
 
@@ -185,12 +197,10 @@ export function CourseList({
     swipeStart.current = null;
   }
 
+  const openCourse = courses.find((course) => course.id === menuFor) ?? null;
+
   return (
     <>
-      {menuFor && (
-        // 透明背板：点菜单外区域即关闭。
-        <div className="fixed inset-0 z-10" onClick={closeMenu} />
-      )}
       {courses.map((course) => {
         // 队列是当前视图时，课程不再算「选中」，避免与队列项同时高亮。
         const selected = course.id === selectedCourseId && !queueOpen;
@@ -234,10 +244,15 @@ export function CourseList({
               <button
                 aria-label="课程操作"
                 data-course-menu
+                ref={(el) => {
+                  if (el) menuButtonRefs.current.set(course.id, el);
+                  else menuButtonRefs.current.delete(course.id);
+                }}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setMenuFor((id) => (id === course.id ? null : course.id));
+                  if (menuFor === course.id) closeMenu();
+                  else openMenuFor(course.id, e.currentTarget);
                 }}
                 className={`ca-touch-44 mr-1 grid h-9 w-9 flex-none place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card)] hover:text-[var(--text-strong)] ${
                   isIOS() || menuFor === course.id || swipedCourseId === course.id
@@ -248,34 +263,6 @@ export function CourseList({
               >
                 <MoreHorizontal className="h-5 w-5" />
               </button>
-              {(menuFor === course.id || swipedCourseId === course.id) && (
-                <div
-                  data-course-menu
-                  className="absolute right-1 top-full z-20 mt-1 w-40 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 shadow-[var(--shadow-pop)]"
-                >
-                  <button
-                    onClick={() => startRename(course.id, course.name)}
-                    className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
-                  >
-                    <Pencil className="h-4 w-4" />
-                    重命名
-                  </button>
-                  <button
-                    onClick={() => void handleRelinkRoot(course.id, course.name)}
-                    className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
-                  >
-                    <FolderOpen className="h-4 w-4" />
-                    重新选择根目录
-                  </button>
-                  <button
-                    onClick={() => void confirmDelete(course.id, course.name)}
-                    className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--status-err)] hover:bg-[var(--surface-card-hover)]"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    删除
-                  </button>
-                </div>
-              )}
             </div>
             {selected && selectedCourseExtra}
           </Fragment>
@@ -290,6 +277,56 @@ export function CourseList({
             选择一个课程文件夹后，视频会按课程归档。
           </div>
         ))}
+      {openCourse &&
+        menuAnchor &&
+        createPortal(
+          <>
+            {/* 透明背板：点菜单外区域即关闭。z-[60]/[61] 明确高于侧栏(40)/底栏(45)/
+                全屏(50) 等所有 z token，避免 portal 到 body 后被它们盖住。 */}
+            <div className="fixed inset-0 z-[60]" onClick={closeMenu} />
+            <div
+              data-course-menu
+              className="fixed z-[61] w-40 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 shadow-[var(--shadow-pop)]"
+              style={menuPosition(menuAnchor)}
+            >
+              <button
+                onClick={() => startRename(openCourse.id, openCourse.name)}
+                className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
+              >
+                <Pencil className="h-4 w-4" />
+                重命名
+              </button>
+              <button
+                onClick={() => void handleRelinkRoot(openCourse.id, openCourse.name)}
+                className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
+              >
+                <FolderOpen className="h-4 w-4" />
+                重新选择根目录
+              </button>
+              <button
+                onClick={() => void confirmDelete(openCourse.id, openCourse.name)}
+                className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--status-err)] hover:bg-[var(--surface-card-hover)]"
+              >
+                <Trash2 className="h-4 w-4" />
+                删除
+              </button>
+            </div>
+          </>,
+          document.body,
+        )}
     </>
   );
+}
+
+// 菜单 fixed 定位：贴触发按钮右下角展开；下方空间不足则向上翻，并夹在视口内。
+const MENU_WIDTH = 160;
+const MENU_HEIGHT_EST = 148;
+function menuPosition(anchor: DOMRect): { left: number; top: number } {
+  const viewportH = typeof window !== "undefined" ? window.innerHeight : 768;
+  const left = Math.max(8, anchor.right - MENU_WIDTH);
+  const openUp = anchor.bottom + MENU_HEIGHT_EST > viewportH;
+  const top = openUp
+    ? Math.max(8, anchor.top - MENU_HEIGHT_EST)
+    : anchor.bottom + 4;
+  return { left, top };
 }
