@@ -159,6 +159,19 @@ describe("NotesPanel", () => {
     expect(secondScroller.scrollTop).toBe(0);
   });
 
+  it("marks the active inner view button with aria-pressed", async () => {
+    renderNotesPanel("video-1", "aria-pressed");
+    const notesBtn = await screen.findByRole("button", { name: "笔记" });
+    expect(notesBtn).toHaveAttribute("aria-pressed", "true");
+    const quizBtn = screen.getByRole("button", { name: "出题" });
+    expect(quizBtn).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(quizBtn);
+
+    expect(quizBtn).toHaveAttribute("aria-pressed", "true");
+    expect(notesBtn).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("flushes the pending note save on unmount (no data loss in the debounce window)", () => {
     // 不用 fake timers（会全局泄漏、拖垮并行的其它用例）：真实 800ms 定时器在本
     // 同步用例里根本来不及触发，所以卸载后若立刻看到 saveNotes，就证明是刷盘而非去抖。

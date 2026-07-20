@@ -35,7 +35,7 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
           renderMarkdown(summary, requestSeek)
         ) : (
           <p className="text-sm text-[var(--text-faint)]">
-            还没有摘要，字幕就绪后会自动生成，也可点右下角重新生成。
+            还没有摘要，字幕就绪后会自动生成，也可点右下角生成。
           </p>
         )}
       </div>

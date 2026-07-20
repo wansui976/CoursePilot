@@ -162,15 +162,22 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       {...(showTimestamps ? {} : { "data-hide-timestamps": "" })}
       className="relative flex h-full flex-col"
     >
-      <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
+      {/* 互斥的视图切换按钮组：用 aria-pressed 传达选中态。不用 role="tab"——外层
+          学习资料标签已有同名「笔记」tab，再嵌一层 tablist 会造成无障碍名重复。 */}
+      <div
+        role="group"
+        aria-label="学习工具"
+        className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2"
+      >
         {VIEWS.map((v) => (
           <button
             key={v.key}
+            aria-pressed={view === v.key}
             onClick={() => setView(v.key)}
             className={`ca-touch-44 rounded px-2 py-1 text-xs ${
               view === v.key
                 ? "bg-primary/20 text-primary"
-                : "text-[var(--text-muted)] hover:bg-[var(--surface-card)]"
+                : "text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)]"
             }`}
           >
             {v.label}
