@@ -253,7 +253,8 @@ describe("Home selected-video integration", () => {
     await waitFor(() =>
       expect(screen.queryByLabelText("处理队列页面")).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole("heading", { name: "课程视频" })).toBeInTheDocument();
+    // 标题层级调整后，选中课程时 h1 显示课程名。
+    expect(screen.getByRole("heading", { name: "Downloads" })).toBeInTheDocument();
   });
 
   it("uses bottom tabs and course-list drill-down on a compact screen", async () => {
