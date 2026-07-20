@@ -1189,7 +1189,9 @@ export function Home() {
             <header className="ca-wb-head">
               <div className="wb-title-row">
                 <div className="min-w-0">
-                  <h1 className="wb-title">{displayTitle(selectedVideo.title)}</h1>
+                  <h1 className="wb-title" title={displayTitle(selectedVideo.title)}>
+                    {displayTitle(selectedVideo.title)}
+                  </h1>
                 </div>
               </div>
             </header>

@@ -48,7 +48,7 @@ export function Controls({
   const durationMs = usePlayer((s) => s.durationMs);
   const [speedOpen, setSpeedOpen] = useState(false);
 
-  // 倍速菜单:点菜单与触发按钮之外即收起(都打了 data-speed-menu)。
+  // 倍速菜单:点菜单与触发按钮之外即收起(都打了 data-speed-menu),或按 Esc 收起。
   useEffect(() => {
     if (!speedOpen) return;
     const onPointerDown = (event: PointerEvent) => {
@@ -56,8 +56,15 @@ export function Controls({
       if (target?.closest("[data-speed-menu]")) return;
       setSpeedOpen(false);
     };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSpeedOpen(false);
+    };
     document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, [speedOpen]);
   const safeDuration = Math.max(0, durationMs);
   const progressPercent =
@@ -101,12 +108,14 @@ export function Controls({
         <div className="relative" data-speed-menu>
           <button
             type="button"
-            className={textButtonClass}
+            className={`${textButtonClass} ${rate !== 1 ? "text-[var(--accent)]" : ""}`}
             aria-haspopup="menu"
             aria-expanded={speedOpen}
+            aria-label={`倍速，当前 ${formatRate(rate)}x`}
             onClick={() => setSpeedOpen((open) => !open)}
           >
-            倍速
+            {/* 非 1x 时按钮直接显示当前速率，让用户不点开也能看到正在几倍速。 */}
+            {rate === 1 ? "倍速" : `${formatRate(rate)}x`}
           </button>
           {speedOpen && (
             <div
