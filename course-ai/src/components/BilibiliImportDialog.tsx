@@ -7,6 +7,12 @@ import { ipc } from "@/lib/ipc";
 import type { ProbeResult } from "@/lib/types";
 
 type Step = "url" | "cookie" | "probing" | "confirm";
+type ImportRequest = {
+  useSub: boolean;
+  quality?: number;
+  subLang?: string;
+  autocorrect: boolean;
+};
 
 export function BilibiliImportDialog({
   courseId,
@@ -90,20 +96,20 @@ export function BilibiliImportDialog({
   };
 
   const importMutation = useMutation({
-    mutationFn: (useSub: boolean) =>
+    mutationFn: (request: ImportRequest) =>
       ipc.tools.importBilibili(
         courseId,
         url.trim(),
-        quality,
-        useSub ? subLang : undefined,
+        request.quality,
+        request.useSub ? request.subLang : undefined,
         // 纠错偏好只对带字幕导入有意义；不带字幕不写偏好（保持 NULL）。
-        useSub ? autocorrect : undefined,
+        request.useSub ? request.autocorrect : undefined,
       ),
-    onSuccess: (video, useSub) => {
+    onSuccess: (video, request) => {
       queryClient.invalidateQueries({ queryKey: ["videos", courseId] });
       // 选用了字幕：立即跑流水线，让字幕被消化成文稿（ASR 阶段会走字幕分支、
       // 跳过语音识别），用户无需再手动「开始处理」。
-      if (useSub) {
+      if (request.useSub) {
         void ipc.pipeline.process(video.id);
       }
       onClose();
@@ -265,7 +271,14 @@ export function BilibiliImportDialog({
                   size="sm"
                   variant="outline"
                   disabled={importMutation.isPending}
-                  onClick={() => importMutation.mutate(false)}
+                  onClick={() =>
+                    importMutation.mutate({
+                      useSub: false,
+                      quality: quality ?? probe.qualities[0],
+                      subLang,
+                      autocorrect,
+                    })
+                  }
                 >
                   不用字幕
                 </Button>
@@ -273,7 +286,14 @@ export function BilibiliImportDialog({
               <Button
                 size="sm"
                 disabled={importMutation.isPending}
-                onClick={() => importMutation.mutate(probe.tracks.length > 0)}
+                onClick={() =>
+                  importMutation.mutate({
+                    useSub: probe.tracks.length > 0,
+                    quality: quality ?? probe.qualities[0],
+                    subLang,
+                    autocorrect,
+                  })
+                }
               >
                 {importMutation.isPending
                   ? "下载中…"

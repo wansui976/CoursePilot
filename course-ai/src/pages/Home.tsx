@@ -57,6 +57,9 @@ const statusTone: Record<Video["processed_status"], BadgeTone> = {
 const PANEL_WIDTH_STORAGE_KEY = "course-ai-study-panel-width";
 const VIEW_STORAGE_KEY = "course-ai-home-view";
 
+// 看到这个比例视为「已看完」：进度条隐藏，改显示看完标记。
+const WATCHED_RATIO = 0.995;
+
 type LibraryView = "grid" | "list";
 
 function readInitialView(): LibraryView {
@@ -841,7 +844,13 @@ export function Home() {
             {durationMs != null && (
               <span className="dur">{formatMs(durationMs)}</span>
             )}
-            {progress.ratio > 0 && progress.ratio < 0.995 && (
+            {progress.ratio >= WATCHED_RATIO && (
+              <span className="done">
+                <Check className="h-3 w-3" />
+                已看完
+              </span>
+            )}
+            {progress.ratio > 0 && progress.ratio < WATCHED_RATIO && (
               <span
                 className="ov-bar"
                 aria-label={`已观看 ${Math.round(progress.ratio * 100)}%`}
@@ -886,7 +895,12 @@ export function Home() {
                 videoId={video.id}
                 className="absolute inset-0 h-full w-full"
               />
-              {progress.ratio > 0 && progress.ratio < 0.995 && (
+              {progress.ratio >= WATCHED_RATIO && (
+                <span className="done" role="img" aria-label="已看完">
+                  <Check className="h-3 w-3" />
+                </span>
+              )}
+              {progress.ratio > 0 && progress.ratio < WATCHED_RATIO && (
                 <span
                   className="ov-bar"
                   aria-label={`已观看 ${Math.round(progress.ratio * 100)}%`}

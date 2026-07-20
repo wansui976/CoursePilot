@@ -8,11 +8,13 @@ import { cn } from "@/lib/utils";
 export function CourseSidebar({
   selectedCourseId,
   onSelect,
+  onClearSelection,
   onOpenRecycleBin,
   className,
 }: {
   selectedCourseId: string | null;
   onSelect: (id: string) => void;
+  onClearSelection?: () => void;
   onOpenRecycleBin?: () => void;
   className?: string;
 }) {
@@ -59,7 +61,11 @@ export function CourseSidebar({
       </div>
       <div className="ca-nav-label">我的课程</div>
       <div className="ca-nav">
-        <CourseList selectedCourseId={selectedCourseId} onSelect={onSelect} />
+        <CourseList
+          selectedCourseId={selectedCourseId}
+          onSelect={onSelect}
+          onClearSelection={onClearSelection}
+        />
       </div>
     </aside>
   );

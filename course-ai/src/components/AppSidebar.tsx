@@ -24,6 +24,7 @@ export function AppSidebar({
   onToggleCollapsed,
   selectedCourseId,
   onSelectCourse,
+  onClearCourseSelection,
   videos = [],
   selectedVideoId = null,
   onOpenVideo,
@@ -42,6 +43,7 @@ export function AppSidebar({
   onToggleCollapsed: () => void;
   selectedCourseId: string | null;
   onSelectCourse: (id: string) => void;
+  onClearCourseSelection?: () => void;
   videos?: Video[];
   selectedVideoId?: string | null;
   onOpenVideo?: (id: string) => void;
@@ -186,6 +188,7 @@ export function AppSidebar({
         <CourseList
           selectedCourseId={selectedCourseId}
           onSelect={onSelectCourse}
+          onClearSelection={onClearCourseSelection}
           queueOpen={queueOpen}
           selectedCourseExtra={
             view === "workbench" ? (

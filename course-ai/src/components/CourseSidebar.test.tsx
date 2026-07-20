@@ -5,7 +5,7 @@ import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CourseSidebar } from "./CourseSidebar";
 
-const { mockIpc, pickDirectoryPathMock, isIOSMock } = vi.hoisted(() => ({
+const { mockIpc, pickDirectoryPathMock, isIOSMock, confirmMock } = vi.hoisted(() => ({
   mockIpc: {
     courses: {
       list: vi.fn(),
@@ -17,6 +17,7 @@ const { mockIpc, pickDirectoryPathMock, isIOSMock } = vi.hoisted(() => ({
   },
   pickDirectoryPathMock: vi.fn(),
   isIOSMock: vi.fn(),
+  confirmMock: vi.fn(),
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
@@ -24,7 +25,7 @@ vi.mock("@/lib/mobileFiles", () => ({
   pickDirectoryPath: pickDirectoryPathMock,
   isIOS: isIOSMock,
 }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: vi.fn(), message: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: confirmMock, message: vi.fn() }));
 
 function renderSidebar(overrides: Partial<ComponentProps<typeof CourseSidebar>> = {}) {
   const queryClient = new QueryClient({
@@ -47,6 +48,7 @@ describe("CourseSidebar", () => {
     isIOSMock.mockReturnValue(false);
     mockIpc.courses.list.mockResolvedValue([]);
     mockIpc.courses.create.mockResolvedValue(undefined);
+    mockIpc.courses.delete.mockResolvedValue(undefined);
     mockIpc.courses.relinkRoot.mockResolvedValue({
       total: 2,
       relinked: 1,
@@ -56,6 +58,7 @@ describe("CourseSidebar", () => {
     pickDirectoryPathMock.mockResolvedValue(
       "/data/user/0/dev.courseai.app.debug/courses/新课程",
     );
+    confirmMock.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -164,5 +167,18 @@ describe("CourseSidebar", () => {
     fireEvent.pointerUp(course.parentElement!, { pointerType: "touch", clientX: 140, clientY: 36 });
 
     expect(await screen.findByRole("button", { name: "重命名" })).toBeInTheDocument();
+  });
+
+  it("clears the selection after deleting the only selected course", async () => {
+    const onClearSelection = vi.fn();
+    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
+    renderSidebar({ selectedCourseId: "c1", onClearSelection });
+
+    await screen.findByRole("button", { name: "线性代数" });
+    fireEvent.click(screen.getByRole("button", { name: "课程操作" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+
+    await waitFor(() => expect(mockIpc.courses.delete).toHaveBeenCalledWith("c1"));
+    await waitFor(() => expect(onClearSelection).toHaveBeenCalledTimes(1));
   });
 });

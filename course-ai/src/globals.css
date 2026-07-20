@@ -733,6 +733,30 @@ select:focus-visible {
   border-radius: 5px;
 }
 
+/* 「已看完」标记：进度条到头后隐藏，靠它区分看完与没看过。列表缩略图太窄，只留图标。 */
+.ca-thumb .done,
+.row-thumb .done {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(255 255 255 / 0.92);
+  background: rgb(15 18 28 / 0.72);
+  padding: 2px 7px;
+  border-radius: 5px;
+}
+
+.row-thumb .done {
+  left: 4px;
+  bottom: 4px;
+  padding: 2px 4px;
+}
+
 /* 封面底部的「看到哪了」进度条（参考自适应课程库的 ov-bar）。 */
 .ca-thumb .ov-bar,
 .row-thumb .ov-bar {

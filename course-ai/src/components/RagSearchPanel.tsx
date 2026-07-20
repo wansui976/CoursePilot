@@ -73,7 +73,7 @@ type AskTurn = {
   /** 推理模型的思考过程；随答案一起保留，答案出来后折叠展示。旧记录没有。 */
   reasoning?: string;
 };
-type AskRequest = { query: string; history: ChatMessage[] };
+type AskRequest = { query: string; history: ChatMessage[]; requestId: string };
 
 const ASK_HISTORY_LIMIT = 6;
 
@@ -228,8 +228,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
     mutationKey: ["rag-ask", videoId],
     // 直接在 mutationFn 内落库：即使提问途中切到别的页面、组件已卸载，
     // 请求仍会跑完并把回答写入历史，切回来即可见。token 通过 onEvent 实时渲染。
-    mutationFn: async ({ query, history }) => {
-      const requestId = crypto.randomUUID();
+    mutationFn: async ({ query, history, requestId }) => {
       // 思考内容也累积到局部变量：随答案一起落库、保留下来（不受组件卸载影响）。
       let reasoningAcc = "";
       if (mountedRef.current)
@@ -274,11 +273,13 @@ function AskChatPanel({ videoId }: { videoId: string }) {
   // 全局 MutationCache 跨组件卸载存活：切回来据此恢复「我的提问 + 思考中」。
   const pendingQueries = useMutationState({
     filters: { mutationKey: ["rag-ask", videoId], status: "pending" },
-    select: (m) => (m.state.variables as AskRequest | undefined)?.query ?? "",
+    select: (m) => m.state.variables as AskRequest | undefined,
   });
-  const pendingQuery =
+  const pendingRequest =
     pendingQueries.length > 0 ? pendingQueries[pendingQueries.length - 1] : undefined;
+  const pendingQuery = pendingRequest?.query;
   const busy = pendingQuery !== undefined;
+  const cancellableRequestId = streaming?.requestId ?? pendingRequest?.requestId;
   // 进行中（含切走时后台进行的）或失败的那一句也显示在对话里，体验更连贯。
   const inFlightQuery = pendingQuery ?? (ask.isError ? ask.variables?.query : undefined);
 
@@ -307,7 +308,11 @@ function AskChatPanel({ videoId }: { videoId: string }) {
   const submit = (raw?: string) => {
     const trimmed = (raw ?? query).trim();
     if (!trimmed || busy) return;
-    ask.mutate({ query: trimmed, history: buildAskContext(history) });
+    ask.mutate({
+      query: trimmed,
+      history: buildAskContext(history),
+      requestId: crypto.randomUUID(),
+    });
     setQuery("");
   };
 
@@ -558,10 +563,10 @@ function AskChatPanel({ videoId }: { videoId: string }) {
             }}
             className="ca-ask-input min-w-0 flex-1 bg-transparent text-sm leading-relaxed text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)]"
           />
-          {streaming ? (
+          {cancellableRequestId ? (
             <button
               type="button"
-              onClick={() => void ipc.ai.cancelRagQuery(streaming.requestId)}
+              onClick={() => void ipc.ai.cancelRagQuery(cancellableRequestId)}
               aria-label="停止生成"
               title="停止生成"
               className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full bg-[var(--surface-card-active)] text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)]"

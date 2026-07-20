@@ -48,13 +48,16 @@ function streamResolving(answer: string) {
   };
 }
 
-function renderAskPanel() {
-  const queryClient = new QueryClient({
+function createTestQueryClient() {
+  return new QueryClient({
     defaultOptions: {
       queries: { retry: false },
       mutations: { retry: false },
     },
   });
+}
+
+function renderAskPanel(queryClient = createTestQueryClient()) {
 
   return render(
     <QueryClientProvider client={queryClient}>
@@ -262,6 +265,36 @@ describe("RagSearchPanel", () => {
     fireEvent.click(stop);
     expect(mockIpc.ai.cancelRagQuery).toHaveBeenCalledTimes(1);
     // 收尾，避免悬挂 promise。
+    box.finish?.();
+  });
+
+  it("can cancel a pending answer after the panel remounts", async () => {
+    const box: { finish?: () => void } = {};
+    mockIpc.ai.ragQueryStream.mockImplementation(
+      (
+        _v: string,
+        _q: string,
+        _h: unknown,
+        _id: string,
+      ) =>
+        new Promise((resolve) => {
+          box.finish = () => resolve({ answer: "完成", citations: [] });
+        }),
+    );
+    const queryClient = createTestQueryClient();
+    const first = renderAskPanel(queryClient);
+
+    const input = screen.getByLabelText("聊天内容");
+    fireEvent.change(input, { target: { value: "问题" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    await waitFor(() => expect(mockIpc.ai.ragQueryStream).toHaveBeenCalledTimes(1));
+    const requestId = mockIpc.ai.ragQueryStream.mock.calls[0]?.[3] as string;
+
+    first.unmount();
+    renderAskPanel(queryClient);
+    fireEvent.click(await screen.findByRole("button", { name: "停止生成" }));
+
+    expect(mockIpc.ai.cancelRagQuery).toHaveBeenCalledWith(requestId);
     box.finish?.();
   });
 
