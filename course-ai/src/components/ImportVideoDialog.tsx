@@ -1,4 +1,4 @@
-import { ChevronDown, Download, FileVideo, Plus } from "lucide-react";
+import { AlertCircle, ChevronDown, Download, FileVideo, Plus } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -55,7 +55,12 @@ export function ImportVideoButton({
 
   return (
     <div className="relative flex-none">
-      <Button size="sm" onClick={() => setMenuOpen((o) => !o)}>
+      <Button
+        size="sm"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((o) => !o)}
+      >
         <Plus className="h-4 w-4" />
         导入
         <ChevronDown className="h-3.5 w-3.5 opacity-70" />
@@ -117,11 +122,14 @@ export function ImportVideoButton({
         </Suspense>
       )}
       {importError && (
+        // 语义错误色（主题感知），不再用硬编码 tailwind 红。importError 已是人话，
+        // 这里直接展示、保留「导入失败：」前缀，不再过一遍 humanizeError（会吞掉前缀）。
         <div
           role="alert"
-          className="absolute right-0 top-full z-20 mt-2 max-w-80 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 shadow-[var(--shadow-pop)]"
+          className="absolute right-0 top-full z-20 mt-2 flex w-72 max-w-[calc(100vw-2rem)] items-start gap-2 rounded-lg bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)] shadow-[var(--shadow-pop)]"
         >
-          导入失败：{importError}
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" />
+          <span className="min-w-0 break-words">导入失败：{importError}</span>
         </div>
       )}
     </div>

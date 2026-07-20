@@ -57,4 +57,26 @@ describe("ImportVideoButton", () => {
       expect(addLocalMock).toHaveBeenCalledWith("course-1", "/tmp/clip.mov", 12_345),
     );
   });
+
+  it("marks the import trigger as a menu button and toggles aria-expanded", () => {
+    renderButton();
+    const trigger = screen.getByRole("button", { name: "导入" });
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("surfaces an import failure as a themed alert", async () => {
+    pickPersistedFileMock.mockResolvedValue({ path: "/tmp/clip.mov", durationMs: 1 });
+    addLocalMock.mockRejectedValue(new Error("磁盘已满"));
+
+    renderButton();
+    fireEvent.click(screen.getByRole("button", { name: "导入" }));
+    fireEvent.click(screen.getByText("上传本地视频").closest("button")!);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/导入失败/);
+  });
 });
