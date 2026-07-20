@@ -138,7 +138,7 @@ describe("AppSidebar", () => {
       onOpenVideo,
     });
     const item = await screen.findByRole("button", { name: /底层逻辑/ });
-    expect(item).toHaveAttribute("aria-current", "true");
+    expect(item).toHaveAttribute("aria-current", "page");
     expect(item.querySelector("svg")).not.toBeInTheDocument();
     fireEvent.click(item);
     expect(onOpenVideo).toHaveBeenCalledWith("video-1");
