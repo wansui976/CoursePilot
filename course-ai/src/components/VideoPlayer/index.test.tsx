@@ -321,7 +321,7 @@ describe("VideoPlayer iOS gestures", () => {
       // 系统 auto-repeat 的 keydown 不应打断长按流程。
       fireEvent.keyDown(window, { key: "ArrowRight", repeat: true });
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(320);
+        await vi.advanceTimersByTimeAsync(220);
       });
 
       expect(setRate).toHaveBeenCalledWith(3);
@@ -351,8 +351,8 @@ describe("VideoPlayer iOS gestures", () => {
 
       fireEvent.keyDown(window, { key: "ArrowLeft" });
       await act(async () => {
-        // 300ms 进入扫描后再过 2 个回退周期（各 200ms）。
-        await vi.advanceTimersByTimeAsync(300 + 410);
+        // 200ms 进入扫描后再过 2 个回退周期（各 200ms）。
+        await vi.advanceTimersByTimeAsync(200 + 410);
       });
 
       expect(setCurrentTime).toHaveBeenCalledTimes(2);

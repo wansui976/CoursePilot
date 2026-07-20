@@ -522,10 +522,10 @@ export function VideoPlayer({
 
   // 键盘快捷键：动作 → 按键的映射在设置里可改（见 stores/shortcuts）。空格在未被
   // 占用时永远兜底为播放/暂停。聚焦输入框时不拦截，避免影响打字。
-  // 快退/快进键是 B 站式长短按：短按 ±5s（松键提交）；按住 ≥300ms 进入扫描——
+  // 快退/快进键是 B 站式长短按：短按 ±5s（松键提交）；按住 ≥200ms 进入扫描——
   // 快进 = 3 倍速播放、快退 = 周期回退，松开恢复原倍速。
   useEffect(() => {
-    const KEY_HOLD_MS = 300;
+    const KEY_HOLD_MS = 200;
     const KEY_HOLD_RATE = 3;
     const KEY_REWIND_TICK_MS = 200;
     const KEY_REWIND_STEP_S = 0.8;
