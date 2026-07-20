@@ -316,6 +316,15 @@ describe("VideoPlayer iOS gestures", () => {
           setRate(v);
         },
       });
+      // 变速不变调在扫描期间要临时关掉（WKWebView 切倍速时重建变调管线会卡顿）。
+      let pitchValue = true;
+      Object.defineProperty(video, "preservesPitch", {
+        configurable: true,
+        get: () => pitchValue,
+        set: (v: boolean) => {
+          pitchValue = v;
+        },
+      });
 
       fireEvent.keyDown(window, { key: "ArrowRight" });
       // 系统 auto-repeat 的 keydown 不应打断长按流程。
@@ -325,10 +334,12 @@ describe("VideoPlayer iOS gestures", () => {
       });
 
       expect(setRate).toHaveBeenCalledWith(2);
+      expect(pitchValue).toBe(false);
       expect(screen.getByText("2x 快进中")).toBeInTheDocument();
 
       fireEvent.keyUp(window, { key: "ArrowRight" });
       expect(setRate).toHaveBeenLastCalledWith(1);
+      expect(pitchValue).toBe(true);
       // 长按结束不追加短按的 +5s。
       expect(setCurrentTime).not.toHaveBeenCalled();
       expect(screen.queryByText("2x 快进中")).not.toBeInTheDocument();
