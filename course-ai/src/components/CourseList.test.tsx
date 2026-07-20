@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CourseList } from "./CourseList";
 
@@ -61,6 +61,18 @@ describe("CourseList", () => {
     // 默认隐藏（仅 hover 显现），但键盘聚焦本行时通过 group-focus-within 显现。
     expect(actionButtons[0].className).toContain("group-focus-within:opacity-100");
     expect(actionButtons[0].className).toContain("opacity-0");
+  });
+
+  it("renders the row action menu in a body portal so the scroll container can't clip it", async () => {
+    renderList({ selectedCourseId: "c1" });
+    const trigger = (await screen.findAllByRole("button", { name: "课程操作" }))[0];
+    fireEvent.click(trigger);
+
+    const rename = await screen.findByRole("button", { name: "重命名" });
+    // portal 到 body：菜单不再是滚动列表项的后代，而是 document.body 的直接子节点。
+    const menu = rename.closest("[data-course-menu]");
+    expect(menu).not.toBeNull();
+    expect(menu!.parentElement).toBe(document.body);
   });
 
   it("shows a guiding empty state when there are no courses", async () => {
