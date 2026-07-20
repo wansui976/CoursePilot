@@ -66,6 +66,15 @@ const course: Course = {
   updated_at: 1,
 };
 
+const otherCourse: Course = {
+  id: "course-2",
+  name: "数学课程",
+  root_path: "/tmp/course-2",
+  cover_image: null,
+  created_at: 1,
+  updated_at: 1,
+};
+
 const video: Video = {
   id: "video-1",
   course_id: course.id,
@@ -102,8 +111,10 @@ describe("Home", () => {
     localStorage.clear();
     document.documentElement.removeAttribute("data-theme");
     useJobs.getState().resetVideo(video.id);
-    mockIpc.courses.list.mockResolvedValue([course]);
-    mockIpc.videos.list.mockResolvedValue([video]);
+    mockIpc.courses.list.mockResolvedValue([course, otherCourse]);
+    mockIpc.videos.list.mockImplementation(async (courseId: string) =>
+      courseId === course.id ? [video] : [],
+    );
     mockIpc.videos.mediaUrl.mockResolvedValue("http://127.0.0.1:1234/m/video-1");
     mockIpc.videos.cover.mockResolvedValue([]);
     mockIpc.videos.updateTitle.mockResolvedValue({ ...video, title: "重命名.mp4" });
@@ -170,13 +181,34 @@ describe("Home", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
 
-    expect(screen.getByRole("heading", { name: "课程视频" })).toBeInTheDocument();
-    expect(await screen.findByText("申论课程 · 1 个视频")).toBeInTheDocument();
+    // 标题层级：h1 是课程名（用户关心「我在哪个课程」），数量降为副标题。
+    expect(await screen.findByRole("heading", { name: "申论课程" })).toBeInTheDocument();
+    expect(await screen.findByText("1 个视频")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "课程视频" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导入" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "网格视图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "列表视图" })).toBeInTheDocument();
     expect(screen.getByText("待处理")).toBeInTheDocument();
     expect(screen.getByText("01:45:18")).toBeInTheDocument();
+  });
+
+  it("keeps the generic heading before any course is selected", () => {
+    renderHome();
+
+    expect(screen.getByRole("heading", { name: "课程视频" })).toBeInTheDocument();
+    expect(screen.getByText("选择课程后导入或管理视频")).toBeInTheDocument();
+  });
+
+  it("hides the duration chip instead of showing a fake 00:00", async () => {
+    // 时长未知（DB 无、localStorage 也没记录）时不显示「00:00」误导用户。
+    mockIpc.videos.list.mockResolvedValueOnce([{ ...video, duration_ms: null }]);
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    await screen.findByText(displayTitle(video.title));
+
+    expect(screen.queryByText("00:00")).not.toBeInTheDocument();
   });
 
   it("uses the shared empty-state language when a selected course has no videos", async () => {
@@ -189,6 +221,8 @@ describe("Home", () => {
     const emptyState = await screen.findByRole("status");
     expect(emptyState).toHaveClass("ca-empty-state");
     expect(within(emptyState).getByRole("heading", { name: "还没有视频" })).toBeInTheDocument();
+    // 空态就地给「导入」入口，新用户不用去找右上角的按钮。
+    expect(within(emptyState).getByRole("button", { name: "导入" })).toBeInTheDocument();
   });
 
   it("turns a selected course and video into the reference-style learning workspace", async () => {
@@ -356,6 +390,31 @@ describe("Home", () => {
     expect(
       within(screen.getByLabelText("处理队列页面")).getByText(displayTitle(video.title)),
     ).toBeInTheDocument();
+  });
+
+  it("keeps queued videos visible and openable after switching courses", async () => {
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /申论课程/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /视频操作/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "开始处理" }));
+    await waitFor(() => expect(mockIpc.pipeline.process).toHaveBeenCalledWith(video.id));
+
+    fireEvent.click(await screen.findByRole("button", { name: /数学课程/ }));
+    const sidebar = screen.getByRole("complementary", { name: "课程侧栏" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "处理队列" }));
+
+    const queuePage = screen.getByLabelText("处理队列页面");
+    const queuedTitle = within(queuePage).getByText(displayTitle(video.title));
+    expect(queuedTitle).toBeInTheDocument();
+
+    fireEvent.click(queuedTitle);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: displayTitle(video.title) }),
+      ).toBeInTheDocument(),
+    );
   });
 
   it("lets the processing queue task list use the full main width", async () => {

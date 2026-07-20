@@ -114,7 +114,7 @@ export function Home() {
   } | null>(null);
   const [queueOpen, setQueueOpen] = useState(false);
   const [queueTick, setQueueTick] = useState(0);
-  const [queuedVideoIds, setQueuedVideoIds] = useState<string[]>([]);
+  const [queuedVideos, setQueuedVideos] = useState<Video[]>([]);
   const [compactTab, setCompactTab] = useState<CompactTab>("courses");
   const [studyPanelWidth, setStudyPanelWidth] = useState(readPanelWidth);
   const [isResizingPanel, setIsResizingPanel] = useState(false);
@@ -152,6 +152,13 @@ export function Home() {
   const isAndroidPlatform =
     typeof navigator !== "undefined" && /android/i.test(navigator.userAgent);
   const androidBackGuard = useRef(0);
+  const returnToLibrary = useCallback(() => {
+    setSelectedVideoId(null);
+    setShowSettings(false);
+    setShowRecycleBin(false);
+    setShowDevConsole(false);
+    setQueueOpen(false);
+  }, []);
 
   const {
     data: videos = [],
@@ -205,10 +212,9 @@ export function Home() {
     setSelectedVideoId(videoId);
   }
 
-  const selectedVideo = videos.find((video) => video.id === selectedVideoId);
-  const queuedVideos = queuedVideoIds
-    .map((id) => videos.find((video) => video.id === id))
-    .filter((video): video is NonNullable<typeof video> => Boolean(video));
+  const selectedVideo =
+    videos.find((video) => video.id === selectedVideoId) ??
+    queuedVideos.find((video) => video.id === selectedVideoId);
 
   // asset 协议在 macOS WKWebView 下放大文件会「有画面没声音」；改用本地 HTTP
   // 媒体服务（带 Range）提供视频，拿到 http://127.0.0.1 的 URL 再播。
@@ -278,6 +284,7 @@ export function Home() {
     showDevConsole,
     showRecycleBin,
     showSettings,
+    returnToLibrary,
   ]);
 
   useEffect(() => {
@@ -339,12 +346,14 @@ export function Home() {
   // 留一点时间让用户看到 100% 再消失。后端续跑的 AI 任务在后台继续，不影响视频已可用。
   useEffect(() => {
     const timers: number[] = [];
-    queuedVideoIds.forEach((videoId) => {
-      const active = activeJobFor(videoId);
+    queuedVideos.forEach((video) => {
+      const active = activeJobFor(video.id);
       if (active?.status === "done" || active?.status === "canceled") {
         timers.push(
           window.setTimeout(() => {
-            setQueuedVideoIds((ids) => ids.filter((id) => id !== videoId));
+            setQueuedVideos((items) =>
+              items.filter((item) => item.id !== video.id),
+            );
           }, 1200),
         );
       }
@@ -352,17 +361,18 @@ export function Home() {
     return () => timers.forEach((timer) => window.clearTimeout(timer));
     // activeJobFor 只读 jobsByVideo，已在依赖里；它本身每次渲染重建，加进去反而每帧重跑。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobsByVideo, queuedVideoIds]);
+  }, [jobsByVideo, queuedVideos]);
 
   useEffect(() => {
-    if (!queueOpen || queuedVideoIds.length === 0) return;
+    if (!queueOpen || queuedVideos.length === 0) return;
     const timer = window.setInterval(() => {
       setQueueTick((tick) => tick + 1);
     }, 2000);
     return () => window.clearInterval(timer);
-  }, [queueOpen, queuedVideoIds.length]);
+  }, [queueOpen, queuedVideos.length]);
 
-  function startProcessing(videoId: string) {
+  function startProcessing(video: Video) {
+    const videoId = video.id;
     // 清掉这个视频的全部「已处理」标记：不仅 videoId，还有各 AI 阶段的
     // `${videoId}:${stage}`。否则重新处理后，阶段键仍在集合里，后端续跑的
     // 章节/摘要/笔记/出题/脑图完成时不会触发面板刷新，用户会看到旧内容。
@@ -372,7 +382,12 @@ export function Home() {
       }
     }
     resetJobs(videoId);
-    setQueuedVideoIds((ids) => (ids.includes(videoId) ? ids : [videoId, ...ids]));
+    setQueuedVideos((items) => {
+      const existing = items.some((item) => item.id === videoId);
+      return existing
+        ? items.map((item) => (item.id === videoId ? video : item))
+        : [video, ...items];
+    });
     void ipc.pipeline.process(videoId);
   }
 
@@ -404,7 +419,7 @@ export function Home() {
     );
     if (!ok) return;
     await ipc.videos.delete(videoId);
-    setQueuedVideoIds((ids) => ids.filter((id) => id !== videoId));
+    setQueuedVideos((items) => items.filter((item) => item.id !== videoId));
     if (selectedVideoId === videoId) setSelectedVideoId(null);
     await queryClient.invalidateQueries({ queryKey: ["videos", selectedCourseId] });
     await queryClient.invalidateQueries({ queryKey: ["trash"] });
@@ -534,13 +549,22 @@ export function Home() {
     );
   }
 
-  function openQueuedVideo(videoId: string) {
+  function openQueuedVideo(video: Video) {
     setQueueOpen(false);
-    openVideo(videoId);
+    if (selectedCourseId !== video.course_id) {
+      setSelectedCourseId(video.course_id);
+    }
+    openVideo(video.id);
   }
 
   function selectCourse(id: string) {
     setSelectedCourseId(id);
+    setSelectedVideoId(null);
+    closeMainOverlays();
+  }
+
+  function clearCourseSelection() {
+    setSelectedCourseId(null);
     setSelectedVideoId(null);
     closeMainOverlays();
   }
@@ -552,11 +576,6 @@ export function Home() {
     setSelectedVideoId(null);
     closeMainOverlays();
     setQueueOpen(willOpen);
-  }
-
-  function returnToLibrary() {
-    setSelectedVideoId(null);
-    closeMainOverlays();
   }
 
   // 窄屏底部 Tab 切换:课程→回到课程下钻当前层;队列/设置→打开对应整页。
@@ -617,7 +636,7 @@ export function Home() {
                     className="relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]"
                   >
                     <button
-                      onClick={() => openQueuedVideo(video.id)}
+                      onClick={() => openQueuedVideo(video)}
                       className={`block w-full px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)] ${
                         canCancel ? "pr-20" : ""
                       }`}
@@ -722,7 +741,7 @@ export function Home() {
             if (video.processed_status === "done") {
               recorrect.mutate(video.id);
             } else {
-              startProcessing(video.id);
+              startProcessing(video);
             }
           }}
         >
@@ -818,9 +837,10 @@ export function Home() {
               className="absolute inset-0 h-full w-full"
             />
             <span className="st">{statusBadge(video)}</span>
-            <span className="dur">
-              {durationMs ? formatMs(durationMs) : "00:00"}
-            </span>
+            {/* 时长未知就不显示角标：假的「00:00」会让人以为视频是空的。 */}
+            {durationMs != null && (
+              <span className="dur">{formatMs(durationMs)}</span>
+            )}
             {progress.ratio > 0 && progress.ratio < 0.995 && (
               <span
                 className="ov-bar"
@@ -848,7 +868,8 @@ export function Home() {
     const durationMs =
       video.duration_ms ??
       (progress.durationSec ? Math.round(progress.durationSec * 1000) : null);
-    const durationText = durationMs ? formatMs(durationMs) : "00:00";
+    // 列表要保持列对齐，时长未知显示占位而不是假的 00:00。
+    const durationText = durationMs ? formatMs(durationMs) : "--:--";
     return (
       <article
         key={video.id}
@@ -906,10 +927,11 @@ export function Home() {
               </button>
             )}
             <div className="tb-titles">
-              <h1>课程视频</h1>
+              {/* h1 给课程名（用户关心「我在哪个课程」），数量降为副标题。 */}
+              <h1>{selectedCourse ? selectedCourse.name : "课程视频"}</h1>
               <div className="sub">
                 {selectedCourse
-                  ? `${selectedCourse.name} · ${videos.length} 个视频`
+                  ? `${videos.length} 个视频`
                   : "选择课程后导入或管理视频"}
               </div>
             </div>
@@ -959,6 +981,11 @@ export function Home() {
                   selectedCourseId
                     ? "导入本地视频或粘贴视频链接后，会在这里形成课程视频列表。"
                     : "从左侧选择课程后导入或管理视频。"
+                }
+                action={
+                  selectedCourseId ? (
+                    <ImportVideoButton courseId={selectedCourseId} />
+                  ) : undefined
                 }
               />
             </div>
@@ -1082,6 +1109,7 @@ export function Home() {
       <CourseSidebar
         selectedCourseId={selectedCourseId}
         onSelect={selectCourse}
+        onClearSelection={clearCourseSelection}
         onOpenRecycleBin={() => openMainView("recycle")}
       />
     );
@@ -1146,6 +1174,7 @@ export function Home() {
           onToggleCollapsed={toggleSidebarCollapsed}
           selectedCourseId={selectedCourseId}
           onSelectCourse={selectCourse}
+          onClearCourseSelection={clearCourseSelection}
           videos={videos}
           selectedVideoId={selectedVideoId}
           onOpenVideo={openVideo}
@@ -1156,7 +1185,7 @@ export function Home() {
           onOpenSettings={() => openMainView("settings")}
           onOpenRecycleBin={() => openMainView("recycle")}
           queueOpen={queueOpen}
-          queueCount={queuedVideoIds.length}
+          queueCount={queuedVideos.length}
           onToggleQueue={toggleQueue}
         />
       )}
@@ -1187,7 +1216,7 @@ export function Home() {
       {showBottomTab && (
         <BottomTabBar
           active={compactTab}
-          queueCount={queuedVideoIds.length}
+          queueCount={queuedVideos.length}
           onSelect={selectCompactTab}
         />
       )}
