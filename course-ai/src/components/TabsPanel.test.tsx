@@ -26,16 +26,16 @@ describe("TabsPanel", () => {
   it("restores the active study tab for the video when remounted", () => {
     const { rerender } = render(<TabsPanel videoId="video-1" />);
 
-    fireEvent.click(screen.getByRole("tab", { name: "笔记" }));
+    fireEvent.click(screen.getByRole("tab", { name: "学习" }));
 
-    expect(screen.getByRole("tab", { name: "笔记" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "学习" })).toHaveAttribute(
       "data-state",
       "active",
     );
 
     rerender(<TabsPanel key="remount" videoId="video-1" />);
 
-    expect(screen.getByRole("tab", { name: "笔记" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "学习" })).toHaveAttribute(
       "data-state",
       "active",
     );

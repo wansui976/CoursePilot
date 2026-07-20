@@ -35,11 +35,14 @@ D. **空态文案与按钮不符**
 
 ## 第二轮（用户「继续推进」）
 
-- **A（重命名外层「笔记」标签解决重名+发现性）：受阻，未做。**
-  Mac 侧 dirty 文件 `Home.integration.test.tsx` 硬断言 `getByRole("tab",
-  {name:"笔记"})` 与 `getByRole("button",{name:"笔记"})`，同时锁死外层 tab 名和
-  内层视图名。重命名任一「笔记」都会让该套件变红，而共享树约束下我无权改/提交
-  那个文件。待 Mac 侧同步后再动。
+- **A（重命名外层「笔记」标签解决重名+发现性）：已做（Mac 侧提交 6c0087a 后解封）。**
+  之前受阻是因为 `Home.integration.test.tsx` 等测试是未提交的 Mac WIP、不能碰；
+  Mac 侧落库后这些成为普通仓库文件，可改可提交。
+  外层标签「笔记」→「学习」（容器义命名，既消除与内层「笔记」视图重名，也提示
+  内含不止笔记）。同步：`StudyTab` 类型、`isStudyTab`、TabsPanel `TABS`/`panels`，
+  以及 TabsPanel / Home 集成测试的外层 tab 断言（内层「笔记」按钮断言保留）。
+  迁移：`migrateStudyTab` 把老 localStorage 里 `activeTab:"笔记"` 读回为「学习」，
+  用户上次停留的标签不丢。
 - **B（内外标签视觉语言割裂）：已改。** 内层视图切换器改成 segmented control
   （凹槽轨道 `--surface-card` + 凸起选中段 `--surface-panel`+阴影），读作一个整体
   控件，与外层下划线大字标签形成清晰层级区分。保留 role=button + aria-pressed 与

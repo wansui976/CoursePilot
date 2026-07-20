@@ -24,7 +24,9 @@ const ClipsPanel = lazy(() =>
   import("./ClipsPanel").then((m) => ({ default: m.ClipsPanel })),
 );
 
-const TABS = ["AI 概览", "笔记", "文稿", "课件", "片段"] as const;
+// 「学习」标签汇集笔记 + 出题 / 脑图 / 提问 / 搜索等 AI 学习工具。命名为容器义的
+// 「学习」而非其中之一「笔记」，既避免与内层「笔记」视图重名，也提示里面不止笔记。
+const TABS = ["AI 概览", "学习", "文稿", "课件", "片段"] as const;
 type Tab = StudyTab;
 
 function PanelFallback() {
@@ -54,7 +56,7 @@ export const TabsPanel = memo(function TabsPanel({ videoId }: { videoId: string 
 
   const panels: { tab: Tab; node: React.ReactNode }[] = [
     { tab: "AI 概览", node: <AiViewPanel videoId={videoId} /> },
-    { tab: "笔记", node: <NotesPanel videoId={videoId} /> },
+    { tab: "学习", node: <NotesPanel videoId={videoId} /> },
     { tab: "文稿", node: <TranscriptPanel videoId={videoId} /> },
     { tab: "课件", node: <SlidesPanel videoId={videoId} /> },
     { tab: "片段", node: <ClipsPanel videoId={videoId} /> },
