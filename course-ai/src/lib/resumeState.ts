@@ -1,6 +1,6 @@
 const RESUME_PREFIX = "course-ai-resume:";
 
-export type StudyTab = "AI 概览" | "笔记" | "文稿" | "课件" | "片段";
+export type StudyTab = "AI 概览" | "学习" | "文稿" | "课件" | "片段";
 
 export interface VideoResumeState {
   activeTab: StudyTab | null;
@@ -36,11 +36,18 @@ function finiteNullableNumber(value: unknown) {
 function isStudyTab(value: unknown): value is StudyTab {
   return (
     value === "AI 概览" ||
-    value === "笔记" ||
+    value === "学习" ||
     value === "文稿" ||
     value === "课件" ||
     value === "片段"
   );
+}
+
+function migrateStudyTab(value: unknown): StudyTab | null {
+  // 外层标签原名「笔记」，现更名「学习」（内层仍有「笔记」视图，避免重名/歧义）。
+  // 老 localStorage 里存的「笔记」映射到「学习」，用户上次停留的标签不丢。
+  if (value === "笔记") return "学习";
+  return isStudyTab(value) ? value : null;
 }
 
 export function readVideoResumeState(videoId: string): VideoResumeState {
@@ -49,7 +56,7 @@ export function readVideoResumeState(videoId: string): VideoResumeState {
     if (!raw) return { ...DEFAULT_RESUME_STATE };
     const parsed = JSON.parse(raw) as Partial<VideoResumeState>;
     return {
-      activeTab: isStudyTab(parsed.activeTab) ? parsed.activeTab : null,
+      activeTab: migrateStudyTab(parsed.activeTab),
       notesScrollTop: Math.max(0, finiteNumber(parsed.notesScrollTop, 0)),
       transcriptScrollTop: Math.max(0, finiteNumber(parsed.transcriptScrollTop, 0)),
       transcriptTopIndex: Math.max(0, finiteNumber(parsed.transcriptTopIndex, 0)),

@@ -12,12 +12,12 @@ describe("resumeState", () => {
 
   it("stores partial resume state for one video without affecting others", () => {
     writeVideoResumeState("video-1", {
-      activeTab: "笔记",
+      activeTab: "学习",
       notesScrollTop: 120,
     });
 
     expect(readVideoResumeState("video-1")).toMatchObject({
-      activeTab: "笔记",
+      activeTab: "学习",
       notesScrollTop: 120,
       transcriptScrollTop: 0,
       studyPanelWidth: null,
@@ -26,11 +26,11 @@ describe("resumeState", () => {
   });
 
   it("merges updates into existing state", () => {
-    writeVideoResumeState("video-1", { activeTab: "笔记" });
+    writeVideoResumeState("video-1", { activeTab: "学习" });
     writeVideoResumeState("video-1", { transcriptScrollTop: 240 });
 
     expect(readVideoResumeState("video-1")).toMatchObject({
-      activeTab: "笔记",
+      activeTab: "学习",
       transcriptScrollTop: 240,
     });
   });
@@ -43,7 +43,7 @@ describe("resumeState", () => {
       JSON.stringify({ transcriptTopIndex: 42 }),
     );
 
-    writeVideoResumeState("video-1", { activeTab: "笔记" });
+    writeVideoResumeState("video-1", { activeTab: "学习" });
     expect(readVideoResumeState("video-1").transcriptTopIndex).toBe(42);
 
     writeVideoResumeState("video-1", {
@@ -54,6 +54,16 @@ describe("resumeState", () => {
       transcriptScrollTop: 500,
       transcriptTopIndex: 0,
     });
+  });
+
+  it("migrates the legacy '笔记' active tab to its new name '学习'", () => {
+    // 外层标签更名前存的 activeTab: "笔记" 应读回为 "学习"，不丢用户上次的停留位置。
+    localStorage.setItem(
+      resumeStateKey("video-1"),
+      JSON.stringify({ activeTab: "笔记" }),
+    );
+
+    expect(readVideoResumeState("video-1").activeTab).toBe("学习");
   });
 
   it("falls back to defaults when stored state is invalid", () => {
