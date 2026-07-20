@@ -61,6 +61,22 @@ describe("QuizPanel", () => {
     });
   });
 
+  it("uses the theme status token for the revealed answer", async () => {
+    mockIpc.ai.getQuiz.mockResolvedValue(
+      JSON.stringify([
+        { type: "judge", stem: "地球是圆的", answer: true },
+      ]),
+    );
+    renderQuizPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "显示答案" }));
+
+    // 答案色走主题 token（深浅主题对比都达标），不硬编码 tailwind 绿。
+    expect((await screen.findByText(/答案：/)).closest("div")).toHaveClass(
+      "text-[var(--status-ok)]",
+    );
+  });
+
   it("shows the empty state (not a crash) when stored quiz JSON is not an array", async () => {
     // 旧数据 / 校验前生成的题库可能不是数组（如 {"questions":[...]}）。
     mockIpc.ai.getQuiz.mockResolvedValue('{"questions":[]}');

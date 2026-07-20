@@ -76,6 +76,18 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   const ocr = useMutation<string, unknown, void>({
     mutationFn: () => ipc.tools.ocr(videoId, Math.floor(currentMs())),
   });
+  // OCR 结果复制成功的短暂反馈（1.5s）。
+  const [copied, setCopied] = useState(false);
+  async function copyOcrResult() {
+    // clipboard 可能不可用（权限受限等）：静默降级，不显示假的成功。
+    try {
+      await navigator.clipboard.writeText(ocr.data ?? "");
+    } catch {
+      return;
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -131,8 +143,13 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
       {ocr.data !== undefined && (
         <div className="flex-none border-b border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-xs">
           <div className="mb-1 flex items-center justify-between">
-            <span className="font-medium text-[var(--text-muted)]">
+            <span className="flex items-center gap-2 font-medium text-[var(--text-muted)]">
               OCR 结果（点击复制）
+              {copied && (
+                <span className="inline-flex items-center rounded-full bg-[var(--status-ok-bg)] px-1.5 py-0.5 font-medium text-[var(--status-ok)]">
+                  已复制
+                </span>
+              )}
             </span>
             <button
               aria-label="关闭 OCR 结果"
@@ -145,7 +162,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
           </div>
           <button
             className="block max-h-40 w-full overflow-y-auto whitespace-pre-wrap text-left text-[var(--text-normal)] hover:text-[var(--text-strong)]"
-            onClick={() => void navigator.clipboard.writeText(ocr.data ?? "")}
+            onClick={() => void copyOcrResult()}
           >
             {ocr.data || "（未识别到文字）"}
           </button>

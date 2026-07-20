@@ -66,6 +66,33 @@ describe("TranscriptPanel", () => {
     );
   });
 
+  it("keeps the edit button reachable on touch via the coarse-pointer class", async () => {
+    renderTranscriptPanel();
+    await screen.findByText("00:01");
+
+    // 触屏没有 hover：按钮靠 .ca-transcript-edit 在 pointer:coarse 下强制可见。
+    const editButtons = screen.getAllByRole("button", { name: "编辑这句文稿" });
+    expect(editButtons[0]).toHaveClass("ca-transcript-edit");
+  });
+
+  it("surfaces an error when saving a transcript edit fails", async () => {
+    mockIpc.transcripts.update.mockRejectedValue(new Error("db locked"));
+    renderTranscriptPanel();
+    await screen.findByText("00:01");
+
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "编辑这句文稿" })[0],
+    );
+    fireEvent.change(screen.getByLabelText("编辑文稿"), {
+      target: { value: "改过的句子" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+
+    // 失败不能无声无息：编辑框内给出错误提示，编辑内容保留。
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.getByLabelText("编辑文稿")).toHaveValue("改过的句子");
+  });
+
   it("tags the scroller as theme-heavy so theme switches skip the fade", async () => {
     renderTranscriptPanel();
     await screen.findByText("00:01");

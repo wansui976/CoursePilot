@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { Play, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/ui/ErrorNote";
@@ -44,6 +45,15 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
     mutationFn: (id: number) => ipc.clips.delete(id),
     onSuccess: invalidate,
   });
+
+  // 片段没有回收站兜底：删除先确认（与删视频/课程一致）。
+  async function confirmRemove(clip: Clip) {
+    const ok = await confirmDialog(
+      `删除片段 ${formatMs(clip.start_ms)} – ${formatMs(clip.end_ms)}？`,
+      { title: "删除片段", kind: "warning", okLabel: "删除", cancelLabel: "取消" },
+    );
+    if (ok) remove.mutate(clip.id);
+  }
 
   function onCapture() {
     if (pendingStart == null) {
@@ -117,7 +127,8 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
                     onClick={() =>
                       update.mutate({
                         id: clip.id,
-                        start_ms: nowMs(),
+                        // 夹到终点：播放头越过终点时不产生 start > end 的倒置区间。
+                        start_ms: Math.min(nowMs(), clip.end_ms),
                         end_ms: clip.end_ms,
                         note: clip.note,
                       })
@@ -132,7 +143,7 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
                       update.mutate({
                         id: clip.id,
                         start_ms: clip.start_ms,
-                        end_ms: nowMs(),
+                        end_ms: Math.max(nowMs(), clip.start_ms),
                         note: clip.note,
                       })
                     }
@@ -143,7 +154,7 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
                     type="button"
                     aria-label="删除片段"
                     className="rounded-md p-1 text-[var(--text-muted)] hover:text-[var(--status-err)]"
-                    onClick={() => remove.mutate(clip.id)}
+                    onClick={() => void confirmRemove(clip)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>

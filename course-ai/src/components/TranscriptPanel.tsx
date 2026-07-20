@@ -2,6 +2,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ErrorNote } from "@/components/ui/ErrorNote";
+import { coarsePointer } from "@/lib/useContainerWidth";
 import { ExportMenu } from "./ExportMenu";
 import { MathText } from "./MathText";
 import { ipc } from "@/lib/ipc";
@@ -59,7 +61,8 @@ const TranscriptRow = memo(function TranscriptRow({
           onClick={() => onEdit(segment.id, segment.text)}
           // 用轻量字形代替 lucide SVG：每行少一棵 SVG 子树，屏外行渲染更快、快滑空白更小。
           // 悬停才出现且盖在文字上方，给实底背景 + 细边保证可读。
-          className="ca-touch-44 ca-workbench-touch absolute bottom-0.5 right-1 grid h-7 w-7 place-items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] text-[15px] leading-none text-[var(--text-muted)] opacity-0 shadow-sm transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
+          // 触屏没有 hover：.ca-transcript-edit 在 pointer:coarse 下强制可见（globals.css）。
+          className="ca-transcript-edit ca-touch-44 ca-workbench-touch absolute bottom-0.5 right-1 grid h-7 w-7 place-items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] text-[15px] leading-none text-[var(--text-muted)] opacity-0 shadow-sm transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
         >
           <span aria-hidden="true">✎</span>
         </button>
@@ -253,7 +256,9 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   return (
     <div className="flex h-full flex-col text-[var(--text-normal)]">
       <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2 text-xs">
-        <span className="text-[var(--text-faint)]">悬停文稿可纠错</span>
+        <span className="text-[var(--text-faint)]">
+          {coarsePointer() ? "点 ✎ 可纠错" : "悬停文稿可纠错"}
+        </span>
         <div className="ml-auto">
           <ExportMenu
             items={[
@@ -291,6 +296,10 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                   className="w-full resize-y rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)] outline-none"
                   rows={2}
                 />
+                {/* 保存失败不能无声无息：编辑框还开着、内容保留，给出原因可重试。 */}
+                {update.isError && (
+                  <ErrorNote className="mt-1" error={update.error} />
+                )}
                 <div className="mt-1 flex items-center gap-2 text-xs">
                   <Button
                     variant="default"

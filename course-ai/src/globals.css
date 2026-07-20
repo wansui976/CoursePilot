@@ -1645,6 +1645,11 @@ select:focus-visible {
     min-height: 48px;
   }
 
+  /* 文稿行的纠错按钮桌面上悬停才出现；触屏没有 hover，必须常显。 */
+  .ca-transcript-edit {
+    opacity: 1;
+  }
+
   /* 工作台顶部 tab：触屏下放宽命中区，点到文字旁边也算。 */
   .ca-study-tab-trigger {
     min-width: 72px;

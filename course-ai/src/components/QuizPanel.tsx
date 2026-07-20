@@ -67,14 +67,15 @@ export function QuizPanel({ videoId }: { videoId: string }) {
             </ul>
           )}
           <button
-            className="text-xs text-primary hover:underline"
+            className="ca-touch-44 inline-flex items-center text-xs text-primary hover:underline"
             onClick={() => setRevealed((r) => ({ ...r, [i]: !r[i] }))}
           >
             {revealed[i] ? "隐藏答案" : "显示答案"}
           </button>
           {revealed[i] && (
             <div className="mt-2 space-y-1 text-sm">
-              <div className="text-green-400">
+              {/* 答案色走主题 token：深浅主题对比都达标，不硬编码 tailwind 绿。 */}
+              <div className="text-[var(--status-ok)]">
                 答案：<MathText text={answerText(q.answer)} />
               </div>
               {q.explanation && (
@@ -84,7 +85,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
               )}
               {typeof q.ref_ms === "number" && (
                 <button
-                  className="text-xs text-primary"
+                  className="ca-touch-44 inline-flex items-center text-xs text-primary"
                   onClick={() => requestSeek(q.ref_ms!)}
                 >
                   ▶ 跳到 {formatMs(q.ref_ms)}
