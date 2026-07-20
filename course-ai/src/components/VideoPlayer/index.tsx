@@ -94,6 +94,7 @@ export function VideoPlayer({
     timer: number;
     interval?: number;
     prevRate?: number;
+    prevPitch?: boolean;
   } | null>(null);
 
   const { data: segments = [] } = useQuery({
@@ -543,6 +544,7 @@ export function VideoPlayer({
       const video = ref.current;
       if (scan.engaged) {
         if (video && scan.prevRate != null) video.playbackRate = scan.prevRate;
+        if (video && scan.prevPitch != null) video.preservesPitch = scan.prevPitch;
         setGestureHint(null);
       } else if (commitTap && video) {
         video.currentTime =
@@ -588,6 +590,10 @@ export function VideoPlayer({
             scan.engaged = true;
             if (scan.action === "seekForward") {
               scan.prevRate = v.playbackRate;
+              // 先关「变速不变调」再变速：WKWebView 切换倍速时要重建音频变调
+              // 管线并重对音画，按下/松开各卡一下。扫描期间音调略升，换取无卡顿。
+              scan.prevPitch = v.preservesPitch;
+              v.preservesPitch = false;
               v.playbackRate = KEY_HOLD_RATE;
               // 暂停中长按 = 直接以倍速开播（对齐 B 站）。
               if (v.paused) void v.play();
