@@ -39,6 +39,8 @@
 
   --border-subtle: #e9eaee;
   --border-faint: #f0f1f4;
+  /* hover 等需要比 subtle 更清晰的强调边框；深浅主题各自定义，别写死浅色灰。 */
+  --border-strong: #dde0e6;
   --border-titlebar: #e9eaee;
 
   --text-strong: #1c1e24;
@@ -61,6 +63,7 @@
   --scrollbar-thumb-hover: #d0d3da;
 
   --shadow-card: 0 1px 2px rgb(20 24 40 / 0.05), 0 4px 14px rgb(20 24 40 / 0.04);
+  --shadow-card-hover: 0 10px 26px rgb(20 24 40 / 0.1);
   --shadow-pop: 0 8px 30px rgb(20 24 40 / 0.1);
 }
 
@@ -82,6 +85,7 @@
 
   --border-subtle: rgb(255 255 255 / 0.06);
   --border-faint: rgb(255 255 255 / 0.04);
+  --border-strong: rgb(255 255 255 / 0.16);
   --border-titlebar: rgb(255 255 255 / 0.06);
 
   --text-strong: rgb(244 247 255 / 0.96);
@@ -103,6 +107,7 @@
   --scrollbar-thumb-hover: rgb(255 255 255 / 0.26);
 
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-card-hover: 0 10px 26px rgb(0 0 0 / 0.5);
   --shadow-pop: 0 12px 32px -8px rgb(0 0 0 / 0.6);
 }
 
@@ -206,6 +211,7 @@ select:focus-visible {
   --text-4: var(--text-faint);
   --line: var(--border-subtle);
   --line-soft: var(--border-faint);
+  --line-strong: var(--border-strong);
   --r-sm: 8px;
   --r-md: 12px;
   --r-lg: 16px;
@@ -604,6 +610,9 @@ select:focus-visible {
   color: var(--text-3);
   font-size: 13px;
   white-space: nowrap;
+  /* 课程名可能很长：截断加省略号，别溢出压到右侧的视图切换/导入按钮。 */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tb-actions {
@@ -663,7 +672,8 @@ select:focus-visible {
 
 .ca-card {
   min-width: 0;
-  overflow: hidden;
+  /* 不能 overflow:hidden：卡片内绝对定位的「⋯」菜单/重命名框会在窄卡上被裁掉。
+     圆角裁剪职责下放给 .ca-thumb（自身已 overflow:hidden）。 */
   cursor: pointer;
   background: var(--bg-panel);
   border: 1px solid var(--line);
@@ -675,8 +685,8 @@ select:focus-visible {
 @media (hover: hover) {
 .ca-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 10px 26px rgb(20 24 40 / 0.1);
-  border-color: #dde0e6;
+  box-shadow: var(--shadow-card-hover);
+  border-color: var(--line-strong);
 }
 }
 
@@ -684,6 +694,8 @@ select:focus-visible {
   aspect-ratio: 16 / 9;
   position: relative;
   overflow: hidden;
+  /* 顶部圆角跟随卡片（卡片本身不再 overflow:hidden），-1px 抵掉卡片边框。 */
+  border-radius: calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px) 0 0;
   background: var(--stage);
   display: flex;
   align-items: center;
@@ -699,8 +711,13 @@ select:focus-visible {
   z-index: 2;
 }
 
+/* 叠在视频画面上的徽标不吃主题变量：深色模式下半透明白底 + 半透明文字对比
+   不达标。与右下角时长角标一致，永远用深色实底 scrim + 高亮文字，状态色留在
+   圆点上（文字 + 圆点双通道，不只靠颜色）。 */
 .ca-thumb .st .ca-badge {
   box-shadow: 0 1px 3px rgb(15 18 28 / 0.35);
+  background: rgb(15 18 28 / 0.72);
+  color: rgb(255 255 255 / 0.92);
 }
 
 .ca-thumb .dur {
