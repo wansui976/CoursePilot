@@ -15,6 +15,7 @@ import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { AppSidebar } from "@/components/AppSidebar";
 import { CourseSidebar } from "@/components/CourseSidebar";
 import { RecycleBin } from "@/components/RecycleBin";
+import { Dashboard } from "@/components/Dashboard";
 import { DevConsole } from "@/components/DevConsole";
 import { ImportVideoButton } from "@/components/ImportVideoDialog";
 import { SettingsPanel } from "@/components/SettingsDialog";
@@ -110,6 +111,7 @@ export function Home() {
   const [showSettings, setShowSettings] = useState(false);
   const [showRecycleBin, setShowRecycleBin] = useState(false);
   const [showDevConsole, setShowDevConsole] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(false);
   const theme = useTheme((s) => s.effective);
   const accent = useTheme((s) => s.accent);
   const customAccent = useTheme((s) => s.customAccent);
@@ -168,6 +170,7 @@ export function Home() {
     setShowSettings(false);
     setShowRecycleBin(false);
     setShowDevConsole(false);
+    setShowDashboard(false);
     setQueueOpen(false);
   }, []);
 
@@ -319,10 +322,11 @@ export function Home() {
     if (now - androidBackGuard.current < 250) return;
     androidBackGuard.current = now;
 
-    if (showSettings || showRecycleBin || showDevConsole) {
+    if (showSettings || showRecycleBin || showDevConsole || showDashboard) {
       setShowSettings(false);
       setShowRecycleBin(false);
       setShowDevConsole(false);
+      setShowDashboard(false);
       return;
     }
     if (queueOpen) {
@@ -346,6 +350,7 @@ export function Home() {
     showDevConsole,
     showRecycleBin,
     showSettings,
+    showDashboard,
     returnToLibrary,
   ]);
 
@@ -495,14 +500,16 @@ export function Home() {
     setShowSettings(false);
     setShowRecycleBin(false);
     setShowDevConsole(false);
+    setShowDashboard(false);
     setQueueOpen(false);
   }
 
-  function openMainView(view: "settings" | "recycle" | "dev") {
+  function openMainView(view: "settings" | "recycle" | "dev" | "dashboard") {
     setQueueOpen(false);
     setShowSettings(view === "settings");
     setShowRecycleBin(view === "recycle");
     setShowDevConsole(view === "dev");
+    setShowDashboard(view === "dashboard");
   }
 
   function beginStudyPanelResize(event: ReactPointerEvent<HTMLDivElement>) {
@@ -1267,7 +1274,7 @@ export function Home() {
     );
   }
 
-  const isWorkbenchView = !!selectedVideo && !showSettings && !showRecycleBin && !showDevConsole && !queueOpen;
+  const isWorkbenchView = !!selectedVideo && !showSettings && !showRecycleBin && !showDevConsole && !showDashboard && !queueOpen;
   // 桌面：进入某个视频的工作台会话后，即便在主区叠开设置/回收站/控制台/队列整页，
   // 左侧仍保持窄工具栏（rail），不回退成首页的宽侧栏——设置只是覆盖主区，会话仍在。
   const inVideoSession = !!selectedVideo;
@@ -1298,9 +1305,11 @@ export function Home() {
     ? "settings"
     : showRecycleBin
       ? "recycle"
-      : showDevConsole
-        ? "dev"
-        : queueOpen
+      : showDashboard
+        ? "dashboard"
+        : showDevConsole
+          ? "dev"
+          : queueOpen
           ? "queue"
           : selectedVideo
             ? "workbench"
@@ -1336,6 +1345,7 @@ export function Home() {
           onToggleTheme={toggleTheme}
           onOpenSettings={() => openMainView("settings")}
           onOpenRecycleBin={() => openMainView("recycle")}
+          onOpenDashboard={() => openMainView("dashboard")}
           queueOpen={queueOpen}
           queueCount={queuedVideos.length}
           onToggleQueue={toggleQueue}
@@ -1352,6 +1362,11 @@ export function Home() {
             />
           ) : showRecycleBin ? (
             <RecycleBin onClose={() => setShowRecycleBin(false)} />
+          ) : showDashboard ? (
+            <Dashboard
+              onClose={() => setShowDashboard(false)}
+              onOpenCourse={selectCourse}
+            />
           ) : showDevConsole ? (
             <DevConsole onClose={() => setShowDevConsole(false)} />
           ) : queueOpen ? (

@@ -1,6 +1,7 @@
 import {
   Book,
   ClipboardList,
+  LayoutDashboard,
   Library,
   Loader2,
   Moon,
@@ -34,6 +35,7 @@ export function AppSidebar({
   onToggleTheme,
   onOpenSettings,
   onOpenRecycleBin,
+  onOpenDashboard,
   queueOpen,
   queueCount,
   onToggleQueue,
@@ -53,6 +55,7 @@ export function AppSidebar({
   onToggleTheme: () => void;
   onOpenSettings: () => void;
   onOpenRecycleBin: () => void;
+  onOpenDashboard: () => void;
   queueOpen: boolean;
   queueCount: number;
   onToggleQueue: () => void;
@@ -97,6 +100,14 @@ export function AppSidebar({
               {queueCount > 0 && <span className="rail-badge">{queueCount}</span>}
             </button>
           )}
+          <button
+            className="rail-btn"
+            title="学习面板"
+            aria-label="学习面板"
+            onClick={onOpenDashboard}
+          >
+            <LayoutDashboard className="h-5 w-5" />
+          </button>
           <div className="rail-sp" />
           <button
             className="rail-btn"
@@ -221,6 +232,15 @@ export function AppSidebar({
           aria-label={themeToggleLabel}
         >
           {theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={onOpenDashboard}
+          title="学习面板"
+          aria-label="学习面板"
+        >
+          <LayoutDashboard className="h-4 w-4" />
         </Button>
         <Button
           size="icon"
