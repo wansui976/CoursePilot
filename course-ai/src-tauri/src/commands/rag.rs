@@ -105,12 +105,52 @@ pub async fn cmd_cancel_rag_query(state: State<'_, AppState>, request_id: String
     Ok(())
 }
 
+/// 把搜索作用域解析成 (video_id, title) 列表。scope=video 只当前视频；
+/// course 为当前视频所属课程的全部未删除视频；all 为所有课程的全部未删除视频。
+async fn resolve_scope(
+    db: &crate::db::Db,
+    video_id: &str,
+    scope: &str,
+) -> AppResult<Vec<(String, String)>> {
+    let rows: Vec<(String, String)> = match scope {
+        "course" => {
+            sqlx::query_as(
+                "SELECT id,title FROM videos
+                 WHERE course_id=(SELECT course_id FROM videos WHERE id=?)
+                   AND deleted_at IS NULL
+                 ORDER BY order_index",
+            )
+            .bind(video_id)
+            .fetch_all(&db.pool)
+            .await?
+        }
+        "all" => {
+            sqlx::query_as(
+                "SELECT id,title FROM videos WHERE deleted_at IS NULL
+                 ORDER BY course_id, order_index",
+            )
+            .fetch_all(&db.pool)
+            .await?
+        }
+        _ => {
+            sqlx::query_as("SELECT id,title FROM videos WHERE id=?")
+                .bind(video_id)
+                .fetch_all(&db.pool)
+                .await?
+        }
+    };
+    Ok(rows)
+}
+
 /// 本地关键词搜索文稿（无需 LLM / 联网），结果可点击跳转。
+/// scope ∈ {video, course, all}：course/all 跨视频，引用带来源视频。
 #[tauri::command]
 pub async fn cmd_search_transcript(
     state: State<'_, AppState>,
     video_id: String,
+    scope: String,
     query: String,
 ) -> AppResult<Vec<rag::Citation>> {
-    rag::keyword_search(&state.db, &video_id, &query, 30).await
+    let videos = resolve_scope(&state.db, &video_id, &scope).await?;
+    rag::keyword_search_scope(&state.db, &videos, &query, 30).await
 }

@@ -39,6 +39,11 @@ pub struct Citation {
     pub text: String,
     pub start_ms: i64,
     pub end_ms: i64,
+    /// 跨视频（课程级/全部）搜索时带来源；单视频搜索为 None。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_title: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -521,24 +526,30 @@ async fn map_reduce_answer(
 // ---------- 文稿关键词搜索（本地，无 LLM） ----------
 
 /// 在字幕段里做关键词匹配：按命中词数排序，再按时间。中文整串当一个词。
-pub fn keyword_search_segments(
-    segments: &[TranscriptSegment],
-    query: &str,
-    limit: usize,
-) -> Vec<Citation> {
+/// 命中打分：一段命中的查询词个数（>0 才计入）。空查询返回空。
+fn scored_segments(segments: &[TranscriptSegment], query: &str) -> Vec<(usize, TranscriptSegment)> {
     let q = query.trim().to_lowercase();
     if q.is_empty() {
         return Vec::new();
     }
     let terms: Vec<String> = q.split_whitespace().map(|s| s.to_string()).collect();
-    let mut scored: Vec<(usize, &TranscriptSegment)> = Vec::new();
+    let mut scored = Vec::new();
     for seg in segments {
         let lc = seg.text.to_lowercase();
         let score = terms.iter().filter(|t| lc.contains(t.as_str())).count();
         if score > 0 {
-            scored.push((score, seg));
+            scored.push((score, seg.clone()));
         }
     }
+    scored
+}
+
+pub fn keyword_search_segments(
+    segments: &[TranscriptSegment],
+    query: &str,
+    limit: usize,
+) -> Vec<Citation> {
+    let mut scored = scored_segments(segments, query);
     scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.start_ms.cmp(&b.1.start_ms)));
     scored
         .into_iter()
@@ -546,9 +557,11 @@ pub fn keyword_search_segments(
         .enumerate()
         .map(|(i, (_, seg))| Citation {
             index: i + 1,
-            text: seg.text.clone(),
+            text: seg.text,
             start_ms: seg.start_ms,
             end_ms: seg.end_ms,
+            video_id: None,
+            video_title: None,
         })
         .collect()
 }
@@ -561,6 +574,37 @@ pub async fn keyword_search(
 ) -> AppResult<Vec<Citation>> {
     let segments = list_segments(db, video_id).await?;
     Ok(keyword_search_segments(&segments, query, limit))
+}
+
+/// 跨视频（课程级/全部）关键词搜索：合并各视频命中，按命中数、再按时间全局排序，
+/// 每条引用带来源视频。videos 为 (video_id, video_title) 列表。
+pub async fn keyword_search_scope(
+    db: &Db,
+    videos: &[(String, String)],
+    query: &str,
+    limit: usize,
+) -> AppResult<Vec<Citation>> {
+    let mut global: Vec<(usize, String, String, TranscriptSegment)> = Vec::new();
+    for (vid, title) in videos {
+        let segs = list_segments(db, vid).await?;
+        for (score, seg) in scored_segments(&segs, query) {
+            global.push((score, vid.clone(), title.clone(), seg));
+        }
+    }
+    global.sort_by(|a, b| b.0.cmp(&a.0).then(a.3.start_ms.cmp(&b.3.start_ms)));
+    Ok(global
+        .into_iter()
+        .take(limit)
+        .enumerate()
+        .map(|(i, (_, vid, title, seg))| Citation {
+            index: i + 1,
+            text: seg.text,
+            start_ms: seg.start_ms,
+            end_ms: seg.end_ms,
+            video_id: Some(vid),
+            video_title: Some(title),
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -768,5 +812,63 @@ mod tests {
         let hits = keyword_search(&db, &vid, "暗反应", 10).await.unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].start_ms, 1000);
+    }
+
+    #[tokio::test]
+    async fn keyword_search_scope_spans_videos_with_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let mk = |name: &str| {
+            let p = dir.path().join(name);
+            std::fs::write(&p, b"x").unwrap();
+            p
+        };
+        let v1 = crate::commands::videos::add_local_video(&db, &course.id, mk("a.mp4"), None)
+            .await
+            .unwrap();
+        let v2 = crate::commands::videos::add_local_video(&db, &course.id, mk("b.mp4"), None)
+            .await
+            .unwrap();
+        for (vid, start, text) in [
+            (&v1.id, 0i64, "第一课讲光合作用"),
+            (&v2.id, 500i64, "第二课复习光合作用"),
+        ] {
+            sqlx::query(
+                "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,0,?,?,?)",
+            )
+            .bind(vid)
+            .bind(start)
+            .bind(start + 1000)
+            .bind(text)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        }
+
+        let videos = vec![
+            (v1.id.clone(), v1.title.clone()),
+            (v2.id.clone(), v2.title.clone()),
+        ];
+        let hits = keyword_search_scope(&db, &videos, "光合作用", 10)
+            .await
+            .unwrap();
+
+        assert_eq!(hits.len(), 2);
+        assert!(hits.iter().all(|c| c.video_id.is_some() && c.video_title.is_some()));
+        let ids: std::collections::HashSet<String> =
+            hits.iter().filter_map(|c| c.video_id.clone()).collect();
+        assert!(ids.contains(&v1.id) && ids.contains(&v2.id));
+        // 引用重新编号从 1 开始。
+        assert_eq!(hits[0].index, 1);
+        assert_eq!(hits[1].index, 2);
     }
 }

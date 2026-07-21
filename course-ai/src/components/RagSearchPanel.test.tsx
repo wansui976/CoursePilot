@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RagSearchPanel } from "./RagSearchPanel";
 import { useInlineAsk } from "@/stores/inlineAsk";
+import { usePlayer } from "@/stores/player";
 
 const { mockIpc, mockConfirm, platformMock } = vi.hoisted(() => ({
   mockIpc: {
@@ -576,10 +577,58 @@ describe("RagSearchPanel", () => {
     const retry = await screen.findByRole("button", { name: "重试" });
     fireEvent.click(retry);
 
-    // 重试用同一 query 再次调用（第一次失败、第二次成功）。
+    // 重试用同一 query 再次调用（第一次失败、第二次成功）。默认作用域为本视频。
     await waitFor(() =>
       expect(mockIpc.ai.searchTranscript).toHaveBeenCalledTimes(2),
     );
-    expect(mockIpc.ai.searchTranscript).toHaveBeenNthCalledWith(2, "video-1", "关键词");
+    expect(mockIpc.ai.searchTranscript).toHaveBeenNthCalledWith(
+      2,
+      "video-1",
+      "video",
+      "关键词",
+    );
+  });
+
+  it("search mode: course scope searches across videos and jumps to the source video", async () => {
+    mockIpc.ai.searchTranscript.mockResolvedValue([
+      {
+        index: 1,
+        text: "另一节课讲到的内容",
+        start_ms: 7000,
+        end_ms: 8000,
+        video_id: "video-2",
+        video_title: "第二讲",
+      },
+    ]);
+    const requestOpenAt = vi.fn();
+    usePlayer.setState({ requestOpenAt });
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <div data-theme="light">
+          <RagSearchPanel videoId="video-1" mode="search" />
+        </div>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "本课程" }));
+    fireEvent.change(screen.getByLabelText("搜索文稿内容"), {
+      target: { value: "内容" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
+
+    // 以 course 作用域发起搜索。
+    await waitFor(() =>
+      expect(mockIpc.ai.searchTranscript).toHaveBeenCalledWith(
+        "video-1",
+        "course",
+        "内容",
+      ),
+    );
+
+    // 结果标注来源视频，点击跳到该视频对应位置（非当前视频 → requestOpenAt）。
+    const hit = await screen.findByText(/另一节课讲到的内容/);
+    fireEvent.click(hit.closest("button")!);
+    expect(requestOpenAt).toHaveBeenCalledWith("video-2", 7000);
   });
 });
