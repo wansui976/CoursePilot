@@ -285,6 +285,108 @@ pub async fn add_local_video(
     Ok(video)
 }
 
+/// 可批量导入的本地视频扩展名（与单文件导入对话框的过滤器一致）。
+const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "mov", "webm", "m4v"];
+
+#[derive(Serialize)]
+pub struct FolderVideo {
+    pub path: String,
+    pub name: String,
+}
+
+/// 自然序比较：让 "part2" 排在 "part10" 之前（数字段按数值、非数字段按字符）。
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let mut ai = a.chars().peekable();
+    let mut bi = b.chars().peekable();
+    let take_digits = |it: &mut std::iter::Peekable<std::str::Chars>| -> String {
+        let mut s = String::new();
+        while let Some(&c) = it.peek() {
+            if c.is_ascii_digit() {
+                s.push(c);
+                it.next();
+            } else {
+                break;
+            }
+        }
+        s
+    };
+    loop {
+        match (ai.peek().copied(), bi.peek().copied()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(ac), Some(bc)) if ac.is_ascii_digit() && bc.is_ascii_digit() => {
+                let an = take_digits(&mut ai);
+                let bn = take_digits(&mut bi);
+                let av = an.trim_start_matches('0');
+                let bv = bn.trim_start_matches('0');
+                match av.len().cmp(&bv.len()).then_with(|| av.cmp(bv)) {
+                    Ordering::Equal => continue,
+                    o => return o,
+                }
+            }
+            (Some(ac), Some(bc)) => match ac.cmp(&bc) {
+                Ordering::Equal => {
+                    ai.next();
+                    bi.next();
+                }
+                o => return o,
+            },
+        }
+    }
+}
+
+/// 枚举目录顶层的视频文件（非递归），按文件名自然序返回。纯文件系统、不碰库。
+pub fn scan_folder(dir: &Path) -> AppResult<Vec<FolderVideo>> {
+    let mut out: Vec<(String, FolderVideo)> = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if !path.is_file() {
+            continue;
+        }
+        let is_video = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| VIDEO_EXTS.contains(&e.to_lowercase().as_str()))
+            .unwrap_or(false);
+        if !is_video {
+            continue;
+        }
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        out.push((
+            file_name,
+            FolderVideo {
+                path: path.to_string_lossy().to_string(),
+                name: display_title_from_path(&path),
+            },
+        ));
+    }
+    out.sort_by(|a, b| natural_cmp(&a.0, &b.0));
+    Ok(out.into_iter().map(|(_, v)| v).collect())
+}
+
+/// 批量导入本地视频：逐个复用幂等的 add_local_video（同文件返回既有、不建重复行）。
+/// 单个文件失败（如导入前被移走）跳过、不中断整批。
+pub async fn add_local_batch(
+    db: &Db,
+    course_id: &str,
+    paths: Vec<String>,
+) -> AppResult<Vec<Video>> {
+    ensure_active_course(db, course_id).await?;
+    let mut added = Vec::new();
+    for p in paths {
+        if let Ok(v) = add_local_video(db, course_id, PathBuf::from(&p), None).await {
+            added.push(v);
+        }
+    }
+    Ok(added)
+}
+
 pub async fn list_videos(db: &Db, course_id: &str) -> AppResult<Vec<Video>> {
     Ok(sqlx::query_as::<_, Video>(
         "SELECT * FROM videos WHERE course_id=? AND deleted_at IS NULL ORDER BY order_index ASC",
@@ -506,6 +608,20 @@ pub async fn cmd_add_local_video(
     Ok(video)
 }
 
+#[tauri::command]
+pub async fn cmd_scan_folder(dir: String) -> AppResult<Vec<FolderVideo>> {
+    scan_folder(Path::new(&dir))
+}
+
+#[tauri::command]
+pub async fn cmd_add_local_batch(
+    state: State<'_, AppState>,
+    course_id: String,
+    paths: Vec<String>,
+) -> AppResult<Vec<Video>> {
+    add_local_batch(&state.db, &course_id, paths).await
+}
+
 /// 导入后用 ffmpeg cropdetect 探测黑边并写库，同时回填到返回的 Video，
 /// 让前端拿到结果即可显示裁剪。无黑边写 0（标记已探测）；ffmpeg 没跑成则保持 NULL。
 pub async fn apply_detected_crop(db: &Db, video: &mut Video) {
@@ -705,6 +821,88 @@ mod tests {
         let list = list_videos(&db, &course.id).await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].order_index, 1);
+    }
+
+    #[test]
+    fn natural_cmp_orders_numeric_runs_by_value() {
+        use std::cmp::Ordering;
+        assert_eq!(natural_cmp("part2", "part10"), Ordering::Less);
+        assert_eq!(natural_cmp("10", "9"), Ordering::Greater);
+        assert_eq!(natural_cmp("01", "1"), Ordering::Equal);
+        assert_eq!(natural_cmp("a", "b"), Ordering::Less);
+    }
+
+    #[tokio::test]
+    async fn scan_folder_lists_only_videos_in_natural_order() {
+        let dir = tempdir().unwrap();
+        for name in ["part10.mp4", "part2.mp4", "part1.mkv", "notes.txt", "cover.png"] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        // 子目录不递归。
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/inner.mp4"), b"x").unwrap();
+
+        let found = scan_folder(dir.path()).unwrap();
+        let files: Vec<String> = found
+            .iter()
+            .map(|v| {
+                std::path::Path::new(&v.path)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(files, vec!["part1.mkv", "part2.mp4", "part10.mp4"]);
+    }
+
+    #[tokio::test]
+    async fn add_local_batch_imports_all_and_is_idempotent() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let paths: Vec<String> = ["a.mp4", "b.mp4"]
+            .iter()
+            .map(|n| {
+                let p = dir.path().join(n);
+                std::fs::write(&p, b"x").unwrap();
+                p.to_string_lossy().to_string()
+            })
+            .collect();
+
+        let added = add_local_batch(&db, &course.id, paths.clone()).await.unwrap();
+        assert_eq!(added.len(), 2);
+        // 再导一次：幂等，不产生重复行。
+        add_local_batch(&db, &course.id, paths).await.unwrap();
+        assert_eq!(list_videos(&db, &course.id).await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn add_local_batch_skips_missing_files_without_aborting() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let good = dir.path().join("good.mp4");
+        std::fs::write(&good, b"x").unwrap();
+        let missing = dir.path().join("gone.mp4").to_string_lossy().to_string();
+
+        let added = add_local_batch(
+            &db,
+            &course.id,
+            vec![missing, good.to_string_lossy().to_string()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(added.len(), 1);
+        assert_eq!(added[0].file_path, good.to_string_lossy());
     }
 
     #[tokio::test]

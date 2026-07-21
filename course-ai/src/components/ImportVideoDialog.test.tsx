@@ -4,9 +4,19 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ImportVideoButton } from "./ImportVideoDialog";
 
-const { addLocalMock, pickPersistedFileMock, isMobileMock } = vi.hoisted(() => ({
+const {
+  addLocalMock,
+  scanFolderMock,
+  addLocalBatchMock,
+  pickPersistedFileMock,
+  pickDirectoryPathMock,
+  isMobileMock,
+} = vi.hoisted(() => ({
   addLocalMock: vi.fn(),
+  scanFolderMock: vi.fn(),
+  addLocalBatchMock: vi.fn(),
   pickPersistedFileMock: vi.fn(),
+  pickDirectoryPathMock: vi.fn(),
   isMobileMock: vi.fn(),
 }));
 
@@ -14,12 +24,22 @@ vi.mock("@/lib/ipc", () => ({
   ipc: {
     videos: {
       addLocal: addLocalMock,
+      scanFolder: scanFolderMock,
+      addLocalBatch: addLocalBatchMock,
     },
   },
 }));
 vi.mock("@/lib/mobileFiles", () => ({
   pickPersistedFile: pickPersistedFileMock,
+  pickDirectoryPath: pickDirectoryPathMock,
+}));
+// 组件从 @/lib/platform 取 isMobile（不是 mobileFiles）——mock 必须打在这里。
+vi.mock("@/lib/platform", () => ({
   isMobile: isMobileMock,
+  isDesktop: () => !isMobileMock(),
+  isAndroid: () => false,
+  isIOS: () => false,
+  isTablet: () => false,
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
@@ -38,9 +58,37 @@ function renderButton() {
 describe("ImportVideoButton", () => {
   beforeEach(() => {
     addLocalMock.mockReset();
+    scanFolderMock.mockReset();
+    addLocalBatchMock.mockReset().mockResolvedValue([]);
     pickPersistedFileMock.mockReset();
+    pickDirectoryPathMock.mockReset();
     isMobileMock.mockReturnValue(true);
     addLocalMock.mockResolvedValue(undefined);
+  });
+
+  it("scans a picked folder and opens the batch import checklist (desktop)", async () => {
+    isMobileMock.mockReturnValue(false);
+    pickDirectoryPathMock.mockResolvedValue("/course/folder");
+    scanFolderMock.mockResolvedValue([
+      { path: "/course/folder/01.mp4", name: "01" },
+      { path: "/course/folder/02.mp4", name: "02" },
+    ]);
+
+    renderButton();
+    fireEvent.click(screen.getByRole("button", { name: "导入" }));
+    fireEvent.click(screen.getByText("导入整个文件夹").closest("button")!);
+
+    await waitFor(() => expect(scanFolderMock).toHaveBeenCalledWith("/course/folder"));
+    // 懒加载的清单对话框出现，默认全选两个。
+    expect(await screen.findByText("已选 2 / 2")).toBeInTheDocument();
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("hides the folder-import entry on mobile", () => {
+    isMobileMock.mockReturnValue(true);
+    renderButton();
+    fireEvent.click(screen.getByRole("button", { name: "导入" }));
+    expect(screen.queryByText("导入整个文件夹")).not.toBeInTheDocument();
   });
 
   it("passes the picked video's duration into addLocal", async () => {
