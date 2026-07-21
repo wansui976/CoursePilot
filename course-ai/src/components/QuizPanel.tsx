@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Brain, Check } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
@@ -15,10 +16,18 @@ function answerText(answer: QuizQuestion["answer"]): string {
 
 export function QuizPanel({ videoId }: { videoId: string }) {
   const requestSeek = usePlayer((s) => s.requestSeek);
+  const queryClient = useQueryClient();
   const [revealed, setRevealed] = useState<Record<number, boolean>>({});
   const { data: raw, isLoading } = useQuery({
     queryKey: ["quiz", videoId],
     queryFn: () => ipc.ai.getQuiz(videoId),
+  });
+
+  // 把这套题加入每日间隔重复复习。
+  const addToReview = useMutation({
+    mutationFn: () => ipc.srs.generate(videoId),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["srs-count-due"] }),
   });
 
   const questions = useMemo<QuizQuestion[]>(() => {
@@ -51,6 +60,23 @@ export function QuizPanel({ videoId }: { videoId: string }) {
 
   return (
     <div className="space-y-4 p-4">
+      <button
+        onClick={() => addToReview.mutate()}
+        disabled={addToReview.isPending}
+        className="ca-touch-44 inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-60"
+      >
+        {addToReview.isSuccess ? (
+          <>
+            <Check className="h-3.5 w-3.5 text-[var(--status-ok)]" />
+            已加入复习
+          </>
+        ) : (
+          <>
+            <Brain className="h-3.5 w-3.5" />
+            {addToReview.isPending ? "加入中…" : "加入每日复习"}
+          </>
+        )}
+      </button>
       {questions.map((q, i) => (
         <div key={i} className="rounded border border-[var(--border-subtle)] p-3">
           <div className="mb-2 text-sm">

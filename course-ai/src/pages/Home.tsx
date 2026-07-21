@@ -30,7 +30,7 @@ import { ErrorNote } from "@/components/ui/ErrorNote";
 import { IconButton } from "@/components/ui/icon-button";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import { coarsePointer, useContainerWidth, useIsPortrait } from "@/lib/useContainerWidth";
-import { ipc } from "@/lib/ipc";
+import { ipc, type DueCard } from "@/lib/ipc";
 import type { Video } from "@/lib/types";
 import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
@@ -265,6 +265,15 @@ export function Home() {
     // 打开视频即回到工作台：合上可能叠在主区的设置/回收站/控制台/队列整页。
     closeMainOverlays();
     setSelectedVideoId(videoId);
+  }
+
+  // 复习卡「回看出处」：关掉仪表盘、切到卡所属课程，跨视频跳转由 pendingSeek 驱动。
+  function reviewJump(card: DueCard) {
+    closeMainOverlays();
+    if (card.course_id) setSelectedCourseId(card.course_id);
+    if (card.video_id && card.source_ms != null) {
+      usePlayer.getState().requestOpenAt(card.video_id, card.source_ms);
+    }
   }
 
   const selectedVideo =
@@ -1366,6 +1375,7 @@ export function Home() {
             <Dashboard
               onClose={() => setShowDashboard(false)}
               onOpenCourse={selectCourse}
+              onJump={reviewJump}
             />
           ) : showDevConsole ? (
             <DevConsole onClose={() => setShowDevConsole(false)} />

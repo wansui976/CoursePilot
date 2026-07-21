@@ -9,6 +9,9 @@ const { mockIpc } = vi.hoisted(() => ({
     ai: {
       getQuiz: vi.fn(),
     },
+    srs: {
+      generate: vi.fn(),
+    },
   },
 }));
 
@@ -32,6 +35,21 @@ function renderQuizPanel() {
 describe("QuizPanel", () => {
   beforeEach(() => {
     mockIpc.ai.getQuiz.mockReset();
+    mockIpc.srs.generate.mockReset().mockResolvedValue(1);
+  });
+
+  it("adds the quiz to spaced-repetition review", async () => {
+    mockIpc.ai.getQuiz.mockResolvedValue(
+      JSON.stringify([{ type: "judge", stem: "地球是圆的", answer: true }]),
+    );
+    renderQuizPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: /加入每日复习/ }));
+
+    await waitFor(() =>
+      expect(mockIpc.srs.generate).toHaveBeenCalledWith("video-1"),
+    );
+    expect(await screen.findByText("已加入复习")).toBeInTheDocument();
   });
 
   it("renders LaTeX math in quiz stems, options, and explanations", async () => {
