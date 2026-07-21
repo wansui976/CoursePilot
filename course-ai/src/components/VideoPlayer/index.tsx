@@ -727,16 +727,24 @@ export function VideoPlayer({
                 setVideoAspect(videoWidth / videoHeight);
                 setVideoMetadataReady(true);
               }
-              // 断点续播：恢复上次离开的位置。
-              const saved = Number(localStorage.getItem(posKey(videoId)));
-              if (
-                Number.isFinite(saved) &&
-                saved > 2 &&
-                video.duration &&
-                saved < video.duration - RESUME_TAIL_GUARD
-              ) {
-                video.currentTime = saved;
-                lastSavedRef.current = saved;
+              // 跨视频跳转优先：若有落在本视频的 pendingSeek（课程级搜索点来的），
+              // 直接跳到该处、消费掉，压过断点续播。
+              const pending = usePlayer.getState().pendingSeek;
+              if (pending && pending.videoId === videoId) {
+                video.currentTime = Math.max(0, pending.ms / 1000);
+                usePlayer.getState().clearPendingSeek();
+              } else {
+                // 断点续播：恢复上次离开的位置。
+                const saved = Number(localStorage.getItem(posKey(videoId)));
+                if (
+                  Number.isFinite(saved) &&
+                  saved > 2 &&
+                  video.duration &&
+                  saved < video.duration - RESUME_TAIL_GUARD
+                ) {
+                  video.currentTime = saved;
+                  lastSavedRef.current = saved;
+                }
               }
             }}
             onPlay={() => {

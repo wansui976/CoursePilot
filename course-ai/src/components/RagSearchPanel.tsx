@@ -631,8 +631,16 @@ function AskChatPanel({ videoId }: { videoId: string }) {
   );
 }
 
+type SearchScope = "video" | "course";
+const SCOPE_LABELS: { key: SearchScope; label: string }[] = [
+  { key: "video", label: "本视频" },
+  { key: "course", label: "本课程" },
+];
+
 function SearchTranscriptPanel({ videoId }: { videoId: string }) {
   const requestSeek = usePlayer((s) => s.requestSeek);
+  const requestOpenAt = usePlayer((s) => s.requestOpenAt);
+  const [scope, setScope] = useState<SearchScope>("video");
   const [query, setQuery] = useState("");
   const [history, setHistory] = useState<SearchHistoryEntry[]>(() =>
     readSearchHistory(videoId, "search"),
@@ -642,8 +650,14 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
     setHistory(readSearchHistory(videoId, "search"));
   }, [videoId]);
 
+  // 点击引用：本视频（或无来源）就地 seek；本课程其它视频则打开该视频再跳转。
+  const jumpTo = (c: Citation) => {
+    if (!c.video_id || c.video_id === videoId) requestSeek(c.start_ms);
+    else requestOpenAt(c.video_id, c.start_ms);
+  };
+
   const search = useMutation<Citation[], unknown, string>({
-    mutationFn: (q: string) => ipc.ai.searchTranscript(videoId, q),
+    mutationFn: (q: string) => ipc.ai.searchTranscript(videoId, scope, q),
     onSuccess: (citations, q) => {
       setHistory((prev) => {
         const next: SearchHistoryEntry[] = [
@@ -666,20 +680,42 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex flex-none items-center gap-2 border-b border-[var(--border-subtle)] p-3">
-        <input
-          aria-label="搜索文稿内容"
-          className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)]"
-          placeholder="输入关键词…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
-          }}
-        />
-        <Button size="sm" variant="default" disabled={busy || !query.trim()} onClick={submit}>
-          {busy ? "搜索中…" : "搜索"}
-        </Button>
+      <div className="flex flex-none flex-col gap-2 border-b border-[var(--border-subtle)] p-3">
+        <div
+          role="group"
+          aria-label="搜索范围"
+          className="inline-flex items-center gap-0.5 self-start rounded-lg bg-[var(--surface-card)] p-0.5"
+        >
+          {SCOPE_LABELS.map((s) => (
+            <button
+              key={s.key}
+              aria-pressed={scope === s.key}
+              onClick={() => setScope(s.key)}
+              className={`ca-touch-44 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                scope === s.key
+                  ? "bg-[var(--surface-panel)] text-[var(--text-strong)] shadow-sm"
+                  : "text-[var(--text-muted)] hover:text-[var(--text-normal)]"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            aria-label="搜索文稿内容"
+            className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)]"
+            placeholder={scope === "course" ? "在本课程所有视频里搜…" : "输入关键词…"}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submit();
+            }}
+          />
+          <Button size="sm" variant="default" disabled={busy || !query.trim()} onClick={submit}>
+            {busy ? "搜索中…" : "搜索"}
+          </Button>
+        </div>
       </div>
 
       {search.isError && (
@@ -708,10 +744,16 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
               <div className="space-y-1">
                 {entry.citations.map((c) => (
                   <button
-                    key={`${entry.id}-${c.start_ms}-${c.index}`}
-                    onClick={() => requestSeek(c.start_ms)}
+                    key={`${entry.id}-${c.video_id ?? ""}-${c.start_ms}-${c.index}`}
+                    onClick={() => jumpTo(c)}
                     className="block w-full rounded px-1.5 py-1 text-left text-xs hover:bg-[var(--surface-card-hover)]"
                   >
+                    {/* 跨视频结果标注来源视频（本视频结果不标）。 */}
+                    {c.video_id && c.video_id !== videoId && c.video_title && (
+                      <span className="mr-1.5 text-[var(--text-faint)]">
+                        {c.video_title} ·
+                      </span>
+                    )}
                     <span className="mr-1.5 text-primary">{formatMs(c.start_ms)}</span>
                     <span className="text-[var(--text-normal)]">{c.text}</span>
                   </button>

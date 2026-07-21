@@ -162,6 +162,9 @@ export interface Citation {
   text: string;
   start_ms: number;
   end_ms: number;
+  /** 跨视频（课程级/全部）搜索时带来源；单视频搜索为 undefined。 */
+  video_id?: string;
+  video_title?: string;
 }
 
 export interface RagAnswer {

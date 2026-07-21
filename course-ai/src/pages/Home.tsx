@@ -289,6 +289,16 @@ export function Home() {
     setVideo(selectedVideoId);
   }, [selectedVideoId, setVideo]);
 
+  // 跨视频跳转（课程级搜索点到本课程其它视频）：打开目标视频，
+  // 具体 seek 由目标播放器加载完成后消费 pendingSeek。
+  const pendingSeek = usePlayer((s) => s.pendingSeek);
+  useEffect(() => {
+    if (pendingSeek && pendingSeek.videoId !== selectedVideoId) {
+      openVideo(pendingSeek.videoId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSeek]);
+
   // 卡片「⋯」菜单:点菜单与触发按钮之外的任意位置即收起(都打了 data-video-menu)。
   useEffect(() => {
     if (!openMenuVideoId) return;

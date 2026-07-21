@@ -208,8 +208,13 @@ export const ipc = {
     },
     cancelRagQuery: (requestId: string): Promise<void> =>
       invoke("cmd_cancel_rag_query", { requestId }),
-    searchTranscript: (videoId: string, query: string): Promise<Citation[]> =>
-      invoke("cmd_search_transcript", { videoId, query }),
+    // scope ∈ {video, course, all}：course/all 跨视频，引用带来源视频。
+    searchTranscript: (
+      videoId: string,
+      scope: "video" | "course" | "all",
+      query: string,
+    ): Promise<Citation[]> =>
+      invoke("cmd_search_transcript", { videoId, scope, query }),
   },
   slides: {
     extract: (videoId: string, threshold?: number): Promise<number> =>
