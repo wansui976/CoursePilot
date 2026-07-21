@@ -55,6 +55,7 @@ function baseProps(overrides: Partial<Parameters<typeof AppSidebar>[0]> = {}) {
     onToggleTheme: vi.fn(),
     onOpenSettings: vi.fn(),
     onOpenRecycleBin: vi.fn(),
+    onOpenDashboard: vi.fn(),
     queueOpen: false,
     queueCount: 0,
     onToggleQueue: vi.fn(),
