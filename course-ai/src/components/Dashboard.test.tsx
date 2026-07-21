@@ -5,15 +5,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "./Dashboard";
 import { localDay } from "@/lib/studyStats";
 
-const { dailyTotals, courseTotals, listCourses } = vi.hoisted(() => ({
+const { dailyTotals, courseTotals, listCourses, countDue } = vi.hoisted(() => ({
   dailyTotals: vi.fn(),
   courseTotals: vi.fn(),
   listCourses: vi.fn(),
+  countDue: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({
   ipc: {
     stats: { dailyTotals, courseTotals },
     courses: { list: listCourses },
+    srs: { countDue },
   },
 }));
 
@@ -23,7 +25,7 @@ function renderDashboard(onOpenCourse = vi.fn()) {
   });
   render(
     <QueryClientProvider client={qc}>
-      <Dashboard onClose={vi.fn()} onOpenCourse={onOpenCourse} />
+      <Dashboard onClose={vi.fn()} onOpenCourse={onOpenCourse} onJump={vi.fn()} />
     </QueryClientProvider>,
   );
   return { onOpenCourse };
@@ -38,6 +40,7 @@ describe("Dashboard", () => {
       { course_id: "c1", watched_ms: 3_600_000, last_ts: Date.now() },
     ]);
     listCourses.mockReset().mockResolvedValue([{ id: "c1", name: "申论课程" }]);
+    countDue.mockReset().mockResolvedValue(0);
   });
 
   it("shows weekly time and a 1-day streak from today's activity", async () => {

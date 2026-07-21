@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, Flame, LayoutDashboard } from "lucide-react";
-import { ipc } from "@/lib/ipc";
+import { Brain, ChevronLeft, Flame, LayoutDashboard } from "lucide-react";
+import { ipc, type DueCard } from "@/lib/ipc";
+import { ReviewSession } from "./ReviewSession";
 import {
   computeStreak,
   formatDuration,
@@ -16,12 +17,20 @@ const LOOKBACK_DAYS = 40;
 export function Dashboard({
   onClose,
   onOpenCourse,
+  onJump,
 }: {
   onClose: () => void;
   onOpenCourse: (courseId: string) => void;
+  onJump: (card: DueCard) => void;
 }) {
   const today = localDay(new Date());
   const fromTs = Date.now() - LOOKBACK_DAYS * 86_400_000;
+  const [reviewing, setReviewing] = useState(false);
+
+  const { data: dueCount = 0 } = useQuery({
+    queryKey: ["srs-count-due"],
+    queryFn: () => ipc.srs.countDue(),
+  });
 
   const { data: daily = [] } = useQuery({
     queryKey: ["stats-daily", today],
@@ -64,6 +73,29 @@ export function Dashboard({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
         <div className="mx-auto max-w-2xl space-y-6">
+          <button
+            onClick={() => setReviewing(true)}
+            disabled={dueCount === 0}
+            className="flex w-full items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)] disabled:cursor-default disabled:opacity-60 disabled:hover:bg-[var(--surface-card)]"
+          >
+            <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-primary/15 text-primary">
+              <Brain className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-[var(--text-strong)]">
+                {dueCount > 0 ? `今日复习 ${dueCount} 张` : "今天没有待复习"}
+              </span>
+              <span className="block text-xs text-[var(--text-muted)]">
+                间隔重复 · 出题自动生成卡片
+              </span>
+            </span>
+            {dueCount > 0 && (
+              <span className="flex-none rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white">
+                开始复习
+              </span>
+            )}
+          </button>
+
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
               <div className="text-xs text-[var(--text-muted)]">本周学习</div>
@@ -115,6 +147,16 @@ export function Dashboard({
           </div>
         </div>
       </div>
+
+      {reviewing && (
+        <ReviewSession
+          onClose={() => setReviewing(false)}
+          onJump={(card) => {
+            setReviewing(false);
+            onJump(card);
+          }}
+        />
+      )}
     </div>
   );
 }

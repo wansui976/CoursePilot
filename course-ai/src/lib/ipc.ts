@@ -34,6 +34,16 @@ export interface FolderVideo {
   name: string;
 }
 
+/** 间隔重复：到期待复习卡片。 */
+export interface DueCard {
+  id: string;
+  video_id: string | null;
+  course_id: string | null;
+  front: string;
+  back: string;
+  source_ms: number | null;
+}
+
 /** 学习统计：按本地日聚合的观看毫秒。 */
 export interface DayTotal {
   day: string;
@@ -95,6 +105,18 @@ export const ipc = {
     list: (): Promise<TrashedVideo[]> => invoke("cmd_list_trash"),
     // 清空回收站，返回清除数量。
     purgeAll: (): Promise<number> => invoke("cmd_purge_trash"),
+  },
+  srs: {
+    // 从出题结果生成/更新复习卡，返回卡片数。
+    generate: (videoId: string): Promise<number> =>
+      invoke("cmd_generate_cards", { videoId }),
+    // 到期待复习卡（跨课程）。
+    due: (limit: number): Promise<DueCard[]> => invoke("cmd_due_cards", { limit }),
+    // 今日待复习张数。
+    countDue: (): Promise<number> => invoke("cmd_count_due"),
+    // 复习评分：1=重来 2=困难 3=良好 4=容易。
+    review: (cardId: string, rating: number): Promise<void> =>
+      invoke("cmd_review_card", { cardId, rating }),
   },
   stats: {
     // 记一段实际观看毫秒（<=0 后端忽略）。
