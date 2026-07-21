@@ -28,6 +28,12 @@ export interface WhisperModel {
   url: string;
 }
 
+/** 目录扫描出的可导入视频（批量导入用）。 */
+export interface FolderVideo {
+  path: string;
+  name: string;
+}
+
 /** 学习统计：按本地日聚合的观看毫秒。 */
 export interface DayTotal {
   day: string;
@@ -60,6 +66,12 @@ export const ipc = {
       filePath: string,
       durationMs?: number | null,
     ): Promise<Video> => invoke("cmd_add_local_video", { courseId, filePath, durationMs }),
+    // 枚举目录顶层的视频文件（自然序）。
+    scanFolder: (dir: string): Promise<FolderVideo[]> =>
+      invoke("cmd_scan_folder", { dir }),
+    // 批量导入本地视频（幂等：已导入的文件跳过）。返回新增/既有的视频。
+    addLocalBatch: (courseId: string, paths: string[]): Promise<Video[]> =>
+      invoke("cmd_add_local_batch", { courseId, paths }),
     ensurePlayable: (videoId: string): Promise<string> =>
       invoke("cmd_ensure_playable", { videoId }),
     // 打开视频时兜底补测黑边（旧视频无 crop 记录时），返回四边占比（无黑边为 0）。

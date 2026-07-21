@@ -1,16 +1,26 @@
-import { AlertCircle, ChevronDown, Download, FileVideo, Plus } from "lucide-react";
+import {
+  AlertCircle,
+  ChevronDown,
+  Download,
+  FileVideo,
+  FolderInput,
+  Plus,
+} from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { humanizeError } from "@/lib/errors";
-import { ipc } from "@/lib/ipc";
-import { pickPersistedFile } from "@/lib/mobileFiles";
+import { ipc, type FolderVideo } from "@/lib/ipc";
+import { pickDirectoryPath, pickPersistedFile } from "@/lib/mobileFiles";
 import { isMobile } from "@/lib/platform";
 import type { Video } from "@/lib/types";
 
 // 按需懒加载：下载向导只在用户点击时才需要，避免把它（及 plugin-dialog 等）压进首屏 eager 包。
 const BilibiliImportDialog = lazy(() =>
   import("./BilibiliImportDialog").then((m) => ({ default: m.BilibiliImportDialog })),
+);
+const FolderImportDialog = lazy(() =>
+  import("./FolderImportDialog").then((m) => ({ default: m.FolderImportDialog })),
 );
 
 /** 单一「导入」入口：点开后可选「上传本地视频」或「下载网络视频（B 站 / 链接）」。 */
@@ -24,11 +34,31 @@ export function ImportVideoButton({
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const [showBili, setShowBili] = useState(false);
+  const [folderVideos, setFolderVideos] = useState<FolderVideo[] | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
-  // 移动端无 yt-dlp sidecar，隐藏「下载网络视频」入口。
+  // 移动端无 yt-dlp sidecar / 无法扫描任意文件夹，隐藏「下载网络视频」「导入整个文件夹」入口。
   const mobile = isMobile();
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["videos", courseId] });
+
+  // 选一个文件夹 → 扫描其中的视频 → 打开勾选清单批量导入。
+  const folder = useMutation({
+    mutationFn: async () => {
+      setImportError(null);
+      const dir = await pickDirectoryPath();
+      if (!dir) return null;
+      return ipc.videos.scanFolder(dir);
+    },
+    onSuccess: (videos) => {
+      if (videos == null) return; // 用户取消了选目录
+      if (videos.length === 0) {
+        setImportError("该文件夹里没有可导入的视频");
+        return;
+      }
+      setFolderVideos(videos);
+    },
+    onError: (error) => setImportError(humanizeError(error)),
+  });
 
   const local = useMutation({
     mutationFn: async () => {
@@ -88,6 +118,26 @@ export function ImportVideoButton({
             </button>
 
             {!mobile && (
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  folder.mutate();
+                }}
+                className="ca-touch-44 flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-[var(--surface-card-hover)]"
+              >
+                <FolderInput className="mt-0.5 h-4 w-4 flex-none text-primary" />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-[var(--text-strong)]">
+                    导入整个文件夹
+                  </span>
+                  <span className="block text-xs text-[var(--text-muted)]">
+                    批量导入一个文件夹里的所有视频
+                  </span>
+                </span>
+              </button>
+            )}
+
+            {!mobile && (
               <>
                 <div className="my-1 border-t border-[var(--border-faint)]" />
                 <button
@@ -118,6 +168,15 @@ export function ImportVideoButton({
             courseId={courseId}
             onClose={() => setShowBili(false)}
             onStartProcessing={onStartProcessing}
+          />
+        </Suspense>
+      )}
+      {folderVideos && (
+        <Suspense fallback={null}>
+          <FolderImportDialog
+            courseId={courseId}
+            videos={folderVideos}
+            onClose={() => setFolderVideos(null)}
           />
         </Suspense>
       )}
