@@ -77,13 +77,15 @@ export const TabsPanel = memo(function TabsPanel({ videoId }: { videoId: string 
       data-study-tab={activeTab}
       className="flex h-full flex-col bg-[var(--surface-panel)] text-[var(--text-normal)]"
     >
-      <TabsList className="flex h-12 items-stretch justify-around border-b border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2.5 sm:h-14 sm:px-4">
+      {/* 面板拖窄时标签放不下：整条横向滚动（overflow-x-auto），而不是被 overflow:hidden
+          裁掉最后一个标签（如「片段」）。标签 min-w-max 不缩到文字以下、宽时仍 flex-1 铺满。 */}
+      <TabsList className="flex h-12 items-stretch overflow-x-auto border-b border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2.5 [scrollbar-width:none] sm:h-14 sm:px-4 [&::-webkit-scrollbar]:hidden">
         {TABS.map((tab) => (
           <TabsTrigger
             key={tab}
             value={tab}
             onClick={() => changeTab(tab)}
-            className="ca-touch-44 ca-study-tab-trigger flex min-h-11 flex-1 items-center justify-center border-b-[3px] border-transparent px-3 py-3 text-sm font-semibold text-[var(--text-muted)] transition-colors data-[state=active]:border-primary data-[state=active]:text-[var(--text-strong)] sm:min-h-12 sm:px-4 sm:text-base"
+            className="ca-touch-44 ca-study-tab-trigger flex min-h-11 min-w-max flex-1 items-center justify-center border-b-[3px] border-transparent px-3 py-3 text-sm font-semibold text-[var(--text-muted)] transition-colors data-[state=active]:border-primary data-[state=active]:text-[var(--text-strong)] sm:min-h-12 sm:px-4 sm:text-base"
           >
             {tab}
           </TabsTrigger>
