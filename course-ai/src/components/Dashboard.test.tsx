@@ -16,6 +16,7 @@ const {
   dueByConcept,
   dueByCourse,
   review,
+  notify,
 } = vi.hoisted(() => ({
   dailyTotals: vi.fn(),
   courseTotals: vi.fn(),
@@ -27,12 +28,14 @@ const {
   dueByConcept: vi.fn(),
   dueByCourse: vi.fn(),
   review: vi.fn(),
+  notify: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({
   ipc: {
     stats: { dailyTotals, courseTotals, continueLearning, courseVideoIds },
     courses: { list: listCourses },
     srs: { countDue, weakConcepts, dueByConcept, dueByCourse, review },
+    notify,
   },
 }));
 
@@ -69,6 +72,7 @@ describe("Dashboard", () => {
     dueByCourse.mockReset().mockResolvedValue([]);
     courseVideoIds.mockReset().mockResolvedValue([]);
     review.mockReset().mockResolvedValue(undefined);
+    notify.mockReset().mockResolvedValue(undefined);
     localStorage.clear();
   });
 
@@ -155,6 +159,17 @@ describe("Dashboard", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(await screen.findByText(/今日已学 30 分钟 \/ 目标 60 分钟/)).toBeInTheDocument();
     expect(localStorage.getItem("course-ai-daily-goal-min")).toBe("60");
+  });
+
+  it("toggles the study reminder on and fires a confirmation notification", async () => {
+    renderDashboard();
+    const toggle = await screen.findByRole("switch", { name: "学习提醒" });
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
+    expect(toggle).toBeChecked();
+    expect(localStorage.getItem("course-ai-reminder-enabled")).toBe("1");
+    await waitFor(() => expect(notify).toHaveBeenCalled());
   });
 
   it("shows a course completion ring and a due badge on the course card", async () => {

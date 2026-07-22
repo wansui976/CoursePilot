@@ -43,6 +43,7 @@ import {
   writeLastVideoId,
 } from "@/lib/playback";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
+import { useStudyReminder } from "@/lib/useStudyReminder";
 import { isIOS, isTablet } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
@@ -113,6 +114,8 @@ export function Home() {
   const [showDevConsole, setShowDevConsole] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [showConcepts, setShowConcepts] = useState(false);
+  // 应用打开时的学习提醒（开启且今天有到期卡才发，每天至多一次）。
+  useStudyReminder();
   const theme = useTheme((s) => s.effective);
   const accent = useTheme((s) => s.accent);
   const customAccent = useTheme((s) => s.customAccent);

@@ -22,6 +22,7 @@ use crate::commands::courses::{
     cmd_rename_course, AppState,
 };
 use crate::commands::concepts::{cmd_analyze_course_concepts, cmd_list_course_concepts};
+use crate::commands::notify::cmd_notify;
 use crate::commands::export::{
     cmd_export_mindmap, cmd_export_notes, cmd_export_quiz, cmd_export_subtitles,
 };
@@ -67,6 +68,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(mobile_files::init())
         .setup(|app| {
             let handle = app.handle().clone();
@@ -175,6 +177,7 @@ pub fn run() {
             cmd_due_cards_by_concept,
             cmd_weak_concepts,
             cmd_due_by_course,
+            cmd_notify,
             cmd_has_bilibili_cookies
         ])
         .run(tauri::generate_context!())
