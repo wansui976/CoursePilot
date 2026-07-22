@@ -6,14 +6,35 @@ import { ReviewSession } from "./ReviewSession";
 import {
   computeStreak,
   formatDuration,
+  heatmapGrid,
   localDay,
   relativeDay,
   weeklyMs,
+  type HeatCell,
 } from "@/lib/studyStats";
 
-const LOOKBACK_DAYS = 40;
+const HEATMAP_WEEKS = 18;
+// 覆盖热力图所需的历史范围（含今天所在周的补位），略放宽。
+const LOOKBACK_DAYS = HEATMAP_WEEKS * 7 + 7;
 
-/** 学习仪表盘：本周时长 + 连续天数 + 各课程已学时长/上次学习（点击进入课程）。 */
+// 热力图各强度等级的背景（level 0–4）；用主题主色的不同透明度，深浅主题都成立。
+const HEAT_LEVEL_BG = [
+  "bg-[var(--surface-card-active)]",
+  "bg-primary/30",
+  "bg-primary/50",
+  "bg-primary/75",
+  "bg-primary",
+];
+
+/** 热力图一格：空位（未来）留透明占位保持网格对齐；有日期的格按等级上色并带悬浮说明。 */
+function HeatSquare({ cell }: { cell: HeatCell }) {
+  if (!cell) return <span className="h-2.5 w-2.5" aria-hidden="true" />;
+  const label =
+    cell.ms > 0 ? `${cell.day} · ${formatDuration(cell.ms)}` : `${cell.day} · 未学习`;
+  return <span title={label} className={`h-2.5 w-2.5 rounded-sm ${HEAT_LEVEL_BG[cell.level]}`} />;
+}
+
+/** 学习仪表盘：本周时长 + 连续天数 + 热力图 + 各课程已学时长/上次学习（点击进入课程）。 */
 export function Dashboard({
   onClose,
   onOpenCourse,
@@ -50,6 +71,7 @@ export function Dashboard({
     [daily, today],
   );
   const week = useMemo(() => weeklyMs(daily, today), [daily, today]);
+  const heatmap = useMemo(() => heatmapGrid(daily, today, HEATMAP_WEEKS), [daily, today]);
   const nameOf = useMemo(() => {
     const map = new Map(courses.map((c) => [c.id, c.name]));
     return (id: string) => map.get(id) ?? "（已删除课程）";
@@ -110,6 +132,34 @@ export function Dashboard({
                   className={`h-5 w-5 ${streak > 0 ? "text-[var(--status-warn,#e08a00)]" : "text-[var(--text-faint)]"}`}
                 />
                 {streak} 天
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-sm font-semibold text-[var(--text-strong)]">学习热力图</div>
+              <div className="flex items-center gap-1 text-[11px] text-[var(--text-faint)]">
+                <span>少</span>
+                {HEAT_LEVEL_BG.map((bg, i) => (
+                  <span key={i} className={`h-2.5 w-2.5 rounded-sm ${bg}`} />
+                ))}
+                <span>多</span>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <div
+                role="img"
+                aria-label={`最近 ${HEATMAP_WEEKS} 周学习热力图`}
+                className="flex gap-1"
+              >
+                {heatmap.map((col, ci) => (
+                  <div key={ci} className="flex flex-col gap-1">
+                    {col.map((cell, ri) => (
+                      <HeatSquare key={ri} cell={cell} />
+                    ))}
+                  </div>
+                ))}
               </div>
             </div>
           </div>
