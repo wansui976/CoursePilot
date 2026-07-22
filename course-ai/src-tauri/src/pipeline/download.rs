@@ -244,6 +244,97 @@ pub fn parse_probe_json(json: &str) -> AppResult<ProbeResult> {
     })
 }
 
+/// 播放列表/合集里的一集：可导入的 URL + 标题 + 可选时长。
+#[derive(Debug, Clone, Serialize)]
+pub struct PlaylistEpisode {
+    pub url: String,
+    pub title: String,
+    pub duration_ms: Option<i64>,
+}
+
+/// 播放列表/合集探测结果：标题（预填课程名用）+ 各集清单。
+#[derive(Debug, Clone, Serialize)]
+pub struct PlaylistInfo {
+    pub title: String,
+    pub episodes: Vec<PlaylistEpisode>,
+}
+
+fn entry_to_episode(entry: &serde_json::Value) -> Option<PlaylistEpisode> {
+    let url = entry
+        .get("url")
+        .or_else(|| entry.get("webpage_url"))
+        .and_then(|u| u.as_str())?
+        .to_string();
+    if url.is_empty() {
+        return None;
+    }
+    let title = entry
+        .get("title")
+        .and_then(|t| t.as_str())
+        .or_else(|| entry.get("id").and_then(|t| t.as_str()))
+        .unwrap_or("video")
+        .to_string();
+    let duration_ms = entry
+        .get("duration")
+        .and_then(|d| d.as_f64())
+        .filter(|d| *d > 0.0)
+        .map(|d| (d * 1000.0) as i64);
+    Some(PlaylistEpisode {
+        url,
+        title,
+        duration_ms,
+    })
+}
+
+/// 解析 `yt-dlp --flat-playlist -J` 输出：合集标题 + 各集（url/title/duration）。
+/// 若不是播放列表（无 entries），当作单集（用顶层 webpage_url）。
+pub fn parse_playlist_json(json: &str) -> AppResult<PlaylistInfo> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(AppError::Json)?;
+    let title = v
+        .get("title")
+        .and_then(|t| t.as_str())
+        .unwrap_or("playlist")
+        .to_string();
+    let episodes: Vec<PlaylistEpisode> = match v.get("entries").and_then(|e| e.as_array()) {
+        Some(entries) => entries.iter().filter_map(entry_to_episode).collect(),
+        // 非播放列表：把它当单集（顶层就是这条视频）。
+        None => entry_to_episode(&v).into_iter().collect(),
+    };
+    Ok(PlaylistInfo { title, episodes })
+}
+
+/// 用 yt-dlp 扁平枚举播放列表/合集（不下载正片），得到各集清单。
+pub async fn probe_playlist(url: &str, cookies: Option<&str>) -> AppResult<PlaylistInfo> {
+    let ytdlp = resolve(&YTDLP, None)?;
+    let mut cmd = Command::new(&ytdlp);
+    cmd.args(["-J", "--flat-playlist", "--skip-download"]);
+    if is_bilibili_url(url) {
+        cmd.args([
+            "--user-agent",
+            BROWSER_USER_AGENT,
+            "--referer",
+            BILIBILI_REFERER,
+        ]);
+    }
+    if let Some(c) = cookies {
+        if !c.trim().is_empty() {
+            cmd.args(["--cookies", c]);
+        }
+    }
+    cmd.arg(url);
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| AppError::Pipeline(format!("yt-dlp spawn: {e}")))?;
+    if !output.status.success() {
+        return Err(AppError::Pipeline(format!(
+            "yt-dlp playlist probe failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+    parse_playlist_json(&String::from_utf8_lossy(&output.stdout))
+}
+
 /// 优选默认字幕轨：手打中文 CC > AI 中文 > 第一条。
 pub fn pick_default_track(tracks: &[SubtitleTrack]) -> Option<&SubtitleTrack> {
     let manual_zh = tracks.iter().find(|t| !t.auto && t.lang.starts_with("zh"));
@@ -323,6 +414,36 @@ mod tests {
         let args = build_ytdlp_args("u", "t", Some("/path/cookies.txt"), None, None);
         let pos = args.iter().position(|a| a == "--cookies").unwrap();
         assert_eq!(args[pos + 1], "/path/cookies.txt");
+    }
+
+    #[test]
+    fn parse_playlist_json_reads_entries() {
+        let json = r#"{
+            "_type":"playlist","title":"我的合集",
+            "entries":[
+                {"id":"BV1","title":"第一讲","url":"https://www.bilibili.com/video/BV1","duration":600},
+                {"id":"BV2","title":"第二讲","url":"https://www.bilibili.com/video/BV2"},
+                {"id":"BV3","title":"无链接"}
+            ]
+        }"#;
+        let info = parse_playlist_json(json).unwrap();
+        assert_eq!(info.title, "我的合集");
+        // 无 url 的一集被跳过。
+        assert_eq!(info.episodes.len(), 2);
+        assert_eq!(info.episodes[0].title, "第一讲");
+        assert_eq!(info.episodes[0].url, "https://www.bilibili.com/video/BV1");
+        assert_eq!(info.episodes[0].duration_ms, Some(600_000));
+        assert_eq!(info.episodes[1].duration_ms, None);
+    }
+
+    #[test]
+    fn parse_playlist_json_single_video_becomes_one_episode() {
+        let json = r#"{"title":"单个视频","webpage_url":"https://www.bilibili.com/video/BVX","duration":120}"#;
+        let info = parse_playlist_json(json).unwrap();
+        assert_eq!(info.title, "单个视频");
+        assert_eq!(info.episodes.len(), 1);
+        assert_eq!(info.episodes[0].url, "https://www.bilibili.com/video/BVX");
+        assert_eq!(info.episodes[0].duration_ms, Some(120_000));
     }
 
     #[test]
