@@ -5,30 +5,37 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "./Dashboard";
 import { localDay } from "@/lib/studyStats";
 
-const { dailyTotals, courseTotals, listCourses, countDue } = vi.hoisted(() => ({
-  dailyTotals: vi.fn(),
-  courseTotals: vi.fn(),
-  listCourses: vi.fn(),
-  countDue: vi.fn(),
-}));
+const { dailyTotals, courseTotals, continueLearning, listCourses, countDue } =
+  vi.hoisted(() => ({
+    dailyTotals: vi.fn(),
+    courseTotals: vi.fn(),
+    continueLearning: vi.fn(),
+    listCourses: vi.fn(),
+    countDue: vi.fn(),
+  }));
 vi.mock("@/lib/ipc", () => ({
   ipc: {
-    stats: { dailyTotals, courseTotals },
+    stats: { dailyTotals, courseTotals, continueLearning },
     courses: { list: listCourses },
     srs: { countDue },
   },
 }));
 
-function renderDashboard(onOpenCourse = vi.fn()) {
+function renderDashboard(onOpenCourse = vi.fn(), onResume = vi.fn()) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   render(
     <QueryClientProvider client={qc}>
-      <Dashboard onClose={vi.fn()} onOpenCourse={onOpenCourse} onJump={vi.fn()} />
+      <Dashboard
+        onClose={vi.fn()}
+        onOpenCourse={onOpenCourse}
+        onResume={onResume}
+        onJump={vi.fn()}
+      />
     </QueryClientProvider>,
   );
-  return { onOpenCourse };
+  return { onOpenCourse, onResume };
 }
 
 describe("Dashboard", () => {
@@ -41,6 +48,8 @@ describe("Dashboard", () => {
     ]);
     listCourses.mockReset().mockResolvedValue([{ id: "c1", name: "申论课程" }]);
     countDue.mockReset().mockResolvedValue(0);
+    continueLearning.mockReset().mockResolvedValue([]);
+    localStorage.clear();
   });
 
   it("shows weekly time and a 1-day streak from today's activity", async () => {
@@ -56,6 +65,29 @@ describe("Dashboard", () => {
 
     fireEvent.click(card.closest("button")!);
     expect(onOpenCourse).toHaveBeenCalledWith("c1");
+  });
+
+  it("shows a continue-learning entry with progress and resumes on click", async () => {
+    continueLearning.mockResolvedValue([
+      {
+        course_id: "c1",
+        course_name: "申论课程",
+        video_id: "v-last",
+        video_title: "第三讲 归纳概括",
+        last_ts: Date.now(),
+      },
+    ]);
+    // 该视频的续播进度：看到 300/600 秒（50%）。
+    localStorage.setItem("video-pos:v-last", "300");
+    localStorage.setItem("video-dur:v-last", "600");
+
+    const { onResume } = renderDashboard();
+
+    const entry = await screen.findByText("第三讲 归纳概括");
+    expect(screen.getByText(/已看 50%/)).toBeInTheDocument();
+
+    fireEvent.click(entry.closest("button")!);
+    expect(onResume).toHaveBeenCalledWith("c1", "v-last", 300);
   });
 
   it("renders the study heatmap with today's activity cell", async () => {

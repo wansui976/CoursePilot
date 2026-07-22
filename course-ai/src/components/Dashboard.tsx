@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Brain, ChevronLeft, Flame, LayoutDashboard } from "lucide-react";
+import { Brain, ChevronLeft, Flame, LayoutDashboard, Play } from "lucide-react";
 import { ipc, type DueCard } from "@/lib/ipc";
+import { readPlaybackProgress } from "@/lib/playback";
 import { ReviewSession } from "./ReviewSession";
 import {
   computeStreak,
@@ -38,10 +39,12 @@ function HeatSquare({ cell }: { cell: HeatCell }) {
 export function Dashboard({
   onClose,
   onOpenCourse,
+  onResume,
   onJump,
 }: {
   onClose: () => void;
   onOpenCourse: (courseId: string) => void;
+  onResume: (courseId: string, videoId: string, positionSec: number) => void;
   onJump: (card: DueCard) => void;
 }) {
   const today = localDay(new Date());
@@ -51,6 +54,11 @@ export function Dashboard({
   const { data: dueCount = 0 } = useQuery({
     queryKey: ["srs-count-due"],
     queryFn: () => ipc.srs.countDue(),
+  });
+
+  const { data: continueRows = [] } = useQuery({
+    queryKey: ["stats-continue"],
+    queryFn: () => ipc.stats.continueLearning(),
   });
 
   const { data: daily = [] } = useQuery({
@@ -117,6 +125,51 @@ export function Dashboard({
               </span>
             )}
           </button>
+
+          {continueRows.length > 0 && (
+            <div>
+              <div className="mb-2 text-sm font-semibold text-[var(--text-strong)]">
+                继续学习
+              </div>
+              <ul className="space-y-2">
+                {continueRows.map((row) => {
+                  const { positionSec, ratio } = readPlaybackProgress(row.video_id);
+                  return (
+                    <li key={row.course_id}>
+                      <button
+                        onClick={() => onResume(row.course_id, row.video_id, positionSec)}
+                        className="group flex w-full items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
+                      >
+                        <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-primary/15 text-primary transition group-hover:bg-primary group-hover:text-white">
+                          <Play className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-medium text-[var(--text-strong)]">
+                            {row.video_title}
+                          </div>
+                          <div className="mt-0.5 truncate text-xs text-[var(--text-muted)]">
+                            {row.course_name}
+                            {ratio > 0 && ` · 已看 ${Math.round(ratio * 100)}%`}
+                          </div>
+                          {ratio > 0 && (
+                            <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--surface-card-active)]">
+                              <div
+                                className="h-full rounded-full bg-primary"
+                                style={{ width: `${Math.round(ratio * 100)}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                        <span className="flex-none text-xs font-medium text-[var(--text-muted)] transition group-hover:text-[var(--text-strong)]">
+                          {ratio > 0 ? "继续" : "开始"}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">

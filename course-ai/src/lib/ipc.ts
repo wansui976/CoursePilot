@@ -57,6 +57,15 @@ export interface CourseTotal {
   last_ts: number;
 }
 
+/** 「继续学习」条目：每门课上次看到的视频（供一键续播）。 */
+export interface ContinueRow {
+  course_id: string;
+  course_name: string;
+  video_id: string;
+  video_title: string;
+  last_ts: number;
+}
+
 export const ipc = {
   courses: {
     list: (): Promise<Course[]> => invoke("cmd_list_courses"),
@@ -127,6 +136,8 @@ export const ipc = {
       invoke("cmd_daily_totals", { fromTs, toTs }),
     // 每门课累计观看时长与最近学习时刻。
     courseTotals: (): Promise<CourseTotal[]> => invoke("cmd_course_totals"),
+    // 每门课上次看到的视频（按最近学习倒序），供仪表盘一键续播。
+    continueLearning: (): Promise<ContinueRow[]> => invoke("cmd_continue_learning"),
   },
   secrets: {
     // 保存敏感凭证（ASR/OCR 密钥）到密钥存储。

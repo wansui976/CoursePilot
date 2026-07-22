@@ -35,7 +35,9 @@ use crate::commands::slides::{
 use crate::commands::srs::{
     cmd_count_due, cmd_due_cards, cmd_generate_cards, cmd_review_card,
 };
-use crate::commands::stats::{cmd_course_totals, cmd_daily_totals, cmd_log_watch};
+use crate::commands::stats::{
+    cmd_continue_learning, cmd_course_totals, cmd_daily_totals, cmd_log_watch,
+};
 use crate::commands::tools::{
     cmd_has_bilibili_cookies, cmd_import_bilibili, cmd_ocr_region, cmd_probe_bilibili,
     cmd_set_bilibili_cookies,
@@ -159,6 +161,7 @@ pub fn run() {
             cmd_log_watch,
             cmd_daily_totals,
             cmd_course_totals,
+            cmd_continue_learning,
             cmd_generate_cards,
             cmd_due_cards,
             cmd_count_due,

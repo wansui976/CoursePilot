@@ -60,6 +60,40 @@ pub async fn daily_totals(db: &Db, from_ts: i64, to_ts: i64) -> AppResult<Vec<Da
     .await?)
 }
 
+/// 「继续学习」条目：每门课最近一次观看的视频（供仪表盘一键续播）。
+#[derive(Serialize, sqlx::FromRow)]
+pub struct ContinueRow {
+    pub course_id: String,
+    pub course_name: String,
+    pub video_id: String,
+    pub video_title: String,
+    pub last_ts: i64,
+}
+
+/// 每门课最近一次观看的视频（按最近学习倒序）。
+/// 用 study_events 的 watch 事件定位「上次看到哪」；最近视频已删除则该课不出现在列表里。
+/// SQLite：GROUP BY 内恰有一个 MAX(ts) 时，同选的 video_id 取自该最大行。
+pub async fn continue_rows(db: &Db) -> AppResult<Vec<ContinueRow>> {
+    Ok(sqlx::query_as(
+        "SELECT e.course_id AS course_id,
+                c.name       AS course_name,
+                e.video_id   AS video_id,
+                v.title      AS video_title,
+                e.last_ts    AS last_ts
+         FROM (
+             SELECT course_id, video_id, CAST(MAX(ts) AS INTEGER) AS last_ts
+             FROM study_events
+             WHERE kind='watch' AND course_id IS NOT NULL AND video_id IS NOT NULL
+             GROUP BY course_id
+         ) e
+         JOIN videos  v ON v.id = e.video_id AND v.deleted_at IS NULL
+         JOIN courses c ON c.id = e.course_id
+         ORDER BY e.last_ts DESC",
+    )
+    .fetch_all(&db.pool)
+    .await?)
+}
+
 /// 每门课的累计观看时长与最近学习时刻（按最近学习倒序）。
 pub async fn course_totals(db: &Db) -> AppResult<Vec<CourseTotal>> {
     Ok(sqlx::query_as(
@@ -95,6 +129,11 @@ pub async fn cmd_daily_totals(
 #[tauri::command]
 pub async fn cmd_course_totals(state: State<'_, AppState>) -> AppResult<Vec<CourseTotal>> {
     course_totals(&state.db).await
+}
+
+#[tauri::command]
+pub async fn cmd_continue_learning(state: State<'_, AppState>) -> AppResult<Vec<ContinueRow>> {
+    continue_rows(&state.db).await
 }
 
 #[cfg(test)]
@@ -187,6 +226,61 @@ mod tests {
         // 升序：第一天合并为 10000，两天后为 1000。
         assert_eq!(rows[0].watched_ms, 10000);
         assert_eq!(rows[1].watched_ms, 1000);
+    }
+
+    async fn seed_video_titled(db: &Db, course_id: &str, title: &str) -> String {
+        let vid = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO videos(id,course_id,title,source_type,file_path,data_dir,created_at)
+             VALUES (?,?,?,?,?,?,?)",
+        )
+        .bind(&vid)
+        .bind(course_id)
+        .bind(title)
+        .bind("local")
+        .bind("/tmp/v.mp4")
+        .bind("/tmp/data")
+        .bind(0i64)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        vid
+    }
+
+    #[tokio::test]
+    async fn continue_rows_returns_the_last_watched_video_per_course() {
+        let db = fresh_db().await;
+        let course = create_course(&db, "申论".into(), "/tmp/c".into())
+            .await
+            .unwrap();
+        let v1 = seed_video_titled(&db, &course.id, "第一讲").await;
+        let v2 = seed_video_titled(&db, &course.id, "第二讲").await;
+        let base = 1_700_000_000_000i64;
+        insert_watch_at(&db, &course.id, &v1, base, 4000).await;
+        insert_watch_at(&db, &course.id, &v2, base + 3600_000, 5000).await; // 更晚 → 上次看的是第二讲
+
+        let rows = continue_rows(&db).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].course_id, course.id);
+        assert_eq!(rows[0].course_name, "申论");
+        assert_eq!(rows[0].video_id, v2);
+        assert_eq!(rows[0].video_title, "第二讲");
+        assert_eq!(rows[0].last_ts, base + 3600_000);
+    }
+
+    #[tokio::test]
+    async fn continue_rows_skips_a_course_whose_last_video_was_deleted() {
+        let db = fresh_db().await;
+        let course = create_course(&db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let vid = seed_video_titled(&db, &course.id, "只有这一讲").await;
+        insert_watch_at(&db, &course.id, &vid, 1_700_000_000_000, 4000).await;
+        sqlx::query("UPDATE videos SET deleted_at=1 WHERE id=?")
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        assert!(continue_rows(&db).await.unwrap().is_empty());
     }
 
     #[tokio::test]
