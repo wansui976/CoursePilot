@@ -1,5 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { contentAspect, cropStyle, NO_INSETS, type Insets } from "./blackBars";
+import {
+  contentAspect,
+  cropStyle,
+  NO_INSETS,
+  symmetricInsets,
+  type Insets,
+} from "./blackBars";
+
+describe("symmetricInsets", () => {
+  it("drops a one-sided inset so the picture stays centered", () => {
+    // 只检测到左边有「黑边」（右边 0）→ 归零，避免把画面推向一边。
+    expect(symmetricInsets({ top: 0, right: 0, bottom: 0, left: 0.1 })).toEqual(NO_INSETS);
+  });
+
+  it("keeps a symmetric letterbox but levels a slightly asymmetric one", () => {
+    // 对称信箱黑边保留；左右轻微不等时取较小值，去掉歪斜。
+    expect(symmetricInsets({ top: 0.06, right: 0.02, bottom: 0.06, left: 0.03 })).toEqual({
+      top: 0.06,
+      right: 0.02,
+      bottom: 0.06,
+      left: 0.02,
+    });
+  });
+});
 
 describe("cropStyle", () => {
   it("fills the stage box exactly when there is no crop", () => {

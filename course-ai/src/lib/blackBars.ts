@@ -10,6 +10,18 @@ export interface Insets {
 
 export const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
 
+/**
+ * 只保留**对称**黑边：对边取较小值（left/right 取 min，top/bottom 取 min）。
+ * 真实信箱/邮筒黑边本就对称；单边多出来的一点几乎都是边缘/压缩噪声的误判——
+ * 若照单全收会把画面往一边推（看起来「歪了/没居中」）。对称化后裁剪永远居中，
+ * 同时仍能去掉真正的对称黑边。
+ */
+export function symmetricInsets(crop: Insets): Insets {
+  const lr = Math.min(crop.left, crop.right);
+  const tb = Math.min(crop.top, crop.bottom);
+  return { top: tb, right: lr, bottom: tb, left: lr };
+}
+
 export interface Box {
   width: number;
   height: number;
