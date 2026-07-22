@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   Film,
   LayoutGrid,
+  Lightbulb,
   List,
   MoreHorizontal,
   Play,
@@ -16,6 +17,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { CourseSidebar } from "@/components/CourseSidebar";
 import { RecycleBin } from "@/components/RecycleBin";
 import { Dashboard } from "@/components/Dashboard";
+import { ConceptsPanel } from "@/components/ConceptsPanel";
 import { DevConsole } from "@/components/DevConsole";
 import { ImportVideoButton } from "@/components/ImportVideoDialog";
 import { SettingsPanel } from "@/components/SettingsDialog";
@@ -112,6 +114,7 @@ export function Home() {
   const [showRecycleBin, setShowRecycleBin] = useState(false);
   const [showDevConsole, setShowDevConsole] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
+  const [showConcepts, setShowConcepts] = useState(false);
   const theme = useTheme((s) => s.effective);
   const accent = useTheme((s) => s.accent);
   const customAccent = useTheme((s) => s.customAccent);
@@ -281,6 +284,12 @@ export function Home() {
     closeMainOverlays();
     setSelectedCourseId(courseId);
     usePlayer.getState().requestOpenAt(videoId, Math.round(positionSec * 1000));
+  }
+
+  // 「知识点」出处点击：关面板、跳到该视频对应位置（同课程，pendingSeek 驱动开视频+seek）。
+  function conceptJump(videoId: string, startMs: number) {
+    setShowConcepts(false);
+    usePlayer.getState().requestOpenAt(videoId, startMs);
   }
 
   const selectedVideo =
@@ -517,6 +526,7 @@ export function Home() {
     setShowRecycleBin(false);
     setShowDevConsole(false);
     setShowDashboard(false);
+    setShowConcepts(false);
     setQueueOpen(false);
   }
 
@@ -1115,6 +1125,15 @@ export function Home() {
                   ))}
                 </div>
               )}
+              {videos.length > 0 && (
+                <button
+                  onClick={() => setShowConcepts(true)}
+                  className="ca-touch-44 inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
+                >
+                  <Lightbulb className="h-4 w-4" />
+                  知识点
+                </button>
+              )}
               <ImportVideoButton
                 courseId={selectedCourseId}
                 onStartProcessing={startProcessing}
@@ -1329,9 +1348,11 @@ export function Home() {
           ? "queue"
           : selectedVideo
             ? "workbench"
-            : showCourseListScreen
-              ? "courselist"
-              : "library";
+            : showConcepts && selectedCourseId
+              ? "concepts"
+              : showCourseListScreen
+                ? "courselist"
+                : "library";
 
   return (
     <div
@@ -1391,6 +1412,13 @@ export function Home() {
             renderProcessingQueuePage()
           ) : selectedVideo ? (
             renderSelectedVideoWorkspace()
+          ) : showConcepts && selectedCourseId ? (
+            <ConceptsPanel
+              courseId={selectedCourseId}
+              courseName={selectedCourse?.name}
+              onClose={() => setShowConcepts(false)}
+              onJump={conceptJump}
+            />
           ) : showCourseListScreen ? (
             renderCourseListScreen()
           ) : (
