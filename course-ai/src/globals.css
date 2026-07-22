@@ -745,10 +745,10 @@ select:focus-visible {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 2px 0 16px;
-  padding: 11px 14px;
-  border-radius: var(--r-md);
+  gap: 13px;
+  margin: 2px 0 18px;
+  padding: 16px 20px;
+  border-radius: var(--r-lg);
   border: 1px solid var(--line);
   background: var(--accent-weak);
   color: var(--text-1);
@@ -771,7 +771,7 @@ select:focus-visible {
 
 .ca-continue .lbl {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 650;
   color: var(--accent-text);
 }
@@ -781,8 +781,8 @@ select:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13.5px;
-  font-weight: 550;
+  font-size: 15.5px;
+  font-weight: 600;
 }
 
 .ca-continue .pos {
@@ -790,7 +790,7 @@ select:focus-visible {
   margin-left: auto;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: 13.5px;
   color: var(--text-3);
 }
 
