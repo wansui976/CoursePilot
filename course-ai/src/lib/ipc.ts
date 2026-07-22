@@ -66,6 +66,20 @@ export interface ContinueRow {
   last_ts: number;
 }
 
+/** 概念的一处出现（带视频标题，供点击跳转）。 */
+export interface ConceptOccurrence {
+  video_id: string;
+  video_title: string;
+  start_ms: number;
+}
+
+/** 课程里的一个概念及其出现位置。 */
+export interface CourseConcept {
+  id: string;
+  name: string;
+  occurrences: ConceptOccurrence[];
+}
+
 export const ipc = {
   courses: {
     list: (): Promise<Course[]> => invoke("cmd_list_courses"),
@@ -138,6 +152,14 @@ export const ipc = {
     courseTotals: (): Promise<CourseTotal[]> => invoke("cmd_course_totals"),
     // 每门课上次看到的视频（按最近学习倒序），供仪表盘一键续播。
     continueLearning: (): Promise<ContinueRow[]> => invoke("cmd_continue_learning"),
+  },
+  concepts: {
+    // 分析本课程概念（会调多次 LLM，耗时），返回入库概念数。
+    analyze: (courseId: string): Promise<number> =>
+      invoke("cmd_analyze_course_concepts", { courseId }),
+    // 列出本课程已抽取的概念（未分析则空表）。
+    list: (courseId: string): Promise<CourseConcept[]> =>
+      invoke("cmd_list_course_concepts", { courseId }),
   },
   secrets: {
     // 保存敏感凭证（ASR/OCR 密钥）到密钥存储。
