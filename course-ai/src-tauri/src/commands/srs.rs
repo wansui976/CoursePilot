@@ -160,11 +160,27 @@ pub fn concept_for_card(source_ms: Option<i64>, occ_in_video: &[(String, i64)]) 
         .map(|(concept_id, _)| concept_id.clone())
 }
 
+type OccByVideo = std::collections::HashMap<String, Vec<(String, i64)>>;
+
+/// 把 (video_id, concept_id, start_ms) 行聚成 video_id -> [(concept_id, start_ms)]。
+fn group_occurrences_by_video(rows: Vec<(String, String, i64)>) -> OccByVideo {
+    let mut by_video: OccByVideo = std::collections::HashMap::new();
+    for (video_id, concept_id, start_ms) in rows {
+        by_video.entry(video_id).or_default().push((concept_id, start_ms));
+    }
+    by_video
+}
+
+/// 从 video->出现 映射里取某视频的出现切片（无则空），供 concept_for_card 使用。
+fn occ_for<'a>(by_video: &'a OccByVideo, video_id: Option<&str>) -> &'a [(String, i64)] {
+    video_id
+        .and_then(|v| by_video.get(v))
+        .map(|v| v.as_slice())
+        .unwrap_or(&[])
+}
+
 /// 拉某课程各视频的概念出现点，聚成 video_id -> [(concept_id, start_ms)]。
-async fn course_occurrences_by_video(
-    db: &Db,
-    course_id: &str,
-) -> AppResult<std::collections::HashMap<String, Vec<(String, i64)>>> {
+async fn course_occurrences_by_video(db: &Db, course_id: &str) -> AppResult<OccByVideo> {
     let rows: Vec<(String, String, i64)> = sqlx::query_as(
         "SELECT o.video_id, o.concept_id, o.start_ms
          FROM concept_occurrences o
@@ -174,12 +190,7 @@ async fn course_occurrences_by_video(
     .bind(course_id)
     .fetch_all(&db.pool)
     .await?;
-    let mut by_video: std::collections::HashMap<String, Vec<(String, i64)>> =
-        std::collections::HashMap::new();
-    for (video_id, concept_id, start_ms) in rows {
-        by_video.entry(video_id).or_default().push((concept_id, start_ms));
-    }
-    Ok(by_video)
+    Ok(group_occurrences_by_video(rows))
 }
 
 /// 某课程「每个概念的待复习卡片数」，按归类规则现算。只返回 due>0 的概念。
@@ -202,8 +213,7 @@ pub async fn due_counts_by_concept(
 
     let mut tally: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
     for (video_id, source_ms) in cards {
-        let Some(video_id) = video_id else { continue };
-        let occ = by_video.get(&video_id).map(|v| v.as_slice()).unwrap_or(&[]);
+        let occ = occ_for(&by_video, video_id.as_deref());
         if let Some(concept_id) = concept_for_card(source_ms, occ) {
             *tally.entry(concept_id).or_default() += 1;
         }
@@ -237,12 +247,7 @@ pub async fn due_cards_for_concept(
     Ok(cards
         .into_iter()
         .filter(|card| {
-            let occ = card
-                .video_id
-                .as_ref()
-                .and_then(|v| by_video.get(v))
-                .map(|v| v.as_slice())
-                .unwrap_or(&[]);
+            let occ = occ_for(&by_video, card.video_id.as_deref());
             concept_for_card(card.source_ms, occ).as_deref() == Some(concept_id)
         })
         .collect())
@@ -266,11 +271,7 @@ pub async fn weak_concepts(db: &Db, min_reviews: i64, limit: usize) -> AppResult
         sqlx::query_as("SELECT video_id, concept_id, start_ms FROM concept_occurrences")
             .fetch_all(&db.pool)
             .await?;
-    let mut occ_by_video: std::collections::HashMap<String, Vec<(String, i64)>> =
-        std::collections::HashMap::new();
-    for (video_id, concept_id, start_ms) in occ_rows {
-        occ_by_video.entry(video_id).or_default().push((concept_id, start_ms));
-    }
+    let occ_by_video = group_occurrences_by_video(occ_rows);
     let cards: Vec<(String, Option<String>, Option<i64>)> =
         sqlx::query_as("SELECT id, video_id, source_ms FROM cards")
             .fetch_all(&db.pool)
@@ -278,11 +279,7 @@ pub async fn weak_concepts(db: &Db, min_reviews: i64, limit: usize) -> AppResult
     let mut card_concept: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
     for (id, video_id, source_ms) in cards {
-        let occ = video_id
-            .as_ref()
-            .and_then(|v| occ_by_video.get(v))
-            .map(|v| v.as_slice())
-            .unwrap_or(&[]);
+        let occ = occ_for(&occ_by_video, video_id.as_deref());
         if let Some(concept_id) = concept_for_card(source_ms, occ) {
             card_concept.insert(id, concept_id);
         }

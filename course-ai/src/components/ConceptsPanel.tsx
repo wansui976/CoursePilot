@@ -34,7 +34,7 @@ export function ConceptsPanel({
     queryKey: ["srs-concept-due", courseId],
     queryFn: () => ipc.srs.conceptDueCounts(courseId),
   });
-  const dueByConcept = new Map(dueCounts.map((d) => [d.concept_id, d.due]));
+  const dueCountByConcept = new Map(dueCounts.map((d) => [d.concept_id, d.due]));
 
   const analyze = useMutation({
     mutationFn: () => ipc.concepts.analyze(courseId),
@@ -121,13 +121,13 @@ export function ConceptsPanel({
                         {c.occurrences.length}
                       </span>
                     </button>
-                    {(dueByConcept.get(c.id) ?? 0) > 0 && (
+                    {(dueCountByConcept.get(c.id) ?? 0) > 0 && (
                       <button
                         onClick={() => setReviewing({ conceptId: c.id, name: c.name })}
                         className="ca-touch-44 inline-flex flex-none items-center gap-1 rounded-lg bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary hover:text-white"
                       >
                         <Brain className="h-3.5 w-3.5" />
-                        复习 {dueByConcept.get(c.id)}
+                        复习 {dueCountByConcept.get(c.id)}
                       </button>
                     )}
                   </div>
