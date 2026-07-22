@@ -46,10 +46,11 @@ RAG 全部锁在单视频：`cmd_rag_query_stream(video_id, …)` 与
 ## 分阶段
 
 - **P1**（已完成）：course 作用域**关键词搜索** + 跨视频引用带来源 + 点击跨视频跳转。
-- **P2**（进行中）：course 作用域**提问（ASK）**——检索命中片段装配带来源标签的上下文、
+- **P2**：course 作用域**提问（ASK）**——检索命中片段装配带来源标签的上下文、
   单次流式作答、答案下方渲染可点击跨视频出处（`assemble_scope_context` +
-  `course_answer_stream`，`cmd_rag_query_stream` 增加 scope 维度）。剩余：all-courses 作用域；
-  两段式按视频粗筛再全局重排的优化。
+  `course_answer_stream`，`cmd_rag_query_stream` 增加 scope 维度）。**两段式重排已完成**：
+  第一段每视频取 topK（PER_VIDEO_TOPK=8）保证跨视频覆盖，第二段全局重排取前 40。
+  剩余：all-courses 作用域（需跨课程跳转通路）。
 - **P3**（已完成，含两个消费方）：概念层抽取与索引。主题级概念、按需课程级抽取、
   `concepts`/`concept_occurrences`（迁移 0015）、课程库屏「知识点」面板。
   详见 [concept-layer spec](superpowers/specs/2026-07-22-concept-layer-design.md) 与
