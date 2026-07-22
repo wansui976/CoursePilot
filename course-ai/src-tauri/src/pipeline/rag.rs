@@ -59,6 +59,8 @@ const SINGLE_CALL_CHAR_LIMIT: usize = 24_000;
 const PART_CHAR_LIMIT: usize = 16_000;
 // 课程级问答：喂给 LLM 的跨视频命中片段上限，控制上下文量与延迟。
 const COURSE_CONTEXT_LIMIT: usize = 40;
+// 两段式第一段：每个视频最多贡献多少命中片段，保证跨视频覆盖。
+const PER_VIDEO_TOPK: usize = 8;
 
 /// 按累计字符数把相邻字幕段聚成 chunk；相邻 chunk 间保留 `overlap` 段重叠。
 pub fn chunk_transcript(
@@ -388,7 +390,8 @@ pub async fn course_answer_stream(
         let segs = list_segments(db, vid).await?;
         per_video.push((vid.clone(), title.clone(), segs));
     }
-    let (context, citations) = assemble_scope_context(&per_video, query, COURSE_CONTEXT_LIMIT);
+    let (context, citations) =
+        assemble_scope_context(&per_video, query, PER_VIDEO_TOPK, COURSE_CONTEXT_LIMIT);
     let messages = build_chat_messages(history, query);
 
     // 命中为空：全课程字幕都没讲到，退回模型自身知识兜底（不发 Citations）。
@@ -700,21 +703,29 @@ fn mmss(ms: i64) -> String {
     }
 }
 
-/// 装配跨视频问答的上下文：从各视频的命中片段里，按命中数、再按时间全局排序取前 `limit` 段，
+/// 装配跨视频问答的上下文（两段式）：
+/// 第一段每视频只保留命中最高的前 `per_video_topk` 段（命中数降序、再按时间），
+/// 保证跨视频覆盖、不让单个高命中视频挤占全部名额；第二段把各视频候选全局重排、取前 `limit`。
 /// 拼成带来源标签 `〈标题 mm:ss〉文本` 的上下文（供单次 LLM 调用），并返回等长的引用列表
 /// （带来源 video_id/title，供前端渲染可点击跳转的出处）。纯函数：不触 LLM/DB，可单测。
 /// `per_video` 为 (video_id, video_title, segments)。查询无命中时返回 (空串, 空表)。
 pub fn assemble_scope_context(
     per_video: &[(String, String, Vec<TranscriptSegment>)],
     query: &str,
+    per_video_topk: usize,
     limit: usize,
 ) -> (String, Vec<Citation>) {
     let mut global: Vec<(usize, String, String, TranscriptSegment)> = Vec::new();
     for (vid, title, segs) in per_video {
-        for (score, seg) in scored_segments(segs, query) {
+        // 第一段：每视频粗筛，只取命中最高的前 K 段。
+        let mut scored = scored_segments(segs, query);
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.start_ms.cmp(&b.1.start_ms)));
+        scored.truncate(per_video_topk);
+        for (score, seg) in scored {
             global.push((score, vid.clone(), title.clone(), seg));
         }
     }
+    // 第二段：全局重排（命中数降序、再按时间），取前 limit。
     global.sort_by(|a, b| b.0.cmp(&a.0).then(a.3.start_ms.cmp(&b.3.start_ms)));
     global.truncate(limit);
 
@@ -1019,7 +1030,7 @@ mod tests {
                 ],
             ),
         ];
-        let (context, citations) = assemble_scope_context(&per_video, "光合作用 暗反应", 10);
+        let (context, citations) = assemble_scope_context(&per_video, "光合作用 暗反应", 10, 10);
 
         // v2 那段两个词都命中（score=2）应排在 v1 之前。
         assert_eq!(citations.len(), 2);
@@ -1036,8 +1047,35 @@ mod tests {
     #[test]
     fn assemble_scope_context_empty_when_no_hits() {
         let per_video = vec![("v1".to_string(), "第一讲".to_string(), vec![seg(0, 0, 1000, "别的话题")])];
-        let (context, citations) = assemble_scope_context(&per_video, "光合作用", 10);
+        let (context, citations) = assemble_scope_context(&per_video, "光合作用", 10, 10);
         assert!(context.is_empty());
         assert!(citations.is_empty());
+    }
+
+    #[test]
+    fn assemble_scope_context_caps_per_video_so_others_stay_covered() {
+        // A 视频命中很多段（同分），B 只命中一段。两段式应把 A 截到前 K，保证 B 仍进上下文。
+        let a_segs: Vec<TranscriptSegment> =
+            (0..5).map(|i| seg(i, i * 1000, i * 1000 + 500, "命中x")).collect();
+        let b_segs = vec![seg(0, 500, 1000, "命中x")];
+        let per_video = vec![
+            ("A".to_string(), "视频A".to_string(), a_segs),
+            ("B".to_string(), "视频B".to_string(), b_segs),
+        ];
+
+        let (_ctx, cites) = assemble_scope_context(&per_video, "x", 2, 10);
+
+        // A 被截到前 2 段（同分按时间靠前：0、1000），2000/3000/4000 落选。
+        let a_times: Vec<i64> = cites
+            .iter()
+            .filter(|c| c.video_id.as_deref() == Some("A"))
+            .map(|c| c.start_ms)
+            .collect();
+        assert_eq!(a_times, vec![0, 1000]);
+        // B 的唯一命中未被高命中的 A 挤掉。
+        assert!(cites
+            .iter()
+            .any(|c| c.video_id.as_deref() == Some("B") && c.start_ms == 500));
+        assert_eq!(cites.len(), 3);
     }
 }
