@@ -66,6 +66,8 @@ const statusTone: Record<Video["processed_status"], BadgeTone> = {
 
 const PANEL_WIDTH_STORAGE_KEY = "course-ai-study-panel-width";
 const VIEW_STORAGE_KEY = "course-ai-home-view";
+// 学习面板最小宽度：保证 5 个标签(AI 概览/学习/文稿/课件/片段)都放得下、不被裁掉。
+const STUDY_PANEL_MIN = 384;
 
 type LibraryView = "grid" | "list";
 
@@ -82,7 +84,7 @@ function readPanelWidth() {
   const raw = window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
   if (!raw) return 480;
   const saved = Number(raw);
-  return Number.isFinite(saved) ? Math.min(720, Math.max(360, saved)) : 480;
+  return Number.isFinite(saved) ? Math.min(720, Math.max(STUDY_PANEL_MIN, saved)) : 480;
 }
 
 const SIDEBAR_COLLAPSED_KEY = "course-ai-sidebar-collapsed";
@@ -264,7 +266,7 @@ export function Home() {
     if (target) writeLastVideoId(target.course_id, videoId);
     const savedWidth = readVideoResumeState(videoId).studyPanelWidth;
     setStudyPanelWidth(
-      savedWidth != null ? Math.min(720, Math.max(360, savedWidth)) : readPanelWidth(),
+      savedWidth != null ? Math.min(720, Math.max(STUDY_PANEL_MIN, savedWidth)) : readPanelWidth(),
     );
     // 打开视频即回到工作台：合上可能叠在主区的设置/回收站/控制台/队列整页。
     closeMainOverlays();
@@ -551,9 +553,10 @@ export function Home() {
     // 松手后（去掉 is-resizing-panel 类）再一次性回流到最终宽度。
     wb?.style.setProperty("--panel-frozen-width", `${startWidth}px`);
     setIsResizingPanel(true);
-    // 按工作台实际宽度限制：面板最小 280，且至少给视频留 320，避免小屏（手机横屏）被挤没。
+    // 按工作台实际宽度限制：面板最小 STUDY_PANEL_MIN（保证标签都放得下），
+    // 且至少给视频留 320，避免小屏（手机横屏）被挤没。
     const containerW = wb?.clientWidth ?? 0;
-    const minPanel = 280;
+    const minPanel = STUDY_PANEL_MIN;
     const maxPanel = containerW > 0 ? Math.max(minPanel, containerW - 320) : 720;
     // rAF 合帧：一帧内多次 pointermove 只写一次（即只触发一次网格重排）。
     let raf = 0;
