@@ -44,6 +44,12 @@ export interface DueCard {
   source_ms: number | null;
 }
 
+/** 某概念的待复习卡片数（概念面板「复习 N」）。 */
+export interface ConceptDue {
+  concept_id: string;
+  due: number;
+}
+
 /** 学习统计：按本地日聚合的观看毫秒。 */
 export interface DayTotal {
   day: string;
@@ -140,6 +146,12 @@ export const ipc = {
     // 复习评分：1=重来 2=困难 3=良好 4=容易。
     review: (cardId: string, rating: number): Promise<void> =>
       invoke("cmd_review_card", { cardId, rating }),
+    // 某课程每个概念的待复习卡数（现算，供概念面板显示「复习 N」）。
+    conceptDueCounts: (courseId: string): Promise<ConceptDue[]> =>
+      invoke("cmd_concept_due_counts", { courseId }),
+    // 某课程某概念下的到期卡（供按概念复习）。
+    dueByConcept: (courseId: string, conceptId: string): Promise<DueCard[]> =>
+      invoke("cmd_due_cards_by_concept", { courseId, conceptId }),
   },
   stats: {
     // 记一段实际观看毫秒（<=0 后端忽略）。
