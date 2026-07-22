@@ -259,21 +259,24 @@ pub struct PlaylistInfo {
     pub episodes: Vec<PlaylistEpisode>,
 }
 
-fn entry_to_episode(entry: &serde_json::Value) -> Option<PlaylistEpisode> {
+fn entry_to_episode(entry: &serde_json::Value, index: usize) -> Option<PlaylistEpisode> {
+    // 可导入的 URL：完整解析时用 webpage_url（页面地址），扁平模式下用 url。
     let url = entry
-        .get("url")
-        .or_else(|| entry.get("webpage_url"))
+        .get("webpage_url")
+        .or_else(|| entry.get("url"))
         .and_then(|u| u.as_str())?
         .to_string();
     if url.is_empty() {
         return None;
     }
+    // 标题优先用真实 title，其次 id，最后按序号兜底（绝不显示成一堆「video」）。
     let title = entry
         .get("title")
         .and_then(|t| t.as_str())
-        .or_else(|| entry.get("id").and_then(|t| t.as_str()))
-        .unwrap_or("video")
-        .to_string();
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| entry.get("id").and_then(|t| t.as_str()).map(str::to_string))
+        .unwrap_or_else(|| format!("第 {} 个", index + 1));
     let duration_ms = entry
         .get("duration")
         .and_then(|d| d.as_f64())
@@ -286,7 +289,7 @@ fn entry_to_episode(entry: &serde_json::Value) -> Option<PlaylistEpisode> {
     })
 }
 
-/// 解析 `yt-dlp --flat-playlist -J` 输出：合集标题 + 各集（url/title/duration）。
+/// 解析 `yt-dlp -J` 输出（完整解析，含各集真实标题/时长）：合集标题 + 各集清单。
 /// 若不是播放列表（无 entries），当作单集（用顶层 webpage_url）。
 pub fn parse_playlist_json(json: &str) -> AppResult<PlaylistInfo> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(AppError::Json)?;
@@ -296,18 +299,24 @@ pub fn parse_playlist_json(json: &str) -> AppResult<PlaylistInfo> {
         .unwrap_or("playlist")
         .to_string();
     let episodes: Vec<PlaylistEpisode> = match v.get("entries").and_then(|e| e.as_array()) {
-        Some(entries) => entries.iter().filter_map(entry_to_episode).collect(),
+        Some(entries) => entries
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| entry_to_episode(e, i))
+            .collect(),
         // 非播放列表：把它当单集（顶层就是这条视频）。
-        None => entry_to_episode(&v).into_iter().collect(),
+        None => entry_to_episode(&v, 0).into_iter().collect(),
     };
     Ok(PlaylistInfo { title, episodes })
 }
 
-/// 用 yt-dlp 扁平枚举播放列表/合集（不下载正片），得到各集清单。
+/// 用 yt-dlp 枚举播放列表/合集（不下载正片）得到各集清单。
+/// 用**完整解析**（非 --flat-playlist）以拿到每集真实标题与时长——B站合集扁平模式常缺标题。
+/// 代价是较大合集枚举更慢。
 pub async fn probe_playlist(url: &str, cookies: Option<&str>) -> AppResult<PlaylistInfo> {
     let ytdlp = resolve(&YTDLP, None)?;
     let mut cmd = Command::new(&ytdlp);
-    cmd.args(["-J", "--flat-playlist", "--skip-download"]);
+    cmd.args(["-J", "--skip-download", "--no-warnings"]);
     if is_bilibili_url(url) {
         cmd.args([
             "--user-agent",
@@ -434,6 +443,24 @@ mod tests {
         assert_eq!(info.episodes[0].url, "https://www.bilibili.com/video/BV1");
         assert_eq!(info.episodes[0].duration_ms, Some(600_000));
         assert_eq!(info.episodes[1].duration_ms, None);
+    }
+
+    #[test]
+    fn parse_playlist_json_full_mode_uses_webpage_url_and_index_fallback() {
+        // 完整解析：各集用 webpage_url；缺 title/id 的按序号兜底，不再显示成「video」。
+        let json = r#"{
+            "title":"合集X",
+            "entries":[
+                {"webpage_url":"https://www.bilibili.com/video/BVa","title":"讲一","duration":60},
+                {"webpage_url":"https://www.bilibili.com/video/BVb"}
+            ]
+        }"#;
+        let info = parse_playlist_json(json).unwrap();
+        assert_eq!(info.episodes.len(), 2);
+        assert_eq!(info.episodes[0].url, "https://www.bilibili.com/video/BVa");
+        assert_eq!(info.episodes[0].title, "讲一");
+        assert_eq!(info.episodes[1].url, "https://www.bilibili.com/video/BVb");
+        assert_eq!(info.episodes[1].title, "第 2 个");
     }
 
     #[test]
