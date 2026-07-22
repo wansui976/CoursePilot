@@ -37,6 +37,7 @@ import type { Video } from "@/lib/types";
 import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import {
+  WATCHED_RATIO,
   readLastVideoId,
   readPlaybackProgress,
   writeLastVideoId,
@@ -64,9 +65,6 @@ const statusTone: Record<Video["processed_status"], BadgeTone> = {
 
 const PANEL_WIDTH_STORAGE_KEY = "course-ai-study-panel-width";
 const VIEW_STORAGE_KEY = "course-ai-home-view";
-
-// 看到这个比例视为「已看完」：进度条隐藏，改显示看完标记。
-const WATCHED_RATIO = 0.995;
 
 type LibraryView = "grid" | "list";
 

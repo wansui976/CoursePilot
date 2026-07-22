@@ -27,6 +27,9 @@ export function writeLastVideoId(courseId: string, videoId: string) {
   }
 }
 
+// 看到这个比例即视为「已看完」：进度条隐藏、改显示看完标记，仪表盘完成度按此计数。
+export const WATCHED_RATIO = 0.995;
+
 export interface PlaybackProgress {
   /** 上次离开位置（秒），无记录为 0 */
   positionSec: number;
