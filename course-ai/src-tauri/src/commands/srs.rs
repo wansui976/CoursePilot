@@ -435,6 +435,19 @@ pub async fn count_due(db: &Db, now: i64) -> AppResult<i64> {
     .await?)
 }
 
+/// 每门课的到期待复习卡数（供仪表盘课程卡「待复习」徽章）。只含有到期卡的课程。
+pub async fn due_by_course(db: &Db, now: i64) -> AppResult<Vec<(String, i64)>> {
+    Ok(sqlx::query_as(
+        "SELECT c.course_id, COUNT(*)
+         FROM cards c JOIN card_schedule s ON s.card_id = c.id
+         WHERE c.course_id IS NOT NULL AND s.due_at <= ?
+         GROUP BY c.course_id",
+    )
+    .bind(now)
+    .fetch_all(&db.pool)
+    .await?)
+}
+
 /// 复习评分：按 FSRS 更新排期 + 记一条 review 事件（含卡 id 与评分）。
 pub async fn review_card(db: &Db, card_id: &str, rating: i64, now: i64) -> AppResult<()> {
     let row: Option<(f64, f64, i64, i64, Option<i64>)> = sqlx::query_as(
@@ -561,6 +574,11 @@ pub async fn cmd_due_cards_by_concept(
 pub async fn cmd_weak_concepts(state: State<'_, AppState>) -> AppResult<Vec<WeakConcept>> {
     // 至少复习过 2 次才算数（避免一次差评就上榜）；取前 8 个。
     weak_concepts(&state.db, 2, 8).await
+}
+
+#[tauri::command]
+pub async fn cmd_due_by_course(state: State<'_, AppState>) -> AppResult<Vec<(String, i64)>> {
+    due_by_course(&state.db, chrono::Utc::now().timestamp_millis()).await
 }
 
 #[cfg(test)]
@@ -830,6 +848,27 @@ mod tests {
             .unwrap();
         assert_eq!(yi.len(), 1);
         assert_eq!(yi[0].front, "乙题");
+    }
+
+    #[tokio::test]
+    async fn due_by_course_counts_due_cards_per_course() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(&db, r#"[{"stem":"甲","answer":"a"},{"stem":"乙","answer":"b"}]"#).await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let course_id: String = sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+
+        let now = chrono::Utc::now().timestamp_millis() + 10_000;
+        let rows = due_by_course(&db, now).await.unwrap();
+        assert_eq!(rows, vec![(course_id.clone(), 2)]);
+
+        // 复习一张到未来 → 该课到期数降为 1。
+        review_card(&db, &format!("q:{vid}:0"), 3, now).await.unwrap();
+        let rows = due_by_course(&db, now).await.unwrap();
+        assert_eq!(rows, vec![(course_id, 1)]);
     }
 
     #[test]
