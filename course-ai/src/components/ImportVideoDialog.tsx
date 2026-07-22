@@ -4,6 +4,7 @@ import {
   Download,
   FileVideo,
   FolderInput,
+  ListVideo,
   Plus,
 } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
@@ -22,6 +23,9 @@ const BilibiliImportDialog = lazy(() =>
 const FolderImportDialog = lazy(() =>
   import("./FolderImportDialog").then((m) => ({ default: m.FolderImportDialog })),
 );
+const PlaylistImportDialog = lazy(() =>
+  import("./PlaylistImportDialog").then((m) => ({ default: m.PlaylistImportDialog })),
+);
 
 /** 单一「导入」入口：点开后可选「上传本地视频」或「下载网络视频（B 站 / 链接）」。 */
 export function ImportVideoButton({
@@ -34,6 +38,7 @@ export function ImportVideoButton({
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const [showBili, setShowBili] = useState(false);
+  const [showPlaylist, setShowPlaylist] = useState(false);
   const [folderVideos, setFolderVideos] = useState<FolderVideo[] | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   // 移动端无 yt-dlp sidecar / 无法扫描任意文件夹，隐藏「下载网络视频」「导入整个文件夹」入口。
@@ -157,6 +162,23 @@ export function ImportVideoButton({
                     </span>
                   </span>
                 </button>
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setShowPlaylist(true);
+                  }}
+                  className="ca-touch-44 flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-[var(--surface-card-hover)]"
+                >
+                  <ListVideo className="mt-0.5 h-4 w-4 flex-none text-primary" />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-[var(--text-strong)]">
+                      导入播放列表 / 合集
+                    </span>
+                    <span className="block text-xs text-[var(--text-muted)]">
+                      B 站合集·多 P / 播放列表，批量下载
+                    </span>
+                  </span>
+                </button>
               </>
             )}
           </div>
@@ -177,6 +199,15 @@ export function ImportVideoButton({
             courseId={courseId}
             videos={folderVideos}
             onClose={() => setFolderVideos(null)}
+          />
+        </Suspense>
+      )}
+      {showPlaylist && (
+        <Suspense fallback={null}>
+          <PlaylistImportDialog
+            courseId={courseId}
+            onClose={() => setShowPlaylist(false)}
+            onStartProcessing={onStartProcessing}
           />
         </Suspense>
       )}

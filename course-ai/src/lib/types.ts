@@ -44,6 +44,19 @@ export interface ProbeResult {
   qualities: number[];
 }
 
+/** 播放列表/合集里的一集。 */
+export interface PlaylistEpisode {
+  url: string;
+  title: string;
+  duration_ms: number | null;
+}
+
+/** 播放列表/合集探测结果。 */
+export interface PlaylistInfo {
+  title: string;
+  episodes: PlaylistEpisode[];
+}
+
 export interface TranscriptSegment {
   id: number;
   video_id: string;
