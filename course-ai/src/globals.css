@@ -1354,9 +1354,13 @@ select:focus-visible {
 /* 拖动分隔条时：只冻结「文稿」栏（DOM 巨大、是卡顿来源）；其余栏较轻，照常同步随宽度渲染。
    把文稿面板冻结成固定尺寸、完全自包含（contain: strict = size+layout+style+paint）的盒子，
    浏览器重排工作台时对这棵子树做「零工作」（不重排、不重评估 content-visibility），内容仍可见；
-   松手去掉此类后回流一次到最终宽度。 */
+   松手去掉此类后回流一次到最终宽度。
+   max-width:100% 兜住「拖窄」：冻结宽度取自拖动起点，往窄拖时它比当前列更宽，会溢出被
+   overflow:hidden 裁掉右半（片段被挡住）——封顶到当前列宽即不再溢出（往窄拖时按需回流，
+   往宽拖/稳态仍是零工作的冻结）。 */
 .ca-wb.is-resizing-panel .ca-panel-col > [data-study-tab="文稿"] {
   width: var(--panel-frozen-width);
+  max-width: 100%;
   height: 100%;
   flex: none;
   contain: strict;
