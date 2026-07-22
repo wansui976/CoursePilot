@@ -84,6 +84,113 @@ pub struct DueCard {
     pub source_ms: Option<i64>,
 }
 
+/// 某概念的待复习卡片数（供概念面板显示「复习 N」）。
+#[derive(Serialize, sqlx::FromRow)]
+pub struct ConceptDue {
+    pub concept_id: String,
+    pub due: i64,
+}
+
+/// 把一张卡归到「它出处那一刻正在讲」的概念：同视频里 start_ms ≤ source_ms 的最近一个
+/// 概念出现点。`occ_in_video` 为该视频的 (concept_id, start_ms)（可无序）。
+/// 无 source_ms、或所有出现都在 source_ms 之后 → None（未归类）。
+pub fn concept_for_card(source_ms: Option<i64>, occ_in_video: &[(String, i64)]) -> Option<String> {
+    let source_ms = source_ms?;
+    occ_in_video
+        .iter()
+        .filter(|(_, start_ms)| *start_ms <= source_ms)
+        .max_by_key(|(_, start_ms)| *start_ms)
+        .map(|(concept_id, _)| concept_id.clone())
+}
+
+/// 拉某课程各视频的概念出现点，聚成 video_id -> [(concept_id, start_ms)]。
+async fn course_occurrences_by_video(
+    db: &Db,
+    course_id: &str,
+) -> AppResult<std::collections::HashMap<String, Vec<(String, i64)>>> {
+    let rows: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT o.video_id, o.concept_id, o.start_ms
+         FROM concept_occurrences o
+         JOIN concepts c ON c.id = o.concept_id
+         WHERE c.course_id = ?",
+    )
+    .bind(course_id)
+    .fetch_all(&db.pool)
+    .await?;
+    let mut by_video: std::collections::HashMap<String, Vec<(String, i64)>> =
+        std::collections::HashMap::new();
+    for (video_id, concept_id, start_ms) in rows {
+        by_video.entry(video_id).or_default().push((concept_id, start_ms));
+    }
+    Ok(by_video)
+}
+
+/// 某课程「每个概念的待复习卡片数」，按归类规则现算。只返回 due>0 的概念。
+pub async fn due_counts_by_concept(
+    db: &Db,
+    course_id: &str,
+    now: i64,
+) -> AppResult<Vec<ConceptDue>> {
+    let by_video = course_occurrences_by_video(db, course_id).await?;
+    // 该课程的到期卡（带出处与所属视频）。
+    let cards: Vec<(Option<String>, Option<i64>)> = sqlx::query_as(
+        "SELECT c.video_id, c.source_ms
+         FROM cards c JOIN card_schedule s ON s.card_id = c.id
+         WHERE c.course_id = ? AND s.due_at <= ?",
+    )
+    .bind(course_id)
+    .bind(now)
+    .fetch_all(&db.pool)
+    .await?;
+
+    let mut tally: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for (video_id, source_ms) in cards {
+        let Some(video_id) = video_id else { continue };
+        let occ = by_video.get(&video_id).map(|v| v.as_slice()).unwrap_or(&[]);
+        if let Some(concept_id) = concept_for_card(source_ms, occ) {
+            *tally.entry(concept_id).or_default() += 1;
+        }
+    }
+    Ok(tally
+        .into_iter()
+        .map(|(concept_id, due)| ConceptDue { concept_id, due })
+        .collect())
+}
+
+/// 某课程某概念下的到期待复习卡（供按概念复习）。按到期时间升序。
+pub async fn due_cards_for_concept(
+    db: &Db,
+    course_id: &str,
+    concept_id: &str,
+    now: i64,
+    limit: i64,
+) -> AppResult<Vec<DueCard>> {
+    let by_video = course_occurrences_by_video(db, course_id).await?;
+    let cards: Vec<DueCard> = sqlx::query_as(
+        "SELECT c.id, c.video_id, c.course_id, c.front, c.back, c.source_ms
+         FROM cards c JOIN card_schedule s ON s.card_id = c.id
+         WHERE c.course_id = ? AND s.due_at <= ? ORDER BY s.due_at LIMIT ?",
+    )
+    .bind(course_id)
+    .bind(now)
+    .bind(limit)
+    .fetch_all(&db.pool)
+    .await?;
+
+    Ok(cards
+        .into_iter()
+        .filter(|card| {
+            let occ = card
+                .video_id
+                .as_ref()
+                .and_then(|v| by_video.get(v))
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+            concept_for_card(card.source_ms, occ).as_deref() == Some(concept_id)
+        })
+        .collect())
+}
+
 /// 出题答案渲染成卡背文本：字符串原样、数组顿号连接、布尔译成正确/错误。
 fn answer_text(answer: &Value) -> String {
     match answer {
@@ -274,6 +381,30 @@ pub async fn cmd_review_card(
     .await
 }
 
+#[tauri::command]
+pub async fn cmd_concept_due_counts(
+    state: State<'_, AppState>,
+    course_id: String,
+) -> AppResult<Vec<ConceptDue>> {
+    due_counts_by_concept(&state.db, &course_id, chrono::Utc::now().timestamp_millis()).await
+}
+
+#[tauri::command]
+pub async fn cmd_due_cards_by_concept(
+    state: State<'_, AppState>,
+    course_id: String,
+    concept_id: String,
+) -> AppResult<Vec<DueCard>> {
+    due_cards_for_concept(
+        &state.db,
+        &course_id,
+        &concept_id,
+        chrono::Utc::now().timestamp_millis(),
+        50,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,5 +543,85 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(reviews, 1);
+    }
+
+    #[test]
+    fn concept_for_card_picks_last_occurrence_at_or_before_source() {
+        let occ = vec![("A".to_string(), 2000i64), ("B".to_string(), 5000i64)];
+        assert_eq!(concept_for_card(None, &occ), None); // 无出处
+        assert_eq!(concept_for_card(Some(1000), &occ), None); // 在首个概念之前
+        assert_eq!(concept_for_card(Some(3000), &occ).as_deref(), Some("A"));
+        assert_eq!(concept_for_card(Some(5000), &occ).as_deref(), Some("B")); // 恰好相等取该概念
+        assert_eq!(concept_for_card(Some(9000), &occ).as_deref(), Some("B"));
+        assert_eq!(concept_for_card(Some(1000), &[]), None); // 无概念
+        // 乱序也正确。
+        let occ2 = vec![("B".to_string(), 5000i64), ("A".to_string(), 2000i64)];
+        assert_eq!(concept_for_card(Some(4000), &occ2).as_deref(), Some("A"));
+    }
+
+    async fn seed_concept(db: &Db, id: &str, course_id: &str, name: &str) {
+        sqlx::query("INSERT INTO concepts(id,course_id,name,created_at) VALUES (?,?,?,0)")
+            .bind(id)
+            .bind(course_id)
+            .bind(name)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+    }
+
+    async fn seed_occurrence(db: &Db, concept_id: &str, video_id: &str, start_ms: i64) {
+        sqlx::query(
+            "INSERT INTO concept_occurrences(concept_id,video_id,start_ms) VALUES (?,?,?)",
+        )
+        .bind(concept_id)
+        .bind(video_id)
+        .bind(start_ms)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn groups_due_cards_by_concept_and_lists_per_concept() {
+        let db = fresh_db().await;
+        // q0@3000→甲, q1@6000→乙, q2@1000→未归类(在甲之前), q3 无 ref_ms→未归类。
+        let vid = seed_quiz(
+            &db,
+            r#"[{"stem":"甲题","answer":"a","ref_ms":3000},
+                {"stem":"乙题","answer":"b","ref_ms":6000},
+                {"stem":"早题","answer":"c","ref_ms":1000},
+                {"stem":"无出处题","answer":"d"}]"#,
+        )
+        .await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let course_id: String = sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        seed_concept(&db, "甲", &course_id, "甲概念").await;
+        seed_concept(&db, "乙", &course_id, "乙概念").await;
+        seed_occurrence(&db, "甲", &vid, 2000).await;
+        seed_occurrence(&db, "乙", &vid, 5000).await;
+
+        let now = chrono::Utc::now().timestamp_millis() + 10_000;
+        let counts = due_counts_by_concept(&db, &course_id, now).await.unwrap();
+        let map: std::collections::HashMap<String, i64> =
+            counts.into_iter().map(|c| (c.concept_id, c.due)).collect();
+        assert_eq!(map.get("甲"), Some(&1)); // q0
+        assert_eq!(map.get("乙"), Some(&1)); // q1
+        assert_eq!(map.len(), 2, "未归类的两张不计入任何概念");
+
+        let jia = due_cards_for_concept(&db, &course_id, "甲", now, 50)
+            .await
+            .unwrap();
+        assert_eq!(jia.len(), 1);
+        assert_eq!(jia[0].front, "甲题");
+
+        let yi = due_cards_for_concept(&db, &course_id, "乙", now, 50)
+            .await
+            .unwrap();
+        assert_eq!(yi.len(), 1);
+        assert_eq!(yi[0].front, "乙题");
     }
 }
