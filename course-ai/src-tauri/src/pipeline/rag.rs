@@ -149,7 +149,7 @@ fn summarize_history(history: &[ChatMessage]) -> String {
 }
 
 /// 按行边界把长文稿切成不超过 `limit` 字符的若干段。
-fn split_by_chars(text: &str, limit: usize) -> Vec<String> {
+pub(crate) fn split_by_chars(text: &str, limit: usize) -> Vec<String> {
     let mut parts = Vec::new();
     let mut cur = String::new();
     for line in text.lines() {

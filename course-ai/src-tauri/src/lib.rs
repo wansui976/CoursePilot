@@ -21,6 +21,7 @@ use crate::commands::courses::{
     cmd_create_course, cmd_delete_course, cmd_list_courses, cmd_relink_course_root,
     cmd_rename_course, AppState,
 };
+use crate::commands::concepts::{cmd_analyze_course_concepts, cmd_list_course_concepts};
 use crate::commands::export::{
     cmd_export_mindmap, cmd_export_notes, cmd_export_quiz, cmd_export_subtitles,
 };
@@ -162,6 +163,8 @@ pub fn run() {
             cmd_daily_totals,
             cmd_course_totals,
             cmd_continue_learning,
+            cmd_analyze_course_concepts,
+            cmd_list_course_concepts,
             cmd_generate_cards,
             cmd_due_cards,
             cmd_count_due,
