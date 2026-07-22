@@ -34,6 +34,35 @@ export function weeklyMs(rows: DayTotal[], today: string): number {
     .reduce((sum, r) => sum + r.watched_ms, 0);
 }
 
+const DAILY_GOAL_KEY = "course-ai-daily-goal-min";
+export const DEFAULT_DAILY_GOAL_MIN = 30;
+
+/** 每日学习目标（分钟）：无/非法记录时回落到默认值。 */
+export function readDailyGoalMin(): number {
+  try {
+    const raw = Number(localStorage.getItem(DAILY_GOAL_KEY));
+    return Number.isFinite(raw) && raw > 0 ? Math.round(raw) : DEFAULT_DAILY_GOAL_MIN;
+  } catch {
+    return DEFAULT_DAILY_GOAL_MIN;
+  }
+}
+
+/** 写每日目标（分钟，需为正整数）。 */
+export function writeDailyGoalMin(min: number): void {
+  try {
+    if (Number.isFinite(min) && min > 0) {
+      localStorage.setItem(DAILY_GOAL_KEY, String(Math.round(min)));
+    }
+  } catch {
+    // ignore storage failures.
+  }
+}
+
+/** 取某天（本地日）的观看毫秒；无记录为 0。 */
+export function dayMs(rows: DayTotal[], day: string): number {
+  return rows.find((r) => r.day === day)?.watched_ms ?? 0;
+}
+
 /** 人类可读时长：分钟 / 小时+分。 */
 export function formatDuration(ms: number): string {
   const min = Math.round(ms / 60000);

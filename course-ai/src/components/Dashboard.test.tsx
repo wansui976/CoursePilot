@@ -143,6 +143,20 @@ describe("Dashboard", () => {
     expect(screen.getByTitle(new RegExp(`${today} · `))).toBeInTheDocument();
   });
 
+  it("shows today's goal progress and lets you edit the goal", async () => {
+    // 今天学了 30 分钟（dailyTotals 默认），默认目标 30 分钟 → 100%。
+    renderDashboard();
+    expect(await screen.findByText(/今日已学 30 分钟 \/ 目标 30 分钟/)).toBeInTheDocument();
+
+    // 编辑目标为 60 → 文案与百分比更新，并落地 localStorage。
+    fireEvent.click(screen.getByRole("button", { name: "编辑目标" }));
+    const input = screen.getByLabelText("每日目标（分钟）");
+    fireEvent.change(input, { target: { value: "60" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByText(/今日已学 30 分钟 \/ 目标 60 分钟/)).toBeInTheDocument();
+    expect(localStorage.getItem("course-ai-daily-goal-min")).toBe("60");
+  });
+
   it("shows a course completion ring and a due badge on the course card", async () => {
     courseVideoIds.mockResolvedValue([
       ["c1", "v1"],

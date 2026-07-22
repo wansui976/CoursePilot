@@ -7,11 +7,14 @@ import { ProgressRing } from "@/components/ui/ProgressRing";
 import { ReviewSession } from "./ReviewSession";
 import {
   computeStreak,
+  dayMs,
   formatDuration,
   heatmapGrid,
   localDay,
+  readDailyGoalMin,
   relativeDay,
   weeklyMs,
+  writeDailyGoalMin,
   type HeatCell,
 } from "@/lib/studyStats";
 
@@ -126,6 +129,18 @@ export function Dashboard({
   );
   const week = useMemo(() => weeklyMs(daily, today), [daily, today]);
   const heatmap = useMemo(() => heatmapGrid(daily, today, HEATMAP_WEEKS), [daily, today]);
+  // 每日学习目标：今日已学分钟 vs 目标分钟（本地存储，可编辑）。
+  const [goalMin, setGoalMin] = useState(() => readDailyGoalMin());
+  const [editingGoal, setEditingGoal] = useState(false);
+  const todayMin = Math.round(dayMs(daily, today) / 60000);
+  function saveGoal(value: string) {
+    const n = Math.round(Number(value));
+    if (Number.isFinite(n) && n > 0) {
+      writeDailyGoalMin(n);
+      setGoalMin(n);
+    }
+    setEditingGoal(false);
+  }
   const nameOf = useMemo(() => {
     const map = new Map(courses.map((c) => [c.id, c.name]));
     return (id: string) => map.get(id) ?? "（已删除课程）";
@@ -171,6 +186,42 @@ export function Dashboard({
               </span>
             )}
           </button>
+
+          <div className="flex items-center gap-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
+            <ProgressRing value={goalMin > 0 ? todayMin / goalMin : 0} size={52} stroke={5}>
+              <span className="text-[11px] font-semibold tabular-nums text-[var(--text-strong)]">
+                {Math.round((goalMin > 0 ? todayMin / goalMin : 0) * 100)}%
+              </span>
+            </ProgressRing>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-[var(--text-strong)]">今日目标</div>
+              <div className="mt-0.5 text-xs text-[var(--text-muted)]">
+                今日已学 {todayMin} 分钟 / 目标 {goalMin} 分钟
+              </div>
+            </div>
+            {editingGoal ? (
+              <input
+                type="number"
+                min={1}
+                aria-label="每日目标（分钟）"
+                defaultValue={goalMin}
+                autoFocus
+                onBlur={(e) => saveGoal(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveGoal((e.target as HTMLInputElement).value);
+                  if (e.key === "Escape") setEditingGoal(false);
+                }}
+                className="ca-touch-44 w-16 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
+              />
+            ) : (
+              <button
+                onClick={() => setEditingGoal(true)}
+                className="ca-touch-44 flex-none rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
+              >
+                编辑目标
+              </button>
+            )}
+          </div>
 
           {continueRows.length > 0 && (
             <div>

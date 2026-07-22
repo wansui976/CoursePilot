@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_DAILY_GOAL_MIN,
   computeStreak,
+  dayMs,
   formatDuration,
   heatLevel,
   heatmapGrid,
+  readDailyGoalMin,
   relativeDay,
   weeklyMs,
+  writeDailyGoalMin,
 } from "./studyStats";
 
 describe("computeStreak", () => {
@@ -55,6 +59,27 @@ describe("relativeDay", () => {
     expect(relativeDay(new Date("2026-07-20T09:00:00").getTime(), today)).toBe("今天");
     expect(relativeDay(new Date("2026-07-19T23:00:00").getTime(), today)).toBe("昨天");
     expect(relativeDay(new Date("2026-07-16T10:00:00").getTime(), today)).toBe("4 天前");
+  });
+});
+
+describe("daily goal storage", () => {
+  it("defaults when unset and round-trips a written value", () => {
+    localStorage.clear();
+    expect(readDailyGoalMin()).toBe(DEFAULT_DAILY_GOAL_MIN);
+    writeDailyGoalMin(45);
+    expect(readDailyGoalMin()).toBe(45);
+    // 非法值不写入，读回仍为上一个有效值。
+    writeDailyGoalMin(0);
+    writeDailyGoalMin(-5);
+    expect(readDailyGoalMin()).toBe(45);
+  });
+});
+
+describe("dayMs", () => {
+  it("returns a day's watched ms or 0", () => {
+    const rows = [{ day: "2026-07-20", watched_ms: 1200 }];
+    expect(dayMs(rows, "2026-07-20")).toBe(1200);
+    expect(dayMs(rows, "2026-07-19")).toBe(0);
   });
 });
 
