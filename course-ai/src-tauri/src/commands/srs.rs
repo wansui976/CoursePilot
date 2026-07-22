@@ -91,6 +91,63 @@ pub struct ConceptDue {
     pub due: i64,
 }
 
+/// 薄弱主题：一个概念的复习表现（差评率越高越薄弱）。
+#[derive(Debug, Clone, Serialize)]
+pub struct WeakConcept {
+    pub concept_id: String,
+    pub name: String,
+    pub course_id: String,
+    pub course_name: String,
+    pub reviews: i64,
+    pub fails: i64,
+    /// 差评率 fails/reviews（0..1）。
+    pub again_rate: f64,
+}
+
+/// 从 review 事件的 meta_json 里取 (cardId, rating)。非法/缺字段 → None。
+pub fn parse_review_meta(meta_json: &str) -> Option<(String, i64)> {
+    let v: Value = serde_json::from_str(meta_json).ok()?;
+    let card_id = v.get("cardId")?.as_str()?.to_string();
+    let rating = v.get("rating")?.as_i64()?;
+    Some((card_id, rating))
+}
+
+/// 按概念聚合复习表现，返回 (concept_id, reviews, fails)。
+/// 差评＝rating ≤ 2（重来/困难）。只保留 reviews ≥ min_reviews 且 fails > 0 的概念，
+/// 按 差评率降序、再按 fails 降序、再按 concept_id 升序（稳定）。
+pub fn rank_weak_concepts(
+    reviews: &[(String, i64)],
+    card_concept: &std::collections::HashMap<String, String>,
+    min_reviews: i64,
+) -> Vec<(String, i64, i64)> {
+    use std::collections::HashMap;
+    let mut agg: HashMap<String, (i64, i64)> = HashMap::new(); // concept -> (reviews, fails)
+    for (card_id, rating) in reviews {
+        let Some(concept_id) = card_concept.get(card_id) else {
+            continue; // 未归类的卡不计入
+        };
+        let e = agg.entry(concept_id.clone()).or_insert((0, 0));
+        e.0 += 1;
+        if *rating <= 2 {
+            e.1 += 1;
+        }
+    }
+    let mut out: Vec<(String, i64, i64)> = agg
+        .into_iter()
+        .filter(|(_, (reviews, fails))| *reviews >= min_reviews && *fails > 0)
+        .map(|(cid, (reviews, fails))| (cid, reviews, fails))
+        .collect();
+    out.sort_by(|a, b| {
+        let ra = a.2 as f64 / a.1 as f64;
+        let rb = b.2 as f64 / b.1 as f64;
+        rb.partial_cmp(&ra)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(b.2.cmp(&a.2))
+            .then(a.0.cmp(&b.0))
+    });
+    out
+}
+
 /// 把一张卡归到「它出处那一刻正在讲」的概念：同视频里 start_ms ≤ source_ms 的最近一个
 /// 概念出现点。`occ_in_video` 为该视频的 (concept_id, start_ms)（可无序）。
 /// 无 source_ms、或所有出现都在 source_ms 之后 → None（未归类）。
@@ -187,6 +244,81 @@ pub async fn due_cards_for_concept(
                 .map(|v| v.as_slice())
                 .unwrap_or(&[]);
             concept_for_card(card.source_ms, occ).as_deref() == Some(concept_id)
+        })
+        .collect())
+}
+
+/// 全局薄弱主题：把复习评分按概念聚合，差评率高的排前。
+/// min_reviews 过滤复习次数太少的噪声；limit 取前若干。
+pub async fn weak_concepts(db: &Db, min_reviews: i64, limit: usize) -> AppResult<Vec<WeakConcept>> {
+    // 全部 review 事件 → (card_id, rating)。
+    let metas: Vec<String> =
+        sqlx::query_scalar("SELECT meta_json FROM study_events WHERE kind='review'")
+            .fetch_all(&db.pool)
+            .await?;
+    let reviews: Vec<(String, i64)> = metas.iter().filter_map(|m| parse_review_meta(m)).collect();
+    if reviews.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // 每张卡归到的概念：video -> [(concept_id,start_ms)]，再用 concept_for_card。
+    let occ_rows: Vec<(String, String, i64)> =
+        sqlx::query_as("SELECT video_id, concept_id, start_ms FROM concept_occurrences")
+            .fetch_all(&db.pool)
+            .await?;
+    let mut occ_by_video: std::collections::HashMap<String, Vec<(String, i64)>> =
+        std::collections::HashMap::new();
+    for (video_id, concept_id, start_ms) in occ_rows {
+        occ_by_video.entry(video_id).or_default().push((concept_id, start_ms));
+    }
+    let cards: Vec<(String, Option<String>, Option<i64>)> =
+        sqlx::query_as("SELECT id, video_id, source_ms FROM cards")
+            .fetch_all(&db.pool)
+            .await?;
+    let mut card_concept: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for (id, video_id, source_ms) in cards {
+        let occ = video_id
+            .as_ref()
+            .and_then(|v| occ_by_video.get(v))
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        if let Some(concept_id) = concept_for_card(source_ms, occ) {
+            card_concept.insert(id, concept_id);
+        }
+    }
+
+    let ranked = rank_weak_concepts(&reviews, &card_concept, min_reviews);
+
+    // 补概念名与课程名。
+    let concept_meta: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT id, name, course_id FROM concepts")
+            .fetch_all(&db.pool)
+            .await?;
+    let name_course: std::collections::HashMap<String, (String, String)> = concept_meta
+        .into_iter()
+        .map(|(id, name, course_id)| (id, (name, course_id)))
+        .collect();
+    let course_rows: Vec<(String, String)> = sqlx::query_as("SELECT id, name FROM courses")
+        .fetch_all(&db.pool)
+        .await?;
+    let course_name: std::collections::HashMap<String, String> = course_rows.into_iter().collect();
+
+    Ok(ranked
+        .into_iter()
+        .take(limit)
+        .filter_map(|(concept_id, reviews, fails)| {
+            let (name, course_id) = name_course.get(&concept_id)?.clone();
+            let course_name = course_name.get(&course_id).cloned().unwrap_or_default();
+            Some(WeakConcept {
+                concept_id,
+                name,
+                course_id,
+                course_name,
+                reviews,
+                fails,
+                again_rate: fails as f64 / reviews as f64,
+            })
         })
         .collect())
 }
@@ -403,6 +535,12 @@ pub async fn cmd_due_cards_by_concept(
         50,
     )
     .await
+}
+
+#[tauri::command]
+pub async fn cmd_weak_concepts(state: State<'_, AppState>) -> AppResult<Vec<WeakConcept>> {
+    // 至少复习过 2 次才算数（避免一次差评就上榜）；取前 8 个。
+    weak_concepts(&state.db, 2, 8).await
 }
 
 #[cfg(test)]
@@ -623,5 +761,79 @@ mod tests {
             .unwrap();
         assert_eq!(yi.len(), 1);
         assert_eq!(yi[0].front, "乙题");
+    }
+
+    #[test]
+    fn parse_review_meta_extracts_card_and_rating() {
+        assert_eq!(
+            parse_review_meta(r#"{"cardId":"q:v:0","rating":2}"#),
+            Some(("q:v:0".to_string(), 2))
+        );
+        assert_eq!(parse_review_meta(r#"{"rating":3}"#), None); // 缺 cardId
+        assert_eq!(parse_review_meta("not json"), None);
+    }
+
+    #[test]
+    fn rank_weak_concepts_orders_by_fail_rate_and_filters() {
+        let mut card_concept = std::collections::HashMap::new();
+        card_concept.insert("a".to_string(), "X".to_string());
+        card_concept.insert("b".to_string(), "X".to_string());
+        card_concept.insert("c".to_string(), "Y".to_string());
+        card_concept.insert("d".to_string(), "Z".to_string());
+        let reviews = vec![
+            ("a".to_string(), 1), // X 差
+            ("a".to_string(), 2), // X 差
+            ("b".to_string(), 3), // X 好 → X: 3 次 2 差，rate .667
+            ("c".to_string(), 1), // Y 差
+            ("c".to_string(), 1), // Y 差 → Y: 2 次 2 差，rate 1.0
+            ("d".to_string(), 3), // Z 全好 → fails=0 被过滤
+            ("d".to_string(), 4),
+            ("unknown".to_string(), 1), // 未归类卡忽略
+        ];
+        let ranked = rank_weak_concepts(&reviews, &card_concept, 2);
+        // Y(1.0) 应在 X(.667) 之前；Z 被 fails>0 过滤掉。
+        assert_eq!(ranked.len(), 2);
+        assert_eq!(ranked[0].0, "Y");
+        assert_eq!(ranked[0], ("Y".to_string(), 2, 2));
+        assert_eq!(ranked[1].0, "X");
+        assert_eq!(ranked[1], ("X".to_string(), 3, 2));
+    }
+
+    #[tokio::test]
+    async fn weak_concepts_aggregates_reviews_by_concept() {
+        let db = fresh_db().await;
+        // 两题：q0@3000→甲, q1@6000→乙。
+        let vid = seed_quiz(
+            &db,
+            r#"[{"stem":"甲题","answer":"a","ref_ms":3000},
+                {"stem":"乙题","answer":"b","ref_ms":6000}]"#,
+        )
+        .await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let course_id: String = sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        seed_concept(&db, "甲", &course_id, "甲概念").await;
+        seed_concept(&db, "乙", &course_id, "乙概念").await;
+        seed_occurrence(&db, "甲", &vid, 2000).await;
+        seed_occurrence(&db, "乙", &vid, 5000).await;
+
+        // 甲题连续差评两次；乙题一次好评。
+        let now = chrono::Utc::now().timestamp_millis();
+        review_card(&db, &format!("q:{vid}:0"), 1, now).await.unwrap();
+        review_card(&db, &format!("q:{vid}:0"), 2, now + 1).await.unwrap();
+        review_card(&db, &format!("q:{vid}:1"), 4, now + 2).await.unwrap();
+
+        let weak = weak_concepts(&db, 2, 8).await.unwrap();
+        // 甲：2 次 2 差 → 上榜；乙：1 次且无差评 → 不上。
+        assert_eq!(weak.len(), 1);
+        assert_eq!(weak[0].concept_id, "甲");
+        assert_eq!(weak[0].name, "甲概念");
+        assert_eq!(weak[0].course_id, course_id);
+        assert_eq!(weak[0].reviews, 2);
+        assert_eq!(weak[0].fails, 2);
+        assert!((weak[0].again_rate - 1.0).abs() < 1e-9);
     }
 }
