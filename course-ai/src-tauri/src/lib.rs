@@ -35,7 +35,7 @@ use crate::commands::slides::{
     cmd_read_slide_image,
 };
 use crate::commands::srs::{
-    cmd_concept_due_counts, cmd_count_due, cmd_due_by_course, cmd_due_cards,
+    cmd_add_card, cmd_concept_due_counts, cmd_count_due, cmd_due_by_course, cmd_due_cards,
     cmd_due_cards_by_concept, cmd_generate_cards, cmd_review_card, cmd_weak_concepts,
 };
 use crate::commands::stats::{
@@ -177,6 +177,7 @@ pub fn run() {
             cmd_due_cards_by_concept,
             cmd_weak_concepts,
             cmd_due_by_course,
+            cmd_add_card,
             cmd_notify,
             cmd_has_bilibili_cookies
         ])

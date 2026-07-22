@@ -413,6 +413,48 @@ pub async fn generate_cards_from_quiz(db: &Db, video_id: &str) -> AppResult<usiz
     Ok(count)
 }
 
+/// 手动新建一张复习卡（如文稿挖空的 cloze 卡）：写卡 + 建一条「立即到期」的 FSRS 排期。
+/// 从视频冗余出 course_id；卡 id 用 `m:{uuid}` 与出题卡（q:）区分。返回卡 id。
+pub async fn add_manual_card(
+    db: &Db,
+    video_id: &str,
+    kind: &str,
+    front: &str,
+    back: &str,
+    source_ms: Option<i64>,
+) -> AppResult<String> {
+    let course_id: Option<String> =
+        sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
+            .bind(video_id)
+            .fetch_optional(&db.pool)
+            .await?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let card_id = format!("m:{}", uuid::Uuid::new_v4());
+    sqlx::query(
+        "INSERT INTO cards(id,video_id,course_id,kind,front,back,source_ms,created_at)
+         VALUES (?,?,?,?,?,?,?,?)",
+    )
+    .bind(&card_id)
+    .bind(video_id)
+    .bind(&course_id)
+    .bind(kind)
+    .bind(front)
+    .bind(back)
+    .bind(source_ms)
+    .bind(now)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO card_schedule(card_id,due_at,ease,interval_days,reps,lapses,last_reviewed,stability,difficulty)
+         VALUES (?,?,0,0,0,0,NULL,0,0)",
+    )
+    .bind(&card_id)
+    .bind(now)
+    .execute(&db.pool)
+    .await?;
+    Ok(card_id)
+}
+
 /// 到期待复习卡（跨课程），按到期时间升序。
 pub async fn due_cards(db: &Db, now: i64, limit: i64) -> AppResult<Vec<DueCard>> {
     Ok(sqlx::query_as(
@@ -579,6 +621,18 @@ pub async fn cmd_weak_concepts(state: State<'_, AppState>) -> AppResult<Vec<Weak
 #[tauri::command]
 pub async fn cmd_due_by_course(state: State<'_, AppState>) -> AppResult<Vec<(String, i64)>> {
     due_by_course(&state.db, chrono::Utc::now().timestamp_millis()).await
+}
+
+#[tauri::command]
+pub async fn cmd_add_card(
+    state: State<'_, AppState>,
+    video_id: String,
+    kind: String,
+    front: String,
+    back: String,
+    source_ms: Option<i64>,
+) -> AppResult<String> {
+    add_manual_card(&state.db, &video_id, &kind, &front, &back, source_ms).await
 }
 
 #[cfg(test)]
@@ -848,6 +902,30 @@ mod tests {
             .unwrap();
         assert_eq!(yi.len(), 1);
         assert_eq!(yi[0].front, "乙题");
+    }
+
+    #[tokio::test]
+    async fn add_manual_card_makes_a_due_cloze_card() {
+        let db = fresh_db().await;
+        // seed_quiz 建了 course+video（也建了一套 quiz，但这里只用视频）。
+        let vid = seed_quiz(&db, r#"[]"#).await;
+        let now = chrono::Utc::now().timestamp_millis();
+
+        let id = add_manual_card(&db, &vid, "cloze", "光合作用发生在＿＿＿＿中", "叶绿体", Some(5000))
+            .await
+            .unwrap();
+        assert!(id.starts_with("m:"));
+
+        let due = due_cards(&db, now + 1000, 50).await.unwrap();
+        let card = due.iter().find(|c| c.id == id).expect("cloze 卡应立即到期");
+        assert_eq!(card.front, "光合作用发生在＿＿＿＿中");
+        assert_eq!(card.back, "叶绿体");
+        assert_eq!(card.source_ms, Some(5000));
+        assert!(card.video_id.is_some());
+
+        // 复习后不再立即到期（走 FSRS 首评）。
+        review_card(&db, &id, 3, now).await.unwrap();
+        assert!(due_cards(&db, now, 50).await.unwrap().iter().all(|c| c.id != id));
     }
 
     #[tokio::test]
