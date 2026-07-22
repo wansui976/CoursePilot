@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { NO_INSETS, contentAspect, cropStyle } from "@/lib/blackBars";
+import { NO_INSETS, contentAspect, cropStyle, symmetricInsets } from "@/lib/blackBars";
 import { ipc } from "@/lib/ipc";
 import { posKey, durKey } from "@/lib/playback";
 import { isIOS } from "@/lib/platform";
@@ -196,7 +196,8 @@ export function VideoPlayer({
   }, [videoId]);
 
   // 在播放区内，求与视频同比例、尽可能大的居中矩形；视频铺满它即完整无黑边。
-  const effectiveCrop = videoMetadataReady ? cropInsets : NO_INSETS;
+  // 只应用对称黑边：避免检测出的单边噪声把画面推歪（所有视频看起来没居中）。
+  const effectiveCrop = symmetricInsets(videoMetadataReady ? cropInsets : NO_INSETS);
   const aspect =
     videoMetadataReady && videoAspect > 0
       ? contentAspect(videoAspect, effectiveCrop)
