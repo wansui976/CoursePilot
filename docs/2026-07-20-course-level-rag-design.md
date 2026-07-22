@@ -50,7 +50,11 @@ RAG 全部锁在单视频：`cmd_rag_query_stream(video_id, …)` 与
   单次流式作答、答案下方渲染可点击跨视频出处（`assemble_scope_context` +
   `course_answer_stream`，`cmd_rag_query_stream` 增加 scope 维度）。剩余：all-courses 作用域；
   两段式按视频粗筛再全局重排的优化。
-- **P3**：概念层抽取与索引（为 #2/#5 铺路）。
+- **P3**（地基已完成）：概念层抽取与索引（为 #2/#5 铺路）。主题级概念、按需课程级
+  抽取、`concepts`/`concept_occurrences`（迁移 0015）、课程库屏「知识点」面板。
+  详见 [concept-layer spec](superpowers/specs/2026-07-22-concept-layer-design.md) 与
+  [plan](superpowers/plans/2026-07-22-concept-layer.md)。剩余：#2 卡片按概念成组、
+  #5 薄弱主题（各自后续增量）。
 
 ## 测试
 
