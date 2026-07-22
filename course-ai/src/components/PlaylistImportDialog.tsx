@@ -241,7 +241,9 @@ export function PlaylistImportDialog({
         )}
 
         {step === "probing" && (
-          <p className="py-6 text-center text-sm text-[var(--text-muted)]">正在枚举各集…</p>
+          <p className="py-6 text-center text-sm text-[var(--text-muted)]">
+            正在枚举各集（读取标题，较大合集可能需要一会儿）…
+          </p>
         )}
 
         {step === "confirm" && info && (
