@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Brain, ChevronLeft, Flame, LayoutDashboard, Play } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Brain, ChevronLeft, Flame, LayoutDashboard, Play, TrendingDown } from "lucide-react";
 import { ipc, type DueCard } from "@/lib/ipc";
 import { readPlaybackProgress } from "@/lib/playback";
 import { ReviewSession } from "./ReviewSession";
@@ -49,7 +49,26 @@ export function Dashboard({
 }) {
   const today = localDay(new Date());
   const fromTs = Date.now() - LOOKBACK_DAYS * 86_400_000;
+  const queryClient = useQueryClient();
   const [reviewing, setReviewing] = useState(false);
+  // 按薄弱概念复习的目标（打开概念作用域的 ReviewSession）。
+  const [weakReview, setWeakReview] = useState<{
+    courseId: string;
+    conceptId: string;
+    name: string;
+  } | null>(null);
+
+  const { data: weak = [] } = useQuery({
+    queryKey: ["weak-concepts"],
+    queryFn: () => ipc.srs.weakConcepts(),
+  });
+
+  // 概念复习结束：刷新薄弱榜与待复习计数。
+  function closeWeakReview() {
+    setWeakReview(null);
+    queryClient.invalidateQueries({ queryKey: ["weak-concepts"] });
+    queryClient.invalidateQueries({ queryKey: ["srs-count-due"] });
+  }
 
   const { data: dueCount = 0 } = useQuery({
     queryKey: ["srs-count-due"],
@@ -189,6 +208,44 @@ export function Dashboard({
             </div>
           </div>
 
+          {weak.length > 0 && (
+            <div>
+              <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-[var(--text-strong)]">
+                <TrendingDown className="h-4 w-4 text-[var(--status-warn,#e08a00)]" />
+                薄弱主题
+              </div>
+              <ul className="space-y-2">
+                {weak.map((w) => (
+                  <li key={`${w.course_id}-${w.concept_id}`}>
+                    <button
+                      onClick={() =>
+                        setWeakReview({
+                          courseId: w.course_id,
+                          conceptId: w.concept_id,
+                          name: w.name,
+                        })
+                      }
+                      className="flex w-full items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium text-[var(--text-strong)]">
+                          {w.name}
+                        </div>
+                        <div className="mt-0.5 truncate text-xs text-[var(--text-muted)]">
+                          {w.course_name} · 差评率 {Math.round(w.again_rate * 100)}%（{w.fails}/
+                          {w.reviews}）
+                        </div>
+                      </div>
+                      <span className="flex-none rounded-md bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary">
+                        复习
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
             <div className="mb-2 flex items-center justify-between">
               <div className="text-sm font-semibold text-[var(--text-strong)]">学习热力图</div>
@@ -256,6 +313,17 @@ export function Dashboard({
           onClose={() => setReviewing(false)}
           onJump={(card) => {
             setReviewing(false);
+            onJump(card);
+          }}
+        />
+      )}
+
+      {weakReview && (
+        <ReviewSession
+          concept={weakReview}
+          onClose={closeWeakReview}
+          onJump={(card) => {
+            closeWeakReview();
             onJump(card);
           }}
         />
