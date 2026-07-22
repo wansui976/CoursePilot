@@ -169,6 +169,12 @@ button {
   background-clip: padding-box;
 }
 
+/* 更细的滚动条（如播放列表清单：整块横向滑动看长标题）。 */
+.ca-thin-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
 /* 键盘聚焦才显示的统一焦点环（无障碍）。 */
 :focus-visible {
   outline: 2px solid var(--color-primary);
