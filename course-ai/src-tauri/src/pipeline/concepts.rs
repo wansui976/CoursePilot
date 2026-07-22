@@ -3,6 +3,9 @@
 
 use crate::db::Db;
 use crate::error::AppResult;
+use crate::llm::{ChatMessage, ChatRequest, Provider};
+use crate::pipeline::ai::transcript_text;
+use crate::pipeline::rag::split_by_chars;
 use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
@@ -220,6 +223,60 @@ pub async fn list_course_concepts(db: &Db, course_id: &str) -> AppResult<Vec<Cou
             .then(a.name.cmp(&b.name))
     });
     Ok(out)
+}
+
+// 单次抽取喂给 LLM 的字幕字符上限；超过则分块逐块抽。
+const CONCEPT_CHUNK_CHARS: usize = 12_000;
+
+const CONCEPT_SYSTEM: &str = "你是课程知识点抽取助手。读这段课程字幕（每行以 [mm:ss] 开头），\
+抽出其中讲到的主题级知识点（如「贝叶斯定理」「参数方程求导」这种可命名的概念，不要太碎的术语，也不要整章大块）。\
+只输出 JSON 数组，每个元素形如 {\"name\":\"知识点名\",\"at\":\"mm:ss\"}：\
+name 用该领域标准、规范的中文术语（同一知识点在不同处尽量用完全一致的名字，便于合并）；\
+at 从本段字幕里照抄一个最能代表该知识点的行首时间点（只填 mm:ss，不带方括号）。\
+没有明确知识点就只输出 []。不要输出 JSON 以外的任何文字。";
+
+/// 分析整门课的概念：逐视频（长则分块）抽取 → 合并 → 事务替换入库。返回入库概念数。
+/// 复用调用方给的 provider/model（命令层按 AiTask::Summary 解析）。无字幕的视频跳过。
+pub async fn analyze_course_concepts(
+    db: &Db,
+    provider: &Provider,
+    chat_model: &str,
+    course_id: &str,
+) -> AppResult<usize> {
+    let videos: Vec<(String, String)> = sqlx::query_as(
+        "SELECT id,title FROM videos WHERE course_id=? AND deleted_at IS NULL ORDER BY order_index",
+    )
+    .bind(course_id)
+    .fetch_all(&db.pool)
+    .await?;
+
+    let mut raw: Vec<(String, RawConcept)> = Vec::new();
+    for (vid, _title) in &videos {
+        let transcript = transcript_text(db, vid).await?;
+        if transcript.trim().is_empty() {
+            continue;
+        }
+        for chunk in split_by_chars(&transcript, CONCEPT_CHUNK_CHARS) {
+            let req = ChatRequest {
+                model: chat_model.to_string(),
+                system: Some(CONCEPT_SYSTEM.to_string()),
+                cacheable_context: Some(format!("字幕片段：\n{chunk}")),
+                messages: vec![ChatMessage {
+                    role: "user".into(),
+                    content: "抽取本段知识点。".into(),
+                }],
+                temperature: 0.1,
+                max_tokens: 800,
+            };
+            let content = provider.complete(&req).await?.content;
+            for rc in parse_concepts_json(&content) {
+                raw.push((vid.clone(), rc));
+            }
+        }
+    }
+
+    let merged = merge_by_name(raw);
+    replace_course_concepts(db, course_id, &merged).await
 }
 
 #[cfg(test)]
