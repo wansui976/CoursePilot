@@ -58,6 +58,13 @@ describe("Dashboard", () => {
     expect(onOpenCourse).toHaveBeenCalledWith("c1");
   });
 
+  it("renders the study heatmap with today's activity cell", async () => {
+    renderDashboard();
+    expect(await screen.findByRole("img", { name: /学习热力图/ })).toBeInTheDocument();
+    // 今天学了 30 分钟 → 该格带时长说明的悬浮 title。
+    expect(screen.getByTitle(new RegExp(`${today} · `))).toBeInTheDocument();
+  });
+
   it("shows an empty state when there is no study record", async () => {
     courseTotals.mockResolvedValue([]);
     renderDashboard();

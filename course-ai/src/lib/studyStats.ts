@@ -44,6 +44,49 @@ export function formatDuration(ms: number): string {
   return m ? `${h} 小时 ${m} 分` : `${h} 小时`;
 }
 
+/** 热力图一格：某天的日期、观看毫秒与强度等级 0–4；null 表示补位（今天之后的未来格）。 */
+export type HeatCell = { day: string; ms: number; level: 0 | 1 | 2 | 3 | 4 } | null;
+
+/** 按观看时长把一天分到 0–4 级：0=无、<15分、<30分、<60分、≥60分。 */
+export function heatLevel(ms: number): 0 | 1 | 2 | 3 | 4 {
+  if (ms <= 0) return 0;
+  if (ms < 15 * 60_000) return 1;
+  if (ms < 30 * 60_000) return 2;
+  if (ms < 60 * 60_000) return 3;
+  return 4;
+}
+
+/**
+ * GitHub 风格贡献热力图网格：返回 `weeks` 列，每列 7 格（周日在上）。
+ * 最后一列的今天所在格对齐今天，之后的未来格为 null；范围内无记录的日子按 0 级。
+ */
+export function heatmapGrid(rows: DayTotal[], today: string, weeks: number): HeatCell[][] {
+  const msByDay = new Map(rows.map((r) => [r.day, r.watched_ms]));
+  const todayDate = new Date(`${today}T00:00:00`);
+  const dow = todayDate.getDay(); // 0=周日 … 6=周六
+  // 网格起点 = 今天所在周的周日，再往前推 (weeks-1) 周。
+  const start = new Date(todayDate);
+  start.setDate(start.getDate() - dow - (weeks - 1) * 7);
+
+  const columns: HeatCell[][] = [];
+  for (let w = 0; w < weeks; w++) {
+    const col: HeatCell[] = [];
+    for (let d = 0; d < 7; d++) {
+      const cell = new Date(start);
+      cell.setDate(start.getDate() + w * 7 + d);
+      const key = localDay(cell);
+      if (key > today) {
+        col.push(null); // 今天之后：补位
+        continue;
+      }
+      const ms = msByDay.get(key) ?? 0;
+      col.push({ day: key, ms, level: heatLevel(ms) });
+    }
+    columns.push(col);
+  }
+  return columns;
+}
+
 /** 相对某天的「今天 / 昨天 / N 天前」。 */
 export function relativeDay(ts: number, today: string): string {
   const then = localDay(new Date(ts));
