@@ -272,7 +272,11 @@ export function PlaylistImportDialog({
                     onChange={() => toggle(ep.url)}
                     className="h-3.5 w-3.5 flex-none accent-[var(--accent-text)]"
                   />
-                  <span className="min-w-0 flex-1 truncate text-[var(--text-normal)]">
+                  {/* 长标题不截断：单行横向滚动，可向左滑动看全；hover 也给完整标题。 */}
+                  <span
+                    title={ep.title}
+                    className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-[var(--text-normal)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  >
                     {ep.title}
                   </span>
                   {ep.duration_ms != null && (
