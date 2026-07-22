@@ -276,6 +276,13 @@ export function Home() {
     }
   }
 
+  // 仪表盘「继续学习」：切到该课程，打开上次的视频并跳到上次进度（秒→毫秒）。
+  function resumeStudy(courseId: string, videoId: string, positionSec: number) {
+    closeMainOverlays();
+    setSelectedCourseId(courseId);
+    usePlayer.getState().requestOpenAt(videoId, Math.round(positionSec * 1000));
+  }
+
   const selectedVideo =
     videos.find((video) => video.id === selectedVideoId) ??
     queuedVideos.find((video) => video.id === selectedVideoId);
@@ -1375,6 +1382,7 @@ export function Home() {
             <Dashboard
               onClose={() => setShowDashboard(false)}
               onOpenCourse={selectCourse}
+              onResume={resumeStudy}
               onJump={reviewJump}
             />
           ) : showDevConsole ? (
