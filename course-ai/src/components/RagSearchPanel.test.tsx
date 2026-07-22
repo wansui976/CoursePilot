@@ -29,16 +29,26 @@ vi.mock("@/lib/platform", () => ({
   isDesktop: () => !platformMock.mobile,
 }));
 
+type Citation = {
+  index: number;
+  text: string;
+  start_ms: number;
+  end_ms: number;
+  video_id?: string;
+  video_title?: string;
+};
 type StreamEvent =
   | { type: "status"; text: string }
   | { type: "reasoning"; delta: string }
   | { type: "token"; delta: string }
+  | { type: "citations"; citations: Citation[] }
   | { type: "done"; answer: string };
 
 /** ragQueryStream 的默认 mock 实现：一次 token 后 done 并 resolve。 */
 function streamResolving(answer: string) {
   return async (
     _videoId: string,
+    _scope: string,
     _query: string,
     _history: unknown,
     _requestId: string,
@@ -95,7 +105,7 @@ describe("RagSearchPanel", () => {
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
 
     await waitFor(() => expect(mockIpc.ai.ragQueryStream).toHaveBeenCalled());
-    const sentQuery = mockIpc.ai.ragQueryStream.mock.calls[0][1] as string;
+    const sentQuery = mockIpc.ai.ragQueryStream.mock.calls[0][2] as string;
     expect(sentQuery).toContain("贝叶斯定理");
     expect(sentQuery).toContain("这是什么意思");
 
@@ -143,6 +153,7 @@ describe("RagSearchPanel", () => {
     expect(mockIpc.ai.ragQueryStream).toHaveBeenNthCalledWith(
       2,
       "video-1",
+      "video",
       "第二轮问题",
       [
         { role: "user", content: "第一轮问题" },
@@ -199,6 +210,7 @@ describe("RagSearchPanel", () => {
     await waitFor(() =>
       expect(mockIpc.ai.ragQueryStream).toHaveBeenCalledWith(
         "video-1",
+        "video",
         "帮我总结重点",
         [],
         expect.any(String),
@@ -248,6 +260,7 @@ describe("RagSearchPanel", () => {
     mockIpc.ai.ragQueryStream.mockImplementation(
       async (
         _v: string,
+        _scope: string,
         _q: string,
         _h: unknown,
         _id: string,
@@ -281,6 +294,7 @@ describe("RagSearchPanel", () => {
     mockIpc.ai.ragQueryStream.mockImplementation(
       (
         _v: string,
+        _scope: string,
         _q: string,
         _h: unknown,
         _id: string,
@@ -309,6 +323,7 @@ describe("RagSearchPanel", () => {
     mockIpc.ai.ragQueryStream.mockImplementation(
       (
         _v: string,
+        _scope: string,
         _q: string,
         _h: unknown,
         _id: string,
@@ -324,7 +339,7 @@ describe("RagSearchPanel", () => {
     fireEvent.change(input, { target: { value: "问题" } });
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
     await waitFor(() => expect(mockIpc.ai.ragQueryStream).toHaveBeenCalledTimes(1));
-    const requestId = mockIpc.ai.ragQueryStream.mock.calls[0]?.[3] as string;
+    const requestId = mockIpc.ai.ragQueryStream.mock.calls[0]?.[4] as string;
 
     first.unmount();
     renderAskPanel(queryClient);
@@ -347,8 +362,8 @@ describe("RagSearchPanel", () => {
     fireEvent.click(await screen.findByRole("button", { name: "重试" }));
     expect(await screen.findByText("重试成功")).toBeInTheDocument();
 
-    const firstId = mockIpc.ai.ragQueryStream.mock.calls[0]?.[3];
-    const retryId = mockIpc.ai.ragQueryStream.mock.calls[1]?.[3];
+    const firstId = mockIpc.ai.ragQueryStream.mock.calls[0]?.[4];
+    const retryId = mockIpc.ai.ragQueryStream.mock.calls[1]?.[4];
     expect(firstId).not.toBe(retryId);
   });
 
@@ -357,6 +372,7 @@ describe("RagSearchPanel", () => {
     mockIpc.ai.ragQueryStream.mockImplementation(
       (
         _v: string,
+        _scope: string,
         _q: string,
         _h: unknown,
         _id: string,
@@ -383,6 +399,7 @@ describe("RagSearchPanel", () => {
     mockIpc.ai.ragQueryStream.mockImplementation(
       async (
         _v: string,
+        _scope: string,
         _q: string,
         _h: unknown,
         _id: string,
@@ -415,6 +432,7 @@ describe("RagSearchPanel", () => {
     mockIpc.ai.ragQueryStream.mockImplementation(
       (
         _v: string,
+        _scope: string,
         _q: string,
         _h: unknown,
         _id: string,
@@ -445,6 +463,7 @@ describe("RagSearchPanel", () => {
     mockIpc.ai.ragQueryStream.mockImplementation(
       (
         _v: string,
+        _scope: string,
         _q: string,
         _h: unknown,
         _id: string,
@@ -518,6 +537,7 @@ describe("RagSearchPanel", () => {
     mockIpc.ai.ragQueryStream.mockImplementation(
       (
         _v: string,
+        _scope: string,
         _q: string,
         _h: unknown,
         _id: string,
@@ -630,5 +650,60 @@ describe("RagSearchPanel", () => {
     const hit = await screen.findByText(/另一节课讲到的内容/);
     fireEvent.click(hit.closest("button")!);
     expect(requestOpenAt).toHaveBeenCalledWith("video-2", 7000);
+  });
+
+  it("ask mode: course scope sends course scope, shows cross-video sources, and jumps", async () => {
+    const citations: Citation[] = [
+      {
+        index: 1,
+        text: "第二讲里讲到的要点",
+        start_ms: 9000,
+        end_ms: 10000,
+        video_id: "video-2",
+        video_title: "第二讲",
+      },
+    ];
+    mockIpc.ai.ragQueryStream.mockImplementation(
+      async (
+        _v: string,
+        _scope: string,
+        _q: string,
+        _h: unknown,
+        _id: string,
+        onEvent: (e: StreamEvent) => void,
+      ) => {
+        onEvent({ type: "citations", citations });
+        onEvent({ type: "token", delta: "综合答案" });
+        onEvent({ type: "done", answer: "综合答案" });
+        return { answer: "综合答案", citations };
+      },
+    );
+    const requestOpenAt = vi.fn();
+    usePlayer.setState({ requestOpenAt });
+
+    renderAskPanel();
+
+    // 切到「本课程」范围再提问。
+    fireEvent.click(screen.getByRole("button", { name: "本课程" }));
+    const input = screen.getByLabelText("聊天内容");
+    fireEvent.change(input, { target: { value: "这门课怎么讲的" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    // 以 course 作用域发起提问（scope 为第 2 个参数）。
+    await waitFor(() =>
+      expect(mockIpc.ai.ragQueryStream).toHaveBeenCalledWith(
+        "video-1",
+        "course",
+        "这门课怎么讲的",
+        [],
+        expect.any(String),
+        expect.any(Function),
+      ),
+    );
+
+    // 答案下方渲染跨视频出处，点击跳到来源视频（非当前视频 → requestOpenAt）。
+    const source = await screen.findByText(/第二讲里讲到的要点/);
+    fireEvent.click(source.closest("button")!);
+    expect(requestOpenAt).toHaveBeenCalledWith("video-2", 9000);
   });
 });
