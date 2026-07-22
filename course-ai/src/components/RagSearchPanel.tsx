@@ -40,6 +40,43 @@ const STREAM_CARET = (
 );
 
 /**
+ * 课程级问答答案下方的「来源」列表：每条可点击跳转（同视频就地 seek，别的视频先打开再跳）。
+ * 单视频问答没有 citations，返回 null，UI 与旧版一致。
+ */
+function CitationSources({
+  citations,
+  currentVideoId,
+  onJump,
+}: {
+  citations?: Citation[];
+  currentVideoId: string;
+  onJump: (c: Citation) => void;
+}) {
+  if (!citations || citations.length === 0) return null;
+  return (
+    <div className="mt-2 border-t border-[var(--border-subtle)] pt-1.5">
+      <div className="mb-1 text-[11px] font-medium text-[var(--text-faint)]">来源</div>
+      <div className="space-y-0.5">
+        {citations.map((c) => (
+          <button
+            key={`${c.video_id ?? ""}-${c.start_ms}-${c.index}`}
+            type="button"
+            onClick={() => onJump(c)}
+            className="block w-full rounded px-1.5 py-1 text-left text-xs hover:bg-[var(--surface-card-hover)]"
+          >
+            {c.video_id && c.video_id !== currentVideoId && c.video_title && (
+              <span className="mr-1.5 text-[var(--text-faint)]">{c.video_title} ·</span>
+            )}
+            <span className="mr-1.5 text-primary">{formatMs(c.start_ms)}</span>
+            <span className="text-[var(--text-normal)]">{c.text}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
  * 节流值：高频变化的输入至多每 ms 毫秒向外吐一次。
  * 用于流式回答——token 每秒来几十个，若每个都全文重跑 Markdown+KaTeX 解析是 O(n²)，
  * 长答案会明显掉帧；节流后解析次数降一个数量级以上，视觉上仍是流畅打字机。
@@ -73,8 +110,32 @@ type AskTurn = {
   answer: string;
   /** 推理模型的思考过程；随答案一起保留，答案出来后折叠展示。旧记录没有。 */
   reasoning?: string;
+  /** 课程级问答的跨视频来源引用；单视频问答为空/缺省。 */
+  citations?: Citation[];
 };
-type AskRequest = { query: string; history: ChatMessage[]; requestId: string };
+type AskScope = "video" | "course";
+type AskRequest = {
+  query: string;
+  history: ChatMessage[];
+  requestId: string;
+  scope: AskScope;
+};
+
+const ASK_SCOPE_KEY = "course-ai-ask-scope";
+function readAskScope(): AskScope {
+  try {
+    return localStorage.getItem(ASK_SCOPE_KEY) === "course" ? "course" : "video";
+  } catch {
+    return "video";
+  }
+}
+function writeAskScope(scope: AskScope) {
+  try {
+    localStorage.setItem(ASK_SCOPE_KEY, scope);
+  } catch {
+    // ignore storage failures.
+  }
+}
 
 const ASK_HISTORY_LIMIT = 6;
 
@@ -184,11 +245,27 @@ const ASK_SUGGESTIONS = [
   "有哪些关键概念和结论？",
 ];
 
+const ASK_SCOPES: { key: AskScope; label: string }[] = [
+  { key: "video", label: "本视频" },
+  { key: "course", label: "本课程" },
+];
+
 function AskChatPanel({ videoId }: { videoId: string }) {
   const requestSeek = usePlayer((s) => s.requestSeek);
+  const requestOpenAt = usePlayer((s) => s.requestOpenAt);
+  const [scope, setScopeState] = useState<AskScope>(() => readAskScope());
   const [query, setQueryState] = useState(() => readDraft(videoId));
   const [history, setHistory] = useState<AskTurn[]>(() => readAskHistory(videoId));
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // 点击来源引用：本视频（或无来源）就地 seek；本课程其它视频则打开该视频再跳转。
+  const jumpTo = (c: Citation) => {
+    if (!c.video_id || c.video_id === videoId) requestSeek(c.start_ms);
+    else requestOpenAt(c.video_id, c.start_ms);
+  };
+  const setScope = (next: AskScope) => {
+    setScopeState(next);
+    writeAskScope(next);
+  };
   // 触屏（安卓/iOS）没有 hover：改为长按气泡才显示复制按钮，记住当前显示的那条。
   const touch = isMobile();
   const [revealedCopyId, setRevealedCopyId] = useState<string | null>(null);
@@ -199,6 +276,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
     status: string;
     reasoning: string;
     text: string;
+    citations: Citation[];
   } | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const tailRef = useRef<HTMLDivElement>(null);
@@ -233,13 +311,14 @@ function AskChatPanel({ videoId }: { videoId: string }) {
     mutationKey: ["rag-ask", videoId],
     // 直接在 mutationFn 内落库：即使提问途中切到别的页面、组件已卸载，
     // 请求仍会跑完并把回答写入历史，切回来即可见。token 通过 onEvent 实时渲染。
-    mutationFn: async ({ query, history, requestId }) => {
+    mutationFn: async ({ query, history, requestId, scope }) => {
       // 思考内容也累积到局部变量：随答案一起落库、保留下来（不受组件卸载影响）。
       let reasoningAcc = "";
       if (mountedRef.current)
-        setStreaming({ requestId, status: "", reasoning: "", text: "" });
+        setStreaming({ requestId, status: "", reasoning: "", text: "", citations: [] });
       const answer = await ipc.ai.ragQueryStream(
         videoId,
+        scope,
         query,
         history,
         requestId,
@@ -252,6 +331,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
             if (e.type === "reasoning")
               return { ...prev, reasoning: prev.reasoning + e.delta };
             if (e.type === "token") return { ...prev, text: prev.text + e.delta };
+            if (e.type === "citations") return { ...prev, citations: e.citations };
             return prev; // done：最终答案由落库 + 历史渲染接管
           });
         },
@@ -263,6 +343,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
           query,
           answer: answer.answer,
           reasoning: reasoningAcc || undefined,
+          citations: answer.citations.length > 0 ? answer.citations : undefined,
         },
       ];
       writeAskHistory(videoId, next);
@@ -322,6 +403,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
       query: finalQuery,
       history: buildAskContext(history),
       requestId: crypto.randomUUID(),
+      scope,
     });
     setQuery("");
     clearAsk();
@@ -381,6 +463,29 @@ function AskChatPanel({ videoId }: { videoId: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      <div className="flex-none border-b border-[var(--border-subtle)] px-3 py-2">
+        <div
+          role="group"
+          aria-label="提问范围"
+          className="inline-flex items-center gap-0.5 self-start rounded-lg bg-[var(--surface-card)] p-0.5"
+        >
+          {ASK_SCOPES.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              aria-pressed={scope === s.key}
+              onClick={() => setScope(s.key)}
+              className={`ca-touch-44 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                scope === s.key
+                  ? "bg-[var(--surface-panel)] text-[var(--text-strong)] shadow-sm"
+                  : "text-[var(--text-muted)] hover:text-[var(--text-normal)]"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
       <div
         ref={scrollerRef}
         aria-label="聊天记录"
@@ -446,6 +551,12 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                   </details>
                 )}
                 <AnswerText text={turn.answer} onSeek={requestSeek} />
+                {/* 课程级问答的跨视频出处，可点击跳转。 */}
+                <CitationSources
+                  citations={turn.citations}
+                  currentVideoId={videoId}
+                  onJump={jumpTo}
+                />
                 {/* 复制：仅图标、小尺寸。桌面 hover 气泡显示；触屏长按显示。 */}
                 <button
                   type="button"
@@ -514,6 +625,11 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                         text={throttledStreamText || streaming.text}
                         onSeek={requestSeek}
                         trailing={STREAM_CARET}
+                      />
+                      <CitationSources
+                        citations={streaming?.citations}
+                        currentVideoId={videoId}
+                        onJump={jumpTo}
                       />
                     </div>
                   ) : streaming?.status ? (

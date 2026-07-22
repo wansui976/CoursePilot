@@ -45,8 +45,11 @@ RAG 全部锁在单视频：`cmd_rag_query_stream(video_id, …)` 与
 
 ## 分阶段
 
-- **P1**：course 作用域检索 + 跨视频引用带来源 + 点击跨视频跳转。
-- **P2**：all-courses 作用域；两段式重排优化。
+- **P1**（已完成）：course 作用域**关键词搜索** + 跨视频引用带来源 + 点击跨视频跳转。
+- **P2**（进行中）：course 作用域**提问（ASK）**——检索命中片段装配带来源标签的上下文、
+  单次流式作答、答案下方渲染可点击跨视频出处（`assemble_scope_context` +
+  `course_answer_stream`，`cmd_rag_query_stream` 增加 scope 维度）。剩余：all-courses 作用域；
+  两段式按视频粗筛再全局重排的优化。
 - **P3**：概念层抽取与索引（为 #2/#5 铺路）。
 
 ## 测试

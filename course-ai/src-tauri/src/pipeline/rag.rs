@@ -20,6 +20,8 @@ pub enum AskEvent {
     Reasoning { delta: String },
     /// 增量文本。
     Token { delta: String },
+    /// 跨视频（课程级）问答的来源引用，供前端渲染可点击跳转的出处列表。单视频问答不发。
+    Citations { citations: Vec<Citation> },
     /// 最终（已清洗）完整答案。
     Done { answer: String },
     /// 出错（后台任务里失败，命令已提前返回，只能靠事件通知前端）。
@@ -55,6 +57,8 @@ pub struct RagAnswer {
 // 单次问答能直接塞进上下文的字幕字符上限；超过则分段 map-reduce。
 const SINGLE_CALL_CHAR_LIMIT: usize = 24_000;
 const PART_CHAR_LIMIT: usize = 16_000;
+// 课程级问答：喂给 LLM 的跨视频命中片段上限，控制上下文量与延迟。
+const COURSE_CONTEXT_LIMIT: usize = 40;
 
 /// 按累计字符数把相邻字幕段聚成 chunk；相邻 chunk 间保留 `overlap` 段重叠。
 pub fn chunk_transcript(
@@ -351,6 +355,84 @@ pub async fn answer_stream(
     })
 }
 
+// 课程级问答系统提示：基于跨视频检索出的带来源标签片段作答，出处用 〈标题 mm:ss〉。
+const COURSE_ASK_SYSTEM: &str = "你是基于整门课程字幕的问答助手，会收到从课程多个视频里检索出的相关片段，\
+每行以「〈视频标题 时间〉」标注它来自哪节课的哪个时间点。严格遵守：\
+1. 只依据这些片段回答，把分散在不同视频里的信息综合、串联起来；不要引入片段之外的知识。\
+   如果这些片段完全不相关，就用一句「本课程里没有讲到这个内容。」明确说明，再另起一段用你自己的知识作答，\
+   并在这段开头标注「（以下回答来自大模型，非课程内容）」，这段不要标注出处。\
+2. 凡是来自课程的结论，都在该句话后面紧跟对应的「〈视频标题 mm:ss〉」出处，标题与时间直接照抄片段行首，方便定位；\
+   不同视频的信息要说清各自出自哪节课。不要输出裸的 [mm:ss] 数组或时间段。\
+3. 回答直接、有条理：先给结论，再按视频/主题展开；不要寒暄。";
+
+/// 课程级流式问答：跨该课程多个视频，先做关键词检索、把命中片段装配成带来源标签的上下文，
+/// 再单次流式作答。开头发 `Citations` 事件，让前端渲染可点击的跨视频出处列表。
+/// 命中为空时退回模型自身知识作答（标注非课程内容）。videos 为 (video_id, title) 列表。
+#[allow(clippy::too_many_arguments)]
+pub async fn course_answer_stream(
+    db: &Db,
+    provider: &Provider,
+    chat_model: &str,
+    videos: &[(String, String)],
+    query: &str,
+    history: &[ChatMessage],
+    cancel: &AtomicBool,
+    on_event: &mut (dyn FnMut(AskEvent) + Send),
+) -> AppResult<RagAnswer> {
+    on_event(AskEvent::Status {
+        text: "正在检索本课程相关内容…".into(),
+    });
+    // 逐视频取字幕段，装配跨视频上下文（限量，控制喂给 LLM 的量与延迟）。
+    let mut per_video = Vec::with_capacity(videos.len());
+    for (vid, title) in videos {
+        let segs = list_segments(db, vid).await?;
+        per_video.push((vid.clone(), title.clone(), segs));
+    }
+    let (context, citations) = assemble_scope_context(&per_video, query, COURSE_CONTEXT_LIMIT);
+    let messages = build_chat_messages(history, query);
+
+    // 命中为空：全课程字幕都没讲到，退回模型自身知识兜底（不发 Citations）。
+    let (system, context_block): (&str, Option<String>) = if context.is_empty() {
+        (
+            "本课程的字幕里没有讲到用户的问题。请先用一句「本课程里没有讲到这个内容。」开头，\
+另起一段用你自己的知识尽量回答，并在该段开头标注「（以下回答来自大模型，非课程内容）」；不要编造出处。",
+            None,
+        )
+    } else {
+        on_event(AskEvent::Citations {
+            citations: citations.clone(),
+        });
+        (
+            COURSE_ASK_SYSTEM,
+            Some(format!(
+                "下面是本课程多个视频里与问题相关的字幕片段，每行以「〈视频标题 时间〉」标注来源：\n{context}"
+            )),
+        )
+    };
+
+    let req = ask_request(chat_model, system, context_block, messages, 1024);
+    let raw = provider
+        .complete_stream(&req, cancel, &mut |piece| match piece {
+            StreamPiece::Content(d) => on_event(AskEvent::Token {
+                delta: d.to_string(),
+            }),
+            StreamPiece::Reasoning(r) => on_event(AskEvent::Reasoning {
+                delta: r.to_string(),
+            }),
+        })
+        .await?;
+
+    let answer = strip_timestamp_arrays(&raw);
+    on_event(AskEvent::Done {
+        answer: answer.clone(),
+    });
+    Ok(RagAnswer {
+        answer,
+        // 命中为空时 citations 已是空表。
+        citations,
+    })
+}
+
 /// 长视频流式：map 各段（非流式）后综合步流式。返回未清洗的累积文本。
 async fn map_reduce_answer_stream(
     provider: &Provider,
@@ -605,6 +687,54 @@ pub async fn keyword_search_scope(
             video_title: Some(title),
         })
         .collect())
+}
+
+/// 把毫秒格式化成 mm:ss（或含小时 h:mm:ss），用于上下文里给 LLM 标注出处。
+fn mmss(ms: i64) -> String {
+    let total = (ms.max(0) / 1000) as u64;
+    let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m:02}:{s:02}")
+    }
+}
+
+/// 装配跨视频问答的上下文：从各视频的命中片段里，按命中数、再按时间全局排序取前 `limit` 段，
+/// 拼成带来源标签 `〈标题 mm:ss〉文本` 的上下文（供单次 LLM 调用），并返回等长的引用列表
+/// （带来源 video_id/title，供前端渲染可点击跳转的出处）。纯函数：不触 LLM/DB，可单测。
+/// `per_video` 为 (video_id, video_title, segments)。查询无命中时返回 (空串, 空表)。
+pub fn assemble_scope_context(
+    per_video: &[(String, String, Vec<TranscriptSegment>)],
+    query: &str,
+    limit: usize,
+) -> (String, Vec<Citation>) {
+    let mut global: Vec<(usize, String, String, TranscriptSegment)> = Vec::new();
+    for (vid, title, segs) in per_video {
+        for (score, seg) in scored_segments(segs, query) {
+            global.push((score, vid.clone(), title.clone(), seg));
+        }
+    }
+    global.sort_by(|a, b| b.0.cmp(&a.0).then(a.3.start_ms.cmp(&b.3.start_ms)));
+    global.truncate(limit);
+
+    let mut context = String::new();
+    let mut citations = Vec::with_capacity(global.len());
+    for (i, (_, vid, title, seg)) in global.into_iter().enumerate() {
+        if !context.is_empty() {
+            context.push('\n');
+        }
+        context.push_str(&format!("〈{} {}〉{}", title, mmss(seg.start_ms), seg.text));
+        citations.push(Citation {
+            index: i + 1,
+            text: seg.text,
+            start_ms: seg.start_ms,
+            end_ms: seg.end_ms,
+            video_id: Some(vid),
+            video_title: Some(title),
+        });
+    }
+    (context, citations)
 }
 
 #[cfg(test)]
@@ -870,5 +1000,44 @@ mod tests {
         // 引用重新编号从 1 开始。
         assert_eq!(hits[0].index, 1);
         assert_eq!(hits[1].index, 2);
+    }
+
+    #[test]
+    fn assemble_scope_context_labels_sources_and_ranks() {
+        let per_video = vec![
+            (
+                "v1".to_string(),
+                "第一讲".to_string(),
+                vec![seg(0, 0, 1000, "只提一次光合作用")],
+            ),
+            (
+                "v2".to_string(),
+                "第二讲".to_string(),
+                vec![
+                    seg(0, 5000, 6000, "无关内容"),
+                    seg(1, 65_000, 66_000, "光合作用与光合作用暗反应"),
+                ],
+            ),
+        ];
+        let (context, citations) = assemble_scope_context(&per_video, "光合作用 暗反应", 10);
+
+        // v2 那段两个词都命中（score=2）应排在 v1 之前。
+        assert_eq!(citations.len(), 2);
+        assert_eq!(citations[0].video_id.as_deref(), Some("v2"));
+        assert_eq!(citations[1].video_id.as_deref(), Some("v1"));
+        // 上下文带来源标签与 mm:ss（65s → 01:05），供 LLM 引用。
+        assert!(context.contains("〈第二讲 01:05〉光合作用与光合作用暗反应"));
+        assert!(context.contains("〈第一讲 00:00〉只提一次光合作用"));
+        // 引用连续编号，且带来源视频。
+        assert_eq!(citations[0].index, 1);
+        assert!(citations.iter().all(|c| c.video_title.is_some()));
+    }
+
+    #[test]
+    fn assemble_scope_context_empty_when_no_hits() {
+        let per_video = vec![("v1".to_string(), "第一讲".to_string(), vec![seg(0, 0, 1000, "别的话题")])];
+        let (context, citations) = assemble_scope_context(&per_video, "光合作用", 10);
+        assert!(context.is_empty());
+        assert!(citations.is_empty());
     }
 }

@@ -184,5 +184,6 @@ export type AskEvent =
   | { type: "status"; text: string }
   | { type: "reasoning"; delta: string }
   | { type: "token"; delta: string }
+  | { type: "citations"; citations: Citation[] }
   | { type: "done"; answer: string }
   | { type: "error"; message: string };

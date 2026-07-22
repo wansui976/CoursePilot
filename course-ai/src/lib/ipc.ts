@@ -196,8 +196,10 @@ export const ipc = {
       query: string,
       history: ChatMessage[] = [],
     ): Promise<RagAnswer> => invoke("cmd_rag_query", { videoId, query, history }),
+    // scope ∈ {video, course, all}：course/all 跨视频检索问答，答案带来源引用（citations 事件）。
     ragQueryStream: async (
       videoId: string,
+      scope: "video" | "course" | "all",
       query: string,
       history: ChatMessage[],
       requestId: string,
@@ -207,19 +209,24 @@ export const ipc = {
       // 先注册监听再 invoke（避免漏掉早到的事件）；答案从 done 事件拿，不再靠命令返回值。
       let resolveAnswer!: (a: RagAnswer) => void;
       let rejectAnswer!: (e: unknown) => void;
+      // 课程级问答的来源引用先于 done 事件到达，暂存后随最终答案一起交回。
+      let citations: Citation[] = [];
       const answer = new Promise<RagAnswer>((res, rej) => {
         resolveAnswer = res;
         rejectAnswer = rej;
       });
       const unlisten = await listen<AskEvent>(`ask-stream:${requestId}`, (evt) => {
         const e = evt.payload;
-        if (e.type === "done") resolveAnswer({ answer: e.answer, citations: [] });
+        if (e.type === "citations") {
+          citations = e.citations;
+          onEvent(e); // 同时转发给调用方，可在流式期间就展示出处
+        } else if (e.type === "done") resolveAnswer({ answer: e.answer, citations });
         else if (e.type === "error") rejectAnswer(new Error(e.message));
         else onEvent(e);
       });
       try {
         // 命令本身只在「配置错误（未配 Profile 等）」时才 reject。
-        await invoke("cmd_rag_query_stream", { videoId, query, history, requestId });
+        await invoke("cmd_rag_query_stream", { videoId, scope, query, history, requestId });
         return await answer;
       } catch (err) {
         rejectAnswer(err);

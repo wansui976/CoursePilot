@@ -52,6 +52,7 @@ pub async fn cmd_rag_query_stream(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     video_id: String,
+    scope: String,
     query: String,
     history: Vec<ChatMessage>,
     request_id: String,
@@ -66,24 +67,42 @@ pub async fn cmd_rag_query_stream(
             return Err(error);
         }
     };
+    // 课程/全部作用域：解析出目标视频列表（配置错误已过，DB 出错也提前返回给前端）。
+    let scope_videos = if scope == "video" {
+        None
+    } else {
+        match resolve_scope(&state.db, &video_id, &scope).await {
+            Ok(videos) => Some(videos),
+            Err(error) => {
+                state.unregister_cancel(&request_id, &cancel);
+                return Err(error);
+            }
+        }
+    };
     let db = state.db.clone();
     let task_state = state.inner().clone();
 
     tauri::async_runtime::spawn(async move {
         let event_name = format!("ask-stream:{request_id}");
-        let result = rag::answer_stream(
-            &db,
-            &provider,
-            &chat_model,
-            &video_id,
-            &query,
-            &history,
-            &cancel,
-            &mut |event| {
-                let _ = app.emit(&event_name, event);
-            },
-        )
-        .await;
+        let mut on_event = |event| {
+            let _ = app.emit(&event_name, event);
+        };
+        // 单视频走整篇字幕问答；课程/全部走跨视频检索问答（带来源引用）。
+        let result = match &scope_videos {
+            None => {
+                rag::answer_stream(
+                    &db, &provider, &chat_model, &video_id, &query, &history, &cancel,
+                    &mut on_event,
+                )
+                .await
+            }
+            Some(videos) => {
+                rag::course_answer_stream(
+                    &db, &provider, &chat_model, videos, &query, &history, &cancel, &mut on_event,
+                )
+                .await
+            }
+        };
         // 成功时 answer_stream 内部已发 Done；失败时命令已返回，只能用 error 事件通知前端。
         if let Err(error) = result {
             let _ = app.emit(
