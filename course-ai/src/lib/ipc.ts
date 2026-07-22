@@ -150,6 +150,15 @@ export const ipc = {
     // 从出题结果生成/更新复习卡，返回卡片数。
     generate: (videoId: string): Promise<number> =>
       invoke("cmd_generate_cards", { videoId }),
+    // 手动新建一张卡（如文稿挖空 cloze），立即到期。返回卡 id。
+    addCard: (
+      videoId: string,
+      kind: string,
+      front: string,
+      back: string,
+      sourceMs: number | null,
+    ): Promise<string> =>
+      invoke("cmd_add_card", { videoId, kind, front, back, sourceMs }),
     // 到期待复习卡（跨课程）。
     due: (limit: number): Promise<DueCard[]> => invoke("cmd_due_cards", { limit }),
     // 今日待复习张数。
