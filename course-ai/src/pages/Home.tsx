@@ -1055,7 +1055,7 @@ export function Home() {
         className="ca-continue"
         onClick={() => openVideo(lastId)}
       >
-        <Play className="ic h-4 w-4" />
+        <Play className="ic h-5 w-5" />
         <span className="lbl">继续上次</span>
         <span className="ttl">{displayTitle(lastVideo.title)}</span>
         <span className="pos">
