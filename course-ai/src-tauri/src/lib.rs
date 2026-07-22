@@ -34,7 +34,8 @@ use crate::commands::slides::{
     cmd_read_slide_image,
 };
 use crate::commands::srs::{
-    cmd_count_due, cmd_due_cards, cmd_generate_cards, cmd_review_card,
+    cmd_concept_due_counts, cmd_count_due, cmd_due_cards, cmd_due_cards_by_concept,
+    cmd_generate_cards, cmd_review_card,
 };
 use crate::commands::stats::{
     cmd_continue_learning, cmd_course_totals, cmd_daily_totals, cmd_log_watch,
@@ -169,6 +170,8 @@ pub fn run() {
             cmd_due_cards,
             cmd_count_due,
             cmd_review_card,
+            cmd_concept_due_counts,
+            cmd_due_cards_by_concept,
             cmd_has_bilibili_cookies
         ])
         .run(tauri::generate_context!())
