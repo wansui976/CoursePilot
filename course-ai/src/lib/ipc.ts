@@ -50,6 +50,17 @@ export interface ConceptDue {
   due: number;
 }
 
+/** 薄弱主题：某概念的复习表现（差评率越高越薄弱）。 */
+export interface WeakConcept {
+  concept_id: string;
+  name: string;
+  course_id: string;
+  course_name: string;
+  reviews: number;
+  fails: number;
+  again_rate: number;
+}
+
 /** 学习统计：按本地日聚合的观看毫秒。 */
 export interface DayTotal {
   day: string;
@@ -152,6 +163,8 @@ export const ipc = {
     // 某课程某概念下的到期卡（供按概念复习）。
     dueByConcept: (courseId: string, conceptId: string): Promise<DueCard[]> =>
       invoke("cmd_due_cards_by_concept", { courseId, conceptId }),
+    // 全局薄弱主题（差评率高的概念在前），供仪表盘推送。
+    weakConcepts: (): Promise<WeakConcept[]> => invoke("cmd_weak_concepts"),
   },
   stats: {
     // 记一段实际观看毫秒（<=0 后端忽略）。

@@ -5,19 +5,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "./Dashboard";
 import { localDay } from "@/lib/studyStats";
 
-const { dailyTotals, courseTotals, continueLearning, listCourses, countDue } =
-  vi.hoisted(() => ({
-    dailyTotals: vi.fn(),
-    courseTotals: vi.fn(),
-    continueLearning: vi.fn(),
-    listCourses: vi.fn(),
-    countDue: vi.fn(),
-  }));
+const {
+  dailyTotals,
+  courseTotals,
+  continueLearning,
+  listCourses,
+  countDue,
+  weakConcepts,
+  dueByConcept,
+  review,
+} = vi.hoisted(() => ({
+  dailyTotals: vi.fn(),
+  courseTotals: vi.fn(),
+  continueLearning: vi.fn(),
+  listCourses: vi.fn(),
+  countDue: vi.fn(),
+  weakConcepts: vi.fn(),
+  dueByConcept: vi.fn(),
+  review: vi.fn(),
+}));
 vi.mock("@/lib/ipc", () => ({
   ipc: {
     stats: { dailyTotals, courseTotals, continueLearning },
     courses: { list: listCourses },
-    srs: { countDue },
+    srs: { countDue, weakConcepts, dueByConcept, review },
   },
 }));
 
@@ -49,6 +60,9 @@ describe("Dashboard", () => {
     listCourses.mockReset().mockResolvedValue([{ id: "c1", name: "申论课程" }]);
     countDue.mockReset().mockResolvedValue(0);
     continueLearning.mockReset().mockResolvedValue([]);
+    weakConcepts.mockReset().mockResolvedValue([]);
+    dueByConcept.mockReset().mockResolvedValue([]);
+    review.mockReset().mockResolvedValue(undefined);
     localStorage.clear();
   });
 
@@ -88,6 +102,32 @@ describe("Dashboard", () => {
 
     fireEvent.click(entry.closest("button")!);
     expect(onResume).toHaveBeenCalledWith("c1", "v-last", 300);
+  });
+
+  it("surfaces weak topics and launches a concept-scoped review", async () => {
+    weakConcepts.mockResolvedValue([
+      {
+        concept_id: "k1",
+        name: "贝叶斯定理",
+        course_id: "c1",
+        course_name: "申论课程",
+        reviews: 4,
+        fails: 3,
+        again_rate: 0.75,
+      },
+    ]);
+    dueByConcept.mockResolvedValue([
+      { id: "d1", video_id: "v1", course_id: "c1", front: "薄弱卡正面", back: "背面", source_ms: 1000 },
+    ]);
+    renderDashboard();
+
+    expect(await screen.findByText("贝叶斯定理")).toBeInTheDocument();
+    expect(screen.getByText(/差评率 75%/)).toBeInTheDocument();
+
+    // 点「复习」→ 概念作用域会话，按概念拉到期卡。
+    fireEvent.click(screen.getByText("贝叶斯定理").closest("button")!);
+    await waitFor(() => expect(dueByConcept).toHaveBeenCalledWith("c1", "k1"));
+    expect(await screen.findByText("薄弱卡正面")).toBeInTheDocument();
   });
 
   it("renders the study heatmap with today's activity cell", async () => {
