@@ -50,11 +50,14 @@ RAG 全部锁在单视频：`cmd_rag_query_stream(video_id, …)` 与
   单次流式作答、答案下方渲染可点击跨视频出处（`assemble_scope_context` +
   `course_answer_stream`，`cmd_rag_query_stream` 增加 scope 维度）。剩余：all-courses 作用域；
   两段式按视频粗筛再全局重排的优化。
-- **P3**（地基已完成）：概念层抽取与索引（为 #2/#5 铺路）。主题级概念、按需课程级
-  抽取、`concepts`/`concept_occurrences`（迁移 0015）、课程库屏「知识点」面板。
+- **P3**（已完成，含两个消费方）：概念层抽取与索引。主题级概念、按需课程级抽取、
+  `concepts`/`concept_occurrences`（迁移 0015）、课程库屏「知识点」面板。
   详见 [concept-layer spec](superpowers/specs/2026-07-22-concept-layer-design.md) 与
-  [plan](superpowers/plans/2026-07-22-concept-layer.md)。剩余：#2 卡片按概念成组、
-  #5 薄弱主题（各自后续增量）。
+  [plan](superpowers/plans/2026-07-22-concept-layer.md)。
+  - **#2 卡片按概念成组**：卡片按「出处那刻正在讲的概念」现算归组（`concept_for_card`，
+    不建表），概念面板每概念「复习 N」→ 概念作用域复习。
+  - **#5 薄弱主题**：按概念聚合复习差评率（`rank_weak_concepts`），仪表盘「薄弱主题」
+    回推最不熟的概念并一键复习。闭环：抽取 → 按概念复习 → 薄弱主题回推。
 
 ## 测试
 
