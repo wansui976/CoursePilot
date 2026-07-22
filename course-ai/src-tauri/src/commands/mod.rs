@@ -3,6 +3,7 @@ pub mod clips;
 pub mod concepts;
 pub mod courses;
 pub mod export;
+pub mod notify;
 pub mod rag;
 pub mod settings;
 pub mod slides;

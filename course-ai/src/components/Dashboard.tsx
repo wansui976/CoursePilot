@@ -1,8 +1,17 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, ChevronLeft, Flame, LayoutDashboard, Play, TrendingDown } from "lucide-react";
+import {
+  Bell,
+  Brain,
+  ChevronLeft,
+  Flame,
+  LayoutDashboard,
+  Play,
+  TrendingDown,
+} from "lucide-react";
 import { ipc, type DueCard } from "@/lib/ipc";
 import { WATCHED_RATIO, readPlaybackProgress } from "@/lib/playback";
+import { readReminderEnabled, writeReminderEnabled } from "@/lib/studyReminder";
 import { ProgressRing } from "@/components/ui/ProgressRing";
 import { ReviewSession } from "./ReviewSession";
 import {
@@ -141,6 +150,19 @@ export function Dashboard({
     }
     setEditingGoal(false);
   }
+  // 学习提醒开关：开启时发一条确认通知（顺带触发系统权限询问并让用户确认可用）。
+  const [remindOn, setRemindOn] = useState(() => readReminderEnabled());
+  async function toggleReminder(on: boolean) {
+    writeReminderEnabled(on);
+    setRemindOn(on);
+    if (on) {
+      try {
+        await ipc.notify("学习提醒已开启", "有待复习卡片时，打开应用会在这里提醒你。");
+      } catch {
+        // 权限被拒/发送失败时静默。
+      }
+    }
+  }
   const nameOf = useMemo(() => {
     const map = new Map(courses.map((c) => [c.id, c.name]));
     return (id: string) => map.get(id) ?? "（已删除课程）";
@@ -222,6 +244,26 @@ export function Dashboard({
               </button>
             )}
           </div>
+
+          <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
+            <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-primary/15 text-primary">
+              <Bell className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-[var(--text-strong)]">学习提醒</span>
+              <span className="block text-xs text-[var(--text-muted)]">
+                有待复习时，打开应用推送桌面通知（每天至多一次）
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="学习提醒"
+              checked={remindOn}
+              onChange={(e) => void toggleReminder(e.target.checked)}
+              className="ca-touch-44 h-5 w-5 flex-none accent-[var(--accent-text)]"
+            />
+          </label>
 
           {continueRows.length > 0 && (
             <div>

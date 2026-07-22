@@ -201,6 +201,9 @@ export const ipc = {
     logs: (): Promise<DevLogEntry[]> => invoke("cmd_get_dev_logs"),
     clearLogs: (): Promise<void> => invoke("cmd_clear_dev_logs"),
   },
+  // 发一条系统桌面通知（学习提醒）。触发时机与去重由前端决定。
+  notify: (title: string, body: string): Promise<void> =>
+    invoke("cmd_notify", { title, body }),
   settings: {
     get: (key: string): Promise<string | null> =>
       invoke("cmd_get_setting", { key }),
