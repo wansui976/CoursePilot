@@ -7,6 +7,7 @@ import { coarsePointer } from "@/lib/useContainerWidth";
 import { ExportMenu } from "./ExportMenu";
 import { MathText } from "./MathText";
 import { ipc } from "@/lib/ipc";
+import { buildCloze } from "@/lib/cloze";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
@@ -97,7 +98,10 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     top: number;
     text: string;
     startMs: number | null;
+    segmentText: string | null;
   } | null>(null);
+  // 挖空成卡成功后短暂提示。
+  const [clozeAdded, setClozeAdded] = useState(false);
   // 跟随播放的活动行下标。只在「跨段」时更新（见下方订阅），不随每个进度 tick 重渲染。
   const [activeRowIndex, setActiveRowIndex] = useState(-1);
 
@@ -281,10 +285,28 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
         : sel.anchorNode.parentElement;
     const rowEl = anchorEl?.closest<HTMLElement>("[data-row]");
     const index = rowEl ? Number(rowEl.getAttribute("data-row")) : -1;
-    const startMs = index >= 0 && rows[index] ? rows[index].start_ms : null;
+    const seg = index >= 0 ? rows[index] : undefined;
+    const startMs = seg ? seg.start_ms : null;
     const rect = sel.getRangeAt(0).getBoundingClientRect();
-    setAskAnchor({ left: rect.left + rect.width / 2, top: rect.top, text, startMs });
+    setAskAnchor({
+      left: rect.left + rect.width / 2,
+      top: rect.top,
+      text,
+      startMs,
+      segmentText: seg ? seg.text : null,
+    });
   }
+
+  // 挖空成卡：把所选词在其所在句里挖空，做成 cloze 复习卡。
+  const addCloze = useMutation({
+    mutationFn: (vars: { front: string; back: string; startMs: number | null }) =>
+      ipc.srs.addCard(videoId, "cloze", vars.front, vars.back, vars.startMs),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["srs-count-due"] });
+      setClozeAdded(true);
+      window.setTimeout(() => setClozeAdded(false), 1600);
+    },
+  });
 
   if (segments.length === 0) {
     return <p className="p-4 text-sm text-[var(--text-muted)]">字幕生成中或尚未开始</p>;
@@ -380,21 +402,48 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
         ))}
       </div>
       {askAnchor && (
-        <button
-          type="button"
+        <div
           // 选区上方浮出；fixed + 视口坐标，不受滚动容器裁剪。
-          className="fixed z-50 -translate-x-1/2 -translate-y-full rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-white shadow-lg"
+          className="fixed z-50 flex -translate-x-1/2 -translate-y-full gap-1"
           style={{ left: askAnchor.left, top: askAnchor.top - 6 }}
           // 别让按钮抢焦点而清掉选区（文本/时间戳已存进 askAnchor，读取本就安全）。
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => {
-            useInlineAsk.getState().askAbout(askAnchor.text, askAnchor.startMs);
-            window.getSelection()?.removeAllRanges();
-            setAskAnchor(null);
-          }}
         >
-          问 AI
-        </button>
+          <button
+            type="button"
+            className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-white shadow-lg"
+            onClick={() => {
+              useInlineAsk.getState().askAbout(askAnchor.text, askAnchor.startMs);
+              window.getSelection()?.removeAllRanges();
+              setAskAnchor(null);
+            }}
+          >
+            问 AI
+          </button>
+          {/* 仅当所选词落在单个句子内（可挖空）时提供。 */}
+          {askAnchor.segmentText?.includes(askAnchor.text) && (
+            <button
+              type="button"
+              className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-1 text-xs font-medium text-[var(--text-normal)] shadow-lg"
+              onClick={() => {
+                const { front, back } = buildCloze(askAnchor.segmentText!, askAnchor.text);
+                addCloze.mutate({ front, back, startMs: askAnchor.startMs });
+                window.getSelection()?.removeAllRanges();
+                setAskAnchor(null);
+              }}
+            >
+              挖空成卡
+            </button>
+          )}
+        </div>
+      )}
+      {clozeAdded && (
+        <div
+          role="status"
+          className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-[var(--surface-card)] px-3 py-1.5 text-xs text-[var(--text-strong)] shadow-lg ring-1 ring-[var(--border-subtle)]"
+        >
+          已加入每日复习
+        </div>
       )}
     </div>
   );

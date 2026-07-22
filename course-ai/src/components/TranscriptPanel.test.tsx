@@ -15,6 +15,9 @@ const { mockIpc } = vi.hoisted(() => ({
     export: {
       subtitles: vi.fn(),
     },
+    srs: {
+      addCard: vi.fn(),
+    },
   },
 }));
 
@@ -57,6 +60,7 @@ describe("TranscriptPanel", () => {
   beforeEach(() => {
     localStorage.clear();
     mockIpc.transcripts.list.mockResolvedValue(makeSegments(60));
+    mockIpc.srs.addCard.mockReset().mockResolvedValue("m:1");
     useInlineAsk.setState({ pending: null });
   });
 
@@ -86,6 +90,40 @@ describe("TranscriptPanel", () => {
       text: "第 1 句文稿内容",
       startMs: 1000,
     });
+  });
+
+  it("makes a cloze card from a selected term within a sentence", async () => {
+    renderTranscriptPanel("cloze");
+    const textEl = await screen.findByText("第 1 句文稿内容");
+
+    // 选中句中的「文稿」两字（落在第 1 行）。
+    const fakeSelection = {
+      isCollapsed: false,
+      anchorNode: textEl.firstChild ?? textEl,
+      toString: () => "文稿",
+      getRangeAt: () => ({
+        getBoundingClientRect: () => ({ left: 100, width: 20, top: 200 }),
+      }),
+      removeAllRanges: () => {},
+    };
+    vi.spyOn(window, "getSelection").mockReturnValue(
+      fakeSelection as unknown as Selection,
+    );
+
+    fireEvent.mouseUp(screen.getByLabelText("文稿内容滚动区"));
+    fireEvent.click(await screen.findByRole("button", { name: "挖空成卡" }));
+
+    // 所在句挖空、所选词作答案、带该句时间戳（1000）。
+    await waitFor(() =>
+      expect(mockIpc.srs.addCard).toHaveBeenCalledWith(
+        "video-1",
+        "cloze",
+        "第 1 句＿＿＿＿内容",
+        "文稿",
+        1000,
+      ),
+    );
+    expect(await screen.findByText("已加入每日复习")).toBeInTheDocument();
   });
 
   it("uses theme-aware muted text for segment timestamps", async () => {
