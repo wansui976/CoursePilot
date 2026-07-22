@@ -76,6 +76,33 @@ describe("PlaylistImportDialog", () => {
     expect(screen.getByText("第二讲")).toBeInTheDocument();
   });
 
+  it("toggles every episode with the 全选 / 全不选 button", async () => {
+    mockIpc.tools.probePlaylist.mockResolvedValue({
+      title: "合集",
+      episodes: [
+        { url: "u1", title: "一", duration_ms: null },
+        { url: "u2", title: "二", duration_ms: null },
+        { url: "u3", title: "三", duration_ms: null },
+      ],
+    });
+    renderDialog();
+    fireEvent.change(screen.getByLabelText("播放列表链接"), { target: { value: "u" } });
+    fireEvent.click(screen.getByRole("button", { name: "枚举各集" }));
+    await screen.findByText("合集");
+
+    // 默认全选。
+    expect(screen.getByText("已选 3 / 3")).toBeInTheDocument();
+
+    // 全不选 → 0 选，导入按钮禁用。
+    fireEvent.click(screen.getByRole("button", { name: "全不选" }));
+    expect(screen.getByText("已选 0 / 3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /导入 0 个/ })).toBeDisabled();
+
+    // 再全选 → 恢复。
+    fireEvent.click(screen.getByRole("button", { name: "全选" }));
+    expect(screen.getByText("已选 3 / 3")).toBeInTheDocument();
+  });
+
   it("lets you deselect episodes before importing", async () => {
     mockIpc.tools.probePlaylist.mockResolvedValue({
       title: "合集",
