@@ -3,6 +3,7 @@ pub mod aliyun_asr;
 pub mod aliyun_ocr;
 pub mod asr;
 pub mod audio;
+pub mod concepts;
 pub mod crop_detect;
 pub mod download;
 pub mod ocr;
