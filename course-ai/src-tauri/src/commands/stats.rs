@@ -136,6 +136,21 @@ pub async fn cmd_continue_learning(state: State<'_, AppState>) -> AppResult<Vec<
     continue_rows(&state.db).await
 }
 
+/// 所有未删除视频的 (course_id, video_id)。供仪表盘按课程算完成度
+/// （「已看完」由前端用本地播放进度 WATCHED_RATIO 判定，故这里只给 id 清单与总数）。
+pub async fn course_video_ids(db: &Db) -> AppResult<Vec<(String, String)>> {
+    Ok(
+        sqlx::query_as("SELECT course_id, id FROM videos WHERE deleted_at IS NULL")
+            .fetch_all(&db.pool)
+            .await?,
+    )
+}
+
+#[tauri::command]
+pub async fn cmd_course_video_ids(state: State<'_, AppState>) -> AppResult<Vec<(String, String)>> {
+    course_video_ids(&state.db).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,6 +281,23 @@ mod tests {
         assert_eq!(rows[0].video_id, v2);
         assert_eq!(rows[0].video_title, "第二讲");
         assert_eq!(rows[0].last_ts, base + 3600_000);
+    }
+
+    #[tokio::test]
+    async fn course_video_ids_lists_live_videos_with_course() {
+        let db = fresh_db().await;
+        let course = create_course(&db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let v1 = seed_video_titled(&db, &course.id, "第一讲").await;
+        let v2 = seed_video_titled(&db, &course.id, "第二讲").await;
+        sqlx::query("UPDATE videos SET deleted_at=1 WHERE id=?")
+            .bind(&v2)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        let rows = course_video_ids(&db).await.unwrap();
+        assert_eq!(rows.len(), 1, "已删除视频不计入");
+        assert_eq!(rows[0], (course.id.clone(), v1));
     }
 
     #[tokio::test]
