@@ -11,6 +11,7 @@ import type {
   DevLogEntry,
   Job,
   LlmProfile,
+  PlaylistInfo,
   ProbeResult,
   RagAnswer,
   RelinkResult,
@@ -388,6 +389,9 @@ export const ipc = {
       }),
     probeBilibili: (url: string): Promise<ProbeResult> =>
       invoke("cmd_probe_bilibili", { url }),
+    // 扁平枚举播放列表/合集（不下载正片），得到各集清单。
+    probePlaylist: (url: string): Promise<PlaylistInfo> =>
+      invoke("cmd_probe_playlist", { url }),
     setBilibiliCookies: (filePath: string): Promise<void> =>
       invoke("cmd_set_bilibili_cookies", { filePath }),
     hasBilibiliCookies: (): Promise<boolean> =>
