@@ -6,70 +6,83 @@ use serde_json::Value;
 use tauri::State;
 
 const DAY_MS: i64 = 86_400_000;
-const MIN_EASE: f64 = 1.3;
-const START_EASE: f64 = 2.5;
 
-/// 一张卡的排期状态（SM-2）。
-#[derive(Debug, Clone, PartialEq)]
-pub struct Sched {
-    pub due_at: i64,
-    pub ease: f64,
-    pub interval_days: i64,
-    pub reps: i64,
-    pub lapses: i64,
-    pub last_reviewed: Option<i64>,
+// FSRS-4.5 默认权重（17 个）。⚠ 本环境离线，权重与公式变体凭记忆；上线前请对照
+// 官方 rs-fsrs / py-fsrs 校验这组权重与公式版本。
+const FSRS_W: [f64; 17] = [
+    0.4872, 1.4003, 3.7145, 13.8206, 5.1618, 1.2298, 0.8975, 0.0310, 1.6474, 0.1367, 1.0461,
+    2.1072, 0.0793, 0.3246, 1.5870, 0.2272, 2.8755,
+];
+const DECAY: f64 = -0.5;
+const FACTOR: f64 = 19.0 / 81.0; // 使幂遗忘曲线在 t=S 时 R=0.9
+const TARGET_RETENTION: f64 = 0.9;
+const S_MIN: f64 = 0.1;
+
+/// 记忆可提取概率 R：随距上次复习的天数 t 按幂遗忘曲线衰减。R(0)=1，R(t=S,S)=0.9。
+fn retrievability(elapsed_days: f64, stability: f64) -> f64 {
+    (1.0 + FACTOR * elapsed_days.max(0.0) / stability.max(S_MIN)).powf(DECAY)
 }
 
-/// SM-2 排期：rating 1=重来 2=困难 3=良好 4=容易。返回复习后的新排期。
-/// 重来：重置进度、~1 分钟后再来、ease 下调、lapses+1；否则按 ease 拉长间隔。
-pub fn next_schedule(prev: &Sched, rating: i64, now: i64) -> Sched {
-    if rating <= 1 {
-        return Sched {
-            due_at: now + 60_000,
-            ease: (prev.ease - 0.2).max(MIN_EASE),
-            interval_days: 0,
-            reps: 0,
-            lapses: prev.lapses + 1,
-            last_reviewed: Some(now),
-        };
-    }
-    let reps = prev.reps + 1;
-    let ease = match rating {
-        2 => (prev.ease - 0.15).max(MIN_EASE),
-        4 => prev.ease + 0.15,
-        _ => prev.ease,
-    };
-    let interval_days = if reps == 1 {
-        1
-    } else if reps == 2 {
-        6
-    } else {
-        let base = (prev.interval_days.max(1) as f64) * ease;
-        let scaled = match rating {
-            2 => (prev.interval_days.max(1) as f64) * 1.2,
-            4 => base * 1.3,
-            _ => base,
-        };
-        scaled.round() as i64
-    };
-    Sched {
-        due_at: now + interval_days * DAY_MS,
-        ease,
-        interval_days,
-        reps,
-        lapses: prev.lapses,
-        last_reviewed: Some(now),
-    }
+/// 目标保持率 0.9 下由稳定度反推的下次间隔（天，至少 1）；数值上间隔≈稳定度。
+fn interval_days_for(stability: f64) -> i64 {
+    let days = stability / FACTOR * (TARGET_RETENTION.powf(1.0 / DECAY) - 1.0);
+    (days.round() as i64).max(1)
 }
 
-fn fresh_sched(now: i64) -> Sched {
-    Sched {
-        due_at: now,
-        ease: START_EASE,
-        interval_days: 0,
-        reps: 0,
-        lapses: 0,
-        last_reviewed: None,
+/// 首评初始稳定度：取该评分档权重（≥S_MIN）。rating 1..=4。
+fn init_stability(rating: i64) -> f64 {
+    FSRS_W[(rating.clamp(1, 4) - 1) as usize].max(S_MIN)
+}
+
+/// 首评初始难度：Again 最难、Easy 最易（线性），夹到 [1,10]。
+fn init_difficulty(rating: i64) -> f64 {
+    (FSRS_W[4] - (rating as f64 - 3.0) * FSRS_W[5]).clamp(1.0, 10.0)
+}
+
+/// 难度更新：按评分升降，再向 Easy 的初始难度做均值回归；夹到 [1,10]。
+fn next_difficulty(difficulty: f64, rating: i64) -> f64 {
+    let delta = difficulty - FSRS_W[6] * (rating as f64 - 3.0);
+    (FSRS_W[7] * init_difficulty(4) + (1.0 - FSRS_W[7]) * delta).clamp(1.0, 10.0)
+}
+
+/// 回忆成功（rating≥2）后的新稳定度：难度低、当前稳定度低、当时可提取率低时增长更多；
+/// 困难档打折(w15)、容易档加成(w16)。
+fn next_recall_stability(difficulty: f64, stability: f64, r: f64, rating: i64) -> f64 {
+    let hard = if rating == 2 { FSRS_W[15] } else { 1.0 };
+    let easy = if rating == 4 { FSRS_W[16] } else { 1.0 };
+    stability
+        * (1.0
+            + FSRS_W[8].exp()
+                * (11.0 - difficulty)
+                * stability.powf(-FSRS_W[9])
+                * (((1.0 - r) * FSRS_W[10]).exp() - 1.0)
+                * hard
+                * easy)
+}
+
+/// 遗忘（rating=1）后的新稳定度（通常低于原值）。
+fn next_forget_stability(difficulty: f64, stability: f64, r: f64) -> f64 {
+    FSRS_W[11]
+        * difficulty.powf(-FSRS_W[12])
+        * ((stability + 1.0).powf(FSRS_W[13]) - 1.0)
+        * ((1.0 - r) * FSRS_W[14]).exp()
+}
+
+/// 一次复习后的新 (stability, difficulty)。rating 1=重来 2=困难 3=良好 4=容易。
+/// prev=None（首评/稳定度未初始化）走初始化；否则按距上次天数算可提取率再更新。
+pub fn fsrs_review(prev: Option<(f64, f64)>, rating: i64, elapsed_days: f64) -> (f64, f64) {
+    match prev {
+        None => (init_stability(rating), init_difficulty(rating)),
+        Some((stability, difficulty)) => {
+            let r = retrievability(elapsed_days, stability);
+            let new_d = next_difficulty(difficulty, rating);
+            let new_s = if rating <= 1 {
+                next_forget_stability(difficulty, stability, r)
+            } else {
+                next_recall_stability(difficulty, stability, r, rating)
+            };
+            (new_s.max(S_MIN), new_d)
+        }
     }
 }
 
@@ -385,17 +398,14 @@ pub async fn generate_cards_from_quiz(db: &Db, video_id: &str) -> AppResult<usiz
         .execute(&db.pool)
         .await?;
 
-        let s = fresh_sched(now);
+        // 新卡：立即到期，FSRS 状态未初始化（stability=0），首评时再初始化。
+        // ease/interval_days 为遗留列，置 0（不再驱动排期）。
         sqlx::query(
-            "INSERT OR IGNORE INTO card_schedule(card_id,due_at,ease,interval_days,reps,lapses,last_reviewed)
-             VALUES (?,?,?,?,?,?,NULL)",
+            "INSERT OR IGNORE INTO card_schedule(card_id,due_at,ease,interval_days,reps,lapses,last_reviewed,stability,difficulty)
+             VALUES (?,?,0,0,0,0,NULL,0,0)",
         )
         .bind(&card_id)
-        .bind(s.due_at)
-        .bind(s.ease)
-        .bind(s.interval_days)
-        .bind(s.reps)
-        .bind(s.lapses)
+        .bind(now)
         .execute(&db.pool)
         .await?;
         count += 1;
@@ -425,36 +435,49 @@ pub async fn count_due(db: &Db, now: i64) -> AppResult<i64> {
     .await?)
 }
 
-/// 复习评分：更新排期 + 记一条 review 事件（含卡 id 与评分）。
+/// 复习评分：按 FSRS 更新排期 + 记一条 review 事件（含卡 id 与评分）。
 pub async fn review_card(db: &Db, card_id: &str, rating: i64, now: i64) -> AppResult<()> {
-    let row: Option<(i64, f64, i64, i64, i64)> = sqlx::query_as(
-        "SELECT due_at, ease, interval_days, reps, lapses FROM card_schedule WHERE card_id=?",
+    let row: Option<(f64, f64, i64, i64, Option<i64>)> = sqlx::query_as(
+        "SELECT stability, difficulty, reps, lapses, last_reviewed FROM card_schedule WHERE card_id=?",
     )
     .bind(card_id)
     .fetch_optional(&db.pool)
     .await?;
-    let Some((due_at, ease, interval_days, reps, lapses)) = row else {
+    let Some((stability, difficulty, reps, lapses, last_reviewed)) = row else {
         return Ok(());
     };
-    let prev = Sched {
-        due_at,
-        ease,
-        interval_days,
-        reps,
-        lapses,
-        last_reviewed: None,
+
+    // 首评：稳定度未初始化（=0）或从未复习过 → FSRS 初始化；否则按距上次天数更新。
+    let prev = if stability > 0.0 && last_reviewed.is_some() {
+        Some((stability, difficulty))
+    } else {
+        None
     };
-    let next = next_schedule(&prev, rating, now);
+    let elapsed_days = last_reviewed
+        .map(|lr| ((now - lr) as f64 / DAY_MS as f64).max(0.0))
+        .unwrap_or(0.0);
+    let (new_s, new_d) = fsrs_review(prev, rating, elapsed_days);
+    let interval = interval_days_for(new_s);
+    // Again 保留「本会话很快再来」（~1 分钟）；其余按 FSRS 间隔。
+    let due_at = if rating <= 1 {
+        now + 60_000
+    } else {
+        now + interval * DAY_MS
+    };
+    let new_reps = if rating <= 1 { 0 } else { reps + 1 };
+    let new_lapses = if rating <= 1 { lapses + 1 } else { lapses };
+
     sqlx::query(
-        "UPDATE card_schedule SET due_at=?, ease=?, interval_days=?, reps=?, lapses=?, last_reviewed=?
+        "UPDATE card_schedule SET due_at=?, stability=?, difficulty=?, interval_days=?, reps=?, lapses=?, last_reviewed=?
          WHERE card_id=?",
     )
-    .bind(next.due_at)
-    .bind(next.ease)
-    .bind(next.interval_days)
-    .bind(next.reps)
-    .bind(next.lapses)
-    .bind(next.last_reviewed)
+    .bind(due_at)
+    .bind(new_s)
+    .bind(new_d)
+    .bind(interval)
+    .bind(new_reps)
+    .bind(new_lapses)
+    .bind(now)
     .bind(card_id)
     .execute(&db.pool)
     .await?;
@@ -581,33 +604,82 @@ mod tests {
         vid
     }
 
-    #[test]
-    fn sm2_good_grows_interval_again_resets() {
-        let s0 = fresh_sched(0);
-        let s1 = next_schedule(&s0, 3, 0); // good
-        assert_eq!(s1.interval_days, 1);
-        assert_eq!(s1.reps, 1);
-        let s2 = next_schedule(&s1, 3, 0);
-        assert_eq!(s2.interval_days, 6);
-        let s3 = next_schedule(&s2, 3, 0);
-        assert!(s3.interval_days > 6, "third good should push past 6 days");
+    // FSRS 属性测试：不校验具体数值（权重凭记忆），只验证「像个正确的间隔重复排期器」。
 
-        // 重来：重置、~1 分钟后再来、lapses+1、ease 下调。
-        let again = next_schedule(&s3, 1, 1_000);
-        assert_eq!(again.interval_days, 0);
-        assert_eq!(again.reps, 0);
-        assert_eq!(again.lapses, 1);
-        assert_eq!(again.due_at, 1_000 + 60_000);
-        assert!(again.ease < s3.ease);
+    #[test]
+    fn fsrs_first_review_orders_stability_and_bounds_difficulty() {
+        // 评分越高，初始稳定度越大；Again 最难、Easy 最易；难度恒在 [1,10]。
+        let (s_again, d_again) = fsrs_review(None, 1, 0.0);
+        let (s_good, _) = fsrs_review(None, 3, 0.0);
+        let (s_easy, d_easy) = fsrs_review(None, 4, 0.0);
+        assert!(s_again < s_good && s_good < s_easy);
+        assert!(d_again > d_easy);
+        for d in [d_again, d_easy] {
+            assert!((1.0..=10.0).contains(&d));
+        }
     }
 
     #[test]
-    fn sm2_ease_has_a_floor() {
-        let mut s = fresh_sched(0);
-        for _ in 0..20 {
-            s = next_schedule(&s, 1, 0);
-        }
-        assert!(s.ease >= MIN_EASE);
+    fn fsrs_retrievability_decays_and_interval_tracks_stability() {
+        // R(0)=1，R(t=S,S)=0.9，且随时间下降。
+        assert!((retrievability(0.0, 5.0) - 1.0).abs() < 1e-9);
+        assert!((retrievability(5.0, 5.0) - 0.9).abs() < 1e-6);
+        assert!(retrievability(20.0, 5.0) < retrievability(5.0, 5.0));
+        // 间隔随稳定度增大；0.9 目标下间隔≈稳定度。
+        assert!(interval_days_for(10.0) > interval_days_for(2.0));
+        assert_eq!(interval_days_for(5.0), 5);
+    }
+
+    #[test]
+    fn fsrs_good_grows_stability_again_shrinks_it_and_hardens() {
+        let (s_good, _) = fsrs_review(Some((5.0, 5.0)), 3, 5.0);
+        assert!(s_good > 5.0, "答对应增长稳定度");
+        let (s_again, d_again) = fsrs_review(Some((5.0, 5.0)), 1, 5.0);
+        assert!(s_again < 5.0, "答错应回落稳定度");
+        assert!(d_again > 5.0, "答错应提高难度");
+        assert!(s_again >= S_MIN, "稳定度有下限");
+    }
+
+    #[test]
+    fn fsrs_higher_grade_gives_longer_interval() {
+        let iv = |rating| {
+            let (s, _) = fsrs_review(Some((5.0, 5.0)), rating, 5.0);
+            interval_days_for(s)
+        };
+        assert!(iv(2) <= iv(3) && iv(3) < iv(4), "困难 ≤ 良好 < 容易");
+    }
+
+    #[tokio::test]
+    async fn review_card_initializes_fsrs_state_and_advances_due() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(&db, r#"[{"stem":"Q","answer":"A"}]"#).await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let cid = format!("q:{vid}:0");
+        let now = chrono::Utc::now().timestamp_millis();
+
+        review_card(&db, &cid, 3, now).await.unwrap(); // Good 首评
+        let (stability, difficulty, due_at, last): (f64, f64, i64, Option<i64>) = sqlx::query_as(
+            "SELECT stability, difficulty, due_at, last_reviewed FROM card_schedule WHERE card_id=?",
+        )
+        .bind(&cid)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+        assert!(stability > 0.0, "首评后稳定度被初始化");
+        assert!((1.0..=10.0).contains(&difficulty));
+        assert!(due_at > now, "Good 之后下次到期在未来");
+        assert_eq!(last, Some(now));
+
+        // 再答 Again：本会话很快再来（≤~2 分钟），lapses+1。
+        review_card(&db, &cid, 1, now + 1000).await.unwrap();
+        let (due2, lapses): (i64, i64) =
+            sqlx::query_as("SELECT due_at, lapses FROM card_schedule WHERE card_id=?")
+                .bind(&cid)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert!(due2 <= now + 1000 + 120_000, "Again 应很快再来");
+        assert_eq!(lapses, 1);
     }
 
     #[tokio::test]
