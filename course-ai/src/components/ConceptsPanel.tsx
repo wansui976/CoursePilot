@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, Lightbulb, Sparkles } from "lucide-react";
+import { Brain, ChevronLeft, Lightbulb, Sparkles } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ReviewSession } from "./ReviewSession";
 
 /** 课程级「知识点」面板：分析并浏览本课程概念，点出处跨视频跳转。 */
 export function ConceptsPanel({
@@ -20,17 +21,35 @@ export function ConceptsPanel({
 }) {
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState<string | null>(null);
+  // 正在按概念复习的目标（打开全屏 ReviewSession）。
+  const [reviewing, setReviewing] = useState<{ conceptId: string; name: string } | null>(null);
 
   const { data: concepts = [], isLoading } = useQuery({
     queryKey: ["course-concepts", courseId],
     queryFn: () => ipc.concepts.list(courseId),
   });
 
+  // 每个概念的待复习卡数（现算），构成 conceptId -> due 映射。
+  const { data: dueCounts = [] } = useQuery({
+    queryKey: ["srs-concept-due", courseId],
+    queryFn: () => ipc.srs.conceptDueCounts(courseId),
+  });
+  const dueByConcept = new Map(dueCounts.map((d) => [d.concept_id, d.due]));
+
   const analyze = useMutation({
     mutationFn: () => ipc.concepts.analyze(courseId),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["course-concepts", courseId] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["course-concepts", courseId] });
+      queryClient.invalidateQueries({ queryKey: ["srs-concept-due", courseId] });
+    },
   });
+
+  // 复习结束（或退出）：刷新概念待复习数与仪表盘计数。
+  function closeReview() {
+    setReviewing(null);
+    queryClient.invalidateQueries({ queryKey: ["srs-concept-due", courseId] });
+    queryClient.invalidateQueries({ queryKey: ["srs-count-due"] });
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
@@ -89,18 +108,29 @@ export function ConceptsPanel({
                   key={c.id}
                   className="overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)]"
                 >
-                  <button
-                    onClick={() => setExpanded((e) => (e === c.id ? null : c.id))}
-                    aria-expanded={expanded === c.id}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--text-strong)]">
-                      {c.name}
-                    </span>
-                    <span className="flex-none rounded-full bg-[var(--surface-card-active)] px-2 py-0.5 text-xs text-[var(--text-muted)]">
-                      {c.occurrences.length}
-                    </span>
-                  </button>
+                  <div className="flex items-center gap-1 pr-2">
+                    <button
+                      onClick={() => setExpanded((e) => (e === c.id ? null : c.id))}
+                      aria-expanded={expanded === c.id}
+                      className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--text-strong)]">
+                        {c.name}
+                      </span>
+                      <span className="flex-none rounded-full bg-[var(--surface-card-active)] px-2 py-0.5 text-xs text-[var(--text-muted)]">
+                        {c.occurrences.length}
+                      </span>
+                    </button>
+                    {(dueByConcept.get(c.id) ?? 0) > 0 && (
+                      <button
+                        onClick={() => setReviewing({ conceptId: c.id, name: c.name })}
+                        className="ca-touch-44 inline-flex flex-none items-center gap-1 rounded-lg bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary hover:text-white"
+                      >
+                        <Brain className="h-3.5 w-3.5" />
+                        复习 {dueByConcept.get(c.id)}
+                      </button>
+                    )}
+                  </div>
                   {expanded === c.id && (
                     <div className="border-t border-[var(--border-subtle)] px-2 py-1.5">
                       {c.occurrences.map((o) => (
@@ -121,6 +151,19 @@ export function ConceptsPanel({
           )}
         </div>
       </div>
+
+      {reviewing && (
+        <ReviewSession
+          concept={{ courseId, conceptId: reviewing.conceptId, name: reviewing.name }}
+          onClose={closeReview}
+          onJump={(card) => {
+            if (card.video_id && card.source_ms != null) {
+              closeReview();
+              onJump(card.video_id, card.source_ms);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

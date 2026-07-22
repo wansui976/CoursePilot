@@ -11,18 +11,26 @@ const GRADES: { rating: number; label: string; key: string }[] = [
 ];
 const SESSION_LIMIT = 50;
 
-/** 全屏、纯键盘的复习会话：空格翻面，1–4 打分，答错可回看出处。 */
+/** 全屏、纯键盘的复习会话：空格翻面，1–4 打分，答错可回看出处。
+ * 默认复习今日全部到期卡；给 `concept` 则只复习该课程该概念下的到期卡。 */
 export function ReviewSession({
   onClose,
   onJump,
+  concept,
 }: {
   onClose: () => void;
   onJump: (card: DueCard) => void;
+  concept?: { courseId: string; conceptId: string; name: string };
 }) {
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
-    queryKey: ["srs-due-session"],
-    queryFn: () => ipc.srs.due(SESSION_LIMIT),
+    queryKey: concept
+      ? ["srs-due-concept", concept.courseId, concept.conceptId]
+      : ["srs-due-session"],
+    queryFn: () =>
+      concept
+        ? ipc.srs.dueByConcept(concept.courseId, concept.conceptId)
+        : ipc.srs.due(SESSION_LIMIT),
     // 会话期间锁定这批卡，复习不即时刷新列表（避免卡片在脚下位移）。
     staleTime: Infinity,
     refetchOnWindowFocus: false,
@@ -78,7 +86,11 @@ export function ReviewSession({
     <div className="fixed inset-0 z-50 flex flex-col bg-[var(--surface-app)]">
       <header className="flex flex-none items-center justify-between border-b border-[var(--border-subtle)] px-6 py-3">
         <span className="text-sm text-[var(--text-muted)]">
-          {cards.length > 0 && !done ? `${index + 1} / ${cards.length}` : "复习"}
+          {cards.length > 0 && !done
+            ? `${index + 1} / ${cards.length}`
+            : concept
+              ? concept.name
+              : "复习"}
         </span>
         <button
           aria-label="退出复习"
@@ -96,7 +108,11 @@ export function ReviewSession({
           ) : done ? (
             <div className="text-center">
               <div className="text-lg font-semibold text-[var(--text-strong)]">
-                {cards.length === 0 ? "今天没有待复习的卡片" : "复习完成 🎉"}
+                {cards.length === 0
+                  ? concept
+                    ? "这个概念没有待复习的卡片"
+                    : "今天没有待复习的卡片"
+                  : "复习完成 🎉"}
               </div>
               <button
                 onClick={onClose}
