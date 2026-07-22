@@ -250,12 +250,9 @@ export function PlaylistImportDialog({
           <>
             <p className="mb-2 flex-none truncate text-xs text-[var(--text-faint)]">{info.title}</p>
             <div className="mb-2 flex flex-none items-center justify-between">
-              <button
-                onClick={toggleAll}
-                className="text-xs font-medium text-primary hover:underline"
-              >
+              <Button size="sm" variant="outline" onClick={toggleAll}>
                 {allSelected ? "全不选" : "全选"}
-              </button>
+              </Button>
               <span className="text-xs text-[var(--text-muted)]">
                 已选 {selected.size} / {info.episodes.length}
               </span>
