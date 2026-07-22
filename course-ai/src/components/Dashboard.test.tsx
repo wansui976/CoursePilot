@@ -9,26 +9,30 @@ const {
   dailyTotals,
   courseTotals,
   continueLearning,
+  courseVideoIds,
   listCourses,
   countDue,
   weakConcepts,
   dueByConcept,
+  dueByCourse,
   review,
 } = vi.hoisted(() => ({
   dailyTotals: vi.fn(),
   courseTotals: vi.fn(),
   continueLearning: vi.fn(),
+  courseVideoIds: vi.fn(),
   listCourses: vi.fn(),
   countDue: vi.fn(),
   weakConcepts: vi.fn(),
   dueByConcept: vi.fn(),
+  dueByCourse: vi.fn(),
   review: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({
   ipc: {
-    stats: { dailyTotals, courseTotals, continueLearning },
+    stats: { dailyTotals, courseTotals, continueLearning, courseVideoIds },
     courses: { list: listCourses },
-    srs: { countDue, weakConcepts, dueByConcept, review },
+    srs: { countDue, weakConcepts, dueByConcept, dueByCourse, review },
   },
 }));
 
@@ -62,6 +66,8 @@ describe("Dashboard", () => {
     continueLearning.mockReset().mockResolvedValue([]);
     weakConcepts.mockReset().mockResolvedValue([]);
     dueByConcept.mockReset().mockResolvedValue([]);
+    dueByCourse.mockReset().mockResolvedValue([]);
+    courseVideoIds.mockReset().mockResolvedValue([]);
     review.mockReset().mockResolvedValue(undefined);
     localStorage.clear();
   });
@@ -135,6 +141,28 @@ describe("Dashboard", () => {
     expect(await screen.findByRole("img", { name: /学习热力图/ })).toBeInTheDocument();
     // 今天学了 30 分钟 → 该格带时长说明的悬浮 title。
     expect(screen.getByTitle(new RegExp(`${today} · `))).toBeInTheDocument();
+  });
+
+  it("shows a course completion ring and a due badge on the course card", async () => {
+    courseVideoIds.mockResolvedValue([
+      ["c1", "v1"],
+      ["c1", "v2"],
+      ["c1", "v3"],
+    ]);
+    dueByCourse.mockResolvedValue([["c1", 4]]);
+    // v1、v2 已看完（ratio 1.0），v3 才看了一点 → 完成 2/3。
+    for (const id of ["v1", "v2"]) {
+      localStorage.setItem(`video-pos:${id}`, "100");
+      localStorage.setItem(`video-dur:${id}`, "100");
+    }
+    localStorage.setItem("video-pos:v3", "5");
+    localStorage.setItem("video-dur:v3", "100");
+
+    renderDashboard();
+
+    await screen.findByText("申论课程");
+    expect(screen.getByText(/完成 2\/3 讲/)).toBeInTheDocument();
+    expect(screen.getByText("待复习 4")).toBeInTheDocument();
   });
 
   it("shows an empty state when there is no study record", async () => {

@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Brain, ChevronLeft, Flame, LayoutDashboard, Play, TrendingDown } from "lucide-react";
 import { ipc, type DueCard } from "@/lib/ipc";
-import { readPlaybackProgress } from "@/lib/playback";
+import { WATCHED_RATIO, readPlaybackProgress } from "@/lib/playback";
+import { ProgressRing } from "@/components/ui/ProgressRing";
 import { ReviewSession } from "./ReviewSession";
 import {
   computeStreak,
@@ -92,6 +93,32 @@ export function Dashboard({
     queryKey: ["courses"],
     queryFn: ipc.courses.list,
   });
+  const { data: courseVideoIds = [] } = useQuery({
+    queryKey: ["stats-course-video-ids"],
+    queryFn: () => ipc.stats.courseVideoIds(),
+  });
+  const { data: dueByCourse = [] } = useQuery({
+    queryKey: ["srs-due-by-course"],
+    queryFn: () => ipc.srs.dueByCourse(),
+  });
+
+  // 每门课的完成度（已看完/总数，「已看完」按本地播放进度 ≥ WATCHED_RATIO 判定）。
+  const completionOf = useMemo(() => {
+    const idsByCourse = new Map<string, string[]>();
+    for (const [cid, vid] of courseVideoIds) {
+      const arr = idsByCourse.get(cid);
+      if (arr) arr.push(vid);
+      else idsByCourse.set(cid, [vid]);
+    }
+    return (courseId: string): { watched: number; total: number } => {
+      const ids = idsByCourse.get(courseId) ?? [];
+      const watched = ids.filter(
+        (id) => readPlaybackProgress(id).ratio >= WATCHED_RATIO,
+      ).length;
+      return { watched, total: ids.length };
+    };
+  }, [courseVideoIds]);
+  const dueOf = useMemo(() => new Map(dueByCourse), [dueByCourse]);
 
   const streak = useMemo(
     () => computeStreak(new Set(daily.filter((d) => d.watched_ms > 0).map((d) => d.day)), today),
@@ -284,24 +311,41 @@ export function Dashboard({
               </p>
             ) : (
               <ul className="space-y-2">
-                {courseTotals.map((c) => (
-                  <li key={c.course_id}>
-                    <button
-                      onClick={() => onOpenCourse(c.course_id)}
-                      className="flex w-full items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-[var(--text-strong)]">
-                          {nameOf(c.course_id)}
+                {courseTotals.map((c) => {
+                  const { watched, total } = completionOf(c.course_id);
+                  const due = dueOf.get(c.course_id) ?? 0;
+                  return (
+                    <li key={c.course_id}>
+                      <button
+                        onClick={() => onOpenCourse(c.course_id)}
+                        className="flex w-full items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
+                      >
+                        {total > 0 && (
+                          <ProgressRing value={watched / total}>
+                            <span className="text-[10px] font-semibold tabular-nums text-[var(--text-strong)]">
+                              {watched}/{total}
+                            </span>
+                          </ProgressRing>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-medium text-[var(--text-strong)]">
+                            {nameOf(c.course_id)}
+                          </div>
+                          <div className="mt-0.5 text-xs text-[var(--text-muted)]">
+                            已学 {formatDuration(c.watched_ms)} · 上次{" "}
+                            {relativeDay(c.last_ts, today)}
+                            {total > 0 && ` · 完成 ${watched}/${total} 讲`}
+                          </div>
                         </div>
-                        <div className="mt-0.5 text-xs text-[var(--text-muted)]">
-                          已学 {formatDuration(c.watched_ms)} · 上次{" "}
-                          {relativeDay(c.last_ts, today)}
-                        </div>
-                      </div>
-                    </button>
-                  </li>
-                ))}
+                        {due > 0 && (
+                          <span className="flex-none rounded-md bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary">
+                            待复习 {due}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>

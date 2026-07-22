@@ -165,6 +165,8 @@ export const ipc = {
       invoke("cmd_due_cards_by_concept", { courseId, conceptId }),
     // 全局薄弱主题（差评率高的概念在前），供仪表盘推送。
     weakConcepts: (): Promise<WeakConcept[]> => invoke("cmd_weak_concepts"),
+    // 每门课的到期待复习卡数 [course_id, due]（供课程卡「待复习」徽章）。
+    dueByCourse: (): Promise<[string, number][]> => invoke("cmd_due_by_course"),
   },
   stats: {
     // 记一段实际观看毫秒（<=0 后端忽略）。
@@ -177,6 +179,8 @@ export const ipc = {
     courseTotals: (): Promise<CourseTotal[]> => invoke("cmd_course_totals"),
     // 每门课上次看到的视频（按最近学习倒序），供仪表盘一键续播。
     continueLearning: (): Promise<ContinueRow[]> => invoke("cmd_continue_learning"),
+    // 所有未删除视频的 [course_id, video_id]（供课程完成度：已看数由本地进度判定）。
+    courseVideoIds: (): Promise<[string, string][]> => invoke("cmd_course_video_ids"),
   },
   concepts: {
     // 分析本课程概念（会调多次 LLM，耗时），返回入库概念数。
