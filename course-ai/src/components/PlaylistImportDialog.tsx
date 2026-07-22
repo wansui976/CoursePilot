@@ -260,32 +260,31 @@ export function PlaylistImportDialog({
                 已选 {selected.size} / {info.episodes.length}
               </span>
             </div>
-            <div className="mb-3 min-h-0 flex-1 space-y-0.5 overflow-y-auto rounded-lg border border-[var(--border-subtle)] p-1.5">
-              {info.episodes.map((ep) => (
-                <label
-                  key={ep.url}
-                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-[var(--surface-card-hover)]"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selected.has(ep.url)}
-                    onChange={() => toggle(ep.url)}
-                    className="h-3.5 w-3.5 flex-none accent-[var(--accent-text)]"
-                  />
-                  {/* 长标题不截断：单行横向滚动，可向左滑动看全；hover 也给完整标题。 */}
-                  <span
-                    title={ep.title}
-                    className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-[var(--text-normal)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            {/* 整个清单一条细滚动条：长标题不截断，横向滑动时各行一起移动。 */}
+            <div className="ca-thin-scroll mb-3 min-h-0 flex-1 overflow-auto rounded-lg border border-[var(--border-subtle)] p-1.5">
+              <div className="min-w-max space-y-0.5">
+                {info.episodes.map((ep) => (
+                  <label
+                    key={ep.url}
+                    className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-2 py-1.5 text-sm hover:bg-[var(--surface-card-hover)]"
                   >
-                    {ep.title}
-                  </span>
-                  {ep.duration_ms != null && (
-                    <span className="flex-none text-xs tabular-nums text-[var(--text-faint)]">
-                      {formatMs(ep.duration_ms)}
+                    <input
+                      type="checkbox"
+                      checked={selected.has(ep.url)}
+                      onChange={() => toggle(ep.url)}
+                      className="h-3.5 w-3.5 flex-none accent-[var(--accent-text)]"
+                    />
+                    <span title={ep.title} className="text-[var(--text-normal)]">
+                      {ep.title}
                     </span>
-                  )}
-                </label>
-              ))}
+                    {ep.duration_ms != null && (
+                      <span className="ml-auto flex-none pl-3 text-xs tabular-nums text-[var(--text-faint)]">
+                        {formatMs(ep.duration_ms)}
+                      </span>
+                    )}
+                  </label>
+                ))}
+              </div>
             </div>
 
             <div className="flex-none space-y-2">
