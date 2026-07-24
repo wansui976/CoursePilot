@@ -43,6 +43,9 @@ export interface DueCard {
   front: string;
   back: string;
   source_ms: number | null;
+  question_type?: "single" | "multi" | "judge" | null;
+  options?: string[] | null;
+  correct_options?: string[] | null;
 }
 
 /** 某概念的待复习卡片数（概念面板「复习 N」）。 */
@@ -89,13 +92,47 @@ export interface ConceptOccurrence {
   video_id: string;
   video_title: string;
   start_ms: number;
+  end_ms?: number | null;
+  excerpt?: string | null;
 }
 
 /** 课程里的一个概念及其出现位置。 */
 export interface CourseConcept {
   id: string;
   name: string;
+  summary?: string | null;
+  /** 展开知识点时展示的一段 AI 解释（分析时依据字幕片段预生成）。 */
+  explanation?: string | null;
   occurrences: ConceptOccurrence[];
+}
+
+export interface CourseKnowledgeGroup {
+  title: string;
+  summary: string | null;
+  concepts: CourseConcept[];
+}
+
+/** 课程知识分析进度：已处理视频数 / 总数 / 当前视频标题。 */
+export interface AnalyzeProgress {
+  done: number;
+  total: number;
+  title: string;
+}
+
+/** 分析命令通过 `concept-analyze:<requestId>` 事件推送的进度 / 完成 / 出错。 */
+type AnalyzeEvent =
+  | ({ type: "progress" } & AnalyzeProgress)
+  | { type: "done"; count: number }
+  | { type: "error"; message: string };
+
+/** 首页课程知识页：总览、主题分组及可回看的真实字幕来源。 */
+export interface CourseKnowledge {
+  overview: string | null;
+  groups: CourseKnowledgeGroup[];
+  generated_at: number | null;
+  covered_videos: number;
+  total_videos: number;
+  stale: boolean;
 }
 
 export const ipc = {
@@ -193,12 +230,84 @@ export const ipc = {
     courseVideoIds: (): Promise<[string, string][]> => invoke("cmd_course_video_ids"),
   },
   concepts: {
-    // 分析本课程概念（会调多次 LLM，耗时），返回入库概念数。
-    analyze: (courseId: string): Promise<number> =>
-      invoke("cmd_analyze_course_concepts", { courseId }),
+    // 分析本课程概念（会调多次 LLM，耗时）。命令立即返回、活儿丢后台跑，逐视频进度经
+    // `concept-analyze:<requestId>` 事件实时到达；最终入库概念数从 done 事件取回。
+    analyze: async (
+      courseId: string,
+      requestId: string,
+      onProgress: (progress: AnalyzeProgress) => void,
+    ): Promise<number> => {
+      let resolveCount!: (count: number) => void;
+      let rejectCount!: (error: unknown) => void;
+      const count = new Promise<number>((res, rej) => {
+        resolveCount = res;
+        rejectCount = rej;
+      });
+      // 先注册监听再 invoke，避免漏掉早到的事件。
+      const unlisten = await listen<AnalyzeEvent>(`concept-analyze:${requestId}`, (evt) => {
+        const e = evt.payload;
+        if (e.type === "progress") onProgress(e);
+        else if (e.type === "done") resolveCount(e.count);
+        else if (e.type === "error") rejectCount(new Error(e.message));
+      });
+      try {
+        // 命令本身只在「配置错误（未配 Profile 等）」时才 reject。
+        await invoke("cmd_analyze_course_concepts", { courseId, requestId });
+        return await count;
+      } catch (err) {
+        rejectCount(err);
+        throw err;
+      } finally {
+        unlisten();
+      }
+    },
+    // 取消进行中的分析：分析循环会在下个视频/片段前停下且不写库。
+    cancelAnalyze: (requestId: string): Promise<void> =>
+      invoke("cmd_cancel_course_analysis", { requestId }),
     // 列出本课程已抽取的概念（未分析则空表）。
     list: (courseId: string): Promise<CourseConcept[]> =>
       invoke("cmd_list_course_concepts", { courseId }),
+    // 课程知识页完整载荷；旧概念数据会由后端兼容为单一分组。
+    get: (courseId: string): Promise<CourseKnowledge> =>
+      invoke("cmd_get_course_knowledge", { courseId }),
+    // 仅基于已有概念生成课程总览与主题，不重新扫描全课字幕。
+    summarize: (courseId: string): Promise<void> =>
+      invoke("cmd_generate_course_knowledge", { courseId }),
+    // 以整门课程的总览+知识点为背景的流式问答。命令立即返回、活儿丢后台跑，token 与最终
+    // 结果都走 `course-chat:<requestId>` 事件到达；先注册监听再 invoke，避免漏早到的事件。
+    chat: async (
+      courseId: string,
+      query: string,
+      history: ChatMessage[],
+      requestId: string,
+      onEvent: (e: AskEvent) => void,
+    ): Promise<string> => {
+      let resolveAnswer!: (a: string) => void;
+      let rejectAnswer!: (e: unknown) => void;
+      const answer = new Promise<string>((res, rej) => {
+        resolveAnswer = res;
+        rejectAnswer = rej;
+      });
+      const unlisten = await listen<AskEvent>(`course-chat:${requestId}`, (evt) => {
+        const e = evt.payload;
+        if (e.type === "done") resolveAnswer(e.answer);
+        else if (e.type === "error") rejectAnswer(new Error(e.message));
+        else onEvent(e);
+      });
+      try {
+        // 命令本身只在「配置错误（未配 Profile 等）」时才 reject。
+        await invoke("cmd_course_knowledge_chat_stream", { courseId, query, history, requestId });
+        return await answer;
+      } catch (err) {
+        rejectAnswer(err);
+        throw err;
+      } finally {
+        unlisten();
+      }
+    },
+    // 停止进行中的课程问答：登记表全局按 requestId 共用，复用 rag 的取消命令即可。
+    cancelChat: (requestId: string): Promise<void> =>
+      invoke("cmd_cancel_rag_query", { requestId }),
   },
   secrets: {
     // 保存敏感凭证（ASR/OCR 密钥）到密钥存储。

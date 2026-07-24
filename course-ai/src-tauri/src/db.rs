@@ -127,6 +127,7 @@ mod tests {
             "slides",
             "screenshots",
             "embeddings",
+            "course_knowledge_overviews",
         ] {
             let row: (String,) =
                 sqlx::query_as("SELECT name FROM sqlite_master WHERE type='table' AND name=?")
