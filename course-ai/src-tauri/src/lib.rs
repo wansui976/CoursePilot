@@ -21,7 +21,10 @@ use crate::commands::courses::{
     cmd_create_course, cmd_delete_course, cmd_list_courses, cmd_relink_course_root,
     cmd_rename_course, AppState,
 };
-use crate::commands::concepts::{cmd_analyze_course_concepts, cmd_list_course_concepts};
+use crate::commands::concepts::{
+    cmd_analyze_course_concepts, cmd_cancel_course_analysis, cmd_course_knowledge_chat_stream,
+    cmd_generate_course_knowledge, cmd_get_course_knowledge, cmd_list_course_concepts,
+};
 use crate::commands::notify::cmd_notify;
 use crate::commands::export::{
     cmd_export_mindmap, cmd_export_notes, cmd_export_quiz, cmd_export_subtitles,
@@ -169,7 +172,11 @@ pub fn run() {
             cmd_continue_learning,
             cmd_course_video_ids,
             cmd_analyze_course_concepts,
+            cmd_cancel_course_analysis,
             cmd_list_course_concepts,
+            cmd_get_course_knowledge,
+            cmd_generate_course_knowledge,
+            cmd_course_knowledge_chat_stream,
             cmd_generate_cards,
             cmd_due_cards,
             cmd_count_due,

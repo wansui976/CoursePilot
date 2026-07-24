@@ -35,11 +35,16 @@ impl AppState {
         flag
     }
 
-    /// 置位对应请求的取消标志（不存在则忽略）。
-    pub fn cancel_rag(&self, id: &str) {
+    /// 置位对应请求的取消标志（通用；不存在则忽略）。问答与课程知识分析共用此登记表。
+    pub fn cancel(&self, id: &str) {
         if let Some(flag) = self.rag_cancels.lock().unwrap().get(id) {
             flag.store(true, std::sync::atomic::Ordering::SeqCst);
         }
+    }
+
+    /// 置位对应问答请求的取消标志（不存在则忽略）。
+    pub fn cancel_rag(&self, id: &str) {
+        self.cancel(id);
     }
 
     /// 请求结束后仅移除自己的登记，避免同 id 的新请求被旧任务收尾误删。
