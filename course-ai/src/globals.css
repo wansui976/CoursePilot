@@ -804,7 +804,9 @@ select:focus-visible {
   display: grid;
   gap: 18px;
   align-content: start;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  /* auto-fit（而非 auto-fill）：卡片不足以铺满一行时，空轨道会塌缩，
+     卡片拉伸填满宽度。否则侧栏折叠、主区变宽后会在最右侧留出空白轨道。 */
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
 .ca-card {
@@ -1067,7 +1069,8 @@ select:focus-visible {
 }
 
 .ca-list {
-  max-width: 980px;
+  /* 不设 max-width：列表铺满主区宽度。否则宽屏（尤其折叠侧栏后主区变宽）会停在
+     980px 靠左，最右侧留出空白、行「没有铺满」。名称列是 1fr，变宽只是标题更宽。 */
   display: flex;
   flex-direction: column;
 }
@@ -1707,12 +1710,45 @@ select:focus-visible {
   }
 }
 
-/* 明暗切换首选 View Transitions(theme.ts):两张快照 GPU 交叉淡化,一次重绘,
-   打开文稿等大 DOM 时不掉帧;时长与旧全树过渡对齐。 */
+/* 明暗切换默认 View Transitions(theme.ts):两张快照 GPU 交叉淡化。
+   从左下角按钮切换时会改走圆形揭开（见 .theme-circle-vt）。 */
 ::view-transition-old(root),
 ::view-transition-new(root) {
   animation-duration: 0.3s;
 }
+
+/* 按钮触发的圆形切色：新主题快照从点击点以 clip-path 圆扩到整屏。 */
+html.theme-circle-vt {
+  /* 默认值兜底，真正数值由 theme.ts 在切换前写入。 */
+  --theme-circle-x: 50%;
+  --theme-circle-y: 50%;
+  --theme-circle-r: 100vmax;
+}
+
+html.theme-circle-vt::view-transition-old(root) {
+  /* 旧画面保持静止垫底，让圆扩散更清晰。 */
+  animation: none;
+  z-index: 1;
+}
+
+html.theme-circle-vt::view-transition-new(root) {
+  animation: ca-theme-circle-reveal 0.6s cubic-bezier(0.2, 0, 0, 1) both;
+  z-index: 2147483646;
+}
+
+@keyframes ca-theme-circle-reveal {
+  from {
+    clip-path: circle(0px at var(--theme-circle-x) var(--theme-circle-y));
+  }
+  to {
+    clip-path: circle(var(--theme-circle-r) at var(--theme-circle-x) var(--theme-circle-y));
+  }
+}
+
+/* 注意:此处不再用 @media (prefers-reduced-motion: reduce) 关掉圆形揭开。
+   圆形揭开只在用户「亲手点击切换按钮」时触发(theme.ts 里带起点的路径),属于对用户
+   直接操作的即时反馈、时长很短,即便系统开了「减弱动态效果」也照常展示——否则会重现
+   「只切色、永远看不到圆」的问题。跟随系统明暗的自动切换仍走瞬切(见 theme.ts)。 */
 
 /* 明暗切换兜底(引擎不支持 View Transitions 时)：切换瞬间由 JS 给 <html> 加
    .theme-animating(~300ms)，让整树颜色一起淡变，避免「按钮淡变、背景/文字/卡片
