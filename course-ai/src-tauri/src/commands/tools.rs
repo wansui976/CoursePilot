@@ -20,6 +20,74 @@ fn default_ocr_backend() -> &'static str {
     }
 }
 
+/// 阿里云 OCR 凭证是否齐全（AccessKey + 密钥）。
+pub async fn aliyun_ocr_configured(db: &crate::db::Db) -> bool {
+    let key_id = get_setting(db, "aliyun_ocr_access_key_id")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let secret = crate::llm::keychain::get_secret_or_legacy(db, "aliyun_ocr_access_key_secret")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    !key_id.trim().is_empty() && !secret.trim().is_empty()
+}
+
+/// 选用哪个 OCR 引擎：设置里显式选过就听设置（用户的明确选择优先）；
+/// 没选过时，配了阿里云就走云——中文幻灯片上云端质量明显好过本地 tesseract。
+pub async fn resolve_ocr_backend(db: &crate::db::Db) -> String {
+    if let Some(explicit) = get_setting(db, "ocr_backend")
+        .await
+        .ok()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        if !is_mobile_os(std::env::consts::OS) || explicit == "aliyun" {
+            return explicit;
+        }
+    }
+    if aliyun_ocr_configured(db).await {
+        return "aliyun".to_string();
+    }
+    default_ocr_backend().to_string()
+}
+
+/// 云端 OCR 需要的凭证与识别类型。
+pub struct AliyunOcrConfig {
+    pub access_key_id: String,
+    pub access_key_secret: String,
+    pub ocr_type: String,
+}
+
+pub async fn aliyun_ocr_config(db: &crate::db::Db) -> AppResult<AliyunOcrConfig> {
+    Ok(AliyunOcrConfig {
+        access_key_id: get_setting(db, "aliyun_ocr_access_key_id")
+            .await?
+            .unwrap_or_default(),
+        access_key_secret: crate::llm::keychain::get_secret_or_legacy(
+            db,
+            "aliyun_ocr_access_key_secret",
+        )
+        .await?
+        .unwrap_or_default(),
+        ocr_type: get_setting(db, "aliyun_ocr_type")
+            .await?
+            .unwrap_or_else(|| aliyun_ocr::DEFAULT_TYPE.to_string()),
+    })
+}
+
+/// 本地 tesseract 的语言包设置。
+pub async fn ocr_langs(db: &crate::db::Db) -> String {
+    get_setting(db, "ocr_langs")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| DEFAULT_OCR_LANGS.to_string())
+}
+
 /// 对视频某时刻的（可选）区域做 OCR，返回识别文本。w/h 为 0 表示整帧。
 /// 后端由设置 `ocr_backend` 决定：tesseract（本地，默认）或 aliyun（阿里云统一识别）。
 #[tauri::command]
@@ -35,33 +103,14 @@ pub async fn cmd_ocr_region(
     if is_mobile_os(std::env::consts::OS) {
         return Err(AppError::Config("移动端暂不支持本地 OCR 截字".into()));
     }
-    let video: Video = sqlx::query_as("SELECT * FROM videos WHERE id=?")
+    let video: Video = sqlx::query_as("SELECT * FROM videos WHERE id=? AND deleted_at IS NULL")
         .bind(&video_id)
-        .fetch_one(&state.db.pool)
-        .await?;
-    let rect = ocr::Rect { x, y, w, h };
-    let backend = get_setting(&state.db, "ocr_backend")
+        .fetch_optional(&state.db.pool)
         .await?
-        .filter(|value| {
-            if is_mobile_os(std::env::consts::OS) {
-                value.trim() == "aliyun"
-            } else {
-                true
-            }
-        })
-        .unwrap_or_else(|| default_ocr_backend().to_string());
-
-    if backend == "aliyun" {
-        let access_key_id = get_setting(&state.db, "aliyun_ocr_access_key_id")
-            .await?
-            .unwrap_or_default();
-        let access_key_secret =
-            crate::llm::keychain::get_secret_or_legacy(&state.db, "aliyun_ocr_access_key_secret")
-                .await?
-                .unwrap_or_default();
-        let ocr_type = get_setting(&state.db, "aliyun_ocr_type")
-            .await?
-            .unwrap_or_else(|| aliyun_ocr::DEFAULT_TYPE.to_string());
+        .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    let rect = ocr::Rect { x, y, w, h };
+    if resolve_ocr_backend(&state.db).await == "aliyun" {
+        let config = aliyun_ocr_config(&state.db).await?;
         let image = ocr::grab_frame(
             Path::new(&video.file_path),
             Path::new(&video.data_dir),
@@ -70,13 +119,16 @@ pub async fn cmd_ocr_region(
         )
         .await?;
         let bytes = tokio::fs::read(&image).await?;
-        return aliyun_ocr::run_aliyun_ocr(&bytes, &access_key_id, &access_key_secret, &ocr_type)
-            .await;
+        return aliyun_ocr::run_aliyun_ocr(
+            &bytes,
+            &config.access_key_id,
+            &config.access_key_secret,
+            &config.ocr_type,
+        )
+        .await;
     }
 
-    let langs = get_setting(&state.db, "ocr_langs")
-        .await?
-        .unwrap_or_else(|| DEFAULT_OCR_LANGS.to_string());
+    let langs = ocr_langs(&state.db).await;
     ocr::run_ocr(
         Path::new(&video.file_path),
         Path::new(&video.data_dir),

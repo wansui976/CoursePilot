@@ -3,24 +3,104 @@ use crate::error::{AppError, AppResult};
 use crate::llm::Provider;
 use serde::Serialize;
 
+/// "[mm:ss]" 时间前缀。
+fn stamp(start_ms: i64) -> String {
+    let total = start_ms.max(0) / 1000;
+    format!("[{:02}:{:02}]", total / 60, total % 60)
+}
+
+/// 一行上下文：讲稿或板书。
+struct ContextLine {
+    start_ms: i64,
+    /// 板书行排在同一时刻的讲稿前面：先看见写了什么，再看讲解。
+    is_slide: bool,
+    text: String,
+}
+
+/// 把一页 OCR 文本切成行，并去掉与上一页重复的行。
+///
+/// 递进式动画（bullet 一条条出现）会让相邻页共享绝大部分文字，逐页原样拼进上下文
+/// 会让板书内容的字数超过讲稿本身、且几乎全是重复，把真正的信息淹掉。只保留新增行，
+/// 顺带把「逐条出现」还原成一次完整的要点列表。纯函数，可单测。
+pub fn new_slide_lines(previous: &[String], current: &str) -> Vec<String> {
+    current
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| !previous.iter().any(|seen| seen == line))
+        .map(str::to_string)
+        .collect()
+}
+
 /// 从 transcripts 表拼出 "[mm:ss] text" 多行文本。
 pub async fn transcript_text(db: &Db, video_id: &str) -> AppResult<String> {
-    let rows: Vec<(i64, String)> =
+    lecture_context(db, video_id).await
+}
+
+/// 喂给 AI 的这一讲的全部可读信息：讲稿 + 课件页上认出来的文字，按时间交织。
+///
+/// 板书行标 `(板书)`：定义、公式、专有名词通常写在片子上而老师念的时候会省略或口误，
+/// 讲稿则承载理解和例子——两类信息可信度不同，模型需要能区分。没有课件 OCR 时
+/// 输出与从前完全一致（纯讲稿），所以对未提取课件的视频没有任何行为变化。
+pub async fn lecture_context(db: &Db, video_id: &str) -> AppResult<String> {
+    let spoken: Vec<(i64, String)> =
         sqlx::query_as("SELECT start_ms, text FROM transcripts WHERE video_id=? ORDER BY start_ms")
             .bind(video_id)
             .fetch_all(&db.pool)
             .await?;
-    if rows.is_empty() {
+    if spoken.is_empty() {
         return Err(AppError::NotFound(format!("no transcript for {video_id}")));
     }
+    let slides: Vec<(i64, Option<String>)> = sqlx::query_as(
+        "SELECT start_ms, ocr_text FROM slides WHERE video_id=? ORDER BY page_no, start_ms",
+    )
+    .bind(video_id)
+    .fetch_all(&db.pool)
+    .await?;
+
+    let mut lines: Vec<ContextLine> = spoken
+        .into_iter()
+        .map(|(start_ms, text)| ContextLine {
+            start_ms,
+            is_slide: false,
+            text: text.trim().to_string(),
+        })
+        .collect();
+
+    let mut seen: Vec<String> = Vec::new();
+    for (start_ms, ocr_text) in slides {
+        let Some(text) = ocr_text.as_deref().map(str::trim).filter(|t| !t.is_empty()) else {
+            continue;
+        };
+        let fresh = new_slide_lines(&seen, text);
+        if fresh.is_empty() {
+            continue;
+        }
+        seen.extend(fresh.iter().cloned());
+        lines.push(ContextLine {
+            start_ms,
+            is_slide: true,
+            text: fresh.join(" / "),
+        });
+    }
+    // 同一时刻先板书后讲稿；其余按时间。
+    lines.sort_by(|a, b| {
+        a.start_ms
+            .cmp(&b.start_ms)
+            .then(b.is_slide.cmp(&a.is_slide))
+    });
+
     let mut out = String::new();
-    for (start_ms, text) in rows {
-        let total = start_ms / 1000;
+    for line in lines {
+        if line.text.is_empty() {
+            continue;
+        }
+        let marker = if line.is_slide { " (板书)" } else { "" };
         out.push_str(&format!(
-            "[{:02}:{:02}] {}\n",
-            total / 60,
-            total % 60,
-            text.trim()
+            "{}{} {}\n",
+            stamp(line.start_ms),
+            marker,
+            line.text
         ));
     }
     Ok(out)
@@ -247,6 +327,67 @@ mod tests {
         .await
         .unwrap();
         (db, video.id, dir)
+    }
+
+    #[test]
+    fn new_slide_lines_drops_lines_already_seen() {
+        // 递进式动画：第二页只是多出一条，重复的两行不该再进上下文。
+        let previous = vec!["贝叶斯定理".to_string(), "先验与后验".to_string()];
+        assert_eq!(
+            new_slide_lines(&previous, "贝叶斯定理\n先验与后验\n似然函数\n\n  "),
+            vec!["似然函数".to_string()]
+        );
+        assert!(new_slide_lines(&previous, "先验与后验").is_empty());
+    }
+
+    #[tokio::test]
+    async fn lecture_context_interleaves_slide_text_with_speech() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        sqlx::query(
+            "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,1,65000,70000,?)",
+        )
+        .bind(&vid)
+        .bind("这里说到似然")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        for (page, start_ms, text) in [
+            (0_i64, 0_i64, "贝叶斯定理\n先验与后验"),
+            // 第二页含上一页重复行 + 新增行；重复的不应再出现。
+            (1, 65_000, "先验与后验\n似然函数"),
+            // 空 OCR（判废或没认过）的页直接跳过，不留空行。
+            (2, 90_000, ""),
+        ] {
+            sqlx::query(
+                "INSERT INTO slides(video_id,image_path,start_ms,end_ms,page_no,ocr_text)
+                 VALUES (?,?,?,NULL,?,?)",
+            )
+            .bind(&vid)
+            .bind(format!("/tmp/{page}.jpg"))
+            .bind(start_ms)
+            .bind(page)
+            .bind(text)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        }
+
+        let context = lecture_context(&db, &vid).await.unwrap();
+        let lines: Vec<&str> = context.lines().collect();
+        // 同一时刻先板书后讲稿：先看见写了什么，再看讲解。
+        assert_eq!(lines[0], "[00:00] (板书) 贝叶斯定理 / 先验与后验");
+        assert_eq!(lines[1], "[00:00] 讲解第一部分");
+        assert_eq!(lines[2], "[01:05] (板书) 似然函数");
+        assert_eq!(lines[3], "[01:05] 这里说到似然");
+        assert_eq!(lines.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn lecture_context_without_slides_is_plain_transcript() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        // 没提取课件的视频，上下文与从前完全一致（不含任何板书标记）。
+        let context = lecture_context(&db, &vid).await.unwrap();
+        assert_eq!(context, "[00:00] 讲解第一部分\n");
     }
 
     #[test]

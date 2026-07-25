@@ -108,15 +108,9 @@ pub async fn grab_frame(
     Err(AppError::Config("移动端不支持本地 ffmpeg 截帧".into()))
 }
 
+/// 对一张已落地的图片跑本地 tesseract。课件页 OCR 直接认已有的页图，不必重新截帧。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub async fn run_ocr(
-    video: &Path,
-    out_dir: &Path,
-    at_ms: i64,
-    rect: Rect,
-    langs: &str,
-) -> AppResult<String> {
-    let image = grab_frame(video, out_dir, at_ms, rect).await?;
+pub async fn run_ocr_on_image(image: &Path, langs: &str) -> AppResult<String> {
     let tesseract = resolve(&TESSERACT, None)?;
     let args = build_tesseract_args(&image.to_string_lossy(), langs);
     let output = Command::new(&tesseract)
@@ -133,9 +127,101 @@ pub async fn run_ocr(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub async fn run_ocr_on_image(_image: &Path, _langs: &str) -> AppResult<String> {
+    Err(AppError::Config("移动端暂不支持本地 OCR".into()))
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub async fn run_ocr(
+    video: &Path,
+    out_dir: &Path,
+    at_ms: i64,
+    rect: Rect,
+    langs: &str,
+) -> AppResult<String> {
+    let image = grab_frame(video, out_dir, at_ms, rect).await?;
+    run_ocr_on_image(&image, langs).await
+}
+
+// 判废用的最低要求：去掉空白后至少这么多字符，且有效字符（中日韩/字母数字/常见标点）
+// 占比不低于这个比例。中文幻灯片走本地 tesseract 时公式和艺术字常出乱码，
+// 乱码进了 AI 背景比没有更糟——模型会照着乱码编术语，所以宁可整页丢掉。
+const OCR_MIN_CHARS: usize = 4;
+const OCR_MIN_VALID_RATIO: f64 = 0.6;
+
+/// 一个字符是否算「像正常文本」。
+fn is_meaningful_char(ch: char) -> bool {
+    ch.is_alphanumeric()
+        || matches!(
+            ch,
+            '，' | '。'
+                | '、'
+                | '：'
+                | '；'
+                | '？'
+                | '！'
+                | '（'
+                | '）'
+                | '《'
+                | '》'
+                | '“'
+                | '”'
+                | '·'
+                | '—'
+                | '%'
+                | '.'
+                | ','
+                | ':'
+                | ';'
+                | '?'
+                | '!'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '+'
+                | '-'
+                | '='
+                | '/'
+                | '<'
+                | '>'
+                | '*'
+                | '&'
+                | '#'
+                | '\''
+                | '"'
+        )
+}
+
+/// OCR 结果是否值得留下。纯函数，可单测。
+pub fn ocr_text_is_usable(text: &str) -> bool {
+    let visible: Vec<char> = text.chars().filter(|ch| !ch.is_whitespace()).collect();
+    if visible.len() < OCR_MIN_CHARS {
+        return false;
+    }
+    let meaningful = visible
+        .iter()
+        .copied()
+        .filter(|ch| is_meaningful_char(*ch))
+        .count();
+    meaningful as f64 / visible.len() as f64 >= OCR_MIN_VALID_RATIO
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ocr_quality_gate_keeps_text_and_drops_junk() {
+        assert!(ocr_text_is_usable("贝叶斯定理：P(A|B) = P(B|A)P(A)/P(B)"));
+        assert!(ocr_text_is_usable("Chapter 2 — Bayes' rule"));
+        // 太短：一两个字符没有价值。
+        assert!(!ocr_text_is_usable("。"));
+        assert!(!ocr_text_is_usable("   \n  "));
+        // 乱码：进了 AI 背景比没有更糟，模型会照着乱码编术语。
+        assert!(!ocr_text_is_usable("§¥«»~^`|\\@¤¶"));
+    }
 
     #[test]
     fn tesseract_args_have_stdout_and_lang() {

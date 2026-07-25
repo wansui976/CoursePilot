@@ -34,8 +34,8 @@ use crate::commands::rag::{
 };
 use crate::commands::settings::{cmd_get_setting, cmd_has_secret, cmd_set_secret, cmd_set_setting};
 use crate::commands::slides::{
-    cmd_cancel_slides_extract, cmd_capture_frame, cmd_extract_slides, cmd_get_screenshots,
-    cmd_get_slides, cmd_read_slide_image,
+    cmd_cancel_slides_extract, cmd_cancel_slides_ocr, cmd_capture_frame, cmd_extract_slides,
+    cmd_get_screenshots, cmd_get_slides, cmd_ocr_slides, cmd_read_slide_image,
 };
 use crate::commands::srs::{
     cmd_add_card, cmd_concept_due_counts, cmd_count_due, cmd_due_by_course, cmd_due_cards,
@@ -151,6 +151,8 @@ pub fn run() {
             cmd_generate_ai,
             cmd_extract_slides,
             cmd_cancel_slides_extract,
+            cmd_ocr_slides,
+            cmd_cancel_slides_ocr,
             cmd_get_slides,
             cmd_read_slide_image,
             cmd_capture_frame,
