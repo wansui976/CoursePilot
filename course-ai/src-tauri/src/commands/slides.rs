@@ -1,6 +1,7 @@
 use crate::commands::courses::AppState;
 use crate::commands::videos::Video;
 use crate::error::{AppError, AppResult};
+use crate::pipeline::crop_detect::{CropInsets, NO_CROP};
 use crate::pipeline::slides;
 use serde::Serialize;
 use std::path::Path;
@@ -25,6 +26,17 @@ pub struct ScreenshotRow {
     pub image_path: String,
     pub at_ms: i64,
     pub created_at: i64,
+}
+
+/// 库里存的黑边四边占比（导入时 cropdetect 探测）；未探测或无黑边时为 None。
+fn video_crop(video: &Video) -> Option<CropInsets> {
+    let insets = CropInsets {
+        top: video.crop_top?,
+        right: video.crop_right?,
+        bottom: video.crop_bottom?,
+        left: video.crop_left?,
+    };
+    (insets != NO_CROP).then_some(insets)
 }
 
 async fn load_video(state: &AppState, video_id: &str) -> AppResult<Video> {
@@ -101,8 +113,11 @@ pub async fn cmd_extract_slides(
     let extracted = slides::extract_slides(
         Path::new(&video.file_path),
         Path::new(&video.data_dir),
-        threshold,
-        video.duration_ms,
+        slides::ExtractOptions {
+            block_delta: threshold,
+            duration_ms: video.duration_ms,
+            crop: video_crop(&video),
+        },
         &cancel,
         &mut on_progress,
     )
