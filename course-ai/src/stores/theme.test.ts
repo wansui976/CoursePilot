@@ -107,6 +107,50 @@ describe("theme store light/dark transition", () => {
     expect(document.querySelector("[data-theme-circle-reveal]")).toBeNull();
   });
 
+  it("keeps the circle on the newest toggle when clicking rapidly", async () => {
+    // 回归：连点时 VT 会把上一次 skip 掉（finished 立即 reject），若那次照常收尾，
+    // 就会把正在播放的这一次的 .theme-circle-vt / --theme-circle-* 摘掉，
+    // 动画退化成默认交叉淡化 —— 表现就是「快速点击直接切换、没有圆」。
+    vi.useFakeTimers();
+    const settlers: { resolve: () => void; reject: (e: unknown) => void }[] = [];
+    const startViewTransition = vi.fn((cb: () => void) => {
+      cb();
+      let resolve!: () => void;
+      let reject!: (e: unknown) => void;
+      const finished = new Promise<void>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      finished.catch(() => {});
+      settlers.push({ resolve, reject });
+      return { finished };
+    });
+    vtDocument.startViewTransition = startViewTransition;
+    const root = document.documentElement;
+
+    setThemeToggleOrigin(20, 700);
+    useTheme.getState().toggle();
+    setThemeToggleOrigin(24, 690);
+    useTheme.getState().toggle();
+
+    expect(startViewTransition).toHaveBeenCalledTimes(2);
+    // 第一次被 skip：finished reject 不能影响第二次。
+    settlers[0].reject(new Error("skipped"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(root.classList.contains("theme-circle-vt")).toBe(true);
+    expect(root.style.getPropertyValue("--theme-circle-x")).toBe("24px");
+    expect(useTheme.getState().effective).toBe("light");
+
+    // 第一次的兜底 timer 也不能在第二次播到一半时把变量摘掉。
+    await vi.advanceTimersByTimeAsync(900);
+    expect(root.classList.contains("theme-circle-vt")).toBe(true);
+
+    settlers[1].resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(root.classList.contains("theme-circle-vt")).toBe(false);
+    expect(root.style.getPropertyValue("--theme-circle-x")).toBe("");
+  });
+
   it("keeps the circular reveal even when visible heavy DOM is present", async () => {
     vi.useFakeTimers();
     const startViewTransition = vi.fn((cb: () => void) => {
