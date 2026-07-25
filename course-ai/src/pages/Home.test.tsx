@@ -138,12 +138,16 @@ describe("Home", () => {
     expect(screen.queryByText("course-ai")).not.toBeInTheDocument();
   });
 
-  it("toggles to dark theme and stores the selection", () => {
+  it("toggles to dark theme and stores the selection", async () => {
     const { container } = renderHome();
 
     fireEvent.click(screen.getByRole("button", { name: "切换到夜晚模式" }));
 
-    expect(container.firstElementChild).toHaveAttribute("data-theme", "dark");
+    // 从按钮扩散的切色圆：新主题在圆盖满整屏时才落到 DOM（没有 View Transitions 的
+    // 环境走覆盖层兜底路径），所以这里等它结算，而不是断言点击后立刻变色。
+    await waitFor(() => {
+      expect(container.firstElementChild).toHaveAttribute("data-theme", "dark");
+    });
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
     expect(localStorage.getItem("course-ai-theme")).toBe("dark");
     expect(screen.getByRole("button", { name: "切换到白天模式" })).toBeInTheDocument();
