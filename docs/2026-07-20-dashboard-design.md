@@ -15,7 +15,6 @@
   笔记数、出题掌握度。
 - **全局**：连续学习天数（streak）、日/周时长、GitHub 式热力图、目标进度。
 - **继续中心**：把 per-video 续看升级成跨课程「回到上次」聚合。
-- **薄弱主题**：聚合出题正确率（配合 #1 概念层）→「你在 X 最弱，来复习」。
 
 ## 数据来源
 
@@ -23,7 +22,6 @@
   `dailyTotals`/`courseTotals`。
 - 完成度：videos 总数 + 已看判定（WATCHED_RATIO，或事件日志推导）。
 - 待复习数：来自 #2 `card_schedule`（due_at ≤ now）。
-- 薄弱主题：出题评分（study_events kind='review'）按 concept 聚合（需 #1）。
 
 ## IPC（`ipc.stats.*`，扩展事件日志的查询）
 
