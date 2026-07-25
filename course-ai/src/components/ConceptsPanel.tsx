@@ -645,7 +645,7 @@ export function ConceptsPanel({
                 </button>
               </div>
               <div className="min-h-0 flex-1">
-                <CourseChatPanel courseId={courseId} />
+                <CourseChatPanel courseId={courseId} onJump={onJump} />
               </div>
             </aside>
           </>
