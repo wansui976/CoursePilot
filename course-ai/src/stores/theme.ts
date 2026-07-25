@@ -68,6 +68,15 @@ const SURFACE_APP: Record<EffectiveTheme, string> = {
 
 const CIRCLE_MS = 600;
 
+/** 圆形揭开的序号：快速连点时会有多次揭开重叠。VT 规范下新一次 startViewTransition 会把
+ *  上一次 skip 掉（其 finished 立即 reject），若那次的收尾照常执行，就会把正在播放的这一次
+ *  的 .theme-circle-vt 与 --theme-circle-* 一起摘掉 —— 动画退化成默认交叉淡化，表现即
+ *  「快速点击直接切换、没有圆」。只允许最新一次收尾。 */
+let circleSeq = 0;
+let circleCleanupTimer: ReturnType<typeof setTimeout> | undefined;
+/** 覆盖层兜底路径上，尚未收尾的那一次的 finish（连点时立即结算，避免叠圆）。 */
+let pendingOverlayFinish: (() => void) | null = null;
+
 function endRadiusFor(origin: { x: number; y: number }): number {
   const { x, y } = origin;
   return Math.hypot(
@@ -95,6 +104,9 @@ function circleRevealWithOverlay(
   next: EffectiveTheme,
   origin: { x: number; y: number },
 ): void {
+  // 连点：上一圈还没扩满就再切，先把它就地结算（提交它的主题并淡出），
+  // 保证主题按点击顺序落地，且屏幕上同时只有一个正在扩散的圆。
+  pendingOverlayFinish?.();
   const { x, y } = origin;
   const radius = Math.ceil(endRadiusFor(origin));
   const size = radius * 2;
@@ -140,6 +152,7 @@ function circleRevealWithOverlay(
   const finish = () => {
     if (finished) return;
     finished = true;
+    if (pendingOverlayFinish === finish) pendingOverlayFinish = null;
     document.documentElement.dataset.theme = next;
     flushSync(mutate);
     overlay.style.transition = "opacity 180ms ease-out";
@@ -148,6 +161,8 @@ function circleRevealWithOverlay(
     overlay.addEventListener("transitionend", remove, { once: true });
     window.setTimeout(remove, 260);
   };
+
+  pendingOverlayFinish = finish;
 
   const start = () => {
     overlay.style.transition = `transform ${CIRCLE_MS}ms cubic-bezier(0.2, 0, 0, 1)`;
@@ -186,6 +201,7 @@ function circleRevealViewTransition(
   origin: { x: number; y: number },
 ): void {
   const root = document.documentElement;
+  const seq = ++circleSeq;
   const endRadius = Math.ceil(endRadiusFor(origin));
   root.style.setProperty("--theme-circle-x", `${origin.x}px`);
   root.style.setProperty("--theme-circle-y", `${origin.y}px`);
@@ -193,6 +209,8 @@ function circleRevealViewTransition(
   root.classList.add("theme-circle-vt");
 
   const cleanup = () => {
+    // 已被更晚的一次揭开接管：那次正在用这些类与变量，绝不能替它摘掉。
+    if (seq !== circleSeq) return;
     root.classList.remove("theme-circle-vt");
     root.style.removeProperty("--theme-circle-x");
     root.style.removeProperty("--theme-circle-y");
@@ -214,7 +232,9 @@ function circleRevealViewTransition(
   }
   transition.finished.then(cleanup, cleanup);
   // 双保险:极端情况下 finished 不落定也要把类和自定义属性摘掉。
-  window.setTimeout(cleanup, CIRCLE_MS + 400);
+  // 只保留最新一次的兜底 timer,否则上一次的定时器会在这一次播到一半时开火。
+  if (circleCleanupTimer) clearTimeout(circleCleanupTimer);
+  circleCleanupTimer = setTimeout(cleanup, CIRCLE_MS + 400);
 }
 
 /** 从按钮起点做圆形切色:优先 View Transitions(圆内显示真实新界面);引擎不支持时
