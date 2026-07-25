@@ -1,5 +1,6 @@
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::pipeline::crop_detect::CropInsets;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::sidecar::{resolve, FFMPEG};
 use serde::Serialize;
@@ -15,6 +16,18 @@ pub struct SlideFrame {
     pub page_no: i64,
     pub image_path: String,
     pub start_ms: i64,
+}
+
+/// 提取参数。分开成一个结构而不是继续加参数，是因为这几项来源不同：门槛来自设置、
+/// 时长与黑边来自视频表。
+#[derive(Debug, Clone, Default)]
+pub struct ExtractOptions {
+    /// 单块亮度差门槛（0~255 量纲）；None 表示按画面噪声自估。
+    pub block_delta: Option<f64>,
+    /// 视频时长，只用来估采样总帧数好报百分比；None 时进度的 total 为 0。
+    pub duration_ms: Option<i64>,
+    /// 导入时 cropdetect 探测的黑边四边占比；None 或全 0 表示不裁。
+    pub crop: Option<CropInsets>,
 }
 
 /// 提取进度。`phase` 为 "sample"（降采样通读整段视频，耗时大头）或
@@ -46,6 +59,33 @@ impl ExtractProgress {
 
 fn cancelled() -> AppError {
     AppError::Other("课件提取已取消".into())
+}
+
+/// 黑边裁剪滤镜（`crop=w:h:x:y`，用 iw/ih 表达式所以不必知道具体分辨率）。
+/// 不裁时返回 None。黑边既该从判定里去掉——永远不变的黑块会稀释「变化块比例」，
+/// 让真正的换页显得没那么大——也该从存下来的课件图里去掉。
+/// 占比之和接近或超过整幅（旧数据/探测异常）时宁可不裁，免得把画面裁没了。
+fn crop_filter(insets: Option<CropInsets>) -> Option<String> {
+    let insets = insets?;
+    let clamp = |value: f64| {
+        if value.is_finite() {
+            value.clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    };
+    let (top, right) = (clamp(insets.top), clamp(insets.right));
+    let (bottom, left) = (clamp(insets.bottom), clamp(insets.left));
+    let (width, height) = (1.0 - left - right, 1.0 - top - bottom);
+    if width < 0.1 || height < 0.1 {
+        return None;
+    }
+    if width > 0.999 && height > 0.999 {
+        return None;
+    }
+    Some(format!(
+        "crop=iw*{width:.4}:ih*{height:.4}:iw*{left:.4}:ih*{top:.4}"
+    ))
 }
 
 // 同时最多跑几个截图进程。逐页串行时几十页就是几十次串行的进程启动+定位，
@@ -171,6 +211,7 @@ fn short_stderr(stderr: &[u8]) -> String {
 async fn sample_luma_frames(
     video: &Path,
     hwaccel: bool,
+    crop: Option<&str>,
     total_hint: usize,
     cancel: &AtomicBool,
     on_progress: &mut (dyn FnMut(ExtractProgress) + Send),
@@ -181,19 +222,17 @@ async fn sample_luma_frames(
     if hwaccel {
         command.args(["-hwaccel", "auto"]);
     }
+    // 先裁黑边再降采样：黑边不该占掉采样帧里的块。
+    let filters = match crop {
+        Some(crop) => format!("{crop},fps={SAMPLE_FPS},scale={SAMPLE_W}:{SAMPLE_H}"),
+        None => format!("fps={SAMPLE_FPS},scale={SAMPLE_W}:{SAMPLE_H}"),
+    };
     let mut child = command
         .arg("-i")
         .arg(video)
         .args([
             "-an", // 只要画面：别让音频白解一遍
-            "-sn",
-            "-vf",
-            &format!("fps={SAMPLE_FPS},scale={SAMPLE_W}:{SAMPLE_H}"),
-            "-pix_fmt",
-            "rgb24",
-            "-f",
-            "rawvideo",
-            "pipe:1",
+            "-sn", "-vf", &filters, "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1",
         ])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -240,14 +279,15 @@ async fn sample_luma_frames(
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 async fn sample_luma_frames_with_fallback(
     video: &Path,
+    crop: Option<&str>,
     total_hint: usize,
     cancel: &AtomicBool,
     on_progress: &mut (dyn FnMut(ExtractProgress) + Send),
 ) -> AppResult<Vec<Vec<u8>>> {
-    match sample_luma_frames(video, true, total_hint, cancel, on_progress).await {
+    match sample_luma_frames(video, true, crop, total_hint, cancel, on_progress).await {
         Ok(frames) if !frames.is_empty() => Ok(frames),
         Ok(_) | Err(_) if !cancel.load(Ordering::SeqCst) => {
-            sample_luma_frames(video, false, total_hint, cancel, on_progress).await
+            sample_luma_frames(video, false, crop, total_hint, cancel, on_progress).await
         }
         other => other,
     }
@@ -415,8 +455,14 @@ async fn sample_mobile_luma_frames(video: &Path) -> AppResult<(Vec<Vec<u8>>, i64
 
 /// 移动端原生截一帧落地 JPEG（无 ffmpeg）：
 /// Android 走 MediaMetadataRetriever，iOS 走 AVAssetImageGenerator。
+/// 原生截帧没有滤镜链，`_crop` 只为与桌面端同签名——移动端不做黑边裁剪。
 #[cfg(any(target_os = "android", target_os = "ios"))]
-async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> {
+async fn capture_jpeg_at(
+    video: &Path,
+    out: &Path,
+    at_ms: i64,
+    _crop: Option<&str>,
+) -> AppResult<()> {
     crate::mobile_files::export_frame_jpeg(
         video.to_string_lossy().to_string(),
         at_ms,
@@ -428,10 +474,16 @@ async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> 
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> {
+async fn capture_jpeg_at(
+    video: &Path,
+    out: &Path,
+    at_ms: i64,
+    crop: Option<&str>,
+) -> AppResult<()> {
     let seconds = at_ms as f64 / 1000.0;
     let ffmpeg = resolve(&FFMPEG, None)?;
-    let output = Command::new(&ffmpeg)
+    let mut command = Command::new(&ffmpeg);
+    command
         .args([
             "-hide_banner",
             "-nostdin",
@@ -440,7 +492,11 @@ async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> 
             &format!("{seconds}"),
             "-i",
         ])
-        .arg(video)
+        .arg(video);
+    if let Some(crop) = crop {
+        command.args(["-vf", crop]);
+    }
+    let output = command
         .args(["-frames:v", "1", "-q:v", "2", "-update", "1"])
         .arg(out)
         .output()
@@ -458,14 +514,12 @@ async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> 
 
 /// 移动端（Android / iOS）：用原生低分辨率亮度抽帧 + 共享换页检测算法提取课件页，
 /// 再为每页用原生截帧落地一张全分辨率图。无 ffmpeg。
-/// 原生抽帧是一次性返回的，采样阶段只在结束时报一次进度。
+/// 原生抽帧是一次性返回的，采样阶段只在结束时报一次进度；黑边裁剪在移动端不生效。
 #[cfg(any(target_os = "android", target_os = "ios"))]
-#[allow(clippy::too_many_arguments)] // 提取入口：视频/输出/门槛/时长/取消/进度各有其义。
 pub async fn extract_slides(
     video: &Path,
     out_dir: &Path,
-    threshold_override: Option<f64>,
-    _duration_ms: Option<i64>,
+    options: ExtractOptions,
     cancel: &AtomicBool,
     on_progress: &mut (dyn FnMut(ExtractProgress) + Send),
 ) -> AppResult<Vec<SlideFrame>> {
@@ -480,7 +534,7 @@ pub async fn extract_slides(
     }
     if frames.is_empty() {
         let fallback = slides_dir.join("0001.jpg");
-        capture_jpeg_at(video, &fallback, 0).await?;
+        capture_jpeg_at(video, &fallback, 0, None).await?;
         return Ok(vec![SlideFrame {
             page_no: 0,
             image_path: fallback.to_string_lossy().to_string(),
@@ -488,7 +542,9 @@ pub async fn extract_slides(
         }]);
     }
 
-    let block_delta = threshold_override.unwrap_or_else(|| dynamic_block_delta(&frames));
+    let block_delta = options
+        .block_delta
+        .unwrap_or_else(|| dynamic_block_delta(&frames));
     let pages = detect_slide_pages(&frames, block_delta);
     let mut out = Vec::new();
     for (page, spec) in pages.iter().enumerate() {
@@ -497,7 +553,7 @@ pub async fn extract_slides(
         }
         let start_ms = spec.start_index as i64 * interval_ms;
         let image = slides_dir.join(format!("{:04}.jpg", page + 1));
-        capture_jpeg_at(video, &image, spec.capture_index as i64 * interval_ms).await?;
+        capture_jpeg_at(video, &image, spec.capture_index as i64 * interval_ms, None).await?;
         out.push(SlideFrame {
             page_no: page as i64,
             image_path: image.to_string_lossy().to_string(),
@@ -509,15 +565,13 @@ pub async fn extract_slides(
 }
 
 /// 抽课件页：降采样灰度帧 → 分块变化比例找换页点 → 为每页截一张全分辨率图。
-/// `threshold_override` 给定时直接用作单块亮度差门槛（0~255 量纲），否则按画面噪声自适应。
-/// `duration_ms` 只用来估算采样总帧数好报百分比，缺失时进度的 total 为 0（前端显示不确定态）。
+/// 视频自带黑边（`options.crop`）会在采样与截图两处都先裁掉：黑块永远不变，
+/// 留着既稀释换页判定、也让存下来的课件图带着黑边。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-#[allow(clippy::too_many_arguments)] // 提取入口：视频/输出/门槛/时长/取消/进度各有其义。
 pub async fn extract_slides(
     video: &Path,
     out_dir: &Path,
-    threshold_override: Option<f64>,
-    duration_ms: Option<i64>,
+    options: ExtractOptions,
     cancel: &AtomicBool,
     on_progress: &mut (dyn FnMut(ExtractProgress) + Send),
 ) -> AppResult<Vec<SlideFrame>> {
@@ -526,14 +580,18 @@ pub async fn extract_slides(
     let _ = std::fs::remove_dir_all(&slides_dir);
     std::fs::create_dir_all(&slides_dir)?;
 
-    let total_hint = duration_ms
+    let total_hint = options
+        .duration_ms
         .filter(|ms| *ms > 0)
         .map(|ms| (ms / SAMPLE_INTERVAL_MS) as usize)
         .unwrap_or(0);
-    let frames = sample_luma_frames_with_fallback(video, total_hint, cancel, on_progress).await?;
+    let crop = crop_filter(options.crop);
+    let frames =
+        sample_luma_frames_with_fallback(video, crop.as_deref(), total_hint, cancel, on_progress)
+            .await?;
     if frames.is_empty() {
         let fallback = slides_dir.join("0001.jpg");
-        capture_jpeg_at(video, &fallback, 0).await?;
+        capture_jpeg_at(video, &fallback, 0, crop.as_deref()).await?;
         return Ok(vec![SlideFrame {
             page_no: 0,
             image_path: fallback.to_string_lossy().to_string(),
@@ -541,7 +599,9 @@ pub async fn extract_slides(
         }]);
     }
 
-    let block_delta = threshold_override.unwrap_or_else(|| dynamic_block_delta(&frames));
+    let block_delta = options
+        .block_delta
+        .unwrap_or_else(|| dynamic_block_delta(&frames));
     let pages = detect_slide_pages(&frames, block_delta);
 
     // 页号/文件名/截图时间点先算好，截图本身只是各自独立的 I/O，因此可以并发而不动页序。
@@ -567,9 +627,9 @@ pub async fn extract_slides(
         if cancel.load(Ordering::SeqCst) {
             return Err(cancelled());
         }
-        let shots = chunk
-            .iter()
-            .map(|(frame, at_ms)| capture_jpeg_at(video, Path::new(&frame.image_path), *at_ms));
+        let shots = chunk.iter().map(|(frame, at_ms)| {
+            capture_jpeg_at(video, Path::new(&frame.image_path), *at_ms, crop.as_deref())
+        });
         futures_util::future::try_join_all(shots).await?;
         done += chunk.len();
         on_progress(ExtractProgress::capture(done, planned.len()));
@@ -605,8 +665,8 @@ pub async fn ensure_cover(video: &Path, data_dir: &Path) -> AppResult<PathBuf> {
     let cover = data_dir.join("cover.jpg");
     if !cover.is_file() {
         // 取第 1 秒，避开纯黑片头；极短视频则回退到首帧。
-        if capture_jpeg_at(video, &cover, 1000).await.is_err() {
-            capture_jpeg_at(video, &cover, 0).await?;
+        if capture_jpeg_at(video, &cover, 1000, None).await.is_err() {
+            capture_jpeg_at(video, &cover, 0, None).await?;
         }
     }
     Ok(cover)
@@ -618,7 +678,7 @@ pub async fn capture_frame(video: &Path, out_dir: &Path, at_ms: i64) -> AppResul
     let shots_dir = out_dir.join("screenshots");
     std::fs::create_dir_all(&shots_dir)?;
     let out = shots_dir.join(format!("{at_ms}.jpg"));
-    capture_jpeg_at(video, &out, at_ms).await?;
+    capture_jpeg_at(video, &out, at_ms, None).await?;
     Ok(out)
 }
 
@@ -628,13 +688,14 @@ pub async fn capture_frame(video: &Path, out_dir: &Path, at_ms: i64) -> AppResul
     let shots_dir = out_dir.join("screenshots");
     std::fs::create_dir_all(&shots_dir)?;
     let out = shots_dir.join(format!("{at_ms}.jpg"));
-    capture_jpeg_at(video, &out, at_ms).await?;
+    capture_jpeg_at(video, &out, at_ms, None).await?;
     Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pipeline::crop_detect::NO_CROP;
     use std::process::Command as StdCommand;
     use tempfile::tempdir;
 
@@ -774,6 +835,38 @@ mod tests {
     }
 
     #[test]
+    fn crop_filter_skips_no_crop_and_absurd_insets() {
+        assert_eq!(crop_filter(None), None);
+        assert_eq!(crop_filter(Some(NO_CROP)), None);
+        // 上下各 10% 的信箱黑边。
+        let letterbox = CropInsets {
+            top: 0.1,
+            right: 0.0,
+            bottom: 0.1,
+            left: 0.0,
+        };
+        assert_eq!(
+            crop_filter(Some(letterbox)).unwrap(),
+            "crop=iw*1.0000:ih*0.8000:iw*0.0000:ih*0.1000"
+        );
+        // 探测异常/脏数据把画面裁没了，宁可不裁。
+        let absurd = CropInsets {
+            top: 0.6,
+            right: 0.0,
+            bottom: 0.6,
+            left: 0.0,
+        };
+        assert_eq!(crop_filter(Some(absurd)), None);
+        let nan = CropInsets {
+            top: f64::NAN,
+            right: 0.0,
+            bottom: 0.0,
+            left: 0.0,
+        };
+        assert_eq!(crop_filter(Some(nan)), None);
+    }
+
+    #[test]
     fn all_blank_video_still_yields_one_page() {
         let frames = vec![solid(0), solid(0), solid(0)];
         assert_eq!(starts_of(&detect_slide_pages(&frames, 8.0)), vec![0]);
@@ -818,8 +911,10 @@ mod tests {
         let frames = extract_slides(
             &video,
             dir.path(),
-            None,
-            Some(6_000),
+            ExtractOptions {
+                duration_ms: Some(6_000),
+                ..Default::default()
+            },
             &AtomicBool::new(false),
             &mut |progress| events.push(progress),
         )
@@ -883,8 +978,7 @@ mod tests {
         let frames = extract_slides(
             &video,
             dir.path(),
-            None,
-            None,
+            ExtractOptions::default(),
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -893,6 +987,97 @@ mod tests {
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].start_ms, 0);
         assert!(Path::new(&frames[0].image_path).is_file());
+    }
+
+    /// 用 ffprobe 读一张图的尺寸，验证黑边是不是真被裁掉了。
+    fn image_dims(path: &Path) -> (i64, i64) {
+        let out = StdCommand::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "csv=p=0",
+            ])
+            .arg(path)
+            .output()
+            .expect("ffprobe");
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut parts = text.trim().split(',');
+        let width = parts.next().unwrap().parse().unwrap();
+        let height = parts.next().unwrap().parse().unwrap();
+        (width, height)
+    }
+
+    #[tokio::test]
+    async fn crops_black_bars_out_of_the_saved_slide_images() {
+        if which::which("ffmpeg").is_err() || which::which("ffprobe").is_err() {
+            eprintln!("skipping: no ffmpeg/ffprobe");
+            return;
+        }
+        let dir = tempdir().unwrap();
+        let video = dir.path().join("letterbox.mp4");
+        // 上下各 18/90 的黑边，内容在中间 54 高的带子里；换页时白块从左半移到右半。
+        let band = |x: i64| format!("drawbox=x={x}:y=18:w=80:h=54:color=white:t=fill");
+        let gen = StdCommand::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=160x90:d=2",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=160x90:d=2",
+                "-filter_complex",
+                &format!(
+                    "[0:v]{}[a];[1:v]{}[b];[a][b]concat=n=2:v=1:a=0",
+                    band(0),
+                    band(80)
+                ),
+            ])
+            .arg(&video)
+            .output()
+            .expect("ffmpeg gen");
+        assert!(gen.status.success(), "gen failed: {gen:?}");
+
+        let insets = CropInsets {
+            top: 0.2,
+            right: 0.0,
+            bottom: 0.2,
+            left: 0.0,
+        };
+        let cropped = extract_slides(
+            &video,
+            &dir.path().join("cropped"),
+            ExtractOptions {
+                crop: Some(insets),
+                ..Default::default()
+            },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+        assert!(cropped.len() >= 2, "got {} pages", cropped.len());
+        // 存下来的课件图不该再带黑边：90 高裁掉上下各 20% 剩 54。
+        assert_eq!(image_dims(Path::new(&cropped[0].image_path)), (160, 54));
+
+        // 不裁时仍是整幅，两者的差别就是这次改动。
+        let whole = extract_slides(
+            &video,
+            &dir.path().join("whole"),
+            ExtractOptions::default(),
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+        assert_eq!(image_dims(Path::new(&whole[0].image_path)), (160, 90));
     }
 
     #[tokio::test]
@@ -922,8 +1107,7 @@ mod tests {
         let error = extract_slides(
             &video,
             dir.path(),
-            None,
-            None,
+            ExtractOptions::default(),
             &AtomicBool::new(true),
             &mut |_| {},
         )
