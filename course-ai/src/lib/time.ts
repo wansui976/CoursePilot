@@ -16,6 +16,21 @@ export function formatRelativeTime(ms: number, now = Date.now()): string {
   return sameYear ? day : `${date.getFullYear()} 年 ${day}`;
 }
 
+/**
+ * 距未来某时刻还有多久：N 分钟后 / N 小时后 / N 天后。
+ * 已经过去（或不足一分钟）时返回「马上」，不显示负数。
+ */
+export function formatCountdown(ms: number, now = Date.now()): string {
+  // 向上取整：还差 30 秒说「1 分钟后」，差 2 小时 59 分说「3 小时后」——倒计时说大不说小，
+  // 也免得「3 小时后到期」因为几毫秒的流逝就退化成「2 小时后」。
+  const diffMinutes = Math.ceil((ms - now) / 60_000);
+  if (diffMinutes < 1) return "马上";
+  if (diffMinutes < 60) return `${diffMinutes} 分钟后`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours} 小时后`;
+  return `${Math.floor(diffHours / 24)} 天后`;
+}
+
 export function formatMs(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(total / 3600);

@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { NO_INSETS, contentAspect, cropStyle, symmetricInsets } from "@/lib/blackBars";
 import { ipc } from "@/lib/ipc";
-import { posKey, durKey } from "@/lib/playback";
+import { posKey, durKey, syncPlaybackProgress } from "@/lib/playback";
 import { isIOS } from "@/lib/platform";
 import { useWatchLogger } from "@/lib/useWatchLogger";
 import { usePlayer } from "@/stores/player";
@@ -64,6 +64,11 @@ export function VideoPlayer({
   const [playing, setPlaying] = useState(false);
   // 把「播放中时长」记入学习事件日志（供仪表盘统计 / 间隔重复排期）。
   useWatchLogger(videoId, playing);
+  // 离开/切换视频时把进度同步进库（暂停时也同步一次，见 onPause）。
+  useEffect(() => {
+    if (!videoId) return;
+    return () => syncPlaybackProgress(videoId);
+  }, [videoId]);
   const [rate, setRate] = useState(1);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
@@ -710,7 +715,10 @@ export function VideoPlayer({
                 lastSavedRef.current = t;
                 const dur = event.currentTarget.duration;
                 if (dur && t > dur - RESUME_TAIL_GUARD) {
-                  localStorage.removeItem(posKey(videoId));
+                  // 看到尾部：记成整段时长（= 已看完）。以前是删掉记录，于是「已看完」
+                  // 角标和仪表盘完成度反而永远不出现——看完一讲把它算成没看。
+                  // 续播那边本来就会跳过尾部附近的位置，不会再从末尾开始播。
+                  localStorage.setItem(posKey(videoId), String(dur));
                 } else if (t > 2) {
                   localStorage.setItem(posKey(videoId), String(t));
                 }
@@ -758,10 +766,14 @@ export function VideoPlayer({
               clearHideTimer();
               const t = event.currentTarget.currentTime;
               const dur = event.currentTarget.duration;
-              if (t > 2 && (!dur || t < dur - RESUME_TAIL_GUARD)) {
-                localStorage.setItem(posKey(videoId), String(t));
-                lastSavedRef.current = t;
+              if (t > 2) {
+                // 尾部附近按「看完」记（同 onTimeUpdate）。
+                const saved = dur && t > dur - RESUME_TAIL_GUARD ? dur : t;
+                localStorage.setItem(posKey(videoId), String(saved));
+                lastSavedRef.current = saved;
               }
+              // 暂停是同步进库的好时机：完成度以库里那份为准。
+              syncPlaybackProgress(videoId);
             }}
               onVolumeChange={(event) => {
                 setVolume(event.currentTarget.volume);

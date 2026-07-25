@@ -43,6 +43,7 @@ use crate::commands::srs::{
 };
 use crate::commands::stats::{
     cmd_continue_learning, cmd_course_totals, cmd_course_video_ids, cmd_daily_totals, cmd_log_watch,
+    cmd_next_due_at, cmd_save_video_progress, cmd_video_progress,
 };
 use crate::commands::tools::{
     cmd_has_bilibili_cookies, cmd_import_bilibili, cmd_ocr_region, cmd_probe_bilibili,
@@ -171,6 +172,9 @@ pub fn run() {
             cmd_course_totals,
             cmd_continue_learning,
             cmd_course_video_ids,
+            cmd_next_due_at,
+            cmd_save_video_progress,
+            cmd_video_progress,
             cmd_analyze_course_concepts,
             cmd_cancel_course_analysis,
             cmd_list_course_concepts,

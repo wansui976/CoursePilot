@@ -1,14 +1,34 @@
 use crate::commands::courses::AppState;
+use crate::commands::srs::parse_review_meta;
 use crate::db::Db;
 use crate::error::AppResult;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use tauri::State;
 
-/// 按天聚合的观看时长（day 为本地日期 'YYYY-MM-DD'）。喂热力图 / 每日时长。
-#[derive(Serialize, sqlx::FromRow)]
+/// 复习评分 ≥ 此值算「答上来了」（3=良好、4=容易；1/2 是重来/困难）。
+const GOOD_RATING: i64 = 3;
+
+/// 按天聚合的学习量（day 为本地日期 'YYYY-MM-DD'）。喂热力图 / 每日时长 / 复习产出。
+#[derive(Serialize)]
 pub struct DayTotal {
     pub day: String,
     pub watched_ms: i64,
+    /// 当天复习的卡片张数。
+    pub reviews: i64,
+    /// 其中评分 ≥ GOOD_RATING 的张数（旧事件缺评分时只计入 reviews）。
+    pub good_reviews: i64,
+}
+
+impl DayTotal {
+    fn empty(day: String) -> Self {
+        DayTotal {
+            day,
+            watched_ms: 0,
+            reviews: 0,
+            good_reviews: 0,
+        }
+    }
 }
 
 /// 每门课累计观看时长与最近学习时刻。
@@ -45,19 +65,65 @@ pub async fn log_watch(db: &Db, video_id: &str, watched_ms: i64) -> AppResult<()
     Ok(())
 }
 
-/// [from_ts, to_ts] 内按本地日聚合的观看毫秒（升序）。
+/// [from_ts, to_ts] 内按本地日聚合的观看毫秒与复习张数（按日期升序）。
+///
+/// 观看与复习都算「这天学了」：只做复习的一天以前会被算成没学习，既断连续天数、
+/// 热力图也留白 —— 对一个以间隔重复为核心的应用，那个激励方向是反的。
 pub async fn daily_totals(db: &Db, from_ts: i64, to_ts: i64) -> AppResult<Vec<DayTotal>> {
-    Ok(sqlx::query_as(
+    let watched: Vec<(String, i64)> = sqlx::query_as(
         "SELECT date(ts/1000,'unixepoch','localtime') AS day,
                 CAST(SUM(duration_ms) AS INTEGER) AS watched_ms
          FROM study_events
          WHERE kind='watch' AND ts BETWEEN ? AND ?
-         GROUP BY day ORDER BY day",
+         GROUP BY day",
     )
     .bind(from_ts)
     .bind(to_ts)
     .fetch_all(&db.pool)
-    .await?)
+    .await?;
+
+    // 评分藏在 meta_json 里，逐条取回、复用复习那边的解析器，避免依赖 SQLite 的 JSON 扩展。
+    let reviews: Vec<(String, String)> = sqlx::query_as(
+        "SELECT date(ts/1000,'unixepoch','localtime') AS day, meta_json
+         FROM study_events
+         WHERE kind='review' AND ts BETWEEN ? AND ?",
+    )
+    .bind(from_ts)
+    .bind(to_ts)
+    .fetch_all(&db.pool)
+    .await?;
+
+    // BTreeMap 的键序即 'YYYY-MM-DD' 的日期序，收尾直接就是升序。
+    let mut by_day: BTreeMap<String, DayTotal> = BTreeMap::new();
+    for (day, watched_ms) in watched {
+        by_day
+            .entry(day.clone())
+            .or_insert_with(|| DayTotal::empty(day))
+            .watched_ms = watched_ms;
+    }
+    for (day, meta_json) in reviews {
+        let entry = by_day
+            .entry(day.clone())
+            .or_insert_with(|| DayTotal::empty(day));
+        entry.reviews += 1;
+        if parse_review_meta(&meta_json).is_some_and(|(_, rating)| rating >= GOOD_RATING) {
+            entry.good_reviews += 1;
+        }
+    }
+    Ok(by_day.into_values().collect())
+}
+
+/// 下一批复习到期时刻（毫秒）：晚于 now 的最早 due_at，没有则 None。
+///
+/// 查的是复习排期，但只服务学习面板「今天没有到期卡」时的那句提示，故与其他面板
+/// 聚合放在一处。
+pub async fn next_due_at(db: &Db, now: i64) -> AppResult<Option<i64>> {
+    Ok(
+        sqlx::query_scalar("SELECT MIN(due_at) FROM card_schedule WHERE due_at > ?")
+            .bind(now)
+            .fetch_one(&db.pool)
+            .await?,
+    )
 }
 
 /// 「继续学习」条目：每门课最近一次观看的视频（供仪表盘一键续播）。
@@ -127,6 +193,11 @@ pub async fn cmd_daily_totals(
 }
 
 #[tauri::command]
+pub async fn cmd_next_due_at(state: State<'_, AppState>) -> AppResult<Option<i64>> {
+    next_due_at(&state.db, chrono::Utc::now().timestamp_millis()).await
+}
+
+#[tauri::command]
 pub async fn cmd_course_totals(state: State<'_, AppState>) -> AppResult<Vec<CourseTotal>> {
     course_totals(&state.db).await
 }
@@ -136,8 +207,67 @@ pub async fn cmd_continue_learning(state: State<'_, AppState>) -> AppResult<Vec<
     continue_rows(&state.db).await
 }
 
-/// 所有未删除视频的 (course_id, video_id)。供仪表盘按课程算完成度
-/// （「已看完」由前端用本地播放进度 WATCHED_RATIO 判定，故这里只给 id 清单与总数）。
+/// 一个视频的播放进度（毫秒）。完成度按 position_ms / duration_ms 判定。
+#[derive(Serialize, sqlx::FromRow)]
+pub struct VideoProgress {
+    pub video_id: String,
+    pub position_ms: i64,
+    /// 播放器读到的真实时长；videos.duration_ms 常为空，故单独存。
+    pub duration_ms: Option<i64>,
+}
+
+/// 记一个视频的播放进度（幂等覆盖）。
+/// duration_ms 为 None 时保留库里已有的时长——元数据还没加载完的那次写入不该把它抹掉。
+pub async fn save_video_progress(
+    db: &Db,
+    video_id: &str,
+    position_ms: i64,
+    duration_ms: Option<i64>,
+) -> AppResult<()> {
+    sqlx::query(
+        "INSERT INTO video_progress(video_id,position_ms,duration_ms,updated_at)
+         VALUES (?,?,?,?)
+         ON CONFLICT(video_id) DO UPDATE SET
+           position_ms=excluded.position_ms,
+           duration_ms=COALESCE(excluded.duration_ms, video_progress.duration_ms),
+           updated_at=excluded.updated_at",
+    )
+    .bind(video_id)
+    .bind(position_ms.max(0))
+    .bind(duration_ms.filter(|ms| *ms > 0))
+    .bind(chrono::Utc::now().timestamp_millis())
+    .execute(&db.pool)
+    .await?;
+    Ok(())
+}
+
+/// 所有未删除视频的播放进度（供仪表盘算完成度）。
+pub async fn video_progress(db: &Db) -> AppResult<Vec<VideoProgress>> {
+    Ok(sqlx::query_as(
+        "SELECT p.video_id, p.position_ms, p.duration_ms
+         FROM video_progress p JOIN videos v ON v.id = p.video_id
+         WHERE v.deleted_at IS NULL",
+    )
+    .fetch_all(&db.pool)
+    .await?)
+}
+
+#[tauri::command]
+pub async fn cmd_save_video_progress(
+    state: State<'_, AppState>,
+    video_id: String,
+    position_ms: i64,
+    duration_ms: Option<i64>,
+) -> AppResult<()> {
+    save_video_progress(&state.db, &video_id, position_ms, duration_ms).await
+}
+
+#[tauri::command]
+pub async fn cmd_video_progress(state: State<'_, AppState>) -> AppResult<Vec<VideoProgress>> {
+    video_progress(&state.db).await
+}
+
+/// 所有未删除视频的 (course_id, video_id)。供仪表盘按课程算完成度（完成度的分母）。
 pub async fn course_video_ids(db: &Db) -> AppResult<Vec<(String, String)>> {
     Ok(
         sqlx::query_as("SELECT course_id, id FROM videos WHERE deleted_at IS NULL")
@@ -222,6 +352,114 @@ mod tests {
         log_watch(&db, &vid, -100).await.unwrap();
 
         assert!(course_totals(&db).await.unwrap().is_empty());
+    }
+
+    /// 直接插入一条指定时刻的 review 事件（rating 落在 meta_json 里，与复习命令一致）。
+    async fn insert_review_at(db: &Db, ts: i64, rating: i64) {
+        sqlx::query(
+            "INSERT INTO study_events(kind,course_id,video_id,ts,duration_ms,meta_json)
+             VALUES ('review',NULL,NULL,?,0,?)",
+        )
+        .bind(ts)
+        .bind(format!(r#"{{"cardId":"c1","rating":{rating}}}"#))
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn daily_totals_counts_a_review_only_day_as_studied() {
+        let db = fresh_db().await;
+        let base = 1_700_000_000_000i64;
+        // 这一天一秒视频没看，只复习了 3 张（其中 2 张答上来了）。
+        insert_review_at(&db, base, 4).await;
+        insert_review_at(&db, base + 1000, 3).await;
+        insert_review_at(&db, base + 2000, 1).await;
+
+        let rows = daily_totals(&db, 0, base + 86_400_000).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].watched_ms, 0);
+        assert_eq!(rows[0].reviews, 3);
+        assert_eq!(rows[0].good_reviews, 2);
+    }
+
+    #[tokio::test]
+    async fn daily_totals_merges_watching_and_reviewing_on_the_same_day() {
+        let db = fresh_db().await;
+        let course = create_course(&db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let vid = seed_video(&db, &course.id).await;
+        let base = 1_700_000_000_000i64;
+        insert_watch_at(&db, &course.id, &vid, base, 4000).await;
+        insert_review_at(&db, base + 1000, 3).await;
+        // 评分字段缺失的旧事件：仍计张数，但不算「答上来了」。
+        sqlx::query(
+            "INSERT INTO study_events(kind,course_id,video_id,ts,duration_ms,meta_json)
+             VALUES ('review',NULL,NULL,?,0,'{}')",
+        )
+        .bind(base + 2000)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let rows = daily_totals(&db, 0, base + 86_400_000).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].watched_ms, 4000);
+        assert_eq!(rows[0].reviews, 2);
+        assert_eq!(rows[0].good_reviews, 1);
+    }
+
+    #[tokio::test]
+    async fn daily_totals_keeps_days_in_ascending_order() {
+        let db = fresh_db().await;
+        let course = create_course(&db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let vid = seed_video(&db, &course.id).await;
+        let base = 1_700_000_000_000i64;
+        // 先写晚的那天，再写早的那天：返回顺序仍应由日期决定。
+        insert_review_at(&db, base + 2 * 86_400_000, 3).await;
+        insert_watch_at(&db, &course.id, &vid, base, 4000).await;
+
+        let rows = daily_totals(&db, 0, base + 5 * 86_400_000).await.unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows[0].day < rows[1].day);
+        assert_eq!(rows[0].watched_ms, 4000);
+        assert_eq!(rows[1].reviews, 1);
+    }
+
+    #[tokio::test]
+    async fn next_due_at_skips_cards_already_due() {
+        let db = fresh_db().await;
+        let course = create_course(&db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let vid = seed_video(&db, &course.id).await;
+        let now = 1_700_000_000_000i64;
+        for (id, due_at) in [("已到期", now - 1000), ("最近", now + 5000), ("更晚", now + 9000)] {
+            sqlx::query(
+                "INSERT INTO cards(id,video_id,course_id,kind,front,back,created_at)
+                 VALUES (?,?,?,'quiz','f','b',0)",
+            )
+            .bind(id)
+            .bind(&vid)
+            .bind(&course.id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO card_schedule(card_id,due_at,ease,interval_days,reps,lapses,stability,difficulty)
+                 VALUES (?,?,0,0,0,0,0,0)",
+            )
+            .bind(id)
+            .bind(due_at)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(next_due_at(&db, now).await.unwrap(), Some(now + 5000));
+    }
+
+    #[tokio::test]
+    async fn next_due_at_is_none_without_future_cards() {
+        let db = fresh_db().await;
+        assert_eq!(next_due_at(&db, 1_700_000_000_000).await.unwrap(), None);
     }
 
     #[tokio::test]
