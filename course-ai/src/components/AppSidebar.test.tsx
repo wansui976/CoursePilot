@@ -19,6 +19,17 @@ vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: vi.fn(), message: vi.fn() }));
 vi.mock("@/lib/mobileFiles", () => ({ isIOS: () => false, pickDirectoryPath: vi.fn() }));
 
+const { mockSetThemeToggleOrigin } = vi.hoisted(() => ({
+  mockSetThemeToggleOrigin: vi.fn(),
+}));
+vi.mock("@/stores/theme", async () => {
+  const actual = await vi.importActual<typeof import("@/stores/theme")>("@/stores/theme");
+  return {
+    ...actual,
+    setThemeToggleOrigin: mockSetThemeToggleOrigin,
+  };
+});
+
 const course = {
   id: "course-1",
   name: "申论课程",
@@ -77,6 +88,7 @@ function renderSidebar(overrides: Partial<Parameters<typeof AppSidebar>[0]> = {}
 describe("AppSidebar", () => {
   beforeEach(() => {
     mockIpc.courses.list.mockReset().mockResolvedValue([course]);
+    mockSetThemeToggleOrigin.mockReset();
   });
 
   it("renders the expanded library sidebar with unified entries", async () => {
@@ -91,24 +103,15 @@ describe("AppSidebar", () => {
     expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
   });
 
-  it("passes the expanded theme button center to the toggle handler", async () => {
+  it("records the theme toggle origin from the bottom-left button center", async () => {
     const onToggleTheme = vi.fn();
     renderSidebar({ onToggleTheme });
     const button = screen.getByRole("button", { name: "切换到夜晚模式" });
     const rect = { left: 12, top: 700, width: 36, height: 36, right: 48, bottom: 736, x: 12, y: 700, toJSON: () => ({}) };
     vi.spyOn(button, "getBoundingClientRect").mockReturnValue(rect as DOMRect);
     fireEvent.click(button);
-    expect(onToggleTheme).toHaveBeenCalledWith({ x: 30, y: 718 });
-  });
-
-  it("passes the collapsed rail theme button center to the toggle handler", () => {
-    const onToggleTheme = vi.fn();
-    renderSidebar({ collapsed: true, onToggleTheme });
-    const button = screen.getByRole("button", { name: "切换到夜晚模式" });
-    const rect = { left: 8, top: 664, width: 40, height: 40, right: 48, bottom: 704, x: 8, y: 664, toJSON: () => ({}) };
-    vi.spyOn(button, "getBoundingClientRect").mockReturnValue(rect as DOMRect);
-    fireEvent.click(button);
-    expect(onToggleTheme).toHaveBeenCalledWith({ x: 28, y: 684 });
+    expect(mockSetThemeToggleOrigin).toHaveBeenCalledWith(30, 718);
+    expect(onToggleTheme).toHaveBeenCalledTimes(1);
   });
 
   it("shows the queue badge and collapse toggle in the expanded state", async () => {

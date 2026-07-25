@@ -35,9 +35,19 @@ export const ACCENTS: { key: AccentKey; label: string; accent: string; press: st
 
 let themeAnimTimer: ReturnType<typeof setTimeout> | undefined;
 
-export type ThemeToggleOrigin = { x: number; y: number };
+/** 圆形揭开动画的起点（切换按钮的位置）。每次切换消费一次，避免系统自动切换复用旧坐标。 */
+let pendingOrigin: { x: number; y: number } | null = null;
 
-let activeCircleReveal: HTMLElement | null = null;
+/** 记录下一次明暗切换的动画起点（点击切换按钮的位置），供圆形揭开使用。 */
+export function setThemeToggleOrigin(x: number, y: number): void {
+  pendingOrigin = { x, y };
+}
+
+function consumeThemeOrigin(): { x: number; y: number } | null {
+  const origin = pendingOrigin;
+  pendingOrigin = null;
+  return origin;
+}
 
 /** 有可见的大 DOM(标了 data-theme-heavy,如打开的文稿)在场时瞬切:任何动画方案在
  *  数千节点上都会放大成本(VT 双全屏快照 / 全树逐元素过渡)。轻场景才保留渐变。
@@ -49,97 +59,193 @@ function hasVisibleHeavyDom(): boolean {
   return false;
 }
 
-const CIRCLE_MS = 420;
-const CIRCLE_FADE_MS = 120;
-const CIRCLE_SIZE = 48;
+/** 与 globals.css 中 --surface-app 保持一致。覆盖层直接用常量，避免临时改 data-theme
+ *  触发整页重算/闪一下，也避免读到旧主题色导致「圆与背景同色看不见」。 */
+const SURFACE_APP: Record<EffectiveTheme, string> = {
+  light: "#f3f4f6",
+  dark: "#0a0c10",
+};
 
-function endRadiusFor(origin: ThemeToggleOrigin): number {
+const CIRCLE_MS = 600;
+
+function endRadiusFor(origin: { x: number; y: number }): number {
   const { x, y } = origin;
-  // 多留 2px，消除高 DPI 屏幕在最远角可能出现的一线底色。
-  return (
-    Math.hypot(
-      Math.max(x, window.innerWidth - x),
-      Math.max(y, window.innerHeight - y),
-    ) + 2
+  return Math.hypot(
+    Math.max(x, window.innerWidth - x),
+    Math.max(y, window.innerHeight - y),
   );
 }
 
-function hasActiveCircleReveal(): boolean {
-  if (activeCircleReveal?.isConnected) return true;
-  activeCircleReveal = null;
-  return false;
+/** 取当前强调色给圆描边用；accent 变量定义在 .ca-app 上（见 accentVars 注释），
+ *  读不到就退回默认蓝，保证描边一定有个可见颜色。 */
+function currentAccent(): string {
+  const host = document.querySelector<HTMLElement>(".ca-app") ?? document.documentElement;
+  const value = getComputedStyle(host).getPropertyValue("--accent").trim();
+  return value || DEFAULT_CUSTOM_ACCENT;
 }
 
-/** 从按钮中心扩散到整个视口的目标主题底色。
- *
- * 这个路径不依赖 View Transitions：大文稿页仍只合成一层小圆的 transform，不需要
- * 旧/新整页快照；也避免不同 WebView 对 ::view-transition-* 的支持差异。 */
+/** 从按钮起点扩散的切色圆：超大圆形 div + CSS transition transform:scale。
+ *  - 不用 WAAPI：部分 WebKit 上 Element.animate 表现不稳
+ *  - 不用 clip-path 动画：部分 WebKit 对 circle() 插值不稳定
+ *  - 不用 popover：WebKit 对「顶层弹出层 + transform」的合成有 bug，会整块不绘制，
+ *    改为直接挂到 <html> 顶层 + 最大 z-index
+ *  - 填充用目标背景常量，另加一圈强调色描边+光晕，避免圆与背景同色「看不见」 */
 function circleRevealWithOverlay(
   mutate: () => void,
   next: EffectiveTheme,
-  origin: ThemeToggleOrigin,
+  origin: { x: number; y: number },
 ): void {
-  if (hasActiveCircleReveal()) return;
-
   const { x, y } = origin;
   const radius = Math.ceil(endRadiusFor(origin));
+  const size = radius * 2;
+  const accent = currentAccent();
   const overlay = document.createElement("div");
   overlay.setAttribute("aria-hidden", "true");
   overlay.dataset.themeCircleReveal = "";
-  // 利用 [data-theme] 自身的 CSS 变量取目标底色，避免复制 --surface-app 的常量。
-  overlay.dataset.theme = next;
-  overlay.className = "theme-circle-reveal";
-  overlay.style.setProperty("--theme-circle-x", `${x}px`);
-  overlay.style.setProperty("--theme-circle-y", `${y}px`);
-  overlay.style.setProperty("--theme-circle-scale", String(radius / (CIRCLE_SIZE / 2)));
-  overlay.style.setProperty("--theme-circle-duration", `${CIRCLE_MS}ms`);
 
-  // 只渲染一个 48px 图层并放大 transform，避免大圆 + 模糊光晕产生巨大的栅格化图层。
-  const host = document.body ?? document.documentElement;
+  overlay.style.cssText = [
+    "position:fixed",
+    "inset:auto",
+    // 圆心对准按钮：用 left/top + 负 margin，避免 transform-origin 与 scale 打架。
+    `left:${x}px`,
+    `top:${y}px`,
+    `width:${size}px`,
+    `height:${size}px`,
+    `margin-left:${-radius}px`,
+    `margin-top:${-radius}px`,
+    "padding:0",
+    "border:0",
+    "display:block",
+    "border-radius:50%",
+    "pointer-events:none",
+    "z-index:2147483647",
+    `background:${SURFACE_APP[next]}`,
+    // 强调色描边 + 光晕：无论新旧主题对比度多低，圆的边缘都清晰可见。
+    `box-shadow:0 0 0 2px ${accent}, 0 0 40px 8px ${accent}`,
+    // 从极小开始，scale(0) 在部分合成器上会被跳过。
+    "transform:scale(0.001)",
+    "opacity:1",
+    "will-change:transform,opacity",
+    "transition:none",
+  ].join(";");
+
+  // 挂到 <html> 顶层（<body> 之后绘制），避开任何 transform 祖先造成的 fixed 定位陷阱。
+  const host = document.documentElement;
   host.appendChild(overlay);
-  activeCircleReveal = overlay;
 
-  let covered = false;
-  let removed = false;
-  const remove = () => {
-    if (removed) return;
-    removed = true;
-    overlay.remove();
-    if (activeCircleReveal === overlay) activeCircleReveal = null;
-  };
+  // 强制提交起始 transform，再开过渡；否则会直接到 scale(1)。
+  void overlay.getBoundingClientRect();
+
+  let finished = false;
   const finish = () => {
-    if (covered) return;
-    covered = true;
+    if (finished) return;
+    finished = true;
     document.documentElement.dataset.theme = next;
     flushSync(mutate);
-    overlay.classList.add("is-complete");
-    window.setTimeout(remove, CIRCLE_FADE_MS + 80);
+    overlay.style.transition = "opacity 180ms ease-out";
+    overlay.style.opacity = "0";
+    const remove = () => overlay.remove();
+    overlay.addEventListener("transitionend", remove, { once: true });
+    window.setTimeout(remove, 260);
   };
 
-  overlay.addEventListener("animationend", (event: AnimationEvent) => {
-    if (event.target !== overlay) return;
-    if (event.animationName === "ca-theme-circle-reveal") finish();
-    if (event.animationName === "ca-theme-circle-reveal-fade") remove();
+  const start = () => {
+    overlay.style.transition = `transform ${CIRCLE_MS}ms cubic-bezier(0.2, 0, 0, 1)`;
+    overlay.style.transform = "scale(1)";
+  };
+
+  // 等起始 scale 提交后再开过渡。双 rAF + 短 timeout 双保险：
+  // 有的 WebView 会合并 rAF；纯 timeout 在前台也足够等到下一帧。
+  let started = false;
+  const startOnce = () => {
+    if (started) return;
+    started = true;
+    start();
+  };
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(startOnce);
   });
+  window.setTimeout(startOnce, 16);
+
+  const onEnd = (event: TransitionEvent) => {
+    if (event.target !== overlay) return;
+    if (event.propertyName !== "transform") return;
+    finish();
+  };
+  overlay.addEventListener("transitionend", onEnd);
   window.setTimeout(finish, CIRCLE_MS + 80);
 }
 
-/** 应用明暗切换(mutate 里做真正的状态变更),按能力与场景选动画:
- *  1. 减少动态效果：瞬切；
- *  2. 有起点（用户点击）：用合成层圆形盖满整屏后切色，文稿等大 DOM 也不取整页快照；
- *  3. 无起点 + 可见重 DOM：瞬切；
- *  4. 其余：View Transitions 交叉淡化，或全树过渡类兜底。 */
-function applyThemeChange(
+/** 圆形揭开(首选):用 View Transitions 把「新主题快照」以 clip-path 圆从起点扩到整屏。
+ *  圆内是真实的新主题界面、圆外是旧界面的静止快照——扩散过程中就能看到新界面在圆里
+ *  逐渐显现,而不是先盖一层纯色圆、等盖满再整块切色。动画在 globals.css 的
+ *  .theme-circle-vt 里声明(clip-path 圆),这里只负责写入圆心/半径并触发快照。 */
+function circleRevealViewTransition(
   mutate: () => void,
   next: EffectiveTheme,
-  origin?: ThemeToggleOrigin,
+  origin: { x: number; y: number },
 ): void {
-  if (typeof document === "undefined") return mutate();
-  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return mutate();
-  if (origin && Number.isFinite(origin.x) && Number.isFinite(origin.y)) {
-    circleRevealWithOverlay(mutate, next, origin);
+  const root = document.documentElement;
+  const endRadius = Math.ceil(endRadiusFor(origin));
+  root.style.setProperty("--theme-circle-x", `${origin.x}px`);
+  root.style.setProperty("--theme-circle-y", `${origin.y}px`);
+  root.style.setProperty("--theme-circle-r", `${endRadius}px`);
+  root.classList.add("theme-circle-vt");
+
+  const cleanup = () => {
+    root.classList.remove("theme-circle-vt");
+    root.style.removeProperty("--theme-circle-x");
+    root.style.removeProperty("--theme-circle-y");
+    root.style.removeProperty("--theme-circle-r");
+  };
+
+  let transition: { finished: Promise<unknown> };
+  try {
+    transition = document.startViewTransition(() => {
+      // 同步提交新主题:html[data-theme] 立即变(根变量),React 再同步渲染
+      // .ca-app[data-theme](局部变量),保证「新快照」抓到的是完整的新主题配色。
+      root.dataset.theme = next;
+      flushSync(mutate);
+    });
+  } catch {
+    cleanup();
+    mutate();
     return;
   }
+  transition.finished.then(cleanup, cleanup);
+  // 双保险:极端情况下 finished 不落定也要把类和自定义属性摘掉。
+  window.setTimeout(cleanup, CIRCLE_MS + 400);
+}
+
+/** 从按钮起点做圆形切色:优先 View Transitions(圆内显示真实新界面);引擎不支持时
+ *  退回纯色覆盖层(圆内只有目标底色,扩满后再切——这是没有 VT 时的次优兜底)。 */
+function circleRevealTheme(
+  mutate: () => void,
+  next: EffectiveTheme,
+  origin: { x: number; y: number },
+): void {
+  if (typeof document.startViewTransition === "function") {
+    circleRevealViewTransition(mutate, next, origin);
+    return;
+  }
+  circleRevealWithOverlay(mutate, next, origin);
+}
+
+/** 应用明暗切换(mutate 里做真正的状态变更),按能力与场景选动画:
+ *  1. 有起点(点/键切换按钮):从按钮圆形扩散盖满整屏再切色(CSS transform 覆盖层)。
+ *     这是对用户「亲手点击」的直接反馈、时长很短,即使系统开了「减弱动态效果」也照做——
+ *     否则 reduce-motion 的早退会把整段圆形动画吞掉(表现就是「只切色、永远看不到圆」);
+ *  2. 无起点 + reduce-motion:跟随系统明暗自动切换时属于环境动画,尊重设置直接瞬切;
+ *  3. 无起点 + 可见重 DOM(data-theme-heavy):直接切——避免 VT/全树过渡放大成本;
+ *  4. 无起点:View Transitions 交叉淡化,或全树过渡类兜底。 */
+function applyThemeChange(mutate: () => void, next: EffectiveTheme): void {
+  if (typeof document === "undefined") return mutate();
+  const origin = consumeThemeOrigin();
+  if (origin) {
+    circleRevealTheme(mutate, next, origin);
+    return;
+  }
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return mutate();
   if (hasVisibleHeavyDom()) return mutate();
   if (typeof document.startViewTransition === "function") {
     // flushSync:让 React 在快照回调内同步提交 data-theme,否则新快照可能截到旧画面。
@@ -260,12 +366,10 @@ export const useTheme = create<ThemeState>((set, get) => ({
     set({ accent: "custom", customAccent });
   },
   toggle: (origin) => {
-    // 圆扩散尚未落幕时忽略重复点击，避免两层遮罩和过期清理回调相互干扰。
-    if (hasActiveCircleReveal()) return;
-    const pref = get().effective === "light" ? "dark" : "light";
-    if (typeof window !== "undefined") window.localStorage.setItem(THEME_KEY, pref);
-    const next = resolveEffective(pref);
-    applyThemeChange(() => set({ pref, effective: next }), next, origin);
+    if (origin && Number.isFinite(origin.x) && Number.isFinite(origin.y)) {
+      pendingOrigin = { x: origin.x, y: origin.y };
+    }
+    get().setPref(get().effective === "light" ? "dark" : "light");
   },
   sync: () => {
     const pref = readPref();
