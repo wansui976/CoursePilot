@@ -4,6 +4,7 @@ use crate::error::{AppError, AppResult};
 use crate::sidecar::{resolve, FFMPEG};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tokio::io::AsyncReadExt;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -15,6 +16,44 @@ pub struct SlideFrame {
     pub image_path: String,
     pub start_ms: i64,
 }
+
+/// 提取进度。`phase` 为 "sample"（降采样通读整段视频，耗时大头）或
+/// "capture"（逐页截全分辨率图）。`total` 为 0 表示总量未知（拿不到时长）。
+#[derive(Debug, Clone, Serialize)]
+pub struct ExtractProgress {
+    pub phase: String,
+    pub done: usize,
+    pub total: usize,
+}
+
+impl ExtractProgress {
+    fn sample(done: usize, total: usize) -> Self {
+        Self {
+            phase: "sample".into(),
+            done,
+            total,
+        }
+    }
+
+    fn capture(done: usize, total: usize) -> Self {
+        Self {
+            phase: "capture".into(),
+            done,
+            total,
+        }
+    }
+}
+
+fn cancelled() -> AppError {
+    AppError::Other("课件提取已取消".into())
+}
+
+// 同时最多跑几个截图进程。逐页串行时几十页就是几十次串行的进程启动+定位，
+// 而这些截图彼此独立；并发数压在个位数，免得把 CPU 全喂给 ffmpeg 卡住播放。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+const CAPTURE_CONCURRENCY: usize = 4;
+// 采样阶段每读多少帧推一次进度（1 帧 = 1 秒视频，太密只是噪声）。
+const SAMPLE_PROGRESS_EVERY: usize = 30;
 
 // 抽帧分析参数。把视频降到很小的灰度帧来比对换页，既快又抗噪。
 // 桌面端用 ffmpeg 生成低分辨率帧；Android 用原生 MediaMetadataRetriever 生成同尺寸亮度帧。
@@ -126,13 +165,28 @@ fn short_stderr(stderr: &[u8]) -> String {
 }
 
 /// 让 ffmpeg 把视频降采样成一串小灰度帧（rgb24 原始流走管道），逐帧读出亮度，避免落地大文件。
+/// `hwaccel` 打开时交给系统硬件解码器（Mac 上是 VideoToolbox）：采样要把整段视频完整解一遍，
+/// 是整个提取流程的时间大头，也是唯一能成倍改善的地方。取消标志置位时杀掉子进程立即返回。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-async fn sample_luma_frames(video: &Path) -> AppResult<Vec<Vec<u8>>> {
+async fn sample_luma_frames(
+    video: &Path,
+    hwaccel: bool,
+    total_hint: usize,
+    cancel: &AtomicBool,
+    on_progress: &mut (dyn FnMut(ExtractProgress) + Send),
+) -> AppResult<Vec<Vec<u8>>> {
     let ffmpeg = resolve(&FFMPEG, None)?;
-    let mut child = Command::new(&ffmpeg)
-        .args(["-hide_banner", "-nostdin", "-i"])
+    let mut command = Command::new(&ffmpeg);
+    command.args(["-hide_banner", "-nostdin"]);
+    if hwaccel {
+        command.args(["-hwaccel", "auto"]);
+    }
+    let mut child = command
+        .arg("-i")
         .arg(video)
         .args([
+            "-an", // 只要画面：别让音频白解一遍
+            "-sn",
             "-vf",
             &format!("fps={SAMPLE_FPS},scale={SAMPLE_W}:{SAMPLE_H}"),
             "-pix_fmt",
@@ -154,14 +208,49 @@ async fn sample_luma_frames(video: &Path) -> AppResult<Vec<Vec<u8>>> {
     let mut buf = vec![0_u8; frame_size];
     let mut frames = Vec::new();
     loop {
+        if cancel.load(Ordering::SeqCst) {
+            let _ = child.kill().await;
+            return Err(cancelled());
+        }
         match stdout.read_exact(&mut buf).await {
-            Ok(_) => frames.push(luminance_frame(&buf)),
+            Ok(_) => {
+                frames.push(luminance_frame(&buf));
+                if frames.len() % SAMPLE_PROGRESS_EVERY == 0 {
+                    on_progress(ExtractProgress::sample(frames.len(), total_hint));
+                }
+            }
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) => return Err(AppError::Pipeline(format!("ffmpeg read: {e}"))),
         }
     }
-    let _ = child.wait().await;
+    let status = child.wait().await;
+    // 硬件解码失败时 ffmpeg 可能中途退出、只吐出一部分帧，静默用会漏掉后半段的换页。
+    // 调用方据此回落软解，所以这里把「非正常退出」当错误报出去。
+    if !matches!(&status, Ok(status) if status.success()) {
+        return Err(AppError::Pipeline(format!(
+            "ffmpeg sample exited abnormally: {status:?}"
+        )));
+    }
+    on_progress(ExtractProgress::sample(frames.len(), frames.len()));
     Ok(frames)
+}
+
+/// 先试硬件解码，失败（或一帧都没吐）再软解重来一次。
+/// `-hwaccel auto` 在没有可用硬件时本就会退回软解，这里兜的是"选中了硬件但解不动"的情况。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+async fn sample_luma_frames_with_fallback(
+    video: &Path,
+    total_hint: usize,
+    cancel: &AtomicBool,
+    on_progress: &mut (dyn FnMut(ExtractProgress) + Send),
+) -> AppResult<Vec<Vec<u8>>> {
+    match sample_luma_frames(video, true, total_hint, cancel, on_progress).await {
+        Ok(frames) if !frames.is_empty() => Ok(frames),
+        Ok(_) | Err(_) if !cancel.load(Ordering::SeqCst) => {
+            sample_luma_frames(video, false, total_hint, cancel, on_progress).await
+        }
+        other => other,
+    }
 }
 
 /// 一页课件在采样序列里的位置。
@@ -369,17 +458,26 @@ async fn capture_jpeg_at(video: &Path, out: &Path, at_ms: i64) -> AppResult<()> 
 
 /// 移动端（Android / iOS）：用原生低分辨率亮度抽帧 + 共享换页检测算法提取课件页，
 /// 再为每页用原生截帧落地一张全分辨率图。无 ffmpeg。
+/// 原生抽帧是一次性返回的，采样阶段只在结束时报一次进度。
 #[cfg(any(target_os = "android", target_os = "ios"))]
+#[allow(clippy::too_many_arguments)] // 提取入口：视频/输出/门槛/时长/取消/进度各有其义。
 pub async fn extract_slides(
     video: &Path,
     out_dir: &Path,
     threshold_override: Option<f64>,
+    _duration_ms: Option<i64>,
+    cancel: &AtomicBool,
+    on_progress: &mut (dyn FnMut(ExtractProgress) + Send),
 ) -> AppResult<Vec<SlideFrame>> {
     let slides_dir = out_dir.join("slides");
     let _ = std::fs::remove_dir_all(&slides_dir);
     std::fs::create_dir_all(&slides_dir)?;
 
     let (frames, interval_ms) = sample_mobile_luma_frames(video).await?;
+    on_progress(ExtractProgress::sample(frames.len(), frames.len()));
+    if cancel.load(Ordering::SeqCst) {
+        return Err(cancelled());
+    }
     if frames.is_empty() {
         let fallback = slides_dir.join("0001.jpg");
         capture_jpeg_at(video, &fallback, 0).await?;
@@ -394,6 +492,9 @@ pub async fn extract_slides(
     let pages = detect_slide_pages(&frames, block_delta);
     let mut out = Vec::new();
     for (page, spec) in pages.iter().enumerate() {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(cancelled());
+        }
         let start_ms = spec.start_index as i64 * interval_ms;
         let image = slides_dir.join(format!("{:04}.jpg", page + 1));
         capture_jpeg_at(video, &image, spec.capture_index as i64 * interval_ms).await?;
@@ -402,24 +503,34 @@ pub async fn extract_slides(
             image_path: image.to_string_lossy().to_string(),
             start_ms,
         });
+        on_progress(ExtractProgress::capture(out.len(), pages.len()));
     }
     Ok(out)
 }
 
 /// 抽课件页：降采样灰度帧 → 分块变化比例找换页点 → 为每页截一张全分辨率图。
 /// `threshold_override` 给定时直接用作单块亮度差门槛（0~255 量纲），否则按画面噪声自适应。
+/// `duration_ms` 只用来估算采样总帧数好报百分比，缺失时进度的 total 为 0（前端显示不确定态）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[allow(clippy::too_many_arguments)] // 提取入口：视频/输出/门槛/时长/取消/进度各有其义。
 pub async fn extract_slides(
     video: &Path,
     out_dir: &Path,
     threshold_override: Option<f64>,
+    duration_ms: Option<i64>,
+    cancel: &AtomicBool,
+    on_progress: &mut (dyn FnMut(ExtractProgress) + Send),
 ) -> AppResult<Vec<SlideFrame>> {
     let slides_dir = out_dir.join("slides");
     // 清掉旧图，避免页数变少时残留上次的多余图片。
     let _ = std::fs::remove_dir_all(&slides_dir);
     std::fs::create_dir_all(&slides_dir)?;
 
-    let frames = sample_luma_frames(video).await?;
+    let total_hint = duration_ms
+        .filter(|ms| *ms > 0)
+        .map(|ms| (ms / SAMPLE_INTERVAL_MS) as usize)
+        .unwrap_or(0);
+    let frames = sample_luma_frames_with_fallback(video, total_hint, cancel, on_progress).await?;
     if frames.is_empty() {
         let fallback = slides_dir.join("0001.jpg");
         capture_jpeg_at(video, &fallback, 0).await?;
@@ -433,24 +544,37 @@ pub async fn extract_slides(
     let block_delta = threshold_override.unwrap_or_else(|| dynamic_block_delta(&frames));
     let pages = detect_slide_pages(&frames, block_delta);
 
-    let mut out = Vec::new();
-    for (page, spec) in pages.iter().enumerate() {
-        let start_ms = spec.start_index as i64 * SAMPLE_INTERVAL_MS;
-        let image = slides_dir.join(format!("{:04}.jpg", page + 1));
-        // 截的是稳定后那一帧，而 start_ms 仍是这一页出现的时刻（点缩略图要跳到讲它的开头）。
-        capture_jpeg_at(
-            video,
-            &image,
-            spec.capture_index as i64 * SAMPLE_INTERVAL_MS,
-        )
-        .await?;
-        out.push(SlideFrame {
-            page_no: page as i64,
-            image_path: image.to_string_lossy().to_string(),
-            start_ms,
-        });
+    // 页号/文件名/截图时间点先算好，截图本身只是各自独立的 I/O，因此可以并发而不动页序。
+    // 截的是稳定后那一帧，而 start_ms 仍是这一页出现的时刻（点缩略图要跳到讲它的开头）。
+    let planned: Vec<(SlideFrame, i64)> = pages
+        .iter()
+        .enumerate()
+        .map(|(page, spec)| {
+            let image = slides_dir.join(format!("{:04}.jpg", page + 1));
+            (
+                SlideFrame {
+                    page_no: page as i64,
+                    image_path: image.to_string_lossy().to_string(),
+                    start_ms: spec.start_index as i64 * SAMPLE_INTERVAL_MS,
+                },
+                spec.capture_index as i64 * SAMPLE_INTERVAL_MS,
+            )
+        })
+        .collect();
+
+    let mut done = 0;
+    for chunk in planned.chunks(CAPTURE_CONCURRENCY) {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(cancelled());
+        }
+        let shots = chunk
+            .iter()
+            .map(|(frame, at_ms)| capture_jpeg_at(video, Path::new(&frame.image_path), *at_ms));
+        futures_util::future::try_join_all(shots).await?;
+        done += chunk.len();
+        on_progress(ExtractProgress::capture(done, planned.len()));
     }
-    Ok(out)
+    Ok(planned.into_iter().map(|(frame, _)| frame).collect())
 }
 
 pub async fn store_slides(db: &Db, video_id: &str, frames: &[SlideFrame]) -> AppResult<usize> {
@@ -690,7 +814,17 @@ mod tests {
             .expect("ffmpeg gen");
         assert!(gen.status.success(), "gen failed: {gen:?}");
 
-        let frames = extract_slides(&video, dir.path(), None).await.unwrap();
+        let mut events: Vec<ExtractProgress> = Vec::new();
+        let frames = extract_slides(
+            &video,
+            dir.path(),
+            None,
+            Some(6_000),
+            &AtomicBool::new(false),
+            &mut |progress| events.push(progress),
+        )
+        .await
+        .unwrap();
         // 红/绿/蓝三段，应至少抽出多于一页且每页图片落地。
         assert!(
             frames.len() >= 2,
@@ -698,6 +832,12 @@ mod tests {
             frames.len()
         );
         assert!(Path::new(&frames[0].image_path).is_file());
+        // 两个阶段都要报进度，截图阶段的总数等于页数（前端据此显示 i/n）。
+        assert!(events.iter().any(|e| e.phase == "sample"));
+        let last = events.last().expect("progress events");
+        assert_eq!(last.phase, "capture");
+        assert_eq!(last.done, frames.len());
+        assert_eq!(last.total, frames.len());
 
         let dbdir = tempdir().unwrap();
         let db = Db::connect_and_migrate(&dbdir.path().join("t.db"))
@@ -740,10 +880,56 @@ mod tests {
             .expect("ffmpeg gen");
         assert!(gen.status.success(), "gen failed: {gen:?}");
 
-        let frames = extract_slides(&video, dir.path(), None).await.unwrap();
+        let frames = extract_slides(
+            &video,
+            dir.path(),
+            None,
+            None,
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].start_ms, 0);
         assert!(Path::new(&frames[0].image_path).is_file());
+    }
+
+    #[tokio::test]
+    async fn extraction_stops_when_cancelled() {
+        if which::which("ffmpeg").is_err() {
+            eprintln!("skipping: no ffmpeg");
+            return;
+        }
+        let dir = tempdir().unwrap();
+        let video = dir.path().join("cancel.mp4");
+        let gen = StdCommand::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=white:s=160x90:d=3",
+                "-vf",
+                "drawbox=w=80:h=90:color=black:t=fill",
+            ])
+            .arg(&video)
+            .output()
+            .expect("ffmpeg gen");
+        assert!(gen.status.success(), "gen failed: {gen:?}");
+
+        // 已置位的取消标志：采样一开始就该停下，不写任何图。
+        let error = extract_slides(
+            &video,
+            dir.path(),
+            None,
+            None,
+            &AtomicBool::new(true),
+            &mut |_| {},
+        )
+        .await
+        .expect_err("cancelled extraction should fail");
+        assert!(error.to_string().contains("取消"), "got {error}");
     }
 
     #[tokio::test]

@@ -4,7 +4,7 @@ use crate::error::{AppError, AppResult};
 use crate::pipeline::slides;
 use serde::Serialize;
 use std::path::Path;
-use tauri::State;
+use tauri::{Emitter, State};
 
 #[derive(Serialize, sqlx::FromRow)]
 pub struct SlideRow {
@@ -55,20 +55,73 @@ async fn image_path_is_registered(
     Ok(count > 0)
 }
 
+/// 课件提取的进度/结束事件，走 `slides-extract:<request_id>`（与知识点分析同一套约定）。
+#[derive(Serialize, Clone)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ExtractEvent {
+    Progress {
+        phase: String,
+        done: usize,
+        total: usize,
+    },
+}
+
+/// 提取课件页。耗时以「通读整段视频」为大头，因此过程中按 `request_id` 推进度事件、
+/// 并可用 `cmd_cancel_slides_extract` 中断；命令本身仍返回落库的页数（不给 request_id
+/// 也能用，只是没有进度）。
 #[tauri::command]
 pub async fn cmd_extract_slides(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     video_id: String,
     threshold: Option<f64>,
+    request_id: Option<String>,
 ) -> AppResult<usize> {
     let video = load_video(&state, &video_id).await?;
-    let frames = slides::extract_slides(
+    // 没给 request_id 时用一个不会被取消的空标志，保持老调用方可用。
+    let cancel = match &request_id {
+        Some(id) => state.register_cancel(id),
+        None => std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+    let event_name = request_id
+        .as_deref()
+        .map(|id| format!("slides-extract:{id}"));
+    let mut on_progress = |progress: slides::ExtractProgress| {
+        if let Some(name) = &event_name {
+            let _ = app.emit(
+                name,
+                ExtractEvent::Progress {
+                    phase: progress.phase,
+                    done: progress.done,
+                    total: progress.total,
+                },
+            );
+        }
+    };
+    let extracted = slides::extract_slides(
         Path::new(&video.file_path),
         Path::new(&video.data_dir),
         threshold,
+        video.duration_ms,
+        &cancel,
+        &mut on_progress,
     )
-    .await?;
-    slides::store_slides(&state.db, &video_id, &frames).await
+    .await;
+    if let Some(id) = &request_id {
+        state.unregister_cancel(id, &cancel);
+    }
+    // 取消/失败时不动库里的旧课件页：宁可保留上一次的结果，也不要留下半套。
+    slides::store_slides(&state.db, &video_id, &extracted?).await
+}
+
+/// 取消进行中的课件提取：置位取消标志，采样循环会杀掉 ffmpeg、截图循环会在下一页前停下。
+#[tauri::command]
+pub async fn cmd_cancel_slides_extract(
+    state: State<'_, AppState>,
+    request_id: String,
+) -> AppResult<()> {
+    state.cancel(&request_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -141,7 +194,9 @@ pub async fn cmd_read_slide_image(
     if !image_path_is_registered(&state, &video_id, &image_path).await? {
         return Err(AppError::NotFound("slide image".into()));
     }
-    Ok(tauri::ipc::Response::new(tokio::fs::read(image_path).await?))
+    Ok(tauri::ipc::Response::new(
+        tokio::fs::read(image_path).await?,
+    ))
 }
 
 #[cfg(test)]
