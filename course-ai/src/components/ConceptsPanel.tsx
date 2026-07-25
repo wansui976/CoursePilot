@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Search,
   Sparkles,
+  Wand2,
   X,
 } from "lucide-react";
 import {
@@ -18,7 +19,7 @@ import {
   type CourseConcept,
   type CourseKnowledgeGroup,
 } from "@/lib/ipc";
-import { formatMs } from "@/lib/time";
+import { formatMs, formatRelativeTime } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -36,6 +37,30 @@ function sourceStats(concept: CourseConcept) {
 
 function containsQuery(value: string | null | undefined, query: string) {
   return value?.toLocaleLowerCase().includes(query) ?? false;
+}
+
+/**
+ * 把命中片段包成 <mark>：query 已是小写，按原文下标切片以保留原始大小写。
+ * 大小写折叠会改变长度的极端场景（如 İ）下下标不再对齐，直接放弃高亮而不是切错字。
+ */
+function highlightQuery(text: string, query: string): ReactNode {
+  if (!query) return text;
+  const lowered = text.toLocaleLowerCase();
+  if (lowered.length !== text.length) return text;
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  for (let at = lowered.indexOf(query); at !== -1; at = lowered.indexOf(query, cursor)) {
+    if (at > cursor) parts.push(text.slice(cursor, at));
+    parts.push(
+      <mark key={at} className="rounded bg-[var(--accent-weak-2)] text-[var(--accent-text)]">
+        {text.slice(at, at + query.length)}
+      </mark>,
+    );
+    cursor = at + query.length;
+  }
+  if (cursor === 0) return text;
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return parts;
 }
 
 function filterGroups(groups: CourseKnowledgeGroup[], query: string) {
@@ -103,7 +128,10 @@ export function ConceptsPanel({
     queryKey: ["srs-concept-due", courseId],
     queryFn: () => ipc.srs.conceptDueCounts(courseId),
   });
-  const dueCountByConcept = new Map(dueCounts.map((due) => [due.concept_id, due.due]));
+  const dueCountByConcept = useMemo(
+    () => new Map(dueCounts.map((due) => [due.concept_id, due.due])),
+    [dueCounts],
+  );
 
   function invalidateKnowledge() {
     void queryClient.invalidateQueries({ queryKey: ["course-knowledge", courseId] });
@@ -154,6 +182,27 @@ export function ConceptsPanel({
     onSettled: invalidateKnowledge,
   });
 
+  // 为某知识点补复习卡：卡片来自各视频的 AI 出题结果，按时间就近归到知识点上。
+  // 后端对已有卡只更新正反面、不动排期，所以重复点不会打乱复习计划。
+  const makeCards = useMutation({
+    mutationFn: async (concept: CourseConcept) => {
+      const videoIds = [...new Set(concept.occurrences.map((occurrence) => occurrence.video_id))];
+      const counts = await Promise.all(videoIds.map((videoId) => ipc.srs.generate(videoId)));
+      return counts.reduce((total, count) => total + count, 0);
+    },
+    onSuccess: (count) => {
+      setAnnouncement(
+        count > 0
+          ? `已从相关视频整理 ${count} 张复习卡，新卡立即可复习，已排期的卡片保持原计划。`
+          : "没有可整理的复习卡：相关视频还没有 AI 出题结果，请先在视频页生成测验。",
+      );
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["srs-concept-due", courseId] });
+      void queryClient.invalidateQueries({ queryKey: ["srs-count-due"] });
+    },
+  });
+
   // 复习结束（或退出）：刷新概念待复习数与仪表盘计数。
   function closeReview() {
     setReviewing(null);
@@ -168,6 +217,14 @@ export function ConceptsPanel({
   const groups = useMemo(() => filterGroups(knowledge?.groups ?? [], query), [knowledge?.groups, query]);
   const busy = analyze.isPending || summarize.isPending;
   const hasKnowledge = allConcepts.length > 0;
+  // 过滤后仍在列的知识点数：搜索时告诉用户命中了多少，而不是只剩下一堆卡片。
+  const matchedCount = groups.reduce((total, group) => total + group.concepts.length, 0);
+  // 知识点实际覆盖到的视频数。它小于「有字幕的视频数」说明有视频还没被分析过 ——
+  // 这种过时只能靠重新分析补上，只更新总结不会凭空长出新知识点。
+  const analyzedVideos = new Set(
+    allConcepts.flatMap((concept) => concept.occurrences.map((occurrence) => occurrence.video_id)),
+  ).size;
+  const missingVideos = Math.max(0, (knowledge?.covered_videos ?? 0) - analyzedVideos);
 
   return (
     <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-[var(--surface-app)] text-[var(--text-normal)]">
@@ -319,10 +376,32 @@ export function ConceptsPanel({
                         已有知识点索引。生成课程总结后，会按主题补充主线和一句话结论。
                       </p>
                     )}
-                    {knowledge?.stale && (
-                      <p className="mt-2 text-xs text-[var(--status-warn)]">
-                        课程内容已有变化，当前总结仍可参考，建议重新分析。
+                    {knowledge?.generated_at != null && (
+                      <p className="mt-2 text-xs text-[var(--text-faint)]">
+                        总结生成于 {formatRelativeTime(knowledge.generated_at)}
                       </p>
+                    )}
+                    {/* 有总结才提供「只更新总结」；没有总结的过时（快照损坏）走下面的首次生成按钮。 */}
+                    {knowledge?.stale && knowledge.overview && (
+                      <div className="mt-2 rounded-lg border border-[var(--status-warn)]/40 bg-[var(--status-warn-bg)] px-3 py-2">
+                        <p className="text-xs leading-5 text-[var(--status-warn)]">
+                          课程内容已有变化，当前总结仍可参考。
+                          {missingVideos > 0
+                            ? `有 ${missingVideos} 个含字幕的视频还没出现在知识点里，需要重新分析才能补上。`
+                            : "知识点没有增减，只更新总结即可（不重新扫描全课字幕，快且省）。"}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => summarize.mutate()}
+                          disabled={busy}
+                          className="ca-touch-44 mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-[var(--status-warn)]/50 px-2.5 py-1 text-xs font-medium text-[var(--status-warn)] transition hover:opacity-80 disabled:opacity-60"
+                        >
+                          <FileText
+                            className={`h-3.5 w-3.5 ${summarize.isPending ? "animate-pulse" : ""}`}
+                          />
+                          {summarize.isPending ? "更新中…" : "只更新总结"}
+                        </button>
+                      </div>
                     )}
                   </div>
                   {!knowledge?.overview && (
@@ -367,6 +446,11 @@ export function ConceptsPanel({
                   className="ca-touch-44 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] py-2 pl-9 pr-3 text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:border-primary"
                 />
               </div>
+              {query && matchedCount > 0 && (
+                <p aria-live="polite" className="-mt-4 text-xs text-[var(--text-muted)]">
+                  命中 {matchedCount}/{allConcepts.length} 个知识点 · {groups.length} 个主题
+                </p>
+              )}
 
               {groups.length === 0 ? (
                 <div className="py-10 text-center text-sm text-[var(--text-muted)]">
@@ -374,19 +458,20 @@ export function ConceptsPanel({
                 </div>
               ) : (
                 <div className="space-y-7">
-                  {groups.map((group) => (
-                    <section key={group.title} aria-labelledby={`knowledge-topic-${group.title}`}>
+                  {/* 主题标题由模型生成，可能重复；key 与 DOM id 用序号，避免同名主题互相顶掉。 */}
+                  {groups.map((group, index) => (
+                    <section key={`${index}-${group.title}`} aria-labelledby={`knowledge-topic-${index}`}>
                       <div className="mb-2 flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <h2
-                            id={`knowledge-topic-${group.title}`}
+                            id={`knowledge-topic-${index}`}
                             className="text-sm font-semibold text-[var(--text-strong)]"
                           >
-                            {group.title}
+                            {highlightQuery(group.title, query)}
                           </h2>
                           {group.summary && (
                             <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-                              {group.summary}
+                              {highlightQuery(group.summary, query)}
                             </p>
                           )}
                         </div>
@@ -414,11 +499,11 @@ export function ConceptsPanel({
                                 >
                                   <span className="min-w-0 flex-1">
                                     <span className="block break-words text-sm font-medium text-[var(--text-strong)]">
-                                      {concept.name}
+                                      {highlightQuery(concept.name, query)}
                                     </span>
                                     {concept.summary && (
                                       <span className="mt-1 block line-clamp-1 text-xs leading-5 text-[var(--text-muted)]">
-                                        {concept.summary}
+                                        {highlightQuery(concept.summary, query)}
                                       </span>
                                     )}
                                     <span className="mt-1 block text-xs text-[var(--text-faint)]">
@@ -482,6 +567,40 @@ export function ConceptsPanel({
                                       ))}
                                     </ul>
                                   </div>
+                                  {due === 0 && (
+                                    <div className="mt-3 border-t border-[var(--border-subtle)] pt-2.5">
+                                      <p className="text-xs leading-5 text-[var(--text-muted)]">
+                                        暂无到期复习卡。可从相关视频的 AI
+                                        出题结果整理卡片（还没出题的视频需先在视频页生成测验）。
+                                      </p>
+                                      <button
+                                        type="button"
+                                        onClick={() => makeCards.mutate(concept)}
+                                        disabled={makeCards.isPending}
+                                        className="ca-touch-44 mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-1 text-xs font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-60"
+                                      >
+                                        <Wand2 className="h-3.5 w-3.5" />
+                                        {makeCards.isPending ? "整理中…" : "生成复习卡"}
+                                      </button>
+                                      {/* 结果只贴在发起的那个知识点下，换知识点后不跟着走。 */}
+                                      {makeCards.variables?.id === concept.id &&
+                                        makeCards.isSuccess && (
+                                          <p className="mt-1.5 text-xs text-[var(--text-muted)]">
+                                            {makeCards.data > 0
+                                              ? `已整理 ${makeCards.data} 张复习卡：新卡立即可复习，已排期的卡片保持原计划。`
+                                              : "相关视频还没有 AI 出题结果，请先在视频页生成测验。"}
+                                          </p>
+                                        )}
+                                      {makeCards.variables?.id === concept.id &&
+                                        makeCards.isError && (
+                                          <ErrorNote
+                                            className="mt-1.5"
+                                            error={makeCards.error}
+                                            onRetry={() => makeCards.mutate(concept)}
+                                          />
+                                        )}
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </li>
