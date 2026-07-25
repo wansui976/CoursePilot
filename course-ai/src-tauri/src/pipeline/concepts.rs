@@ -5,7 +5,7 @@ use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::llm::{ChatMessage, ChatRequest, Provider, StreamPiece};
 use crate::pipeline::ai::{parse_lenient_json, transcript_text};
-use crate::pipeline::rag::{build_chat_messages, split_by_chars, AskEvent};
+use crate::pipeline::rag::{build_chat_messages, mmss, split_by_chars, AskEvent, Citation};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -445,11 +445,12 @@ async fn existing_concept_explanations(
     db: &Db,
     course_id: &str,
 ) -> AppResult<HashMap<String, ConceptExplanation>> {
-    let rows: Vec<(String, Option<String>, Option<String>)> =
-        sqlx::query_as("SELECT name,explanation,explanation_source FROM concepts WHERE course_id=?")
-            .bind(course_id)
-            .fetch_all(&db.pool)
-            .await?;
+    let rows: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT name,explanation,explanation_source FROM concepts WHERE course_id=?",
+    )
+    .bind(course_id)
+    .fetch_all(&db.pool)
+    .await?;
     let mut out = HashMap::new();
     for (name, explanation, source_sig) in rows {
         let (Some(text), Some(source_sig)) = (explanation, source_sig) else {
@@ -1000,21 +1001,138 @@ pub async fn get_course_knowledge(db: &Db, course_id: &str) -> AppResult<CourseK
 
 // ---------- 课程知识问答（以整门课的总览+知识点为背景的聊天） ----------
 
-// 拼进上下文的知识点背景字节上限：概念解释较长，超预算后只保留概念名/摘要，控制 token。
-const COURSE_CHAT_CONTEXT_BYTES: usize = 40_000;
+// 稳定背景（课程总览 + 全部知识点的名称/摘要名录）的字节上限。这段与问题无关、跨轮一致，
+// 整段作为 prompt cache 块复用；超预算就截断并说明有省略，免得模型把名录当成完整清单。
+const CHAT_OUTLINE_BYTES: usize = 12_000;
+// 与问题最相关的知识点最多带几个（含完整解释与来源），以及这段的字节上限。
+const CHAT_FOCUS_CONCEPTS: usize = 8;
+const CHAT_FOCUS_BYTES: usize = 12_000;
+// 每个重点知识点最多取几处来源，以及回给前端的来源总数上限。
+const CHAT_SOURCES_PER_CONCEPT: usize = 2;
+const CHAT_CITATIONS: usize = 8;
 
-const COURSE_CHAT_SYSTEM: &str = "你是这门课程的学习助手，会收到这门课程的『课程总览』和『知识点及其 AI 解释』作为背景。严格遵守：\
+const COURSE_CHAT_SYSTEM: &str = "你是这门课程的学习助手，会收到这门课程的『课程总览』和『知识点名录』作为背景，\
+提问时还会附上与该问题最相关的几个知识点（含 AI 解释，多数带「〈视频标题 mm:ss〉」来源标签）。严格遵守：\
 1. 优先依据这些课程主题和知识点作答，帮助学习者理解、串联、复习本课程内容；引用到某个知识点时可点名它；\
-2. 若问题超出这些知识点的范围，可以用你自己的知识补充，但要明确说明「这部分超出了本课程明确讲到的范围」，\
+2. 凡是依据带来源标签的知识点得出的结论，都在该句话后面紧跟对应的「〈视频标题 mm:ss〉」，\
+标题与时间照抄来源行行首，方便回看；不要输出裸的 [mm:ss]；\
+3. 名录里只有名称和摘要的知识点，可以点名、但不要替它编造细节；若问题超出这些知识点的范围，\
+可以用你自己的知识补充，但要明确说明「这部分超出了本课程明确讲到的范围」，\
 不要把课外内容伪装成课程内容，也不要编造课程里不存在的细节；\
-3. 回答用中文、Markdown 排版，简洁有条理：先给结论，再用「- 」列表展开要点；不要寒暄。";
+4. 回答用中文、Markdown 排版，简洁有条理：先给结论，再用「- 」列表展开要点；不要寒暄。";
 
 const COURSE_CHAT_NO_KNOWLEDGE_SYSTEM: &str = "你是这门课程的学习助手，但这门课程目前还没有分析出任何知识点。\
 请先用一句「这门课程还没有分析出知识点，以下回答来自我自己的知识」说明，再尽量帮用户解答；回答用中文、Markdown、简洁有条理。";
 
-/// 把课程知识（总览 + 各主题下的知识点/摘要/AI 解释）拼成一段背景上下文。
-/// 概念解释较长，仅在字节预算内附上（超预算的概念只保留名称/摘要），控制上下文规模。纯函数，可单测。
-fn course_knowledge_context(knowledge: &CourseKnowledge) -> String {
+/// 疑问句里的常见填充词：任何课程的解释里都可能出现，计分时会淹没真正的关键词。
+const CHAT_STOP_TERMS: &[&str] = &[
+    "什么", "怎么", "为什", "如何", "可以", "一下", "这个", "那个", "哪些", "请问", "帮我", "我想",
+    "the", "and", "what", "how", "why", "does", "is", "are", "of", "in", "to", "for", "this",
+    "that", "with", "about", "can",
+];
+
+/// 拉丁词按整词收；单字母（a/x）噪声太大，丢掉。
+fn push_word_term(word: &mut String, terms: &mut Vec<String>) {
+    if word.chars().count() >= 2 {
+        terms.push(word.clone());
+    }
+    word.clear();
+}
+
+/// 中文没有空格可切，按相邻二字组合成词元：既能命中「贝叶斯定理」的一部分，
+/// 又不像单字那样在任何课程里都命中。单字查询（如「熵」）保留原字。
+fn push_cjk_terms(run: &mut Vec<char>, terms: &mut Vec<String>) {
+    if run.len() == 1 {
+        terms.push(run[0].to_string());
+    } else {
+        for pair in run.windows(2) {
+            terms.push(pair.iter().collect());
+        }
+    }
+    run.clear();
+}
+
+/// 把问题切成匹配用的词元（小写、去重、去填充词）。纯函数，可单测。
+fn query_terms(query: &str) -> Vec<String> {
+    let mut terms: Vec<String> = Vec::new();
+    let mut word = String::new();
+    let mut run: Vec<char> = Vec::new();
+    // 末尾补一个空格，让最后一段词/中文串也走到 flush 分支。
+    for ch in query.to_lowercase().chars().chain(std::iter::once(' ')) {
+        if ch.is_ascii_alphanumeric() {
+            push_cjk_terms(&mut run, &mut terms);
+            word.push(ch);
+        } else if ch.is_alphanumeric() {
+            // 非 ASCII 的字母（中日韩等）都按「无空格分词」处理。
+            push_word_term(&mut word, &mut terms);
+            run.push(ch);
+        } else {
+            push_word_term(&mut word, &mut terms);
+            push_cjk_terms(&mut run, &mut terms);
+        }
+    }
+    terms.retain(|term| !CHAT_STOP_TERMS.contains(&term.as_str()));
+    terms.sort();
+    terms.dedup();
+    terms
+}
+
+/// 知识点与问题的相关度：名称命中权重最高，其次摘要，再是解释与字幕摘录。
+/// 计的是「命中了几个不同词元」而非出现次数，长解释不会靠反复出现同一个词压过名称命中；
+/// 摘录取最高的一处，出现次数多的知识点不因此虚高。
+fn concept_score(concept: &CourseConcept, terms: &[String]) -> usize {
+    let hits = |text: &str| -> usize {
+        let lowered = text.to_lowercase();
+        terms.iter().filter(|term| lowered.contains(*term)).count()
+    };
+    let mut score = hits(&concept.name) * 4;
+    if let Some(summary) = concept.summary.as_deref() {
+        score += hits(summary) * 2;
+    }
+    if let Some(explanation) = concept.explanation.as_deref() {
+        score += hits(explanation);
+    }
+    score += concept
+        .occurrences
+        .iter()
+        .filter_map(|occurrence| occurrence.excerpt.as_deref())
+        .map(hits)
+        .max()
+        .unwrap_or(0);
+    score
+}
+
+/// 按与问题的相关度挑出重点知识点（相关度为 0 的不进）。同分保持课程顺序（稳定排序）。
+/// 返回 (所属主题, 知识点)。
+fn rank_concepts<'a>(
+    knowledge: &'a CourseKnowledge,
+    terms: &[String],
+) -> Vec<(&'a str, &'a CourseConcept)> {
+    if terms.is_empty() {
+        return Vec::new();
+    }
+    let mut ranked: Vec<(usize, &str, &CourseConcept)> = Vec::new();
+    for group in &knowledge.groups {
+        for concept in &group.concepts {
+            let score = concept_score(concept, terms);
+            if score > 0 {
+                ranked.push((score, group.title.as_str(), concept));
+            }
+        }
+    }
+    // 稳定排序：同分的知识点保持课程里的先后顺序。
+    ranked.sort_by_key(|(score, _, _)| std::cmp::Reverse(*score));
+    ranked.truncate(CHAT_FOCUS_CONCEPTS);
+    ranked
+        .into_iter()
+        .map(|(_, title, concept)| (title, concept))
+        .collect()
+}
+
+/// 稳定背景：课程总览 + 全部知识点的名称/摘要名录（按主题分组）。
+/// 不含解释——解释只随相关的那几个知识点走，故这段与问题无关、跨轮字节一致，可整段命中 prompt cache。
+/// 纯函数，可单测。
+fn course_outline_context(knowledge: &CourseKnowledge) -> String {
     let mut ctx = String::new();
     if let Some(overview) = knowledge
         .overview
@@ -1026,9 +1144,14 @@ fn course_knowledge_context(knowledge: &CourseKnowledge) -> String {
         ctx.push_str(overview);
         ctx.push_str("\n\n");
     }
+    let mut truncated = false;
     for group in &knowledge.groups {
         if group.concepts.is_empty() {
             continue;
+        }
+        if ctx.len() >= CHAT_OUTLINE_BYTES {
+            truncated = true;
+            break;
         }
         ctx.push_str(&format!("【主题】{}\n", group.title));
         if let Some(summary) = group
@@ -1041,6 +1164,10 @@ fn course_knowledge_context(knowledge: &CourseKnowledge) -> String {
             ctx.push('\n');
         }
         for concept in &group.concepts {
+            if ctx.len() >= CHAT_OUTLINE_BYTES {
+                truncated = true;
+                break;
+            }
             ctx.push_str("- ");
             ctx.push_str(&concept.name);
             if let Some(summary) = concept
@@ -1053,27 +1180,99 @@ fn course_knowledge_context(knowledge: &CourseKnowledge) -> String {
                 ctx.push_str(summary);
             }
             ctx.push('\n');
-            // 解释按预算附上：预算内才加，避免概念很多时上下文过大。
-            if ctx.len() < COURSE_CHAT_CONTEXT_BYTES {
-                if let Some(explanation) = concept
-                    .explanation
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                {
-                    ctx.push_str("  ");
-                    ctx.push_str(explanation);
-                    ctx.push('\n');
-                }
-            }
         }
         ctx.push('\n');
+    }
+    if truncated {
+        ctx.push_str("（名录过长，其余知识点已省略）\n");
     }
     ctx
 }
 
+/// 重点块：按相关度排好的知识点，带完整解释与「〈视频标题 mm:ss〉摘录」来源行。
+/// 同时产出等价的引用表（编号从 1）供前端渲染可点击出处——只有进了引用表的来源才写进上下文，
+/// 所以模型照抄的出处一定能在界面上点到。纯函数，可单测。
+fn course_focus_context(focus: &[(&str, &CourseConcept)]) -> (String, Vec<Citation>) {
+    let mut ctx = String::new();
+    let mut citations: Vec<Citation> = Vec::new();
+    let mut seen: HashSet<(String, i64)> = HashSet::new();
+    for (group_title, concept) in focus {
+        if ctx.len() >= CHAT_FOCUS_BYTES {
+            break;
+        }
+        ctx.push_str(&format!("### {}（主题：{}）\n", concept.name, group_title));
+        if let Some(summary) = concept
+            .summary
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            ctx.push_str(summary);
+            ctx.push('\n');
+        }
+        if let Some(explanation) = concept
+            .explanation
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            ctx.push_str(explanation);
+            ctx.push('\n');
+        }
+        let mut taken = 0;
+        for occurrence in &concept.occurrences {
+            if taken >= CHAT_SOURCES_PER_CONCEPT || citations.len() >= CHAT_CITATIONS {
+                break;
+            }
+            if !seen.insert((occurrence.video_id.clone(), occurrence.start_ms)) {
+                continue;
+            }
+            taken += 1;
+            let text = occurrence
+                .excerpt
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(concept.name.as_str())
+                .to_string();
+            ctx.push_str(&format!(
+                "〈{} {}〉{}\n",
+                occurrence.video_title,
+                mmss(occurrence.start_ms),
+                text
+            ));
+            citations.push(Citation {
+                index: citations.len() + 1,
+                text,
+                start_ms: occurrence.start_ms,
+                end_ms: occurrence.end_ms.unwrap_or(occurrence.start_ms),
+                video_id: Some(occurrence.video_id.clone()),
+                video_title: Some(occurrence.video_title.clone()),
+            });
+        }
+        ctx.push('\n');
+    }
+    (ctx, citations)
+}
+
+/// 装配课程问答的上下文，返回（稳定背景, 与问题相关的重点块, 引用表）。
+/// 此前是把整门课的解释一股脑倾倒进去、超预算就按遍历顺序丢弃——课程一大，被丢掉的
+/// 很可能正是用户问的那个知识点。现在按相关度挑重点：名录保证模型仍有全课地图，
+/// 解释与来源只给相关的那几个。问题与任何知识点都不沾（如「这门课主要讲了什么」）时
+/// 重点块为空，只给名录，本就是这类问题该有的背景。
+fn course_chat_context(
+    knowledge: &CourseKnowledge,
+    query: &str,
+) -> (String, String, Vec<Citation>) {
+    let outline = course_outline_context(knowledge);
+    let focus = rank_concepts(knowledge, &query_terms(query));
+    let (focus_context, citations) = course_focus_context(&focus);
+    (outline, focus_context, citations)
+}
+
 /// 以整门课程的总览与知识点为背景的流式问答。命中知识为空时退回模型自身知识（明确标注）。
-/// 与 rag 的问答共用 `AskEvent`（发 Token/Reasoning，结束发 Done）。
+/// 与 rag 的问答共用 `AskEvent`：有来源时开头发 Citations，随后 Token/Reasoning，结束发 Done。
+/// 稳定的知识点名录走 cacheable_context（跨轮命中缓存），与本次问题相关的重点块随当前提问走。
 #[allow(clippy::too_many_arguments)] // 编排入口：db/provider/model/course/query/history/cancel/on_event 各有其义。
 pub async fn course_chat_stream(
     db: &Db,
@@ -1086,22 +1285,33 @@ pub async fn course_chat_stream(
     on_event: &mut (dyn FnMut(AskEvent) + Send),
 ) -> AppResult<String> {
     let knowledge = get_course_knowledge(db, course_id).await?;
-    let context = course_knowledge_context(&knowledge);
-    let (system, cacheable_context): (&str, Option<String>) = if context.trim().is_empty() {
+    let (outline, focus, citations) = course_chat_context(&knowledge, query);
+    let (system, cacheable_context): (&str, Option<String>) = if outline.trim().is_empty() {
         (COURSE_CHAT_NO_KNOWLEDGE_SYSTEM, None)
     } else {
         (
             COURSE_CHAT_SYSTEM,
             Some(format!(
-                "以下是本课程的主题总览与知识点（含 AI 解释），作为回答依据：\n{context}"
+                "以下是本课程的总览与知识点名录，作为回答依据：\n{outline}"
             )),
         )
+    };
+    // 出处先于正文送达：前端在答案还在流的时候就能把「来源」列出来。
+    if !citations.is_empty() {
+        on_event(AskEvent::Citations {
+            citations: citations.clone(),
+        });
+    }
+    let turn = if focus.trim().is_empty() {
+        query.to_string()
+    } else {
+        format!("【与这个问题最相关的知识点】\n{focus}\n【我的问题】{query}")
     };
     let req = ChatRequest {
         model: chat_model.to_string(),
         system: Some(system.to_string()),
         cacheable_context,
-        messages: build_chat_messages(history, query),
+        messages: build_chat_messages(history, &turn),
         temperature: 0.3,
         max_tokens: 1024,
     };
@@ -1336,7 +1546,9 @@ async fn canonicalize_merged_concepts(
             let norm = normalize_name(&alias);
             // 只接受给定列表里的别名；每个原始名以先到的分组为准。
             if known.contains(&norm) {
-                canonical_of.entry(norm).or_insert_with(|| canonical.clone());
+                canonical_of
+                    .entry(norm)
+                    .or_insert_with(|| canonical.clone());
             }
         }
     }
@@ -1428,9 +1640,8 @@ pub async fn analyze_course_concepts(
                         first_error = Some(error);
                     }
                     if chunk_ok == 0 && chunk_errors >= BEST_EFFORT_GIVE_UP {
-                        return Err(first_error.unwrap_or_else(|| {
-                            AppError::Other("知识点抽取连续失败".into())
-                        }));
+                        return Err(first_error
+                            .unwrap_or_else(|| AppError::Other("知识点抽取连续失败".into())));
                     }
                 }
             }
@@ -1521,45 +1732,68 @@ pub async fn analyze_course_concepts(
 mod tests {
     use super::*;
 
-    #[test]
-    fn course_knowledge_context_includes_overview_concepts_and_explanations() {
-        let knowledge = CourseKnowledge {
+    fn occurrence(video_id: &str, title: &str, start_ms: i64, excerpt: &str) -> ConceptOccurrence {
+        ConceptOccurrence {
+            video_id: video_id.into(),
+            video_title: title.into(),
+            start_ms,
+            end_ms: Some(start_ms + 5_000),
+            excerpt: Some(excerpt.into()),
+        }
+    }
+
+    fn concept(name: &str, summary: &str, explanation: &str) -> CourseConcept {
+        CourseConcept {
+            id: format!("k-{name}"),
+            name: name.into(),
+            summary: Some(summary.into()),
+            explanation: Some(explanation.into()),
+            occurrences: vec![],
+        }
+    }
+
+    fn knowledge_of(groups: Vec<CourseKnowledgeGroup>) -> CourseKnowledge {
+        CourseKnowledge {
             overview: Some("本课程围绕概率判断展开。".into()),
-            groups: vec![
-                CourseKnowledgeGroup {
-                    title: "概率推断".into(),
-                    summary: Some("用概率组织不确定信息。".into()),
-                    concepts: vec![CourseConcept {
-                        id: "k1".into(),
-                        name: "贝叶斯定理".into(),
-                        summary: Some("用新证据更新先验。".into()),
-                        explanation: Some("贝叶斯定理讲的是如何用新证据更新先验判断。".into()),
-                        occurrences: vec![],
-                    }],
-                },
-                // 空组不应产生「【主题】」噪声。
-                CourseKnowledgeGroup {
-                    title: "空组".into(),
-                    summary: None,
-                    concepts: vec![],
-                },
-            ],
+            groups,
             generated_at: Some(1),
             covered_videos: 2,
             total_videos: 2,
             stale: false,
-        };
-        let ctx = course_knowledge_context(&knowledge);
+        }
+    }
+
+    #[test]
+    fn course_outline_context_lists_names_and_summaries_without_explanations() {
+        let knowledge = knowledge_of(vec![
+            CourseKnowledgeGroup {
+                title: "概率推断".into(),
+                summary: Some("用概率组织不确定信息。".into()),
+                concepts: vec![concept(
+                    "贝叶斯定理",
+                    "用新证据更新先验。",
+                    "贝叶斯定理讲的是如何用新证据更新先验判断。",
+                )],
+            },
+            // 空组不应产生「【主题】」噪声。
+            CourseKnowledgeGroup {
+                title: "空组".into(),
+                summary: None,
+                concepts: vec![],
+            },
+        ]);
+        let ctx = course_outline_context(&knowledge);
         assert!(ctx.contains("【课程总览】"));
         assert!(ctx.contains("本课程围绕概率判断展开。"));
         assert!(ctx.contains("【主题】概率推断"));
         assert!(ctx.contains("贝叶斯定理：用新证据更新先验。"));
-        assert!(ctx.contains("用新证据更新先验判断"));
         assert!(!ctx.contains("空组"));
+        // 解释不进名录：这段要跨轮字节一致，才能整段命中 prompt cache。
+        assert!(!ctx.contains("如何用新证据更新先验判断"));
     }
 
     #[test]
-    fn course_knowledge_context_empty_when_no_knowledge() {
+    fn course_outline_context_empty_when_no_knowledge() {
         let knowledge = CourseKnowledge {
             overview: None,
             groups: vec![],
@@ -1568,7 +1802,119 @@ mod tests {
             total_videos: 1,
             stale: false,
         };
-        assert!(course_knowledge_context(&knowledge).trim().is_empty());
+        assert!(course_outline_context(&knowledge).trim().is_empty());
+    }
+
+    #[test]
+    fn course_outline_context_notes_truncation_when_over_budget() {
+        let concepts: Vec<CourseConcept> = (0..400)
+            .map(|i| {
+                concept(
+                    &format!("知识点{i}"),
+                    &"这是一段用来把名录顶到预算上限的摘要。".repeat(3),
+                    "解释",
+                )
+            })
+            .collect();
+        let ctx = course_outline_context(&knowledge_of(vec![CourseKnowledgeGroup {
+            title: "大主题".into(),
+            summary: None,
+            concepts,
+        }]));
+        assert!(ctx.len() < CHAT_OUTLINE_BYTES + 1_000);
+        // 截断要说明，否则模型会把残缺名录当成课程的完整清单。
+        assert!(ctx.contains("其余知识点已省略"));
+    }
+
+    #[test]
+    fn query_terms_splits_cjk_into_bigrams_and_drops_fillers() {
+        let terms = query_terms("贝叶斯定理怎么用 Bayes");
+        assert!(terms.contains(&"贝叶".to_string()));
+        assert!(terms.contains(&"叶斯".to_string()));
+        assert!(terms.contains(&"定理".to_string()));
+        assert!(terms.contains(&"bayes".to_string()));
+        // 疑问填充词不参与计分，否则任何含「怎么」的解释都算命中。
+        assert!(!terms.contains(&"怎么".to_string()));
+        // 单字查询保留原字，否则「熵」这类问题一个词元都没有。
+        assert_eq!(query_terms("熵"), vec!["熵".to_string()]);
+        assert!(query_terms("").is_empty());
+    }
+
+    #[test]
+    fn course_chat_context_focuses_on_the_concept_the_question_is_about() {
+        // 相关知识点排在最后：旧实现按遍历顺序填预算，正是它的解释会被丢掉。
+        let mut irrelevant: Vec<CourseConcept> = (0..30)
+            .map(|i| {
+                concept(
+                    &format!("无关知识点{i}"),
+                    "与提问无关的摘要。",
+                    &"与提问无关的长篇解释。".repeat(50),
+                )
+            })
+            .collect();
+        let mut target = concept(
+            "贝叶斯定理",
+            "用新证据更新先验。",
+            "贝叶斯定理讲的是如何用新证据更新先验判断。",
+        );
+        target.occurrences = vec![
+            occurrence(
+                "v1",
+                "第三讲 概率",
+                65_000,
+                "先验概率会随着新的证据被更新。",
+            ),
+            occurrence("v2", "第四讲 应用", 12_000, "用贝叶斯做医学检验的例子。"),
+            // 超过每个知识点的来源上限，不进上下文也不进引用表。
+            occurrence("v2", "第四讲 应用", 30_000, "第三处来源。"),
+        ];
+        irrelevant.push(target);
+
+        let (outline, focus, citations) = course_chat_context(
+            &knowledge_of(vec![CourseKnowledgeGroup {
+                title: "概率推断".into(),
+                summary: None,
+                concepts: irrelevant,
+            }]),
+            "贝叶斯定理是什么意思",
+        );
+
+        assert!(focus.contains("贝叶斯定理"));
+        assert!(focus.contains("如何用新证据更新先验判断"));
+        // 来源行用与 rag 一致的〈标题 mm:ss〉写法，模型照抄即可。
+        assert!(focus.contains("〈第三讲 概率 01:05〉先验概率会随着新的证据被更新。"));
+        assert!(!focus.contains("第三处来源"));
+        assert!(!focus.contains("与提问无关的长篇解释"));
+        // 名录照旧给出全课地图（含无关知识点的名称），但不含它们的解释。
+        assert!(outline.contains("无关知识点0"));
+        assert!(!outline.contains("与提问无关的长篇解释"));
+
+        assert_eq!(citations.len(), 2);
+        assert_eq!(citations[0].index, 1);
+        assert_eq!(citations[0].video_id.as_deref(), Some("v1"));
+        assert_eq!(citations[0].start_ms, 65_000);
+        assert_eq!(citations[0].text, "先验概率会随着新的证据被更新。");
+        assert_eq!(citations[1].video_id.as_deref(), Some("v2"));
+        assert!(citations
+            .iter()
+            .all(|c| c.video_title.as_deref() == Some("第三讲 概率")
+                || c.video_title.as_deref() == Some("第四讲 应用")));
+    }
+
+    #[test]
+    fn course_chat_context_has_no_focus_for_overview_questions() {
+        let (outline, focus, citations) = course_chat_context(
+            &knowledge_of(vec![CourseKnowledgeGroup {
+                title: "概率推断".into(),
+                summary: None,
+                concepts: vec![concept("贝叶斯定理", "用新证据更新先验。", "解释")],
+            }]),
+            "帮我梳理一下",
+        );
+        // 与任何知识点都不沾的问题：只给名录，这本就是这类问题该有的背景。
+        assert!(focus.is_empty());
+        assert!(citations.is_empty());
+        assert!(outline.contains("贝叶斯定理"));
     }
 
     #[test]
@@ -2169,7 +2515,9 @@ mod tests {
             .await
             .unwrap();
 
-        let reusable = existing_concept_explanations(&db, &course.id).await.unwrap();
+        let reusable = existing_concept_explanations(&db, &course.id)
+            .await
+            .unwrap();
         assert_eq!(reusable.len(), 1);
         let kept = &reusable["甲概念"];
         assert_eq!(kept.text, "甲概念的解释。");

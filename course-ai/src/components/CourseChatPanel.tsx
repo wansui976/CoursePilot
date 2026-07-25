@@ -4,10 +4,68 @@ import { Send, Sparkles, Square, Trash2, User } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { renderMarkdown } from "@/lib/renderMarkdown";
-import type { AskEvent, ChatMessage } from "@/lib/types";
+import { formatMs } from "@/lib/time";
+import { displayTitle } from "@/lib/videoTitle";
+import type { AskEvent, ChatMessage, Citation } from "@/lib/types";
 
-// 课程问答的答案没有单一当前视频可跳转，解释里也不含 [mm:ss]，故用空 seek。
+// 答案里的 [mm:ss] 不跳转：课程问答横跨多个视频，没有「当前视频」可 seek，
+// 该跳哪儿由下方「来源」列表说清楚（每条自带视频）。
 const NO_SEEK = () => {};
+
+/**
+ * 答案下方的「来源」：后端挑出的相关知识点带来了哪些讲课片段，点一条就跳到那节课那一刻。
+ * 没有来源（问题不针对具体知识点、或旧记录）时不渲染。
+ */
+function ChatSources({
+  citations,
+  onJump,
+}: {
+  citations?: Citation[];
+  onJump?: (videoId: string, startMs: number) => void;
+}) {
+  if (!citations || citations.length === 0) return null;
+  return (
+    <div className="mt-2 border-t border-[var(--border-subtle)] pt-1.5">
+      <div className="mb-1 text-[11px] font-medium text-[var(--text-faint)]">来源</div>
+      <div className="space-y-0.5">
+        {citations.map((c) => {
+          const label = (
+            <>
+              {c.video_title && (
+                <span className="mr-1.5 text-[var(--text-faint)]">
+                  {displayTitle(c.video_title)} ·
+                </span>
+              )}
+              <span className="mr-1.5 text-primary">{formatMs(c.start_ms)}</span>
+              <span className="text-[var(--text-normal)]">{c.text}</span>
+            </>
+          );
+          const key = `${c.video_id ?? ""}-${c.start_ms}-${c.index}`;
+          // 拿不到跳转能力或来源没带视频时降级成纯文本，免得点了没反应。
+          if (!onJump || !c.video_id) {
+            return (
+              <p key={key} className="px-1.5 py-1 text-xs">
+                {label}
+              </p>
+            );
+          }
+          const videoId = c.video_id;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onJump(videoId, c.start_ms)}
+              aria-label={`回看 ${displayTitle(c.video_title ?? "")} ${formatMs(c.start_ms)}`}
+              className="block w-full rounded px-1.5 py-1 text-left text-xs hover:bg-[var(--surface-card-hover)]"
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 /** 渲染回答：Markdown（标题/列表/加粗）+ KaTeX。memo 避免打字等无关重渲染反复重解析。 */
 const AnswerText = memo(function AnswerText({
@@ -55,6 +113,8 @@ type ChatTurn = {
   answer: string;
   /** 推理模型的思考过程；随答案一起保留，答案出来后折叠展示。旧记录没有。 */
   reasoning?: string;
+  /** 本轮答案依据的讲课片段（后端按问题相关性挑的知识点来源）。旧记录没有。 */
+  citations?: Citation[];
 };
 type ChatRequest = { query: string; history: ChatMessage[]; requestId: string };
 
@@ -71,14 +131,17 @@ function readHistory(courseId: string): ChatTurn[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((entry): entry is ChatTurn => {
-      const row = entry as Record<string, unknown>;
-      return (
-        typeof row.id === "string" &&
-        typeof row.query === "string" &&
-        typeof row.answer === "string"
-      );
-    });
+    return parsed
+      .filter((entry): entry is ChatTurn => {
+        const row = entry as Record<string, unknown>;
+        return (
+          typeof row.id === "string" &&
+          typeof row.query === "string" &&
+          typeof row.answer === "string"
+        );
+      })
+      // 来源是后来才加的字段：形状不对就当没有，不让坏记录拖垮整段历史。
+      .map((turn) => (Array.isArray(turn.citations) ? turn : { ...turn, citations: undefined }));
   } catch {
     return [];
   }
@@ -106,14 +169,22 @@ const SUGGESTIONS = [
 ];
 
 /** 以整门课程的总览+知识点为背景的问答面板：流式回答、可停止、按课程留存历史。 */
-export function CourseChatPanel({ courseId }: { courseId: string }) {
+export function CourseChatPanel({
+  courseId,
+  onJump,
+}: {
+  courseId: string;
+  /** 点「来源」跳到该视频该时刻；没传时来源只作为文字展示。 */
+  onJump?: (videoId: string, startMs: number) => void;
+}) {
   const [query, setQuery] = useState("");
   const [history, setHistory] = useState<ChatTurn[]>(() => readHistory(courseId));
-  // 进行中的流式回答（本轮 requestId + 推理思考 + 已累积文本）。
+  // 进行中的流式回答（本轮 requestId + 推理思考 + 已累积文本 + 已到达的来源）。
   const [streaming, setStreaming] = useState<{
     requestId: string;
     reasoning: string;
     text: string;
+    citations: Citation[];
   } | null>(null);
   const tailRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -133,22 +204,31 @@ export function CourseChatPanel({ courseId }: { courseId: string }) {
 
   const ask = useMutation<string, unknown, ChatRequest>({
     mutationFn: async ({ query, history, requestId }) => {
-      // 思考内容也累积到局部变量：随答案一起落库、保留（不受组件卸载影响）。
+      // 思考内容与来源也累积到局部变量：随答案一起落库、保留（不受组件卸载影响）。
       let reasoningAcc = "";
-      if (mountedRef.current) setStreaming({ requestId, reasoning: "", text: "" });
+      let citationsAcc: Citation[] = [];
+      if (mountedRef.current) setStreaming({ requestId, reasoning: "", text: "", citations: [] });
       const answer = await ipc.concepts.chat(courseId, query, history, requestId, (e: AskEvent) => {
         if (e.type === "reasoning") reasoningAcc += e.delta;
+        if (e.type === "citations") citationsAcc = e.citations;
         if (!mountedRef.current) return;
         setStreaming((prev) => {
           if (!prev || prev.requestId !== requestId) return prev;
           if (e.type === "reasoning") return { ...prev, reasoning: prev.reasoning + e.delta };
           if (e.type === "token") return { ...prev, text: prev.text + e.delta };
+          if (e.type === "citations") return { ...prev, citations: e.citations };
           return prev; // done：最终答案由落库 + 历史渲染接管
         });
       });
       const next = [
         ...readHistory(courseId),
-        { id: crypto.randomUUID(), query, answer, reasoning: reasoningAcc || undefined },
+        {
+          id: crypto.randomUUID(),
+          query,
+          answer,
+          reasoning: reasoningAcc || undefined,
+          citations: citationsAcc.length > 0 ? citationsAcc : undefined,
+        },
       ];
       writeHistory(courseId, next);
       if (mountedRef.current) setStreaming(null);
@@ -268,6 +348,7 @@ export function CourseChatPanel({ courseId }: { courseId: string }) {
                   </details>
                 )}
                 <AnswerText text={turn.answer} />
+                <ChatSources citations={turn.citations} onJump={onJump} />
               </div>
             </div>
           </div>
@@ -314,6 +395,7 @@ export function CourseChatPanel({ courseId }: { courseId: string }) {
                         text={throttledStreamText || streaming.text}
                         trailing={STREAM_CARET}
                       />
+                      <ChatSources citations={streaming.citations} onJump={onJump} />
                     </div>
                   ) : streaming?.reasoning ? null : (
                     <div className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-3">

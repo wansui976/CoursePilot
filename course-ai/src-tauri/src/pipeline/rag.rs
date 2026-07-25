@@ -342,7 +342,13 @@ pub async fn answer_stream(
             .await?
     } else {
         map_reduce_answer_stream(
-            provider, chat_model, &transcript, query, history, cancel, on_event,
+            provider,
+            chat_model,
+            &transcript,
+            query,
+            history,
+            cancel,
+            on_event,
         )
         .await?
     };
@@ -693,7 +699,8 @@ pub async fn keyword_search_scope(
 }
 
 /// 把毫秒格式化成 mm:ss（或含小时 h:mm:ss），用于上下文里给 LLM 标注出处。
-fn mmss(ms: i64) -> String {
+/// 课程知识问答也用它拼来源标签，两边的出处写法必须一致。
+pub fn mmss(ms: i64) -> String {
     let total = (ms.max(0) / 1000) as u64;
     let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);
     if h > 0 {
@@ -909,7 +916,14 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let mut events: Vec<AskEvent> = Vec::new();
         let ans = answer_stream(
-            &db, &provider, "m", &vid, "问题", &[], &cancel, &mut |e| events.push(e),
+            &db,
+            &provider,
+            "m",
+            &vid,
+            "问题",
+            &[],
+            &cancel,
+            &mut |e| events.push(e),
         )
         .await
         .unwrap();
@@ -1004,7 +1018,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(hits.len(), 2);
-        assert!(hits.iter().all(|c| c.video_id.is_some() && c.video_title.is_some()));
+        assert!(hits
+            .iter()
+            .all(|c| c.video_id.is_some() && c.video_title.is_some()));
         let ids: std::collections::HashSet<String> =
             hits.iter().filter_map(|c| c.video_id.clone()).collect();
         assert!(ids.contains(&v1.id) && ids.contains(&v2.id));
@@ -1046,7 +1062,11 @@ mod tests {
 
     #[test]
     fn assemble_scope_context_empty_when_no_hits() {
-        let per_video = vec![("v1".to_string(), "第一讲".to_string(), vec![seg(0, 0, 1000, "别的话题")])];
+        let per_video = vec![(
+            "v1".to_string(),
+            "第一讲".to_string(),
+            vec![seg(0, 0, 1000, "别的话题")],
+        )];
         let (context, citations) = assemble_scope_context(&per_video, "光合作用", 10, 10);
         assert!(context.is_empty());
         assert!(citations.is_empty());
@@ -1055,8 +1075,9 @@ mod tests {
     #[test]
     fn assemble_scope_context_caps_per_video_so_others_stay_covered() {
         // A 视频命中很多段（同分），B 只命中一段。两段式应把 A 截到前 K，保证 B 仍进上下文。
-        let a_segs: Vec<TranscriptSegment> =
-            (0..5).map(|i| seg(i, i * 1000, i * 1000 + 500, "命中x")).collect();
+        let a_segs: Vec<TranscriptSegment> = (0..5)
+            .map(|i| seg(i, i * 1000, i * 1000 + 500, "命中x"))
+            .collect();
         let b_segs = vec![seg(0, 500, 1000, "命中x")];
         let per_video = vec![
             ("A".to_string(), "视频A".to_string(), a_segs),
