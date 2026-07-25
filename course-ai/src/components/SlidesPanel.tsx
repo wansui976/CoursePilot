@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Camera, Images, ScanText, X } from "lucide-react";
+import { Camera, Images, ScanText, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/ui/ErrorNote";
-import { ipc } from "@/lib/ipc";
+import { ipc, type SlidesProgress } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { getSlidesSensitivity, sensitivityToThreshold } from "@/lib/slides";
 import { usePlayer } from "@/stores/player";
@@ -48,6 +48,19 @@ function SlideImage({
   return <img src={src} alt={alt} className={className} />;
 }
 
+/**
+ * 提取进度的按钮文案。采样阶段是"通读整段视频"，一节 90 分钟的课要好几分钟，
+ * 只写「提取中…」等于让人干等；拿不到时长时退化成不确定态。
+ */
+function progressLabel(progress: SlidesProgress | null): string {
+  if (!progress) return "提取中…";
+  if (progress.phase === "capture") return `截图 ${progress.done}/${progress.total}`;
+  if (progress.total > 0) {
+    return `采样 ${Math.min(99, Math.round((progress.done / progress.total) * 100))}%`;
+  }
+  return "采样中…";
+}
+
 export function SlidesPanel({ videoId }: { videoId: string }) {
   const qc = useQueryClient();
   const requestSeek = usePlayer((s) => s.requestSeek);
@@ -63,11 +76,28 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
     queryFn: () => ipc.slides.screenshots(videoId),
   });
 
+  // 进行中那次提取的进度与 requestId（供「停止」定位后台任务）。
+  const [progress, setProgress] = useState<SlidesProgress | null>(null);
+  const extractRequest = useRef<string | null>(null);
+
   const extract = useMutation({
-    // 灵敏度在「设置 → 课件提取」里调，这里取当前值换算成阈值。
-    mutationFn: () =>
-      ipc.slides.extract(videoId, sensitivityToThreshold(getSlidesSensitivity())),
+    // 灵敏度在「设置 → 课件提取」里调，这里取当前值换算成门槛（"自动"档为 null）。
+    mutationFn: () => {
+      const requestId = crypto.randomUUID();
+      extractRequest.current = requestId;
+      setProgress(null);
+      return ipc.slides.extract(
+        videoId,
+        sensitivityToThreshold(getSlidesSensitivity()),
+        requestId,
+        setProgress,
+      );
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["slides", videoId] }),
+    onSettled: () => {
+      extractRequest.current = null;
+      setProgress(null);
+    },
   });
   const capture = useMutation({
     mutationFn: () => ipc.slides.capture(videoId, Math.floor(currentMs())),
@@ -114,6 +144,20 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
             <Camera className="h-3.5 w-3.5" />
             {capture.isPending ? "截图中…" : "截图"}
           </Button>
+          {extract.isPending && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                const requestId = extractRequest.current;
+                if (requestId) void ipc.slides.cancelExtract(requestId);
+              }}
+              title="停止提取（库里已有的课件页不会被清掉）"
+            >
+              <Square className="h-3 w-3" />
+              停止
+            </Button>
+          )}
           <Button
             size="sm"
             disabled={extract.isPending}
@@ -121,7 +165,11 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
             title="按画面变化自动识别换页（灵敏度在设置里调）"
           >
             <Images className="h-3.5 w-3.5" />
-            {extract.isPending ? "提取中…" : slides.length ? "重新提取" : "提取课件"}
+            {extract.isPending
+              ? progressLabel(progress)
+              : slides.length
+                ? "重新提取"
+                : "提取课件"}
           </Button>
         </div>
       </div>

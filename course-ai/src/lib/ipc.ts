@@ -130,6 +130,18 @@ export interface AnalyzeProgress {
   title: string;
 }
 
+/**
+ * 课件提取进度。`sample` 是降采样通读整段视频（耗时大头，total 为估算的采样帧数，
+ * 拿不到时长时为 0），`capture` 是逐页截全分辨率图（total 为页数）。
+ */
+export interface SlidesProgress {
+  phase: "sample" | "capture";
+  done: number;
+  total: number;
+}
+
+type SlidesExtractEvent = { type: "progress" } & SlidesProgress;
+
 /** 分析命令通过 `concept-analyze:<requestId>` 事件推送的进度 / 完成 / 出错。 */
 type AnalyzeEvent =
   | ({ type: "progress" } & AnalyzeProgress)
@@ -452,8 +464,30 @@ export const ipc = {
   },
   slides: {
     // threshold 为单块亮度差门槛；null/省略表示让后端按画面噪声自估。
-    extract: (videoId: string, threshold?: number | null): Promise<number> =>
-      invoke("cmd_extract_slides", { videoId, threshold }),
+    // 给了 requestId 才有进度事件与可取消；不给就是一发到底（老行为）。
+    extract: async (
+      videoId: string,
+      threshold?: number | null,
+      requestId?: string,
+      onProgress?: (progress: SlidesProgress) => void,
+    ): Promise<number> => {
+      if (!requestId) return invoke("cmd_extract_slides", { videoId, threshold });
+      // 先注册监听再 invoke，避免漏掉早到的事件。
+      const unlisten = await listen<SlidesExtractEvent>(
+        `slides-extract:${requestId}`,
+        (evt) => {
+          if (evt.payload.type === "progress") onProgress?.(evt.payload);
+        },
+      );
+      try {
+        return await invoke<number>("cmd_extract_slides", { videoId, threshold, requestId });
+      } finally {
+        unlisten();
+      }
+    },
+    // 取消进行中的提取：采样会杀掉 ffmpeg、截图会在下一页前停下，库里的旧课件页不动。
+    cancelExtract: (requestId: string): Promise<void> =>
+      invoke("cmd_cancel_slides_extract", { requestId }),
     list: (videoId: string): Promise<Slide[]> =>
       invoke("cmd_get_slides", { videoId }),
     capture: (videoId: string, atMs: number): Promise<Screenshot> =>
