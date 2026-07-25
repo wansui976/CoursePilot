@@ -182,6 +182,23 @@ fn merge_by_canonical(
     out
 }
 
+/// 一段已生成的知识点解释，连同它所依据的字幕上下文指纹。
+/// 指纹用于下一轮分析时判断「上下文没变」，从而直接复用，省掉一次 LLM 调用。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConceptExplanation {
+    pub text: String,
+    pub source_sig: String,
+}
+
+/// 解释上下文的指纹：直接对喂给模型的上下文文本取哈希 —— 同样的上下文必然得到同样质量的
+/// 解释，故上下文一字不变时复用是安全的；字幕重新转写或出现位置变化都会改变它。
+fn explanation_signature(context_text: &str) -> String {
+    Sha256::digest(context_text.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 /// 概念的一处出现。摘录只从本地字幕回填，不接受模型自由生成。
 #[derive(Debug, Clone, Serialize)]
 pub struct ConceptOccurrence {
@@ -365,7 +382,7 @@ async fn replace_course_concepts_on_connection(
     connection: &mut sqlx::SqliteConnection,
     course_id: &str,
     merged: &[MergedConcept],
-    explanations: &HashMap<String, String>,
+    explanations: &HashMap<String, ConceptExplanation>,
 ) -> AppResult<()> {
     let now = chrono::Utc::now().timestamp_millis();
     sqlx::query(
@@ -384,12 +401,14 @@ async fn replace_course_concepts_on_connection(
         // 解释按归一化名匹配（与分析阶段用同一份合并结果，名字一致）。
         let explanation = explanations.get(&normalize_name(&c.name));
         sqlx::query(
-            "INSERT INTO concepts(id,course_id,name,explanation,created_at) VALUES (?,?,?,?,?)",
+            "INSERT INTO concepts(id,course_id,name,explanation,explanation_source,created_at)
+             VALUES (?,?,?,?,?,?)",
         )
         .bind(&id)
         .bind(course_id)
         .bind(&c.name)
-        .bind(explanation)
+        .bind(explanation.map(|item| item.text.as_str()))
+        .bind(explanation.map(|item| item.source_sig.as_str()))
         .bind(now)
         .execute(&mut *connection)
         .await?;
@@ -420,10 +439,48 @@ pub async fn replace_course_concepts(
     Ok(merged.len())
 }
 
+/// 读上一轮已入库的解释：归一化名 → (解释, 上下文指纹)。缺任一字段的行跳过
+/// （老库里 explanation_source 为 NULL，只能重算，不冒用旧解释的风险）。
+async fn existing_concept_explanations(
+    db: &Db,
+    course_id: &str,
+) -> AppResult<HashMap<String, ConceptExplanation>> {
+    let rows: Vec<(String, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT name,explanation,explanation_source FROM concepts WHERE course_id=?")
+            .bind(course_id)
+            .fetch_all(&db.pool)
+            .await?;
+    let mut out = HashMap::new();
+    for (name, explanation, source_sig) in rows {
+        let (Some(text), Some(source_sig)) = (explanation, source_sig) else {
+            continue;
+        };
+        if text.trim().is_empty() || source_sig.trim().is_empty() {
+            continue;
+        }
+        out.insert(
+            normalize_name(&name),
+            ConceptExplanation { text, source_sig },
+        );
+    }
+    Ok(out)
+}
+
 /// 列出某课程的概念，每个带「在哪几节讲到」（join 存活视频标题）。
 /// 概念按存活出现数降序、名升序；出现按 (视频 order_index, start_ms) 升序；
 /// 全部出现都落在已删除视频上的概念不返回。
 pub async fn list_course_concepts(db: &Db, course_id: &str) -> AppResult<Vec<CourseConcept>> {
+    Ok(list_course_concepts_ranked(db, course_id).await?.0)
+}
+
+/// 同 `list_course_concepts`，额外返回 概念 id → 讲课次序（0 起）。
+/// 次序取自 SQL 的 (video order_index, start_ms) 排序：每个概念第一次出现的先后。
+/// 用于展示时把组内知识点按讲课顺序排列，而返回列表本身仍保持既有的频次排序
+/// （它参与 knowledge_catalog 的指纹，改动会让所有存量快照凭空变 stale）。
+async fn list_course_concepts_ranked(
+    db: &Db,
+    course_id: &str,
+) -> AppResult<(Vec<CourseConcept>, HashMap<String, usize>)> {
     let context = load_course_context(db, course_id).await?;
     let rows: Vec<(String, String, Option<String>, String, i64)> = sqlx::query_as(
         "SELECT c.id, c.name, c.explanation, v.id, o.start_ms
@@ -439,8 +496,11 @@ pub async fn list_course_concepts(db: &Db, course_id: &str) -> AppResult<Vec<Cou
 
     let mut out: Vec<CourseConcept> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
+    let mut teaching_order: HashMap<String, usize> = HashMap::new();
     for (cid, cname, explanation, vid, start_ms) in rows {
         let i = *index.entry(cid.clone()).or_insert_with(|| {
+            // 行已按 (order_index, start_ms) 排序，首次见到即该概念最早出现的位置。
+            teaching_order.insert(cid.clone(), teaching_order.len());
             out.push(CourseConcept {
                 id: cid.clone(),
                 name: cname.clone(),
@@ -460,7 +520,7 @@ pub async fn list_course_concepts(db: &Db, course_id: &str) -> AppResult<Vec<Cou
             .cmp(&a.occurrences.len())
             .then(a.name.cmp(&b.name))
     });
-    Ok(out)
+    Ok((out, teaching_order))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -473,6 +533,10 @@ struct PromptKnowledgeSource {
 struct PromptKnowledgeConcept {
     concept_ref: String,
     name: String,
+    /// 该知识点已生成的 AI 解释（截断）。比两条生字幕摘录更能说明它到底讲了什么，
+    /// 分组与一句话结论的质量主要靠它；没有解释时省略该字段。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    explanation: Option<String>,
     sources: Vec<PromptKnowledgeSource>,
 }
 
@@ -534,6 +598,19 @@ struct PreparedKnowledge {
     fingerprint: String,
 }
 
+/// 每个知识点带进总结提示词的解释长度上限：够模型判断主题归属与写一句话结论即可，
+/// 再长只是徒增 token（整门课几十个知识点会成倍放大）。
+const PROMPT_EXPLANATION_CHARS: usize = 220;
+
+/// 按字符边界截断（不切坏 UTF-8），超长补省略号。
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let head: String = text.chars().take(max_chars).collect();
+    format!("{head}…")
+}
+
 fn knowledge_catalog(concepts: &[CourseConcept]) -> AppResult<KnowledgeCatalog> {
     let fingerprint_payload: Vec<Value> = concepts
         .iter()
@@ -585,6 +662,12 @@ fn knowledge_catalog(concepts: &[CourseConcept]) -> AppResult<KnowledgeCatalog> 
             prompt_concepts.push(PromptKnowledgeConcept {
                 concept_ref,
                 name: concept.name.clone(),
+                explanation: concept
+                    .explanation
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+                    .map(|text| truncate_chars(text, PROMPT_EXPLANATION_CHARS)),
                 sources,
             });
         }
@@ -609,7 +692,8 @@ fn knowledge_summary_request(model: &str, catalog: &KnowledgeCatalog) -> AppResu
                 .into(),
         ),
         cacheable_context: Some(format!(
-            "以下是课程概念及其真实字幕来源目录：\n{source_json}"
+            "以下是课程概念目录：每项含已生成的知识点解释（explanation，可能截断）\
+             与真实字幕来源（sources）：\n{source_json}"
         )),
         messages: vec![ChatMessage {
             role: "user".into(),
@@ -619,7 +703,9 @@ fn knowledge_summary_request(model: &str, catalog: &KnowledgeCatalog) -> AppResu
                       \"summary\":\"该知识点的一句话结论\",\"source_refs\":[\"S0001\"]}]}]}。\
                       要求：1. 使用 3-12 个主题，按学习顺序排列；概念很少时可少于 3 个主题。\
                       2. 每个知识点只出现一次，concept_ref 必须照抄。\
-                      3. summary 必须由该概念对应的真实来源支持，source_refs 只能选该概念名下的编号。\
+                      3. 分组与 summary 主要依据每项的 explanation（没有则依据 sources），\
+                      summary 必须能被该概念自己的 explanation 或来源支持，\
+                      source_refs 只能选该概念名下的编号。\
                       4. 不扩展字幕没有讲到的知识，不使用空泛套话。"
                 .into(),
         }],
@@ -801,18 +887,30 @@ pub async fn generate_course_knowledge(
     store_knowledge_snapshot(db, course_id, &prepared.snapshot, &prepared.fingerprint).await
 }
 
+/// 组内按讲课顺序排：知识点第一次被讲到的先后（缺失次序的排在末尾，再按名稳定）。
+/// 主题之间的顺序仍照模型给的「按学习顺序」不动。
+fn sort_by_teaching_order(concepts: &mut [CourseConcept], order: &HashMap<String, usize>) {
+    concepts.sort_by(|a, b| {
+        let rank = |concept: &CourseConcept| order.get(&concept.id).copied().unwrap_or(usize::MAX);
+        rank(a).cmp(&rank(b)).then(a.name.cmp(&b.name))
+    });
+}
+
 fn materialize_groups(
     concepts: &[CourseConcept],
     snapshot: Option<&StoredKnowledgeSnapshot>,
+    order: &HashMap<String, usize>,
 ) -> Vec<CourseKnowledgeGroup> {
     let Some(snapshot) = snapshot else {
         return if concepts.is_empty() {
             Vec::new()
         } else {
+            let mut all = concepts.to_vec();
+            sort_by_teaching_order(&mut all, order);
             vec![CourseKnowledgeGroup {
                 title: "知识点".into(),
                 summary: None,
-                concepts: concepts.to_vec(),
+                concepts: all,
             }]
         };
     };
@@ -838,6 +936,7 @@ fn materialize_groups(
             grouped.push(concept);
         }
         if !grouped.is_empty() {
+            sort_by_teaching_order(&mut grouped, order);
             groups.push(CourseKnowledgeGroup {
                 title: stored_group.title.clone(),
                 summary: Some(stored_group.summary.clone()),
@@ -845,11 +944,12 @@ fn materialize_groups(
             });
         }
     }
-    let leftovers: Vec<CourseConcept> = concepts
+    let mut leftovers: Vec<CourseConcept> = concepts
         .iter()
         .filter(|concept| !used.contains(&normalize_name(&concept.name)))
         .cloned()
         .collect();
+    sort_by_teaching_order(&mut leftovers, order);
     if !leftovers.is_empty() {
         groups.push(CourseKnowledgeGroup {
             title: "其他".into(),
@@ -861,7 +961,7 @@ fn materialize_groups(
 }
 
 pub async fn get_course_knowledge(db: &Db, course_id: &str) -> AppResult<CourseKnowledge> {
-    let concepts = list_course_concepts(db, course_id).await?;
+    let (concepts, teaching_order) = list_course_concepts_ranked(db, course_id).await?;
     let catalog = knowledge_catalog(&concepts)?;
     let row: Option<(String, String, i64)> = sqlx::query_as(
         "SELECT content_json,source_fingerprint,generated_at
@@ -890,7 +990,7 @@ pub async fn get_course_knowledge(db: &Db, course_id: &str) -> AppResult<CourseK
 
     Ok(CourseKnowledge {
         overview: snapshot.as_ref().map(|value| value.overview.clone()),
-        groups: materialize_groups(&concepts, snapshot.as_ref()),
+        groups: materialize_groups(&concepts, snapshot.as_ref(), &teaching_order),
         generated_at,
         covered_videos,
         total_videos,
@@ -1101,19 +1201,29 @@ fn concept_explanation_request(model: &str, name: &str, context_text: &str) -> C
     }
 }
 
-/// 逐概念生成一段 AI 解释，返回 归一化名 → 解释。无可用字幕上下文的概念跳过（不写解释）。
+/// 连续失败到这个数且一次都没成功过，就认定 provider 整体不可用，停止继续白跑。
+const BEST_EFFORT_GIVE_UP: usize = 3;
+
+/// 逐概念生成一段 AI 解释，返回 归一化名 → 解释(+上下文指纹)。
+/// - 上下文与上一轮完全一致的概念直接复用 `reusable` 里的解释，不再调用 LLM（重新分析的省钱大头）；
+/// - 无可用字幕上下文的概念跳过（不写解释）；
+/// - 单个概念失败只跳过它：解释是增量信息，不该让整门课的分析作废。连续失败且零成功时提前收手，
+///   真正的 provider 故障会在紧随其后的课程总结那步以原始错误暴露出来。
 /// 进度以「解释 i/n」推给前端；可取消。
 async fn generate_concept_explanations(
     provider: &Provider,
     chat_model: &str,
     concepts: &[CourseConcept],
     context: &HashMap<String, VideoContext>,
+    reusable: &HashMap<String, ConceptExplanation>,
     cancel: &AtomicBool,
     on_progress: &mut (dyn FnMut(AnalyzeProgress) + Send),
     video_total: usize,
-) -> AppResult<HashMap<String, String>> {
+) -> AppResult<HashMap<String, ConceptExplanation>> {
     let mut out = HashMap::new();
     let total = concepts.len();
+    let mut generated = 0usize;
+    let mut failures = 0usize;
     for (index, concept) in concepts.iter().enumerate() {
         if cancel.load(Ordering::SeqCst) {
             return Err(AppError::Other("分析已取消".into()));
@@ -1127,10 +1237,30 @@ async fn generate_concept_explanations(
         if context_text.trim().is_empty() {
             continue;
         }
+        let key = normalize_name(&concept.name);
+        let source_sig = explanation_signature(&context_text);
+        if let Some(previous) = reusable.get(&key) {
+            if previous.source_sig == source_sig {
+                out.insert(key, previous.clone());
+                continue;
+            }
+        }
         let request = concept_explanation_request(chat_model, &concept.name, &context_text);
-        let explanation = provider.complete(&request).await?.content.trim().to_string();
-        if !explanation.is_empty() {
-            out.insert(normalize_name(&concept.name), explanation);
+        let text = match provider.complete(&request).await {
+            Ok(response) => response.content.trim().to_string(),
+            Err(error) => {
+                failures += 1;
+                tracing::warn!(concept = %concept.name, %error, "知识点解释生成失败，已跳过");
+                if generated == 0 && failures >= BEST_EFFORT_GIVE_UP {
+                    tracing::warn!("连续 {failures} 个知识点解释都失败，本轮不再生成解释");
+                    break;
+                }
+                continue;
+            }
+        };
+        if !text.is_empty() {
+            generated += 1;
+            out.insert(key, ConceptExplanation { text, source_sig });
         }
     }
     Ok(out)
@@ -1185,7 +1315,14 @@ async fn canonicalize_merged_concepts(
     }
     let names: Vec<String> = merged.iter().map(|concept| concept.name.clone()).collect();
     let request = concept_canonicalization_request(chat_model, &names)?;
-    let content = provider.complete(&request).await?.content;
+    // 调用失败也算「归并没做成」：退回精确合并结果，别让整门课的分析为一次可选的优化作废。
+    let content = match provider.complete(&request).await {
+        Ok(response) => response.content,
+        Err(error) => {
+            tracing::warn!(%error, "知识点归并失败，沿用按名精确合并的结果");
+            return Ok(merged);
+        }
+    };
     let groups: Vec<CanonicalGroup> = parse_lenient_json(&content).unwrap_or_default();
 
     let known: HashSet<String> = names.iter().map(|name| normalize_name(name)).collect();
@@ -1236,6 +1373,12 @@ pub async fn analyze_course_concepts(
 
     let total = videos.len();
     let mut raw: Vec<(String, RawConcept)> = Vec::new();
+    // 抽取按块尽力而为：单块超时或返回坏 JSON 只丢这一块，不让整门课白跑。
+    // 但一次都没成功过而已经连错 BEST_EFFORT_GIVE_UP 块时（典型是密钥/网络问题），
+    // 立刻带着原始错误退出——继续跑只是拖时间且掩盖真实原因。
+    let mut chunk_errors = 0usize;
+    let mut chunk_ok = 0usize;
+    let mut first_error: Option<AppError> = None;
     for (index, (vid, title)) in videos.iter().enumerate() {
         if cancel.load(Ordering::SeqCst) {
             return Err(AppError::Other("分析已取消".into()));
@@ -1267,18 +1410,39 @@ pub async fn analyze_course_concepts(
                 temperature: 0.1,
                 max_tokens: 1600,
             };
-            let content = provider.complete(&req).await?.content;
-            for rc in parse_concepts_json(&content)? {
-                raw.push((vid.clone(), rc));
+            let extracted = match provider.complete(&req).await {
+                Ok(response) => parse_concepts_json(&response.content),
+                Err(error) => Err(error),
+            };
+            match extracted {
+                Ok(concepts) => {
+                    chunk_ok += 1;
+                    for rc in concepts {
+                        raw.push((vid.clone(), rc));
+                    }
+                }
+                Err(error) => {
+                    chunk_errors += 1;
+                    tracing::warn!(video = %title, %error, "知识点抽取失败，已跳过该字幕块");
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                    if chunk_ok == 0 && chunk_errors >= BEST_EFFORT_GIVE_UP {
+                        return Err(first_error.unwrap_or_else(|| {
+                            AppError::Other("知识点抽取连续失败".into())
+                        }));
+                    }
+                }
             }
         }
     }
 
     let merged = merge_by_name(raw);
     if merged.is_empty() {
-        return Err(AppError::Other(
-            "没有生成可用知识点，已保留上一次分析结果".into(),
-        ));
+        // 一块都没成功过时报出真实原因，而不是笼统的「没有知识点」。
+        return Err(first_error.unwrap_or_else(|| {
+            AppError::Other("没有生成可用知识点，已保留上一次分析结果".into())
+        }));
     }
 
     // 把近义/含后缀的知识点归并成更粗的规范概念（尽力而为，失败退回精确合并）。
@@ -1291,18 +1455,27 @@ pub async fn analyze_course_concepts(
 
     // 先在内存中构建候选集并生成解释与总结；任一 LLM/校验失败都不会改动已落库的概念或快照。
     let context = load_course_context(db, course_id).await?;
-    let (_, candidate_concepts) = materialize_candidate_concepts(&merged, &context);
+    let (_, mut candidate_concepts) = materialize_candidate_concepts(&merged, &context);
     // 逐概念生成一段 AI 解释（依据其字幕片段），供知识点展开时展示，替换原始字幕。
+    // 上一轮的解释按「上下文指纹」复用：只有新增或上下文变动的知识点才真正重算。
+    let reusable = existing_concept_explanations(db, course_id).await?;
     let explanations = generate_concept_explanations(
         provider,
         chat_model,
         &candidate_concepts,
         &context,
+        &reusable,
         cancel,
         on_progress,
         total,
     )
     .await?;
+    // 把解释挂回候选概念：课程总结据此分组、写一句话结论（比两条生字幕摘录准得多）。
+    for concept in &mut candidate_concepts {
+        concept.explanation = explanations
+            .get(&normalize_name(&concept.name))
+            .map(|item| item.text.clone());
+    }
 
     // 字幕与解释都就绪，进入课程级归纳阶段：进度条打满，标题提示正在整理总结。
     on_progress(AnalyzeProgress {
@@ -1854,13 +2027,157 @@ mod tests {
             1,
         )
         .unwrap();
-        let groups = materialize_groups(&concepts, Some(&snapshot));
+        let groups = materialize_groups(&concepts, Some(&snapshot), &HashMap::new());
         assert_eq!(
             groups[0].concepts[0].summary.as_deref(),
             Some("甲概念的一句话结论。")
         );
         assert_eq!(groups[1].title, "其他");
         assert_eq!(groups[1].concepts[0].name, "乙概念");
+    }
+
+    fn concept_with_explanation(id: &str, name: &str, explanation: Option<&str>) -> CourseConcept {
+        CourseConcept {
+            id: id.into(),
+            name: name.into(),
+            summary: None,
+            explanation: explanation.map(str::to_string),
+            occurrences: vec![ConceptOccurrence {
+                video_id: "v1".into(),
+                video_title: "第一讲".into(),
+                start_ms: 1_000,
+                end_ms: Some(2_000),
+                excerpt: Some(format!("{name}的真实来源。")),
+            }],
+        }
+    }
+
+    #[test]
+    fn knowledge_catalog_gives_the_summary_model_the_concept_explanation() {
+        // 分组与一句话结论主要靠解释；只喂两条生字幕摘录时模型看不出知识点到底讲了什么。
+        let long = "贝叶斯".repeat(200);
+        let concepts = vec![
+            concept_with_explanation("k1", "甲概念", Some(&long)),
+            concept_with_explanation("k2", "乙概念", None),
+        ];
+        let catalog = knowledge_catalog(&concepts).unwrap();
+
+        let first = catalog.prompt_concepts[0].explanation.as_deref().unwrap();
+        // 截断到上限并补省略号，避免几十个知识点成倍放大 token。
+        assert_eq!(first.chars().count(), PROMPT_EXPLANATION_CHARS + 1);
+        assert!(first.ends_with('…'));
+        // 没有解释的知识点不带该字段，仍靠 sources 兜底。
+        assert!(catalog.prompt_concepts[1].explanation.is_none());
+        assert!(!catalog.prompt_concepts[1].sources.is_empty());
+    }
+
+    #[test]
+    fn materialize_groups_orders_group_concepts_by_teaching_order() {
+        // 组内按「第一次被讲到」排，读起来是课程主线；模型给的 items 顺序不作数。
+        let concepts = vec![
+            concept_with_explanation("k1", "后讲的".into(), None),
+            concept_with_explanation("k2", "先讲的".into(), None),
+            concept_with_explanation("k3", "落单的".into(), None),
+        ];
+        let snapshot = StoredKnowledgeSnapshot {
+            version: 1,
+            overview: "课程主线。".into(),
+            groups: vec![StoredKnowledgeGroup {
+                title: "基础".into(),
+                summary: "先理解基础。".into(),
+                items: vec![
+                    StoredKnowledgeItem {
+                        concept_name: "后讲的".into(),
+                        summary: "结论 A。".into(),
+                    },
+                    StoredKnowledgeItem {
+                        concept_name: "先讲的".into(),
+                        summary: "结论 B。".into(),
+                    },
+                ],
+            }],
+            covered_videos: 1,
+            total_videos: 1,
+        };
+        let order = HashMap::from([("k2".to_string(), 0usize), ("k1".to_string(), 1usize)]);
+
+        let groups = materialize_groups(&concepts, Some(&snapshot), &order);
+        assert_eq!(
+            groups[0]
+                .concepts
+                .iter()
+                .map(|concept| concept.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["先讲的", "后讲的"]
+        );
+        // 一句话结论仍跟着各自的知识点，不因重排而错位。
+        assert_eq!(groups[0].concepts[0].summary.as_deref(), Some("结论 B。"));
+        // 未被分组的知识点没有次序，落到「其他」末尾。
+        assert_eq!(groups[1].title, "其他");
+        assert_eq!(groups[1].concepts[0].name, "落单的");
+    }
+
+    #[test]
+    fn explanation_signature_tracks_the_context_text() {
+        // 指纹只跟着喂给模型的上下文变：一字未改才复用，字幕重写就必须重算。
+        assert_eq!(
+            explanation_signature("字幕片段 A"),
+            explanation_signature("字幕片段 A")
+        );
+        assert_ne!(
+            explanation_signature("字幕片段 A"),
+            explanation_signature("字幕片段 B")
+        );
+    }
+
+    #[tokio::test]
+    async fn existing_explanations_round_trip_and_skip_rows_without_a_signature() {
+        let db = fresh_db().await;
+        let course = create_course(&db, "c".into(), "/tmp/c".into())
+            .await
+            .unwrap();
+        let v1 = seed_video(&db, &course.id, "第一讲", 0).await;
+        let merged = vec![
+            MergedConcept {
+                name: "甲概念".into(),
+                occurrences: vec![(v1.clone(), 1000)],
+            },
+            MergedConcept {
+                name: "乙概念".into(),
+                occurrences: vec![(v1.clone(), 2000)],
+            },
+        ];
+        let explanations = HashMap::from([(
+            "甲概念".to_string(),
+            ConceptExplanation {
+                text: "甲概念的解释。".into(),
+                source_sig: "sig-a".into(),
+            },
+        )]);
+
+        let mut tx = db.pool.begin().await.unwrap();
+        replace_course_concepts_on_connection(&mut tx, &course.id, &merged, &explanations)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // 老库升级上来的行只有 explanation、没有指纹：不能凭空复用，必须重算。
+        sqlx::query("UPDATE concepts SET explanation=?, explanation_source=NULL WHERE name=?")
+            .bind("乙概念的旧解释。")
+            .bind("乙概念")
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        let reusable = existing_concept_explanations(&db, &course.id).await.unwrap();
+        assert_eq!(reusable.len(), 1);
+        let kept = &reusable["甲概念"];
+        assert_eq!(kept.text, "甲概念的解释。");
+        assert_eq!(kept.source_sig, "sig-a");
+        // 解释本身仍照常读给界面用。
+        let list = list_course_concepts(&db, &course.id).await.unwrap();
+        let second = list.iter().find(|c| c.name == "乙概念").unwrap();
+        assert_eq!(second.explanation.as_deref(), Some("乙概念的旧解释。"));
     }
 
     #[tokio::test]
