@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
@@ -12,7 +12,9 @@ import {
 import { ipc, type DueCard } from "@/lib/ipc";
 import { WATCHED_RATIO, readPlaybackProgress } from "@/lib/playback";
 import { readReminderEnabled, writeReminderEnabled } from "@/lib/studyReminder";
+import { displayTitle } from "@/lib/videoTitle";
 import { ProgressRing } from "@/components/ui/ProgressRing";
+import { DailyGoalDialog } from "./DailyGoalDialog";
 import { ReviewSession } from "./ReviewSession";
 import {
   computeStreak,
@@ -27,9 +29,13 @@ import {
   type HeatCell,
 } from "@/lib/studyStats";
 
-const HEATMAP_WEEKS = 18;
+const HEATMAP_WEEKS = {
+  compact: 12,
+  medium: 18,
+  wide: 26,
+} as const;
 // 覆盖热力图所需的历史范围（含今天所在周的补位），略放宽。
-const LOOKBACK_DAYS = HEATMAP_WEEKS * 7 + 7;
+const LOOKBACK_DAYS = HEATMAP_WEEKS.wide * 7 + 7;
 
 // 热力图各强度等级的背景（level 0–4）；用主题主色的不同透明度，深浅主题都成立。
 const HEAT_LEVEL_BG = [
@@ -40,12 +46,95 @@ const HEAT_LEVEL_BG = [
   "bg-primary",
 ];
 
-/** 热力图一格：空位（未来）留透明占位保持网格对齐；有日期的格按等级上色并带悬浮说明。 */
-function HeatSquare({ cell }: { cell: HeatCell }) {
-  if (!cell) return <span className="h-2.5 w-2.5" aria-hidden="true" />;
-  const label =
-    cell.ms > 0 ? `${cell.day} · ${formatDuration(cell.ms)}` : `${cell.day} · 未学习`;
-  return <span title={label} className={`h-2.5 w-2.5 rounded-sm ${HEAT_LEVEL_BG[cell.level]}`} />;
+function weeksForViewport(width: number): number {
+  if (width < 600) return HEATMAP_WEEKS.compact;
+  if (width < 900) return HEATMAP_WEEKS.medium;
+  return HEATMAP_WEEKS.wide;
+}
+
+function viewportWidth(): number {
+  if (typeof window === "undefined") return 1024;
+  return window.innerWidth || 1024;
+}
+
+function useHeatmapWeeks(): number {
+  const [weeks, setWeeks] = useState(() => weeksForViewport(viewportWidth()));
+
+  useEffect(() => {
+    const update = () => setWeeks(weeksForViewport(viewportWidth()));
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  return weeks;
+}
+
+function heatCellLabel(cell: NonNullable<HeatCell>): string {
+  return cell.ms > 0
+    ? `${cell.day} · 学习 ${formatDuration(cell.ms)}`
+    : `${cell.day} · 未学习`;
+}
+
+function monthLabel(column: HeatCell[], index: number): string | null {
+  const first = column.find((cell): cell is NonNullable<HeatCell> => cell !== null);
+  if (!first) return null;
+  const monthStart = column.find(
+    (cell): cell is NonNullable<HeatCell> => cell !== null && cell.day.endsWith("-01"),
+  );
+  if (index !== 0 && !monthStart) return null;
+  const day = monthStart?.day ?? first.day;
+  return `${Number(day.slice(5, 7))}月`;
+}
+
+/** 可聚焦的热力图格：今天保持描边，方向键按时间矩阵移动。 */
+function HeatSquare({
+  cell,
+  today,
+  active,
+  onSelect,
+  onNavigate,
+}: {
+  cell: HeatCell;
+  today: string;
+  active: boolean;
+  onSelect: (day: string) => void;
+  onNavigate: (day: string, offsetDays: number) => void;
+}) {
+  if (!cell) return <span className="h-3 w-3" aria-hidden="true" />;
+  const label = heatCellLabel(cell);
+  const isToday = cell.day === today;
+
+  return (
+    <button
+      type="button"
+      data-heat-day={cell.day}
+      aria-label={label}
+      aria-current={isToday ? "date" : undefined}
+      title={label}
+      tabIndex={active ? 0 : -1}
+      onClick={() => onSelect(cell.day)}
+      onFocus={() => onSelect(cell.day)}
+      onKeyDown={(event) => {
+        const offsets: Partial<Record<string, number>> = {
+          ArrowLeft: -7,
+          ArrowRight: 7,
+          ArrowUp: -1,
+          ArrowDown: 1,
+        };
+        const offset = offsets[event.key];
+        if (offset == null) return;
+        event.preventDefault();
+        onNavigate(cell.day, offset);
+      }}
+      className={`h-3 w-3 flex-none cursor-pointer rounded-[2px] ${HEAT_LEVEL_BG[cell.level]} transition-colors focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-card)] ${
+        isToday
+          ? "outline outline-2 outline-offset-1 outline-primary"
+          : active
+            ? "outline outline-1 outline-offset-1 outline-[var(--text-muted)]"
+            : ""
+      }`}
+    />
+  );
 }
 
 /** 学习仪表盘：本周时长 + 连续天数 + 热力图 + 各课程已学时长/上次学习（点击进入课程）。 */
@@ -62,8 +151,11 @@ export function Dashboard({
 }) {
   const today = localDay(new Date());
   const fromTs = Date.now() - LOOKBACK_DAYS * 86_400_000;
+  const heatmapWeeks = useHeatmapWeeks();
   const queryClient = useQueryClient();
   const [reviewing, setReviewing] = useState(false);
+  const [activeHeatDay, setActiveHeatDay] = useState(today);
+  const heatmapRef = useRef<HTMLDivElement>(null);
   // 按薄弱概念复习的目标（打开概念作用域的 ReviewSession）。
   const [weakReview, setWeakReview] = useState<{
     courseId: string;
@@ -137,18 +229,61 @@ export function Dashboard({
     [daily, today],
   );
   const week = useMemo(() => weeklyMs(daily, today), [daily, today]);
-  const heatmap = useMemo(() => heatmapGrid(daily, today, HEATMAP_WEEKS), [daily, today]);
+  const heatmap = useMemo(
+    () => heatmapGrid(daily, today, heatmapWeeks),
+    [daily, heatmapWeeks, today],
+  );
+  const heatDays = useMemo(
+    () =>
+      new Set(
+        heatmap
+          .flat()
+          .filter((cell): cell is NonNullable<HeatCell> => cell !== null)
+          .map((cell) => cell.day),
+      ),
+    [heatmap],
+  );
+  const activeHeatCell = useMemo(
+    () =>
+      heatmap.flat().find((cell) => cell?.day === activeHeatDay) ??
+      heatmap.flat().find((cell) => cell?.day === today) ??
+      null,
+    [activeHeatDay, heatmap, today],
+  );
+
+  useEffect(() => {
+    if (!heatDays.has(activeHeatDay)) setActiveHeatDay(today);
+  }, [activeHeatDay, heatDays, today]);
+
+  function navigateHeatDay(day: string, offsetDays: number) {
+    const target = new Date(`${day}T00:00:00`);
+    target.setDate(target.getDate() + offsetDays);
+    const targetDay = localDay(target);
+    if (!heatDays.has(targetDay)) return;
+    setActiveHeatDay(targetDay);
+    const focusTarget = () => {
+      heatmapRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-heat-day="${targetDay}"]`)
+        ?.focus();
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(focusTarget);
+    } else {
+      focusTarget();
+    }
+  }
+
   // 每日学习目标：今日已学分钟 vs 目标分钟（本地存储，可编辑）。
   const [goalMin, setGoalMin] = useState(() => readDailyGoalMin());
-  const [editingGoal, setEditingGoal] = useState(false);
-  const todayMin = Math.round(dayMs(daily, today) / 60000);
-  function saveGoal(value: string) {
-    const n = Math.round(Number(value));
+  const todayWatched = dayMs(daily, today);
+  const weekGoalMs = goalMin * 7 * 60_000;
+  const weekGoalPercent = weekGoalMs > 0 ? Math.round((week / weekGoalMs) * 100) : 0;
+  function saveGoal(value: number) {
+    const n = Math.round(value);
     if (Number.isFinite(n) && n > 0) {
       writeDailyGoalMin(n);
       setGoalMin(n);
     }
-    setEditingGoal(false);
   }
   // 学习提醒开关：开启时发一条确认通知（顺带触发系统权限询问并让用户确认可用）。
   const [remindOn, setRemindOn] = useState(() => readReminderEnabled());
@@ -186,85 +321,6 @@ export function Dashboard({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
         <div className="mx-auto max-w-2xl space-y-6">
-          <button
-            onClick={() => setReviewing(true)}
-            disabled={dueCount === 0}
-            className="flex w-full items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)] disabled:cursor-default disabled:opacity-60 disabled:hover:bg-[var(--surface-card)]"
-          >
-            <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-primary/15 text-primary">
-              <Brain className="h-5 w-5" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium text-[var(--text-strong)]">
-                {dueCount > 0 ? `今日复习 ${dueCount} 张` : "今天没有待复习"}
-              </span>
-              <span className="block text-xs text-[var(--text-muted)]">
-                间隔重复 · 出题自动生成卡片
-              </span>
-            </span>
-            {dueCount > 0 && (
-              <span className="flex-none rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white">
-                开始复习
-              </span>
-            )}
-          </button>
-
-          <div className="flex items-center gap-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
-            <ProgressRing value={goalMin > 0 ? todayMin / goalMin : 0} size={52} stroke={5}>
-              <span className="text-[11px] font-semibold tabular-nums text-[var(--text-strong)]">
-                {Math.round((goalMin > 0 ? todayMin / goalMin : 0) * 100)}%
-              </span>
-            </ProgressRing>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-[var(--text-strong)]">今日目标</div>
-              <div className="mt-0.5 text-xs text-[var(--text-muted)]">
-                今日已学 {todayMin} 分钟 / 目标 {goalMin} 分钟
-              </div>
-            </div>
-            {editingGoal ? (
-              <input
-                type="number"
-                min={1}
-                aria-label="每日目标（分钟）"
-                defaultValue={goalMin}
-                autoFocus
-                onBlur={(e) => saveGoal(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") saveGoal((e.target as HTMLInputElement).value);
-                  if (e.key === "Escape") setEditingGoal(false);
-                }}
-                className="ca-touch-44 w-16 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)]"
-              />
-            ) : (
-              <button
-                onClick={() => setEditingGoal(true)}
-                className="ca-touch-44 flex-none rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
-              >
-                编辑目标
-              </button>
-            )}
-          </div>
-
-          <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
-            <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-primary/15 text-primary">
-              <Bell className="h-5 w-5" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium text-[var(--text-strong)]">学习提醒</span>
-              <span className="block text-xs text-[var(--text-muted)]">
-                有待复习时，打开应用推送桌面通知（每天至多一次）
-              </span>
-            </span>
-            <input
-              type="checkbox"
-              role="switch"
-              aria-label="学习提醒"
-              checked={remindOn}
-              onChange={(e) => void toggleReminder(e.target.checked)}
-              className="ca-touch-44 h-5 w-5 flex-none accent-[var(--accent-text)]"
-            />
-          </label>
-
           {continueRows.length > 0 && (
             <div>
               <div className="mb-2 text-sm font-semibold text-[var(--text-strong)]">
@@ -284,7 +340,7 @@ export function Dashboard({
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium text-[var(--text-strong)]">
-                            {row.video_title}
+                            {displayTitle(row.video_title)}
                           </div>
                           <div className="mt-0.5 truncate text-xs text-[var(--text-muted)]">
                             {row.course_name}
@@ -310,23 +366,94 @@ export function Dashboard({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
-              <div className="text-xs text-[var(--text-muted)]">本周学习</div>
-              <div className="mt-1 text-xl font-semibold text-[var(--text-strong)]">
+          <button
+            onClick={() => setReviewing(true)}
+            disabled={dueCount === 0}
+            className="flex w-full items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)] disabled:cursor-default disabled:opacity-60 disabled:hover:bg-[var(--surface-card)]"
+          >
+            <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-primary/15 text-primary">
+              <Brain className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-[var(--text-strong)]">
+                {dueCount > 0 ? `今日复习 ${dueCount} 张` : "今天没有待复习"}
+              </span>
+              <span className="block text-xs text-[var(--text-muted)]">
+                间隔重复 · 出题自动生成卡片
+              </span>
+            </span>
+            {dueCount > 0 && (
+              <span className="flex-none rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white">
+                开始复习
+              </span>
+            )}
+          </button>
+
+          <div
+            role="group"
+            aria-label="学习统计"
+            className="grid grid-cols-3 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)]"
+          >
+            <section aria-label="今日学习" className="min-w-0 px-3 py-3">
+              <div className="flex min-h-7 items-center justify-between gap-1">
+                <span className="text-xs text-[var(--text-muted)]">今日学习</span>
+                <DailyGoalDialog value={goalMin} onSave={saveGoal} />
+              </div>
+              <div className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-strong)]">
+                {formatDuration(todayWatched)}
+              </div>
+              <div className="mt-1 text-xs text-[var(--text-muted)]">目标 {goalMin} 分钟</div>
+            </section>
+
+            <section
+              aria-label="本周学习"
+              className="min-w-0 border-l border-[var(--border-subtle)] px-3 py-3"
+            >
+              <div className="min-h-7 text-xs leading-7 text-[var(--text-muted)]">本周学习</div>
+              <div className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-strong)]">
                 {formatDuration(week)}
               </div>
-            </div>
-            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
-              <div className="text-xs text-[var(--text-muted)]">连续学习</div>
-              <div className="mt-1 flex items-center gap-1.5 text-xl font-semibold text-[var(--text-strong)]">
+              <div className="mt-1 text-xs leading-tight text-[var(--text-muted)]">
+                目标 {formatDuration(weekGoalMs)} · {weekGoalPercent}%
+              </div>
+            </section>
+
+            <section
+              aria-label="连续学习"
+              className="min-w-0 border-l border-[var(--border-subtle)] px-3 py-3"
+            >
+              <div className="min-h-7 text-xs leading-7 text-[var(--text-muted)]">连续学习</div>
+              <div className="mt-1 flex items-center gap-1.5 text-lg font-semibold tabular-nums text-[var(--text-strong)]">
                 <Flame
-                  className={`h-5 w-5 ${streak > 0 ? "text-[var(--status-warn,#e08a00)]" : "text-[var(--text-faint)]"}`}
+                  className={`h-4 w-4 flex-none ${streak > 0 ? "text-[var(--status-warn,#e08a00)]" : "text-[var(--text-faint)]"}`}
                 />
                 {streak} 天
               </div>
-            </div>
+              <div className="mt-1 text-xs leading-tight text-[var(--text-muted)]">
+                {todayWatched > 0 ? "今天已学习" : "今天尚未学习"}
+              </div>
+            </section>
           </div>
+
+          <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
+            <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-primary/15 text-primary">
+              <Bell className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-[var(--text-strong)]">学习提醒</span>
+              <span className="block text-xs text-[var(--text-muted)]">
+                有待复习时，打开应用推送桌面通知（每天至多一次）
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="学习提醒"
+              checked={remindOn}
+              onChange={(e) => void toggleReminder(e.target.checked)}
+              className="ca-touch-44 h-5 w-5 flex-none accent-[var(--accent-text)]"
+            />
+          </label>
 
           {weak.length > 0 && (
             <div>
@@ -372,25 +499,65 @@ export function Dashboard({
               <div className="flex items-center gap-1 text-[11px] text-[var(--text-faint)]">
                 <span>少</span>
                 {HEAT_LEVEL_BG.map((bg, i) => (
-                  <span key={i} className={`h-2.5 w-2.5 rounded-sm ${bg}`} />
+                  <span key={i} className={`h-3 w-3 rounded-[2px] ${bg}`} />
                 ))}
                 <span>多</span>
               </div>
             </div>
-            <div className="overflow-x-auto">
-              <div
-                role="img"
-                aria-label={`最近 ${HEATMAP_WEEKS} 周学习热力图`}
-                className="flex gap-1"
-              >
-                {heatmap.map((col, ci) => (
-                  <div key={ci} className="flex flex-col gap-1">
-                    {col.map((cell, ri) => (
-                      <HeatSquare key={ri} cell={cell} />
-                    ))}
-                  </div>
-                ))}
+            <div className="overflow-x-auto pb-1">
+              <div className="grid min-w-max grid-cols-[auto] grid-rows-[1rem_auto] gap-y-1">
+                <div aria-hidden="true" className="flex h-4 gap-1">
+                  {heatmap.map((column, index) => (
+                    <span key={index} className="relative h-4 w-3 flex-none">
+                      {monthLabel(column, index) && (
+                        <span className="absolute left-0 top-0 whitespace-nowrap text-[10px] leading-4 text-[var(--text-faint)]">
+                          {monthLabel(column, index)}
+                        </span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+
+                <div
+                  ref={heatmapRef}
+                  role="group"
+                  aria-label={`最近 ${heatmapWeeks} 周学习热力图`}
+                  className="flex gap-1"
+                >
+                  {heatmap.map((column, columnIndex) => {
+                    const startsMonth =
+                      columnIndex > 0 && column.some((cell) => cell?.day.endsWith("-01"));
+                    return (
+                      <div key={columnIndex} className="relative flex flex-col gap-1">
+                        {startsMonth && (
+                          <span
+                            aria-hidden="true"
+                            data-month-divider
+                            className="pointer-events-none absolute inset-y-0 -left-0.5 border-l border-dashed border-[var(--border-strong)] opacity-60"
+                          />
+                        )}
+                        {column.map((cell, rowIndex) => (
+                          <HeatSquare
+                            key={cell?.day ?? `future-${rowIndex}`}
+                            cell={cell}
+                            today={today}
+                            active={cell?.day === activeHeatDay}
+                            onSelect={setActiveHeatDay}
+                            onNavigate={navigateHeatDay}
+                          />
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
+            </div>
+            <div
+              role="status"
+              aria-live="polite"
+              className="mt-2 min-h-4 text-xs text-[var(--text-muted)]"
+            >
+              {activeHeatCell ? heatCellLabel(activeHeatCell) : "暂无学习记录"}
             </div>
           </div>
 
@@ -400,7 +567,7 @@ export function Dashboard({
             </div>
             {courseTotals.length === 0 ? (
               <p className="rounded-lg border border-[var(--border-faint)] bg-[var(--surface-card)] px-4 py-6 text-center text-sm text-[var(--text-muted)]">
-                还没有学习记录，去看几节课，这里就会显示进度。
+                还没有学习记录。
               </p>
             ) : (
               <ul className="space-y-2">

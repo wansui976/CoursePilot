@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "./Dashboard";
 import { localDay } from "@/lib/studyStats";
@@ -43,7 +43,7 @@ function renderDashboard(onOpenCourse = vi.fn(), onResume = vi.fn()) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  render(
+  const view = render(
     <QueryClientProvider client={qc}>
       <Dashboard
         onClose={vi.fn()}
@@ -53,7 +53,7 @@ function renderDashboard(onOpenCourse = vi.fn(), onResume = vi.fn()) {
       />
     </QueryClientProvider>,
   );
-  return { onOpenCourse, onResume };
+  return { onOpenCourse, onResume, ...view };
 }
 
 describe("Dashboard", () => {
@@ -74,12 +74,27 @@ describe("Dashboard", () => {
     review.mockReset().mockResolvedValue(undefined);
     notify.mockReset().mockResolvedValue(undefined);
     localStorage.clear();
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: 1024,
+    });
   });
 
   it("shows weekly time and a 1-day streak from today's activity", async () => {
     renderDashboard();
-    expect(await screen.findByText("30 分钟")).toBeInTheDocument();
-    expect(screen.getByText("1 天")).toBeInTheDocument();
+    const stats = await screen.findByRole("group", { name: "学习统计" });
+    await waitFor(() => {
+      expect(within(stats).getByRole("region", { name: "今日学习" })).toHaveTextContent(
+        "30 分钟",
+      );
+      expect(within(stats).getByRole("region", { name: "本周学习" })).toHaveTextContent(
+        "30 分钟",
+      );
+      expect(within(stats).getByRole("region", { name: "连续学习" })).toHaveTextContent(
+        "1 天",
+      );
+    });
   });
 
   it("lists each course with time studied and last-studied, and opens it on click", async () => {
@@ -97,7 +112,7 @@ describe("Dashboard", () => {
         course_id: "c1",
         course_name: "申论课程",
         video_id: "v-last",
-        video_title: "第三讲 归纳概括",
+        video_title: "第三讲 归纳概括.mp4",
         last_ts: Date.now(),
       },
     ]);
@@ -108,7 +123,14 @@ describe("Dashboard", () => {
     const { onResume } = renderDashboard();
 
     const entry = await screen.findByText("第三讲 归纳概括");
+    expect(screen.queryByText("第三讲 归纳概括.mp4")).not.toBeInTheDocument();
     expect(screen.getByText(/已看 50%/)).toBeInTheDocument();
+
+    const continueHeading = screen.getByText("继续学习");
+    const reviewEntry = screen.getByText("今天没有待复习");
+    expect(
+      continueHeading.compareDocumentPosition(reviewEntry) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
     fireEvent.click(entry.closest("button")!);
     expect(onResume).toHaveBeenCalledWith("c1", "v-last", 300);
@@ -140,24 +162,101 @@ describe("Dashboard", () => {
     expect(await screen.findByText("薄弱卡正面")).toBeInTheDocument();
   });
 
-  it("renders the study heatmap with today's activity cell", async () => {
+  it("renders a labeled square heatmap and outlines today's activity", async () => {
     renderDashboard();
-    expect(await screen.findByRole("img", { name: /学习热力图/ })).toBeInTheDocument();
-    // 今天学了 30 分钟 → 该格带时长说明的悬浮 title。
-    expect(screen.getByTitle(new RegExp(`${today} · `))).toBeInTheDocument();
+    const grid = await screen.findByRole("group", {
+      name: "最近 26 周学习热力图",
+    });
+    const todayCell = await within(grid).findByRole("button", {
+      name: `${today} · 学习 30 分钟`,
+    });
+    expect(todayCell).toHaveAttribute("aria-current", "date");
+    expect(todayCell).toHaveClass("rounded-[2px]", "outline-2");
+    expect(screen.queryByText("周一")).not.toBeInTheDocument();
+    expect(screen.queryByText("周三")).not.toBeInTheDocument();
+    expect(screen.queryByText("周五")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/^\d{1,2}月$/).length).toBeGreaterThan(0);
+    const monthDividers = grid.querySelectorAll("[data-month-divider]");
+    expect(monthDividers.length).toBeGreaterThan(0);
+    monthDividers.forEach((divider) => {
+      expect(divider).toHaveAttribute("aria-hidden", "true");
+      expect(divider).toHaveClass("border-dashed", "opacity-60");
+      expect(divider.parentElement?.querySelector('[data-heat-day$="-01"]')).not.toBeNull();
+    });
+    expect(screen.getByRole("status")).toHaveTextContent(`${today} · 学习 30 分钟`);
   });
 
-  it("shows today's goal progress and lets you edit the goal", async () => {
-    // 今天学了 30 分钟（dailyTotals 默认），默认目标 30 分钟 → 100%。
+  it.each([
+    [480, 12],
+    [768, 18],
+    [1024, 26],
+  ])("shows %i px viewports with a %i-week heatmap", async (width, weeks) => {
+    window.innerWidth = width;
     renderDashboard();
-    expect(await screen.findByText(/今日已学 30 分钟 \/ 目标 30 分钟/)).toBeInTheDocument();
+    expect(
+      await screen.findByRole("group", {
+        name: `最近 ${weeks} 周学习热力图`,
+      }),
+    ).toBeInTheDocument();
+  });
 
-    // 编辑目标为 60 → 文案与百分比更新，并落地 localStorage。
+  it("shows date details on focus/click and supports arrow-key navigation", async () => {
+    const yesterdayDate = new Date(`${today}T00:00:00`);
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterday = localDay(yesterdayDate);
+    const priorWeekDate = new Date(`${today}T00:00:00`);
+    priorWeekDate.setDate(priorWeekDate.getDate() - 7);
+    const priorWeek = localDay(priorWeekDate);
+
+    renderDashboard();
+    const grid = await screen.findByRole("group", {
+      name: "最近 26 周学习热力图",
+    });
+    const detail = screen.getByRole("status");
+    const yesterdayCell = within(grid).getByRole("button", {
+      name: `${yesterday} · 未学习`,
+    });
+    fireEvent.focus(yesterdayCell);
+    expect(detail).toHaveTextContent(`${yesterday} · 未学习`);
+
+    const todayCell = await within(grid).findByRole("button", {
+      name: `${today} · 学习 30 分钟`,
+    });
+    fireEvent.click(todayCell);
+    expect(detail).toHaveTextContent(`${today} · 学习 30 分钟`);
+
+    fireEvent.keyDown(todayCell, { key: "ArrowLeft" });
+    const priorWeekCell = within(grid).getByRole("button", {
+      name: `${priorWeek} · 未学习`,
+    });
+    await waitFor(() => {
+      expect(detail).toHaveTextContent(`${priorWeek} · 未学习`);
+      expect(priorWeekCell).toHaveFocus();
+    });
+  });
+
+  it("shows a three-column summary with daily and weekly goals, and edits the goal", async () => {
+    renderDashboard();
+    const stats = await screen.findByRole("group", { name: "学习统计" });
+    const todayStat = within(stats).getByRole("region", { name: "今日学习" });
+    const weekStat = within(stats).getByRole("region", { name: "本周学习" });
+    await waitFor(() => {
+      expect(todayStat).toHaveTextContent("30 分钟");
+      expect(todayStat).toHaveTextContent("目标 30 分钟");
+      expect(weekStat).toHaveTextContent("目标 3 小时 30 分 · 14%");
+    });
+
     fireEvent.click(screen.getByRole("button", { name: "编辑目标" }));
-    const input = screen.getByLabelText("每日目标（分钟）");
-    fireEvent.change(input, { target: { value: "60" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(await screen.findByText(/今日已学 30 分钟 \/ 目标 60 分钟/)).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "设置每日目标" });
+    const dial = within(dialog).getByRole("slider", { name: "每日学习目标" });
+    expect(dial).toHaveAttribute("aria-valuenow", "30");
+    fireEvent.keyDown(dial, { key: "PageUp" });
+    expect(dial).toHaveAttribute("aria-valuenow", "60");
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      expect(todayStat).toHaveTextContent("目标 60 分钟");
+      expect(weekStat).toHaveTextContent("目标 7 小时 · 7%");
+    });
     expect(localStorage.getItem("course-ai-daily-goal-min")).toBe("60");
   });
 
