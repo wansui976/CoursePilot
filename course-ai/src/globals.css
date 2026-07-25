@@ -20,8 +20,6 @@
 :root {
   color-scheme: light;
 
-  --z-theme-transition: 70;
-
   /* 全局唯一字体栈：body 与 .ca-app 共用,避免挂到 body 的浮层回退到未加载的 Inter。 */
   --font-app: -apple-system, BlinkMacSystemFont, "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
@@ -1712,50 +1710,45 @@ select:focus-visible {
   }
 }
 
-/* 明暗切换默认 View Transitions(theme.ts):两张快照 GPU 交叉淡化。 */
+/* 明暗切换默认 View Transitions(theme.ts):两张快照 GPU 交叉淡化。
+   从左下角按钮切换时会改走圆形揭开（见 .theme-circle-vt）。 */
 ::view-transition-old(root),
 ::view-transition-new(root) {
   animation-duration: 0.3s;
 }
 
-/* 按钮触发的切色圆：固定 48px 小图层只做 transform 合成，扩到视口最远角后才切主题。
-   既能让圆边界清晰可见，也避免文稿等大 DOM 走 View Transition 的双整页快照。 */
-.theme-circle-reveal {
-  position: fixed;
-  left: var(--theme-circle-x);
-  top: var(--theme-circle-y);
-  width: 48px;
-  height: 48px;
-  margin: 0;
-  border: 0;
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: var(--z-theme-transition);
-  background: var(--surface-app);
-  will-change: transform, opacity;
-  animation: ca-theme-circle-reveal var(--theme-circle-duration, 420ms)
-    cubic-bezier(0.2, 0, 0, 1) both;
+/* 按钮触发的圆形切色：新主题快照从点击点以 clip-path 圆扩到整屏。 */
+html.theme-circle-vt {
+  /* 默认值兜底，真正数值由 theme.ts 在切换前写入。 */
+  --theme-circle-x: 50%;
+  --theme-circle-y: 50%;
+  --theme-circle-r: 100vmax;
 }
 
-.theme-circle-reveal.is-complete {
-  transform: translate(-50%, -50%) scale(var(--theme-circle-scale));
-  animation: ca-theme-circle-reveal-fade 120ms ease-out both;
+html.theme-circle-vt::view-transition-old(root) {
+  /* 旧画面保持静止垫底，让圆扩散更清晰。 */
+  animation: none;
+  z-index: 1;
+}
+
+html.theme-circle-vt::view-transition-new(root) {
+  animation: ca-theme-circle-reveal 0.6s cubic-bezier(0.2, 0, 0, 1) both;
+  z-index: 2147483646;
 }
 
 @keyframes ca-theme-circle-reveal {
   from {
-    transform: translate(-50%, -50%) scale(0.04);
+    clip-path: circle(0px at var(--theme-circle-x) var(--theme-circle-y));
   }
   to {
-    transform: translate(-50%, -50%) scale(var(--theme-circle-scale));
+    clip-path: circle(var(--theme-circle-r) at var(--theme-circle-x) var(--theme-circle-y));
   }
 }
 
-@keyframes ca-theme-circle-reveal-fade {
-  to {
-    opacity: 0;
-  }
-}
+/* 注意:此处不再用 @media (prefers-reduced-motion: reduce) 关掉圆形揭开。
+   圆形揭开只在用户「亲手点击切换按钮」时触发(theme.ts 里带起点的路径),属于对用户
+   直接操作的即时反馈、时长很短,即便系统开了「减弱动态效果」也照常展示——否则会重现
+   「只切色、永远看不到圆」的问题。跟随系统明暗的自动切换仍走瞬切(见 theme.ts)。 */
 
 /* 明暗切换兜底(引擎不支持 View Transitions 时)：切换瞬间由 JS 给 <html> 加
    .theme-animating(~300ms)，让整树颜色一起淡变，避免「按钮淡变、背景/文字/卡片
