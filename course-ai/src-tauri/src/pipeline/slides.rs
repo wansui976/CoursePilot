@@ -22,10 +22,28 @@ const SAMPLE_W: usize = 128;
 const SAMPLE_H: usize = 72;
 const SAMPLE_FPS: i64 = 1; // 每秒采 1 帧
 const SAMPLE_INTERVAL_MS: i64 = 1000 / SAMPLE_FPS;
-// 亮度 RMS 差阈值的上下限（0~255 量纲）。动态阈值取相邻差的中位数后钳到这区间：
-// 静态讲义中位数通常很小→落到下限 10，能滤掉光标/噪声；动态内容则自动抬高。
-const THRESHOLD_MIN: f64 = 10.0;
-const THRESHOLD_MAX: f64 = 60.0;
+
+// 换页判定的分块参数：把采样帧切成 8×8 的块，只看块均值。
+// 此前用整屏亮度 RMS，分不清「角落里的讲师摄像头/鼠标/进度条在动」和「换页」：
+// 阈值调低会被局部动静刷出一堆重复页，调高又漏掉只换了标题和一行字的页。
+const BLOCK: usize = 8;
+const BLOCKS_X: usize = SAMPLE_W / BLOCK;
+const BLOCKS_Y: usize = SAMPLE_H / BLOCK;
+const BLOCK_COUNT: usize = BLOCKS_X * BLOCKS_Y;
+// 至少这个比例的块变了才算换页：局部动静只影响少数块，换页动大半屏。
+const CHANGE_RATIO: f64 = 0.2;
+// 变化比例低于此值视为画面已稳定（用来挑动画结束后的那一帧）。比 CHANGE_RATIO 松，
+// 讲师的小幅动作不至于让一页永远「不稳定」。
+const SETTLED_RATIO: f64 = 0.1;
+// 从换页点往后最多找几帧的稳定帧（1 帧 = 1 秒）。
+const SETTLE_MAX_FRAMES: usize = 5;
+// 停留不足这么多帧的页按转场/动画中间态丢掉。
+const MIN_DWELL_FRAMES: usize = 2;
+// 块均值极差小于此值的帧视为近纯色（黑屏片头、白场转场），不作为课件页。
+const BLANK_SPREAD: f64 = 8.0;
+// 自动块阈值的上下限（0~255 量纲，作用在单个块的均值差上）。
+const BLOCK_DELTA_MIN: f64 = 4.0;
+const BLOCK_DELTA_MAX: f64 = 24.0;
 
 /// RGB→Rec.709 亮度（与参考算法 video-to-ppt 一致）。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -38,20 +56,53 @@ fn luminance_frame(rgb: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-/// 两帧亮度的均方根差（RMS）。
-fn rms_diff(a: &[u8], b: &[u8]) -> f64 {
-    if a.is_empty() {
+/// 把一帧亮度图压成块均值（16×9）。换页判定全部基于块均值。
+/// 帧尺寸不是采样尺寸（移动端异常返回等）时返回空表，调用方按「无变化」处理。
+fn block_means(frame: &[u8]) -> Vec<f64> {
+    if frame.len() != SAMPLE_W * SAMPLE_H {
+        return Vec::new();
+    }
+    let mut means = Vec::with_capacity(BLOCK_COUNT);
+    for by in 0..BLOCKS_Y {
+        for bx in 0..BLOCKS_X {
+            let mut sum = 0_u32;
+            for y in 0..BLOCK {
+                let row = (by * BLOCK + y) * SAMPLE_W + bx * BLOCK;
+                for x in 0..BLOCK {
+                    sum += u32::from(frame[row + x]);
+                }
+            }
+            means.push(f64::from(sum) / (BLOCK * BLOCK) as f64);
+        }
+    }
+    means
+}
+
+/// 两帧之间「均值变化超过 delta」的块占全部块的比例。
+fn changed_ratio(a: &[f64], b: &[f64], delta: f64) -> f64 {
+    if a.is_empty() || a.len() != b.len() {
         return 0.0;
     }
-    let sum: f64 = a
+    let changed = a
         .iter()
         .zip(b.iter())
-        .map(|(x, y)| {
-            let d = *x as f64 - *y as f64;
-            d * d
-        })
-        .sum();
-    (sum / a.len() as f64).sqrt()
+        .filter(|(x, y)| (*x - *y).abs() > delta)
+        .count();
+    changed as f64 / a.len() as f64
+}
+
+/// 近纯色帧：块均值极差很小。黑屏片头、白场转场都长这样，它们不该占一页
+/// （此前第 0 帧无条件成为第一页，于是黑屏片头就是第一张课件）。
+fn is_blank(blocks: &[f64]) -> bool {
+    if blocks.is_empty() {
+        return true;
+    }
+    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+    for &value in blocks {
+        lo = lo.min(value);
+        hi = hi.max(value);
+    }
+    hi - lo < BLANK_SPREAD
 }
 
 fn median(mut values: Vec<f64>) -> f64 {
@@ -113,28 +164,106 @@ async fn sample_luma_frames(video: &Path) -> AppResult<Vec<Vec<u8>>> {
     Ok(frames)
 }
 
-/// 算出每个换页所在的采样帧下标。第 0 帧永远是第一页；之后某帧相对上一帧的亮度 RMS
-/// 差超过阈值、且与"上一张已保存页"也明显不同（去重渐变/动画回弹），才算新的一页。
-pub fn detect_slide_indices(frames: &[Vec<u8>], threshold: f64) -> Vec<usize> {
+/// 一页课件在采样序列里的位置。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlidePage {
+    /// 这一页出现的采样帧（决定 start_ms，即「讲到这一页」的时间）。
+    pub start_index: usize,
+    /// 画面稳定后用于截图的采样帧：换页那一刻常落在淡入/飞入动画中途，截出来是半张图。
+    pub capture_index: usize,
+}
+
+/// 在 [start, 下一页起点) 内找画面稳住的第一帧，最多往后 SETTLE_MAX_FRAMES 帧。
+/// 一直不稳定（长动画）就用能取到的最后一帧——总比停在动画刚开始那一瞬好。
+fn settle_index(blocks: &[Vec<f64>], start: usize, end: usize, delta: f64) -> usize {
+    let last = blocks.len().saturating_sub(1);
+    let limit = (start + SETTLE_MAX_FRAMES)
+        .min(end.saturating_sub(1))
+        .min(last)
+        .max(start);
+    for j in start..limit {
+        if changed_ratio(&blocks[j], &blocks[j + 1], delta) < SETTLED_RATIO {
+            return j;
+        }
+    }
+    limit
+}
+
+/// 找出每一页课件：与前一帧、且与上一张已保存页都有足够比例的块发生变化，才算新的一页
+/// （后者去掉渐变/动画回弹造成的重复页）。近纯色帧不参与成页；停留过短的页按转场丢掉；
+/// 每页再往后挑一帧稳定画面用于截图。`block_delta` 是单个块「算变了」的亮度差门槛。
+pub fn detect_slide_pages(frames: &[Vec<u8>], block_delta: f64) -> Vec<SlidePage> {
     if frames.is_empty() {
         return Vec::new();
     }
-    let mut starts = vec![0usize];
-    let mut last = 0usize;
-    for i in 1..frames.len() {
-        let changed = rms_diff(&frames[i - 1], &frames[i]) > threshold;
-        if changed && rms_diff(&frames[last], &frames[i]) > threshold {
-            starts.push(i);
-            last = i;
+    let blocks: Vec<Vec<f64>> = frames.iter().map(|frame| block_means(frame)).collect();
+
+    let mut starts: Vec<usize> = Vec::new();
+    for i in 0..blocks.len() {
+        if is_blank(&blocks[i]) {
+            continue;
+        }
+        match starts.last() {
+            // 第一页 = 第一帧有内容的画面（跳过黑屏片头）。
+            None => starts.push(i),
+            Some(&page) => {
+                let from_prev = changed_ratio(&blocks[i - 1], &blocks[i], block_delta);
+                let from_page = changed_ratio(&blocks[page], &blocks[i], block_delta);
+                if from_prev >= CHANGE_RATIO && from_page >= CHANGE_RATIO {
+                    starts.push(i);
+                }
+            }
         }
     }
-    starts
+    // 整段都是纯色（全黑视频等）时仍给出一页，否则「提取成功但一页都没有」更让人困惑。
+    if starts.is_empty() {
+        starts.push(0);
+    }
+
+    // 停留不足 MIN_DWELL_FRAMES 的页是转场/动画中间态。末页的停留算到采样结束。
+    let mut kept: Vec<usize> = Vec::with_capacity(starts.len());
+    for (i, &start) in starts.iter().enumerate() {
+        let end = starts.get(i + 1).copied().unwrap_or(blocks.len());
+        if end - start >= MIN_DWELL_FRAMES {
+            kept.push(start);
+        }
+    }
+    // 全被过滤掉（视频短于最短停留等）时保留第一页。
+    if kept.is_empty() {
+        kept.push(starts[0]);
+    }
+
+    kept.iter()
+        .enumerate()
+        .map(|(i, &start)| {
+            let end = kept.get(i + 1).copied().unwrap_or(blocks.len());
+            SlidePage {
+                start_index: start,
+                capture_index: settle_index(&blocks, start, end, block_delta),
+            }
+        })
+        .collect()
 }
 
-/// 动态阈值：相邻帧亮度差的中位数，钳到 [THRESHOLD_MIN, THRESHOLD_MAX]。
-pub fn dynamic_threshold(frames: &[Vec<u8>]) -> f64 {
-    let diffs: Vec<f64> = frames.windows(2).map(|w| rms_diff(&w[0], &w[1])).collect();
-    median(diffs).clamp(THRESHOLD_MIN, THRESHOLD_MAX)
+/// 自动块阈值：先估画面噪声地板（每对相邻帧取各块均值差的中位数，再取全局中位数），
+/// 抬高几倍作为「算变了」的门槛。此前的自适应阈值取整屏 RMS 差的中位数，那跟随的是
+/// 「典型运动量」而不是噪声——动态内容多的视频会把门槛抬到漏页。
+pub fn dynamic_block_delta(frames: &[Vec<u8>]) -> f64 {
+    let blocks: Vec<Vec<f64>> = frames.iter().map(|frame| block_means(frame)).collect();
+    let per_pair: Vec<f64> = blocks
+        .windows(2)
+        .filter(|pair| pair[0].len() == pair[1].len() && !pair[0].is_empty())
+        .map(|pair| {
+            median(
+                pair[0]
+                    .iter()
+                    .zip(pair[1].iter())
+                    .map(|(a, b)| (a - b).abs())
+                    .collect(),
+            )
+        })
+        .collect();
+    (median(per_pair) * 3.0 + BLOCK_DELTA_MIN).clamp(BLOCK_DELTA_MIN, BLOCK_DELTA_MAX)
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -261,13 +390,13 @@ pub async fn extract_slides(
         }]);
     }
 
-    let threshold = threshold_override.unwrap_or_else(|| dynamic_threshold(&frames));
-    let indices = detect_slide_indices(&frames, threshold);
+    let block_delta = threshold_override.unwrap_or_else(|| dynamic_block_delta(&frames));
+    let pages = detect_slide_pages(&frames, block_delta);
     let mut out = Vec::new();
-    for (page, &idx) in indices.iter().enumerate() {
-        let start_ms = idx as i64 * interval_ms;
+    for (page, spec) in pages.iter().enumerate() {
+        let start_ms = spec.start_index as i64 * interval_ms;
         let image = slides_dir.join(format!("{:04}.jpg", page + 1));
-        capture_jpeg_at(video, &image, start_ms).await?;
+        capture_jpeg_at(video, &image, spec.capture_index as i64 * interval_ms).await?;
         out.push(SlideFrame {
             page_no: page as i64,
             image_path: image.to_string_lossy().to_string(),
@@ -277,8 +406,8 @@ pub async fn extract_slides(
     Ok(out)
 }
 
-/// 抽课件页：降采样灰度帧 → 亮度 RMS 差 + 动态阈值找换页点 → 为每页截一张全分辨率图。
-/// `threshold_override` 给定时直接用作亮度阈值（0~255 量纲），否则按视频内容自适应。
+/// 抽课件页：降采样灰度帧 → 分块变化比例找换页点 → 为每页截一张全分辨率图。
+/// `threshold_override` 给定时直接用作单块亮度差门槛（0~255 量纲），否则按画面噪声自适应。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn extract_slides(
     video: &Path,
@@ -301,14 +430,20 @@ pub async fn extract_slides(
         }]);
     }
 
-    let threshold = threshold_override.unwrap_or_else(|| dynamic_threshold(&frames));
-    let indices = detect_slide_indices(&frames, threshold);
+    let block_delta = threshold_override.unwrap_or_else(|| dynamic_block_delta(&frames));
+    let pages = detect_slide_pages(&frames, block_delta);
 
     let mut out = Vec::new();
-    for (page, &idx) in indices.iter().enumerate() {
-        let start_ms = idx as i64 * SAMPLE_INTERVAL_MS;
+    for (page, spec) in pages.iter().enumerate() {
+        let start_ms = spec.start_index as i64 * SAMPLE_INTERVAL_MS;
         let image = slides_dir.join(format!("{:04}.jpg", page + 1));
-        capture_jpeg_at(video, &image, start_ms).await?;
+        // 截的是稳定后那一帧，而 start_ms 仍是这一页出现的时刻（点缩略图要跳到讲它的开头）。
+        capture_jpeg_at(
+            video,
+            &image,
+            spec.capture_index as i64 * SAMPLE_INTERVAL_MS,
+        )
+        .await?;
         out.push(SlideFrame {
             page_no: page as i64,
             image_path: image.to_string_lossy().to_string(),
@@ -383,6 +518,37 @@ mod tests {
         vec![value; SAMPLE_W * SAMPLE_H]
     }
 
+    /// 一张"有内容"的页：左半 base、右半 base+90，块均值极差够大，不会被当成纯色。
+    fn page(base: u8) -> Vec<u8> {
+        let mut frame = vec![base; SAMPLE_W * SAMPLE_H];
+        for y in 0..SAMPLE_H {
+            for x in SAMPLE_W / 2..SAMPLE_W {
+                frame[y * SAMPLE_W + x] = base.saturating_add(90);
+            }
+        }
+        frame
+    }
+
+    /// 在一页上改动左上角 bx×by 个块。2×2 用来模拟讲师摄像头/鼠标那种局部动静，
+    /// 4×6（24/144 ≈ 17%）用来模拟"还在动但不算换页"的动画。
+    fn with_blocks(frame: &[u8], bx: usize, by: usize, value: u8) -> Vec<u8> {
+        let mut out = frame.to_vec();
+        for y in 0..BLOCK * by {
+            for x in 0..BLOCK * bx {
+                out[y * SAMPLE_W + x] = value;
+            }
+        }
+        out
+    }
+
+    fn with_corner(frame: &[u8], value: u8) -> Vec<u8> {
+        with_blocks(frame, 2, 2, value)
+    }
+
+    fn starts_of(pages: &[SlidePage]) -> Vec<usize> {
+        pages.iter().map(|p| p.start_index).collect()
+    }
+
     #[test]
     fn luminance_uses_rec709_weights() {
         // 纯绿权重最大。
@@ -391,33 +557,102 @@ mod tests {
     }
 
     #[test]
-    fn rms_diff_zero_for_identical_and_positive_for_different() {
-        let a = solid(40);
-        assert_eq!(rms_diff(&a, &a), 0.0);
-        let b = solid(60);
-        assert!((rms_diff(&a, &b) - 20.0).abs() < 1e-9);
+    fn changed_ratio_counts_only_blocks_over_delta() {
+        let a = block_means(&page(40));
+        assert_eq!(a.len(), BLOCK_COUNT);
+        assert_eq!(changed_ratio(&a, &a, 8.0), 0.0);
+        // 左上 2×2 块变了：4/144，远低于换页所需比例。
+        let corner = block_means(&with_corner(&page(40), 220));
+        let ratio = changed_ratio(&a, &corner, 8.0);
+        assert!(
+            (ratio - 4.0 / BLOCK_COUNT as f64).abs() < 1e-9,
+            "got {ratio}"
+        );
+        assert!(ratio < CHANGE_RATIO);
+        // 整屏换页：所有块都变。
+        assert_eq!(changed_ratio(&a, &block_means(&page(140)), 8.0), 1.0);
+    }
+
+    #[test]
+    fn local_motion_does_not_make_a_new_page() {
+        // 一页讲义 + 角落里有人在动：此前整屏 RMS 一超阈值就成新页，现在只动 4 块不算。
+        let base = page(40);
+        let frames = vec![
+            base.clone(),
+            with_corner(&base, 200),
+            with_corner(&base, 60),
+            base.clone(),
+        ];
+        assert_eq!(starts_of(&detect_slide_pages(&frames, 8.0)), vec![0]);
     }
 
     #[test]
     fn detects_each_distinct_page_once() {
         // 三张明显不同的页，中间各夹一张"稳定后的同页"——不应重复计数。
-        let frames = vec![solid(10), solid(10), solid(120), solid(120), solid(230)];
-        let starts = detect_slide_indices(&frames, 15.0);
-        // 起点：0(第一页)、2(跳到120)、4(跳到230)。中间稳定帧不算。
-        assert_eq!(starts, vec![0, 2, 4]);
+        let frames = vec![
+            page(10),
+            page(10),
+            page(120),
+            page(120),
+            page(160),
+            page(160),
+        ];
+        assert_eq!(starts_of(&detect_slide_pages(&frames, 8.0)), vec![0, 2, 4]);
+    }
+
+    #[test]
+    fn skips_blank_intro_frames() {
+        // 黑屏片头不该占第一页：第一页从有内容的那一帧开始。
+        let frames = vec![solid(0), solid(0), page(90), page(90)];
+        assert_eq!(starts_of(&detect_slide_pages(&frames, 8.0)), vec![2]);
+    }
+
+    #[test]
+    fn drops_pages_that_do_not_stay_long_enough() {
+        // 第 2 帧是转场中间态（只停留 1 帧），应被丢掉，只留前后两页。
+        let frames = vec![page(20), page(20), page(200), page(90), page(90), page(90)];
+        assert_eq!(starts_of(&detect_slide_pages(&frames, 8.0)), vec![0, 3]);
+    }
+
+    #[test]
+    fn captures_the_frame_after_the_animation_settles() {
+        // 换页后还有一帧在动（约 17% 的块，够"不稳定"但不够"新的一页"）：
+        // 截图取稳定后的那一帧，start_index 仍是换页那一刻。
+        let frames = vec![
+            page(20),
+            page(20),
+            page(120),
+            with_blocks(&page(120), 4, 6, 255),
+            page(120),
+            page(120),
+        ];
+        let pages = detect_slide_pages(&frames, 8.0);
+        assert_eq!(starts_of(&pages), vec![0, 2]);
+        assert_eq!(pages[1].start_index, 2);
+        assert_eq!(pages[1].capture_index, 4);
     }
 
     #[test]
     fn steady_content_yields_single_page() {
-        let frames = vec![solid(200), solid(200), solid(200)];
-        let threshold = dynamic_threshold(&frames);
-        assert_eq!(detect_slide_indices(&frames, threshold), vec![0]);
+        let frames = vec![page(200), page(200), page(200)];
+        let delta = dynamic_block_delta(&frames);
+        assert_eq!(starts_of(&detect_slide_pages(&frames, delta)), vec![0]);
     }
 
     #[test]
-    fn dynamic_threshold_clamps_to_floor_for_static_video() {
-        let frames = vec![solid(128), solid(129), solid(128)]; // 几乎不变
-        assert_eq!(dynamic_threshold(&frames), THRESHOLD_MIN);
+    fn dynamic_block_delta_floors_for_static_video_and_rises_with_noise() {
+        let still = vec![page(128), page(128), page(128)];
+        assert_eq!(dynamic_block_delta(&still), BLOCK_DELTA_MIN);
+        // 每帧整屏抖动 ±6 的噪声视频：门槛抬高，不再把噪声当换页。
+        let noisy = vec![page(100), page(106), page(100), page(106)];
+        assert!(dynamic_block_delta(&noisy) > BLOCK_DELTA_MIN);
+        assert!(dynamic_block_delta(&noisy) <= BLOCK_DELTA_MAX);
+    }
+
+    #[test]
+    fn all_blank_video_still_yields_one_page() {
+        let frames = vec![solid(0), solid(0), solid(0)];
+        assert_eq!(starts_of(&detect_slide_pages(&frames, 8.0)), vec![0]);
     }
 
     #[tokio::test]
@@ -428,6 +663,7 @@ mod tests {
         }
         let dir = tempdir().unwrap();
         let video = dir.path().join("in.mp4");
+        // 每段左半边画成白块：纯色帧会被当作转场/黑屏跳过，讲义总是有明暗结构的。
         let gen = StdCommand::new("ffmpeg")
             .args([
                 "-y",
@@ -444,7 +680,10 @@ mod tests {
                 "-i",
                 "color=c=blue:s=160x90:d=2",
                 "-filter_complex",
-                "[0:v][1:v][2:v]concat=n=3:v=1:a=0",
+                "[0:v]drawbox=w=80:h=90:color=white:t=fill[a];\
+                 [1:v]drawbox=w=80:h=90:color=white:t=fill[b];\
+                 [2:v]drawbox=w=80:h=90:color=white:t=fill[c];\
+                 [a][b][c]concat=n=3:v=1:a=0",
             ])
             .arg(&video)
             .output()
@@ -487,7 +726,15 @@ mod tests {
         let dir = tempdir().unwrap();
         let video = dir.path().join("steady.mp4");
         let gen = StdCommand::new("ffmpeg")
-            .args(["-y", "-f", "lavfi", "-i", "color=c=white:s=160x90:d=2"])
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=white:s=160x90:d=3",
+                "-vf",
+                "drawbox=w=80:h=90:color=black:t=fill",
+            ])
             .arg(&video)
             .output()
             .expect("ffmpeg gen");

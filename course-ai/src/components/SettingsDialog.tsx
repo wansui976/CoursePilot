@@ -25,9 +25,12 @@ import {
   type ShortcutAction,
 } from "@/stores/shortcuts";
 import {
+  AUTO_SENSITIVITY,
+  DEFAULT_SLIDES_SENSITIVITY,
   getSlidesSensitivity,
   sensitivityToThreshold,
   setSlidesSensitivity,
+  type SlidesSensitivity,
 } from "@/lib/slides";
 import { defaultAsrBackend, normalizeAsrBackend } from "@/lib/asrDefaults";
 import { defaultOcrBackend, normalizeOcrBackend } from "@/lib/ocrDefaults";
@@ -331,6 +334,13 @@ export function SettingsPanel({
   const [slidesSensitivity, setSlidesSensitivityState] = useState(() =>
     getSlidesSensitivity(),
   );
+  const slidesAuto = slidesSensitivity === AUTO_SENSITIVITY;
+  // 关掉「自动」时回到手调档位；滑块本身只在手调模式下可用。
+  const slidesSliderValue = slidesAuto ? DEFAULT_SLIDES_SENSITIVITY : slidesSensitivity;
+  const changeSlidesSensitivity = (value: SlidesSensitivity) => {
+    setSlidesSensitivityState(value);
+    setSlidesSensitivity(value);
+  };
   // 即时保存（改了立刻写库）的设置失败时不能无声无息：界面已显示新值、库里却没存。
   // 统一走 saveSetting，失败在详情区顶部给错误条；下一次保存成功后自动清除。
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -1137,10 +1147,28 @@ export function SettingsPanel({
 
                 <Group
                   header="课件提取"
-                  footnote={`灵敏度越高抓取的课件页越多（当前差异阈值 ${sensitivityToThreshold(
-                    slidesSensitivity,
-                  )}）。`}
+                  footnote={
+                    slidesAuto
+                      ? "按每个视频的画面噪声自动定门槛：静态讲义会更敏感，带摄像头画面的录屏会自动收紧。"
+                      : `灵敏度越高抓取的课件页越多（当前画面块差异门槛 ${sensitivityToThreshold(
+                          slidesSensitivity,
+                        )}）。`
+                  }
                 >
+                  <Row
+                    label="自动定灵敏度"
+                    hint="按视频画面噪声估算门槛，不用手调"
+                    htmlFor="slides-auto"
+                  >
+                    <Switch
+                      id="slides-auto"
+                      aria-label="课件提取自动灵敏度"
+                      checked={slidesAuto}
+                      onCheckedChange={(next) =>
+                        changeSlidesSensitivity(next ? AUTO_SENSITIVITY : DEFAULT_SLIDES_SENSITIVITY)
+                      }
+                    />
+                  </Row>
                   <StackRow label="换页灵敏度">
                     <div className="flex items-center gap-3 text-xs text-[var(--text-muted)]">
                       <span>低</span>
@@ -1150,18 +1178,15 @@ export function SettingsPanel({
                         min={0}
                         max={100}
                         step={5}
-                        value={slidesSensitivity}
-                        onChange={(event) => {
-                          const value = Number(event.target.value);
-                          setSlidesSensitivityState(value);
-                          setSlidesSensitivity(value);
-                        }}
-                        className="ca-slider flex-1"
-                        style={{ "--slider-fill": `${slidesSensitivity}%` } as CSSProperties}
+                        disabled={slidesAuto}
+                        value={slidesSliderValue}
+                        onChange={(event) => changeSlidesSensitivity(Number(event.target.value))}
+                        className="ca-slider flex-1 disabled:opacity-40"
+                        style={{ "--slider-fill": `${slidesSliderValue}%` } as CSSProperties}
                       />
                       <span>高</span>
                       <span className="w-8 text-right tabular-nums text-[var(--text-faint)]">
-                        {slidesSensitivity}
+                        {slidesAuto ? "自动" : slidesSensitivity}
                       </span>
                     </div>
                   </StackRow>
