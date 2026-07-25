@@ -451,7 +451,8 @@ export const ipc = {
       invoke("cmd_search_transcript", { videoId, scope, query }),
   },
   slides: {
-    extract: (videoId: string, threshold?: number): Promise<number> =>
+    // threshold 为单块亮度差门槛；null/省略表示让后端按画面噪声自估。
+    extract: (videoId: string, threshold?: number | null): Promise<number> =>
       invoke("cmd_extract_slides", { videoId, threshold }),
     list: (videoId: string): Promise<Slide[]> =>
       invoke("cmd_get_slides", { videoId }),
