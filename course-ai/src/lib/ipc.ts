@@ -65,10 +65,21 @@ export interface WeakConcept {
   again_rate: number;
 }
 
-/** 学习统计：按本地日聚合的观看毫秒。 */
+/** 学习统计：按本地日聚合的观看毫秒与复习张数。 */
 export interface DayTotal {
   day: string;
   watched_ms: number;
+  /** 当天复习的卡片张数（只复习没看视频的一天也算学习了）。 */
+  reviews: number;
+  /** 其中评分「良好/容易」的张数。 */
+  good_reviews: number;
+}
+
+/** 某视频的播放进度（毫秒）。完成度按 position/duration 判定。 */
+export interface VideoProgress {
+  video_id: string;
+  position_ms: number;
+  duration_ms: number | null;
 }
 
 /** 学习统计：每门课累计观看毫秒与最近学习时刻。 */
@@ -226,8 +237,18 @@ export const ipc = {
     courseTotals: (): Promise<CourseTotal[]> => invoke("cmd_course_totals"),
     // 每门课上次看到的视频（按最近学习倒序），供仪表盘一键续播。
     continueLearning: (): Promise<ContinueRow[]> => invoke("cmd_continue_learning"),
-    // 所有未删除视频的 [course_id, video_id]（供课程完成度：已看数由本地进度判定）。
+    // 所有未删除视频的 [course_id, video_id]（课程完成度的分母）。
     courseVideoIds: (): Promise<[string, string][]> => invoke("cmd_course_video_ids"),
+    // 下一批复习到期的时刻（毫秒），没有排期中的卡则为 null。
+    nextDueAt: (): Promise<number | null> => invoke("cmd_next_due_at"),
+    // 落库一个视频的播放进度（完成度以库里这份为准，本地记录只是热路径缓存）。
+    saveVideoProgress: (
+      videoId: string,
+      positionMs: number,
+      durationMs: number | null,
+    ): Promise<void> => invoke("cmd_save_video_progress", { videoId, positionMs, durationMs }),
+    // 所有未删除视频的播放进度。
+    videoProgress: (): Promise<VideoProgress[]> => invoke("cmd_video_progress"),
   },
   concepts: {
     // 分析本课程概念（会调多次 LLM，耗时）。命令立即返回、活儿丢后台跑，逐视频进度经

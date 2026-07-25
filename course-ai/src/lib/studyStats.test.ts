@@ -3,14 +3,23 @@ import {
   DEFAULT_DAILY_GOAL_MIN,
   computeStreak,
   dayMs,
+  dayReviews,
   formatDuration,
   heatLevel,
   heatmapGrid,
+  isStudiedDay,
   readDailyGoalMin,
   relativeDay,
+  reviewTotals,
   weeklyMs,
   writeDailyGoalMin,
 } from "./studyStats";
+
+/** 造一行按天统计（只写关心的字段）。 */
+function row(day: string, over: Partial<Omit<DayTotal, "day">> = {}) {
+  return { day, watched_ms: 0, reviews: 0, good_reviews: 0, ...over };
+}
+type DayTotal = { day: string; watched_ms: number; reviews: number; good_reviews: number };
 
 describe("computeStreak", () => {
   it("counts consecutive days back from today", () => {
@@ -33,12 +42,38 @@ describe("computeStreak", () => {
   });
 });
 
+describe("isStudiedDay", () => {
+  it("counts a review-only day as studied", () => {
+    expect(isStudiedDay(row("2026-07-20", { reviews: 5 }))).toBe(true);
+    expect(isStudiedDay(row("2026-07-20", { watched_ms: 1000 }))).toBe(true);
+    expect(isStudiedDay(row("2026-07-20"))).toBe(false);
+  });
+});
+
+describe("reviewTotals", () => {
+  it("sums reviews and good answers over the last 7 days only", () => {
+    const rows = [
+      row("2026-07-20", { reviews: 10, good_reviews: 7 }),
+      row("2026-07-14", { reviews: 4, good_reviews: 4 }), // 恰好 7 天前（含）
+      row("2026-07-13", { reviews: 99, good_reviews: 99 }), // 8 天前（不含）
+    ];
+    expect(reviewTotals(rows, "2026-07-20")).toEqual({ reviews: 14, good: 11 });
+  });
+
+  it("is zero when nothing was reviewed", () => {
+    expect(reviewTotals([row("2026-07-20", { watched_ms: 600_000 })], "2026-07-20")).toEqual({
+      reviews: 0,
+      good: 0,
+    });
+  });
+});
+
 describe("weeklyMs", () => {
   it("sums only the last 7 days including today", () => {
     const rows = [
-      { day: "2026-07-20", watched_ms: 1000 },
-      { day: "2026-07-14", watched_ms: 2000 }, // 恰好 7 天前（含）
-      { day: "2026-07-13", watched_ms: 4000 }, // 8 天前（不含）
+      { day: "2026-07-20", watched_ms: 1000, reviews: 0, good_reviews: 0 },
+      { day: "2026-07-14", watched_ms: 2000, reviews: 0, good_reviews: 0 }, // 恰好 7 天前（含）
+      { day: "2026-07-13", watched_ms: 4000, reviews: 0, good_reviews: 0 }, // 8 天前（不含）
     ];
     expect(weeklyMs(rows, "2026-07-20")).toBe(3000);
   });
@@ -77,7 +112,7 @@ describe("daily goal storage", () => {
 
 describe("dayMs", () => {
   it("returns a day's watched ms or 0", () => {
-    const rows = [{ day: "2026-07-20", watched_ms: 1200 }];
+    const rows = [{ day: "2026-07-20", watched_ms: 1200, reviews: 0, good_reviews: 0 }];
     expect(dayMs(rows, "2026-07-20")).toBe(1200);
     expect(dayMs(rows, "2026-07-19")).toBe(0);
   });
@@ -113,8 +148,8 @@ describe("heatmapGrid", () => {
   it("maps a day's watched time to its level and leaves gaps at level 0", () => {
     const grid = heatmapGrid(
       [
-        { day: "2026-07-20", watched_ms: 90 * 60_000 }, // 今天：4 级
-        { day: "2026-07-18", watched_ms: 10 * 60_000 }, // 周六：1 级
+        { day: "2026-07-20", watched_ms: 90 * 60_000, reviews: 0, good_reviews: 0 }, // 今天：4 级
+        { day: "2026-07-18", watched_ms: 10 * 60_000, reviews: 0, good_reviews: 0 }, // 周六：1 级
       ],
       today,
       4,
@@ -124,5 +159,21 @@ describe("heatmapGrid", () => {
     expect(cells.find((c) => c.day === "2026-07-18")!.level).toBe(1);
     // 有记录的天数就这两天，其余在范围内的都是 0 级（不是 null）。
     expect(cells.filter((c) => c.level === 0).length).toBeGreaterThan(0);
+  });
+
+  it("keeps a review-only day visible at level 1", () => {
+    const grid = heatmapGrid([row("2026-07-19", { reviews: 12 })], today, 4);
+    const cell = grid
+      .flat()
+      .find((c): c is NonNullable<typeof c> => c?.day === "2026-07-19");
+    expect(cell).toMatchObject({ ms: 0, reviews: 12, level: 1 });
+  });
+});
+
+describe("dayReviews", () => {
+  it("returns a day's review count or 0", () => {
+    const rows = [row("2026-07-20", { reviews: 8 })];
+    expect(dayReviews(rows, "2026-07-20")).toBe(8);
+    expect(dayReviews(rows, "2026-07-19")).toBe(0);
   });
 });

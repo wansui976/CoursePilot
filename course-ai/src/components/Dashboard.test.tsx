@@ -16,7 +16,8 @@ const {
   dueByConcept,
   dueByCourse,
   review,
-  notify,
+  nextDueAt,
+  videoProgress,
 } = vi.hoisted(() => ({
   dailyTotals: vi.fn(),
   courseTotals: vi.fn(),
@@ -28,14 +29,21 @@ const {
   dueByConcept: vi.fn(),
   dueByCourse: vi.fn(),
   review: vi.fn(),
-  notify: vi.fn(),
+  nextDueAt: vi.fn(),
+  videoProgress: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({
   ipc: {
-    stats: { dailyTotals, courseTotals, continueLearning, courseVideoIds },
+    stats: {
+      dailyTotals,
+      courseTotals,
+      continueLearning,
+      courseVideoIds,
+      nextDueAt,
+      videoProgress,
+    },
     courses: { list: listCourses },
     srs: { countDue, weakConcepts, dueByConcept, dueByCourse, review },
-    notify,
   },
 }));
 
@@ -60,7 +68,10 @@ describe("Dashboard", () => {
   const today = localDay(new Date());
 
   beforeEach(() => {
-    dailyTotals.mockReset().mockResolvedValue([{ day: today, watched_ms: 1_800_000 }]); // 今天 30 分钟
+    // 今天看了 30 分钟（正好达到默认目标），没有复习记录。
+    dailyTotals
+      .mockReset()
+      .mockResolvedValue([{ day: today, watched_ms: 1_800_000, reviews: 0, good_reviews: 0 }]);
     courseTotals.mockReset().mockResolvedValue([
       { course_id: "c1", watched_ms: 3_600_000, last_ts: Date.now() },
     ]);
@@ -72,7 +83,8 @@ describe("Dashboard", () => {
     dueByCourse.mockReset().mockResolvedValue([]);
     courseVideoIds.mockReset().mockResolvedValue([]);
     review.mockReset().mockResolvedValue(undefined);
-    notify.mockReset().mockResolvedValue(undefined);
+    nextDueAt.mockReset().mockResolvedValue(null);
+    videoProgress.mockReset().mockResolvedValue([]);
     localStorage.clear();
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
@@ -127,7 +139,7 @@ describe("Dashboard", () => {
     expect(screen.getByText(/已看 50%/)).toBeInTheDocument();
 
     const continueHeading = screen.getByText("继续学习");
-    const reviewEntry = screen.getByText("今天没有待复习");
+    const reviewEntry = screen.getByText("今天没有到期卡片");
     expect(
       continueHeading.compareDocumentPosition(reviewEntry) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -168,7 +180,7 @@ describe("Dashboard", () => {
       name: "最近 26 周学习热力图",
     });
     const todayCell = await within(grid).findByRole("button", {
-      name: `${today} · 学习 30 分钟`,
+      name: `${today} · 学习 30 分钟 · 已达标`,
     });
     expect(todayCell).toHaveAttribute("aria-current", "date");
     expect(todayCell).toHaveClass("rounded-[2px]", "outline-2");
@@ -183,7 +195,7 @@ describe("Dashboard", () => {
       expect(divider).toHaveClass("border-dashed", "opacity-60");
       expect(divider.parentElement?.querySelector('[data-heat-day$="-01"]')).not.toBeNull();
     });
-    expect(screen.getByRole("status")).toHaveTextContent(`${today} · 学习 30 分钟`);
+    expect(screen.getByRole("status")).toHaveTextContent(`${today} · 学习 30 分钟 · 已达标`);
   });
 
   it.each([
@@ -220,10 +232,10 @@ describe("Dashboard", () => {
     expect(detail).toHaveTextContent(`${yesterday} · 未学习`);
 
     const todayCell = await within(grid).findByRole("button", {
-      name: `${today} · 学习 30 分钟`,
+      name: `${today} · 学习 30 分钟 · 已达标`,
     });
     fireEvent.click(todayCell);
-    expect(detail).toHaveTextContent(`${today} · 学习 30 分钟`);
+    expect(detail).toHaveTextContent(`${today} · 学习 30 分钟 · 已达标`);
 
     fireEvent.keyDown(todayCell, { key: "ArrowLeft" });
     const priorWeekCell = within(grid).getByRole("button", {
@@ -242,7 +254,8 @@ describe("Dashboard", () => {
     const weekStat = within(stats).getByRole("region", { name: "本周学习" });
     await waitFor(() => {
       expect(todayStat).toHaveTextContent("30 分钟");
-      expect(todayStat).toHaveTextContent("目标 30 分钟");
+      // 今天正好达到默认目标 → 直接说「已达标」，不再只是干巴巴地写目标值。
+      expect(todayStat).toHaveTextContent("已达标 · 30 分钟");
       expect(weekStat).toHaveTextContent("目标 3 小时 30 分 · 14%");
     });
 
@@ -260,15 +273,56 @@ describe("Dashboard", () => {
     expect(localStorage.getItem("course-ai-daily-goal-min")).toBe("60");
   });
 
-  it("toggles the study reminder on and fires a confirmation notification", async () => {
+  it("counts a review-only day as studied instead of breaking the streak", async () => {
+    // 今天一秒视频没看，只复习了 8 张卡。
+    dailyTotals.mockResolvedValue([
+      { day: today, watched_ms: 0, reviews: 8, good_reviews: 6 },
+    ]);
     renderDashboard();
-    const toggle = await screen.findByRole("switch", { name: "学习提醒" });
-    expect(toggle).not.toBeChecked();
 
-    fireEvent.click(toggle);
-    expect(toggle).toBeChecked();
-    expect(localStorage.getItem("course-ai-reminder-enabled")).toBe("1");
-    await waitFor(() => expect(notify).toHaveBeenCalled());
+    const stats = await screen.findByRole("group", { name: "学习统计" });
+    await waitFor(() => {
+      expect(within(stats).getByRole("region", { name: "连续学习" })).toHaveTextContent("1 天");
+      expect(within(stats).getByRole("region", { name: "连续学习" })).toHaveTextContent(
+        "今天已学习",
+      );
+    });
+    // 热力图上这天也不能是空白格。
+    const grid = screen.getByRole("group", { name: "最近 26 周学习热力图" });
+    expect(
+      within(grid).getByRole("button", { name: `${today} · 复习 8 张` }),
+    ).toBeInTheDocument();
+  });
+
+  it("reports the recent review output, not just time spent", async () => {
+    countDue.mockResolvedValue(5);
+    dailyTotals.mockResolvedValue([
+      { day: today, watched_ms: 600_000, reviews: 30, good_reviews: 24 },
+    ]);
+    renderDashboard();
+
+    expect(await screen.findByText("今日复习 5 张")).toBeInTheDocument();
+    expect(screen.getByText("最近 7 天复习 30 张 · 良好率 80%")).toBeInTheDocument();
+  });
+
+  it("tells the user when the next batch is due instead of a dead disabled button", async () => {
+    countDue.mockResolvedValue(0);
+    nextDueAt.mockResolvedValue(Date.now() + 3 * 3600_000);
+    renderDashboard();
+
+    expect(await screen.findByText("今天没有到期卡片")).toBeInTheDocument();
+    expect(await screen.findByText("下一批 3 小时后到期")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /复习/ })).not.toBeInTheDocument();
+  });
+
+  it("says cards have to be generated first when nothing is scheduled", async () => {
+    countDue.mockResolvedValue(0);
+    nextDueAt.mockResolvedValue(null);
+    renderDashboard();
+
+    expect(
+      await screen.findByText("还没有排期中的卡片，在视频页出题后会自动生成"),
+    ).toBeInTheDocument();
   });
 
   it("shows a course completion ring and a due badge on the course card", async () => {
@@ -291,6 +345,22 @@ describe("Dashboard", () => {
     await screen.findByText("申论课程");
     expect(screen.getByText(/完成 2\/3 讲/)).toBeInTheDocument();
     expect(screen.getByText("待复习 4")).toBeInTheDocument();
+  });
+
+  it("counts completion from stored progress even with no local record", async () => {
+    courseVideoIds.mockResolvedValue([
+      ["c1", "v1"],
+      ["c1", "v2"],
+    ]);
+    // 库里记着 v1 已看到末尾、v2 只看了一点；localStorage 全空（清过缓存/换了设备）。
+    videoProgress.mockResolvedValue([
+      { video_id: "v1", position_ms: 600_000, duration_ms: 600_000 },
+      { video_id: "v2", position_ms: 30_000, duration_ms: 600_000 },
+    ]);
+    renderDashboard();
+
+    await screen.findByText("申论课程");
+    expect(await screen.findByText(/完成 1\/2 讲/)).toBeInTheDocument();
   });
 
   it("shows an empty state when there is no study record", async () => {

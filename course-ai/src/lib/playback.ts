@@ -1,3 +1,8 @@
+import { ipc, type VideoProgress } from "./ipc";
+
+/** 库里存的那份进度（仅用到位置与时长两列）。 */
+type StoredProgress = Pick<VideoProgress, "position_ms" | "duration_ms">;
+
 // 播放进度持久化在 localStorage（与断点续播共用一份数据）：
 // - video-pos:<id>  上次离开的位置（秒）
 // - video-dur:<id>  视频总时长（秒，加载元数据时写入）
@@ -37,6 +42,43 @@ export interface PlaybackProgress {
   durationSec: number;
   /** 进度比例 0..1，时长未知为 0 */
   ratio: number;
+}
+
+/**
+ * 把本地记的进度同步进库：完成度以库里那份为准，本地记录退化为热路径缓存。
+ * 时机是「暂停」与「离开这个视频」，不跟着 timeupdate 走，避免每 5 秒一次 IPC。
+ * 失败静默——本地记录仍在，下次同步会带上。
+ */
+export function syncPlaybackProgress(videoId: string): void {
+  const { positionSec, durationSec } = readPlaybackProgress(videoId);
+  if (positionSec <= 0) return;
+  try {
+    // 同步是「顺手」的事：无论 IPC 不可用还是写库失败，都不该影响播放与卸载。
+    void ipc.stats
+      .saveVideoProgress(
+        videoId,
+        Math.round(positionSec * 1000),
+        durationSec > 0 ? Math.round(durationSec * 1000) : null,
+      )
+      .catch(() => {
+        // 忽略：完成度会在下一次同步补上，本地续播不受影响。
+      });
+  } catch {
+    // 同上。
+  }
+}
+
+/**
+ * 「已看完」判定：库里的进度优先，没有（老数据或还没同步过）才回落到本地记录。
+ * 两条路用的是同一个规则，所以完成度不会因为清缓存就和「已学时长」互相打脸。
+ */
+export function isWatchedThrough(videoId: string, stored?: StoredProgress): boolean {
+  if (stored) {
+    // 库里没存到时长（元数据没读到）时借用本地那份，两者来自同一个播放器。
+    const durationMs = stored.duration_ms ?? readPlaybackProgress(videoId).durationSec * 1000;
+    if (durationMs > 0) return stored.position_ms / durationMs >= WATCHED_RATIO;
+  }
+  return readPlaybackProgress(videoId).ratio >= WATCHED_RATIO;
 }
 
 export function readPlaybackProgress(videoId: string): PlaybackProgress {

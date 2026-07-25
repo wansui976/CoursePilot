@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Bell,
   Brain,
+  Check,
   ChevronLeft,
+  Clock,
   Flame,
   LayoutDashboard,
   Play,
   TrendingDown,
 } from "lucide-react";
 import { ipc, type DueCard } from "@/lib/ipc";
-import { WATCHED_RATIO, readPlaybackProgress } from "@/lib/playback";
-import { readReminderEnabled, writeReminderEnabled } from "@/lib/studyReminder";
+import { isWatchedThrough, readPlaybackProgress } from "@/lib/playback";
+import { formatCountdown } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { ProgressRing } from "@/components/ui/ProgressRing";
 import { DailyGoalDialog } from "./DailyGoalDialog";
@@ -19,11 +20,14 @@ import { ReviewSession } from "./ReviewSession";
 import {
   computeStreak,
   dayMs,
+  dayReviews,
   formatDuration,
   heatmapGrid,
+  isStudiedDay,
   localDay,
   readDailyGoalMin,
   relativeDay,
+  reviewTotals,
   weeklyMs,
   writeDailyGoalMin,
   type HeatCell,
@@ -69,10 +73,13 @@ function useHeatmapWeeks(): number {
   return weeks;
 }
 
-function heatCellLabel(cell: NonNullable<HeatCell>): string {
-  return cell.ms > 0
-    ? `${cell.day} · 学习 ${formatDuration(cell.ms)}`
-    : `${cell.day} · 未学习`;
+function heatCellLabel(cell: NonNullable<HeatCell>, reached: boolean): string {
+  const parts = [cell.day];
+  if (cell.ms > 0) parts.push(`学习 ${formatDuration(cell.ms)}`);
+  if (cell.reviews > 0) parts.push(`复习 ${cell.reviews} 张`);
+  if (parts.length === 1) parts.push("未学习");
+  if (reached) parts.push("已达标");
+  return parts.join(" · ");
 }
 
 function monthLabel(column: HeatCell[], index: number): string | null {
@@ -86,22 +93,26 @@ function monthLabel(column: HeatCell[], index: number): string | null {
   return `${Number(day.slice(5, 7))}月`;
 }
 
-/** 可聚焦的热力图格：今天保持描边，方向键按时间矩阵移动。 */
+/** 可聚焦的热力图格：今天保持描边，达标日描细边，方向键按时间矩阵移动。 */
 function HeatSquare({
   cell,
   today,
   active,
+  goalMs,
   onSelect,
   onNavigate,
 }: {
   cell: HeatCell;
   today: string;
   active: boolean;
+  goalMs: number;
   onSelect: (day: string) => void;
   onNavigate: (day: string, offsetDays: number) => void;
 }) {
   if (!cell) return <span className="h-3 w-3" aria-hidden="true" />;
-  const label = heatCellLabel(cell);
+  // 目标只存当前值、没有按天留存，所以过去的达标是按「今天的目标」回看的。
+  const reached = goalMs > 0 && cell.ms >= goalMs;
+  const label = heatCellLabel(cell, reached);
   const isToday = cell.day === today;
 
   return (
@@ -131,7 +142,9 @@ function HeatSquare({
           ? "outline outline-2 outline-offset-1 outline-primary"
           : active
             ? "outline outline-1 outline-offset-1 outline-[var(--text-muted)]"
-            : ""
+            : reached
+              ? "outline outline-1 outline-offset-1 outline-primary/60"
+              : ""
       }`}
     />
   );
@@ -180,6 +193,12 @@ export function Dashboard({
     queryFn: () => ipc.srs.countDue(),
   });
 
+  // 下一批到期时刻：没有到期卡时用它代替一个点不动的禁用按钮。
+  const { data: nextDueAt = null } = useQuery({
+    queryKey: ["srs-next-due"],
+    queryFn: () => ipc.stats.nextDueAt(),
+  });
+
   const { data: continueRows = [] } = useQuery({
     queryKey: ["stats-continue"],
     queryFn: () => ipc.stats.continueLearning(),
@@ -205,27 +224,31 @@ export function Dashboard({
     queryKey: ["srs-due-by-course"],
     queryFn: () => ipc.srs.dueByCourse(),
   });
+  const { data: progressRows = [] } = useQuery({
+    queryKey: ["stats-video-progress"],
+    queryFn: () => ipc.stats.videoProgress(),
+  });
 
-  // 每门课的完成度（已看完/总数，「已看完」按本地播放进度 ≥ WATCHED_RATIO 判定）。
-  const completionOf = useMemo(() => {
-    const idsByCourse = new Map<string, string[]>();
-    for (const [cid, vid] of courseVideoIds) {
-      const arr = idsByCourse.get(cid);
-      if (arr) arr.push(vid);
-      else idsByCourse.set(cid, [vid]);
+  // 每门课的完成度（已看完/总数）。「已看完」优先看库里的播放进度，没有那条记录
+  // 才回落到本地记录——清缓存/换设备后完成度不会再凭空归零。
+  // 一次性算完：以前是每次渲染都为每个视频读两次 localStorage。
+  const completion = useMemo(() => {
+    const stored = new Map(progressRows.map((row) => [row.video_id, row]));
+    const tally = new Map<string, { watched: number; total: number }>();
+    for (const [courseId, videoId] of courseVideoIds) {
+      const entry = tally.get(courseId) ?? { watched: 0, total: 0 };
+      entry.total += 1;
+      if (isWatchedThrough(videoId, stored.get(videoId))) entry.watched += 1;
+      tally.set(courseId, entry);
     }
-    return (courseId: string): { watched: number; total: number } => {
-      const ids = idsByCourse.get(courseId) ?? [];
-      const watched = ids.filter(
-        (id) => readPlaybackProgress(id).ratio >= WATCHED_RATIO,
-      ).length;
-      return { watched, total: ids.length };
-    };
-  }, [courseVideoIds]);
+    return tally;
+  }, [courseVideoIds, progressRows]);
+  const completionOf = (courseId: string) =>
+    completion.get(courseId) ?? { watched: 0, total: 0 };
   const dueOf = useMemo(() => new Map(dueByCourse), [dueByCourse]);
 
   const streak = useMemo(
-    () => computeStreak(new Set(daily.filter((d) => d.watched_ms > 0).map((d) => d.day)), today),
+    () => computeStreak(new Set(daily.filter(isStudiedDay).map((d) => d.day)), today),
     [daily, today],
   );
   const week = useMemo(() => weeklyMs(daily, today), [daily, today]);
@@ -276,6 +299,10 @@ export function Dashboard({
   // 每日学习目标：今日已学分钟 vs 目标分钟（本地存储，可编辑）。
   const [goalMin, setGoalMin] = useState(() => readDailyGoalMin());
   const todayWatched = dayMs(daily, today);
+  const todayReviews = dayReviews(daily, today);
+  const goalMs = goalMin * 60_000;
+  const goalPercent = goalMs > 0 ? Math.min(100, Math.round((todayWatched / goalMs) * 100)) : 0;
+  const goalReached = goalMs > 0 && todayWatched >= goalMs;
   const weekGoalMs = goalMin * 7 * 60_000;
   const weekGoalPercent = weekGoalMs > 0 ? Math.round((week / weekGoalMs) * 100) : 0;
   function saveGoal(value: number) {
@@ -285,19 +312,17 @@ export function Dashboard({
       setGoalMin(n);
     }
   }
-  // 学习提醒开关：开启时发一条确认通知（顺带触发系统权限询问并让用户确认可用）。
-  const [remindOn, setRemindOn] = useState(() => readReminderEnabled());
-  async function toggleReminder(on: boolean) {
-    writeReminderEnabled(on);
-    setRemindOn(on);
-    if (on) {
-      try {
-        await ipc.notify("学习提醒已开启", "有待复习卡片时，打开应用会在这里提醒你。");
-      } catch {
-        // 权限被拒/发送失败时静默。
-      }
-    }
-  }
+
+  // 复习产出：观看时长只说明投入，这行说明「有没有学会」。
+  const recentReviews = useMemo(() => reviewTotals(daily, today), [daily, today]);
+  const goodRate =
+    recentReviews.reviews > 0
+      ? Math.round((recentReviews.good / recentReviews.reviews) * 100)
+      : 0;
+  const reviewOutputLine =
+    recentReviews.reviews > 0
+      ? `最近 7 天复习 ${recentReviews.reviews} 张 · 良好率 ${goodRate}%`
+      : "间隔重复 · 出题自动生成卡片";
   const nameOf = useMemo(() => {
     const map = new Map(courses.map((c) => [c.id, c.name]));
     return (id: string) => map.get(id) ?? "（已删除课程）";
@@ -366,28 +391,45 @@ export function Dashboard({
             </div>
           )}
 
-          <button
-            onClick={() => setReviewing(true)}
-            disabled={dueCount === 0}
-            className="flex w-full items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)] disabled:cursor-default disabled:opacity-60 disabled:hover:bg-[var(--surface-card)]"
-          >
-            <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-primary/15 text-primary">
-              <Brain className="h-5 w-5" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium text-[var(--text-strong)]">
-                {dueCount > 0 ? `今日复习 ${dueCount} 张` : "今天没有待复习"}
+          {dueCount > 0 ? (
+            <button
+              onClick={() => setReviewing(true)}
+              className="flex w-full items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
+            >
+              <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-primary/15 text-primary">
+                <Brain className="h-5 w-5" />
               </span>
-              <span className="block text-xs text-[var(--text-muted)]">
-                间隔重复 · 出题自动生成卡片
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-[var(--text-strong)]">
+                  今日复习 {dueCount} 张
+                </span>
+                <span className="block text-xs text-[var(--text-muted)]">{reviewOutputLine}</span>
               </span>
-            </span>
-            {dueCount > 0 && (
               <span className="flex-none rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white">
                 开始复习
               </span>
-            )}
-          </button>
+            </button>
+          ) : (
+            // 没有到期卡时不摆一个点不动的禁用按钮（读屏也读不到它）：改成说明下一批什么时候来。
+            <div className="flex w-full items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
+              <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-[var(--surface-card-active)] text-[var(--text-muted)]">
+                <Clock className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-[var(--text-strong)]">
+                  今天没有到期卡片
+                </div>
+                <div className="text-xs text-[var(--text-muted)]">
+                  {nextDueAt != null
+                    ? `下一批 ${formatCountdown(nextDueAt)}到期`
+                    : "还没有排期中的卡片，在视频页出题后会自动生成"}
+                </div>
+                {recentReviews.reviews > 0 && (
+                  <div className="mt-0.5 text-xs text-[var(--text-faint)]">{reviewOutputLine}</div>
+                )}
+              </div>
+            </div>
+          )}
 
           <div
             role="group"
@@ -402,7 +444,23 @@ export function Dashboard({
               <div className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-strong)]">
                 {formatDuration(todayWatched)}
               </div>
-              <div className="mt-1 text-xs text-[var(--text-muted)]">目标 {goalMin} 分钟</div>
+              {goalReached ? (
+                <div className="mt-1 flex items-center gap-1 text-xs font-medium text-[var(--accent-text)]">
+                  <Check className="h-3.5 w-3.5 flex-none" />
+                  已达标 · {goalMin} 分钟
+                </div>
+              ) : (
+                <div className="mt-1 text-xs text-[var(--text-muted)]">目标 {goalMin} 分钟</div>
+              )}
+              <div
+                aria-hidden="true"
+                className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--surface-card-active)]"
+              >
+                <div
+                  className={`h-full rounded-full ${goalReached ? "bg-[var(--accent-text)]" : "bg-primary"}`}
+                  style={{ width: `${goalPercent}%` }}
+                />
+              </div>
             </section>
 
             <section
@@ -430,30 +488,10 @@ export function Dashboard({
                 {streak} 天
               </div>
               <div className="mt-1 text-xs leading-tight text-[var(--text-muted)]">
-                {todayWatched > 0 ? "今天已学习" : "今天尚未学习"}
+                {todayWatched > 0 || todayReviews > 0 ? "今天已学习" : "今天尚未学习"}
               </div>
             </section>
           </div>
-
-          <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
-            <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-primary/15 text-primary">
-              <Bell className="h-5 w-5" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium text-[var(--text-strong)]">学习提醒</span>
-              <span className="block text-xs text-[var(--text-muted)]">
-                有待复习时，打开应用推送桌面通知（每天至多一次）
-              </span>
-            </span>
-            <input
-              type="checkbox"
-              role="switch"
-              aria-label="学习提醒"
-              checked={remindOn}
-              onChange={(e) => void toggleReminder(e.target.checked)}
-              className="ca-touch-44 h-5 w-5 flex-none accent-[var(--accent-text)]"
-            />
-          </label>
 
           {weak.length > 0 && (
             <div>
@@ -541,6 +579,7 @@ export function Dashboard({
                             key={cell?.day ?? `future-${rowIndex}`}
                             cell={cell}
                             today={today}
+                            goalMs={goalMs}
                             active={cell?.day === activeHeatDay}
                             onSelect={setActiveHeatDay}
                             onNavigate={navigateHeatDay}
@@ -557,7 +596,9 @@ export function Dashboard({
               aria-live="polite"
               className="mt-2 min-h-4 text-xs text-[var(--text-muted)]"
             >
-              {activeHeatCell ? heatCellLabel(activeHeatCell) : "暂无学习记录"}
+              {activeHeatCell
+                ? heatCellLabel(activeHeatCell, goalMs > 0 && activeHeatCell.ms >= goalMs)
+                : "暂无学习记录"}
             </div>
           </div>
 

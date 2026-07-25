@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from "react";
 import {
   AudioLines,
+  Bell,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -31,6 +32,7 @@ import {
 import { defaultAsrBackend, normalizeAsrBackend } from "@/lib/asrDefaults";
 import { defaultOcrBackend, normalizeOcrBackend } from "@/lib/ocrDefaults";
 import { isMobile, isTablet } from "@/lib/platform";
+import { readReminderEnabled, writeReminderEnabled } from "@/lib/studyReminder";
 import { pickDirectoryPath } from "@/lib/mobileFiles";
 import { Switch } from "@/components/ui/switch";
 import { WhisperModelsPanel } from "./WhisperModelsPanel";
@@ -68,6 +70,7 @@ function Select({
 
 type SettingsCategory =
   | "appearance"
+  | "study"
   | "shortcuts"
   | "storage"
   | "asr"
@@ -80,6 +83,7 @@ const CATEGORY_META: Record<
   { label: string; icon: ReactNode; tint: string }
 > = {
   appearance: { label: "外观", icon: <Palette className="h-3.5 w-3.5" />, tint: "#e0568f" },
+  study: { label: "学习", icon: <Bell className="h-3.5 w-3.5" />, tint: "#0ea5e9" },
   shortcuts: { label: "快捷键", icon: <Keyboard className="h-3.5 w-3.5" />, tint: "#10b981" },
   storage: { label: "存储", icon: <FolderCog className="h-3.5 w-3.5" />, tint: "#8e8e93" },
   asr: { label: "语音识别", icon: <AudioLines className="h-3.5 w-3.5" />, tint: "#2f6cea" },
@@ -274,6 +278,18 @@ export function SettingsPanel({
   const resetBindings = useShortcuts((s) => s.resetBindings);
   // 正在为哪个动作录入新按键（null = 不在录入）。录入时下一次按键即写入；Esc 取消。
   const [capturing, setCapturing] = useState<ShortcutAction | null>(null);
+  // 学习提醒开关（本地存储）：开启时立刻发一条确认通知，顺带触发系统权限询问。
+  const [remindOn, setRemindOn] = useState(() => readReminderEnabled());
+  async function toggleReminder(on: boolean) {
+    writeReminderEnabled(on);
+    setRemindOn(on);
+    if (!on) return;
+    try {
+      await ipc.notify("学习提醒已开启", "有待复习卡片时，打开应用会提醒你。");
+    } catch {
+      // 权限被拒 / 发送失败时静默：开关状态仍已保存。
+    }
+  }
 
   useEffect(() => {
     if (!capturing) return;
@@ -517,6 +533,7 @@ export function SettingsPanel({
 
   const categories: SettingsCategory[] = [
     "appearance",
+    "study",
     "shortcuts",
     "storage",
     "asr",
@@ -726,6 +743,26 @@ export function SettingsPanel({
                   </StackRow>
                 </Group>
               </>
+            )}
+
+            {activeCategory === "study" && (
+              <Group
+                header="学习提醒"
+                footnote="提醒只在打开应用时检查，不会在后台常驻推送。"
+              >
+                <Row
+                  label="到期复习提醒"
+                  hint="有待复习卡片时，打开应用推送一条桌面通知（每天至多一次）"
+                  htmlFor="study-reminder"
+                >
+                  <Switch
+                    id="study-reminder"
+                    aria-label="到期复习提醒"
+                    checked={remindOn}
+                    onCheckedChange={(next) => void toggleReminder(next)}
+                  />
+                </Row>
+              </Group>
             )}
 
             {activeCategory === "shortcuts" && (

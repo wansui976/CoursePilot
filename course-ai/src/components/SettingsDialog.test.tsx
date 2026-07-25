@@ -12,6 +12,7 @@ const { mockIpc } = vi.hoisted(() => ({
       set: vi.fn(),
       has: vi.fn(),
     },
+    notify: vi.fn(),
   },
 }));
 const { pickDirectoryPathMock } = vi.hoisted(() => ({
@@ -51,6 +52,8 @@ describe("SettingsPanel", () => {
     mockIpc.secrets.set.mockResolvedValue(undefined);
     mockIpc.secrets.has.mockResolvedValue(false);
     pickDirectoryPathMock.mockResolvedValue("/data/user/0/dev.courseai.app.debug/storage");
+    mockIpc.notify.mockReset().mockResolvedValue(undefined);
+    localStorage.clear();
   });
 
   it("lets users select Volcengine ASR and save App ID + Access Token, hiding only the token", async () => {
@@ -83,6 +86,20 @@ describe("SettingsPanel", () => {
       "volcengine_asr_access_token",
       "secret-token",
     );
+  });
+
+  it("keeps the study reminder switch in settings, not on the dashboard", async () => {
+    render(<SettingsPanel onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "学习" }));
+    const toggle = await screen.findByRole("switch", { name: "到期复习提醒" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+    expect(localStorage.getItem("course-ai-reminder-enabled")).toBe("1");
+    // 开启时立刻发一条确认通知，顺带触发系统权限询问。
+    await waitFor(() => expect(mockIpc.notify).toHaveBeenCalled());
   });
 
   it("shows a 已配置 hint when a secret is already stored", async () => {
