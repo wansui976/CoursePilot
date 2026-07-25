@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { CourseList, useCreateCourse } from "@/components/CourseList";
 import { displayTitle } from "@/lib/videoTitle";
-import { setThemeToggleOrigin } from "@/stores/theme";
+import type { ThemeToggleOrigin } from "@/stores/theme";
 import type { Video } from "@/lib/types";
 
 /** 全局唯一左侧栏:展开=宽栏、折叠=图标栏(Task 3),课程库与工作台共用。 */
@@ -54,7 +54,7 @@ export function AppSidebar({
   onBackToLibrary?: () => void;
   theme: "dark" | "light";
   themeToggleLabel: string;
-  onToggleTheme: () => void;
+  onToggleTheme: (origin?: ThemeToggleOrigin) => void;
   onOpenSettings: () => void;
   onOpenRecycleBin: () => void;
   onOpenDashboard: () => void;
@@ -67,8 +67,7 @@ export function AppSidebar({
   // 用按钮中心作圆形扩散起点（比 clientX/Y 稳，键盘/鼠标一致），再切换主题。
   function toggleThemeFrom(event: MouseEvent<HTMLButtonElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
-    setThemeToggleOrigin(rect.left + rect.width / 2, rect.top + rect.height / 2);
-    onToggleTheme();
+    onToggleTheme({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
   }
 
   if (collapsed) {
