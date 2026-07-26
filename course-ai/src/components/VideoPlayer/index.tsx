@@ -5,6 +5,7 @@ import {
   NO_INSETS,
   contentAspect,
   cropStyle,
+  formatCropGeometry,
   formatCropNotice,
   isCropEnabled,
   setCropEnabled,
@@ -818,7 +819,7 @@ export function VideoPlayer({
           {cropNotice && (
             <div
               aria-live="polite"
-              className="pointer-events-none absolute inset-x-4 top-6 z-20 mx-auto w-fit max-w-full rounded-lg bg-black/75 px-3 py-1.5 text-center text-xs font-medium leading-relaxed text-white"
+              className="pointer-events-none absolute inset-x-4 top-6 z-20 mx-auto w-fit max-w-full whitespace-pre-line rounded-lg bg-black/75 px-3 py-1.5 text-center text-xs font-medium leading-relaxed text-white"
             >
               {cropNotice}
             </div>
@@ -900,7 +901,16 @@ export function VideoPlayer({
             const next = !cropOn;
             setCropOn(next);
             setCropEnabled(next);
-            setCropNotice(formatCropNotice(cropInsets, next));
+            const video = ref.current;
+            const geometry =
+              video && stageBox && next
+                ? `\n${formatCropGeometry(
+                    { width: video.videoWidth, height: video.videoHeight },
+                    stageBox,
+                    symmetricInsets(cropInsets),
+                  )}`
+                : "";
+            setCropNotice(`${formatCropNotice(cropInsets, next)}${geometry}`);
           }}
           onToggleSkipSilence={silenceSkip.toggle}
           onPreviewSkip={(ms) => {

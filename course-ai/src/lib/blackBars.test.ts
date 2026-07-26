@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   contentAspect,
   cropStyle,
+  formatCropGeometry,
   formatCropNotice,
   formatInsets,
   isCropEnabled,
@@ -21,6 +22,17 @@ describe("black bar switch", () => {
     expect(isCropEnabled()).toBe(false);
     setCropEnabled(true);
     expect(isCropEnabled()).toBe(true);
+  });
+
+  it("reports the visible window so a mis-placed crop is obvious", () => {
+    // 左右各裁 11.4%：露出的应当正好是整帧的 11.4%~88.6%，偏了就是摆错了。
+    const line = formatCropGeometry(
+      { width: 1920, height: 1080 },
+      { width: 823.6, height: 600 },
+      { top: 0, right: 0.114, bottom: 0, left: 0.114 },
+    );
+    expect(line).toContain("源 1920×1080");
+    expect(line).toContain("可见 11.4%~88.6%");
   });
 
   it("shows both the detected and the actually-used insets when they differ", () => {
