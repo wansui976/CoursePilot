@@ -33,6 +33,7 @@ use crate::commands::rag::{
     cmd_cancel_rag_query, cmd_rag_query, cmd_rag_query_stream, cmd_search_transcript,
 };
 use crate::commands::settings::{cmd_get_setting, cmd_has_secret, cmd_set_secret, cmd_set_setting};
+use crate::commands::silence::cmd_video_skips;
 use crate::commands::slides::{
     cmd_cancel_slides_extract, cmd_cancel_slides_ocr, cmd_capture_frame, cmd_extract_slides,
     cmd_get_screenshots, cmd_get_slides, cmd_ocr_slides, cmd_read_slide_image,
@@ -151,6 +152,7 @@ pub fn run() {
             cmd_generate_ai,
             cmd_extract_slides,
             cmd_cancel_slides_extract,
+            cmd_video_skips,
             cmd_ocr_slides,
             cmd_cancel_slides_ocr,
             cmd_get_slides,

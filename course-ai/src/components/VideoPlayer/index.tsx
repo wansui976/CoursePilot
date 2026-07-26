@@ -6,6 +6,7 @@ import { ipc } from "@/lib/ipc";
 import { posKey, durKey, syncPlaybackProgress } from "@/lib/playback";
 import { isIOS } from "@/lib/platform";
 import { useWatchLogger } from "@/lib/useWatchLogger";
+import { useSilenceSkip } from "@/lib/useSilenceSkip";
 import { usePlayer } from "@/stores/player";
 import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
 import { CaptionOverlay } from "./CaptionOverlay";
@@ -70,6 +71,7 @@ export function VideoPlayer({
     return () => syncPlaybackProgress(videoId);
   }, [videoId]);
   const [rate, setRate] = useState(1);
+  const silenceSkip = useSilenceSkip(videoId);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [captionsOn, setCaptionsOn] = useState(true);
@@ -708,6 +710,8 @@ export function VideoPlayer({
               filter: `brightness(${brightness})`,
             }}
             onTimeUpdate={(event) => {
+              // 跳停顿：落在无声区间里就直接跃过去，跳完这一轮不再按旧位置记进度。
+              if (silenceSkip.handleTimeUpdate(event.currentTarget)) return;
               const t = event.currentTarget.currentTime;
               setCurrentMs(Math.floor(t * 1000));
               // 每 5 秒（或回退时）记录一次进度，避免频繁写 localStorage。
@@ -791,6 +795,14 @@ export function VideoPlayer({
               style={{ touchAction: "none" }}
             />
           )}
+          {silenceSkip.notice && (
+            <div
+              aria-live="polite"
+              className="pointer-events-none absolute left-1/2 top-6 z-20 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-xs font-medium text-white"
+            >
+              {silenceSkip.notice}
+            </div>
+          )}
           {gestureHint && (
             <div
               aria-label="亮度浮层"
@@ -848,8 +860,10 @@ export function VideoPlayer({
           volume={volume}
           muted={muted}
           captionsOn={captionsOn}
+          skipSilence={silenceSkip.enabled}
           fullscreen={fullscreen}
           onToggleCaptions={() => setCaptionsOn((on) => !on)}
+          onToggleSkipSilence={silenceSkip.toggle}
           onPlayPause={() => {
             const video = ref.current;
             if (!video) return;
