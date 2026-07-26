@@ -213,6 +213,21 @@ describe("SettingsPanel", () => {
     expect(await screen.findByText(/保存失败/)).toBeInTheDocument();
   });
 
+  it("turns automatic slide extraction off and persists the choice", async () => {
+    render(<SettingsPanel onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "课件 / OCR" }));
+    // 没设置过时默认开着：导入后就自动跑，不用用户再点一次。
+    const toggle = await screen.findByLabelText("导入后自动提取课件");
+    expect(toggle).toBeChecked();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(mockIpc.settings.set).toHaveBeenCalledWith("slides_auto_extract", "off"),
+    );
+  });
+
   it("renders the slides sensitivity slider in the modern styled variant", async () => {
     render(<SettingsPanel onClose={() => undefined} />);
 

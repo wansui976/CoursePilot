@@ -317,6 +317,7 @@ export function SettingsPanel({
   const [asrLanguage, setAsrLanguage] = useState("zh");
   const [correctionConcurrency, setCorrectionConcurrency] = useState("8");
   const [subtitleAutocorrect, setSubtitleAutocorrect] = useState(true);
+  const [slidesAutoExtract, setSlidesAutoExtract] = useState(true);
   const [volcengineAppId, setVolcengineAppId] = useState("");
   const [volcengineToken, setVolcengineToken] = useState("");
   const [volcengineSaved, setVolcengineSaved] = useState("");
@@ -372,6 +373,9 @@ export function SettingsPanel({
     void ipc.settings
       .get("subtitle_autocorrect")
       .then((value) => setSubtitleAutocorrect(value !== "false"));
+    void ipc.settings
+      .get("slides_auto_extract")
+      .then((value) => setSlidesAutoExtract(value !== "off"));
     void ipc.settings
       .get("volcengine_asr_app_id")
       .then((value) => setVolcengineAppId(value ?? ""));
@@ -446,6 +450,11 @@ export function SettingsPanel({
   async function changeSubtitleAutocorrect(value: boolean) {
     setSubtitleAutocorrect(value);
     await saveSetting("subtitle_autocorrect", value ? "true" : "false");
+  }
+
+  async function changeSlidesAutoExtract(value: boolean) {
+    setSlidesAutoExtract(value);
+    await saveSetting("slides_auto_extract", value ? "on" : "off");
   }
 
   async function saveVolcengineKey() {
@@ -1155,6 +1164,18 @@ export function SettingsPanel({
                         )}）。`
                   }
                 >
+                  <Row
+                    label="导入后自动提取"
+                    hint="导入视频后与语音识别并行跑，提取课件页并认出页上的文字，之后的总结、出题才看得到板书。纯口播课程可以关掉。"
+                    htmlFor="slides-auto-extract"
+                  >
+                    <Switch
+                      id="slides-auto-extract"
+                      aria-label="导入后自动提取课件"
+                      checked={slidesAutoExtract}
+                      onCheckedChange={(next) => void changeSlidesAutoExtract(next)}
+                    />
+                  </Row>
                   <Row
                     label="自动定灵敏度"
                     hint="按视频画面噪声估算门槛，不用手调"

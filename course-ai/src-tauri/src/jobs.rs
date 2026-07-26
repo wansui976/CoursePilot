@@ -6,10 +6,20 @@ use sqlx::FromRow;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
-// 流水线阶段顺序：抽音频 → 语音识别 → 章节 → 摘要 → 笔记 → 出题 → 脑图。
+// 流水线阶段顺序：抽音频 → 语音识别 → 提取课件 → 课件文字 → 章节 → 摘要 → 笔记 → 出题 → 脑图。
 // 字幕之后的 AI 产物全部由流水线自动生成，用户无需手动点「生成」。
+// 课件两步与音频/识别并行跑（一个啃视频画面、一个啃音轨），但都在 AI 步骤之前收口，
+// 好让总结、出题这些看得到课件页上的板书文字。
 pub const STAGES: &[&str] = &[
-    "audio", "asr", "chapters", "summary", "notes", "quiz", "mindmap",
+    "audio",
+    "asr",
+    "slides",
+    "slides_ocr",
+    "chapters",
+    "summary",
+    "notes",
+    "quiz",
+    "mindmap",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
