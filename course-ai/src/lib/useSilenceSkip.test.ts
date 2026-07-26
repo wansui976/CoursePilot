@@ -67,7 +67,7 @@ describe("useSilenceSkip", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     // 每打开一个视频都弹一句「已开启」只会烦人；只有用户亲手点开时才播报。
     expect(result.current.notice).toBeNull();
-    expect(result.current.count).toBe(1);
+    expect(result.current.ranges).toHaveLength(1);
   });
 
   it("jumps past a silence while playing and says how much it skipped", async () => {

@@ -22,7 +22,8 @@ export function useSilenceSkip(videoId: string) {
   const [enabled, setEnabled] = useState(isSkipSilenceEnabled);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [count, setCount] = useState<number | null>(null);
+  // ref 供每次 timeupdate 的热路径用，state 供界面（试跳按钮）用。
+  const [ranges, setRanges] = useState<SkipRange[]>([]);
   const rangesRef = useRef<SkipRange[]>([]);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 只有用户亲手点开时才播报分析过程；开着开关切换视频时静悄悄地准备就好。
@@ -47,7 +48,7 @@ export function useSilenceSkip(videoId: string) {
   // 换视频就作废上一份区间，免得拿旧视频的时间点在新视频上乱跳。
   useEffect(() => {
     rangesRef.current = [];
-    setCount(null);
+    setRanges([]);
   }, [videoId]);
 
   useEffect(() => {
@@ -62,7 +63,7 @@ export function useSilenceSkip(videoId: string) {
       .then((ranges) => {
         if (cancelled) return;
         rangesRef.current = ranges;
-        setCount(ranges.length);
+        setRanges(ranges);
         if (!announce) return;
         showNotice(
           ranges.length > 0
@@ -74,7 +75,7 @@ export function useSilenceSkip(videoId: string) {
         // 探测失败（缺 ffmpeg、文件不在）就当没有可跳的段，照常播放。
         if (cancelled) return;
         rangesRef.current = [];
-        setCount(0);
+        setRanges([]);
         if (announce) showNotice("停顿分析失败，暂时跳不了");
       })
       .finally(() => {
@@ -116,5 +117,5 @@ export function useSilenceSkip(videoId: string) {
     });
   }, [showNotice]);
 
-  return { enabled, toggle, notice, loading, count, handleTimeUpdate };
+  return { enabled, toggle, notice, loading, ranges, handleTimeUpdate };
 }

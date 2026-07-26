@@ -1,4 +1,9 @@
 import { Button } from "@/components/ui/button";
+import {
+  nextSkipPreviewMs,
+  prevSkipPreviewMs,
+  type SkipRange,
+} from "@/lib/silenceSkip";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import { Check, Maximize, Minimize, Pause, Play, Volume2, VolumeX } from "lucide-react";
@@ -22,9 +27,11 @@ export function Controls({
   captionsOn,
   skipSilence,
   skipSilenceLoading,
+  skipRanges,
   fullscreen,
   onToggleCaptions,
   onToggleSkipSilence,
+  onPreviewSkip,
   onPlayPause,
   onSeek,
   onRate,
@@ -39,9 +46,11 @@ export function Controls({
   captionsOn: boolean;
   skipSilence: boolean;
   skipSilenceLoading: boolean;
+  skipRanges: SkipRange[];
   fullscreen: boolean;
   onToggleCaptions: () => void;
   onToggleSkipSilence: () => void;
+  onPreviewSkip: (ms: number) => void;
   onPlayPause: () => void;
   onSeek: (ms: number) => void;
   onRate: (rate: number) => void;
@@ -55,6 +64,10 @@ export function Controls({
   const [speedOpen, setSpeedOpen] = useState(false);
   // 首次开启要扫一遍音轨，几秒内还跳不了；按钮上直说，别让人以为已经在跳了。
   const skipSilenceLabel = skipSilenceLoading ? "分析中" : "开";
+  // 试跳：直接送到下一处/上一处停顿前 1.5 秒并接着播，不用守着整段视频等它跳。
+  const prevSkipMs = prevSkipPreviewMs(skipRanges, currentMs);
+  const nextSkipMs = nextSkipPreviewMs(skipRanges, currentMs);
+  const showSkipNav = skipSilence && skipRanges.length > 0;
 
   // 倍速菜单:点菜单与触发按钮之外即收起(都打了 data-speed-menu),或按 Esc 收起。
   useEffect(() => {
@@ -176,6 +189,28 @@ export function Controls({
         >
           跳停顿{skipSilence ? ` · ${skipSilenceLabel}` : ""}
         </button>
+        {showSkipNav && (
+          <>
+            <button
+              type="button"
+              onClick={() => prevSkipMs != null && onPreviewSkip(prevSkipMs)}
+              disabled={prevSkipMs == null}
+              title="跳到上一处停顿前，看它怎么跳"
+              className={`${textButtonClass} disabled:opacity-35`}
+            >
+              上一处
+            </button>
+            <button
+              type="button"
+              onClick={() => nextSkipMs != null && onPreviewSkip(nextSkipMs)}
+              disabled={nextSkipMs == null}
+              title="跳到下一处停顿前，看它怎么跳"
+              className={`${textButtonClass} disabled:opacity-35`}
+            >
+              下一处
+            </button>
+          </>
+        )}
         <button
           type="button"
           onClick={onToggleCaptions}
