@@ -861,6 +861,7 @@ export function VideoPlayer({
           muted={muted}
           captionsOn={captionsOn}
           skipSilence={silenceSkip.enabled}
+          skipSilenceLoading={silenceSkip.loading}
           fullscreen={fullscreen}
           onToggleCaptions={() => setCaptionsOn((on) => !on)}
           onToggleSkipSilence={silenceSkip.toggle}

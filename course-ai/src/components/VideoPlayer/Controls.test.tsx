@@ -12,6 +12,7 @@ function renderControls(props: Partial<Parameters<typeof Controls>[0]> = {}) {
     muted: false,
     captionsOn: false,
     skipSilence: false,
+    skipSilenceLoading: false,
     fullscreen: false,
     onToggleCaptions: vi.fn(),
     onToggleSkipSilence: vi.fn(),
@@ -64,12 +65,34 @@ describe("Controls skip-silence toggle", () => {
     const onToggleSkipSilence = vi.fn();
     renderControls({ skipSilence: true, onToggleSkipSilence });
 
-    const button = screen.getByRole("button", { name: "跳停顿" });
+    const button = screen.getByRole("button", { name: "跳停顿，已开启" });
     // 开着时按钮要看得出来是开着的，否则用户不知道画面为什么会自己往前跳。
     expect(button).toHaveAttribute("aria-pressed", "true");
     expect(button.className).toContain("text-[var(--accent)]");
 
     fireEvent.click(button);
     expect(onToggleSkipSilence).toHaveBeenCalledTimes(1);
+  });
+
+  it("says 开 on the button so the state is readable at a glance", () => {
+    const { rerender } = renderControls({ skipSilence: false });
+    // 关着时只有名字，没有多余的状态字。
+    expect(screen.getByRole("button", { name: "跳停顿，已关闭" })).toHaveTextContent(
+      /^跳停顿$/,
+    );
+
+    rerender(<div />);
+    renderControls({ skipSilence: true });
+    expect(screen.getByRole("button", { name: "跳停顿，已开启" })).toHaveTextContent(
+      "跳停顿 · 开",
+    );
+  });
+
+  it("shows 分析中 while the first scan is still running", () => {
+    renderControls({ skipSilence: true, skipSilenceLoading: true });
+    // 首次开启要扫音轨，这几秒内还跳不了，按钮上得说实话。
+    expect(screen.getByRole("button", { name: "跳停顿，已开启" })).toHaveTextContent(
+      "跳停顿 · 分析中",
+    );
   });
 });
