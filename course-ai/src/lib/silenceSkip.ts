@@ -37,3 +37,28 @@ export function formatSkipNotice(fromMs: number, toMs: number): string {
   const seconds = Math.max(1, Math.round((toMs - fromMs) / 1000));
   return `跳过 ${seconds} 秒静音`;
 }
+
+/** 试跳时落在停顿前多久。留一点余量，好看清「说着说着——啪，跳过去了」。 */
+export const PREVIEW_LEAD_MS = 1_500;
+
+function previewMs(range: SkipRange): number {
+  return Math.max(0, range.start_ms - PREVIEW_LEAD_MS);
+}
+
+/**
+ * 「下一处停顿」的落点：第一处落点还在当前位置之后的停顿。
+ *
+ * 用落点（而不是停顿起点）来比，是为了让连按有效——按一次正好停在落点上，
+ * 再按一次就该去下一处，而不是原地不动。
+ */
+export function nextSkipPreviewMs(ranges: SkipRange[], positionMs: number): number | null {
+  const hit = ranges.find((range) => previewMs(range) > positionMs);
+  return hit ? previewMs(hit) : null;
+}
+
+/** 「上一处停顿」的落点：最后一处落点还在当前位置之前的停顿。 */
+export function prevSkipPreviewMs(ranges: SkipRange[], positionMs: number): number | null {
+  const hits = ranges.filter((range) => previewMs(range) < positionMs);
+  const hit = hits[hits.length - 1];
+  return hit ? previewMs(hit) : null;
+}

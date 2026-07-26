@@ -862,9 +862,17 @@ export function VideoPlayer({
           captionsOn={captionsOn}
           skipSilence={silenceSkip.enabled}
           skipSilenceLoading={silenceSkip.loading}
+          skipRanges={silenceSkip.ranges}
           fullscreen={fullscreen}
           onToggleCaptions={() => setCaptionsOn((on) => !on)}
           onToggleSkipSilence={silenceSkip.toggle}
+          onPreviewSkip={(ms) => {
+            // 试跳要「看得到跳」：暂停着不会触发跳过判定，所以顺手接着播。
+            const video = ref.current;
+            if (!video) return;
+            video.currentTime = ms / 1000;
+            if (video.paused) void video.play();
+          }}
           onPlayPause={() => {
             const video = ref.current;
             if (!video) return;
