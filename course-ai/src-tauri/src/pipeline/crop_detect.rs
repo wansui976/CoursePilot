@@ -27,12 +27,20 @@ pub const NO_CROP: CropInsets = CropInsets {
 };
 
 /// 跑一遍 ffmpeg cropdetect，返回 stderr 文本；**spawn 失败返回 None**（区分「跑过」与「没跑成」）。
-async fn run_cropdetect(path: &Path) -> Option<String> {
+async fn run_cropdetect(path: &Path, at_s: i64, window_s: i64) -> Option<String> {
     let ffmpeg = resolve(&FFMPEG, None).ok()?;
     let output = Command::new(&ffmpeg)
         .kill_on_drop(true)
-        // 跳过前 3s 片头，采样 60s；cropdetect 累积包围盒；null 输出不落地、不编码。
-        .args(["-hide_banner", "-nostats", "-ss", "3", "-t", "60", "-i"])
+        // cropdetect 在窗口内累积包围盒；null 输出不落地、不编码。
+        .args([
+            "-hide_banner",
+            "-nostats",
+            "-ss",
+            &at_s.to_string(),
+            "-t",
+            &window_s.to_string(),
+            "-i",
+        ])
         .arg(path)
         .args([
             "-vf",
@@ -50,7 +58,72 @@ async fn run_cropdetect(path: &Path) -> Option<String> {
 
 /// 跑 cropdetect 并解析出四边黑边占比；无黑边/失败返回 None。
 pub async fn detect_crop(path: &Path) -> Option<CropInsets> {
-    parse_cropdetect(&run_cropdetect(path).await?)
+    let samples = sample_insets(path).await?;
+    merge_samples(&samples)
+}
+
+/// 采样正片多处，返回各处测到的包围盒。
+///
+/// 只看开头那一段是不够的：课程录像的片头常和正片取景不同（标题卡、片花、
+/// 全屏欢迎页），照着片头的黑边去裁，正片的真实画面就被削掉一条。
+async fn sample_insets(path: &Path) -> Option<Vec<CropInsets>> {
+    let first = run_cropdetect(path, 3, 30).await?;
+    let mut samples = Vec::new();
+    if let Some(insets) = measure_sample(&first) {
+        samples.push(insets);
+    }
+    for at_s in extra_offsets(parse_duration_ms(&first)) {
+        let Some(stderr) = run_cropdetect(path, at_s, 20).await else {
+            continue;
+        };
+        if let Some(insets) = measure_sample(&stderr) {
+            samples.push(insets);
+        }
+    }
+    Some(samples)
+}
+
+/// 除开头之外还该采样哪几处（秒）。太短的视频没有中后段可采，就只看开头。
+pub fn extra_offsets(duration_ms: Option<i64>) -> Vec<i64> {
+    let Some(duration_s) = duration_ms.map(|ms| ms / 1000) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    if duration_s > 120 {
+        out.push(duration_s * 40 / 100);
+    }
+    if duration_s > 300 {
+        out.push(duration_s * 75 / 100);
+    }
+    out
+}
+
+/// 从 ffmpeg 头部信息里读片长（`Duration: 00:12:34.56`）。
+/// cropdetect 那一趟本来就打了这行，不必再单独跑一次 ffprobe。
+pub fn parse_duration_ms(stderr: &str) -> Option<i64> {
+    let rest = stderr.split("Duration:").nth(1)?;
+    let token = rest.trim_start().split(',').next()?.trim();
+    let mut parts = token.split(':');
+    let hours: i64 = parts.next()?.trim().parse().ok()?;
+    let minutes: i64 = parts.next()?.trim().parse().ok()?;
+    let seconds: f64 = parts.next()?.trim().parse().ok()?;
+    if !seconds.is_finite() || seconds < 0.0 {
+        return None;
+    }
+    Some(((hours * 3600 + minutes * 60) as f64 + seconds).round() as i64 * 1000)
+}
+
+/// 合并多处采样：每边取最小值，等于「所有采样都同意这条边是黑的才裁」。
+/// 只会裁得更少，不会更多——过裁才是会吃掉画面的那一侧错误。
+pub fn merge_samples(samples: &[CropInsets]) -> Option<CropInsets> {
+    let mut merged = *samples.first()?;
+    for sample in &samples[1..] {
+        merged.top = merged.top.min(sample.top);
+        merged.right = merged.right.min(sample.right);
+        merged.bottom = merged.bottom.min(sample.bottom);
+        merged.left = merged.left.min(sample.left);
+    }
+    meaningful(merged)
 }
 
 /// 探测并写库，返回 insets（无黑边为 0）。
@@ -58,10 +131,10 @@ pub async fn detect_crop(path: &Path) -> Option<CropInsets> {
 /// 只要 ffmpeg **跑过**（无论是否检出黑边）就写库——无黑边写 0，把该视频标记为「已探测」，
 /// 避免每次打开都重跑。仅当 ffmpeg 没跑成（spawn 失败）时不写库（保持 NULL，下次再试）。
 pub async fn ensure_crop(db: &crate::db::Db, video_id: &str, path: PathBuf) -> CropInsets {
-    let Some(stderr) = run_cropdetect(&path).await else {
+    let Some(samples) = sample_insets(&path).await else {
         return NO_CROP;
     };
-    let insets = parse_cropdetect(&stderr).unwrap_or(NO_CROP);
+    let insets = merge_samples(&samples).unwrap_or(NO_CROP);
     let _ = sqlx::query(
         "UPDATE videos SET crop_top=?,crop_right=?,crop_bottom=?,crop_left=? WHERE id=?",
     )
@@ -113,8 +186,12 @@ fn parse_last_crop(stderr: &str) -> Option<(i64, i64, i64, i64)> {
     last
 }
 
-/// 解析 cropdetect 输出 → 四边占比。无有意义黑边返回 None。
-pub fn parse_cropdetect(stderr: &str) -> Option<CropInsets> {
+/// 单段采样的测量结果。
+///
+/// `None` 表示这段**没解出包围盒**（`-ss` 超出片长、解码失败），不该参与合并；
+/// `Some(全 0)` 表示这段解出来了、就是没有黑边——这是反对裁剪的最强证据，
+/// 必须参与合并，不能当作「没测到」丢掉。
+fn measure_sample(stderr: &str) -> Option<CropInsets> {
     let (w, h) = parse_dims(stderr)?;
     let (cw, ch, cx, cy) = parse_last_crop(stderr)?;
     if cw <= 0 || ch <= 0 || cw > w || ch > h {
@@ -127,23 +204,31 @@ pub fn parse_cropdetect(stderr: &str) -> Option<CropInsets> {
 
     // 单边超 45% 视为异常（整帧偏暗等）→ 该边不裁。
     let clamp = |v: f64| if v > 0.45 { 0.0 } else { v };
-    let insets = CropInsets {
+    Some(CropInsets {
         top: clamp(top),
         right: clamp(right),
         bottom: clamp(bottom),
         left: clamp(left),
-    };
+    })
+}
+
+/// 黑边不足 1% 视为无（避免编码边缘的 1~2px 抖动）。
+fn meaningful(insets: CropInsets) -> Option<CropInsets> {
     let max = insets
         .top
         .max(insets.right)
         .max(insets.bottom)
         .max(insets.left);
-    // 黑边不足 1% 视为无（避免编码边缘的 1~2px 抖动）。
     if max < 0.01 {
         None
     } else {
         Some(insets)
     }
+}
+
+/// 解析 cropdetect 输出 → 四边占比。无有意义黑边返回 None。
+pub fn parse_cropdetect(stderr: &str) -> Option<CropInsets> {
+    meaningful(measure_sample(stderr)?)
 }
 
 #[cfg(test)]
@@ -152,6 +237,67 @@ mod tests {
 
     const SAMPLE_DIMS: &str =
         "  Stream #0:0(und): Video: h264 (High), yuv420p, 1920x1080, 2500 kb/s, 25 fps\n";
+
+    #[test]
+    fn merging_samples_never_crops_more_than_the_least_black_one() {
+        // 片头是 4:3 加左右黑边的标题卡，正片其实是满屏（或黑边窄得多）。
+        // 只看片头就会照着 12.5% 去裁，正片左右各被削掉一条真实画面。
+        let intro = CropInsets {
+            top: 0.0,
+            right: 0.125,
+            bottom: 0.0,
+            left: 0.125,
+        };
+        let body = CropInsets {
+            top: 0.0,
+            right: 0.04,
+            bottom: 0.0,
+            left: 0.0,
+        };
+        let merged = merge_samples(&[intro, body]).unwrap();
+        assert_eq!(merged.left, 0.0);
+        assert_eq!(merged.right, 0.04);
+
+        // 各处一致的真信箱黑边照旧保留。
+        let letterbox = CropInsets {
+            top: 0.13,
+            right: 0.0,
+            bottom: 0.13,
+            left: 0.0,
+        };
+        assert_eq!(merge_samples(&[letterbox, letterbox]).unwrap(), letterbox);
+
+        // 有一处明确「没有黑边」就不该裁——那是反对裁剪的最强证据。
+        assert_eq!(merge_samples(&[letterbox, NO_CROP]), None);
+        assert_eq!(merge_samples(&[]), None);
+    }
+
+    #[test]
+    fn a_sample_with_no_bars_still_counts_as_a_measurement() {
+        // 「解出包围盒 = 整帧」必须参与合并（Some(全 0)），不能和「这段没帧」混为一谈。
+        let full_frame = format!("{SAMPLE_DIMS}[Parsed_cropdetect_0 @ 0x1] crop=1920:1080:0:0\n");
+        assert_eq!(measure_sample(&full_frame), Some(NO_CROP));
+        // 没有 crop= 行（-ss 超出片长）→ 这段没测到，不参与合并。
+        assert_eq!(measure_sample(SAMPLE_DIMS), None);
+    }
+
+    #[test]
+    fn reads_duration_from_the_ffmpeg_header() {
+        let log = "  Duration: 00:47:12.34, start: 0.000000, bitrate: 1500 kb/s\n";
+        assert_eq!(parse_duration_ms(log), Some(2_832_000));
+        assert_eq!(parse_duration_ms(SAMPLE_DIMS), None);
+        // 直播流等拿不到片长时不瞎猜，只看开头那段。
+        assert_eq!(parse_duration_ms("  Duration: N/A, bitrate: N/A\n"), None);
+    }
+
+    #[test]
+    fn extra_sample_points_scale_with_length() {
+        // 太短的视频没有中后段可采。
+        assert!(extra_offsets(Some(90_000)).is_empty());
+        assert_eq!(extra_offsets(Some(200_000)), vec![80]);
+        assert_eq!(extra_offsets(Some(3_600_000)), vec![1_440, 2_700]);
+        assert!(extra_offsets(None).is_empty());
+    }
 
     #[test]
     fn parses_letterbox_top_bottom() {

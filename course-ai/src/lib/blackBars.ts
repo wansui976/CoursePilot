@@ -77,6 +77,32 @@ export function formatInsets(crop: Insets): string {
  * 得同时看两组数：探测到的原始四边，和对称化之后**实际用**的四边。两者不一致就说明
  * 是单边误判被抹平了。
  */
+/**
+ * 播放器实际摆出来的几何，供切换去黑边时一并打在画面上。
+ *
+ * 裁剪的做法是「把 video 放大到内容刚好铺满舞台，再负偏移把黑边推出视野」。
+ * 这一串数字能一眼看出摆错在哪：`可见` 是最终露出的画面区间（占整帧比例），
+ * 正常应当等于 `左inset ~ 1-右inset`；偏了就是偏移或缩放算错了。
+ */
+export function formatCropGeometry(
+  media: Box,
+  stage: Box,
+  crop: Insets,
+): string {
+  const style = cropStyle(stage, crop);
+  const width = Number(style.width) || 0;
+  const offset = Math.abs(Number(style.left) || 0);
+  const from = width > 0 ? offset / width : 0;
+  const to = width > 0 ? (offset + stage.width) / width : 1;
+  const round = (value: number) => value.toFixed(1);
+  const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
+  return (
+    `源 ${media.width}×${media.height} / 舞台 ${round(stage.width)}×${round(stage.height)}` +
+    ` / 画面 ${round(width)}×${round(Number(style.height) || 0)} 偏移 ${round(offset)}` +
+    ` / 可见 ${pct(from)}~${pct(to)}`
+  );
+}
+
 export function formatCropNotice(detected: Insets, enabled: boolean): string {
   if (!enabled) return `已关闭去黑边（探测值 ${formatInsets(detected)}）`;
   const effective = symmetricInsets(detected);
