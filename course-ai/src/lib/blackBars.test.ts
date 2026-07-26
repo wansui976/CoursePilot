@@ -52,6 +52,22 @@ describe("symmetricInsets", () => {
     expect(symmetricInsets({ top: 0, right: 0, bottom: 0, left: 0.1 })).toEqual(NO_INSETS);
   });
 
+  it("leaves a one-sided black bar alone instead of shaving the other side", () => {
+    // 源片右边有一条真黑边（20%），左边只是画面偏暗被误判成 2%。
+    // 取 min 会照着 2% 裁：右边那条黑边一点没少，左边却把真实画面削掉一条
+    // ——正是「左侧被裁切、右侧有黑边」。差得这么多就不该当成对称黑边。
+    expect(symmetricInsets({ top: 0, right: 0.2, bottom: 0, left: 0.02 })).toEqual(NO_INSETS);
+    // 上下同理。
+    expect(symmetricInsets({ top: 0.18, right: 0, bottom: 0.03, left: 0 })).toEqual(NO_INSETS);
+  });
+
+  it("ignores a hair-thin inset on both sides", () => {
+    // 1% 上下的对称「黑边」多半是编码边缘抖动，裁了没收益，只会损失画面。
+    expect(symmetricInsets({ top: 0.012, right: 0.01, bottom: 0.012, left: 0.011 })).toEqual(
+      NO_INSETS,
+    );
+  });
+
   it("keeps a symmetric letterbox but levels a slightly asymmetric one", () => {
     // 对称信箱黑边保留；左右轻微不等时取较小值，去掉歪斜。
     expect(symmetricInsets({ top: 0.06, right: 0.02, bottom: 0.06, left: 0.03 })).toEqual({

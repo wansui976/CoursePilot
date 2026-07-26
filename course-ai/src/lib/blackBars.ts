@@ -10,15 +10,32 @@ export interface Insets {
 
 export const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
 
+/** 低于这个比例的黑边当作编码/暗色边缘噪声，不值得裁。 */
+const MIN_EDGE_INSET = 0.02;
+/** 两侧相差超过这么多个百分点，就不是一条对称黑边。 */
+const MAX_EDGE_GAP = 0.03;
+
 /**
- * 只保留**对称**黑边：对边取较小值（left/right 取 min，top/bottom 取 min）。
- * 真实信箱/邮筒黑边本就对称；单边多出来的一点几乎都是边缘/压缩噪声的误判——
- * 若照单全收会把画面往一边推（看起来「歪了/没居中」）。对称化后裁剪永远居中，
- * 同时仍能去掉真正的对称黑边。
+ * 一条轴上真正该裁掉的量。
+ *
+ * 真实信箱/邮筒黑边本就对称，所以对边取较小值，裁剪永远居中，不会把画面推歪。
+ * 但只取 min 不够，还有两种会**吃掉真实画面**的情况：
+ *
+ * - 两侧差得离谱（如左 2%、右 20%）：这不是对称黑边，而是「单边黑边 + 另一侧的
+ *   暗色误判」。取 min 会照着那 2% 去裁——右边那条真黑边一点没少，左边却把画面
+ *   削掉一条。整轴不裁才对。
+ * - 两侧都只有一丁点（1% 上下）：多半是编码边缘抖动，裁了没收益，只会损失画面。
  */
+function axisInset(a: number, b: number): number {
+  if (Math.abs(a - b) > MAX_EDGE_GAP) return 0;
+  const value = Math.min(a, b);
+  return value < MIN_EDGE_INSET ? 0 : value;
+}
+
+/** 把探测到的四边收敛成真正安全的裁剪量（见 [`axisInset`]）。 */
 export function symmetricInsets(crop: Insets): Insets {
-  const lr = Math.min(crop.left, crop.right);
-  const tb = Math.min(crop.top, crop.bottom);
+  const lr = axisInset(crop.left, crop.right);
+  const tb = axisInset(crop.top, crop.bottom);
   return { top: tb, right: lr, bottom: tb, left: lr };
 }
 
