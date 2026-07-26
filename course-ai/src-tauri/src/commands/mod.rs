@@ -6,6 +6,7 @@ pub mod export;
 pub mod notify;
 pub mod rag;
 pub mod settings;
+pub mod silence;
 pub mod slides;
 pub mod srs;
 pub mod stats;

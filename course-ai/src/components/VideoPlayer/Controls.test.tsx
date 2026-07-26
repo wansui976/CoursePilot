@@ -11,8 +11,10 @@ function renderControls(props: Partial<Parameters<typeof Controls>[0]> = {}) {
     volume: 1,
     muted: false,
     captionsOn: false,
+    skipSilence: false,
     fullscreen: false,
     onToggleCaptions: vi.fn(),
+    onToggleSkipSilence: vi.fn(),
     onPlayPause: vi.fn(),
     onSeek: vi.fn(),
     onRate: vi.fn(),
@@ -50,5 +52,24 @@ describe("Controls speed button", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(screen.queryByRole("menu", { name: "倍速" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Controls skip-silence toggle", () => {
+  beforeEach(() => {
+    usePlayer.setState({ currentMs: 0, durationMs: 60_000 });
+  });
+
+  it("reflects and toggles the skip-silence switch", () => {
+    const onToggleSkipSilence = vi.fn();
+    renderControls({ skipSilence: true, onToggleSkipSilence });
+
+    const button = screen.getByRole("button", { name: "跳停顿" });
+    // 开着时按钮要看得出来是开着的，否则用户不知道画面为什么会自己往前跳。
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    expect(button.className).toContain("text-[var(--accent)]");
+
+    fireEvent.click(button);
+    expect(onToggleSkipSilence).toHaveBeenCalledTimes(1);
   });
 });

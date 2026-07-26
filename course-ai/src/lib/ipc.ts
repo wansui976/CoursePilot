@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Insets } from "./blackBars";
+import type { SkipRange } from "./silenceSkip";
 import type {
   AskEvent,
   ChatMessage,
@@ -201,6 +202,9 @@ export const ipc = {
     // 手动排序：orderedIds 须为该课程当前全部视频 id 的新顺序。
     reorder: (courseId: string, orderedIds: string[]): Promise<void> =>
       invoke("cmd_reorder_videos", { courseId, orderedIds }),
+    // 可跳过的停顿区间。首次调用会扫一遍音轨（只解码音频），之后直接读库。
+    skips: (videoId: string): Promise<SkipRange[]> =>
+      invoke("cmd_video_skips", { videoId }),
   },
   trash: {
     list: (): Promise<TrashedVideo[]> => invoke("cmd_list_trash"),

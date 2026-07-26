@@ -20,8 +20,10 @@ export function Controls({
   volume,
   muted,
   captionsOn,
+  skipSilence,
   fullscreen,
   onToggleCaptions,
+  onToggleSkipSilence,
   onPlayPause,
   onSeek,
   onRate,
@@ -34,8 +36,10 @@ export function Controls({
   volume: number;
   muted: boolean;
   captionsOn: boolean;
+  skipSilence: boolean;
   fullscreen: boolean;
   onToggleCaptions: () => void;
+  onToggleSkipSilence: () => void;
   onPlayPause: () => void;
   onSeek: (ms: number) => void;
   onRate: (rate: number) => void;
@@ -146,6 +150,19 @@ export function Controls({
             </div>
           )}
         </div>
+        <button
+          type="button"
+          onClick={onToggleSkipSilence}
+          aria-pressed={skipSilence}
+          title={
+            skipSilence
+              ? "关闭跳停顿（不再跳过无声的空档）"
+              : "跳过老师写板书、等记笔记这类无声空档"
+          }
+          className={`${textButtonClass} ${skipSilence ? "text-[var(--accent)]" : ""}`}
+        >
+          跳停顿
+        </button>
         <button
           type="button"
           onClick={onToggleCaptions}
