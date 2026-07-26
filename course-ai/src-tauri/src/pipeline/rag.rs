@@ -46,6 +46,11 @@ pub struct Citation {
     pub video_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video_title: Option<String>,
+    /// 命中来自课件页时带页图路径与页号，供前端显示缩略图；字幕命中为 None。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slide_image: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slide_page: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -635,26 +640,188 @@ fn scored_segments(segments: &[TranscriptSegment], query: &str) -> Vec<(usize, T
     scored
 }
 
+/// 一页课件及其认出来的文字。板书上的公式、定义、专有名词常常写了不念，
+/// 字幕里根本没有，所以搜索必须连课件页一起搜。
+#[derive(Debug, Clone)]
+pub struct SlidePage {
+    pub page_no: i64,
+    pub start_ms: i64,
+    pub end_ms: Option<i64>,
+    pub image_path: String,
+    pub ocr_text: String,
+}
+
+/// 结果列表里一页课件最多显示多少字。整页 OCR 文本太长，直接铺出来没法读。
+const SLIDE_SNIPPET_CHARS: usize = 120;
+
+/// slides 表里一行的原始列（page_no, start_ms, end_ms, image_path, ocr_text）。
+type SlideRow = (i64, i64, Option<i64>, String, Option<String>);
+
+async fn list_slide_pages(db: &Db, video_id: &str) -> AppResult<Vec<SlidePage>> {
+    let rows: Vec<SlideRow> = sqlx::query_as(
+        "SELECT page_no,start_ms,end_ms,image_path,ocr_text FROM slides
+         WHERE video_id=? AND ocr_text IS NOT NULL AND TRIM(ocr_text)<>''
+         ORDER BY page_no",
+    )
+    .bind(video_id)
+    .fetch_all(&db.pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(page_no, start_ms, end_ms, image_path, ocr_text)| SlidePage {
+                page_no,
+                start_ms,
+                end_ms,
+                image_path,
+                ocr_text: ocr_text.unwrap_or_default(),
+            },
+        )
+        .collect())
+}
+
+fn search_terms(query: &str) -> Vec<String> {
+    query
+        .trim()
+        .to_lowercase()
+        .split_whitespace()
+        .map(str::to_string)
+        .collect()
+}
+
+/// 从整页 OCR 文本里挑出命中的那几行当摘要；一行都没命中时退回开头几行。
+/// OCR 出来的文本天然按行，命中行本身就是最好的摘要。纯函数，可单测。
+pub fn slide_snippet(text: &str, terms: &[String], limit: usize) -> String {
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let mut picked: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|line| {
+            let lc = line.to_lowercase();
+            terms.iter().any(|term| lc.contains(term.as_str()))
+        })
+        .collect();
+    if picked.is_empty() {
+        picked = lines;
+    }
+    let mut out = String::new();
+    for line in picked {
+        if !out.is_empty() {
+            if out.chars().count() + line.chars().count() + 3 > limit {
+                out.push('…');
+                break;
+            }
+            out.push_str(" / ");
+        }
+        out.extend(line.chars().take(limit.saturating_sub(out.chars().count())));
+        if out.chars().count() >= limit {
+            break;
+        }
+    }
+    out
+}
+
+fn scored_slide_pages(pages: &[SlidePage], query: &str) -> Vec<(usize, SlidePage)> {
+    let terms = search_terms(query);
+    if terms.is_empty() {
+        return Vec::new();
+    }
+    pages
+        .iter()
+        .filter_map(|page| {
+            let lc = page.ocr_text.to_lowercase();
+            let score = terms
+                .iter()
+                .filter(|term| lc.contains(term.as_str()))
+                .count();
+            (score > 0).then(|| (score, page.clone()))
+        })
+        .collect()
+}
+
+/// 搜索命中的中间表示：字幕段与课件页在这里合流，排完序再统一编号成引用。
+struct Hit {
+    score: usize,
+    start_ms: i64,
+    end_ms: i64,
+    text: String,
+    /// 课件页命中时为 (页图路径, 页号)。
+    slide: Option<(String, i64)>,
+    video: Option<(String, String)>,
+}
+
+fn slide_hit(score: usize, page: SlidePage, query: &str, video: Option<(String, String)>) -> Hit {
+    let terms = search_terms(query);
+    Hit {
+        score,
+        start_ms: page.start_ms,
+        end_ms: page.end_ms.unwrap_or(page.start_ms),
+        text: slide_snippet(&page.ocr_text, &terms, SLIDE_SNIPPET_CHARS),
+        slide: Some((page.image_path, page.page_no)),
+        video,
+    }
+}
+
+/// 命中数降序 → 课件页优先 → 时间升序。
+/// 同样命中时把课件页排前面：写在片子上的术语比听写下来的更可靠。
+fn rank_hits(hits: &mut [Hit]) {
+    hits.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then(b.slide.is_some().cmp(&a.slide.is_some()))
+            .then(a.start_ms.cmp(&b.start_ms))
+    });
+}
+
+fn to_citations(hits: Vec<Hit>, limit: usize) -> Vec<Citation> {
+    hits.into_iter()
+        .take(limit)
+        .enumerate()
+        .map(|(i, hit)| {
+            let (video_id, video_title) = match hit.video {
+                Some((id, title)) => (Some(id), Some(title)),
+                None => (None, None),
+            };
+            let (slide_image, slide_page) = match hit.slide {
+                Some((image, page)) => (Some(image), Some(page)),
+                None => (None, None),
+            };
+            Citation {
+                index: i + 1,
+                text: hit.text,
+                start_ms: hit.start_ms,
+                end_ms: hit.end_ms,
+                video_id,
+                video_title,
+                slide_image,
+                slide_page,
+            }
+        })
+        .collect()
+}
+
 pub fn keyword_search_segments(
     segments: &[TranscriptSegment],
     query: &str,
     limit: usize,
 ) -> Vec<Citation> {
-    let mut scored = scored_segments(segments, query);
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.start_ms.cmp(&b.1.start_ms)));
-    scored
+    let mut hits: Vec<Hit> = scored_segments(segments, query)
         .into_iter()
-        .take(limit)
-        .enumerate()
-        .map(|(i, (_, seg))| Citation {
-            index: i + 1,
-            text: seg.text,
+        .map(|(score, seg)| Hit {
+            score,
             start_ms: seg.start_ms,
             end_ms: seg.end_ms,
-            video_id: None,
-            video_title: None,
+            text: seg.text,
+            slide: None,
+            video: None,
         })
-        .collect()
+        .collect();
+    rank_hits(&mut hits);
+    to_citations(hits, limit)
 }
 
 pub async fn keyword_search(
@@ -664,38 +831,52 @@ pub async fn keyword_search(
     limit: usize,
 ) -> AppResult<Vec<Citation>> {
     let segments = list_segments(db, video_id).await?;
-    Ok(keyword_search_segments(&segments, query, limit))
+    let pages = list_slide_pages(db, video_id).await?;
+    let mut hits: Vec<Hit> = scored_segments(&segments, query)
+        .into_iter()
+        .map(|(score, seg)| Hit {
+            score,
+            start_ms: seg.start_ms,
+            end_ms: seg.end_ms,
+            text: seg.text,
+            slide: None,
+            video: None,
+        })
+        .collect();
+    for (score, page) in scored_slide_pages(&pages, query) {
+        hits.push(slide_hit(score, page, query, None));
+    }
+    rank_hits(&mut hits);
+    Ok(to_citations(hits, limit))
 }
 
-/// 跨视频（课程级/全部）关键词搜索：合并各视频命中，按命中数、再按时间全局排序，
-/// 每条引用带来源视频。videos 为 (video_id, video_title) 列表。
+/// 跨视频（课程级/全部）关键词搜索：合并各视频的字幕段与课件页命中，
+/// 按命中数、课件优先、再按时间全局排序，每条引用带来源视频。
 pub async fn keyword_search_scope(
     db: &Db,
     videos: &[(String, String)],
     query: &str,
     limit: usize,
 ) -> AppResult<Vec<Citation>> {
-    let mut global: Vec<(usize, String, String, TranscriptSegment)> = Vec::new();
+    let mut hits: Vec<Hit> = Vec::new();
     for (vid, title) in videos {
-        let segs = list_segments(db, vid).await?;
-        for (score, seg) in scored_segments(&segs, query) {
-            global.push((score, vid.clone(), title.clone(), seg));
+        let source = Some((vid.clone(), title.clone()));
+        for (score, seg) in scored_segments(&list_segments(db, vid).await?, query) {
+            hits.push(Hit {
+                score,
+                start_ms: seg.start_ms,
+                end_ms: seg.end_ms,
+                text: seg.text,
+                slide: None,
+                video: source.clone(),
+            });
+        }
+        for (score, page) in scored_slide_pages(&list_slide_pages(db, vid).await?, query) {
+            hits.push(slide_hit(score, page, query, source.clone()));
         }
     }
-    global.sort_by(|a, b| b.0.cmp(&a.0).then(a.3.start_ms.cmp(&b.3.start_ms)));
-    Ok(global
-        .into_iter()
-        .take(limit)
-        .enumerate()
-        .map(|(i, (_, vid, title, seg))| Citation {
-            index: i + 1,
-            text: seg.text,
-            start_ms: seg.start_ms,
-            end_ms: seg.end_ms,
-            video_id: Some(vid),
-            video_title: Some(title),
-        })
-        .collect())
+    rank_hits(&mut hits);
+    Ok(to_citations(hits, limit))
 }
 
 /// 把毫秒格式化成 mm:ss（或含小时 h:mm:ss），用于上下文里给 LLM 标注出处。
@@ -750,6 +931,8 @@ pub fn assemble_scope_context(
             end_ms: seg.end_ms,
             video_id: Some(vid),
             video_title: Some(title),
+            slide_image: None,
+            slide_page: None,
         });
     }
     (context, citations)
@@ -967,6 +1150,113 @@ mod tests {
         let hits = keyword_search(&db, &vid, "暗反应", 10).await.unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].start_ms, 1000);
+    }
+
+    #[test]
+    fn slide_snippet_keeps_the_matching_lines() {
+        let page = "第三章 概率\n贝叶斯定理\nP(A|B) = P(B|A)P(A)/P(B)\n先验与后验";
+        let terms = vec!["贝叶斯".to_string()];
+        // 整页太长读不了，只留命中的那行。
+        assert_eq!(slide_snippet(page, &terms, 120), "贝叶斯定理");
+        // 一行都没命中时退回开头几行，至少让人看出这是哪一页。
+        let none = slide_snippet(page, &["无关".to_string()], 120);
+        assert!(none.starts_with("第三章 概率 / 贝叶斯定理"));
+        // 超长页按上限截断，不把整页铺进结果列表。
+        let long = "甲".repeat(400);
+        assert_eq!(
+            slide_snippet(&long, &["甲".to_string()], 20)
+                .chars()
+                .count(),
+            20
+        );
+    }
+
+    #[tokio::test]
+    async fn search_finds_terms_that_only_exist_on_the_slides() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let path = dir.path().join("a.mp4");
+        std::fs::write(&path, b"x").unwrap();
+        let video = crate::commands::videos::add_local_video(&db, &course.id, path, None)
+            .await
+            .unwrap();
+        // 老师念的是「这个定理」，术语只写在片子上——字幕里根本搜不到。
+        sqlx::query(
+            "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,0,?,?,?)",
+        )
+        .bind(&video.id)
+        .bind(0_i64)
+        .bind(1_000_i64)
+        .bind("我们来看这个定理")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO slides(video_id,image_path,start_ms,end_ms,page_no,ocr_text)
+             VALUES (?,?,?,?,?,?)",
+        )
+        .bind(&video.id)
+        .bind("/tmp/page-2.jpg")
+        .bind(30_000_i64)
+        .bind(45_000_i64)
+        .bind(2_i64)
+        .bind("贝叶斯定理\nP(A|B) = P(B|A)P(A)/P(B)")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let hits = keyword_search(&db, &video.id, "贝叶斯", 10).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        // 命中带页图与页号，前端据此显示缩略图并跳到那一页。
+        assert_eq!(hits[0].slide_image.as_deref(), Some("/tmp/page-2.jpg"));
+        assert_eq!(hits[0].slide_page, Some(2));
+        assert_eq!(hits[0].start_ms, 30_000);
+        assert_eq!(hits[0].text, "贝叶斯定理");
+
+        // 没认出文字的页不参与搜索（不会冒出一条空结果）。
+        sqlx::query("UPDATE slides SET ocr_text=NULL WHERE video_id=?")
+            .bind(&video.id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        assert!(keyword_search(&db, &video.id, "贝叶斯", 10)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn equal_hits_put_the_slide_first() {
+        let mut hits = vec![
+            Hit {
+                score: 1,
+                start_ms: 1_000,
+                end_ms: 2_000,
+                text: "讲稿".into(),
+                slide: None,
+                video: None,
+            },
+            Hit {
+                score: 1,
+                start_ms: 9_000,
+                end_ms: 9_500,
+                text: "板书".into(),
+                slide: Some(("/tmp/p.jpg".into(), 3)),
+                video: None,
+            },
+        ];
+        rank_hits(&mut hits);
+        // 同样命中时课件页排前面：写在片子上的术语比听写下来的更可靠。
+        assert_eq!(hits[0].text, "板书");
     }
 
     #[tokio::test]

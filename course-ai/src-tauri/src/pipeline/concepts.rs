@@ -1248,6 +1248,8 @@ fn course_focus_context(focus: &[(&str, &CourseConcept)]) -> (String, Vec<Citati
                 end_ms: occurrence.end_ms.unwrap_or(occurrence.start_ms),
                 video_id: Some(occurrence.video_id.clone()),
                 video_title: Some(occurrence.video_title.clone()),
+                slide_image: None,
+                slide_page: None,
             });
         }
         ctx.push('\n');

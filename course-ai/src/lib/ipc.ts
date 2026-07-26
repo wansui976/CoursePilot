@@ -143,6 +143,14 @@ export interface SlidesProgress {
 
 type SlidesExtractEvent = { type: "progress" } & SlidesProgress;
 
+/** 课件页 OCR 进度：已识别页数 / 待识别总数。 */
+export interface SlidesOcrProgress {
+  done: number;
+  total: number;
+}
+
+type SlidesOcrEvent = { type: "progress" } & SlidesOcrProgress;
+
 /** 分析命令通过 `concept-analyze:<requestId>` 事件推送的进度 / 完成 / 出错。 */
 type AnalyzeEvent =
   | ({ type: "progress" } & AnalyzeProgress)
@@ -492,6 +500,27 @@ export const ipc = {
     // 取消进行中的提取：采样会杀掉 ffmpeg、截图会在下一页前停下，库里的旧课件页不动。
     cancelExtract: (requestId: string): Promise<void> =>
       invoke("cmd_cancel_slides_extract", { requestId }),
+    // 识别课件页上的文字。已认过的页跳过（force 为真时全部重认），返回本次认出的页数。
+    ocr: async (
+      videoId: string,
+      requestId?: string,
+      force?: boolean,
+      onProgress?: (progress: SlidesOcrProgress) => void,
+    ): Promise<number> => {
+      if (!requestId) return invoke("cmd_ocr_slides", { videoId, force });
+      // 先注册监听再 invoke，避免漏掉早到的事件。
+      const unlisten = await listen<SlidesOcrEvent>(`slides-ocr:${requestId}`, (evt) => {
+        if (evt.payload.type === "progress") onProgress?.(evt.payload);
+      });
+      try {
+        return await invoke<number>("cmd_ocr_slides", { videoId, requestId, force });
+      } finally {
+        unlisten();
+      }
+    },
+    // 取消进行中的识别：已认出文字的页留在库里，下次接着认。
+    cancelOcr: (requestId: string): Promise<void> =>
+      invoke("cmd_cancel_slides_ocr", { requestId }),
     list: (videoId: string): Promise<Slide[]> =>
       invoke("cmd_get_slides", { videoId }),
     capture: (videoId: string, atMs: number): Promise<Screenshot> =>
