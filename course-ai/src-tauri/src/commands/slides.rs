@@ -99,6 +99,52 @@ pub enum ExtractEvent {
     },
 }
 
+/// 提取课件页的核心流程，供命令与导入后的自动流水线共用：调用方给取消标志与进度回调，
+/// 这里只管「按帧变化找页 → 落盘 → 写库 → 清理旧页」。
+pub async fn extract_slides_for_video(
+    state: &AppState,
+    video_id: &str,
+    threshold: Option<f64>,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    on_progress: &mut (dyn FnMut(slides::ExtractProgress) + Send),
+) -> AppResult<usize> {
+    let video = load_video(state, video_id).await?;
+    let previous_paths = current_slide_paths(state, video_id).await?;
+    // 每次提取写进独立目录。旧页只有在新文件和数据库都成功后才会被清理。
+    let extraction_root = Path::new(&video.data_dir)
+        .join("slide-extractions")
+        .join(Uuid::new_v4().to_string());
+    let extracted = slides::extract_slides(
+        Path::new(&video.file_path),
+        &extraction_root,
+        slides::ExtractOptions {
+            block_delta: threshold,
+            duration_ms: video.duration_ms,
+            crop: video_crop(&video),
+        },
+        cancel,
+        on_progress,
+    )
+    .await;
+    let frames = match extracted {
+        Ok(frames) => frames,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&extraction_root);
+            return Err(error);
+        }
+    };
+    match slides::store_slides(&state.db, video_id, &frames).await {
+        Ok(count) => {
+            remove_files(&previous_paths);
+            Ok(count)
+        }
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&extraction_root);
+            Err(error)
+        }
+    }
+}
+
 /// 提取课件页。耗时以「通读整段视频」为大头，因此过程中按 `request_id` 推进度事件、
 /// 并可用 `cmd_cancel_slides_extract` 中断；命令本身仍返回落库的页数（不给 request_id
 /// 也能用，只是没有进度）。
@@ -110,12 +156,6 @@ pub async fn cmd_extract_slides(
     threshold: Option<f64>,
     request_id: Option<String>,
 ) -> AppResult<usize> {
-    let video = load_video(&state, &video_id).await?;
-    let previous_paths = current_slide_paths(&state, &video_id).await?;
-    // 每次提取写进独立目录。旧页只有在新文件和数据库都成功后才会被清理。
-    let extraction_root = Path::new(&video.data_dir)
-        .join("slide-extractions")
-        .join(Uuid::new_v4().to_string());
     // 没给 request_id 时用一个不会被取消的空标志，保持老调用方可用。
     let cancel = match &request_id {
         Some(id) => state.register_cancel(id),
@@ -136,38 +176,12 @@ pub async fn cmd_extract_slides(
             );
         }
     };
-    let extracted = slides::extract_slides(
-        Path::new(&video.file_path),
-        &extraction_root,
-        slides::ExtractOptions {
-            block_delta: threshold,
-            duration_ms: video.duration_ms,
-            crop: video_crop(&video),
-        },
-        &cancel,
-        &mut on_progress,
-    )
-    .await;
+    let result =
+        extract_slides_for_video(&state, &video_id, threshold, &cancel, &mut on_progress).await;
     if let Some(id) = &request_id {
         state.unregister_cancel(id, &cancel);
     }
-    let frames = match extracted {
-        Ok(frames) => frames,
-        Err(error) => {
-            let _ = std::fs::remove_dir_all(&extraction_root);
-            return Err(error);
-        }
-    };
-    match slides::store_slides(&state.db, &video_id, &frames).await {
-        Ok(count) => {
-            remove_files(&previous_paths);
-            Ok(count)
-        }
-        Err(error) => {
-            let _ = std::fs::remove_dir_all(&extraction_root);
-            Err(error)
-        }
-    }
+    result
 }
 
 /// 课件页 OCR 的进度事件，走 `slides-ocr:<request_id>`。
@@ -180,29 +194,26 @@ pub enum OcrEvent {
 // 同时最多识别几页。云端是网络往返、本地是 CPU 进程，都不宜放开跑。
 const OCR_CONCURRENCY: usize = 3;
 
-/// 识别课件页上的文字（板书/公式/定义常常写在片子上却没被念出来，字幕里根本不存在）。
+/// 识别课件页上的文字的核心流程，供命令与导入后的自动流水线共用。
 /// 已有文字的页跳过，所以可以续跑；识别不像正常文本的结果整页丢弃，不写库。
 /// 引擎按设置选：显式选过听设置，否则配了阿里云就走云。返回本次新识别出文字的页数。
-#[tauri::command]
-pub async fn cmd_ocr_slides(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    video_id: String,
-    request_id: Option<String>,
-    force: Option<bool>,
+pub async fn ocr_slides_for_video(
+    state: &AppState,
+    video_id: &str,
+    force: bool,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    on_progress: &mut (dyn FnMut(usize, usize) + Send),
 ) -> AppResult<usize> {
     let pages: Vec<(i64, String, Option<String>)> = sqlx::query_as(
         "SELECT id,image_path,ocr_text FROM slides WHERE video_id=? ORDER BY page_no",
     )
-    .bind(&video_id)
+    .bind(video_id)
     .fetch_all(&state.db.pool)
     .await?;
     // force 时重认全部（换了引擎想重跑），否则只认还没有文字的页。
     let todo: Vec<(i64, String)> = pages
         .into_iter()
-        .filter(|(_, _, text)| {
-            force.unwrap_or(false) || text.as_deref().map(str::trim).unwrap_or("").is_empty()
-        })
+        .filter(|(_, _, text)| force || text.as_deref().map(str::trim).unwrap_or("").is_empty())
         .map(|(id, path, _)| (id, path))
         .collect();
     let total = todo.len();
@@ -217,11 +228,6 @@ pub async fn cmd_ocr_slides(
         None
     };
     let langs = ocr_langs(&state.db).await;
-    let cancel = match &request_id {
-        Some(id) => state.register_cancel(id),
-        None => std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    };
-    let event_name = request_id.as_deref().map(|id| format!("slides-ocr:{id}"));
 
     let mut recognized = 0;
     let mut done = 0;
@@ -265,14 +271,43 @@ pub async fn cmd_ocr_slides(
                 .await?;
             recognized += 1;
         }
+        on_progress(done, total);
+    }
+    Ok(recognized)
+}
+
+/// 识别课件页上的文字（板书/公式/定义常常写在片子上却没被念出来，字幕里根本不存在）。
+/// 进度走 `slides-ocr:<request_id>`，可用 `cmd_cancel_slides_ocr` 中断。
+#[tauri::command]
+pub async fn cmd_ocr_slides(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    video_id: String,
+    request_id: Option<String>,
+    force: Option<bool>,
+) -> AppResult<usize> {
+    let cancel = match &request_id {
+        Some(id) => state.register_cancel(id),
+        None => std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+    let event_name = request_id.as_deref().map(|id| format!("slides-ocr:{id}"));
+    let mut on_progress = |done: usize, total: usize| {
         if let Some(name) = &event_name {
             let _ = app.emit(name, OcrEvent::Progress { done, total });
         }
-    }
+    };
+    let result = ocr_slides_for_video(
+        &state,
+        &video_id,
+        force.unwrap_or(false),
+        &cancel,
+        &mut on_progress,
+    )
+    .await;
     if let Some(id) = &request_id {
         state.unregister_cancel(id, &cancel);
     }
-    Ok(recognized)
+    result
 }
 
 /// 取消进行中的课件页 OCR：已识别的页留在库里，下次接着认。

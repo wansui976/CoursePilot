@@ -144,6 +144,17 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
         );
     }
 
+    // 课件提取与语音识别并行：一个啃画面、一个啃音轨，互不抢资源。句柄留到 AI 步骤前收口。
+    let slides_task = {
+        let app = app.clone();
+        let db = db.clone();
+        let video_id = video_id.clone();
+        let jobs_list = jobs_list.clone();
+        tauri::async_runtime::spawn(async move {
+            run_slides_stage(&app, &db, &video_id, &jobs_list).await;
+        })
+    };
+
     let backend = asr_backend_or_default(
         sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key='asr_backend'")
             .fetch_optional(&db.pool)
@@ -187,6 +198,8 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
                 },
             );
         }
+        // AI 步骤要看到板书文字，等课件那条支线收口再开始。
+        let _ = slides_task.await;
         run_ai_followups(&app, &db, &video_id, &jobs_list).await;
         return Ok(());
     }
@@ -291,6 +304,8 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
                 message: Some(msg),
             },
         );
+        // AI 步骤要看到板书文字，等课件那条支线收口再开始。
+        let _ = slides_task.await;
         run_ai_followups(&app, &db, &video_id, &jobs_list).await;
         return Ok(());
     }
@@ -574,9 +589,253 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
     }
 
     // 字幕就绪后自动续跑「章节 → 笔记」。这些是增值步骤，失败不影响视频已 done 的状态。
+    // AI 步骤要看到板书文字，等课件那条支线收口再开始。
+    let _ = slides_task.await;
     run_ai_followups(&app, &db, &video_id, &jobs_list).await;
 
     Ok(())
+}
+
+/// 自动提取课件的取消键：与命令侧的 request_id 共用同一张登记表，
+/// 这样「取消处理」按钮也能停掉正在跑的课件提取。
+pub fn slides_cancel_key(video_id: &str) -> String {
+    format!("pipeline-slides:{video_id}")
+}
+
+/// 自动提取课件是否开启。默认开；设置里显式关掉的课程/用户才跳过。
+async fn slides_auto_enabled(db: &crate::db::Db) -> bool {
+    let value: Option<String> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key='slides_auto_extract'")
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten();
+    !matches!(value.as_deref().map(str::trim), Some("off") | Some("false"))
+}
+
+/// 导入后自动跑「提取课件 → 识别课件文字」。与抽音频/语音识别并行（一个啃画面、一个啃音轨），
+/// 但在 AI 步骤之前收口，好让总结、出题看得到板书。尽力而为：失败只标记该 job，
+/// 不影响字幕与后续 AI。
+async fn run_slides_stage(
+    app: &AppHandle,
+    db: &crate::db::Db,
+    video_id: &str,
+    jobs_list: &[jobs::Job],
+) {
+    let (Some(extract_job), Some(ocr_job)) = (
+        jobs_list.iter().find(|job| job.stage == "slides"),
+        jobs_list.iter().find(|job| job.stage == "slides_ocr"),
+    ) else {
+        return;
+    };
+
+    if !slides_auto_enabled(db).await {
+        for job in [extract_job, ocr_job] {
+            let msg = "已在设置里关闭自动提取课件";
+            let _ = jobs::cancel(db, &job.id, msg).await;
+            emit_stage(
+                app,
+                video_id,
+                &job.id,
+                &job.stage,
+                "canceled",
+                0.0,
+                Some(msg),
+            );
+        }
+        return;
+    }
+
+    let state = app.state::<AppState>();
+    let cancel = state.register_cancel(&slides_cancel_key(video_id));
+
+    // 断点续跑：已提取过就不重复通读整段视频，直接数库里的页数进 OCR。
+    let pages = if extract_job.status == "done" {
+        emit_stage(app, video_id, &extract_job.id, "slides", "done", 1.0, None);
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM slides WHERE video_id=?")
+            .bind(video_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap_or(0) as usize
+    } else {
+        let _ = jobs::start(db, &extract_job.id).await;
+        emit_stage(
+            app,
+            video_id,
+            &extract_job.id,
+            "slides",
+            "running",
+            0.02,
+            Some("提取课件页"),
+        );
+        // 通读整段视频是耗时大头，截图只占尾巴，进度条按这个比例分。
+        let mut on_progress = |progress: slides::ExtractProgress| {
+            let ratio = if progress.total == 0 {
+                0.0
+            } else {
+                progress.done as f64 / progress.total as f64
+            };
+            let value = if progress.phase == "sample" {
+                0.02 + 0.68 * ratio
+            } else {
+                0.70 + 0.30 * ratio
+            };
+            emit_stage(
+                app,
+                video_id,
+                &extract_job.id,
+                "slides",
+                "running",
+                value,
+                None,
+            );
+        };
+        match crate::commands::slides::extract_slides_for_video(
+            &state,
+            video_id,
+            None,
+            &cancel,
+            &mut on_progress,
+        )
+        .await
+        {
+            Ok(count) => {
+                let msg = format!("提取到 {count} 页课件");
+                let _ = jobs::finish(db, &extract_job.id).await;
+                emit_stage(
+                    app,
+                    video_id,
+                    &extract_job.id,
+                    "slides",
+                    "done",
+                    1.0,
+                    Some(&msg),
+                );
+                count
+            }
+            Err(error) => {
+                // 用户点了「取消处理」时提取也会报错，但那不是失败，别在界面上标红。
+                let stopped = cancel.load(std::sync::atomic::Ordering::SeqCst);
+                let msg = if stopped {
+                    "已取消".to_string()
+                } else {
+                    error.to_string()
+                };
+                let status = if stopped { "canceled" } else { "failed" };
+                if stopped {
+                    let _ = jobs::cancel(db, &extract_job.id, &msg).await;
+                } else {
+                    let _ = jobs::fail(db, &extract_job.id, &msg).await;
+                }
+                emit_stage(
+                    app,
+                    video_id,
+                    &extract_job.id,
+                    "slides",
+                    status,
+                    0.0,
+                    Some(&msg),
+                );
+                state.unregister_cancel(&slides_cancel_key(video_id), &cancel);
+                return;
+            }
+        }
+    };
+
+    // 没有课件页的视频（纯讲授、口播）不必白跑一遍 OCR。
+    if pages == 0 {
+        let msg = "没有找到课件页，已跳过";
+        let _ = jobs::cancel(db, &ocr_job.id, msg).await;
+        emit_stage(
+            app,
+            video_id,
+            &ocr_job.id,
+            "slides_ocr",
+            "canceled",
+            0.0,
+            Some(msg),
+        );
+        state.unregister_cancel(&slides_cancel_key(video_id), &cancel);
+        return;
+    }
+
+    let _ = jobs::start(db, &ocr_job.id).await;
+    emit_stage(
+        app,
+        video_id,
+        &ocr_job.id,
+        "slides_ocr",
+        "running",
+        0.02,
+        Some("识别课件文字"),
+    );
+    let mut on_progress = |done: usize, total: usize| {
+        let value = if total == 0 {
+            1.0
+        } else {
+            done as f64 / total as f64
+        };
+        emit_stage(
+            app,
+            video_id,
+            &ocr_job.id,
+            "slides_ocr",
+            "running",
+            value,
+            None,
+        );
+    };
+    match crate::commands::slides::ocr_slides_for_video(
+        &state,
+        video_id,
+        false,
+        &cancel,
+        &mut on_progress,
+    )
+    .await
+    {
+        // 取消时已认出的页留在库里，标成「已跳过」而不是完成——还有页没认，下次要接着跑。
+        Ok(count) if cancel.load(std::sync::atomic::Ordering::SeqCst) => {
+            let msg = format!("已取消，{count} 页已认出");
+            let _ = jobs::cancel(db, &ocr_job.id, &msg).await;
+            emit_stage(
+                app,
+                video_id,
+                &ocr_job.id,
+                "slides_ocr",
+                "canceled",
+                0.0,
+                Some(&msg),
+            );
+        }
+        Ok(count) => {
+            let msg = format!("{count}/{pages} 页认出文字");
+            let _ = jobs::finish(db, &ocr_job.id).await;
+            emit_stage(
+                app,
+                video_id,
+                &ocr_job.id,
+                "slides_ocr",
+                "done",
+                1.0,
+                Some(&msg),
+            );
+        }
+        Err(error) => {
+            let msg = error.to_string();
+            let _ = jobs::fail(db, &ocr_job.id, &msg).await;
+            emit_stage(
+                app,
+                video_id,
+                &ocr_job.id,
+                "slides_ocr",
+                "failed",
+                0.0,
+                Some(&msg),
+            );
+        }
+    }
+    state.unregister_cancel(&slides_cancel_key(video_id), &cancel);
 }
 
 /// ASR 之后自动生成章节、笔记。尽力而为：未配置大模型或单步失败都只标记该 job，
@@ -831,7 +1090,10 @@ pub async fn cmd_process_video(app: AppHandle, video_id: String) -> AppResult<()
     }
 
     // 同一视频若已有任务在跑，先中止并等待旧任务完全退出，避免新旧任务并发写 job。
+    // 课件那条支线是独立 task，abort 主任务停不掉它，得另外置位取消标志。
     if let Some(old) = app.state::<ProcessingTasks>().take(&video_id) {
+        app.state::<AppState>()
+            .cancel(&slides_cancel_key(&video_id));
         old.abort();
         let _ = old.await;
     }
@@ -875,6 +1137,9 @@ pub async fn cmd_recorrect_transcript(
 /// 取消某视频正在进行的处理：先中止并等待任务退出，再把 running/pending 步骤标为「已取消」
 /// （ffmpeg/whisper 子进程因 kill_on_drop 会被杀掉）。
 pub async fn cancel_processing(app: &AppHandle, video_id: &str) -> AppResult<()> {
+    // 课件支线跑在独立 task 里，只 abort 主任务停不掉；置位取消标志让它自己收工
+    // （已提取的页与已认出的文字都留在库里，下次续跑）。
+    app.state::<AppState>().cancel(&slides_cancel_key(video_id));
     if let Some(handle) = app.state::<ProcessingTasks>().take(video_id) {
         handle.abort();
         let _ = handle.await;
@@ -916,6 +1181,36 @@ mod tests {
     use crate::commands::videos::add_local_video;
     use std::process::Command;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn slides_auto_extract_is_on_unless_explicitly_turned_off() {
+        let dir = tempdir().unwrap();
+        let db = crate::db::Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        // 没设置过：默认开，导入后自动提取课件。
+        assert!(slides_auto_enabled(&db).await);
+
+        for (value, expected) in [("off", false), ("on", true), ("false", false)] {
+            sqlx::query(
+                "INSERT OR REPLACE INTO settings(key,value) VALUES ('slides_auto_extract',?)",
+            )
+            .bind(value)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+            assert_eq!(slides_auto_enabled(&db).await, expected, "value={value}");
+        }
+    }
+
+    #[test]
+    fn slides_stages_run_before_the_ai_stages() {
+        // 顺序不只是显示：AI 步骤要看得到板书文字，课件两步必须排在它们之前。
+        let position = |stage: &str| jobs::STAGES.iter().position(|s| *s == stage).unwrap();
+        assert!(position("slides") < position("chapters"));
+        assert!(position("slides_ocr") < position("chapters"));
+        assert!(position("slides") < position("slides_ocr"));
+    }
 
     fn tiny_model_path() -> Option<std::path::PathBuf> {
         let home = std::env::var("HOME").ok()?;
