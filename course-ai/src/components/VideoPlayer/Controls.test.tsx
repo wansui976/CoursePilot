@@ -14,10 +14,13 @@ function renderControls(props: Partial<Parameters<typeof Controls>[0]> = {}) {
     skipSilence: false,
     skipSilenceLoading: false,
     skipRanges: [],
+    cropOn: true,
+    cropInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     fullscreen: false,
     onToggleCaptions: vi.fn(),
     onToggleSkipSilence: vi.fn(),
     onPreviewSkip: vi.fn(),
+    onToggleCrop: vi.fn(),
     onPlayPause: vi.fn(),
     onSeek: vi.fn(),
     onRate: vi.fn(),
@@ -126,5 +129,35 @@ describe("Controls skip-silence toggle", () => {
     expect(screen.getByRole("button", { name: "跳停顿，已开启" })).toHaveTextContent(
       "跳停顿 · 分析中",
     );
+  });
+});
+
+describe("Controls black-bar toggle", () => {
+  beforeEach(() => {
+    usePlayer.setState({ currentMs: 0, durationMs: 60_000 });
+  });
+
+  it("spells out the detected insets so a lopsided picture can be diagnosed", () => {
+    const onToggleCrop = vi.fn();
+    renderControls({
+      cropOn: true,
+      cropInsets: { top: 0.0625, right: 0, bottom: 0.0625, left: 0.125 },
+      onToggleCrop,
+    });
+
+    const button = screen.getByRole("button", { name: "去黑边，已开启" });
+    expect(button).toHaveAttribute(
+      "title",
+      "检测到的黑边：上 6.3% / 右 0.0% / 下 6.3% / 左 12.5%。关掉看原始画面",
+    );
+
+    fireEvent.click(button);
+    expect(onToggleCrop).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the toggle when no black bars were detected", () => {
+    renderControls({ cropInsets: { top: 0, right: 0, bottom: 0, left: 0 } });
+    // 一条边都没检测到时开关没有意义——同时也是「源片本来就带边」的线索。
+    expect(screen.getByRole("button", { name: "去黑边，已开启" })).toBeDisabled();
   });
 });
