@@ -53,6 +53,27 @@ export function formatInsets(crop: Insets): string {
   return `上 ${pct(crop.top)} / 右 ${pct(crop.right)} / 下 ${pct(crop.bottom)} / 左 ${pct(crop.left)}`;
 }
 
+/**
+ * 切换去黑边时打在画面上的说明。
+ *
+ * 光靠悬浮提示看不到——控制栏会自动淡出，原生 tooltip 要悬停一秒才出来。排查裁歪
+ * 得同时看两组数：探测到的原始四边，和对称化之后**实际用**的四边。两者不一致就说明
+ * 是单边误判被抹平了。
+ */
+export function formatCropNotice(detected: Insets, enabled: boolean): string {
+  if (!enabled) return `已关闭去黑边（探测值 ${formatInsets(detected)}）`;
+  const effective = symmetricInsets(detected);
+  const same =
+    effective.top === detected.top &&
+    effective.right === detected.right &&
+    effective.bottom === detected.bottom &&
+    effective.left === detected.left;
+  const detail = same
+    ? formatInsets(detected)
+    : `${formatInsets(detected)} → 实际用 ${formatInsets(effective)}`;
+  return `已开启去黑边：${detail}`;
+}
+
 export interface Box {
   width: number;
   height: number;

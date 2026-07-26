@@ -5,6 +5,7 @@ import {
   NO_INSETS,
   contentAspect,
   cropStyle,
+  formatCropNotice,
   isCropEnabled,
   setCropEnabled,
   symmetricInsets,
@@ -80,6 +81,13 @@ export function VideoPlayer({
   const [rate, setRate] = useState(1);
   const silenceSkip = useSilenceSkip(videoId);
   const [cropOn, setCropOn] = useState(isCropEnabled);
+  // 切换去黑边时把探测值打在画面上：控制栏会自动淡出，原生 tooltip 根本来不及看。
+  const [cropNotice, setCropNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!cropNotice) return;
+    const timer = setTimeout(() => setCropNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [cropNotice]);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [captionsOn, setCaptionsOn] = useState(true);
@@ -807,6 +815,14 @@ export function VideoPlayer({
               style={{ touchAction: "none" }}
             />
           )}
+          {cropNotice && (
+            <div
+              aria-live="polite"
+              className="pointer-events-none absolute inset-x-4 top-6 z-20 mx-auto w-fit max-w-full rounded-lg bg-black/75 px-3 py-1.5 text-center text-xs font-medium leading-relaxed text-white"
+            >
+              {cropNotice}
+            </div>
+          )}
           {silenceSkip.notice && (
             <div
               aria-live="polite"
@@ -880,10 +896,11 @@ export function VideoPlayer({
           fullscreen={fullscreen}
           onToggleCaptions={() => setCaptionsOn((on) => !on)}
           onToggleCrop={() => {
-            setCropOn((on) => {
-              setCropEnabled(!on);
-              return !on;
-            });
+            // 更新函数里不能带副作用（React 可能重跑它），所以先算出下一个状态。
+            const next = !cropOn;
+            setCropOn(next);
+            setCropEnabled(next);
+            setCropNotice(formatCropNotice(cropInsets, next));
           }}
           onToggleSkipSilence={silenceSkip.toggle}
           onPreviewSkip={(ms) => {
