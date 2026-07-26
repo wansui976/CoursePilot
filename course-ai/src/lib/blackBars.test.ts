@@ -1,11 +1,33 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   contentAspect,
   cropStyle,
+  formatInsets,
+  isCropEnabled,
   NO_INSETS,
+  setCropEnabled,
   symmetricInsets,
   type Insets,
 } from "./blackBars";
+
+describe("black bar switch", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("crops by default and remembers being turned off", () => {
+    // 默认开：绝大多数带黑边的录像去掉更好看。
+    expect(isCropEnabled()).toBe(true);
+    setCropEnabled(false);
+    expect(isCropEnabled()).toBe(false);
+    setCropEnabled(true);
+    expect(isCropEnabled()).toBe(true);
+  });
+
+  it("spells out the four insets for troubleshooting a lopsided picture", () => {
+    expect(formatInsets({ top: 0.0625, right: 0, bottom: 0.0625, left: 0.125 })).toBe(
+      "上 6.3% / 右 0.0% / 下 6.3% / 左 12.5%",
+    );
+  });
+});
 
 describe("symmetricInsets", () => {
   it("drops a one-sided inset so the picture stays centered", () => {

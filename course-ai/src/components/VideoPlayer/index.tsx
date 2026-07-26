@@ -1,7 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { NO_INSETS, contentAspect, cropStyle, symmetricInsets } from "@/lib/blackBars";
+import {
+  NO_INSETS,
+  contentAspect,
+  cropStyle,
+  isCropEnabled,
+  setCropEnabled,
+  symmetricInsets,
+} from "@/lib/blackBars";
 import { ipc } from "@/lib/ipc";
 import { posKey, durKey, syncPlaybackProgress } from "@/lib/playback";
 import { isIOS } from "@/lib/platform";
@@ -72,6 +79,7 @@ export function VideoPlayer({
   }, [videoId]);
   const [rate, setRate] = useState(1);
   const silenceSkip = useSilenceSkip(videoId);
+  const [cropOn, setCropOn] = useState(isCropEnabled);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [captionsOn, setCaptionsOn] = useState(true);
@@ -204,7 +212,11 @@ export function VideoPlayer({
 
   // 在播放区内，求与视频同比例、尽可能大的居中矩形；视频铺满它即完整无黑边。
   // 只应用对称黑边：避免检测出的单边噪声把画面推歪（所有视频看起来没居中）。
-  const effectiveCrop = symmetricInsets(videoMetadataReady ? cropInsets : NO_INSETS);
+  // 去黑边是猜出来的，猜错时画面会显得被裁掉一块；关掉开关就回到原封不动的画面，
+  // 好分清「源片本来如此」还是「我们裁歪了」。
+  const effectiveCrop = symmetricInsets(
+    videoMetadataReady && cropOn ? cropInsets : NO_INSETS,
+  );
   const aspect =
     videoMetadataReady && videoAspect > 0
       ? contentAspect(videoAspect, effectiveCrop)
@@ -863,8 +875,16 @@ export function VideoPlayer({
           skipSilence={silenceSkip.enabled}
           skipSilenceLoading={silenceSkip.loading}
           skipRanges={silenceSkip.ranges}
+          cropOn={cropOn}
+          cropInsets={cropInsets}
           fullscreen={fullscreen}
           onToggleCaptions={() => setCaptionsOn((on) => !on)}
+          onToggleCrop={() => {
+            setCropOn((on) => {
+              setCropEnabled(!on);
+              return !on;
+            });
+          }}
           onToggleSkipSilence={silenceSkip.toggle}
           onPreviewSkip={(ms) => {
             // 试跳要「看得到跳」：暂停着不会触发跳过判定，所以顺手接着播。

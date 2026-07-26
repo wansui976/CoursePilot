@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { formatInsets, NO_INSETS, type Insets } from "@/lib/blackBars";
 import {
   nextSkipPreviewMs,
   prevSkipPreviewMs,
@@ -28,9 +29,12 @@ export function Controls({
   skipSilence,
   skipSilenceLoading,
   skipRanges,
+  cropOn,
+  cropInsets,
   fullscreen,
   onToggleCaptions,
   onToggleSkipSilence,
+  onToggleCrop,
   onPreviewSkip,
   onPlayPause,
   onSeek,
@@ -47,9 +51,12 @@ export function Controls({
   skipSilence: boolean;
   skipSilenceLoading: boolean;
   skipRanges: SkipRange[];
+  cropOn: boolean;
+  cropInsets: Insets;
   fullscreen: boolean;
   onToggleCaptions: () => void;
   onToggleSkipSilence: () => void;
+  onToggleCrop: () => void;
   onPreviewSkip: (ms: number) => void;
   onPlayPause: () => void;
   onSeek: (ms: number) => void;
@@ -68,6 +75,8 @@ export function Controls({
   const prevSkipMs = prevSkipPreviewMs(skipRanges, currentMs);
   const nextSkipMs = nextSkipPreviewMs(skipRanges, currentMs);
   const showSkipNav = skipSilence && skipRanges.length > 0;
+  // 一条边都没检测到时开关没有意义，置灰即可（也是「源片本来就带边」的线索）。
+  const hasCrop = cropInsets !== NO_INSETS && Object.values(cropInsets).some((v) => v > 0);
 
   // 倍速菜单:点菜单与触发按钮之外即收起(都打了 data-speed-menu),或按 Esc 收起。
   useEffect(() => {
@@ -211,6 +220,25 @@ export function Controls({
             </button>
           </>
         )}
+        <button
+          type="button"
+          onClick={onToggleCrop}
+          aria-pressed={cropOn}
+          aria-label={cropOn ? "去黑边，已开启" : "去黑边，已关闭"}
+          title={
+            hasCrop
+              ? `检测到的黑边：${formatInsets(cropInsets)}。${
+                  cropOn ? "关掉看原始画面" : "打开自动去掉黑边"
+                }`
+              : "这个视频没检测到黑边"
+          }
+          disabled={!hasCrop}
+          className={`${textButtonClass} disabled:opacity-35 ${
+            cropOn && hasCrop ? "text-[var(--accent)]" : ""
+          }`}
+        >
+          去黑边
+        </button>
         <button
           type="button"
           onClick={onToggleCaptions}

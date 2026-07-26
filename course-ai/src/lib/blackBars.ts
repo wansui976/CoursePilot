@@ -22,6 +22,37 @@ export function symmetricInsets(crop: Insets): Insets {
   return { top: tb, right: lr, bottom: tb, left: lr };
 }
 
+const CROP_KEY = "crop-black-bars";
+
+/**
+ * 是否自动去黑边。默认开——绝大多数带黑边的录像去掉更好看。
+ *
+ * 之所以留这个开关：去黑边是**猜**出来的（cropdetect 按画面亮度估边界），猜错时
+ * 画面会显得被裁掉一块或没对齐。关掉就是原封不动的画面，一眼就能分清「是源片
+ * 本来如此」还是「我们裁歪了」。
+ */
+export function isCropEnabled(): boolean {
+  try {
+    return localStorage.getItem(CROP_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function setCropEnabled(enabled: boolean) {
+  try {
+    localStorage.setItem(CROP_KEY, enabled ? "on" : "off");
+  } catch {
+    // 隐私模式下写不了 localStorage，本次会话内照常工作即可。
+  }
+}
+
+/** 把四边占比写成人能读的百分比，供开关的悬浮说明用（排查裁歪时要看的就是这四个数）。 */
+export function formatInsets(crop: Insets): string {
+  const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
+  return `上 ${pct(crop.top)} / 右 ${pct(crop.right)} / 下 ${pct(crop.bottom)} / 左 ${pct(crop.left)}`;
+}
+
 export interface Box {
   width: number;
   height: number;
