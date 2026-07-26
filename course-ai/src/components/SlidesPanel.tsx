@@ -1,52 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Images, ScanText, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/ui/ErrorNote";
-import { ipc, type SlidesProgress } from "@/lib/ipc";
+import { ipc, type SlidesOcrProgress, type SlidesProgress } from "@/lib/ipc";
+import { SlideImage } from "@/components/SlideImage";
 import { formatMs } from "@/lib/time";
 import { getSlidesSensitivity, sensitivityToThreshold } from "@/lib/slides";
 import { usePlayer } from "@/stores/player";
-
-function SlideImage({
-  videoId,
-  imagePath,
-  alt,
-  className,
-}: {
-  videoId: string;
-  imagePath: string;
-  alt: string;
-  className: string;
-}) {
-  // 字节走 Query 缓存（staleTime: Infinity）：切 tab 重挂时不再逐张重新走 IPC。
-  const { data } = useQuery({
-    queryKey: ["slide-image", videoId, imagePath],
-    queryFn: () => ipc.slides.image(videoId, imagePath),
-    staleTime: Infinity,
-    gcTime: 30 * 60_000,
-    retry: false,
-  });
-  const [src, setSrc] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!data) return;
-    const objectUrl = URL.createObjectURL(
-      new Blob([new Uint8Array(data)], { type: "image/jpeg" }),
-    );
-    setSrc(objectUrl);
-    return () => {
-      URL.revokeObjectURL(objectUrl);
-      setSrc(null);
-    };
-  }, [data]);
-
-  if (!src) {
-    return <div aria-label={alt} className={`${className} bg-[var(--surface-card)]`} />;
-  }
-
-  return <img src={src} alt={alt} className={className} />;
-}
 
 /**
  * 提取进度的按钮文案。采样阶段是"通读整段视频"，一节 90 分钟的课要好几分钟，
@@ -79,6 +40,9 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   // 进行中那次提取的进度与 requestId（供「停止」定位后台任务）。
   const [progress, setProgress] = useState<SlidesProgress | null>(null);
   const extractRequest = useRef<string | null>(null);
+  // 课件页文字识别的进度与 requestId。导入时会自动认一遍，这里是补跑/换引擎重认的入口。
+  const [pagesOcrProgress, setPagesOcrProgress] = useState<SlidesOcrProgress | null>(null);
+  const pagesOcrRequest = useRef<string | null>(null);
 
   const extract = useMutation({
     // 灵敏度在「设置 → 课件提取」里调，这里取当前值换算成门槛（"自动"档为 null）。
@@ -106,6 +70,21 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   const ocr = useMutation<string, unknown, void>({
     mutationFn: () => ipc.tools.ocr(videoId, Math.floor(currentMs())),
   });
+  // 整批认课件页上的文字。默认只认还没认过的页；按住 shift 点则全部重认（换了引擎时用）。
+  const pagesOcr = useMutation<number, unknown, boolean>({
+    mutationFn: (force: boolean) => {
+      const requestId = crypto.randomUUID();
+      pagesOcrRequest.current = requestId;
+      setPagesOcrProgress(null);
+      return ipc.slides.ocr(videoId, requestId, force, setPagesOcrProgress);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["slides", videoId] }),
+    onSettled: () => {
+      pagesOcrRequest.current = null;
+      setPagesOcrProgress(null);
+    },
+  });
+  const pagesWithText = slides.filter((slide) => (slide.ocr_text ?? "").trim() !== "").length;
   // OCR 结果复制成功的短暂反馈（1.5s）。
   const [copied, setCopied] = useState(false);
   async function copyOcrResult() {
@@ -124,6 +103,37 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
       <div className="flex flex-none items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-3 py-2.5">
         <span className="text-sm font-medium text-[var(--text-strong)]">课件页</span>
         <div className="flex items-center gap-1.5">
+          {slides.length > 0 &&
+            (pagesOcr.isPending ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  const requestId = pagesOcrRequest.current;
+                  if (requestId) void ipc.slides.cancelOcr(requestId);
+                }}
+                title="停止识别（已认出文字的页留着，下次接着认）"
+              >
+                <Square className="h-3 w-3" />
+                {pagesOcrProgress
+                  ? `识别 ${pagesOcrProgress.done}/${pagesOcrProgress.total}`
+                  : "识别中…"}
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={(event) => pagesOcr.mutate(event.shiftKey)}
+                title={
+                  pagesWithText === slides.length
+                    ? "所有页都认过了。按住 Shift 点可全部重认（换了 OCR 引擎时用）"
+                    : `识别课件页上的文字（还有 ${slides.length - pagesWithText} 页没认）。按住 Shift 点可全部重认`
+                }
+              >
+                <ScanText className="h-3.5 w-3.5" />
+                {pagesWithText === slides.length ? "重认文字" : "识别文字"}
+              </Button>
+            ))}
           <Button
             size="sm"
             variant="ghost"
@@ -174,6 +184,13 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
         </div>
       </div>
 
+      {pagesOcr.isError && (
+        <ErrorNote
+          className="mx-3 mb-2 flex-none"
+          error={pagesOcr.error}
+          onRetry={() => pagesOcr.mutate(false)}
+        />
+      )}
       {extract.isError && (
         <ErrorNote
           className="mx-3 mb-2 flex-none"

@@ -14,6 +14,7 @@ const { mockIpc, mockConfirm, platformMock } = vi.hoisted(() => ({
       cancelRagQuery: vi.fn(),
       searchTranscript: vi.fn(),
     },
+    slides: { image: vi.fn() },
   },
   mockConfirm: vi.fn(),
   platformMock: { mobile: false },
@@ -607,6 +608,44 @@ describe("RagSearchPanel", () => {
       "video",
       "关键词",
     );
+  });
+
+  it("search mode: a slide hit shows its page thumbnail and jumps to that page", async () => {
+    mockIpc.slides.image.mockResolvedValue(new ArrayBuffer(1));
+    mockIpc.ai.searchTranscript.mockResolvedValue([
+      {
+        index: 1,
+        text: "贝叶斯定理",
+        start_ms: 30_000,
+        end_ms: 45_000,
+        slide_image: "/pages/p2.jpg",
+        slide_page: 2,
+      },
+    ]);
+    const requestSeek = vi.fn();
+    usePlayer.setState({ requestSeek });
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <div data-theme="light">
+          <RagSearchPanel videoId="video-1" mode="search" />
+        </div>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.change(screen.getByLabelText("搜索文稿内容"), {
+      target: { value: "贝叶斯" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
+
+    // 板书上的术语老师常写了不念，字幕里根本没有——命中要看得出来自课件第几页。
+    expect(await screen.findByText("课件 P2")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mockIpc.slides.image).toHaveBeenCalledWith("video-1", "/pages/p2.jpg"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /贝叶斯定理/ }));
+    expect(requestSeek).toHaveBeenCalledWith(30_000);
   });
 
   it("search mode: course scope searches across videos and jumps to the source video", async () => {

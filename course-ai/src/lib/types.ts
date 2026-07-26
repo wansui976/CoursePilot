@@ -178,6 +178,9 @@ export interface Citation {
   /** 跨视频（课程级/全部）搜索时带来源；单视频搜索为 undefined。 */
   video_id?: string;
   video_title?: string;
+  /** 命中来自课件页时带页图路径与页号；字幕命中为 undefined。 */
+  slide_image?: string;
+  slide_page?: number;
 }
 
 export interface RagAnswer {

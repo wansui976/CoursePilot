@@ -5,6 +5,7 @@ import { Check, Copy, Send, Sparkles, Square, Trash2, User } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { ipc } from "@/lib/ipc";
+import { SlideImage } from "@/components/SlideImage";
 import { formatMs } from "@/lib/time";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { isMobile } from "@/lib/platform";
@@ -821,7 +822,9 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
           <input
             aria-label="搜索文稿内容"
             className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)]"
-            placeholder={scope === "course" ? "在本课程所有视频里搜…" : "输入关键词…"}
+            placeholder={
+              scope === "course" ? "在本课程所有视频里搜…" : "搜字幕与课件文字…"
+            }
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -855,23 +858,39 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
           >
             <div className="mb-2 text-xs font-medium text-primary">{entry.query}</div>
             {entry.mode !== "search" || entry.citations.length === 0 ? (
-              <p className="text-sm text-[var(--text-muted)]">没有匹配的字幕。</p>
+              <p className="text-sm text-[var(--text-muted)]">没有匹配的字幕或课件文字。</p>
             ) : (
               <div className="space-y-1">
                 {entry.citations.map((c) => (
                   <button
                     key={`${entry.id}-${c.video_id ?? ""}-${c.start_ms}-${c.index}`}
                     onClick={() => jumpTo(c)}
-                    className="block w-full rounded px-1.5 py-1 text-left text-xs hover:bg-[var(--surface-card-hover)]"
+                    className="flex w-full items-start gap-2 rounded px-1.5 py-1 text-left text-xs hover:bg-[var(--surface-card-hover)]"
                   >
-                    {/* 跨视频结果标注来源视频（本视频结果不标）。 */}
-                    {c.video_id && c.video_id !== videoId && c.video_title && (
-                      <span className="mr-1.5 text-[var(--text-faint)]">
-                        {c.video_title} ·
-                      </span>
+                    {/* 命中课件页时配一张缩略图：公式和板书看图比看 OCR 文本快得多。 */}
+                    {c.slide_image && (
+                      <SlideImage
+                        videoId={c.video_id ?? videoId}
+                        imagePath={c.slide_image}
+                        alt={`课件第 ${c.slide_page ?? 0} 页`}
+                        className="h-10 w-16 flex-none rounded object-cover"
+                      />
                     )}
-                    <span className="mr-1.5 text-primary">{formatMs(c.start_ms)}</span>
-                    <span className="text-[var(--text-normal)]">{c.text}</span>
+                    <span className="min-w-0 flex-1">
+                      {/* 跨视频结果标注来源视频（本视频结果不标）。 */}
+                      {c.video_id && c.video_id !== videoId && c.video_title && (
+                        <span className="mr-1.5 text-[var(--text-faint)]">
+                          {c.video_title} ·
+                        </span>
+                      )}
+                      {c.slide_image && (
+                        <span className="mr-1.5 rounded bg-[var(--surface-card-hover)] px-1 text-[var(--text-muted)]">
+                          课件 P{c.slide_page ?? 0}
+                        </span>
+                      )}
+                      <span className="mr-1.5 text-primary">{formatMs(c.start_ms)}</span>
+                      <span className="text-[var(--text-normal)]">{c.text}</span>
+                    </span>
                   </button>
                 ))}
               </div>

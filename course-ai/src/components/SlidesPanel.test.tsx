@@ -13,6 +13,8 @@ const { mockIpc, player } = vi.hoisted(() => ({
       capture: vi.fn(),
       image: vi.fn(),
       cancelExtract: vi.fn(),
+      ocr: vi.fn(),
+      cancelOcr: vi.fn(),
     },
     tools: { ocr: vi.fn() },
   },
@@ -43,6 +45,8 @@ describe("SlidesPanel", () => {
     mockIpc.slides.screenshots.mockReset().mockResolvedValue([]);
     mockIpc.slides.extract.mockReset();
     mockIpc.slides.cancelExtract.mockReset().mockResolvedValue(undefined);
+    mockIpc.slides.ocr.mockReset();
+    mockIpc.slides.cancelOcr.mockReset().mockResolvedValue(undefined);
     mockIpc.tools.ocr.mockReset();
   });
 
@@ -130,5 +134,89 @@ describe("SlidesPanel", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("SlidesPanel page OCR", () => {
+  beforeEach(() => {
+    mockIpc.slides.screenshots.mockReset().mockResolvedValue([]);
+    mockIpc.slides.image.mockReset().mockResolvedValue(new ArrayBuffer(1));
+    mockIpc.slides.ocr.mockReset();
+    mockIpc.slides.cancelOcr.mockReset().mockResolvedValue(undefined);
+  });
+
+  const pages = [
+    {
+      id: 1,
+      video_id: "video-1",
+      image_path: "/p1.jpg",
+      composed_path: null,
+      start_ms: 0,
+      end_ms: 1000,
+      page_no: 1,
+      ocr_text: "贝叶斯定理",
+    },
+    {
+      id: 2,
+      video_id: "video-1",
+      image_path: "/p2.jpg",
+      composed_path: null,
+      start_ms: 2000,
+      end_ms: 3000,
+      page_no: 2,
+      ocr_text: null,
+    },
+  ];
+
+  it("recognizes only the pages that still need it, and can be stopped", async () => {
+    mockIpc.slides.list.mockReset().mockResolvedValue(pages);
+    let capturedRequestId = "";
+    let report: ((progress: unknown) => void) | undefined;
+    mockIpc.slides.ocr.mockImplementation(
+      (
+        _videoId: string,
+        requestId: string,
+        _force: boolean,
+        onProgress: (progress: unknown) => void,
+      ) => {
+        capturedRequestId = requestId;
+        report = onProgress;
+        return new Promise(() => {});
+      },
+    );
+    renderPanel();
+
+    // 还有页没认过时按钮说「识别文字」，而不是含糊的「OCR」。
+    fireEvent.click(await screen.findByRole("button", { name: /识别文字/ }));
+    await waitFor(() => expect(mockIpc.slides.ocr).toHaveBeenCalled());
+    expect(mockIpc.slides.ocr.mock.calls[0][2]).toBe(false);
+
+    report?.({ done: 1, total: 2 });
+    const stop = await screen.findByRole("button", { name: /识别 1\/2/ });
+    fireEvent.click(stop);
+    expect(mockIpc.slides.cancelOcr).toHaveBeenCalledWith(capturedRequestId);
+  });
+
+  it("re-recognizes every page when shift-clicked", async () => {
+    mockIpc.slides.list
+      .mockReset()
+      .mockResolvedValue(pages.map((page) => ({ ...page, ocr_text: "已认" })));
+    mockIpc.slides.ocr.mockResolvedValue(2);
+    renderPanel();
+
+    // 都认过了：按钮变成「重认文字」，按住 Shift 点才整批重来（换了引擎时用）。
+    const button = await screen.findByRole("button", { name: /重认文字/ });
+    fireEvent.click(button, { shiftKey: true });
+
+    await waitFor(() => expect(mockIpc.slides.ocr).toHaveBeenCalled());
+    expect(mockIpc.slides.ocr.mock.calls[0][2]).toBe(true);
+  });
+
+  it("hides the button when there are no slides to recognize", async () => {
+    mockIpc.slides.list.mockReset().mockResolvedValue([]);
+    renderPanel();
+
+    await waitFor(() => expect(mockIpc.slides.list).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: /识别文字/ })).not.toBeInTheDocument();
   });
 });
