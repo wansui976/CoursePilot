@@ -428,3 +428,24 @@ describe("VideoPlayer iOS gestures", () => {
     }
   });
 });
+
+describe("VideoPlayer black-bar readout", () => {
+  it("prints the detected insets on screen when the crop switch is flipped", async () => {
+    localStorage.clear();
+    mockEnsureCrop.mockResolvedValue({ top: 0.0625, right: 0, bottom: 0.0625, left: 0.125 });
+    renderPlayer();
+
+    const button = await screen.findByRole("button", { name: "去黑边，已开启" });
+    // 探测结果回来之前开关是灰的，等它可用再点。
+    await waitFor(() => expect(button).not.toBeDisabled());
+    fireEvent.click(button);
+
+    // 悬浮提示看不到（控制栏会淡出），所以把探测值和实际用的值直接打在画面上。
+    expect(await screen.findByText(/已关闭去黑边（探测值 上 6\.3%/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "去黑边，已关闭" }));
+    expect(
+      await screen.findByText(/已开启去黑边：.*→ 实际用 上 6\.3% \/ 右 0\.0% \/ 下 6\.3% \/ 左 0\.0%/),
+    ).toBeInTheDocument();
+  });
+});

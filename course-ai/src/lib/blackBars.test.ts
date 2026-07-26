@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   contentAspect,
   cropStyle,
+  formatCropNotice,
   formatInsets,
   isCropEnabled,
   NO_INSETS,
@@ -20,6 +21,22 @@ describe("black bar switch", () => {
     expect(isCropEnabled()).toBe(false);
     setCropEnabled(true);
     expect(isCropEnabled()).toBe(true);
+  });
+
+  it("shows both the detected and the actually-used insets when they differ", () => {
+    // 单边误判被对称化抹平时，两组数不一样——排查裁歪要看的就是这个差别。
+    expect(
+      formatCropNotice({ top: 0.0625, right: 0, bottom: 0.0625, left: 0.125 }, true),
+    ).toBe(
+      "已开启去黑边：上 6.3% / 右 0.0% / 下 6.3% / 左 12.5% → 实际用 上 6.3% / 右 0.0% / 下 6.3% / 左 0.0%",
+    );
+    // 探测本就对称时不必重复写两遍。
+    expect(formatCropNotice({ top: 0.1, right: 0, bottom: 0.1, left: 0 }, true)).toBe(
+      "已开启去黑边：上 10.0% / 右 0.0% / 下 10.0% / 左 0.0%",
+    );
+    expect(formatCropNotice({ top: 0.1, right: 0, bottom: 0.1, left: 0 }, false)).toBe(
+      "已关闭去黑边（探测值 上 10.0% / 右 0.0% / 下 10.0% / 左 0.0%）",
+    );
   });
 
   it("spells out the four insets for troubleshooting a lopsided picture", () => {
