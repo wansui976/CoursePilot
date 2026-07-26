@@ -35,6 +35,41 @@ describe("useSilenceSkip", () => {
     await waitFor(() => expect(mockIpc.videos.skips).toHaveBeenCalledWith("v1"));
   });
 
+  it("acknowledges the click right away and reports what it found", async () => {
+    const { result } = renderHook(() => useSilenceSkip("v1"));
+
+    act(() => result.current.toggle());
+    // 分析要好几秒，点下去必须立刻有回执，否则看着像按钮没反应。
+    expect(result.current.notice).toBe("正在找可跳的停顿…");
+
+    await waitFor(() =>
+      expect(result.current.notice).toBe("跳停顿已开启，可跳过 1 处停顿"),
+    );
+
+    act(() => result.current.toggle());
+    expect(result.current.notice).toBe("已关闭跳停顿");
+  });
+
+  it("says so when a video has nothing worth skipping", async () => {
+    mockIpc.videos.skips.mockResolvedValue([]);
+    const { result } = renderHook(() => useSilenceSkip("v1"));
+
+    act(() => result.current.toggle());
+    await waitFor(() =>
+      expect(result.current.notice).toBe("跳停顿已开启，这个视频没有可跳的停顿"),
+    );
+  });
+
+  it("stays quiet when the switch was already on from a previous session", async () => {
+    localStorage.setItem("skip-silence", "on");
+    const { result } = renderHook(() => useSilenceSkip("v1"));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    // 每打开一个视频都弹一句「已开启」只会烦人；只有用户亲手点开时才播报。
+    expect(result.current.notice).toBeNull();
+    expect(result.current.count).toBe(1);
+  });
+
   it("jumps past a silence while playing and says how much it skipped", async () => {
     const { result } = renderHook(() => useSilenceSkip("v1"));
     act(() => result.current.toggle());
@@ -68,7 +103,7 @@ describe("useSilenceSkip", () => {
     const { result } = renderHook(() => useSilenceSkip("v1"));
 
     act(() => result.current.toggle());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() => expect(result.current.notice).toBe("停顿分析失败，暂时跳不了"));
     expect(result.current.handleTimeUpdate(fakeVideo(12))).toBe(false);
   });
 });

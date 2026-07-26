@@ -21,6 +21,7 @@ export function Controls({
   muted,
   captionsOn,
   skipSilence,
+  skipSilenceLoading,
   fullscreen,
   onToggleCaptions,
   onToggleSkipSilence,
@@ -37,6 +38,7 @@ export function Controls({
   muted: boolean;
   captionsOn: boolean;
   skipSilence: boolean;
+  skipSilenceLoading: boolean;
   fullscreen: boolean;
   onToggleCaptions: () => void;
   onToggleSkipSilence: () => void;
@@ -51,6 +53,8 @@ export function Controls({
   const currentMs = usePlayer((s) => s.currentMs);
   const durationMs = usePlayer((s) => s.durationMs);
   const [speedOpen, setSpeedOpen] = useState(false);
+  // 首次开启要扫一遍音轨，几秒内还跳不了；按钮上直说，别让人以为已经在跳了。
+  const skipSilenceLabel = skipSilenceLoading ? "分析中" : "开";
 
   // 倍速菜单:点菜单与触发按钮之外即收起(都打了 data-speed-menu),或按 Esc 收起。
   useEffect(() => {
@@ -154,14 +158,23 @@ export function Controls({
           type="button"
           onClick={onToggleSkipSilence}
           aria-pressed={skipSilence}
+          aria-label={skipSilence ? "跳停顿，已开启" : "跳停顿，已关闭"}
           title={
             skipSilence
-              ? "关闭跳停顿（不再跳过无声的空档）"
+              ? skipSilenceLabel === "分析中"
+                ? "正在分析可跳过的停顿"
+                : "关闭跳停顿（不再跳过无声的空档）"
               : "跳过老师写板书、等记笔记这类无声空档"
           }
-          className={`${textButtonClass} ${skipSilence ? "text-[var(--accent)]" : ""}`}
+          // 只靠文字变个色，开没开一眼看不出来（用户反馈「点了没反馈」）：
+          // 开启时给一层强调色底＋描边，并在文字后面直接写「开」。
+          className={`${textButtonClass} ${
+            skipSilence
+              ? "bg-[var(--accent)]/25 text-[var(--accent)] ring-1 ring-inset ring-[var(--accent)]/60"
+              : ""
+          }`}
         >
-          跳停顿
+          跳停顿{skipSilence ? ` · ${skipSilenceLabel}` : ""}
         </button>
         <button
           type="button"
