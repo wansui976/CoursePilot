@@ -26,6 +26,8 @@ export function Controls({
   volume,
   muted,
   captionsOn,
+  smartRate,
+  smartRateAvailable,
   skipSilence,
   skipSilenceLoading,
   skipRanges,
@@ -34,6 +36,7 @@ export function Controls({
   fullscreen,
   onToggleCaptions,
   onToggleSkipSilence,
+  onToggleSmartRate,
   onToggleCrop,
   onPreviewSkip,
   onPlayPause,
@@ -48,6 +51,8 @@ export function Controls({
   volume: number;
   muted: boolean;
   captionsOn: boolean;
+  smartRate: boolean;
+  smartRateAvailable: boolean;
   skipSilence: boolean;
   skipSilenceLoading: boolean;
   skipRanges: SkipRange[];
@@ -56,6 +61,7 @@ export function Controls({
   fullscreen: boolean;
   onToggleCaptions: () => void;
   onToggleSkipSilence: () => void;
+  onToggleSmartRate: () => void;
   onToggleCrop: () => void;
   onPreviewSkip: (ms: number) => void;
   onPlayPause: () => void;
@@ -176,6 +182,23 @@ export function Controls({
             </div>
           )}
         </div>
+        <button
+          type="button"
+          onClick={onToggleSmartRate}
+          aria-pressed={smartRate}
+          aria-label={smartRate ? "智能倍速，已开启" : "智能倍速，已关闭"}
+          disabled={!smartRateAvailable}
+          title={
+            smartRateAvailable
+              ? "按语速自动调速：讲得慢的段落加速，密集推导处回到你选的倍速"
+              : "还没有字幕，智能倍速排不出来"
+          }
+          className={`${textButtonClass} disabled:opacity-35 ${
+            smartRate ? "bg-[var(--accent)]/25 text-[var(--accent)] ring-1 ring-inset ring-[var(--accent)]/60" : ""
+          }`}
+        >
+          智能倍速{smartRate ? " · 开" : ""}
+        </button>
         <button
           type="button"
           onClick={onToggleSkipSilence}

@@ -11,6 +11,8 @@ function renderControls(props: Partial<Parameters<typeof Controls>[0]> = {}) {
     volume: 1,
     muted: false,
     captionsOn: false,
+    smartRate: false,
+    smartRateAvailable: true,
     skipSilence: false,
     skipSilenceLoading: false,
     skipRanges: [],
@@ -19,6 +21,7 @@ function renderControls(props: Partial<Parameters<typeof Controls>[0]> = {}) {
     fullscreen: false,
     onToggleCaptions: vi.fn(),
     onToggleSkipSilence: vi.fn(),
+    onToggleSmartRate: vi.fn(),
     onPreviewSkip: vi.fn(),
     onToggleCrop: vi.fn(),
     onPlayPause: vi.fn(),
@@ -52,7 +55,8 @@ describe("Controls speed button", () => {
 
   it("closes the speed menu on Escape", () => {
     renderControls({ rate: 1 });
-    fireEvent.click(screen.getByRole("button", { name: /倍速/ }));
+    // 精确名字：控制栏里「智能倍速」也含「倍速」，松匹配会同时命中两个按钮。
+    fireEvent.click(screen.getByRole("button", { name: /^倍速，当前/ }));
     expect(screen.getByRole("menu", { name: "倍速" })).toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: "Escape" });
@@ -159,5 +163,29 @@ describe("Controls black-bar toggle", () => {
     renderControls({ cropInsets: { top: 0, right: 0, bottom: 0, left: 0 } });
     // 一条边都没检测到时开关没有意义——同时也是「源片本来就带边」的线索。
     expect(screen.getByRole("button", { name: "去黑边，已开启" })).toBeDisabled();
+  });
+});
+
+describe("Controls smart-rate toggle", () => {
+  beforeEach(() => {
+    usePlayer.setState({ currentMs: 0, durationMs: 60_000 });
+  });
+
+  it("reflects and toggles the smart-rate switch", () => {
+    const onToggleSmartRate = vi.fn();
+    renderControls({ smartRate: true, onToggleSmartRate });
+
+    const button = screen.getByRole("button", { name: "智能倍速，已开启" });
+    expect(button).toHaveTextContent("智能倍速 · 开");
+    fireEvent.click(button);
+    expect(onToggleSmartRate).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables itself when there are no subtitles to measure speech rate from", () => {
+    renderControls({ smartRate: false, smartRateAvailable: false });
+    // 语速是从字幕算的，没有字幕就排不出倍率表——按钮置灰并说明原因。
+    const button = screen.getByRole("button", { name: "智能倍速，已关闭" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "还没有字幕，智能倍速排不出来");
   });
 });
