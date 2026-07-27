@@ -769,7 +769,10 @@ pub async fn cmd_ensure_playable(
 
 /// 返回一个 WebView 可播放的 http://127.0.0.1 媒体 URL（带完整 Range 支持），
 /// 绕开 asset 协议在 macOS WKWebView 下「大文件没声音/放不了」的限制。
-/// 顺带对非 faststart 的文件做一次转封装，让起播更快。
+///
+/// 这个命令挡在「画面出来」前面：它返回之前，播放器连 `<video>` 都还没挂上，
+/// 用户只看到一行「正在准备播放」。所以这里**只做查表和查缓存**，一概不碰 ffmpeg。
+/// 每次的耗时记进开发控制台，万一还是慢，能直接看出慢在哪一段。
 #[tauri::command]
 pub async fn cmd_media_url(
     app: tauri::AppHandle,
@@ -777,6 +780,7 @@ pub async fn cmd_media_url(
     media: State<'_, crate::media_server::MediaServer>,
     video_id: String,
 ) -> AppResult<String> {
+    let started = std::time::Instant::now();
     let row: Option<(String, String)> =
         sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
             .bind(&video_id)
@@ -784,13 +788,24 @@ pub async fn cmd_media_url(
             .await?;
     let (file_path, data_dir) =
         row.ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    let after_query = started.elapsed();
     let file_path = stabilize_mobile_video_file(&app, &state.db, &video_id, &file_path).await?;
-    let path = crate::pipeline::playable::ensure_playable(
+    let path = crate::pipeline::playable::cached_playable(
         std::path::Path::new(&file_path),
         std::path::Path::new(&data_dir),
-    )
-    .await?;
-    media.register(&video_id, path);
+    );
+    media.register(&video_id, path.clone());
+    crate::dev_log::record(
+        "media-url",
+        &video_id,
+        &path.to_string_lossy(),
+        &format!(
+            "查库 {}ms / 总计 {}ms",
+            after_query.as_millis(),
+            started.elapsed().as_millis()
+        ),
+        "已交给播放器",
+    );
     Ok(media.url(&video_id))
 }
 

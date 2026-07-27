@@ -52,6 +52,25 @@ pub fn is_faststart(path: &Path) -> AppResult<bool> {
     }
 }
 
+/// 点开视频时用的路径：**只查缓存，绝不现场转封装**。
+///
+/// 转封装要把整个文件读一遍写一遍——一两 GB 的课就是几十秒的纯磁盘时间，而它正好
+/// 卡在「点开视频」和「画面出来」之间，那几秒里播放器连元素都还没挂上，用户只看到
+/// 一行「正在准备播放」。这个代价换来的只是规避 asset 协议的老毛病，而媒体现在走的是
+/// 本地 HTTP 服务（带 Range），WebKit 自己会按 Range 去文件末尾取 moov 索引，
+/// 非 faststart 的文件本就能正常放。
+///
+/// 已经转过封装的视频照旧用那份缓存（不制造回退）；[`ensure_playable`] 保留下来，
+/// 万一某个视频真的「有画面没声音」，还能显式跑一次。
+pub fn cached_playable(original: &Path, data_dir: &Path) -> PathBuf {
+    let cached = data_dir.join("playable.mp4");
+    if cached.is_file() {
+        cached
+    } else {
+        original.to_path_buf()
+    }
+}
+
 /// 返回一个可在 WebView 中正常播放的路径：
 /// 原文件已 faststart → 原样返回；否则生成（并缓存）data_dir/playable.mp4。
 /// 转封装失败时退回原文件（至少画面能放）。
@@ -132,6 +151,23 @@ mod tests {
         let p = dir.path().join("b.mp4");
         write_mp4(&p, false);
         assert!(!is_faststart(&p).unwrap());
+    }
+
+    #[test]
+    fn the_open_path_only_looks_at_the_cache() {
+        let dir = tempdir().unwrap();
+        let original = dir.path().join("lecture.mp4");
+        write_mp4(&original, false); // moov 在末尾，老逻辑会在这里整片转封装
+        let data_dir = dir.path().join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        // 没有缓存就直接用原文件：点开视频不该等一趟整片读写。
+        assert_eq!(cached_playable(&original, &data_dir), original);
+
+        // 已经转过封装的视频照旧用那份缓存，不制造回退。
+        let cached = data_dir.join("playable.mp4");
+        write_mp4(&cached, true);
+        assert_eq!(cached_playable(&original, &data_dir), cached);
     }
 
     #[tokio::test]
