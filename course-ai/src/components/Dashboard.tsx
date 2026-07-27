@@ -82,15 +82,27 @@ function heatCellLabel(cell: NonNullable<HeatCell>, reached: boolean): string {
   return parts.join(" · ");
 }
 
-function monthLabel(column: HeatCell[], index: number): string | null {
-  const first = column.find((cell): cell is NonNullable<HeatCell> => cell !== null);
-  if (!first) return null;
-  const monthStart = column.find(
-    (cell): cell is NonNullable<HeatCell> => cell !== null && cell.day.endsWith("-01"),
-  );
-  if (index !== 0 && !monthStart) return null;
-  const day = monthStart?.day ?? first.day;
-  return `${Number(day.slice(5, 7))}月`;
+/** 一段连续的周列 + 它们所属的月份，用来把月份标签摆在整段的中间。 */
+type MonthSegment = { label: string; span: number };
+
+function monthSegments(columns: HeatCell[][]): MonthSegment[] {
+  const segments: MonthSegment[] = [];
+  for (const column of columns) {
+    const monthStart = column.find(
+      (cell): cell is NonNullable<HeatCell> => cell !== null && cell.day.endsWith("-01"),
+    );
+    const first = column.find((cell): cell is NonNullable<HeatCell> => cell !== null);
+    const last = segments[segments.length - 1];
+    // 只有跨月的那一列开新段；其余列（含整列都是补位的）并进当前段。
+    if (last && !monthStart) {
+      last.span += 1;
+      continue;
+    }
+    const day = monthStart?.day ?? first?.day;
+    if (!day) continue;
+    segments.push({ label: `${Number(day.slice(5, 7))}月`, span: 1 });
+  }
+  return segments;
 }
 
 /** 可聚焦的热力图格：今天保持描边，达标日描细边，方向键按时间矩阵移动。 */
@@ -256,6 +268,7 @@ export function Dashboard({
     () => heatmapGrid(daily, today, heatmapWeeks),
     [daily, heatmapWeeks, today],
   );
+  const heatMonths = useMemo(() => monthSegments(heatmap), [heatmap]);
   const heatDays = useMemo(
     () =>
       new Set(
@@ -545,13 +558,18 @@ export function Dashboard({
             <div className="overflow-x-auto pb-1">
               <div className="grid min-w-max grid-cols-[auto] grid-rows-[1rem_auto] gap-y-1">
                 <div aria-hidden="true" className="flex h-4 gap-1">
-                  {heatmap.map((column, index) => (
-                    <span key={index} className="relative h-4 w-3 flex-none">
-                      {monthLabel(column, index) && (
-                        <span className="absolute left-0 top-0 whitespace-nowrap text-[10px] leading-4 text-[var(--text-faint)]">
-                          {monthLabel(column, index)}
-                        </span>
-                      )}
+                  {heatMonths.map((segment, index) => (
+                    <span
+                      key={index}
+                      className="relative h-4 flex-none"
+                      // 段宽 = 列宽 w-3 × 列数 + 列间 gap-1
+                      style={{
+                        width: `calc(${segment.span} * 0.75rem + ${segment.span - 1} * 0.25rem)`,
+                      }}
+                    >
+                      <span className="absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap text-[10px] leading-4 text-[var(--text-faint)]">
+                        {segment.label}
+                      </span>
                     </span>
                   ))}
                 </div>
