@@ -6,6 +6,7 @@ import {
   multiplierAt,
   planSmartRates,
   setSmartRateEnabled,
+  speedUpCoverageMs,
 } from "./smartRate";
 import type { TranscriptSegment } from "./types";
 
@@ -21,55 +22,88 @@ function seg(startMs: number, endMs: number, text: string): TranscriptSegment {
   };
 }
 
-/** 每段 10 秒；字数决定语速。20 字/10 秒 = 2 字/秒。 */
-function segsOf(...counts: number[]): TranscriptSegment[] {
-  return counts.map((chars, i) => seg(i * 10_000, (i + 1) * 10_000, "字".repeat(chars)));
-}
-
 describe("planSmartRates", () => {
-  it("speeds up the slow stretches and keeps the dense ones at base", () => {
-    // 中位语速 2 字/秒。中间连着三句只有 0.8 字/秒（老师在写板书、边写边说）→ 该加速；
-    // 前后正常语速 → 原速。单句的快慢是噪声，只有成片的慢才算慢。
-    const spans = planSmartRates(segsOf(20, 20, 20, 8, 8, 8, 20, 20, 20));
-    const at = (ms: number) => multiplierAt(spans, ms);
-    expect(at(5_000)).toBe(1);
-    expect(at(45_000)).toBeGreaterThan(1);
-    expect(at(85_000)).toBe(1);
+  /** 每 5 秒一句、每句 12 字的正常讲授段。 */
+  function talking(fromMs: number, count: number): TranscriptSegment[] {
+    return Array.from({ length: count }, (_, i) =>
+      seg(fromMs + i * 5_000, fromMs + i * 5_000 + 4_000, "字".repeat(12)),
+    );
+  }
+  /** 板书段：每 20 秒才蹦一句，字也少——句子内部语速正常，空档全在句子之间。 */
+  function writing(fromMs: number, count: number): TranscriptSegment[] {
+    return Array.from({ length: count }, (_, i) =>
+      seg(fromMs + i * 20_000, fromMs + i * 20_000 + 4_000, "字".repeat(10)),
+    );
+  }
+
+  it("speeds up the sparse stretches, where the pauses live between sentences", () => {
+    // 关键点：板书段每句的语速和正常段几乎一样，只是句子之间空档大。
+    // 按「一句话的字数 ÷ 这句话的时长」算根本看不出区别，按时间窗算才看得出。
+    const spans = planSmartRates([
+      ...talking(0, 12),
+      ...writing(60_000, 5),
+      ...talking(160_000, 12),
+    ]);
+    expect(multiplierAt(spans, 20_000)).toBe(1);
+    expect(multiplierAt(spans, 100_000)).toBeGreaterThan(1);
+    expect(multiplierAt(spans, 180_000)).toBe(1);
+  });
+
+  it("actually covers a meaningful chunk of the video", () => {
+    // 「效果不明显」就是这里出的问题：如果绝大多数时间都落回 1 倍，等于没开。
+    const spans = planSmartRates([
+      ...talking(0, 12),
+      ...writing(60_000, 5),
+      ...talking(160_000, 12),
+    ]);
+    expect(speedUpCoverageMs(spans)).toBeGreaterThan(60_000);
   });
 
   it("never drops below the rate the user picked", () => {
-    // 整段都比平时快也不该低于 1：用户选了 1.25x 就是要 1.25x 起步。
-    const spans = planSmartRates(segsOf(20, 60, 20, 60));
+    const spans = planSmartRates([...talking(0, 12), ...talking(60_000, 24)]);
     expect(spans.every((span) => span.multiplier >= 1)).toBe(true);
   });
 
   it("caps how fast it will go", () => {
-    // 某段几乎不说话（语速极低），倍率也不能突破上限，否则根本听不清。
-    const spans = planSmartRates(segsOf(40, 40, 1, 40));
+    // 一分钟只说一句：倍率也不能突破上限，否则根本听不清。
+    const spans = planSmartRates([
+      ...talking(0, 12),
+      seg(60_000, 62_000, "字"),
+      seg(180_000, 182_000, "字"),
+      ...talking(240_000, 12),
+    ]);
     expect(Math.max(...spans.map((span) => span.multiplier))).toBeLessThanOrEqual(
       DEFAULT_SMART_RATE_OPTIONS.maxMultiplier,
     );
   });
 
-  it("merges short runs so the speed does not flap", () => {
-    // 快慢逐段交替：如果照单全收，每 10 秒变一次速，听着像卡带。
-    const spans = planSmartRates(segsOf(20, 10, 20, 10, 20, 10, 20, 10));
-    // 每 10 秒一句、快慢交替：变速间隔下限 15 秒，所以最多也就分成 4 段。
-    expect(spans.length).toBeLessThanOrEqual(4);
-    expect(spans.every((span) => span.end_ms - span.start_ms >= 15_000)).toBe(true);
+  it("keeps a minimum gap between speed changes", () => {
+    const spans = planSmartRates([
+      ...talking(0, 6),
+      ...writing(30_000, 2),
+      ...talking(70_000, 6),
+      ...writing(100_000, 2),
+      ...talking(140_000, 6),
+    ]);
+    // 变速间隔下限 15 秒：不满足就并进前一段，免得速度来回抖。
+    expect(
+      spans.slice(0, -1).every((span) => span.end_ms - span.start_ms >= 15_000),
+    ).toBe(true);
   });
 
   it("returns nothing to act on without usable subtitles", () => {
     expect(planSmartRates([])).toEqual([]);
-    // 时长为 0 或空文本的段算不出语速，不该拿它当基准。
+    // 时长为 0 或空文本的段算不出密度。
     expect(planSmartRates([seg(0, 0, "字"), seg(1_000, 2_000, "   ")])).toEqual([]);
+    // 比一个时间窗还短的视频不值得排倍率表。
+    expect(planSmartRates(talking(0, 2))).toEqual([]);
   });
 
   it("falls back to base rate outside the planned spans", () => {
-    const spans = planSmartRates(segsOf(20, 10, 10, 20));
+    const spans = planSmartRates([...talking(0, 12), ...writing(60_000, 5)]);
     // 片头、没有字幕的地方不猜，按用户选的倍速播。
     expect(multiplierAt(spans, -1)).toBe(1);
-    expect(multiplierAt(spans, 10 * 60_000)).toBe(1);
+    expect(multiplierAt(spans, 60 * 60_000)).toBe(1);
   });
 });
 

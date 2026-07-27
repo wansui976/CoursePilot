@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   formatRateNotice,
+  formatSmartRateSummary,
   isSmartRateEnabled,
   multiplierAt,
   planSmartRates,
@@ -70,11 +71,11 @@ export function useSmartRate(segments: TranscriptSegment[]) {
 
   useEffect(() => {
     if (!enabled) return;
-    // 打开时先给个回执：没有字幕就排不出倍率表，说清楚免得以为坏了。
-    setNotice(spans.length === 0 ? "还没有字幕，智能倍速排不出来" : "智能倍速已开启");
+    // 打开时先给个回执，并说清这节课大约有多少会加速——不然「有没有生效」全靠猜。
+    setNotice(formatSmartRateSummary(spans));
     clearNoticeTimer();
     noticeTimerRef.current = setTimeout(() => setNotice(null), NOTICE_MS);
-  }, [enabled, spans.length]);
+  }, [enabled, spans]);
 
   return { enabled, toggle, multiplier, notice, available: spans.length > 0, update };
 }
