@@ -16,6 +16,7 @@ import { posKey, durKey, syncPlaybackProgress } from "@/lib/playback";
 import { isIOS } from "@/lib/platform";
 import { useWatchLogger } from "@/lib/useWatchLogger";
 import { useSilenceSkip } from "@/lib/useSilenceSkip";
+import { useSmartRate } from "@/lib/useSmartRate";
 import { usePlayer } from "@/stores/player";
 import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
 import { CaptionOverlay } from "./CaptionOverlay";
@@ -130,6 +131,7 @@ export function VideoPlayer({
     refetchInterval: (query) =>
       query.state.data && query.state.data.length > 0 ? false : 2000,
   });
+  const smartRate = useSmartRate(segments);
   const { data: cropInsets = NO_INSETS } = useQuery({
     queryKey: ["video-crop", videoId],
     queryFn: () => ipc.videos.ensureCrop(videoId),
@@ -254,8 +256,9 @@ export function VideoPlayer({
   }, [seekRequest]);
 
   useEffect(() => {
-    if (ref.current) ref.current.playbackRate = rate;
-  }, [rate]);
+    // 智能倍速是在用户选的倍速之上叠加的倍率，所以这里生效的是两者之积。
+    if (ref.current) ref.current.playbackRate = rate * smartRate.multiplier;
+  }, [rate, smartRate.multiplier]);
 
   useEffect(() => {
     if (!ref.current) return;
@@ -734,6 +737,8 @@ export function VideoPlayer({
               // 跳停顿：落在无声区间里就直接跃过去，跳完这一轮不再按旧位置记进度。
               if (silenceSkip.handleTimeUpdate(event.currentTarget)) return;
               const t = event.currentTarget.currentTime;
+              // 长按快进时播放器的 playbackRate 由手势直接改，这时别去抢。
+              if (!keyScanRef.current?.engaged) smartRate.update(t * 1000, rate);
               setCurrentMs(Math.floor(t * 1000));
               // 每 5 秒（或回退时）记录一次进度，避免频繁写 localStorage。
               if (Math.abs(t - lastSavedRef.current) >= 5) {
@@ -824,6 +829,14 @@ export function VideoPlayer({
               {cropNotice}
             </div>
           )}
+          {smartRate.notice && (
+            <div
+              aria-live="polite"
+              className="pointer-events-none absolute right-4 top-6 z-20 rounded-full bg-black/70 px-3 py-1 text-xs font-medium text-white"
+            >
+              {smartRate.notice}
+            </div>
+          )}
           {silenceSkip.notice && (
             <div
               aria-live="polite"
@@ -889,6 +902,8 @@ export function VideoPlayer({
           volume={volume}
           muted={muted}
           captionsOn={captionsOn}
+          smartRate={smartRate.enabled}
+          smartRateAvailable={smartRate.available}
           skipSilence={silenceSkip.enabled}
           skipSilenceLoading={silenceSkip.loading}
           skipRanges={silenceSkip.ranges}
@@ -912,6 +927,7 @@ export function VideoPlayer({
                 : "";
             setCropNotice(`${formatCropNotice(cropInsets, next)}${geometry}`);
           }}
+          onToggleSmartRate={smartRate.toggle}
           onToggleSkipSilence={silenceSkip.toggle}
           onPreviewSkip={(ms) => {
             // 试跳要「看得到跳」：暂停着不会触发跳过判定，所以顺手接着播。
