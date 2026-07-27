@@ -71,6 +71,8 @@ export function VideoPlayer({
   const lastSavedRef = useRef(0);
   const [videoAspect, setVideoAspect] = useState(16 / 9);
   const [videoMetadataReady, setVideoMetadataReady] = useState(false);
+  // 画面已经能放了（缓冲够起播）。黑边探测等这个信号再开工，见下面那个 useQuery。
+  const [playbackReady, setPlaybackReady] = useState(false);
   const [region, setRegion] = useState({ w: 0, h: 0 });
   const [playing, setPlaying] = useState(false);
   // 把「播放中时长」记入学习事件日志（供仪表盘统计 / 间隔重复排期）。
@@ -132,12 +134,25 @@ export function VideoPlayer({
       query.state.data && query.state.data.length > 0 ? false : 2000,
   });
   const smartRate = useSmartRate(segments);
+  // 黑边探测要 ffmpeg 解码正片三处、几十秒画面，是实打实的磁盘和 CPU 开销。
+  // 因此：① 等画面已经能放了再开工，不和起播抢；② 开关关着就压根不测。
   const { data: cropInsets = NO_INSETS } = useQuery({
     queryKey: ["video-crop", videoId],
     queryFn: () => ipc.videos.ensureCrop(videoId),
+    enabled: cropOn && playbackReady,
     staleTime: Infinity,
     retry: false,
   });
+
+  // 切走/关掉播放器就停掉这个视频的探测：结果已经没人要了，留着只会压在下一个
+  // 视频的起播上——在一门课里连点几个视频，那些 ffmpeg 会一个个叠起来。
+  useEffect(
+    () => () => {
+      // 收尾动作，失败也没有下一步可做：别让它变成卸载时的未处理拒绝。
+      void ipc.videos.cancelCropDetect(videoId).catch(() => {});
+    },
+    [videoId],
+  );
 
   // 字幕跳转用：始终持有按 start_ms 排好序的最新分句，供键盘处理器读取（避免闭包过期）。
   const segmentsRef = useRef<typeof segments>([]);
@@ -219,6 +234,7 @@ export function VideoPlayer({
   useEffect(() => {
     setVideoAspect(16 / 9);
     setVideoMetadataReady(false);
+    setPlaybackReady(false);
   }, [videoId]);
 
   // 在播放区内，求与视频同比例、尽可能大的居中矩形；视频铺满它即完整无黑边。
@@ -754,6 +770,8 @@ export function VideoPlayer({
                 }
               }
             }}
+            // 缓冲够起播了才放黑边探测进场：那一趟解码不该和首帧抢磁盘。
+            onCanPlay={() => setPlaybackReady(true)}
             onLoadedMetadata={(event) => {
               const video = event.currentTarget;
               setDurationMs(Math.floor(video.duration * 1000));

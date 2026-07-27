@@ -7,11 +7,12 @@ import { usePlayer } from "@/stores/player";
 
 const setFullscreen = vi.hoisted(() => vi.fn());
 const mockEnsureCrop = vi.hoisted(() => vi.fn());
+const mockCancelCropDetect = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/ipc", () => ({
   ipc: {
     transcripts: { list: vi.fn().mockResolvedValue([]) },
-    videos: { ensureCrop: mockEnsureCrop },
+    videos: { ensureCrop: mockEnsureCrop, cancelCropDetect: mockCancelCropDetect },
   },
 }));
 
@@ -30,7 +31,14 @@ vi.mock("@/lib/platform", () => ({
 beforeEach(() => {
   mockEnsureCrop.mockReset();
   mockEnsureCrop.mockResolvedValue({ top: 0, right: 0, bottom: 0, left: 0 });
+  mockCancelCropDetect.mockReset();
+  mockCancelCropDetect.mockResolvedValue(undefined);
 });
+
+/** 画面「已经能放了」——黑边探测等的就是这个信号。 */
+function reachPlayable() {
+  fireEvent.canPlay(screen.getByLabelText("课程视频播放器"));
+}
 
 function renderPlayer(immersive = true) {
   const queryClient = new QueryClient({
@@ -429,6 +437,42 @@ describe("VideoPlayer iOS gestures", () => {
   });
 });
 
+describe("VideoPlayer black-bar detection cost", () => {
+  it("waits until the picture can play before spending ffmpeg on detection", async () => {
+    localStorage.clear();
+    renderPlayer();
+
+    await screen.findByRole("button", { name: "去黑边，已开启" });
+    // 探测要解码正片三处；在首帧还没缓冲出来的时候开跑，就是和起播抢磁盘。
+    expect(mockEnsureCrop).not.toHaveBeenCalled();
+
+    reachPlayable();
+    await waitFor(() => expect(mockEnsureCrop).toHaveBeenCalledWith("video-1"));
+  });
+
+  it("does not detect at all while the crop switch is off", async () => {
+    localStorage.clear();
+    localStorage.setItem("crop-black-bars", "off");
+    renderPlayer();
+
+    await screen.findByRole("button", { name: "去黑边，已关闭" });
+    reachPlayable();
+    // 关着开关还去测，等于为一个用不上的结果付整趟解码。
+    await waitFor(() => expect(mockEnsureCrop).not.toHaveBeenCalled());
+  });
+
+  it("stops the detection when you leave the video", async () => {
+    localStorage.clear();
+    const { unmount } = renderPlayer();
+    reachPlayable();
+    await waitFor(() => expect(mockEnsureCrop).toHaveBeenCalled());
+
+    unmount();
+    // 切走了结果就没人要；不停的话连点几个视频会攒下一堆 ffmpeg，全压在新视频的起播上。
+    expect(mockCancelCropDetect).toHaveBeenCalledWith("video-1");
+  });
+});
+
 describe("VideoPlayer black-bar readout", () => {
   it("prints the detected insets on screen when the crop switch is flipped", async () => {
     localStorage.clear();
@@ -436,6 +480,7 @@ describe("VideoPlayer black-bar readout", () => {
     renderPlayer();
 
     const button = await screen.findByRole("button", { name: "去黑边，已开启" });
+    reachPlayable();
     // 探测结果回来之前开关是灰的，等它可用再点。
     await waitFor(() => expect(button).not.toBeDisabled());
     fireEvent.click(button);

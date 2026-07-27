@@ -35,6 +35,18 @@ impl AppState {
         flag
     }
 
+    /// 同 id 已有任务在跑时返回 None，供调用方避免重复起一趟同样的活
+    /// （黑边探测这种「解码几十秒画面」的活，重复一趟就是白占一份 CPU 和磁盘）。
+    pub fn register_cancel_if_free(&self, id: &str) -> Option<Arc<AtomicBool>> {
+        let mut cancels = self.rag_cancels.lock().unwrap();
+        if cancels.contains_key(id) {
+            return None;
+        }
+        let flag = Arc::new(AtomicBool::new(false));
+        cancels.insert(id.to_string(), flag.clone());
+        Some(flag)
+    }
+
     /// 置位对应请求的取消标志（通用；不存在则忽略）。问答与课程知识分析共用此登记表。
     pub fn cancel(&self, id: &str) {
         if let Some(flag) = self.rag_cancels.lock().unwrap().get(id) {

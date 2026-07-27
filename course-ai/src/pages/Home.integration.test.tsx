@@ -14,6 +14,8 @@ const { mockIpc } = vi.hoisted(() => ({
       addLocal: vi.fn(),
       mediaUrl: vi.fn(),
       ensurePlayable: vi.fn(),
+      ensureCrop: vi.fn().mockResolvedValue({ top: 0, right: 0, bottom: 0, left: 0 }),
+      cancelCropDetect: vi.fn().mockResolvedValue(undefined),
       cover: vi.fn(),
       updateTitle: vi.fn(),
       delete: vi.fn(),

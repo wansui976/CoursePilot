@@ -197,6 +197,10 @@ export const ipc = {
     // 打开视频时兜底补测黑边（旧视频无 crop 记录时），返回四边占比（无黑边为 0）。
     ensureCrop: (videoId: string): Promise<Insets> =>
       invoke("cmd_ensure_crop", { videoId }),
+    // 离开视频时停掉它的黑边探测：探测要解码正片三处，切走了就没人要这个结果，
+    // 留着只会和下一个视频的起播抢磁盘。
+    cancelCropDetect: (videoId: string): Promise<void> =>
+      invoke("cmd_cancel_crop_detect", { videoId }),
     mediaUrl: (videoId: string): Promise<string> =>
       invoke("cmd_media_url", { videoId }),
     // 原始二进制（后端 ipc::Response），不是 JSON 数字数组。
