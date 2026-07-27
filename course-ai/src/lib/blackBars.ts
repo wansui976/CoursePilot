@@ -42,17 +42,20 @@ export function symmetricInsets(crop: Insets): Insets {
 const CROP_KEY = "crop-black-bars";
 
 /**
- * 是否自动去黑边。默认开——绝大多数带黑边的录像去掉更好看。
+ * 是否自动去黑边。**默认关**。
  *
- * 之所以留这个开关：去黑边是**猜**出来的（cropdetect 按画面亮度估边界），猜错时
- * 画面会显得被裁掉一块或没对齐。关掉就是原封不动的画面，一眼就能分清「是源片
- * 本来如此」还是「我们裁歪了」。
+ * 原本默认开，但代价压在了最不该压的地方：黑边是**猜**出来的（cropdetect 按亮度估
+ * 边界），要 ffmpeg 解码正片三处才敢下结论，而这一趟就发生在你点开视频的那几秒里。
+ * 拿「等更久才出画面」换「少一圈黑边」，这笔账不划算。
+ *
+ * 功能整个留着：想要的人在控制栏一点即开（这时才去测），也依旧能一开一关分清
+ * 「源片本来带边」和「我们裁歪了」。
  */
 export function isCropEnabled(): boolean {
   try {
-    return localStorage.getItem(CROP_KEY) !== "off";
+    return localStorage.getItem(CROP_KEY) === "on";
   } catch {
-    return true;
+    return false;
   }
 }
 
