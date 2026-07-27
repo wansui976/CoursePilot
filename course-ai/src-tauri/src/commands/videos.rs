@@ -623,7 +623,8 @@ pub async fn cmd_add_local_batch(
 /// 让前端拿到结果即可显示裁剪。无黑边写 0（标记已探测）；ffmpeg 没跑成则保持 NULL。
 pub async fn apply_detected_crop(db: &Db, video: &mut Video) {
     let path = PathBuf::from(&video.file_path);
-    let c = crate::pipeline::crop_detect::ensure_crop(db, &video.id, path).await;
+    let never = std::sync::atomic::AtomicBool::new(false);
+    let c = crate::pipeline::crop_detect::ensure_crop(db, &video.id, path, &never).await;
     video.crop_top = Some(c.top);
     video.crop_right = Some(c.right);
     video.crop_bottom = Some(c.bottom);
@@ -651,7 +652,32 @@ pub async fn cmd_ensure_crop(
             left: left.unwrap_or(0.0),
         });
     }
-    Ok(crate::pipeline::crop_detect::ensure_crop(&state.db, &video_id, PathBuf::from(row.4)).await)
+    // 同一个视频已经在测了（前端重挂、窗口重新聚焦都会再问一次）就不再起第二趟：
+    // 那只会多占一份解码。这次先按「无黑边」返回，正在跑的那趟测完会写库，下次即生效。
+    let key = crate::pipeline::crop_detect::cancel_key(&video_id);
+    let Some(cancel) = state.register_cancel_if_free(&key) else {
+        return Ok(crate::pipeline::crop_detect::NO_CROP);
+    };
+    let insets = crate::pipeline::crop_detect::ensure_crop(
+        &state.db,
+        &video_id,
+        PathBuf::from(row.4),
+        &cancel,
+    )
+    .await;
+    state.unregister_cancel(&key, &cancel);
+    Ok(insets)
+}
+
+/// 离开视频时停掉它的黑边探测。
+///
+/// 探测要解码正片三处、几十秒画面，是实打实的 CPU 和磁盘开销；而前端一旦切走，
+/// 结果也没人要了。不停的话在一门课里连点几个视频，前面几个的 ffmpeg 全还在跑，
+/// 一起压在新视频的起播上——表现就是「点开一个视频要黑屏好久」。
+#[tauri::command]
+pub async fn cmd_cancel_crop_detect(state: State<'_, AppState>, video_id: String) -> AppResult<()> {
+    state.cancel(&crate::pipeline::crop_detect::cancel_key(&video_id));
+    Ok(())
 }
 
 #[tauri::command]
