@@ -253,10 +253,13 @@ export function Controls({
               ? `检测到的黑边：${formatInsets(cropInsets)}。${
                   cropOn ? "关掉看原始画面" : "打开自动去掉黑边"
                 }`
-              : "这个视频没检测到黑边"
+              : cropOn
+                ? "这个视频没检测到黑边"
+                : "打开自动去掉黑边（会先花几秒探测）"
           }
-          disabled={!hasCrop}
-          className={`${textButtonClass} disabled:opacity-35 ${
+          // 不置灰：探测只在开关打开后才跑，关着的时候「有没有黑边」根本还不知道，
+          // 按没检测到就锁住按钮，等于永远打不开。
+          className={`${textButtonClass} ${
             cropOn && hasCrop ? "text-[var(--accent)]" : ""
           }`}
         >

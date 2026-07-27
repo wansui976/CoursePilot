@@ -438,31 +438,46 @@ describe("VideoPlayer iOS gestures", () => {
 });
 
 describe("VideoPlayer black-bar detection cost", () => {
-  it("waits until the picture can play before spending ffmpeg on detection", async () => {
+  it("costs nothing at all until you ask for it", async () => {
     localStorage.clear();
     renderPlayer();
 
+    await screen.findByRole("button", { name: "去黑边，已关闭" });
+    reachPlayable();
+    // 默认关掉了：探测要解码正片三处，这一趟压在「点开视频」那几秒里最难受，
+    // 而它换来的只是少一圈黑边。想要的人自己开。
+    await waitFor(() => expect(mockEnsureCrop).not.toHaveBeenCalled());
+  });
+
+  it("is reachable while off, and measures only once switched on", async () => {
+    localStorage.clear();
+    renderPlayer();
+    reachPlayable();
+
+    const button = await screen.findByRole("button", { name: "去黑边，已关闭" });
+    // 关着的时候还没测过，按「没检测到黑边」置灰就等于永远打不开。
+    expect(button).not.toBeDisabled();
+
+    fireEvent.click(button);
+    await waitFor(() => expect(mockEnsureCrop).toHaveBeenCalledWith("video-1"));
+  });
+
+  it("waits until the picture can play before spending ffmpeg on detection", async () => {
+    localStorage.clear();
+    localStorage.setItem("crop-black-bars", "on");
+    renderPlayer();
+
     await screen.findByRole("button", { name: "去黑边，已开启" });
-    // 探测要解码正片三处；在首帧还没缓冲出来的时候开跑，就是和起播抢磁盘。
+    // 就算开着，也别在首帧还没缓冲出来的时候开跑——那是和起播抢磁盘。
     expect(mockEnsureCrop).not.toHaveBeenCalled();
 
     reachPlayable();
     await waitFor(() => expect(mockEnsureCrop).toHaveBeenCalledWith("video-1"));
   });
 
-  it("does not detect at all while the crop switch is off", async () => {
-    localStorage.clear();
-    localStorage.setItem("crop-black-bars", "off");
-    renderPlayer();
-
-    await screen.findByRole("button", { name: "去黑边，已关闭" });
-    reachPlayable();
-    // 关着开关还去测，等于为一个用不上的结果付整趟解码。
-    await waitFor(() => expect(mockEnsureCrop).not.toHaveBeenCalled());
-  });
-
   it("stops the detection when you leave the video", async () => {
     localStorage.clear();
+    localStorage.setItem("crop-black-bars", "on");
     const { unmount } = renderPlayer();
     reachPlayable();
     await waitFor(() => expect(mockEnsureCrop).toHaveBeenCalled());
@@ -476,13 +491,14 @@ describe("VideoPlayer black-bar detection cost", () => {
 describe("VideoPlayer black-bar readout", () => {
   it("prints the detected insets on screen when the crop switch is flipped", async () => {
     localStorage.clear();
+    localStorage.setItem("crop-black-bars", "on");
     mockEnsureCrop.mockResolvedValue({ top: 0.0625, right: 0, bottom: 0.0625, left: 0.125 });
     renderPlayer();
 
     const button = await screen.findByRole("button", { name: "去黑边，已开启" });
     reachPlayable();
-    // 探测结果回来之前开关是灰的，等它可用再点。
-    await waitFor(() => expect(button).not.toBeDisabled());
+    // 测出黑边、裁剪真正生效后开关会变成强调色；等这个信号再点。
+    await waitFor(() => expect(button.className).toContain("--accent"));
     fireEvent.click(button);
 
     // 悬浮提示看不到（控制栏会淡出），所以把探测值和实际用的值直接打在画面上。

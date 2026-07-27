@@ -15,13 +15,14 @@ import {
 describe("black bar switch", () => {
   beforeEach(() => localStorage.clear());
 
-  it("crops by default and remembers being turned off", () => {
-    // 默认开：绝大多数带黑边的录像去掉更好看。
-    expect(isCropEnabled()).toBe(true);
-    setCropEnabled(false);
+  it("stays out of the way by default and remembers being turned on", () => {
+    // 默认关：探测要解码正片三处，这一趟就发生在点开视频那几秒里。
+    // 拿「等更久才出画面」换「少一圈黑边」不划算，想要的人自己开。
     expect(isCropEnabled()).toBe(false);
     setCropEnabled(true);
     expect(isCropEnabled()).toBe(true);
+    setCropEnabled(false);
+    expect(isCropEnabled()).toBe(false);
   });
 
   it("reports the visible window so a mis-placed crop is obvious", () => {

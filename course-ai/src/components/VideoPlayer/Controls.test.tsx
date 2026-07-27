@@ -159,10 +159,31 @@ describe("Controls black-bar toggle", () => {
     expect(onToggleCrop).toHaveBeenCalledTimes(1);
   });
 
-  it("disables the toggle when no black bars were detected", () => {
-    renderControls({ cropInsets: { top: 0, right: 0, bottom: 0, left: 0 } });
-    // 一条边都没检测到时开关没有意义——同时也是「源片本来就带边」的线索。
-    expect(screen.getByRole("button", { name: "去黑边，已开启" })).toBeDisabled();
+  it("stays clickable while off, since nothing has been measured yet", () => {
+    const onToggleCrop = vi.fn();
+    renderControls({
+      cropOn: false,
+      cropInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      onToggleCrop,
+    });
+
+    // 探测只在开关打开后才跑，关着的时候「有没有黑边」根本还不知道；
+    // 按「没检测到」把按钮锁住，等于这功能永远打不开。
+    const button = screen.getByRole("button", { name: "去黑边，已关闭" });
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveAttribute("title", "打开自动去掉黑边（会先花几秒探测）");
+
+    fireEvent.click(button);
+    expect(onToggleCrop).toHaveBeenCalledTimes(1);
+  });
+
+  it("says so when the measurement came back empty", () => {
+    renderControls({ cropOn: true, cropInsets: { top: 0, right: 0, bottom: 0, left: 0 } });
+    // 开着却一条边都没测到：这本身就是「源片本来如此」的线索，得说出来。
+    expect(screen.getByRole("button", { name: "去黑边，已开启" })).toHaveAttribute(
+      "title",
+      "这个视频没检测到黑边",
+    );
   });
 });
 
