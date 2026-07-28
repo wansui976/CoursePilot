@@ -12,6 +12,9 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
+// 问句切词元（中文按二字组）与文稿关键词检索共用同一套：
+// 两边对「什么算命中」的理解必须一致。
+use crate::pipeline::search_terms::query_terms;
 
 /// 课程知识分析进度：已处理视频数 / 总数 / 当前视频标题。逐视频推给前端渲染进度条。
 #[derive(Debug, Clone, Serialize)]
@@ -1024,59 +1027,6 @@ const COURSE_CHAT_SYSTEM: &str = "你是这门课程的学习助手，会收到�
 const COURSE_CHAT_NO_KNOWLEDGE_SYSTEM: &str = "你是这门课程的学习助手，但这门课程目前还没有分析出任何知识点。\
 请先用一句「这门课程还没有分析出知识点，以下回答来自我自己的知识」说明，再尽量帮用户解答；回答用中文、Markdown、简洁有条理。";
 
-/// 疑问句里的常见填充词：任何课程的解释里都可能出现，计分时会淹没真正的关键词。
-const CHAT_STOP_TERMS: &[&str] = &[
-    "什么", "怎么", "为什", "如何", "可以", "一下", "这个", "那个", "哪些", "请问", "帮我", "我想",
-    "the", "and", "what", "how", "why", "does", "is", "are", "of", "in", "to", "for", "this",
-    "that", "with", "about", "can",
-];
-
-/// 拉丁词按整词收；单字母（a/x）噪声太大，丢掉。
-fn push_word_term(word: &mut String, terms: &mut Vec<String>) {
-    if word.chars().count() >= 2 {
-        terms.push(word.clone());
-    }
-    word.clear();
-}
-
-/// 中文没有空格可切，按相邻二字组合成词元：既能命中「贝叶斯定理」的一部分，
-/// 又不像单字那样在任何课程里都命中。单字查询（如「熵」）保留原字。
-fn push_cjk_terms(run: &mut Vec<char>, terms: &mut Vec<String>) {
-    if run.len() == 1 {
-        terms.push(run[0].to_string());
-    } else {
-        for pair in run.windows(2) {
-            terms.push(pair.iter().collect());
-        }
-    }
-    run.clear();
-}
-
-/// 把问题切成匹配用的词元（小写、去重、去填充词）。纯函数，可单测。
-fn query_terms(query: &str) -> Vec<String> {
-    let mut terms: Vec<String> = Vec::new();
-    let mut word = String::new();
-    let mut run: Vec<char> = Vec::new();
-    // 末尾补一个空格，让最后一段词/中文串也走到 flush 分支。
-    for ch in query.to_lowercase().chars().chain(std::iter::once(' ')) {
-        if ch.is_ascii_alphanumeric() {
-            push_cjk_terms(&mut run, &mut terms);
-            word.push(ch);
-        } else if ch.is_alphanumeric() {
-            // 非 ASCII 的字母（中日韩等）都按「无空格分词」处理。
-            push_word_term(&mut word, &mut terms);
-            run.push(ch);
-        } else {
-            push_word_term(&mut word, &mut terms);
-            push_cjk_terms(&mut run, &mut terms);
-        }
-    }
-    terms.retain(|term| !CHAT_STOP_TERMS.contains(&term.as_str()));
-    terms.sort();
-    terms.dedup();
-    terms
-}
-
 /// 知识点与问题的相关度：名称命中权重最高，其次摘要，再是解释与字幕摘录。
 /// 计的是「命中了几个不同词元」而非出现次数，长解释不会靠反复出现同一个词压过名称命中；
 /// 摘录取最高的一处，出现次数多的知识点不因此虚高。
@@ -1887,20 +1837,6 @@ mod tests {
         assert!(ctx.len() < CHAT_OUTLINE_BYTES + 1_000);
         // 截断要说明，否则模型会把残缺名录当成课程的完整清单。
         assert!(ctx.contains("其余知识点已省略"));
-    }
-
-    #[test]
-    fn query_terms_splits_cjk_into_bigrams_and_drops_fillers() {
-        let terms = query_terms("贝叶斯定理怎么用 Bayes");
-        assert!(terms.contains(&"贝叶".to_string()));
-        assert!(terms.contains(&"叶斯".to_string()));
-        assert!(terms.contains(&"定理".to_string()));
-        assert!(terms.contains(&"bayes".to_string()));
-        // 疑问填充词不参与计分，否则任何含「怎么」的解释都算命中。
-        assert!(!terms.contains(&"怎么".to_string()));
-        // 单字查询保留原字，否则「熵」这类问题一个词元都没有。
-        assert_eq!(query_terms("熵"), vec!["熵".to_string()]);
-        assert!(query_terms("").is_empty());
     }
 
     #[test]

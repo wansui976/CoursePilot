@@ -9,6 +9,7 @@ pub mod download;
 pub mod ocr;
 pub mod playable;
 pub mod rag;
+pub mod search_terms;
 pub mod silence;
 pub mod slides;
 pub mod subtitle;
