@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useSilenceSkip } from "@/lib/useSilenceSkip";
+import { useSmartRate } from "@/lib/useSmartRate";
 import { ipc } from "@/lib/ipc";
 import { posKey, durKey, syncPlaybackProgress } from "@/lib/playback";
 import { isIOS } from "@/lib/platform";
+import { findActiveSegmentIndex } from "@/lib/transcript";
 import { useWatchLogger } from "@/lib/useWatchLogger";
-import { useSilenceSkip } from "@/lib/useSilenceSkip";
-import { useSmartRate } from "@/lib/useSmartRate";
 import { usePlayer } from "@/stores/player";
 import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
 import { CaptionOverlay } from "./CaptionOverlay";
@@ -114,23 +115,28 @@ export function VideoPlayer({
   });
   const smartRate = useSmartRate(segments);
   // 字幕跳转用：始终持有按 start_ms 排好序的最新分句，供键盘处理器读取（避免闭包过期）。
+  const sortedSegments = useMemo(
+    () => [...segments].sort((a, b) => a.start_ms - b.start_ms),
+    [segments],
+  );
   const segmentsRef = useRef<typeof segments>([]);
   useEffect(() => {
-    segmentsRef.current = [...segments].sort((a, b) => a.start_ms - b.start_ms);
-  }, [segments]);
+    segmentsRef.current = sortedSegments;
+  }, [sortedSegments]);
 
   // 跟随播放进度更新字幕：订阅播放器 store，但只在字幕文本变化时才 setState，
   // 避免每个 currentMs tick 都重渲染。
   useEffect(() => {
     const compute = (ms: number) => {
-      const text = segmentsRef.current.find(
-        (segment) => ms >= segment.start_ms && ms < segment.end_ms,
-      )?.text;
+      const index = findActiveSegmentIndex(sortedSegments, ms);
+      const text = index >= 0 ? sortedSegments[index].text : undefined;
       setCaption((prev) => (prev === text ? prev : text));
     };
     compute(usePlayer.getState().currentMs);
-    return usePlayer.subscribe((state) => compute(state.currentMs));
-  }, [segments]);
+    return usePlayer.subscribe((state, previousState) => {
+      if (state.currentMs !== previousState.currentMs) compute(state.currentMs);
+    });
+  }, [sortedSegments]);
 
   useLayoutEffect(() => {
     ref.current?.setAttribute("webkit-playsinline", "true");
@@ -692,7 +698,8 @@ export function VideoPlayer({
               transform: "translateZ(0)",
               willChange: "transform",
               backfaceVisibility: "hidden",
-              filter: `brightness(${brightness})`,
+              // A no-op filter still creates extra compositing work for video frames.
+              filter: brightness < 1 ? `brightness(${brightness})` : undefined,
             }}
             onTimeUpdate={(event) => {
               // 跳停顿：落在无声区间里就直接跃过去，跳完这一轮不再按旧位置记进度。

@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ConceptsPanel } from "./ConceptsPanel";
+import { ConceptsPanel, type ConceptNavigationState } from "./ConceptsPanel";
 
 const {
   get,
@@ -13,6 +13,7 @@ const {
   dueByConcept,
   review,
   generate,
+  generateForConcept,
 } = vi.hoisted(() => ({
   get: vi.fn(),
   analyze: vi.fn(),
@@ -22,19 +23,30 @@ const {
   dueByConcept: vi.fn(),
   review: vi.fn(),
   generate: vi.fn(),
+  generateForConcept: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({
   ipc: {
     concepts: { get, analyze, cancelAnalyze, summarize },
-    srs: { conceptDueCounts, dueByConcept, review, generate },
+    srs: { conceptDueCounts, dueByConcept, review, generate, generateForConcept },
   },
 }));
 
-function renderPanel(onJump = vi.fn(), onClose = vi.fn()) {
+function renderPanel(
+  onJump = vi.fn(),
+  onClose = vi.fn(),
+  initialNavigationState: ConceptNavigationState | undefined = undefined,
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
-      <ConceptsPanel courseId="c1" courseName="申论" onClose={onClose} onJump={onJump} />
+      <ConceptsPanel
+        courseId="c1"
+        courseName="申论"
+        onClose={onClose}
+        onJump={onJump}
+        initialNavigationState={initialNavigationState}
+      />
     </QueryClientProvider>,
   );
   return { onJump, onClose };
@@ -88,9 +100,10 @@ describe("ConceptsPanel", () => {
     dueByConcept.mockReset().mockResolvedValue([]);
     review.mockReset().mockResolvedValue(undefined);
     generate.mockReset().mockResolvedValue(3);
+    generateForConcept.mockReset().mockResolvedValue(3);
   });
 
-  it("shows a course overview, concept summary, AI explanation, and clickable source jumps", async () => {
+  it("shows a course overview, concept summary, AI explanation, and clickable subtitle evidence", async () => {
     const { onJump } = renderPanel();
 
     expect(await screen.findByText(knowledge.overview)).toBeInTheDocument();
@@ -102,14 +115,55 @@ describe("ConceptsPanel", () => {
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(disclosure);
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
-    // 展开后展示 AI 解释，而不是原始字幕。
+    // 展开后同时展示 AI 解释和可核验的真实字幕片段。
     expect(await screen.findByText(concept.explanation)).toBeInTheDocument();
-    expect(screen.queryByText("先验概率会随着新的证据被更新。")).not.toBeInTheDocument();
+    const excerpt = screen.getByText("先验概率会随着新的证据被更新。");
+    expect(excerpt).toBeInTheDocument();
+    expect(excerpt).toHaveClass("line-clamp-2");
     expect(screen.getByText("第一讲")).toBeInTheDocument();
     expect(screen.queryByText("第一讲.mp4")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "回看 第一讲 01:05" }));
-    expect(onJump).toHaveBeenCalledWith("v1", 65000);
+    const sourceButton = screen.getByRole("button", { name: "回看 第一讲 01:05" });
+    expect(sourceButton).toHaveClass("min-h-11", "ca-touch-44");
+    const scroller = screen.getByRole("main").parentElement!;
+    scroller.scrollTop = 180;
+    fireEvent.click(sourceButton);
+    expect(onJump).toHaveBeenCalledWith("v1", 65000, {
+      conceptId: "k1",
+      conceptName: "贝叶斯定理",
+      search: "",
+      expandedConceptId: "k1",
+      scrollTop: 180,
+    });
+  });
+
+  it("uses real due counts for the next step and otherwise continues from a source", async () => {
+    const { onJump } = renderPanel();
+
+    expect(await screen.findByText("当前没有到期卡")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "继续学习" }));
+    expect(onJump).toHaveBeenCalledWith(
+      "v1",
+      65000,
+      expect.objectContaining({ conceptId: "k1", expandedConceptId: "k1" }),
+    );
+  });
+
+  it("restores the search, expanded concept, and scroll position after returning", async () => {
+    renderPanel(vi.fn(), vi.fn(), {
+      conceptId: "k1",
+      conceptName: "贝叶斯定理",
+      search: "贝叶斯",
+      expandedConceptId: "k1",
+      scrollTop: 240,
+    });
+
+    expect(await screen.findByRole("searchbox", { name: "搜索课程知识" })).toHaveValue("贝叶斯");
+    expect(screen.getByRole("button", { name: /贝叶斯定理/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    await waitFor(() => expect(screen.getByRole("main").parentElement).toHaveProperty("scrollTop", 240));
   });
 
   it("renders the AI explanation as markdown, not raw text", async () => {
@@ -153,11 +207,69 @@ describe("ConceptsPanel", () => {
       target: { value: "条件概率" },
     });
     expect(await screen.findByText("贝叶斯定理")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /贝叶斯定理/ }));
+    const region = await screen.findByRole("region", { name: "贝叶斯定理的解释与来源" });
+    expect(await within(region).findByText("条件概率", { selector: "mark" })).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("searchbox", { name: "搜索课程知识" }), {
       target: { value: "不存在" },
     });
     expect(await screen.findByText("没有匹配“不存在”的知识点。")).toBeInTheDocument();
+  });
+
+  it("shows three sources by default and provides an accessible expand and collapse control", async () => {
+    const occurrences = [
+      ...concept.occurrences,
+      {
+        video_id: "v3",
+        video_title: "第三讲.mp4",
+        start_ms: 15000,
+        end_ms: 19000,
+        excerpt: "第三处字幕证据。",
+      },
+      {
+        video_id: "v4",
+        video_title: "第四讲.mp4",
+        start_ms: 25000,
+        end_ms: 29000,
+        excerpt: "第四处字幕证据。",
+      },
+      {
+        video_id: "v5",
+        video_title: "第五讲.mp4",
+        start_ms: 35000,
+        end_ms: 39000,
+        excerpt: "第五处字幕证据。",
+      },
+    ];
+    get.mockResolvedValue({
+      ...knowledge,
+      groups: [
+        {
+          ...knowledge.groups[0],
+          concepts: [{ ...concept, occurrences }],
+        },
+      ],
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: /贝叶斯定理/ }));
+    const region = await screen.findByRole("region", { name: "贝叶斯定理的解释与来源" });
+    expect(within(region).getByText("第三处字幕证据。")).toBeInTheDocument();
+    expect(within(region).queryByText("第四处字幕证据。")).not.toBeInTheDocument();
+    expect(within(region).queryByText("第五处字幕证据。")).not.toBeInTheDocument();
+
+    const expand = within(region).getByRole("button", { name: "展开其余 2 条来源" });
+    expect(expand).toHaveAttribute("aria-expanded", "false");
+    expect(expand).toHaveAttribute("aria-controls", "concept-sources-k1");
+    fireEvent.click(expand);
+
+    expect(within(region).getByText("第四处字幕证据。")).toBeInTheDocument();
+    expect(within(region).getByText("第五处字幕证据。")).toBeInTheDocument();
+    const collapse = within(region).getByRole("button", { name: "收起来源" });
+    expect(collapse).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(collapse);
+    expect(within(region).queryByText("第四处字幕证据。")).not.toBeInTheDocument();
   });
 
   it("shows a per-concept review button and launches a scoped review session", async () => {
@@ -167,6 +279,7 @@ describe("ConceptsPanel", () => {
     ]);
     renderPanel();
 
+    expect(await screen.findByText("本课程共 2 张到期卡")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: /复习 2/ }));
     await waitFor(() => expect(dueByConcept).toHaveBeenCalledWith("c1", "k1"));
     expect(await screen.findByText("卡片正面")).toBeInTheDocument();
@@ -213,29 +326,27 @@ describe("ConceptsPanel", () => {
     ).toBeInTheDocument();
   });
 
-  it("lets a concept without due cards pull cards from its videos", async () => {
+  it("lets a concept without due cards generate only concept-scoped cards", async () => {
     renderPanel();
 
     fireEvent.click(await screen.findByRole("button", { name: /贝叶斯定理/ }));
     expect(screen.queryByRole("button", { name: /复习 / })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "生成复习卡" }));
-    // 该知识点出现过的每个视频都出一次卡（去重后 v1、v2）。
-    await waitFor(() => expect(generate).toHaveBeenCalledTimes(2));
-    expect(generate).toHaveBeenCalledWith("v1");
-    expect(generate).toHaveBeenCalledWith("v2");
-    expect(await screen.findByText(/已整理 6 张复习卡/)).toBeInTheDocument();
+    await waitFor(() => expect(generateForConcept).toHaveBeenCalledWith("c1", "k1"));
+    expect(generate).not.toHaveBeenCalled();
+    expect(await screen.findByText(/已整理 3 张复习卡/)).toBeInTheDocument();
   });
 
-  it("tells the user to generate a quiz first when no cards could be made", async () => {
-    generate.mockResolvedValue(0);
+  it("explains both reasons when no concept-scoped cards could be made", async () => {
+    generateForConcept.mockResolvedValue(0);
     renderPanel();
 
     fireEvent.click(await screen.findByRole("button", { name: /贝叶斯定理/ }));
     fireEvent.click(screen.getByRole("button", { name: "生成复习卡" }));
 
     expect(
-      await screen.findByText("相关视频还没有 AI 出题结果，请先在视频页生成测验。"),
+      await screen.findByText("相关视频尚无 AI 题目，或题目出处不在这个知识点范围内。"),
     ).toBeInTheDocument();
   });
 

@@ -79,6 +79,7 @@ pub async fn run_aliyun_ocr(
         .header("x-acs-date", &date)
         .header("x-acs-signature-nonce", &nonce)
         .header("x-acs-version", VERSION)
+        .timeout(std::time::Duration::from_secs(30))
         .body(image.to_vec())
         .send()
         .await

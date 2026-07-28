@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		01C94543AB5A60D400F0FA6F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 7919E1277F043231350D350B /* LaunchScreen.storyboard */; };
 		614952CA97648BFE458A15F0 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 8B92F7107AAAD22E5876F46C /* libapp.a */; };
+		7763ED898B64AF0BE98B3E5E /* CloudKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 84EFC626C1C20F24A827BBB0 /* CloudKit.framework */; };
 		86D2D1CC9D4B980BB666CA34 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8ACB6FE5A0AFBACEB2B621F2 /* MetalKit.framework */; };
 		A41A7F943E3389707C443AB8 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4C523DF21CC35F02AB80EAEB /* CoreGraphics.framework */; };
 		C43896CE771D0C09551C0AC6 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = F69052E1134D52D507625EE9 /* main.mm */; };
@@ -23,20 +24,29 @@
 
 /* Begin PBXFileReference section */
 		0070887AED9638790B8C6D49 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
+		0CC7BE7259ECB05AD1946B9F /* envelope.rs */ = {isa = PBXFileReference; path = envelope.rs; sourceTree = "<group>"; };
 		0E48D0CF1F0D3C511CE71A7A /* audio.rs */ = {isa = PBXFileReference; path = audio.rs; sourceTree = "<group>"; };
+		1659208A8FB250036F4ACB15 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
 		198DF8065B8D238CDAEDB4DD /* profiles.rs */ = {isa = PBXFileReference; path = profiles.rs; sourceTree = "<group>"; };
 		280A4D285008854E15B2FD55 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		28D7A2DBDC049CF586178EE9 /* stats.rs */ = {isa = PBXFileReference; path = stats.rs; sourceTree = "<group>"; };
+		2A1C802311B91762FAE36447 /* silence.rs */ = {isa = PBXFileReference; path = silence.rs; sourceTree = "<group>"; };
 		2A5B42B186D8E17E37817751 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
 		2F5DE34096187B688209009B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		30F213FAB00B59B7DD7120C7 /* slides.rs */ = {isa = PBXFileReference; path = slides.rs; sourceTree = "<group>"; };
 		328DD14B5DC83DC25E3DBAE3 /* sidecar.rs */ = {isa = PBXFileReference; path = sidecar.rs; sourceTree = "<group>"; };
 		3CC0459CA2D96C08CE7D3501 /* transcript_correction.rs */ = {isa = PBXFileReference; path = transcript_correction.rs; sourceTree = "<group>"; };
+		3D78A72EF688091EA5C2FBB8 /* cloud_sync.rs */ = {isa = PBXFileReference; path = cloud_sync.rs; sourceTree = "<group>"; };
 		3F0B586F1EE23B9760183758 /* courses.rs */ = {isa = PBXFileReference; path = courses.rs; sourceTree = "<group>"; };
+		40F72876CBE465AEDFE5D867 /* sync.rs */ = {isa = PBXFileReference; path = sync.rs; sourceTree = "<group>"; };
 		4C523DF21CC35F02AB80EAEB /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		4D249D891C5C0D04C0074343 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
 		53E9A89565B82A527937D720 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		54F7158007E928EA1DE59837 /* videos.rs */ = {isa = PBXFileReference; path = videos.rs; sourceTree = "<group>"; };
+		571B045A449EA6FDCC0C1443 /* clips.rs */ = {isa = PBXFileReference; path = clips.rs; sourceTree = "<group>"; };
+		576CCC7D0403F49B783A0D40 /* silence.rs */ = {isa = PBXFileReference; path = silence.rs; sourceTree = "<group>"; };
 		62BF5B4CB615CBAAD548E376 /* playable.rs */ = {isa = PBXFileReference; path = playable.rs; sourceTree = "<group>"; };
+		65306C450127E868FCED992A /* srs.rs */ = {isa = PBXFileReference; path = srs.rs; sourceTree = "<group>"; };
 		654E237CFF1EB4BBD2D61248 /* subtitle.rs */ = {isa = PBXFileReference; path = subtitle.rs; sourceTree = "<group>"; };
 		68898FB511AA8FBF0BDD714F /* anthropic.rs */ = {isa = PBXFileReference; path = anthropic.rs; sourceTree = "<group>"; };
 		6A548B63B67F6C4C322EC4F8 /* course-ai_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "course-ai_iOS.entitlements"; sourceTree = "<group>"; };
@@ -48,9 +58,12 @@
 		75F9F7A7F4EDC749D3F171D2 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		78DEF8C30E238CE48025C39C /* storage.rs */ = {isa = PBXFileReference; path = storage.rs; sourceTree = "<group>"; };
 		7919E1277F043231350D350B /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		7AB5D24E36F7C5DB615999AD /* concepts.rs */ = {isa = PBXFileReference; path = concepts.rs; sourceTree = "<group>"; };
 		835618D25953022642728742 /* rag.rs */ = {isa = PBXFileReference; path = rag.rs; sourceTree = "<group>"; };
 		839D6BD7531FB4E2F6964DD1 /* export.rs */ = {isa = PBXFileReference; path = export.rs; sourceTree = "<group>"; };
+		84EFC626C1C20F24A827BBB0 /* CloudKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CloudKit.framework; path = System/Library/Frameworks/CloudKit.framework; sourceTree = SDKROOT; };
 		8827E60C96389E9C0390A81D /* asr.rs */ = {isa = PBXFileReference; path = asr.rs; sourceTree = "<group>"; };
+		8A3D2A2DEC94D09711D6324F /* concepts.rs */ = {isa = PBXFileReference; path = concepts.rs; sourceTree = "<group>"; };
 		8ACB6FE5A0AFBACEB2B621F2 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		8B92F7107AAAD22E5876F46C /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		8C697D00FDB914D9F9C171A0 /* aliyun_ocr.rs */ = {isa = PBXFileReference; path = aliyun_ocr.rs; sourceTree = "<group>"; };
@@ -59,7 +72,9 @@
 		92D623BCDD4486B71EF0F4D3 /* volcengine_auc.rs */ = {isa = PBXFileReference; path = volcengine_auc.rs; sourceTree = "<group>"; };
 		933A306ED743B4DF002128BC /* dev_log.rs */ = {isa = PBXFileReference; path = dev_log.rs; sourceTree = "<group>"; };
 		99BD9C106A769AD351EDE5ED /* jobs.rs */ = {isa = PBXFileReference; path = jobs.rs; sourceTree = "<group>"; };
+		9B31FFA14BA0B119D8AD4977 /* identity.rs */ = {isa = PBXFileReference; path = identity.rs; sourceTree = "<group>"; };
 		A0BE9B8E7D6536BE9400F02E /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		A1E14FFEE3E9CCBAA64C2865 /* apple_vision.rs */ = {isa = PBXFileReference; path = apple_vision.rs; sourceTree = "<group>"; };
 		A4745C607647C457546B30CF /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
 		A69292E349BF266D832BE341 /* keychain.rs */ = {isa = PBXFileReference; path = keychain.rs; sourceTree = "<group>"; };
 		A97DBABFC852D7848DDEFE2A /* transcripts.rs */ = {isa = PBXFileReference; path = transcripts.rs; sourceTree = "<group>"; };
@@ -78,11 +93,14 @@
 		D001F9B6B5902764627E74BA /* slides.rs */ = {isa = PBXFileReference; path = slides.rs; sourceTree = "<group>"; };
 		D431B794A9518EC545D3FE66 /* ai.rs */ = {isa = PBXFileReference; path = ai.rs; sourceTree = "<group>"; };
 		D6BD509ED3D00CCADA7EE378 /* course-ai_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "course-ai_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		DA0F32E7A5233AA418A29A5E /* notify.rs */ = {isa = PBXFileReference; path = notify.rs; sourceTree = "<group>"; };
 		DB4C67C402A987A0D1A22A4E /* download.rs */ = {isa = PBXFileReference; path = download.rs; sourceTree = "<group>"; };
 		DB7195B2CDC8FE97C9AD2C84 /* media_server.rs */ = {isa = PBXFileReference; path = media_server.rs; sourceTree = "<group>"; };
 		DD478A730AA0F12D0031D59B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		DFA0DAEA98617AFC52F42090 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		F59F6059FCCAB83361FAE97F /* spool.rs */ = {isa = PBXFileReference; path = spool.rs; sourceTree = "<group>"; };
 		F69052E1134D52D507625EE9 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
+		FB4F96FF2592D11BDB558EDF /* outbox.rs */ = {isa = PBXFileReference; path = outbox.rs; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -92,6 +110,7 @@
 			files = (
 				614952CA97648BFE458A15F0 /* libapp.a in Frameworks */,
 				A41A7F943E3389707C443AB8 /* CoreGraphics.framework in Frameworks */,
+				7763ED898B64AF0BE98B3E5E /* CloudKit.framework in Frameworks */,
 				EB19DD653C12FA2791D04580 /* Metal.framework in Frameworks */,
 				86D2D1CC9D4B980BB666CA34 /* MetalKit.framework in Frameworks */,
 				F44167AA4AD6BF9A48E3A080 /* QuartzCore.framework in Frameworks */,
@@ -121,6 +140,7 @@
 		2AC278A4C170ECD21C874598 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				84EFC626C1C20F24A827BBB0 /* CloudKit.framework */,
 				4C523DF21CC35F02AB80EAEB /* CoreGraphics.framework */,
 				8B92F7107AAAD22E5876F46C /* libapp.a */,
 				DFA0DAEA98617AFC52F42090 /* Metal.framework */,
@@ -139,14 +159,17 @@
 				D431B794A9518EC545D3FE66 /* ai.rs */,
 				6BAEF70551F2F12F62CEB0B7 /* aliyun_asr.rs */,
 				8C697D00FDB914D9F9C171A0 /* aliyun_ocr.rs */,
+				A1E14FFEE3E9CCBAA64C2865 /* apple_vision.rs */,
 				8827E60C96389E9C0390A81D /* asr.rs */,
 				0E48D0CF1F0D3C511CE71A7A /* audio.rs */,
+				8A3D2A2DEC94D09711D6324F /* concepts.rs */,
 				C1A960C0267BE7D9802CCD98 /* crop_detect.rs */,
 				DB4C67C402A987A0D1A22A4E /* download.rs */,
 				A4745C607647C457546B30CF /* mod.rs */,
 				6D0A26B8137D8146B4BEEF72 /* ocr.rs */,
 				62BF5B4CB615CBAAD548E376 /* playable.rs */,
 				B92E36528DDA3661AB5250EB /* rag.rs */,
+				2A1C802311B91762FAE36447 /* silence.rs */,
 				D001F9B6B5902764627E74BA /* slides.rs */,
 				654E237CFF1EB4BBD2D61248 /* subtitle.rs */,
 				3CC0459CA2D96C08CE7D3501 /* transcript_correction.rs */,
@@ -160,12 +183,19 @@
 			isa = PBXGroup;
 			children = (
 				C570DFE91554405F1BB5DF2C /* ai.rs */,
+				571B045A449EA6FDCC0C1443 /* clips.rs */,
+				7AB5D24E36F7C5DB615999AD /* concepts.rs */,
 				3F0B586F1EE23B9760183758 /* courses.rs */,
 				839D6BD7531FB4E2F6964DD1 /* export.rs */,
 				280A4D285008854E15B2FD55 /* mod.rs */,
+				DA0F32E7A5233AA418A29A5E /* notify.rs */,
 				835618D25953022642728742 /* rag.rs */,
 				C85B7A806C022A75A1267534 /* settings.rs */,
+				576CCC7D0403F49B783A0D40 /* silence.rs */,
 				30F213FAB00B59B7DD7120C7 /* slides.rs */,
+				65306C450127E868FCED992A /* srs.rs */,
+				28D7A2DBDC049CF586178EE9 /* stats.rs */,
+				40F72876CBE465AEDFE5D867 /* sync.rs */,
 				6FB5D474D7F2076122D14B01 /* tools.rs */,
 				A97DBABFC852D7848DDEFE2A /* transcripts.rs */,
 				54F7158007E928EA1DE59837 /* videos.rs */,
@@ -222,6 +252,18 @@
 			path = "course-ai_iOS";
 			sourceTree = "<group>";
 		};
+		B36B4640558EE4DB287F3AE0 /* sync */ = {
+			isa = PBXGroup;
+			children = (
+				0CC7BE7259ECB05AD1946B9F /* envelope.rs */,
+				9B31FFA14BA0B119D8AD4977 /* identity.rs */,
+				1659208A8FB250036F4ACB15 /* mod.rs */,
+				FB4F96FF2592D11BDB558EDF /* outbox.rs */,
+				F59F6059FCCAB83361FAE97F /* spool.rs */,
+			);
+			path = sync;
+			sourceTree = "<group>";
+		};
 		FA0B640BE7143543B2C86C21 /* bindings */ = {
 			isa = PBXGroup;
 			children = (
@@ -233,6 +275,7 @@
 		FE99BD8F1E5779525699E12A /* src */ = {
 			isa = PBXGroup;
 			children = (
+				3D78A72EF688091EA5C2FBB8 /* cloud_sync.rs */,
 				CDE697C54933E17A0E89348A /* db.rs */,
 				933A306ED743B4DF002128BC /* dev_log.rs */,
 				CE16F1D7AB9E12BDE63FB442 /* error.rs */,
@@ -247,6 +290,7 @@
 				3928B114BB503EB693A59C3A /* commands */,
 				1A4FE5869E5803B95E7B2EC8 /* llm */,
 				32F575798FAC7FF0CABC9DF7 /* pipeline */,
+				B36B4640558EE4DB287F3AE0 /* sync */,
 			);
 			name = src;
 			path = ../../src;
@@ -403,7 +447,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -418,6 +462,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				APS_ENVIRONMENT = development;
 				ARCHS = (
 					arm64,
 				);
@@ -498,7 +543,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -514,6 +559,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				APS_ENVIRONMENT = production;
 				ARCHS = (
 					arm64,
 				);

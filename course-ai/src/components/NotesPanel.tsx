@@ -19,6 +19,7 @@ import { RagSearchPanel } from "./RagSearchPanel";
 import { TimestampToggle } from "./TimestampToggle";
 import { useTimestampPrefs } from "@/stores/timestampPrefs";
 import { useInlineAsk } from "@/stores/inlineAsk";
+import { NotesWriteQueue } from "@/lib/notesWriteQueue";
 
 // markmap 较重，仅在切到「脑图」时才加载。
 const QuizPanel = lazy(() =>
@@ -26,6 +27,10 @@ const QuizPanel = lazy(() =>
 );
 const MindmapPanel = lazy(() =>
   import("./MindmapPanel").then((m) => ({ default: m.MindmapPanel })),
+);
+
+const notesWriter = new NotesWriteQueue((videoId, contentJson) =>
+  ipc.ai.saveNotes(videoId, contentJson),
 );
 
 type View = "notes" | "quiz" | "mindmap" | "ask" | "search";
@@ -50,17 +55,22 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [saveError, setSaveError] = useState<unknown>(null);
 
-  const { data: notesContent } = useQuery({
+  const notesQuery = useQuery({
     queryKey: ["notes", videoId],
     queryFn: () => ipc.ai.getNotes(videoId),
   });
+  const notesContent = notesQuery.data;
 
   function debounceSave(json: string) {
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       saveTimer.current = undefined;
-      void ipc.ai.saveNotes(videoId, json);
+      void notesWriter.enqueue(videoId, json).then(
+        () => setSaveError(null),
+        (error) => setSaveError(error),
+      );
     }, 800);
   }
 
@@ -113,7 +123,11 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       if (saveTimer.current !== undefined) {
         clearTimeout(saveTimer.current);
         saveTimer.current = undefined;
-        if (editor) void ipc.ai.saveNotes(videoId, JSON.stringify(editor.getJSON()));
+        if (editor) {
+          void notesWriter
+            .enqueue(videoId, JSON.stringify(editor.getJSON()))
+            .catch(() => undefined);
+        }
       }
     };
   }, [videoId, editor]);
@@ -148,8 +162,11 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   }
 
   const generate = useMutation({
-    mutationFn: (task: "notes" | "quiz" | "mindmap") =>
-      ipc.ai.generate(videoId, task),
+    mutationFn: async (task: "notes" | "quiz" | "mindmap") => {
+      // An already-started autosave must finish before generation clears content_json.
+      await notesWriter.flush(videoId);
+      return ipc.ai.generate(videoId, task);
+    },
     // 取消可能挂起的自动保存，避免「删空笔记后生成」时旧的空内容把新笔记盖回去。
     onMutate: () => clearTimeout(saveTimer.current),
     onSuccess: (_d, task) => {
@@ -209,6 +226,25 @@ export function NotesPanel({ videoId }: { videoId: string }) {
           onRetry={currentTask ? () => generate.mutate(currentTask) : undefined}
         />
       )}
+      {saveError != null && (
+        <ErrorNote
+          className="mx-3 mb-2"
+          error={saveError}
+          onRetry={() => {
+            void notesWriter.flush(videoId).then(
+              () => setSaveError(null),
+              (error) => setSaveError(error),
+            );
+          }}
+        />
+      )}
+      {view === "notes" && notesQuery.isError && (
+        <ErrorNote
+          className="mx-3 mb-2"
+          error={notesQuery.error}
+          onRetry={() => void notesQuery.refetch()}
+        />
+      )}
       {view === "ask" || view === "search" ? (
         // 问答/搜索自带满高布局 + 底部输入栏，不套外层滚动容器（否则底部输入栏会被 pb 挤上去）。
         <div className="min-h-0 flex-1">
@@ -228,7 +264,14 @@ export function NotesPanel({ videoId }: { videoId: string }) {
           className="min-h-0 flex-1 overflow-y-auto pb-12"
           onScroll={rememberNotesScroll}
         >
-          {view === "notes" && <EditorContent editor={editor} />}
+          {view === "notes" &&
+            (notesQuery.isPending ? (
+              <div className="p-4">
+                <TextSkeleton lines={5} />
+              </div>
+            ) : notesQuery.isError ? null : (
+              <EditorContent editor={editor} />
+            ))}
           {(view === "quiz" || view === "mindmap") && (
             <Suspense fallback={<TextSkeleton lines={5} />}>
               {view === "quiz" && <QuizPanel videoId={videoId} />}

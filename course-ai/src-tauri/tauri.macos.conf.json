@@ -2,7 +2,9 @@
   "bundle": {
     "externalBin": ["binaries/ffmpeg", "binaries/yt-dlp"],
     "macOS": {
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "minimumSystemVersion": "14.0",
+      "entitlements": "Entitlements.plist"
     }
   }
 }

@@ -67,7 +67,8 @@ cd src-tauri && cargo test
 ## Phase 3 / 4 Scope
 
 - **课件 (slides)**: ffmpeg scene-change frame extraction, 课件 tab grid, 视频截图
-- **OCR (截字)**: ffmpeg crop + tesseract (runtime needs `tesseract` + `chi_sim`)
+- **OCR (截字)**: Apple Vision on macOS/iOS, bundled ML Kit Chinese on Android,
+  and Tesseract (`tesseract` + `chi_sim`) as the other desktop fallback
 - **课程问答 / 文稿搜索**: ask mode sends transcript context to the configured
   LLM; search mode does local transcript keyword matching
 - **Export**: subtitles SRT/VTT, notes Markdown, mindmap SVG
@@ -147,4 +148,5 @@ cd src-tauri && cargo test
 See `docs/superpowers/STATUS.md` for the full implementation status, the two
 documented spec deviations (enum provider, settings-table key storage), and
 what still needs your machine (installer packaging, keychain hardening,
-optional PiP, and the runtime binaries `tesseract` / `yt-dlp`).
+optional PiP, and the runtime binaries `yt-dlp` plus Tesseract on fallback
+desktop platforms).

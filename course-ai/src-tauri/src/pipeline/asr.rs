@@ -48,11 +48,23 @@ pub struct StoredSegment {
     pub words_json: String,
 }
 
-/// 覆盖式写入 transcripts。
-pub async fn store_segments(db: &Db, video_id: &str, segs: &[StoredSegment]) -> AppResult<usize> {
+fn require_segments(segs: &[StoredSegment]) -> AppResult<()> {
+    if segs.is_empty() {
+        return Err(AppError::Pipeline(
+            "refusing to replace transcript with no segments".into(),
+        ));
+    }
+    Ok(())
+}
+
+async fn replace_segments_on_connection(
+    connection: &mut sqlx::SqliteConnection,
+    video_id: &str,
+    segs: &[StoredSegment],
+) -> AppResult<()> {
     sqlx::query("DELETE FROM transcripts WHERE video_id=?")
         .bind(video_id)
-        .execute(&db.pool)
+        .execute(&mut *connection)
         .await?;
     for (idx, seg) in segs.iter().enumerate() {
         sqlx::query(
@@ -65,9 +77,18 @@ pub async fn store_segments(db: &Db, video_id: &str, segs: &[StoredSegment]) -> 
         .bind(seg.end_ms)
         .bind(seg.text.trim())
         .bind(&seg.words_json)
-        .execute(&db.pool)
+        .execute(&mut *connection)
         .await?;
     }
+    Ok(())
+}
+
+/// 覆盖式写入 transcripts。删除和全部插入必须作为一个原子替换提交。
+pub async fn store_segments(db: &Db, video_id: &str, segs: &[StoredSegment]) -> AppResult<usize> {
+    require_segments(segs)?;
+    let mut tx = db.pool.begin().await?;
+    replace_segments_on_connection(&mut tx, video_id, segs).await?;
+    tx.commit().await?;
     Ok(segs.len())
 }
 
@@ -100,6 +121,41 @@ pub async fn store_segments_backup(
     .execute(&db.pool)
     .await?;
     Ok(())
+}
+
+/// 在同一事务内保存原始快照并替换正式文稿，避免其中一步成功、另一步失败。
+pub async fn store_segments_with_backup(
+    db: &Db,
+    video_id: &str,
+    source: &str,
+    segs: &[StoredSegment],
+) -> AppResult<usize> {
+    require_segments(segs)?;
+    let backup: Vec<TranscriptBackupSegment> = segs
+        .iter()
+        .enumerate()
+        .map(|(idx, seg)| TranscriptBackupSegment {
+            segment_idx: idx as i64,
+            start_ms: seg.start_ms,
+            end_ms: seg.end_ms,
+            text: seg.text.trim().to_string(),
+            words_json: seg.words_json.clone(),
+        })
+        .collect();
+    let mut tx = db.pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO transcript_backups(video_id,source,segments_json,created_at)
+         VALUES (?,?,?,?)",
+    )
+    .bind(video_id)
+    .bind(source)
+    .bind(serde_json::to_string(&backup)?)
+    .bind(chrono::Utc::now().timestamp_millis())
+    .execute(&mut *tx)
+    .await?;
+    replace_segments_on_connection(&mut tx, video_id, segs).await?;
+    tx.commit().await?;
+    Ok(segs.len())
 }
 
 /// 把 whisper JSON 转成通用段（words_json 由 tokens 序列化）。
@@ -216,6 +272,15 @@ pub async fn run_whisper(
 pub async fn store_transcripts(db: &Db, video_id: &str, json: &WhisperJson) -> AppResult<usize> {
     let segs = whisper_to_segments(json)?;
     store_segments(db, video_id, &segs).await
+}
+
+pub async fn store_transcripts_with_raw_backup(
+    db: &Db,
+    video_id: &str,
+    json: &WhisperJson,
+) -> AppResult<usize> {
+    let segs = whisper_to_segments(json)?;
+    store_segments_with_backup(db, video_id, "raw_asr", &segs).await
 }
 
 pub async fn store_raw_transcript_backup(
@@ -358,6 +423,111 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(source, "bilibili_sub");
+    }
+
+    #[tokio::test]
+    async fn empty_replacement_keeps_existing_transcript() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let vpath = dir.path().join("v.mp4");
+        std::fs::write(&vpath, b"x").unwrap();
+        let video = add_local_video(&db, &course.id, vpath, None).await.unwrap();
+        let old = vec![StoredSegment {
+            start_ms: 0,
+            end_ms: 1_000,
+            text: "old".into(),
+            words_json: "[]".into(),
+        }];
+        store_segments(&db, &video.id, &old).await.unwrap();
+
+        assert!(store_segments_with_backup(&db, &video.id, "raw_asr", &[])
+            .await
+            .is_err());
+
+        let texts: Vec<String> = sqlx::query_scalar(
+            "SELECT text FROM transcripts WHERE video_id=? ORDER BY segment_idx",
+        )
+        .bind(&video.id)
+        .fetch_all(&db.pool)
+        .await
+        .unwrap();
+        assert_eq!(texts, vec!["old"]);
+        let backups: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM transcript_backups WHERE video_id=?")
+                .bind(&video.id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(backups, 0);
+    }
+
+    #[tokio::test]
+    async fn transcript_and_backup_roll_back_when_replacement_insert_fails() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let vpath = dir.path().join("v.mp4");
+        std::fs::write(&vpath, b"x").unwrap();
+        let video = add_local_video(&db, &course.id, vpath, None).await.unwrap();
+        let old = vec![StoredSegment {
+            start_ms: 0,
+            end_ms: 1_000,
+            text: "old".into(),
+            words_json: "[]".into(),
+        }];
+        store_segments(&db, &video.id, &old).await.unwrap();
+        sqlx::query(
+            "CREATE TRIGGER fail_second_transcript BEFORE INSERT ON transcripts
+             WHEN NEW.segment_idx=1 BEGIN SELECT RAISE(ABORT, 'test failure'); END",
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        let replacement = vec![
+            StoredSegment {
+                start_ms: 0,
+                end_ms: 1_000,
+                text: "new one".into(),
+                words_json: "[]".into(),
+            },
+            StoredSegment {
+                start_ms: 1_000,
+                end_ms: 2_000,
+                text: "new two".into(),
+                words_json: "[]".into(),
+            },
+        ];
+
+        assert!(
+            store_segments_with_backup(&db, &video.id, "raw_asr", &replacement)
+                .await
+                .is_err()
+        );
+
+        let texts: Vec<String> = sqlx::query_scalar(
+            "SELECT text FROM transcripts WHERE video_id=? ORDER BY segment_idx",
+        )
+        .bind(&video.id)
+        .fetch_all(&db.pool)
+        .await
+        .unwrap();
+        assert_eq!(texts, vec!["old"]);
+        let backups: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM transcript_backups WHERE video_id=?")
+                .bind(&video.id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(backups, 0);
     }
 
     #[tokio::test]

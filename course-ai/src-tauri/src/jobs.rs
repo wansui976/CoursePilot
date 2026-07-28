@@ -35,40 +35,30 @@ pub struct Job {
 }
 
 pub async fn ensure_jobs(db: &Db, video_id: &str) -> AppResult<Vec<Job>> {
+    let mut tx = db.pool.begin().await?;
     let mut output = Vec::new();
     for stage in STAGES {
-        let existing: Option<Job> =
-            sqlx::query_as("SELECT * FROM processing_jobs WHERE video_id=? AND stage=?")
-                .bind(video_id)
-                .bind(stage)
-                .fetch_optional(&db.pool)
-                .await?;
-        if let Some(job) = existing {
-            output.push(job);
-            continue;
-        }
         let id = Uuid::new_v4().to_string();
         sqlx::query(
-            "INSERT INTO processing_jobs(id,video_id,stage,status,progress) VALUES (?,?,?,?,?)",
+            "INSERT INTO processing_jobs(id,video_id,stage,status,progress)
+             VALUES (?,?,?,?,?)
+             ON CONFLICT(video_id,stage) DO NOTHING",
         )
         .bind(&id)
         .bind(video_id)
         .bind(stage)
         .bind("pending")
         .bind(0.0)
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await?;
-        output.push(Job {
-            id,
-            video_id: video_id.into(),
-            stage: stage.to_string(),
-            status: "pending".into(),
-            progress: 0.0,
-            message: None,
-            started_at: None,
-            finished_at: None,
-        });
+        let job = sqlx::query_as("SELECT * FROM processing_jobs WHERE video_id=? AND stage=?")
+            .bind(video_id)
+            .bind(stage)
+            .fetch_one(&mut *tx)
+            .await?;
+        output.push(job);
     }
+    tx.commit().await?;
     Ok(output)
 }
 
@@ -209,5 +199,77 @@ mod tests {
         assert_eq!(restarted_audio.status, "running");
         assert_eq!(restarted_audio.finished_at, None);
         assert!(restarted_audio.progress < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn concurrent_ensure_jobs_reuses_one_row_per_stage() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let video_path = dir.path().join("v.mp4");
+        std::fs::write(&video_path, b"x").unwrap();
+        let video = add_local_video(&db, &course.id, video_path, None)
+            .await
+            .unwrap();
+
+        let (first, second) =
+            tokio::join!(ensure_jobs(&db, &video.id), ensure_jobs(&db, &video.id));
+        let first = first.unwrap();
+        let second = second.unwrap();
+
+        assert_eq!(first.len(), STAGES.len());
+        assert_eq!(second.len(), STAGES.len());
+        for stage in STAGES {
+            let first_id = &first.iter().find(|job| &job.stage == stage).unwrap().id;
+            let second_id = &second.iter().find(|job| &job.stage == stage).unwrap().id;
+            assert_eq!(first_id, second_id);
+        }
+        let row_count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM processing_jobs WHERE video_id=?")
+                .bind(&video.id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(row_count.0, STAGES.len() as i64);
+    }
+
+    #[tokio::test]
+    async fn ensure_jobs_rolls_back_partial_initialization() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let video_path = dir.path().join("v.mp4");
+        std::fs::write(&video_path, b"x").unwrap();
+        let video = add_local_video(&db, &course.id, video_path, None)
+            .await
+            .unwrap();
+        sqlx::raw_sql(
+            "CREATE TRIGGER reject_chapters
+             BEFORE INSERT ON processing_jobs
+             WHEN NEW.stage = 'chapters'
+             BEGIN
+               SELECT RAISE(ABORT, 'test failure');
+             END;",
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        assert!(ensure_jobs(&db, &video.id).await.is_err());
+        let row_count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM processing_jobs WHERE video_id=?")
+                .bind(&video.id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(row_count.0, 0);
     }
 }

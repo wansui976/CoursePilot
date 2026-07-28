@@ -17,12 +17,18 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import org.json.JSONArray
 import java.nio.ByteBuffer
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 @InvokeArg
 class PersistPickedFileArgs {
@@ -51,6 +57,11 @@ class ExportLumaFramesArgs {
   var sampleWidth: Long = 128
   var sampleHeight: Long = 72
   var intervalMs: Long = 1000
+}
+
+@InvokeArg
+class RecognizeImageTextArgs {
+  lateinit var imagePath: String
 }
 
 private data class AudioExportResult(val path: String, val mime: String, val format: String)
@@ -181,6 +192,39 @@ class MobileFilesPlugin(private val activity: Activity) : Plugin(activity) {
       }
     } catch (error: Exception) {
       invoke.reject(error.message ?: "Failed to export luma frames", error)
+    }
+  }
+
+  // bundled ML Kit 中文模型：图片始终留在设备上，不依赖首次联网下载。
+  @Command
+  fun recognizeImageText(invoke: Invoke) {
+    try {
+      val args = invoke.parseArgs(RecognizeImageTextArgs::class.java)
+      runOnIoThread(invoke, "Failed to recognize image text") {
+        val imageFile = File(args.imagePath)
+        if (!imageFile.isFile) {
+          throw IllegalArgumentException("OCR image not found: ${args.imagePath}")
+        }
+        val image = InputImage.fromFilePath(activity, Uri.fromFile(imageFile))
+        val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+        val text = try {
+          try {
+            Tasks.await(recognizer.process(image), 60, TimeUnit.SECONDS).text.trim()
+          } catch (error: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw error
+          } catch (error: ExecutionException) {
+            throw (error.cause as? Exception ?: error)
+          }
+        } finally {
+          recognizer.close()
+        }
+        val result = JSObject()
+        result.put("text", text)
+        result
+      }
+    } catch (error: Exception) {
+      invoke.reject(error.message ?: "Failed to recognize image text", error)
     }
   }
 

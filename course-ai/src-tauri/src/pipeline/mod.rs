@@ -1,6 +1,8 @@
 pub mod ai;
 pub mod aliyun_asr;
 pub mod aliyun_ocr;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub mod apple_vision;
 pub mod asr;
 pub mod audio;
 pub mod concepts;
@@ -118,7 +120,12 @@ fn whisper_language_or_default(value: Option<String>) -> String {
         .unwrap_or_else(|| "zh".into())
 }
 
-pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
+async fn run_all(
+    app: AppHandle,
+    video_id: String,
+    slides_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    slides_done: tokio::sync::oneshot::Sender<()>,
+) -> AppResult<()> {
     let state = app.state::<AppState>();
     let db = state.db.clone();
     let video: Video = sqlx::query_as("SELECT * FROM videos WHERE id=? AND deleted_at IS NULL")
@@ -153,7 +160,8 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
         let video_id = video_id.clone();
         let jobs_list = jobs_list.clone();
         tauri::async_runtime::spawn(async move {
-            run_slides_stage(&app, &db, &video_id, &jobs_list).await;
+            run_slides_stage(&app, &db, &video_id, &jobs_list, &slides_cancel).await;
+            let _ = slides_done.send(());
         })
     };
 
@@ -525,9 +533,8 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
     match asr_result {
         Ok(json) => {
             emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.92, "解析识别结果").await?;
-            asr::store_raw_transcript_backup(&db, &video_id, &json).await?;
             emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.95, "写入原始文稿").await?;
-            let count = asr::store_transcripts(&db, &video_id, &json).await?;
+            let count = asr::store_transcripts_with_raw_backup(&db, &video_id, &json).await?;
             let final_message =
                 match crate::commands::ai::first_available_provider_for_db(&db).await? {
                     Some((provider, model)) => {
@@ -598,12 +605,6 @@ pub async fn run_all(app: AppHandle, video_id: String) -> AppResult<()> {
     Ok(())
 }
 
-/// 自动提取课件的取消键：与命令侧的 request_id 共用同一张登记表，
-/// 这样「取消处理」按钮也能停掉正在跑的课件提取。
-pub fn slides_cancel_key(video_id: &str) -> String {
-    format!("pipeline-slides:{video_id}")
-}
-
 /// 自动提取课件是否开启。默认开；设置里显式关掉的课程/用户才跳过。
 async fn slides_auto_enabled(db: &crate::db::Db) -> bool {
     let value: Option<String> =
@@ -623,6 +624,7 @@ async fn run_slides_stage(
     db: &crate::db::Db,
     video_id: &str,
     jobs_list: &[jobs::Job],
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     let (Some(extract_job), Some(ocr_job)) = (
         jobs_list.iter().find(|job| job.stage == "slides"),
@@ -649,7 +651,6 @@ async fn run_slides_stage(
     }
 
     let state = app.state::<AppState>();
-    let cancel = state.register_cancel(&slides_cancel_key(video_id));
 
     // 断点续跑：已提取过就不重复通读整段视频，直接数库里的页数进 OCR。
     let pages = if extract_job.status == "done" {
@@ -738,7 +739,6 @@ async fn run_slides_stage(
                     0.0,
                     Some(&msg),
                 );
-                state.unregister_cancel(&slides_cancel_key(video_id), &cancel);
                 return;
             }
         }
@@ -757,7 +757,6 @@ async fn run_slides_stage(
             0.0,
             Some(msg),
         );
-        state.unregister_cancel(&slides_cancel_key(video_id), &cancel);
         return;
     }
 
@@ -837,7 +836,6 @@ async fn run_slides_stage(
             );
         }
     }
-    state.unregister_cancel(&slides_cancel_key(video_id), &cancel);
 }
 
 /// ASR 之后自动生成章节、笔记。尽力而为：未配置大模型或单步失败都只标记该 job，
@@ -1016,11 +1014,14 @@ pub async fn recover_interrupted_processing(db: &crate::db::Db) -> AppResult<()>
 #[derive(Default)]
 pub struct ProcessingTasks {
     tasks: std::sync::Mutex<std::collections::HashMap<String, ProcessingTask>>,
+    transition: tokio::sync::Mutex<()>,
 }
 
 struct ProcessingTask {
     run_id: String,
     handle: tauri::async_runtime::JoinHandle<()>,
+    slides_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    slides_done: tokio::sync::oneshot::Receiver<()>,
 }
 
 impl ProcessingTasks {
@@ -1028,24 +1029,12 @@ impl ProcessingTasks {
         self.tasks.lock().unwrap().keys().cloned().collect()
     }
 
-    fn take(&self, video_id: &str) -> Option<tauri::async_runtime::JoinHandle<()>> {
-        self.tasks
-            .lock()
-            .unwrap()
-            .remove(video_id)
-            .map(|task| task.handle)
+    fn take(&self, video_id: &str) -> Option<ProcessingTask> {
+        self.tasks.lock().unwrap().remove(video_id)
     }
 
-    fn insert(
-        &self,
-        video_id: String,
-        run_id: String,
-        handle: tauri::async_runtime::JoinHandle<()>,
-    ) {
-        self.tasks
-            .lock()
-            .unwrap()
-            .insert(video_id, ProcessingTask { run_id, handle });
+    fn insert(&self, video_id: String, task: ProcessingTask) {
+        self.tasks.lock().unwrap().insert(video_id, task);
     }
 
     fn remove_if_current(&self, video_id: &str, run_id: &str) {
@@ -1058,6 +1047,19 @@ impl ProcessingTasks {
             tasks.remove(video_id);
         }
     }
+}
+
+async fn stop_processing_task(task: ProcessingTask) {
+    let ProcessingTask {
+        handle,
+        slides_cancel,
+        slides_done,
+        ..
+    } = task;
+    slides_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    handle.abort();
+    let _ = handle.await;
+    let _ = slides_done.await;
 }
 
 #[tauri::command]
@@ -1091,30 +1093,47 @@ pub async fn cmd_process_video(app: AppHandle, video_id: String) -> AppResult<()
         return Err(AppError::NotFound(format!("video {video_id}")));
     }
 
-    // 同一视频若已有任务在跑，先中止并等待旧任务完全退出，避免新旧任务并发写 job。
-    // 课件那条支线是独立 task，abort 主任务停不掉它，得另外置位取消标志。
-    if let Some(old) = app.state::<ProcessingTasks>().take(&video_id) {
-        app.state::<AppState>()
-            .cancel(&slides_cancel_key(&video_id));
-        old.abort();
-        let _ = old.await;
+    // Treat take/abort/insert as one lifecycle transition. Without this lock, two
+    // concurrent commands can both observe an empty slot and run against the same jobs.
+    let tasks = app.state::<ProcessingTasks>();
+    let _transition = tasks.transition.lock().await;
+    // Wait for both the main task and its independently spawned slides branch.
+    if let Some(old) = tasks.take(&video_id) {
+        stop_processing_task(old).await;
     }
     let task_app = app.clone();
     let task_video = video_id.clone();
     let run_id = Uuid::new_v4().to_string();
     let task_run_id = run_id.clone();
     let (start_tx, start_rx) = tokio::sync::oneshot::channel::<()>();
+    let slides_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let task_slides_cancel = slides_cancel.clone();
+    let (slides_done_tx, slides_done_rx) = tokio::sync::oneshot::channel::<()>();
     let handle = tauri::async_runtime::spawn(async move {
         let _ = start_rx.await;
-        if let Err(error) = run_all(task_app.clone(), task_video.clone()).await {
+        if let Err(error) = run_all(
+            task_app.clone(),
+            task_video.clone(),
+            task_slides_cancel,
+            slides_done_tx,
+        )
+        .await
+        {
             tracing::error!("pipeline failed: {error:?}");
         }
         task_app
             .state::<ProcessingTasks>()
             .remove_if_current(&task_video, &task_run_id);
     });
-    app.state::<ProcessingTasks>()
-        .insert(video_id, run_id, handle);
+    tasks.insert(
+        video_id,
+        ProcessingTask {
+            run_id,
+            handle,
+            slides_cancel,
+            slides_done: slides_done_rx,
+        },
+    );
     let _ = start_tx.send(());
     Ok(())
 }
@@ -1139,12 +1158,11 @@ pub async fn cmd_recorrect_transcript(
 /// 取消某视频正在进行的处理：先中止并等待任务退出，再把 running/pending 步骤标为「已取消」
 /// （ffmpeg/whisper 子进程因 kill_on_drop 会被杀掉）。
 pub async fn cancel_processing(app: &AppHandle, video_id: &str) -> AppResult<()> {
-    // 课件支线跑在独立 task 里，只 abort 主任务停不掉；置位取消标志让它自己收工
-    // （已提取的页与已认出的文字都留在库里，下次续跑）。
-    app.state::<AppState>().cancel(&slides_cancel_key(video_id));
-    if let Some(handle) = app.state::<ProcessingTasks>().take(video_id) {
-        handle.abort();
-        let _ = handle.await;
+    let tasks = app.state::<ProcessingTasks>();
+    let _transition = tasks.transition.lock().await;
+    // 已提取的页与已认出的文字都留在库里，下次续跑。
+    if let Some(task) = tasks.take(video_id) {
+        stop_processing_task(task).await;
     }
     let db = app.state::<AppState>().db.clone();
     for job in jobs::list_for_video(&db, video_id).await? {
@@ -1182,7 +1200,43 @@ mod tests {
     use crate::commands::transcripts::list_segments;
     use crate::commands::videos::add_local_video;
     use std::process::Command;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn stopping_processing_task_waits_for_detached_slides_branch() {
+        let slides_cancel = Arc::new(AtomicBool::new(false));
+        let slides_exited = Arc::new(AtomicBool::new(false));
+        let child_cancel = slides_cancel.clone();
+        let child_exited = slides_exited.clone();
+        let (slides_started_tx, slides_started_rx) = tokio::sync::oneshot::channel();
+        let (slides_done_tx, slides_done_rx) = tokio::sync::oneshot::channel();
+
+        let handle = tauri::async_runtime::spawn(async move {
+            let _slides = tauri::async_runtime::spawn(async move {
+                let _ = slides_started_tx.send(());
+                while !child_cancel.load(Ordering::SeqCst) {
+                    tokio::task::yield_now().await;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                child_exited.store(true, Ordering::SeqCst);
+                let _ = slides_done_tx.send(());
+            });
+            std::future::pending::<()>().await;
+        });
+        slides_started_rx.await.unwrap();
+
+        stop_processing_task(ProcessingTask {
+            run_id: "run".into(),
+            handle,
+            slides_cancel,
+            slides_done: slides_done_rx,
+        })
+        .await;
+
+        assert!(slides_exited.load(Ordering::SeqCst));
+    }
 
     #[tokio::test]
     async fn slides_auto_extract_is_on_unless_explicitly_turned_off() {

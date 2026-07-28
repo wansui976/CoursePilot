@@ -1,12 +1,10 @@
-//! 截字 OCR：ffmpeg 截（可裁剪）帧 → tesseract 识别。
-//!
-//! 运行时需要 `tesseract`（含 `chi_sim` 语言包）。当前沙箱未安装，故 run_ocr
-//! 在缺二进制时返回明确错误；arg 构造为纯函数，单测覆盖。
+//! 截字 OCR：按平台截帧后走系统本地引擎；非 Apple 桌面回退到 Tesseract。
 
 use crate::error::{AppError, AppResult};
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_os = "macos")))]
+use crate::sidecar::TESSERACT;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use crate::sidecar::{resolve, FFMPEG, TESSERACT};
+use crate::sidecar::{resolve, FFMPEG};
 use std::path::{Path, PathBuf};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tokio::process::Command;
@@ -20,13 +18,16 @@ pub struct Rect {
     pub h: i64,
 }
 
-/// 构造 tesseract 命令参数：`<image> stdout -l <langs>`。
+/// 构造 Tesseract 命令参数。课件通常是一整块排版文本，使用 psm 6 比默认的
+/// “自动页面布局”更稳定，也能减少段落之间的多余空行。
 pub fn build_tesseract_args(image: &str, langs: &str) -> Vec<String> {
     vec![
         image.to_string(),
         "stdout".to_string(),
         "-l".to_string(),
         langs.to_string(),
+        "--psm".to_string(),
+        "6".to_string(),
     ]
 }
 
@@ -40,7 +41,7 @@ pub fn build_crop_vf(rect: Rect) -> Option<String> {
 }
 
 /// 截取视频某时刻的（可选裁剪）帧为 PNG，供本地或云端 OCR 复用。
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn grab_frame(
     video: &Path,
     out_dir: &Path,
@@ -48,7 +49,7 @@ pub async fn grab_frame(
     rect: Rect,
 ) -> AppResult<PathBuf> {
     if build_crop_vf(rect).is_some() {
-        return Err(AppError::Config("移动端截图 OCR 暂不支持区域裁剪".into()));
+        return Err(AppError::Config("移动端 OCR 暂不支持区域裁剪".into()));
     }
     crate::pipeline::slides::capture_frame(video, out_dir, at_ms).await
 }
@@ -85,31 +86,8 @@ pub async fn grab_frame(
     Ok(out)
 }
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub async fn run_ocr(
-    _video: &Path,
-    _out_dir: &Path,
-    _at_ms: i64,
-    _rect: Rect,
-    _langs: &str,
-) -> AppResult<String> {
-    Err(AppError::Config(
-        "移动端 OCR 暂不可用，请先在桌面端完成截字".into(),
-    ))
-}
-
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub async fn grab_frame(
-    _video: &Path,
-    _out_dir: &Path,
-    _at_ms: i64,
-    _rect: Rect,
-) -> AppResult<PathBuf> {
-    Err(AppError::Config("移动端不支持本地 ffmpeg 截帧".into()))
-}
-
 /// 对一张已落地的图片跑本地 tesseract。课件页 OCR 直接认已有的页图，不必重新截帧。
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_os = "macos")))]
 pub async fn run_ocr_on_image(image: &Path, langs: &str) -> AppResult<String> {
     let tesseract = resolve(&TESSERACT, None)?;
     let args = build_tesseract_args(&image.to_string_lossy(), langs);
@@ -127,12 +105,36 @@ pub async fn run_ocr_on_image(image: &Path, langs: &str) -> AppResult<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub async fn run_ocr_on_image(_image: &Path, _langs: &str) -> AppResult<String> {
-    Err(AppError::Config("移动端暂不支持本地 OCR".into()))
+/// Apple 平台直接调用系统 Vision 框架，不需要额外二进制或模型文件。
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub async fn run_ocr_on_image(image: &Path, _langs: &str) -> AppResult<String> {
+    let image = image.to_path_buf();
+    tokio::task::spawn_blocking(move || super::apple_vision::recognize_text(&image))
+        .await
+        .map_err(|error| AppError::Pipeline(format!("Apple Vision task failed: {error}")))?
+}
+
+/// Android 使用随应用打包的 ML Kit 中文识别模型。
+#[cfg(target_os = "android")]
+pub async fn run_ocr_on_image(image: &Path, _langs: &str) -> AppResult<String> {
+    crate::mobile_files::recognize_image_text(image.to_string_lossy().into_owned())
+        .await
+        .map_err(AppError::Pipeline)
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub async fn run_ocr(
+    video: &Path,
+    out_dir: &Path,
+    at_ms: i64,
+    rect: Rect,
+    langs: &str,
+) -> AppResult<String> {
+    let image = grab_frame(video, out_dir, at_ms, rect).await?;
+    run_ocr_on_image(&image, langs).await
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn run_ocr(
     video: &Path,
     out_dir: &Path,
@@ -226,7 +228,10 @@ mod tests {
     #[test]
     fn tesseract_args_have_stdout_and_lang() {
         let args = build_tesseract_args("/tmp/a.png", "chi_sim+eng");
-        assert_eq!(args, vec!["/tmp/a.png", "stdout", "-l", "chi_sim+eng"]);
+        assert_eq!(
+            args,
+            vec!["/tmp/a.png", "stdout", "-l", "chi_sim+eng", "--psm", "6"]
+        );
     }
 
     #[test]

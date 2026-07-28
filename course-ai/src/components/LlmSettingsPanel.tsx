@@ -34,37 +34,48 @@ export function LlmSettingsPanel() {
   const [hasKey, setHasKey] = useState<Record<string, boolean>>({});
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [savedMsg, setSavedMsg] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     void (async () => {
-      const ps = await ipc.ai.getProfiles();
-      setProfiles(ps);
-      // 当前默认模型：从已存 routing 推断（任一任务指向的 profile），否则第一个。
-      let active: string | null = ps[0]?.id ?? null;
       try {
+        const ps = await ipc.ai.getProfiles();
+        // 当前默认模型：从已存 routing 推断（任一任务指向的 profile），否则第一个。
+        let active: string | null = ps[0]?.id ?? null;
         const routingRaw = await ipc.settings.get("llm_task_routing");
         if (routingRaw) {
-          const routing = JSON.parse(routingRaw) as Record<string, string | null>;
-          const hit = ROUTING_TASKS.map((task) => routing[task]).find(
-            (value) => value && ps.some((p) => p.id === value),
-          );
-          if (hit) active = hit;
+          try {
+            const routing = JSON.parse(routingRaw) as Record<string, string | null>;
+            const hit = ROUTING_TASKS.map((task) => routing[task]).find(
+              (value) => value && ps.some((p) => p.id === value),
+            );
+            if (hit) active = hit;
+          } catch {
+            // routing JSON 损坏时忽略，用第一个；IPC 读取错误则交给外层显示。
+          }
         }
-      } catch {
-        // routing 损坏时忽略，用第一个。
+        // 标记哪些配置已存有 API Key → 输入框显示掩码。
+        const flags: Record<string, boolean> = {};
+        await Promise.all(
+          ps.map(async (p) => {
+            flags[p.id] = await ipc.ai.hasApiKey(p.id).catch(() => false);
+          }),
+        );
+        if (cancelled) return;
+        setProfiles(ps);
+        setActiveId(active);
+        setHasKey(flags);
+        setLoadError("");
+      } catch (error) {
+        if (!cancelled) setLoadError(`LLM 配置加载失败：${error}`);
       }
-      setActiveId(active);
-      // 标记哪些配置已存有 API Key → 输入框显示掩码。
-      const flags: Record<string, boolean> = {};
-      await Promise.all(
-        ps.map(async (p) => {
-          flags[p.id] = await ipc.ai.hasApiKey(p.id).catch(() => false);
-        }),
-      );
-      setHasKey(flags);
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function update(id: string, patch: Partial<LlmProfile>) {
@@ -127,14 +138,19 @@ export function LlmSettingsPanel() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-[var(--text-muted)]">
-          配置多个模型，选一个作为「当前使用」
-        </p>
         <Button size="sm" variant="outline" onClick={add}>
           新增
         </Button>
       </div>
-      {profiles.length === 0 && (
+      {loadError && (
+        <p
+          role="alert"
+          className="rounded-lg border border-[var(--status-err)] bg-[var(--status-err-bg)] px-3 py-2 text-xs text-[var(--status-err)]"
+        >
+          {loadError}
+        </p>
+      )}
+      {!loadError && profiles.length === 0 && (
         <p className="rounded-lg border border-dashed border-[var(--border-subtle)] px-3 py-4 text-center text-xs text-[var(--text-faint)]">
           还没有配置。点「新增」添加一个 OpenAI 兼容或 Anthropic 配置。
         </p>
@@ -217,7 +233,7 @@ export function LlmSettingsPanel() {
                   className={`${FIELD} pr-10`}
                   value={keys[p.id] ?? ""}
                   placeholder={
-                    hasKey[p.id] ? "已配置 ••••••（留空＝不修改）" : "API Key"
+                    hasKey[p.id] ? "••••••" : "API Key"
                   }
                   onChange={(e) => setKeys((k) => ({ ...k, [p.id]: e.target.value }))}
                 />
@@ -238,18 +254,19 @@ export function LlmSettingsPanel() {
                 </span>
               )}
             </div>
-            <button
+
+            <Button
               className="text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
               onClick={() => void remove(p)}
             >
-              删除此配置
-            </button>
+              删除
+            </Button>
           </div>
         );
       })}
       <div className="flex items-center gap-3">
         <Button size="sm" disabled={saving} onClick={save}>
-          保存 LLM 配置
+          保存
         </Button>
         {savedMsg && (
           <span

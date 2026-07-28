@@ -10,6 +10,7 @@ pub mod silence;
 pub mod slides;
 pub mod srs;
 pub mod stats;
+pub mod sync;
 pub mod tools;
 pub mod transcripts;
 pub mod videos;

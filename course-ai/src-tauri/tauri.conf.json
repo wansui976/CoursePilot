@@ -34,7 +34,11 @@
       "minSdkVersion": 24
     },
     "macOS": {
-      "signingIdentity": "-"
+      "minimumSystemVersion": "14.0",
+      "entitlements": "Entitlements.plist"
+    },
+    "iOS": {
+      "minimumSystemVersion": "17.0"
     },
     "icon": [
       "icons/32x32.png",

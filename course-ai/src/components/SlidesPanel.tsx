@@ -28,20 +28,23 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   // 不订阅 currentMs（避免播放时每秒 4 次重渲染）；点「截图/OCR」时按需读取当前进度。
   const currentMs = () => usePlayer.getState().currentMs;
 
-  const { data: slides = [] } = useQuery({
+  const slidesQuery = useQuery({
     queryKey: ["slides", videoId],
     queryFn: () => ipc.slides.list(videoId),
   });
-  const { data: shots = [] } = useQuery({
+  const shotsQuery = useQuery({
     queryKey: ["screenshots", videoId],
     queryFn: () => ipc.slides.screenshots(videoId),
   });
+  const slides = slidesQuery.data ?? [];
+  const shots = shotsQuery.data ?? [];
 
   // 进行中那次提取的进度与 requestId（供「停止」定位后台任务）。
   const [progress, setProgress] = useState<SlidesProgress | null>(null);
   const extractRequest = useRef<string | null>(null);
   // 课件页文字识别的进度与 requestId。导入时会自动认一遍，这里是补跑/换引擎重认的入口。
   const [pagesOcrProgress, setPagesOcrProgress] = useState<SlidesOcrProgress | null>(null);
+  const [pagesOcrFeedback, setPagesOcrFeedback] = useState<string | null>(null);
   const pagesOcrRequest = useRef<string | null>(null);
 
   const extract = useMutation({
@@ -76,10 +79,16 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
       const requestId = crypto.randomUUID();
       pagesOcrRequest.current = requestId;
       setPagesOcrProgress(null);
+      setPagesOcrFeedback(null);
       return ipc.slides.ocr(videoId, requestId, force, setPagesOcrProgress);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["slides", videoId] }),
+    onSuccess: (recognized) => {
+      setPagesOcrFeedback(
+        recognized > 0 ? `已识别 ${recognized} 页` : "识别完成，没有识别到可用文字",
+      );
+    },
     onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["slides", videoId] });
       pagesOcrRequest.current = null;
       setPagesOcrProgress(null);
     },
@@ -142,7 +151,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
             variant="ghost"
             disabled={ocr.isPending}
             onClick={() => ocr.mutate()}
-            title="对当前帧整屏 OCR（引擎在设置里选择：本地 Tesseract 或 阿里云 OCR）"
+            title="对当前帧整屏 OCR（引擎在设置里选择：本地 OCR 或阿里云 OCR）"
           >
             <ScanText className="h-3.5 w-3.5" />
             {ocr.isPending ? "识别中…" : "截图OCR"}
@@ -194,11 +203,40 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
           onRetry={() => pagesOcr.mutate(false)}
         />
       )}
+      {pagesOcrFeedback && !pagesOcr.isError && (
+        <div
+          role="status"
+          className="mx-3 mb-2 flex-none rounded-md bg-[var(--status-ok-bg)] px-3 py-2 text-xs text-[var(--status-ok)]"
+        >
+          {pagesOcrFeedback}
+        </div>
+      )}
       {extract.isError && (
         <ErrorNote
           className="mx-3 mb-2 flex-none"
           error={extract.error}
           onRetry={() => extract.mutate()}
+        />
+      )}
+      {slidesQuery.isError && (
+        <ErrorNote
+          className="mx-3 mb-2 flex-none"
+          error={slidesQuery.error}
+          onRetry={() => void slidesQuery.refetch()}
+        />
+      )}
+      {shotsQuery.isError && (
+        <ErrorNote
+          className="mx-3 mb-2 flex-none"
+          error={shotsQuery.error}
+          onRetry={() => void shotsQuery.refetch()}
+        />
+      )}
+      {capture.isError && (
+        <ErrorNote
+          className="mx-3 mb-2 flex-none"
+          error={capture.error}
+          onRetry={() => capture.mutate()}
         />
       )}
       {ocr.isError && (
@@ -238,7 +276,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {slides.length === 0 ? (
+        {slidesQuery.isError ? null : slides.length === 0 ? (
           <div className="flex h-full min-h-[220px] items-center justify-center">
             <div className="max-w-xs text-center">
               <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl border border-[var(--border-faint)] bg-[var(--surface-card)] text-primary">

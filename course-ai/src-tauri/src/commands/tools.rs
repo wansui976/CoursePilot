@@ -13,10 +13,15 @@ fn is_mobile_os(os: &str) -> bool {
 }
 
 fn default_ocr_backend() -> &'static str {
-    if is_mobile_os(std::env::consts::OS) {
-        "aliyun"
-    } else {
-        "tesseract"
+    "local"
+}
+
+fn normalize_ocr_backend(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        // `tesseract` 是旧版设置值；本地引擎现在按平台分派。
+        "local" | "tesseract" => Some("local"),
+        "aliyun" => Some("aliyun"),
+        _ => None,
     }
 }
 
@@ -35,22 +40,16 @@ pub async fn aliyun_ocr_configured(db: &crate::db::Db) -> bool {
     !key_id.trim().is_empty() && !secret.trim().is_empty()
 }
 
-/// 选用哪个 OCR 引擎：设置里显式选过就听设置（用户的明确选择优先）；
-/// 没选过时，配了阿里云就走云——中文幻灯片上云端质量明显好过本地 tesseract。
+/// 选用哪个 OCR 引擎：设置里显式选过就听设置；没有设置时默认完全本地。
+/// 旧值 `tesseract` 会迁移为按平台选择的 `local`。
 pub async fn resolve_ocr_backend(db: &crate::db::Db) -> String {
     if let Some(explicit) = get_setting(db, "ocr_backend")
         .await
         .ok()
         .flatten()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+        .and_then(|value| normalize_ocr_backend(&value))
     {
-        if !is_mobile_os(std::env::consts::OS) || explicit == "aliyun" {
-            return explicit;
-        }
-    }
-    if aliyun_ocr_configured(db).await {
-        return "aliyun".to_string();
+        return explicit.to_string();
     }
     default_ocr_backend().to_string()
 }
@@ -79,7 +78,7 @@ pub async fn aliyun_ocr_config(db: &crate::db::Db) -> AppResult<AliyunOcrConfig>
     })
 }
 
-/// 本地 tesseract 的语言包设置。
+/// 本地 Tesseract 回退引擎的语言包设置。
 pub async fn ocr_langs(db: &crate::db::Db) -> String {
     get_setting(db, "ocr_langs")
         .await
@@ -89,7 +88,7 @@ pub async fn ocr_langs(db: &crate::db::Db) -> String {
 }
 
 /// 对视频某时刻的（可选）区域做 OCR，返回识别文本。w/h 为 0 表示整帧。
-/// 后端由设置 `ocr_backend` 决定：tesseract（本地，默认）或 aliyun（阿里云统一识别）。
+/// 后端由设置 `ocr_backend` 决定：local（本地，默认）或 aliyun（阿里云统一识别）。
 #[tauri::command]
 pub async fn cmd_ocr_region(
     state: State<'_, AppState>,
@@ -100,9 +99,6 @@ pub async fn cmd_ocr_region(
     w: i64,
     h: i64,
 ) -> AppResult<String> {
-    if is_mobile_os(std::env::consts::OS) {
-        return Err(AppError::Config("移动端暂不支持本地 OCR 截字".into()));
-    }
     let video: Video = sqlx::query_as("SELECT * FROM videos WHERE id=? AND deleted_at IS NULL")
         .bind(&video_id)
         .fetch_optional(&state.db.pool)
@@ -250,4 +246,18 @@ pub async fn cmd_set_bilibili_cookies(
     std::fs::copy(&file_path, &dest)?;
     crate::commands::settings::set_setting(&state.db, "bilibili_cookies", &dest.to_string_lossy())
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_ocr_backend;
+
+    #[test]
+    fn normalizes_legacy_and_current_ocr_backends() {
+        assert_eq!(super::default_ocr_backend(), "local");
+        assert_eq!(normalize_ocr_backend("local"), Some("local"));
+        assert_eq!(normalize_ocr_backend(" tesseract "), Some("local"));
+        assert_eq!(normalize_ocr_backend("aliyun"), Some("aliyun"));
+        assert_eq!(normalize_ocr_backend("unknown"), None);
+    }
 }

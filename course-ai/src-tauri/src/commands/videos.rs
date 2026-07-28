@@ -209,7 +209,19 @@ pub async fn add_local_video(
             file_path.display()
         )));
     }
-    ensure_active_course(db, course_id).await?;
+    // Serialize the active-course check, duplicate lookup and order allocation.
+    // A deferred transaction lets two imports both pass the lookup before either
+    // writes; BEGIN IMMEDIATE reserves the single SQLite writer up front.
+    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let active: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM courses WHERE id=? AND deleted_at IS NULL)",
+    )
+    .bind(course_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !active {
+        return Err(AppError::NotFound(format!("course {course_id}")));
+    }
 
     // 防重导入：同课程已存在相同文件的「未删除」视频时，直接返回它，不再新建重复行。
     // 这正是回收站里出现「同一文件多条」的根源——同一文件被导入多次生成了多条视频。
@@ -219,9 +231,10 @@ pub async fn add_local_video(
     )
     .bind(course_id)
     .bind(&file_path_str)
-    .fetch_optional(&db.pool)
+    .fetch_optional(&mut *tx)
     .await?
     {
+        tx.commit().await?;
         return Ok(existing);
     }
 
@@ -233,7 +246,7 @@ pub async fn add_local_video(
     let order_index: i64 =
         sqlx::query_scalar("SELECT COALESCE(MAX(order_index),0)+1 FROM videos WHERE course_id=?")
             .bind(course_id)
-            .fetch_one(&db.pool)
+            .fetch_one(&mut *tx)
             .await?;
     let video = Video {
         id: id.clone(),
@@ -276,8 +289,9 @@ pub async fn add_local_video(
     .bind(&video.data_dir)
     .bind(&video.processed_status)
     .bind(video.created_at)
-    .execute(&db.pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     Ok(video)
 }
@@ -386,7 +400,9 @@ pub async fn add_local_batch(
 
 pub async fn list_videos(db: &Db, course_id: &str) -> AppResult<Vec<Video>> {
     Ok(sqlx::query_as::<_, Video>(
-        "SELECT * FROM videos WHERE course_id=? AND deleted_at IS NULL ORDER BY order_index ASC",
+        "SELECT * FROM videos
+         WHERE course_id=? AND deleted_at IS NULL
+         ORDER BY order_index ASC, created_at ASC, id ASC",
     )
     .bind(course_id)
     .fetch_all(&db.pool)
@@ -397,10 +413,12 @@ pub async fn list_videos(db: &Db, course_id: &str) -> AppResult<Vec<Video>> {
 /// ordered_ids 必须与该课程当前未删除视频的 id 集合完全一致（不多、不少、不重复），
 /// 否则拒绝——防止并发导入/删除后按过期列表覆盖掉新视频的位置。
 pub async fn reorder_videos(db: &Db, course_id: &str, ordered_ids: Vec<String>) -> AppResult<()> {
+    // Lock out concurrent imports/deletes before validating the submitted id set.
+    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
     let mut current: Vec<String> =
         sqlx::query_scalar("SELECT id FROM videos WHERE course_id=? AND deleted_at IS NULL")
             .bind(course_id)
-            .fetch_all(&db.pool)
+            .fetch_all(&mut *tx)
             .await?;
     let mut requested = ordered_ids.clone();
     current.sort();
@@ -409,13 +427,19 @@ pub async fn reorder_videos(db: &Db, course_id: &str, ordered_ids: Vec<String>) 
         return Err(AppError::Other("视频列表已变化，请刷新后重试".into()));
     }
 
-    let mut tx = db.pool.begin().await?;
     for (index, id) in ordered_ids.iter().enumerate() {
-        sqlx::query("UPDATE videos SET order_index=? WHERE id=?")
-            .bind(index as i64)
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
+        let result = sqlx::query(
+            "UPDATE videos SET order_index=?
+             WHERE id=? AND course_id=? AND deleted_at IS NULL",
+        )
+        .bind(index as i64)
+        .bind(id)
+        .bind(course_id)
+        .execute(&mut *tx)
+        .await?;
+        if result.rows_affected() != 1 {
+            return Err(AppError::Other("视频列表已变化，请刷新后重试".into()));
+        }
     }
     tx.commit().await?;
     Ok(())
@@ -639,11 +663,13 @@ pub async fn cmd_ensure_crop(
     video_id: String,
 ) -> AppResult<crate::pipeline::crop_detect::CropInsets> {
     let row = sqlx::query_as::<_, (Option<f64>, Option<f64>, Option<f64>, Option<f64>, String)>(
-        "SELECT crop_top,crop_right,crop_bottom,crop_left,file_path FROM videos WHERE id=?",
+        "SELECT crop_top,crop_right,crop_bottom,crop_left,file_path
+         FROM videos WHERE id=? AND deleted_at IS NULL",
     )
     .bind(&video_id)
-    .fetch_one(&state.db.pool)
-    .await?;
+    .fetch_optional(&state.db.pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
     if let (Some(top), right, bottom, left, _) = (row.0, row.1, row.2, row.3, &row.4) {
         return Ok(crate::pipeline::crop_detect::CropInsets {
             top,
@@ -678,6 +704,14 @@ pub async fn cmd_ensure_crop(
 pub async fn cmd_cancel_crop_detect(state: State<'_, AppState>, video_id: String) -> AppResult<()> {
     state.cancel(&crate::pipeline::crop_detect::cancel_key(&video_id));
     Ok(())
+}
+
+async fn live_video_paths(db: &Db, video_id: &str) -> AppResult<(String, String)> {
+    sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=? AND deleted_at IS NULL")
+        .bind(video_id)
+        .fetch_optional(&db.pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))
 }
 
 #[tauri::command]
@@ -751,13 +785,7 @@ pub async fn cmd_ensure_playable(
     state: State<'_, AppState>,
     video_id: String,
 ) -> AppResult<String> {
-    let row: Option<(String, String)> =
-        sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
-            .bind(&video_id)
-            .fetch_optional(&state.db.pool)
-            .await?;
-    let (file_path, data_dir) =
-        row.ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    let (file_path, data_dir) = live_video_paths(&state.db, &video_id).await?;
     let file_path = stabilize_mobile_video_file(&app, &state.db, &video_id, &file_path).await?;
     let path = crate::pipeline::playable::ensure_playable(
         std::path::Path::new(&file_path),
@@ -781,13 +809,7 @@ pub async fn cmd_media_url(
     video_id: String,
 ) -> AppResult<String> {
     let started = std::time::Instant::now();
-    let row: Option<(String, String)> =
-        sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
-            .bind(&video_id)
-            .fetch_optional(&state.db.pool)
-            .await?;
-    let (file_path, data_dir) =
-        row.ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    let (file_path, data_dir) = live_video_paths(&state.db, &video_id).await?;
     let after_query = started.elapsed();
     let file_path = stabilize_mobile_video_file(&app, &state.db, &video_id, &file_path).await?;
     let path = crate::pipeline::playable::cached_playable(
@@ -817,13 +839,7 @@ pub async fn cmd_video_cover(
     state: State<'_, AppState>,
     video_id: String,
 ) -> AppResult<tauri::ipc::Response> {
-    let row: Option<(String, String)> =
-        sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
-            .bind(&video_id)
-            .fetch_optional(&state.db.pool)
-            .await?;
-    let (file_path, data_dir) =
-        row.ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    let (file_path, data_dir) = live_video_paths(&state.db, &video_id).await?;
     let cover = crate::pipeline::slides::ensure_cover(
         std::path::Path::new(&file_path),
         std::path::Path::new(&data_dir),
@@ -873,7 +889,13 @@ mod tests {
     #[tokio::test]
     async fn scan_folder_lists_only_videos_in_natural_order() {
         let dir = tempdir().unwrap();
-        for name in ["part10.mp4", "part2.mp4", "part1.mkv", "notes.txt", "cover.png"] {
+        for name in [
+            "part10.mp4",
+            "part2.mp4",
+            "part1.mkv",
+            "notes.txt",
+            "cover.png",
+        ] {
             std::fs::write(dir.path().join(name), b"x").unwrap();
         }
         // 子目录不递归。
@@ -912,7 +934,9 @@ mod tests {
             })
             .collect();
 
-        let added = add_local_batch(&db, &course.id, paths.clone()).await.unwrap();
+        let added = add_local_batch(&db, &course.id, paths.clone())
+            .await
+            .unwrap();
         assert_eq!(added.len(), 2);
         // 再导一次：幂等，不产生重复行。
         add_local_batch(&db, &course.id, paths).await.unwrap();
@@ -1093,6 +1117,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn playback_paths_reject_a_video_in_the_recycle_bin() {
+        let dir = tempdir().unwrap();
+        let (db, _course_id, video_id) = seed_video(&dir).await;
+        delete_video(&db, &video_id).await.unwrap();
+
+        assert!(matches!(
+            live_video_paths(&db, &video_id).await,
+            Err(AppError::NotFound(_))
+        ));
+    }
+
+    #[tokio::test]
     async fn restore_and_purge_reject_active_videos() {
         let dir = tempdir().unwrap();
         let (db, course_id, video_id) = seed_video(&dir).await;
@@ -1133,6 +1169,63 @@ mod tests {
             .unwrap();
         assert_eq!(again.id, video_id);
         assert_eq!(list_videos(&db, &course_id).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn concurrent_add_local_video_does_not_create_duplicates() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let video_path = dir.path().join("same.mp4");
+        std::fs::write(&video_path, b"fake").unwrap();
+
+        let (first, second) = tokio::join!(
+            add_local_video(&db, &course.id, video_path.clone(), None),
+            add_local_video(&db, &course.id, video_path, None),
+        );
+        let first = first.unwrap();
+        let second = second.unwrap();
+
+        assert_eq!(first.id, second.id);
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM videos
+             WHERE course_id=? AND file_path=? AND deleted_at IS NULL",
+        )
+        .bind(&course.id)
+        .bind(dir.path().join("same.mp4").to_string_lossy().as_ref())
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn concurrent_adds_allocate_distinct_order_indexes() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let first_path = dir.path().join("first.mp4");
+        let second_path = dir.path().join("second.mp4");
+        std::fs::write(&first_path, b"first").unwrap();
+        std::fs::write(&second_path, b"second").unwrap();
+
+        let (first, second) = tokio::join!(
+            add_local_video(&db, &course.id, first_path, None),
+            add_local_video(&db, &course.id, second_path, None),
+        );
+        let first = first.unwrap();
+        let second = second.unwrap();
+
+        assert_ne!(first.order_index, second.order_index);
+        assert_eq!(list_videos(&db, &course.id).await.unwrap().len(), 2);
     }
 
     #[tokio::test]

@@ -28,7 +28,6 @@ import {
   AUTO_SENSITIVITY,
   DEFAULT_SLIDES_SENSITIVITY,
   getSlidesSensitivity,
-  sensitivityToThreshold,
   setSlidesSensitivity,
   type SlidesSensitivity,
 } from "@/lib/slides";
@@ -37,6 +36,7 @@ import { defaultOcrBackend, normalizeOcrBackend } from "@/lib/ocrDefaults";
 import { isMobile, isTablet } from "@/lib/platform";
 import { readReminderEnabled, writeReminderEnabled } from "@/lib/studyReminder";
 import { pickDirectoryPath } from "@/lib/mobileFiles";
+import { createSettingsWriter } from "@/lib/settingsWriteQueue";
 import { Switch } from "@/components/ui/switch";
 import { WhisperModelsPanel } from "./WhisperModelsPanel";
 import { LlmSettingsPanel } from "./LlmSettingsPanel";
@@ -342,61 +342,58 @@ export function SettingsPanel({
     setSlidesSensitivityState(value);
     setSlidesSensitivity(value);
   };
-  // 即时保存（改了立刻写库）的设置失败时不能无声无息：界面已显示新值、库里却没存。
-  // 统一走 saveSetting，失败在详情区顶部给错误条；下一次保存成功后自动清除。
+  // 同一个 key 的即时写入必须按触发顺序落库；否则快速切换时，较慢的旧请求可能最后覆盖新值。
+  const settingsWriterRef = useRef<ReturnType<typeof createSettingsWriter> | null>(null);
+  if (!settingsWriterRef.current) {
+    settingsWriterRef.current = createSettingsWriter(ipc.settings.set);
+  }
+  const latestSaveRef = useRef(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const saveSetting = useCallback(async (key: string, value: string) => {
+    const requestId = ++latestSaveRef.current;
     try {
-      await ipc.settings.set(key, value);
-      setSaveError(null);
+      await settingsWriterRef.current!(key, value);
+      if (requestId === latestSaveRef.current) setSaveError(null);
     } catch (error) {
-      setSaveError(String(error));
+      if (requestId === latestSaveRef.current) setSaveError(String(error));
     }
   }, []);
   // 凭证保存进行中：禁用保存按钮防连点。
   const [savingCred, setSavingCred] = useState<"volc" | "ctx" | "dash" | "ocr" | null>(null);
 
   useEffect(() => {
-    void ipc.settings.get("default_storage_root").then((value) => setRoot(value ?? ""));
-    void ipc.settings
-      .get("whisper_model")
-      .then((value) => setModel(value ?? "large-v3-turbo"));
-    void ipc.settings
-      .get("asr_backend")
-      .then((value) => setAsrBackend(normalizeAsrBackend(value)));
-    void ipc.settings
-      .get("asr_language")
-      .then((value) => setAsrLanguage(value ?? "zh"));
-    void ipc.settings
-      .get("asr_correction_concurrency")
-      .then((value) => setCorrectionConcurrency(value ?? "8"));
-    void ipc.settings
-      .get("subtitle_autocorrect")
-      .then((value) => setSubtitleAutocorrect(value !== "false"));
-    void ipc.settings
-      .get("slides_auto_extract")
-      .then((value) => setSlidesAutoExtract(value !== "off"));
-    void ipc.settings
-      .get("volcengine_asr_app_id")
-      .then((value) => setVolcengineAppId(value ?? ""));
-    void ipc.settings
-      .get("volcengine_asr_hotwords")
-      .then((value) => setVolcengineHotwords(value ?? ""));
-    void ipc.settings
-      .get("volcengine_asr_context")
-      .then((value) => setVolcengineContext(value ?? ""));
-    void ipc.settings
-      .get("aliyun_asr_model")
-      .then((value) => setAliyunModel(value ?? "qwen3-asr-flash-filetrans"));
-    void ipc.settings
-      .get("ocr_backend")
-      .then((value) => setOcrBackend(normalizeOcrBackend(value)));
-    void ipc.settings
-      .get("aliyun_ocr_type")
-      .then((value) => setOcrType(value ?? "Advanced"));
-    void ipc.settings
-      .get("aliyun_ocr_access_key_id")
-      .then((value) => setOcrKeyId(value ?? ""));
+    let cancelled = false;
+    const load = async (key: string, apply: (value: string | null) => void) => {
+      const value = await ipc.settings.get(key);
+      if (!cancelled) apply(value);
+    };
+    const requests = [
+      load("default_storage_root", (value) => setRoot(value ?? "")),
+      load("whisper_model", (value) => setModel(value ?? "large-v3-turbo")),
+      load("asr_backend", (value) => setAsrBackend(normalizeAsrBackend(value))),
+      load("asr_language", (value) => setAsrLanguage(value ?? "zh")),
+      load("asr_correction_concurrency", (value) => setCorrectionConcurrency(value ?? "8")),
+      load("subtitle_autocorrect", (value) => setSubtitleAutocorrect(value !== "false")),
+      load("slides_auto_extract", (value) => setSlidesAutoExtract(value !== "off")),
+      load("volcengine_asr_app_id", (value) => setVolcengineAppId(value ?? "")),
+      load("volcengine_asr_hotwords", (value) => setVolcengineHotwords(value ?? "")),
+      load("volcengine_asr_context", (value) => setVolcengineContext(value ?? "")),
+      load("aliyun_asr_model", (value) =>
+        setAliyunModel(value ?? "qwen3-asr-flash-filetrans"),
+      ),
+      load("ocr_backend", (value) => setOcrBackend(normalizeOcrBackend(value))),
+      load("aliyun_ocr_type", (value) => setOcrType(value ?? "Advanced")),
+      load("aliyun_ocr_access_key_id", (value) => setOcrKeyId(value ?? "")),
+    ];
+    void Promise.allSettled(requests).then((results) => {
+      if (cancelled) return;
+      const failed = results.find((result) => result.status === "rejected");
+      setLoadError(failed?.status === "rejected" ? String(failed.reason) : null);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function pickRoot() {
@@ -557,8 +554,8 @@ export function SettingsPanel({
     "storage",
     "asr",
     "llm",
+    "courseware",
   ];
-  if (!mobile) categories.push("courseware");
   if (onOpenDevConsole) categories.push("dev");
 
   // 竖屏下钻时：进入了某分类则顶栏显示该分类名 + 返回到分类列表；否则显示「设置」+ 关闭。
@@ -658,6 +655,15 @@ export function SettingsPanel({
               </h2>
             )}
 
+            {loadError && (
+              <div
+                role="alert"
+                className="mb-4 rounded-lg border border-[var(--status-err)] bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)]"
+              >
+                设置加载失败：{loadError}
+              </div>
+            )}
+
             {saveError && (
               <div
                 role="alert"
@@ -708,7 +714,6 @@ export function SettingsPanel({
 
                 <Group
                   header="强调色"
-                  footnote="影响按钮、选中态等点缀色；第一颗颜色可从系统色板自选。"
                 >
                   <StackRow>
                     <div className="flex flex-wrap items-center gap-3">
@@ -771,7 +776,7 @@ export function SettingsPanel({
               >
                 <Row
                   label="到期复习提醒"
-                  hint="有待复习卡片时，打开应用推送一条桌面通知（每天至多一次）"
+                  hint="有待复习卡片时，打开应用推送一条桌面通知"
                   htmlFor="study-reminder"
                 >
                   <Switch
@@ -787,7 +792,6 @@ export function SettingsPanel({
             {activeCategory === "shortcuts" && (
               <Group
                 header="播放快捷键"
-                footnote="点右侧按键后，按下新键即可重设；Esc 取消。同一个键改绑到别的动作时，原动作会被清空。聚焦输入框时快捷键不生效。"
               >
                 {SHORTCUT_ACTIONS.map(({ action, label, hint }) => (
                   <Row key={action} label={label} hint={hint}>
@@ -1066,18 +1070,17 @@ export function SettingsPanel({
             )}
 
             {activeCategory === "llm" && (
-              <Group header="大模型" footnote="用于生成笔记、出题、脑图与问答。">
+              <Group header="大模型">
                 <StackRow>
                   <LlmSettingsPanel />
                 </StackRow>
               </Group>
             )}
 
-            {!mobile && activeCategory === "courseware" && (
+            {activeCategory === "courseware" && (
               <>
                 <Group
                   header="图文识别 (OCR)"
-                  footnote="对课件帧「截字」时使用的文字识别引擎。"
                 >
                   <Row label="OCR 引擎" htmlFor="ocr-backend">
                     <div className="w-full sm:w-56">
@@ -1086,7 +1089,7 @@ export function SettingsPanel({
                         value={ocrBackend}
                         onChange={(event) => void changeOcrBackend(event.target.value)}
                       >
-                        {!mobile && <option value="tesseract">本地 Tesseract</option>}
+                        <option value="local">本地 OCR（离线）</option>
                         <option value="aliyun">阿里云 OCR 统一识别</option>
                       </Select>
                     </div>
@@ -1156,17 +1159,10 @@ export function SettingsPanel({
 
                 <Group
                   header="课件提取"
-                  footnote={
-                    slidesAuto
-                      ? "按每个视频的画面噪声自动定门槛：静态讲义会更敏感，带摄像头画面的录屏会自动收紧。"
-                      : `灵敏度越高抓取的课件页越多（当前画面块差异门槛 ${sensitivityToThreshold(
-                          slidesSensitivity,
-                        )}）。`
-                  }
+
                 >
                   <Row
                     label="导入后自动提取"
-                    hint="导入视频后与语音识别并行跑，提取课件页并认出页上的文字，之后的总结、出题才看得到板书。纯口播课程可以关掉。"
                     htmlFor="slides-auto-extract"
                   >
                     <Switch
@@ -1177,8 +1173,7 @@ export function SettingsPanel({
                     />
                   </Row>
                   <Row
-                    label="自动定灵敏度"
-                    hint="按视频画面噪声估算门槛，不用手调"
+                    label="自动确定灵敏度"
                     htmlFor="slides-auto"
                   >
                     <Switch
@@ -1218,7 +1213,7 @@ export function SettingsPanel({
             {activeCategory === "dev" && onOpenDevConsole && (
               <Group
                 header="开发者"
-                footnote="查看 AI 文稿纠错的请求与回复，确认纠错是否真的实施。"
+                footnote="查看 AI 文稿纠错的请求与回复"
               >
                 <StackRow>
                   <Button variant="outline" size="sm" onClick={onOpenDevConsole}>

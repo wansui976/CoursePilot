@@ -1,3 +1,4 @@
+pub mod cloud_sync;
 pub mod commands;
 pub mod db;
 pub mod dev_log;
@@ -10,6 +11,7 @@ pub mod mobile_files;
 pub mod pipeline;
 pub mod sidecar;
 pub mod storage;
+pub mod sync;
 
 use crate::commands::ai::{
     cmd_generate_ai, cmd_get_chapters, cmd_get_llm_profiles, cmd_get_mindmap, cmd_get_notes,
@@ -17,18 +19,18 @@ use crate::commands::ai::{
     cmd_set_api_key,
 };
 use crate::commands::clips::{cmd_add_clip, cmd_delete_clip, cmd_list_clips, cmd_update_clip};
-use crate::commands::courses::{
-    cmd_create_course, cmd_delete_course, cmd_list_courses, cmd_relink_course_root,
-    cmd_rename_course, AppState,
-};
 use crate::commands::concepts::{
     cmd_analyze_course_concepts, cmd_cancel_course_analysis, cmd_course_knowledge_chat_stream,
     cmd_generate_course_knowledge, cmd_get_course_knowledge, cmd_list_course_concepts,
 };
-use crate::commands::notify::cmd_notify;
+use crate::commands::courses::{
+    cmd_create_course, cmd_delete_course, cmd_list_courses, cmd_relink_course_root,
+    cmd_rename_course, AppState,
+};
 use crate::commands::export::{
     cmd_export_mindmap, cmd_export_notes, cmd_export_quiz, cmd_export_subtitles,
 };
+use crate::commands::notify::cmd_notify;
 use crate::commands::rag::{
     cmd_cancel_rag_query, cmd_rag_query, cmd_rag_query_stream, cmd_search_transcript,
 };
@@ -40,11 +42,15 @@ use crate::commands::slides::{
 };
 use crate::commands::srs::{
     cmd_add_card, cmd_concept_due_counts, cmd_count_due, cmd_due_by_course, cmd_due_cards,
-    cmd_due_cards_by_concept, cmd_generate_cards, cmd_review_card, cmd_weak_concepts,
+    cmd_due_cards_by_concept, cmd_generate_cards, cmd_generate_cards_for_concept, cmd_review_card,
+    cmd_weak_concepts,
 };
 use crate::commands::stats::{
-    cmd_continue_learning, cmd_course_totals, cmd_course_video_ids, cmd_daily_totals, cmd_log_watch,
-    cmd_next_due_at, cmd_save_video_progress, cmd_video_progress,
+    cmd_continue_learning, cmd_course_totals, cmd_course_video_ids, cmd_daily_totals,
+    cmd_log_watch, cmd_next_due_at, cmd_save_video_progress, cmd_video_progress,
+};
+use crate::commands::sync::{
+    cmd_sync_now, cmd_sync_probe, cmd_sync_set_enabled, cmd_sync_start, cmd_sync_status,
 };
 use crate::commands::tools::{
     cmd_has_bilibili_cookies, cmd_import_bilibili, cmd_ocr_region, cmd_probe_bilibili,
@@ -74,6 +80,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(cloud_sync::init())
         .plugin(mobile_files::init())
         .setup(|app| {
             let handle = app.handle().clone();
@@ -83,6 +90,9 @@ pub fn run() {
                 let db = Db::connect_and_migrate(&data_dir.join("courseai.db"))
                     .await
                     .expect("db init");
+                if let Err(error) = crate::sync::identity::ensure_sync_identity(&db).await {
+                    tracing::warn!("initialize sync identity failed: {error}");
+                }
                 if let Err(error) = crate::pipeline::recover_interrupted_processing(&db).await {
                     tracing::warn!("recover interrupted processing failed: {error}");
                 }
@@ -188,6 +198,7 @@ pub fn run() {
             cmd_generate_course_knowledge,
             cmd_course_knowledge_chat_stream,
             cmd_generate_cards,
+            cmd_generate_cards_for_concept,
             cmd_due_cards,
             cmd_count_due,
             cmd_review_card,
@@ -197,6 +208,11 @@ pub fn run() {
             cmd_due_by_course,
             cmd_add_card,
             cmd_notify,
+            cmd_sync_status,
+            cmd_sync_start,
+            cmd_sync_set_enabled,
+            cmd_sync_now,
+            cmd_sync_probe,
             cmd_has_bilibili_cookies
         ])
         .run(tauri::generate_context!())

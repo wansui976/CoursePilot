@@ -1,11 +1,13 @@
 use crate::commands::courses::AppState;
 use crate::db::Db;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::State;
 
 const DAY_MS: i64 = 86_400_000;
+/// 题目出处与最近概念出现点最多相隔 5 分钟；超过后不再把后续无关内容归给该概念。
+const CONCEPT_CARD_MAX_DISTANCE_MS: i64 = 5 * 60 * 1000;
 
 // FSRS-4.5 默认权重（17 个）。⚠ 本环境离线，权重与公式变体凭记忆；上线前请对照
 // 官方 rs-fsrs / py-fsrs 校验这组权重与公式版本。
@@ -87,7 +89,7 @@ pub fn fsrs_review(prev: Option<(f64, f64)>, rating: i64, elapsed_days: f64) -> 
 }
 
 /// 待复习卡片（到期）。带出处以支持「回看」。
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Debug, Serialize)]
 pub struct DueCard {
     pub id: String,
     pub video_id: Option<String>,
@@ -95,6 +97,38 @@ pub struct DueCard {
     pub front: String,
     pub back: String,
     pub source_ms: Option<i64>,
+    pub question_type: Option<String>,
+    pub options: Option<Vec<String>>,
+    pub correct_options: Option<Vec<String>>,
+}
+
+#[derive(sqlx::FromRow)]
+struct DueCardRow {
+    id: String,
+    video_id: Option<String>,
+    course_id: Option<String>,
+    kind: String,
+    front: String,
+    back: String,
+    source_ms: Option<i64>,
+    questions_json: Option<String>,
+}
+
+impl DueCardRow {
+    fn into_due_card(self) -> DueCard {
+        let choice = choice_payload_for_card(&self);
+        DueCard {
+            id: self.id,
+            video_id: self.video_id,
+            course_id: self.course_id,
+            front: self.front,
+            back: self.back,
+            source_ms: self.source_ms,
+            question_type: choice.as_ref().map(|(kind, _, _)| kind.clone()),
+            options: choice.as_ref().map(|(_, options, _)| options.clone()),
+            correct_options: choice.map(|(_, _, correct)| correct),
+        }
+    }
 }
 
 /// 某概念的待复习卡片数（供概念面板显示「复习 N」）。
@@ -161,14 +195,17 @@ pub fn rank_weak_concepts(
     out
 }
 
-/// 把一张卡归到「它出处那一刻正在讲」的概念：同视频里 start_ms ≤ source_ms 的最近一个
-/// 概念出现点。`occ_in_video` 为该视频的 (concept_id, start_ms)（可无序）。
-/// 无 source_ms、或所有出现都在 source_ms 之后 → None（未归类）。
+/// 把一张卡归到「它出处那一刻正在讲」的概念：同视频里 start_ms ≤ source_ms、且距离
+/// 不超过 5 分钟的最近一个概念出现点。`occ_in_video` 为该视频的
+/// (concept_id, start_ms)（可无序）。无 source_ms、所有出现都在出处之后或距离过远时
+/// 返回 None（未归类）。
 pub fn concept_for_card(source_ms: Option<i64>, occ_in_video: &[(String, i64)]) -> Option<String> {
     let source_ms = source_ms?;
     occ_in_video
         .iter()
-        .filter(|(_, start_ms)| *start_ms <= source_ms)
+        .filter(|(_, start_ms)| {
+            *start_ms <= source_ms && source_ms - *start_ms <= CONCEPT_CARD_MAX_DISTANCE_MS
+        })
         .max_by_key(|(_, start_ms)| *start_ms)
         .map(|(concept_id, _)| concept_id.clone())
 }
@@ -179,7 +216,10 @@ type OccByVideo = std::collections::HashMap<String, Vec<(String, i64)>>;
 fn group_occurrences_by_video(rows: Vec<(String, String, i64)>) -> OccByVideo {
     let mut by_video: OccByVideo = std::collections::HashMap::new();
     for (video_id, concept_id, start_ms) in rows {
-        by_video.entry(video_id).or_default().push((concept_id, start_ms));
+        by_video
+            .entry(video_id)
+            .or_default()
+            .push((concept_id, start_ms));
     }
     by_video
 }
@@ -217,7 +257,12 @@ pub async fn due_counts_by_concept(
     let cards: Vec<(Option<String>, Option<i64>)> = sqlx::query_as(
         "SELECT c.video_id, c.source_ms
          FROM cards c JOIN card_schedule s ON s.card_id = c.id
-         WHERE c.course_id = ? AND s.due_at <= ?",
+         LEFT JOIN videos v ON v.id = c.video_id
+         LEFT JOIN courses course ON course.id = COALESCE(v.course_id, c.course_id)
+         WHERE c.course_id = ? AND s.due_at <= ?
+           AND (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
+           AND (COALESCE(v.course_id, c.course_id) IS NULL
+                OR (course.id IS NOT NULL AND course.deleted_at IS NULL))",
     )
     .bind(course_id)
     .bind(now)
@@ -246,23 +291,32 @@ pub async fn due_cards_for_concept(
     limit: i64,
 ) -> AppResult<Vec<DueCard>> {
     let by_video = course_occurrences_by_video(db, course_id).await?;
-    let cards: Vec<DueCard> = sqlx::query_as(
-        "SELECT c.id, c.video_id, c.course_id, c.front, c.back, c.source_ms
+    let cards: Vec<DueCardRow> = sqlx::query_as(
+        "SELECT c.id, c.video_id, c.course_id, c.kind, c.front, c.back, c.source_ms,
+                q.questions_json
          FROM cards c JOIN card_schedule s ON s.card_id = c.id
-         WHERE c.course_id = ? AND s.due_at <= ? ORDER BY s.due_at LIMIT ?",
+         LEFT JOIN quizzes q ON q.video_id = c.video_id
+         LEFT JOIN videos v ON v.id = c.video_id
+         LEFT JOIN courses course ON course.id = COALESCE(v.course_id, c.course_id)
+         WHERE c.course_id = ? AND s.due_at <= ?
+           AND (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
+           AND (COALESCE(v.course_id, c.course_id) IS NULL
+                OR (course.id IS NOT NULL AND course.deleted_at IS NULL))
+         ORDER BY s.due_at, c.id",
     )
     .bind(course_id)
     .bind(now)
-    .bind(limit)
     .fetch_all(&db.pool)
     .await?;
 
     Ok(cards
         .into_iter()
+        .map(DueCardRow::into_due_card)
         .filter(|card| {
             let occ = occ_for(&by_video, card.video_id.as_deref());
             concept_for_card(card.source_ms, occ).as_deref() == Some(concept_id)
         })
+        .take(limit.max(0) as usize)
         .collect())
 }
 
@@ -340,76 +394,240 @@ fn answer_text(answer: &Value) -> String {
         Value::Bool(b) => if *b { "正确" } else { "错误" }.to_string(),
         Value::Array(items) => items
             .iter()
-            .map(|v| v.as_str().map(|s| s.to_string()).unwrap_or_else(|| v.to_string()))
+            .map(|v| {
+                v.as_str()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| v.to_string())
+            })
             .collect::<Vec<_>>()
             .join("、"),
         other => other.to_string(),
     }
 }
 
+/// 从 quiz 卡的稳定 id 找回原题选项。题干和答案必须仍与卡片一致，避免题库重排后
+/// 把另一题的选项挂到旧卡上；手工卡或损坏的旧题则继续按普通闪卡显示。
+fn choice_payload_for_card(row: &DueCardRow) -> Option<(String, Vec<String>, Vec<String>)> {
+    if row.kind != "quiz" {
+        return None;
+    }
+    let video_id = row.video_id.as_deref()?;
+    let index = row
+        .id
+        .strip_prefix(&format!("q:{video_id}:"))?
+        .parse::<usize>()
+        .ok()?;
+    let questions: Vec<Value> = serde_json::from_str(row.questions_json.as_deref()?).ok()?;
+    let question = questions.get(index)?;
+    if question.get("stem")?.as_str()?.trim() != row.front.trim() {
+        return None;
+    }
+
+    let question_type = question.get("type")?.as_str()?;
+    let answer = question.get("answer")?;
+    if answer_text(answer).trim() != row.back.lines().next().unwrap_or_default().trim() {
+        return None;
+    }
+
+    let (options, correct_options) = match question_type {
+        "single" => {
+            let options = string_array(question.get("options")?)?;
+            let correct = answer.as_str()?.to_string();
+            (options, vec![correct])
+        }
+        "multi" => {
+            let options = string_array(question.get("options")?)?;
+            let correct = string_array(answer)?;
+            if correct.len() < 2 {
+                return None;
+            }
+            (options, correct)
+        }
+        "judge" => {
+            let correct = if answer.as_bool()? {
+                "正确"
+            } else {
+                "错误"
+            };
+            (
+                vec!["正确".to_string(), "错误".to_string()],
+                vec![correct.to_string()],
+            )
+        }
+        _ => return None,
+    };
+
+    if options.len() < 2
+        || correct_options
+            .iter()
+            .any(|correct| !options.iter().any(|option| option == correct))
+    {
+        return None;
+    }
+
+    Some((question_type.to_string(), options, correct_options))
+}
+
+fn string_array(value: &Value) -> Option<Vec<String>> {
+    value
+        .as_array()?
+        .iter()
+        .map(|item| item.as_str().map(str::to_string))
+        .collect()
+}
+
+/// 写入一道测验题对应的复习卡。题干无效时跳过；已有排期不会被重置。
+async fn upsert_quiz_card(
+    conn: &mut sqlx::SqliteConnection,
+    video_id: &str,
+    course_id: Option<&str>,
+    index: usize,
+    question: &Value,
+    now: i64,
+) -> AppResult<bool> {
+    let Some(stem) = question.get("stem").and_then(|value| value.as_str()) else {
+        return Ok(false);
+    };
+    let mut back = question.get("answer").map(answer_text).unwrap_or_default();
+    if let Some(explanation) = question.get("explanation").and_then(|value| value.as_str()) {
+        if !explanation.trim().is_empty() {
+            back.push('\n');
+            back.push_str(explanation);
+        }
+    }
+    let source_ms = question.get("ref_ms").and_then(|value| value.as_i64());
+    let card_id = format!("q:{video_id}:{index}");
+
+    sqlx::query(
+        "INSERT INTO cards(id,video_id,course_id,kind,front,back,source_ms,created_at)
+         VALUES (?,?,?,'quiz',?,?,?,?)
+         ON CONFLICT(id) DO UPDATE SET front=excluded.front, back=excluded.back,
+           source_ms=excluded.source_ms",
+    )
+    .bind(&card_id)
+    .bind(video_id)
+    .bind(course_id)
+    .bind(stem)
+    .bind(&back)
+    .bind(source_ms)
+    .bind(now)
+    .execute(&mut *conn)
+    .await?;
+
+    // 新卡：立即到期，FSRS 状态未初始化（stability=0），首评时再初始化。
+    // ease/interval_days 为遗留列，置 0（不再驱动排期）。
+    sqlx::query(
+        "INSERT OR IGNORE INTO card_schedule(card_id,due_at,ease,interval_days,reps,lapses,last_reviewed,stability,difficulty)
+         VALUES (?,?,0,0,0,0,NULL,0,0)",
+    )
+    .bind(&card_id)
+    .bind(now)
+    .execute(&mut *conn)
+    .await?;
+    Ok(true)
+}
+
 /// 从出题结果生成/更新复习卡：按题序稳定 id，重生成时更新正背面、保留已有排期；
 /// 新卡建一条「立即到期」的排期。返回卡片总数。
 pub async fn generate_cards_from_quiz(db: &Db, video_id: &str) -> AppResult<usize> {
+    let mut tx = db.pool.begin().await?;
     let raw: Option<String> =
         sqlx::query_scalar("SELECT questions_json FROM quizzes WHERE video_id=?")
             .bind(video_id)
-            .fetch_optional(&db.pool)
+            .fetch_optional(&mut *tx)
             .await?;
     let Some(raw) = raw else { return Ok(0) };
-    let questions: Vec<Value> = serde_json::from_str(&raw).unwrap_or_default();
-    let course_id: Option<String> =
-        sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
-            .bind(video_id)
-            .fetch_optional(&db.pool)
-            .await?;
+    let questions: Vec<Value> = serde_json::from_str(&raw)?;
+    let course_id: Option<String> = sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
+        .bind(video_id)
+        .fetch_optional(&mut *tx)
+        .await?;
     let now = chrono::Utc::now().timestamp_millis();
 
     let mut count = 0;
-    for (i, q) in questions.iter().enumerate() {
-        let Some(stem) = q.get("stem").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let mut back = q
-            .get("answer")
-            .map(answer_text)
-            .unwrap_or_default();
-        if let Some(exp) = q.get("explanation").and_then(|v| v.as_str()) {
-            if !exp.trim().is_empty() {
-                back.push('\n');
-                back.push_str(exp);
+    let mut active_ids = std::collections::HashSet::new();
+    for (index, question) in questions.iter().enumerate() {
+        if upsert_quiz_card(
+            &mut tx,
+            video_id,
+            course_id.as_deref(),
+            index,
+            question,
+            now,
+        )
+        .await?
+        {
+            count += 1;
+            active_ids.insert(format!("q:{video_id}:{index}"));
+        }
+    }
+
+    // 题库缩短或某题变为无效结构时，删除对应的旧测验卡；外键级联同时清理排期。
+    // 先按 video_id 收窄，再在 Rust 中匹配稳定 id 前缀，避免 LIKE 通配符误判 video id。
+    let existing_ids: Vec<String> =
+        sqlx::query_scalar("SELECT id FROM cards WHERE video_id=? AND kind='quiz'")
+            .bind(video_id)
+            .fetch_all(&mut *tx)
+            .await?;
+    let quiz_prefix = format!("q:{video_id}:");
+    for card_id in existing_ids {
+        if card_id.starts_with(&quiz_prefix) && !active_ids.contains(&card_id) {
+            sqlx::query("DELETE FROM cards WHERE id=?")
+                .bind(card_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+    tx.commit().await?;
+    Ok(count)
+}
+
+/// 只把当前课程中实际归属于指定概念的测验题生成/更新为卡片。归类规则与待复习计数、
+/// 概念复习列表和薄弱概念统计完全一致；相关视频中的其他题不会被写入或更新。
+pub async fn generate_cards_for_concept(
+    db: &Db,
+    course_id: &str,
+    concept_id: &str,
+) -> AppResult<usize> {
+    let concept_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM concepts WHERE id=? AND course_id=?)")
+            .bind(concept_id)
+            .bind(course_id)
+            .fetch_one(&db.pool)
+            .await?;
+    if !concept_exists {
+        return Err(AppError::NotFound(format!(
+            "concept {concept_id} in course {course_id}"
+        )));
+    }
+
+    let by_video = course_occurrences_by_video(db, course_id).await?;
+    let mut tx = db.pool.begin().await?;
+    let quizzes: Vec<(String, String)> = sqlx::query_as(
+        "SELECT q.video_id, q.questions_json
+         FROM quizzes q JOIN videos v ON v.id=q.video_id
+         WHERE v.course_id=? AND v.deleted_at IS NULL",
+    )
+    .bind(course_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut count = 0;
+
+    for (video_id, raw) in quizzes {
+        let questions: Vec<Value> = serde_json::from_str(&raw)?;
+        let occurrences = occ_for(&by_video, Some(&video_id));
+        for (index, question) in questions.iter().enumerate() {
+            let source_ms = question.get("ref_ms").and_then(|value| value.as_i64());
+            if concept_for_card(source_ms, occurrences).as_deref() != Some(concept_id) {
+                continue;
+            }
+            if upsert_quiz_card(&mut tx, &video_id, Some(course_id), index, question, now).await? {
+                count += 1;
             }
         }
-        let source_ms = q.get("ref_ms").and_then(|v| v.as_i64());
-        let card_id = format!("q:{video_id}:{i}");
-
-        sqlx::query(
-            "INSERT INTO cards(id,video_id,course_id,kind,front,back,source_ms,created_at)
-             VALUES (?,?,?,'quiz',?,?,?,?)
-             ON CONFLICT(id) DO UPDATE SET front=excluded.front, back=excluded.back,
-               source_ms=excluded.source_ms",
-        )
-        .bind(&card_id)
-        .bind(video_id)
-        .bind(&course_id)
-        .bind(stem)
-        .bind(&back)
-        .bind(source_ms)
-        .bind(now)
-        .execute(&db.pool)
-        .await?;
-
-        // 新卡：立即到期，FSRS 状态未初始化（stability=0），首评时再初始化。
-        // ease/interval_days 为遗留列，置 0（不再驱动排期）。
-        sqlx::query(
-            "INSERT OR IGNORE INTO card_schedule(card_id,due_at,ease,interval_days,reps,lapses,last_reviewed,stability,difficulty)
-             VALUES (?,?,0,0,0,0,NULL,0,0)",
-        )
-        .bind(&card_id)
-        .bind(now)
-        .execute(&db.pool)
-        .await?;
-        count += 1;
     }
+    tx.commit().await?;
     Ok(count)
 }
 
@@ -423,11 +641,11 @@ pub async fn add_manual_card(
     back: &str,
     source_ms: Option<i64>,
 ) -> AppResult<String> {
-    let course_id: Option<String> =
-        sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
-            .bind(video_id)
-            .fetch_optional(&db.pool)
-            .await?;
+    let mut tx = db.pool.begin().await?;
+    let course_id: Option<String> = sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
+        .bind(video_id)
+        .fetch_optional(&mut *tx)
+        .await?;
     let now = chrono::Utc::now().timestamp_millis();
     let card_id = format!("m:{}", uuid::Uuid::new_v4());
     sqlx::query(
@@ -442,7 +660,7 @@ pub async fn add_manual_card(
     .bind(back)
     .bind(source_ms)
     .bind(now)
-    .execute(&db.pool)
+    .execute(&mut *tx)
     .await?;
     sqlx::query(
         "INSERT INTO card_schedule(card_id,due_at,ease,interval_days,reps,lapses,last_reviewed,stability,difficulty)
@@ -450,27 +668,44 @@ pub async fn add_manual_card(
     )
     .bind(&card_id)
     .bind(now)
-    .execute(&db.pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(card_id)
 }
 
 /// 到期待复习卡（跨课程），按到期时间升序。
 pub async fn due_cards(db: &Db, now: i64, limit: i64) -> AppResult<Vec<DueCard>> {
-    Ok(sqlx::query_as(
-        "SELECT c.id, c.video_id, c.course_id, c.front, c.back, c.source_ms
+    let rows: Vec<DueCardRow> = sqlx::query_as(
+        "SELECT c.id, c.video_id, c.course_id, c.kind, c.front, c.back, c.source_ms,
+                q.questions_json
          FROM cards c JOIN card_schedule s ON s.card_id=c.id
-         WHERE s.due_at <= ? ORDER BY s.due_at LIMIT ?",
+         LEFT JOIN quizzes q ON q.video_id = c.video_id
+         LEFT JOIN videos v ON v.id = c.video_id
+         LEFT JOIN courses course ON course.id = COALESCE(v.course_id, c.course_id)
+         WHERE s.due_at <= ?
+           AND (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
+           AND (COALESCE(v.course_id, c.course_id) IS NULL
+                OR (course.id IS NOT NULL AND course.deleted_at IS NULL))
+         ORDER BY s.due_at LIMIT ?",
     )
     .bind(now)
     .bind(limit)
     .fetch_all(&db.pool)
-    .await?)
+    .await?;
+    Ok(rows.into_iter().map(DueCardRow::into_due_card).collect())
 }
 
 pub async fn count_due(db: &Db, now: i64) -> AppResult<i64> {
     Ok(sqlx::query_scalar(
-        "SELECT COUNT(*) FROM card_schedule WHERE due_at <= ?",
+        "SELECT COUNT(*)
+         FROM card_schedule s JOIN cards c ON c.id = s.card_id
+         LEFT JOIN videos v ON v.id = c.video_id
+         LEFT JOIN courses course ON course.id = COALESCE(v.course_id, c.course_id)
+         WHERE s.due_at <= ?
+           AND (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
+           AND (COALESCE(v.course_id, c.course_id) IS NULL
+                OR (course.id IS NOT NULL AND course.deleted_at IS NULL))",
     )
     .bind(now)
     .fetch_one(&db.pool)
@@ -480,10 +715,14 @@ pub async fn count_due(db: &Db, now: i64) -> AppResult<i64> {
 /// 每门课的到期待复习卡数（供仪表盘课程卡「待复习」徽章）。只含有到期卡的课程。
 pub async fn due_by_course(db: &Db, now: i64) -> AppResult<Vec<(String, i64)>> {
     Ok(sqlx::query_as(
-        "SELECT c.course_id, COUNT(*)
+        "SELECT COALESCE(v.course_id, c.course_id), COUNT(*)
          FROM cards c JOIN card_schedule s ON s.card_id = c.id
-         WHERE c.course_id IS NOT NULL AND s.due_at <= ?
-         GROUP BY c.course_id",
+         LEFT JOIN videos v ON v.id = c.video_id
+         LEFT JOIN courses course ON course.id = COALESCE(v.course_id, c.course_id)
+         WHERE COALESCE(v.course_id, c.course_id) IS NOT NULL AND s.due_at <= ?
+           AND (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
+           AND course.id IS NOT NULL AND course.deleted_at IS NULL
+         GROUP BY COALESCE(v.course_id, c.course_id)",
     )
     .bind(now)
     .fetch_all(&db.pool)
@@ -492,14 +731,38 @@ pub async fn due_by_course(db: &Db, now: i64) -> AppResult<Vec<(String, i64)>> {
 
 /// 复习评分：按 FSRS 更新排期 + 记一条 review 事件（含卡 id 与评分）。
 pub async fn review_card(db: &Db, card_id: &str, rating: i64, now: i64) -> AppResult<()> {
-    let row: Option<(f64, f64, i64, i64, Option<i64>)> = sqlx::query_as(
-        "SELECT stability, difficulty, reps, lapses, last_reviewed FROM card_schedule WHERE card_id=?",
+    if !(1..=4).contains(&rating) {
+        return Err(AppError::Config(format!(
+            "review rating must be between 1 and 4, got {rating}"
+        )));
+    }
+    let mut tx = db.pool.begin().await?;
+    let row: Option<(
+        f64,
+        f64,
+        i64,
+        i64,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+    )> = sqlx::query_as(
+        "SELECT s.stability, s.difficulty, s.reps, s.lapses, s.last_reviewed,
+                COALESCE(v.course_id, c.course_id), c.video_id
+         FROM card_schedule s
+         JOIN cards c ON c.id = s.card_id
+         LEFT JOIN videos v ON v.id = c.video_id
+         LEFT JOIN courses course ON course.id = COALESCE(v.course_id, c.course_id)
+         WHERE s.card_id=?
+           AND (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
+           AND (COALESCE(v.course_id, c.course_id) IS NULL
+                OR (course.id IS NOT NULL AND course.deleted_at IS NULL))",
     )
     .bind(card_id)
-    .fetch_optional(&db.pool)
+    .fetch_optional(&mut *tx)
     .await?;
-    let Some((stability, difficulty, reps, lapses, last_reviewed)) = row else {
-        return Ok(());
+    let Some((stability, difficulty, reps, lapses, last_reviewed, course_id, video_id)) = row
+    else {
+        return Err(AppError::NotFound(format!("active card {card_id}")));
     };
 
     // 首评：稳定度未初始化（=0）或从未复习过 → FSRS 初始化；否则按距上次天数更新。
@@ -534,33 +797,42 @@ pub async fn review_card(db: &Db, card_id: &str, rating: i64, now: i64) -> AppRe
     .bind(new_lapses)
     .bind(now)
     .bind(card_id)
-    .execute(&db.pool)
+    .execute(&mut *tx)
     .await?;
 
-    // 复习流水（供仪表盘/掌握度聚合）。course_id/video_id 从卡冗余取。
-    let ids: Option<(Option<String>, Option<String>)> =
-        sqlx::query_as("SELECT course_id, video_id FROM cards WHERE id=?")
-            .bind(card_id)
-            .fetch_optional(&db.pool)
-            .await?;
-    let (course_id, video_id) = ids.unwrap_or((None, None));
-    let meta = format!("{{\"cardId\":{},\"rating\":{}}}", serde_json::json!(card_id), rating);
+    // 复习流水（供仪表盘/掌握度聚合）。课程以存活视频的实际归属为准。
+    let meta = format!(
+        "{{\"cardId\":{},\"rating\":{}}}",
+        serde_json::json!(card_id),
+        rating
+    );
     sqlx::query(
-        "INSERT INTO study_events(kind,course_id,video_id,ts,duration_ms,meta_json)
-         VALUES ('review',?,?,?,0,?)",
+        "INSERT INTO study_events(kind,course_id,video_id,ts,duration_ms,meta_json,event_id)
+         VALUES ('review',?,?,?,0,?,?)",
     )
     .bind(&course_id)
     .bind(&video_id)
     .bind(now)
     .bind(&meta)
-    .execute(&db.pool)
+    .bind(uuid::Uuid::new_v4().to_string())
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn cmd_generate_cards(state: State<'_, AppState>, video_id: String) -> AppResult<usize> {
     generate_cards_from_quiz(&state.db, &video_id).await
+}
+
+#[tauri::command]
+pub async fn cmd_generate_cards_for_concept(
+    state: State<'_, AppState>,
+    course_id: String,
+    concept_id: String,
+) -> AppResult<usize> {
+    generate_cards_for_concept(&state.db, &course_id, &concept_id).await
 }
 
 #[tauri::command]
@@ -755,12 +1027,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn review_card_rolls_back_schedule_when_event_insert_fails() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(&db, r#"[{"stem":"Q","answer":"A"}]"#).await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let card_id = format!("q:{vid}:0");
+        let before: (i64, f64, f64, i64, i64, Option<i64>) = sqlx::query_as(
+            "SELECT due_at, stability, difficulty, reps, lapses, last_reviewed
+             FROM card_schedule WHERE card_id=?",
+        )
+        .bind(&card_id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TRIGGER fail_review_event BEFORE INSERT ON study_events
+             WHEN NEW.kind='review' BEGIN SELECT RAISE(ABORT, 'blocked'); END",
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        assert!(review_card(&db, &card_id, 3, before.0 + 1000)
+            .await
+            .is_err());
+
+        let after: (i64, f64, f64, i64, i64, Option<i64>) = sqlx::query_as(
+            "SELECT due_at, stability, difficulty, reps, lapses, last_reviewed
+             FROM card_schedule WHERE card_id=?",
+        )
+        .bind(&card_id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+        assert_eq!(after, before);
+    }
+
+    #[tokio::test]
+    async fn review_card_rejects_ratings_outside_one_to_four() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(&db, r#"[{"stem":"Q","answer":"A"}]"#).await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let card_id = format!("q:{vid}:0");
+
+        let error = review_card(&db, &card_id, 0, 1).await.unwrap_err();
+        assert!(error.to_string().contains("between 1 and 4"));
+        let last_reviewed: Option<i64> =
+            sqlx::query_scalar("SELECT last_reviewed FROM card_schedule WHERE card_id=?")
+                .bind(card_id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(last_reviewed, None);
+    }
+
+    #[tokio::test]
     async fn generate_from_quiz_makes_due_cards_with_source() {
         let db = fresh_db().await;
         let vid = seed_quiz(
             &db,
-            r#"[{"stem":"光合作用发生在哪里？","answer":"叶绿体","explanation":"暗反应在基质","ref_ms":5000},
-                {"stem":"判断：地球是平的","answer":false}]"#,
+            r#"[{"type":"single","stem":"光合作用发生在哪里？","options":["叶绿体","细胞核","线粒体","核糖体"],"answer":"叶绿体","explanation":"暗反应在基质","ref_ms":5000},
+                {"type":"judge","stem":"判断：地球是平的","answer":false}]"#,
         )
         .await;
 
@@ -774,8 +1101,31 @@ mod tests {
         let first = due.iter().find(|c| c.front.contains("光合作用")).unwrap();
         assert_eq!(first.back, "叶绿体\n暗反应在基质");
         assert_eq!(first.source_ms, Some(5000));
+        assert_eq!(first.question_type.as_deref(), Some("single"));
+        assert_eq!(
+            first.options.as_ref().unwrap(),
+            &vec![
+                "叶绿体".to_string(),
+                "细胞核".to_string(),
+                "线粒体".to_string(),
+                "核糖体".to_string(),
+            ]
+        );
+        assert_eq!(
+            first.correct_options.as_ref().unwrap(),
+            &vec!["叶绿体".to_string()]
+        );
         let judge = due.iter().find(|c| c.front.contains("地球")).unwrap();
         assert_eq!(judge.back, "错误");
+        assert_eq!(judge.question_type.as_deref(), Some("judge"));
+        assert_eq!(
+            judge.options.as_ref().unwrap(),
+            &vec!["正确".to_string(), "错误".to_string()]
+        );
+        assert_eq!(
+            judge.correct_options.as_ref().unwrap(),
+            &vec!["错误".to_string()]
+        );
     }
 
     #[tokio::test]
@@ -784,7 +1134,9 @@ mod tests {
         let vid = seed_quiz(&db, r#"[{"stem":"旧题","answer":"旧答"}]"#).await;
         generate_cards_from_quiz(&db, &vid).await.unwrap();
         let now = chrono::Utc::now().timestamp_millis();
-        review_card(&db, &format!("q:{vid}:0"), 3, now).await.unwrap();
+        review_card(&db, &format!("q:{vid}:0"), 3, now)
+            .await
+            .unwrap();
 
         // 该卡已复习 → 不再到期。重生成（题面变化）不应把它拉回「立即到期」。
         sqlx::query("UPDATE quizzes SET questions_json=? WHERE video_id=?")
@@ -806,6 +1158,137 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn quiz_generation_rolls_back_all_cards_when_schedule_insert_fails() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(
+            &db,
+            r#"[{"stem":"第一题","answer":"A"},{"stem":"第二题","answer":"B"}]"#,
+        )
+        .await;
+        let failing_card = format!("q:{vid}:1");
+        sqlx::raw_sql(&format!(
+            "CREATE TRIGGER fail_second_card_schedule
+             BEFORE INSERT ON card_schedule
+             WHEN NEW.card_id='{failing_card}'
+             BEGIN SELECT RAISE(ABORT, 'test failure'); END;"
+        ))
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        assert!(generate_cards_from_quiz(&db, &vid).await.is_err());
+
+        let cards: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE video_id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        let schedules: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM card_schedule WHERE card_id LIKE ?")
+                .bind(format!("q:{vid}:%"))
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!((cards, schedules), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn quiz_regeneration_removes_stale_cards_and_keeps_surviving_schedule() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(
+            &db,
+            r#"[{"stem":"保留","answer":"A"},{"stem":"删除","answer":"B"}]"#,
+        )
+        .await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let kept_due_at = 9_876_543_210_i64;
+        sqlx::query("UPDATE card_schedule SET due_at=? WHERE card_id=?")
+            .bind(kept_due_at)
+            .bind(format!("q:{vid}:0"))
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE quizzes SET questions_json=? WHERE video_id=?")
+            .bind(r#"[{"stem":"仍保留","answer":"A2"}]"#)
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+
+        let cards: Vec<String> =
+            sqlx::query_scalar("SELECT id FROM cards WHERE video_id=? ORDER BY id")
+                .bind(&vid)
+                .fetch_all(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(cards, vec![format!("q:{vid}:0")]);
+        let due_at: i64 = sqlx::query_scalar("SELECT due_at FROM card_schedule WHERE card_id=?")
+            .bind(format!("q:{vid}:0"))
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(due_at, kept_due_at);
+    }
+
+    #[tokio::test]
+    async fn manual_card_rolls_back_when_schedule_insert_fails() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(&db, "[]").await;
+        sqlx::raw_sql(
+            "CREATE TRIGGER fail_manual_card_schedule
+             BEFORE INSERT ON card_schedule
+             BEGIN SELECT RAISE(ABORT, 'test failure'); END;",
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        assert!(add_manual_card(&db, &vid, "cloze", "front", "back", None)
+            .await
+            .is_err());
+
+        let cards: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE video_id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(cards, 0);
+    }
+
+    #[tokio::test]
+    async fn recycle_bin_cards_are_hidden_and_cannot_be_reviewed() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(&db, r#"[{"stem":"Q","answer":"A"}]"#).await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let card_id = format!("q:{vid}:0");
+        let now = chrono::Utc::now().timestamp_millis() + 1_000;
+        assert_eq!(count_due(&db, now).await.unwrap(), 1);
+
+        sqlx::query("UPDATE videos SET deleted_at=1 WHERE id=?")
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        assert!(due_cards(&db, now, 50).await.unwrap().is_empty());
+        assert_eq!(count_due(&db, now).await.unwrap(), 0);
+        assert!(due_by_course(&db, now).await.unwrap().is_empty());
+        assert!(matches!(
+            review_card(&db, &card_id, 3, now).await,
+            Err(AppError::NotFound(_))
+        ));
+
+        sqlx::query("UPDATE videos SET deleted_at=NULL WHERE id=?")
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(count_due(&db, now).await.unwrap(), 1);
+    }
+
+    #[tokio::test]
     async fn review_logs_event_and_advances_due() {
         let db = fresh_db().await;
         let vid = seed_quiz(&db, r#"[{"stem":"Q","answer":"A"}]"#).await;
@@ -813,7 +1296,9 @@ mod tests {
         let now = chrono::Utc::now().timestamp_millis();
         assert_eq!(count_due(&db, now).await.unwrap(), 1);
 
-        review_card(&db, &format!("q:{vid}:0"), 3, now).await.unwrap();
+        review_card(&db, &format!("q:{vid}:0"), 3, now)
+            .await
+            .unwrap();
         assert_eq!(count_due(&db, now).await.unwrap(), 0, "复习后当下不再到期");
 
         let reviews: i64 =
@@ -832,8 +1317,16 @@ mod tests {
         assert_eq!(concept_for_card(Some(3000), &occ).as_deref(), Some("A"));
         assert_eq!(concept_for_card(Some(5000), &occ).as_deref(), Some("B")); // 恰好相等取该概念
         assert_eq!(concept_for_card(Some(9000), &occ).as_deref(), Some("B"));
+        assert_eq!(
+            concept_for_card(Some(5000 + CONCEPT_CARD_MAX_DISTANCE_MS), &occ).as_deref(),
+            Some("B")
+        ); // 阈值边界仍归类
+        assert_eq!(
+            concept_for_card(Some(5001 + CONCEPT_CARD_MAX_DISTANCE_MS), &occ),
+            None
+        ); // 过远不再错归到视频最后一个概念
         assert_eq!(concept_for_card(Some(1000), &[]), None); // 无概念
-        // 乱序也正确。
+                                                             // 乱序也正确。
         let occ2 = vec![("B".to_string(), 5000i64), ("A".to_string(), 2000i64)];
         assert_eq!(concept_for_card(Some(4000), &occ2).as_deref(), Some("A"));
     }
@@ -849,15 +1342,13 @@ mod tests {
     }
 
     async fn seed_occurrence(db: &Db, concept_id: &str, video_id: &str, start_ms: i64) {
-        sqlx::query(
-            "INSERT INTO concept_occurrences(concept_id,video_id,start_ms) VALUES (?,?,?)",
-        )
-        .bind(concept_id)
-        .bind(video_id)
-        .bind(start_ms)
-        .execute(&db.pool)
-        .await
-        .unwrap();
+        sqlx::query("INSERT INTO concept_occurrences(concept_id,video_id,start_ms) VALUES (?,?,?)")
+            .bind(concept_id)
+            .bind(video_id)
+            .bind(start_ms)
+            .execute(&db.pool)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -866,7 +1357,7 @@ mod tests {
         // q0@3000→甲, q1@6000→乙, q2@1000→未归类(在甲之前), q3 无 ref_ms→未归类。
         let vid = seed_quiz(
             &db,
-            r#"[{"stem":"甲题","answer":"a","ref_ms":3000},
+            r#"[{"type":"single","stem":"甲题","options":["a","x"],"answer":"a","ref_ms":3000},
                 {"stem":"乙题","answer":"b","ref_ms":6000},
                 {"stem":"早题","answer":"c","ref_ms":1000},
                 {"stem":"无出处题","answer":"d"}]"#,
@@ -896,6 +1387,14 @@ mod tests {
             .unwrap();
         assert_eq!(jia.len(), 1);
         assert_eq!(jia[0].front, "甲题");
+        assert_eq!(
+            jia[0].options.as_ref().unwrap(),
+            &vec!["a".to_string(), "x".to_string()]
+        );
+        assert_eq!(
+            jia[0].correct_options.as_ref().unwrap(),
+            &vec!["a".to_string()]
+        );
 
         let yi = due_cards_for_concept(&db, &course_id, "乙", now, 50)
             .await
@@ -905,15 +1404,177 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concept_due_list_filters_before_applying_limit() {
+        let db = fresh_db().await;
+        let mut questions = Vec::new();
+        for index in 0..50 {
+            questions.push(serde_json::json!({
+                "stem": format!("甲题 {index}"),
+                "answer": "甲",
+                "ref_ms": 1_000
+            }));
+        }
+        questions.push(serde_json::json!({
+            "stem": "第 51 张乙题",
+            "answer": "乙",
+            "ref_ms": 11_000
+        }));
+        let raw = serde_json::to_string(&questions).unwrap();
+        let vid = seed_quiz(&db, &raw).await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let course_id: String = sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        seed_concept(&db, "甲", &course_id, "甲概念").await;
+        seed_concept(&db, "乙", &course_id, "乙概念").await;
+        seed_occurrence(&db, "甲", &vid, 0).await;
+        seed_occurrence(&db, "乙", &vid, 10_000).await;
+
+        for index in 0..=50 {
+            sqlx::query("UPDATE card_schedule SET due_at=? WHERE card_id=?")
+                .bind(index as i64)
+                .bind(format!("q:{vid}:{index}"))
+                .execute(&db.pool)
+                .await
+                .unwrap();
+        }
+
+        let cards = due_cards_for_concept(&db, &course_id, "乙", 100, 50)
+            .await
+            .unwrap();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].front, "第 51 张乙题");
+    }
+
+    #[tokio::test]
+    async fn far_card_is_excluded_from_due_and_weak_concept_views() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(
+            &db,
+            &format!(
+                r#"[{{"stem":"远处题","answer":"答","ref_ms":{}}}]"#,
+                1_001 + CONCEPT_CARD_MAX_DISTANCE_MS
+            ),
+        )
+        .await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let course_id: String = sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        seed_concept(&db, "甲", &course_id, "甲概念").await;
+        seed_occurrence(&db, "甲", &vid, 1_000).await;
+        let now = chrono::Utc::now().timestamp_millis() + 10_000;
+
+        assert!(due_counts_by_concept(&db, &course_id, now)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(due_cards_for_concept(&db, &course_id, "甲", now, 50)
+            .await
+            .unwrap()
+            .is_empty());
+
+        let card_id = format!("q:{vid}:0");
+        review_card(&db, &card_id, 1, now).await.unwrap();
+        review_card(&db, &card_id, 2, now + 1).await.unwrap();
+        assert!(weak_concepts(&db, 2, 8).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn concept_generation_only_writes_questions_assigned_to_that_concept() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(
+            &db,
+            r#"[{"stem":"旧甲题","answer":"甲","ref_ms":1000},
+                {"stem":"旧乙题","answer":"乙","ref_ms":11000}]"#,
+        )
+        .await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let course_id: String = sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        seed_concept(&db, "甲", &course_id, "甲概念").await;
+        seed_concept(&db, "乙", &course_id, "乙概念").await;
+        seed_occurrence(&db, "甲", &vid, 0).await;
+        seed_occurrence(&db, "乙", &vid, 10_000).await;
+
+        let kept_due_at = 987_654_321i64;
+        sqlx::query("UPDATE card_schedule SET due_at=? WHERE card_id=?")
+            .bind(kept_due_at)
+            .bind(format!("q:{vid}:0"))
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE quizzes SET questions_json=? WHERE video_id=?")
+            .bind(
+                r#"[{"stem":"新甲题","answer":"新甲","ref_ms":1000},
+                    {"stem":"新乙题","answer":"新乙","ref_ms":11000},
+                    {"stem":"新增乙题","answer":"乙","ref_ms":12000},
+                    {"stem":"新增甲题","answer":"甲","ref_ms":2000}]"#,
+            )
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        let count = generate_cards_for_concept(&db, &course_id, "甲")
+            .await
+            .unwrap();
+        assert_eq!(count, 2, "只更新旧甲题并生成新增甲题");
+
+        let first: (String, i64) = sqlx::query_as(
+            "SELECT c.front,s.due_at FROM cards c JOIN card_schedule s ON s.card_id=c.id WHERE c.id=?",
+        )
+        .bind(format!("q:{vid}:0"))
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+        assert_eq!(first, ("新甲题".to_string(), kept_due_at));
+        let old_other: String = sqlx::query_scalar("SELECT front FROM cards WHERE id=?")
+            .bind(format!("q:{vid}:1"))
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(old_other, "旧乙题", "乙题不应被该命令更新");
+        let other_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cards WHERE id=?)")
+                .bind(format!("q:{vid}:2"))
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert!(!other_exists, "新增乙题不应被该命令生成");
+        let target_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cards WHERE id=?)")
+                .bind(format!("q:{vid}:3"))
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert!(target_exists, "新增甲题应被该命令生成");
+    }
+
+    #[tokio::test]
     async fn add_manual_card_makes_a_due_cloze_card() {
         let db = fresh_db().await;
         // seed_quiz 建了 course+video（也建了一套 quiz，但这里只用视频）。
         let vid = seed_quiz(&db, r#"[]"#).await;
         let now = chrono::Utc::now().timestamp_millis();
 
-        let id = add_manual_card(&db, &vid, "cloze", "光合作用发生在＿＿＿＿中", "叶绿体", Some(5000))
-            .await
-            .unwrap();
+        let id = add_manual_card(
+            &db,
+            &vid,
+            "cloze",
+            "光合作用发生在＿＿＿＿中",
+            "叶绿体",
+            Some(5000),
+        )
+        .await
+        .unwrap();
         assert!(id.starts_with("m:"));
 
         let due = due_cards(&db, now + 1000, 50).await.unwrap();
@@ -922,16 +1583,26 @@ mod tests {
         assert_eq!(card.back, "叶绿体");
         assert_eq!(card.source_ms, Some(5000));
         assert!(card.video_id.is_some());
+        assert!(card.options.is_none());
+        assert!(card.correct_options.is_none());
 
         // 复习后不再立即到期（走 FSRS 首评）。
         review_card(&db, &id, 3, now).await.unwrap();
-        assert!(due_cards(&db, now, 50).await.unwrap().iter().all(|c| c.id != id));
+        assert!(due_cards(&db, now, 50)
+            .await
+            .unwrap()
+            .iter()
+            .all(|c| c.id != id));
     }
 
     #[tokio::test]
     async fn due_by_course_counts_due_cards_per_course() {
         let db = fresh_db().await;
-        let vid = seed_quiz(&db, r#"[{"stem":"甲","answer":"a"},{"stem":"乙","answer":"b"}]"#).await;
+        let vid = seed_quiz(
+            &db,
+            r#"[{"stem":"甲","answer":"a"},{"stem":"乙","answer":"b"}]"#,
+        )
+        .await;
         generate_cards_from_quiz(&db, &vid).await.unwrap();
         let course_id: String = sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
             .bind(&vid)
@@ -944,7 +1615,9 @@ mod tests {
         assert_eq!(rows, vec![(course_id.clone(), 2)]);
 
         // 复习一张到未来 → 该课到期数降为 1。
-        review_card(&db, &format!("q:{vid}:0"), 3, now).await.unwrap();
+        review_card(&db, &format!("q:{vid}:0"), 3, now)
+            .await
+            .unwrap();
         let rows = due_by_course(&db, now).await.unwrap();
         assert_eq!(rows, vec![(course_id, 1)]);
     }
@@ -1008,9 +1681,15 @@ mod tests {
 
         // 甲题连续差评两次；乙题一次好评。
         let now = chrono::Utc::now().timestamp_millis();
-        review_card(&db, &format!("q:{vid}:0"), 1, now).await.unwrap();
-        review_card(&db, &format!("q:{vid}:0"), 2, now + 1).await.unwrap();
-        review_card(&db, &format!("q:{vid}:1"), 4, now + 2).await.unwrap();
+        review_card(&db, &format!("q:{vid}:0"), 1, now)
+            .await
+            .unwrap();
+        review_card(&db, &format!("q:{vid}:0"), 2, now + 1)
+            .await
+            .unwrap();
+        review_card(&db, &format!("q:{vid}:1"), 4, now + 2)
+            .await
+            .unwrap();
 
         let weak = weak_concepts(&db, 2, 8).await.unwrap();
         // 甲：2 次 2 差 → 上榜；乙：1 次且无差评 → 不上。

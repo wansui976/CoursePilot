@@ -82,4 +82,28 @@ describe("LlmSettingsPanel", () => {
 
     expect(await screen.findByText(/保存失败/)).toBeInTheDocument();
   });
+
+  it("shows a load error instead of a misleading empty state", async () => {
+    mockIpc.ai.getProfiles.mockRejectedValue(new Error("database unavailable"));
+
+    render(<LlmSettingsPanel />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "LLM 配置加载失败：Error: database unavailable",
+    );
+    expect(screen.queryByText(/还没有配置/)).not.toBeInTheDocument();
+  });
+
+  it("reports routing read failures but tolerates malformed routing JSON", async () => {
+    mockIpc.settings.get.mockRejectedValueOnce(new Error("db locked"));
+    const { unmount } = render(<LlmSettingsPanel />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("db locked");
+    unmount();
+
+    mockIpc.settings.get.mockResolvedValueOnce("not-json");
+    render(<LlmSettingsPanel />);
+    expect(await screen.findByLabelText("配置名称")).toHaveValue(profile.name);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });

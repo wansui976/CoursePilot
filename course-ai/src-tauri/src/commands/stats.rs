@@ -46,20 +46,20 @@ pub async fn log_watch(db: &Db, video_id: &str, watched_ms: i64) -> AppResult<()
         return Ok(());
     }
     // 视频可能已不存在（fetch_optional -> None）；course_id 列本身 NOT NULL。
-    let course_id: Option<String> =
-        sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
-            .bind(video_id)
-            .fetch_optional(&db.pool)
-            .await?;
+    let course_id: Option<String> = sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
+        .bind(video_id)
+        .fetch_optional(&db.pool)
+        .await?;
     let ts = chrono::Utc::now().timestamp_millis();
     sqlx::query(
-        "INSERT INTO study_events(kind,course_id,video_id,ts,duration_ms,meta_json)
-         VALUES ('watch',?,?,?,?,'{}')",
+        "INSERT INTO study_events(kind,course_id,video_id,ts,duration_ms,meta_json,event_id)
+         VALUES ('watch',?,?,?,?,'{}',?)",
     )
     .bind(&course_id)
     .bind(video_id)
     .bind(ts)
     .bind(watched_ms)
+    .bind(uuid::Uuid::new_v4().to_string())
     .execute(&db.pool)
     .await?;
     Ok(())
@@ -118,12 +118,21 @@ pub async fn daily_totals(db: &Db, from_ts: i64, to_ts: i64) -> AppResult<Vec<Da
 /// 查的是复习排期，但只服务学习面板「今天没有到期卡」时的那句提示，故与其他面板
 /// 聚合放在一处。
 pub async fn next_due_at(db: &Db, now: i64) -> AppResult<Option<i64>> {
-    Ok(
-        sqlx::query_scalar("SELECT MIN(due_at) FROM card_schedule WHERE due_at > ?")
-            .bind(now)
-            .fetch_one(&db.pool)
-            .await?,
+    Ok(sqlx::query_scalar(
+        "SELECT MIN(s.due_at)
+         FROM card_schedule s
+         JOIN cards card ON card.id = s.card_id
+         LEFT JOIN videos video ON video.id = card.video_id
+         LEFT JOIN courses course ON course.id = COALESCE(video.course_id, card.course_id)
+         WHERE s.due_at > ?
+           AND (card.video_id IS NULL
+                OR (video.id IS NOT NULL AND video.deleted_at IS NULL))
+           AND (COALESCE(video.course_id, card.course_id) IS NULL
+                OR (course.id IS NOT NULL AND course.deleted_at IS NULL))",
     )
+    .bind(now)
+    .fetch_one(&db.pool)
+    .await?)
 }
 
 /// 「继续学习」条目：每门课最近一次观看的视频（供仪表盘一键续播）。
@@ -330,7 +339,9 @@ mod tests {
     #[tokio::test]
     async fn log_watch_resolves_course_and_accumulates_for_the_course() {
         let db = fresh_db().await;
-        let course = create_course(&db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let course = create_course(&db, "c".into(), "/tmp/c".into())
+            .await
+            .unwrap();
         let vid = seed_video(&db, &course.id).await;
 
         log_watch(&db, &vid, 5000).await.unwrap();
@@ -345,7 +356,9 @@ mod tests {
     #[tokio::test]
     async fn log_watch_ignores_non_positive_durations() {
         let db = fresh_db().await;
-        let course = create_course(&db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let course = create_course(&db, "c".into(), "/tmp/c".into())
+            .await
+            .unwrap();
         let vid = seed_video(&db, &course.id).await;
 
         log_watch(&db, &vid, 0).await.unwrap();
@@ -386,7 +399,9 @@ mod tests {
     #[tokio::test]
     async fn daily_totals_merges_watching_and_reviewing_on_the_same_day() {
         let db = fresh_db().await;
-        let course = create_course(&db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let course = create_course(&db, "c".into(), "/tmp/c".into())
+            .await
+            .unwrap();
         let vid = seed_video(&db, &course.id).await;
         let base = 1_700_000_000_000i64;
         insert_watch_at(&db, &course.id, &vid, base, 4000).await;
@@ -411,7 +426,9 @@ mod tests {
     #[tokio::test]
     async fn daily_totals_keeps_days_in_ascending_order() {
         let db = fresh_db().await;
-        let course = create_course(&db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let course = create_course(&db, "c".into(), "/tmp/c".into())
+            .await
+            .unwrap();
         let vid = seed_video(&db, &course.id).await;
         let base = 1_700_000_000_000i64;
         // 先写晚的那天，再写早的那天：返回顺序仍应由日期决定。
@@ -428,10 +445,16 @@ mod tests {
     #[tokio::test]
     async fn next_due_at_skips_cards_already_due() {
         let db = fresh_db().await;
-        let course = create_course(&db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let course = create_course(&db, "c".into(), "/tmp/c".into())
+            .await
+            .unwrap();
         let vid = seed_video(&db, &course.id).await;
         let now = 1_700_000_000_000i64;
-        for (id, due_at) in [("已到期", now - 1000), ("最近", now + 5000), ("更晚", now + 9000)] {
+        for (id, due_at) in [
+            ("已到期", now - 1000),
+            ("最近", now + 5000),
+            ("更晚", now + 9000),
+        ] {
             sqlx::query(
                 "INSERT INTO cards(id,video_id,course_id,kind,front,back,created_at)
                  VALUES (?,?,?,'quiz','f','b',0)",
@@ -454,6 +477,20 @@ mod tests {
         }
 
         assert_eq!(next_due_at(&db, now).await.unwrap(), Some(now + 5000));
+
+        sqlx::query("UPDATE videos SET deleted_at=1 WHERE id=?")
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(next_due_at(&db, now).await.unwrap(), None);
+
+        sqlx::query("UPDATE videos SET deleted_at=NULL WHERE id=?")
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(next_due_at(&db, now).await.unwrap(), Some(now + 5000));
     }
 
     #[tokio::test]
@@ -465,7 +502,9 @@ mod tests {
     #[tokio::test]
     async fn daily_totals_merges_same_day_and_splits_across_days() {
         let db = fresh_db().await;
-        let course = create_course(&db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let course = create_course(&db, "c".into(), "/tmp/c".into())
+            .await
+            .unwrap();
         let vid = seed_video(&db, &course.id).await;
 
         // 两条同一时刻（同一天）合并；再来一条隔两天的单独成行。
@@ -524,7 +563,9 @@ mod tests {
     #[tokio::test]
     async fn course_video_ids_lists_live_videos_with_course() {
         let db = fresh_db().await;
-        let course = create_course(&db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let course = create_course(&db, "c".into(), "/tmp/c".into())
+            .await
+            .unwrap();
         let v1 = seed_video_titled(&db, &course.id, "第一讲").await;
         let v2 = seed_video_titled(&db, &course.id, "第二讲").await;
         sqlx::query("UPDATE videos SET deleted_at=1 WHERE id=?")
@@ -541,7 +582,9 @@ mod tests {
     #[tokio::test]
     async fn continue_rows_skips_a_course_whose_last_video_was_deleted() {
         let db = fresh_db().await;
-        let course = create_course(&db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let course = create_course(&db, "c".into(), "/tmp/c".into())
+            .await
+            .unwrap();
         let vid = seed_video_titled(&db, &course.id, "只有这一讲").await;
         insert_watch_at(&db, &course.id, &vid, 1_700_000_000_000, 4000).await;
         sqlx::query("UPDATE videos SET deleted_at=1 WHERE id=?")
@@ -556,7 +599,9 @@ mod tests {
     #[tokio::test]
     async fn daily_totals_respects_the_time_window() {
         let db = fresh_db().await;
-        let course = create_course(&db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let course = create_course(&db, "c".into(), "/tmp/c".into())
+            .await
+            .unwrap();
         let vid = seed_video(&db, &course.id).await;
         let base = 1_700_000_000_000i64;
         insert_watch_at(&db, &course.id, &vid, base, 4000).await;

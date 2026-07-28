@@ -10,6 +10,7 @@ const iosPluginSourcePath = join(
   process.cwd(),
   "src-tauri/ios/Sources/MobileFilesPlugin.swift",
 );
+const androidBuildPath = join(process.cwd(), "src-tauri/gen/android/app/build.gradle.kts");
 
 function commandBody(source: string, commandName: string) {
   const start = source.indexOf(`fun ${commandName}(invoke: Invoke)`);
@@ -77,7 +78,39 @@ describe("Android native plugin threading", () => {
 
     expect(source).toContain("#[cfg(target_os = \"android\")]");
     expect(source).toContain("slides::capture_frame");
-    expect(source).toContain("移动端 OCR 暂不可用");
+    expect(source).toContain("recognize_image_text");
+    expect(source).not.toContain("移动端 OCR 暂不可用");
+  });
+
+  it("runs bundled ML Kit OCR off the Android main thread", () => {
+    const source = readFileSync(pluginSourcePath, "utf8");
+    const build = readFileSync(androidBuildPath, "utf8");
+    const body = commandBody(source, "recognizeImageText");
+
+    expect(build).toContain('com.google.mlkit:text-recognition-chinese:16.0.1');
+    expect(body.indexOf("runOnIoThread")).toBeGreaterThanOrEqual(0);
+    expect(body.indexOf("ChineseTextRecognizerOptions")).toBeGreaterThan(
+      body.indexOf("runOnIoThread"),
+    );
+    expect(body).toContain("Tasks.await");
+  });
+});
+
+describe("Apple Vision OCR", () => {
+  it("keeps all Vision objects inside the blocking thread", () => {
+    const pipeline = readFileSync(
+      join(process.cwd(), "src-tauri/src/pipeline/ocr.rs"),
+      "utf8",
+    );
+    const vision = readFileSync(
+      join(process.cwd(), "src-tauri/src/pipeline/apple_vision.rs"),
+      "utf8",
+    );
+
+    expect(pipeline).toContain("spawn_blocking");
+    expect(vision).toContain("VNRecognizeTextRequest::new()");
+    expect(vision).toContain('["zh-Hans", "en-US"]');
+    expect(vision).toContain("autoreleasepool");
   });
 });
 
