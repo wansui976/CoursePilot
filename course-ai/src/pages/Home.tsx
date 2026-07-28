@@ -410,20 +410,25 @@ export function Home() {
     };
   }, [goBackOneLevel, isAndroidPlatform]);
 
-  // ASR 完成后：章节、摘要、笔记、出题、脑图全部由后端流水线作为可见任务自动续跑
-  // （见 pipeline::run_ai_followups），用户无需手动点「生成」。这里只补做不在后端任务
-  // 队列里的「课件抽取」，并在各 AI 任务完成时刷新对应面板。
+  // 课件抽取、文字识别、章节、摘要、笔记、出题、脑图全部由后端流水线作为可见任务
+  // 自动续跑（见 pipeline::run_all / run_ai_followups），用户无需手动点「生成」。
+  // 这里只负责在各任务完成时刷新对应面板。
+  //
+  // 这里**不能**再自己调一次课件抽取：课件抽取已经是后端流水线的一步，前端再补一次
+  // 就是整段视频解码两遍；而且写课件页是「先清空该视频的所有页再重写」，第二遍会把
+  // 第一遍连同已经认出来的页面文字一起抹掉。
   useEffect(() => {
     // 注意：以 jobsByVideo 为遍历源，而非 queuedVideoIds——这样视频处理完成
     // 出队后，后端续跑的 AI 任务完成时仍能刷新对应面板。
     Object.keys(jobsByVideo).forEach((videoId) => {
       const jobs = jobsByVideo[videoId];
       if (!jobs) return;
-      if (jobs.asr?.status === "done" && !generatedAfterAsr.current.has(videoId)) {
-        generatedAfterAsr.current.add(videoId);
-        void ipc.slides.extract(videoId).finally(() => {
+      for (const stage of ["slides", "slides_ocr"] as const) {
+        const key = `${videoId}:${stage}`;
+        if (jobs[stage]?.status === "done" && !generatedAfterAsr.current.has(key)) {
+          generatedAfterAsr.current.add(key);
           queryClient.invalidateQueries({ queryKey: ["slides", videoId] });
-        });
+        }
       }
       // 后端各 AI 任务完成 → 刷新对应面板（各刷一次）。
       for (const stage of ["chapters", "summary", "notes", "quiz", "mindmap"] as const) {
