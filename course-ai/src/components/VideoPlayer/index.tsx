@@ -1,16 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import {
-  NO_INSETS,
-  contentAspect,
-  cropStyle,
-  formatCropGeometry,
-  formatCropNotice,
-  isCropEnabled,
-  setCropEnabled,
-  symmetricInsets,
-} from "@/lib/blackBars";
 import { ipc } from "@/lib/ipc";
 import { posKey, durKey, syncPlaybackProgress } from "@/lib/playback";
 import { isIOS } from "@/lib/platform";
@@ -70,9 +60,6 @@ export function VideoPlayer({
   const [controlsHeight, setControlsHeight] = useState(0);
   const lastSavedRef = useRef(0);
   const [videoAspect, setVideoAspect] = useState(16 / 9);
-  const [videoMetadataReady, setVideoMetadataReady] = useState(false);
-  // 画面已经能放了（缓冲够起播）。黑边探测等这个信号再开工，见下面那个 useQuery。
-  const [playbackReady, setPlaybackReady] = useState(false);
   const [region, setRegion] = useState({ w: 0, h: 0 });
   const [playing, setPlaying] = useState(false);
   // 把「播放中时长」记入学习事件日志（供仪表盘统计 / 间隔重复排期）。
@@ -84,14 +71,6 @@ export function VideoPlayer({
   }, [videoId]);
   const [rate, setRate] = useState(1);
   const silenceSkip = useSilenceSkip(videoId);
-  const [cropOn, setCropOn] = useState(isCropEnabled);
-  // 切换去黑边时把探测值打在画面上：控制栏会自动淡出，原生 tooltip 根本来不及看。
-  const [cropNotice, setCropNotice] = useState<string | null>(null);
-  useEffect(() => {
-    if (!cropNotice) return;
-    const timer = setTimeout(() => setCropNotice(null), 4000);
-    return () => clearTimeout(timer);
-  }, [cropNotice]);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [captionsOn, setCaptionsOn] = useState(true);
@@ -134,26 +113,6 @@ export function VideoPlayer({
       query.state.data && query.state.data.length > 0 ? false : 2000,
   });
   const smartRate = useSmartRate(segments);
-  // 黑边探测要 ffmpeg 解码正片三处、几十秒画面，是实打实的磁盘和 CPU 开销。
-  // 因此：① 等画面已经能放了再开工，不和起播抢；② 开关关着就压根不测。
-  const { data: cropInsets = NO_INSETS } = useQuery({
-    queryKey: ["video-crop", videoId],
-    queryFn: () => ipc.videos.ensureCrop(videoId),
-    enabled: cropOn && playbackReady,
-    staleTime: Infinity,
-    retry: false,
-  });
-
-  // 切走/关掉播放器就停掉这个视频的探测：结果已经没人要了，留着只会压在下一个
-  // 视频的起播上——在一门课里连点几个视频，那些 ffmpeg 会一个个叠起来。
-  useEffect(
-    () => () => {
-      // 收尾动作，失败也没有下一步可做：别让它变成卸载时的未处理拒绝。
-      void ipc.videos.cancelCropDetect(videoId).catch(() => {});
-    },
-    [videoId],
-  );
-
   // 字幕跳转用：始终持有按 start_ms 排好序的最新分句，供键盘处理器读取（避免闭包过期）。
   const segmentsRef = useRef<typeof segments>([]);
   useEffect(() => {
@@ -233,23 +192,10 @@ export function VideoPlayer({
 
   useEffect(() => {
     setVideoAspect(16 / 9);
-    setVideoMetadataReady(false);
-    setPlaybackReady(false);
   }, [videoId]);
 
   // 在播放区内，求与视频同比例、尽可能大的居中矩形；视频铺满它即完整无黑边。
-  // 只应用对称黑边：避免检测出的单边噪声把画面推歪（所有视频看起来没居中）。
-  // 去黑边是猜出来的，猜错时画面会显得被裁掉一块；关掉开关就回到原封不动的画面，
-  // 好分清「源片本来如此」还是「我们裁歪了」。
-  const effectiveCrop = symmetricInsets(
-    videoMetadataReady && cropOn ? cropInsets : NO_INSETS,
-  );
-  const aspect =
-    videoMetadataReady && videoAspect > 0
-      ? contentAspect(videoAspect, effectiveCrop)
-      : videoAspect > 0
-        ? videoAspect
-        : 16 / 9;
+  const aspect = videoAspect > 0 ? videoAspect : 16 / 9;
   const stageBox = (() => {
     const { w, h } = region;
     if (!w || !h) return null;
@@ -743,7 +689,6 @@ export function VideoPlayer({
             // 提升到独立 GPU 合成层：暂停后让这一帧留在自己的层上，减少回退到
             // 「栅格化再缩放」的软化；backface-visibility 进一步固定层、避免半像素抖动。
             style={{
-              ...(stageBox ? cropStyle(stageBox, effectiveCrop) : {}),
               transform: "translateZ(0)",
               willChange: "transform",
               backfaceVisibility: "hidden",
@@ -770,8 +715,6 @@ export function VideoPlayer({
                 }
               }
             }}
-            // 缓冲够起播了才放黑边探测进场：那一趟解码不该和首帧抢磁盘。
-            onCanPlay={() => setPlaybackReady(true)}
             onLoadedMetadata={(event) => {
               const video = event.currentTarget;
               setDurationMs(Math.floor(video.duration * 1000));
@@ -782,7 +725,6 @@ export function VideoPlayer({
               const { videoWidth, videoHeight } = video;
               if (videoWidth > 0 && videoHeight > 0) {
                 setVideoAspect(videoWidth / videoHeight);
-                setVideoMetadataReady(true);
               }
               // 跨视频跳转优先：若有落在本视频的 pendingSeek（课程级搜索点来的），
               // 直接跳到该处、消费掉，压过断点续播。
@@ -838,14 +780,6 @@ export function VideoPlayer({
               onPointerCancel={handleIosPointerCancel}
               style={{ touchAction: "none" }}
             />
-          )}
-          {cropNotice && (
-            <div
-              aria-live="polite"
-              className="pointer-events-none absolute inset-x-4 top-6 z-20 mx-auto w-fit max-w-full whitespace-pre-line rounded-lg bg-black/75 px-3 py-1.5 text-center text-xs font-medium leading-relaxed text-white"
-            >
-              {cropNotice}
-            </div>
           )}
           {smartRate.notice && (
             <div
@@ -925,26 +859,8 @@ export function VideoPlayer({
           skipSilence={silenceSkip.enabled}
           skipSilenceLoading={silenceSkip.loading}
           skipRanges={silenceSkip.ranges}
-          cropOn={cropOn}
-          cropInsets={cropInsets}
           fullscreen={fullscreen}
           onToggleCaptions={() => setCaptionsOn((on) => !on)}
-          onToggleCrop={() => {
-            // 更新函数里不能带副作用（React 可能重跑它），所以先算出下一个状态。
-            const next = !cropOn;
-            setCropOn(next);
-            setCropEnabled(next);
-            const video = ref.current;
-            const geometry =
-              video && stageBox && next
-                ? `\n${formatCropGeometry(
-                    { width: video.videoWidth, height: video.videoHeight },
-                    stageBox,
-                    symmetricInsets(cropInsets),
-                  )}`
-                : "";
-            setCropNotice(`${formatCropNotice(cropInsets, next)}${geometry}`);
-          }}
           onToggleSmartRate={smartRate.toggle}
           onToggleSkipSilence={silenceSkip.toggle}
           onPreviewSkip={(ms) => {
