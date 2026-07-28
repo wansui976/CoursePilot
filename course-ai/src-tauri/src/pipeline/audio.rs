@@ -128,6 +128,12 @@ async fn prepare_cloud_audio(
     ))
 }
 
+/// iOS 上两家云 ASR 都先抽音轨再上传。
+///
+/// 阿里云那条原来是把**原始视频**直接交上去的，而上传路径要把整个文件读进内存、
+/// base64 一遍（×4/3）、再塞进一个 JSON 字符串（又一份）——一节 1GB 的课峰值内存
+/// 三四个 GB，iOS 直接把进程杀掉。抽出来的音轨通常只有视频的几十分之一，
+/// 这条路才走得通。原生桥本来就支持按格式导出（火山那条一直在用）。
 #[cfg(target_os = "ios")]
 async fn prepare_cloud_audio(
     app: &tauri::AppHandle,
@@ -135,28 +141,20 @@ async fn prepare_cloud_audio(
     out_dir: &Path,
     provider: CloudAsrProvider,
 ) -> AppResult<PreparedAudio> {
-    match provider {
-        CloudAsrProvider::Aliyun => Ok(PreparedAudio::new(
-            video,
-            input_mime_for_path(video),
-            input_format_for_path(video),
-        )),
-        CloudAsrProvider::Volcengine => {
-            let exported = crate::mobile_files::export_audio_for_asr(
-                app.clone(),
-                video.to_string_lossy().to_string(),
-                out_dir.to_string_lossy().to_string(),
-                "wav".to_string(),
-            )
-            .await
-            .map_err(AppError::Pipeline)?;
-            Ok(PreparedAudio::new(
-                exported.path,
-                exported.mime,
-                exported.format,
-            ))
-        }
-    }
+    let target = provider.android_export_format();
+    let exported = crate::mobile_files::export_audio_for_asr(
+        app.clone(),
+        video.to_string_lossy().to_string(),
+        out_dir.to_string_lossy().to_string(),
+        target.format.to_string(),
+    )
+    .await
+    .map_err(AppError::Pipeline)?;
+    Ok(PreparedAudio::new(
+        exported.path,
+        exported.mime,
+        exported.format,
+    ))
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -173,47 +171,6 @@ async fn prepare_cloud_audio(
             let mp3 = wav_to_mp3(&wav).await?;
             Ok(PreparedAudio::new(mp3, "audio/mpeg", "mp3"))
         }
-    }
-}
-
-#[cfg(target_os = "ios")]
-fn input_mime_for_path(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("mp4") | Some("m4v") => "video/mp4",
-        Some("mov") => "video/quicktime",
-        Some("webm") => "video/webm",
-        Some("mkv") => "video/x-matroska",
-        Some("m4a") => "audio/mp4",
-        Some("wav") => "audio/wav",
-        Some("mp3") => "audio/mpeg",
-        Some("aac") => "audio/aac",
-        _ => "video/mp4",
-    }
-}
-
-#[cfg(target_os = "ios")]
-fn input_format_for_path(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("mp4") => "mp4",
-        Some("m4v") => "m4v",
-        Some("mov") => "mov",
-        Some("webm") => "webm",
-        Some("mkv") => "mkv",
-        Some("m4a") => "m4a",
-        Some("wav") => "wav",
-        Some("mp3") => "mp3",
-        Some("aac") => "aac",
-        _ => "mp4",
     }
 }
 
