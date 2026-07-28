@@ -1416,6 +1416,32 @@ fn concept_explanation_request(model: &str, name: &str, context_text: &str) -> C
 /// 连续失败到这个数且一次都没成功过，就认定 provider 整体不可用，停止继续白跑。
 const BEST_EFFORT_GIVE_UP: usize = 3;
 
+/// 抽取阶段至少要成功这么大比例的字幕块，结果才够格**整体替换**已有课程知识库。
+const MIN_CHUNK_SUCCESS_RATIO: f64 = 0.8;
+
+/// 这一轮抽取的成品率是否够格替换整门课已有的知识库。
+///
+/// 为什么需要门槛：抽取是「尽力而为」的——只要有一块成功过，后续任意数量的超时、
+/// 限流、坏 JSON 都只会被跳过。于是十块里成了一块也算跑完，而这一块的产物会整体
+/// 替换整门课的知识库。一次网络抖动就能把一份完整的知识库换成残缺版本，而且看起来
+/// 一切正常。达不到门槛时宁可什么都不写，把库里那份留着。
+///
+/// `attempted == 0` 是「这门课没有可分析的字幕」，不属于成品率问题，交给后面
+/// 「没有生成可用知识点」那条路去报。
+fn extraction_is_complete_enough(ok: usize, attempted: usize) -> bool {
+    attempted == 0 || ok as f64 >= attempted as f64 * MIN_CHUNK_SUCCESS_RATIO
+}
+
+fn chunk_shortfall_error(ok: usize, attempted: usize, cause: Option<AppError>) -> AppError {
+    let detail = cause
+        .map(|error| format!("；首个错误：{error}"))
+        .unwrap_or_default();
+    AppError::Other(format!(
+        "只有 {ok}/{attempted} 个字幕块分析成功，未达到覆盖门槛，\
+         已保留上一次的课程知识，未做替换{detail}"
+    ))
+}
+
 /// 逐概念生成一段 AI 解释，返回 归一化名 → 解释(+上下文指纹)。
 /// - 上下文与上一轮完全一致的概念直接复用 `reusable` 里的解释，不再调用 LLM（重新分析的省钱大头）；
 /// - 无可用字幕上下文的概念跳过（不写解释）；
@@ -1651,6 +1677,14 @@ pub async fn analyze_course_concepts(
         }
     }
 
+    // 成品率不够就地退出：什么都不写，库里上一次的知识库留着（见
+    // [`extraction_is_complete_enough`]）。放在归并/解释/总结之前，顺带省下后面
+    // 那一串本来注定要被丢弃的 LLM 调用。
+    let attempted = chunk_ok + chunk_errors;
+    if !extraction_is_complete_enough(chunk_ok, attempted) {
+        return Err(chunk_shortfall_error(chunk_ok, attempted, first_error));
+    }
+
     let merged = merge_by_name(raw);
     if merged.is_empty() {
         // 一块都没成功过时报出真实原因，而不是笼统的「没有知识点」。
@@ -1734,6 +1768,32 @@ pub async fn analyze_course_concepts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mostly_failed_extraction_must_not_replace_the_knowledge_base() {
+        // 报告里的场景：十块里只成了一块，剩下九块超时/限流/坏 JSON 全被跳过。
+        // 老逻辑照样往下走，用这一块的产物整体替换整门课——完整的旧知识库就这么没了。
+        assert!(!extraction_is_complete_enough(1, 10));
+        assert!(!extraction_is_complete_enough(7, 10));
+
+        // 零星失败仍然放行：抽取本来就是尽力而为，一两块坏 JSON 不该让整门课白跑。
+        assert!(extraction_is_complete_enough(8, 10));
+        assert!(extraction_is_complete_enough(9, 10));
+        assert!(extraction_is_complete_enough(10, 10));
+
+        // 一块都没有 = 这门课没有可分析的字幕，不是成品率问题，交给后面那条路去报。
+        assert!(extraction_is_complete_enough(0, 0));
+    }
+
+    #[test]
+    fn the_shortfall_error_says_how_bad_it_was_and_that_nothing_was_touched() {
+        let error = chunk_shortfall_error(1, 10, Some(AppError::Other("429 限流".into())));
+        let text = error.to_string();
+        // 用户要能分清「这门课没知识点」和「大半没跑成、旧的还在」。
+        assert!(text.contains("1/10"));
+        assert!(text.contains("已保留上一次的课程知识"));
+        assert!(text.contains("429 限流"));
+    }
 
     fn occurrence(video_id: &str, title: &str, start_ms: i64, excerpt: &str) -> ConceptOccurrence {
         ConceptOccurrence {
