@@ -17,7 +17,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { CourseSidebar } from "@/components/CourseSidebar";
 import { RecycleBin } from "@/components/RecycleBin";
 import { Dashboard } from "@/components/Dashboard";
-import { ConceptsPanel } from "@/components/ConceptsPanel";
+import { ConceptsPanel, type ConceptNavigationState } from "@/components/ConceptsPanel";
 import { DevConsole } from "@/components/DevConsole";
 import { ImportVideoButton } from "@/components/ImportVideoDialog";
 import { SettingsPanel } from "@/components/SettingsDialog";
@@ -91,6 +91,11 @@ const SIDEBAR_COLLAPSED_KEY = "course-ai-sidebar-collapsed";
 
 type SidebarCollapsed = { library: boolean; workbench: boolean };
 
+type KnowledgeReturnState = {
+  courseId: string;
+  navigationState: ConceptNavigationState;
+};
+
 // 首次默认：课程库展开（选课要概览）、工作台折叠（看视频省空间）。
 function readSidebarCollapsed(): SidebarCollapsed {
   const fallback: SidebarCollapsed = { library: false, workbench: true };
@@ -116,6 +121,7 @@ export function Home() {
   const [showDevConsole, setShowDevConsole] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [showConcepts, setShowConcepts] = useState(false);
+  const [knowledgeReturn, setKnowledgeReturn] = useState<KnowledgeReturnState | null>(null);
   // 应用打开时的学习提醒（开启且今天有到期卡才发，每天至多一次）。
   useStudyReminder();
   const theme = useTheme((s) => s.effective);
@@ -173,6 +179,7 @@ export function Home() {
   const androidBackGuard = useRef(0);
   const returnToLibrary = useCallback(() => {
     setSelectedVideoId(null);
+    setKnowledgeReturn(null);
     setShowSettings(false);
     setShowRecycleBin(false);
     setShowDevConsole(false);
@@ -275,6 +282,7 @@ export function Home() {
 
   // 复习卡「回看出处」：关掉仪表盘、切到卡所属课程，跨视频跳转由 pendingSeek 驱动。
   function reviewJump(card: DueCard) {
+    setKnowledgeReturn(null);
     closeMainOverlays();
     if (card.course_id) setSelectedCourseId(card.course_id);
     if (card.video_id && card.source_ms != null) {
@@ -284,16 +292,47 @@ export function Home() {
 
   // 仪表盘「继续学习」：切到该课程，打开上次的视频并跳到上次进度（秒→毫秒）。
   function resumeStudy(courseId: string, videoId: string, positionSec: number) {
+    setKnowledgeReturn(null);
     closeMainOverlays();
     setSelectedCourseId(courseId);
     usePlayer.getState().requestOpenAt(videoId, Math.round(positionSec * 1000));
   }
 
   // 「知识点」出处点击：关面板、跳到该视频对应位置（同课程，pendingSeek 驱动开视频+seek）。
-  function conceptJump(videoId: string, startMs: number) {
+  function conceptJump(
+    videoId: string,
+    startMs: number,
+    navigationState?: ConceptNavigationState,
+  ) {
+    if (selectedCourseId && navigationState) {
+      setKnowledgeReturn({ courseId: selectedCourseId, navigationState });
+    } else {
+      setKnowledgeReturn(null);
+    }
     setShowConcepts(false);
     usePlayer.getState().requestOpenAt(videoId, startMs);
   }
+
+  const returnToKnowledge = useCallback(() => {
+    if (!knowledgeReturn) return;
+    usePlayer.getState().clearPendingSeek();
+    setSelectedCourseId(knowledgeReturn.courseId);
+    setSelectedVideoId(null);
+    setShowSettings(false);
+    setShowRecycleBin(false);
+    setShowDevConsole(false);
+    setShowDashboard(false);
+    setQueueOpen(false);
+    setShowConcepts(true);
+  }, [knowledgeReturn]);
+
+  const returnFromVideo = useCallback(() => {
+    if (knowledgeReturn) {
+      returnToKnowledge();
+    } else {
+      returnToLibrary();
+    }
+  }, [knowledgeReturn, returnToKnowledge, returnToLibrary]);
 
   const selectedVideo =
     videos.find((video) => video.id === selectedVideoId) ??
@@ -350,6 +389,11 @@ export function Home() {
     if (now - androidBackGuard.current < 250) return;
     androidBackGuard.current = now;
 
+    if (showConcepts) {
+      setShowConcepts(false);
+      setKnowledgeReturn(null);
+      return;
+    }
     if (showSettings || showRecycleBin || showDevConsole || showDashboard) {
       setShowSettings(false);
       setShowRecycleBin(false);
@@ -363,7 +407,7 @@ export function Home() {
       return;
     }
     if (selectedVideoId) {
-      returnToLibrary();
+      returnFromVideo();
       return;
     }
     // 窄屏「课程」Tab:选了课程→退回课程列表;已在列表根层则不拦截(交系统)。
@@ -379,7 +423,8 @@ export function Home() {
     showRecycleBin,
     showSettings,
     showDashboard,
-    returnToLibrary,
+    showConcepts,
+    returnFromVideo,
   ]);
 
   useEffect(() => {
@@ -662,6 +707,7 @@ export function Home() {
   }
 
   function selectCourse(id: string) {
+    setKnowledgeReturn(null);
     setSelectedCourseId(id);
     setSelectedVideoId(null);
     setVideoQuery("");
@@ -669,6 +715,7 @@ export function Home() {
   }
 
   function clearCourseSelection() {
+    setKnowledgeReturn(null);
     setSelectedCourseId(null);
     setSelectedVideoId(null);
     setVideoQuery("");
@@ -679,6 +726,7 @@ export function Home() {
     // 先算出目标态再收起全部：closeMainOverlays 会把 queueOpen 置 false，
     // 这里用当前渲染的 queueOpen 求反，最终以 setQueueOpen 覆盖，保留「再点收起」的切换语义。
     const willOpen = !queueOpen;
+    if (willOpen) setKnowledgeReturn(null);
     setSelectedVideoId(null);
     closeMainOverlays();
     setQueueOpen(willOpen);
@@ -1249,6 +1297,18 @@ export function Home() {
           {!isPhoneDevice && (
             <header className="ca-wb-head">
               <div className="wb-title-row">
+                {knowledgeReturn && (
+                  <button
+                    type="button"
+                    onClick={returnToKnowledge}
+                    aria-label={`返回知识点：${knowledgeReturn.navigationState.conceptName}`}
+                    title={`返回知识点：${knowledgeReturn.navigationState.conceptName}`}
+                    className="ca-touch-44 inline-flex max-w-[45%] flex-none items-center gap-1 text-sm font-medium text-primary transition hover:opacity-80"
+                  >
+                    <ChevronLeft className="h-4 w-4 flex-none" />
+                    <span className="truncate">返回 {knowledgeReturn.navigationState.conceptName}</span>
+                  </button>
+                )}
                 <div className="min-w-0">
                   <h1 className="wb-title" title={displayTitle(selectedVideo.title)}>
                     {displayTitle(selectedVideo.title)}
@@ -1262,9 +1322,9 @@ export function Home() {
               <button
                 type="button"
                 className="ca-back-fab"
-                onClick={returnToLibrary}
-                title="返回"
-                aria-label="返回"
+                onClick={returnFromVideo}
+                title={knowledgeReturn ? `返回知识点：${knowledgeReturn.navigationState.conceptName}` : "返回"}
+                aria-label={knowledgeReturn ? `返回知识点：${knowledgeReturn.navigationState.conceptName}` : "返回"}
               >
                 <ChevronLeft className="h-5 w-5" />
               </button>
@@ -1385,7 +1445,7 @@ export function Home() {
           videos={videos}
           selectedVideoId={selectedVideoId}
           onOpenVideo={openVideo}
-          onBackToLibrary={returnToLibrary}
+          onBackToLibrary={returnFromVideo}
           theme={theme}
           themeToggleLabel={themeToggleLabel}
           onToggleTheme={toggleTheme}
@@ -1425,8 +1485,16 @@ export function Home() {
             <ConceptsPanel
               courseId={selectedCourseId}
               courseName={selectedCourse?.name}
-              onClose={() => setShowConcepts(false)}
+              onClose={() => {
+                setShowConcepts(false);
+                setKnowledgeReturn(null);
+              }}
               onJump={conceptJump}
+              initialNavigationState={
+                knowledgeReturn?.courseId === selectedCourseId
+                  ? knowledgeReturn.navigationState
+                  : null
+              }
             />
           ) : showCourseListScreen ? (
             renderCourseListScreen()

@@ -29,6 +29,28 @@ export interface WhisperModel {
   url: string;
 }
 
+export interface NativeCloudSyncStatus {
+  accountStatus: string;
+  started: boolean;
+  pendingChanges: number;
+  lastError?: string | null;
+  nativeBridgeAvailable: boolean;
+}
+
+export interface CloudSyncStatus {
+  deviceId: string;
+  enabled: boolean;
+  bootstrapComplete: boolean;
+  pendingOutbox: number;
+  incomingFiles: number;
+  native: NativeCloudSyncStatus;
+}
+
+export interface CloudSyncProbeResult {
+  probeId: string;
+  native: NativeCloudSyncStatus;
+}
+
 /** 目录扫描出的可导入视频（批量导入用）。 */
 export interface FolderVideo {
   path: string;
@@ -167,6 +189,14 @@ export interface CourseKnowledge {
 }
 
 export const ipc = {
+  sync: {
+    status: (): Promise<CloudSyncStatus> => invoke("cmd_sync_status"),
+    start: (): Promise<CloudSyncStatus> => invoke("cmd_sync_start"),
+    setEnabled: (enabled: boolean): Promise<CloudSyncStatus> =>
+      invoke("cmd_sync_set_enabled", { enabled }),
+    syncNow: (): Promise<CloudSyncStatus> => invoke("cmd_sync_now"),
+    probe: (): Promise<CloudSyncProbeResult> => invoke("cmd_sync_probe"),
+  },
   courses: {
     list: (): Promise<Course[]> => invoke("cmd_list_courses"),
     create: (name: string, rootPath: string): Promise<Course> =>
@@ -219,6 +249,9 @@ export const ipc = {
     // 从出题结果生成/更新复习卡，返回卡片数。
     generate: (videoId: string): Promise<number> =>
       invoke("cmd_generate_cards", { videoId }),
+    // 只整理实际归属于该知识点的测验卡；同视频的其他题不会被生成或更新。
+    generateForConcept: (courseId: string, conceptId: string): Promise<number> =>
+      invoke("cmd_generate_cards_for_concept", { courseId, conceptId }),
     // 手动新建一张卡（如文稿挖空 cloze），立即到期。返回卡 id。
     addCard: (
       videoId: string,

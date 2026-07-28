@@ -32,3 +32,55 @@ export class WatchAccumulator {
     return ms;
   }
 }
+
+export type WriteWatchLog = (videoId: string, watchedMs: number) => Promise<void>;
+
+/**
+ * Coalesces unsaved watch time per video. A failed write is restored to the
+ * same video's bucket so a later flush can retry it without misattribution.
+ */
+export class WatchLogQueue {
+  private pending = new Map<string, number>();
+  private active = new Map<string, Promise<void>>();
+
+  constructor(private write: WriteWatchLog) {}
+
+  enqueue(videoId: string, watchedMs: number): Promise<void> {
+    if (watchedMs > 0) {
+      this.pending.set(videoId, (this.pending.get(videoId) ?? 0) + watchedMs);
+    }
+    return this.flush(videoId);
+  }
+
+  async retryAll(): Promise<void> {
+    await Promise.allSettled([...this.pending.keys()].map((videoId) => this.flush(videoId)));
+  }
+
+  pendingMs(videoId: string): number {
+    return this.pending.get(videoId) ?? 0;
+  }
+
+  private flush(videoId: string): Promise<void> {
+    const existing = this.active.get(videoId);
+    if (existing) return existing;
+
+    const task = (async () => {
+      while ((this.pending.get(videoId) ?? 0) > 0) {
+        const watchedMs = this.pending.get(videoId)!;
+        this.pending.delete(videoId);
+        try {
+          await this.write(videoId, watchedMs);
+        } catch (error) {
+          this.pending.set(videoId, watchedMs + (this.pending.get(videoId) ?? 0));
+          throw error;
+        }
+      }
+    })();
+    this.active.set(videoId, task);
+    const cleanup = () => {
+      if (this.active.get(videoId) === task) this.active.delete(videoId);
+    };
+    void task.then(cleanup, cleanup);
+    return task;
+  }
+}

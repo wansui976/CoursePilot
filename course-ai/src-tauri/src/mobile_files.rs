@@ -88,6 +88,19 @@ pub struct MobileLumaFrames {
     pub frames: Vec<String>,
 }
 
+#[cfg(target_os = "android")]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecognizeImageTextRequest {
+    image_path: String,
+}
+
+#[cfg(target_os = "android")]
+#[derive(Deserialize)]
+struct RecognizeImageTextResponse {
+    text: String,
+}
+
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -165,6 +178,23 @@ pub async fn export_luma_frames(
             },
         )
         .map_err(|error| error.to_string())
+}
+
+/// Android bundled ML Kit：识别一张已经落地的课件图，全程不上传网络。
+#[cfg(target_os = "android")]
+pub async fn recognize_image_text(image_path: String) -> Result<String, String> {
+    let app = APP_HANDLE
+        .get()
+        .ok_or_else(|| "mobile-files app handle not initialized".to_string())?;
+    let mobile_files = app.state::<MobileFiles<tauri::Wry>>();
+    let response = mobile_files
+        .0
+        .run_mobile_plugin::<RecognizeImageTextResponse>(
+            "recognizeImageText",
+            RecognizeImageTextRequest { image_path },
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(response.text)
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -319,7 +349,11 @@ fn percent_decode_path(input: &str) -> String {
 
 pub fn init() -> TauriPlugin<tauri::Wry> {
     PluginBuilder::new("mobile-files")
-    .invoke_handler(tauri::generate_handler![persist_picked_file, pick_and_persist_file, share_file])
+        .invoke_handler(tauri::generate_handler![
+            persist_picked_file,
+            pick_and_persist_file,
+            share_file
+        ])
         .setup(|_app, _api| {
             #[cfg(target_os = "android")]
             {

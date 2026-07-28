@@ -1,4 +1,4 @@
-use crate::commands::transcripts::list_segments;
+use crate::commands::transcripts::{list_segments, TranscriptSegment};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::llm::Provider;
@@ -115,7 +115,14 @@ pub async fn overwrite_transcript_texts(
     video_id: &str,
     corrected: &[CorrectionSegment],
 ) -> AppResult<()> {
-    let rows = list_segments(db, video_id).await?;
+    let mut tx = db.pool.begin().await?;
+    let rows: Vec<TranscriptSegment> = sqlx::query_as(
+        "SELECT id,video_id,segment_idx,start_ms,end_ms,text
+         FROM transcripts WHERE video_id=? ORDER BY segment_idx",
+    )
+    .bind(video_id)
+    .fetch_all(&mut *tx)
+    .await?;
     if rows.len() != corrected.len() {
         return Err(AppError::Other("transcript row count mismatch".into()));
     }
@@ -124,12 +131,20 @@ pub async fn overwrite_transcript_texts(
         if row.start_ms != segment.start_ms || row.end_ms != segment.end_ms {
             return Err(AppError::Other("transcript timestamp mismatch".into()));
         }
-        sqlx::query("UPDATE transcripts SET text=? WHERE id=?")
+    }
+    for (row, segment) in rows.iter().zip(corrected) {
+        let result = sqlx::query("UPDATE transcripts SET text=? WHERE id=?")
             .bind(segment.text.trim())
             .bind(row.id)
-            .execute(&db.pool)
+            .execute(&mut *tx)
             .await?;
+        if result.rows_affected() != 1 {
+            return Err(AppError::Other(
+                "transcript changed while correcting".into(),
+            ));
+        }
     }
+    tx.commit().await?;
     Ok(())
 }
 
@@ -236,25 +251,43 @@ struct RawBackupSegment {
 /// 用于「仅重新纠错」：先回到原始稿，再重跑纠错，避免在已纠错文本上反复改写。
 /// 没有备份时返回 false（沿用当前文本）。
 pub async fn restore_raw_transcript(db: &Db, video_id: &str) -> AppResult<bool> {
+    let mut tx = db.pool.begin().await?;
     let raw: Option<String> = sqlx::query_scalar(
         "SELECT segments_json FROM transcript_backups
          WHERE video_id=? AND source='raw_asr' ORDER BY created_at DESC LIMIT 1",
     )
     .bind(video_id)
-    .fetch_optional(&db.pool)
+    .fetch_optional(&mut *tx)
     .await?;
     let Some(json) = raw else {
         return Ok(false);
     };
     let segments: Vec<RawBackupSegment> = serde_json::from_str(&json)?;
-    for segment in &segments {
-        sqlx::query("UPDATE transcripts SET text=? WHERE video_id=? AND segment_idx=?")
-            .bind(segment.text.trim())
+    let current_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM transcripts WHERE video_id=?")
             .bind(video_id)
-            .bind(segment.segment_idx)
-            .execute(&db.pool)
+            .fetch_one(&mut *tx)
             .await?;
+    if current_count != segments.len() as i64 {
+        return Err(AppError::Other(
+            "raw transcript backup row count mismatch".into(),
+        ));
     }
+    for segment in &segments {
+        let result =
+            sqlx::query("UPDATE transcripts SET text=? WHERE video_id=? AND segment_idx=?")
+                .bind(segment.text.trim())
+                .bind(video_id)
+                .bind(segment.segment_idx)
+                .execute(&mut *tx)
+                .await?;
+        if result.rows_affected() != 1 {
+            return Err(AppError::Other(
+                "raw transcript backup does not match current segments".into(),
+            ));
+        }
+    }
+    tx.commit().await?;
     Ok(true)
 }
 
@@ -561,5 +594,67 @@ mod tests {
             .await
             .unwrap();
         assert!(joined.contains("纠正后的讲解第一部分"));
+    }
+
+    #[tokio::test]
+    async fn timestamp_mismatch_does_not_partially_update_transcript() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        sqlx::query(
+            "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text)
+             VALUES (?,1,5000,10000,'第二部分')",
+        )
+        .bind(&vid)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        let corrected = vec![
+            CorrectionSegment {
+                start_ms: 0,
+                end_ms: 5000,
+                text: "第一部分已改".into(),
+            },
+            CorrectionSegment {
+                start_ms: 5001,
+                end_ms: 10000,
+                text: "错误时间戳".into(),
+            },
+        ];
+
+        assert!(overwrite_transcript_texts(&db, &vid, &corrected)
+            .await
+            .is_err());
+
+        let texts: Vec<String> = sqlx::query_scalar(
+            "SELECT text FROM transcripts WHERE video_id=? ORDER BY segment_idx",
+        )
+        .bind(&vid)
+        .fetch_all(&db.pool)
+        .await
+        .unwrap();
+        assert_eq!(texts, vec!["讲解第一部分", "第二部分"]);
+    }
+
+    #[tokio::test]
+    async fn mismatched_raw_backup_does_not_partially_restore_transcript() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let backup = r#"[{"segment_idx":0,"text":"第一段原始文本"},{"segment_idx":1,"text":"第二段原始文本"}]"#;
+        sqlx::query(
+            "INSERT INTO transcript_backups(video_id,source,segments_json,created_at)
+             VALUES (?,'raw_asr',?,1)",
+        )
+        .bind(&vid)
+        .bind(backup)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        assert!(restore_raw_transcript(&db, &vid).await.is_err());
+
+        let text: String = sqlx::query_scalar("SELECT text FROM transcripts WHERE video_id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(text, "讲解第一部分");
     }
 }

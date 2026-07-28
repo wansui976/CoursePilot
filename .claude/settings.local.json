@@ -32,7 +32,14 @@
       "Bash(CARGO_HOME=/home/node/.cargo cargo test asr)",
       "Bash(cargo check *)",
       "Bash(pnpm exec *)",
-      "Skill(code-review)"
+      "Skill(code-review)",
+      "Bash(mount)",
+      "Read(//home/node/.codeisland/**)",
+      "Read(//home/node/**)",
+      "Bash(pnpm config *)",
+      "Bash(pnpm --version)",
+      "Bash(pnpm tauri *)",
+      "Bash(CARGO_BUILD_JOBS=1 cargo test --lib -j 1 videos::tests)"
     ]
   },
   "enabledMcpjsonServers": [

@@ -304,9 +304,15 @@ pub fn validate_quiz_json(content: &str) -> AppResult<String> {
 }
 
 pub async fn store_chapters(db: &Db, video_id: &str, drafts: &[ChapterDraft]) -> AppResult<usize> {
+    if drafts.is_empty() {
+        return Err(AppError::Pipeline(
+            "refusing to replace chapters with an empty result".into(),
+        ));
+    }
+    let mut tx = db.pool.begin().await?;
     sqlx::query("DELETE FROM chapters WHERE video_id=?")
         .bind(video_id)
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await?;
     for (idx, d) in drafts.iter().enumerate() {
         sqlx::query(
@@ -319,9 +325,10 @@ pub async fn store_chapters(db: &Db, video_id: &str, drafts: &[ChapterDraft]) ->
         .bind(d.start_ms)
         .bind(d.end_ms)
         .bind(idx as i64)
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await?;
     }
+    tx.commit().await?;
     Ok(drafts.len())
 }
 
@@ -634,6 +641,71 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count.0, 1);
+    }
+
+    #[tokio::test]
+    async fn empty_chapter_result_keeps_existing_chapters() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let old = vec![ChapterDraft {
+            title: "old".into(),
+            summary: "kept".into(),
+            start_ms: 0,
+            end_ms: 1_000,
+        }];
+        store_chapters(&db, &vid, &old).await.unwrap();
+
+        assert!(store_chapters(&db, &vid, &[]).await.is_err());
+
+        let titles: Vec<String> =
+            sqlx::query_scalar("SELECT title FROM chapters WHERE video_id=? ORDER BY order_index")
+                .bind(&vid)
+                .fetch_all(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(titles, vec!["old"]);
+    }
+
+    #[tokio::test]
+    async fn chapter_replacement_rolls_back_when_an_insert_fails() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let old = vec![ChapterDraft {
+            title: "old".into(),
+            summary: "kept".into(),
+            start_ms: 0,
+            end_ms: 1_000,
+        }];
+        store_chapters(&db, &vid, &old).await.unwrap();
+        sqlx::query(
+            "CREATE TRIGGER fail_second_chapter BEFORE INSERT ON chapters
+             WHEN NEW.order_index=1 BEGIN SELECT RAISE(ABORT, 'test failure'); END",
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        let replacement = vec![
+            ChapterDraft {
+                title: "new one".into(),
+                summary: String::new(),
+                start_ms: 0,
+                end_ms: 1_000,
+            },
+            ChapterDraft {
+                title: "new two".into(),
+                summary: String::new(),
+                start_ms: 1_000,
+                end_ms: 2_000,
+            },
+        ];
+
+        assert!(store_chapters(&db, &vid, &replacement).await.is_err());
+
+        let titles: Vec<String> =
+            sqlx::query_scalar("SELECT title FROM chapters WHERE video_id=? ORDER BY order_index")
+                .bind(&vid)
+                .fetch_all(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(titles, vec!["old"]);
     }
 
     #[tokio::test]

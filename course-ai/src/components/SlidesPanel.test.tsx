@@ -44,6 +44,8 @@ describe("SlidesPanel", () => {
     mockIpc.slides.list.mockReset().mockResolvedValue([]);
     mockIpc.slides.screenshots.mockReset().mockResolvedValue([]);
     mockIpc.slides.extract.mockReset();
+    mockIpc.slides.capture.mockReset();
+    mockIpc.slides.image.mockReset();
     mockIpc.slides.cancelExtract.mockReset().mockResolvedValue(undefined);
     mockIpc.slides.ocr.mockReset();
     mockIpc.slides.cancelOcr.mockReset().mockResolvedValue(undefined);
@@ -135,6 +137,33 @@ describe("SlidesPanel", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("shows a retryable error instead of an empty state when slide loading fails", async () => {
+    mockIpc.slides.list
+      .mockRejectedValueOnce(new Error("slide list failed"))
+      .mockResolvedValueOnce([]);
+    renderPanel();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("slide list failed");
+    expect(screen.queryByText(/还没有课件页/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /重试/ }));
+
+    await waitFor(() => expect(mockIpc.slides.list).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/还没有课件页/)).toBeInTheDocument();
+  });
+
+  it("surfaces screenshot failures and allows retry", async () => {
+    mockIpc.slides.capture
+      .mockRejectedValueOnce(new Error("capture failed"))
+      .mockResolvedValueOnce({});
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "截图" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("capture failed");
+    fireEvent.click(screen.getByRole("button", { name: /重试/ }));
+
+    await waitFor(() => expect(mockIpc.slides.capture).toHaveBeenCalledTimes(2));
+  });
 });
 
 describe("SlidesPanel page OCR", () => {
@@ -210,6 +239,31 @@ describe("SlidesPanel page OCR", () => {
 
     await waitFor(() => expect(mockIpc.slides.ocr).toHaveBeenCalled());
     expect(mockIpc.slides.ocr.mock.calls[0][2]).toBe(true);
+    expect(await screen.findByRole("status")).toHaveTextContent("已识别 2 页");
+  });
+
+  it("shows an explicit completion message when no usable text is found", async () => {
+    mockIpc.slides.list.mockReset().mockResolvedValue(pages);
+    mockIpc.slides.ocr.mockResolvedValue(0);
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: /识别文字/ }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "识别完成，没有识别到可用文字",
+    );
+  });
+
+  it("surfaces batch OCR failures instead of silently returning to idle", async () => {
+    mockIpc.slides.list.mockReset().mockResolvedValue(pages);
+    mockIpc.slides.ocr.mockRejectedValue(
+      new Error("课件 OCR 无法执行：阿里云 OCR 鉴权失败"),
+    );
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: /识别文字/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("阿里云 OCR 鉴权失败");
   });
 
   it("hides the button when there are no slides to recognize", async () => {

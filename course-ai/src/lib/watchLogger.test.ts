@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { WatchAccumulator } from "./watchLogger";
+import { describe, expect, it, vi } from "vitest";
+import { WatchAccumulator, WatchLogQueue } from "./watchLogger";
 
 /** 用一个可推进的假时钟驱动累加器。 */
 function fakeClock(start = 0) {
@@ -50,5 +50,37 @@ describe("WatchAccumulator", () => {
     acc.setPlaying(true); // 重复 true 不应重置起点、丢失已计时间
     clock.advance(4000);
     expect(acc.drain()).toBe(4000);
+  });
+});
+
+describe("WatchLogQueue", () => {
+  it("retains a failed batch and retries it for the same video", async () => {
+    const write = vi
+      .fn<(videoId: string, watchedMs: number) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("db locked"))
+      .mockResolvedValueOnce(undefined);
+    const queue = new WatchLogQueue(write);
+
+    await expect(queue.enqueue("v1", 30_000)).rejects.toThrow("db locked");
+    expect(queue.pendingMs("v1")).toBe(30_000);
+
+    await queue.retryAll();
+    expect(write).toHaveBeenNthCalledWith(2, "v1", 30_000);
+    expect(queue.pendingMs("v1")).toBe(0);
+  });
+
+  it("keeps failed time isolated from another video's writes", async () => {
+    const write = vi
+      .fn<(videoId: string, watchedMs: number) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("v1 failed"))
+      .mockResolvedValue(undefined);
+    const queue = new WatchLogQueue(write);
+
+    await expect(queue.enqueue("v1", 5_000)).rejects.toThrow("v1 failed");
+    await queue.enqueue("v2", 7_000);
+
+    expect(write).toHaveBeenNthCalledWith(2, "v2", 7_000);
+    expect(queue.pendingMs("v1")).toBe(5_000);
+    expect(queue.pendingMs("v2")).toBe(0);
   });
 });

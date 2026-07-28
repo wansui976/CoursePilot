@@ -1,15 +1,11 @@
-import { isMobile } from "./platform";
-
 export function defaultOcrBackend() {
-  return isMobile() ? "aliyun" : "tesseract";
+  return "local";
 }
 
 export function normalizeOcrBackend(value: string | null | undefined) {
-  if (isMobile()) return "aliyun";
   const trimmed = value?.trim();
-  return trimmed === "tesseract" || trimmed === "aliyun"
-    ? trimmed
-    : defaultOcrBackend();
+  if (trimmed === "tesseract") return "local";
+  return trimmed === "local" || trimmed === "aliyun" ? trimmed : defaultOcrBackend();
 }
 
 export function ocrBackendOrDefault(value: string | null | undefined) {

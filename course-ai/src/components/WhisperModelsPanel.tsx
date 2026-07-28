@@ -19,12 +19,18 @@ export function WhisperModelsPanel() {
 
 function WhisperModelsPanelDesktop() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [loadError, setLoadError] = useState("");
   const [progress, setProgress] = useState<
     Record<string, { received: number; total: number; done: boolean }>
   >({});
 
   async function refresh() {
-    setRows(await ipc.whisper.list());
+    try {
+      setRows(await ipc.whisper.list());
+      setLoadError("");
+    } catch (error) {
+      setLoadError(`模型列表加载失败：${error}`);
+    }
   }
 
   useEffect(() => {
@@ -54,6 +60,17 @@ function WhisperModelsPanelDesktop() {
       <h4 className="mb-1 text-xs font-medium text-[var(--text-muted)]">
         Whisper 模型
       </h4>
+      {loadError && (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-3 rounded-lg bg-[var(--status-err-bg)] px-2 py-1.5 text-xs text-[var(--status-err)]"
+        >
+          <span>{loadError}</span>
+          <Button size="sm" variant="outline" onClick={() => void refresh()}>
+            重试
+          </Button>
+        </div>
+      )}
       {rows.map(([model, installed]) => {
         const item = progress[model.id];
         const pct = item && item.total ? Math.floor((item.received / item.total) * 100) : 0;

@@ -638,9 +638,10 @@ pub async fn extract_slides(
 }
 
 pub async fn store_slides(db: &Db, video_id: &str, frames: &[SlideFrame]) -> AppResult<usize> {
+    let mut tx = db.pool.begin().await?;
     sqlx::query("DELETE FROM slides WHERE video_id=?")
         .bind(video_id)
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await?;
     for (idx, f) in frames.iter().enumerate() {
         let end_ms = frames.get(idx + 1).map(|n| n.start_ms);
@@ -653,9 +654,10 @@ pub async fn store_slides(db: &Db, video_id: &str, frames: &[SlideFrame]) -> App
         .bind(f.start_ms)
         .bind(end_ms)
         .bind(f.page_no)
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await?;
     }
+    tx.commit().await?;
     Ok(frames.len())
 }
 
@@ -1114,6 +1116,66 @@ mod tests {
         .await
         .expect_err("cancelled extraction should fail");
         assert!(error.to_string().contains("取消"), "got {error}");
+    }
+
+    #[tokio::test]
+    async fn store_slides_rolls_back_the_whole_replacement_on_insert_failure() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let video_path = dir.path().join("v.mp4");
+        std::fs::write(&video_path, b"x").unwrap();
+        let video = crate::commands::videos::add_local_video(&db, &course.id, video_path, None)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO slides(video_id,image_path,start_ms,end_ms,page_no)
+             VALUES (?,?,?,?,?)",
+        )
+        .bind(&video.id)
+        .bind("old.jpg")
+        .bind(0_i64)
+        .bind(None::<i64>)
+        .bind(0_i64)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TRIGGER fail_second_slide BEFORE INSERT ON slides
+             WHEN NEW.page_no=1 BEGIN SELECT RAISE(ABORT, 'test failure'); END",
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        let replacement = vec![
+            SlideFrame {
+                page_no: 0,
+                image_path: "new-1.jpg".into(),
+                start_ms: 0,
+            },
+            SlideFrame {
+                page_no: 1,
+                image_path: "new-2.jpg".into(),
+                start_ms: 1_000,
+            },
+        ];
+
+        assert!(store_slides(&db, &video.id, &replacement).await.is_err());
+        let paths: Vec<String> =
+            sqlx::query_scalar("SELECT image_path FROM slides WHERE video_id=? ORDER BY page_no")
+                .bind(&video.id)
+                .fetch_all(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(paths, vec!["old.jpg"]);
     }
 
     #[tokio::test]

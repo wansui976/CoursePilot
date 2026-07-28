@@ -22,11 +22,49 @@ pub async fn cmd_save_llm_profiles(
     profiles_json: String,
     routing_json: String,
 ) -> AppResult<()> {
-    // 校验可解析
-    parse_profiles(Some(&profiles_json))?;
-    parse_routing(Some(&routing_json))?;
-    crate::commands::settings::set_setting(&state.db, "llm_profiles", &profiles_json).await?;
-    crate::commands::settings::set_setting(&state.db, "llm_task_routing", &routing_json).await?;
+    save_llm_profiles(&state.db, &profiles_json, &routing_json).await
+}
+
+pub async fn save_llm_profiles(
+    db: &crate::db::Db,
+    profiles_json: &str,
+    routing_json: &str,
+) -> AppResult<()> {
+    let profiles = parse_profiles(Some(profiles_json))?;
+    parse_routing(Some(routing_json))?;
+
+    let mut tx = db.pool.begin().await?;
+    for (key, value) in [
+        ("llm_profiles", profiles_json),
+        ("llm_task_routing", routing_json),
+    ] {
+        sqlx::query(
+            "INSERT INTO settings(key,value) VALUES(?,?)
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        )
+        .bind(key)
+        .bind(value)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    // API keys currently share the settings table. Remove keys whose profile no
+    // longer exists in the same transaction as the profile/routing update.
+    let stored_keys: Vec<String> =
+        sqlx::query_scalar("SELECT key FROM settings WHERE key GLOB 'llm_key_*'")
+            .fetch_all(&mut *tx)
+            .await?;
+    for key in stored_keys {
+        let profile_id = key.strip_prefix("llm_key_").unwrap_or_default();
+        if !profiles.iter().any(|profile| profile.id == profile_id) {
+            sqlx::query("DELETE FROM settings WHERE key=?")
+                .bind(key)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+
+    tx.commit().await?;
     Ok(())
 }
 
@@ -248,5 +286,44 @@ mod tests {
 
         let (_, model) = first_available_provider_for_db(&db).await.unwrap().unwrap();
         assert_eq!(model, "gpt-4o-mini");
+    }
+
+    #[tokio::test]
+    async fn saving_profiles_removes_orphaned_api_keys_atomically() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        keychain::set_api_key(&db, "removed", "sk-removed")
+            .await
+            .unwrap();
+        keychain::set_api_key(&db, "kept", "sk-kept").await.unwrap();
+        set_setting(&db, "llmXkeyYunrelated", "keep-me")
+            .await
+            .unwrap();
+
+        let profiles = r#"[
+          {"id":"kept","name":"Kept","kind":"openai","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini"}
+        ]"#;
+        let routing = r#"{"notes":"kept"}"#;
+        save_llm_profiles(&db, profiles, routing).await.unwrap();
+
+        assert!(!keychain::has_api_key(&db, "removed").await.unwrap());
+        assert!(keychain::has_api_key(&db, "kept").await.unwrap());
+        assert_eq!(
+            get_setting(&db, "llmXkeyYunrelated").await.unwrap(),
+            Some("keep-me".into())
+        );
+        assert_eq!(
+            get_setting(&db, "llm_profiles").await.unwrap().as_deref(),
+            Some(profiles)
+        );
+        assert_eq!(
+            get_setting(&db, "llm_task_routing")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(routing)
+        );
     }
 }

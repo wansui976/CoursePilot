@@ -198,7 +198,11 @@ describe("VideoPlayer iOS gestures", () => {
 
   it("shows a brightness overlay while adjusting brightness", () => {
     renderPlayer();
+    const video = screen.getByLabelText("课程视频播放器");
     const gestureLayer = screen.getByLabelText("课程视频手势层");
+
+    // Default brightness must not force every decoded frame through a CSS filter.
+    expect(video).not.toHaveStyle({ filter: "brightness(1)" });
 
     fireEvent.pointerDown(gestureLayer, {
       pointerId: 1,
@@ -210,11 +214,12 @@ describe("VideoPlayer iOS gestures", () => {
       pointerId: 1,
       pointerType: "touch",
       clientX: 80,
-      clientY: 120,
+      clientY: 280,
     });
 
     expect(screen.getByLabelText("亮度浮层")).toBeInTheDocument();
     expect(screen.getByText(/亮度/)).toBeInTheDocument();
+    expect(video).toHaveStyle({ filter: "brightness(0.8)" });
   });
 
   it("shows a volume overlay while adjusting volume", () => {

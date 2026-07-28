@@ -2,7 +2,7 @@ name: course-ai
 options:
   bundleIdPrefix: dev.courseai.app
   deploymentTarget:
-    iOS: 14.0
+    iOS: 17.0
 fileGroups: [../../src]
 configs:
   debug: debug
@@ -59,8 +59,16 @@ targets:
           - _http._tcp
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        UIBackgroundModes:
+          - remote-notification
     entitlements:
       path: course-ai_iOS/course-ai_iOS.entitlements
+      properties:
+        aps-environment: $(APS_ENVIRONMENT)
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.dev.courseai.app
+        com.apple.developer.icloud-services:
+          - CloudKit
     scheme:
       environmentVariables:
         RUST_BACKTRACE: full
@@ -75,10 +83,16 @@ targets:
         ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: true
         EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
       groups: [app]
+      configs:
+        debug:
+          APS_ENVIRONMENT: development
+        release:
+          APS_ENVIRONMENT: production
     dependencies:
       - framework: libapp.a
         embed: false
       - sdk: CoreGraphics.framework
+      - sdk: CloudKit.framework
       - sdk: Metal.framework
       - sdk: MetalKit.framework
       - sdk: QuartzCore.framework

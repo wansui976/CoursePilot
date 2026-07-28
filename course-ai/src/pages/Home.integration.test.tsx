@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Home } from "./Home";
 import type { Course, Video } from "@/lib/types";
 import { displayTitle } from "@/lib/videoTitle";
+import { usePlayer } from "@/stores/player";
 
 const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
@@ -57,6 +58,50 @@ const { mockIpc } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
+vi.mock("@/components/ConceptsPanel", () => ({
+  ConceptsPanel: ({
+    onClose,
+    onJump,
+    initialNavigationState,
+  }: {
+    onClose: () => void;
+    onJump: (videoId: string, startMs: number, state: {
+      conceptId: string;
+      conceptName: string;
+      search: string;
+      expandedConceptId: string;
+      scrollTop: number;
+    }) => void;
+    initialNavigationState?: {
+      search: string;
+      expandedConceptId: string | null;
+      scrollTop: number;
+    } | null;
+  }) => (
+    <section
+      aria-label="课程知识页面"
+      data-search={initialNavigationState?.search ?? ""}
+      data-expanded={initialNavigationState?.expandedConceptId ?? ""}
+      data-scroll-top={initialNavigationState?.scrollTop ?? 0}
+    >
+      <button type="button" onClick={onClose}>关闭课程知识</button>
+      <button
+        type="button"
+        onClick={() =>
+          onJump("video-1", 65_000, {
+            conceptId: "concept-1",
+            conceptName: "贝叶斯定理",
+            search: "条件概率",
+            expandedConceptId: "concept-1",
+            scrollTop: 320,
+          })
+        }
+      >
+        回看字幕证据
+      </button>
+    </section>
+  ),
+}));
 const mockUseContainerWidth = vi.hoisted(() => ({
   useContainerWidth: vi.fn(),
   coarsePointer: vi.fn(() => false),
@@ -132,6 +177,13 @@ describe("Home selected-video integration", () => {
   });
 
   beforeEach(() => {
+    usePlayer.setState({
+      videoId: null,
+      currentMs: 0,
+      durationMs: 0,
+      seekRequest: null,
+      pendingSeek: null,
+    });
     mockUseContainerWidth.useContainerWidth.mockReturnValue("wide");
     mockUseContainerWidth.coarsePointer.mockReturnValue(false);
     mockUseContainerWidth.useIsPortrait.mockReturnValue(false);
@@ -263,6 +315,78 @@ describe("Home selected-video integration", () => {
     );
     // 标题层级调整后，选中课程时 h1 显示课程名。
     expect(screen.getByRole("heading", { name: "Downloads" })).toBeInTheDocument();
+  });
+
+  it("returns from the course knowledge page when Android back is pressed", async () => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
+    vi.stubGlobal("navigator", { userAgent: "Android" });
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
+    await screen.findByText(displayTitle(video.title));
+    fireEvent.click(screen.getByRole("button", { name: "知识点" }));
+
+    expect(screen.getByLabelText("课程知识页面")).toBeInTheDocument();
+
+    await waitFor(() => expect(mockBackButtonPress.onBackButtonPress).toHaveBeenCalled());
+    const handler = mockBackButtonPress.onBackButtonPress.mock.calls[
+      mockBackButtonPress.onBackButtonPress.mock.calls.length - 1
+    ]?.[0] as
+      | ((payload: { canGoBack: boolean }) => void)
+      | undefined;
+    expect(handler).toBeTypeOf("function");
+
+    act(() => {
+      handler?.({ canGoBack: false });
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByLabelText("课程知识页面")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("heading", { name: "Downloads" })).toBeInTheDocument();
+  });
+
+  it("returns from a subtitle source to the same concept context", async () => {
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
+    await screen.findByText(displayTitle(video.title));
+    fireEvent.click(screen.getByRole("button", { name: "知识点" }));
+    fireEvent.click(screen.getByRole("button", { name: "回看字幕证据" }));
+
+    expect(await screen.findByRole("region", { name: "学习工作台" })).toBeInTheDocument();
+    const returnButton = screen.getByRole("button", { name: "返回知识点：贝叶斯定理" });
+    fireEvent.click(returnButton);
+
+    const knowledgePage = await screen.findByLabelText("课程知识页面");
+    expect(knowledgePage).toHaveAttribute("data-search", "条件概率");
+    expect(knowledgePage).toHaveAttribute("data-expanded", "concept-1");
+    expect(knowledgePage).toHaveAttribute("data-scroll-top", "320");
+  });
+
+  it("uses Android back to return from a source video to its concept", async () => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
+    vi.stubGlobal("navigator", { userAgent: "Android" });
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
+    await screen.findByText(displayTitle(video.title));
+    fireEvent.click(screen.getByRole("button", { name: "知识点" }));
+    fireEvent.click(screen.getByRole("button", { name: "回看字幕证据" }));
+
+    expect(
+      await screen.findByRole("button", { name: "返回知识点：贝叶斯定理" }),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(mockBackButtonPress.onBackButtonPress).toHaveBeenCalled());
+    const handler = mockBackButtonPress.onBackButtonPress.mock.calls[
+      mockBackButtonPress.onBackButtonPress.mock.calls.length - 1
+    ]?.[0] as ((payload: { canGoBack: boolean }) => void) | undefined;
+
+    act(() => handler?.({ canGoBack: false }));
+
+    const knowledgePage = await screen.findByLabelText("课程知识页面");
+    expect(knowledgePage).toHaveAttribute("data-expanded", "concept-1");
   });
 
   it("uses bottom tabs and course-list drill-down on a compact screen", async () => {

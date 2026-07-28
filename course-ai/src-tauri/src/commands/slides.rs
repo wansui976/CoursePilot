@@ -202,7 +202,7 @@ const OCR_CONCURRENCY: usize = 3;
 
 /// 识别课件页上的文字的核心流程，供命令与导入后的自动流水线共用。
 /// 已有文字的页跳过，所以可以续跑；识别不像正常文本的结果整页丢弃，不写库。
-/// 引擎按设置选：显式选过听设置，否则配了阿里云就走云。返回本次新识别出文字的页数。
+/// 引擎按设置选，默认走本地 OCR。返回本次新识别出文字的页数。
 pub async fn ocr_slides_for_video(
     state: &AppState,
     video_id: &str,
@@ -226,6 +226,8 @@ pub async fn ocr_slides_for_video(
     if total == 0 {
         return Ok(0);
     }
+    // 任务一开始就发 0/n，让前端立即进入明确的进度态，不必等首批 OCR 请求结束。
+    on_progress(0, total);
 
     let backend = resolve_ocr_backend(&state.db).await;
     let aliyun = if backend == "aliyun" {
@@ -236,6 +238,9 @@ pub async fn ocr_slides_for_video(
     let langs = ocr_langs(&state.db).await;
 
     let mut recognized = 0;
+    let mut executed = 0;
+    let mut failed = 0;
+    let mut first_error = None;
     let mut done = 0;
     for chunk in todo.chunks(OCR_CONCURRENCY) {
         if cancel.load(std::sync::atomic::Ordering::SeqCst) {
@@ -260,13 +265,28 @@ pub async fn ocr_slides_for_video(
                     },
                     None => ocr::run_ocr_on_image(Path::new(path), langs).await,
                 };
-                (*id, text)
+                (*id, path.as_str(), text)
             }
         });
-        // 单页失败（网络抖动、某张图坏了）不该毁掉整次识别，跳过继续。
-        for (id, text) in futures_util::future::join_all(jobs).await {
+        // 零星单页失败（网络抖动、某张图坏了）跳过继续；整批引擎不可用则在下方报错。
+        let mut chunk_failed = 0;
+        for (id, path, text) in futures_util::future::join_all(jobs).await {
             done += 1;
-            let Ok(text) = text else { continue };
+            let text = match text {
+                Ok(text) => {
+                    executed += 1;
+                    text
+                }
+                Err(error) => {
+                    failed += 1;
+                    chunk_failed += 1;
+                    if first_error.is_none() {
+                        first_error = Some(error.to_string());
+                    }
+                    tracing::warn!(slide_id = id, image_path = %path, %error, "课件页 OCR 失败");
+                    continue;
+                }
+            };
             if !ocr::ocr_text_is_usable(&text) {
                 continue;
             }
@@ -278,6 +298,29 @@ pub async fn ocr_slides_for_video(
             recognized += 1;
         }
         on_progress(done, total);
+
+        // 同一批三页全部执行失败，通常表示引擎整体不可用（鉴权、网络或模型问题）。
+        // 首批就这样失败时立即把错误交给前端，避免几十页逐一静默重试。
+        if executed == 0 && chunk_failed == chunk.len() {
+            return finish_ocr_batch(recognized, executed, failed, done, total, first_error);
+        }
+    }
+    finish_ocr_batch(recognized, executed, failed, done, total, first_error)
+}
+
+fn finish_ocr_batch(
+    recognized: usize,
+    executed: usize,
+    failed: usize,
+    done: usize,
+    total: usize,
+    first_error: Option<String>,
+) -> AppResult<usize> {
+    if executed == 0 && failed > 0 {
+        return Err(AppError::Pipeline(format!(
+            "课件 OCR 无法执行：已处理 {done}/{total} 页，{failed} 页失败。首个错误：{}",
+            first_error.unwrap_or_else(|| "未知错误".into())
+        )));
     }
     Ok(recognized)
 }
@@ -418,6 +461,21 @@ mod tests {
     use crate::commands::videos::add_local_video;
     use crate::db::Db;
     use tempfile::tempdir;
+
+    #[test]
+    fn batch_ocr_reports_when_the_engine_never_runs_successfully() {
+        let error = finish_ocr_batch(0, 0, 3, 3, 35, Some("鉴权失败".into()))
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("已处理 3/35 页"));
+        assert!(error.contains("鉴权失败"));
+    }
+
+    #[test]
+    fn batch_ocr_can_finish_with_no_usable_text_after_successful_execution() {
+        assert_eq!(finish_ocr_batch(0, 3, 0, 3, 3, None).unwrap(), 0);
+    }
 
     #[tokio::test]
     async fn only_registered_slide_images_are_readable() {

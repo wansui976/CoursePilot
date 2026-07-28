@@ -183,6 +183,17 @@ describe("SettingsPanel", () => {
     expect(await screen.findByText(/设置保存失败/)).toBeInTheDocument();
   });
 
+  it("surfaces initialization failures instead of leaving an unhandled rejection", async () => {
+    mockIpc.settings.get.mockImplementation(async (key: string) => {
+      if (key === "asr_language") throw new Error("database unavailable");
+      return null;
+    });
+
+    render(<SettingsPanel onClose={() => undefined} />);
+
+    expect(await screen.findByText(/设置加载失败：.*database unavailable/)).toBeInTheDocument();
+  });
+
   it("toggles subtitle autocorrect through a switch control", async () => {
     render(<SettingsPanel onClose={() => undefined} />);
 
@@ -272,7 +283,7 @@ describe("SettingsPanel", () => {
     expect(localStorage.getItem("course-ai-custom-accent")).toBe("#123456");
   });
 
-  it("uses the tablet category sidebar on iPad while keeping mobile cloud backend choices", async () => {
+  it("uses the tablet category sidebar on iPad with native mobile backends", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("medium");
     mockPlatform.isMobile.mockReturnValue(true);
     mockPlatform.isTablet.mockReturnValue(true);
@@ -292,6 +303,9 @@ describe("SettingsPanel", () => {
     expect(screen.queryByRole("option", { name: "本地 Whisper" })).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "火山录音文件识别" })).toBeInTheDocument();
     expect(screen.getByLabelText("App ID")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "课件" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "课件 / OCR" }));
+    expect(await screen.findByLabelText("OCR 引擎")).toHaveValue("local");
+    expect(screen.getByRole("option", { name: "本地 OCR（离线）" })).toBeInTheDocument();
   });
 });

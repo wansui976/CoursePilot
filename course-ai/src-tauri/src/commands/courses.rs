@@ -15,6 +15,8 @@ pub struct AppState {
     pub db: Db,
     /// 进行中的问答请求 id → 取消标志。停止生成时置位。
     pub rag_cancels: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    /// 串行化 CloudKit 生命周期切换，避免 stop/start 交错复活原生引擎。
+    pub sync_transition: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppState {
@@ -22,6 +24,7 @@ impl AppState {
         Self {
             db,
             rag_cancels: Arc::new(Mutex::new(HashMap::new())),
+            sync_transition: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 

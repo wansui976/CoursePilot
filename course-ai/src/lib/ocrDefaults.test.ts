@@ -9,30 +9,31 @@ describe("OCR defaults", () => {
     vi.unstubAllGlobals();
   });
 
-  it("defaults Android to Aliyun OCR", async () => {
+  it("defaults Android to bundled local OCR", async () => {
     vi.stubGlobal("navigator", { userAgent: "Android" });
 
     const { defaultOcrBackend, ocrBackendOrDefault } = await import("./ocrDefaults");
 
-    expect(defaultOcrBackend()).toBe("aliyun");
-    expect(ocrBackendOrDefault(null)).toBe("aliyun");
+    expect(defaultOcrBackend()).toBe("local");
+    expect(ocrBackendOrDefault(null)).toBe("local");
   });
 
-  it("defaults iOS to Aliyun OCR", async () => {
+  it("defaults iOS to Apple Vision OCR", async () => {
     vi.stubGlobal("navigator", { userAgent: "iPhone" });
 
     const { defaultOcrBackend, ocrBackendOrDefault } = await import("./ocrDefaults");
 
-    expect(defaultOcrBackend()).toBe("aliyun");
-    expect(ocrBackendOrDefault(undefined)).toBe("aliyun");
+    expect(defaultOcrBackend()).toBe("local");
+    expect(ocrBackendOrDefault(undefined)).toBe("local");
   });
 
-  it("keeps desktop default on local Tesseract", async () => {
+  it("defaults desktop to its platform local engine", async () => {
     vi.stubGlobal("navigator", { userAgent: "Macintosh" });
 
     const { defaultOcrBackend, ocrBackendOrDefault } = await import("./ocrDefaults");
 
-    expect(defaultOcrBackend()).toBe("tesseract");
+    expect(defaultOcrBackend()).toBe("local");
     expect(ocrBackendOrDefault("aliyun")).toBe("aliyun");
+    expect(ocrBackendOrDefault("tesseract")).toBe("local");
   });
 });

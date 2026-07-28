@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useRef, useState, type ReactNode } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
@@ -7,6 +7,7 @@ import {
   FileText,
   Lightbulb,
   MessageCircle,
+  Play,
   RefreshCw,
   Search,
   Sparkles,
@@ -29,6 +30,14 @@ import { CourseChatPanel } from "./CourseChatPanel";
 
 // 知识点解释跨多个视频，没有单一当前视频可跳转；解释里也不含 [mm:ss]，故用空 seek。
 const NO_SEEK = () => {};
+
+export type ConceptNavigationState = {
+  conceptId: string;
+  conceptName: string;
+  search: string;
+  expandedConceptId: string | null;
+  scrollTop: number;
+};
 
 function sourceStats(concept: CourseConcept) {
   const videos = new Set(concept.occurrences.map((occurrence) => occurrence.video_id)).size;
@@ -86,22 +95,109 @@ function filterGroups(groups: CourseKnowledgeGroup[], query: string) {
     .filter((group) => group.concepts.length > 0);
 }
 
+const SOURCE_PREVIEW_LIMIT = 3;
+
+function ConceptSources({
+  concept,
+  query,
+  onJump,
+}: {
+  concept: CourseConcept;
+  query: string;
+  onJump: (videoId: string, startMs: number) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const sourceListId = `concept-sources-${concept.id}`;
+  const hasMore = concept.occurrences.length > SOURCE_PREVIEW_LIMIT;
+  const occurrences = showAll
+    ? concept.occurrences
+    : concept.occurrences.slice(0, SOURCE_PREVIEW_LIMIT);
+
+  return (
+    <div className="mt-3 border-t border-[var(--border-subtle)] pt-2.5">
+      <p className="mb-1 text-xs font-medium text-[var(--text-faint)]">字幕证据</p>
+      <ul id={sourceListId} className="divide-y divide-[var(--border-subtle)]">
+        {occurrences.map((occurrence) => {
+          const sourceKey = `${occurrence.video_id}-${occurrence.start_ms}`;
+          const excerpt = occurrence.excerpt?.trim() || null;
+          const excerptId = excerpt ? `${sourceListId}-${sourceKey}-excerpt` : undefined;
+          return (
+            <li key={sourceKey}>
+              <button
+                type="button"
+                onClick={() => onJump(occurrence.video_id, occurrence.start_ms)}
+                aria-label={`回看 ${displayTitle(occurrence.video_title)} ${formatMs(occurrence.start_ms)}`}
+                aria-describedby={excerptId}
+                className="ca-touch-44 min-h-11 w-full px-1 py-2 text-left transition-colors hover:bg-[var(--surface-card-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+              >
+                <span className="flex min-w-0 items-baseline gap-2 text-xs">
+                  <span className="min-w-0 flex-1 truncate font-medium text-[var(--text-normal)]">
+                    {highlightQuery(displayTitle(occurrence.video_title), query)}
+                  </span>
+                  <span className="flex-none font-medium text-primary">
+                    {formatMs(occurrence.start_ms)}
+                  </span>
+                </span>
+                {excerpt && (
+                  <span
+                    id={excerptId}
+                    className="mt-0.5 block line-clamp-2 text-xs leading-5 text-[var(--text-muted)]"
+                  >
+                    {highlightQuery(excerpt, query)}
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setShowAll((value) => !value)}
+          aria-expanded={showAll}
+          aria-controls={sourceListId}
+          className="ca-touch-44 mt-1 inline-flex min-h-11 items-center gap-1 text-xs font-medium text-primary transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          <ChevronDown
+            aria-hidden="true"
+            className={`h-3.5 w-3.5 transition-transform ${showAll ? "rotate-180" : ""}`}
+          />
+          {showAll
+            ? "收起来源"
+            : `展开其余 ${concept.occurrences.length - SOURCE_PREVIEW_LIMIT} 条来源`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** 课程级知识页：总览、主题分组、可核验出处与按概念复习。 */
 export function ConceptsPanel({
   courseId,
   courseName,
   onClose,
   onJump,
+  initialNavigationState,
 }: {
   courseId: string;
   courseName?: string;
   onClose: () => void;
-  onJump: (videoId: string, startMs: number) => void;
+  onJump: (
+    videoId: string,
+    startMs: number,
+    navigationState?: ConceptNavigationState,
+  ) => void;
+  initialNavigationState?: ConceptNavigationState | null;
 }) {
   const queryClient = useQueryClient();
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [expanded, setExpanded] = useState<string | null>(
+    initialNavigationState?.expandedConceptId ?? null,
+  );
+  const [search, setSearch] = useState(initialNavigationState?.search ?? "");
   const deferredSearch = useDeferredValue(search);
+  const mainScrollRef = useRef<HTMLDivElement>(null);
+  const restoredScrollRef = useRef(false);
   const [announcement, setAnnouncement] = useState("");
   // 分析进度（逐视频事件驱动）；null 表示尚未收到进度。
   const [progress, setProgress] = useState<AnalyzeProgress | null>(null);
@@ -124,7 +220,11 @@ export function ConceptsPanel({
   });
 
   // 每个概念的待复习卡数（现算），构成 conceptId -> due 映射。
-  const { data: dueCounts = [] } = useQuery({
+  const {
+    data: dueCounts = [],
+    isPending: dueCountsPending,
+    isError: dueCountsError,
+  } = useQuery({
     queryKey: ["srs-concept-due", courseId],
     queryFn: () => ipc.srs.conceptDueCounts(courseId),
   });
@@ -132,6 +232,17 @@ export function ConceptsPanel({
     () => new Map(dueCounts.map((due) => [due.concept_id, due.due])),
     [dueCounts],
   );
+
+  useEffect(() => {
+    if (!initialNavigationState || isLoading || restoredScrollRef.current) return;
+    restoredScrollRef.current = true;
+    const frame = requestAnimationFrame(() => {
+      if (mainScrollRef.current) {
+        mainScrollRef.current.scrollTop = initialNavigationState.scrollTop;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [initialNavigationState, isLoading]);
 
   function invalidateKnowledge() {
     void queryClient.invalidateQueries({ queryKey: ["course-knowledge", courseId] });
@@ -182,19 +293,15 @@ export function ConceptsPanel({
     onSettled: invalidateKnowledge,
   });
 
-  // 为某知识点补复习卡：卡片来自各视频的 AI 出题结果，按时间就近归到知识点上。
+  // 为某知识点补复习卡：后端只写入确实落在该概念时间范围内的题目。
   // 后端对已有卡只更新正反面、不动排期，所以重复点不会打乱复习计划。
   const makeCards = useMutation({
-    mutationFn: async (concept: CourseConcept) => {
-      const videoIds = [...new Set(concept.occurrences.map((occurrence) => occurrence.video_id))];
-      const counts = await Promise.all(videoIds.map((videoId) => ipc.srs.generate(videoId)));
-      return counts.reduce((total, count) => total + count, 0);
-    },
+    mutationFn: (concept: CourseConcept) => ipc.srs.generateForConcept(courseId, concept.id),
     onSuccess: (count) => {
       setAnnouncement(
         count > 0
           ? `已从相关视频整理 ${count} 张复习卡，新卡立即可复习，已排期的卡片保持原计划。`
-          : "没有可整理的复习卡：相关视频还没有 AI 出题结果，请先在视频页生成测验。",
+          : "没有可整理的复习卡：相关视频尚无 AI 题目，或题目出处不在这个知识点范围内。",
       );
     },
     onSettled: () => {
@@ -225,6 +332,28 @@ export function ConceptsPanel({
     allConcepts.flatMap((concept) => concept.occurrences.map((occurrence) => occurrence.video_id)),
   ).size;
   const missingVideos = Math.max(0, (knowledge?.covered_videos ?? 0) - analyzedVideos);
+  const dueConcepts = allConcepts.flatMap((concept) => {
+    const due = dueCountByConcept.get(concept.id) ?? 0;
+    return due > 0 ? [{ concept, due }] : [];
+  });
+  const totalDue = dueConcepts.reduce((total, item) => total + item.due, 0);
+  const nextReview = dueConcepts[0];
+  const nextLearnConcept = allConcepts.find((concept) => concept.occurrences.length > 0);
+  const nextOccurrence = nextLearnConcept?.occurrences[0];
+
+  function navigationStateFor(concept: CourseConcept): ConceptNavigationState {
+    return {
+      conceptId: concept.id,
+      conceptName: concept.name,
+      search,
+      expandedConceptId: concept.id,
+      scrollTop: mainScrollRef.current?.scrollTop ?? 0,
+    };
+  }
+
+  function jumpToOccurrence(concept: CourseConcept, videoId: string, startMs: number) {
+    onJump(videoId, startMs, navigationStateFor(concept));
+  }
 
   return (
     <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-[var(--surface-app)] text-[var(--text-normal)]">
@@ -280,7 +409,10 @@ export function ConceptsPanel({
       </header>
 
       <div className="relative flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-6">
+        <div
+          ref={mainScrollRef}
+          className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-6"
+        >
         <main className="mx-auto max-w-4xl space-y-6">
           <p className="sr-only" aria-live="polite">
             {announcement}
@@ -433,6 +565,62 @@ export function ConceptsPanel({
                     </dd>
                   </div>
                 </dl>
+
+                <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-[var(--border-subtle)] pt-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium text-[var(--text-muted)]">下一步学习</p>
+                    {dueCountsPending ? (
+                      <p className="mt-1 text-sm text-[var(--text-faint)]">正在读取复习计划…</p>
+                    ) : nextReview ? (
+                      <p className="mt-1 truncate text-sm text-[var(--text-strong)]">
+                        先复习「{nextReview.concept.name}」
+                        <span className="ml-2 text-xs text-[var(--text-muted)]">
+                          本课程共 {totalDue} 张到期卡
+                        </span>
+                      </p>
+                    ) : nextLearnConcept && nextOccurrence ? (
+                      <p className="mt-1 truncate text-sm text-[var(--text-strong)]">
+                        回看「{nextLearnConcept.name}」的字幕出处
+                        <span className="ml-2 text-xs text-[var(--text-muted)]">
+                          {dueCountsError ? "复习计划暂时不可用" : "当前没有到期卡"}
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-sm text-[var(--text-faint)]">暂无可继续的内容</p>
+                    )}
+                  </div>
+                  {!dueCountsPending && nextReview && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setReviewing({
+                          conceptId: nextReview.concept.id,
+                          name: nextReview.concept.name,
+                        })
+                      }
+                      className="ca-touch-44 inline-flex flex-none items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium !text-white transition hover:opacity-90"
+                    >
+                      <Brain className="h-3.5 w-3.5" />
+                      开始复习
+                    </button>
+                  )}
+                  {!dueCountsPending && !nextReview && nextLearnConcept && nextOccurrence && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        jumpToOccurrence(
+                          nextLearnConcept,
+                          nextOccurrence.video_id,
+                          nextOccurrence.start_ms,
+                        )
+                      }
+                      className="ca-touch-44 inline-flex flex-none items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
+                    >
+                      <Play className="h-3.5 w-3.5 text-primary" />
+                      继续学习
+                    </button>
+                  )}
+                </div>
               </section>
 
               <div className="relative">
@@ -543,30 +731,13 @@ export function ConceptsPanel({
                                       暂无 AI 解释，重新分析课程后会依据字幕片段生成。
                                     </p>
                                   )}
-                                  <div className="mt-3">
-                                    <p className="mb-1.5 text-xs font-medium text-[var(--text-faint)]">
-                                      来源片段
-                                    </p>
-                                    <ul className="flex flex-wrap gap-2">
-                                      {concept.occurrences.map((occurrence) => (
-                                        <li key={`${occurrence.video_id}-${occurrence.start_ms}`}>
-                                          <button
-                                            type="button"
-                                            onClick={() => onJump(occurrence.video_id, occurrence.start_ms)}
-                                            aria-label={`回看 ${displayTitle(occurrence.video_title)} ${formatMs(occurrence.start_ms)}`}
-                                            className="inline-flex max-w-[240px] items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-1.5 text-xs transition hover:bg-[var(--surface-card-hover)]"
-                                          >
-                                            <span className="min-w-0 truncate text-[var(--text-muted)]">
-                                              {displayTitle(occurrence.video_title)}
-                                            </span>
-                                            <span className="flex-none text-primary">
-                                              {formatMs(occurrence.start_ms)}
-                                            </span>
-                                          </button>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </div>
+                                  <ConceptSources
+                                    concept={concept}
+                                    query={query}
+                                    onJump={(videoId, startMs) =>
+                                      jumpToOccurrence(concept, videoId, startMs)
+                                    }
+                                  />
                                   {due === 0 && (
                                     <div className="mt-3 border-t border-[var(--border-subtle)] pt-2.5">
                                       <p className="text-xs leading-5 text-[var(--text-muted)]">
@@ -588,7 +759,7 @@ export function ConceptsPanel({
                                           <p className="mt-1.5 text-xs text-[var(--text-muted)]">
                                             {makeCards.data > 0
                                               ? `已整理 ${makeCards.data} 张复习卡：新卡立即可复习，已排期的卡片保持原计划。`
-                                              : "相关视频还没有 AI 出题结果，请先在视频页生成测验。"}
+                                              : "相关视频尚无 AI 题目，或题目出处不在这个知识点范围内。"}
                                           </p>
                                         )}
                                       {makeCards.variables?.id === concept.id &&
@@ -658,8 +829,13 @@ export function ConceptsPanel({
           onClose={closeReview}
           onJump={(card) => {
             if (card.video_id && card.source_ms != null) {
+              const concept = allConcepts.find((item) => item.id === reviewing.conceptId);
               closeReview();
-              onJump(card.video_id, card.source_ms);
+              onJump(
+                card.video_id,
+                card.source_ms,
+                concept ? navigationStateFor(concept) : undefined,
+              );
             }
           }}
         />

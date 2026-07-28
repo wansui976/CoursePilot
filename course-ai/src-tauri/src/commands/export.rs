@@ -9,10 +9,11 @@ use tauri::Manager as _;
 use tauri::State;
 
 async fn load_video(state: &AppState, video_id: &str) -> AppResult<Video> {
-    Ok(sqlx::query_as("SELECT * FROM videos WHERE id=?")
+    sqlx::query_as("SELECT * FROM videos WHERE id=? AND deleted_at IS NULL")
         .bind(video_id)
-        .fetch_one(&state.db.pool)
-        .await?)
+        .fetch_optional(&state.db.pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))
 }
 
 fn export_dir_from_root(root: &Path, video_id: &str) -> PathBuf {

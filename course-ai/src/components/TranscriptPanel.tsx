@@ -13,6 +13,7 @@ import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import { useInlineAsk } from "@/stores/inlineAsk";
 import type { TranscriptSegment } from "@/lib/types";
+import { findActiveSegmentIndex } from "@/lib/transcript";
 
 // 手动滚动后暂停「跟随播放自动居中」的时长；停手超过该窗口才恢复跟随。
 const FOLLOW_PAUSE_MS = 4000;
@@ -107,7 +108,10 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
 
   // 仅渲染非空分段：空段是纠错清空的语气词，原本也不显示（且无法被点开编辑）。
   const rows = useMemo(
-    () => segments.filter((segment) => segment.text.trim() !== ""),
+    () =>
+      segments
+        .filter((segment) => segment.text.trim() !== "")
+        .sort((a, b) => a.start_ms - b.start_ms),
     [segments],
   );
   // 按块分组，块级 content-visibility（见 CHUNK_SIZE 注释）。
@@ -141,13 +145,13 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   // 跟随播放：订阅进度，只在活动行真正变化时 setState，避免每个 tick 重渲染可见行。
   useEffect(() => {
     const compute = (ms: number) => {
-      const idx = rows.findIndex(
-        (segment) => ms >= segment.start_ms && ms < segment.end_ms,
-      );
+      const idx = findActiveSegmentIndex(rows, ms);
       setActiveRowIndex((prev) => (prev === idx ? prev : idx));
     };
     compute(usePlayer.getState().currentMs);
-    return usePlayer.subscribe((state) => compute(state.currentMs));
+    return usePlayer.subscribe((state, previousState) => {
+      if (state.currentMs !== previousState.currentMs) compute(state.currentMs);
+    });
   }, [rows]);
 
   // 手动滚动打时间戳：wheel / 触摸滑动 / 滚动条拖拽 / 键盘翻页都算。程序化 scrollTo

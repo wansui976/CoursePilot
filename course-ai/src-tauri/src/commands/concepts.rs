@@ -16,7 +16,11 @@ use tauri::{Emitter, State};
 #[serde(tag = "type", rename_all = "lowercase")]
 enum AnalyzeEvent {
     /// 进度：已处理视频数 / 总数 / 当前视频标题。
-    Progress { done: usize, total: usize, title: String },
+    Progress {
+        done: usize,
+        total: usize,
+        title: String,
+    },
     /// 完成：入库知识点数。
     Done { count: usize },
     /// 失败或取消（后台任务里发生，命令已返回，只能靠事件通知前端）。

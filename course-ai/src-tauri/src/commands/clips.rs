@@ -32,14 +32,17 @@ pub async fn add_clip(
 ) -> AppResult<ClipRow> {
     let (start_ms, end_ms) = normalize(start_ms, end_ms);
     let created_at = chrono::Utc::now().timestamp_millis();
+    let sync_id = uuid::Uuid::new_v4().to_string();
     let id: i64 = sqlx::query_scalar(
-        "INSERT INTO clips(video_id,start_ms,end_ms,note,created_at)
-         VALUES (?,?,?,?,?) RETURNING id",
+        "INSERT INTO clips(video_id,start_ms,end_ms,note,created_at,sync_id,sync_updated_at)
+         VALUES (?,?,?,?,?,?,?) RETURNING id",
     )
     .bind(video_id)
     .bind(start_ms)
     .bind(end_ms)
     .bind(note)
+    .bind(created_at)
+    .bind(sync_id)
     .bind(created_at)
     .fetch_one(&db.pool)
     .await?;
@@ -70,10 +73,11 @@ pub async fn update_clip(
     note: &str,
 ) -> AppResult<()> {
     let (start_ms, end_ms) = normalize(start_ms, end_ms);
-    sqlx::query("UPDATE clips SET start_ms=?, end_ms=?, note=? WHERE id=?")
+    sqlx::query("UPDATE clips SET start_ms=?, end_ms=?, note=?, sync_updated_at=? WHERE id=?")
         .bind(start_ms)
         .bind(end_ms)
         .bind(note)
+        .bind(chrono::Utc::now().timestamp_millis())
         .bind(id)
         .execute(&db.pool)
         .await?;
@@ -136,7 +140,9 @@ mod tests {
     }
 
     async fn seed_video(db: &Db) -> String {
-        let course = create_course(db, "c".into(), "/tmp/c".into()).await.unwrap();
+        let course = create_course(db, "c".into(), "/tmp/c".into())
+            .await
+            .unwrap();
         let vid = Uuid::new_v4().to_string();
         sqlx::query(
             "INSERT INTO videos(id,course_id,title,source_type,file_path,data_dir,created_at)

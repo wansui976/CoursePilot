@@ -195,6 +195,44 @@ describe("NotesPanel", () => {
     expect(mockIpc.ai.saveNotes).toHaveBeenCalledWith("video-1", expect.any(String));
   });
 
+  it("shows autosave failures and retries the retained document", async () => {
+    // Keep the query pending so the intentionally minimal editor mock is not recreated mid-debounce.
+    mockIpc.ai.getNotes.mockReturnValue(new Promise(() => {}));
+    mockIpc.ai.saveNotes
+      .mockRejectedValueOnce(new Error("save failed"))
+      .mockResolvedValueOnce(undefined);
+    renderNotesPanel("video-save-error", "save-error");
+    act(() => {
+      editorCapture.onUpdate?.({
+        editor: {
+          getJSON: () => ({ type: "doc", content: [{ type: "paragraph" }] }),
+        },
+      });
+    });
+
+    expect(await screen.findByRole("alert", {}, { timeout: 2_000 })).toHaveTextContent(
+      "save failed",
+    );
+    fireEvent.click(screen.getByRole("button", { name: /重试/ }));
+    await waitFor(() => expect(mockIpc.ai.saveNotes).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("does not expose a blank editor when loading existing notes fails", async () => {
+    mockIpc.ai.getNotes
+      .mockRejectedValueOnce(new Error("notes load failed"))
+      .mockResolvedValueOnce(
+        JSON.stringify({ type: "doc", content: [{ type: "paragraph" }] }),
+      );
+    renderNotesPanel("video-load-error", "load-error");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("notes load failed");
+    expect(screen.queryByText("笔记正文")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /重试/ }));
+
+    expect(await screen.findByText("笔记正文")).toBeInTheDocument();
+  });
+
   it("clears the editor when switching to a video that has no notes yet", async () => {
     // 面板在标签之间是保活的（不重建）。切到一个还没有笔记的视频时若不清空，
     // 编辑器会继续显示上一讲的笔记；用户接着打字，那份内容就被存到新视频名下了。
