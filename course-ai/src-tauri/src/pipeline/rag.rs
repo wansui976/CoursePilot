@@ -7,6 +7,8 @@ use crate::commands::transcripts::{list_segments, TranscriptSegment};
 use crate::db::Db;
 use crate::error::AppResult;
 use crate::llm::{ChatMessage, ChatRequest, Provider, StreamPiece};
+// 中文问句切词元与课程问答那边共用同一套：两处对「什么算命中」的理解必须一致。
+use crate::pipeline::search_terms::{hit_count, query_terms};
 use serde::Serialize;
 use std::sync::atomic::AtomicBool;
 
@@ -621,18 +623,19 @@ async fn map_reduce_answer(
 
 // ---------- 文稿关键词搜索（本地，无 LLM） ----------
 
-/// 在字幕段里做关键词匹配：按命中词数排序，再按时间。中文整串当一个词。
-/// 命中打分：一段命中的查询词个数（>0 才计入）。空查询返回空。
+/// 在字幕段里做关键词匹配：按命中词数排序，再按时间。空查询返回空。
+///
+/// 词元由 [`query_terms`] 切（中文按二字组）。原来是按空白切的，
+/// 于是「光合作用是什么」整串成了一个词元，而字幕里写的是「讲解光合作用」——
+/// 一个字都对不上，检索空手而归，问答再退化成「模型凭自己的知识回答」。
 fn scored_segments(segments: &[TranscriptSegment], query: &str) -> Vec<(usize, TranscriptSegment)> {
-    let q = query.trim().to_lowercase();
-    if q.is_empty() {
+    let terms = query_terms(query);
+    if terms.is_empty() {
         return Vec::new();
     }
-    let terms: Vec<String> = q.split_whitespace().map(|s| s.to_string()).collect();
     let mut scored = Vec::new();
     for seg in segments {
-        let lc = seg.text.to_lowercase();
-        let score = terms.iter().filter(|t| lc.contains(t.as_str())).count();
+        let score = hit_count(&seg.text, &terms);
         if score > 0 {
             scored.push((score, seg.clone()));
         }
@@ -680,15 +683,6 @@ async fn list_slide_pages(db: &Db, video_id: &str) -> AppResult<Vec<SlidePage>> 
         .collect())
 }
 
-fn search_terms(query: &str) -> Vec<String> {
-    query
-        .trim()
-        .to_lowercase()
-        .split_whitespace()
-        .map(str::to_string)
-        .collect()
-}
-
 /// 从整页 OCR 文本里挑出命中的那几行当摘要；一行都没命中时退回开头几行。
 /// OCR 出来的文本天然按行，命中行本身就是最好的摘要。纯函数，可单测。
 pub fn slide_snippet(text: &str, terms: &[String], limit: usize) -> String {
@@ -726,7 +720,7 @@ pub fn slide_snippet(text: &str, terms: &[String], limit: usize) -> String {
 }
 
 fn scored_slide_pages(pages: &[SlidePage], query: &str) -> Vec<(usize, SlidePage)> {
-    let terms = search_terms(query);
+    let terms = query_terms(query);
     if terms.is_empty() {
         return Vec::new();
     }
@@ -755,7 +749,7 @@ struct Hit {
 }
 
 fn slide_hit(score: usize, page: SlidePage, query: &str, video: Option<(String, String)>) -> Hit {
-    let terms = search_terms(query);
+    let terms = query_terms(query);
     Hit {
         score,
         start_ms: page.start_ms,
