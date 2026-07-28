@@ -6,7 +6,12 @@
 //!   2. GET  .../tasks/{task_id} 轮询，直到 task_status=SUCCEEDED；
 //!   3. 下载 transcription_url 指向的 JSON，映射成内部字幕结构。
 //!
-//! 本地文件没有公网 URL，改用 base64 data URI 作为 file_urls 传入。
+//! 本地文件没有公网 URL，改用 base64 data URI 传入。
+//!
+//! **未经真机验证的地方**：官方文档要求 file_url 是公网可访问的地址，没说支持
+//! data URI。如果服务端确实拒收，这条后端就需要先把音频传到一个可访问的地方
+//! （如 OSS）再提交，那是另一件事，不是改几行参数能解决的。字段名（单数/复数）
+//! 已经按模型区分，见 [`uses_singular_file_url`]。
 
 use crate::error::{AppError, AppResult};
 use crate::pipeline::asr::{Offsets, TokenObj, WhisperJson, WhisperSegment};
@@ -110,10 +115,22 @@ pub fn supports_language_hints(model: &str) -> bool {
     model.contains("paraformer") || model.contains("fun-asr")
 }
 
+/// qwen3-asr 系列的录音文件识别接口收的是**单数** `file_url`（一次一个文件）；
+/// fun-asr / paraformer 收的是复数 `file_urls` 数组。发错字段名，服务端会报
+/// 「缺少必需参数」，而这正是默认模型——等于默认配置下这条后端根本跑不通。
+pub fn uses_singular_file_url(model: &str) -> bool {
+    model.contains("qwen3-asr")
+}
+
 pub fn build_submit_body(model: &str, file_url: &str, language_hint: Option<&str>) -> Value {
+    let input = if uses_singular_file_url(model) {
+        json!({ "file_url": file_url })
+    } else {
+        json!({ "file_urls": [file_url] })
+    };
     let mut body = json!({
         "model": model,
-        "input": { "file_urls": [file_url] },
+        "input": input,
     });
     if let Some(lang) = language_hint {
         body["parameters"] = json!({ "language_hints": [lang] });
@@ -238,6 +255,20 @@ mod tests {
         assert_eq!(body["model"], "fun-asr");
         assert_eq!(body["input"]["file_urls"][0], "data:audio/mpeg;base64,QUJD");
         assert!(body.get("parameters").is_none());
+    }
+
+    #[test]
+    fn qwen3_takes_a_singular_file_url() {
+        // 默认模型就是 qwen3 系列，它收的是单数 file_url。发成复数数组会被服务端
+        // 判成缺少必需参数——等于默认配置下这条后端根本跑不通。
+        assert!(uses_singular_file_url(DEFAULT_MODEL));
+        let body = build_submit_body(DEFAULT_MODEL, "data:audio/mp4;base64,QUJD", None);
+        assert_eq!(body["input"]["file_url"], "data:audio/mp4;base64,QUJD");
+        assert!(body["input"].get("file_urls").is_none());
+
+        // fun-asr / paraformer 仍然是复数数组，别把它们一起改坏了。
+        assert!(!uses_singular_file_url("fun-asr"));
+        assert!(!uses_singular_file_url("paraformer-v2"));
     }
 
     #[test]

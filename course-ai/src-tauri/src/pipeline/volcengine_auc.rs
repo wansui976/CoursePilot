@@ -23,10 +23,54 @@ const SUBMIT_URL: &str = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/s
 const QUERY_URL: &str = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query";
 const RESOURCE_ID: &str = "volc.bigasr.auc";
 const STATUS_SUCCESS: &str = "20000000";
+/// 正在处理 / 排队中：只有这两个码才值得继续等。
+const STATUS_PROCESSING: &str = "20000001";
+const STATUS_QUEUED: &str = "20000002";
+/// 静音音频：服务端已经处理完了，结论是「这段没有人说话」。
+///
+/// 原来把 2000000x 一律当「处理中」，于是这个**终态**会被一直轮询到超时——
+/// 30 分钟一段，外面还包着两次重试，一段静音能拖掉 90 分钟。
+const STATUS_SILENT: &str = "20000003";
 const STATUS_HEADER: &str = "X-Api-Status-Code";
 const MESSAGE_HEADER: &str = "X-Api-Message";
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 const MAX_POLLS: u32 = 600; // 3s × 600 ≈ 30 分钟上限
+/// 单个 HTTP 请求的上限。没有它时，一次卡死的连接可以挂到天荒地老，
+/// 所谓「30 分钟上限」只是轮询次数上限，根本不是真的 deadline。
+const SUBMIT_TIMEOUT: Duration = Duration::from_secs(300);
+const QUERY_TIMEOUT: Duration = Duration::from_secs(60);
+/// 轮询期间允许连续多少次网络抖动。超过就放弃这一段——但**不会**重新提交。
+const MAX_QUERY_HICCUPS: u32 = 5;
+
+/// 带请求超时的客户端。两个阶段的超时不同：提交要上传整段 base64 音频，慢得多。
+fn asr_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(SUBMIT_TIMEOUT)
+        .build()
+        .unwrap_or_default()
+}
+
+/// 一次识别失败发生在提交之前还是之后。
+///
+/// 这个区分决定了能不能重试：提交成功之后，任务已经在云端跑着、也已经计费；
+/// 换个 request_id 重来一遍会变成**第二个任务、第二笔账**，而原任务还在继续跑。
+/// 所以只有「提交本身没成功」才允许整段重来。
+enum RecognizeFailure {
+    BeforeSubmit(AppError),
+    AfterSubmit(AppError),
+}
+
+impl RecognizeFailure {
+    fn into_error(self) -> AppError {
+        match self {
+            Self::BeforeSubmit(error) | Self::AfterSubmit(error) => error,
+        }
+    }
+
+    fn is_resubmittable(&self) -> bool {
+        matches!(self, Self::BeforeSubmit(_))
+    }
+}
 
 /// 分段识别默认参数：5 分钟一段、并发 4 路、每段指数回退重试两次。
 pub const DEFAULT_CHUNK_SECS: u64 = 300;
@@ -44,7 +88,7 @@ pub async fn run_volcengine_file(
 ) -> AppResult<WhisperJson> {
     let (app_id, access_token) = check_credentials(app_id, access_token)?;
     let audio_bytes = tokio::fs::read(audio).await?;
-    let client = reqwest::Client::new();
+    let client = asr_client();
     recognize_bytes_with_retry(
         &client,
         &app_id,
@@ -96,7 +140,7 @@ pub async fn run_volcengine_file_chunked(
                 return Err(AppError::Pipeline("音频切片为空，无法识别".into()));
             }
         };
-        let client = reqwest::Client::new();
+        let client = asr_client();
         let bytes = tokio::fs::read(&single).await?;
         let out = recognize_bytes_with_retry(
             &client,
@@ -111,7 +155,7 @@ pub async fn run_volcengine_file_chunked(
         return out;
     }
 
-    let client = reqwest::Client::new();
+    let client = asr_client();
     let results: Vec<AppResult<(usize, WhisperJson)>> =
         futures_util::stream::iter(chunks.into_iter().enumerate().map(|(idx, path)| {
             let client = client.clone();
@@ -165,7 +209,7 @@ async fn recognize_bytes(
     audio_bytes: &[u8],
     context: Option<&str>,
     format: &str,
-) -> AppResult<WhisperJson> {
+) -> Result<WhisperJson, RecognizeFailure> {
     let request_id = Uuid::new_v4().to_string();
 
     // ---- 1. 提交任务 ----
@@ -180,26 +224,69 @@ async fn recognize_bytes(
         .json(&body)
         .send()
         .await
-        .map_err(|error| AppError::Pipeline(format!("volcengine submit: {error}")))?;
+        .map_err(|error| {
+            RecognizeFailure::BeforeSubmit(AppError::Pipeline(format!(
+                "volcengine submit: {error}"
+            )))
+        })?;
     let status = header_value(&resp, STATUS_HEADER);
     let message = header_value(&resp, MESSAGE_HEADER);
     if status.as_deref() != Some(STATUS_SUCCESS) {
-        return Err(submit_error("submit", status, message, resp.status()));
+        return Err(RecognizeFailure::BeforeSubmit(submit_error(
+            "submit",
+            status,
+            message,
+            resp.status(),
+        )));
     }
 
     // ---- 2. 轮询结果 ----
+    // 从这里开始，云端任务已经存在并计费：无论出什么事都只能报错，不能换个
+    // request_id 重来（那会变成第二个任务、第二笔账，原任务还在跑）。
+    poll_until_done(client, app_id, access_token, &request_id)
+        .await
+        .map_err(RecognizeFailure::AfterSubmit)
+}
+
+/// 轮询同一个 request_id 直到出结果。网络抖动就地重试，绝不换 id。
+async fn poll_until_done(
+    client: &reqwest::Client,
+    app_id: &str,
+    access_token: &str,
+    request_id: &str,
+) -> AppResult<WhisperJson> {
+    let mut hiccups = 0u32;
     for _ in 0..MAX_POLLS {
-        let resp = client
+        let sent = client
             .post(QUERY_URL)
+            .timeout(QUERY_TIMEOUT)
             .header("X-Api-App-Key", app_id)
             .header("X-Api-Access-Key", access_token)
             .header("X-Api-Resource-Id", RESOURCE_ID)
-            .header("X-Api-Request-Id", &request_id)
+            .header("X-Api-Request-Id", request_id)
             .header("X-Api-Sequence", "-1")
             .json(&json!({}))
             .send()
-            .await
-            .map_err(|error| AppError::Pipeline(format!("volcengine query: {error}")))?;
+            .await;
+        let resp = match sent {
+            Ok(resp) => {
+                hiccups = 0;
+                resp
+            }
+            // 查询请求本身没发出去/超时：任务还在云端跑着，接着问就是了。
+            // 原来这里直接报错，外层会把整段音频重新提交一次——白花一份钱。
+            Err(error) => {
+                hiccups += 1;
+                if hiccups > MAX_QUERY_HICCUPS {
+                    return Err(AppError::Pipeline(format!(
+                        "volcengine query 连续 {MAX_QUERY_HICCUPS} 次失败：{error}"
+                    )));
+                }
+                tracing::warn!("volcengine query 第 {hiccups} 次网络失败：{error}；稍后再查");
+                tokio::time::sleep(POLL_INTERVAL).await;
+                continue;
+            }
+        };
         let status = header_value(&resp, STATUS_HEADER);
         let message = header_value(&resp, MESSAGE_HEADER);
         match status.as_deref() {
@@ -209,8 +296,16 @@ async fn recognize_bytes(
                 })?;
                 return response_payload_to_transcript(&payload);
             }
-            // 2000000x（排队 / 处理中）继续等；其余视为失败。
-            Some(code) if code.starts_with("2000000") => {
+            // 服务端说这段没有人说话。这是终态，不是「还在处理」：接着轮询只会
+            // 一路等到超时。返回空字幕即可——长音频是分段识别的，中间夹一段静音
+            // 很正常，不该让整个视频失败。
+            Some(STATUS_SILENT) => {
+                tracing::info!(request_id, "volcengine 判定该段为静音，返回空字幕");
+                return Ok(WhisperJson {
+                    transcription: Vec::new(),
+                });
+            }
+            Some(STATUS_PROCESSING) | Some(STATUS_QUEUED) => {
                 tokio::time::sleep(POLL_INTERVAL).await;
             }
             other => {
@@ -229,6 +324,9 @@ async fn recognize_bytes(
 }
 
 /// 在 recognize_bytes 外包一层指数回退重试：失败后等 2s、4s 再试，最多重试两次。
+///
+/// **只重试提交阶段的失败**。提交成功之后的任何失败都直接上报：那时云端任务已经
+/// 建好并开始计费，重来一遍等于同一段音频付两次钱，而且两个任务会并行跑。
 async fn recognize_bytes_with_retry(
     client: &reqwest::Client,
     app_id: &str,
@@ -241,13 +339,14 @@ async fn recognize_bytes_with_retry(
     loop {
         match recognize_bytes(client, app_id, access_token, audio_bytes, context, format).await {
             Ok(value) => return Ok(value),
-            Err(error) => {
-                if attempt >= MAX_RETRIES {
-                    return Err(error);
+            Err(failure) => {
+                if !failure.is_resubmittable() || attempt >= MAX_RETRIES {
+                    return Err(failure.into_error());
                 }
+                let error = failure.into_error();
                 let backoff = Duration::from_secs(2u64.pow(attempt + 1));
                 tracing::warn!(
-                    "volcengine 分段识别第 {} 次失败：{error}；{:?} 后重试",
+                    "volcengine 分段提交第 {} 次失败：{error}；{:?} 后重试",
                     attempt + 1,
                     backoff
                 );
@@ -444,6 +543,57 @@ pub fn base64_encode(input: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_failed_submit_may_be_retried() {
+        // 提交没成功 = 云端没有任务，整段重来是安全的。
+        assert!(RecognizeFailure::BeforeSubmit(AppError::Pipeline("x".into())).is_resubmittable());
+        // 提交成功之后的任何失败（查询超时、解析出错）都不能重来：任务已经在云端
+        // 跑着并计费，换个 request_id 重来会变成第二个任务、第二笔账。
+        assert!(!RecognizeFailure::AfterSubmit(AppError::Pipeline("x".into())).is_resubmittable());
+    }
+
+    #[test]
+    fn silence_is_a_terminal_status_not_a_reason_to_keep_polling() {
+        // 这三个码必须区分开：静音是**结论**，排队和处理中才是「再等等」。
+        // 原来 2000000x 一律当处理中，一段静音会轮询到超时——30 分钟一段，
+        // 外面还包着两次重试，能拖掉 90 分钟。
+        assert_ne!(STATUS_SILENT, STATUS_PROCESSING);
+        assert_ne!(STATUS_SILENT, STATUS_QUEUED);
+        for code in [
+            STATUS_SUCCESS,
+            STATUS_PROCESSING,
+            STATUS_QUEUED,
+            STATUS_SILENT,
+        ] {
+            assert!(code.starts_with("2000000"), "{code} 应属于 2000000x 一族");
+        }
+    }
+
+    #[test]
+    fn a_silent_chunk_yields_an_empty_transcript_that_merges_cleanly() {
+        // 长音频是分段识别的，中间夹一段静音很正常，不该让整个视频失败。
+        let silent = WhisperJson {
+            transcription: Vec::new(),
+        };
+        let spoken = maps_one_segment("后半段有人说话");
+        let merged = merge_chunk_transcripts(vec![(0, silent), (1, spoken)], 300_000);
+        assert_eq!(merged.transcription.len(), 1);
+        assert_eq!(merged.transcription[0].text, "后半段有人说话");
+        // 第二段的时间偏移照常加上，静音段不会把时间轴顶乱。
+        assert_eq!(merged.transcription[0].offsets.from, 300_000);
+    }
+
+    /// 造一段只有一句话、从 0ms 开始的识别结果。
+    fn maps_one_segment(text: &str) -> WhisperJson {
+        WhisperJson {
+            transcription: vec![crate::pipeline::asr::WhisperSegment {
+                text: text.to_string(),
+                offsets: crate::pipeline::asr::Offsets { from: 0, to: 1_000 },
+                tokens: Vec::new(),
+            }],
+        }
+    }
 
     #[test]
     fn base64_matches_known_vectors() {
