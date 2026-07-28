@@ -165,13 +165,142 @@ pub fn parse_chapters(content: &str) -> AppResult<Vec<ChapterDraft>> {
     parse_lenient_json(content)
 }
 
-/// quiz 仅校验是合法 JSON 数组，原样落库（前端按约定字段渲染）。
+/// 题型。模型偶尔会写成大写或带空格，统一按小写去空白匹配。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum QuizKind {
+    Single,
+    Multi,
+    Judge,
+}
+
+impl QuizKind {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_lowercase().as_str() {
+            "single" => Some(Self::Single),
+            "multi" | "multiple" => Some(Self::Multi),
+            "judge" | "boolean" | "truefalse" | "true_false" => Some(Self::Judge),
+            _ => None,
+        }
+    }
+}
+
+/// 一道校验过的题。落库的就是这个结构序列化后的样子，前端拿到的字段形状因此有保证。
+#[derive(Debug, Clone, Serialize)]
+pub struct QuizQuestion {
+    #[serde(rename = "type")]
+    pub kind: QuizKind,
+    pub stem: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<String>>,
+    pub answer: QuizAnswer,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explanation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ref_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum QuizAnswer {
+    Judge(bool),
+    One(String),
+    Many(Vec<String>),
+}
+
+/// 判断题的答案模型经常写成中文/英文字面量而不是布尔。这些都认，其余的丢。
+fn parse_judge_answer(value: &serde_json::Value) -> Option<bool> {
+    if let Some(flag) = value.as_bool() {
+        return Some(flag);
+    }
+    match value.as_str()?.trim().to_lowercase().as_str() {
+        "true" | "正确" | "对" | "是" | "yes" | "t" => Some(true),
+        "false" | "错误" | "错" | "否" | "no" | "f" => Some(false),
+        _ => None,
+    }
+}
+
+fn non_empty_string(value: Option<&serde_json::Value>) -> Option<String> {
+    let text = value?.as_str()?.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+fn string_list(value: &serde_json::Value) -> Vec<String> {
+    match value {
+        serde_json::Value::Array(items) => items
+            .iter()
+            .filter_map(|item| non_empty_string(Some(item)))
+            .collect(),
+        _ => non_empty_string(Some(value)).into_iter().collect(),
+    }
+}
+
+/// 把一条原始 JSON 校验成一道题；形状不对返回 None（调用方丢掉这一条）。
+///
+/// 为什么要逐条校验：以前只看「顶层是不是数组」，`[{}]`、`stem: null`、
+/// options 写成字符串这些全都能落库，前端直接当成合法题目渲染——`options.map`
+/// 在字符串上就是 TypeError，整个出题面板白屏。模型输出不可信，这一层必须挡住。
+fn validate_question(raw: &serde_json::Value) -> Option<QuizQuestion> {
+    let kind = QuizKind::parse(raw.get("type")?.as_str()?)?;
+    let stem = non_empty_string(raw.get("stem"))?;
+    let answer_raw = raw.get("answer")?;
+    let options: Vec<String> = raw.get("options").map(string_list).unwrap_or_default();
+
+    let (options, answer) = match kind {
+        // 判断题不需要选项；答案必须能归成布尔。
+        QuizKind::Judge => (None, QuizAnswer::Judge(parse_judge_answer(answer_raw)?)),
+        // 选择题至少要两个选项，否则不成其为选择题。
+        QuizKind::Single | QuizKind::Multi => {
+            if options.len() < 2 {
+                return None;
+            }
+            let answers = string_list(answer_raw);
+            if answers.is_empty() {
+                return None;
+            }
+            let answer = if kind == QuizKind::Multi {
+                QuizAnswer::Many(answers)
+            } else {
+                // 单选给了多个答案就取第一个，别把整道题丢掉。
+                QuizAnswer::One(answers[0].clone())
+            };
+            (Some(options), answer)
+        }
+    };
+
+    Some(QuizQuestion {
+        kind,
+        stem,
+        options,
+        answer,
+        explanation: non_empty_string(raw.get("explanation")),
+        ref_ms: raw
+            .get("ref_ms")
+            .and_then(serde_json::Value::as_i64)
+            .filter(|ms| *ms >= 0),
+    })
+}
+
+/// 逐题校验后落库。坏题丢掉、好题留下；一道都不剩才算失败——
+/// 模型偶尔写坏一道，不该让整套题白生成。
 pub fn validate_quiz_json(content: &str) -> AppResult<String> {
     let v: serde_json::Value = parse_lenient_json(content)?;
-    if !v.is_array() {
+    let Some(items) = v.as_array() else {
         return Err(AppError::Other("quiz output is not a JSON array".into()));
+    };
+    let total = items.len();
+    let questions: Vec<QuizQuestion> = items.iter().filter_map(validate_question).collect();
+    if questions.len() < total {
+        tracing::warn!(
+            dropped = total - questions.len(),
+            total,
+            "出题结果里有形状不对的题目，已丢弃"
+        );
     }
-    Ok(v.to_string())
+    if questions.is_empty() {
+        return Err(AppError::Other("出题结果里没有一道形状合法的题目".into()));
+    }
+    serde_json::to_string(&questions).map_err(AppError::Json)
 }
 
 pub async fn store_chapters(db: &Db, video_id: &str, drafts: &[ChapterDraft]) -> AppResult<usize> {
@@ -406,14 +535,76 @@ mod tests {
 
     #[test]
     fn validates_quiz_array() {
-        assert!(validate_quiz_json(r#"[{"stem":"q"}]"#).is_ok());
         assert!(validate_quiz_json(r#"{"not":"array"}"#).is_err());
+        // 以前这条是 ok 的：只看顶层是不是数组，缺字段的题照样落库，
+        // 前端拿到它就崩在 options.map / 空题干上。
+        assert!(validate_quiz_json(r#"[{"stem":"q"}]"#).is_err());
+    }
+
+    #[test]
+    fn malformed_questions_are_dropped_instead_of_crashing_the_panel() {
+        let raw = r#"[
+            {},
+            {"type":"single","stem":null,"options":["a","b"],"answer":"a"},
+            {"type":"single","stem":"选项写成了字符串","options":"a、b","answer":"a"},
+            {"type":"single","stem":"只有一个选项","options":["a"],"answer":"a"},
+            {"type":"single","stem":"没有答案","options":["a","b"]},
+            {"type":"魔法","stem":"题型不认识","options":["a","b"],"answer":"a"},
+            {"type":"single","stem":"好题","options":["a","b"],"answer":"a","ref_ms":1200}
+        ]"#;
+        let out = validate_quiz_json(raw).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let items = parsed.as_array().unwrap();
+        // 六条坏题全丢掉，只留下唯一一道形状合法的。
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["stem"], "好题");
+        assert_eq!(items[0]["ref_ms"], 1200);
+    }
+
+    #[test]
+    fn a_quiz_with_nothing_usable_is_an_error_not_an_empty_panel() {
+        // 全是坏题时报错，让上层保留上一次的题库，而不是把空数组写进去。
+        assert!(validate_quiz_json(r#"[{},{"stem":"只有题干"}]"#).is_err());
+        assert!(validate_quiz_json("[]").is_err());
+    }
+
+    #[test]
+    fn judge_answers_written_as_text_are_normalized_to_booleans() {
+        // 模型写「正确」「错误」比写 true/false 更常见；一律丢掉会白扔大半判断题。
+        let out = validate_quiz_json(r#"[{"type":"judge","stem":"地球是圆的","answer":"正确"}]"#)
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed[0]["answer"], serde_json::Value::Bool(true));
+        // 判断题不该带选项。
+        assert!(parsed[0].get("options").is_none());
+
+        let out = validate_quiz_json(r#"[{"type":"judge","stem":"x","answer":false}]"#).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed[0]["answer"], serde_json::Value::Bool(false));
+
+        // 归不成布尔的判断题丢掉，否则前端答案栏显示空白。
+        assert!(validate_quiz_json(r#"[{"type":"judge","stem":"x","answer":"也许"}]"#).is_err());
+    }
+
+    #[test]
+    fn multi_answers_are_always_a_list_and_single_always_one_string() {
+        let out = validate_quiz_json(
+            r#"[{"type":"multi","stem":"多选","options":["a","b","c"],"answer":"a"},
+                {"type":"single","stem":"单选","options":["a","b"],"answer":["b","c"]}]"#,
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        // 多选答案即便只有一个也是数组，前端不必再判断类型。
+        assert!(parsed[0]["answer"].is_array());
+        // 单选给了多个答案取第一个，别为这个把整道题丢了。
+        assert_eq!(parsed[1]["answer"], "b");
     }
 
     #[test]
     fn quiz_and_chapters_tolerate_unescaped_latex_backslashes() {
         // 题干里含未转义的 LaTeX 反斜杠，严格 JSON 会失败，宽松解析应修复。
-        let quiz = r#"[{"type":"single","stem":"求 \(v^2\) 的值","options":["1"],"answer":"1"}]"#;
+        let quiz =
+            r#"[{"type":"single","stem":"求 \(v^2\) 的值","options":["1","2"],"answer":"1"}]"#;
         assert!(validate_quiz_json(quiz).is_ok());
         let chapters =
             r#"[{"title":"速度变换 \(v_x'\)","summary":"s","start_ms":0,"end_ms":1000}]"#;
