@@ -102,9 +102,9 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
     <div className="flex h-full flex-col">
       {/* 学习面板可以被拖得很窄。这一行原来是单行不换行的，一窄就把最右边的
           「提取课件 / 重新提取」挤出可视区——而那正是这个面板唯一的主操作，
-          用户根本点不到。改成允许换行：标题占一行，按钮不够宽就自己折下去。 */}
-      <div className="flex flex-none flex-wrap items-center justify-between gap-x-2 gap-y-1.5 border-b border-[var(--border-subtle)] px-3 py-2.5">
-        <span className="flex-none text-sm font-medium text-[var(--text-strong)]">课件页</span>
+          用户根本点不到。改成允许换行：按钮不够宽就自己折下去。
+          标题去掉了：外层标签已经写着「课件」，再写一遍「课件页」纯属占宽度。 */}
+      <div className="flex flex-none flex-wrap items-center justify-end gap-x-2 gap-y-1.5 border-b border-[var(--border-subtle)] px-3 py-2.5">
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
           {slides.length > 0 &&
             (pagesOcr.isPending ? (
