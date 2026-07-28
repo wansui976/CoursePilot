@@ -342,17 +342,21 @@ function AskChatPanel({ videoId }: { videoId: string }) {
           });
         },
       );
-      const next = [
-        ...readAskHistory(videoId),
-        {
-          id: crypto.randomUUID(),
-          query,
-          answer: answer.answer,
-          reasoning: reasoningAcc || undefined,
-          citations: answer.citations.length > 0 ? answer.citations : undefined,
-        },
-      ];
-      writeAskHistory(videoId, next);
+      // 一个字都没生成出来（长视频在通读阶段就被停掉）就不记这一条：
+      // 历史里留一条空回答，看起来像是模型答了个空白。
+      if (answer.answer.trim()) {
+        const next = [
+          ...readAskHistory(videoId),
+          {
+            id: crypto.randomUUID(),
+            query,
+            answer: answer.answer,
+            reasoning: reasoningAcc || undefined,
+            citations: answer.citations.length > 0 ? answer.citations : undefined,
+          },
+        ];
+        writeAskHistory(videoId, next);
+      }
       if (mountedRef.current) setStreaming(null);
       return answer;
     },

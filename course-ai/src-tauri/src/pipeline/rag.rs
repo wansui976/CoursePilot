@@ -313,6 +313,34 @@ pub async fn answer(
 
 /// 流式问答：短视频直接流式；长视频先发状态提示，仅综合步流式。
 /// 结束时对累积文本清洗时间戳数组，发 Done 并返回。
+/// 等模型返回，但每隔一小会儿看一眼取消标志；被取消时返回 None。
+///
+/// 只置位标志是不够的：map 阶段是**非流式**调用，`complete` 最长要等到请求超时
+/// （180 秒）才回得来。用户点了「停止」，界面却还得转上几分钟。future 一被丢弃，
+/// 底层 HTTP 请求随之断开，取消才真正落到网络这一层。
+async fn complete_or_cancel(
+    provider: &Provider,
+    req: &ChatRequest,
+    cancel: &AtomicBool,
+) -> AppResult<Option<String>> {
+    use std::sync::atomic::Ordering;
+    if cancel.load(Ordering::SeqCst) {
+        return Ok(None);
+    }
+    let call = provider.complete(req);
+    tokio::pin!(call);
+    loop {
+        tokio::select! {
+            finished = &mut call => return finished.map(|response| Some(response.content)),
+            _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
+                if cancel.load(Ordering::SeqCst) {
+                    return Ok(None);
+                }
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)] // 编排入口：db/provider/model/video/query/history/cancel/on_event 各有其义。
 pub async fn answer_stream(
     db: &Db,
@@ -348,6 +376,8 @@ pub async fn answer_stream(
             })
             .await?
     } else {
+        // None = 用户在 map 阶段就停了，那时一个字都还没流出去。给空答案，
+        // 上层据此不把「用户没看到的完整回答」写进历史。
         map_reduce_answer_stream(
             provider,
             chat_model,
@@ -358,6 +388,7 @@ pub async fn answer_stream(
             on_event,
         )
         .await?
+        .unwrap_or_default()
     };
 
     let answer = strip_timestamp_arrays(&raw);
@@ -458,7 +489,7 @@ async fn map_reduce_answer_stream(
     history: &[ChatMessage],
     cancel: &AtomicBool,
     on_event: &mut (dyn FnMut(AskEvent) + Send),
-) -> AppResult<String> {
+) -> AppResult<Option<String>> {
     use std::sync::atomic::Ordering;
     on_event(AskEvent::Status {
         text: "正在通读各段…".into(),
@@ -467,9 +498,6 @@ async fn map_reduce_answer_stream(
     let mut partials = Vec::new();
     let messages = build_chat_messages(history, query);
     for part in &parts {
-        if cancel.load(Ordering::SeqCst) {
-            break;
-        }
         let req = ask_request(
             chat_model,
             "你是课程字幕问答助手。仅根据这部分字幕回答问题；若这部分完全没有相关信息，只回复 NONE，不要解释。\
@@ -479,7 +507,11 @@ async fn map_reduce_answer_stream(
             messages.clone(),
             512,
         );
-        let content = provider.complete(&req).await?.content;
+        // 取消发生在调用途中时 content 为 None：这一轮还什么都没流给用户，
+        // 直接整体作废。继续往下走会拼出一份用户从没看见、却会被存进历史的完整答案。
+        let Some(content) = complete_or_cancel(provider, &req, cancel).await? else {
+            return Ok(None);
+        };
         let trimmed = content.trim();
         if !trimmed.is_empty() && !trimmed.to_uppercase().starts_with("NONE") {
             partials.push(content);
@@ -505,12 +537,16 @@ async fn map_reduce_answer_stream(
                     delta: r.to_string(),
                 }),
             })
-            .await;
+            .await
+            .map(Some);
     }
 
     // 只有一段命中：不再额外调用 LLM，直接把它按词切成 Token 逐词发。
     if partials.len() == 1 {
         let text = partials.pop().unwrap();
+        // 只返回**真正吐出去**的那部分：中途停止时返回整段，等于把用户没看到的
+        // 后半截存进历史。
+        let mut shown = String::new();
         for (i, word) in text.split_whitespace().enumerate() {
             if cancel.load(Ordering::SeqCst) {
                 break;
@@ -520,9 +556,10 @@ async fn map_reduce_answer_stream(
             } else {
                 format!(" {word}")
             };
+            shown.push_str(&piece);
             on_event(AskEvent::Token { delta: piece });
         }
-        return Ok(text);
+        return Ok(Some(shown));
     }
 
     // 多段：综合步流式。
@@ -555,6 +592,7 @@ async fn map_reduce_answer_stream(
             }),
         })
         .await
+        .map(Some)
 }
 
 async fn map_reduce_answer(
@@ -1114,6 +1152,37 @@ mod tests {
             other => panic!("最后一个事件应为 Done，实际 {other:?}"),
         }
         assert_eq!(ans.answer, "参数方程 是重点 [00:05]");
+    }
+
+    #[tokio::test]
+    async fn stopping_a_long_answer_does_not_save_what_was_never_shown() {
+        // 长字幕走 map-reduce：map 阶段是非流式的，用户此时点停止，一个字都还没吐出去。
+        // 老实现照样把各段拼起来、跑完综合步，返回一份完整答案——前端把它写进历史，
+        // 于是「停止生成」反而留下了一整段用户从没看见的回答。
+        let provider = Provider::Mock {
+            canned: "这是不该被保存的完整答案".into(),
+        };
+        let transcript = "[00:01] ".to_string() + &"字".repeat(SINGLE_CALL_CHAR_LIMIT + 1_000);
+        let cancel = AtomicBool::new(true); // 已经点了停止
+        let mut events = Vec::new();
+
+        let answer = map_reduce_answer_stream(
+            &provider,
+            "m",
+            &transcript,
+            "问题",
+            &[],
+            &cancel,
+            &mut |e| events.push(e),
+        )
+        .await
+        .unwrap();
+
+        assert!(answer.is_none(), "取消后不该交出任何完整答案");
+        assert!(
+            !events.iter().any(|e| matches!(e, AskEvent::Token { .. })),
+            "一个 token 都没吐出去过"
+        );
     }
 
     #[tokio::test]
