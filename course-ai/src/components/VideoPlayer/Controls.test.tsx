@@ -16,14 +16,11 @@ function renderControls(props: Partial<Parameters<typeof Controls>[0]> = {}) {
     skipSilence: false,
     skipSilenceLoading: false,
     skipRanges: [],
-    cropOn: true,
-    cropInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     fullscreen: false,
     onToggleCaptions: vi.fn(),
     onToggleSkipSilence: vi.fn(),
     onToggleSmartRate: vi.fn(),
     onPreviewSkip: vi.fn(),
-    onToggleCrop: vi.fn(),
     onPlayPause: vi.fn(),
     onSeek: vi.fn(),
     onRate: vi.fn(),
@@ -132,57 +129,6 @@ describe("Controls skip-silence toggle", () => {
     // 首次开启要扫音轨，这几秒内还跳不了，按钮上得说实话。
     expect(screen.getByRole("button", { name: "跳停顿，已开启" })).toHaveTextContent(
       "跳停顿 · 分析中",
-    );
-  });
-});
-
-describe("Controls black-bar toggle", () => {
-  beforeEach(() => {
-    usePlayer.setState({ currentMs: 0, durationMs: 60_000 });
-  });
-
-  it("spells out the detected insets so a lopsided picture can be diagnosed", () => {
-    const onToggleCrop = vi.fn();
-    renderControls({
-      cropOn: true,
-      cropInsets: { top: 0.0625, right: 0, bottom: 0.0625, left: 0.125 },
-      onToggleCrop,
-    });
-
-    const button = screen.getByRole("button", { name: "去黑边，已开启" });
-    expect(button).toHaveAttribute(
-      "title",
-      "检测到的黑边：上 6.3% / 右 0.0% / 下 6.3% / 左 12.5%。关掉看原始画面",
-    );
-
-    fireEvent.click(button);
-    expect(onToggleCrop).toHaveBeenCalledTimes(1);
-  });
-
-  it("stays clickable while off, since nothing has been measured yet", () => {
-    const onToggleCrop = vi.fn();
-    renderControls({
-      cropOn: false,
-      cropInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      onToggleCrop,
-    });
-
-    // 探测只在开关打开后才跑，关着的时候「有没有黑边」根本还不知道；
-    // 按「没检测到」把按钮锁住，等于这功能永远打不开。
-    const button = screen.getByRole("button", { name: "去黑边，已关闭" });
-    expect(button).not.toBeDisabled();
-    expect(button).toHaveAttribute("title", "打开自动去掉黑边（会先花几秒探测）");
-
-    fireEvent.click(button);
-    expect(onToggleCrop).toHaveBeenCalledTimes(1);
-  });
-
-  it("says so when the measurement came back empty", () => {
-    renderControls({ cropOn: true, cropInsets: { top: 0, right: 0, bottom: 0, left: 0 } });
-    // 开着却一条边都没测到：这本身就是「源片本来如此」的线索，得说出来。
-    expect(screen.getByRole("button", { name: "去黑边，已开启" })).toHaveAttribute(
-      "title",
-      "这个视频没检测到黑边",
     );
   });
 });

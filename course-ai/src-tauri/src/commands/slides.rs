@@ -108,7 +108,13 @@ pub async fn extract_slides_for_video(
     cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     on_progress: &mut (dyn FnMut(slides::ExtractProgress) + Send),
 ) -> AppResult<usize> {
-    let video = load_video(state, video_id).await?;
+    let mut video = load_video(state, video_id).await?;
+    // 黑边探测结果本来由导入时写库、播放器兜底补测。播放器那边的「去黑边」已经
+    // 撤掉，课件提取成了唯一的消费者——所以缺就自己补一次，否则老视频截出来的
+    // 课件页会一直带着黑边。测完写库，下次直接用。
+    if video.crop_top.is_none() {
+        crate::commands::videos::apply_detected_crop(&state.db, &mut video).await;
+    }
     let previous_paths = current_slide_paths(state, video_id).await?;
     // 每次提取写进独立目录。旧页只有在新文件和数据库都成功后才会被清理。
     let extraction_root = Path::new(&video.data_dir)

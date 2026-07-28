@@ -219,4 +219,16 @@ describe("SlidesPanel page OCR", () => {
     await waitFor(() => expect(mockIpc.slides.list).toHaveBeenCalled());
     expect(screen.queryByRole("button", { name: /识别文字/ })).not.toBeInTheDocument();
   });
+
+  it("lets the toolbar wrap so the main action survives a narrow panel", async () => {
+    // 学习面板可以被拖得很窄。这一行原来单行不换行，一窄就把最右边的
+    // 「提取课件」挤出可视区——而那是本面板唯一的主操作。jsdom 量不了布局，
+    // 这里守的是那条机制：标题行和按钮组都允许换行。
+    renderPanel();
+
+    const main = await screen.findByRole("button", { name: /提取课件/ });
+    const group = main.parentElement as HTMLElement;
+    expect(group.className).toContain("flex-wrap");
+    expect((group.parentElement as HTMLElement).className).toContain("flex-wrap");
+  });
 });

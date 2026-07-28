@@ -1,18 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { VideoPlayer } from ".";
 import { ipc } from "@/lib/ipc";
 import { usePlayer } from "@/stores/player";
 
 const setFullscreen = vi.hoisted(() => vi.fn());
-const mockEnsureCrop = vi.hoisted(() => vi.fn());
-const mockCancelCropDetect = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/ipc", () => ({
   ipc: {
     transcripts: { list: vi.fn().mockResolvedValue([]) },
-    videos: { ensureCrop: mockEnsureCrop, cancelCropDetect: mockCancelCropDetect },
   },
 }));
 
@@ -27,18 +24,6 @@ vi.mock("@/lib/platform", () => ({
   isTablet: () => false,
   isDesktop: () => false,
 }));
-
-beforeEach(() => {
-  mockEnsureCrop.mockReset();
-  mockEnsureCrop.mockResolvedValue({ top: 0, right: 0, bottom: 0, left: 0 });
-  mockCancelCropDetect.mockReset();
-  mockCancelCropDetect.mockResolvedValue(undefined);
-});
-
-/** 画面「已经能放了」——黑边探测等的就是这个信号。 */
-function reachPlayable() {
-  fireEvent.canPlay(screen.getByLabelText("课程视频播放器"));
-}
 
 function renderPlayer(immersive = true) {
   const queryClient = new QueryClient({
@@ -434,79 +419,5 @@ describe("VideoPlayer iOS gestures", () => {
       Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetDesc);
       Object.defineProperty(Element.prototype, "clientHeight", clientDesc);
     }
-  });
-});
-
-describe("VideoPlayer black-bar detection cost", () => {
-  it("costs nothing at all until you ask for it", async () => {
-    localStorage.clear();
-    renderPlayer();
-
-    await screen.findByRole("button", { name: "去黑边，已关闭" });
-    reachPlayable();
-    // 默认关掉了：探测要解码正片三处，这一趟压在「点开视频」那几秒里最难受，
-    // 而它换来的只是少一圈黑边。想要的人自己开。
-    await waitFor(() => expect(mockEnsureCrop).not.toHaveBeenCalled());
-  });
-
-  it("is reachable while off, and measures only once switched on", async () => {
-    localStorage.clear();
-    renderPlayer();
-    reachPlayable();
-
-    const button = await screen.findByRole("button", { name: "去黑边，已关闭" });
-    // 关着的时候还没测过，按「没检测到黑边」置灰就等于永远打不开。
-    expect(button).not.toBeDisabled();
-
-    fireEvent.click(button);
-    await waitFor(() => expect(mockEnsureCrop).toHaveBeenCalledWith("video-1"));
-  });
-
-  it("waits until the picture can play before spending ffmpeg on detection", async () => {
-    localStorage.clear();
-    localStorage.setItem("crop-black-bars", "on");
-    renderPlayer();
-
-    await screen.findByRole("button", { name: "去黑边，已开启" });
-    // 就算开着，也别在首帧还没缓冲出来的时候开跑——那是和起播抢磁盘。
-    expect(mockEnsureCrop).not.toHaveBeenCalled();
-
-    reachPlayable();
-    await waitFor(() => expect(mockEnsureCrop).toHaveBeenCalledWith("video-1"));
-  });
-
-  it("stops the detection when you leave the video", async () => {
-    localStorage.clear();
-    localStorage.setItem("crop-black-bars", "on");
-    const { unmount } = renderPlayer();
-    reachPlayable();
-    await waitFor(() => expect(mockEnsureCrop).toHaveBeenCalled());
-
-    unmount();
-    // 切走了结果就没人要；不停的话连点几个视频会攒下一堆 ffmpeg，全压在新视频的起播上。
-    expect(mockCancelCropDetect).toHaveBeenCalledWith("video-1");
-  });
-});
-
-describe("VideoPlayer black-bar readout", () => {
-  it("prints the detected insets on screen when the crop switch is flipped", async () => {
-    localStorage.clear();
-    localStorage.setItem("crop-black-bars", "on");
-    mockEnsureCrop.mockResolvedValue({ top: 0.0625, right: 0, bottom: 0.0625, left: 0.125 });
-    renderPlayer();
-
-    const button = await screen.findByRole("button", { name: "去黑边，已开启" });
-    reachPlayable();
-    // 测出黑边、裁剪真正生效后开关会变成强调色；等这个信号再点。
-    await waitFor(() => expect(button.className).toContain("--accent"));
-    fireEvent.click(button);
-
-    // 悬浮提示看不到（控制栏会淡出），所以把探测值和实际用的值直接打在画面上。
-    expect(await screen.findByText(/已关闭去黑边（探测值 上 6\.3%/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "去黑边，已关闭" }));
-    expect(
-      await screen.findByText(/已开启去黑边：.*→ 实际用 上 6\.3% \/ 右 0\.0% \/ 下 6\.3% \/ 左 0\.0%/),
-    ).toBeInTheDocument();
   });
 });
