@@ -306,6 +306,11 @@ function AskChatPanel({ videoId }: { videoId: string }) {
   useEffect(() => {
     setQueryState(readDraft(videoId));
     setHistory(readAskHistory(videoId));
+    // 正在流的那段回答属于上一个视频，必须一并清掉。面板在标签间是保活的
+    // （见 TabsPanel 的 forceMount），不清就会看到上一讲的 token 继续往下吐，
+    // 而且落款在新视频名下。回答本身不受影响：请求在 mutationFn 里跑完并写进
+    // 那个视频的历史，切回去仍然看得到。
+    setStreaming(null);
   }, [videoId]);
 
   const ask = useMutation<RagAnswer, unknown, AskRequest>({
