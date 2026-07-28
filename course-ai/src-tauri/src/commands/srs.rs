@@ -3,6 +3,7 @@ use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use serde::Serialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tauri::State;
 
 const DAY_MS: i64 = 86_400_000;
@@ -405,23 +406,19 @@ fn answer_text(answer: &Value) -> String {
     }
 }
 
-/// 从 quiz 卡的稳定 id 找回原题选项。题干和答案必须仍与卡片一致，避免题库重排后
-/// 把另一题的选项挂到旧卡上；手工卡或损坏的旧题则继续按普通闪卡显示。
+/// 从 quiz 卡找回原题选项：按**题干**在题库里定位，再核对答案。
+///
+/// 原来是从卡片 id 里解出题目下标去取的，而 id 现在按题干内容算（见 [`quiz_card_id`]），
+/// 解不出下标。按题干找本来也更稳：题库重排、增删题都不会把另一题的选项挂到这张卡上，
+/// 而那正是原实现要靠事后比对题干来防的事。
 fn choice_payload_for_card(row: &DueCardRow) -> Option<(String, Vec<String>, Vec<String>)> {
     if row.kind != "quiz" {
         return None;
     }
-    let video_id = row.video_id.as_deref()?;
-    let index = row
-        .id
-        .strip_prefix(&format!("q:{video_id}:"))?
-        .parse::<usize>()
-        .ok()?;
     let questions: Vec<Value> = serde_json::from_str(row.questions_json.as_deref()?).ok()?;
-    let question = questions.get(index)?;
-    if question.get("stem")?.as_str()?.trim() != row.front.trim() {
-        return None;
-    }
+    let question = questions.iter().find(|item| {
+        item.get("stem").and_then(Value::as_str).map(str::trim) == Some(row.front.trim())
+    })?;
 
     let question_type = question.get("type")?.as_str()?;
     let answer = question.get("answer")?;
@@ -477,6 +474,62 @@ fn string_array(value: &Value) -> Option<Vec<String>> {
 }
 
 /// 写入一道测验题对应的复习卡。题干无效时跳过；已有排期不会被重置。
+/// 测验卡的稳定 id 由**题干内容**决定，不再由题目在列表里的下标决定。
+///
+/// 按下标编 id 有个隐蔽的坏处：重新出题后第 3 题往往换成了另一道题，但 id 没变，
+/// 于是它继承了上一道题的到期时间、复习次数和 FSRS 稳定度——你会看到一道从没见过
+/// 的题被排到三个月后，或者一道刚出的新题显示「你已经很熟了」。按内容编 id 之后，
+/// 题目没变就还是同一张卡（该保留的排期保留），题目变了就是新卡（立即到期）。
+fn quiz_card_id(video_id: &str, stem: &str) -> String {
+    // 只做空白归一：换行/缩进的微调不该让一道题变成新卡。
+    let normalized: String = stem.split_whitespace().collect::<Vec<_>>().join(" ");
+    let digest = format!("{:x}", Sha256::digest(normalized.as_bytes()));
+    format!("q:{video_id}:{}", &digest[..16])
+}
+
+/// 把老的「按下标」卡片的排期搬到新的「按内容」卡片上。
+///
+/// 只在题干**逐字相同**时搬——那才能确认是同一道题。搬完删掉旧卡（否则下面的清理
+/// 也会删它，只是顺序不同）。没有这一步的话，升级后第一次重新出题会把所有测验卡的
+/// 复习历史清零，即便题目一个字都没变。
+async fn adopt_legacy_quiz_schedule(
+    conn: &mut sqlx::SqliteConnection,
+    video_id: &str,
+    index: usize,
+    stem: &str,
+    card_id: &str,
+) -> AppResult<()> {
+    let legacy_id = format!("q:{video_id}:{index}");
+    if legacy_id == card_id {
+        return Ok(());
+    }
+    let legacy_front: Option<String> =
+        sqlx::query_scalar("SELECT front FROM cards WHERE id=? AND kind='quiz'")
+            .bind(&legacy_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    if legacy_front.as_deref() != Some(stem) {
+        return Ok(());
+    }
+    // 新卡已经有排期了（同一道题在库里出现过两次）就不覆盖。
+    sqlx::query(
+        "INSERT OR IGNORE INTO card_schedule(
+           card_id,due_at,ease,interval_days,reps,lapses,last_reviewed,stability,difficulty
+         )
+         SELECT ?,due_at,ease,interval_days,reps,lapses,last_reviewed,stability,difficulty
+         FROM card_schedule WHERE card_id=?",
+    )
+    .bind(card_id)
+    .bind(&legacy_id)
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query("DELETE FROM cards WHERE id=?")
+        .bind(&legacy_id)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
 async fn upsert_quiz_card(
     conn: &mut sqlx::SqliteConnection,
     video_id: &str,
@@ -496,7 +549,7 @@ async fn upsert_quiz_card(
         }
     }
     let source_ms = question.get("ref_ms").and_then(|value| value.as_i64());
-    let card_id = format!("q:{video_id}:{index}");
+    let card_id = quiz_card_id(video_id, stem);
 
     sqlx::query(
         "INSERT INTO cards(id,video_id,course_id,kind,front,back,source_ms,created_at)
@@ -514,6 +567,9 @@ async fn upsert_quiz_card(
     .execute(&mut *conn)
     .await?;
 
+    // 卡片行已经在了，这时才能把老卡的排期认过来（card_schedule 外键指向 cards）。
+    adopt_legacy_quiz_schedule(&mut *conn, video_id, index, stem, &card_id).await?;
+
     // 新卡：立即到期，FSRS 状态未初始化（stability=0），首评时再初始化。
     // ease/interval_days 为遗留列，置 0（不再驱动排期）。
     sqlx::query(
@@ -527,8 +583,9 @@ async fn upsert_quiz_card(
     Ok(true)
 }
 
-/// 从出题结果生成/更新复习卡：按题序稳定 id，重生成时更新正背面、保留已有排期；
-/// 新卡建一条「立即到期」的排期。返回卡片总数。
+/// 从出题结果生成/更新复习卡：id 按题干内容算（见 [`quiz_card_id`]），所以重新出题后
+/// 题目没变的卡保留排期、题目变了的算新卡立即到期；消失的题连同排期一起删掉。
+/// 返回卡片总数。
 pub async fn generate_cards_from_quiz(db: &Db, video_id: &str) -> AppResult<usize> {
     let mut tx = db.pool.begin().await?;
     let raw: Option<String> =
@@ -558,7 +615,9 @@ pub async fn generate_cards_from_quiz(db: &Db, video_id: &str) -> AppResult<usiz
         .await?
         {
             count += 1;
-            active_ids.insert(format!("q:{video_id}:{index}"));
+            if let Some(stem) = question.get("stem").and_then(|value| value.as_str()) {
+                active_ids.insert(quiz_card_id(video_id, stem));
+            }
         }
     }
 
@@ -998,7 +1057,7 @@ mod tests {
         let db = fresh_db().await;
         let vid = seed_quiz(&db, r#"[{"stem":"Q","answer":"A"}]"#).await;
         generate_cards_from_quiz(&db, &vid).await.unwrap();
-        let cid = format!("q:{vid}:0");
+        let cid = quiz_card_id(&vid, "Q");
         let now = chrono::Utc::now().timestamp_millis();
 
         review_card(&db, &cid, 3, now).await.unwrap(); // Good 首评
@@ -1031,7 +1090,7 @@ mod tests {
         let db = fresh_db().await;
         let vid = seed_quiz(&db, r#"[{"stem":"Q","answer":"A"}]"#).await;
         generate_cards_from_quiz(&db, &vid).await.unwrap();
-        let card_id = format!("q:{vid}:0");
+        let card_id = quiz_card_id(&vid, "Q");
         let before: (i64, f64, f64, i64, i64, Option<i64>) = sqlx::query_as(
             "SELECT due_at, stability, difficulty, reps, lapses, last_reviewed
              FROM card_schedule WHERE card_id=?",
@@ -1068,7 +1127,7 @@ mod tests {
         let db = fresh_db().await;
         let vid = seed_quiz(&db, r#"[{"stem":"Q","answer":"A"}]"#).await;
         generate_cards_from_quiz(&db, &vid).await.unwrap();
-        let card_id = format!("q:{vid}:0");
+        let card_id = quiz_card_id(&vid, "Q");
 
         let error = review_card(&db, &card_id, 0, 1).await.unwrap_err();
         assert!(error.to_string().contains("between 1 and 4"));
@@ -1129,16 +1188,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn regenerate_keeps_schedule_but_updates_text() {
+    async fn an_unchanged_question_keeps_its_review_history() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(&db, r#"[{"stem":"这道题不变","answer":"旧答"}]"#).await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        let card_id = quiz_card_id(&vid, "这道题不变");
+        review_card(&db, &card_id, 3, now).await.unwrap();
+
+        // 题干一个字没变，只是答案/解析被重写：还是同一道题，排期该留着。
+        sqlx::query("UPDATE quizzes SET questions_json=? WHERE video_id=?")
+            .bind(r#"[{"stem":"这道题不变","answer":"新答"}]"#)
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+
+        assert!(
+            due_cards(&db, now, 50).await.unwrap().is_empty(),
+            "题目没变，已复习过的卡不该被拉回立即到期"
+        );
+        let back: String = sqlx::query_scalar("SELECT back FROM cards WHERE id=?")
+            .bind(&card_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(back, "新答");
+    }
+
+    #[tokio::test]
+    async fn a_replaced_question_does_not_inherit_the_old_one_s_schedule() {
         let db = fresh_db().await;
         let vid = seed_quiz(&db, r#"[{"stem":"旧题","answer":"旧答"}]"#).await;
         generate_cards_from_quiz(&db, &vid).await.unwrap();
         let now = chrono::Utc::now().timestamp_millis();
-        review_card(&db, &format!("q:{vid}:0"), 3, now)
+        review_card(&db, &quiz_card_id(&vid, "旧题"), 3, now)
             .await
             .unwrap();
 
-        // 该卡已复习 → 不再到期。重生成（题面变化）不应把它拉回「立即到期」。
+        // 第 1 题换成了完全不同的一道题。按下标编 id 时它会继承上一道题的到期时间和
+        // FSRS 稳定度——一道从没见过的题显示成「你已经很熟了」，排到几个月后。
         sqlx::query("UPDATE quizzes SET questions_json=? WHERE video_id=?")
             .bind(r#"[{"stem":"新题","answer":"新答"}]"#)
             .bind(&vid)
@@ -1147,14 +1237,70 @@ mod tests {
             .unwrap();
         generate_cards_from_quiz(&db, &vid).await.unwrap();
 
-        let due = due_cards(&db, now, 50).await.unwrap();
-        assert!(due.is_empty(), "已复习的卡重生成后不应立即到期");
-        let front: String = sqlx::query_scalar("SELECT front FROM cards WHERE id=?")
-            .bind(format!("q:{vid}:0"))
+        let due = due_cards(&db, now + 60_000, 50).await.unwrap();
+        assert_eq!(due.len(), 1, "没见过的新题必须立即到期");
+        assert_eq!(due[0].front, "新题");
+        // 旧题连同它的排期一起消失，不留下没人认领的历史。
+        let stale: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE id=?")
+            .bind(quiz_card_id(&vid, "旧题"))
             .fetch_one(&db.pool)
             .await
             .unwrap();
-        assert_eq!(front, "新题");
+        assert_eq!(stale, 0);
+    }
+
+    #[tokio::test]
+    async fn legacy_positional_cards_hand_their_schedule_to_the_content_card() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(&db, r#"[{"stem":"老卡片","answer":"A"}]"#).await;
+        // 升级前的样子：id 按下标编，且已经复习过。
+        let legacy_id = format!("q:{vid}:0");
+        let kept_due_at = 9_876_543_210_i64;
+        let course_id: Option<String> =
+            sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
+                .bind(&vid)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        sqlx::query(
+            "INSERT INTO cards(id,video_id,course_id,kind,front,back,created_at)
+             VALUES (?,?,?,'quiz',?,?,1)",
+        )
+        .bind(&legacy_id)
+        .bind(&vid)
+        .bind(&course_id)
+        .bind("老卡片")
+        .bind("A")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO card_schedule(card_id,due_at,ease,interval_days,reps,lapses,last_reviewed,stability,difficulty)
+             VALUES (?,?,0,0,4,1,1,12.5,6.0)",
+        )
+        .bind(&legacy_id)
+        .bind(kept_due_at)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+
+        // 题干逐字相同 → 认定是同一道题，把复习历史搬过来，别让升级清零所有人的进度。
+        let card_id = quiz_card_id(&vid, "老卡片");
+        let (due_at, reps): (i64, i64) =
+            sqlx::query_as("SELECT due_at,reps FROM card_schedule WHERE card_id=?")
+                .bind(&card_id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!((due_at, reps), (kept_due_at, 4));
+        let legacy_left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards WHERE id=?")
+            .bind(&legacy_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(legacy_left, 0, "搬完之后旧卡不该还在");
     }
 
     #[tokio::test]
@@ -1165,7 +1311,7 @@ mod tests {
             r#"[{"stem":"第一题","answer":"A"},{"stem":"第二题","answer":"B"}]"#,
         )
         .await;
-        let failing_card = format!("q:{vid}:1");
+        let failing_card = quiz_card_id(&vid, "第二题");
         sqlx::raw_sql(&format!(
             "CREATE TRIGGER fail_second_card_schedule
              BEFORE INSERT ON card_schedule
@@ -1204,12 +1350,12 @@ mod tests {
         let kept_due_at = 9_876_543_210_i64;
         sqlx::query("UPDATE card_schedule SET due_at=? WHERE card_id=?")
             .bind(kept_due_at)
-            .bind(format!("q:{vid}:0"))
+            .bind(quiz_card_id(&vid, "保留"))
             .execute(&db.pool)
             .await
             .unwrap();
         sqlx::query("UPDATE quizzes SET questions_json=? WHERE video_id=?")
-            .bind(r#"[{"stem":"仍保留","answer":"A2"}]"#)
+            .bind(r#"[{"stem":"保留","answer":"A2"}]"#)
             .bind(&vid)
             .execute(&db.pool)
             .await
@@ -1223,9 +1369,9 @@ mod tests {
                 .fetch_all(&db.pool)
                 .await
                 .unwrap();
-        assert_eq!(cards, vec![format!("q:{vid}:0")]);
+        assert_eq!(cards, vec![quiz_card_id(&vid, "保留")]);
         let due_at: i64 = sqlx::query_scalar("SELECT due_at FROM card_schedule WHERE card_id=?")
-            .bind(format!("q:{vid}:0"))
+            .bind(quiz_card_id(&vid, "保留"))
             .fetch_one(&db.pool)
             .await
             .unwrap();
@@ -1262,7 +1408,7 @@ mod tests {
         let db = fresh_db().await;
         let vid = seed_quiz(&db, r#"[{"stem":"Q","answer":"A"}]"#).await;
         generate_cards_from_quiz(&db, &vid).await.unwrap();
-        let card_id = format!("q:{vid}:0");
+        let card_id = quiz_card_id(&vid, "Q");
         let now = chrono::Utc::now().timestamp_millis() + 1_000;
         assert_eq!(count_due(&db, now).await.unwrap(), 1);
 
@@ -1296,7 +1442,7 @@ mod tests {
         let now = chrono::Utc::now().timestamp_millis();
         assert_eq!(count_due(&db, now).await.unwrap(), 1);
 
-        review_card(&db, &format!("q:{vid}:0"), 3, now)
+        review_card(&db, &quiz_card_id(&vid, "Q"), 3, now)
             .await
             .unwrap();
         assert_eq!(count_due(&db, now).await.unwrap(), 0, "复习后当下不再到期");
@@ -1435,7 +1581,11 @@ mod tests {
         for index in 0..=50 {
             sqlx::query("UPDATE card_schedule SET due_at=? WHERE card_id=?")
                 .bind(index as i64)
-                .bind(format!("q:{vid}:{index}"))
+                .bind(if index < 50 {
+                    quiz_card_id(&vid, &format!("甲题 {index}"))
+                } else {
+                    quiz_card_id(&vid, "第 51 张乙题")
+                })
                 .execute(&db.pool)
                 .await
                 .unwrap();
@@ -1478,7 +1628,7 @@ mod tests {
             .unwrap()
             .is_empty());
 
-        let card_id = format!("q:{vid}:0");
+        let card_id = quiz_card_id(&vid, "远处题");
         review_card(&db, &card_id, 1, now).await.unwrap();
         review_card(&db, &card_id, 2, now + 1).await.unwrap();
         assert!(weak_concepts(&db, 2, 8).await.unwrap().is_empty());
@@ -1507,14 +1657,16 @@ mod tests {
         let kept_due_at = 987_654_321i64;
         sqlx::query("UPDATE card_schedule SET due_at=? WHERE card_id=?")
             .bind(kept_due_at)
-            .bind(format!("q:{vid}:0"))
+            .bind(quiz_card_id(&vid, "旧甲题"))
             .execute(&db.pool)
             .await
             .unwrap();
+        // 题干保持不变、只改答案与解析：卡片身份不变，排期该留着。
+        // 另外各加一道新的甲题和乙题，用来验证「只写属于该概念的题」。
         sqlx::query("UPDATE quizzes SET questions_json=? WHERE video_id=?")
             .bind(
-                r#"[{"stem":"新甲题","answer":"新甲","ref_ms":1000},
-                    {"stem":"新乙题","answer":"新乙","ref_ms":11000},
+                r#"[{"stem":"旧甲题","answer":"新甲","ref_ms":1000},
+                    {"stem":"旧乙题","answer":"新乙","ref_ms":11000},
                     {"stem":"新增乙题","answer":"乙","ref_ms":12000},
                     {"stem":"新增甲题","answer":"甲","ref_ms":2000}]"#,
             )
@@ -1528,30 +1680,35 @@ mod tests {
             .unwrap();
         assert_eq!(count, 2, "只更新旧甲题并生成新增甲题");
 
-        let first: (String, i64) = sqlx::query_as(
-            "SELECT c.front,s.due_at FROM cards c JOIN card_schedule s ON s.card_id=c.id WHERE c.id=?",
+        let first: (String, String, i64) = sqlx::query_as(
+            "SELECT c.front,c.back,s.due_at FROM cards c JOIN card_schedule s ON s.card_id=c.id
+             WHERE c.id=?",
         )
-        .bind(format!("q:{vid}:0"))
+        .bind(quiz_card_id(&vid, "旧甲题"))
         .fetch_one(&db.pool)
         .await
         .unwrap();
-        assert_eq!(first, ("新甲题".to_string(), kept_due_at));
-        let old_other: String = sqlx::query_scalar("SELECT front FROM cards WHERE id=?")
-            .bind(format!("q:{vid}:1"))
+        assert_eq!(
+            first,
+            ("旧甲题".to_string(), "新甲".to_string(), kept_due_at),
+            "题干没变就是同一道题：答案更新、排期保留"
+        );
+        let old_other: String = sqlx::query_scalar("SELECT back FROM cards WHERE id=?")
+            .bind(quiz_card_id(&vid, "旧乙题"))
             .fetch_one(&db.pool)
             .await
             .unwrap();
-        assert_eq!(old_other, "旧乙题", "乙题不应被该命令更新");
+        assert_eq!(old_other, "乙", "乙题不应被该命令更新（答案仍是旧的）");
         let other_exists: bool =
             sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cards WHERE id=?)")
-                .bind(format!("q:{vid}:2"))
+                .bind(quiz_card_id(&vid, "新增乙题"))
                 .fetch_one(&db.pool)
                 .await
                 .unwrap();
         assert!(!other_exists, "新增乙题不应被该命令生成");
         let target_exists: bool =
             sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cards WHERE id=?)")
-                .bind(format!("q:{vid}:3"))
+                .bind(quiz_card_id(&vid, "新增甲题"))
                 .fetch_one(&db.pool)
                 .await
                 .unwrap();
@@ -1615,7 +1772,7 @@ mod tests {
         assert_eq!(rows, vec![(course_id.clone(), 2)]);
 
         // 复习一张到未来 → 该课到期数降为 1。
-        review_card(&db, &format!("q:{vid}:0"), 3, now)
+        review_card(&db, &quiz_card_id(&vid, "甲"), 3, now)
             .await
             .unwrap();
         let rows = due_by_course(&db, now).await.unwrap();
@@ -1681,13 +1838,13 @@ mod tests {
 
         // 甲题连续差评两次；乙题一次好评。
         let now = chrono::Utc::now().timestamp_millis();
-        review_card(&db, &format!("q:{vid}:0"), 1, now)
+        review_card(&db, &quiz_card_id(&vid, "甲题"), 1, now)
             .await
             .unwrap();
-        review_card(&db, &format!("q:{vid}:0"), 2, now + 1)
+        review_card(&db, &quiz_card_id(&vid, "甲题"), 2, now + 1)
             .await
             .unwrap();
-        review_card(&db, &format!("q:{vid}:1"), 4, now + 2)
+        review_card(&db, &quiz_card_id(&vid, "乙题"), 4, now + 2)
             .await
             .unwrap();
 
