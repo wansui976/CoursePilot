@@ -115,11 +115,13 @@ pub async fn run_aliyun_ocr(
     }
     let text = extract_content(&payload)?;
     if text.is_empty() {
-        // 成功但没取到文字：把原始响应抛出来，便于定位（字段结构/空白帧）。
-        return Err(AppError::Pipeline(format!(
-            "aliyun OCR 未提取到文字。原始响应：{}",
-            truncate(&raw, 600)
-        )));
+        // 「调用成功、这页没有文字」是**正常结果**，不是错误：封面、纯图页、空白页
+        // 本来就没字。以前在这里报错，批量识别会把它算成一次失败——如果前三页恰好都是
+        // 这种页，整批就被判成「引擎不可用」而中止，后面几十页再也不认了。
+        //
+        // 响应结构真的变了的话，`extract_content` 会因为找不到 Data 直接报错；能走到
+        // 这里说明结构是对的，只是没有文字。留一条 debug 日志便于事后核对。
+        tracing::debug!(response = %truncate(&raw, 600), "aliyun OCR 这一页没有文字");
     }
     Ok(text)
 }
@@ -406,7 +408,17 @@ mod tests {
 
     #[test]
     fn extract_content_empty_when_nothing_found() {
+        // 「这一页没有文字」是正常结果，不是错误：封面、纯图页、空白页本来就没字。
+        // 报成错误的话，批量识别会把它算成失败——前三页恰好都是这种页时整批就被
+        // 判成「引擎不可用」而中止，后面几十页再也不认了。
         let payload = json!({ "Data": { "content": "" } });
         assert_eq!(extract_content(&payload).unwrap(), "");
+    }
+
+    #[test]
+    fn a_response_without_data_is_still_an_error() {
+        // 结构真变了要能看出来：Data 缺失/不可解析仍然报错，不会被当成空白页糊过去。
+        assert!(extract_content(&json!({ "RequestId": "r" })).is_err());
+        assert!(extract_content(&json!({ "Data": "not json" })).is_err());
     }
 }

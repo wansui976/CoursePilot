@@ -26,6 +26,9 @@ const ROUTING_TASKS = [
   "mindmap",
   "rag",
   "vision_ocr",
+  // 字幕纠错。原来它不走路由，而是「拿列表里第一个有 Key 的」，
+  // 于是这里选的模型对它不生效——字幕可能被发去另一家、算在另一个账上。
+  "correction",
 ] as const;
 
 export function LlmSettingsPanel() {
