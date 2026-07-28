@@ -7,6 +7,10 @@ import { usePlayer } from "@/stores/player";
 import { TextSkeleton } from "@/components/ui/skeleton";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { PanelActions } from "./PanelActions";
+import {
+  invalidateStaleArtifacts,
+  useStaleArtifacts,
+} from "@/lib/useStaleArtifacts";
 
 // 折叠是全局 UI 偏好（非按视频），存一个 localStorage 布尔即可。
 const COLLAPSE_KEY = "course-ai-summary-collapsed";
@@ -35,9 +39,13 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
     queryKey: ["summary", videoId],
     queryFn: () => ipc.ai.getSummary(videoId),
   });
+  const stale = useStaleArtifacts(videoId);
   const generate = useMutation({
     mutationFn: () => ipc.ai.generate(videoId, "summary"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["summary", videoId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["summary", videoId] });
+      invalidateStaleArtifacts(qc, videoId);
+    },
   });
 
   function toggleCollapsed() {
@@ -91,6 +99,7 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
             onRegenerate={() => generate.mutate()}
             regenerating={generate.isPending}
             hasContent={!!summary}
+            stale={stale.has("summary")}
           />
         </>
       )}

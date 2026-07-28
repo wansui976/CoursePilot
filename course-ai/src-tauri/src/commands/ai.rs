@@ -183,6 +183,18 @@ pub async fn cmd_get_mindmap(
     )
 }
 
+/// 哪些 AI 产物是基于旧讲稿生成的（人工改过字幕、或重跑过 AI 纠错之后）。
+///
+/// 只标记、不自动重跑：重跑要花钱，跑不跑由用户定。没有指纹记录的产物不算过期
+/// （那是这套记录上线之前生成的，无从判断）。
+#[tauri::command]
+pub async fn cmd_stale_ai_artifacts(
+    state: State<'_, AppState>,
+    video_id: String,
+) -> AppResult<Vec<String>> {
+    ai::stale_artifacts(&state.db, &video_id).await
+}
+
 // ---------- generation ----------
 
 /// 解析某个任务要用的 LLM Provider；未配置 Profile 或 API Key 时返回 None，

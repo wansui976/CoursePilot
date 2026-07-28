@@ -5,6 +5,10 @@ import { usePlayer } from "@/stores/player";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { TextSkeleton } from "@/components/ui/skeleton";
 import { PanelActions } from "./PanelActions";
+import {
+  invalidateStaleArtifacts,
+  useStaleArtifacts,
+} from "@/lib/useStaleArtifacts";
 
 export function ChaptersPanel({ videoId }: { videoId: string }) {
   const qc = useQueryClient();
@@ -13,9 +17,13 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
     queryKey: ["chapters", videoId],
     queryFn: () => ipc.ai.getChapters(videoId),
   });
+  const stale = useStaleArtifacts(videoId);
   const generate = useMutation({
     mutationFn: () => ipc.ai.generate(videoId, "chapters"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["chapters", videoId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["chapters", videoId] });
+      invalidateStaleArtifacts(qc, videoId);
+    },
   });
 
   return (
@@ -56,6 +64,7 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
         onRegenerate={() => generate.mutate()}
         regenerating={generate.isPending}
         hasContent={chapters.length > 0}
+        stale={stale.has("chapters")}
       />
     </div>
   );
