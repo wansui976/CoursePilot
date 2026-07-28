@@ -54,6 +54,7 @@
 		6C2869C566554E105AE92321 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		6D0A26B8137D8146B4BEEF72 /* ocr.rs */ = {isa = PBXFileReference; path = ocr.rs; sourceTree = "<group>"; };
 		6FB5D474D7F2076122D14B01 /* tools.rs */ = {isa = PBXFileReference; path = tools.rs; sourceTree = "<group>"; };
+		7049CD751003CB2A92A4F253 /* search_terms.rs */ = {isa = PBXFileReference; path = search_terms.rs; sourceTree = "<group>"; };
 		719310A7319B8C54B4D74FE4 /* openai.rs */ = {isa = PBXFileReference; path = openai.rs; sourceTree = "<group>"; };
 		75F9F7A7F4EDC749D3F171D2 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		78DEF8C30E238CE48025C39C /* storage.rs */ = {isa = PBXFileReference; path = storage.rs; sourceTree = "<group>"; };
@@ -86,6 +87,7 @@
 		C1A960C0267BE7D9802CCD98 /* crop_detect.rs */ = {isa = PBXFileReference; path = crop_detect.rs; sourceTree = "<group>"; };
 		C570DFE91554405F1BB5DF2C /* ai.rs */ = {isa = PBXFileReference; path = ai.rs; sourceTree = "<group>"; };
 		C85B7A806C022A75A1267534 /* settings.rs */ = {isa = PBXFileReference; path = settings.rs; sourceTree = "<group>"; };
+		C959DF1F7804CA2D44A4788F /* probe.rs */ = {isa = PBXFileReference; path = probe.rs; sourceTree = "<group>"; };
 		CC9FD13BA31BC3ABC98E528A /* mobile_files.rs */ = {isa = PBXFileReference; path = mobile_files.rs; sourceTree = "<group>"; };
 		CD056622CF183850AD2BCFD8 /* whisper.rs */ = {isa = PBXFileReference; path = whisper.rs; sourceTree = "<group>"; };
 		CDE697C54933E17A0E89348A /* db.rs */ = {isa = PBXFileReference; path = db.rs; sourceTree = "<group>"; };
@@ -169,6 +171,7 @@
 				6D0A26B8137D8146B4BEEF72 /* ocr.rs */,
 				62BF5B4CB615CBAAD548E376 /* playable.rs */,
 				B92E36528DDA3661AB5250EB /* rag.rs */,
+				7049CD751003CB2A92A4F253 /* search_terms.rs */,
 				2A1C802311B91762FAE36447 /* silence.rs */,
 				D001F9B6B5902764627E74BA /* slides.rs */,
 				654E237CFF1EB4BBD2D61248 /* subtitle.rs */,
@@ -259,6 +262,7 @@
 				9B31FFA14BA0B119D8AD4977 /* identity.rs */,
 				1659208A8FB250036F4ACB15 /* mod.rs */,
 				FB4F96FF2592D11BDB558EDF /* outbox.rs */,
+				C959DF1F7804CA2D44A4788F /* probe.rs */,
 				F59F6059FCCAB83361FAE97F /* spool.rs */,
 			);
 			path = sync;

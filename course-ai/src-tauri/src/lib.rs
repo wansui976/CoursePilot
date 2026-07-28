@@ -50,7 +50,9 @@ use crate::commands::stats::{
     cmd_log_watch, cmd_next_due_at, cmd_save_video_progress, cmd_video_progress,
 };
 use crate::commands::sync::{
-    cmd_sync_now, cmd_sync_probe, cmd_sync_set_enabled, cmd_sync_start, cmd_sync_status,
+    cmd_sync_now, cmd_sync_probe, cmd_sync_probe_confirm_account_change, cmd_sync_probe_send,
+    cmd_sync_probe_status, cmd_sync_probe_stop, cmd_sync_set_enabled, cmd_sync_start,
+    cmd_sync_status,
 };
 use crate::commands::tools::{
     cmd_has_bilibili_cookies, cmd_import_bilibili, cmd_ocr_region, cmd_probe_bilibili,
@@ -93,6 +95,24 @@ pub fn run() {
                 if let Err(error) = crate::sync::identity::ensure_sync_identity(&db).await {
                     tracing::warn!("initialize sync identity failed: {error}");
                 }
+                let app_state = AppState::new(db.clone());
+                let sync_transition = app_state.sync_transition.clone();
+                handle.manage(app_state);
+                let probe_handle = handle.clone();
+                let probe_db = db.clone();
+                tauri::async_runtime::spawn(async move {
+                    let expiry_transition = sync_transition.clone();
+                    let _transition = sync_transition.lock().await;
+                    if let Err(error) = crate::commands::sync::resume_probe_engine(
+                        &probe_handle,
+                        &probe_db,
+                        expiry_transition,
+                    )
+                    .await
+                    {
+                        tracing::warn!("resume CloudKit transport probe failed: {error}");
+                    }
+                });
                 if let Err(error) = crate::pipeline::recover_interrupted_processing(&db).await {
                     tracing::warn!("recover interrupted processing failed: {error}");
                 }
@@ -100,7 +120,6 @@ pub fn run() {
                 if let Err(error) = crate::commands::videos::purge_expired_trash(&db).await {
                     tracing::warn!("purge expired trash failed: {error}");
                 }
-                handle.manage(AppState::new(db));
                 handle.manage(ProcessingTasks::default());
                 let media = crate::media_server::start()
                     .await
@@ -213,6 +232,10 @@ pub fn run() {
             cmd_sync_set_enabled,
             cmd_sync_now,
             cmd_sync_probe,
+            cmd_sync_probe_confirm_account_change,
+            cmd_sync_probe_send,
+            cmd_sync_probe_status,
+            cmd_sync_probe_stop,
             cmd_has_bilibili_cookies
         ])
         .run(tauri::generate_context!())

@@ -49,6 +49,7 @@ fn build_macos_cloud_sync() {
         .to_string();
 
     for source in [
+        "ios/CloudSyncCore/Sources/CloudSyncCore/CloudSyncProbeCore.swift",
         "ios/Sources/CloudSyncManager.swift",
         "macos/CloudSyncBridge.swift",
     ] {
@@ -70,6 +71,7 @@ fn build_macos_cloud_sync() {
             "CourseCloudSync",
             "-o",
             output.to_str().expect("output path"),
+            "ios/CloudSyncCore/Sources/CloudSyncCore/CloudSyncProbeCore.swift",
             "ios/Sources/CloudSyncManager.swift",
             "macos/CloudSyncBridge.swift",
         ])

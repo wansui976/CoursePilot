@@ -59,12 +59,13 @@ pub struct NativeCloudSyncStatus {
     pub native_bridge_available: bool,
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", test))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CloudSyncRequest {
     root_path: String,
     container_identifier: Option<String>,
+    #[serde(rename = "expectedAccountIDHash")]
     expected_account_id_hash: Option<String>,
 }
 
@@ -113,10 +114,9 @@ async fn run<R: Runtime>(
 ) -> Result<NativeCloudSyncStatus, String> {
     #[cfg(target_os = "ios")]
     {
-        let cloud_sync = app.state::<CloudSync<R>>();
+        let cloud_sync = app.state::<CloudSync<R>>().0.clone();
         let mut response = cloud_sync
-            .0
-            .run_mobile_plugin::<NativeCloudSyncStatus>(
+            .run_mobile_plugin_async::<NativeCloudSyncStatus>(
                 command,
                 CloudSyncRequest {
                     root_path,
@@ -124,6 +124,7 @@ async fn run<R: Runtime>(
                     expected_account_id_hash,
                 },
             )
+            .await
             .map_err(|error| error.to_string())?;
         response.native_bridge_available = true;
         Ok(response)
@@ -258,6 +259,19 @@ mod tests {
         .unwrap();
 
         assert_eq!(status.account_id_hash, None);
+    }
+
+    #[test]
+    fn ios_request_uses_swift_acronym_casing() {
+        let request = CloudSyncRequest {
+            root_path: "/private/probe".into(),
+            container_identifier: Some(CLOUDKIT_CONTAINER.into()),
+            expected_account_id_hash: Some(format!("sha256:{}", "a".repeat(64))),
+        };
+
+        let serialized = serde_json::to_value(request).unwrap();
+        assert!(serialized.get("expectedAccountIDHash").is_some());
+        assert!(serialized.get("expectedAccountIdHash").is_none());
     }
 
     #[cfg(target_os = "macos")]

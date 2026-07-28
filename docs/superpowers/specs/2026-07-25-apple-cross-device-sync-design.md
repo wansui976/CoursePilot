@@ -555,7 +555,37 @@ Coordinator 在启动、恢复前台、网络变为可用、业务写入后和�
 - 提升最低系统版本；配置 CloudKit container、entitlements、签名和 remote notification。
 - 新增 SQLite 同步表、稳定 id backfill、逻辑时钟、outbox/tombstone。
 - 建立 Swift CloudSyncKit、spool、CKSyncEngine state 和开发环境 Zone。
-- 只用一个测试 Record 验证 Mac ↔ iPad 双向收发、后台推送与重复投递。
+- 只用一组测试 Record 验证 Mac ↔ iPad 双向收发、后台推送与重复投递。
+
+#### P0 双设备传输探针
+
+单机上传成功不能作为 P0 通过。探针使用独立、账号隔离的 spool，并采用
+`SyncProbeRequest` + `SyncProbeReceipt` 两个逻辑 Record 完成往返证明：
+
+1. Mac 生成 32 位十六进制会话码并执行 `cmd_sync_probe`；iPad 使用同一会话码执行同一命令。
+   两端 arm 时只做显式基线 fetch，随后保持 `CKSyncEngine` 运行并使用系统自动调度。
+2. 会话码只在两台测试设备间传递。云端只保存由它派生的 session id、会话内 participant id 和
+   account proof；不得上传原始 `device_id`、`account_id_hash` 或会话密钥。
+3. iPad 进入后台后，Mac 执行 `cmd_sync_probe_send(replay=false)`。请求使用固定 message id、nonce、
+   过期时间与 HMAC。iPad 的 Swift delegate 在自动 fetch 回调中直接生成确定性 Receipt，不依赖前端
+   或 Rust 命令再次运行。
+4. Mac 使用 `cmd_sync_probe_status` 只读本地 incoming/journal；该命令严禁调用 fetch/send，避免把
+   显式拉取伪装成后台投递。
+5. Mac 执行 `cmd_sync_probe_send(replay=true)`，原样重放同一 Request。iPad 更新同一个 Receipt，
+   `observedDeliveries` 增加，但 `appliedCount` 必须保持 1。发送前先持久化重放意图及当时的观察数基线；
+   Request payload、message id 和逻辑版本保持不变，envelope `updatedAt` 标识本次传输尝试。崩溃恢复后
+   只有收到匹配该 `updatedAt` 的 CloudKit ACK，且 `observedDeliveries` 严格大于基线，才能证明这次
+   显式重放已经到达。
+6. `cmd_sync_probe_status` 仅在请求已获 CloudKit ACK、Receipt 来自另一 participant、nonce/account
+   proof/HMAC 均匹配、首次投递为 `automatic + background`、重复观察次数至少为 2 且逻辑应用次数
+   恰好为 1 时返回 `complete`。
+
+探针首次 arm 会把经过 CloudKit 验证的账号 hash 绑定到本地 `sync_device_state`。账号退出时清理旧
+engine token；账号切换时把旧账号的 state、incoming、outgoing、ack 移入本地 quarantine，且在用户
+明确确认前不得用新账号恢复或上传。确认入口 `cmd_sync_probe_confirm_account_change` 必须重新验证当前
+CloudKit 账号、停止旧 engine、删除旧探针会话密钥、隔离旧账号目录，再事务更新本地绑定；普通 arm
+不得静默重绑。应用启动时仅恢复仍在有效期内、且配置文件仍标记为 armed 的探针；运行中的探针到期
+后由后台到期任务停止 engine 并删除会话密钥，不依赖用户再次打开状态页。
 
 ### P1：核心学习状态
 

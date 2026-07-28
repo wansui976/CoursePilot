@@ -15,13 +15,15 @@ let package = Package(
       targets: ["mobile-files"])
   ],
   dependencies: [
-    .package(name: "Tauri", path: "./.tauri/tauri-api")
+    .package(name: "Tauri", path: "./.tauri/tauri-api"),
+    .package(name: "CloudSyncCore", path: "./CloudSyncCore"),
   ],
   targets: [
     .target(
       name: "mobile-files",
       dependencies: [
-        .byName(name: "Tauri")
+        .byName(name: "Tauri"),
+        .product(name: "CloudSyncCore", package: "CloudSyncCore"),
       ],
       path: "Sources")
   ]
