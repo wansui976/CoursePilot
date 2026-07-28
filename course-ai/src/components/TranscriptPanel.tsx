@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invalidateStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -128,6 +129,8 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
       ipc.transcripts.update(id, text),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["transcripts", videoId] });
+      // 改过字幕之后，摘要/章节/笔记/题库/脑图讲的都还是旧稿的内容，重新算一次过期标记。
+      invalidateStaleArtifacts(qc, videoId);
       setEditingId(null);
     },
   });

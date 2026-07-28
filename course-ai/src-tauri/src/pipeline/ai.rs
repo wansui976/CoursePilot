@@ -2,6 +2,7 @@ use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::llm::Provider;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 /// "[mm:ss]" 时间前缀。
 fn stamp(start_ms: i64) -> String {
@@ -332,6 +333,67 @@ pub async fn store_chapters(db: &Db, video_id: &str, drafts: &[ChapterDraft]) ->
     Ok(drafts.len())
 }
 
+// ---------- 产物与讲稿的对应关系（用于标「已过期」） ----------
+
+/// 有指纹记录的五种 AI 产物。
+pub const TRACKED_ARTIFACTS: &[&str] = &["chapters", "summary", "notes", "quiz", "mindmap"];
+
+/// 讲稿指纹：喂给模型的那份文本的 SHA-256 前 16 位。
+///
+/// 算的是**完整上下文**而不只是字幕表：课件页上认出来的板书文字本来就参与生成
+/// （见 [`lecture_context`]），它变了产物同样该标过期。
+pub fn context_fingerprint(context: &str) -> String {
+    let digest = format!("{:x}", Sha256::digest(context.as_bytes()));
+    digest[..16].to_string()
+}
+
+/// 记下这份产物是基于哪一版讲稿生成的。
+pub async fn record_artifact_source(
+    db: &Db,
+    video_id: &str,
+    artifact: &str,
+    context: &str,
+) -> AppResult<()> {
+    sqlx::query(
+        "INSERT INTO ai_artifact_sources(video_id,artifact,fingerprint,generated_at)
+         VALUES (?,?,?,?)
+         ON CONFLICT(video_id,artifact) DO UPDATE SET
+           fingerprint=excluded.fingerprint, generated_at=excluded.generated_at",
+    )
+    .bind(video_id)
+    .bind(artifact)
+    .bind(context_fingerprint(context))
+    .bind(chrono::Utc::now().timestamp_millis())
+    .execute(&db.pool)
+    .await?;
+    Ok(())
+}
+
+/// 哪些产物是基于旧讲稿生成的。
+///
+/// 没有指纹记录的产物**不算过期**：那是这套记录上线之前生成的，无从判断真伪，
+/// 与其把所有人的历史产物一律标成过期，不如什么都不说。
+pub async fn stale_artifacts(db: &Db, video_id: &str) -> AppResult<Vec<String>> {
+    let current = match lecture_context(db, video_id).await {
+        Ok(context) => context_fingerprint(&context),
+        // 还没有字幕：没有可比对的基准，谈不上过期。
+        Err(AppError::NotFound(_)) => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT artifact,fingerprint FROM ai_artifact_sources WHERE video_id=?")
+            .bind(video_id)
+            .fetch_all(&db.pool)
+            .await?;
+    let mut stale: Vec<String> = rows
+        .into_iter()
+        .filter(|(_, fingerprint)| fingerprint != &current)
+        .map(|(artifact, _)| artifact)
+        .collect();
+    stale.sort();
+    Ok(stale)
+}
+
 pub async fn generate_chapters(
     db: &Db,
     provider: &Provider,
@@ -342,7 +404,9 @@ pub async fn generate_chapters(
     let req = crate::llm::prompts::chapters_request(model, &transcript);
     let resp = provider.complete(&req).await?;
     let drafts = parse_chapters(&resp.content)?;
-    store_chapters(db, video_id, &drafts).await
+    let count = store_chapters(db, video_id, &drafts).await?;
+    record_artifact_source(db, video_id, "chapters", &transcript).await?;
+    Ok(count)
 }
 
 pub async fn generate_quiz(
@@ -364,6 +428,7 @@ pub async fn generate_quiz(
     .bind(chrono::Utc::now().timestamp_millis())
     .execute(&db.pool)
     .await?;
+    record_artifact_source(db, video_id, "quiz", &transcript).await?;
     Ok(())
 }
 
@@ -386,6 +451,7 @@ pub async fn generate_mindmap(
     .bind(chrono::Utc::now().timestamp_millis())
     .execute(&db.pool)
     .await?;
+    record_artifact_source(db, video_id, "mindmap", &transcript).await?;
     Ok(())
 }
 
@@ -408,6 +474,7 @@ pub async fn generate_summary(
     .bind(chrono::Utc::now().timestamp_millis())
     .execute(&db.pool)
     .await?;
+    record_artifact_source(db, video_id, "summary", &transcript).await?;
     Ok(())
 }
 
@@ -433,6 +500,7 @@ pub async fn generate_notes(
     .bind(now)
     .execute(&db.pool)
     .await?;
+    record_artifact_source(db, video_id, "notes", &transcript).await?;
     Ok(())
 }
 
@@ -516,6 +584,78 @@ mod tests {
         assert_eq!(lines[2], "[01:05] (板书) 似然函数");
         assert_eq!(lines[3], "[01:05] 这里说到似然");
         assert_eq!(lines.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn editing_the_transcript_marks_the_products_stale() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let context = lecture_context(&db, &vid).await.unwrap();
+        record_artifact_source(&db, &vid, "summary", &context)
+            .await
+            .unwrap();
+        record_artifact_source(&db, &vid, "quiz", &context)
+            .await
+            .unwrap();
+
+        // 讲稿没动：两份产物都还算数。
+        assert!(stale_artifacts(&db, &vid).await.unwrap().is_empty());
+
+        // 人工改了一句字幕（或重跑了 AI 纠错）。摘要和题库讲的还是旧稿的内容，
+        // 界面上却看不出来——这正是要标出来的情况。
+        sqlx::query("UPDATE transcripts SET text=? WHERE video_id=?")
+            .bind("改过的一句")
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            stale_artifacts(&db, &vid).await.unwrap(),
+            vec!["quiz".to_string(), "summary".to_string()]
+        );
+
+        // 重新生成其中一份：它回到最新，另一份仍然过期。
+        let fresh = lecture_context(&db, &vid).await.unwrap();
+        record_artifact_source(&db, &vid, "summary", &fresh)
+            .await
+            .unwrap();
+        assert_eq!(
+            stale_artifacts(&db, &vid).await.unwrap(),
+            vec!["quiz".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn slide_text_changes_also_make_the_products_stale() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let context = lecture_context(&db, &vid).await.unwrap();
+        record_artifact_source(&db, &vid, "notes", &context)
+            .await
+            .unwrap();
+
+        // 课件页上认出来的板书文字本来就参与生成，补认了文字就等于换了讲稿。
+        sqlx::query(
+            "INSERT INTO slides(video_id,image_path,start_ms,end_ms,page_no,ocr_text)
+             VALUES (?,?,0,NULL,0,?)",
+        )
+        .bind(&vid)
+        .bind("/tmp/p0.jpg")
+        .bind("贝叶斯定理")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            stale_artifacts(&db, &vid).await.unwrap(),
+            vec!["notes".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn products_without_a_recorded_source_are_not_flagged() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        // 这套记录上线之前生成的产物没有指纹：无从判断，就什么都不说，
+        // 而不是把所有人的历史产物一律标成过期。
+        assert!(stale_artifacts(&db, &vid).await.unwrap().is_empty());
     }
 
     #[tokio::test]

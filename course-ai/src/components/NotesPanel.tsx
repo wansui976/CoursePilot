@@ -9,6 +9,10 @@ import { type ExportItem } from "./ExportMenu";
 import { TextSkeleton } from "@/components/ui/skeleton";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { PanelActions } from "./PanelActions";
+import {
+  invalidateStaleArtifacts,
+  useStaleArtifacts,
+} from "@/lib/useStaleArtifacts";
 import { ipc } from "@/lib/ipc";
 import { markdownToTiptap } from "@/lib/markdownToTiptap";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
@@ -171,11 +175,13 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     onMutate: () => clearTimeout(saveTimer.current),
     onSuccess: (_d, task) => {
       qc.invalidateQueries({ queryKey: [task, videoId] });
+      invalidateStaleArtifacts(qc, videoId);
     },
   });
 
   const current = VIEWS.find((v) => v.key === view)!;
   const currentTask = current.task;
+  const stale = useStaleArtifacts(videoId);
 
   const exportItems: ExportItem[] =
     view === "notes"
@@ -286,6 +292,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
           onRegenerate={() => generate.mutate(currentTask)}
           regenerating={generate.isPending}
           hasContent={view === "notes" ? !!notesContent : undefined}
+          stale={stale.has(currentTask)}
           exportItems={exportItems}
         />
       )}

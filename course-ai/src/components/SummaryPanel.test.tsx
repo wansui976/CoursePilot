@@ -9,6 +9,7 @@ const { mockIpc, player } = vi.hoisted(() => ({
     ai: {
       getSummary: vi.fn(),
       generate: vi.fn(),
+      staleArtifacts: vi.fn(),
     },
   },
   player: { requestSeek: vi.fn() },
@@ -40,6 +41,7 @@ describe("SummaryPanel", () => {
     localStorage.clear();
     mockIpc.ai.getSummary.mockReset();
     mockIpc.ai.generate.mockReset();
+    mockIpc.ai.staleArtifacts.mockReset().mockResolvedValue([]);
     mockIpc.ai.getSummary.mockResolvedValue("这是整体摘要正文。");
   });
 
@@ -66,5 +68,29 @@ describe("SummaryPanel", () => {
       "aria-expanded",
       "false",
     );
+  });
+
+  it("marks the summary stale when it was written from an older transcript", async () => {
+    // 改过字幕之后，这份摘要讲的还是旧稿的内容，界面上却看不出任何区别。
+    // 只标记不自动重跑：重跑要花钱，跑不跑由用户决定。
+    mockIpc.ai.getSummary.mockResolvedValue("旧稿写出来的摘要");
+    mockIpc.ai.staleArtifacts.mockResolvedValue(["summary"]);
+
+    renderSummaryPanel();
+
+    expect(await screen.findByText("已过期")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "重新生成" }),
+    ).toHaveAttribute("title", "字幕已更新：用新稿重新生成");
+  });
+
+  it("says nothing when the summary still matches the transcript", async () => {
+    mockIpc.ai.getSummary.mockResolvedValue("最新的摘要");
+    mockIpc.ai.staleArtifacts.mockResolvedValue([]);
+
+    renderSummaryPanel();
+
+    await screen.findByText("最新的摘要");
+    expect(screen.queryByText("已过期")).not.toBeInTheDocument();
   });
 });

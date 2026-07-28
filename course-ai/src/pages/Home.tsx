@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateStaleArtifacts } from "@/lib/useStaleArtifacts";
 import {
   Check,
   ChevronLeft,
@@ -539,8 +540,11 @@ export function Home() {
   // 已有字幕时「仅重新纠错」：不重新识别，回到原始稿后重跑 AI 纠错，完成后刷新文稿。
   const recorrect = useMutation({
     mutationFn: (videoId: string) => ipc.pipeline.recorrect(videoId),
-    onSuccess: (_d, videoId) =>
-      queryClient.invalidateQueries({ queryKey: ["transcripts", videoId] }),
+    onSuccess: (_d, videoId) => {
+      queryClient.invalidateQueries({ queryKey: ["transcripts", videoId] });
+      // 纠错重写了整份文稿：各 AI 产物据此重新判断是否已过期。
+      invalidateStaleArtifacts(queryClient, videoId);
+    },
   });
 
   async function saveRenamedVideo() {

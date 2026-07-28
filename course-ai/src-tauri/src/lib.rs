@@ -16,7 +16,7 @@ pub mod sync;
 use crate::commands::ai::{
     cmd_generate_ai, cmd_get_chapters, cmd_get_llm_profiles, cmd_get_mindmap, cmd_get_notes,
     cmd_get_quiz, cmd_get_summary, cmd_has_api_key, cmd_save_llm_profiles, cmd_save_notes,
-    cmd_set_api_key,
+    cmd_set_api_key, cmd_stale_ai_artifacts,
 };
 use crate::commands::clips::{cmd_add_clip, cmd_delete_clip, cmd_list_clips, cmd_update_clip};
 use crate::commands::concepts::{
@@ -179,6 +179,7 @@ pub fn run() {
             cmd_get_quiz,
             cmd_get_mindmap,
             cmd_get_summary,
+            cmd_stale_ai_artifacts,
             cmd_generate_ai,
             cmd_extract_slides,
             cmd_cancel_slides_extract,

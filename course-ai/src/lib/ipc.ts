@@ -488,6 +488,10 @@ export const ipc = {
       invoke("cmd_get_chapters", { videoId }),
     getNotes: (videoId: string): Promise<string | null> =>
       invoke("cmd_get_notes", { videoId }),
+    // 哪些 AI 产物是基于旧讲稿生成的（改过字幕、重跑过纠错、补认了课件文字之后）。
+    // 只用于标「已过期」，重不重跑由用户决定。
+    staleArtifacts: (videoId: string): Promise<string[]> =>
+      invoke("cmd_stale_ai_artifacts", { videoId }),
     getSummary: (videoId: string): Promise<string | null> =>
       invoke("cmd_get_summary", { videoId }),
     saveNotes: (videoId: string, contentJson: string): Promise<void> =>
