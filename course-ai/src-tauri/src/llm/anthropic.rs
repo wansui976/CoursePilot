@@ -1,5 +1,5 @@
 use crate::error::{AppError, AppResult};
-use crate::llm::{ChatRequest, ChatResponse, StreamPiece};
+use crate::llm::{take_sse_line, ChatRequest, ChatResponse, SseEvent, StreamPiece};
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -75,24 +75,41 @@ pub async fn complete(
 }
 
 /// 解析一行 Anthropic SSE：仅 content_block_delta 的 text_delta 返回其 text。
-pub fn parse_anthropic_sse_line(line: &str) -> Option<String> {
-    let data = line.strip_prefix("data:")?.trim();
+pub fn parse_anthropic_sse_line(line: &str) -> SseEvent {
+    let Some(data) = line.strip_prefix("data:").map(str::trim) else {
+        return SseEvent::Ignore;
+    };
     if data.is_empty() {
-        return None;
+        return SseEvent::Ignore;
     }
-    let v: Value = serde_json::from_str(data).ok()?;
-    if v.get("type").and_then(|t| t.as_str()) != Some("content_block_delta") {
-        return None;
+    let Ok(v) = serde_json::from_str::<Value>(data) else {
+        return SseEvent::Ignore;
+    };
+    match v.get("type").and_then(|t| t.as_str()) {
+        // 服务端明确宣布这次生成结束。没等到它就到了 EOF，说明流断在半截。
+        Some("message_stop") => return SseEvent::Finished,
+        // HTTP 已经 200 了，错误改从流里来（限流、内容策略等）。
+        Some("error") => {
+            let message = v
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("未知错误");
+            return SseEvent::Failed(message.to_string());
+        }
+        Some("content_block_delta") => {}
+        _ => return SseEvent::Ignore,
     }
-    let delta = v.get("delta")?;
+    let Some(delta) = v.get("delta") else {
+        return SseEvent::Ignore;
+    };
     if delta.get("type").and_then(|t| t.as_str()) != Some("text_delta") {
-        return None;
+        return SseEvent::Ignore;
     }
-    delta
-        .get("text")?
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
+    match delta.get("text").and_then(Value::as_str) {
+        Some(text) if !text.is_empty() => SseEvent::Content(text.to_string()),
+        _ => SseEvent::Ignore,
+    }
 }
 
 pub async fn complete_stream(
@@ -122,24 +139,41 @@ pub async fn complete_stream(
         return Err(AppError::Other(format!("Anthropic {status}: {text}")));
     }
     let mut acc = String::new();
-    let mut buf = String::new();
+    // 字节缓冲，不是字符串缓冲：中文字符会被切在 chunk 中间，见 [`take_sse_line`]。
+    let mut buf: Vec<u8> = Vec::new();
+    let mut finished = false;
+    let mut canceled = false;
     let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
+    'outer: while let Some(chunk) = stream.next().await {
         if cancel.load(Ordering::SeqCst) {
+            canceled = true;
             break;
         }
         let bytes = chunk.map_err(|e| AppError::Other(e.to_string()))?;
-        buf.push_str(&String::from_utf8_lossy(&bytes));
-        while let Some(pos) = buf.find('\n') {
-            let line: String = buf.drain(..=pos).collect();
-            if let Some(delta) = parse_anthropic_sse_line(line.trim_end()) {
-                if cancel.load(Ordering::SeqCst) {
-                    return Ok(acc);
+        buf.extend_from_slice(&bytes);
+        while let Some(line) = take_sse_line(&mut buf) {
+            if cancel.load(Ordering::SeqCst) {
+                canceled = true;
+                break 'outer;
+            }
+            match parse_anthropic_sse_line(line.trim_end()) {
+                SseEvent::Content(delta) => {
+                    on_piece(StreamPiece::Content(&delta));
+                    acc.push_str(&delta);
                 }
-                on_piece(StreamPiece::Content(&delta));
-                acc.push_str(&delta);
+                SseEvent::Finished => finished = true,
+                SseEvent::Failed(message) => {
+                    return Err(AppError::Other(format!("Anthropic 流内错误: {message}")))
+                }
+                SseEvent::Reasoning(_) | SseEvent::Ignore => {}
             }
         }
+    }
+    // 用户主动停止时，已经吐出来的那部分就是他要的，照常返回。
+    if !finished && !canceled {
+        return Err(AppError::Other(
+            "Anthropic 流在 message_stop 之前就断了，这次回答不完整".into(),
+        ));
     }
     Ok(acc)
 }
@@ -155,15 +189,33 @@ mod tests {
             parse_anthropic_sse_line(
                 r#"data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"你好"}}"#
             ),
-            Some("你好".to_string())
+            SseEvent::Content("你好".into())
         );
         // 非 text_delta 事件不产出。
         assert_eq!(
             parse_anthropic_sse_line(r#"data: {"type":"message_start"}"#),
-            None
+            SseEvent::Ignore
         );
-        assert_eq!(parse_anthropic_sse_line("event: ping"), None);
-        assert_eq!(parse_anthropic_sse_line(""), None);
+        assert_eq!(parse_anthropic_sse_line("event: ping"), SseEvent::Ignore);
+        assert_eq!(parse_anthropic_sse_line(""), SseEvent::Ignore);
+    }
+
+    #[test]
+    fn the_stop_event_is_what_proves_the_answer_is_whole() {
+        assert_eq!(
+            parse_anthropic_sse_line(r#"data: {"type":"message_stop"}"#),
+            SseEvent::Finished
+        );
+    }
+
+    #[test]
+    fn an_in_stream_error_is_not_silently_swallowed() {
+        // HTTP 已经 200 了，限流之类的错误改从流里来；当成普通行忽略掉，
+        // 用户会收到一个空答案却看不到任何原因。
+        assert_eq!(
+            parse_anthropic_sse_line(r#"data: {"type":"error","error":{"message":"overloaded"}}"#),
+            SseEvent::Failed("overloaded".into())
+        );
     }
 
     #[test]

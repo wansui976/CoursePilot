@@ -1,5 +1,5 @@
 use crate::error::{AppError, AppResult};
-use crate::llm::{ChatRequest, ChatResponse, StreamPiece};
+use crate::llm::{take_sse_line, ChatRequest, ChatResponse, SseEvent, StreamPiece};
 use futures_util::StreamExt;
 use reqwest::header::CONTENT_TYPE;
 use serde_json::{json, Value};
@@ -166,30 +166,54 @@ pub async fn embed(
     parse_embeddings_response(&v)
 }
 
-/// 解析一行 OpenAI SSE：仅当是 `data: {json}` 且含 choices[0].delta.content 时返回该增量。
-/// 解析一行 OpenAI SSE，返回 `(是否为推理内容, 增量文本)`。
-/// content 优先；推理模型（DeepSeek-R1 等）的思考在 `delta.reasoning_content`
-/// （部分实现叫 `reasoning`）。两者都没有则 None。
-pub fn parse_openai_sse_line(line: &str) -> Option<(bool, String)> {
-    let data = line.strip_prefix("data:")?.trim();
-    if data.is_empty() || data == "[DONE]" {
-        return None;
+/// 解析一行 OpenAI SSE。content 优先；推理模型（DeepSeek-R1 等）的思考在
+/// `delta.reasoning_content`（部分实现叫 `reasoning`），标记为 Reasoning 不计入答案。
+pub fn parse_openai_sse_line(line: &str) -> SseEvent {
+    let Some(data) = line.strip_prefix("data:").map(str::trim) else {
+        return SseEvent::Ignore;
+    };
+    if data.is_empty() {
+        return SseEvent::Ignore;
     }
-    let v: Value = serde_json::from_str(data).ok()?;
-    let delta = v.get("choices")?.get(0)?.get("delta")?;
-    if let Some(content) = delta.get("content").and_then(Value::as_str) {
-        if !content.is_empty() {
-            return Some((false, content.to_string()));
+    if data == "[DONE]" {
+        return SseEvent::Finished;
+    }
+    let Ok(v) = serde_json::from_str::<Value>(data) else {
+        return SseEvent::Ignore;
+    };
+    if let Some(error) = v.get("error") {
+        let message = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("未知错误");
+        return SseEvent::Failed(message.to_string());
+    }
+    let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else {
+        return SseEvent::Ignore;
+    };
+    if let Some(delta) = choice.get("delta") {
+        if let Some(content) = delta.get("content").and_then(Value::as_str) {
+            if !content.is_empty() {
+                return SseEvent::Content(content.to_string());
+            }
         }
-    }
-    for field in ["reasoning_content", "reasoning"] {
-        if let Some(r) = delta.get(field).and_then(Value::as_str) {
-            if !r.is_empty() {
-                return Some((true, r.to_string()));
+        for field in ["reasoning_content", "reasoning"] {
+            if let Some(r) = delta.get(field).and_then(Value::as_str) {
+                if !r.is_empty() {
+                    return SseEvent::Reasoning(r.to_string());
+                }
             }
         }
     }
-    None
+    // 有些 OpenAI 兼容服务不发 [DONE]，但都会在最后一块给出非空 finish_reason。
+    // 两者认其一，既能识破「断在半截」，又不会把这些服务全判成失败。
+    if choice
+        .get("finish_reason")
+        .is_some_and(|reason| !reason.is_null())
+    {
+        return SseEvent::Finished;
+    }
+    SseEvent::Ignore
 }
 
 pub async fn complete_stream(
@@ -226,32 +250,46 @@ pub async fn complete_stream(
         )));
     }
     let mut acc = String::new();
-    let mut buf = String::new();
+    // 字节缓冲，不是字符串缓冲：中文字符会被切在 chunk 中间，见 [`take_sse_line`]。
+    let mut buf: Vec<u8> = Vec::new();
+    let mut finished = false;
+    let mut canceled = false;
     let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
+    'outer: while let Some(chunk) = stream.next().await {
         if cancel.load(Ordering::SeqCst) {
+            canceled = true;
             break;
         }
         let bytes = chunk.map_err(|e| AppError::Other(e.to_string()))?;
-        buf.push_str(&String::from_utf8_lossy(&bytes));
+        buf.extend_from_slice(&bytes);
         // 按行处理，保留最后一段不完整行到下次。
-        while let Some(pos) = buf.find('\n') {
-            let line: String = buf.drain(..=pos).collect();
-            if let Some((reasoning, delta)) = parse_openai_sse_line(line.trim_end()) {
-                if cancel.load(Ordering::SeqCst) {
-                    return Ok(acc);
-                }
-                if reasoning {
-                    // 推理模型的「思考」内容：流式给前端展示，但不计入最终答案。
-                    on_piece(StreamPiece::Reasoning(&delta));
-                } else {
+        while let Some(line) = take_sse_line(&mut buf) {
+            if cancel.load(Ordering::SeqCst) {
+                canceled = true;
+                break 'outer;
+            }
+            match parse_openai_sse_line(line.trim_end()) {
+                // 推理模型的「思考」内容：流式给前端展示，但不计入最终答案。
+                SseEvent::Reasoning(delta) => on_piece(StreamPiece::Reasoning(&delta)),
+                SseEvent::Content(delta) => {
                     on_piece(StreamPiece::Content(&delta));
                     acc.push_str(&delta);
                 }
+                SseEvent::Finished => finished = true,
+                SseEvent::Failed(message) => {
+                    return Err(AppError::Other(format!("OpenAI 流内错误: {message}")))
+                }
+                SseEvent::Ignore => {}
             }
         }
         // 每个 chunk 处理完后主动 yield，让 Tokio 把累积的 channel.send 投递到前端。
         tokio::task::yield_now().await;
+    }
+    // 用户主动停止时，已经吐出来的那部分就是他要的，照常返回。
+    if !finished && !canceled {
+        return Err(AppError::Other(
+            "OpenAI 流在结束标记之前就断了，这次回答不完整".into(),
+        ));
     }
     Ok(acc)
 }
@@ -265,27 +303,53 @@ mod tests {
     fn parses_openai_delta_lines() {
         assert_eq!(
             parse_openai_sse_line(r#"data: {"choices":[{"delta":{"content":"你好"}}]}"#),
-            Some((false, "你好".to_string()))
+            SseEvent::Content("你好".into())
         );
-        // 推理模型的思考走 reasoning_content，标记为 reasoning=true。
+        // 推理模型的思考走 reasoning_content，标记为 Reasoning。
         assert_eq!(
             parse_openai_sse_line(
                 r#"data: {"choices":[{"delta":{"reasoning_content":"先想想"}}]}"#
             ),
-            Some((true, "先想想".to_string()))
+            SseEvent::Reasoning("先想想".into())
         );
         // 别名 reasoning 也支持。
         assert_eq!(
             parse_openai_sse_line(r#"data: {"choices":[{"delta":{"reasoning":"嗯"}}]}"#),
-            Some((true, "嗯".to_string()))
+            SseEvent::Reasoning("嗯".into())
         );
-        assert_eq!(parse_openai_sse_line("data: [DONE]"), None);
-        assert_eq!(parse_openai_sse_line(": comment"), None);
-        assert_eq!(parse_openai_sse_line(""), None);
+        assert_eq!(parse_openai_sse_line("data: [DONE]"), SseEvent::Finished);
+        assert_eq!(parse_openai_sse_line(": comment"), SseEvent::Ignore);
+        assert_eq!(parse_openai_sse_line(""), SseEvent::Ignore);
         // role-only delta（无 content）不产出。
         assert_eq!(
             parse_openai_sse_line(r#"data: {"choices":[{"delta":{"role":"assistant"}}]}"#),
-            None
+            SseEvent::Ignore
+        );
+    }
+
+    #[test]
+    fn a_finish_reason_also_counts_as_a_proper_ending() {
+        // 有些 OpenAI 兼容服务不发 [DONE]。只认 [DONE] 会把它们全判成「断在半截」。
+        assert_eq!(
+            parse_openai_sse_line(r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#),
+            SseEvent::Finished
+        );
+        // 中途的块 finish_reason 是 null，不算结束。
+        assert_eq!(
+            parse_openai_sse_line(
+                r#"data: {"choices":[{"delta":{"content":"半"},"finish_reason":null}]}"#
+            ),
+            SseEvent::Content("半".into())
+        );
+    }
+
+    #[test]
+    fn an_in_stream_error_is_not_silently_swallowed() {
+        // HTTP 已经 200 了，限流之类的错误改从流里来；当成普通行忽略掉，
+        // 用户会收到一个空答案却看不到任何原因。
+        assert_eq!(
+            parse_openai_sse_line(r#"data: {"error":{"message":"rate limited"}}"#),
+            SseEvent::Failed("rate limited".into())
         );
     }
 

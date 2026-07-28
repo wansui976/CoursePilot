@@ -34,6 +34,61 @@ pub fn round_temperature(temperature: f32) -> f64 {
     (temperature as f64 * 100.0).round() / 100.0
 }
 
+/// 一行 SSE 的含义（OpenAI 与 Anthropic 共用）。
+///
+/// 区分「正常结束」和「流断在半截」是关键：只看到 EOF 就返回成功，会把被截断的
+/// 半截回答当成完整答案交出去——用户看不出区别，它还会被存进笔记、摘要、题库。
+#[derive(Debug, PartialEq)]
+pub enum SseEvent {
+    Content(String),
+    Reasoning(String),
+    /// 服务端明确宣布这次生成结束。
+    Finished,
+    /// 流内错误事件：HTTP 已经 200 了，错误改从流里来（限流、内容策略等）。
+    Failed(String),
+    Ignore,
+}
+
+/// 从字节缓冲里切出一行（含换行符）；没有完整行时返回 None，剩余字节留到下一个 chunk。
+///
+/// 必须按**字节**找 `\n` 再整行解码：一个中文字符占三字节，很容易被切在两个网络
+/// chunk 中间；对每个 chunk 单独做 from_utf8_lossy 就会把它变成 `�`，而且是随机复现。
+/// 行边界是安全的——`\n` 是 ASCII，不可能出现在多字节字符内部，所以整行一定是
+/// 完整的 UTF-8。
+pub fn take_sse_line(buf: &mut Vec<u8>) -> Option<String> {
+    let pos = buf.iter().position(|byte| *byte == b'\n')?;
+    let line: Vec<u8> = buf.drain(..=pos).collect();
+    Some(String::from_utf8_lossy(&line).into_owned())
+}
+
+#[cfg(test)]
+mod sse_tests {
+    use super::take_sse_line;
+
+    #[test]
+    fn a_chinese_character_split_across_chunks_survives() {
+        // 「好」是 E5 A5 BD 三个字节。网络按 chunk 切，切点落在字符中间是常态；
+        // 对每个 chunk 单独 from_utf8_lossy，这里就会变成 `你��`——随机出现的乱码。
+        let mut buf: Vec<u8> = Vec::new();
+        let full = "data: 你好\n".as_bytes();
+        let split = full.len() - 3; // 切在「好」的第一个字节之后
+        buf.extend_from_slice(&full[..split]);
+        assert_eq!(take_sse_line(&mut buf), None, "半行不该被交出去");
+        buf.extend_from_slice(&full[split..]);
+        assert_eq!(take_sse_line(&mut buf), Some("data: 你好\n".to_string()));
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn leftovers_stay_in_the_buffer_for_the_next_chunk() {
+        let mut buf: Vec<u8> = b"a\nb\nhalf".to_vec();
+        assert_eq!(take_sse_line(&mut buf), Some("a\n".to_string()));
+        assert_eq!(take_sse_line(&mut buf), Some("b\n".to_string()));
+        assert_eq!(take_sse_line(&mut buf), None);
+        assert_eq!(buf, b"half");
+    }
+}
+
 /// 流式片段：正式回答内容，或推理模型的「思考」内容（不计入最终答案）。
 pub enum StreamPiece<'a> {
     Content(&'a str),
