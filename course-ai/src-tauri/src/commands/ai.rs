@@ -202,22 +202,6 @@ pub async fn provider_for_db(
     Ok(Some((build_provider(&profile, key), profile.model.clone())))
 }
 
-pub async fn first_available_provider_for_db(
-    db: &crate::db::Db,
-) -> AppResult<Option<(crate::llm::Provider, String)>> {
-    let profiles = parse_profiles(get_setting(db, "llm_profiles").await?.as_deref())?;
-    for profile in profiles {
-        let Some(key) = keychain::get_api_key(db, &profile.id).await? else {
-            continue;
-        };
-        if key.trim().is_empty() {
-            continue;
-        }
-        return Ok(Some((build_provider(&profile, key), profile.model.clone())));
-    }
-    Ok(None)
-}
-
 async fn provider_for(state: &AppState, task: AiTask) -> AppResult<(crate::llm::Provider, String)> {
     provider_for_db(&state.db, task).await?.ok_or_else(|| {
         AppError::Config("尚未配置可用的 LLM Profile / API Key（设置 → 大模型）".into())
@@ -253,6 +237,11 @@ pub async fn cmd_generate_ai(
                 "RAG 不通过 cmd_generate_ai 触发；用 cmd_build_embeddings / cmd_rag_query".into(),
             ))
         }
+        AiTask::Correction => {
+            return Err(AppError::Other(
+                "字幕纠错不通过 cmd_generate_ai 触发；用 cmd_recorrect_transcript".into(),
+            ))
+        }
     }
     Ok(())
 }
@@ -265,7 +254,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[tokio::test]
-    async fn first_available_provider_skips_profiles_without_keys() {
+    async fn subtitle_correction_uses_the_model_the_user_picked() {
         let dir = tempdir().unwrap();
         let db = Db::connect_and_migrate(&dir.path().join("t.db"))
             .await
@@ -275,16 +264,54 @@ mod tests {
             "llm_profiles",
             r#"[
               {"id":"no-key","name":"A","kind":"openai","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini"},
-              {"id":"with-key","name":"B","kind":"openai","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini"}
+              {"id":"with-key","name":"B","kind":"openai","base_url":"https://api.openai.com/v1","model":"gpt-4o-chosen"}
             ]"#,
         )
         .await
         .unwrap();
-        keychain::set_api_key(&db, "with-key", "sk-test")
+        keychain::set_api_key(&db, "no-key", "sk-first")
+            .await
+            .unwrap();
+        keychain::set_api_key(&db, "with-key", "sk-chosen")
+            .await
+            .unwrap();
+        // 用户在设置里选的是第二个 profile（面板把所有任务都路由到它）。
+        set_setting(&db, "llm_task_routing", r#"{"correction":"with-key"}"#)
             .await
             .unwrap();
 
-        let (_, model) = first_available_provider_for_db(&db).await.unwrap().unwrap();
+        // 纠错原来走的是「配置列表里第一个有 Key 的」，会绕开用户选的模型——
+        // 可能把字幕发去非预期的服务商，也算在别人账上。
+        let (_, model) = provider_for_db(&db, AiTask::Correction)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(model, "gpt-4o-chosen");
+    }
+
+    #[tokio::test]
+    async fn correction_routing_defaults_to_the_first_profile_for_old_configs() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        set_setting(
+            &db,
+            "llm_profiles",
+            r#"[{"id":"only","name":"A","kind":"openai","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini"}]"#,
+        )
+        .await
+        .unwrap();
+        keychain::set_api_key(&db, "only", "sk-test").await.unwrap();
+        // 升级前存下来的 routing 里没有 correction 字段，仍要能解析并回退到第一个。
+        set_setting(&db, "llm_task_routing", r#"{"notes":"only"}"#)
+            .await
+            .unwrap();
+
+        let (_, model) = provider_for_db(&db, AiTask::Correction)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(model, "gpt-4o-mini");
     }
 

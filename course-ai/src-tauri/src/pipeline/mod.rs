@@ -284,7 +284,8 @@ async fn run_all(
         // 是否对字幕走 AI 纠错：视频级偏好（导入时勾选）> 全局开关，再要求有可用大模型。
         let autocorrect = subtitle::autocorrect_enabled(&db, &video_id).await?;
         let correct = if autocorrect {
-            crate::commands::ai::first_available_provider_for_db(&db).await?
+            crate::commands::ai::provider_for_db(&db, crate::llm::profiles::AiTask::Correction)
+                .await?
         } else {
             None
         };
@@ -535,32 +536,36 @@ async fn run_all(
             emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.92, "解析识别结果").await?;
             emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.95, "写入原始文稿").await?;
             let count = asr::store_transcripts_with_raw_backup(&db, &video_id, &json).await?;
-            let final_message =
-                match crate::commands::ai::first_available_provider_for_db(&db).await? {
-                    Some((provider, model)) => {
-                        emit_running_progress(
-                            &app,
-                            &db,
-                            &video_id,
-                            &asr_job.id,
-                            0.98,
-                            "正在 AI 纠正文稿",
-                        )
-                        .await?;
-                        match transcript_correction::autocorrect_transcript(
-                            &db, &provider, &model, &video_id,
-                        )
-                        .await
-                        {
-                            Ok(()) => asr_done_message(count, TranscriptCorrectionOutcome::Applied),
-                            Err(error) => {
-                                eprintln!("transcript correction skipped after failure: {error}");
-                                asr_done_message(count, TranscriptCorrectionOutcome::Failed)
-                            }
+            let final_message = match crate::commands::ai::provider_for_db(
+                &db,
+                crate::llm::profiles::AiTask::Correction,
+            )
+            .await?
+            {
+                Some((provider, model)) => {
+                    emit_running_progress(
+                        &app,
+                        &db,
+                        &video_id,
+                        &asr_job.id,
+                        0.98,
+                        "正在 AI 纠正文稿",
+                    )
+                    .await?;
+                    match transcript_correction::autocorrect_transcript(
+                        &db, &provider, &model, &video_id,
+                    )
+                    .await
+                    {
+                        Ok(()) => asr_done_message(count, TranscriptCorrectionOutcome::Applied),
+                        Err(error) => {
+                            eprintln!("transcript correction skipped after failure: {error}");
+                            asr_done_message(count, TranscriptCorrectionOutcome::Failed)
                         }
                     }
-                    None => asr_done_message(count, TranscriptCorrectionOutcome::NoProvider),
-                };
+                }
+                None => asr_done_message(count, TranscriptCorrectionOutcome::NoProvider),
+            };
             jobs::update_progress(&db, &asr_job.id, 1.0, Some(&final_message)).await?;
             jobs::finish(&db, &asr_job.id).await?;
             emit_update(
@@ -1146,11 +1151,12 @@ pub async fn cmd_recorrect_transcript(
     video_id: String,
 ) -> AppResult<()> {
     let db = state.db.clone();
-    let (provider, model) = crate::commands::ai::first_available_provider_for_db(&db)
-        .await?
-        .ok_or_else(|| {
-            AppError::Config("未配置大模型，无法纠错（请到设置 → 大模型 配置）".into())
-        })?;
+    let (provider, model) =
+        crate::commands::ai::provider_for_db(&db, crate::llm::profiles::AiTask::Correction)
+            .await?
+            .ok_or_else(|| {
+                AppError::Config("未配置大模型，无法纠错（请到设置 → 大模型 配置）".into())
+            })?;
     transcript_correction::restore_raw_transcript(&db, &video_id).await?;
     transcript_correction::autocorrect_transcript(&db, &provider, &model, &video_id).await
 }

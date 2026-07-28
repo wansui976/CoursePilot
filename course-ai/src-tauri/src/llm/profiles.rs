@@ -17,8 +17,10 @@ pub struct LlmProfile {
     pub model: String,
 }
 
-/// 六个任务到 profile id 的路由。None = 用第一个 profile。
+/// 各任务到 profile id 的路由。None = 用第一个 profile。
+/// 全部字段带 serde default：老版本存下来的 routing JSON 缺字段也能照常解析。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TaskRouting {
     pub notes: Option<String>,
     pub chapters: Option<String>,
@@ -27,6 +29,9 @@ pub struct TaskRouting {
     pub mindmap: Option<String>,
     pub rag: Option<String>,
     pub vision_ocr: Option<String>,
+    /// 字幕 AI 纠错。原来这一步不走路由，而是「拿配置列表里第一个有 Key 的」，
+    /// 于是用户选好的模型被绕开——可能发去了非预期的服务商，也算在别人账上。
+    pub correction: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -37,6 +42,8 @@ pub enum AiTask {
     Quiz,
     Mindmap,
     Rag,
+    /// 字幕 AI 纠错。
+    Correction,
 }
 
 pub fn parse_profiles(json: Option<&str>) -> AppResult<Vec<LlmProfile>> {
@@ -66,6 +73,7 @@ pub fn resolve_profile<'a>(
         AiTask::Quiz => &routing.quiz,
         AiTask::Mindmap => &routing.mindmap,
         AiTask::Rag => &routing.rag,
+        AiTask::Correction => &routing.correction,
     };
     if let Some(id) = wanted {
         if let Some(p) = profiles.iter().find(|p| &p.id == id) {
