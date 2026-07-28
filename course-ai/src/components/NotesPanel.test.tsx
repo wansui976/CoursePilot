@@ -21,6 +21,9 @@ const { mockIpc, editorCapture } = vi.hoisted(() => ({
   },
   editorCapture: {
     onUpdate: undefined as undefined | ((p: { editor: unknown }) => void),
+    // 稳定的 spy：mock 的 useEditor 每次渲染都会被调用，每次新建一个 vi.fn()
+    // 就断言不到累计调用。
+    setContent: vi.fn(),
   },
 }));
 
@@ -41,7 +44,7 @@ vi.mock("@tiptap/react", () => ({
     editorCapture.onUpdate = opts?.onUpdate;
     return {
       commands: {
-        setContent: vi.fn(),
+        setContent: editorCapture.setContent,
       },
       getJSON: () => ({ type: "doc", content: [{ type: "paragraph" }] }),
     };
@@ -66,6 +69,7 @@ function renderNotesPanel(videoId = "video-1", instanceKey = "one") {
 describe("NotesPanel", () => {
   beforeEach(() => {
     localStorage.clear();
+    editorCapture.setContent.mockClear();
     mockIpc.ai.getNotes.mockReset();
     mockIpc.ai.generate.mockReset();
     mockIpc.ai.saveNotes.mockReset();
@@ -189,5 +193,48 @@ describe("NotesPanel", () => {
     // 卸载应立刻把未落库的编辑刷盘，而不是丢弃待发的定时器。
     unmount();
     expect(mockIpc.ai.saveNotes).toHaveBeenCalledWith("video-1", expect.any(String));
+  });
+
+  it("clears the editor when switching to a video that has no notes yet", async () => {
+    // 面板在标签之间是保活的（不重建）。切到一个还没有笔记的视频时若不清空，
+    // 编辑器会继续显示上一讲的笔记；用户接着打字，那份内容就被存到新视频名下了。
+    mockIpc.ai.getNotes.mockImplementation((videoId: string) =>
+      Promise.resolve(
+        videoId === "video-with-notes"
+          ? JSON.stringify({
+              type: "doc",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "上一讲的笔记" }] }],
+            })
+          : null,
+      ),
+    );
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <NotesPanel videoId="video-with-notes" />
+      </QueryClientProvider>,
+    );
+    await waitFor(() =>
+      expect(editorCapture.setContent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "doc" }),
+      ),
+    );
+    editorCapture.setContent.mockClear();
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <NotesPanel videoId="video-without-notes" />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() =>
+      expect(editorCapture.setContent).toHaveBeenCalledWith({
+        type: "doc",
+        content: [{ type: "paragraph" }],
+      }),
+    );
   });
 });

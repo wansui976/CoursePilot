@@ -290,6 +290,52 @@ describe("RagSearchPanel", () => {
     );
   });
 
+  it("drops the in-flight answer when you switch to another video", async () => {
+    // 面板在标签之间是保活的：不清 streaming，上一讲的 token 会继续往下吐，
+    // 而且落款在新视频名下。回答本身不受影响——请求跑完仍会写进原视频的历史。
+    const box: { emit?: (delta: string) => void } = {};
+    mockIpc.ai.ragQueryStream.mockImplementation(
+      (
+        _v: string,
+        _scope: string,
+        _q: string,
+        _h: unknown,
+        _id: string,
+        onEvent: (e: StreamEvent) => void,
+      ) =>
+        new Promise(() => {
+          box.emit = (delta) => onEvent({ type: "token", delta });
+        }),
+    );
+
+    const queryClient = createTestQueryClient();
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <div data-theme="light">
+          <RagSearchPanel videoId="video-1" mode="ask" />
+        </div>
+      </QueryClientProvider>,
+    );
+    const input = screen.getByLabelText("聊天内容");
+    fireEvent.change(input, { target: { value: "问题" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    await waitFor(() => expect(box.emit).toBeDefined());
+    act(() => box.emit!("上一讲的答案"));
+    await screen.findByText(/上一讲的答案/);
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <div data-theme="light">
+          <RagSearchPanel videoId="video-2" mode="ask" />
+        </div>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByText(/上一讲的答案/)).not.toBeInTheDocument(),
+    );
+  });
+
   it("shows a stop button while streaming and cancels on click", async () => {
     const box: { finish?: () => void } = {};
     mockIpc.ai.ragQueryStream.mockImplementation(

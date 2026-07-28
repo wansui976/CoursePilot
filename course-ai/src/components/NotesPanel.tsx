@@ -85,7 +85,15 @@ export function NotesPanel({ videoId }: { videoId: string }) {
 
   // 加载已有笔记：content_json（"{...}"）或 content_md（markdown）
   useEffect(() => {
-    if (!editor || notesContent == null) return;
+    // 还在查库时什么都不动，免得先闪一下空编辑器。
+    if (!editor || notesQuery.isPending) return;
+    if (notesContent == null || notesContent.trim() === "") {
+      // 这个视频还没有笔记 —— 必须把编辑器清空。面板在标签之间是保活的（不重建），
+      // 早退就会继续显示上一个视频的笔记；用户一旦在上面接着打字，那份内容会被
+      // 存到**新视频**名下，等于把别人的笔记搬了家。
+      editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
+      return;
+    }
     try {
       const parsed = JSON.parse(notesContent);
       if (parsed && parsed.type === "doc") {
@@ -96,7 +104,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       // 非 JSON → 当作 markdown
     }
     editor.commands.setContent(markdownToTiptap(notesContent));
-  }, [editor, notesContent]);
+  }, [editor, notesContent, notesQuery.isPending]);
 
   // 切走视频 / 卸载前：若去抖窗口内还有未落库的编辑，立刻刷盘，避免丢失。
   // cleanup 在 videoId 变化时以「旧 videoId + 旧内容」运行，正好把上一条编辑存回原视频。
