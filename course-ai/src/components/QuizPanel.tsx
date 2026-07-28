@@ -14,6 +14,44 @@ function answerText(answer: QuizQuestion["answer"]): string {
   return answer;
 }
 
+/**
+ * 把库里存的一条题目收敛成能安全渲染的形状；不合格返回 null。
+ *
+ * 后端现在逐题校验了，但**已经存在库里的**题库是在那之前生成的，里面可能有
+ * `{}`、`stem: null`、options 写成字符串这些东西。渲染时 `options.map` 撞上字符串
+ * 就是 TypeError，整个面板白屏——一道坏题不该毁掉整套题。
+ */
+function sanitizeQuestion(raw: unknown): QuizQuestion | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Record<string, unknown>;
+  const stem = typeof item.stem === "string" ? item.stem.trim() : "";
+  if (!stem) return null;
+
+  const answer = item.answer;
+  const answerOk =
+    typeof answer === "string" ||
+    typeof answer === "boolean" ||
+    (Array.isArray(answer) && answer.every((one) => typeof one === "string"));
+  if (!answerOk) return null;
+
+  // 没有 options 是正常的（判断题就没有）；有但不是字符串数组，说明这道题本身坏了：
+  // 渲染出来是一道选不了的选择题，不如不显示。
+  const hasOptions = item.options !== undefined && item.options !== null;
+  const optionsOk =
+    Array.isArray(item.options) && item.options.every((one) => typeof one === "string");
+  if (hasOptions && !optionsOk) return null;
+  const options = optionsOk ? (item.options as string[]) : undefined;
+
+  return {
+    type: item.type === "multi" || item.type === "judge" ? item.type : "single",
+    stem,
+    options,
+    answer: answer as QuizQuestion["answer"],
+    explanation: typeof item.explanation === "string" ? item.explanation : undefined,
+    ref_ms: typeof item.ref_ms === "number" && item.ref_ms >= 0 ? item.ref_ms : undefined,
+  };
+}
+
 export function QuizPanel({ videoId }: { videoId: string }) {
   const requestSeek = usePlayer((s) => s.requestSeek);
   const queryClient = useQueryClient();
@@ -35,7 +73,11 @@ export function QuizPanel({ videoId }: { videoId: string }) {
     try {
       const parsed = JSON.parse(raw);
       // 校验前生成的旧题库可能不是数组（如 {"questions":[...]}），非数组直接当空，避免渲染时崩溃。
-      return Array.isArray(parsed) ? parsed : [];
+      if (!Array.isArray(parsed)) return [];
+      // 逐题过筛：坏题丢掉、好题照常显示（见 sanitizeQuestion）。
+      return parsed
+        .map(sanitizeQuestion)
+        .filter((one): one is QuizQuestion => one !== null);
     } catch {
       return [];
     }
