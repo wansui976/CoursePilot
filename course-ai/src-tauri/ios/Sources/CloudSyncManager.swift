@@ -1,6 +1,12 @@
 import CloudKit
+#if canImport(CloudSyncCore)
+import CloudSyncCore
+#endif
 import CryptoKit
 import Foundation
+#if os(iOS)
+import UIKit
+#endif
 
 struct CloudSyncStatus: Encodable, Sendable {
   let accountStatus: String
@@ -22,6 +28,9 @@ actor CloudSyncManager: CKSyncEngineDelegate {
   private let ackURL: URL
   private let stateURL: URL
   private let recordStateURL: URL
+  private let accountBindingURL: URL
+  private let probeConfigurationURL: URL
+  private let probeJournalURL: URL
   private let zone: CKRecordZone
   private let accountHashContainer: String
   private var syncEngine: CKSyncEngine?
@@ -34,6 +43,7 @@ actor CloudSyncManager: CKSyncEngineDelegate {
   private var lifecycleGeneration: UInt64 = 0
   private var cancellationSequence: UInt64 = 0
   private var pendingCancellation: (id: UInt64, task: Task<Void, Never>)?
+  private var explicitFetchDepth = 0
 
   init(rootPath: String, containerIdentifier: String?) throws {
     rootURL = URL(fileURLWithPath: rootPath, isDirectory: true)
@@ -42,6 +52,9 @@ actor CloudSyncManager: CKSyncEngineDelegate {
     ackURL = rootURL.appendingPathComponent("ack", isDirectory: true)
     stateURL = rootURL.appendingPathComponent("state", isDirectory: true)
     recordStateURL = stateURL.appendingPathComponent("records", isDirectory: true)
+    accountBindingURL = stateURL.appendingPathComponent("account-binding.txt")
+    probeConfigurationURL = stateURL.appendingPathComponent("probe-config.json")
+    probeJournalURL = stateURL.appendingPathComponent("probe-journal.json")
     container = containerIdentifier.map(CKContainer.init(identifier:)) ?? CKContainer.default()
     zone = CKRecordZone(zoneName: Self.zoneName)
     accountHashContainer = containerIdentifier ?? "default"
@@ -95,12 +108,13 @@ actor CloudSyncManager: CKSyncEngineDelegate {
       }
       return syncEngine
     }
+    try prepareAccountScopedState(for: accountIDHash)
     var configuration = CKSyncEngine.Configuration(
       database: container.privateCloudDatabase,
       stateSerialization: try Self.loadEngineState(from: stateURL),
       delegate: self
     )
-    configuration.automaticallySync = false
+    configuration.automaticallySync = true
     configuration.subscriptionID = "CoursePilotSyncSubscription"
     let engine = CKSyncEngine(configuration)
     syncEngine = engine
@@ -181,16 +195,26 @@ actor CloudSyncManager: CKSyncEngineDelegate {
       try ensureCurrent(syncEngine, generation: generation)
       try await ensureZone(syncEngine)
       try ensureCurrent(syncEngine, generation: generation)
-      try await syncEngine.fetchChanges()
+      try recoverProbeReceipts(syncEngine)
+      try await fetchChangesExplicitly(syncEngine)
       try ensureCurrent(syncEngine, generation: generation)
       started = true
       lastError = nil
       return status()
     } catch {
+      let operationError = error
       if generation == lifecycleGeneration {
-        await deactivateEngine(lastError: error.localizedDescription)
+        await deactivateEngine(lastError: operationError.localizedDescription)
+        if case CloudSyncError.accountChanged = operationError {
+          do {
+            try quarantineAccountScopedState()
+          } catch {
+            lastError = "iCloud account changed and old sync state could not be quarantined: \(error.localizedDescription)"
+            throw error
+          }
+        }
       }
-      throw error
+      throw operationError
     }
   }
 
@@ -214,7 +238,7 @@ actor CloudSyncManager: CKSyncEngineDelegate {
       try ensureCurrent(syncEngine, generation: generation)
 
       // Pull first so an explicit sync cannot upload before observing server state.
-      try await syncEngine.fetchChanges()
+      try await fetchChangesExplicitly(syncEngine)
       try ensureCurrent(syncEngine, generation: generation)
       let recheckedAccountIDHash = try await verifyAccount(
         expectedAccountIDHash: expectedAccountIDHash,
@@ -230,10 +254,19 @@ actor CloudSyncManager: CKSyncEngineDelegate {
       lastError = nil
       return status()
     } catch {
+      let operationError = error
       if generation == lifecycleGeneration {
-        await deactivateEngine(lastError: error.localizedDescription)
+        await deactivateEngine(lastError: operationError.localizedDescription)
+        if case CloudSyncError.accountChanged = operationError {
+          do {
+            try quarantineAccountScopedState()
+          } catch {
+            lastError = "iCloud account changed and old sync state could not be quarantined: \(error.localizedDescription)"
+            throw error
+          }
+        }
       }
-      throw error
+      throw operationError
     }
   }
 
@@ -266,29 +299,42 @@ actor CloudSyncManager: CKSyncEngineDelegate {
           accountIDHash = account.hash
           guard account.status == "available", account.hash == engineAccountIDHash else {
             await deactivateEngine(lastError: "iCloud account changed; sync is paused")
+            try quarantineAccountScopedState()
             return
           }
         case .signOut:
           accountStatus = "noAccount"
           accountIDHash = nil
           await deactivateEngine(lastError: "iCloud account signed out; sync is paused")
+          try resetEngineStatePreservingSpool()
         case .switchAccounts:
           accountStatus = "unknown"
           accountIDHash = nil
           await deactivateEngine(lastError: "iCloud account changed; sync is paused")
+          try quarantineAccountScopedState()
         @unknown default:
           accountStatus = "unknown"
           accountIDHash = nil
           await deactivateEngine(lastError: "iCloud account state changed; sync is paused")
+          try quarantineAccountScopedState()
         }
       case .fetchedRecordZoneChanges(let changes):
+        let trigger = explicitFetchDepth > 0 ? "explicit" : "automatic"
+        let appState = await Self.currentProbeAppState()
         for modification in changes.modifications {
           try persistFetchedRecord(modification.record)
+          try await handleProbeRequest(
+            modification.record,
+            trigger: trigger,
+            appState: appState,
+            syncEngine: syncEngine
+          )
         }
       case .sentRecordZoneChanges(let changes):
         for record in changes.savedRecords {
           try persistSystemFields(record)
           try writeAck(for: record, error: nil)
+          try markProbeReceiptAcked(record)
           try removeOutgoingFile(for: record.recordID.recordName)
         }
         for failure in changes.failedRecordSaves {
@@ -329,6 +375,42 @@ actor CloudSyncManager: CKSyncEngineDelegate {
     return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: pending) { recordID in
       await self.recordToSave(for: recordID, syncEngine: syncEngine)
     }
+  }
+
+  private func fetchChangesExplicitly(_ syncEngine: CKSyncEngine) async throws {
+    explicitFetchDepth += 1
+    defer { explicitFetchDepth -= 1 }
+    try await syncEngine.fetchChanges()
+  }
+
+  func prepareAccountScopedState(for accountIDHash: String) throws {
+    try Self.prepareAccountScopedState(for: accountIDHash, rootURL: rootURL)
+  }
+
+  static func prepareAccountScopedState(for accountIDHash: String, rootURL: URL) throws {
+    try CloudSyncProbeCore.prepareAccountScopedState(for: accountIDHash, rootURL: rootURL)
+  }
+
+  private func resetEngineStatePreservingSpool() throws {
+    let engineStateURL = stateURL.appendingPathComponent("cksyncengine.plist")
+    if FileManager.default.fileExists(atPath: engineStateURL.path) {
+      try FileManager.default.removeItem(at: engineStateURL)
+    }
+    if FileManager.default.fileExists(atPath: recordStateURL.path) {
+      try FileManager.default.removeItem(at: recordStateURL)
+    }
+    try FileManager.default.createDirectory(
+      at: recordStateURL,
+      withIntermediateDirectories: true
+    )
+  }
+
+  func quarantineAccountScopedState() throws {
+    try Self.quarantineAccountScopedState(rootURL: rootURL)
+  }
+
+  static func quarantineAccountScopedState(rootURL: URL) throws {
+    try CloudSyncProbeCore.quarantineAccountScopedState(rootURL: rootURL)
   }
 
   private func ensureZone(_ syncEngine: CKSyncEngine) async throws {
@@ -426,6 +508,11 @@ actor CloudSyncManager: CKSyncEngineDelegate {
           let envelope = Self.envelope(from: record) else {
       return
     }
+    if try loadProbeConfiguration() != nil,
+       envelope.recordType != "SyncProbeRequest",
+       envelope.recordType != "SyncProbeReceipt" {
+      return
+    }
     try persistSystemFields(record)
     let fileMaterial =
       "\(record.recordID.recordName)\0\(envelope.version.counter)\0\(envelope.version.device)"
@@ -472,6 +559,7 @@ actor CloudSyncManager: CKSyncEngineDelegate {
         "counter": envelope.version.counter,
         "device": envelope.version.device,
       ],
+      "updatedAt": envelope.updatedAt,
     ]
     if let changeTag = record.recordChangeTag {
       object["changeTag"] = changeTag
@@ -499,6 +587,143 @@ actor CloudSyncManager: CKSyncEngineDelegate {
     } catch CocoaError.fileNoSuchFile {
       return
     }
+  }
+
+  private func handleProbeRequest(
+    _ record: CKRecord,
+    trigger: String,
+    appState: String,
+    syncEngine: CKSyncEngine
+  ) async throws {
+    guard let configuration = try loadProbeConfiguration(),
+          let envelope = Self.envelope(from: record),
+          envelope.recordType == "SyncProbeRequest",
+          let payloadData = envelope.payloadJSON.data(using: .utf8),
+          let request = try? JSONDecoder().decode(ProbeRequest.self, from: payloadData) else {
+      return
+    }
+    let nowMS = Int64(Date().timeIntervalSince1970 * 1_000)
+    guard request.protocolVersion == configuration.protocolVersion,
+          request.sessionID == configuration.sessionID,
+          request.senderParticipantID != configuration.participantID,
+          request.accountProof == configuration.accountProof,
+          request.expiresAtMS >= nowMS,
+          configuration.expiresAtMS >= nowMS,
+          CloudSyncProbeCore.verifyRequest(request, configuration: configuration) else {
+      return
+    }
+
+    var journal = try loadProbeJournal()
+    let previous = journal[request.messageID]
+    let entry = CloudSyncProbeCore.prepareReceipt(
+      request: request,
+      configuration: configuration,
+      previous: previous,
+      trigger: trigger,
+      appState: appState,
+      nowMS: nowMS
+    )
+    journal[request.messageID] = entry
+    try persistProbeJournal(journal)
+    try writeProbeReceipt(entry.receipt, configuration: configuration)
+    try enqueueOutgoingFiles(syncEngine)
+  }
+
+  private func recoverProbeReceipts(_ syncEngine: CKSyncEngine) throws {
+    guard let configuration = try loadProbeConfiguration() else {
+      return
+    }
+    let nowMS = Int64(Date().timeIntervalSince1970 * 1_000)
+    guard configuration.expiresAtMS >= nowMS else {
+      return
+    }
+    for entry in try loadProbeJournal().values where !entry.acked {
+      try writeProbeReceipt(entry.receipt, configuration: configuration)
+    }
+    try enqueueOutgoingFiles(syncEngine)
+  }
+
+  private func markProbeReceiptAcked(_ record: CKRecord) throws {
+    guard let envelope = Self.envelope(from: record),
+          envelope.recordType == "SyncProbeReceipt",
+          let payloadData = envelope.payloadJSON.data(using: .utf8),
+          let receipt = try? JSONDecoder().decode(ProbeReceipt.self, from: payloadData) else {
+      return
+    }
+    var journal = try loadProbeJournal()
+    guard var entry = journal[receipt.inReplyTo],
+          entry.receipt.messageID == receipt.messageID,
+          entry.receipt.observedDeliveries == receipt.observedDeliveries else {
+      return
+    }
+    entry.acked = true
+    journal[receipt.inReplyTo] = entry
+    try persistProbeJournal(journal)
+  }
+
+  private func writeProbeReceipt(
+    _ receipt: ProbeReceipt,
+    configuration: ProbeConfiguration
+  ) throws {
+    guard receipt.sessionID == configuration.sessionID else {
+      throw CloudSyncError.invalidProbe("receipt session")
+    }
+    let payloadData = try JSONEncoder().encode(receipt)
+    let payload = try JSONSerialization.jsonObject(with: payloadData)
+    let object: [String: Any] = [
+      "schemaVersion": 1,
+      "recordType": "SyncProbeReceipt",
+      "recordID": receipt.messageID,
+      "operation": "save",
+      "version": [
+        "counter": Int64(receipt.observedDeliveries),
+        "device": configuration.participantID,
+      ],
+      "updatedAt": Int64(Date().timeIntervalSince1970 * 1_000),
+      "payload": payload,
+    ]
+    let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    let name = "probe-receipt-\(Self.sha256Hex(receipt.messageID)).json"
+    try Self.atomicWrite(data, to: outgoingURL.appendingPathComponent(name))
+  }
+
+  private func loadProbeConfiguration() throws -> ProbeConfiguration? {
+    guard FileManager.default.fileExists(atPath: probeConfigurationURL.path) else {
+      return nil
+    }
+    return try JSONDecoder().decode(
+      ProbeConfiguration.self,
+      from: Data(contentsOf: probeConfigurationURL)
+    )
+  }
+
+  private func loadProbeJournal() throws -> [String: ProbeJournalEntry] {
+    guard FileManager.default.fileExists(atPath: probeJournalURL.path) else {
+      return [:]
+    }
+    return try JSONDecoder().decode(
+      [String: ProbeJournalEntry].self,
+      from: Data(contentsOf: probeJournalURL)
+    )
+  }
+
+  private func persistProbeJournal(_ journal: [String: ProbeJournalEntry]) throws {
+    try Self.atomicWrite(try JSONEncoder().encode(journal), to: probeJournalURL)
+  }
+
+  private static func currentProbeAppState() async -> String {
+    #if os(iOS)
+    return await MainActor.run {
+      switch UIApplication.shared.applicationState {
+      case .background: return "background"
+      case .inactive: return "inactive"
+      case .active: return "active"
+      @unknown default: return "unknown"
+      }
+    }
+    #else
+    return "active"
+    #endif
   }
 
   private func persistEngineState(_ serialization: CKSyncEngine.State.Serialization) throws {
@@ -663,6 +888,7 @@ private struct DiskEnvelope {
 
 private enum CloudSyncError: LocalizedError {
   case invalidEnvelope(String)
+  case invalidProbe(String)
   case engineUnavailable
   case operationSuperseded
   case accountUnavailable(String)
@@ -673,6 +899,8 @@ private enum CloudSyncError: LocalizedError {
     switch self {
     case .invalidEnvelope(let name):
       return "Invalid sync envelope: \(name)"
+    case .invalidProbe(let detail):
+      return "Invalid CloudKit probe: \(detail)"
     case .engineUnavailable:
       return "Cloud sync engine is not running"
     case .operationSuperseded:

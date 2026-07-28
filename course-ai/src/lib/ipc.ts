@@ -37,6 +37,11 @@ export interface NativeCloudSyncStatus {
   nativeBridgeAvailable: boolean;
 }
 
+export interface CloudSyncProbeAccountChangeResult {
+  changed: boolean;
+  native: NativeCloudSyncStatus;
+}
+
 export interface CloudSyncStatus {
   deviceId: string;
   enabled: boolean;
@@ -46,8 +51,41 @@ export interface CloudSyncStatus {
   native: NativeCloudSyncStatus;
 }
 
-export interface CloudSyncProbeResult {
-  probeId: string;
+export interface CloudSyncProbeArmResult {
+  sessionCode: string;
+  sessionId: string;
+  expiresAtMs: number;
+  native: NativeCloudSyncStatus;
+}
+
+export interface CloudSyncProbeStatus {
+  sessionId: string;
+  requestId?: string | null;
+  state:
+    | "armed"
+    | "expired"
+    | "sending"
+    | "waitingForReceipt"
+    | "backgroundDeliveryNotObserved"
+    | "waitingForReplay"
+    | "waitingForReplayAck"
+    | "waitingForReplayReceipt"
+    | "duplicateApplicationDetected"
+    | "complete";
+  requestCloudAcked: boolean;
+  receiptReceived: boolean;
+  sameICloudAccount: boolean;
+  firstDeliveryTrigger?: string | null;
+  firstDeliveryAppState?: string | null;
+  replayCount: number;
+  replayBaselineDeliveries?: number | null;
+  replayCloudAcked: boolean;
+  observedDeliveries: number;
+  appliedCount: number;
+}
+
+export interface CloudSyncProbeStopResult {
+  status: CloudSyncProbeStatus;
   native: NativeCloudSyncStatus;
 }
 
@@ -195,7 +233,16 @@ export const ipc = {
     setEnabled: (enabled: boolean): Promise<CloudSyncStatus> =>
       invoke("cmd_sync_set_enabled", { enabled }),
     syncNow: (): Promise<CloudSyncStatus> => invoke("cmd_sync_now"),
-    probe: (): Promise<CloudSyncProbeResult> => invoke("cmd_sync_probe"),
+    probe: (sessionCode?: string): Promise<CloudSyncProbeArmResult> =>
+      invoke("cmd_sync_probe", { sessionCode }),
+    confirmProbeAccountChange: (): Promise<CloudSyncProbeAccountChangeResult> =>
+      invoke("cmd_sync_probe_confirm_account_change"),
+    probeSend: (replay = false): Promise<CloudSyncProbeStatus> =>
+      invoke("cmd_sync_probe_send", { replay }),
+    probeStatus: (): Promise<CloudSyncProbeStatus> =>
+      invoke("cmd_sync_probe_status"),
+    probeStop: (): Promise<CloudSyncProbeStopResult> =>
+      invoke("cmd_sync_probe_stop"),
   },
   courses: {
     list: (): Promise<Course[]> => invoke("cmd_list_courses"),
