@@ -247,14 +247,21 @@ struct RawBackupSegment {
     text: String,
 }
 
-/// 把最近一份原始 ASR 快照（transcript_backups source=raw_asr）写回 transcripts.text。
+/// 把最近一份原始快照写回 transcripts.text。
 /// 用于「仅重新纠错」：先回到原始稿，再重跑纠错，避免在已纠错文本上反复改写。
-/// 没有备份时返回 false（沿用当前文本）。
+/// 没有任何备份时返回 false（沿用当前文本）。
+///
+/// 优先取原始 ASR 稿；没有就退到最近的一份**任何来源**的备份——视频自带字幕
+/// （B 站/本地 SRT）走的是导入而不是语音识别，备份记的是 `bilibili_sub` 之类的来源。
+/// 只认 raw_asr 的话，这类视频每次「重新纠错」都是在上一次的纠错结果上再纠一遍，
+/// 改动会一轮轮累积漂移。
 pub async fn restore_raw_transcript(db: &Db, video_id: &str) -> AppResult<bool> {
     let mut tx = db.pool.begin().await?;
     let raw: Option<String> = sqlx::query_scalar(
         "SELECT segments_json FROM transcript_backups
-         WHERE video_id=? AND source='raw_asr' ORDER BY created_at DESC LIMIT 1",
+         WHERE video_id=?
+         ORDER BY (source='raw_asr') DESC, created_at DESC
+         LIMIT 1",
     )
     .bind(video_id)
     .fetch_optional(&mut *tx)
@@ -511,6 +518,39 @@ mod tests {
         )])
         .unwrap_err();
         assert!(err.to_string().contains("所有分段纠错均失败"));
+    }
+
+    #[tokio::test]
+    async fn recorrecting_a_subtitle_video_starts_from_the_imported_text() {
+        // 自带字幕的视频（B 站/本地 SRT）走的是导入而不是语音识别，备份来源不是
+        // raw_asr。只认 raw_asr 的话，每次「重新纠错」都是在上一次的结果上再纠一遍，
+        // 改动会一轮轮累积漂移。
+        let (db, vid, _dir) = seed_video_with_transcript().await;
+        let segments = vec![crate::pipeline::asr::StoredSegment {
+            start_ms: 0,
+            end_ms: 5_000,
+            text: "导入时的原始字幕".into(),
+            words_json: "[]".into(),
+        }];
+        crate::pipeline::asr::store_segments_with_backup(&db, &vid, "bilibili_sub", &segments)
+            .await
+            .unwrap();
+        // 上一轮纠错把它改过了。
+        sqlx::query("UPDATE transcripts SET text=? WHERE video_id=?")
+            .bind("上一轮纠错后的文本")
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        assert!(restore_raw_transcript(&db, &vid).await.unwrap());
+
+        let text: String = sqlx::query_scalar("SELECT text FROM transcripts WHERE video_id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(text, "导入时的原始字幕");
     }
 
     #[tokio::test]

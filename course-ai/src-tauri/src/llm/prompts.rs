@@ -109,13 +109,13 @@ pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatReque
         model: model.to_string(),
         system: Some(
             "你是课程字幕纠错助手。只输出 JSON 数组，不要任何解释、标题或代码围栏。\
-             只修正识别错误、病句、标点和口语赘词；不要补充视频里没说过的内容。\
+             只修正识别错误、病句和口语赘词；不要补充视频里没说过的内容。\
              删除口语里无实义的语气词、口头禅与重复赘语，让句子更精炼通顺，\
              例如「额、呃、嗯、啊、哦、那个、这个、就是、然后然后、对吧、是吧、对不对、\
              你知道吧、呢、嘛、啦」等；但只删纯语气/填充词，凡有实际含义的字词一律保留，\
              不要改变原意，疑问句末尾真正表疑问的「吗/呢」要保留。\
-             重点规范断句与标点：把零碎、粘连或断错的口语文本整理成通顺完整的句子，\
-             正确使用中文逗号、句号、问号、顿号等标点，句子开头规范、首字不丢；\
+             不要添加原文没有的标点符号：字幕本来就按时间分段，加标点只会让画面更碎。\
+             把零碎、粘连或断错的口语文本理顺成通顺的句子，首字不丢；\
              但每段只在本段内纠正，不要跨段搬移文字、不要合并或拆分分段。\
              把被识别成文字的数学/物理/化学表达还原成 LaTeX 公式，用行内定界符 \\( ... \\) 包裹\
              （较长的独立公式可用 \\[ ... \\]）：\
@@ -205,6 +205,14 @@ mod tests {
                 "correction prompt should mention {required}"
             );
         }
+    }
+
+    #[test]
+    fn transcript_correction_prompt_does_not_ask_for_punctuation() {
+        let system = transcript_correction_request("m", "[]").system.unwrap();
+        // 字幕本来就按时间分段，再加标点只会让画面更碎。
+        assert!(system.contains("不要添加原文没有的标点符号"));
+        assert!(!system.contains("正确使用中文逗号"), "不该再要求补标点");
     }
 
     #[test]
