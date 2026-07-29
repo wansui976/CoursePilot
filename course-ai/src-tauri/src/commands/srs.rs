@@ -973,8 +973,9 @@ mod tests {
     use uuid::Uuid;
 
     async fn fresh_db() -> Db {
-        let p = std::env::temp_dir().join(format!("course-ai-srs-{}.db", Uuid::new_v4()));
-        Db::connect_and_migrate(&p).await.unwrap()
+        Db::connect_and_migrate(&crate::db::test_db_path("srs"))
+            .await
+            .unwrap()
     }
 
     async fn seed_quiz(db: &Db, questions_json: &str) -> String {
