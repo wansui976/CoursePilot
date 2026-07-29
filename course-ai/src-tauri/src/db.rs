@@ -36,6 +36,26 @@ impl Db {
     }
 }
 
+/// 测试用的 SQLite 文件路径。
+///
+/// 这些测试 helper 只拿得到 `Db`（没有地方存 `TempDir` 守卫），所以库文件删不掉，
+/// 每跑一次 `cargo test` 就在 /tmp 里留下几百个。沙箱的 /tmp 只有 512MB，攒够了
+/// 整个测试套件会以 "database or disk is full" 集体失败——错误信息还完全指不到病根。
+///
+/// 折中办法：全部放进同一个目录，并在每个测试进程**第一次**取路径时把上一轮的残留
+/// 整个清掉。这样最多只留一轮的量，且不必给几十处调用点改签名。
+#[cfg(test)]
+pub fn test_db_path(prefix: &str) -> std::path::PathBuf {
+    use std::sync::Once;
+    static CLEAN: Once = Once::new();
+    let root = std::env::temp_dir().join("course-ai-tests");
+    CLEAN.call_once(|| {
+        let _ = std::fs::remove_dir_all(&root);
+    });
+    let _ = std::fs::create_dir_all(&root);
+    root.join(format!("{prefix}-{}.db", uuid::Uuid::new_v4()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

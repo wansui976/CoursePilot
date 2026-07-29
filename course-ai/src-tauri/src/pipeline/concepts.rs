@@ -2066,8 +2066,9 @@ mod tests {
     use crate::commands::courses::create_course;
 
     async fn fresh_db() -> Db {
-        let dir = std::env::temp_dir().join(format!("ca-concepts-{}.db", uuid::Uuid::new_v4()));
-        Db::connect_and_migrate(&dir).await.unwrap()
+        Db::connect_and_migrate(&crate::db::test_db_path("concepts"))
+            .await
+            .unwrap()
     }
 
     async fn seed_video(db: &Db, course_id: &str, title: &str, order_index: i64) -> String {

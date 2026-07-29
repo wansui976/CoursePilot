@@ -297,8 +297,7 @@ mod tests {
     use uuid::Uuid;
 
     async fn fresh_db() -> Db {
-        let db_path =
-            std::env::temp_dir().join(format!("course-ai-stats-test-{}.db", Uuid::new_v4()));
+        let db_path = crate::db::test_db_path("stats");
         Db::connect_and_migrate(&db_path).await.unwrap()
     }
 
