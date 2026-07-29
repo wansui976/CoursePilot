@@ -843,7 +843,8 @@ async fn prepare_course_knowledge(
     chat_model: &str,
     course_id: &str,
     concepts: &[CourseConcept],
-) -> AppResult<PreparedKnowledge> {
+    cancel: &AtomicBool,
+) -> AppResult<Option<PreparedKnowledge>> {
     if concepts.is_empty() {
         return Err(AppError::Other("尚无可总结的课程知识点".into()));
     }
@@ -853,14 +854,18 @@ async fn prepare_course_knowledge(
     }
     let (covered_videos, total_videos) = course_video_counts(db, course_id).await?;
     let request = knowledge_summary_request(chat_model, &catalog)?;
-    let content = provider.complete(&request).await?.content;
+    // 「整理课程总结」是整条分析里最后也最长的一次调用。原来这里既不查取消、
+    // 也拦不住后面的提交：用户点了停止，它照样跑完、写库，还报告成功。
+    let Some(content) = crate::llm::complete_or_cancel(provider, &request, cancel).await? else {
+        return Ok(None);
+    };
     let draft: KnowledgeDraft = parse_lenient_json(&content)?;
     let snapshot = validate_knowledge_draft(draft, &catalog, covered_videos, total_videos)?;
 
-    Ok(PreparedKnowledge {
+    Ok(Some(PreparedKnowledge {
         snapshot,
         fingerprint: catalog.fingerprint,
-    })
+    }))
 }
 
 /// 基于当前概念与真实字幕生成课程总览快照。LLM 期间不持事务；写入前再次核对指纹，
@@ -872,7 +877,11 @@ pub async fn generate_course_knowledge(
     course_id: &str,
 ) -> AppResult<()> {
     let concepts = list_course_concepts(db, course_id).await?;
-    let prepared = prepare_course_knowledge(db, provider, chat_model, course_id, &concepts).await?;
+    // 这个入口（单独重生成课程总结）没有取消通道，给一个永不置位的标志。
+    let never = AtomicBool::new(false);
+    let prepared = prepare_course_knowledge(db, provider, chat_model, course_id, &concepts, &never)
+        .await?
+        .ok_or_else(|| AppError::Other("课程总结已取消".into()))?;
 
     let current_concepts = list_course_concepts(db, course_id).await?;
     let current_catalog = knowledge_catalog(&current_concepts)?;
@@ -1681,8 +1690,18 @@ pub async fn analyze_course_concepts(
         total,
         title: "整理课程总结…".into(),
     });
-    let prepared =
-        prepare_course_knowledge(db, provider, chat_model, course_id, &candidate_concepts).await?;
+    let Some(prepared) = prepare_course_knowledge(
+        db,
+        provider,
+        chat_model,
+        course_id,
+        &candidate_concepts,
+        cancel,
+    )
+    .await?
+    else {
+        return Err(AppError::Other("分析已取消".into()));
+    };
 
     // LLM 等待期间字幕、视频或概念可能变化。提交前再核对，避免给已变化的课程写入旧摘要。
     let (current_merged, current_concepts) =
@@ -1699,6 +1718,12 @@ pub async fn analyze_course_concepts(
         return Err(AppError::Other(
             "分析期间课程内容发生变化，请重新分析课程知识".into(),
         ));
+    }
+
+    // 提交前最后一道闸：核对指纹那几次查库之间用户也可能点了停止。
+    // 「已取消」却照样替换整门课的知识库，是最难解释的一种结果。
+    if cancel.load(Ordering::SeqCst) {
+        return Err(AppError::Other("分析已取消".into()));
     }
 
     let mut tx = db.pool.begin().await?;
@@ -1718,6 +1743,46 @@ pub async fn analyze_course_concepts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn stopping_during_the_summary_step_writes_nothing() {
+        // 「整理课程总结」是整条分析里最后也最长的一次调用。原来这一步既不查取消，
+        // 也拦不住后面的提交：用户点了停止，它照样跑完、替换整门课的知识库、报告成功。
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let provider = Provider::Mock {
+            canned: "{}".into(),
+        };
+        let mut concept = concept("贝叶斯定理", "用新证据更新先验。", "解释");
+        concept.occurrences = vec![occurrence("v1", "第一讲", 1_000, "先验会被证据更新。")];
+        let concepts = vec![concept];
+
+        // 没取消时这套输入是能走到 LLM 那一步的（模型返回坏 JSON 才失败），
+        // 说明下面的 Ok(None) 确实来自取消，而不是前置校验拦下的。
+        let never = AtomicBool::new(false);
+        assert!(
+            prepare_course_knowledge(&db, &provider, "m", &course.id, &concepts, &never)
+                .await
+                .is_err(),
+            "未取消时应当真的调用了模型（这里回的是坏 JSON）"
+        );
+
+        let canceled = AtomicBool::new(true);
+        let prepared =
+            prepare_course_knowledge(&db, &provider, "m", &course.id, &concepts, &canceled)
+                .await
+                .unwrap();
+        assert!(prepared.is_none(), "取消后不该交出可提交的课程总结");
+    }
 
     #[test]
     fn a_mostly_failed_extraction_must_not_replace_the_knowledge_base() {

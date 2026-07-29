@@ -89,6 +89,33 @@ mod sse_tests {
     }
 }
 
+/// 等模型返回，但每隔一小会儿看一眼取消标志；被取消时返回 None。
+///
+/// 非流式调用只在开始前查一次标志是不够的：`complete` 最长要等到请求超时（180 秒）
+/// 才回得来，用户点了「停止」，界面却还得转上几分钟，而且这期间跑出来的结果照样
+/// 会被写库。future 一被丢弃，底层 HTTP 请求随之断开，取消才真正落到网络这一层。
+pub async fn complete_or_cancel(
+    provider: &Provider,
+    req: &ChatRequest,
+    cancel: &AtomicBool,
+) -> AppResult<Option<String>> {
+    if cancel.load(Ordering::SeqCst) {
+        return Ok(None);
+    }
+    let call = provider.complete(req);
+    tokio::pin!(call);
+    loop {
+        tokio::select! {
+            finished = &mut call => return finished.map(|response| Some(response.content)),
+            _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
+                if cancel.load(Ordering::SeqCst) {
+                    return Ok(None);
+                }
+            }
+        }
+    }
+}
+
 /// 流式片段：正式回答内容，或推理模型的「思考」内容（不计入最终答案）。
 pub enum StreamPiece<'a> {
     Content(&'a str),
