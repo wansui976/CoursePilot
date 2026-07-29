@@ -114,6 +114,17 @@ function readSidebarCollapsed(): SidebarCollapsed {
   }
 }
 
+/**
+ * 这个视频能不能只重跑 AI 纠错（而不是从头抽音频、重新识别一遍）。
+ *
+ * 处理完成的当然可以。自带字幕的（B 站导入、本地 SRT）也可以，哪怕状态不是「已处理」
+ * ——它的文稿是导入来的，重跑完整流程会把自带字幕丢掉、改用语音识别，既慢又更差。
+ * `subtitle_lang` 在字幕消化完之后仍然保留，正是用来标记来源的。
+ */
+function canRecorrect(video: Video): boolean {
+  return video.processed_status === "done" || !!video.subtitle_lang;
+}
+
 export function Home() {
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
@@ -905,15 +916,14 @@ export function Home() {
           className="ca-touch-44"
           onClick={() => {
             setOpenMenuVideoId(null);
-            // 已有字幕（处理完成）→ 仅重新 AI 纠错；否则跑完整处理。
-            if (video.processed_status === "done") {
+            if (canRecorrect(video)) {
               recorrect.mutate(video.id);
             } else {
               startProcessing(video);
             }
           }}
         >
-          {video.processed_status === "done"
+          {canRecorrect(video)
             ? recorrect.isPending && recorrect.variables === video.id
               ? "纠错中…"
               : "重新纠错"
