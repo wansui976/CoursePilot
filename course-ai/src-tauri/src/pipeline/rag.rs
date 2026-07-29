@@ -6,7 +6,7 @@
 use crate::commands::transcripts::{list_segments, TranscriptSegment};
 use crate::db::Db;
 use crate::error::AppResult;
-use crate::llm::{ChatMessage, ChatRequest, Provider, StreamPiece};
+use crate::llm::{complete_or_cancel, ChatMessage, ChatRequest, Provider, StreamPiece};
 // 中文问句切词元与课程问答那边共用同一套：两处对「什么算命中」的理解必须一致。
 use crate::pipeline::search_terms::{hit_count, query_terms};
 use serde::Serialize;
@@ -313,34 +313,6 @@ pub async fn answer(
 
 /// 流式问答：短视频直接流式；长视频先发状态提示，仅综合步流式。
 /// 结束时对累积文本清洗时间戳数组，发 Done 并返回。
-/// 等模型返回，但每隔一小会儿看一眼取消标志；被取消时返回 None。
-///
-/// 只置位标志是不够的：map 阶段是**非流式**调用，`complete` 最长要等到请求超时
-/// （180 秒）才回得来。用户点了「停止」，界面却还得转上几分钟。future 一被丢弃，
-/// 底层 HTTP 请求随之断开，取消才真正落到网络这一层。
-async fn complete_or_cancel(
-    provider: &Provider,
-    req: &ChatRequest,
-    cancel: &AtomicBool,
-) -> AppResult<Option<String>> {
-    use std::sync::atomic::Ordering;
-    if cancel.load(Ordering::SeqCst) {
-        return Ok(None);
-    }
-    let call = provider.complete(req);
-    tokio::pin!(call);
-    loop {
-        tokio::select! {
-            finished = &mut call => return finished.map(|response| Some(response.content)),
-            _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
-                if cancel.load(Ordering::SeqCst) {
-                    return Ok(None);
-                }
-            }
-        }
-    }
-}
-
 #[allow(clippy::too_many_arguments)] // 编排入口：db/provider/model/video/query/history/cancel/on_event 各有其义。
 pub async fn answer_stream(
     db: &Db,
