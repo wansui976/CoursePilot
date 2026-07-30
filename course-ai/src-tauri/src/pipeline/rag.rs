@@ -1,7 +1,10 @@
 //! 视频问答 + 文稿关键词搜索（不依赖向量/嵌入）。
 //!
-//! - 问答：把整篇字幕作为上下文直接交给 LLM 作答；超长视频自动分段 map-reduce。
+//! - 问答：先用关键词检索出相关片段，只把这些片段交给 LLM 作答（不再整篇喂）。
 //! - 搜索：本地在字幕段里做关键词匹配，结果可点击跳转。
+//!
+//! 两条路都同时看字幕和课件 OCR：术语常常只写在片子上、老师一句没念，只读字幕会把
+//! 「讲过」误判成「没讲过」。
 
 use crate::commands::transcripts::{list_segments, TranscriptSegment};
 use crate::db::Db;
@@ -257,6 +260,69 @@ struct Window {
     text: String,
 }
 
+/// 问答里一页课件最多放多少字。搜索列表只要 120 字够扫一眼，
+/// 问答要的是板书上那条完整的公式或定义，砍太狠等于没喂。
+const SLIDE_ASK_CHARS: usize = 300;
+/// 单视频问答最多带几页课件；课程级每视频最多几页、全课程共几页。
+/// 有上限是因为整份 OCR 会把讲稿窗口挤出预算，而讲稿才是老师真正讲过的部分。
+const SLIDE_ASK_MAX_PAGES: usize = 4;
+const COURSE_SLIDE_PER_VIDEO: usize = 2;
+const COURSE_SLIDE_LIMIT: usize = 6;
+
+/// 一页参与问答的课件。
+struct SlideRef {
+    score: usize,
+    page_no: i64,
+    start_ms: i64,
+    end_ms: i64,
+    text: String,
+    image_path: String,
+}
+
+/// 一次检索的全部依据：讲稿窗口 + 命中的课件页。
+///
+/// 课件页必须进来。术语常常只写在片子上、老师一句没念，字幕里就是没有；
+/// 搜索早就承认了这件事（见 [`list_slide_pages`] 的注释），问答却只读字幕，
+/// 于是同一个术语「搜得到、问不出」——问答会一口咬定「视频里没有讲到这个内容」。
+struct Retrieved {
+    windows: Vec<Window>,
+    slides: Vec<SlideRef>,
+}
+
+impl Retrieved {
+    fn is_empty(&self) -> bool {
+        self.windows.is_empty() && self.slides.is_empty()
+    }
+}
+
+/// 用一句给定的检索文本召回讲稿窗口与课件页（不含历史回退）。
+fn retrieve_once(segments: &[TranscriptSegment], pages: &[SlidePage], query: &str) -> Retrieved {
+    let mut slides: Vec<SlideRef> = scored_slide_pages(pages, query)
+        .into_iter()
+        .map(|(score, page)| slide_ref(score, page, query))
+        .collect();
+    // 命中多的页优先，同分按出现时间；只留前几页。
+    slides.sort_by(|a, b| b.score.cmp(&a.score).then(a.start_ms.cmp(&b.start_ms)));
+    slides.truncate(SLIDE_ASK_MAX_PAGES);
+    slides.sort_by_key(|slide| slide.start_ms);
+    Retrieved {
+        windows: windows_from_hits(segments, query, WINDOW_BUDGET_CHARS),
+        slides,
+    }
+}
+
+fn slide_ref(score: usize, page: SlidePage, query: &str) -> SlideRef {
+    let terms = query_terms(query);
+    SlideRef {
+        score,
+        page_no: page.page_no,
+        start_ms: page.start_ms,
+        end_ms: page.end_ms.unwrap_or(page.start_ms),
+        text: slide_snippet(&page.ocr_text, &terms, SLIDE_ASK_CHARS),
+        image_path: page.image_path,
+    }
+}
+
 /// 追问带上最近几轮问过什么，凑出用于**检索**的文本。
 ///
 /// 「那第二种情况呢」「为什么不行」这类省略主语的追问，本身几乎没有可检索的词——
@@ -282,20 +348,21 @@ fn retrieval_text_with_history(query: &str, history: &[ChatMessage]) -> String {
     text
 }
 
-/// 检索窗口：先只用本轮问题；召不回再带上最近几轮追问重试一次。
-fn retrieve_windows(
+/// 检索依据：先只用本轮问题；讲稿和课件都召不回，再带上最近几轮追问重试一次。
+fn retrieve(
     segments: &[TranscriptSegment],
+    pages: &[SlidePage],
     query: &str,
     history: &[ChatMessage],
-) -> Vec<Window> {
-    let direct = windows_from_hits(segments, query, WINDOW_BUDGET_CHARS);
+) -> Retrieved {
+    let direct = retrieve_once(segments, pages, query);
     if !direct.is_empty() || history.is_empty() {
         return direct;
     }
-    windows_from_hits(
+    retrieve_once(
         segments,
+        pages,
         &retrieval_text_with_history(query, history),
-        WINDOW_BUDGET_CHARS,
     )
 }
 
@@ -387,13 +454,15 @@ const RETRIEVAL_ASK_SYSTEM: &str = "你是这节课的答疑助手。只根据�
    只用单个时间点，不要输出时间段或时间戳数组。\
 3. 片段不足以回答时，直说「这节课讲到的部分只够回答到这里」，再说明缺的是什么；\
    不要用你自己的知识补齐后混在一起讲。\
-4. 先给结论，再展开；不要复述问题，不要寒暄。";
+4. 可能会给到「课件」块：那是课件画面上认出来的文字，老师可能写了没念，同样算这节课讲过的内容；\
+   但它是机器识别的，个别字符可能出错，明显不通时按上下文理解，不要照抄错字。引用它时用它行首的 [mm:ss]。\
+5. 先给结论，再展开；不要复述问题，不要寒暄。";
 
-const NOT_COVERED_SYSTEM: &str = "这节课的字幕里没有讲到用户的问题。\
+const NOT_COVERED_SYSTEM: &str = "这节课的字幕和课件里都没有讲到用户的问题。\
 请先用一句「视频里没有讲到这个内容。」开头，另起一段用你自己的知识尽量回答，\
 并在该段开头标注「（以下回答来自大模型，非视频内容）」；不要编造时间戳。";
 
-/// 整篇字幕作为上下文回答；视频很长时分段问、再综合。
+/// 检索式问答（非流式）：召回相关讲稿窗口与课件页，只喂这些片段。
 pub async fn answer(
     db: &Db,
     provider: &Provider,
@@ -403,54 +472,93 @@ pub async fn answer(
     history: &[ChatMessage],
 ) -> AppResult<RagAnswer> {
     let segments = list_segments(db, video_id).await?;
-    let windows = retrieve_windows(&segments, query, history);
+    let pages = list_slide_pages(db, video_id).await?;
+    let retrieved = retrieve(&segments, &pages, query, history);
     let messages = build_chat_messages(history, query);
-    let (system, context) = ask_context(&windows);
+    let (system, context) = ask_context(&retrieved);
     let req = ask_request(chat_model, system, context, messages, 1024);
     let answer = provider.complete(&req).await?.content;
 
     Ok(RagAnswer {
         // 兜底清掉模型偶尔仍会输出的 [01:10, 01:15, ...] 时间戳数组。
         answer: strip_timestamp_arrays(&answer),
-        citations: window_citations(&windows),
+        citations: retrieved_citations(&retrieved),
     })
 }
 
 /// 按检索结果选系统提示与上下文。零命中时不喂任何字幕——问题这节课没讲到，
 /// 喂全文也只是让模型自己得出同一个结论，白花一份钱。
-fn ask_context(windows: &[Window]) -> (&'static str, Option<String>) {
-    if windows.is_empty() {
+fn ask_context(retrieved: &Retrieved) -> (&'static str, Option<String>) {
+    if retrieved.is_empty() {
         return (NOT_COVERED_SYSTEM, None);
     }
-    let joined = windows
-        .iter()
-        .map(|window| window.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n---\n");
-    (
-        RETRIEVAL_ASK_SYSTEM,
-        Some(format!(
+    let mut blocks: Vec<String> = Vec::new();
+    if !retrieved.windows.is_empty() {
+        let joined = retrieved
+            .windows
+            .iter()
+            .map(|window| window.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n---\n");
+        blocks.push(format!(
             "下面是从这节课讲稿里检索出的相关片段，段与段之间**不连续**（每行以 [mm:ss] 开头）：\n{joined}"
-        )),
-    )
+        ));
+    }
+    if !retrieved.slides.is_empty() {
+        let joined = retrieved
+            .slides
+            .iter()
+            .map(|slide| {
+                format!(
+                    "[{}] 第 {} 页：{}",
+                    mmss(slide.start_ms),
+                    slide.page_no,
+                    slide.text
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        blocks.push(format!(
+            "下面是课件画面上认出来的文字（时间是这页出现的时刻）：\n{joined}"
+        ));
+    }
+    (RETRIEVAL_ASK_SYSTEM, Some(blocks.join("\n\n")))
 }
 
-/// 每个窗口一条引用，供前端渲染可点击的出处列表。
-fn window_citations(windows: &[Window]) -> Vec<Citation> {
-    windows
-        .iter()
-        .enumerate()
-        .map(|(i, window)| Citation {
-            index: i + 1,
-            text: window.text.clone(),
-            start_ms: window.start_ms,
-            end_ms: window.end_ms,
-            video_id: None,
-            video_title: None,
-            slide_image: None,
-            slide_page: None,
-        })
-        .collect()
+/// 每个窗口、每页课件各一条引用，供前端渲染可点击的出处列表。
+/// 课件那几条带上页图与页号，前端会连缩略图一起显示——出处是「片子上写的」还是
+/// 「老师念的」，用户一眼要能看出来。
+fn retrieved_citations(retrieved: &Retrieved) -> Vec<Citation> {
+    let windows = retrieved.windows.iter().map(|window| Citation {
+        index: 0,
+        text: window.text.clone(),
+        start_ms: window.start_ms,
+        end_ms: window.end_ms,
+        video_id: None,
+        video_title: None,
+        slide_image: None,
+        slide_page: None,
+    });
+    let slides = retrieved.slides.iter().map(|slide| Citation {
+        index: 0,
+        text: slide.text.clone(),
+        start_ms: slide.start_ms,
+        end_ms: slide.end_ms,
+        video_id: None,
+        video_title: None,
+        slide_image: Some(slide.image_path.clone()),
+        slide_page: Some(slide.page_no),
+    });
+    renumber(windows.chain(slides).collect())
+}
+
+/// 重排引用编号。讲稿与课件是两条独立的召回路径，各自从 1 开始编号，
+/// 合起来会出现两条 index=1——前端拿 index 拼 key，重号就意味着列表项互相覆盖。
+fn renumber(mut citations: Vec<Citation>) -> Vec<Citation> {
+    for (i, citation) in citations.iter_mut().enumerate() {
+        citation.index = i + 1;
+    }
+    citations
 }
 
 /// 流式问答：短视频直接流式；长视频先发状态提示，仅综合步流式。
@@ -470,15 +578,16 @@ pub async fn answer_stream(
         text: "正在检索相关片段…".into(),
     });
     let segments = list_segments(db, video_id).await?;
-    let windows = retrieve_windows(&segments, query, history);
-    let citations = window_citations(&windows);
+    let pages = list_slide_pages(db, video_id).await?;
+    let retrieved = retrieve(&segments, &pages, query, history);
+    let citations = retrieved_citations(&retrieved);
     if !citations.is_empty() {
         on_event(AskEvent::Citations {
             citations: citations.clone(),
         });
     }
     let messages = build_chat_messages(history, query);
-    let (system, context) = ask_context(&windows);
+    let (system, context) = ask_context(&retrieved);
     let req = ask_request(chat_model, system, context, messages, 1024);
     let raw = provider
         .complete_stream(&req, cancel, &mut |piece| match piece {
@@ -506,7 +615,110 @@ const COURSE_ASK_SYSTEM: &str = "你是基于整门课程字幕的问答助手�
    并在这段开头标注「（以下回答来自大模型，非课程内容）」，这段不要标注出处。\
 2. 凡是来自课程的结论，都在该句话后面紧跟对应的「〈视频标题 mm:ss〉」出处，标题与时间直接照抄片段行首，方便定位；\
    不同视频的信息要说清各自出自哪节课。不要输出裸的 [mm:ss] 数组或时间段。\
-3. 回答直接、有条理：先给结论，再按视频/主题展开；不要寒暄。";
+3. 标了「课件 P几」的行来自课件画面上认出来的文字，老师可能写了没念，同样算课程讲过的内容；\
+   它是机器识别的，个别字符可能出错，明显不通时按上下文理解，不要照抄错字。\
+4. 回答直接、有条理：先给结论，再按视频/主题展开；不要寒暄。";
+
+/// 课程级检索：先只用本轮问题；一段都召不回再带上最近几轮追问重试一次。
+///
+/// 单视频路径早就这么做了，课程级却只看当前 query——而「本课程」恰恰是前端明确
+/// 允许连续追问的范围。于是「那第二个例子呢」「为什么不行」这类省略主语的追问，
+/// 在课程模式下反而更容易掉进「本课程里没有讲到」的兜底分支。
+fn retrieve_scope_context(
+    per_video: &[(String, String, Vec<TranscriptSegment>)],
+    per_video_pages: &[(String, String, Vec<SlidePage>)],
+    query: &str,
+    history: &[ChatMessage],
+) -> (String, Vec<Citation>) {
+    let direct = scope_context_once(per_video, per_video_pages, query);
+    if !direct.0.is_empty() || history.is_empty() {
+        return direct;
+    }
+    scope_context_once(
+        per_video,
+        per_video_pages,
+        &retrieval_text_with_history(query, history),
+    )
+}
+
+/// 用一句给定的检索文本装配课程级上下文：字幕命中 + 课件页命中。
+fn scope_context_once(
+    per_video: &[(String, String, Vec<TranscriptSegment>)],
+    per_video_pages: &[(String, String, Vec<SlidePage>)],
+    query: &str,
+) -> (String, Vec<Citation>) {
+    let (transcript, transcript_cites) =
+        assemble_scope_context(per_video, query, PER_VIDEO_TOPK, COURSE_CONTEXT_LIMIT);
+    let (slides, slide_cites) = assemble_scope_slides(
+        per_video_pages,
+        query,
+        COURSE_SLIDE_PER_VIDEO,
+        COURSE_SLIDE_LIMIT,
+    );
+    let context = match (transcript.is_empty(), slides.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => transcript,
+        (true, false) => slides,
+        (false, false) => format!("{transcript}\n{slides}"),
+    };
+    let citations = renumber(
+        transcript_cites
+            .into_iter()
+            .chain(slide_cites)
+            .collect::<Vec<_>>(),
+    );
+    (context, citations)
+}
+
+/// 课件页版的 [`assemble_scope_context`]：每视频最多 `per_video_topk` 页，全局取前 `limit` 页，
+/// 行首同样是「〈标题 mm:ss〉」，再加一个「课件 P几」标记好让模型知道这是板书而不是口述。
+/// 纯函数：不触 LLM/DB，可单测。
+pub fn assemble_scope_slides(
+    per_video: &[(String, String, Vec<SlidePage>)],
+    query: &str,
+    per_video_topk: usize,
+    limit: usize,
+) -> (String, Vec<Citation>) {
+    let terms = query_terms(query);
+    let mut global: Vec<(usize, String, String, SlidePage)> = Vec::new();
+    for (vid, title, pages) in per_video {
+        let mut scored = scored_slide_pages(pages, query);
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.start_ms.cmp(&b.1.start_ms)));
+        scored.truncate(per_video_topk);
+        for (score, page) in scored {
+            global.push((score, vid.clone(), title.clone(), page));
+        }
+    }
+    global.sort_by(|a, b| b.0.cmp(&a.0).then(a.3.start_ms.cmp(&b.3.start_ms)));
+    global.truncate(limit);
+
+    let mut context = String::new();
+    let mut citations = Vec::with_capacity(global.len());
+    for (i, (_, vid, title, page)) in global.into_iter().enumerate() {
+        let snippet = slide_snippet(&page.ocr_text, &terms, SLIDE_ASK_CHARS);
+        if !context.is_empty() {
+            context.push('\n');
+        }
+        context.push_str(&format!(
+            "〈{} {}〉课件 P{}：{}",
+            title,
+            mmss(page.start_ms),
+            page.page_no,
+            snippet
+        ));
+        citations.push(Citation {
+            index: i + 1,
+            text: snippet,
+            start_ms: page.start_ms,
+            end_ms: page.end_ms.unwrap_or(page.start_ms),
+            video_id: Some(vid),
+            video_title: Some(title),
+            slide_image: Some(page.image_path),
+            slide_page: Some(page.page_no),
+        });
+    }
+    (context, citations)
+}
 
 /// 课程级流式问答：跨该课程多个视频，先做关键词检索、把命中片段装配成带来源标签的上下文，
 /// 再单次流式作答。开头发 `Citations` 事件，让前端渲染可点击的跨视频出处列表。
@@ -525,20 +737,22 @@ pub async fn course_answer_stream(
     on_event(AskEvent::Status {
         text: "正在检索本课程相关内容…".into(),
     });
-    // 逐视频取字幕段，装配跨视频上下文（限量，控制喂给 LLM 的量与延迟）。
+    // 逐视频取字幕段与课件页，装配跨视频上下文（限量，控制喂给 LLM 的量与延迟）。
     let mut per_video = Vec::with_capacity(videos.len());
+    let mut per_video_pages = Vec::with_capacity(videos.len());
     for (vid, title) in videos {
         let segs = list_segments(db, vid).await?;
+        let pages = list_slide_pages(db, vid).await?;
         per_video.push((vid.clone(), title.clone(), segs));
+        per_video_pages.push((vid.clone(), title.clone(), pages));
     }
-    let (context, citations) =
-        assemble_scope_context(&per_video, query, PER_VIDEO_TOPK, COURSE_CONTEXT_LIMIT);
+    let (context, citations) = retrieve_scope_context(&per_video, &per_video_pages, query, history);
     let messages = build_chat_messages(history, query);
 
-    // 命中为空：全课程字幕都没讲到，退回模型自身知识兜底（不发 Citations）。
+    // 命中为空：全课程的字幕和课件都没讲到，退回模型自身知识兜底（不发 Citations）。
     let (system, context_block): (&str, Option<String>) = if context.is_empty() {
         (
-            "本课程的字幕里没有讲到用户的问题。请先用一句「本课程里没有讲到这个内容。」开头，\
+            "本课程的字幕和课件里都没有讲到用户的问题。请先用一句「本课程里没有讲到这个内容。」开头，\
 另起一段用你自己的知识尽量回答，并在该段开头标注「（以下回答来自大模型，非课程内容）」；不要编造出处。",
             None,
         )
@@ -549,7 +763,8 @@ pub async fn course_answer_stream(
         (
             COURSE_ASK_SYSTEM,
             Some(format!(
-                "下面是本课程多个视频里与问题相关的字幕片段，每行以「〈视频标题 时间〉」标注来源：\n{context}"
+                "下面是本课程多个视频里与问题相关的内容，每行以「〈视频标题 时间〉」标注来源，\
+标了「课件 P几」的来自课件画面上的文字：\n{context}"
             )),
         )
     };
@@ -1074,7 +1289,7 @@ mod tests {
                 content: "分光反应和暗反应两个阶段。".into(),
             },
         ];
-        let rescued = retrieve_windows(&segs, "那第二种呢", &history);
+        let rescued = retrieve(&segs, &[], "那第二种呢", &history).windows;
         assert!(!rescued.is_empty(), "带上前几轮提问应当能召回");
         assert!(rescued[0].text.contains("光合作用"));
     }
@@ -1090,7 +1305,7 @@ mod tests {
             content: "光合作用分几个阶段".into(),
         }];
         // 本轮问题自己能召回时就不掺历史，免得被上一轮的词拖回旧话题。
-        let windows = retrieve_windows(&segs, "细胞呼吸", &history);
+        let windows = retrieve(&segs, &[], "细胞呼吸", &history).windows;
         assert_eq!(windows.len(), 1);
         assert!(windows[0].text.contains("细胞呼吸"));
         assert!(!windows[0].text.contains("光反应"));
@@ -1460,5 +1675,151 @@ mod tests {
             .iter()
             .any(|c| c.video_id.as_deref() == Some("B") && c.start_ms == 500));
         assert_eq!(cites.len(), 3);
+    }
+
+    fn slide(page_no: i64, start_ms: i64, ocr: &str) -> SlidePage {
+        SlidePage {
+            page_no,
+            start_ms,
+            end_ms: Some(start_ms + 15_000),
+            image_path: format!("/tmp/page-{page_no}.jpg"),
+            ocr_text: ocr.into(),
+        }
+    }
+
+    #[test]
+    fn a_term_only_written_on_the_slides_is_still_answerable() {
+        // 与 search_finds_terms_that_only_exist_on_the_slides 同一种数据：老师念的是
+        // 「这个定理」，术语只写在片子上。搜索早就能命中，问答却会说「视频里没有讲到」。
+        let segs = vec![seg(0, 0, 1_000, "我们来看这个定理")];
+        let pages = vec![slide(2, 30_000, "贝叶斯定理\nP(A|B) = P(B|A)P(A)/P(B)")];
+
+        let retrieved = retrieve(&segs, &pages, "贝叶斯", &[]);
+        assert!(retrieved.windows.is_empty(), "字幕里确实没有这个词");
+        assert!(!retrieved.is_empty(), "课件命中就算这节课讲过");
+
+        let (system, context) = ask_context(&retrieved);
+        assert_ne!(system, NOT_COVERED_SYSTEM, "不该再退回「没有讲到」");
+        let context = context.expect("有依据就要喂给模型");
+        assert!(context.contains("贝叶斯定理"));
+        assert!(context.contains("第 2 页"));
+        // 出处带页图与页号，前端才能显示缩略图并跳到那一页。
+        let cites = retrieved_citations(&retrieved);
+        assert_eq!(cites.len(), 1);
+        assert_eq!(cites[0].slide_image.as_deref(), Some("/tmp/page-2.jpg"));
+        assert_eq!(cites[0].slide_page, Some(2));
+        assert_eq!(cites[0].start_ms, 30_000);
+    }
+
+    #[test]
+    fn transcript_and_slide_sources_are_numbered_without_collision() {
+        let segs = vec![seg(0, 0, 5_000, "先讲光合作用的光反应")];
+        let pages = vec![slide(1, 0, "光合作用：光反应 / 暗反应")];
+        let cites = retrieved_citations(&retrieve(&segs, &pages, "光合作用", &[]));
+        // 两条召回路径各自从 1 开始编号，合起来必须重排——否则前端拿 index 拼 key 会撞。
+        assert_eq!(cites.len(), 2);
+        assert_eq!(
+            cites.iter().map(|c| c.index).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+    }
+
+    #[test]
+    fn slides_do_not_crowd_out_the_lecture() {
+        let segs = vec![seg(0, 0, 5_000, "讲光合作用")];
+        let pages: Vec<SlidePage> = (0..20)
+            .map(|i| slide(i, i * 60_000, "光合作用相关的板书"))
+            .collect();
+        let retrieved = retrieve(&segs, &pages, "光合作用", &[]);
+        assert!(!retrieved.windows.is_empty());
+        assert!(
+            retrieved.slides.len() <= SLIDE_ASK_MAX_PAGES,
+            "课件页要限量，否则整份 OCR 会把讲稿挤出预算"
+        );
+        // 限量后仍按时间输出，读起来是顺序的。
+        assert!(retrieved
+            .slides
+            .windows(2)
+            .all(|w| w[0].start_ms <= w[1].start_ms));
+    }
+
+    #[test]
+    fn a_course_level_follow_up_retrieves_using_the_earlier_turns() {
+        let per_video = vec![
+            (
+                "v1".to_string(),
+                "第一讲".to_string(),
+                vec![seg(0, 0, 5_000, "光合作用的光反应在类囊体膜上")],
+            ),
+            (
+                "v2".to_string(),
+                "第二讲".to_string(),
+                vec![seg(0, 0, 5_000, "光合作用的暗反应在叶绿体基质")],
+            ),
+        ];
+        let no_pages: Vec<(String, String, Vec<SlidePage>)> = per_video
+            .iter()
+            .map(|(vid, title, _)| (vid.clone(), title.clone(), Vec::new()))
+            .collect();
+
+        // 「那第二个呢」自己召不回，单看本轮问题会掉进「本课程里没有讲到」。
+        let (alone, _) = scope_context_once(&per_video, &no_pages, "那第二个呢");
+        assert!(alone.is_empty());
+
+        let history = vec![
+            ChatMessage {
+                role: "user".into(),
+                content: "光合作用分几个阶段".into(),
+            },
+            ChatMessage {
+                role: "assistant".into(),
+                content: "分光反应和暗反应。".into(),
+            },
+        ];
+        let (rescued, cites) =
+            retrieve_scope_context(&per_video, &no_pages, "那第二个呢", &history);
+        assert!(!rescued.is_empty(), "带上前几轮提问应当能召回");
+        assert!(!cites.is_empty());
+    }
+
+    #[test]
+    fn a_new_course_level_topic_is_not_dragged_back_by_the_previous_turn() {
+        let per_video = vec![(
+            "v1".to_string(),
+            "第一讲".to_string(),
+            vec![
+                seg(0, 0, 5_000, "光合作用的光反应"),
+                seg(1, 60_000, 65_000, "接下来讲细胞呼吸"),
+            ],
+        )];
+        let no_pages = vec![("v1".to_string(), "第一讲".to_string(), Vec::new())];
+        let history = vec![ChatMessage {
+            role: "user".into(),
+            content: "光合作用分几个阶段".into(),
+        }];
+        let (context, _) = retrieve_scope_context(&per_video, &no_pages, "细胞呼吸", &history);
+        assert!(context.contains("细胞呼吸"));
+        assert!(!context.contains("光反应"), "本轮能召回就不该掺历史");
+    }
+
+    #[test]
+    fn course_level_answers_can_come_from_the_slides_alone() {
+        let per_video = vec![(
+            "v1".to_string(),
+            "第一讲".to_string(),
+            vec![seg(0, 0, 1_000, "我们来看这个定理")],
+        )];
+        let pages = vec![(
+            "v1".to_string(),
+            "第一讲".to_string(),
+            vec![slide(2, 30_000, "贝叶斯定理\nP(A|B) = P(B|A)P(A)/P(B)")],
+        )];
+        let (context, cites) = retrieve_scope_context(&per_video, &pages, "贝叶斯", &[]);
+        assert!(!context.is_empty(), "课件命中就算本课程讲过");
+        // 行首照旧是「〈标题 时间〉」，再标明这是课件，好让模型说清出处。
+        assert!(context.contains("〈第一讲 00:30〉课件 P2："));
+        assert_eq!(cites.len(), 1);
+        assert_eq!(cites[0].slide_page, Some(2));
+        assert_eq!(cites[0].video_id.as_deref(), Some("v1"));
     }
 }
