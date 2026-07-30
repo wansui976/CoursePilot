@@ -40,40 +40,43 @@ pub fn chapters_request(model: &str, transcript: &str) -> ChatRequest {
 pub fn notes_request(model: &str, transcript: &str) -> ChatRequest {
     base(
         model,
-        "你是笔记助手。输出适合复习和二次整理的结构化 Markdown，\
-         不要输出代码围栏。笔记风格参考“以下为AI生成的图文笔记的内容”：先搭课程大纲，\
-         再按主题沉淀题型定位、审题方法、解题方法论、作答技巧、例题解析、易错警示，\
-         最后用知识小结表格收束。必须遵守：\
-         1. 标题使用“# 以下为AI生成的图文笔记的内容”。\
-         2. 一级结构用中文编号。\
-         3. 每个主要主题尽量包含“题型定位”“审题方法”“方法论”“作答技巧”“易错警示”“答案示范”等小节；\
-            字幕没有的信息不要硬编，可省略无依据小节。\
-         4. 遇到例题、案例、材料分析，使用“例题：...”小节，按“题目解析 / 材料处理 / 答案组织 / 实战要点”拆开。\
-         5. “知识小结”必须使用 Markdown 表格，列为：知识点 | 核心内容 | 考试重点/易混淆点 | 难度系数。\
-         6. 保留材料中的规范表述、口诀、关键词和总括词；故事性内容要提炼为可复习的方法或对策。\
-         7. 每个重要要点末尾追加形如 [mm:ss] 的时间戳，对应该要点在视频中的位置。",
+        "你是应试类网课的笔记助手。输出 Markdown，不要代码围栏。\
+         写给「课后复习 + 考前速查」的人看：他没时间重看视频，要能直接拿去用。\
+         规则：\
+         1. 只写视频真讲过的。每一条都要能在讲稿里找到出处，找不到就不写；\
+            宁可整节缺失，也不要用常识补一个看起来合理的说法。\
+         2. 每条要点末尾附 [mm:ss]，取自讲稿里该内容所在行的时间，不要编造时间。\
+         3. 用「## 主题」分节，节内用「- 」列要点。要点写成可执行的动作或可判断的结论，\
+            不要写成「介绍了 X」这类目录式空话。\
+         4. 老师给的口诀、答题模板、固定表述、判分点，**逐字保留**，不要改写成同义句\
+            ——这些是拿分的东西，换个说法就废了。\
+         5. 例题只在老师完整讲了解法时才写，固定三行：题目 → 关键判断（他是怎么看出\
+            该用这个方法的）→ 答法。不要抄整道题面。\
+         6. 结尾写一节「## 速查表」，Markdown 表格，列为：考点 | 怎么判 | 怎么答。\
+            只收本视频真正讲到的考点，三到八行。",
         transcript,
-        "根据字幕生成一份笔记。\
-         不要写成普通提纲，要尽量像课堂讲义：层级清楚、例题拆解充分、方法论可操作、易错点明确，\
-         结尾必须有“二、知识小结”的 Markdown 表格。",
-        6144,
+        "根据讲稿写笔记。",
+        3072,
     )
 }
 
 pub fn quiz_request(model: &str, transcript: &str) -> ChatRequest {
     base(
         model,
-        "你是出题助手。只输出 JSON 数组，不要任何解释或代码围栏。",
+        "你是应试类网课的出题助手。只输出 JSON 数组，不要解释或代码围栏。",
         transcript,
-        "紧扣视频真正讲到的知识点出 5-8 道题，覆盖不同章节，难度有梯度。输出 JSON 数组，每项 \
+        "紧扣视频真正讲到的考点出 5-8 道题，覆盖不同章节。输出 JSON 数组，每项 \
          {\"type\":\"single\"|\"multi\"|\"judge\",\"stem\":题干,\
-         \"options\":[字符串...],\"answer\":正确项(单选为字符串/多选为字符串数组/判断为 true|false),\
-         \"explanation\":解析,\"ref_ms\":相关字幕毫秒}。要求：\
-         1. 题目考查理解与应用，不要只考死记；干扰项要合理、都与主题相关，避免一眼排除。\
-         2. single 至少 4 个选项；multi 有 2 个及以上正确项；judge 不要给 options。\
-         3. answer 必须与 options 完全一致（用选项原文，不要用字母 A/B/C）。\
-         4. explanation 说明为什么对、错在哪，并指出依据；ref_ms 取自相关字幕的毫秒时间。",
-        4096,
+         \"options\":[字符串...],\"answer\":单选为字符串/多选为字符串数组/判断为 true|false,\
+         \"explanation\":一句话说明依据,\"ref_ms\":该考点在讲稿里的毫秒时间}。要求：\
+         1. 考「会不会用」，不考「记不记得住」：题干给一个具体情境，问该怎么判断或怎么处理。\
+         2. 干扰项必须是**老师明确讲过的易混点**；讲稿里没提到的混淆点不要造。\
+            造不出合格干扰项的考点，改出判断题，或者跳过——不要为了凑题数编一眼能排除的选项。\
+         3. single 至少 4 个选项；multi 有 2 个及以上正确项；judge 不要给 options。\
+         4. answer 必须与 options 完全一致（用选项原文，不要用字母 A/B/C）。\
+         5. explanation 只写一句：指出依据在讲稿的哪个说法上。不要复述题干，不要展开教学。\
+         6. ref_ms 取自相关讲稿行的毫秒时间，不要编造。",
+        2048,
     )
 }
 
@@ -84,9 +87,10 @@ pub fn mindmap_request(model: &str, transcript: &str) -> ChatRequest {
         transcript,
         "把视频知识结构整理成层级脑图（Markdown 大纲）。要求：\
          1. 用一个一级标题（# 视频主题）作根节点；二级标题（##）是主要模块，对应各章节/大主题。\
-         2. 在每个模块下用 - 列表展开具体知识点，必要时再嵌套子列表，整体保持 3-4 层、层次清晰。\
-         3. 每个节点用精炼短语（不要整句），只保留字幕真正讲到的内容，覆盖全片要点不遗漏主线。",
-        4096,
+         2. 在每个模块下用 - 列表展开具体知识点，必要时再嵌套子列表，整体保持 3-4 层。\
+         3. 每个节点用精炼短语（不超过 14 字，不要整句、不要标点结尾）。\
+         4. 只放讲稿真讲过的内容；宁可少一个分支，不要为了对称补一个。",
+        1536,
     )
 }
 
@@ -190,26 +194,46 @@ mod tests {
     }
 
     #[test]
-    fn notes_prompt_requires_exam_style_graphic_notes_structure() {
+    fn notes_prompt_lets_content_decide_the_structure() {
         let req = notes_request("m", "[00:01] 概括对策题");
         let system = req.system.unwrap();
-        let user = &req.messages[0].content;
 
-        for required in [
-            "AI生成的图文笔记",
-            "题型定位",
-            "审题方法",
-            "方法论",
-            "易错警示",
-            "答案示范",
-            "知识小结",
-            "Markdown 表格",
-        ] {
+        // 关键约束：有依据才写、原话逐字保留、结尾速查表。
+        for required in ["找不到就不写", "逐字保留", "速查表", "[mm:ss]"] {
             assert!(
-                system.contains(required) || user.contains(required),
+                system.contains(required),
                 "notes prompt should mention {required}"
             );
         }
+        // 原来有七个固定小节（题型定位/审题方法/方法论/答案示范…）。硬结构会逼着模型
+        // 在字幕没讲的地方编一个填满——这与「找不到就不写」是互相拉扯的，已去掉。
+        for gone in ["题型定位", "审题方法", "答案示范", "AI生成的图文笔记"] {
+            assert!(!system.contains(gone), "不该再要求固定小节 {gone}");
+        }
+        // 输出预算也跟着收紧：输出 token 通常比输入贵几倍，这是最大的一笔。
+        assert_eq!(req.max_tokens, 3072);
+    }
+
+    #[test]
+    fn quiz_prompt_would_rather_skip_than_pad() {
+        let req = quiz_request("m", "[00:01] 讲了两个易混概念");
+        let user = &req.messages[0].content;
+        // 干扰项必须来自老师讲过的易混点；造不出来就降级或跳过，
+        // 不要为了凑题数编一眼能排除的选项——那种题既费 token 又没有复习价值。
+        assert!(user.contains("老师明确讲过的易混点"));
+        assert!(user.contains("跳过"));
+        // 解析收成一句话，这是输出侧最大的一笔。
+        assert!(user.contains("只写一句"));
+        assert_eq!(req.max_tokens, 2048);
+    }
+
+    #[test]
+    fn mindmap_prompt_caps_node_length_and_budget() {
+        let req = mindmap_request("m", "[00:01] 主题");
+        let user = &req.messages[0].content;
+        assert!(user.contains("不超过 14 字"));
+        assert!(user.contains("不要为了对称补一个"));
+        assert_eq!(req.max_tokens, 1536);
     }
 
     #[test]
