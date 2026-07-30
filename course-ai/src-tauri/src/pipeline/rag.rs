@@ -6,7 +6,7 @@
 use crate::commands::transcripts::{list_segments, TranscriptSegment};
 use crate::db::Db;
 use crate::error::AppResult;
-use crate::llm::{complete_or_cancel, ChatMessage, ChatRequest, Provider, StreamPiece};
+use crate::llm::{ChatMessage, ChatRequest, Provider, StreamPiece};
 // 中文问句切词元与课程问答那边共用同一套：两处对「什么算命中」的理解必须一致。
 use crate::pipeline::search_terms::{hit_count, query_terms};
 use serde::Serialize;
@@ -61,9 +61,6 @@ pub struct RagAnswer {
     pub citations: Vec<Citation>,
 }
 
-// 单次问答能直接塞进上下文的字幕字符上限；超过则分段 map-reduce。
-const SINGLE_CALL_CHAR_LIMIT: usize = 24_000;
-const PART_CHAR_LIMIT: usize = 16_000;
 // 课程级问答：喂给 LLM 的跨视频命中片段上限，控制上下文量与延迟。
 const COURSE_CONTEXT_LIMIT: usize = 40;
 // 两段式第一段：每个视频最多贡献多少命中片段，保证跨视频覆盖。
@@ -139,25 +136,8 @@ pub fn build_chat_messages(history: &[ChatMessage], query: &str) -> Vec<ChatMess
     messages
 }
 
-fn summarize_history(history: &[ChatMessage]) -> String {
-    if history.is_empty() {
-        return String::new();
-    }
-    history
-        .iter()
-        .map(|message| {
-            let speaker = if message.role == "assistant" {
-                "助手"
-            } else {
-                "用户"
-            };
-            format!("{speaker}: {}", message.content)
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// 按行边界把长文稿切成不超过 `limit` 字符的若干段。
+/// 按行把长文本切成不超过 `limit` 字符的块（不切断行）。
+/// 课程知识分析与长讲稿提要都用它分块。
 pub(crate) fn split_by_chars(text: &str, limit: usize) -> Vec<String> {
     let mut parts = Vec::new();
     let mut cur = String::new();
@@ -174,23 +154,6 @@ pub(crate) fn split_by_chars(text: &str, limit: usize) -> Vec<String> {
     parts
 }
 
-const ASK_SYSTEM: &str = "你是基于课程视频字幕的问答助手。严格遵守：\
-1. 优先依据给出的字幕回答（按第 2 条标注 [mm:ss] 出处，这部分不要引入字幕之外的知识）。\
-   如果字幕里没有相关内容，先用一句「视频里没有讲到这个内容。」明确说明，\
-   再另起一段用你自己的知识尽量回答，并在这段开头标注「（以下回答来自大模型，非视频内容）」；\
-   这段补充回答属于模型知识，不要编造 [mm:ss] 时间戳。\
-2. 字幕每行以 [mm:ss] 时间戳开头。回答时，凡是来自视频的结论，都要在该句话后面紧跟对应的 [mm:ss] 出处，\
-   时间戳格式必须和字幕里完全一致（直接照抄那一行行首的 [mm:ss]），方便点击跳转；涉及多处就标多个。\
-   只能用单个时间点 [mm:ss]，每个方括号里只放一个时间；\
-   绝对不要写成时间段（不要 [mm:ss-mm:ss]、不要 [mm:ss~mm:ss]、不要 [mm:ss 到 mm:ss]），\
-   要表示一段就照抄起始那一行的 [mm:ss]，也不要加 ▶ 等符号。\
-   更不要把多个时间戳塞进同一个方括号，绝对不要输出形如 [01:10, 01:15, 01:18] 的时间戳数组/列表；\
-   每个出处都必须紧跟在对应结论那句话后面单独成一个 [mm:ss]，不要在句尾或段末堆一串时间点。\
-3. 回答要直接、有条理：先给结论，再展开要点；要点多时用简短的分行或「- 」列表，不要长篇大论，不要寒暄。";
-
-/// 删除回答里形如 [01:10, 01:15, 01:18] 的「时间戳数组」——一个方括号里塞了多个
-/// 逗号/顿号分隔的时间点。前端只把单个 [mm:ss] 渲染成可点击跳转，这种数组无法点击、
-/// 只是噪音，故整体删除；单个 [mm:ss] 出处保留不动。
 fn strip_timestamp_arrays(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
@@ -277,6 +240,115 @@ fn take_digits(chars: &[char], start: usize, min: usize, max: usize) -> Option<u
     }
 }
 
+// ---------- 检索式问答（单视频） ----------
+
+/// 命中段前后各扩这么久，凑出一个能读懂的窗口。
+const WINDOW_PAD_MS: i64 = 30_000;
+/// 喂给模型的窗口总量上限（字符）。
+const WINDOW_BUDGET_CHARS: usize = 4_000;
+
+/// 一个检索窗口：一段连续时间里的讲稿，加上它的最高命中分。
+struct Window {
+    score: usize,
+    start_ms: i64,
+    end_ms: i64,
+    text: String,
+}
+
+/// 把命中段扩成窗口并合并重叠区间。
+///
+/// 为什么要扩窗：命中的那一句往往只是关键词出现的地方，答案在它前后。
+/// 只喂命中句，模型会答得片面且频繁说「片段不足」。
+///
+/// 纯函数，可单测。
+fn windows_from_hits(
+    segments: &[TranscriptSegment],
+    query: &str,
+    budget_chars: usize,
+) -> Vec<Window> {
+    let terms = query_terms(query);
+    if terms.is_empty() {
+        return Vec::new();
+    }
+    let mut ranges: Vec<(usize, i64, i64)> = Vec::new();
+    for seg in segments {
+        let score = hit_count(&seg.text, &terms);
+        if score == 0 {
+            continue;
+        }
+        ranges.push((
+            score,
+            seg.start_ms - WINDOW_PAD_MS,
+            seg.end_ms + WINDOW_PAD_MS,
+        ));
+    }
+    if ranges.is_empty() {
+        return Vec::new();
+    }
+    // 按时间合并重叠/相邻区间，分数取区间内最高。
+    ranges.sort_by_key(|(_, start, _)| *start);
+    let mut merged: Vec<(usize, i64, i64)> = Vec::new();
+    for (score, start, end) in ranges {
+        match merged.last_mut() {
+            Some(last) if start <= last.2 => {
+                last.2 = last.2.max(end);
+                last.0 = last.0.max(score);
+            }
+            _ => merged.push((score, start, end)),
+        }
+    }
+
+    let mut windows: Vec<Window> = merged
+        .into_iter()
+        .map(|(score, start, end)| {
+            let text = segments
+                .iter()
+                .filter(|seg| seg.end_ms > start && seg.start_ms < end)
+                .map(|seg| format!("[{}] {}", mmss(seg.start_ms), seg.text.trim()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let real_start = segments
+                .iter()
+                .find(|seg| seg.end_ms > start && seg.start_ms < end)
+                .map(|seg| seg.start_ms)
+                .unwrap_or(start.max(0));
+            Window {
+                score,
+                start_ms: real_start,
+                end_ms: end,
+                text,
+            }
+        })
+        .filter(|window| !window.text.is_empty())
+        .collect();
+
+    // 先按分数取（好的优先进预算），再按时间排序输出——读起来才是顺序的。
+    windows.sort_by(|a, b| b.score.cmp(&a.score).then(a.start_ms.cmp(&b.start_ms)));
+    let mut used = 0usize;
+    windows.retain(|window| {
+        let size = window.text.chars().count();
+        if used + size > budget_chars && used > 0 {
+            return false;
+        }
+        used += size;
+        true
+    });
+    windows.sort_by_key(|window| window.start_ms);
+    windows
+}
+
+const RETRIEVAL_ASK_SYSTEM: &str = "你是这节课的答疑助手。只根据给到的片段回答。严格遵守：\
+1. 只用片段里的信息。片段之间是**不连续**的，不要假设它们前后相接，不要把两段拼成因果关系。\
+2. 凡是来自课程的结论，都在该句话后面紧跟依据所在的 [mm:ss]，照抄片段里的时间，\
+   只用单个时间点，不要输出时间段或时间戳数组。\
+3. 片段不足以回答时，直说「这节课讲到的部分只够回答到这里」，再说明缺的是什么；\
+   不要用你自己的知识补齐后混在一起讲。\
+4. 先给结论，再展开；不要复述问题，不要寒暄。";
+
+const NOT_COVERED_SYSTEM: &str = "这节课的字幕里没有讲到用户的问题。\
+请先用一句「视频里没有讲到这个内容。」开头，另起一段用你自己的知识尽量回答，\
+并在该段开头标注「（以下回答来自大模型，非视频内容）」；不要编造时间戳。";
+
 /// 整篇字幕作为上下文回答；视频很长时分段问、再综合。
 pub async fn answer(
     db: &Db,
@@ -286,29 +358,55 @@ pub async fn answer(
     query: &str,
     history: &[ChatMessage],
 ) -> AppResult<RagAnswer> {
-    let transcript = crate::pipeline::ai::transcript_text(db, video_id).await?;
+    let segments = list_segments(db, video_id).await?;
+    let windows = windows_from_hits(&segments, query, WINDOW_BUDGET_CHARS);
     let messages = build_chat_messages(history, query);
-
-    let answer = if transcript.chars().count() <= SINGLE_CALL_CHAR_LIMIT {
-        let req = ask_request(
-            chat_model,
-            ASK_SYSTEM,
-            Some(format!(
-                "课程视频完整字幕（每行 [mm:ss] 文本）：\n{transcript}"
-            )),
-            messages,
-            1024,
-        );
-        provider.complete(&req).await?.content
-    } else {
-        map_reduce_answer(provider, chat_model, &transcript, query, history).await?
-    };
+    let (system, context) = ask_context(&windows);
+    let req = ask_request(chat_model, system, context, messages, 1024);
+    let answer = provider.complete(&req).await?.content;
 
     Ok(RagAnswer {
         // 兜底清掉模型偶尔仍会输出的 [01:10, 01:15, ...] 时间戳数组。
         answer: strip_timestamp_arrays(&answer),
-        citations: Vec::new(),
+        citations: window_citations(&windows),
     })
+}
+
+/// 按检索结果选系统提示与上下文。零命中时不喂任何字幕——问题这节课没讲到，
+/// 喂全文也只是让模型自己得出同一个结论，白花一份钱。
+fn ask_context(windows: &[Window]) -> (&'static str, Option<String>) {
+    if windows.is_empty() {
+        return (NOT_COVERED_SYSTEM, None);
+    }
+    let joined = windows
+        .iter()
+        .map(|window| window.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n---\n");
+    (
+        RETRIEVAL_ASK_SYSTEM,
+        Some(format!(
+            "下面是从这节课讲稿里检索出的相关片段，段与段之间**不连续**（每行以 [mm:ss] 开头）：\n{joined}"
+        )),
+    )
+}
+
+/// 每个窗口一条引用，供前端渲染可点击的出处列表。
+fn window_citations(windows: &[Window]) -> Vec<Citation> {
+    windows
+        .iter()
+        .enumerate()
+        .map(|(i, window)| Citation {
+            index: i + 1,
+            text: window.text.clone(),
+            start_ms: window.start_ms,
+            end_ms: window.end_ms,
+            video_id: None,
+            video_title: None,
+            slide_image: None,
+            slide_page: None,
+        })
+        .collect()
 }
 
 /// 流式问答：短视频直接流式；长视频先发状态提示，仅综合步流式。
@@ -324,53 +422,36 @@ pub async fn answer_stream(
     cancel: &AtomicBool,
     on_event: &mut (dyn FnMut(AskEvent) + Send),
 ) -> AppResult<RagAnswer> {
-    let transcript = crate::pipeline::ai::transcript_text(db, video_id).await?;
+    on_event(AskEvent::Status {
+        text: "正在检索相关片段…".into(),
+    });
+    let segments = list_segments(db, video_id).await?;
+    let windows = windows_from_hits(&segments, query, WINDOW_BUDGET_CHARS);
+    let citations = window_citations(&windows);
+    if !citations.is_empty() {
+        on_event(AskEvent::Citations {
+            citations: citations.clone(),
+        });
+    }
     let messages = build_chat_messages(history, query);
-
-    let raw = if transcript.chars().count() <= SINGLE_CALL_CHAR_LIMIT {
-        let req = ask_request(
-            chat_model,
-            ASK_SYSTEM,
-            Some(format!(
-                "课程视频完整字幕（每行 [mm:ss] 文本）：\n{transcript}"
-            )),
-            messages,
-            1024,
-        );
-        provider
-            .complete_stream(&req, cancel, &mut |piece| match piece {
-                StreamPiece::Content(d) => on_event(AskEvent::Token {
-                    delta: d.to_string(),
-                }),
-                StreamPiece::Reasoning(r) => on_event(AskEvent::Reasoning {
-                    delta: r.to_string(),
-                }),
-            })
-            .await?
-    } else {
-        // None = 用户在 map 阶段就停了，那时一个字都还没流出去。给空答案，
-        // 上层据此不把「用户没看到的完整回答」写进历史。
-        map_reduce_answer_stream(
-            provider,
-            chat_model,
-            &transcript,
-            query,
-            history,
-            cancel,
-            on_event,
-        )
-        .await?
-        .unwrap_or_default()
-    };
+    let (system, context) = ask_context(&windows);
+    let req = ask_request(chat_model, system, context, messages, 1024);
+    let raw = provider
+        .complete_stream(&req, cancel, &mut |piece| match piece {
+            StreamPiece::Content(d) => on_event(AskEvent::Token {
+                delta: d.to_string(),
+            }),
+            StreamPiece::Reasoning(r) => on_event(AskEvent::Reasoning {
+                delta: r.to_string(),
+            }),
+        })
+        .await?;
 
     let answer = strip_timestamp_arrays(&raw);
     on_event(AskEvent::Done {
         answer: answer.clone(),
     });
-    Ok(RagAnswer {
-        answer,
-        citations: Vec::new(),
-    })
+    Ok(RagAnswer { answer, citations })
 }
 
 // 课程级问答系统提示：基于跨视频检索出的带来源标签片段作答，出处用 〈标题 mm:ss〉。
@@ -450,185 +531,6 @@ pub async fn course_answer_stream(
         // 命中为空时 citations 已是空表。
         citations,
     })
-}
-
-/// 长视频流式：map 各段（非流式）后综合步流式。返回未清洗的累积文本。
-async fn map_reduce_answer_stream(
-    provider: &Provider,
-    chat_model: &str,
-    transcript: &str,
-    query: &str,
-    history: &[ChatMessage],
-    cancel: &AtomicBool,
-    on_event: &mut (dyn FnMut(AskEvent) + Send),
-) -> AppResult<Option<String>> {
-    use std::sync::atomic::Ordering;
-    on_event(AskEvent::Status {
-        text: "正在通读各段…".into(),
-    });
-    let parts = split_by_chars(transcript, PART_CHAR_LIMIT);
-    let mut partials = Vec::new();
-    let messages = build_chat_messages(history, query);
-    for part in &parts {
-        let req = ask_request(
-            chat_model,
-            "你是课程字幕问答助手。仅根据这部分字幕回答问题；若这部分完全没有相关信息，只回复 NONE，不要解释。\
-有相关信息时，每条结论后紧跟字幕里照抄的 [mm:ss] 出处，时间戳格式与字幕完全一致；\
-只用单个时间点 [mm:ss]，不要写成时间段 [mm:ss-mm:ss]。",
-            Some(format!("字幕片段：\n{part}")),
-            messages.clone(),
-            512,
-        );
-        // 取消发生在调用途中时 content 为 None：这一轮还什么都没流给用户，
-        // 直接整体作废。继续往下走会拼出一份用户从没看见、却会被存进历史的完整答案。
-        let Some(content) = complete_or_cancel(provider, &req, cancel).await? else {
-            return Ok(None);
-        };
-        let trimmed = content.trim();
-        if !trimmed.is_empty() && !trimmed.to_uppercase().starts_with("NONE") {
-            partials.push(content);
-        }
-    }
-
-    // 未覆盖：流式兜底（模型自身知识）。
-    if partials.is_empty() {
-        let req = ask_request(
-            chat_model,
-            "课程字幕里没有讲到用户的问题。请先用一句「视频里没有讲到这个内容。」开头，\
-另起一段用你自己的知识尽量回答，并在该段开头标注「（以下回答来自大模型，非视频内容）」；不要编造时间戳。",
-            None,
-            build_chat_messages(history, query),
-            1024,
-        );
-        return provider
-            .complete_stream(&req, cancel, &mut |piece| match piece {
-                StreamPiece::Content(d) => on_event(AskEvent::Token {
-                    delta: d.to_string(),
-                }),
-                StreamPiece::Reasoning(r) => on_event(AskEvent::Reasoning {
-                    delta: r.to_string(),
-                }),
-            })
-            .await
-            .map(Some);
-    }
-
-    // 只有一段命中：不再额外调用 LLM，直接把它按词切成 Token 逐词发。
-    if partials.len() == 1 {
-        let text = partials.pop().unwrap();
-        // 只返回**真正吐出去**的那部分：中途停止时返回整段，等于把用户没看到的
-        // 后半截存进历史。
-        let mut shown = String::new();
-        for (i, word) in text.split_whitespace().enumerate() {
-            if cancel.load(Ordering::SeqCst) {
-                break;
-            }
-            let piece = if i == 0 {
-                word.to_string()
-            } else {
-                format!(" {word}")
-            };
-            shown.push_str(&piece);
-            on_event(AskEvent::Token { delta: piece });
-        }
-        return Ok(Some(shown));
-    }
-
-    // 多段：综合步流式。
-    let joined = partials.join("\n---\n");
-    let history_summary = summarize_history(history);
-    let prompt = if history_summary.is_empty() {
-        format!("问题：{query}\n\n各片段回答：\n{joined}")
-    } else {
-        format!("历史对话：\n{history_summary}\n\n问题：{query}\n\n各片段回答：\n{joined}")
-    };
-    let req = ask_request(
-        chat_model,
-        "把下面来自同一视频不同片段、针对同一问题的多段回答，综合成一个完整、不重复、条理清晰、按时间顺序的最终回答。\
-原样保留每条结论后的 [mm:ss] 时间标注，只用单个时间点，不要改写成时间段 [mm:ss-mm:ss]，不要改写时间戳格式；\
-绝对不要把多个时间戳合并进同一个方括号，不要输出形如 [01:10, 01:15, 01:18] 的时间戳数组/列表。",
-        None,
-        vec![ChatMessage {
-            role: "user".into(),
-            content: prompt,
-        }],
-        1024,
-    );
-    provider
-        .complete_stream(&req, cancel, &mut |piece| match piece {
-            StreamPiece::Content(d) => on_event(AskEvent::Token {
-                delta: d.to_string(),
-            }),
-            StreamPiece::Reasoning(r) => on_event(AskEvent::Reasoning {
-                delta: r.to_string(),
-            }),
-        })
-        .await
-        .map(Some)
-}
-
-async fn map_reduce_answer(
-    provider: &Provider,
-    chat_model: &str,
-    transcript: &str,
-    query: &str,
-    history: &[ChatMessage],
-) -> AppResult<String> {
-    let parts = split_by_chars(transcript, PART_CHAR_LIMIT);
-    let mut partials = Vec::new();
-    let messages = build_chat_messages(history, query);
-    for part in &parts {
-        let req = ask_request(
-            chat_model,
-            "你是课程字幕问答助手。仅根据这部分字幕回答问题；若这部分完全没有相关信息，只回复 NONE，不要解释。\
-有相关信息时，每条结论后紧跟字幕里照抄的 [mm:ss] 出处，时间戳格式与字幕完全一致；\
-只用单个时间点 [mm:ss]，不要写成时间段 [mm:ss-mm:ss]。",
-            Some(format!("字幕片段：\n{part}")),
-            messages.clone(),
-            512,
-        );
-        let content = provider.complete(&req).await?.content;
-        let trimmed = content.trim();
-        if !trimmed.is_empty() && !trimmed.to_uppercase().starts_with("NONE") {
-            partials.push(content);
-        }
-    }
-
-    if partials.is_empty() {
-        // 字幕完全没覆盖：明说没讲到，再用模型自身知识补充作答（标注来源）。
-        let req = ask_request(
-            chat_model,
-            "课程字幕里没有讲到用户的问题。请先用一句「视频里没有讲到这个内容。」开头，\
-另起一段用你自己的知识尽量回答，并在该段开头标注「（以下回答来自大模型，非视频内容）」；不要编造时间戳。",
-            None,
-            build_chat_messages(history, query),
-            1024,
-        );
-        return Ok(provider.complete(&req).await?.content);
-    }
-    if partials.len() == 1 {
-        return Ok(partials.pop().unwrap());
-    }
-    let joined = partials.join("\n---\n");
-    let history_summary = summarize_history(history);
-    let prompt = if history_summary.is_empty() {
-        format!("问题：{query}\n\n各片段回答：\n{joined}")
-    } else {
-        format!("历史对话：\n{history_summary}\n\n问题：{query}\n\n各片段回答：\n{joined}")
-    };
-    let req = ask_request(
-        chat_model,
-        "把下面来自同一视频不同片段、针对同一问题的多段回答，综合成一个完整、不重复、条理清晰、按时间顺序的最终回答。\
-原样保留每条结论后的 [mm:ss] 时间标注，只用单个时间点，不要改写成时间段 [mm:ss-mm:ss]，不要改写时间戳格式；\
-绝对不要把多个时间戳合并进同一个方括号，不要输出形如 [01:10, 01:15, 01:18] 的时间戳数组/列表。",
-        None,
-        vec![ChatMessage {
-            role: "user".into(),
-            content: prompt,
-        }],
-        1024,
-    );
-    Ok(provider.complete(&req).await?.content)
 }
 
 // ---------- 文稿关键词搜索（本地，无 LLM） ----------
@@ -1080,7 +982,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn answer_uses_full_transcript_context() {
+    async fn answer_retrieves_windows_and_reports_where_they_came_from() {
         let (db, vid, _d) = seed().await;
         let provider = Provider::Mock {
             canned: "光合作用是…… [00:00]".into(),
@@ -1089,7 +991,67 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ans.answer, "光合作用是…… [00:00]");
+        // 检索式问答从此有出处（原来整篇喂，没有「命中片段」这个概念，引用一直是空的）。
+        assert!(!ans.citations.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_question_the_lecture_never_covers_costs_no_transcript() {
+        let (db, vid, _d) = seed().await;
+        let provider = Provider::Mock {
+            canned: "视频里没有讲到这个内容。".into(),
+        };
+        let ans = answer(&db, &provider, "chat", &vid, "微积分基本定理", &[])
+            .await
+            .unwrap();
+        // 零命中：不喂任何字幕（喂全文只是让模型自己得出同一个结论，白花一份钱），
+        // 也没有出处可给。
         assert!(ans.citations.is_empty());
+    }
+
+    #[test]
+    fn windows_expand_around_hits_and_merge_when_they_overlap() {
+        let segs = vec![
+            seg(0, 0, 5_000, "开场寒暄"),
+            seg(1, 10_000, 15_000, "讲解光合作用的两个阶段"),
+            seg(2, 20_000, 25_000, "接着说光反应"),
+            seg(3, 600_000, 605_000, "完全无关的内容"),
+            seg(4, 900_000, 905_000, "又提到光合作用"),
+        ];
+        let windows = windows_from_hits(&segs, "光合作用", WINDOW_BUDGET_CHARS);
+
+        // 10s 与 20s 两处命中扩窗后重叠 → 合成一个窗口；900s 那处单独一个。
+        assert_eq!(windows.len(), 2);
+        // 扩窗把命中句前面的内容也带进来了——答案往往在命中句前后，只喂命中句会答得片面。
+        assert!(windows[0].text.contains("开场寒暄"));
+        assert!(windows[0].text.contains("接着说光反应"));
+        // 输出按时间排序，读起来是顺序的。
+        assert!(windows[0].start_ms < windows[1].start_ms);
+        assert!(!windows[1].text.contains("完全无关的内容"));
+    }
+
+    #[test]
+    fn windows_respect_the_budget_and_keep_the_best_hits() {
+        let mut segs = Vec::new();
+        for i in 0..200 {
+            // 每段都命中，且彼此相距很远，逼出很多窗口。
+            segs.push(seg(
+                i,
+                i * 600_000,
+                i * 600_000 + 5_000,
+                "光合作用相关的一段内容反复出现",
+            ));
+        }
+        let windows = windows_from_hits(&segs, "光合作用", 400);
+        let total: usize = windows.iter().map(|w| w.text.chars().count()).sum();
+        assert!(total <= 400 + 60, "总量要压在预算附近，实际 {total}");
+        assert!(!windows.is_empty());
+    }
+
+    #[test]
+    fn an_empty_query_retrieves_nothing() {
+        let segs = vec![seg(0, 0, 5_000, "随便一句")];
+        assert!(windows_from_hits(&segs, "   ", WINDOW_BUDGET_CHARS).is_empty());
     }
 
     #[tokio::test]
@@ -1124,37 +1086,6 @@ mod tests {
             other => panic!("最后一个事件应为 Done，实际 {other:?}"),
         }
         assert_eq!(ans.answer, "参数方程 是重点 [00:05]");
-    }
-
-    #[tokio::test]
-    async fn stopping_a_long_answer_does_not_save_what_was_never_shown() {
-        // 长字幕走 map-reduce：map 阶段是非流式的，用户此时点停止，一个字都还没吐出去。
-        // 老实现照样把各段拼起来、跑完综合步，返回一份完整答案——前端把它写进历史，
-        // 于是「停止生成」反而留下了一整段用户从没看见的回答。
-        let provider = Provider::Mock {
-            canned: "这是不该被保存的完整答案".into(),
-        };
-        let transcript = "[00:01] ".to_string() + &"字".repeat(SINGLE_CALL_CHAR_LIMIT + 1_000);
-        let cancel = AtomicBool::new(true); // 已经点了停止
-        let mut events = Vec::new();
-
-        let answer = map_reduce_answer_stream(
-            &provider,
-            "m",
-            &transcript,
-            "问题",
-            &[],
-            &cancel,
-            &mut |e| events.push(e),
-        )
-        .await
-        .unwrap();
-
-        assert!(answer.is_none(), "取消后不该交出任何完整答案");
-        assert!(
-            !events.iter().any(|e| matches!(e, AskEvent::Token { .. })),
-            "一个 token 都没吐出去过"
-        );
     }
 
     #[tokio::test]
