@@ -433,6 +433,12 @@ pub async fn record_artifact_source(
 
 /// 哪些产物是基于旧讲稿生成的。
 ///
+/// 「已过期」只表示**内容来源变了**（字幕被改、课件补认了文字），不表示我们的 Prompt
+/// 口径变了。曾经想把 Prompt 版本也算进指纹，让改过 Prompt 之后旧产物自动标过期，
+/// 但那会让每次调 Prompt 都把所有视频的五个产物一次性标红——这个标记刚建立信任，
+/// 一旦掺进「其实内容没问题、只是我们换了写法」的情形，用户就不会再认真看它了。
+/// Prompt 口径变更属于版本说明该讲的事，不该挤进这个信号。
+///
 /// 没有指纹记录的产物**不算过期**：那是这套记录上线之前生成的，无从判断真伪，
 /// 与其把所有人的历史产物一律标成过期，不如什么都不说。
 pub async fn stale_artifacts(db: &Db, video_id: &str) -> AppResult<Vec<String>> {
@@ -459,6 +465,7 @@ pub async fn stale_artifacts(db: &Db, video_id: &str) -> AppResult<Vec<String>> 
 /// 讲稿口径版本。改变 `lecture_context` 输出（合并规则、板书格式…）时要加一，
 /// 迁移逻辑据此判断是否需要改写已记录的指纹。
 const CONTEXT_SCHEMA_VERSION: &str = "2";
+
 const CONTEXT_SCHEMA_SETTING: &str = "ai_context_schema_version";
 
 /// 未合并的旧口径讲稿。**只给指纹迁移用**，不要用于生成。
