@@ -254,6 +254,11 @@ pub async fn cmd_generate_ai(
                 "字幕纠错不通过 cmd_generate_ai 触发；用 cmd_recorrect_transcript".into(),
             ))
         }
+        AiTask::Digest => {
+            return Err(AppError::Other(
+                "分块提要是各生成任务的内部步骤，不单独触发".into(),
+            ))
+        }
     }
     Ok(())
 }

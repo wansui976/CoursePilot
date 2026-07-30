@@ -32,6 +32,8 @@ pub struct TaskRouting {
     /// 字幕 AI 纠错。原来这一步不走路由，而是「拿配置列表里第一个有 Key 的」，
     /// 于是用户选好的模型被绕开——可能发去了非预期的服务商，也算在别人账上。
     pub correction: Option<String>,
+    /// 长视频的分块提要。这一步只是压缩，不需要强模型，单独路由出来好让用户挂个便宜的。
+    pub digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -44,6 +46,8 @@ pub enum AiTask {
     Rag,
     /// 字幕 AI 纠错。
     Correction,
+    /// 长视频的分块提要（只压缩，不需要强模型）。
+    Digest,
 }
 
 pub fn parse_profiles(json: Option<&str>) -> AppResult<Vec<LlmProfile>> {
@@ -74,6 +78,7 @@ pub fn resolve_profile<'a>(
         AiTask::Mindmap => &routing.mindmap,
         AiTask::Rag => &routing.rag,
         AiTask::Correction => &routing.correction,
+        AiTask::Digest => &routing.digest,
     };
     if let Some(id) = wanted {
         if let Some(p) = profiles.iter().find(|p| &p.id == id) {

@@ -104,6 +104,33 @@ pub fn summary_request(model: &str, transcript: &str) -> ChatRequest {
     )
 }
 
+/// 长视频的分块提要：把一块讲稿压成要点 + 少量代表性原句。
+///
+/// 只在讲稿超出输入预算时用。目标是让后续的笔记/出题/脑图仍能看到「讲了什么、
+/// 老师的原话怎么说」，同时把体量压下来——所以既要要点，也要留几条逐字原句：
+/// 应试类网课的价值大量在原话里（口诀、模板、判分点），全改写成概括就没用了。
+pub fn digest_request(model: &str, chunk: &str) -> ChatRequest {
+    ChatRequest {
+        model: model.to_string(),
+        system: Some("你是课程讲稿压缩助手。输出纯文本，不要代码围栏、不要任何解释。".into()),
+        cacheable_context: None,
+        messages: vec![ChatMessage {
+            role: "user".into(),
+            content: format!(
+                "把下面这段课程讲稿压缩成提要。格式固定为两部分：\n\
+                 第一部分「要点」：不超过 300 字，说清这一段讲了什么、给了什么方法或结论。\n\
+                 第二部分「原句」：摘 3 条最值得逐字保留的句子，每条一行，\
+                 行首照抄该句在讲稿里的 [mm:ss] 时间戳。\n\
+                 优先摘老师给的口诀、答题模板、固定表述、判分点、以及例题的关键判断——\
+                 这些换成同义句就失效了。没有这类句子时摘信息量最大的三句。\n\
+                 只用讲稿里有的内容，不要补充、不要评论。\n\n讲稿：\n{chunk}"
+            ),
+        }],
+        temperature: 0.2,
+        max_tokens: 700,
+    }
+}
+
 pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatRequest {
     ChatRequest {
         model: model.to_string(),
