@@ -246,6 +246,8 @@ fn take_digits(chars: &[char], start: usize, min: usize, max: usize) -> Option<u
 const WINDOW_PAD_MS: i64 = 30_000;
 /// 喂给模型的窗口总量上限（字符）。
 const WINDOW_BUDGET_CHARS: usize = 4_000;
+/// 本轮问题召不回时，往回带几轮用户提问参与检索。
+const HISTORY_TURNS_FOR_RETRIEVAL: usize = 2;
 
 /// 一个检索窗口：一段连续时间里的讲稿，加上它的最高命中分。
 struct Window {
@@ -253,6 +255,48 @@ struct Window {
     start_ms: i64,
     end_ms: i64,
     text: String,
+}
+
+/// 追问带上最近几轮问过什么，凑出用于**检索**的文本。
+///
+/// 「那第二种情况呢」「为什么不行」这类省略主语的追问，本身几乎没有可检索的词——
+/// 只看本轮问题会一个窗口都召不回，于是被判成「这节课没讲到」，而上一轮明明已经聊清楚
+/// 主题了。这比旧的「整篇讲稿 + 历史」路径更容易丢掉视频依据，是检索式必须补的一课。
+///
+/// 只取用户那几轮（助手的回答里满是模型自己的措辞，掺进来会把检索带偏），
+/// 且只在本轮问题**自己召不回**时才用——话题真的换了的时候，不该被上一轮的词拖回去。
+fn retrieval_text_with_history(query: &str, history: &[ChatMessage]) -> String {
+    let recent: Vec<&str> = history
+        .iter()
+        .rev()
+        .filter(|message| message.role == "user")
+        .take(HISTORY_TURNS_FOR_RETRIEVAL)
+        .map(|message| message.content.as_str())
+        .collect();
+    let mut text = String::new();
+    for earlier in recent.into_iter().rev() {
+        text.push_str(earlier);
+        text.push(' ');
+    }
+    text.push_str(query);
+    text
+}
+
+/// 检索窗口：先只用本轮问题；召不回再带上最近几轮追问重试一次。
+fn retrieve_windows(
+    segments: &[TranscriptSegment],
+    query: &str,
+    history: &[ChatMessage],
+) -> Vec<Window> {
+    let direct = windows_from_hits(segments, query, WINDOW_BUDGET_CHARS);
+    if !direct.is_empty() || history.is_empty() {
+        return direct;
+    }
+    windows_from_hits(
+        segments,
+        &retrieval_text_with_history(query, history),
+        WINDOW_BUDGET_CHARS,
+    )
 }
 
 /// 把命中段扩成窗口并合并重叠区间。
@@ -359,7 +403,7 @@ pub async fn answer(
     history: &[ChatMessage],
 ) -> AppResult<RagAnswer> {
     let segments = list_segments(db, video_id).await?;
-    let windows = windows_from_hits(&segments, query, WINDOW_BUDGET_CHARS);
+    let windows = retrieve_windows(&segments, query, history);
     let messages = build_chat_messages(history, query);
     let (system, context) = ask_context(&windows);
     let req = ask_request(chat_model, system, context, messages, 1024);
@@ -426,7 +470,7 @@ pub async fn answer_stream(
         text: "正在检索相关片段…".into(),
     });
     let segments = list_segments(db, video_id).await?;
-    let windows = windows_from_hits(&segments, query, WINDOW_BUDGET_CHARS);
+    let windows = retrieve_windows(&segments, query, history);
     let citations = window_citations(&windows);
     if !citations.is_empty() {
         on_event(AskEvent::Citations {
@@ -1007,6 +1051,68 @@ mod tests {
         // 零命中：不喂任何字幕（喂全文只是让模型自己得出同一个结论，白花一份钱），
         // 也没有出处可给。
         assert!(ans.citations.is_empty());
+    }
+
+    #[test]
+    fn a_follow_up_question_retrieves_using_the_earlier_turns() {
+        let segs = vec![
+            seg(0, 0, 5_000, "先讲光合作用的光反应"),
+            seg(1, 10_000, 15_000, "再讲光合作用的暗反应"),
+            seg(2, 600_000, 605_000, "完全无关的内容"),
+        ];
+        // 「那第二种呢」自己几乎没有可检索的词：只看本轮问题会一个窗口都召不回，
+        // 于是被判成「这节课没讲到」，而上一轮明明已经聊清楚主题了。
+        assert!(windows_from_hits(&segs, "那第二种呢", WINDOW_BUDGET_CHARS).is_empty());
+
+        let history = vec![
+            ChatMessage {
+                role: "user".into(),
+                content: "光合作用分几个阶段".into(),
+            },
+            ChatMessage {
+                role: "assistant".into(),
+                content: "分光反应和暗反应两个阶段。".into(),
+            },
+        ];
+        let rescued = retrieve_windows(&segs, "那第二种呢", &history);
+        assert!(!rescued.is_empty(), "带上前几轮提问应当能召回");
+        assert!(rescued[0].text.contains("光合作用"));
+    }
+
+    #[test]
+    fn a_new_topic_is_not_dragged_back_by_the_previous_turn() {
+        let segs = vec![
+            seg(0, 0, 5_000, "先讲光合作用的光反应"),
+            seg(1, 60_000, 65_000, "接下来讲细胞呼吸"),
+        ];
+        let history = vec![ChatMessage {
+            role: "user".into(),
+            content: "光合作用分几个阶段".into(),
+        }];
+        // 本轮问题自己能召回时就不掺历史，免得被上一轮的词拖回旧话题。
+        let windows = retrieve_windows(&segs, "细胞呼吸", &history);
+        assert_eq!(windows.len(), 1);
+        assert!(windows[0].text.contains("细胞呼吸"));
+        assert!(!windows[0].text.contains("光反应"));
+    }
+
+    #[test]
+    fn only_user_turns_feed_retrieval() {
+        // 助手的回答里满是模型自己的措辞，掺进检索会把召回带偏。
+        let history = vec![
+            ChatMessage {
+                role: "user".into(),
+                content: "问过的话".into(),
+            },
+            ChatMessage {
+                role: "assistant".into(),
+                content: "回答里的措辞".into(),
+            },
+        ];
+        let text = retrieval_text_with_history("本轮", &history);
+        assert!(text.contains("问过的话"));
+        assert!(text.contains("本轮"));
+        assert!(!text.contains("回答里的措辞"));
     }
 
     #[test]

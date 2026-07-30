@@ -531,8 +531,8 @@ pub async fn migrate_context_fingerprints(db: &Db) -> AppResult<usize> {
 const CONTEXT_BUDGET_CHARS: usize = 20_000;
 /// 超预算时的分块大小。
 const DIGEST_CHUNK_CHARS: usize = 12_000;
-/// 分块提要的成品率门槛：低于这个比例就整体失败，不交出缺了几块的提要稿。
-const DIGEST_MIN_SUCCESS_RATIO: f64 = 0.8;
+/// 每一块提要允许重试多少次。网络抖动用重试兜，而不是放宽「每块都要成功」这条要求。
+const DIGEST_CHUNK_RETRIES: u32 = 2;
 
 /// 送进各生成任务的讲稿，以及它所基于的**原始讲稿**指纹。
 ///
@@ -606,6 +606,13 @@ async fn cached_digest(db: &Db, video_id: &str, fingerprint: &str) -> AppResult<
 
 /// 分块压缩。提要用的模型单独路由（`AiTask::Digest`）——这一步只是压缩，
 /// 不值得用贵模型；没配就退回调用方给的那个。
+///
+/// **每一块都必须成功**。提要稿是五个下游产物的唯一输入，缺一块就意味着摘要、笔记、
+/// 出题、脑图、章节全都没看过那一段内容，而界面上完全看不出来。这里原来照抄了课程
+/// 知识分析的「八成成品率」门槛，但那个场景不一样：那边的部分结果仍是一份可用的知识库，
+/// 门槛防的是「用残缺结果替换完整旧数据」；这边没有任何「部分可用」的解释。
+///
+/// 网络抖动用**逐块重试**兜，而不是降低门槛：重试能救回偶发失败，真失败仍然拦住。
 async fn build_digest(
     db: &Db,
     fallback_provider: &Provider,
@@ -619,40 +626,55 @@ async fn build_digest(
     };
 
     let chunks = crate::pipeline::rag::split_by_chars(full, DIGEST_CHUNK_CHARS);
+    if chunks.is_empty() {
+        return Err(AppError::Other("讲稿为空，无法生成提要".into()));
+    }
     let total = chunks.len();
     let mut parts = Vec::with_capacity(total);
-    let mut first_error: Option<AppError> = None;
-    for chunk in &chunks {
-        match provider
-            .complete(&crate::llm::prompts::digest_request(model, chunk))
+    for (index, chunk) in chunks.iter().enumerate() {
+        let text = digest_one_chunk(provider, model, chunk)
             .await
-        {
-            Ok(response) => {
-                let text = response.content.trim();
-                if !text.is_empty() {
-                    parts.push(text.to_string());
-                }
-            }
-            Err(error) => {
-                tracing::warn!(%error, "讲稿分块提要失败，已跳过该块");
-                if first_error.is_none() {
-                    first_error = Some(error);
-                }
-            }
-        }
-    }
-
-    // 缺块的提要稿不能用：产物会少看一整段内容，而界面上完全看不出来。
-    // 与课程知识分析同一套判断——达不到成品率就整体失败，让用户重试。
-    if total == 0 || (parts.len() as f64) < total as f64 * DIGEST_MIN_SUCCESS_RATIO {
-        return Err(first_error.unwrap_or_else(|| {
-            AppError::Other(format!(
-                "讲稿提要只成功了 {}/{total} 块，未达到覆盖门槛",
-                parts.len()
-            ))
-        }));
+            .map_err(|error| {
+                AppError::Other(format!(
+                    "讲稿提要第 {}/{total} 块失败，整份作废（缺一块会让五个产物都漏掉那一段）：{error}",
+                    index + 1
+                ))
+            })?;
+        parts.push(text);
     }
     Ok(parts.join("\n\n"))
+}
+
+/// 压一块，失败重试。空回复也算失败——它和「跳过这一块」是一样的后果。
+async fn digest_one_chunk(provider: &Provider, model: &str, chunk: &str) -> AppResult<String> {
+    let mut attempt = 0u32;
+    loop {
+        let outcome = provider
+            .complete(&crate::llm::prompts::digest_request(model, chunk))
+            .await
+            .and_then(|response| {
+                let text = response.content.trim().to_string();
+                if text.is_empty() {
+                    Err(AppError::Other("模型对这一块返回了空提要".into()))
+                } else {
+                    Ok(text)
+                }
+            });
+        match outcome {
+            Ok(text) => return Ok(text),
+            Err(error) if attempt < DIGEST_CHUNK_RETRIES => {
+                let backoff = std::time::Duration::from_secs(2u64.pow(attempt + 1));
+                tracing::warn!(
+                    attempt = attempt + 1,
+                    %error,
+                    "讲稿分块提要失败，{backoff:?} 后重试"
+                );
+                tokio::time::sleep(backoff).await;
+                attempt += 1;
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 pub async fn generate_chapters(
@@ -1005,6 +1027,26 @@ mod tests {
         assert_eq!(stored, 1);
         let second = budgeted_context(&db, &provider, "m", &vid).await.unwrap();
         assert_eq!(second.context, first.context);
+    }
+
+    #[tokio::test]
+    async fn a_digest_missing_even_one_chunk_is_not_delivered() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        seed_long_transcript(&db, &vid, 500).await;
+        // Mock 一律回空串：每一块都算失败。原来门槛是「八成成功即交付」，
+        // 于是缺一整段内容的提要仍会被五个下游产物复用，界面上看不出来。
+        let provider = Provider::Mock { canned: " ".into() };
+
+        let result = budgeted_context(&db, &provider, "m", &vid).await;
+
+        assert!(result.is_err(), "有块失败就该整份作废");
+        let stored: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM transcript_digests WHERE video_id=?")
+                .bind(&vid)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, 0, "失败的提要不该落库，否则下次直接读到残缺版本");
     }
 
     #[tokio::test]
