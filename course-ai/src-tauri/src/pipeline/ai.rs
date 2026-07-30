@@ -1,5 +1,6 @@
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::llm::profiles::AiTask;
 use crate::llm::Provider;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -338,21 +339,32 @@ pub async fn store_chapters(db: &Db, video_id: &str, drafts: &[ChapterDraft]) ->
 /// 有指纹记录的五种 AI 产物。
 pub const TRACKED_ARTIFACTS: &[&str] = &["chapters", "summary", "notes", "quiz", "mindmap"];
 
+/// 讲稿指纹。
+///
+/// 包一层而不是直接用 `String`：指纹和讲稿正文都是字符串，编译器不会拦住
+/// 「把正文当指纹传进去」，而那个错误的后果是产物永远显示「已过期」——
+/// 我自己就先踩了一次。
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fingerprint(pub String);
+
 /// 讲稿指纹：喂给模型的那份文本的 SHA-256 前 16 位。
 ///
 /// 算的是**完整上下文**而不只是字幕表：课件页上认出来的板书文字本来就参与生成
 /// （见 [`lecture_context`]），它变了产物同样该标过期。
-pub fn context_fingerprint(context: &str) -> String {
+pub fn context_fingerprint(context: &str) -> Fingerprint {
     let digest = format!("{:x}", Sha256::digest(context.as_bytes()));
-    digest[..16].to_string()
+    Fingerprint(digest[..16].to_string())
 }
 
 /// 记下这份产物是基于哪一版讲稿生成的。
+///
+/// 传的是**原始讲稿**的指纹，不是实际送进模型的那份：长视频送的是提要稿，
+/// 但「已过期」判断要跟着字幕和课件文字走，不能跟着我们内部的压缩结果走。
 pub async fn record_artifact_source(
     db: &Db,
     video_id: &str,
     artifact: &str,
-    context: &str,
+    fingerprint: &Fingerprint,
 ) -> AppResult<()> {
     sqlx::query(
         "INSERT INTO ai_artifact_sources(video_id,artifact,fingerprint,generated_at)
@@ -362,7 +374,7 @@ pub async fn record_artifact_source(
     )
     .bind(video_id)
     .bind(artifact)
-    .bind(context_fingerprint(context))
+    .bind(&fingerprint.0)
     .bind(chrono::Utc::now().timestamp_millis())
     .execute(&db.pool)
     .await?;
@@ -387,11 +399,141 @@ pub async fn stale_artifacts(db: &Db, video_id: &str) -> AppResult<Vec<String>> 
             .await?;
     let mut stale: Vec<String> = rows
         .into_iter()
-        .filter(|(_, fingerprint)| fingerprint != &current)
+        .filter(|(_, fingerprint)| fingerprint != &current.0)
         .map(|(artifact, _)| artifact)
         .collect();
     stale.sort();
     Ok(stale)
+}
+
+// ---------- 输入预算 ----------
+
+/// 直接整篇送进 Prompt 的上限（字符）。绝大多数单节课在这以下。
+const CONTEXT_BUDGET_CHARS: usize = 20_000;
+/// 超预算时的分块大小。
+const DIGEST_CHUNK_CHARS: usize = 12_000;
+/// 分块提要的成品率门槛：低于这个比例就整体失败，不交出缺了几块的提要稿。
+const DIGEST_MIN_SUCCESS_RATIO: f64 = 0.8;
+
+/// 送进各生成任务的讲稿，以及它所基于的**原始讲稿**指纹。
+///
+/// 指纹始终算在原始讲稿上，不是提要稿上：产物的「已过期」判断要跟着字幕和课件文字走，
+/// 而不是跟着我们内部的压缩结果走。
+pub struct LectureInput {
+    pub context: String,
+    pub fingerprint: Fingerprint,
+}
+
+/// 取一份送得进模型的讲稿。
+///
+/// 短片直接整篇；长片改用**提要稿**——原来五个任务各把整份讲稿发一遍且没有任何上限，
+/// 三小时的长讲座正文六万字符以上，五个任务会依次撞上下文上限、连环失败。
+///
+/// 提要稿按讲稿指纹缓存：五个任务共用同一份，且字幕一变自动作废。不缓存的话五个任务
+/// 各做一轮分块压缩，比原来更贵。
+pub async fn budgeted_context(
+    db: &Db,
+    provider: &Provider,
+    model: &str,
+    video_id: &str,
+) -> AppResult<LectureInput> {
+    let full = lecture_context(db, video_id).await?;
+    let fingerprint = context_fingerprint(&full);
+    if full.chars().count() <= CONTEXT_BUDGET_CHARS {
+        return Ok(LectureInput {
+            context: full,
+            fingerprint,
+        });
+    }
+
+    if let Some(cached) = cached_digest(db, video_id, &fingerprint.0).await? {
+        return Ok(LectureInput {
+            context: cached,
+            fingerprint,
+        });
+    }
+
+    let digest = build_digest(db, provider, model, &full).await?;
+    sqlx::query(
+        "INSERT INTO transcript_digests(video_id,fingerprint,content,generated_at)
+         VALUES (?,?,?,?)
+         ON CONFLICT(video_id) DO UPDATE SET
+           fingerprint=excluded.fingerprint, content=excluded.content,
+           generated_at=excluded.generated_at",
+    )
+    .bind(video_id)
+    .bind(&fingerprint.0)
+    .bind(&digest)
+    .bind(chrono::Utc::now().timestamp_millis())
+    .execute(&db.pool)
+    .await?;
+
+    Ok(LectureInput {
+        context: digest,
+        fingerprint,
+    })
+}
+
+async fn cached_digest(db: &Db, video_id: &str, fingerprint: &str) -> AppResult<Option<String>> {
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT fingerprint,content FROM transcript_digests WHERE video_id=?")
+            .bind(video_id)
+            .fetch_optional(&db.pool)
+            .await?;
+    Ok(row
+        .filter(|(stored, _)| stored == fingerprint)
+        .map(|(_, content)| content))
+}
+
+/// 分块压缩。提要用的模型单独路由（`AiTask::Digest`）——这一步只是压缩，
+/// 不值得用贵模型；没配就退回调用方给的那个。
+async fn build_digest(
+    db: &Db,
+    fallback_provider: &Provider,
+    fallback_model: &str,
+    full: &str,
+) -> AppResult<String> {
+    let routed = crate::commands::ai::provider_for_db(db, AiTask::Digest).await?;
+    let (provider, model) = match &routed {
+        Some((provider, model)) => (provider, model.as_str()),
+        None => (fallback_provider, fallback_model),
+    };
+
+    let chunks = crate::pipeline::rag::split_by_chars(full, DIGEST_CHUNK_CHARS);
+    let total = chunks.len();
+    let mut parts = Vec::with_capacity(total);
+    let mut first_error: Option<AppError> = None;
+    for chunk in &chunks {
+        match provider
+            .complete(&crate::llm::prompts::digest_request(model, chunk))
+            .await
+        {
+            Ok(response) => {
+                let text = response.content.trim();
+                if !text.is_empty() {
+                    parts.push(text.to_string());
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "讲稿分块提要失败，已跳过该块");
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+    }
+
+    // 缺块的提要稿不能用：产物会少看一整段内容，而界面上完全看不出来。
+    // 与课程知识分析同一套判断——达不到成品率就整体失败，让用户重试。
+    if total == 0 || (parts.len() as f64) < total as f64 * DIGEST_MIN_SUCCESS_RATIO {
+        return Err(first_error.unwrap_or_else(|| {
+            AppError::Other(format!(
+                "讲稿提要只成功了 {}/{total} 块，未达到覆盖门槛",
+                parts.len()
+            ))
+        }));
+    }
+    Ok(parts.join("\n\n"))
 }
 
 pub async fn generate_chapters(
@@ -400,12 +542,13 @@ pub async fn generate_chapters(
     model: &str,
     video_id: &str,
 ) -> AppResult<usize> {
-    let transcript = transcript_text(db, video_id).await?;
-    let req = crate::llm::prompts::chapters_request(model, &transcript);
+    let input = budgeted_context(db, provider, model, video_id).await?;
+    let transcript = &input.context;
+    let req = crate::llm::prompts::chapters_request(model, transcript);
     let resp = provider.complete(&req).await?;
     let drafts = parse_chapters(&resp.content)?;
     let count = store_chapters(db, video_id, &drafts).await?;
-    record_artifact_source(db, video_id, "chapters", &transcript).await?;
+    record_artifact_source(db, video_id, "chapters", &input.fingerprint).await?;
     Ok(count)
 }
 
@@ -415,8 +558,9 @@ pub async fn generate_quiz(
     model: &str,
     video_id: &str,
 ) -> AppResult<()> {
-    let transcript = transcript_text(db, video_id).await?;
-    let req = crate::llm::prompts::quiz_request(model, &transcript);
+    let input = budgeted_context(db, provider, model, video_id).await?;
+    let transcript = &input.context;
+    let req = crate::llm::prompts::quiz_request(model, transcript);
     let resp = provider.complete(&req).await?;
     let json = validate_quiz_json(&resp.content)?;
     sqlx::query(
@@ -428,7 +572,7 @@ pub async fn generate_quiz(
     .bind(chrono::Utc::now().timestamp_millis())
     .execute(&db.pool)
     .await?;
-    record_artifact_source(db, video_id, "quiz", &transcript).await?;
+    record_artifact_source(db, video_id, "quiz", &input.fingerprint).await?;
     Ok(())
 }
 
@@ -438,8 +582,9 @@ pub async fn generate_mindmap(
     model: &str,
     video_id: &str,
 ) -> AppResult<()> {
-    let transcript = transcript_text(db, video_id).await?;
-    let req = crate::llm::prompts::mindmap_request(model, &transcript);
+    let input = budgeted_context(db, provider, model, video_id).await?;
+    let transcript = &input.context;
+    let req = crate::llm::prompts::mindmap_request(model, transcript);
     let md = provider.complete(&req).await?.content;
     let md = strip_code_fence(&md).to_string();
     sqlx::query(
@@ -451,7 +596,7 @@ pub async fn generate_mindmap(
     .bind(chrono::Utc::now().timestamp_millis())
     .execute(&db.pool)
     .await?;
-    record_artifact_source(db, video_id, "mindmap", &transcript).await?;
+    record_artifact_source(db, video_id, "mindmap", &input.fingerprint).await?;
     Ok(())
 }
 
@@ -461,8 +606,9 @@ pub async fn generate_summary(
     model: &str,
     video_id: &str,
 ) -> AppResult<()> {
-    let transcript = transcript_text(db, video_id).await?;
-    let req = crate::llm::prompts::summary_request(model, &transcript);
+    let input = budgeted_context(db, provider, model, video_id).await?;
+    let transcript = &input.context;
+    let req = crate::llm::prompts::summary_request(model, transcript);
     let md = provider.complete(&req).await?.content;
     let md = strip_code_fence(&md).to_string();
     sqlx::query(
@@ -474,7 +620,7 @@ pub async fn generate_summary(
     .bind(chrono::Utc::now().timestamp_millis())
     .execute(&db.pool)
     .await?;
-    record_artifact_source(db, video_id, "summary", &transcript).await?;
+    record_artifact_source(db, video_id, "summary", &input.fingerprint).await?;
     Ok(())
 }
 
@@ -484,8 +630,9 @@ pub async fn generate_notes(
     model: &str,
     video_id: &str,
 ) -> AppResult<()> {
-    let transcript = transcript_text(db, video_id).await?;
-    let req = crate::llm::prompts::notes_request(model, &transcript);
+    let input = budgeted_context(db, provider, model, video_id).await?;
+    let transcript = &input.context;
+    let req = crate::llm::prompts::notes_request(model, transcript);
     let md = provider.complete(&req).await?.content;
     let md = strip_code_fence(&md).to_string();
     let now = chrono::Utc::now().timestamp_millis();
@@ -500,7 +647,7 @@ pub async fn generate_notes(
     .bind(now)
     .execute(&db.pool)
     .await?;
-    record_artifact_source(db, video_id, "notes", &transcript).await?;
+    record_artifact_source(db, video_id, "notes", &input.fingerprint).await?;
     Ok(())
 }
 
@@ -586,14 +733,96 @@ mod tests {
         assert_eq!(lines.len(), 4);
     }
 
+    /// 造一份超出输入预算的讲稿（很多行，每行带时间戳）。
+    async fn seed_long_transcript(db: &Db, video_id: &str, lines: usize) {
+        for idx in 1..=lines {
+            sqlx::query(
+                "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)",
+            )
+            .bind(video_id)
+            .bind(idx as i64)
+            .bind((idx * 5_000) as i64)
+            .bind((idx * 5_000 + 4_000) as i64)
+            .bind("这一句是为了把讲稿撑到超过输入预算而反复出现的内容".repeat(3))
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_short_lecture_is_sent_whole() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let provider = Provider::Mock {
+            canned: "不该被用到".into(),
+        };
+        let input = budgeted_context(&db, &provider, "m", &vid).await.unwrap();
+        // 短片不压缩：内容与讲稿逐字相同（这也是五个任务命中前缀缓存的前提）。
+        assert_eq!(input.context, lecture_context(&db, &vid).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_long_lecture_falls_back_to_a_cached_digest() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        seed_long_transcript(&db, &vid, 500).await;
+        let full = lecture_context(&db, &vid).await.unwrap();
+        assert!(
+            full.chars().count() > CONTEXT_BUDGET_CHARS,
+            "这份讲稿要超预算才测得到分块提要"
+        );
+        let provider = Provider::Mock {
+            canned: "要点：这一块讲了什么。".into(),
+        };
+
+        let first = budgeted_context(&db, &provider, "m", &vid).await.unwrap();
+        assert!(first.context.chars().count() < full.chars().count());
+        // 指纹算在**原始讲稿**上：产物过期要跟字幕走，不跟我们内部的压缩结果走。
+        assert_eq!(first.fingerprint, context_fingerprint(&full));
+
+        // 第二次必须命中缓存：不缓存的话五个任务各压一轮，比原来更贵。
+        let stored: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM transcript_digests WHERE video_id=?")
+                .bind(&vid)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, 1);
+        let second = budgeted_context(&db, &provider, "m", &vid).await.unwrap();
+        assert_eq!(second.context, first.context);
+    }
+
+    #[tokio::test]
+    async fn a_changed_transcript_invalidates_the_cached_digest() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        seed_long_transcript(&db, &vid, 500).await;
+        let provider = Provider::Mock {
+            canned: "旧提要".into(),
+        };
+        let before = budgeted_context(&db, &provider, "m", &vid).await.unwrap();
+
+        sqlx::query("UPDATE transcripts SET text=? WHERE video_id=? AND segment_idx=1")
+            .bind("改过的一句")
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        let provider = Provider::Mock {
+            canned: "新提要".into(),
+        };
+        let after = budgeted_context(&db, &provider, "m", &vid).await.unwrap();
+        assert_ne!(after.fingerprint, before.fingerprint);
+        assert!(after.context.contains("新提要"), "指纹不匹配就该重做提要");
+    }
+
     #[tokio::test]
     async fn editing_the_transcript_marks_the_products_stale() {
         let (db, vid, _d) = seed_video_with_transcript().await;
         let context = lecture_context(&db, &vid).await.unwrap();
-        record_artifact_source(&db, &vid, "summary", &context)
+        record_artifact_source(&db, &vid, "summary", &context_fingerprint(&context))
             .await
             .unwrap();
-        record_artifact_source(&db, &vid, "quiz", &context)
+        record_artifact_source(&db, &vid, "quiz", &context_fingerprint(&context))
             .await
             .unwrap();
 
@@ -615,7 +844,7 @@ mod tests {
 
         // 重新生成其中一份：它回到最新，另一份仍然过期。
         let fresh = lecture_context(&db, &vid).await.unwrap();
-        record_artifact_source(&db, &vid, "summary", &fresh)
+        record_artifact_source(&db, &vid, "summary", &context_fingerprint(&fresh))
             .await
             .unwrap();
         assert_eq!(
@@ -628,7 +857,7 @@ mod tests {
     async fn slide_text_changes_also_make_the_products_stale() {
         let (db, vid, _d) = seed_video_with_transcript().await;
         let context = lecture_context(&db, &vid).await.unwrap();
-        record_artifact_source(&db, &vid, "notes", &context)
+        record_artifact_source(&db, &vid, "notes", &context_fingerprint(&context))
             .await
             .unwrap();
 
