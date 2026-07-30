@@ -29,9 +29,12 @@ const ROUTING_TASKS = [
   // 字幕纠错。原来它不走路由，而是「拿列表里第一个有 Key 的」，
   // 于是这里选的模型对它不生效——字幕可能被发去另一家、算在另一个账上。
   "correction",
-  // 长视频的分块提要。挂在同一个模型上；想省钱可以手改 llm_task_routing 单独指一个便宜的。
   "digest",
 ] as const;
+
+// 「当前默认模型」会把所有任务重写成同一个 profile。digest（长视频的分块提要）是例外：
+// 它只是压缩，值得单独挂一个便宜模型，而那份手工配置不该在改任何模型设置时被静默盖掉。
+const TASKS_KEEPING_MANUAL_ROUTING = ["digest"] as const;
 
 export function LlmSettingsPanel() {
   const [profiles, setProfiles] = useState<LlmProfile[]>([]);
@@ -39,6 +42,8 @@ export function LlmSettingsPanel() {
   const [hasKey, setHasKey] = useState<Record<string, boolean>>({});
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
+  // 手工配过的任务路由（目前只有 digest）。保存时要原样带回去，不能被「当前默认模型」冲掉。
+  const [manualRouting, setManualRouting] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState("");
   const [savedMsg, setSavedMsg] = useState("");
   const [saving, setSaving] = useState(false);
@@ -51,13 +56,22 @@ export function LlmSettingsPanel() {
         // 当前默认模型：从已存 routing 推断（任一任务指向的 profile），否则第一个。
         let active: string | null = ps[0]?.id ?? null;
         const routingRaw = await ipc.settings.get("llm_task_routing");
+        const manual: Record<string, string> = {};
         if (routingRaw) {
           try {
             const routing = JSON.parse(routingRaw) as Record<string, string | null>;
-            const hit = ROUTING_TASKS.map((task) => routing[task]).find(
-              (value) => value && ps.some((p) => p.id === value),
-            );
+            // 「当前默认模型」取任一任务指向的 profile；digest 可能被单独指到别处，
+            // 所以推断默认模型时把它排除，否则会把便宜模型当成默认模型显示。
+            const hit = ROUTING_TASKS.filter(
+              (task) => !TASKS_KEEPING_MANUAL_ROUTING.includes(task as "digest"),
+            )
+              .map((task) => routing[task])
+              .find((value) => value && ps.some((p) => p.id === value));
             if (hit) active = hit;
+            for (const task of TASKS_KEEPING_MANUAL_ROUTING) {
+              const value = routing[task];
+              if (value && ps.some((p) => p.id === value)) manual[task] = value;
+            }
           } catch {
             // routing JSON 损坏时忽略，用第一个；IPC 读取错误则交给外层显示。
           }
@@ -72,6 +86,7 @@ export function LlmSettingsPanel() {
         if (cancelled) return;
         setProfiles(ps);
         setActiveId(active);
+        setManualRouting(manual);
         setHasKey(flags);
         setLoadError("");
       } catch (error) {
@@ -115,6 +130,12 @@ export function LlmSettingsPanel() {
       const routing: Record<string, string> = {};
       if (activeId && profiles.some((p) => p.id === activeId)) {
         for (const task of ROUTING_TASKS) routing[task] = activeId;
+        // 保住手工配的 digest 路由：原来这里把所有任务一律重写成 activeId，
+        // 于是「给提要单独挂个便宜模型」的配置会在下次改任何设置时被悄悄覆盖。
+        for (const task of TASKS_KEEPING_MANUAL_ROUTING) {
+          const manual = manualRouting[task];
+          if (manual && profiles.some((p) => p.id === manual)) routing[task] = manual;
+        }
       }
       await ipc.ai.saveProfiles(JSON.stringify(profiles), JSON.stringify(routing));
       for (const [id, key] of Object.entries(keys)) {
