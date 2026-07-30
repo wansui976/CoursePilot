@@ -116,6 +116,13 @@ pub fn run() {
                 if let Err(error) = crate::pipeline::recover_interrupted_processing(&db).await {
                     tracing::warn!("recover interrupted processing failed: {error}");
                 }
+                // 讲稿口径变更后改写仍然对得上的产物指纹，避免用户一开视频就看到
+                // 五个产物全标「已过期」（内容其实没问题）。只跑一次，见函数注释。
+                match crate::pipeline::ai::migrate_context_fingerprints(&db).await {
+                    Ok(0) => {}
+                    Ok(rewritten) => tracing::info!(rewritten, "已按新讲稿口径改写产物指纹"),
+                    Err(error) => tracing::warn!("migrate context fingerprints failed: {error}"),
+                }
                 // 启动时清理过期回收站（超过保留期的视频永久删除）。
                 if let Err(error) = crate::commands::videos::purge_expired_trash(&db).await {
                     tracing::warn!("purge expired trash failed: {error}");

@@ -11,7 +11,13 @@ fn stamp(start_ms: i64) -> String {
     format!("[{:02}:{:02}]", total / 60, total % 60)
 }
 
+/// 相邻讲稿行合并成一块的时间窗与字数上限。
+/// 45 秒足够定位（产物里的时间戳是给人点击跳转的），200 字避免把一整段挤成一行。
+const MERGE_WINDOW_MS: i64 = 45_000;
+const MERGE_MAX_CHARS: usize = 200;
+
 /// 一行上下文：讲稿或板书。
+#[derive(Clone)]
 struct ContextLine {
     start_ms: i64,
     /// 板书行排在同一时刻的讲稿前面：先看见写了什么，再看讲解。
@@ -45,6 +51,12 @@ pub async fn transcript_text(db: &Db, video_id: &str) -> AppResult<String> {
 /// 讲稿则承载理解和例子——两类信息可信度不同，模型需要能区分。没有课件 OCR 时
 /// 输出与从前完全一致（纯讲稿），所以对未提取课件的视频没有任何行为变化。
 pub async fn lecture_context(db: &Db, video_id: &str) -> AppResult<String> {
+    let lines = lecture_lines(db, video_id).await?;
+    Ok(format_lines(&merge_speech(&lines)))
+}
+
+/// 讲稿 + 板书，按时间排好序的原始行（未合并）。
+async fn lecture_lines(db: &Db, video_id: &str) -> AppResult<Vec<ContextLine>> {
     let spoken: Vec<(i64, String)> =
         sqlx::query_as("SELECT start_ms, text FROM transcripts WHERE video_id=? ORDER BY start_ms")
             .bind(video_id)
@@ -91,7 +103,45 @@ pub async fn lecture_context(db: &Db, video_id: &str) -> AppResult<String> {
             .cmp(&b.start_ms)
             .then(b.is_slide.cmp(&a.is_slide))
     });
+    Ok(lines)
+}
 
+/// 合并讲稿的碎段。板书行不参与合并。
+///
+/// ASR 大约每 5 秒切一段，一节 90 分钟的课就有上千行，每行都带一个 `[mm:ss] ` 前缀——
+/// 光前缀就占掉整份输入的四分之一，而笔记/出题/脑图根本不需要 5 秒粒度的时间锚点
+/// （产物里的时间戳是给人点击跳转用的，几十秒完全够）。合并后前缀开销降到约七分之一。
+///
+/// 必须是纯函数且**结果确定**：五个 AI 任务共用同一份上下文才能命中前缀缓存，
+/// 这里一旦引入任何随机/时间/迭代顺序相关的东西，缓存就废了。
+fn merge_speech(lines: &[ContextLine]) -> Vec<ContextLine> {
+    let mut out: Vec<ContextLine> = Vec::with_capacity(lines.len());
+    for line in lines {
+        if line.text.is_empty() {
+            continue;
+        }
+        // 板书行原样保留：它们本来就稀疏，且 (板书) 标记要留在自己那一行上。
+        if line.is_slide {
+            out.push(line.clone());
+            continue;
+        }
+        let can_extend = out.last().is_some_and(|last| {
+            !last.is_slide
+                && line.start_ms - last.start_ms < MERGE_WINDOW_MS
+                && last.text.chars().count() + 1 + line.text.chars().count() <= MERGE_MAX_CHARS
+        });
+        if can_extend {
+            let last = out.last_mut().expect("can_extend 保证非空");
+            last.text.push(' ');
+            last.text.push_str(&line.text);
+        } else {
+            out.push(line.clone());
+        }
+    }
+    out
+}
+
+fn format_lines(lines: &[ContextLine]) -> String {
     let mut out = String::new();
     for line in lines {
         if line.text.is_empty() {
@@ -105,7 +155,7 @@ pub async fn lecture_context(db: &Db, video_id: &str) -> AppResult<String> {
             line.text
         ));
     }
-    Ok(out)
+    out
 }
 
 /// LLM 偶尔会包代码围栏；剥掉再解析。
@@ -404,6 +454,68 @@ pub async fn stale_artifacts(db: &Db, video_id: &str) -> AppResult<Vec<String>> 
         .collect();
     stale.sort();
     Ok(stale)
+}
+
+/// 讲稿口径版本。改变 `lecture_context` 输出（合并规则、板书格式…）时要加一，
+/// 迁移逻辑据此判断是否需要改写已记录的指纹。
+const CONTEXT_SCHEMA_VERSION: &str = "2";
+const CONTEXT_SCHEMA_SETTING: &str = "ai_context_schema_version";
+
+/// 未合并的旧口径讲稿。**只给指纹迁移用**，不要用于生成。
+async fn legacy_lecture_context(db: &Db, video_id: &str) -> AppResult<String> {
+    let lines = lecture_lines(db, video_id).await?;
+    Ok(format_lines(&lines))
+}
+
+/// 讲稿口径变了之后，把仍然对得上的产物指纹改写成新口径。
+///
+/// 不做这一步的话：规范化改变了讲稿文本 → 所有已记录的指纹都对不上 → 用户打开任何
+/// 视频都看到五个产物全标「已过期」，而内容其实没问题。「已过期」这个标记刚建立信任，
+/// 第一次上线就全屏泛红会让它失去意义。
+///
+/// 判断方式是精确的，不是「一律当成没过期」：用**旧口径**重算当前字幕的指纹，
+/// 与记录值比对——相等说明字幕自生成以来没变过，改写成新口径；不相等说明是真过期，
+/// 原样留着（它与新指纹同样对不上，继续显示过期）。
+pub async fn migrate_context_fingerprints(db: &Db) -> AppResult<usize> {
+    let current: Option<String> =
+        crate::commands::settings::get_setting(db, CONTEXT_SCHEMA_SETTING).await?;
+    if current.as_deref() == Some(CONTEXT_SCHEMA_VERSION) {
+        return Ok(0);
+    }
+
+    let videos: Vec<String> =
+        sqlx::query_scalar("SELECT DISTINCT video_id FROM ai_artifact_sources")
+            .fetch_all(&db.pool)
+            .await?;
+    let mut rewritten = 0usize;
+    for video_id in videos {
+        let (Ok(legacy), Ok(fresh)) = (
+            legacy_lecture_context(db, &video_id).await,
+            lecture_context(db, &video_id).await,
+        ) else {
+            continue; // 字幕已被删掉之类，跳过
+        };
+        let legacy_fingerprint = context_fingerprint(&legacy);
+        let fresh_fingerprint = context_fingerprint(&fresh);
+        let result = sqlx::query(
+            "UPDATE ai_artifact_sources SET fingerprint=?
+             WHERE video_id=? AND fingerprint=?",
+        )
+        .bind(&fresh_fingerprint.0)
+        .bind(&video_id)
+        .bind(&legacy_fingerprint.0)
+        .execute(&db.pool)
+        .await?;
+        rewritten += result.rows_affected() as usize;
+    }
+
+    // 缓存的提要稿也按旧口径算过指纹，一律作废（内容会在下次需要时按新口径重做）。
+    sqlx::query("DELETE FROM transcript_digests")
+        .execute(&db.pool)
+        .await?;
+    crate::commands::settings::set_setting(db, CONTEXT_SCHEMA_SETTING, CONTEXT_SCHEMA_VERSION)
+        .await?;
+    Ok(rewritten)
 }
 
 // ---------- 输入预算 ----------
@@ -748,6 +860,103 @@ mod tests {
             .await
             .unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn speech_lines_merge_into_blocks_but_slides_do_not() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        // 每 5 秒一句（ASR 的真实粒度），跨过 45 秒窗口。
+        for (idx, start) in [(1_i64, 5_000_i64), (2, 10_000), (3, 15_000), (4, 60_000)] {
+            sqlx::query(
+                "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)",
+            )
+            .bind(&vid)
+            .bind(idx)
+            .bind(start)
+            .bind(start + 4_000)
+            .bind(format!("第{idx}句"))
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO slides(video_id,image_path,start_ms,end_ms,page_no,ocr_text)
+             VALUES (?,?,12000,NULL,0,?)",
+        )
+        .bind(&vid)
+        .bind("/tmp/p0.jpg")
+        .bind("板书内容")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let lines: Vec<String> = lecture_context(&db, &vid)
+            .await
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+
+        // 0/5/10 秒三句并进一块（块首时间戳）；板书行自成一行、不被合并；
+        // 12 秒之后的讲稿重新起块（板书打断了合并）；60 秒那句超出 45 秒窗口，另起一块。
+        assert_eq!(lines[0], "[00:00] 讲解第一部分 第1句 第2句");
+        assert_eq!(lines[1], "[00:12] (板书) 板书内容");
+        assert_eq!(lines[2], "[00:15] 第3句");
+        assert_eq!(lines[3], "[01:00] 第4句");
+        assert_eq!(lines.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn merging_is_deterministic() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        seed_long_transcript(&db, &vid, 40).await;
+        // 前缀缓存的前提：同一份输入永远产出逐字节相同的上下文。
+        let a = lecture_context(&db, &vid).await.unwrap();
+        let b = lecture_context(&db, &vid).await.unwrap();
+        assert_eq!(a, b);
+        assert_eq!(context_fingerprint(&a), context_fingerprint(&b));
+    }
+
+    #[tokio::test]
+    async fn the_schema_migration_keeps_unchanged_products_out_of_the_stale_list() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        seed_long_transcript(&db, &vid, 20).await;
+        // 模拟升级前的记录：指纹按**旧口径**（未合并）算。
+        let legacy = legacy_lecture_context(&db, &vid).await.unwrap();
+        record_artifact_source(&db, &vid, "summary", &context_fingerprint(&legacy))
+            .await
+            .unwrap();
+        // 新口径下它对不上，所以升级后本来会被标成过期。
+        assert_eq!(
+            stale_artifacts(&db, &vid).await.unwrap(),
+            vec!["summary".to_string()]
+        );
+
+        assert_eq!(migrate_context_fingerprints(&db).await.unwrap(), 1);
+        assert!(
+            stale_artifacts(&db, &vid).await.unwrap().is_empty(),
+            "字幕没变过的产物不该因为我们换了讲稿口径而被标成过期"
+        );
+        // 只跑一次。
+        assert_eq!(migrate_context_fingerprints(&db).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn the_schema_migration_leaves_genuinely_stale_products_alone() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        seed_long_transcript(&db, &vid, 20).await;
+        // 记录一份「既不是旧口径也不是新口径」的指纹：代表产物生成之后字幕真的改过。
+        record_artifact_source(&db, &vid, "notes", &Fingerprint("stale0000000000".into()))
+            .await
+            .unwrap();
+
+        migrate_context_fingerprints(&db).await.unwrap();
+
+        assert_eq!(
+            stale_artifacts(&db, &vid).await.unwrap(),
+            vec!["notes".to_string()],
+            "真过期的产物不该被迁移顺手洗白"
+        );
     }
 
     #[tokio::test]
