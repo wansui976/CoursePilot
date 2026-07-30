@@ -56,7 +56,7 @@ describe("LlmSettingsPanel", () => {
     confirmMock.mockResolvedValue(false);
     render(<LlmSettingsPanel />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "删除此配置" }));
+    fireEvent.click(await screen.findByRole("button", { name: "删除" }));
 
     await waitFor(() =>
       expect(confirmMock).toHaveBeenCalledWith(
@@ -68,7 +68,7 @@ describe("LlmSettingsPanel", () => {
     expect(screen.getByLabelText("配置名称")).toBeInTheDocument();
 
     confirmMock.mockResolvedValue(true);
-    fireEvent.click(screen.getByRole("button", { name: "删除此配置" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
     await waitFor(() =>
       expect(screen.queryByLabelText("配置名称")).not.toBeInTheDocument(),
     );
@@ -78,7 +78,7 @@ describe("LlmSettingsPanel", () => {
     mockIpc.ai.saveProfiles.mockRejectedValue(new Error("disk full"));
     render(<LlmSettingsPanel />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "保存 LLM 配置" }));
+    fireEvent.click(await screen.findByRole("button", { name: "保存" }));
 
     expect(await screen.findByText(/保存失败/)).toBeInTheDocument();
   });
