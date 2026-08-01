@@ -124,16 +124,14 @@ fn ask_request(
         cacheable_context: context,
         messages,
         temperature: 0.2,
+        tools: Vec::new(),
     }
 }
 
 pub fn build_chat_messages(history: &[ChatMessage], query: &str) -> Vec<ChatMessage> {
     let mut messages = Vec::with_capacity(history.len() + 1);
     messages.extend(history.iter().cloned());
-    messages.push(ChatMessage {
-        role: "user".into(),
-        content: query.to_string(),
-    });
+    messages.push(ChatMessage::user(query.to_string()));
     messages
 }
 
@@ -1459,14 +1457,8 @@ mod tests {
     #[test]
     fn build_chat_messages_appends_current_query_after_history() {
         let history = vec![
-            ChatMessage {
-                role: "user".into(),
-                content: "第一轮问题".into(),
-            },
-            ChatMessage {
-                role: "assistant".into(),
-                content: "第一轮回答".into(),
-            },
+            ChatMessage::user("第一轮问题"),
+            ChatMessage::assistant("第一轮回答"),
         ];
         let messages = build_chat_messages(&history, "第二轮问题");
         assert_eq!(messages.len(), 3);
@@ -1592,14 +1584,8 @@ mod tests {
         );
 
         let history = vec![
-            ChatMessage {
-                role: "user".into(),
-                content: "光合作用分几个阶段".into(),
-            },
-            ChatMessage {
-                role: "assistant".into(),
-                content: "分光反应和暗反应两个阶段。".into(),
-            },
+            ChatMessage::user("光合作用分几个阶段"),
+            ChatMessage::assistant("分光反应和暗反应两个阶段。"),
         ];
         let rescued = retrieve(&segs, &[], "那第二种呢", &history).windows;
         assert!(!rescued.is_empty(), "带上前几轮提问应当能召回");
@@ -1612,10 +1598,7 @@ mod tests {
             seg(0, 0, 5_000, "先讲光合作用的光反应"),
             seg(1, 60_000, 65_000, "接下来讲细胞呼吸"),
         ];
-        let history = vec![ChatMessage {
-            role: "user".into(),
-            content: "光合作用分几个阶段".into(),
-        }];
+        let history = vec![ChatMessage::user("光合作用分几个阶段")];
         // 本轮问题自己能召回时就不掺历史，免得被上一轮的词拖回旧话题。
         let windows = retrieve(&segs, &[], "细胞呼吸", &history).windows;
         assert_eq!(windows.len(), 1);
@@ -1627,14 +1610,8 @@ mod tests {
     fn only_user_turns_feed_retrieval() {
         // 助手的回答里满是模型自己的措辞，掺进检索会把召回带偏。
         let history = vec![
-            ChatMessage {
-                role: "user".into(),
-                content: "问过的话".into(),
-            },
-            ChatMessage {
-                role: "assistant".into(),
-                content: "回答里的措辞".into(),
-            },
+            ChatMessage::user("问过的话"),
+            ChatMessage::assistant("回答里的措辞"),
         ];
         let text = retrieval_text_with_history("本轮", &history);
         assert!(text.contains("问过的话"));
@@ -1914,14 +1891,8 @@ mod tests {
             canned: "续问回答 [00:00]".into(),
         };
         let history = vec![
-            ChatMessage {
-                role: "user".into(),
-                content: "第一轮问题".into(),
-            },
-            ChatMessage {
-                role: "assistant".into(),
-                content: "第一轮回答".into(),
-            },
+            ChatMessage::user("第一轮问题"),
+            ChatMessage::assistant("第一轮回答"),
         ];
         let ans = answer(&db, &provider, "chat", &vid, "第二轮问题", &history)
             .await
@@ -2272,14 +2243,8 @@ mod tests {
         assert!(alone.is_empty());
 
         let history = vec![
-            ChatMessage {
-                role: "user".into(),
-                content: "光合作用分几个阶段".into(),
-            },
-            ChatMessage {
-                role: "assistant".into(),
-                content: "分光反应和暗反应。".into(),
-            },
+            ChatMessage::user("光合作用分几个阶段"),
+            ChatMessage::assistant("分光反应和暗反应。"),
         ];
         let (rescued, cites) =
             retrieve_scope_context(&per_video, &no_pages, "那第二个呢", &history);
@@ -2298,10 +2263,7 @@ mod tests {
             ],
         )];
         let no_pages = vec![("v1".to_string(), "第一讲".to_string(), Vec::new())];
-        let history = vec![ChatMessage {
-            role: "user".into(),
-            content: "光合作用分几个阶段".into(),
-        }];
+        let history = vec![ChatMessage::user("光合作用分几个阶段")];
         let (context, _) = retrieve_scope_context(&per_video, &no_pages, "细胞呼吸", &history);
         assert!(context.contains("细胞呼吸"));
         assert!(!context.contains("光反应"), "本轮能召回就不该掺历史");

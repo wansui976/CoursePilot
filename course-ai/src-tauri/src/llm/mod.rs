@@ -8,10 +8,80 @@ use crate::error::AppResult;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// 一个可以交给模型调用的工具。`parameters` 是它的入参 JSON Schema。
+#[derive(Debug, Clone)]
+pub struct ToolSpec {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+/// 模型要求调用某个工具。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolCall {
+    /// 服务端给的调用 id。回结果时必须原样带回去，否则模型对不上是哪一次调用。
+    pub id: String,
+    pub name: String,
+    /// 模型给的入参，**原样保留字符串、不在这里解析**。
+    ///
+    /// 模型完全可能吐出不合法的 JSON，或者参数不符合 schema。那是执行方要处理的错误
+    /// （可以把错误当工具结果喂回去让它改），不该让整个响应解析失败——一旦在这里
+    /// 报错，用户看到的是「请求失败」，而真相是「模型少写了一个引号」。
+    pub arguments: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
-    pub role: String, // "user" | "assistant"
+    /// "user" | "assistant" | "tool"
+    pub role: String,
     pub content: String,
+    /// 仅 assistant 轮次：这一轮模型没有作答，而是要求调用这些工具。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
+    /// 仅 tool 轮次：这条结果回应的是哪一次调用。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+impl ChatMessage {
+    pub fn user(content: impl Into<String>) -> Self {
+        Self::text("user", content)
+    }
+
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self::text("assistant", content)
+    }
+
+    pub fn text(role: &str, content: impl Into<String>) -> Self {
+        Self {
+            role: role.to_string(),
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+        }
+    }
+
+    /// 模型这一轮要求调工具。必须原样放回对话里再发下一次请求，
+    /// 否则后面那条 tool 结果就成了没有出处的孤儿，服务端会直接拒。
+    pub fn tool_calls(calls: Vec<ToolCall>) -> Self {
+        Self {
+            role: "assistant".into(),
+            content: String::new(),
+            tool_calls: calls,
+            tool_call_id: None,
+        }
+    }
+
+    /// 一次工具执行的结果。执行失败时也走这里——把错误文本喂回去，
+    /// 让模型有机会换参数重试，比直接把整轮对话打断有用。
+    pub fn tool_result(call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            role: "tool".into(),
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: Some(call_id.into()),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +97,23 @@ pub struct ChatRequest {
     pub cacheable_context: Option<String>,
     pub messages: Vec<ChatMessage>,
     pub temperature: f32,
+    /// 这一轮允许模型调用的工具。空表示不带——请求体里连字段都不出现，
+    /// 所以现有那些任务的请求形状一个字节都没变。
+    pub tools: Vec<ToolSpec>,
+}
+
+impl ChatRequest {
+    /// 纯文本请求（不带工具）。现有任务都走这里。
+    pub fn text(model: &str, system: Option<String>, messages: Vec<ChatMessage>) -> Self {
+        Self {
+            model: model.to_string(),
+            system,
+            cacheable_context: None,
+            messages,
+            temperature: 0.2,
+            tools: Vec::new(),
+        }
+    }
 }
 
 /// 把 temperature 量化到 2 位小数再发给服务端。
@@ -128,6 +215,8 @@ pub enum StreamPiece<'a> {
 #[derive(Debug, Clone)]
 pub struct ChatResponse {
     pub content: String,
+    /// 模型这一轮要求调的工具。非空时 `content` 通常是空的——它没在说话，在派活。
+    pub tool_calls: Vec<ToolCall>,
 }
 
 /// 统一的 LLM 通道。用 enum 而非 trait，避免引入 async-trait 依赖，
@@ -152,6 +241,7 @@ impl Provider {
             } => openai::complete(base_url, api_key, client, req).await,
             Provider::Mock { canned } => Ok(ChatResponse {
                 content: canned.clone(),
+                tool_calls: Vec::new(),
             }),
         }
     }
@@ -232,11 +322,9 @@ mod tests {
             model: "x".into(),
             system: None,
             cacheable_context: None,
-            messages: vec![ChatMessage {
-                role: "user".into(),
-                content: "hi".into(),
-            }],
+            messages: vec![ChatMessage::user("hi")],
             temperature: 0.2,
+            tools: Vec::new(),
         };
         assert_eq!(provider.complete(&req).await.unwrap().content, "hello");
     }
@@ -248,6 +336,7 @@ mod tests {
             cacheable_context: None,
             messages: vec![],
             temperature: 0.2,
+            tools: Vec::new(),
         }
     }
 

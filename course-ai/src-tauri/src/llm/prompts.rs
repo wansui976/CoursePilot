@@ -11,11 +11,9 @@ fn base(model: &str, system: &str, transcript: &str, user: &str) -> ChatRequest 
              认出来的文字，其余是老师讲的话。定义、公式、术语的写法以板书为准，\
              理解、举例与推导以讲稿为准；板书文字可能有识别错漏，明显不通就以讲稿为准：\n{transcript}"
         )),
-        messages: vec![ChatMessage {
-            role: "user".into(),
-            content: user.to_string(),
-        }],
+        messages: vec![ChatMessage::user(user)],
         temperature: 0.3,
+        tools: Vec::new(),
     }
 }
 
@@ -112,19 +110,17 @@ pub fn digest_request(model: &str, chunk: &str) -> ChatRequest {
         model: model.to_string(),
         system: Some("你是课程讲稿压缩助手。输出纯文本，不要代码围栏、不要任何解释。".into()),
         cacheable_context: None,
-        messages: vec![ChatMessage {
-            role: "user".into(),
-            content: format!(
-                "把下面这段课程讲稿压缩成提要。格式固定为两部分：\n\
+        messages: vec![ChatMessage::user(format!(
+            "把下面这段课程讲稿压缩成提要。格式固定为两部分：\n\
                  第一部分「要点」：不超过 300 字，说清这一段讲了什么、给了什么方法或结论。\n\
                  第二部分「原句」：摘 3 条最值得逐字保留的句子，每条一行，\
                  行首照抄该句在讲稿里的 [mm:ss] 时间戳。\n\
                  优先摘老师给的口诀、答题模板、固定表述、判分点、以及例题的关键判断——\
                  这些换成同义句就失效了。没有这类句子时摘信息量最大的三句。\n\
                  只用讲稿里有的内容，不要补充、不要评论。\n\n讲稿：\n{chunk}"
-            ),
-        }],
+        ))],
         temperature: 0.2,
+        tools: Vec::new(),
     }
 }
 
@@ -144,18 +140,16 @@ pub fn query_expansion_request(model: &str, query: &str) -> ChatRequest {
                 .into(),
         ),
         cacheable_context: None,
-        messages: vec![ChatMessage {
-            role: "user".into(),
-            content: format!(
-                "学生在问一节网课里的内容：{query}\n\n\
+        messages: vec![ChatMessage::user(format!(
+            "学生在问一节网课里的内容：{query}\n\n\
                  请写出 3 到 5 个「老师讲这段时最可能说出口」的中文专业术语或固定说法，\
                  用空格分隔，写在一行里。\n\
                  要具体到能在讲稿里搜到的程度：写学科术语的标准叫法，\
                  不要写「公式」「定义」「例子」「方法」这类哪节课都有的空泛词。\n\
                  拿不准是哪门学科时，就把问题里的口语换成更书面的同义说法。"
-            ),
-        }],
+        ))],
         temperature: 0.3,
+        tools: Vec::new(),
     }
 }
 
@@ -185,13 +179,11 @@ pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatReque
                 .into(),
         ),
         cacheable_context: None,
-        messages: vec![ChatMessage {
-            role: "user".into(),
-            content: format!(
+        messages: vec![ChatMessage::user(format!(
                 "下面是带 id 的分段，找出需要修改的条目，只返回 [{{\"id\":<原 id>,\"replacedtext\":\"...\"}}]，id 照抄：\n{batch_json}"
-            ),
-        }],
+        ))],
         temperature: 0.1,
+        tools: Vec::new(),
     }
 }
 
