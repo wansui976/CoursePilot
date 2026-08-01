@@ -710,11 +710,16 @@ impl AssistantTools<'_> {
                 let wanted: Vec<&Course> = if scope == "all" {
                     courses.iter().collect()
                 } else {
-                    let course_id = self.context.course_id.clone();
-                    courses
-                        .iter()
-                        .filter(|c| Some(&c.id) == course_id.as_ref())
-                        .collect()
+                    // 默认作用域是「当前课程」，但用户完全可能在首页、根本没打开课程。
+                    // 那时按原来的写法会筛出空列表 → 搜不到任何东西 → 模型转头告诉用户
+                    // 「课程里没讲到」。那是把「没打开课程」伪装成了内容判断，
+                    // 和之前 B 站搜索那个坑是同一类。宁可搜全部，也不要给一个自信的错答案。
+                    let Some(course_id) = self.context.course_id.clone() else {
+                        return Err(ToolOutcome::failed(
+                            "当前没有打开的课程，没法按「本课程」搜。请改用 scope=\"all\" 搜全部，或先让用户选一门课",
+                        ));
+                    };
+                    courses.iter().filter(|c| c.id == course_id).collect()
                 };
                 let mut videos = Vec::new();
                 for course in wanted {
@@ -874,6 +879,19 @@ mod tests {
             .await;
         assert!(out.content.contains("不在可改范围"));
         assert!(tools.take_actions().is_empty());
+    }
+
+    #[tokio::test]
+    async fn searching_the_current_course_without_one_open_says_so() {
+        // 用户完全可能在首页、根本没打开课程。按「当前课程」筛出空列表 → 搜不到 →
+        // 模型转头说「课程里没讲到」，把「没打开课程」伪装成了内容判断。
+        let (db, _c, _v, _d) = seed().await;
+        let tools = AssistantTools::new(&db, AssistantContext::default());
+        let out = tools
+            .run(&call("search_content", r#"{"query":"双曲线"}"#))
+            .await;
+        assert!(out.content.contains("没有打开的课程"));
+        assert!(!out.content.contains("没搜到"), "不能说成搜过了但没有");
     }
 
     #[tokio::test]
