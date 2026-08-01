@@ -67,12 +67,94 @@ describe("AssistantPanel", () => {
     mockIpc.assistant.ask.mockResolvedValue(reply());
   });
 
-  it("收起时只留一个可点开的入口", () => {
+  it("收起时在界面边缘留一条可点开的窄条", () => {
     useAssistantUi.setState({ open: false });
     renderPanel();
     expect(screen.queryByLabelText("对助手说")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText("打开助手"));
+    const dockStrip = screen.getByLabelText("打开助手");
+    expect(dockStrip).toHaveAttribute("data-dock-side", "right");
+    expect(dockStrip).toHaveClass("right-0", "h-28", "w-11");
+    fireEvent.click(dockStrip);
     expect(screen.getByLabelText("对助手说")).toBeInTheDocument();
+  });
+
+  it("删除空白对话里的示例注脚", () => {
+    renderPanel();
+    expect(screen.queryByText(/这门课哪讲了梯度下降/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/把这个视频改名叫第三讲/)).not.toBeInTheDocument();
+  });
+
+  it("可以从标题栏拖动桌面面板", () => {
+    renderPanel();
+    const panel = screen.getByRole("complementary", { name: "助手" });
+    vi.spyOn(panel, "getBoundingClientRect").mockReturnValue({
+      left: 648,
+      top: 16,
+      width: 360,
+      height: 600,
+      right: 1008,
+      bottom: 616,
+      x: 648,
+      y: 16,
+      toJSON: () => ({}),
+    });
+
+    const handle = screen.getByRole("button", { name: "拖动助手面板" });
+    fireEvent.pointerDown(handle, {
+      pointerId: 1,
+      pointerType: "mouse",
+      button: 0,
+      clientX: 700,
+      clientY: 40,
+    });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 500, clientY: 140 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 500, clientY: 140 });
+
+    expect(panel).toHaveStyle({ left: "448px", top: "116px" });
+    expect(useAssistantUi.getState().open).toBe(true);
+  });
+
+  it("拖到左侧边缘后自动吸附成窄条", () => {
+    renderPanel();
+    const panel = screen.getByRole("complementary", { name: "助手" });
+    vi.spyOn(panel, "getBoundingClientRect").mockReturnValue({
+      left: 648,
+      top: 16,
+      width: 360,
+      height: 600,
+      right: 1008,
+      bottom: 616,
+      x: 648,
+      y: 16,
+      toJSON: () => ({}),
+    });
+
+    const handle = screen.getByRole("button", { name: "拖动助手面板" });
+    fireEvent.pointerDown(handle, {
+      pointerId: 2,
+      pointerType: "mouse",
+      button: 0,
+      clientX: 700,
+      clientY: 40,
+    });
+    fireEvent.pointerMove(window, { pointerId: 2, clientX: 40, clientY: 180 });
+    expect(panel).toHaveAttribute("data-snap-side", "left");
+    fireEvent.pointerUp(window, { pointerId: 2, clientX: 40, clientY: 180 });
+
+    const dockStrip = screen.getByRole("button", { name: "打开助手" });
+    expect(dockStrip).toHaveAttribute("data-dock-side", "left");
+    expect(dockStrip).toHaveClass("left-0", "h-28", "w-11");
+    expect(dockStrip).toHaveStyle({ top: "396px" });
+    expect(useAssistantUi.getState()).toMatchObject({ open: false, side: "left" });
+  });
+
+  it("键盘可以把面板吸附到左右边缘", () => {
+    renderPanel();
+    fireEvent.keyDown(screen.getByRole("button", { name: "拖动助手面板" }), { key: "Home" });
+    expect(screen.getByRole("button", { name: "打开助手" })).toHaveAttribute(
+      "data-dock-side",
+      "left",
+    );
   });
 
   it("回答按 Markdown 渲染，而不是把 ** 和 - 原样铺出来", async () => {
@@ -214,6 +296,7 @@ describe("AssistantPanel", () => {
     platformMock.mobile = true;
     renderPanel();
     expect(screen.queryByLabelText(/停靠到/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "拖动助手面板" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("对助手说")).toBeInTheDocument();
   });
 });
