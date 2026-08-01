@@ -1,6 +1,6 @@
 use crate::llm::{ChatMessage, ChatRequest};
 
-fn base(model: &str, system: &str, transcript: &str, user: &str, max_tokens: u32) -> ChatRequest {
+fn base(model: &str, system: &str, transcript: &str, user: &str) -> ChatRequest {
     ChatRequest {
         model: model.to_string(),
         system: Some(system.to_string()),
@@ -16,7 +16,6 @@ fn base(model: &str, system: &str, transcript: &str, user: &str, max_tokens: u32
             content: user.to_string(),
         }],
         temperature: 0.3,
-        max_tokens,
     }
 }
 
@@ -33,7 +32,6 @@ pub fn chapters_request(model: &str, transcript: &str) -> ChatRequest {
          2. 第一章 start_ms 从视频开头附近开始，最后一章 end_ms 接近视频结尾。\
          3. start_ms/end_ms 取自字幕里对应句子的毫秒时间，不要凭空编造。\
          4. 标题要具体，写出该段的主题，避免「介绍」「内容」这类空泛词。",
-        4096,
     )
 }
 
@@ -56,7 +54,6 @@ pub fn notes_request(model: &str, transcript: &str) -> ChatRequest {
             只收本视频真正讲到的考点，三到八行。",
         transcript,
         "根据讲稿写笔记。",
-        3072,
     )
 }
 
@@ -76,7 +73,6 @@ pub fn quiz_request(model: &str, transcript: &str) -> ChatRequest {
          4. answer 必须与 options 完全一致（用选项原文，不要用字母 A/B/C）。\
          5. explanation 只写一句：指出依据在讲稿的哪个说法上。不要复述题干，不要展开教学。\
          6. ref_ms 取自相关讲稿行的毫秒时间，不要编造。",
-        2048,
     )
 }
 
@@ -90,7 +86,6 @@ pub fn mindmap_request(model: &str, transcript: &str) -> ChatRequest {
          2. 在每个模块下用 - 列表展开具体知识点，必要时再嵌套子列表，整体保持 3-4 层。\
          3. 每个节点用精炼短语（不超过 14 字，不要整句、不要标点结尾）。\
          4. 只放讲稿真讲过的内容；宁可少一个分支，不要为了对称补一个。",
-        1536,
     )
 }
 
@@ -104,7 +99,6 @@ pub fn summary_request(model: &str, transcript: &str) -> ChatRequest {
          再用 ## 核心要点 列出 4-8 条最重要的知识点，每条一行短句、用名词性短语写清「讲了什么/结论是什么」，\
          并在每条末尾附上该要点对应的 [mm:ss] 时间戳（照抄字幕里那一行行首的时间，便于点击跳转）。\
          只讲内容本身，紧扣字幕、不展开无关知识，不要寒暄。",
-        1536,
     )
 }
 
@@ -131,7 +125,6 @@ pub fn digest_request(model: &str, chunk: &str) -> ChatRequest {
             ),
         }],
         temperature: 0.2,
-        max_tokens: 700,
     }
 }
 
@@ -163,8 +156,6 @@ pub fn query_expansion_request(model: &str, query: &str) -> ChatRequest {
             ),
         }],
         temperature: 0.3,
-        // 只要几个词，给多了模型反而会写成句子。
-        max_tokens: 60,
     }
 }
 
@@ -201,8 +192,6 @@ pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatReque
             ),
         }],
         temperature: 0.1,
-        // 注意：这个值现在发不出去（出站不带 max_tokens），改它没有效果。
-        max_tokens: 4096,
     }
 }
 
@@ -243,8 +232,6 @@ mod tests {
         for gone in ["题型定位", "审题方法", "答案示范", "AI生成的图文笔记"] {
             assert!(!system.contains(gone), "不该再要求固定小节 {gone}");
         }
-        // 输出预算也跟着收紧：输出 token 通常比输入贵几倍，这是最大的一笔。
-        assert_eq!(req.max_tokens, 3072);
     }
 
     #[test]
@@ -257,7 +244,6 @@ mod tests {
         assert!(user.contains("跳过"));
         // 解析收成一句话，这是输出侧最大的一笔。
         assert!(user.contains("只写一句"));
-        assert_eq!(req.max_tokens, 2048);
     }
 
     #[test]
@@ -266,7 +252,6 @@ mod tests {
         let user = &req.messages[0].content;
         assert!(user.contains("不超过 14 字"));
         assert!(user.contains("不要为了对称补一个"));
-        assert_eq!(req.max_tokens, 1536);
     }
 
     #[test]

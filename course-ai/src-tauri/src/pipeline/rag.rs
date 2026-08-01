@@ -117,7 +117,6 @@ fn ask_request(
     system: &str,
     context: Option<String>,
     messages: Vec<ChatMessage>,
-    max_tokens: u32,
 ) -> ChatRequest {
     ChatRequest {
         model: model.to_string(),
@@ -125,7 +124,6 @@ fn ask_request(
         cacheable_context: context,
         messages,
         temperature: 0.2,
-        max_tokens,
     }
 }
 
@@ -593,7 +591,7 @@ pub async fn answer(
     .await;
     let messages = build_chat_messages(history, query);
     let (system, context) = ask_context(&retrieved);
-    let req = ask_request(chat_model, system, context, messages, 1024);
+    let req = ask_request(chat_model, system, context, messages);
     let answer = provider.complete(&req).await?.content;
 
     Ok(RagAnswer {
@@ -723,7 +721,7 @@ pub async fn answer_stream(
     }
     let messages = build_chat_messages(history, query);
     let (system, context) = ask_context(&retrieved);
-    let req = ask_request(chat_model, system, context, messages, 1024);
+    let req = ask_request(chat_model, system, context, messages);
     let raw = provider
         .complete_stream(&req, cancel, &mut |piece| match piece {
             StreamPiece::Content(d) => on_event(AskEvent::Token {
@@ -998,7 +996,7 @@ pub async fn course_answer_stream(
         )
     };
 
-    let req = ask_request(chat_model, system, context_block, messages, 1024);
+    let req = ask_request(chat_model, system, context_block, messages);
     let raw = provider
         .complete_stream(&req, cancel, &mut |piece| match piece {
             StreamPiece::Content(d) => on_event(AskEvent::Token {
