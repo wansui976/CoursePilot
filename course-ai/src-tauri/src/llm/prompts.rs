@@ -135,6 +135,39 @@ pub fn digest_request(model: &str, chunk: &str) -> ChatRequest {
     }
 }
 
+/// 把学生的口语提问改写成讲师可能说出口的术语。
+///
+/// 只在讲稿和课件都一无所获时才调。要解决的是「问的词和讲的词不是同一个词」：
+/// 学生问「为什么会卡住」，老师说的是「陷入局部极小值」——二字组一个都对不上，
+/// 于是明明讲过的内容被判成没讲过。这是关键词检索最真实的短板，也是稠密向量最能赢
+/// 的那一点；先用一次很小的调用去够它，比为此引入整套嵌入便宜得多。
+///
+/// 只要词，不要句子：返回的东西直接进检索，成句只会切出一堆没用的二字组。
+pub fn query_expansion_request(model: &str, query: &str) -> ChatRequest {
+    ChatRequest {
+        model: model.to_string(),
+        system: Some(
+            "你把学生的提问改写成课堂上可能出现的说法。只输出词，不要句子、不要解释、不要标点。"
+                .into(),
+        ),
+        cacheable_context: None,
+        messages: vec![ChatMessage {
+            role: "user".into(),
+            content: format!(
+                "学生在问一节网课里的内容：{query}\n\n\
+                 请写出 3 到 5 个「老师讲这段时最可能说出口」的中文专业术语或固定说法，\
+                 用空格分隔，写在一行里。\n\
+                 要具体到能在讲稿里搜到的程度：写学科术语的标准叫法，\
+                 不要写「公式」「定义」「例子」「方法」这类哪节课都有的空泛词。\n\
+                 拿不准是哪门学科时，就把问题里的口语换成更书面的同义说法。"
+            ),
+        }],
+        temperature: 0.3,
+        // 只要几个词，给多了模型反而会写成句子。
+        max_tokens: 60,
+    }
+}
+
 pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatRequest {
     ChatRequest {
         model: model.to_string(),

@@ -87,6 +87,10 @@ pub fn query_terms(query: &str) -> Vec<String> {
 pub struct TermWeights {
     terms: Vec<String>,
     idf: Vec<f64>,
+    /// 每个词元出现在多少篇材料里，以及总共几篇。留着是为了判断一个词「是否太常见」——
+    /// 机器扩写出来的词要靠它筛掉。
+    df: Vec<usize>,
+    documents: usize,
 }
 
 impl TermWeights {
@@ -106,6 +110,25 @@ impl TermWeights {
 
     pub fn is_empty(&self) -> bool {
         self.terms.is_empty()
+    }
+
+    /// 这个词元出现在几篇材料里。
+    /// 用来判断一个词是否太常见而不值得拿去检索——注意这是**词**的性质，
+    /// 不是给答案设阈值，所以不会把「有没有讲到」重新变成一个要调的参数。
+    pub fn document_count(&self, term: &str) -> usize {
+        self.terms
+            .iter()
+            .position(|known| known == term)
+            .map(|i| self.df[i])
+            .unwrap_or(0)
+    }
+
+    /// 这个词元出现在多少比例的材料里（0.0–1.0）。没有材料时返回 0。
+    pub fn document_ratio(&self, term: &str) -> f64 {
+        if self.documents == 0 {
+            return 0.0;
+        }
+        self.document_count(term) as f64 / self.documents as f64
     }
 
     /// 一段文本的相关度：命中的词元权重之和；一个都没命中就是 0。
@@ -156,6 +179,8 @@ impl TermWeightsBuilder {
         TermWeights {
             terms: self.terms,
             idf,
+            df: self.df,
+            documents: self.documents,
         }
     }
 }
