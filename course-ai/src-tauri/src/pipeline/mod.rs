@@ -4,6 +4,7 @@ pub mod aliyun_ocr;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod apple_vision;
 pub mod asr;
+pub mod assistant;
 pub mod audio;
 pub mod concepts;
 pub mod crop_detect;

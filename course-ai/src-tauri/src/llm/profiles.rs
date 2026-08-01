@@ -41,6 +41,9 @@ pub struct TaskRouting {
     pub correction: Option<String>,
     /// 长视频的分块提要。这一步只是压缩，不需要强模型，单独路由出来好让用户挂个便宜的。
     pub digest: Option<String>,
+    /// 全局助手。它要判断意图、调工具，得是个像样的模型，所以跟着「当前默认模型」走
+    /// （设置面板会把它和其余任务一起写成选中的那个）。
+    pub assistant: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -55,6 +58,8 @@ pub enum AiTask {
     Correction,
     /// 长视频的分块提要（只压缩，不需要强模型）。
     Digest,
+    /// 全局助手的工具调用循环。
+    Assistant,
 }
 
 pub fn parse_profiles(json: Option<&str>) -> AppResult<Vec<LlmProfile>> {
@@ -86,6 +91,7 @@ pub fn resolve_profile<'a>(
         AiTask::Rag => &routing.rag,
         AiTask::Correction => &routing.correction,
         AiTask::Digest => &routing.digest,
+        AiTask::Assistant => &routing.assistant,
     };
     if let Some(id) = wanted {
         if let Some(p) = profiles.iter().find(|p| &p.id == id) {
