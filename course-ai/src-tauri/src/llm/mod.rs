@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod factory;
 pub mod keychain;
 pub mod openai;
@@ -132,11 +133,73 @@ pub fn round_temperature(temperature: f32) -> f64 {
 pub enum SseEvent {
     Content(String),
     Reasoning(String),
+    /// 工具调用的一个**碎片**。流式下它不是一次给全的：函数名通常在第一片，
+    /// 入参 JSON 一个字符一个字符地来，跨十几片；多个调用靠 `index` 区分、可能交错。
+    ToolCallDelta(ToolCallDelta),
     /// 服务端明确宣布这次生成结束。
     Finished,
     /// 流内错误事件：HTTP 已经 200 了，错误改从流里来（限流、内容策略等）。
     Failed(String),
     Ignore,
+}
+
+/// 工具调用的一片增量。除 `index` 外都可能缺席——这正是流式的形状。
+#[derive(Debug, PartialEq, Default)]
+pub struct ToolCallDelta {
+    pub index: usize,
+    pub id: Option<String>,
+    pub name: Option<String>,
+    /// 入参 JSON 的一段，要按 index 拼起来才是完整的。
+    pub arguments: String,
+}
+
+/// 把流式碎片拼回完整的工具调用。
+///
+/// 不能等到最后一片再解析：服务端只保证碎片按 `index` 归属，不保证顺序、
+/// 也不保证 id 和 name 一定在第一片。所以这里按槽位累积，谁先到谁先填。
+#[derive(Debug, Default)]
+pub struct ToolCallAccumulator {
+    slots: Vec<ToolCallDelta>,
+}
+
+impl ToolCallAccumulator {
+    pub fn push(&mut self, delta: ToolCallDelta) {
+        // index 不保证连续，也不保证从 0 开始，所以按需补齐槽位而不是 push。
+        if self.slots.len() <= delta.index {
+            self.slots
+                .resize_with(delta.index + 1, ToolCallDelta::default);
+        }
+        let slot = &mut self.slots[delta.index];
+        slot.index = delta.index;
+        if let Some(id) = delta.id {
+            slot.id = Some(id);
+        }
+        if let Some(name) = delta.name {
+            slot.name = Some(name);
+        }
+        slot.arguments.push_str(&delta.arguments);
+    }
+
+    /// 收尾。没有名字的槽位丢掉——那是补齐留下的空洞，或者服务端只发了半截；
+    /// 没名字就没法执行，留着只会让上层拿到一个调不动的调用。
+    pub fn finish(self) -> Vec<ToolCall> {
+        self.slots
+            .into_iter()
+            .filter_map(|slot| {
+                let name = slot.name?;
+                Some(ToolCall {
+                    // id 缺失时用序号兜一个：结果要靠它配对，空字符串会让服务端拒收整轮。
+                    id: slot.id.unwrap_or_else(|| format!("call_{}", slot.index)),
+                    name,
+                    arguments: if slot.arguments.is_empty() {
+                        "{}".into()
+                    } else {
+                        slot.arguments
+                    },
+                })
+            })
+            .collect()
+    }
 }
 
 /// 从字节缓冲里切出一行（含换行符）；没有完整行时返回 None，剩余字节留到下一个 chunk。
@@ -149,6 +212,93 @@ pub fn take_sse_line(buf: &mut Vec<u8>) -> Option<String> {
     let pos = buf.iter().position(|byte| *byte == b'\n')?;
     let line: Vec<u8> = buf.drain(..=pos).collect();
     Some(String::from_utf8_lossy(&line).into_owned())
+}
+
+#[cfg(test)]
+mod tool_stream_tests {
+    use super::*;
+
+    fn frag(index: usize, id: Option<&str>, name: Option<&str>, args: &str) -> ToolCallDelta {
+        ToolCallDelta {
+            index,
+            id: id.map(str::to_string),
+            name: name.map(str::to_string),
+            arguments: args.to_string(),
+        }
+    }
+
+    #[test]
+    fn arguments_split_across_many_fragments_are_reassembled() {
+        // 真实形状：第一片带 id 和函数名、入参是空串，后面几片只有入参碎片。
+        let mut acc = ToolCallAccumulator::default();
+        acc.push(frag(0, Some("call_1"), Some("open_video"), ""));
+        acc.push(frag(0, None, None, r#"{"vid"#));
+        acc.push(frag(0, None, None, r#"eo_id":"#));
+        acc.push(frag(0, None, None, r#""abc"}"#));
+        let calls = acc.finish();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_1");
+        assert_eq!(calls[0].name, "open_video");
+        assert_eq!(calls[0].arguments, r#"{"video_id":"abc"}"#);
+    }
+
+    #[test]
+    fn two_interleaved_calls_stay_separate() {
+        // 模型一轮可以要求调多个工具，碎片按 index 归属、可以交错到达。
+        // 不按 index 分开的话，两份入参会被拼成一坨谁也解析不了的东西。
+        let mut acc = ToolCallAccumulator::default();
+        acc.push(frag(0, Some("a"), Some("rename"), ""));
+        acc.push(frag(1, Some("b"), Some("delete"), ""));
+        acc.push(frag(0, None, None, r#"{"to":"#));
+        acc.push(frag(1, None, None, r#"{"id":"#));
+        acc.push(frag(0, None, None, r#""新名"}"#));
+        acc.push(frag(1, None, None, r#""v2"}"#));
+        let calls = acc.finish();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].name, "rename");
+        assert_eq!(calls[0].arguments, r#"{"to":"新名"}"#);
+        assert_eq!(calls[1].name, "delete");
+        assert_eq!(calls[1].arguments, r#"{"id":"v2"}"#);
+    }
+
+    #[test]
+    fn a_name_arriving_after_the_arguments_still_lands() {
+        // 服务端不保证 id/name 一定在第一片。按槽位累积、谁先到谁先填，就不怕顺序。
+        let mut acc = ToolCallAccumulator::default();
+        acc.push(frag(0, None, None, r#"{"q":"x"}"#));
+        acc.push(frag(0, Some("late"), Some("search"), ""));
+        let calls = acc.finish();
+        assert_eq!(calls[0].name, "search");
+        assert_eq!(calls[0].id, "late");
+        assert_eq!(calls[0].arguments, r#"{"q":"x"}"#);
+    }
+
+    #[test]
+    fn a_sparse_index_does_not_leave_a_phantom_call() {
+        // 只收到 index=2 时要补两个空槽位。空槽位没有名字，不能当成三次调用交出去。
+        let mut acc = ToolCallAccumulator::default();
+        acc.push(frag(2, Some("c"), Some("only"), "{}"));
+        let calls = acc.finish();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "only");
+    }
+
+    #[test]
+    fn a_call_with_no_arguments_gets_an_empty_object() {
+        // 无参工具的服务端经常一个 arguments 字节都不发。空串不是合法 JSON，
+        // 执行方会解析失败；给个 {} 让它能正常走。
+        let mut acc = ToolCallAccumulator::default();
+        acc.push(frag(0, Some("x"), Some("list_courses"), ""));
+        assert_eq!(acc.finish()[0].arguments, "{}");
+    }
+
+    #[test]
+    fn a_missing_id_still_produces_something_pairable() {
+        // 结果消息要靠 id 配对，空 id 会让服务端拒收整轮对话。
+        let mut acc = ToolCallAccumulator::default();
+        acc.push(frag(0, None, Some("f"), "{}"));
+        assert!(!acc.finish()[0].id.is_empty());
+    }
 }
 
 #[cfg(test)]
@@ -206,6 +356,16 @@ pub async fn complete_or_cancel(
     }
 }
 
+/// 一次流式调用的结果。
+///
+/// 原来只返回正文字符串。带工具之后不够了：模型这一轮可能一个字都没说，
+/// 只是要求调几个工具——那时正文是空的，真正的产出全在 `tool_calls` 里。
+#[derive(Debug, Clone, Default)]
+pub struct StreamOutcome {
+    pub content: String,
+    pub tool_calls: Vec<ToolCall>,
+}
+
 /// 流式片段：正式回答内容，或推理模型的「思考」内容（不计入最终答案）。
 pub enum StreamPiece<'a> {
     Content(&'a str),
@@ -229,6 +389,13 @@ pub enum Provider {
     },
     /// 测试 / 离线用：返回预置内容。
     Mock { canned: String },
+    /// 测试用：按剧本逐次返回，可以模拟「先要求调工具、再作答」。
+    ///
+    /// Mock 只会复读一句固定文本，没法驱动工具调用循环——而那个循环恰恰是最需要
+    /// 被测的东西（不封顶就是死循环，孤儿消息会让服务端拒收整轮）。
+    Scripted {
+        steps: std::sync::Mutex<Vec<ChatResponse>>,
+    },
 }
 
 impl Provider {
@@ -243,6 +410,14 @@ impl Provider {
                 content: canned.clone(),
                 tool_calls: Vec::new(),
             }),
+            Provider::Scripted { steps } => {
+                let mut steps = steps.lock().unwrap_or_else(|e| e.into_inner());
+                if steps.is_empty() {
+                    Err(crate::error::AppError::Other("剧本已用尽".into()))
+                } else {
+                    Ok(steps.remove(0))
+                }
+            }
         }
     }
 
@@ -253,13 +428,21 @@ impl Provider {
         req: &ChatRequest,
         cancel: &AtomicBool,
         on_piece: &mut (dyn FnMut(StreamPiece) + Send),
-    ) -> AppResult<String> {
+    ) -> AppResult<StreamOutcome> {
         match self {
             Provider::OpenAi {
                 base_url,
                 api_key,
                 client,
             } => openai::complete_stream(base_url, api_key, client, req, cancel, on_piece).await,
+            Provider::Scripted { .. } => {
+                let response = self.complete(req).await?;
+                on_piece(StreamPiece::Content(&response.content));
+                Ok(StreamOutcome {
+                    content: response.content,
+                    tool_calls: response.tool_calls,
+                })
+            }
             Provider::Mock { canned } => {
                 let mut acc = String::new();
                 // 按空白切成词，逐词回调，模拟流式；每词前查取消。
@@ -275,7 +458,10 @@ impl Provider {
                     on_piece(StreamPiece::Content(&piece));
                     acc.push_str(&piece);
                 }
-                Ok(acc)
+                Ok(StreamOutcome {
+                    content: acc,
+                    tool_calls: Vec::new(),
+                })
             }
         }
     }
@@ -293,7 +479,9 @@ impl Provider {
                 api_key,
                 client,
             } => openai::embed(base_url, api_key, client, model, inputs).await,
-            Provider::Mock { .. } => Ok(inputs.iter().map(|s| mock_embed(s)).collect()),
+            Provider::Mock { .. } | Provider::Scripted { .. } => {
+                Ok(inputs.iter().map(|s| mock_embed(s)).collect())
+            }
         }
     }
 }
@@ -357,8 +545,8 @@ mod tests {
             .await
             .unwrap();
         assert!(chunks.len() >= 2, "应分多段回调");
-        assert_eq!(full, chunks.concat());
-        assert_eq!(full, "结论 一 二 三");
+        assert_eq!(full.content, chunks.concat());
+        assert_eq!(full.content, "结论 一 二 三");
     }
 
     #[tokio::test]
@@ -374,6 +562,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(chunks, 0, "已取消则不产出");
-        assert_eq!(full, "");
+        assert_eq!(full.content, "");
     }
 }
