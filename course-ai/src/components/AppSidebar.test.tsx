@@ -126,6 +126,7 @@ describe("AppSidebar", () => {
     renderSidebar({ collapsed: true, queueCount: 2 });
     const rail = screen.getByRole("navigation", { name: "工具栏" });
     expect(rail).toBeInTheDocument();
+    expect(rail.querySelector(".rail-logo")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "展开侧栏" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "处理队列" })).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
@@ -149,7 +150,9 @@ describe("AppSidebar", () => {
     expect(screen.queryByRole("button", { name: "处理队列" })).not.toBeInTheDocument();
     // 「课程视频」按钮及其弹层已移除;视频列表改由展开态侧栏内联提供。
     expect(screen.queryByRole("button", { name: "课程视频" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "返回课程库" }));
+    const backButton = screen.getByRole("button", { name: "返回课程库" });
+    expect(backButton).toHaveClass("rail-logo");
+    fireEvent.click(backButton);
     expect(onBackToLibrary).toHaveBeenCalled();
   });
 
