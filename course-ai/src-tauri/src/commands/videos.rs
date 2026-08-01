@@ -461,6 +461,16 @@ pub struct TrashedVideo {
     pub expires_at: i64,
 }
 
+/// 按 id 取一个未删除的视频。助手要靠它把模型给的 id 落到实处——
+/// 模型完全可能编一个 id 出来，拿着它去改名或删除就是改错/删错对象。
+pub async fn get_video(db: &Db, id: &str) -> AppResult<Video> {
+    sqlx::query_as("SELECT * FROM videos WHERE id=? AND deleted_at IS NULL")
+        .bind(id)
+        .fetch_optional(&db.pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("video {id}")))
+}
+
 pub async fn update_video_title(db: &Db, id: &str, title: String) -> AppResult<Video> {
     let title = title.trim();
     if title.is_empty() {

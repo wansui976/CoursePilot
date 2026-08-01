@@ -29,6 +29,8 @@ const ROUTING_TASKS = [
   // 于是这里选的模型对它不生效——字幕可能被发去另一家、算在另一个账上。
   "correction",
   "digest",
+  // 全局助手。它要判断意图、调工具，挂便宜模型会经常听不懂，所以跟着默认模型走。
+  "assistant",
 ] as const;
 
 // 「当前默认模型」会把所有任务重写成同一个 profile。digest（长视频的分块提要）是例外：

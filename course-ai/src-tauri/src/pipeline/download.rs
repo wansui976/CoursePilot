@@ -602,3 +602,138 @@ mod tests {
         assert_eq!(pick_default_track(&tracks2).unwrap().lang, "ai-zh");
     }
 }
+
+/// B 站搜索的一条结果。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct SearchHit {
+    pub title: String,
+    pub url: String,
+    pub uploader: Option<String>,
+    pub duration_secs: Option<u64>,
+}
+
+/// 解析 `yt-dlp -J --flat-playlist "bilisearchN:..."` 的输出。
+///
+/// 扁平模式下每条只有基本字段，而且 `url` 常常只是 BV 号而不是完整链接——
+/// 直接把它当链接交给用户，点开是 404。所以这里补全成可访问的页面地址。
+/// 纯函数，可单测：yt-dlp 是外挂进程，沙箱里装不了，能离线测的只有解析这一段。
+pub fn parse_search_json(json: &str) -> AppResult<Vec<SearchHit>> {
+    let v: serde_json::Value = serde_json::from_str(json)
+        .map_err(|e| AppError::Pipeline(format!("yt-dlp search json: {e}")))?;
+    let entries = v
+        .get("entries")
+        .and_then(|e| e.as_array())
+        .ok_or_else(|| AppError::Pipeline("yt-dlp search 输出里没有 entries".into()))?;
+    Ok(entries
+        .iter()
+        .filter_map(|entry| {
+            let title = entry.get("title").and_then(|t| t.as_str())?.trim();
+            if title.is_empty() {
+                return None;
+            }
+            let raw = entry
+                .get("webpage_url")
+                .or_else(|| entry.get("url"))
+                .and_then(|u| u.as_str())
+                .unwrap_or_default();
+            let id = entry.get("id").and_then(|i| i.as_str()).unwrap_or_default();
+            let url = if raw.starts_with("http") {
+                raw.to_string()
+            } else if !id.is_empty() {
+                format!("https://www.bilibili.com/video/{id}")
+            } else if !raw.is_empty() {
+                format!("https://www.bilibili.com/video/{raw}")
+            } else {
+                return None;
+            };
+            Some(SearchHit {
+                title: title.to_string(),
+                url,
+                uploader: entry
+                    .get("uploader")
+                    .and_then(|u| u.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+                duration_secs: entry
+                    .get("duration")
+                    .and_then(|d| d.as_f64())
+                    .map(|d| d as u64),
+            })
+        })
+        .collect())
+}
+
+/// 在 B 站搜索视频。
+///
+/// 走 yt-dlp 的 `bilisearch:` 提取器，而不是直接打 B 站的搜索 API——后者现在要 wbi 签名
+/// 和 cookie，是个会随时失效的活靶子；而 yt-dlp 本来就是这个项目的外挂进程，
+/// 它的维护者比我们更勤快地跟着站点变化走。不引入新依赖、不多一个凭证。
+///
+/// `--flat-playlist` 只枚举不解析各条，快得多；候选够用了，真要导入时再走完整探测。
+pub async fn search_bilibili(query: &str, limit: usize) -> AppResult<Vec<SearchHit>> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ytdlp = resolve(&YTDLP, None)?;
+    let output = Command::new(&ytdlp)
+        .args([
+            "-J",
+            "--flat-playlist",
+            "--skip-download",
+            "--no-warnings",
+            "--user-agent",
+            BROWSER_USER_AGENT,
+            "--referer",
+            BILIBILI_REFERER,
+            &format!("bilisearch{}:{query}", limit.clamp(1, 20)),
+        ])
+        .output()
+        .await
+        .map_err(|e| AppError::Pipeline(format!("yt-dlp spawn: {e}")))?;
+    if !output.status.success() {
+        return Err(AppError::Pipeline(format!(
+            "B 站搜索失败: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+    parse_search_json(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    #[test]
+    fn flat_search_entries_become_clickable_links() {
+        // 扁平模式下 url 常常只是 BV 号。直接当链接交给用户，点开是 404。
+        let json = r#"{"entries":[
+            {"id":"BV1xx411c7mD","title":"线性代数 第一讲","uploader":"某老师","duration":1830.0},
+            {"id":"BV1yy411c7mE","title":"第二讲","url":"https://www.bilibili.com/video/BV1yy411c7mE"}
+        ]}"#;
+        let hits = parse_search_json(json).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].url, "https://www.bilibili.com/video/BV1xx411c7mD");
+        assert_eq!(hits[0].uploader.as_deref(), Some("某老师"));
+        assert_eq!(hits[0].duration_secs, Some(1830));
+        // 已经是完整链接的原样保留。
+        assert_eq!(hits[1].url, "https://www.bilibili.com/video/BV1yy411c7mE");
+    }
+
+    #[test]
+    fn entries_without_a_title_are_dropped() {
+        // 没标题的候选拿给用户也没法选，留着只会占位置。
+        let json = r#"{"entries":[{"id":"BV1","title":""},{"id":"BV2","title":"有名字的"}]}"#;
+        let hits = parse_search_json(json).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "有名字的");
+    }
+
+    #[test]
+    fn a_response_without_entries_is_an_error_not_an_empty_list() {
+        // 空列表意味着「搜过了，没有」；解析不出来意味着「没搜成」。
+        // 混为一谈会让助手把一次失败说成「B 站上没有这个」。
+        assert!(parse_search_json(r#"{"error":"rate limited"}"#).is_err());
+        assert!(parse_search_json(r#"{"entries":[]}"#).unwrap().is_empty());
+    }
+}

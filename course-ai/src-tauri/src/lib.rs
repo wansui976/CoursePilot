@@ -18,6 +18,7 @@ use crate::commands::ai::{
     cmd_get_quiz, cmd_get_summary, cmd_has_api_key, cmd_save_llm_profiles, cmd_save_notes,
     cmd_set_api_key, cmd_stale_ai_artifacts,
 };
+use crate::commands::assistant::cmd_assistant_ask;
 use crate::commands::clips::{cmd_add_clip, cmd_delete_clip, cmd_list_clips, cmd_update_clip};
 use crate::commands::concepts::{
     cmd_analyze_course_concepts, cmd_cancel_course_analysis, cmd_course_knowledge_chat_stream,
@@ -203,6 +204,7 @@ pub fn run() {
             cmd_export_mindmap,
             cmd_rag_query,
             cmd_rag_query_stream,
+            cmd_assistant_ask,
             cmd_cancel_rag_query,
             cmd_search_transcript,
             cmd_ocr_region,
