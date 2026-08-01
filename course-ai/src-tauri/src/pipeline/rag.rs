@@ -310,10 +310,22 @@ impl Retrieved {
 
 /// 用一句给定的检索文本召回讲稿窗口与课件页（不含历史回退）。
 fn retrieve_once(segments: &[TranscriptSegment], pages: &[SlidePage], query: &str) -> Retrieved {
-    let weights = weigh_terms(query, segments, pages);
-    let mut slides: Vec<SlideRef> = scored_slide_pages(pages, &weights)
+    retrieve_with(segments, pages, &weigh_terms(query, segments, pages))
+}
+
+/// 用**已经建好**的权重召回。
+///
+/// 拆出来是为了让扩写那条路把同一份权重用两次（筛词 + 检索），少扫一遍语料。
+/// 实测一门八十小时的大课，扫一遍语料约 200ms，全花在几十万次子串查找上——
+/// 换更快的查找只省得下一成（试过预建 searcher，12%），所以真正该省的是**遍数**。
+fn retrieve_with(
+    segments: &[TranscriptSegment],
+    pages: &[SlidePage],
+    weights: &TermWeights,
+) -> Retrieved {
+    let mut slides: Vec<SlideRef> = scored_slide_pages(pages, weights)
         .into_iter()
-        .map(|(score, page)| slide_ref(score, page, &weights))
+        .map(|(score, page)| slide_ref(score, page, weights))
         .collect();
     // 命中多的页优先，同分按出现时间；只留前几页。
     slides.sort_by(|a, b| {
@@ -324,7 +336,7 @@ fn retrieve_once(segments: &[TranscriptSegment], pages: &[SlidePage], query: &st
     slides.truncate(SLIDE_ASK_MAX_PAGES);
     slides.sort_by_key(|slide| slide.start_ms);
     Retrieved {
-        windows: windows_from_hits(segments, &weights, WINDOW_BUDGET_CHARS),
+        windows: windows_from_hits(segments, weights, WINDOW_BUDGET_CHARS),
         slides,
     }
 }
@@ -393,6 +405,13 @@ fn retrieve(
 /// 一律保留（他既然打了，就说明它重要）。
 const EXPANSION_MAX_DF_RATIO: f64 = 0.2;
 
+/// 扩写这一步的进度通知。分两种是因为「正在试」和「试失败了」对用户是两件事：
+/// 前者解释为什么要多等一会儿，后者说明接下来那句「没讲到」可能并不可信。
+pub enum ExpandNote {
+    Started,
+    Failed,
+}
+
 /// 一个机器扩写出来的词，值不值得拿去检索。
 fn expansion_term_is_useful(weights: &TermWeights, term: &str) -> bool {
     let hits = weights.document_count(term);
@@ -402,23 +421,36 @@ fn expansion_term_is_useful(weights: &TermWeights, term: &str) -> bool {
     }
     // 只出现在一处的词永远算数。按比例卡会误伤短视频：统共三段的课，
     // 「只讲了一次」在比例上就是 33%，反倒显得遍地都是。
+    //
+    // 注意这一条其实只在语料少于五篇时才起作用：再大一点，1/N 本来就已经低于
+    // 比例闸了。也就是说**大语料下任何只出现一次的词都会放行**——这不是这个例外
+    // 造成的，是比例闸本身的性质。挡住由此产生的假证据靠的是下面的「至少两个词
+    // 对上」，不是这里。
     hits == 1 || weights.document_ratio(term) <= EXPANSION_MAX_DF_RATIO
 }
 
-/// 从模型的改写结果里挑出值得拿去检索的词：在这批材料里出现过、但又不是遍地都是。
-/// 一个都不剩就返回空——空的话上层直接放弃重试，省掉一次白跑的检索。
-fn useful_expansion_terms(
-    expansion: &str,
-    segments: &[TranscriptSegment],
-    pages: &[SlidePage],
-) -> Vec<String> {
-    let weights = weigh_terms(expansion, segments, pages);
-    weights
-        .terms()
+/// 扩写召回的材料里，至少要有一处同时命中这么多个不同词元，才算数。
+///
+/// 为什么需要：大语料下任何只出现一次的词都能过筛，而越稀有的词权重越高，
+/// 于是模型随口编的一个词只要碰巧在某节无关的课里出现过一次，就能独力造出一个
+/// 带出处、带时间戳的窗口——「这节课没讲到」变成一个看着很可信的错答案。
+/// 那正是我在引入这条兜底时说最不愿意看到的失败。
+///
+/// 为什么是「两个」：一个完整术语会切出好几个二字组（「局部极小值」→ 局部/部极/
+/// 极小/小值），真讲到那一段会同时中好几个；只中一个，多半是某个二字组撞上了。
+/// 这不是给分数设阈值——它数的是「几个词对上了」，与语料规模无关，也不用调。
+const EXPANSION_MIN_AGREEING_TERMS: usize = 2;
+
+/// 这次召回是不是**只靠一个词碰巧撞上**。
+fn expansion_evidence_is_thin(retrieved: &Retrieved, weights: &TermWeights) -> bool {
+    let best = retrieved
+        .windows
         .iter()
-        .filter(|term| expansion_term_is_useful(&weights, term))
-        .cloned()
-        .collect()
+        .map(|w| weights.hit_count(&w.text))
+        .chain(retrieved.slides.iter().map(|s| weights.hit_count(&s.text)))
+        .max()
+        .unwrap_or(0);
+    best < EXPANSION_MIN_AGREEING_TERMS
 }
 
 /// 模型的回复最多取这么长拿去当检索词。它偶尔会不听话写成一段话，
@@ -442,26 +474,53 @@ async fn retrieve_or_expand(
     query: &str,
     history: &[ChatMessage],
     cancel: &AtomicBool,
-    on_expand: &mut (dyn FnMut() + Send),
+    on_expand: &mut (dyn FnMut(ExpandNote) + Send),
 ) -> Retrieved {
     let direct = retrieve(segments, pages, query, history);
     if !direct.is_empty() {
         return direct;
     }
-    on_expand();
+    on_expand(ExpandNote::Started);
     let req = crate::llm::prompts::query_expansion_request(chat_model, query);
     let reply = match crate::llm::complete_or_cancel(provider, &req, cancel).await {
         Ok(Some(reply)) => reply,
-        // 取消或出错都不算失败：照旧回「没讲到」，别把一次可选的补救变成一个报错。
-        Ok(None) | Err(_) => return direct,
+        // 取消是用户自己的意思，不用报告。
+        Ok(None) => return direct,
+        // 出错要说一声。原来这里也静默：端点抽风时用户看到的是「这节课没讲到」——
+        // 一个把网络故障伪装成内容判断的答案，比直接说失败糟得多。
+        Err(_) => {
+            on_expand(ExpandNote::Failed);
+            return direct;
+        }
     };
     let trimmed: String = reply.trim().chars().take(EXPANSION_MAX_CHARS).collect();
-    let extra = useful_expansion_terms(&trimmed, segments, pages);
-    if extra.is_empty() {
+
+    // 一趟扫描办两件事：按「原问题 + 扩写」的并集建权重，先用它筛掉没用的扩写词，
+    // 再用剩下的词直接检索。df 与集合里有没有别的词无关，所以裁掉词不用重算 IDF，
+    // 也就不用再扫一遍语料。
+    let union = weigh_terms(&format!("{query} {trimmed}"), segments, pages);
+    let from_query: std::collections::HashSet<String> = query_terms(query).into_iter().collect();
+    let expansion: Vec<String> = query_terms(&trimmed)
+        .into_iter()
+        .filter(|term| !from_query.contains(term))
+        .collect();
+    let usable: std::collections::HashSet<&str> = expansion
+        .iter()
+        .filter(|term| expansion_term_is_useful(&union, term))
+        .map(String::as_str)
+        .collect();
+    if usable.is_empty() {
         return direct;
     }
     // 原问题的词一起带上：用户自己的措辞始终参与打分，扩写只是补充。
-    retrieve_once(segments, pages, &format!("{query} {}", extra.join(" ")))
+    let weights = union.retaining(|term| from_query.contains(term) || usable.contains(term));
+
+    let expanded = retrieve_with(segments, pages, &weights);
+    if expansion_evidence_is_thin(&expanded, &weights) {
+        // 只有一个词对上——证据太薄，宁可维持「没讲到」，也不要造一个有出处的错答案。
+        return direct;
+    }
+    expanded
 }
 
 /// 把命中段扩成窗口并合并重叠区间。
@@ -584,7 +643,7 @@ pub async fn answer(
         query,
         history,
         &never,
-        &mut || {},
+        &mut |_| {},
     )
     .await;
     let messages = build_chat_messages(history, query);
@@ -694,9 +753,13 @@ pub async fn answer_stream(
     let pages = list_slide_pages(db, video_id).await?;
     let retrieved = {
         // 改写要多花一个来回，界面上不能干等着什么都不说。
-        let mut notify = || {
+        let mut notify = |note: ExpandNote| {
             on_event(AskEvent::Status {
-                text: "没直接找到，换个说法再找一遍…".into(),
+                text: match note {
+                    ExpandNote::Started => "没直接找到，换个说法再找一遍…".into(),
+                    // 端点抽风时，紧跟着那句「没讲到」并不可信，得说清楚。
+                    ExpandNote::Failed => "换个说法这一步没成功，下面的结论仅供参考。".to_string(),
+                },
             })
         };
         retrieve_or_expand(
@@ -783,65 +846,57 @@ async fn retrieve_scope_or_expand(
     query: &str,
     history: &[ChatMessage],
     cancel: &AtomicBool,
-    on_expand: &mut (dyn FnMut() + Send),
+    on_expand: &mut (dyn FnMut(ExpandNote) + Send),
 ) -> (String, Vec<Citation>) {
     let direct = retrieve_scope_context(per_video, per_video_pages, query, history);
     if !direct.0.is_empty() {
         return direct;
     }
-    on_expand();
+    on_expand(ExpandNote::Started);
     let req = crate::llm::prompts::query_expansion_request(chat_model, query);
     let reply = match crate::llm::complete_or_cancel(provider, &req, cancel).await {
         Ok(Some(reply)) => reply,
-        Ok(None) | Err(_) => return direct,
+        Ok(None) => return direct,
+        Err(_) => {
+            on_expand(ExpandNote::Failed);
+            return direct;
+        }
     };
     let trimmed: String = reply.trim().chars().take(EXPANSION_MAX_CHARS).collect();
-    let extra = scope_expansion_terms(&trimmed, per_video, per_video_pages);
-    if extra.is_empty() {
+
+    // 和单视频那条路同一套：一趟扫描既筛词又检索。整门课的语料最大，
+    // 少扫一遍这里省得最多。
+    let union = weigh_scope_terms(&format!("{query} {trimmed}"), per_video, per_video_pages);
+    let from_query: std::collections::HashSet<String> = query_terms(query).into_iter().collect();
+    let usable: std::collections::HashSet<String> = query_terms(&trimmed)
+        .into_iter()
+        .filter(|term| !from_query.contains(term) && expansion_term_is_useful(&union, term))
+        .collect();
+    if usable.is_empty() {
         return direct;
     }
-    scope_context_once(
-        per_video,
-        per_video_pages,
-        &format!("{query} {}", extra.join(" ")),
-    )
-}
+    let weights = union.retaining(|term| from_query.contains(term) || usable.contains(term));
 
-/// [`useful_expansion_terms`] 的课程级版本：语料是整门课的讲稿与课件。
-fn scope_expansion_terms(
-    expansion: &str,
-    per_video: &[(String, String, Vec<TranscriptSegment>)],
-    per_video_pages: &[(String, String, Vec<SlidePage>)],
-) -> Vec<String> {
-    let mut builder = TermWeights::builder(query_terms(expansion));
-    for (_, _, segments) in per_video {
-        for seg in segments {
-            builder.add_document([seg.text.as_str()]);
-        }
-    }
-    for (_, _, pages) in per_video_pages {
-        for page in pages {
-            builder.add_document([page.ocr_text.as_str()]);
-        }
-    }
-    let weights = builder.finish();
-    weights
-        .terms()
+    let expanded = scope_context_with(per_video, per_video_pages, &weights);
+    // 同样要求「至少两个词对上」：整门课语料更大，一个稀有词碰巧撞上的机会也更多。
+    let best = expanded
+        .1
         .iter()
-        .filter(|term| expansion_term_is_useful(&weights, term))
-        .cloned()
-        .collect()
+        .map(|citation| weights.hit_count(&citation.text))
+        .max()
+        .unwrap_or(0);
+    if best < EXPANSION_MIN_AGREEING_TERMS {
+        return direct;
+    }
+    expanded
 }
 
-/// 用一句给定的检索文本装配课程级上下文：字幕命中 + 课件页命中。
-///
-/// 词元稀有度按**整门课**统计：一个术语在某一节课里反复出现、在全课程里却只出现在
-/// 那一节，正说明那一节就是讲它的地方，这个信号只有把整门课当语料才看得见。
-fn scope_context_once(
+/// 按整门课的讲稿与课件建词元权重。
+fn weigh_scope_terms(
+    query: &str,
     per_video: &[(String, String, Vec<TranscriptSegment>)],
     per_video_pages: &[(String, String, Vec<SlidePage>)],
-    query: &str,
-) -> (String, Vec<Citation>) {
+) -> TermWeights {
     let mut builder = TermWeights::builder(query_terms(query));
     for (_, _, segments) in per_video {
         for seg in segments {
@@ -853,13 +908,33 @@ fn scope_context_once(
             builder.add_document([page.ocr_text.as_str()]);
         }
     }
-    let weights = builder.finish();
+    builder.finish()
+}
 
+/// 用一句给定的检索文本装配课程级上下文：字幕命中 + 课件页命中。
+///
+/// 词元稀有度按**整门课**统计：一个术语在某一节课里反复出现、在全课程里却只出现在
+/// 那一节，正说明那一节就是讲它的地方，这个信号只有把整门课当语料才看得见。
+fn scope_context_once(
+    per_video: &[(String, String, Vec<TranscriptSegment>)],
+    per_video_pages: &[(String, String, Vec<SlidePage>)],
+    query: &str,
+) -> (String, Vec<Citation>) {
+    let weights = weigh_scope_terms(query, per_video, per_video_pages);
+    scope_context_with(per_video, per_video_pages, &weights)
+}
+
+/// 用已经建好的权重装配课程级上下文（扩写那条路复用同一份权重，少扫一遍语料）。
+fn scope_context_with(
+    per_video: &[(String, String, Vec<TranscriptSegment>)],
+    per_video_pages: &[(String, String, Vec<SlidePage>)],
+    weights: &TermWeights,
+) -> (String, Vec<Citation>) {
     let (transcript, transcript_cites) =
-        assemble_scope_context(per_video, &weights, PER_VIDEO_TOPK, COURSE_CONTEXT_LIMIT);
+        assemble_scope_context(per_video, weights, PER_VIDEO_TOPK, COURSE_CONTEXT_LIMIT);
     let (slides, slide_cites) = assemble_scope_slides(
         per_video_pages,
-        &weights,
+        weights,
         COURSE_SLIDE_PER_VIDEO,
         COURSE_SLIDE_LIMIT,
     );
@@ -955,9 +1030,13 @@ pub async fn course_answer_stream(
         per_video_pages.push((vid.clone(), title.clone(), pages));
     }
     let (context, citations) = {
-        let mut notify = || {
+        let mut notify = |note: ExpandNote| {
             on_event(AskEvent::Status {
-                text: "没直接找到，换个说法再找一遍…".into(),
+                text: match note {
+                    ExpandNote::Started => "没直接找到，换个说法再找一遍…".into(),
+                    // 端点抽风时，紧跟着那句「没讲到」并不可信，得说清楚。
+                    ExpandNote::Failed => "换个说法这一步没成功，下面的结论仅供参考。".to_string(),
+                },
             })
         };
         retrieve_scope_or_expand(
@@ -1713,13 +1792,18 @@ mod tests {
         ));
 
         // 模型改写出来的东西：有能定位的术语，也有哪节课都有的空泛词。
-        let kept = useful_expansion_terms("局部极小值 我们 收敛", &segs, &[]);
+        let w = weigh("局部极小值 我们 收敛", &segs);
+        let kept: Vec<&String> = w
+            .terms()
+            .iter()
+            .filter(|t| expansion_term_is_useful(&w, t))
+            .collect();
         assert!(
             kept.iter().any(|term| term.contains("极小")),
             "能定位的术语要留下，实际留下：{kept:?}"
         );
         assert!(
-            !kept.iter().any(|term| term == "我们"),
+            !kept.iter().any(|term| *term == "我们"),
             "遍地都是的词不该拿去检索，实际留下：{kept:?}"
         );
         // 材料里根本没出现的词（这节课没讲收敛）留着也没用，先筛掉省一次白跑。
@@ -1727,11 +1811,50 @@ mod tests {
     }
 
     #[test]
-    fn expansion_that_yields_nothing_usable_changes_no_outcome() {
-        let segs = vec![seg(0, 0, 5_000, "我们接着往下看")];
-        // 全是空泛词 → 一个都留不下 → 上层据此直接放弃重试。
-        assert!(useful_expansion_terms("方法 定义 公式", &segs, &[]).is_empty());
-        assert!(useful_expansion_terms("", &segs, &[]).is_empty());
+    fn one_stray_term_is_not_enough_evidence() {
+        // 大语料下任何只出现一次的词都能过筛，而越稀有权重越高。模型随口编的词只要
+        // 碰巧在某节无关的课里出现过一次，就能独力造出一个带时间戳的窗口——
+        // 「没讲到」于是变成一个看着很可信的错答案。这一条就是挡它的。
+        let mut segs: Vec<TranscriptSegment> = (0..40)
+            .map(|i| {
+                seg(
+                    i,
+                    i * 70_000,
+                    i * 70_000 + 5_000,
+                    "今天讲光合作用的两个阶段",
+                )
+            })
+            .collect();
+        // 「变换」在整门课里只出现这一次，且与傅里叶毫无关系。
+        segs.push(seg(
+            40,
+            40 * 70_000,
+            40 * 70_000 + 5_000,
+            "坐标变换一下就好",
+        ));
+
+        let w = weigh("傅里叶变换", &segs);
+        let hit = retrieve_with(&segs, &[], &w);
+        assert!(!hit.is_empty(), "「变换」确实命中了那一段");
+        assert!(
+            expansion_evidence_is_thin(&hit, &w),
+            "只有一个词对上，应判为证据不足"
+        );
+
+        // 真讲到时，一个术语的好几个二字组会同时中。
+        let mut real = segs.clone();
+        real.push(seg(
+            41,
+            41 * 70_000,
+            41 * 70_000 + 5_000,
+            "傅里叶变换把信号拆成正弦",
+        ));
+        let w2 = weigh("傅里叶变换", &real);
+        let hit2 = retrieve_with(&real, &[], &w2);
+        assert!(
+            !expansion_evidence_is_thin(&hit2, &w2),
+            "多个词对上，应判为证据充分"
+        );
     }
 
     #[tokio::test]
@@ -1757,7 +1880,7 @@ mod tests {
             "为什么会卡住",
             &[],
             &cancel,
-            &mut || {},
+            &mut |_| {},
         )
         .await;
         assert!(!rescued.is_empty(), "改写之后应当能召回");
@@ -1781,7 +1904,7 @@ mod tests {
             "词牌名怎么分类",
             &[],
             &cancel,
-            &mut || {},
+            &mut |_| {},
         )
         .await;
         assert!(
@@ -1806,7 +1929,7 @@ mod tests {
             "为什么会卡住",
             &[],
             &cancel,
-            &mut || {},
+            &mut |_| {},
         )
         .await;
         // 取消不是错误：照旧走「没讲到」，不该 panic 也不该抛错。

@@ -532,7 +532,24 @@ const CONTEXT_BUDGET_CHARS: usize = 20_000;
 /// 超预算时的分块大小。
 const DIGEST_CHUNK_CHARS: usize = 12_000;
 /// 每一块提要允许重试多少次。网络抖动用重试兜，而不是放宽「每块都要成功」这条要求。
-const DIGEST_CHUNK_RETRIES: u32 = 2;
+/// 每块的重试次数与退避（秒）。
+///
+/// 「缺一块整份作废」是刻意的——提要缺一段，五个产物都会静悄悄漏掉那一段，
+/// 用户根本看不出来，比直接失败糟得多。但这也把失败面从「部分可用」变成了
+/// 「整体失败」：块数多的长视频，只要端点持续抖动，整份就没了。
+///
+/// 所以退避得撑得住一次短暂的抖动。原来是 2s、4s，六秒就放弃，对分钟级波动毫无抵抗力。
+/// 现在给到 2s、6s、15s。代价有限：分块是**串行**的，而且一块失败就立刻中止整份，
+/// 所以最坏情况只多等这一块的重试预算（约 23 秒），不会按块数累乘。
+///
+/// 这个数字没有真实数据支撑，是个判断。上线后如果长视频仍然常常整份失败，
+/// 该看的是端点的实际错误分布，而不是继续往上加。
+#[cfg(not(test))]
+const DIGEST_CHUNK_BACKOFF_SECS: &[u64] = &[2, 6, 15];
+/// 测试里不真睡：**重试次数不变**（这才是被测的逻辑），只是不等。
+/// 试过 tokio 的假时钟，但它会连带把 sqlx 连接池的获取超时也一起跳掉。
+#[cfg(test)]
+const DIGEST_CHUNK_BACKOFF_SECS: &[u64] = &[0, 0, 0];
 
 /// 送进各生成任务的讲稿，以及它所基于的**原始讲稿**指纹。
 ///
@@ -662,8 +679,9 @@ async fn digest_one_chunk(provider: &Provider, model: &str, chunk: &str) -> AppR
             });
         match outcome {
             Ok(text) => return Ok(text),
-            Err(error) if attempt < DIGEST_CHUNK_RETRIES => {
-                let backoff = std::time::Duration::from_secs(2u64.pow(attempt + 1));
+            Err(error) if (attempt as usize) < DIGEST_CHUNK_BACKOFF_SECS.len() => {
+                let backoff =
+                    std::time::Duration::from_secs(DIGEST_CHUNK_BACKOFF_SECS[attempt as usize]);
                 tracing::warn!(
                     attempt = attempt + 1,
                     %error,
