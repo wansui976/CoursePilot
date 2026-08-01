@@ -1,5 +1,5 @@
 use crate::error::{AppError, AppResult};
-use crate::llm::{take_sse_line, ChatRequest, ChatResponse, SseEvent, StreamPiece};
+use crate::llm::{take_sse_line, ChatRequest, ChatResponse, SseEvent, StreamOutcome, StreamPiece};
 use futures_util::StreamExt;
 use reqwest::header::CONTENT_TYPE;
 use serde_json::{json, Value};
@@ -267,6 +267,30 @@ pub fn parse_openai_sse_line(line: &str) -> SseEvent {
                 }
             }
         }
+        // 工具调用碎片。放在 content/reasoning 之后判断：同一片 delta 里这三者
+        // 实际上互斥，但真出现混合时正文优先，免得答案被吞掉。
+        if let Some(item) = delta.get("tool_calls").and_then(|c| c.get(0)) {
+            let function = item.get("function");
+            return SseEvent::ToolCallDelta(crate::llm::ToolCallDelta {
+                // index 缺席时按 0 处理：单个工具调用的服务端有时省略它。
+                index: item.get("index").and_then(Value::as_u64).unwrap_or(0) as usize,
+                id: item
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+                name: function
+                    .and_then(|f| f.get("name"))
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+                arguments: function
+                    .and_then(|f| f.get("arguments"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            });
+        }
     }
     // 有些 OpenAI 兼容服务不发 [DONE]，但都会在最后一块给出非空 finish_reason。
     // 两者认其一，既能识破「断在半截」，又不会把这些服务全判成失败。
@@ -286,7 +310,7 @@ pub async fn complete_stream(
     req: &ChatRequest,
     cancel: &AtomicBool,
     on_piece: &mut (dyn FnMut(StreamPiece) + Send),
-) -> AppResult<String> {
+) -> AppResult<StreamOutcome> {
     let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
     let mut body = build_openai_body(req);
     body["stream"] = json!(true);
@@ -313,6 +337,7 @@ pub async fn complete_stream(
         )));
     }
     let mut acc = String::new();
+    let mut tools = crate::llm::ToolCallAccumulator::default();
     // 字节缓冲，不是字符串缓冲：中文字符会被切在 chunk 中间，见 [`take_sse_line`]。
     let mut buf: Vec<u8> = Vec::new();
     let mut finished = false;
@@ -338,6 +363,7 @@ pub async fn complete_stream(
                     on_piece(StreamPiece::Content(&delta));
                     acc.push_str(&delta);
                 }
+                SseEvent::ToolCallDelta(delta) => tools.push(delta),
                 SseEvent::Finished => finished = true,
                 SseEvent::Failed(message) => {
                     return Err(AppError::Other(format!("OpenAI 流内错误: {message}")))
@@ -354,13 +380,56 @@ pub async fn complete_stream(
             "OpenAI 流在结束标记之前就断了，这次回答不完整".into(),
         ));
     }
-    Ok(acc)
+    Ok(StreamOutcome {
+        content: acc,
+        tool_calls: tools.finish(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::llm::ChatMessage;
+
+    #[test]
+    fn parses_a_streamed_tool_call_fragment() {
+        let first = parse_openai_sse_line(
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"open_video","arguments":""}}]}}]}"#,
+        );
+        match first {
+            SseEvent::ToolCallDelta(d) => {
+                assert_eq!(d.index, 0);
+                assert_eq!(d.id.as_deref(), Some("call_1"));
+                assert_eq!(d.name.as_deref(), Some("open_video"));
+                assert_eq!(d.arguments, "");
+            }
+            other => panic!("应是工具调用碎片，实际 {other:?}"),
+        }
+
+        // 后续碎片只有入参，没有 id / name。
+        let more = parse_openai_sse_line(
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"a\":1}"}}]}}]}"#,
+        );
+        match more {
+            SseEvent::ToolCallDelta(d) => {
+                assert!(d.id.is_none() && d.name.is_none());
+                assert_eq!(d.arguments, r#"{"a":1}"#);
+            }
+            other => panic!("应是工具调用碎片，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_tool_call_finish_reason_still_counts_as_finished() {
+        // 带工具时服务端给的是 finish_reason: "tool_calls"。不认它的话，
+        // 这一轮会被当成「流断在半截」而报错——而它其实正常结束了。
+        assert_eq!(
+            parse_openai_sse_line(
+                r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#
+            ),
+            SseEvent::Finished
+        );
+    }
 
     #[test]
     fn parses_openai_delta_lines() {

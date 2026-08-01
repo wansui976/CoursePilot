@@ -1304,6 +1304,7 @@ pub async fn course_chat_stream(
             }),
         })
         .await?;
+    let answer = answer.content;
     on_event(AskEvent::Done {
         answer: answer.clone(),
     });

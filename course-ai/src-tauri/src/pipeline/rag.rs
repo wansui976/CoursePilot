@@ -794,7 +794,7 @@ pub async fn answer_stream(
         })
         .await?;
 
-    let answer = strip_timestamp_arrays(&raw);
+    let answer = strip_timestamp_arrays(&raw.content);
     on_event(AskEvent::Done {
         answer: answer.clone(),
     });
@@ -1085,7 +1085,7 @@ pub async fn course_answer_stream(
         })
         .await?;
 
-    let answer = strip_timestamp_arrays(&raw);
+    let answer = strip_timestamp_arrays(&raw.content);
     on_event(AskEvent::Done {
         answer: answer.clone(),
     });
