@@ -3,8 +3,11 @@ import { listen } from "@tauri-apps/api/event";
 import type { SkipRange } from "./silenceSkip";
 import type {
   AskEvent,
-  ChatMessage,
+  AssistantContext,
+  AssistantMessage,
+  AssistantReply,
   Chapter,
+  ChatMessage,
   Citation,
   Clip,
   Course,
@@ -444,6 +447,15 @@ export const ipc = {
   // 发一条系统桌面通知（学习提醒）。触发时机与去重由前端决定。
   notify: (title: string, body: string): Promise<void> =>
     invoke("cmd_notify", { title, body }),
+  assistant: {
+    /** 问一句。history 传上一轮返回的 history 即可续聊。 */
+    ask: (
+      query: string,
+      context?: AssistantContext,
+      history?: AssistantMessage[],
+    ): Promise<AssistantReply> =>
+      invoke("cmd_assistant_ask", { query, context, history }),
+  },
   settings: {
     get: (key: string): Promise<string | null> =>
       invoke("cmd_get_setting", { key }),

@@ -34,7 +34,10 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import { coarsePointer, useContainerWidth, useIsPortrait } from "@/lib/useContainerWidth";
 import { ipc, type DueCard } from "@/lib/ipc";
-import type { Video } from "@/lib/types";
+import type {
+  AssistantAction,
+  Video,
+} from "@/lib/types";
 import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import {
@@ -47,6 +50,7 @@ import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { useStudyReminder } from "@/lib/useStudyReminder";
 import { isIOS, isTablet } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
+import { AssistantPanel } from "@/components/AssistantPanel";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 import { accentVars, useTheme } from "@/stores/theme";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -302,6 +306,17 @@ export function Home() {
     }
   }
 
+  // 助手的导航动作。只有这里知道播放器和当前选中项，所以由 Home 执行。
+  function assistantNavigate(action: AssistantAction) {
+    if (action.kind === "open_video") {
+      // 走 requestOpenAt 而不是直接 setSelectedVideoId：目标可能不是当前课程的视频，
+      // 这条路会先开视频、加载完再跳，跨课程也成立。
+      usePlayer.getState().requestOpenAt(action.video_id, action.at_ms ?? 0);
+    } else if (action.kind === "seek_to") {
+      usePlayer.getState().requestSeek(action.at_ms);
+    }
+  }
+
   // 仪表盘「继续学习」：切到该课程，打开上次的视频并跳到上次进度（秒→毫秒）。
   function resumeStudy(courseId: string, videoId: string, positionSec: number) {
     setKnowledgeReturn(null);
@@ -374,6 +389,8 @@ export function Home() {
   // 跨视频跳转（课程级搜索点到本课程其它视频）：打开目标视频，
   // 具体 seek 由目标播放器加载完成后消费 pendingSeek。
   const pendingSeek = usePlayer((s) => s.pendingSeek);
+  // 助手要知道「播到哪儿了」，「跳到刚才那句」这类话才落得下去。
+  const playerMs = usePlayer((s) => s.currentMs);
   useEffect(() => {
     if (pendingSeek && pendingSeek.videoId !== selectedVideoId) {
       openVideo(pendingSeek.videoId);
@@ -1524,6 +1541,14 @@ export function Home() {
           onSelect={selectCompactTab}
         />
       )}
+      <AssistantPanel
+        context={{
+          course_id: selectedCourseId,
+          video_id: selectedVideoId,
+          position_ms: playerMs,
+        }}
+        onNavigate={assistantNavigate}
+      />
     </div>
   );
 }

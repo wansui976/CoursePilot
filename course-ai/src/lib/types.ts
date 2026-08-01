@@ -204,3 +204,58 @@ export type AskEvent =
   | { type: "citations"; citations: Citation[] }
   | { type: "done"; answer: string }
   | { type: "error"; message: string };
+
+// ---------- 全局助手 ----------
+
+/** 助手对话里的一轮。工具往返也在里面，原样传回后端即可继续追问。 */
+export interface AssistantMessage {
+  role: string;
+  content: string;
+  tool_calls?: { id: string; name: string; arguments: string }[];
+  tool_call_id?: string;
+}
+
+/**
+ * 助手想让界面做的事。
+ *
+ * 分两类，界面必须区别对待：`open_video` / `seek_to` 是导航，没有破坏性，直接执行；
+ * 其余 `propose_*` 是**提案**——后端一个字节都没改，必须渲染成确认卡，用户点了才落地。
+ */
+export type AssistantAction =
+  | { kind: "open_video"; video_id: string; title: string; at_ms?: number | null }
+  | { kind: "seek_to"; at_ms: number }
+  | {
+      kind: "propose_rename";
+      video_id: string;
+      current_title: string;
+      new_title: string;
+    }
+  | { kind: "propose_delete"; video_id: string; title: string }
+  | {
+      kind: "propose_setting";
+      key: string;
+      label: string;
+      current?: string | null;
+      value: string;
+    }
+  | {
+      kind: "propose_import";
+      url: string;
+      title: string;
+      course_id?: string | null;
+    };
+
+export interface AssistantReply {
+  answer: string;
+  actions: AssistantAction[];
+  turns: number;
+  tools_used: string[];
+  history: AssistantMessage[];
+}
+
+/** 助手当前看到的界面状态，让「这个视频」这类说法能落到具体对象上。 */
+export interface AssistantContext {
+  course_id?: string | null;
+  video_id?: string | null;
+  position_ms?: number | null;
+}
