@@ -361,15 +361,21 @@ describe("AssistantPanel", () => {
 
   it("工具链用人话显示，不是函数名", async () => {
     mockIpc.assistant.ask.mockResolvedValueOnce(
-      reply({ tools_used: ["search_content", "open_video"], turns: 3 }),
+      reply({
+        tools_used: ["get_study_progress", "list_due_reviews", "search_content", "open_video"],
+        turns: 3,
+      }),
     );
     renderPanel();
     await ask("找找看");
     const chips = await screen.findByTestId("tool-chips");
+    expect(chips).toHaveTextContent("读取学习进度");
+    expect(chips).toHaveTextContent("查看待复习");
     expect(chips).toHaveTextContent("搜索课程内容");
     expect(chips).toHaveTextContent("打开视频");
     // search_content 是给模型看的标识符，摆在界面上只会让人去猜它是什么。
     expect(chips).not.toHaveTextContent("search_content");
+    expect(chips).not.toHaveTextContent("get_study_progress");
     // 每轮的工具结果都留在上下文里，花销是乘法涨的，轮次要看得见。
     expect(screen.getByText(/来回 3 轮/)).toBeInTheDocument();
   });

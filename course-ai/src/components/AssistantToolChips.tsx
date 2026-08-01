@@ -1,6 +1,8 @@
 import {
   Download,
   FolderPlus,
+  Gauge,
+  ListChecks,
   ListVideo,
   Navigation,
   PenLine,
@@ -25,6 +27,8 @@ import {
 const LABELS: Record<string, { text: string; icon: React.ReactNode }> = {
   list_courses: { text: "查看课程", icon: <ListVideo className="h-3 w-3" /> },
   list_videos: { text: "查看视频列表", icon: <ListVideo className="h-3 w-3" /> },
+  get_study_progress: { text: "读取学习进度", icon: <Gauge className="h-3 w-3" /> },
+  list_due_reviews: { text: "查看待复习", icon: <ListChecks className="h-3 w-3" /> },
   search_content: { text: "搜索课程内容", icon: <Search className="h-3 w-3" /> },
   search_bilibili: { text: "搜索 B 站", icon: <Search className="h-3 w-3" /> },
   open_video: { text: "打开视频", icon: <Navigation className="h-3 w-3" /> },
