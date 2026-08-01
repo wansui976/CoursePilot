@@ -75,7 +75,7 @@ export function AppSidebar({
     return (
       <>
         <nav className="ca-rail" aria-label="工具栏">
-          {view === "workbench" ? (
+          {view === "workbench" && (
             <button
               type="button"
               className="rail-logo"
@@ -85,10 +85,6 @@ export function AppSidebar({
             >
               <Book className="h-[18px] w-[18px]" />
             </button>
-          ) : (
-            <span className="rail-logo">
-              <Book className="h-[18px] w-[18px]" />
-            </span>
           )}
           <button
             className="rail-btn"
