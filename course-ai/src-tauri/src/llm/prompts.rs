@@ -201,7 +201,7 @@ pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatReque
             ),
         }],
         temperature: 0.1,
-        // 一批约 40 段，输出含时间戳回显；4096 是 Anthropic 的输出上限（OpenAI 不发此值）。
+        // 注意：这个值现在发不出去（出站不带 max_tokens），改它没有效果。
         max_tokens: 4096,
     }
 }

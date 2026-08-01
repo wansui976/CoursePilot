@@ -48,8 +48,8 @@ pub fn build_openai_body(req: &ChatRequest) -> Value {
         messages.push(json!({"role": m.role, "content": m.content}));
     }
     // OpenAI 规范里 max_tokens 是可选的：省略它，模型就用自身的最大输出预算，
-    // 避免我们这边写死的上限把长输出（出题/纠错的 JSON）截断。Anthropic 那边
-    // max_tokens 是必填，仍照常发送（见 anthropic.rs）。
+    // 避免我们这边写死的上限把长输出（出题/纠错的 JSON）截断。
+    // 这是唯一的出站通道，所以 ChatRequest.max_tokens 现在实际不生效。
     json!({
         "model": req.model,
         "messages": messages,

@@ -1,18 +1,17 @@
 import { useEffect, useState } from "react";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
-import { Check, ChevronDown, Eye, EyeOff } from "lucide-react";
+import { Check, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
-import type { LlmProfile, ProviderKind } from "@/lib/types";
+import type { LlmProfile } from "@/lib/types";
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
-const DEFAULT_BASE: Record<ProviderKind, string> = {
-  openai: "https://api.openai.com/v1",
-  anthropic: "https://api.anthropic.com",
-};
+// 现在只剩 OpenAI 兼容一种通道，所以默认地址也只剩一个。
+// Claude 仍然能用：把地址换成 Anthropic 的 OpenAI 兼容层即可，Key 和模型名照旧。
+const DEFAULT_BASE = "https://api.openai.com/v1";
 
 const FIELD =
   "w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] outline-none transition placeholder:text-[var(--text-faint)]";
@@ -106,7 +105,7 @@ export function LlmSettingsPanel() {
     const id = uid();
     setProfiles((ps) => [
       ...ps,
-      { id, name: "新配置", kind: "openai", base_url: DEFAULT_BASE.openai, model: "gpt-4o-mini" },
+      { id, name: "新配置", kind: "openai", base_url: DEFAULT_BASE, model: "gpt-4o-mini" },
     ]);
     setActiveId((current) => current ?? id);
   }
@@ -178,7 +177,7 @@ export function LlmSettingsPanel() {
       )}
       {!loadError && profiles.length === 0 && (
         <p className="rounded-lg border border-dashed border-[var(--border-subtle)] px-3 py-4 text-center text-xs text-[var(--text-faint)]">
-          还没有配置。点「新增」添加一个 OpenAI 兼容或 Anthropic 配置。
+          还没有配置。点「新增」添加一个 OpenAI 兼容配置（Claude 填 Anthropic 的兼容层地址也能用）。
         </p>
       )}
       {profiles.map((p) => {
@@ -222,20 +221,6 @@ export function LlmSettingsPanel() {
                 placeholder="名称"
                 onChange={(e) => update(p.id, { name: e.target.value })}
               />
-              <div className="relative">
-                <select
-                  className={`${FIELD} w-auto cursor-pointer appearance-none pr-9`}
-                  value={p.kind}
-                  onChange={(e) => {
-                    const kind = e.target.value as ProviderKind;
-                    update(p.id, { kind, base_url: DEFAULT_BASE[kind] });
-                  }}
-                >
-                  <option value="openai">OpenAI 兼容</option>
-                  <option value="anthropic">Anthropic</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
-              </div>
             </div>
             <input
               aria-label="Base URL"

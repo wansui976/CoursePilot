@@ -1,11 +1,18 @@
 use crate::error::AppResult;
 use serde::{Deserialize, Serialize};
 
+/// 出站通道类型。目前只剩 OpenAI 兼容一种，枚举留着是因为配置里存了这个字段，
+/// 而且以后加别的通道时不用再改存量数据的形状。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
+    /// 老配置里存的 `anthropic` 一并读成这个——**不是丢弃，是迁移**。
+    ///
+    /// Anthropic 官方有 OpenAI 兼容层，而它的默认 base_url（`https://api.anthropic.com`）
+    /// 经过归一化恰好落在 `/v1/chat/completions` 上，Key 和模型名都不用动，原样继续用。
+    /// 存回去时写的是 `openai`，所以这个别名只在第一次读老数据时起作用。
+    #[serde(alias = "anthropic")]
     Openai,
-    Anthropic,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,7 +111,7 @@ mod tests {
             LlmProfile {
                 id: "b".into(),
                 name: "B".into(),
-                kind: ProviderKind::Anthropic,
+                kind: ProviderKind::Openai,
                 base_url: "u".into(),
                 model: "m".into(),
             },
@@ -142,6 +149,23 @@ mod tests {
         let json = serde_json::to_string(&profiles()).unwrap();
         let back = parse_profiles(Some(&json)).unwrap();
         assert_eq!(back.len(), 2);
-        assert_eq!(back[1].kind, ProviderKind::Anthropic);
+        assert_eq!(back[1].kind, ProviderKind::Openai);
+    }
+
+    #[test]
+    fn an_old_anthropic_profile_still_loads() {
+        // 删掉 Anthropic 通道不能让用户存量配置直接读不出来——那等于配置全丢。
+        // 读成 OpenAI 兼容后，默认 base_url 归一化正好指向 Anthropic 的兼容层，
+        // Key 和模型名照旧可用。
+        let json = r#"[{"id":"c","name":"Claude","kind":"anthropic",
+                        "base_url":"https://api.anthropic.com","model":"claude-sonnet-4-6"}]"#;
+        let back = parse_profiles(Some(json)).unwrap();
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].kind, ProviderKind::Openai);
+        assert_eq!(back[0].model, "claude-sonnet-4-6");
+        // 存回去写的是新值，老别名不会再出现。
+        let again = serde_json::to_string(&back).unwrap();
+        assert!(again.contains("\"kind\":\"openai\""));
+        assert!(!again.contains("anthropic\""));
     }
 }
