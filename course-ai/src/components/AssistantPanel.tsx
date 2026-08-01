@@ -1,11 +1,17 @@
-import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Send, Sparkles, X } from "lucide-react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import { ChevronLeft, ChevronRight, GripHorizontal, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AssistantActionList } from "@/components/AssistantActionCard";
 import { AssistantToolChips } from "@/components/AssistantToolChips";
 import { ipc } from "@/lib/ipc";
 import { isMobile } from "@/lib/platform";
-import { useAssistantUi } from "@/stores/assistant";
+import { type DockSide, useAssistantUi } from "@/stores/assistant";
 import { useTheme } from "@/stores/theme";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import type { AssistantAction, AssistantContext, AssistantMessage } from "@/lib/types";
@@ -13,9 +19,66 @@ import type { AssistantAction, AssistantContext, AssistantMessage } from "@/lib/
 /**
  * 常驻的全局助手面板。
  *
- * 桌面端吸附在左右任一边缘，收起时缩成一个小球；手机端没有「边缘停靠」的余地，
+ * 桌面端可拖动，移到左右边缘时吸附成窄条；手机端没有「边缘停靠」的余地，
  * 改成底部抽屉——两种外壳共用同一套状态和消息流，切换的只是容器。
  */
+
+const PANEL_WIDTH = 360;
+const PANEL_MAX_HEIGHT = 720;
+const VIEWPORT_GAP = 16;
+const EDGE_SNAP_DISTANCE = 28;
+const DOCK_STRIP_HEIGHT = 112;
+const KEYBOARD_MOVE_STEP = 24;
+const DRAG_START_DISTANCE = 4;
+
+interface PanelPosition {
+  x: number;
+  y: number;
+}
+
+interface DragSession {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  offsetX: number;
+  offsetY: number;
+  panelWidth: number;
+  panelHeight: number;
+  moved: boolean;
+  position: PanelPosition;
+  snapSide: DockSide | null;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), Math.max(min, max));
+}
+
+function viewportSize() {
+  if (typeof window === "undefined") return { width: 1024, height: 768 };
+  return { width: window.innerWidth, height: window.innerHeight };
+}
+
+function fallbackPanelSize() {
+  const viewport = viewportSize();
+  return {
+    width: Math.min(PANEL_WIDTH, Math.max(0, viewport.width - VIEWPORT_GAP * 2)),
+    height: Math.min(PANEL_MAX_HEIGHT, Math.max(0, viewport.height - VIEWPORT_GAP * 2)),
+  };
+}
+
+function initialPanelPosition(side: DockSide): PanelPosition {
+  const viewport = viewportSize();
+  const panel = fallbackPanelSize();
+  return {
+    x: side === "left" ? VIEWPORT_GAP : viewport.width - panel.width - VIEWPORT_GAP,
+    y: VIEWPORT_GAP,
+  };
+}
+
+function initialDockTop() {
+  const { height } = viewportSize();
+  return Math.max(VIEWPORT_GAP, height - DOCK_STRIP_HEIGHT - 24);
+}
 
 interface Turn {
   id: string;
@@ -42,7 +105,14 @@ export function AssistantPanel({
   const [turns, setTurns] = useState<Turn[]>([]);
   const [history, setHistory] = useState<AssistantMessage[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const dragRef = useRef<DragSession | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
   const mobile = isMobile();
+  const [position, setPosition] = useState<PanelPosition>(() => initialPanelPosition(side));
+  const [dockTop, setDockTop] = useState(initialDockTop);
+  const [dragging, setDragging] = useState(false);
+  const [snapSide, setSnapSide] = useState<DockSide | null>(null);
   const setThemePref = useTheme((state) => state.setPref);
 
   // 回答里的 [mm:ss] 点了就跳。助手常说「在 12:30 讲到」，让它可点是顺手的事。
@@ -55,6 +125,251 @@ export function AssistantPanel({
     const box = scrollRef.current;
     if (box) box.scrollTop = box.scrollHeight;
   }, [turns, busy]);
+
+  useEffect(() => {
+    if (mobile) return;
+
+    const keepInsideViewport = () => {
+      const panel = measurePanel();
+      const viewport = viewportSize();
+      setPosition((current) => ({
+        x: clamp(current.x, VIEWPORT_GAP, viewport.width - panel.width - VIEWPORT_GAP),
+        y: clamp(current.y, VIEWPORT_GAP, viewport.height - panel.height - VIEWPORT_GAP),
+      }));
+      setDockTop((current) =>
+        clamp(current, VIEWPORT_GAP, viewport.height - DOCK_STRIP_HEIGHT - VIEWPORT_GAP),
+      );
+    };
+
+    window.addEventListener("resize", keepInsideViewport);
+    return () => window.removeEventListener("resize", keepInsideViewport);
+  }, [mobile]);
+
+  useEffect(() => () => dragCleanupRef.current?.(), []);
+
+  function measurePanel() {
+    const fallback = fallbackPanelSize();
+    const rect = panelRef.current?.getBoundingClientRect();
+    return {
+      width: rect?.width || fallback.width,
+      height: rect?.height || fallback.height,
+    };
+  }
+
+  function positionAtSide(nextSide: DockSide, y: number) {
+    const viewport = viewportSize();
+    const panel = measurePanel();
+    return {
+      x:
+        nextSide === "left"
+          ? VIEWPORT_GAP
+          : viewport.width - panel.width - VIEWPORT_GAP,
+      y: clamp(y, VIEWPORT_GAP, viewport.height - panel.height - VIEWPORT_GAP),
+    };
+  }
+
+  function movePanelToSide(nextSide: DockSide) {
+    dock(nextSide);
+    setPosition((current) => positionAtSide(nextSide, current.y));
+  }
+
+  function dockToStrip(nextSide: DockSide, y: number) {
+    const { height } = viewportSize();
+    const panel = measurePanel();
+    const centeredTop = y + panel.height / 2 - DOCK_STRIP_HEIGHT / 2;
+    setDockTop(
+      clamp(centeredTop, VIEWPORT_GAP, height - DOCK_STRIP_HEIGHT - VIEWPORT_GAP),
+    );
+    dock(nextSide);
+    setOpen(false);
+  }
+
+  function openFromDock() {
+    const panel = measurePanel();
+    const centeredTop = dockTop + DOCK_STRIP_HEIGHT / 2 - panel.height / 2;
+    setPosition(positionAtSide(side, centeredTop));
+    setOpen(true);
+  }
+
+  function collapseToNearestSide() {
+    const panel = measurePanel();
+    const nearestSide: DockSide =
+      position.x + panel.width / 2 < viewportSize().width / 2 ? "left" : "right";
+    dockToStrip(nearestSide, position.y);
+  }
+
+  function updateDrag(clientX: number, clientY: number) {
+    const session = dragRef.current;
+    if (!session) return null;
+
+    if (!session.moved) {
+      const distance = Math.hypot(clientX - session.startX, clientY - session.startY);
+      if (distance < DRAG_START_DISTANCE) return session;
+      session.moved = true;
+    }
+
+    const viewport = viewportSize();
+    const rawX = clientX - session.offsetX;
+    const rawY = clientY - session.offsetY;
+    const nearLeft = rawX <= EDGE_SNAP_DISTANCE;
+    const nearRight =
+      rawX + session.panelWidth >= viewport.width - EDGE_SNAP_DISTANCE;
+    const nextSnapSide: DockSide | null =
+      nearLeft && nearRight
+        ? clientX < viewport.width / 2
+          ? "left"
+          : "right"
+        : nearLeft
+          ? "left"
+          : nearRight
+            ? "right"
+            : null;
+
+    session.position = {
+      x:
+        nextSnapSide === "left"
+          ? 0
+          : nextSnapSide === "right"
+            ? viewport.width - session.panelWidth
+            : clamp(
+                rawX,
+                VIEWPORT_GAP,
+                viewport.width - session.panelWidth - VIEWPORT_GAP,
+              ),
+      y: clamp(
+        rawY,
+        VIEWPORT_GAP,
+        viewport.height - session.panelHeight - VIEWPORT_GAP,
+      ),
+    };
+    session.snapSide = nextSnapSide;
+    setPosition(session.position);
+    setSnapSide(nextSnapSide);
+    return session;
+  }
+
+  function beginPanelDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (mobile || (event.pointerType === "mouse" && event.button !== 0)) return;
+
+    dragCleanupRef.current?.();
+    const panel = measurePanel();
+    const rect = panelRef.current?.getBoundingClientRect();
+    const panelLeft = rect?.width ? rect.left : position.x;
+    const panelTop = rect?.height ? rect.top : position.y;
+    const handle = event.currentTarget;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: event.clientX - panelLeft,
+      offsetY: event.clientY - panelTop,
+      panelWidth: panel.width,
+      panelHeight: panel.height,
+      moved: false,
+      position,
+      snapSide: null,
+    };
+    setDragging(true);
+    setSnapSide(null);
+
+    try {
+      handle.setPointerCapture(event.pointerId);
+    } catch {
+      // WebView / jsdom 可能没有指针捕获；window 监听仍能保证拖出标题栏后继续移动。
+    }
+
+    const removeListeners = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      try {
+        if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+      } catch {
+        // 与 setPointerCapture 相同，缺少该 API 时无需额外处理。
+      }
+      if (dragCleanupRef.current === removeListeners) dragCleanupRef.current = null;
+    };
+
+    const finish = (pointerEvent: PointerEvent, cancelled: boolean) => {
+      const session = dragRef.current;
+      if (!session || pointerEvent.pointerId !== session.pointerId) return;
+      const completed = cancelled ? session : updateDrag(pointerEvent.clientX, pointerEvent.clientY);
+      removeListeners();
+      dragRef.current = null;
+      setDragging(false);
+      setSnapSide(null);
+      if (!cancelled && completed?.moved && completed.snapSide) {
+        dockToStrip(completed.snapSide, completed.position.y);
+      }
+    };
+
+    function onMove(pointerEvent: PointerEvent) {
+      if (pointerEvent.pointerId !== dragRef.current?.pointerId) return;
+      pointerEvent.preventDefault();
+      updateDrag(pointerEvent.clientX, pointerEvent.clientY);
+    }
+
+    function onUp(pointerEvent: PointerEvent) {
+      finish(pointerEvent, false);
+    }
+
+    function onCancel(pointerEvent: PointerEvent) {
+      finish(pointerEvent, true);
+    }
+
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    dragCleanupRef.current = removeListeners;
+  }
+
+  function movePanelWithKeyboard(event: KeyboardEvent<HTMLButtonElement>) {
+    if (mobile) return;
+    if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      dockToStrip(event.key === "Home" ? "left" : "right", position.y);
+      return;
+    }
+
+    const step = event.shiftKey ? KEYBOARD_MOVE_STEP * 2 : KEYBOARD_MOVE_STEP;
+    const delta =
+      event.key === "ArrowLeft"
+        ? { x: -step, y: 0 }
+        : event.key === "ArrowRight"
+          ? { x: step, y: 0 }
+          : event.key === "ArrowUp"
+            ? { x: 0, y: -step }
+            : event.key === "ArrowDown"
+              ? { x: 0, y: step }
+              : null;
+    if (!delta) return;
+    event.preventDefault();
+
+    const viewport = viewportSize();
+    const panel = measurePanel();
+    const next = {
+      x: clamp(
+        position.x + delta.x,
+        VIEWPORT_GAP,
+        viewport.width - panel.width - VIEWPORT_GAP,
+      ),
+      y: clamp(
+        position.y + delta.y,
+        VIEWPORT_GAP,
+        viewport.height - panel.height - VIEWPORT_GAP,
+      ),
+    };
+    if (event.key === "ArrowLeft" && next.x === VIEWPORT_GAP) {
+      dockToStrip("left", next.y);
+    } else if (
+      event.key === "ArrowRight" &&
+      next.x === viewport.width - panel.width - VIEWPORT_GAP
+    ) {
+      dockToStrip("right", next.y);
+    } else {
+      setPosition(next);
+    }
+  }
 
   async function send() {
     const question = input.trim();
@@ -94,37 +409,73 @@ export function AssistantPanel({
       <button
         type="button"
         aria-label="打开助手"
-        onClick={() => setOpen(true)}
-        className={`ca-touch-44 fixed bottom-6 z-40 grid h-12 w-12 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-lg transition hover:bg-[var(--surface-card-hover)] ${
-          side === "left" ? "left-4" : "right-4"
-        }`}
+        data-dock-side={mobile ? undefined : side}
+        onClick={openFromDock}
+        style={mobile ? undefined : { top: dockTop }}
+        className={
+          mobile
+            ? "ca-touch-44 fixed bottom-6 right-4 z-40 grid h-12 w-12 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-lg transition-colors hover:bg-[var(--surface-card-hover)] motion-reduce:transition-none"
+            : `fixed z-40 grid h-28 w-11 place-items-center border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-lg transition-colors hover:bg-[var(--surface-card-hover)] motion-reduce:transition-none ${
+                side === "left"
+                  ? "left-0 rounded-r-lg border-l-0"
+                  : "right-0 rounded-l-lg border-r-0"
+              }`
+        }
       >
-        <Sparkles className="h-5 w-5 text-[var(--accent)]" />
+        <span className="flex flex-col items-center gap-3" aria-hidden="true">
+          <Sparkles className="h-5 w-5 text-[var(--accent)]" />
+          {mobile ? null : side === "left" ? (
+            <ChevronRight className="h-4 w-4 text-[var(--text-faint)]" />
+          ) : (
+            <ChevronLeft className="h-4 w-4 text-[var(--text-faint)]" />
+          )}
+        </span>
       </button>
     );
   }
 
   const shell = mobile
     ? "fixed inset-x-0 bottom-0 z-40 h-[70vh] rounded-t-2xl border-t"
-    : `fixed bottom-4 top-4 z-40 w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border ${
-        side === "left" ? "left-4" : "right-4"
-      }`;
+    : "fixed z-40 h-[min(720px,calc(100dvh-2rem))] w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border";
 
   return (
     <aside
+      ref={panelRef}
       aria-label="助手"
-      className={`${shell} flex flex-col border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-xl`}
+      data-dragging={mobile ? undefined : dragging}
+      data-snap-side={mobile ? undefined : snapSide ?? undefined}
+      style={mobile ? undefined : { left: position.x, top: position.y }}
+      className={`${shell} flex flex-col border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-xl ${
+        snapSide ? "ring-2 ring-[var(--accent)]" : ""
+      }`}
     >
       <header className="flex items-center gap-1 border-b border-[var(--border-subtle)] px-3 py-2">
-        <Sparkles className="h-4 w-4 flex-none text-[var(--accent)]" />
-        <span className="flex-1 text-sm font-medium text-[var(--text-strong)]">助手</span>
+        {mobile ? (
+          <>
+            <Sparkles className="h-4 w-4 flex-none text-[var(--accent)]" />
+            <span className="flex-1 text-sm font-medium text-[var(--text-strong)]">助手</span>
+          </>
+        ) : (
+          <button
+            type="button"
+            aria-label="拖动助手面板"
+            title="拖动助手面板"
+            onPointerDown={beginPanelDrag}
+            onKeyDown={movePanelWithKeyboard}
+            className="-ml-1 flex min-w-0 flex-1 touch-none select-none items-center gap-1.5 rounded-md px-1 py-1 text-left cursor-grab active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          >
+            <GripHorizontal className="h-4 w-4 flex-none text-[var(--text-faint)]" />
+            <Sparkles className="h-4 w-4 flex-none text-[var(--accent)]" />
+            <span className="truncate text-sm font-medium text-[var(--text-strong)]">助手</span>
+          </button>
+        )}
         {/* 手机端没有左右可停靠的空间，只有桌面端给这个按钮。 */}
         {!mobile && (
           <Button
             size="icon"
             variant="ghost"
             aria-label={side === "left" ? "停靠到右边" : "停靠到左边"}
-            onClick={() => dock(side === "left" ? "right" : "left")}
+            onClick={() => movePanelToSide(side === "left" ? "right" : "left")}
           >
             {side === "left" ? (
               <ChevronRight className="h-4 w-4" />
@@ -133,18 +484,17 @@ export function AssistantPanel({
             )}
           </Button>
         )}
-        <Button size="icon" variant="ghost" aria-label="收起助手" onClick={() => setOpen(false)}>
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label="收起助手"
+          onClick={collapseToNearestSide}
+        >
           <X className="h-4 w-4" />
         </Button>
       </header>
 
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
-        {turns.length === 0 && !busy && (
-          <p className="text-xs text-[var(--text-faint)]">
-            可以问「这门课哪讲了梯度下降」「跳到讲例题的地方」，
-            也可以说「把这个视频改名叫第三讲」——改动类的会先给你一张确认卡。
-          </p>
-        )}
         {turns.map((turn) => (
           <div key={turn.id} className="space-y-2">
             {/* 自己说的话靠右、带底色；助手的靠左。一眼能分清谁说的，
