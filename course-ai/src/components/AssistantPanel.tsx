@@ -5,10 +5,23 @@ import {
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { ChevronLeft, ChevronRight, GripHorizontal, Send, Sparkles, X } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowUpRight,
+  ChevronLeft,
+  ChevronRight,
+  GripHorizontal,
+  LoaderCircle,
+  MessageSquarePlus,
+  Send,
+  Sparkles,
+  Square,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AssistantActionList } from "@/components/AssistantActionCard";
 import { AssistantToolChips } from "@/components/AssistantToolChips";
+import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
 import { isMobile } from "@/lib/platform";
 import { type DockSide, useAssistantUi } from "@/stores/assistant";
@@ -88,27 +101,59 @@ interface Turn {
   tools: string[];
   /** 这一轮来回了几次。花了多少钱要让人看得见。 */
   turns: number;
+  canceled: boolean;
+}
+
+function suggestionsFor(context: AssistantContext) {
+  if (context.video_id) {
+    return [
+      { label: "概括当前视频", prompt: "概括当前视频的主要内容" },
+      { label: "查找例题", prompt: "查找当前视频里讲例题的位置" },
+      { label: "梳理知识重点", prompt: "梳理当前视频最重要的知识点" },
+    ];
+  }
+  if (context.course_id) {
+    return [
+      { label: "概览这门课程", prompt: "概览这门课程的主要内容" },
+      { label: "查看视频目录", prompt: "列出这门课程的全部视频" },
+      { label: "查找课程重点", prompt: "查找这门课程最重要的知识点" },
+    ];
+  }
+  return [
+    { label: "查看我的课程", prompt: "列出我的全部课程" },
+    { label: "规划下一步学习", prompt: "根据我的课程规划下一步学习" },
+    { label: "切换到夜间模式", prompt: "切换到夜间模式" },
+  ];
 }
 
 export function AssistantPanel({
   context,
   onNavigate,
+  compact = false,
+  bottomNavigationVisible = false,
 }: {
   context: AssistantContext;
   /** 打开视频 / 跳转由外层执行——只有它知道播放器和路由。 */
   onNavigate: (action: AssistantAction) => void;
+  /** 跟随 Home 的实际布局档位；窄窗口即使是桌面 UA 也应使用抽屉。 */
+  compact?: boolean;
+  /** 课程库窄屏下底部有 56px 主导航，抽屉和入口都要避开它。 */
+  bottomNavigationVisible?: boolean;
 }) {
   const { open, side, setOpen, dock } = useAssistantUi();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [error, setError] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [history, setHistory] = useState<AssistantMessage[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const dragRef = useRef<DragSession | null>(null);
   const dragCleanupRef = useRef<(() => void) | null>(null);
-  const mobile = isMobile();
+  const activeRequestRef = useRef<string | null>(null);
+  const mobile = compact || isMobile();
   const [position, setPosition] = useState<PanelPosition>(() => initialPanelPosition(side));
   const [dockTop, setDockTop] = useState(initialDockTop);
   const [dragging, setDragging] = useState(false);
@@ -145,7 +190,14 @@ export function AssistantPanel({
     return () => window.removeEventListener("resize", keepInsideViewport);
   }, [mobile]);
 
-  useEffect(() => () => dragCleanupRef.current?.(), []);
+  useEffect(
+    () => () => {
+      dragCleanupRef.current?.();
+      const requestId = activeRequestRef.current;
+      if (requestId) void ipc.assistant.cancel(requestId);
+    },
+    [],
+  );
 
   function measurePanel() {
     const fallback = fallbackPanelSize();
@@ -371,17 +423,23 @@ export function AssistantPanel({
     }
   }
 
-  async function send() {
-    const question = input.trim();
-    if (!question || busy) return;
+  async function send(suggestedQuestion?: string) {
+    const question = (suggestedQuestion ?? input).trim();
+    if (!question || busy || activeRequestRef.current) return;
+    const requestId = crypto.randomUUID();
+    activeRequestRef.current = requestId;
     setInput("");
     setBusy(true);
+    setStopping(false);
     setError("");
     try {
-      const reply = await ipc.assistant.ask(question, context, history);
+      const reply = await ipc.assistant.ask(question, context, history, requestId);
+      // 后端也会清空取消轮次的动作；这里再守一次，避免旧后端或兼容端点让用户
+      // 点停以后仍切主题、导航或冒出待确认操作。
+      const actions = reply.canceled ? [] : reply.actions;
       setHistory(reply.history);
       // 主题当场生效。它无破坏性、一眼可见，再让人点一次只是把一步变两步。
-      for (const action of reply.actions) {
+      for (const action of actions) {
         if (action.kind === "set_theme") setThemePref(action.pref);
       }
       setTurns((prev) => [
@@ -390,31 +448,61 @@ export function AssistantPanel({
           id: crypto.randomUUID(),
           question,
           answer: reply.answer,
-          actions: reply.actions,
+          actions,
           tools: reply.tools_used,
           turns: reply.turns,
+          canceled: reply.canceled,
         },
       ]);
     } catch (e) {
       // 把问题放回输入框：让用户能直接重发，而不是重新打一遍。
       setInput(question);
-      setError(String(e));
+      setError(humanizeError(e));
     } finally {
-      setBusy(false);
+      if (activeRequestRef.current === requestId) {
+        activeRequestRef.current = null;
+        setBusy(false);
+        setStopping(false);
+      }
     }
   }
 
+  async function stop() {
+    const requestId = activeRequestRef.current;
+    if (!requestId || stopping) return;
+    setStopping(true);
+    setError("");
+    try {
+      await ipc.assistant.cancel(requestId);
+    } catch (e) {
+      setStopping(false);
+      setError(humanizeError(e));
+    }
+  }
+
+  function startNewConversation() {
+    if (busy) return;
+    setTurns([]);
+    setHistory([]);
+    setInput("");
+    setError("");
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
   if (!open) {
+    const mobileBottom = bottomNavigationVisible
+      ? "calc(56px + env(safe-area-inset-bottom, 0px) + 24px)"
+      : "24px";
     return (
       <button
         type="button"
         aria-label="打开助手"
         data-dock-side={mobile ? undefined : side}
         onClick={openFromDock}
-        style={mobile ? undefined : { top: dockTop }}
+        style={mobile ? { bottom: mobileBottom } : { top: dockTop }}
         className={
           mobile
-            ? "ca-touch-44 fixed bottom-6 right-4 z-40 grid h-12 w-12 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-lg transition-colors hover:bg-[var(--surface-card-hover)] motion-reduce:transition-none"
+            ? "ca-touch-44 fixed right-4 z-40 grid h-12 w-12 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-lg transition-colors hover:bg-[var(--surface-card-hover)] motion-reduce:transition-none"
             : `fixed z-40 grid h-28 w-11 place-items-center border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-lg transition-colors hover:bg-[var(--surface-card-hover)] motion-reduce:transition-none ${
                 side === "left"
                   ? "left-0 rounded-r-lg border-l-0"
@@ -435,8 +523,11 @@ export function AssistantPanel({
   }
 
   const shell = mobile
-    ? "fixed inset-x-0 bottom-0 z-40 h-[70vh] rounded-t-2xl border-t"
+    ? "fixed inset-x-0 z-40 h-[70vh] rounded-t-2xl border-t"
     : "fixed z-40 h-[min(720px,calc(100dvh-2rem))] w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border";
+  const mobileBottom = bottomNavigationVisible
+    ? "calc(56px + env(safe-area-inset-bottom, 0px))"
+    : "0px";
 
   return (
     <aside
@@ -444,7 +535,7 @@ export function AssistantPanel({
       aria-label="助手"
       data-dragging={mobile ? undefined : dragging}
       data-snap-side={mobile ? undefined : snapSide ?? undefined}
-      style={mobile ? undefined : { left: position.x, top: position.y }}
+      style={mobile ? { bottom: mobileBottom } : { left: position.x, top: position.y }}
       className={`${shell} flex flex-col border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-xl ${
         snapSide ? "ring-2 ring-[var(--accent)]" : ""
       }`}
@@ -468,6 +559,18 @@ export function AssistantPanel({
             <Sparkles className="h-4 w-4 flex-none text-[var(--accent)]" />
             <span className="truncate text-sm font-medium text-[var(--text-strong)]">助手</span>
           </button>
+        )}
+        {(turns.length > 0 || history.length > 0) && (
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label="新对话"
+            title="新对话"
+            disabled={busy}
+            onClick={startNewConversation}
+          >
+            <MessageSquarePlus className="h-4 w-4" />
+          </Button>
         )}
         {/* 手机端没有左右可停靠的空间，只有桌面端给这个按钮。 */}
         {!mobile && (
@@ -495,6 +598,23 @@ export function AssistantPanel({
       </header>
 
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
+        {turns.length === 0 && !busy && !error && (
+          <div className="flex min-h-full items-center">
+            <div className="grid w-full gap-2">
+              {suggestionsFor(context).map((suggestion) => (
+                <button
+                  key={suggestion.prompt}
+                  type="button"
+                  onClick={() => void send(suggestion.prompt)}
+                  className="ca-touch-44 flex w-full items-center justify-between gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2.5 text-left text-sm text-[var(--text-normal)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] motion-reduce:transition-none"
+                >
+                  <span>{suggestion.label}</span>
+                  <ArrowUpRight className="h-3.5 w-3.5 flex-none text-[var(--text-faint)]" />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {turns.map((turn) => (
           <div key={turn.id} className="space-y-2">
             {/* 自己说的话靠右、带底色；助手的靠左。一眼能分清谁说的，
@@ -529,18 +649,38 @@ export function AssistantPanel({
               // 来回几次要让人看见：每一轮的工具结果都留在上下文里，花销是乘法涨的。
               <p className="text-[10px] text-[var(--text-faint)]">来回 {turn.turns} 轮</p>
             )}
+            {turn.canceled && (
+              <p className="flex items-center gap-1 text-[10px] text-[var(--text-faint)]">
+                <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
+                已停止，未继续执行
+              </p>
+            )}
           </div>
         ))}
-        {busy && <p className="text-xs text-[var(--text-faint)]">正在想…</p>}
+        {busy && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="flex items-center gap-2 text-xs text-[var(--text-faint)]"
+          >
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            <span>{stopping ? "正在停止…" : "正在思考并调用工具…"}</span>
+          </div>
+        )}
         {error && (
-          <p role="alert" className="text-xs text-[var(--status-err)]">
-            {error}
-          </p>
+          <div
+            role="alert"
+            className="flex items-start gap-1.5 rounded-lg bg-[var(--status-err-bg)] px-2.5 py-2 text-xs text-[var(--status-err)]"
+          >
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" aria-hidden="true" />
+            <span>{error}</span>
+          </div>
         )}
       </div>
 
       <div className="flex items-end gap-2 border-t border-[var(--border-subtle)] p-2">
         <textarea
+          ref={inputRef}
           aria-label="对助手说"
           rows={1}
           value={input}
@@ -556,9 +696,27 @@ export function AssistantPanel({
           }}
           className="max-h-24 flex-1 resize-none rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2.5 py-2 text-sm text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)]"
         />
-        <Button size="icon" aria-label="发送" disabled={busy || !input.trim()} onClick={send}>
-          <Send className="h-4 w-4" />
-        </Button>
+        {busy ? (
+          <Button
+            size="icon"
+            variant="outline"
+            aria-label="停止生成"
+            title="停止生成"
+            disabled={stopping}
+            onClick={stop}
+          >
+            <Square className="h-3.5 w-3.5 fill-current" />
+          </Button>
+        ) : (
+          <Button
+            size="icon"
+            aria-label="发送"
+            disabled={!input.trim()}
+            onClick={() => void send()}
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        )}
       </div>
     </aside>
   );

@@ -74,6 +74,8 @@ pub struct AgentOutcome {
     pub messages: Vec<ChatMessage>,
     /// 实际来回了几轮。
     pub turns: usize,
+    /// 是否由用户主动停止。撞轮次上限不算取消。
+    pub canceled: bool,
 }
 
 /// 跑一轮工具调用循环，直到模型给出不带工具调用的答复。
@@ -126,6 +128,7 @@ pub async fn run<T: ToolBox>(
                 answer,
                 messages,
                 turns,
+                canceled: false,
             });
         }
 
@@ -157,6 +160,7 @@ pub async fn run<T: ToolBox>(
         answer,
         messages,
         turns,
+        canceled: cancel.load(Ordering::SeqCst),
     })
 }
 

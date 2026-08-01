@@ -9,7 +9,7 @@ import type { AssistantAction, AssistantReply } from "@/lib/types";
 
 const { mockIpc, platformMock } = vi.hoisted(() => ({
   mockIpc: {
-    assistant: { ask: vi.fn() },
+    assistant: { ask: vi.fn(), cancel: vi.fn() },
     videos: { updateTitle: vi.fn(), delete: vi.fn() },
     courses: { create: vi.fn(), rename: vi.fn() },
     settings: { set: vi.fn(), get: vi.fn() },
@@ -35,6 +35,7 @@ vi.mock("@/lib/platform", () => ({
 function reply(over: Partial<AssistantReply> = {}): AssistantReply {
   return {
     answer: "好了",
+    canceled: false,
     actions: [],
     turns: 1,
     tools_used: [],
@@ -43,11 +44,19 @@ function reply(over: Partial<AssistantReply> = {}): AssistantReply {
   };
 }
 
-function renderPanel(onNavigate = vi.fn()) {
+function renderPanel(
+  onNavigate = vi.fn(),
+  layout: { compact?: boolean; bottomNavigationVisible?: boolean } = {},
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <AssistantPanel context={{ course_id: "c1", video_id: "v1" }} onNavigate={onNavigate} />
+      <AssistantPanel
+        context={{ course_id: "c1", video_id: "v1" }}
+        onNavigate={onNavigate}
+        compact={layout.compact}
+        bottomNavigationVisible={layout.bottomNavigationVisible}
+      />
     </QueryClientProvider>,
   );
   return onNavigate;
@@ -65,6 +74,7 @@ describe("AssistantPanel", () => {
     platformMock.mobile = false;
     useAssistantUi.setState({ open: true, side: "right" });
     mockIpc.assistant.ask.mockResolvedValue(reply());
+    mockIpc.assistant.cancel.mockResolvedValue(undefined);
   });
 
   it("收起时在界面边缘留一条可点开的窄条", () => {
@@ -82,6 +92,19 @@ describe("AssistantPanel", () => {
     renderPanel();
     expect(screen.queryByText(/这门课哪讲了梯度下降/)).not.toBeInTheDocument();
     expect(screen.queryByText(/把这个视频改名叫第三讲/)).not.toBeInTheDocument();
+  });
+
+  it("空白对话给出可直接执行的当前视频建议", async () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "查找例题" }));
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenCalledWith(
+        "查找当前视频里讲例题的位置",
+        { course_id: "c1", video_id: "v1" },
+        [],
+        expect.any(String),
+      ),
+    );
   });
 
   it("可以从标题栏拖动桌面面板", () => {
@@ -190,6 +213,7 @@ describe("AssistantPanel", () => {
         "这讲了什么",
         { course_id: "c1", video_id: "v1" },
         [],
+        expect.any(String),
       ),
     );
   });
@@ -207,6 +231,7 @@ describe("AssistantPanel", () => {
         "那第二个呢",
         expect.anything(),
         history,
+        expect.any(String),
       ),
     );
   });
@@ -217,6 +242,97 @@ describe("AssistantPanel", () => {
     await ask("帮我查查");
     await screen.findByRole("alert");
     expect(screen.getByLabelText("对助手说")).toHaveValue("帮我查查");
+  });
+
+  it("把后端错误翻成人能处理的提示", async () => {
+    mockIpc.assistant.ask.mockRejectedValueOnce(new Error("HTTP 401 Unauthorized"));
+    renderPanel();
+    await ask("帮我查查");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("API Key");
+    expect(alert).not.toHaveTextContent("HTTP 401");
+  });
+
+  it("等待 Agent 工具链时给屏幕阅读器明确状态", async () => {
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask.mockReturnValueOnce(
+      new Promise<AssistantReply>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    renderPanel();
+    await ask("找一下例题");
+
+    expect(await screen.findByRole("status")).toHaveTextContent("正在思考并调用工具");
+    expect(screen.getByLabelText("停止生成")).toBeEnabled();
+
+    finish(reply());
+    await screen.findByText("好了");
+  });
+
+  it("停止会取消当前 request_id，并明确标出这一轮没有执行完", async () => {
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask.mockReturnValueOnce(
+      new Promise<AssistantReply>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    renderPanel();
+    await ask("查完所有课程");
+
+    const requestId = mockIpc.assistant.ask.mock.calls[0][3];
+    fireEvent.click(await screen.findByLabelText("停止生成"));
+    await waitFor(() => expect(mockIpc.assistant.cancel).toHaveBeenCalledWith(requestId));
+    expect(screen.getByRole("status")).toHaveTextContent("正在停止");
+
+    finish(reply({ answer: "", canceled: true }));
+    expect(await screen.findByText("已停止，未继续执行")).toBeInTheDocument();
+    expect(screen.getByLabelText("发送")).toBeDisabled();
+  });
+
+  it("停止后的半成品动作不会继续改界面或等待确认", async () => {
+    useTheme.setState({ pref: "light" });
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        answer: "",
+        canceled: true,
+        actions: [
+          { kind: "set_theme", pref: "dark" },
+          { kind: "propose_delete", video_id: "v1", title: "第一讲" },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("删掉它并切换主题");
+
+    expect(await screen.findByText("已停止，未继续执行")).toBeInTheDocument();
+    expect(useTheme.getState().pref).toBe("light");
+    expect(screen.queryByText("删除视频")).not.toBeInTheDocument();
+    expect(mockIpc.videos.delete).not.toHaveBeenCalled();
+  });
+
+  it("新对话会清掉旧消息和后端历史", async () => {
+    const oldHistory = [{ role: "user", content: "旧问题" }];
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({ answer: "旧回答", history: oldHistory }),
+    );
+    renderPanel();
+    await ask("旧问题");
+    await screen.findByText("旧回答");
+
+    fireEvent.click(screen.getByRole("button", { name: "新对话" }));
+    expect(screen.queryByText("旧问题")).not.toBeInTheDocument();
+    expect(screen.queryByText("旧回答")).not.toBeInTheDocument();
+
+    await ask("重新开始");
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenLastCalledWith(
+        "重新开始",
+        expect.anything(),
+        [],
+        expect.any(String),
+      ),
+    );
   });
 
   it("导航动作点一下才执行，不会自己跳走", async () => {
@@ -299,6 +415,14 @@ describe("AssistantPanel", () => {
     expect(screen.queryByRole("button", { name: "拖动助手面板" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("对助手说")).toBeInTheDocument();
   });
+
+  it("窄视口按移动抽屉渲染，并避开底部主导航", () => {
+    renderPanel(vi.fn(), { compact: true, bottomNavigationVisible: true });
+    const panel = screen.getByRole("complementary", { name: "助手" });
+    expect(screen.queryByRole("button", { name: "拖动助手面板" })).not.toBeInTheDocument();
+    expect(panel).toHaveClass("inset-x-0", "h-[70vh]");
+    expect(panel.getAttribute("style")).toContain("bottom: calc(56px");
+  });
 });
 
 describe("确认卡", () => {
@@ -308,6 +432,7 @@ describe("确认卡", () => {
     platformMock.mobile = false;
     useAssistantUi.setState({ open: true, side: "right" });
     mockIpc.assistant.ask.mockResolvedValue(reply());
+    mockIpc.assistant.cancel.mockResolvedValue(undefined);
     mockIpc.tools.hasBilibiliCookies.mockResolvedValue(true);
     mockIpc.tools.probeBilibili.mockResolvedValue({
       title: "双曲线",
@@ -552,6 +677,32 @@ describe("确认卡", () => {
     expect(alert).toHaveTextContent("第二讲");
   });
 
+  it("批量重试只执行失败项，已经成功的不能再做一次", async () => {
+    mockIpc.videos.updateTitle
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("重名"))
+      .mockResolvedValueOnce(undefined);
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          { kind: "propose_rename", video_id: "v1", current_title: "01", new_title: "第一讲" },
+          { kind: "propose_rename", video_id: "v2", current_title: "02", new_title: "第二讲" },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("批量改名");
+    fireEvent.click(await screen.findByRole("button", { name: "确认改名 2 项" }));
+
+    const retry = await screen.findByRole("button", { name: "重试失败的 1 项" });
+    expect(screen.getByText("已完成")).toBeInTheDocument();
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(screen.getByText("已生效")).toBeInTheDocument());
+    expect(mockIpc.videos.updateTitle.mock.calls.filter(([id]) => id === "v1")).toHaveLength(1);
+    expect(mockIpc.videos.updateTitle.mock.calls.filter(([id]) => id === "v2")).toHaveLength(2);
+  });
+
   it("导入要带上字幕轨和清晰度，并在之后跑流水线", async () => {
     // 之前这里只调了一次裸的下载：视频进来了，但没字幕、没分析。
     mockIpc.assistant.ask.mockResolvedValueOnce(
@@ -606,6 +757,36 @@ describe("确认卡", () => {
     expect(mockIpc.tools.importBilibili).not.toHaveBeenCalled();
   });
 
+  it("导入完成但流水线失败时，重试只继续处理而不重复下载", async () => {
+    mockIpc.pipeline.process
+      .mockRejectedValueOnce(new Error("服务暂不可用"))
+      .mockResolvedValueOnce(undefined);
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_import",
+            url: "https://www.bilibili.com/video/BV1",
+            title: "双曲线",
+            course_id: "c1",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("导入这个");
+    fireEvent.click(await screen.findByRole("button", { name: "确认导入" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("视频已导入");
+    expect(mockIpc.tools.importBilibili).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "重试失败的 1 项" }));
+
+    await waitFor(() => expect(screen.getByText("已生效")).toBeInTheDocument());
+    expect(mockIpc.tools.importBilibili).toHaveBeenCalledTimes(1);
+    expect(mockIpc.pipeline.process).toHaveBeenCalledTimes(2);
+    expect(mockIpc.pipeline.process).toHaveBeenNthCalledWith(2, "newvid");
+  });
+
   it("没有课程时导入卡直说而不是提交一个必然失败的请求", async () => {
     mockIpc.assistant.ask.mockResolvedValueOnce(
       reply({
@@ -617,5 +798,6 @@ describe("确认卡", () => {
     renderPanel();
     await ask("把这个导进来");
     expect(await screen.findByText(/还没选课程/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认导入" })).toBeDisabled();
   });
 });

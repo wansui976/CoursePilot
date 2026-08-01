@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
 import type { AssistantAction } from "@/lib/types";
 
@@ -70,11 +71,42 @@ async function refreshAfter(action: Proposal, queryClient: QueryClient) {
  * 字幕轨的优先级与导入对话框保持一致：手打中文 > AI 中文 > 第一条。
  * 两处规则必须一样，否则同一个视频从不同入口导进来会得到不同的字幕。
  */
-async function importWithSubtitles(courseId: string, url: string) {
+type ImportResume = {
+  importedVideoId?: string;
+  onImported?: (videoId: string) => void;
+};
+
+/** 已经写给用户看的业务错误，不再交给通用错误映射二次改写。 */
+class AssistantActionError extends Error {}
+
+function displayActionError(error: unknown) {
+  return error instanceof AssistantActionError ? error.message : humanizeError(error);
+}
+
+async function processImportedVideo(videoId: string) {
+  try {
+    await ipc.pipeline.process(videoId);
+  } catch (error) {
+    throw new AssistantActionError(
+      `视频已导入，但后续处理失败：${humanizeError(error)}。重试只会继续处理，不会重复下载。`,
+    );
+  }
+}
+
+async function importWithSubtitles(courseId: string, url: string, resume: ImportResume = {}) {
+  // 下载已经成功、只是后续流水线失败时，从检查点继续。重新 probe / import 会产生重复视频。
+  if (resume.importedVideoId) {
+    await processImportedVideo(resume.importedVideoId);
+    return;
+  }
+
   // B 站没有 cookies 会在下载阶段报 412。先说清楚，别让人对着一个原始错误码猜。
-  const hasCookies = await ipc.tools.hasBilibiliCookies().catch(() => false);
+  // 检查本身出错时保留真实错误，不能伪装成「没有 cookies」。
+  const hasCookies = await ipc.tools.hasBilibiliCookies();
   if (!hasCookies) {
-    throw new Error("还没有导入 B 站 cookies，下载会被拦截。请先在导入对话框里导入一次 cookies.txt");
+    throw new AssistantActionError(
+      "还没有导入 B 站 cookies，下载会被拦截。请先在导入对话框里导入一次 cookies.txt",
+    );
   }
   const probe = await ipc.tools.probeBilibili(url);
   const track =
@@ -93,13 +125,14 @@ async function importWithSubtitles(courseId: string, url: string) {
     track?.lang,
     autocorrect,
   );
+  resume.onImported?.(video.id);
 
   // 有字幕就立刻跑流水线：ASR 阶段会走字幕分支跳过语音识别，
   // 用户不必再手动点一次「开始处理」。
-  if (track) await ipc.pipeline.process(video.id);
+  if (track) await processImportedVideo(video.id);
 }
 
-async function execute(action: Proposal) {
+async function execute(action: Proposal, importResume?: ImportResume) {
   switch (action.kind) {
     case "propose_rename":
       await ipc.videos.updateTitle(action.video_id, action.new_title);
@@ -112,7 +145,7 @@ async function execute(action: Proposal) {
       return;
     case "propose_import":
       if (!action.course_id) throw new Error("没有指定要导入到哪门课程");
-      await importWithSubtitles(action.course_id, action.url);
+      await importWithSubtitles(action.course_id, action.url, importResume);
       return;
     case "propose_create_course":
       await ipc.courses.create(action.name, action.root_path);
@@ -194,31 +227,63 @@ function formatMs(ms: number | null | undefined) {
 function ProposalGroup({ actions, onDone }: { actions: Proposal[]; onDone: () => void }) {
   const queryClient = useQueryClient();
   const [skipped, setSkipped] = useState<Set<number>>(new Set());
+  const [completed, setCompleted] = useState<Set<number>>(new Set());
   const [status, setStatus] = useState<Status>("pending");
   const [error, setError] = useState("");
+  const [warning, setWarning] = useState("");
+  const importCheckpoints = useRef<Map<number, string>>(new Map());
 
   const meta = META[actions[0].kind];
   const chosen = actions.map((action, i) => ({ action, i })).filter(({ i }) => !skipped.has(i));
+  const remaining = chosen.filter(({ i }) => !completed.has(i));
   const batch = actions.length > 1;
+  const missingImportCourse = remaining.some(
+    ({ action }) => action.kind === "propose_import" && !action.course_id,
+  );
 
   async function confirm() {
+    if (status === "running" || remaining.length === 0 || missingImportCourse) return;
     setStatus("running");
-    const failures: string[] = [];
-    for (const { action } of chosen) {
+    setError("");
+    setWarning("");
+    const succeeded: number[] = [];
+    const failures: { message: string }[] = [];
+    let shouldRefresh = false;
+    for (const { action, i } of remaining) {
       try {
-        await execute(action);
+        await execute(action, {
+          importedVideoId: importCheckpoints.current.get(i),
+          onImported: (videoId) => {
+            importCheckpoints.current.set(i, videoId);
+            shouldRefresh = true;
+          },
+        });
+        succeeded.push(i);
+        shouldRefresh = true;
       } catch (e) {
-        failures.push(`${describe(action).primary}（${e}）`);
+        failures.push({ message: `${describe(action).primary}（${displayActionError(e)}）` });
       }
     }
-    await refreshAfter(actions[0], queryClient);
+    if (succeeded.length > 0) {
+      setCompleted((prev) => new Set([...prev, ...succeeded]));
+    }
+    if (shouldRefresh) {
+      try {
+        await refreshAfter(actions[0], queryClient);
+      } catch {
+        // 动作已经落库，刷新失败不能把它伪装成「执行失败」再让用户重做一次。
+        setWarning("操作已经完成，但列表没有自动刷新。请手动刷新后确认结果。");
+      }
+    }
     if (failures.length === 0) {
       setStatus("done");
       return;
     }
     // 批量里失败几项时必须说清是哪几项。只报一条错，用户无从知道该重做什么。
     setError(
-      `${chosen.length - failures.length} 项完成，${failures.length} 项失败：${failures.join("；")}`,
+      `${succeeded.length} 项完成，${failures.length} 项失败：${failures
+        .map(({ message }) => message)
+        .join("；")}`,
     );
     setStatus("failed");
   }
@@ -256,6 +321,12 @@ function ProposalGroup({ actions, onDone }: { actions: Proposal[]; onDone: () =>
                 )}
                 <p className="break-all text-[var(--text-strong)]">{primary}</p>
               </div>
+              {completed.has(i) && (
+                <span className="flex flex-none items-center gap-1 text-[var(--status-ok)]">
+                  <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                  已完成
+                </span>
+              )}
               {batch && status === "pending" && (
                 <button
                   type="button"
@@ -274,7 +345,7 @@ function ProposalGroup({ actions, onDone }: { actions: Proposal[]; onDone: () =>
       {actions[0].kind === "propose_delete" && (
         <p className="mb-2 text-[var(--text-muted)]">进回收站，30 天内可还原。</p>
       )}
-      {actions[0].kind === "propose_import" && !actions[0].course_id && (
+      {missingImportCourse && (
         <p className="mb-2 flex items-center gap-1 text-[var(--status-err)]">
           <AlertTriangle className="h-3.5 w-3.5" />
           还没选课程，先打开一门课程再导入
@@ -291,16 +362,18 @@ function ProposalGroup({ actions, onDone }: { actions: Proposal[]; onDone: () =>
           <Button
             size="sm"
             variant={meta.danger ? "destructive" : "default"}
-            disabled={status === "running"}
+            disabled={status === "running" || missingImportCourse}
             onClick={confirm}
           >
             {status === "running"
               ? "执行中…"
+              : status === "failed"
+                ? `重试失败的 ${remaining.length} 项`
               : batch
                 ? `${meta.confirm} ${chosen.length} 项`
                 : meta.confirm}
           </Button>
-          <Button size="sm" variant="ghost" onClick={onDone}>
+          <Button size="sm" variant="ghost" disabled={status === "running"} onClick={onDone}>
             取消
           </Button>
         </div>
@@ -308,6 +381,11 @@ function ProposalGroup({ actions, onDone }: { actions: Proposal[]; onDone: () =>
       {status === "failed" && (
         <p role="alert" className="mt-1.5 text-[var(--status-err)]">
           没能执行：{error}
+        </p>
+      )}
+      {warning && (
+        <p role="status" className="mt-1.5 text-[var(--status-warn)]">
+          {warning}
         </p>
       )}
     </div>

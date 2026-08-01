@@ -256,6 +256,7 @@ export type AssistantAction =
 
 export interface AssistantReply {
   answer: string;
+  canceled: boolean;
   actions: AssistantAction[];
   turns: number;
   tools_used: string[];

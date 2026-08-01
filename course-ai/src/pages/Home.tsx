@@ -1548,6 +1548,8 @@ export function Home() {
           position_ms: playerMs,
         }}
         onNavigate={assistantNavigate}
+        compact={isPhoneDevice}
+        bottomNavigationVisible={showBottomTab}
       />
     </div>
   );
