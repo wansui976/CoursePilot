@@ -107,7 +107,13 @@ pub async fn run<T: ToolBox>(
             temperature: 0.2,
             tools: specs.clone(),
         };
-        let response = provider.complete(&req).await?;
+        // complete_or_cancel 而不是 complete：光在轮次之间查标志是不够的，
+        // 单次调用最长要等到请求超时才回得来。用户点了停止，界面却还得转上几分钟——
+        // 而这个循环最需要被打断的时刻，恰恰就是某一次调用卡住的时候。
+        let Some(response) = crate::llm::complete_or_cancel_full(provider, &req, cancel).await?
+        else {
+            break;
+        };
 
         if !response.content.trim().is_empty() {
             answer = response.content.clone();

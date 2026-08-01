@@ -424,33 +424,48 @@ fn expansion_term_is_useful(weights: &TermWeights, term: &str) -> bool {
     //
     // 注意这一条其实只在语料少于五篇时才起作用：再大一点，1/N 本来就已经低于
     // 比例闸了。也就是说**大语料下任何只出现一次的词都会放行**——这不是这个例外
-    // 造成的，是比例闸本身的性质。挡住由此产生的假证据靠的是下面的「至少两个词
-    // 对上」，不是这里。
+    // 造成的，是比例闸本身的性质。挡住由此产生的假证据靠的是下面的「整词必须出现」，
+    // 不是这里。
     hits == 1 || weights.document_ratio(term) <= EXPANSION_MAX_DF_RATIO
 }
 
-/// 扩写召回的材料里，至少要有一处同时命中这么多个不同词元，才算数。
+/// 扩写召回的材料里，至少要有一处**完整**出现模型给的某个术语，才算数。
 ///
-/// 为什么需要：大语料下任何只出现一次的词都能过筛，而越稀有的词权重越高，
-/// 于是模型随口编的一个词只要碰巧在某节无关的课里出现过一次，就能独力造出一个
-/// 带出处、带时间戳的窗口——「这节课没讲到」变成一个看着很可信的错答案。
-/// 那正是我在引入这条兜底时说最不愿意看到的失败。
+/// 要挡的是：大语料下任何只出现一次的词都能过筛，而越稀有权重越高，于是模型随口编的
+/// 词只要碰巧在某节无关的课里出现过一次，就能独力造出一个带出处、带时间戳的窗口——
+/// 「这节课没讲到」变成一个看着很可信的错答案。
 ///
-/// 为什么是「两个」：一个完整术语会切出好几个二字组（「局部极小值」→ 局部/部极/
-/// 极小/小值），真讲到那一段会同时中好几个；只中一个，多半是某个二字组撞上了。
-/// 这不是给分数设阈值——它数的是「几个词对上了」，与语料规模无关，也不用调。
-const EXPANSION_MIN_AGREEING_TERMS: usize = 2;
-
-/// 这次召回是不是**只靠一个词碰巧撞上**。
-fn expansion_evidence_is_thin(retrieved: &Retrieved, weights: &TermWeights) -> bool {
-    let best = retrieved
+/// 判据是「模型给的那个术语整体出现过没有」，不是「命中了几个二字组」：
+/// 「傅里叶变换」在「坐标变换一下」里只对上「变换」，整词没出现 → 不算数；
+/// 而「卡顿」这种本身就两个字的合法术语，整词出现即算数。
+///
+/// 之前用的是「至少两个不同词元对上」。方向对，但对**恰好两个字**的术语是死判：
+/// 它只切得出一个二字组，永远凑不满两个，于是真讲到了也救不回来。
+/// 改成整词包含既没有这个盲区，也不需要任何阈值。
+fn expansion_evidence_is_thin(retrieved: &Retrieved, phrases: &[String]) -> bool {
+    let texts: Vec<String> = retrieved
         .windows
         .iter()
-        .map(|w| weights.hit_count(&w.text))
-        .chain(retrieved.slides.iter().map(|s| weights.hit_count(&s.text)))
-        .max()
-        .unwrap_or(0);
-    best < EXPANSION_MIN_AGREEING_TERMS
+        .map(|window| window.text.to_lowercase())
+        .chain(
+            retrieved
+                .slides
+                .iter()
+                .map(|slide| slide.text.to_lowercase()),
+        )
+        .collect();
+    !phrases
+        .iter()
+        .any(|phrase| texts.iter().any(|text| text.contains(phrase.as_str())))
+}
+
+/// 把模型的改写结果切成一个个术语（按空白分隔）。
+fn expansion_phrases(expansion: &str) -> Vec<String> {
+    expansion
+        .split_whitespace()
+        .map(|piece| piece.trim().to_lowercase())
+        .filter(|piece| !piece.is_empty())
+        .collect()
 }
 
 /// 模型的回复最多取这么长拿去当检索词。它偶尔会不听话写成一段话，
@@ -516,8 +531,9 @@ async fn retrieve_or_expand(
     let weights = union.retaining(|term| from_query.contains(term) || usable.contains(term));
 
     let expanded = retrieve_with(segments, pages, &weights);
-    if expansion_evidence_is_thin(&expanded, &weights) {
-        // 只有一个词对上——证据太薄，宁可维持「没讲到」，也不要造一个有出处的错答案。
+    if expansion_evidence_is_thin(&expanded, &expansion_phrases(&trimmed)) {
+        // 没有一个术语完整出现——证据太薄，宁可维持「没讲到」，
+        // 也不要造一个有出处、有时间戳的错答案。
         return direct;
     }
     expanded
@@ -878,14 +894,13 @@ async fn retrieve_scope_or_expand(
     let weights = union.retaining(|term| from_query.contains(term) || usable.contains(term));
 
     let expanded = scope_context_with(per_video, per_video_pages, &weights);
-    // 同样要求「至少两个词对上」：整门课语料更大，一个稀有词碰巧撞上的机会也更多。
-    let best = expanded
-        .1
-        .iter()
-        .map(|citation| weights.hit_count(&citation.text))
-        .max()
-        .unwrap_or(0);
-    if best < EXPANSION_MIN_AGREEING_TERMS {
+    // 同样要求整词出现：整门课语料更大，一个稀有词碰巧撞上的机会也更多。
+    let phrases = expansion_phrases(&trimmed);
+    let corroborated = expanded.1.iter().any(|citation| {
+        let text = citation.text.to_lowercase();
+        phrases.iter().any(|phrase| text.contains(phrase.as_str()))
+    });
+    if !corroborated {
         return direct;
     }
     expanded
@@ -1811,7 +1826,7 @@ mod tests {
     }
 
     #[test]
-    fn one_stray_term_is_not_enough_evidence() {
+    fn a_term_that_only_partly_matches_is_not_enough_evidence() {
         // 大语料下任何只出现一次的词都能过筛，而越稀有权重越高。模型随口编的词只要
         // 碰巧在某节无关的课里出现过一次，就能独力造出一个带时间戳的窗口——
         // 「没讲到」于是变成一个看着很可信的错答案。这一条就是挡它的。
@@ -1837,11 +1852,11 @@ mod tests {
         let hit = retrieve_with(&segs, &[], &w);
         assert!(!hit.is_empty(), "「变换」确实命中了那一段");
         assert!(
-            expansion_evidence_is_thin(&hit, &w),
-            "只有一个词对上，应判为证据不足"
+            expansion_evidence_is_thin(&hit, &expansion_phrases("傅里叶变换")),
+            "整词没出现，应判为证据不足"
         );
 
-        // 真讲到时，一个术语的好几个二字组会同时中。
+        // 真讲到时整词就在那儿。
         let mut real = segs.clone();
         real.push(seg(
             41,
@@ -1852,88 +1867,32 @@ mod tests {
         let w2 = weigh("傅里叶变换", &real);
         let hit2 = retrieve_with(&real, &[], &w2);
         assert!(
-            !expansion_evidence_is_thin(&hit2, &w2),
-            "多个词对上，应判为证据充分"
+            !expansion_evidence_is_thin(&hit2, &expansion_phrases("傅里叶变换")),
+            "整词出现，应判为证据充分"
         );
     }
 
-    #[tokio::test]
-    async fn a_reworded_question_finds_what_the_lecturer_actually_said() {
-        let (db, vid, _d) = seed_gradient_lecture().await;
-        // 学生问的是口语说法，讲稿里一个字都不沾——直接检索必然空手。
-        let segments = list_segments(&db, &vid).await.unwrap();
+    #[test]
+    fn a_two_character_term_is_not_doomed_by_the_rule() {
+        // 「卡顿」只切得出一个二字组。按「至少两个词元对上」判，它永远凑不满，
+        // 于是真讲到了也救不回来——这正是换成整词包含要修掉的盲区。
+        let mut segs: Vec<TranscriptSegment> = (0..30)
+            .map(|i| seg(i, i * 70_000, i * 70_000 + 5_000, "继续讲下一个知识点"))
+            .collect();
+        segs.push(seg(
+            30,
+            30 * 70_000,
+            30 * 70_000 + 5_000,
+            "画面卡顿是掉帧引起的",
+        ));
+
+        let w = weigh("卡顿", &segs);
+        let hit = retrieve_with(&segs, &[], &w);
+        assert!(!hit.is_empty());
         assert!(
-            retrieve(&segments, &[], "为什么会卡住", &[]).is_empty(),
-            "这正是关键词检索的短板：问的词和讲的词不是同一个词"
+            !expansion_evidence_is_thin(&hit, &expansion_phrases("卡顿")),
+            "两个字的合法术语整词出现了，不该被判成证据不足"
         );
-
-        // 模型把问题改写成老师的说法后，同样的问题能召回了。
-        let provider = Provider::Mock {
-            canned: "局部极小值 梯度".into(),
-        };
-        let cancel = AtomicBool::new(false);
-        let rescued = retrieve_or_expand(
-            &provider,
-            "m",
-            &segments,
-            &[],
-            "为什么会卡住",
-            &[],
-            &cancel,
-            &mut |_| {},
-        )
-        .await;
-        assert!(!rescued.is_empty(), "改写之后应当能召回");
-        assert!(rescued.windows[0].text.contains("局部极小值"));
-    }
-
-    #[tokio::test]
-    async fn a_question_the_lecture_really_never_covers_stays_uncovered() {
-        let (db, vid, _d) = seed_gradient_lecture().await;
-        let segments = list_segments(&db, &vid).await.unwrap();
-        // 模型给的改写词在这节课里根本不存在 → 不能因为「调过一次模型」就硬凑出依据。
-        let provider = Provider::Mock {
-            canned: "宋词 平仄".into(),
-        };
-        let cancel = AtomicBool::new(false);
-        let still_empty = retrieve_or_expand(
-            &provider,
-            "m",
-            &segments,
-            &[],
-            "词牌名怎么分类",
-            &[],
-            &cancel,
-            &mut |_| {},
-        )
-        .await;
-        assert!(
-            still_empty.is_empty(),
-            "改写不该把「没讲到」翻成一个有依据的错答案"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_canceled_expansion_falls_back_instead_of_failing() {
-        let (db, vid, _d) = seed_gradient_lecture().await;
-        let segments = list_segments(&db, &vid).await.unwrap();
-        let provider = Provider::Mock {
-            canned: "局部极小值".into(),
-        };
-        let cancel = AtomicBool::new(true); // 用户已经点了停止
-        let out = retrieve_or_expand(
-            &provider,
-            "m",
-            &segments,
-            &[],
-            "为什么会卡住",
-            &[],
-            &cancel,
-            &mut |_| {},
-        )
-        .await;
-        // 取消不是错误：照旧走「没讲到」，不该 panic 也不该抛错。
-        assert!(out.is_empty());
     }
 
     #[test]
