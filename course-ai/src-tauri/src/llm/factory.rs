@@ -18,11 +18,6 @@ pub fn build_provider(profile: &LlmProfile, api_key: String) -> Provider {
             api_key,
             client,
         },
-        ProviderKind::Anthropic => Provider::Anthropic {
-            base_url: profile.base_url.clone(),
-            api_key,
-            client,
-        },
     }
 }
 
@@ -31,7 +26,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builds_provider_for_each_kind() {
+    fn builds_an_openai_provider() {
         let openai = LlmProfile {
             id: "a".into(),
             name: "A".into(),
@@ -41,12 +36,5 @@ mod tests {
         };
         let p = build_provider(&openai, "sk-x".into());
         assert!(matches!(p, Provider::OpenAi { .. }));
-
-        let anthropic = LlmProfile {
-            kind: ProviderKind::Anthropic,
-            ..openai
-        };
-        let p2 = build_provider(&anthropic, "sk-y".into());
-        assert!(matches!(p2, Provider::Anthropic { .. }));
     }
 }

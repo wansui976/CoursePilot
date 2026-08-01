@@ -1,4 +1,3 @@
-pub mod anthropic;
 pub mod factory;
 pub mod keychain;
 pub mod openai;
@@ -19,10 +18,18 @@ pub struct ChatMessage {
 pub struct ChatRequest {
     pub model: String,
     pub system: Option<String>,
-    /// 大段字幕上下文：Anthropic 会作为 cache 块；OpenAI 会拼进 system。
+    /// 大段字幕上下文：拼进 system 的最前面，让同一视频的多个任务共用同一段前缀。
+    ///
+    /// 原来这里是「Anthropic 显式标 cache 块、OpenAI 靠前缀自动缓存」两套。去掉 Anthropic
+    /// 之后只剩后者——**缓存从显式变成了隐式**：命不命中由端点自己决定，我们既不声明也
+    /// 收不到反馈。换到不做自动前缀缓存的兼容端点时，那几个共用讲稿的任务会悄悄贵好几倍，
+    /// 而且没有任何信号。字段保留，因为「把稳定的大块放最前面」这件事仍然是对的。
     pub cacheable_context: Option<String>,
     pub messages: Vec<ChatMessage>,
     pub temperature: f32,
+    /// 目前**不会被发出去**：OpenAI 规范里它是可选的，我们特意省略，免得写死的上限
+    /// 把长输出截断（见 openai 侧 body 构造）。删掉 Anthropic 后就没有任何通道读它了。
+    /// 留着是给将来真需要封顶时用；改这个数字现在不会有任何效果。
     pub max_tokens: u32,
 }
 
@@ -135,11 +142,6 @@ pub enum Provider {
         api_key: String,
         client: reqwest::Client,
     },
-    Anthropic {
-        base_url: String,
-        api_key: String,
-        client: reqwest::Client,
-    },
     /// 测试 / 离线用：返回预置内容。
     Mock { canned: String },
 }
@@ -152,11 +154,6 @@ impl Provider {
                 api_key,
                 client,
             } => openai::complete(base_url, api_key, client, req).await,
-            Provider::Anthropic {
-                base_url,
-                api_key,
-                client,
-            } => anthropic::complete(base_url, api_key, client, req).await,
             Provider::Mock { canned } => Ok(ChatResponse {
                 content: canned.clone(),
             }),
@@ -177,11 +174,6 @@ impl Provider {
                 api_key,
                 client,
             } => openai::complete_stream(base_url, api_key, client, req, cancel, on_piece).await,
-            Provider::Anthropic {
-                base_url,
-                api_key,
-                client,
-            } => anthropic::complete_stream(base_url, api_key, client, req, cancel, on_piece).await,
             Provider::Mock { canned } => {
                 let mut acc = String::new();
                 // 按空白切成词，逐词回调，模拟流式；每词前查取消。
@@ -206,7 +198,7 @@ impl Provider {
         false
     }
 
-    /// 文本嵌入。OpenAI 兼容端点用 `/embeddings`；Anthropic 无嵌入 API；
+    /// 文本嵌入。OpenAI 兼容端点用 `/embeddings`；
     /// Mock 返回确定性向量（相似文本→相似向量），便于离线单测 RAG。
     pub async fn embed(&self, model: &str, inputs: &[String]) -> AppResult<Vec<Vec<f32>>> {
         match self {
@@ -215,9 +207,6 @@ impl Provider {
                 api_key,
                 client,
             } => openai::embed(base_url, api_key, client, model, inputs).await,
-            Provider::Anthropic { .. } => Err(crate::error::AppError::Config(
-                "Anthropic 不支持嵌入；请为 RAG 任务选用 OpenAI 兼容 Profile".into(),
-            )),
             Provider::Mock { .. } => Ok(inputs.iter().map(|s| mock_embed(s)).collect()),
         }
     }

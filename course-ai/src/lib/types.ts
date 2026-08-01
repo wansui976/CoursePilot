@@ -97,7 +97,8 @@ export interface Job {
   finished_at: number | null;
 }
 
-export type ProviderKind = "openai" | "anthropic";
+/** 只剩 OpenAI 兼容一种通道。Claude 走 Anthropic 的兼容层地址，同样是这个类型。 */
+export type ProviderKind = "openai";
 
 export interface LlmProfile {
   id: string;
