@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AssistantActionList } from "@/components/AssistantActionCard";
+import { AssistantToolChips } from "@/components/AssistantToolChips";
 import { ipc } from "@/lib/ipc";
 import { isMobile } from "@/lib/platform";
 import { useAssistantUi } from "@/stores/assistant";
@@ -145,23 +146,38 @@ export function AssistantPanel({
           </p>
         )}
         {turns.map((turn) => (
-          <div key={turn.id} className="space-y-1.5">
-            <p className="text-right text-xs text-[var(--text-muted)]">{turn.question}</p>
+          <div key={turn.id} className="space-y-2">
+            {/* 自己说的话靠右、带底色；助手的靠左。一眼能分清谁说的，
+                比让两边都是同一坨灰字强得多。 */}
+            <div className="flex justify-end">
+              <p
+                data-testid="user-bubble"
+                className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-[var(--accent-weak)] px-3 py-1.5 text-sm text-[var(--accent-text)]"
+              >
+                {turn.question}
+              </p>
+            </div>
+
+            {/* 工具链摆在回答前面：它解释了这段回答是怎么来的，
+                也让「一轮里悄悄调了三次搜索」这种事看得见。 */}
+            <AssistantToolChips tools={turn.tools} />
+
             {turn.answer && (
-              // 助手的回答天然带 Markdown（列表、加粗、代码），当纯文本铺出来
-              // 满屏都是 ** 和 -，读起来比没有格式还糟。复用问答面板那套渲染器，
-              // 顺带白拿了公式和 [mm:ss] 可点击跳转。
-              <div className="text-sm text-[var(--text-normal)]">
-                {renderMarkdown(turn.answer, onSeek)}
+              <div className="flex justify-start">
+                {/* 回答天然带 Markdown（列表、加粗、公式），当纯文本铺出来满屏 ** 和 -，
+                    比没有格式还难读。复用问答面板那套渲染器，顺带白拿了
+                    公式渲染和 [mm:ss] 可点击跳转。 */}
+                <div className="max-w-[92%] break-words rounded-2xl rounded-bl-sm border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-normal)]">
+                  {renderMarkdown(turn.answer, onSeek)}
+                </div>
               </div>
             )}
+
             <AssistantActionList actions={turn.actions} onNavigate={onNavigate} />
-            {turn.tools.length > 0 && (
-              // 调了什么、来回几次，都摆出来。工具循环每一轮的结果都留在上下文里，
-              // 花销是乘法涨的，不该是笔糊涂账。
-              <p className="text-[10px] text-[var(--text-faint)]">
-                用了 {turn.tools.join("、")}，{turn.turns} 轮
-              </p>
+
+            {turn.turns > 1 && (
+              // 来回几次要让人看见：每一轮的工具结果都留在上下文里，花销是乘法涨的。
+              <p className="text-[10px] text-[var(--text-faint)]">来回 {turn.turns} 轮</p>
             )}
           </div>
         ))}
