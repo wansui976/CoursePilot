@@ -612,52 +612,96 @@ pub struct SearchHit {
     pub duration_secs: Option<u64>,
 }
 
-/// 解析 `yt-dlp -J --flat-playlist "bilisearchN:..."` 的输出。
+/// 去掉搜索结果标题里的高亮标签，并还原 HTML 实体。
 ///
-/// 扁平模式下每条只有基本字段，而且 `url` 常常只是 BV 号而不是完整链接——
-/// 直接把它当链接交给用户，点开是 404。所以这里补全成可访问的页面地址。
-/// 纯函数，可单测：yt-dlp 是外挂进程，沙箱里装不了，能离线测的只有解析这一段。
-pub fn parse_search_json(json: &str) -> AppResult<Vec<SearchHit>> {
+/// 接口返回的标题长这样：`<em class="keyword">双曲线</em>的标准方程`。原样交给用户
+/// 就是一串标签，交给模型则会让它以为标题里真有尖括号，转头拼进别的地方。
+pub fn strip_highlight(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut in_tag = false;
+    for ch in raw.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .trim()
+        .to_string()
+}
+
+/// 把 "20:47" / "1:02:30" 这样的时长换算成秒。认不出来就返回 None——
+/// 时长只是给用户挑片子时参考，缺了不该让整条结果作废。
+pub fn parse_duration(raw: &str) -> Option<u64> {
+    let parts: Vec<u64> = raw
+        .split(':')
+        .map(|piece| piece.trim().parse::<u64>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    match parts.as_slice() {
+        [m, s] => Some(m * 60 + s),
+        [h, m, s] => Some(h * 3600 + m * 60 + s),
+        _ => None,
+    }
+}
+
+/// 解析 B 站搜索接口的响应。
+pub fn parse_search_response(json: &str) -> AppResult<Vec<SearchHit>> {
     let v: serde_json::Value = serde_json::from_str(json)
-        .map_err(|e| AppError::Pipeline(format!("yt-dlp search json: {e}")))?;
-    let entries = v
-        .get("entries")
-        .and_then(|e| e.as_array())
-        .ok_or_else(|| AppError::Pipeline("yt-dlp search 输出里没有 entries".into()))?;
-    Ok(entries
+        .map_err(|e| AppError::Pipeline(format!("B 站搜索返回的不是 JSON: {e}")))?;
+    // code 非 0 是接口层面的失败（限流、参数变更）。它和「搜过了但没有结果」是两回事，
+    // 混为一谈会让助手把一次失败说成「B 站上没有这个」。
+    match v.get("code").and_then(serde_json::Value::as_i64) {
+        Some(0) => {}
+        Some(code) => {
+            let message = v
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("未知错误");
+            return Err(AppError::Pipeline(format!(
+                "B 站搜索接口返回 code={code}：{message}"
+            )));
+        }
+        None => return Err(AppError::Pipeline("B 站搜索响应缺少 code".into())),
+    }
+    let Some(items) = v
+        .get("data")
+        .and_then(|d| d.get("result"))
+        .and_then(serde_json::Value::as_array)
+    else {
+        // data.result 缺失/为 null 是「这一页没有结果」，属正常。
+        return Ok(Vec::new());
+    };
+    Ok(items
         .iter()
-        .filter_map(|entry| {
-            let title = entry.get("title").and_then(|t| t.as_str())?.trim();
+        .filter_map(|item| {
+            // 用 bvid 拼链接，不用接口给的 arcurl：后者是 http 的 av 号旧地址。
+            // 没有 bvid 的多半是付费课程（/cheese/），下不下来，列出来只会让人白点一次。
+            let bvid = item.get("bvid").and_then(serde_json::Value::as_str)?;
+            if bvid.is_empty() {
+                return None;
+            }
+            let title = strip_highlight(item.get("title").and_then(serde_json::Value::as_str)?);
             if title.is_empty() {
                 return None;
             }
-            let raw = entry
-                .get("webpage_url")
-                .or_else(|| entry.get("url"))
-                .and_then(|u| u.as_str())
-                .unwrap_or_default();
-            let id = entry.get("id").and_then(|i| i.as_str()).unwrap_or_default();
-            let url = if raw.starts_with("http") {
-                raw.to_string()
-            } else if !id.is_empty() {
-                format!("https://www.bilibili.com/video/{id}")
-            } else if !raw.is_empty() {
-                format!("https://www.bilibili.com/video/{raw}")
-            } else {
-                return None;
-            };
             Some(SearchHit {
-                title: title.to_string(),
-                url,
-                uploader: entry
-                    .get("uploader")
-                    .and_then(|u| u.as_str())
+                title,
+                url: format!("https://www.bilibili.com/video/{bvid}"),
+                uploader: item
+                    .get("author")
+                    .and_then(serde_json::Value::as_str)
                     .filter(|s| !s.is_empty())
                     .map(str::to_string),
-                duration_secs: entry
+                duration_secs: item
                     .get("duration")
-                    .and_then(|d| d.as_f64())
-                    .map(|d| d as u64),
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(parse_duration),
             })
         })
         .collect())
@@ -665,75 +709,120 @@ pub fn parse_search_json(json: &str) -> AppResult<Vec<SearchHit>> {
 
 /// 在 B 站搜索视频。
 ///
-/// 走 yt-dlp 的 `bilisearch:` 提取器，而不是直接打 B 站的搜索 API——后者现在要 wbi 签名
-/// 和 cookie，是个会随时失效的活靶子；而 yt-dlp 本来就是这个项目的外挂进程，
-/// 它的维护者比我们更勤快地跟着站点变化走。不引入新依赖、不多一个凭证。
+/// 直接调它的搜索接口，**不走 yt-dlp**。原因是 yt-dlp 的搜索提取器拿到完整结果后
+/// 只保留 url 和 id，标题、作者、时长全部丢弃（见其 `url_result` 调用）——
+/// 而候选列表没有标题就等于没有。逐条再解析也不行：单视频元数据接口会返回 412。
 ///
-/// `--flat-playlist` 只枚举不解析各条，快得多；候选够用了，真要导入时再走完整探测。
+/// 搜索接口本身只需要一个 buvid3 cookie，没有 wbi 签名那套东西。下载仍然走 yt-dlp，
+/// 那部分才真正需要它跟着站点变化走。
 pub async fn search_bilibili(query: &str, limit: usize) -> AppResult<Vec<SearchHit>> {
     let query = query.trim();
     if query.is_empty() {
         return Ok(Vec::new());
     }
-    let ytdlp = resolve(&YTDLP, None)?;
-    let output = Command::new(&ytdlp)
-        .args([
-            "-J",
-            "--flat-playlist",
-            "--skip-download",
-            "--no-warnings",
-            "--user-agent",
-            BROWSER_USER_AGENT,
-            "--referer",
-            BILIBILI_REFERER,
-            &format!("bilisearch{}:{query}", limit.clamp(1, 20)),
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| AppError::Pipeline(format!("构造 HTTP 客户端失败: {e}")))?;
+    let response = client
+        .get("https://api.bilibili.com/x/web-interface/search/type")
+        .query(&[
+            ("keyword", query),
+            ("search_type", "video"),
+            ("page", "1"),
+            ("__refresh__", "true"),
         ])
-        .output()
+        .header(reqwest::header::USER_AGENT, BROWSER_USER_AGENT)
+        .header(reqwest::header::REFERER, BILIBILI_REFERER)
+        // 没有 buvid3 时接口直接拒答。值本身不校验，随机一个即可。
+        .header(
+            reqwest::header::COOKIE,
+            format!("buvid3={}infoc", uuid::Uuid::new_v4()),
+        )
+        .send()
         .await
-        .map_err(|e| AppError::Pipeline(format!("yt-dlp spawn: {e}")))?;
-    if !output.status.success() {
+        .map_err(|e| AppError::Pipeline(format!("B 站搜索请求失败: {e}")))?;
+    if !response.status().is_success() {
         return Err(AppError::Pipeline(format!(
-            "B 站搜索失败: {}",
-            String::from_utf8_lossy(&output.stderr)
+            "B 站搜索 HTTP {}",
+            response.status()
         )));
     }
-    parse_search_json(&String::from_utf8_lossy(&output.stdout))
+    let body = response
+        .text()
+        .await
+        .map_err(|e| AppError::Pipeline(format!("B 站搜索读取响应失败: {e}")))?;
+    let mut hits = parse_search_response(&body)?;
+    hits.truncate(limit.clamp(1, 20));
+    Ok(hits)
 }
 
 #[cfg(test)]
 mod search_tests {
     use super::*;
 
+    /// 照抄真实响应的形状（已裁剪字段）。
+    ///
+    /// 上一版的测试用的是我**凭空编的**样例——每条都带 title，于是「没标题就丢掉」
+    /// 这条逻辑看起来完全正确。真实的扁平搜索输出里一条标题都没有，
+    /// 那条逻辑把结果全滤没了，表现成「B 站搜不到任何东西」。
+    /// 教训：夹具要照着真东西写，编出来的夹具只会把测试变成自我确认。
+    const REAL: &str = r#"{
+      "code": 0,
+      "data": {"result": [
+        {"title": "<em class=\"keyword\">双曲线</em>的标准方程【基础】",
+         "author": "一数", "duration": "20:47", "bvid": "BV1Et411j72N",
+         "arcurl": "http://www.bilibili.com/video/av60669492"},
+        {"title": "<em class=\"keyword\">双曲线</em>小题题型总结",
+         "author": "高中数学小竹老师", "duration": "", "bvid": "",
+         "arcurl": "https://www.bilibili.com/cheese/play/ss726229932"},
+        {"title": "圆锥曲线 &amp; 定义", "author": "某老师",
+         "duration": "1:02:30", "bvid": "BV1j23r6GENs", "arcurl": "http://x"}
+      ]}
+    }"#;
+
     #[test]
-    fn flat_search_entries_become_clickable_links() {
-        // 扁平模式下 url 常常只是 BV 号。直接当链接交给用户，点开是 404。
-        let json = r#"{"entries":[
-            {"id":"BV1xx411c7mD","title":"线性代数 第一讲","uploader":"某老师","duration":1830.0},
-            {"id":"BV1yy411c7mE","title":"第二讲","url":"https://www.bilibili.com/video/BV1yy411c7mE"}
-        ]}"#;
-        let hits = parse_search_json(json).unwrap();
+    fn a_real_response_yields_usable_candidates() {
+        let hits = parse_search_response(REAL).unwrap();
+        // 付费课程那条没有 bvid，下不下来，不该出现在候选里。
         assert_eq!(hits.len(), 2);
-        assert_eq!(hits[0].url, "https://www.bilibili.com/video/BV1xx411c7mD");
-        assert_eq!(hits[0].uploader.as_deref(), Some("某老师"));
-        assert_eq!(hits[0].duration_secs, Some(1830));
-        // 已经是完整链接的原样保留。
-        assert_eq!(hits[1].url, "https://www.bilibili.com/video/BV1yy411c7mE");
+        assert_eq!(hits[0].title, "双曲线的标准方程【基础】");
+        assert_eq!(hits[0].url, "https://www.bilibili.com/video/BV1Et411j72N");
+        assert_eq!(hits[0].uploader.as_deref(), Some("一数"));
+        assert_eq!(hits[0].duration_secs, Some(20 * 60 + 47));
+        // 实体要还原，否则标题里带着 &amp; 交给用户和模型。
+        assert_eq!(hits[1].title, "圆锥曲线 & 定义");
+        assert_eq!(hits[1].duration_secs, Some(3750));
     }
 
     #[test]
-    fn entries_without_a_title_are_dropped() {
-        // 没标题的候选拿给用户也没法选，留着只会占位置。
-        let json = r#"{"entries":[{"id":"BV1","title":""},{"id":"BV2","title":"有名字的"}]}"#;
-        let hits = parse_search_json(json).unwrap();
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].title, "有名字的");
+    fn highlight_tags_never_reach_the_user() {
+        assert_eq!(
+            strip_highlight(r#"<em class="keyword">双曲线</em>入门"#),
+            "双曲线入门"
+        );
+        assert_eq!(strip_highlight("纯文本"), "纯文本");
     }
 
     #[test]
-    fn a_response_without_entries_is_an_error_not_an_empty_list() {
-        // 空列表意味着「搜过了，没有」；解析不出来意味着「没搜成」。
-        // 混为一谈会让助手把一次失败说成「B 站上没有这个」。
-        assert!(parse_search_json(r#"{"error":"rate limited"}"#).is_err());
-        assert!(parse_search_json(r#"{"entries":[]}"#).unwrap().is_empty());
+    fn odd_durations_do_not_discard_the_whole_hit() {
+        // 时长只是挑片子时的参考，认不出来不该让整条结果作废。
+        assert_eq!(parse_duration("20:47"), Some(1247));
+        assert_eq!(parse_duration("1:02:30"), Some(3750));
+        assert_eq!(parse_duration(""), None);
+        assert_eq!(parse_duration("直播中"), None);
+    }
+
+    #[test]
+    fn an_api_level_failure_is_an_error_not_an_empty_list() {
+        // 空表示「搜过了没有」，报错表示「没搜成」。混为一谈会让助手把一次失败
+        // 说成「B 站上没有这个」——这正是这次真实踩到的坑。
+        let err = parse_search_response(r#"{"code":-412,"message":"请求被拦截"}"#).unwrap_err();
+        assert!(format!("{err}").contains("-412"));
+        assert!(
+            parse_search_response(r#"{"code":0,"data":{"result":null}}"#)
+                .unwrap()
+                .is_empty()
+        );
     }
 }
