@@ -5,10 +5,14 @@ use crate::llm::Provider;
 use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 
-// 一批的段数。模型只返回需要修改的 patch（按 id 引用）。批越大越容易输出截断、
-// id 越界/串位，故取 20 段：上下文够用，又把单批漂移与截断概率压低。
-// OpenAI 已不发 max_tokens（无上限）；Anthropic 仍使用请求里的 max_tokens。
-const CORRECTION_BATCH_SIZE: usize = 20;
+// 一批的段数。模型只返回需要修改的 patch（按 id 引用）。
+//
+// 原来是 20，顾虑是「批越大越容易输出截断、id 越界/串位」。这两条现在不对称了：
+// 截断那半条基本消失——出站请求根本不发 max_tokens，输出预算是模型自己的，
+// 一批四十段的 patch 离任何现代模型的上限都还很远；而 id 串位那半条仍然成立，
+// 靠的是解析时的逐条校验（越界跳过、重复只取首次），错了会漏改而不会改错人。
+// 于是取 40：往返次数减半，风险仍由校验兜住。再往上就要先有真实数据支撑了。
+const CORRECTION_BATCH_SIZE: usize = 40;
 // 默认并发批数；可被设置 asr_correction_concurrency 覆盖。批之间相互独立，
 // 并发跑可大幅缩短长视频的纠错耗时。DeepSeek 等高并发模型可调到很大
 // （flash 2500 / pro 500）；普通端点保守些以免触发限流。
