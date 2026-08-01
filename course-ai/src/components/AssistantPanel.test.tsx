@@ -4,12 +4,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantPanel } from "./AssistantPanel";
 import { useAssistantUi } from "@/stores/assistant";
+import { useTheme } from "@/stores/theme";
 import type { AssistantAction, AssistantReply } from "@/lib/types";
 
 const { mockIpc, platformMock } = vi.hoisted(() => ({
   mockIpc: {
     assistant: { ask: vi.fn() },
     videos: { updateTitle: vi.fn(), delete: vi.fn() },
+    courses: { create: vi.fn(), rename: vi.fn() },
     settings: { set: vi.fn() },
     tools: { importBilibili: vi.fn() },
   },
@@ -66,6 +68,31 @@ describe("AssistantPanel", () => {
     expect(screen.queryByLabelText("对助手说")).not.toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("打开助手"));
     expect(screen.getByLabelText("对助手说")).toBeInTheDocument();
+  });
+
+  it("回答按 Markdown 渲染，而不是把 ** 和 - 原样铺出来", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({ answer: "重点有两条：\n\n- **梯度下降**很关键\n- 学习率要调" }),
+    );
+    renderPanel();
+    await ask("讲了什么");
+    // 星号被吃掉、变成加粗元素；列表项也不再带前导的 "- "。
+    const strong = await screen.findByText("梯度下降");
+    expect(strong.tagName).toBe("STRONG");
+    expect(screen.queryByText(/\*\*梯度下降\*\*/)).not.toBeInTheDocument();
+    expect(screen.getByText(/学习率要调/).textContent).not.toMatch(/^- /);
+  });
+
+  it("主题当场生效，不用再点一次确认", async () => {
+    useTheme.setState({ pref: "light" });
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({ actions: [{ kind: "set_theme", pref: "dark" }] }),
+    );
+    renderPanel();
+    await ask("设置主题为黑夜模式");
+    // 无破坏性、一眼可见、再说一句就能改回来——不该为它加一次点击。
+    await waitFor(() => expect(useTheme.getState().pref).toBe("dark"));
+    expect(await screen.findByText(/已切换到夜间主题/)).toBeInTheDocument();
   });
 
   it("把界面状态一起发过去，助手才听得懂「这个视频」", async () => {
@@ -252,6 +279,50 @@ describe("确认卡", () => {
     fireEvent.click(await screen.findByRole("button", { name: "确认删除" }));
     // 悄悄退回的话，用户会以为自己没点上而再点一次——而第一次可能已经生效了。
     expect(await screen.findByRole("alert")).toHaveTextContent("文件被占用");
+  });
+
+  it("新建课程要确认，并显示建在哪个目录", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [{ kind: "propose_create_course", name: "概率论", root_path: "/Users/me/课程" }],
+      }),
+    );
+    renderPanel();
+    await ask("新建一门概率论");
+    expect(await screen.findByText("概率论")).toBeInTheDocument();
+    // 多数人记不清默认存放位置，建错地方后面很难收拾。
+    expect(screen.getByText(/\/Users\/me\/课程/)).toBeInTheDocument();
+    expect(mockIpc.courses.create).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认创建" }));
+    await waitFor(() =>
+      expect(mockIpc.courses.create).toHaveBeenCalledWith("概率论", "/Users/me/课程"),
+    );
+  });
+
+  it("课程改名要确认，且和视频改名是两回事", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_rename_course",
+            course_id: "c1",
+            current_name: "线性代数",
+            new_name: "线代复习",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("把课程改个名");
+    expect(await screen.findByText("课程改名")).toBeInTheDocument();
+    expect(screen.getByText("线性代数")).toBeInTheDocument();
+    expect(mockIpc.courses.rename).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认改名" }));
+    await waitFor(() => expect(mockIpc.courses.rename).toHaveBeenCalledWith("c1", "线代复习"));
+    // 别把课程改名走成视频改名。
+    expect(mockIpc.videos.updateTitle).not.toHaveBeenCalled();
   });
 
   it("没有课程时导入卡直说而不是提交一个必然失败的请求", async () => {

@@ -57,6 +57,23 @@ pub enum AssistantAction {
         title: String,
         course_id: Option<String>,
     },
+    /// 提案：新建课程。目录来自「默认存放位置」设置——助手没法替用户挑目录，
+    /// 而这个位置多数人也记不清，所以卡片上要把它显示出来。
+    ProposeCreateCourse { name: String, root_path: String },
+    /// 提案：给课程改名。
+    ProposeRenameCourse {
+        course_id: String,
+        current_name: String,
+        new_name: String,
+    },
+    /// 切换主题。
+    ///
+    /// 不走确认卡：它无破坏性、一眼可见、再说一句就能改回来。给它加一次点击
+    /// 只是让「把主题调暗」这种最该一步到位的事变成两步。
+    ///
+    /// 也不走设置白名单——主题存在前端本地，后端的设置表里根本没有这一项，
+    /// 加进白名单只会写出一条谁也不读的记录。
+    SetTheme { pref: String },
 }
 
 /// 允许助手改动的设置，以及每项的取值约束。
@@ -262,6 +279,22 @@ struct BilibiliSearchArgs {
 }
 
 #[derive(Deserialize)]
+struct CreateCourseArgs {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct RenameCourseArgs {
+    course_id: Option<String>,
+    new_name: String,
+}
+
+#[derive(Deserialize)]
+struct ThemeArgs {
+    pref: String,
+}
+
+#[derive(Deserialize)]
 struct ImportArgs {
     url: String,
     #[serde(default)]
@@ -345,6 +378,31 @@ pub fn tool_specs() -> Vec<ToolSpec> {
             parameters: object(
                 json!({"key": {"type": "string"}, "value": {"type": "string"}}),
                 &["key", "value"],
+            ),
+        },
+        ToolSpec {
+            name: "create_course".into(),
+            description: "新建一门课程。**会生成确认卡，用户点了才创建。** \
+                 课程目录取自设置里的「默认存放位置」。"
+                .into(),
+            parameters: object(json!({"name": {"type": "string"}}), &["name"]),
+        },
+        ToolSpec {
+            name: "rename_course".into(),
+            description: "给课程改名。**会生成确认卡，用户点了才生效。** \
+                 注意这是改**课程**的名字；改单个视频的标题用 rename_video。"
+                .into(),
+            parameters: object(
+                json!({"course_id": {"type": "string"}, "new_name": {"type": "string"}}),
+                &["new_name"],
+            ),
+        },
+        ToolSpec {
+            name: "set_theme".into(),
+            description: "切换界面主题：dark 夜间、light 日间、auto 跟随系统。立即生效。".into(),
+            parameters: object(
+                json!({"pref": {"type": "string", "enum": ["dark", "light", "auto"]}}),
+                &["pref"],
             ),
         },
         ToolSpec {
@@ -510,6 +568,77 @@ impl AssistantTools<'_> {
                     "已提出把「{}」改为 {}，等用户确认。还没有生效。",
                     rule.label, args.value
                 )))
+            }
+
+            "create_course" => {
+                let args: CreateCourseArgs = parse_arguments(call)?;
+                let name = args.name.trim().to_string();
+                if name.is_empty() {
+                    return Err(ToolOutcome::failed("课程名不能为空"));
+                }
+                let root = crate::commands::settings::get_setting(self.db, "default_storage_root")
+                    .await
+                    .ok()
+                    .flatten()
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| {
+                        ToolOutcome::failed(
+                            "还没设置「默认存放位置」，没法决定新课程放哪。请用户先去设置里选一个目录",
+                        )
+                    })?;
+                self.record(AssistantAction::ProposeCreateCourse {
+                    name: name.clone(),
+                    root_path: root,
+                });
+                Ok(ToolOutcome::ok(format!(
+                    "已提出新建课程《{name}》，等用户确认。还没有创建。"
+                )))
+            }
+
+            "rename_course" => {
+                let args: RenameCourseArgs = parse_arguments(call)?;
+                let new_name = args.new_name.trim().to_string();
+                if new_name.is_empty() {
+                    return Err(ToolOutcome::failed("新名字不能为空"));
+                }
+                let course_id = args
+                    .course_id
+                    .or_else(|| self.context.course_id.clone())
+                    .ok_or_else(|| {
+                        ToolOutcome::failed("没有指定课程，当前也没有打开的课程。先调 list_courses")
+                    })?;
+                let courses = crate::commands::courses::list_courses(self.db)
+                    .await
+                    .map_err(ToolOutcome::failed)?;
+                let course = courses
+                    .into_iter()
+                    .find(|c| c.id == course_id)
+                    .ok_or_else(|| {
+                        ToolOutcome::failed(format!(
+                            "找不到 id 为 {course_id} 的课程。先用 list_courses 查真实 id"
+                        ))
+                    })?;
+                self.record(AssistantAction::ProposeRenameCourse {
+                    course_id: course.id,
+                    current_name: course.name.clone(),
+                    new_name: new_name.clone(),
+                });
+                Ok(ToolOutcome::ok(format!(
+                    "已提出把课程《{}》改名为《{new_name}》，等用户确认。还没有生效。",
+                    course.name
+                )))
+            }
+
+            "set_theme" => {
+                let args: ThemeArgs = parse_arguments(call)?;
+                let pref = args.pref.trim().to_lowercase();
+                if !["dark", "light", "auto"].contains(&pref.as_str()) {
+                    return Err(ToolOutcome::failed(format!(
+                        "「{pref}」不是有效主题，只能是 dark / light / auto"
+                    )));
+                }
+                self.record(AssistantAction::SetTheme { pref: pref.clone() });
+                Ok(ToolOutcome::ok(format!("已切换到 {pref} 主题。")))
             }
 
             "search_bilibili" => {
@@ -740,6 +869,109 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn creating_a_course_without_a_storage_root_says_so_instead_of_guessing() {
+        // 助手没法替用户挑目录。没配存放位置时必须直说，不能瞎编一个路径去建目录。
+        let (db, _c, _v, _d) = seed().await;
+        let tools = AssistantTools::new(&db, AssistantContext::default());
+        let out = tools
+            .run(&call("create_course", r#"{"name":"概率论"}"#))
+            .await;
+        assert!(out.content.contains("默认存放位置"));
+        assert!(tools.take_actions().is_empty());
+    }
+
+    #[tokio::test]
+    async fn creating_a_course_only_proposes_and_shows_where_it_would_go() {
+        let (db, _c, _v, dir) = seed().await;
+        crate::commands::settings::set_setting(
+            &db,
+            "default_storage_root",
+            &dir.path().to_string_lossy(),
+        )
+        .await
+        .unwrap();
+        let before = crate::commands::courses::list_courses(&db)
+            .await
+            .unwrap()
+            .len();
+
+        let tools = AssistantTools::new(&db, AssistantContext::default());
+        let out = tools
+            .run(&call("create_course", r#"{"name":"概率论"}"#))
+            .await;
+
+        assert_eq!(
+            crate::commands::courses::list_courses(&db)
+                .await
+                .unwrap()
+                .len(),
+            before,
+            "新建课程工具不该真的建"
+        );
+        assert!(out.content.contains("还没有创建"));
+        match tools.take_actions().as_slice() {
+            [AssistantAction::ProposeCreateCourse { name, root_path }] => {
+                assert_eq!(name, "概率论");
+                // 目录要摆出来：多数人记不清默认位置在哪。
+                assert!(!root_path.is_empty());
+            }
+            other => panic!("应当只产出一条新建提案，实际 {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn renaming_a_course_only_proposes_and_keeps_the_old_name() {
+        let (db, course_id, _v, _d) = seed().await;
+        let tools = AssistantTools::new(
+            &db,
+            AssistantContext {
+                course_id: Some(course_id.clone()),
+                ..Default::default()
+            },
+        );
+        let out = tools
+            .run(&call("rename_course", r#"{"new_name":"线性代数（新）"}"#))
+            .await;
+
+        let courses = crate::commands::courses::list_courses(&db).await.unwrap();
+        assert_eq!(courses[0].name, "线性代数", "改名工具不该真的改");
+        assert!(out.content.contains("还没有生效"));
+        match tools.take_actions().as_slice() {
+            [AssistantAction::ProposeRenameCourse {
+                current_name,
+                new_name,
+                ..
+            }] => {
+                assert_eq!(current_name, "线性代数");
+                assert_eq!(new_name, "线性代数（新）");
+            }
+            other => panic!("应当只产出一条课程改名提案，实际 {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn switching_theme_applies_directly_without_a_confirmation_card() {
+        // 主题无破坏性、一眼可见、一句话就能改回来。给它加一次点击，
+        // 只是让「把界面调暗」这种最该一步到位的事变成两步。
+        let (db, _c, _v, _d) = seed().await;
+        let tools = AssistantTools::new(&db, AssistantContext::default());
+        tools.run(&call("set_theme", r#"{"pref":"dark"}"#)).await;
+        match tools.take_actions().as_slice() {
+            [AssistantAction::SetTheme { pref }] => assert_eq!(pref, "dark"),
+            other => panic!("应当是一条主题动作，实际 {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_invalid_theme_is_refused() {
+        let (db, _c, _v, _d) = seed().await;
+        let tools = AssistantTools::new(&db, AssistantContext::default());
+        let out = tools.run(&call("set_theme", r#"{"pref":"深色"}"#)).await;
+        assert!(out.content.contains("不是有效主题"));
+        assert!(tools.take_actions().is_empty());
+    }
+
+    #[tokio::test]
     async fn opening_a_video_is_executed_directly_because_it_breaks_nothing() {
         let (db, _course, video_id, _d) = seed().await;
         let tools = AssistantTools::new(&db, AssistantContext::default());
@@ -820,6 +1052,9 @@ mod tests {
                 "rename_video",
                 "delete_video",
                 "update_setting",
+                "create_course",
+                "rename_course",
+                "set_theme",
                 "search_bilibili",
                 "import_video",
             ]
