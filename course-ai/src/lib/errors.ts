@@ -42,6 +42,9 @@ export function humanizeError(error: unknown): string {
   ) {
     return "未配置或密钥无效：请到「设置」检查大模型 / 语音的 API Key。";
   }
+  if (s.includes("大模型请求超时")) {
+    return "大模型生成超过 10 分钟，服务端可能仍在处理。请稍后检查，避免立即重复生成。";
+  }
   if (s.includes("timeout") || s.includes("timed out") || s.includes("超时")) {
     return "请求超时，请检查网络后重试。";
   }

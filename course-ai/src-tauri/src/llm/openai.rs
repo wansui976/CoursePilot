@@ -3,12 +3,34 @@ use crate::llm::{take_sse_line, ChatRequest, ChatResponse, SseEvent, StreamOutco
 use futures_util::StreamExt;
 use reqwest::header::CONTENT_TYPE;
 use serde_json::{json, Value};
+use std::error::Error as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 fn body_snippet(body: &str) -> String {
     const MAX: usize = 500;
     let compact = body.split_whitespace().collect::<Vec<_>>().join(" ");
     compact.chars().take(MAX).collect()
+}
+
+fn request_error(error: reqwest::Error) -> AppError {
+    if error.is_timeout() {
+        return AppError::Other(
+            "大模型请求超时（已等待 10 分钟）。服务端可能仍在生成，请稍后检查，避免立即重复提交。"
+                .into(),
+        );
+    }
+
+    let mut message = format!("OpenAI 请求失败: {error}");
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let detail = cause.to_string();
+        if !message.ends_with(&detail) {
+            message.push_str(": ");
+            message.push_str(&detail);
+        }
+        source = cause.source();
+    }
+    AppError::Other(message)
 }
 
 pub fn normalize_openai_base_url(base_url: &str) -> String {
@@ -152,7 +174,7 @@ pub async fn complete(
         .json(&build_openai_body(req))
         .send()
         .await
-        .map_err(|e| AppError::Other(e.to_string()))?;
+        .map_err(request_error)?;
     let content_type = resp
         .headers()
         .get(CONTENT_TYPE)
@@ -167,7 +189,7 @@ pub async fn complete(
             body_snippet(&body)
         )));
     }
-    let body = resp.text().await.map_err(|e| AppError::Other(e.to_string()))?;
+    let body = resp.text().await.map_err(request_error)?;
     let v = parse_json_response(&body, &content_type)?;
     parse_openai_response(&v)
 }
@@ -209,7 +231,7 @@ pub async fn embed(
         .json(&build_embeddings_body(model, inputs))
         .send()
         .await
-        .map_err(|e| AppError::Other(e.to_string()))?;
+        .map_err(request_error)?;
     let content_type = resp
         .headers()
         .get(CONTENT_TYPE)
@@ -224,7 +246,7 @@ pub async fn embed(
             body_snippet(&body)
         )));
     }
-    let body = resp.text().await.map_err(|e| AppError::Other(e.to_string()))?;
+    let body = resp.text().await.map_err(request_error)?;
     let v = parse_json_response(&body, &content_type)?;
     parse_embeddings_response(&v)
 }
@@ -337,7 +359,7 @@ pub async fn complete_stream(
         .json(&body)
         .send()
         .await
-        .map_err(|e| AppError::Other(e.to_string()))?;
+        .map_err(request_error)?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
@@ -358,7 +380,7 @@ pub async fn complete_stream(
             canceled = true;
             break;
         }
-        let bytes = chunk.map_err(|e| AppError::Other(e.to_string()))?;
+        let bytes = chunk.map_err(request_error)?;
         buf.extend_from_slice(&bytes);
         // 按行处理，保留最后一段不完整行到下次。
         while let Some(line) = take_sse_line(&mut buf) {

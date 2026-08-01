@@ -10,6 +10,14 @@ describe("humanizeError", () => {
     expect(humanizeError(null)).toBe("发生未知错误。");
   });
 
+  it("explains long model generation timeouts without encouraging an immediate retry", () => {
+    const message = humanizeError(
+      "大模型请求超时（已等待 10 分钟）。服务端可能仍在生成，请稍后检查，避免立即重复提交。",
+    );
+    expect(message).toContain("10 分钟");
+    expect(message).toContain("避免立即重复生成");
+  });
+
   it("maps API key / auth errors", () => {
     expect(humanizeError("HTTP 401 Unauthorized")).toContain("API Key");
     expect(humanizeError("未配置大模型")).toContain("API Key");
