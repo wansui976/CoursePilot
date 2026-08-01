@@ -133,9 +133,12 @@ pub fn round_temperature(temperature: f32) -> f64 {
 pub enum SseEvent {
     Content(String),
     Reasoning(String),
-    /// 工具调用的一个**碎片**。流式下它不是一次给全的：函数名通常在第一片，
+    /// 工具调用的**碎片**。流式下它不是一次给全的：函数名通常在第一片，
     /// 入参 JSON 一个字符一个字符地来，跨十几片；多个调用靠 `index` 区分、可能交错。
-    ToolCallDelta(ToolCallDelta),
+    ///
+    /// 是复数：同一条 delta 里塞多个 index 是允许的。原来只取第 0 个，
+    /// 剩下的会被静默丢掉——丢掉的那次调用不会报错，只是永远不执行。
+    ToolCallDeltas(Vec<ToolCallDelta>),
     /// 服务端明确宣布这次生成结束。
     Finished,
     /// 流内错误事件：HTTP 已经 200 了，错误改从流里来（限流、内容策略等）。
@@ -339,6 +342,17 @@ pub async fn complete_or_cancel(
     req: &ChatRequest,
     cancel: &AtomicBool,
 ) -> AppResult<Option<String>> {
+    Ok(complete_or_cancel_full(provider, req, cancel)
+        .await?
+        .map(|response| response.content))
+}
+
+/// 同上，但把整个响应交出来——带工具调用时正文可能是空的，真正的产出在 tool_calls 里。
+pub async fn complete_or_cancel_full(
+    provider: &Provider,
+    req: &ChatRequest,
+    cancel: &AtomicBool,
+) -> AppResult<Option<ChatResponse>> {
     if cancel.load(Ordering::SeqCst) {
         return Ok(None);
     }
@@ -346,7 +360,7 @@ pub async fn complete_or_cancel(
     tokio::pin!(call);
     loop {
         tokio::select! {
-            finished = &mut call => return finished.map(|response| Some(response.content)),
+            finished = &mut call => return finished.map(Some),
             _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
                 if cancel.load(Ordering::SeqCst) {
                     return Ok(None);

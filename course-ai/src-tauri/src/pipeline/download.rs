@@ -669,15 +669,17 @@ pub fn parse_search_response(json: &str) -> AppResult<Vec<SearchHit>> {
         }
         None => return Err(AppError::Pipeline("B 站搜索响应缺少 code".into())),
     }
-    let Some(items) = v
+    // data 整个缺失说明响应结构不是我们认识的那个——那是接口变了，不是没搜到。
+    // 这两者必须分开，否则接口一改版，助手会一直说「B 站上没有这个」。
+    let data = v
         .get("data")
-        .and_then(|d| d.get("result"))
-        .and_then(serde_json::Value::as_array)
-    else {
-        // data.result 缺失/为 null 是「这一页没有结果」，属正常。
+        .ok_or_else(|| AppError::Pipeline("B 站搜索响应缺少 data，接口可能已变更".into()))?;
+    let Some(items) = data.get("result").and_then(serde_json::Value::as_array) else {
+        // result 为 null 才是真的「这一页没有结果」。
         return Ok(Vec::new());
     };
-    Ok(items
+    let total = items.len();
+    let hits: Vec<SearchHit> = items
         .iter()
         .filter_map(|item| {
             // 用 bvid 拼链接，不用接口给的 arcurl：后者是 http 的 av 号旧地址。
@@ -704,7 +706,16 @@ pub fn parse_search_response(json: &str) -> AppResult<Vec<SearchHit>> {
                     .and_then(parse_duration),
             })
         })
-        .collect())
+        .collect();
+    // 拿到了一堆结果却一条都留不下，多半是字段变了（上一版就是这么静默失灵的：
+    // 二十条结果全被「没有标题」滤掉，表现成「搜不到任何东西」）。
+    // 付费课程确实会被正常滤掉，所以只在**一条都不剩**时才当异常。
+    if total > 0 && hits.is_empty() {
+        return Err(AppError::Pipeline(format!(
+            "B 站返回了 {total} 条结果，但没有一条能用（可能全是付费课程，也可能接口字段变了）"
+        )));
+    }
+    Ok(hits)
 }
 
 /// 在 B 站搜索视频。
@@ -811,6 +822,24 @@ mod search_tests {
         assert_eq!(parse_duration("1:02:30"), Some(3750));
         assert_eq!(parse_duration(""), None);
         assert_eq!(parse_duration("直播中"), None);
+    }
+
+    #[test]
+    fn results_that_all_get_filtered_out_are_reported_not_silently_empty() {
+        // 上一版就是这么静默失灵的：二十条结果全被「没有标题」滤掉，
+        // 表现成「B 站上搜不到任何东西」。有结果却一条都留不下，必须说出来。
+        let all_paid = r#"{"code":0,"data":{"result":[
+            {"title":"付费课 A","author":"x","duration":"","bvid":"","arcurl":"y"},
+            {"title":"付费课 B","author":"x","duration":"","bvid":"","arcurl":"y"}
+        ]}}"#;
+        let err = parse_search_response(all_paid).unwrap_err();
+        assert!(format!("{err}").contains("2 条"));
+    }
+
+    #[test]
+    fn a_response_without_data_is_a_schema_change_not_an_empty_result() {
+        let err = parse_search_response(r#"{"code":0}"#).unwrap_err();
+        assert!(format!("{err}").contains("接口可能已变更"));
     }
 
     #[test]

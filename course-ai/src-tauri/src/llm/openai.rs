@@ -269,27 +269,37 @@ pub fn parse_openai_sse_line(line: &str) -> SseEvent {
         }
         // 工具调用碎片。放在 content/reasoning 之后判断：同一片 delta 里这三者
         // 实际上互斥，但真出现混合时正文优先，免得答案被吞掉。
-        if let Some(item) = delta.get("tool_calls").and_then(|c| c.get(0)) {
-            let function = item.get("function");
-            return SseEvent::ToolCallDelta(crate::llm::ToolCallDelta {
-                // index 缺席时按 0 处理：单个工具调用的服务端有时省略它。
-                index: item.get("index").and_then(Value::as_u64).unwrap_or(0) as usize,
-                id: item
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string),
-                name: function
-                    .and_then(|f| f.get("name"))
-                    .and_then(Value::as_str)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string),
-                arguments: function
-                    .and_then(|f| f.get("arguments"))
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-            });
+        if let Some(items) = delta.get("tool_calls").and_then(Value::as_array) {
+            // 遍历全部而不是只取第 0 个：一条 delta 里塞多个 index 是允许的，
+            // 只读第一个会把其余的静默丢掉——丢掉的那次调用不会报错，只是永远不执行。
+            let deltas: Vec<crate::llm::ToolCallDelta> = items
+                .iter()
+                .map(|item| {
+                    let function = item.get("function");
+                    crate::llm::ToolCallDelta {
+                        // index 缺席时按 0 处理：只有一个调用的服务端有时省略它。
+                        index: item.get("index").and_then(Value::as_u64).unwrap_or(0) as usize,
+                        id: item
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_string),
+                        name: function
+                            .and_then(|f| f.get("name"))
+                            .and_then(Value::as_str)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_string),
+                        arguments: function
+                            .and_then(|f| f.get("arguments"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                    }
+                })
+                .collect();
+            if !deltas.is_empty() {
+                return SseEvent::ToolCallDeltas(deltas);
+            }
         }
     }
     // 有些 OpenAI 兼容服务不发 [DONE]，但都会在最后一块给出非空 finish_reason。
@@ -363,7 +373,11 @@ pub async fn complete_stream(
                     on_piece(StreamPiece::Content(&delta));
                     acc.push_str(&delta);
                 }
-                SseEvent::ToolCallDelta(delta) => tools.push(delta),
+                SseEvent::ToolCallDeltas(deltas) => {
+                    for delta in deltas {
+                        tools.push(delta);
+                    }
+                }
                 SseEvent::Finished => finished = true,
                 SseEvent::Failed(message) => {
                     return Err(AppError::Other(format!("OpenAI 流内错误: {message}")))
@@ -397,7 +411,8 @@ mod tests {
             r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"open_video","arguments":""}}]}}]}"#,
         );
         match first {
-            SseEvent::ToolCallDelta(d) => {
+            SseEvent::ToolCallDeltas(ds) => {
+                let d = &ds[0];
                 assert_eq!(d.index, 0);
                 assert_eq!(d.id.as_deref(), Some("call_1"));
                 assert_eq!(d.name.as_deref(), Some("open_video"));
@@ -411,11 +426,33 @@ mod tests {
             r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"a\":1}"}}]}}]}"#,
         );
         match more {
-            SseEvent::ToolCallDelta(d) => {
+            SseEvent::ToolCallDeltas(ds) => {
+                let d = &ds[0];
                 assert!(d.id.is_none() && d.name.is_none());
                 assert_eq!(d.arguments, r#"{"a":1}"#);
             }
             other => panic!("应是工具调用碎片，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn two_calls_in_one_delta_are_both_kept() {
+        // 同一条 delta 里塞多个 index 是允许的。只读第 0 个的话，第二次调用
+        // 不会报错，只是永远不执行——静默少干一件事，最难查。
+        let event = parse_openai_sse_line(
+            r#"data: {"choices":[{"delta":{"tool_calls":[
+                {"index":0,"id":"a","function":{"name":"rename_video","arguments":""}},
+                {"index":1,"id":"b","function":{"name":"delete_video","arguments":""}}
+            ]}}]}"#,
+        );
+        match event {
+            SseEvent::ToolCallDeltas(ds) => {
+                assert_eq!(ds.len(), 2);
+                assert_eq!(ds[0].name.as_deref(), Some("rename_video"));
+                assert_eq!(ds[1].index, 1);
+                assert_eq!(ds[1].id.as_deref(), Some("b"));
+            }
+            other => panic!("应是两片工具调用，实际 {other:?}"),
         }
     }
 
