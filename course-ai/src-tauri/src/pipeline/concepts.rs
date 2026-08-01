@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
 // 问句切词元（中文按二字组）与文稿关键词检索共用同一套：
 // 两边对「什么算命中」的理解必须一致。
-use crate::pipeline::search_terms::query_terms;
+use crate::pipeline::search_terms::{query_terms, TermWeights};
 
 /// 课程知识分析进度：已处理视频数 / 总数 / 当前视频标题。逐视频推给前端渲染进度条。
 #[derive(Debug, Clone, Serialize)]
@@ -1037,50 +1037,70 @@ const COURSE_CHAT_NO_KNOWLEDGE_SYSTEM: &str = "你是这门课程的学习助手
 请先用一句「这门课程还没有分析出知识点，以下回答来自我自己的知识」说明，再尽量帮用户解答；回答用中文、Markdown、简洁有条理。";
 
 /// 知识点与问题的相关度：名称命中权重最高，其次摘要，再是解释与字幕摘录。
-/// 计的是「命中了几个不同词元」而非出现次数，长解释不会靠反复出现同一个词压过名称命中；
-/// 摘录取最高的一处，出现次数多的知识点不因此虚高。
-fn concept_score(concept: &CourseConcept, terms: &[String]) -> usize {
-    let hits = |text: &str| -> usize {
-        let lowered = text.to_lowercase();
-        terms.iter().filter(|term| lowered.contains(*term)).count()
-    };
-    let mut score = hits(&concept.name) * 4;
+/// 每处按「命中了几个词元、各值多少分」算而非出现次数，长解释不会靠反复出现同一个词
+/// 压过名称命中；摘录取最高的一处，出现次数多的知识点不因此虚高。
+///
+/// 词元分量由 [`TermWeights`] 给：一门课里遍地都是的二字组（「作用」「方法」）说话轻，
+/// 只属于某一两个知识点的术语说话重——否则问「贝叶斯」会被一堆名字里带「方法」的
+/// 知识点挤掉。
+fn concept_score(concept: &CourseConcept, weights: &TermWeights) -> f64 {
+    let mut score = weights.score(&concept.name) * 4.0;
     if let Some(summary) = concept.summary.as_deref() {
-        score += hits(summary) * 2;
+        score += weights.score(summary) * 2.0;
     }
     if let Some(explanation) = concept.explanation.as_deref() {
-        score += hits(explanation);
+        score += weights.score(explanation);
     }
     score += concept
         .occurrences
         .iter()
         .filter_map(|occurrence| occurrence.excerpt.as_deref())
-        .map(hits)
-        .max()
-        .unwrap_or(0);
+        .map(|excerpt| weights.score(excerpt))
+        .fold(0.0, f64::max);
     score
+}
+
+/// 按整门课的知识点统计词元稀有度。一个知识点算一篇材料，它的名称/摘要/解释/摘录
+/// 都算这一篇里的内容——字段多不该让自己命中的词显得更常见。
+fn weigh_concept_terms(knowledge: &CourseKnowledge, query: &str) -> TermWeights {
+    let mut builder = TermWeights::builder(query_terms(query));
+    for group in &knowledge.groups {
+        for concept in &group.concepts {
+            let mut parts: Vec<&str> = vec![concept.name.as_str()];
+            parts.extend(concept.summary.as_deref());
+            parts.extend(concept.explanation.as_deref());
+            parts.extend(
+                concept
+                    .occurrences
+                    .iter()
+                    .filter_map(|occurrence| occurrence.excerpt.as_deref()),
+            );
+            builder.add_document(parts);
+        }
+    }
+    builder.finish()
 }
 
 /// 按与问题的相关度挑出重点知识点（相关度为 0 的不进）。同分保持课程顺序（稳定排序）。
 /// 返回 (所属主题, 知识点)。
 fn rank_concepts<'a>(
     knowledge: &'a CourseKnowledge,
-    terms: &[String],
+    weights: &TermWeights,
 ) -> Vec<(&'a str, &'a CourseConcept)> {
-    if terms.is_empty() {
+    if weights.is_empty() {
         return Vec::new();
     }
-    let mut ranked: Vec<(usize, &str, &CourseConcept)> = Vec::new();
+    let mut ranked: Vec<(f64, &str, &CourseConcept)> = Vec::new();
     for group in &knowledge.groups {
         for concept in &group.concepts {
-            let score = concept_score(concept, terms);
-            if score > 0 {
+            let score = concept_score(concept, weights);
+            if score > 0.0 {
                 ranked.push((score, group.title.as_str(), concept));
             }
         }
     }
     // 稳定排序：同分的知识点保持课程里的先后顺序。
-    ranked.sort_by_key(|(score, _, _)| std::cmp::Reverse(*score));
+    ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
     ranked.truncate(CHAT_FOCUS_CONCEPTS);
     ranked
         .into_iter()
@@ -1226,7 +1246,7 @@ fn course_chat_context(
     query: &str,
 ) -> (String, String, Vec<Citation>) {
     let outline = course_outline_context(knowledge);
-    let focus = rank_concepts(knowledge, &query_terms(query));
+    let focus = rank_concepts(knowledge, &weigh_concept_terms(knowledge, query));
     let (focus_context, citations) = course_focus_context(&focus);
     (outline, focus_context, citations)
 }
