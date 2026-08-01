@@ -448,13 +448,16 @@ export const ipc = {
   notify: (title: string, body: string): Promise<void> =>
     invoke("cmd_notify", { title, body }),
   assistant: {
-    /** 问一句。history 传上一轮返回的 history 即可续聊。 */
+    /** 问一句。history 传上一轮返回的 history 即可续聊；requestId 用来精确停止这一轮。 */
     ask: (
       query: string,
-      context?: AssistantContext,
-      history?: AssistantMessage[],
+      context: AssistantContext | undefined,
+      history: AssistantMessage[] | undefined,
+      requestId: string,
     ): Promise<AssistantReply> =>
-      invoke("cmd_assistant_ask", { query, context, history }),
+      invoke("cmd_assistant_ask", { query, context, history, requestId }),
+    cancel: (requestId: string): Promise<void> =>
+      invoke("cmd_cancel_assistant", { requestId }),
   },
   settings: {
     get: (key: string): Promise<string | null> =>
