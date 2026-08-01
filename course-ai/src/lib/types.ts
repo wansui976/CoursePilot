@@ -243,7 +243,16 @@ export type AssistantAction =
       url: string;
       title: string;
       course_id?: string | null;
-    };
+    }
+  | { kind: "propose_create_course"; name: string; root_path: string }
+  | {
+      kind: "propose_rename_course";
+      course_id: string;
+      current_name: string;
+      new_name: string;
+    }
+  /** 主题不走确认卡：无破坏性、一眼可见、再说一句就能改回来。 */
+  | { kind: "set_theme"; pref: "dark" | "light" | "auto" };
 
 export interface AssistantReply {
   answer: string;

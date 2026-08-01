@@ -5,6 +5,8 @@ import { AssistantActionCard } from "@/components/AssistantActionCard";
 import { ipc } from "@/lib/ipc";
 import { isMobile } from "@/lib/platform";
 import { useAssistantUi } from "@/stores/assistant";
+import { useTheme } from "@/stores/theme";
+import { renderMarkdown } from "@/lib/renderMarkdown";
 import type { AssistantAction, AssistantContext, AssistantMessage } from "@/lib/types";
 
 /**
@@ -41,6 +43,10 @@ export function AssistantPanel({
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   const mobile = isMobile();
+  const setThemePref = useTheme((state) => state.setPref);
+
+  // 回答里的 [mm:ss] 点了就跳。助手常说「在 12:30 讲到」，让它可点是顺手的事。
+  const onSeek = (ms: number) => onNavigate({ kind: "seek_to", at_ms: ms });
 
   useEffect(() => {
     // 新一轮出来就滚到底，否则答案出现在视野外，看起来像没反应。
@@ -59,6 +65,10 @@ export function AssistantPanel({
     try {
       const reply = await ipc.assistant.ask(question, context, history);
       setHistory(reply.history);
+      // 主题当场生效。它无破坏性、一眼可见，再让人点一次只是把一步变两步。
+      for (const action of reply.actions) {
+        if (action.kind === "set_theme") setThemePref(action.pref);
+      }
       setTurns((prev) => [
         ...prev,
         {
@@ -139,9 +149,12 @@ export function AssistantPanel({
           <div key={turn.id} className="space-y-1.5">
             <p className="text-right text-xs text-[var(--text-muted)]">{turn.question}</p>
             {turn.answer && (
-              <p className="whitespace-pre-wrap text-sm text-[var(--text-normal)]">
-                {turn.answer}
-              </p>
+              // 助手的回答天然带 Markdown（列表、加粗、代码），当纯文本铺出来
+              // 满屏都是 ** 和 -，读起来比没有格式还糟。复用问答面板那套渲染器，
+              // 顺带白拿了公式和 [mm:ss] 可点击跳转。
+              <div className="text-sm text-[var(--text-normal)]">
+                {renderMarkdown(turn.answer, onSeek)}
+              </div>
             )}
             {turn.actions
               .map((action, i) => ({ action, key: `${turn.id}-${i}` }))

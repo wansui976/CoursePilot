@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { AlertTriangle, Check, Download, PenLine, Settings2, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Download,
+  FolderPlus,
+  PenLine,
+  Settings2,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
 import type { AssistantAction } from "@/lib/types";
@@ -109,6 +117,16 @@ export function AssistantActionCard({
   /** 导航类动作交给外层执行（打开视频 / 跳转）。 */
   onNavigate: (action: AssistantAction) => void;
 }) {
+  // 主题已经在外层直接应用了，这里只留一条说明，不再要求点击。
+  if (action.kind === "set_theme") {
+    const label = { dark: "夜间", light: "日间", auto: "跟随系统" }[action.pref];
+    return (
+      <p className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-2 text-xs text-[var(--text-muted)]">
+        已切换到{label}主题
+      </p>
+    );
+  }
+
   // 导航没有破坏性，不需要确认——但也不该悄悄发生，给一个能点的条目。
   if (action.kind === "open_video" || action.kind === "seek_to") {
     const label =
@@ -140,7 +158,10 @@ function ProposalCard({
   action,
   onDismiss,
 }: {
-  action: Exclude<AssistantAction, { kind: "open_video" } | { kind: "seek_to" }>;
+  action: Exclude<
+    AssistantAction,
+    { kind: "open_video" } | { kind: "seek_to" } | { kind: "set_theme" }
+  >;
   onDismiss: () => void;
 }) {
   const run = async () => {
@@ -157,6 +178,12 @@ function ProposalCard({
       case "propose_import":
         if (!action.course_id) throw new Error("没有指定要导入到哪门课程");
         await ipc.tools.importBilibili(action.course_id, action.url);
+        return;
+      case "propose_create_course":
+        await ipc.courses.create(action.name, action.root_path);
+        return;
+      case "propose_rename_course":
+        await ipc.courses.rename(action.course_id, action.new_name);
     }
   };
   const { status, error, confirm } = useConfirm(run);
@@ -202,6 +229,31 @@ function ProposalCard({
           <p className="text-[var(--text-muted)]">
             {action.current ?? "未设置"} → {action.value}
           </p>
+        </Shell>
+      );
+    case "propose_create_course":
+      return (
+        <Shell
+          {...common}
+          icon={<FolderPlus className="h-3.5 w-3.5" />}
+          title="新建课程"
+          confirmLabel="确认创建"
+        >
+          <p className="text-[var(--text-strong)]">{action.name}</p>
+          {/* 目录要显示：多数人记不清默认存放位置在哪，建错地方后面很难收拾。 */}
+          <p className="break-all text-[var(--text-muted)]">建在 {action.root_path}</p>
+        </Shell>
+      );
+    case "propose_rename_course":
+      return (
+        <Shell
+          {...common}
+          icon={<PenLine className="h-3.5 w-3.5" />}
+          title="课程改名"
+          confirmLabel="确认改名"
+        >
+          <p className="text-[var(--text-muted)] line-through">{action.current_name}</p>
+          <p className="text-[var(--text-strong)]">{action.new_name}</p>
         </Shell>
       );
     case "propose_import":
