@@ -45,29 +45,98 @@ pub fn build_openai_body(req: &ChatRequest) -> Value {
         messages.push(json!({"role": "system", "content": s}));
     }
     for m in &req.messages {
-        messages.push(json!({"role": m.role, "content": m.content}));
+        messages.push(message_body(m));
     }
     // 不发 max_tokens：OpenAI 规范里它可选，省略后模型用自身的最大输出预算，
     // 免得我们写死的上限把长输出（出题/纠错的 JSON）截断。
     // ChatRequest 上原本有这个字段，但没有任何通道读它，已删——别再加回来。
-    json!({
+    let mut body = json!({
         "model": req.model,
         "messages": messages,
         "temperature": crate::llm::round_temperature(req.temperature),
+    });
+    // 不带工具时连字段都不出现：现有那些任务的请求体保持逐字节不变，
+    // 既不影响前缀缓存，也不会让某些兼容端点因为多了个空数组而报错。
+    if !req.tools.is_empty() {
+        body["tools"] = Value::Array(req.tools.iter().map(tool_body).collect());
+    }
+    body
+}
+
+fn tool_body(tool: &crate::llm::ToolSpec) -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters,
+        }
     })
 }
 
+/// 把一条消息转成请求体里的一项。三种形态：普通文本、模型要求调工具、工具执行结果。
+fn message_body(m: &crate::llm::ChatMessage) -> Value {
+    if let Some(call_id) = &m.tool_call_id {
+        return json!({"role": "tool", "tool_call_id": call_id, "content": m.content});
+    }
+    if !m.tool_calls.is_empty() {
+        // content 必须是 null 而不是空串：模型这一轮没有说话，只是要求调工具。
+        // 发空串会被一些端点当成「助手说了句空话」，下一轮的推理跟着跑偏。
+        return json!({
+            "role": "assistant",
+            "content": Value::Null,
+            "tool_calls": m.tool_calls.iter().map(|c| json!({
+                "id": c.id,
+                "type": "function",
+                "function": {"name": c.name, "arguments": c.arguments},
+            })).collect::<Vec<_>>(),
+        });
+    }
+    json!({"role": m.role, "content": m.content})
+}
+
 pub fn parse_openai_response(v: &Value) -> AppResult<ChatResponse> {
-    let content = v
+    let message = v
         .get("choices")
         .and_then(|c| c.get(0))
         .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("content"))
-        .and_then(|t| t.as_str())
         .ok_or_else(|| AppError::Other(format!("unexpected OpenAI response: {v}")))?;
+    let tool_calls = parse_tool_calls(message);
+    // 模型决定调工具时 content 是 null——这是**正常**响应，不是格式错误。
+    // 原来这里强求 content 必须是字符串，一旦带上工具，第一次调用就会被判成
+    // 「unexpected OpenAI response」，而真相是模型正常地要求调工具。
+    let content = message.get("content").and_then(|t| t.as_str());
+    if content.is_none() && tool_calls.is_empty() {
+        return Err(AppError::Other(format!("unexpected OpenAI response: {v}")));
+    }
     Ok(ChatResponse {
-        content: content.to_string(),
+        content: content.unwrap_or_default().to_string(),
+        tool_calls,
     })
+}
+
+/// 从一条 assistant 消息里取出工具调用。缺字段的项直接跳过而不是整体报错：
+/// 少一次调用最多是这一轮没干成，能让模型重试；整体报错则是把整段对话打断。
+fn parse_tool_calls(message: &Value) -> Vec<crate::llm::ToolCall> {
+    let Some(items) = message.get("tool_calls").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let function = item.get("function")?;
+            Some(crate::llm::ToolCall {
+                id: item.get("id").and_then(Value::as_str)?.to_string(),
+                name: function.get("name").and_then(Value::as_str)?.to_string(),
+                // 缺 arguments 视为空对象：模型对无参工具经常什么都不给。
+                arguments: function
+                    .get("arguments")
+                    .and_then(Value::as_str)
+                    .unwrap_or("{}")
+                    .to_string(),
+            })
+        })
+        .collect()
 }
 
 pub async fn complete(
@@ -98,10 +167,7 @@ pub async fn complete(
             body_snippet(&body)
         )));
     }
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| AppError::Other(e.to_string()))?;
+    let body = resp.text().await.map_err(|e| AppError::Other(e.to_string()))?;
     let v = parse_json_response(&body, &content_type)?;
     parse_openai_response(&v)
 }
@@ -158,10 +224,7 @@ pub async fn embed(
             body_snippet(&body)
         )));
     }
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| AppError::Other(e.to_string()))?;
+    let body = resp.text().await.map_err(|e| AppError::Other(e.to_string()))?;
     let v = parse_json_response(&body, &content_type)?;
     parse_embeddings_response(&v)
 }
@@ -358,12 +421,128 @@ mod tests {
             model: "gpt-4o".into(),
             system: Some("you are helpful".into()),
             cacheable_context: Some("TRANSCRIPT".into()),
-            messages: vec![ChatMessage {
-                role: "user".into(),
-                content: "summarize".into(),
-            }],
+            messages: vec![ChatMessage::user("summarize")],
             temperature: 0.3,
+            tools: Vec::new(),
         }
+    }
+
+    fn weather_tool() -> crate::llm::ToolSpec {
+        crate::llm::ToolSpec {
+            name: "get_weather".into(),
+            description: "查天气".into(),
+            parameters: json!({"type":"object","properties":{"city":{"type":"string"}}}),
+        }
+    }
+
+    #[test]
+    fn no_tools_means_the_field_is_absent_entirely() {
+        // 现有那些任务的请求体必须保持逐字节不变：多一个空数组既可能打乱前缀缓存，
+        // 也可能让个别兼容端点直接报错。
+        let body = build_openai_body(&sample_req());
+        assert!(body.get("tools").is_none());
+    }
+
+    #[test]
+    fn tools_are_sent_in_the_function_wrapper_shape() {
+        let mut req = sample_req();
+        req.tools = vec![weather_tool()];
+        let body = build_openai_body(&req);
+        let tools = body["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], "function");
+        assert_eq!(tools[0]["function"]["name"], "get_weather");
+        assert_eq!(tools[0]["function"]["parameters"]["type"], "object");
+    }
+
+    #[test]
+    fn a_tool_round_trip_serializes_into_three_turns() {
+        let mut req = sample_req();
+        req.tools = vec![weather_tool()];
+        req.messages = vec![
+            ChatMessage::user("北京天气怎么样"),
+            ChatMessage::tool_calls(vec![crate::llm::ToolCall {
+                id: "call_1".into(),
+                name: "get_weather".into(),
+                arguments: r#"{"city":"北京"}"#.into(),
+            }]),
+            ChatMessage::tool_result("call_1", "晴，26 度"),
+        ];
+        let body = build_openai_body(&req);
+        let msgs = body["messages"].as_array().unwrap();
+        // system + 三轮
+        assert_eq!(msgs.len(), 4);
+
+        // 模型要求调工具的那一轮：content 必须是 null，不是空串——
+        // 空串会被某些端点当成「助手说了句空话」，下一轮推理跟着跑偏。
+        assert_eq!(msgs[2]["role"], "assistant");
+        assert!(msgs[2]["content"].is_null());
+        assert_eq!(msgs[2]["tool_calls"][0]["id"], "call_1");
+        assert_eq!(
+            msgs[2]["tool_calls"][0]["function"]["arguments"],
+            r#"{"city":"北京"}"#
+        );
+
+        // 结果那一轮要带回同一个 id，否则模型对不上是哪次调用。
+        assert_eq!(msgs[3]["role"], "tool");
+        assert_eq!(msgs[3]["tool_call_id"], "call_1");
+        assert_eq!(msgs[3]["content"], "晴，26 度");
+    }
+
+    #[test]
+    fn a_tool_call_response_parses_even_though_content_is_null() {
+        // 模型决定调工具时 content 就是 null。原来的解析强求它是字符串，
+        // 于是带工具的第一次调用必然被判成「响应格式异常」。
+        let v: Value = serde_json::from_str(
+            r#"{
+          "choices":[{"message":{"role":"assistant","content":null,"tool_calls":[
+            {"id":"call_1","type":"function",
+             "function":{"name":"get_weather","arguments":"{\"city\":\"北京\"}"}}
+          ]}}]
+        }"#,
+        )
+        .unwrap();
+        let resp = parse_openai_response(&v).unwrap();
+        assert_eq!(resp.content, "");
+        assert_eq!(resp.tool_calls.len(), 1);
+        assert_eq!(resp.tool_calls[0].name, "get_weather");
+        assert_eq!(resp.tool_calls[0].arguments, r#"{"city":"北京"}"#);
+    }
+
+    #[test]
+    fn malformed_tool_arguments_survive_as_text() {
+        // 模型给的参数不是合法 JSON 是常事。这里不能报错——报了错用户看到的是
+        // 「请求失败」，而真相是模型少写了个引号。原样带出去交给执行方处理。
+        let v: Value = serde_json::from_str(
+            r#"{
+          "choices":[{"message":{"content":null,"tool_calls":[
+            {"id":"c1","function":{"name":"f","arguments":"{\"city\": "}}
+          ]}}]
+        }"#,
+        )
+        .unwrap();
+        let resp = parse_openai_response(&v).unwrap();
+        assert_eq!(resp.tool_calls[0].arguments, r#"{"city": "#);
+    }
+
+    #[test]
+    fn a_plain_answer_still_parses_and_carries_no_tool_calls() {
+        let v: Value = serde_json::from_str(
+            r#"{"choices":[{"message":{"role":"assistant","content":"你好"}}]}"#,
+        )
+        .unwrap();
+        let resp = parse_openai_response(&v).unwrap();
+        assert_eq!(resp.content, "你好");
+        assert!(resp.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn a_response_with_neither_content_nor_tool_calls_is_still_an_error() {
+        // 放宽 content 的要求不等于什么都收：真正畸形的响应仍要报出来，
+        // 否则会把服务端的异常静默成一个空回答。
+        let v: Value =
+            serde_json::from_str(r#"{"choices":[{"message":{"role":"assistant"}}]}"#).unwrap();
+        assert!(parse_openai_response(&v).is_err());
     }
 
     #[test]

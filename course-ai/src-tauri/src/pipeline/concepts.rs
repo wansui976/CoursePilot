@@ -699,9 +699,8 @@ fn knowledge_summary_request(model: &str, catalog: &KnowledgeCatalog) -> AppResu
             "以下是课程概念目录：每项含已生成的知识点解释（explanation，可能截断）\
              与真实字幕来源（sources）：\n{source_json}"
         )),
-        messages: vec![ChatMessage {
-            role: "user".into(),
-            content: "把这些概念整理成便于学习的课程知识总结。输出结构：\
+        messages: vec![ChatMessage::user(
+            "把这些概念整理成便于学习的课程知识总结。输出结构：\
                       {\"overview\":\"2-4 句课程主线\",\"groups\":[{\"title\":\"主题名\",\
                       \"summary\":\"一句话说明该主题\",\"items\":[{\"concept_ref\":\"K001\",\
                       \"summary\":\"该知识点的一句话结论\",\"source_refs\":[\"S0001\"]}]}]}。\
@@ -710,10 +709,10 @@ fn knowledge_summary_request(model: &str, catalog: &KnowledgeCatalog) -> AppResu
                       3. 分组与 summary 主要依据每项的 explanation（没有则依据 sources），\
                       summary 必须能被该概念自己的 explanation 或来源支持，\
                       source_refs 只能选该概念名下的编号。\
-                      4. 不扩展字幕没有讲到的知识，不使用空泛套话。"
-                .into(),
-        }],
+                      4. 不扩展字幕没有讲到的知识，不使用空泛套话。",
+        )],
         temperature: 0.1,
+        tools: Vec::new(),
     })
 }
 
@@ -1293,6 +1292,7 @@ pub async fn course_chat_stream(
         cacheable_context,
         messages: build_chat_messages(history, &turn),
         temperature: 0.3,
+        tools: Vec::new(),
     };
     let answer = provider
         .complete_stream(&req, cancel, &mut |piece| match piece {
@@ -1381,11 +1381,10 @@ fn concept_explanation_request(model: &str, name: &str, context_text: &str) -> C
                 .into(),
         ),
         cacheable_context: Some(format!("字幕片段：\n{context_text}")),
-        messages: vec![ChatMessage {
-            role: "user".into(),
-            content: format!("请依据这些片段，较全面地讲解知识点「{name}」。"),
-        }],
+        messages: vec![ChatMessage::user(format!("请依据这些片段，较全面地讲解知识点「{name}」。")
+        )],
         temperature: 0.3,
+        tools: Vec::new(),
     }
 }
 
@@ -1500,15 +1499,13 @@ fn concept_canonicalization_request(model: &str, names: &[String]) -> AppResult<
                 .into(),
         ),
         cacheable_context: Some(format!("知识点名列表：\n{list}")),
-        messages: vec![ChatMessage {
-            role: "user".into(),
-            content: "把上面的名字归并分组。输出结构：\
+        messages: vec![ChatMessage::user("把上面的名字归并分组。输出结构：\
                       [{\"canonical\":\"规范名\",\"aliases\":[\"原始名1\",\"原始名2\"]}]。\
                       aliases 只能从给定列表里原样选取，每个原始名最多归入一组；能合并的尽量合并，\
                       独立的知识点各自成组。"
-                .into(),
-        }],
+        )],
         temperature: 0.1,
+        tools: Vec::new(),
     })
 }
 
@@ -1619,11 +1616,9 @@ pub async fn analyze_course_concepts(
                 model: chat_model.to_string(),
                 system: Some(CONCEPT_SYSTEM.to_string()),
                 cacheable_context: Some(format!("字幕片段：\n{chunk}")),
-                messages: vec![ChatMessage {
-                    role: "user".into(),
-                    content: "抽取本段知识点。".into(),
-                }],
+                messages: vec![ChatMessage::user("抽取本段知识点。")],
                 temperature: 0.1,
+                tools: Vec::new(),
             };
             let extracted = match provider.complete(&req).await {
                 Ok(response) => parse_concepts_json(&response.content),
