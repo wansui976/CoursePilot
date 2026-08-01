@@ -387,6 +387,81 @@ fn retrieve(
     )
 }
 
+/// 机器扩写出来的词元，命中材料超过这个比例就丢掉。
+///
+/// 模型很爱回「公式」「定义」「方法」这种哪节课都有的词。它们本身不算错，但拿去检索
+/// 只会把一堆不相干的段落变成「命中」，于是「这节课没讲到」被翻成一个有依据的错答案——
+/// 那正是我不愿意为向量检索设相似度阈值的同一个理由。
+///
+/// 注意这是**词**的筛子，不是给答案设的阈值：只筛机器编的词，用户自己打出来的词
+/// 一律保留（他既然打了，就说明它重要）。
+const EXPANSION_MAX_DF_RATIO: f64 = 0.2;
+
+/// 一个机器扩写出来的词，值不值得拿去检索。
+fn expansion_term_is_useful(weights: &TermWeights, term: &str) -> bool {
+    let hits = weights.document_count(term);
+    if hits == 0 {
+        // 材料里根本没有这个词，留着也只是白跑一趟检索。
+        return false;
+    }
+    // 只出现在一处的词永远算数。按比例卡会误伤短视频：统共三段的课，
+    // 「只讲了一次」在比例上就是 33%，反倒显得遍地都是。
+    hits == 1 || weights.document_ratio(term) <= EXPANSION_MAX_DF_RATIO
+}
+
+/// 从模型的改写结果里挑出值得拿去检索的词：在这批材料里出现过、但又不是遍地都是。
+/// 一个都不剩就返回空——空的话上层直接放弃重试，省掉一次白跑的检索。
+fn useful_expansion_terms(
+    expansion: &str,
+    segments: &[TranscriptSegment],
+    pages: &[SlidePage],
+) -> Vec<String> {
+    let weights = weigh_terms(expansion, segments, pages);
+    weights
+        .terms()
+        .iter()
+        .filter(|term| expansion_term_is_useful(&weights, term))
+        .cloned()
+        .collect()
+}
+
+/// 模型的回复最多取这么长拿去当检索词。它偶尔会不听话写成一段话，
+/// 截断能保证最坏情况也只是多几个没用的二字组，而不是几百个。
+const EXPANSION_MAX_CHARS: usize = 100;
+
+/// 最后一级兜底：讲稿和课件都一无所获时，请模型把问题改写成讲师可能用的术语，再检索一次。
+///
+/// 只在真的召不回时才走，所以常规提问不会因此多花一分钱、多等一次往返。
+/// 扩写失败、被取消、或扩出来的词一个都不值得用，都原样返回空结果，让上层照旧说
+/// 「这节课没讲到」——一个可选的增强不该把主流程带崩。
+async fn retrieve_or_expand(
+    provider: &Provider,
+    chat_model: &str,
+    segments: &[TranscriptSegment],
+    pages: &[SlidePage],
+    query: &str,
+    history: &[ChatMessage],
+    cancel: &AtomicBool,
+) -> Retrieved {
+    let direct = retrieve(segments, pages, query, history);
+    if !direct.is_empty() {
+        return direct;
+    }
+    let req = crate::llm::prompts::query_expansion_request(chat_model, query);
+    let reply = match crate::llm::complete_or_cancel(provider, &req, cancel).await {
+        Ok(Some(reply)) => reply,
+        // 取消或出错都不算失败：照旧回「没讲到」，别把一次可选的补救变成一个报错。
+        Ok(None) | Err(_) => return direct,
+    };
+    let trimmed: String = reply.trim().chars().take(EXPANSION_MAX_CHARS).collect();
+    let extra = useful_expansion_terms(&trimmed, segments, pages);
+    if extra.is_empty() {
+        return direct;
+    }
+    // 原问题的词一起带上：用户自己的措辞始终参与打分，扩写只是补充。
+    retrieve_once(segments, pages, &format!("{query} {}", extra.join(" ")))
+}
+
 /// 把命中段扩成窗口并合并重叠区间。
 ///
 /// 为什么要扩窗：命中的那一句往往只是关键词出现的地方，答案在它前后。
@@ -498,7 +573,11 @@ pub async fn answer(
 ) -> AppResult<RagAnswer> {
     let segments = list_segments(db, video_id).await?;
     let pages = list_slide_pages(db, video_id).await?;
-    let retrieved = retrieve(&segments, &pages, query, history);
+    let never = AtomicBool::new(false);
+    let retrieved = retrieve_or_expand(
+        provider, chat_model, &segments, &pages, query, history, &never,
+    )
+    .await;
     let messages = build_chat_messages(history, query);
     let (system, context) = ask_context(&retrieved);
     let req = ask_request(chat_model, system, context, messages, 1024);
@@ -604,7 +683,10 @@ pub async fn answer_stream(
     });
     let segments = list_segments(db, video_id).await?;
     let pages = list_slide_pages(db, video_id).await?;
-    let retrieved = retrieve(&segments, &pages, query, history);
+    let retrieved = retrieve_or_expand(
+        provider, chat_model, &segments, &pages, query, history, cancel,
+    )
+    .await;
     let citations = retrieved_citations(&retrieved);
     if !citations.is_empty() {
         on_event(AskEvent::Citations {
@@ -664,6 +746,65 @@ fn retrieve_scope_context(
         per_video_pages,
         &retrieval_text_with_history(query, history),
     )
+}
+
+/// 课程级的最后一级兜底：整门课都召不回时，请模型改写问题再检索一次。
+/// 与单视频那条路同一套规矩——只在真召不回时才调，失败一律当没发生。
+#[allow(clippy::too_many_arguments)]
+async fn retrieve_scope_or_expand(
+    provider: &Provider,
+    chat_model: &str,
+    per_video: &[(String, String, Vec<TranscriptSegment>)],
+    per_video_pages: &[(String, String, Vec<SlidePage>)],
+    query: &str,
+    history: &[ChatMessage],
+    cancel: &AtomicBool,
+) -> (String, Vec<Citation>) {
+    let direct = retrieve_scope_context(per_video, per_video_pages, query, history);
+    if !direct.0.is_empty() {
+        return direct;
+    }
+    let req = crate::llm::prompts::query_expansion_request(chat_model, query);
+    let reply = match crate::llm::complete_or_cancel(provider, &req, cancel).await {
+        Ok(Some(reply)) => reply,
+        Ok(None) | Err(_) => return direct,
+    };
+    let trimmed: String = reply.trim().chars().take(EXPANSION_MAX_CHARS).collect();
+    let extra = scope_expansion_terms(&trimmed, per_video, per_video_pages);
+    if extra.is_empty() {
+        return direct;
+    }
+    scope_context_once(
+        per_video,
+        per_video_pages,
+        &format!("{query} {}", extra.join(" ")),
+    )
+}
+
+/// [`useful_expansion_terms`] 的课程级版本：语料是整门课的讲稿与课件。
+fn scope_expansion_terms(
+    expansion: &str,
+    per_video: &[(String, String, Vec<TranscriptSegment>)],
+    per_video_pages: &[(String, String, Vec<SlidePage>)],
+) -> Vec<String> {
+    let mut builder = TermWeights::builder(query_terms(expansion));
+    for (_, _, segments) in per_video {
+        for seg in segments {
+            builder.add_document([seg.text.as_str()]);
+        }
+    }
+    for (_, _, pages) in per_video_pages {
+        for page in pages {
+            builder.add_document([page.ocr_text.as_str()]);
+        }
+    }
+    let weights = builder.finish();
+    weights
+        .terms()
+        .iter()
+        .filter(|term| expansion_term_is_useful(&weights, term))
+        .cloned()
+        .collect()
 }
 
 /// 用一句给定的检索文本装配课程级上下文：字幕命中 + 课件页命中。
@@ -787,7 +928,16 @@ pub async fn course_answer_stream(
         per_video.push((vid.clone(), title.clone(), segs));
         per_video_pages.push((vid.clone(), title.clone(), pages));
     }
-    let (context, citations) = retrieve_scope_context(&per_video, &per_video_pages, query, history);
+    let (context, citations) = retrieve_scope_or_expand(
+        provider,
+        chat_model,
+        &per_video,
+        &per_video_pages,
+        query,
+        history,
+        cancel,
+    )
+    .await;
     let messages = build_chat_messages(history, query);
 
     // 命中为空：全课程的字幕和课件都没讲到，退回模型自身知识兜底（不发 Citations）。
@@ -1323,6 +1473,47 @@ mod tests {
         (db, video.id, dir)
     }
 
+    /// 一节讲梯度下降的课：老师说「局部极小值」，学生会问「为什么会卡住」。
+    async fn seed_gradient_lecture() -> (Db, String, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let vpath = dir.path().join("g.mp4");
+        std::fs::write(&vpath, b"x").unwrap();
+        let video = crate::commands::videos::add_local_video(&db, &course.id, vpath, None)
+            .await
+            .unwrap();
+        for (i, text) in [
+            "我们接着往下看",
+            "梯度下降会陷入局部极小值",
+            "所以要换个初始点再试",
+        ]
+        .iter()
+        .enumerate()
+        {
+            sqlx::query(
+                "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)",
+            )
+            .bind(&video.id)
+            .bind(i as i64)
+            .bind(i as i64 * 70_000)
+            .bind(i as i64 * 70_000 + 5_000)
+            .bind(*text)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        }
+        (db, video.id, dir)
+    }
+
     #[tokio::test]
     async fn answer_retrieves_windows_and_reports_where_they_came_from() {
         let (db, vid, _d) = seed().await;
@@ -1493,6 +1684,101 @@ mod tests {
             "最相关的应排第一，实际是：{}",
             hits[0].text
         );
+    }
+
+    #[test]
+    fn expansion_keeps_terms_that_identify_something_and_drops_the_vague_ones() {
+        // 一节讲梯度下降的课：「局部极小值」只在一处出现，「我们」哪儿都是。
+        let mut segs: Vec<TranscriptSegment> = (0..20)
+            .map(|i| seg(i, i * 70_000, i * 70_000 + 5_000, "我们接着往下看"))
+            .collect();
+        segs.push(seg(
+            20,
+            20 * 70_000,
+            20 * 70_000 + 5_000,
+            "这里会陷入局部极小值",
+        ));
+
+        // 模型改写出来的东西：有能定位的术语，也有哪节课都有的空泛词。
+        let kept = useful_expansion_terms("局部极小值 我们 收敛", &segs, &[]);
+        assert!(
+            kept.iter().any(|term| term.contains("极小")),
+            "能定位的术语要留下，实际留下：{kept:?}"
+        );
+        assert!(
+            !kept.iter().any(|term| term == "我们"),
+            "遍地都是的词不该拿去检索，实际留下：{kept:?}"
+        );
+        // 材料里根本没出现的词（这节课没讲收敛）留着也没用，先筛掉省一次白跑。
+        assert!(!kept.iter().any(|term| term.contains("收敛")));
+    }
+
+    #[test]
+    fn expansion_that_yields_nothing_usable_changes_no_outcome() {
+        let segs = vec![seg(0, 0, 5_000, "我们接着往下看")];
+        // 全是空泛词 → 一个都留不下 → 上层据此直接放弃重试。
+        assert!(useful_expansion_terms("方法 定义 公式", &segs, &[]).is_empty());
+        assert!(useful_expansion_terms("", &segs, &[]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_reworded_question_finds_what_the_lecturer_actually_said() {
+        let (db, vid, _d) = seed_gradient_lecture().await;
+        // 学生问的是口语说法，讲稿里一个字都不沾——直接检索必然空手。
+        let segments = list_segments(&db, &vid).await.unwrap();
+        assert!(
+            retrieve(&segments, &[], "为什么会卡住", &[]).is_empty(),
+            "这正是关键词检索的短板：问的词和讲的词不是同一个词"
+        );
+
+        // 模型把问题改写成老师的说法后，同样的问题能召回了。
+        let provider = Provider::Mock {
+            canned: "局部极小值 梯度".into(),
+        };
+        let cancel = AtomicBool::new(false);
+        let rescued =
+            retrieve_or_expand(&provider, "m", &segments, &[], "为什么会卡住", &[], &cancel).await;
+        assert!(!rescued.is_empty(), "改写之后应当能召回");
+        assert!(rescued.windows[0].text.contains("局部极小值"));
+    }
+
+    #[tokio::test]
+    async fn a_question_the_lecture_really_never_covers_stays_uncovered() {
+        let (db, vid, _d) = seed_gradient_lecture().await;
+        let segments = list_segments(&db, &vid).await.unwrap();
+        // 模型给的改写词在这节课里根本不存在 → 不能因为「调过一次模型」就硬凑出依据。
+        let provider = Provider::Mock {
+            canned: "宋词 平仄".into(),
+        };
+        let cancel = AtomicBool::new(false);
+        let still_empty = retrieve_or_expand(
+            &provider,
+            "m",
+            &segments,
+            &[],
+            "词牌名怎么分类",
+            &[],
+            &cancel,
+        )
+        .await;
+        assert!(
+            still_empty.is_empty(),
+            "改写不该把「没讲到」翻成一个有依据的错答案"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_canceled_expansion_falls_back_instead_of_failing() {
+        let (db, vid, _d) = seed_gradient_lecture().await;
+        let segments = list_segments(&db, &vid).await.unwrap();
+        let provider = Provider::Mock {
+            canned: "局部极小值".into(),
+        };
+        let cancel = AtomicBool::new(true); // 用户已经点了停止
+        let out =
+            retrieve_or_expand(&provider, "m", &segments, &[], "为什么会卡住", &[], &cancel).await;
+        // 取消不是错误：照旧走「没讲到」，不该 panic 也不该抛错。
+        assert!(out.is_empty());
     }
 
     #[test]
@@ -1956,3 +2242,7 @@ mod tests {
         assert_eq!(cites[0].video_id.as_deref(), Some("v1"));
     }
 }
+
+#[cfg(test)]
+#[path = "retrieval_eval.rs"]
+mod retrieval_eval;
