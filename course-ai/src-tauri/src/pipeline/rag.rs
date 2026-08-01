@@ -459,12 +459,21 @@ fn expansion_evidence_is_thin(retrieved: &Retrieved, phrases: &[String]) -> bool
         .any(|phrase| texts.iter().any(|text| text.contains(phrase.as_str())))
 }
 
-/// 把模型的改写结果切成一个个术语（按空白分隔）。
+/// 把模型的改写结果切成一个个术语。
+///
+/// **不能只按空格切。** 提示词里写了「用空格分隔」，但中文模型照样经常回
+/// 「局部极小值、梯度下降、收敛」。只按空格切的话整串会变成一个「术语」，
+/// 它当然不会原样出现在讲稿里，于是佐证永远不成立——检索明明召回了正确的段落，
+/// 却被这一步整个丢掉，而且一声不吭。
+///
+/// 所以凡是不构成词的字符（顿号、逗号、编号里的点、括号……）一律当分隔符，
+/// 和切词元那边对「什么是词」的判断保持一致。
 fn expansion_phrases(expansion: &str) -> Vec<String> {
     expansion
-        .split_whitespace()
+        .split(|ch: char| !ch.is_alphanumeric())
         .map(|piece| piece.trim().to_lowercase())
-        .filter(|piece| !piece.is_empty())
+        // 单个字符（编号里的 "1"、残留的 "a"）不算术语，留着只会让佐证形同虚设。
+        .filter(|piece| piece.chars().count() >= 2)
         .collect()
 }
 
@@ -1870,6 +1879,38 @@ mod tests {
             !expansion_evidence_is_thin(&hit2, &expansion_phrases("傅里叶变换")),
             "整词出现，应判为证据充分"
         );
+    }
+
+    #[test]
+    fn the_models_punctuation_does_not_silently_disable_the_fallback() {
+        // 提示词写了「用空格分隔」，但中文模型照样常回「A、B、C」。只按空格切的话
+        // 整串成了一个「术语」，它当然不会原样出现在讲稿里，于是佐证永远不成立——
+        // 检索明明召回了正确的段落，却被整个丢掉，而且一声不吭。
+        let mut segs: Vec<TranscriptSegment> = (0..30)
+            .map(|i| seg(i, i * 70_000, i * 70_000 + 5_000, "继续讲下一个知识点"))
+            .collect();
+        segs.push(seg(
+            30,
+            30 * 70_000,
+            30 * 70_000 + 5_000,
+            "梯度下降会陷入局部极小值",
+        ));
+
+        for reply in [
+            "局部极小值 梯度下降 收敛",
+            "局部极小值、梯度下降、收敛",
+            "局部极小值，梯度下降",
+            "1. 局部极小值 2. 梯度下降",
+        ] {
+            let phrases = expansion_phrases(reply);
+            let weights = weigh_terms(reply, &segs, &[]);
+            let hit = retrieve_with(&segs, &[], &weights);
+            assert!(!hit.is_empty(), "「{reply}」应当能召回");
+            assert!(
+                !expansion_evidence_is_thin(&hit, &phrases),
+                "「{reply}」召回正确却被判成证据不足，切出来的是 {phrases:?}"
+            );
+        }
     }
 
     #[test]
