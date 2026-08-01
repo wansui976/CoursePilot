@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { AssistantActionCard } from "@/components/AssistantActionCard";
+import { AssistantActionList } from "@/components/AssistantActionCard";
 import { ipc } from "@/lib/ipc";
 import { isMobile } from "@/lib/platform";
 import { useAssistantUi } from "@/stores/assistant";
@@ -40,7 +40,6 @@ export function AssistantPanel({
   const [error, setError] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [history, setHistory] = useState<AssistantMessage[]>([]);
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   const mobile = isMobile();
   const setThemePref = useTheme((state) => state.setPref);
@@ -156,19 +155,7 @@ export function AssistantPanel({
                 {renderMarkdown(turn.answer, onSeek)}
               </div>
             )}
-            {turn.actions
-              .map((action, i) => ({ action, key: `${turn.id}-${i}` }))
-              .filter(({ key }) => !dismissed.has(key))
-              .map(({ action, key }) => (
-                <AssistantActionCard
-                  key={key}
-                  action={action}
-                  onNavigate={onNavigate}
-                  onDismiss={() =>
-                    setDismissed((prev) => new Set(prev).add(key))
-                  }
-                />
-              ))}
+            <AssistantActionList actions={turn.actions} onNavigate={onNavigate} />
             {turn.tools.length > 0 && (
               // 调了什么、来回几次，都摆出来。工具循环每一轮的结果都留在上下文里，
               // 花销是乘法涨的，不该是笔糊涂账。

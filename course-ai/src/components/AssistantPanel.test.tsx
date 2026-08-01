@@ -325,6 +325,100 @@ describe("确认卡", () => {
     expect(mockIpc.videos.updateTitle).not.toHaveBeenCalled();
   });
 
+  it("确认之后要让列表失效，否则界面还在显示旧名字", async () => {
+    // 真实反馈：确认了但名字没变。库里其实改好了，是界面在拿缓存——
+    // 应用里别处的改动都顺带做了失效，这张卡直接调 IPC，漏了这一步。
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_rename",
+            video_id: "v1",
+            current_title: "未命名",
+            new_title: "第三讲",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("改个名");
+    fireEvent.click(await screen.findByRole("button", { name: "确认改名" }));
+    await waitFor(() => expect(mockIpc.videos.updateTitle).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: ["videos"] }),
+      ),
+    );
+    invalidate.mockRestore();
+  });
+
+  it("批量改名合成一张卡，只点一次确认", async () => {
+    // 让人为一次批量改名点十下确认，等于把确认训练成一件要赶紧跳过的事，
+    // 那就再也拦不住真正该拦的那一次了。
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          { kind: "propose_rename", video_id: "v1", current_title: "01", new_title: "第一讲" },
+          { kind: "propose_rename", video_id: "v2", current_title: "02", new_title: "第二讲" },
+          { kind: "propose_rename", video_id: "v3", current_title: "03", new_title: "第三讲" },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("批量改名");
+
+    expect(await screen.findByText("3 项")).toBeInTheDocument();
+    // 只有一个确认按钮，不是三个。
+    expect(screen.getAllByRole("button", { name: /确认改名/ })).toHaveLength(1);
+    expect(screen.getByText("第一讲")).toBeInTheDocument();
+    expect(screen.getByText("第三讲")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认改名 3 项" }));
+    await waitFor(() => expect(mockIpc.videos.updateTitle).toHaveBeenCalledTimes(3));
+    expect(mockIpc.videos.updateTitle).toHaveBeenCalledWith("v2", "第二讲");
+  });
+
+  it("批量里可以单独剔掉认错的那一条", async () => {
+    // 批量里错一两个是常态，不该逼着人要么全接受要么全放弃。
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          { kind: "propose_rename", video_id: "v1", current_title: "01", new_title: "第一讲" },
+          { kind: "propose_rename", video_id: "v2", current_title: "02", new_title: "认错了" },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("批量改名");
+    fireEvent.click(await screen.findByRole("button", { name: "跳过 认错了" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "确认改名 1 项" }));
+    await waitFor(() => expect(mockIpc.videos.updateTitle).toHaveBeenCalledTimes(1));
+    expect(mockIpc.videos.updateTitle).toHaveBeenCalledWith("v1", "第一讲");
+  });
+
+  it("批量里部分失败要说清是哪几项", async () => {
+    mockIpc.videos.updateTitle
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("重名"));
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          { kind: "propose_rename", video_id: "v1", current_title: "01", new_title: "第一讲" },
+          { kind: "propose_rename", video_id: "v2", current_title: "02", new_title: "第二讲" },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("批量改名");
+    fireEvent.click(await screen.findByRole("button", { name: "确认改名 2 项" }));
+    // 只报一条错的话，用户无从知道该重做哪个。
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("1 项完成");
+    expect(alert).toHaveTextContent("第二讲");
+  });
+
   it("没有课程时导入卡直说而不是提交一个必然失败的请求", async () => {
     mockIpc.assistant.ask.mockResolvedValueOnce(
       reply({
