@@ -434,6 +434,10 @@ const EXPANSION_MAX_CHARS: usize = 100;
 /// 只在真的召不回时才走，所以常规提问不会因此多花一分钱、多等一次往返。
 /// 扩写失败、被取消、或扩出来的词一个都不值得用，都原样返回空结果，让上层照旧说
 /// 「这节课没讲到」——一个可选的增强不该把主流程带崩。
+///
+/// `on_expand` 在真要去调模型之前回调一次：这一步会多花一个来回，界面上不能干等着
+/// 什么都不说。
+#[allow(clippy::too_many_arguments)] // 检索入口：材料/问题/历史/取消/进度各有其义。
 async fn retrieve_or_expand(
     provider: &Provider,
     chat_model: &str,
@@ -442,11 +446,13 @@ async fn retrieve_or_expand(
     query: &str,
     history: &[ChatMessage],
     cancel: &AtomicBool,
+    on_expand: &mut (dyn FnMut() + Send),
 ) -> Retrieved {
     let direct = retrieve(segments, pages, query, history);
     if !direct.is_empty() {
         return direct;
     }
+    on_expand();
     let req = crate::llm::prompts::query_expansion_request(chat_model, query);
     let reply = match crate::llm::complete_or_cancel(provider, &req, cancel).await {
         Ok(Some(reply)) => reply,
@@ -575,7 +581,14 @@ pub async fn answer(
     let pages = list_slide_pages(db, video_id).await?;
     let never = AtomicBool::new(false);
     let retrieved = retrieve_or_expand(
-        provider, chat_model, &segments, &pages, query, history, &never,
+        provider,
+        chat_model,
+        &segments,
+        &pages,
+        query,
+        history,
+        &never,
+        &mut || {},
     )
     .await;
     let messages = build_chat_messages(history, query);
@@ -683,10 +696,25 @@ pub async fn answer_stream(
     });
     let segments = list_segments(db, video_id).await?;
     let pages = list_slide_pages(db, video_id).await?;
-    let retrieved = retrieve_or_expand(
-        provider, chat_model, &segments, &pages, query, history, cancel,
-    )
-    .await;
+    let retrieved = {
+        // 改写要多花一个来回，界面上不能干等着什么都不说。
+        let mut notify = || {
+            on_event(AskEvent::Status {
+                text: "没直接找到，换个说法再找一遍…".into(),
+            })
+        };
+        retrieve_or_expand(
+            provider,
+            chat_model,
+            &segments,
+            &pages,
+            query,
+            history,
+            cancel,
+            &mut notify,
+        )
+        .await
+    };
     let citations = retrieved_citations(&retrieved);
     if !citations.is_empty() {
         on_event(AskEvent::Citations {
@@ -759,11 +787,13 @@ async fn retrieve_scope_or_expand(
     query: &str,
     history: &[ChatMessage],
     cancel: &AtomicBool,
+    on_expand: &mut (dyn FnMut() + Send),
 ) -> (String, Vec<Citation>) {
     let direct = retrieve_scope_context(per_video, per_video_pages, query, history);
     if !direct.0.is_empty() {
         return direct;
     }
+    on_expand();
     let req = crate::llm::prompts::query_expansion_request(chat_model, query);
     let reply = match crate::llm::complete_or_cancel(provider, &req, cancel).await {
         Ok(Some(reply)) => reply,
@@ -928,16 +958,24 @@ pub async fn course_answer_stream(
         per_video.push((vid.clone(), title.clone(), segs));
         per_video_pages.push((vid.clone(), title.clone(), pages));
     }
-    let (context, citations) = retrieve_scope_or_expand(
-        provider,
-        chat_model,
-        &per_video,
-        &per_video_pages,
-        query,
-        history,
-        cancel,
-    )
-    .await;
+    let (context, citations) = {
+        let mut notify = || {
+            on_event(AskEvent::Status {
+                text: "没直接找到，换个说法再找一遍…".into(),
+            })
+        };
+        retrieve_scope_or_expand(
+            provider,
+            chat_model,
+            &per_video,
+            &per_video_pages,
+            query,
+            history,
+            cancel,
+            &mut notify,
+        )
+        .await
+    };
     let messages = build_chat_messages(history, query);
 
     // 命中为空：全课程的字幕和课件都没讲到，退回模型自身知识兜底（不发 Citations）。
@@ -1736,8 +1774,17 @@ mod tests {
             canned: "局部极小值 梯度".into(),
         };
         let cancel = AtomicBool::new(false);
-        let rescued =
-            retrieve_or_expand(&provider, "m", &segments, &[], "为什么会卡住", &[], &cancel).await;
+        let rescued = retrieve_or_expand(
+            &provider,
+            "m",
+            &segments,
+            &[],
+            "为什么会卡住",
+            &[],
+            &cancel,
+            &mut || {},
+        )
+        .await;
         assert!(!rescued.is_empty(), "改写之后应当能召回");
         assert!(rescued.windows[0].text.contains("局部极小值"));
     }
@@ -1759,6 +1806,7 @@ mod tests {
             "词牌名怎么分类",
             &[],
             &cancel,
+            &mut || {},
         )
         .await;
         assert!(
@@ -1775,8 +1823,17 @@ mod tests {
             canned: "局部极小值".into(),
         };
         let cancel = AtomicBool::new(true); // 用户已经点了停止
-        let out =
-            retrieve_or_expand(&provider, "m", &segments, &[], "为什么会卡住", &[], &cancel).await;
+        let out = retrieve_or_expand(
+            &provider,
+            "m",
+            &segments,
+            &[],
+            "为什么会卡住",
+            &[],
+            &cancel,
+            &mut || {},
+        )
+        .await;
         // 取消不是错误：照旧走「没讲到」，不该 panic 也不该抛错。
         assert!(out.is_empty());
     }
@@ -1819,6 +1876,37 @@ mod tests {
             other => panic!("最后一个事件应为 Done，实际 {other:?}"),
         }
         assert_eq!(ans.answer, "参数方程 是重点 [00:05]");
+    }
+
+    #[tokio::test]
+    async fn a_reword_attempt_says_so_instead_of_silently_stalling() {
+        let (db, vid, _d) = seed_gradient_lecture().await;
+        let provider = Provider::Mock {
+            canned: "局部极小值".into(),
+        };
+        let cancel = AtomicBool::new(false);
+        let mut events: Vec<AskEvent> = Vec::new();
+        answer_stream(
+            &db,
+            &provider,
+            "m",
+            &vid,
+            "为什么会卡住", // 直接检索必然空手，会触发改写
+            &[],
+            &cancel,
+            &mut |e| events.push(e),
+        )
+        .await
+        .unwrap();
+
+        // 改写要多花一个来回。不说一声的话，界面就是在那儿干等着。
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AskEvent::Status { text } if text.contains("换个说法")
+            )),
+            "触发改写时应当有进度提示，实际事件：{events:?}"
+        );
     }
 
     #[tokio::test]
