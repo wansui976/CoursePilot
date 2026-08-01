@@ -60,6 +60,45 @@ async function refreshAfter(action: Proposal, queryClient: QueryClient) {
   }
 }
 
+/**
+ * 按正常导入的完整流程走一遍，而不是只调一次裸的下载。
+ *
+ * 上一版这里只有 `importBilibili(courseId, url)`，结果是：没有字幕、没有清晰度选择、
+ * 导入完也不跑流水线——视频进来了却什么都没分析。三件事其实是同一个原因：
+ * 那几个参数不给，后端就按「不要字幕」处理；而流水线本来就靠调用方在拿到字幕后主动发起。
+ *
+ * 字幕轨的优先级与导入对话框保持一致：手打中文 > AI 中文 > 第一条。
+ * 两处规则必须一样，否则同一个视频从不同入口导进来会得到不同的字幕。
+ */
+async function importWithSubtitles(courseId: string, url: string) {
+  // B 站没有 cookies 会在下载阶段报 412。先说清楚，别让人对着一个原始错误码猜。
+  const hasCookies = await ipc.tools.hasBilibiliCookies().catch(() => false);
+  if (!hasCookies) {
+    throw new Error("还没有导入 B 站 cookies，下载会被拦截。请先在导入对话框里导入一次 cookies.txt");
+  }
+  const probe = await ipc.tools.probeBilibili(url);
+  const track =
+    probe.tracks.find((t) => !t.auto && t.lang.startsWith("zh")) ??
+    probe.tracks.find((t) => t.lang === "ai-zh") ??
+    probe.tracks[0];
+  // 纠错偏好取全局设置（未设置视为开，与流水线一致）；不带字幕时不写偏好。
+  const autocorrect = track
+    ? (await ipc.settings.get("subtitle_autocorrect").catch(() => null)) !== "false"
+    : undefined;
+
+  const video = await ipc.tools.importBilibili(
+    courseId,
+    url,
+    probe.qualities[0],
+    track?.lang,
+    autocorrect,
+  );
+
+  // 有字幕就立刻跑流水线：ASR 阶段会走字幕分支跳过语音识别，
+  // 用户不必再手动点一次「开始处理」。
+  if (track) await ipc.pipeline.process(video.id);
+}
+
 async function execute(action: Proposal) {
   switch (action.kind) {
     case "propose_rename":
@@ -73,7 +112,7 @@ async function execute(action: Proposal) {
       return;
     case "propose_import":
       if (!action.course_id) throw new Error("没有指定要导入到哪门课程");
-      await ipc.tools.importBilibili(action.course_id, action.url);
+      await importWithSubtitles(action.course_id, action.url);
       return;
     case "propose_create_course":
       await ipc.courses.create(action.name, action.root_path);

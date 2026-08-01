@@ -12,8 +12,13 @@ const { mockIpc, platformMock } = vi.hoisted(() => ({
     assistant: { ask: vi.fn() },
     videos: { updateTitle: vi.fn(), delete: vi.fn() },
     courses: { create: vi.fn(), rename: vi.fn() },
-    settings: { set: vi.fn() },
-    tools: { importBilibili: vi.fn() },
+    settings: { set: vi.fn(), get: vi.fn() },
+    tools: {
+      importBilibili: vi.fn(),
+      probeBilibili: vi.fn(),
+      hasBilibiliCookies: vi.fn(),
+    },
+    pipeline: { process: vi.fn() },
   },
   platformMock: { mobile: false },
 }));
@@ -186,6 +191,17 @@ describe("确认卡", () => {
     platformMock.mobile = false;
     useAssistantUi.setState({ open: true, side: "right" });
     mockIpc.assistant.ask.mockResolvedValue(reply());
+    mockIpc.tools.hasBilibiliCookies.mockResolvedValue(true);
+    mockIpc.tools.probeBilibili.mockResolvedValue({
+      title: "双曲线",
+      qualities: [1080, 720],
+      tracks: [
+        { lang: "ai-zh", auto: true, label: "AI 中文" },
+        { lang: "zh-Hans", auto: false, label: "中文（简体）" },
+      ],
+    });
+    mockIpc.tools.importBilibili.mockResolvedValue({ id: "newvid" });
+    mockIpc.settings.get.mockResolvedValue(null);
   });
 
   it("改名要等用户点确认才真的改", async () => {
@@ -417,6 +433,60 @@ describe("确认卡", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("1 项完成");
     expect(alert).toHaveTextContent("第二讲");
+  });
+
+  it("导入要带上字幕轨和清晰度，并在之后跑流水线", async () => {
+    // 之前这里只调了一次裸的下载：视频进来了，但没字幕、没分析。
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_import",
+            url: "https://www.bilibili.com/video/BV1",
+            title: "双曲线",
+            course_id: "c1",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("导入这个");
+    fireEvent.click(await screen.findByRole("button", { name: "确认导入" }));
+
+    await waitFor(() =>
+      expect(mockIpc.tools.importBilibili).toHaveBeenCalledWith(
+        "c1",
+        "https://www.bilibili.com/video/BV1",
+        1080,
+        // 手打中文优先于 AI 中文——必须和导入对话框用同一套规则，
+        // 否则同一个视频从不同入口导进来会拿到不同字幕。
+        "zh-Hans",
+        true,
+      ),
+    );
+    // 有字幕就要立刻跑流水线，否则用户还得自己再点一次「开始处理」。
+    await waitFor(() => expect(mockIpc.pipeline.process).toHaveBeenCalledWith("newvid"));
+  });
+
+  it("没有 cookies 时说清楚，而不是让人对着 412 猜", async () => {
+    mockIpc.tools.hasBilibiliCookies.mockResolvedValueOnce(false);
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_import",
+            url: "https://www.bilibili.com/video/BV1",
+            title: "双曲线",
+            course_id: "c1",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("导入这个");
+    fireEvent.click(await screen.findByRole("button", { name: "确认导入" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("cookies");
+    expect(mockIpc.tools.importBilibili).not.toHaveBeenCalled();
   });
 
   it("没有课程时导入卡直说而不是提交一个必然失败的请求", async () => {

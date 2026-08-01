@@ -652,7 +652,23 @@ impl AssistantTools<'_> {
                 }
                 let listed = found
                     .iter()
-                    .map(|item| format!("- {}\n  {}", item.title, item.url))
+                    .map(|item| {
+                        // UP 主和时长都要给：挑课程视频时「谁讲的、多长」往往比标题更决定选哪个，
+                        // 而模型只能转述我们给它的东西——上一版只给了标题和链接，
+                        // 于是候选列表里永远没有时长。
+                        let mut line = format!("- {}", item.title);
+                        if let Some(up) = &item.uploader {
+                            line.push_str(&format!("（UP：{up}）"));
+                        }
+                        if let Some(secs) = item.duration_secs {
+                            line.push_str(&format!(
+                                "　时长 {}",
+                                crate::pipeline::rag::mmss(secs as i64 * 1000,)
+                            ));
+                        }
+                        line.push_str(&format!("\n  {}", item.url));
+                        line
+                    })
                     .collect::<Vec<_>>()
                     .join("\n");
                 Ok(ToolOutcome::ok(format!(
