@@ -154,15 +154,49 @@ describe("AssistantPanel", () => {
     expect(onNavigate).toHaveBeenCalledWith(action);
   });
 
-  it("把调了哪些工具、来回几轮摆出来", async () => {
+  it("自己说的话显示成气泡", async () => {
+    renderPanel();
+    await ask("这讲了什么");
+    const bubble = await screen.findByTestId("user-bubble");
+    expect(bubble).toHaveTextContent("这讲了什么");
+  });
+
+  it("工具链用人话显示，不是函数名", async () => {
     mockIpc.assistant.ask.mockResolvedValueOnce(
       reply({ tools_used: ["search_content", "open_video"], turns: 3 }),
     );
     renderPanel();
     await ask("找找看");
-    // 每一轮的工具结果都留在上下文里，花销是乘法涨的，不该是笔糊涂账。
-    expect(await screen.findByText(/search_content、open_video/)).toBeInTheDocument();
-    expect(screen.getByText(/3 轮/)).toBeInTheDocument();
+    const chips = await screen.findByTestId("tool-chips");
+    expect(chips).toHaveTextContent("搜索课程内容");
+    expect(chips).toHaveTextContent("打开视频");
+    // search_content 是给模型看的标识符，摆在界面上只会让人去猜它是什么。
+    expect(chips).not.toHaveTextContent("search_content");
+    // 每轮的工具结果都留在上下文里，花销是乘法涨的，轮次要看得见。
+    expect(screen.getByText(/来回 3 轮/)).toBeInTheDocument();
+  });
+
+  it("连着调同一个工具折叠成 ×N", async () => {
+    // 真实遇到过：连搜三次 B 站，底下并排三颗一模一样的标签。
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({ tools_used: ["search_bilibili", "search_bilibili", "search_bilibili"], turns: 3 }),
+    );
+    renderPanel();
+    await ask("找视频");
+    const chips = await screen.findByTestId("tool-chips");
+    expect(chips).toHaveTextContent("搜索 B 站");
+    expect(chips).toHaveTextContent("×3");
+  });
+
+  it("会改动东西的工具标成「准备」，免得看起来像已经做了", async () => {
+    // 它只生成了确认卡、什么都没做。写成「删除视频」会让人以为已经删了，
+    // 那底下紧跟着的确认卡就白设了。
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({ tools_used: ["delete_video"], turns: 2 }),
+    );
+    renderPanel();
+    await ask("删了它");
+    expect(await screen.findByTestId("tool-chips")).toHaveTextContent("准备删除");
   });
 
   it("输入法组词时的回车不发送", async () => {
