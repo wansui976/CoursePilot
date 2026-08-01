@@ -11,7 +11,7 @@ use crate::db::Db;
 use crate::error::AppResult;
 use crate::llm::{ChatMessage, ChatRequest, Provider, StreamPiece};
 // 中文问句切词元与课程问答那边共用同一套：两处对「什么算命中」的理解必须一致。
-use crate::pipeline::search_terms::{hit_count, query_terms};
+use crate::pipeline::search_terms::{query_terms, TermWeights};
 use serde::Serialize;
 use std::sync::atomic::AtomicBool;
 
@@ -254,10 +254,27 @@ const HISTORY_TURNS_FOR_RETRIEVAL: usize = 2;
 
 /// 一个检索窗口：一段连续时间里的讲稿，加上它的最高命中分。
 struct Window {
-    score: usize,
+    score: f64,
     start_ms: i64,
     end_ms: i64,
     text: String,
+}
+
+/// 按这一次检索能看到的全部材料（讲稿段 + 课件页）统计词元稀有度。
+///
+/// 语料要取「这次搜的范围」：单视频问答就是这个视频，课程级就是整门课。同一个词在
+/// 一节课里遍地都是、在另一节课里只出现一次，它在两处本来就该有不同的分量。
+/// 讲稿和课件放进同一个语料，是因为搜索会把两种命中排进同一张列表——分开统计的话，
+/// 段数上千的讲稿和只有几十页的课件会得出量级不同的权重，排在一起就没法比。
+fn weigh_terms(query: &str, segments: &[TranscriptSegment], pages: &[SlidePage]) -> TermWeights {
+    let mut builder = TermWeights::builder(query_terms(query));
+    for seg in segments {
+        builder.add_document([seg.text.as_str()]);
+    }
+    for page in pages {
+        builder.add_document([page.ocr_text.as_str()]);
+    }
+    builder.finish()
 }
 
 /// 问答里一页课件最多放多少字。搜索列表只要 120 字够扫一眼，
@@ -271,7 +288,7 @@ const COURSE_SLIDE_LIMIT: usize = 6;
 
 /// 一页参与问答的课件。
 struct SlideRef {
-    score: usize,
+    score: f64,
     page_no: i64,
     start_ms: i64,
     end_ms: i64,
@@ -297,28 +314,32 @@ impl Retrieved {
 
 /// 用一句给定的检索文本召回讲稿窗口与课件页（不含历史回退）。
 fn retrieve_once(segments: &[TranscriptSegment], pages: &[SlidePage], query: &str) -> Retrieved {
-    let mut slides: Vec<SlideRef> = scored_slide_pages(pages, query)
+    let weights = weigh_terms(query, segments, pages);
+    let mut slides: Vec<SlideRef> = scored_slide_pages(pages, &weights)
         .into_iter()
-        .map(|(score, page)| slide_ref(score, page, query))
+        .map(|(score, page)| slide_ref(score, page, &weights))
         .collect();
     // 命中多的页优先，同分按出现时间；只留前几页。
-    slides.sort_by(|a, b| b.score.cmp(&a.score).then(a.start_ms.cmp(&b.start_ms)));
+    slides.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then(a.start_ms.cmp(&b.start_ms))
+    });
     slides.truncate(SLIDE_ASK_MAX_PAGES);
     slides.sort_by_key(|slide| slide.start_ms);
     Retrieved {
-        windows: windows_from_hits(segments, query, WINDOW_BUDGET_CHARS),
+        windows: windows_from_hits(segments, &weights, WINDOW_BUDGET_CHARS),
         slides,
     }
 }
 
-fn slide_ref(score: usize, page: SlidePage, query: &str) -> SlideRef {
-    let terms = query_terms(query);
+fn slide_ref(score: f64, page: SlidePage, weights: &TermWeights) -> SlideRef {
     SlideRef {
         score,
         page_no: page.page_no,
         start_ms: page.start_ms,
         end_ms: page.end_ms.unwrap_or(page.start_ms),
-        text: slide_snippet(&page.ocr_text, &terms, SLIDE_ASK_CHARS),
+        text: slide_snippet(&page.ocr_text, weights.terms(), SLIDE_ASK_CHARS),
         image_path: page.image_path,
     }
 }
@@ -374,17 +395,17 @@ fn retrieve(
 /// 纯函数，可单测。
 fn windows_from_hits(
     segments: &[TranscriptSegment],
-    query: &str,
+    weights: &TermWeights,
     budget_chars: usize,
 ) -> Vec<Window> {
-    let terms = query_terms(query);
-    if terms.is_empty() {
+    if weights.is_empty() {
         return Vec::new();
     }
-    let mut ranges: Vec<(usize, i64, i64)> = Vec::new();
+    let mut ranges: Vec<(f64, i64, i64)> = Vec::new();
     for seg in segments {
-        let score = hit_count(&seg.text, &terms);
-        if score == 0 {
+        let score = weights.score(&seg.text);
+        // 权重恒为正，所以「等于 0」精确等于「一个词元都没命中」，不是一个要调的阈值。
+        if score == 0.0 {
             continue;
         }
         ranges.push((
@@ -398,7 +419,7 @@ fn windows_from_hits(
     }
     // 按时间合并重叠/相邻区间，分数取区间内最高。
     ranges.sort_by_key(|(_, start, _)| *start);
-    let mut merged: Vec<(usize, i64, i64)> = Vec::new();
+    let mut merged: Vec<(f64, i64, i64)> = Vec::new();
     for (score, start, end) in ranges {
         match merged.last_mut() {
             Some(last) if start <= last.2 => {
@@ -434,7 +455,11 @@ fn windows_from_hits(
         .collect();
 
     // 先按分数取（好的优先进预算），再按时间排序输出——读起来才是顺序的。
-    windows.sort_by(|a, b| b.score.cmp(&a.score).then(a.start_ms.cmp(&b.start_ms)));
+    windows.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then(a.start_ms.cmp(&b.start_ms))
+    });
     let mut used = 0usize;
     windows.retain(|window| {
         let size = window.text.chars().count();
@@ -642,16 +667,32 @@ fn retrieve_scope_context(
 }
 
 /// 用一句给定的检索文本装配课程级上下文：字幕命中 + 课件页命中。
+///
+/// 词元稀有度按**整门课**统计：一个术语在某一节课里反复出现、在全课程里却只出现在
+/// 那一节，正说明那一节就是讲它的地方，这个信号只有把整门课当语料才看得见。
 fn scope_context_once(
     per_video: &[(String, String, Vec<TranscriptSegment>)],
     per_video_pages: &[(String, String, Vec<SlidePage>)],
     query: &str,
 ) -> (String, Vec<Citation>) {
+    let mut builder = TermWeights::builder(query_terms(query));
+    for (_, _, segments) in per_video {
+        for seg in segments {
+            builder.add_document([seg.text.as_str()]);
+        }
+    }
+    for (_, _, pages) in per_video_pages {
+        for page in pages {
+            builder.add_document([page.ocr_text.as_str()]);
+        }
+    }
+    let weights = builder.finish();
+
     let (transcript, transcript_cites) =
-        assemble_scope_context(per_video, query, PER_VIDEO_TOPK, COURSE_CONTEXT_LIMIT);
+        assemble_scope_context(per_video, &weights, PER_VIDEO_TOPK, COURSE_CONTEXT_LIMIT);
     let (slides, slide_cites) = assemble_scope_slides(
         per_video_pages,
-        query,
+        &weights,
         COURSE_SLIDE_PER_VIDEO,
         COURSE_SLIDE_LIMIT,
     );
@@ -675,27 +716,27 @@ fn scope_context_once(
 /// 纯函数：不触 LLM/DB，可单测。
 pub fn assemble_scope_slides(
     per_video: &[(String, String, Vec<SlidePage>)],
-    query: &str,
+    weights: &TermWeights,
     per_video_topk: usize,
     limit: usize,
 ) -> (String, Vec<Citation>) {
-    let terms = query_terms(query);
-    let mut global: Vec<(usize, String, String, SlidePage)> = Vec::new();
+    let terms = weights.terms();
+    let mut global: Vec<(f64, String, String, SlidePage)> = Vec::new();
     for (vid, title, pages) in per_video {
-        let mut scored = scored_slide_pages(pages, query);
-        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.start_ms.cmp(&b.1.start_ms)));
+        let mut scored = scored_slide_pages(pages, weights);
+        scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.start_ms.cmp(&b.1.start_ms)));
         scored.truncate(per_video_topk);
         for (score, page) in scored {
             global.push((score, vid.clone(), title.clone(), page));
         }
     }
-    global.sort_by(|a, b| b.0.cmp(&a.0).then(a.3.start_ms.cmp(&b.3.start_ms)));
+    global.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.3.start_ms.cmp(&b.3.start_ms)));
     global.truncate(limit);
 
     let mut context = String::new();
     let mut citations = Vec::with_capacity(global.len());
     for (i, (_, vid, title, page)) in global.into_iter().enumerate() {
-        let snippet = slide_snippet(&page.ocr_text, &terms, SLIDE_ASK_CHARS);
+        let snippet = slide_snippet(&page.ocr_text, terms, SLIDE_ASK_CHARS);
         if !context.is_empty() {
             context.push('\n');
         }
@@ -794,20 +835,23 @@ pub async fn course_answer_stream(
 
 // ---------- 文稿关键词搜索（本地，无 LLM） ----------
 
-/// 在字幕段里做关键词匹配：按命中词数排序，再按时间。空查询返回空。
+/// 在字幕段里做关键词匹配：按相关度排序，再按时间。空查询返回空。
 ///
 /// 词元由 [`query_terms`] 切（中文按二字组）。原来是按空白切的，
 /// 于是「光合作用是什么」整串成了一个词元，而字幕里写的是「讲解光合作用」——
 /// 一个字都对不上，检索空手而归，问答再退化成「模型凭自己的知识回答」。
-fn scored_segments(segments: &[TranscriptSegment], query: &str) -> Vec<(usize, TranscriptSegment)> {
-    let terms = query_terms(query);
-    if terms.is_empty() {
+/// 分数由 [`TermWeights`] 给：稀有词元说话更响，不再是「命中几个算几分」。
+fn scored_segments(
+    segments: &[TranscriptSegment],
+    weights: &TermWeights,
+) -> Vec<(f64, TranscriptSegment)> {
+    if weights.is_empty() {
         return Vec::new();
     }
     let mut scored = Vec::new();
     for seg in segments {
-        let score = hit_count(&seg.text, &terms);
-        if score > 0 {
+        let score = weights.score(&seg.text);
+        if score > 0.0 {
             scored.push((score, seg.clone()));
         }
     }
@@ -890,27 +934,22 @@ pub fn slide_snippet(text: &str, terms: &[String], limit: usize) -> String {
     out
 }
 
-fn scored_slide_pages(pages: &[SlidePage], query: &str) -> Vec<(usize, SlidePage)> {
-    let terms = query_terms(query);
-    if terms.is_empty() {
+fn scored_slide_pages(pages: &[SlidePage], weights: &TermWeights) -> Vec<(f64, SlidePage)> {
+    if weights.is_empty() {
         return Vec::new();
     }
     pages
         .iter()
         .filter_map(|page| {
-            let lc = page.ocr_text.to_lowercase();
-            let score = terms
-                .iter()
-                .filter(|term| lc.contains(term.as_str()))
-                .count();
-            (score > 0).then(|| (score, page.clone()))
+            let score = weights.score(&page.ocr_text);
+            (score > 0.0).then(|| (score, page.clone()))
         })
         .collect()
 }
 
 /// 搜索命中的中间表示：字幕段与课件页在这里合流，排完序再统一编号成引用。
 struct Hit {
-    score: usize,
+    score: f64,
     start_ms: i64,
     end_ms: i64,
     text: String,
@@ -919,24 +958,28 @@ struct Hit {
     video: Option<(String, String)>,
 }
 
-fn slide_hit(score: usize, page: SlidePage, query: &str, video: Option<(String, String)>) -> Hit {
-    let terms = query_terms(query);
+fn slide_hit(
+    score: f64,
+    page: SlidePage,
+    weights: &TermWeights,
+    video: Option<(String, String)>,
+) -> Hit {
     Hit {
         score,
         start_ms: page.start_ms,
         end_ms: page.end_ms.unwrap_or(page.start_ms),
-        text: slide_snippet(&page.ocr_text, &terms, SLIDE_SNIPPET_CHARS),
+        text: slide_snippet(&page.ocr_text, weights.terms(), SLIDE_SNIPPET_CHARS),
         slide: Some((page.image_path, page.page_no)),
         video,
     }
 }
 
-/// 命中数降序 → 课件页优先 → 时间升序。
-/// 同样命中时把课件页排前面：写在片子上的术语比听写下来的更可靠。
+/// 相关度降序 → 课件页优先 → 时间升序。
+/// 同样相关时把课件页排前面：写在片子上的术语比听写下来的更可靠。
 fn rank_hits(hits: &mut [Hit]) {
     hits.sort_by(|a, b| {
         b.score
-            .cmp(&a.score)
+            .total_cmp(&a.score)
             .then(b.slide.is_some().cmp(&a.slide.is_some()))
             .then(a.start_ms.cmp(&b.start_ms))
     });
@@ -974,7 +1017,8 @@ pub fn keyword_search_segments(
     query: &str,
     limit: usize,
 ) -> Vec<Citation> {
-    let mut hits: Vec<Hit> = scored_segments(segments, query)
+    let weights = weigh_terms(query, segments, &[]);
+    let mut hits: Vec<Hit> = scored_segments(segments, &weights)
         .into_iter()
         .map(|(score, seg)| Hit {
             score,
@@ -997,7 +1041,8 @@ pub async fn keyword_search(
 ) -> AppResult<Vec<Citation>> {
     let segments = list_segments(db, video_id).await?;
     let pages = list_slide_pages(db, video_id).await?;
-    let mut hits: Vec<Hit> = scored_segments(&segments, query)
+    let weights = weigh_terms(query, &segments, &pages);
+    let mut hits: Vec<Hit> = scored_segments(&segments, &weights)
         .into_iter()
         .map(|(score, seg)| Hit {
             score,
@@ -1008,25 +1053,44 @@ pub async fn keyword_search(
             video: None,
         })
         .collect();
-    for (score, page) in scored_slide_pages(&pages, query) {
-        hits.push(slide_hit(score, page, query, None));
+    for (score, page) in scored_slide_pages(&pages, &weights) {
+        hits.push(slide_hit(score, page, &weights, None));
     }
     rank_hits(&mut hits);
     Ok(to_citations(hits, limit))
 }
 
 /// 跨视频（课程级/全部）关键词搜索：合并各视频的字幕段与课件页命中，
-/// 按命中数、课件优先、再按时间全局排序，每条引用带来源视频。
+/// 按相关度、课件优先、再按时间全局排序，每条引用带来源视频。
+///
+/// 先把整个范围的材料读齐再打分：词元稀有度要按「这次搜的全部范围」统计，
+/// 边读边算的话每个视频各算各的，跨视频的分数就不可比了。
 pub async fn keyword_search_scope(
     db: &Db,
     videos: &[(String, String)],
     query: &str,
     limit: usize,
 ) -> AppResult<Vec<Citation>> {
-    let mut hits: Vec<Hit> = Vec::new();
+    let mut loaded: Vec<(String, String, Vec<TranscriptSegment>, Vec<SlidePage>)> =
+        Vec::with_capacity(videos.len());
+    let mut builder = TermWeights::builder(query_terms(query));
     for (vid, title) in videos {
-        let source = Some((vid.clone(), title.clone()));
-        for (score, seg) in scored_segments(&list_segments(db, vid).await?, query) {
+        let segments = list_segments(db, vid).await?;
+        let pages = list_slide_pages(db, vid).await?;
+        for seg in &segments {
+            builder.add_document([seg.text.as_str()]);
+        }
+        for page in &pages {
+            builder.add_document([page.ocr_text.as_str()]);
+        }
+        loaded.push((vid.clone(), title.clone(), segments, pages));
+    }
+    let weights = builder.finish();
+
+    let mut hits: Vec<Hit> = Vec::new();
+    for (vid, title, segments, pages) in loaded {
+        let source = Some((vid, title));
+        for (score, seg) in scored_segments(&segments, &weights) {
             hits.push(Hit {
                 score,
                 start_ms: seg.start_ms,
@@ -1036,8 +1100,8 @@ pub async fn keyword_search_scope(
                 video: source.clone(),
             });
         }
-        for (score, page) in scored_slide_pages(&list_slide_pages(db, vid).await?, query) {
-            hits.push(slide_hit(score, page, query, source.clone()));
+        for (score, page) in scored_slide_pages(&pages, &weights) {
+            hits.push(slide_hit(score, page, &weights, source.clone()));
         }
     }
     rank_hits(&mut hits);
@@ -1057,29 +1121,29 @@ pub fn mmss(ms: i64) -> String {
 }
 
 /// 装配跨视频问答的上下文（两段式）：
-/// 第一段每视频只保留命中最高的前 `per_video_topk` 段（命中数降序、再按时间），
+/// 第一段每视频只保留最相关的前 `per_video_topk` 段（相关度降序、再按时间），
 /// 保证跨视频覆盖、不让单个高命中视频挤占全部名额；第二段把各视频候选全局重排、取前 `limit`。
 /// 拼成带来源标签 `〈标题 mm:ss〉文本` 的上下文（供单次 LLM 调用），并返回等长的引用列表
 /// （带来源 video_id/title，供前端渲染可点击跳转的出处）。纯函数：不触 LLM/DB，可单测。
 /// `per_video` 为 (video_id, video_title, segments)。查询无命中时返回 (空串, 空表)。
 pub fn assemble_scope_context(
     per_video: &[(String, String, Vec<TranscriptSegment>)],
-    query: &str,
+    weights: &TermWeights,
     per_video_topk: usize,
     limit: usize,
 ) -> (String, Vec<Citation>) {
-    let mut global: Vec<(usize, String, String, TranscriptSegment)> = Vec::new();
+    let mut global: Vec<(f64, String, String, TranscriptSegment)> = Vec::new();
     for (vid, title, segs) in per_video {
-        // 第一段：每视频粗筛，只取命中最高的前 K 段。
-        let mut scored = scored_segments(segs, query);
-        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.start_ms.cmp(&b.1.start_ms)));
+        // 第一段：每视频粗筛，只取最相关的前 K 段。
+        let mut scored = scored_segments(segs, weights);
+        scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.start_ms.cmp(&b.1.start_ms)));
         scored.truncate(per_video_topk);
         for (score, seg) in scored {
             global.push((score, vid.clone(), title.clone(), seg));
         }
     }
-    // 第二段：全局重排（命中数降序、再按时间），取前 limit。
-    global.sort_by(|a, b| b.0.cmp(&a.0).then(a.3.start_ms.cmp(&b.3.start_ms)));
+    // 第二段：全局重排（相关度降序、再按时间），取前 limit。
+    global.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.3.start_ms.cmp(&b.3.start_ms)));
     global.truncate(limit);
 
     let mut context = String::new();
@@ -1106,6 +1170,25 @@ pub fn assemble_scope_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 按这批讲稿段建词元权重（测试里绝大多数场景没有课件页）。
+    fn weigh(query: &str, segments: &[TranscriptSegment]) -> TermWeights {
+        weigh_terms(query, segments, &[])
+    }
+
+    /// 课程级：按整门课的讲稿段建权重。
+    fn weigh_scope(
+        query: &str,
+        per_video: &[(String, String, Vec<TranscriptSegment>)],
+    ) -> TermWeights {
+        let mut builder = TermWeights::builder(query_terms(query));
+        for (_, _, segments) in per_video {
+            for seg in segments {
+                builder.add_document([seg.text.as_str()]);
+            }
+        }
+        builder.finish()
+    }
 
     fn seg(idx: i64, start_ms: i64, end_ms: i64, text: &str) -> TranscriptSegment {
         TranscriptSegment {
@@ -1277,7 +1360,9 @@ mod tests {
         ];
         // 「那第二种呢」自己几乎没有可检索的词：只看本轮问题会一个窗口都召不回，
         // 于是被判成「这节课没讲到」，而上一轮明明已经聊清楚主题了。
-        assert!(windows_from_hits(&segs, "那第二种呢", WINDOW_BUDGET_CHARS).is_empty());
+        assert!(
+            windows_from_hits(&segs, &weigh("那第二种呢", &segs), WINDOW_BUDGET_CHARS).is_empty()
+        );
 
         let history = vec![
             ChatMessage {
@@ -1339,7 +1424,7 @@ mod tests {
             seg(3, 600_000, 605_000, "完全无关的内容"),
             seg(4, 900_000, 905_000, "又提到光合作用"),
         ];
-        let windows = windows_from_hits(&segs, "光合作用", WINDOW_BUDGET_CHARS);
+        let windows = windows_from_hits(&segs, &weigh("光合作用", &segs), WINDOW_BUDGET_CHARS);
 
         // 10s 与 20s 两处命中扩窗后重叠 → 合成一个窗口；900s 那处单独一个。
         assert_eq!(windows.len(), 2);
@@ -1363,16 +1448,57 @@ mod tests {
                 "光合作用相关的一段内容反复出现",
             ));
         }
-        let windows = windows_from_hits(&segs, "光合作用", 400);
+        let windows = windows_from_hits(&segs, &weigh("光合作用", &segs), 400);
         let total: usize = windows.iter().map(|w| w.text.chars().count()).sum();
         assert!(total <= 400 + 60, "总量要压在预算附近，实际 {total}");
         assert!(!windows.is_empty());
     }
 
+    /// 问「熵 作用」，两个词元各值多少：一节课里「作用」遍地都是，「熵」只讲一处。
+    /// 每种段落都恰好命中其中一个词元——所以按「命中几个词元」计分时两者完全同分，
+    /// 只有引入稀有度才分得出高下。
+    fn entropy_lecture() -> Vec<TranscriptSegment> {
+        // 相邻段间隔 70 秒。扩窗是前后各 30 秒，所以间隔必须大于 65 秒，
+        // 否则相邻窗口首尾相接会被合并成一个，测不出「谁挤掉谁」。
+        let mut segs: Vec<TranscriptSegment> = (0..20)
+            .map(|i| seg(i, i * 70_000, i * 70_000 + 5_000, "这个作用很重要"))
+            .collect();
+        // 放在最后，免得是靠时间靠前侥幸留下的。
+        segs.push(seg(20, 20 * 70_000, 20 * 70_000 + 5_000, "熵在这里定义"));
+        segs
+    }
+
+    #[test]
+    fn the_rare_term_survives_the_budget_and_the_ubiquitous_one_does_not() {
+        let segs = entropy_lecture();
+        // 同分时排序退回按时间，于是预算全被前面那二十段「作用」吃光，
+        // 真正讲「熵」的那一段挤不进去——这正是加权重要修的毛病。
+        let windows = windows_from_hits(&segs, &weigh("熵 作用", &segs), 20);
+        assert_eq!(windows.len(), 1, "预算只够一个窗口");
+        assert!(
+            windows[0].text.contains("熵"),
+            "留下的应该是稀有词那一段，实际是：{}",
+            windows[0].text
+        );
+    }
+
+    #[test]
+    fn a_search_puts_the_rare_term_first() {
+        let segs = entropy_lecture();
+        let hits = keyword_search_segments(&segs, "熵 作用", 30);
+        // 只命中「作用」的那些段仍然算命中（确实含查询词），只是排在后面。
+        assert!(hits.len() > 1);
+        assert!(
+            hits[0].text.contains("熵"),
+            "最相关的应排第一，实际是：{}",
+            hits[0].text
+        );
+    }
+
     #[test]
     fn an_empty_query_retrieves_nothing() {
         let segs = vec![seg(0, 0, 5_000, "随便一句")];
-        assert!(windows_from_hits(&segs, "   ", WINDOW_BUDGET_CHARS).is_empty());
+        assert!(windows_from_hits(&segs, &weigh("   ", &segs), WINDOW_BUDGET_CHARS).is_empty());
     }
 
     #[tokio::test]
@@ -1525,7 +1651,7 @@ mod tests {
     fn equal_hits_put_the_slide_first() {
         let mut hits = vec![
             Hit {
-                score: 1,
+                score: 1.0,
                 start_ms: 1_000,
                 end_ms: 2_000,
                 text: "讲稿".into(),
@@ -1533,7 +1659,7 @@ mod tests {
                 video: None,
             },
             Hit {
-                score: 1,
+                score: 1.0,
                 start_ms: 9_000,
                 end_ms: 9_500,
                 text: "板书".into(),
@@ -1623,7 +1749,12 @@ mod tests {
                 ],
             ),
         ];
-        let (context, citations) = assemble_scope_context(&per_video, "光合作用 暗反应", 10, 10);
+        let (context, citations) = assemble_scope_context(
+            &per_video,
+            &weigh_scope("光合作用 暗反应", &per_video),
+            10,
+            10,
+        );
 
         // v2 那段两个词都命中（score=2）应排在 v1 之前。
         assert_eq!(citations.len(), 2);
@@ -1644,7 +1775,8 @@ mod tests {
             "第一讲".to_string(),
             vec![seg(0, 0, 1000, "别的话题")],
         )];
-        let (context, citations) = assemble_scope_context(&per_video, "光合作用", 10, 10);
+        let (context, citations) =
+            assemble_scope_context(&per_video, &weigh_scope("光合作用", &per_video), 10, 10);
         assert!(context.is_empty());
         assert!(citations.is_empty());
     }
@@ -1661,7 +1793,8 @@ mod tests {
             ("B".to_string(), "视频B".to_string(), b_segs),
         ];
 
-        let (_ctx, cites) = assemble_scope_context(&per_video, "x", 2, 10);
+        let (_ctx, cites) =
+            assemble_scope_context(&per_video, &weigh_scope("x", &per_video), 2, 10);
 
         // A 被截到前 2 段（同分按时间靠前：0、1000），2000/3000/4000 落选。
         let a_times: Vec<i64> = cites

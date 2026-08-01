@@ -70,11 +70,94 @@ pub fn query_terms(query: &str) -> Vec<String> {
     terms
 }
 
-/// 一段文本命中了几个不同词元。计的是「命中几个词元」而非出现次数，
-/// 长文本不会靠反复出现同一个词压过短而精准的命中。
-pub fn hit_count(text: &str, terms: &[String]) -> usize {
-    let lowered = text.to_lowercase();
-    terms.iter().filter(|term| lowered.contains(*term)).count()
+/// 词元在这批材料里的稀有度权重（IDF），以及用它给一段文本打分。
+///
+/// 为什么需要：原来计分是「命中了几个不同词元」，命中「作用」和命中「贝叶斯」一样重。
+/// 中文二字组尤其吃这个亏——「作用」「问题」「方法」「一个」这类组合在任何一门课的
+/// 字幕里都遍地都是，它们把真正能区分内容的那个词淹没掉，于是排在最前面的常常是
+/// 「哪儿都沾一点、哪儿都不对」的段落，而真正写着那个术语的一句反而挤不进预算。
+///
+/// 用的是 BM25 那一支的 IDF：`ln(1 + (N - df + 0.5) / (df + 0.5))`。选它是因为它**恒为正**，
+/// 于是「有没有命中」这个判断完全不受影响：得分为 0 仍然精确等于「一个词元都没命中」。
+/// 上层「这节课没讲到 → 干脆不喂字幕、让模型明说这是它自己的知识」正是靠这个干脆的
+/// 零信号，不能因为引入权重就变成一个要调的阈值。
+///
+/// 词频仍然按「命中/未命中」算，不数出现次数：字幕段本来就短，同一个词重复出现多半是
+/// 口语重复，不代表更相关。
+pub struct TermWeights {
+    terms: Vec<String>,
+    idf: Vec<f64>,
+}
+
+impl TermWeights {
+    /// 开始统计：给定查询词元，逐篇喂入被检索的材料，最后 `finish` 得到权重。
+    pub fn builder(terms: Vec<String>) -> TermWeightsBuilder {
+        TermWeightsBuilder {
+            df: vec![0; terms.len()],
+            terms,
+            documents: 0,
+        }
+    }
+
+    /// 切出来的词元原样（挑摘要行、拼提示词时要用）。
+    pub fn terms(&self) -> &[String] {
+        &self.terms
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.terms.is_empty()
+    }
+
+    /// 一段文本的相关度：命中的词元权重之和；一个都没命中就是 0。
+    pub fn score(&self, text: &str) -> f64 {
+        let lowered = text.to_lowercase();
+        self.terms
+            .iter()
+            .zip(&self.idf)
+            .filter(|(term, _)| lowered.contains(term.as_str()))
+            .map(|(_, idf)| *idf)
+            .sum()
+    }
+}
+
+pub struct TermWeightsBuilder {
+    terms: Vec<String>,
+    df: Vec<usize>,
+    documents: usize,
+}
+
+impl TermWeightsBuilder {
+    /// 记一篇材料。`parts` 是它的各个字段（如知识点的名称/摘要/解释）：
+    /// 只要有一处出现，这篇就算含有该词元——df 统计的是「多少篇里有」，不是出现次数。
+    pub fn add_document<'a>(&mut self, parts: impl IntoIterator<Item = &'a str>) {
+        let lowered: Vec<String> = parts
+            .into_iter()
+            .map(|part| part.to_lowercase())
+            .filter(|part| !part.is_empty())
+            .collect();
+        self.documents += 1;
+        for (i, term) in self.terms.iter().enumerate() {
+            if lowered.iter().any(|part| part.contains(term.as_str())) {
+                self.df[i] += 1;
+            }
+        }
+    }
+
+    pub fn finish(self) -> TermWeights {
+        let n = self.documents as f64;
+        let idf = self
+            .df
+            .iter()
+            .map(|df| {
+                let df = *df as f64;
+                (1.0 + (n - df + 0.5) / (df + 0.5)).ln()
+            })
+            .collect();
+        TermWeights {
+            terms: self.terms,
+            idf,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -89,7 +172,8 @@ mod tests {
         assert!(terms.contains(&"光合".to_string()));
         assert!(terms.contains(&"合作".to_string()));
         assert!(terms.contains(&"作用".to_string()));
-        assert!(hit_count("这节课讲解光合作用的两个阶段", &terms) >= 3);
+        let hits = weights("光合作用是什么", &["这节课讲解光合作用的两个阶段"]);
+        assert!(hits.score("这节课讲解光合作用的两个阶段") > 0.0);
         // 填充词不参与：否则任何一句含「什么」的字幕都算命中。
         assert!(!terms.contains(&"什么".to_string()));
     }
@@ -118,12 +202,77 @@ mod tests {
         assert!(query_terms("   ").is_empty());
     }
 
+    /// 按一批文档建权重，省掉每个测试里的样板。
+    fn weights(query: &str, documents: &[&str]) -> TermWeights {
+        let mut builder = TermWeights::builder(query_terms(query));
+        for doc in documents {
+            builder.add_document([*doc]);
+        }
+        builder.finish()
+    }
+
     #[test]
-    fn hit_count_counts_distinct_terms_not_repeats() {
-        let terms = query_terms("光合作用");
-        let once = hit_count("光合作用", &terms);
-        // 同一段话把词重复十遍，命中数不该翻十倍。
-        assert_eq!(hit_count(&"光合作用".repeat(10), &terms), once);
-        assert_eq!(hit_count("完全无关的一句话", &terms), 0);
+    fn scoring_counts_distinct_terms_not_repeats() {
+        let w = weights("光合作用", &["光合作用"]);
+        let once = w.score("光合作用");
+        // 同一段话把词重复十遍，得分不该翻十倍：字幕段本来就短，重复多半只是口语重复。
+        assert_eq!(w.score(&"光合作用".repeat(10)), once);
+        assert_eq!(w.score("完全无关的一句话"), 0.0);
+    }
+
+    #[test]
+    fn a_rare_term_outweighs_one_that_is_everywhere() {
+        // 「作用」在整门课里遍地都是，「熵」只讲一处。两句各自**只**命中一个词元，
+        // 所以按「命中几个词元」计分时它们完全同分——只有稀有度能分出高下。
+        let mut corpus = vec!["熵在这里定义"];
+        for _ in 0..20 {
+            corpus.push("这个作用很重要");
+        }
+        let w = weights("熵 作用", &corpus);
+
+        let rare = w.score("讲熵");
+        let common = w.score("讲作用");
+        assert!(
+            rare > common,
+            "只出现一处的词应当更有分量：rare={rare}, common={common}"
+        );
+        // 两个都命中的那句最高——权重是加起来的，没有谁被无视。
+        assert!(w.score("熵的作用") > rare);
+    }
+
+    #[test]
+    fn a_miss_is_still_exactly_zero() {
+        // 上层「这节课没讲到」全靠这个干脆的零信号：加了权重也不能变成一个要调的阈值。
+        let w = weights("贝叶斯", &["讲光合作用", "讲细胞呼吸"]);
+        assert_eq!(w.score("讲光合作用"), 0.0);
+        // 反过来，只要命中就必须严格大于 0，哪怕这个词每篇材料里都有。
+        let everywhere = weights("作用", &["讲作用", "还是作用", "仍然是作用"]);
+        assert!(everywhere.score("讲作用") > 0.0);
+    }
+
+    #[test]
+    fn a_document_counts_once_however_many_fields_hold_the_term() {
+        // 知识点这类多字段材料：名称和解释里都写了同一个词，df 只加一次，
+        // 否则字段多的材料会把自己命中的词压成「很常见」。
+        let mut builder = TermWeights::builder(query_terms("贝叶斯"));
+        builder.add_document(["贝叶斯定理", "用贝叶斯定理求后验概率"]);
+        builder.add_document(["光合作用", "叶绿体里的反应"]);
+        let two_fields = builder.finish().score("贝叶斯");
+
+        let mut builder = TermWeights::builder(query_terms("贝叶斯"));
+        builder.add_document(["贝叶斯定理"]);
+        builder.add_document(["光合作用"]);
+        assert_eq!(builder.finish().score("贝叶斯"), two_fields);
+    }
+
+    #[test]
+    fn no_corpus_degrades_to_plain_term_counting() {
+        // 一篇材料都没有时（空课程、还没转写的视频）权重退化成均匀，
+        // 相当于回到原来的「数命中了几个词元」，不会除零也不会 NaN。
+        let w = TermWeights::builder(query_terms("光合作用")).finish();
+        let one = w.score("光合");
+        assert!(one.is_finite() && one > 0.0);
+        // 三个词元全中 → 恰好是单个的三倍（均匀权重）。
+        assert!((w.score("光合作用") - one * 3.0).abs() < 1e-9);
     }
 }
