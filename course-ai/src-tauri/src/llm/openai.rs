@@ -47,9 +47,9 @@ pub fn build_openai_body(req: &ChatRequest) -> Value {
     for m in &req.messages {
         messages.push(json!({"role": m.role, "content": m.content}));
     }
-    // OpenAI 规范里 max_tokens 是可选的：省略它，模型就用自身的最大输出预算，
-    // 避免我们这边写死的上限把长输出（出题/纠错的 JSON）截断。
-    // 这是唯一的出站通道，所以 ChatRequest.max_tokens 现在实际不生效。
+    // 不发 max_tokens：OpenAI 规范里它可选，省略后模型用自身的最大输出预算，
+    // 免得我们写死的上限把长输出（出题/纠错的 JSON）截断。
+    // ChatRequest 上原本有这个字段，但没有任何通道读它，已删——别再加回来。
     json!({
         "model": req.model,
         "messages": messages,
@@ -363,7 +363,6 @@ mod tests {
                 content: "summarize".into(),
             }],
             temperature: 0.3,
-            max_tokens: 512,
         }
     }
 

@@ -27,10 +27,6 @@ pub struct ChatRequest {
     pub cacheable_context: Option<String>,
     pub messages: Vec<ChatMessage>,
     pub temperature: f32,
-    /// 目前**不会被发出去**：OpenAI 规范里它是可选的，我们特意省略，免得写死的上限
-    /// 把长输出截断（见 openai 侧 body 构造）。删掉 Anthropic 后就没有任何通道读它了。
-    /// 留着是给将来真需要封顶时用；改这个数字现在不会有任何效果。
-    pub max_tokens: u32,
 }
 
 /// 把 temperature 量化到 2 位小数再发给服务端。
@@ -241,7 +237,6 @@ mod tests {
                 content: "hi".into(),
             }],
             temperature: 0.2,
-            max_tokens: 100,
         };
         assert_eq!(provider.complete(&req).await.unwrap().content, "hello");
     }
@@ -253,7 +248,6 @@ mod tests {
             cacheable_context: None,
             messages: vec![],
             temperature: 0.2,
-            max_tokens: 64,
         }
     }
 

@@ -714,7 +714,6 @@ fn knowledge_summary_request(model: &str, catalog: &KnowledgeCatalog) -> AppResu
                 .into(),
         }],
         temperature: 0.1,
-        max_tokens: 8192,
     })
 }
 
@@ -1294,7 +1293,6 @@ pub async fn course_chat_stream(
         cacheable_context,
         messages: build_chat_messages(history, &turn),
         temperature: 0.3,
-        max_tokens: 1024,
     };
     let answer = provider
         .complete_stream(&req, cancel, &mut |piece| match piece {
@@ -1388,7 +1386,6 @@ fn concept_explanation_request(model: &str, name: &str, context_text: &str) -> C
             content: format!("请依据这些片段，较全面地讲解知识点「{name}」。"),
         }],
         temperature: 0.3,
-        max_tokens: 900,
     }
 }
 
@@ -1512,7 +1509,6 @@ fn concept_canonicalization_request(model: &str, names: &[String]) -> AppResult<
                 .into(),
         }],
         temperature: 0.1,
-        max_tokens: 4096,
     })
 }
 
@@ -1628,7 +1624,6 @@ pub async fn analyze_course_concepts(
                     content: "抽取本段知识点。".into(),
                 }],
                 temperature: 0.1,
-                max_tokens: 1600,
             };
             let extracted = match provider.complete(&req).await {
                 Ok(response) => parse_concepts_json(&response.content),
