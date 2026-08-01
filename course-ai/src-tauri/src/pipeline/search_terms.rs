@@ -141,6 +141,41 @@ impl TermWeights {
             .map(|(_, idf)| *idf)
             .sum()
     }
+
+    /// 一段文本命中了**几个不同**词元。用来判断证据强弱：
+    /// 一整个术语会切出好几个二字组，真命中那一段通常同时中好几个；
+    /// 只中一个多半是某个二字组碰巧撞上了。
+    pub fn hit_count(&self, text: &str) -> usize {
+        let lowered = text.to_lowercase();
+        self.terms
+            .iter()
+            .filter(|term| lowered.contains(term.as_str()))
+            .count()
+    }
+
+    /// 只留下满足条件的词元，**不重新扫语料**。
+    ///
+    /// 之所以能这么干：一个词的 df 是「多少篇材料含它」，与集合里有没有别的词无关，
+    /// 总篇数也没变，所以剩下那些词的 IDF 一个都不用重算。有了这个，
+    /// 「先按并集扫一遍、再挑出要用的词」就只需要一趟扫描，而不是两趟。
+    pub fn retaining(self, keep: impl Fn(&str) -> bool) -> TermWeights {
+        let mut terms = Vec::new();
+        let mut idf = Vec::new();
+        let mut df = Vec::new();
+        for ((term, weight), count) in self.terms.into_iter().zip(self.idf).zip(self.df) {
+            if keep(&term) {
+                terms.push(term);
+                idf.push(weight);
+                df.push(count);
+            }
+        }
+        TermWeights {
+            terms,
+            idf,
+            df,
+            documents: self.documents,
+        }
+    }
 }
 
 pub struct TermWeightsBuilder {
