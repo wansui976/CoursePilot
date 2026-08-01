@@ -746,9 +746,39 @@ pub async fn due_cards(db: &Db, now: i64, limit: i64) -> AppResult<Vec<DueCard>>
            AND (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
            AND (COALESCE(v.course_id, c.course_id) IS NULL
                 OR (course.id IS NOT NULL AND course.deleted_at IS NULL))
-         ORDER BY s.due_at LIMIT ?",
+         ORDER BY s.due_at, c.id LIMIT ?",
     )
     .bind(now)
+    .bind(limit)
+    .fetch_all(&db.pool)
+    .await?;
+    Ok(rows.into_iter().map(DueCardRow::into_due_card).collect())
+}
+
+/// 某门课程的到期待复习卡，按到期时间升序。
+///
+/// 课程归属优先取视频所属课程，课程级手工卡再回落到卡片自己的 course_id。
+/// 单独提供这个查询，避免调用方先拉一批全局卡再过滤，导致其他课程排在前面时漏项。
+pub async fn due_cards_for_course(
+    db: &Db,
+    now: i64,
+    course_id: &str,
+    limit: i64,
+) -> AppResult<Vec<DueCard>> {
+    let rows: Vec<DueCardRow> = sqlx::query_as(
+        "SELECT c.id, c.video_id, c.course_id, c.kind, c.front, c.back, c.source_ms,
+                q.questions_json
+         FROM cards c JOIN card_schedule s ON s.card_id=c.id
+         LEFT JOIN quizzes q ON q.video_id = c.video_id
+         LEFT JOIN videos v ON v.id = c.video_id
+         JOIN courses course ON course.id = COALESCE(v.course_id, c.course_id)
+         WHERE s.due_at <= ? AND COALESCE(v.course_id, c.course_id) = ?
+           AND (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
+           AND course.deleted_at IS NULL
+         ORDER BY s.due_at, c.id LIMIT ?",
+    )
+    .bind(now)
+    .bind(course_id)
     .bind(limit)
     .fetch_all(&db.pool)
     .await?;
