@@ -1,11 +1,11 @@
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantPanel } from "./AssistantPanel";
 import { useAssistantUi } from "@/stores/assistant";
 import { useTheme } from "@/stores/theme";
-import type { AssistantAction, AssistantReply } from "@/lib/types";
+import type { AssistantAction, AssistantContext, AssistantReply } from "@/lib/types";
 
 const { mockIpc, platformMock } = vi.hoisted(() => ({
   mockIpc: {
@@ -20,7 +20,7 @@ const { mockIpc, platformMock } = vi.hoisted(() => ({
     },
     pipeline: { process: vi.fn() },
   },
-  platformMock: { mobile: false },
+  platformMock: { mobile: false, tablet: false },
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
@@ -28,7 +28,7 @@ vi.mock("@/lib/platform", () => ({
   isMobile: () => platformMock.mobile,
   isAndroid: () => platformMock.mobile,
   isIOS: () => false,
-  isTablet: () => false,
+  isTablet: () => platformMock.tablet,
   isDesktop: () => !platformMock.mobile,
 }));
 
@@ -46,13 +46,17 @@ function reply(over: Partial<AssistantReply> = {}): AssistantReply {
 
 function renderPanel(
   onNavigate = vi.fn(),
-  layout: { compact?: boolean; bottomNavigationVisible?: boolean } = {},
+  layout: {
+    compact?: boolean;
+    bottomNavigationVisible?: boolean;
+    context?: AssistantContext;
+  } = {},
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <AssistantPanel
-        context={{ course_id: "c1", video_id: "v1" }}
+        context={layout.context ?? { course_id: "c1", video_id: "v1" }}
         onNavigate={onNavigate}
         compact={layout.compact}
         bottomNavigationVisible={layout.bottomNavigationVisible}
@@ -72,6 +76,7 @@ describe("AssistantPanel", () => {
     vi.clearAllMocks();
     localStorage.clear();
     platformMock.mobile = false;
+    platformMock.tablet = false;
     useAssistantUi.setState({ open: true, side: "right" });
     mockIpc.assistant.ask.mockResolvedValue(reply());
     mockIpc.assistant.cancel.mockResolvedValue(undefined);
@@ -80,12 +85,12 @@ describe("AssistantPanel", () => {
   it("收起时在界面边缘留一条可点开的窄条", () => {
     useAssistantUi.setState({ open: false });
     renderPanel();
-    expect(screen.queryByLabelText("对助手说")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("对助手说")).not.toBeVisible();
     const dockStrip = screen.getByLabelText("打开助手");
     expect(dockStrip).toHaveAttribute("data-dock-side", "right");
     expect(dockStrip).toHaveClass("right-0", "h-28", "w-11");
     fireEvent.click(dockStrip);
-    expect(screen.getByLabelText("对助手说")).toBeInTheDocument();
+    expect(screen.getByLabelText("对助手说")).toBeVisible();
   });
 
   it("删除空白对话里的示例注脚", () => {
@@ -263,6 +268,7 @@ describe("AssistantPanel", () => {
     renderPanel();
     await ask("找一下例题");
 
+    expect(screen.getByTestId("user-bubble")).toHaveTextContent("找一下例题");
     expect(await screen.findByRole("status")).toHaveTextContent("正在思考并调用工具");
     expect(screen.getByLabelText("停止生成")).toBeEnabled();
 
@@ -311,6 +317,57 @@ describe("AssistantPanel", () => {
     expect(mockIpc.videos.delete).not.toHaveBeenCalled();
   });
 
+  it("本地点了停止后，即使旧后端抢先返回完成也不执行动作或续接该轮", async () => {
+    useTheme.setState({ pref: "light" });
+    const previousHistory = [
+      { role: "user", content: "第一轮" },
+      { role: "assistant", content: "第一轮回答" },
+    ];
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask
+      .mockResolvedValueOnce(reply({ answer: "第一轮回答", history: previousHistory }))
+      .mockReturnValueOnce(
+        new Promise<AssistantReply>((resolve) => {
+          finish = resolve;
+        }),
+      );
+    renderPanel();
+    await ask("第一轮");
+    await screen.findByText("第一轮回答");
+    await ask("第二轮");
+
+    fireEvent.click(await screen.findByLabelText("停止生成"));
+    finish(
+      reply({
+        answer: "服务端其实已经答完",
+        canceled: false,
+        actions: [
+          { kind: "set_theme", pref: "dark" },
+          { kind: "propose_delete", video_id: "v1", title: "第一讲" },
+        ],
+        history: [
+          ...previousHistory,
+          { role: "user", content: "第二轮" },
+          { role: "assistant", content: "服务端其实已经答完" },
+        ],
+      }),
+    );
+
+    expect(await screen.findByText("已停止，未继续执行")).toBeInTheDocument();
+    expect(useTheme.getState().pref).toBe("light");
+    expect(screen.queryByRole("button", { name: "确认删除" })).not.toBeInTheDocument();
+
+    await ask("第三轮");
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenLastCalledWith(
+        "第三轮",
+        expect.anything(),
+        previousHistory,
+        expect.any(String),
+      ),
+    );
+  });
+
   it("新对话会清掉旧消息和后端历史", async () => {
     const oldHistory = [{ role: "user", content: "旧问题" }];
     mockIpc.assistant.ask.mockResolvedValueOnce(
@@ -333,6 +390,87 @@ describe("AssistantPanel", () => {
         expect.any(String),
       ),
     );
+  });
+
+  it("重挂载后恢复对话、续聊历史和草稿，但不复活旧确认动作", async () => {
+    const savedHistory = [
+      { role: "user", content: "删掉第一讲" },
+      { role: "assistant", content: "已经准备好，等你确认" },
+    ];
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        answer: "已经准备好，等你确认",
+        history: savedHistory,
+        actions: [{ kind: "propose_delete", video_id: "v1", title: "第一讲" }],
+      }),
+    );
+    renderPanel();
+    await ask("删掉第一讲");
+    expect(await screen.findByRole("button", { name: "确认删除" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("对助手说"), { target: { value: "接着问" } });
+
+    cleanup();
+    useAssistantUi.setState({ open: true, side: "right" });
+    renderPanel();
+
+    expect(screen.getByText("已经准备好，等你确认")).toBeInTheDocument();
+    expect(screen.getByLabelText("对助手说")).toHaveValue("接着问");
+    expect(screen.queryByRole("button", { name: "确认删除" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("发送"));
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenLastCalledWith(
+        "接着问",
+        expect.anything(),
+        savedHistory,
+        expect.any(String),
+      ),
+    );
+  });
+
+  it("复制回答提供明确成功反馈", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "可复制的回答" }));
+    renderPanel();
+    await ask("给我答案");
+
+    fireEvent.click(await screen.findByRole("button", { name: "复制回答" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("可复制的回答"));
+    expect(screen.getByRole("button", { name: "已复制" })).toBeInTheDocument();
+  });
+
+  it("旧回答里的时间戳会回到回答产生时的视频", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "回看 [01:30]" }));
+    const onNavigate = vi.fn();
+    renderPanel(onNavigate, { context: { course_id: "c1", video_id: "v1" } });
+    await ask("在哪讲的");
+    await screen.findByRole("button", { name: /01:30/ });
+
+    cleanup();
+    useAssistantUi.setState({ open: true, side: "right" });
+    renderPanel(onNavigate, { context: { course_id: "c1", video_id: "v2" } });
+    fireEvent.click(screen.getByRole("button", { name: /01:30/ }));
+
+    expect(onNavigate).toHaveBeenCalledWith({
+      kind: "open_video",
+      video_id: "v1",
+      title: "原视频",
+      at_ms: 90_000,
+    });
+  });
+
+  it("打开后聚焦输入框，Escape 收起并把焦点还给入口", async () => {
+    useAssistantUi.setState({ open: false, side: "right" });
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "打开助手" }));
+    const input = screen.getByLabelText("对助手说");
+    await waitFor(() => expect(input).toHaveFocus());
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    const launcher = screen.getByRole("button", { name: "打开助手" });
+    await waitFor(() => expect(launcher).toHaveFocus());
+    expect(input).not.toBeVisible();
   });
 
   it("导航动作点一下才执行，不会自己跳走", async () => {
@@ -422,11 +560,19 @@ describe("AssistantPanel", () => {
     expect(screen.getByLabelText("对助手说")).toBeInTheDocument();
   });
 
+  it("宽屏 iPad 跟随布局档位使用桌面面板", () => {
+    platformMock.mobile = true;
+    platformMock.tablet = true;
+    renderPanel(vi.fn(), { compact: false });
+    expect(screen.getByRole("button", { name: "拖动助手面板" })).toBeInTheDocument();
+    expect(screen.getByLabelText("当前提问范围：当前视频")).toBeInTheDocument();
+  });
+
   it("窄视口按移动抽屉渲染，并避开底部主导航", () => {
     renderPanel(vi.fn(), { compact: true, bottomNavigationVisible: true });
     const panel = screen.getByRole("complementary", { name: "助手" });
     expect(screen.queryByRole("button", { name: "拖动助手面板" })).not.toBeInTheDocument();
-    expect(panel).toHaveClass("inset-x-0", "h-[70vh]");
+    expect(panel).toHaveClass("inset-x-0", "h-[70dvh]");
     expect(panel.getAttribute("style")).toContain("bottom: calc(56px");
   });
 });
@@ -436,6 +582,7 @@ describe("确认卡", () => {
     vi.clearAllMocks();
     localStorage.clear();
     platformMock.mobile = false;
+    platformMock.tablet = false;
     useAssistantUi.setState({ open: true, side: "right" });
     mockIpc.assistant.ask.mockResolvedValue(reply());
     mockIpc.assistant.cancel.mockResolvedValue(undefined);
@@ -479,6 +626,147 @@ describe("确认卡", () => {
       expect(mockIpc.videos.updateTitle).toHaveBeenCalledWith("v1", "第三讲 特征值"),
     );
     expect(await screen.findByText("已生效")).toBeInTheDocument();
+  });
+
+  it("已完成的动作在收起再打开后不会复活", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_rename",
+            video_id: "v1",
+            current_title: "未命名",
+            new_title: "第一讲",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("改名");
+    fireEvent.click(await screen.findByRole("button", { name: "确认改名" }));
+    expect(await screen.findByText("已生效")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "收起助手" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开助手" }));
+
+    expect(screen.getByText("已生效")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "确认改名" })).not.toBeInTheDocument();
+    expect(mockIpc.videos.updateTitle).toHaveBeenCalledTimes(1);
+  });
+
+  it("动作结果写回续聊历史，Agent 不再误以为仍待确认", async () => {
+    const initialHistory = [
+      { role: "user", content: "改名" },
+      { role: "assistant", content: "已经准备好，等你确认" },
+    ];
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        history: initialHistory,
+        actions: [
+          {
+            kind: "propose_rename",
+            video_id: "v1",
+            current_title: "未命名",
+            new_title: "第一讲",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("改名");
+    fireEvent.click(await screen.findByRole("button", { name: "确认改名" }));
+    await screen.findByText("已生效");
+
+    await ask("完成了吗");
+    await waitFor(() => {
+      const calls = mockIpc.assistant.ask.mock.calls;
+      const sentHistory = calls[calls.length - 1]?.[2];
+      expect(sentHistory[sentHistory.length - 1].content).toContain(
+        "界面操作结果：已完成改名：第一讲",
+      );
+    });
+  });
+
+  it("请求进行时执行旧确认卡，操作结果不会被新回复覆盖", async () => {
+    const initialHistory = [
+      { role: "user", content: "改名" },
+      { role: "assistant", content: "已经准备好，等你确认" },
+    ];
+    const secondHistory = [
+      ...initialHistory,
+      { role: "user", content: "顺便总结一下" },
+      { role: "assistant", content: "这是第二轮回答" },
+    ];
+    let finishSecond!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask
+      .mockResolvedValueOnce(
+        reply({
+          history: initialHistory,
+          actions: [
+            {
+              kind: "propose_rename",
+              video_id: "v1",
+              current_title: "未命名",
+              new_title: "第一讲",
+            },
+          ],
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise<AssistantReply>((resolve) => {
+          finishSecond = resolve;
+        }),
+      );
+    renderPanel();
+    await ask("改名");
+    const confirm = await screen.findByRole("button", { name: "确认改名" });
+
+    await ask("顺便总结一下");
+    fireEvent.click(confirm);
+    expect(await screen.findByText("操作结果：已完成改名：第一讲")).toBeInTheDocument();
+    finishSecond(reply({ answer: "这是第二轮回答", history: secondHistory }));
+    await screen.findByText("这是第二轮回答");
+
+    await ask("现在完成了吗");
+    await waitFor(() => {
+      const calls = mockIpc.assistant.ask.mock.calls;
+      const sentHistory = calls[calls.length - 1]?.[2];
+      expect(sentHistory).toEqual([
+        ...secondHistory,
+        { role: "assistant", content: "（界面操作结果：已完成改名：第一讲）" },
+      ]);
+    });
+  });
+
+  it("已完成动作在真正重挂载后保留结果，但不复活确认卡", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        history: [
+          { role: "user", content: "改名" },
+          { role: "assistant", content: "已经准备好，等你确认" },
+        ],
+        actions: [
+          {
+            kind: "propose_rename",
+            video_id: "v1",
+            current_title: "未命名",
+            new_title: "第一讲",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("改名");
+    fireEvent.click(await screen.findByRole("button", { name: "确认改名" }));
+    expect(await screen.findByText("操作结果：已完成改名：第一讲")).toBeInTheDocument();
+
+    cleanup();
+    useAssistantUi.setState({ open: true, side: "right" });
+    renderPanel();
+
+    expect(screen.getByText("操作结果：已完成改名：第一讲")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "确认改名" })).not.toBeInTheDocument();
+    expect(mockIpc.videos.updateTitle).toHaveBeenCalledTimes(1);
   });
 
   it("删除要等确认，并说清楚是进回收站", async () => {
@@ -707,6 +995,38 @@ describe("确认卡", () => {
     await waitFor(() => expect(screen.getByText("已生效")).toBeInTheDocument());
     expect(mockIpc.videos.updateTitle.mock.calls.filter(([id]) => id === "v1")).toHaveLength(1);
     expect(mockIpc.videos.updateTitle.mock.calls.filter(([id]) => id === "v2")).toHaveLength(2);
+  });
+
+  it("执行中可以停止剩余批量项，之后从未完成项继续", async () => {
+    let finishFirst!: () => void;
+    mockIpc.videos.updateTitle
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          finishFirst = resolve;
+        }),
+      )
+      .mockResolvedValueOnce(undefined);
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          { kind: "propose_rename", video_id: "v1", current_title: "01", new_title: "第一讲" },
+          { kind: "propose_rename", video_id: "v2", current_title: "02", new_title: "第二讲" },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("批量改名");
+    fireEvent.click(await screen.findByRole("button", { name: "确认改名 2 项" }));
+    fireEvent.click(screen.getByRole("button", { name: "停止剩余" }));
+    finishFirst();
+
+    expect(await screen.findByText(/剩余 1 项尚未完成/)).toBeInTheDocument();
+    expect(mockIpc.videos.updateTitle).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "继续剩余 1 项" }));
+
+    await waitFor(() => expect(screen.getByText("已生效")).toBeInTheDocument());
+    expect(mockIpc.videos.updateTitle).toHaveBeenCalledTimes(2);
+    expect(mockIpc.videos.updateTitle).toHaveBeenLastCalledWith("v2", "第二讲");
   });
 
   it("导入要带上字幕轨和清晰度，并在之后跑流水线", async () => {

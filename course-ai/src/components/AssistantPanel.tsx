@@ -8,8 +8,10 @@ import {
 import {
   AlertCircle,
   ArrowUpRight,
+  Check,
   ChevronLeft,
   ChevronRight,
+  Copy,
   GripHorizontal,
   LoaderCircle,
   MessageSquarePlus,
@@ -21,9 +23,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { AssistantActionList } from "@/components/AssistantActionCard";
 import { AssistantToolChips } from "@/components/AssistantToolChips";
+import {
+  clearAssistantSession,
+  readAssistantSession,
+  writeAssistantSession,
+  type AssistantTurnRecord,
+} from "@/lib/assistantSession";
 import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
-import { isMobile } from "@/lib/platform";
+import { isMobile, isTablet } from "@/lib/platform";
 import { type DockSide, useAssistantUi } from "@/stores/assistant";
 import { useTheme } from "@/stores/theme";
 import { renderMarkdown } from "@/lib/renderMarkdown";
@@ -93,15 +101,22 @@ function initialDockTop() {
   return Math.max(VIEWPORT_GAP, height - DOCK_STRIP_HEIGHT - 24);
 }
 
-interface Turn {
-  id: string;
-  question: string;
-  answer: string;
-  actions: AssistantAction[];
-  tools: string[];
-  /** 这一轮来回了几次。花了多少钱要让人看得见。 */
-  turns: number;
-  canceled: boolean;
+type Turn = AssistantTurnRecord;
+
+function formatPosition(ms: number) {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function contextLabel(context: AssistantContext) {
+  if (context.video_id) {
+    return context.position_ms != null && context.position_ms > 0
+      ? `当前视频 · ${formatPosition(context.position_ms)}`
+      : "当前视频";
+  }
+  if (context.course_id) return "当前课程";
+  return "全部课程";
 }
 
 function suggestionsFor(context: AssistantContext) {
@@ -141,27 +156,52 @@ export function AssistantPanel({
   bottomNavigationVisible?: boolean;
 }) {
   const { open, side, setOpen, dock } = useAssistantUi();
-  const [input, setInput] = useState("");
+  const [initialSession] = useState(readAssistantSession);
+  const [input, setInput] = useState(initialSession.draft);
   const [busy, setBusy] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState("");
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [history, setHistory] = useState<AssistantMessage[]>([]);
+  const [turns, setTurns] = useState<Turn[]>(initialSession.turns);
+  const [history, setHistory] = useState<AssistantMessage[]>(initialSession.history);
+  const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const launcherRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const dragRef = useRef<DragSession | null>(null);
   const dragCleanupRef = useRef<(() => void) | null>(null);
   const activeRequestRef = useRef<string | null>(null);
-  const mobile = compact || isMobile();
+  const locallyStoppedRequestsRef = useRef(new Set<string>());
+  const historyRef = useRef(initialSession.history);
+  const copyTimerRef = useRef<number | null>(null);
+  const focusLauncherAfterCloseRef = useRef(false);
+  // iPad 宽屏有足够空间使用可拖动面板；真正决定布局的是视口档位，不是触屏 UA。
+  const mobile = compact || (isMobile() && !isTablet());
   const [position, setPosition] = useState<PanelPosition>(() => initialPanelPosition(side));
   const [dockTop, setDockTop] = useState(initialDockTop);
   const [dragging, setDragging] = useState(false);
   const [snapSide, setSnapSide] = useState<DockSide | null>(null);
   const setThemePref = useTheme((state) => state.setPref);
+  const scopeLabel = contextLabel(context);
 
-  // 回答里的 [mm:ss] 点了就跳。助手常说「在 12:30 讲到」，让它可点是顺手的事。
-  const onSeek = (ms: number) => onNavigate({ kind: "seek_to", at_ms: ms });
+  function navigateFromTurn(turn: Turn, action: AssistantAction) {
+    // 时间点属于回答生成时的视频。用户可能在等待期间或之后切了视频，不能把旧时间戳
+    // 直接 seek 到新播放器里。
+    if (
+      action.kind === "seek_to" &&
+      turn.context?.video_id &&
+      turn.context.video_id !== context.video_id
+    ) {
+      onNavigate({
+        kind: "open_video",
+        video_id: turn.context.video_id,
+        title: "原视频",
+        at_ms: action.at_ms,
+      });
+      return;
+    }
+    onNavigate(action);
+  }
 
   useEffect(() => {
     // 新一轮出来就滚到底，否则答案出现在视野外，看起来像没反应。
@@ -170,6 +210,24 @@ export function AssistantPanel({
     const box = scrollRef.current;
     if (box) box.scrollTop = box.scrollHeight;
   }, [turns, busy]);
+
+  useEffect(() => {
+    const pendingQuestion = turns.find((turn) => turn.pending)?.question ?? "";
+    writeAssistantSession({ turns, history, draft: input || pendingQuestion });
+  }, [history, input, turns]);
+
+  useEffect(() => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 96)}px`;
+  }, [input, open]);
+
+  useEffect(() => {
+    if (open || !focusLauncherAfterCloseRef.current) return;
+    focusLauncherAfterCloseRef.current = false;
+    requestAnimationFrame(() => launcherRef.current?.focus());
+  }, [open]);
 
   useEffect(() => {
     if (mobile) return;
@@ -193,6 +251,7 @@ export function AssistantPanel({
   useEffect(
     () => () => {
       dragCleanupRef.current?.();
+      if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
       const requestId = activeRequestRef.current;
       if (requestId) void ipc.assistant.cancel(requestId);
     },
@@ -225,7 +284,7 @@ export function AssistantPanel({
     setPosition((current) => positionAtSide(nextSide, current.y));
   }
 
-  function dockToStrip(nextSide: DockSide, y: number) {
+  function dockToStrip(nextSide: DockSide, y: number, focusLauncher = false) {
     const { height } = viewportSize();
     const panel = measurePanel();
     const centeredTop = y + panel.height / 2 - DOCK_STRIP_HEIGHT / 2;
@@ -233,6 +292,7 @@ export function AssistantPanel({
       clamp(centeredTop, VIEWPORT_GAP, height - DOCK_STRIP_HEIGHT - VIEWPORT_GAP),
     );
     dock(nextSide);
+    focusLauncherAfterCloseRef.current = focusLauncher;
     setOpen(false);
   }
 
@@ -241,13 +301,14 @@ export function AssistantPanel({
     const centeredTop = dockTop + DOCK_STRIP_HEIGHT / 2 - panel.height / 2;
     setPosition(positionAtSide(side, centeredTop));
     setOpen(true);
+    requestAnimationFrame(() => inputRef.current?.focus());
   }
 
-  function collapseToNearestSide() {
+  function collapseToNearestSide(focusLauncher = false) {
     const panel = measurePanel();
     const nearestSide: DockSide =
       position.x + panel.width / 2 < viewportSize().width / 2 ? "left" : "right";
-    dockToStrip(nearestSide, position.y);
+    dockToStrip(nearestSide, position.y, focusLauncher);
   }
 
   function updateDrag(clientX: number, clientY: number) {
@@ -379,7 +440,7 @@ export function AssistantPanel({
     if (mobile) return;
     if (event.key === "Home" || event.key === "End") {
       event.preventDefault();
-      dockToStrip(event.key === "Home" ? "left" : "right", position.y);
+      dockToStrip(event.key === "Home" ? "left" : "right", position.y, true);
       return;
     }
 
@@ -427,38 +488,70 @@ export function AssistantPanel({
     const question = (suggestedQuestion ?? input).trim();
     if (!question || busy || activeRequestRef.current) return;
     const requestId = crypto.randomUUID();
+    const turnId = crypto.randomUUID();
+    const historyAtSend = historyRef.current;
     activeRequestRef.current = requestId;
     setInput("");
     setBusy(true);
     setStopping(false);
     setError("");
+    // 长工具链可能要等几十秒；问题先进入对话，让用户立即确认自己发出了什么。
+    setTurns((prev) => [
+      ...prev,
+      {
+        id: turnId,
+        question,
+        answer: "",
+        actions: [],
+        tools: [],
+        turns: 1,
+        canceled: false,
+        actionResults: [],
+        pending: true,
+        context: { ...context },
+      },
+    ]);
     try {
-      const reply = await ipc.assistant.ask(question, context, history, requestId);
+      const reply = await ipc.assistant.ask(question, context, historyAtSend, requestId);
+      const canceled = reply.canceled || locallyStoppedRequestsRef.current.has(requestId);
       // 后端也会清空取消轮次的动作；这里再守一次，避免旧后端或兼容端点让用户
       // 点停以后仍切主题、导航或冒出待确认操作。
-      const actions = reply.canceled ? [] : reply.actions;
-      setHistory(reply.history);
+      const actions = canceled ? [] : reply.actions;
+      // 请求期间用户仍可能执行旧确认卡。那类结果已经追加进 historyRef，不能被
+      // 此次回复的整包 history 覆盖；取消轮次自身则不能进入下一轮上下文。
+      const actionEventsDuringRequest = historyRef.current.slice(historyAtSend.length);
+      const nextHistory = [
+        ...(canceled ? historyAtSend : reply.history),
+        ...actionEventsDuringRequest,
+      ];
+      historyRef.current = nextHistory;
+      setHistory(nextHistory);
       // 主题当场生效。它无破坏性、一眼可见，再让人点一次只是把一步变两步。
       for (const action of actions) {
         if (action.kind === "set_theme") setThemePref(action.pref);
       }
-      setTurns((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          question,
-          answer: reply.answer,
-          actions,
-          tools: reply.tools_used,
-          turns: reply.turns,
-          canceled: reply.canceled,
-        },
-      ]);
+      setTurns((prev) =>
+        prev.map((turn) =>
+          turn.id === turnId
+            ? {
+                ...turn,
+                answer: reply.answer,
+                actions,
+                tools: reply.tools_used,
+                turns: reply.turns,
+                canceled,
+                pending: false,
+              }
+            : turn,
+        ),
+      );
     } catch (e) {
       // 把问题放回输入框：让用户能直接重发，而不是重新打一遍。
+      setTurns((prev) => prev.filter((turn) => turn.id !== turnId));
       setInput(question);
       setError(humanizeError(e));
     } finally {
+      locallyStoppedRequestsRef.current.delete(requestId);
       if (activeRequestRef.current === requestId) {
         activeRequestRef.current = null;
         setBusy(false);
@@ -467,9 +560,44 @@ export function AssistantPanel({
     }
   }
 
+  async function copyAnswer(turn: Turn) {
+    if (!turn.answer || !navigator.clipboard?.writeText) {
+      setError("当前环境无法使用剪贴板");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(turn.answer);
+      setCopiedTurnId(turn.id);
+      if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = window.setTimeout(() => setCopiedTurnId(null), 1500);
+    } catch (e) {
+      setError(`复制失败：${humanizeError(e)}`);
+    }
+  }
+
+  function recordActionResult(turnId: string, message: string) {
+    // 独立追加而不是改写“最后一条回答”：用户可能回头执行旧轮次的卡片，附到最新回答
+    // 会把两个不相干的操作串在一起。assistant 角色也不会消耗后端的用户轮次上限。
+    setTurns((previous) =>
+      previous.map((turn) =>
+        turn.id === turnId
+          ? { ...turn, actionResults: [...turn.actionResults, message] }
+          : turn,
+      ),
+    );
+    historyRef.current = [
+      ...historyRef.current,
+      { role: "assistant", content: `（界面操作结果：${message}）` },
+    ];
+    setHistory(historyRef.current);
+  }
+
   async function stop() {
     const requestId = activeRequestRef.current;
     if (!requestId || stopping) return;
+    // 先记下用户意图，再发取消 IPC。即便 ask 与 cancel 同时完成，也绝不能执行
+    // 用户已经叫停的主题、导航或写操作提案。
+    locallyStoppedRequestsRef.current.add(requestId);
     setStopping(true);
     setError("");
     try {
@@ -483,23 +611,34 @@ export function AssistantPanel({
   function startNewConversation() {
     if (busy) return;
     setTurns([]);
+    historyRef.current = [];
     setHistory([]);
     setInput("");
     setError("");
+    clearAssistantSession();
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
-  if (!open) {
-    const mobileBottom = bottomNavigationVisible
-      ? "calc(56px + env(safe-area-inset-bottom, 0px) + 24px)"
-      : "24px";
-    return (
+  const launcherBottom = bottomNavigationVisible
+    ? "calc(56px + env(safe-area-inset-bottom, 0px) + 24px)"
+    : "calc(env(safe-area-inset-bottom, 0px) + 24px)";
+  const shell = mobile
+    ? "fixed inset-x-0 z-40 h-[70dvh] max-h-[calc(100dvh-56px)] rounded-t-2xl border-t"
+    : "fixed z-40 h-[min(720px,calc(100dvh-2rem))] w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border";
+  const panelBottom = bottomNavigationVisible
+    ? "calc(56px + env(safe-area-inset-bottom, 0px))"
+    : "env(safe-area-inset-bottom, 0px)";
+
+  return (
+    <>
+      {!open && (
       <button
+        ref={launcherRef}
         type="button"
         aria-label="打开助手"
         data-dock-side={mobile ? undefined : side}
         onClick={openFromDock}
-        style={mobile ? { bottom: mobileBottom } : { top: dockTop }}
+        style={mobile ? { bottom: launcherBottom } : { top: dockTop }}
         className={
           mobile
             ? "ca-touch-44 fixed right-4 z-40 grid h-12 w-12 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-lg transition-colors hover:bg-[var(--surface-card-hover)] motion-reduce:transition-none"
@@ -519,24 +658,21 @@ export function AssistantPanel({
           )}
         </span>
       </button>
-    );
-  }
-
-  const shell = mobile
-    ? "fixed inset-x-0 z-40 h-[70vh] rounded-t-2xl border-t"
-    : "fixed z-40 h-[min(720px,calc(100dvh-2rem))] w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border";
-  const mobileBottom = bottomNavigationVisible
-    ? "calc(56px + env(safe-area-inset-bottom, 0px))"
-    : "0px";
-
-  return (
+      )}
     <aside
       ref={panelRef}
       aria-label="助手"
+      hidden={!open}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        collapseToNearestSide(true);
+      }}
       data-dragging={mobile ? undefined : dragging}
       data-snap-side={mobile ? undefined : snapSide ?? undefined}
-      style={mobile ? { bottom: mobileBottom } : { left: position.x, top: position.y }}
-      className={`${shell} flex flex-col border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-xl ${
+      style={mobile ? { bottom: panelBottom } : { left: position.x, top: position.y }}
+      className={`${open ? "flex" : "hidden"} ${shell} flex-col border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-xl ${
         snapSide ? "ring-2 ring-[var(--accent)]" : ""
       }`}
     >
@@ -544,7 +680,15 @@ export function AssistantPanel({
         {mobile ? (
           <>
             <Sparkles className="h-4 w-4 flex-none text-[var(--accent)]" />
-            <span className="flex-1 text-sm font-medium text-[var(--text-strong)]">助手</span>
+            <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+              <span className="text-sm font-medium text-[var(--text-strong)]">助手</span>
+              <span
+                aria-label={`当前提问范围：${scopeLabel}`}
+                className="truncate text-[11px] text-[var(--text-faint)]"
+              >
+                {scopeLabel}
+              </span>
+            </span>
           </>
         ) : (
           <button
@@ -557,7 +701,15 @@ export function AssistantPanel({
           >
             <GripHorizontal className="h-4 w-4 flex-none text-[var(--text-faint)]" />
             <Sparkles className="h-4 w-4 flex-none text-[var(--accent)]" />
-            <span className="truncate text-sm font-medium text-[var(--text-strong)]">助手</span>
+            <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+              <span className="text-sm font-medium text-[var(--text-strong)]">助手</span>
+              <span
+                aria-label={`当前提问范围：${scopeLabel}`}
+                className="truncate text-[11px] font-normal text-[var(--text-faint)]"
+              >
+                {scopeLabel}
+              </span>
+            </span>
           </button>
         )}
         {(turns.length > 0 || history.length > 0) && (
@@ -591,13 +743,19 @@ export function AssistantPanel({
           size="icon"
           variant="ghost"
           aria-label="收起助手"
-          onClick={collapseToNearestSide}
+          onClick={() => collapseToNearestSide()}
         >
           <X className="h-4 w-4" />
         </Button>
       </header>
 
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
+      <div
+        ref={scrollRef}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
+        className="flex-1 space-y-3 overflow-y-auto px-3 py-3"
+      >
         {turns.length === 0 && !busy && !error && (
           <div className="flex min-h-full items-center">
             <div className="grid w-full gap-2">
@@ -637,13 +795,54 @@ export function AssistantPanel({
                 {/* 回答天然带 Markdown（列表、加粗、公式），当纯文本铺出来满屏 ** 和 -，
                     比没有格式还难读。复用问答面板那套渲染器，顺带白拿了
                     公式渲染和 [mm:ss] 可点击跳转。 */}
-                <div className="max-w-[92%] break-words rounded-2xl rounded-bl-sm border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-normal)]">
-                  {renderMarkdown(turn.answer, onSeek)}
+                <div className="group max-w-[92%]">
+                  <div className="break-words rounded-2xl rounded-bl-sm border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-normal)]">
+                    {renderMarkdown(turn.answer, (ms) =>
+                      navigateFromTurn(turn, { kind: "seek_to", at_ms: ms }),
+                    )}
+                  </div>
+                  <div className="mt-0.5 flex h-7 items-center">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label={copiedTurnId === turn.id ? "已复制" : "复制回答"}
+                      title={copiedTurnId === turn.id ? "已复制" : "复制回答"}
+                      onClick={() => void copyAnswer(turn)}
+                      className="h-7 w-7 text-[var(--text-faint)]"
+                    >
+                      {copiedTurnId === turn.id ? (
+                        <Check className="h-3.5 w-3.5 text-[var(--status-ok)]" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
 
-            <AssistantActionList actions={turn.actions} onNavigate={onNavigate} />
+            <AssistantActionList
+              actions={turn.actions}
+              onNavigate={(action) => navigateFromTurn(turn, action)}
+              onResult={(message) => recordActionResult(turn.id, message)}
+            />
+
+            {turn.actionResults.length > 0 && (
+              <div aria-label="操作记录" className="space-y-1">
+                {turn.actionResults.map((result, index) => (
+                  <p
+                    key={`${turn.id}-result-${index}`}
+                    className="flex items-start gap-1.5 text-[11px] text-[var(--text-muted)]"
+                  >
+                    <span
+                      className="mt-[0.45em] h-1.5 w-1.5 flex-none rounded-full bg-[var(--accent)]"
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0 break-words">操作结果：{result}</span>
+                  </p>
+                ))}
+              </div>
+            )}
 
             {turn.turns > 1 && (
               // 来回几次要让人看见：每一轮的工具结果都留在上下文里，花销是乘法涨的。
@@ -694,7 +893,7 @@ export function AssistantPanel({
               void send();
             }
           }}
-          className="max-h-24 flex-1 resize-none rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2.5 py-2 text-sm text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)]"
+          className="max-h-24 flex-1 resize-none rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2.5 py-2 text-sm text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
         />
         {busy ? (
           <Button
@@ -719,5 +918,6 @@ export function AssistantPanel({
         )}
       </div>
     </aside>
+    </>
   );
 }

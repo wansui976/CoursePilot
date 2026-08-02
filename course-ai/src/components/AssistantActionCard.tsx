@@ -30,7 +30,7 @@ type Proposal = Exclude<
   { kind: "open_video" } | { kind: "seek_to" } | { kind: "set_theme" }
 >;
 
-type Status = "pending" | "running" | "done" | "failed";
+type Status = "pending" | "running" | "paused" | "done" | "failed";
 
 /**
  * 动作执行完必须让相关列表失效。
@@ -224,7 +224,15 @@ function formatMs(ms: number | null | undefined) {
  *
  * 但每一项仍能单独剔除——批量里错一两个是常态，不该逼着人要么全接受要么全放弃。
  */
-function ProposalGroup({ actions, onDone }: { actions: Proposal[]; onDone: () => void }) {
+function ProposalGroup({
+  actions,
+  onDone,
+  onResult,
+}: {
+  actions: Proposal[];
+  onDone: () => void;
+  onResult?: (message: string) => void;
+}) {
   const queryClient = useQueryClient();
   const [skipped, setSkipped] = useState<Set<number>>(new Set());
   const [completed, setCompleted] = useState<Set<number>>(new Set());
@@ -232,6 +240,8 @@ function ProposalGroup({ actions, onDone }: { actions: Proposal[]; onDone: () =>
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
   const importCheckpoints = useRef<Map<number, string>>(new Map());
+  const stopRequestedRef = useRef(false);
+  const [stopRequested, setStopRequested] = useState(false);
 
   const meta = META[actions[0].kind];
   const chosen = actions.map((action, i) => ({ action, i })).filter(({ i }) => !skipped.has(i));
@@ -246,10 +256,17 @@ function ProposalGroup({ actions, onDone }: { actions: Proposal[]; onDone: () =>
     setStatus("running");
     setError("");
     setWarning("");
+    stopRequestedRef.current = false;
+    setStopRequested(false);
     const succeeded: number[] = [];
     const failures: { message: string }[] = [];
     let shouldRefresh = false;
+    let interrupted = false;
     for (const { action, i } of remaining) {
+      if (stopRequestedRef.current) {
+        interrupted = true;
+        break;
+      }
       try {
         await execute(action, {
           importedVideoId: importCheckpoints.current.get(i),
@@ -261,11 +278,18 @@ function ProposalGroup({ actions, onDone }: { actions: Proposal[]; onDone: () =>
         succeeded.push(i);
         shouldRefresh = true;
       } catch (e) {
-        failures.push({ message: `${describe(action).primary}（${displayActionError(e)}）` });
+        failures.push({
+          message: `${describe(action).primary}（${displayActionError(e)}）`,
+        });
       }
     }
     if (succeeded.length > 0) {
       setCompleted((prev) => new Set([...prev, ...succeeded]));
+      onResult?.(
+        `已完成${meta.title}：${succeeded
+          .map((index) => describe(actions[index]).primary)
+          .join("、")}`,
+      );
     }
     if (shouldRefresh) {
       try {
@@ -274,6 +298,18 @@ function ProposalGroup({ actions, onDone }: { actions: Proposal[]; onDone: () =>
         // 动作已经落库，刷新失败不能把它伪装成「执行失败」再让用户重做一次。
         setWarning("操作已经完成，但列表没有自动刷新。请手动刷新后确认结果。");
       }
+    }
+    const completedAfter = new Set([...completed, ...succeeded]);
+    const unfinishedAfter = chosen.filter(({ i }) => !completedAfter.has(i));
+    if (interrupted) {
+      setWarning(`已停止，剩余 ${unfinishedAfter.length} 项尚未完成，可稍后继续。`);
+      onResult?.(
+        `用户停止了剩余${meta.title}，尚未完成：${unfinishedAfter
+          .map(({ action }) => describe(action).primary)
+          .join("、")}`,
+      );
+      setStatus("paused");
+      return;
     }
     if (failures.length === 0) {
       setStatus("done");
@@ -285,7 +321,27 @@ function ProposalGroup({ actions, onDone }: { actions: Proposal[]; onDone: () =>
         .map(({ message }) => message)
         .join("；")}`,
     );
+    onResult?.(`没能完成${meta.title}：${failures.map(({ message }) => message).join("；")}`);
     setStatus("failed");
+  }
+
+  function stopRemaining() {
+    stopRequestedRef.current = true;
+    setStopRequested(true);
+  }
+
+  function dismiss() {
+    onResult?.(
+      `用户取消了${meta.title}：${remaining
+        .map(({ action }) => describe(action).primary)
+        .join("、")}`,
+    );
+    onDone();
+  }
+
+  function skip(index: number, action: Proposal) {
+    setSkipped((prev) => new Set(prev).add(index));
+    onResult?.(`用户跳过了${meta.title}：${describe(action).primary}`);
   }
 
   if (chosen.length === 0) return null;
@@ -327,11 +383,11 @@ function ProposalGroup({ actions, onDone }: { actions: Proposal[]; onDone: () =>
                   已完成
                 </span>
               )}
-              {batch && status === "pending" && (
+              {batch && (status === "pending" || status === "paused") && (
                 <button
                   type="button"
                   aria-label={`跳过 ${primary}`}
-                  onClick={() => setSkipped((prev) => new Set(prev).add(i))}
+                  onClick={() => skip(i, action)}
                   className="ca-touch-44 flex-none rounded p-0.5 text-[var(--text-faint)] transition hover:text-[var(--text-strong)]"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -369,16 +425,29 @@ function ProposalGroup({ actions, onDone }: { actions: Proposal[]; onDone: () =>
               ? "执行中…"
               : status === "failed"
                 ? `重试失败的 ${remaining.length} 项`
-              : batch
-                ? `${meta.confirm} ${chosen.length} 项`
-                : meta.confirm}
+                : status === "paused"
+                  ? `继续剩余 ${remaining.length} 项`
+                  : batch
+                    ? `${meta.confirm} ${chosen.length} 项`
+                    : meta.confirm}
           </Button>
-          <Button size="sm" variant="ghost" disabled={status === "running"} onClick={onDone}>
-            取消
-          </Button>
+          {status === "running" ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={stopRequested}
+              onClick={stopRemaining}
+            >
+              {stopRequested ? "停止中…" : "停止剩余"}
+            </Button>
+          ) : (
+            <Button size="sm" variant="ghost" onClick={dismiss}>
+              取消
+            </Button>
+          )}
         </div>
       )}
-      {status === "failed" && (
+      {error && (
         <p role="alert" className="mt-1.5 text-[var(--status-err)]">
           没能执行：{error}
         </p>
@@ -396,9 +465,11 @@ function ProposalGroup({ actions, onDone }: { actions: Proposal[]; onDone: () =>
 export function AssistantActionList({
   actions,
   onNavigate,
+  onResult,
 }: {
   actions: AssistantAction[];
   onNavigate: (action: AssistantAction) => void;
+  onResult?: (message: string) => void;
 }) {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
@@ -451,6 +522,7 @@ export function AssistantActionList({
               key={group.key}
               actions={group.items as Proposal[]}
               onDone={() => setDismissed((prev) => new Set(prev).add(group.key))}
+              onResult={onResult}
             />
           );
         })}
