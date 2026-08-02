@@ -163,6 +163,7 @@ export function AssistantPanel({
   const [error, setError] = useState("");
   const [turns, setTurns] = useState<Turn[]>(initialSession.turns);
   const [history, setHistory] = useState<AssistantMessage[]>(initialSession.history);
+  const [conversationEpoch, setConversationEpoch] = useState(0);
   const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -173,6 +174,7 @@ export function AssistantPanel({
   const activeRequestRef = useRef<string | null>(null);
   const locallyStoppedRequestsRef = useRef(new Set<string>());
   const historyRef = useRef(initialSession.history);
+  const conversationEpochRef = useRef(0);
   const copyTimerRef = useRef<number | null>(null);
   const focusLauncherAfterCloseRef = useRef(false);
   // iPad 宽屏有足够空间使用可拖动面板；真正决定布局的是视口档位，不是触屏 UA。
@@ -513,7 +515,8 @@ export function AssistantPanel({
     ]);
     try {
       const reply = await ipc.assistant.ask(question, context, historyAtSend, requestId);
-      const canceled = reply.canceled || locallyStoppedRequestsRef.current.has(requestId);
+      const locallyStopped = locallyStoppedRequestsRef.current.has(requestId);
+      const canceled = reply.canceled || locallyStopped;
       // 后端也会清空取消轮次的动作；这里再守一次，避免旧后端或兼容端点让用户
       // 点停以后仍切主题、导航或冒出待确认操作。
       const actions = canceled ? [] : reply.actions;
@@ -535,7 +538,9 @@ export function AssistantPanel({
           turn.id === turnId
             ? {
                 ...turn,
-                answer: reply.answer,
+                // cancel IPC 与已完成响应赛跑时，旧后端可能仍回 canceled=false。此时整轮
+                // history 已被丢弃，回答也不能显示成下一轮模型根本没见过的幽灵上下文。
+                answer: locallyStopped && !reply.canceled ? "" : reply.answer,
                 actions,
                 tools: reply.tools_used,
                 turns: reply.turns,
@@ -575,7 +580,10 @@ export function AssistantPanel({
     }
   }
 
-  function recordActionResult(turnId: string, message: string) {
+  function recordActionResult(turnId: string, message: string, epoch: number) {
+    // 用户可以在确认卡执行期间开始新对话。旧操作照常完成，但它的回执不能写进
+    // 已经重置的会话，尤其不能混入新会话正在进行的请求。
+    if (epoch !== conversationEpochRef.current) return;
     // 独立追加而不是改写“最后一条回答”：用户可能回头执行旧轮次的卡片，附到最新回答
     // 会把两个不相干的操作串在一起。assistant 角色也不会消耗后端的用户轮次上限。
     setTurns((previous) =>
@@ -610,6 +618,9 @@ export function AssistantPanel({
 
   function startNewConversation() {
     if (busy) return;
+    const nextEpoch = conversationEpochRef.current + 1;
+    conversationEpochRef.current = nextEpoch;
+    setConversationEpoch(nextEpoch);
     setTurns([]);
     historyRef.current = [];
     setHistory([]);
@@ -824,7 +835,7 @@ export function AssistantPanel({
             <AssistantActionList
               actions={turn.actions}
               onNavigate={(action) => navigateFromTurn(turn, action)}
-              onResult={(message) => recordActionResult(turn.id, message)}
+              onResult={(message) => recordActionResult(turn.id, message, conversationEpoch)}
             />
 
             {turn.actionResults.length > 0 && (
