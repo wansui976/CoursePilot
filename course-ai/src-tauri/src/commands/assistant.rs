@@ -223,11 +223,14 @@ mod tests {
     use super::*;
 
     fn tool_call_message(index: usize) -> ChatMessage {
-        ChatMessage::tool_calls("", vec![crate::llm::ToolCall {
-            id: format!("call-{index}"),
-            name: "probe".into(),
-            arguments: "{}".into(),
-        }])
+        ChatMessage::tool_calls(
+            "",
+            vec![crate::llm::ToolCall {
+                id: format!("call-{index}"),
+                name: "probe".into(),
+                arguments: "{}".into(),
+            }],
+        )
     }
 
     #[test]
