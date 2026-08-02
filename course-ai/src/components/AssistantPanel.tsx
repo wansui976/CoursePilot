@@ -32,7 +32,9 @@ import {
 import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
 import { isMobile, isTablet } from "@/lib/platform";
+import { formatMs } from "@/lib/time";
 import { type DockSide, useAssistantUi } from "@/stores/assistant";
+import { useInlineAsk } from "@/stores/inlineAsk";
 import { useTheme } from "@/stores/theme";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import type { AssistantAction, AssistantContext, AssistantMessage } from "@/lib/types";
@@ -48,9 +50,12 @@ const PANEL_WIDTH = 360;
 const PANEL_MAX_HEIGHT = 720;
 const VIEWPORT_GAP = 16;
 const EDGE_SNAP_DISTANCE = 28;
-const DOCK_STRIP_HEIGHT = 112;
+/// 收起时那颗球的直径。停靠位置的夹取与展开/收起时的居中都按它算，
+/// 改了尺寸这些数会自动跟上。
+const LAUNCHER_SIZE = 56;
 const KEYBOARD_MOVE_STEP = 24;
 const DRAG_START_DISTANCE = 4;
+const DOCK_DETACH_DISTANCE = 16;
 
 interface PanelPosition {
   x: number;
@@ -58,6 +63,10 @@ interface PanelPosition {
 }
 
 interface DragSession {
+  source: "panel" | "dock";
+  originSide: DockSide;
+  startDockTop: number;
+  detached: boolean;
   pointerId: number;
   startX: number;
   startY: number;
@@ -98,7 +107,7 @@ function initialPanelPosition(side: DockSide): PanelPosition {
 
 function initialDockTop() {
   const { height } = viewportSize();
-  return Math.max(VIEWPORT_GAP, height - DOCK_STRIP_HEIGHT - 24);
+  return Math.max(VIEWPORT_GAP, height - LAUNCHER_SIZE - 24);
 }
 
 type Turn = AssistantTurnRecord;
@@ -171,6 +180,7 @@ export function AssistantPanel({
   const panelRef = useRef<HTMLElement>(null);
   const dragRef = useRef<DragSession | null>(null);
   const dragCleanupRef = useRef<(() => void) | null>(null);
+  const suppressLauncherClickRef = useRef(false);
   const activeRequestRef = useRef<string | null>(null);
   const locallyStoppedRequestsRef = useRef(new Set<string>());
   const historyRef = useRef(initialSession.history);
@@ -184,6 +194,8 @@ export function AssistantPanel({
   const [dragging, setDragging] = useState(false);
   const [snapSide, setSnapSide] = useState<DockSide | null>(null);
   const setThemePref = useTheme((state) => state.setPref);
+  const pendingInlineAsk = useInlineAsk((state) => state.pending);
+  const clearInlineAsk = useInlineAsk((state) => state.clear);
   const scopeLabel = contextLabel(context);
 
   function navigateFromTurn(turn: Turn, action: AssistantAction) {
@@ -226,6 +238,21 @@ export function AssistantPanel({
   }, [input, open]);
 
   useEffect(() => {
+    if (!pendingInlineAsk) return;
+    const source =
+      pendingInlineAsk.startMs == null
+        ? ""
+        : `（${formatMs(pendingInlineAsk.startMs)}）`;
+    const draft = `请解释这段文稿${source}：\n\n${pendingInlineAsk.text}`;
+    setInput((current) =>
+      current.trim() ? `${current.trimEnd()}\n\n${draft}` : draft,
+    );
+    setOpen(true);
+    clearInlineAsk();
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [clearInlineAsk, pendingInlineAsk, setOpen]);
+
+  useEffect(() => {
     if (open || !focusLauncherAfterCloseRef.current) return;
     focusLauncherAfterCloseRef.current = false;
     requestAnimationFrame(() => launcherRef.current?.focus());
@@ -242,7 +269,7 @@ export function AssistantPanel({
         y: clamp(current.y, VIEWPORT_GAP, viewport.height - panel.height - VIEWPORT_GAP),
       }));
       setDockTop((current) =>
-        clamp(current, VIEWPORT_GAP, viewport.height - DOCK_STRIP_HEIGHT - VIEWPORT_GAP),
+        clamp(current, VIEWPORT_GAP, viewport.height - LAUNCHER_SIZE - VIEWPORT_GAP),
       );
     };
 
@@ -289,9 +316,9 @@ export function AssistantPanel({
   function dockToStrip(nextSide: DockSide, y: number, focusLauncher = false) {
     const { height } = viewportSize();
     const panel = measurePanel();
-    const centeredTop = y + panel.height / 2 - DOCK_STRIP_HEIGHT / 2;
+    const centeredTop = y + panel.height / 2 - LAUNCHER_SIZE / 2;
     setDockTop(
-      clamp(centeredTop, VIEWPORT_GAP, height - DOCK_STRIP_HEIGHT - VIEWPORT_GAP),
+      clamp(centeredTop, VIEWPORT_GAP, height - LAUNCHER_SIZE - VIEWPORT_GAP),
     );
     dock(nextSide);
     focusLauncherAfterCloseRef.current = focusLauncher;
@@ -300,7 +327,7 @@ export function AssistantPanel({
 
   function openFromDock() {
     const panel = measurePanel();
-    const centeredTop = dockTop + DOCK_STRIP_HEIGHT / 2 - panel.height / 2;
+    const centeredTop = dockTop + LAUNCHER_SIZE / 2 - panel.height / 2;
     setPosition(positionAtSide(side, centeredTop));
     setOpen(true);
     requestAnimationFrame(() => inputRef.current?.focus());
@@ -324,6 +351,35 @@ export function AssistantPanel({
     }
 
     const viewport = viewportSize();
+    if (session.source === "dock" && !session.detached) {
+      const inwardDistance =
+        session.originSide === "left"
+          ? clientX - session.startX
+          : session.startX - clientX;
+      if (inwardDistance < DOCK_DETACH_DISTANCE) {
+        const nextDockTop = clamp(
+          session.startDockTop + clientY - session.startY,
+          VIEWPORT_GAP,
+          viewport.height - LAUNCHER_SIZE - VIEWPORT_GAP,
+        );
+        session.position = {
+          ...session.position,
+          y: clamp(
+            nextDockTop + LAUNCHER_SIZE / 2 - session.panelHeight / 2,
+            VIEWPORT_GAP,
+            viewport.height - session.panelHeight - VIEWPORT_GAP,
+          ),
+        };
+        session.snapSide = session.originSide;
+        setDockTop(nextDockTop);
+        return session;
+      }
+
+      session.detached = true;
+      setOpen(true);
+      setDragging(true);
+    }
+
     const rawX = clientX - session.offsetX;
     const rawY = clientY - session.offsetY;
     const nearLeft = rawX <= EDGE_SNAP_DISTANCE;
@@ -363,28 +419,13 @@ export function AssistantPanel({
     return session;
   }
 
-  function beginPanelDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+  function trackDrag(event: ReactPointerEvent<HTMLButtonElement>, session: DragSession) {
     if (mobile || (event.pointerType === "mouse" && event.button !== 0)) return;
 
     dragCleanupRef.current?.();
-    const panel = measurePanel();
-    const rect = panelRef.current?.getBoundingClientRect();
-    const panelLeft = rect?.width ? rect.left : position.x;
-    const panelTop = rect?.height ? rect.top : position.y;
     const handle = event.currentTarget;
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      offsetX: event.clientX - panelLeft,
-      offsetY: event.clientY - panelTop,
-      panelWidth: panel.width,
-      panelHeight: panel.height,
-      moved: false,
-      position,
-      snapSide: null,
-    };
-    setDragging(true);
+    dragRef.current = session;
+    setDragging(session.source === "panel");
     setSnapSide(null);
 
     try {
@@ -413,7 +454,21 @@ export function AssistantPanel({
       dragRef.current = null;
       setDragging(false);
       setSnapSide(null);
-      if (!cancelled && completed?.moved && completed.snapSide) {
+      if (completed?.source === "dock" && completed.moved) {
+        suppressLauncherClickRef.current = true;
+        window.setTimeout(() => {
+          suppressLauncherClickRef.current = false;
+        }, 0);
+      }
+      if (cancelled && completed?.source === "dock" && completed.detached) {
+        setOpen(false);
+        setDockTop(completed.startDockTop);
+      } else if (
+        !cancelled &&
+        completed?.moved &&
+        completed.snapSide &&
+        (completed.source === "panel" || completed.detached)
+      ) {
         dockToStrip(completed.snapSide, completed.position.y);
       }
     };
@@ -436,6 +491,65 @@ export function AssistantPanel({
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onCancel);
     dragCleanupRef.current = removeListeners;
+  }
+
+  function beginPanelDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (mobile || (event.pointerType === "mouse" && event.button !== 0)) return;
+
+    const panel = measurePanel();
+    const rect = panelRef.current?.getBoundingClientRect();
+    const panelLeft = rect?.width ? rect.left : position.x;
+    const panelTop = rect?.height ? rect.top : position.y;
+    trackDrag(event, {
+      source: "panel",
+      originSide: side,
+      startDockTop: dockTop,
+      detached: true,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: event.clientX - panelLeft,
+      offsetY: event.clientY - panelTop,
+      panelWidth: panel.width,
+      panelHeight: panel.height,
+      moved: false,
+      position,
+      snapSide: null,
+    });
+  }
+
+  function beginDockDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (mobile || (event.pointerType === "mouse" && event.button !== 0)) return;
+
+    const viewport = viewportSize();
+    const panel = measurePanel();
+    const dockedPosition = {
+      x:
+        side === "left"
+          ? VIEWPORT_GAP
+          : viewport.width - panel.width - VIEWPORT_GAP,
+      y: clamp(
+        dockTop + LAUNCHER_SIZE / 2 - panel.height / 2,
+        VIEWPORT_GAP,
+        viewport.height - panel.height - VIEWPORT_GAP,
+      ),
+    };
+    trackDrag(event, {
+      source: "dock",
+      originSide: side,
+      startDockTop: dockTop,
+      detached: false,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: event.clientX - dockedPosition.x,
+      offsetY: event.clientY - dockedPosition.y,
+      panelWidth: panel.width,
+      panelHeight: panel.height,
+      moved: false,
+      position: dockedPosition,
+      snapSide: side,
+    });
   }
 
   function movePanelWithKeyboard(event: KeyboardEvent<HTMLButtonElement>) {
@@ -648,26 +762,21 @@ export function AssistantPanel({
         type="button"
         aria-label="打开助手"
         data-dock-side={mobile ? undefined : side}
-        onClick={openFromDock}
+        onClick={() => {
+          if (suppressLauncherClickRef.current) return;
+          openFromDock();
+        }}
+        onPointerDown={mobile ? undefined : beginDockDrag}
         style={mobile ? { bottom: launcherBottom } : { top: dockTop }}
         className={
           mobile
             ? "ca-touch-44 fixed right-4 z-40 grid h-12 w-12 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-lg transition-colors hover:bg-[var(--surface-card-hover)] motion-reduce:transition-none"
-            : `fixed z-40 grid h-28 w-11 place-items-center border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-lg transition-colors hover:bg-[var(--surface-card-hover)] motion-reduce:transition-none ${
-                side === "left"
-                  ? "left-0 rounded-r-lg border-l-0"
-                  : "right-0 rounded-l-lg border-r-0"
+            : `ca-touch-44 fixed z-40 grid h-14 w-14 touch-none select-none cursor-grab active:cursor-grabbing place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-lg transition hover:scale-105 hover:bg-[var(--surface-card-hover)] motion-reduce:transition-none motion-reduce:hover:scale-100 ${
+                side === "left" ? "left-3" : "right-3"
               }`
         }
       >
-        <span className="flex flex-col items-center gap-3" aria-hidden="true">
-          <Sparkles className="h-5 w-5 text-[var(--accent)]" />
-          {mobile ? null : side === "left" ? (
-            <ChevronRight className="h-4 w-4 text-[var(--text-faint)]" />
-          ) : (
-            <ChevronLeft className="h-4 w-4 text-[var(--text-faint)]" />
-          )}
-        </span>
+        <Sparkles className="h-5 w-5 text-[var(--accent)]" aria-hidden="true" />
       </button>
       )}
     <aside
