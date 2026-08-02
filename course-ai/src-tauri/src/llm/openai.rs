@@ -102,11 +102,16 @@ fn message_body(m: &crate::llm::ChatMessage) -> Value {
         return json!({"role": "tool", "tool_call_id": call_id, "content": m.content});
     }
     if !m.tool_calls.is_empty() {
-        // content 必须是 null 而不是空串：模型这一轮没有说话，只是要求调工具。
-        // 发空串会被一些端点当成「助手说了句空话」，下一轮的推理跟着跑偏。
+        // 它顺带说了话就把话发回去；真没说才发 null。
+        // 不能发空串——一些端点会当成「助手说了句空话」，下一轮推理跟着跑偏。
+        let content = if m.content.is_empty() {
+            Value::Null
+        } else {
+            Value::String(m.content.clone())
+        };
         return json!({
             "role": "assistant",
-            "content": Value::Null,
+            "content": content,
             "tool_calls": m.tool_calls.iter().map(|c| json!({
                 "id": c.id,
                 "type": "function",
@@ -368,64 +373,199 @@ pub async fn complete_stream(
             body_snippet(&text)
         )));
     }
-    let mut acc = String::new();
-    let mut tools = crate::llm::ToolCallAccumulator::default();
-    // 字节缓冲，不是字符串缓冲：中文字符会被切在 chunk 中间，见 [`take_sse_line`]。
-    let mut buf: Vec<u8> = Vec::new();
-    let mut finished = false;
-    let mut canceled = false;
+    let mut state = StreamState::default();
     let mut stream = resp.bytes_stream();
-    'outer: while let Some(chunk) = stream.next().await {
+    while let Some(chunk) = stream.next().await {
         if cancel.load(Ordering::SeqCst) {
-            canceled = true;
+            state.canceled = true;
             break;
         }
         let bytes = chunk.map_err(request_error)?;
-        buf.extend_from_slice(&bytes);
+        if state.feed(&bytes, cancel, on_piece)? {
+            break;
+        }
+        // 每个 chunk 处理完后主动 yield，让 Tokio 把累积的 channel.send 投递到前端。
+        tokio::task::yield_now().await;
+    }
+    state.finish()
+}
+
+/// SSE 流的状态机，从网络里拆出来单独放。
+///
+/// 拆出来是为了能测：带工具的流式路径此前**从没跑过**——单元测试只覆盖了单行解析和
+/// 碎片累加器，而「一段段字节喂进来、切行、分派、拼装」这层接线是靠真实请求才走得到的。
+/// 现在可以直接喂字节。
+#[derive(Default)]
+struct StreamState {
+    acc: String,
+    tools: crate::llm::ToolCallAccumulator,
+    /// 字节缓冲，不是字符串缓冲：中文字符会被切在 chunk 中间，见 [`take_sse_line`]。
+    buf: Vec<u8>,
+    finished: bool,
+    canceled: bool,
+}
+
+impl StreamState {
+    /// 吃进一段字节。返回 true 表示该停下了（被取消）。
+    fn feed(
+        &mut self,
+        bytes: &[u8],
+        cancel: &AtomicBool,
+        on_piece: &mut (dyn FnMut(StreamPiece) + Send),
+    ) -> AppResult<bool> {
+        self.buf.extend_from_slice(bytes);
         // 按行处理，保留最后一段不完整行到下次。
-        while let Some(line) = take_sse_line(&mut buf) {
+        while let Some(line) = take_sse_line(&mut self.buf) {
             if cancel.load(Ordering::SeqCst) {
-                canceled = true;
-                break 'outer;
+                self.canceled = true;
+                return Ok(true);
             }
             match parse_openai_sse_line(line.trim_end()) {
                 // 推理模型的「思考」内容：流式给前端展示，但不计入最终答案。
                 SseEvent::Reasoning(delta) => on_piece(StreamPiece::Reasoning(&delta)),
                 SseEvent::Content(delta) => {
                     on_piece(StreamPiece::Content(&delta));
-                    acc.push_str(&delta);
+                    self.acc.push_str(&delta);
                 }
                 SseEvent::ToolCallDeltas(deltas) => {
                     for delta in deltas {
-                        tools.push(delta);
+                        self.tools.push(delta);
                     }
                 }
-                SseEvent::Finished => finished = true,
+                SseEvent::Finished => self.finished = true,
                 SseEvent::Failed(message) => {
                     return Err(AppError::Other(format!("OpenAI 流内错误: {message}")))
                 }
                 SseEvent::Ignore => {}
             }
         }
-        // 每个 chunk 处理完后主动 yield，让 Tokio 把累积的 channel.send 投递到前端。
-        tokio::task::yield_now().await;
+        Ok(false)
     }
-    // 用户主动停止时，已经吐出来的那部分就是他要的，照常返回。
-    if !finished && !canceled {
-        return Err(AppError::Other(
-            "OpenAI 流在结束标记之前就断了，这次回答不完整".into(),
-        ));
+
+    fn finish(self) -> AppResult<StreamOutcome> {
+        // 用户主动停止时，已经吐出来的那部分就是他要的，照常返回。
+        if !self.finished && !self.canceled {
+            return Err(AppError::Other(
+                "OpenAI 流在结束标记之前就断了，这次回答不完整".into(),
+            ));
+        }
+        Ok(StreamOutcome {
+            content: self.acc,
+            tool_calls: self.tools.finish(),
+        })
     }
-    Ok(StreamOutcome {
-        content: acc,
-        tool_calls: tools.finish(),
-    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::llm::ChatMessage;
+
+    /// 把整段 SSE 按给定大小切块喂进状态机，模拟网络分包。
+    fn drive(sse: &str, chunk_size: usize) -> AppResult<StreamOutcome> {
+        let cancel = AtomicBool::new(false);
+        let mut state = StreamState::default();
+        let mut seen = String::new();
+        for chunk in sse.as_bytes().chunks(chunk_size) {
+            let stop = state.feed(chunk, &cancel, &mut |piece| {
+                if let StreamPiece::Content(d) = piece {
+                    seen.push_str(d);
+                }
+            })?;
+            if stop {
+                break;
+            }
+        }
+        let outcome = state.finish()?;
+        assert_eq!(seen, outcome.content, "回调吐出的和累积的必须一致");
+        Ok(outcome)
+    }
+
+    /// 一段真实形状的流：先说一句话，再分片要求调两个工具，最后 [DONE]。
+    const TOOL_STREAM: &str = concat!(
+        r#"data: {"choices":[{"delta":{"content":"我先查一下"}}]}"#,
+        "\n\n",
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"search_content","arguments":""}}]}}]}"#,
+        "\n\n",
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"c2","function":{"name":"open_video","arguments":""}}]}}]}"#,
+        "\n\n",
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"query\":\"双曲"}}]}}]}"#,
+        "\n\n",
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\"video_id\":\"v9\"}"}}]}}]}"#,
+        "\n\n",
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"线\"}"}}]}}]}"#,
+        "\n\n",
+        r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+        "\n\n",
+        "data: [DONE]\n\n",
+    );
+
+    #[test]
+    fn a_whole_tool_call_stream_reassembles_however_the_network_splits_it() {
+        // 这条路线上从没跑过：此前只测了「单行解析」和「碎片累加器」，
+        // 中间那层接线（字节切行 → 分派 → 拼装）是靠真实请求才走得到的。
+        // 逐字节喂是最狠的切法：每个多字节汉字、每段 JSON 都会被切开。
+        for chunk_size in [1, 3, 7, 64, 4096] {
+            let out = drive(TOOL_STREAM, chunk_size).unwrap();
+            assert_eq!(out.content, "我先查一下", "chunk={chunk_size} 正文被切坏了");
+            assert_eq!(out.tool_calls.len(), 2, "chunk={chunk_size}");
+            assert_eq!(out.tool_calls[0].name, "search_content");
+            assert_eq!(
+                out.tool_calls[0].arguments, r#"{"query":"双曲线"}"#,
+                "chunk={chunk_size} 入参跨片没拼对"
+            );
+            assert_eq!(out.tool_calls[1].name, "open_video");
+            assert_eq!(out.tool_calls[1].arguments, r#"{"video_id":"v9"}"#);
+        }
+    }
+
+    #[test]
+    fn a_stream_cut_before_the_end_marker_is_an_error_not_a_short_answer() {
+        // 半截回答和完整回答在界面上看不出区别，而它还会被存进笔记和题库。
+        let truncated = r#"data: {"choices":[{"delta":{"content":"讲到一半"}}]}"#;
+        assert!(drive(truncated, 8).is_err());
+    }
+
+    #[test]
+    fn canceling_midstream_keeps_what_already_arrived() {
+        let cancel = AtomicBool::new(true);
+        let mut state = StreamState::default();
+        let stop = state
+            .feed(TOOL_STREAM.as_bytes(), &cancel, &mut |_| {})
+            .unwrap();
+        assert!(stop, "取消要让上层停下");
+        // 用户主动停止时，已经吐出来的那部分就是他要的，不该报错。
+        assert!(state.finish().is_ok());
+    }
+
+    #[test]
+    fn an_assistant_turn_keeps_what_the_model_said_alongside_its_tool_calls() {
+        // 原来一律发 null，等于把模型自己说过的话从它的上下文里抹掉，
+        // 下一轮它看不到自己刚才的交代，容易把同一件事再解释一遍。
+        let mut req = sample_req();
+        req.messages = vec![ChatMessage::tool_calls(
+            "我先查一下",
+            vec![crate::llm::ToolCall {
+                id: "c1".into(),
+                name: "probe".into(),
+                arguments: "{}".into(),
+            }],
+        )];
+        let body = build_openai_body(&req);
+        let turn = &body["messages"][1];
+        assert_eq!(turn["content"], "我先查一下");
+
+        // 真没说话时仍然发 null——空串会被一些端点当成「助手说了句空话」。
+        req.messages = vec![ChatMessage::tool_calls(
+            "",
+            vec![crate::llm::ToolCall {
+                id: "c1".into(),
+                name: "probe".into(),
+                arguments: "{}".into(),
+            }],
+        )];
+        assert!(build_openai_body(&req)["messages"][1]["content"].is_null());
+    }
 
     #[test]
     fn parses_a_streamed_tool_call_fragment() {
@@ -589,11 +729,14 @@ mod tests {
         req.tools = vec![weather_tool()];
         req.messages = vec![
             ChatMessage::user("北京天气怎么样"),
-            ChatMessage::tool_calls(vec![crate::llm::ToolCall {
-                id: "call_1".into(),
-                name: "get_weather".into(),
-                arguments: r#"{"city":"北京"}"#.into(),
-            }]),
+            ChatMessage::tool_calls(
+                "",
+                vec![crate::llm::ToolCall {
+                    id: "call_1".into(),
+                    name: "get_weather".into(),
+                    arguments: r#"{"city":"北京"}"#.into(),
+                }],
+            ),
             ChatMessage::tool_result("call_1", "晴，26 度"),
         ];
         let body = build_openai_body(&req);

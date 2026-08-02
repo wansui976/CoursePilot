@@ -135,7 +135,10 @@ pub async fn run<T: ToolBox>(
         // 模型要求调工具的那一轮必须原样放回对话里，后面那些结果才有出处；
         // 少了它，服务端会因为「孤儿 tool 消息」直接拒掉下一次请求。
 
-        messages.push(ChatMessage::tool_calls(response.tool_calls.clone()));
+        messages.push(ChatMessage::tool_calls(
+            response.content.clone(),
+            response.tool_calls.clone(),
+        ));
 
         for call in &response.tool_calls {
             // 取消后不再执行剩下的工具，但已经执行过的结果要留在对话里——
@@ -151,7 +154,9 @@ pub async fn run<T: ToolBox>(
         }
     }
 
-    if turns >= MAX_TURNS {
+    // 被取消不算撞上限。两者都会走到这里，但对用户是两件事：
+    // 一个是「你叫停的」，一个是「它自己转不出来了」。
+    if turns >= MAX_TURNS && !cancel.load(Ordering::SeqCst) {
         on_event(AgentEvent::HitTurnLimit);
     }
     // 撞上限或被取消：把已经拿到的交出去，不报错。用户宁可看到半截结果，
@@ -427,6 +432,92 @@ mod tests {
             .filter_map(|m| m.tool_call_id.clone())
             .collect();
         assert_eq!(answered, ["a", "b"], "两次调用都要有结果，哪怕是「已取消」");
+    }
+
+    #[tokio::test]
+    async fn being_canceled_is_not_reported_as_hitting_the_turn_limit() {
+        // 两者都会走到收尾，但对用户是两件事：一个是「你叫停的」，
+        // 一个是「它自己转不出来了」。混着说会让人以为助手卡死了。
+        // 必须在**最后一轮**才取消，否则循环提前 break，turns 根本到不了上限，
+        // 这个判断就没被走到——测试会假装通过。
+        struct CancelOnLastTool<'a> {
+            cancel: &'a AtomicBool,
+            seen: RefCell<usize>,
+        }
+        impl ToolBox for CancelOnLastTool<'_> {
+            fn specs(&self) -> Vec<ToolSpec> {
+                vec![ToolSpec {
+                    name: "probe".into(),
+                    description: String::new(),
+                    parameters: serde_json::json!({"type":"object"}),
+                }]
+            }
+            async fn run(&self, _call: &ToolCall) -> ToolOutcome {
+                *self.seen.borrow_mut() += 1;
+                if *self.seen.borrow() >= MAX_TURNS {
+                    self.cancel.store(true, Ordering::SeqCst);
+                }
+                ToolOutcome::ok("做完了")
+            }
+        }
+
+        let provider = scripted(
+            (0..MAX_TURNS + 2)
+                .map(|i| wants(vec![call(&format!("c{i}"), "probe", "{}")]))
+                .collect(),
+        );
+        let cancel = AtomicBool::new(false);
+        let tools = CancelOnLastTool {
+            cancel: &cancel,
+            seen: RefCell::new(0),
+        };
+        let mut hit_limit = false;
+        run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("一直做")],
+            &tools,
+            &cancel,
+            &mut |e| {
+                if matches!(e, AgentEvent::HitTurnLimit) {
+                    hit_limit = true;
+                }
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!hit_limit, "被取消不该报成撞上限");
+    }
+
+    #[tokio::test]
+    async fn what_the_model_said_alongside_its_tool_calls_stays_in_the_conversation() {
+        // 置空的话，它下一轮看不到自己刚才的交代，容易把同一件事再解释一遍。
+        let provider = scripted(vec![
+            crate::llm::ChatResponse {
+                content: "我先查一下".into(),
+                tool_calls: vec![call("c1", "probe", "{}")],
+            },
+            says("查完了"),
+        ]);
+        let tools = Recorder::new(false);
+        let out = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("查查看")],
+            &tools,
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+        let announced = out
+            .messages
+            .iter()
+            .find(|m| !m.tool_calls.is_empty())
+            .unwrap();
+        assert_eq!(announced.content, "我先查一下");
     }
 
     #[tokio::test]

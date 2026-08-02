@@ -64,10 +64,14 @@ impl ChatMessage {
 
     /// 模型这一轮要求调工具。必须原样放回对话里再发下一次请求，
     /// 否则后面那条 tool 结果就成了没有出处的孤儿，服务端会直接拒。
-    pub fn tool_calls(calls: Vec<ToolCall>) -> Self {
+    ///
+    /// `content` 是它这一轮**顺带说的话**（「我先查一下」之类），可能为空。
+    /// 原来这里一律置空，等于把模型自己说过的话从它的上下文里抹掉——
+    /// 它下一轮看不到自己刚才的交代，容易把同一件事再解释一遍。
+    pub fn tool_calls(content: impl Into<String>, calls: Vec<ToolCall>) -> Self {
         Self {
             role: "assistant".into(),
-            content: String::new(),
+            content: content.into(),
             tool_calls: calls,
             tool_call_id: None,
         }
