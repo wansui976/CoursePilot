@@ -16,11 +16,21 @@ fn body_snippet(body: &str) -> String {
 }
 
 fn request_error(error: reqwest::Error) -> AppError {
+    // 连接阶段的超时要单独认出来。它和「等生成等了十分钟」是两码事：
+    // 连接超时只等了 20 秒，压根没连上服务端，也就谈不上「服务端可能仍在生成」——
+    // 照那句话提示，用户会白等，而正确的做法恰恰是立刻重试或去查网络。
+    // reqwest 对连接超时同时置位 is_timeout 和 is_connect，所以先判 is_connect。
+    if error.is_connect() {
+        return AppError::Other(format!(
+            "连不上大模型服务（{} 秒内没能建立连接）。检查网络、代理和 Base URL 是否正确。",
+            crate::llm::factory::LLM_CONNECT_TIMEOUT.as_secs()
+        ));
+    }
     if error.is_timeout() {
-        return AppError::Other(
-            "大模型请求超时（已等待 10 分钟）。服务端可能仍在生成，请稍后检查，避免立即重复提交。"
-                .into(),
-        );
+        return AppError::Other(format!(
+            "大模型请求超时（已等待 {} 分钟）。服务端可能仍在生成，请稍后检查，避免立即重复提交。",
+            crate::llm::factory::LLM_REQUEST_TIMEOUT.as_secs() / 60
+        ));
     }
 
     let mut message = format!("OpenAI 请求失败: {error}");
