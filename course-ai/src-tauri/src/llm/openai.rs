@@ -5,6 +5,9 @@ use reqwest::header::CONTENT_TYPE;
 use serde_json::{json, Value};
 use std::error::Error as _;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+const STREAM_CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 fn body_snippet(body: &str) -> String {
     const MAX: usize = 500;
@@ -375,19 +378,58 @@ pub async fn complete_stream(
     }
     let mut state = StreamState::default();
     let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        if cancel.load(Ordering::SeqCst) {
-            state.canceled = true;
-            break;
+    loop {
+        match next_stream_item_or_cancel(&mut stream, cancel).await {
+            StreamWait::Item(chunk) => {
+                // 取消可能与网络结果同时到达；沿用原来的优先级，停止优先于解析 chunk/错误。
+                if cancel.load(Ordering::SeqCst) {
+                    state.canceled = true;
+                    break;
+                }
+                let bytes = chunk.map_err(request_error)?;
+                if state.feed(&bytes, cancel, on_piece)? {
+                    break;
+                }
+                // 每个 chunk 处理完后主动 yield，让 Tokio 把累积的 channel.send 投递到前端。
+                tokio::task::yield_now().await;
+            }
+            StreamWait::End => break,
+            StreamWait::Canceled => {
+                state.canceled = true;
+                break;
+            }
         }
-        let bytes = chunk.map_err(request_error)?;
-        if state.feed(&bytes, cancel, on_piece)? {
-            break;
-        }
-        // 每个 chunk 处理完后主动 yield，让 Tokio 把累积的 channel.send 投递到前端。
-        tokio::task::yield_now().await;
     }
     state.finish()
+}
+
+enum StreamWait<T> {
+    Item(T),
+    End,
+    Canceled,
+}
+
+/// 等下一块网络数据时也定期看取消标志。
+///
+/// 只在拿到 chunk 后检查会漏掉最需要取消的情况：连接已经建立，但服务端一直不再发送数据。
+async fn next_stream_item_or_cancel<S>(stream: &mut S, cancel: &AtomicBool) -> StreamWait<S::Item>
+where
+    S: futures_util::Stream + Unpin,
+{
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            return StreamWait::Canceled;
+        }
+        tokio::select! {
+            item = stream.next() => {
+                return match item {
+                    Some(item) => StreamWait::Item(item),
+                    None => StreamWait::End,
+                };
+            }
+            _ = tokio::time::sleep(STREAM_CANCEL_POLL_INTERVAL) => {}
+        }
+    }
 }
 
 /// SSE 流的状态机，从网络里拆出来单独放。
@@ -528,14 +570,50 @@ mod tests {
 
     #[test]
     fn canceling_midstream_keeps_what_already_arrived() {
-        let cancel = AtomicBool::new(true);
+        let cancel = AtomicBool::new(false);
         let mut state = StreamState::default();
+        let first = concat!(
+            r#"data: {"choices":[{"delta":{"content":"已经收到"}}]}"#,
+            "\n\n"
+        );
+        let mut seen = String::new();
+        assert!(!state
+            .feed(first.as_bytes(), &cancel, &mut |piece| {
+                if let StreamPiece::Content(delta) = piece {
+                    seen.push_str(delta);
+                }
+            })
+            .unwrap());
+
+        cancel.store(true, Ordering::SeqCst);
         let stop = state
             .feed(TOOL_STREAM.as_bytes(), &cancel, &mut |_| {})
             .unwrap();
         assert!(stop, "取消要让上层停下");
         // 用户主动停止时，已经吐出来的那部分就是他要的，不该报错。
-        assert!(state.finish().is_ok());
+        let outcome = state.finish().unwrap();
+        assert_eq!(seen, "已经收到");
+        assert_eq!(outcome.content, "已经收到");
+    }
+
+    #[tokio::test]
+    async fn cancel_interrupts_a_stream_that_never_produces_another_chunk() {
+        let cancel = AtomicBool::new(false);
+        let mut stream = futures_util::stream::pending::<()>();
+
+        let result = tokio::time::timeout(Duration::from_secs(1), async {
+            let wait = next_stream_item_or_cancel(&mut stream, &cancel);
+            let cancel_later = async {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                cancel.store(true, Ordering::SeqCst);
+            };
+            let (result, ()) = tokio::join!(wait, cancel_later);
+            result
+        })
+        .await
+        .expect("等待无数据的流也应在取消后很快返回");
+
+        assert!(matches!(result, StreamWait::Canceled));
     }
 
     #[test]
