@@ -23,7 +23,10 @@ describe("assistantSession", () => {
           actionResults: ["已完成删除：第一讲"],
         },
       ],
-      history: [{ role: "user", content: "删掉它" }],
+      history: [
+        { role: "user", content: "删掉它" },
+        { role: "assistant", content: "已经准备好" },
+      ],
       draft: "继续问",
     });
 
@@ -40,7 +43,10 @@ describe("assistantSession", () => {
           actionResults: ["已完成删除：第一讲"],
         },
       ],
-      history: [{ role: "user", content: "删掉它" }],
+      history: [
+        { role: "user", content: "删掉它" },
+        { role: "assistant", content: "已经准备好" },
+      ],
       draft: "继续问",
     });
   });
@@ -115,6 +121,7 @@ describe("assistantSession", () => {
       JSON.stringify({
         turns: [],
         history: Array.from({ length: 10 }, (_, index) => [
+          { role: "user", content: `（界面状态：当前视频 id=v${index}）` },
           { role: "user", content: `问题 ${index}` },
           { role: "assistant", content: `回答 ${index}` },
         ]).flat(),
@@ -125,5 +132,6 @@ describe("assistantSession", () => {
     const history = readAssistantSession().history;
     expect(history.filter((message) => message.role === "user")).toHaveLength(8);
     expect(history[0].content).toBe("问题 2");
+    expect(history.every((message) => !message.content.startsWith("（界面状态："))).toBe(true);
   });
 });

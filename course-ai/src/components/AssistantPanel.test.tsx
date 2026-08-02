@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantPanel } from "./AssistantPanel";
 import { useAssistantUi } from "@/stores/assistant";
@@ -354,6 +354,7 @@ describe("AssistantPanel", () => {
     );
 
     expect(await screen.findByText("已停止，未继续执行")).toBeInTheDocument();
+    expect(screen.queryByText("服务端其实已经答完")).not.toBeInTheDocument();
     expect(useTheme.getState().pref).toBe("light");
     expect(screen.queryByRole("button", { name: "确认删除" })).not.toBeInTheDocument();
 
@@ -767,6 +768,59 @@ describe("确认卡", () => {
     expect(screen.getByText("操作结果：已完成改名：第一讲")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "确认改名" })).not.toBeInTheDocument();
     expect(mockIpc.videos.updateTitle).toHaveBeenCalledTimes(1);
+  });
+
+  it("旧确认卡执行完后不会把回执写进已经开始的新对话", async () => {
+    let finishRename!: () => void;
+    mockIpc.videos.updateTitle.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishRename = resolve;
+      }),
+    );
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        history: [
+          { role: "user", content: "改名" },
+          { role: "assistant", content: "已经准备好，等你确认" },
+        ],
+        actions: [
+          {
+            kind: "propose_rename",
+            video_id: "v1",
+            current_title: "未命名",
+            new_title: "第一讲",
+          },
+        ],
+      }),
+    );
+    const newHistory = [
+      { role: "user", content: "新会话问题" },
+      { role: "assistant", content: "新会话回答" },
+    ];
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({ answer: "新会话回答", history: newHistory }),
+    );
+    renderPanel();
+    await ask("改名");
+    fireEvent.click(await screen.findByRole("button", { name: "确认改名" }));
+    fireEvent.click(screen.getByRole("button", { name: "新对话" }));
+
+    await ask("新会话问题");
+    await screen.findByText("新会话回答");
+    await act(async () => {
+      finishRename();
+      await Promise.resolve();
+    });
+
+    await ask("继续新会话");
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenLastCalledWith(
+        "继续新会话",
+        expect.anything(),
+        newHistory,
+        expect.any(String),
+      ),
+    );
   });
 
   it("删除要等确认，并说清楚是进回收站", async () => {

@@ -7,6 +7,7 @@ const MAX_HISTORY_USER_TURNS = 8;
 const MAX_HISTORY_CHARS = 48_000;
 const MAX_ACTION_RESULTS = 50;
 const MAX_ACTION_RESULT_CHARS = 2_000;
+const CONTEXT_PREFIX = "（界面状态：";
 
 export interface AssistantTurnRecord {
   id: string;
@@ -159,6 +160,9 @@ function readHistory(values: unknown[]): AssistantMessage[] {
 
   for (const value of values) {
     const message = readMessage(value);
+    // 和后端 prepare_history 一样，旧界面状态每轮都会被当前状态替换，既不持久化，
+    // 也不占用户轮次预算。
+    if (message?.role === "user" && message.content.startsWith(CONTEXT_PREFIX)) continue;
     if (message?.role === "user") {
       if (current) groups.push(current);
       current = { messages: [message], invalid: false };
@@ -170,7 +174,8 @@ function readHistory(values: unknown[]): AssistantMessage[] {
   if (current) groups.push(current);
 
   const valid = groups.filter(
-    (group) => !group.invalid && validHistoryGroup(group.messages),
+    (group) =>
+      !group.invalid && group.messages.length > 1 && validHistoryGroup(group.messages),
   );
   const kept: AssistantMessage[][] = [];
   let keptChars = 0;
