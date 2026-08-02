@@ -3,7 +3,7 @@ use crate::llm::Provider;
 use std::time::Duration;
 
 pub const LLM_REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
-const LLM_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+pub const LLM_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// 由 profile + 明文 key 构造 Provider。key 由调用方从 keychain（settings 表）取出。
 pub fn build_provider(profile: &LlmProfile, api_key: String) -> Provider {
