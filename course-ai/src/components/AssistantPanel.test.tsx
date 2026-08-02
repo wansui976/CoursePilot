@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantPanel } from "./AssistantPanel";
 import { useAssistantUi } from "@/stores/assistant";
 import { useTheme } from "@/stores/theme";
+import { useInlineAsk } from "@/stores/inlineAsk";
 import type { AssistantAction, AssistantContext, AssistantReply } from "@/lib/types";
 
 const { mockIpc, platformMock } = vi.hoisted(() => ({
@@ -78,25 +79,85 @@ describe("AssistantPanel", () => {
     platformMock.mobile = false;
     platformMock.tablet = false;
     useAssistantUi.setState({ open: true, side: "right" });
+    useInlineAsk.setState({ pending: null });
     mockIpc.assistant.ask.mockResolvedValue(reply());
     mockIpc.assistant.cancel.mockResolvedValue(undefined);
   });
 
-  it("收起时在界面边缘留一条可点开的窄条", () => {
+  it("收起时在界面边缘留一颗可点开的球", () => {
     useAssistantUi.setState({ open: false });
     renderPanel();
     expect(screen.getByLabelText("对助手说")).not.toBeVisible();
     const dockStrip = screen.getByLabelText("打开助手");
     expect(dockStrip).toHaveAttribute("data-dock-side", "right");
-    expect(dockStrip).toHaveClass("right-0", "h-28", "w-11");
+    // 圆球：贴边但留一点空隙，不再是糊在边上的窄条。
+    expect(dockStrip).toHaveClass("right-3", "h-14", "w-14", "rounded-full");
     fireEvent.click(dockStrip);
     expect(screen.getByLabelText("对助手说")).toBeVisible();
+  });
+
+  it("左侧的球向内拖动时会直接拉出并移动面板", () => {
+    useAssistantUi.setState({ open: false, side: "left" });
+    renderPanel();
+    const dockStrip = screen.getByRole("button", { name: "打开助手" });
+
+    fireEvent.pointerDown(dockStrip, {
+      pointerId: 3,
+      pointerType: "mouse",
+      button: 0,
+      clientX: 22,
+      clientY: 680,
+    });
+    fireEvent.pointerMove(window, { pointerId: 3, clientX: 200, clientY: 680 });
+    fireEvent.pointerUp(window, { pointerId: 3, clientX: 200, clientY: 680 });
+
+    const panel = screen.getByRole("complementary", { name: "助手" });
+    expect(panel).toBeVisible();
+    expect(panel).toHaveStyle({ left: "194px" });
+    expect(screen.queryByRole("button", { name: "打开助手" })).not.toBeInTheDocument();
+    expect(useAssistantUi.getState().open).toBe(true);
+  });
+
+  it("球沿边缘拖动只调整位置，不会被随后的 click 误打开", () => {
+    useAssistantUi.setState({ open: false, side: "left" });
+    renderPanel();
+    const dockStrip = screen.getByRole("button", { name: "打开助手" });
+
+    fireEvent.pointerDown(dockStrip, {
+      pointerId: 4,
+      pointerType: "mouse",
+      button: 0,
+      clientX: 22,
+      clientY: 680,
+    });
+    fireEvent.pointerMove(window, { pointerId: 4, clientX: 22, clientY: 530 });
+    fireEvent.pointerUp(window, { pointerId: 4, clientX: 22, clientY: 530 });
+    fireEvent.click(dockStrip);
+
+    // 球比原来的窄条矮 56px，能停到更靠下的位置，所以下界跟着降。
+    expect(dockStrip).toHaveStyle({ top: "538px" });
+    expect(screen.getByLabelText("对助手说")).not.toBeVisible();
+    expect(useAssistantUi.getState().open).toBe(false);
   });
 
   it("删除空白对话里的示例注脚", () => {
     renderPanel();
     expect(screen.queryByText(/这门课哪讲了梯度下降/)).not.toBeInTheDocument();
     expect(screen.queryByText(/把这个视频改名叫第三讲/)).not.toBeInTheDocument();
+  });
+
+  it("文稿选区提问会打开全局助手并预填带来源的草稿", async () => {
+    useAssistantUi.setState({ open: false });
+    renderPanel();
+
+    act(() => useInlineAsk.getState().askAbout("贝叶斯定理", 5_000));
+
+    await waitFor(() => expect(useAssistantUi.getState().open).toBe(true));
+    expect(screen.getByLabelText("对助手说")).toHaveValue(
+      "请解释这段文稿（00:05）：\n\n贝叶斯定理",
+    );
+    expect(useInlineAsk.getState().pending).toBeNull();
+    expect(mockIpc.assistant.ask).not.toHaveBeenCalled();
   });
 
   it("空白对话给出可直接执行的当前视频建议", async () => {
@@ -142,7 +203,7 @@ describe("AssistantPanel", () => {
     expect(useAssistantUi.getState().open).toBe(true);
   });
 
-  it("拖到左侧边缘后自动吸附成窄条", () => {
+  it("拖到左侧边缘后自动吸附成球", () => {
     renderPanel();
     const panel = screen.getByRole("complementary", { name: "助手" });
     vi.spyOn(panel, "getBoundingClientRect").mockReturnValue({
@@ -171,8 +232,9 @@ describe("AssistantPanel", () => {
 
     const dockStrip = screen.getByRole("button", { name: "打开助手" });
     expect(dockStrip).toHaveAttribute("data-dock-side", "left");
-    expect(dockStrip).toHaveClass("left-0", "h-28", "w-11");
-    expect(dockStrip).toHaveStyle({ top: "396px" });
+    expect(dockStrip).toHaveClass("left-3", "h-14", "w-14", "rounded-full");
+    // 收起时按中心对齐，球矮了 56px，顶边就下移一半（28px）。
+    expect(dockStrip).toHaveStyle({ top: "424px" });
     expect(useAssistantUi.getState()).toMatchObject({ open: false, side: "left" });
   });
 
