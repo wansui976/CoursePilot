@@ -317,6 +317,69 @@ impl<'a> AssistantTools<'a> {
         )))
     }
 
+    async fn resume_learning(&self, args: CourseScopeArgs) -> Result<ToolOutcome, ToolOutcome> {
+        let courses = crate::commands::courses::list_courses(self.db)
+            .await
+            .map_err(ToolOutcome::failed)?;
+        if courses.is_empty() {
+            return Ok(ToolOutcome::ok("还没有任何课程。"));
+        }
+
+        let course_id = args.course_id.or_else(|| self.context.course_id.clone());
+        let selected_course = match course_id.as_deref() {
+            Some(course_id) => Some(
+                courses
+                    .iter()
+                    .find(|course| course.id == course_id)
+                    .ok_or_else(|| {
+                        ToolOutcome::failed(format!(
+                            "找不到 id 为 {course_id} 的课程。先用 list_courses 查真实 id"
+                        ))
+                    })?,
+            ),
+            None => None,
+        };
+        let rows = crate::commands::stats::continue_rows(self.db)
+            .await
+            .map_err(ToolOutcome::failed)?;
+        let recent = match selected_course {
+            Some(course) => rows.into_iter().find(|row| row.course_id == course.id),
+            None => rows
+                .into_iter()
+                .find(|row| courses.iter().any(|course| course.id == row.course_id)),
+        };
+        let Some(recent) = recent else {
+            return Ok(ToolOutcome::ok(match selected_course {
+                Some(course) => format!("《{}》还没有可继续的学习记录。", course.name),
+                None => "还没有可继续的学习记录。".to_string(),
+            }));
+        };
+
+        let progress = crate::commands::stats::video_progress(self.db)
+            .await
+            .map_err(ToolOutcome::failed)?;
+        let position_ms = progress
+            .iter()
+            .find(|row| row.video_id == recent.video_id)
+            .map(|row| row.position_ms.max(0))
+            .unwrap_or(0);
+        self.record(AssistantAction::OpenVideo {
+            video_id: recent.video_id,
+            title: recent.video_title.clone(),
+            at_ms: Some(position_ms),
+        });
+
+        let position = if position_ms > 0 {
+            format!("，从 {} 继续", crate::pipeline::rag::mmss(position_ms))
+        } else {
+            "，从开头继续".to_string()
+        };
+        Ok(ToolOutcome::ok(format!(
+            "已直接打开《{} / {}》{position}。不要再调用 open_video。",
+            recent.course_name, recent.video_title
+        )))
+    }
+
     async fn due_reviews(&self, args: DueReviewsArgs) -> Result<ToolOutcome, ToolOutcome> {
         let courses = crate::commands::courses::list_courses(self.db)
             .await
@@ -588,6 +651,14 @@ pub fn tool_specs() -> Vec<ToolSpec> {
             parameters: object(json!({"course_id": {"type": "string"}}), &[]),
         },
         ToolSpec {
+            name: "resume_learning".into(),
+            description: "直接打开最近学习的视频并跳到已同步的播放进度。\
+                 给 course_id 时继续该课程；不提供时优先继续当前课程，首页则继续全局最近记录。\
+                 这个工具已经执行打开动作，成功后不要再调用 open_video。"
+                .into(),
+            parameters: object(json!({"course_id": {"type": "string"}}), &[]),
+        },
+        ToolSpec {
             name: "list_due_reviews".into(),
             description: "列出已经到期的复习卡题面与出处，不返回答案。\
                  给 course_id 时只看该课程；不提供时优先看当前课程，首页则看全部课程。\
@@ -756,6 +827,11 @@ impl AssistantTools<'_> {
             "get_study_progress" => {
                 let args: CourseScopeArgs = parse_arguments(call)?;
                 self.study_progress(args).await
+            }
+
+            "resume_learning" => {
+                let args: CourseScopeArgs = parse_arguments(call)?;
+                self.resume_learning(args).await
             }
 
             "list_due_reviews" => {
@@ -1101,6 +1177,19 @@ mod tests {
             .id
     }
 
+    async fn insert_watch_at(db: &Db, course_id: &str, video_id: &str, ts: i64) {
+        sqlx::query(
+            "INSERT INTO study_events(kind,course_id,video_id,ts,duration_ms,meta_json)
+             VALUES ('watch',?,?,?,1000,'{}')",
+        )
+        .bind(course_id)
+        .bind(video_id)
+        .bind(ts)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn study_progress_uses_synced_completion_watch_time_and_due_count() {
         let (db, course_id, video_id, dir) = seed().await;
@@ -1147,6 +1236,84 @@ mod tests {
             .contains("1 个已开始视频因缺少时长无法判断是否看完"));
         assert!(out.content.contains(&format!("course_id={course_id}")));
         assert!(tools.take_actions().is_empty(), "只读工具不该产生界面动作");
+    }
+
+    #[tokio::test]
+    async fn resume_learning_prefers_the_current_course_and_uses_saved_position() {
+        let (db, course_id, video_id, dir) = seed().await;
+        let other_course = crate::commands::courses::create_course(
+            &db,
+            "概率论".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let other_video = add_test_video(&db, &other_course.id, &dir, "latest.mp4").await;
+        insert_watch_at(&db, &course_id, &video_id, 1_000).await;
+        insert_watch_at(&db, &other_course.id, &other_video, 2_000).await;
+        crate::commands::stats::save_video_progress(&db, &video_id, 65_000, Some(600_000))
+            .await
+            .unwrap();
+        crate::commands::stats::save_video_progress(&db, &other_video, 90_000, Some(600_000))
+            .await
+            .unwrap();
+
+        let current_tools = AssistantTools::new(
+            &db,
+            AssistantContext {
+                course_id: Some(course_id),
+                ..Default::default()
+            },
+        );
+        let current = current_tools.run(&call("resume_learning", "{}")).await;
+        assert!(current.content.contains("01:05"));
+        match current_tools.take_actions().as_slice() {
+            [AssistantAction::OpenVideo {
+                video_id: opened,
+                at_ms,
+                ..
+            }] => {
+                assert_eq!(opened, &video_id);
+                assert_eq!(*at_ms, Some(65_000));
+            }
+            other => panic!("应当继续当前课程的视频，实际 {other:?}"),
+        }
+
+        let global_tools = AssistantTools::new(&db, AssistantContext::default());
+        global_tools.run(&call("resume_learning", "{}")).await;
+        match global_tools.take_actions().as_slice() {
+            [AssistantAction::OpenVideo {
+                video_id: opened,
+                at_ms,
+                ..
+            }] => {
+                assert_eq!(opened, &other_video);
+                assert_eq!(*at_ms, Some(90_000));
+            }
+            other => panic!("首页应当继续全局最近的视频，实际 {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resume_learning_never_falls_back_from_a_missing_course_or_empty_history() {
+        let (db, course_id, _video_id, _dir) = seed().await;
+        let empty_tools = AssistantTools::new(
+            &db,
+            AssistantContext {
+                course_id: Some(course_id),
+                ..Default::default()
+            },
+        );
+        let empty = empty_tools.run(&call("resume_learning", "{}")).await;
+        assert!(empty.content.contains("没有可继续的学习记录"));
+        assert!(empty_tools.take_actions().is_empty());
+
+        let missing_tools = AssistantTools::new(&db, AssistantContext::default());
+        let missing = missing_tools
+            .run(&call("resume_learning", r#"{"course_id":"不存在的课程"}"#))
+            .await;
+        assert!(missing.content.contains("找不到"));
+        assert!(missing_tools.take_actions().is_empty());
     }
 
     #[tokio::test]
@@ -1522,6 +1689,7 @@ mod tests {
                 "list_courses",
                 "list_videos",
                 "get_study_progress",
+                "resume_learning",
                 "list_due_reviews",
                 "search_content",
                 "open_video",
