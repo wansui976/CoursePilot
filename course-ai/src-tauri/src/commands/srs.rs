@@ -340,10 +340,17 @@ pub async fn weak_concepts(db: &Db, min_reviews: i64, limit: usize) -> AppResult
             .fetch_all(&db.pool)
             .await?;
     let occ_by_video = group_occurrences_by_video(occ_rows);
-    let cards: Vec<(String, Option<String>, Option<i64>)> =
-        sqlx::query_as("SELECT id, video_id, source_ms FROM cards")
-            .fetch_all(&db.pool)
-            .await?;
+    let cards: Vec<(String, Option<String>, Option<i64>)> = sqlx::query_as(
+        "SELECT c.id, c.video_id, c.source_ms
+         FROM cards c
+         LEFT JOIN videos v ON v.id = c.video_id
+         LEFT JOIN courses course ON course.id = COALESCE(v.course_id, c.course_id)
+         WHERE (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
+           AND (COALESCE(v.course_id, c.course_id) IS NULL
+                OR (course.id IS NOT NULL AND course.deleted_at IS NULL))",
+    )
+    .fetch_all(&db.pool)
+    .await?;
     let mut card_concept: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
     for (id, video_id, source_ms) in cards {
@@ -1888,5 +1895,33 @@ mod tests {
         assert_eq!(weak[0].reviews, 2);
         assert_eq!(weak[0].fails, 2);
         assert!((weak[0].again_rate - 1.0).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn weak_concepts_ignore_reviews_from_a_video_in_the_recycle_bin() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(&db, r#"[{"stem":"甲题","answer":"a","ref_ms":3000}]"#).await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let course_id: String = sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        seed_concept(&db, "甲", &course_id, "甲概念").await;
+        seed_occurrence(&db, "甲", &vid, 2_000).await;
+        let card_id = quiz_card_id(&vid, "甲题");
+        review_card(&db, &card_id, 1, 1_000).await.unwrap();
+        review_card(&db, &card_id, 2, 2_000).await.unwrap();
+        assert_eq!(weak_concepts(&db, 2, 8).await.unwrap().len(), 1);
+
+        sqlx::query("UPDATE videos SET deleted_at=3_000 WHERE id=?")
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        assert!(
+            weak_concepts(&db, 2, 8).await.unwrap().is_empty(),
+            "回收站视频的历史评分不该继续影响薄弱知识点"
+        );
     }
 }
