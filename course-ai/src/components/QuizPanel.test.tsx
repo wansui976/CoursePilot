@@ -139,4 +139,26 @@ describe("QuizPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "显示答案" }));
     expect(await screen.findByText(/正确/)).toBeInTheDocument();
   });
+
+  it("题目装在自己的滚动区里，而不是被标签页容器裁掉", async () => {
+    // 真实反馈：练习翻不动。标签页容器是 overflow-hidden 的，这个面板却直接铺了一坨
+    // 内容出去——不是滚不动，是压根没地方滚，后面的题被裁在视口外。
+    mockIpc.ai.getQuiz.mockResolvedValue(
+      JSON.stringify(
+        Array.from({ length: 20 }, (_, i) => ({
+          type: "judge",
+          stem: `第 ${i + 1} 题`,
+          answer: true,
+        })),
+      ),
+    );
+
+    renderQuizPanel();
+
+    const scroller = await screen.findByLabelText("练习内容滚动区");
+    // jsdom 不做布局，滚不出真实位移。能验证的是最后一题确实挂在这个滚动区里，
+    // 且容器本身限高并允许纵向滚动——少了任何一样，题目就又被裁掉了。
+    expect(scroller).toContainElement(screen.getByText("第 20 题"));
+    expect(scroller).toHaveClass("h-full", "overflow-y-auto");
+  });
 });
