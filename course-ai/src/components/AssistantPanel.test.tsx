@@ -96,26 +96,30 @@ describe("AssistantPanel", () => {
     expect(screen.getByLabelText("对助手说")).toBeVisible();
   });
 
-  it("左侧的球向内拖动时会直接拉出并移动面板", () => {
+  it("拖动球只是把球挪个地方，不会顺手把面板拽出来", () => {
+    // 真实反馈：一拖动面板就打开了。挪位置和打开面板本是两件事，原先却揉在同一个手势里
+    // ——向内拖过 16px 就展开——而任何一次拖动都会顺手越过这个门槛。
     useAssistantUi.setState({ open: false, side: "left" });
     renderPanel();
-    const dockStrip = screen.getByRole("button", { name: "打开助手" });
+    const ball = screen.getByRole("button", { name: "打开助手" });
 
-    fireEvent.pointerDown(dockStrip, {
+    fireEvent.pointerDown(ball, {
       pointerId: 3,
       pointerType: "mouse",
       button: 0,
       clientX: 22,
       clientY: 680,
     });
-    fireEvent.pointerMove(window, { pointerId: 3, clientX: 200, clientY: 680 });
-    fireEvent.pointerUp(window, { pointerId: 3, clientX: 200, clientY: 680 });
+    fireEvent.pointerMove(window, { pointerId: 3, clientX: 900, clientY: 300 });
+    // 拖动中球跟着指针走，不是钉死在边上。
+    expect(ball).toHaveStyle({ left: "890px", top: "308px" });
+    fireEvent.pointerUp(window, { pointerId: 3, clientX: 900, clientY: 300 });
 
-    const panel = screen.getByRole("complementary", { name: "助手" });
-    expect(panel).toBeVisible();
-    expect(panel).toHaveStyle({ left: "194px" });
-    expect(screen.queryByRole("button", { name: "打开助手" })).not.toBeInTheDocument();
-    expect(useAssistantUi.getState().open).toBe(true);
+    // 松手贴回最近的一边：横着跨过了半屏，就换边。
+    expect(ball).toHaveClass("right-3");
+    expect(ball).toHaveStyle({ top: "308px" });
+    expect(useAssistantUi.getState()).toMatchObject({ open: false, side: "right" });
+    expect(screen.getByLabelText("对助手说")).not.toBeVisible();
   });
 
   it("球沿边缘拖动只调整位置，不会被随后的 click 误打开", async () => {

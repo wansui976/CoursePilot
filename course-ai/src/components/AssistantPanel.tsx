@@ -53,9 +53,11 @@ const EDGE_SNAP_DISTANCE = 28;
 /// 收起时那颗球的直径。停靠位置的夹取与展开/收起时的居中都按它算，
 /// 改了尺寸这些数会自动跟上。
 const LAUNCHER_SIZE = 56;
+/// 球贴边时离边框的距离，与它的 left-3 / right-3 一致——拖动时按同一个数夹取，
+/// 松手贴回去才不会横着弹一下。
+const LAUNCHER_MARGIN = 12;
 const KEYBOARD_MOVE_STEP = 24;
 const DRAG_START_DISTANCE = 4;
-const DOCK_DETACH_DISTANCE = 16;
 
 interface PanelPosition {
   x: number;
@@ -64,16 +66,14 @@ interface PanelPosition {
 
 interface DragSession {
   source: "panel" | "dock";
-  originSide: DockSide;
-  startDockTop: number;
-  detached: boolean;
   pointerId: number;
   startX: number;
   startY: number;
   offsetX: number;
   offsetY: number;
-  panelWidth: number;
-  panelHeight: number;
+  /** 被拖对象的尺寸：面板拖的是面板，球拖的是球。 */
+  width: number;
+  height: number;
   moved: boolean;
   position: PanelPosition;
   snapSide: DockSide | null;
@@ -191,6 +191,8 @@ export function AssistantPanel({
   const mobile = compact || (isMobile() && !isTablet());
   const [position, setPosition] = useState<PanelPosition>(() => initialPanelPosition(side));
   const [dockTop, setDockTop] = useState(initialDockTop);
+  /** 拖动中球的落点；不在拖动时为 null，球回到 left-3 / right-3 + dockTop 的贴边位置。 */
+  const [launcherPosition, setLauncherPosition] = useState<PanelPosition | null>(null);
   const [dragging, setDragging] = useState(false);
   const [snapSide, setSnapSide] = useState<DockSide | null>(null);
   const setThemePref = useTheme((state) => state.setPref);
@@ -351,40 +353,34 @@ export function AssistantPanel({
     }
 
     const viewport = viewportSize();
-    if (session.source === "dock" && !session.detached) {
-      const inwardDistance =
-        session.originSide === "left"
-          ? clientX - session.startX
-          : session.startX - clientX;
-      if (inwardDistance < DOCK_DETACH_DISTANCE) {
-        const nextDockTop = clamp(
-          session.startDockTop + clientY - session.startY,
-          VIEWPORT_GAP,
-          viewport.height - LAUNCHER_SIZE - VIEWPORT_GAP,
-        );
-        session.position = {
-          ...session.position,
-          y: clamp(
-            nextDockTop + LAUNCHER_SIZE / 2 - session.panelHeight / 2,
-            VIEWPORT_GAP,
-            viewport.height - session.panelHeight - VIEWPORT_GAP,
-          ),
-        };
-        session.snapSide = session.originSide;
-        setDockTop(nextDockTop);
-        return session;
-      }
-
-      session.detached = true;
-      setOpen(true);
-      setDragging(true);
-    }
-
     const rawX = clientX - session.offsetX;
     const rawY = clientY - session.offsetY;
+
+    if (session.source === "dock") {
+      // 球跟着指针走，松手时贴回最近的一边。
+      //
+      // 这里原先还有一档「向内拖过 16px 就展开成面板」。挪个位置和打开面板是两件事，
+      // 揉进同一个手势的结果是：想把球往下挪一点，整块面板弹了出来——16px 的门槛低到
+      // 任何一次真实拖动都会顺手越过。开面板交给点击就够了。
+      const x = clamp(
+        rawX,
+        LAUNCHER_MARGIN,
+        viewport.width - session.width - LAUNCHER_MARGIN,
+      );
+      const y = clamp(
+        rawY,
+        VIEWPORT_GAP,
+        viewport.height - session.height - VIEWPORT_GAP,
+      );
+      session.position = { x, y };
+      session.snapSide = x + session.width / 2 < viewport.width / 2 ? "left" : "right";
+      setLauncherPosition(session.position);
+      return session;
+    }
+
     const nearLeft = rawX <= EDGE_SNAP_DISTANCE;
     const nearRight =
-      rawX + session.panelWidth >= viewport.width - EDGE_SNAP_DISTANCE;
+      rawX + session.width >= viewport.width - EDGE_SNAP_DISTANCE;
     const nextSnapSide: DockSide | null =
       nearLeft && nearRight
         ? clientX < viewport.width / 2
@@ -401,17 +397,9 @@ export function AssistantPanel({
         nextSnapSide === "left"
           ? 0
           : nextSnapSide === "right"
-            ? viewport.width - session.panelWidth
-            : clamp(
-                rawX,
-                VIEWPORT_GAP,
-                viewport.width - session.panelWidth - VIEWPORT_GAP,
-              ),
-      y: clamp(
-        rawY,
-        VIEWPORT_GAP,
-        viewport.height - session.panelHeight - VIEWPORT_GAP,
-      ),
+            ? viewport.width - session.width
+            : clamp(rawX, VIEWPORT_GAP, viewport.width - session.width - VIEWPORT_GAP),
+      y: clamp(rawY, VIEWPORT_GAP, viewport.height - session.height - VIEWPORT_GAP),
     };
     session.snapSide = nextSnapSide;
     setPosition(session.position);
@@ -454,7 +442,10 @@ export function AssistantPanel({
       dragRef.current = null;
       setDragging(false);
       setSnapSide(null);
-      if (completed?.source === "dock" && completed.moved) {
+
+      if (completed?.source === "dock") {
+        setLauncherPosition(null);
+        if (!completed.moved) return;
         // 拖完浏览器还会补一个 click，得把它吃掉。
         //
         // 原来是置位后用 setTimeout(0) 复位，指望「click 比定时器先到」。真实浏览器里
@@ -465,16 +456,14 @@ export function AssistantPanel({
         // 改成由 click 自己消费；万一这次没有 click（比如松手时指针已经离开按钮），
         // 下一次 pointerdown 会清掉它，不会误伤后面那次真正的点击。
         suppressLauncherClickRef.current = true;
+        // 取消（指针被系统收走）就当这次拖动没发生过：球回到原来贴边的位置。
+        if (cancelled) return;
+        setDockTop(completed.position.y);
+        if (completed.snapSide) dock(completed.snapSide);
+        return;
       }
-      if (cancelled && completed?.source === "dock" && completed.detached) {
-        setOpen(false);
-        setDockTop(completed.startDockTop);
-      } else if (
-        !cancelled &&
-        completed?.moved &&
-        completed.snapSide &&
-        (completed.source === "panel" || completed.detached)
-      ) {
+
+      if (!cancelled && completed?.moved && completed.snapSide) {
         dockToStrip(completed.snapSide, completed.position.y);
       }
     };
@@ -508,16 +497,13 @@ export function AssistantPanel({
     const panelTop = rect?.height ? rect.top : position.y;
     trackDrag(event, {
       source: "panel",
-      originSide: side,
-      startDockTop: dockTop,
-      detached: true,
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
       offsetX: event.clientX - panelLeft,
       offsetY: event.clientY - panelTop,
-      panelWidth: panel.width,
-      panelHeight: panel.height,
+      width: panel.width,
+      height: panel.height,
       moved: false,
       position,
       snapSide: null,
@@ -530,33 +516,28 @@ export function AssistantPanel({
     // 每次按下先清一次，保证它只压制紧随其后的那一下。
     suppressLauncherClickRef.current = false;
 
+    // 按球自己的盒子算偏移量，指针才会稳稳停在按下时的那一点上。
     const viewport = viewportSize();
-    const panel = measurePanel();
-    const dockedPosition = {
-      x:
-        side === "left"
-          ? VIEWPORT_GAP
-          : viewport.width - panel.width - VIEWPORT_GAP,
-      y: clamp(
-        dockTop + LAUNCHER_SIZE / 2 - panel.height / 2,
-        VIEWPORT_GAP,
-        viewport.height - panel.height - VIEWPORT_GAP,
-      ),
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ball = {
+      x: rect.width
+        ? rect.left
+        : side === "left"
+          ? LAUNCHER_MARGIN
+          : viewport.width - LAUNCHER_SIZE - LAUNCHER_MARGIN,
+      y: rect.height ? rect.top : dockTop,
     };
     trackDrag(event, {
       source: "dock",
-      originSide: side,
-      startDockTop: dockTop,
-      detached: false,
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      offsetX: event.clientX - dockedPosition.x,
-      offsetY: event.clientY - dockedPosition.y,
-      panelWidth: panel.width,
-      panelHeight: panel.height,
+      offsetX: event.clientX - ball.x,
+      offsetY: event.clientY - ball.y,
+      width: LAUNCHER_SIZE,
+      height: LAUNCHER_SIZE,
       moved: false,
-      position: dockedPosition,
+      position: ball,
       snapSide: side,
     });
   }
@@ -780,12 +761,22 @@ export function AssistantPanel({
           openFromDock();
         }}
         onPointerDown={mobile ? undefined : beginDockDrag}
-        style={mobile ? { bottom: launcherBottom } : { top: dockTop }}
+        style={
+          mobile
+            ? { bottom: launcherBottom }
+            : launcherPosition
+              ? { left: launcherPosition.x, top: launcherPosition.y }
+              : { top: dockTop }
+        }
+        // 底色用 surface-panel 而不是 surface-card：深色主题下 card 是一层 3.5% 的白，
+        // 它是给「铺在某块不透明面板上的卡片」用的。球和面板都浮在整个应用之上，
+        // 底下没有那层不透明的东西——直接用就成了一块透明玻璃，字浮在页面内容上。
+        // hover 同理不能换成 card-hover（7% 的白），一悬停球就没了。
         className={
           mobile
-            ? "ca-touch-44 fixed right-4 z-40 grid h-12 w-12 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-lg transition-colors hover:bg-[var(--surface-card-hover)] motion-reduce:transition-none"
-            : `ca-touch-44 fixed z-40 grid h-14 w-14 touch-none select-none cursor-grab active:cursor-grabbing place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-lg transition hover:scale-105 hover:bg-[var(--surface-card-hover)] motion-reduce:transition-none motion-reduce:hover:scale-100 ${
-                side === "left" ? "left-3" : "right-3"
+            ? "ca-touch-44 fixed right-4 z-40 grid h-12 w-12 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] transition-colors hover:border-[var(--border-strong)] motion-reduce:transition-none"
+            : `ca-touch-44 fixed z-40 grid h-14 w-14 touch-none select-none cursor-grab active:cursor-grabbing place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] transition hover:scale-105 hover:border-[var(--border-strong)] motion-reduce:transition-none motion-reduce:hover:scale-100 ${
+                launcherPosition ? "" : side === "left" ? "left-3" : "right-3"
               }`
         }
       >
@@ -805,7 +796,7 @@ export function AssistantPanel({
       data-dragging={mobile ? undefined : dragging}
       data-snap-side={mobile ? undefined : snapSide ?? undefined}
       style={mobile ? { bottom: panelBottom } : { left: position.x, top: position.y }}
-      className={`${open ? "flex" : "hidden"} ${shell} flex-col border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-xl ${
+      className={`${open ? "flex" : "hidden"} ${shell} flex-col border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] ${
         snapSide ? "ring-2 ring-[var(--accent)]" : ""
       }`}
     >
