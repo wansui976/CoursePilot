@@ -19,6 +19,30 @@ describe("WatchAccumulator", () => {
     expect(acc.drain()).toBe(5000);
   });
 
+  it("系统睡眠那几个小时不算学习时长", () => {
+    // 用的是墙上时钟，而睡眠期间我们的代码一行都不跑：合上笔记本一夜，醒来后第一次
+    // 结算算出来的是「现在 − 开始播放」，整晚都被记成学习时长。就算播放器在睡眠时
+    // 发了暂停事件也救不回来——那个事件同样要等到醒来才被处理。
+    let clock = 0;
+    const acc = new WatchAccumulator(() => clock, 5 * 60_000);
+    acc.setPlaying(true);
+    clock += 8 * 60 * 60_000; // 睡了八小时
+    acc.setPlaying(false);
+
+    expect(acc.drain()).toBe(5 * 60_000);
+  });
+
+  it("不封顶时长期后台播放照常计入", () => {
+    // 窗口在后台会被节流，一分钟才结算一次——那是真实的观看时间，不能一起砍掉。
+    let clock = 0;
+    const acc = new WatchAccumulator(() => clock, 5 * 60_000);
+    acc.setPlaying(true);
+    clock += 90_000;
+    acc.setPlaying(false);
+
+    expect(acc.drain()).toBe(90_000);
+  });
+
   it("keeps counting across a drain while still playing", () => {
     const clock = fakeClock();
     const acc = new WatchAccumulator(clock.now);

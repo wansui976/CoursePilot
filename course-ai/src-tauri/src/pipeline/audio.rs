@@ -10,6 +10,12 @@ pub struct PreparedAudio {
     pub path: PathBuf,
     pub mime: String,
     pub format: String,
+    /// 为这次识别落地的所有中间文件，识别结束后要删掉。
+    ///
+    /// 必须显式记着而不是只删 `path`：阿里云那条路先抽 WAV 再转 MP3，交出去的是 MP3，
+    /// 而那份 WAV 还躺在旁边。一小时的课约 115MB，谁都不会再用它，也没有任何界面
+    /// 能看到它——不记下来就等于每处理一个视频就永久占掉一份。
+    pub artifacts: Vec<PathBuf>,
 }
 
 impl PreparedAudio {
@@ -18,10 +24,47 @@ impl PreparedAudio {
         mime: impl Into<String>,
         format: impl Into<String>,
     ) -> Self {
+        let path = path.into();
         Self {
-            path: path.into(),
+            artifacts: vec![path.clone()],
+            path,
             mime: mime.into(),
             format: format.into(),
+        }
+    }
+
+    /// 追加一个同样需要清理的中间文件。
+    fn with_artifact(mut self, path: impl Into<PathBuf>) -> Self {
+        self.artifacts.push(path.into());
+        self
+    }
+}
+
+/// 识别用音频的清理守卫：离开作用域就把中间音频删掉。
+///
+/// 用 Drop 而不是在末尾显式调用，是因为这条流水线的退出口太多——识别失败、被取消、
+/// 甚至「这个视频自带字幕，根本不用识别」的早退（那条路上音频已经抽好了，却一次都没用过）。
+/// 少覆盖任何一条，那份一小时约 115MB 的音轨就永久留在磁盘上，而且没有任何界面看得到它。
+pub struct TempAudio {
+    artifacts: Vec<PathBuf>,
+}
+
+impl TempAudio {
+    pub fn new(prepared: &PreparedAudio) -> Self {
+        Self {
+            artifacts: prepared.artifacts.clone(),
+        }
+    }
+}
+
+impl Drop for TempAudio {
+    fn drop(&mut self) {
+        for path in &self.artifacts {
+            if let Err(error) = std::fs::remove_file(path) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!(path = %path.display(), %error, "清理识别用音频失败");
+                }
+            }
         }
     }
 }
@@ -164,12 +207,24 @@ async fn prepare_cloud_audio(
     out_dir: &Path,
     provider: CloudAsrProvider,
 ) -> AppResult<PreparedAudio> {
+    cloud_audio_from_video(video, out_dir, provider).await
+}
+
+/// 桌面端云 ASR 的音频准备。单独一层是为了能直接测：它用不到 app 句柄，而
+/// 「阿里云那条路有没有把中间的 WAV 一起记进待清理列表」正是要盯住的地方。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+async fn cloud_audio_from_video(
+    video: &Path,
+    out_dir: &Path,
+    provider: CloudAsrProvider,
+) -> AppResult<PreparedAudio> {
     let wav = extract_audio(video, out_dir).await?;
     match provider {
         CloudAsrProvider::Volcengine => Ok(PreparedAudio::new(wav, "audio/wav", "wav")),
         CloudAsrProvider::Aliyun => {
             let mp3 = wav_to_mp3(&wav).await?;
-            Ok(PreparedAudio::new(mp3, "audio/mpeg", "mp3"))
+            // 交出去的是 MP3，但中间那份 WAV 也得跟着一起清。
+            Ok(PreparedAudio::new(mp3, "audio/mpeg", "mp3").with_artifact(wav))
         }
     }
 }
@@ -267,6 +322,79 @@ mod tests {
     use super::*;
     use std::process::Command as StdCommand;
     use tempfile::tempdir;
+
+    #[test]
+    fn the_intermediate_audio_is_deleted_when_the_run_ends() {
+        // 一小时的课抽出来约 115MB，识别完之后没有任何东西会再用它，也没有任何界面
+        // 看得到它。不删的话，每处理一个视频就永久占掉一份。
+        let dir = tempdir().unwrap();
+        let wav = dir.path().join("audio.wav");
+        let mp3 = dir.path().join("audio.mp3");
+        std::fs::write(&wav, b"wav").unwrap();
+        std::fs::write(&mp3, b"mp3").unwrap();
+        let prepared = PreparedAudio::new(&mp3, "audio/mpeg", "mp3").with_artifact(&wav);
+
+        drop(TempAudio::new(&prepared));
+
+        assert!(!wav.exists());
+        assert!(!mp3.exists());
+    }
+
+    #[test]
+    fn cleaning_up_a_missing_file_is_not_a_problem() {
+        // 识别失败得早的话文件可能压根没落地。清理是尽力而为，不能反过来把流水线搞炸。
+        let dir = tempdir().unwrap();
+        let missing = dir.path().join("audio.wav");
+        drop(TempAudio::new(&PreparedAudio::new(
+            &missing,
+            "audio/wav",
+            "wav",
+        )));
+        assert!(!missing.exists());
+    }
+
+    #[tokio::test]
+    async fn the_aliyun_path_also_cleans_the_intermediate_wav() {
+        // 它交出去的是 MP3，中间那份 WAV 还躺在旁边。只清 path 的话，最占地方的
+        // 那一份恰恰留了下来——这条是盯生产路径本身，不是手搓一个列表自说自话。
+        if which::which("ffmpeg").is_err() {
+            eprintln!("skipping: no ffmpeg");
+            return;
+        }
+        let dir = tempdir().unwrap();
+        let video = dir.path().join("in.mp4");
+        let gen = StdCommand::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=64x64:d=1",
+                "-shortest",
+            ])
+            .arg(&video)
+            .output()
+            .expect("ffmpeg gen");
+        assert!(gen.status.success(), "gen failed: {gen:?}");
+
+        let prepared = cloud_audio_from_video(&video, dir.path(), CloudAsrProvider::Aliyun)
+            .await
+            .unwrap();
+
+        let wav = dir.path().join("audio.wav");
+        assert!(wav.is_file(), "中间的 WAV 确实落地了");
+        assert!(
+            prepared.artifacts.contains(&wav),
+            "中间的 WAV 必须进待清理列表，否则它会永久留下"
+        );
+        drop(TempAudio::new(&prepared));
+        assert!(!wav.exists());
+        assert!(!prepared.path.exists());
+    }
 
     #[test]
     fn prepared_audio_records_path_mime_and_provider_format() {
