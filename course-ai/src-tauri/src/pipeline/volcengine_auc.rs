@@ -248,6 +248,35 @@ async fn recognize_bytes(
         .map_err(RecognizeFailure::AfterSubmit)
 }
 
+/// 拿到一个查询状态码之后该怎么办。
+#[derive(Debug, PartialEq)]
+enum PollAction {
+    /// 出结果了，去取正文。
+    Take,
+    /// 服务端的结论是「这段没人说话」。
+    Silent,
+    /// 还在排队/处理中，等一会儿再问。
+    KeepWaiting,
+    /// 服务端自己出错了。这一次没问到，但任务还在跑——记一次抖动，接着问。
+    Hiccup,
+    /// 参数错、鉴权失败之类：再问一百遍也是同一个答复。
+    Fatal,
+}
+
+/// 状态码的首位标明是谁的问题，和 HTTP 一样：2 = 正常，4 = 请求方，5 = 服务端。
+///
+/// 关键是别把 5 开头的当终态。那类错误（真实遇到的是 55000000，网关取不到到后端的
+/// 连接）几秒后就自愈，而放弃的代价极不对称：这段音频已经付过钱了，扔掉要重付一次。
+fn classify_poll_status(status: Option<&str>) -> PollAction {
+    match status {
+        Some(STATUS_SUCCESS) => PollAction::Take,
+        Some(STATUS_SILENT) => PollAction::Silent,
+        Some(STATUS_PROCESSING) | Some(STATUS_QUEUED) => PollAction::KeepWaiting,
+        Some(code) if code.starts_with('5') => PollAction::Hiccup,
+        _ => PollAction::Fatal,
+    }
+}
+
 /// 轮询同一个 request_id 直到出结果。网络抖动就地重试，绝不换 id。
 async fn poll_until_done(
     client: &reqwest::Client,
@@ -268,11 +297,11 @@ async fn poll_until_done(
             .json(&json!({}))
             .send()
             .await;
+        // 计数只在**问到了可用答复**（处理中/排队中）时归零，收到响应本身不算数：
+        // 服务端错误是裹在一个 HTTP 200 里回来的，在这里归零的话，一串 5xx 会把
+        // 上限彻底架空，一路空转到 30 分钟的轮询上限。
         let resp = match sent {
-            Ok(resp) => {
-                hiccups = 0;
-                resp
-            }
+            Ok(resp) => resp,
             // 查询请求本身没发出去/超时：任务还在云端跑着，接着问就是了。
             // 原来这里直接报错，外层会把整段音频重新提交一次——白花一份钱。
             Err(error) => {
@@ -289,8 +318,8 @@ async fn poll_until_done(
         };
         let status = header_value(&resp, STATUS_HEADER);
         let message = header_value(&resp, MESSAGE_HEADER);
-        match status.as_deref() {
-            Some(STATUS_SUCCESS) => {
+        match classify_poll_status(status.as_deref()) {
+            PollAction::Take => {
                 let payload: Value = resp.json().await.map_err(|error| {
                     AppError::Pipeline(format!("volcengine query decode: {error}"))
                 })?;
@@ -299,22 +328,36 @@ async fn poll_until_done(
             // 服务端说这段没有人说话。这是终态，不是「还在处理」：接着轮询只会
             // 一路等到超时。返回空字幕即可——长音频是分段识别的，中间夹一段静音
             // 很正常，不该让整个视频失败。
-            Some(STATUS_SILENT) => {
+            PollAction::Silent => {
                 tracing::info!(request_id, "volcengine 判定该段为静音，返回空字幕");
                 return Ok(WhisperJson {
                     transcription: Vec::new(),
                 });
             }
-            Some(STATUS_PROCESSING) | Some(STATUS_QUEUED) => {
+            PollAction::KeepWaiting => {
+                hiccups = 0;
                 tokio::time::sleep(POLL_INTERVAL).await;
             }
-            other => {
-                return Err(submit_error(
-                    "query",
-                    other.map(str::to_string),
-                    message,
-                    resp.status(),
-                ));
+            // 服务端自己出错。这和上面「查询请求根本没发出去」是同一件事：这一次没
+            // 问到结果，任务却还在云端跑着；区别只是失败被裹在一个 HTTP 200 里报回来，
+            // 对我们没有意义。原来它落进下面的兜底分支当场判死，而这段音频已经付过
+            // 钱了——放弃等于把它扔掉，重来还要再付一次。接着问只花几秒，外层 30 分钟
+            // 的轮询上限照样兜着底。
+            PollAction::Hiccup => {
+                hiccups += 1;
+                if hiccups > MAX_QUERY_HICCUPS {
+                    return Err(submit_error("query", status, message, resp.status()));
+                }
+                tracing::warn!(
+                    request_id,
+                    "volcengine query 第 {hiccups} 次返回服务端错误 {}：{}；稍后再查",
+                    status.as_deref().unwrap_or(""),
+                    message.as_deref().unwrap_or("")
+                );
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+            PollAction::Fatal => {
+                return Err(submit_error("query", status, message, resp.status()));
             }
         }
     }
@@ -567,6 +610,37 @@ mod tests {
             STATUS_SILENT,
         ] {
             assert!(code.starts_with("2000000"), "{code} 应属于 2000000x 一族");
+        }
+    }
+
+    #[test]
+    fn a_server_side_status_is_a_hiccup_not_a_verdict() {
+        // 真实遇到的那一条：55000000，网关取不到到后端的连接（POOL_FAILURE），
+        // 几秒后自愈。原来任何不认识的状态码都当场判死——而这一段音频已经付过钱了，
+        // 放弃等于把它扔掉，重来还要再付一次；接着问只花几秒。
+        assert_eq!(classify_poll_status(Some("55000000")), PollAction::Hiccup);
+        assert_eq!(classify_poll_status(Some("55000031")), PollAction::Hiccup);
+    }
+
+    #[test]
+    fn a_caller_side_status_is_still_final() {
+        // 4 开头是我们自己的问题（参数错、鉴权失败、音频格式不对），再问一百遍
+        // 也是同一个答复。把它也当抖动的话，一个必败的请求要空转到轮询上限才收场。
+        assert_eq!(classify_poll_status(Some("45000001")), PollAction::Fatal);
+        assert_eq!(classify_poll_status(Some("45000151")), PollAction::Fatal);
+        // 连状态码都没有：同样没什么可等的。
+        assert_eq!(classify_poll_status(None), PollAction::Fatal);
+    }
+
+    #[test]
+    fn the_four_known_statuses_keep_their_meaning() {
+        assert_eq!(classify_poll_status(Some(STATUS_SUCCESS)), PollAction::Take);
+        assert_eq!(
+            classify_poll_status(Some(STATUS_SILENT)),
+            PollAction::Silent
+        );
+        for code in [STATUS_PROCESSING, STATUS_QUEUED] {
+            assert_eq!(classify_poll_status(Some(code)), PollAction::KeepWaiting);
         }
     }
 
