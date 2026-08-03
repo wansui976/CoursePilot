@@ -15,6 +15,43 @@ fn body_snippet(body: &str) -> String {
     compact.chars().take(MAX).collect()
 }
 
+/// 把一个非 2xx 应答变成错误，并顺手判定它值不值得重试。
+///
+/// 4xx 里只有 429（限流）和 408（请求超时）会因为「等一会儿再来」而改变结果。
+/// 其余 4xx——密钥不对、余额不足、模型名写错、请求体超限——再发一遍还是同一句话。
+/// 之所以要区分：上游的退避重试是为网络抖动准备的，拿它去撞一个 402，只会让用户
+/// 多等三轮退避，最后拿到一模一样的答复。5xx 归入可重试，服务端故障常常是暂时的。
+fn http_error(what: &str, status: reqwest::StatusCode, body: &str) -> AppError {
+    // 账号层面的三种状态直接说人话，并且放在最前面。原样甩一段
+    // `{"error":{"message":"Insufficient Balance",...}}` 出去，用户得自己去翻译；
+    // 而这条消息会一路传到流水线的步骤列表里，那里没有第二次解释的机会。
+    // 原始应答仍附在后面——排查时要看的就是它。
+    let hint = match status {
+        reqwest::StatusCode::PAYMENT_REQUIRED => {
+            "大模型账户余额不足：请充值或更换 API Key 后重试。"
+        }
+        reqwest::StatusCode::UNAUTHORIZED => "API Key 无效或已过期：请到「设置」检查大模型配置。",
+        reqwest::StatusCode::FORBIDDEN => {
+            "这个 API Key 没有调用该模型的权限：请检查模型名与账号权限。"
+        }
+        _ => "",
+    };
+    let detail = format!("{what} {status}: {}", body_snippet(body));
+    let text = if hint.is_empty() {
+        detail
+    } else {
+        format!("{hint}（{detail}）")
+    };
+    if status.is_client_error()
+        && status != reqwest::StatusCode::TOO_MANY_REQUESTS
+        && status != reqwest::StatusCode::REQUEST_TIMEOUT
+    {
+        AppError::Permanent(text)
+    } else {
+        AppError::Other(text)
+    }
+}
+
 fn request_error(error: reqwest::Error) -> AppError {
     // 连接阶段的超时要单独认出来。它和「等生成等了十分钟」是两码事：
     // 连接超时只等了 20 秒，压根没连上服务端，也就谈不上「服务端可能仍在生成」——
@@ -202,10 +239,7 @@ pub async fn complete(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!(
-            "OpenAI {status}: {}",
-            body_snippet(&body)
-        )));
+        return Err(http_error("OpenAI", status, &body));
     }
     let body = resp.text().await.map_err(request_error)?;
     let v = parse_json_response(&body, &content_type)?;
@@ -259,10 +293,7 @@ pub async fn embed(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!(
-            "OpenAI embeddings {status}: {}",
-            body_snippet(&body)
-        )));
+        return Err(http_error("OpenAI embeddings", status, &body));
     }
     let body = resp.text().await.map_err(request_error)?;
     let v = parse_json_response(&body, &content_type)?;
@@ -381,10 +412,7 @@ pub async fn complete_stream(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!(
-            "OpenAI {status}: {}",
-            body_snippet(&text)
-        )));
+        return Err(http_error("OpenAI", status, &text));
     }
     let mut state = StreamState::default();
     let mut stream = resp.bytes_stream();
@@ -512,6 +540,42 @@ impl StreamState {
 mod tests {
     use super::*;
     use crate::llm::ChatMessage;
+
+    #[test]
+    fn account_level_failures_are_not_worth_retrying() {
+        // 真实遇到的那一条：余额耗尽。重试三轮还是余额耗尽，只是让用户白等二十多秒。
+        let body = r#"{"error":{"message":"Insufficient Balance","type":"unknown_error"}}"#;
+        let error = http_error("OpenAI", reqwest::StatusCode::PAYMENT_REQUIRED, body);
+
+        assert!(error.is_permanent());
+        // 说人话的部分在最前面：这条消息会一路传到流水线的步骤列表，那里不会再解释一次。
+        let text = error.to_string();
+        assert!(text.starts_with("大模型账户余额不足"), "{text}");
+        // 原始应答仍要留着——排查时要看的就是它。
+        assert!(text.contains("Insufficient Balance"), "{text}");
+    }
+
+    #[test]
+    fn rate_limits_and_server_faults_stay_retryable() {
+        // 这两类等一会儿真的会变。把它们也判成「不必重试」，等于把抖动重试整个废掉。
+        for status in [
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            reqwest::StatusCode::REQUEST_TIMEOUT,
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            reqwest::StatusCode::BAD_GATEWAY,
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        ] {
+            let error = http_error("OpenAI", status, "busy");
+            assert!(!error.is_permanent(), "{status} 应当可重试");
+        }
+    }
+
+    #[test]
+    fn a_bad_request_is_permanent_too() {
+        // 模型名写错、请求体超限：同一个请求再发一遍还是同一个 400。
+        let error = http_error("OpenAI", reqwest::StatusCode::BAD_REQUEST, "no such model");
+        assert!(error.is_permanent());
+    }
 
     /// 把整段 SSE 按给定大小切块喂进状态机，模拟网络分包。
     fn drive(sse: &str, chunk_size: usize) -> AppResult<StreamOutcome> {

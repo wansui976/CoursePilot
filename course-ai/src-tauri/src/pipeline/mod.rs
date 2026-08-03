@@ -844,8 +844,15 @@ async fn run_slides_stage(
     }
 }
 
+/// 账号级问题（余额、密钥、权限）把后面几步一并跳过时给出的说明。
+const AI_HALTED_MESSAGE: &str =
+    "已跳过：上一步因账号问题失败（余额、密钥或权限），接着跑也是同样结果。处理好之后，可在各面板右下角手动生成。";
+
 /// ASR 之后自动生成章节、笔记。尽力而为：未配置大模型或单步失败都只标记该 job，
 /// 不回滚视频状态、不中断其余步骤。
+///
+/// 唯一的例外是账号级的错误。余额耗尽时，剩下四个任务会各自把讲稿重新分块压缩一遍，
+/// 再撞上同一个 402——用户等来的是五条一模一样的报错，和五轮白花的时间。
 async fn run_ai_followups(
     app: &AppHandle,
     db: &crate::db::Db,
@@ -853,6 +860,7 @@ async fn run_ai_followups(
     jobs_list: &[jobs::Job],
 ) {
     use crate::llm::profiles::AiTask;
+    let mut halted = false;
     for (stage, task) in [
         ("chapters", AiTask::Chapters),
         ("summary", AiTask::Summary),
@@ -866,6 +874,20 @@ async fn run_ai_followups(
         // 断点续跑：该步骤已完成则跳过，不重复调用大模型（也避免重复写库）。
         if job.status == "done" {
             emit_stage(app, video_id, &job.id, stage, "done", 1.0, None);
+            continue;
+        }
+        if halted {
+            // 标成 canceled 而不是 failed：它们没失败，是根本没轮到。
+            let _ = jobs::cancel(db, &job.id, AI_HALTED_MESSAGE).await;
+            emit_stage(
+                app,
+                video_id,
+                &job.id,
+                stage,
+                "canceled",
+                0.0,
+                Some(AI_HALTED_MESSAGE),
+            );
             continue;
         }
         let _ = jobs::start(db, &job.id).await;
@@ -914,6 +936,9 @@ async fn run_ai_followups(
                 let msg = error.to_string();
                 let _ = jobs::fail(db, &job.id, &msg).await;
                 emit_stage(app, video_id, &job.id, stage, "failed", 0.0, Some(&msg));
+                // 只有账号级的错误才连坐。内容本身有问题（某个任务解析不出结果）
+                // 不该拖累其余四个——它们各自的输入和提示词都不一样。
+                halted = error.is_permanent();
             }
         }
     }

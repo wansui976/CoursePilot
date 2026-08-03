@@ -651,8 +651,10 @@ async fn build_digest(
     for (index, chunk) in chunks.iter().enumerate() {
         let text = digest_one_chunk(provider, model, chunk)
             .await
+            // rewrap 而不是 Other：这层只是加了句说明，「重试救不了」的判断得原样传上去，
+            // 上层靠它决定后面四个任务还跑不跑。
             .map_err(|error| {
-                AppError::Other(format!(
+                error.rewrap(format!(
                     "讲稿提要第 {}/{total} 块失败，整份作废（缺一块会让五个产物都漏掉那一段）：{error}",
                     index + 1
                 ))
@@ -679,6 +681,9 @@ async fn digest_one_chunk(provider: &Provider, model: &str, chunk: &str) -> AppR
             });
         match outcome {
             Ok(text) => return Ok(text),
+            // 余额不足、密钥不对这类错误再等三轮也是同一句话。退避是为抖动准备的，
+            // 拿它去撞一个 402，只是让整份提要多花二十多秒才宣告失败。
+            Err(error) if error.is_permanent() => return Err(error),
             Err(error) if (attempt as usize) < DIGEST_CHUNK_BACKOFF_SECS.len() => {
                 let backoff =
                     std::time::Duration::from_secs(DIGEST_CHUNK_BACKOFF_SECS[attempt as usize]);
@@ -1045,6 +1050,63 @@ mod tests {
         assert_eq!(stored, 1);
         let second = budgeted_context(&db, &provider, "m", &vid).await.unwrap();
         assert_eq!(second.context, first.context);
+    }
+
+    fn failing_provider(permanent: bool, message: &str) -> Provider {
+        Provider::Failing {
+            permanent,
+            message: message.into(),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_permanent_failure_is_not_retried() {
+        // 真实遇到的：402 Insufficient Balance。退避重试是为网络抖动准备的，
+        // 拿它去撞一个余额不足，只是让用户白等三轮，最后拿到同一句话。
+        let provider = failing_provider(true, "OpenAI 402 Payment Required: Insufficient Balance");
+
+        let error = digest_one_chunk(&provider, "m", "一块讲稿")
+            .await
+            .unwrap_err();
+
+        assert!(error.is_permanent());
+        assert_eq!(provider.call_count(), 1, "余额不足不该重试");
+    }
+
+    #[tokio::test]
+    async fn a_transient_failure_still_gets_its_full_retry_budget() {
+        // 反过来也要守住：别为了「失败快」把抖动重试一并砍掉——
+        // 那正是「缺一块整份作废」赖以成立的前提。
+        let provider = failing_provider(false, "OpenAI 503: upstream unavailable");
+
+        let error = digest_one_chunk(&provider, "m", "一块讲稿")
+            .await
+            .unwrap_err();
+
+        assert!(!error.is_permanent());
+        assert_eq!(
+            provider.call_count(),
+            1 + DIGEST_CHUNK_BACKOFF_SECS.len(),
+            "首次加上每一档退避，一次都不能少"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_permanent_failure_stays_permanent_after_being_wrapped() {
+        // build_digest 会给错误加一句「第几块失败、整份作废」。这层包装如果把分类
+        // 丢了，流水线就看不出这是账号问题，会接着把剩下四个任务各撞一遍同样的 402。
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        seed_long_transcript(&db, &vid, 500).await;
+        let provider = failing_provider(true, "OpenAI 402 Payment Required: Insufficient Balance");
+
+        let error = match budgeted_context(&db, &provider, "m", &vid).await {
+            Err(error) => error,
+            Ok(_) => panic!("每一块都失败，不该交付提要"),
+        };
+
+        assert!(error.to_string().contains("整份作废"), "说明文字要保留");
+        assert!(error.is_permanent(), "包装之后仍然是「重试没用」");
     }
 
     #[tokio::test]

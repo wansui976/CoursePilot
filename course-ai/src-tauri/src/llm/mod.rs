@@ -414,6 +414,16 @@ pub enum Provider {
     Scripted {
         steps: std::sync::Mutex<Vec<ChatResponse>>,
     },
+    /// 测试用：每次都失败，并记下被调了多少次。
+    ///
+    /// 「这个错误重试几次」本身就是要被测的行为——余额不足重试三轮还是余额不足，
+    /// 只是让用户白等。没有一个会数数的失败端点，就只能断言最终返回了错误，
+    /// 而那对「试了一次还是四次」一无所知。
+    Failing {
+        permanent: bool,
+        message: String,
+        calls: std::sync::atomic::AtomicUsize,
+    },
 }
 
 impl Provider {
@@ -436,6 +446,33 @@ impl Provider {
                     Ok(steps.remove(0))
                 }
             }
+            Provider::Failing { .. } => Err(self.canned_failure()),
+        }
+    }
+
+    /// `Failing` 端点这一次的错误，顺带计一次数。
+    fn canned_failure(&self) -> crate::error::AppError {
+        let Provider::Failing {
+            permanent,
+            message,
+            calls,
+        } = self
+        else {
+            unreachable!("只有 Failing 会走到这里");
+        };
+        calls.fetch_add(1, Ordering::SeqCst);
+        if *permanent {
+            crate::error::AppError::Permanent(message.clone())
+        } else {
+            crate::error::AppError::Other(message.clone())
+        }
+    }
+
+    /// `Failing` 至今被调用了多少次。
+    pub fn call_count(&self) -> usize {
+        match self {
+            Provider::Failing { calls, .. } => calls.load(Ordering::SeqCst),
+            _ => 0,
         }
     }
 
@@ -481,6 +518,7 @@ impl Provider {
                     tool_calls: Vec::new(),
                 })
             }
+            Provider::Failing { .. } => Err(self.canned_failure()),
         }
     }
 
@@ -500,6 +538,7 @@ impl Provider {
             Provider::Mock { .. } | Provider::Scripted { .. } => {
                 Ok(inputs.iter().map(|s| mock_embed(s)).collect())
             }
+            Provider::Failing { .. } => Err(self.canned_failure()),
         }
     }
 }
