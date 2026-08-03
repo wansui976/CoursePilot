@@ -30,6 +30,7 @@ import { BottomTabBar, type CompactTab } from "@/components/BottomTabBar";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorNote } from "@/components/ui/ErrorNote";
+import { canRecorrect } from "@/lib/videoActions";
 import { IconButton } from "@/components/ui/icon-button";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import { coarsePointer, useContainerWidth, useIsPortrait } from "@/lib/useContainerWidth";
@@ -37,6 +38,7 @@ import { ipc, type DueCard } from "@/lib/ipc";
 import type {
   AssistantAction,
   Video,
+  VideoListItem,
 } from "@/lib/types";
 import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
@@ -118,16 +120,6 @@ function readSidebarCollapsed(): SidebarCollapsed {
   }
 }
 
-/**
- * 这个视频能不能只重跑 AI 纠错（而不是从头抽音频、重新识别一遍）。
- *
- * 处理完成的当然可以。自带字幕的（B 站导入、本地 SRT）也可以，哪怕状态不是「已处理」
- * ——它的文稿是导入来的，重跑完整流程会把自带字幕丢掉、改用语音识别，既慢又更差。
- * `subtitle_lang` 在字幕消化完之后仍然保留，正是用来标记来源的。
- */
-function canRecorrect(video: Video): boolean {
-  return video.processed_status === "done" || !!video.subtitle_lang;
-}
 
 export function Home() {
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
@@ -574,6 +566,9 @@ export function Home() {
       invalidateStaleArtifacts(queryClient, videoId);
     },
   });
+  // 纠错失败原来没有任何地方接：菜单点完就收起，既没有报错也没有变化，看起来就像没点上——
+  // 而没配大模型、批次全失败、快照对不上都会走到这里。
+  const recorrectError = recorrect.isError ? recorrect.error : null;
 
   async function saveRenamedVideo() {
     if (!renamingVideo) return;
@@ -892,7 +887,8 @@ export function Home() {
     );
   }
 
-  function videoMenu(video: Video) {
+  // 菜单要按「有没有文稿」在「重新纠错」和「开始处理」之间选，所以收的是列表条目而不是裸 Video。
+  function videoMenu(video: VideoListItem) {
     if (openMenuVideoId !== video.id) return null;
     const index = videos.findIndex((item) => item.id === video.id);
     // 拖拽排序的键盘/无障碍替代：与相邻项交换位置，走同一个乐观更新 mutation。
@@ -1022,7 +1018,7 @@ export function Home() {
     );
   }
 
-  function renderVideoGridCard(video: Video) {
+  function renderVideoGridCard(video: VideoListItem) {
     const progress = readPlaybackProgress(video.id);
     const durationMs =
       video.duration_ms ??
@@ -1075,7 +1071,7 @@ export function Home() {
     );
   }
 
-  function renderVideoListRow(video: Video) {
+  function renderVideoListRow(video: VideoListItem) {
     const progress = readPlaybackProgress(video.id);
     const durationMs =
       video.duration_ms ??
@@ -1230,6 +1226,17 @@ export function Home() {
           )}
         </header>
         <div className="ca-scroll">
+          {recorrectError && (
+            <ErrorNote
+              error={recorrectError}
+              onRetry={
+                recorrect.variables
+                  ? () => recorrect.mutate(recorrect.variables!)
+                  : undefined
+              }
+              className="mx-4 mt-3"
+            />
+          )}
           {!videosError && renderContinueBanner()}
           {selectedCourseId && videosError ? (
             // 加载失败不再静默留空：显示错误 + 重试，用户能看到问题也能自助恢复。

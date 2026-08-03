@@ -23,6 +23,7 @@ import type {
   TranscriptSegment,
   TrashedVideo,
   Video,
+  VideoListItem,
 } from "./types";
 
 export interface WhisperModel {
@@ -272,7 +273,7 @@ export const ipc = {
       invoke("cmd_relink_course_root", { courseId, newRoot }),
   },
   videos: {
-    list: (courseId: string): Promise<Video[]> =>
+    list: (courseId: string): Promise<VideoListItem[]> =>
       invoke("cmd_list_videos", { courseId }),
     addLocal: (
       courseId: string,

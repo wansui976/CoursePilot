@@ -5,6 +5,17 @@
  * 仅用于「展示」；需要按错误类型分支处理的逻辑（如 B站 412 引导重导 cookie）请
  * 直接匹配原始报错，不要依赖这里的输出文案。
  */
+/**
+ * 报错文本里有没有出现某个 HTTP 状态码。
+ *
+ * 必须按整词匹配，不能用 includes。报错里常带着 id——`not found: video a4028f3c-…`
+ * 这样的 uuid 是十六进制，含着 402 / 401 / 412 的概率各在千分之七上下，
+ * 一旦撞上，「找不到视频」就会被翻译成「账户余额不足」，比不翻译糟得多。
+ */
+function hasStatus(text: string, code: number): boolean {
+  return new RegExp(`(?<![0-9a-z])${code}(?![0-9a-z])`).test(text);
+}
+
 export function humanizeError(error: unknown): string {
   const raw =
     error instanceof Error
@@ -20,7 +31,7 @@ export function humanizeError(error: unknown): string {
   // B站登录态失效 / 触发风控（HTTP 412）——放在通用 403/forbidden 之前判断。
   if (
     (s.includes("bilibili") || s.includes("b站") || s.includes("cookie")) &&
-    (s.includes("412") ||
+    (hasStatus(s, 412) ||
       s.includes("precondition") ||
       s.includes("login") ||
       s.includes("需要登录") ||
@@ -28,14 +39,14 @@ export function humanizeError(error: unknown): string {
   ) {
     return "B站登录态已失效或触发风控（HTTP 412）：请用 Get cookies.txt LOCALLY 扩展重新导出并导入 cookies.txt。";
   }
-  if (s.includes("412") || s.includes("precondition")) {
+  if (hasStatus(s, 412) || s.includes("precondition")) {
     return "服务器拒绝了请求（HTTP 412）：登录态可能已失效，请重新导入 cookies.txt 后重试。";
   }
 
   // 余额耗尽（402）和「密钥无效」是两回事：密钥是对的，就是没钱了，让人去检查
   // 设置只会白跑一趟。必须排在下面那条之前——后端给的提示里就带着「API Key」四个字。
   if (
-    s.includes("402") ||
+    hasStatus(s, 402) ||
     s.includes("payment required") ||
     s.includes("insufficient balance") ||
     s.includes("insufficient_quota") ||
@@ -48,7 +59,7 @@ export function humanizeError(error: unknown): string {
     s.includes("api key") ||
     s.includes("apikey") ||
     s.includes("unauthorized") ||
-    s.includes("401") ||
+    hasStatus(s, 401) ||
     s.includes("no profile") ||
     s.includes("未配置")
   ) {

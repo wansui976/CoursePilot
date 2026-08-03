@@ -35,6 +35,18 @@ describe("humanizeError", () => {
     expect(humanizeError("You exceeded your current quota")).toContain("余额不足");
   });
 
+  it("id 里恰好出现的数字不算状态码", () => {
+    // uuid 是十六进制，含着 402 / 401 / 412 的概率各在千分之七上下。按子串匹配的话，
+    // 「找不到这个视频」会被翻译成「账户余额不足」——比不翻译糟得多。
+    expect(humanizeError("not found: video a4028f3c-4011-41ab-9d5e-0c1")).toBe(
+      "not found: video a4028f3c-4011-41ab-9d5e-0c1",
+    );
+    // 真的带状态码时照旧认得出来。
+    expect(humanizeError("OpenAI 402 Payment Required")).toContain("余额不足");
+    expect(humanizeError("HTTP 401 Unauthorized")).toContain("API Key");
+    expect(humanizeError("HTTP Error 412: Precondition Failed")).toContain("412");
+  });
+
   it("maps network and rate-limit errors", () => {
     expect(humanizeError("fetch failed: dns")).toContain("网络");
     expect(humanizeError("rate limit exceeded")).toContain("频繁");

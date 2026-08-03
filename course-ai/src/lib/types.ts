@@ -32,6 +32,17 @@ export interface Video {
   crop_left?: number | null;
 }
 
+/**
+ * 视频列表里的一条，比 Video 多一件事：库里到底有没有文稿。
+ *
+ * 菜单要靠它决定给「重新纠错」还是「开始处理」。自带字幕的视频在下载完当场就打上了
+ * 字幕标记，那时流水线还没跑、一个字都没有——只看标记的话，菜单会对着一份不存在的
+ * 文稿提议纠错，而那恰恰是唯一需要「开始处理」的情形。只有列表接口返回它。
+ */
+export interface VideoListItem extends Video {
+  has_transcript: boolean;
+}
+
 export interface SubtitleTrack {
   lang: string;
   name: string;
