@@ -121,6 +121,19 @@ fn whisper_language_or_default(value: Option<String>) -> String {
         .unwrap_or_else(|| "zh".into())
 }
 
+/// 这次处理能不能直接用自带字幕，从而整个跳过语音识别。
+///
+/// **必须在抽音轨之前调用。** 原来的顺序是先抽再判：一节一小时的课要把整个文件解码
+/// 一遍、写出约 115MB 的 WAV，然后才走进这个分支——那份音频一次都没被读过，
+/// 用户白等那几十秒。
+///
+/// 只登记了路径不算数，文件得真的在：字幕是导入时下载到磁盘上的，用户可能把它删了
+/// 或者搬走了。那种情况下老老实实去识别，而不是抱着一个不存在的路径往下走。
+fn subtitle_shortcut(subtitle_path: Option<&str>) -> Option<std::path::PathBuf> {
+    let path = std::path::PathBuf::from(subtitle_path?);
+    path.is_file().then_some(path)
+}
+
 async fn run_all(
     app: AppHandle,
     video_id: String,
@@ -215,6 +228,70 @@ async fn run_all(
         return Ok(());
     }
 
+    // 自带字幕的视频根本不用识别，这一判断必须排在抽音轨**之前**。
+    //
+    // 原来的顺序是先抽再判：一节一小时的课要把整个文件解码一遍、写出约 115MB 的 WAV，
+    // 然后走进这个分支，那份音频一次都没被读过。用户等的那几十秒纯属白等。
+    const SUBTITLE_SKIP_AUDIO: &str = "自带字幕，无需抽音轨";
+    if let Some(sub_path) = subtitle_shortcut(video.subtitle_path.as_deref()) {
+        // 抽音轨这一步没失败，是压根不需要——标成「已跳过」而不是「完成」。
+        let _ = jobs::cancel(&db, &audio_job.id, SUBTITLE_SKIP_AUDIO).await;
+        emit_update(
+            &app,
+            JobEvent {
+                video_id: video_id.clone(),
+                job_id: audio_job.id.clone(),
+                stage: "audio".into(),
+                status: "canceled".into(),
+                progress: 0.0,
+                message: Some(SUBTITLE_SKIP_AUDIO.into()),
+            },
+        );
+
+        jobs::start(&db, &asr_job.id).await?;
+        emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.3, "导入 B站自带字幕").await?;
+        let srt_text = tokio::fs::read_to_string(&sub_path).await?;
+
+        // 是否对字幕走 AI 纠错：视频级偏好（导入时勾选）> 全局开关，再要求有可用大模型。
+        let autocorrect = subtitle::autocorrect_enabled(&db, &video_id).await?;
+        let correct = if autocorrect {
+            crate::commands::ai::provider_for_db(&db, crate::llm::profiles::AiTask::Correction)
+                .await?
+        } else {
+            None
+        };
+        if correct.is_some() {
+            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.6, "正在 AI 纠正字幕")
+                .await?;
+        }
+
+        let count = subtitle::ingest_subtitle(&db, &video_id, &srt_text, correct).await?;
+
+        // 消化完成：清空 path（保留 lang 作来源展示），标记完成。
+        sqlx::query("UPDATE videos SET subtitle_path=NULL, processed_status='done' WHERE id=?")
+            .bind(&video_id)
+            .execute(&db.pool)
+            .await?;
+        let msg = format!("{count} segments（来源：B站字幕）");
+        jobs::update_progress(&db, &asr_job.id, 1.0, Some(&msg)).await?;
+        jobs::finish(&db, &asr_job.id).await?;
+        emit_update(
+            &app,
+            JobEvent {
+                video_id: video_id.clone(),
+                job_id: asr_job.id.clone(),
+                stage: "asr".into(),
+                status: "done".into(),
+                progress: 1.0,
+                message: Some(msg),
+            },
+        );
+        // AI 步骤要看到板书文字，等课件那条支线收口再开始。
+        let _ = slides_task.await;
+        run_ai_followups(&app, &db, &video_id, &jobs_list).await;
+        return Ok(());
+    }
+
     jobs::start(&db, &audio_job.id).await?;
     emit_update(
         &app,
@@ -271,61 +348,11 @@ async fn run_all(
     };
 
     // 从这里往下，无论走哪条路退出，抽出来的音频都要跟着一起清掉——识别之后没有
-    // 任何东西会再用它。包括下面「自带字幕、跳过识别」那条早退：音频在上一步已经
-    // 抽好了，那条路上一次都没用过。
+    // 任何东西会再用它。识别失败、被取消都算，所以挂在 Drop 上而不是末尾显式调用。
     let _temp_audio = audio::TempAudio::new(&prepared_audio);
 
     jobs::start(&db, &asr_job.id).await?;
     emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.05, "准备识别引擎").await?;
-
-    // 若该视频带「待用 B站字幕」，直接用字幕作文稿，跳过语音转写。
-    if let Some(sub_path) = video
-        .subtitle_path
-        .clone()
-        .filter(|p| std::path::Path::new(p).is_file())
-    {
-        emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.3, "导入 B站自带字幕").await?;
-        let srt_text = tokio::fs::read_to_string(&sub_path).await?;
-
-        // 是否对字幕走 AI 纠错：视频级偏好（导入时勾选）> 全局开关，再要求有可用大模型。
-        let autocorrect = subtitle::autocorrect_enabled(&db, &video_id).await?;
-        let correct = if autocorrect {
-            crate::commands::ai::provider_for_db(&db, crate::llm::profiles::AiTask::Correction)
-                .await?
-        } else {
-            None
-        };
-        if correct.is_some() {
-            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.6, "正在 AI 纠正字幕")
-                .await?;
-        }
-
-        let count = subtitle::ingest_subtitle(&db, &video_id, &srt_text, correct).await?;
-
-        // 消化完成：清空 path（保留 lang 作来源展示），标记完成。
-        sqlx::query("UPDATE videos SET subtitle_path=NULL, processed_status='done' WHERE id=?")
-            .bind(&video_id)
-            .execute(&db.pool)
-            .await?;
-        let msg = format!("{count} segments（来源：B站字幕）");
-        jobs::update_progress(&db, &asr_job.id, 1.0, Some(&msg)).await?;
-        jobs::finish(&db, &asr_job.id).await?;
-        emit_update(
-            &app,
-            JobEvent {
-                video_id: video_id.clone(),
-                job_id: asr_job.id.clone(),
-                stage: "asr".into(),
-                status: "done".into(),
-                progress: 1.0,
-                message: Some(msg),
-            },
-        );
-        // AI 步骤要看到板书文字，等课件那条支线收口再开始。
-        let _ = slides_task.await;
-        run_ai_followups(&app, &db, &video_id, &jobs_list).await;
-        return Ok(());
-    }
 
     let audio_path = prepared_audio.path.clone();
 
@@ -1314,6 +1341,26 @@ mod tests {
             .unwrap();
             assert_eq!(slides_auto_enabled(&db).await, expected, "value={value}");
         }
+    }
+
+    #[test]
+    fn a_video_with_its_own_subtitle_needs_no_audio_track() {
+        // 这个判断必须排在抽音轨之前。原来是先抽再判：一小时的课整个解码一遍、写出
+        // 约 115MB 的 WAV，然后走进「用自带字幕」的分支——那份音频一次都没被读过。
+        let dir = tempdir().unwrap();
+        let srt = dir.path().join("sub.srt");
+        std::fs::write(&srt, "1\n00:00:00,000 --> 00:00:01,000\n你好\n").unwrap();
+
+        assert_eq!(
+            subtitle_shortcut(Some(srt.to_str().unwrap())),
+            Some(srt.clone())
+        );
+        // 没登记字幕的视频照常走识别。
+        assert_eq!(subtitle_shortcut(None), None);
+        // 登记了但文件已经不在（用户删了或搬走了）：也得老老实实去识别，
+        // 而不是抱着一个不存在的路径往下走。
+        let gone = dir.path().join("missing.srt");
+        assert_eq!(subtitle_shortcut(Some(gone.to_str().unwrap())), None);
     }
 
     #[test]
