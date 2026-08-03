@@ -125,6 +125,7 @@ fn ask_request(
         messages,
         temperature: 0.2,
         tools: Vec::new(),
+        label: "ask",
     }
 }
 

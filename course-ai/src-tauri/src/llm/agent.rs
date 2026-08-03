@@ -108,6 +108,7 @@ pub async fn run<T: ToolBox>(
             messages: messages.clone(),
             temperature: 0.2,
             tools: specs.clone(),
+            label: "assistant",
         };
         // complete_or_cancel 而不是 complete：光在轮次之间查标志是不够的，
         // 单次调用最长要等到请求超时才回得来。用户点了停止，界面却还得转上几分钟——
@@ -209,6 +210,7 @@ mod tests {
         crate::llm::ChatResponse {
             content: text.into(),
             tool_calls: Vec::new(),
+            usage: None,
         }
     }
 
@@ -216,6 +218,7 @@ mod tests {
         crate::llm::ChatResponse {
             content: String::new(),
             tool_calls: calls,
+            usage: None,
         }
     }
 
@@ -497,6 +500,7 @@ mod tests {
             crate::llm::ChatResponse {
                 content: "我先查一下".into(),
                 tool_calls: vec![call("c1", "probe", "{}")],
+                usage: None,
             },
             says("查完了"),
         ]);

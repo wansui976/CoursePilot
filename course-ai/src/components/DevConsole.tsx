@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, Copy, RefreshCw, Terminal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
-import type { DevLogEntry } from "@/lib/types";
+import type { DevLogEntry, LlmUsageTotals } from "@/lib/types";
 
 function statusClass(status: string): string {
   if (status.startsWith("已应用")) return "text-[var(--status-ok)] bg-[var(--status-ok-bg)]";
@@ -56,6 +56,74 @@ function LogCard({ entry }: { entry: DevLogEntry }) {
   );
 }
 
+function ratio(part: number, whole: number): string {
+  if (whole <= 0) return "—";
+  return `${Math.round((part / whole) * 100)}%`;
+}
+
+/**
+ * 各档 LLM 调用的 token 用量。
+ *
+ * 三列是用来回答三个具体问题的：命中率说明共享前缀有没有真的生效（五个产物用的是
+ * 同一份讲稿，第一次之后应该大比例命中）；输出说明纠错这类任务到底吐了多少字；
+ * 「其中思考」是计费在输出里、但我们只读正式回答、并不使用的那部分——不为零就说明
+ * 这一档路由到了推理模型，而那笔钱基本是白花的。
+ */
+function UsageTable({ rows }: { rows: LlmUsageTotals[] }) {
+  if (rows.length === 0) {
+    return (
+      <p className="text-xs text-[var(--text-faint)]">
+        还没有用量记录。跑一次 AI 生成或字幕纠错后，这里会按档显示 token 消耗。
+        端点不返回用量时也会是空的。
+      </p>
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead className="text-[var(--text-muted)]">
+          <tr className="text-left">
+            <th className="py-1 pr-3 font-medium">档</th>
+            <th className="py-1 pr-3 font-medium">模型</th>
+            <th className="py-1 pr-3 text-right font-medium">次数</th>
+            <th className="py-1 pr-3 text-right font-medium">输入</th>
+            <th className="py-1 pr-3 text-right font-medium">命中缓存</th>
+            <th className="py-1 pr-3 text-right font-medium">输出</th>
+            <th className="py-1 text-right font-medium">其中思考</th>
+          </tr>
+        </thead>
+        <tbody className="text-[var(--text-normal)]">
+          {rows.map((row) => (
+            <tr
+              key={`${row.label}-${row.model}`}
+              className="border-t border-[var(--border-subtle)]"
+            >
+              <td className="py-1 pr-3">{row.label}</td>
+              <td className="py-1 pr-3 text-[var(--text-muted)]">{row.model}</td>
+              <td className="py-1 pr-3 text-right tabular-nums">{row.calls}</td>
+              <td className="py-1 pr-3 text-right tabular-nums">{row.prompt_tokens}</td>
+              <td className="py-1 pr-3 text-right tabular-nums">
+                {row.cached_tokens}
+                <span className="ml-1 text-[var(--text-faint)]">
+                  {ratio(row.cached_tokens, row.prompt_tokens)}
+                </span>
+              </td>
+              <td className="py-1 pr-3 text-right tabular-nums">{row.completion_tokens}</td>
+              <td
+                className={`py-1 text-right tabular-nums ${
+                  row.reasoning_tokens > 0 ? "text-[var(--status-warn)]" : ""
+                }`}
+              >
+                {row.reasoning_tokens}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function DevConsole({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const { data: logs = [], isFetching } = useQuery({
@@ -63,9 +131,20 @@ export function DevConsole({ onClose }: { onClose: () => void }) {
     queryFn: ipc.dev.logs,
     refetchInterval: 3000,
   });
+  const { data: usage = [] } = useQuery({
+    queryKey: ["llm-usage"],
+    queryFn: ipc.dev.llmUsage,
+    refetchInterval: 3000,
+  });
   const clear = useMutation({
-    mutationFn: ipc.dev.clearLogs,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["dev-logs"] }),
+    mutationFn: async () => {
+      await ipc.dev.clearLogs();
+      await ipc.dev.clearLlmUsage();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dev-logs"] });
+      qc.invalidateQueries({ queryKey: ["llm-usage"] });
+    },
   });
   const [copied, setCopied] = useState(false);
 
@@ -132,7 +211,7 @@ export function DevConsole({ onClose }: { onClose: () => void }) {
         <Button
           size="sm"
           variant="outline"
-          disabled={clear.isPending || logs.length === 0}
+          disabled={clear.isPending || (logs.length === 0 && usage.length === 0)}
           onClick={() => clear.mutate()}
         >
           <Trash2 className="h-3.5 w-3.5" />
@@ -141,7 +220,16 @@ export function DevConsole({ onClose }: { onClose: () => void }) {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
+        <div className="mx-auto mb-6 max-w-3xl space-y-2">
+          <h3 className="text-sm font-semibold text-[var(--text-strong)]">token 用量</h3>
+          <p className="text-xs text-[var(--text-muted)]">
+            按档累计，进程内统计、重启清空。只覆盖非流式调用（生成、纠错、提要、助手），
+            流式的问答不在内。
+          </p>
+          <UsageTable rows={usage} />
+        </div>
         <div className="mx-auto max-w-3xl space-y-2">
+          <h3 className="text-sm font-semibold text-[var(--text-strong)]">纠错请求与回复</h3>
           {logs.length === 0 ? (
             <div className="flex h-full min-h-[240px] items-center justify-center text-center text-sm text-[var(--text-faint)]">
               还没有 AI 纠错记录。处理一个视频后（且已配置大模型），
