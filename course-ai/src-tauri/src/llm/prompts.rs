@@ -172,15 +172,28 @@ pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatReque
              「根号下一减 v 方比 c 方」→ \\(\\sqrt{1-v^2/c^2}\\)，「比/除以」用分式或 /。\
              只把公式部分写成 LaTeX，其余仍是普通中文文本，不要整段包成公式；含义不确定时保留原文。\
              只返回需要修改的分段；不需要修改的分段不要返回。\
-             输入每项有 id、text 两个字段。输出每项只有 id、replacedtext 两个字段：\
-             id 原样照抄该分段输入的 id（仅用于定位，切勿改动或编造，更不要用时间戳）；\
-             replacedtext 写纠正后的文本；若整段都是无实义语气词，replacedtext 给空串 \"\" 表示删除。\
-             不要输出 start_ms、end_ms、originaltext 或原文。若本批没有需要修改的内容，输出空数组 []。"
+             输入每项有 id、text 两个字段。id 原样照抄该分段输入的 id\
+             （仅用于定位，切勿改动或编造，更不要用时间戳）。\
+             输出优先用「局部替换」：{\"id\":<原 id>,\"from\":\"要替换掉的原文片段\",\"to\":\"改成什么\"}。\
+             from 必须是该分段原文里**一字不差**的一小截，并且在该段中只出现一次——\
+             只出现一次是硬要求，若那几个字在段里重复出现，就把 from 向左右各扩几个字\
+             直到唯一为止。对不上原文或不唯一的替换会被丢弃，等于这处没改。\
+             to 写替换后的文本，删掉某几个字就给空串 \"\"。同一段有多处要改就回多条，\
+             每条的 from 各自独立、互不重叠，且都按**原文**来写（不要按改完之后的样子写）。\
+             只有当整段几乎全要重写（比如断句整体重排）时才改用\
+             {\"id\":<原 id>,\"replacedtext\":\"整段纠正后的文本\"}；\
+             若整段都是无实义语气词，用 replacedtext 给空串 \"\" 表示删除整段。\
+             同一段不要同时给这两种形式。\
+             不要输出 start_ms、end_ms、originaltext 或整段原文。\
+             若本批没有需要修改的内容，输出空数组 []。"
                 .into(),
         ),
         cacheable_context: None,
         messages: vec![ChatMessage::user(format!(
-                "下面是带 id 的分段，找出需要修改的条目，只返回 [{{\"id\":<原 id>,\"replacedtext\":\"...\"}}]，id 照抄：\n{batch_json}"
+                "下面是带 id 的分段，找出需要修改的地方。\
+                 每处改动只回被改的那一小截：[{{\"id\":<原 id>,\"from\":\"原文片段\",\"to\":\"改成什么\"}}]，\
+                 from 一字不差照抄原文且在该段中唯一；整段几乎全要重写时才回 replacedtext。\
+                 id 照抄，不要回原文整段：\n{batch_json}"
         ))],
         temperature: 0.1,
         tools: Vec::new(),
@@ -266,6 +279,28 @@ mod tests {
                 "correction prompt should mention {required}"
             );
         }
+    }
+
+    #[test]
+    fn transcript_correction_prompt_asks_for_local_patches_not_whole_segments() {
+        // 输出是这条链路上最贵的部分。一段四十字的话里认错两个字，回整段就要付四十字。
+        let req = transcript_correction_request("m", "[]");
+        let system = req.system.unwrap();
+        let user = &req.messages[0].content;
+
+        for required in ["from", "to", "局部替换"] {
+            assert!(
+                system.contains(required),
+                "correction prompt should mention {required}"
+            );
+        }
+        // 唯一匹配是硬要求：对不上或不唯一的替换会被丢弃，模型得知道这一点，
+        // 才会主动把片段扩到唯一，而不是随手给两个字。
+        assert!(system.contains("只出现一次"));
+        assert!(system.contains("一字不差"));
+        // 整段重写留作例外，不是默认。
+        assert!(system.contains("只有当整段几乎全要重写"));
+        assert!(user.contains("不要回原文整段"));
     }
 
     #[test]

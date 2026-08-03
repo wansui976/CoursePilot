@@ -56,12 +56,69 @@ fn build_batch_request_json(batch: &[CorrectionSegment]) -> AppResult<String> {
     Ok(serde_json::to_string_pretty(&items)?)
 }
 
-// 模型回的 patch：只认 id 与 replacedtext。其余字段（哪怕模型多回了原文/时间戳）
-// 一律忽略。replacedtext 缺失则该条反序列化失败 → 单条跳过，不会误把整段清空。
+// 模型回的 patch 有两种形状，都只认 id 加各自那两个字段；其余字段（哪怕模型多回了
+// 原文/时间戳）一律忽略。字段缺失则该条反序列化失败 → 单条跳过，不会误把整段清空。
+//
+// 局部替换：只回被改的那一小截。一段四十字的话里认错两个字，原来要把整段四十字
+// 重新写回来，现在只付那两个字加上下文的钱——输出是这条链路上最贵的部分。
 #[derive(Debug, Clone, Deserialize)]
-struct CorrectionPatch {
+struct ReplacePatch {
+    id: usize,
+    from: String,
+    to: String,
+}
+
+// 整段重写：改动铺满全段时（断句重排之类）用它。这种情况下局部替换反而更贵——
+// from 要把原文整段抄一遍，等于新旧各付一份。
+#[derive(Debug, Clone, Deserialize)]
+struct RewritePatch {
     id: usize,
     replacedtext: String,
+}
+
+/// 一段上要做的改动。
+enum Edit {
+    Replace { from: String, to: String },
+    Rewrite(String),
+}
+
+/// 把若干「把 from 换成 to」应用到一段文本上。
+///
+/// 全部按**原文**定位、校验完再一次性替换。逐条替换会互相干扰：前一条改完之后，
+/// 后一条的 from 可能不再匹配，更糟的是可能匹配到刚刚新造出来的位置上，改错地方。
+///
+/// 每条 from 必须在原文里**恰好出现一次**。出现零次说明模型抄错了原文，出现多次
+/// 说明不知道它指的是哪一处——两种都跳过、保留原文。宁可漏掉一处该改的，
+/// 也不能把不该动的地方改了：这份文稿会进笔记、出题和检索。
+fn apply_replacements(original: &str, edits: &[(String, String)]) -> String {
+    let mut spans: Vec<(usize, usize, &str)> = Vec::new();
+    for (from, to) in edits {
+        if from.is_empty() {
+            continue; // 空的 from 无从定位
+        }
+        let mut hits = original.match_indices(from.as_str());
+        let Some((start, matched)) = hits.next() else {
+            continue; // 对不上原文
+        };
+        if hits.next().is_some() {
+            continue; // 不止一处，说不清改哪个
+        }
+        spans.push((start, start + matched.len(), to.as_str()));
+    }
+    spans.sort_by_key(|(start, _, _)| *start);
+
+    let mut out = String::with_capacity(original.len());
+    let mut cursor = 0usize;
+    for (start, end, to) in spans {
+        if start < cursor {
+            continue; // 与前一处改动重叠，跳过后来的这条
+        }
+        out.push_str(&original[cursor..start]);
+        out.push_str(to);
+        cursor = end;
+    }
+    out.push_str(&original[cursor..]);
+    out
 }
 
 fn load_correction_segments(
@@ -87,27 +144,57 @@ pub fn parse_corrections(
     // 先收成 Value 数组，再逐条尝试转 patch——这样单条结构异常不会废掉整批。
     let values: Vec<serde_json::Value> = crate::pipeline::ai::parse_lenient_json(content)?;
     let mut out = raw.to_vec();
-    let mut seen = std::collections::HashSet::new();
+    let mut edits: std::collections::HashMap<usize, Vec<Edit>> = std::collections::HashMap::new();
 
     for value in values {
-        let Ok(patch) = serde_json::from_value::<CorrectionPatch>(value) else {
+        // 先按局部替换认，认不出再按整段重写认。两种都不是 → 跳过这一条。
+        let (id, edit) = if let Ok(patch) = serde_json::from_value::<ReplacePatch>(value.clone()) {
+            (
+                patch.id,
+                Edit::Replace {
+                    from: patch.from,
+                    to: patch.to,
+                },
+            )
+        } else if let Ok(patch) = serde_json::from_value::<RewritePatch>(value) {
+            (patch.id, Edit::Rewrite(patch.replacedtext))
+        } else {
             continue; // 单条字段缺失/类型不符 → 跳过
         };
-        if patch.id >= raw.len() {
+        if id >= raw.len() {
             continue; // id 越界（串位/编造）→ 跳过
         }
-        if !seen.insert(patch.id) {
-            continue; // 同一 id 重复 patch → 只取首次
-        }
+        edits.entry(id).or_default().push(edit);
+    }
 
-        let orig = &raw[patch.id];
-        // replacedtext 为空是合法的「整段删除」：当一段全是语气词/口头禅（如「哎。」）
-        // 时，模型按提示词把它清空。这里保留分段（时间戳不变，满足下游行数一致校验），
+    for (id, edits) in edits {
+        let orig = &raw[id];
+        // 同一段既给了整段重写又给了局部替换时以整段重写为准（取第一条）：
+        // 两种混着往同一段上招呼，结果取决于顺序，不如挑一个说得清的规则。
+        let rewritten = edits.iter().find_map(|edit| match edit {
+            Edit::Rewrite(text) => Some(text.clone()),
+            Edit::Replace { .. } => None,
+        });
+        let text = match rewritten {
+            Some(text) => text,
+            None => {
+                let pairs: Vec<(String, String)> = edits
+                    .into_iter()
+                    .filter_map(|edit| match edit {
+                        Edit::Replace { from, to } => Some((from, to)),
+                        Edit::Rewrite(_) => None,
+                    })
+                    .collect();
+                apply_replacements(&orig.text, &pairs)
+            }
+        };
+        // 文本为空是合法的「整段删除」：当一段全是语气词/口头禅（如「哎。」）时，
+        // 模型按提示词把它清空。这里保留分段（时间戳不变，满足下游行数一致校验），
         // 只把文本置空——该时间段不再显示字幕，也不污染文稿/笔记。
-        out[patch.id] = CorrectionSegment {
+        out[id] = CorrectionSegment {
             start_ms: orig.start_ms,
             end_ms: orig.end_ms,
-            text: patch.replacedtext.trim().to_string(),
+            text: text.trim().to_string(),
         };
     }
 
@@ -399,6 +486,101 @@ mod tests {
         assert_eq!(out[0].end_ms, 1000);
         assert_eq!(out[0].text, "纠正文");
         assert_eq!(out[1].text, "不用修改");
+    }
+
+    fn seg(start_ms: i64, end_ms: i64, text: &str) -> CorrectionSegment {
+        CorrectionSegment {
+            start_ms,
+            end_ms,
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn a_local_patch_only_touches_the_span_it_names() {
+        // 输出是这条链路上最贵的部分。一段四十字的话里认错两个字，原来要把整段
+        // 四十字重新写回来；现在只回那一小截，其余原样保留。
+        let raw = vec![seg(0, 5000, "所以 m 零 是静止质量，这一点要记住")];
+
+        let out = parse_corrections(&raw, r#"[{"id":0,"from":"m 零","to":"\\(m_0\\)"}]"#).unwrap();
+
+        assert_eq!(out[0].text, "所以 \\(m_0\\) 是静止质量，这一点要记住");
+        assert_eq!(out[0].start_ms, 0);
+    }
+
+    #[test]
+    fn several_patches_on_one_segment_all_land() {
+        let raw = vec![seg(0, 5000, "嗯，那个速度是 v 方，对吧")];
+
+        let out = parse_corrections(
+            &raw,
+            r#"[{"id":0,"from":"嗯，那个","to":""},{"id":0,"from":"v 方","to":"v²"},{"id":0,"from":"，对吧","to":""}]"#,
+        )
+        .unwrap();
+
+        assert_eq!(out[0].text, "速度是 v²");
+    }
+
+    #[test]
+    fn patches_are_located_against_the_original_not_each_other() {
+        // 逐条替换会互相干扰：改完第一处之后，第二处的 from 可能匹配到刚刚新造出来的
+        // 位置上，改错地方。所以全部按原文定位、一次性替换。
+        let raw = vec![seg(0, 5000, "AB")];
+
+        // 若逐条应用：先 A→B 得到 "BB"，再把 B→C 就会撞上两个 B。按原文定位则各改各的。
+        let out = parse_corrections(
+            &raw,
+            r#"[{"id":0,"from":"A","to":"B"},{"id":0,"from":"B","to":"C"}]"#,
+        )
+        .unwrap();
+
+        assert_eq!(out[0].text, "BC");
+    }
+
+    #[test]
+    fn a_patch_that_does_not_match_the_original_is_dropped() {
+        // 模型把原文抄错了。宁可漏掉这处改动，也不能猜着往上安——这份文稿会进
+        // 笔记、出题和检索。
+        let raw = vec![seg(0, 5000, "静止质量是 m 零")];
+
+        let out =
+            parse_corrections(&raw, r#"[{"id":0,"from":"静止質量","to":"静止质量"}]"#).unwrap();
+
+        assert_eq!(out[0].text, "静止质量是 m 零", "对不上原文就保持原样");
+    }
+
+    #[test]
+    fn an_ambiguous_patch_is_dropped_rather_than_guessed() {
+        // 「的」在这段里出现两次，模型没说清改哪一个。改错位置比不改更糟。
+        let raw = vec![seg(0, 5000, "他的书和她的书")];
+
+        let out = parse_corrections(&raw, r#"[{"id":0,"from":"的","to":"地"}]"#).unwrap();
+
+        assert_eq!(out[0].text, "他的书和她的书");
+    }
+
+    #[test]
+    fn overlapping_patches_keep_the_first_and_drop_the_rest() {
+        let raw = vec![seg(0, 5000, "abcdef")];
+
+        let out = parse_corrections(
+            &raw,
+            r#"[{"id":0,"from":"bcd","to":"X"},{"id":0,"from":"cde","to":"Y"}]"#,
+        )
+        .unwrap();
+
+        assert_eq!(out[0].text, "aXef");
+    }
+
+    #[test]
+    fn a_whole_segment_rewrite_still_works() {
+        // 改动铺满全段时（断句重排之类）局部替换反而更贵：from 要把原文整段抄一遍。
+        // 这种情况仍然可以整段回。
+        let raw = vec![seg(0, 5000, "然后 呢 我们 来 看 这个 题")];
+
+        let out = parse_corrections(&raw, r#"[{"id":0,"replacedtext":"我们来看这道题"}]"#).unwrap();
+
+        assert_eq!(out[0].text, "我们来看这道题");
     }
 
     #[test]
