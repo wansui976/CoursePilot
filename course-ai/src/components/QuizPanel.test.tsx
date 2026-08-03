@@ -8,6 +8,8 @@ const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
     ai: {
       getQuiz: vi.fn(),
+      generate: vi.fn(),
+      staleArtifacts: vi.fn(),
     },
     srs: {
       generate: vi.fn(),
@@ -35,6 +37,8 @@ function renderQuizPanel() {
 describe("QuizPanel", () => {
   beforeEach(() => {
     mockIpc.ai.getQuiz.mockReset();
+    mockIpc.ai.generate.mockReset().mockResolvedValue(undefined);
+    mockIpc.ai.staleArtifacts.mockReset().mockResolvedValue([]);
     mockIpc.srs.generate.mockReset().mockResolvedValue(1);
   });
 
@@ -155,10 +159,47 @@ describe("QuizPanel", () => {
 
     renderQuizPanel();
 
-    const scroller = await screen.findByLabelText("练习内容滚动区");
+    const last = await screen.findByText("第 20 题");
+    const scroller = screen.getByLabelText("练习内容滚动区");
     // jsdom 不做布局，滚不出真实位移。能验证的是最后一题确实挂在这个滚动区里，
-    // 且容器本身限高并允许纵向滚动——少了任何一样，题目就又被裁掉了。
-    expect(scroller).toContainElement(screen.getByText("第 20 题"));
-    expect(scroller).toHaveClass("h-full", "overflow-y-auto");
+    // 且容器本身被撑满的父级限住高度、允许纵向滚动——少了任何一样，题目又被裁掉。
+    expect(scroller).toContainElement(last);
+    expect(scroller).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
+    expect(scroller.parentElement).toHaveClass("h-full", "flex-col");
+  });
+
+  it("还没有题目时也给得出生成按钮", async () => {
+    // 空状态的文案一直写着「也可点右下角生成」，而这个面板从来没挂过那组按钮——
+    // 加载中和空题库都是提前 return 的，恰恰绕过了最需要它的那两个状态。
+    mockIpc.ai.getQuiz.mockResolvedValue(null);
+    renderQuizPanel();
+
+    expect(await screen.findByText(/还没有题目/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+
+    await waitFor(() =>
+      expect(mockIpc.ai.generate).toHaveBeenCalledWith("video-1", "quiz"),
+    );
+  });
+
+  it("有题目时按钮是「重新生成」，不是「生成」", async () => {
+    mockIpc.ai.getQuiz.mockResolvedValue(
+      JSON.stringify([{ type: "judge", stem: "地球是圆的", answer: true }]),
+    );
+    renderQuizPanel();
+
+    expect(await screen.findByRole("button", { name: "重新生成" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "生成" })).not.toBeInTheDocument();
+  });
+
+  it("生成失败要说出来，而不是按钮转一圈就没了", async () => {
+    mockIpc.ai.getQuiz.mockResolvedValue(null);
+    mockIpc.ai.generate.mockRejectedValueOnce(new Error("模型没配好"));
+    renderQuizPanel();
+
+    await screen.findByText(/还没有题目/);
+    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+
+    expect(await screen.findByText(/模型没配好/)).toBeInTheDocument();
   });
 });
