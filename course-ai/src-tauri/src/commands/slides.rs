@@ -200,6 +200,26 @@ pub enum OcrEvent {
 // 同时最多识别几页。云端是网络往返、本地是 CPU 进程，都不宜放开跑。
 const OCR_CONCURRENCY: usize = 3;
 
+/// 一次批量识别的结果。
+///
+/// 原来这里只返回「认出文字的页数」，于是**部分失败根本传不出去**：只要有一页成功，
+/// 函数就返回成功，界面弹一个绿色的「已识别 9 页」——哪怕后面 90 页全因为额度耗尽
+/// 失败了。失败页数当时是统计了的，只是没参与任何判断。
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OcrBatchOutcome {
+    /// 认出可用文字、已写库的页数。
+    pub recognized: usize,
+    /// 引擎执行失败的页数（识别成功但内容判为不可用的不算在内）。
+    pub failed: usize,
+    /// 本次需要处理的总页数。
+    pub total: usize,
+    /// 用户中途叫停。
+    pub canceled: bool,
+    /// 首个失败原因，用于在界面上说清「为什么失败」。
+    pub error: Option<String>,
+}
+
 /// 识别课件页上的文字的核心流程，供命令与导入后的自动流水线共用。
 /// 已有文字的页跳过，所以可以续跑；识别不像正常文本的结果整页丢弃，不写库。
 /// 引擎按设置选，默认走本地 OCR。返回本次新识别出文字的页数。
@@ -209,22 +229,26 @@ pub async fn ocr_slides_for_video(
     force: bool,
     cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     on_progress: &mut (dyn FnMut(usize, usize) + Send),
-) -> AppResult<usize> {
+) -> AppResult<OcrBatchOutcome> {
     let pages: Vec<(i64, String, Option<String>)> = sqlx::query_as(
         "SELECT id,image_path,ocr_text FROM slides WHERE video_id=? ORDER BY page_no",
     )
     .bind(video_id)
     .fetch_all(&state.db.pool)
     .await?;
-    // force 时重认全部（换了引擎想重跑），否则只认还没有文字的页。
+    // force 时重认全部（换了引擎想重跑），否则只认**从没认过**的页。
+    //
+    // 「认过了但没认出可用文字」现在记为空串，与还没认过的 NULL 分开。原来两者
+    // 在库里长得一模一样，后果是纯图页、封面页每次重跑都要再认一遍（云端 OCR 就是
+    // 重复付费），而且面板上「还有 N 页没认」永远清不掉。
     let todo: Vec<(i64, String)> = pages
         .into_iter()
-        .filter(|(_, _, text)| force || text.as_deref().map(str::trim).unwrap_or("").is_empty())
+        .filter(|(_, _, text)| needs_ocr(force, text.as_deref()))
         .map(|(id, path, _)| (id, path))
         .collect();
     let total = todo.len();
     if total == 0 {
-        return Ok(0);
+        return Ok(OcrBatchOutcome::default());
     }
     // 任务一开始就发 0/n，让前端立即进入明确的进度态，不必等首批 OCR 请求结束。
     on_progress(0, total);
@@ -242,8 +266,11 @@ pub async fn ocr_slides_for_video(
     let mut failed = 0;
     let mut first_error = None;
     let mut done = 0;
+    let mut canceled = false;
+    let mut hopeless = false;
     for chunk in todo.chunks(OCR_CONCURRENCY) {
         if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            canceled = true;
             break; // 已识别的页留在库里，下次续跑
         }
         let jobs = chunk.iter().map(|(id, path)| {
@@ -280,6 +307,11 @@ pub async fn ocr_slides_for_video(
                 Err(error) => {
                     failed += 1;
                     chunk_failed += 1;
+                    // 账号级的失败（鉴权、欠费、没开通服务）对剩下几十页是同一个结局。
+                    // 接着跑只是把同一个拒绝重复几十遍，云端引擎还每次都要走一趟网络。
+                    if error.is_permanent() {
+                        hopeless = true;
+                    }
                     if first_error.is_none() {
                         first_error = Some(error.to_string());
                     }
@@ -287,42 +319,63 @@ pub async fn ocr_slides_for_video(
                     continue;
                 }
             };
-            if !ocr::ocr_text_is_usable(&text) {
-                continue;
-            }
+            // 认过了就留个记号，哪怕认出来的是乱码：空串表示「这页认过，没有可用文字」。
+            // 不留记号的话它和「还没认过」在库里没有区别，下次重跑还要再认一遍。
+            let usable = ocr::ocr_text_is_usable(&text);
             sqlx::query("UPDATE slides SET ocr_text=? WHERE id=?")
-                .bind(text.trim())
+                .bind(if usable { text.trim() } else { "" })
                 .bind(id)
                 .execute(&state.db.pool)
                 .await?;
-            recognized += 1;
+            if usable {
+                recognized += 1;
+            }
         }
         on_progress(done, total);
 
-        // 同一批三页全部执行失败，通常表示引擎整体不可用（鉴权、网络或模型问题）。
-        // 首批就这样失败时立即把错误交给前端，避免几十页逐一静默重试。
-        if executed == 0 && chunk_failed == chunk.len() {
-            return finish_ocr_batch(recognized, executed, failed, done, total, first_error);
+        // 同一批三页全部执行失败且此前一次都没成功过，通常表示引擎整体不可用。
+        if hopeless || (executed == 0 && chunk_failed == chunk.len()) {
+            break;
         }
     }
-    finish_ocr_batch(recognized, executed, failed, done, total, first_error)
+    finish_ocr_batch(recognized, executed, failed, total, canceled, first_error)
 }
 
+/// 这一页要不要（重新）识别。
+///
+/// 三种状态必须分开：NULL 是还没认过，空串是认过了但没认出可用文字，非空是已有文字。
+/// 原来空串和 NULL 一样都会被重新排进队列，于是纯图页、封面页每次重跑都要再认一遍
+/// （云端 OCR 就是重复付费），面板上「还有 N 页没认」也永远清不掉。
+fn needs_ocr(force: bool, ocr_text: Option<&str>) -> bool {
+    force || ocr_text.is_none()
+}
+
+/// 把这一轮的计数收成结果。
+///
+/// 只有「一页都没跑成」才当作错误——那时候库里什么都没变，报错是唯一能说的话。
+/// 部分失败仍然算成功返回，但失败页数和原因跟着一起带出去：识别出来的页确实写进库了，
+/// 把它们连同已完成的工作一起判成失败同样是在撒谎。措辞交给界面。
 fn finish_ocr_batch(
     recognized: usize,
     executed: usize,
     failed: usize,
-    done: usize,
     total: usize,
+    canceled: bool,
     first_error: Option<String>,
-) -> AppResult<usize> {
+) -> AppResult<OcrBatchOutcome> {
     if executed == 0 && failed > 0 {
         return Err(AppError::Pipeline(format!(
-            "课件 OCR 无法执行：已处理 {done}/{total} 页，{failed} 页失败。首个错误：{}",
+            "课件 OCR 无法执行：{failed} 页全部失败。首个错误：{}",
             first_error.unwrap_or_else(|| "未知错误".into())
         )));
     }
-    Ok(recognized)
+    Ok(OcrBatchOutcome {
+        recognized,
+        failed,
+        total,
+        canceled,
+        error: first_error,
+    })
 }
 
 /// 识别课件页上的文字（板书/公式/定义常常写在片子上却没被念出来，字幕里根本不存在）。
@@ -334,7 +387,7 @@ pub async fn cmd_ocr_slides(
     video_id: String,
     request_id: Option<String>,
     force: Option<bool>,
-) -> AppResult<usize> {
+) -> AppResult<OcrBatchOutcome> {
     let cancel = match &request_id {
         Some(id) => state.register_cancel(id),
         None => std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -464,17 +517,57 @@ mod tests {
 
     #[test]
     fn batch_ocr_reports_when_the_engine_never_runs_successfully() {
-        let error = finish_ocr_batch(0, 0, 3, 3, 35, Some("鉴权失败".into()))
+        let error = finish_ocr_batch(0, 0, 3, 35, false, Some("鉴权失败".into()))
             .unwrap_err()
             .to_string();
 
-        assert!(error.contains("已处理 3/35 页"));
+        assert!(error.contains("3 页全部失败"));
         assert!(error.contains("鉴权失败"));
     }
 
     #[test]
     fn batch_ocr_can_finish_with_no_usable_text_after_successful_execution() {
-        assert_eq!(finish_ocr_batch(0, 3, 0, 3, 3, None).unwrap(), 0);
+        let outcome = finish_ocr_batch(0, 3, 0, 3, false, None).unwrap();
+        assert_eq!(outcome.recognized, 0);
+        assert_eq!(outcome.failed, 0);
+    }
+
+    #[test]
+    fn a_partial_failure_carries_the_failed_count_and_reason_out() {
+        // 这是原来漏掉的那一格：有页成功、有页失败。只要成功过一页，旧实现就返回
+        // 一个成功的页数，失败页数统计了却不参与任何判断——额度在第 10 页耗尽，
+        // 界面照样弹绿色的「已识别 9 页」，另外 90 页的失败无处可查。
+        let outcome = finish_ocr_batch(9, 9, 90, 99, false, Some("余额不足".into())).unwrap();
+
+        assert_eq!(outcome.recognized, 9, "认出来的页确实写进库了，不能算失败");
+        assert_eq!(outcome.failed, 90);
+        assert_eq!(outcome.error.as_deref(), Some("余额不足"));
+    }
+
+    #[test]
+    fn a_page_that_was_checked_and_yielded_nothing_is_not_queued_again() {
+        // 认过、判为不可用 → 空串。它和「还没认过」在库里长得几乎一样，
+        // 混为一谈的话，一张纯图页会在每一次重跑里被重新认一遍，永远认不出东西。
+        assert!(needs_ocr(false, None), "还没认过的要认");
+        assert!(!needs_ocr(false, Some("")), "认过但没文字的不该再排队");
+        assert!(
+            !needs_ocr(false, Some("贝叶斯定理")),
+            "已有文字的不该再排队"
+        );
+        // 换了引擎想重跑时全都要认，包括上次判为不可用的那些。
+        assert!(needs_ocr(true, Some("")));
+        assert!(needs_ocr(true, Some("贝叶斯定理")));
+    }
+
+    #[test]
+    fn cancelling_is_not_the_same_as_finishing() {
+        // 叫停走的也是成功路径，但界面要说得出「是你停的」——原来两者返回值一模一样，
+        // 按下停止弹的是「识别完成」。
+        let stopped = finish_ocr_batch(4, 4, 0, 40, true, None).unwrap();
+        assert!(stopped.canceled);
+        assert_eq!(stopped.recognized, 4);
+
+        assert!(!finish_ocr_batch(4, 4, 0, 4, false, None).unwrap().canceled);
     }
 
     #[tokio::test]

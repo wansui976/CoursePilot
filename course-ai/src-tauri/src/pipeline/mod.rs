@@ -802,8 +802,8 @@ async fn run_slides_stage(
     .await
     {
         // 取消时已认出的页留在库里，标成「已跳过」而不是完成——还有页没认，下次要接着跑。
-        Ok(count) if cancel.load(std::sync::atomic::Ordering::SeqCst) => {
-            let msg = format!("已取消，{count} 页已认出");
+        Ok(outcome) if outcome.canceled || cancel.load(std::sync::atomic::Ordering::SeqCst) => {
+            let msg = format!("已取消，{} 页已认出", outcome.recognized);
             let _ = jobs::cancel(db, &ocr_job.id, &msg).await;
             emit_stage(
                 app,
@@ -815,8 +815,28 @@ async fn run_slides_stage(
                 Some(&msg),
             );
         }
-        Ok(count) => {
-            let msg = format!("{count}/{pages} 页认出文字");
+        // 有页失败但不是全军覆没：识别出来的确实写进库了，这一步算完成，
+        // 但失败必须写进步骤消息里——不然界面只报「认出 9 页」，另外 90 页的失败无处可查。
+        Ok(outcome) if outcome.failed > 0 => {
+            let msg = format!(
+                "{}/{pages} 页认出文字，{} 页失败：{}",
+                outcome.recognized,
+                outcome.failed,
+                outcome.error.as_deref().unwrap_or("未知错误")
+            );
+            let _ = jobs::finish(db, &ocr_job.id).await;
+            emit_stage(
+                app,
+                video_id,
+                &ocr_job.id,
+                "slides_ocr",
+                "done",
+                1.0,
+                Some(&msg),
+            );
+        }
+        Ok(outcome) => {
+            let msg = format!("{}/{pages} 页认出文字", outcome.recognized);
             let _ = jobs::finish(db, &ocr_job.id).await;
             emit_stage(
                 app,
