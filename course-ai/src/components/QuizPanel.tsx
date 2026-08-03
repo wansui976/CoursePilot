@@ -5,8 +5,14 @@ import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import type { QuizQuestion } from "@/lib/types";
+import { ErrorNote } from "@/components/ui/ErrorNote";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MathText } from "./MathText";
+import { PanelActions } from "./PanelActions";
+import {
+  invalidateStaleArtifacts,
+  useStaleArtifacts,
+} from "@/lib/useStaleArtifacts";
 
 function answerText(answer: QuizQuestion["answer"]): string {
   if (Array.isArray(answer)) return answer.join("、");
@@ -68,6 +74,15 @@ export function QuizPanel({ videoId }: { videoId: string }) {
       queryClient.invalidateQueries({ queryKey: ["srs-count-due"] }),
   });
 
+  const stale = useStaleArtifacts(videoId);
+  const generate = useMutation({
+    mutationFn: () => ipc.ai.generate(videoId, "quiz"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["quiz", videoId] });
+      invalidateStaleArtifacts(queryClient, videoId);
+    },
+  });
+
   const questions = useMemo<QuizQuestion[]>(() => {
     if (!raw) return [];
     try {
@@ -83,92 +98,102 @@ export function QuizPanel({ videoId }: { videoId: string }) {
     }
   }, [raw]);
 
-  if (isLoading) {
-    return (
-      <div className="space-y-4 p-4" role="status" aria-label="加载中…">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <Skeleton key={i} className="h-24 w-full" />
-        ))}
-      </div>
-    );
-  }
-  if (questions.length === 0) {
-    return (
-      <p className="p-4 text-sm text-[var(--text-faint)]">
-        还没有题目，字幕就绪后会自动生成，也可点右下角生成。
-      </p>
-    );
-  }
-
+  // 加载中和空题库原先是提前 return 的，绕过了整个外壳——于是「点右下角生成」
+  // 承诺的那个按钮，恰恰在最需要它的空状态下不存在。三种状态共用一个外壳。
   return (
-    // 外层撑满、内层自己滚：标签页容器是 overflow-hidden 的，面板不自带滚动区，
-    // 题目一多就被直接裁掉——不是滚不动，是压根没地方滚。
-    // 同一套写法文稿、笔记、章节都在用。
-    <div
-      aria-label="练习内容滚动区"
-      className="h-full min-h-0 space-y-4 overflow-y-auto p-4"
-    >
-      <button
-        onClick={() => addToReview.mutate()}
-        disabled={addToReview.isPending}
-        className="ca-touch-44 inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-60"
+    <div className="relative flex h-full min-h-0 flex-col">
+      {/* 内层自己滚：标签页容器是 overflow-hidden 的，面板不自带滚动区，题目一多
+          就被直接裁掉——不是滚不动，是压根没地方滚。文稿、笔记、章节都是这套写法。
+          pb-12 给右下角那组悬浮按钮让位，免得压住最后一题。 */}
+      <div
+        aria-label="练习内容滚动区"
+        className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 pb-12"
       >
-        {addToReview.isSuccess ? (
-          <>
-            <Check className="h-3.5 w-3.5 text-[var(--status-ok)]" />
-            已加入复习
-          </>
+        {generate.isError && (
+          <ErrorNote error={generate.error} onRetry={() => generate.mutate()} />
+        )}
+        {isLoading ? (
+          <div className="space-y-4" role="status" aria-label="加载中…">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-24 w-full" />
+            ))}
+          </div>
+        ) : questions.length === 0 ? (
+          <p className="text-sm text-[var(--text-faint)]">
+            还没有题目，字幕就绪后会自动生成，也可点右下角生成。
+          </p>
         ) : (
           <>
-            <Brain className="h-3.5 w-3.5" />
-            {addToReview.isPending ? "加入中…" : "加入每日复习"}
+            <button
+              onClick={() => addToReview.mutate()}
+              disabled={addToReview.isPending}
+              className="ca-touch-44 inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-60"
+            >
+              {addToReview.isSuccess ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-[var(--status-ok)]" />
+                  已加入复习
+                </>
+              ) : (
+                <>
+                  <Brain className="h-3.5 w-3.5" />
+                  {addToReview.isPending ? "加入中…" : "加入每日复习"}
+                </>
+              )}
+            </button>
+            {questions.map((q, i) => (
+              <div key={i} className="rounded border border-[var(--border-subtle)] p-3">
+                <div className="mb-2 text-sm">
+                  <span className="mr-1 text-[var(--text-faint)]">{i + 1}.</span>
+                  <MathText text={q.stem} />
+                </div>
+                {q.options && (
+                  <ul className="mb-2 space-y-1 text-sm text-[var(--text-normal)]">
+                    {q.options.map((opt, j) => (
+                      <li key={j}>
+                        {String.fromCharCode(65 + j)}. <MathText text={opt} />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <button
+                  className="ca-touch-44 inline-flex items-center text-xs text-primary hover:underline"
+                  onClick={() => setRevealed((r) => ({ ...r, [i]: !r[i] }))}
+                >
+                  {revealed[i] ? "隐藏答案" : "显示答案"}
+                </button>
+                {revealed[i] && (
+                  <div className="mt-2 space-y-1 text-sm">
+                    {/* 答案色走主题 token：深浅主题对比都达标，不硬编码 tailwind 绿。 */}
+                    <div className="text-[var(--status-ok)]">
+                      答案：<MathText text={answerText(q.answer)} />
+                    </div>
+                    {q.explanation && (
+                      <div className="text-[var(--text-muted)]">
+                        <MathText text={q.explanation} />
+                      </div>
+                    )}
+                    {typeof q.ref_ms === "number" && (
+                      <button
+                        className="ca-touch-44 inline-flex items-center text-xs text-primary"
+                        onClick={() => requestSeek(q.ref_ms!)}
+                      >
+                        ▶ 跳到 {formatMs(q.ref_ms)}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
           </>
         )}
-      </button>
-      {questions.map((q, i) => (
-        <div key={i} className="rounded border border-[var(--border-subtle)] p-3">
-          <div className="mb-2 text-sm">
-            <span className="mr-1 text-[var(--text-faint)]">{i + 1}.</span>
-            <MathText text={q.stem} />
-          </div>
-          {q.options && (
-            <ul className="mb-2 space-y-1 text-sm text-[var(--text-normal)]">
-              {q.options.map((opt, j) => (
-                <li key={j}>
-                  {String.fromCharCode(65 + j)}. <MathText text={opt} />
-                </li>
-              ))}
-            </ul>
-          )}
-          <button
-            className="ca-touch-44 inline-flex items-center text-xs text-primary hover:underline"
-            onClick={() => setRevealed((r) => ({ ...r, [i]: !r[i] }))}
-          >
-            {revealed[i] ? "隐藏答案" : "显示答案"}
-          </button>
-          {revealed[i] && (
-            <div className="mt-2 space-y-1 text-sm">
-              {/* 答案色走主题 token：深浅主题对比都达标，不硬编码 tailwind 绿。 */}
-              <div className="text-[var(--status-ok)]">
-                答案：<MathText text={answerText(q.answer)} />
-              </div>
-              {q.explanation && (
-                <div className="text-[var(--text-muted)]">
-                  <MathText text={q.explanation} />
-                </div>
-              )}
-              {typeof q.ref_ms === "number" && (
-                <button
-                  className="ca-touch-44 inline-flex items-center text-xs text-primary"
-                  onClick={() => requestSeek(q.ref_ms!)}
-                >
-                  ▶ 跳到 {formatMs(q.ref_ms)}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
+      </div>
+      <PanelActions
+        onRegenerate={() => generate.mutate()}
+        regenerating={generate.isPending}
+        hasContent={questions.length > 0}
+        stale={stale.has("quiz")}
+      />
     </div>
   );
 }
