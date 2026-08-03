@@ -98,27 +98,40 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   });
 
   // 加载已有笔记：content_json（"{...}"）或 content_md（markdown）
+  //
+  // 三处 setContent 都必须显式 emitUpdate:false。**装载不是编辑**，而 tiptap 3 的
+  // setContent 默认会发 update 事件（2.x 默认不发，升级时这个默认值反过来了）。
+  // 不关掉的话，光是打开笔记标签就会走一遍去抖自动保存：把刚读出来的内容原样写回、
+  // 盖上「用户编辑于此刻」的戳、再推一条云同步——内容一个字都没变。
+  // 更糟的是下面那条清空分支：查询失败时 notesContent 是 undefined，编辑器被清空、
+  // 顺手把一份空文档存回库里，用户的笔记就没了。
   useEffect(() => {
     // 还在查库时什么都不动，免得先闪一下空编辑器。
     if (!editor || notesQuery.isPending) return;
+    // 查询失败时 data 是 undefined，和「这个视频没有笔记」长得一模一样。此时绝不能
+    // 按空笔记处理：编辑器一清空就会被当成用户把笔记删了。
+    if (notesQuery.isError) return;
     if (notesContent == null || notesContent.trim() === "") {
       // 这个视频还没有笔记 —— 必须把编辑器清空。面板在标签之间是保活的（不重建），
       // 早退就会继续显示上一个视频的笔记；用户一旦在上面接着打字，那份内容会被
       // 存到**新视频**名下，等于把别人的笔记搬了家。
-      editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
+      editor.commands.setContent(
+        { type: "doc", content: [{ type: "paragraph" }] },
+        { emitUpdate: false },
+      );
       return;
     }
     try {
       const parsed = JSON.parse(notesContent);
       if (parsed && parsed.type === "doc") {
-        editor.commands.setContent(parsed);
+        editor.commands.setContent(parsed, { emitUpdate: false });
         return;
       }
     } catch {
       // 非 JSON → 当作 markdown
     }
-    editor.commands.setContent(markdownToTiptap(notesContent));
-  }, [editor, notesContent, notesQuery.isPending]);
+    editor.commands.setContent(markdownToTiptap(notesContent), { emitUpdate: false });
+  }, [editor, notesContent, notesQuery.isError, notesQuery.isPending]);
 
   // 切走视频 / 卸载前：若去抖窗口内还有未落库的编辑，立刻刷盘，避免丢失。
   // cleanup 在 videoId 变化时以「旧 videoId + 旧内容」运行，正好把上一条编辑存回原视频。

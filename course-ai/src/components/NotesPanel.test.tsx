@@ -19,12 +19,26 @@ const { mockIpc, editorCapture } = vi.hoisted(() => ({
       mindmap: vi.fn(),
     },
   },
-  editorCapture: {
-    onUpdate: undefined as undefined | ((p: { editor: unknown }) => void),
+  editorCapture: (() => {
     // 稳定的 spy：mock 的 useEditor 每次渲染都会被调用，每次新建一个 vi.fn()
     // 就断言不到累计调用。
-    setContent: vi.fn(),
-  },
+    //
+    // 它还要和真的 tiptap 3 一致：setContent **默认会发 update 事件**（2.x 是默认
+    // 不发，升级时默认值反过来了）。原来这个替身是个什么都不做的空函数，于是
+    // 「装载内容顺手触发了一次自动保存」这类问题在测试里根本看不见——替身把被测的
+    // 那条因果关系整个抹掉了。
+    const capture: {
+      onUpdate?: (p: { editor: unknown }) => void;
+      setContent: ReturnType<typeof vi.fn>;
+    } = { onUpdate: undefined, setContent: vi.fn() };
+    capture.setContent = vi.fn((_content: unknown, options?: { emitUpdate?: boolean }) => {
+      if (options?.emitUpdate === false) return;
+      capture.onUpdate?.({
+        editor: { getJSON: () => ({ type: "doc", content: [{ type: "paragraph" }] }) },
+      });
+    });
+    return capture;
+  })(),
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
@@ -195,6 +209,38 @@ describe("NotesPanel", () => {
     expect(mockIpc.ai.saveNotes).toHaveBeenCalledWith("video-1", expect.any(String));
   });
 
+  it("打开笔记不会把它原样写回一遍", async () => {
+    // tiptap 3 的 setContent 默认会发 update 事件，于是「装载」被当成了「编辑」：
+    // 光是打开笔记标签就会触发一次去抖自动保存，把刚读出来的内容原样写回、盖上
+    // 「用户编辑于此刻」的戳、再推一条云同步——内容一个字都没变。
+    mockIpc.ai.getNotes.mockResolvedValue(
+      JSON.stringify({
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "我写的笔记" }] }],
+      }),
+    );
+    renderNotesPanel("video-load", "load-no-write");
+    await screen.findByText("笔记正文");
+
+    // 去抖窗口 800ms，等过去再确认确实一次都没写。
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(mockIpc.ai.saveNotes).not.toHaveBeenCalled();
+  });
+
+  it("读不出笔记时绝不把空文档写回去", async () => {
+    // 查询失败时 data 是 undefined，和「这个视频没有笔记」长得一模一样。按空笔记处理
+    // 就会清空编辑器，而清空又被当成用户的编辑存回库里——用户的笔记就这么没了。
+    mockIpc.ai.getNotes.mockRejectedValue(new Error("数据库忙"));
+    renderNotesPanel("video-read-error", "read-error");
+
+    // 必须等到查询真的进入失败态再断言。只等「getNotes 被调用过」的话，断言会跑在
+    // 拒绝被处理之前，那时 setContent 本来就还没被调用——测试通过，但什么也没验证。
+    await screen.findByRole("alert");
+    expect(editorCapture.setContent).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(mockIpc.ai.saveNotes).not.toHaveBeenCalled();
+  });
+
   it("shows autosave failures and retries the retained document", async () => {
     // Keep the query pending so the intentionally minimal editor mock is not recreated mid-debounce.
     mockIpc.ai.getNotes.mockReturnValue(new Promise(() => {}));
@@ -258,6 +304,7 @@ describe("NotesPanel", () => {
     await waitFor(() =>
       expect(editorCapture.setContent).toHaveBeenCalledWith(
         expect.objectContaining({ type: "doc" }),
+        { emitUpdate: false },
       ),
     );
     editorCapture.setContent.mockClear();
@@ -269,10 +316,11 @@ describe("NotesPanel", () => {
     );
 
     await waitFor(() =>
-      expect(editorCapture.setContent).toHaveBeenCalledWith({
-        type: "doc",
-        content: [{ type: "paragraph" }],
-      }),
+      expect(editorCapture.setContent).toHaveBeenCalledWith(
+        { type: "doc", content: [{ type: "paragraph" }] },
+        // 装载不是编辑：清空编辑器不能触发一次把空文档写回库的自动保存。
+        { emitUpdate: false },
+      ),
     );
   });
 });
