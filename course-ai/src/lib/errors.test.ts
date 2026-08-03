@@ -23,6 +23,18 @@ describe("humanizeError", () => {
     expect(humanizeError("未配置大模型")).toContain("API Key");
   });
 
+  it("tells 余额不足 apart from 密钥无效", () => {
+    // 真实遇到的那一条。密钥是对的，就是没钱了——让人去「检查 API Key」是白跑一趟。
+    const raw =
+      '大模型账户余额不足：请充值或更换 API Key 后重试。（OpenAI 402 Payment Required: {"error":{"message":"Insufficient Balance"}}）';
+    expect(humanizeError(raw)).toContain("余额不足");
+    // 后端给的提示里就带着「API Key」四个字，顺序错了就会被下面那条鉴权规则截胡。
+    expect(humanizeError(raw)).not.toContain("未配置或密钥无效");
+    // 没经过后端提示的原始应答也要认得。
+    expect(humanizeError("OpenAI 402: Insufficient Balance")).toContain("余额不足");
+    expect(humanizeError("You exceeded your current quota")).toContain("余额不足");
+  });
+
   it("maps network and rate-limit errors", () => {
     expect(humanizeError("fetch failed: dns")).toContain("网络");
     expect(humanizeError("rate limit exceeded")).toContain("频繁");

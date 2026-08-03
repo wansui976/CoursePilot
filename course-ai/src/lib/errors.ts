@@ -32,6 +32,18 @@ export function humanizeError(error: unknown): string {
     return "服务器拒绝了请求（HTTP 412）：登录态可能已失效，请重新导入 cookies.txt 后重试。";
   }
 
+  // 余额耗尽（402）和「密钥无效」是两回事：密钥是对的，就是没钱了，让人去检查
+  // 设置只会白跑一趟。必须排在下面那条之前——后端给的提示里就带着「API Key」四个字。
+  if (
+    s.includes("402") ||
+    s.includes("payment required") ||
+    s.includes("insufficient balance") ||
+    s.includes("insufficient_quota") ||
+    s.includes("exceeded your current quota") ||
+    s.includes("余额")
+  ) {
+    return "大模型账户余额不足：请充值或更换 API Key 后重试。";
+  }
   if (
     s.includes("api key") ||
     s.includes("apikey") ||
