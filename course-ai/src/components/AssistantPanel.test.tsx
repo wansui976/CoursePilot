@@ -118,7 +118,7 @@ describe("AssistantPanel", () => {
     expect(useAssistantUi.getState().open).toBe(true);
   });
 
-  it("球沿边缘拖动只调整位置，不会被随后的 click 误打开", () => {
+  it("球沿边缘拖动只调整位置，不会被随后的 click 误打开", async () => {
     useAssistantUi.setState({ open: false, side: "left" });
     renderPanel();
     const dockStrip = screen.getByRole("button", { name: "打开助手" });
@@ -132,12 +132,47 @@ describe("AssistantPanel", () => {
     });
     fireEvent.pointerMove(window, { pointerId: 4, clientX: 22, clientY: 530 });
     fireEvent.pointerUp(window, { pointerId: 4, clientX: 22, clientY: 530 });
+    // 真实浏览器里 pointerup 和 click 之间隔着一次事件循环。原来的写法把两者排在同一个
+    // 同步块里，任何「靠定时器复位」的压制都会显得正确——而线上那一下确实会误打开。
+    await new Promise((resolve) => setTimeout(resolve, 0));
     fireEvent.click(dockStrip);
 
     // 球比原来的窄条矮 56px，能停到更靠下的位置，所以下界跟着降。
     expect(dockStrip).toHaveStyle({ top: "538px" });
     expect(screen.getByLabelText("对助手说")).not.toBeVisible();
     expect(useAssistantUi.getState().open).toBe(false);
+  });
+
+  it("拖动后即使没有收到 click，下一次真点击照样能打开", async () => {
+    // 松手时指针可能已经不在球上，那一下 click 根本不会来。压制标志若留着不清，
+    // 会把后面那次真正的点击一起吃掉——面板从此点不开。
+    useAssistantUi.setState({ open: false, side: "left" });
+    renderPanel();
+    const ball = screen.getByRole("button", { name: "打开助手" });
+
+    fireEvent.pointerDown(ball, {
+      pointerId: 7,
+      pointerType: "mouse",
+      button: 0,
+      clientX: 22,
+      clientY: 680,
+    });
+    fireEvent.pointerMove(window, { pointerId: 7, clientX: 22, clientY: 540 });
+    fireEvent.pointerUp(window, { pointerId: 7, clientX: 22, clientY: 540 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // 这次没有 click。用户重新按下再抬起，是一次干净的点击。
+    fireEvent.pointerDown(ball, {
+      pointerId: 8,
+      pointerType: "mouse",
+      button: 0,
+      clientX: 22,
+      clientY: 540,
+    });
+    fireEvent.pointerUp(window, { pointerId: 8, clientX: 22, clientY: 540 });
+    fireEvent.click(ball);
+
+    expect(useAssistantUi.getState().open).toBe(true);
   });
 
   it("删除空白对话里的示例注脚", () => {

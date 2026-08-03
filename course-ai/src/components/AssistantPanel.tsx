@@ -455,10 +455,16 @@ export function AssistantPanel({
       setDragging(false);
       setSnapSide(null);
       if (completed?.source === "dock" && completed.moved) {
+        // 拖完浏览器还会补一个 click，得把它吃掉。
+        //
+        // 原来是置位后用 setTimeout(0) 复位，指望「click 比定时器先到」。真实浏览器里
+        // pointerup 与 click 之间隔着一次事件循环，定时器完全可能插在中间先跑——
+        // 于是标志被提前清掉，那一下拖动结束就顺手把面板打开了。
+        // 测试没抓到是因为它把 pointerUp 和 click 排在同一个同步块里，定时器根本没机会跑。
+        //
+        // 改成由 click 自己消费；万一这次没有 click（比如松手时指针已经离开按钮），
+        // 下一次 pointerdown 会清掉它，不会误伤后面那次真正的点击。
         suppressLauncherClickRef.current = true;
-        window.setTimeout(() => {
-          suppressLauncherClickRef.current = false;
-        }, 0);
       }
       if (cancelled && completed?.source === "dock" && completed.detached) {
         setOpen(false);
@@ -520,6 +526,9 @@ export function AssistantPanel({
 
   function beginDockDrag(event: ReactPointerEvent<HTMLButtonElement>) {
     if (mobile || (event.pointerType === "mouse" && event.button !== 0)) return;
+    // 上一次拖动如果没等到 click（松手时指针已经不在球上），标志会留着。
+    // 每次按下先清一次，保证它只压制紧随其后的那一下。
+    suppressLauncherClickRef.current = false;
 
     const viewport = viewportSize();
     const panel = measurePanel();
@@ -763,7 +772,11 @@ export function AssistantPanel({
         aria-label="打开助手"
         data-dock-side={mobile ? undefined : side}
         onClick={() => {
-          if (suppressLauncherClickRef.current) return;
+          if (suppressLauncherClickRef.current) {
+            // 用掉就清：这一下是拖动的尾巴，后面那次才是真点击。
+            suppressLauncherClickRef.current = false;
+            return;
+          }
           openFromDock();
         }}
         onPointerDown={mobile ? undefined : beginDockDrag}
