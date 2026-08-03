@@ -105,6 +105,11 @@ pub struct ChatRequest {
     /// 这一轮允许模型调用的工具。空表示不带——请求体里连字段都不出现，
     /// 所以现有那些任务的请求形状一个字节都没变。
     pub tools: Vec<ToolSpec>,
+    /// 这次调用属于哪一档，**只用于用量统计**，不进请求体。
+    ///
+    /// 按档分开才看得出问题：整体命中率 40% 说明不了什么，「笔记这一档一次都没命中」
+    /// 才是能动手的结论。
+    pub label: &'static str,
 }
 
 impl ChatRequest {
@@ -117,6 +122,7 @@ impl ChatRequest {
             messages,
             temperature: 0.2,
             tools: Vec::new(),
+            label: "other",
         }
     }
 }
@@ -395,6 +401,26 @@ pub struct ChatResponse {
     pub content: String,
     /// 模型这一轮要求调的工具。非空时 `content` 通常是空的——它没在说话，在派活。
     pub tool_calls: Vec<ToolCall>,
+    /// 服务端报的 token 用量。端点不报就是 None。
+    pub usage: Option<Usage>,
+}
+
+/// 一次调用的 token 用量。
+///
+/// 各家字段名不一样，这里收敛成一套：
+/// - OpenAI 的命中缓存量在 `usage.prompt_tokens_details.cached_tokens`；
+/// - DeepSeek 在 `usage.prompt_cache_hit_tokens`。
+///
+/// `reasoning_tokens` 单独拿出来，是因为推理模型的思考过程**按输出计费**，而我们
+/// 只读正式回答、把它整个丢掉——那部分钱花得有没有道理，得先看得见才谈得上。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct Usage {
+    pub prompt_tokens: i64,
+    /// 输入里命中前缀缓存的部分。
+    pub cached_tokens: i64,
+    pub completion_tokens: i64,
+    /// 计费在输出里、但我们并不使用的思考 token。
+    pub reasoning_tokens: i64,
 }
 
 /// 统一的 LLM 通道。用 enum 而非 trait，避免引入 async-trait 依赖，
@@ -433,10 +459,19 @@ impl Provider {
                 base_url,
                 api_key,
                 client,
-            } => openai::complete(base_url, api_key, client, req).await,
+            } => {
+                let response = openai::complete(base_url, api_key, client, req).await?;
+                // 端点报了用量才记。没报就什么都不记——把「没报」当成「零消耗」
+                // 会让命中率算出来是假的。
+                if let Some(usage) = &response.usage {
+                    crate::usage_log::record(req.label, &req.model, usage);
+                }
+                Ok(response)
+            }
             Provider::Mock { canned } => Ok(ChatResponse {
                 content: canned.clone(),
                 tool_calls: Vec::new(),
+                usage: None,
             }),
             Provider::Scripted { steps } => {
                 let mut steps = steps.lock().unwrap_or_else(|e| e.into_inner());
@@ -570,6 +605,7 @@ mod tests {
             messages: vec![ChatMessage::user("hi")],
             temperature: 0.2,
             tools: Vec::new(),
+            label: "test",
         };
         assert_eq!(provider.complete(&req).await.unwrap().content, "hello");
     }
@@ -582,6 +618,7 @@ mod tests {
             messages: vec![],
             temperature: 0.2,
             tools: Vec::new(),
+            label: "test",
         }
     }
 

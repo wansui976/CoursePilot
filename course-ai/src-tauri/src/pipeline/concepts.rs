@@ -713,6 +713,7 @@ fn knowledge_summary_request(model: &str, catalog: &KnowledgeCatalog) -> AppResu
         )],
         temperature: 0.1,
         tools: Vec::new(),
+        label: "course_outline",
     })
 }
 
@@ -1293,6 +1294,7 @@ pub async fn course_chat_stream(
         messages: build_chat_messages(history, &turn),
         temperature: 0.3,
         tools: Vec::new(),
+        label: "course_chat",
     };
     let answer = provider
         .complete_stream(&req, cancel, &mut |piece| match piece {
@@ -1386,6 +1388,7 @@ fn concept_explanation_request(model: &str, name: &str, context_text: &str) -> C
         )],
         temperature: 0.3,
         tools: Vec::new(),
+        label: "concept_explain",
     }
 }
 
@@ -1507,6 +1510,7 @@ fn concept_canonicalization_request(model: &str, names: &[String]) -> AppResult<
         )],
         temperature: 0.1,
         tools: Vec::new(),
+        label: "concept_canonical",
     })
 }
 
@@ -1620,6 +1624,7 @@ pub async fn analyze_course_concepts(
                 messages: vec![ChatMessage::user("抽取本段知识点。")],
                 temperature: 0.1,
                 tools: Vec::new(),
+                label: "concept_extract",
             };
             let extracted = match provider.complete(&req).await {
                 Ok(response) => parse_concepts_json(&response.content),

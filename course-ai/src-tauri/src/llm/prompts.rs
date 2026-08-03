@@ -1,6 +1,12 @@
 use crate::llm::{ChatMessage, ChatRequest};
 
-fn base(model: &str, system: &str, transcript: &str, user: &str) -> ChatRequest {
+fn base(
+    label: &'static str,
+    model: &str,
+    system: &str,
+    transcript: &str,
+    user: &str,
+) -> ChatRequest {
     ChatRequest {
         model: model.to_string(),
         system: Some(system.to_string()),
@@ -14,11 +20,13 @@ fn base(model: &str, system: &str, transcript: &str, user: &str) -> ChatRequest 
         messages: vec![ChatMessage::user(user)],
         temperature: 0.3,
         tools: Vec::new(),
+        label,
     }
 }
 
 pub fn chapters_request(model: &str, transcript: &str) -> ChatRequest {
     base(
+        "chapters",
         model,
         "你是课程结构分析助手。只输出 JSON 数组，不要任何解释或代码围栏。",
         transcript,
@@ -35,6 +43,7 @@ pub fn chapters_request(model: &str, transcript: &str) -> ChatRequest {
 
 pub fn notes_request(model: &str, transcript: &str) -> ChatRequest {
     base(
+        "notes",
         model,
         "你是应试类网课的笔记助手。输出 Markdown，不要代码围栏。\
          写给「课后复习 + 考前速查」的人看：他没时间重看视频，要能直接拿去用。\
@@ -57,6 +66,7 @@ pub fn notes_request(model: &str, transcript: &str) -> ChatRequest {
 
 pub fn quiz_request(model: &str, transcript: &str) -> ChatRequest {
     base(
+        "quiz",
         model,
         "你是应试类网课的出题助手。只输出 JSON 数组，不要解释或代码围栏。",
         transcript,
@@ -76,6 +86,7 @@ pub fn quiz_request(model: &str, transcript: &str) -> ChatRequest {
 
 pub fn mindmap_request(model: &str, transcript: &str) -> ChatRequest {
     base(
+        "mindmap",
         model,
         "你是脑图助手。只输出 Markmap 兼容的 Markdown（多级 # 标题 + - 列表），不要代码围栏。",
         transcript,
@@ -89,6 +100,7 @@ pub fn mindmap_request(model: &str, transcript: &str) -> ChatRequest {
 
 pub fn summary_request(model: &str, transcript: &str) -> ChatRequest {
     base(
+        "summary",
         model,
         "你是课程摘要助手。输出简洁的 Markdown，不要代码围栏。",
         transcript,
@@ -121,6 +133,7 @@ pub fn digest_request(model: &str, chunk: &str) -> ChatRequest {
         ))],
         temperature: 0.2,
         tools: Vec::new(),
+        label: "digest",
     }
 }
 
@@ -150,6 +163,7 @@ pub fn query_expansion_request(model: &str, query: &str) -> ChatRequest {
         ))],
         temperature: 0.3,
         tools: Vec::new(),
+        label: "query_expansion",
     }
 }
 
@@ -197,6 +211,7 @@ pub fn transcript_correction_request(model: &str, batch_json: &str) -> ChatReque
         ))],
         temperature: 0.1,
         tools: Vec::new(),
+        label: "correction",
     }
 }
 

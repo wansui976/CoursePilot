@@ -189,6 +189,24 @@ pub fn parse_openai_response(v: &Value) -> AppResult<ChatResponse> {
     Ok(ChatResponse {
         content: content.unwrap_or_default().to_string(),
         tool_calls,
+        usage: parse_usage(v),
+    })
+}
+
+/// 从响应里取 token 用量。各家字段名不一样，认得出哪个算哪个；一个都没有就返回 None
+/// ——「端点没报」和「消耗为零」必须分开，否则命中率会被算成假的。
+pub fn parse_usage(v: &Value) -> Option<crate::llm::Usage> {
+    let usage = v.get("usage")?;
+    let num = |value: Option<&Value>| value.and_then(Value::as_i64).unwrap_or(0);
+    let nested =
+        |group: &str, field: &str| num(usage.get(group).and_then(|inner| inner.get(field)));
+    Some(crate::llm::Usage {
+        prompt_tokens: num(usage.get("prompt_tokens")),
+        // DeepSeek 报 prompt_cache_hit_tokens，OpenAI 报 prompt_tokens_details.cached_tokens。
+        cached_tokens: num(usage.get("prompt_cache_hit_tokens"))
+            .max(nested("prompt_tokens_details", "cached_tokens")),
+        completion_tokens: num(usage.get("completion_tokens")),
+        reasoning_tokens: nested("completion_tokens_details", "reasoning_tokens"),
     })
 }
 
@@ -836,6 +854,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn usage_is_read_from_whichever_field_the_endpoint_uses() {
+        // DeepSeek 报 prompt_cache_hit_tokens。
+        let deepseek = serde_json::json!({
+            "usage": {"prompt_tokens": 1200, "prompt_cache_hit_tokens": 1088,
+                      "prompt_cache_miss_tokens": 112, "completion_tokens": 260}
+        });
+        let usage = parse_usage(&deepseek).unwrap();
+        assert_eq!(usage.prompt_tokens, 1200);
+        assert_eq!(usage.cached_tokens, 1088);
+        assert_eq!(usage.completion_tokens, 260);
+
+        // OpenAI 把它藏在 prompt_tokens_details 里，思考 token 也另有一处。
+        let openai = serde_json::json!({
+            "usage": {"prompt_tokens": 1200, "completion_tokens": 900,
+                      "prompt_tokens_details": {"cached_tokens": 1024},
+                      "completion_tokens_details": {"reasoning_tokens": 700}}
+        });
+        let usage = parse_usage(&openai).unwrap();
+        assert_eq!(usage.cached_tokens, 1024);
+        // 思考过程按输出计费，而我们只读正式回答、把它丢掉——这笔钱得单独看得见。
+        assert_eq!(usage.reasoning_tokens, 700);
+    }
+
+    #[test]
+    fn an_endpoint_that_reports_nothing_is_not_counted_as_zero() {
+        // 「没报用量」和「消耗为零」必须分开：混为一谈的话，一个不报用量的端点会把
+        // 命中率稀释成一串漂亮的假数字。
+        assert!(parse_usage(&serde_json::json!({"choices": []})).is_none());
+    }
+
     fn sample_req() -> ChatRequest {
         ChatRequest {
             model: "gpt-4o".into(),
@@ -844,6 +893,7 @@ mod tests {
             messages: vec![ChatMessage::user("summarize")],
             temperature: 0.3,
             tools: Vec::new(),
+            label: "test",
         }
     }
 

@@ -12,6 +12,7 @@ pub mod pipeline;
 pub mod sidecar;
 pub mod storage;
 pub mod sync;
+mod usage_log;
 
 use crate::commands::ai::{
     cmd_generate_ai, cmd_get_chapters, cmd_get_llm_profiles, cmd_get_mindmap, cmd_get_notes,
@@ -74,6 +75,7 @@ use crate::pipeline::{
     cmd_cancel_processing, cmd_list_processing_videos, cmd_process_video, cmd_recorrect_transcript,
     ProcessingTasks,
 };
+use crate::usage_log::{cmd_clear_llm_usage, cmd_llm_usage};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -164,6 +166,8 @@ pub fn run() {
             cmd_has_secret,
             cmd_get_dev_logs,
             cmd_clear_dev_logs,
+            cmd_llm_usage,
+            cmd_clear_llm_usage,
             cmd_list_whisper_models,
             cmd_download_whisper_model,
             cmd_list_jobs,

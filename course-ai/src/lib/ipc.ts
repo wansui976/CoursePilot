@@ -14,6 +14,7 @@ import type {
   DevLogEntry,
   Job,
   LlmProfile,
+  LlmUsageTotals,
   PlaylistInfo,
   ProbeResult,
   RagAnswer,
@@ -458,6 +459,9 @@ export const ipc = {
   dev: {
     logs: (): Promise<DevLogEntry[]> => invoke("cmd_get_dev_logs"),
     clearLogs: (): Promise<void> => invoke("cmd_clear_dev_logs"),
+    // 各档 LLM 调用的累计 token 用量（进程内统计，重启即清空）。
+    llmUsage: (): Promise<LlmUsageTotals[]> => invoke("cmd_llm_usage"),
+    clearLlmUsage: (): Promise<void> => invoke("cmd_clear_llm_usage"),
   },
   // 发一条系统桌面通知（学习提醒）。触发时机与去重由前端决定。
   notify: (title: string, body: string): Promise<void> =>
