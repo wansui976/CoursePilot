@@ -622,7 +622,10 @@ pub async fn extract_slides(
         })
         .collect();
 
+    let total = planned.len();
     let mut done = 0;
+    let mut captured: Vec<SlideFrame> = Vec::with_capacity(total);
+    let mut first_error: Option<AppError> = None;
     for chunk in planned.chunks(CAPTURE_CONCURRENCY) {
         if cancel.load(Ordering::SeqCst) {
             return Err(cancelled());
@@ -630,11 +633,50 @@ pub async fn extract_slides(
         let shots = chunk.iter().map(|(frame, at_ms)| {
             capture_jpeg_at(video, Path::new(&frame.image_path), *at_ms, crop.as_deref())
         });
-        futures_util::future::try_join_all(shots).await?;
+        // 单页截失败不再让整次提取作废。走到这里，通读整段视频的采样已经跑完了——
+        // 那是整个流程的时间大头，为了一帧坏图把它连同其余几十页一起扔掉，代价完全
+        // 不成比例。缺页是看得见的：页号会断在那里，用户知道少了哪一张。
+        for (result, (frame, _)) in futures_util::future::join_all(shots)
+            .await
+            .into_iter()
+            .zip(chunk)
+        {
+            match result {
+                Ok(()) => captured.push(frame.clone()),
+                Err(error) => {
+                    tracing::warn!(page_no = frame.page_no, %error, "课件页截图失败，跳过这一页");
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
         done += chunk.len();
-        on_progress(ExtractProgress::capture(done, planned.len()));
+        on_progress(ExtractProgress::capture(done, total));
     }
-    Ok(planned.into_iter().map(|(frame, _)| frame).collect())
+    keep_captured(captured, total, first_error)
+}
+
+/// 截图收尾：留下成功的页，大面积失败则整次作废。
+///
+/// 「零星缺页」和「基本上全废了」是两回事。少一两页是可以交付的——页号会断在那里，
+/// 用户看得见。但过半都截不出来通常是系统性问题（磁盘满、文件损坏、ffmpeg 没了），
+/// 这时候交一份残缺课件只会让人以为提取成功了。
+fn keep_captured(
+    captured: Vec<SlideFrame>,
+    total: usize,
+    first_error: Option<AppError>,
+) -> AppResult<Vec<SlideFrame>> {
+    if captured.len() * 2 >= total {
+        return Ok(captured);
+    }
+    let cause = first_error
+        .map(|error| error.to_string())
+        .unwrap_or_else(|| "未知原因".into());
+    Err(AppError::Pipeline(format!(
+        "课件页截图大多失败：{total} 页里只成功 {}。首个错误：{cause}",
+        captured.len()
+    )))
 }
 
 pub async fn store_slides(db: &Db, video_id: &str, frames: &[SlideFrame]) -> AppResult<usize> {
@@ -866,6 +908,46 @@ mod tests {
             left: 0.0,
         };
         assert_eq!(crop_filter(Some(nan)), None);
+    }
+
+    fn frame_at(page_no: i64) -> SlideFrame {
+        SlideFrame {
+            page_no,
+            image_path: format!("{page_no}.jpg"),
+            start_ms: page_no * 1000,
+        }
+    }
+
+    #[test]
+    fn one_bad_frame_no_longer_throws_away_the_whole_extraction() {
+        // 走到截图这一步时，通读整段视频的采样已经跑完了——那是整个流程的时间大头。
+        // 为了一帧坏图把它连同其余几十页一起扔掉，代价完全不成比例。
+        let kept: Vec<SlideFrame> = (0..39).map(frame_at).collect();
+        let out = keep_captured(kept, 40, Some(AppError::Pipeline("坏帧".into()))).unwrap();
+
+        assert_eq!(out.len(), 39);
+        // 页号保持原样，不重新编号：断掉的那个号就是「这里少了一页」的告示。
+        assert_eq!(out[38].page_no, 38);
+    }
+
+    #[test]
+    fn a_mostly_failed_capture_is_still_a_failure() {
+        // 过半截不出来多半是系统性问题（磁盘满、文件坏了）。这时候交半份课件出去，
+        // 用户只会以为提取成功了。
+        let kept: Vec<SlideFrame> = (0..4).map(frame_at).collect();
+        let error = keep_captured(kept, 40, Some(AppError::Pipeline("磁盘已满".into())))
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("40 页里只成功 4"));
+        assert!(error.contains("磁盘已满"), "得说清是什么原因");
+    }
+
+    #[test]
+    fn exactly_half_captured_is_still_delivered() {
+        // 边界：一半算够。再往下才是「基本上全废了」。
+        let kept: Vec<SlideFrame> = (0..5).map(frame_at).collect();
+        assert_eq!(keep_captured(kept, 10, None).unwrap().len(), 5);
     }
 
     #[test]

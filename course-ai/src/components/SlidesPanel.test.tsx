@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SlidesPanel } from "./SlidesPanel";
+import type { SlidesOcrOutcome } from "@/lib/ipc";
 
 const { mockIpc, player } = vi.hoisted(() => ({
   mockIpc: {
@@ -174,6 +175,10 @@ describe("SlidesPanel page OCR", () => {
     mockIpc.slides.cancelOcr.mockReset().mockResolvedValue(undefined);
   });
 
+  function outcome(over: Partial<SlidesOcrOutcome> = {}): SlidesOcrOutcome {
+    return { recognized: 0, failed: 0, total: 0, canceled: false, error: null, ...over };
+  }
+
   const pages = [
     {
       id: 1,
@@ -230,7 +235,7 @@ describe("SlidesPanel page OCR", () => {
     mockIpc.slides.list
       .mockReset()
       .mockResolvedValue(pages.map((page) => ({ ...page, ocr_text: "已认" })));
-    mockIpc.slides.ocr.mockResolvedValue(2);
+    mockIpc.slides.ocr.mockResolvedValue(outcome({ recognized: 2, total: 2 }));
     renderPanel();
 
     // 都认过了：按钮变成「重认文字」，按住 Shift 点才整批重来（换了引擎时用）。
@@ -244,7 +249,7 @@ describe("SlidesPanel page OCR", () => {
 
   it("shows an explicit completion message when no usable text is found", async () => {
     mockIpc.slides.list.mockReset().mockResolvedValue(pages);
-    mockIpc.slides.ocr.mockResolvedValue(0);
+    mockIpc.slides.ocr.mockResolvedValue(outcome({ total: 2 }));
     renderPanel();
 
     fireEvent.click(await screen.findByRole("button", { name: /识别文字/ }));
@@ -252,6 +257,58 @@ describe("SlidesPanel page OCR", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(
       "识别完成，没有识别到可用文字",
     );
+  });
+
+  it("部分失败不能报成一句「已识别 N 页」", async () => {
+    // 真实场景：云端 OCR 的额度在第 10 页耗尽。前 9 页认出来了，后 90 页全挂——
+    // 旧实现只要有一页成功就返回一个页数，界面弹绿色的「已识别 9 页」，
+    // 另外 90 页的失败一个字都不提。
+    mockIpc.slides.list.mockReset().mockResolvedValue(pages);
+    mockIpc.slides.ocr.mockResolvedValue(
+      outcome({
+        recognized: 9,
+        failed: 90,
+        total: 99,
+        error: "大模型账户余额不足：请充值或更换 API Key 后重试。",
+      }),
+    );
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: /识别文字/ }));
+
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("已识别 9 页");
+    expect(status).toHaveTextContent("90 页失败");
+    expect(status).toHaveTextContent("余额不足");
+    // 不能是成功那套绿色：有九成的页没认成。
+    expect(status.className).not.toContain("status-ok");
+  });
+
+  it("按下停止说的是「已停止」，不是「识别完成」", async () => {
+    mockIpc.slides.list.mockReset().mockResolvedValue(pages);
+    mockIpc.slides.ocr.mockResolvedValue(
+      outcome({ recognized: 4, total: 40, canceled: true }),
+    );
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: /识别文字/ }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("已停止，已识别 4 页");
+  });
+
+  it("认过但没认出文字的页不再算进「还没认」", async () => {
+    // 认过、判为乱码的页记的是空串。按「有没有文字」来数的话，一张纯图页会让按钮
+    // 永远停在「识别文字」，每次重跑都把它再认一遍——云端 OCR 就是重复付费。
+    mockIpc.slides.list
+      .mockReset()
+      .mockResolvedValue([
+        { ...pages[0], ocr_text: "贝叶斯定理" },
+        { ...pages[1], ocr_text: "" },
+      ]);
+    renderPanel();
+
+    expect(await screen.findByRole("button", { name: /重认文字/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /识别文字/ })).not.toBeInTheDocument();
   });
 
   it("surfaces batch OCR failures instead of silently returning to idle", async () => {

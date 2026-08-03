@@ -108,10 +108,27 @@ pub async fn run_aliyun_ocr(
         } else {
             ""
         };
-        return Err(AppError::Pipeline(format!(
+        let text = format!(
             "aliyun OCR 失败：{} {code} {message}{hint}",
             status.as_u16()
-        )));
+        );
+        // 鉴权、欠费、没开通服务：几十页逐一重试只是把同一个拒绝重复几十遍。
+        // 标成「重试没用」，批量识别据此当场停下并把原因报出来。限流（Throttling）
+        // 不在此列——那个等一会儿真的会好。
+        let account_level = matches!(status.as_u16(), 401..=403)
+            || [
+                "Forbidden",
+                "NoPermission",
+                "InvalidAccessKey",
+                "AccessDenied",
+            ]
+            .iter()
+            .any(|marker| code.contains(marker));
+        return Err(if account_level {
+            AppError::Permanent(text)
+        } else {
+            AppError::Pipeline(text)
+        });
     }
     let text = extract_content(&payload)?;
     if text.is_empty() {

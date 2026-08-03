@@ -3,7 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Images, ScanText, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/ui/ErrorNote";
-import { ipc, type SlidesOcrProgress, type SlidesProgress } from "@/lib/ipc";
+import { humanizeError } from "@/lib/errors";
+import {
+  ipc,
+  type SlidesOcrOutcome,
+  type SlidesOcrProgress,
+  type SlidesProgress,
+} from "@/lib/ipc";
 import { SlideImage } from "@/components/SlideImage";
 import { formatMs } from "@/lib/time";
 import { getSlidesSensitivity, sensitivityToThreshold } from "@/lib/slides";
@@ -20,6 +26,22 @@ function progressLabel(progress: SlidesProgress | null): string {
     return `采样 ${Math.min(99, Math.round((progress.done / progress.total) * 100))}%`;
   }
   return "采样中…";
+}
+
+/**
+ * 一次批量识别结束后说什么。
+ *
+ * 三件事必须分得开：中途叫停、部分失败、正常跑完。原来只有一句「已识别 N 页」，
+ * 按下停止是它，额度耗尽后 90 页全挂也是它——用户没有任何线索。
+ */
+function ocrFeedbackText(outcome: SlidesOcrOutcome): string {
+  const done = `已识别 ${outcome.recognized} 页`;
+  if (outcome.failed > 0) {
+    const reason = outcome.error ? `：${humanizeError(outcome.error)}` : "";
+    return `${done}，${outcome.failed} 页失败${reason}`;
+  }
+  if (outcome.canceled) return `已停止，${done}`;
+  return outcome.recognized > 0 ? done : "识别完成，没有识别到可用文字";
 }
 
 export function SlidesPanel({ videoId }: { videoId: string }) {
@@ -44,7 +66,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   const extractRequest = useRef<string | null>(null);
   // 课件页文字识别的进度与 requestId。导入时会自动认一遍，这里是补跑/换引擎重认的入口。
   const [pagesOcrProgress, setPagesOcrProgress] = useState<SlidesOcrProgress | null>(null);
-  const [pagesOcrFeedback, setPagesOcrFeedback] = useState<string | null>(null);
+  const [pagesOcrFeedback, setPagesOcrFeedback] = useState<SlidesOcrOutcome | null>(null);
   const pagesOcrRequest = useRef<string | null>(null);
 
   const extract = useMutation({
@@ -74,7 +96,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
     mutationFn: () => ipc.tools.ocr(videoId, Math.floor(currentMs())),
   });
   // 整批认课件页上的文字。默认只认还没认过的页；按住 shift 点则全部重认（换了引擎时用）。
-  const pagesOcr = useMutation<number, unknown, boolean>({
+  const pagesOcr = useMutation<SlidesOcrOutcome, unknown, boolean>({
     mutationFn: (force: boolean) => {
       const requestId = crypto.randomUUID();
       pagesOcrRequest.current = requestId;
@@ -82,18 +104,17 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
       setPagesOcrFeedback(null);
       return ipc.slides.ocr(videoId, requestId, force, setPagesOcrProgress);
     },
-    onSuccess: (recognized) => {
-      setPagesOcrFeedback(
-        recognized > 0 ? `已识别 ${recognized} 页` : "识别完成，没有识别到可用文字",
-      );
-    },
+    onSuccess: (outcome) => setPagesOcrFeedback(outcome),
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ["slides", videoId] });
       pagesOcrRequest.current = null;
       setPagesOcrProgress(null);
     },
   });
-  const pagesWithText = slides.filter((slide) => (slide.ocr_text ?? "").trim() !== "").length;
+  // 「还没认过」是 ocr_text 为 null；认过但没认出可用文字的页记的是空串。
+  // 按「有没有文字」来数的话，纯图页、封面页会永远算在「还没认」里，重认按钮永远出不来，
+  // 而且每次重跑都要把它们再认一遍（云端 OCR 就是重复付费）。
+  const pending = slides.filter((slide) => slide.ocr_text === null).length;
   // OCR 结果复制成功的短暂反馈（1.5s）。
   const [copied, setCopied] = useState(false);
   async function copyOcrResult() {
@@ -137,13 +158,13 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
                 variant="ghost"
                 onClick={(event) => pagesOcr.mutate(event.shiftKey)}
                 title={
-                  pagesWithText === slides.length
+                  pending === 0
                     ? "所有页都认过了。按住 Shift 点可全部重认（换了 OCR 引擎时用）"
-                    : `识别课件页上的文字（还有 ${slides.length - pagesWithText} 页没认）。按住 Shift 点可全部重认`
+                    : `识别课件页上的文字（还有 ${pending} 页没认）。按住 Shift 点可全部重认`
                 }
               >
                 <ScanText className="h-3.5 w-3.5" />
-                {pagesWithText === slides.length ? "重认文字" : "识别文字"}
+                {pending === 0 ? "重认文字" : "识别文字"}
               </Button>
             ))}
           <Button
@@ -204,11 +225,17 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
         />
       )}
       {pagesOcrFeedback && !pagesOcr.isError && (
+        // 有页失败就不能用绿色的成功样式：识别出来的页确实写进库了，可另外那些没有，
+        // 而额度耗尽、鉴权失效正是从半路开始一页页失败的样子。
         <div
           role="status"
-          className="mx-3 mb-2 flex-none rounded-md bg-[var(--status-ok-bg)] px-3 py-2 text-xs text-[var(--status-ok)]"
+          className={`mx-3 mb-2 flex-none rounded-md px-3 py-2 text-xs ${
+            pagesOcrFeedback.failed > 0
+              ? "bg-[var(--status-warn-bg)] text-[var(--status-warn)]"
+              : "bg-[var(--status-ok-bg)] text-[var(--status-ok)]"
+          }`}
         >
-          {pagesOcrFeedback}
+          {ocrFeedbackText(pagesOcrFeedback)}
         </div>
       )}
       {extract.isError && (
