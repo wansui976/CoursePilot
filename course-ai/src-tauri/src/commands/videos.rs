@@ -409,6 +409,32 @@ pub async fn list_videos(db: &Db, course_id: &str) -> AppResult<Vec<Video>> {
     .await?)
 }
 
+/// 列表里的一条视频，外加「库里到底有没有文稿」。
+///
+/// 界面要靠它决定菜单给的是「重新纠错」还是「开始处理」，而这件事光看视频行是判断不出来的：
+/// 自带字幕的视频在**下载完当场**就打上了字幕标记，那时流水线还没跑、一个字的文稿都没有。
+/// 只看标记的话，菜单会对着一份不存在的文稿提议纠错，而这恰恰是唯一需要「开始处理」的情形。
+#[derive(Serialize, sqlx::FromRow)]
+pub struct VideoListItem {
+    #[sqlx(flatten)]
+    #[serde(flatten)]
+    pub video: Video,
+    pub has_transcript: bool,
+}
+
+/// 供界面使用的视频列表。比 `list_videos` 多一列「有没有文稿」。
+pub async fn list_videos_for_ui(db: &Db, course_id: &str) -> AppResult<Vec<VideoListItem>> {
+    Ok(sqlx::query_as::<_, VideoListItem>(
+        "SELECT v.*, EXISTS(SELECT 1 FROM transcripts t WHERE t.video_id=v.id) AS has_transcript
+         FROM videos v
+         WHERE v.course_id=? AND v.deleted_at IS NULL
+         ORDER BY v.order_index ASC, v.created_at ASC, v.id ASC",
+    )
+    .bind(course_id)
+    .fetch_all(&db.pool)
+    .await?)
+}
+
 /// 手动排序：按 ordered_ids 的顺序重写该课程视频的 order_index（0,1,2…）。
 /// ordered_ids 必须与该课程当前未删除视频的 id 集合完全一致（不多、不少、不重复），
 /// 否则拒绝——防止并发导入/删除后按过期列表覆盖掉新视频的位置。
@@ -728,8 +754,8 @@ async fn live_video_paths(db: &Db, video_id: &str) -> AppResult<(String, String)
 pub async fn cmd_list_videos(
     state: State<'_, AppState>,
     course_id: String,
-) -> AppResult<Vec<Video>> {
-    list_videos(&state.db, &course_id).await
+) -> AppResult<Vec<VideoListItem>> {
+    list_videos_for_ui(&state.db, &course_id).await
 }
 
 #[tauri::command]
@@ -885,6 +911,52 @@ mod tests {
         let list = list_videos(&db, &course.id).await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].order_index, 1);
+    }
+
+    #[tokio::test]
+    async fn the_list_says_whether_a_video_actually_has_a_transcript() {
+        // 界面靠这一列在「重新纠错」和「开始处理」之间选。自带字幕的视频在下载完当场
+        // 就打上了字幕标记，那时流水线还没跑——只看标记的话，菜单会对着一份不存在的
+        // 文稿提议纠错，而它恰恰是列表里唯一能触发「开始处理」的入口，视频就此卡死。
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        for name in ["01.mp4", "02.mp4"] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, b"fake").unwrap();
+            add_local_video(&db, &course.id, path, None).await.unwrap();
+        }
+        let ids: Vec<String> = list_videos(&db, &course.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|video| video.id)
+            .collect();
+        // 第一个视频有了字幕标记，但一句文稿都还没写进来——正是刚导入完的样子。
+        sqlx::query("UPDATE videos SET subtitle_lang='zh-Hans' WHERE id=?")
+            .bind(&ids[0])
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,0,0,1000,'讲了什么')",
+        )
+        .bind(&ids[1])
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let list = list_videos_for_ui(&db, &course.id).await.unwrap();
+
+        assert!(!list[0].has_transcript, "有字幕标记不等于有文稿");
+        assert!(list[1].has_transcript);
+        // 顺带守住展平：列表条目仍然带着视频本身的字段。
+        assert_eq!(list[0].video.id, ids[0]);
+        assert_eq!(list[0].video.subtitle_lang.as_deref(), Some("zh-Hans"));
     }
 
     #[test]

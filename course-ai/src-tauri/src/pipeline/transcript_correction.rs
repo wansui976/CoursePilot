@@ -310,7 +310,11 @@ pub async fn autocorrect_transcript(
 ) -> AppResult<()> {
     let rows = list_segments(db, video_id).await?;
     if rows.is_empty() {
-        return Err(AppError::NotFound(format!("no transcript for {video_id}")));
+        // 说人话并给出下一步。这是「重新纠错」最后的一道拦截，用户看到的就是这句话；
+        // 原来吐的是 `no transcript for <一串 id>`，既看不懂也不知道该干什么。
+        return Err(AppError::NotFound(
+            "这个视频还没有文稿，先「开始处理」生成字幕之后才能纠错".into(),
+        ));
     }
 
     let concurrency = correction_concurrency(db).await;
