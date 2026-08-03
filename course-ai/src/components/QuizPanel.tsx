@@ -101,7 +101,13 @@ export function QuizPanel({ videoId }: { videoId: string }) {
   }
 
   return (
-    <div className="space-y-4 p-4">
+    // 外层撑满、内层自己滚：标签页容器是 overflow-hidden 的，面板不自带滚动区，
+    // 题目一多就被直接裁掉——不是滚不动，是压根没地方滚。
+    // 同一套写法文稿、笔记、章节都在用。
+    <div
+      aria-label="练习内容滚动区"
+      className="h-full min-h-0 space-y-4 overflow-y-auto p-4"
+    >
       <button
         onClick={() => addToReview.mutate()}
         disabled={addToReview.isPending}
