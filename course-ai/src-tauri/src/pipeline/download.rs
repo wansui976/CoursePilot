@@ -107,7 +107,20 @@ pub async fn download(
         ));
     }
     std::fs::create_dir_all(out_dir)?;
-    let template = out_dir.join("%(title).80s.%(ext)s");
+    // 先下到本次导入专用的空目录，再挪进课程目录。
+    //
+    // 原来是直接下进课程目录，然后按「目录里最新的 .mp4 / .srt」认领成果。字幕那条会
+    // **认错人**：yt-dlp 拿不到所请求的字幕轨时只是警告一句、照样成功退出（同一个合集里
+    // 只有部分集数有 CC 是常事），于是「最新的 .srt」就是上一集留下的那份——第二集的
+    // 文稿变成了第一集的内容，而且没有任何提示。下载下来的 .srt 一直躺在课程目录里，
+    // 从来没人清，所以这块「上一集的残留」一直都在。
+    //
+    // 在一个空目录里认领，就不可能认到别人头上。顺带也不再往用户的课程目录里散落文件。
+    let staging = out_dir
+        .join(".courseai-import")
+        .join(uuid::Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&staging)?;
+    let template = staging.join("%(title).80s.%(ext)s");
     let ytdlp = resolve(&YTDLP, None)?;
     let args = build_ytdlp_args(
         url,
@@ -123,19 +136,68 @@ pub async fn download(
         .await
         .map_err(|e| AppError::Pipeline(format!("yt-dlp spawn: {e}")))?;
     if !output.status.success() {
+        let _ = std::fs::remove_dir_all(&staging);
         return Err(AppError::Pipeline(format!(
             "yt-dlp failed: {}",
             String::from_utf8_lossy(&output.stderr)
         )));
     }
-    let video = newest_with_ext(out_dir, "mp4")?
+    let claimed = claim_downloaded(&staging, out_dir, sub_lang);
+    let _ = std::fs::remove_dir_all(&staging);
+    claimed
+}
+
+/// 把这一次下到的东西从暂存目录挪进课程目录。
+fn claim_downloaded(
+    staging: &Path,
+    out_dir: &Path,
+    sub_lang: Option<&str>,
+) -> AppResult<DownloadResult> {
+    let video = newest_with_ext(staging, "mp4")?
         .ok_or_else(|| AppError::Pipeline("yt-dlp produced no mp4".into()))?;
+    // 请求了字幕却没下到（这一集没有该语言的轨）就是没有，不去别处找。
     let subtitle = if sub_lang.map(|l| !l.trim().is_empty()).unwrap_or(false) {
-        newest_with_ext(out_dir, "srt")?
+        newest_with_ext(staging, "srt")?
     } else {
         None
     };
-    Ok(DownloadResult { video, subtitle })
+    Ok(DownloadResult {
+        video: move_into(out_dir, &video)?,
+        subtitle: subtitle.map(|path| move_into(out_dir, &path)).transpose()?,
+    })
+}
+
+/// 把文件挪到目标目录，重名时在文件名后加序号。
+///
+/// 不能直接覆盖：课程目录里同名的那个文件很可能是**上一次导入的视频**，库里还有一行
+/// 指着它。覆盖掉之后那一行就指向了另一个视频的内容，而列表上看不出任何区别。
+fn move_into(dir: &Path, file: &Path) -> AppResult<PathBuf> {
+    let name = file
+        .file_name()
+        .ok_or_else(|| AppError::Pipeline(format!("下载结果没有文件名: {}", file.display())))?;
+    let target = vacant_path(dir, Path::new(name));
+    std::fs::rename(file, &target)?;
+    Ok(target)
+}
+
+/// 目标目录里一个尚未被占用的文件名：`名字.mp4`、`名字 (2).mp4`、`名字 (3).mp4`……
+fn vacant_path(dir: &Path, name: &Path) -> PathBuf {
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let stem = name.file_stem().unwrap_or_default().to_string_lossy();
+    let ext = name.extension().map(|e| e.to_string_lossy());
+    for n in 2..1000 {
+        let candidate = match &ext {
+            Some(ext) => dir.join(format!("{stem} ({n}).{ext}")),
+            None => dir.join(format!("{stem} ({n})")),
+        };
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    first
 }
 
 /// 返回 out_dir 里扩展名为 ext 的最新文件。
@@ -402,6 +464,61 @@ pub async fn probe(url: &str, cookies: Option<&str>) -> AppResult<ProbeResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn a_missing_subtitle_never_picks_up_the_previous_episode_s() {
+        // 真实场景：同一个合集里只有部分集数带 CC。yt-dlp 拿不到所请求的字幕轨时
+        // 只是警告一句、照样成功退出。原来按「课程目录里最新的 .srt」认领成果，
+        // 认到的就是上一集留下的那份——第二集的文稿变成第一集的内容，毫无提示。
+        let dir = tempdir().unwrap();
+        let course = dir.path();
+        std::fs::write(course.join("第一讲.srt"), "上一集的字幕").unwrap();
+        // 这一次只下到了视频，没有字幕。
+        let staging = course.join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("第二讲.mp4"), b"mp4").unwrap();
+
+        let result = claim_downloaded(&staging, course, Some("zh-Hans")).unwrap();
+
+        assert_eq!(result.subtitle, None, "没下到就是没有，不去别处找");
+        assert_eq!(result.video, course.join("第二讲.mp4"));
+    }
+
+    #[test]
+    fn a_downloaded_subtitle_comes_along() {
+        let dir = tempdir().unwrap();
+        let course = dir.path();
+        let staging = course.join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("第三讲.mp4"), b"mp4").unwrap();
+        std::fs::write(staging.join("第三讲.srt"), "字幕").unwrap();
+
+        let result = claim_downloaded(&staging, course, Some("zh-Hans")).unwrap();
+
+        assert_eq!(result.subtitle, Some(course.join("第三讲.srt")));
+        assert!(course.join("第三讲.mp4").is_file());
+    }
+
+    #[test]
+    fn importing_the_same_title_twice_does_not_overwrite_the_first_one() {
+        // 课程目录里同名的那个文件很可能是上一次导入的视频，库里还有一行指着它。
+        // 覆盖掉之后那一行就指向了另一个视频的内容，而列表上看不出任何区别。
+        let dir = tempdir().unwrap();
+        let course = dir.path();
+        std::fs::write(course.join("同名.mp4"), "第一次导入的").unwrap();
+        let staging = course.join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("同名.mp4"), "第二次导入的").unwrap();
+
+        let result = claim_downloaded(&staging, course, None).unwrap();
+
+        assert_eq!(result.video, course.join("同名 (2).mp4"));
+        assert_eq!(
+            std::fs::read_to_string(course.join("同名.mp4")).unwrap(),
+            "第一次导入的"
+        );
+    }
 
     #[test]
     fn ytdlp_args_basic() {
