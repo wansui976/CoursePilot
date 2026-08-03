@@ -270,6 +270,11 @@ async fn run_all(
         }
     };
 
+    // 从这里往下，无论走哪条路退出，抽出来的音频都要跟着一起清掉——识别之后没有
+    // 任何东西会再用它。包括下面「自带字幕、跳过识别」那条早退：音频在上一步已经
+    // 抽好了，那条路上一次都没用过。
+    let _temp_audio = audio::TempAudio::new(&prepared_audio);
+
     jobs::start(&db, &asr_job.id).await?;
     emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.05, "准备识别引擎").await?;
 

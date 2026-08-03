@@ -7,7 +7,14 @@ export class WatchAccumulator {
   private accumMs = 0;
   private startedAt: number | null = null;
 
-  constructor(private now: () => number = Date.now) {}
+  /**
+   * @param now 可注入的时钟，便于测试。
+   * @param maxSegmentMs 单段最多计多少。见 settle()。
+   */
+  constructor(
+    private now: () => number = Date.now,
+    private maxSegmentMs = Number.POSITIVE_INFINITY,
+  ) {}
 
   /** 切换播放状态：进入播放开始计时，暂停则把这段计入累计。 */
   setPlaying(playing: boolean): void {
@@ -15,9 +22,21 @@ export class WatchAccumulator {
     if (playing) this.startedAt = this.now();
   }
 
+  /**
+   * 结算当前这一段。
+   *
+   * 单段要封顶。这里用的是墙上时钟，而系统睡眠期间我们的代码一行都不跑：合上笔记本
+   * 一夜，醒来后第一次结算算出来的是「现在 − 开始播放」，整晚都被记成学习时长。
+   * 就算播放器在睡眠时发了暂停事件也救不回来——那个事件同样要等到醒来才被处理，
+   * 时间戳还是醒来的时刻。
+   *
+   * 判据是：我们本来就会定期结算，所以一段远超结算周期，只可能是我们整段没在跑。
+   * 上限取得比「后台节流」宽松得多（那种情况最长约一分钟一次，是真实的观看时间），
+   * 只把小时级的空档挡在外面。
+   */
   private settle(): void {
     if (this.startedAt != null) {
-      this.accumMs += this.now() - this.startedAt;
+      this.accumMs += Math.min(this.now() - this.startedAt, this.maxSegmentMs);
       this.startedAt = null;
     }
   }

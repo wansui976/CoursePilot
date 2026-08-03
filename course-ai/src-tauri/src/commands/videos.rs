@@ -547,13 +547,38 @@ pub async fn restore_video(db: &Db, id: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// 删掉一个视频的派生数据目录（`.courseai/<video_id>`：识别音频、课件页图、截图、
+/// 为播放重封装的副本……）。
+///
+/// **只删目录名恰好等于视频 id 的那一个。** 这条不变量是安全绳：这个路径来自库里的
+/// 一列字符串，万一它被写坏成课程根目录或视频文件所在的目录，一次递归删除就会把
+/// 用户自己的课件和视频一起抹掉。目录名对不上就宁可留着不删。
+///
+/// 尽力而为：删不掉只是留下垃圾，不该让「永久删除」本身失败——库里的行已经没了。
+fn remove_video_data_dir(data_dir: &str, video_id: &str) {
+    let path = std::path::Path::new(data_dir);
+    if path.file_name().and_then(|name| name.to_str()) != Some(video_id) {
+        tracing::warn!(
+            data_dir,
+            video_id,
+            "数据目录名与视频 id 不符，跳过删除以免误删用户文件"
+        );
+        return;
+    }
+    if let Err(error) = std::fs::remove_dir_all(path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(data_dir, %error, "删除视频数据目录失败");
+        }
+    }
+}
+
 /// 永久删除单个视频（连带其转写/笔记等衍生数据，经 FK 级联）。
 pub async fn purge_video(db: &Db, id: &str) -> AppResult<()> {
     let mut tx = db.pool.begin().await?;
-    let course_id = sqlx::query_scalar::<_, String>(
+    let (course_id, data_dir) = sqlx::query_as::<_, (String, String)>(
         "DELETE FROM videos
          WHERE id=? AND deleted_at IS NOT NULL
-         RETURNING course_id",
+         RETURNING course_id,data_dir",
     )
     .bind(id)
     .fetch_optional(&mut *tx)
@@ -569,6 +594,8 @@ pub async fn purge_video(db: &Db, id: &str) -> AppResult<()> {
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
+    // 先提交再删文件：反过来的话，事务万一失败，库里还留着行、文件却已经没了。
+    remove_video_data_dir(&data_dir, id);
     Ok(())
 }
 
@@ -589,6 +616,10 @@ pub async fn list_trashed(db: &Db) -> AppResult<Vec<TrashedVideo>> {
 /// 清空回收站：永久删除全部软删视频，再删掉没有任何视频的已软删课程。返回清除数量。
 pub async fn purge_trash(db: &Db) -> AppResult<u64> {
     let mut tx = db.pool.begin().await?;
+    let doomed: Vec<(String, String)> =
+        sqlx::query_as("SELECT id,data_dir FROM videos WHERE deleted_at IS NOT NULL")
+            .fetch_all(&mut *tx)
+            .await?;
     let result = sqlx::query("DELETE FROM videos WHERE deleted_at IS NOT NULL")
         .execute(&mut *tx)
         .await?;
@@ -600,6 +631,9 @@ pub async fn purge_trash(db: &Db) -> AppResult<u64> {
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
+    for (id, data_dir) in &doomed {
+        remove_video_data_dir(data_dir, id);
+    }
     Ok(result.rows_affected())
 }
 
@@ -607,6 +641,12 @@ pub async fn purge_trash(db: &Db) -> AppResult<u64> {
 pub async fn purge_expired_trash(db: &Db) -> AppResult<u64> {
     let cutoff = Utc::now().timestamp_millis() - TRASH_RETENTION_DAYS * DAY_MS;
     let mut tx = db.pool.begin().await?;
+    let doomed: Vec<(String, String)> = sqlx::query_as(
+        "SELECT id,data_dir FROM videos WHERE deleted_at IS NOT NULL AND deleted_at < ?",
+    )
+    .bind(cutoff)
+    .fetch_all(&mut *tx)
+    .await?;
     let result = sqlx::query("DELETE FROM videos WHERE deleted_at IS NOT NULL AND deleted_at < ?")
         .bind(cutoff)
         .execute(&mut *tx)
@@ -619,6 +659,9 @@ pub async fn purge_expired_trash(db: &Db) -> AppResult<u64> {
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
+    for (id, data_dir) in &doomed {
+        remove_video_data_dir(data_dir, id);
+    }
     Ok(result.rows_affected())
 }
 
@@ -957,6 +1000,87 @@ mod tests {
         // 顺带守住展平：列表条目仍然带着视频本身的字段。
         assert_eq!(list[0].video.id, ids[0]);
         assert_eq!(list[0].video.subtitle_lang.as_deref(), Some("zh-Hans"));
+    }
+
+    /// 造一个已在回收站里、且派生目录里塞了东西的视频。
+    async fn trashed_video_with_data(db: &Db, course_id: &str, name: &str) -> (String, PathBuf) {
+        let video = add_local_video(db, course_id, PathBuf::from(name), None)
+            .await
+            .unwrap();
+        let data_dir = PathBuf::from(&video.data_dir);
+        std::fs::create_dir_all(data_dir.join("slides")).unwrap();
+        // 识别音频一小时约 115MB，是这里面最占地方的一份。
+        std::fs::write(data_dir.join("audio.wav"), b"wav").unwrap();
+        std::fs::write(data_dir.join("playable.mp4"), b"mp4").unwrap();
+        sqlx::query("UPDATE videos SET deleted_at=1 WHERE id=?")
+            .bind(&video.id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        (video.id, data_dir)
+    }
+
+    #[tokio::test]
+    async fn purging_a_video_also_frees_its_disk() {
+        // 「永久删除」原来只删库里的行，派生目录一个字节都不动——识别音频、课件页图、
+        // 截图、为播放重封装的副本全留着，加起来可能比视频本身还大。
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let video_file = dir.path().join("v.mp4");
+        std::fs::write(&video_file, b"fake").unwrap();
+        let (id, data_dir) =
+            trashed_video_with_data(&db, &course.id, video_file.to_str().unwrap()).await;
+        assert!(data_dir.join("audio.wav").is_file());
+
+        purge_video(&db, &id).await.unwrap();
+
+        assert!(!data_dir.exists(), "派生目录要跟着一起清掉");
+        // 用户自己的视频文件是导入进来的，不归我们删。
+        assert!(video_file.is_file());
+    }
+
+    #[tokio::test]
+    async fn emptying_the_trash_frees_every_purged_video() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let mut dirs = Vec::new();
+        for name in ["a.mp4", "b.mp4"] {
+            let file = dir.path().join(name);
+            std::fs::write(&file, b"fake").unwrap();
+            let (_, data_dir) =
+                trashed_video_with_data(&db, &course.id, file.to_str().unwrap()).await;
+            dirs.push(data_dir);
+        }
+
+        assert_eq!(purge_trash(&db).await.unwrap(), 2);
+
+        for data_dir in dirs {
+            assert!(!data_dir.exists());
+        }
+    }
+
+    #[test]
+    fn a_data_dir_that_is_not_named_after_the_video_is_left_alone() {
+        // 安全绳：这个路径来自库里的一列字符串。万一它被写坏成课程根目录，一次递归
+        // 删除就会把用户自己的课件和视频一起抹掉。目录名对不上就宁可留着。
+        let dir = tempdir().unwrap();
+        let course_root = dir.path().join("我的课程");
+        std::fs::create_dir_all(&course_root).unwrap();
+        std::fs::write(course_root.join("第一讲.mp4"), "珍贵的课件").unwrap();
+
+        remove_video_data_dir(course_root.to_str().unwrap(), "video-1");
+
+        assert!(course_root.join("第一讲.mp4").is_file(), "不该动用户的文件");
     }
 
     #[test]
