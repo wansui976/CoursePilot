@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatCountdown, formatMs, formatRelativeTime } from "./time";
+import {
+  formatCountdown,
+  formatMs,
+  formatRelativeTime,
+  formatStudyInterval,
+} from "./time";
 
 describe("formatMs", () => {
   it("formats zero", () => {
@@ -64,5 +69,31 @@ describe("formatCountdown", () => {
   it("says 马上 for anything already due", () => {
     expect(ahead(0)).toBe("马上");
     expect(ahead(-3600_000)).toBe("马上");
+  });
+});
+
+describe("formatStudyInterval", () => {
+  const DAY = 86_400_000;
+
+  it("keeps short intervals in minutes", () => {
+    expect(formatStudyInterval(60_000)).toBe("1 分钟");
+    expect(formatStudyInterval(10 * 60_000)).toBe("10 分钟");
+    // 不足一分钟也说「1 分钟」：按钮上不该出现「0 分钟」。
+    expect(formatStudyInterval(1_000)).toBe("1 分钟");
+  });
+
+  it("counts in days up to a month", () => {
+    expect(formatStudyInterval(DAY)).toBe("1 天");
+    expect(formatStudyInterval(21 * DAY)).toBe("21 天");
+    expect(formatStudyInterval(29 * DAY)).toBe("29 天");
+  });
+
+  it("switches to months and years with one decimal", () => {
+    expect(formatStudyInterval(30 * DAY)).toBe("1 个月");
+    // 一位小数的意义：40 天与 70 天要分得出哪个档更划算。
+    expect(formatStudyInterval(40 * DAY)).toBe("1.3 个月");
+    expect(formatStudyInterval(70 * DAY)).toBe("2.3 个月");
+    expect(formatStudyInterval(365 * DAY)).toBe("1 年");
+    expect(formatStudyInterval(800 * DAY)).toBe("2.2 年");
   });
 });
