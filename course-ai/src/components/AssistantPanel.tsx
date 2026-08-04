@@ -50,6 +50,9 @@ const PANEL_WIDTH = 360;
 const PANEL_MAX_HEIGHT = 720;
 const VIEWPORT_GAP = 16;
 const EDGE_SNAP_DISTANCE = 28;
+const SCROLL_FOLLOW_THRESHOLD = 32;
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 /// 收起时那颗球的直径。停靠位置的夹取与展开/收起时的居中都按它算，
 /// 改了尺寸这些数会自动跟上。
 const LAUNCHER_SIZE = 56;
@@ -118,6 +121,16 @@ function formatPosition(ms: number) {
   return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function isNearScrollEnd(box: HTMLElement) {
+  return box.scrollHeight - box.scrollTop - box.clientHeight <= SCROLL_FOLLOW_THRESHOLD;
+}
+
+function focusableElements(container: HTMLElement) {
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (element) => !element.hasAttribute("hidden") && element.getAttribute("aria-hidden") !== "true",
+  );
+}
+
 function contextLabel(context: AssistantContext) {
   if (context.video_id) {
     return context.position_ms != null && context.position_ms > 0
@@ -175,6 +188,7 @@ export function AssistantPanel({
   const [conversationEpoch, setConversationEpoch] = useState(0);
   const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const followScrollRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -220,11 +234,12 @@ export function AssistantPanel({
   }
 
   useEffect(() => {
-    // 新一轮出来就滚到底，否则答案出现在视野外，看起来像没反应。
+    // 新一轮出来且用户原本在底部时才跟到底。用户主动翻看旧回答/动作卡后，
+    // 工具状态或回执更新不能把视线强行抢回去。
     // 直接写 scrollTop 而不是 scrollTo：后者在 jsdom 里根本不存在，
     // 而这行代码没必要为了一个平滑动画就在测试环境里炸掉。
     const box = scrollRef.current;
-    if (box) box.scrollTop = box.scrollHeight;
+    if (box && followScrollRef.current) box.scrollTop = box.scrollHeight;
   }, [turns, busy]);
 
   useEffect(() => {
@@ -259,6 +274,12 @@ export function AssistantPanel({
     focusLauncherAfterCloseRef.current = false;
     requestAnimationFrame(() => launcherRef.current?.focus());
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !mobile) return;
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [open, mobile]);
 
   useEffect(() => {
     if (mobile) return;
@@ -597,6 +618,8 @@ export function AssistantPanel({
     const turnId = crypto.randomUUID();
     const historyAtSend = historyRef.current;
     activeRequestRef.current = requestId;
+    // 新问题是用户主动发起的导航点，无论此前停在哪一段，都把它带到最新内容。
+    followScrollRef.current = true;
     setInput("");
     setBusy(true);
     setStopping(false);
@@ -726,6 +749,7 @@ export function AssistantPanel({
     conversationEpochRef.current = nextEpoch;
     setConversationEpoch(nextEpoch);
     setTurns([]);
+    followScrollRef.current = true;
     historyRef.current = [];
     setHistory([]);
     setInput("");
@@ -738,7 +762,7 @@ export function AssistantPanel({
     ? "calc(56px + env(safe-area-inset-bottom, 0px) + 24px)"
     : "calc(env(safe-area-inset-bottom, 0px) + 24px)";
   const shell = mobile
-    ? "fixed inset-x-0 z-40 h-[70dvh] max-h-[calc(100dvh-56px)] rounded-t-2xl border-t"
+    ? "fixed inset-x-0 z-[47] h-[70dvh] max-h-[calc(100dvh-56px)] rounded-t-2xl border-t"
     : "fixed z-40 h-[min(720px,calc(100dvh-2rem))] w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border";
   const panelBottom = bottomNavigationVisible
     ? "calc(56px + env(safe-area-inset-bottom, 0px))"
@@ -783,11 +807,41 @@ export function AssistantPanel({
         <Sparkles className="h-5 w-5 text-[var(--accent)]" aria-hidden="true" />
       </button>
       )}
+      {open && mobile && (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="关闭助手"
+          onClick={() => collapseToNearestSide(true)}
+          className="fixed inset-0 z-[46] cursor-default bg-black/20 motion-reduce:transition-none"
+        />
+      )}
     <aside
       ref={panelRef}
-      aria-label="助手"
+      aria-labelledby="assistant-panel-title"
+      aria-modal={mobile ? true : undefined}
+      role={mobile ? "dialog" : "complementary"}
       hidden={!open}
       onKeyDown={(event) => {
+        if (event.key === "Tab" && mobile) {
+          const focusable = focusableElements(event.currentTarget);
+          if (focusable.length === 0) {
+            event.preventDefault();
+            return;
+          }
+          const current = document.activeElement as HTMLElement | null;
+          const currentIndex = current ? focusable.indexOf(current) : -1;
+          const nextIndex = event.shiftKey
+            ? currentIndex <= 0
+              ? focusable.length - 1
+              : currentIndex - 1
+            : currentIndex === focusable.length - 1
+              ? 0
+              : currentIndex + 1;
+          event.preventDefault();
+          focusable[nextIndex]?.focus();
+          return;
+        }
         if (event.key !== "Escape") return;
         event.preventDefault();
         event.stopPropagation();
@@ -805,7 +859,9 @@ export function AssistantPanel({
           <>
             <Sparkles className="h-4 w-4 flex-none text-[var(--accent)]" />
             <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-              <span className="text-sm font-medium text-[var(--text-strong)]">助手</span>
+              <span id="assistant-panel-title" className="text-sm font-medium text-[var(--text-strong)]">
+                助手
+              </span>
               <span
                 aria-label={`当前提问范围：${scopeLabel}`}
                 className="truncate text-[11px] text-[var(--text-faint)]"
@@ -826,7 +882,9 @@ export function AssistantPanel({
             <GripHorizontal className="h-4 w-4 flex-none text-[var(--text-faint)]" />
             <Sparkles className="h-4 w-4 flex-none text-[var(--accent)]" />
             <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-              <span className="text-sm font-medium text-[var(--text-strong)]">助手</span>
+              <span id="assistant-panel-title" className="text-sm font-medium text-[var(--text-strong)]">
+                助手
+              </span>
               <span
                 aria-label={`当前提问范围：${scopeLabel}`}
                 className="truncate text-[11px] font-normal text-[var(--text-faint)]"
@@ -878,6 +936,10 @@ export function AssistantPanel({
         role="log"
         aria-live="polite"
         aria-relevant="additions text"
+        onScroll={() => {
+          const box = scrollRef.current;
+          if (box) followScrollRef.current = isNearScrollEnd(box);
+        }}
         className="flex-1 space-y-3 overflow-y-auto px-3 py-3"
       >
         {turns.length === 0 && !busy && !error && (
