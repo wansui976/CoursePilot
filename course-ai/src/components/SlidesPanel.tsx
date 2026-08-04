@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Images, ScanText, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PanelEmptyState } from "@/components/ui/empty-state";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { humanizeError } from "@/lib/errors";
 import {
@@ -304,17 +305,11 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {slidesQuery.isError ? null : slides.length === 0 ? (
-          <div className="flex h-full min-h-[220px] items-center justify-center">
-            <div className="max-w-xs text-center">
-              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl border border-[var(--border-faint)] bg-[var(--surface-card)] text-primary">
-                <Images className="h-6 w-6" />
-              </div>
-              <p className="text-sm text-[var(--text-muted)]">
-                还没有课件页。点右上角「提取课件」按画面变化自动识别换页，
-                或用「截图」「截图OCR」单独抓取当前帧。
-              </p>
-            </div>
-          </div>
+          <PanelEmptyState
+            icon={<Images className="h-7 w-7" />}
+            title="还没有课件页"
+            description="点右上角「提取课件」按画面变化自动识别换页，或用「截图」「截图 OCR」单独抓取当前帧。"
+          />
         ) : (
           <div className="grid grid-cols-2 gap-2.5">
             {slides.map((s) => (

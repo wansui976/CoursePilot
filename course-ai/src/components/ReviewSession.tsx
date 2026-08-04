@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CheckCircle2, RotateCcw, X, XCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ipc, type DueCard } from "@/lib/ipc";
 import { formatStudyInterval } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -217,12 +218,13 @@ export function ReviewSession({
                     : "今天没有待复习的卡片"
                   : "复习完成 🎉"}
               </div>
-              <button
+              <Button
+                variant="primary"
                 onClick={onClose}
-                className="ca-touch-44 mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-medium !text-white hover:bg-primary/90"
+                className="ca-touch-44 mt-4"
               >
                 完成
-              </button>
+              </Button>
             </div>
           ) : card ? (
             <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6">
@@ -381,13 +383,14 @@ export function ReviewSession({
                   )}
                 </>
               ) : (
-                <button
+                <Button
+                  variant="primary"
                   onClick={revealAnswer}
                   disabled={Boolean(choiceData && selectedOptions.length === 0)}
-                  className="ca-touch-44 mt-5 w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium !text-white transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="ca-touch-44 mt-5 w-full"
                 >
                   {choiceData ? "提交答案（空格）" : "显示答案（空格）"}
-                </button>
+                </Button>
               )}
             </div>
           ) : null}

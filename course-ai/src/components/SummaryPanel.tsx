@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, FileText } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { usePlayer } from "@/stores/player";
 import { TextSkeleton } from "@/components/ui/skeleton";
+import { PanelEmptyState } from "@/components/ui/empty-state";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { PanelActions } from "./PanelActions";
 import {
@@ -90,9 +91,11 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
             ) : summary ? (
               renderMarkdown(summary, requestSeek)
             ) : (
-              <p className="text-sm text-[var(--text-faint)]">
-                还没有摘要，字幕就绪后会自动生成，也可点右下角生成。
-              </p>
+              <PanelEmptyState
+                icon={<FileText className="h-7 w-7" />}
+                title="还没有摘要"
+                description="字幕就绪后会自动生成，也可以点右下角手动生成。"
+              />
             )}
           </div>
           <PanelActions

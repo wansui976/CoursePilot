@@ -285,9 +285,9 @@ export function DailyGoalDialog({
             </Dialog.Close>
             <Button
               type="button"
+              variant="primary"
               size="sm"
               onClick={save}
-              className="border-[var(--accent)] bg-[var(--accent)] !text-white hover:bg-[var(--accent-press)]"
             >
               保存
             </Button>

@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, Check } from "lucide-react";
+import { Brain, Check, CircleHelp } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import type { QuizQuestion } from "@/lib/types";
+import { PanelEmptyState } from "@/components/ui/empty-state";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MathText } from "./MathText";
@@ -119,9 +120,11 @@ export function QuizPanel({ videoId }: { videoId: string }) {
             ))}
           </div>
         ) : questions.length === 0 ? (
-          <p className="text-sm text-[var(--text-faint)]">
-            还没有题目，字幕就绪后会自动生成，也可点右下角生成。
-          </p>
+          <PanelEmptyState
+            icon={<CircleHelp className="h-7 w-7" />}
+            title="还没有题目"
+            description="字幕就绪后会自动生成，也可以点右下角手动生成。"
+          />
         ) : (
           <>
             <button
