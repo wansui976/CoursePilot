@@ -227,7 +227,10 @@ export function ReviewSession({
               </Button>
             </div>
           ) : card ? (
-            <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6">
+            <div
+              key={card.id}
+              className="ca-card-enter rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6"
+            >
               <div className="whitespace-pre-wrap text-center text-lg text-[var(--text-strong)]">
                 <MathText text={card.front} />
               </div>
@@ -309,7 +312,7 @@ export function ReviewSession({
               )}
 
               {revealed ? (
-                <>
+                <div className="ca-reveal-enter">
                   {choiceData && (
                     <div
                       role="status"
@@ -381,7 +384,7 @@ export function ReviewSession({
                       评分保存失败：{String(review.error)}。请重试。
                     </p>
                   )}
-                </>
+                </div>
               ) : (
                 <Button
                   variant="primary"

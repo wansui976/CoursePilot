@@ -179,7 +179,7 @@ export function DailyGoalDialog({
       </Dialog.Trigger>
 
       <Dialog.Portal container={portalContainer ?? undefined}>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+        <Dialog.Overlay className="ca-dialog-overlay fixed inset-0 z-50 bg-black/50" />
         <Dialog.Content
           aria-modal="true"
           aria-describedby={undefined}
