@@ -53,6 +53,11 @@ import { useStudyReminder } from "@/lib/useStudyReminder";
 import { isIOS, isTablet } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
 import { AssistantPanel } from "@/components/AssistantPanel";
+import {
+  currentStage,
+  overallProgress,
+  stageMessage,
+} from "@/lib/pipelineProgress";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 import { accentVars, useTheme } from "@/stores/theme";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -692,12 +697,8 @@ export function Home() {
     }
   }
 
-  function stageLabel(stage?: string) {
-    if (stage === "audio") return "提取音频";
-    if (stage === "asr") return "语音识别";
-    return "等待中";
-  }
-
+  /** 语音识别没有真进度可报的那一段（0.12–0.9），按时间往前爬一点，免得看着像死了。
+   *  纠错阶段（0.9 起）有逐批的真进度，不需要也不应该被估计值盖住。 */
   function displayProgress(job: JobUpdate | undefined) {
     if (!job) return 0;
     let progress = job.progress;
@@ -716,13 +717,20 @@ export function Home() {
   }
 
   function activeJobFor(videoId: string) {
+    return currentStage(jobsByVideo[videoId] ?? {}) as JobUpdate | undefined;
+  }
+
+  /** 整条流水线的完成度：识别做完只是开头，后面还有课件与五个 AI 步骤。
+   *  当前阶段自身的估计进度并进整体，好让识别那段也在动。 */
+  function pipelineProgressFor(videoId: string) {
     const byStage = jobsByVideo[videoId] ?? {};
-    const ordered = ["audio", "asr"].map((stage) => byStage[stage]).filter(Boolean);
-    return (
-      ordered.find((job) => job.status === "running") ??
-      ordered.find((job) => job.status === "failed") ??
-      ordered[ordered.length - 1]
-    );
+    const active = activeJobFor(videoId);
+    if (!active || active.status !== "running") return overallProgress(byStage);
+    const patched = {
+      ...byStage,
+      [active.stage]: { ...active, progress: displayProgress(active) },
+    };
+    return overallProgress(patched);
   }
 
   function openQueuedVideo(video: Video) {
@@ -806,9 +814,8 @@ export function Home() {
             <div className="flex w-full flex-col gap-3">
               {queuedVideos.map((video) => {
                 const active = activeJobFor(video.id);
-                const progress = displayProgress(active);
-                const percent = Math.floor(progress * 100);
-                const message = active?.message || stageLabel(active?.stage);
+                const percent = Math.floor(pipelineProgressFor(video.id) * 100);
+                const message = stageMessage(active);
                 const canCancel =
                   active?.status === "running" || active?.status === "pending";
                 return (
