@@ -7,12 +7,14 @@ studio = (root / "screenshot-studio.html").read_text(encoding="utf-8")
 generator = (root / "generate_mock_screenshots.py").read_text(encoding="utf-8")
 
 required_text = [
-    "课程视频学习工作台",
-    "Bilibili / URL 下载",
-    "本地 whisper.cpp",
-    "截图 OCR",
-    "回答按句标注出处",
-    "prompt caching",
+    "课程视频",
+    "Bilibili",
+    "whisper.cpp",
+    "OCR",
+    "间隔复习",
+    "AI 助手",
+    "知识点",
+    "Token",
     "data-animate",
     "data-parallax",
     "IntersectionObserver",

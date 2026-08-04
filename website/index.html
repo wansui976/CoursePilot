@@ -3,19 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>CoursePilot — 把课程视频整理成可复习资料</title>
+    <title>CoursePilot — 把课程视频变成真正记得住的东西</title>
     <meta
       name="description"
-      content="CoursePilot 是本地优先的课程视频学习工作台。导入本地视频，或用 Bilibili / URL 下载，它会转写字幕、整理章节、生成笔记和脑图，还能按课程内容回答问题。"
+      content="把课程视频变成真正记得住的东西——自动转写、笔记、章节、课件截图、脑图、练习题、知识点抽取、间隔复习，还有一个能帮你操作应用的 AI 助手。本地优先，数据在你手里。"
     />
     <meta name="theme-color" content="#000000" />
 
     <!-- Open Graph / 分享卡片 -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="CoursePilot — 课程视频学习工作台" />
+    <meta property="og:title" content="CoursePilot — 把课程视频变成真正记得住的东西" />
     <meta
       property="og:description"
-      content="导入本地视频，或用 Bilibili / URL 下载。CoursePilot 会转写字幕、整理章节、生成笔记和脑图。资料存在本地，AI 功能使用你自己的 Key。"
+      content="自动转写、笔记、章节、课件截图、脑图、练习题、知识点抽取、间隔复习，还有 AI 助手帮你操作应用。本地优先，数据在你手里。"
     />
     <meta property="og:image" content="./og-image.png" />
 
@@ -1278,9 +1278,8 @@
         </a>
         <div class="global-nav__links">
           <a href="#features">功能</a>
-          <a href="#workbench">工作台</a>
+          <a href="#workbench">流程</a>
           <a href="#privacy">隐私</a>
-          <a href="#media">截图</a>
           <a href="#download">下载</a>
         </div>
         <span class="global-nav__spacer"></span>
@@ -1295,16 +1294,16 @@
         <div class="aurora" aria-hidden="true"></div>
         <div class="tile__inner" style="position: relative; z-index: 1;">
           <p class="eyebrow" data-animate="hero" style="--motion-delay: 80ms">CoursePilot</p>
-          <h1 class="hero-display" data-animate="hero" style="--motion-delay: 160ms">把课程视频<br />整理成可复习资料。</h1>
+          <h1 class="hero-display" data-animate="hero" style="--motion-delay: 160ms">把课程视频变成<br />真正记得住的东西。</h1>
           <p class="lead" data-animate="hero" style="--motion-delay: 240ms">
-            把本地视频拖进来，或粘贴 Bilibili / URL 下载。CoursePilot 会转写字幕、纠错、分好章节，再生成笔记、脑图和练习题。处理完，你就有了一套能搜、能问、能复习的资料。
+            拖进来一个视频，CoursePilot 会转写字幕、生成笔记和脑图、抽取课件、出练习题。然后用知识点和间隔复习帮你真正记住它。还有一个 AI 助手，用自然语言就能操作整个应用。
           </p>
           <div class="cta-row" data-animate="hero" style="--motion-delay: 320ms">
             <a class="btn-pill" href="#download" data-magnetic>查看下载方式</a>
             <a class="btn-pill btn-dark-link" href="https://github.com/wansui976/CoursePilot" data-magnetic>GitHub 源码</a>
             <a class="text-link" href="#workbench">看看流程</a>
           </div>
-          <p class="caption" data-animate="hero" style="--motion-delay: 380ms">macOS · iPhone · iPad · Android · 资料存在本地 · AI 功能使用你自己的 API Key</p>
+          <p class="caption" data-animate="hero" style="--motion-delay: 380ms">macOS · iPhone · iPad · Android · 资料存在本地 · 跨设备同步 · AI 功能使用你自己的 API Key</p>
 
           <!-- Screenshot source: website/promo-hero.png -->
           <div class="product-shot shot-frame" id="promo-hero" data-animate="scale" data-parallax role="img" aria-label="CoursePilot 学习工作台界面预览：左侧图标侧栏，中间播放课程视频，右侧为 AI 概览 / 笔记 / 文稿 / 课件 标签，当前为 AI 概览">
@@ -1366,7 +1365,7 @@
               </div>
             </div>
           </div>
-          <p class="caption media-note" data-animate>宣传截图资产：promo-hero.png · promo-workbench.png · og-image.png</p>
+          <p class="caption media-note" data-animate>本地优先 · 开源 MIT · 资料不上传 · 凭证存在系统钥匙串</p>
         </div>
       </section>
 
@@ -1376,7 +1375,7 @@
           <p class="eyebrow" data-animate>学习资料</p>
           <h2 class="display-lg" data-animate>视频看完，资料也整理好了。</h2>
           <p class="lead" data-animate>
-            章节、概览、笔记、练习题和脑图，都从这节课的文稿里生成。可以直接拿来复习，也可以再改、导出，按自己的习惯整理。
+            章节、概览、笔记、练习题、脑图和知识点，都从这节课的文稿和课件文字里生成。可以直接拿来复习，也可以再改、导出，按自己的习惯整理。
           </p>
 
           <div class="feature-cols" data-animate>
@@ -1384,38 +1383,40 @@
               <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
               </svg>
-              <h3>章节与概览</h3>
-              <p>把一节课拆成几个自然段落，每段配一句摘要；点一下章节，就回到对应时间点。</p>
+              <h3>章节、笔记与脑图</h3>
+              <p>把一节课拆成章节，配上概览；再生成图文笔记和脑图。课件上的板书、公式也一并被识别出来喂给 AI，写在片子上但没念出来的内容不会丢。</p>
             </div>
             <div data-animate style="--motion-delay: 140ms">
               <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M5 4h11l4 4v12H5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
-                <path d="M8 12h8M8 16h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                <circle cx="12" cy="8" r="3" stroke="currentColor" stroke-width="1.7" />
+                <circle cx="5" cy="17" r="2.5" stroke="currentColor" stroke-width="1.7" />
+                <circle cx="19" cy="17" r="2.5" stroke="currentColor" stroke-width="1.7" />
+                <path d="M12 11v2M8.5 15l-2 1M15.5 15l2 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
               </svg>
-              <h3>笔记与脑图</h3>
-              <p>先生成一版图文笔记，再理成脑图。哪里写得不顺，直接改；课件截图也能插进去。</p>
+              <h3>知识点</h3>
+              <p>每个视频自动抽取知识点，同名和近义的自动合并成课程清单。每个知识点有解释、学习进度、搜索高亮和补卡入口。</p>
             </div>
             <div data-animate style="--motion-delay: 210ms">
               <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.7" />
-                <path d="M12 8v4l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" stroke-width="1.7" />
+                <path d="M8 12l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <h3>练习题</h3>
-              <p>按这节课出几道自测题。答错了，回到那一段再看一遍。</p>
+              <h3>练习题与间隔复习</h3>
+              <p>按课程内容自动出题；做完的题目进入 FSRS-4.5 间隔复习调度器，打分前就能看到四个档位分别把下次复习推到多久之后。在文稿里划一段也能做成挖空卡。</p>
             </div>
           </div>
           <div class="capability-band" data-animate>
             <div class="capability">
-              <strong>长字幕不用每次重读。</strong>
-              <p>Anthropic 走 cache_control，OpenAI-compatible 端把长文稿作为可缓存前缀。反复生成章节、笔记、练习题时，可以命中 prompt caching。</p>
+              <strong>字幕改了，AI 资料自动过期。</strong>
+              <p>手动改过字幕后，基于旧稿生成的笔记、章节等 AI 产物会自动标为「已过期」，提醒你重新生成。</p>
             </div>
             <div class="capability">
-              <strong>本地搜索，不绑向量库。</strong>
-              <p>文稿搜索用本地关键词匹配。命中项带时间戳，点一下就回到视频里的那一句。</p>
+              <strong>字幕和课件都能搜。</strong>
+              <p>跨视频搜索字幕和课件文字，命中直接跳到对应时刻。中文搜索按稀有度加权，自然语言问句也能命中。</p>
             </div>
             <div class="capability">
-              <strong>生成后还能改。</strong>
-              <p>笔记、脑图、字幕和课件截图都不是一次性结果。可以改，可以导出，也可以继续整理。</p>
+              <strong>Token 用量一目了然。</strong>
+              <p>每次大模型调用的 token 消耗都有记录，缓存命中率和思考消耗看得见，帮你掌握 API 花费。</p>
             </div>
           </div>
         </div>
@@ -1425,9 +1426,9 @@
       <section class="tile tile--light" id="workbench">
         <div class="tile__inner">
           <p class="eyebrow" data-animate>处理管线</p>
-          <h2 class="display-lg" data-animate>导入之后，按步骤处理。</h2>
+          <h2 class="display-lg" data-animate>导入之后，全自动处理。</h2>
           <p class="lead" data-animate>
-            本地视频，或 Bilibili / URL 下载进来后，CoursePilot 会分几步处理：抽音频、转写、字幕纠错，再到章节、概览、笔记、练习题和脑图。每一步都有进度，哪一步失败了，也能单独重试。
+            视频导入后，CoursePilot 会分步处理：抽音频、转写、字幕纠错，再到章节、概览、笔记、练习题和脑图。课件提取和语音识别并行，不用互相等。每一步都有进度，哪一步失败了也能单独重试。支持批量导入文件夹和 B 站播放列表，云端识别中断后可以断点续跑。
           </p>
           <div class="workflow" aria-label="CoursePilot 处理流程" data-animate>
             <div class="workflow__step" data-animate style="--motion-delay: 60ms">
@@ -1453,7 +1454,7 @@
             <div class="workflow__step" data-animate style="--motion-delay: 300ms">
               <span>05</span>
               <strong>复习</strong>
-              <p>搜索文稿，向课程提问，必要时再改笔记。</p>
+              <p>间隔复习知识点，搜索文稿，向课程提问。</p>
             </div>
           </div>
         </div>
@@ -1465,7 +1466,7 @@
           <p class="eyebrow" data-animate>课件</p>
           <h2 class="display-lg" data-animate>课件翻到哪，它就存到哪。</h2>
           <p class="lead" data-animate>
-            画面一变就自动识别换页，一页页留下来。看到想记的内容，截张图、做个截图 OCR，画面里的文字和图就一起进了笔记。
+            按画面变化比例判断换页，截取动画稳定后的那一帧，跳过纯色页和转场。每一页整批 OCR，板书上的公式和定义不会丢。导入时自动和语音识别并行提取，硬件解码采样，还会先裁掉视频自带的黑边。
           </p>
           <!-- Screenshot source: website/promo-workbench.png -->
           <div class="product-shot product-shot--wide shot-frame" id="promo-workbench" data-animate="scale" data-parallax role="img" aria-label="CoursePilot 课件界面预览：左侧图标侧栏，中间播放课程视频，右侧为「课件」标签下自动留存的课件页与 OCR">
@@ -1546,16 +1547,16 @@
           </div>
           <div class="capability-band" data-animate>
             <div class="capability">
-              <strong>抽帧和截图。</strong>
-              <p>桌面端用 ffmpeg，移动端走原生媒体能力，不把命令行 sidecar 带到手机上。</p>
+              <strong>课件文字也能搜到。</strong>
+              <p>搜课件上的文字时直接给出页面缩略图和页码，点击跳到讲这一页的时刻。</p>
             </div>
             <div class="capability">
               <strong>OCR 可本地可云端。</strong>
-              <p>离线时用本地 tesseract；课件文字复杂时，可以换成阿里云 OCR。</p>
+              <p>离线时用本地 tesseract；课件文字复杂时，可以换成阿里云 OCR。整批识别，一页失败不影响其他页。</p>
             </div>
             <div class="capability">
-              <strong>和笔记连在一起。</strong>
-              <p>课件图、识别文字和字幕时间戳会进入同一份笔记，后面还能继续改。</p>
+              <strong>板书喂给 AI。</strong>
+              <p>识别出的课件文字和讲稿按时间交织，一起喂给摘要、笔记、出题——写在片子上但没念出来的定义和公式不再丢失。</p>
             </div>
           </div>
         </div>
@@ -1565,9 +1566,9 @@
       <section class="tile tile--parchment">
         <div class="tile__inner">
           <p class="eyebrow" data-animate>提问</p>
-          <h2 class="display-lg" data-animate>直接问这节课。</h2>
+          <h2 class="display-lg" data-animate>直接问这门课。</h2>
           <p class="lead" data-animate>
-            回答只看这节课的字幕，回答按句标注出处。课程里讲过，就帮你定位到时间点；没讲到，会直接说没有依据。
+            单个视频的问答按相关性检索上下文，不用把整份字幕塞进去；课程级问答可以跨视频提问，两段式重排挑最相关的段落。在文稿里选中一段也能直接追问。问句搜不到东西时，会自动改写问题再试一次。
           </p>
           <div class="qa-demo" data-animate>
             <div class="qa-demo__row">
@@ -1582,8 +1583,115 @@
         </div>
       </section>
 
+      <!-- ============ AI 助手（dark） ============ -->
+      <section class="tile tile--dark spotlight">
+        <div class="tile__inner">
+          <p class="eyebrow" data-animate>AI 助手</p>
+          <h2 class="display-lg" data-animate>说一句话，它帮你做。</h2>
+          <p class="lead" data-animate>
+            屏幕角落的悬浮球，点开就是一个能帮你操作应用的 AI 助手。搜 B 站找视频、新建和管理课程、跳转到指定位置、查看学习进度和薄弱知识点——用自然语言说就行，不用翻菜单。
+          </p>
+          <div class="qa-demo" data-animate>
+            <div class="qa-demo__row">
+              <span class="qa-demo__label">你说</span>
+              <p>帮我在 B 站搜一下吴恩达的机器学习课程</p>
+            </div>
+            <div class="qa-demo__row">
+              <span class="qa-demo__label">助手做</span>
+              <p>🔍 搜索 B 站… 找到 8 个结果。<br />第一个是「吴恩达机器学习 2022」，共 33 集，发布于 2022-07。要导入到哪个课程？</p>
+            </div>
+          </div>
+          <div class="capability-band" data-animate>
+            <div class="capability">
+              <strong>对话式操作。</strong>
+              <p>气泡流对话，工具调用的过程用大白话解释。面板可拖拽吸附、可拉宽，收起后变成悬浮球。</p>
+            </div>
+            <div class="capability">
+              <strong>了解你的学习进度。</strong>
+              <p>助手可以读取你的学习进度、待复习内容和薄弱知识点，基于真实数据给建议。</p>
+            </div>
+            <div class="capability">
+              <strong>接着上次继续。</strong>
+              <p>会话支持连续性，可以继续上次的学习对话，不用每次重新说明上下文。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 学习闭环（light） ============ -->
+      <section class="tile tile--light">
+        <div class="tile__inner">
+          <p class="eyebrow" data-animate>学习闭环</p>
+          <h2 class="display-lg" data-animate>看完不是终点，记住才是。</h2>
+          <p class="lead" data-animate>
+            学习仪表盘追踪你的学习热力图、完成度和薄弱主题。每日目标设了就有反馈。间隔复习按 FSRS-4.5 调度，知识点自动抽取和合并——从看到记，形成闭环。
+          </p>
+          <div class="feature-cols" data-animate>
+            <div data-animate style="--motion-delay: 70ms">
+              <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" stroke-width="1.7" />
+                <path d="M7 13h2v4H7zM11 10h2v7h-2zM15 7h2v10h-2z" fill="currentColor" opacity="0.7" />
+              </svg>
+              <h3>学习仪表盘</h3>
+              <p>热力图、每门课的完成度环、到期复习角标、薄弱主题聚合、「继续学习」入口，一页看清学习全貌。</p>
+            </div>
+            <div data-animate style="--motion-delay: 140ms">
+              <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7" />
+                <path d="M12 7v5l4 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <h3>间隔复习</h3>
+              <p>FSRS-4.5 调度器，复习卡按知识点分组。打分前看到四个档位各会推到多久之后。文稿里划一段就能做成挖空卡。</p>
+            </div>
+            <div data-animate style="--motion-delay: 210ms">
+              <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 3v3M12 18v3M3 12h3M18 12h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                <circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.7" />
+              </svg>
+              <h3>每日目标</h3>
+              <p>设一个学习目标，进度拨盘实时跟踪。达成后有反馈，桌面端还支持原生学习提醒。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 播放器（dark-2） ============ -->
+      <section class="tile tile--dark-2">
+        <div class="tile__inner">
+          <p class="eyebrow" data-animate>播放器</p>
+          <h2 class="display-lg" data-animate>不只是播放，是学习。</h2>
+          <p class="lead" data-animate>
+            跳停顿、智能倍速、收藏片段、长按快扫、字幕浮层——播放器为长课程学习专门设计。
+          </p>
+          <div class="feature-cols" data-animate>
+            <div data-animate style="--motion-delay: 70ms">
+              <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <polygon points="5,3 19,12 5,21" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" fill="none" />
+                <path d="M13 8l4 4-4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <h3>跳停顿</h3>
+              <p>自动跃过老师写板书、等记笔记这类无声空档。换页瞬间不跳，另有「上一处/下一处」试跳按钮。</p>
+            </div>
+            <div data-animate style="--motion-delay: 140ms">
+              <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+              </svg>
+              <h3>智能倍速</h3>
+              <p>按信息密度动态调速——讲得稀的段落自动加速，推导密集处回到你选的倍速，永远不会比你设的更慢。</p>
+            </div>
+            <div data-animate style="--motion-delay: 210ms">
+              <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+              </svg>
+              <h3>收藏片段</h3>
+              <p>两次点击框出一段，记个笔记，随时跳回。方向键长按进入快扫，短按 ±5 秒。字幕浮层可在画面内自由拖动。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- ============ 工具卡：为什么选 CoursePilot ============ -->
-      <section class="tile tile--light" id="privacy">
+      <section class="tile tile--parchment" id="privacy">
         <div class="tile__inner">
           <p class="eyebrow" data-animate>一点说明</p>
           <h2 class="display-lg" data-animate>够本地，也够透明。</h2>
@@ -1598,11 +1706,11 @@
           </div>
           <div class="ucard" data-animate style="--motion-delay: 120ms">
             <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="3" y="4" width="18" height="13" rx="2" stroke="currentColor" stroke-width="1.7" />
-              <path d="M8 20h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              <path d="M8 7h12M8 12h12M8 17h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              <path d="M4.5 7h.01M4.5 12h.01M4.5 17h.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
             </svg>
-            <h3>多平台一致</h3>
-            <p>macOS、iOS、Android 和 Windows 使用同一套工作台。</p>
+            <h3>跨设备同步</h3>
+            <p>通过 Apple CloudKit 在多台设备间同步学习记录，网络不好时自动驻留重试。</p>
           </div>
           <div class="ucard" data-animate style="--motion-delay: 180ms">
             <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1623,7 +1731,7 @@
       </section>
 
       <!-- ============ 宣传截图资产 ============ -->
-      <section class="tile tile--parchment" id="media">
+      <section class="tile tile--light" id="media">
         <div class="tile__inner">
           <p class="eyebrow" data-animate>媒体资产</p>
           <h2 class="display-lg" data-animate>产品介绍图已经备好。</h2>
@@ -1709,7 +1817,8 @@
             <h4>功能</h4>
             <a href="#features">字幕转写</a>
             <a href="#features">课件提取</a>
-            <a href="#features">课程问答</a>
+            <a href="#features">间隔复习</a>
+            <a href="#features">AI 助手</a>
           </div>
           <div class="footer__col">
             <h4>支持</h4>
@@ -1725,7 +1834,7 @@
           </div>
         </div>
         <p class="footer__legal">
-          CoursePilot 是本地优先的个人课程学习工具。云端语音识别、大模型和 OCR 需要在应用内配置对应服务的 API Key。<br />
+          CoursePilot 把课程视频变成真正记得住的东西——自动转写、笔记、知识点、间隔复习，还有 AI 助手。云端语音识别、大模型和 OCR 需要在应用内配置对应服务的 API Key。<br />
           App Store 与 App Store 标识、Google Play 与 Google Play 标识分别为 Apple Inc. 与 Google LLC 的商标。<br />
           © <span id="year">2026</span> CoursePilot. 保留所有权利。
         </p>
