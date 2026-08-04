@@ -806,6 +806,18 @@ async fn live_video_paths(db: &Db, video_id: &str) -> AppResult<(String, String)
         .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))
 }
 
+/// 不问是否在回收站的路径查询。仅供封面使用：回收站里的条目也要认得出是哪个视频，
+/// 而软删只是打了个 deleted_at，文件和 data_dir 都还在，缩略图照样出得来。
+/// 播放、转封装那几条命令继续走 live_video_paths——「能认出来」和「能打开」是两回事，
+/// 回收站里的东西不该还能播。
+async fn any_video_paths(db: &Db, video_id: &str) -> AppResult<(String, String)> {
+    sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
+        .bind(video_id)
+        .fetch_optional(&db.pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))
+}
+
 #[tauri::command]
 pub async fn cmd_list_videos(
     state: State<'_, AppState>,
@@ -931,13 +943,20 @@ pub async fn cmd_video_cover(
     state: State<'_, AppState>,
     video_id: String,
 ) -> AppResult<tauri::ipc::Response> {
-    let (file_path, data_dir) = live_video_paths(&state.db, &video_id).await?;
+    Ok(tauri::ipc::Response::new(
+        video_cover_bytes(&state.db, &video_id).await?,
+    ))
+}
+
+/// 封面字节。回收站里的视频同样给得出——见 any_video_paths。
+pub async fn video_cover_bytes(db: &Db, video_id: &str) -> AppResult<Vec<u8>> {
+    let (file_path, data_dir) = any_video_paths(db, video_id).await?;
     let cover = crate::pipeline::slides::ensure_cover(
         std::path::Path::new(&file_path),
         std::path::Path::new(&data_dir),
     )
     .await?;
-    Ok(tauri::ipc::Response::new(tokio::fs::read(&cover).await?))
+    Ok(tokio::fs::read(&cover).await?)
 }
 
 #[cfg(test)]
@@ -967,6 +986,44 @@ mod tests {
         let list = list_videos(&db, &course.id).await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].order_index, 1);
+    }
+
+    /// 回收站里的条目也要认得出是哪个视频。软删只是打了个 deleted_at，
+    /// 文件和 data_dir 都还在，缩略图本来就出得来——此前封面命令一律按「未删除」查，
+    /// 于是整个回收站只剩一排一模一样的占位图标，恰恰在要挑哪个恢复、哪个永久删的时候。
+    #[tokio::test]
+    async fn a_video_in_the_trash_still_has_a_cover() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let video_path = dir.path().join("01.mp4");
+        std::fs::write(&video_path, b"fake").unwrap();
+        let video = add_local_video(&db, &course.id, video_path, None)
+            .await
+            .unwrap();
+        // 预置缓存好的封面：真机上首帧早在首页就截过了，这里也就不必依赖 ffmpeg。
+        std::fs::write(
+            std::path::Path::new(&video.data_dir).join("cover.jpg"),
+            b"jpeg-bytes",
+        )
+        .unwrap();
+
+        delete_video(&db, &video.id).await.unwrap();
+
+        assert_eq!(
+            video_cover_bytes(&db, &video.id).await.unwrap(),
+            b"jpeg-bytes",
+            "回收站里的视频应当照常给得出封面"
+        );
+        // 但「认得出」不等于「能打开」：播放那几条命令仍旧只认未删除的视频。
+        assert!(
+            live_video_paths(&db, &video.id).await.is_err(),
+            "回收站里的视频不该还能播"
+        );
     }
 
     #[tokio::test]
