@@ -3,7 +3,7 @@
 //! agent 循环本身不认识任何工具（见 llm 那边的 agent 模块），**安全策略全在这一层**。
 //! 一条硬规矩贯穿始终：
 //!
-//! **只读的直接执行，会改动的一律只提案。**
+//! **只读查询直接执行，导航只生成待点击动作，会改动的一律只提案。**
 //!
 //! 改名、删除、改设置、下载导入，工具本身**不动任何数据**，只是把「打算做什么」记下来，
 //! 交给界面渲染成一张确认卡，用户点了才真的执行。这不只是防误删——真正的风险不是
@@ -29,13 +29,13 @@ use std::sync::Mutex;
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AssistantAction {
-    /// 导航：打开某个视频（可带跳转时刻）。无破坏性，界面可以直接执行。
+    /// 导航：生成打开某个视频的待点击动作（可带跳转时刻）。工具调用本身不会切换界面。
     OpenVideo {
         video_id: String,
         title: String,
         at_ms: Option<i64>,
     },
-    /// 导航：在当前视频里跳到某一刻。
+    /// 导航：生成在当前视频里跳到某一刻的待点击动作。
     SeekTo { at_ms: i64 },
     /// 提案：改名。界面渲染确认卡，用户点了才调真正的改名命令。
     ProposeRename {
@@ -375,7 +375,7 @@ impl<'a> AssistantTools<'a> {
             "，从开头继续".to_string()
         };
         Ok(ToolOutcome::ok(format!(
-            "已直接打开《{} / {}》{position}。不要再调用 open_video。",
+            "已找到《{} / {}》{position}。点击下方按钮后才会打开，不要再调用 open_video。",
             recent.course_name, recent.video_title
         )))
     }
@@ -721,9 +721,9 @@ pub fn tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "resume_learning".into(),
-            description: "直接打开最近学习的视频并跳到已同步的播放进度。\
+            description: "生成一个待点击的导航动作，打开最近学习的视频并跳到已同步的播放进度。工具调用本身不会切换界面，用户点击后才打开。\
                  给 course_id 时继续该课程；不提供时优先继续当前课程，首页则继续全局最近记录。\
-                 这个工具已经执行打开动作，成功后不要再调用 open_video。"
+                 成功后不要再调用 open_video。"
                 .into(),
             parameters: object(json!({"course_id": {"type": "string"}}), &[]),
         },
@@ -766,7 +766,7 @@ pub fn tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "open_video".into(),
-            description: "在界面上打开某个视频，可选跳到某个毫秒时刻。".into(),
+            description: "生成一个待点击的导航动作，在界面上打开某个视频，可选跳到某个毫秒时刻；工具调用本身不会立即切换界面。".into(),
             parameters: object(
                 json!({"video_id": {"type": "string"}, "at_ms": {"type": "integer"}}),
                 &["video_id"],
@@ -774,7 +774,7 @@ pub fn tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "seek_to".into(),
-            description: "把当前正在看的视频跳到某个毫秒时刻。".into(),
+            description: "生成一个待点击的导航动作，把当前正在看的视频跳到某个毫秒时刻；工具调用本身不会立即跳转。".into(),
             parameters: object(json!({"at_ms": {"type": "integer"}}), &["at_ms"]),
         },
         ToolSpec {
@@ -935,7 +935,10 @@ impl AssistantTools<'_> {
                     title: video.title.clone(),
                     at_ms: args.at_ms,
                 });
-                Ok(ToolOutcome::ok(format!("已打开《{}》。", video.title)))
+                Ok(ToolOutcome::ok(format!(
+                    "已找到《{}》。点击下方按钮后才会打开。",
+                    video.title
+                )))
             }
 
             "seek_to" => {
@@ -947,7 +950,7 @@ impl AssistantTools<'_> {
                 }
                 self.record(AssistantAction::SeekTo { at_ms: args.at_ms });
                 Ok(ToolOutcome::ok(format!(
-                    "已跳到 {}。",
+                    "已定位到 {}。点击下方按钮后才会跳转。",
                     crate::pipeline::rag::mmss(args.at_ms)
                 )))
             }
@@ -1390,6 +1393,8 @@ mod tests {
         );
         let current = current_tools.run(&call("resume_learning", "{}")).await;
         assert!(current.content.contains("01:05"));
+        assert!(current.content.contains("点击下方按钮后才会打开"));
+        assert!(!current.content.contains("已直接打开"));
         match current_tools.take_actions().as_slice() {
             [AssistantAction::OpenVideo {
                 video_id: opened,
@@ -1820,15 +1825,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn opening_a_video_is_executed_directly_because_it_breaks_nothing() {
+    async fn opening_a_video_returns_a_pending_navigation_action() {
         let (db, _course, video_id, _d) = seed().await;
         let tools = AssistantTools::new(&db, AssistantContext::default());
-        tools
+        let out = tools
             .run(&call(
                 "open_video",
                 &format!(r#"{{"video_id":"{video_id}","at_ms":90000}}"#),
             ))
             .await;
+        assert!(out.content.contains("点击下方按钮后才会打开"));
+        assert!(!out.content.contains("已打开"));
         match tools.take_actions().as_slice() {
             [AssistantAction::OpenVideo { at_ms, .. }] => assert_eq!(*at_ms, Some(90_000)),
             other => panic!("应当是一条导航动作，实际 {other:?}"),
@@ -1928,6 +1935,18 @@ mod tests {
             assert!(
                 spec.description.contains("确认"),
                 "{name} 的说明里没讲清楚这只是提案"
+            );
+        }
+    }
+
+    #[test]
+    fn navigation_tools_say_that_the_user_must_click() {
+        let specs = tool_specs();
+        for name in ["resume_learning", "open_video", "seek_to"] {
+            let spec = specs.iter().find(|spec| spec.name == name).unwrap();
+            assert!(
+                spec.description.contains("待点击"),
+                "{name} 的说明没有声明待点击动作"
             );
         }
     }

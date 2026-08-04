@@ -246,7 +246,7 @@ export interface AssistantMessage {
 /**
  * 助手想让界面做的事。
  *
- * 分两类，界面必须区别对待：`open_video` / `seek_to` 是导航，没有破坏性，直接执行；
+ * 分两类，界面必须区别对待：`open_video` / `seek_to` 是待点击导航动作，工具调用本身不会直接执行；
  * 其余 `propose_*` 是**提案**——后端一个字节都没改，必须渲染成确认卡，用户点了才落地。
  */
 export type AssistantAction =
