@@ -78,6 +78,34 @@ pub struct AgentOutcome {
     pub canceled: bool,
 }
 
+/// 执行一个工具，同时轮询用户取消标志。
+///
+/// 工具可能包含网络请求或全库检索，只在调用前后检查一次会让「停止」一直等到工具自己的
+/// 超时。返回 `None` 时当前工具 future 已被丢弃；调用方仍要为这次 tool_call 补一条结果，
+/// 保持后续会话结构完整。
+async fn run_tool_or_cancel<T: ToolBox>(
+    tools: &T,
+    call: &ToolCall,
+    cancel: &AtomicBool,
+) -> Option<ToolOutcome> {
+    if cancel.load(Ordering::SeqCst) {
+        return None;
+    }
+
+    let pending = tools.run(call);
+    tokio::pin!(pending);
+    loop {
+        tokio::select! {
+            outcome = &mut pending => return Some(outcome),
+            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                if cancel.load(Ordering::SeqCst) {
+                    return None;
+                }
+            }
+        }
+    }
+}
+
 /// 跑一轮工具调用循环，直到模型给出不带工具调用的答复。
 ///
 /// `messages` 是起始对话（通常是系统状态 + 用户这句话）；返回时会带上循环中产生的
@@ -149,9 +177,14 @@ pub async fn run<T: ToolBox>(
                 continue;
             }
             on_event(AgentEvent::ToolStarted(call));
-            let outcome = tools.run(call).await;
+            let outcome = run_tool_or_cancel(tools, call, cancel).await;
             on_event(AgentEvent::ToolFinished(call));
-            messages.push(ChatMessage::tool_result(&call.id, outcome.content));
+            messages.push(ChatMessage::tool_result(
+                &call.id,
+                outcome
+                    .map(|outcome| outcome.content)
+                    .unwrap_or_else(|| "已取消，执行未完成。".to_string()),
+            ));
         }
     }
 
@@ -205,6 +238,8 @@ mod tests {
             arguments: args.into(),
         }
     }
+
+    fn ignore_event(_event: AgentEvent<'_>) {}
 
     fn says(text: &str) -> crate::llm::ChatResponse {
         crate::llm::ChatResponse {
@@ -435,6 +470,81 @@ mod tests {
             .filter_map(|m| m.tool_call_id.clone())
             .collect();
         assert_eq!(answered, ["a", "b"], "两次调用都要有结果，哪怕是「已取消」");
+    }
+
+    #[tokio::test]
+    async fn canceling_interrupts_a_tool_that_never_returns() {
+        struct NeverReturns {
+            started: AtomicBool,
+        }
+
+        impl ToolBox for NeverReturns {
+            fn specs(&self) -> Vec<ToolSpec> {
+                vec![ToolSpec {
+                    name: "probe".into(),
+                    description: String::new(),
+                    parameters: serde_json::json!({"type":"object"}),
+                }]
+            }
+
+            async fn run(&self, _call: &ToolCall) -> ToolOutcome {
+                self.started.store(true, Ordering::SeqCst);
+                std::future::pending::<ToolOutcome>().await
+            }
+        }
+
+        let provider = scripted(vec![wants(vec![
+            call("running", "probe", "{}"),
+            call("queued", "probe", "{}"),
+        ])]);
+        let cancel = AtomicBool::new(false);
+        let tools = NeverReturns {
+            started: AtomicBool::new(false),
+        };
+
+        let scenario = async {
+            let mut on_event = ignore_event;
+            let stop_when_started = async {
+                while !tools.started.load(Ordering::SeqCst) {
+                    tokio::task::yield_now().await;
+                }
+                cancel.store(true, Ordering::SeqCst);
+            };
+            let (result, ()) = tokio::join!(
+                run(
+                    &provider,
+                    "m",
+                    None,
+                    vec![ChatMessage::user("执行慢工具")],
+                    &tools,
+                    &cancel,
+                    &mut on_event,
+                ),
+                stop_when_started,
+            );
+            result.unwrap()
+        };
+
+        let out = tokio::time::timeout(std::time::Duration::from_secs(1), scenario)
+            .await
+            .expect("停止后不该继续等待挂起的工具");
+        assert!(out.canceled);
+
+        let results: Vec<(&str, &str)> = out
+            .messages
+            .iter()
+            .filter_map(|message| {
+                Some((message.tool_call_id.as_deref()?, message.content.as_str()))
+            })
+            .collect();
+        assert_eq!(
+            results,
+            [
+                ("running", "已取消，执行未完成。"),
+                ("queued", "已取消，未执行。"),
+            ],
+            "正在执行和尚未执行的调用都要各有一条取消结果"
+        );
     }
 
     #[tokio::test]
