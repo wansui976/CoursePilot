@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CheckCircle2, RotateCcw, X, XCircle } from "lucide-react";
 import { ipc, type DueCard } from "@/lib/ipc";
+import { formatStudyInterval } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { MathText } from "./MathText";
 
@@ -342,18 +343,33 @@ export function ReviewSession({
                     )}
                   </div>
                   <div className="mt-5 grid grid-cols-4 gap-2">
-                    {GRADES.map((g) => (
-                      <button
-                        key={g.rating}
-                        type="button"
-                        onClick={() => grade(g.rating)}
-                        disabled={review.isPending}
-                        className="ca-touch-44 rounded-lg border border-[var(--border-subtle)] px-2 py-2 text-sm text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
-                      >
-                        <span className="block font-medium">{g.label}</span>
-                        <span className="text-xs text-[var(--text-faint)]">{g.key}</span>
-                      </button>
-                    ))}
+                    {GRADES.map((g) => {
+                      // 该档按下去会推到多久之后。后端与真正落库的排期同源，这里只负责显示；
+                      // 缺失（老后端）时整行不出现，不猜一个数字糊上去。
+                      const interval = card.preview_ms?.[g.rating - 1];
+                      return (
+                        <button
+                          key={g.rating}
+                          type="button"
+                          onClick={() => grade(g.rating)}
+                          disabled={review.isPending}
+                          aria-label={
+                            interval == null
+                              ? g.label
+                              : `${g.label}，下次复习在 ${formatStudyInterval(interval)}后`
+                          }
+                          className="ca-touch-44 rounded-lg border border-[var(--border-subtle)] px-1 py-2 text-sm text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
+                        >
+                          <span className="block font-medium">{g.label}</span>
+                          {interval != null && (
+                            <span className="mt-0.5 block truncate text-xs tabular-nums text-[var(--text-muted)]">
+                              {formatStudyInterval(interval)}
+                            </span>
+                          )}
+                          <span className="text-xs text-[var(--text-faint)]">{g.key}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                   {review.isError && (
                     <p

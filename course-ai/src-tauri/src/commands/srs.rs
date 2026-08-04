@@ -90,6 +90,83 @@ pub fn fsrs_review(prev: Option<(f64, f64)>, rating: i64, elapsed_days: f64) -> 
     }
 }
 
+/// 一张卡的排期状态。三处共用同一个结构：本地打分的增量更新、同步收方向按事件重放的
+/// 折叠、以及打分前给用户看的间隔预览。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScheduleState {
+    pub stability: f64,
+    pub difficulty: f64,
+    pub interval_days: i64,
+    pub reps: i64,
+    pub lapses: i64,
+    pub last_reviewed: Option<i64>,
+    pub due_at: i64,
+}
+
+impl ScheduleState {
+    /// 未复习过的新卡：与建卡时写入的种子排期一字不差。
+    pub(crate) fn fresh(created_at: i64) -> Self {
+        Self {
+            stability: 0.0,
+            difficulty: 0.0,
+            interval_days: 0,
+            reps: 0,
+            lapses: 0,
+            last_reviewed: None,
+            due_at: created_at,
+        }
+    }
+}
+
+/// 一次复习的状态递推——本地打分、事件重放、间隔预览走的都是这一个函数。
+///
+/// 只此一处的意义有两层：「增量 ≡ 重放」是同步收方向的收敛前提（由测试钉死）；
+/// 而预览若另算一遍，它迟早会与真正落库的排期分家——按钮上写着 8 天、按下去变成 5 天，
+/// 比不给预览更糟。
+pub fn step_review(state: &mut ScheduleState, rating: i64, ts: i64) {
+    let prev = if state.stability > 0.0 && state.last_reviewed.is_some() {
+        Some((state.stability, state.difficulty))
+    } else {
+        None
+    };
+    let elapsed_days = state
+        .last_reviewed
+        .map(|last| ((ts - last) as f64 / DAY_MS as f64).max(0.0))
+        .unwrap_or(0.0);
+    let (stability, difficulty) = fsrs_review(prev, rating, elapsed_days);
+    let interval = interval_days_for(stability);
+    // Again 保留「本会话很快再来」（~1 分钟）；其余按 FSRS 间隔。
+    state.due_at = if rating <= 1 {
+        ts + 60_000
+    } else {
+        ts + interval * DAY_MS
+    };
+    state.reps = if rating <= 1 { 0 } else { state.reps + 1 };
+    state.lapses = if rating <= 1 {
+        state.lapses + 1
+    } else {
+        state.lapses
+    };
+    state.stability = stability;
+    state.difficulty = difficulty;
+    state.interval_days = interval;
+    state.last_reviewed = Some(ts);
+}
+
+/// 四个评分档各自的「距下次复习还有多久」（毫秒），下标 0..3 对应 rating 1..4。
+///
+/// 给的是间隔而非绝对到期时刻：卡片列表在会话开始时一次取回，用户可能十分钟后才按下按钮，
+/// 绝对时刻届时已经偏了，间隔不会。
+pub fn preview_intervals_ms(state: &ScheduleState, now: i64) -> Vec<i64> {
+    (1..=4)
+        .map(|rating| {
+            let mut next = state.clone();
+            step_review(&mut next, rating, now);
+            (next.due_at - now).max(0)
+        })
+        .collect()
+}
+
 /// 待复习卡片（到期）。带出处以支持「回看」。
 #[derive(Debug, Serialize)]
 pub struct DueCard {
@@ -102,7 +179,16 @@ pub struct DueCard {
     pub question_type: Option<String>,
     pub options: Option<Vec<String>>,
     pub correct_options: Option<Vec<String>>,
+    /// 四个评分档按下去各自会推到多久之后（毫秒，下标对应 rating 1..4）。
+    pub preview_ms: Vec<i64>,
 }
+
+/// 到期卡查询共用的列。排期那几列只为算间隔预览，不出现在返回给前端的 `DueCard` 里。
+const DUE_CARD_COLUMNS: &str =
+    "c.id, c.video_id, c.course_id, c.kind, c.front, c.back, c.source_ms,
+                q.questions_json,
+                s.stability, s.difficulty, s.interval_days, s.reps, s.lapses, s.last_reviewed,
+                s.due_at";
 
 #[derive(sqlx::FromRow)]
 struct DueCardRow {
@@ -114,11 +200,27 @@ struct DueCardRow {
     back: String,
     source_ms: Option<i64>,
     questions_json: Option<String>,
+    stability: f64,
+    difficulty: f64,
+    interval_days: i64,
+    reps: i64,
+    lapses: i64,
+    last_reviewed: Option<i64>,
+    due_at: i64,
 }
 
 impl DueCardRow {
-    fn into_due_card(self) -> DueCard {
+    fn into_due_card(self, now: i64) -> DueCard {
         let choice = choice_payload_for_card(&self);
+        let schedule = ScheduleState {
+            stability: self.stability,
+            difficulty: self.difficulty,
+            interval_days: self.interval_days,
+            reps: self.reps,
+            lapses: self.lapses,
+            last_reviewed: self.last_reviewed,
+            due_at: self.due_at,
+        };
         DueCard {
             id: self.id,
             video_id: self.video_id,
@@ -129,6 +231,7 @@ impl DueCardRow {
             question_type: choice.as_ref().map(|(kind, _, _)| kind.clone()),
             options: choice.as_ref().map(|(_, options, _)| options.clone()),
             correct_options: choice.map(|(_, _, correct)| correct),
+            preview_ms: preview_intervals_ms(&schedule, now),
         }
     }
 }
@@ -293,9 +396,8 @@ pub async fn due_cards_for_concept(
     limit: i64,
 ) -> AppResult<Vec<DueCard>> {
     let by_video = course_occurrences_by_video(db, course_id).await?;
-    let cards: Vec<DueCardRow> = sqlx::query_as(
-        "SELECT c.id, c.video_id, c.course_id, c.kind, c.front, c.back, c.source_ms,
-                q.questions_json
+    let cards: Vec<DueCardRow> = sqlx::query_as(&format!(
+        "SELECT {DUE_CARD_COLUMNS}
          FROM cards c JOIN card_schedule s ON s.card_id = c.id
          LEFT JOIN quizzes q ON q.video_id = c.video_id
          LEFT JOIN videos v ON v.id = c.video_id
@@ -304,8 +406,8 @@ pub async fn due_cards_for_concept(
            AND (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
            AND (COALESCE(v.course_id, c.course_id) IS NULL
                 OR (course.id IS NOT NULL AND course.deleted_at IS NULL))
-         ORDER BY s.due_at, c.id",
-    )
+         ORDER BY s.due_at, c.id"
+    ))
     .bind(course_id)
     .bind(now)
     .fetch_all(&db.pool)
@@ -313,7 +415,7 @@ pub async fn due_cards_for_concept(
 
     Ok(cards
         .into_iter()
-        .map(DueCardRow::into_due_card)
+        .map(|row| row.into_due_card(now))
         .filter(|card| {
             let occ = occ_for(&by_video, card.video_id.as_deref());
             concept_for_card(card.source_ms, occ).as_deref() == Some(concept_id)
@@ -743,9 +845,8 @@ pub async fn add_manual_card(
 
 /// 到期待复习卡（跨课程），按到期时间升序。
 pub async fn due_cards(db: &Db, now: i64, limit: i64) -> AppResult<Vec<DueCard>> {
-    let rows: Vec<DueCardRow> = sqlx::query_as(
-        "SELECT c.id, c.video_id, c.course_id, c.kind, c.front, c.back, c.source_ms,
-                q.questions_json
+    let rows: Vec<DueCardRow> = sqlx::query_as(&format!(
+        "SELECT {DUE_CARD_COLUMNS}
          FROM cards c JOIN card_schedule s ON s.card_id=c.id
          LEFT JOIN quizzes q ON q.video_id = c.video_id
          LEFT JOIN videos v ON v.id = c.video_id
@@ -754,13 +855,13 @@ pub async fn due_cards(db: &Db, now: i64, limit: i64) -> AppResult<Vec<DueCard>>
            AND (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
            AND (COALESCE(v.course_id, c.course_id) IS NULL
                 OR (course.id IS NOT NULL AND course.deleted_at IS NULL))
-         ORDER BY s.due_at, c.id LIMIT ?",
-    )
+         ORDER BY s.due_at, c.id LIMIT ?"
+    ))
     .bind(now)
     .bind(limit)
     .fetch_all(&db.pool)
     .await?;
-    Ok(rows.into_iter().map(DueCardRow::into_due_card).collect())
+    Ok(rows.into_iter().map(|row| row.into_due_card(now)).collect())
 }
 
 /// 某门课程的到期待复习卡，按到期时间升序。
@@ -773,9 +874,8 @@ pub async fn due_cards_for_course(
     course_id: &str,
     limit: i64,
 ) -> AppResult<Vec<DueCard>> {
-    let rows: Vec<DueCardRow> = sqlx::query_as(
-        "SELECT c.id, c.video_id, c.course_id, c.kind, c.front, c.back, c.source_ms,
-                q.questions_json
+    let rows: Vec<DueCardRow> = sqlx::query_as(&format!(
+        "SELECT {DUE_CARD_COLUMNS}
          FROM cards c JOIN card_schedule s ON s.card_id=c.id
          LEFT JOIN quizzes q ON q.video_id = c.video_id
          LEFT JOIN videos v ON v.id = c.video_id
@@ -783,14 +883,14 @@ pub async fn due_cards_for_course(
          WHERE s.due_at <= ? AND COALESCE(v.course_id, c.course_id) = ?
            AND (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
            AND course.deleted_at IS NULL
-         ORDER BY s.due_at, c.id LIMIT ?",
-    )
+         ORDER BY s.due_at, c.id LIMIT ?"
+    ))
     .bind(now)
     .bind(course_id)
     .bind(limit)
     .fetch_all(&db.pool)
     .await?;
-    Ok(rows.into_iter().map(DueCardRow::into_due_card).collect())
+    Ok(rows.into_iter().map(|row| row.into_due_card(now)).collect())
 }
 
 pub async fn count_due(db: &Db, now: i64) -> AppResult<i64> {
@@ -862,36 +962,29 @@ pub async fn review_card(db: &Db, card_id: &str, rating: i64, now: i64) -> AppRe
         return Err(AppError::NotFound(format!("active card {card_id}")));
     };
 
-    // 首评：稳定度未初始化（=0）或从未复习过 → FSRS 初始化；否则按距上次天数更新。
-    let prev = if stability > 0.0 && last_reviewed.is_some() {
-        Some((stability, difficulty))
-    } else {
-        None
+    // 递推交给 step_review：同步收方向的事件重放、以及打分按钮上的间隔预览走的是同一个
+    // 函数，三者不可能算出不同的排期。
+    let mut schedule = ScheduleState {
+        stability,
+        difficulty,
+        interval_days: 0,
+        reps,
+        lapses,
+        last_reviewed,
+        due_at: now,
     };
-    let elapsed_days = last_reviewed
-        .map(|lr| ((now - lr) as f64 / DAY_MS as f64).max(0.0))
-        .unwrap_or(0.0);
-    let (new_s, new_d) = fsrs_review(prev, rating, elapsed_days);
-    let interval = interval_days_for(new_s);
-    // Again 保留「本会话很快再来」（~1 分钟）；其余按 FSRS 间隔。
-    let due_at = if rating <= 1 {
-        now + 60_000
-    } else {
-        now + interval * DAY_MS
-    };
-    let new_reps = if rating <= 1 { 0 } else { reps + 1 };
-    let new_lapses = if rating <= 1 { lapses + 1 } else { lapses };
+    step_review(&mut schedule, rating, now);
 
     sqlx::query(
         "UPDATE card_schedule SET due_at=?, stability=?, difficulty=?, interval_days=?, reps=?, lapses=?, last_reviewed=?
          WHERE card_id=?",
     )
-    .bind(due_at)
-    .bind(new_s)
-    .bind(new_d)
-    .bind(interval)
-    .bind(new_reps)
-    .bind(new_lapses)
+    .bind(schedule.due_at)
+    .bind(schedule.stability)
+    .bind(schedule.difficulty)
+    .bind(schedule.interval_days)
+    .bind(schedule.reps)
+    .bind(schedule.lapses)
     .bind(now)
     .bind(card_id)
     .execute(&mut *tx)
@@ -1923,6 +2016,96 @@ mod tests {
         assert!(
             weak_concepts(&db, 2, 8).await.unwrap().is_empty(),
             "回收站视频的历史评分不该继续影响薄弱知识点"
+        );
+    }
+
+    /// 打分按钮上写的间隔，必须就是按下去之后真正落库的间隔。
+    /// 预览若另算一遍公式，两边迟早分家——那时按钮成了骗人的。
+    #[tokio::test]
+    async fn the_preview_is_exactly_what_grading_will_do() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(
+            &db,
+            r#"[{"stem":"甲题","answer":"a"},{"stem":"乙题","answer":"b"},
+                {"stem":"丙题","answer":"c"},{"stem":"丁题","answer":"d"}]"#,
+        )
+        .await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        // 新卡的种子到期时刻取的是真实时钟，now 必须晚于它，否则一张都不到期。
+        let now = chrono::Utc::now().timestamp_millis() + 1_000;
+
+        // 四张全新的卡，各承受一个评分档；预览与实际取的是同一个 now，不存在时钟漂移。
+        for (offset, stem) in ["甲题", "乙题", "丙题", "丁题"].iter().enumerate() {
+            let rating = offset as i64 + 1;
+            let card_id = quiz_card_id(&vid, stem);
+            let previewed = due_cards(&db, now, 50)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|card| card.id == card_id)
+                .unwrap()
+                .preview_ms;
+            assert_eq!(previewed.len(), 4, "四个评分档各要给一个间隔");
+
+            review_card(&db, &card_id, rating, now).await.unwrap();
+            let due_at: i64 =
+                sqlx::query_scalar("SELECT due_at FROM card_schedule WHERE card_id=?")
+                    .bind(&card_id)
+                    .fetch_one(&db.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                due_at - now,
+                previewed[offset],
+                "评分 {rating} 的预览间隔与真正落库的排期对不上"
+            );
+        }
+
+        // 「重来」永远是本会话很快再来，不是一天后。
+        let again = due_cards(&db, now, 50).await.unwrap();
+        assert!(
+            again.iter().all(|card| card.preview_ms[0] == 60_000),
+            "重来档应预览为一分钟后"
+        );
+    }
+
+    /// 复习过的卡走的是 DSR 更新而非首评初始化，间隔还取决于距上次多久。
+    /// 这条分支单独钉一次，否则只测新卡等于没测到真正会变的那部分。
+    #[tokio::test]
+    async fn the_preview_tracks_a_card_that_already_has_history() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(&db, r#"[{"stem":"甲题","answer":"a"}]"#).await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let card_id = quiz_card_id(&vid, "甲题");
+
+        let first = chrono::Utc::now().timestamp_millis() + 1_000;
+        review_card(&db, &card_id, 3, first).await.unwrap();
+
+        // 隔十天再来：可提取率已经掉下去，四档的间隔与首评那次完全不同。
+        let later = first + 10 * DAY_MS;
+        let previewed = due_cards(&db, later, 50)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|card| card.id == card_id)
+            .unwrap()
+            .preview_ms;
+        assert!(
+            previewed[3] > previewed[1],
+            "容易档给出的间隔应长于困难档，实际 {:?}",
+            previewed
+        );
+
+        review_card(&db, &card_id, 4, later).await.unwrap();
+        let due_at: i64 = sqlx::query_scalar("SELECT due_at FROM card_schedule WHERE card_id=?")
+            .bind(&card_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            due_at - later,
+            previewed[3],
+            "有历史的卡，预览同样要与实际排期一致"
         );
     }
 }

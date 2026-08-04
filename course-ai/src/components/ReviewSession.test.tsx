@@ -7,6 +7,7 @@ import { ReviewSession } from "./ReviewSession";
 const { due, review } = vi.hoisted(() => ({ due: vi.fn(), review: vi.fn() }));
 vi.mock("@/lib/ipc", () => ({ ipc: { srs: { due, review } } }));
 
+const DAY = 86_400_000;
 const cards = [
   {
     id: "a",
@@ -18,8 +19,18 @@ const cards = [
     question_type: "single",
     options: ["答案一", "干扰项二", "干扰项三", "干扰项四"],
     correct_options: ["答案一"],
+    preview_ms: [60_000, 3 * DAY, 8 * DAY, 21 * DAY],
   },
-  { id: "b", video_id: null, course_id: null, front: "问题二", back: "答案二", source_ms: null },
+  {
+    id: "b",
+    video_id: null,
+    course_id: null,
+    front: "问题二",
+    back: "答案二",
+    source_ms: null,
+    // 长间隔：跨到「个月」「年」这两档。
+    preview_ms: [60_000, 45 * DAY, 400 * DAY, 800 * DAY],
+  },
 ];
 
 function deferred() {
@@ -105,6 +116,43 @@ describe("ReviewSession", () => {
     review.mockResolvedValueOnce(undefined);
     fireEvent.click(screen.getByRole("button", { name: /良好/ }));
     expect(await screen.findByText("问题二")).toBeInTheDocument();
+  });
+
+  it("每个评分档都写着按下去会推到多久之后", async () => {
+    renderSession();
+    await screen.findByText("问题一");
+    fireEvent.click(screen.getByRole("button", { name: /选项 A/ }));
+    fireEvent.click(screen.getByRole("button", { name: /提交答案/ }));
+
+    // 后端给的四个间隔原样呈现，前端不另算——这四个数就是按下去会发生的事。
+    expect(screen.getByRole("button", { name: /重来/ })).toHaveTextContent("1 分钟");
+    expect(screen.getByRole("button", { name: /困难/ })).toHaveTextContent("3 天");
+    expect(screen.getByRole("button", { name: /良好/ })).toHaveTextContent("8 天");
+    expect(screen.getByRole("button", { name: /容易/ })).toHaveTextContent("21 天");
+    // 读屏也要听得到后果，而不只是一个「容易」。
+    expect(
+      screen.getByRole("button", { name: "容易，下次复习在 21 天后" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /良好/ }));
+    await screen.findByText("问题二");
+    fireEvent.click(screen.getByRole("button", { name: /显示答案/ }));
+    // 长间隔换算成月和年，40 天与 70 天不该都显示成「1 个月」。
+    expect(screen.getByRole("button", { name: /困难/ })).toHaveTextContent("1.5 个月");
+    expect(screen.getByRole("button", { name: /良好/ })).toHaveTextContent("1.1 年");
+    expect(screen.getByRole("button", { name: /容易/ })).toHaveTextContent("2.2 年");
+  });
+
+  it("后端没给间隔时照样能打分，不会瞎写一个数字", async () => {
+    due.mockResolvedValue([{ ...cards[1], preview_ms: undefined }]);
+    renderSession();
+    await screen.findByText("问题二");
+    fireEvent.click(screen.getByRole("button", { name: /显示答案/ }));
+
+    const good = screen.getByRole("button", { name: "良好" });
+    expect(good).toHaveTextContent(/^良好3$/);
+    fireEvent.click(good);
+    await waitFor(() => expect(review).toHaveBeenCalledWith("b", 3));
   });
 
   it("offers 回看出处 for a card with a source and jumps on click", async () => {

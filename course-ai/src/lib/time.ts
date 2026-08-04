@@ -31,6 +31,26 @@ export function formatCountdown(ms: number, now = Date.now()): string {
   return `${Math.floor(diffHours / 24)} 天后`;
 }
 
+/**
+ * 复习间隔的短表述，用在打分按钮上：1 分钟 / 3 天 / 1.5 个月 / 2 年。
+ *
+ * 与 formatCountdown 的区别是这里量的是「跨度」而不是「距某时刻」，且要短——四个档并排，
+ * 每个只有一行的宽度。月和年保留一位小数（去掉多余的 .0），否则 40 天和 70 天都成了「1 个月」，
+ * 分不出哪个档更划算。
+ */
+export function formatStudyInterval(ms: number): string {
+  const oneDecimal = (value: number) => value.toFixed(1).replace(/\.0$/, "");
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = ms / 3_600_000;
+  if (hours < 24) return `${Math.round(hours)} 小时`;
+  const days = ms / 86_400_000;
+  if (days < 30) return `${Math.round(days)} 天`;
+  const months = days / 30;
+  if (months < 12) return `${oneDecimal(months)} 个月`;
+  return `${oneDecimal(days / 365)} 年`;
+}
+
 export function formatMs(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(total / 3600);

@@ -111,6 +111,11 @@ export interface DueCard {
   question_type?: "single" | "multi" | "judge" | null;
   options?: string[] | null;
   correct_options?: string[] | null;
+  /**
+   * 四个评分档按下去各自会推到多久之后（毫秒，下标 0..3 对应 重来/困难/良好/容易）。
+   * 由后端用与真正落库排期同一个函数算出，不在前端重算——按钮上写的必须是会发生的事。
+   */
+  preview_ms: number[];
 }
 
 /** 某概念的待复习卡片数（概念面板「复习 N」）。 */

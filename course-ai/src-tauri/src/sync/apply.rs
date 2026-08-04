@@ -1079,63 +1079,9 @@ async fn save_progress(
 
 pub(crate) const BASELINE_KIND: &str = "srs_baseline";
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ScheduleState {
-    pub stability: f64,
-    pub difficulty: f64,
-    pub interval_days: i64,
-    pub reps: i64,
-    pub lapses: i64,
-    pub last_reviewed: Option<i64>,
-    pub due_at: i64,
-}
-
-impl ScheduleState {
-    fn fresh(created_at: i64) -> Self {
-        // 与本地建卡的种子排期一字不差。
-        Self {
-            stability: 0.0,
-            difficulty: 0.0,
-            interval_days: 0,
-            reps: 0,
-            lapses: 0,
-            last_reviewed: None,
-            due_at: created_at,
-        }
-    }
-}
-
-/// 一次复习的状态递推——与 `review_card` 的增量更新是同一套公式的同一种执行。
-/// 这条等式（增量 ≡ 重放）由测试钉死；改任何一边而不改另一边，测试会红。
-pub(crate) fn step_review(state: &mut ScheduleState, rating: i64, ts: i64) {
-    use crate::commands::srs::{fsrs_review, interval_days_for, DAY_MS};
-    let prev = if state.stability > 0.0 && state.last_reviewed.is_some() {
-        Some((state.stability, state.difficulty))
-    } else {
-        None
-    };
-    let elapsed_days = state
-        .last_reviewed
-        .map(|last| ((ts - last) as f64 / DAY_MS as f64).max(0.0))
-        .unwrap_or(0.0);
-    let (stability, difficulty) = fsrs_review(prev, rating, elapsed_days);
-    let interval = interval_days_for(stability);
-    state.due_at = if rating <= 1 {
-        ts + 60_000
-    } else {
-        ts + interval * DAY_MS
-    };
-    state.reps = if rating <= 1 { 0 } else { state.reps + 1 };
-    state.lapses = if rating <= 1 {
-        state.lapses + 1
-    } else {
-        state.lapses
-    };
-    state.stability = stability;
-    state.difficulty = difficulty;
-    state.interval_days = interval;
-    state.last_reviewed = Some(ts);
-}
+// 排期状态与递推函数住在 srs 模块：本地打分、这里的事件重放、打分按钮上的间隔预览
+// 必须是同一份实现。「增量 ≡ 重放」这条等式由本文件的测试钉死。
+pub(crate) use crate::commands::srs::{step_review, ScheduleState};
 
 fn card_id_of_meta(meta_json: &str) -> Option<String> {
     let value: Value = serde_json::from_str(meta_json).ok()?;
