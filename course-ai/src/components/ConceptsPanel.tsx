@@ -805,7 +805,7 @@ export function ConceptsPanel({
             />
             <aside
               aria-label="课程 AI 问答"
-              className="absolute inset-y-0 right-0 z-30 flex w-full max-w-full flex-col border-l border-[var(--border-subtle)] bg-[var(--surface-app)] shadow-xl sm:static sm:z-auto sm:w-[380px] sm:flex-none sm:shadow-none"
+              className="absolute inset-y-0 right-0 z-30 flex w-full max-w-full flex-col border-l border-[var(--border-subtle)] bg-[var(--surface-app)] shadow-[var(--shadow-pop)] sm:static sm:z-auto sm:w-[380px] sm:flex-none sm:shadow-none"
             >
               <div className="flex flex-none items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-3 py-2.5">
                 <Sparkles className="h-4 w-4 flex-none text-primary" />

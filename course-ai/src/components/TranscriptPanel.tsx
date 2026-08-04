@@ -71,7 +71,7 @@ const TranscriptRow = memo(function TranscriptRow({
           // 用轻量字形代替 lucide SVG：每行少一棵 SVG 子树，屏外行渲染更快、快滑空白更小。
           // 悬停才出现且盖在文字上方，给实底背景 + 细边保证可读。
           // 触屏没有 hover：.ca-transcript-edit 在 pointer:coarse 下强制可见（globals.css）。
-          className="ca-transcript-edit ca-touch-44 ca-workbench-touch absolute bottom-0.5 right-1 grid h-7 w-7 place-items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] text-[15px] leading-none text-[var(--text-muted)] opacity-0 shadow-sm transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
+          className="ca-transcript-edit ca-touch-44 ca-workbench-touch absolute bottom-0.5 right-1 grid h-7 w-7 place-items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] text-[15px] leading-none text-[var(--text-muted)] opacity-0 shadow-[var(--shadow-raise)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
         >
           <span aria-hidden="true">✎</span>
         </button>
@@ -418,7 +418,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
         >
           <button
             type="button"
-            className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-white shadow-lg"
+            className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-white shadow-[var(--shadow-pop)]"
             onClick={() => {
               useInlineAsk.getState().askAbout(askAnchor.text, askAnchor.startMs);
               window.getSelection()?.removeAllRanges();
@@ -431,7 +431,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
           {askAnchor.segmentText?.includes(askAnchor.text) && (
             <button
               type="button"
-              className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-1 text-xs font-medium text-[var(--text-normal)] shadow-lg"
+              className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-1 text-xs font-medium text-[var(--text-normal)] shadow-[var(--shadow-pop)]"
               onClick={() => {
                 const { front, back } = buildCloze(askAnchor.segmentText!, askAnchor.text);
                 addCloze.mutate({ front, back, startMs: askAnchor.startMs });
@@ -447,7 +447,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
       {clozeAdded && (
         <div
           role="status"
-          className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-[var(--surface-card)] px-3 py-1.5 text-xs text-[var(--text-strong)] shadow-lg ring-1 ring-[var(--border-subtle)]"
+          className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-[var(--surface-card)] px-3 py-1.5 text-xs text-[var(--text-strong)] shadow-[var(--shadow-pop)] ring-1 ring-[var(--border-subtle)]"
         >
           已加入每日复习
         </div>

@@ -68,7 +68,7 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
               aria-label={label}
               title={label}
               onClick={onClick}
-              className="ca-touch-44 grid h-8 w-8 place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] text-[var(--text-muted)] shadow-sm transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+              className="ca-touch-44 grid h-8 w-8 place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] text-[var(--text-muted)] shadow-[var(--shadow-raise)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
             >
               <Icon className="h-4 w-4" />
             </button>

@@ -99,7 +99,7 @@ describe("动效的实现约束", () => {
   });
 });
 
-describe("组件里的过渡写法", () => {
+describe("阴影与过渡的写法约束", () => {
   function componentSources() {
     const root = resolve("src/components");
     const files: string[] = [];
@@ -114,6 +114,56 @@ describe("组件里的过渡写法", () => {
     walk(root);
     return files;
   }
+
+  it("阴影走主题令牌，不用 Tailwind 的原生档位", () => {
+    // Tailwind 的 shadow-sm/lg/xl 是按浅色背景调的 10% 纯黑，放到暗色主题近黑的底上
+    // 等于没有——浮层、选中丸、划选浮出的按钮全部与背景糊在一起。
+    // 例外是视频舞台里那两处：它们永远压在纯黑上，原生阴影在那儿本来就是对的。
+    const offenders: string[] = [];
+    for (const file of componentSources()) {
+      readFileSync(file, "utf8")
+        .split("\n")
+        .forEach((line, index) => {
+          if (!/\bshadow-(sm|md|lg|xl|2xl)\b/.test(line)) return;
+          if (line.includes("bg-black")) return;
+          offenders.push(`${file.replace(resolve("src/components"), "")}:${index + 1}`);
+        });
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("自定义阴影令牌不与 Tailwind 的同名变量撞车", () => {
+    // Tailwind v4 在 @theme 里定义 --shadow-xs/sm/md/lg/xl/2xl 并据此生成工具类。
+    // 在 :root 上重定义同名变量，会连带改掉全应用 shadow-* 的输出——而且只在
+    // 构建产物里看得出来，源码上一切正常。
+    const reserved = ["xs", "sm", "md", "lg", "xl", "2xl", "inner", "none"];
+    const declared = [...css.matchAll(/^\s*--shadow-([\w-]+)\s*:/gm)].map((m) => m[1]);
+
+    expect(declared.filter((name) => reserved.includes(name))).toEqual([]);
+  });
+
+  it("暗色主题的每档阴影都带顶部内高光", () => {
+    // 底已经接近纯黑，再黑也黑不出边界——暗色下把层次分开的其实是那道 inset 亮边，
+    // 不是投影。去掉它，卡片、菜单、选中丸就全平贴在背景上了。
+    const dark =
+      css.match(/^\[data-theme="dark"\]\s*\{[\s\S]*?\n\}/m)?.[0] ?? "";
+    const tokens = [...dark.matchAll(/--shadow-([\w-]+)\s*:\s*([^;]+);/g)];
+
+    expect(tokens.length).toBeGreaterThan(0);
+    expect(
+      tokens.filter(([, , value]) => !value.includes("inset")).map(([, name]) => name),
+    ).toEqual([]);
+  });
+
+  it("受光层不占用 box-shadow", () => {
+    // .ca-sheen 会和挂着 --shadow-pop 的浮层按钮叠在同一个元素上。
+    // 两条 box-shadow 是互相覆盖而不是叠加的，所以高光只能走 background-image。
+    const sheen = css.match(/^\.ca-sheen\s*\{[\s\S]*?\n\}/m)?.[0] ?? "";
+
+    expect(sheen).toMatch(/background-image:/);
+    expect(sheen).not.toMatch(/box-shadow:/);
+  });
 
   it("不用 transition-all", () => {
     // transition-all 会把「所有」属性都纳入过渡，包括 width/height 这类触发重排的。
