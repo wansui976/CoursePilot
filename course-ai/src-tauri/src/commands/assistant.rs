@@ -10,7 +10,7 @@ use crate::llm::profiles::AiTask;
 use crate::llm::ChatMessage;
 use crate::pipeline::assistant::{AssistantAction, AssistantContext, AssistantTools};
 use serde::Serialize;
-use tauri::State;
+use tauri::{Emitter, State};
 
 /// 系统提示。
 ///
@@ -36,8 +36,27 @@ const CONTEXT_PREFIX: &str = "（界面状态：";
 const MAX_HISTORY_USER_TURNS: usize = 8;
 const MAX_HISTORY_CHARS: usize = 48_000;
 
+/// 助手流式推送给前端的事件。与问答那套（AskEvent）保持同一形状：tag="type"，字段小写。
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum AssistantEvent {
+    /// 新一轮开始。界面收到就清空这一轮已显示的正文——循环里答案是逐轮替换而非追加的，
+    /// 接着往下拼会拼出一段谁也没说过的话。
+    Turn { turn: usize },
+    /// 推理模型的思考增量。不计入答案。
+    Reasoning { delta: String },
+    /// 正文增量。
+    Token { delta: String },
+    /// 开始执行某个工具。此前工具标签要等整轮跑完才出现，现在实时。
+    Tool { name: String },
+    /// 全部结束，带上最终结果（动作、历史、用过的工具都在里面）。
+    Done { reply: AssistantReply },
+    /// 后台任务里失败。命令早已返回，只能靠事件通知前端。
+    Error { message: String },
+}
+
 /// 一次助手对话的结果。
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AssistantReply {
     pub answer: String,
     /// 用户是否主动停止了这一轮。即使已执行过部分只读工具，也不把半截答复伪装成完成。
@@ -139,14 +158,20 @@ fn history_for_next_turn(
     messages
 }
 
+/// 流式提问。**命令立即返回，真正的活儿丢到后台任务里跑。**
+///
+/// Tauri 会把「一个 await 了很久的命令」内部发的事件憋到命令返回才一起投递，
+/// 那样就成了「不流式、最后一次性蹦出来」。后台任务发的事件才实时到达。
+/// 结果与错误都经 `assistant-stream:<request_id>` 事件送达（done / error）。
 #[tauri::command]
 pub async fn cmd_assistant_ask(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     query: String,
     context: Option<AssistantContext>,
     history: Option<Vec<ChatMessage>>,
     request_id: String,
-) -> AppResult<AssistantReply> {
+) -> AppResult<()> {
     let query = query.trim().to_string();
     if query.is_empty() {
         return Err(AppError::Other("说点什么吧".into()));
@@ -159,57 +184,103 @@ pub async fn cmd_assistant_ask(
     let cancel = state
         .register_cancel_if_free(&request_id)
         .ok_or_else(|| AppError::Other("这次提问还在进行中".into()))?;
-    let result = async {
-        let context = context.unwrap_or_default();
-        let (provider, model) = crate::commands::ai::provider_for_db(&state.db, AiTask::Assistant)
-            .await?
-            .ok_or_else(|| AppError::Config("尚未配置可用的大模型（设置 → 大模型）".into()))?;
 
-        let mut messages = prepare_history(history.unwrap_or_default());
+    // 模型配置在返回前解析：没配大模型这类错误要当场由命令返回值报出去，
+    // 而不是等前端订阅上事件之后才收到一条 error——那时错误提示会晚一拍。
+    let resolved = crate::commands::ai::provider_for_db(&state.db, AiTask::Assistant).await;
+    let (provider, model) = match resolved {
+        Ok(Some(pair)) => pair,
+        Ok(None) => {
+            state.unregister_cancel(&request_id, &cancel);
+            return Err(AppError::Config(
+                "尚未配置可用的大模型（设置 → 大模型）".into(),
+            ));
+        }
+        Err(error) => {
+            state.unregister_cancel(&request_id, &cancel);
+            return Err(error);
+        }
+    };
+
+    let db = state.db.clone();
+    let task_state = state.inner().clone();
+    let context = context.unwrap_or_default();
+    let history = history.unwrap_or_default();
+
+    tauri::async_runtime::spawn(async move {
+        let event_name = format!("assistant-stream:{request_id}");
+        let emit = |event: AssistantEvent| {
+            let _ = app.emit(&event_name, event);
+        };
+
+        let mut messages = prepare_history(history);
         let completed_history_len = messages.len();
         if let Some(line) = context_line(&context) {
             messages.push(ChatMessage::user(line));
         }
         messages.push(ChatMessage::user(&query));
 
-        let tools = AssistantTools::new(&state.db, context);
+        let tools = AssistantTools::new(&db, context);
         let mut tools_used: Vec<String> = Vec::new();
-        let outcome = agent::run(
+        let result = agent::run(
             &provider,
             &model,
             Some(ASSISTANT_SYSTEM.to_string()),
             messages,
             &tools,
             &cancel,
-            &mut |event| {
-                if let AgentEvent::ToolStarted(call) = event {
+            &mut |event| match event {
+                AgentEvent::TurnStarted(turn) => emit(AssistantEvent::Turn { turn }),
+                AgentEvent::Reasoning(delta) => emit(AssistantEvent::Reasoning {
+                    delta: delta.to_string(),
+                }),
+                AgentEvent::Content(delta) => emit(AssistantEvent::Token {
+                    delta: delta.to_string(),
+                }),
+                AgentEvent::ToolStarted(call) => {
                     tools_used.push(call.name.clone());
+                    emit(AssistantEvent::Tool {
+                        name: call.name.clone(),
+                    });
                 }
+                AgentEvent::ToolFinished(_) | AgentEvent::HitTurnLimit => {}
             },
         )
-        .await?;
+        .await;
 
-        let actions = tools.take_actions();
-        let next_history =
-            history_for_next_turn(outcome.messages, completed_history_len, outcome.canceled);
-        Ok(AssistantReply {
-            answer: outcome.answer,
-            canceled: outcome.canceled,
-            // 停止发生在工具轮之间时，前面可能已经生成了导航、主题或写操作提案。
-            // 它们都还没有得到一轮完整答复确认，不能在用户点停之后继续交给界面执行。
-            actions: if outcome.canceled {
-                Vec::new()
-            } else {
-                actions
-            },
-            turns: outcome.turns,
-            tools_used,
-            history: next_history,
-        })
-    }
-    .await;
-    state.unregister_cancel(&request_id, &cancel);
-    result
+        match result {
+            Ok(outcome) => {
+                let actions = tools.take_actions();
+                let next_history = history_for_next_turn(
+                    outcome.messages,
+                    completed_history_len,
+                    outcome.canceled,
+                );
+                emit(AssistantEvent::Done {
+                    reply: AssistantReply {
+                        answer: outcome.answer,
+                        canceled: outcome.canceled,
+                        // 停止发生在工具轮之间时，前面可能已经生成了导航、主题或写操作提案。
+                        // 它们都还没有得到一轮完整答复确认，不能在用户点停之后继续交给界面执行。
+                        actions: if outcome.canceled {
+                            Vec::new()
+                        } else {
+                            actions
+                        },
+                        turns: outcome.turns,
+                        tools_used,
+                        history: next_history,
+                    },
+                });
+            }
+            Err(error) => emit(AssistantEvent::Error {
+                message: error.to_string(),
+            }),
+        }
+        task_state.unregister_cancel(&request_id, &cancel);
+    });
+
+    Ok(())
 }
 
 /// 叫停一次进行中的助手提问。置位标志后，循环会在当前这步结束时停下，

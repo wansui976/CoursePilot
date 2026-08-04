@@ -13,6 +13,8 @@ export interface AssistantTurnRecord {
   id: string;
   question: string;
   answer: string;
+  /** 推理模型的思考过程；随答案一起保留，答案出来后折叠展示。旧记录没有。 */
+  reasoning?: string;
   actions: AssistantAction[];
   tools: string[];
   canceled: boolean;
@@ -49,6 +51,9 @@ function readTurn(value: unknown): AssistantTurnRecord | null {
     id: value.id,
     question: value.question,
     answer: value.answer,
+    ...(typeof value.reasoning === "string" && value.reasoning
+      ? { reasoning: value.reasoning }
+      : {}),
     // 旧确认卡不能跨重启复活：用户可能已经在别处完成了同一操作。
     actions: [],
     tools: Array.isArray(value.tools)

@@ -149,6 +149,9 @@ pub enum SseEvent {
     /// 是复数：同一条 delta 里塞多个 index 是允许的。原来只取第 0 个，
     /// 剩下的会被静默丢掉——丢掉的那次调用不会报错，只是永远不执行。
     ToolCallDeltas(Vec<ToolCallDelta>),
+    /// 服务端在流末尾报的 token 用量（需要请求时开启 stream_options.include_usage）。
+    /// 它所在的那一片 `choices` 是空数组，不能按普通 delta 处理。
+    Usage(Usage),
     /// 服务端明确宣布这次生成结束。
     Finished,
     /// 流内错误事件：HTTP 已经 200 了，错误改从流里来（限流、内容策略等）。
@@ -388,6 +391,9 @@ pub async fn complete_or_cancel_full(
 pub struct StreamOutcome {
     pub content: String,
     pub tool_calls: Vec<ToolCall>,
+    /// 端点报的用量。流式下要显式开启 include_usage 才有；没报就是 None，
+    /// 与非流式一样按「没报不记」处理，免得把缺失当成零消耗。
+    pub usage: Option<Usage>,
 }
 
 /// 流式片段：正式回答内容，或推理模型的「思考」内容（不计入最终答案）。
@@ -531,6 +537,7 @@ impl Provider {
                 Ok(StreamOutcome {
                     content: response.content,
                     tool_calls: response.tool_calls,
+                    usage: response.usage,
                 })
             }
             Provider::Mock { canned } => {
@@ -551,6 +558,7 @@ impl Provider {
                 Ok(StreamOutcome {
                     content: acc,
                     tool_calls: Vec::new(),
+                    usage: None,
                 })
             }
             Provider::Failing { .. } => Err(self.canned_failure()),

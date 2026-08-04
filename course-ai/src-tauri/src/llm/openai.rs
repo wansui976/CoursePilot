@@ -196,17 +196,33 @@ pub fn parse_openai_response(v: &Value) -> AppResult<ChatResponse> {
 /// 从响应里取 token 用量。各家字段名不一样，认得出哪个算哪个；一个都没有就返回 None
 /// ——「端点没报」和「消耗为零」必须分开，否则命中率会被算成假的。
 pub fn parse_usage(v: &Value) -> Option<crate::llm::Usage> {
-    let usage = v.get("usage")?;
-    let num = |value: Option<&Value>| value.and_then(Value::as_i64).unwrap_or(0);
+    let usage = v.get("usage")?.as_object()?;
+    let num = |value: Option<&Value>| value.and_then(Value::as_i64);
     let nested =
         |group: &str, field: &str| num(usage.get(group).and_then(|inner| inner.get(field)));
+    let prompt_tokens = num(usage.get("prompt_tokens"));
+    let prompt_cache_hit_tokens = num(usage.get("prompt_cache_hit_tokens"));
+    let nested_cached_tokens = nested("prompt_tokens_details", "cached_tokens");
+    let completion_tokens = num(usage.get("completion_tokens"));
+    let reasoning_tokens = nested("completion_tokens_details", "reasoning_tokens");
+
+    if prompt_tokens.is_none()
+        && prompt_cache_hit_tokens.is_none()
+        && nested_cached_tokens.is_none()
+        && completion_tokens.is_none()
+        && reasoning_tokens.is_none()
+    {
+        return None;
+    }
+
     Some(crate::llm::Usage {
-        prompt_tokens: num(usage.get("prompt_tokens")),
+        prompt_tokens: prompt_tokens.unwrap_or(0),
         // DeepSeek 报 prompt_cache_hit_tokens，OpenAI 报 prompt_tokens_details.cached_tokens。
-        cached_tokens: num(usage.get("prompt_cache_hit_tokens"))
-            .max(nested("prompt_tokens_details", "cached_tokens")),
-        completion_tokens: num(usage.get("completion_tokens")),
-        reasoning_tokens: nested("completion_tokens_details", "reasoning_tokens"),
+        cached_tokens: prompt_cache_hit_tokens
+            .unwrap_or(0)
+            .max(nested_cached_tokens.unwrap_or(0)),
+        completion_tokens: completion_tokens.unwrap_or(0),
+        reasoning_tokens: reasoning_tokens.unwrap_or(0),
     })
 }
 

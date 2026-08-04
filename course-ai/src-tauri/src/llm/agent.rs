@@ -58,6 +58,16 @@ pub trait ToolBox {
 
 /// 循环过程中的进度，交给调用方决定怎么显示。
 pub enum AgentEvent<'a> {
+    /// 新的一轮开始了（1 起算）。
+    ///
+    /// 界面必须知道这条：循环里 `answer` 是**逐轮替换**而不是追加的，
+    /// 第二轮的正文接在第一轮后面就会拼出一段谁也没说过的话。收到它就把已显示的
+    /// 答案清空重来。
+    TurnStarted(usize),
+    /// 推理模型的思考增量。不计入答案，只用于显示。
+    Reasoning(&'a str),
+    /// 正文增量。
+    Content(&'a str),
     /// 模型这一轮要求调某个工具，即将执行。
     ToolStarted(&'a ToolCall),
     /// 该工具执行完毕（成功与否都算完毕）。
@@ -138,12 +148,26 @@ pub async fn run<T: ToolBox>(
             tools: specs.clone(),
             label: "assistant",
         };
-        // complete_or_cancel 而不是 complete：光在轮次之间查标志是不够的，
-        // 单次调用最长要等到请求超时才回得来。用户点了停止，界面却还得转上几分钟——
+        on_event(AgentEvent::TurnStarted(turns));
+
+        // 走流式：思考与正文一边生成一边交给调用方显示。
+        // 取消同样不必等到请求超时——complete_stream 在等待网络数据的间隙也查标志，
         // 而这个循环最需要被打断的时刻，恰恰就是某一次调用卡住的时候。
-        let Some(response) = crate::llm::complete_or_cancel_full(provider, &req, cancel).await?
-        else {
+        let mut on_piece = |piece: crate::llm::StreamPiece| match piece {
+            crate::llm::StreamPiece::Content(delta) => on_event(AgentEvent::Content(delta)),
+            crate::llm::StreamPiece::Reasoning(delta) => on_event(AgentEvent::Reasoning(delta)),
+        };
+        let streamed = provider
+            .complete_stream(&req, cancel, &mut on_piece)
+            .await?;
+        // 取消时把已经吐出来的半截丢掉：它不是一个完整答复，也没有对应的工具结果。
+        if cancel.load(Ordering::SeqCst) {
             break;
+        }
+        let response = crate::llm::ChatResponse {
+            content: streamed.content,
+            tool_calls: streamed.tool_calls,
+            usage: streamed.usage,
         };
 
         if !response.content.trim().is_empty() {
@@ -325,6 +349,83 @@ mod tests {
         assert_eq!(roles, ["user", "assistant", "tool", "assistant"]);
         assert_eq!(out.messages[1].tool_calls[0].id, "c1");
         assert_eq!(out.messages[2].tool_call_id.as_deref(), Some("c1"));
+    }
+
+    /// 循环里 answer 是**逐轮替换**的：第二轮说的话不接在第一轮后面。
+    /// 界面据此在每个 TurnStarted 上清空已显示的正文——少了这条边界，
+    /// 「我先查一下」和「查完了」会被拼成一段谁也没说过的话。
+    #[tokio::test]
+    async fn each_turn_is_announced_before_its_own_text() {
+        let provider = scripted(vec![
+            crate::llm::ChatResponse {
+                content: "我先查一下".into(),
+                tool_calls: vec![call("c1", "probe", "{}")],
+                usage: None,
+            },
+            says("查完了，答案是这个"),
+        ]);
+        let tools = Recorder::new(false);
+        let mut trace: Vec<String> = Vec::new();
+        let out = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("帮我查一下")],
+            &tools,
+            &AtomicBool::new(false),
+            &mut |event| match event {
+                AgentEvent::TurnStarted(turn) => trace.push(format!("turn:{turn}")),
+                AgentEvent::Content(delta) => trace.push(format!("text:{delta}")),
+                AgentEvent::ToolStarted(call) => trace.push(format!("tool:{}", call.name)),
+                _ => {}
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            trace,
+            [
+                "turn:1",
+                "text:我先查一下",
+                "tool:probe",
+                "turn:2",
+                "text:查完了，答案是这个",
+            ],
+            "每一轮的正文都必须落在它自己的 turn 之后"
+        );
+        // 最终答案是最后一轮说的，不是两轮拼起来的。
+        assert_eq!(out.answer, "查完了，答案是这个");
+    }
+
+    /// 工具标签此前要等整轮跑完才出现（只在返回值里带 tools_used）。
+    /// 现在开始执行就发一次，界面能实时显示助手正在做什么。
+    #[tokio::test]
+    async fn tools_are_announced_as_they_start_not_at_the_end() {
+        let provider = scripted(vec![
+            wants(vec![call("a", "probe", "{}"), call("b", "probe", "{}")]),
+            says("好了"),
+        ]);
+        let tools = Recorder::new(false);
+        let mut announced_before_answer = 0usize;
+        let mut answered = false;
+        run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("做两件事")],
+            &tools,
+            &AtomicBool::new(false),
+            &mut |event| match event {
+                AgentEvent::ToolStarted(_) if !answered => announced_before_answer += 1,
+                AgentEvent::Content(text) if text.contains("好了") => answered = true,
+                _ => {}
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(announced_before_answer, 2, "两个工具都要在答案之前报出来");
     }
 
     #[tokio::test]
