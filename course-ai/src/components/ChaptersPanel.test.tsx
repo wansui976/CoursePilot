@@ -55,7 +55,10 @@ describe("ChaptersPanel", () => {
     mockIpc.ai.getChapters.mockResolvedValue([]);
     renderChaptersPanel();
 
-    expect(await screen.findByText(/还没有章节/)).toBeInTheDocument();
+    // 走共用的面板空态：会被读屏播报，且各面板的「还什么都没有」长得一样——
+    // 此前这里是一段贴在左上角的裸段落，与隔壁页签各写各的。
+    const empty = await screen.findByText(/还没有章节/);
+    expect(empty.closest('[role="status"]')).toHaveClass("ca-empty-state");
   });
 
   it("renders chapters and seeks on click", async () => {

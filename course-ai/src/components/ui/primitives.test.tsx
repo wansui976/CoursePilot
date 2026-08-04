@@ -3,7 +3,8 @@ import { render, screen } from "@testing-library/react";
 import { MoreHorizontal, Play } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 import { Badge } from "./badge";
-import { EmptyState } from "./empty-state";
+import { Button } from "./button";
+import { EmptyState, PanelEmptyState } from "./empty-state";
 import { IconButton } from "./icon-button";
 import { Menu, MenuItem } from "./menu";
 
@@ -61,5 +62,43 @@ describe("shared UI primitives", () => {
     expect(screen.getByRole("status")).toHaveClass("ca-empty-state");
     expect(screen.getByRole("heading", { name: "还没有视频" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导入" })).toBeInTheDocument();
+  });
+
+  it("实色强调按钮的字走 --on-accent，且与其他变体盒模型一致", () => {
+    render(
+      <Button variant="primary">
+        保存
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "保存" });
+    // 前景必须是 on-accent 令牌：写死 text-white 的话，暗色主题下的按下态就跟不上了。
+    expect(button).toHaveClass("bg-[var(--accent)]", "text-[var(--on-accent)]");
+    expect(button).not.toHaveClass("text-white");
+    // 同色描边：与 default/outline 并排时内容盒等宽等高，不会差出一圈边框。
+    expect(button).toHaveClass("border", "border-[var(--accent)]");
+    // 悬停换成设计好的按下色，而不是把整颗按钮连字一起调淡——后者会让标签更难读，
+    // 而各页面手搓的强调按钮当初正是一半用 opacity-90、一半用别的。
+    expect(button).toHaveClass(
+      "hover:bg-[var(--accent-press)]",
+      "hover:text-[var(--on-accent-press)]",
+    );
+    expect(button.className).not.toMatch(/hover:opacity-/);
+  });
+
+  it("面板空态在剩余空间里居中，且与首页空态是同一套外观", () => {
+    render(
+      <PanelEmptyState
+        icon={<Play aria-hidden="true" />}
+        title="还没有章节"
+        description="字幕就绪后会自动生成。"
+      />,
+    );
+
+    const state = screen.getByRole("status");
+    expect(state).toHaveClass("ca-empty-state");
+    expect(screen.getByRole("heading", { name: "还没有章节" })).toBeInTheDocument();
+    // 居中容器包在外面：面板里的空态不该像段落一样贴在左上角。
+    expect(state.parentElement).toHaveClass("items-center", "justify-center");
   });
 });

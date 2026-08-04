@@ -312,7 +312,9 @@ select:focus-visible {
 
 .ca-rail .rail-btn.active {
   background: var(--accent-weak);
-  color: var(--accent);
+  /* 前景用 --accent-text 而非 --accent：后者是实心块的底色，暗色主题下不跟着变亮，
+     当图标/文字色时在近黑底上只有 3.7:1，且与别处的强调蓝不是同一个颜色。 */
+  color: var(--accent-text);
 }
 
 .ca-rail .rail-sp {
@@ -489,7 +491,9 @@ select:focus-visible {
 }
 
 .ca-nav-item.active .ic {
-  color: var(--accent);
+  /* 前景用 --accent-text 而非 --accent：后者是实心块的底色，暗色主题下不跟着变亮，
+     当图标/文字色时在近黑底上只有 3.7:1，且与别处的强调蓝不是同一个颜色。 */
+  color: var(--accent-text);
 }
 
 .ca-nav-button .nm {
@@ -1046,7 +1050,9 @@ select:focus-visible {
   border-radius: var(--r-sm);
   border: 1px solid var(--line-soft);
   background: var(--bg-panel);
-  color: var(--accent);
+  /* 前景用 --accent-text 而非 --accent：后者是实心块的底色，暗色主题下不跟着变亮，
+     当图标/文字色时在近黑底上只有 3.7:1，且与别处的强调蓝不是同一个颜色。 */
+  color: var(--accent-text);
 }
 
 .ca-empty-state-title {
@@ -1938,7 +1944,9 @@ html.theme-circle-vt::view-transition-new(root) {
 }
 
 .ca-bottom-tab-btn.on {
-  color: var(--accent);
+  /* 前景用 --accent-text 而非 --accent：后者是实心块的底色，暗色主题下不跟着变亮，
+     当图标/文字色时在近黑底上只有 3.7:1，且与别处的强调蓝不是同一个颜色。 */
+  color: var(--accent-text);
 }
 
 .ca-bottom-tab-label {

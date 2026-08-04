@@ -187,7 +187,8 @@ describe("ReviewSession", () => {
     renderSession();
     await screen.findByText("问题一");
     const submit = screen.getByRole("button", { name: /提交答案/ });
-    expect(submit).toHaveClass("!text-white");
+    // 实色强调按钮的字用 --on-accent，不继承页面文字色——否则蓝底上是深色字，看不清。
+    expect(submit).toHaveClass("text-[var(--on-accent)]");
     expect(submit).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: /选项 B/ }));
@@ -232,7 +233,7 @@ describe("ReviewSession", () => {
     renderSession();
     await screen.findByText("问题二");
     const reveal = screen.getByRole("button", { name: /显示答案/ });
-    expect(reveal).toHaveClass("!text-white");
+    expect(reveal).toHaveClass("text-[var(--on-accent)]");
     fireEvent.keyDown(window, { key: " " });
     expect(screen.getByText("答案二")).toBeInTheDocument();
   });

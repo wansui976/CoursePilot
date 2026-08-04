@@ -22,6 +22,7 @@ import {
 } from "@/lib/ipc";
 import { formatMs, formatRelativeTime } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
+import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { Skeleton } from "@/components/ui/skeleton";
 import { renderMarkdown } from "@/lib/renderMarkdown";
@@ -476,14 +477,15 @@ export function ConceptsPanel({
               <p className="max-w-[340px] text-sm leading-relaxed text-[var(--text-muted)]">
                 分析会读取课程内已有字幕，抽取知识点并整理出课程主线与可回看的出处。
               </p>
-              <button
+              <Button
                 type="button"
+                variant="primary"
                 onClick={() => analyze.mutate()}
                 disabled={busy}
-                className="ca-touch-44 rounded-lg bg-primary px-4 py-2 text-sm font-medium !text-white transition hover:opacity-90 disabled:opacity-60"
+                className="ca-touch-44"
               >
                 {analyze.isPending ? "分析中…" : "分析本课程"}
-              </button>
+              </Button>
             </div>
           ) : (
             <>
@@ -537,15 +539,17 @@ export function ConceptsPanel({
                     )}
                   </div>
                   {!knowledge?.overview && (
-                    <button
+                    <Button
                       type="button"
+                      variant="primary"
+                      size="sm"
                       onClick={() => summarize.mutate()}
                       disabled={busy}
-                      className="ca-touch-44 inline-flex flex-none items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium !text-white transition hover:opacity-90 disabled:opacity-60"
+                      className="ca-touch-44 flex-none gap-1.5"
                     >
                       <FileText className={`h-3.5 w-3.5 ${summarize.isPending ? "animate-pulse" : ""}`} />
                       {summarize.isPending ? "生成中…" : "生成课程总结"}
-                    </button>
+                    </Button>
                   )}
                 </div>
 
@@ -590,19 +594,21 @@ export function ConceptsPanel({
                     )}
                   </div>
                   {!dueCountsPending && nextReview && (
-                    <button
+                    <Button
                       type="button"
+                      variant="primary"
+                      size="sm"
                       onClick={() =>
                         setReviewing({
                           conceptId: nextReview.concept.id,
                           name: nextReview.concept.name,
                         })
                       }
-                      className="ca-touch-44 inline-flex flex-none items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium !text-white transition hover:opacity-90"
+                      className="ca-touch-44 flex-none gap-1.5"
                     >
                       <Brain className="h-3.5 w-3.5" />
                       开始复习
-                    </button>
+                    </Button>
                   )}
                   {!dueCountsPending && !nextReview && nextLearnConcept && nextOccurrence && (
                     <button

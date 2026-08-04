@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
+import { Maximize2, Share2, ZoomIn, ZoomOut } from "lucide-react";
 import { Transformer } from "markmap-lib";
 import { Markmap } from "markmap-view";
 import { ipc } from "@/lib/ipc";
 import { ErrorNote } from "@/components/ui/ErrorNote";
+import { PanelEmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTheme } from "@/stores/theme";
 import { PanelActions } from "./PanelActions";
@@ -85,9 +86,11 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
         </div>
       )}
       {!isLoading && !md && (
-        <p className="p-4 text-sm text-[var(--text-faint)]">
-          还没有脑图，字幕就绪后会自动生成，也可点右下角生成。
-        </p>
+        <PanelEmptyState
+          icon={<Share2 className="h-7 w-7" />}
+          title="还没有脑图"
+          description="字幕就绪后会自动生成，也可以点右下角手动生成。"
+        />
       )}
       {/* svg 常驻，没图时只是藏起来。它一旦卸载再挂回来就是个新节点，而 Markmap 实例
           绑在创建它的那个节点上——沿用旧实例等于往一张已经脱离文档的画布上画，

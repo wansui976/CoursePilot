@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ListTree } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import { ErrorNote } from "@/components/ui/ErrorNote";
+import { PanelEmptyState } from "@/components/ui/empty-state";
 import { TextSkeleton } from "@/components/ui/skeleton";
 import { PanelActions } from "./PanelActions";
 import {
@@ -40,9 +42,11 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
         {isLoading ? (
           <TextSkeleton lines={4} className="p-0" />
         ) : chapters.length === 0 ? (
-          <p className="text-sm text-[var(--text-faint)]">
-            还没有章节，字幕就绪后会自动生成，也可点右下角生成。
-          </p>
+          <PanelEmptyState
+            icon={<ListTree className="h-7 w-7" />}
+            title="还没有章节"
+            description="字幕就绪后会自动生成，也可以点右下角手动生成。"
+          />
         ) : null}
         {chapters.map((c) => (
           <button

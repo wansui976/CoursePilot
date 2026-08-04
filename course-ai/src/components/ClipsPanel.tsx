@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
-import { Play, Trash2, X } from "lucide-react";
+import { Play, Scissors, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PanelEmptyState } from "@/components/ui/empty-state";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
@@ -97,9 +98,11 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
 
       <div className="mt-3 min-h-0 flex-1 overflow-auto">
         {clips.length === 0 ? (
-          <p className="mt-8 text-center text-sm text-[var(--text-muted)]">
-            还没有收藏的片段。播放时点「标记起点」，到终点再点「标记终点」。
-          </p>
+          <PanelEmptyState
+            icon={<Scissors className="h-7 w-7" />}
+            title="还没有收藏的片段"
+            description="播放时点「标记起点」，到终点再点「标记终点」，这一段就留在这里。"
+          />
         ) : (
           <ul className="flex flex-col gap-2">
             {clips.map((clip) => (
