@@ -6,12 +6,12 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WhisperJson {
     pub transcription: Vec<WhisperSegment>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WhisperSegment {
     pub text: String,
     pub offsets: Offsets,
@@ -19,13 +19,13 @@ pub struct WhisperSegment {
     pub tokens: Vec<TokenObj>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Offsets {
     pub from: i64,
     pub to: i64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TokenObj {
     pub text: String,
     pub offsets: Offsets,

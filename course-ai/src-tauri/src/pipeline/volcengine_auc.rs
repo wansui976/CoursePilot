@@ -110,6 +110,7 @@ pub async fn run_volcengine_file_chunked(
     chunk_secs: u64,
     concurrency: usize,
     context: Option<String>,
+    cache: Option<&crate::pipeline::asr_cache::ChunkCache<'_>>,
 ) -> AppResult<WhisperJson> {
     let (app_id, access_token) = check_credentials(app_id, access_token)?;
     let chunk_secs = if chunk_secs == 0 {
@@ -142,14 +143,16 @@ pub async fn run_volcengine_file_chunked(
         };
         let client = asr_client();
         let bytes = tokio::fs::read(&single).await?;
-        let out = recognize_bytes_with_retry(
-            &client,
-            &app_id,
-            &access_token,
-            &bytes,
-            context.as_deref(),
-            "mp3",
-        )
+        let out = cached_or_recognize(&bytes, cache, || {
+            recognize_bytes_with_retry(
+                &client,
+                &app_id,
+                &access_token,
+                &bytes,
+                context.as_deref(),
+                "mp3",
+            )
+        })
         .await;
         let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
         return out;
@@ -164,14 +167,16 @@ pub async fn run_volcengine_file_chunked(
             let context = context.clone();
             async move {
                 let bytes = tokio::fs::read(&path).await?;
-                let json = recognize_bytes_with_retry(
-                    &client,
-                    &app_id,
-                    &access_token,
-                    &bytes,
-                    context.as_deref(),
-                    "mp3",
-                )
+                let json = cached_or_recognize(&bytes, cache, || {
+                    recognize_bytes_with_retry(
+                        &client,
+                        &app_id,
+                        &access_token,
+                        &bytes,
+                        context.as_deref(),
+                        "mp3",
+                    )
+                })
                 .await?;
                 Ok((idx, json))
             }
@@ -364,6 +369,35 @@ async fn poll_until_done(
     Err(AppError::Pipeline(
         "volcengine 录音文件识别轮询超时（超过 30 分钟仍未返回结果）".into(),
     ))
+}
+
+/// 先看这一片之前认过没有；没有才真的去认，认完立刻记下来。
+///
+/// 断点续跑就靠这一层。注意「认完立刻存」而不是等整份合并完再落库——后者正是中断之后
+/// 必须从第一片重来的原因。识别那一步做成注入的，是为了这两半都能单测：不然测试只能
+/// 手动往缓存里塞一条，而「认完有没有存」这半根本没被验证到。
+///
+/// 缓存本身尽力而为：读写出任何问题都只退化成「重认一遍」，不会让识别失败。
+async fn cached_or_recognize<F, Fut>(
+    audio_bytes: &[u8],
+    cache: Option<&crate::pipeline::asr_cache::ChunkCache<'_>>,
+    recognize: F,
+) -> AppResult<WhisperJson>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = AppResult<WhisperJson>>,
+{
+    if let Some(cache) = cache {
+        if let Some(hit) = cache.get(audio_bytes).await {
+            tracing::info!("命中上次中断前已识别的分片，跳过一次云端调用");
+            return Ok(hit);
+        }
+    }
+    let json = recognize().await?;
+    if let Some(cache) = cache {
+        cache.put(audio_bytes, &json).await;
+    }
+    Ok(json)
 }
 
 /// 在 recognize_bytes 外包一层指数回退重试：失败后等 2s、4s 再试，最多重试两次。
@@ -586,6 +620,70 @@ pub fn base64_encode(input: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn cache_fixture(dir: &tempfile::TempDir) -> (crate::db::Db, String) {
+        let db = crate::db::Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let path = dir.path().join("v.mp4");
+        std::fs::write(&path, b"x").unwrap();
+        let video = crate::commands::videos::add_local_video(&db, &course.id, path, None)
+            .await
+            .unwrap();
+        (db, video.id)
+    }
+
+    #[tokio::test]
+    async fn a_recognized_chunk_is_stored_right_away_and_reused_next_time() {
+        // 断点续跑的两半，缺一半就等于没做：
+        //   认完立刻存（不是等整份合并完才落库——那正是中断后从头再来的原因）；
+        //   下次先查缓存，命中就不再走云端。
+        let dir = tempfile::tempdir().unwrap();
+        let (db, video_id) = cache_fixture(&dir).await;
+        let cache = crate::pipeline::asr_cache::ChunkCache {
+            db: &db,
+            video_id: &video_id,
+            params: "volcengine-auc|".into(),
+        };
+        let audio = b"pretend-mp3-bytes";
+
+        // 第一次：没认过，走识别，结果应当当场落库。
+        let first = cached_or_recognize(audio, Some(&cache), || async {
+            Ok(maps_one_segment("这一片认出来的话"))
+        })
+        .await
+        .unwrap();
+        assert_eq!(first.transcription[0].text, "这一片认出来的话");
+        assert!(
+            cache.get(audio).await.is_some(),
+            "认完必须立刻存，否则中断后这一片的钱白花"
+        );
+
+        // 第二次（模拟中断后重来）：必须走缓存。这里的识别闭包一旦被调用就直接失败，
+        // 所以能拿到结果就证明它没去调云端。
+        let second = cached_or_recognize(audio, Some(&cache), || async {
+            Err(AppError::Pipeline("不该走到这里：应当命中缓存".into()))
+        })
+        .await
+        .unwrap();
+        assert_eq!(second.transcription[0].text, "这一片认出来的话");
+    }
+
+    #[tokio::test]
+    async fn without_a_cache_it_just_recognizes_as_before() {
+        // 没有缓存句柄时（整段上传模式等）行为不变，不该因为多了这一层就出事。
+        let out = cached_or_recognize(b"bytes", None, || async { Ok(maps_one_segment("照常")) })
+            .await
+            .unwrap();
+        assert_eq!(out.transcription[0].text, "照常");
+    }
 
     #[test]
     fn only_a_failed_submit_may_be_retried() {

@@ -4,6 +4,7 @@ pub mod aliyun_ocr;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod apple_vision;
 pub mod asr;
+pub mod asr_cache;
 pub mod assistant;
 pub mod audio;
 pub mod concepts;
@@ -511,13 +512,25 @@ async fn run_all(
                         "云端分段识别中（火山引擎）",
                     )
                     .await?;
+                    // 断点续跑：分片认完就落库，中途退出（点停、崩溃、关机）时
+                    // 已经付过钱的那些分片下次直接取回，不用从第一片重来。
+                    // 识别参数拌进键里，改了热词/上下文就不会命中。
+                    let cache = asr_cache::ChunkCache {
+                        db: &db,
+                        video_id: &video_id,
+                        params: format!(
+                            "volcengine-auc|{}",
+                            context.as_deref().unwrap_or_default()
+                        ),
+                    };
                     volcengine_auc::run_volcengine_file_chunked(
                         &audio_path,
                         &app_id,
                         &access_token,
                         chunk_secs,
                         concurrency,
-                        context,
+                        context.clone(),
+                        Some(&cache),
                     )
                     .await
                 }
@@ -569,6 +582,12 @@ async fn run_all(
             emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.92, "解析识别结果").await?;
             emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.95, "写入原始文稿").await?;
             let count = asr::store_transcripts_with_raw_backup(&db, &video_id, &json).await?;
+            // 整份文稿已经落库，分片断点缓存的使命就结束了。留着的话，用户明确要求
+            // 「重新处理」时会静默拿回旧结果——那时他要的恰恰是重认一遍。
+            // 清理失败只是留下一点垃圾，不该让这一步失败。
+            if let Err(error) = asr_cache::clear(&db, &video_id).await {
+                tracing::warn!(%error, "清理分片识别缓存失败");
+            }
             let final_message = match crate::commands::ai::provider_for_db(
                 &db,
                 crate::llm::profiles::AiTask::Correction,
