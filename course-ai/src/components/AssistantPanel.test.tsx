@@ -377,6 +377,27 @@ describe("AssistantPanel", () => {
     await screen.findByText("好了");
   });
 
+  it("用户翻看旧消息时，新回复不会强行抢回滚动位置", async () => {
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask.mockReturnValueOnce(
+      new Promise<AssistantReply>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    renderPanel();
+    await ask("找一下例题");
+
+    const log = screen.getByRole("log");
+    Object.defineProperty(log, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(log, "clientHeight", { configurable: true, value: 200 });
+    Object.defineProperty(log, "scrollTop", { configurable: true, writable: true, value: 300 });
+    fireEvent.scroll(log);
+
+    finish(reply());
+    await screen.findByText("好了");
+    expect(log.scrollTop).toBe(300);
+  });
+
   it("停止会取消当前 request_id，并明确标出这一轮没有执行完", async () => {
     let finish!: (value: AssistantReply) => void;
     mockIpc.assistant.ask.mockReturnValueOnce(
@@ -672,10 +693,31 @@ describe("AssistantPanel", () => {
 
   it("窄视口按移动抽屉渲染，并避开底部主导航", () => {
     renderPanel(vi.fn(), { compact: true, bottomNavigationVisible: true });
-    const panel = screen.getByRole("complementary", { name: "助手" });
+    const panel = screen.getByRole("dialog", { name: "助手" });
     expect(screen.queryByRole("button", { name: "拖动助手面板" })).not.toBeInTheDocument();
     expect(panel).toHaveClass("inset-x-0", "h-[70dvh]");
     expect(panel.getAttribute("style")).toContain("bottom: calc(56px");
+  });
+
+  it("移动抽屉有模态遮罩，焦点循环在抽屉内并可点击遮罩关闭", async () => {
+    renderPanel(vi.fn(), { compact: true });
+    const panel = screen.getByRole("dialog", { name: "助手" });
+    expect(panel).toHaveAttribute("aria-modal", "true");
+    const input = screen.getByLabelText("对助手说");
+    const send = screen.getByLabelText("发送");
+    const close = screen.getByLabelText("收起助手");
+    await waitFor(() => expect(input).toHaveFocus());
+    fireEvent.change(input, { target: { value: "查一下" } });
+
+    send.focus();
+    fireEvent.keyDown(send, { key: "Tab" });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
+    expect(send).toHaveFocus();
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭助手" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "打开助手" })).toHaveFocus());
+    expect(panel).not.toBeVisible();
   });
 });
 
