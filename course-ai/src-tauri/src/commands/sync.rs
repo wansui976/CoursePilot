@@ -119,6 +119,15 @@ pub async fn cmd_sync_set_enabled(
 pub async fn cmd_sync_now(app: AppHandle, state: State<'_, AppState>) -> AppResult<SyncStatus> {
     let _transition = state.sync_transition.lock().await;
     let spool = sync_spool(&app)?;
+    // 收方向不依赖云传输：进件目录里已经躺着的信封先并进来（apply 是本地事务，
+    // 目录为空时是个空操作）。出方向仍被闸门挡着，照旧明说不可用。
+    let data_root = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|root| root.join("synced-videos"));
+    crate::sync::apply::apply_incoming(&state.db, &spool.incoming_dir(), data_root.as_deref())
+        .await?;
     stop_and_disable_business_sync(&app, &state.db, &spool).await?;
     Err(AppError::Config(BUSINESS_SYNC_UNAVAILABLE.into()))
 }
@@ -939,7 +948,7 @@ async fn drain_acks(db: &crate::db::Db, spool: &SyncSpool) -> AppResult<()> {
                 .await
                 .map(|_| ())
         } else {
-            outbox::acknowledge(
+            match outbox::acknowledge(
                 db,
                 &ack.record_type,
                 &ack.record_id,
@@ -947,7 +956,20 @@ async fn drain_acks(db: &crate::db::Db, spool: &SyncSpool) -> AppResult<()> {
                 ack.change_tag.as_deref(),
             )
             .await
-            .map(|_| ())
+            {
+                // 只在确认真的清掉出件项时刷新基准：版本不匹配的过期确认说明本地
+                // 又改过了，那时的当前内容不是与对端达成一致的内容。
+                Ok(true) if ack.record_type == "Note" => {
+                    crate::sync::apply::record_acked_note_basis(
+                        db,
+                        &ack.record_id,
+                        ack.updated_at
+                            .unwrap_or_else(|| Utc::now().timestamp_millis()),
+                    )
+                    .await
+                }
+                other => other.map(|_| ()),
+            }
         };
 
         if let Err(error) = result {

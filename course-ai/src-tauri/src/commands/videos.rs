@@ -455,10 +455,11 @@ pub async fn reorder_videos(db: &Db, course_id: &str, ordered_ids: Vec<String>) 
 
     for (index, id) in ordered_ids.iter().enumerate() {
         let result = sqlx::query(
-            "UPDATE videos SET order_index=?
+            "UPDATE videos SET order_index=?, sync_updated_at=?
              WHERE id=? AND course_id=? AND deleted_at IS NULL",
         )
         .bind(index as i64)
+        .bind(Utc::now().timestamp_millis())
         .bind(id)
         .bind(course_id)
         .execute(&mut *tx)
@@ -502,22 +503,31 @@ pub async fn update_video_title(db: &Db, id: &str, title: String) -> AppResult<V
     if title.is_empty() {
         return Err(AppError::Other("视频标题不能为空".into()));
     }
-    let video = sqlx::query_as::<_, Video>("UPDATE videos SET title=? WHERE id=? RETURNING *")
-        .bind(title)
-        .bind(id)
-        .fetch_optional(&db.pool)
-        .await?
-        .ok_or_else(|| AppError::NotFound(format!("video {id}")))?;
+    // sync_updated_at 是同步合并里意图字段组的 LWW 钟：编辑发生的那一刻，不是外发的那一刻。
+    let video = sqlx::query_as::<_, Video>(
+        "UPDATE videos SET title=?, sync_updated_at=? WHERE id=? RETURNING *",
+    )
+    .bind(title)
+    .bind(Utc::now().timestamp_millis())
+    .bind(id)
+    .fetch_optional(&db.pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("video {id}")))?;
     Ok(video)
 }
 
 /// 软删除：移入回收站（置 deleted_at），可在 30 天内恢复。
 pub async fn delete_video(db: &Db, id: &str) -> AppResult<()> {
-    let result = sqlx::query("UPDATE videos SET deleted_at=? WHERE id=? AND deleted_at IS NULL")
-        .bind(Utc::now().timestamp_millis())
-        .bind(id)
-        .execute(&db.pool)
-        .await?;
+    // trash_changed_at 是删除态字段组自己的钟；意图编辑不拨它，它也不拨意图钟。
+    let now = Utc::now().timestamp_millis();
+    let result = sqlx::query(
+        "UPDATE videos SET deleted_at=?, trash_changed_at=? WHERE id=? AND deleted_at IS NULL",
+    )
+    .bind(now)
+    .bind(now)
+    .bind(id)
+    .execute(&db.pool)
+    .await?;
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound(format!("video {id}")));
     }
@@ -527,19 +537,22 @@ pub async fn delete_video(db: &Db, id: &str) -> AppResult<()> {
 /// 从回收站恢复视频；若其课程也被软删除，一并恢复课程。
 pub async fn restore_video(db: &Db, id: &str) -> AppResult<()> {
     let mut tx = db.pool.begin().await?;
+    let now = Utc::now().timestamp_millis();
     let course_id = sqlx::query_scalar::<_, String>(
-        "UPDATE videos SET deleted_at=NULL
+        "UPDATE videos SET deleted_at=NULL, trash_changed_at=?
          WHERE id=? AND deleted_at IS NOT NULL
          RETURNING course_id",
     )
+    .bind(now)
     .bind(id)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::NotFound(format!("trashed video {id}")))?;
     sqlx::query(
-        "UPDATE courses SET deleted_at=NULL
-         WHERE id=?",
+        "UPDATE courses SET deleted_at=NULL, trash_changed_at=?
+         WHERE id=? AND deleted_at IS NOT NULL",
     )
+    .bind(now)
     .bind(course_id)
     .execute(&mut *tx)
     .await?;

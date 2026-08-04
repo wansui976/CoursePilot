@@ -204,28 +204,35 @@ fn parse_operation(value: &str) -> AppResult<SyncOperation> {
     }
 }
 
-async fn payload_for(
+pub(crate) async fn payload_for(
     tx: &mut Transaction<'_, Sqlite>,
     record_type: &str,
     record_id: &str,
 ) -> AppResult<Option<Value>> {
     let payload = match record_type {
         "Course" => {
-            let row: Option<(String, String, i64, i64, Option<i64>)> = sqlx::query_as(
-                "SELECT id,name,created_at,updated_at,deleted_at FROM courses WHERE id=?",
+            type CourseSyncRow = (String, String, i64, i64, Option<i64>, i64);
+            let row: Option<CourseSyncRow> = sqlx::query_as(
+                "SELECT id,name,created_at,updated_at,deleted_at,
+                        COALESCE(trash_changed_at, deleted_at, created_at)
+                 FROM courses WHERE id=?",
             )
             .bind(record_id)
             .fetch_optional(&mut **tx)
             .await?;
-            row.map(|(id, name, created_at, updated_at, deleted_at)| {
-                json!({
-                    "id": id,
-                    "name": name,
-                    "createdAt": created_at,
-                    "updatedAt": updated_at,
-                    "deletedAt": deleted_at,
-                })
-            })
+            row.map(
+                |(id, name, created_at, updated_at, deleted_at, trash_changed_at)| {
+                    json!({
+                        "id": id,
+                        "name": name,
+                        "createdAt": created_at,
+                        "updatedAt": updated_at,
+                        "deletedAt": deleted_at,
+                        // 删除态字段组自己的 LWW 钟；意图编辑不拨它。合并律见 docs。
+                        "trashChangedAt": trash_changed_at,
+                    })
+                },
+            )
         }
         "Video" => {
             type VideoSyncRow = (
@@ -239,10 +246,14 @@ async fn payload_for(
                 i64,
                 i64,
                 Option<i64>,
+                i64,
+                i64,
             );
             let row: Option<VideoSyncRow> = sqlx::query_as(
                 "SELECT id,course_id,title,source_type,source_uri,content_fingerprint,
-                        duration_ms,order_index,created_at,deleted_at
+                        duration_ms,order_index,created_at,deleted_at,
+                        CASE WHEN sync_updated_at>0 THEN sync_updated_at ELSE created_at END,
+                        COALESCE(trash_changed_at, deleted_at, created_at)
                  FROM videos WHERE id=?",
             )
             .bind(record_id)
@@ -260,6 +271,8 @@ async fn payload_for(
                     order_index,
                     created_at,
                     deleted_at,
+                    updated_at,
+                    trash_changed_at,
                 )| {
                     json!({
                         "id": id,
@@ -272,6 +285,9 @@ async fn payload_for(
                         "orderIndex": order_index,
                         "createdAt": created_at,
                         "deletedAt": deleted_at,
+                        // 意图字段组（标题/归属/排序）的 LWW 钟：编辑时刻。0 = 建行后从未编辑。
+                        "updatedAt": updated_at,
+                        "trashChangedAt": trash_changed_at,
                     })
                 },
             )

@@ -137,16 +137,22 @@ pub async fn ensure_active_course(db: &Db, id: &str) -> AppResult<()> {
 pub async fn delete_course(db: &Db, id: String) -> AppResult<()> {
     let now = Utc::now().timestamp_millis();
     let mut tx = db.pool.begin().await?;
-    sqlx::query("UPDATE videos SET deleted_at=? WHERE course_id=? AND deleted_at IS NULL")
-        .bind(now)
-        .bind(&id)
-        .execute(&mut *tx)
-        .await?;
-    let result = sqlx::query("UPDATE courses SET deleted_at=? WHERE id=? AND deleted_at IS NULL")
-        .bind(now)
-        .bind(&id)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "UPDATE videos SET deleted_at=?, trash_changed_at=? WHERE course_id=? AND deleted_at IS NULL",
+    )
+    .bind(now)
+    .bind(now)
+    .bind(&id)
+    .execute(&mut *tx)
+    .await?;
+    let result = sqlx::query(
+        "UPDATE courses SET deleted_at=?, trash_changed_at=? WHERE id=? AND deleted_at IS NULL",
+    )
+    .bind(now)
+    .bind(now)
+    .bind(&id)
+    .execute(&mut *tx)
+    .await?;
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound(format!("course {id}")));
     }
