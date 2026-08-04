@@ -190,6 +190,23 @@ function readHistory(values: unknown[]): AssistantMessage[] {
   return kept.flat();
 }
 
+/**
+ * 去掉最后一次提问以及它之后的所有消息，得到「问那句话之前」的上下文。
+ *
+ * 重新生成用它：同一个问题要在同样的上下文里再问一遍，否则模型会看见自己上一次的
+ * 回答，「换个说法再答一次」就变成了「顺着刚才继续说」——而用户点重新生成，恰恰是
+ * 因为刚才那次不满意。
+ *
+ * 从最后一条 user 消息切断，那一轮的工具往返和界面操作回执都跟着丢掉：它们都是这次
+ * 提问的产物，重问一遍会重新产生。
+ */
+export function historyBeforeLastQuestion(history: AssistantMessage[]): AssistantMessage[] {
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    if (history[index].role === "user") return history.slice(0, index);
+  }
+  return [];
+}
+
 export function readAssistantSession(): AssistantSession {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
