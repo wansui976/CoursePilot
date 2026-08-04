@@ -791,7 +791,6 @@ export function AssistantPanel({
         answer: "",
         actions: [],
         tools: [],
-        turns: 1,
         canceled: false,
         actionResults: [],
         pending: true,
@@ -828,7 +827,6 @@ export function AssistantPanel({
                 answer: locallyStopped && !reply.canceled ? "" : reply.answer,
                 actions,
                 tools: reply.tools_used,
-                turns: reply.turns,
                 canceled,
                 pending: false,
               }
@@ -1268,10 +1266,6 @@ export function AssistantPanel({
               </div>
             )}
 
-            {turn.turns > 1 && (
-              // 来回几次要让人看见：每一轮的工具结果都留在上下文里，花销是乘法涨的。
-              <p className="text-[10px] text-[var(--text-faint)]">来回 {turn.turns} 轮</p>
-            )}
             {turn.canceled && (
               <p className="flex items-center gap-1 text-[10px] text-[var(--text-faint)]">
                 <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
