@@ -7,7 +7,9 @@ import {
 } from "react";
 import {
   AlertCircle,
+  ArrowDown,
   ArrowUpRight,
+  AtSign,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -15,6 +17,7 @@ import {
   GripHorizontal,
   LoaderCircle,
   MessageSquarePlus,
+  RefreshCw,
   Send,
   Sparkles,
   Square,
@@ -25,6 +28,7 @@ import { AssistantActionList } from "@/components/AssistantActionCard";
 import { AssistantToolChips } from "@/components/AssistantToolChips";
 import {
   clearAssistantSession,
+  historyBeforeLastQuestion,
   readAssistantSession,
   writeAssistantSession,
   type AssistantTurnRecord,
@@ -33,7 +37,13 @@ import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
 import { isMobile, isTablet } from "@/lib/platform";
 import { formatMs } from "@/lib/time";
-import { type DockSide, useAssistantUi } from "@/stores/assistant";
+import {
+  clampPanelWidth,
+  MAX_PANEL_WIDTH,
+  MIN_PANEL_WIDTH,
+  type DockSide,
+  useAssistantUi,
+} from "@/stores/assistant";
 import { useInlineAsk } from "@/stores/inlineAsk";
 import { useTheme } from "@/stores/theme";
 import { renderMarkdown } from "@/lib/renderMarkdown";
@@ -46,7 +56,6 @@ import type { AssistantAction, AssistantContext, AssistantMessage } from "@/lib/
  * 改成底部抽屉——两种外壳共用同一套状态和消息流，切换的只是容器。
  */
 
-const PANEL_WIDTH = 360;
 const PANEL_MAX_HEIGHT = 720;
 const VIEWPORT_GAP = 16;
 const EDGE_SNAP_DISTANCE = 28;
@@ -60,6 +69,7 @@ const LAUNCHER_SIZE = 56;
 /// 松手贴回去才不会横着弹一下。
 const LAUNCHER_MARGIN = 12;
 const KEYBOARD_MOVE_STEP = 24;
+const KEYBOARD_RESIZE_STEP = 32;
 const DRAG_START_DISTANCE = 4;
 
 interface PanelPosition {
@@ -91,10 +101,18 @@ function viewportSize() {
   return { width: window.innerWidth, height: window.innerHeight };
 }
 
+/**
+ * 面板还没排版时的估算尺寸。宽度直接从 store 读当前值而不是收参数：这些估算会在
+ * 窗口 resize 之类的长期监听里被调用，收参数的话闭包会把某一次渲染时的宽度冻在里面，
+ * 用户拉宽面板之后那些监听还按旧宽度算。
+ */
 function fallbackPanelSize() {
   const viewport = viewportSize();
   return {
-    width: Math.min(PANEL_WIDTH, Math.max(0, viewport.width - VIEWPORT_GAP * 2)),
+    width: Math.min(
+      useAssistantUi.getState().width,
+      Math.max(0, viewport.width - VIEWPORT_GAP * 2),
+    ),
     height: Math.min(PANEL_MAX_HEIGHT, Math.max(0, viewport.height - VIEWPORT_GAP * 2)),
   };
 }
@@ -106,6 +124,12 @@ function initialPanelPosition(side: DockSide): PanelPosition {
     x: side === "left" ? VIEWPORT_GAP : viewport.width - panel.width - VIEWPORT_GAP,
     y: VIEWPORT_GAP,
   };
+}
+
+/** 呼出快捷键的显示写法。Mac 用 ⌘，其余平台用 Ctrl。 */
+function toggleShortcutLabel() {
+  if (typeof navigator === "undefined") return "Ctrl+J";
+  return /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent) ? "⌘J" : "Ctrl+J";
 }
 
 function initialDockTop() {
@@ -177,7 +201,7 @@ export function AssistantPanel({
   /** 课程库窄屏下底部有 56px 主导航，抽屉和入口都要避开它。 */
   bottomNavigationVisible?: boolean;
 }) {
-  const { open, side, setOpen, dock } = useAssistantUi();
+  const { open, side, width, setOpen, dock, setWidth } = useAssistantUi();
   const [initialSession] = useState(readAssistantSession);
   const [input, setInput] = useState(initialSession.draft);
   const [busy, setBusy] = useState(false);
@@ -209,6 +233,12 @@ export function AssistantPanel({
   const [launcherPosition, setLauncherPosition] = useState<PanelPosition | null>(null);
   const [dragging, setDragging] = useState(false);
   const [snapSide, setSnapSide] = useState<DockSide | null>(null);
+  /** 用户翻上去看旧消息了吗。翻上去了就给一个「回到最新」的按钮，不然新回答落在屏幕外没人知道。 */
+  const [scrolledAway, setScrolledAway] = useState(false);
+  /** 拖动内侧边框时的实时宽度。松手才写进偏好，免得一次拖动往磁盘上写几十遍。 */
+  const [resizeWidth, setResizeWidth] = useState<number | null>(null);
+  const toggleRef = useRef(() => {});
+  const panelWidth = resizeWidth ?? width;
   const setThemePref = useTheme((state) => state.setPref);
   const pendingInlineAsk = useInlineAsk((state) => state.pending);
   const clearInlineAsk = useInlineAsk((state) => state.clear);
@@ -241,6 +271,26 @@ export function AssistantPanel({
     const box = scrollRef.current;
     if (box && followScrollRef.current) box.scrollTop = box.scrollHeight;
   }, [turns, busy]);
+
+  // 呼出快捷键。常驻助手只能靠鼠标点那颗球才能打开，等于把它排除在键盘之外；
+  // 成熟的助手都有一个随手可按的组合键。
+  // 处理函数每次渲染重新绑一遍到 ref 上：监听只挂一次，读到的却始终是最新的位置和状态。
+  useEffect(() => {
+    toggleRef.current = () => (open ? collapseToNearestSide(true) : openFromDock());
+  });
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if (key !== "j" || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) {
+        return;
+      }
+      event.preventDefault();
+      toggleRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   useEffect(() => {
     const pendingQuestion = turns.find((turn) => turn.pending)?.question ?? "";
@@ -563,6 +613,111 @@ export function AssistantPanel({
     });
   }
 
+  /**
+   * 拉宽/收窄面板。
+   *
+   * 固定 360px 对一段带列表和公式的长回答太窄了——每行放不下十几个字，一条列表项要折三行。
+   * 抓手放在朝向屏幕内侧的那条边（停在右边就抓左边框），拖的时候贴边的那一侧不动：
+   * 面板向内长出来，而不是整块跟着手跑出屏幕。
+   */
+  function beginResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (mobile || (event.pointerType === "mouse" && event.button !== 0)) return;
+    event.preventDefault();
+    dragCleanupRef.current?.();
+
+    const handle = event.currentTarget;
+    const { pointerId } = event;
+    const fromLeftEdge = side === "right";
+    const startX = event.clientX;
+    const startWidth = measurePanel().width;
+    // 不动的那条边。左边框拖动时右边固定，反之亦然。
+    const anchor = fromLeftEdge ? position.x + startWidth : position.x;
+
+    try {
+      handle.setPointerCapture(pointerId);
+    } catch {
+      // 与拖动一样：没有指针捕获时靠 window 监听也能跟到底。
+    }
+
+    const widthAt = (clientX: number) => {
+      const viewport = viewportSize();
+      const room = fromLeftEdge ? anchor - VIEWPORT_GAP : viewport.width - anchor - VIEWPORT_GAP;
+      const dragged = fromLeftEdge ? startX - clientX : clientX - startX;
+      const wanted = clampPanelWidth(startWidth + dragged);
+      // 视口比偏好上限还窄时，宽度让位给视口，但不缩到读不了。
+      return Math.min(wanted, Math.max(MIN_PANEL_WIDTH, room));
+    };
+
+    const apply = (clientX: number) => {
+      const next = widthAt(clientX);
+      setResizeWidth(next);
+      if (fromLeftEdge) setPosition((current) => ({ ...current, x: anchor - next }));
+      return next;
+    };
+
+    const removeListeners = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      try {
+        if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+      } catch {
+        // 同上，缺少该 API 时无需额外处理。
+      }
+      if (dragCleanupRef.current === removeListeners) dragCleanupRef.current = null;
+    };
+
+    function onMove(pointerEvent: PointerEvent) {
+      if (pointerEvent.pointerId !== pointerId) return;
+      pointerEvent.preventDefault();
+      apply(pointerEvent.clientX);
+    }
+
+    function onUp(pointerEvent: PointerEvent) {
+      if (pointerEvent.pointerId !== pointerId) return;
+      setWidth(apply(pointerEvent.clientX));
+      setResizeWidth(null);
+      removeListeners();
+    }
+
+    function onCancel(pointerEvent: PointerEvent) {
+      if (pointerEvent.pointerId !== pointerId) return;
+      // 指针被系统收走就当这次没拖过：回到偏好里存着的宽度。
+      setResizeWidth(null);
+      if (fromLeftEdge) setPosition((current) => ({ ...current, x: anchor - startWidth }));
+      removeListeners();
+    }
+
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    dragCleanupRef.current = removeListeners;
+  }
+
+  function resizeWithKeyboard(event: KeyboardEvent<HTMLDivElement>) {
+    // 抓手在哪边，「往外拉」就是哪个方向：停在右边时抓的是左边框，向左即变宽。
+    const widen = side === "right" ? "ArrowLeft" : "ArrowRight";
+    const narrow = side === "right" ? "ArrowRight" : "ArrowLeft";
+    const delta =
+      event.key === widen
+        ? KEYBOARD_RESIZE_STEP
+        : event.key === narrow
+          ? -KEYBOARD_RESIZE_STEP
+          : 0;
+    if (!delta) return;
+    event.preventDefault();
+
+    const next = clampPanelWidth(width + delta);
+    setWidth(next);
+    if (side === "right") {
+      const viewport = viewportSize();
+      setPosition((current) => ({
+        ...current,
+        x: clamp(current.x + (width - next), VIEWPORT_GAP, viewport.width - next - VIEWPORT_GAP),
+      }));
+    }
+  }
+
   function movePanelWithKeyboard(event: KeyboardEvent<HTMLButtonElement>) {
     if (mobile) return;
     if (event.key === "Home" || event.key === "End") {
@@ -620,7 +775,10 @@ export function AssistantPanel({
     activeRequestRef.current = requestId;
     // 新问题是用户主动发起的导航点，无论此前停在哪一段，都把它带到最新内容。
     followScrollRef.current = true;
-    setInput("");
+    setScrolledAway(false);
+    // 只清从输入框发出的那一条。点建议、点重新回答时用户可能正打着别的字，
+    // 不该被顺手抹掉。
+    if (suggestedQuestion === undefined) setInput("");
     setBusy(true);
     setStopping(false);
     setError("");
@@ -679,8 +837,9 @@ export function AssistantPanel({
       );
     } catch (e) {
       // 把问题放回输入框：让用户能直接重发，而不是重新打一遍。
+      // 但输入框里已经有东西时不覆盖——那是他趁等待时打的，比这句重发的价值高。
       setTurns((prev) => prev.filter((turn) => turn.id !== turnId));
-      setInput(question);
+      setInput((current) => (current.trim() ? current : question));
       setError(humanizeError(e));
     } finally {
       locallyStoppedRequestsRef.current.delete(requestId);
@@ -705,6 +864,33 @@ export function AssistantPanel({
     } catch (e) {
       setError(`复制失败：${humanizeError(e)}`);
     }
+  }
+
+  /**
+   * 同一个问题再问一遍。
+   *
+   * 关键是**先把上下文退回提问之前**，否则模型看得见自己刚才那次回答，「重新生成」就变成了
+   * 「顺着刚才继续说」——而用户点它，恰恰是因为刚才那次不满意。
+   *
+   * 被停掉的那一轮是个例外：它整轮都没进上下文（后端返回的 history 被丢弃了），
+   * 现在的 history 已经就是提问之前的样子，再退一轮会把上一次真正的问答也砍掉。
+   */
+  function regenerate(turn: Turn) {
+    if (busy || activeRequestRef.current) return;
+    const before = turn.canceled
+      ? historyRef.current
+      : historyBeforeLastQuestion(historyRef.current);
+    historyRef.current = before;
+    setHistory(before);
+    setTurns((previous) => previous.filter((item) => item.id !== turn.id));
+    void send(turn.question);
+  }
+
+  function jumpToLatest() {
+    const box = scrollRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
+    followScrollRef.current = true;
+    setScrolledAway(false);
   }
 
   function recordActionResult(turnId: string, message: string, epoch: number) {
@@ -750,6 +936,7 @@ export function AssistantPanel({
     setConversationEpoch(nextEpoch);
     setTurns([]);
     followScrollRef.current = true;
+    setScrolledAway(false);
     historyRef.current = [];
     setHistory([]);
     setInput("");
@@ -763,7 +950,7 @@ export function AssistantPanel({
     : "calc(env(safe-area-inset-bottom, 0px) + 24px)";
   const shell = mobile
     ? "fixed inset-x-0 z-[47] h-[70dvh] max-h-[calc(100dvh-56px)] rounded-t-2xl border-t"
-    : "fixed z-40 h-[min(720px,calc(100dvh-2rem))] w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border";
+    : "fixed z-40 h-[min(720px,calc(100dvh-2rem))] max-w-[calc(100vw-2rem)] rounded-2xl border";
   const panelBottom = bottomNavigationVisible
     ? "calc(56px + env(safe-area-inset-bottom, 0px))"
     : "env(safe-area-inset-bottom, 0px)";
@@ -775,6 +962,7 @@ export function AssistantPanel({
         ref={launcherRef}
         type="button"
         aria-label="打开助手"
+        title={`打开助手 (${toggleShortcutLabel()})`}
         data-dock-side={mobile ? undefined : side}
         onClick={() => {
           if (suppressLauncherClickRef.current) {
@@ -849,25 +1037,43 @@ export function AssistantPanel({
       }}
       data-dragging={mobile ? undefined : dragging}
       data-snap-side={mobile ? undefined : snapSide ?? undefined}
-      style={mobile ? { bottom: panelBottom } : { left: position.x, top: position.y }}
+      style={
+        mobile
+          ? { bottom: panelBottom }
+          : { left: position.x, top: position.y, width: panelWidth }
+      }
       className={`${open ? "flex" : "hidden"} ${shell} flex-col border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] ${
         snapSide ? "ring-2 ring-[var(--accent)]" : ""
       }`}
     >
+      {/* 朝向屏幕内侧的那条边是宽度抓手。固定宽度对一段带列表和公式的长回答太窄了。 */}
+      {!mobile && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整助手宽度"
+          aria-valuenow={panelWidth}
+          aria-valuemin={MIN_PANEL_WIDTH}
+          aria-valuemax={MAX_PANEL_WIDTH}
+          tabIndex={0}
+          onPointerDown={beginResize}
+          onKeyDown={resizeWithKeyboard}
+          className={`absolute inset-y-3 z-10 w-1.5 cursor-col-resize touch-none rounded-full transition-colors hover:bg-[var(--accent-weak-2)] focus-visible:outline-none focus-visible:bg-[var(--accent)] motion-reduce:transition-none ${
+            side === "right" ? "left-0" : "right-0"
+          } ${resizeWidth === null ? "" : "bg-[var(--accent)]"}`}
+        />
+      )}
       <header className="flex items-center gap-1 border-b border-[var(--border-subtle)] px-3 py-2">
+        {/* 提问范围原先挤在标题旁边，11px 一行灰字。它决定了「这个视频」指的是谁，
+            该待在你打字的地方，而不是滚动区顶上那条最容易被忽略的边。 */}
         {mobile ? (
           <>
             <Sparkles className="h-4 w-4 flex-none text-[var(--accent)]" />
-            <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-              <span id="assistant-panel-title" className="text-sm font-medium text-[var(--text-strong)]">
-                助手
-              </span>
-              <span
-                aria-label={`当前提问范围：${scopeLabel}`}
-                className="truncate text-[11px] text-[var(--text-faint)]"
-              >
-                {scopeLabel}
-              </span>
+            <span
+              id="assistant-panel-title"
+              className="min-w-0 flex-1 text-sm font-medium text-[var(--text-strong)]"
+            >
+              助手
             </span>
           </>
         ) : (
@@ -881,16 +1087,11 @@ export function AssistantPanel({
           >
             <GripHorizontal className="h-4 w-4 flex-none text-[var(--text-faint)]" />
             <Sparkles className="h-4 w-4 flex-none text-[var(--accent)]" />
-            <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-              <span id="assistant-panel-title" className="text-sm font-medium text-[var(--text-strong)]">
-                助手
-              </span>
-              <span
-                aria-label={`当前提问范围：${scopeLabel}`}
-                className="truncate text-[11px] font-normal text-[var(--text-faint)]"
-              >
-                {scopeLabel}
-              </span>
+            <span
+              id="assistant-panel-title"
+              className="min-w-0 flex-1 text-sm font-medium text-[var(--text-strong)]"
+            >
+              助手
             </span>
           </button>
         )}
@@ -925,12 +1126,14 @@ export function AssistantPanel({
           size="icon"
           variant="ghost"
           aria-label="收起助手"
+          title={`收起助手 (${toggleShortcutLabel()})`}
           onClick={() => collapseToNearestSide()}
         >
           <X className="h-4 w-4" />
         </Button>
       </header>
 
+      <div className="relative flex min-h-0 flex-1 flex-col">
       <div
         ref={scrollRef}
         role="log"
@@ -938,12 +1141,21 @@ export function AssistantPanel({
         aria-relevant="additions text"
         onScroll={() => {
           const box = scrollRef.current;
-          if (box) followScrollRef.current = isNearScrollEnd(box);
+          if (!box) return;
+          const atEnd = isNearScrollEnd(box);
+          followScrollRef.current = atEnd;
+          setScrolledAway(!atEnd);
         }}
-        className="flex-1 space-y-3 overflow-y-auto px-3 py-3"
+        className="flex-1 space-y-4 overflow-y-auto px-3 py-3"
       >
         {turns.length === 0 && !busy && !error && (
-          <div className="flex min-h-full items-center">
+          <div className="flex min-h-full flex-col justify-center gap-4">
+            <div>
+              <p className="text-[15px] font-medium text-[var(--text-strong)]">有什么可以帮你的？</p>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--text-faint)]">
+                问{scopeLabel}的内容，也可以让我打开视频、跳到某一处或改设置。
+              </p>
+            </div>
             <div className="grid w-full gap-2">
               {suggestionsFor(context).map((suggestion) => (
                 <button
@@ -977,32 +1189,58 @@ export function AssistantPanel({
             <AssistantToolChips tools={turn.tools} />
 
             {turn.answer && (
-              <div className="flex justify-start">
+              /* 回答不套气泡，整幅铺开。
+                 气泡是给一两行的短句用的；回答是长文——带列表、公式、代码。在一块本来就窄的
+                 面板里，边框加左右内边距再加 8% 的留白，等于每行少掉四五个字，一条列表项要多折
+                 一行。成熟的助手都是这么分的：你说的话进气泡，它答的话铺满。左右不对称本身
+                 已经把「谁在说」讲清楚了。 */
+              <div className="group">
                 {/* 回答天然带 Markdown（列表、加粗、公式），当纯文本铺出来满屏 ** 和 -，
                     比没有格式还难读。复用问答面板那套渲染器，顺带白拿了
                     公式渲染和 [mm:ss] 可点击跳转。 */}
-                <div className="group max-w-[92%]">
-                  <div className="break-words rounded-2xl rounded-bl-sm border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-normal)]">
-                    {renderMarkdown(turn.answer, (ms) =>
-                      navigateFromTurn(turn, { kind: "seek_to", at_ms: ms }),
+                <div className="break-words text-sm leading-relaxed text-[var(--text-normal)]">
+                  {renderMarkdown(turn.answer, (ms) =>
+                    navigateFromTurn(turn, { kind: "seek_to", at_ms: ms }),
+                  )}
+                </div>
+                {/* 每条回答底下常驻一排按钮，翻起来满屏都是灰图标。桌面端悬停或键盘聚焦才浮出来，
+                    但位置一直留着——不留的话鼠标一进来整段就往上跳。触屏没有悬停，一直显示。 */}
+                <div
+                  className={`-ml-1.5 mt-0.5 flex h-7 items-center gap-0.5 ${
+                    mobile
+                      ? ""
+                      : "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none"
+                  }`}
+                >
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label={copiedTurnId === turn.id ? "已复制" : "复制回答"}
+                    title={copiedTurnId === turn.id ? "已复制" : "复制回答"}
+                    onClick={() => void copyAnswer(turn)}
+                    className="h-7 w-7 text-[var(--text-faint)]"
+                  >
+                    {copiedTurnId === turn.id ? (
+                      <Check className="h-3.5 w-3.5 text-[var(--status-ok)]" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
                     )}
-                  </div>
-                  <div className="mt-0.5 flex h-7 items-center">
+                  </Button>
+                  {/* 只给最后一轮。往回重生成会让它后面的问答全部失去依据——那已经是分支，
+                      不是重试了。 */}
+                  {turn.id === turns[turns.length - 1]?.id && (
                     <Button
                       size="icon"
                       variant="ghost"
-                      aria-label={copiedTurnId === turn.id ? "已复制" : "复制回答"}
-                      title={copiedTurnId === turn.id ? "已复制" : "复制回答"}
-                      onClick={() => void copyAnswer(turn)}
+                      aria-label="重新回答"
+                      title="重新回答"
+                      disabled={busy}
+                      onClick={() => regenerate(turn)}
                       className="h-7 w-7 text-[var(--text-faint)]"
                     >
-                      {copiedTurnId === turn.id ? (
-                        <Check className="h-3.5 w-3.5 text-[var(--status-ok)]" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" />
-                      )}
+                      <RefreshCw className="h-3.5 w-3.5" />
                     </Button>
-                  </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1063,45 +1301,77 @@ export function AssistantPanel({
         )}
       </div>
 
-      <div className="flex items-end gap-2 border-t border-[var(--border-subtle)] p-2">
-        <textarea
-          ref={inputRef}
-          aria-label="对助手说"
-          rows={1}
-          value={input}
-          placeholder="想做什么？"
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            // Enter 发送、Shift+Enter 换行。输入法组词时的 Enter 不能当发送，
-            // 否则中文用户每选一次候选词就误发一条。
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-          className="max-h-24 flex-1 resize-none rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2.5 py-2 text-sm text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-        />
-        {busy ? (
-          <Button
-            size="icon"
-            variant="outline"
-            aria-label="停止生成"
-            title="停止生成"
-            disabled={stopping}
-            onClick={stop}
-          >
-            <Square className="h-3.5 w-3.5 fill-current" />
-          </Button>
-        ) : (
-          <Button
-            size="icon"
-            aria-label="发送"
-            disabled={!input.trim()}
-            onClick={() => void send()}
-          >
-            <Send className="h-4 w-4" />
-          </Button>
-        )}
+      {/* 翻上去看旧回答时，新回答落在屏幕外，原来没有任何提示，也没有回来的路——
+          只能自己往下拖。给一个浮在滚动区底部的按钮。 */}
+      {scrolledAway && turns.length > 0 && (
+        <button
+          type="button"
+          onClick={jumpToLatest}
+          className="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] shadow-[var(--shadow-pop)] transition-colors hover:text-[var(--text-strong)] motion-reduce:transition-none"
+        >
+          <ArrowDown className="h-3 w-3" aria-hidden="true" />
+          回到最新
+        </button>
+      )}
+      </div>
+
+      {/* 输入框、范围提示和按钮合成一块。原来三样东西各管各的，输入区看着像张随手贴的表单。 */}
+      <div className="border-t border-[var(--border-subtle)] p-2">
+        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-input)] focus-within:border-[var(--accent)]">
+          <div className="px-2.5 pt-1.5">
+            <span
+              aria-label={`当前提问范围：${scopeLabel}`}
+              title="「这个视频」这类说法会落到这里"
+              className="inline-flex max-w-full items-center gap-1 rounded-full bg-[var(--surface-card)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)]"
+            >
+              <AtSign className="h-2.5 w-2.5 flex-none" aria-hidden="true" />
+              <span className="truncate">{scopeLabel}</span>
+            </span>
+          </div>
+          <div className="flex items-end gap-2 px-2 pb-1.5 pt-1">
+            <textarea
+              ref={inputRef}
+              aria-label="对助手说"
+              rows={1}
+              value={input}
+              placeholder="想做什么？"
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter 发送、Shift+Enter 换行。输入法组词时的 Enter 不能当发送，
+                // 否则中文用户每选一次候选词就误发一条。
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+              className="max-h-24 flex-1 resize-none bg-transparent px-0.5 py-1 text-sm text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)]"
+            />
+            {busy ? (
+              <Button
+                size="icon"
+                variant="outline"
+                aria-label="停止生成"
+                title="停止生成"
+                disabled={stopping}
+                onClick={stop}
+                className="h-8 w-8 flex-none rounded-lg"
+              >
+                <Square className="h-3.5 w-3.5 fill-current" />
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                aria-label="发送"
+                title="发送 (Enter)"
+                disabled={!input.trim()}
+                onClick={() => void send()}
+                className="h-8 w-8 flex-none rounded-lg"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        </div>
       </div>
     </aside>
     </>

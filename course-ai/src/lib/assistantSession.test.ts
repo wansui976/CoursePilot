@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   assistantSessionStorageKey,
   clearAssistantSession,
+  historyBeforeLastQuestion,
   readAssistantSession,
   writeAssistantSession,
 } from "./assistantSession";
@@ -133,5 +134,54 @@ describe("assistantSession", () => {
     expect(history.filter((message) => message.role === "user")).toHaveLength(8);
     expect(history[0].content).toBe("问题 2");
     expect(history.every((message) => !message.content.startsWith("（界面状态："))).toBe(true);
+  });
+});
+
+describe("historyBeforeLastQuestion", () => {
+  it("退回到提问之前，好让同一个问题在同样的上下文里重问一遍", () => {
+    // 不退回去，模型会看见自己刚才那次回答，「重新回答」就变成了「顺着刚才继续说」
+    // ——而用户点它，恰恰是因为刚才那次不满意。
+    const history = [
+      { role: "user", content: "第一问" },
+      { role: "assistant", content: "第一答" },
+      { role: "user", content: "第二问" },
+      { role: "assistant", content: "第二答" },
+    ];
+
+    expect(historyBeforeLastQuestion(history)).toEqual([
+      { role: "user", content: "第一问" },
+      { role: "assistant", content: "第一答" },
+    ]);
+  });
+
+  it("那一轮的工具往返和操作回执一起丢掉，它们都是这次提问的产物", () => {
+    const history = [
+      { role: "user", content: "旧问" },
+      { role: "assistant", content: "旧答" },
+      { role: "user", content: "删掉第三讲" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{ id: "c1", name: "delete_video", arguments: "{}" }],
+      },
+      { role: "tool", content: "已生成确认卡", tool_call_id: "c1" },
+      { role: "assistant", content: "要删哪个？" },
+      { role: "assistant", content: "（界面操作结果：已移入回收站）" },
+    ];
+
+    expect(historyBeforeLastQuestion(history)).toEqual([
+      { role: "user", content: "旧问" },
+      { role: "assistant", content: "旧答" },
+    ]);
+  });
+
+  it("只有一轮时退回空上下文", () => {
+    expect(
+      historyBeforeLastQuestion([
+        { role: "user", content: "唯一一问" },
+        { role: "assistant", content: "唯一一答" },
+      ]),
+    ).toEqual([]);
+    expect(historyBeforeLastQuestion([])).toEqual([]);
   });
 });

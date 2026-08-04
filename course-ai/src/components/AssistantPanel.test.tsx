@@ -78,7 +78,7 @@ describe("AssistantPanel", () => {
     localStorage.clear();
     platformMock.mobile = false;
     platformMock.tablet = false;
-    useAssistantUi.setState({ open: true, side: "right" });
+    useAssistantUi.setState({ open: true, side: "right", width: 380 });
     useInlineAsk.setState({ pending: null });
     mockIpc.assistant.ask.mockResolvedValue(reply());
     mockIpc.assistant.cancel.mockResolvedValue(undefined);
@@ -662,6 +662,179 @@ describe("AssistantPanel", () => {
     renderPanel();
     await ask("删了它");
     expect(await screen.findByTestId("tool-chips")).toHaveTextContent("准备删除");
+  });
+
+  it("拖内侧边框能把面板拉宽，贴边的那一侧不动", () => {
+    // 固定 360px 对一段带列表和公式的长回答太窄了：每行放不下十几个字，一条列表项要折三行。
+    renderPanel();
+    const panel = screen.getByRole("complementary", { name: "助手" });
+    // 停在右边时抓的是左边框，右边缘应当钉住不动——不然拉宽会把整块面板推出屏幕。
+    expect(panel).toHaveStyle({ left: "628px", width: "380px" });
+
+    const handle = screen.getByRole("separator", { name: "调整助手宽度" });
+    fireEvent.pointerDown(handle, { pointerId: 9, pointerType: "mouse", button: 0, clientX: 628 });
+    fireEvent.pointerMove(window, { pointerId: 9, clientX: 528 });
+    expect(panel).toHaveStyle({ left: "528px", width: "480px" });
+    fireEvent.pointerUp(window, { pointerId: 9, clientX: 528 });
+
+    expect(panel).toHaveStyle({ left: "528px", width: "480px" });
+    // 松手才写进偏好：拖动过程中每动一像素就写一次磁盘毫无必要。
+    expect(useAssistantUi.getState().width).toBe(480);
+    expect(localStorage.getItem("assistant_panel_width")).toBe("480");
+  });
+
+  it("宽度夹在能读的区间里，既拉不成半个屏幕也压不成一条缝", () => {
+    renderPanel();
+    const panel = screen.getByRole("complementary", { name: "助手" });
+    const handle = screen.getByRole("separator", { name: "调整助手宽度" });
+
+    fireEvent.pointerDown(handle, { pointerId: 4, pointerType: "mouse", button: 0, clientX: 628 });
+    fireEvent.pointerMove(window, { pointerId: 4, clientX: -4000 });
+    expect(panel).toHaveStyle({ width: "720px" });
+    fireEvent.pointerMove(window, { pointerId: 4, clientX: 4000 });
+    expect(panel).toHaveStyle({ width: "320px" });
+    fireEvent.pointerUp(window, { pointerId: 4, clientX: 4000 });
+  });
+
+  it("键盘也能调面板宽度", () => {
+    renderPanel();
+    const panel = screen.getByRole("complementary", { name: "助手" });
+    const handle = screen.getByRole("separator", { name: "调整助手宽度" });
+
+    // 抓手在左边框上，向左即变宽。
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(panel).toHaveStyle({ left: "596px", width: "412px" });
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(panel).toHaveStyle({ left: "628px", width: "380px" });
+    expect(handle).toHaveAttribute("aria-valuenow", "380");
+  });
+
+  it("快捷键能呼出和收起助手", async () => {
+    // 只能靠鼠标点那颗球才打得开，等于把常驻助手排除在键盘之外。
+    useAssistantUi.setState({ open: false });
+    renderPanel();
+
+    fireEvent.keyDown(window, { key: "j", metaKey: true });
+    await waitFor(() => expect(screen.getByLabelText("对助手说")).toBeVisible());
+
+    fireEvent.keyDown(window, { key: "j", ctrlKey: true });
+    await waitFor(() => expect(screen.getByLabelText("对助手说")).not.toBeVisible());
+
+    // 光按 j 不能生效，否则往输入框里打一个 j 就把面板关了。
+    fireEvent.keyDown(window, { key: "j" });
+    expect(screen.getByLabelText("对助手说")).not.toBeVisible();
+  });
+
+  it("翻上去看旧消息时留一条回到最新的路", async () => {
+    renderPanel();
+    await ask("问一句");
+    await screen.findByText("好了");
+    expect(screen.queryByRole("button", { name: "回到最新" })).not.toBeInTheDocument();
+
+    const log = screen.getByRole("log");
+    Object.defineProperty(log, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(log, "clientHeight", { configurable: true, value: 200 });
+    Object.defineProperty(log, "scrollTop", { configurable: true, writable: true, value: 300 });
+    fireEvent.scroll(log);
+
+    // 新回答落在屏幕外时，原来既没有提示也没有回去的路，只能自己往下拖。
+    fireEvent.click(await screen.findByRole("button", { name: "回到最新" }));
+    expect(log.scrollTop).toBe(1000);
+    expect(screen.queryByRole("button", { name: "回到最新" })).not.toBeInTheDocument();
+  });
+
+  it("重新回答把这一轮换掉，并退回到提问之前的上下文", async () => {
+    // 不退回去，模型会看见自己刚才那次回答，「重新回答」就变成了「顺着刚才继续说」
+    // ——而用户点它，恰恰是因为刚才那次不满意。
+    mockIpc.assistant.ask
+      .mockResolvedValueOnce(
+        reply({
+          answer: "第一答",
+          history: [
+            { role: "user", content: "讲了什么" },
+            { role: "assistant", content: "第一答" },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(reply({ answer: "换个说法" }));
+    renderPanel();
+    await ask("讲了什么");
+    await screen.findByText("第一答");
+
+    fireEvent.click(screen.getByRole("button", { name: "重新回答" }));
+
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenLastCalledWith(
+        "讲了什么",
+        { course_id: "c1", video_id: "v1" },
+        [],
+        expect.any(String),
+      ),
+    );
+    expect(await screen.findByText("换个说法")).toBeInTheDocument();
+    // 换掉，而不是并排留着两条回答。
+    expect(screen.queryByText("第一答")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("user-bubble")).toHaveLength(1);
+  });
+
+  it("重新回答被停掉的那一轮，不会把上一轮真实问答也砍掉", async () => {
+    // 停掉的那轮整轮都没进上下文，现在的 history 已经就是提问之前的样子。
+    mockIpc.assistant.ask
+      .mockResolvedValueOnce(
+        reply({
+          answer: "第一答",
+          history: [
+            { role: "user", content: "第一问" },
+            { role: "assistant", content: "第一答" },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(reply({ answer: "半截", canceled: true }))
+      .mockResolvedValueOnce(reply({ answer: "重来的答案" }));
+    renderPanel();
+    await ask("第一问");
+    await screen.findByText("第一答");
+    await ask("第二问");
+    await screen.findByText("半截");
+
+    fireEvent.click(screen.getByRole("button", { name: "重新回答" }));
+
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenLastCalledWith(
+        "第二问",
+        expect.anything(),
+        [
+          { role: "user", content: "第一问" },
+          { role: "assistant", content: "第一答" },
+        ],
+        expect.any(String),
+      ),
+    );
+  });
+
+  it("重新回答不会清掉输入框里正打着的下一个问题", async () => {
+    mockIpc.assistant.ask.mockResolvedValue(reply({ answer: "第一答" }));
+    renderPanel();
+    await ask("讲了什么");
+    await screen.findByText("第一答");
+
+    const box = screen.getByLabelText("对助手说");
+    fireEvent.change(box, { target: { value: "顺手打的下一个问题" } });
+    fireEvent.click(screen.getByRole("button", { name: "重新回答" }));
+
+    await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalledTimes(2));
+    expect(box).toHaveValue("顺手打的下一个问题");
+  });
+
+  it("只给最后一轮重新回答：往回重生成会让后面的问答全部失去依据", async () => {
+    renderPanel();
+    await ask("第一问");
+    await screen.findByText("好了");
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "第二答" }));
+    await ask("第二问");
+    await screen.findByText("第二答");
+
+    expect(screen.getAllByRole("button", { name: "重新回答" })).toHaveLength(1);
   });
 
   it("输入法组词时的回车不发送", async () => {
