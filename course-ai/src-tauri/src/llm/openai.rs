@@ -340,6 +340,10 @@ pub fn parse_openai_sse_line(line: &str) -> SseEvent {
             .unwrap_or("未知错误");
         return SseEvent::Failed(message.to_string());
     }
+    // 用量片的 choices 是空数组，放在取 choices 之前判断，否则整片被当作无关内容丢掉。
+    if let Some(usage) = parse_usage(&v) {
+        return SseEvent::Usage(usage);
+    }
     let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else {
         return SseEvent::Ignore;
     };
@@ -402,6 +406,17 @@ pub fn parse_openai_sse_line(line: &str) -> SseEvent {
     SseEvent::Ignore
 }
 
+/// 流式请求体。单独拎出来是为了能被测试直接检查：include_usage 一旦掉了，
+/// 流里就不再带用量，而这种缺失不会报错，只会静悄悄不记账。
+fn build_streaming_body(req: &ChatRequest) -> Value {
+    let mut body = build_openai_body(req);
+    body["stream"] = json!(true);
+    // 不开这个，流式响应里根本不带 usage——助手改走流式之后 token 账就会凭空消失。
+    // 不支持的端点会忽略它，那时与今天一样「没报就不记」。
+    body["stream_options"] = json!({ "include_usage": true });
+    body
+}
+
 pub async fn complete_stream(
     base_url: &str,
     api_key: &str,
@@ -411,8 +426,7 @@ pub async fn complete_stream(
     on_piece: &mut (dyn FnMut(StreamPiece) + Send),
 ) -> AppResult<StreamOutcome> {
     let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
-    let mut body = build_openai_body(req);
-    body["stream"] = json!(true);
+    let body = build_streaming_body(req);
     let resp = client
         .post(url)
         .bearer_auth(api_key)
@@ -456,7 +470,12 @@ pub async fn complete_stream(
             }
         }
     }
-    state.finish()
+    let outcome = state.finish()?;
+    // 与非流式同一条规矩：端点报了才记。助手走流式之后，这里是它唯一的记账点。
+    if let Some(usage) = &outcome.usage {
+        crate::usage_log::record(req.label, &req.model, usage);
+    }
+    Ok(outcome)
 }
 
 enum StreamWait<T> {
@@ -501,6 +520,7 @@ struct StreamState {
     buf: Vec<u8>,
     finished: bool,
     canceled: bool,
+    usage: Option<crate::llm::Usage>,
 }
 
 impl StreamState {
@@ -530,6 +550,7 @@ impl StreamState {
                         self.tools.push(delta);
                     }
                 }
+                SseEvent::Usage(usage) => self.usage = Some(usage),
                 SseEvent::Finished => self.finished = true,
                 SseEvent::Failed(message) => {
                     return Err(AppError::Other(format!("OpenAI 流内错误: {message}")))
@@ -550,6 +571,7 @@ impl StreamState {
         Ok(StreamOutcome {
             content: self.acc,
             tool_calls: self.tools.finish(),
+            usage: self.usage,
         })
     }
 }
@@ -854,6 +876,44 @@ mod tests {
         );
     }
 
+    /// 流式下用量在最后一片单独发来，那一片的 choices 是**空数组**。
+    /// 按普通 delta 的路子先取 choices[0] 会直接把整片当无关内容丢掉，
+    /// 于是助手改走流式之后 token 账凭空消失——而这种缺失不会报错，只会静悄悄不记。
+    #[test]
+    fn the_usage_chunk_at_the_end_of_a_stream_is_not_dropped() {
+        let line = r#"data: {"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":40,
+            "completion_tokens_details":{"reasoning_tokens":25}}}"#;
+        match parse_openai_sse_line(line) {
+            SseEvent::Usage(usage) => {
+                assert_eq!(usage.prompt_tokens, 120);
+                assert_eq!(usage.completion_tokens, 40);
+                assert_eq!(usage.reasoning_tokens, 25);
+            }
+            _ => panic!("流末尾的用量片必须被识别出来"),
+        }
+    }
+
+    /// 端点只有被显式要求时才在流里带用量。
+    #[test]
+    fn a_streaming_request_asks_for_usage() {
+        let req = ChatRequest {
+            model: "m".into(),
+            system: None,
+            cacheable_context: None,
+            messages: vec![ChatMessage::user("你好")],
+            temperature: 0.2,
+            tools: Vec::new(),
+            label: "assistant",
+        };
+        let body = build_streaming_body(&req);
+        assert_eq!(body["stream"], serde_json::json!(true));
+        assert_eq!(
+            body["stream_options"]["include_usage"],
+            serde_json::json!(true),
+            "不显式要，端点就不会在流里报用量"
+        );
+    }
+
     #[test]
     fn usage_is_read_from_whichever_field_the_endpoint_uses() {
         // DeepSeek 报 prompt_cache_hit_tokens。
@@ -879,10 +939,25 @@ mod tests {
     }
 
     #[test]
-    fn an_endpoint_that_reports_nothing_is_not_counted_as_zero() {
+    fn usage_is_none_when_endpoint_reports_nothing() {
         // 「没报用量」和「消耗为零」必须分开：混为一谈的话，一个不报用量的端点会把
         // 命中率稀释成一串漂亮的假数字。
-        assert!(parse_usage(&serde_json::json!({"choices": []})).is_none());
+        for response in [
+            serde_json::json!({"choices": []}),
+            serde_json::json!({"usage": null}),
+            serde_json::json!({"usage": {}}),
+            serde_json::json!({"usage": {"vendor_tokens": 123}}),
+            serde_json::json!({"usage": {"prompt_tokens": "123"}}),
+        ] {
+            assert!(parse_usage(&response).is_none(), "{response}");
+        }
+
+        // 数值 0 是端点明确上报的用量，不能与缺席混为一谈。
+        let response = serde_json::json!({"usage": {"completion_tokens": 0}});
+        assert_eq!(
+            parse_usage(&response).unwrap(),
+            crate::llm::Usage::default()
+        );
     }
 
     fn sample_req() -> ChatRequest {

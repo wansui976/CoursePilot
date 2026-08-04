@@ -239,6 +239,14 @@ export function AssistantPanel({
   const [resizeWidth, setResizeWidth] = useState<number | null>(null);
   const toggleRef = useRef(() => {});
   const panelWidth = resizeWidth ?? width;
+
+  // 「现在在干什么」跟着流走：先是等第一片，然后在思考，最后在作答。
+  const pendingTurn = turns.find((turn) => turn.pending);
+  const streamingLabel = pendingTurn?.answer
+    ? "正在作答…"
+    : pendingTurn?.reasoning
+      ? "正在思考…"
+      : "正在思考并调用工具…";
   const setThemePref = useTheme((state) => state.setPref);
   const pendingInlineAsk = useInlineAsk((state) => state.pending);
   const clearInlineAsk = useInlineAsk((state) => state.clear);
@@ -798,7 +806,28 @@ export function AssistantPanel({
       },
     ]);
     try {
-      const reply = await ipc.assistant.ask(question, context, historyAtSend, requestId);
+      // 流式：思考、正文、工具标签边生成边落到这一轮上。
+      // turn 事件必须清空正文——助手是多轮循环，答案逐轮替换而非追加，
+      // 接着往下拼会拼出一段谁也没说过的话。思考则跨轮累积，那是完整的思考轨迹。
+      const patch = (change: (turn: Turn) => Turn) =>
+        setTurns((prev) => prev.map((item) => (item.id === turnId ? change(item) : item)));
+      const reply = await ipc.assistant.ask(
+        question,
+        context,
+        historyAtSend,
+        requestId,
+        (event) => {
+          if (event.type === "turn") {
+            patch((item) => ({ ...item, answer: "" }));
+          } else if (event.type === "reasoning") {
+            patch((item) => ({ ...item, reasoning: (item.reasoning ?? "") + event.delta }));
+          } else if (event.type === "token") {
+            patch((item) => ({ ...item, answer: item.answer + event.delta }));
+          } else if (event.type === "tool") {
+            patch((item) => ({ ...item, tools: [...item.tools, event.name] }));
+          }
+        },
+      );
       const locallyStopped = locallyStoppedRequestsRef.current.has(requestId);
       const canceled = reply.canceled || locallyStopped;
       // 后端也会清空取消轮次的动作；这里再守一次，避免旧后端或兼容端点让用户
@@ -1186,6 +1215,20 @@ export function AssistantPanel({
                 也让「一轮里悄悄调了三次搜索」这种事看得见。 */}
             <AssistantToolChips tools={turn.tools} />
 
+            {/* 推理模型的思考。它比正文先到，所以不能塞在「有答案才渲染」的分支里——
+                那样恰好在最想看它的那段时间（还没开始作答）什么都不显示。
+                默认折叠：它是过程不是结论，摊开会把真正的回答挤下去。 */}
+            {turn.reasoning && (
+              <details className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card-hover)] px-2.5 py-1.5">
+                <summary className="cursor-pointer select-none text-xs text-[var(--text-faint)]">
+                  思考过程
+                </summary>
+                <div className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-muted)]">
+                  {turn.reasoning}
+                </div>
+              </details>
+            )}
+
             {turn.answer && (
               /* 回答不套气泡，整幅铺开。
                  气泡是给一两行的短句用的；回答是长文——带列表、公式、代码。在一块本来就窄的
@@ -1281,7 +1324,8 @@ export function AssistantPanel({
             className="flex items-center gap-2 text-xs text-[var(--text-faint)]"
           >
             <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            <span>{stopping ? "正在停止…" : "正在思考并调用工具…"}</span>
+            {/* 正文改成流式之后，字已经在往外冒的时候再说「正在思考」就不对了。 */}
+            <span>{stopping ? "正在停止…" : streamingLabel}</span>
           </div>
         )}
         {error && (

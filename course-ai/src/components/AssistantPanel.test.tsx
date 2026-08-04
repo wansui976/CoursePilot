@@ -6,7 +6,12 @@ import { AssistantPanel } from "./AssistantPanel";
 import { useAssistantUi } from "@/stores/assistant";
 import { useTheme } from "@/stores/theme";
 import { useInlineAsk } from "@/stores/inlineAsk";
-import type { AssistantAction, AssistantContext, AssistantReply } from "@/lib/types";
+import type {
+  AssistantAction,
+  AssistantContext,
+  AssistantEvent,
+  AssistantReply,
+} from "@/lib/types";
 
 const { mockIpc, platformMock } = vi.hoisted(() => ({
   mockIpc: {
@@ -208,8 +213,74 @@ describe("AssistantPanel", () => {
         { course_id: "c1", video_id: "v1" },
         [],
         expect.any(String),
+        expect.any(Function),
       ),
     );
+  });
+
+  it("思考内容边生成边显示，且比答案先出现", async () => {
+    // 助手此前是一次性的：转圈 → 什么都没有 → 答案和工具标签一起蹦出来。
+    // 现在思考、正文、工具标签都实时到达。
+    let emit!: (event: AssistantEvent) => void;
+    mockIpc.assistant.ask.mockImplementationOnce(
+      (_q, _c, _h, _id, onEvent: (event: AssistantEvent) => void) => {
+        emit = onEvent;
+        return new Promise<AssistantReply>(() => {}); // 一直不 resolve：停在流式中途
+      },
+    );
+    renderPanel();
+    await ask("讲讲这节课");
+
+    await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalled());
+    act(() => {
+      emit({ type: "turn", turn: 1 });
+      emit({ type: "reasoning", delta: "先看看" });
+      emit({ type: "reasoning", delta: "字幕里有什么" });
+    });
+
+    // 思考比正文先到，所以不能藏在「有答案才渲染」的分支里。
+    expect(await screen.findByText("思考过程")).toBeInTheDocument();
+    expect(screen.getByText("先看看字幕里有什么")).toBeInTheDocument();
+    expect(screen.getByText("正在思考…")).toBeInTheDocument();
+
+    act(() => {
+      emit({ type: "tool", name: "search_content" });
+      emit({ type: "token", delta: "这节课" });
+      emit({ type: "token", delta: "讲的是导数。" });
+    });
+    expect(await screen.findByText("这节课讲的是导数。")).toBeInTheDocument();
+    // 工具标签实时出现，不必等整轮跑完。
+    expect(screen.getByText(/搜索|search_content/)).toBeInTheDocument();
+    expect(screen.getByText("正在作答…")).toBeInTheDocument();
+  });
+
+  it("新一轮开始会清空上一轮的正文，不会拼成一句谁也没说过的话", async () => {
+    // 循环里 answer 是逐轮替换的：第一轮「我先查一下」，第二轮「查完了」。
+    // 接着往下拼会得到「我先查一下查完了」。
+    let emit!: (event: AssistantEvent) => void;
+    mockIpc.assistant.ask.mockImplementationOnce(
+      (_q, _c, _h, _id, onEvent: (event: AssistantEvent) => void) => {
+        emit = onEvent;
+        return new Promise<AssistantReply>(() => {});
+      },
+    );
+    renderPanel();
+    await ask("查一下");
+    await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalled());
+
+    act(() => {
+      emit({ type: "turn", turn: 1 });
+      emit({ type: "token", delta: "我先查一下" });
+    });
+    expect(await screen.findByText("我先查一下")).toBeInTheDocument();
+
+    act(() => {
+      emit({ type: "turn", turn: 2 });
+      emit({ type: "token", delta: "查完了" });
+    });
+    expect(await screen.findByText("查完了")).toBeInTheDocument();
+    expect(screen.queryByText("我先查一下查完了")).not.toBeInTheDocument();
+    expect(screen.queryByText("我先查一下")).not.toBeInTheDocument();
   });
 
   it("可以从标题栏拖动桌面面板", () => {
@@ -320,6 +391,7 @@ describe("AssistantPanel", () => {
         { course_id: "c1", video_id: "v1" },
         [],
         expect.any(String),
+        expect.any(Function),
       ),
     );
   });
@@ -338,6 +410,7 @@ describe("AssistantPanel", () => {
         expect.anything(),
         history,
         expect.any(String),
+        expect.any(Function),
       ),
     );
   });
@@ -487,6 +560,7 @@ describe("AssistantPanel", () => {
         expect.anything(),
         previousHistory,
         expect.any(String),
+        expect.any(Function),
       ),
     );
   });
@@ -511,6 +585,7 @@ describe("AssistantPanel", () => {
         expect.anything(),
         [],
         expect.any(String),
+        expect.any(Function),
       ),
     );
   });
@@ -547,6 +622,7 @@ describe("AssistantPanel", () => {
         expect.anything(),
         savedHistory,
         expect.any(String),
+        expect.any(Function),
       ),
     );
   });
@@ -767,6 +843,7 @@ describe("AssistantPanel", () => {
         { course_id: "c1", video_id: "v1" },
         [],
         expect.any(String),
+        expect.any(Function),
       ),
     );
     expect(await screen.findByText("换个说法")).toBeInTheDocument();
@@ -806,6 +883,7 @@ describe("AssistantPanel", () => {
           { role: "assistant", content: "第一答" },
         ],
         expect.any(String),
+        expect.any(Function),
       ),
     );
   });
@@ -1133,6 +1211,7 @@ describe("确认卡", () => {
         expect.anything(),
         newHistory,
         expect.any(String),
+        expect.any(Function),
       ),
     );
   });

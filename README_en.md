@@ -10,6 +10,8 @@ Works with local files, Bilibili links, and any video URL. Local-first, your dat
 
 Website: [https://wansui976.github.io/CoursePilot/](https://wansui976.github.io/CoursePilot/)
 
+> **Note:** The app UI and screenshots are currently in Chinese. Internationalization (i18n) is on the roadmap.
+
 ---
 
 ## Features

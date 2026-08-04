@@ -4,6 +4,7 @@ import type { SkipRange } from "./silenceSkip";
 import type {
   AskEvent,
   AssistantContext,
+  AssistantEvent,
   AssistantMessage,
   AssistantReply,
   Chapter,
@@ -472,14 +473,45 @@ export const ipc = {
   notify: (title: string, body: string): Promise<void> =>
     invoke("cmd_notify", { title, body }),
   assistant: {
-    /** 问一句。history 传上一轮返回的 history 即可续聊；requestId 用来精确停止这一轮。 */
-    ask: (
+    /**
+     * 问一句，流式。history 传上一轮返回的 history 即可续聊；requestId 用来精确停止这一轮。
+     *
+     * 与问答那条流一样：命令立刻返回、活儿在后台跑，事件（含最终 done / error）实时到达。
+     * 先注册监听再 invoke，避免漏掉早到的事件。
+     */
+    ask: async (
       query: string,
       context: AssistantContext | undefined,
       history: AssistantMessage[] | undefined,
       requestId: string,
-    ): Promise<AssistantReply> =>
-      invoke("cmd_assistant_ask", { query, context, history, requestId }),
+      onEvent: (e: AssistantEvent) => void = () => {},
+    ): Promise<AssistantReply> => {
+      let resolveReply!: (reply: AssistantReply) => void;
+      let rejectReply!: (error: unknown) => void;
+      const reply = new Promise<AssistantReply>((res, rej) => {
+        resolveReply = res;
+        rejectReply = rej;
+      });
+      const unlisten = await listen<AssistantEvent>(
+        `assistant-stream:${requestId}`,
+        (evt) => {
+          const e = evt.payload;
+          if (e.type === "done") resolveReply(e.reply);
+          else if (e.type === "error") rejectReply(new Error(e.message));
+          else onEvent(e);
+        },
+      );
+      try {
+        // 命令本身只在「未配置大模型」这类配置错误时才 reject。
+        await invoke("cmd_assistant_ask", { query, context, history, requestId });
+        return await reply;
+      } catch (error) {
+        rejectReply(error);
+        throw error;
+      } finally {
+        unlisten();
+      }
+    },
     cancel: (requestId: string): Promise<void> =>
       invoke("cmd_cancel_assistant", { requestId }),
   },

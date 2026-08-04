@@ -250,7 +250,13 @@ export interface AssistantMessage {
  * 其余 `propose_*` 是**提案**——后端一个字节都没改，必须渲染成确认卡，用户点了才落地。
  */
 export type AssistantAction =
-  | { kind: "open_video"; video_id: string; title: string; at_ms?: number | null }
+  | {
+      kind: "open_video";
+      course_id?: string | null;
+      video_id: string;
+      title: string;
+      at_ms?: number | null;
+    }
   | { kind: "seek_to"; at_ms: number }
   | {
       kind: "propose_rename";
@@ -290,6 +296,20 @@ export interface AssistantReply {
   tools_used: string[];
   history: AssistantMessage[];
 }
+
+/**
+ * 助手流式事件：与后端 commands::assistant::AssistantEvent 对应（tag = "type"）。
+ *
+ * `turn` 是必须处理的一条：助手是个多轮循环，答案**逐轮替换**而不是追加，
+ * 收到新的一轮就要把已显示的正文清空，否则会拼出一段谁也没说过的话。
+ */
+export type AssistantEvent =
+  | { type: "turn"; turn: number }
+  | { type: "reasoning"; delta: string }
+  | { type: "token"; delta: string }
+  | { type: "tool"; name: string }
+  | { type: "done"; reply: AssistantReply }
+  | { type: "error"; message: string };
 
 /** 助手当前看到的界面状态，让「这个视频」这类说法能落到具体对象上。 */
 export interface AssistantContext {
