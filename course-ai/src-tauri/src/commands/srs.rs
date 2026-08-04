@@ -6,7 +6,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tauri::State;
 
-const DAY_MS: i64 = 86_400_000;
+pub(crate) const DAY_MS: i64 = 86_400_000;
 /// 题目出处与最近概念出现点最多相隔 5 分钟；超过后不再把后续无关内容归给该概念。
 const CONCEPT_CARD_MAX_DISTANCE_MS: i64 = 5 * 60 * 1000;
 
@@ -27,7 +27,8 @@ fn retrievability(elapsed_days: f64, stability: f64) -> f64 {
 }
 
 /// 目标保持率 0.9 下由稳定度反推的下次间隔（天，至少 1）；数值上间隔≈稳定度。
-fn interval_days_for(stability: f64) -> i64 {
+/// pub(crate)：同步收方向按事件重放排期时必须用同一个函数，否则「增量 ≡ 重放」不成立。
+pub(crate) fn interval_days_for(stability: f64) -> i64 {
     let days = stability / FACTOR * (TARGET_RETENTION.powf(1.0 / DECAY) - 1.0);
     (days.round() as i64).max(1)
 }
