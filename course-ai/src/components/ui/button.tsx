@@ -17,7 +17,7 @@ const buttonVariants = cva(
         // 带一圈同色描边，好让它与 default/outline 的盒模型一模一样——并排放时
         // 内容盒等宽等高，不会因为少了 1px 边框而与旁边的按钮错开。
         primary:
-          "border border-[var(--accent)] bg-[var(--accent)] text-[var(--on-accent)] hover:border-[var(--accent-press)] hover:bg-[var(--accent-press)] hover:text-[var(--on-accent-press)]",
+          "ca-sheen border border-[var(--accent)] bg-[var(--accent)] text-[var(--on-accent)] hover:border-[var(--accent-press)] hover:bg-[var(--accent-press)] hover:text-[var(--on-accent-press)]",
         destructive: "bg-red-600 text-white hover:bg-red-500",
         outline:
           "border border-[var(--border-subtle)] bg-transparent text-[var(--text-strong)] hover:bg-[var(--surface-card-hover)]",

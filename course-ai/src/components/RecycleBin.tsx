@@ -278,7 +278,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
           )}
 
           {selected.size > 0 && (
-            <div className="sticky bottom-2 mt-6 flex items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-4 py-3 shadow-lg">
+            <div className="sticky bottom-2 mt-6 flex items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-4 py-3 shadow-[var(--shadow-pop)]">
               <span className="text-sm text-[var(--text-strong)]">
                 已选 {selected.size} 项
               </span>

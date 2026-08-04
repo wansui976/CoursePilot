@@ -493,7 +493,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
               onClick={() => setScope(s.key)}
               className={`ca-touch-44 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                 scope === s.key
-                  ? "bg-[var(--surface-panel)] text-[var(--text-strong)] shadow-sm"
+                  ? "bg-[var(--surface-panel)] text-[var(--text-strong)] shadow-[var(--shadow-raise)]"
                   : "text-[var(--text-muted)] hover:text-[var(--text-normal)]"
               }`}
             >
@@ -579,7 +579,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                   onClick={() => copyAnswer(turn.id, turn.answer)}
                   aria-label="复制回答"
                   title="复制"
-                  className={`absolute bottom-1 right-1 grid h-6 w-6 flex-none place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-card)] text-[var(--text-muted)] shadow-sm transition hover:text-[var(--text-strong)] ${
+                  className={`absolute bottom-1 right-1 grid h-6 w-6 flex-none place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-card)] text-[var(--text-muted)] shadow-[var(--shadow-raise)] transition hover:text-[var(--text-strong)] ${
                     touch
                       ? revealedCopyId === turn.id
                         ? "opacity-100"
@@ -825,7 +825,7 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
               onClick={() => setScope(s.key)}
               className={`ca-touch-44 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                 scope === s.key
-                  ? "bg-[var(--surface-panel)] text-[var(--text-strong)] shadow-sm"
+                  ? "bg-[var(--surface-panel)] text-[var(--text-strong)] shadow-[var(--shadow-raise)]"
                   : "text-[var(--text-muted)] hover:text-[var(--text-normal)]"
               }`}
             >

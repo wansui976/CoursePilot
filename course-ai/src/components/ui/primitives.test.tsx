@@ -85,6 +85,8 @@ describe("shared UI primitives", () => {
       "hover:text-[var(--on-accent-press)]",
     );
     expect(button.className).not.toMatch(/hover:opacity-/);
+    // 受光渐变：纯色矩形看着像贴上去的色片，一层自上而下的白色渐变才让它像凸起。
+    expect(button).toHaveClass("ca-sheen");
   });
 
   it("对话框进出有动画可挂：Radix 打的 data-state 落在遮罩和面板上", () => {

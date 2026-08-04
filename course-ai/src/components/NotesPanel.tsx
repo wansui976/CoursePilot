@@ -229,7 +229,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
               onClick={() => setView(v.key)}
               className={`ca-touch-44 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                 view === v.key
-                  ? "bg-[var(--surface-panel)] text-[var(--text-strong)] shadow-sm"
+                  ? "bg-[var(--surface-panel)] text-[var(--text-strong)] shadow-[var(--shadow-raise)]"
                   : "text-[var(--text-muted)] hover:text-[var(--text-normal)]"
               }`}
             >
