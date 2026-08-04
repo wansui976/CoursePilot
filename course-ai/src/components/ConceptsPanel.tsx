@@ -444,7 +444,7 @@ export function ConceptsPanel({
               </div>
               <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[var(--surface-panel)]">
                 <div
-                  className="h-full rounded-full bg-primary transition-all"
+                  className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
                   style={{
                     width: `${progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 8}%`,
                   }}

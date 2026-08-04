@@ -340,7 +340,7 @@ export function PlaylistImportDialog({
             <p className="truncate text-center text-xs text-[var(--text-faint)]">{progress.title}</p>
             <div className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-card-active)]">
               <div
-                className="h-full rounded-full bg-primary transition-all"
+                className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
                 style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }}
               />
             </div>

@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import { MoreHorizontal, Play } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
+import * as Dialog from "@radix-ui/react-dialog";
 import { Badge } from "./badge";
 import { Button } from "./button";
 import { EmptyState, PanelEmptyState } from "./empty-state";
@@ -84,6 +85,24 @@ describe("shared UI primitives", () => {
       "hover:text-[var(--on-accent-press)]",
     );
     expect(button.className).not.toMatch(/hover:opacity-/);
+  });
+
+  it("对话框进出有动画可挂：Radix 打的 data-state 落在遮罩和面板上", () => {
+    render(
+      <Dialog.Root open>
+        <Dialog.Portal>
+          <Dialog.Overlay className="ca-dialog-overlay" data-testid="ov" />
+          <Dialog.Content aria-describedby={undefined}>
+            <Dialog.Title>标题</Dialog.Title>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>,
+    );
+
+    // 动画挂在 [data-state] 上，Radix 会在关闭时保持挂载直到动画跑完；
+    // 少了这两个钩子，对话框就退回硬切。
+    expect(screen.getByTestId("ov")).toHaveAttribute("data-state", "open");
+    expect(screen.getByRole("dialog")).toHaveAttribute("data-state", "open");
   });
 
   it("面板空态在剩余空间里居中，且与首页空态是同一套外观", () => {

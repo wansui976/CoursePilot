@@ -155,6 +155,27 @@ describe("ReviewSession", () => {
     await waitFor(() => expect(review).toHaveBeenCalledWith("b", 3));
   });
 
+  it("翻到下一张会重播进场动画，展开答案不会在原地闪", async () => {
+    renderSession();
+    await screen.findByText("问题一");
+    const first = screen.getByText("问题一").closest(".ca-card-enter");
+    expect(first).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /选项 A/ }));
+    fireEvent.click(screen.getByRole("button", { name: /提交答案/ }));
+    // 展开答案换的是内容不是卡：卡片节点必须还是同一个，否则整张会重新淡入一次。
+    expect(screen.getByText("问题一").closest(".ca-card-enter")).toBe(first);
+    // 答案与四个评分档一起淡入，而不是「啪」地把卡片撑长。
+    expect(
+      screen.getByRole("button", { name: /良好/ }).closest(".ca-reveal-enter"),
+    ).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /良好/ }));
+    await screen.findByText("问题二");
+    // 换卡则必须是新节点——key 绑的是卡片 id，重挂才会重播动画。
+    expect(screen.getByText("问题二").closest(".ca-card-enter")).not.toBe(first);
+  });
+
   it("offers 回看出处 for a card with a source and jumps on click", async () => {
     const onJump = vi.fn();
     renderSession(onJump);
