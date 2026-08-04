@@ -637,8 +637,6 @@ describe("AssistantPanel", () => {
     // search_content 是给模型看的标识符，摆在界面上只会让人去猜它是什么。
     expect(chips).not.toHaveTextContent("search_content");
     expect(chips).not.toHaveTextContent("get_study_progress");
-    // 每轮的工具结果都留在上下文里，花销是乘法涨的，轮次要看得见。
-    expect(screen.getByText(/来回 3 轮/)).toBeInTheDocument();
   });
 
   it("连着调同一个工具折叠成 ×N", async () => {

@@ -15,7 +15,6 @@ export interface AssistantTurnRecord {
   answer: string;
   actions: AssistantAction[];
   tools: string[];
-  turns: number;
   canceled: boolean;
   /** 确认卡的实际执行结果；重启后仍需告诉用户已经完成、失败或取消。 */
   actionResults: string[];
@@ -55,10 +54,6 @@ function readTurn(value: unknown): AssistantTurnRecord | null {
     tools: Array.isArray(value.tools)
       ? value.tools.filter((tool): tool is string => typeof tool === "string")
       : [],
-    turns:
-      typeof value.turns === "number" && Number.isFinite(value.turns)
-        ? Math.max(1, Math.floor(value.turns))
-        : 1,
     canceled: value.canceled === true,
     actionResults: Array.isArray(value.actionResults)
       ? value.actionResults
