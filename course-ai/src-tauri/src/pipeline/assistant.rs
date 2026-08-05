@@ -31,6 +31,7 @@ use std::sync::Mutex;
 pub enum AssistantAction {
     /// 导航：生成打开某个视频的待点击动作（可带跳转时刻）。工具调用本身不会切换界面。
     OpenVideo {
+        course_id: String,
         video_id: String,
         title: String,
         at_ms: Option<i64>,
@@ -364,6 +365,7 @@ impl<'a> AssistantTools<'a> {
             .map(|row| row.position_ms.max(0))
             .unwrap_or(0);
         self.record(AssistantAction::OpenVideo {
+            course_id: recent.course_id.clone(),
             video_id: recent.video_id,
             title: recent.video_title.clone(),
             at_ms: Some(position_ms),
@@ -931,6 +933,7 @@ impl AssistantTools<'_> {
                 let args: OpenVideoArgs = parse_arguments(call)?;
                 let video = self.find_video(&args.video_id).await?;
                 self.record(AssistantAction::OpenVideo {
+                    course_id: video.course_id.clone(),
                     video_id: video.id.clone(),
                     title: video.title.clone(),
                     at_ms: args.at_ms,
@@ -1387,7 +1390,7 @@ mod tests {
         let current_tools = AssistantTools::new(
             &db,
             AssistantContext {
-                course_id: Some(course_id),
+                course_id: Some(course_id.clone()),
                 ..Default::default()
             },
         );
@@ -1397,10 +1400,12 @@ mod tests {
         assert!(!current.content.contains("已直接打开"));
         match current_tools.take_actions().as_slice() {
             [AssistantAction::OpenVideo {
+                course_id: opened_course,
                 video_id: opened,
                 at_ms,
                 ..
             }] => {
+                assert_eq!(opened_course, &course_id);
                 assert_eq!(opened, &video_id);
                 assert_eq!(*at_ms, Some(65_000));
             }
@@ -1411,10 +1416,12 @@ mod tests {
         global_tools.run(&call("resume_learning", "{}")).await;
         match global_tools.take_actions().as_slice() {
             [AssistantAction::OpenVideo {
+                course_id: opened_course,
                 video_id: opened,
                 at_ms,
                 ..
             }] => {
+                assert_eq!(opened_course, &other_course.id);
                 assert_eq!(opened, &other_video);
                 assert_eq!(*at_ms, Some(90_000));
             }
@@ -1826,7 +1833,7 @@ mod tests {
 
     #[tokio::test]
     async fn opening_a_video_returns_a_pending_navigation_action() {
-        let (db, _course, video_id, _d) = seed().await;
+        let (db, course_id, video_id, _d) = seed().await;
         let tools = AssistantTools::new(&db, AssistantContext::default());
         let out = tools
             .run(&call(
@@ -1837,7 +1844,14 @@ mod tests {
         assert!(out.content.contains("点击下方按钮后才会打开"));
         assert!(!out.content.contains("已打开"));
         match tools.take_actions().as_slice() {
-            [AssistantAction::OpenVideo { at_ms, .. }] => assert_eq!(*at_ms, Some(90_000)),
+            [AssistantAction::OpenVideo {
+                course_id: opened_course,
+                at_ms,
+                ..
+            }] => {
+                assert_eq!(opened_course, &course_id);
+                assert_eq!(*at_ms, Some(90_000));
+            }
             other => panic!("应当是一条导航动作，实际 {other:?}"),
         }
     }
