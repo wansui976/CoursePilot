@@ -21,16 +21,16 @@ const DEFAULT_CUSTOM_ACCENT = "#2f6cea";
 
 /** 强调色：accent 为基色、press 深一档；text/weak 用 color-mix 随明暗派生。
  *  custom = 用户通过系统色板选择的第一颗强调色。 */
-export const ACCENTS: { key: AccentKey; label: string; accent: string; press: string }[] = [
-  { key: "custom", label: "多色", accent: DEFAULT_CUSTOM_ACCENT, press: "#255cd0" },
-  { key: "blue", label: "蓝", accent: "#2f6cea", press: "#255cd0" },
-  { key: "purple", label: "紫", accent: "#8a4bdb", press: "#763bc4" },
-  { key: "pink", label: "粉", accent: "#e0568f", press: "#c8447b" },
-  { key: "red", label: "红", accent: "#e0483d", press: "#c63a31" },
-  { key: "orange", label: "橙", accent: "#e8851f", press: "#cf7314" },
-  { key: "yellow", label: "黄", accent: "#d99e12", press: "#c08a0d" },
-  { key: "green", label: "绿", accent: "#34a853", press: "#2c9247" },
-  { key: "gray", label: "灰", accent: "#8a8f99", press: "#767b85" },
+export const ACCENTS: { key: AccentKey; i18nKey: string; accent: string; press: string }[] = [
+  { key: "custom", i18nKey: "settings.appearance.accentCustom", accent: DEFAULT_CUSTOM_ACCENT, press: "#255cd0" },
+  { key: "blue", i18nKey: "settings.appearance.accentBlue", accent: "#2f6cea", press: "#255cd0" },
+  { key: "purple", i18nKey: "settings.appearance.accentPurple", accent: "#8a4bdb", press: "#763bc4" },
+  { key: "pink", i18nKey: "settings.appearance.accentPink", accent: "#e0568f", press: "#c8447b" },
+  { key: "red", i18nKey: "settings.appearance.accentRed", accent: "#e0483d", press: "#c63a31" },
+  { key: "orange", i18nKey: "settings.appearance.accentOrange", accent: "#e8851f", press: "#cf7314" },
+  { key: "yellow", i18nKey: "settings.appearance.accentYellow", accent: "#d99e12", press: "#c08a0d" },
+  { key: "green", i18nKey: "settings.appearance.accentGreen", accent: "#34a853", press: "#2c9247" },
+  { key: "gray", i18nKey: "settings.appearance.accentGray", accent: "#8a8f99", press: "#767b85" },
 ];
 
 let themeAnimTimer: ReturnType<typeof setTimeout> | undefined;
@@ -252,20 +252,18 @@ function circleRevealTheme(
 }
 
 /** 应用明暗切换(mutate 里做真正的状态变更),按能力与场景选动画:
- *  1. 有起点(点/键切换按钮):从按钮圆形扩散盖满整屏再切色(CSS transform 覆盖层)。
- *     这是对用户「亲手点击」的直接反馈、时长很短,即使系统开了「减弱动态效果」也照做——
- *     否则 reduce-motion 的早退会把整段圆形动画吞掉(表现就是「只切色、永远看不到圆」);
- *  2. 无起点 + reduce-motion:跟随系统明暗自动切换时属于环境动画,尊重设置直接瞬切;
+ *  1. reduce-motion:无论是否由按钮点击触发都直接瞬切;
+ *  2. 有起点(点/键切换按钮):从按钮圆形扩散盖满整屏再切色(CSS transform 覆盖层);
  *  3. 无起点 + 可见重 DOM(data-theme-heavy):直接切——避免 VT/全树过渡放大成本;
  *  4. 无起点:View Transitions 交叉淡化,或全树过渡类兜底。 */
 function applyThemeChange(mutate: () => void, next: EffectiveTheme): void {
   if (typeof document === "undefined") return mutate();
   const origin = consumeThemeOrigin();
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return mutate();
   if (origin) {
     circleRevealTheme(mutate, next, origin);
     return;
   }
-  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return mutate();
   if (hasVisibleHeavyDom()) return mutate();
   if (typeof document.startViewTransition === "function") {
     // flushSync:让 React 在快照回调内同步提交 data-theme,否则新快照可能截到旧画面。
@@ -311,6 +309,41 @@ function normalizeHexColor(value: string): string {
   return value.toLowerCase();
 }
 
+function rgbFromHex(value: string): [number, number, number] {
+  return [
+    Number.parseInt(value.slice(1, 3), 16),
+    Number.parseInt(value.slice(3, 5), 16),
+    Number.parseInt(value.slice(5, 7), 16),
+  ];
+}
+
+function relativeLuminance(value: string): number {
+  const [r, g, b] = rgbFromHex(value).map((channel) => {
+    const srgb = channel / 255;
+    return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastRatio(a: string, b: string): number {
+  const lighter = Math.max(relativeLuminance(a), relativeLuminance(b));
+  const darker = Math.min(relativeLuminance(a), relativeLuminance(b));
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/** 纯黑/纯白中总有一个能让任意不透明 sRGB 色达到至少 4.58:1。 */
+function readableForeground(background: string): "#000000" | "#ffffff" {
+  return contrastRatio("#ffffff", background) >= contrastRatio("#000000", background)
+    ? "#ffffff"
+    : "#000000";
+}
+
+function darkenHex(value: string, amount: number): string {
+  return `#${rgbFromHex(value)
+    .map((channel) => Math.round(channel * amount).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
 function readCustomAccent(): string {
   if (typeof window === "undefined") return DEFAULT_CUSTOM_ACCENT;
   const value = window.localStorage.getItem(CUSTOM_ACCENT_KEY);
@@ -327,12 +360,18 @@ export function accentVars(
 ): Record<string, string> {
   const entry = ACCENTS.find((a) => a.key === accent);
   if (!entry) return {};
-  const base = accent === "custom" ? customAccent : entry.accent;
-  const press =
-    accent === "custom" ? `color-mix(in srgb, ${base} 88%, black)` : entry.press;
+  const validCustomAccent = isHexColor(customAccent)
+    ? normalizeHexColor(customAccent)
+    : DEFAULT_CUSTOM_ACCENT;
+  const base = accent === "custom" ? validCustomAccent : entry.accent;
+  const press = accent === "custom" ? darkenHex(base, 0.88) : entry.press;
+  const onAccent = readableForeground(base);
+  const onAccentPress = readableForeground(press);
   return {
     "--accent": base,
     "--accent-press": press,
+    "--on-accent": onAccent,
+    "--on-accent-press": onAccentPress,
     "--accent-text":
       effective === "dark"
         ? `color-mix(in srgb, ${base} 62%, white)`
@@ -342,6 +381,7 @@ export function accentVars(
     // Tailwind 的 primary 系列(bg-primary/text-primary/accent-primary 等)走这个
     // @theme 令牌,一并联动,让用 primary 的元素也跟随强调色。
     "--color-primary": base,
+    "--color-primary-foreground": onAccent,
   };
 }
 

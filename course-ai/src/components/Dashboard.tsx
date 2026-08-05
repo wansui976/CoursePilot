@@ -87,7 +87,7 @@ function heatCellLabel(cell: NonNullable<HeatCell>, reached: boolean, t: TFuncti
 /** 一段连续的周列 + 它们所属的月份，用来把月份标签摆在整段的中间。 */
 type MonthSegment = { label: string; span: number };
 
-function monthSegments(columns: HeatCell[][]): MonthSegment[] {
+function monthSegments(columns: HeatCell[][], t: (k: string) => string): MonthSegment[] {
   const segments: MonthSegment[] = [];
   for (const column of columns) {
     const monthStart = column.find(
@@ -102,7 +102,8 @@ function monthSegments(columns: HeatCell[][]): MonthSegment[] {
     }
     const day = monthStart?.day ?? first?.day;
     if (!day) continue;
-    segments.push({ label: `${Number(day.slice(5, 7))}月`, span: 1 });
+    const month = Number(day.slice(5, 7));
+    segments.push({ label: t(`dashboard.month${month}`), span: 1 });
   }
   return segments;
 }
@@ -273,7 +274,7 @@ export function Dashboard({
     () => heatmapGrid(daily, today, heatmapWeeks),
     [daily, heatmapWeeks, today],
   );
-  const heatMonths = useMemo(() => monthSegments(heatmap), [heatmap]);
+  const heatMonths = useMemo(() => monthSegments(heatmap, t), [heatmap, t]);
   const heatDays = useMemo(
     () =>
       new Set(

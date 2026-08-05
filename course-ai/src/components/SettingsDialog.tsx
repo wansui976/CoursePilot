@@ -737,7 +737,7 @@ export function SettingsPanel({
                           return (
                             <label
                               key={option.key}
-                              title={option.label}
+                              title={t(option.i18nKey)}
                               className={`ca-touch-44 relative grid h-7 w-7 cursor-pointer place-items-center rounded-full ring-2 ring-offset-2 ring-offset-[var(--surface-card)] transition ${
                                 selected ? "ring-[var(--text-muted)]" : "ring-transparent"
                               }`}
@@ -763,8 +763,8 @@ export function SettingsPanel({
                           <button
                             key={option.key}
                             onClick={() => setAccent(option.key)}
-                            title={option.label}
-                            aria-label={option.label}
+                            title={t(option.i18nKey)}
+                            aria-label={t(option.i18nKey)}
                             aria-pressed={selected}
                             className={`ca-touch-44 grid h-7 w-7 place-items-center rounded-full ring-2 ring-offset-2 ring-offset-[var(--surface-card)] transition ${
                               selected ? "ring-[var(--text-muted)]" : "ring-transparent"
@@ -820,19 +820,19 @@ export function SettingsPanel({
               <Group
                 header={t("settings.shortcuts.title")}
               >
-                {SHORTCUT_ACTIONS.map(({ action, label, hint }) => (
-                  <Row key={action} label={label} hint={hint}>
+                {SHORTCUT_ACTIONS.map(({ action, i18nKey, i18nHint }) => (
+                  <Row key={action} label={t(i18nKey)} hint={i18nHint ? t(i18nHint) : undefined}>
                     <button
                       type="button"
                       onClick={() => setCapturing(action)}
-                      aria-label={t("settings.shortcuts.setKey", { label })}
+                      aria-label={t("settings.shortcuts.setKey", { label: t(i18nKey) })}
                       className={`min-h-11 min-w-[88px] rounded-lg border px-3 py-1.5 text-center text-sm font-medium transition ${
                         capturing === action
                           ? "border-[var(--accent-text)] bg-[var(--accent-weak)] text-[var(--accent-text)]"
                           : "border-[var(--border-subtle)] bg-[var(--surface-input)] text-[var(--text-strong)] hover:border-[var(--text-faint)]"
                       }`}
                     >
-                      {capturing === action ? t("settings.shortcuts.pressKey") : keyLabel(bindings[action])}
+                      {capturing === action ? t("settings.shortcuts.pressKey") : keyLabel(bindings[action], t)}
                     </button>
                   </Row>
                 ))}

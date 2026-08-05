@@ -17,19 +17,19 @@ export type ShortcutBindings = Record<ShortcutAction, string>;
 
 export const SHORTCUT_ACTIONS: {
   action: ShortcutAction;
-  label: string;
-  hint?: string;
+  i18nKey: string;
+  i18nHint?: string;
 }[] = [
-  { action: "playPause", label: "播放 / 暂停" },
-  { action: "prevSubtitle", label: "上一句字幕", hint: "无字幕时回退到快退 10 秒" },
-  { action: "nextSubtitle", label: "下一句字幕", hint: "无字幕时回退到快进 10 秒" },
-  { action: "seekBack", label: "快退 5 秒", hint: "长按连续快退" },
-  { action: "seekForward", label: "快进 5 秒", hint: "长按 2 倍速快进" },
-  { action: "volumeUp", label: "音量 +" },
-  { action: "volumeDown", label: "音量 -" },
-  { action: "mute", label: "静音" },
-  { action: "fullscreen", label: "全屏" },
-  { action: "captions", label: "字幕开关" },
+  { action: "playPause", i18nKey: "settings.shortcuts.playPause" },
+  { action: "prevSubtitle", i18nKey: "settings.shortcuts.prevSubtitle", i18nHint: "settings.shortcuts.prevSubtitleHint" },
+  { action: "nextSubtitle", i18nKey: "settings.shortcuts.nextSubtitle", i18nHint: "settings.shortcuts.nextSubtitleHint" },
+  { action: "seekBack", i18nKey: "settings.shortcuts.seekBack", i18nHint: "settings.shortcuts.seekBackHint" },
+  { action: "seekForward", i18nKey: "settings.shortcuts.seekForward", i18nHint: "settings.shortcuts.seekForwardHint" },
+  { action: "volumeUp", i18nKey: "settings.shortcuts.volumeUp" },
+  { action: "volumeDown", i18nKey: "settings.shortcuts.volumeDown" },
+  { action: "mute", i18nKey: "settings.shortcuts.mute" },
+  { action: "fullscreen", i18nKey: "settings.shortcuts.fullscreen" },
+  { action: "captions", i18nKey: "settings.shortcuts.captions" },
 ];
 
 export const DEFAULT_BINDINGS: ShortcutBindings = {
@@ -65,11 +65,11 @@ export function actionForKey(
   return null;
 }
 
-/** 人类可读的按键名（设置里显示用）。 */
-export function keyLabel(key: string): string {
-  if (!key) return "未设置";
+/** 人类可读的按键名（设置里显示用）。接收 t 函数以翻译 "未设置" / "空格"。 */
+export function keyLabel(key: string, t: (k: string) => string): string {
+  if (!key) return t("settings.shortcuts.notSet");
   const named: Record<string, string> = {
-    " ": "空格",
+    " ": t("settings.shortcuts.space"),
     ArrowLeft: "←",
     ArrowRight: "→",
     ArrowUp: "↑",
