@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
@@ -68,7 +69,7 @@ describe("CourseSidebar", () => {
   it("creates a default course under app data on Android", async () => {
     renderSidebar();
 
-    fireEvent.click(screen.getByRole("button", { name: "新建课程" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加课程文件夹" }));
 
     await waitFor(() =>
       expect(pickDirectoryPathMock).toHaveBeenCalledWith(["courses", "新课程"]),
@@ -90,7 +91,7 @@ describe("CourseSidebar", () => {
     });
     renderSidebar();
 
-    fireEvent.click(screen.getByRole("button", { name: "新建课程" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加课程文件夹" }));
 
     await waitFor(() =>
       expect(mockIpc.courses.create).toHaveBeenCalledWith(
@@ -110,12 +111,12 @@ describe("CourseSidebar", () => {
 
     renderSidebar();
 
-    fireEvent.click(screen.getByRole("button", { name: "新建课程" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加课程文件夹" }));
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "新建课程" })).toBeDisabled(),
+      expect(screen.getByRole("button", { name: "添加课程文件夹" })).toBeDisabled(),
     );
-    expect(screen.getByRole("button", { name: "新建课程" })).toHaveTextContent("创建中");
+    expect(screen.getByRole("button", { name: "添加课程文件夹" })).toHaveTextContent("添加中");
   });
 
   it("relinks a course root through the directory picker", async () => {

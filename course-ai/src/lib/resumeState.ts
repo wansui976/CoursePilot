@@ -1,6 +1,6 @@
 const RESUME_PREFIX = "course-ai-resume:";
 
-export type StudyTab = "AI 概览" | "学习" | "文稿" | "课件" | "片段";
+export type StudyTab = "overview" | "transcript" | "notes" | "quiz" | "more";
 
 export interface VideoResumeState {
   activeTab: StudyTab | null;
@@ -35,19 +35,32 @@ function finiteNullableNumber(value: unknown) {
 
 function isStudyTab(value: unknown): value is StudyTab {
   return (
-    value === "AI 概览" ||
-    value === "学习" ||
-    value === "文稿" ||
-    value === "课件" ||
-    value === "片段"
+    value === "overview" ||
+    value === "transcript" ||
+    value === "notes" ||
+    value === "quiz" ||
+    value === "more"
   );
 }
 
+const LEGACY_TAB_MAP: Record<string, StudyTab> = {
+  "概览": "overview",
+  "AI 概览": "overview",
+  "文稿": "transcript",
+  "笔记": "notes",
+  "学习": "notes",
+  "练习": "quiz",
+  "更多": "more",
+  "课件": "more",
+  "片段": "more",
+};
+
 function migrateStudyTab(value: unknown): StudyTab | null {
-  // 外层标签原名「笔记」，现更名「学习」（内层仍有「笔记」视图，避免重名/歧义）。
-  // 老 localStorage 里存的「笔记」映射到「学习」，用户上次停留的标签不丢。
-  if (value === "笔记") return "学习";
-  return isStudyTab(value) ? value : null;
+  if (isStudyTab(value)) return value;
+  if (typeof value === "string" && value in LEGACY_TAB_MAP) {
+    return LEGACY_TAB_MAP[value];
+  }
+  return null;
 }
 
 export function readVideoResumeState(videoId: string): VideoResumeState {

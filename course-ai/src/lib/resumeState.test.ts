@@ -12,12 +12,12 @@ describe("resumeState", () => {
 
   it("stores partial resume state for one video without affecting others", () => {
     writeVideoResumeState("video-1", {
-      activeTab: "学习",
+      activeTab: "notes",
       notesScrollTop: 120,
     });
 
     expect(readVideoResumeState("video-1")).toMatchObject({
-      activeTab: "学习",
+      activeTab: "notes",
       notesScrollTop: 120,
       transcriptScrollTop: 0,
       studyPanelWidth: null,
@@ -26,24 +26,22 @@ describe("resumeState", () => {
   });
 
   it("merges updates into existing state", () => {
-    writeVideoResumeState("video-1", { activeTab: "学习" });
+    writeVideoResumeState("video-1", { activeTab: "notes" });
     writeVideoResumeState("video-1", { transcriptScrollTop: 240 });
 
     expect(readVideoResumeState("video-1")).toMatchObject({
-      activeTab: "学习",
+      activeTab: "notes",
       transcriptScrollTop: 240,
     });
   });
 
   it("keeps the legacy transcriptTopIndex across unrelated writes until migrated", () => {
-    // 旧版本存的是虚拟列表行号；升级后其它面板的写入（如 activeTab）不得把它冲掉，
-    // 要留给 TranscriptPanel 换算成像素位置后再清零。
     localStorage.setItem(
       resumeStateKey("video-1"),
       JSON.stringify({ transcriptTopIndex: 42 }),
     );
 
-    writeVideoResumeState("video-1", { activeTab: "学习" });
+    writeVideoResumeState("video-1", { activeTab: "notes" });
     expect(readVideoResumeState("video-1").transcriptTopIndex).toBe(42);
 
     writeVideoResumeState("video-1", {
@@ -56,14 +54,18 @@ describe("resumeState", () => {
     });
   });
 
-  it("migrates the legacy '笔记' active tab to its new name '学习'", () => {
-    // 外层标签更名前存的 activeTab: "笔记" 应读回为 "学习"，不丢用户上次的停留位置。
+  it.each([
+    ["AI 概览", "overview"],
+    ["学习", "notes"],
+    ["课件", "more"],
+    ["片段", "more"],
+  ])("migrates the legacy '%s' active tab to '%s'", (legacy, expected) => {
     localStorage.setItem(
       resumeStateKey("video-1"),
-      JSON.stringify({ activeTab: "笔记" }),
+      JSON.stringify({ activeTab: legacy }),
     );
 
-    expect(readVideoResumeState("video-1").activeTab).toBe("学习");
+    expect(readVideoResumeState("video-1").activeTab).toBe(expected);
   });
 
   it("falls back to defaults when stored state is invalid", () => {

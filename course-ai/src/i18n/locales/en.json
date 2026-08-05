@@ -1,0 +1,40 @@
+{
+  "nav": {
+    "courseLibrary": "Courses",
+    "myCourses": "My Courses",
+    "dashboard": "Dashboard",
+    "queue": "Queue",
+    "recycleBin": "Recycle Bin",
+    "settings": "Settings",
+    "expandSidebar": "Expand sidebar",
+    "collapseSidebar": "Collapse sidebar",
+    "backToLibrary": "Back to courses",
+    "addCourseFolder": "New Course Folder",
+    "addingCourse": "Adding…",
+    "mainNav": "Main navigation",
+    "toolbar": "Toolbar",
+    "courseSidebar": "Course sidebar",
+    "courseVideoList": "Course video list",
+    "noCourseVideos": "No videos in this course"
+  },
+  "bottomTab": {
+    "courses": "Courses",
+    "study": "Study",
+    "queue": "Queue",
+    "settings": "Settings"
+  },
+  "studyTab": {
+    "overview": "Overview",
+    "transcript": "Transcript",
+    "notes": "Notes",
+    "quiz": "Quiz",
+    "more": "More"
+  },
+  "morePanel": {
+    "slides": "Slides",
+    "mindmap": "Mind Map",
+    "clips": "Clips",
+    "search": "Search",
+    "label": "More study materials"
+  }
+}

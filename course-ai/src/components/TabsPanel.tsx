@@ -1,4 +1,5 @@
-import { lazy, memo, Suspense, useEffect, useState } from "react";
+import { lazy, memo, Suspense, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TextSkeleton } from "@/components/ui/skeleton";
 import {
@@ -6,7 +7,6 @@ import {
   type StudyTab,
   writeVideoResumeState,
 } from "@/lib/resumeState";
-import { useInlineAsk } from "@/stores/inlineAsk";
 
 // 重组件（tiptap / markmap / katex）按需懒加载，缩小首屏主包体积。
 const AiViewPanel = lazy(() =>
@@ -18,25 +18,24 @@ const NotesPanel = lazy(() =>
 const TranscriptPanel = lazy(() =>
   import("./TranscriptPanel").then((m) => ({ default: m.TranscriptPanel })),
 );
-const SlidesPanel = lazy(() =>
-  import("./SlidesPanel").then((m) => ({ default: m.SlidesPanel })),
+const QuizPanel = lazy(() =>
+  import("./QuizPanel").then((m) => ({ default: m.QuizPanel })),
 );
-const ClipsPanel = lazy(() =>
-  import("./ClipsPanel").then((m) => ({ default: m.ClipsPanel })),
+const MoreStudyPanel = lazy(() =>
+  import("./MoreStudyPanel").then((m) => ({ default: m.MoreStudyPanel })),
 );
 
-// 「学习」标签汇集笔记 + 出题 / 脑图 / 提问 / 搜索等 AI 学习工具。命名为容器义的
-// 「学习」而非其中之一「笔记」，既避免与内层「笔记」视图重名，也提示里面不止笔记。
-const TABS = ["AI 概览", "学习", "文稿", "课件", "片段"] as const;
+const TAB_KEYS: StudyTab[] = ["overview", "transcript", "notes", "quiz", "more"];
 type Tab = StudyTab;
 
 function PanelFallback() {
   return <TextSkeleton lines={6} />;
 }
 
-export const TabsPanel = memo(function TabsPanel({ videoId }: { videoId: string }) {
+function VideoTabsPanel({ videoId }: { videoId: string }) {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<Tab>(
-    () => readVideoResumeState(videoId).activeTab ?? "AI 概览",
+    () => readVideoResumeState(videoId).activeTab ?? "overview",
   );
   // 保活：记录访问过的标签。访问过的面板用 forceMount 常驻 DOM（非活动时隐藏），
   // 再切回时不必重建重组件（tiptap/markmap）或上千行文稿 DOM —— 切换从此瞬时完成。
@@ -55,19 +54,12 @@ export const TabsPanel = memo(function TabsPanel({ videoId }: { videoId: string 
     writeVideoResumeState(videoId, { activeTab: tab });
   }
 
-  // 就地追问：用户在文稿里「问 AI」后跳到「学习」标签（提问视图由 NotesPanel 切换）。
-  const pendingAsk = useInlineAsk((s) => s.pending);
-  useEffect(() => {
-    if (pendingAsk) changeTab("学习");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingAsk]);
-
   const panels: { tab: Tab; node: React.ReactNode }[] = [
-    { tab: "AI 概览", node: <AiViewPanel videoId={videoId} /> },
-    { tab: "学习", node: <NotesPanel videoId={videoId} /> },
-    { tab: "文稿", node: <TranscriptPanel videoId={videoId} /> },
-    { tab: "课件", node: <SlidesPanel videoId={videoId} /> },
-    { tab: "片段", node: <ClipsPanel videoId={videoId} /> },
+    { tab: "overview", node: <AiViewPanel videoId={videoId} /> },
+    { tab: "transcript", node: <TranscriptPanel videoId={videoId} /> },
+    { tab: "notes", node: <NotesPanel videoId={videoId} /> },
+    { tab: "quiz", node: <QuizPanel videoId={videoId} /> },
+    { tab: "more", node: <MoreStudyPanel videoId={videoId} /> },
   ];
 
   return (
@@ -77,17 +69,16 @@ export const TabsPanel = memo(function TabsPanel({ videoId }: { videoId: string 
       data-study-tab={activeTab}
       className="flex h-full flex-col bg-[var(--surface-panel)] text-[var(--text-normal)]"
     >
-      {/* 面板拖窄时标签放不下：整条横向滚动（overflow-x-auto），而不是被 overflow:hidden
-          裁掉最后一个标签（如「片段」）。标签 min-w-max 不缩到文字以下、宽时仍 flex-1 铺满。 */}
+      {/* 面板拖窄时允许横向滚动；核心任务保持一级可见，低频资料统一收进"更多"。 */}
       <TabsList className="flex h-12 items-stretch overflow-x-auto border-b border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2.5 [scrollbar-width:none] sm:h-14 sm:px-4 [&::-webkit-scrollbar]:hidden">
-        {TABS.map((tab) => (
+        {TAB_KEYS.map((tab) => (
           <TabsTrigger
             key={tab}
             value={tab}
             onClick={() => changeTab(tab)}
             className="ca-touch-44 ca-study-tab-trigger flex min-h-11 min-w-max flex-1 items-center justify-center border-b-[3px] border-transparent px-3 py-3 text-sm font-semibold text-[var(--text-muted)] transition-colors data-[state=active]:border-primary data-[state=active]:text-[var(--text-strong)] sm:min-h-12 sm:px-4 sm:text-base"
           >
-            {tab}
+            {t(`studyTab.${tab}`)}
           </TabsTrigger>
         ))}
       </TabsList>
@@ -106,4 +97,10 @@ export const TabsPanel = memo(function TabsPanel({ videoId }: { videoId: string 
       ))}
     </Tabs>
   );
+}
+
+export const TabsPanel = memo(function TabsPanel({ videoId }: { videoId: string }) {
+  // videoId 是学习现场的边界。换视频时重建内部状态，重新读取该视频保存的
+  // activeTab，同时让 visited 只从当前标签开始，避免上一视频的重面板继续保活。
+  return <VideoTabsPanel key={videoId} videoId={videoId} />;
 });

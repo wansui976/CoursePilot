@@ -1,0 +1,40 @@
+{
+  "nav": {
+    "courseLibrary": "课程库",
+    "myCourses": "我的课程",
+    "dashboard": "学习面板",
+    "queue": "处理队列",
+    "recycleBin": "回收站",
+    "settings": "设置",
+    "expandSidebar": "展开侧栏",
+    "collapseSidebar": "折叠侧栏",
+    "backToLibrary": "返回课程库",
+    "addCourseFolder": "添加课程文件夹",
+    "addingCourse": "添加中",
+    "mainNav": "主导航",
+    "toolbar": "工具栏",
+    "courseSidebar": "课程侧栏",
+    "courseVideoList": "课程视频列表",
+    "noCourseVideos": "该课程暂无视频"
+  },
+  "bottomTab": {
+    "courses": "课程",
+    "study": "学习",
+    "queue": "队列",
+    "settings": "设置"
+  },
+  "studyTab": {
+    "overview": "概览",
+    "transcript": "文稿",
+    "notes": "笔记",
+    "quiz": "练习",
+    "more": "更多"
+  },
+  "morePanel": {
+    "slides": "课件",
+    "mindmap": "脑图",
+    "clips": "片段",
+    "search": "搜索",
+    "label": "更多学习资料"
+  }
+}

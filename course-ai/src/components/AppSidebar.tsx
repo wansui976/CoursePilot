@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { MouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { CourseList, useCreateCourse } from "@/components/CourseList";
@@ -62,9 +63,9 @@ export function AppSidebar({
   queueCount: number;
   onToggleQueue: () => void;
 }) {
+  const { t } = useTranslation();
   const { createCourse, creatingCourse, createError } = useCreateCourse();
 
-  // 用按钮中心作圆形扩散起点（比 clientX/Y 稳，键盘/鼠标一致），再切换主题。
   function toggleThemeFrom(event: MouseEvent<HTMLButtonElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
     setThemeToggleOrigin(rect.left + rect.width / 2, rect.top + rect.height / 2);
@@ -74,13 +75,13 @@ export function AppSidebar({
   if (collapsed) {
     return (
       <>
-        <nav className="ca-rail" aria-label="工具栏">
+        <nav className="ca-rail" aria-label={t("nav.toolbar")}>
           {view === "workbench" && (
             <button
               type="button"
               className="rail-logo"
-              title="返回课程库"
-              aria-label="返回课程库"
+              title={t("nav.backToLibrary")}
+              aria-label={t("nav.backToLibrary")}
               onClick={onBackToLibrary}
             >
               <Book className="h-[18px] w-[18px]" />
@@ -88,8 +89,8 @@ export function AppSidebar({
           )}
           <button
             className="rail-btn"
-            title="展开侧栏"
-            aria-label="展开侧栏"
+            title={t("nav.expandSidebar")}
+            aria-label={t("nav.expandSidebar")}
             onClick={onToggleCollapsed}
           >
             <PanelLeftOpen className="h-5 w-5" />
@@ -97,8 +98,8 @@ export function AppSidebar({
           {view === "library" && (
             <button
               className={`rail-btn ${queueOpen ? "active" : ""}`}
-              title="处理队列"
-              aria-label="处理队列"
+              title={t("nav.queue")}
+              aria-label={t("nav.queue")}
               onClick={onToggleQueue}
             >
               <ClipboardList className="h-5 w-5" />
@@ -107,8 +108,8 @@ export function AppSidebar({
           )}
           <button
             className="rail-btn"
-            title="学习面板"
-            aria-label="学习面板"
+            title={t("nav.dashboard")}
+            aria-label={t("nav.dashboard")}
             onClick={onOpenDashboard}
           >
             <LayoutDashboard className="h-5 w-5" />
@@ -124,16 +125,16 @@ export function AppSidebar({
           </button>
           <button
             className="rail-btn"
-            title="回收站"
-            aria-label="回收站"
+            title={t("nav.recycleBin")}
+            aria-label={t("nav.recycleBin")}
             onClick={onOpenRecycleBin}
           >
             <Trash2 className="h-5 w-5" />
           </button>
           <button
             className="rail-btn"
-            title="设置"
-            aria-label="设置"
+            title={t("nav.settings")}
+            aria-label={t("nav.settings")}
             onClick={onOpenSettings}
           >
             <Settings className="h-5 w-5" />
@@ -144,19 +145,19 @@ export function AppSidebar({
   }
 
   return (
-    <aside aria-label="课程侧栏" className="ca-side">
+    <aside aria-label={t("nav.courseSidebar")} className="ca-side">
       <div className="flex-none">
         <div className="ca-brand">
           <div className="logo">
             <Library className="h-4 w-4" />
           </div>
           <div className="label">
-            <h1>课程库</h1>
+            <h1>{t("nav.courseLibrary")}</h1>
           </div>
           <button
             type="button"
-            aria-label="折叠侧栏"
-            title="折叠侧栏"
+            aria-label={t("nav.collapseSidebar")}
+            title={t("nav.collapseSidebar")}
             className="ca-icon-btn ml-auto"
             onClick={onToggleCollapsed}
           >
@@ -166,7 +167,7 @@ export function AppSidebar({
         {view === "library" && (
           <>
             <Button
-              aria-label="新建课程"
+              aria-label={t("nav.addCourseFolder")}
               className="ca-new-btn"
               size="sm"
               variant="outline"
@@ -178,18 +179,18 @@ export function AppSidebar({
               ) : (
                 <Plus className="h-4 w-4" />
               )}
-              {creatingCourse ? "创建中" : "新建课程"}
+              {creatingCourse ? t("nav.addingCourse") : t("nav.addCourseFolder")}
             </Button>
             {createError && <ErrorNote className="mt-2" error={createError} />}
             <Button
-              aria-label="处理队列"
+              aria-label={t("nav.queue")}
               className={`ca-nav-item mt-2 w-full justify-start ${queueOpen ? "active" : ""}`}
               size="sm"
               variant="ghost"
               onClick={onToggleQueue}
             >
               <ClipboardList className="h-4 w-4" />
-              处理队列
+              {t("nav.queue")}
               {queueCount > 0 && (
                 <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/15 px-1.5 text-[11px] leading-none text-primary">
                   {queueCount}
@@ -199,7 +200,7 @@ export function AppSidebar({
           </>
         )}
       </div>
-      <div className="ca-nav-label">我的课程</div>
+      <div className="ca-nav-label">{t("nav.myCourses")}</div>
       <div className="ca-nav">
         <CourseList
           selectedCourseId={selectedCourseId}
@@ -208,7 +209,7 @@ export function AppSidebar({
           queueOpen={queueOpen}
           selectedCourseExtra={
             view === "workbench" ? (
-              <div className="ca-side-videos" aria-label="课程视频列表">
+              <div className="ca-side-videos" aria-label={t("nav.courseVideoList")}>
                 {videos.map((video) => (
                   <button
                     key={video.id}
@@ -221,7 +222,7 @@ export function AppSidebar({
                   </button>
                 ))}
                 {videos.length === 0 && (
-                  <div className="ca-side-videos-empty">该课程暂无视频</div>
+                  <div className="ca-side-videos-empty">{t("nav.noCourseVideos")}</div>
                 )}
               </div>
             ) : undefined
@@ -242,8 +243,8 @@ export function AppSidebar({
           size="icon"
           variant="ghost"
           onClick={onOpenDashboard}
-          title="学习面板"
-          aria-label="学习面板"
+          title={t("nav.dashboard")}
+          aria-label={t("nav.dashboard")}
         >
           <LayoutDashboard className="h-4 w-4" />
         </Button>
@@ -251,8 +252,8 @@ export function AppSidebar({
           size="icon"
           variant="ghost"
           onClick={onOpenRecycleBin}
-          title="回收站"
-          aria-label="回收站"
+          title={t("nav.recycleBin")}
+          aria-label={t("nav.recycleBin")}
         >
           <Trash2 className="h-4 w-4" />
         </Button>
@@ -263,7 +264,7 @@ export function AppSidebar({
           onClick={onOpenSettings}
         >
           <Settings className="h-4 w-4" />
-          设置
+          {t("nav.settings")}
         </Button>
       </div>
     </aside>

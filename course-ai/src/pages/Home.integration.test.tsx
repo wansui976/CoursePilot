@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -50,6 +51,19 @@ const { mockIpc } = vi.hoisted(() => ({
       notes: vi.fn(),
       quiz: vi.fn(),
       mindmap: vi.fn(),
+    },
+    srs: {
+      weakConcepts: vi.fn(),
+      countDue: vi.fn(),
+      dueByCourse: vi.fn(),
+    },
+    stats: {
+      nextDueAt: vi.fn(),
+      continueLearning: vi.fn(),
+      dailyTotals: vi.fn(),
+      courseTotals: vi.fn(),
+      courseVideoIds: vi.fn(),
+      videoProgress: vi.fn(),
     },
     settings: { get: vi.fn(), set: vi.fn() },
     secrets: { set: vi.fn(), has: vi.fn() },
@@ -209,6 +223,15 @@ describe("Home selected-video integration", () => {
     mockIpc.ai.getSummary.mockResolvedValue(null);
     mockIpc.slides.list.mockResolvedValue([]);
     mockIpc.slides.screenshots.mockResolvedValue([]);
+    mockIpc.srs.weakConcepts.mockResolvedValue([]);
+    mockIpc.srs.countDue.mockResolvedValue(0);
+    mockIpc.srs.dueByCourse.mockResolvedValue([]);
+    mockIpc.stats.nextDueAt.mockResolvedValue(null);
+    mockIpc.stats.continueLearning.mockResolvedValue([]);
+    mockIpc.stats.dailyTotals.mockResolvedValue([]);
+    mockIpc.stats.courseTotals.mockResolvedValue([]);
+    mockIpc.stats.courseVideoIds.mockResolvedValue([]);
+    mockIpc.stats.videoProgress.mockResolvedValue([]);
     mockIpc.settings.get.mockResolvedValue(null);
     mockIpc.settings.set.mockResolvedValue(undefined);
     mockIpc.secrets.set.mockResolvedValue(undefined);
@@ -218,27 +241,38 @@ describe("Home selected-video integration", () => {
   it("keeps visible learning UI when the real selected-video panels mount", async () => {
     const { container } = renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }));
-    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Downloads" }, { timeout: 5_000 }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: /底层逻辑/ }, { timeout: 5_000 }),
+    );
 
     expect(container.firstElementChild).toHaveAttribute("data-bucket", "wide");
     expect(screen.getByRole("region", { name: "学习工作台" })).toBeInTheDocument();
     expect(screen.getByText(displayTitle(video.title))).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "AI 概览" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "学习" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "概览" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "文稿" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "课件" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "笔记" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "练习" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "更多" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: "学习" }));
+    fireEvent.click(screen.getByRole("tab", { name: "笔记" }));
     // 笔记面板按需懒加载，Tiptap/NotesPanel 在完整套件并行跑时偶尔超过默认等待窗口。
     expect(
-      await screen.findByRole("button", { name: "笔记" }, { timeout: 5000 }),
+      await screen.findByLabelText("笔记内容滚动区", {}, { timeout: 5000 }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "出题" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "学习工具" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "更多" }));
+    expect(
+      await screen.findByRole("group", { name: "更多学习资料" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "课件" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "脑图" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "提问" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "片段" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "搜索" })).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("shows an error with retry when the videos query fails", async () => {
     mockIpc.videos.list.mockRejectedValue(new Error("boom"));
@@ -394,16 +428,57 @@ describe("Home selected-video integration", () => {
     renderHome();
 
     const nav = await screen.findByRole("navigation", { name: "主导航" });
-    expect(within(nav).getByRole("button", { name: "课程" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "课程" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(nav).getByRole("button", { name: "学习" })).toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: "队列" })).toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: "设置" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "课程侧栏" })).toHaveClass(
       "ca-course-screen",
     );
 
+    fireEvent.click(within(nav).getByRole("button", { name: "学习" }));
+
+    expect(await screen.findByRole("heading", { name: "学习面板" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "学习" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
     fireEvent.click(within(nav).getByRole("button", { name: "设置" }));
 
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "设置" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+
+    await waitFor(() =>
+      expect(within(nav).getByRole("button", { name: "课程" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      ),
+    );
+
+    fireEvent.click(within(nav).getByRole("button", { name: "队列" }));
+    expect(await screen.findByLabelText("处理队列页面")).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "队列" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "返回上一菜单" }));
+
+    await waitFor(() =>
+      expect(within(nav).getByRole("button", { name: "课程" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      ),
+    );
   });
 
   it("uses the phone-style library layout on iPad portrait", async () => {

@@ -1,12 +1,14 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { BottomTabBar } from "./BottomTabBar";
 
 describe("BottomTabBar", () => {
-  it("renders the three tabs and marks the active one", () => {
+  it("renders the four tabs and marks the active one", () => {
     render(<BottomTabBar active="courses" onSelect={() => undefined} />);
     expect(screen.getByRole("button", { name: "课程" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "学习" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "队列" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
   });
@@ -16,6 +18,13 @@ describe("BottomTabBar", () => {
     render(<BottomTabBar active="courses" onSelect={onSelect} />);
     fireEvent.click(screen.getByRole("button", { name: "设置" }));
     expect(onSelect).toHaveBeenCalledWith("settings");
+  });
+
+  it("selects the study dashboard", () => {
+    const onSelect = vi.fn();
+    render(<BottomTabBar active="courses" onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole("button", { name: "学习" }));
+    expect(onSelect).toHaveBeenCalledWith("study");
   });
 
   it("shows a queue badge when queueCount > 0", () => {

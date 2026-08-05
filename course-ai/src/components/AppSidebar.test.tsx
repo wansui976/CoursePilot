@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -94,7 +95,7 @@ describe("AppSidebar", () => {
   it("renders the expanded library sidebar with unified entries", async () => {
     renderSidebar();
     expect(screen.getByRole("complementary", { name: "课程侧栏" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "新建课程" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加课程文件夹" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "处理队列" })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /申论课程/ })).toBeInTheDocument();
     // 底部固定功能区
@@ -173,7 +174,7 @@ describe("AppSidebar", () => {
 
   it("workbench expanded: hides course creation and processing queue entries", () => {
     renderSidebar({ view: "workbench" });
-    expect(screen.queryByRole("button", { name: "新建课程" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "添加课程文件夹" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "处理队列" })).not.toBeInTheDocument();
   });
 
