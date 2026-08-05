@@ -291,6 +291,11 @@ export type AssistantAction =
 export interface AssistantReply {
   answer: string;
   canceled: boolean;
+  /**
+   * 助手转到轮次上限才停下。此时 answer 多半只是它某一轮的过场话（「我先查一下课程列表」），
+   * 甚至是空串——不点出来的话，用户看到的要么是把过场话当成答复，要么是问完之后什么都没有。
+   */
+  hit_turn_limit: boolean;
   actions: AssistantAction[];
   turns: number;
   tools_used: string[];

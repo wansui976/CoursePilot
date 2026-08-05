@@ -86,6 +86,11 @@ pub struct AgentOutcome {
     pub turns: usize,
     /// 是否由用户主动停止。撞轮次上限不算取消。
     pub canceled: bool,
+    /// 是否转到轮次上限才停下。
+    ///
+    /// 调用方必须往下传给界面。撞上限时 `answer` 多半是模型某一轮的过场话
+    /// （「我先查一下课程列表」），甚至是空的——照常显示出来，用户会当成它给完了答复。
+    pub hit_turn_limit: bool,
 }
 
 /// 执行一个工具，同时轮询用户取消标志。
@@ -182,6 +187,7 @@ pub async fn run<T: ToolBox>(
                 messages,
                 turns,
                 canceled: false,
+                hit_turn_limit: false,
             });
         }
 
@@ -214,7 +220,9 @@ pub async fn run<T: ToolBox>(
 
     // 被取消不算撞上限。两者都会走到这里，但对用户是两件事：
     // 一个是「你叫停的」，一个是「它自己转不出来了」。
-    if turns >= MAX_TURNS && !cancel.load(Ordering::SeqCst) {
+    let canceled = cancel.load(Ordering::SeqCst);
+    let hit_turn_limit = turns >= MAX_TURNS && !canceled;
+    if hit_turn_limit {
         on_event(AgentEvent::HitTurnLimit);
     }
     // 撞上限或被取消：把已经拿到的交出去，不报错。用户宁可看到半截结果，
@@ -223,7 +231,8 @@ pub async fn run<T: ToolBox>(
         answer,
         messages,
         turns,
-        canceled: cancel.load(Ordering::SeqCst),
+        canceled,
+        hit_turn_limit,
     })
 }
 
@@ -491,7 +500,31 @@ mod tests {
 
         assert_eq!(out.turns, MAX_TURNS);
         assert!(hit_limit, "撞上限要说一声");
+        assert!(
+            out.hit_turn_limit,
+            "结果里也要带着：命令层只拿得到 outcome，事件是流式过程，落不进最终回复"
+        );
+        assert!(!out.canceled, "转不出来不等于用户叫停");
         assert_eq!(tools.executed.borrow().len(), MAX_TURNS);
+    }
+
+    #[tokio::test]
+    async fn a_model_that_answers_normally_is_not_flagged_as_having_run_out_of_turns() {
+        // 这个标记会让界面挂出「没得出结论」。答得好好的却挂上，比不挂更糟。
+        let provider = scripted(vec![says("答完了")]);
+        let out = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("问")],
+            &Recorder::new(false),
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+
+        assert!(!out.hit_turn_limit);
     }
 
     #[tokio::test]
@@ -686,7 +719,7 @@ mod tests {
             seen: RefCell::new(0),
         };
         let mut hit_limit = false;
-        run(
+        let out = run(
             &provider,
             "m",
             None,
@@ -702,6 +735,8 @@ mod tests {
         .await
         .unwrap();
         assert!(!hit_limit, "被取消不该报成撞上限");
+        assert!(!out.hit_turn_limit, "结果里同样不能混为一谈");
+        assert!(out.canceled);
     }
 
     #[tokio::test]

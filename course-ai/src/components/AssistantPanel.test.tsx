@@ -42,6 +42,7 @@ function reply(over: Partial<AssistantReply> = {}): AssistantReply {
   return {
     answer: "好了",
     canceled: false,
+    hit_turn_limit: false,
     actions: [],
     turns: 1,
     tools_used: [],
@@ -911,6 +912,65 @@ describe("AssistantPanel", () => {
     await screen.findByText("第二答");
 
     expect(screen.getAllByRole("button", { name: "重新回答" })).toHaveLength(1);
+  });
+
+  it("助手转到轮次上限停下时说清楚，不让过场话冒充结论", async () => {
+    // 撞上限那一轮，answer 里留的常常是它某一轮的交代，而不是答案。原样铺出来，
+    // 用户读到的是一句「我先查一下」，还以为助手就答成这样。
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({ answer: "我先查一下这门课有哪些视频", hit_turn_limit: true }),
+    );
+    renderPanel();
+    await ask("把这门课整理成提纲");
+
+    expect(await screen.findByText(/没能得出结论/)).toBeInTheDocument();
+    // 它说过的话仍然留着——被截断不代表这段过程没有价值。
+    expect(screen.getByText("我先查一下这门课有哪些视频")).toBeInTheDocument();
+  });
+
+  it("一个字都没回时不留一片空白，并且就地给出重试入口", async () => {
+    // 这是最糟的一种：问完之后什么都没有，和程序坏了长得一模一样。
+    // 而那排重新回答按钮挂在回答上，恰恰是最需要重试的这种情况反而没有入口。
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "", hit_turn_limit: true }));
+    renderPanel();
+    await ask("把这门课整理成提纲");
+
+    expect(await screen.findByText(/没能得出结论/)).toBeInTheDocument();
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "这次答出来了" }));
+    fireEvent.click(screen.getByRole("button", { name: "重新回答" }));
+
+    expect(await screen.findByText("这次答出来了")).toBeInTheDocument();
+    expect(mockIpc.assistant.ask.mock.calls[1][0]).toBe("把这门课整理成提纲");
+  });
+
+  it("回答为空又没撞上限时，同样明说这次没回答", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "" }));
+    renderPanel();
+    await ask("讲讲这段");
+
+    expect(await screen.findByText("助手这次没有给出回答。")).toBeInTheDocument();
+  });
+
+  it("用户叫停的那一轮不挂「没得出结论」——它没转不出来，是被按停的", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({ answer: "", canceled: true, hit_turn_limit: true }),
+    );
+    renderPanel();
+    await ask("查完所有课程");
+
+    expect(await screen.findByText("已停止，未继续执行")).toBeInTheDocument();
+    expect(screen.queryByText(/没能得出结论/)).not.toBeInTheDocument();
+    // 「已停止」已经把话说完了，再补一句「这次没有给出回答」是同一件事说两遍。
+    expect(screen.queryByText("助手这次没有给出回答。")).not.toBeInTheDocument();
+  });
+
+  it("正常答完的一轮不挂任何未完成说明", async () => {
+    renderPanel();
+    await ask("讲讲这段");
+    await screen.findByText("好了");
+
+    expect(screen.queryByText(/没能得出结论/)).not.toBeInTheDocument();
+    expect(screen.queryByText("助手这次没有给出回答。")).not.toBeInTheDocument();
   });
 
   it("输入法组词时的回车不发送", async () => {

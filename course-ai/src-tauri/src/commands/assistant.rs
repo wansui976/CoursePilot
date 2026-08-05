@@ -61,6 +61,12 @@ pub struct AssistantReply {
     pub answer: String,
     /// 用户是否主动停止了这一轮。即使已执行过部分只读工具，也不把半截答复伪装成完成。
     pub canceled: bool,
+    /// 是否是转到轮次上限才停的。
+    ///
+    /// 界面必须显示出来。撞上限时 `answer` 往往只是模型某一轮的过场话，甚至是空串；
+    /// 照常渲染的话，用户看到的要么是一句「我先查一下课程列表」被当成最终答复，
+    /// 要么是问完之后**什么都没有**——那和程序坏了长得一模一样。
+    pub hit_turn_limit: bool,
     /// 待界面执行或确认的动作。导航类渲染成待点击按钮；提案类必须渲染成确认卡。
     pub actions: Vec<AssistantAction>,
     /// 这一轮来回了几次，以及调了哪些工具——花了多少钱要让用户看得见。
@@ -142,6 +148,34 @@ fn prepare_history(history: Vec<ChatMessage>) -> Vec<ChatMessage> {
         Vec::new()
     } else {
         messages.into_iter().skip(start).collect()
+    }
+}
+
+/// 把循环结果装配成交给界面的回复。
+///
+/// 抽出来是为了能测：这里每一条都是「不这么做就会骗到用户」的规则——取消后不能留下
+/// 待确认的动作、取消的那一轮不能进下次上下文、转不出来要如实说。装在 spawn 的闭包里
+/// 它们一条都测不到。
+fn build_reply(
+    outcome: crate::llm::agent::AgentOutcome,
+    actions: Vec<AssistantAction>,
+    tools_used: Vec<String>,
+    completed_history_len: usize,
+) -> AssistantReply {
+    AssistantReply {
+        answer: outcome.answer,
+        canceled: outcome.canceled,
+        hit_turn_limit: outcome.hit_turn_limit,
+        // 停止发生在工具轮之间时，前面可能已经生成了导航、主题或写操作提案。
+        // 它们都还没有得到一轮完整答复确认，不能在用户点停之后继续交给界面执行。
+        actions: if outcome.canceled {
+            Vec::new()
+        } else {
+            actions
+        },
+        turns: outcome.turns,
+        tools_used,
+        history: history_for_next_turn(outcome.messages, completed_history_len, outcome.canceled),
     }
 }
 
@@ -251,26 +285,8 @@ pub async fn cmd_assistant_ask(
         match result {
             Ok(outcome) => {
                 let actions = tools.take_actions();
-                let next_history = history_for_next_turn(
-                    outcome.messages,
-                    completed_history_len,
-                    outcome.canceled,
-                );
                 emit(AssistantEvent::Done {
-                    reply: AssistantReply {
-                        answer: outcome.answer,
-                        canceled: outcome.canceled,
-                        // 停止发生在工具轮之间时，前面可能已经生成了导航、主题或写操作提案。
-                        // 它们都还没有得到一轮完整答复确认，不能在用户点停之后继续交给界面执行。
-                        actions: if outcome.canceled {
-                            Vec::new()
-                        } else {
-                            actions
-                        },
-                        turns: outcome.turns,
-                        tools_used,
-                        history: next_history,
-                    },
+                    reply: build_reply(outcome, actions, tools_used, completed_history_len),
                 });
             }
             Err(error) => emit(AssistantEvent::Error {
@@ -397,6 +413,84 @@ mod tests {
             ChatMessage::assistant("答".repeat(MAX_HISTORY_CHARS + 1)),
         ]);
         assert!(prepared.is_empty());
+    }
+
+    fn outcome(messages: Vec<ChatMessage>) -> crate::llm::agent::AgentOutcome {
+        crate::llm::agent::AgentOutcome {
+            answer: "答复".into(),
+            messages,
+            turns: 1,
+            canceled: false,
+            hit_turn_limit: false,
+        }
+    }
+
+    #[test]
+    fn a_reply_that_ran_out_of_turns_says_so_instead_of_looking_finished() {
+        // 撞上限时 answer 常常只是过场话甚至空串。这个标记是界面唯一的分辨依据；
+        // 漏传的话用户会把「我先查一下」当成最终答复，或者干脆面对一片空白。
+        let reply = build_reply(
+            crate::llm::agent::AgentOutcome {
+                answer: "我先查一下这门课有哪些视频".into(),
+                hit_turn_limit: true,
+                ..outcome(vec![ChatMessage::assistant("我先查一下这门课有哪些视频")])
+            },
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        assert!(reply.hit_turn_limit);
+        assert!(!reply.canceled, "转不出来不是用户叫停的");
+    }
+
+    #[test]
+    fn a_finished_reply_is_not_flagged_as_having_run_out_of_turns() {
+        let reply = build_reply(
+            outcome(vec![ChatMessage::assistant("答复")]),
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        assert!(!reply.hit_turn_limit);
+    }
+
+    #[test]
+    fn stopping_mid_chain_drops_the_proposals_that_never_got_confirmed() {
+        // 停止可能发生在工具轮之间，此时确认卡已经生成但没有任何一轮完整答复背书。
+        // 交给界面就等于用户点了停止、面前却仍摆着一张「确认删除」。
+        let reply = build_reply(
+            crate::llm::agent::AgentOutcome {
+                canceled: true,
+                ..outcome(vec![
+                    ChatMessage::assistant("上一轮完成"),
+                    ChatMessage::user("删掉这个"),
+                ])
+            },
+            vec![AssistantAction::ProposeDelete {
+                video_id: "v1".into(),
+                title: "第一讲".into(),
+            }],
+            vec!["delete_video".into()],
+            1,
+        );
+        assert!(reply.actions.is_empty());
+        assert_eq!(reply.history.len(), 1, "取消的那一轮也不进下次上下文");
+        // 调过哪些工具照常留着：用户有权知道叫停之前它已经动了什么。
+        assert_eq!(reply.tools_used, ["delete_video"]);
+    }
+
+    #[test]
+    fn a_completed_turn_hands_its_proposals_to_the_interface() {
+        let reply = build_reply(
+            outcome(vec![ChatMessage::assistant("答复")]),
+            vec![AssistantAction::ProposeDelete {
+                video_id: "v1".into(),
+                title: "第一讲".into(),
+            }],
+            Vec::new(),
+            0,
+        );
+        assert_eq!(reply.actions.len(), 1);
     }
 
     #[test]

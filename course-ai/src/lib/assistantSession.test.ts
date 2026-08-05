@@ -50,6 +50,29 @@ describe("assistantSession", () => {
     });
   });
 
+  it("remembers that a turn ran out of steps instead of restoring it as a finished answer", () => {
+    // 重启之后这一轮看起来和答完了一模一样：一句过场话，或者干脆是空的。
+    // 不把标记存下来，那条「没能得出结论」的说明就跟着消失了。
+    writeAssistantSession({
+      turns: [
+        {
+          id: "t1",
+          question: "整理成提纲",
+          answer: "我先查一下这门课有哪些视频",
+          actions: [],
+          tools: ["list_videos"],
+          canceled: false,
+          hitTurnLimit: true,
+          actionResults: [],
+        },
+      ],
+      history: [],
+      draft: "",
+    });
+
+    expect(readAssistantSession().turns[0].hitTurnLimit).toBe(true);
+  });
+
   it("does not persist an in-flight turn", () => {
     writeAssistantSession({
       turns: [

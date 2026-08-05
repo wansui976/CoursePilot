@@ -18,6 +18,8 @@ export interface AssistantTurnRecord {
   actions: AssistantAction[];
   tools: string[];
   canceled: boolean;
+  /** 助手转到轮次上限才停下；这一轮的回答不完整，重启后同样要说明。旧记录没有。 */
+  hitTurnLimit?: boolean;
   /** 确认卡的实际执行结果；重启后仍需告诉用户已经完成、失败或取消。 */
   actionResults: string[];
   pending?: boolean;
@@ -60,6 +62,7 @@ function readTurn(value: unknown): AssistantTurnRecord | null {
       ? value.tools.filter((tool): tool is string => typeof tool === "string")
       : [],
     canceled: value.canceled === true,
+    ...(value.hitTurnLimit === true ? { hitTurnLimit: true } : {}),
     actionResults: Array.isArray(value.actionResults)
       ? value.actionResults
           .filter((result): result is string => typeof result === "string")

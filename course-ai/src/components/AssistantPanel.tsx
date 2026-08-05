@@ -857,6 +857,9 @@ export function AssistantPanel({
                 actions,
                 tools: reply.tools_used,
                 canceled,
+                // 用户叫停的那一轮已经有自己的说明，再挂一条「没得出结论」是在替它
+                // 找借口——它没转不出来，是被你按停的。
+                hitTurnLimit: reply.hit_turn_limit && !canceled,
                 pending: false,
               }
             : turn,
@@ -1283,6 +1286,36 @@ export function AssistantPanel({
                     </Button>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* 这一轮没能好好结束时说清楚。
+                助手转到轮次上限停下时，answer 里留的往往是它某一轮的过场话
+                （「我先查一下这门课有哪些视频」），甚至是空串。照原样铺出来，用户要么
+                把过场话当成最终答复，要么问完之后**什么都没有**——后者和程序坏了长得
+                一模一样，而它其实是查得太久被截断了，换个具体点的问法就能过去。
+                正文空着的时候顺带把重新回答放在这儿：那排悬停按钮挂在回答上，
+                恰恰是最需要重试的这种情况反而没有入口。 */}
+            {!turn.pending && (turn.hitTurnLimit || (!turn.answer && !turn.canceled)) && (
+              <div className="flex items-start gap-1.5 text-[11px] text-[var(--text-muted)]">
+                <AlertCircle className="mt-[0.2em] h-3 w-3 flex-none" aria-hidden="true" />
+                <span className="min-w-0 break-words">
+                  {turn.hitTurnLimit
+                    ? "助手连查了几轮也没能得出结论，已经停下。问得再具体一点通常能问出来。"
+                    : "助手这次没有给出回答。"}
+                </span>
+                {!turn.answer && turn.id === turns[turns.length - 1]?.id && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => regenerate(turn)}
+                    className="-my-1 h-6 flex-none px-1.5 text-[11px]"
+                  >
+                    <RefreshCw className="mr-1 h-3 w-3" aria-hidden="true" />
+                    重新回答
+                  </Button>
+                )}
               </div>
             )}
 
