@@ -637,6 +637,7 @@
   "assistantTools": {
     "list_courses": "View courses",
     "list_videos": "View video list",
+    "get_course_outline": "Read course outline",
     "get_study_progress": "Read study progress",
     "resume_learning": "Resume learning",
     "list_weak_concepts": "View weak concepts",

@@ -18,4 +18,11 @@ describe("AssistantToolChips", () => {
     expect(chips).toHaveTextContent("查看薄弱知识点");
     expect(chips).not.toHaveTextContent("list_weak_concepts");
   });
+
+  it("shows the generated course outline in user-facing language", () => {
+    render(<AssistantToolChips tools={["get_course_outline"]} />);
+    const chips = screen.getByTestId("tool-chips");
+    expect(chips).toHaveTextContent("读取课程知识结构");
+    expect(chips).not.toHaveTextContent("get_course_outline");
+  });
 });

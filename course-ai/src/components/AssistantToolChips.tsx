@@ -1,4 +1,5 @@
 import {
+  BookOpen,
   Download,
   FolderPlus,
   Gauge,
@@ -30,6 +31,7 @@ import { useTranslation } from "react-i18next";
 const ICONS: Record<string, React.ReactNode> = {
   list_courses: <ListVideo className="h-3 w-3" />,
   list_videos: <ListVideo className="h-3 w-3" />,
+  get_course_outline: <BookOpen className="h-3 w-3" />,
   get_study_progress: <Gauge className="h-3 w-3" />,
   resume_learning: <Play className="h-3 w-3" />,
   list_weak_concepts: <Target className="h-3 w-3" />,

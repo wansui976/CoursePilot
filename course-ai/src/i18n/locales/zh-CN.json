@@ -637,6 +637,7 @@
   "assistantTools": {
     "list_courses": "查看课程",
     "list_videos": "查看视频列表",
+    "get_course_outline": "读取课程知识结构",
     "get_study_progress": "读取学习进度",
     "resume_learning": "继续上次学习",
     "list_weak_concepts": "查看薄弱知识点",
