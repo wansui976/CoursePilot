@@ -450,7 +450,10 @@
     "appearance": {
       "title": "外观",
       "accentColor": "强调色",
-      "customAccent": "自定义强调色"
+      "customAccent": "自定义强调色",
+      "language": "语言",
+      "languageZh": "简体中文",
+      "languageEn": "English"
     },
     "studyReminder": {
       "title": "学习提醒",

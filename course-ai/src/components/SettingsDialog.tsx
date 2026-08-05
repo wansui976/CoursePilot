@@ -34,6 +34,7 @@ import {
 } from "@/lib/slides";
 import { defaultAsrBackend, normalizeAsrBackend } from "@/lib/asrDefaults";
 import { defaultOcrBackend, normalizeOcrBackend } from "@/lib/ocrDefaults";
+import { changeLanguage } from "@/i18n";
 import { isMobile, isTablet } from "@/lib/platform";
 import { readReminderEnabled, writeReminderEnabled } from "@/lib/studyReminder";
 import { pickDirectoryPath } from "@/lib/mobileFiles";
@@ -256,7 +257,7 @@ export function SettingsPanel({
   onClose: () => void;
   onOpenDevConsole?: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const mobile = isMobile();
   const tablet = isTablet();
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>("appearance");
@@ -778,6 +779,19 @@ export function SettingsPanel({
                       })}
                     </div>
                   </StackRow>
+                </Group>
+
+                <Group header={t("settings.appearance.language")}>
+                  <Row label={t("settings.appearance.language")} htmlFor="app-language">
+                    <Select
+                      id="app-language"
+                      value={i18n.language}
+                      onChange={(e) => changeLanguage(e.target.value)}
+                    >
+                      <option value="zh-CN">{t("settings.appearance.languageZh")}</option>
+                      <option value="en">{t("settings.appearance.languageEn")}</option>
+                    </Select>
+                  </Row>
                 </Group>
               </>
             )}
