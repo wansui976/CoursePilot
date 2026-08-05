@@ -74,9 +74,9 @@ const TranscriptRow = memo(function TranscriptRow({
           title={t("transcript.editButtonTitle")}
           onClick={() => onEdit(segment.id, segment.text)}
           // 用轻量字形代替 lucide SVG：每行少一棵 SVG 子树，屏外行渲染更快、快滑空白更小。
-          // 悬停才出现且盖在文字上方，给实底背景 + 细边保证可读。
+          // 悬停才出现且盖在文字上方；按钮表面保持透明，不挡住文稿内容。
           // 触屏没有 hover：.ca-transcript-edit 在 pointer:coarse 下强制可见（globals.css）。
-          className="ca-transcript-edit ca-touch-44 ca-workbench-touch absolute bottom-0.5 right-1 grid h-7 w-7 place-items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] text-[15px] leading-none text-[var(--text-muted)] opacity-0 shadow-[var(--shadow-raise)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
+          className="ca-transcript-edit ca-touch-44 ca-workbench-touch absolute bottom-0.5 right-1 grid h-7 w-7 place-items-center rounded border border-transparent bg-transparent text-[15px] leading-none text-[var(--text-muted)] opacity-0 shadow-none transition hover:bg-transparent hover:text-[var(--text-strong)] focus-visible:opacity-100 group-hover:opacity-100"
         >
           <span aria-hidden="true">✎</span>
         </button>
@@ -196,8 +196,8 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     };
   }, [hasRows]);
 
-  // 活动行变化时才考虑滚动（编辑时不打扰用户）。刚手动滚过则暂停；活动行已完整可见则不动，
-  // 仅当它滚出可视区才平滑居中——原生 scrollTo，不做任何量高回改，故不抽搐。
+  // 活动行变化时将它放回视区中线（编辑时不打扰用户）。刚手动滚过则暂停；除此之外
+  // 每次换句都重新居中，不等活动行走到视区底部。原生 scrollTo 不做量高回改，故不抽搐。
   useEffect(() => {
     if (activeRowIndex < 0 || editingId != null) return;
     if (Date.now() - userScrollRef.current < FOLLOW_PAUSE_MS) return;
@@ -208,8 +208,6 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     if (!scroller || !row) return;
     const sRect = scroller.getBoundingClientRect();
     const rRect = row.getBoundingClientRect();
-    const fullyVisible = rRect.top >= sRect.top && rRect.bottom <= sRect.bottom;
-    if (fullyVisible) return;
     const target =
       scroller.scrollTop +
       (rRect.top - sRect.top) -

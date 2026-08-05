@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptPanel } from "./TranscriptPanel";
 import { useInlineAsk } from "@/stores/inlineAsk";
+import { usePlayer } from "@/stores/player";
 import type { TranscriptSegment } from "@/lib/types";
 
 const { mockIpc } = vi.hoisted(() => ({
@@ -66,6 +67,13 @@ describe("TranscriptPanel", () => {
     mockIpc.transcripts.list.mockResolvedValue(makeSegments(60));
     mockIpc.srs.addCard.mockReset().mockResolvedValue("m:1");
     useInlineAsk.setState({ pending: null });
+    usePlayer.setState({
+      videoId: null,
+      currentMs: 0,
+      durationMs: 0,
+      seekRequest: null,
+      pendingSeek: null,
+    });
   });
 
   it("shows a skeleton while the transcript is loading", () => {
@@ -170,13 +178,59 @@ describe("TranscriptPanel", () => {
     );
   });
 
-  it("keeps the edit button reachable on touch via the coarse-pointer class", async () => {
+  it("keeps the edit button reachable on touch with a transparent surface", async () => {
     renderTranscriptPanel();
     await screen.findByText("00:01");
 
     // 触屏没有 hover：按钮靠 .ca-transcript-edit 在 pointer:coarse 下强制可见。
     const editButtons = screen.getAllByRole("button", { name: "编辑这句文稿" });
-    expect(editButtons[0]).toHaveClass("ca-transcript-edit");
+    expect(editButtons[0]).toHaveClass(
+      "ca-transcript-edit",
+      "border-transparent",
+      "bg-transparent",
+      "shadow-none",
+      "hover:bg-transparent",
+      "focus-visible:opacity-100",
+    );
+  });
+
+  it("recenters every active sentence even while it is fully visible", async () => {
+    renderTranscriptPanel();
+    await screen.findByText("00:01");
+
+    const scroller = screen.getByLabelText("文稿内容滚动区");
+    const row = scroller.querySelector<HTMLElement>('[data-row="20"]');
+    expect(row).not.toBeNull();
+
+    Object.defineProperty(scroller, "clientHeight", {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(row, "clientHeight", {
+      configurable: true,
+      value: 30,
+    });
+    scroller.scrollTop = 120;
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({
+      top: 100,
+      bottom: 500,
+    } as DOMRect);
+    vi.spyOn(row as HTMLElement, "getBoundingClientRect").mockReturnValue({
+      top: 300,
+      bottom: 330,
+    } as DOMRect);
+    const scrollTo = vi.fn();
+    Object.defineProperty(scroller, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+    });
+
+    // 第 21 句仍完整位于 100-500 的视区内，也应在换句时回到中线。
+    act(() => usePlayer.getState().setCurrentMs(21_500));
+
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({ top: 135, behavior: "smooth" }),
+    );
   });
 
   it("surfaces an error when saving a transcript edit fails", async () => {
