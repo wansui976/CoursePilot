@@ -10,20 +10,23 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { isIOS, pickDirectoryPath } from "@/lib/mobileFiles";
 
-function nextCourseName(courses: { name: string }[]) {
+function nextCourseName(courses: { name: string }[], t: (key: string, opts?: Record<string, unknown>) => string) {
   const names = new Set(courses.map((course) => course.name));
-  if (!names.has("新课程")) return "新课程";
+  const baseName = t("courseList.newCourse");
+  if (!names.has(baseName)) return baseName;
   let index = 2;
-  while (names.has(`新课程 ${index}`)) index += 1;
-  return `新课程 ${index}`;
+  while (names.has(t("courseList.newCourseN", { index }))) index += 1;
+  return t("courseList.newCourseN", { index });
 }
 
-/** 「新建课程」逻辑:目录选择 → 创建 → 刷新;供宽侧栏与窄屏课程页复用。 */
+/** 「添加课程文件夹」逻辑:目录选择 → 创建 → 刷新;供各个课程入口复用。 */
 export function useCreateCourse() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data: courses = [] } = useQuery({
     queryKey: ["courses"],
@@ -34,7 +37,7 @@ export function useCreateCourse() {
 
   async function createCourse() {
     if (creatingCourse) return;
-    const name = nextCourseName(courses);
+    const name = nextCourseName(courses, t);
     try {
       setCreateError(null);
       setCreatingCourse(true);
@@ -67,6 +70,7 @@ export function CourseList({
   /** 渲染在「选中课程」条目正下方(工作台内联视频列表插槽)。 */
   selectedCourseExtra?: ReactNode;
 }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const {
     data: courses = [],
@@ -140,12 +144,12 @@ export function CourseList({
       await queryClient.invalidateQueries({ queryKey: ["courses"] });
       await queryClient.invalidateQueries({ queryKey: ["videos", id] });
       await queryClient.invalidateQueries({ queryKey: ["media-url"] });
-      const lines = [`已重连 ${res.relinked}/${res.total} 个视频`];
+      const lines = [t("courseList.relinkResult", { relinked: res.relinked, total: res.total })];
       if (res.missing.length)
-        lines.push(`缺失 ${res.missing.length} 个：${res.missing.join("、")}`);
+        lines.push(t("courseList.relinkMissing", { count: res.missing.length, names: res.missing.join("、") }));
       if (res.ambiguous.length)
-        lines.push(`重名跳过 ${res.ambiguous.length} 个：${res.ambiguous.join("、")}`);
-      await messageDialog(lines.join("\n"), { title: "重新选择根目录" });
+        lines.push(t("courseList.relinkAmbiguous", { count: res.ambiguous.length, names: res.ambiguous.join("、") }));
+      await messageDialog(lines.join("\n"), { title: t("courseList.relinkRoot") });
     },
   });
 
@@ -162,8 +166,8 @@ export function CourseList({
   async function confirmDelete(id: string, name: string) {
     closeMenu();
     const ok = await confirmDialog(
-      `删除课程「${name}」？\n该课程下的视频会移入回收站，可在 30 天内恢复。`,
-      { title: "删除课程", kind: "warning", okLabel: "删除", cancelLabel: "取消" },
+      t("courseList.deleteCourseConfirm", { name }),
+      { title: t("courseList.deleteCourseTitle"), kind: "warning", okLabel: t("courseList.delete"), cancelLabel: t("courseList.cancel") },
     );
     if (ok) remove.mutate(id);
   }
@@ -208,7 +212,7 @@ export function CourseList({
           return (
             <Fragment key={course.id}>
               <input
-                aria-label="重命名课程"
+                aria-label={t("courseList.renameCourse")}
                 autoFocus
                 value={renameDraft}
                 onChange={(e) => setRenameDraft(e.target.value)}
@@ -242,7 +246,7 @@ export function CourseList({
                 <span className="nm">{course.name}</span>
               </button>
               <button
-                aria-label="课程操作"
+                aria-label={t("courseList.courseActions")}
                 data-course-menu
                 ref={(el) => {
                   if (el) menuButtonRefs.current.set(course.id, el);
@@ -273,8 +277,8 @@ export function CourseList({
           // 课程加载失败：显示错误 + 重试，而不是伪装成「还没有课程」。
           <ErrorNote error={coursesErrorObj} onRetry={() => refetchCourses()} />
         ) : (
-          <div className="rounded-md border border-[var(--border-faint)] bg-[var(--surface-card)] px-3 py-4 text-xs leading-relaxed text-[var(--text-muted)]">
-            选择一个课程文件夹后，视频会按课程归档。
+          <div className="px-3 py-4 text-xs text-[var(--text-faint)]">
+            {t("courseList.noCourses")}
           </div>
         ))}
       {openCourse &&
@@ -294,21 +298,21 @@ export function CourseList({
                 className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
               >
                 <Pencil className="h-4 w-4" />
-                重命名
+                {t("courseList.rename")}
               </button>
               <button
                 onClick={() => void handleRelinkRoot(openCourse.id, openCourse.name)}
                 className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
               >
                 <FolderOpen className="h-4 w-4" />
-                重新选择根目录
+                {t("courseList.relinkRoot")}
               </button>
               <button
                 onClick={() => void confirmDelete(openCourse.id, openCourse.name)}
                 className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--status-err)] hover:bg-[var(--surface-card-hover)]"
               >
                 <Trash2 className="h-4 w-4" />
-                删除
+                {t("courseList.delete")}
               </button>
             </div>
           </>,

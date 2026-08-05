@@ -8,6 +8,7 @@ import {
   Plus,
 } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { humanizeError } from "@/lib/errors";
@@ -35,6 +36,7 @@ export function ImportVideoButton({
   courseId: string;
   onStartProcessing?: (video: Video) => void;
 }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const [showBili, setShowBili] = useState(false);
@@ -57,7 +59,7 @@ export function ImportVideoButton({
     onSuccess: (videos) => {
       if (videos == null) return; // 用户取消了选目录
       if (videos.length === 0) {
-        setImportError("该文件夹里没有可导入的视频");
+        setImportError(t("import.noVideosInFolder"));
         return;
       }
       setFolderVideos(videos);
@@ -74,7 +76,7 @@ export function ImportVideoButton({
         filters: [
           { name: "Video", extensions: ["mp4", "mkv", "mov", "webm", "m4v"] },
         ],
-        prompt: "选择本地视频",
+        prompt: t("import.selectLocalVideo"),
       });
       if (!persisted) return null;
       return ipc.videos.addLocal(courseId, persisted.path, persisted.durationMs);
@@ -97,7 +99,7 @@ export function ImportVideoButton({
         onClick={() => setMenuOpen((o) => !o)}
       >
         <Plus className="h-4 w-4" />
-        导入
+        {t("import.title")}
         <ChevronDown className="h-3.5 w-3.5 opacity-70" />
       </Button>
       {menuOpen && (
@@ -114,10 +116,10 @@ export function ImportVideoButton({
               <FileVideo className="mt-0.5 h-4 w-4 flex-none text-primary" />
               <span className="min-w-0">
                 <span className="block text-sm font-medium text-[var(--text-strong)]">
-                  上传本地视频
+                  {t("import.uploadLocal")}
                 </span>
                 <span className="block text-xs text-[var(--text-muted)]">
-                  从电脑选择 mp4 / mkv / mov…
+                  {t("import.uploadHint")}
                 </span>
               </span>
             </button>
@@ -133,10 +135,10 @@ export function ImportVideoButton({
                 <FolderInput className="mt-0.5 h-4 w-4 flex-none text-primary" />
                 <span className="min-w-0">
                   <span className="block text-sm font-medium text-[var(--text-strong)]">
-                    导入整个文件夹
+                    {t("import.importFolder")}
                   </span>
                   <span className="block text-xs text-[var(--text-muted)]">
-                    批量导入一个文件夹里的所有视频
+                    {t("import.importFolderHint")}
                   </span>
                 </span>
               </button>
@@ -155,10 +157,10 @@ export function ImportVideoButton({
                   <Download className="mt-0.5 h-4 w-4 flex-none text-primary" />
                   <span className="min-w-0">
                     <span className="block text-sm font-medium text-[var(--text-strong)]">
-                      下载网络视频
+                      {t("import.downloadOnline")}
                     </span>
                     <span className="block text-xs text-[var(--text-muted)]">
-                      B 站 / 链接，可选清晰度与自带字幕
+                      {t("import.downloadOnlineHint")}
                     </span>
                   </span>
                 </button>
@@ -172,10 +174,10 @@ export function ImportVideoButton({
                   <ListVideo className="mt-0.5 h-4 w-4 flex-none text-primary" />
                   <span className="min-w-0">
                     <span className="block text-sm font-medium text-[var(--text-strong)]">
-                      导入播放列表 / 合集
+                      {t("import.importPlaylist")}
                     </span>
                     <span className="block text-xs text-[var(--text-muted)]">
-                      B 站合集·多 P / 播放列表，批量下载
+                      {t("import.importPlaylistHint")}
                     </span>
                   </span>
                 </button>
@@ -219,7 +221,7 @@ export function ImportVideoButton({
           className="absolute right-0 top-full z-20 mt-2 flex w-72 max-w-[calc(100vw-2rem)] items-start gap-2 rounded-lg bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)] shadow-[var(--shadow-pop)]"
         >
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" />
-          <span className="min-w-0 break-words">导入失败：{importError}</span>
+          <span className="min-w-0 break-words">{t("import.importFailed", { error: importError })}</span>
         </div>
       )}
     </div>

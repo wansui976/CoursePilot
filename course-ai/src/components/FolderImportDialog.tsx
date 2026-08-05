@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FolderInput } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,6 +19,13 @@ export function FolderImportDialog({
   onClose: () => void;
   onImported?: () => void;
 }) {
+  const { t } = useTranslation();
+  const restoreFocusRef = useRef<HTMLElement | null>(
+    typeof document !== "undefined" &&
+      document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<ReadonlySet<string>>(
     () => new Set(videos.map((v) => v.path)),
@@ -31,16 +40,6 @@ export function FolderImportDialog({
       onClose();
     },
   });
-
-  // Esc 关闭（导入中不关，避免打断批量写入）。
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !importBatch.isPending) onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [importBatch.isPending]);
 
   function toggle(path: string) {
     setSelected((prev) => {
@@ -60,27 +59,44 @@ export function FolderImportDialog({
   );
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={() => !importBatch.isPending && onClose()}
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open && !importBatch.isPending) onClose();
+      }}
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="folder-import-title"
-        className="flex max-h-[80vh] w-[460px] flex-col rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-5 shadow-[var(--shadow-pop)]"
-        onClick={(e) => e.stopPropagation()}
+      <Dialog.Overlay
+        data-testid="folder-import-overlay"
+        className="ca-dialog-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       >
-        <h2
-          id="folder-import-title"
+        <Dialog.Content
+          aria-modal="true"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            restoreFocusRef.current?.focus();
+          }}
+          onEscapeKeyDown={(event) => {
+            if (importBatch.isPending) event.preventDefault();
+          }}
+          onInteractOutside={(event) => {
+            if (importBatch.isPending) event.preventDefault();
+          }}
+          onPointerDownOutside={(event) => {
+            if (importBatch.isPending) event.preventDefault();
+          }}
+          className="flex max-h-[80vh] w-[460px] flex-col rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-5 shadow-[var(--shadow-pop)]"
+        >
+        <Dialog.Title
           className="mb-1 flex items-center gap-2 text-sm font-semibold text-[var(--text-strong)]"
         >
           <FolderInput className="h-4 w-4" />
-          导入文件夹视频
-        </h2>
-        <p className="mb-3 text-xs text-[var(--text-muted)]">
-          找到 {videos.length} 个视频，已导入过的会自动跳过。
-        </p>
+          {t("folderImport.title")}
+        </Dialog.Title>
+        <Dialog.Description
+          className="mb-3 text-xs text-[var(--text-muted)]"
+        >
+          {t("folderImport.found", { count: videos.length })}
+        </Dialog.Description>
 
         <div className="mb-2 flex items-center justify-between">
           <button
@@ -88,10 +104,10 @@ export function FolderImportDialog({
             onClick={toggleAll}
             className="ca-touch-44 text-xs text-primary hover:underline"
           >
-            {allSelected ? "全不选" : "全选"}
+            {allSelected ? t("folderImport.deselectAll") : t("folderImport.selectAll")}
           </button>
           <span className="text-xs text-[var(--text-muted)]">
-            已选 {selected.size} / {videos.length}
+            {t("folderImport.selected", { selected: selected.size, total: videos.length })}
           </span>
         </div>
 
@@ -101,7 +117,7 @@ export function FolderImportDialog({
               <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-[var(--surface-card-hover)]">
                 <input
                   type="checkbox"
-                  aria-label={`选择 ${v.name}`}
+                  aria-label={t("folderImport.selectItem", { name: v.name })}
                   checked={selected.has(v.path)}
                   onChange={() => toggle(v.path)}
                   className="ca-touch-44 h-4 w-4 flex-none accent-[var(--accent,#888)]"
@@ -125,17 +141,18 @@ export function FolderImportDialog({
             disabled={importBatch.isPending}
             onClick={onClose}
           >
-            取消
+            {t("folderImport.cancel")}
           </Button>
           <Button
             size="sm"
             disabled={selected.size === 0 || importBatch.isPending}
             onClick={() => importBatch.mutate(orderedPaths)}
           >
-            {importBatch.isPending ? "导入中…" : `导入 (${selected.size})`}
+            {importBatch.isPending ? t("folderImport.importing") : t("folderImport.importCount", { count: selected.size })}
           </Button>
         </div>
-      </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Overlay>
+    </Dialog.Root>
   );
 }

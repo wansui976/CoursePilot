@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
 
 /**
@@ -17,6 +18,7 @@ export function SlideImage({
   alt: string;
   className: string;
 }) {
+  const { t } = useTranslation();
   // 字节走 Query 缓存（staleTime: Infinity）：切 tab 重挂时不再逐张重新走 IPC。
   const { data, isError } = useQuery({
     queryKey: ["slide-image", videoId, imagePath],
@@ -43,10 +45,10 @@ export function SlideImage({
     return (
       <div
         role="img"
-        aria-label={`${alt} 加载失败`}
+        aria-label={t("slideImage.loadFailed", { alt })}
         className={`${className} grid place-items-center bg-[var(--status-err-bg)] text-xs text-[var(--status-err)]`}
       >
-        图片加载失败
+        {t("slideImage.loadFailedText")}
       </div>
     );
   }

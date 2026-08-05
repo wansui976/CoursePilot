@@ -1,6 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { PencilLine, X } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 
 const MIN_GOAL_MINUTES = 5;
@@ -72,6 +73,7 @@ export function DailyGoalDialog({
   value: number;
   onSave: (minutes: number) => void;
 }) {
+  const { t } = useTranslation();
   const maxGoalMinutes = Math.max(
     MAX_GOAL_MINUTES,
     Math.ceil(value / GOAL_STEP_MINUTES) * GOAL_STEP_MINUTES,
@@ -170,8 +172,8 @@ export function DailyGoalDialog({
         <button
           ref={triggerRef}
           type="button"
-          aria-label="编辑目标"
-          title="编辑目标"
+          aria-label={t("dailyGoal.editGoal")}
+          title={t("dailyGoal.editGoal")}
           className="ca-touch-44 grid h-7 w-7 flex-none cursor-pointer place-items-center rounded-md text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
         >
           <PencilLine className="h-3.5 w-3.5" />
@@ -191,13 +193,13 @@ export function DailyGoalDialog({
         >
           <div className="mb-3 flex items-center justify-between gap-3">
             <Dialog.Title className="text-sm font-semibold text-[var(--text-strong)]">
-              设置每日目标
+              {t("dailyGoal.setDailyGoal")}
             </Dialog.Title>
             <Dialog.Close asChild>
               <button
                 type="button"
-                aria-label="关闭"
-                title="关闭"
+                aria-label={t("dailyGoal.close")}
+                title={t("dailyGoal.close")}
                 className="ca-icon-btn grid flex-none cursor-pointer place-items-center text-[var(--text-muted)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               >
                 <X className="h-4 w-4" />
@@ -209,11 +211,11 @@ export function DailyGoalDialog({
             ref={dialRef}
             role="slider"
             tabIndex={0}
-            aria-label="每日学习目标"
+            aria-label={t("dailyGoal.dailyStudyGoal")}
             aria-valuemin={MIN_GOAL_MINUTES}
             aria-valuemax={maxGoalMinutes}
             aria-valuenow={draft}
-            aria-valuetext={`${draft} 分钟`}
+            aria-valuetext={t("dailyGoal.minutesValue", { value: draft })}
             onKeyDown={handleKeyDown}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
@@ -267,7 +269,7 @@ export function DailyGoalDialog({
               <span className="text-4xl font-semibold tabular-nums text-[var(--text-strong)]">
                 {draft}
               </span>
-              <span className="mt-1 text-xs text-[var(--text-muted)]">分钟</span>
+              <span className="mt-1 text-xs text-[var(--text-muted)]">{t("dailyGoal.minutes")}</span>
             </div>
             <span className="pointer-events-none absolute bottom-4 left-5 text-[10px] tabular-nums text-[var(--text-faint)]">
               {MIN_GOAL_MINUTES}
@@ -280,7 +282,7 @@ export function DailyGoalDialog({
           <div className="mt-3 flex justify-end gap-2">
             <Dialog.Close asChild>
               <Button type="button" size="sm" variant="outline">
-                取消
+                {t("dailyGoal.cancel")}
               </Button>
             </Dialog.Close>
             <Button
@@ -289,7 +291,7 @@ export function DailyGoalDialog({
               size="sm"
               onClick={save}
             >
-              保存
+              {t("dailyGoal.save")}
             </Button>
           </div>
         </Dialog.Content>

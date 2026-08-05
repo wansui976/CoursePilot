@@ -1,5 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { humanizeError } from "@/lib/errors";
@@ -9,8 +11,8 @@ import type { PlaylistInfo, Video } from "@/lib/types";
 
 type Step = "url" | "cookie" | "probing" | "confirm" | "importing" | "done";
 
-const QUALITY_PRESETS: { label: string; value: number | undefined }[] = [
-  { label: "最高", value: undefined },
+const QUALITY_PRESETS: { labelKey?: string; label: string; value: number | undefined }[] = [
+  { labelKey: "playlistImport.best", label: "最高", value: undefined },
   { label: "1080P", value: 1080 },
   { label: "720P", value: 720 },
   { label: "480P", value: 480 },
@@ -26,6 +28,13 @@ export function PlaylistImportDialog({
   onClose: () => void;
   onStartProcessing?: (video: Video) => void;
 }) {
+  const { t } = useTranslation();
+  const restoreFocusRef = useRef<HTMLElement | null>(
+    typeof document !== "undefined" &&
+      document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
   const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>("url");
   const [url, setUrl] = useState("");
@@ -53,7 +62,7 @@ export function PlaylistImportDialog({
     try {
       const r = await ipc.tools.probePlaylist(url.trim());
       if (r.episodes.length === 0) {
-        setError("这个链接里没有找到可导入的视频");
+        setError(t("playlistImport.noVideosFound"));
         setStep("url");
         return;
       }
@@ -161,48 +170,64 @@ export function PlaylistImportDialog({
     setStep("done");
   };
 
-  // Esc 关闭（导入进行中不关，避免误触中断）。
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && step !== "importing") onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [step, onClose]);
+  const closeBlocked =
+    preparing || step === "probing" || step === "importing";
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={() => step !== "importing" && onClose()}
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open && !closeBlocked) onClose();
+      }}
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="playlist-import-title"
-        className="flex max-h-[80vh] w-[460px] flex-col rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-5 shadow-[var(--shadow-pop)]"
-        onClick={(e) => e.stopPropagation()}
+      <Dialog.Overlay
+        data-testid="playlist-import-overlay"
+        className="ca-dialog-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       >
-        <h2 id="playlist-import-title" className="mb-3 flex-none text-sm font-semibold text-[var(--text-strong)]">
-          导入播放列表 / 合集
-        </h2>
+        <Dialog.Content
+          aria-modal="true"
+          aria-describedby={undefined}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            restoreFocusRef.current?.focus();
+          }}
+          onEscapeKeyDown={(event) => {
+            if (closeBlocked) event.preventDefault();
+          }}
+          onInteractOutside={(event) => {
+            if (closeBlocked) event.preventDefault();
+          }}
+          onPointerDownOutside={(event) => {
+            if (closeBlocked) event.preventDefault();
+          }}
+          className="flex max-h-[80vh] w-[460px] flex-col rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-5 shadow-[var(--shadow-pop)]"
+        >
+        <Dialog.Title className="mb-3 flex-none text-sm font-semibold text-[var(--text-strong)]">
+          {t("playlistImport.title")}
+        </Dialog.Title>
 
         {step === "url" && (
           <div className="space-y-3">
             <input
-              aria-label="播放列表链接"
+              aria-label={t("playlistImport.linkLabel")}
               autoFocus
               className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm outline-none focus:border-primary/70"
-              placeholder="B 站合集 / 多 P / 播放列表链接…"
+              placeholder={t("playlistImport.linkPlaceholder")}
               value={url}
               onChange={(e) => setUrl(e.target.value)}
             />
             {error && <p className="text-xs text-[var(--status-err)]">{humanizeError(error)}</p>}
             <div className="flex justify-end gap-2">
-              <Button size="sm" variant="outline" onClick={onClose}>
-                取消
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={closeBlocked}
+                onClick={onClose}
+              >
+                {t("playlistImport.cancel")}
               </Button>
               <Button size="sm" disabled={!url.trim() || preparing} onClick={startUrl}>
-                {preparing ? "检查中…" : "枚举各集"}
+                {preparing ? t("playlistImport.checking") : t("playlistImport.enumerate")}
               </Button>
             </div>
           </div>
@@ -211,18 +236,14 @@ export function PlaylistImportDialog({
         {step === "cookie" && (
           <div className="space-y-3 text-sm text-[var(--text-muted)]">
             {cookieReason === "expired" ? (
-              <p>
-                B站登录态可能已失效（<b>HTTP 412</b> 等），需要重新导出 cookies.txt 再导入。
-              </p>
+              <p dangerouslySetInnerHTML={{ __html: t("playlistImport.cookieExpired") }} />
             ) : (
-              <p>合集枚举与高清晰度通常需要登录态，请先导入 cookies.txt。</p>
+              <p>{t("playlistImport.cookieNeeded")}</p>
             )}
             <ol className="list-decimal space-y-1 pl-5 text-xs leading-relaxed">
-              <li>
-                Chrome 安装扩展 <b className="text-[var(--text-strong)]">Get cookies.txt LOCALLY</b>
-              </li>
-              <li>登录 bilibili.com，点扩展图标导出 cookies.txt</li>
-              <li>回到这里选择刚导出的 cookies.txt</li>
+              <li dangerouslySetInnerHTML={{ __html: t("playlistImport.chromeExtension") }} />
+              <li>{t("playlistImport.cookieStep1")}</li>
+              <li>{t("playlistImport.cookieStep2")}</li>
             </ol>
             {error && (
               <p className="whitespace-pre-wrap break-words text-xs text-[var(--status-err)]">
@@ -230,11 +251,16 @@ export function PlaylistImportDialog({
               </p>
             )}
             <div className="flex justify-end gap-2">
-              <Button size="sm" variant="outline" onClick={() => setStep("url")}>
-                返回
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={closeBlocked}
+                onClick={() => setStep("url")}
+              >
+                {t("playlistImport.back")}
               </Button>
               <Button size="sm" disabled={preparing} onClick={pickCookie}>
-                {preparing ? "导入中…" : "选择 cookies.txt"}
+                {preparing ? t("playlistImport.importing") : t("playlistImport.selectCookies")}
               </Button>
             </div>
           </div>
@@ -242,7 +268,7 @@ export function PlaylistImportDialog({
 
         {step === "probing" && (
           <p className="py-6 text-center text-sm text-[var(--text-muted)]">
-            正在枚举各集（读取标题，较大合集可能需要一会儿）…
+            {t("playlistImport.enumerating")}
           </p>
         )}
 
@@ -251,10 +277,10 @@ export function PlaylistImportDialog({
             <p className="mb-2 flex-none truncate text-xs text-[var(--text-faint)]">{info.title}</p>
             <div className="mb-2 flex flex-none items-center justify-between">
               <Button size="sm" variant="outline" onClick={toggleAll}>
-                {allSelected ? "全不选" : "全选"}
+                {allSelected ? t("playlistImport.deselectAll") : t("playlistImport.selectAll")}
               </Button>
               <span className="text-xs text-[var(--text-muted)]">
-                已选 {selected.size} / {info.episodes.length}
+                {t("playlistImport.selected", { selected: selected.size, total: info.episodes.length })}
               </span>
             </div>
             {/* 整个清单一条细滚动条：长标题不截断，横向滑动时各行一起移动。 */}
@@ -286,7 +312,7 @@ export function PlaylistImportDialog({
 
             <div className="flex-none space-y-2">
               <div>
-                <div className="mb-1 text-xs font-medium text-[var(--text-muted)]">清晰度上限</div>
+                <div className="mb-1 text-xs font-medium text-[var(--text-muted)]">{t("playlistImport.qualityLimit")}</div>
                 <div className="flex flex-wrap gap-1.5">
                   {QUALITY_PRESETS.map((q) => (
                     <button
@@ -294,7 +320,7 @@ export function PlaylistImportDialog({
                       onClick={() => setMaxHeight(q.value)}
                       className={`rounded px-2 py-1 text-xs ${maxHeight === q.value ? "bg-primary/20 text-primary" : "bg-[var(--surface-card-hover)]"}`}
                     >
-                      {q.label}
+                      {q.labelKey ? t(q.labelKey) : q.label}
                     </button>
                   ))}
                 </div>
@@ -306,7 +332,7 @@ export function PlaylistImportDialog({
                   onChange={(e) => setUseSub(e.target.checked)}
                   className="h-3.5 w-3.5 accent-[var(--accent-text)]"
                 />
-                优先自带中文字幕（没有则语音转写）
+                {t("playlistImport.preferSubtitle")}
               </label>
               {useSub && (
                 <label className="flex items-center gap-2 pl-5 text-xs text-[var(--text-normal)]">
@@ -316,16 +342,16 @@ export function PlaylistImportDialog({
                     onChange={(e) => setAutocorrect(e.target.checked)}
                     className="h-3.5 w-3.5 accent-[var(--accent-text)]"
                   />
-                  下载后用 AI 纠错字幕
+                  {t("playlistImport.aiCorrection")}
                 </label>
               )}
               {error && <p className="text-xs text-[var(--status-err)]">{humanizeError(error)}</p>}
               <div className="flex justify-end gap-2 pt-1">
                 <Button size="sm" variant="outline" onClick={onClose}>
-                  取消
+                  {t("playlistImport.cancel")}
                 </Button>
                 <Button size="sm" disabled={selected.size === 0} onClick={runImport}>
-                  导入 {selected.size} 个
+                  {t("playlistImport.importCount", { count: selected.size })}
                 </Button>
               </div>
             </div>
@@ -335,7 +361,7 @@ export function PlaylistImportDialog({
         {step === "importing" && progress && (
           <div className="space-y-3 py-4">
             <p className="text-center text-sm text-[var(--text-muted)]">
-              正在导入 {progress.done} / {progress.total}…
+              {t("playlistImport.progress", { done: progress.done, total: progress.total })}
             </p>
             <p className="truncate text-center text-xs text-[var(--text-faint)]">{progress.title}</p>
             <div className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-card-active)]">
@@ -345,7 +371,7 @@ export function PlaylistImportDialog({
               />
             </div>
             <p className="text-center text-xs text-[var(--text-faint)]">
-              下载中请勿关闭；失败的集不会中断其余项。
+              {t("playlistImport.progressNote")}
             </p>
           </div>
         )}
@@ -353,8 +379,8 @@ export function PlaylistImportDialog({
         {step === "done" && results && (
           <div className="space-y-3">
             <p className="text-sm text-[var(--text-strong)]">
-              导入完成：成功 {results.ok} 个
-              {results.failures.length > 0 && `，失败 ${results.failures.length} 个`}。
+              {t("playlistImport.resultOk", { ok: results.ok })}
+              {results.failures.length > 0 && t("playlistImport.resultFail", { fail: results.failures.length })}
             </p>
             {results.failures.length > 0 && (
               <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-[var(--border-subtle)] p-2 text-xs">
@@ -367,12 +393,13 @@ export function PlaylistImportDialog({
             )}
             <div className="flex justify-end">
               <Button size="sm" onClick={onClose}>
-                完成
+                {t("playlistImport.done")}
               </Button>
             </div>
           </div>
         )}
-      </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Overlay>
+    </Dialog.Root>
   );
 }

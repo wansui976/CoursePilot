@@ -1,6 +1,8 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FolderImportDialog } from "./FolderImportDialog";
 
@@ -71,5 +73,63 @@ describe("FolderImportDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(onClose).toHaveBeenCalled();
     expect(addLocalBatch).not.toHaveBeenCalled();
+  });
+
+  it("restores focus to the opener after Escape closes the modal", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            打开文件夹导入
+          </button>
+          {open && (
+            <QueryClientProvider
+              client={new QueryClient({
+                defaultOptions: { mutations: { retry: false } },
+              })}
+            >
+              <FolderImportDialog
+                courseId="c1"
+                videos={videos}
+                onClose={() => setOpen(false)}
+              />
+            </QueryClientProvider>
+          )}
+        </>
+      );
+    }
+
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "打开文件夹导入" });
+    opener.focus();
+    fireEvent.click(opener);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "全不选" })).toHaveFocus(),
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(opener).toHaveFocus());
+  });
+
+  it("cannot close with Escape or an outside pointer while importing", async () => {
+    let finishImport!: (videos: never[]) => void;
+    const importing = new Promise<never[]>((resolve) => {
+      finishImport = resolve;
+    });
+    addLocalBatch.mockReturnValue(importing);
+    const { onClose } = renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "导入 (3)" }));
+    await screen.findByRole("button", { name: "导入中…" });
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.pointerDown(screen.getByTestId("folder-import-overlay"));
+
+    expect(onClose).not.toHaveBeenCalled();
+
+    finishImport([]);
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 });

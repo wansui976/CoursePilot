@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,16 +21,16 @@ const { mockIpc } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 
-function renderDialog(onStartProcessing = vi.fn()) {
+function renderDialog(onStartProcessing = vi.fn(), onClose = vi.fn()) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
     <QueryClientProvider client={qc}>
-      <PlaylistImportDialog courseId="c1" onClose={vi.fn()} onStartProcessing={onStartProcessing} />
+      <PlaylistImportDialog courseId="c1" onClose={onClose} onStartProcessing={onStartProcessing} />
     </QueryClientProvider>,
   );
-  return { onStartProcessing };
+  return { onClose, onStartProcessing };
 }
 
 describe("PlaylistImportDialog", () => {
@@ -131,5 +132,48 @@ describe("PlaylistImportDialog", () => {
       true,
     );
     expect(onStartProcessing).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses modal semantics, focuses the URL field, and closes on an outside pointer", async () => {
+    const { onClose } = renderDialog();
+    const dialog = screen.getByRole("dialog", {
+      name: "导入播放列表 / 合集",
+    });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    await waitFor(() =>
+      expect(screen.getByLabelText("播放列表链接")).toHaveFocus(),
+    );
+
+    fireEvent.pointerDown(screen.getByTestId("playlist-import-overlay"));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  });
+
+  it("cannot close with Escape or an outside pointer while importing", async () => {
+    let finishImport!: (video: { id: string }) => void;
+    const importing = new Promise<{ id: string }>((resolve) => {
+      finishImport = resolve;
+    });
+    mockIpc.tools.probePlaylist.mockResolvedValue({
+      title: "合集",
+      episodes: [{ url: "u1", title: "第一讲", duration_ms: null }],
+    });
+    mockIpc.tools.importBilibili.mockReturnValue(importing);
+    const { onClose } = renderDialog();
+
+    fireEvent.change(screen.getByLabelText("播放列表链接"), {
+      target: { value: "u" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "枚举各集" }));
+    await screen.findByText("合集");
+    fireEvent.click(screen.getByRole("button", { name: "导入 1 个" }));
+    await screen.findByText(/正在导入 0 \/ 1/);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.pointerDown(screen.getByTestId("playlist-import-overlay"));
+    expect(onClose).not.toHaveBeenCalled();
+
+    finishImport({ id: "v1" });
+    await screen.findByText(/导入完成：成功 1 个/);
   });
 });

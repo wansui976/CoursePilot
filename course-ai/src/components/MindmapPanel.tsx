@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Maximize2, Share2, ZoomIn, ZoomOut } from "lucide-react";
 import { Transformer } from "markmap-lib";
@@ -17,6 +18,7 @@ import {
 const transformer = new Transformer();
 
 export function MindmapPanel({ videoId }: { videoId: string }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const theme = useTheme((s) => s.effective);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -58,9 +60,9 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
         <div className="absolute right-2 top-2 z-10 flex flex-col gap-1">
           {(
             [
-              [ZoomIn, "放大", () => zoom(1.25)],
-              [ZoomOut, "缩小", () => zoom(0.8)],
-              [Maximize2, "适应窗口", () => void mmRef.current?.fit()],
+              [ZoomIn, t("mindmap.zoomIn"), () => zoom(1.25)],
+              [ZoomOut, t("mindmap.zoomOut"), () => zoom(0.8)],
+              [Maximize2, t("mindmap.fitWindow"), () => void mmRef.current?.fit()],
             ] as const
           ).map(([Icon, label, onClick]) => (
             <button
@@ -81,15 +83,15 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
         </div>
       )}
       {isLoading && (
-        <div className="min-h-0 flex-1 p-4" role="status" aria-label="加载中…">
+        <div className="min-h-0 flex-1 p-4" role="status" aria-label={t("mindmap.loading")}>
           <Skeleton className="h-full min-h-[200px] w-full" />
         </div>
       )}
       {!isLoading && !md && (
         <PanelEmptyState
           icon={<Share2 className="h-7 w-7" />}
-          title="还没有脑图"
-          description="字幕就绪后会自动生成，也可以点右下角手动生成。"
+          title={t("mindmap.emptyTitle")}
+          description={t("mindmap.emptyDescription")}
         />
       )}
       {/* svg 常驻，没图时只是藏起来。它一旦卸载再挂回来就是个新节点，而 Markmap 实例

@@ -1,8 +1,9 @@
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 
-// 流水线顺序与中文标签（与后端 jobs::STAGES 对应）。
+// 流水线顺序（与后端 jobs::STAGES 对应）。
 const STAGE_ORDER = [
   "audio",
   "asr",
@@ -14,23 +15,23 @@ const STAGE_ORDER = [
   "quiz",
   "mindmap",
 ];
-const STAGE_LABEL: Record<string, string> = {
-  audio: "提取音频",
-  asr: "语音识别",
-  slides: "提取课件",
-  slides_ocr: "识别课件文字",
-  chapters: "生成章节",
-  summary: "生成摘要",
-  notes: "生成笔记",
-  quiz: "生成出题",
-  mindmap: "生成脑图",
+const STAGE_KEYS: Record<string, string> = {
+  audio: "job.audio",
+  asr: "job.asr",
+  slides: "job.slides",
+  slides_ocr: "job.slides_ocr",
+  chapters: "job.chapters",
+  summary: "job.summary",
+  notes: "job.notes",
+  quiz: "job.quiz",
+  mindmap: "job.mindmap",
 };
-const STATUS_LABEL: Record<string, string> = {
-  pending: "待处理",
-  running: "进行中",
-  done: "完成",
-  failed: "失败",
-  canceled: "已跳过",
+const STATUS_KEYS: Record<string, string> = {
+  pending: "job.pending",
+  running: "job.running",
+  done: "job.done",
+  failed: "job.failed",
+  canceled: "job.canceled",
 };
 
 function stageRank(stage: string): number {
@@ -41,6 +42,7 @@ function stageRank(stage: string): number {
 const EMPTY_JOBS: Record<string, JobUpdate> = {};
 
 export function JobProgress({ videoId }: { videoId: string }) {
+  const { t } = useTranslation();
   const jobs = useJobs((s) => s.byVideo[videoId] ?? EMPTY_JOBS);
   const setOne = useJobs((s) => s.setOne);
 
@@ -62,7 +64,7 @@ export function JobProgress({ videoId }: { videoId: string }) {
   const list = Object.values(jobs).sort(
     (a, b) => stageRank(a.stage) - stageRank(b.stage),
   );
-  if (list.length === 0) return <p className="text-xs text-[var(--text-faint)]">未开始</p>;
+  if (list.length === 0) return <p className="text-xs text-[var(--text-faint)]">{t("job.notStarted")}</p>;
 
   const hasFailed = list.some((job) => job.status === "failed");
 
@@ -74,18 +76,18 @@ export function JobProgress({ videoId }: { videoId: string }) {
             className="rounded border border-[var(--border-subtle)] px-2 py-0.5 text-xs text-primary hover:bg-[var(--surface-card)]"
             onClick={() => void ipc.pipeline.process(videoId)}
           >
-            重试
+            {t("job.retry")}
           </button>
         </li>
       )}
       {list.map((job) => (
         <li key={job.stage} className="text-xs">
           <div className="flex justify-between">
-            <span>{STAGE_LABEL[job.stage] ?? job.stage}</span>
+            <span>{STAGE_KEYS[job.stage] ? t(STAGE_KEYS[job.stage]) : job.stage}</span>
             <span
               className={job.status === "failed" ? "text-[var(--status-err)]" : "text-[var(--text-muted)]"}
             >
-              {STATUS_LABEL[job.status] ?? job.status} {Math.floor(job.progress * 100)}%
+              {STATUS_KEYS[job.status] ? t(STATUS_KEYS[job.status]) : job.status} {Math.floor(job.progress * 100)}%
             </span>
           </div>
           <div className="h-1 overflow-hidden rounded bg-[var(--surface-card-hover)]">

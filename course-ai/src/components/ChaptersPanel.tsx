@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListTree } from "lucide-react";
 import { ipc } from "@/lib/ipc";
@@ -13,6 +14,7 @@ import {
 } from "@/lib/useStaleArtifacts";
 
 export function ChaptersPanel({ videoId }: { videoId: string }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const requestSeek = usePlayer((s) => s.requestSeek);
   const { data: chapters = [], isLoading } = useQuery({
@@ -30,7 +32,7 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 px-3 pt-2 text-sm text-[var(--text-muted)]">重点章节</div>
+      <div className="shrink-0 px-3 pt-2 text-sm text-[var(--text-muted)]">{t("chapters.keyChapters")}</div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-12 pt-1">
         {generate.isError && (
           <ErrorNote
@@ -44,8 +46,8 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
         ) : chapters.length === 0 ? (
           <PanelEmptyState
             icon={<ListTree className="h-7 w-7" />}
-            title="还没有章节"
-            description="字幕就绪后会自动生成，也可以点右下角手动生成。"
+            title={t("chapters.emptyTitle")}
+            description={t("chapters.emptyDescription")}
           />
         ) : null}
         {chapters.map((c) => (

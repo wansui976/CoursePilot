@@ -1,3 +1,4 @@
+import "@/i18n";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JobProgress } from "./JobProgress";

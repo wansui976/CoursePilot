@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { TFunction } from "i18next";
 import { Camera, Images, ScanText, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PanelEmptyState } from "@/components/ui/empty-state";
@@ -20,13 +22,13 @@ import { usePlayer } from "@/stores/player";
  * 提取进度的按钮文案。采样阶段是"通读整段视频"，一节 90 分钟的课要好几分钟，
  * 只写「提取中…」等于让人干等；拿不到时长时退化成不确定态。
  */
-function progressLabel(progress: SlidesProgress | null): string {
-  if (!progress) return "提取中…";
-  if (progress.phase === "capture") return `截图 ${progress.done}/${progress.total}`;
+function progressLabel(progress: SlidesProgress | null, t: TFunction): string {
+  if (!progress) return t("slides.extracting");
+  if (progress.phase === "capture") return t("slides.captureProgress", { done: progress.done, total: progress.total });
   if (progress.total > 0) {
-    return `采样 ${Math.min(99, Math.round((progress.done / progress.total) * 100))}%`;
+    return t("slides.samplingPercent", { percent: Math.min(99, Math.round((progress.done / progress.total) * 100)) });
   }
-  return "采样中…";
+  return t("slides.sampling");
 }
 
 /**
@@ -35,17 +37,22 @@ function progressLabel(progress: SlidesProgress | null): string {
  * 三件事必须分得开：中途叫停、部分失败、正常跑完。原来只有一句「已识别 N 页」，
  * 按下停止是它，额度耗尽后 90 页全挂也是它——用户没有任何线索。
  */
-function ocrFeedbackText(outcome: SlidesOcrOutcome): string {
-  const done = `已识别 ${outcome.recognized} 页`;
+function ocrFeedbackText(outcome: SlidesOcrOutcome, t: TFunction): string {
+  if (outcome.canceled) return t("slides.stoppedRecognized", { count: outcome.recognized });
+  if (outcome.stoppedEarly) {
+    const remaining = Math.max(0, outcome.total - outcome.attempted);
+    const reason = outcome.error ? `：${humanizeError(outcome.error)}` : "";
+    return t("slides.ocrPartialStop", { attempted: outcome.attempted, total: outcome.total, remaining, reason });
+  }
   if (outcome.failed > 0) {
     const reason = outcome.error ? `：${humanizeError(outcome.error)}` : "";
-    return `${done}，${outcome.failed} 页失败${reason}`;
+    return t("slides.ocrPartialFail", { recognized: outcome.recognized, failed: outcome.failed, reason });
   }
-  if (outcome.canceled) return `已停止，${done}`;
-  return outcome.recognized > 0 ? done : "识别完成，没有识别到可用文字";
+  return outcome.recognized > 0 ? t("slides.recognized", { count: outcome.recognized }) : t("slides.ocrNoText");
 }
 
 export function SlidesPanel({ videoId }: { videoId: string }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const requestSeek = usePlayer((s) => s.requestSeek);
   // 不订阅 currentMs（避免播放时每秒 4 次重渲染）；点「截图/OCR」时按需读取当前进度。
@@ -146,12 +153,12 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
                   const requestId = pagesOcrRequest.current;
                   if (requestId) void ipc.slides.cancelOcr(requestId);
                 }}
-                title="停止识别（已认出文字的页留着，下次接着认）"
+                title={t("slides.stopOcrTitle")}
               >
                 <Square className="h-3 w-3" />
                 {pagesOcrProgress
-                  ? `识别 ${pagesOcrProgress.done}/${pagesOcrProgress.total}`
-                  : "识别中…"}
+                  ? t("slides.ocrProgress", { done: pagesOcrProgress.done, total: pagesOcrProgress.total })
+                  : t("slides.ocrBusy")}
               </Button>
             ) : (
               <Button
@@ -160,12 +167,12 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
                 onClick={(event) => pagesOcr.mutate(event.shiftKey)}
                 title={
                   pending === 0
-                    ? "所有页都认过了。按住 Shift 点可全部重认（换了 OCR 引擎时用）"
-                    : `识别课件页上的文字（还有 ${pending} 页没认）。按住 Shift 点可全部重认`
+                    ? t("slides.allRecognized")
+                    : t("slides.ocrPending", { count: pending })
                 }
               >
                 <ScanText className="h-3.5 w-3.5" />
-                {pending === 0 ? "重认文字" : "识别文字"}
+                {pending === 0 ? t("slides.reRecognize") : t("slides.recognizeText")}
               </Button>
             ))}
           <Button
@@ -173,20 +180,20 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
             variant="ghost"
             disabled={ocr.isPending}
             onClick={() => ocr.mutate()}
-            title="对当前帧整屏 OCR（引擎在设置里选择：本地 OCR 或阿里云 OCR）"
+            title={t("slides.screenshotOcrTitle")}
           >
             <ScanText className="h-3.5 w-3.5" />
-            {ocr.isPending ? "识别中…" : "截图OCR"}
+            {ocr.isPending ? t("slides.screenshotOcrBusy") : t("slides.screenshotOcr")}
           </Button>
           <Button
             size="sm"
             variant="ghost"
             disabled={capture.isPending}
             onClick={() => capture.mutate()}
-            title="把当前帧存为截图"
+            title={t("slides.screenshotTitle")}
           >
             <Camera className="h-3.5 w-3.5" />
-            {capture.isPending ? "截图中…" : "截图"}
+            {capture.isPending ? t("slides.screenshotBusy") : t("slides.screenshot")}
           </Button>
           {extract.isPending && (
             <Button
@@ -196,24 +203,24 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
                 const requestId = extractRequest.current;
                 if (requestId) void ipc.slides.cancelExtract(requestId);
               }}
-              title="停止提取（库里已有的课件页不会被清掉）"
+              title={t("slides.stopExtractTitle")}
             >
               <Square className="h-3 w-3" />
-              停止
+              {t("slides.stopExtract")}
             </Button>
           )}
           <Button
             size="sm"
             disabled={extract.isPending}
             onClick={() => extract.mutate()}
-            title="按画面变化自动识别换页（灵敏度在设置里调）"
+            title={t("slides.extractTitle")}
           >
             <Images className="h-3.5 w-3.5" />
             {extract.isPending
-              ? progressLabel(progress)
+              ? progressLabel(progress, t)
               : slides.length
-                ? "重新提取"
-                : "提取课件"}
+                ? t("slides.reExtract")
+                : t("slides.extract")}
           </Button>
         </div>
       </div>
@@ -231,12 +238,14 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
         <div
           role="status"
           className={`mx-3 mb-2 flex-none rounded-md px-3 py-2 text-xs ${
-            pagesOcrFeedback.failed > 0
+            pagesOcrFeedback.failed > 0 ||
+            pagesOcrFeedback.canceled ||
+            pagesOcrFeedback.stoppedEarly
               ? "bg-[var(--status-warn-bg)] text-[var(--status-warn)]"
               : "bg-[var(--status-ok-bg)] text-[var(--status-ok)]"
           }`}
         >
-          {ocrFeedbackText(pagesOcrFeedback)}
+          {ocrFeedbackText(pagesOcrFeedback, t)}
         </div>
       )}
       {extract.isError && (
@@ -278,16 +287,16 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
         <div className="flex-none border-b border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-xs">
           <div className="mb-1 flex items-center justify-between">
             <span className="flex items-center gap-2 font-medium text-[var(--text-muted)]">
-              OCR 结果（点击复制）
+              {t("slides.ocrResultTitle")}
               {copied && (
                 <span className="inline-flex items-center rounded-full bg-[var(--status-ok-bg)] px-1.5 py-0.5 font-medium text-[var(--status-ok)]">
-                  已复制
+                  {t("slides.copied")}
                 </span>
               )}
             </span>
             <button
-              aria-label="关闭 OCR 结果"
-              title="关闭"
+              aria-label={t("slides.closeOcr")}
+              title={t("slides.close")}
               onClick={() => ocr.reset()}
               className="ca-touch-44 ca-workbench-touch grid h-9 w-9 place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
             >
@@ -298,7 +307,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
             className="block max-h-40 w-full overflow-y-auto whitespace-pre-wrap text-left text-[var(--text-normal)] hover:text-[var(--text-strong)]"
             onClick={() => void copyOcrResult()}
           >
-            {ocr.data || "（未识别到文字）"}
+            {ocr.data || t("slides.noOcrText")}
           </button>
         </div>
       )}
@@ -307,8 +316,8 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
         {slidesQuery.isError ? null : slides.length === 0 ? (
           <PanelEmptyState
             icon={<Images className="h-7 w-7" />}
-            title="还没有课件页"
-            description="点右上角「提取课件」按画面变化自动识别换页，或用「截图」「截图 OCR」单独抓取当前帧。"
+            title={t("slides.emptyTitle")}
+            description={t("slides.emptyDescription")}
           />
         ) : (
           <div className="grid grid-cols-2 gap-2.5">
@@ -338,7 +347,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
         {shots.length > 0 && (
           <div className="mt-5">
             <div className="mb-2 text-xs font-medium text-[var(--text-muted)]">
-              我的截图
+              {t("slides.myScreenshots")}
             </div>
             <div className="flex gap-2 overflow-x-auto pb-1">
               {shots.map((sh) => (

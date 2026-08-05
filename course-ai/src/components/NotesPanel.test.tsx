@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,23 +21,27 @@ const { mockIpc, editorCapture } = vi.hoisted(() => ({
     },
   },
   editorCapture: (() => {
-    // 稳定的 spy：mock 的 useEditor 每次渲染都会被调用，每次新建一个 vi.fn()
-    // 就断言不到累计调用。
-    //
-    // 它还要和真的 tiptap 3 一致：setContent **默认会发 update 事件**（2.x 是默认
-    // 不发，升级时默认值反过来了）。原来这个替身是个什么都不做的空函数，于是
-    // 「装载内容顺手触发了一次自动保存」这类问题在测试里根本看不见——替身把被测的
-    // 那条因果关系整个抹掉了。
+    // 这个替身要和真的 tiptap 3 一致：setContent **默认会发 update 事件**
+    // （2.x 是默认不发，升级时默认值反过来了）。原来的替身是个什么都不做的空函数，
+    // 于是「装载内容顺手触发了一次自动保存」这类问题在测试里根本看不见——
+    // 替身把被测的那条因果关系整个抹掉了。
     const capture: {
       onUpdate?: (p: { editor: unknown }) => void;
       setContent: ReturnType<typeof vi.fn>;
-    } = { onUpdate: undefined, setContent: vi.fn() };
+      editor: unknown;
+    } = {
+      onUpdate: undefined,
+      setContent: vi.fn(),
+      editor: undefined,
+    };
     capture.setContent = vi.fn((_content: unknown, options?: { emitUpdate?: boolean }) => {
       if (options?.emitUpdate === false) return;
-      capture.onUpdate?.({
-        editor: { getJSON: () => ({ type: "doc", content: [{ type: "paragraph" }] }) },
-      });
+      capture.onUpdate?.({ editor: capture.editor });
     });
+    capture.editor = {
+      commands: { setContent: capture.setContent },
+      getJSON: () => ({ type: "doc", content: [{ type: "paragraph" }] }),
+    };
     return capture;
   })(),
 }));
@@ -56,12 +61,7 @@ vi.mock("@tiptap/react", () => ({
   EditorContent: () => <div>笔记正文</div>,
   useEditor: (opts: { onUpdate?: (p: { editor: unknown }) => void }) => {
     editorCapture.onUpdate = opts?.onUpdate;
-    return {
-      commands: {
-        setContent: editorCapture.setContent,
-      },
-      getJSON: () => ({ type: "doc", content: [{ type: "paragraph" }] }),
-    };
+    return editorCapture.editor;
   },
 }));
 
@@ -177,17 +177,15 @@ describe("NotesPanel", () => {
     expect(secondScroller.scrollTop).toBe(0);
   });
 
-  it("marks the active inner view button with aria-pressed", async () => {
-    renderNotesPanel("video-1", "aria-pressed");
-    const notesBtn = await screen.findByRole("button", { name: "笔记" });
-    expect(notesBtn).toHaveAttribute("aria-pressed", "true");
-    const quizBtn = screen.getByRole("button", { name: "出题" });
-    expect(quizBtn).toHaveAttribute("aria-pressed", "false");
+  it("does not repeat the workbench navigation inside the notes panel", async () => {
+    renderNotesPanel("video-1", "flat-navigation");
+    await screen.findByText("笔记正文");
 
-    fireEvent.click(quizBtn);
-
-    expect(quizBtn).toHaveAttribute("aria-pressed", "true");
-    expect(notesBtn).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("group", { name: "学习工具" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "出题" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "脑图" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "提问" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();
   });
 
   it("flushes the pending note save on unmount (no data loss in the debounce window)", () => {
@@ -242,12 +240,11 @@ describe("NotesPanel", () => {
   });
 
   it("shows autosave failures and retries the retained document", async () => {
-    // Keep the query pending so the intentionally minimal editor mock is not recreated mid-debounce.
-    mockIpc.ai.getNotes.mockReturnValue(new Promise(() => {}));
     mockIpc.ai.saveNotes
       .mockRejectedValueOnce(new Error("save failed"))
       .mockResolvedValueOnce(undefined);
     renderNotesPanel("video-save-error", "save-error");
+    await screen.findByText("笔记正文");
     act(() => {
       editorCapture.onUpdate?.({
         editor: {
@@ -256,12 +253,41 @@ describe("NotesPanel", () => {
       });
     });
 
+    const unsaved = screen.getByText("未保存");
+    expect(unsaved).toHaveAttribute("aria-live", "polite");
+
     expect(await screen.findByRole("alert", {}, { timeout: 2_000 })).toHaveTextContent(
       "save failed",
     );
+    expect(screen.getByText("保存失败")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /重试/ }));
+    expect(screen.getByText("保存中")).toBeInTheDocument();
     await waitFor(() => expect(mockIpc.ai.saveNotes).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.getByText("已保存")).toBeInTheDocument();
+  });
+
+  it("reports an unmount flush failure and restores it for that video", async () => {
+    mockIpc.ai.saveNotes.mockRejectedValue(new Error("flush failed"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { unmount } = renderNotesPanel("video-flush-error", "flush-error");
+    await screen.findByText("笔记正文");
+    act(() => {
+      editorCapture.onUpdate?.({ editor: editorCapture.editor });
+    });
+
+    unmount();
+    await waitFor(() =>
+      expect(consoleError).toHaveBeenCalledWith(
+        "Failed to flush notes for video video-flush-error",
+        expect.any(Error),
+      ),
+    );
+
+    renderNotesPanel("video-flush-error", "flush-error-remount");
+    expect(await screen.findByText("保存失败")).toHaveAttribute("aria-live", "polite");
+    expect(await screen.findByRole("alert")).toHaveTextContent("flush failed");
+    consoleError.mockRestore();
   });
 
   it("does not expose a blank editor when loading existing notes fails", async () => {

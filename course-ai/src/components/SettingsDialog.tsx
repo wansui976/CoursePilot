@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import {
   AudioLines,
   Bell,
@@ -40,6 +41,7 @@ import { createSettingsWriter } from "@/lib/settingsWriteQueue";
 import { Switch } from "@/components/ui/switch";
 import { WhisperModelsPanel } from "./WhisperModelsPanel";
 import { LlmSettingsPanel } from "./LlmSettingsPanel";
+import { DatabaseBackupAction } from "./DatabaseBackupAction";
 
 const FIELD =
   "w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] outline-none transition placeholder:text-[var(--text-faint)]";
@@ -83,22 +85,22 @@ type SettingsCategory =
 
 const CATEGORY_META: Record<
   SettingsCategory,
-  { label: string; icon: ReactNode; tint: string }
+  { i18nKey: string; icon: ReactNode; tint: string }
 > = {
-  appearance: { label: "外观", icon: <Palette className="h-3.5 w-3.5" />, tint: "#e0568f" },
-  study: { label: "学习", icon: <Bell className="h-3.5 w-3.5" />, tint: "#0ea5e9" },
-  shortcuts: { label: "快捷键", icon: <Keyboard className="h-3.5 w-3.5" />, tint: "#10b981" },
-  storage: { label: "存储", icon: <FolderCog className="h-3.5 w-3.5" />, tint: "#8e8e93" },
-  asr: { label: "语音识别", icon: <AudioLines className="h-3.5 w-3.5" />, tint: "#2f6cea" },
-  llm: { label: "大模型", icon: <Sparkles className="h-3.5 w-3.5" />, tint: "#a855f7" },
-  courseware: { label: "课件 / OCR", icon: <ScanText className="h-3.5 w-3.5" />, tint: "#f59e0b" },
-  dev: { label: "开发者", icon: <Terminal className="h-3.5 w-3.5" />, tint: "#64748b" },
+  appearance: { i18nKey: "settings.categories.appearance", icon: <Palette className="h-3.5 w-3.5" />, tint: "#e0568f" },
+  study: { i18nKey: "settings.categories.study", icon: <Bell className="h-3.5 w-3.5" />, tint: "#0ea5e9" },
+  shortcuts: { i18nKey: "settings.categories.shortcuts", icon: <Keyboard className="h-3.5 w-3.5" />, tint: "#10b981" },
+  storage: { i18nKey: "settings.categories.storage", icon: <FolderCog className="h-3.5 w-3.5" />, tint: "#8e8e93" },
+  asr: { i18nKey: "settings.categories.asr", icon: <AudioLines className="h-3.5 w-3.5" />, tint: "#2f6cea" },
+  llm: { i18nKey: "settings.categories.llm", icon: <Sparkles className="h-3.5 w-3.5" />, tint: "#a855f7" },
+  courseware: { i18nKey: "settings.categories.courseware", icon: <ScanText className="h-3.5 w-3.5" />, tint: "#f59e0b" },
+  dev: { i18nKey: "settings.categories.dev", icon: <Terminal className="h-3.5 w-3.5" />, tint: "#64748b" },
 };
 
-const THEME_OPTIONS: { key: ThemePref; label: string }[] = [
-  { key: "light", label: "浅色" },
-  { key: "dark", label: "深色" },
-  { key: "auto", label: "自动" },
+const THEME_OPTIONS: { key: ThemePref; i18nKey: string }[] = [
+  { key: "light", i18nKey: "settings.theme.light" },
+  { key: "dark", i18nKey: "settings.theme.dark" },
+  { key: "auto", i18nKey: "settings.theme.auto" },
 ];
 
 /** 外观主题的小缩略图（仿一个迷你窗口）。auto 用左浅右深的斜分。 */
@@ -215,10 +217,8 @@ function StackRow({
   );
 }
 
-function SavedBadge({ text }: { text: string }) {
+function SavedBadge({ text, isError = false }: { text: string; isError?: boolean }) {
   if (!text) return null;
-  // 文案含「失败」时按错误态(红色)展示，让保存失败不再无声无息。
-  const isError = text.includes("失败");
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -256,6 +256,7 @@ export function SettingsPanel({
   onClose: () => void;
   onOpenDevConsole?: () => void;
 }) {
+  const { t } = useTranslation();
   const mobile = isMobile();
   const tablet = isTablet();
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>("appearance");
@@ -288,7 +289,7 @@ export function SettingsPanel({
     setRemindOn(on);
     if (!on) return;
     try {
-      await ipc.notify("学习提醒已开启", "有待复习卡片时，打开应用会提醒你。");
+      await ipc.notify(t("settings.studyReminder.enabled"), t("settings.studyReminder.enabledBody"));
     } catch {
       // 权限被拒 / 发送失败时静默：开关状态仍已保存。
     }
@@ -321,17 +322,21 @@ export function SettingsPanel({
   const [volcengineAppId, setVolcengineAppId] = useState("");
   const [volcengineToken, setVolcengineToken] = useState("");
   const [volcengineSaved, setVolcengineSaved] = useState("");
+  const [volcengineSavedErr, setVolcengineSavedErr] = useState(false);
   const [volcengineHotwords, setVolcengineHotwords] = useState("");
   const [volcengineContext, setVolcengineContext] = useState("");
   const [volcengineCtxSaved, setVolcengineCtxSaved] = useState("");
+  const [volcengineCtxSavedErr, setVolcengineCtxSavedErr] = useState(false);
   const [dashscopeKey, setDashscopeKey] = useState("");
   const [dashscopeSaved, setDashscopeSaved] = useState("");
+  const [dashscopeSavedErr, setDashscopeSavedErr] = useState(false);
   const [aliyunModel, setAliyunModel] = useState("qwen3-asr-flash-filetrans");
   const [ocrBackend, setOcrBackend] = useState(defaultOcrBackend());
   const [ocrType, setOcrType] = useState("Advanced");
   const [ocrKeyId, setOcrKeyId] = useState("");
   const [ocrSecret, setOcrSecret] = useState("");
   const [ocrSaved, setOcrSaved] = useState("");
+  const [ocrSavedErr, setOcrSavedErr] = useState(false);
   const [slidesSensitivity, setSlidesSensitivityState] = useState(() =>
     getSlidesSensitivity(),
   );
@@ -466,11 +471,13 @@ export function SettingsPanel({
         volcSecret.refresh();
         setVolcengineToken("");
       }
-      setVolcengineSaved("已保存");
+      setVolcengineSaved(t("settings.saved"));
+      setVolcengineSavedErr(false);
       setTimeout(() => setVolcengineSaved(""), 1500);
     } catch (error) {
       // 不再无声失败：把后端写入错误直接显示出来，便于定位（例如 DB 不可写）。
-      setVolcengineSaved(`保存失败：${error}`);
+      setVolcengineSaved(t("settings.saveFailed", { error }));
+      setVolcengineSavedErr(true);
       setTimeout(() => setVolcengineSaved(""), 6000);
     } finally {
       setSavingCred(null);
@@ -482,10 +489,12 @@ export function SettingsPanel({
     try {
       await ipc.settings.set("volcengine_asr_hotwords", volcengineHotwords.trim());
       await ipc.settings.set("volcengine_asr_context", volcengineContext.trim());
-      setVolcengineCtxSaved("已保存");
+      setVolcengineCtxSaved(t("settings.saved"));
+      setVolcengineCtxSavedErr(false);
       setTimeout(() => setVolcengineCtxSaved(""), 1500);
     } catch (error) {
-      setVolcengineCtxSaved(`保存失败：${error}`);
+      setVolcengineCtxSaved(t("settings.saveFailed", { error }));
+      setVolcengineCtxSavedErr(true);
       setTimeout(() => setVolcengineCtxSaved(""), 6000);
     } finally {
       setSavingCred(null);
@@ -504,10 +513,12 @@ export function SettingsPanel({
       await ipc.secrets.set("dashscope_api_key", dashscopeKey.trim());
       dashSecret.refresh();
       setDashscopeKey("");
-      setDashscopeSaved("已保存");
+      setDashscopeSaved(t("settings.saved"));
+      setDashscopeSavedErr(false);
       setTimeout(() => setDashscopeSaved(""), 1500);
     } catch (error) {
-      setDashscopeSaved(`保存失败：${error}`);
+      setDashscopeSaved(t("settings.saveFailed", { error }));
+      setDashscopeSavedErr(true);
       setTimeout(() => setDashscopeSaved(""), 6000);
     } finally {
       setSavingCred(null);
@@ -537,10 +548,12 @@ export function SettingsPanel({
         ocrSecret2.refresh();
         setOcrSecret("");
       }
-      setOcrSaved("已保存");
+      setOcrSaved(t("settings.saved"));
+      setOcrSavedErr(false);
       setTimeout(() => setOcrSaved(""), 1500);
     } catch (error) {
-      setOcrSaved(`保存失败：${error}`);
+      setOcrSaved(t("settings.saveFailed", { error }));
+      setOcrSavedErr(true);
       setTimeout(() => setOcrSaved(""), 6000);
     } finally {
       setSavingCred(null);
@@ -560,7 +573,7 @@ export function SettingsPanel({
 
   // 竖屏下钻时：进入了某分类则顶栏显示该分类名 + 返回到分类列表；否则显示「设置」+ 关闭。
   const inDetail = compact && entered;
-  const headerTitle = inDetail ? CATEGORY_META[activeCategory].label : "设置";
+  const headerTitle = inDetail ? t(CATEGORY_META[activeCategory].i18nKey) : t("settings.title");
   const onHeaderBack = inDetail ? () => setEntered(false) : onClose;
 
   return (
@@ -571,7 +584,7 @@ export function SettingsPanel({
       {/* 头部 */}
       <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-5 py-3.5">
         <button
-          aria-label="返回"
+          aria-label={t("settings.back")}
           onClick={onHeaderBack}
           className="ca-icon-btn ca-touch-44 ml-0"
         >
@@ -584,7 +597,7 @@ export function SettingsPanel({
       <div className="flex min-h-0 flex-1">
         {!compact && (
           <nav
-            aria-label="设置分类"
+            aria-label={t("settings.category")}
             className="flex w-52 flex-none flex-col gap-0.5 overflow-y-auto border-r border-[var(--border-subtle)] bg-[var(--surface-sidebar)] p-3"
           >
             {categories.map((key) => {
@@ -607,7 +620,7 @@ export function SettingsPanel({
                   >
                     {meta.icon}
                   </span>
-                  {meta.label}
+                  {t(meta.i18nKey)}
                 </button>
               );
             })}
@@ -616,7 +629,7 @@ export function SettingsPanel({
 
         {compact && !entered ? (
           <nav
-            aria-label="设置分类"
+            aria-label={t("settings.category")}
             className="min-h-0 flex-1 overflow-y-auto px-4 py-5"
           >
             <div className="mx-auto max-w-2xl divide-y divide-[var(--border-faint)] overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)]">
@@ -638,7 +651,7 @@ export function SettingsPanel({
                       {meta.icon}
                     </span>
                     <span className="flex-1 text-[15px] text-[var(--text-strong)]">
-                      {meta.label}
+                      {t(meta.i18nKey)}
                     </span>
                     <ChevronRight className="h-4 w-4 flex-none text-[var(--text-faint)]" />
                   </button>
@@ -651,7 +664,7 @@ export function SettingsPanel({
           <div className="mx-auto max-w-2xl">
             {!compact && (
               <h2 className="mb-5 text-[22px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">
-                {CATEGORY_META[activeCategory].label}
+                {t(CATEGORY_META[activeCategory].i18nKey)}
               </h2>
             )}
 
@@ -660,7 +673,7 @@ export function SettingsPanel({
                 role="alert"
                 className="mb-4 rounded-lg border border-[var(--status-err)] bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)]"
               >
-                设置加载失败：{loadError}
+                {t("settings.loadError", { error: loadError })}
               </div>
             )}
 
@@ -669,13 +682,13 @@ export function SettingsPanel({
                 role="alert"
                 className="mb-4 rounded-lg border border-[var(--status-err)] bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)]"
               >
-                设置保存失败：{saveError}
+                {t("settings.saveError", { error: saveError })}
               </div>
             )}
 
             {activeCategory === "appearance" && (
               <>
-                <Group header="外观">
+                <Group header={t("settings.appearance.title")}>
                   <StackRow>
                     <div className="flex gap-6">
                       {THEME_OPTIONS.map((opt) => {
@@ -703,7 +716,7 @@ export function SettingsPanel({
                                   : "text-[var(--text-muted)]"
                               }`}
                             >
-                              {opt.label}
+                              {t(opt.i18nKey)}
                             </span>
                           </button>
                         );
@@ -713,7 +726,7 @@ export function SettingsPanel({
                 </Group>
 
                 <Group
-                  header="强调色"
+                  header={t("settings.appearance.accentColor")}
                 >
                   <StackRow>
                     <div className="flex flex-wrap items-center gap-3">
@@ -729,7 +742,7 @@ export function SettingsPanel({
                               }`}
                             >
                               <input
-                                aria-label="自定义强调色"
+                                aria-label={t("settings.appearance.customAccent")}
                                 type="color"
                                 value={customAccent}
                                 onChange={(event) => setCustomAccent(event.target.value)}
@@ -771,17 +784,17 @@ export function SettingsPanel({
 
             {activeCategory === "study" && (
               <Group
-                header="学习提醒"
-                footnote="提醒只在打开应用时检查，不会在后台常驻推送。"
+                header={t("settings.studyReminder.title")}
+                footnote={t("settings.studyReminder.footnote")}
               >
                 <Row
-                  label="到期复习提醒"
-                  hint="有待复习卡片时，打开应用推送一条桌面通知"
+                  label={t("settings.studyReminder.label")}
+                  hint={t("settings.studyReminder.hint")}
                   htmlFor="study-reminder"
                 >
                   <Switch
                     id="study-reminder"
-                    aria-label="到期复习提醒"
+                    aria-label={t("settings.studyReminder.label")}
                     checked={remindOn}
                     onCheckedChange={(next) => void toggleReminder(next)}
                   />
@@ -791,76 +804,89 @@ export function SettingsPanel({
 
             {activeCategory === "shortcuts" && (
               <Group
-                header="播放快捷键"
+                header={t("settings.shortcuts.title")}
               >
                 {SHORTCUT_ACTIONS.map(({ action, label, hint }) => (
                   <Row key={action} label={label} hint={hint}>
                     <button
                       type="button"
                       onClick={() => setCapturing(action)}
-                      aria-label={`设置「${label}」快捷键`}
+                      aria-label={t("settings.shortcuts.setKey", { label })}
                       className={`min-h-11 min-w-[88px] rounded-lg border px-3 py-1.5 text-center text-sm font-medium transition ${
                         capturing === action
                           ? "border-[var(--accent-text)] bg-[var(--accent-weak)] text-[var(--accent-text)]"
                           : "border-[var(--border-subtle)] bg-[var(--surface-input)] text-[var(--text-strong)] hover:border-[var(--text-faint)]"
                       }`}
                     >
-                      {capturing === action ? "按下按键…" : keyLabel(bindings[action])}
+                      {capturing === action ? t("settings.shortcuts.pressKey") : keyLabel(bindings[action])}
                     </button>
                   </Row>
                 ))}
                 <StackRow>
                   <Button variant="outline" size="sm" onClick={resetBindings}>
-                    恢复默认
+                    {t("settings.shortcuts.restoreDefaults")}
                   </Button>
                 </StackRow>
               </Group>
             )}
 
             {activeCategory === "storage" && (
-              <Group
-                header="存储位置"
-                footnote="转写、字幕、课件等产物的存放位置；留空 = 跟视频同目录的 .courseai/。"
-              >
-                <StackRow label="默认数据根目录">
-                  <div className="flex items-center gap-2">
-                    <input className={FIELD} value={root} readOnly placeholder="未设置" />
-                    <Button size="sm" variant="outline" onClick={pickRoot}>
-                      选择
-                    </Button>
-                    {root && (
-                      <Button size="sm" variant="ghost" onClick={() => void clearRoot()}>
-                        清除
+              <>
+                <Group
+                  header={t("settings.storage.title")}
+                  footnote={t("settings.storage.footnote")}
+                >
+                  <StackRow label={t("settings.storage.defaultRoot")}>
+                    <div className="flex items-center gap-2">
+                      <input className={FIELD} value={root} readOnly placeholder={t("settings.storage.notSet")} />
+                      <Button size="sm" variant="outline" onClick={pickRoot}>
+                        {t("settings.storage.select")}
                       </Button>
-                    )}
-                  </div>
-                </StackRow>
-              </Group>
+                      {root && (
+                        <Button size="sm" variant="ghost" onClick={() => void clearRoot()}>
+                          {t("settings.storage.clear")}
+                        </Button>
+                      )}
+                    </div>
+                  </StackRow>
+                </Group>
+                <Group
+                  header={t("settings.storage.security")}
+                  footnote={t("settings.storage.securityFootnote")}
+                >
+                  <Row
+                    label={t("backup.label")}
+                    hint={t("backup.hint")}
+                  >
+                    <DatabaseBackupAction />
+                  </Row>
+                </Group>
+              </>
             )}
 
             {activeCategory === "asr" && (
               <>
-                <Group header="识别引擎">
-                  <Row label="识别后端" htmlFor="asr-backend">
+                <Group header={t("settings.asr.engineTitle")}>
+                  <Row label={t("settings.asr.backend")} htmlFor="asr-backend">
                     <div className="w-full sm:w-56">
                       <Select
                         id="asr-backend"
                         value={asrBackend}
                         onChange={(event) => void changeAsrBackend(event.target.value)}
                       >
-                        {!mobile && <option value="whisper">本地 Whisper</option>}
-                        <option value="volcengine">火山录音文件识别</option>
-                        <option value="aliyun">阿里云 DashScope 录音文件识别</option>
+                        {!mobile && <option value="whisper">{t("settings.asr.localWhisper")}</option>}
+                        <option value="volcengine">{t("settings.asr.volcengine")}</option>
+                        <option value="aliyun">{t("settings.asr.aliyun")}</option>
                       </Select>
                     </div>
                   </Row>
                   <Row
-                    label="识别语言"
+                    label={t("settings.asr.language")}
                     htmlFor="asr-language"
                     hint={
                       mobile
-                        ? "移动端使用云端 ASR，自动识别语言"
-                        : "对本地 Whisper 与阿里云 paraformer-v2 / fun-asr 生效；火山及通义千问 ASR 为自动识别"
+                        ? t("settings.asr.languageHintMobile")
+                        : t("settings.asr.languageHintDesktop")
                     }
                   >
                     <div className="w-full sm:w-40">
@@ -869,23 +895,23 @@ export function SettingsPanel({
                         value={asrLanguage}
                         onChange={(event) => void changeAsrLanguage(event.target.value)}
                       >
-                        <option value="auto">自动检测</option>
-                        <option value="zh">中文</option>
-                        <option value="en">英语</option>
-                        <option value="ja">日语</option>
-                        <option value="ko">韩语</option>
-                        <option value="yue">粤语</option>
-                        <option value="fr">法语</option>
-                        <option value="de">德语</option>
-                        <option value="es">西班牙语</option>
-                        <option value="ru">俄语</option>
+                        <option value="auto">{t("settings.asr.autoDetect")}</option>
+                        <option value="zh">{t("settings.asr.zh")}</option>
+                        <option value="en">{t("settings.asr.en")}</option>
+                        <option value="ja">{t("settings.asr.ja")}</option>
+                        <option value="ko">{t("settings.asr.ko")}</option>
+                        <option value="yue">{t("settings.asr.yue")}</option>
+                        <option value="fr">{t("settings.asr.fr")}</option>
+                        <option value="de">{t("settings.asr.de")}</option>
+                        <option value="es">{t("settings.asr.es")}</option>
+                        <option value="ru">{t("settings.asr.ru")}</option>
                       </Select>
                     </div>
                   </Row>
                   <Row
-                    label="AI 纠错并发数"
+                    label={t("settings.asr.concurrency")}
                     htmlFor="asr-correction-concurrency"
-                    hint="字幕分批并发交给大模型纠错；越大越快，但受模型并发上限约束（DeepSeek-flash 2500 / pro 500，普通端点建议 5~16）。"
+                    hint={t("settings.asr.concurrencyHint")}
                   >
                     <input
                       id="asr-correction-concurrency"
@@ -902,9 +928,9 @@ export function SettingsPanel({
                     />
                   </Row>
                   <Row
-                    label="导入字幕后用 AI 纠错"
+                    label={t("settings.asr.importCorrection")}
                     htmlFor="subtitle-autocorrect"
-                    hint="导入 B 站自带字幕后，是否像 ASR 文稿一样交给大模型纠正错别字、标点并还原数学公式。关闭则字幕原样使用。"
+                    hint={t("settings.asr.importCorrectionHint")}
                   >
                     <Switch
                       id="subtitle-autocorrect"
@@ -917,8 +943,8 @@ export function SettingsPanel({
                 </Group>
 
                 {!mobile && asrBackend === "whisper" && (
-                  <Group header="本地 Whisper">
-                    <Row label="默认 Whisper 模型" htmlFor="whisper-model">
+                  <Group header={t("settings.asr.whisperTitle")}>
+                    <Row label={t("settings.asr.defaultModel")} htmlFor="whisper-model">
                       <div className="w-full sm:w-44">
                         <Select
                           id="whisper-model"
@@ -933,28 +959,28 @@ export function SettingsPanel({
                         </Select>
                       </div>
                     </Row>
-                    <StackRow label="模型下载">
+                    <StackRow label={t("settings.asr.modelDownload")}>
                       <WhisperModelsPanel />
                     </StackRow>
                   </Group>
                 )}
 
                 {asrBackend === "volcengine" && (
-                  <Group header="火山引擎">
+                  <Group header={t("settings.asr.volcengineTitle")}>
                     <Row label="App ID" htmlFor="volcengine-asr-app-id">
                       <input
                         id="volcengine-asr-app-id"
                         type="text"
                         className={`${FIELD} w-full sm:w-64`}
                         value={volcengineAppId}
-                        placeholder="控制台「应用」的 App ID"
+                        placeholder={t("settings.asr.appIdPlaceholder")}
                         onChange={(event) => setVolcengineAppId(event.target.value)}
                       />
                     </Row>
                     <Row
                       label="Access Token"
                       htmlFor="volcengine-asr-token"
-                      hint={volcSecret.configured ? "已配置 · 留空 = 不修改" : "留空 = 不修改"}
+                      hint={volcSecret.configured ? t("settings.configured") : t("settings.notConfigured")}
                     >
                       <input
                         id="volcengine-asr-token"
@@ -973,34 +999,34 @@ export function SettingsPanel({
                           disabled={savingCred !== null}
                           onClick={saveVolcengineKey}
                         >
-                          保存火山 ASR 凭证
+                          {t("settings.asr.saveVolcCreds")}
                         </Button>
-                        <SavedBadge text={volcengineSaved} />
+                        <SavedBadge text={volcengineSaved} isError={volcengineSavedErr} />
                       </div>
                     </StackRow>
                     <StackRow
-                      label="热词"
+                      label={t("settings.asr.hotwords")}
                       htmlFor="volcengine-asr-hotwords"
-                      hint="一行一个（也可用逗号/顿号分隔），最多 5000 词；专有名词、人名、术语"
+                      hint={t("settings.asr.hotwordsHint")}
                     >
                       <textarea
                         id="volcengine-asr-hotwords"
                         className={`${FIELD} min-h-[72px] resize-y`}
                         value={volcengineHotwords}
-                        placeholder={"勒沙特列原理\n焓变\n范德华力"}
+                        placeholder={t("settings.asr.hotwordsPlaceholder")}
                         onChange={(event) => setVolcengineHotwords(event.target.value)}
                       />
                     </StackRow>
                     <StackRow
-                      label="上下文"
+                      label={t("settings.asr.context")}
                       htmlFor="volcengine-asr-context"
-                      hint="视频标题、课程名会自动加入；此处可补充口音/领域/场景等（约 800 tokens 上限，一行一条）"
+                      hint={t("settings.asr.contextHint")}
                     >
                       <textarea
                         id="volcengine-asr-context"
                         className={`${FIELD} min-h-[72px] resize-y`}
                         value={volcengineContext}
-                        placeholder={"本片为高中化学反应原理课\n讲师有四川口音"}
+                        placeholder={t("settings.asr.contextPlaceholder")}
                         onChange={(event) => setVolcengineContext(event.target.value)}
                       />
                     </StackRow>
@@ -1012,17 +1038,17 @@ export function SettingsPanel({
                           disabled={savingCred !== null}
                           onClick={saveVolcengineContext}
                         >
-                          保存热词与上下文
+                          {t("settings.asr.saveHotwordsContext")}
                         </Button>
-                        <SavedBadge text={volcengineCtxSaved} />
+                        <SavedBadge text={volcengineCtxSaved} isError={volcengineCtxSavedErr} />
                       </div>
                     </StackRow>
                   </Group>
                 )}
 
                 {asrBackend === "aliyun" && (
-                  <Group header="阿里云 DashScope">
-                    <Row label="识别模型" htmlFor="aliyun-asr-model">
+                  <Group header={t("settings.asr.aliyunTitle")}>
+                    <Row label={t("settings.asr.aliyunModel")} htmlFor="aliyun-asr-model">
                       <div className="w-full sm:w-64">
                         <Select
                           id="aliyun-asr-model"
@@ -1030,7 +1056,7 @@ export function SettingsPanel({
                           onChange={(event) => void changeAliyunModel(event.target.value)}
                         >
                           <option value="qwen3-asr-flash-filetrans">
-                            千问3-ASR-Flash-Filetrans
+                            {t("settings.asr.qwen3AsrFlash")}
                           </option>
                           <option value="fun-asr">Fun-ASR</option>
                           <option value="paraformer-v2">Paraformer-v2</option>
@@ -1038,9 +1064,9 @@ export function SettingsPanel({
                       </div>
                     </Row>
                     <Row
-                      label="百炼 API Key"
+                      label={t("settings.asr.aliyunApiKey")}
                       htmlFor="dashscope-key"
-                      hint={dashSecret.configured ? "已配置 · 留空 = 不修改" : "留空 = 不修改"}
+                      hint={dashSecret.configured ? t("settings.configured") : t("settings.notConfigured")}
                     >
                       <input
                         id="dashscope-key"
@@ -1059,9 +1085,9 @@ export function SettingsPanel({
                           disabled={savingCred !== null}
                           onClick={saveDashscopeKey}
                         >
-                          保存百炼 API Key
+                          {t("settings.asr.saveAliyunKey")}
                         </Button>
-                        <SavedBadge text={dashscopeSaved} />
+                        <SavedBadge text={dashscopeSaved} isError={dashscopeSavedErr} />
                       </div>
                     </StackRow>
                   </Group>
@@ -1070,7 +1096,7 @@ export function SettingsPanel({
             )}
 
             {activeCategory === "llm" && (
-              <Group header="大模型">
+              <Group header={t("settings.llm.title")}>
                 <StackRow>
                   <LlmSettingsPanel />
                 </StackRow>
@@ -1080,35 +1106,35 @@ export function SettingsPanel({
             {activeCategory === "courseware" && (
               <>
                 <Group
-                  header="图文识别 (OCR)"
+                  header={t("settings.ocr.title")}
                 >
-                  <Row label="OCR 引擎" htmlFor="ocr-backend">
+                  <Row label={t("settings.ocr.engine")} htmlFor="ocr-backend">
                     <div className="w-full sm:w-56">
                       <Select
                         id="ocr-backend"
                         value={ocrBackend}
                         onChange={(event) => void changeOcrBackend(event.target.value)}
                       >
-                        <option value="local">本地 OCR（离线）</option>
-                        <option value="aliyun">阿里云 OCR 统一识别</option>
+                        <option value="local">{t("settings.ocr.localOcr")}</option>
+                        <option value="aliyun">{t("settings.ocr.aliyunOcr")}</option>
                       </Select>
                     </div>
                   </Row>
 
                   {ocrBackend === "aliyun" && (
                     <>
-                      <Row label="识别类型" htmlFor="aliyun-ocr-type">
+                      <Row label={t("settings.ocr.aliyunType")} htmlFor="aliyun-ocr-type">
                         <div className="w-full sm:w-56">
                           <Select
                             id="aliyun-ocr-type"
                             value={ocrType}
                             onChange={(event) => void changeOcrType(event.target.value)}
                           >
-                            <option value="Advanced">通用文字识别（高精版）</option>
-                            <option value="General">通用文字识别</option>
-                            <option value="HandWriting">手写文字识别</option>
-                            <option value="MultiLanguage">多语言识别</option>
-                            <option value="Table">表格识别</option>
+                            <option value="Advanced">{t("settings.ocr.advanced")}</option>
+                            <option value="General">{t("settings.ocr.general")}</option>
+                            <option value="HandWriting">{t("settings.ocr.handwriting")}</option>
+                            <option value="MultiLanguage">{t("settings.ocr.multiLanguage")}</option>
+                            <option value="Table">{t("settings.ocr.table")}</option>
                           </Select>
                         </div>
                       </Row>
@@ -1118,7 +1144,7 @@ export function SettingsPanel({
                           type="text"
                           className={`${FIELD} w-full sm:w-64`}
                           value={ocrKeyId}
-                          placeholder="阿里云 RAM 账号 AccessKey ID"
+                          placeholder={t("settings.ocr.accessKeyPlaceholder")}
                           onChange={(event) => setOcrKeyId(event.target.value)}
                         />
                       </Row>
@@ -1127,8 +1153,8 @@ export function SettingsPanel({
                         htmlFor="aliyun-ocr-secret"
                         hint={
                           ocrSecret2.configured
-                            ? "已配置 · 留空 = 不修改；需在阿里云控制台开通「文字识别 OCR」"
-                            : "留空 = 不修改；需在阿里云控制台开通「文字识别 OCR」"
+                            ? t("settings.ocr.aliyunSecretConfigured")
+                            : t("settings.ocr.aliyunSecretNotConfigured")
                         }
                       >
                         <input
@@ -1148,9 +1174,9 @@ export function SettingsPanel({
                             disabled={savingCred !== null}
                             onClick={saveOcrCreds}
                           >
-                            保存阿里云 OCR 凭证
+                            {t("settings.ocr.saveAliyunOcr")}
                           </Button>
-                          <SavedBadge text={ocrSaved} />
+                          <SavedBadge text={ocrSaved} isError={ocrSavedErr} />
                         </div>
                       </StackRow>
                     </>
@@ -1158,38 +1184,37 @@ export function SettingsPanel({
                 </Group>
 
                 <Group
-                  header="课件提取"
-
+                  header={t("settings.courseware.title")}
                 >
                   <Row
-                    label="导入后自动提取"
+                    label={t("settings.courseware.autoExtract")}
                     htmlFor="slides-auto-extract"
                   >
                     <Switch
                       id="slides-auto-extract"
-                      aria-label="导入后自动提取课件"
+                      aria-label={t("settings.courseware.autoExtractLabel")}
                       checked={slidesAutoExtract}
                       onCheckedChange={(next) => void changeSlidesAutoExtract(next)}
                     />
                   </Row>
                   <Row
-                    label="自动确定灵敏度"
+                    label={t("settings.courseware.autoSensitivity")}
                     htmlFor="slides-auto"
                   >
                     <Switch
                       id="slides-auto"
-                      aria-label="课件提取自动灵敏度"
+                      aria-label={t("settings.courseware.autoSensitivityLabel")}
                       checked={slidesAuto}
                       onCheckedChange={(next) =>
                         changeSlidesSensitivity(next ? AUTO_SENSITIVITY : DEFAULT_SLIDES_SENSITIVITY)
                       }
                     />
                   </Row>
-                  <StackRow label="换页灵敏度">
+                  <StackRow label={t("settings.courseware.sensitivity")}>
                     <div className="flex items-center gap-3 text-xs text-[var(--text-muted)]">
-                      <span>低</span>
+                      <span>{t("settings.courseware.low")}</span>
                       <input
-                        aria-label="课件提取灵敏度"
+                        aria-label={t("settings.courseware.sensitivityLabel")}
                         type="range"
                         min={0}
                         max={100}
@@ -1200,9 +1225,9 @@ export function SettingsPanel({
                         className="ca-slider flex-1 disabled:opacity-40"
                         style={{ "--slider-fill": `${slidesSliderValue}%` } as CSSProperties}
                       />
-                      <span>高</span>
+                      <span>{t("settings.courseware.high")}</span>
                       <span className="w-8 text-right tabular-nums text-[var(--text-faint)]">
-                        {slidesAuto ? "自动" : slidesSensitivity}
+                        {slidesAuto ? t("settings.theme.auto") : slidesSensitivity}
                       </span>
                     </div>
                   </StackRow>
@@ -1212,13 +1237,13 @@ export function SettingsPanel({
 
             {activeCategory === "dev" && onOpenDevConsole && (
               <Group
-                header="开发者"
-                footnote="查看 AI 文稿纠错的请求与回复"
+                header={t("settings.dev.title")}
+                footnote={t("settings.dev.footnote")}
               >
                 <StackRow>
                   <Button variant="outline" size="sm" onClick={onOpenDevConsole}>
                     <Terminal className="h-3.5 w-3.5" />
-                    打开开发控制台
+                    {t("settings.dev.openConsole")}
                   </Button>
                 </StackRow>
               </Group>

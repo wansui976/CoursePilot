@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { RefreshCw } from "lucide-react";
 import { ExportMenu, type ExportItem } from "./ExportMenu";
 
@@ -23,6 +24,7 @@ export function PanelActions({
   exportItems?: ExportItem[];
   leading?: ReactNode;
 }) {
+  const { t } = useTranslation();
   if (!leading && !onRegenerate && exportItems.length === 0) return null;
   return (
     <div className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5">
@@ -31,9 +33,9 @@ export function PanelActions({
       {stale && (
         <span
           className="rounded-md border border-[var(--accent)]/45 bg-[var(--accent)]/15 px-2 py-1 text-[11px] font-medium text-[var(--accent)]"
-          title="字幕已更新，这份内容还是照着旧稿生成的。要用新稿重做，点右边的重新生成。"
+          title={t("panelActions.staleTitle")}
         >
-          已过期
+          {t("panelActions.stale")}
         </span>
       )}
       {leading}
@@ -45,13 +47,13 @@ export function PanelActions({
           type="button"
           onClick={onRegenerate}
           disabled={regenerating}
-          aria-label={hasContent ? "重新生成" : "生成"}
+          aria-label={hasContent ? t("panelActions.regenerate") : t("panelActions.generate")}
           title={
             stale
-              ? "字幕已更新：用新稿重新生成"
+              ? t("panelActions.staleRegenerate")
               : hasContent
-                ? "重新生成"
-                : "生成"
+                ? t("panelActions.regenerate")
+                : t("panelActions.generate")
           }
           className={`${panelActionButtonClass} ${
             stale ? "border-[var(--accent)]/60 text-[var(--accent)]" : ""

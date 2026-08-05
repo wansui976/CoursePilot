@@ -1,5 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { TFunction } from "i18next";
 import {
   Brain,
   ChevronDown,
@@ -40,9 +42,9 @@ export type ConceptNavigationState = {
   scrollTop: number;
 };
 
-function sourceStats(concept: CourseConcept) {
+function sourceStats(concept: CourseConcept, t: TFunction) {
   const videos = new Set(concept.occurrences.map((occurrence) => occurrence.video_id)).size;
-  return `${videos} 个视频 · ${concept.occurrences.length} 处来源`;
+  return t("concepts.videoSources", { count: videos, occurrences: concept.occurrences.length });
 }
 
 function containsQuery(value: string | null | undefined, query: string) {
@@ -107,6 +109,7 @@ function ConceptSources({
   query: string;
   onJump: (videoId: string, startMs: number) => void;
 }) {
+  const { t } = useTranslation();
   const [showAll, setShowAll] = useState(false);
   const sourceListId = `concept-sources-${concept.id}`;
   const hasMore = concept.occurrences.length > SOURCE_PREVIEW_LIMIT;
@@ -116,7 +119,7 @@ function ConceptSources({
 
   return (
     <div className="mt-3 border-t border-[var(--border-subtle)] pt-2.5">
-      <p className="mb-1 text-xs font-medium text-[var(--text-faint)]">字幕证据</p>
+      <p className="mb-1 text-xs font-medium text-[var(--text-faint)]">{t("concepts.subtitleEvidence")}</p>
       <ul id={sourceListId} className="divide-y divide-[var(--border-subtle)]">
         {occurrences.map((occurrence) => {
           const sourceKey = `${occurrence.video_id}-${occurrence.start_ms}`;
@@ -127,7 +130,7 @@ function ConceptSources({
               <button
                 type="button"
                 onClick={() => onJump(occurrence.video_id, occurrence.start_ms)}
-                aria-label={`回看 ${displayTitle(occurrence.video_title)} ${formatMs(occurrence.start_ms)}`}
+                aria-label={t("concepts.reviewSource", { title: displayTitle(occurrence.video_title), time: formatMs(occurrence.start_ms) })}
                 aria-describedby={excerptId}
                 className="ca-touch-44 min-h-11 w-full px-1 py-2 text-left transition-colors hover:bg-[var(--surface-card-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
               >
@@ -165,8 +168,8 @@ function ConceptSources({
             className={`h-3.5 w-3.5 transition-transform ${showAll ? "rotate-180" : ""}`}
           />
           {showAll
-            ? "收起来源"
-            : `展开其余 ${concept.occurrences.length - SOURCE_PREVIEW_LIMIT} 条来源`}
+            ? t("concepts.collapseSource")
+            : t("concepts.expandSource", { count: concept.occurrences.length - SOURCE_PREVIEW_LIMIT })}
         </button>
       )}
     </div>
@@ -191,6 +194,7 @@ export function ConceptsPanel({
   ) => void;
   initialNavigationState?: ConceptNavigationState | null;
 }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState<string | null>(
     initialNavigationState?.expandedConceptId ?? null,
@@ -260,13 +264,13 @@ export function ConceptsPanel({
     },
     onSuccess: (count) => {
       setAnnouncement(
-        count > 0 ? `已更新 ${count} 个知识点和课程总结。` : "未发现可用知识点，请先确认课程已有文稿。",
+        count > 0 ? t("concepts.updatedConcepts", { count }) : t("concepts.noConceptsFound"),
       );
       setExpanded(null);
     },
     onError: (error) => {
       if (error instanceof Error && error.message.includes("已取消")) {
-        setAnnouncement("已取消分析。");
+        setAnnouncement(t("concepts.analysisCanceled"));
       }
     },
     onSettled: () => {
@@ -290,7 +294,7 @@ export function ConceptsPanel({
 
   const summarize = useMutation({
     mutationFn: () => ipc.concepts.summarize(courseId),
-    onSuccess: () => setAnnouncement("课程总结已生成。"),
+    onSuccess: () => setAnnouncement(t("concepts.summaryGenerated")),
     onSettled: invalidateKnowledge,
   });
 
@@ -301,8 +305,8 @@ export function ConceptsPanel({
     onSuccess: (count) => {
       setAnnouncement(
         count > 0
-          ? `已从相关视频整理 ${count} 张复习卡，新卡立即可复习，已排期的卡片保持原计划。`
-          : "没有可整理的复习卡：相关视频尚无 AI 题目，或题目出处不在这个知识点范围内。",
+          ? t("concepts.madeCards", { count })
+          : t("concepts.noCardsAvailable"),
       );
     },
     onSettled: () => {
@@ -360,7 +364,7 @@ export function ConceptsPanel({
     <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-[var(--surface-app)] text-[var(--text-normal)]">
       <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-4 py-3 sm:px-7 sm:py-4">
         <button
-          aria-label="返回课程视频"
+          aria-label={t("concepts.backToVideos")}
           onClick={onClose}
           className="ca-icon-btn ca-touch-44 ml-0"
         >
@@ -369,7 +373,7 @@ export function ConceptsPanel({
         <div className="min-w-0">
           <h1 className="flex items-center gap-2 text-lg font-semibold text-[var(--text-strong)]">
             <Lightbulb className="h-4 w-4 flex-none" />
-            课程知识
+            {t("concepts.title")}
           </h1>
           {courseName && (
             <p className="truncate text-xs text-[var(--text-muted)]" title={courseName}>
@@ -382,9 +386,9 @@ export function ConceptsPanel({
             <button
               type="button"
               onClick={() => setChatOpen((open) => !open)}
-              aria-label="课程 AI 问答"
+              aria-label={t("concepts.courseChat")}
               aria-pressed={chatOpen}
-              title="课程 AI 问答"
+              title={t("concepts.courseChatTitle")}
               className={`ca-touch-44 inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
                 chatOpen
                   ? "border-transparent bg-primary !text-white"
@@ -392,18 +396,18 @@ export function ConceptsPanel({
               }`}
             >
               <MessageCircle className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">AI 问答</span>
+              <span className="hidden sm:inline">{t("concepts.aiChat")}</span>
             </button>
             <button
               type="button"
               onClick={() => analyze.mutate()}
               disabled={busy}
-              aria-label={analyze.isPending ? "正在重新分析" : "重新分析课程知识"}
-              title={analyze.isPending ? "正在重新分析" : "重新分析课程知识"}
+              aria-label={analyze.isPending ? t("concepts.reanalyzing") : t("concepts.reanalyze")}
+              title={analyze.isPending ? t("concepts.reanalyzing") : t("concepts.reanalyze")}
               className="ca-touch-44 inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-60"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${analyze.isPending ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline">{analyze.isPending ? "分析中…" : "重新分析"}</span>
+              <span className="hidden sm:inline">{analyze.isPending ? t("concepts.analyzing") : t("concepts.reanalyzeShort")}</span>
             </button>
           </div>
         )}
@@ -426,11 +430,11 @@ export function ConceptsPanel({
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--text-strong)]">正在分析课程知识…</p>
+                  <p className="text-sm font-medium text-[var(--text-strong)]">{t("concepts.analyzingKnowledge")}</p>
                   <p className="mt-0.5 truncate text-xs text-[var(--text-muted)]">
                     {progress
                       ? `${progress.total ? `${Math.min(progress.done + 1, progress.total)}/${progress.total} · ` : ""}${displayTitle(progress.title)}`
-                      : "正在准备…"}
+                      : t("concepts.preparing")}
                   </p>
                 </div>
                 <button
@@ -439,7 +443,7 @@ export function ConceptsPanel({
                   className="ca-touch-44 inline-flex flex-none items-center gap-1 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
                 >
                   <X className="h-3.5 w-3.5" />
-                  取消
+                  {t("concepts.cancelAnalysis")}
                 </button>
               </div>
               <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[var(--surface-panel)]">
@@ -460,7 +464,7 @@ export function ConceptsPanel({
           )}
 
           {isLoading ? (
-            <div className="space-y-5" aria-label="正在加载课程知识">
+            <div className="space-y-5" aria-label={t("concepts.loadingKnowledge")}>
               <Skeleton className="h-24 w-full" />
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-20 w-full" />
@@ -473,9 +477,9 @@ export function ConceptsPanel({
               <span className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/12 text-primary">
                 <Sparkles className="h-6 w-6" />
               </span>
-              <h2 className="text-base font-semibold text-[var(--text-strong)]">还没有课程知识</h2>
+              <h2 className="text-base font-semibold text-[var(--text-strong)]">{t("concepts.noKnowledge")}</h2>
               <p className="max-w-[340px] text-sm leading-relaxed text-[var(--text-muted)]">
-                分析会读取课程内已有字幕，抽取知识点并整理出课程主线与可回看的出处。
+                {t("concepts.noKnowledgeDesc")}
               </p>
               <Button
                 type="button"
@@ -484,7 +488,7 @@ export function ConceptsPanel({
                 disabled={busy}
                 className="ca-touch-44"
               >
-                {analyze.isPending ? "分析中…" : "分析本课程"}
+                {analyze.isPending ? t("concepts.analyzing") : t("concepts.analyzeCourse")}
               </Button>
             </div>
           ) : (
@@ -499,7 +503,7 @@ export function ConceptsPanel({
                       id="course-knowledge-overview"
                       className="text-base font-semibold text-[var(--text-strong)]"
                     >
-                      课程总览
+                      {t("concepts.courseOverview")}
                     </h2>
                     {knowledge?.overview ? (
                       <p className="mt-2 max-w-3xl whitespace-pre-wrap text-sm leading-6 text-[var(--text-normal)]">
@@ -507,22 +511,22 @@ export function ConceptsPanel({
                       </p>
                     ) : (
                       <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
-                        已有知识点索引。生成课程总结后，会按主题补充主线和一句话结论。
+                        {t("concepts.knowledgeIndexNote")}
                       </p>
                     )}
                     {knowledge?.generated_at != null && (
                       <p className="mt-2 text-xs text-[var(--text-faint)]">
-                        总结生成于 {formatRelativeTime(knowledge.generated_at)}
+                        {t("concepts.generatedAt", { time: formatRelativeTime(knowledge.generated_at) })}
                       </p>
                     )}
                     {/* 有总结才提供「只更新总结」；没有总结的过时（快照损坏）走下面的首次生成按钮。 */}
                     {knowledge?.stale && knowledge.overview && (
                       <div className="mt-2 rounded-lg border border-[var(--status-warn)]/40 bg-[var(--status-warn-bg)] px-3 py-2">
                         <p className="text-xs leading-5 text-[var(--status-warn)]">
-                          课程内容已有变化，当前总结仍可参考。
+                          {t("concepts.contentChanged")}
                           {missingVideos > 0
-                            ? `有 ${missingVideos} 个含字幕的视频还没出现在知识点里，需要重新分析才能补上。`
-                            : "知识点没有增减，只更新总结即可（不重新扫描全课字幕，快且省）。"}
+                            ? t("concepts.missingVideos", { count: missingVideos })
+                            : t("concepts.noChangeSummaryOnly")}
                         </p>
                         <button
                           type="button"
@@ -533,7 +537,7 @@ export function ConceptsPanel({
                           <FileText
                             className={`h-3.5 w-3.5 ${summarize.isPending ? "animate-pulse" : ""}`}
                           />
-                          {summarize.isPending ? "更新中…" : "只更新总结"}
+                          {summarize.isPending ? t("concepts.updatingSummary") : t("concepts.updateSummaryOnly")}
                         </button>
                       </div>
                     )}
@@ -548,22 +552,22 @@ export function ConceptsPanel({
                       className="ca-touch-44 flex-none gap-1.5"
                     >
                       <FileText className={`h-3.5 w-3.5 ${summarize.isPending ? "animate-pulse" : ""}`} />
-                      {summarize.isPending ? "生成中…" : "生成课程总结"}
+                      {summarize.isPending ? t("concepts.generatingSummary") : t("concepts.generateSummary")}
                     </Button>
                   )}
                 </div>
 
                 <dl className="mt-4 grid grid-cols-3 divide-x divide-[var(--border-subtle)] border-y border-[var(--border-subtle)] py-3">
                   <div className="min-w-0 px-3 first:pl-0">
-                    <dt className="text-xs text-[var(--text-muted)]">主题</dt>
+                    <dt className="text-xs text-[var(--text-muted)]">{t("concepts.topicsLabel")}</dt>
                     <dd className="mt-1 text-lg font-semibold text-[var(--text-strong)]">{topicCount}</dd>
                   </div>
                   <div className="min-w-0 px-3">
-                    <dt className="text-xs text-[var(--text-muted)]">知识点</dt>
+                    <dt className="text-xs text-[var(--text-muted)]">{t("concepts.conceptsLabel")}</dt>
                     <dd className="mt-1 text-lg font-semibold text-[var(--text-strong)]">{allConcepts.length}</dd>
                   </div>
                   <div className="min-w-0 px-3 last:pr-0">
-                    <dt className="text-xs text-[var(--text-muted)]">已覆盖视频</dt>
+                    <dt className="text-xs text-[var(--text-muted)]">{t("concepts.coveredVideos")}</dt>
                     <dd className="mt-1 truncate text-lg font-semibold text-[var(--text-strong)]">
                       {knowledge?.covered_videos ?? 0}/{knowledge?.total_videos ?? 0}
                     </dd>
@@ -572,25 +576,25 @@ export function ConceptsPanel({
 
                 <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-[var(--border-subtle)] pt-3">
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-[var(--text-muted)]">下一步学习</p>
+                    <p className="text-xs font-medium text-[var(--text-muted)]">{t("concepts.nextStep")}</p>
                     {dueCountsPending ? (
-                      <p className="mt-1 text-sm text-[var(--text-faint)]">正在读取复习计划…</p>
+                      <p className="mt-1 text-sm text-[var(--text-faint)]">{t("concepts.loadingReviewPlan")}</p>
                     ) : nextReview ? (
                       <p className="mt-1 truncate text-sm text-[var(--text-strong)]">
-                        先复习「{nextReview.concept.name}」
+                        {t("concepts.reviewFirst", { name: nextReview.concept.name })}
                         <span className="ml-2 text-xs text-[var(--text-muted)]">
-                          本课程共 {totalDue} 张到期卡
+                          {t("concepts.courseDueCards", { count: totalDue })}
                         </span>
                       </p>
                     ) : nextLearnConcept && nextOccurrence ? (
                       <p className="mt-1 truncate text-sm text-[var(--text-strong)]">
-                        回看「{nextLearnConcept.name}」的字幕出处
+                        {t("concepts.reviewConcept", { name: nextLearnConcept.name })}
                         <span className="ml-2 text-xs text-[var(--text-muted)]">
-                          {dueCountsError ? "复习计划暂时不可用" : "当前没有到期卡"}
+                          {dueCountsError ? t("concepts.reviewUnavailable") : t("concepts.noDueCards")}
                         </span>
                       </p>
                     ) : (
-                      <p className="mt-1 text-sm text-[var(--text-faint)]">暂无可继续的内容</p>
+                      <p className="mt-1 text-sm text-[var(--text-faint)]">{t("concepts.noNextContent")}</p>
                     )}
                   </div>
                   {!dueCountsPending && nextReview && (
@@ -607,7 +611,7 @@ export function ConceptsPanel({
                       className="ca-touch-44 flex-none gap-1.5"
                     >
                       <Brain className="h-3.5 w-3.5" />
-                      开始复习
+                      {t("concepts.startReview")}
                     </Button>
                   )}
                   {!dueCountsPending && !nextReview && nextLearnConcept && nextOccurrence && (
@@ -623,7 +627,7 @@ export function ConceptsPanel({
                       className="ca-touch-44 inline-flex flex-none items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
                     >
                       <Play className="h-3.5 w-3.5 text-primary" />
-                      继续学习
+                      {t("concepts.continueLearning")}
                     </button>
                   )}
                 </div>
@@ -633,22 +637,22 @@ export function ConceptsPanel({
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-faint)]" />
                 <input
                   type="search"
-                  aria-label="搜索课程知识"
+                  aria-label={t("concepts.searchKnowledge")}
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="搜索知识点、结论或来源"
+                  placeholder={t("concepts.searchPlaceholder")}
                   className="ca-touch-44 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] py-2 pl-9 pr-3 text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:border-primary"
                 />
               </div>
               {query && matchedCount > 0 && (
                 <p aria-live="polite" className="-mt-4 text-xs text-[var(--text-muted)]">
-                  命中 {matchedCount}/{allConcepts.length} 个知识点 · {groups.length} 个主题
+                  {t("concepts.searchResults", { matched: matchedCount, total: allConcepts.length, groups: groups.length })}
                 </p>
               )}
 
               {groups.length === 0 ? (
                 <div className="py-10 text-center text-sm text-[var(--text-muted)]">
-                  没有匹配“{search.trim()}”的知识点。
+                  {t("concepts.noSearchResults", { query: search.trim() })}
                 </div>
               ) : (
                 <div className="space-y-7">
@@ -670,7 +674,7 @@ export function ConceptsPanel({
                           )}
                         </div>
                         <span className="flex-none text-xs text-[var(--text-faint)]">
-                          {group.concepts.length} 个知识点
+                          {t("concepts.conceptCount", { count: group.concepts.length })}
                         </span>
                       </div>
 
@@ -701,7 +705,7 @@ export function ConceptsPanel({
                                       </span>
                                     )}
                                     <span className="mt-1 block text-xs text-[var(--text-faint)]">
-                                      {sourceStats(concept)}
+                                      {sourceStats(concept, t)}
                                     </span>
                                   </span>
                                   <ChevronDown
@@ -717,7 +721,7 @@ export function ConceptsPanel({
                                     className="ca-touch-44 my-auto inline-flex flex-none items-center gap-1 rounded-lg bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary hover:!text-white"
                                   >
                                     <Brain className="h-3.5 w-3.5" />
-                                    复习 {due}
+                                    {t("concepts.reviewDue", { count: due })}
                                   </button>
                                 )}
                               </div>
@@ -725,7 +729,7 @@ export function ConceptsPanel({
                                 <div
                                   id={detailId}
                                   role="region"
-                                  aria-label={`${concept.name}的解释与来源`}
+                                  aria-label={t("concepts.conceptExplanation", { name: concept.name })}
                                   className="border-t border-[var(--border-subtle)] bg-[var(--surface-panel)] px-3 py-3"
                                 >
                                   {concept.explanation ? (
@@ -734,7 +738,7 @@ export function ConceptsPanel({
                                     </div>
                                   ) : (
                                     <p className="text-xs leading-5 text-[var(--text-muted)]">
-                                      暂无 AI 解释，重新分析课程后会依据字幕片段生成。
+                                      {t("concepts.noExplanation")}
                                     </p>
                                   )}
                                   <ConceptSources
@@ -747,8 +751,7 @@ export function ConceptsPanel({
                                   {due === 0 && (
                                     <div className="mt-3 border-t border-[var(--border-subtle)] pt-2.5">
                                       <p className="text-xs leading-5 text-[var(--text-muted)]">
-                                        暂无到期复习卡。可从相关视频的 AI
-                                        出题结果整理卡片（还没出题的视频需先在视频页生成测验）。
+                                        {t("concepts.noReviewCards")}
                                       </p>
                                       <button
                                         type="button"
@@ -757,15 +760,15 @@ export function ConceptsPanel({
                                         className="ca-touch-44 mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-1 text-xs font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-60"
                                       >
                                         <Wand2 className="h-3.5 w-3.5" />
-                                        {makeCards.isPending ? "整理中…" : "生成复习卡"}
+                                        {makeCards.isPending ? t("concepts.makingCards") : t("concepts.makeReviewCards")}
                                       </button>
                                       {/* 结果只贴在发起的那个知识点下，换知识点后不跟着走。 */}
                                       {makeCards.variables?.id === concept.id &&
                                         makeCards.isSuccess && (
                                           <p className="mt-1.5 text-xs text-[var(--text-muted)]">
                                             {makeCards.data > 0
-                                              ? `已整理 ${makeCards.data} 张复习卡：新卡立即可复习，已排期的卡片保持原计划。`
-                                              : "相关视频尚无 AI 题目，或题目出处不在这个知识点范围内。"}
+                                              ? t("concepts.madeCards", { count: makeCards.data })
+                                              : t("concepts.noCardsAvailable")}
                                           </p>
                                         )}
                                       {makeCards.variables?.id === concept.id &&
@@ -788,7 +791,7 @@ export function ConceptsPanel({
                   ))}
                 </div>
               )}
-              <p className="sr-only">共 {sourceCount} 处可回看来源。</p>
+              <p className="sr-only">{t("concepts.sourceCount", { count: sourceCount })}</p>
             </>
           )}
         </main>
@@ -799,23 +802,23 @@ export function ConceptsPanel({
             {/* 窄屏：抽屉浮层覆盖，半透明背板点击关闭；宽屏：在流内占 380px，左侧知识缩窄但仍可见。 */}
             <button
               type="button"
-              aria-label="关闭 AI 问答"
+              aria-label={t("concepts.closeChat")}
               onClick={() => setChatOpen(false)}
               className="absolute inset-0 z-20 bg-black/30 sm:hidden"
             />
             <aside
-              aria-label="课程 AI 问答"
+              aria-label={t("concepts.chatLabel")}
               className="absolute inset-y-0 right-0 z-30 flex w-full max-w-full flex-col border-l border-[var(--border-subtle)] bg-[var(--surface-app)] shadow-[var(--shadow-pop)] sm:static sm:z-auto sm:w-[380px] sm:flex-none sm:shadow-none"
             >
               <div className="flex flex-none items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-3 py-2.5">
                 <Sparkles className="h-4 w-4 flex-none text-primary" />
-                <span className="text-sm font-semibold text-[var(--text-strong)]">AI 问答</span>
-                <span className="truncate text-xs text-[var(--text-faint)]">· 基于本课程知识</span>
+                <span className="text-sm font-semibold text-[var(--text-strong)]">{t("concepts.chatTitle")}</span>
+                <span className="truncate text-xs text-[var(--text-faint)]">{t("concepts.chatSubtitle")}</span>
                 <button
                   type="button"
                   onClick={() => setChatOpen(false)}
-                  aria-label="关闭 AI 问答"
-                  title="关闭"
+                  aria-label={t("concepts.closeChat")}
+                  title={t("concepts.closeChatButton")}
                   className="ca-icon-btn ca-touch-44 ml-auto"
                 >
                   <X className="h-4 w-4" />

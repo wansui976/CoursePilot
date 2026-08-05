@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CheckCircle2, RotateCcw, X, XCircle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { ipc, type DueCard } from "@/lib/ipc";
 import { formatStudyInterval } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { MathText } from "./MathText";
 
-const GRADES: { rating: number; label: string; key: string }[] = [
-  { rating: 1, label: "重来", key: "1" },
-  { rating: 2, label: "困难", key: "2" },
-  { rating: 3, label: "良好", key: "3" },
-  { rating: 4, label: "容易", key: "4" },
+const GRADES: { rating: number; labelKey: string; key: string }[] = [
+  { rating: 1, labelKey: "review.again", key: "1" },
+  { rating: 2, labelKey: "review.hard", key: "2" },
+  { rating: 3, labelKey: "review.good", key: "3" },
+  { rating: 4, labelKey: "review.easy", key: "4" },
 ];
 const SESSION_LIMIT = 50;
 
@@ -65,6 +66,7 @@ export function ReviewSession({
   onJump: (card: DueCard) => void;
   concept?: { courseId: string; conceptId: string; name: string };
 }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: concept
@@ -179,10 +181,10 @@ export function ReviewSession({
             ? `${index + 1} / ${cards.length}`
             : concept
               ? concept.name
-              : "复习"}
+              : t("review.title")}
         </span>
         <button
-          aria-label="退出复习"
+          aria-label={t("review.exit")}
           onClick={onClose}
           className="ca-icon-btn ca-touch-44"
         >
@@ -194,11 +196,11 @@ export function ReviewSession({
         <div className="mx-auto flex min-h-full w-full max-w-xl items-center">
           <div className="w-full">
           {isLoading ? (
-            <p className="text-center text-sm text-[var(--text-faint)]">加载中…</p>
+            <p className="text-center text-sm text-[var(--text-faint)]">{t("review.loading")}</p>
           ) : isError ? (
             <div className="text-center">
               <p role="alert" className="text-sm text-[var(--status-err)]">
-                复习卡加载失败：{String(error)}
+                {t("review.loadError", { error: String(error) })}
               </p>
               <button
                 type="button"
@@ -206,7 +208,7 @@ export function ReviewSession({
                 onClick={() => void refetch()}
                 className="ca-touch-44 mt-4 rounded-lg border border-[var(--border-subtle)] px-4 py-2 text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
               >
-                {isFetching ? "重试中…" : "重试"}
+                {isFetching ? t("review.retrying") : t("review.retry")}
               </button>
             </div>
           ) : done ? (
@@ -214,16 +216,16 @@ export function ReviewSession({
               <div className="text-lg font-semibold text-[var(--text-strong)]">
                 {cards.length === 0
                   ? concept
-                    ? "这个概念没有待复习的卡片"
-                    : "今天没有待复习的卡片"
-                  : "复习完成 🎉"}
+                    ? t("review.noConceptCards")
+                    : t("review.noDueCards")
+                  : t("review.completed")}
               </div>
               <Button
                 variant="primary"
                 onClick={onClose}
                 className="ca-touch-44 mt-4"
               >
-                完成
+                {t("review.done")}
               </Button>
             </div>
           ) : card ? (
@@ -239,10 +241,10 @@ export function ReviewSession({
                 <div
                   className="mt-5 space-y-2"
                   role="group"
-                  aria-label={choiceData.multiple ? "多选题选项" : "单选题选项"}
+                  aria-label={choiceData.multiple ? t("review.choiceOptions") : t("review.singleOptions")}
                 >
                   <div className="text-xs font-medium text-[var(--text-muted)]">
-                    {choiceData.multiple ? "多选" : "单选"}
+                    {choiceData.multiple ? t("review.multipleChoice") : t("review.singleChoice")}
                   </div>
                   {choiceData.options.map((option, optionIndex) => {
                     const selected = selectedOptions.includes(option);
@@ -255,7 +257,7 @@ export function ReviewSession({
                         key={`${optionKey}-${option}`}
                         type="button"
                         aria-pressed={selected}
-                        aria-label={`选项 ${optionKey}：${option}`}
+                        aria-label={t("review.optionLabel", { key: optionKey, option })}
                         onClick={() => selectOption(option)}
                         className={cn(
                           "ca-touch-44 flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition",
@@ -297,12 +299,12 @@ export function ReviewSession({
                         </span>
                         {revealed && correct && (
                           <span className="flex-none text-xs font-medium text-[var(--status-ok)]">
-                            正确答案
+                            {t("review.correctAnswer")}
                           </span>
                         )}
                         {selectedWrong && (
                           <span className="flex-none text-xs font-medium text-[var(--status-err)]">
-                            你的选择
+                            {t("review.yourAnswer")}
                           </span>
                         )}
                       </button>
@@ -329,8 +331,8 @@ export function ReviewSession({
                         <XCircle className="h-4 w-4" aria-hidden="true" />
                       )}
                       {sameAnswers(selectedOptions, choiceData.correctOptions)
-                        ? "回答正确"
-                        : "回答不正确"}
+                        ? t("review.answerCorrect")
+                        : t("review.answerIncorrect")}
                     </div>
                   )}
                   <div className="mt-4 border-t border-[var(--border-subtle)] pt-4 text-center">
@@ -343,7 +345,7 @@ export function ReviewSession({
                         className="ca-touch-44 mt-3 inline-flex items-center gap-1 text-xs text-primary hover:underline"
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
-                        回看出处
+                        {t("review.reviewSource")}
                       </button>
                     )}
                   </div>
@@ -360,12 +362,12 @@ export function ReviewSession({
                           disabled={review.isPending}
                           aria-label={
                             interval == null
-                              ? g.label
-                              : `${g.label}，下次复习在 ${formatStudyInterval(interval)}后`
+                              ? t(g.labelKey)
+                              : t("review.nextReviewIn", { label: t(g.labelKey), interval: formatStudyInterval(interval) })
                           }
                           className="ca-touch-44 rounded-lg border border-[var(--border-subtle)] px-1 py-2 text-sm text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
                         >
-                          <span className="block font-medium">{g.label}</span>
+                          <span className="block font-medium">{t(g.labelKey)}</span>
                           {interval != null && (
                             <span className="mt-0.5 block truncate text-xs tabular-nums text-[var(--text-muted)]">
                               {formatStudyInterval(interval)}
@@ -381,7 +383,7 @@ export function ReviewSession({
                       role="alert"
                       className="mt-3 rounded-lg bg-[var(--status-err-bg)] px-3 py-2 text-center text-xs text-[var(--status-err)]"
                     >
-                      评分保存失败：{String(review.error)}。请重试。
+                      {t("review.ratingError", { error: String(review.error) })}
                     </p>
                   )}
                 </div>
@@ -392,7 +394,7 @@ export function ReviewSession({
                   disabled={Boolean(choiceData && selectedOptions.length === 0)}
                   className="ca-touch-44 mt-5 w-full"
                 >
-                  {choiceData ? "提交答案（空格）" : "显示答案（空格）"}
+                  {choiceData ? t("review.submitAnswer") : t("review.showAnswer")}
                 </Button>
               )}
             </div>

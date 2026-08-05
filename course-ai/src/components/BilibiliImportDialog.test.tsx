@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -254,5 +255,55 @@ describe("BilibiliImportDialog", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("focuses the URL field and keeps Tab focus inside the dialog", async () => {
+    mockTools.hasBilibiliCookies.mockResolvedValue(true);
+    renderDialog();
+
+    const input = screen.getByLabelText("视频链接");
+    await waitFor(() => expect(input).toHaveFocus());
+
+    const lastButton = screen.getByRole("button", { name: "下一步" });
+    lastButton.focus();
+    fireEvent.keyDown(lastButton, { key: "Tab" });
+
+    expect(input).toHaveFocus();
+  });
+
+  it("cannot close with Escape or an outside pointer while downloading", async () => {
+    let finishImport!: (video: { id: string }) => void;
+    const importing = new Promise<{ id: string }>((resolve) => {
+      finishImport = resolve;
+    });
+    const onClose = vi.fn();
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    mockTools.hasBilibiliCookies.mockResolvedValue(true);
+    mockTools.probeBilibili.mockResolvedValue({
+      title: "示例视频",
+      qualities: [1080],
+      tracks: [],
+    });
+    mockTools.importBilibili.mockReturnValue(importing);
+    render(
+      <QueryClientProvider client={qc}>
+        <BilibiliImportDialog courseId="c1" onClose={onClose} />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.change(screen.getByLabelText("视频链接"), {
+      target: { value: "https://b23.tv/abc" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    await screen.findByText("示例视频");
+    fireEvent.click(screen.getByRole("button", { name: "下载" }));
+    await screen.findByRole("button", { name: "下载中…" });
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.pointerDown(screen.getByTestId("bilibili-import-overlay"));
+    expect(onClose).not.toHaveBeenCalled();
+
+    finishImport({ id: "v1" });
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 });

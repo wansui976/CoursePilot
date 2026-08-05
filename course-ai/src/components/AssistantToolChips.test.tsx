@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { AssistantToolChips } from "./AssistantToolChips";

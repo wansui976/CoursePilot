@@ -5,6 +5,8 @@ import {
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   AlertCircle,
   ArrowDown,
@@ -155,35 +157,35 @@ function focusableElements(container: HTMLElement) {
   );
 }
 
-function contextLabel(context: AssistantContext) {
+function contextLabel(context: AssistantContext, t: TFunction) {
   if (context.video_id) {
     return context.position_ms != null && context.position_ms > 0
-      ? `当前视频 · ${formatPosition(context.position_ms)}`
-      : "当前视频";
+      ? t("assistant.scopeCurrentVideoAt", { position: formatPosition(context.position_ms) })
+      : t("assistant.scopeCurrentVideo");
   }
-  if (context.course_id) return "当前课程";
-  return "全部课程";
+  if (context.course_id) return t("assistant.scopeCurrentCourse");
+  return t("assistant.scopeAllCourses");
 }
 
-function suggestionsFor(context: AssistantContext) {
+function suggestionsFor(context: AssistantContext, t: TFunction) {
   if (context.video_id) {
     return [
-      { label: "概括当前视频", prompt: "概括当前视频的主要内容" },
-      { label: "查找例题", prompt: "查找当前视频里讲例题的位置" },
-      { label: "梳理知识重点", prompt: "梳理当前视频最重要的知识点" },
+      { label: t("assistant.suggestSummarizeVideo"), prompt: "概括当前视频的主要内容" },
+      { label: t("assistant.suggestFindExamples"), prompt: "查找当前视频里讲例题的位置" },
+      { label: t("assistant.suggestKeyPoints"), prompt: "梳理当前视频最重要的知识点" },
     ];
   }
   if (context.course_id) {
     return [
-      { label: "概览这门课程", prompt: "概览这门课程的主要内容" },
-      { label: "查看视频目录", prompt: "列出这门课程的全部视频" },
-      { label: "查找课程重点", prompt: "查找这门课程最重要的知识点" },
+      { label: t("assistant.suggestOverviewCourse"), prompt: "概览这门课程的主要内容" },
+      { label: t("assistant.suggestVideoList"), prompt: "列出这门课程的全部视频" },
+      { label: t("assistant.suggestCourseKeyPoints"), prompt: "查找这门课程最重要的知识点" },
     ];
   }
   return [
-    { label: "查看我的课程", prompt: "列出我的全部课程" },
-    { label: "规划下一步学习", prompt: "根据我的课程规划下一步学习" },
-    { label: "切换到夜间模式", prompt: "切换到夜间模式" },
+    { label: t("assistant.suggestMyCourses"), prompt: "列出我的全部课程" },
+    { label: t("assistant.suggestPlanStudy"), prompt: "根据我的课程规划下一步学习" },
+    { label: t("assistant.suggestDarkMode"), prompt: "切换到夜间模式" },
   ];
 }
 
@@ -201,6 +203,7 @@ export function AssistantPanel({
   /** 课程库窄屏下底部有 56px 主导航，抽屉和入口都要避开它。 */
   bottomNavigationVisible?: boolean;
 }) {
+  const { t } = useTranslation();
   const { open, side, width, setOpen, dock, setWidth } = useAssistantUi();
   const [initialSession] = useState(readAssistantSession);
   const [input, setInput] = useState(initialSession.draft);
@@ -243,14 +246,14 @@ export function AssistantPanel({
   // 「现在在干什么」跟着流走：先是等第一片，然后在思考，最后在作答。
   const pendingTurn = turns.find((turn) => turn.pending);
   const streamingLabel = pendingTurn?.answer
-    ? "正在作答…"
+    ? t("assistant.answering")
     : pendingTurn?.reasoning
-      ? "正在思考…"
-      : "正在思考并调用工具…";
+      ? t("assistant.thinkingStatus")
+      : t("assistant.thinkingWithTools");
   const setThemePref = useTheme((state) => state.setPref);
   const pendingInlineAsk = useInlineAsk((state) => state.pending);
   const clearInlineAsk = useInlineAsk((state) => state.clear);
-  const scopeLabel = contextLabel(context);
+  const scopeLabel = contextLabel(context, t);
 
   function navigateFromTurn(turn: Turn, action: AssistantAction) {
     // 时间点属于回答生成时的视频。用户可能在等待期间或之后切了视频，不能把旧时间戳
@@ -262,8 +265,9 @@ export function AssistantPanel({
     ) {
       onNavigate({
         kind: "open_video",
+        course_id: turn.context.course_id,
         video_id: turn.context.video_id,
-        title: "原视频",
+        title: t("assistant.originalVideo"),
         at_ms: action.at_ms,
       });
       return;
@@ -318,7 +322,7 @@ export function AssistantPanel({
       pendingInlineAsk.startMs == null
         ? ""
         : `（${formatMs(pendingInlineAsk.startMs)}）`;
-    const draft = `请解释这段文稿${source}：\n\n${pendingInlineAsk.text}`;
+    const draft = t("assistant.explainTranscript", { source, text: pendingInlineAsk.text });
     setInput((current) =>
       current.trim() ? `${current.trimEnd()}\n\n${draft}` : draft,
     );
@@ -883,7 +887,7 @@ export function AssistantPanel({
 
   async function copyAnswer(turn: Turn) {
     if (!turn.answer || !navigator.clipboard?.writeText) {
-      setError("当前环境无法使用剪贴板");
+      setError(t("assistant.clipboardUnavailable"));
       return;
     }
     try {
@@ -892,7 +896,7 @@ export function AssistantPanel({
       if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = window.setTimeout(() => setCopiedTurnId(null), 1500);
     } catch (e) {
-      setError(`复制失败：${humanizeError(e)}`);
+      setError(t("assistant.copyFailed", { error: humanizeError(e) }));
     }
   }
 
@@ -938,7 +942,7 @@ export function AssistantPanel({
     );
     historyRef.current = [
       ...historyRef.current,
-      { role: "assistant", content: `（界面操作结果：${message}）` },
+      { role: "assistant", content: t("assistant.uiActionResult", { message }) },
     ];
     setHistory(historyRef.current);
   }
@@ -991,8 +995,8 @@ export function AssistantPanel({
       <button
         ref={launcherRef}
         type="button"
-        aria-label="打开助手"
-        title={`打开助手 (${toggleShortcutLabel()})`}
+        aria-label={t("assistant.openAssistant")}
+        title={t("assistant.openWithShortcut", { shortcut: toggleShortcutLabel() })}
         data-dock-side={mobile ? undefined : side}
         onClick={() => {
           if (suppressLauncherClickRef.current) {
@@ -1029,7 +1033,7 @@ export function AssistantPanel({
         <button
           type="button"
           tabIndex={-1}
-          aria-label="关闭助手"
+          aria-label={t("assistant.closeAssistant")}
           onClick={() => collapseToNearestSide(true)}
           className="fixed inset-0 z-[46] cursor-default bg-black/20 motion-reduce:transition-none"
         />
@@ -1081,7 +1085,7 @@ export function AssistantPanel({
         <div
           role="separator"
           aria-orientation="vertical"
-          aria-label="调整助手宽度"
+          aria-label={t("assistant.adjustWidth")}
           aria-valuenow={panelWidth}
           aria-valuemin={MIN_PANEL_WIDTH}
           aria-valuemax={MAX_PANEL_WIDTH}
@@ -1103,14 +1107,14 @@ export function AssistantPanel({
               id="assistant-panel-title"
               className="min-w-0 flex-1 text-sm font-medium text-[var(--text-strong)]"
             >
-              助手
+              {t("assistant.title")}
             </span>
           </>
         ) : (
           <button
             type="button"
-            aria-label="拖动助手面板"
-            title="拖动助手面板"
+            aria-label={t("assistant.dragPanel")}
+            title={t("assistant.dragPanel")}
             onPointerDown={beginPanelDrag}
             onKeyDown={movePanelWithKeyboard}
             className="-ml-1 flex min-w-0 flex-1 touch-none select-none items-center gap-1.5 rounded-md px-1 py-1 text-left cursor-grab active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
@@ -1121,7 +1125,7 @@ export function AssistantPanel({
               id="assistant-panel-title"
               className="min-w-0 flex-1 text-sm font-medium text-[var(--text-strong)]"
             >
-              助手
+              {t("assistant.title")}
             </span>
           </button>
         )}
@@ -1129,8 +1133,8 @@ export function AssistantPanel({
           <Button
             size="icon"
             variant="ghost"
-            aria-label="新对话"
-            title="新对话"
+            aria-label={t("assistant.newChat")}
+            title={t("assistant.newChat")}
             disabled={busy}
             onClick={startNewConversation}
           >
@@ -1142,7 +1146,7 @@ export function AssistantPanel({
           <Button
             size="icon"
             variant="ghost"
-            aria-label={side === "left" ? "停靠到右边" : "停靠到左边"}
+            aria-label={side === "left" ? t("assistant.dockRight") : t("assistant.dockLeft")}
             onClick={() => movePanelToSide(side === "left" ? "right" : "left")}
           >
             {side === "left" ? (
@@ -1155,8 +1159,8 @@ export function AssistantPanel({
         <Button
           size="icon"
           variant="ghost"
-          aria-label="收起助手"
-          title={`收起助手 (${toggleShortcutLabel()})`}
+          aria-label={t("assistant.collapseAssistant")}
+          title={t("assistant.collapseWithShortcut", { shortcut: toggleShortcutLabel() })}
           onClick={() => collapseToNearestSide()}
         >
           <X className="h-4 w-4" />
@@ -1181,13 +1185,13 @@ export function AssistantPanel({
         {turns.length === 0 && !busy && !error && (
           <div className="flex min-h-full flex-col justify-center gap-4">
             <div>
-              <p className="text-[15px] font-medium text-[var(--text-strong)]">有什么可以帮你的？</p>
+              <p className="text-[15px] font-medium text-[var(--text-strong)]">{t("assistant.greeting")}</p>
               <p className="mt-1 text-xs leading-relaxed text-[var(--text-faint)]">
-                问{scopeLabel}的内容，也可以让我打开视频、跳到某一处或改设置。
+                {t("assistant.greetingHint", { scope: scopeLabel })}
               </p>
             </div>
             <div className="grid w-full gap-2">
-              {suggestionsFor(context).map((suggestion) => (
+              {suggestionsFor(context, t).map((suggestion) => (
                 <button
                   key={suggestion.prompt}
                   type="button"
@@ -1224,7 +1228,7 @@ export function AssistantPanel({
             {turn.reasoning && (
               <details className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card-hover)] px-2.5 py-1.5">
                 <summary className="cursor-pointer select-none text-xs text-[var(--text-faint)]">
-                  思考过程
+                  {t("assistant.thinking")}
                 </summary>
                 <div className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-muted)]">
                   {turn.reasoning}
@@ -1259,8 +1263,8 @@ export function AssistantPanel({
                   <Button
                     size="icon"
                     variant="ghost"
-                    aria-label={copiedTurnId === turn.id ? "已复制" : "复制回答"}
-                    title={copiedTurnId === turn.id ? "已复制" : "复制回答"}
+                    aria-label={copiedTurnId === turn.id ? t("assistant.copiedLabel") : t("assistant.copyAnswer")}
+                    title={copiedTurnId === turn.id ? t("assistant.copiedLabel") : t("assistant.copyAnswer")}
                     onClick={() => void copyAnswer(turn)}
                     className="h-7 w-7 text-[var(--text-faint)]"
                   >
@@ -1276,8 +1280,8 @@ export function AssistantPanel({
                     <Button
                       size="icon"
                       variant="ghost"
-                      aria-label="重新回答"
-                      title="重新回答"
+                      aria-label={t("assistant.regenerate")}
+                      title={t("assistant.regenerate")}
                       disabled={busy}
                       onClick={() => regenerate(turn)}
                       className="h-7 w-7 text-[var(--text-faint)]"
@@ -1313,7 +1317,7 @@ export function AssistantPanel({
                     className="-my-1 h-6 flex-none px-1.5 text-[11px]"
                   >
                     <RefreshCw className="mr-1 h-3 w-3" aria-hidden="true" />
-                    重新回答
+                    {t("assistant.regenerate")}
                   </Button>
                 )}
               </div>
@@ -1326,7 +1330,7 @@ export function AssistantPanel({
             />
 
             {turn.actionResults.length > 0 && (
-              <div aria-label="操作记录" className="space-y-1">
+              <div aria-label={t("assistant.actionRecord")} className="space-y-1">
                 {turn.actionResults.map((result, index) => (
                   <p
                     key={`${turn.id}-result-${index}`}
@@ -1336,7 +1340,7 @@ export function AssistantPanel({
                       className="mt-[0.45em] h-1.5 w-1.5 flex-none rounded-full bg-[var(--accent)]"
                       aria-hidden="true"
                     />
-                    <span className="min-w-0 break-words">操作结果：{result}</span>
+                    <span className="min-w-0 break-words">{t("assistant.actionResult", { result })}</span>
                   </p>
                 ))}
               </div>
@@ -1345,7 +1349,7 @@ export function AssistantPanel({
             {turn.canceled && (
               <p className="flex items-center gap-1 text-[10px] text-[var(--text-faint)]">
                 <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
-                已停止，未继续执行
+                {t("assistant.stopped")}
               </p>
             )}
           </div>
@@ -1358,7 +1362,7 @@ export function AssistantPanel({
           >
             <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
             {/* 正文改成流式之后，字已经在往外冒的时候再说「正在思考」就不对了。 */}
-            <span>{stopping ? "正在停止…" : streamingLabel}</span>
+            <span>{stopping ? t("assistant.stopping") : streamingLabel}</span>
           </div>
         )}
         {error && (
@@ -1381,7 +1385,7 @@ export function AssistantPanel({
           className="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] shadow-[var(--shadow-pop)] transition-colors hover:text-[var(--text-strong)] motion-reduce:transition-none"
         >
           <ArrowDown className="h-3 w-3" aria-hidden="true" />
-          回到最新
+          {t("assistant.scrollToLatest")}
         </button>
       )}
       </div>
@@ -1391,8 +1395,8 @@ export function AssistantPanel({
         <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-input)] focus-within:border-[var(--accent)]">
           <div className="px-2.5 pt-1.5">
             <span
-              aria-label={`当前提问范围：${scopeLabel}`}
-              title="「这个视频」这类说法会落到这里"
+              aria-label={t("assistant.scopeLabel", { scope: scopeLabel })}
+              title={t("assistant.scopeHint")}
               className="inline-flex max-w-full items-center gap-1 rounded-full bg-[var(--surface-card)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)]"
             >
               <AtSign className="h-2.5 w-2.5 flex-none" aria-hidden="true" />
@@ -1402,10 +1406,10 @@ export function AssistantPanel({
           <div className="flex items-end gap-2 px-2 pb-1.5 pt-1">
             <textarea
               ref={inputRef}
-              aria-label="对助手说"
+              aria-label={t("assistant.inputLabel")}
               rows={1}
               value={input}
-              placeholder="想做什么？"
+              placeholder={t("assistant.inputPlaceholder")}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 // Enter 发送、Shift+Enter 换行。输入法组词时的 Enter 不能当发送，
@@ -1421,8 +1425,8 @@ export function AssistantPanel({
               <Button
                 size="icon"
                 variant="outline"
-                aria-label="停止生成"
-                title="停止生成"
+                aria-label={t("assistant.stopGeneration")}
+                title={t("assistant.stopGeneration")}
                 disabled={stopping}
                 onClick={stop}
                 className="h-8 w-8 flex-none rounded-lg"
@@ -1432,8 +1436,8 @@ export function AssistantPanel({
             ) : (
               <Button
                 size="icon"
-                aria-label="发送"
-                title="发送 (Enter)"
+                aria-label={t("assistant.send")}
+                title={t("assistant.sendTitle")}
                 disabled={!input.trim()}
                 onClick={() => void send()}
                 className="h-8 w-8 flex-none rounded-lg"

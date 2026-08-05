@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation, useMutationState } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { Check, Copy, Send, Sparkles, Square, Trash2, User } from "lucide-react";
@@ -53,10 +54,11 @@ function CitationSources({
   currentVideoId: string;
   onJump: (c: Citation) => void;
 }) {
+  const { t } = useTranslation();
   if (!citations || citations.length === 0) return null;
   return (
     <div className="mt-2 border-t border-[var(--border-subtle)] pt-1.5">
-      <div className="mb-1 text-[11px] font-medium text-[var(--text-faint)]">来源</div>
+      <div className="mb-1 text-[11px] font-medium text-[var(--text-faint)]">{t("ragSearch.sources")}</div>
       <div className="space-y-0.5">
         {citations.map((c) => (
           <button
@@ -72,7 +74,7 @@ function CitationSources({
             {/* 这条出处来自课件画面而不是老师念的话——不标一下，读者会以为是原话。 */}
             {c.slide_image && (
               <span className="mr-1.5 rounded bg-[var(--surface-card-hover)] px-1 text-[10px] text-[var(--text-muted)]">
-                课件 P{c.slide_page ?? 0}
+                {t("ragSearch.slidePage", { page: c.slide_page ?? 0 })}
               </span>
             )}
             <span className="text-[var(--text-normal)]">{c.text}</span>
@@ -246,18 +248,19 @@ function buildAskContext(history: AskTurn[]): ChatMessage[] {
   ]);
 }
 
-const ASK_SUGGESTIONS = [
-  "这节课主要讲了什么？",
-  "帮我总结重点",
-  "有哪些关键概念和结论？",
-];
+const ASK_SUGGESTION_KEYS = [
+  "ragSearch.suggestion1",
+  "ragSearch.suggestion2",
+  "ragSearch.suggestion3",
+] as const;
 
-const ASK_SCOPES: { key: AskScope; label: string }[] = [
-  { key: "video", label: "本视频" },
-  { key: "course", label: "本课程" },
+const ASK_SCOPE_KEYS: { key: AskScope; i18nKey: string }[] = [
+  { key: "video", i18nKey: "ragSearch.scopeVideo" },
+  { key: "course", i18nKey: "ragSearch.scopeCourse" },
 ];
 
 function AskChatPanel({ videoId }: { videoId: string }) {
+  const { t } = useTranslation();
   const requestSeek = usePlayer((s) => s.requestSeek);
   const requestOpenAt = usePlayer((s) => s.requestOpenAt);
   const [scope, setScopeState] = useState<AskScope>(() => readAskScope());
@@ -413,7 +416,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
     // 有选区上下文时，把它作为强前缀拼进本轮问题（带时间戳出处），然后清除药丸。
     const pending = useInlineAsk.getState().pending;
     const finalQuery = pending
-      ? `【所选文稿${pending.startMs != null ? ` ${formatMs(pending.startMs)}` : ""}】${pending.text}\n\n${trimmed}`
+      ? t("ragSearch.selectionContext", { time: pending.startMs != null ? ` ${formatMs(pending.startMs)}` : "", text: pending.text, query: trimmed })
       : trimmed;
     ask.mutate({
       query: finalQuery,
@@ -436,11 +439,11 @@ function AskChatPanel({ videoId }: { videoId: string }) {
     ask.reset();
   };
   const onClearClick = async () => {
-    const ok = await confirmDialog("清空与这节课的全部问答？此操作不可撤销。", {
-      title: "清空对话",
+    const ok = await confirmDialog(t("ragSearch.clearConfirm"), {
+      title: t("ragSearch.clearConfirmTitle"),
       kind: "warning",
-      okLabel: "清空",
-      cancelLabel: "取消",
+      okLabel: t("ragSearch.clear"),
+      cancelLabel: t("ragSearch.cancel"),
     });
     if (ok) clearChat();
   };
@@ -482,10 +485,10 @@ function AskChatPanel({ videoId }: { videoId: string }) {
       <div className="flex-none border-b border-[var(--border-subtle)] px-3 py-2">
         <div
           role="group"
-          aria-label="提问范围"
+          aria-label={t("ragSearch.scopeLabel")}
           className="inline-flex items-center gap-0.5 self-start rounded-lg bg-[var(--surface-card)] p-0.5"
         >
-          {ASK_SCOPES.map((s) => (
+          {ASK_SCOPE_KEYS.map((s) => (
             <button
               key={s.key}
               type="button"
@@ -497,14 +500,14 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                   : "text-[var(--text-muted)] hover:text-[var(--text-normal)]"
               }`}
             >
-              {s.label}
+              {t(s.i18nKey)}
             </button>
           ))}
         </div>
       </div>
       <div
         ref={scrollerRef}
-        aria-label="聊天记录"
+        aria-label={t("ragSearch.chatHistory")}
         className="min-h-0 flex-1 space-y-5 overflow-y-auto p-3"
       >
         {history.length === 0 && inFlightQuery === undefined && (
@@ -513,20 +516,20 @@ function AskChatPanel({ videoId }: { videoId: string }) {
               <Sparkles className="h-6 w-6" />
             </span>
             <div>
-              <div className="text-sm font-medium text-[var(--text-strong)]">向这节课提问</div>
+              <div className="text-sm font-medium text-[var(--text-strong)]">{t("ragSearch.askVideo")}</div>
               <p className="mx-auto mt-1 max-w-[260px] text-xs leading-relaxed text-[var(--text-faint)]">
-                AI 会基于字幕回答，并标注 [mm:ss] 出处，可继续追问。
+                {t("ragSearch.qaHint")}
               </p>
             </div>
             <div className="flex flex-wrap justify-center gap-2">
-              {ASK_SUGGESTIONS.map((s) => (
+              {ASK_SUGGESTION_KEYS.map((key) => (
                 <button
-                  key={s}
+                  key={key}
                   type="button"
-                  onClick={() => submit(s)}
+                  onClick={() => submit(t(key))}
                   className="rounded-full border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-1.5 text-xs text-[var(--text-normal)] transition hover:border-[var(--accent-text)] hover:bg-[var(--surface-card-hover)]"
                 >
-                  {s}
+                  {t(key)}
                 </button>
               ))}
             </div>
@@ -539,7 +542,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
               {userAvatar}
               <div
                 role="article"
-                aria-label="我的提问"
+                aria-label={t("ragSearch.myQuestion")}
                 className="max-w-[82%] rounded-2xl rounded-tr-sm bg-primary/15 px-3 py-2"
               >
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-strong)]">
@@ -551,7 +554,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
               {aiAvatar}
               <div
                 role="article"
-                aria-label="AI 回复"
+                aria-label={t("ragSearch.aiReply")}
                 className="group relative min-w-0 max-w-[82%] rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2"
                 {...longPressProps(turn.id)}
               >
@@ -559,7 +562,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                 {turn.reasoning && (
                   <details className="mb-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card-hover)] px-2.5 py-1.5">
                     <summary className="cursor-pointer select-none text-xs text-[var(--text-faint)]">
-                      思考过程
+                      {t("ragSearch.thinking")}
                     </summary>
                     <div className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-muted)]">
                       {turn.reasoning}
@@ -577,8 +580,8 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                 <button
                   type="button"
                   onClick={() => copyAnswer(turn.id, turn.answer)}
-                  aria-label="复制回答"
-                  title="复制"
+                  aria-label={t("ragSearch.copyAnswer")}
+                  title={t("ragSearch.copy")}
                   className={`absolute bottom-1 right-1 grid h-6 w-6 flex-none place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-card)] text-[var(--text-muted)] shadow-[var(--shadow-raise)] transition hover:text-[var(--text-strong)] ${
                     touch
                       ? revealedCopyId === turn.id
@@ -604,7 +607,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
               {userAvatar}
               <div
                 role="article"
-                aria-label="我的提问"
+                aria-label={t("ragSearch.myQuestion")}
                 className="max-w-[82%] rounded-2xl rounded-tr-sm bg-primary/15 px-3 py-2"
               >
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-strong)]">
@@ -623,7 +626,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                       className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card-hover)] px-2.5 py-1.5"
                     >
                       <summary className="cursor-pointer select-none text-xs text-[var(--text-faint)]">
-                        思考过程
+                        {t("ragSearch.thinking")}
                       </summary>
                       <div className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-muted)]">
                         {streaming.reasoning}
@@ -633,7 +636,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                   {streaming?.text ? (
                     <div
                       role="article"
-                      aria-label="AI 回复"
+                      aria-label={t("ragSearch.aiReply")}
                       className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2"
                     >
                       <AnswerText
@@ -658,7 +661,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
                     <div className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-3">
                       <span
                         className="ca-typing inline-flex items-center gap-1 text-[var(--text-muted)]"
-                        aria-label="思考中"
+                        aria-label={t("ragSearch.thinkingLabel")}
                       >
                         <i className="ca-typing-dot" />
                         <i className="ca-typing-dot" style={{ animationDelay: "0.15s" }} />
@@ -694,13 +697,13 @@ function AskChatPanel({ videoId }: { videoId: string }) {
         {pendingAsk && (
           <div className="mb-1.5 flex items-start gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-muted)]">
             <span className="min-w-0 flex-1 truncate">
-              基于所选
+              {t("ragSearch.basedOnSelection")}
               {pendingAsk.startMs != null ? ` ${formatMs(pendingAsk.startMs)}` : ""}：
               {pendingAsk.text}
             </span>
             <button
               type="button"
-              aria-label="移除所选上下文"
+              aria-label={t("ragSearch.removeContext")}
               onClick={clearAsk}
               className="ca-touch-44 flex-none text-[var(--text-faint)] transition hover:text-[var(--text-strong)]"
             >
@@ -713,8 +716,8 @@ function AskChatPanel({ videoId }: { videoId: string }) {
             <button
               type="button"
               onClick={() => void onClearClick()}
-              aria-label="清空对话"
-              title="清空对话"
+              aria-label={t("ragSearch.clearChat")}
+              title={t("ragSearch.clearTitle")}
               className="ca-touch-44 inline-flex flex-none items-center justify-center rounded-full text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
             >
               <Trash2 className="h-4 w-4" />
@@ -722,9 +725,9 @@ function AskChatPanel({ videoId }: { videoId: string }) {
           )}
           <input
             ref={inputRef}
-            aria-label="聊天内容"
+            aria-label={t("ragSearch.chatInput")}
             type="text"
-            placeholder="继续追问…"
+            placeholder={t("ragSearch.placeholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -739,8 +742,8 @@ function AskChatPanel({ videoId }: { videoId: string }) {
             <button
               type="button"
               onClick={() => void ipc.ai.cancelRagQuery(cancellableRequestId)}
-              aria-label="停止生成"
-              title="停止生成"
+              aria-label={t("ragSearch.stopGeneration")}
+              title={t("ragSearch.stopTitle")}
               className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full bg-[var(--surface-card-active)] text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)]"
             >
               <Square className="h-3.5 w-3.5" />
@@ -750,8 +753,8 @@ function AskChatPanel({ videoId }: { videoId: string }) {
               type="button"
               onClick={() => submit()}
               disabled={busy || !query.trim()}
-              aria-label="发送"
-              title="发送（Enter）"
+              aria-label={t("ragSearch.send")}
+              title={t("ragSearch.sendTitle")}
               className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full bg-primary text-white transition hover:opacity-90 disabled:bg-[var(--surface-card-active)] disabled:text-[var(--text-muted)] disabled:hover:opacity-100"
             >
               <Send className="h-4 w-4" />
@@ -764,12 +767,13 @@ function AskChatPanel({ videoId }: { videoId: string }) {
 }
 
 type SearchScope = "video" | "course";
-const SCOPE_LABELS: { key: SearchScope; label: string }[] = [
-  { key: "video", label: "本视频" },
-  { key: "course", label: "本课程" },
+const SEARCH_SCOPE_KEYS: { key: SearchScope; i18nKey: string }[] = [
+  { key: "video", i18nKey: "ragSearch.scopeVideo" },
+  { key: "course", i18nKey: "ragSearch.scopeCourse" },
 ];
 
 function SearchTranscriptPanel({ videoId }: { videoId: string }) {
+  const { t } = useTranslation();
   const requestSeek = usePlayer((s) => s.requestSeek);
   const requestOpenAt = usePlayer((s) => s.requestOpenAt);
   const [scope, setScope] = useState<SearchScope>("video");
@@ -815,10 +819,10 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
       <div className="flex flex-none flex-col gap-2 border-b border-[var(--border-subtle)] p-3">
         <div
           role="group"
-          aria-label="搜索范围"
+          aria-label={t("ragSearch.searchScope")}
           className="inline-flex items-center gap-0.5 self-start rounded-lg bg-[var(--surface-card)] p-0.5"
         >
-          {SCOPE_LABELS.map((s) => (
+          {SEARCH_SCOPE_KEYS.map((s) => (
             <button
               key={s.key}
               aria-pressed={scope === s.key}
@@ -829,16 +833,16 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
                   : "text-[var(--text-muted)] hover:text-[var(--text-normal)]"
               }`}
             >
-              {s.label}
+              {t(s.i18nKey)}
             </button>
           ))}
         </div>
         <div className="flex items-center gap-2">
           <input
-            aria-label="搜索文稿内容"
+            aria-label={t("ragSearch.searchInput")}
             className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)]"
             placeholder={
-              scope === "course" ? "在本课程所有视频里搜…" : "搜字幕与课件文字…"
+              scope === "course" ? t("ragSearch.searchPlaceholderCourse") : t("ragSearch.searchPlaceholderVideo")
             }
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -847,7 +851,7 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
             }}
           />
           <Button size="sm" variant="default" disabled={busy || !query.trim()} onClick={submit}>
-            {busy ? "搜索中…" : "搜索"}
+            {busy ? t("ragSearch.searching") : t("ragSearch.searchButton")}
           </Button>
         </div>
       </div>
@@ -860,11 +864,11 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
         />
       )}
       <div
-        aria-label="搜索结果"
+        aria-label={t("ragSearch.searchResults")}
         className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3"
       >
         {history.length === 0 && (
-          <p className="text-sm text-[var(--text-faint)]">还没有搜索历史。</p>
+          <p className="text-sm text-[var(--text-faint)]">{t("ragSearch.noSearchHistory")}</p>
         )}
         {history.map((entry) => (
           <div
@@ -873,7 +877,7 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
           >
             <div className="mb-2 text-xs font-medium text-primary">{entry.query}</div>
             {entry.mode !== "search" || entry.citations.length === 0 ? (
-              <p className="text-sm text-[var(--text-muted)]">没有匹配的字幕或课件文字。</p>
+              <p className="text-sm text-[var(--text-muted)]">{t("ragSearch.noSearchResults")}</p>
             ) : (
               <div className="space-y-1">
                 {entry.citations.map((c) => (
@@ -887,7 +891,7 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
                       <SlideImage
                         videoId={c.video_id ?? videoId}
                         imagePath={c.slide_image}
-                        alt={`课件第 ${c.slide_page ?? 0} 页`}
+                        alt={t("ragSearch.slidePageAlt", { page: c.slide_page ?? 0 })}
                         className="h-10 w-16 flex-none rounded object-cover"
                       />
                     )}
@@ -900,7 +904,7 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
                       )}
                       {c.slide_image && (
                         <span className="mr-1.5 rounded bg-[var(--surface-card-hover)] px-1 text-[var(--text-muted)]">
-                          课件 P{c.slide_page ?? 0}
+                          {t("ragSearch.slidePage", { page: c.slide_page ?? 0 })}
                         </span>
                       )}
                       <span className="mr-1.5 text-primary">{formatMs(c.start_ms)}</span>

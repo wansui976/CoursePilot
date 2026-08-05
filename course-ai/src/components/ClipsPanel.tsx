@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { Play, Scissors, Trash2, X } from "lucide-react";
@@ -11,6 +12,7 @@ import type { Clip } from "@/lib/types";
 import { usePlayer } from "@/stores/player";
 
 export function ClipsPanel({ videoId }: { videoId: string }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const requestSeek = usePlayer((s) => s.requestSeek);
   // 懒读播放进度（不订阅，避免每秒重渲染）。
@@ -50,8 +52,8 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
   // 片段没有回收站兜底：删除先确认（与删视频/课程一致）。
   async function confirmRemove(clip: Clip) {
     const ok = await confirmDialog(
-      `删除片段 ${formatMs(clip.start_ms)} – ${formatMs(clip.end_ms)}？`,
-      { title: "删除片段", kind: "warning", okLabel: "删除", cancelLabel: "取消" },
+      t("clips.deleteConfirm", { range: `${formatMs(clip.start_ms)} – ${formatMs(clip.end_ms)}` }),
+      { title: t("clips.deleteTitle"), kind: "warning", okLabel: t("clips.delete"), cancelLabel: t("clips.cancel") },
     );
     if (ok) remove.mutate(clip.id);
   }
@@ -71,16 +73,16 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
         <Button
           onClick={onCapture}
           className="h-9"
-          title="播放到起点点一下，到终点再点一下"
+          title={t("clips.markStartTitle")}
         >
           {pendingStart == null
-            ? "标记起点"
-            : `标记终点 · 起 ${formatMs(pendingStart)}`}
+            ? t("clips.markStart")
+            : t("clips.markEnd", { time: formatMs(pendingStart) })}
         </Button>
         {pendingStart != null && (
           <button
             type="button"
-            aria-label="取消标记"
+            aria-label={t("clips.cancelMark")}
             className="rounded-md p-1 text-[var(--text-muted)] hover:text-[var(--text-strong)]"
             onClick={() => setPendingStart(null)}
           >
@@ -100,8 +102,8 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
         {clips.length === 0 ? (
           <PanelEmptyState
             icon={<Scissors className="h-7 w-7" />}
-            title="还没有收藏的片段"
-            description="播放时点「标记起点」，到终点再点「标记终点」，这一段就留在这里。"
+            title={t("clips.emptyTitle")}
+            description={t("clips.emptyDescription")}
           />
         ) : (
           <ul className="flex flex-col gap-2">
@@ -113,7 +115,7 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    aria-label="跳转"
+                    aria-label={t("clips.jump")}
                     className="flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-[var(--text-strong)] hover:bg-[var(--bg-sunken)]"
                     onClick={() => requestSeek(clip.start_ms)}
                   >
@@ -137,7 +139,7 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
                       })
                     }
                   >
-                    重设起点
+                    {t("clips.resetStart")}
                   </button>
                   <button
                     type="button"
@@ -151,11 +153,11 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
                       })
                     }
                   >
-                    重设终点
+                    {t("clips.resetEnd")}
                   </button>
                   <button
                     type="button"
-                    aria-label="删除片段"
+                    aria-label={t("clips.deleteClip")}
                     className="rounded-md p-1 text-[var(--text-muted)] hover:text-[var(--status-err)]"
                     onClick={() => void confirmRemove(clip)}
                   >
@@ -163,9 +165,9 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
                   </button>
                 </div>
                 <input
-                  aria-label="片段备注"
+                  aria-label={t("clips.clipNote")}
                   defaultValue={clip.note}
-                  placeholder="添加备注…"
+                  placeholder={t("clips.addNote")}
                   className="mt-2 w-full rounded-md border border-[var(--border-subtle)] bg-transparent px-2 py-1 text-sm outline-none focus:border-primary/70"
                   onBlur={(e) => {
                     const note = e.target.value;

@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -75,11 +76,12 @@ describe("CourseList", () => {
     expect(menu!.parentElement).toBe(document.body);
   });
 
-  it("shows a guiding empty state when there are no courses", async () => {
+  it("keeps the sidebar empty state concise when there are no courses", async () => {
     mockIpc.courses.list.mockResolvedValue([]);
     renderList({ selectedCourseId: null });
     await waitFor(() =>
-      expect(screen.getByText(/视频会按课程归档/)).toBeInTheDocument(),
+      expect(screen.getByText("暂无课程")).toBeInTheDocument(),
     );
+    expect(screen.queryByText(/视频会按课程归档/)).not.toBeInTheDocument();
   });
 });

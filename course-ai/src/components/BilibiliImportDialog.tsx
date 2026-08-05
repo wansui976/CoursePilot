@@ -1,5 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { humanizeError } from "@/lib/errors";
@@ -23,6 +25,13 @@ export function BilibiliImportDialog({
   onClose: () => void;
   onStartProcessing?: (video: Video) => void;
 }) {
+  const { t } = useTranslation();
+  const restoreFocusRef = useRef<HTMLElement | null>(
+    typeof document !== "undefined" &&
+      document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
   const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>("url");
   const [url, setUrl] = useState("");
@@ -148,56 +157,70 @@ export function BilibiliImportDialog({
     },
   });
 
-  // 模态框基本无障碍：Esc 关闭（下载中不关，避免误触中断正在进行的导入）。
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !importMutation.isPending) onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [importMutation.isPending]);
+  const closeBlocked =
+    preparing || step === "probing" || importMutation.isPending;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open && !closeBlocked) onClose();
+      }}
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="bili-import-title"
-        className="w-[420px] rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-5 shadow-[var(--shadow-pop)]"
-        onClick={(e) => e.stopPropagation()}
+      <Dialog.Overlay
+        data-testid="bilibili-import-overlay"
+        className="ca-dialog-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       >
-        <h2
-          id="bili-import-title"
+        <Dialog.Content
+          aria-modal="true"
+          aria-describedby={undefined}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            restoreFocusRef.current?.focus();
+          }}
+          onEscapeKeyDown={(event) => {
+            if (closeBlocked) event.preventDefault();
+          }}
+          onInteractOutside={(event) => {
+            if (closeBlocked) event.preventDefault();
+          }}
+          onPointerDownOutside={(event) => {
+            if (closeBlocked) event.preventDefault();
+          }}
+          className="w-[420px] rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-5 shadow-[var(--shadow-pop)]"
+        >
+        <Dialog.Title
           className="mb-3 text-sm font-semibold text-[var(--text-strong)]"
         >
-          下载 B站视频
-        </h2>
+          {t("bilibiliImport.title")}
+        </Dialog.Title>
 
         {step === "url" && (
           <div className="space-y-3">
             <input
-              aria-label="视频链接"
+              aria-label={t("bilibiliImport.linkLabel")}
               autoFocus
               className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm outline-none focus:border-primary/70"
-              placeholder="B 站 / 视频链接…"
+              placeholder={t("bilibiliImport.linkPlaceholder")}
               value={url}
               onChange={(e) => setUrl(e.target.value)}
             />
             {error && <p className="text-xs text-[var(--status-err)]">{humanizeError(error)}</p>}
             <div className="flex justify-end gap-2">
-              <Button size="sm" variant="outline" onClick={onClose}>
-                取消
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={closeBlocked}
+                onClick={onClose}
+              >
+                {t("bilibiliImport.cancel")}
               </Button>
               <Button
                 size="sm"
                 disabled={!url.trim() || preparing}
                 onClick={startUrl}
               >
-                {preparing ? "检查中…" : "下一步"}
+                {preparing ? t("bilibiliImport.checking") : t("bilibiliImport.next")}
               </Button>
             </div>
           </div>
@@ -206,23 +229,20 @@ export function BilibiliImportDialog({
         {step === "cookie" && (
           <div className="space-y-3 text-sm text-[var(--text-muted)]">
             {cookieReason === "expired" ? (
-              <p>
-                B站登录态可能已失效（下载报错 <b>HTTP 412</b> 等），需要重新导出
-                cookies.txt 再导入。
-              </p>
+              <p dangerouslySetInnerHTML={{ __html: t("bilibiliImport.cookieExpired") }} />
             ) : (
-              <p>B站自带字幕与高清晰度通常需要登录态，请先导入 cookies.txt。</p>
+              <p>{t("bilibiliImport.cookieNeeded")}</p>
             )}
             <ol className="list-decimal space-y-1 pl-5 text-xs leading-relaxed">
               <li>
-                Chrome 安装扩展
+                {t("bilibiliImport.chromeExtension")}
                 <b className="text-[var(--text-strong)]">
                   {" "}
                   Get cookies.txt LOCALLY{" "}
                 </b>
               </li>
-              <li>登录 bilibili.com，点扩展图标导出 cookies.txt</li>
-              <li>回到这里选择刚导出的 cookies.txt</li>
+              <li>{t("bilibiliImport.cookieStep1")}</li>
+              <li>{t("bilibiliImport.cookieStep2")}</li>
             </ol>
             {error && (
               <p className="whitespace-pre-wrap break-words text-xs text-[var(--status-err)]">
@@ -230,11 +250,16 @@ export function BilibiliImportDialog({
               </p>
             )}
             <div className="flex justify-end gap-2">
-              <Button size="sm" variant="outline" onClick={() => setStep("url")}>
-                返回
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={closeBlocked}
+                onClick={() => setStep("url")}
+              >
+                {t("bilibiliImport.back")}
               </Button>
               <Button size="sm" disabled={preparing} onClick={pickCookie}>
-                {preparing ? "导入中…" : "选择 cookies.txt"}
+                {preparing ? t("bilibiliImport.importing") : t("bilibiliImport.selectCookies")}
               </Button>
             </div>
           </div>
@@ -242,7 +267,7 @@ export function BilibiliImportDialog({
 
         {step === "probing" && (
           <p className="py-6 text-center text-sm text-[var(--text-muted)]">
-            正在探测视频信息…
+            {t("bilibiliImport.probing")}
           </p>
         )}
 
@@ -252,12 +277,12 @@ export function BilibiliImportDialog({
 
             <div>
               <div className="mb-1 text-xs font-medium text-[var(--text-muted)]">
-                清晰度
+                {t("bilibiliImport.quality")}
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {probe.qualities.length === 0 && (
                   <span className="text-xs text-[var(--text-faint)]">
-                    用最高可用
+                    {t("bilibiliImport.bestAvailable")}
                   </span>
                 )}
                 {probe.qualities.map((q) => (
@@ -275,7 +300,7 @@ export function BilibiliImportDialog({
             {probe.tracks.length > 0 ? (
               <div>
                 <div className="mb-1 text-xs font-medium text-[var(--text-muted)]">
-                  检测到自带字幕，可用它替代 AI 转写
+                  {t("bilibiliImport.subtitleDetected")}
                 </div>
                 <select
                   className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1.5 text-sm"
@@ -296,15 +321,15 @@ export function BilibiliImportDialog({
                     onChange={(e) => setAutocorrect(e.target.checked)}
                     className="h-3.5 w-3.5 accent-[var(--accent,#888)]"
                   />
-                  下载后用 AI 纠错字幕
+                  {t("bilibiliImport.aiCorrection")}
                 </label>
                 <p className="mt-1 text-xs text-[var(--text-faint)]">
-                  未配置大模型时将跳过纠错
+                  {t("bilibiliImport.aiCorrectionNote")}
                 </p>
               </div>
             ) : (
               <p className="text-xs text-[var(--text-faint)]">
-                未检测到自带字幕，将用语音转写。
+                {t("bilibiliImport.noSubtitle")}
               </p>
             )}
 
@@ -324,7 +349,7 @@ export function BilibiliImportDialog({
                     })
                   }
                 >
-                  不用字幕
+                  {t("bilibiliImport.skipSubtitle")}
                 </Button>
               )}
               <Button
@@ -340,15 +365,16 @@ export function BilibiliImportDialog({
                 }
               >
                 {importMutation.isPending
-                  ? "下载中…"
+                  ? t("bilibiliImport.downloading")
                   : probe.tracks.length > 0
-                    ? "用所选字幕下载"
-                    : "下载"}
+                    ? t("bilibiliImport.downloadWithSub")
+                    : t("bilibiliImport.download")}
               </Button>
             </div>
           </div>
         )}
-      </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Overlay>
+    </Dialog.Root>
   );
 }

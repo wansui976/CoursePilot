@@ -1,9 +1,13 @@
+import "@/i18n";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsPanel } from "./SettingsDialog";
 
 const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
+    backup: {
+      create: vi.fn(),
+    },
     settings: {
       get: vi.fn(),
       set: vi.fn(),
@@ -18,6 +22,10 @@ const { mockIpc } = vi.hoisted(() => ({
 const { pickDirectoryPathMock } = vi.hoisted(() => ({
   pickDirectoryPathMock: vi.fn(),
 }));
+const { saveFileMock, shareFileMock } = vi.hoisted(() => ({
+  saveFileMock: vi.fn(),
+  shareFileMock: vi.fn(),
+}));
 const mockUseContainerWidth = vi.hoisted(() => ({
   useContainerWidth: vi.fn(() => "wide"),
 }));
@@ -27,10 +35,13 @@ const mockPlatform = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
-vi.mock("@/lib/mobileFiles", () => ({ pickDirectoryPath: pickDirectoryPathMock }));
+vi.mock("@/lib/mobileFiles", () => ({
+  pickDirectoryPath: pickDirectoryPathMock,
+  shareFile: shareFileMock,
+}));
 vi.mock("@/lib/useContainerWidth", () => mockUseContainerWidth);
 vi.mock("@/lib/platform", () => mockPlatform);
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: saveFileMock }));
 vi.mock("./WhisperModelsPanel", () => ({
   WhisperModelsPanel: () => <div>Whisper 下载</div>,
 }));
@@ -49,10 +60,13 @@ describe("SettingsPanel", () => {
       return null;
     });
     mockIpc.settings.set.mockResolvedValue(undefined);
+    mockIpc.backup.create.mockReset().mockResolvedValue("/tmp/CoursePilot-backup.db");
     mockIpc.secrets.set.mockResolvedValue(undefined);
     mockIpc.secrets.has.mockResolvedValue(false);
     pickDirectoryPathMock.mockResolvedValue("/data/user/0/dev.courseai.app.debug/storage");
     mockIpc.notify.mockReset().mockResolvedValue(undefined);
+    saveFileMock.mockReset().mockResolvedValue("/tmp/CoursePilot-backup.db");
+    shareFileMock.mockReset().mockResolvedValue(undefined);
     localStorage.clear();
   });
 
@@ -149,6 +163,17 @@ describe("SettingsPanel", () => {
       expect(mockIpc.settings.set).toHaveBeenCalledWith("default_storage_root", ""),
     );
     expect(input).toHaveValue("");
+  });
+
+  it("places full database backup and its credential warning under storage", async () => {
+    render(<SettingsPanel onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "存储" }));
+
+    expect(screen.getByText("完整数据库备份")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "备份到文件…" })).toBeInTheDocument();
+    expect(screen.getByText(/备份包含已保存的 API 密钥/)).toBeInTheDocument();
+    expect(screen.getByText(/不包含视频、音频、课件图片和本地模型/)).toBeInTheDocument();
   });
 
   it("normalizes an invalid correction concurrency on blur", async () => {

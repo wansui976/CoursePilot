@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
@@ -73,12 +75,12 @@ function useHeatmapWeeks(): number {
   return weeks;
 }
 
-function heatCellLabel(cell: NonNullable<HeatCell>, reached: boolean): string {
+function heatCellLabel(cell: NonNullable<HeatCell>, reached: boolean, t: TFunction): string {
   const parts = [cell.day];
-  if (cell.ms > 0) parts.push(`学习 ${formatDuration(cell.ms)}`);
-  if (cell.reviews > 0) parts.push(`复习 ${cell.reviews} 张`);
-  if (parts.length === 1) parts.push("未学习");
-  if (reached) parts.push("已达标");
+  if (cell.ms > 0) parts.push(t("dashboard.studyDuration", { duration: formatDuration(cell.ms) }));
+  if (cell.reviews > 0) parts.push(t("dashboard.reviewCount", { count: cell.reviews }));
+  if (parts.length === 1) parts.push(t("dashboard.noStudy"));
+  if (reached) parts.push(t("dashboard.reached"));
   return parts.join(" · ");
 }
 
@@ -113,6 +115,7 @@ function HeatSquare({
   goalMs,
   onSelect,
   onNavigate,
+  t,
 }: {
   cell: HeatCell;
   today: string;
@@ -120,11 +123,12 @@ function HeatSquare({
   goalMs: number;
   onSelect: (day: string) => void;
   onNavigate: (day: string, offsetDays: number) => void;
+  t: TFunction;
 }) {
   if (!cell) return <span className="h-3 w-3" aria-hidden="true" />;
   // 目标只存当前值、没有按天留存，所以过去的达标是按「今天的目标」回看的。
   const reached = goalMs > 0 && cell.ms >= goalMs;
-  const label = heatCellLabel(cell, reached);
+  const label = heatCellLabel(cell, reached, t);
   const isToday = cell.day === today;
 
   return (
@@ -174,6 +178,7 @@ export function Dashboard({
   onResume: (courseId: string, videoId: string, positionSec: number) => void;
   onJump: (card: DueCard) => void;
 }) {
+  const { t } = useTranslation();
   const today = localDay(new Date());
   const fromTs = Date.now() - LOOKBACK_DAYS * 86_400_000;
   const heatmapWeeks = useHeatmapWeeks();
@@ -334,18 +339,18 @@ export function Dashboard({
       : 0;
   const reviewOutputLine =
     recentReviews.reviews > 0
-      ? `最近 7 天复习 ${recentReviews.reviews} 张 · 良好率 ${goodRate}%`
-      : "间隔重复 · 出题自动生成卡片";
+      ? t("dashboard.recentReviews", { reviews: recentReviews.reviews, rate: goodRate })
+      : t("dashboard.srsIntro");
   const nameOf = useMemo(() => {
     const map = new Map(courses.map((c) => [c.id, c.name]));
-    return (id: string) => map.get(id) ?? "（已删除课程）";
-  }, [courses]);
+    return (id: string) => map.get(id) ?? t("dashboard.deletedCourse");
+  }, [courses, t]);
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
       <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-4">
         <button
-          aria-label="返回"
+          aria-label={t("dashboard.back")}
           onClick={onClose}
           className="ca-icon-btn ca-touch-44 ml-0"
         >
@@ -353,7 +358,7 @@ export function Dashboard({
         </button>
         <h2 className="flex items-center gap-2 text-lg font-semibold text-[var(--text-strong)]">
           <LayoutDashboard className="h-4 w-4" />
-          学习面板
+          {t("dashboard.title")}
         </h2>
       </header>
 
@@ -362,7 +367,7 @@ export function Dashboard({
           {continueRows.length > 0 && (
             <div>
               <div className="mb-2 text-sm font-semibold text-[var(--text-strong)]">
-                继续学习
+                {t("dashboard.continueLearning")}
               </div>
               <ul className="space-y-2">
                 {continueRows.map((row) => {
@@ -382,7 +387,7 @@ export function Dashboard({
                           </div>
                           <div className="mt-0.5 truncate text-xs text-[var(--text-muted)]">
                             {row.course_name}
-                            {ratio > 0 && ` · 已看 ${Math.round(ratio * 100)}%`}
+                            {ratio > 0 && t("dashboard.watchedPercent", { percent: Math.round(ratio * 100) })}
                           </div>
                           {ratio > 0 && (
                             <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--surface-card-active)]">
@@ -394,7 +399,7 @@ export function Dashboard({
                           )}
                         </div>
                         <span className="flex-none text-xs font-medium text-[var(--text-muted)] transition group-hover:text-[var(--text-strong)]">
-                          {ratio > 0 ? "继续" : "开始"}
+                          {ratio > 0 ? t("dashboard.continue") : t("dashboard.start")}
                         </span>
                       </button>
                     </li>
@@ -414,12 +419,12 @@ export function Dashboard({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium text-[var(--text-strong)]">
-                  今日复习 {dueCount} 张
+                  {t("dashboard.reviewDue", { count: dueCount })}
                 </span>
                 <span className="block text-xs text-[var(--text-muted)]">{reviewOutputLine}</span>
               </span>
               <span className="flex-none rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white">
-                开始复习
+                {t("dashboard.startReview")}
               </span>
             </button>
           ) : (
@@ -430,12 +435,12 @@ export function Dashboard({
               </span>
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium text-[var(--text-strong)]">
-                  今天没有到期卡片
+                  {t("dashboard.noDueToday")}
                 </div>
                 <div className="text-xs text-[var(--text-muted)]">
                   {nextDueAt != null
-                    ? `下一批 ${formatCountdown(nextDueAt)}到期`
-                    : "还没有排期中的卡片，在视频页出题后会自动生成"}
+                    ? t("dashboard.nextDue", { time: formatCountdown(nextDueAt) })
+                    : t("dashboard.noScheduledCards")}
                 </div>
                 {recentReviews.reviews > 0 && (
                   <div className="mt-0.5 text-xs text-[var(--text-faint)]">{reviewOutputLine}</div>
@@ -446,12 +451,12 @@ export function Dashboard({
 
           <div
             role="group"
-            aria-label="学习统计"
+            aria-label={t("dashboard.stats")}
             className="grid grid-cols-3 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)]"
           >
-            <section aria-label="今日学习" className="min-w-0 px-3 py-3">
+            <section aria-label={t("dashboard.todayStudy")} className="min-w-0 px-3 py-3">
               <div className="flex min-h-7 items-center justify-between gap-1">
-                <span className="text-xs text-[var(--text-muted)]">今日学习</span>
+                <span className="text-xs text-[var(--text-muted)]">{t("dashboard.todayStudy")}</span>
                 <DailyGoalDialog value={goalMin} onSave={saveGoal} />
               </div>
               <div className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-strong)]">
@@ -460,10 +465,10 @@ export function Dashboard({
               {goalReached ? (
                 <div className="mt-1 flex items-center gap-1 text-xs font-medium text-[var(--accent-text)]">
                   <Check className="h-3.5 w-3.5 flex-none" />
-                  已达标 · {goalMin} 分钟
+                  {t("dashboard.goalReached", { min: goalMin })}
                 </div>
               ) : (
-                <div className="mt-1 text-xs text-[var(--text-muted)]">目标 {goalMin} 分钟</div>
+                <div className="mt-1 text-xs text-[var(--text-muted)]">{t("dashboard.goalTarget", { min: goalMin })}</div>
               )}
               <div
                 aria-hidden="true"
@@ -477,31 +482,31 @@ export function Dashboard({
             </section>
 
             <section
-              aria-label="本周学习"
+              aria-label={t("dashboard.weekStudy")}
               className="min-w-0 border-l border-[var(--border-subtle)] px-3 py-3"
             >
-              <div className="min-h-7 text-xs leading-7 text-[var(--text-muted)]">本周学习</div>
+              <div className="min-h-7 text-xs leading-7 text-[var(--text-muted)]">{t("dashboard.weekStudy")}</div>
               <div className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-strong)]">
                 {formatDuration(week)}
               </div>
               <div className="mt-1 text-xs leading-tight text-[var(--text-muted)]">
-                目标 {formatDuration(weekGoalMs)} · {weekGoalPercent}%
+                {t("dashboard.weekGoal", { duration: formatDuration(weekGoalMs), percent: weekGoalPercent })}
               </div>
             </section>
 
             <section
-              aria-label="连续学习"
+              aria-label={t("dashboard.streak")}
               className="min-w-0 border-l border-[var(--border-subtle)] px-3 py-3"
             >
-              <div className="min-h-7 text-xs leading-7 text-[var(--text-muted)]">连续学习</div>
+              <div className="min-h-7 text-xs leading-7 text-[var(--text-muted)]">{t("dashboard.streak")}</div>
               <div className="mt-1 flex items-center gap-1.5 text-lg font-semibold tabular-nums text-[var(--text-strong)]">
                 <Flame
                   className={`h-4 w-4 flex-none ${streak > 0 ? "text-[var(--status-warn,#e08a00)]" : "text-[var(--text-faint)]"}`}
                 />
-                {streak} 天
+                {t("dashboard.streakDays", { days: streak })}
               </div>
               <div className="mt-1 text-xs leading-tight text-[var(--text-muted)]">
-                {todayWatched > 0 || todayReviews > 0 ? "今天已学习" : "今天尚未学习"}
+                {todayWatched > 0 || todayReviews > 0 ? t("dashboard.studiedToday") : t("dashboard.notStudiedToday")}
               </div>
             </section>
           </div>
@@ -510,7 +515,7 @@ export function Dashboard({
             <div>
               <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-[var(--text-strong)]">
                 <TrendingDown className="h-4 w-4 text-[var(--status-warn,#e08a00)]" />
-                薄弱主题
+                {t("dashboard.weakTopics")}
               </div>
               <ul className="space-y-2">
                 {weak.map((w) => (
@@ -530,12 +535,11 @@ export function Dashboard({
                           {w.name}
                         </div>
                         <div className="mt-0.5 truncate text-xs text-[var(--text-muted)]">
-                          {w.course_name} · 差评率 {Math.round(w.again_rate * 100)}%（{w.fails}/
-                          {w.reviews}）
+                          {t("dashboard.weakDetail", { course: w.course_name, rate: Math.round(w.again_rate * 100), fails: w.fails })}{w.reviews}）
                         </div>
                       </div>
                       <span className="flex-none rounded-md bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary">
-                        复习
+                        {t("dashboard.reviewButton")}
                       </span>
                     </button>
                   </li>
@@ -546,13 +550,13 @@ export function Dashboard({
 
           <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
             <div className="mb-2 flex items-center justify-between">
-              <div className="text-sm font-semibold text-[var(--text-strong)]">学习热力图</div>
+              <div className="text-sm font-semibold text-[var(--text-strong)]">{t("dashboard.heatmap")}</div>
               <div className="flex items-center gap-1 text-[11px] text-[var(--text-faint)]">
-                <span>少</span>
+                <span>{t("dashboard.less")}</span>
                 {HEAT_LEVEL_BG.map((bg, i) => (
                   <span key={i} className={`h-3 w-3 rounded-[2px] ${bg}`} />
                 ))}
-                <span>多</span>
+                <span>{t("dashboard.more")}</span>
               </div>
             </div>
             <div className="overflow-x-auto pb-1">
@@ -577,7 +581,7 @@ export function Dashboard({
                 <div
                   ref={heatmapRef}
                   role="group"
-                  aria-label={`最近 ${heatmapWeeks} 周学习热力图`}
+                  aria-label={t("dashboard.heatmapAria", { weeks: heatmapWeeks })}
                   className="flex gap-1"
                 >
                   {heatmap.map((column, columnIndex) => {
@@ -601,6 +605,7 @@ export function Dashboard({
                             active={cell?.day === activeHeatDay}
                             onSelect={setActiveHeatDay}
                             onNavigate={navigateHeatDay}
+                            t={t}
                           />
                         ))}
                       </div>
@@ -615,18 +620,18 @@ export function Dashboard({
               className="mt-2 min-h-4 text-xs text-[var(--text-muted)]"
             >
               {activeHeatCell
-                ? heatCellLabel(activeHeatCell, goalMs > 0 && activeHeatCell.ms >= goalMs)
-                : "暂无学习记录"}
+                ? heatCellLabel(activeHeatCell, goalMs > 0 && activeHeatCell.ms >= goalMs, t)
+                : t("dashboard.noRecords")}
             </div>
           </div>
 
           <div>
             <div className="mb-2 text-sm font-semibold text-[var(--text-strong)]">
-              各课程
+              {t("dashboard.courses")}
             </div>
             {courseTotals.length === 0 ? (
               <p className="rounded-lg border border-[var(--border-faint)] bg-[var(--surface-card)] px-4 py-6 text-center text-sm text-[var(--text-muted)]">
-                还没有学习记录。
+                {t("dashboard.noStudyRecords")}
               </p>
             ) : (
               <ul className="space-y-2">
@@ -651,14 +656,14 @@ export function Dashboard({
                             {nameOf(c.course_id)}
                           </div>
                           <div className="mt-0.5 text-xs text-[var(--text-muted)]">
-                            已学 {formatDuration(c.watched_ms)} · 上次{" "}
+                            {t("dashboard.courseWatched", { duration: formatDuration(c.watched_ms) })}
                             {relativeDay(c.last_ts, today)}
-                            {total > 0 && ` · 完成 ${watched}/${total} 讲`}
+                            {total > 0 && t("dashboard.courseCompletion", { watched, total })}
                           </div>
                         </div>
                         {due > 0 && (
                           <span className="flex-none rounded-md bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary">
-                            待复习 {due}
+                            {t("dashboard.courseDue", { count: due })}
                           </span>
                         )}
                       </button>

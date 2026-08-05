@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QuizPanel } from "./QuizPanel";
 
@@ -27,11 +28,14 @@ function renderQuizPanel() {
     },
   });
 
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <QuizPanel videoId="video-1" />
-    </QueryClientProvider>,
-  );
+  return {
+    queryClient,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <QuizPanel videoId="video-1" />
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 describe("QuizPanel", () => {
@@ -201,5 +205,68 @@ describe("QuizPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "生成" }));
 
     expect(await screen.findByText(/模型没配好/)).toBeInTheDocument();
+  });
+
+  it("hides answers revealed for the previous video when videoId changes", async () => {
+    mockIpc.ai.getQuiz.mockResolvedValue(
+      JSON.stringify([{ type: "judge", stem: "地球是圆的", answer: true }]),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const ui = (videoId: string) => (
+      <QueryClientProvider client={queryClient}>
+        <QuizPanel videoId={videoId} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(ui("video-1"));
+
+    fireEvent.click(await screen.findByRole("button", { name: "显示答案" }));
+    expect(await screen.findByText(/答案：/)).toBeInTheDocument();
+
+    rerender(ui("video-2"));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "显示答案" })).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/答案：/)).not.toBeInTheDocument();
+  });
+
+  it("hides revealed answers when the same video's regenerated quiz arrives", async () => {
+    mockIpc.ai.getQuiz
+      .mockResolvedValueOnce(
+        JSON.stringify([{ type: "judge", stem: "旧题", answer: true }]),
+      )
+      .mockResolvedValue(
+        JSON.stringify([{ type: "judge", stem: "新题", answer: false }]),
+      );
+    renderQuizPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "显示答案" }));
+    expect(await screen.findByText(/答案：/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "重新生成" }));
+
+    expect(await screen.findByText("新题")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "显示答案" })).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/答案：/)).not.toBeInTheDocument();
+  });
+
+  it("does not reuse revealed indexes when the query cache receives a new quiz", async () => {
+    const oldQuiz = JSON.stringify([{ type: "judge", stem: "旧题", answer: true }]);
+    const newQuiz = JSON.stringify([{ type: "judge", stem: "外部更新的新题", answer: false }]);
+    mockIpc.ai.getQuiz.mockResolvedValue(oldQuiz);
+    const { queryClient } = renderQuizPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "显示答案" }));
+    expect(await screen.findByText(/答案：/)).toBeInTheDocument();
+
+    act(() => queryClient.setQueryData(["quiz", "video-1"], newQuiz));
+
+    expect(await screen.findByText("外部更新的新题")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "显示答案" })).toBeInTheDocument();
+    expect(screen.queryByText(/答案：/)).not.toBeInTheDocument();
   });
 });

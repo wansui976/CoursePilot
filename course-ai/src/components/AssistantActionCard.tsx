@@ -10,6 +10,8 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import i18n from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
@@ -88,7 +90,7 @@ async function processImportedVideo(videoId: string) {
     await ipc.pipeline.process(videoId);
   } catch (error) {
     throw new AssistantActionError(
-      `视频已导入，但后续处理失败：${humanizeError(error)}。重试只会继续处理，不会重复下载。`,
+      i18n.t("assistantActions.importSuccess", { error: humanizeError(error) }),
     );
   }
 }
@@ -105,7 +107,7 @@ async function importWithSubtitles(courseId: string, url: string, resume: Import
   const hasCookies = await ipc.tools.hasBilibiliCookies();
   if (!hasCookies) {
     throw new AssistantActionError(
-      "还没有导入 B 站 cookies，下载会被拦截。请先在导入对话框里导入一次 cookies.txt",
+      i18n.t("assistantActions.noCookies"),
     );
   }
   const probe = await ipc.tools.probeBilibili(url);
@@ -144,7 +146,7 @@ async function execute(action: Proposal, importResume?: ImportResume) {
       await ipc.settings.set(action.key, action.value);
       return;
     case "propose_import":
-      if (!action.course_id) throw new Error("没有指定要导入到哪门课程");
+      if (!action.course_id) throw new Error(i18n.t("assistantActions.noCourseId"));
       await importWithSubtitles(action.course_id, action.url, importResume);
       return;
     case "propose_create_course":
@@ -165,12 +167,12 @@ function describe(action: Proposal): { primary: string; secondary?: string } {
     case "propose_setting":
       return {
         primary: action.label,
-        secondary: `${action.current ?? "未设置"} → ${action.value}`,
+        secondary: i18n.t("assistantActions.settingChange", { current: action.current ?? i18n.t("assistantActions.notSet"), value: action.value }),
       };
     case "propose_import":
       return { primary: action.title, secondary: action.url };
     case "propose_create_course":
-      return { primary: action.name, secondary: `建在 ${action.root_path}` };
+      return { primary: action.name, secondary: i18n.t("assistantActions.createAt", { path: action.root_path }) };
     case "propose_rename_course":
       return { primary: action.new_name, secondary: action.current_name };
   }
@@ -178,34 +180,34 @@ function describe(action: Proposal): { primary: string; secondary?: string } {
 
 const META: Record<
   Proposal["kind"],
-  { icon: React.ReactNode; title: string; confirm: string; danger?: boolean }
+  { icon: React.ReactNode; titleKey: string; confirmKey: string; danger?: boolean }
 > = {
-  propose_rename: { icon: <PenLine className="h-3.5 w-3.5" />, title: "改名", confirm: "确认改名" },
+  propose_rename: { icon: <PenLine className="h-3.5 w-3.5" />, titleKey: "assistantActions.renameTitle", confirmKey: "assistantActions.renameConfirm" },
   propose_delete: {
     icon: <Trash2 className="h-3.5 w-3.5" />,
-    title: "删除视频",
-    confirm: "确认删除",
+    titleKey: "assistantActions.deleteTitle",
+    confirmKey: "assistantActions.deleteConfirm",
     danger: true,
   },
   propose_setting: {
     icon: <Settings2 className="h-3.5 w-3.5" />,
-    title: "修改设置",
-    confirm: "确认修改",
+    titleKey: "assistantActions.settingTitle",
+    confirmKey: "assistantActions.settingConfirm",
   },
   propose_import: {
     icon: <Download className="h-3.5 w-3.5" />,
-    title: "导入视频",
-    confirm: "确认导入",
+    titleKey: "assistantActions.importTitle",
+    confirmKey: "assistantActions.importConfirm",
   },
   propose_create_course: {
     icon: <FolderPlus className="h-3.5 w-3.5" />,
-    title: "新建课程",
-    confirm: "确认创建",
+    titleKey: "assistantActions.createTitle",
+    confirmKey: "assistantActions.createConfirm",
   },
   propose_rename_course: {
     icon: <PenLine className="h-3.5 w-3.5" />,
-    title: "课程改名",
-    confirm: "确认改名",
+    titleKey: "assistantActions.courseRenameTitle",
+    confirmKey: "assistantActions.courseRenameConfirm",
   },
 };
 
@@ -233,6 +235,7 @@ function ProposalGroup({
   onDone: () => void;
   onResult?: (message: string) => void;
 }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [skipped, setSkipped] = useState<Set<number>>(new Set());
   const [completed, setCompleted] = useState<Set<number>>(new Set());
@@ -244,6 +247,8 @@ function ProposalGroup({
   const [stopRequested, setStopRequested] = useState(false);
 
   const meta = META[actions[0].kind];
+  const title = t(meta.titleKey);
+  const confirmLabel = t(meta.confirmKey);
   const chosen = actions.map((action, i) => ({ action, i })).filter(({ i }) => !skipped.has(i));
   const remaining = chosen.filter(({ i }) => !completed.has(i));
   const batch = actions.length > 1;
@@ -286,9 +291,9 @@ function ProposalGroup({
     if (succeeded.length > 0) {
       setCompleted((prev) => new Set([...prev, ...succeeded]));
       onResult?.(
-        `已完成${meta.title}：${succeeded
+        t("assistantActions.completeResult", { title, details: succeeded
           .map((index) => describe(actions[index]).primary)
-          .join("、")}`,
+          .join("、") }),
       );
     }
     if (shouldRefresh) {
@@ -296,17 +301,17 @@ function ProposalGroup({
         await refreshAfter(actions[0], queryClient);
       } catch {
         // 动作已经落库，刷新失败不能把它伪装成「执行失败」再让用户重做一次。
-        setWarning("操作已经完成，但列表没有自动刷新。请手动刷新后确认结果。");
+        setWarning(t("assistantActions.refreshFailed"));
       }
     }
     const completedAfter = new Set([...completed, ...succeeded]);
     const unfinishedAfter = chosen.filter(({ i }) => !completedAfter.has(i));
     if (interrupted) {
-      setWarning(`已停止，剩余 ${unfinishedAfter.length} 项尚未完成，可稍后继续。`);
+      setWarning(t("assistantActions.stoppedResult", { count: unfinishedAfter.length }));
       onResult?.(
-        `用户停止了剩余${meta.title}，尚未完成：${unfinishedAfter
+        t("assistantActions.canceledResult", { title, details: unfinishedAfter
           .map(({ action }) => describe(action).primary)
-          .join("、")}`,
+          .join("、") }),
       );
       setStatus("paused");
       return;
@@ -317,11 +322,11 @@ function ProposalGroup({
     }
     // 批量里失败几项时必须说清是哪几项。只报一条错，用户无从知道该重做什么。
     setError(
-      `${succeeded.length} 项完成，${failures.length} 项失败：${failures
+      t("assistantActions.partialResult", { succeeded: succeeded.length, failed: failures.length, details: failures
         .map(({ message }) => message)
-        .join("；")}`,
+        .join("；") }),
     );
-    onResult?.(`没能完成${meta.title}：${failures.map(({ message }) => message).join("；")}`);
+    onResult?.(t("assistantActions.executionError", { error: failures.map(({ message }) => message).join("；") }));
     setStatus("failed");
   }
 
@@ -332,16 +337,16 @@ function ProposalGroup({
 
   function dismiss() {
     onResult?.(
-      `用户取消了${meta.title}：${remaining
+      t("assistantActions.canceledResult", { title, details: remaining
         .map(({ action }) => describe(action).primary)
-        .join("、")}`,
+        .join("、") }),
     );
     onDone();
   }
 
   function skip(index: number, action: Proposal) {
     setSkipped((prev) => new Set(prev).add(index));
-    onResult?.(`用户跳过了${meta.title}：${describe(action).primary}`);
+    onResult?.(t("assistantActions.canceledResult", { title, details: describe(action).primary }));
   }
 
   if (chosen.length === 0) return null;
@@ -356,8 +361,8 @@ function ProposalGroup({
     >
       <div className="mb-1.5 flex items-center gap-1.5 font-medium text-[var(--text-strong)]">
         {meta.icon}
-        {meta.title}
-        {batch && <span className="text-[var(--text-muted)]">{chosen.length} 项</span>}
+        {title}
+        {batch && <span className="text-[var(--text-muted)]">{t("assistantActions.items", { count: chosen.length })}</span>}
       </div>
 
       <ul className="mb-2 space-y-1">
@@ -380,13 +385,13 @@ function ProposalGroup({
               {completed.has(i) && (
                 <span className="flex flex-none items-center gap-1 text-[var(--status-ok)]">
                   <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                  已完成
+                  {t("assistantActions.completed")}
                 </span>
               )}
               {batch && (status === "pending" || status === "paused") && (
                 <button
                   type="button"
-                  aria-label={`跳过 ${primary}`}
+                  aria-label={t("assistantActions.skip", { name: primary })}
                   onClick={() => skip(i, action)}
                   className="ca-touch-44 flex-none rounded p-0.5 text-[var(--text-faint)] transition hover:text-[var(--text-strong)]"
                 >
@@ -399,19 +404,19 @@ function ProposalGroup({
       </ul>
 
       {actions[0].kind === "propose_delete" && (
-        <p className="mb-2 text-[var(--text-muted)]">进回收站，30 天内可还原。</p>
+        <p className="mb-2 text-[var(--text-muted)]">{t("assistantActions.recycleBinNote")}</p>
       )}
       {missingImportCourse && (
         <p className="mb-2 flex items-center gap-1 text-[var(--status-err)]">
           <AlertTriangle className="h-3.5 w-3.5" />
-          还没选课程，先打开一门课程再导入
+          {t("assistantActions.noCourseSelected")}
         </p>
       )}
 
       {status === "done" ? (
         <div className="flex items-center gap-1 text-[var(--status-ok)]">
           <Check className="h-3.5 w-3.5" />
-          已生效
+          {t("assistantActions.applied")}
         </div>
       ) : (
         <div className="flex items-center gap-2">
@@ -422,14 +427,14 @@ function ProposalGroup({
             onClick={confirm}
           >
             {status === "running"
-              ? "执行中…"
+              ? t("assistantActions.executing")
               : status === "failed"
-                ? `重试失败的 ${remaining.length} 项`
+                ? t("assistantActions.retryFailed", { count: remaining.length })
                 : status === "paused"
-                  ? `继续剩余 ${remaining.length} 项`
+                  ? t("assistantActions.continueRemaining", { count: remaining.length })
                   : batch
-                    ? `${meta.confirm} ${chosen.length} 项`
-                    : meta.confirm}
+                    ? t("assistantActions.confirmBatch", { action: confirmLabel, count: chosen.length })
+                    : confirmLabel}
           </Button>
           {status === "running" ? (
             <Button
@@ -438,18 +443,18 @@ function ProposalGroup({
               disabled={stopRequested}
               onClick={stopRemaining}
             >
-              {stopRequested ? "停止中…" : "停止剩余"}
+              {stopRequested ? t("assistantActions.stopping") : t("assistantActions.stopRemaining")}
             </Button>
           ) : (
             <Button size="sm" variant="ghost" onClick={dismiss}>
-              取消
+              {t("assistantActions.cancel")}
             </Button>
           )}
         </div>
       )}
       {error && (
         <p role="alert" className="mt-1.5 text-[var(--status-err)]">
-          没能执行：{error}
+          {t("assistantActions.executionError", { error })}
         </p>
       )}
       {warning && (
@@ -471,6 +476,7 @@ export function AssistantActionList({
   onNavigate: (action: AssistantAction) => void;
   onResult?: (message: string) => void;
 }) {
+  const { t } = useTranslation();
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
   // 按出现顺序分组，相邻同类合并。不重排：助手交代事情是有先后的。
@@ -491,21 +497,21 @@ export function AssistantActionList({
         .map((group) => {
           const first = group.items[0];
           if (first.kind === "set_theme") {
-            const label = { dark: "夜间", light: "日间", auto: "跟随系统" }[first.pref];
+            const themeLabel = { dark: t("assistantActions.themeDark"), light: t("assistantActions.themeLight"), auto: t("assistantActions.themeAuto") }[first.pref];
             return (
               <p
                 key={group.key}
                 className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-2 text-xs text-[var(--text-muted)]"
               >
-                已切换到{label}主题
+                {t("assistantActions.switchedTheme", { label: themeLabel })}
               </p>
             );
           }
           if (first.kind === "open_video" || first.kind === "seek_to") {
             const label =
               first.kind === "open_video"
-                ? `打开《${first.title}》`
-                : `跳到 ${formatMs(first.at_ms)}`;
+                ? t("assistantActions.openVideo", { title: first.title })
+                : t("assistantActions.seekTo", { time: formatMs(first.at_ms) });
             return (
               <button
                 key={group.key}

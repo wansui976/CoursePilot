@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -59,9 +60,44 @@ function renderTranscriptPanel(instanceKey = "one") {
 describe("TranscriptPanel", () => {
   beforeEach(() => {
     localStorage.clear();
+    mockIpc.transcripts.list.mockReset();
+    mockIpc.transcripts.update.mockReset();
+    mockIpc.export.subtitles.mockReset();
     mockIpc.transcripts.list.mockResolvedValue(makeSegments(60));
     mockIpc.srs.addCard.mockReset().mockResolvedValue("m:1");
     useInlineAsk.setState({ pending: null });
+  });
+
+  it("shows a skeleton while the transcript is loading", () => {
+    mockIpc.transcripts.list.mockReturnValue(new Promise(() => {}));
+
+    renderTranscriptPanel("loading");
+
+    expect(screen.getByRole("status", { name: "正在加载文稿" })).toBeInTheDocument();
+    expect(screen.queryByText(/尚无文稿/)).not.toBeInTheDocument();
+  });
+
+  it("shows transcript load errors and retries them", async () => {
+    mockIpc.transcripts.list
+      .mockRejectedValueOnce(new Error("transcript load failed"))
+      .mockResolvedValueOnce(makeSegments(1));
+    renderTranscriptPanel("load-error");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("transcript load failed");
+    fireEvent.click(screen.getByRole("button", { name: /重试/ }));
+
+    expect(await screen.findByText("第 1 句文稿内容")).toBeInTheDocument();
+    expect(mockIpc.transcripts.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a distinct empty state after an empty transcript loads", async () => {
+    mockIpc.transcripts.list.mockResolvedValue([]);
+
+    renderTranscriptPanel("empty");
+
+    expect(await screen.findByText(/尚无文稿/)).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "正在加载文稿" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("offers 问 AI on a selection and dispatches the text with its timestamp", async () => {

@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { ipc, type WhisperModel } from "@/lib/ipc";
 import { isMobile } from "@/lib/platform";
@@ -18,6 +19,7 @@ export function WhisperModelsPanel() {
 }
 
 function WhisperModelsPanelDesktop() {
+  const { t } = useTranslation();
   const [rows, setRows] = useState<Row[]>([]);
   const [loadError, setLoadError] = useState("");
   const [progress, setProgress] = useState<
@@ -29,7 +31,7 @@ function WhisperModelsPanelDesktop() {
       setRows(await ipc.whisper.list());
       setLoadError("");
     } catch (error) {
-      setLoadError(`模型列表加载失败：${error}`);
+      setLoadError(t("whisperModels.loadError", { error: String(error) }));
     }
   }
 
@@ -58,7 +60,7 @@ function WhisperModelsPanelDesktop() {
   return (
     <div className="space-y-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] p-3">
       <h4 className="mb-1 text-xs font-medium text-[var(--text-muted)]">
-        Whisper 模型
+        {t("whisperModels.title")}
       </h4>
       {loadError && (
         <div
@@ -67,7 +69,7 @@ function WhisperModelsPanelDesktop() {
         >
           <span>{loadError}</span>
           <Button size="sm" variant="outline" onClick={() => void refresh()}>
-            重试
+            {t("whisperModels.retry")}
           </Button>
         </div>
       )}
@@ -87,7 +89,7 @@ function WhisperModelsPanelDesktop() {
               </span>
               {installed && (
                 <span className="inline-flex items-center rounded-full bg-[var(--status-ok-bg)] px-1.5 py-0.5 text-xs font-medium text-[var(--status-ok)]">
-                  已安装
+                  {t("whisperModels.installed")}
                 </span>
               )}
             </span>
@@ -98,7 +100,7 @@ function WhisperModelsPanelDesktop() {
                 disabled={!!item && !item.done}
                 onClick={() => void ipc.whisper.download(model.id)}
               >
-                {item && !item.done ? `${pct}%` : "下载"}
+                {item && !item.done ? t("whisperModels.downloading", { percent: pct }) : t("whisperModels.download")}
               </Button>
             )}
           </div>

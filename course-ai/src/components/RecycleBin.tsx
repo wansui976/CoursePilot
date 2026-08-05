@@ -2,6 +2,7 @@ import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, RotateCcw, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
@@ -38,6 +39,7 @@ function groupByCourse(items: TrashedVideo[]): CourseGroup[] {
 }
 
 export function RecycleBin({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const { data: items = [], isLoading } = useQuery({
     queryKey: ["trash"],
@@ -111,24 +113,24 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
   async function confirmPurgeSelected() {
     const ids = [...selected];
     const ok = await confirmDialog(
-      `彻底删除所选 ${ids.length} 个视频？\n此操作无法撤销。`,
-      { title: "彻底删除", kind: "warning", okLabel: "彻底删除", cancelLabel: "取消" },
+      t("recycleBin.deleteSelectedConfirm", { count: ids.length }),
+      { title: t("recycleBin.deleteConfirmTitle"), kind: "warning", okLabel: t("recycleBin.permanentDelete"), cancelLabel: t("common.cancel") },
     );
     if (ok) purgeMany.mutate(ids);
   }
 
   async function confirmPurgeAll() {
     const ok = await confirmDialog(
-      `清空回收站？共 ${items.length} 个视频。\n此操作无法撤销。`,
-      { title: "清空回收站", kind: "warning", okLabel: "清空", cancelLabel: "取消" },
+      t("recycleBin.clearAllConfirm", { count: items.length }),
+      { title: t("recycleBin.clearConfirmTitle"), kind: "warning", okLabel: t("recycleBin.clear"), cancelLabel: t("common.cancel") },
     );
     if (ok) purgeAll.mutate();
   }
 
   async function confirmPurge(item: TrashedVideo) {
     const ok = await confirmDialog(
-      `彻底删除「${item.title}」？\n此操作无法撤销。`,
-      { title: "彻底删除", kind: "warning", okLabel: "彻底删除", cancelLabel: "取消" },
+      t("recycleBin.deleteSingleConfirm", { title: item.title }),
+      { title: t("recycleBin.deleteConfirmTitle"), kind: "warning", okLabel: t("recycleBin.permanentDelete"), cancelLabel: t("common.cancel") },
     );
     if (ok) purge.mutate(item.id);
   }
@@ -152,7 +154,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
       >
         <input
           type="checkbox"
-          aria-label={`选择 ${item.title}`}
+          aria-label={t("recycleBin.selectItem", { title: item.title })}
           checked={selected.has(item.id)}
           onChange={() => toggleOne(item.id)}
           className="ca-touch-44 h-4 w-4 flex-none accent-[var(--accent,#888)]"
@@ -176,29 +178,29 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
                   : undefined
               }
             >
-              剩余 {left} 天
+              {t("recycleBin.daysLeft", { days: left })}
             </span>
           </div>
         </div>
         <button
           onClick={() => restore.mutate(item.id)}
           disabled={restore.isPending || busy}
-          title="恢复"
-          aria-label={`恢复 ${item.title}`}
+          title={t("recycleBin.restoreTitle")}
+          aria-label={t("recycleBin.restoreItem", { title: item.title })}
           className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
         >
           <RotateCcw className="h-3.5 w-3.5" />
-          恢复
+          {t("recycleBin.restore")}
         </button>
         <button
           onClick={() => void confirmPurge(item)}
           disabled={busy}
-          title="彻底删除"
-          aria-label={`彻底删除 ${item.title}`}
+          title={t("recycleBin.permanentDeleteTitle")}
+          aria-label={t("recycleBin.deleteItem", { title: item.title })}
           className="ca-touch-44 inline-flex items-center gap-1 rounded-md px-3 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
         >
           <Trash2 className="h-3.5 w-3.5" />
-          彻底删除
+          {t("recycleBin.permanentDelete")}
         </button>
       </li>
     );
@@ -210,11 +212,11 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
     ).length;
     const allSelected = selectedCount === group.items.length;
     return (
-      <section key={group.courseId} aria-label={`课程 ${group.courseName}`}>
+      <section key={group.courseId} aria-label={t("recycleBin.courseGroup", { name: group.courseName })}>
         <div className="mb-2 flex items-center gap-2">
           <input
             type="checkbox"
-            aria-label={`选择 ${group.courseName} 全部`}
+            aria-label={t("recycleBin.selectAllInCourse", { name: group.courseName })}
             checked={allSelected}
             ref={(el) => {
               if (el) el.indeterminate = selectedCount > 0 && !allSelected;
@@ -235,7 +237,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
       <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-4">
         <button
-          aria-label="返回"
+          aria-label={t("common.back")}
           onClick={onClose}
           className="ca-icon-btn ca-touch-44 ml-0"
         >
@@ -244,10 +246,10 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-[var(--text-strong)]">
             <Trash2 className="h-4 w-4" />
-            回收站
+            {t("recycleBin.title")}
           </h2>
           <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-            删除的视频保留 30 天，到期自动清除；期间可恢复
+            {t("recycleBin.description")}
           </p>
         </div>
         {items.length > 0 && (
@@ -257,7 +259,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
             className="ca-touch-44 ml-auto inline-flex flex-none items-center gap-1 rounded-md px-3 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            清空回收站
+            {t("recycleBin.clearAll")}
           </button>
         )}
       </header>
@@ -267,11 +269,11 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
           {opError && <ErrorNote error={opError} className="mb-4" />}
           {isLoading ? (
             <p role="status" className="p-4 text-sm text-[var(--text-faint)]">
-              加载中…
+              {t("recycleBin.loading")}
             </p>
           ) : items.length === 0 ? (
             <p className="p-6 text-center text-sm text-[var(--text-faint)]">
-              回收站是空的
+              {t("recycleBin.empty")}
             </p>
           ) : (
             <div className="space-y-6">{groups.map(renderGroup)}</div>
@@ -280,7 +282,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
           {selected.size > 0 && (
             <div className="sticky bottom-2 mt-6 flex items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-4 py-3 shadow-[var(--shadow-pop)]">
               <span className="text-sm text-[var(--text-strong)]">
-                已选 {selected.size} 项
+                {t("recycleBin.selected", { count: selected.size })}
               </span>
               <div className="ml-auto flex items-center gap-2">
                 <button
@@ -289,7 +291,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
                   className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
-                  恢复所选
+                  {t("recycleBin.restoreSelected")}
                 </button>
                 <button
                   onClick={() => void confirmPurgeSelected()}
@@ -297,7 +299,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
                   className="ca-touch-44 inline-flex items-center gap-1 rounded-md px-3 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  彻底删除所选
+                  {t("recycleBin.deleteSelected")}
                 </button>
               </div>
             </div>

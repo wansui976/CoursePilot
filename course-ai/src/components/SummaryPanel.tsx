@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, FileText } from "lucide-react";
 import { ipc } from "@/lib/ipc";
@@ -33,6 +34,7 @@ function saveCollapsed(value: boolean) {
 }
 
 export function SummaryPanel({ videoId }: { videoId: string }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const requestSeek = usePlayer((s) => s.requestSeek);
   const [collapsed, setCollapsed] = useState(loadCollapsed);
@@ -68,13 +70,13 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
         type="button"
         onClick={toggleCollapsed}
         aria-expanded={!collapsed}
-        title={collapsed ? "展开整体摘要" : "折叠整体摘要"}
+        title={collapsed ? t("summary.expandTitle") : t("summary.collapseTitle")}
         className="ca-touch-44 flex shrink-0 items-center gap-1 px-3 py-2 text-left text-sm text-[var(--text-muted)] transition-colors hover:text-[var(--text-normal)]"
       >
         <ChevronDown
           className={`h-3.5 w-3.5 transition-transform ${collapsed ? "-rotate-90" : ""}`}
         />
-        整体摘要
+        {t("summary.title")}
       </button>
       {!collapsed && (
         <>
@@ -93,8 +95,8 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
             ) : (
               <PanelEmptyState
                 icon={<FileText className="h-7 w-7" />}
-                title="还没有摘要"
-                description="字幕就绪后会自动生成，也可以点右下角手动生成。"
+                title={t("summary.emptyTitle")}
+                description={t("summary.emptyDescription")}
               />
             )}
           </div>

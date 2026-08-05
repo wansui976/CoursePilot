@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Check, ChevronDown, Download, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { humanizeError } from "@/lib/errors";
@@ -30,6 +31,7 @@ export function ExportMenu({
   icon?: boolean;
   placement?: "up" | "down";
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
@@ -46,7 +48,7 @@ export function ExportMenu({
     try {
       const sourcePath = await item.run();
       await shareFile(sourcePath, item.mime ?? "application/octet-stream");
-      setMsg({ text: `已分享 · ${shorten(sourcePath)}` });
+      setMsg({ text: t("export.shared", { path: shorten(sourcePath) }) });
     } catch (error) {
       setMsg({ text: humanizeError(error), error: true });
     } finally {
@@ -60,7 +62,7 @@ export function ExportMenu({
     setBusy(true);
     try {
       const path = await item.run();
-      setMsg({ text: `已导出 · ${shorten(path)}` });
+      setMsg({ text: t("export.exported", { path: shorten(path) }) });
     } catch (error) {
       setMsg({ text: humanizeError(error), error: true });
     } finally {
@@ -82,8 +84,8 @@ export function ExportMenu({
             }
             setOpen((o) => !o);
           }}
-          aria-label={directShare ? "导出并分享" : "导出"}
-          title={directShare ? "导出并分享" : "导出"}
+          aria-label={directShare ? t("export.exportAndShare") : t("export.exportButton")}
+          title={directShare ? t("export.exportAndShare") : t("export.exportButton")}
           className={panelActionButtonClass}
         >
           {directShare ? (
@@ -104,14 +106,14 @@ export function ExportMenu({
             }
             setOpen((o) => !o);
           }}
-          title={directShare ? "导出并分享" : "导出"}
+          title={directShare ? t("export.exportAndShare") : t("export.exportButton")}
         >
           {directShare ? (
             <Share2 className="h-3.5 w-3.5" />
           ) : (
             <Download className="h-3.5 w-3.5" />
           )}
-          {busy ? (directShare ? "分享中…" : "导出中…") : directShare ? "导出" : "导出"}
+          {busy ? (directShare ? t("export.sharing") : t("export.exporting")) : t("export.exportButton")}
           {!directShare && <ChevronDown className="h-3 w-3 opacity-70" />}
         </Button>
       )}

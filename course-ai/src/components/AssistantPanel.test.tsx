@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -655,6 +656,7 @@ describe("AssistantPanel", () => {
     expect(onNavigate).toHaveBeenCalledWith({
       kind: "open_video",
       video_id: "v1",
+      course_id: "c1",
       title: "原视频",
       at_ms: 90_000,
     });

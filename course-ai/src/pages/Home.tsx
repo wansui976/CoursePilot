@@ -1,21 +1,35 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { invalidateStaleArtifacts } from "@/lib/useStaleArtifacts";
 import {
   Check,
   ChevronLeft,
   Film,
+  FolderPlus,
   LayoutGrid,
   Lightbulb,
   List,
+  Loader2,
   MoreHorizontal,
   Play,
+  RotateCcw,
+  Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { onBackButtonPress } from "@tauri-apps/api/app";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { AppSidebar } from "@/components/AppSidebar";
 import { CourseSidebar } from "@/components/CourseSidebar";
+import { useCreateCourse } from "@/components/CourseList";
 import { RecycleBin } from "@/components/RecycleBin";
 import { Dashboard } from "@/components/Dashboard";
 import { ConceptsPanel, type ConceptNavigationState } from "@/components/ConceptsPanel";
@@ -30,11 +44,18 @@ import { BottomTabBar, type CompactTab } from "@/components/BottomTabBar";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorNote } from "@/components/ui/ErrorNote";
-import { canRecorrect } from "@/lib/videoActions";
 import { IconButton } from "@/components/ui/icon-button";
+import { Button } from "@/components/ui/button";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import { coarsePointer, useContainerWidth, useIsPortrait } from "@/lib/useContainerWidth";
 import { ipc, type DueCard } from "@/lib/ipc";
+import { humanizeError } from "@/lib/errors";
+import {
+  currentStage,
+  overallProgress,
+  stageMessage,
+} from "@/lib/pipelineProgress";
+import { canRecorrect } from "@/lib/videoActions";
 import type {
   AssistantAction,
   Video,
@@ -53,20 +74,15 @@ import { useStudyReminder } from "@/lib/useStudyReminder";
 import { isIOS, isTablet } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
 import { AssistantPanel } from "@/components/AssistantPanel";
-import {
-  currentStage,
-  overallProgress,
-  stageMessage,
-} from "@/lib/pipelineProgress";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 import { accentVars, useTheme } from "@/stores/theme";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-const statusMeta = {
-  pending: { label: "待处理" },
-  processing: { label: "处理中" },
-  done: { label: "已处理" },
-  failed: { label: "处理失败" },
+const statusLabelKey = {
+  pending: "home.statusPending",
+  processing: "home.statusProcessing",
+  done: "home.statusDone",
+  failed: "home.statusFailed",
 } as const;
 
 const statusTone: Record<Video["processed_status"], BadgeTone> = {
@@ -78,7 +94,8 @@ const statusTone: Record<Video["processed_status"], BadgeTone> = {
 
 const PANEL_WIDTH_STORAGE_KEY = "course-ai-study-panel-width";
 const VIEW_STORAGE_KEY = "course-ai-home-view";
-// 学习面板最小宽度：保证 5 个标签(AI 概览/学习/文稿/课件/片段)都放得下、不被裁掉。
+const STUDY_PANEL_MAX = 720;
+// 学习面板最小宽度：保证核心资料页签和正文都可正常阅读。
 const STUDY_PANEL_MIN = 384;
 
 type LibraryView = "grid" | "list";
@@ -96,7 +113,9 @@ function readPanelWidth() {
   const raw = window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
   if (!raw) return 480;
   const saved = Number(raw);
-  return Number.isFinite(saved) ? Math.min(720, Math.max(STUDY_PANEL_MIN, saved)) : 480;
+  return Number.isFinite(saved)
+    ? Math.min(STUDY_PANEL_MAX, Math.max(STUDY_PANEL_MIN, saved))
+    : 480;
 }
 
 const SIDEBAR_COLLAPSED_KEY = "course-ai-sidebar-collapsed";
@@ -107,6 +126,37 @@ type KnowledgeReturnState = {
   courseId: string;
   navigationState: ConceptNavigationState;
 };
+
+export function dispatchAssistantNavigation(
+  action: AssistantAction,
+  currentVideoId: string | null,
+  commands: {
+    selectCourse: (courseId: string) => void;
+    openAt: (videoId: string, atMs: number) => void;
+    seek: (atMs: number) => void;
+    clearPendingOpen: () => void;
+  },
+) {
+  if (action.kind === "open_video") {
+    if (action.course_id) commands.selectCourse(action.course_id);
+
+    const atMs = Math.max(0, action.at_ms ?? 0);
+    if (action.video_id === currentVideoId) {
+      // pendingSeek 只在 loadedmetadata 时消费；当前视频不会重新触发该事件，必须直接 seek。
+      commands.clearPendingOpen();
+      if (action.at_ms != null) commands.seek(atMs);
+      return;
+    }
+
+    commands.openAt(action.video_id, atMs);
+    return;
+  }
+
+  if (action.kind === "seek_to") {
+    commands.clearPendingOpen();
+    commands.seek(Math.max(0, action.at_ms));
+  }
+}
 
 // 首次默认：课程库展开（选课要概览）、工作台折叠（看视频省空间）。
 function readSidebarCollapsed(): SidebarCollapsed {
@@ -135,6 +185,7 @@ export function Home() {
   const [showDashboard, setShowDashboard] = useState(false);
   const [showConcepts, setShowConcepts] = useState(false);
   const [knowledgeReturn, setKnowledgeReturn] = useState<KnowledgeReturnState | null>(null);
+  const { t } = useTranslation();
   // 应用打开时的学习提醒（开启且今天有到期卡才发，每天至多一次）。
   useStudyReminder();
   const theme = useTheme((s) => s.effective);
@@ -152,7 +203,7 @@ export function Home() {
   const [queueOpen, setQueueOpen] = useState(false);
   const [queueTick, setQueueTick] = useState(0);
   const [queuedVideos, setQueuedVideos] = useState<Video[]>([]);
-  const [compactTab, setCompactTab] = useState<CompactTab>("courses");
+  const { createCourse, creatingCourse, createError } = useCreateCourse();
   const [studyPanelWidth, setStudyPanelWidth] = useState(readPanelWidth);
   const [isResizingPanel, setIsResizingPanel] = useState(false);
   // 拖动期间的实时宽度（用 ref，不触发重渲染；松手才提交到 state）。
@@ -171,7 +222,7 @@ export function Home() {
   const appRef = useRef<HTMLDivElement>(null);
   const bucket = useContainerWidth(appRef);
   const isLightTheme = theme === "light";
-  const themeToggleLabel = isLightTheme ? "切换到夜晚模式" : "切换到白天模式";
+  const themeToggleLabel = isLightTheme ? t("home.themeLightLabel") : t("home.themeDarkLabel");
   const tabletDevice = isTablet();
   const portrait = useIsPortrait();
   // 触控优先：iOS/iPad 竖屏一律走底部 Tab / 上下叠放布局；只有横屏才保留桌面式左右分栏。
@@ -286,7 +337,9 @@ export function Home() {
     if (target) writeLastVideoId(target.course_id, videoId);
     const savedWidth = readVideoResumeState(videoId).studyPanelWidth;
     setStudyPanelWidth(
-      savedWidth != null ? Math.min(720, Math.max(STUDY_PANEL_MIN, savedWidth)) : readPanelWidth(),
+      savedWidth != null
+        ? Math.min(STUDY_PANEL_MAX, Math.max(STUDY_PANEL_MIN, savedWidth))
+        : readPanelWidth(),
     );
     // 打开视频即回到工作台：合上可能叠在主区的设置/回收站/控制台/队列整页。
     closeMainOverlays();
@@ -305,13 +358,14 @@ export function Home() {
 
   // 助手的导航动作。只有这里知道播放器和当前选中项，所以由 Home 执行。
   function assistantNavigate(action: AssistantAction) {
-    if (action.kind === "open_video") {
-      // 走 requestOpenAt 而不是直接 setSelectedVideoId：目标可能不是当前课程的视频，
-      // 这条路会先开视频、加载完再跳，跨课程也成立。
-      usePlayer.getState().requestOpenAt(action.video_id, action.at_ms ?? 0);
-    } else if (action.kind === "seek_to") {
-      usePlayer.getState().requestSeek(action.at_ms);
-    }
+    setKnowledgeReturn(null);
+    closeMainOverlays();
+    dispatchAssistantNavigation(action, selectedVideoId, {
+      selectCourse: setSelectedCourseId,
+      openAt: usePlayer.getState().requestOpenAt,
+      seek: usePlayer.getState().requestSeek,
+      clearPendingOpen: usePlayer.getState().clearPendingSeek,
+    });
   }
 
   // 仪表盘「继续学习」：切到该课程，打开上次的视频并跳到上次进度（秒→毫秒）。
@@ -494,6 +548,13 @@ export function Home() {
     Object.keys(jobsByVideo).forEach((videoId) => {
       const jobs = jobsByVideo[videoId];
       if (!jobs) return;
+      // 文稿在 ASR 完成时已经落库。只在该阶段首次进入 done 时刷新一次视频列表，
+      // 这样即使没有配置 LLM、后续 AI 任务全被取消，菜单也能拿到最新的 has_transcript。
+      const asrKey = `${videoId}:asr`;
+      if (jobs.asr?.status === "done" && !generatedAfterAsr.current.has(asrKey)) {
+        generatedAfterAsr.current.add(asrKey);
+        queryClient.invalidateQueries({ queryKey: ["videos"] });
+      }
       for (const stage of ["slides", "slides_ocr"] as const) {
         const key = `${videoId}:${stage}`;
         if (jobs[stage]?.status === "done" && !generatedAfterAsr.current.has(key)) {
@@ -559,21 +620,75 @@ export function Home() {
         ? items.map((item) => (item.id === videoId ? video : item))
         : [video, ...items];
     });
-    void ipc.pipeline.process(videoId);
+    void ipc.pipeline.process(videoId).catch((error) => {
+      setJob({
+        video_id: videoId,
+        job_id: `start-${videoId}`,
+        stage: "audio",
+        status: "failed",
+        progress: 0,
+        message: humanizeError(error),
+      });
+    });
+  }
+
+  function removeQueuedVideo(videoId: string) {
+    setQueuedVideos((items) => items.filter((item) => item.id !== videoId));
+    resetJobs(videoId);
   }
 
   // 已有字幕时「仅重新纠错」：不重新识别，回到原始稿后重跑 AI 纠错，完成后刷新文稿。
   const recorrect = useMutation({
-    mutationFn: (videoId: string) => ipc.pipeline.recorrect(videoId),
-    onSuccess: (_d, videoId) => {
-      queryClient.invalidateQueries({ queryKey: ["transcripts", videoId] });
+    mutationFn: (target: { videoId: string; courseId: string }) =>
+      ipc.pipeline.recorrect(target.videoId),
+    onSuccess: (_d, target) => {
+      queryClient.invalidateQueries({ queryKey: ["transcripts", target.videoId] });
       // 纠错重写了整份文稿：各 AI 产物据此重新判断是否已过期。
-      invalidateStaleArtifacts(queryClient, videoId);
+      invalidateStaleArtifacts(queryClient, target.videoId);
     },
   });
+  const resetRecorrect = recorrect.reset;
+  const recorrectPendingRef = useRef(recorrect.isPending);
+  const resetRecorrectWhenSettled = useRef(false);
+  recorrectPendingRef.current = recorrect.isPending;
+  useEffect(() => {
+    // reset 只清 observer，不会取消已经发出的付费请求。进行中切课程/视频时先隐藏
+    // 当前作用域，等请求真正收口再清；否则 hook 会提前回 idle，菜单能够重复发同一请求。
+    if (recorrectPendingRef.current) {
+      resetRecorrectWhenSettled.current = true;
+    } else {
+      resetRecorrect();
+    }
+  }, [resetRecorrect, selectedCourseId, selectedVideoId]);
+  useEffect(() => {
+    if (recorrect.isPending || !resetRecorrectWhenSettled.current) return;
+    resetRecorrectWhenSettled.current = false;
+    // 请求期间可能切走又回到原课程。此时结果仍属于眼前作用域，失败反馈要留下；
+    // 只有收口时仍在其他课程/视频里，才清掉已经不可见的 mutation 状态。
+    const backInTargetLibrary =
+      !selectedVideoId && recorrect.variables?.courseId === selectedCourseId;
+    if (!backInTargetLibrary) resetRecorrect();
+  }, [
+    recorrect.isPending,
+    recorrect.variables,
+    resetRecorrect,
+    selectedCourseId,
+    selectedVideoId,
+  ]);
   // 纠错失败原来没有任何地方接：菜单点完就收起，既没有报错也没有变化，看起来就像没点上——
   // 而没配大模型、批次全失败、快照对不上都会走到这里。
-  const recorrectError = recorrect.isError ? recorrect.error : null;
+  const recorrectTarget =
+    recorrect.isError &&
+    recorrect.variables &&
+    videos.some(
+      (video) =>
+        video.id === recorrect.variables?.videoId &&
+        video.course_id === recorrect.variables?.courseId &&
+        video.course_id === selectedCourseId,
+    )
+      ? recorrect.variables
+      : null;
+  const recorrectError = recorrectTarget ? recorrect.error : null;
 
   async function saveRenamedVideo() {
     if (!renamingVideo) return;
@@ -591,8 +706,8 @@ export function Home() {
 
   async function deleteVideo(videoId: string) {
     const ok = await confirmDialog(
-      "删除这个视频？\n它会移入回收站，可在 30 天内恢复。",
-      { title: "删除视频", kind: "warning", okLabel: "删除", cancelLabel: "取消" },
+      t("home.deleteConfirm"),
+      { title: t("home.deleteTitle"), kind: "warning", okLabel: t("home.deleteLabel"), cancelLabel: t("home.cancel") },
     );
     if (!ok) return;
     await ipc.videos.delete(videoId);
@@ -639,7 +754,10 @@ export function Home() {
     // 且至少给视频留 320，避免小屏（手机横屏）被挤没。
     const containerW = wb?.clientWidth ?? 0;
     const minPanel = STUDY_PANEL_MIN;
-    const maxPanel = containerW > 0 ? Math.max(minPanel, containerW - 320) : 720;
+    const maxPanel =
+      containerW > 0
+        ? Math.min(STUDY_PANEL_MAX, Math.max(minPanel, containerW - 320))
+        : STUDY_PANEL_MAX;
     // rAF 合帧：一帧内多次 pointermove 只写一次（即只触发一次网格重排）。
     let raf = 0;
     let pendingX = startX;
@@ -688,13 +806,49 @@ export function Home() {
 
   // 双击分隔条:把面板宽度复位到默认值(480),省去手动拖回。
   function resetStudyPanelWidth() {
-    const next = 480;
+    commitStudyPanelWidth(480);
+  }
+
+  function panelMaxWidth(container: HTMLElement | null) {
+    const containerWidth = container?.clientWidth ?? 0;
+    return containerWidth > 0
+      ? Math.min(
+          STUDY_PANEL_MAX,
+          Math.max(STUDY_PANEL_MIN, containerWidth - 320),
+        )
+      : STUDY_PANEL_MAX;
+  }
+
+  function commitStudyPanelWidth(nextWidth: number, container?: HTMLElement | null) {
+    const next = Math.min(
+      panelMaxWidth(container ?? null),
+      Math.max(STUDY_PANEL_MIN, nextWidth),
+    );
     liveWidthRef.current = next;
     setStudyPanelWidth(next);
+    container?.style.setProperty("--study-panel-width", `${next}px`);
     window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(next));
     if (selectedVideoId) {
       writeVideoResumeState(selectedVideoId, { studyPanelWidth: next });
     }
+  }
+
+  function resizeStudyPanelFromKeyboard(
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ) {
+    const container = event.currentTarget.parentElement as HTMLElement | null;
+    const step = event.shiftKey ? 72 : 24;
+    let next: number | null = null;
+
+    if (event.key === "ArrowLeft") next = liveWidthRef.current + step;
+    else if (event.key === "ArrowRight") next = liveWidthRef.current - step;
+    else if (event.key === "Home") next = STUDY_PANEL_MIN;
+    else if (event.key === "End") next = panelMaxWidth(container);
+    else if (event.key === "Enter") next = 480;
+
+    if (next == null) return;
+    event.preventDefault();
+    commitStudyPanelWidth(next, container);
   }
 
   /** 语音识别没有真进度可报的那一段（0.12–0.9），按时间往前爬一点，免得看着像死了。
@@ -767,11 +921,12 @@ export function Home() {
     setQueueOpen(willOpen);
   }
 
-  // 窄屏底部 Tab 切换:课程→回到课程下钻当前层;队列/设置→打开对应整页。
+  // 窄屏底部 Tab 切换：课程回到当前课程层级；学习/队列/设置打开对应整页。
   function selectCompactTab(tab: CompactTab) {
-    setCompactTab(tab);
     closeMainOverlays();
-    if (tab === "queue") {
+    if (tab === "study") {
+      setShowDashboard(true);
+    } else if (tab === "queue") {
       setQueueOpen(true);
     } else if (tab === "settings") {
       setShowSettings(true);
@@ -782,7 +937,7 @@ export function Home() {
   function renderProcessingQueuePage() {
     return (
       <div
-        aria-label="处理队列页面"
+        aria-label={t("home.queueTitle")}
         className="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
         <header className="flex flex-none items-start justify-between gap-4 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-5">
@@ -790,25 +945,25 @@ export function Home() {
             <IconButton
               className="mt-0.5"
               onClick={goBackOneLevel}
-              aria-label="返回上一菜单"
-              title="返回上一菜单"
+              aria-label={t("home.queueBack")}
+              title={t("home.queueBack")}
             >
               <ChevronLeft className="h-4 w-4" />
             </IconButton>
             <div className="min-w-0">
               <h1 className="text-2xl font-semibold text-[var(--text-strong)]">
-                处理队列
+                {t("home.queueLabel")}
               </h1>
             </div>
           </div>
           <Badge tone="neutral" dot={false}>
-            {queuedVideos.length} 个任务
+            {t("home.queueCount", { count: queuedVideos.length })}
           </Badge>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
           {queuedVideos.length === 0 ? (
             <div className="flex h-full min-h-[240px] items-center justify-center text-sm text-[var(--text-faint)]">
-              暂无正在处理的视频。导入或处理视频后会出现在这里。
+              {t("home.queueEmpty")}
             </div>
           ) : (
             <div className="flex w-full flex-col gap-3">
@@ -818,6 +973,7 @@ export function Home() {
                 const message = stageMessage(active);
                 const canCancel =
                   active?.status === "running" || active?.status === "pending";
+                const failed = active?.status === "failed";
                 return (
                   <div
                     key={video.id}
@@ -826,7 +982,7 @@ export function Home() {
                     <button
                       onClick={() => openQueuedVideo(video)}
                       className={`block w-full px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)] ${
-                        canCancel ? "pr-20" : ""
+                        canCancel ? "pr-20" : failed ? "pr-40" : ""
                       }`}
                     >
                       <div className="flex items-center justify-between gap-3">
@@ -849,8 +1005,8 @@ export function Home() {
                       </div>
                       <div
                         className={
-                          active?.status === "failed"
-                            ? "mt-1.5 truncate text-xs text-[var(--status-err)]"
+                          failed
+                            ? "mt-1.5 whitespace-pre-wrap break-words pr-2 text-xs leading-relaxed text-[var(--status-err)]"
                             : "mt-1.5 truncate text-xs text-[var(--text-muted)]"
                         }
                       >
@@ -862,8 +1018,28 @@ export function Home() {
                         onClick={() => void ipc.pipeline.cancel(video.id)}
                         className="ca-touch-44 absolute right-3 top-3 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
                       >
-                        取消
+                        {t("home.cancel")}
                       </button>
+                    )}
+                    {failed && (
+                      <div className="absolute right-3 top-3 flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => startProcessing(video)}
+                          className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          {t("home.retry")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeQueuedVideo(video.id)}
+                          className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)]"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          {t("home.remove")}
+                        </button>
+                      </div>
                     )}
                   </div>
                 );
@@ -880,7 +1056,7 @@ export function Home() {
     return (
       <IconButton
         type="button"
-        aria-label="视频操作"
+        aria-label={t("home.videoActions")}
         aria-haspopup="menu"
         aria-expanded={openMenuVideoId === video.id}
         data-video-menu
@@ -908,7 +1084,7 @@ export function Home() {
     };
     return (
       <Menu
-        aria-label="视频操作菜单"
+        aria-label={t("home.videoActionsMenu")}
         data-video-menu
         className="absolute right-3 top-12 z-10 w-32"
       >
@@ -919,35 +1095,37 @@ export function Home() {
             setRenamingVideo({ id: video.id, title: displayTitle(video.title) });
           }}
         >
-          修改标题
+          {t("home.editTitle")}
         </MenuItem>
         {/* 过滤态下移动的是全量列表位置、界面上看不出效果，藏掉避免困惑。 */}
         {!normalizedQuery && index > 0 && (
           <MenuItem className="ca-touch-44" onClick={() => moveTo(index - 1)}>
-            上移
+            {t("home.moveUp")}
           </MenuItem>
         )}
         {!normalizedQuery && index !== -1 && index < videos.length - 1 && (
           <MenuItem className="ca-touch-44" onClick={() => moveTo(index + 1)}>
-            下移
+            {t("home.moveDown")}
           </MenuItem>
         )}
         <MenuItem
           className="ca-touch-44"
+          disabled={canRecorrect(video) && recorrect.isPending}
           onClick={() => {
             setOpenMenuVideoId(null);
             if (canRecorrect(video)) {
-              recorrect.mutate(video.id);
+              if (recorrect.isPending) return;
+              recorrect.mutate({ videoId: video.id, courseId: video.course_id });
             } else {
               startProcessing(video);
             }
           }}
         >
           {canRecorrect(video)
-            ? recorrect.isPending && recorrect.variables === video.id
-              ? "纠错中…"
-              : "重新纠错"
-            : "开始处理"}
+            ? recorrect.isPending && recorrect.variables?.videoId === video.id
+              ? t("home.correcting")
+              : t("home.reCorrect")
+            : t("home.startProcessing")}
         </MenuItem>
         {/* 危险操作放最后并用分隔线隔开，避免夹在常规操作中间被误点。 */}
         <MenuItem
@@ -958,7 +1136,7 @@ export function Home() {
             void deleteVideo(video.id);
           }}
         >
-          删除
+          {t("home.delete")}
         </MenuItem>
       </Menu>
     );
@@ -969,15 +1147,15 @@ export function Home() {
     return (
       <div
         role="dialog"
-        aria-label="修改标题"
+        aria-label={t("home.editTitle")}
         className="absolute inset-x-3 top-12 z-20 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-2 shadow-[var(--shadow-pop)]"
       >
         <label className="sr-only" htmlFor={`rename-${video.id}`}>
-          视频标题
+          {t("home.videoTitle")}
         </label>
         <input
           id={`rename-${video.id}`}
-          aria-label="视频标题"
+          aria-label={t("home.videoTitle")}
           autoFocus
           onFocus={(event) => event.currentTarget.select()}
           className="min-h-11 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1.5 text-xs text-[var(--text-strong)] outline-none"
@@ -993,7 +1171,7 @@ export function Home() {
         <div className="mt-2 flex justify-end gap-1">
           <button
             type="button"
-            aria-label="取消修改标题"
+            aria-label={t("home.cancelEdit")}
             className="ca-touch-44 flex h-7 w-7 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)]"
             onClick={() => setRenamingVideo(null)}
           >
@@ -1001,7 +1179,7 @@ export function Home() {
           </button>
           <button
             type="button"
-            aria-label="保存标题"
+            aria-label={t("home.saveTitle")}
             className="ca-touch-44 flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] text-[var(--text-strong)] hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
             disabled={!renamingVideo.title.trim()}
             onClick={() => void saveRenamedVideo()}
@@ -1020,7 +1198,7 @@ export function Home() {
         data-testid="video-status-badge"
         tone={statusTone[status]}
       >
-        {statusMeta[status].label}
+        {t(statusLabelKey[status])}
       </Badge>
     );
   }
@@ -1037,7 +1215,7 @@ export function Home() {
       >
         <button
           className="block w-full text-left"
-          aria-label={`打开视频：${displayTitle(video.title)}`}
+          aria-label={t("home.openVideo", { title: displayTitle(video.title) })}
           onClick={() => openVideo(video.id)}
         >
           <span className="ca-thumb">
@@ -1053,13 +1231,13 @@ export function Home() {
             {progress.ratio >= WATCHED_RATIO && (
               <span className="done">
                 <Check className="h-3 w-3" />
-                已看完
+                {t("home.watched")}
               </span>
             )}
             {progress.ratio > 0 && progress.ratio < WATCHED_RATIO && (
               <span
                 className="ov-bar"
-                aria-label={`已观看 ${Math.round(progress.ratio * 100)}%`}
+                aria-label={t("home.watchedPercent", { percent: Math.round(progress.ratio * 100) })}
               >
                 <i style={{ width: `${progress.ratio * 100}%` }} />
               </span>
@@ -1092,7 +1270,7 @@ export function Home() {
       >
         <button
           className="row-button"
-          aria-label={`打开视频：${displayTitle(video.title)}`}
+          aria-label={t("home.openVideo", { title: displayTitle(video.title) })}
           onClick={() => openVideo(video.id)}
         >
           <span className="row-main">
@@ -1102,14 +1280,14 @@ export function Home() {
                 className="absolute inset-0 h-full w-full"
               />
               {progress.ratio >= WATCHED_RATIO && (
-                <span className="done" role="img" aria-label="已看完">
+                <span className="done" role="img" aria-label={t("home.watched")}>
                   <Check className="h-3 w-3" />
                 </span>
               )}
               {progress.ratio > 0 && progress.ratio < WATCHED_RATIO && (
                 <span
                   className="ov-bar"
-                  aria-label={`已观看 ${Math.round(progress.ratio * 100)}%`}
+                  aria-label={t("home.watchedPercent", { percent: Math.round(progress.ratio * 100) })}
                 >
                   <i style={{ width: `${progress.ratio * 100}%` }} />
                 </span>
@@ -1147,10 +1325,10 @@ export function Home() {
         onClick={() => openVideo(lastId)}
       >
         <Play className="ic h-5 w-5" />
-        <span className="lbl">继续上次</span>
+        <span className="lbl">{t("home.continueLast")}</span>
         <span className="ttl">{displayTitle(lastVideo.title)}</span>
         <span className="pos">
-          看到 {formatMs(Math.round(progress.positionSec * 1000))}
+          {t("home.watchedTo", { time: formatMs(Math.round(progress.positionSec * 1000)) })}
         </span>
       </button>
     );
@@ -1166,19 +1344,19 @@ export function Home() {
                 type="button"
                 className="hamb"
                 onClick={() => setSelectedCourseId(null)}
-                title="返回课程库"
-                aria-label="返回课程库"
+                title={t("home.backToLibrary")}
+                aria-label={t("home.backToLibrary")}
               >
                 <ChevronLeft className="h-5 w-5" />
               </button>
             )}
             <div className="tb-titles">
               {/* h1 给课程名（用户关心「我在哪个课程」），数量降为副标题。 */}
-              <h1>{selectedCourse ? selectedCourse.name : "课程视频"}</h1>
+              <h1>{selectedCourse ? selectedCourse.name : t("home.courseVideos")}</h1>
               <div className="sub">
                 {selectedCourse
-                  ? `${videos.length} 个视频`
-                  : "选择课程后导入或管理视频"}
+                  ? t("home.videoCount", { count: videos.length })
+                  : t("home.selectCourseHint")}
               </div>
             </div>
           </div>
@@ -1186,8 +1364,8 @@ export function Home() {
             <div className="tb-actions">
               {videos.length > 0 && (
                 <input
-                  aria-label="搜索视频"
-                  placeholder="搜索视频"
+                  aria-label={t("home.searchVideos")}
+                  placeholder={t("home.searchVideos")}
                   className="tb-search"
                   value={videoQuery}
                   onChange={(event) => setVideoQuery(event.target.value)}
@@ -1200,8 +1378,8 @@ export function Home() {
                 <div className="ca-seg">
                   {(
                     [
-                      ["grid", LayoutGrid, "网格视图"],
-                      ["list", List, "列表视图"],
+                      ["grid", LayoutGrid, t("home.gridView")],
+                      ["list", List, t("home.listView")],
                     ] as const
                   ).map(([key, Icon, label]) => (
                     <button
@@ -1222,7 +1400,7 @@ export function Home() {
                   className="ca-touch-44 inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
                 >
                   <Lightbulb className="h-4 w-4" />
-                  知识点
+                  {t("home.knowledgePoints")}
                 </button>
               )}
               <ImportVideoButton
@@ -1237,8 +1415,8 @@ export function Home() {
             <ErrorNote
               error={recorrectError}
               onRetry={
-                recorrect.variables
-                  ? () => recorrect.mutate(recorrect.variables!)
+                recorrectTarget
+                  ? () => recorrect.mutate(recorrectTarget)
                   : undefined
               }
               className="mx-4 mt-3"
@@ -1258,11 +1436,11 @@ export function Home() {
             <div className="flex h-full min-h-[320px] items-center justify-center">
               <EmptyState
                 icon={<Film className="h-7 w-7" />}
-                title={selectedCourseId ? "还没有视频" : "选择课程开始"}
+                title={selectedCourseId ? t("home.noVideos") : t("home.noCourses")}
                 description={
                   selectedCourseId
-                    ? "导入本地视频或粘贴视频链接后，会在这里形成课程视频列表。"
-                    : "从左侧选择课程后导入或管理视频。"
+                    ? t("home.noVideosHint")
+                    : undefined
                 }
                 action={
                   selectedCourseId ? (
@@ -1270,7 +1448,25 @@ export function Home() {
                       courseId={selectedCourseId}
                       onStartProcessing={startProcessing}
                     />
-                  ) : undefined
+                  ) : (
+                    <div className="flex flex-col items-center gap-2">
+                      <Button
+                        type="button"
+                        disabled={creatingCourse}
+                        onClick={() => void createCourse()}
+                      >
+                        {creatingCourse ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <FolderPlus className="h-4 w-4" />
+                        )}
+                        {creatingCourse ? t("nav.addingCourse") : t("nav.addCourseFolder")}
+                      </Button>
+                      {createError && (
+                        <ErrorNote className="max-w-sm" error={createError} />
+                      )}
+                    </div>
+                  )
                 }
               />
             </div>
@@ -1278,8 +1474,8 @@ export function Home() {
             <div className="flex h-full min-h-[320px] items-center justify-center">
               <EmptyState
                 icon={<Film className="h-7 w-7" />}
-                title="没有匹配的视频"
-                description={`没有标题包含「${videoQuery.trim()}」的视频。`}
+                title={t("home.noMatch")}
+                description={t("home.noMatchDesc", { query: videoQuery.trim() })}
               />
             </div>
           ) : view === "list" ? (
@@ -1292,9 +1488,9 @@ export function Home() {
             >
               <div className="ca-list">
                 <div className="ca-list-head">
-                  <span>名称</span>
-                  <span className="h-dur">时长</span>
-                  <span className="h-status">状态</span>
+                  <span>{t("home.colName")}</span>
+                  <span className="h-dur">{t("home.colDuration")}</span>
+                  <span className="h-status">{t("home.colStatus")}</span>
                 </div>
                 {visibleVideos.map((video) => (
                   <SortableVideoItem key={video.id} id={video.id}>
@@ -1329,7 +1525,7 @@ export function Home() {
 
     return (
       <div
-        aria-label="学习工作台响应布局"
+        aria-label={t("home.workbenchLayout")}
         data-layout={isWorkbenchWide ? "wide" : "stacked"}
         className={`ca-wb ${isResizingPanel ? "is-resizing-panel" : ""}`}
         style={
@@ -1338,7 +1534,7 @@ export function Home() {
             : undefined
         }
       >
-        <section aria-label="学习工作台" className="ca-player-col">
+        <section aria-label={t("home.workbench")} className="ca-player-col">
           {!isPhoneDevice && (
             <header className="ca-wb-head">
               <div className="wb-title-row">
@@ -1346,12 +1542,12 @@ export function Home() {
                   <button
                     type="button"
                     onClick={returnToKnowledge}
-                    aria-label={`返回知识点：${knowledgeReturn.navigationState.conceptName}`}
-                    title={`返回知识点：${knowledgeReturn.navigationState.conceptName}`}
+                    aria-label={t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName })}
+                    title={t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName })}
                     className="ca-touch-44 inline-flex max-w-[45%] flex-none items-center gap-1 text-sm font-medium text-primary transition hover:opacity-80"
                   >
                     <ChevronLeft className="h-4 w-4 flex-none" />
-                    <span className="truncate">返回 {knowledgeReturn.navigationState.conceptName}</span>
+                    <span className="truncate">{t("home.backToConcepts", { name: knowledgeReturn.navigationState.conceptName })}</span>
                   </button>
                 )}
                 <div className="min-w-0">
@@ -1368,8 +1564,8 @@ export function Home() {
                 type="button"
                 className="ca-back-fab"
                 onClick={returnFromVideo}
-                title={knowledgeReturn ? `返回知识点：${knowledgeReturn.navigationState.conceptName}` : "返回"}
-                aria-label={knowledgeReturn ? `返回知识点：${knowledgeReturn.navigationState.conceptName}` : "返回"}
+                title={knowledgeReturn ? t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName }) : t("nav.back")}
+                aria-label={knowledgeReturn ? t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName }) : t("nav.back")}
               >
                 <ChevronLeft className="h-5 w-5" />
               </button>
@@ -1384,7 +1580,7 @@ export function Home() {
                 />
               ) : (
                 <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">
-                  正在准备播放…
+                  {t("home.preparing")}
                 </div>
               )}
             </div>
@@ -1393,16 +1589,22 @@ export function Home() {
         {showResizer && (
           <div
             role="separator"
-            aria-label="调整学习资料宽度"
+            aria-label={t("home.resizeStudy")}
             aria-orientation="vertical"
-            title="拖动调整宽度,双击重置"
+            aria-valuemin={STUDY_PANEL_MIN}
+            aria-valuemax={STUDY_PANEL_MAX}
+            aria-valuenow={Math.round(studyPanelWidthForLayout)}
+            aria-valuetext={t("home.pixelValue", { width: Math.round(studyPanelWidthForLayout) })}
+            tabIndex={0}
+            title={t("home.resizeHint")}
             className={`ca-resizer ${isResizingPanel ? "is-resizing" : ""}`}
             onPointerDown={beginStudyPanelResize}
             onDoubleClick={resetStudyPanelWidth}
+            onKeyDown={resizeStudyPanelFromKeyboard}
           />
         )}
         <aside
-          aria-label="学习资料面板"
+          aria-label={t("home.studyPanel")}
           className="ca-panel-col"
         >
           <TabsPanel videoId={selectedVideo.id} />
@@ -1438,10 +1640,18 @@ export function Home() {
   }
   // 窄屏底部 Tab 仅在「非工作台」时显示(工作台全屏沉浸)。
   const showBottomTab = isPhoneDevice && !isWorkbenchView;
+  // 底栏选中项由当前顶层视图派生，返回或由其它入口切页后不会保留旧高亮。
+  const activeCompactTab: CompactTab = showSettings
+    ? "settings"
+    : showDashboard
+      ? "study"
+      : queueOpen
+        ? "queue"
+        : "courses";
   // 窄屏「课程」Tab 根层(未选课程、未开队列/设置/回收/控制台)→ 整屏课程列表。
   const showCourseListScreen =
     isPhoneDevice &&
-    compactTab === "courses" &&
+    activeCompactTab === "courses" &&
     !selectedCourseId &&
     !queueOpen &&
     !showSettings &&
@@ -1550,7 +1760,7 @@ export function Home() {
       </main>
       {showBottomTab && (
         <BottomTabBar
-          active={compactTab}
+          active={activeCompactTab}
           queueCount={queuedVideos.length}
           onSelect={selectCompactTab}
         />

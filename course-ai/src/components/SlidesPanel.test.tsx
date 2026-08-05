@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -176,7 +177,16 @@ describe("SlidesPanel page OCR", () => {
   });
 
   function outcome(over: Partial<SlidesOcrOutcome> = {}): SlidesOcrOutcome {
-    return { recognized: 0, failed: 0, total: 0, canceled: false, error: null, ...over };
+    return {
+      recognized: 0,
+      failed: 0,
+      total: 0,
+      attempted: 0,
+      stoppedEarly: false,
+      canceled: false,
+      error: null,
+      ...over,
+    };
   }
 
   const pages = [
@@ -294,6 +304,28 @@ describe("SlidesPanel page OCR", () => {
     fireEvent.click(await screen.findByRole("button", { name: /识别文字/ }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("已停止，已识别 4 页");
+  });
+
+  it("提前停止时说清未尝试页数", async () => {
+    mockIpc.slides.list.mockReset().mockResolvedValue(pages);
+    mockIpc.slides.ocr.mockResolvedValue(
+      outcome({
+        recognized: 9,
+        failed: 3,
+        attempted: 12,
+        total: 99,
+        stoppedEarly: true,
+        error: "余额不足",
+      }),
+    );
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: /识别文字/ }));
+
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("已尝试 12/99 页");
+    expect(status).toHaveTextContent("剩余 87 页未尝试");
+    expect(status).toHaveTextContent("余额不足");
   });
 
   it("认过但没认出文字的页不再算进「还没认」", async () => {

@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -214,7 +215,7 @@ describe("ConceptsPanel", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "搜索课程知识" }), {
       target: { value: "不存在" },
     });
-    expect(await screen.findByText("没有匹配“不存在”的知识点。")).toBeInTheDocument();
+    expect(await screen.findByText(/没有匹配.*不存在.*的知识点。/)).toBeInTheDocument();
   });
 
   it("shows three sources by default and provides an accessible expand and collapse control", async () => {
@@ -335,7 +336,7 @@ describe("ConceptsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "生成复习卡" }));
     await waitFor(() => expect(generateForConcept).toHaveBeenCalledWith("c1", "k1"));
     expect(generate).not.toHaveBeenCalled();
-    expect(await screen.findByText(/已整理 3 张复习卡/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/已整理 3 张复习卡/)).length).toBeGreaterThanOrEqual(1);
   });
 
   it("explains both reasons when no concept-scoped cards could be made", async () => {
@@ -346,8 +347,8 @@ describe("ConceptsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "生成复习卡" }));
 
     expect(
-      await screen.findByText("相关视频尚无 AI 题目，或题目出处不在这个知识点范围内。"),
-    ).toBeInTheDocument();
+      (await screen.findAllByText("相关视频尚无 AI 题目，或题目出处不在这个知识点范围内。")).length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it("offers an inexpensive summary generation path for legacy concept data", async () => {

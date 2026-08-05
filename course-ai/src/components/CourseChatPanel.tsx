@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
 import { Send, Sparkles, Square, Trash2, User } from "lucide-react";
 import { ipc } from "@/lib/ipc";
@@ -23,10 +24,11 @@ function ChatSources({
   citations?: Citation[];
   onJump?: (videoId: string, startMs: number) => void;
 }) {
+  const { t } = useTranslation();
   if (!citations || citations.length === 0) return null;
   return (
     <div className="mt-2 border-t border-[var(--border-subtle)] pt-1.5">
-      <div className="mb-1 text-[11px] font-medium text-[var(--text-faint)]">来源</div>
+      <div className="mb-1 text-[11px] font-medium text-[var(--text-faint)]">{t("courseChat.sources")}</div>
       <div className="space-y-0.5">
         {citations.map((c) => {
           const label = (
@@ -55,7 +57,7 @@ function ChatSources({
               key={key}
               type="button"
               onClick={() => onJump(videoId, c.start_ms)}
-              aria-label={`回看 ${displayTitle(c.video_title ?? "")} ${formatMs(c.start_ms)}`}
+              aria-label={t("concepts.reviewSource", { title: displayTitle(c.video_title ?? ""), time: formatMs(c.start_ms) })}
               className="block w-full rounded px-1.5 py-1 text-left text-xs hover:bg-[var(--surface-card-hover)]"
             >
               {label}
@@ -162,11 +164,11 @@ function buildContext(history: ChatTurn[]): ChatMessage[] {
   ]);
 }
 
-const SUGGESTIONS = [
-  "这门课主要讲了什么？",
-  "帮我梳理知识点之间的关系",
-  "给我出几个复习问题",
-];
+const SUGGESTION_KEYS = [
+  "courseChat.suggestion1",
+  "courseChat.suggestion2",
+  "courseChat.suggestion3",
+] as const;
 
 /** 以整门课程的总览+知识点为背景的问答面板：流式回答、可停止、按课程留存历史。 */
 export function CourseChatPanel({
@@ -177,6 +179,7 @@ export function CourseChatPanel({
   /** 点「来源」跳到该视频该时刻；没传时来源只作为文字展示。 */
   onJump?: (videoId: string, startMs: number) => void;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [history, setHistory] = useState<ChatTurn[]>(() => readHistory(courseId));
   // 进行中的流式回答（本轮 requestId + 推理思考 + 已累积文本 + 已到达的来源）。
@@ -287,7 +290,7 @@ export function CourseChatPanel({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div
-        aria-label="课程问答记录"
+        aria-label={t("courseChat.chatHistory")}
         className="min-h-0 flex-1 space-y-5 overflow-y-auto p-3"
       >
         {history.length === 0 && inFlightQuery === undefined && (
@@ -296,20 +299,20 @@ export function CourseChatPanel({
               <Sparkles className="h-6 w-6" />
             </span>
             <div>
-              <div className="text-sm font-medium text-[var(--text-strong)]">向这门课程提问</div>
+              <div className="text-sm font-medium text-[var(--text-strong)]">{t("courseChat.askCourse")}</div>
               <p className="mx-auto mt-1 max-w-[260px] text-xs leading-relaxed text-[var(--text-faint)]">
-                AI 会基于这门课程的总览和知识点回答，可继续追问。
+                {t("courseChat.courseQaHint")}
               </p>
             </div>
             <div className="flex flex-wrap justify-center gap-2">
-              {SUGGESTIONS.map((s) => (
+              {SUGGESTION_KEYS.map((key) => (
                 <button
-                  key={s}
+                  key={key}
                   type="button"
-                  onClick={() => submit(s)}
+                  onClick={() => submit(t(key))}
                   className="rounded-full border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-1.5 text-xs text-[var(--text-normal)] transition hover:border-[var(--accent-text)] hover:bg-[var(--surface-card-hover)]"
                 >
-                  {s}
+                  {t(key)}
                 </button>
               ))}
             </div>
@@ -322,7 +325,7 @@ export function CourseChatPanel({
               {userAvatar}
               <div
                 role="article"
-                aria-label="我的提问"
+                aria-label={t("courseChat.myQuestion")}
                 className="max-w-[82%] rounded-2xl rounded-tr-sm bg-primary/15 px-3 py-2"
               >
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-strong)]">
@@ -334,13 +337,13 @@ export function CourseChatPanel({
               {aiAvatar}
               <div
                 role="article"
-                aria-label="AI 回复"
+                aria-label={t("courseChat.aiReply")}
                 className="min-w-0 max-w-[82%] rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2"
               >
                 {turn.reasoning && (
                   <details className="mb-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card-hover)] px-2.5 py-1.5">
                     <summary className="cursor-pointer select-none text-xs text-[var(--text-faint)]">
-                      思考过程
+                      {t("courseChat.thinking")}
                     </summary>
                     <div className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-muted)]">
                       {turn.reasoning}
@@ -360,7 +363,7 @@ export function CourseChatPanel({
               {userAvatar}
               <div
                 role="article"
-                aria-label="我的提问"
+                aria-label={t("courseChat.myQuestion")}
                 className="max-w-[82%] rounded-2xl rounded-tr-sm bg-primary/15 px-3 py-2"
               >
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-strong)]">
@@ -378,7 +381,7 @@ export function CourseChatPanel({
                       className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card-hover)] px-2.5 py-1.5"
                     >
                       <summary className="cursor-pointer select-none text-xs text-[var(--text-faint)]">
-                        思考过程
+                        {t("courseChat.thinking")}
                       </summary>
                       <div className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-muted)]">
                         {streaming.reasoning}
@@ -388,7 +391,7 @@ export function CourseChatPanel({
                   {streaming?.text ? (
                     <div
                       role="article"
-                      aria-label="AI 回复"
+                      aria-label={t("courseChat.aiReply")}
                       className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2"
                     >
                       <AnswerText
@@ -401,7 +404,7 @@ export function CourseChatPanel({
                     <div className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-3">
                       <span
                         className="ca-typing inline-flex items-center gap-1 text-[var(--text-muted)]"
-                        aria-label="思考中"
+                        aria-label={t("courseChat.thinkingLabel")}
                       >
                         <i className="ca-typing-dot" />
                         <i className="ca-typing-dot" style={{ animationDelay: "0.15s" }} />
@@ -436,8 +439,8 @@ export function CourseChatPanel({
             <button
               type="button"
               onClick={clearChat}
-              aria-label="清空对话"
-              title="清空对话"
+              aria-label={t("courseChat.clearChat")}
+              title={t("courseChat.clearTitle")}
               className="ca-touch-44 inline-flex flex-none items-center justify-center rounded-full text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
             >
               <Trash2 className="h-4 w-4" />
@@ -445,9 +448,9 @@ export function CourseChatPanel({
           )}
           <input
             ref={inputRef}
-            aria-label="课程问答输入"
+            aria-label={t("courseChat.chatInput")}
             type="text"
-            placeholder="问一问本课程…"
+            placeholder={t("courseChat.placeholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -462,8 +465,8 @@ export function CourseChatPanel({
             <button
               type="button"
               onClick={() => void ipc.concepts.cancelChat(cancellableRequestId)}
-              aria-label="停止生成"
-              title="停止生成"
+              aria-label={t("courseChat.stopGeneration")}
+              title={t("courseChat.stopTitle")}
               className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full bg-[var(--surface-card-active)] text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)]"
             >
               <Square className="h-3.5 w-3.5" />
@@ -473,8 +476,8 @@ export function CourseChatPanel({
               type="button"
               onClick={() => submit()}
               disabled={busy || !query.trim()}
-              aria-label="发送"
-              title="发送（Enter）"
+              aria-label={t("courseChat.send")}
+              title={t("courseChat.sendTitle")}
               className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full bg-primary text-white transition hover:opacity-90 disabled:bg-[var(--surface-card-active)] disabled:text-[var(--text-muted)] disabled:hover:opacity-100"
             >
               <Send className="h-4 w-4" />

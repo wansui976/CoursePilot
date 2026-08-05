@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { Check, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,7 @@ const ROUTING_TASKS = [
 const TASKS_KEEPING_MANUAL_ROUTING = ["digest"] as const;
 
 export function LlmSettingsPanel() {
+  const { t } = useTranslation();
   const [profiles, setProfiles] = useState<LlmProfile[]>([]);
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [hasKey, setHasKey] = useState<Record<string, boolean>>({});
@@ -47,6 +49,7 @@ export function LlmSettingsPanel() {
   const [manualRouting, setManualRouting] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState("");
   const [savedMsg, setSavedMsg] = useState("");
+  const [savedIsError, setSavedIsError] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -91,7 +94,7 @@ export function LlmSettingsPanel() {
         setHasKey(flags);
         setLoadError("");
       } catch (error) {
-        if (!cancelled) setLoadError(`LLM 配置加载失败：${error}`);
+        if (!cancelled) setLoadError(t("llmSettings.loadError", { error: String(error) }));
       }
     })();
     return () => {
@@ -107,18 +110,18 @@ export function LlmSettingsPanel() {
     const id = uid();
     setProfiles((ps) => [
       ...ps,
-      { id, name: "新配置", kind: "openai", base_url: DEFAULT_BASE, model: "gpt-4o-mini" },
+      { id, name: t("llmSettings.newProfile"), kind: "openai", base_url: DEFAULT_BASE, model: "gpt-4o-mini" },
     ]);
     setActiveId((current) => current ?? id);
   }
 
   // 删除已保存的配置是破坏性操作（保存后连同 Key 路由一起消失）：先确认。
   async function remove(profile: LlmProfile) {
-    const ok = await confirmDialog(`删除配置「${profile.name}」？`, {
-      title: "删除 LLM 配置",
+    const ok = await confirmDialog(t("llmSettings.deleteConfirm", { name: profile.name }), {
+      title: t("llmSettings.deleteTitle"),
       kind: "warning",
-      okLabel: "删除",
-      cancelLabel: "取消",
+      okLabel: t("llmSettings.deleteLabel"),
+      cancelLabel: t("llmSettings.cancel"),
     });
     if (!ok) return;
     setProfiles((ps) => ps.filter((p) => p.id !== profile.id));
@@ -148,11 +151,13 @@ export function LlmSettingsPanel() {
         return next;
       });
       setKeys({});
-      setSavedMsg("已保存");
+      setSavedMsg(t("llmSettings.saved"));
+      setSavedIsError(false);
       setTimeout(() => setSavedMsg(""), 1500);
     } catch (error) {
       // 保存失败要说出来：否则界面上的配置和库里的从此各说各话。
-      setSavedMsg(`保存失败：${error}`);
+      setSavedMsg(t("llmSettings.saveFailed", { error: String(error) }));
+      setSavedIsError(true);
       setTimeout(() => setSavedMsg(""), 6000);
     } finally {
       setSaving(false);
@@ -166,7 +171,7 @@ export function LlmSettingsPanel() {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <Button size="sm" variant="outline" onClick={add}>
-          新增
+          {t("llmSettings.add")}
         </Button>
       </div>
       {loadError && (
@@ -179,7 +184,7 @@ export function LlmSettingsPanel() {
       )}
       {!loadError && profiles.length === 0 && (
         <p className="rounded-lg border border-dashed border-[var(--border-subtle)] px-3 py-4 text-center text-xs text-[var(--text-faint)]">
-          还没有配置。点「新增」添加一个 OpenAI 兼容配置（Claude 填 Anthropic 的兼容层地址也能用）。
+          {t("llmSettings.emptyHint")}
         </p>
       )}
       {profiles.map((p) => {
@@ -198,7 +203,7 @@ export function LlmSettingsPanel() {
                 type="button"
                 onClick={() => setActiveId(p.id)}
                 aria-pressed={isActive}
-                title={isActive ? "当前使用的模型" : "设为当前使用"}
+                title={isActive ? t("llmSettings.activeModel") : t("llmSettings.setDefault")}
                 className={`flex flex-none items-center gap-1.5 rounded-full px-2 py-1 text-xs transition ${
                   isActive
                     ? "bg-[var(--accent-weak)] text-[var(--accent-text)]"
@@ -214,13 +219,13 @@ export function LlmSettingsPanel() {
                 >
                   {isActive && <Check className="h-2.5 w-2.5" />}
                 </span>
-                {isActive ? "使用中" : "设为默认"}
+                {isActive ? t("llmSettings.active") : t("llmSettings.setAsDefault")}
               </button>
               <input
-                aria-label="配置名称"
+                aria-label={t("llmSettings.profileName")}
                 className={`${FIELD} flex-1`}
                 value={p.name}
-                placeholder="名称"
+                placeholder={t("llmSettings.profileNamePlaceholder")}
                 onChange={(e) => update(p.id, { name: e.target.value })}
               />
             </div>
@@ -232,10 +237,10 @@ export function LlmSettingsPanel() {
               onChange={(e) => update(p.id, { base_url: e.target.value })}
             />
             <input
-              aria-label="模型名"
+              aria-label={t("llmSettings.modelName")}
               className={FIELD}
               value={p.model}
-              placeholder="模型名（如 gpt-4o / claude-sonnet-4-6）"
+              placeholder={t("llmSettings.modelPlaceholder")}
               onChange={(e) => update(p.id, { model: e.target.value })}
             />
             <div className="flex items-center gap-2">
@@ -252,8 +257,8 @@ export function LlmSettingsPanel() {
                 />
                 <button
                   type="button"
-                  aria-label={showKey[p.id] ? "隐藏 API Key" : "显示 API Key"}
-                  title={showKey[p.id] ? "隐藏" : "显示"}
+                  aria-label={showKey[p.id] ? t("llmSettings.hideKey") : t("llmSettings.showKey")}
+                  title={showKey[p.id] ? t("llmSettings.hideLabel") : t("llmSettings.showLabel")}
                   onClick={() => setShowKey((s) => ({ ...s, [p.id]: !s[p.id] }))}
                   className="ca-touch-44 ca-workbench-touch absolute right-2 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded text-[var(--text-muted)] transition hover:text-[var(--text-strong)]"
                 >
@@ -263,7 +268,7 @@ export function LlmSettingsPanel() {
               {hasKey[p.id] && !keys[p.id] && (
                 <span className="inline-flex flex-none items-center gap-1 rounded-full bg-[var(--status-ok-bg)] px-2 py-1 text-xs font-medium text-[var(--status-ok)]">
                   <Check className="h-3 w-3" />
-                  已配置
+                  {t("llmSettings.configured")}
                 </span>
               )}
             </div>
@@ -272,19 +277,19 @@ export function LlmSettingsPanel() {
               className="text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
               onClick={() => void remove(p)}
             >
-              删除
+              {t("llmSettings.delete")}
             </Button>
           </div>
         );
       })}
       <div className="flex items-center gap-3">
         <Button size="sm" disabled={saving} onClick={save}>
-          保存
+          {t("llmSettings.save")}
         </Button>
         {savedMsg && (
           <span
             className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
-              savedMsg.includes("失败")
+              savedIsError
                 ? "bg-[var(--status-err-bg)] text-[var(--status-err)]"
                 : "bg-[var(--status-ok-bg)] text-[var(--status-ok)]"
             }`}

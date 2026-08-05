@@ -1,9 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { invalidateStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, X } from "lucide-react";
+import { Captions, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PanelEmptyState } from "@/components/ui/empty-state";
 import { ErrorNote } from "@/components/ui/ErrorNote";
+import { TextSkeleton } from "@/components/ui/skeleton";
 import { coarsePointer } from "@/lib/useContainerWidth";
 import { ExportMenu } from "./ExportMenu";
 import { MathText } from "./MathText";
@@ -22,6 +25,7 @@ const FOLLOW_PAUSE_MS = 4000;
 // content-visibility 按「块」而非按行：每块行数。块少两个数量级，滚动时浏览器的可见性
 // 簿记开销小得多；快滑时整块（约一屏半）一次性渲染进来，而不是一行行往外挤，基本不见空白。
 const CHUNK_SIZE = 30;
+const EMPTY_SEGMENTS: TranscriptSegment[] = [];
 
 // 单行文稿：memo 化，只有活动态变化的行才重渲染（换句时仅两行更新，避免整表重排）。
 // 长文稿性能由块级 content-visibility 承担（见 globals.css .ca-transcript-chunk）——
@@ -39,6 +43,7 @@ const TranscriptRow = memo(function TranscriptRow({
   onSeek: (ms: number) => void;
   onEdit: (id: number, text: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="px-3 py-0.5">
       <div
@@ -65,8 +70,8 @@ const TranscriptRow = memo(function TranscriptRow({
           </span>
         </button>
         <button
-          aria-label="编辑这句文稿"
-          title="纠错"
+          aria-label={t("transcript.editButton")}
+          title={t("transcript.editButtonTitle")}
           onClick={() => onEdit(segment.id, segment.text)}
           // 用轻量字形代替 lucide SVG：每行少一棵 SVG 子树，屏外行渲染更快、快滑空白更小。
           // 悬停才出现且盖在文字上方，给实底背景 + 细边保证可读。
@@ -81,13 +86,15 @@ const TranscriptRow = memo(function TranscriptRow({
 });
 
 export function TranscriptPanel({ videoId }: { videoId: string }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
-  const { data: segments = [] } = useQuery({
+  const transcriptQuery = useQuery({
     queryKey: ["transcripts", videoId],
     queryFn: () => ipc.transcripts.list(videoId),
     refetchInterval: (query) =>
       query.state.data && query.state.data.length > 0 ? false : 2000,
   });
+  const segments = transcriptQuery.data ?? EMPTY_SEGMENTS;
   const requestSeek = usePlayer((s) => s.requestSeek);
   const scrollerRef = useRef<HTMLDivElement>(null);
   // 用户手动滚动时间戳：其后一小段窗口内暂停「跟随播放自动居中」，避免与手滚打架而抽搐。
@@ -315,28 +322,48 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     },
   });
 
-  if (segments.length === 0) {
-    return <p className="p-4 text-sm text-[var(--text-muted)]">字幕生成中或尚未开始</p>;
+  if (transcriptQuery.isPending) {
+    return <TextSkeleton lines={6} label={t("transcript.loading")} />;
+  }
+
+  if (transcriptQuery.isError) {
+    return (
+      <ErrorNote
+        className="m-4"
+        error={transcriptQuery.error}
+        onRetry={() => void transcriptQuery.refetch()}
+      />
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <PanelEmptyState
+        icon={<Captions className="h-7 w-7" />}
+        title={t("transcript.emptyTitle")}
+        description={t("transcript.emptyDescription")}
+      />
+    );
   }
 
   return (
     <div className="flex h-full flex-col text-[var(--text-normal)]">
       <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2 text-xs">
         <span className="text-[var(--text-faint)]">
-          {coarsePointer() ? "点 ✎ 可纠错" : "悬停文稿可纠错"}
+          {coarsePointer() ? t("transcript.editHintTouch") : t("transcript.editHintDesktop")}
         </span>
         <div className="ml-auto">
           <ExportMenu
             items={[
-              { label: "SRT 字幕", run: () => ipc.export.subtitles(videoId, "srt"), mime: "application/x-subrip", saveAs: "subtitles.srt" },
-              { label: "VTT 字幕", run: () => ipc.export.subtitles(videoId, "vtt"), mime: "text/vtt", saveAs: "subtitles.vtt" },
+              { label: t("transcript.srtExport"), run: () => ipc.export.subtitles(videoId, "srt"), mime: "application/x-subrip", saveAs: "subtitles.srt" },
+              { label: t("transcript.vttExport"), run: () => ipc.export.subtitles(videoId, "vtt"), mime: "text/vtt", saveAs: "subtitles.vtt" },
             ]}
           />
         </div>
       </div>
       <div
         ref={scrollerRef}
-        aria-label="文稿内容滚动区"
+        aria-label={t("transcript.scrollArea")}
         // 大 DOM 标记:可见时主题切换走瞬切(见 stores/theme.ts hasVisibleHeavyDom),
         // 避免 VT 双全屏快照/全树过渡在数千节点上造成冻结;tab 非活动(display:none)不算在场。
         data-theme-heavy=""
@@ -357,7 +384,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
             <div key={segment.id} className="px-3 py-0.5">
               <div className="rounded bg-[var(--surface-card)] p-2">
                 <textarea
-                  aria-label="编辑文稿"
+                  aria-label={t("transcript.editSubtitle")}
                   autoFocus
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
@@ -380,7 +407,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                     disabled={update.isPending}
                   >
                     <Check className="h-3 w-3" />
-                    保存
+                    {t("transcript.save")}
                   </Button>
                   <Button
                     variant="ghost"
@@ -388,9 +415,9 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                     onClick={() => setEditingId(null)}
                   >
                     <X className="h-3 w-3" />
-                    取消
+                    {t("transcript.cancel")}
                   </Button>
-                  <span className="text-[var(--text-faint)]">⌘/Ctrl+Enter 保存</span>
+                  <span className="text-[var(--text-faint)]">{t("transcript.saveShortcut")}</span>
                 </div>
               </div>
             </div>
@@ -416,22 +443,25 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
           // 别让按钮抢焦点而清掉选区（文本/时间戳已存进 askAnchor，读取本就安全）。
           onMouseDown={(e) => e.preventDefault()}
         >
-          <button
+          <Button
             type="button"
-            className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-white shadow-[var(--shadow-pop)]"
+            variant="primary"
+            size="sm"
+            className="shadow-[var(--shadow-pop)]"
             onClick={() => {
               useInlineAsk.getState().askAbout(askAnchor.text, askAnchor.startMs);
               window.getSelection()?.removeAllRanges();
               setAskAnchor(null);
             }}
           >
-            问 AI
-          </button>
+            {t("transcript.askAi")}
+          </Button>
           {/* 仅当所选词落在单个句子内（可挖空）时提供。 */}
           {askAnchor.segmentText?.includes(askAnchor.text) && (
-            <button
+            <Button
               type="button"
-              className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-1 text-xs font-medium text-[var(--text-normal)] shadow-[var(--shadow-pop)]"
+              size="sm"
+              className="shadow-[var(--shadow-pop)]"
               onClick={() => {
                 const { front, back } = buildCloze(askAnchor.segmentText!, askAnchor.text);
                 addCloze.mutate({ front, back, startMs: askAnchor.startMs });
@@ -439,8 +469,8 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                 setAskAnchor(null);
               }}
             >
-              挖空成卡
-            </button>
+              {t("transcript.clozeCard")}
+            </Button>
           )}
         </div>
       )}
@@ -449,7 +479,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
           role="status"
           className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-[var(--surface-card)] px-3 py-1.5 text-xs text-[var(--text-strong)] shadow-[var(--shadow-pop)] ring-1 ring-[var(--border-subtle)]"
         >
-          已加入每日复习
+          {t("transcript.addedToReview")}
         </div>
       )}
     </div>
