@@ -690,6 +690,8 @@
     "notSet": "未设置",
     "settingChange": "{{current}} → {{value}}",
     "createAt": "建在 {{path}}",
+    "courseContext": "课程：{{course}}",
+    "importCourseContext": "导入到：{{course}}",
     "importSuccess": "视频已导入，但后续处理失败：{{error}}。重试只会继续处理，不会重复下载。",
     "noCookies": "还没有导入 B 站 cookies，下载会被拦截。请先在导入对话框里导入一次 cookies.txt",
     "noCourseId": "没有指定要导入到哪门课程",

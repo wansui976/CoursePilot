@@ -468,6 +468,7 @@ mod tests {
             },
             vec![AssistantAction::ProposeDelete {
                 video_id: "v1".into(),
+                course_name: "线性代数".into(),
                 title: "第一讲".into(),
             }],
             vec!["delete_video".into()],
@@ -485,6 +486,7 @@ mod tests {
             outcome(vec![ChatMessage::assistant("答复")]),
             vec![AssistantAction::ProposeDelete {
                 video_id: "v1".into(),
+                course_name: "线性代数".into(),
                 title: "第一讲".into(),
             }],
             Vec::new(),

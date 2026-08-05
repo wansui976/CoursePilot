@@ -261,10 +261,16 @@ export type AssistantAction =
   | {
       kind: "propose_rename";
       video_id: string;
+      course_name?: string | null;
       current_title: string;
       new_title: string;
     }
-  | { kind: "propose_delete"; video_id: string; title: string }
+  | {
+      kind: "propose_delete";
+      video_id: string;
+      course_name?: string | null;
+      title: string;
+    }
   | {
       kind: "propose_setting";
       key: string;
@@ -277,6 +283,7 @@ export type AssistantAction =
       url: string;
       title: string;
       course_id?: string | null;
+      course_name?: string | null;
     }
   | { kind: "propose_create_course"; name: string; root_path: string }
   | {

@@ -690,6 +690,8 @@
     "notSet": "Not set",
     "settingChange": "{{current}} → {{value}}",
     "createAt": "at {{path}}",
+    "courseContext": "Course: {{course}}",
+    "importCourseContext": "Import to: {{course}}",
     "importSuccess": "Video imported, but processing failed: {{error}}. Retry will continue processing without re-downloading.",
     "noCookies": "Bilibili cookies not imported — downloads will be blocked. Please import cookies.txt in the import dialog first",
     "noCourseId": "No target course specified",

@@ -157,20 +157,37 @@ async function execute(action: Proposal, importResume?: ImportResume) {
   }
 }
 
-/** 提案怎么显示：一行主标题、一行副标题。单张卡和批量卡共用，保持一致。 */
-function describe(action: Proposal): { primary: string; secondary?: string } {
+/** 提案怎么显示：对象、补充信息和所属课程。单张卡和批量卡共用，保持一致。 */
+function describe(action: Proposal): { primary: string; secondary?: string; context?: string } {
   switch (action.kind) {
     case "propose_rename":
-      return { primary: action.new_title, secondary: action.current_title };
+      return {
+        primary: action.new_title,
+        secondary: action.current_title,
+        context: action.course_name
+          ? i18n.t("assistantActions.courseContext", { course: action.course_name })
+          : undefined,
+      };
     case "propose_delete":
-      return { primary: action.title };
+      return {
+        primary: action.title,
+        context: action.course_name
+          ? i18n.t("assistantActions.courseContext", { course: action.course_name })
+          : undefined,
+      };
     case "propose_setting":
       return {
         primary: action.label,
         secondary: i18n.t("assistantActions.settingChange", { current: action.current ?? i18n.t("assistantActions.notSet"), value: action.value }),
       };
     case "propose_import":
-      return { primary: action.title, secondary: action.url };
+      return {
+        primary: action.title,
+        secondary: action.url,
+        context: action.course_name
+          ? i18n.t("assistantActions.importCourseContext", { course: action.course_name })
+          : undefined,
+      };
     case "propose_create_course":
       return { primary: action.name, secondary: i18n.t("assistantActions.createAt", { path: action.root_path }) };
     case "propose_rename_course":
@@ -367,12 +384,15 @@ function ProposalGroup({
 
       <ul className="mb-2 space-y-1">
         {chosen.map(({ action, i }) => {
-          const { primary, secondary } = describe(action);
+          const { primary, secondary, context } = describe(action);
           const struck =
             action.kind === "propose_rename" || action.kind === "propose_rename_course";
           return (
             <li key={i} className="flex items-start gap-1.5">
               <div className="min-w-0 flex-1">
+                {context && (
+                  <p className="break-all text-[var(--text-muted)]">{context}</p>
+                )}
                 {secondary && (
                   <p
                     className={`break-all text-[var(--text-muted)] ${struck ? "line-through" : ""}`}

@@ -41,11 +41,16 @@ pub enum AssistantAction {
     /// 提案：改名。界面渲染确认卡，用户点了才调真正的改名命令。
     ProposeRename {
         video_id: String,
+        course_name: String,
         current_title: String,
         new_title: String,
     },
     /// 提案：删除（真正执行的是软删除，回收站留 30 天）。
-    ProposeDelete { video_id: String, title: String },
+    ProposeDelete {
+        video_id: String,
+        course_name: String,
+        title: String,
+    },
     /// 提案：改一项设置。
     ProposeSetting {
         key: String,
@@ -58,6 +63,7 @@ pub enum AssistantAction {
         url: String,
         title: String,
         course_id: Option<String>,
+        course_name: String,
     },
     /// 提案：新建课程。目录来自「默认存放位置」设置——助手没法替用户挑目录，
     /// 而这个位置多数人也记不清，所以卡片上要把它显示出来。
@@ -1114,14 +1120,16 @@ impl AssistantTools<'_> {
                 let video = self
                     .find_video(&self.resolve_video_id(args.video_id)?)
                     .await?;
+                let course = self.find_course(&video.course_id).await?;
                 self.record(AssistantAction::ProposeRename {
                     video_id: video.id.clone(),
+                    course_name: course.name.clone(),
                     current_title: video.title.clone(),
                     new_title: new_title.clone(),
                 });
                 Ok(ToolOutcome::ok(format!(
-                    "已提出把《{}》改名为《{new_title}》，等用户确认。还没有生效。",
-                    video.title
+                    "已提出把课程《{}》中的《{}》改名为《{new_title}》，等用户确认。还没有生效。",
+                    course.name, video.title
                 )))
             }
 
@@ -1130,13 +1138,15 @@ impl AssistantTools<'_> {
                 let video = self
                     .find_video(&self.resolve_video_id(args.video_id)?)
                     .await?;
+                let course = self.find_course(&video.course_id).await?;
                 self.record(AssistantAction::ProposeDelete {
                     video_id: video.id.clone(),
+                    course_name: course.name.clone(),
                     title: video.title.clone(),
                 });
                 Ok(ToolOutcome::ok(format!(
-                    "已提出删除《{}》，等用户确认。还没有删，确认后也只是进回收站，30 天内可还原。",
-                    video.title
+                    "已提出删除课程《{}》中的《{}》，等用户确认。还没有删，确认后也只是进回收站，30 天内可还原。",
+                    course.name, video.title
                 )))
             }
 
@@ -1287,6 +1297,7 @@ impl AssistantTools<'_> {
                     title: args.title.unwrap_or_else(|| url.clone()),
                     url,
                     course_id: Some(course.id.clone()),
+                    course_name: course.name.clone(),
                 });
                 Ok(ToolOutcome::ok(format!(
                     "已提出导入到课程《{}》，等用户确认。还没有开始下载。",
@@ -1885,7 +1896,12 @@ mod tests {
         assert!(out.content.contains("确认") && out.content.contains("还没有生效"));
 
         match tools.take_actions().as_slice() {
-            [AssistantAction::ProposeRename { new_title, .. }] => {
+            [AssistantAction::ProposeRename {
+                course_name,
+                new_title,
+                ..
+            }] => {
+                assert_eq!(course_name, "线性代数");
                 assert_eq!(new_title, "第一讲 行列式")
             }
             other => panic!("应当只产出一条改名提案，实际 {other:?}"),
@@ -1908,10 +1924,12 @@ mod tests {
             .unwrap();
         assert_eq!(still_there.len(), 1, "删除工具不该真的删");
         assert!(out.content.contains("还没有删"));
-        assert!(matches!(
-            tools.take_actions().as_slice(),
-            [AssistantAction::ProposeDelete { .. }]
-        ));
+        match tools.take_actions().as_slice() {
+            [AssistantAction::ProposeDelete { course_name, .. }] => {
+                assert_eq!(course_name, "线性代数")
+            }
+            other => panic!("应当只产出一条带课程名的删除提案，实际 {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -1980,8 +1998,12 @@ mod tests {
         match course_tools.take_actions().as_slice() {
             [AssistantAction::ProposeImport {
                 course_id: Some(target),
+                course_name,
                 ..
-            }] => assert_eq!(target, &course_id),
+            }] => {
+                assert_eq!(target, &course_id);
+                assert_eq!(course_name, "线性代数");
+            }
             other => panic!("应当生成带真实课程的导入卡，实际 {other:?}"),
         }
     }

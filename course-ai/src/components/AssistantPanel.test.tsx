@@ -1061,6 +1061,7 @@ describe("确认卡", () => {
           {
             kind: "propose_rename",
             video_id: "v1",
+            course_name: "线性代数",
             current_title: "未命名",
             new_title: "第三讲 特征值",
           },
@@ -1073,6 +1074,7 @@ describe("确认卡", () => {
     // 卡片必须把原名和新名都摆出来——最大的风险不是「AI 要改名」，是它认错了对象。
     expect(await screen.findByText("未命名")).toBeInTheDocument();
     expect(screen.getByText("第三讲 特征值")).toBeInTheDocument();
+    expect(screen.getByText("课程：线性代数")).toBeInTheDocument();
     // 还没点之前，什么都不该发生。
     expect(mockIpc.videos.updateTitle).not.toHaveBeenCalled();
 
@@ -1280,12 +1282,22 @@ describe("确认卡", () => {
 
   it("删除要等确认，并说清楚是进回收站", async () => {
     mockIpc.assistant.ask.mockResolvedValueOnce(
-      reply({ actions: [{ kind: "propose_delete", video_id: "v2", title: "第五讲" }] }),
+      reply({
+        actions: [
+          {
+            kind: "propose_delete",
+            video_id: "v2",
+            course_name: "高等数学",
+            title: "第五讲",
+          },
+        ],
+      }),
     );
     renderPanel();
     await ask("删了它");
 
     expect(await screen.findByText("第五讲")).toBeInTheDocument();
+    expect(screen.getByText("课程：高等数学")).toBeInTheDocument();
     expect(screen.getByText(/30 天内可还原/)).toBeInTheDocument();
     expect(mockIpc.videos.delete).not.toHaveBeenCalled();
 
@@ -1548,12 +1560,14 @@ describe("确认卡", () => {
             url: "https://www.bilibili.com/video/BV1",
             title: "双曲线",
             course_id: "c1",
+            course_name: "解析几何",
           },
         ],
       }),
     );
     renderPanel();
     await ask("导入这个");
+    expect(await screen.findByText("导入到：解析几何")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "确认导入" }));
 
     await waitFor(() =>
