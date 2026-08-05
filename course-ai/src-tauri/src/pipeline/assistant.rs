@@ -197,6 +197,20 @@ impl<'a> AssistantTools<'a> {
             })
     }
 
+    /// 课程 id 同样来自模型，不能把不存在或已进回收站的课程当成一门真实的空课程。
+    async fn find_course(&self, course_id: &str) -> Result<Course, ToolOutcome> {
+        crate::commands::courses::list_courses(self.db)
+            .await
+            .map_err(ToolOutcome::failed)?
+            .into_iter()
+            .find(|course| course.id == course_id)
+            .ok_or_else(|| {
+                ToolOutcome::failed(format!(
+                    "找不到 id 为 {course_id} 的课程。先用 list_courses 查真实 id，不要凭印象填"
+                ))
+            })
+    }
+
     /// 没指定视频时用「当前正在看的那个」。
     fn resolve_video_id(&self, given: Option<String>) -> Result<String, ToolOutcome> {
         given
@@ -852,7 +866,9 @@ pub fn tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "import_video".into(),
-            description: "把一个视频链接导入课程。**会生成确认卡，用户点了才真的下载。**".into(),
+            description: "把一个视频链接导入课程。**会生成确认卡，用户点了才真的下载。** \
+                 必须明确目标 course_id；未提供时只能使用当前课程，首页应先调 list_courses。"
+                .into(),
             parameters: object(
                 json!({
                     "url": {"type": "string"},
@@ -898,7 +914,8 @@ impl AssistantTools<'_> {
                     .ok_or_else(|| {
                         ToolOutcome::failed("没有指定课程，当前也没有打开的课程。先调 list_courses")
                     })?;
-                let videos = crate::commands::videos::list_videos(self.db, &course_id)
+                let course = self.find_course(&course_id).await?;
+                let videos = crate::commands::videos::list_videos(self.db, &course.id)
                     .await
                     .map_err(ToolOutcome::failed)?;
                 Ok(ToolOutcome::ok(videos_summary(&videos)))
@@ -1062,17 +1079,7 @@ impl AssistantTools<'_> {
                     .ok_or_else(|| {
                         ToolOutcome::failed("没有指定课程，当前也没有打开的课程。先调 list_courses")
                     })?;
-                let courses = crate::commands::courses::list_courses(self.db)
-                    .await
-                    .map_err(ToolOutcome::failed)?;
-                let course = courses
-                    .into_iter()
-                    .find(|c| c.id == course_id)
-                    .ok_or_else(|| {
-                        ToolOutcome::failed(format!(
-                            "找不到 id 为 {course_id} 的课程。先用 list_courses 查真实 id"
-                        ))
-                    })?;
+                let course = self.find_course(&course_id).await?;
                 self.record(AssistantAction::ProposeRenameCourse {
                     course_id: course.id,
                     current_name: course.name.clone(),
@@ -1137,12 +1144,24 @@ impl AssistantTools<'_> {
                 if !url.starts_with("http") {
                     return Err(ToolOutcome::failed(format!("「{url}」不是一个链接")));
                 }
+                let course_id = args
+                    .course_id
+                    .or_else(|| self.context.course_id.clone())
+                    .ok_or_else(|| {
+                        ToolOutcome::failed(
+                            "没有指定导入到哪门课程，当前也没有打开的课程。先调 list_courses，再明确 course_id",
+                        )
+                    })?;
+                let course = self.find_course(&course_id).await?;
                 self.record(AssistantAction::ProposeImport {
                     title: args.title.unwrap_or_else(|| url.clone()),
                     url,
-                    course_id: args.course_id.or_else(|| self.context.course_id.clone()),
+                    course_id: Some(course.id.clone()),
                 });
-                Ok(ToolOutcome::ok("已提出导入，等用户确认。还没有开始下载。"))
+                Ok(ToolOutcome::ok(format!(
+                    "已提出导入到课程《{}》，等用户确认。还没有开始下载。",
+                    course.name
+                )))
             }
 
             other => Err(ToolOutcome::failed(format!(
@@ -1158,7 +1177,7 @@ impl AssistantTools<'_> {
                 let video_id = self.resolve_video_id(None)?;
                 crate::pipeline::rag::keyword_search(self.db, &video_id, &args.query, 8).await
             }
-            _ => {
+            "course" | "all" => {
                 let courses = crate::commands::courses::list_courses(self.db)
                     .await
                     .map_err(ToolOutcome::failed)?;
@@ -1174,7 +1193,14 @@ impl AssistantTools<'_> {
                             "当前没有打开的课程，没法按「本课程」搜。请改用 scope=\"all\" 搜全部，或先让用户选一门课",
                         ));
                     };
-                    courses.iter().filter(|c| c.id == course_id).collect()
+                    vec![courses
+                        .iter()
+                        .find(|course| course.id == course_id)
+                        .ok_or_else(|| {
+                            ToolOutcome::failed(format!(
+                                "找不到 id 为 {course_id} 的课程。先用 list_courses 查真实 id"
+                            ))
+                        })?]
                 };
                 let mut videos = Vec::new();
                 for course in wanted {
@@ -1186,6 +1212,11 @@ impl AssistantTools<'_> {
                     }
                 }
                 crate::pipeline::rag::keyword_search_scope(self.db, &videos, &args.query, 8).await
+            }
+            other => {
+                return Err(ToolOutcome::failed(format!(
+                    "搜索范围「{other}」无效，只能是 video / course / all"
+                )))
             }
         }
         .map_err(ToolOutcome::failed)?;
@@ -1694,6 +1725,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_made_up_course_id_is_not_reported_as_empty_or_used_for_import() {
+        let (db, _course, _video, _d) = seed().await;
+        let tools = AssistantTools::new(&db, AssistantContext::default());
+
+        let listed = tools
+            .run(&call("list_videos", r#"{"course_id":"course_不存在"}"#))
+            .await;
+        assert!(listed.content.contains("找不到"));
+        assert!(!listed.content.contains("还没有视频"));
+
+        let imported = tools
+            .run(&call(
+                "import_video",
+                r#"{"url":"https://www.bilibili.com/video/BV1xx","course_id":"course_不存在"}"#,
+            ))
+            .await;
+        assert!(imported.content.contains("找不到"));
+        assert!(tools.take_actions().is_empty(), "虚构课程不能产生导入卡");
+    }
+
+    #[tokio::test]
+    async fn importing_requires_a_real_target_course_and_records_it_on_the_proposal() {
+        let (db, course_id, _video, _d) = seed().await;
+        let homepage_tools = AssistantTools::new(&db, AssistantContext::default());
+        let missing = homepage_tools
+            .run(&call(
+                "import_video",
+                r#"{"url":"https://www.bilibili.com/video/BV1xx"}"#,
+            ))
+            .await;
+        assert!(missing.content.contains("没有指定导入到哪门课程"));
+        assert!(homepage_tools.take_actions().is_empty());
+
+        let course_tools = AssistantTools::new(
+            &db,
+            AssistantContext {
+                course_id: Some(course_id.clone()),
+                ..Default::default()
+            },
+        );
+        let proposed = course_tools
+            .run(&call(
+                "import_video",
+                r#"{"url":"https://www.bilibili.com/video/BV1xx","title":"线性代数第二讲"}"#,
+            ))
+            .await;
+        assert!(proposed.content.contains("线性代数"));
+        match course_tools.take_actions().as_slice() {
+            [AssistantAction::ProposeImport {
+                course_id: Some(target),
+                ..
+            }] => assert_eq!(target, &course_id),
+            other => panic!("应当生成带真实课程的导入卡，实际 {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn a_setting_outside_the_whitelist_is_refused_with_the_allowed_list() {
         let (db, _c, _v, _d) = seed().await;
         let tools = AssistantTools::new(&db, AssistantContext::default());
@@ -1718,6 +1806,27 @@ mod tests {
             .await;
         assert!(out.content.contains("没有打开的课程"));
         assert!(!out.content.contains("没搜到"), "不能说成搜过了但没有");
+    }
+
+    #[tokio::test]
+    async fn an_invalid_search_scope_is_rejected_instead_of_falling_back_to_course() {
+        let (db, course_id, _video, _d) = seed().await;
+        let tools = AssistantTools::new(
+            &db,
+            AssistantContext {
+                course_id: Some(course_id),
+                ..Default::default()
+            },
+        );
+        let out = tools
+            .run(&call(
+                "search_content",
+                r#"{"query":"行列式","scope":"nearby"}"#,
+            ))
+            .await;
+        assert!(out.content.contains("搜索范围"));
+        assert!(out.content.contains("video / course / all"));
+        assert!(tools.take_actions().is_empty());
     }
 
     #[tokio::test]
