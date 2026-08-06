@@ -247,10 +247,12 @@ function ProposalGroup({
   actions,
   onDone,
   onResult,
+  onExecutionChange,
 }: {
   actions: Proposal[];
   onDone: () => void;
   onResult?: (message: string) => void;
+  onExecutionChange?: (running: boolean) => void;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -280,6 +282,15 @@ function ProposalGroup({
     setWarning("");
     stopRequestedRef.current = false;
     setStopRequested(false);
+    onExecutionChange?.(true);
+    try {
+      await executeRemaining();
+    } finally {
+      onExecutionChange?.(false);
+    }
+  }
+
+  async function executeRemaining() {
     const succeeded: number[] = [];
     const failures: { message: string }[] = [];
     let shouldRefresh = false;
@@ -456,7 +467,7 @@ function ProposalGroup({
                     ? t("assistantActions.confirmBatch", { action: confirmLabel, count: chosen.length })
                     : confirmLabel}
           </Button>
-          {status === "running" ? (
+          {status === "running" && batch ? (
             <Button
               size="sm"
               variant="ghost"
@@ -465,11 +476,11 @@ function ProposalGroup({
             >
               {stopRequested ? t("assistantActions.stopping") : t("assistantActions.stopRemaining")}
             </Button>
-          ) : (
+          ) : status !== "running" ? (
             <Button size="sm" variant="ghost" onClick={dismiss}>
               {t("assistantActions.cancel")}
             </Button>
-          )}
+          ) : null}
         </div>
       )}
       {error && (
@@ -491,10 +502,12 @@ export function AssistantActionList({
   actions,
   onNavigate,
   onResult,
+  onExecutionChange,
 }: {
   actions: AssistantAction[];
   onNavigate: (action: AssistantAction) => void;
   onResult?: (message: string) => void;
+  onExecutionChange?: (running: boolean) => void;
 }) {
   const { t } = useTranslation();
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
@@ -549,6 +562,7 @@ export function AssistantActionList({
               actions={group.items as Proposal[]}
               onDone={() => setDismissed((prev) => new Set(prev).add(group.key))}
               onResult={onResult}
+              onExecutionChange={onExecutionChange}
             />
           );
         })}

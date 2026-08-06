@@ -208,6 +208,7 @@ export function AssistantPanel({
   const [initialSession] = useState(readAssistantSession);
   const [input, setInput] = useState(initialSession.draft);
   const [busy, setBusy] = useState(false);
+  const [actionExecutionCount, setActionExecutionCount] = useState(0);
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState("");
   const [turns, setTurns] = useState<Turn[]>(initialSession.turns);
@@ -223,6 +224,7 @@ export function AssistantPanel({
   const dragCleanupRef = useRef<(() => void) | null>(null);
   const suppressLauncherClickRef = useRef(false);
   const activeRequestRef = useRef<string | null>(null);
+  const actionExecutionCountRef = useRef(0);
   const locallyStoppedRequestsRef = useRef(new Set<string>());
   const historyRef = useRef(initialSession.history);
   const conversationEpochRef = useRef(0);
@@ -254,6 +256,13 @@ export function AssistantPanel({
   const pendingInlineAsk = useInlineAsk((state) => state.pending);
   const clearInlineAsk = useInlineAsk((state) => state.clear);
   const scopeLabel = contextLabel(context, t);
+  const actionExecutionBusy = actionExecutionCount > 0;
+
+  function trackActionExecution(running: boolean) {
+    const next = Math.max(0, actionExecutionCountRef.current + (running ? 1 : -1));
+    actionExecutionCountRef.current = next;
+    setActionExecutionCount(next);
+  }
 
   function navigateFromTurn(turn: Turn, action: AssistantAction) {
     // 时间点属于回答生成时的视频。用户可能在等待期间或之后切了视频，不能把旧时间戳
@@ -910,7 +919,7 @@ export function AssistantPanel({
    * 现在的 history 已经就是提问之前的样子，再退一轮会把上一次真正的问答也砍掉。
    */
   function regenerate(turn: Turn) {
-    if (busy || activeRequestRef.current) return;
+    if (busy || activeRequestRef.current || actionExecutionCountRef.current > 0) return;
     const before = turn.canceled
       ? historyRef.current
       : historyBeforeLastQuestion(historyRef.current);
@@ -964,7 +973,7 @@ export function AssistantPanel({
   }
 
   function startNewConversation() {
-    if (busy) return;
+    if (busy || actionExecutionCountRef.current > 0) return;
     const nextEpoch = conversationEpochRef.current + 1;
     conversationEpochRef.current = nextEpoch;
     setConversationEpoch(nextEpoch);
@@ -1135,7 +1144,7 @@ export function AssistantPanel({
             variant="ghost"
             aria-label={t("assistant.newChat")}
             title={t("assistant.newChat")}
-            disabled={busy}
+            disabled={busy || actionExecutionBusy}
             onClick={startNewConversation}
           >
             <MessageSquarePlus className="h-4 w-4" />
@@ -1282,7 +1291,7 @@ export function AssistantPanel({
                       variant="ghost"
                       aria-label={t("assistant.regenerate")}
                       title={t("assistant.regenerate")}
-                      disabled={busy}
+                      disabled={busy || actionExecutionBusy}
                       onClick={() => regenerate(turn)}
                       className="h-7 w-7 text-[var(--text-faint)]"
                     >
@@ -1312,7 +1321,7 @@ export function AssistantPanel({
                   <Button
                     size="sm"
                     variant="ghost"
-                    disabled={busy}
+                    disabled={busy || actionExecutionBusy}
                     onClick={() => regenerate(turn)}
                     className="-my-1 h-6 flex-none px-1.5 text-[11px]"
                   >
@@ -1327,6 +1336,7 @@ export function AssistantPanel({
               actions={turn.actions}
               onNavigate={(action) => navigateFromTurn(turn, action)}
               onResult={(message) => recordActionResult(turn.id, message, conversationEpoch)}
+              onExecutionChange={trackActionExecution}
             />
 
             {turn.actionsExpired && (

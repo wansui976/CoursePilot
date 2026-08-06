@@ -1233,7 +1233,7 @@ describe("确认卡", () => {
     expect(mockIpc.videos.updateTitle).toHaveBeenCalledTimes(1);
   });
 
-  it("旧确认卡执行完后不会把回执写进已经开始的新对话", async () => {
+  it("确认操作执行中不能丢掉旧会话，完成后才允许新建对话", async () => {
     let finishRename!: () => void;
     mockIpc.videos.updateTitle.mockReturnValueOnce(
       new Promise<void>((resolve) => {
@@ -1256,35 +1256,26 @@ describe("确认卡", () => {
         ],
       }),
     );
-    const newHistory = [
-      { role: "user", content: "新会话问题" },
-      { role: "assistant", content: "新会话回答" },
-    ];
-    mockIpc.assistant.ask.mockResolvedValueOnce(
-      reply({ answer: "新会话回答", history: newHistory }),
-    );
     renderPanel();
     await ask("改名");
     fireEvent.click(await screen.findByRole("button", { name: "确认改名" }));
-    fireEvent.click(screen.getByRole("button", { name: "新对话" }));
 
-    await ask("新会话问题");
-    await screen.findByText("新会话回答");
+    const newConversation = screen.getByRole("button", { name: "新对话" });
+    expect(newConversation).toBeDisabled();
+    expect(screen.getByRole("button", { name: "重新回答" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "停止剩余" })).not.toBeInTheDocument();
+    fireEvent.click(newConversation);
+    expect(screen.getByTestId("user-bubble")).toHaveTextContent("改名");
+
     await act(async () => {
       finishRename();
       await Promise.resolve();
     });
+    await waitFor(() => expect(newConversation).toBeEnabled());
+    expect(screen.getByRole("button", { name: "重新回答" })).toBeEnabled();
 
-    await ask("继续新会话");
-    await waitFor(() =>
-      expect(mockIpc.assistant.ask).toHaveBeenLastCalledWith(
-        "继续新会话",
-        expect.anything(),
-        newHistory,
-        expect.any(String),
-        expect.any(Function),
-      ),
-    );
+    fireEvent.click(newConversation);
+    expect(screen.queryByTestId("user-bubble")).not.toBeInTheDocument();
   });
 
   it("删除要等确认，并说清楚是进回收站", async () => {
