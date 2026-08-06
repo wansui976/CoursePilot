@@ -7,7 +7,7 @@
 //! 三条硬约束，都是这个循环必须自带的：
 //!
 //! 1. **轮次有上限**。模型能自己跟自己调一晚上工具，每一轮的结果又都留在上下文里，
-//!    成本是乘法涨的。撞到上限时不是报错，而是把已经拿到的东西交出去。
+//!    成本是乘法涨的。撞到上限时会再发一次不带工具的总结请求，把已经拿到的资料整理出来。
 //! 2. **随时可取消**。用户点停止之后，正在等的那次模型调用要断，已经排上的工具不再执行。
 //! 3. **工具失败不等于整轮失败**。执行出错时把错误当成工具结果喂回去，模型有机会换个
 //!    参数重试或者改口说做不到；直接抛错则是把整段对话打断，用户只看到一个红条。
@@ -16,12 +16,22 @@ use crate::error::{AppError, AppResult};
 use crate::llm::{ChatMessage, ChatRequest, Provider, ToolCall, ToolSpec};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// 一轮循环最多来回几次。
+/// 带工具的循环最多来回几次。
 ///
-/// 六次的依据：真实请求里「查一下再答」是一到两轮，「查、再查、确认、答」到四轮，
-/// 超过这个数基本是模型在原地打转。留一点余量，但不能不封顶——每一轮的工具结果
-/// 都留在上下文里，第六轮的输入已经是第一轮的好几倍。
+/// 总结请求不计入这个上限：第 6 轮工具结果回来后，最多再发一次不带工具的模型请求，
+/// 避免模型已经查到资料却因为封顶只能把「我先查一下」交给用户。
 pub const MAX_TURNS: usize = 6;
+const MAX_TOOL_CALLS: usize = 24;
+const MAX_TOOL_RESULT_CHARS: usize = 12_000;
+const MAX_TOTAL_TOOL_RESULT_CHARS: usize = 32_000;
+const TOOL_BUDGET_EXHAUSTED: &str =
+    "工具预算已用完，本次调用未执行。请直接基于已有结果总结，不要继续调用工具。";
+const TOOL_RESULT_TRUNCATED: &str = "\n（工具结果已按本轮上下文预算截断；请基于现有内容总结。）";
+
+const FORCE_SUMMARY_INSTRUCTION: &str =
+    "工具调用轮次或上下文预算已经达到上限。请基于上面已经获得的工具结果，\
+直接给用户完整、准确、简洁的最终答复；不要再调用工具，也不要只说正在查询。\
+如果现有资料不足，请明确说明不足之处以及已经能够确认的内容。";
 
 /// 一次工具执行的结果。
 ///
@@ -72,24 +82,24 @@ pub enum AgentEvent<'a> {
     ToolStarted(&'a ToolCall),
     /// 该工具执行完毕（成功与否都算完毕）。
     ToolFinished(&'a ToolCall),
-    /// 撞到轮次上限，已经停下。
+    /// 带工具的循环撞到轮次或上下文预算上限，已经转入强制总结。
     HitTurnLimit,
 }
 
 /// 一次完整循环的结果。
 pub struct AgentOutcome {
-    /// 模型最终说的话。撞上限或中途取消时，这里是它最后一次说过的内容，可能为空。
+    /// 模型最终说的话。强制总结失败或中途取消时，这里可能仍是最后一轮过场话。
     pub answer: String,
     /// 整段对话（含工具往返），供调用方接着追问。
     pub messages: Vec<ChatMessage>,
     /// 实际来回了几轮。
     pub turns: usize,
-    /// 是否由用户主动停止。撞轮次上限不算取消。
+    /// 是否由用户主动停止。撞工具轮次或上下文预算上限不算取消。
     pub canceled: bool,
-    /// 是否转到轮次上限才停下。
+    /// 是否转到工具轮次或上下文预算上限后仍未得到可用的最终答复。
     ///
-    /// 调用方必须往下传给界面。撞上限时 `answer` 多半是模型某一轮的过场话
-    /// （「我先查一下课程列表」），甚至是空的——照常显示出来，用户会当成它给完了答复。
+    /// 调用方必须往下传给界面。强制总结成功时该字段为 false；总结失败时，界面应提示用户
+    /// 这次查询没有得出结论，而不是把过场话（「我先查一下课程列表」）当成答案。
     pub hit_turn_limit: bool,
 }
 
@@ -121,7 +131,43 @@ async fn run_tool_or_cancel<T: ToolBox>(
     }
 }
 
-/// 跑一轮工具调用循环，直到模型给出不带工具调用的答复。
+fn cap_tool_result(content: String, remaining_chars: usize) -> (String, usize, bool) {
+    let limit = remaining_chars.min(MAX_TOOL_RESULT_CHARS);
+    let original_chars = content.chars().count();
+    if original_chars <= limit {
+        return (content, original_chars, false);
+    }
+
+    let suffix_chars = TOOL_RESULT_TRUNCATED.chars().count();
+    let kept_chars = limit.saturating_sub(suffix_chars);
+    let mut capped: String = content.chars().take(kept_chars).collect();
+    capped.extend(TOOL_RESULT_TRUNCATED.chars().take(limit - kept_chars));
+    let used = capped.chars().count();
+    (capped, used, true)
+}
+
+fn forced_summary_request(
+    model: &str,
+    system: Option<&str>,
+    messages: Vec<ChatMessage>,
+) -> ChatRequest {
+    let summary_system = match system {
+        Some(base) => format!("{base}\n\n{FORCE_SUMMARY_INSTRUCTION}"),
+        None => FORCE_SUMMARY_INSTRUCTION.to_string(),
+    };
+    ChatRequest {
+        model: model.to_string(),
+        system: Some(summary_system),
+        cacheable_context: None,
+        messages,
+        temperature: 0.2,
+        // 空数组在 OpenAI 请求体里会被完全省略，兼容端点无法继续选择工具。
+        tools: Vec::new(),
+        label: "assistant",
+    }
+}
+
+/// 跑工具调用循环，直到模型给出答复；达到工具轮次或上下文预算上限后再尝试一次无工具总结。
 ///
 /// `messages` 是起始对话（通常是系统状态 + 用户这句话）；返回时会带上循环中产生的
 /// 全部往返，调用方原样存下来就能继续追问。
@@ -137,8 +183,11 @@ pub async fn run<T: ToolBox>(
     let specs = tools.specs();
     let mut answer = String::new();
     let mut turns = 0;
+    let mut tool_calls = 0;
+    let mut tool_result_chars = 0;
+    let mut budget_exhausted = false;
 
-    for turn in 0..MAX_TURNS {
+    'agent: for turn in 0..MAX_TURNS {
         if cancel.load(Ordering::SeqCst) {
             break;
         }
@@ -206,33 +255,102 @@ pub async fn run<T: ToolBox>(
                 messages.push(ChatMessage::tool_result(&call.id, "已取消，未执行。"));
                 continue;
             }
+            if tool_calls >= MAX_TOOL_CALLS || tool_result_chars >= MAX_TOTAL_TOOL_RESULT_CHARS {
+                messages.push(ChatMessage::tool_result(&call.id, TOOL_BUDGET_EXHAUSTED));
+                budget_exhausted = true;
+                continue;
+            }
+            tool_calls += 1;
             on_event(AgentEvent::ToolStarted(call));
             let outcome = run_tool_or_cancel(tools, call, cancel).await;
             on_event(AgentEvent::ToolFinished(call));
-            messages.push(ChatMessage::tool_result(
-                &call.id,
-                outcome
-                    .map(|outcome| outcome.content)
-                    .unwrap_or_else(|| "已取消，执行未完成。".to_string()),
-            ));
+            let raw_content = outcome
+                .map(|outcome| outcome.content)
+                .unwrap_or_else(|| "已取消，执行未完成。".to_string());
+            let remaining_chars = MAX_TOTAL_TOOL_RESULT_CHARS - tool_result_chars;
+            let (content, used_chars, truncated) = cap_tool_result(raw_content, remaining_chars);
+            tool_result_chars += used_chars;
+            budget_exhausted |= truncated || tool_result_chars >= MAX_TOTAL_TOOL_RESULT_CHARS;
+            messages.push(ChatMessage::tool_result(&call.id, content));
+        }
+        if budget_exhausted {
+            break 'agent;
         }
     }
 
     // 被取消不算撞上限。两者都会走到这里，但对用户是两件事：
     // 一个是「你叫停的」，一个是「它自己转不出来了」。
     let canceled = cancel.load(Ordering::SeqCst);
-    let hit_turn_limit = turns >= MAX_TURNS && !canceled;
-    if hit_turn_limit {
+    if (turns >= MAX_TURNS || budget_exhausted) && !canceled {
+        // 先发出边界事件，让调用方知道工具链已经封顶；随后这一次请求明确不带工具，
+        // 只负责把已有检索结果整理成最终答复。总结请求失败时仍保留上限标记。
         on_event(AgentEvent::HitTurnLimit);
+        let summary_turn = turns + 1;
+        on_event(AgentEvent::TurnStarted(summary_turn));
+        let summary_req = forced_summary_request(model, system.as_deref(), messages.clone());
+        let mut on_piece = |piece: crate::llm::StreamPiece| match piece {
+            crate::llm::StreamPiece::Content(delta) => on_event(AgentEvent::Content(delta)),
+            crate::llm::StreamPiece::Reasoning(delta) => on_event(AgentEvent::Reasoning(delta)),
+        };
+        let summary = match provider
+            .complete_stream(&summary_req, cancel, &mut on_piece)
+            .await
+        {
+            Ok(summary) => summary,
+            // 强制总结是封顶后的兜底。它自己失败时不能把前面已经取得的资料和动作
+            // 一起变成命令错误；保留旧结果并让界面明确提示未得出最终结论。
+            Err(_) => {
+                let canceled = cancel.load(Ordering::SeqCst);
+                return Ok(AgentOutcome {
+                    answer,
+                    messages,
+                    turns: summary_turn,
+                    canceled,
+                    hit_turn_limit: !canceled,
+                });
+            }
+        };
+        // 和工具循环一样，取消时丢掉总结请求吐出的半截内容，不把它写进下一轮历史。
+        if cancel.load(Ordering::SeqCst) {
+            return Ok(AgentOutcome {
+                answer,
+                messages,
+                turns: summary_turn,
+                canceled: true,
+                hit_turn_limit: false,
+            });
+        }
+        // 兼容端点即使在请求体没有 tools 时仍返回 tool_calls，也绝不执行它们；有正文就
+        // 把正文当作总结，否则回退到上限提示，避免再次进入没有边界的工具循环。
+        if !summary.content.trim().is_empty() {
+            answer = summary.content.clone();
+            messages.push(ChatMessage::assistant(summary.content));
+            return Ok(AgentOutcome {
+                answer,
+                messages,
+                turns: summary_turn,
+                canceled: false,
+                hit_turn_limit: false,
+            });
+        }
+        // 总结没有产出正文：把已取得的资料和过场答复交出去，并保留上限标记，供界面给出
+        // 可重试的提示。若 summary 有 tool_calls，不把孤儿调用写进历史。
+        return Ok(AgentOutcome {
+            answer,
+            messages,
+            turns: summary_turn,
+            canceled: false,
+            hit_turn_limit: true,
+        });
     }
-    // 撞上限或被取消：把已经拿到的交出去，不报错。用户宁可看到半截结果，
-    // 也好过看到一个「失败」却不知道刚才那些工具到底做了什么。
+
+    // 没撞上限时只有取消会走到这里：把已经拿到的交出去，不报错。
     Ok(AgentOutcome {
         answer,
         messages,
         turns,
         canceled,
-        hit_turn_limit,
+        hit_turn_limit: false,
     })
 }
 
@@ -294,6 +412,23 @@ mod tests {
         Provider::Scripted {
             steps: Mutex::new(steps),
         }
+    }
+
+    #[test]
+    fn the_forced_summary_request_disables_tools_and_keeps_the_collected_history() {
+        let request = forced_summary_request(
+            "m",
+            Some("原系统提示"),
+            vec![ChatMessage::tool_result("c1", "检索结果")],
+        );
+
+        assert!(request.tools.is_empty());
+        assert!(request
+            .system
+            .as_deref()
+            .is_some_and(|text| text.contains(FORCE_SUMMARY_INSTRUCTION)));
+        assert_eq!(request.messages.len(), 1);
+        assert_eq!(request.messages[0].content, "检索结果");
     }
 
     /// 记录被执行过哪些工具；`fail` 时一律执行失败。
@@ -473,13 +608,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_model_that_never_stops_is_capped_instead_of_looping_forever() {
+    async fn a_model_that_never_stops_gets_one_forced_summary_after_the_cap() {
         // 模型可以自己跟自己调一晚上工具，而每轮的结果都留在上下文里，成本是乘法涨的。
-        let provider = scripted(
-            (0..MAX_TURNS + 5)
-                .map(|i| wants(vec![call(&format!("c{i}"), "probe", "{}")]))
-                .collect(),
-        );
+        // 达到工具轮上限后只允许再做一次无工具总结，不能把「我先查一下」当成最终答案。
+        let mut steps: Vec<_> = (0..MAX_TURNS)
+            .map(|i| wants(vec![call(&format!("c{i}"), "probe", "{}")]))
+            .collect();
+        steps.push(says("基于已经查到的资料，最终答案如下"));
+        let provider = scripted(steps);
         let tools = Recorder::new(false);
         let mut hit_limit = false;
         let out = run(
@@ -498,14 +634,160 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(out.turns, MAX_TURNS);
-        assert!(hit_limit, "撞上限要说一声");
+        assert_eq!(out.turns, MAX_TURNS + 1, "最后一次只负责总结");
+        assert!(hit_limit, "工具轮撞上限要发出内部事件");
+        assert_eq!(out.answer, "基于已经查到的资料，最终答案如下");
         assert!(
-            out.hit_turn_limit,
-            "结果里也要带着：命令层只拿得到 outcome，事件是流式过程，落不进最终回复"
+            !out.hit_turn_limit,
+            "总结成功后不能再让界面声称没有得出结论"
         );
-        assert!(!out.canceled, "转不出来不等于用户叫停");
+        assert!(!out.canceled);
         assert_eq!(tools.executed.borrow().len(), MAX_TURNS);
+        assert_eq!(
+            out.messages.last().map(|message| message.content.as_str()),
+            Some("基于已经查到的资料，最终答案如下")
+        );
+    }
+
+    #[tokio::test]
+    async fn the_forced_summary_never_executes_or_loops_on_more_tool_calls() {
+        // Scripted 故意模拟一个违约端点：请求已经不带 tools，它仍返回 tool_calls。
+        // Agent 不能执行上限外的工具，更不能由此开始第二段无限循环。
+        let mut steps: Vec<_> = (0..MAX_TURNS)
+            .map(|i| wants(vec![call(&format!("c{i}"), "probe", "{}")]))
+            .collect();
+        steps.push(wants(vec![call("summary-call", "probe", "{}")]));
+        let provider = scripted(steps);
+        let tools = Recorder::new(false);
+        let out = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("一直做")],
+            &tools,
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out.turns, MAX_TURNS + 1);
+        assert_eq!(tools.executed.borrow().len(), MAX_TURNS);
+        assert!(out.hit_turn_limit, "总结没有正文时仍要给界面上限提示");
+        assert!(out
+            .messages
+            .iter()
+            .flat_map(|message| &message.tool_calls)
+            .all(|call| call.id != "summary-call"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_forced_summary_keeps_the_tool_results_instead_of_failing_the_request() {
+        // Scripted 在步骤耗尽时返回错误。只给满额工具轮步骤，就能精确模拟随后的
+        // 总结请求失败，而前面的检索结果仍应作为一个可继续追问的 outcome 返回。
+        let provider = scripted(
+            (0..MAX_TURNS)
+                .map(|i| wants(vec![call(&format!("c{i}"), "probe", "{}")]))
+                .collect(),
+        );
+        let tools = Recorder::new(false);
+        let out = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("一直做")],
+            &tools,
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .await
+        .expect("总结失败不应抹掉已经完成的工具轮");
+
+        assert_eq!(out.turns, MAX_TURNS + 1);
+        assert_eq!(tools.executed.borrow().len(), MAX_TURNS);
+        assert!(out.hit_turn_limit);
+        assert_eq!(
+            out.messages
+                .iter()
+                .filter(|message| message.role == "tool")
+                .count(),
+            MAX_TURNS
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_tool_results_are_capped_before_forced_summary() {
+        struct LargeResult;
+        impl ToolBox for LargeResult {
+            fn specs(&self) -> Vec<ToolSpec> {
+                Recorder::new(false).specs()
+            }
+
+            async fn run(&self, _call: &ToolCall) -> ToolOutcome {
+                ToolOutcome::ok("资料".repeat(MAX_TOTAL_TOOL_RESULT_CHARS))
+            }
+        }
+
+        let provider = scripted(vec![
+            wants(vec![call("large", "probe", "{}")]),
+            says("根据已保留的资料完成总结"),
+        ]);
+        let out = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("查很多资料")],
+            &LargeResult,
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+
+        let result = out
+            .messages
+            .iter()
+            .find(|message| message.tool_call_id.as_deref() == Some("large"))
+            .expect("工具调用必须保留对应结果");
+        assert!(result.content.chars().count() <= MAX_TOOL_RESULT_CHARS);
+        assert!(result.content.contains("截断"));
+        assert_eq!(out.answer, "根据已保留的资料完成总结");
+        assert_eq!(out.turns, 2);
+    }
+
+    #[tokio::test]
+    async fn excessive_tool_calls_are_answered_but_not_executed_past_the_budget() {
+        let calls: Vec<_> = (0..MAX_TOOL_CALLS + 2)
+            .map(|index| call(&format!("budget-{index}"), "probe", "{}"))
+            .collect();
+        let provider = scripted(vec![wants(calls), says("预算内结果总结")]);
+        let tools = Recorder::new(false);
+        let out = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("调用太多工具")],
+            &tools,
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(tools.executed.borrow().len(), MAX_TOOL_CALLS);
+        assert_eq!(
+            out.messages
+                .iter()
+                .filter(|message| message.role == "tool")
+                .count(),
+            MAX_TOOL_CALLS + 2,
+            "未执行的调用也要补结果，不能留下孤儿 tool_call"
+        );
+        assert!(out
+            .messages
+            .iter()
+            .any(|message| { message.role == "tool" && message.content == TOOL_BUDGET_EXHAUSTED }));
+        assert_eq!(out.answer, "预算内结果总结");
     }
 
     #[tokio::test]

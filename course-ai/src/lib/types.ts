@@ -261,6 +261,7 @@ export type AssistantAction =
   | {
       kind: "propose_rename";
       video_id: string;
+      course_id?: string;
       course_name?: string | null;
       current_title: string;
       new_title: string;
@@ -268,6 +269,7 @@ export type AssistantAction =
   | {
       kind: "propose_delete";
       video_id: string;
+      course_id?: string;
       course_name?: string | null;
       title: string;
     }
@@ -299,8 +301,8 @@ export interface AssistantReply {
   answer: string;
   canceled: boolean;
   /**
-   * 助手转到轮次上限才停下。此时 answer 多半只是它某一轮的过场话（「我先查一下课程列表」），
-   * 甚至是空串——不点出来的话，用户看到的要么是把过场话当成答复，要么是问完之后什么都没有。
+   * 工具轮次或上下文预算封顶后，额外的无工具总结仍没有给出可用答复。此时 answer 多半只是某一轮的
+   * 过场话（「我先查一下课程列表」），甚至是空串；总结成功时该字段为 false。
    */
   hit_turn_limit: boolean;
   actions: AssistantAction[];
@@ -316,6 +318,7 @@ export interface AssistantReply {
  * 收到新的一轮就要把已显示的正文清空，否则会拼出一段谁也没说过的话。
  */
 export type AssistantEvent =
+  | { type: "started" }
   | { type: "turn"; turn: number }
   | { type: "reasoning"; delta: string }
   | { type: "token"; delta: string }

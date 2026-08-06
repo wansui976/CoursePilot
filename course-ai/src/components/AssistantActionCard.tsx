@@ -32,7 +32,7 @@ type Proposal = Exclude<
   { kind: "open_video" } | { kind: "seek_to" } | { kind: "set_theme" }
 >;
 
-type Status = "pending" | "running" | "paused" | "done" | "failed";
+type Status = "pending" | "running" | "paused" | "done" | "failed" | "stale";
 
 /**
  * 动作执行完必须让相关列表失效。
@@ -80,6 +80,8 @@ type ImportResume = {
 
 /** 已经写给用户看的业务错误，不再交给通用错误映射二次改写。 */
 class AssistantActionError extends Error {}
+
+class StaleAssistantActionError extends AssistantActionError {}
 
 function displayActionError(error: unknown) {
   return error instanceof AssistantActionError ? error.message : humanizeError(error);
@@ -154,6 +156,83 @@ async function execute(action: Proposal, importResume?: ImportResume) {
       return;
     case "propose_rename_course":
       await ipc.courses.rename(action.course_id, action.new_name);
+  }
+}
+
+/**
+ * 确认卡可能在界面里放很久，期间用户手工修改或云同步都可能改变目标。
+ * 先把本批次涉及的对象统一读一遍，任何一项过期都不执行，避免半批成功后才发现认错对象。
+ */
+async function assertActionsFresh(actions: Proposal[]) {
+  const needsCourses = actions.some(
+    (action) =>
+      action.kind === "propose_import" ||
+      action.kind === "propose_create_course" ||
+      action.kind === "propose_rename_course",
+  );
+  const courses = needsCourses ? await ipc.courses.list() : [];
+  const videosByCourse = new Map<string, Awaited<ReturnType<typeof ipc.videos.list>>>();
+  const settings = new Map<string, string | null>();
+
+  const stale = (action: Proposal): never => {
+    throw new StaleAssistantActionError(
+      i18n.t("assistantActions.staleTarget", { target: describe(action).primary }),
+    );
+  };
+
+  for (const action of actions) {
+    if (action.kind === "propose_rename" || action.kind === "propose_delete") {
+      // course_id 是新后端提供的稳定定位；旧后端的卡仍按原协议执行，避免热更新时全部失效。
+      if (!action.course_id) continue;
+      let videos = videosByCourse.get(action.course_id);
+      if (!videos) {
+        videos = await ipc.videos.list(action.course_id);
+        videosByCourse.set(action.course_id, videos);
+      }
+      const current = videos.find((video) => video.id === action.video_id);
+      if (!current) {
+        stale(action);
+        continue;
+      }
+      const expected =
+        action.kind === "propose_rename" ? action.current_title : action.title;
+      const alreadyApplied =
+        action.kind === "propose_rename" && current.title === action.new_title;
+      if (!alreadyApplied && current.title !== expected) stale(action);
+      continue;
+    }
+
+    if (action.kind === "propose_setting") {
+      let current = settings.get(action.key);
+      if (!settings.has(action.key)) {
+        current = await ipc.settings.get(action.key);
+        settings.set(action.key, current);
+      }
+      const expected = action.current ?? null;
+      if (current !== expected && current !== action.value) stale(action);
+      continue;
+    }
+
+    if (action.kind === "propose_rename_course") {
+      const current = courses.find((course) => course.id === action.course_id);
+      if (!current || (current.name !== action.current_name && current.name !== action.new_name)) {
+        stale(action);
+      }
+      continue;
+    }
+
+    if (action.kind === "propose_import") {
+      const current = courses.find((course) => course.id === action.course_id);
+      if (!current) stale(action);
+      continue;
+    }
+
+    if (action.kind === "propose_create_course") {
+      const root = await ipc.settings.get("default_storage_root");
+      if (root !== action.root_path || courses.some((course) => course.name === action.name)) {
+        stale(action);
+      }
+    }
   }
 }
 
@@ -274,12 +353,28 @@ function ProposalGroup({
   );
 
   async function confirm() {
-    if (status === "running" || remaining.length === 0 || missingImportCourse) return;
+    if (
+      status === "running" ||
+      status === "stale" ||
+      remaining.length === 0 ||
+      missingImportCourse
+    ) {
+      return;
+    }
     setStatus("running");
     setError("");
     setWarning("");
     stopRequestedRef.current = false;
     setStopRequested(false);
+    try {
+      await assertActionsFresh(remaining.map(({ action }) => action));
+    } catch (e) {
+      const message = displayActionError(e);
+      setError(message);
+      setStatus(e instanceof StaleAssistantActionError ? "stale" : "failed");
+      onResult?.(t("assistantActions.executionError", { error: message }));
+      return;
+    }
     const succeeded: number[] = [];
     const failures: { message: string }[] = [];
     let shouldRefresh = false;
@@ -443,11 +538,13 @@ function ProposalGroup({
           <Button
             size="sm"
             variant={meta.danger ? "destructive" : "default"}
-            disabled={status === "running" || missingImportCourse}
+            disabled={status === "running" || status === "stale" || missingImportCourse}
             onClick={confirm}
           >
             {status === "running"
               ? t("assistantActions.executing")
+              : status === "stale"
+                ? t("assistantActions.staleButton")
               : status === "failed"
                 ? t("assistantActions.retryFailed", { count: remaining.length })
                 : status === "paused"

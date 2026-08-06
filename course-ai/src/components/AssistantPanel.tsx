@@ -29,8 +29,12 @@ import { Button } from "@/components/ui/button";
 import { AssistantActionList } from "@/components/AssistantActionCard";
 import { AssistantToolChips } from "@/components/AssistantToolChips";
 import {
+  boundTrustedAssistantHistory,
+  capAssistantText,
   clearAssistantSession,
   historyBeforeLastQuestion,
+  MAX_ASSISTANT_ANSWER_CHARS,
+  MAX_ASSISTANT_REASONING_CHARS,
   readAssistantSession,
   writeAssistantSession,
   type AssistantTurnRecord,
@@ -62,6 +66,9 @@ const PANEL_MAX_HEIGHT = 720;
 const VIEWPORT_GAP = 16;
 const EDGE_SNAP_DISTANCE = 28;
 const SCROLL_FOLLOW_THRESHOLD = 32;
+const SESSION_PERSIST_DELAY_MS = 250;
+const MAX_RENDERED_TURNS = 50;
+const MAX_STREAMED_TOOLS = 50;
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 /// 收起时那颗球的直径。停靠位置的夹取与展开/收起时的居中都按它算，
@@ -72,6 +79,20 @@ const LAUNCHER_SIZE = 56;
 const LAUNCHER_MARGIN = 12;
 const KEYBOARD_MOVE_STEP = 24;
 const KEYBOARD_RESIZE_STEP = 32;
+
+function appendStreamChunk(
+  chunks: string[],
+  currentChars: number,
+  delta: string,
+  maxChars: number,
+) {
+  const kept = delta.slice(0, Math.max(0, maxChars - currentChars));
+  if (!kept) return currentChars;
+  chunks.push(kept);
+  // 后台标签页可能长时间不执行动画帧；偶尔合并小片段，避免数组对象本身无限增长。
+  if (chunks.length >= 256) chunks.splice(0, chunks.length, chunks.join(""));
+  return currentChars + kept.length;
+}
 const DRAG_START_DISTANCE = 4;
 
 interface PanelPosition {
@@ -208,6 +229,7 @@ export function AssistantPanel({
   const [initialSession] = useState(readAssistantSession);
   const [input, setInput] = useState(initialSession.draft);
   const [busy, setBusy] = useState(false);
+  const [requestReady, setRequestReady] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState("");
   const [turns, setTurns] = useState<Turn[]>(initialSession.turns);
@@ -223,10 +245,18 @@ export function AssistantPanel({
   const dragCleanupRef = useRef<(() => void) | null>(null);
   const suppressLauncherClickRef = useRef(false);
   const activeRequestRef = useRef<string | null>(null);
+  const requestReadyRef = useRef(false);
+  const mountedRef = useRef(true);
   const locallyStoppedRequestsRef = useRef(new Set<string>());
   const historyRef = useRef(initialSession.history);
   const conversationEpochRef = useRef(0);
   const copyTimerRef = useRef<number | null>(null);
+  const persistTimerRef = useRef<number | null>(null);
+  const sessionSnapshotRef = useRef({
+    turns: initialSession.turns,
+    history: initialSession.history,
+    draft: initialSession.draft,
+  });
   const focusLauncherAfterCloseRef = useRef(false);
   // iPad 宽屏有足够空间使用可拖动面板；真正决定布局的是视口档位，不是触屏 UA。
   const mobile = compact || (isMobile() && !isTablet());
@@ -304,9 +334,17 @@ export function AssistantPanel({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  const pendingQuestion = turns.find((turn) => turn.pending)?.question ?? "";
+  sessionSnapshotRef.current = { turns, history, draft: input || pendingQuestion };
   useEffect(() => {
-    const pendingQuestion = turns.find((turn) => turn.pending)?.question ?? "";
-    writeAssistantSession({ turns, history, draft: input || pendingQuestion });
+    if (persistTimerRef.current != null) window.clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = window.setTimeout(() => {
+      writeAssistantSession(sessionSnapshotRef.current);
+      persistTimerRef.current = null;
+    }, SESSION_PERSIST_DELAY_MS);
+    return () => {
+      if (persistTimerRef.current != null) window.clearTimeout(persistTimerRef.current);
+    };
   }, [history, input, turns]);
 
   useEffect(() => {
@@ -362,15 +400,24 @@ export function AssistantPanel({
     return () => window.removeEventListener("resize", keepInsideViewport);
   }, [mobile]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    const locallyStoppedRequests = locallyStoppedRequestsRef.current;
+    return () => {
+      mountedRef.current = false;
       dragCleanupRef.current?.();
       if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
+      if (persistTimerRef.current != null) window.clearTimeout(persistTimerRef.current);
+      writeAssistantSession(sessionSnapshotRef.current);
       const requestId = activeRequestRef.current;
-      if (requestId) void ipc.assistant.cancel(requestId);
-    },
-    [],
-  );
+      if (requestId) {
+        locallyStoppedRequests.add(requestId);
+        // started 之前发送取消会被后端当成未知 id 丢掉。若尚未登记，started 回调会补发；
+        // 已登记时则立即取消，避免面板卸载后请求继续计费。
+        if (requestReadyRef.current) void ipc.assistant.cancel(requestId);
+      }
+    };
+  }, []);
 
   function measurePanel() {
     const fallback = fallbackPanelSize();
@@ -792,46 +839,122 @@ export function AssistantPanel({
     // 不该被顺手抹掉。
     if (suggestedQuestion === undefined) setInput("");
     setBusy(true);
+    setRequestReady(false);
+    requestReadyRef.current = false;
     setStopping(false);
     setError("");
+    // 流式片段只做防抖持久化，但请求刚发出时先落一次草稿；即使应用随后退出，
+    // 用户的问题也能回到输入框，而不是随着未完成轮次一起丢失。
+    writeAssistantSession({ turns, history: historyAtSend, draft: input || question });
     // 长工具链可能要等几十秒；问题先进入对话，让用户立即确认自己发出了什么。
-    setTurns((prev) => [
-      ...prev,
-      {
-        id: turnId,
-        question,
-        answer: "",
-        actions: [],
-        tools: [],
-        canceled: false,
-        actionResults: [],
-        pending: true,
-        context: { ...context },
-      },
-    ]);
+    setTurns((prev) =>
+      [
+        ...prev,
+        {
+          id: turnId,
+          question,
+          answer: "",
+          actions: [],
+          tools: [],
+          canceled: false,
+          actionResults: [],
+          pending: true,
+          context: { ...context },
+        },
+      ].slice(-MAX_RENDERED_TURNS),
+    );
     try {
-      // 流式：思考、正文、工具标签边生成边落到这一轮上。
-      // turn 事件必须清空正文——助手是多轮循环，答案逐轮替换而非追加，
-      // 接着往下拼会拼出一段谁也没说过的话。思考则跨轮累积，那是完整的思考轨迹。
       const patch = (change: (turn: Turn) => Turn) =>
         setTurns((prev) => prev.map((item) => (item.id === turnId ? change(item) : item)));
+      // SSE 常把一个字拆成一个事件。逐片 setState 会让 React 每秒渲染几十次，并反复复制
+      // 已有长字符串；先缓冲到下一帧，每帧最多更新一次。
+      let streamFrame: number | null = null;
+      let clearBufferedAnswer = false;
+      let bufferedAnswer: string[] = [];
+      let bufferedAnswerChars = 0;
+      let bufferedReasoning: string[] = [];
+      let bufferedReasoningChars = 0;
+      let bufferedTools: string[] = [];
+      const flushStream = () => {
+        if (streamFrame != null) cancelAnimationFrame(streamFrame);
+        streamFrame = null;
+        if (!mountedRef.current) return;
+        const answerDelta = bufferedAnswer.join("");
+        const reasoningDelta = bufferedReasoning.join("");
+        const toolsDelta = bufferedTools;
+        const shouldClear = clearBufferedAnswer;
+        bufferedAnswer = [];
+        bufferedAnswerChars = 0;
+        bufferedReasoning = [];
+        bufferedReasoningChars = 0;
+        bufferedTools = [];
+        clearBufferedAnswer = false;
+        if (!shouldClear && !answerDelta && !reasoningDelta && toolsDelta.length === 0) return;
+        patch((item) => ({
+          ...item,
+          answer: capAssistantText(
+            `${shouldClear ? "" : item.answer}${answerDelta}`,
+            MAX_ASSISTANT_ANSWER_CHARS,
+          ),
+          reasoning: reasoningDelta
+            ? capAssistantText(
+                `${item.reasoning ?? ""}${reasoningDelta}`,
+                MAX_ASSISTANT_REASONING_CHARS,
+              )
+            : item.reasoning,
+          tools:
+            toolsDelta.length > 0
+              ? [...item.tools, ...toolsDelta].slice(-MAX_STREAMED_TOOLS)
+              : item.tools,
+        }));
+      };
+      const scheduleStreamFlush = () => {
+        if (streamFrame == null) streamFrame = requestAnimationFrame(flushStream);
+      };
       const reply = await ipc.assistant.ask(
         question,
         context,
         historyAtSend,
         requestId,
         (event) => {
-          if (event.type === "turn") {
-            patch((item) => ({ ...item, answer: "" }));
+          if (event.type === "started") {
+            requestReadyRef.current = true;
+            if (locallyStoppedRequestsRef.current.has(requestId)) {
+              void ipc.assistant.cancel(requestId);
+            } else if (mountedRef.current) {
+              setRequestReady(true);
+            }
+          } else if (!mountedRef.current) {
+            return;
+          } else if (event.type === "turn") {
+            clearBufferedAnswer = true;
+            bufferedAnswer = [];
+            bufferedAnswerChars = 0;
+            scheduleStreamFlush();
           } else if (event.type === "reasoning") {
-            patch((item) => ({ ...item, reasoning: (item.reasoning ?? "") + event.delta }));
+            bufferedReasoningChars = appendStreamChunk(
+              bufferedReasoning,
+              bufferedReasoningChars,
+              event.delta,
+              MAX_ASSISTANT_REASONING_CHARS,
+            );
+            scheduleStreamFlush();
           } else if (event.type === "token") {
-            patch((item) => ({ ...item, answer: item.answer + event.delta }));
+            bufferedAnswerChars = appendStreamChunk(
+              bufferedAnswer,
+              bufferedAnswerChars,
+              event.delta,
+              MAX_ASSISTANT_ANSWER_CHARS,
+            );
+            scheduleStreamFlush();
           } else if (event.type === "tool") {
-            patch((item) => ({ ...item, tools: [...item.tools, event.name] }));
+            bufferedTools = [...bufferedTools, event.name].slice(-MAX_STREAMED_TOOLS);
+            scheduleStreamFlush();
           }
         },
       );
+      if (!mountedRef.current) return;
+      flushStream();
       const locallyStopped = locallyStoppedRequestsRef.current.has(requestId);
       const canceled = reply.canceled || locallyStopped;
       // 后端也会清空取消轮次的动作；这里再守一次，避免旧后端或兼容端点让用户
@@ -840,10 +963,10 @@ export function AssistantPanel({
       // 请求期间用户仍可能执行旧确认卡。那类结果已经追加进 historyRef，不能被
       // 此次回复的整包 history 覆盖；取消轮次自身则不能进入下一轮上下文。
       const actionEventsDuringRequest = historyRef.current.slice(historyAtSend.length);
-      const nextHistory = [
+      const nextHistory = boundTrustedAssistantHistory([
         ...(canceled ? historyAtSend : reply.history),
         ...actionEventsDuringRequest,
-      ];
+      ]);
       historyRef.current = nextHistory;
       setHistory(nextHistory);
       // 主题当场生效。它无破坏性、一眼可见，再让人点一次只是把一步变两步。
@@ -857,9 +980,12 @@ export function AssistantPanel({
                 ...turn,
                 // cancel IPC 与已完成响应赛跑时，旧后端可能仍回 canceled=false。此时整轮
                 // history 已被丢弃，回答也不能显示成下一轮模型根本没见过的幽灵上下文。
-                answer: locallyStopped && !reply.canceled ? "" : reply.answer,
+                answer:
+                  locallyStopped && !reply.canceled
+                    ? ""
+                    : capAssistantText(reply.answer, MAX_ASSISTANT_ANSWER_CHARS),
                 actions,
-                tools: reply.tools_used,
+                tools: reply.tools_used.slice(-MAX_STREAMED_TOOLS),
                 canceled,
                 // 用户叫停的那一轮已经有自己的说明，再挂一条「没得出结论」是在替它
                 // 找借口——它没转不出来，是被你按停的。
@@ -870,6 +996,7 @@ export function AssistantPanel({
         ),
       );
     } catch (e) {
+      if (!mountedRef.current) return;
       // 把问题放回输入框：让用户能直接重发，而不是重新打一遍。
       // 但输入框里已经有东西时不覆盖——那是他趁等待时打的，比这句重发的价值高。
       setTurns((prev) => prev.filter((turn) => turn.id !== turnId));
@@ -879,8 +1006,12 @@ export function AssistantPanel({
       locallyStoppedRequestsRef.current.delete(requestId);
       if (activeRequestRef.current === requestId) {
         activeRequestRef.current = null;
-        setBusy(false);
-        setStopping(false);
+        requestReadyRef.current = false;
+        if (mountedRef.current) {
+          setBusy(false);
+          setRequestReady(false);
+          setStopping(false);
+        }
       }
     }
   }
@@ -940,16 +1071,16 @@ export function AssistantPanel({
           : turn,
       ),
     );
-    historyRef.current = [
+    historyRef.current = boundTrustedAssistantHistory([
       ...historyRef.current,
       { role: "assistant", content: t("assistant.uiActionResult", { message }) },
-    ];
+    ]);
     setHistory(historyRef.current);
   }
 
   async function stop() {
     const requestId = activeRequestRef.current;
-    if (!requestId || stopping) return;
+    if (!requestId || !requestReady || stopping) return;
     // 先记下用户意图，再发取消 IPC。即便 ask 与 cancel 同时完成，也绝不能执行
     // 用户已经叫停的主题、导航或写操作提案。
     locallyStoppedRequestsRef.current.add(requestId);
@@ -1294,7 +1425,7 @@ export function AssistantPanel({
             )}
 
             {/* 这一轮没能好好结束时说清楚。
-                助手转到轮次上限停下时，answer 里留的往往是它某一轮的过场话
+                工具轮或上下文预算封顶且强制总结仍失败时，answer 里留的往往是它某一轮的过场话
                 （「我先查一下这门课有哪些视频」），甚至是空串。照原样铺出来，用户要么
                 把过场话当成最终答复，要么问完之后**什么都没有**——后者和程序坏了长得
                 一模一样，而它其实是查得太久被截断了，换个具体点的问法就能过去。
@@ -1328,6 +1459,13 @@ export function AssistantPanel({
               onNavigate={(action) => navigateFromTurn(turn, action)}
               onResult={(message) => recordActionResult(turn.id, message, conversationEpoch)}
             />
+
+            {turn.actionsExpired && (
+              <p className="flex items-start gap-1.5 text-[11px] text-[var(--status-warn)]">
+                <AlertCircle className="mt-[0.2em] h-3 w-3 flex-none" aria-hidden="true" />
+                <span className="min-w-0 break-words">{t("assistant.expiredActions")}</span>
+              </p>
+            )}
 
             {turn.actionResults.length > 0 && (
               <div aria-label={t("assistant.actionRecord")} className="space-y-1">
@@ -1419,7 +1557,7 @@ export function AssistantPanel({
                   void send();
                 }
               }}
-              className="max-h-24 flex-1 resize-none bg-transparent px-0.5 py-1 text-sm text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)]"
+              className="ca-ask-input max-h-24 flex-1 resize-none bg-transparent px-0.5 py-1 text-sm text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)]"
             />
             {busy ? (
               <Button
@@ -1427,7 +1565,7 @@ export function AssistantPanel({
                 variant="outline"
                 aria-label={t("assistant.stopGeneration")}
                 title={t("assistant.stopGeneration")}
-                disabled={stopping}
+                disabled={stopping || !requestReady}
                 onClick={stop}
                 className="h-8 w-8 flex-none rounded-lg"
               >
