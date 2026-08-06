@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VideoPlayer } from ".";
 import { ipc } from "@/lib/ipc";
 import { usePlayer } from "@/stores/player";
@@ -40,7 +40,48 @@ function renderPlayer(immersive = true) {
   );
 }
 
+beforeEach(() => {
+  localStorage.removeItem("course-ai-playback-rate");
+});
+
 describe("VideoPlayer iOS gestures", () => {
+  it("expands the uncropped video element to every stage edge", () => {
+    renderPlayer(false);
+
+    const video = screen.getByLabelText("课程视频播放器");
+    expect(video).toHaveClass("h-full", "w-full", "object-contain");
+    expect(video.parentElement).toHaveClass("absolute", "inset-0", "overflow-hidden");
+    expect(video.parentElement).not.toHaveClass("rounded-xl");
+  });
+
+  it("restores and persists the selected base playback rate", () => {
+    localStorage.setItem("course-ai-playback-rate", "1.25");
+    renderPlayer();
+
+    fireEvent.click(screen.getByRole("button", { name: "倍速，当前 1.25x" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "1.5x" }));
+
+    expect(localStorage.getItem("course-ai-playback-rate")).toBe("1.5");
+    expect(screen.getByRole("button", { name: "倍速，当前 1.5x" })).toBeInTheDocument();
+  });
+
+  it("reapplies the persisted rate after a media resource resets playback", () => {
+    localStorage.setItem("course-ai-playback-rate", "1.5");
+    renderPlayer();
+    const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
+    const setRate = vi.fn();
+    Object.defineProperty(video, "playbackRate", {
+      configurable: true,
+      get: () => 1,
+      set: setRate,
+    });
+
+    fireEvent.loadedMetadata(video);
+
+    expect(setRate).toHaveBeenLastCalledWith(1.5);
+    expect(video.defaultPlaybackRate).toBe(1.5);
+  });
+
   it("toggles fullscreen on double tap", async () => {
     setFullscreen.mockClear();
     setFullscreen.mockResolvedValue(undefined);
@@ -274,6 +315,82 @@ describe("VideoPlayer iOS gestures", () => {
     });
     expect(setRate).toHaveBeenLastCalledWith(1);
     vi.useRealTimers();
+  });
+
+  it("keeps an effective smart rate separate from the base rate during long press", async () => {
+    vi.useFakeTimers();
+    try {
+      renderPlayer();
+      const gestureLayer = screen.getByLabelText("课程视频手势层");
+      const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
+      const setRate = vi.fn();
+      let rateValue = 1.5;
+      let pitchValue = true;
+      Object.defineProperty(video, "playbackRate", {
+        configurable: true,
+        get: () => rateValue,
+        set: (value: number) => {
+          rateValue = value;
+          setRate(value);
+        },
+      });
+      Object.defineProperty(video, "preservesPitch", {
+        configurable: true,
+        get: () => pitchValue,
+        set: (value: boolean) => {
+          pitchValue = value;
+        },
+      });
+
+      fireEvent.pointerDown(gestureLayer, {
+        pointerId: 1,
+        pointerType: "touch",
+        clientX: 120,
+        clientY: 120,
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+      // 1.5x 已是叠加后的有效速度；Apple 播放内核长按仍封顶 2x。
+      expect(setRate).toHaveBeenLastCalledWith(2);
+      expect(pitchValue).toBe(false);
+      // 临时快进不能污染控制栏里的基础倍速。
+      expect(screen.getByRole("button", { name: "倍速，当前 1.0x" })).toBeInTheDocument();
+
+      fireEvent.pointerUp(gestureLayer, {
+        pointerId: 1,
+        pointerType: "touch",
+        clientX: 120,
+        clientY: 120,
+      });
+      expect(setRate).toHaveBeenLastCalledWith(1.5);
+      expect(pitchValue).toBe(true);
+      expect(screen.getByRole("button", { name: "倍速，当前 1.0x" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not rebuild the empty smart-rate plan while transcripts are pending", async () => {
+    localStorage.setItem("smart-rate", "on");
+    vi.mocked(ipc.transcripts.list).mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      renderPlayer();
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(screen.getByLabelText("课程视频播放器")).toBeInTheDocument();
+      expect(consoleError.mock.calls.flat().join(" ")).not.toContain(
+        "Maximum update depth exceeded",
+      );
+    } finally {
+      consoleError.mockRestore();
+      localStorage.removeItem("smart-rate");
+    }
   });
 
   it("seeks +5s on a short right-arrow tap (committed on release)", () => {

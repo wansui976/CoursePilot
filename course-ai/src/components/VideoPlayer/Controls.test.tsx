@@ -8,12 +8,14 @@ function renderControls(props: Partial<Parameters<typeof Controls>[0]> = {}) {
   const base = {
     playing: false,
     rate: 1,
+    effectiveRate: 1,
     volume: 1,
     muted: false,
     captionsOn: false,
     smartRate: false,
     smartRateAvailable: true,
     skipSilence: false,
+    skipSilenceAvailable: true,
     skipSilenceLoading: false,
     skipRanges: [],
     fullscreen: false,
@@ -44,10 +46,30 @@ describe("Controls speed button", () => {
   });
 
   it("shows the current rate on the button when not 1x", () => {
-    renderControls({ rate: 1.5 });
+    renderControls({ rate: 1.5, effectiveRate: 1.5 });
     const button = screen.getByRole("button", { name: /倍速，当前 1\.5x/ });
     expect(button).toHaveTextContent("1.5x");
     expect(button.className).toContain("text-[var(--accent)]");
+  });
+
+  it("shows the smart-adjusted effective rate while keeping the base menu selection", () => {
+    renderControls({ rate: 1, effectiveRate: 1.4 });
+
+    fireEvent.click(screen.getByRole("button", { name: "倍速，当前 1.4x" }));
+
+    expect(screen.getByRole("button", { name: "倍速，当前 1.4x" })).toHaveTextContent("1.4x");
+    expect(screen.getByRole("menuitemradio", { name: "1.0x" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  it("rounds floating-point effective rates for display", () => {
+    renderControls({ rate: 0.75, effectiveRate: 0.75 * 1.1 });
+
+    expect(screen.getByRole("button", { name: "倍速，当前 0.83x" })).toHaveTextContent(
+      "0.83x",
+    );
   });
 
   it("closes the speed menu on Escape", () => {
@@ -131,6 +153,14 @@ describe("Controls skip-silence toggle", () => {
       "跳停顿 · 分析中",
     );
   });
+
+  it("disables skip-silence where audio scanning is unavailable", () => {
+    renderControls({ skipSilenceAvailable: false });
+
+    const button = screen.getByRole("button", { name: "跳停顿，已关闭" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "当前设备暂不支持跳停顿");
+  });
 });
 
 describe("Controls smart-rate toggle", () => {
@@ -154,5 +184,20 @@ describe("Controls smart-rate toggle", () => {
     const button = screen.getByRole("button", { name: "智能倍速，已关闭" });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", "还没有字幕，智能倍速排不出来");
+  });
+
+  it("still lets an enabled global switch be turned off on an unavailable video", () => {
+    const onToggleSmartRate = vi.fn();
+    renderControls({
+      smartRate: true,
+      smartRateAvailable: false,
+      onToggleSmartRate,
+    });
+
+    const button = screen.getByRole("button", { name: "智能倍速，已开启" });
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("title", "关闭智能倍速（当前视频没有可用字幕）");
+    fireEvent.click(button);
+    expect(onToggleSmartRate).toHaveBeenCalledTimes(1);
   });
 });

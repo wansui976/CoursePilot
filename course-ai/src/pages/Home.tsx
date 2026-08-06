@@ -62,6 +62,7 @@ import type {
   VideoListItem,
 } from "@/lib/types";
 import { formatMs } from "@/lib/time";
+import { silenceSkipQueryKey } from "@/lib/silenceSkip";
 import { displayTitle } from "@/lib/videoTitle";
 import {
   WATCHED_RATIO,
@@ -560,6 +561,10 @@ export function Home() {
         if (jobs[stage]?.status === "done" && !generatedAfterAsr.current.has(key)) {
           generatedAfterAsr.current.add(key);
           queryClient.invalidateQueries({ queryKey: ["slides", videoId] });
+          // OCR 只补页面文字，不改变换页时间；只在 slides 真正重提取后重规划跳停顿。
+          if (stage === "slides") {
+            queryClient.invalidateQueries({ queryKey: silenceSkipQueryKey(videoId) });
+          }
         }
       }
       // 后端各 AI 任务完成 → 刷新对应面板（各刷一次）。
@@ -1576,7 +1581,6 @@ export function Home() {
                   src={mediaSrc}
                   videoId={selectedVideo.id}
                   immersive={isIOS()}
-                  resizing={isResizingPanel}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">

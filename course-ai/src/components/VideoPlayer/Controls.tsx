@@ -16,18 +16,21 @@ const textButtonClass =
   "h-7 whitespace-nowrap rounded-lg px-2 text-[13px] font-medium text-white/85 transition hover:bg-white/10 hover:text-white";
 
 function formatRate(rate: number) {
-  return Number.isInteger(rate) ? rate.toFixed(1) : String(rate);
+  const rounded = Math.round(rate * 100) / 100;
+  return Number.isInteger(rounded) ? rounded.toFixed(1) : String(rounded);
 }
 
 export function Controls({
   playing,
   rate,
+  effectiveRate,
   volume,
   muted,
   captionsOn,
   smartRate,
   smartRateAvailable,
   skipSilence,
+  skipSilenceAvailable,
   skipSilenceLoading,
   skipRanges,
   fullscreen,
@@ -43,6 +46,8 @@ export function Controls({
   onFullscreenToggle,
 }: {
   playing: boolean;
+  /** 常态实际播放速度；智能倍速开启时可能高于用户选择的基础倍速。 */
+  effectiveRate: number;
   rate: number;
   volume: number;
   muted: boolean;
@@ -50,6 +55,7 @@ export function Controls({
   smartRate: boolean;
   smartRateAvailable: boolean;
   skipSilence: boolean;
+  skipSilenceAvailable: boolean;
   skipSilenceLoading: boolean;
   skipRanges: SkipRange[];
   fullscreen: boolean;
@@ -94,12 +100,13 @@ export function Controls({
     };
   }, [speedOpen]);
   const safeDuration = Math.max(0, durationMs);
+  const displayedRate = effectiveRate;
   const progressPercent =
     safeDuration > 0 ? Math.min(100, Math.max(0, (currentMs / safeDuration) * 100)) : 0;
   const volumePercent = muted ? 0 : Math.min(100, Math.max(0, volume * 100));
 
   return (
-    <div className="shrink-0 bg-black/95 px-3 pb-1 pt-1 text-white">
+    <div className="ca-player-controls-shell shrink-0 bg-black/95 text-white">
       <input
         aria-label="播放进度"
         type="range"
@@ -135,14 +142,14 @@ export function Controls({
         <div className="relative" data-speed-menu>
           <button
             type="button"
-            className={`${textButtonClass} ${rate !== 1 ? "text-[var(--accent)]" : ""}`}
+            className={`${textButtonClass} ${displayedRate !== 1 ? "text-[var(--accent)]" : ""}`}
             aria-haspopup="menu"
             aria-expanded={speedOpen}
-            aria-label={`倍速，当前 ${formatRate(rate)}x`}
+            aria-label={`倍速，当前 ${formatRate(displayedRate)}x`}
             onClick={() => setSpeedOpen((open) => !open)}
           >
-            {/* 非 1x 时按钮直接显示当前速率，让用户不点开也能看到正在几倍速。 */}
-            {rate === 1 ? "倍速" : `${formatRate(rate)}x`}
+            {/* 菜单勾选基础倍速，触发按钮显示智能调速后的常态实际速度。 */}
+            {displayedRate === 1 ? "倍速" : `${formatRate(displayedRate)}x`}
           </button>
           {speedOpen && (
             <div
@@ -178,10 +185,12 @@ export function Controls({
           onClick={onToggleSmartRate}
           aria-pressed={smartRate}
           aria-label={smartRate ? "智能倍速，已开启" : "智能倍速，已关闭"}
-          disabled={!smartRateAvailable}
+          disabled={!smartRateAvailable && !smartRate}
           title={
             smartRateAvailable
               ? "按语速自动调速：讲得慢的段落加速，密集推导处回到你选的倍速"
+              : smartRate
+                ? "关闭智能倍速（当前视频没有可用字幕）"
               : "还没有字幕，智能倍速排不出来"
           }
           className={`${textButtonClass} disabled:opacity-35 ${
@@ -195,16 +204,19 @@ export function Controls({
           onClick={onToggleSkipSilence}
           aria-pressed={skipSilence}
           aria-label={skipSilence ? "跳停顿，已开启" : "跳停顿，已关闭"}
+          disabled={!skipSilenceAvailable}
           title={
-            skipSilence
-              ? skipSilenceLabel === "分析中"
-                ? "正在分析可跳过的停顿"
-                : "关闭跳停顿（不再跳过无声的空档）"
-              : "跳过老师写板书、等记笔记这类无声空档"
+            !skipSilenceAvailable
+              ? "当前设备暂不支持跳停顿"
+              : skipSilence
+                ? skipSilenceLabel === "分析中"
+                  ? "正在分析可跳过的停顿"
+                  : "关闭跳停顿（不再跳过无声的空档）"
+                : "跳过画面稳定、没有讲解的无声空档"
           }
           // 只靠文字变个色，开没开一眼看不出来（用户反馈「点了没反馈」）：
           // 开启时给一层强调色底＋描边，并在文字后面直接写「开」。
-          className={`${textButtonClass} ${
+          className={`${textButtonClass} disabled:opacity-35 ${
             skipSilence
               ? "bg-[var(--accent)]/25 text-[var(--accent)] ring-1 ring-inset ring-[var(--accent)]/60"
               : ""

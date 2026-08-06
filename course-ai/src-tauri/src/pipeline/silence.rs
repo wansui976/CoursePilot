@@ -99,30 +99,49 @@ pub fn plan_skips(
     page_starts: &[i64],
     options: SkipOptions,
 ) -> Vec<SkipRange> {
+    // 页面时间点对所有静音段共用：至多排序一次，再用二分只访问落在当前静音段里的点。
+    // slides 查询通常已经按时间排序，此时连这次复制也可以省掉。
+    let sorted_page_starts;
+    let page_starts = if page_starts.windows(2).all(|pair| pair[0] <= pair[1]) {
+        page_starts
+    } else {
+        sorted_page_starts = {
+            let mut starts = page_starts.to_vec();
+            starts.sort_unstable();
+            starts
+        };
+        &sorted_page_starts
+    };
+
     let mut out = Vec::new();
     for &(start, end) in silences {
         if end <= start {
             continue;
         }
-        let mut bounds = vec![start];
-        bounds.extend(
-            page_starts
-                .iter()
-                .copied()
-                .filter(|at| *at > start && *at < end),
-        );
-        bounds.push(end);
-        bounds.sort_unstable();
 
-        let best = bounds
-            .windows(2)
-            .map(|pair| {
-                let from = pair[0] + options.head_keep_ms;
-                let to = pair[1] - options.tail_keep_ms;
-                (from, to)
-            })
-            .filter(|(from, to)| to - from >= options.min_skip_ms)
-            .max_by_key(|(from, to)| to - from);
+        // 起止点本身不算「静音中发生的换页」，保持原来的严格开区间语义。
+        let first_inside = page_starts.partition_point(|at| *at <= start);
+        let after_inside = page_starts.partition_point(|at| *at < end);
+
+        let mut previous = start;
+        let mut best: Option<(i64, i64)> = None;
+        for &boundary in page_starts[first_inside..after_inside]
+            .iter()
+            .chain(std::iter::once(&end))
+        {
+            let from = previous + options.head_keep_ms;
+            let to = boundary - options.tail_keep_ms;
+            let length = to - from;
+            if length >= options.min_skip_ms
+                && best
+                    .map(|(best_from, best_to)| length >= best_to - best_from)
+                    .unwrap_or(true)
+            {
+                // max_by_key 在同长时取最后一个；用 >= 保留这个边界行为。
+                best = Some((from, to));
+            }
+            previous = boundary;
+        }
         if let Some((start_ms, end_ms)) = best {
             out.push(SkipRange { start_ms, end_ms });
         }
@@ -247,6 +266,58 @@ size=N/A time=00:00:30.00 bitrate=N/A
 
         // 静音被切碎到每截都不够长时，一段都不跳。
         assert!(plan_skips(&[(10_000, 14_000)], &[11_000, 12_500], options).is_empty());
+    }
+
+    #[test]
+    fn preserves_strict_page_boundaries_and_chooses_the_latest_tied_gap() {
+        let options = SkipOptions {
+            min_skip_ms: 0,
+            head_keep_ms: 0,
+            tail_keep_ms: 0,
+        };
+        // 输入可以无序且含重复点；静音起止点不参与切分。中间两段同长时，沿用旧实现
+        // max_by_key 的行为，选择时间更靠后的那段。
+        let ranges = plan_skips(
+            &[(10_000, 20_000)],
+            &[20_000, 15_000, 10_000, 15_000],
+            options,
+        );
+        assert_eq!(
+            ranges,
+            vec![SkipRange {
+                start_ms: 15_000,
+                end_ms: 20_000,
+            }]
+        );
+    }
+
+    #[test]
+    fn plans_many_disjoint_silences_without_rescanning_every_page() {
+        use std::time::{Duration, Instant};
+
+        const COUNT: i64 = 20_000;
+        let silences: Vec<_> = (0..COUNT)
+            .map(|index| {
+                let start = index * 10_000;
+                (start, start + 9_000)
+            })
+            .collect();
+        // 倒序输入也只应触发一次排序。每段静音里恰好一个页面点；旧实现会为每段
+        // 重扫全部 2 万个点（4 亿次检查），二分后的实现只访问对应切片。
+        let page_starts: Vec<_> = (0..COUNT)
+            .rev()
+            .map(|index| index * 10_000 + 4_500)
+            .collect();
+
+        let started = Instant::now();
+        let ranges = plan_skips(&silences, &page_starts, SkipOptions::default());
+        let elapsed = started.elapsed();
+
+        assert_eq!(ranges.len(), COUNT as usize);
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "large skip plan took {elapsed:?}; page starts may be rescanned per silence"
+        );
     }
 
     #[test]

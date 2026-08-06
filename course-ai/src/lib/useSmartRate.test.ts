@@ -85,6 +85,36 @@ describe("useSmartRate", () => {
     await waitFor(() => expect(result.current.multiplier).toBe(1));
   });
 
+  it("drops the old multiplier immediately when the video or rate plan changes", async () => {
+    const { result, rerender } = renderHook(
+      ({ currentSegments, videoId }) =>
+        useSmartRate(currentSegments, { resetKey: videoId }),
+      { initialProps: { currentSegments: segments, videoId: "v1" } },
+    );
+    act(() => result.current.toggle());
+    act(() => void result.current.update(SLOW_MS, 1));
+    await waitFor(() => expect(result.current.multiplier).toBeGreaterThan(1));
+
+    rerender({ currentSegments: segments, videoId: "v2" });
+    expect(result.current.multiplier).toBe(1);
+
+    rerender({ currentSegments: [], videoId: "v2" });
+    act(() => expect(result.current.update(SLOW_MS, 1)).toBe(1));
+    expect(result.current.multiplier).toBe(1);
+  });
+
+  it("caps the effective rate for Apple playback engines", async () => {
+    const { result } = renderHook(() =>
+      useSmartRate(segments, { maxEffectiveRate: 2 }),
+    );
+    act(() => result.current.toggle());
+    act(() => void result.current.update(SLOW_MS, 1.5));
+
+    await waitFor(() => expect(result.current.multiplier).toBeGreaterThan(1));
+    expect(1.5 * result.current.multiplier).toBeCloseTo(2);
+    expect(result.current.notice).toContain("设备流畅播放上限");
+  });
+
   it("says so when there are no subtitles to measure", async () => {
     const { result } = renderHook(() => useSmartRate([]));
     expect(result.current.available).toBe(false);

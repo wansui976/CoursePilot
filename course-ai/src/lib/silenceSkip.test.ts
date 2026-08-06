@@ -48,6 +48,25 @@ describe("silenceSkip", () => {
     expect(nextSkipPreviewMs([{ start_ms: 500, end_ms: 9_000 }], -1)).toBe(0);
   });
 
+  it("uses logarithmic indexed reads for playback and preview lookups", () => {
+    const source = Array.from({ length: 100_000 }, (_, index) => ({
+      start_ms: index * 10_000,
+      end_ms: index * 10_000 + 5_000,
+    }));
+    let indexedReads = 0;
+    const measured = new Proxy(source, {
+      get(target, property, receiver) {
+        if (typeof property === "string" && /^\d+$/.test(property)) indexedReads += 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    expect(skipTargetMs(measured, 543_212_000)).toBe(543_215_000);
+    expect(nextSkipPreviewMs(measured, 543_212_000)).toBe(543_218_500);
+    expect(prevSkipPreviewMs(measured, 543_212_000)).toBe(543_208_500);
+    expect(indexedReads).toBeLessThan(80);
+  });
+
   it("remembers the switch and stays off until turned on", () => {
     expect(isSkipSilenceEnabled()).toBe(false);
     setSkipSilenceEnabled(true);

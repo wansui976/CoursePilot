@@ -79,23 +79,80 @@ function quantize(value: number, step: number): number {
  * 一个时间窗里的字密度（字/秒）。窗内每句按**重叠比例**折算字数，
  * 句子之间的空档自然落进分母——那正是「这段讲得稀」的来源。
  */
-function windowDensity(
-  segments: TranscriptSegment[],
-  from: number,
-  to: number,
-): number {
+type DensityIntegral = {
+  positions: number[];
+  totals: number[];
+  rates: number[];
+};
+
+type WeightedSegment = {
+  start_ms: number;
+  end_ms: number;
+  chars: number;
+};
+
+/**
+ * 把每句字幕的均匀字密度叠成分段积分。规划时每个窗口只需两次二分查询，
+ * 不再为每个窗口重新遍历整份字幕。
+ */
+function buildDensityIntegral(segments: WeightedSegment[]): DensityIntegral {
+  const events: { at: number; delta: number }[] = [];
+  for (const segment of segments) {
+    const rate = segment.chars / (segment.end_ms - segment.start_ms);
+    events.push({ at: segment.start_ms, delta: rate });
+    events.push({ at: segment.end_ms, delta: -rate });
+  }
+  events.sort((a, b) => a.at - b.at);
+
+  const positions: number[] = [];
+  const totals: number[] = [];
+  const rates: number[] = [];
+  let activeRate = 0;
+  let total = 0;
+  let previousAt = events[0]?.at ?? 0;
+  for (let i = 0; i < events.length; ) {
+    const at = events[i].at;
+    total += activeRate * (at - previousAt);
+    let delta = 0;
+    while (i < events.length && events[i].at === at) {
+      delta += events[i].delta;
+      i += 1;
+    }
+    activeRate += delta;
+    if (Math.abs(activeRate) < 1e-12) activeRate = 0;
+    positions.push(at);
+    totals.push(total);
+    rates.push(activeRate);
+    previousAt = at;
+  }
+  return { positions, totals, rates };
+}
+
+function accumulatedCharsAt(integral: DensityIntegral, position: number): number {
+  let low = 0;
+  let high = integral.positions.length - 1;
+  let hit = -1;
+  while (low <= high) {
+    const middle = (low + high) >>> 1;
+    if (integral.positions[middle] <= position) {
+      hit = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  if (hit < 0) return 0;
+  return (
+    integral.totals[hit] +
+    integral.rates[hit] * (position - integral.positions[hit])
+  );
+}
+
+function windowDensity(integral: DensityIntegral, from: number, to: number): number {
   const seconds = (to - from) / 1000;
   if (seconds <= 0) return 0;
-  let chars = 0;
-  for (const segment of segments) {
-    const overlap =
-      Math.min(to, segment.end_ms) - Math.max(from, segment.start_ms);
-    if (overlap <= 0) continue;
-    const duration = segment.end_ms - segment.start_ms;
-    const share = duration > 0 ? overlap / duration : 1;
-    chars += charCount(segment.text) * share;
-  }
-  return chars / seconds;
+  const chars = accumulatedCharsAt(integral, to) - accumulatedCharsAt(integral, from);
+  return chars > 1e-9 ? chars / seconds : 0;
 }
 
 /**
@@ -110,18 +167,28 @@ export function planSmartRates(
   segments: TranscriptSegment[],
   options: SmartRateOptions = DEFAULT_SMART_RATE_OPTIONS,
 ): RateSpan[] {
-  const usable = segments
-    .filter((segment) => segment.end_ms > segment.start_ms && charCount(segment.text) > 0)
-    .sort((a, b) => a.start_ms - b.start_ms);
+  const usable: WeightedSegment[] = [];
+  for (const segment of segments) {
+    if (segment.end_ms <= segment.start_ms) continue;
+    const chars = charCount(segment.text);
+    if (chars > 0) {
+      usable.push({ start_ms: segment.start_ms, end_ms: segment.end_ms, chars });
+    }
+  }
+  usable.sort((a, b) => a.start_ms - b.start_ms);
   if (usable.length === 0) return [];
   const first = usable[0].start_ms;
-  const last = Math.max(...usable.map((segment) => segment.end_ms));
+  let last = usable[0].end_ms;
+  for (let i = 1; i < usable.length; i += 1) {
+    last = Math.max(last, usable[i].end_ms);
+  }
   if (last - first < options.windowMs) return [];
+  const densityIntegral = buildDensityIntegral(usable);
 
   const windows: { start: number; end: number; density: number }[] = [];
   for (let from = first; from < last; from += options.stepMs) {
     const to = Math.min(from + options.windowMs, last);
-    windows.push({ start: from, end: to, density: windowDensity(usable, from, to) });
+    windows.push({ start: from, end: to, density: windowDensity(densityIntegral, from, to) });
   }
   const baseline = median(windows.map((w) => w.density).filter((d) => d > 0));
   if (baseline == null || baseline <= 0) return [];
@@ -163,10 +230,20 @@ export function speedUpCoverageMs(spans: RateSpan[]): number {
 
 /** 播到 positionMs 时该用几倍速；落在任何段之外（片头、无字幕处）为 1。 */
 export function multiplierAt(spans: RateSpan[], positionMs: number): number {
-  const hit = spans.find(
-    (span) => positionMs >= span.start_ms && positionMs < span.end_ms,
-  );
-  return hit ? hit.multiplier : 1;
+  let low = 0;
+  let high = spans.length - 1;
+  while (low <= high) {
+    const middle = (low + high) >>> 1;
+    const span = spans[middle];
+    if (positionMs < span.start_ms) {
+      high = middle - 1;
+    } else if (positionMs >= span.end_ms) {
+      low = middle + 1;
+    } else {
+      return span.multiplier;
+    }
+  }
+  return 1;
 }
 
 /** 打开时的回执：这节课到底有多少能省。全程都不变速时明说，免得以为坏了。 */
@@ -181,8 +258,12 @@ export function formatSmartRateSummary(spans: RateSpan[]): string {
 }
 
 /** 变速时给的提示。用户得知道速度为什么变了。 */
-export function formatRateNotice(base: number, multiplier: number): string {
-  const effective = Math.round(base * multiplier * 100) / 100;
+export function formatRateNotice(
+  base: number,
+  multiplier: number,
+  maxEffectiveRate = Number.POSITIVE_INFINITY,
+): string {
+  const effective = Math.round(Math.min(base * multiplier, maxEffectiveRate) * 100) / 100;
   if (multiplier <= 1) return `回到 ${effective}x（这段讲得密）`;
   return `${effective}x（这段讲得慢）`;
 }

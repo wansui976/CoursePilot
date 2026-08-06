@@ -7,6 +7,10 @@ export type SkipRange = { start_ms: number; end_ms: number };
 
 const ENABLED_KEY = "skip-silence";
 
+export function silenceSkipQueryKey(videoId: string) {
+  return ["video-skips", videoId] as const;
+}
+
 /** 默认关：跳过是会改变观看内容的行为，得由用户主动打开。 */
 export function isSkipSilenceEnabled(): boolean {
   try {
@@ -26,10 +30,21 @@ export function setSkipSilenceEnabled(enabled: boolean) {
 
 /** 播放到 positionMs 时该跳到哪；不在任何区间内返回 null。 */
 export function skipTargetMs(ranges: SkipRange[], positionMs: number): number | null {
-  const hit = ranges.find(
-    (range) => positionMs >= range.start_ms && positionMs < range.end_ms,
-  );
+  const hit = rangeAtOrBefore(ranges, positionMs);
   return hit ? hit.end_ms : null;
+}
+
+/** 后端按 start_ms 返回互不重叠的区间；热路径用二分，避免播放越久扫描越多。 */
+function rangeAtOrBefore(ranges: SkipRange[], positionMs: number): SkipRange | null {
+  let low = 0;
+  let high = ranges.length;
+  while (low < high) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (ranges[mid].start_ms <= positionMs) low = mid + 1;
+    else high = mid;
+  }
+  const hit = low > 0 ? ranges[low - 1] : undefined;
+  return hit && positionMs < hit.end_ms ? hit : null;
 }
 
 /** 跳过后的提示文案。用户得知道刚才画面为什么突然前进了。 */
@@ -52,13 +67,24 @@ function previewMs(range: SkipRange): number {
  * 再按一次就该去下一处，而不是原地不动。
  */
 export function nextSkipPreviewMs(ranges: SkipRange[], positionMs: number): number | null {
-  const hit = ranges.find((range) => previewMs(range) > positionMs);
-  return hit ? previewMs(hit) : null;
+  let low = 0;
+  let high = ranges.length;
+  while (low < high) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (previewMs(ranges[mid]) <= positionMs) low = mid + 1;
+    else high = mid;
+  }
+  return low < ranges.length ? previewMs(ranges[low]) : null;
 }
 
 /** 「上一处停顿」的落点：最后一处落点还在当前位置之前的停顿。 */
 export function prevSkipPreviewMs(ranges: SkipRange[], positionMs: number): number | null {
-  const hits = ranges.filter((range) => previewMs(range) < positionMs);
-  const hit = hits[hits.length - 1];
-  return hit ? previewMs(hit) : null;
+  let low = 0;
+  let high = ranges.length;
+  while (low < high) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (previewMs(ranges[mid]) < positionMs) low = mid + 1;
+    else high = mid;
+  }
+  return low > 0 ? previewMs(ranges[low - 1]) : null;
 }

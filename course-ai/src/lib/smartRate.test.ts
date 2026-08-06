@@ -105,6 +105,50 @@ describe("planSmartRates", () => {
     expect(multiplierAt(spans, -1)).toBe(1);
     expect(multiplierAt(spans, 60 * 60_000)).toBe(1);
   });
+
+  it("reads each subtitle text only once while planning a very large transcript", () => {
+    let textReads = 0;
+    const largeTranscript = Array.from({ length: 100_000 }, (_, i) => {
+      const segment = {
+        id: i,
+        video_id: "large",
+        segment_idx: i,
+        start_ms: i * 1_000,
+        end_ms: i * 1_000 + 800,
+      } as TranscriptSegment;
+      Object.defineProperty(segment, "text", {
+        enumerable: true,
+        get: () => {
+          textReads += 1;
+          return "字幕";
+        },
+      });
+      return segment;
+    });
+
+    expect(planSmartRates(largeTranscript).length).toBeGreaterThan(0);
+    // 旧实现会在每个 5 秒窗口重新扫描全部字幕；积分表只需读取每句一次。
+    expect(textReads).toBe(largeTranscript.length);
+  });
+
+  it("looks up a large rate plan logarithmically during playback", () => {
+    const manySpans = Array.from({ length: 131_072 }, (_, i) => ({
+      start_ms: i * 2_000,
+      end_ms: i * 2_000 + 1_000,
+      multiplier: 1.2,
+    }));
+    let indexedReads = 0;
+    const observed = new Proxy(manySpans, {
+      get(target, property, receiver) {
+        if (typeof property === "string" && /^\d+$/.test(property)) indexedReads += 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    expect(multiplierAt(observed, 100_000 * 2_000 + 500)).toBe(1.2);
+    expect(multiplierAt(observed, 100_000 * 2_000 + 1_500)).toBe(1);
+    expect(indexedReads).toBeLessThan(50);
+  });
 });
 
 describe("smart rate switch and notice", () => {
@@ -123,5 +167,6 @@ describe("smart rate switch and notice", () => {
     // 倍速是相对用户选的倍速叠加的，提示里要给最终速度。
     expect(formatRateNotice(1.5, 1.25)).toBe("1.88x（这段讲得慢）");
     expect(formatRateNotice(1.25, 1)).toBe("回到 1.25x（这段讲得密）");
+    expect(formatRateNotice(1.5, 1.5, 2)).toBe("2x（这段讲得慢）");
   });
 });

@@ -1266,11 +1266,12 @@ select:focus-visible {
 }
 }
 
+/* 视频舞台全出血到播放器列边缘；交互控件在自身容器内单独避让系统安全区。 */
 .ca-stage-wrap {
   position: relative;
   flex: 1;
   min-height: 0;
-  padding: 16px 24px 22px;
+  padding: 0;
   display: flex;
 }
 
@@ -1294,7 +1295,7 @@ select:focus-visible {
   flex: 1;
   min-height: 0;
   background: var(--stage);
-  border-radius: var(--r-lg);
+  border-radius: 0;
   position: relative;
   overflow: hidden;
   display: flex;
@@ -1303,6 +1304,13 @@ select:focus-visible {
 .ca-stage > * {
   flex: 1;
   min-width: 0;
+}
+
+.ca-player-controls-shell {
+  padding-top: 4px;
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+  padding-bottom: max(4px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
 }
 
 .ca-resizer {
@@ -1422,7 +1430,7 @@ select:focus-visible {
 
 .ca-app[data-bucket="compact"] .ca-stage-wrap {
   display: block;
-  padding: 12px 16px 16px;
+  padding: 0;
 }
 
 .ca-app[data-bucket="compact"] .ca-stage {
@@ -1453,7 +1461,7 @@ select:focus-visible {
 
 .ca-app[data-bucket="medium"] .ca-stage-wrap {
   display: block;
-  padding: 12px 16px 16px;
+  padding: 0;
 }
 
 .ca-app[data-bucket="medium"] .ca-stage {
@@ -1484,7 +1492,7 @@ select:focus-visible {
     flex: 1;
     min-height: 0;
     display: flex;
-    padding: 6px 12px 10px;
+    padding: 0;
   }
 
   .ca-app[data-bucket="medium"] .ca-stage {

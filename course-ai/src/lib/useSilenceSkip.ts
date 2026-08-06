@@ -1,15 +1,19 @@
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ipc } from "@/lib/ipc";
+import { isMobile } from "@/lib/platform";
 import {
   formatSkipNotice,
   isSkipSilenceEnabled,
   setSkipSilenceEnabled,
+  silenceSkipQueryKey,
   skipTargetMs,
   type SkipRange,
 } from "@/lib/silenceSkip";
 
 /** 提示停留多久。够看清「跳过了多少」，又不至于压在画面上碍事。 */
 const NOTICE_MS = 2200;
+const EMPTY_RANGES: SkipRange[] = [];
 
 /**
  * 跳停顿的播放器侧接线：管开关、拉区间、在播放中该跳时跳，并给一句提示。
@@ -19,11 +23,10 @@ const NOTICE_MS = 2200;
  * 用户自己点开的，就一路给回执：正在分析 → 找到几段 / 一段都没有。
  */
 export function useSilenceSkip(videoId: string) {
-  const [enabled, setEnabled] = useState(isSkipSilenceEnabled);
+  const available = !isMobile();
+  const [enabled, setEnabled] = useState(() => available && isSkipSilenceEnabled());
   const [notice, setNotice] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  // ref 供每次 timeupdate 的热路径用，state 供界面（试跳按钮）用。
-  const [ranges, setRanges] = useState<SkipRange[]>([]);
+  // ref 供每次 timeupdate 的热路径用，query data 供界面（试跳按钮）用。
   const rangesRef = useRef<SkipRange[]>([]);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 只有用户亲手点开时才播报分析过程；开着开关切换视频时静悄悄地准备就好。
@@ -45,46 +48,53 @@ export function useSilenceSkip(videoId: string) {
     }
   }, []);
 
-  // 换视频就作废上一份区间，免得拿旧视频的时间点在新视频上乱跳。
-  useEffect(() => {
-    rangesRef.current = [];
-    setRanges([]);
-  }, [videoId]);
+  const skipsQuery = useQuery({
+    queryKey: silenceSkipQueryKey(videoId),
+    queryFn: () => ipc.videos.skips(videoId),
+    enabled: enabled && available,
+    retry: false,
+    // 课件提取完成时由调用方精确 invalidate；平时不要重复扫描或查库。
+    staleTime: Infinity,
+  });
+  const ranges = skipsQuery.data ?? EMPTY_RANGES;
 
   useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    const announce = announceRef.current;
+    rangesRef.current = ranges;
+  }, [ranges, videoId]);
+
+  useEffect(() => {
+    if (available) return;
+    // 桌面上留下的全局偏好不能让移动端长期显示一个实际不可用的开启状态。
+    setEnabled(false);
+    setSkipSilenceEnabled(false);
+  }, [available]);
+
+  useEffect(() => {
+    if (!enabled || !available || skipsQuery.isFetching) return;
+    if (skipsQuery.isError) {
+      announceRef.current = false;
+      rangesRef.current = [];
+      setEnabled(false);
+      setSkipSilenceEnabled(false);
+      showNotice("停顿分析失败，已关闭跳停顿");
+      return;
+    }
+    if (!skipsQuery.isSuccess || !announceRef.current) return;
     announceRef.current = false;
-    setLoading(true);
-    if (announce) showNotice("正在找可跳的停顿…", true);
-    void ipc.videos
-      .skips(videoId)
-      .then((ranges) => {
-        if (cancelled) return;
-        rangesRef.current = ranges;
-        setRanges(ranges);
-        if (!announce) return;
-        showNotice(
-          ranges.length > 0
-            ? `跳停顿已开启，可跳过 ${ranges.length} 处停顿`
-            : "跳停顿已开启，这个视频没有可跳的停顿",
-        );
-      })
-      .catch(() => {
-        // 探测失败（缺 ffmpeg、文件不在）就当没有可跳的段，照常播放。
-        if (cancelled) return;
-        rangesRef.current = [];
-        setRanges([]);
-        if (announce) showNotice("停顿分析失败，暂时跳不了");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, showNotice, videoId]);
+    showNotice(
+      ranges.length > 0
+        ? `跳停顿已开启，可跳过 ${ranges.length} 处停顿`
+        : "跳停顿已开启，这个视频没有可跳的停顿",
+    );
+  }, [
+    available,
+    enabled,
+    ranges,
+    showNotice,
+    skipsQuery.isError,
+    skipsQuery.isFetching,
+    skipsQuery.isSuccess,
+  ]);
 
   useEffect(() => clearNoticeTimer, []);
 
@@ -103,6 +113,11 @@ export function useSilenceSkip(videoId: string) {
   );
 
   const toggle = useCallback(() => {
+    if (!available) {
+      setSkipSilenceEnabled(false);
+      showNotice("当前设备暂不支持跳停顿");
+      return;
+    }
     setEnabled((on) => {
       const next = !on;
       setSkipSilenceEnabled(next);
@@ -115,7 +130,15 @@ export function useSilenceSkip(videoId: string) {
       }
       return next;
     });
-  }, [showNotice]);
+  }, [available, showNotice]);
 
-  return { enabled, toggle, notice, loading, ranges, handleTimeUpdate };
+  return {
+    enabled,
+    available,
+    toggle,
+    notice,
+    loading: enabled && skipsQuery.isFetching,
+    ranges,
+    handleTimeUpdate,
+  };
 }

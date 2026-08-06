@@ -7,6 +7,7 @@ import { ipc } from "@/lib/ipc";
 import { posKey, durKey, syncPlaybackProgress } from "@/lib/playback";
 import { isIOS } from "@/lib/platform";
 import { findActiveSegmentIndex } from "@/lib/transcript";
+import type { TranscriptSegment } from "@/lib/types";
 import { useWatchLogger } from "@/lib/useWatchLogger";
 import { usePlayer } from "@/stores/player";
 import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
@@ -22,6 +23,38 @@ const AXIS_LOCK_PX = 16;
 const SCRUB_MS_PER_PIXEL = 100;
 const BRIGHTNESS_STEP = 0.0025;
 const VOLUME_STEP = 0.0025;
+const APPLE_MAX_PLAYBACK_RATE = 2;
+const PLAYBACK_RATE_KEY = "course-ai-playback-rate";
+const SUPPORTED_PLAYBACK_RATES = new Set([0.5, 0.75, 1, 1.25, 1.5, 2]);
+const EMPTY_TRANSCRIPT_SEGMENTS: TranscriptSegment[] = [];
+
+function loadPlaybackRate() {
+  try {
+    const stored = Number(localStorage.getItem(PLAYBACK_RATE_KEY));
+    return SUPPORTED_PLAYBACK_RATES.has(stored) ? stored : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function persistPlaybackRate(rate: number) {
+  try {
+    localStorage.setItem(PLAYBACK_RATE_KEY, String(rate));
+  } catch {
+    // 隐私模式无法持久化时，本次播放器会话内仍然生效。
+  }
+}
+
+function usesApplePlaybackEngine() {
+  if (isIOS()) return true;
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent ?? "";
+  return (
+    /Macintosh|Mac OS X/i.test(ua) &&
+    /AppleWebKit/i.test(ua) &&
+    !/Chrome|Chromium|Edg|OPR/i.test(ua)
+  );
+}
 
 type GestureMode = "idle" | "brightness" | "volume" | "scrub";
 
@@ -31,6 +64,7 @@ type GestureState = {
   startY: number;
   startTime: number;
   startRate: number;
+  startPreservesPitch: boolean;
   startVolume: number;
   startBrightness: number;
   mode: GestureMode;
@@ -45,23 +79,17 @@ export function VideoPlayer({
   src,
   videoId,
   immersive = false,
-  resizing = false,
 }: {
   src: string;
   videoId: string;
   immersive?: boolean;
-  // 工作台分隔条正在拖动:拖动期间冻结舞台尺寸,避免暂停静帧每帧重新栅格化导致卡顿。
-  resizing?: boolean;
 }) {
   const regionRef = useRef<HTMLDivElement>(null);
-  const stageRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLVideoElement>(null);
   // 控制栏实测高度：字幕据此在控制栏显示时上移，浮在其上方（控制栏悬浮遮住舞台底部）。
   const [controlsHeight, setControlsHeight] = useState(0);
   const lastSavedRef = useRef(0);
-  const [videoAspect, setVideoAspect] = useState(16 / 9);
-  const [region, setRegion] = useState({ w: 0, h: 0 });
   const [playing, setPlaying] = useState(false);
   // 把「播放中时长」记入学习事件日志（供仪表盘统计 / 间隔重复排期）。
   useWatchLogger(videoId, playing);
@@ -70,7 +98,7 @@ export function VideoPlayer({
     if (!videoId) return;
     return () => syncPlaybackProgress(videoId);
   }, [videoId]);
-  const [rate, setRate] = useState(1);
+  const [rate, setRate] = useState(loadPlaybackRate);
   const silenceSkip = useSilenceSkip(videoId);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
@@ -107,13 +135,22 @@ export function VideoPlayer({
     prevPitch?: boolean;
   } | null>(null);
 
-  const { data: segments = [] } = useQuery({
+  const { data: queriedSegments } = useQuery({
     queryKey: ["transcripts", videoId],
     queryFn: () => ipc.transcripts.list(videoId),
     refetchInterval: (query) =>
       query.state.data && query.state.data.length > 0 ? false : 2000,
   });
-  const smartRate = useSmartRate(segments);
+  // 查询 pending 时保持同一个空数组引用，避免智能倍率计划被当作“新文稿”反复重建。
+  const segments = queriedSegments ?? EMPTY_TRANSCRIPT_SEGMENTS;
+  const applePlaybackEngine = useMemo(usesApplePlaybackEngine, []);
+  const smartRate = useSmartRate(segments, {
+    resetKey: videoId,
+    maxEffectiveRate: applePlaybackEngine ? APPLE_MAX_PLAYBACK_RATE : undefined,
+  });
+  const effectiveRate = applePlaybackEngine
+    ? Math.min(APPLE_MAX_PLAYBACK_RATE, rate * smartRate.multiplier)
+    : rate * smartRate.multiplier;
   // 字幕跳转用：始终持有按 start_ms 排好序的最新分句，供键盘处理器读取（避免闭包过期）。
   const sortedSegments = useMemo(
     () => [...segments].sort((a, b) => a.start_ms - b.start_ms),
@@ -154,70 +191,6 @@ export function VideoPlayer({
     return () => ro.disconnect();
   }, []);
 
-  // 跟踪播放区实际尺寸，据此把舞台收成视频的真实宽高比，做到「完整不裁剪 + 不留黑边」。
-  const resizingRef = useRef(resizing);
-  useEffect(() => {
-    const el = regionRef.current;
-    if (!el) return;
-    const update = () => {
-      // 拖动分隔条期间不重算舞台尺寸：否则网格每帧重排，暂停的静帧会被反复栅格化（卡顿来源）。
-      if (resizingRef.current) return;
-      const w = el.clientWidth;
-      const h = el.clientHeight;
-      // 等值守卫：尺寸没变就不 setState，避免无谓重渲染。
-      setRegion((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
-    };
-    update();
-    if (typeof ResizeObserver === "undefined") return;
-    // rAF 合帧：一帧内多次 resize 只算一次。
-    let raf = 0;
-    const ro = new ResizeObserver(() => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        update();
-      });
-    });
-    ro.observe(el);
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-      ro.disconnect();
-    };
-  }, []);
-
-  // 分隔条拖动状态翻转：拖动中冻结舞台尺寸，松手后一次性贴合最终宽度。
-  useEffect(() => {
-    resizingRef.current = resizing;
-    if (resizing) return;
-    const el = regionRef.current;
-    if (!el) return;
-    const w = el.clientWidth;
-    const h = el.clientHeight;
-    setRegion((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
-  }, [resizing]);
-
-  useEffect(() => {
-    setVideoAspect(16 / 9);
-  }, [videoId]);
-
-  // 在播放区内，求与视频同比例、尽可能大的居中矩形；视频铺满它即完整无黑边。
-  const aspect = videoAspect > 0 ? videoAspect : 16 / 9;
-  const stageBox = (() => {
-    const { w, h } = region;
-    if (!w || !h) return null;
-    let boxW = w;
-    let boxH = w / aspect;
-    if (boxH > h) {
-      boxH = h;
-      boxW = h * aspect;
-    }
-    // 对齐到整数物理像素：暂停时的静态帧是按物理像素栅格化的，舞台落在半像素上会被
-    // 重采样而发虚。先按 devicePixelRatio 取整再换回 CSS 像素，让缩放尽量无损。
-    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-    const snap = (v: number) => Math.round(v * dpr) / dpr;
-    return { width: snap(boxW), height: snap(boxH) };
-  })();
-
   useEffect(() => {
     if (!ref.current || !seekRequest) return;
     ref.current.currentTime = seekRequest.ms / 1000;
@@ -225,8 +198,13 @@ export function VideoPlayer({
 
   useEffect(() => {
     // 智能倍速是在用户选的倍速之上叠加的倍率，所以这里生效的是两者之积。
-    if (ref.current) ref.current.playbackRate = rate * smartRate.multiplier;
-  }, [rate, smartRate.multiplier]);
+    const video = ref.current;
+    if (!video || gestureRef.current?.longPressActive) return;
+    // 媒体资源加载会把 playbackRate 还原为 defaultPlaybackRate；两者一起更新，
+    // 切到目标倍速相同的新视频时也不会悄悄掉回 1x。
+    video.defaultPlaybackRate = effectiveRate;
+    if (video.playbackRate !== effectiveRate) video.playbackRate = effectiveRate;
+  }, [effectiveRate, src]);
 
   useEffect(() => {
     if (!ref.current) return;
@@ -310,6 +288,7 @@ export function VideoPlayer({
       startY: event.clientY,
       startTime: video?.currentTime ?? 0,
       startRate: video?.playbackRate ?? rate,
+      startPreservesPitch: video?.preservesPitch ?? true,
       startVolume: volume,
       startBrightness: brightness,
       mode: "idle",
@@ -332,7 +311,12 @@ export function VideoPlayer({
       if (!current || current.pointerId !== event.pointerId || !activeVideo) return;
       if (current.swiped || current.longPressActive) return;
       current.longPressActive = true;
-      setRate(current.startRate * 2);
+      // 长按只临时改播放器的有效倍速，不能把已经叠过智能倍率的值写回基础 rate。
+      // 先关变调可避免 WKWebView 重建音频管线时的明显停顿。
+      activeVideo.preservesPitch = false;
+      const next = Math.min(APPLE_MAX_PLAYBACK_RATE, current.startRate * 2);
+      activeVideo.playbackRate = next;
+      setGestureHint({ kind: "rate", value: next });
     }, LONG_PRESS_MS);
   }
   function handleIosPointerMove(event: React.PointerEvent<HTMLDivElement>) {
@@ -393,7 +377,12 @@ export function VideoPlayer({
     const adx = Math.abs(dx);
     const ady = Math.abs(dy);
     if (gesture.longPressActive) {
-      setRate(gesture.startRate);
+      const video = ref.current;
+      if (video) {
+        video.playbackRate = gesture.startRate;
+        video.preservesPitch = gesture.startPreservesPitch;
+      }
+      setGestureHint(null);
       revealControls();
     } else if (gesture.mode === "scrub" || (gesture.swiped && adx > ady)) {
       revealControls();
@@ -419,7 +408,12 @@ export function VideoPlayer({
     if (!gesture || gesture.pointerId !== event.pointerId || !isIosImmersive) return;
     clearGestureTimer(gesture);
     if (gesture.longPressActive) {
-      setRate(gesture.startRate);
+      const video = ref.current;
+      if (video) {
+        video.playbackRate = gesture.startRate;
+        video.preservesPitch = gesture.startPreservesPitch;
+      }
+      setGestureHint(null);
     }
     gestureRef.current = null;
   }
@@ -672,19 +666,11 @@ export function VideoPlayer({
         onClick={immersive && !isIosImmersive ? handleStageTap : undefined}
         onMouseEnter={!immersive ? revealDesktopControls : undefined}
         onMouseLeave={!immersive ? scheduleDesktopHideControls : undefined}
-        className={`relative flex min-h-0 w-full min-w-0 flex-1 items-center justify-center overflow-hidden ${
+        className={`relative min-h-0 w-full min-w-0 flex-1 overflow-hidden ${
           fullscreen ? "bg-black" : "bg-[var(--surface-stage)]"
         }`}
       >
-      <div
-        ref={stageRef}
-        className={`relative overflow-hidden ${fullscreen ? "" : "rounded-xl"}`}
-        style={
-          stageBox
-              ? { width: stageBox.width, height: stageBox.height }
-              : { width: "100%", height: "100%" }
-          }
-        >
+        <div className="absolute inset-0 overflow-hidden">
           <video
             ref={ref}
             aria-label="课程视频播放器"
@@ -706,7 +692,9 @@ export function VideoPlayer({
               if (silenceSkip.handleTimeUpdate(event.currentTarget)) return;
               const t = event.currentTarget.currentTime;
               // 长按快进时播放器的 playbackRate 由手势直接改，这时别去抢。
-              if (!keyScanRef.current?.engaged) smartRate.update(t * 1000, rate);
+              if (!keyScanRef.current?.engaged && !gestureRef.current?.longPressActive) {
+                smartRate.update(t * 1000, rate);
+              }
               setCurrentMs(Math.floor(t * 1000));
               // 每 5 秒（或回退时）记录一次进度，避免频繁写 localStorage。
               if (Math.abs(t - lastSavedRef.current) >= 5) {
@@ -724,14 +712,13 @@ export function VideoPlayer({
             }}
             onLoadedMetadata={(event) => {
               const video = event.currentTarget;
+              // 某些 WebKit 版本在资源加载后才重置速率；metadata 到达时再兜底应用一次。
+              video.defaultPlaybackRate = effectiveRate;
+              video.playbackRate = effectiveRate;
               setDurationMs(Math.floor(video.duration * 1000));
               // 记录总时长，供首页显示「时长 + 进度条」（DB 里 duration_ms 常为空）。
               if (Number.isFinite(video.duration) && video.duration > 0) {
                 localStorage.setItem(durKey(videoId), String(video.duration));
-              }
-              const { videoWidth, videoHeight } = video;
-              if (videoWidth > 0 && videoHeight > 0) {
-                setVideoAspect(videoWidth / videoHeight);
               }
               // 跨视频跳转优先：若有落在本视频的 pendingSeek（课程级搜索点来的），
               // 直接跳到该处、消费掉，压过断点续播。
@@ -772,10 +759,10 @@ export function VideoPlayer({
               // 暂停是同步进库的好时机：完成度以库里那份为准。
               syncPlaybackProgress(videoId);
             }}
-              onVolumeChange={(event) => {
-                setVolume(event.currentTarget.volume);
-                setMuted(event.currentTarget.muted);
-              }}
+            onVolumeChange={(event) => {
+              setVolume(event.currentTarget.volume);
+              setMuted(event.currentTarget.muted);
+            }}
           />
           {isIosImmersive && (
             <div
@@ -858,12 +845,14 @@ export function VideoPlayer({
         <Controls
           playing={playing}
           rate={rate}
+          effectiveRate={effectiveRate}
           volume={volume}
           muted={muted}
           captionsOn={captionsOn}
           smartRate={smartRate.enabled}
           smartRateAvailable={smartRate.available}
           skipSilence={silenceSkip.enabled}
+          skipSilenceAvailable={silenceSkip.available}
           skipSilenceLoading={silenceSkip.loading}
           skipRanges={silenceSkip.ranges}
           fullscreen={fullscreen}
@@ -889,7 +878,10 @@ export function VideoPlayer({
           onSeek={(ms) => {
             if (ref.current) ref.current.currentTime = ms / 1000;
           }}
-          onRate={setRate}
+          onRate={(nextRate) => {
+            setRate(nextRate);
+            persistPlaybackRate(nextRate);
+          }}
           onVolume={(value) => {
             setVolume(value);
             setMuted(value === 0);

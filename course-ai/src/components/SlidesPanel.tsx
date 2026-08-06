@@ -16,6 +16,7 @@ import {
 import { SlideImage } from "@/components/SlideImage";
 import { formatMs } from "@/lib/time";
 import { getSlidesSensitivity, sensitivityToThreshold } from "@/lib/slides";
+import { silenceSkipQueryKey } from "@/lib/silenceSkip";
 import { usePlayer } from "@/stores/player";
 
 /**
@@ -90,7 +91,10 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
         setProgress,
       );
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["slides", videoId] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["slides", videoId] });
+      void qc.invalidateQueries({ queryKey: silenceSkipQueryKey(videoId) });
+    },
     onSettled: () => {
       extractRequest.current = null;
       setProgress(null);

@@ -1,11 +1,29 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { createElement, StrictMode, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSilenceSkip } from "./useSilenceSkip";
+import { silenceSkipQueryKey } from "./silenceSkip";
 
-const { mockIpc } = vi.hoisted(() => ({
+const { mockIpc, mockIsMobile } = vi.hoisted(() => ({
   mockIpc: { videos: { skips: vi.fn() } },
+  mockIsMobile: vi.fn(() => false),
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
+vi.mock("@/lib/platform", () => ({ isMobile: mockIsMobile }));
+
+function renderSkipHook(videoId = "v1", strict = false) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+  });
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(
+      QueryClientProvider,
+      { client },
+      strict ? createElement(StrictMode, null, children) : children,
+    );
+  return { ...renderHook(() => useSilenceSkip(videoId), { wrapper }), client };
+}
 
 function fakeVideo(seconds: number) {
   return {
@@ -18,13 +36,14 @@ function fakeVideo(seconds: number) {
 describe("useSilenceSkip", () => {
   beforeEach(() => {
     localStorage.clear();
+    mockIsMobile.mockReturnValue(false);
     mockIpc.videos.skips.mockReset().mockResolvedValue([
       { start_ms: 10_000, end_ms: 20_000 },
     ]);
   });
 
   it("does not scan the audio track until the feature is switched on", async () => {
-    const { result } = renderHook(() => useSilenceSkip("v1"));
+    const { result } = renderSkipHook();
 
     expect(result.current.enabled).toBe(false);
     expect(mockIpc.videos.skips).not.toHaveBeenCalled();
@@ -36,7 +55,7 @@ describe("useSilenceSkip", () => {
   });
 
   it("acknowledges the click right away and reports what it found", async () => {
-    const { result } = renderHook(() => useSilenceSkip("v1"));
+    const { result } = renderSkipHook();
 
     act(() => result.current.toggle());
     // 分析要好几秒，点下去必须立刻有回执，否则看着像按钮没反应。
@@ -52,7 +71,7 @@ describe("useSilenceSkip", () => {
 
   it("says so when a video has nothing worth skipping", async () => {
     mockIpc.videos.skips.mockResolvedValue([]);
-    const { result } = renderHook(() => useSilenceSkip("v1"));
+    const { result } = renderSkipHook();
 
     act(() => result.current.toggle());
     await waitFor(() =>
@@ -62,7 +81,7 @@ describe("useSilenceSkip", () => {
 
   it("stays quiet when the switch was already on from a previous session", async () => {
     localStorage.setItem("skip-silence", "on");
-    const { result } = renderHook(() => useSilenceSkip("v1"));
+    const { result } = renderSkipHook();
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     // 每打开一个视频都弹一句「已开启」只会烦人；只有用户亲手点开时才播报。
@@ -71,9 +90,9 @@ describe("useSilenceSkip", () => {
   });
 
   it("jumps past a silence while playing and says how much it skipped", async () => {
-    const { result } = renderHook(() => useSilenceSkip("v1"));
+    const { result } = renderSkipHook();
     act(() => result.current.toggle());
-    await waitFor(() => expect(mockIpc.videos.skips).toHaveBeenCalled());
+    await waitFor(() => expect(result.current.ranges).toHaveLength(1));
 
     const video = fakeVideo(12);
     act(() => {
@@ -87,7 +106,7 @@ describe("useSilenceSkip", () => {
   });
 
   it("leaves a paused or seeking player alone", async () => {
-    const { result } = renderHook(() => useSilenceSkip("v1"));
+    const { result } = renderSkipHook();
     act(() => result.current.toggle());
     await waitFor(() => expect(mockIpc.videos.skips).toHaveBeenCalled());
 
@@ -98,12 +117,47 @@ describe("useSilenceSkip", () => {
     expect(result.current.handleTimeUpdate(seeking)).toBe(false);
   });
 
-  it("survives a failed scan by simply not skipping", async () => {
+  it("turns itself off after a failed scan", async () => {
     mockIpc.videos.skips.mockRejectedValue(new Error("no ffmpeg"));
-    const { result } = renderHook(() => useSilenceSkip("v1"));
+    const { result } = renderSkipHook();
 
     act(() => result.current.toggle());
-    await waitFor(() => expect(result.current.notice).toBe("停顿分析失败，暂时跳不了"));
+    await waitFor(() => expect(result.current.notice).toBe("停顿分析失败，已关闭跳停顿"));
+    expect(result.current.enabled).toBe(false);
+    expect(localStorage.getItem("skip-silence")).toBe("off");
     expect(result.current.handleTimeUpdate(fakeVideo(12))).toBe(false);
+  });
+
+  it("deduplicates the initial request when StrictMode remounts effects", async () => {
+    localStorage.setItem("skip-silence", "on");
+    const { result } = renderSkipHook("v1", true);
+
+    await waitFor(() => expect(result.current.ranges).toHaveLength(1));
+    expect(mockIpc.videos.skips).toHaveBeenCalledTimes(1);
+  });
+
+  it("reloads planned ranges when slide extraction invalidates the query", async () => {
+    localStorage.setItem("skip-silence", "on");
+    const { result, client } = renderSkipHook();
+    await waitFor(() => expect(result.current.ranges[0]?.end_ms).toBe(20_000));
+
+    mockIpc.videos.skips.mockResolvedValue([{ start_ms: 30_000, end_ms: 35_000 }]);
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: silenceSkipQueryKey("v1") });
+    });
+
+    await waitFor(() => expect(result.current.ranges[0]?.end_ms).toBe(35_000));
+    expect(mockIpc.videos.skips).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the persisted switch off on unsupported mobile platforms", async () => {
+    localStorage.setItem("skip-silence", "on");
+    mockIsMobile.mockReturnValue(true);
+    const { result } = renderSkipHook();
+
+    expect(result.current.available).toBe(false);
+    expect(result.current.enabled).toBe(false);
+    await waitFor(() => expect(localStorage.getItem("skip-silence")).toBe("off"));
+    expect(mockIpc.videos.skips).not.toHaveBeenCalled();
   });
 });
