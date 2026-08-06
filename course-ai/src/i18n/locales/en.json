@@ -602,6 +602,7 @@
     "regenerate": "Regenerate",
     "actionRecord": "Action log",
     "actionResult": "Action result: {{result}}",
+    "expiredActions": "This turn's previous action buttons expired after restart. Completed results remain in the action log; unconfirmed actions were not run. Ask again to recreate them.",
     "stopped": "Stopped, remaining actions not executed",
     "stopping": "Stopping…",
     "answering": "Answering…",

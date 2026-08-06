@@ -10,7 +10,7 @@ import {
 describe("assistantSession", () => {
   beforeEach(() => localStorage.clear());
 
-  it("restores transcript, history, and draft without reviving actions", () => {
+  it("restores transcript, history, and draft without reviving executable actions", () => {
     writeAssistantSession({
       turns: [
         {
@@ -37,6 +37,7 @@ describe("assistantSession", () => {
           question: "删掉它",
           answer: "已经准备好",
           actions: [],
+          actionsExpired: true,
           tools: ["delete_video"],
           canceled: false,
           actionResults: ["已完成删除：第一讲"],
@@ -45,9 +46,47 @@ describe("assistantSession", () => {
       history: [
         { role: "user", content: "删掉它" },
         { role: "assistant", content: "已经准备好" },
+        {
+          role: "assistant",
+          content:
+            "（界面操作结果：应用重启后，本轮旧操作按钮已失效；已经完成的结果以操作记录为准，尚未确认的操作未执行。如仍需操作，必须重新调用工具核对当前状态并生成新按钮。）",
+        },
       ],
       draft: "继续问",
     });
+
+    const stored = JSON.parse(localStorage.getItem(assistantSessionStorageKey) ?? "{}") as {
+      turns?: Array<{ actions?: unknown[]; actionsExpired?: boolean }>;
+    };
+    expect(stored.turns?.[0]).toMatchObject({ actions: [], actionsExpired: true });
+  });
+
+  it("does not call an already-applied theme switch an expired action", () => {
+    writeAssistantSession({
+      turns: [
+        {
+          id: "t1",
+          question: "切到夜间",
+          answer: "已切换",
+          actions: [{ kind: "set_theme", pref: "dark" }],
+          tools: ["set_theme"],
+          canceled: false,
+          actionResults: [],
+        },
+      ],
+      history: [
+        { role: "user", content: "切到夜间" },
+        { role: "assistant", content: "已切换" },
+      ],
+      draft: "",
+    });
+
+    const restored = readAssistantSession();
+    expect(restored.turns[0].actionsExpired).toBeUndefined();
+    expect(restored.history).toEqual([
+      { role: "user", content: "切到夜间" },
+      { role: "assistant", content: "已切换" },
+    ]);
   });
 
   it("remembers that a turn ran out of steps instead of restoring it as a finished answer", () => {

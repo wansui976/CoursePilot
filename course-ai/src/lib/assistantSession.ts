@@ -8,6 +8,8 @@ const MAX_HISTORY_CHARS = 48_000;
 const MAX_ACTION_RESULTS = 50;
 const MAX_ACTION_RESULT_CHARS = 2_000;
 const CONTEXT_PREFIX = "（界面状态：";
+const EXPIRED_ACTION_HISTORY_NOTICE =
+  "（界面操作结果：应用重启后，本轮旧操作按钮已失效；已经完成的结果以操作记录为准，尚未确认的操作未执行。如仍需操作，必须重新调用工具核对当前状态并生成新按钮。）";
 
 export interface AssistantTurnRecord {
   id: string;
@@ -16,6 +18,8 @@ export interface AssistantTurnRecord {
   /** 推理模型的思考过程；随答案一起保留，答案出来后折叠展示。旧记录没有。 */
   reasoning?: string;
   actions: AssistantAction[];
+  /** 重启前这一轮曾有操作按钮；参数不会落盘，恢复后只能提示用户重新发起。 */
+  actionsExpired?: boolean;
   tools: string[];
   canceled: boolean;
   /** 助手转到轮次上限才停下；这一轮的回答不完整，重启后同样要说明。旧记录没有。 */
@@ -58,6 +62,7 @@ function readTurn(value: unknown): AssistantTurnRecord | null {
       : {}),
     // 旧确认卡不能跨重启复活：用户可能已经在别处完成了同一操作。
     actions: [],
+    ...(value.actionsExpired === true ? { actionsExpired: true } : {}),
     tools: Array.isArray(value.tools)
       ? value.tools.filter((tool): tool is string => typeof tool === "string")
       : [],
@@ -233,15 +238,34 @@ export function readAssistantSession(): AssistantSession {
 
 export function writeAssistantSession(session: AssistantSession) {
   try {
+    // 主题已经当场生效；其余按钮都依赖生成时的界面状态，重启后不得复活。
+    const hasLiveActionPayload = session.turns.some((turn) =>
+      turn.actions.some((action) => action.kind !== "set_theme"),
+    );
     const turns = session.turns
       .filter((turn) => !turn.pending)
       .slice(-MAX_TURNS)
-      .map((turn) => ({ ...turn, actions: [], pending: undefined }));
+      .map((turn) => ({
+        ...turn,
+        actions: [],
+        actionsExpired:
+          turn.actionsExpired === true ||
+          turn.actions.some((action) => action.kind !== "set_theme") ||
+          undefined,
+        pending: undefined,
+      }));
+    const cleanHistory = readHistory(session.history);
+    const history = hasLiveActionPayload
+      ? readHistory([
+          ...cleanHistory,
+          { role: "assistant", content: EXPIRED_ACTION_HISTORY_NOTICE },
+        ])
+      : cleanHistory;
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
         turns,
-        history: readHistory(session.history),
+        history,
         draft: session.draft.slice(0, MAX_DRAFT_CHARS),
       }),
     );

@@ -614,6 +614,7 @@ describe("AssistantPanel", () => {
     renderPanel();
 
     expect(screen.getByText("已经准备好，等你确认")).toBeInTheDocument();
+    expect(screen.getByText(/本轮原有操作按钮已失效/)).toBeInTheDocument();
     expect(screen.getByLabelText("对助手说")).toHaveValue("接着问");
     expect(screen.queryByRole("button", { name: "确认删除" })).not.toBeInTheDocument();
 
@@ -622,7 +623,13 @@ describe("AssistantPanel", () => {
       expect(mockIpc.assistant.ask).toHaveBeenLastCalledWith(
         "接着问",
         expect.anything(),
-        savedHistory,
+        [
+          ...savedHistory,
+          {
+            role: "assistant",
+            content: expect.stringContaining("旧操作按钮已失效"),
+          },
+        ],
         expect.any(String),
         expect.any(Function),
       ),

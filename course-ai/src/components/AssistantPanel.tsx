@@ -1329,6 +1329,13 @@ export function AssistantPanel({
               onResult={(message) => recordActionResult(turn.id, message, conversationEpoch)}
             />
 
+            {turn.actionsExpired && (
+              <p className="flex items-start gap-1.5 text-[11px] text-[var(--status-warn)]">
+                <AlertCircle className="mt-[0.2em] h-3 w-3 flex-none" aria-hidden="true" />
+                <span className="min-w-0 break-words">{t("assistant.expiredActions")}</span>
+              </p>
+            )}
+
             {turn.actionResults.length > 0 && (
               <div aria-label={t("assistant.actionRecord")} className="space-y-1">
                 {turn.actionResults.map((result, index) => (

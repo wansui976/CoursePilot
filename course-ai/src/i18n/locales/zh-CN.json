@@ -602,6 +602,7 @@
     "regenerate": "重新回答",
     "actionRecord": "操作记录",
     "actionResult": "操作结果：{{result}}",
+    "expiredActions": "应用重启后，本轮原有操作按钮已失效。已完成结果见操作记录；未确认的操作没有执行，需要时请重新提出。",
     "stopped": "已停止，未继续执行",
     "stopping": "正在停止…",
     "answering": "正在作答…",
