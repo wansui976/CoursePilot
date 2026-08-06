@@ -139,7 +139,10 @@ function initialDockTop() {
   return Math.max(VIEWPORT_GAP, height - LAUNCHER_SIZE - 24);
 }
 
-type Turn = AssistantTurnRecord;
+type Turn = AssistantTurnRecord & {
+  /** 只存在于当前流式请求中；完成后不落入会话存储。 */
+  activeTool?: { callId: string; name: string };
+};
 
 function formatPosition(ms: number) {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -248,13 +251,20 @@ export function AssistantPanel({
   const toggleRef = useRef(() => {});
   const panelWidth = resizeWidth ?? width;
 
-  // 「现在在干什么」跟着流走：先是等第一片，然后在思考，最后在作答。
+  // 「现在在干什么」跟着流走：工具执行优先于此前已经吐出的思考或过场正文。
   const pendingTurn = turns.find((turn) => turn.pending);
-  const streamingLabel = pendingTurn?.answer
-    ? t("assistant.answering")
-    : pendingTurn?.reasoning
-      ? t("assistant.thinkingStatus")
-      : t("assistant.thinkingWithTools");
+  const activeToolLabel = pendingTurn?.activeTool
+    ? t(`assistantTools.${pendingTurn.activeTool.name}`, {
+        defaultValue: pendingTurn.activeTool.name,
+      })
+    : null;
+  const streamingLabel = activeToolLabel
+    ? t("assistant.usingTool", { tool: activeToolLabel })
+    : pendingTurn?.answer
+      ? t("assistant.answering")
+      : pendingTurn?.reasoning
+        ? t("assistant.thinkingStatus")
+        : t("assistant.thinkingWithTools");
   const setThemePref = useTheme((state) => state.setPref);
   const pendingInlineAsk = useInlineAsk((state) => state.pending);
   const clearInlineAsk = useInlineAsk((state) => state.clear);
@@ -834,13 +844,23 @@ export function AssistantPanel({
         requestId,
         (event) => {
           if (event.type === "turn") {
-            patch((item) => ({ ...item, answer: "" }));
+            patch((item) => ({ ...item, answer: "", activeTool: undefined }));
           } else if (event.type === "reasoning") {
             patch((item) => ({ ...item, reasoning: (item.reasoning ?? "") + event.delta }));
           } else if (event.type === "token") {
             patch((item) => ({ ...item, answer: item.answer + event.delta }));
           } else if (event.type === "tool") {
-            patch((item) => ({ ...item, tools: [...item.tools, event.name] }));
+            patch((item) => ({
+              ...item,
+              tools: [...item.tools, event.name],
+              activeTool: { callId: event.call_id, name: event.name },
+            }));
+          } else if (event.type === "tool_finished") {
+            patch((item) => ({
+              ...item,
+              activeTool:
+                item.activeTool?.callId === event.call_id ? undefined : item.activeTool,
+            }));
           }
         },
       );
@@ -876,6 +896,7 @@ export function AssistantPanel({
                 // 用户叫停的那一轮已经有自己的说明，再挂一条「没得出结论」是在替它
                 // 找借口——它没转不出来，是被你按停的。
                 hitTurnLimit: reply.hit_turn_limit && !canceled,
+                activeTool: undefined,
                 pending: false,
               }
             : turn,

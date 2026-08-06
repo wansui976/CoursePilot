@@ -608,6 +608,7 @@
     "answering": "Answering…",
     "thinkingStatus": "Thinking…",
     "thinkingWithTools": "Thinking and calling tools…",
+    "usingTool": "Using {{tool}}…",
     "scrollToLatest": "Scroll to latest",
     "scopeLabel": "Current scope: {{scope}}",
     "scopeHint": "References like \"this video\" are resolved to this scope",

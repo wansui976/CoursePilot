@@ -248,14 +248,29 @@ describe("AssistantPanel", () => {
     expect(screen.getByText("正在思考…")).toBeInTheDocument();
 
     act(() => {
-      emit({ type: "tool", name: "search_content" });
+      emit({ type: "tool", call_id: "call-search-1", name: "search_content" });
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("正在搜索课程内容");
+
+    act(() => {
       emit({ type: "token", delta: "这节课" });
       emit({ type: "token", delta: "讲的是导数。" });
     });
     expect(await screen.findByText("这节课讲的是导数。")).toBeInTheDocument();
     // 工具标签实时出现，不必等整轮跑完。
-    expect(screen.getByText(/搜索|search_content/)).toBeInTheDocument();
-    expect(screen.getByText("正在作答…")).toBeInTheDocument();
+    expect(screen.getByTestId("tool-chips")).toHaveTextContent("搜索课程内容");
+    // 即使工具开始前已经有正文，执行中的工具仍然是当前真实状态。
+    expect(screen.getByRole("status")).toHaveTextContent("正在搜索课程内容");
+
+    act(() => {
+      emit({
+        type: "tool_finished",
+        call_id: "call-search-1",
+        name: "search_content",
+        canceled: false,
+      });
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("正在作答");
   });
 
   it("新一轮开始会清空上一轮的正文，不会拼成一句谁也没说过的话", async () => {

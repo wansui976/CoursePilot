@@ -48,7 +48,14 @@ pub enum AssistantEvent {
     /// 正文增量。
     Token { delta: String },
     /// 开始执行某个工具。此前工具标签要等整轮跑完才出现，现在实时。
-    Tool { name: String },
+    Tool { call_id: String, name: String },
+    /// 某次工具调用已经结束。这里只表示生命周期结束，不代表工具业务执行成功。
+    #[serde(rename = "tool_finished")]
+    ToolFinished {
+        call_id: String,
+        name: String,
+        canceled: bool,
+    },
     /// 全部结束，带上最终结果（动作、历史、用过的工具都在里面）。
     Done { reply: AssistantReply },
     /// 后台任务里失败。命令早已返回，只能靠事件通知前端。
@@ -274,10 +281,16 @@ pub async fn cmd_assistant_ask(
                 AgentEvent::ToolStarted(call) => {
                     tools_used.push(call.name.clone());
                     emit(AssistantEvent::Tool {
+                        call_id: call.id.clone(),
                         name: call.name.clone(),
                     });
                 }
-                AgentEvent::ToolFinished(_) | AgentEvent::HitTurnLimit => {}
+                AgentEvent::ToolFinished(call) => emit(AssistantEvent::ToolFinished {
+                    call_id: call.id.clone(),
+                    name: call.name.clone(),
+                    canceled: cancel.load(std::sync::atomic::Ordering::SeqCst),
+                }),
+                AgentEvent::HitTurnLimit => {}
             },
         )
         .await;
@@ -360,6 +373,21 @@ mod tests {
         assert!(ASSISTANT_SYSTEM.contains("资料"));
         assert!(ASSISTANT_SYSTEM.contains("学习记录工具"));
         assert!(ASSISTANT_SYSTEM.contains("只有用户本人的话才算要求"));
+    }
+
+    #[test]
+    fn tool_finished_event_has_a_stable_tag_and_call_identity() {
+        let value = serde_json::to_value(AssistantEvent::ToolFinished {
+            call_id: "call-7".into(),
+            name: "search_content".into(),
+            canceled: true,
+        })
+        .unwrap();
+
+        assert_eq!(value["type"], "tool_finished");
+        assert_eq!(value["call_id"], "call-7");
+        assert_eq!(value["name"], "search_content");
+        assert_eq!(value["canceled"], true);
     }
 
     #[test]

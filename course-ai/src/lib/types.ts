@@ -319,7 +319,8 @@ export type AssistantEvent =
   | { type: "turn"; turn: number }
   | { type: "reasoning"; delta: string }
   | { type: "token"; delta: string }
-  | { type: "tool"; name: string }
+  | { type: "tool"; call_id: string; name: string }
+  | { type: "tool_finished"; call_id: string; name: string; canceled: boolean }
   | { type: "done"; reply: AssistantReply }
   | { type: "error"; message: string };
 

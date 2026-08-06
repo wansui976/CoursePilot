@@ -251,6 +251,13 @@ export interface CourseKnowledge {
   stale: boolean;
 }
 
+type AssistantRequestState = { cancelRequested: boolean };
+
+// `cmd_assistant_ask` registers the request after the frontend has installed its
+// listener. A stop click can arrive in that small window, so remember the intent
+// locally and replay the cancellation once the ask command has returned.
+const assistantRequestStates = new Map<string, AssistantRequestState>();
+
 export const ipc = {
   sync: {
     status: (): Promise<CloudSyncStatus> => invoke("cmd_sync_status"),
@@ -486,34 +493,48 @@ export const ipc = {
       requestId: string,
       onEvent: (e: AssistantEvent) => void = () => {},
     ): Promise<AssistantReply> => {
+      const requestState: AssistantRequestState = { cancelRequested: false };
+      assistantRequestStates.set(requestId, requestState);
       let resolveReply!: (reply: AssistantReply) => void;
       let rejectReply!: (error: unknown) => void;
       const reply = new Promise<AssistantReply>((res, rej) => {
         resolveReply = res;
         rejectReply = rej;
       });
-      const unlisten = await listen<AssistantEvent>(
-        `assistant-stream:${requestId}`,
-        (evt) => {
-          const e = evt.payload;
-          if (e.type === "done") resolveReply(e.reply);
-          else if (e.type === "error") rejectReply(new Error(e.message));
-          else onEvent(e);
-        },
-      );
+      // A command/configuration error can reject before `reply` is awaited. Attach
+      // a sink immediately so that an early event error never becomes unhandled.
+      void reply.catch(() => {});
+      let unlisten: (() => void) | undefined;
       try {
+        unlisten = await listen<AssistantEvent>(
+          `assistant-stream:${requestId}`,
+          (evt) => {
+            const e = evt.payload;
+            if (e.type === "done") resolveReply(e.reply);
+            else if (e.type === "error") rejectReply(new Error(e.message));
+            else onEvent(e);
+          },
+        );
         // 命令本身只在「未配置大模型」这类配置错误时才 reject。
         await invoke("cmd_assistant_ask", { query, context, history, requestId });
+        if (requestState.cancelRequested) {
+          // The first cancel may have run before the backend registered this id.
+          // Replay it after the ask command has completed registration.
+          await invoke("cmd_cancel_assistant", { requestId });
+        }
         return await reply;
-      } catch (error) {
-        rejectReply(error);
-        throw error;
       } finally {
-        unlisten();
+        if (assistantRequestStates.get(requestId) === requestState) {
+          assistantRequestStates.delete(requestId);
+        }
+        unlisten?.();
       }
     },
-    cancel: (requestId: string): Promise<void> =>
-      invoke("cmd_cancel_assistant", { requestId }),
+    cancel: (requestId: string): Promise<void> => {
+      const requestState = assistantRequestStates.get(requestId);
+      if (requestState) requestState.cancelRequested = true;
+      return invoke("cmd_cancel_assistant", { requestId });
+    },
   },
   settings: {
     get: (key: string): Promise<string | null> =>

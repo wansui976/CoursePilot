@@ -608,6 +608,7 @@
     "answering": "正在作答…",
     "thinkingStatus": "正在思考…",
     "thinkingWithTools": "正在思考并调用工具…",
+    "usingTool": "正在{{tool}}…",
     "scrollToLatest": "回到最新",
     "scopeLabel": "当前提问范围：{{scope}}",
     "scopeHint": "「这个视频」这类说法会落到这里",
