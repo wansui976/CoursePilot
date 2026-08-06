@@ -248,11 +248,13 @@ function ProposalGroup({
   onDone,
   onResult,
   onExecutionChange,
+  onApplied,
 }: {
   actions: Proposal[];
   onDone: () => void;
   onResult?: (message: string) => void;
   onExecutionChange?: (running: boolean) => void;
+  onApplied?: (action: Proposal) => void;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -308,6 +310,12 @@ function ProposalGroup({
             shouldRefresh = true;
           },
         });
+        // 后端动作已经成功，外层同步界面失败不能把它伪装成可重试的执行失败。
+        try {
+          onApplied?.(action);
+        } catch {
+          // 查询失效仍会尽量把界面拉回真实状态。
+        }
         succeeded.push(i);
         shouldRefresh = true;
       } catch (e) {
@@ -503,11 +511,13 @@ export function AssistantActionList({
   onNavigate,
   onResult,
   onExecutionChange,
+  onApplied,
 }: {
   actions: AssistantAction[];
   onNavigate: (action: AssistantAction) => void;
   onResult?: (message: string) => void;
   onExecutionChange?: (running: boolean) => void;
+  onApplied?: (action: AssistantAction) => void;
 }) {
   const { t } = useTranslation();
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
@@ -563,6 +573,7 @@ export function AssistantActionList({
               onDone={() => setDismissed((prev) => new Set(prev).add(group.key))}
               onResult={onResult}
               onExecutionChange={onExecutionChange}
+              onApplied={onApplied}
             />
           );
         })}

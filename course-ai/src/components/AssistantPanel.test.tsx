@@ -58,6 +58,7 @@ function renderPanel(
     compact?: boolean;
     bottomNavigationVisible?: boolean;
     context?: AssistantContext;
+    onActionApplied?: (action: AssistantAction) => void;
   } = {},
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -66,6 +67,7 @@ function renderPanel(
       <AssistantPanel
         context={layout.context ?? { course_id: "c1", video_id: "v1" }}
         onNavigate={onNavigate}
+        onActionApplied={layout.onActionApplied}
         compact={layout.compact}
         bottomNavigationVisible={layout.bottomNavigationVisible}
       />
@@ -1279,6 +1281,7 @@ describe("确认卡", () => {
   });
 
   it("删除要等确认，并说清楚是进回收站", async () => {
+    const onActionApplied = vi.fn();
     mockIpc.assistant.ask.mockResolvedValueOnce(
       reply({
         actions: [
@@ -1291,7 +1294,7 @@ describe("确认卡", () => {
         ],
       }),
     );
-    renderPanel();
+    renderPanel(undefined, { onActionApplied });
     await ask("删了它");
 
     expect(await screen.findByText("第五讲")).toBeInTheDocument();
@@ -1301,6 +1304,9 @@ describe("确认卡", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
     await waitFor(() => expect(mockIpc.videos.delete).toHaveBeenCalledWith("v2"));
+    expect(onActionApplied).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "propose_delete", video_id: "v2" }),
+    );
   });
 
   it("取消提案就什么都不做", async () => {

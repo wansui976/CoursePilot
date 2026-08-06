@@ -61,6 +61,7 @@ import type {
   Video,
   VideoListItem,
 } from "@/lib/types";
+import { buildAssistantContext, reconcileAssistantAction } from "@/lib/assistantHome";
 import { formatMs } from "@/lib/time";
 import { silenceSkipQueryKey } from "@/lib/silenceSkip";
 import { displayTitle } from "@/lib/videoTitle";
@@ -369,6 +370,18 @@ export function Home() {
     });
   }
 
+  function assistantActionApplied(action: AssistantAction) {
+    reconcileAssistantAction(action, selectedVideoId, {
+      removeQueuedVideo: (videoId) =>
+        setQueuedVideos((items) => items.filter((item) => item.id !== videoId)),
+      clearCurrentVideo: () => setSelectedVideoId(null),
+      clearPendingOpen: (videoId) => {
+        const player = usePlayer.getState();
+        if (player.pendingSeek?.videoId === videoId) player.clearPendingSeek();
+      },
+    });
+  }
+
   // 仪表盘「继续学习」：切到该课程，打开上次的视频并跳到上次进度（秒→毫秒）。
   function resumeStudy(courseId: string, videoId: string, positionSec: number) {
     setKnowledgeReturn(null);
@@ -443,6 +456,7 @@ export function Home() {
   const pendingSeek = usePlayer((s) => s.pendingSeek);
   // 助手要知道「播到哪儿了」，「跳到刚才那句」这类话才落得下去。
   const playerMs = usePlayer((s) => s.currentMs);
+  const assistantContext = buildAssistantContext(selectedCourseId, selectedVideo, playerMs);
   useEffect(() => {
     if (pendingSeek && pendingSeek.videoId !== selectedVideoId) {
       openVideo(pendingSeek.videoId);
@@ -1770,12 +1784,9 @@ export function Home() {
         />
       )}
       <AssistantPanel
-        context={{
-          course_id: selectedCourseId,
-          video_id: selectedVideoId,
-          position_ms: playerMs,
-        }}
+        context={assistantContext}
         onNavigate={assistantNavigate}
+        onActionApplied={assistantActionApplied}
         compact={isPhoneDevice}
         bottomNavigationVisible={showBottomTab}
       />

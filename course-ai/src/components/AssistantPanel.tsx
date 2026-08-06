@@ -192,12 +192,15 @@ function suggestionsFor(context: AssistantContext, t: TFunction) {
 export function AssistantPanel({
   context,
   onNavigate,
+  onActionApplied,
   compact = false,
   bottomNavigationVisible = false,
 }: {
   context: AssistantContext;
   /** 打开视频 / 跳转由外层执行——只有它知道播放器和路由。 */
   onNavigate: (action: AssistantAction) => void;
+  /** 确认动作落地后同步外层选择态，例如删除正在观看的视频。 */
+  onActionApplied?: (action: AssistantAction) => void;
   /** 跟随 Home 的实际布局档位；窄窗口即使是桌面 UA 也应使用抽屉。 */
   compact?: boolean;
   /** 课程库窄屏下底部有 56px 主导航，抽屉和入口都要避开它。 */
@@ -1337,6 +1340,7 @@ export function AssistantPanel({
               onNavigate={(action) => navigateFromTurn(turn, action)}
               onResult={(message) => recordActionResult(turn.id, message, conversationEpoch)}
               onExecutionChange={trackActionExecution}
+              onApplied={onActionApplied}
             />
 
             {turn.actionsExpired && (
