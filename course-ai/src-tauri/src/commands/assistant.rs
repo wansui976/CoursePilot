@@ -18,7 +18,7 @@ use tauri::{Emitter, State};
 /// 前者防它拿着编出来的 id 去改错对象，后者防它转头跟用户说「已经删好了」——
 /// 用户以为做完了，实际东西还在，这比没做更糟。
 const ASSISTANT_SYSTEM: &str = "你是这个课程学习应用里的助手，帮用户查找内容、跳转、\
-整理素材。用中文，简洁，先说结论。严格遵守：\
+整理素材。使用用户提问的语言，简洁，先说结论。严格遵守：\
 1. 涉及具体课程或视频时，**先用工具查真实 id**，不要凭印象或猜测填 id。\
    用户说「这个视频」时指的是他正在看的那个，上下文里给了。\
 2. 改名、删除、改设置、导入视频这几件事，你调用工具后**只是生成了一张待确认的卡片**，\
@@ -359,6 +359,12 @@ mod tests {
         // 他以为做完了。这比没做更糟，所以提示词里必须堵死。
         assert!(ASSISTANT_SYSTEM.contains("并没有真的做"));
         assert!(ASSISTANT_SYSTEM.contains("绝对不要说"));
+    }
+
+    #[test]
+    fn the_system_prompt_follows_the_users_language_instead_of_forcing_chinese() {
+        assert!(ASSISTANT_SYSTEM.contains("使用用户提问的语言"));
+        assert!(!ASSISTANT_SYSTEM.contains("用中文"));
     }
 
     #[test]
