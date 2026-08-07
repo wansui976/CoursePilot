@@ -167,12 +167,18 @@ pub async fn cmd_import_bilibili(
     )
     .await?;
     let mut video = add_local_video(&state.db, &course_id, result.video, None).await?;
-    sqlx::query("UPDATE videos SET source_type='bilibili', source_uri=? WHERE id=?")
+    let source_type = if download::is_bilibili_url(&url) {
+        "bilibili"
+    } else {
+        "url"
+    };
+    sqlx::query("UPDATE videos SET source_type=?, source_uri=? WHERE id=?")
+        .bind(source_type)
         .bind(&url)
         .bind(&video.id)
         .execute(&state.db.pool)
         .await?;
-    video.source_type = "bilibili".into();
+    video.source_type = source_type.into();
     video.source_uri = Some(url);
     // 若下到了字幕，挂到 video 上供流水线消化；一并记录导入时选的纠错偏好
     // （NULL = 跟随全局设置），后续「重新处理」也按它来。

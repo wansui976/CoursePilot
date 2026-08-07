@@ -79,7 +79,7 @@ fn ffmpeg_location_args() -> Vec<String> {
     }
 }
 
-fn is_bilibili_url(url: &str) -> bool {
+pub(crate) fn is_bilibili_url(url: &str) -> bool {
     Url::parse(url)
         .ok()
         .and_then(|url| url.host_str().map(|host| host.to_ascii_lowercase()))
@@ -533,6 +533,14 @@ mod tests {
         assert!(args.contains(&"mp4".to_string()));
         assert_eq!(args.last().unwrap(), "https://b23.tv/x");
         assert!(!args.contains(&"--cookies".to_string()));
+    }
+
+    #[test]
+    fn source_domain_detection_distinguishes_bilibili_from_generic_urls() {
+        assert!(is_bilibili_url("https://www.bilibili.com/video/BV1"));
+        assert!(is_bilibili_url("https://b23.tv/x"));
+        assert!(!is_bilibili_url("https://www.youtube.com/watch?v=x"));
+        assert!(!is_bilibili_url("https://bilibili.com.example/video"));
     }
 
     #[test]
