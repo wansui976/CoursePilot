@@ -1694,6 +1694,8 @@ describe("确认卡", () => {
 
     expect(await screen.findByText(/剩余 1 项尚未完成/)).toBeInTheDocument();
     expect(mockIpc.videos.updateTitle).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "跳过 第一讲" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "跳过 第二讲" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "继续剩余 1 项" }));
 
     await waitFor(() => expect(screen.getByText("已生效")).toBeInTheDocument());

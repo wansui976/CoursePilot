@@ -487,6 +487,7 @@ function ProposalGroup({
   }
 
   function skip(index: number, action: Proposal) {
+    if (completed.has(index)) return;
     setSkipped((prev) => new Set(prev).add(index));
     onResult?.(t("assistantActions.canceledResult", { title, details: describe(action).primary }));
   }
@@ -533,7 +534,7 @@ function ProposalGroup({
                   {t("assistantActions.completed")}
                 </span>
               )}
-              {batch && (status === "pending" || status === "paused") && (
+              {batch && !completed.has(i) && (status === "pending" || status === "paused") && (
                 <button
                   type="button"
                   aria-label={t("assistantActions.skip", { name: primary })}
