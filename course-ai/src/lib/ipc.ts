@@ -231,6 +231,8 @@ export interface SlidesOcrOutcome {
   recognized: number;
   failed: number;
   total: number;
+  attempted: number;
+  stoppedEarly: boolean;
   canceled: boolean;
   error: string | null;
 }
@@ -524,6 +526,8 @@ export const ipc = {
         }
         return await reply;
       } finally {
+        // invoke 自身失败时直接沿用它的拒绝；不能再 reject 尚无人等待的 reply，
+        // 否则同一个配置错误会额外制造一条 unhandledRejection。
         if (assistantRequestStates.get(requestId) === requestState) {
           assistantRequestStates.delete(requestId);
         }
@@ -731,6 +735,10 @@ export const ipc = {
       invoke("cmd_export_quiz", { videoId }),
     mindmap: (videoId: string): Promise<string> =>
       invoke("cmd_export_mindmap", { videoId }),
+  },
+  backup: {
+    create: (destinationPath: string | null): Promise<string> =>
+      invoke("cmd_backup_database", { destinationPath }),
   },
   tools: {
     ocr: (

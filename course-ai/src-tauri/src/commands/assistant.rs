@@ -40,6 +40,8 @@ const MAX_HISTORY_CHARS: usize = 48_000;
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum AssistantEvent {
+    /// 请求已经登记取消标志；前端收到后才启用“停止”，避免取消命令先于登记到达。
+    Started,
     /// 新一轮开始。界面收到就清空这一轮已显示的正文——循环里答案是逐轮替换而非追加的，
     /// 接着往下拼会拼出一段谁也没说过的话。
     Turn { turn: usize },
@@ -68,9 +70,9 @@ pub struct AssistantReply {
     pub answer: String,
     /// 用户是否主动停止了这一轮。即使已执行过部分只读工具，也不把半截答复伪装成完成。
     pub canceled: bool,
-    /// 是否是转到轮次上限才停的。
+    /// 是否达到工具轮次或上下文预算上限、且额外的无工具总结仍未给出可用答复。
     ///
-    /// 界面必须显示出来。撞上限时 `answer` 往往只是模型某一轮的过场话，甚至是空串；
+    /// 强制总结成功时该字段为 false。仍为 true 时，`answer` 往往只是模型某一轮的过场话，甚至是空串；
     /// 照常渲染的话，用户看到的要么是一句「我先查一下课程列表」被当成最终答复，
     /// 要么是问完之后**什么都没有**——那和程序坏了长得一模一样。
     pub hit_turn_limit: bool,
@@ -253,6 +255,7 @@ pub async fn cmd_assistant_ask(
         let emit = |event: AssistantEvent| {
             let _ = app.emit(&event_name, event);
         };
+        emit(AssistantEvent::Started);
 
         let mut messages = prepare_history(history);
         let completed_history_len = messages.len();
@@ -502,6 +505,7 @@ mod tests {
             },
             vec![AssistantAction::ProposeDelete {
                 video_id: "v1".into(),
+                course_id: "c1".into(),
                 course_name: "线性代数".into(),
                 title: "第一讲".into(),
             }],
@@ -520,6 +524,7 @@ mod tests {
             outcome(vec![ChatMessage::assistant("答复")]),
             vec![AssistantAction::ProposeDelete {
                 video_id: "v1".into(),
+                course_id: "c1".into(),
                 course_name: "线性代数".into(),
                 title: "第一讲".into(),
             }],

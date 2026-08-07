@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 /// 助手想让界面做的事。只读工具不产生这些；会改动的工具只产生这些、不落地。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AssistantAction {
     /// 导航：生成打开某个视频的待点击动作（可带跳转时刻）。工具调用本身不会切换界面。
@@ -41,6 +41,7 @@ pub enum AssistantAction {
     /// 提案：改名。界面渲染确认卡，用户点了才调真正的改名命令。
     ProposeRename {
         video_id: String,
+        course_id: String,
         course_name: String,
         current_title: String,
         new_title: String,
@@ -48,6 +49,7 @@ pub enum AssistantAction {
     /// 提案：删除（真正执行的是软删除，回收站留 30 天）。
     ProposeDelete {
         video_id: String,
+        course_id: String,
         course_name: String,
         title: String,
     },
@@ -184,11 +186,44 @@ impl<'a> AssistantTools<'a> {
         std::mem::take(&mut self.actions.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
-    fn record(&self, action: AssistantAction) {
-        self.actions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(action);
+    fn mutation_target(action: &AssistantAction) -> Option<String> {
+        match action {
+            AssistantAction::ProposeRename { video_id, .. }
+            | AssistantAction::ProposeDelete { video_id, .. } => Some(format!("video:{video_id}")),
+            AssistantAction::ProposeSetting { key, .. } => Some(format!("setting:{key}")),
+            AssistantAction::ProposeImport { url, course_id, .. } => Some(format!(
+                "import:{}:{url}",
+                course_id.as_deref().unwrap_or_default()
+            )),
+            AssistantAction::ProposeCreateCourse { name, root_path } => {
+                Some(format!("create-course:{root_path}:{name}"))
+            }
+            AssistantAction::ProposeRenameCourse { course_id, .. } => {
+                Some(format!("course:{course_id}"))
+            }
+            AssistantAction::OpenVideo { .. }
+            | AssistantAction::SeekTo { .. }
+            | AssistantAction::SetTheme { .. } => None,
+        }
+    }
+
+    fn record(&self, action: AssistantAction) -> Result<(), ToolOutcome> {
+        let mut actions = self.actions.lock().unwrap_or_else(|e| e.into_inner());
+        if actions.contains(&action) {
+            return Ok(());
+        }
+        if let Some(target) = Self::mutation_target(&action) {
+            if actions
+                .iter()
+                .any(|existing| Self::mutation_target(existing).as_deref() == Some(target.as_str()))
+            {
+                return Err(ToolOutcome::failed(
+                    "同一对象已经有另一项待确认操作。本次冲突操作未加入；请保留一项明确结果，不要让用户一次确认互相覆盖的修改",
+                ));
+            }
+        }
+        actions.push(action);
+        Ok(())
     }
 
     /// 模型给的 video_id 可能是它自己编的。所有涉及具体视频的工具都要先过这一关：
@@ -403,7 +438,7 @@ impl<'a> AssistantTools<'a> {
             video_id: recent.video_id,
             title: recent.video_title.clone(),
             at_ms: Some(position_ms),
-        });
+        })?;
 
         let position = if position_ms > 0 {
             format!("，从 {} 继续", crate::pipeline::rag::mmss(position_ms))
@@ -1090,7 +1125,7 @@ impl AssistantTools<'_> {
                     video_id: video.id.clone(),
                     title: video.title.clone(),
                     at_ms: args.at_ms,
-                });
+                })?;
                 Ok(ToolOutcome::ok(format!(
                     "已找到《{}》。点击下方按钮后才会打开。",
                     video.title
@@ -1104,7 +1139,7 @@ impl AssistantTools<'_> {
                         "当前没有正在观看的视频，先用 open_video 打开一个",
                     ));
                 }
-                self.record(AssistantAction::SeekTo { at_ms: args.at_ms });
+                self.record(AssistantAction::SeekTo { at_ms: args.at_ms })?;
                 Ok(ToolOutcome::ok(format!(
                     "已定位到 {}。点击下方按钮后才会跳转。",
                     crate::pipeline::rag::mmss(args.at_ms)
@@ -1123,10 +1158,11 @@ impl AssistantTools<'_> {
                 let course = self.find_course(&video.course_id).await?;
                 self.record(AssistantAction::ProposeRename {
                     video_id: video.id.clone(),
+                    course_id: video.course_id.clone(),
                     course_name: course.name.clone(),
                     current_title: video.title.clone(),
                     new_title: new_title.clone(),
-                });
+                })?;
                 Ok(ToolOutcome::ok(format!(
                     "已提出把课程《{}》中的《{}》改名为《{new_title}》，等用户确认。还没有生效。",
                     course.name, video.title
@@ -1141,9 +1177,10 @@ impl AssistantTools<'_> {
                 let course = self.find_course(&video.course_id).await?;
                 self.record(AssistantAction::ProposeDelete {
                     video_id: video.id.clone(),
+                    course_id: video.course_id.clone(),
                     course_name: course.name.clone(),
                     title: video.title.clone(),
-                });
+                })?;
                 Ok(ToolOutcome::ok(format!(
                     "已提出删除课程《{}》中的《{}》，等用户确认。还没有删，确认后也只是进回收站，30 天内可还原。",
                     course.name, video.title
@@ -1168,14 +1205,13 @@ impl AssistantTools<'_> {
                 })?;
                 let current = crate::commands::settings::get_setting(self.db, rule.key)
                     .await
-                    .ok()
-                    .flatten();
+                    .map_err(ToolOutcome::failed)?;
                 self.record(AssistantAction::ProposeSetting {
                     key: rule.key.to_string(),
                     label: rule.label.to_string(),
                     current,
                     value: args.value.clone(),
-                });
+                })?;
                 Ok(ToolOutcome::ok(format!(
                     "已提出把「{}」改为 {}，等用户确认。还没有生效。",
                     rule.label, args.value
@@ -1201,7 +1237,7 @@ impl AssistantTools<'_> {
                 self.record(AssistantAction::ProposeCreateCourse {
                     name: name.clone(),
                     root_path: root,
-                });
+                })?;
                 Ok(ToolOutcome::ok(format!(
                     "已提出新建课程《{name}》，等用户确认。还没有创建。"
                 )))
@@ -1224,7 +1260,7 @@ impl AssistantTools<'_> {
                     course_id: course.id,
                     current_name: course.name.clone(),
                     new_name: new_name.clone(),
-                });
+                })?;
                 Ok(ToolOutcome::ok(format!(
                     "已提出把课程《{}》改名为《{new_name}》，等用户确认。还没有生效。",
                     course.name
@@ -1239,7 +1275,7 @@ impl AssistantTools<'_> {
                         "「{pref}」不是有效主题，只能是 dark / light / auto"
                     )));
                 }
-                self.record(AssistantAction::SetTheme { pref: pref.clone() });
+                self.record(AssistantAction::SetTheme { pref: pref.clone() })?;
                 Ok(ToolOutcome::ok(format!("已切换到 {pref} 主题。")))
             }
 
@@ -1298,7 +1334,7 @@ impl AssistantTools<'_> {
                     url,
                     course_id: Some(course.id.clone()),
                     course_name: course.name.clone(),
-                });
+                })?;
                 Ok(ToolOutcome::ok(format!(
                     "已提出导入到课程《{}》，等用户确认。还没有开始下载。",
                     course.name
@@ -1929,6 +1965,50 @@ mod tests {
                 assert_eq!(course_name, "线性代数")
             }
             other => panic!("应当只产出一条带课程名的删除提案，实际 {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn repeated_identical_write_tools_create_only_one_action() {
+        let (db, _course_id, video_id, _d) = seed().await;
+        let tools = AssistantTools::new(&db, AssistantContext::default());
+        let delete = call("delete_video", &format!(r#"{{"video_id":"{video_id}"}}"#));
+
+        tools.run(&delete).await;
+        tools.run(&delete).await;
+
+        assert_eq!(
+            tools.take_actions().len(),
+            1,
+            "同一轮里模型重试同一写工具不能生成重复确认项"
+        );
+    }
+
+    #[tokio::test]
+    async fn conflicting_writes_for_one_target_keep_only_the_first_proposal() {
+        let (db, _course_id, video_id, _d) = seed().await;
+        let tools = AssistantTools::new(&db, AssistantContext::default());
+
+        let first = tools
+            .run(&call(
+                "rename_video",
+                &format!(r#"{{"video_id":"{video_id}","new_title":"第一版"}}"#),
+            ))
+            .await;
+        let conflicting = tools
+            .run(&call(
+                "rename_video",
+                &format!(r#"{{"video_id":"{video_id}","new_title":"第二版"}}"#),
+            ))
+            .await;
+
+        assert!(first.content.contains("第一版"));
+        assert!(conflicting.content.contains("冲突操作未加入"));
+        match tools.take_actions().as_slice() {
+            [AssistantAction::ProposeRename { new_title, .. }] => {
+                assert_eq!(new_title, "第一版")
+            }
+            other => panic!("同一目标只能保留第一项明确提案，实际 {other:?}"),
         }
     }
 

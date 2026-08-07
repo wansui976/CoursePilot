@@ -682,6 +682,8 @@
     "stopRemaining": "Stop remaining",
     "cancel": "Cancel",
     "executionError": "Failed to execute: {{error}}",
+    "staleTarget": "“{{target}}” changed after this confirmation card was created. Nothing was applied; cancel it and ask the assistant to generate a fresh action.",
+    "staleButton": "Target changed",
     "items": "{{count}} items",
     "themeDark": "Dark",
     "themeLight": "Light",

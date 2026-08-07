@@ -3,6 +3,8 @@ import {
   assistantSessionStorageKey,
   clearAssistantSession,
   historyBeforeLastQuestion,
+  MAX_ASSISTANT_ANSWER_CHARS,
+  MAX_ASSISTANT_REASONING_CHARS,
   readAssistantSession,
   writeAssistantSession,
 } from "./assistantSession";
@@ -130,6 +132,29 @@ describe("assistantSession", () => {
       draft: "",
     });
     expect(readAssistantSession().turns).toEqual([]);
+  });
+
+  it("caps restored answer and reasoning text so one model response cannot fill localStorage", () => {
+    writeAssistantSession({
+      turns: [
+        {
+          id: "large",
+          question: "长回答",
+          answer: "答".repeat(MAX_ASSISTANT_ANSWER_CHARS + 500),
+          reasoning: "想".repeat(MAX_ASSISTANT_REASONING_CHARS + 500),
+          actions: [],
+          tools: [],
+          canceled: false,
+          actionResults: [],
+        },
+      ],
+      history: [],
+      draft: "",
+    });
+
+    const restored = readAssistantSession().turns[0];
+    expect(restored.answer).toHaveLength(MAX_ASSISTANT_ANSWER_CHARS);
+    expect(restored.reasoning).toHaveLength(MAX_ASSISTANT_REASONING_CHARS);
   });
 
   it("ignores corrupt storage and can clear the saved session", () => {

@@ -17,8 +17,8 @@ import type {
 const { mockIpc, platformMock } = vi.hoisted(() => ({
   mockIpc: {
     assistant: { ask: vi.fn(), cancel: vi.fn() },
-    videos: { updateTitle: vi.fn(), delete: vi.fn() },
-    courses: { create: vi.fn(), rename: vi.fn() },
+    videos: { list: vi.fn(), updateTitle: vi.fn(), delete: vi.fn() },
+    courses: { list: vi.fn(), create: vi.fn(), rename: vi.fn() },
     settings: { set: vi.fn(), get: vi.fn() },
     tools: {
       importBilibili: vi.fn(),
@@ -463,6 +463,9 @@ describe("AssistantPanel", () => {
 
     expect(screen.getByTestId("user-bubble")).toHaveTextContent("找一下例题");
     expect(await screen.findByRole("status")).toHaveTextContent("正在思考并调用工具");
+    expect(screen.getByLabelText("停止生成")).toBeDisabled();
+    const emit = mockIpc.assistant.ask.mock.calls[0][4] as (event: AssistantEvent) => void;
+    act(() => emit({ type: "started" }));
     expect(screen.getByLabelText("停止生成")).toBeEnabled();
 
     finish(reply());
@@ -501,6 +504,8 @@ describe("AssistantPanel", () => {
     await ask("查完所有课程");
 
     const requestId = mockIpc.assistant.ask.mock.calls[0][3];
+    const emit = mockIpc.assistant.ask.mock.calls[0][4] as (event: AssistantEvent) => void;
+    act(() => emit({ type: "started" }));
     fireEvent.click(await screen.findByLabelText("停止生成"));
     await waitFor(() => expect(mockIpc.assistant.cancel).toHaveBeenCalledWith(requestId));
     expect(screen.getByRole("status")).toHaveTextContent("正在停止");
@@ -508,6 +513,82 @@ describe("AssistantPanel", () => {
     finish(reply({ answer: "", canceled: true }));
     expect(await screen.findByText("已停止，未继续执行")).toBeInTheDocument();
     expect(screen.getByLabelText("发送")).toBeDisabled();
+  });
+
+  it("后端登记请求之前不会让停止命令抢跑", async () => {
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask.mockReturnValueOnce(
+      new Promise<AssistantReply>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    renderPanel();
+    await ask("立即停止也不能漏掉");
+
+    const stopButton = await screen.findByLabelText("停止生成");
+    expect(stopButton).toBeDisabled();
+    fireEvent.click(stopButton);
+    expect(mockIpc.assistant.cancel).not.toHaveBeenCalled();
+
+    const emit = mockIpc.assistant.ask.mock.calls[0][4] as (event: AssistantEvent) => void;
+    act(() => emit({ type: "started" }));
+    expect(stopButton).toBeEnabled();
+    fireEvent.click(stopButton);
+    await waitFor(() => expect(mockIpc.assistant.cancel).toHaveBeenCalledTimes(1));
+
+    finish(reply({ answer: "", canceled: true }));
+    expect(await screen.findByText("已停止，未继续执行")).toBeInTheDocument();
+  });
+
+  it("started 之前卸载会在登记完成后补发取消", async () => {
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask.mockReturnValueOnce(
+      new Promise<AssistantReply>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    renderPanel();
+    await ask("关闭界面也不能让请求继续跑");
+
+    const requestId = mockIpc.assistant.ask.mock.calls[0][3];
+    const emit = mockIpc.assistant.ask.mock.calls[0][4] as (event: AssistantEvent) => void;
+    cleanup();
+    expect(mockIpc.assistant.cancel).not.toHaveBeenCalled();
+
+    act(() => emit({ type: "started" }));
+    await waitFor(() => expect(mockIpc.assistant.cancel).toHaveBeenCalledWith(requestId));
+    finish(reply({ canceled: true }));
+  });
+
+  it("同一帧内的大量流式片段只安排一次界面刷新", async () => {
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask.mockReturnValueOnce(
+      new Promise<AssistantReply>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    renderPanel();
+    await ask("输出很多片段");
+    const emit = mockIpc.assistant.ask.mock.calls[0][4] as (event: AssistantEvent) => void;
+    let queued: FrameRequestCallback | null = null;
+    const frame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      queued = callback;
+      return 42;
+    });
+
+    act(() => {
+      emit({ type: "started" });
+      for (let index = 0; index < 100; index += 1) {
+        emit({ type: "token", delta: "字" });
+      }
+    });
+    expect(frame).toHaveBeenCalledTimes(1);
+    act(() => queued?.(0));
+    expect(screen.getByText("字".repeat(100))).toBeInTheDocument();
+
+    finish(reply({ answer: "字".repeat(100) }));
+    await screen.findByText("字".repeat(100));
+    frame.mockRestore();
   });
 
   it("停止后的半成品动作不会继续改界面或等待确认", async () => {
@@ -550,6 +631,8 @@ describe("AssistantPanel", () => {
     await screen.findByText("第一轮回答");
     await ask("第二轮");
 
+    const emit = mockIpc.assistant.ask.mock.calls[1][4] as (event: AssistantEvent) => void;
+    act(() => emit({ type: "started" }));
     fireEvent.click(await screen.findByLabelText("停止生成"));
     finish(
       reply({
@@ -1010,6 +1093,11 @@ describe("AssistantPanel", () => {
     await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalled());
   });
 
+  it("组合输入区聚焦时不叠加输入框自身的焦点环", () => {
+    renderPanel();
+    expect(screen.getByLabelText("对助手说")).toHaveClass("ca-ask-input");
+  });
+
   it("手机端不显示左右停靠按钮", async () => {
     platformMock.mobile = true;
     renderPanel();
@@ -1065,6 +1153,17 @@ describe("确认卡", () => {
     useAssistantUi.setState({ open: true, side: "right" });
     mockIpc.assistant.ask.mockResolvedValue(reply());
     mockIpc.assistant.cancel.mockResolvedValue(undefined);
+    mockIpc.courses.list.mockResolvedValue([
+      {
+        id: "c1",
+        name: "线性代数",
+        root_path: "/tmp/course",
+        cover_image: null,
+        created_at: 1,
+        updated_at: 1,
+      },
+    ]);
+    mockIpc.videos.list.mockResolvedValue([]);
     mockIpc.tools.hasBilibiliCookies.mockResolvedValue(true);
     mockIpc.tools.probeBilibili.mockResolvedValue({
       title: "双曲线",
@@ -1336,6 +1435,7 @@ describe("确认卡", () => {
   });
 
   it("改设置显示改前改后，确认后才写", async () => {
+    mockIpc.settings.get.mockResolvedValueOnce("false");
     mockIpc.assistant.ask.mockResolvedValueOnce(
       reply({
         actions: [
@@ -1373,7 +1473,38 @@ describe("确认卡", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("文件被占用");
   });
 
+  it("确认前目标已变化时整批不执行", async () => {
+    mockIpc.videos.list.mockResolvedValueOnce([
+      {
+        id: "v1",
+        course_id: "c1",
+        title: "用户刚改的新名字",
+      },
+    ]);
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_rename",
+            video_id: "v1",
+            course_id: "c1",
+            current_title: "旧名字",
+            new_title: "助手建议的名字",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("改名");
+    fireEvent.click(await screen.findByRole("button", { name: "确认改名" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("已发生变化");
+    expect(screen.getByRole("button", { name: "目标已变化" })).toBeDisabled();
+    expect(mockIpc.videos.updateTitle).not.toHaveBeenCalled();
+  });
+
   it("新建课程要确认，并显示建在哪个目录", async () => {
+    mockIpc.settings.get.mockResolvedValueOnce("/Users/me/课程");
     mockIpc.assistant.ask.mockResolvedValueOnce(
       reply({
         actions: [{ kind: "propose_create_course", name: "概率论", root_path: "/Users/me/课程" }],
@@ -1557,6 +1688,7 @@ describe("确认卡", () => {
     renderPanel();
     await ask("批量改名");
     fireEvent.click(await screen.findByRole("button", { name: "确认改名 2 项" }));
+    await waitFor(() => expect(mockIpc.videos.updateTitle).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("button", { name: "停止剩余" }));
     finishFirst();
 

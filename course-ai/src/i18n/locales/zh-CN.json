@@ -682,6 +682,8 @@
     "stopRemaining": "停止剩余",
     "cancel": "取消",
     "executionError": "没能执行：{{error}}",
+    "staleTarget": "“{{target}}”生成确认卡后已发生变化。为避免改错对象，本批操作没有执行；请取消并让助手重新生成。",
+    "staleButton": "目标已变化",
     "items": "{{count}} 项",
     "themeDark": "夜间",
     "themeLight": "日间",

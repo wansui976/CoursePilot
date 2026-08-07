@@ -1,8 +1,13 @@
 import type { AssistantAction, AssistantContext, AssistantMessage } from "./types";
 
 const STORAGE_KEY = "course-ai-assistant-session:v1";
-const MAX_TURNS = 20;
+export const MAX_ASSISTANT_TURNS = 20;
+export const MAX_ASSISTANT_ANSWER_CHARS = 24_000;
+export const MAX_ASSISTANT_REASONING_CHARS = 16_000;
 const MAX_DRAFT_CHARS = 10_000;
+const MAX_QUESTION_CHARS = 10_000;
+const MAX_TOOL_NAME_CHARS = 200;
+const MAX_TOOLS_PER_TURN = 50;
 const MAX_HISTORY_USER_TURNS = 8;
 const MAX_HISTORY_CHARS = 48_000;
 const MAX_ACTION_RESULTS = 50;
@@ -22,7 +27,7 @@ export interface AssistantTurnRecord {
   actionsExpired?: boolean;
   tools: string[];
   canceled: boolean;
-  /** 助手转到轮次上限才停下；这一轮的回答不完整，重启后同样要说明。旧记录没有。 */
+  /** 工具轮或上下文预算封顶且强制总结仍失败；这一轮回答不完整，重启后同样要说明。旧记录没有。 */
   hitTurnLimit?: boolean;
   /** 确认卡的实际执行结果；重启后仍需告诉用户已经完成、失败或取消。 */
   actionResults: string[];
@@ -43,6 +48,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+export function capAssistantText(value: string, maxChars: number) {
+  return value.length <= maxChars ? value : value.slice(0, maxChars);
+}
+
 function readTurn(value: unknown): AssistantTurnRecord | null {
   if (!isRecord(value)) return null;
   if (
@@ -55,16 +64,19 @@ function readTurn(value: unknown): AssistantTurnRecord | null {
 
   return {
     id: value.id,
-    question: value.question,
-    answer: value.answer,
+    question: capAssistantText(value.question, MAX_QUESTION_CHARS),
+    answer: capAssistantText(value.answer, MAX_ASSISTANT_ANSWER_CHARS),
     ...(typeof value.reasoning === "string" && value.reasoning
-      ? { reasoning: value.reasoning }
+      ? { reasoning: capAssistantText(value.reasoning, MAX_ASSISTANT_REASONING_CHARS) }
       : {}),
     // 旧确认卡不能跨重启复活：用户可能已经在别处完成了同一操作。
     actions: [],
     ...(value.actionsExpired === true ? { actionsExpired: true } : {}),
     tools: Array.isArray(value.tools)
-      ? value.tools.filter((tool): tool is string => typeof tool === "string")
+      ? value.tools
+          .filter((tool): tool is string => typeof tool === "string")
+          .map((tool) => capAssistantText(tool, MAX_TOOL_NAME_CHARS))
+          .slice(-MAX_TOOLS_PER_TURN)
       : [],
     canceled: value.canceled === true,
     ...(value.hitTurnLimit === true ? { hitTurnLimit: true } : {}),
@@ -162,7 +174,7 @@ function validHistoryGroup(messages: AssistantMessage[]) {
  * localStorage 可以被旧版本或手工修改。只恢复最近的完整用户轮次，避免把孤立的
  * tool 结果或任意 role 反复发给模型端点；边界与后端 prepare_history 保持一致。
  */
-function readHistory(values: unknown[]): AssistantMessage[] {
+export function boundAssistantHistory(values: unknown[]): AssistantMessage[] {
   const groups: { messages: AssistantMessage[]; invalid: boolean }[] = [];
   let current: { messages: AssistantMessage[]; invalid: boolean } | null = null;
 
@@ -198,6 +210,33 @@ function readHistory(values: unknown[]): AssistantMessage[] {
   return kept.flat();
 }
 
+/** 后端刚返回的历史已经过结构校验，只需按同一用户轮次/字符预算裁剪。 */
+export function boundTrustedAssistantHistory(history: AssistantMessage[]): AssistantMessage[] {
+  const messages = history.filter(
+    (message) => !(message.role === "user" && message.content.startsWith(CONTEXT_PREFIX)),
+  );
+  const userStarts = messages.flatMap((message, index) =>
+    message.role === "user" ? [index] : [],
+  );
+  let start = messages.length;
+  let end = messages.length;
+  let keptTurns = 0;
+  let keptChars = 0;
+  for (let index = userStarts.length - 1; index >= 0; index -= 1) {
+    if (keptTurns >= MAX_HISTORY_USER_TURNS) break;
+    const candidate = userStarts[index];
+    const groupChars = messages
+      .slice(candidate, end)
+      .reduce((sum, message) => sum + messageChars(message), 0);
+    if (keptChars + groupChars > MAX_HISTORY_CHARS) break;
+    start = candidate;
+    end = candidate;
+    keptTurns += 1;
+    keptChars += groupChars;
+  }
+  return start === messages.length ? [] : messages.slice(start);
+}
+
 /**
  * 去掉最后一次提问以及它之后的所有消息，得到「问那句话之前」的上下文。
  *
@@ -226,9 +265,9 @@ export function readAssistantSession(): AssistantSession {
       ? value.turns
           .map(readTurn)
           .filter((turn) => turn !== null)
-          .slice(-MAX_TURNS)
+          .slice(-MAX_ASSISTANT_TURNS)
       : [];
-    const history = Array.isArray(value.history) ? readHistory(value.history) : [];
+    const history = Array.isArray(value.history) ? boundAssistantHistory(value.history) : [];
     const draft = typeof value.draft === "string" ? value.draft.slice(0, MAX_DRAFT_CHARS) : "";
     return { turns, history, draft };
   } catch {
@@ -244,9 +283,20 @@ export function writeAssistantSession(session: AssistantSession) {
     );
     const turns = session.turns
       .filter((turn) => !turn.pending)
-      .slice(-MAX_TURNS)
+      .slice(-MAX_ASSISTANT_TURNS)
       .map((turn) => ({
         ...turn,
+        question: capAssistantText(turn.question, MAX_QUESTION_CHARS),
+        answer: capAssistantText(turn.answer, MAX_ASSISTANT_ANSWER_CHARS),
+        reasoning: turn.reasoning
+          ? capAssistantText(turn.reasoning, MAX_ASSISTANT_REASONING_CHARS)
+          : undefined,
+        tools: turn.tools
+          .map((tool) => capAssistantText(tool, MAX_TOOL_NAME_CHARS))
+          .slice(-MAX_TOOLS_PER_TURN),
+        actionResults: turn.actionResults
+          .map((result) => capAssistantText(result, MAX_ACTION_RESULT_CHARS))
+          .slice(-MAX_ACTION_RESULTS),
         actions: [],
         actionsExpired:
           turn.actionsExpired === true ||
@@ -254,9 +304,9 @@ export function writeAssistantSession(session: AssistantSession) {
           undefined,
         pending: undefined,
       }));
-    const cleanHistory = readHistory(session.history);
+    const cleanHistory = boundAssistantHistory(session.history);
     const history = hasLiveActionPayload
-      ? readHistory([
+      ? boundAssistantHistory([
           ...cleanHistory,
           { role: "assistant", content: EXPIRED_ACTION_HISTORY_NOTICE },
         ])
