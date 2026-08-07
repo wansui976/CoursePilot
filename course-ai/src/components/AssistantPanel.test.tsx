@@ -1625,6 +1625,35 @@ describe("确认卡", () => {
     expect(mockIpc.tools.importBilibili).not.toHaveBeenCalled();
   });
 
+  it("非 B 站链接不要求 B 站 cookies", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_import",
+            url: "https://www.youtube.com/watch?v=course-1",
+            title: "公开课",
+            course_id: "c1",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("导入这个公开课");
+    fireEvent.click(await screen.findByRole("button", { name: "确认导入" }));
+
+    await waitFor(() =>
+      expect(mockIpc.tools.importBilibili).toHaveBeenCalledWith(
+        "c1",
+        "https://www.youtube.com/watch?v=course-1",
+        1080,
+        "zh-Hans",
+        true,
+      ),
+    );
+    expect(mockIpc.tools.hasBilibiliCookies).not.toHaveBeenCalled();
+  });
+
   it("导入完成但流水线失败时，重试只继续处理而不重复下载", async () => {
     mockIpc.pipeline.process
       .mockRejectedValueOnce(new Error("服务暂不可用"))
