@@ -260,6 +260,7 @@ export function AssistantPanel({
   const conversationEpochRef = useRef(0);
   const copyTimerRef = useRef<number | null>(null);
   const persistTimerRef = useRef<number | null>(null);
+  const hadPendingTurnRef = useRef(initialSession.turns.some((turn) => turn.pending));
   const sessionSnapshotRef = useRef({
     turns: initialSession.turns,
     history: initialSession.history,
@@ -359,7 +360,15 @@ export function AssistantPanel({
   const pendingQuestion = turns.find((turn) => turn.pending)?.question ?? "";
   sessionSnapshotRef.current = { turns, history, draft: input || pendingQuestion };
   useEffect(() => {
+    const hasPendingTurn = turns.some((turn) => turn.pending);
+    const requestJustFinished = hadPendingTurnRef.current && !hasPendingTurn;
+    hadPendingTurnRef.current = hasPendingTurn;
     if (persistTimerRef.current != null) window.clearTimeout(persistTimerRef.current);
+    if (requestJustFinished) {
+      writeAssistantSession(sessionSnapshotRef.current);
+      persistTimerRef.current = null;
+      return;
+    }
     persistTimerRef.current = window.setTimeout(() => {
       writeAssistantSession(sessionSnapshotRef.current);
       persistTimerRef.current = null;
