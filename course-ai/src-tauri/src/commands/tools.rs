@@ -156,7 +156,11 @@ pub async fn cmd_import_bilibili(
             .fetch_optional(&state.db.pool)
             .await?
             .ok_or_else(|| AppError::NotFound(format!("course {course_id}")))?;
-    let cookies = get_setting(&state.db, "bilibili_cookies").await?;
+    let cookies = if download::is_bilibili_url(&url) {
+        get_setting(&state.db, "bilibili_cookies").await?
+    } else {
+        None
+    };
     let out_dir = PathBuf::from(&root_path);
     let result = download::download(
         &url,
@@ -207,7 +211,11 @@ pub async fn cmd_probe_bilibili(
     state: State<'_, AppState>,
     url: String,
 ) -> AppResult<download::ProbeResult> {
-    let cookies = get_setting(&state.db, "bilibili_cookies").await?;
+    let cookies = if download::is_bilibili_url(&url) {
+        get_setting(&state.db, "bilibili_cookies").await?
+    } else {
+        None
+    };
     download::probe(&url, cookies.as_deref()).await
 }
 
@@ -217,7 +225,11 @@ pub async fn cmd_probe_playlist(
     state: State<'_, AppState>,
     url: String,
 ) -> AppResult<download::PlaylistInfo> {
-    let cookies = get_setting(&state.db, "bilibili_cookies").await?;
+    let cookies = if download::is_bilibili_url(&url) {
+        get_setting(&state.db, "bilibili_cookies").await?
+    } else {
+        None
+    };
     download::probe_playlist(&url, cookies.as_deref()).await
 }
 
