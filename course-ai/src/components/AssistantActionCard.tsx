@@ -97,6 +97,15 @@ async function processImportedVideo(videoId: string) {
   }
 }
 
+function isBilibiliUrl(value: string) {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host === "b23.tv" || host === "bilibili.com" || host.endsWith(".bilibili.com");
+  } catch {
+    return false;
+  }
+}
+
 async function importWithSubtitles(courseId: string, url: string, resume: ImportResume = {}) {
   // 下载已经成功、只是后续流水线失败时，从检查点继续。重新 probe / import 会产生重复视频。
   if (resume.importedVideoId) {
@@ -106,11 +115,13 @@ async function importWithSubtitles(courseId: string, url: string, resume: Import
 
   // B 站没有 cookies 会在下载阶段报 412。先说清楚，别让人对着一个原始错误码猜。
   // 检查本身出错时保留真实错误，不能伪装成「没有 cookies」。
-  const hasCookies = await ipc.tools.hasBilibiliCookies();
-  if (!hasCookies) {
-    throw new AssistantActionError(
-      i18n.t("assistantActions.noCookies"),
-    );
+  if (isBilibiliUrl(url)) {
+    const hasCookies = await ipc.tools.hasBilibiliCookies();
+    if (!hasCookies) {
+      throw new AssistantActionError(
+        i18n.t("assistantActions.noCookies"),
+      );
+    }
   }
   const probe = await ipc.tools.probeBilibili(url);
   const track =
