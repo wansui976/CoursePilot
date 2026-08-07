@@ -9,7 +9,11 @@ use crate::llm::agent::{self, AgentEvent};
 use crate::llm::profiles::AiTask;
 use crate::llm::ChatMessage;
 use crate::pipeline::assistant::{AssistantAction, AssistantContext, AssistantTools};
+use futures_util::FutureExt;
 use serde::Serialize;
+use std::panic::AssertUnwindSafe;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use tauri::{Emitter, State};
 
 /// 系统提示。
@@ -35,6 +39,29 @@ const ASSISTANT_SYSTEM: &str = "你是这个课程学习应用里的助手，帮
 const CONTEXT_PREFIX: &str = "（界面状态：";
 const MAX_HISTORY_USER_TURNS: usize = 8;
 const MAX_HISTORY_CHARS: usize = 48_000;
+
+/// 后台任务无论正常返回、报错、取消还是 panic，都必须释放 request id。
+struct AssistantCancelRegistration {
+    state: AppState,
+    request_id: String,
+    cancel: Arc<AtomicBool>,
+}
+
+impl AssistantCancelRegistration {
+    fn new(state: AppState, request_id: String, cancel: Arc<AtomicBool>) -> Self {
+        Self {
+            state,
+            request_id,
+            cancel,
+        }
+    }
+}
+
+impl Drop for AssistantCancelRegistration {
+    fn drop(&mut self) {
+        self.state.unregister_cancel(&self.request_id, &self.cancel);
+    }
+}
 
 /// 助手流式推送给前端的事件。与问答那套（AskEvent）保持同一形状：tag="type"，字段小写。
 #[derive(Debug, Clone, Serialize)]
@@ -227,6 +254,8 @@ pub async fn cmd_assistant_ask(
     let cancel = state
         .register_cancel_if_free(&request_id)
         .ok_or_else(|| AppError::Other("这次提问还在进行中".into()))?;
+    let cancel_registration =
+        AssistantCancelRegistration::new(state.inner().clone(), request_id.clone(), cancel.clone());
 
     // 模型配置在返回前解析：没配大模型这类错误要当场由命令返回值报出去，
     // 而不是等前端订阅上事件之后才收到一条 error——那时错误提示会晚一拍。
@@ -234,19 +263,14 @@ pub async fn cmd_assistant_ask(
     let (provider, model) = match resolved {
         Ok(Some(pair)) => pair,
         Ok(None) => {
-            state.unregister_cancel(&request_id, &cancel);
             return Err(AppError::Config(
                 "尚未配置可用的大模型（设置 → 大模型）".into(),
-            ));
+            ))
         }
-        Err(error) => {
-            state.unregister_cancel(&request_id, &cancel);
-            return Err(error);
-        }
+        Err(error) => return Err(error),
     };
 
     let db = state.db.clone();
-    let task_state = state.inner().clone();
     let context = context.unwrap_or_default();
     let history = history.unwrap_or_default();
 
@@ -255,61 +279,71 @@ pub async fn cmd_assistant_ask(
         let emit = |event: AssistantEvent| {
             let _ = app.emit(&event_name, event);
         };
-        emit(AssistantEvent::Started);
+        let task = AssertUnwindSafe(async {
+            emit(AssistantEvent::Started);
 
-        let mut messages = prepare_history(history);
-        let completed_history_len = messages.len();
-        if let Some(line) = context_line(&context) {
-            messages.push(ChatMessage::user(line));
-        }
-        messages.push(ChatMessage::user(&query));
+            let mut messages = prepare_history(history);
+            let completed_history_len = messages.len();
+            if let Some(line) = context_line(&context) {
+                messages.push(ChatMessage::user(line));
+            }
+            messages.push(ChatMessage::user(&query));
 
-        let tools = AssistantTools::new(&db, context);
-        let mut tools_used: Vec<String> = Vec::new();
-        let result = agent::run(
-            &provider,
-            &model,
-            Some(ASSISTANT_SYSTEM.to_string()),
-            messages,
-            &tools,
-            &cancel,
-            &mut |event| match event {
-                AgentEvent::TurnStarted(turn) => emit(AssistantEvent::Turn { turn }),
-                AgentEvent::Reasoning(delta) => emit(AssistantEvent::Reasoning {
-                    delta: delta.to_string(),
-                }),
-                AgentEvent::Content(delta) => emit(AssistantEvent::Token {
-                    delta: delta.to_string(),
-                }),
-                AgentEvent::ToolStarted(call) => {
-                    tools_used.push(call.name.clone());
-                    emit(AssistantEvent::Tool {
+            let tools = AssistantTools::new(&db, context);
+            let mut tools_used: Vec<String> = Vec::new();
+            let result = agent::run(
+                &provider,
+                &model,
+                Some(ASSISTANT_SYSTEM.to_string()),
+                messages,
+                &tools,
+                &cancel,
+                &mut |event| match event {
+                    AgentEvent::TurnStarted(turn) => emit(AssistantEvent::Turn { turn }),
+                    AgentEvent::Reasoning(delta) => emit(AssistantEvent::Reasoning {
+                        delta: delta.to_string(),
+                    }),
+                    AgentEvent::Content(delta) => emit(AssistantEvent::Token {
+                        delta: delta.to_string(),
+                    }),
+                    AgentEvent::ToolStarted(call) => {
+                        tools_used.push(call.name.clone());
+                        emit(AssistantEvent::Tool {
+                            call_id: call.id.clone(),
+                            name: call.name.clone(),
+                        });
+                    }
+                    AgentEvent::ToolFinished(call) => emit(AssistantEvent::ToolFinished {
                         call_id: call.id.clone(),
                         name: call.name.clone(),
+                        canceled: cancel.load(std::sync::atomic::Ordering::SeqCst),
+                    }),
+                    AgentEvent::HitTurnLimit => {}
+                },
+            )
+            .await;
+
+            match result {
+                Ok(outcome) => {
+                    let actions = tools.take_actions();
+                    emit(AssistantEvent::Done {
+                        reply: build_reply(outcome, actions, tools_used, completed_history_len),
                     });
                 }
-                AgentEvent::ToolFinished(call) => emit(AssistantEvent::ToolFinished {
-                    call_id: call.id.clone(),
-                    name: call.name.clone(),
-                    canceled: cancel.load(std::sync::atomic::Ordering::SeqCst),
+                Err(error) => emit(AssistantEvent::Error {
+                    message: error.to_string(),
                 }),
-                AgentEvent::HitTurnLimit => {}
-            },
-        )
+            }
+        })
+        .catch_unwind()
         .await;
 
-        match result {
-            Ok(outcome) => {
-                let actions = tools.take_actions();
-                emit(AssistantEvent::Done {
-                    reply: build_reply(outcome, actions, tools_used, completed_history_len),
-                });
-            }
-            Err(error) => emit(AssistantEvent::Error {
-                message: error.to_string(),
-            }),
+        if task.is_err() {
+            emit(AssistantEvent::Error {
+                message: "助手任务意外中止，请重试".into(),
+            });
         }
-        task_state.unregister_cancel(&request_id, &cancel);
+        drop(cancel_registration);
     });
 
     Ok(())
@@ -336,6 +370,28 @@ mod tests {
                 arguments: "{}".into(),
             }],
         )
+    }
+
+    #[tokio::test]
+    async fn a_panicking_background_scope_releases_its_request_id() {
+        let db =
+            crate::db::Db::connect_and_migrate(&crate::db::test_db_path("assistant-panic-cleanup"))
+                .await
+                .unwrap();
+        let state = AppState::new(db);
+        let cancel = state.register_cancel_if_free("panic-request").unwrap();
+        let registration =
+            AssistantCancelRegistration::new(state.clone(), "panic-request".into(), cancel);
+
+        let result = AssertUnwindSafe(async move {
+            let _registration = registration;
+            panic!("simulated assistant panic");
+        })
+        .catch_unwind()
+        .await;
+
+        assert!(result.is_err());
+        assert!(state.register_cancel_if_free("panic-request").is_some());
     }
 
     #[test]
