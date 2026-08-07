@@ -250,7 +250,9 @@ describe("AssistantPanel", () => {
     act(() => {
       emit({ type: "tool", call_id: "call-search-1", name: "search_content" });
     });
-    expect(screen.getByRole("status")).toHaveTextContent("正在搜索课程内容");
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("正在搜索课程内容"),
+    );
 
     act(() => {
       emit({ type: "token", delta: "这节课" });
@@ -270,7 +272,73 @@ describe("AssistantPanel", () => {
         canceled: false,
       });
     });
-    expect(screen.getByRole("status")).toHaveTextContent("正在作答");
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("正在作答"));
+  });
+
+  it("done 会先冲刷尚未到下一帧的思考片段", async () => {
+    let emit!: (event: AssistantEvent) => void;
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask.mockImplementationOnce(
+      (_q, _c, _h, _id, onEvent: (event: AssistantEvent) => void) => {
+        emit = onEvent;
+        return new Promise<AssistantReply>((resolve) => {
+          finish = resolve;
+        });
+      },
+    );
+    const requestFrame = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation(() => 9);
+    const cancelFrame = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+
+    renderPanel();
+    await ask("快速结束");
+    await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalled());
+    act(() => {
+      emit({ type: "reasoning", delta: "最后一段思考" });
+      finish(reply({ answer: "最终答复" }));
+    });
+
+    expect(await screen.findByText("最后一段思考")).toBeInTheDocument();
+    expect(screen.getByText("最终答复")).toBeInTheDocument();
+    expect(cancelFrame).toHaveBeenCalledWith(9);
+
+    requestFrame.mockRestore();
+    cancelFrame.mockRestore();
+  });
+
+  it("pending token 不会反复序列化同一份已完成会话", async () => {
+    let emit!: (event: AssistantEvent) => void;
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask.mockImplementationOnce(
+      (_q, _c, _h, _id, onEvent: (event: AssistantEvent) => void) => {
+        emit = onEvent;
+        return new Promise<AssistantReply>((resolve) => {
+          finish = resolve;
+        });
+      },
+    );
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+
+    renderPanel();
+    await ask("高频输出");
+    await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalled());
+    setItem.mockClear();
+
+    act(() => {
+      emit({ type: "turn", turn: 1 });
+      for (const delta of ["高", "频", "流", "式", "回", "答"]) {
+        emit({ type: "token", delta });
+      }
+    });
+    expect(await screen.findByText("高频流式回答")).toBeInTheDocument();
+    expect(setItem).not.toHaveBeenCalled();
+
+    act(() => finish(reply({ answer: "高频流式回答" })));
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
+    expect(setItem).toHaveBeenCalledTimes(1);
+
+    setItem.mockRestore();
   });
 
   it("新一轮开始会清空上一轮的正文，不会拼成一句谁也没说过的话", async () => {
