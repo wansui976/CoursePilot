@@ -531,9 +531,6 @@ describe("AssistantPanel", () => {
 
     expect(screen.getByTestId("user-bubble")).toHaveTextContent("找一下例题");
     expect(await screen.findByRole("status")).toHaveTextContent("正在思考并调用工具");
-    expect(screen.getByLabelText("停止生成")).toBeDisabled();
-    const emit = mockIpc.assistant.ask.mock.calls[0][4] as (event: AssistantEvent) => void;
-    act(() => emit({ type: "started" }));
     expect(screen.getByLabelText("停止生成")).toBeEnabled();
 
     finish(reply());
@@ -583,7 +580,7 @@ describe("AssistantPanel", () => {
     expect(screen.getByLabelText("发送")).toBeDisabled();
   });
 
-  it("后端登记请求之前不会让停止命令抢跑", async () => {
+  it("后端登记请求之前也会把停止意图交给 IPC 补发", async () => {
     let finish!: (value: AssistantReply) => void;
     mockIpc.assistant.ask.mockReturnValueOnce(
       new Promise<AssistantReply>((resolve) => {
@@ -594,21 +591,18 @@ describe("AssistantPanel", () => {
     await ask("立即停止也不能漏掉");
 
     const stopButton = await screen.findByLabelText("停止生成");
-    expect(stopButton).toBeDisabled();
-    fireEvent.click(stopButton);
-    expect(mockIpc.assistant.cancel).not.toHaveBeenCalled();
-
-    const emit = mockIpc.assistant.ask.mock.calls[0][4] as (event: AssistantEvent) => void;
-    act(() => emit({ type: "started" }));
     expect(stopButton).toBeEnabled();
     fireEvent.click(stopButton);
     await waitFor(() => expect(mockIpc.assistant.cancel).toHaveBeenCalledTimes(1));
+    const emit = mockIpc.assistant.ask.mock.calls[0][4] as (event: AssistantEvent) => void;
+    act(() => emit({ type: "started" }));
+    expect(mockIpc.assistant.cancel).toHaveBeenCalledTimes(1);
 
     finish(reply({ answer: "", canceled: true }));
     expect(await screen.findByText("已停止，未继续执行")).toBeInTheDocument();
   });
 
-  it("started 之前卸载会在登记完成后补发取消", async () => {
+  it("started 之前卸载也会立即把取消意图交给 IPC", async () => {
     let finish!: (value: AssistantReply) => void;
     mockIpc.assistant.ask.mockReturnValueOnce(
       new Promise<AssistantReply>((resolve) => {
@@ -619,11 +613,7 @@ describe("AssistantPanel", () => {
     await ask("关闭界面也不能让请求继续跑");
 
     const requestId = mockIpc.assistant.ask.mock.calls[0][3];
-    const emit = mockIpc.assistant.ask.mock.calls[0][4] as (event: AssistantEvent) => void;
     cleanup();
-    expect(mockIpc.assistant.cancel).not.toHaveBeenCalled();
-
-    act(() => emit({ type: "started" }));
     await waitFor(() => expect(mockIpc.assistant.cancel).toHaveBeenCalledWith(requestId));
     finish(reply({ canceled: true }));
   });

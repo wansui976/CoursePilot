@@ -50,12 +50,13 @@ describe("ipc.assistant", () => {
     const pending = ipc.assistant.ask("查一下", undefined, [], "request-1");
     await vi.waitFor(() => expect(releaseAsk).toBeTypeOf("function"));
 
-    await ipc.assistant.cancel("request-1");
+    const cancel = ipc.assistant.cancel("request-1");
     expect(
       invokeMock.mock.calls.filter(([command]) => command === "cmd_cancel_assistant"),
     ).toHaveLength(1);
 
     releaseAsk();
+    await cancel;
     await vi.waitFor(() =>
       expect(
         invokeMock.mock.calls.filter(([command]) => command === "cmd_cancel_assistant"),
@@ -76,6 +77,75 @@ describe("ipc.assistant", () => {
     await expect(ipc.assistant.ask("查一下", undefined, [], "request-2")).rejects.toThrow(
       "尚未配置模型",
     );
+    expect(unlistenMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("补发取消失败时继续监听，直到收到真实终态", async () => {
+    let releaseAsk!: () => void;
+    let cancelCalls = 0;
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "cmd_assistant_ask") {
+        return new Promise<void>((resolve) => {
+          releaseAsk = resolve;
+        });
+      }
+      if (command === "cmd_cancel_assistant") {
+        cancelCalls += 1;
+        return cancelCalls === 2
+          ? Promise.reject(new Error("取消通道暂时不可用"))
+          : Promise.resolve();
+      }
+      return Promise.resolve();
+    });
+
+    const pending = ipc.assistant.ask("查一下", undefined, [], "request-3");
+    await vi.waitFor(() => expect(releaseAsk).toBeTypeOf("function"));
+    const cancel = ipc.assistant.cancel("request-3");
+    const cancelError = cancel.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    releaseAsk();
+
+    await vi.waitFor(() => expect(cancelCalls).toBe(2));
+    await expect(cancelError).resolves.toEqual(
+      expect.objectContaining({ message: "取消通道暂时不可用" }),
+    );
+    expect(unlistenMock).not.toHaveBeenCalled();
+
+    await expect(ipc.assistant.cancel("request-3")).resolves.toBeUndefined();
+    expect(cancelCalls).toBe(3);
+
+    emit({ payload: { type: "done", reply: reply() } });
+    await expect(pending).resolves.toMatchObject({ answer: "答复" });
+    expect(unlistenMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("补发取消一直未返回时也能消费真实终态并清理监听", async () => {
+    let releaseAsk!: () => void;
+    let cancelCalls = 0;
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "cmd_assistant_ask") {
+        return new Promise<void>((resolve) => {
+          releaseAsk = resolve;
+        });
+      }
+      if (command === "cmd_cancel_assistant") {
+        cancelCalls += 1;
+        if (cancelCalls === 2) return new Promise<void>(() => {});
+      }
+      return Promise.resolve();
+    });
+
+    const pending = ipc.assistant.ask("查一下", undefined, [], "request-4");
+    await vi.waitFor(() => expect(releaseAsk).toBeTypeOf("function"));
+    const cancel = ipc.assistant.cancel("request-4");
+    void cancel.catch(() => {});
+    releaseAsk();
+    await vi.waitFor(() => expect(cancelCalls).toBe(2));
+
+    emit({ payload: { type: "done", reply: reply() } });
+    await expect(pending).resolves.toMatchObject({ answer: "答复" });
     expect(unlistenMock).toHaveBeenCalledTimes(1);
   });
 });

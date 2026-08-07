@@ -236,7 +236,6 @@ export function AssistantPanel({
   const [input, setInput] = useState(initialSession.draft);
   const [busy, setBusy] = useState(false);
   const [actionExecutionCount, setActionExecutionCount] = useState(0);
-  const [requestReady, setRequestReady] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState("");
   const [turns, setTurns] = useState<Turn[]>(initialSession.turns);
@@ -253,7 +252,6 @@ export function AssistantPanel({
   const suppressLauncherClickRef = useRef(false);
   const activeRequestRef = useRef<string | null>(null);
   const actionExecutionCountRef = useRef(0);
-  const requestReadyRef = useRef(false);
   const mountedRef = useRef(true);
   const locallyStoppedRequestsRef = useRef(new Set<string>());
   const historyRef = useRef(initialSession.history);
@@ -443,9 +441,9 @@ export function AssistantPanel({
       const requestId = activeRequestRef.current;
       if (requestId) {
         locallyStoppedRequests.add(requestId);
-        // started 之前发送取消会被后端当成未知 id 丢掉。若尚未登记，started 回调会补发；
-        // 已登记时则立即取消，避免面板卸载后请求继续计费。
-        if (requestReadyRef.current) void ipc.assistant.cancel(requestId);
+        // IPC 会记住早于后端登记的取消，并在 ask 完成登记后补发。
+        // 卸载后不能再展示错误，但也不能留下继续计费的无主请求。
+        void ipc.assistant.cancel(requestId).catch(() => {});
       }
     };
   }, []);
@@ -870,8 +868,6 @@ export function AssistantPanel({
     // 不该被顺手抹掉。
     if (suggestedQuestion === undefined) setInput("");
     setBusy(true);
-    setRequestReady(false);
-    requestReadyRef.current = false;
     setStopping(false);
     setError("");
     // 流式片段只做防抖持久化，但请求刚发出时先落一次草稿；即使应用随后退出，
@@ -948,14 +944,7 @@ export function AssistantPanel({
         historyAtSend,
         requestId,
         (event) => {
-          if (event.type === "started") {
-            requestReadyRef.current = true;
-            if (locallyStoppedRequestsRef.current.has(requestId)) {
-              void ipc.assistant.cancel(requestId);
-            } else if (mountedRef.current) {
-              setRequestReady(true);
-            }
-          } else if (!mountedRef.current) {
+          if (!mountedRef.current || event.type === "started") {
             return;
           } else if (event.type === "turn") {
             clearBufferedAnswer = true;
@@ -1049,10 +1038,8 @@ export function AssistantPanel({
       locallyStoppedRequestsRef.current.delete(requestId);
       if (activeRequestRef.current === requestId) {
         activeRequestRef.current = null;
-        requestReadyRef.current = false;
         if (mountedRef.current) {
           setBusy(false);
-          setRequestReady(false);
           setStopping(false);
         }
       }
@@ -1123,7 +1110,7 @@ export function AssistantPanel({
 
   async function stop() {
     const requestId = activeRequestRef.current;
-    if (!requestId || !requestReady || stopping) return;
+    if (!requestId || stopping) return;
     // 先记下用户意图，再发取消 IPC。即便 ask 与 cancel 同时完成，也绝不能执行
     // 用户已经叫停的主题、导航或写操作提案。
     locallyStoppedRequestsRef.current.add(requestId);
@@ -1610,7 +1597,7 @@ export function AssistantPanel({
                 variant="outline"
                 aria-label={t("assistant.stopGeneration")}
                 title={t("assistant.stopGeneration")}
-                disabled={stopping || !requestReady}
+                disabled={stopping}
                 onClick={stop}
                 className="h-8 w-8 flex-none rounded-lg"
               >

@@ -253,7 +253,13 @@ export interface CourseKnowledge {
   stale: boolean;
 }
 
-type AssistantRequestState = { cancelRequested: boolean };
+type AssistantRequestState = {
+  cancelRequested: boolean;
+  askSettled: boolean;
+  askReady: Promise<void>;
+  resolveAskReady: () => void;
+  replayCancel?: Promise<void>;
+};
 
 // `cmd_assistant_ask` registers the request after the frontend has installed its
 // listener. A stop click can arrive in that small window, so remember the intent
@@ -495,7 +501,16 @@ export const ipc = {
       requestId: string,
       onEvent: (e: AssistantEvent) => void = () => {},
     ): Promise<AssistantReply> => {
-      const requestState: AssistantRequestState = { cancelRequested: false };
+      let resolveAskReady!: () => void;
+      const askReady = new Promise<void>((resolve) => {
+        resolveAskReady = resolve;
+      });
+      const requestState: AssistantRequestState = {
+        cancelRequested: false,
+        askSettled: false,
+        askReady,
+        resolveAskReady,
+      };
       assistantRequestStates.set(requestId, requestState);
       let resolveReply!: (reply: AssistantReply) => void;
       let rejectReply!: (error: unknown) => void;
@@ -519,13 +534,25 @@ export const ipc = {
         );
         // 命令本身只在「未配置大模型」这类配置错误时才 reject。
         await invoke("cmd_assistant_ask", { query, context, history, requestId });
+        requestState.askSettled = true;
         if (requestState.cancelRequested) {
           // The first cancel may have run before the backend registered this id.
-          // Replay it after the ask command has completed registration.
-          await invoke("cmd_cancel_assistant", { requestId });
+          // Replay it after the ask command has completed registration. A failed
+          // replay must not tear down the stream: the backend may still be running,
+          // and its eventual done/error event is the only trustworthy terminal state.
+          requestState.replayCancel = invoke<void>("cmd_cancel_assistant", {
+            requestId,
+          });
+          void requestState.replayCancel.catch(() => {});
         }
+        requestState.resolveAskReady();
+        // cancel() exposes replay failures to the caller. The stream must not await
+        // that transport call: done/error still has to settle and release the listener
+        // even if the cancel invoke itself never returns.
         return await reply;
       } finally {
+        requestState.askSettled = true;
+        requestState.resolveAskReady();
         // invoke 自身失败时直接沿用它的拒绝；不能再 reject 尚无人等待的 reply，
         // 否则同一个配置错误会额外制造一条 unhandledRejection。
         if (assistantRequestStates.get(requestId) === requestState) {
@@ -534,10 +561,25 @@ export const ipc = {
         unlisten?.();
       }
     },
-    cancel: (requestId: string): Promise<void> => {
+    cancel: async (requestId: string): Promise<void> => {
       const requestState = assistantRequestStates.get(requestId);
-      if (requestState) requestState.cancelRequested = true;
-      return invoke("cmd_cancel_assistant", { requestId });
+      if (!requestState) {
+        return invoke("cmd_cancel_assistant", { requestId });
+      }
+
+      const needsReplay = !requestState.askSettled;
+      requestState.cancelRequested = true;
+      const initial = invoke<void>("cmd_cancel_assistant", { requestId }).then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+      if (needsReplay) {
+        await requestState.askReady;
+        if (requestState.replayCancel) return requestState.replayCancel;
+      }
+
+      const outcome = await initial;
+      if (!outcome.ok) throw outcome.error;
     },
   },
   settings: {
