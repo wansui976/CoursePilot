@@ -866,6 +866,12 @@ struct ImportArgs {
     course_id: Option<String>,
 }
 
+fn is_http_url(value: &str) -> bool {
+    reqwest::Url::parse(value)
+        .map(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+        .unwrap_or(false)
+}
+
 fn object(properties: serde_json::Value, required: &[&str]) -> serde_json::Value {
     json!({"type": "object", "properties": properties, "required": required})
 }
@@ -1317,7 +1323,7 @@ impl AssistantTools<'_> {
             "import_video" => {
                 let args: ImportArgs = parse_arguments(call)?;
                 let url = args.url.trim().to_string();
-                if !url.starts_with("http") {
+                if !is_http_url(&url) {
                     return Err(ToolOutcome::failed(format!("「{url}」不是一个链接")));
                 }
                 let course_id = args
@@ -2086,6 +2092,29 @@ mod tests {
             }
             other => panic!("应当生成带真实课程的导入卡，实际 {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn importing_rejects_malformed_or_non_http_urls_without_a_proposal() {
+        let (db, course_id, _video, _d) = seed().await;
+        let tools = AssistantTools::new(
+            &db,
+            AssistantContext {
+                course_id: Some(course_id),
+                ..Default::default()
+            },
+        );
+
+        for url in ["http-not-a-url", "ftp://example.com/video", "https://"] {
+            let arguments = json!({ "url": url }).to_string();
+            let outcome = tools.run(&call("import_video", &arguments)).await;
+            assert!(
+                outcome.content.contains("不是一个链接"),
+                "{url}: {}",
+                outcome.content
+            );
+        }
+        assert!(tools.take_actions().is_empty(), "非法链接不能产生导入卡");
     }
 
     #[tokio::test]
