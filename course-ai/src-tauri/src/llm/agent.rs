@@ -14,6 +14,7 @@
 
 use crate::error::{AppError, AppResult};
 use crate::llm::{ChatMessage, ChatRequest, Provider, ToolCall, ToolSpec};
+use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// 带工具的循环最多来回几次。
@@ -86,6 +87,34 @@ pub enum AgentEvent<'a> {
     HitTurnLimit,
 }
 
+/// Agent 循环为什么结束。
+///
+/// `canceled` 和 `hit_turn_limit` 两个兼容布尔值不足以区分“正常完成”和“封顶后总结成功”。
+/// 显式终态既用于运行追踪，也为后续检查点恢复提供稳定协议。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentStopReason {
+    /// 模型未再请求工具，正常给出最终答复。
+    Completed,
+    /// 工具链达到轮次或上下文预算上限，但额外的无工具总结成功。
+    SummarizedAfterLimit,
+    /// 用户主动停止。
+    Canceled,
+    /// 工具链封顶后的总结为空或失败，未得到可靠最终答复。
+    LimitReached,
+}
+
+impl AgentStopReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::SummarizedAfterLimit => "summarized_after_limit",
+            Self::Canceled => "canceled",
+            Self::LimitReached => "limit_reached",
+        }
+    }
+}
+
 /// 一次完整循环的结果。
 pub struct AgentOutcome {
     /// 模型最终说的话。强制总结失败或中途取消时，这里可能仍是最后一轮过场话。
@@ -101,6 +130,26 @@ pub struct AgentOutcome {
     /// 调用方必须往下传给界面。强制总结成功时该字段为 false；总结失败时，界面应提示用户
     /// 这次查询没有得出结论，而不是把过场话（「我先查一下课程列表」）当成答案。
     pub hit_turn_limit: bool,
+    /// 唯一终态。上面的兼容布尔值必须由它推导，不能形成互相矛盾的组合。
+    pub stop_reason: AgentStopReason,
+}
+
+impl AgentOutcome {
+    fn finished(
+        answer: String,
+        messages: Vec<ChatMessage>,
+        turns: usize,
+        stop_reason: AgentStopReason,
+    ) -> Self {
+        Self {
+            answer,
+            messages,
+            turns,
+            canceled: stop_reason == AgentStopReason::Canceled,
+            hit_turn_limit: stop_reason == AgentStopReason::LimitReached,
+            stop_reason,
+        }
+    }
 }
 
 /// 执行一个工具，同时轮询用户取消标志。
@@ -231,13 +280,12 @@ pub async fn run<T: ToolBox>(
         // 没有要调的工具 = 它说完了。
         if response.tool_calls.is_empty() {
             messages.push(ChatMessage::assistant(response.content));
-            return Ok(AgentOutcome {
+            return Ok(AgentOutcome::finished(
                 answer,
                 messages,
                 turns,
-                canceled: false,
-                hit_turn_limit: false,
-            });
+                AgentStopReason::Completed,
+            ));
         }
 
         // 模型要求调工具的那一轮必须原样放回对话里，后面那些结果才有出处；
@@ -301,57 +349,60 @@ pub async fn run<T: ToolBox>(
             // 一起变成命令错误；保留旧结果并让界面明确提示未得出最终结论。
             Err(_) => {
                 let canceled = cancel.load(Ordering::SeqCst);
-                return Ok(AgentOutcome {
+                return Ok(AgentOutcome::finished(
                     answer,
                     messages,
-                    turns: summary_turn,
-                    canceled,
-                    hit_turn_limit: !canceled,
-                });
+                    summary_turn,
+                    if canceled {
+                        AgentStopReason::Canceled
+                    } else {
+                        AgentStopReason::LimitReached
+                    },
+                ));
             }
         };
         // 和工具循环一样，取消时丢掉总结请求吐出的半截内容，不把它写进下一轮历史。
         if cancel.load(Ordering::SeqCst) {
-            return Ok(AgentOutcome {
+            return Ok(AgentOutcome::finished(
                 answer,
                 messages,
-                turns: summary_turn,
-                canceled: true,
-                hit_turn_limit: false,
-            });
+                summary_turn,
+                AgentStopReason::Canceled,
+            ));
         }
         // 兼容端点即使在请求体没有 tools 时仍返回 tool_calls，也绝不执行它们；有正文就
         // 把正文当作总结，否则回退到上限提示，避免再次进入没有边界的工具循环。
         if !summary.content.trim().is_empty() {
             answer = summary.content.clone();
             messages.push(ChatMessage::assistant(summary.content));
-            return Ok(AgentOutcome {
+            return Ok(AgentOutcome::finished(
                 answer,
                 messages,
-                turns: summary_turn,
-                canceled: false,
-                hit_turn_limit: false,
-            });
+                summary_turn,
+                AgentStopReason::SummarizedAfterLimit,
+            ));
         }
         // 总结没有产出正文：把已取得的资料和过场答复交出去，并保留上限标记，供界面给出
         // 可重试的提示。若 summary 有 tool_calls，不把孤儿调用写进历史。
-        return Ok(AgentOutcome {
+        return Ok(AgentOutcome::finished(
             answer,
             messages,
-            turns: summary_turn,
-            canceled: false,
-            hit_turn_limit: true,
-        });
+            summary_turn,
+            AgentStopReason::LimitReached,
+        ));
     }
 
     // 没撞上限时只有取消会走到这里：把已经拿到的交出去，不报错。
-    Ok(AgentOutcome {
+    Ok(AgentOutcome::finished(
         answer,
         messages,
         turns,
-        canceled,
-        hit_turn_limit: false,
-    })
+        if canceled {
+            AgentStopReason::Canceled
+        } else {
+            AgentStopReason::Completed
+        },
+    ))
 }
 
 /// 解析一次调用的入参。
@@ -431,6 +482,22 @@ mod tests {
         assert_eq!(request.messages[0].content, "检索结果");
     }
 
+    #[test]
+    fn stop_reasons_derive_compatible_flags_without_ambiguous_combinations() {
+        let cases = [
+            (AgentStopReason::Completed, false, false),
+            (AgentStopReason::SummarizedAfterLimit, false, false),
+            (AgentStopReason::Canceled, true, false),
+            (AgentStopReason::LimitReached, false, true),
+        ];
+
+        for (reason, canceled, hit_turn_limit) in cases {
+            let outcome = AgentOutcome::finished(String::new(), Vec::new(), 0, reason);
+            assert_eq!(outcome.canceled, canceled, "{reason:?}");
+            assert_eq!(outcome.hit_turn_limit, hit_turn_limit, "{reason:?}");
+        }
+    }
+
     /// 记录被执行过哪些工具；`fail` 时一律执行失败。
     struct Recorder {
         executed: RefCell<Vec<String>>,
@@ -485,6 +552,7 @@ mod tests {
 
         assert_eq!(out.answer, "查完了，答案是这个");
         assert_eq!(out.turns, 2);
+        assert_eq!(out.stop_reason, AgentStopReason::Completed);
         assert_eq!(tools.executed.borrow().as_slice(), ["c1"]);
 
         // 对话顺序：用户 → 模型要求调用 → 工具结果 → 模型作答。
@@ -642,6 +710,7 @@ mod tests {
             "总结成功后不能再让界面声称没有得出结论"
         );
         assert!(!out.canceled);
+        assert_eq!(out.stop_reason, AgentStopReason::SummarizedAfterLimit);
         assert_eq!(tools.executed.borrow().len(), MAX_TURNS);
         assert_eq!(
             out.messages.last().map(|message| message.content.as_str()),
@@ -674,6 +743,7 @@ mod tests {
         assert_eq!(out.turns, MAX_TURNS + 1);
         assert_eq!(tools.executed.borrow().len(), MAX_TURNS);
         assert!(out.hit_turn_limit, "总结没有正文时仍要给界面上限提示");
+        assert_eq!(out.stop_reason, AgentStopReason::LimitReached);
         assert!(out
             .messages
             .iter()
@@ -706,6 +776,7 @@ mod tests {
         assert_eq!(out.turns, MAX_TURNS + 1);
         assert_eq!(tools.executed.borrow().len(), MAX_TURNS);
         assert!(out.hit_turn_limit);
+        assert_eq!(out.stop_reason, AgentStopReason::LimitReached);
         assert_eq!(
             out.messages
                 .iter()
@@ -807,6 +878,7 @@ mod tests {
         .unwrap();
 
         assert!(!out.hit_turn_limit);
+        assert_eq!(out.stop_reason, AgentStopReason::Completed);
     }
 
     #[tokio::test]
@@ -833,6 +905,7 @@ mod tests {
         assert_eq!(out.turns, 0);
         assert!(tools.executed.borrow().is_empty());
         assert!(out.answer.is_empty());
+        assert_eq!(out.stop_reason, AgentStopReason::Canceled);
     }
 
     #[tokio::test]
@@ -1019,6 +1092,7 @@ mod tests {
         assert!(!hit_limit, "被取消不该报成撞上限");
         assert!(!out.hit_turn_limit, "结果里同样不能混为一谈");
         assert!(out.canceled);
+        assert_eq!(out.stop_reason, AgentStopReason::Canceled);
     }
 
     #[tokio::test]

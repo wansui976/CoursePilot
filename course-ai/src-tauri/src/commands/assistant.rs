@@ -5,7 +5,7 @@
 
 use crate::commands::courses::AppState;
 use crate::error::{AppError, AppResult};
-use crate::llm::agent::{self, AgentEvent};
+use crate::llm::agent::{self, AgentEvent, AgentStopReason};
 use crate::llm::profiles::AiTask;
 use crate::llm::ChatMessage;
 use crate::pipeline::assistant::{AssistantAction, AssistantContext, AssistantTools};
@@ -14,6 +14,7 @@ use serde::Serialize;
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::time::Instant;
 use tauri::{Emitter, State};
 
 /// 系统提示。
@@ -95,6 +96,8 @@ pub enum AssistantEvent {
 #[derive(Debug, Clone, Serialize)]
 pub struct AssistantReply {
     pub answer: String,
+    /// Agent 的唯一终态。旧布尔字段暂时保留用于前端兼容。
+    pub stop_reason: AgentStopReason,
     /// 用户是否主动停止了这一轮。即使已执行过部分只读工具，也不把半截答复伪装成完成。
     pub canceled: bool,
     /// 是否达到工具轮次或上下文预算上限、且额外的无工具总结仍未给出可用答复。
@@ -200,6 +203,7 @@ fn build_reply(
 ) -> AssistantReply {
     AssistantReply {
         answer: outcome.answer,
+        stop_reason: outcome.stop_reason,
         canceled: outcome.canceled,
         hit_turn_limit: outcome.hit_turn_limit,
         // 停止发生在工具轮之间时，前面可能已经生成了导航、主题或写操作提案。
@@ -275,10 +279,12 @@ pub async fn cmd_assistant_ask(
     let history = history.unwrap_or_default();
 
     tauri::async_runtime::spawn(async move {
+        let started_at = Instant::now();
         let event_name = format!("assistant-stream:{request_id}");
         let emit = |event: AssistantEvent| {
             let _ = app.emit(&event_name, event);
         };
+        tracing::info!(request_id = %request_id, "assistant run started");
         let task = AssertUnwindSafe(async {
             emit(AssistantEvent::Started);
 
@@ -326,19 +332,40 @@ pub async fn cmd_assistant_ask(
             match result {
                 Ok(outcome) => {
                     let actions = tools.take_actions();
-                    emit(AssistantEvent::Done {
-                        reply: build_reply(outcome, actions, tools_used, completed_history_len),
+                    let reply = build_reply(outcome, actions, tools_used, completed_history_len);
+                    tracing::info!(
+                        request_id = %request_id,
+                        stop_reason = reply.stop_reason.as_str(),
+                        turns = reply.turns,
+                        tools = ?reply.tools_used,
+                        actions = reply.actions.len(),
+                        elapsed_ms = started_at.elapsed().as_millis(),
+                        "assistant run finished"
+                    );
+                    emit(AssistantEvent::Done { reply });
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        error_kind = assistant_error_kind(&error),
+                        elapsed_ms = started_at.elapsed().as_millis(),
+                        "assistant run failed"
+                    );
+                    emit(AssistantEvent::Error {
+                        message: error.to_string(),
                     });
                 }
-                Err(error) => emit(AssistantEvent::Error {
-                    message: error.to_string(),
-                }),
             }
         })
         .catch_unwind()
         .await;
 
         if task.is_err() {
+            tracing::error!(
+                request_id = %request_id,
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "assistant run panicked"
+            );
             emit(AssistantEvent::Error {
                 message: "助手任务意外中止，请重试".into(),
             });
@@ -347,6 +374,21 @@ pub async fn cmd_assistant_ask(
     });
 
     Ok(())
+}
+
+fn assistant_error_kind(error: &AppError) -> &'static str {
+    match error {
+        AppError::Database(_) => "database",
+        AppError::Migrate(_) => "migration",
+        AppError::Io(_) => "io",
+        AppError::Json(_) => "json",
+        AppError::Config(_) => "config",
+        AppError::NotFound(_) => "not_found",
+        AppError::Pipeline(_) => "pipeline",
+        AppError::Permanent(_) => "permanent",
+        AppError::Account { .. } => "account",
+        AppError::Other(_) => "other",
+    }
 }
 
 /// 叫停一次进行中的助手提问。置位标志后，循环会在当前这步结束时停下，
@@ -456,6 +498,25 @@ mod tests {
     }
 
     #[test]
+    fn stop_reasons_have_stable_wire_names() {
+        let reasons = [
+            AgentStopReason::Completed,
+            AgentStopReason::SummarizedAfterLimit,
+            AgentStopReason::Canceled,
+            AgentStopReason::LimitReached,
+        ];
+        assert_eq!(
+            serde_json::to_value(reasons).unwrap(),
+            serde_json::json!([
+                "completed",
+                "summarized_after_limit",
+                "canceled",
+                "limit_reached"
+            ])
+        );
+    }
+
+    #[test]
     fn old_interface_context_is_replaced_instead_of_accumulating() {
         let prepared = prepare_history(vec![
             ChatMessage::user("（界面状态：当前视频 id=old）"),
@@ -515,6 +576,7 @@ mod tests {
             turns: 1,
             canceled: false,
             hit_turn_limit: false,
+            stop_reason: AgentStopReason::Completed,
         }
     }
 
@@ -526,6 +588,7 @@ mod tests {
             crate::llm::agent::AgentOutcome {
                 answer: "我先查一下这门课有哪些视频".into(),
                 hit_turn_limit: true,
+                stop_reason: AgentStopReason::LimitReached,
                 ..outcome(vec![ChatMessage::assistant("我先查一下这门课有哪些视频")])
             },
             Vec::new(),
@@ -533,6 +596,7 @@ mod tests {
             0,
         );
         assert!(reply.hit_turn_limit);
+        assert_eq!(reply.stop_reason, AgentStopReason::LimitReached);
         assert!(!reply.canceled, "转不出来不是用户叫停的");
     }
 
@@ -554,6 +618,7 @@ mod tests {
         let reply = build_reply(
             crate::llm::agent::AgentOutcome {
                 canceled: true,
+                stop_reason: AgentStopReason::Canceled,
                 ..outcome(vec![
                     ChatMessage::assistant("上一轮完成"),
                     ChatMessage::user("删掉这个"),
@@ -569,6 +634,7 @@ mod tests {
             1,
         );
         assert!(reply.actions.is_empty());
+        assert_eq!(reply.stop_reason, AgentStopReason::Canceled);
         assert_eq!(reply.history.len(), 1, "取消的那一轮也不进下次上下文");
         // 调过哪些工具照常留着：用户有权知道叫停之前它已经动了什么。
         assert_eq!(reply.tools_used, ["delete_video"]);

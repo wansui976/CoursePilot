@@ -1,0 +1,200 @@
+# CoursePilot Agent 运行时演进设计
+
+日期：2026-08-08
+状态：已决策，分阶段实施
+
+## 1. 决策
+
+CoursePilot 不引入 Rig、LangGraph、Swiftide、OpenAI Agents SDK 等新的 Agent 运行时，
+也不增加 Node.js 或 Python sidecar。后续只借鉴成熟框架已经验证过的设计模式，并在现有
+Rust/Tauri 架构中按产品边界实现。
+
+原因不是排斥框架，而是本项目最难替换的部分不在通用工具循环：
+
+- `llm/agent.rs` 已有流式多轮调用、工具预算、强制总结和可取消工具执行；
+- `pipeline/assistant.rs` 持有课程领域工具、真实对象解析和“写操作只生成提案”的安全边界；
+- `commands/assistant.rs` 管理 Tauri 请求、取消登记、历史裁剪和最终回复；
+- 前端确认卡才拥有写操作和导航动作的最终执行权。
+
+引入完整框架会重做这些边界，却不能替代课程领域逻辑。演进策略因此是：保持现有所有权，
+把状态、停止条件、策略、检查点和可观测性逐步显式化。
+
+## 2. 目标与非目标
+
+### 目标
+
+1. 每次 Agent 运行都有唯一、可解释的终态，不能靠多个布尔值组合猜测。
+2. 生命周期事件成对且有顺序，取消、预算封顶、总结失败都能被准确观察。
+3. 工具执行前后有统一策略入口，领域工具仍负责最终的业务校验。
+4. 需要用户介入时形成可序列化检查点；恢复时重新核对外部状态，不复活旧动作。
+5. 建立不记录提问正文、模型正文和工具结果的结构化运行日志。
+6. 每一阶段都能独立回滚，并由现有回归测试保护。
+
+### 非目标
+
+- 不做多 Agent 自动分工或模型间 handoff。
+- 不把课程处理流水线改造成通用工作流引擎。
+- 不允许模型绕过确认卡直接修改课程、视频、设置或文件。
+- 不把模型思考内容、字幕正文、工具返回正文写入遥测。
+- 不在本轮改变前端确认卡的交互和持久化格式。
+
+## 3. 现有边界
+
+| 层 | 责任 | 必须保留的约束 |
+| --- | --- | --- |
+| `llm/agent.rs` | 模型回合、工具往返、流式事件、预算、取消 | 不认识业务动作，不直接写数据库 |
+| `pipeline/assistant.rs` | 工具目录、参数解析、真实对象查询、动作提案 | 写操作只生成 `AssistantAction` |
+| `commands/assistant.rs` | 请求生命周期、历史、Tauri 事件、回复装配 | 取消后丢弃动作和未完成轮次 |
+| `AssistantPanel` / `AssistantActionCard` | 展示、人工确认、动作执行 | 重启后旧动作失效，执行前再次确认目标 |
+
+任何演进都不能把领域安全规则下沉到通用模型循环，也不能把最终执行权上移给模型。
+
+## 4. 借鉴的设计模式
+
+### 4.1 显式状态与终态
+
+借鉴 LangGraph 的状态图和 Swiftide 的停止条件，但不引入图运行时。一次运行采用以下状态：
+
+```mermaid
+stateDiagram-v2
+    [*] --> Registered
+    Registered --> ModelTurn
+    ModelTurn --> ToolExecution: tool_calls
+    ToolExecution --> ModelTurn: results appended
+    ModelTurn --> Completed: final content
+    ModelTurn --> ForcedSummary: turn or context budget
+    ToolExecution --> ForcedSummary: tool budget
+    ForcedSummary --> SummarizedAfterLimit: final content
+    ForcedSummary --> LimitReached: empty or failed summary
+    Registered --> Canceled: user cancellation
+    ModelTurn --> Canceled: user cancellation
+    ToolExecution --> Canceled: user cancellation
+    ForcedSummary --> Canceled: user cancellation
+    Registered --> Error: infrastructure error
+    ModelTurn --> Error: infrastructure error
+```
+
+第一阶段先引入 `AgentStopReason`：
+
+- `completed`：模型正常给出终答；
+- `summarized_after_limit`：工具链封顶后，额外总结成功；
+- `canceled`：用户主动停止；
+- `limit_reached`：封顶后的总结为空或失败，未得到可靠终答。
+
+基础设施错误仍通过 `AppResult::Err` 和 `AssistantEvent::Error` 返回，不伪装成正常 outcome。
+现有 `canceled`、`hit_turn_limit` 暂时保留为兼容字段，但必须由停止原因推导。
+
+### 4.2 生命周期事件
+
+借鉴 Agent SDK 的 run/tool lifecycle：
+
+- 每个 `TurnStarted` 先于该轮的正文和思考增量；
+- 每个实际开始的 `ToolStarted` 必须恰好对应一个 `ToolFinished`；
+- 被预算拒绝、尚未开始的工具不冒充已执行工具；
+- 最终 outcome 是终态事实来源，流式事件只用于过程显示。
+
+不增加通用 hook 列表。只有出现第二个真实消费者时，才把事件观察者抽象成独立 trait。
+
+### 4.3 工具策略与 Guardrail
+
+借鉴 Rig 的类型化工具目录和 Agent SDK 的 guardrail，但保持双层校验：
+
+1. 通用层：工具名存在、调用预算、参数 JSON 可解析、取消状态；
+2. 领域层：对象真实存在、课程上下文未过期、动作风险类型、目标解析；
+3. 执行层：只读工具可立即执行，导航与写操作只返回待点击/待确认动作；
+4. 界面层：用户确认后调用现有 IPC，执行前由命令再次校验当前状态。
+
+未来的工具描述应显式声明 `read_only`、`navigation`、`mutation_proposal`，但不能仅依赖声明
+保障安全；真正的实现仍必须做到模型调用工具时不会直接产生写入。
+
+### 4.4 检查点与恢复
+
+借鉴 LangGraph 的 checkpoint/interrupt/resume，但检查点只保存可验证状态，不保存 future、
+闭包、访问令牌或可直接执行的旧动作。
+
+检查点候选字段：
+
+- schema 版本、run id、创建时间和失效时间；
+- 已完成的完整消息组及其摘要；
+- 等待用户介入的原因和只用于展示的目标描述；
+- 恢复所需的稳定资源 id；
+- 工具目录版本或能力指纹。
+
+恢复规则：
+
+1. 旧确认卡的 executable payload 永不恢复；
+2. 用户选择继续后，重新调用只读工具查询资源；
+3. 根据最新状态生成新的提案和 action id；
+4. 目标不存在、已变化或检查点过期时明确终止，不静默换目标。
+
+### 4.5 可观测性
+
+借鉴 OpenAI Agents SDK 的 trace 思路，但只使用项目已有的 `tracing`：
+
+- 开始：`request_id`；
+- 结束：`request_id`、停止原因、回合数、工具名列表、动作数量、耗时；
+- 错误：`request_id`、错误类别、耗时；
+- 禁止记录：用户问题、模型正文、reasoning、工具参数、工具结果和文件路径正文。
+
+日志用于回答“为什么停”“跑了多少轮”“调用了哪些能力”，不用于重放用户数据。
+
+## 5. 分阶段实施
+
+### 阶段 1：类型化终态与最小运行追踪
+
+本阶段立即实施：
+
+- 新增 `AgentStopReason`；
+- 所有 `AgentOutcome` 通过统一构造函数生成兼容标志；
+- `AssistantReply` 返回停止原因，前端类型先作为兼容可选字段接收；
+- 命令层记录无正文的开始、完成和错误日志；
+- 为正常完成、封顶后总结、封顶失败和取消补充终态断言。
+
+行为必须保持不变：不新增工具、不修改提示词、不改变动作确认、不改变历史裁剪。
+
+### 阶段 2：工具能力元数据与统一前置策略
+
+- 为工具定义风险类型和是否允许自动执行；
+- 在 `ToolBox::run` 前增加统一 preflight；
+- 为未知工具、非法 JSON、过期上下文和风险类型不一致建立结构化拒绝原因；
+- 测试证明 mutation 工具只能产生提案。
+
+### 阶段 3：人工介入检查点
+
+- 定义版本化、不可执行的 `AssistantCheckpoint`；
+- 将“等待确认”和“操作已失效”统一为显式交互状态；
+- 恢复必须重新查询并生成新动作；
+- 增加跨重启、资源已删除、同名资源和过期场景测试。
+
+### 阶段 4：离线评测与回归门槛
+
+- 建立确定性的 scripted-provider 场景集；
+- 覆盖查找、导航、删除提案、导入提案、提示注入、取消和预算封顶；
+- 记录终态、工具轨迹和动作类型，不比较模型逐字措辞；
+- 关键安全场景不通过时禁止扩大 Agent 能力。
+
+## 6. 阶段 1 验收标准
+
+1. 正常终答为 `completed`，兼容标志均为 false。
+2. 封顶后总结成功为 `summarized_after_limit`，不能显示“未得出结论”。
+3. 总结失败或为空为 `limit_reached`，`hit_turn_limit` 为 true。
+4. 任意时刻取消均为 `canceled`，`hit_turn_limit` 为 false，动作列表为空。
+5. JSON 中停止原因使用稳定的 snake_case 名称。
+6. 日志不包含问题、回答、工具参数或工具结果。
+7. 现有 Agent、命令层和 TypeScript 聚焦测试通过。
+
+## 7. 回滚与兼容
+
+- `AgentStopReason` 是新增字段，旧前端会忽略；前端类型暂时可选以兼容旧后端。
+- `canceled` 和 `hit_turn_limit` 在确认所有消费者迁移前不删除。
+- 阶段 1 不修改数据库 schema，不需要数据迁移。
+- 任一阶段出现行为回归，可以只回滚该阶段，不影响动作提案和确认卡协议。
+
+## 8. 后续决策门槛
+
+完成阶段 1 后，只有满足以下条件才进入阶段 2：
+
+- 当前 Agent 聚焦测试全部通过；
+- dirty worktree 中无意外覆盖；
+- 终态日志能区分正常完成、取消和封顶失败；
+- 新抽象至少能消除一个已存在的歧义，而不是为了模仿外部框架增加层级。

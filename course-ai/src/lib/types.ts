@@ -297,8 +297,16 @@ export type AssistantAction =
   /** 主题不走确认卡：无破坏性、一眼可见、再说一句就能改回来。 */
   | { kind: "set_theme"; pref: "dark" | "light" | "auto" };
 
+export type AgentStopReason =
+  | "completed"
+  | "summarized_after_limit"
+  | "canceled"
+  | "limit_reached";
+
 export interface AssistantReply {
   answer: string;
+  /** Agent 的唯一终态。可选是为了兼容尚未返回该字段的旧后端。 */
+  stop_reason?: AgentStopReason;
   canceled: boolean;
   /**
    * 工具轮次或上下文预算封顶后，额外的无工具总结仍没有给出可用答复。此时 answer 多半只是某一轮的
