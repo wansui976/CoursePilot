@@ -7,6 +7,7 @@ import { AssistantPanel } from "./AssistantPanel";
 import { useAssistantUi } from "@/stores/assistant";
 import { useTheme } from "@/stores/theme";
 import { useInlineAsk } from "@/stores/inlineAsk";
+import { writeAssistantSession } from "@/lib/assistantSession";
 import type {
   AssistantAction,
   AssistantContext,
@@ -1018,6 +1019,59 @@ describe("AssistantPanel", () => {
     // 换掉，而不是并排留着两条回答。
     expect(screen.queryByText("第一答")).not.toBeInTheDocument();
     expect(screen.getAllByTestId("user-bubble")).toHaveLength(1);
+  });
+
+  it("重启后的检查点说明旧操作，并只用当前上下文重新核对", async () => {
+    writeAssistantSession(
+      {
+        turns: [
+          {
+            id: "expired-turn",
+            question: "删除导论",
+            answer: "请确认",
+            actions: [
+              {
+                kind: "propose_delete",
+                video_id: "stale-video-id",
+                course_id: "stale-course-id",
+                course_name: "课程甲",
+                title: "导论",
+              },
+            ],
+            tools: ["delete_video"],
+            canceled: false,
+            actionResults: [],
+          },
+        ],
+        history: [
+          { role: "user", content: "删除导论" },
+          { role: "assistant", content: "请确认" },
+        ],
+        draft: "",
+      },
+      Date.now() - 1_000,
+    );
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "已重新核对" }));
+
+    renderPanel(vi.fn(), {
+      context: { course_id: "current-course-id", video_id: "current-video-id" },
+    });
+
+    expect(screen.getByText("上次待处理：删除视频 · 导论（课程甲）")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重新核对这项操作" }));
+
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenCalledWith(
+        "删除导论",
+        { course_id: "current-course-id", video_id: "current-video-id" },
+        [],
+        expect.any(String),
+        expect.any(Function),
+      ),
+    );
+    expect(JSON.stringify(mockIpc.assistant.ask.mock.calls[0])).not.toContain("stale-video-id");
+    expect(JSON.stringify(mockIpc.assistant.ask.mock.calls[0])).not.toContain("stale-course-id");
+    expect(await screen.findByText("已重新核对")).toBeInTheDocument();
   });
 
   it("重新回答被停掉的那一轮，不会把上一轮真实问答也砍掉", async () => {

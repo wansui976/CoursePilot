@@ -38,6 +38,8 @@ import {
   MAX_ASSISTANT_REASONING_CHARS,
   readAssistantSession,
   writeAssistantSession,
+  type AssistantCheckpoint,
+  type AssistantCheckpointActionKind,
   type AssistantTurnRecord,
 } from "@/lib/assistantSession";
 import { humanizeError } from "@/lib/errors";
@@ -190,6 +192,38 @@ function contextLabel(context: AssistantContext, t: TFunction) {
   }
   if (context.course_id) return t("assistant.scopeCurrentCourse");
   return t("assistant.scopeAllCourses");
+}
+
+const CHECKPOINT_ACTION_LABEL_KEYS: Record<AssistantCheckpointActionKind, string> = {
+  open_video: "assistantTools.open_video",
+  seek_to: "assistantTools.seek_to",
+  propose_rename: "assistantActions.renameTitle",
+  propose_delete: "assistantActions.deleteTitle",
+  propose_setting: "assistantActions.settingTitle",
+  propose_import: "assistantActions.importTitle",
+  propose_create_course: "assistantActions.createTitle",
+  propose_rename_course: "assistantActions.courseRenameTitle",
+};
+
+function checkpointSummary(checkpoint: AssistantCheckpoint, t: TFunction) {
+  const visible = checkpoint.targets.slice(0, 3).map((target) => {
+    const action = t(CHECKPOINT_ACTION_LABEL_KEYS[target.action], {
+      defaultValue: target.action,
+    });
+    const subject =
+      target.label && target.courseLabel
+        ? t("assistant.checkpointTargetCourse", {
+            target: target.label,
+            course: target.courseLabel,
+          })
+        : target.label ?? target.courseLabel;
+    return subject ? t("assistant.checkpointTarget", { action, target: subject }) : action;
+  });
+  const hidden = checkpoint.targets.length - visible.length;
+  return t("assistant.checkpointSummary", {
+    targets: visible.join(t("assistant.checkpointSeparator")),
+    more: hidden > 0 ? t("assistant.checkpointMore", { count: hidden }) : "",
+  });
 }
 
 function suggestionsFor(context: AssistantContext, t: TFunction) {
@@ -1494,10 +1528,34 @@ export function AssistantPanel({
             />
 
             {getAssistantInteractionState(turn).status === "expired" && (
-              <p className="flex items-start gap-1.5 text-[11px] text-[var(--status-warn)]">
+              <div className="flex items-start gap-1.5 text-[11px] text-[var(--status-warn)]">
                 <AlertCircle className="mt-[0.2em] h-3 w-3 flex-none" aria-hidden="true" />
-                <span className="min-w-0 break-words">{t("assistant.expiredActions")}</span>
-              </p>
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <p className="break-words">
+                    {turn.checkpoint?.expiredReason === "timeout"
+                      ? t("assistant.expiredActionsTimeout")
+                      : t("assistant.expiredActions")}
+                  </p>
+                  {turn.checkpoint && (
+                    <p className="break-words text-[var(--text-faint)]">
+                      {checkpointSummary(turn.checkpoint, t)}
+                    </p>
+                  )}
+                </div>
+                {turn.id === turns[turns.length - 1]?.id && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label={t("assistant.recheckExpired")}
+                    title={t("assistant.recheckExpired")}
+                    disabled={busy || actionExecutionBusy}
+                    onClick={() => regenerate(turn)}
+                    className="-my-1 h-6 w-6 flex-none text-[var(--status-warn)]"
+                  >
+                    <RefreshCw className="h-3 w-3" aria-hidden="true" />
+                  </Button>
+                )}
+              </div>
             )}
 
             {turn.actionResults.length > 0 && (
