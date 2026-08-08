@@ -186,6 +186,39 @@ impl<'a> AssistantTools<'a> {
         std::mem::take(&mut self.actions.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
+    fn action_count(&self) -> usize {
+        self.actions.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    /// postflight 只看本次调用新增的动作。发现声明与产物不一致时立即回滚新增部分，
+    /// 但保留前面已经通过策略的动作，避免一个坏工具污染或抹掉整轮结果。
+    fn enforce_effect(
+        &self,
+        tool_name: &str,
+        expected: ToolEffect,
+        action_start: usize,
+    ) -> Result<(), ToolOutcome> {
+        let mut actions = self.actions.lock().unwrap_or_else(|e| e.into_inner());
+        if action_start > actions.len() {
+            return Err(ToolOutcome::failed(format!(
+                "工具策略内部状态异常：{tool_name} 执行期间动作列表被缩短，本次结果已拒绝"
+            )));
+        }
+        let actual = actions[action_start..]
+            .iter()
+            .map(AssistantAction::effect)
+            .find(|actual| *actual != expected);
+        if let Some(actual) = actual {
+            actions.truncate(action_start);
+            return Err(ToolOutcome::failed(format!(
+                "工具策略拒绝：{tool_name} 声明为 {}，却生成了 {} 动作；本次新增动作已回滚",
+                expected.as_str(),
+                actual.as_str(),
+            )));
+        }
+        Ok(())
+    }
+
     fn mutation_target(action: &AssistantAction) -> Option<String> {
         match action {
             AssistantAction::ProposeRename { video_id, .. }
@@ -876,6 +909,78 @@ fn object(properties: serde_json::Value, required: &[&str]) -> serde_json::Value
     json!({"type": "object", "properties": properties, "required": required})
 }
 
+/// 工具对应用状态的可见影响。它不替代领域校验，而是约束 dispatch 最终允许留下什么动作。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolEffect {
+    ReadOnly,
+    ClientAction,
+    MutationProposal,
+}
+
+impl ToolEffect {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read_only",
+            Self::ClientAction => "client_action",
+            Self::MutationProposal => "mutation_proposal",
+        }
+    }
+}
+
+impl AssistantAction {
+    fn effect(&self) -> ToolEffect {
+        match self {
+            Self::OpenVideo { .. } | Self::SeekTo { .. } | Self::SetTheme { .. } => {
+                ToolEffect::ClientAction
+            }
+            Self::ProposeRename { .. }
+            | Self::ProposeDelete { .. }
+            | Self::ProposeSetting { .. }
+            | Self::ProposeImport { .. }
+            | Self::ProposeCreateCourse { .. }
+            | Self::ProposeRenameCourse { .. } => ToolEffect::MutationProposal,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ToolPolicy {
+    name: &'static str,
+    effect: ToolEffect,
+}
+
+const fn policy(name: &'static str, effect: ToolEffect) -> ToolPolicy {
+    ToolPolicy { name, effect }
+}
+
+const TOOL_POLICIES: &[ToolPolicy] = &[
+    policy("list_courses", ToolEffect::ReadOnly),
+    policy("list_videos", ToolEffect::ReadOnly),
+    policy("get_course_outline", ToolEffect::ReadOnly),
+    policy("get_study_progress", ToolEffect::ReadOnly),
+    policy("resume_learning", ToolEffect::ClientAction),
+    policy("list_weak_concepts", ToolEffect::ReadOnly),
+    policy("list_due_reviews", ToolEffect::ReadOnly),
+    policy("search_content", ToolEffect::ReadOnly),
+    policy("open_video", ToolEffect::ClientAction),
+    policy("seek_to", ToolEffect::ClientAction),
+    policy("rename_video", ToolEffect::MutationProposal),
+    policy("delete_video", ToolEffect::MutationProposal),
+    policy("update_setting", ToolEffect::MutationProposal),
+    policy("create_course", ToolEffect::MutationProposal),
+    policy("rename_course", ToolEffect::MutationProposal),
+    policy("set_theme", ToolEffect::ClientAction),
+    policy("search_bilibili", ToolEffect::ReadOnly),
+    policy("import_video", ToolEffect::MutationProposal),
+];
+
+fn tool_effect(name: &str) -> Option<ToolEffect> {
+    TOOL_POLICIES
+        .iter()
+        .find(|policy| policy.name == name)
+        .map(|policy| policy.effect)
+}
+
 /// 工具清单。做成自由函数而不是方法，是为了能脱离数据库单测——
 /// 「报出去的工具」和「真能执行的工具」必须一一对应，那是最值得盯的一致性。
 pub fn tool_specs() -> Vec<ToolSpec> {
@@ -1058,8 +1163,19 @@ impl ToolBox for AssistantTools<'_> {
         tool_specs()
     }
 
-    async fn run(&self, call: &ToolCall) -> ToolOutcome {
-        match self.dispatch(call).await {
+    async fn run_unchecked(&self, call: &ToolCall) -> ToolOutcome {
+        let Some(effect) = tool_effect(&call.name) else {
+            return ToolOutcome::failed(format!(
+                "工具 {} 缺少 effect 元数据，已拒绝进入领域执行",
+                call.name
+            ));
+        };
+        let action_start = self.action_count();
+        let result = self.dispatch(call).await;
+        if let Err(outcome) = self.enforce_effect(&call.name, effect, action_start) {
+            return outcome;
+        }
+        match result {
             Ok(outcome) => outcome,
             Err(outcome) => outcome,
         }
@@ -2132,6 +2248,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn updating_a_setting_only_proposes_and_leaves_the_database_unchanged() {
+        let (db, _c, _v, _d) = seed().await;
+        crate::commands::settings::set_setting(&db, "subtitle_autocorrect", "false")
+            .await
+            .unwrap();
+        let tools = AssistantTools::new(&db, AssistantContext::default());
+        let out = tools
+            .run(&call(
+                "update_setting",
+                r#"{"key":"subtitle_autocorrect","value":"true"}"#,
+            ))
+            .await;
+
+        assert_eq!(
+            crate::commands::settings::get_setting(&db, "subtitle_autocorrect")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("false"),
+            "设置工具不能绕过确认卡直接写库"
+        );
+        assert!(out.content.contains("还没有生效"));
+        match tools.take_actions().as_slice() {
+            [AssistantAction::ProposeSetting {
+                key,
+                current,
+                value,
+                ..
+            }] => {
+                assert_eq!(key, "subtitle_autocorrect");
+                assert_eq!(current.as_deref(), Some("false"));
+                assert_eq!(value, "true");
+            }
+            other => panic!("应当只生成一条设置提案，实际 {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn searching_the_current_course_without_one_open_says_so() {
         // 用户完全可能在首页、根本没打开课程。按「当前课程」筛出空列表 → 搜不到 →
         // 模型转头说「课程里没讲到」，把「没打开课程」伪装成了内容判断。
@@ -2171,6 +2325,21 @@ mod tests {
         let tools = AssistantTools::new(&db, AssistantContext::default());
         let out = tools.run(&call("rm_rf", "{}")).await;
         assert!(out.content.contains("没有名为"));
+    }
+
+    #[tokio::test]
+    async fn preflight_rejects_non_object_arguments_before_domain_parsing() {
+        let (db, _c, _v, _d) = seed().await;
+        let tools = AssistantTools::new(&db, AssistantContext::default());
+        for arguments in ["{", "[]", "null", r#""text""#] {
+            let out = tools.run(&call("rename_video", arguments)).await;
+            assert!(
+                out.content.contains("合法 JSON") || out.content.contains("JSON 对象"),
+                "{arguments}: {}",
+                out.content
+            );
+        }
+        assert!(tools.take_actions().is_empty());
     }
 
     #[tokio::test]
@@ -2381,6 +2550,80 @@ mod tests {
     }
 
     #[test]
+    fn every_model_visible_tool_has_exactly_one_effect_policy() {
+        let spec_names: Vec<_> = tool_specs().into_iter().map(|spec| spec.name).collect();
+        let policy_names: Vec<_> = TOOL_POLICIES.iter().map(|policy| policy.name).collect();
+        assert_eq!(
+            spec_names, policy_names,
+            "工具注册表与 effect 元数据必须同序且完整"
+        );
+
+        let mut unique = policy_names.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), policy_names.len(), "effect 元数据不能重名");
+
+        for name in [
+            "list_courses",
+            "list_videos",
+            "get_course_outline",
+            "get_study_progress",
+            "list_weak_concepts",
+            "list_due_reviews",
+            "search_content",
+            "search_bilibili",
+        ] {
+            assert_eq!(tool_effect(name), Some(ToolEffect::ReadOnly), "{name}");
+        }
+        for name in ["resume_learning", "open_video", "seek_to", "set_theme"] {
+            assert_eq!(tool_effect(name), Some(ToolEffect::ClientAction), "{name}");
+        }
+        for name in [
+            "rename_video",
+            "delete_video",
+            "update_setting",
+            "create_course",
+            "rename_course",
+            "import_video",
+        ] {
+            assert_eq!(
+                tool_effect(name),
+                Some(ToolEffect::MutationProposal),
+                "{name}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn postflight_rolls_back_only_the_mismatched_new_actions() {
+        let (db, _course_id, _video_id, _d) = seed().await;
+        let tools = AssistantTools::new(&db, AssistantContext::default());
+        assert!(tools
+            .record(AssistantAction::SetTheme {
+                pref: "dark".into(),
+            })
+            .is_ok());
+        let action_start = tools.action_count();
+        assert!(tools
+            .record(AssistantAction::ProposeSetting {
+                key: "subtitle_autocorrect".into(),
+                label: "字幕 AI 纠错".into(),
+                current: Some("false".into()),
+                value: "true".into(),
+            })
+            .is_ok());
+
+        let rejected = tools
+            .enforce_effect("broken_client_tool", ToolEffect::ClientAction, action_start)
+            .unwrap_err();
+        assert!(rejected.content.contains("工具策略拒绝"));
+        match tools.take_actions().as_slice() {
+            [AssistantAction::SetTheme { pref }] => assert_eq!(pref, "dark"),
+            other => panic!("错配动作应回滚，之前的合法动作应保留，实际 {other:?}"),
+        }
+    }
+
+    #[test]
     fn destructive_tools_say_out_loud_that_they_only_propose() {
         // 提示词里必须写明「只是提案」，否则模型会在回答里跟用户说「已经删好了」，
         // 而实际上东西还在——用户以为做完了，这比没做更糟。
@@ -2389,6 +2632,8 @@ mod tests {
             "rename_video",
             "delete_video",
             "update_setting",
+            "create_course",
+            "rename_course",
             "import_video",
         ] {
             let spec = specs.iter().find(|s| s.name == name).unwrap();

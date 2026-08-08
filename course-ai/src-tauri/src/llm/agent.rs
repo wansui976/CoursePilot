@@ -60,11 +60,53 @@ impl ToolOutcome {
     }
 }
 
-/// 调用方要提供的工具集：报出有哪些工具，以及怎么执行一次调用。
+/// 工具进入领域执行前的通用检查。
+///
+/// 这里只验证所有工具都共有、且不需要理解 JSON Schema 的边界：名称必须在本次注册表里，
+/// 参数必须是合法 JSON 对象。required 字段、枚举、资源 id 等业务约束仍交给具体工具解析，
+/// 避免在通用层复制一套不完整的 schema validator。
+fn preflight_tool_call(specs: &[ToolSpec], call: &ToolCall) -> Result<(), ToolOutcome> {
+    if !specs.iter().any(|spec| spec.name == call.name) {
+        return Err(ToolOutcome::failed(format!(
+            "没有名为 {} 的工具。请只使用本次提供的工具，不要编造工具名",
+            call.name
+        )));
+    }
+
+    let arguments: serde_json::Value = serde_json::from_str(&call.arguments).map_err(|error| {
+        ToolOutcome::failed(format!(
+            "{} 的参数不是合法 JSON（{error}）。收到的是：{}",
+            call.name, call.arguments
+        ))
+    })?;
+    if !arguments.is_object() {
+        return Err(ToolOutcome::failed(format!(
+            "{} 的参数必须是 JSON 对象，不能是数组、字符串、数字或 null",
+            call.name
+        )));
+    }
+    Ok(())
+}
+
+/// 调用方要提供的工具集：报出有哪些工具，以及怎么执行一次已经通过 preflight 的调用。
 #[allow(async_fn_in_trait)] // 只在本进程内实现与调用，不需要 Send 边界。
 pub trait ToolBox {
     fn specs(&self) -> Vec<ToolSpec>;
-    async fn run(&self, call: &ToolCall) -> ToolOutcome;
+
+    fn preflight(&self, call: &ToolCall) -> Result<(), ToolOutcome> {
+        preflight_tool_call(&self.specs(), call)
+    }
+
+    async fn run_unchecked(&self, call: &ToolCall) -> ToolOutcome;
+
+    /// 业务调用方使用的标准入口。Agent 循环只在自己已经完成同一 preflight 后，
+    /// 才会为取消轮询直接进入 `run_unchecked`。
+    async fn run(&self, call: &ToolCall) -> ToolOutcome {
+        match self.preflight(call) {
+            Ok(()) => self.run_unchecked(call).await,
+            Err(outcome) => outcome,
+        }
+    }
 }
 
 /// 循环过程中的进度，交给调用方决定怎么显示。
@@ -166,7 +208,9 @@ async fn run_tool_or_cancel<T: ToolBox>(
         return None;
     }
 
-    let pending = tools.run(call);
+    // 调用方已经在发出 ToolStarted 前完成 preflight；这里不能再走带 preflight 的
+    // `ToolBox::run`，否则同一调用会重复解析参数。
+    let pending = tools.run_unchecked(call);
     tokio::pin!(pending);
     loop {
         tokio::select! {
@@ -309,9 +353,17 @@ pub async fn run<T: ToolBox>(
                 continue;
             }
             tool_calls += 1;
-            on_event(AgentEvent::ToolStarted(call));
-            let outcome = run_tool_or_cancel(tools, call, cancel).await;
-            on_event(AgentEvent::ToolFinished(call));
+            let outcome = match tools.preflight(call) {
+                Ok(()) => {
+                    on_event(AgentEvent::ToolStarted(call));
+                    let outcome = run_tool_or_cancel(tools, call, cancel).await;
+                    on_event(AgentEvent::ToolFinished(call));
+                    outcome
+                }
+                // 被策略拒绝的调用从未进入领域 dispatch，不能对界面谎报成“工具已开始”。
+                // 失败仍要作为 tool result 回给模型，保持消息结构完整并允许它修正。
+                Err(outcome) => Some(outcome),
+            };
             let raw_content = outcome
                 .map(|outcome| outcome.content)
                 .unwrap_or_else(|| "已取消，执行未完成。".to_string());
@@ -521,7 +573,7 @@ mod tests {
                 parameters: serde_json::json!({"type":"object"}),
             }]
         }
-        async fn run(&self, call: &ToolCall) -> ToolOutcome {
+        async fn run_unchecked(&self, call: &ToolCall) -> ToolOutcome {
             self.executed.borrow_mut().push(call.id.clone());
             if self.fail {
                 ToolOutcome::failed("端点 500")
@@ -676,6 +728,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn preflight_rejections_become_results_without_entering_tool_dispatch() {
+        let provider = scripted(vec![
+            wants(vec![
+                call("unknown", "made_up_tool", "{}"),
+                call("malformed", "probe", "{"),
+                call("not-object", "probe", "[]"),
+            ]),
+            says("参数有问题，已停止调用并说明原因"),
+        ]);
+        let tools = Recorder::new(false);
+        let mut started = 0;
+        let out = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("测试工具边界")],
+            &tools,
+            &AtomicBool::new(false),
+            &mut |event| {
+                if matches!(event, AgentEvent::ToolStarted(_)) {
+                    started += 1;
+                }
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            tools.executed.borrow().is_empty(),
+            "preflight 失败不能进入 dispatch"
+        );
+        assert_eq!(started, 0, "被 preflight 拒绝的调用不能冒充已开始");
+        let results: Vec<_> = out
+            .messages
+            .iter()
+            .filter(|message| message.role == "tool")
+            .map(|message| message.content.as_str())
+            .collect();
+        assert_eq!(results.len(), 3, "每个被拒绝的调用仍要补齐 tool result");
+        assert!(results[0].contains("没有名为 made_up_tool"));
+        assert!(results[1].contains("不是合法 JSON"));
+        assert!(results[2].contains("必须是 JSON 对象"));
+        assert_eq!(out.answer, "参数有问题，已停止调用并说明原因");
+    }
+
+    #[tokio::test]
     async fn a_model_that_never_stops_gets_one_forced_summary_after_the_cap() {
         // 模型可以自己跟自己调一晚上工具，而每轮的结果都留在上下文里，成本是乘法涨的。
         // 达到工具轮上限后只允许再做一次无工具总结，不能把「我先查一下」当成最终答案。
@@ -794,7 +892,7 @@ mod tests {
                 Recorder::new(false).specs()
             }
 
-            async fn run(&self, _call: &ToolCall) -> ToolOutcome {
+            async fn run_unchecked(&self, _call: &ToolCall) -> ToolOutcome {
                 ToolOutcome::ok("资料".repeat(MAX_TOTAL_TOOL_RESULT_CHARS))
             }
         }
@@ -924,7 +1022,7 @@ mod tests {
                     parameters: serde_json::json!({"type":"object"}),
                 }]
             }
-            async fn run(&self, call: &ToolCall) -> ToolOutcome {
+            async fn run_unchecked(&self, call: &ToolCall) -> ToolOutcome {
                 self.executed.borrow_mut().push(call.id.clone());
                 self.cancel.store(true, Ordering::SeqCst);
                 ToolOutcome::ok("第一个做完了")
@@ -976,7 +1074,7 @@ mod tests {
                 }]
             }
 
-            async fn run(&self, _call: &ToolCall) -> ToolOutcome {
+            async fn run_unchecked(&self, _call: &ToolCall) -> ToolOutcome {
                 self.started.store(true, Ordering::SeqCst);
                 std::future::pending::<ToolOutcome>().await
             }
@@ -1054,7 +1152,7 @@ mod tests {
                     parameters: serde_json::json!({"type":"object"}),
                 }]
             }
-            async fn run(&self, _call: &ToolCall) -> ToolOutcome {
+            async fn run_unchecked(&self, _call: &ToolCall) -> ToolOutcome {
                 *self.seen.borrow_mut() += 1;
                 if *self.seen.borrow() >= MAX_TURNS {
                     self.cancel.store(true, Ordering::SeqCst);
