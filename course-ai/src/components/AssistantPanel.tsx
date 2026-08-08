@@ -32,6 +32,7 @@ import {
   boundTrustedAssistantHistory,
   capAssistantText,
   clearAssistantSession,
+  getAssistantInteractionState,
   historyBeforeLastQuestion,
   MAX_ASSISTANT_ANSWER_CHARS,
   MAX_ASSISTANT_REASONING_CHARS,
@@ -1492,7 +1493,7 @@ export function AssistantPanel({
               onApplied={onActionApplied}
             />
 
-            {turn.actionsExpired && (
+            {getAssistantInteractionState(turn).status === "expired" && (
               <p className="flex items-start gap-1.5 text-[11px] text-[var(--status-warn)]">
                 <AlertCircle className="mt-[0.2em] h-3 w-3 flex-none" aria-hidden="true" />
                 <span className="min-w-0 break-words">{t("assistant.expiredActions")}</span>

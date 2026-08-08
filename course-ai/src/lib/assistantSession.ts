@@ -12,9 +12,39 @@ const MAX_HISTORY_USER_TURNS = 8;
 const MAX_HISTORY_CHARS = 48_000;
 const MAX_ACTION_RESULTS = 50;
 const MAX_ACTION_RESULT_CHARS = 2_000;
+const MAX_CHECKPOINT_TARGETS = 12;
+const MAX_CHECKPOINT_LABEL_CHARS = 240;
 const CONTEXT_PREFIX = "（界面状态：";
 const EXPIRED_ACTION_HISTORY_NOTICE =
   "（界面操作结果：应用重启后，本轮旧操作按钮已失效；已经完成的结果以操作记录为准，尚未确认的操作未执行。如仍需操作，必须重新调用工具核对当前状态并生成新按钮。）";
+
+export const ASSISTANT_CHECKPOINT_VERSION = 1 as const;
+export const ASSISTANT_CHECKPOINT_TTL_MS = 24 * 60 * 60 * 1_000;
+
+type CheckpointAction = Exclude<AssistantAction, { kind: "set_theme" }>;
+export type AssistantCheckpointActionKind = CheckpointAction["kind"];
+
+export interface AssistantCheckpointTarget {
+  action: AssistantCheckpointActionKind;
+  /** 仅供重新说明上下文，不包含 URL、路径、新值或资源 id。 */
+  label?: string;
+  courseLabel?: string;
+}
+
+export interface AssistantCheckpoint {
+  version: typeof ASSISTANT_CHECKPOINT_VERSION;
+  /** 从本地存储读出的检查点永远不可执行。 */
+  status: "expired";
+  expiredReason: "restart" | "timeout";
+  createdAt: number;
+  expiresAt: number;
+  targets: AssistantCheckpointTarget[];
+}
+
+export type AssistantInteractionState =
+  | { status: "none" }
+  | { status: "awaiting_user"; actions: CheckpointAction[] }
+  | { status: "expired"; checkpoint?: AssistantCheckpoint };
 
 export interface AssistantTurnRecord {
   id: string;
@@ -25,6 +55,8 @@ export interface AssistantTurnRecord {
   actions: AssistantAction[];
   /** 重启前这一轮曾有操作按钮；参数不会落盘，恢复后只能提示用户重新发起。 */
   actionsExpired?: boolean;
+  /** 重启后只用于解释等待过什么；不能转换回 AssistantAction。 */
+  checkpoint?: AssistantCheckpoint;
   tools: string[];
   canceled: boolean;
   /** 工具轮或上下文预算封顶且强制总结仍失败；这一轮回答不完整，重启后同样要说明。旧记录没有。 */
@@ -52,7 +84,140 @@ export function capAssistantText(value: string, maxChars: number) {
   return value.length <= maxChars ? value : value.slice(0, maxChars);
 }
 
-function readTurn(value: unknown): AssistantTurnRecord | null {
+const CHECKPOINT_ACTION_KINDS = new Set<AssistantCheckpointActionKind>([
+  "open_video",
+  "seek_to",
+  "propose_rename",
+  "propose_delete",
+  "propose_setting",
+  "propose_import",
+  "propose_create_course",
+  "propose_rename_course",
+]);
+
+function isCheckpointActionKind(value: unknown): value is AssistantCheckpointActionKind {
+  return (
+    typeof value === "string" &&
+    CHECKPOINT_ACTION_KINDS.has(value as AssistantCheckpointActionKind)
+  );
+}
+
+function safeCheckpointLabel(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  // 导入标题可能直接回退为 URL；路径和 URL 都不能进入可恢复状态。
+  if (
+    /[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ||
+    /(?:^|\s)(?:~?\/|\\\\)\S/.test(trimmed) ||
+    /(?:^|\s)[a-z]:[\\/]\S/i.test(trimmed)
+  ) {
+    return undefined;
+  }
+  return capAssistantText(trimmed, MAX_CHECKPOINT_LABEL_CHARS);
+}
+
+function checkpointTarget(action: CheckpointAction): AssistantCheckpointTarget {
+  switch (action.kind) {
+    case "open_video":
+      return { action: action.kind, label: safeCheckpointLabel(action.title) };
+    case "seek_to":
+      return { action: action.kind };
+    case "propose_rename":
+      return {
+        action: action.kind,
+        label: safeCheckpointLabel(action.current_title),
+        courseLabel: safeCheckpointLabel(action.course_name),
+      };
+    case "propose_delete":
+      return {
+        action: action.kind,
+        label: safeCheckpointLabel(action.title),
+        courseLabel: safeCheckpointLabel(action.course_name),
+      };
+    case "propose_setting":
+      return { action: action.kind, label: safeCheckpointLabel(action.label) };
+    case "propose_import":
+      return {
+        action: action.kind,
+        label: safeCheckpointLabel(action.title),
+        courseLabel: safeCheckpointLabel(action.course_name),
+      };
+    case "propose_create_course":
+      return { action: action.kind, label: safeCheckpointLabel(action.name) };
+    case "propose_rename_course":
+      return { action: action.kind, label: safeCheckpointLabel(action.current_name) };
+  }
+}
+
+function createCheckpoint(actions: CheckpointAction[], now: number) {
+  return {
+    version: ASSISTANT_CHECKPOINT_VERSION,
+    status: "awaiting_user" as const,
+    createdAt: now,
+    expiresAt: now + ASSISTANT_CHECKPOINT_TTL_MS,
+    targets: actions.slice(0, MAX_CHECKPOINT_TARGETS).map(checkpointTarget),
+  };
+}
+
+function readCheckpointTarget(value: unknown): AssistantCheckpointTarget | null {
+  if (!isRecord(value) || !isCheckpointActionKind(value.action)) return null;
+  const label = safeCheckpointLabel(value.label);
+  const courseLabel = safeCheckpointLabel(value.courseLabel);
+  return {
+    action: value.action,
+    ...(label ? { label } : {}),
+    ...(courseLabel ? { courseLabel } : {}),
+  };
+}
+
+function readCheckpoint(value: unknown, now: number): AssistantCheckpoint | undefined {
+  if (
+    !isRecord(value) ||
+    value.version !== ASSISTANT_CHECKPOINT_VERSION ||
+    (value.status !== "awaiting_user" && value.status !== "expired") ||
+    typeof value.createdAt !== "number" ||
+    !Number.isFinite(value.createdAt) ||
+    value.createdAt < 0 ||
+    typeof value.expiresAt !== "number" ||
+    !Number.isFinite(value.expiresAt) ||
+    value.expiresAt < value.createdAt ||
+    !Array.isArray(value.targets)
+  ) {
+    return undefined;
+  }
+  const targets = value.targets
+    .map(readCheckpointTarget)
+    .filter((target) => target !== null)
+    .slice(0, MAX_CHECKPOINT_TARGETS);
+  if (targets.length === 0) return undefined;
+  return {
+    version: ASSISTANT_CHECKPOINT_VERSION,
+    status: "expired",
+    expiredReason: now >= value.expiresAt ? "timeout" : "restart",
+    createdAt: value.createdAt,
+    expiresAt: value.expiresAt,
+    targets,
+  };
+}
+
+export function getAssistantInteractionState(
+  turn: AssistantTurnRecord,
+): AssistantInteractionState {
+  const actions = turn.actions.filter(
+    (action): action is CheckpointAction => action.kind !== "set_theme",
+  );
+  if (actions.length > 0) return { status: "awaiting_user", actions };
+  if (turn.actionsExpired || turn.checkpoint) {
+    return {
+      status: "expired",
+      ...(turn.checkpoint ? { checkpoint: turn.checkpoint } : {}),
+    };
+  }
+  return { status: "none" };
+}
+
+function readTurn(value: unknown, now: number): AssistantTurnRecord | null {
   if (!isRecord(value)) return null;
   if (
     typeof value.id !== "string" ||
@@ -62,6 +227,7 @@ function readTurn(value: unknown): AssistantTurnRecord | null {
     return null;
   }
 
+  const checkpoint = readCheckpoint(value.checkpoint, now);
   return {
     id: value.id,
     question: capAssistantText(value.question, MAX_QUESTION_CHARS),
@@ -71,7 +237,8 @@ function readTurn(value: unknown): AssistantTurnRecord | null {
       : {}),
     // 旧确认卡不能跨重启复活：用户可能已经在别处完成了同一操作。
     actions: [],
-    ...(value.actionsExpired === true ? { actionsExpired: true } : {}),
+    ...(value.actionsExpired === true || checkpoint ? { actionsExpired: true } : {}),
+    ...(checkpoint ? { checkpoint } : {}),
     tools: Array.isArray(value.tools)
       ? value.tools
           .filter((tool): tool is string => typeof tool === "string")
@@ -254,7 +421,7 @@ export function historyBeforeLastQuestion(history: AssistantMessage[]): Assistan
   return [];
 }
 
-export function readAssistantSession(): AssistantSession {
+export function readAssistantSession(now = Date.now()): AssistantSession {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return EMPTY_SESSION;
@@ -263,7 +430,7 @@ export function readAssistantSession(): AssistantSession {
 
     const turns = Array.isArray(value.turns)
       ? value.turns
-          .map(readTurn)
+          .map((turn) => readTurn(turn, now))
           .filter((turn) => turn !== null)
           .slice(-MAX_ASSISTANT_TURNS)
       : [];
@@ -275,7 +442,7 @@ export function readAssistantSession(): AssistantSession {
   }
 }
 
-export function writeAssistantSession(session: AssistantSession) {
+export function writeAssistantSession(session: AssistantSession, now = Date.now()) {
   try {
     // 主题已经当场生效；其余按钮都依赖生成时的界面状态，重启后不得复活。
     const hasLiveActionPayload = session.turns.some((turn) =>
@@ -284,26 +451,31 @@ export function writeAssistantSession(session: AssistantSession) {
     const turns = session.turns
       .filter((turn) => !turn.pending)
       .slice(-MAX_ASSISTANT_TURNS)
-      .map((turn) => ({
-        ...turn,
-        question: capAssistantText(turn.question, MAX_QUESTION_CHARS),
-        answer: capAssistantText(turn.answer, MAX_ASSISTANT_ANSWER_CHARS),
-        reasoning: turn.reasoning
-          ? capAssistantText(turn.reasoning, MAX_ASSISTANT_REASONING_CHARS)
-          : undefined,
-        tools: turn.tools
-          .map((tool) => capAssistantText(tool, MAX_TOOL_NAME_CHARS))
-          .slice(-MAX_TOOLS_PER_TURN),
-        actionResults: turn.actionResults
-          .map((result) => capAssistantText(result, MAX_ACTION_RESULT_CHARS))
-          .slice(-MAX_ACTION_RESULTS),
-        actions: [],
-        actionsExpired:
-          turn.actionsExpired === true ||
-          turn.actions.some((action) => action.kind !== "set_theme") ||
-          undefined,
-        pending: undefined,
-      }));
+      .map((turn) => {
+        const interaction = getAssistantInteractionState(turn);
+        const checkpoint =
+          interaction.status === "awaiting_user"
+            ? createCheckpoint(interaction.actions, now)
+            : turn.checkpoint;
+        return {
+          ...turn,
+          question: capAssistantText(turn.question, MAX_QUESTION_CHARS),
+          answer: capAssistantText(turn.answer, MAX_ASSISTANT_ANSWER_CHARS),
+          reasoning: turn.reasoning
+            ? capAssistantText(turn.reasoning, MAX_ASSISTANT_REASONING_CHARS)
+            : undefined,
+          tools: turn.tools
+            .map((tool) => capAssistantText(tool, MAX_TOOL_NAME_CHARS))
+            .slice(-MAX_TOOLS_PER_TURN),
+          actionResults: turn.actionResults
+            .map((result) => capAssistantText(result, MAX_ACTION_RESULT_CHARS))
+            .slice(-MAX_ACTION_RESULTS),
+          actions: [],
+          actionsExpired: interaction.status !== "none" || undefined,
+          checkpoint,
+          pending: undefined,
+        };
+      });
     const cleanHistory = boundAssistantHistory(session.history);
     const history = hasLiveActionPayload
       ? boundAssistantHistory([

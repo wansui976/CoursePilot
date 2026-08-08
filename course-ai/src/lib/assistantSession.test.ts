@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  ASSISTANT_CHECKPOINT_TTL_MS,
   assistantSessionStorageKey,
   clearAssistantSession,
+  getAssistantInteractionState,
   historyBeforeLastQuestion,
   MAX_ASSISTANT_ANSWER_CHARS,
   MAX_ASSISTANT_REASONING_CHARS,
@@ -13,6 +15,7 @@ describe("assistantSession", () => {
   beforeEach(() => localStorage.clear());
 
   it("restores transcript, history, and draft without reviving executable actions", () => {
+    const savedAt = 1_000;
     writeAssistantSession({
       turns: [
         {
@@ -30,9 +33,10 @@ describe("assistantSession", () => {
         { role: "assistant", content: "已经准备好" },
       ],
       draft: "继续问",
-    });
+    }, savedAt);
 
-    expect(readAssistantSession()).toEqual({
+    const restored = readAssistantSession(savedAt + 1);
+    expect(restored).toEqual({
       turns: [
         {
           id: "t1",
@@ -40,6 +44,14 @@ describe("assistantSession", () => {
           answer: "已经准备好",
           actions: [],
           actionsExpired: true,
+          checkpoint: {
+            version: 1,
+            status: "expired",
+            expiredReason: "restart",
+            createdAt: savedAt,
+            expiresAt: savedAt + ASSISTANT_CHECKPOINT_TTL_MS,
+            targets: [{ action: "propose_delete", label: "第一讲" }],
+          },
           tools: ["delete_video"],
           canceled: false,
           actionResults: ["已完成删除：第一讲"],
@@ -56,11 +68,163 @@ describe("assistantSession", () => {
       ],
       draft: "继续问",
     });
+    expect(getAssistantInteractionState(restored.turns[0])).toMatchObject({
+      status: "expired",
+      checkpoint: { expiredReason: "restart" },
+    });
 
     const stored = JSON.parse(localStorage.getItem(assistantSessionStorageKey) ?? "{}") as {
-      turns?: Array<{ actions?: unknown[]; actionsExpired?: boolean }>;
+      turns?: Array<{
+        actions?: unknown[];
+        actionsExpired?: boolean;
+        checkpoint?: { status?: string };
+      }>;
     };
     expect(stored.turns?.[0]).toMatchObject({ actions: [], actionsExpired: true });
+    expect(stored.turns?.[0].checkpoint?.status).toBe("awaiting_user");
+  });
+
+  it("keeps checkpoint descriptions non-executable and strips sensitive action parameters", () => {
+    writeAssistantSession(
+      {
+        turns: [
+          {
+            id: "t1",
+            question: "准备这些操作",
+            answer: "请确认",
+            actions: [
+              {
+                kind: "propose_import",
+                url: "https://example.test/private-video",
+                title: "待导入 https://example.test/private-video",
+                course_id: "course-secret-id",
+                course_name: "课程甲",
+              },
+              {
+                kind: "propose_create_course",
+                name: "新课程",
+                root_path: "/Users/test/private-course",
+              },
+              {
+                kind: "propose_setting",
+                key: "provider_api_key",
+                label: "模型设置",
+                current: "old-secret-value",
+                value: "new-secret-value",
+              },
+              {
+                kind: "propose_rename",
+                video_id: "video-secret-id",
+                current_title: "第一讲",
+                new_title: "内部新标题",
+              },
+              { kind: "seek_to", at_ms: 98_765 },
+            ],
+            tools: [],
+            canceled: false,
+            actionResults: [],
+          },
+        ],
+        history: [],
+        draft: "",
+      },
+      2_000,
+    );
+
+    const stored = JSON.parse(localStorage.getItem(assistantSessionStorageKey) ?? "{}") as {
+      turns?: Array<{ checkpoint?: unknown }>;
+    };
+    const checkpointText = JSON.stringify(stored.turns?.[0].checkpoint);
+    expect(checkpointText).not.toContain("example.test");
+    expect(checkpointText).not.toContain("private-course");
+    expect(checkpointText).not.toContain("secret-id");
+    expect(checkpointText).not.toContain("secret-value");
+    expect(checkpointText).not.toContain("内部新标题");
+    expect(checkpointText).not.toContain("98765");
+    expect(readAssistantSession(2_001).turns[0].checkpoint?.targets).toEqual([
+      { action: "propose_import", courseLabel: "课程甲" },
+      { action: "propose_create_course", label: "新课程" },
+      { action: "propose_setting", label: "模型设置" },
+      { action: "propose_rename", label: "第一讲" },
+      { action: "seek_to" },
+    ]);
+  });
+
+  it("preserves same-named targets as separate display records without persisting their ids", () => {
+    writeAssistantSession(
+      {
+        turns: [
+          {
+            id: "same-name",
+            question: "删除两门课里的导论",
+            answer: "请逐项确认",
+            actions: [
+              {
+                kind: "propose_delete",
+                video_id: "video-a",
+                course_id: "course-a",
+                course_name: "课程甲",
+                title: "导论",
+              },
+              {
+                kind: "propose_delete",
+                video_id: "video-b",
+                course_id: "course-b",
+                course_name: "课程乙",
+                title: "导论",
+              },
+            ],
+            tools: [],
+            canceled: false,
+            actionResults: [],
+          },
+        ],
+        history: [],
+        draft: "",
+      },
+      3_000,
+    );
+
+    const checkpoint = readAssistantSession(3_001).turns[0].checkpoint;
+    expect(checkpoint?.targets).toEqual([
+      { action: "propose_delete", label: "导论", courseLabel: "课程甲" },
+      { action: "propose_delete", label: "导论", courseLabel: "课程乙" },
+    ]);
+    expect(JSON.stringify(checkpoint)).not.toContain("video-a");
+    expect(JSON.stringify(checkpoint)).not.toContain("course-a");
+  });
+
+  it("marks an old checkpoint as timed out and still never restores stale resource actions", () => {
+    const savedAt = 4_000;
+    writeAssistantSession(
+      {
+        turns: [
+          {
+            id: "deleted-resource",
+            question: "打开之后可能已删除的视频",
+            answer: "已准备",
+            actions: [
+              { kind: "open_video", video_id: "deleted-video", title: "已删除的课" },
+            ],
+            tools: ["open_video"],
+            canceled: false,
+            actionResults: [],
+          },
+        ],
+        history: [],
+        draft: "",
+      },
+      savedAt,
+    );
+
+    const restored = readAssistantSession(savedAt + ASSISTANT_CHECKPOINT_TTL_MS);
+    expect(restored.turns[0].actions).toEqual([]);
+    expect(restored.turns[0].checkpoint).toMatchObject({
+      status: "expired",
+      expiredReason: "timeout",
+      targets: [{ action: "open_video", label: "已删除的课" }],
+    });
+    expect(JSON.stringify(restored.turns[0].checkpoint)).not.toContain("deleted-video");
   });
 
   it("does not call an already-applied theme switch an expired action", () => {
@@ -89,6 +253,33 @@ describe("assistantSession", () => {
       { role: "user", content: "切到夜间" },
       { role: "assistant", content: "已切换" },
     ]);
+  });
+
+  it("keeps legacy actionsExpired records visible without inventing a checkpoint", () => {
+    localStorage.setItem(
+      assistantSessionStorageKey,
+      JSON.stringify({
+        turns: [
+          {
+            id: "legacy",
+            question: "旧问题",
+            answer: "旧回答",
+            actions: [{ kind: "propose_delete", video_id: "must-not-revive" }],
+            actionsExpired: true,
+            tools: [],
+            canceled: false,
+            actionResults: [],
+          },
+        ],
+        history: [],
+        draft: "",
+      }),
+    );
+
+    const turn = readAssistantSession(5_000).turns[0];
+    expect(turn.actions).toEqual([]);
+    expect(turn.checkpoint).toBeUndefined();
+    expect(getAssistantInteractionState(turn)).toEqual({ status: "expired" });
   });
 
   it("remembers that a turn ran out of steps instead of restoring it as a finished answer", () => {
