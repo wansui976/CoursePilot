@@ -1583,11 +1583,13 @@ describe("确认卡", () => {
 
     const deleteButton = await screen.findByRole("button", { name: "确认删除" });
     const settingButton = await screen.findByRole("button", { name: "确认修改" });
-    fireEvent.click(deleteButton);
+    act(() => {
+      fireEvent.click(deleteButton);
+      fireEvent.click(settingButton);
+    });
     await waitFor(() => expect(mockIpc.videos.delete).toHaveBeenCalledWith("v2"));
-    expect(settingButton).toBeDisabled();
-    fireEvent.click(settingButton);
     expect(mockIpc.settings.set).not.toHaveBeenCalled();
+    expect(settingButton).toBeDisabled();
 
     await act(async () => {
       finishDelete();
