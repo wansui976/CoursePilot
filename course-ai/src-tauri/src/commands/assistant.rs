@@ -319,11 +319,13 @@ pub async fn cmd_assistant_ask(
                             name: call.name.clone(),
                         });
                     }
-                    AgentEvent::ToolFinished(call) => emit(AssistantEvent::ToolFinished {
-                        call_id: call.id.clone(),
-                        name: call.name.clone(),
-                        canceled: cancel.load(std::sync::atomic::Ordering::SeqCst),
-                    }),
+                    AgentEvent::ToolFinished { call, canceled } => {
+                        emit(AssistantEvent::ToolFinished {
+                            call_id: call.id.clone(),
+                            name: call.name.clone(),
+                            canceled,
+                        })
+                    }
                     AgentEvent::HitTurnLimit => {}
                 },
             )

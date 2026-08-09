@@ -123,8 +123,9 @@ pub enum AgentEvent<'a> {
     Content(&'a str),
     /// 模型这一轮要求调某个工具，即将执行。
     ToolStarted(&'a ToolCall),
-    /// 该工具执行完毕（成功与否都算完毕）。
-    ToolFinished(&'a ToolCall),
+    /// 该工具执行完毕（成功与否都算完毕）。`canceled` 只描述这次工具 future 是否被中断，
+    /// 不从整轮取消标志事后推断，避免把刚好在完成边界收到取消的成功调用误报为取消。
+    ToolFinished { call: &'a ToolCall, canceled: bool },
     /// 带工具的循环撞到轮次或上下文预算上限，已经转入强制总结。
     HitTurnLimit,
 }
@@ -357,7 +358,10 @@ pub async fn run<T: ToolBox>(
                 Ok(()) => {
                     on_event(AgentEvent::ToolStarted(call));
                     let outcome = run_tool_or_cancel(tools, call, cancel).await;
-                    on_event(AgentEvent::ToolFinished(call));
+                    on_event(AgentEvent::ToolFinished {
+                        call,
+                        canceled: outcome.is_none(),
+                    });
                     outcome
                 }
                 // 被策略拒绝的调用从未进入领域 dispatch，不能对界面谎报成“工具已开始”。
@@ -492,8 +496,6 @@ mod tests {
             arguments: args.into(),
         }
     }
-
-    fn ignore_event(_event: AgentEvent<'_>) {}
 
     fn says(text: &str) -> crate::llm::ChatResponse {
         crate::llm::ChatResponse {
@@ -1038,6 +1040,7 @@ mod tests {
             cancel: &cancel,
             executed: RefCell::new(Vec::new()),
         };
+        let mut finished = Vec::new();
         let out = run(
             &provider,
             "m",
@@ -1045,7 +1048,11 @@ mod tests {
             vec![ChatMessage::user("做两件事")],
             &tools,
             &cancel,
-            &mut |_| {},
+            &mut |event| {
+                if let AgentEvent::ToolFinished { call, canceled } = event {
+                    finished.push((call.id.clone(), canceled));
+                }
+            },
         )
         .await
         .unwrap();
@@ -1057,6 +1064,11 @@ mod tests {
             .filter_map(|m| m.tool_call_id.clone())
             .collect();
         assert_eq!(answered, ["a", "b"], "两次调用都要有结果，哪怕是「已取消」");
+        assert_eq!(
+            finished,
+            [("a".to_string(), false)],
+            "工具已经返回结果时，即使整轮同时收到取消，也不能把该工具误报为取消"
+        );
     }
 
     #[tokio::test]
@@ -1088,9 +1100,14 @@ mod tests {
         let tools = NeverReturns {
             started: AtomicBool::new(false),
         };
+        let mut finished = Vec::new();
+        let mut on_event = |event: AgentEvent<'_>| {
+            if let AgentEvent::ToolFinished { call, canceled } = event {
+                finished.push((call.id.clone(), canceled));
+            }
+        };
 
         let scenario = async {
-            let mut on_event = ignore_event;
             let stop_when_started = async {
                 while !tools.started.load(Ordering::SeqCst) {
                     tokio::task::yield_now().await;
@@ -1116,6 +1133,11 @@ mod tests {
             .await
             .expect("停止后不该继续等待挂起的工具");
         assert!(out.canceled);
+        assert_eq!(
+            finished,
+            [("running".to_string(), true)],
+            "只有真正被中断的工具才应标记为 canceled"
+        );
 
         let results: Vec<(&str, &str)> = out
             .messages

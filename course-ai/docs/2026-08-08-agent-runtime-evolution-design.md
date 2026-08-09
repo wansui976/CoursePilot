@@ -91,6 +91,7 @@ stateDiagram-v2
 
 - 每个 `TurnStarted` 先于该轮的正文和思考增量；
 - 每个实际开始的 `ToolStarted` 必须恰好对应一个 `ToolFinished`；
+- `ToolFinished.canceled` 由工具 future 是否被中断决定，不在命令层根据整轮取消标志重新推断；
 - 被预算拒绝、尚未开始的工具不冒充已执行工具；
 - 最终 outcome 是终态事实来源，流式事件只用于过程显示。
 
