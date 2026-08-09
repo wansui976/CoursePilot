@@ -151,8 +151,7 @@ describe("theme store light/dark transition", () => {
     expect(root.style.getPropertyValue("--theme-circle-x")).toBe("");
   });
 
-  it("keeps the circular reveal even when visible heavy DOM is present", async () => {
-    vi.useFakeTimers();
+  it("switches instantly from an explicit origin when visible heavy DOM is present", () => {
     const startViewTransition = vi.fn((cb: () => void) => {
       cb();
       return { finished: Promise.resolve() };
@@ -166,11 +165,9 @@ describe("theme store light/dark transition", () => {
     setThemeToggleOrigin(24, 680);
     useTheme.getState().toggle();
 
-    // 有起点优先于重 DOM 瞬切：仍走圆形揭开（此处为 VT）。
-    expect(startViewTransition).toHaveBeenCalledTimes(1);
-    expect(document.documentElement.classList.contains("theme-circle-vt")).toBe(true);
+    expect(startViewTransition).not.toHaveBeenCalled();
+    expect(document.documentElement.classList.contains("theme-circle-vt")).toBe(false);
     expect(useTheme.getState().effective).toBe("dark");
-    await vi.advanceTimersByTimeAsync(1100);
   });
 
   it("falls back to the whole-tree transition class without view transitions", () => {
@@ -199,10 +196,7 @@ describe("theme store light/dark transition", () => {
     expect(document.documentElement.classList.contains("theme-animating")).toBe(false);
   });
 
-  it("still reveals the circle on an explicit toggle even under reduced-motion", async () => {
-    // 回归：WKWebView 常把 prefers-reduced-motion 报成 true,早退曾把整段圆动画吞掉,
-    // 表现为「只切色、永远看不到圆」。用户亲手点击(带起点)必须照常揭开。
-    vi.useFakeTimers();
+  it("switches instantly from an explicit origin under reduced-motion", () => {
     stubReducedMotion(true);
     const startViewTransition = vi.fn((cb: () => void) => {
       cb();
@@ -213,10 +207,12 @@ describe("theme store light/dark transition", () => {
     setThemeToggleOrigin(20, 700);
     useTheme.getState().toggle();
 
-    expect(startViewTransition).toHaveBeenCalledTimes(1);
-    expect(document.documentElement.classList.contains("theme-circle-vt")).toBe(true);
     expect(useTheme.getState().effective).toBe("dark");
-    await vi.advanceTimersByTimeAsync(1100);
+    expect(startViewTransition).not.toHaveBeenCalled();
+    expect(document.documentElement.classList.contains("theme-circle-vt")).toBe(false);
+    expect(document.documentElement.classList.contains("theme-animating")).toBe(false);
+    expect(document.querySelector("[data-theme-circle-reveal]")).toBeNull();
+    expect(document.documentElement.style.getPropertyValue("--theme-circle-x")).toBe("");
   });
 
   it("does not animate when the effective theme is unchanged", () => {

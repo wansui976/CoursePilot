@@ -674,10 +674,13 @@ export function VideoPlayer({
           <video
             ref={ref}
             aria-label="课程视频播放器"
+            data-theme-heavy=""
             src={src}
             playsInline
             disablePictureInPicture
-            className={`h-full w-full bg-black object-contain ${isIosImmersive ? "pointer-events-none" : ""}`}
+            className={`h-full w-full object-contain ${
+              fullscreen ? "bg-black" : "bg-[var(--surface-stage)]"
+            } ${isIosImmersive ? "pointer-events-none" : ""}`}
             // 提升到独立 GPU 合成层：暂停后让这一帧留在自己的层上，减少回退到
             // 「栅格化再缩放」的软化；backface-visibility 进一步固定层、避免半像素抖动。
             style={{

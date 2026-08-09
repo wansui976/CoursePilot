@@ -50,6 +50,9 @@ describe("VideoPlayer iOS gestures", () => {
 
     const video = screen.getByLabelText("课程视频播放器");
     expect(video).toHaveClass("h-full", "w-full", "object-contain");
+    expect(video).toHaveClass("bg-[var(--surface-stage)]");
+    expect(video).not.toHaveClass("bg-black");
+    expect(video).toHaveAttribute("data-theme-heavy");
     expect(video.parentElement).toHaveClass("absolute", "inset-0", "overflow-hidden");
     expect(video.parentElement).not.toHaveClass("rounded-xl");
   });

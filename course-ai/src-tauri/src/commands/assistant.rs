@@ -445,7 +445,6 @@ fn assistant_error_kind(error: &AppError) -> &'static str {
         AppError::NotFound(_) => "not_found",
         AppError::Pipeline(_) => "pipeline",
         AppError::Permanent(_) => "permanent",
-        AppError::Account { .. } => "account",
         AppError::Other(_) => "other",
     }
 }

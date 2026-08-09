@@ -49,8 +49,8 @@ function consumeThemeOrigin(): { x: number; y: number } | null {
   return origin;
 }
 
-/** 有可见的大 DOM(标了 data-theme-heavy,如打开的文稿)在场时瞬切:任何动画方案在
- *  数千节点上都会放大成本(VT 双全屏快照 / 全树逐元素过渡)。轻场景才保留渐变。
+/** 有可见的高成本内容(标了 data-theme-heavy,如视频或打开的文稿)在场时瞬切:任何动画方案在
+ *  视频合成层或数千节点上都会放大成本(VT 双全屏快照 / 全树逐元素过渡)。轻场景才保留渐变。
  *  引擎无 checkVisibility 时按「存在即算」保守处理(宁可瞬切不冒卡顿风险)。 */
 function hasVisibleHeavyDom(): boolean {
   for (const el of document.querySelectorAll<HTMLElement>("[data-theme-heavy]")) {
@@ -253,18 +253,18 @@ function circleRevealTheme(
 
 /** 应用明暗切换(mutate 里做真正的状态变更),按能力与场景选动画:
  *  1. reduce-motion:无论是否由按钮点击触发都直接瞬切;
- *  2. 有起点(点/键切换按钮):从按钮圆形扩散盖满整屏再切色(CSS transform 覆盖层);
- *  3. 无起点 + 可见重 DOM(data-theme-heavy):直接切——避免 VT/全树过渡放大成本;
+ *  2. 可见高成本内容(data-theme-heavy):直接切——避免 VT/全树过渡放大成本;
+ *  3. 有起点(点/键切换按钮):从按钮圆形扩散盖满整屏再切色(CSS transform 覆盖层);
  *  4. 无起点:View Transitions 交叉淡化,或全树过渡类兜底。 */
 function applyThemeChange(mutate: () => void, next: EffectiveTheme): void {
   if (typeof document === "undefined") return mutate();
   const origin = consumeThemeOrigin();
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return mutate();
+  if (hasVisibleHeavyDom()) return mutate();
   if (origin) {
     circleRevealTheme(mutate, next, origin);
     return;
   }
-  if (hasVisibleHeavyDom()) return mutate();
   if (typeof document.startViewTransition === "function") {
     // flushSync:让 React 在快照回调内同步提交 data-theme,否则新快照可能截到旧画面。
     document.startViewTransition(() => flushSync(mutate));
