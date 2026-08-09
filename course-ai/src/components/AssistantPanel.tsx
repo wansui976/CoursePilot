@@ -56,7 +56,13 @@ import {
 import { useInlineAsk } from "@/stores/inlineAsk";
 import { useTheme } from "@/stores/theme";
 import { renderMarkdown } from "@/lib/renderMarkdown";
-import type { AssistantAction, AssistantContext, AssistantMessage } from "@/lib/types";
+import type {
+  AgentStopReason,
+  AssistantAction,
+  AssistantContext,
+  AssistantMessage,
+  AssistantReply,
+} from "@/lib/types";
 
 /**
  * 常驻的全局助手面板。
@@ -167,6 +173,13 @@ type Turn = AssistantTurnRecord & {
   /** 只存在于当前流式请求中；完成后不落入会话存储。 */
   activeTool?: { callId: string; name: string };
 };
+
+function normalizedStopReason(reply: AssistantReply): AgentStopReason {
+  if (reply.stop_reason) return reply.stop_reason;
+  if (reply.canceled) return "canceled";
+  if (reply.hit_turn_limit) return "limit_reached";
+  return "completed";
+}
 
 function formatPosition(ms: number) {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -1048,8 +1061,10 @@ export function AssistantPanel({
       );
       if (!mountedRef.current) return;
       flushStream();
+      const stopReason = normalizedStopReason(reply);
+      const serverCanceled = stopReason === "canceled";
       const locallyStopped = locallyStoppedRequestsRef.current.has(requestId);
-      const canceled = reply.canceled || locallyStopped;
+      const canceled = serverCanceled || locallyStopped;
       // 后端也会清空取消轮次的动作；这里再守一次，避免旧后端或兼容端点让用户
       // 点停以后仍切主题、导航或冒出待确认操作。
       const actions = canceled ? [] : reply.actions;
@@ -1074,7 +1089,7 @@ export function AssistantPanel({
                 // cancel IPC 与已完成响应赛跑时，旧后端可能仍回 canceled=false。此时整轮
                 // history 已被丢弃，回答也不能显示成下一轮模型根本没见过的幽灵上下文。
                 answer:
-                  locallyStopped && !reply.canceled
+                  locallyStopped && !serverCanceled
                     ? ""
                     : capAssistantText(reply.answer, MAX_ASSISTANT_ANSWER_CHARS),
                 actions,
@@ -1082,7 +1097,7 @@ export function AssistantPanel({
                 canceled,
                 // 用户叫停的那一轮已经有自己的说明，再挂一条「没得出结论」是在替它
                 // 找借口——它没转不出来，是被你按停的。
-                hitTurnLimit: reply.hit_turn_limit && !canceled,
+                hitTurnLimit: stopReason === "limit_reached" && !canceled,
                 activeTool: undefined,
                 pending: false,
               }

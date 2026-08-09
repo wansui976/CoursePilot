@@ -1149,6 +1149,35 @@ describe("AssistantPanel", () => {
     expect(screen.getByText("我先查一下这门课有哪些视频")).toBeInTheDocument();
   });
 
+  it("以后端 stop_reason 为准识别轮次上限", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        answer: "我还在整理",
+        stop_reason: "limit_reached",
+        hit_turn_limit: false,
+      }),
+    );
+    renderPanel();
+    await ask("继续整理");
+
+    expect(await screen.findByText(/没能得出结论/)).toBeInTheDocument();
+  });
+
+  it("强制总结成功时不被旧的轮次上限字段误报为未完成", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        answer: "这是收束后的完整总结",
+        stop_reason: "summarized_after_limit",
+        hit_turn_limit: true,
+      }),
+    );
+    renderPanel();
+    await ask("总结这门课");
+
+    expect(await screen.findByText("这是收束后的完整总结")).toBeInTheDocument();
+    expect(screen.queryByText(/没能得出结论/)).not.toBeInTheDocument();
+  });
+
   it("一个字都没回时不留一片空白，并且就地给出重试入口", async () => {
     // 这是最糟的一种：问完之后什么都没有，和程序坏了长得一模一样。
     // 而那排重新回答按钮挂在回答上，恰恰是最需要重试的这种情况反而没有入口。
@@ -1183,6 +1212,27 @@ describe("AssistantPanel", () => {
     expect(screen.queryByText(/没能得出结论/)).not.toBeInTheDocument();
     // 「已停止」已经把话说完了，再补一句「这次没有给出回答」是同一件事说两遍。
     expect(screen.queryByText("助手这次没有给出回答。")).not.toBeInTheDocument();
+  });
+
+  it("stop_reason 标记取消时不执行旧字段携带的动作", async () => {
+    useTheme.setState({ pref: "light" });
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        answer: "",
+        stop_reason: "canceled",
+        canceled: false,
+        actions: [
+          { kind: "set_theme", pref: "dark" },
+          { kind: "propose_delete", video_id: "v1", title: "第一讲" },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("停止并删除它");
+
+    expect(await screen.findByText("已停止，未继续执行")).toBeInTheDocument();
+    expect(useTheme.getState().pref).toBe("light");
+    expect(screen.queryByRole("button", { name: "确认删除" })).not.toBeInTheDocument();
   });
 
   it("正常答完的一轮不挂任何未完成说明", async () => {

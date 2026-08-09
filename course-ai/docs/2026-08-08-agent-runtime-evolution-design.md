@@ -83,6 +83,7 @@ stateDiagram-v2
 
 基础设施错误仍通过 `AppResult::Err` 和 `AssistantEvent::Error` 返回，不伪装成正常 outcome。
 现有 `canceled`、`hit_turn_limit` 暂时保留为兼容字段，但必须由停止原因推导。
+前端收到 `stop_reason` 时必须以它为唯一终态事实来源；仅当该字段缺失时，才回退读取两个兼容布尔值。
 
 ### 4.2 生命周期事件
 
@@ -148,7 +149,7 @@ stateDiagram-v2
 
 - 新增 `AgentStopReason`；
 - 所有 `AgentOutcome` 通过统一构造函数生成兼容标志；
-- `AssistantReply` 返回停止原因，前端类型先作为兼容可选字段接收；
+- `AssistantReply` 返回停止原因；前端优先按该字段归一化终态，并为旧后端保留布尔字段回退；
 - 命令层记录无正文的开始、完成和错误日志；
 - 为正常完成、封顶后总结、封顶失败和取消补充终态断言。
 
