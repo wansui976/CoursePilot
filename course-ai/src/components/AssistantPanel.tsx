@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -17,6 +18,7 @@ import {
   ChevronRight,
   Copy,
   GripHorizontal,
+  History as HistoryIcon,
   LoaderCircle,
   MessageSquarePlus,
   RefreshCw,
@@ -31,17 +33,27 @@ import { AssistantToolChips } from "@/components/AssistantToolChips";
 import {
   boundTrustedAssistantHistory,
   capAssistantText,
-  clearAssistantSession,
   getAssistantInteractionState,
   historyBeforeLastQuestion,
   MAX_ASSISTANT_ANSWER_CHARS,
   MAX_ASSISTANT_REASONING_CHARS,
-  readAssistantSession,
   writeAssistantSession,
+  type AssistantSession,
   type AssistantCheckpoint,
   type AssistantCheckpointActionKind,
   type AssistantTurnRecord,
 } from "@/lib/assistantSession";
+import {
+  appendRecentAssistantQuestion,
+  createAssistantConversation,
+  readAssistantConversation,
+  readAssistantConversations,
+  readRecentAssistantQuestions,
+  saveAssistantConversation,
+  tryCreateAssistantConversation,
+  trySetActiveAssistantConversation,
+  type AssistantConversationsState,
+} from "@/lib/assistantConversations";
 import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
 import { isMobile, isTablet } from "@/lib/platform";
@@ -79,7 +91,7 @@ const SESSION_PERSIST_DELAY_MS = 250;
 const MAX_RENDERED_TURNS = 50;
 const MAX_STREAMED_TOOLS = 50;
 const FOCUSABLE_SELECTOR =
-  'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+  'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), summary, [href], [tabindex]:not([tabindex="-1"])';
 /// 收起时那颗球的直径。停靠位置的夹取与展开/收起时的居中都按它算，
 /// 改了尺寸这些数会自动跟上。
 const LAUNCHER_SIZE = 56;
@@ -173,6 +185,31 @@ type Turn = AssistantTurnRecord & {
   /** 只存在于当前流式请求中；完成后不落入会话存储。 */
   activeTool?: { callId: string; name: string };
 };
+
+const EMPTY_ASSISTANT_SESSION: AssistantSession = { turns: [], history: [], draft: "" };
+
+function initialAssistantConversation() {
+  let conversations = readAssistantConversations();
+  if (!conversations.activeId) conversations = createAssistantConversation();
+  const activeId = conversations.activeId;
+  const session = activeId
+    ? (readAssistantConversation(activeId)?.session ?? EMPTY_ASSISTANT_SESSION)
+    : EMPTY_ASSISTANT_SESSION;
+  return { conversations, session };
+}
+
+function formatConversationTime(updatedAt: number, locale: string) {
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(updatedAt));
+  } catch {
+    return "";
+  }
+}
 
 function normalizedStopReason(reply: AssistantReply): AgentStopReason {
   if (reply.stop_reason) return reply.stop_reason;
@@ -278,14 +315,20 @@ export function AssistantPanel({
   /** 课程库窄屏下底部有 56px 主导航，抽屉和入口都要避开它。 */
   bottomNavigationVisible?: boolean;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { open, side, width, setOpen, dock, setWidth } = useAssistantUi();
-  const [initialSession] = useState(readAssistantSession);
+  const [initialConversation] = useState(initialAssistantConversation);
+  const initialSession = initialConversation.session;
+  const [conversationState, setConversationState] = useState<AssistantConversationsState>(
+    initialConversation.conversations,
+  );
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [input, setInput] = useState(initialSession.draft);
   const [busy, setBusy] = useState(false);
   const [actionExecutionCount, setActionExecutionCount] = useState(0);
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState("");
+  const [statusAnnouncement, setStatusAnnouncement] = useState("");
   const [turns, setTurns] = useState<Turn[]>(initialSession.turns);
   const [history, setHistory] = useState<AssistantMessage[]>(initialSession.history);
   const [conversationEpoch, setConversationEpoch] = useState(0);
@@ -293,12 +336,14 @@ export function AssistantPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const followScrollRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const historyButtonRef = useRef<HTMLButtonElement>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const dragRef = useRef<DragSession | null>(null);
   const dragCleanupRef = useRef<(() => void) | null>(null);
   const suppressLauncherClickRef = useRef(false);
   const activeRequestRef = useRef<string | null>(null);
+  const activeConversationIdRef = useRef(initialConversation.conversations.activeId);
   const actionExecutionCountRef = useRef(0);
   const mountedRef = useRef(true);
   const locallyStoppedRequestsRef = useRef(new Set<string>());
@@ -306,6 +351,9 @@ export function AssistantPanel({
   const conversationEpochRef = useRef(0);
   const copyTimerRef = useRef<number | null>(null);
   const persistTimerRef = useRef<number | null>(null);
+  const recentQuestionsRef = useRef(readRecentAssistantQuestions());
+  const recentQuestionIndexRef = useRef<number | null>(null);
+  const recentQuestionDraftRef = useRef(initialSession.draft);
   const hadPendingTurnRef = useRef(initialSession.turns.some((turn) => turn.pending));
   const sessionSnapshotRef = useRef({
     turns: initialSession.turns,
@@ -339,25 +387,183 @@ export function AssistantPanel({
     ? t("assistant.usingTool", { tool: activeToolLabel })
     : pendingTurn?.answer
       ? t("assistant.answering")
-      : pendingTurn?.reasoning
-        ? t("assistant.thinkingStatus")
-        : t("assistant.thinkingWithTools");
+      : pendingTurn?.tools.length
+        ? t("assistant.organizing")
+        : t("assistant.thinkingStatus");
   const setThemePref = useTheme((state) => state.setPref);
   const pendingInlineAsk = useInlineAsk((state) => state.pending);
   const clearInlineAsk = useInlineAsk((state) => state.clear);
   const scopeLabel = contextLabel(context, t);
   const actionExecutionBusy = actionExecutionCount > 0;
+  const generationStatus = stopping ? t("assistant.stopping") : streamingLabel;
 
-  function beginActionExecution() {
-    if (actionExecutionCountRef.current > 0) return false;
-    actionExecutionCountRef.current = 1;
-    setActionExecutionCount(1);
+  // 视觉阶段和读屏通知共用一个 live region，但不能互相遮住：旧确认卡可能在新一轮
+  // 生成期间完成，动作回执必须先被读屏播报，再由下一次阶段变化接管通知文本。
+  useEffect(() => {
+    if (busy) setStatusAnnouncement(generationStatus);
+  }, [busy, generationStatus]);
+
+  const persistConversationSnapshot = useCallback(
+    (conversationId: string | null, snapshot: AssistantSession, now = Date.now()) => {
+      if (!conversationId) return false;
+      const result = saveAssistantConversation({ id: conversationId, session: snapshot }, now);
+      // 固定 key 只镜像当前会话，供旧版本和索引损坏时回退。迟到的旧会话定时器
+      // 仍可按捕获 id 保存自己的快照，但绝不能覆盖当前镜像。
+      if (result.snapshotSaved && conversationId === activeConversationIdRef.current) {
+        writeAssistantSession(snapshot, now);
+      }
+      if (mountedRef.current) setConversationState(result.state);
+      if (!result.snapshotSaved && mountedRef.current) {
+        setError(t("assistant.conversationSaveFailed"));
+      }
+      return result.snapshotSaved;
+    },
+    [t],
+  );
+
+  const clearScheduledPersistence = useCallback(() => {
+    if (persistTimerRef.current == null) return;
+    window.clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = null;
+  }, []);
+
+  function resetRecentQuestionNavigation(draft: string) {
+    recentQuestionIndexRef.current = null;
+    recentQuestionDraftRef.current = draft;
+  }
+
+  function setInputFromUser(value: string) {
+    resetRecentQuestionNavigation(value);
+    setInput(value);
+  }
+
+  function moveInputCaretToEnd() {
+    requestAnimationFrame(() => {
+      const textarea = inputRef.current;
+      if (!textarea) return;
+      const end = textarea.value.length;
+      textarea.setSelectionRange(end, end);
+    });
+  }
+
+  function navigateRecentQuestions(event: KeyboardEvent<HTMLTextAreaElement>) {
+    const currentIndex = recentQuestionIndexRef.current;
+    if (
+      (event.key !== "ArrowUp" && event.key !== "ArrowDown") ||
+      event.shiftKey ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.nativeEvent.isComposing
+    ) {
+      return false;
+    }
+
+    if (event.currentTarget.selectionStart !== event.currentTarget.selectionEnd) {
+      if (currentIndex != null) resetRecentQuestionNavigation(event.currentTarget.value);
+      return false;
+    }
+    // 召回后光标会停在末尾，连续上下键继续浏览；一旦用户把光标移进文本中间，
+    // 就把当前内容当成普通草稿，方向键交还给 textarea 的多行编辑。
+    if (
+      currentIndex != null &&
+      event.currentTarget.selectionStart !== event.currentTarget.value.length
+    ) {
+      resetRecentQuestionNavigation(event.currentTarget.value);
+      return false;
+    }
+
+    const questions = recentQuestionsRef.current;
+    if (event.key === "ArrowUp") {
+      if (questions.length === 0 || (currentIndex == null && event.currentTarget.selectionStart !== 0)) {
+        return false;
+      }
+      if (currentIndex == null) recentQuestionDraftRef.current = event.currentTarget.value;
+      const nextIndex = Math.max(0, (currentIndex ?? questions.length) - 1);
+      event.preventDefault();
+      recentQuestionIndexRef.current = nextIndex;
+      setInput(questions[nextIndex]);
+      moveInputCaretToEnd();
+      return true;
+    }
+
+    if (currentIndex == null) return false;
+    event.preventDefault();
+    if (currentIndex < questions.length - 1) {
+      const nextIndex = currentIndex + 1;
+      recentQuestionIndexRef.current = nextIndex;
+      setInput(questions[nextIndex]);
+    } else {
+      recentQuestionIndexRef.current = null;
+      setInput(recentQuestionDraftRef.current);
+    }
+    moveInputCaretToEnd();
     return true;
   }
 
-  function endActionExecution() {
+  function updateTrackedTurns(update: (previous: Turn[]) => Turn[]) {
+    sessionSnapshotRef.current = {
+      ...sessionSnapshotRef.current,
+      turns: update(sessionSnapshotRef.current.turns),
+    };
+    if (mountedRef.current) setTurns(update);
+  }
+
+  function beginActionExecution(
+    turnId: string,
+    executingActions: AssistantAction[],
+    epoch: number,
+  ) {
+    if (
+      epoch !== conversationEpochRef.current ||
+      executingActions.length === 0 ||
+      actionExecutionCountRef.current > 0
+    ) {
+      return false;
+    }
+    actionExecutionCountRef.current = 1;
+    setActionExecutionCount(1);
+    const executing = new Set(executingActions);
+    updateTrackedTurns((previous) =>
+      previous.map((turn) => {
+        if (turn.id !== turnId) return turn;
+        const indexes = new Set(turn.executingActionIndexes ?? []);
+        turn.actions.forEach((action, index) => {
+          if (executing.has(action)) indexes.add(index);
+        });
+        return { ...turn, executingActionIndexes: [...indexes].sort((a, b) => a - b) };
+      }),
+    );
+    // 不可逆动作边界不能只等防抖或 React cleanup；窗口硬关闭时两者都不保证运行。
+    if (mountedRef.current) {
+      persistConversationSnapshot(activeConversationIdRef.current, sessionSnapshotRef.current);
+    }
+    return true;
+  }
+
+  function endActionExecution(
+    turnId: string,
+    finishedActions: AssistantAction[],
+    epoch: number,
+  ) {
     actionExecutionCountRef.current = 0;
-    setActionExecutionCount(0);
+    if (mountedRef.current) setActionExecutionCount(0);
+    if (epoch !== conversationEpochRef.current || finishedActions.length === 0) return;
+    const finished = new Set(finishedActions);
+    updateTrackedTurns((previous) =>
+      previous.map((turn) => {
+        if (turn.id !== turnId || !turn.executingActionIndexes?.length) return turn;
+        const indexes = turn.executingActionIndexes.filter(
+          (index) => !finished.has(turn.actions[index]),
+        );
+        return indexes.length === turn.executingActionIndexes.length
+          ? turn
+          : { ...turn, executingActionIndexes: indexes.length > 0 ? indexes : undefined };
+      }),
+    );
+    if (mountedRef.current) {
+      persistConversationSnapshot(activeConversationIdRef.current, sessionSnapshotRef.current);
+    }
   }
 
   function markTurnActionsResolved(
@@ -367,18 +573,33 @@ export function AssistantPanel({
   ) {
     if (epoch !== conversationEpochRef.current || resolvedActions.length === 0) return;
     const resolved = new Set(resolvedActions);
-    setTurns((previous) =>
+    updateTrackedTurns((previous) =>
       previous.map((turn) => {
         if (turn.id !== turnId) return turn;
         const indexes = new Set(turn.resolvedActionIndexes ?? []);
+        const resolvedNow = new Set<number>();
         turn.actions.forEach((action, index) => {
-          if (resolved.has(action)) indexes.add(index);
+          if (resolved.has(action)) {
+            indexes.add(index);
+            resolvedNow.add(index);
+          }
         });
-        return indexes.size === (turn.resolvedActionIndexes?.length ?? 0)
-          ? turn
-          : { ...turn, resolvedActionIndexes: [...indexes].sort((a, b) => a - b) };
+        const executingActionIndexes = turn.executingActionIndexes?.filter(
+          (index) => !resolvedNow.has(index),
+        );
+        return {
+          ...turn,
+          resolvedActionIndexes: [...indexes].sort((a, b) => a - b),
+          executingActionIndexes:
+            executingActionIndexes && executingActionIndexes.length > 0
+              ? executingActionIndexes
+              : undefined,
+        };
       }),
     );
+    if (mountedRef.current) {
+      persistConversationSnapshot(activeConversationIdRef.current, sessionSnapshotRef.current);
+    }
   }
 
   function navigateFromTurn(turn: Turn, action: AssistantAction) {
@@ -431,25 +652,30 @@ export function AssistantPanel({
   }, []);
 
   const pendingQuestion = turns.find((turn) => turn.pending)?.question ?? "";
-  sessionSnapshotRef.current = { turns, history, draft: input || pendingQuestion };
+  const persistedDraft =
+    recentQuestionIndexRef.current == null ? input : recentQuestionDraftRef.current;
+  sessionSnapshotRef.current = { turns, history, draft: persistedDraft || pendingQuestion };
   useEffect(() => {
+    const conversationId = activeConversationIdRef.current;
+    const snapshot = sessionSnapshotRef.current;
     const hasPendingTurn = turns.some((turn) => turn.pending);
     const requestJustFinished = hadPendingTurnRef.current && !hasPendingTurn;
     hadPendingTurnRef.current = hasPendingTurn;
-    if (persistTimerRef.current != null) window.clearTimeout(persistTimerRef.current);
+    clearScheduledPersistence();
     if (requestJustFinished) {
-      writeAssistantSession(sessionSnapshotRef.current);
-      persistTimerRef.current = null;
+      persistConversationSnapshot(conversationId, snapshot);
       return;
     }
-    persistTimerRef.current = window.setTimeout(() => {
-      writeAssistantSession(sessionSnapshotRef.current);
-      persistTimerRef.current = null;
+    const timer = window.setTimeout(() => {
+      persistConversationSnapshot(conversationId, snapshot);
+      if (persistTimerRef.current === timer) persistTimerRef.current = null;
     }, SESSION_PERSIST_DELAY_MS);
+    persistTimerRef.current = timer;
     return () => {
-      if (persistTimerRef.current != null) window.clearTimeout(persistTimerRef.current);
+      window.clearTimeout(timer);
+      if (persistTimerRef.current === timer) persistTimerRef.current = null;
     };
-  }, [history, input, turns]);
+  }, [clearScheduledPersistence, history, input, persistConversationSnapshot, turns]);
 
   useEffect(() => {
     const textarea = inputRef.current;
@@ -465,13 +691,14 @@ export function AssistantPanel({
         ? ""
         : `（${formatMs(pendingInlineAsk.startMs)}）`;
     const draft = t("assistant.explainTranscript", { source, text: pendingInlineAsk.text });
+    recentQuestionIndexRef.current = null;
     setInput((current) =>
       current.trim() ? `${current.trimEnd()}\n\n${draft}` : draft,
     );
     setOpen(true);
     clearInlineAsk();
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, [clearInlineAsk, pendingInlineAsk, setOpen]);
+  }, [clearInlineAsk, pendingInlineAsk, setOpen, t]);
 
   useEffect(() => {
     if (open || !focusLauncherAfterCloseRef.current) return;
@@ -511,8 +738,8 @@ export function AssistantPanel({
       mountedRef.current = false;
       dragCleanupRef.current?.();
       if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
-      if (persistTimerRef.current != null) window.clearTimeout(persistTimerRef.current);
-      writeAssistantSession(sessionSnapshotRef.current);
+      clearScheduledPersistence();
+      persistConversationSnapshot(activeConversationIdRef.current, sessionSnapshotRef.current);
       const requestId = activeRequestRef.current;
       if (requestId) {
         locallyStoppedRequests.add(requestId);
@@ -521,7 +748,7 @@ export function AssistantPanel({
         void ipc.assistant.cancel(requestId).catch(() => {});
       }
     };
-  }, []);
+  }, [clearScheduledPersistence, persistConversationSnapshot]);
 
   function measurePanel() {
     const fallback = fallbackPanelSize();
@@ -918,36 +1145,48 @@ export function AssistantPanel({
       ),
     };
     if (event.key === "ArrowLeft" && next.x === VIEWPORT_GAP) {
-      dockToStrip("left", next.y);
+      dockToStrip("left", next.y, true);
     } else if (
       event.key === "ArrowRight" &&
       next.x === viewport.width - panel.width - VIEWPORT_GAP
     ) {
-      dockToStrip("right", next.y);
+      dockToStrip("right", next.y, true);
     } else {
       setPosition(next);
     }
   }
 
-  async function send(suggestedQuestion?: string) {
+  async function send(suggestedQuestion?: string, rememberQuestion = true) {
     const question = (suggestedQuestion ?? input).trim();
     if (!question || busy || activeRequestRef.current) return;
+    const conversationId = activeConversationIdRef.current;
     const requestId = crypto.randomUUID();
     const turnId = crypto.randomUUID();
     const historyAtSend = historyRef.current;
     activeRequestRef.current = requestId;
+    if (rememberQuestion) {
+      recentQuestionsRef.current = appendRecentAssistantQuestion(question);
+    }
     // 新问题是用户主动发起的导航点，无论此前停在哪一段，都把它带到最新内容。
     followScrollRef.current = true;
     setScrolledAway(false);
     // 只清从输入框发出的那一条。点建议、点重新回答时用户可能正打着别的字，
     // 不该被顺手抹掉。
-    if (suggestedQuestion === undefined) setInput("");
+    if (suggestedQuestion === undefined) {
+      resetRecentQuestionNavigation("");
+      setInput("");
+    } else {
+      resetRecentQuestionNavigation(input);
+    }
     setBusy(true);
     setStopping(false);
     setError("");
+    setStatusAnnouncement("");
     // 流式片段只做防抖持久化，但请求刚发出时先落一次草稿；即使应用随后退出，
     // 用户的问题也能回到输入框，而不是随着未完成轮次一起丢失。
-    writeAssistantSession({ turns, history: historyAtSend, draft: input || question });
+    const startingSnapshot = { turns, history: historyAtSend, draft: input || question };
+    sessionSnapshotRef.current = startingSnapshot;
+    persistConversationSnapshot(conversationId, startingSnapshot);
     // 长工具链可能要等几十秒；问题先进入对话，让用户立即确认自己发出了什么。
     setTurns((prev) =>
       [
@@ -1104,13 +1343,21 @@ export function AssistantPanel({
             : turn,
         ),
       );
+      setStatusAnnouncement(
+        canceled ? t("assistant.generationStopped") : t("assistant.responseComplete"),
+      );
     } catch (e) {
       if (!mountedRef.current) return;
       // 把问题放回输入框：让用户能直接重发，而不是重新打一遍。
       // 但输入框里已经有东西时不覆盖——那是他趁等待时打的，比这句重发的价值高。
       setTurns((prev) => prev.filter((turn) => turn.id !== turnId));
-      setInput((current) => (current.trim() ? current : question));
+      setInput((current) => {
+        const next = current.trim() ? current : question;
+        resetRecentQuestionNavigation(next);
+        return next;
+      });
       setError(humanizeError(e));
+      setStatusAnnouncement("");
     } finally {
       locallyStoppedRequestsRef.current.delete(requestId);
       if (activeRequestRef.current === requestId) {
@@ -1155,7 +1402,7 @@ export function AssistantPanel({
     historyRef.current = before;
     setHistory(before);
     setTurns((previous) => previous.filter((item) => item.id !== turn.id));
-    void send(turn.question);
+    void send(turn.question, false);
   }
 
   function jumpToLatest() {
@@ -1171,7 +1418,7 @@ export function AssistantPanel({
     if (epoch !== conversationEpochRef.current) return;
     // 独立追加而不是改写“最后一条回答”：用户可能回头执行旧轮次的卡片，附到最新回答
     // 会把两个不相干的操作串在一起。assistant 角色也不会消耗后端的用户轮次上限。
-    setTurns((previous) =>
+    updateTrackedTurns((previous) =>
       previous.map((turn) =>
         turn.id === turnId
           ? { ...turn, actionResults: [...turn.actionResults, message] }
@@ -1182,7 +1429,15 @@ export function AssistantPanel({
       ...historyRef.current,
       { role: "assistant", content: t("assistant.uiActionResult", { message }) },
     ]);
+    sessionSnapshotRef.current = {
+      ...sessionSnapshotRef.current,
+      history: historyRef.current,
+    };
     setHistory(historyRef.current);
+    setStatusAnnouncement(t("assistant.actionResultAnnouncement", { result: message }));
+    if (mountedRef.current) {
+      persistConversationSnapshot(activeConversationIdRef.current, sessionSnapshotRef.current);
+    }
   }
 
   async function stop() {
@@ -1201,20 +1456,79 @@ export function AssistantPanel({
     }
   }
 
-  function startNewConversation() {
-    if (busy || actionExecutionCountRef.current > 0) return;
+  function activateConversation(
+    conversationId: string,
+    nextState: AssistantConversationsState,
+    session: AssistantSession,
+  ) {
     const nextEpoch = conversationEpochRef.current + 1;
+    activeConversationIdRef.current = conversationId;
     conversationEpochRef.current = nextEpoch;
     setConversationEpoch(nextEpoch);
-    setTurns([]);
+    setConversationState(nextState);
+    setTurns(session.turns);
+    historyRef.current = session.history;
+    setHistory(session.history);
+    sessionSnapshotRef.current = session;
+    hadPendingTurnRef.current = false;
+    setInput(session.draft);
+    resetRecentQuestionNavigation(session.draft);
+    setError("");
+    setStatusAnnouncement("");
+    setCopiedTurnId(null);
+    setBusy(false);
+    setStopping(false);
+    actionExecutionCountRef.current = 0;
+    setActionExecutionCount(0);
     followScrollRef.current = true;
     setScrolledAway(false);
-    historyRef.current = [];
-    setHistory([]);
-    setInput("");
-    setError("");
-    clearAssistantSession();
+    setHistoryOpen(false);
+    writeAssistantSession(session);
     requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  function switchConversation(conversationId: string) {
+    if (busy || activeRequestRef.current || actionExecutionCountRef.current > 0) return;
+    if (conversationId === activeConversationIdRef.current) {
+      setHistoryOpen(false);
+      requestAnimationFrame(() => inputRef.current?.focus());
+      return;
+    }
+    clearScheduledPersistence();
+    if (!persistConversationSnapshot(activeConversationIdRef.current, sessionSnapshotRef.current)) {
+      setError(t("assistant.conversationSaveFailed"));
+      setHistoryOpen(false);
+      requestAnimationFrame(() => inputRef.current?.focus());
+      return;
+    }
+    const target = readAssistantConversation(conversationId);
+    if (!target) return;
+    const activated = trySetActiveAssistantConversation(conversationId);
+    if (!activated.persisted) {
+      setError(t("assistant.conversationSaveFailed"));
+      setHistoryOpen(false);
+      requestAnimationFrame(() => inputRef.current?.focus());
+      return;
+    }
+    activateConversation(conversationId, activated.state, target.session);
+  }
+
+  function startNewConversation() {
+    if (busy || activeRequestRef.current || actionExecutionCountRef.current > 0) return;
+    clearScheduledPersistence();
+    if (
+      activeConversationIdRef.current &&
+      !persistConversationSnapshot(activeConversationIdRef.current, sessionSnapshotRef.current)
+    ) {
+      setError(t("assistant.conversationSaveFailed"));
+      return;
+    }
+    const created = tryCreateAssistantConversation();
+    if (!created.persisted || !created.createdId) {
+      setError(t("assistant.conversationSaveFailed"));
+      return;
+    }
+    activateConversation(created.createdId, created.state, EMPTY_ASSISTANT_SESSION);
   }
 
   const launcherBottom = bottomNavigationVisible
@@ -1305,6 +1619,11 @@ export function AssistantPanel({
         if (event.key !== "Escape") return;
         event.preventDefault();
         event.stopPropagation();
+        if (historyOpen) {
+          setHistoryOpen(false);
+          requestAnimationFrame(() => historyButtonRef.current?.focus());
+          return;
+        }
         collapseToNearestSide(true);
       }}
       data-dragging={mobile ? undefined : dragging}
@@ -1367,6 +1686,30 @@ export function AssistantPanel({
             </span>
           </button>
         )}
+        {(conversationState.conversations.length > 1 || turns.length > 0 || history.length > 0) && (
+          <Button
+            ref={historyButtonRef}
+            size="icon"
+            variant="ghost"
+            aria-label={
+              historyOpen
+                ? t("assistant.closeConversationHistory")
+                : t("assistant.conversationHistory")
+            }
+            title={
+              historyOpen
+                ? t("assistant.closeConversationHistory")
+                : t("assistant.conversationHistory")
+            }
+            aria-expanded={historyOpen}
+            aria-controls="assistant-conversation-history"
+            disabled={busy || actionExecutionBusy}
+            onClick={() => setHistoryOpen((current) => !current)}
+            className="ca-touch-44"
+          >
+            <HistoryIcon className="h-4 w-4" />
+          </Button>
+        )}
         {(turns.length > 0 || history.length > 0) && (
           <Button
             size="icon"
@@ -1375,6 +1718,7 @@ export function AssistantPanel({
             title={t("assistant.newChat")}
             disabled={busy || actionExecutionBusy}
             onClick={startNewConversation}
+            className="ca-touch-44"
           >
             <MessageSquarePlus className="h-4 w-4" />
           </Button>
@@ -1399,18 +1743,87 @@ export function AssistantPanel({
           variant="ghost"
           aria-label={t("assistant.collapseAssistant")}
           title={t("assistant.collapseWithShortcut", { shortcut: toggleShortcutLabel() })}
-          onClick={() => collapseToNearestSide()}
+          onClick={() => collapseToNearestSide(true)}
+          className="ca-touch-44"
         >
           <X className="h-4 w-4" />
         </Button>
       </header>
 
       <div className="relative flex min-h-0 flex-1 flex-col">
+      {historyOpen ? (
+        <section
+          id="assistant-conversation-history"
+          aria-labelledby="assistant-conversation-history-title"
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <div className="border-b border-[var(--border-subtle)] px-3 py-2.5">
+            <h2
+              id="assistant-conversation-history-title"
+              className="text-sm font-medium text-[var(--text-strong)]"
+            >
+              {t("assistant.conversationHistory")}
+            </h2>
+          </div>
+          {conversationState.conversations.length > 0 ? (
+            <div
+              role="list"
+              aria-label={t("assistant.conversationList")}
+              className="min-h-0 flex-1 overflow-y-auto"
+            >
+              {conversationState.conversations.map((conversation) => {
+                const current = conversation.id === conversationState.activeId;
+                const updatedAt = formatConversationTime(
+                  conversation.updatedAt,
+                  i18n.resolvedLanguage ?? i18n.language,
+                );
+                return (
+                  <div key={conversation.id} role="listitem">
+                    <button
+                      type="button"
+                      aria-current={current ? "true" : undefined}
+                      disabled={busy || actionExecutionBusy}
+                      onClick={() => switchConversation(conversation.id)}
+                      className="ca-touch-44 flex min-h-[52px] w-full items-center gap-3 border-b border-[var(--border-subtle)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface-card-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm text-[var(--text-strong)]">
+                          {conversation.title || t("assistant.untitledConversation")}
+                        </span>
+                        {updatedAt && (
+                          <time
+                            dateTime={new Date(conversation.updatedAt).toISOString()}
+                            className="mt-0.5 block text-[11px] text-[var(--text-faint)]"
+                          >
+                            {updatedAt}
+                          </time>
+                        )}
+                      </span>
+                      {current && (
+                        <span className="flex flex-none items-center gap-1 text-[11px] text-[var(--accent-text)]">
+                          <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                          {t("assistant.currentConversation")}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="px-3 py-6 text-center text-xs text-[var(--text-faint)]">
+              {t("assistant.emptyConversationHistory")}
+            </p>
+          )}
+        </section>
+      ) : (
+      <>
       <div
         ref={scrollRef}
         role="log"
-        aria-live="polite"
-        aria-relevant="additions text"
+        aria-live="off"
+        aria-relevant="additions"
+        aria-busy={busy}
         onScroll={() => {
           const box = scrollRef.current;
           if (!box) return;
@@ -1492,10 +1905,10 @@ export function AssistantPanel({
                 {/* 每条回答底下常驻一排按钮，翻起来满屏都是灰图标。桌面端悬停或键盘聚焦才浮出来，
                     但位置一直留着——不留的话鼠标一进来整段就往上跳。触屏没有悬停，一直显示。 */}
                 <div
-                  className={`-ml-1.5 mt-0.5 flex h-7 items-center gap-0.5 ${
+                  className={`-ml-1.5 mt-0.5 flex items-center gap-0.5 ${
                     mobile
-                      ? ""
-                      : "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none"
+                      ? "h-11"
+                      : "h-7 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none"
                   }`}
                 >
                   <Button
@@ -1504,7 +1917,7 @@ export function AssistantPanel({
                     aria-label={copiedTurnId === turn.id ? t("assistant.copiedLabel") : t("assistant.copyAnswer")}
                     title={copiedTurnId === turn.id ? t("assistant.copiedLabel") : t("assistant.copyAnswer")}
                     onClick={() => void copyAnswer(turn)}
-                    className="h-7 w-7 text-[var(--text-faint)]"
+                    className="ca-touch-44 h-7 w-7 text-[var(--text-faint)]"
                   >
                     {copiedTurnId === turn.id ? (
                       <Check className="h-3.5 w-3.5 text-[var(--status-ok)]" />
@@ -1522,7 +1935,7 @@ export function AssistantPanel({
                       title={t("assistant.regenerate")}
                       disabled={busy || actionExecutionBusy}
                       onClick={() => regenerate(turn)}
-                      className="h-7 w-7 text-[var(--text-faint)]"
+                      className="ca-touch-44 h-7 w-7 text-[var(--text-faint)]"
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
                     </Button>
@@ -1566,8 +1979,12 @@ export function AssistantPanel({
               onNavigate={(action) => navigateFromTurn(turn, action)}
               onResult={(message) => recordActionResult(turn.id, message, conversationEpoch)}
               executionLocked={actionExecutionBusy}
-              onExecutionStart={beginActionExecution}
-              onExecutionEnd={endActionExecution}
+              onExecutionStart={(actions) =>
+                beginActionExecution(turn.id, actions, conversationEpoch)
+              }
+              onExecutionEnd={(actions) =>
+                endActionExecution(turn.id, actions, conversationEpoch)
+              }
               onActionsResolved={(actions) =>
                 markTurnActionsResolved(turn.id, actions, conversationEpoch)
               }
@@ -1579,9 +1996,11 @@ export function AssistantPanel({
                 <AlertCircle className="mt-[0.2em] h-3 w-3 flex-none" aria-hidden="true" />
                 <div className="min-w-0 flex-1 space-y-0.5">
                   <p className="break-words">
-                    {turn.checkpoint?.expiredReason === "timeout"
-                      ? t("assistant.expiredActionsTimeout")
-                      : t("assistant.expiredActions")}
+                    {turn.checkpoint?.expiredReason === "interrupted"
+                      ? t("assistant.expiredActionsInterrupted")
+                      : turn.checkpoint?.expiredReason === "timeout"
+                        ? t("assistant.expiredActionsTimeout")
+                        : t("assistant.expiredActions")}
                   </p>
                   {turn.checkpoint && (
                     <p className="break-words text-[var(--text-faint)]">
@@ -1630,17 +2049,6 @@ export function AssistantPanel({
             )}
           </div>
         ))}
-        {busy && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="flex items-center gap-2 text-xs text-[var(--text-faint)]"
-          >
-            <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            {/* 正文改成流式之后，字已经在往外冒的时候再说「正在思考」就不对了。 */}
-            <span>{stopping ? t("assistant.stopping") : streamingLabel}</span>
-          </div>
-        )}
         {error && (
           <div
             role="alert"
@@ -1650,6 +2058,17 @@ export function AssistantPanel({
             <span>{error}</span>
           </div>
         )}
+      </div>
+
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className={busy ? "flex items-center gap-2 px-3 pb-2 text-xs text-[var(--text-faint)]" : "sr-only"}
+      >
+        {busy && <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+        {busy && <span aria-hidden="true">{generationStatus}</span>}
+        <span className={busy ? "sr-only" : undefined}>{statusAnnouncement}</span>
       </div>
 
       {/* 翻上去看旧回答时，新回答落在屏幕外，原来没有任何提示，也没有回来的路——
@@ -1664,9 +2083,12 @@ export function AssistantPanel({
           {t("assistant.scrollToLatest")}
         </button>
       )}
+      </>
+      )}
       </div>
 
       {/* 输入框、范围提示和按钮合成一块。原来三样东西各管各的，输入区看着像张随手贴的表单。 */}
+      {!historyOpen && (
       <div className="border-t border-[var(--border-subtle)] p-2">
         <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-input)] focus-within:border-[var(--accent)]">
           <div className="px-2.5 pt-1.5">
@@ -1686,8 +2108,10 @@ export function AssistantPanel({
               rows={1}
               value={input}
               placeholder={t("assistant.inputPlaceholder")}
-              onChange={(e) => setInput(e.target.value)}
+              aria-keyshortcuts="ArrowUp ArrowDown"
+              onChange={(e) => setInputFromUser(e.target.value)}
               onKeyDown={(e) => {
+                if (navigateRecentQuestions(e)) return;
                 // Enter 发送、Shift+Enter 换行。输入法组词时的 Enter 不能当发送，
                 // 否则中文用户每选一次候选词就误发一条。
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -1705,7 +2129,7 @@ export function AssistantPanel({
                 title={t("assistant.stopGeneration")}
                 disabled={stopping}
                 onClick={stop}
-                className="h-8 w-8 flex-none rounded-lg"
+                className="ca-touch-44 h-8 w-8 flex-none rounded-lg"
               >
                 <Square className="h-3.5 w-3.5 fill-current" />
               </Button>
@@ -1716,7 +2140,7 @@ export function AssistantPanel({
                 title={t("assistant.sendTitle")}
                 disabled={!input.trim()}
                 onClick={() => void send()}
-                className="h-8 w-8 flex-none rounded-lg"
+                className="ca-touch-44 h-8 w-8 flex-none rounded-lg"
               >
                 <Send className="h-4 w-4" />
               </Button>
@@ -1724,6 +2148,7 @@ export function AssistantPanel({
           </div>
         </div>
       </div>
+      )}
     </aside>
     </>
   );

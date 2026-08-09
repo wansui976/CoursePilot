@@ -17,9 +17,14 @@ const MAX_CHECKPOINT_LABEL_CHARS = 240;
 const CONTEXT_PREFIX = "（界面状态：";
 const EXPIRED_ACTION_HISTORY_NOTICE =
   "（界面操作结果：应用重启后，本轮旧操作按钮已失效；已经完成的结果以操作记录为准，尚未确认的操作未执行。如仍需操作，必须重新调用工具核对当前状态并生成新按钮。）";
+const INTERRUPTED_ACTION_HISTORY_NOTICE =
+  "（界面操作结果：应用在操作执行期间关闭，部分操作结果可能已经生效；旧按钮已经失效。继续之前必须重新调用工具核对当前状态，不能直接重复执行。）";
+const UI_ACTION_RESULT_PREFIXES = ["（界面操作结果：", "(UI action result:"];
 
 export const ASSISTANT_CHECKPOINT_VERSION = 1 as const;
 export const ASSISTANT_CHECKPOINT_TTL_MS = 24 * 60 * 60 * 1_000;
+export const MAX_ASSISTANT_PROMPT_HISTORY = 50;
+export const MAX_ASSISTANT_PROMPT_CHARS = MAX_QUESTION_CHARS;
 
 type CheckpointAction = Exclude<AssistantAction, { kind: "set_theme" }>;
 export type AssistantCheckpointActionKind = CheckpointAction["kind"];
@@ -35,7 +40,7 @@ export interface AssistantCheckpoint {
   version: typeof ASSISTANT_CHECKPOINT_VERSION;
   /** 从本地存储读出的检查点永远不可执行。 */
   status: "expired";
-  expiredReason: "restart" | "timeout";
+  expiredReason: "restart" | "timeout" | "interrupted";
   createdAt: number;
   expiresAt: number;
   targets: AssistantCheckpointTarget[];
@@ -44,6 +49,7 @@ export interface AssistantCheckpoint {
 export type AssistantInteractionState =
   | { status: "none" }
   | { status: "awaiting_user"; actions: CheckpointAction[] }
+  | { status: "executing"; actions: CheckpointAction[] }
   | { status: "expired"; checkpoint?: AssistantCheckpoint };
 
 export interface AssistantTurnRecord {
@@ -55,6 +61,8 @@ export interface AssistantTurnRecord {
   actions: AssistantAction[];
   /** 当前进程里已经成功、跳过、取消或判定失效的动作索引；只用于筛掉恢复检查点。 */
   resolvedActionIndexes?: number[];
+  /** 正在执行、但尚未拿到确定结果的动作索引；卸载时据此保存结果不确定的检查点。 */
+  executingActionIndexes?: number[];
   /** 重启前这一轮曾有操作按钮；参数不会落盘，恢复后只能提示用户重新发起。 */
   actionsExpired?: boolean;
   /** 重启后只用于解释等待过什么；不能转换回 AssistantAction。 */
@@ -74,6 +82,8 @@ export interface AssistantSession {
   turns: AssistantTurnRecord[];
   history: AssistantMessage[];
   draft: string;
+  /** 旧调用端可随会话保存；新版输入历史使用独立的全局存储。 */
+  promptHistory?: string[];
 }
 
 const EMPTY_SESSION: AssistantSession = { turns: [], history: [], draft: "" };
@@ -84,6 +94,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function capAssistantText(value: string, maxChars: number) {
   return value.length <= maxChars ? value : value.slice(0, maxChars);
+}
+
+export function boundAssistantPromptHistory(values: unknown[]): string[] {
+  return values
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => capAssistantText(value.trim(), MAX_ASSISTANT_PROMPT_CHARS))
+    .filter(Boolean)
+    .slice(-MAX_ASSISTANT_PROMPT_HISTORY);
 }
 
 const CHECKPOINT_ACTION_KINDS = new Set<AssistantCheckpointActionKind>([
@@ -152,10 +170,14 @@ function checkpointTarget(action: CheckpointAction): AssistantCheckpointTarget {
   }
 }
 
-function createCheckpoint(actions: CheckpointAction[], now: number) {
+function createCheckpoint(
+  actions: CheckpointAction[],
+  status: "awaiting_user" | "executing",
+  now: number,
+) {
   return {
     version: ASSISTANT_CHECKPOINT_VERSION,
-    status: "awaiting_user" as const,
+    status,
     createdAt: now,
     expiresAt: now + ASSISTANT_CHECKPOINT_TTL_MS,
     targets: actions.slice(0, MAX_CHECKPOINT_TARGETS).map(checkpointTarget),
@@ -177,7 +199,9 @@ function readCheckpoint(value: unknown, now: number): AssistantCheckpoint | unde
   if (
     !isRecord(value) ||
     value.version !== ASSISTANT_CHECKPOINT_VERSION ||
-    (value.status !== "awaiting_user" && value.status !== "expired") ||
+    (value.status !== "awaiting_user" &&
+      value.status !== "executing" &&
+      value.status !== "expired") ||
     typeof value.createdAt !== "number" ||
     !Number.isFinite(value.createdAt) ||
     value.createdAt < 0 ||
@@ -193,10 +217,13 @@ function readCheckpoint(value: unknown, now: number): AssistantCheckpoint | unde
     .filter((target) => target !== null)
     .slice(0, MAX_CHECKPOINT_TARGETS);
   if (targets.length === 0) return undefined;
+  const interrupted =
+    value.status === "executing" ||
+    (value.status === "expired" && value.expiredReason === "interrupted");
   return {
     version: ASSISTANT_CHECKPOINT_VERSION,
     status: "expired",
-    expiredReason: now >= value.expiresAt ? "timeout" : "restart",
+    expiredReason: interrupted ? "interrupted" : now >= value.expiresAt ? "timeout" : "restart",
     createdAt: value.createdAt,
     expiresAt: value.expiresAt,
     targets,
@@ -211,10 +238,21 @@ export function getAssistantInteractionState(
       (index) => Number.isInteger(index) && index >= 0 && index < turn.actions.length,
     ),
   );
-  const actions = turn.actions.filter(
-    (action, index): action is CheckpointAction =>
-      action.kind !== "set_theme" && !resolved.has(index),
+  const executing = new Set(
+    (turn.executingActionIndexes ?? []).filter(
+      (index) => Number.isInteger(index) && index >= 0 && index < turn.actions.length,
+    ),
   );
+  const unresolved = turn.actions
+    .map((action, index) => ({ action, index }))
+    .filter(
+      (entry): entry is { action: CheckpointAction; index: number } =>
+        entry.action.kind !== "set_theme" && !resolved.has(entry.index),
+    );
+  const actions = unresolved.map(({ action }) => action);
+  if (unresolved.some(({ index }) => executing.has(index))) {
+    return { status: "executing", actions };
+  }
   if (actions.length > 0) return { status: "awaiting_user", actions };
   if (turn.actionsExpired || turn.checkpoint) {
     return {
@@ -413,27 +451,40 @@ export function boundTrustedAssistantHistory(history: AssistantMessage[]): Assis
 }
 
 /**
- * 去掉最后一次提问以及它之后的所有消息，得到「问那句话之前」的上下文。
+ * 去掉最后一次提问对应的模型往返，得到「问那句话之前」的上下文。
  *
  * 重新生成用它：同一个问题要在同样的上下文里再问一遍，否则模型会看见自己上一次的
  * 回答，「换个说法再答一次」就变成了「顺着刚才继续说」——而用户点重新生成，恰恰是
  * 因为刚才那次不满意。
  *
- * 从最后一条 user 消息切断，那一轮的工具往返和界面操作回执都跟着丢掉：它们都是这次
- * 提问的产物，重问一遍会重新产生。
+ * 界面操作回执是例外：它可能来自更早轮次、只是在这轮请求期间才完成；即使来自当前轮次，
+ * 外部副作用也不会随重生成撤销。必须把这些回执留下，避免模型随后重复执行。
  */
 export function historyBeforeLastQuestion(history: AssistantMessage[]): AssistantMessage[] {
   for (let index = history.length - 1; index >= 0; index -= 1) {
-    if (history[index].role === "user") return history.slice(0, index);
+    if (history[index].role !== "user") continue;
+    const actionResults = history.slice(index + 1).filter(
+      (message) =>
+        message.role === "assistant" &&
+        UI_ACTION_RESULT_PREFIXES.some((prefix) => message.content.startsWith(prefix)),
+    );
+    const before = history.slice(0, index);
+    // 后端只接受从 user 开始的完整轮次。第一轮发生过外部副作用时，保留原问题作为
+    // 回执锚点；否则孤立的 assistant 回执会在 prepare_history 中被直接丢弃。
+    return actionResults.length > 0 && !before.some((message) => message.role === "user")
+      ? [history[index], ...actionResults]
+      : [...before, ...actionResults];
   }
   return [];
 }
 
-export function readAssistantSession(now = Date.now()): AssistantSession {
+export function deserializeAssistantSession(
+  serialized: string | null | undefined,
+  now = Date.now(),
+): AssistantSession {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return EMPTY_SESSION;
-    const value = JSON.parse(raw) as unknown;
+    if (!serialized) return EMPTY_SESSION;
+    const value = JSON.parse(serialized) as unknown;
     if (!isRecord(value)) return EMPTY_SESSION;
 
     const turns = Array.isArray(value.turns)
@@ -444,7 +495,85 @@ export function readAssistantSession(now = Date.now()): AssistantSession {
       : [];
     const history = Array.isArray(value.history) ? boundAssistantHistory(value.history) : [];
     const draft = typeof value.draft === "string" ? value.draft.slice(0, MAX_DRAFT_CHARS) : "";
-    return { turns, history, draft };
+    const promptHistory = Array.isArray(value.promptHistory)
+      ? boundAssistantPromptHistory(value.promptHistory)
+      : [];
+    return {
+      turns,
+      history,
+      draft,
+      ...(promptHistory.length > 0 ? { promptHistory } : {}),
+    };
+  } catch {
+    return EMPTY_SESSION;
+  }
+}
+
+export function serializeAssistantSession(session: AssistantSession, now = Date.now()) {
+  // 主题已经当场生效；其余按钮都依赖生成时的界面状态，重启后不得复活。
+  const persistableTurns = session.turns
+    .filter((turn) => !turn.pending)
+    .slice(-MAX_ASSISTANT_TURNS);
+  const interactions = persistableTurns.map(getAssistantInteractionState);
+  const hasLiveActionPayload = interactions.some(
+    (interaction) =>
+      interaction.status === "awaiting_user" || interaction.status === "executing",
+  );
+  const hasExecutingAction = interactions.some(
+    (interaction) => interaction.status === "executing",
+  );
+  const turns = persistableTurns.map((turn) => {
+    const interaction = getAssistantInteractionState(turn);
+    const checkpoint =
+      interaction.status === "awaiting_user" || interaction.status === "executing"
+        ? createCheckpoint(interaction.actions, interaction.status, now)
+        : turn.checkpoint;
+    return {
+      ...turn,
+      question: capAssistantText(turn.question, MAX_QUESTION_CHARS),
+      answer: capAssistantText(turn.answer, MAX_ASSISTANT_ANSWER_CHARS),
+      reasoning: turn.reasoning
+        ? capAssistantText(turn.reasoning, MAX_ASSISTANT_REASONING_CHARS)
+        : undefined,
+      tools: turn.tools
+        .map((tool) => capAssistantText(tool, MAX_TOOL_NAME_CHARS))
+        .slice(-MAX_TOOLS_PER_TURN),
+      actionResults: turn.actionResults
+        .map((result) => capAssistantText(result, MAX_ACTION_RESULT_CHARS))
+        .slice(-MAX_ACTION_RESULTS),
+      actions: [],
+      resolvedActionIndexes: undefined,
+      executingActionIndexes: undefined,
+      actionsExpired: interaction.status !== "none" || undefined,
+      checkpoint,
+      pending: undefined,
+    };
+  });
+  const cleanHistory = boundAssistantHistory(session.history);
+  const history = hasLiveActionPayload
+    ? boundAssistantHistory([
+        ...cleanHistory,
+        {
+          role: "assistant",
+          content: hasExecutingAction
+            ? INTERRUPTED_ACTION_HISTORY_NOTICE
+            : EXPIRED_ACTION_HISTORY_NOTICE,
+        },
+      ])
+    : cleanHistory;
+  return JSON.stringify({
+    turns,
+    history,
+    draft: session.draft.slice(0, MAX_DRAFT_CHARS),
+    ...(session.promptHistory?.length
+      ? { promptHistory: boundAssistantPromptHistory(session.promptHistory) }
+      : {}),
+  });
+}
+
+export function readAssistantSession(now = Date.now()): AssistantSession {
+  try {
+    return deserializeAssistantSession(localStorage.getItem(STORAGE_KEY), now);
   } catch {
     return EMPTY_SESSION;
   }
@@ -452,54 +581,7 @@ export function readAssistantSession(now = Date.now()): AssistantSession {
 
 export function writeAssistantSession(session: AssistantSession, now = Date.now()) {
   try {
-    // 主题已经当场生效；其余按钮都依赖生成时的界面状态，重启后不得复活。
-    const hasLiveActionPayload = session.turns.some(
-      (turn) => getAssistantInteractionState(turn).status === "awaiting_user",
-    );
-    const turns = session.turns
-      .filter((turn) => !turn.pending)
-      .slice(-MAX_ASSISTANT_TURNS)
-      .map((turn) => {
-        const interaction = getAssistantInteractionState(turn);
-        const checkpoint =
-          interaction.status === "awaiting_user"
-            ? createCheckpoint(interaction.actions, now)
-            : turn.checkpoint;
-        return {
-          ...turn,
-          question: capAssistantText(turn.question, MAX_QUESTION_CHARS),
-          answer: capAssistantText(turn.answer, MAX_ASSISTANT_ANSWER_CHARS),
-          reasoning: turn.reasoning
-            ? capAssistantText(turn.reasoning, MAX_ASSISTANT_REASONING_CHARS)
-            : undefined,
-          tools: turn.tools
-            .map((tool) => capAssistantText(tool, MAX_TOOL_NAME_CHARS))
-            .slice(-MAX_TOOLS_PER_TURN),
-          actionResults: turn.actionResults
-            .map((result) => capAssistantText(result, MAX_ACTION_RESULT_CHARS))
-            .slice(-MAX_ACTION_RESULTS),
-          actions: [],
-          resolvedActionIndexes: undefined,
-          actionsExpired: interaction.status !== "none" || undefined,
-          checkpoint,
-          pending: undefined,
-        };
-      });
-    const cleanHistory = boundAssistantHistory(session.history);
-    const history = hasLiveActionPayload
-      ? boundAssistantHistory([
-          ...cleanHistory,
-          { role: "assistant", content: EXPIRED_ACTION_HISTORY_NOTICE },
-        ])
-      : cleanHistory;
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        turns,
-        history,
-        draft: session.draft.slice(0, MAX_DRAFT_CHARS),
-      }),
-    );
+    localStorage.setItem(STORAGE_KEY, serializeAssistantSession(session, now));
   } catch {
     // 本地存储只是连续性增强；不可用时当前会话仍应正常工作。
   }

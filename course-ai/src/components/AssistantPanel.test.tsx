@@ -7,7 +7,19 @@ import { AssistantPanel } from "./AssistantPanel";
 import { useAssistantUi } from "@/stores/assistant";
 import { useTheme } from "@/stores/theme";
 import { useInlineAsk } from "@/stores/inlineAsk";
-import { writeAssistantSession } from "@/lib/assistantSession";
+import {
+  assistantSessionStorageKey,
+  readAssistantSession,
+  writeAssistantSession,
+} from "@/lib/assistantSession";
+import {
+  assistantConversationsStorageKey,
+  assistantConversationStorageKey,
+  readAssistantConversation,
+  readAssistantConversations,
+  readRecentAssistantQuestions,
+  writeRecentAssistantQuestions,
+} from "@/lib/assistantConversations";
 import type {
   AssistantAction,
   AssistantContext,
@@ -237,6 +249,10 @@ describe("AssistantPanel", () => {
     await ask("讲讲这节课");
 
     await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalled());
+    expect(screen.getByRole("log")).toHaveAttribute("aria-live", "off");
+    expect(screen.getByRole("log")).toHaveAttribute("aria-relevant", "additions");
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent("正在思考");
     act(() => {
       emit({ type: "turn", turn: 1 });
       emit({ type: "reasoning", delta: "先看看" });
@@ -246,7 +262,7 @@ describe("AssistantPanel", () => {
     // 思考比正文先到，所以不能藏在「有答案才渲染」的分支里。
     expect(await screen.findByText("思考过程")).toBeInTheDocument();
     expect(screen.getByText("先看看字幕里有什么")).toBeInTheDocument();
-    expect(screen.getByText("正在思考…")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("正在思考…");
 
     act(() => {
       emit({ type: "tool", call_id: "call-search-1", name: "search_content" });
@@ -256,16 +272,6 @@ describe("AssistantPanel", () => {
     );
 
     act(() => {
-      emit({ type: "token", delta: "这节课" });
-      emit({ type: "token", delta: "讲的是导数。" });
-    });
-    expect(await screen.findByText("这节课讲的是导数。")).toBeInTheDocument();
-    // 工具标签实时出现，不必等整轮跑完。
-    expect(screen.getByTestId("tool-chips")).toHaveTextContent("搜索课程内容");
-    // 即使工具开始前已经有正文，执行中的工具仍然是当前真实状态。
-    expect(screen.getByRole("status")).toHaveTextContent("正在搜索课程内容");
-
-    act(() => {
       emit({
         type: "tool_finished",
         call_id: "call-search-1",
@@ -273,6 +279,15 @@ describe("AssistantPanel", () => {
         canceled: false,
       });
     });
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("正在整理结果"));
+    // 工具标签实时出现，不必等整轮跑完。
+    expect(screen.getByTestId("tool-chips")).toHaveTextContent("搜索课程内容");
+
+    act(() => {
+      emit({ type: "token", delta: "这节课" });
+      emit({ type: "token", delta: "讲的是导数。" });
+    });
+    expect(await screen.findByText("这节课讲的是导数。")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("正在作答"));
   });
 
@@ -336,8 +351,12 @@ describe("AssistantPanel", () => {
     expect(setItem).not.toHaveBeenCalled();
 
     act(() => finish(reply({ answer: "高频流式回答" })));
-    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
-    expect(setItem).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("回答已完成"));
+    await waitFor(() =>
+      expect(
+        setItem.mock.calls.filter(([key]) => key === assistantSessionStorageKey),
+      ).toHaveLength(1),
+    );
 
     setItem.mockRestore();
   });
@@ -445,6 +464,18 @@ describe("AssistantPanel", () => {
     );
   });
 
+  it("方向键把面板吸附成入口后会把焦点交给入口", async () => {
+    renderPanel();
+    const handle = screen.getByRole("button", { name: "拖动助手面板" });
+    handle.focus();
+
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+
+    const launcher = screen.getByRole("button", { name: "打开助手" });
+    await waitFor(() => expect(launcher).toHaveFocus());
+    expect(launcher).toHaveAttribute("data-dock-side", "right");
+  });
+
   it("回答按 Markdown 渲染，而不是把 ** 和 - 原样铺出来", async () => {
     mockIpc.assistant.ask.mockResolvedValueOnce(
       reply({ answer: "重点有两条：\n\n- **梯度下降**很关键\n- 学习率要调" }),
@@ -531,11 +562,13 @@ describe("AssistantPanel", () => {
     await ask("找一下例题");
 
     expect(screen.getByTestId("user-bubble")).toHaveTextContent("找一下例题");
-    expect(await screen.findByRole("status")).toHaveTextContent("正在思考并调用工具");
+    expect(await screen.findByRole("status")).toHaveTextContent("正在思考");
     expect(screen.getByLabelText("停止生成")).toBeEnabled();
+    expect(screen.getByLabelText("停止生成")).toHaveClass("ca-touch-44");
 
     finish(reply());
     await screen.findByText("好了");
+    expect(screen.getByRole("status")).toHaveTextContent("回答已完成");
   });
 
   it("用户翻看旧消息时，新回复不会强行抢回滚动位置", async () => {
@@ -749,6 +782,253 @@ describe("AssistantPanel", () => {
         expect.any(Function),
       ),
     );
+  });
+
+  it("上下方向键浏览发送历史，并在越过最新一条后恢复未发送草稿", async () => {
+    mockIpc.assistant.ask
+      .mockResolvedValueOnce(reply({ answer: "第一答" }))
+      .mockResolvedValueOnce(reply({ answer: "第二答" }));
+    renderPanel();
+
+    await ask("第一条问题");
+    await screen.findByText("第一答");
+    await ask("第二条问题");
+    await screen.findByText("第二答");
+
+    const input = screen.getByLabelText("对助手说") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "还没发送的草稿" } });
+    input.setSelectionRange(0, 0);
+
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input).toHaveValue("第二条问题");
+
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input).toHaveValue("第一条问题");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveValue("第二条问题");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveValue("还没发送的草稿");
+  });
+
+  it("多行中部、文本选择和输入法组词时保留原生方向键，只有光标在开头才回看历史", () => {
+    writeRecentAssistantQuestions(["上一条已发送问题"]);
+    renderPanel();
+
+    const input = screen.getByLabelText("对助手说") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "第一行\n第二行" } });
+    input.setSelectionRange(4, 4);
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input).toHaveValue("第一行\n第二行");
+
+    input.setSelectionRange(0, 3);
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input).toHaveValue("第一行\n第二行");
+
+    input.setSelectionRange(0, 0);
+    fireEvent.keyDown(input, { key: "ArrowUp", isComposing: true });
+    expect(input).toHaveValue("第一行\n第二行");
+
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input).toHaveValue("上一条已发送问题");
+  });
+
+  it("浏览发送历史不会把原来的未发送草稿覆盖到会话快照", () => {
+    writeRecentAssistantQuestions(["上一条已发送问题"]);
+    renderPanel();
+
+    const input = screen.getByLabelText("对助手说") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "需要保留的草稿" } });
+    input.setSelectionRange(0, 0);
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input).toHaveValue("上一条已发送问题");
+
+    cleanup();
+    useAssistantUi.setState({ open: true, side: "right" });
+    renderPanel();
+    expect(screen.getByLabelText("对助手说")).toHaveValue("需要保留的草稿");
+  });
+
+  it("召回问题后把光标移到文本中间会退出历史浏览", () => {
+    writeRecentAssistantQuestions(["更早的问题", "一条较长的历史问题"]);
+    renderPanel();
+
+    const input = screen.getByLabelText("对助手说") as HTMLTextAreaElement;
+    input.setSelectionRange(0, 0);
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input).toHaveValue("一条较长的历史问题");
+
+    input.setSelectionRange(3, 3);
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input).toHaveValue("一条较长的历史问题");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveValue("一条较长的历史问题");
+  });
+
+  it("新建会话后可从历史列表切回，并分别恢复两边的回答和草稿", async () => {
+    mockIpc.assistant.ask
+      .mockResolvedValueOnce(reply({ answer: "第一会话回答" }))
+      .mockResolvedValueOnce(reply({ answer: "第二会话回答" }));
+    renderPanel(vi.fn(), { compact: true });
+
+    await ask("第一会话问题");
+    await screen.findByText("第一会话回答");
+    fireEvent.change(screen.getByLabelText("对助手说"), {
+      target: { value: "第一会话草稿" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新对话" }));
+
+    await ask("第二会话问题");
+    await screen.findByText("第二会话回答");
+    fireEvent.change(screen.getByLabelText("对助手说"), {
+      target: { value: "第二会话草稿" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
+    const firstConversation = screen.getByRole("button", { name: /第一会话问题/ });
+    expect(firstConversation).toHaveClass("ca-touch-44", "min-h-[52px]");
+    expect(screen.queryByLabelText("对助手说")).not.toBeInTheDocument();
+    fireEvent.click(firstConversation);
+
+    expect(screen.getByText("第一会话回答")).toBeInTheDocument();
+    expect(screen.queryByText("第二会话回答")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("对助手说")).toHaveValue("第一会话草稿");
+
+    fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
+    fireEvent.click(screen.getByRole("button", { name: /第二会话问题/ }));
+
+    expect(screen.getByText("第二会话回答")).toBeInTheDocument();
+    expect(screen.queryByText("第一会话回答")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("对助手说")).toHaveValue("第二会话草稿");
+
+    const historyButton = screen.getByRole("button", { name: "会话历史" });
+    fireEvent.click(historyButton);
+    expect(historyButton).toHaveAttribute("aria-expanded", "true");
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(historyButton).toHaveFocus());
+    expect(historyButton).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("重新回答不会把同一个问题重复写入最近问题", async () => {
+    mockIpc.assistant.ask
+      .mockResolvedValueOnce(reply({ answer: "第一次回答" }))
+      .mockResolvedValueOnce(reply({ answer: "重新回答" }));
+    renderPanel();
+
+    await ask("只记一次的问题");
+    await screen.findByText("第一次回答");
+    expect(readRecentAssistantQuestions()).toEqual(["只记一次的问题"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "重新回答" }));
+    await screen.findByText("重新回答");
+
+    expect(readRecentAssistantQuestions()).toEqual(["只记一次的问题"]);
+  });
+
+  it("旧会话的迟到防抖保存不会覆盖新会话草稿", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "旧会话回答" }));
+    renderPanel();
+    await ask("旧会话问题");
+    await screen.findByText("旧会话回答");
+
+    const oldConversationId = readAssistantConversations().activeId;
+    expect(oldConversationId).not.toBeNull();
+
+    vi.useFakeTimers();
+    const clearTimeout = vi.spyOn(window, "clearTimeout").mockImplementation(() => undefined);
+    try {
+      fireEvent.change(screen.getByLabelText("对助手说"), {
+        target: { value: "旧会话未发送草稿" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "新对话" }));
+      const newConversationId = readAssistantConversations().activeId;
+      expect(newConversationId).not.toBe(oldConversationId);
+
+      fireEvent.change(screen.getByLabelText("对助手说"), {
+        target: { value: "新会话未发送草稿" },
+      });
+      act(() => vi.advanceTimersByTime(300));
+
+      expect(readAssistantConversation(oldConversationId!)?.session.draft).toBe(
+        "旧会话未发送草稿",
+      );
+      expect(readAssistantConversation(newConversationId!)?.session.draft).toBe(
+        "新会话未发送草稿",
+      );
+    } finally {
+      clearTimeout.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("当前会话保存失败时中止历史切换并保留界面内容", async () => {
+    mockIpc.assistant.ask
+      .mockResolvedValueOnce(reply({ answer: "第一会话回答" }))
+      .mockResolvedValueOnce(reply({ answer: "第二会话回答" }));
+    renderPanel();
+    await ask("第一会话问题");
+    await screen.findByText("第一会话回答");
+    fireEvent.click(screen.getByRole("button", { name: "新对话" }));
+    await ask("第二会话问题");
+    await screen.findByText("第二会话回答");
+    fireEvent.change(screen.getByLabelText("对助手说"), {
+      target: { value: "不能丢的草稿" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
+
+    const currentId = readAssistantConversations().activeId as string;
+    const originalSetItem = Storage.prototype.setItem;
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key, value) {
+        if (key === assistantConversationStorageKey(currentId)) {
+          throw new DOMException("quota", "QuotaExceededError");
+        }
+        return originalSetItem.call(this, key, value);
+      });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /第一会话问题/ }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("当前会话未能保存");
+      expect(screen.getByText("第二会话回答")).toBeInTheDocument();
+      expect(screen.queryByText("第一会话回答")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("对助手说")).toHaveValue("不能丢的草稿");
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
+  it("activeId 索引保存失败时中止历史切换", async () => {
+    mockIpc.assistant.ask
+      .mockResolvedValueOnce(reply({ answer: "索引场景第一答" }))
+      .mockResolvedValueOnce(reply({ answer: "索引场景第二答" }));
+    renderPanel();
+    await ask("索引场景第一问");
+    await screen.findByText("索引场景第一答");
+    fireEvent.click(screen.getByRole("button", { name: "新对话" }));
+    await ask("索引场景第二问");
+    await screen.findByText("索引场景第二答");
+    fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
+
+    const currentId = readAssistantConversations().activeId;
+    const originalSetItem = Storage.prototype.setItem;
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key, value) {
+        if (key === assistantConversationsStorageKey) {
+          throw new DOMException("quota", "QuotaExceededError");
+        }
+        return originalSetItem.call(this, key, value);
+      });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /索引场景第一问/ }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("当前会话未能保存");
+      expect(screen.getByText("索引场景第二答")).toBeInTheDocument();
+      expect(screen.queryByText("索引场景第一答")).not.toBeInTheDocument();
+      expect(readAssistantConversations().activeId).toBe(currentId);
+    } finally {
+      setItem.mockRestore();
+    }
   });
 
   it("重挂载后恢复对话、续聊历史和草稿，但不复活旧确认动作", async () => {
@@ -1064,7 +1344,13 @@ describe("AssistantPanel", () => {
       expect(mockIpc.assistant.ask).toHaveBeenCalledWith(
         "删除导论",
         { course_id: "current-course-id", video_id: "current-video-id" },
-        [],
+        [
+          { role: "user", content: "删除导论" },
+          {
+            role: "assistant",
+            content: expect.stringContaining("旧操作按钮已失效"),
+          },
+        ],
         expect.any(String),
         expect.any(Function),
       ),
@@ -1291,6 +1577,8 @@ describe("AssistantPanel", () => {
     const input = screen.getByLabelText("对助手说");
     const send = screen.getByLabelText("发送");
     const close = screen.getByLabelText("收起助手");
+    expect(send).toHaveClass("ca-touch-44");
+    expect(close).toHaveClass("ca-touch-44");
     await waitFor(() => expect(input).toHaveFocus());
     fireEvent.change(input, { target: { value: "查一下" } });
 
@@ -1303,6 +1591,41 @@ describe("AssistantPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "关闭助手" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "打开助手" })).toHaveFocus());
     expect(panel).not.toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "打开助手" }));
+    await waitFor(() => expect(input).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "收起助手" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "打开助手" })).toHaveFocus());
+  });
+
+  it("移动抽屉的思考摘要参与键盘焦点循环", async () => {
+    writeAssistantSession({
+      turns: [
+        {
+          id: "reasoning-turn",
+          question: "为什么",
+          answer: "因为条件成立。",
+          reasoning: "先检查条件。",
+          actions: [],
+          tools: [],
+          canceled: false,
+          actionResults: [],
+        },
+      ],
+      history: [
+        { role: "user", content: "为什么" },
+        { role: "assistant", content: "因为条件成立。" },
+      ],
+      draft: "",
+    });
+    renderPanel(vi.fn(), { compact: true });
+
+    const summary = screen.getByText("思考过程");
+    expect(screen.getByRole("button", { name: "复制回答" })).toHaveClass("ca-touch-44");
+    expect(screen.getByRole("button", { name: "重新回答" })).toHaveClass("ca-touch-44");
+    summary.focus();
+    fireEvent.keyDown(summary, { key: "Tab" });
+    expect(screen.getByRole("button", { name: "复制回答" })).toHaveFocus();
   });
 });
 
@@ -1418,6 +1741,9 @@ describe("确认卡", () => {
     await ask("改名");
     fireEvent.click(await screen.findByRole("button", { name: "确认改名" }));
     await screen.findByText("已生效");
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent("操作状态更新：已完成改名：第一讲");
+    expect(screen.getByText("已生效")).toHaveFocus();
 
     await ask("完成了吗");
     await waitFor(() => {
@@ -1466,6 +1792,9 @@ describe("确认卡", () => {
     await ask("顺便总结一下");
     fireEvent.click(confirm);
     expect(await screen.findByText("操作结果：已完成改名：第一讲")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("操作状态更新：已完成改名：第一讲"),
+    );
     finishSecond(reply({ answer: "这是第二轮回答", history: secondHistory }));
     await screen.findByText("这是第二轮回答");
 
@@ -1475,6 +1804,57 @@ describe("确认卡", () => {
       const sentHistory = calls[calls.length - 1]?.[2];
       expect(sentHistory).toEqual([
         ...secondHistory,
+        { role: "assistant", content: "（界面操作结果：已完成改名：第一讲）" },
+      ]);
+    });
+  });
+
+  it("旧确认动作在后一轮请求期间完成，重生成仍保留它的操作回执", async () => {
+    const initialHistory = [
+      { role: "user", content: "改名" },
+      { role: "assistant", content: "已经准备好，等你确认" },
+    ];
+    const secondHistory = [
+      ...initialHistory,
+      { role: "user", content: "顺便总结一下" },
+      { role: "assistant", content: "这是第二轮回答" },
+    ];
+    let finishSecond!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask
+      .mockResolvedValueOnce(
+        reply({
+          history: initialHistory,
+          actions: [
+            {
+              kind: "propose_rename",
+              video_id: "v1",
+              current_title: "未命名",
+              new_title: "第一讲",
+            },
+          ],
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise<AssistantReply>((resolve) => {
+          finishSecond = resolve;
+        }),
+      )
+      .mockResolvedValueOnce(reply({ answer: "重生成的回答" }));
+    renderPanel();
+    await ask("改名");
+    const confirm = await screen.findByRole("button", { name: "确认改名" });
+
+    await ask("顺便总结一下");
+    fireEvent.click(confirm);
+    await screen.findByText("操作结果：已完成改名：第一讲");
+    finishSecond(reply({ answer: "这是第二轮回答", history: secondHistory }));
+    await screen.findByText("这是第二轮回答");
+
+    fireEvent.click(screen.getByRole("button", { name: "重新回答" }));
+    await waitFor(() => {
+      expect(mockIpc.assistant.ask).toHaveBeenCalledTimes(3);
+      expect(mockIpc.assistant.ask.mock.calls[2][2]).toEqual([
+        ...initialHistory,
         { role: "assistant", content: "（界面操作结果：已完成改名：第一讲）" },
       ]);
     });
@@ -1512,6 +1892,50 @@ describe("确认卡", () => {
     expect(mockIpc.videos.updateTitle).toHaveBeenCalledTimes(1);
   });
 
+  it("确认动作执行中卸载后按结果不确定恢复，不能伪装成未执行", async () => {
+    let finishRename!: () => void;
+    mockIpc.videos.updateTitle.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishRename = resolve;
+      }),
+    );
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        history: [
+          { role: "user", content: "改名" },
+          { role: "assistant", content: "已经准备好，等你确认" },
+        ],
+        actions: [
+          {
+            kind: "propose_rename",
+            video_id: "v1",
+            current_title: "未命名",
+            new_title: "第一讲",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("改名");
+    fireEvent.click(await screen.findByRole("button", { name: "确认改名" }));
+    await waitFor(() =>
+      expect(mockIpc.videos.updateTitle).toHaveBeenCalledWith("v1", "第一讲"),
+    );
+
+    cleanup();
+    await act(async () => {
+      finishRename();
+      await Promise.resolve();
+    });
+    useAssistantUi.setState({ open: true, side: "right" });
+    renderPanel();
+
+    expect(screen.getByText(/结果可能已经生效/)).toBeInTheDocument();
+    expect(screen.getByText(/上次待处理：改名 · 未命名/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "确认改名" })).not.toBeInTheDocument();
+    expect(mockIpc.videos.updateTitle).toHaveBeenCalledTimes(1);
+  });
+
   it("确认操作执行中不能丢掉旧会话，完成后才允许新建对话", async () => {
     let finishRename!: () => void;
     mockIpc.videos.updateTitle.mockReturnValueOnce(
@@ -1539,6 +1963,11 @@ describe("确认卡", () => {
     await ask("改名");
     fireEvent.click(await screen.findByRole("button", { name: "确认改名" }));
 
+    const executingSession = JSON.parse(
+      localStorage.getItem(assistantSessionStorageKey) ?? "{}",
+    );
+    expect(executingSession.turns[0].checkpoint.status).toBe("executing");
+
     const newConversation = screen.getByRole("button", { name: "新对话" });
     expect(newConversation).toBeDisabled();
     expect(screen.getByRole("button", { name: "重新回答" })).toBeDisabled();
@@ -1552,6 +1981,10 @@ describe("确认卡", () => {
     });
     await waitFor(() => expect(newConversation).toBeEnabled());
     expect(screen.getByRole("button", { name: "重新回答" })).toBeEnabled();
+    const persistedTurn = readAssistantSession().turns[0];
+    expect(persistedTurn.actionResults).toEqual(["已完成改名：第一讲"]);
+    expect(persistedTurn.actionsExpired).toBeUndefined();
+    expect(persistedTurn.checkpoint).toBeUndefined();
 
     fireEvent.click(newConversation);
     expect(screen.queryByTestId("user-bubble")).not.toBeInTheDocument();
@@ -1602,6 +2035,46 @@ describe("确认卡", () => {
     );
   });
 
+  it("确认写操作与导航共享原子锁，同一帧只执行前一个动作", async () => {
+    let finishDelete!: () => void;
+    mockIpc.videos.delete.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishDelete = resolve;
+      }),
+    );
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          { kind: "propose_delete", video_id: "v2", title: "第五讲" },
+          { kind: "open_video", video_id: "v3", title: "第六讲" },
+        ],
+      }),
+    );
+    const onNavigate = vi.fn();
+    renderPanel(onNavigate);
+    await ask("删除第五讲，再打开第六讲");
+
+    const deleteButton = await screen.findByRole("button", { name: "确认删除" });
+    const navigationButton = screen.getByRole("button", { name: /打开《第六讲》/ });
+    act(() => {
+      fireEvent.click(deleteButton);
+      fireEvent.click(navigationButton);
+    });
+    await waitFor(() => expect(mockIpc.videos.delete).toHaveBeenCalledWith("v2"));
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(navigationButton).toBeDisabled();
+
+    await act(async () => {
+      finishDelete();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(navigationButton).toBeEnabled());
+    fireEvent.click(navigationButton);
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "open_video", video_id: "v3" }),
+    );
+  });
+
   it("删除要等确认，并说清楚是进回收站", async () => {
     const onActionApplied = vi.fn();
     mockIpc.assistant.ask.mockResolvedValueOnce(
@@ -1629,6 +2102,20 @@ describe("确认卡", () => {
     expect(onActionApplied).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "propose_delete", video_id: "v2" }),
     );
+  });
+
+  it("移动端确认按钮保留 44px 触控命中区并允许换行", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({ actions: [{ kind: "propose_delete", video_id: "v2", title: "第五讲" }] }),
+    );
+    renderPanel(vi.fn(), { compact: true });
+    await ask("删了它");
+
+    const confirm = await screen.findByRole("button", { name: "确认删除" });
+    const cancel = screen.getByRole("button", { name: "取消" });
+    expect(confirm).toHaveClass("ca-touch-44");
+    expect(cancel).toHaveClass("ca-touch-44");
+    expect(confirm.parentElement).toHaveClass("flex-wrap");
   });
 
   it("取消提案就什么都不做", async () => {

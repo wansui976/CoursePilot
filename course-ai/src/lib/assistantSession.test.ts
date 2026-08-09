@@ -3,16 +3,57 @@ import {
   ASSISTANT_CHECKPOINT_TTL_MS,
   assistantSessionStorageKey,
   clearAssistantSession,
+  deserializeAssistantSession,
   getAssistantInteractionState,
   historyBeforeLastQuestion,
   MAX_ASSISTANT_ANSWER_CHARS,
   MAX_ASSISTANT_REASONING_CHARS,
   readAssistantSession,
+  serializeAssistantSession,
   writeAssistantSession,
 } from "./assistantSession";
 
 describe("assistantSession", () => {
   beforeEach(() => localStorage.clear());
+
+  it("serializes and restores a session without depending on the fixed storage key", () => {
+    const serialized = serializeAssistantSession(
+      {
+        turns: [
+          {
+            id: "portable",
+            question: "打开第一讲",
+            answer: "请确认",
+            actions: [{ kind: "open_video", video_id: "video-1", title: "第一讲" }],
+            tools: [],
+            canceled: false,
+            actionResults: [],
+          },
+        ],
+        history: [
+          { role: "user", content: "打开第一讲" },
+          { role: "assistant", content: "请确认" },
+        ],
+        draft: "下一问",
+        promptHistory: ["第一问", "第二问"],
+      },
+      500,
+    );
+
+    expect(localStorage.getItem(assistantSessionStorageKey)).toBeNull();
+    expect(deserializeAssistantSession(serialized, 501)).toMatchObject({
+      turns: [
+        {
+          id: "portable",
+          actions: [],
+          actionsExpired: true,
+          checkpoint: { expiredReason: "restart" },
+        },
+      ],
+      draft: "下一问",
+      promptHistory: ["第一问", "第二问"],
+    });
+  });
 
   it("restores transcript, history, and draft without reviving executable actions", () => {
     const savedAt = 1_000;
@@ -273,6 +314,63 @@ describe("assistantSession", () => {
     ]);
   });
 
+  it("marks actions interrupted by unload as ambiguous and never revives their parameters", () => {
+    const savedAt = 3_700;
+    writeAssistantSession(
+      {
+        turns: [
+          {
+            id: "executing",
+            question: "改名后删除第二讲",
+            answer: "请确认",
+            actions: [
+              {
+                kind: "propose_rename",
+                video_id: "private-video-id",
+                current_title: "第一讲",
+                new_title: "开篇",
+              },
+              {
+                kind: "propose_delete",
+                video_id: "second-private-id",
+                title: "第二讲",
+              },
+            ],
+            executingActionIndexes: [0],
+            tools: ["rename_video", "delete_video"],
+            canceled: false,
+            actionResults: [],
+          },
+        ],
+        history: [
+          { role: "user", content: "改名后删除第二讲" },
+          { role: "assistant", content: "请确认" },
+        ],
+        draft: "",
+      },
+      savedAt,
+    );
+
+    const stored = localStorage.getItem(assistantSessionStorageKey) ?? "";
+    expect(stored).not.toContain("private-video-id");
+    expect(stored).not.toContain("second-private-id");
+    expect(stored).not.toContain("executingActionIndexes");
+    expect(JSON.parse(stored).turns[0].checkpoint.status).toBe("executing");
+
+    const restored = readAssistantSession(savedAt + ASSISTANT_CHECKPOINT_TTL_MS * 2);
+    expect(restored.turns[0].checkpoint).toMatchObject({
+      status: "expired",
+      expiredReason: "interrupted",
+      targets: [
+        { action: "propose_rename", label: "第一讲" },
+        { action: "propose_delete", label: "第二讲" },
+      ],
+    });
+    const lastHistoryMessage = restored.history[restored.history.length - 1];
+    expect(lastHistoryMessage?.content).toContain("部分操作结果可能已经生效");
+    expect(lastHistoryMessage?.content).toContain("不能直接重复执行");
+  });
+
   it("marks an old checkpoint as timed out and still never restores stale resource actions", () => {
     const savedAt = 4_000;
     writeAssistantSession(
@@ -508,7 +606,7 @@ describe("historyBeforeLastQuestion", () => {
     ]);
   });
 
-  it("那一轮的工具往返和操作回执一起丢掉，它们都是这次提问的产物", () => {
+  it("丢掉那一轮的模型往返，但保留已经发生的界面操作回执", () => {
     const history = [
       { role: "user", content: "旧问" },
       { role: "assistant", content: "旧答" },
@@ -526,6 +624,36 @@ describe("historyBeforeLastQuestion", () => {
     expect(historyBeforeLastQuestion(history)).toEqual([
       { role: "user", content: "旧问" },
       { role: "assistant", content: "旧答" },
+      { role: "assistant", content: "（界面操作结果：已移入回收站）" },
+    ]);
+  });
+
+  it("也保留英文界面的操作回执", () => {
+    expect(
+      historyBeforeLastQuestion([
+        { role: "user", content: "First" },
+        { role: "assistant", content: "Done" },
+        { role: "user", content: "Second" },
+        { role: "assistant", content: "Answer" },
+        { role: "assistant", content: "(UI action result: Renamed lecture)" },
+      ]),
+    ).toEqual([
+      { role: "user", content: "First" },
+      { role: "assistant", content: "Done" },
+      { role: "assistant", content: "(UI action result: Renamed lecture)" },
+    ]);
+  });
+
+  it("第一轮发生过操作时保留原问题作为后端可接受的回执锚点", () => {
+    expect(
+      historyBeforeLastQuestion([
+        { role: "user", content: "删除第一讲" },
+        { role: "assistant", content: "请确认" },
+        { role: "assistant", content: "（界面操作结果：已移入回收站）" },
+      ]),
+    ).toEqual([
+      { role: "user", content: "删除第一讲" },
+      { role: "assistant", content: "（界面操作结果：已移入回收站）" },
     ]);
   });
 

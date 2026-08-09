@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -347,8 +347,8 @@ function ProposalGroup({
   onDone: () => void;
   onResult?: (message: string) => void;
   executionLocked?: boolean;
-  onExecutionStart?: () => boolean;
-  onExecutionEnd?: () => void;
+  onExecutionStart?: (actions: Proposal[]) => boolean;
+  onExecutionEnd?: (actions: Proposal[]) => void;
   onResolved?: (actions: Proposal[]) => void;
   onApplied?: (action: Proposal) => void;
 }) {
@@ -360,6 +360,7 @@ function ProposalGroup({
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
   const importCheckpoints = useRef<Map<number, string>>(new Map());
+  const completionRef = useRef<HTMLDivElement>(null);
   const stopRequestedRef = useRef(false);
   const [stopRequested, setStopRequested] = useState(false);
 
@@ -373,6 +374,10 @@ function ProposalGroup({
     ({ action }) => action.kind === "propose_import" && !action.course_id,
   );
 
+  useEffect(() => {
+    if (status === "done") completionRef.current?.focus();
+  }, [status]);
+
   async function confirm() {
     if (
       status === "running" ||
@@ -383,7 +388,8 @@ function ProposalGroup({
     ) {
       return;
     }
-    if (onExecutionStart && !onExecutionStart()) return;
+    const actionSnapshot = remaining.map(({ action }) => action);
+    if (onExecutionStart && !onExecutionStart(actionSnapshot)) return;
     setStatus("running");
     setError("");
     setWarning("");
@@ -392,7 +398,7 @@ function ProposalGroup({
     try {
       await executeRemaining();
     } finally {
-      onExecutionEnd?.();
+      onExecutionEnd?.(actionSnapshot);
     }
   }
 
@@ -582,15 +588,20 @@ function ProposalGroup({
       )}
 
       {status === "done" ? (
-        <div className="flex items-center gap-1 text-[var(--status-ok)]">
+        <div
+          ref={completionRef}
+          tabIndex={-1}
+          className="flex items-center gap-1 text-[var(--status-ok)] outline-none"
+        >
           <Check className="h-3.5 w-3.5" />
           {t("assistantActions.applied")}
         </div>
       ) : (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
             variant={meta.danger ? "destructive" : "default"}
+            className="ca-touch-44"
             disabled={
               status === "running" ||
               status === "stale" ||
@@ -615,13 +626,14 @@ function ProposalGroup({
             <Button
               size="sm"
               variant="ghost"
+              className="ca-touch-44"
               disabled={stopRequested}
               onClick={stopRemaining}
             >
               {stopRequested ? t("assistantActions.stopping") : t("assistantActions.stopRemaining")}
             </Button>
           ) : status !== "running" ? (
-            <Button size="sm" variant="ghost" onClick={dismiss}>
+            <Button size="sm" variant="ghost" onClick={dismiss} className="ca-touch-44">
               {t("assistantActions.cancel")}
             </Button>
           ) : null}
@@ -656,8 +668,8 @@ export function AssistantActionList({
   onNavigate: (action: AssistantAction) => void;
   onResult?: (message: string) => void;
   executionLocked?: boolean;
-  onExecutionStart?: () => boolean;
-  onExecutionEnd?: () => void;
+  onExecutionStart?: (actions: AssistantAction[]) => boolean;
+  onExecutionEnd?: (actions: AssistantAction[]) => void;
   onActionsResolved?: (actions: AssistantAction[]) => void;
   onApplied?: (action: AssistantAction) => void;
 }) {
@@ -703,8 +715,13 @@ export function AssistantActionList({
                 type="button"
                 disabled={executionLocked}
                 onClick={() => {
-                  onNavigate(first);
-                  onActionsResolved?.([first]);
+                  if (onExecutionStart && !onExecutionStart([first])) return;
+                  try {
+                    onNavigate(first);
+                    onActionsResolved?.([first]);
+                  } finally {
+                    onExecutionEnd?.([first]);
+                  }
                 }}
                 className="ca-touch-44 block w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-2 text-left text-xs text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)] disabled:cursor-not-allowed disabled:opacity-50"
               >
