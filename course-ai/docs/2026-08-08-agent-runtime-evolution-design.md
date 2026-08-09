@@ -91,7 +91,8 @@ stateDiagram-v2
 
 - 每个 `TurnStarted` 先于该轮的正文和思考增量；
 - 每个实际开始的 `ToolStarted` 必须恰好对应一个 `ToolFinished`；
-- `ToolFinished.canceled` 由工具 future 是否被中断决定，不在命令层根据整轮取消标志重新推断；
+- `ToolFinished.status` 显式区分 `completed`、`failed`、`canceled`，由工具结果或 future 中断决定；
+- 兼容字段 `ToolFinished.canceled` 由 `status` 推导，不在命令层根据整轮取消标志重新推断；
 - 被预算拒绝、尚未开始的工具不冒充已执行工具；
 - 最终 outcome 是终态事实来源，流式事件只用于过程显示。
 
@@ -140,7 +141,8 @@ stateDiagram-v2
 借鉴 OpenAI Agents SDK 的 trace 思路，但只使用项目已有的 `tracing`：
 
 - 开始：`request_id`；
-- 结束：`request_id`、停止原因、回合数、工具名列表、动作数量、耗时；
+- 工具结束：`request_id`、工具名、类型化执行状态，不记录参数或结果；
+- 运行结束：`request_id`、停止原因、回合数、工具名列表、动作数量、耗时；
 - 错误：`request_id`、错误类别、耗时；
 - 禁止记录：用户问题、模型正文、reasoning、工具参数、工具结果和文件路径正文。
 

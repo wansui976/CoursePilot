@@ -38,14 +38,34 @@ const FORCE_SUMMARY_INSTRUCTION: &str =
 ///
 /// 失败也是一种结果，不是错误：`Err` 会打断整段对话，而把失败文本喂回去，
 /// 模型能换个参数重试，或者老实告诉用户这件事没做成。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolExecutionStatus {
+    Completed,
+    Failed,
+    Canceled,
+}
+
+impl ToolExecutionStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Canceled => "canceled",
+        }
+    }
+}
+
 pub struct ToolOutcome {
     pub content: String,
+    pub status: ToolExecutionStatus,
 }
 
 impl ToolOutcome {
     pub fn ok(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
+            status: ToolExecutionStatus::Completed,
         }
     }
 
@@ -56,6 +76,7 @@ impl ToolOutcome {
             content: format!(
                 "工具执行失败：{reason}。请据此调整参数重试，或告诉用户这件事没做成。"
             ),
+            status: ToolExecutionStatus::Failed,
         }
     }
 }
@@ -123,9 +144,12 @@ pub enum AgentEvent<'a> {
     Content(&'a str),
     /// 模型这一轮要求调某个工具，即将执行。
     ToolStarted(&'a ToolCall),
-    /// 该工具执行完毕（成功与否都算完毕）。`canceled` 只描述这次工具 future 是否被中断，
-    /// 不从整轮取消标志事后推断，避免把刚好在完成边界收到取消的成功调用误报为取消。
-    ToolFinished { call: &'a ToolCall, canceled: bool },
+    /// 该工具执行完毕（成功与否都算完毕）。状态由工具结果或 future 中断直接确定，
+    /// 不从结果文本或整轮取消标志事后推断。
+    ToolFinished {
+        call: &'a ToolCall,
+        status: ToolExecutionStatus,
+    },
     /// 带工具的循环撞到轮次或上下文预算上限，已经转入强制总结。
     HitTurnLimit,
 }
@@ -360,7 +384,10 @@ pub async fn run<T: ToolBox>(
                     let outcome = run_tool_or_cancel(tools, call, cancel).await;
                     on_event(AgentEvent::ToolFinished {
                         call,
-                        canceled: outcome.is_none(),
+                        status: outcome
+                            .as_ref()
+                            .map(|outcome| outcome.status)
+                            .unwrap_or(ToolExecutionStatus::Canceled),
                     });
                     outcome
                 }
@@ -1049,8 +1076,8 @@ mod tests {
             &tools,
             &cancel,
             &mut |event| {
-                if let AgentEvent::ToolFinished { call, canceled } = event {
-                    finished.push((call.id.clone(), canceled));
+                if let AgentEvent::ToolFinished { call, status } = event {
+                    finished.push((call.id.clone(), status));
                 }
             },
         )
@@ -1066,7 +1093,7 @@ mod tests {
         assert_eq!(answered, ["a", "b"], "两次调用都要有结果，哪怕是「已取消」");
         assert_eq!(
             finished,
-            [("a".to_string(), false)],
+            [("a".to_string(), ToolExecutionStatus::Completed)],
             "工具已经返回结果时，即使整轮同时收到取消，也不能把该工具误报为取消"
         );
     }
@@ -1102,8 +1129,8 @@ mod tests {
         };
         let mut finished = Vec::new();
         let mut on_event = |event: AgentEvent<'_>| {
-            if let AgentEvent::ToolFinished { call, canceled } = event {
-                finished.push((call.id.clone(), canceled));
+            if let AgentEvent::ToolFinished { call, status } = event {
+                finished.push((call.id.clone(), status));
             }
         };
 
@@ -1135,7 +1162,7 @@ mod tests {
         assert!(out.canceled);
         assert_eq!(
             finished,
-            [("running".to_string(), true)],
+            [("running".to_string(), ToolExecutionStatus::Canceled)],
             "只有真正被中断的工具才应标记为 canceled"
         );
 
@@ -1253,6 +1280,7 @@ mod tests {
             says("那件事没做成，因为端点挂了"),
         ]);
         let tools = Recorder::new(true);
+        let mut finished = Vec::new();
         let out = run(
             &provider,
             "m",
@@ -1260,7 +1288,11 @@ mod tests {
             vec![ChatMessage::user("做点什么")],
             &tools,
             &AtomicBool::new(false),
-            &mut |_| {},
+            &mut |event| {
+                if let AgentEvent::ToolFinished { call, status } = event {
+                    finished.push((call.id.clone(), status));
+                }
+            },
         )
         .await
         .unwrap();
@@ -1268,6 +1300,11 @@ mod tests {
         // 失败进的是对话，不是错误通道——模型因此有机会改口。
         let result = out.messages.iter().find(|m| m.role == "tool").unwrap();
         assert!(result.content.contains("端点 500"));
+        assert_eq!(
+            finished,
+            [("c1".to_string(), ToolExecutionStatus::Failed)],
+            "领域失败必须是结构化状态，不能靠解析错误文本识别"
+        );
         assert_eq!(out.answer, "那件事没做成，因为端点挂了");
     }
 

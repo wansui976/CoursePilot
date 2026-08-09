@@ -5,7 +5,7 @@
 
 use crate::commands::courses::AppState;
 use crate::error::{AppError, AppResult};
-use crate::llm::agent::{self, AgentEvent, AgentStopReason};
+use crate::llm::agent::{self, AgentEvent, AgentStopReason, ToolExecutionStatus};
 use crate::llm::profiles::AiTask;
 use crate::llm::ChatMessage;
 use crate::pipeline::assistant::{AssistantAction, AssistantContext, AssistantTools};
@@ -85,6 +85,8 @@ pub enum AssistantEvent {
     ToolFinished {
         call_id: String,
         name: String,
+        status: ToolExecutionStatus,
+        /// 兼容旧前端；必须由 `status` 推导。
         canceled: bool,
     },
     /// 全部结束，带上最终结果（动作、历史、用过的工具都在里面）。
@@ -367,11 +369,18 @@ pub async fn cmd_assistant_ask(
                             name: call.name.clone(),
                         });
                     }
-                    AgentEvent::ToolFinished { call, canceled } => {
+                    AgentEvent::ToolFinished { call, status } => {
+                        tracing::debug!(
+                            request_id = %request_id,
+                            tool = %call.name,
+                            status = status.as_str(),
+                            "assistant tool finished"
+                        );
                         emit(AssistantEvent::ToolFinished {
                             call_id: call.id.clone(),
                             name: call.name.clone(),
-                            canceled,
+                            status,
+                            canceled: status == ToolExecutionStatus::Canceled,
                         })
                     }
                     AgentEvent::HitTurnLimit => {}
@@ -537,6 +546,7 @@ mod tests {
         let value = serde_json::to_value(AssistantEvent::ToolFinished {
             call_id: "call-7".into(),
             name: "search_content".into(),
+            status: ToolExecutionStatus::Canceled,
             canceled: true,
         })
         .unwrap();
@@ -544,7 +554,21 @@ mod tests {
         assert_eq!(value["type"], "tool_finished");
         assert_eq!(value["call_id"], "call-7");
         assert_eq!(value["name"], "search_content");
+        assert_eq!(value["status"], "canceled");
         assert_eq!(value["canceled"], true);
+    }
+
+    #[test]
+    fn tool_execution_statuses_have_stable_wire_names() {
+        assert_eq!(
+            serde_json::to_value([
+                ToolExecutionStatus::Completed,
+                ToolExecutionStatus::Failed,
+                ToolExecutionStatus::Canceled,
+            ])
+            .unwrap(),
+            serde_json::json!(["completed", "failed", "canceled"])
+        );
     }
 
     #[test]

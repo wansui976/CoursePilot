@@ -303,6 +303,8 @@ export type AgentStopReason =
   | "canceled"
   | "limit_reached";
 
+export type ToolExecutionStatus = "completed" | "failed" | "canceled";
+
 export interface AssistantReply {
   answer: string;
   /** Agent 的唯一终态。可选是为了兼容尚未返回该字段的旧后端。 */
@@ -331,7 +333,14 @@ export type AssistantEvent =
   | { type: "reasoning"; delta: string }
   | { type: "token"; delta: string }
   | { type: "tool"; call_id: string; name: string }
-  | { type: "tool_finished"; call_id: string; name: string; canceled: boolean }
+  | {
+      type: "tool_finished";
+      call_id: string;
+      name: string;
+      /** 可选是为了兼容尚未返回类型化状态的旧后端。 */
+      status?: ToolExecutionStatus;
+      canceled: boolean;
+    }
   | { type: "done"; reply: AssistantReply }
   | { type: "error"; message: string };
 
