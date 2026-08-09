@@ -337,13 +337,19 @@ function ProposalGroup({
   actions,
   onDone,
   onResult,
-  onExecutionChange,
+  executionLocked,
+  onExecutionStart,
+  onExecutionEnd,
+  onResolved,
   onApplied,
 }: {
   actions: Proposal[];
   onDone: () => void;
   onResult?: (message: string) => void;
-  onExecutionChange?: (running: boolean) => void;
+  executionLocked?: boolean;
+  onExecutionStart?: () => boolean;
+  onExecutionEnd?: () => void;
+  onResolved?: (actions: Proposal[]) => void;
   onApplied?: (action: Proposal) => void;
 }) {
   const { t } = useTranslation();
@@ -371,21 +377,22 @@ function ProposalGroup({
     if (
       status === "running" ||
       status === "stale" ||
+      executionLocked ||
       remaining.length === 0 ||
       missingImportCourse
     ) {
       return;
     }
+    if (onExecutionStart && !onExecutionStart()) return;
     setStatus("running");
     setError("");
     setWarning("");
     stopRequestedRef.current = false;
     setStopRequested(false);
-    onExecutionChange?.(true);
     try {
       await executeRemaining();
     } finally {
-      onExecutionChange?.(false);
+      onExecutionEnd?.();
     }
   }
 
@@ -395,7 +402,15 @@ function ProposalGroup({
     } catch (e) {
       const message = displayActionError(e);
       setError(message);
-      setStatus(e instanceof StaleAssistantActionError ? "stale" : "failed");
+      const stale = e instanceof StaleAssistantActionError;
+      setStatus(stale ? "stale" : "failed");
+      if (stale) {
+        try {
+          onResolved?.(remaining.map(({ action }) => action));
+        } catch {
+          // 失效状态已经确定，外层记录失败不能让旧动作重新变成可执行。
+        }
+      }
       onResult?.(t("assistantActions.executionError", { error: message }));
       return;
     }
@@ -432,6 +447,11 @@ function ProposalGroup({
     }
     if (succeeded.length > 0) {
       setCompleted((prev) => new Set([...prev, ...succeeded]));
+      try {
+        onResolved?.(succeeded.map((index) => actions[index]));
+      } catch {
+        // 动作已经落库；外层持久化记录失败不能把它重新暴露为待确认。
+      }
       onResult?.(
         t("assistantActions.completeResult", { title, details: succeeded
           .map((index) => describe(actions[index]).primary)
@@ -478,6 +498,7 @@ function ProposalGroup({
   }
 
   function dismiss() {
+    onResolved?.(remaining.map(({ action }) => action));
     onResult?.(
       t("assistantActions.canceledResult", { title, details: remaining
         .map(({ action }) => describe(action).primary)
@@ -489,6 +510,7 @@ function ProposalGroup({
   function skip(index: number, action: Proposal) {
     if (completed.has(index)) return;
     setSkipped((prev) => new Set(prev).add(index));
+    onResolved?.([action]);
     onResult?.(t("assistantActions.canceledResult", { title, details: describe(action).primary }));
   }
 
@@ -569,7 +591,12 @@ function ProposalGroup({
           <Button
             size="sm"
             variant={meta.danger ? "destructive" : "default"}
-            disabled={status === "running" || status === "stale" || missingImportCourse}
+            disabled={
+              status === "running" ||
+              status === "stale" ||
+              executionLocked ||
+              missingImportCourse
+            }
             onClick={confirm}
           >
             {status === "running"
@@ -619,13 +646,19 @@ export function AssistantActionList({
   actions,
   onNavigate,
   onResult,
-  onExecutionChange,
+  executionLocked,
+  onExecutionStart,
+  onExecutionEnd,
+  onActionsResolved,
   onApplied,
 }: {
   actions: AssistantAction[];
   onNavigate: (action: AssistantAction) => void;
   onResult?: (message: string) => void;
-  onExecutionChange?: (running: boolean) => void;
+  executionLocked?: boolean;
+  onExecutionStart?: () => boolean;
+  onExecutionEnd?: () => void;
+  onActionsResolved?: (actions: AssistantAction[]) => void;
   onApplied?: (action: AssistantAction) => void;
 }) {
   const { t } = useTranslation();
@@ -668,8 +701,12 @@ export function AssistantActionList({
               <button
                 key={group.key}
                 type="button"
-                onClick={() => onNavigate(first)}
-                className="ca-touch-44 block w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-2 text-left text-xs text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
+                disabled={executionLocked}
+                onClick={() => {
+                  onNavigate(first);
+                  onActionsResolved?.([first]);
+                }}
+                className="ca-touch-44 block w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-2 text-left text-xs text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {label}
               </button>
@@ -681,7 +718,10 @@ export function AssistantActionList({
               actions={group.items as Proposal[]}
               onDone={() => setDismissed((prev) => new Set(prev).add(group.key))}
               onResult={onResult}
-              onExecutionChange={onExecutionChange}
+              executionLocked={executionLocked}
+              onExecutionStart={onExecutionStart}
+              onExecutionEnd={onExecutionEnd}
+              onResolved={onActionsResolved}
               onApplied={onApplied}
             />
           );

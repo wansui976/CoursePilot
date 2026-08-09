@@ -53,6 +53,8 @@ export interface AssistantTurnRecord {
   /** 推理模型的思考过程；随答案一起保留，答案出来后折叠展示。旧记录没有。 */
   reasoning?: string;
   actions: AssistantAction[];
+  /** 当前进程里已经成功、跳过、取消或判定失效的动作索引；只用于筛掉恢复检查点。 */
+  resolvedActionIndexes?: number[];
   /** 重启前这一轮曾有操作按钮；参数不会落盘，恢复后只能提示用户重新发起。 */
   actionsExpired?: boolean;
   /** 重启后只用于解释等待过什么；不能转换回 AssistantAction。 */
@@ -204,8 +206,14 @@ function readCheckpoint(value: unknown, now: number): AssistantCheckpoint | unde
 export function getAssistantInteractionState(
   turn: AssistantTurnRecord,
 ): AssistantInteractionState {
+  const resolved = new Set(
+    (turn.resolvedActionIndexes ?? []).filter(
+      (index) => Number.isInteger(index) && index >= 0 && index < turn.actions.length,
+    ),
+  );
   const actions = turn.actions.filter(
-    (action): action is CheckpointAction => action.kind !== "set_theme",
+    (action, index): action is CheckpointAction =>
+      action.kind !== "set_theme" && !resolved.has(index),
   );
   if (actions.length > 0) return { status: "awaiting_user", actions };
   if (turn.actionsExpired || turn.checkpoint) {
@@ -445,8 +453,8 @@ export function readAssistantSession(now = Date.now()): AssistantSession {
 export function writeAssistantSession(session: AssistantSession, now = Date.now()) {
   try {
     // 主题已经当场生效；其余按钮都依赖生成时的界面状态，重启后不得复活。
-    const hasLiveActionPayload = session.turns.some((turn) =>
-      turn.actions.some((action) => action.kind !== "set_theme"),
+    const hasLiveActionPayload = session.turns.some(
+      (turn) => getAssistantInteractionState(turn).status === "awaiting_user",
     );
     const turns = session.turns
       .filter((turn) => !turn.pending)
@@ -471,6 +479,7 @@ export function writeAssistantSession(session: AssistantSession, now = Date.now(
             .map((result) => capAssistantText(result, MAX_ACTION_RESULT_CHARS))
             .slice(-MAX_ACTION_RESULTS),
           actions: [],
+          resolvedActionIndexes: undefined,
           actionsExpired: interaction.status !== "none" || undefined,
           checkpoint,
           pending: undefined,

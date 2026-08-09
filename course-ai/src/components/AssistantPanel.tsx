@@ -335,10 +335,37 @@ export function AssistantPanel({
   const scopeLabel = contextLabel(context, t);
   const actionExecutionBusy = actionExecutionCount > 0;
 
-  function trackActionExecution(running: boolean) {
-    const next = Math.max(0, actionExecutionCountRef.current + (running ? 1 : -1));
-    actionExecutionCountRef.current = next;
-    setActionExecutionCount(next);
+  function beginActionExecution() {
+    if (actionExecutionCountRef.current > 0) return false;
+    actionExecutionCountRef.current = 1;
+    setActionExecutionCount(1);
+    return true;
+  }
+
+  function endActionExecution() {
+    actionExecutionCountRef.current = 0;
+    setActionExecutionCount(0);
+  }
+
+  function markTurnActionsResolved(
+    turnId: string,
+    resolvedActions: AssistantAction[],
+    epoch: number,
+  ) {
+    if (epoch !== conversationEpochRef.current || resolvedActions.length === 0) return;
+    const resolved = new Set(resolvedActions);
+    setTurns((previous) =>
+      previous.map((turn) => {
+        if (turn.id !== turnId) return turn;
+        const indexes = new Set(turn.resolvedActionIndexes ?? []);
+        turn.actions.forEach((action, index) => {
+          if (resolved.has(action)) indexes.add(index);
+        });
+        return indexes.size === (turn.resolvedActionIndexes?.length ?? 0)
+          ? turn
+          : { ...turn, resolvedActionIndexes: [...indexes].sort((a, b) => a - b) };
+      }),
+    );
   }
 
   function navigateFromTurn(turn: Turn, action: AssistantAction) {
@@ -1523,7 +1550,12 @@ export function AssistantPanel({
               actions={turn.actions}
               onNavigate={(action) => navigateFromTurn(turn, action)}
               onResult={(message) => recordActionResult(turn.id, message, conversationEpoch)}
-              onExecutionChange={trackActionExecution}
+              executionLocked={actionExecutionBusy}
+              onExecutionStart={beginActionExecution}
+              onExecutionEnd={endActionExecution}
+              onActionsResolved={(actions) =>
+                markTurnActionsResolved(turn.id, actions, conversationEpoch)
+              }
               onApplied={onActionApplied}
             />
 

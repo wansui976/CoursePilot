@@ -194,6 +194,85 @@ describe("assistantSession", () => {
     expect(JSON.stringify(checkpoint)).not.toContain("course-a");
   });
 
+  it("does not create an expired checkpoint after every action was resolved", () => {
+    writeAssistantSession(
+      {
+        turns: [
+          {
+            id: "resolved",
+            question: "删掉它并打开下一讲",
+            answer: "已经准备好",
+            actions: [
+              { kind: "propose_delete", video_id: "v1", title: "第一讲" },
+              { kind: "open_video", video_id: "v2", title: "第二讲" },
+            ],
+            resolvedActionIndexes: [0, 1],
+            tools: ["delete_video", "open_video"],
+            canceled: false,
+            actionResults: ["已完成删除：第一讲", "已打开第二讲"],
+          },
+        ],
+        history: [
+          { role: "user", content: "删掉它并打开下一讲" },
+          { role: "assistant", content: "已经准备好" },
+        ],
+        draft: "",
+      },
+      3_500,
+    );
+
+    const restored = readAssistantSession(3_501);
+    expect(restored.turns[0].actionsExpired).toBeUndefined();
+    expect(restored.turns[0].checkpoint).toBeUndefined();
+    expect(restored.history).toEqual([
+      { role: "user", content: "删掉它并打开下一讲" },
+      { role: "assistant", content: "已经准备好" },
+    ]);
+    const stored = localStorage.getItem(assistantSessionStorageKey) ?? "";
+    expect(stored).not.toContain("resolvedActionIndexes");
+  });
+
+  it("checkpoints only unresolved actions from a partially completed batch", () => {
+    writeAssistantSession(
+      {
+        turns: [
+          {
+            id: "partial",
+            question: "批量改名",
+            answer: "请确认",
+            actions: [
+              {
+                kind: "propose_rename",
+                video_id: "v1",
+                current_title: "01",
+                new_title: "第一讲",
+              },
+              {
+                kind: "propose_rename",
+                video_id: "v2",
+                current_title: "02",
+                new_title: "第二讲",
+              },
+            ],
+            resolvedActionIndexes: [0, -1, 99, 0],
+            tools: ["rename_video"],
+            canceled: false,
+            actionResults: ["第一讲已完成，第二讲待重试"],
+          },
+        ],
+        history: [],
+        draft: "",
+      },
+      3_600,
+    );
+
+    const restored = readAssistantSession(3_601).turns[0];
+    expect(restored.actionsExpired).toBe(true);
+    expect(restored.checkpoint?.targets).toEqual([
+      { action: "propose_rename", label: "02" },
+    ]);
+  });
+
   it("marks an old checkpoint as timed out and still never restores stale resource actions", () => {
     const savedAt = 4_000;
     writeAssistantSession(

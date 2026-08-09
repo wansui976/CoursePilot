@@ -1458,6 +1458,7 @@ describe("确认卡", () => {
 
     expect(screen.getByText("操作结果：已完成改名：第一讲")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "确认改名" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/原有操作按钮已失效/)).not.toBeInTheDocument();
     expect(mockIpc.videos.updateTitle).toHaveBeenCalledTimes(1);
   });
 
@@ -1504,6 +1505,49 @@ describe("确认卡", () => {
 
     fireEvent.click(newConversation);
     expect(screen.queryByTestId("user-bubble")).not.toBeInTheDocument();
+  });
+
+  it("不同确认卡不能并发执行，前一张完成后才解锁下一张", async () => {
+    let finishDelete!: () => void;
+    mockIpc.videos.delete.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishDelete = resolve;
+      }),
+    );
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          { kind: "propose_delete", video_id: "v2", title: "第五讲" },
+          {
+            kind: "propose_setting",
+            key: "subtitle_autocorrect",
+            label: "字幕 AI 纠错",
+            current: null,
+            value: "true",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("先删视频，再开字幕纠错");
+
+    const deleteButton = await screen.findByRole("button", { name: "确认删除" });
+    const settingButton = await screen.findByRole("button", { name: "确认修改" });
+    fireEvent.click(deleteButton);
+    await waitFor(() => expect(mockIpc.videos.delete).toHaveBeenCalledWith("v2"));
+    expect(settingButton).toBeDisabled();
+    fireEvent.click(settingButton);
+    expect(mockIpc.settings.set).not.toHaveBeenCalled();
+
+    await act(async () => {
+      finishDelete();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(settingButton).toBeEnabled());
+    fireEvent.click(settingButton);
+    await waitFor(() =>
+      expect(mockIpc.settings.set).toHaveBeenCalledWith("subtitle_autocorrect", "true"),
+    );
   });
 
   it("删除要等确认，并说清楚是进回收站", async () => {
