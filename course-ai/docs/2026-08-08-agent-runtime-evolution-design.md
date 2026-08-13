@@ -93,6 +93,7 @@ stateDiagram-v2
 - 每个实际开始的 `ToolStarted` 必须恰好对应一个 `ToolFinished`；
 - `ToolFinished.status` 显式区分 `completed`、`failed`、`canceled`，由工具结果或 future 中断决定；
 - 兼容字段 `ToolFinished.canceled` 由 `status` 推导，不在命令层根据整轮取消标志重新推断；
+- 前端消费类型化状态提供过程反馈，但工具失败仍由模型调整或说明，不升级成整轮错误；
 - 被预算拒绝、尚未开始的工具不冒充已执行工具；
 - 最终 outcome 是终态事实来源，流式事件只用于过程显示。
 

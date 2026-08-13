@@ -626,6 +626,8 @@
     "thinkingStatus": "正在思考…",
     "thinkingWithTools": "正在思考并调用工具…",
     "organizing": "正在整理结果…",
+    "toolFailedContinuing": "工具未能完成，正在调整方案…",
+    "toolCanceled": "工具已停止，正在结束本轮…",
     "responseComplete": "回答已完成",
     "usingTool": "正在{{tool}}…",
     "scrollToLatest": "回到最新",

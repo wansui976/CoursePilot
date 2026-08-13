@@ -291,6 +291,49 @@ describe("AssistantPanel", () => {
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("正在作答"));
   });
 
+  it("按类型化工具终态说明失败与取消，并由新工具覆盖旧状态", async () => {
+    let emit!: (event: AssistantEvent) => void;
+    mockIpc.assistant.ask.mockImplementationOnce(
+      (_q, _c, _h, _id, onEvent: (event: AssistantEvent) => void) => {
+        emit = onEvent;
+        return new Promise<AssistantReply>(() => {});
+      },
+    );
+    renderPanel();
+    await ask("尝试两种查找方式");
+    await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalled());
+
+    act(() => {
+      emit({ type: "tool", call_id: "first", name: "search_content" });
+      emit({
+        type: "tool_finished",
+        call_id: "first",
+        name: "search_content",
+        status: "failed",
+        canceled: false,
+      });
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("工具未能完成，正在调整方案"),
+    );
+
+    act(() => emit({ type: "tool", call_id: "second", name: "list_videos" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("正在查看视频列表"));
+
+    act(() =>
+      emit({
+        type: "tool_finished",
+        call_id: "second",
+        name: "list_videos",
+        status: "canceled",
+        canceled: true,
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("工具已停止，正在结束本轮"),
+    );
+  });
+
   it("done 会先冲刷尚未到下一帧的思考片段", async () => {
     let emit!: (event: AssistantEvent) => void;
     let finish!: (value: AssistantReply) => void;

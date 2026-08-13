@@ -74,6 +74,7 @@ import type {
   AssistantContext,
   AssistantMessage,
   AssistantReply,
+  ToolExecutionStatus,
 } from "@/lib/types";
 
 /**
@@ -184,6 +185,8 @@ function initialDockTop() {
 type Turn = AssistantTurnRecord & {
   /** 只存在于当前流式请求中；完成后不落入会话存储。 */
   activeTool?: { callId: string; name: string };
+  /** 最近一次工具结束状态；只用于当前请求的过程反馈，不落入会话存储。 */
+  toolExecutionStatus?: ToolExecutionStatus;
 };
 
 const EMPTY_ASSISTANT_SESSION: AssistantSession = { turns: [], history: [], draft: "" };
@@ -385,11 +388,15 @@ export function AssistantPanel({
     : null;
   const streamingLabel = activeToolLabel
     ? t("assistant.usingTool", { tool: activeToolLabel })
-    : pendingTurn?.answer
-      ? t("assistant.answering")
-      : pendingTurn?.tools.length
-        ? t("assistant.organizing")
-        : t("assistant.thinkingStatus");
+    : pendingTurn?.toolExecutionStatus === "failed"
+      ? t("assistant.toolFailedContinuing")
+      : pendingTurn?.toolExecutionStatus === "canceled"
+        ? t("assistant.toolCanceled")
+        : pendingTurn?.answer
+          ? t("assistant.answering")
+          : pendingTurn?.tools.length
+            ? t("assistant.organizing")
+            : t("assistant.thinkingStatus");
   const setThemePref = useTheme((state) => state.setPref);
   const pendingInlineAsk = useInlineAsk((state) => state.pending);
   const clearInlineAsk = useInlineAsk((state) => state.clear);
@@ -1264,7 +1271,7 @@ export function AssistantPanel({
             clearBufferedAnswer = true;
             bufferedAnswer = [];
             bufferedAnswerChars = 0;
-            patch((item) => ({ ...item, activeTool: undefined }));
+            patch((item) => ({ ...item, activeTool: undefined, toolExecutionStatus: undefined }));
             scheduleStreamFlush();
           } else if (event.type === "reasoning") {
             bufferedReasoningChars = appendStreamChunk(
@@ -1287,6 +1294,7 @@ export function AssistantPanel({
             patch((item) => ({
               ...item,
               activeTool: { callId: event.call_id, name: event.name },
+              toolExecutionStatus: undefined,
             }));
             scheduleStreamFlush();
           } else if (event.type === "tool_finished") {
@@ -1294,6 +1302,10 @@ export function AssistantPanel({
               ...item,
               activeTool:
                 item.activeTool?.callId === event.call_id ? undefined : item.activeTool,
+              toolExecutionStatus:
+                item.activeTool?.callId === event.call_id
+                  ? (event.status ?? (event.canceled ? "canceled" : "completed"))
+                  : item.toolExecutionStatus,
             }));
           }
         },
@@ -1338,6 +1350,7 @@ export function AssistantPanel({
                 // 找借口——它没转不出来，是被你按停的。
                 hitTurnLimit: stopReason === "limit_reached" && !canceled,
                 activeTool: undefined,
+                toolExecutionStatus: undefined,
                 pending: false,
               }
             : turn,

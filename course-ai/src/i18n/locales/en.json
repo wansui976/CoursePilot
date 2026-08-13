@@ -626,6 +626,8 @@
     "thinkingStatus": "Thinking…",
     "thinkingWithTools": "Thinking and calling tools…",
     "organizing": "Organizing results…",
+    "toolFailedContinuing": "Tool did not complete; adjusting the approach…",
+    "toolCanceled": "Tool stopped; finishing this turn…",
     "responseComplete": "Response complete",
     "usingTool": "Using {{tool}}…",
     "scrollToLatest": "Scroll to latest",
