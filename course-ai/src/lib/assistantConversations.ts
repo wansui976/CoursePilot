@@ -72,6 +72,16 @@ interface PersistedConversationIndex {
   conversations: AssistantConversationSummary[];
 }
 
+type ConversationIndexReadResult =
+  | { status: "missing" }
+  | { status: "valid"; state: AssistantConversationsState }
+  | { status: "corrupt" | "unsupported"; state: AssistantConversationsState };
+
+interface ResolvedAssistantConversations {
+  state: AssistantConversationsState;
+  writable: boolean;
+}
+
 const EMPTY_SESSION: AssistantSession = { turns: [], history: [], draft: "" };
 const volatileConversationSessions = new Map<string, AssistantSession>();
 
@@ -100,11 +110,20 @@ export function deriveAssistantConversationTitle(session: AssistantSession) {
 }
 
 function readSummary(value: unknown): AssistantConversationSummary | null {
-  if (!isRecord(value) || !isConversationId(value.id)) return null;
+  if (
+    !isRecord(value) ||
+    !isConversationId(value.id) ||
+    typeof value.title !== "string" ||
+    typeof value.updatedAt !== "number" ||
+    !Number.isFinite(value.updatedAt) ||
+    value.updatedAt < 0
+  ) {
+    return null;
+  }
   return {
     id: value.id,
     title: normalizeTitle(value.title),
-    updatedAt: normalizeTimestamp(value.updatedAt, 0),
+    updatedAt: value.updatedAt,
   };
 }
 
@@ -119,26 +138,58 @@ function sortConversations(conversations: AssistantConversationSummary[]) {
     .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id));
 }
 
-function parseIndex(serialized: string | null): AssistantConversationsState | null {
-  if (!serialized) return null;
+function emptyAssistantConversationsState(): AssistantConversationsState {
+  return { activeId: null, conversations: [] };
+}
+
+function parseIndex(serialized: string): ConversationIndexReadResult {
   try {
     const value = JSON.parse(serialized) as unknown;
-    if (!isRecord(value) || value.version !== INDEX_VERSION || !Array.isArray(value.conversations)) {
-      return null;
+    if (!isRecord(value) || !("version" in value)) {
+      return { status: "corrupt", state: emptyAssistantConversationsState() };
     }
-    const conversations = sortConversations(
-      value.conversations
-        .map(readSummary)
-        .filter((conversation) => conversation !== null),
+    if (value.version !== INDEX_VERSION) {
+      return { status: "unsupported", state: emptyAssistantConversationsState() };
+    }
+    if (!Array.isArray(value.conversations)) {
+      return { status: "corrupt", state: emptyAssistantConversationsState() };
+    }
+    const summaries = value.conversations.map(readSummary);
+    if (summaries.some((summary) => summary === null)) {
+      return { status: "corrupt", state: emptyAssistantConversationsState() };
+    }
+    const typedSummaries = summaries.filter(
+      (summary): summary is AssistantConversationSummary => summary !== null,
     );
-    const activeId =
-      isConversationId(value.activeId) &&
-      conversations.some((conversation) => conversation.id === value.activeId)
-        ? value.activeId
-        : (conversations[0]?.id ?? null);
-    return { activeId, conversations };
+    if (new Set(typedSummaries.map(({ id }) => id)).size !== typedSummaries.length) {
+      return { status: "corrupt", state: emptyAssistantConversationsState() };
+    }
+    const conversations = sortConversations(typedSummaries);
+    const activeId = value.activeId;
+    if (activeId === null) {
+      return { status: "valid", state: { activeId: null, conversations } };
+    }
+    if (
+      !isConversationId(activeId) ||
+      !conversations.some((conversation) => conversation.id === activeId)
+    ) {
+      return { status: "corrupt", state: emptyAssistantConversationsState() };
+    }
+    return {
+      status: "valid",
+      state: { activeId, conversations },
+    };
   } catch {
-    return null;
+    return { status: "corrupt", state: emptyAssistantConversationsState() };
+  }
+}
+
+function readConversationIndex(): ConversationIndexReadResult {
+  try {
+    const serialized = localStorage.getItem(INDEX_STORAGE_KEY);
+    return serialized === null ? { status: "missing" } : parseIndex(serialized);
+  } catch {
+    return { status: "corrupt", state: emptyAssistantConversationsState() };
   }
 }
 
@@ -278,12 +329,16 @@ function migrateLegacyAssistantSession(now: number): AssistantConversationsState
   return state;
 }
 
-export function readAssistantConversations(now = Date.now()): AssistantConversationsState {
-  try {
-    return parseIndex(localStorage.getItem(INDEX_STORAGE_KEY)) ?? migrateLegacyAssistantSession(now);
-  } catch {
-    return migrateLegacyAssistantSession(now);
+function resolveAssistantConversations(now: number): ResolvedAssistantConversations {
+  const index = readConversationIndex();
+  if (index.status === "missing") {
+    return { state: migrateLegacyAssistantSession(now), writable: true };
   }
+  return { state: index.state, writable: index.status === "valid" };
+}
+
+export function readAssistantConversations(now = Date.now()): AssistantConversationsState {
+  return resolveAssistantConversations(now).state;
 }
 
 export function readAssistantConversation(
@@ -302,7 +357,11 @@ export function saveAssistantConversation(
   now = Date.now(),
 ): SaveAssistantConversationResult {
   if (!isConversationId(input.id)) throw new Error("Invalid assistant conversation id");
-  const current = readAssistantConversations(now);
+  const resolved = resolveAssistantConversations(now);
+  const current = resolved.state;
+  if (!resolved.writable) {
+    return { state: current, snapshotSaved: false, indexSaved: false };
+  }
   const previous = current.conversations.find((conversation) => conversation.id === input.id);
   if (!persistConversationSnapshot(input.id, input.session, now)) {
     return { state: current, snapshotSaved: false, indexSaved: false };
@@ -344,14 +403,24 @@ export function tryCreateAssistantConversation(
   options: CreateAssistantConversationOptions = {},
 ): CreateAssistantConversationResult {
   const now = options.now ?? Date.now();
-  const current = readAssistantConversations(now);
+  const resolved = resolveAssistantConversations(now);
+  const current = resolved.state;
+  if (!resolved.writable) {
+    return {
+      state: current,
+      createdId: null,
+      persisted: false,
+      status: "storage_error",
+    };
+  }
   const reserved = new Set(current.conversations.map((conversation) => conversation.id));
   if (options.id !== undefined && (!isConversationId(options.id) || reserved.has(options.id))) {
     throw new Error("Assistant conversation id must be unique and storage-safe");
   }
   const session = options.session ?? EMPTY_SESSION;
   const reusable = findReusableEmptyConversation(current, now);
-  const reuseExistingId = options.id === undefined && reusable !== null;
+  const reuseExistingId =
+    options.id === undefined && options.session === undefined && reusable !== null;
 
   if (current.conversations.length >= MAX_ASSISTANT_CONVERSATIONS && !reusable) {
     return { state: current, createdId: null, persisted: false, status: "limit" };
@@ -424,7 +493,9 @@ export function trySetActiveAssistantConversation(
   id: string,
   now = Date.now(),
 ): SetActiveAssistantConversationResult {
-  const current = readAssistantConversations(now);
+  const resolved = resolveAssistantConversations(now);
+  const current = resolved.state;
+  if (!resolved.writable) return { state: current, persisted: false };
   if (!current.conversations.some((conversation) => conversation.id === id)) {
     return { state: current, persisted: false };
   }
@@ -445,7 +516,9 @@ export function renameAssistantConversation(
   title: string,
   now = Date.now(),
 ): AssistantConversationsState {
-  const current = readAssistantConversations(now);
+  const resolved = resolveAssistantConversations(now);
+  const current = resolved.state;
+  if (!resolved.writable) return current;
   const normalized = normalizeTitle(title);
   if (!normalized || !current.conversations.some((conversation) => conversation.id === id)) {
     return current;
@@ -468,7 +541,9 @@ export function deleteAssistantConversation(
   id: string,
   now = Date.now(),
 ): AssistantConversationsState {
-  const current = readAssistantConversations(now);
+  const resolved = resolveAssistantConversations(now);
+  const current = resolved.state;
+  if (!resolved.writable) return current;
   if (!current.conversations.some((conversation) => conversation.id === id)) return current;
   const conversations = current.conversations.filter((conversation) => conversation.id !== id);
   const next = {

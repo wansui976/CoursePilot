@@ -49,6 +49,13 @@ function session(question: string, answer = `回答：${question}`): AssistantSe
   };
 }
 
+function localStorageBytes() {
+  return Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+    .filter((key): key is string => key !== null)
+    .sort()
+    .map((key) => [key, localStorage.getItem(key)] as const);
+}
+
 describe("assistantConversations", () => {
   beforeEach(() => localStorage.clear());
 
@@ -133,6 +140,63 @@ describe("assistantConversations", () => {
     );
     expect(localStorage.getItem(assistantConversationsStorageKey)).toBeNull();
     indexFailure.mockRestore();
+  });
+
+  it.each([
+    ["corrupt", "{not-json"],
+    [
+      "unsupported",
+      JSON.stringify({
+        version: 2,
+        activeId: "conversation-existing",
+        conversations: [
+          { id: "conversation-existing", title: "未来会话", updatedAt: 900 },
+        ],
+        futureMetadata: { keep: true },
+      }),
+    ],
+  ])("keeps a %s index and every snapshot byte-for-byte read-only", (_label, indexBytes) => {
+    const existingId = "conversation-existing";
+    const snapshotBytes = '{"turns":[],"history":[],"draft":"","future":"keep"}';
+    writeAssistantSession(session("旧固定会话不能被迁移"), 800);
+    localStorage.setItem(assistantConversationStorageKey(existingId), snapshotBytes);
+    localStorage.setItem(assistantConversationsStorageKey, indexBytes);
+    const before = localStorageBytes();
+
+    expect(readAssistantConversations(1_000)).toEqual({ activeId: null, conversations: [] });
+    expect(readAssistantConversation(existingId, 1_001)).toBeNull();
+    expect(
+      tryCreateAssistantConversation({
+        id: "conversation-new",
+        session: session("不能新增"),
+        now: 1_002,
+      }),
+    ).toEqual({
+      state: { activeId: null, conversations: [] },
+      createdId: null,
+      persisted: false,
+      status: "storage_error",
+    });
+    expect(
+      saveAssistantConversation({ id: existingId, session: session("不能覆盖") }, 1_003),
+    ).toEqual({
+      state: { activeId: null, conversations: [] },
+      snapshotSaved: false,
+      indexSaved: false,
+    });
+    expect(trySetActiveAssistantConversation(existingId, 1_004)).toEqual({
+      state: { activeId: null, conversations: [] },
+      persisted: false,
+    });
+    expect(renameAssistantConversation(existingId, "不能重命名", 1_005)).toEqual({
+      activeId: null,
+      conversations: [],
+    });
+    expect(deleteAssistantConversation(existingId, 1_006)).toEqual({
+      activeId: null,
+      conversations: [],
+    });
+    expect(localStorageBytes()).toEqual(before);
   });
 
   it("reports failed saves and does not publish a half-created conversation", () => {
@@ -336,6 +400,27 @@ describe("assistantConversations", () => {
     expect(readAssistantConversation(firstId)?.session.turns[0].question).toBe("保留的会话");
   });
 
+  it("creates a new id instead of overwriting a reusable empty snapshot with supplied content", () => {
+    const initial = readAssistantConversations(1);
+    const emptyId = initial.activeId as string;
+    const emptySnapshot = localStorage.getItem(assistantConversationStorageKey(emptyId));
+
+    const created = tryCreateAssistantConversation({ session: session("新会话内容"), now: 2 });
+
+    expect(created.status).toBe("created");
+    expect(created.createdId).not.toBe(emptyId);
+    expect(created.state.conversations).toHaveLength(2);
+    expect(localStorage.getItem(assistantConversationStorageKey(emptyId))).toBe(emptySnapshot);
+    expect(readAssistantConversation(emptyId)?.session).toEqual({
+      turns: [],
+      history: [],
+      draft: "",
+    });
+    expect(readAssistantConversation(created.createdId as string)?.session.turns[0].question).toBe(
+      "新会话内容",
+    );
+  });
+
   it("reclaims an empty slot at the limit but preserves every non-empty conversation", () => {
     const initial = readAssistantConversations(1);
     const emptyId = initial.activeId as string;
@@ -399,6 +484,37 @@ describe("assistantConversations", () => {
     }
   });
 
+  it("preserves an empty snapshot byte-for-byte when copy-on-write index saving fails", () => {
+    const initial = readAssistantConversations(1);
+    const emptyId = initial.activeId as string;
+    const emptySnapshot = localStorage.getItem(assistantConversationStorageKey(emptyId));
+    const before = localStorageBytes();
+    const originalSetItem = Storage.prototype.setItem;
+    const indexFailure = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key, value) {
+        if (key === assistantConversationsStorageKey) {
+          throw new DOMException("quota", "QuotaExceededError");
+        }
+        return originalSetItem.call(this, key, value);
+      });
+
+    try {
+      expect(
+        tryCreateAssistantConversation({ session: session("不会覆盖空快照"), now: 2 }),
+      ).toEqual({
+        state: initial,
+        createdId: null,
+        persisted: false,
+        status: "storage_error",
+      });
+      expect(localStorage.getItem(assistantConversationStorageKey(emptyId))).toBe(emptySnapshot);
+      expect(localStorageBytes()).toEqual(before);
+    } finally {
+      indexFailure.mockRestore();
+    }
+  });
+
   it.each([
     ["corrupt", "broken"],
     ["future format", JSON.stringify({ turns: [], history: [], draft: "", futureData: "keep" })],
@@ -435,19 +551,16 @@ describe("assistantConversations", () => {
     expect(readAssistantConversations(6)).toEqual(empty);
   });
 
-  it("recovers safely from corrupt index and snapshot JSON", () => {
-    localStorage.setItem(assistantSessionStorageKey, "not-json");
-    localStorage.setItem(assistantConversationsStorageKey, "also-not-json");
-    const recovered = readAssistantConversations(100);
-    expect(recovered.conversations).toHaveLength(1);
-
-    const id = recovered.activeId as string;
+  it("reads a corrupt snapshot as empty without changing its bytes", () => {
+    const state = readAssistantConversations(100);
+    const id = state.activeId as string;
     localStorage.setItem(assistantConversationStorageKey(id), "broken-snapshot");
     expect(readAssistantConversation(id, 101)?.session).toEqual({
       turns: [],
       history: [],
       draft: "",
     });
+    expect(localStorage.getItem(assistantConversationStorageKey(id))).toBe("broken-snapshot");
   });
 });
 
