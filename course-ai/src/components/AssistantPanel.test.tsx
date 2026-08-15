@@ -15,11 +15,15 @@ import {
 import {
   assistantConversationsStorageKey,
   assistantConversationStorageKey,
+  createAssistantConversation,
+  MAX_ASSISTANT_CONVERSATIONS,
   readAssistantConversation,
   readAssistantConversations,
   readRecentAssistantQuestions,
+  upsertAssistantConversation,
   writeRecentAssistantQuestions,
 } from "@/lib/assistantConversations";
+import type { AssistantSession } from "@/lib/assistantSession";
 import type {
   AssistantAction,
   AssistantContext,
@@ -92,6 +96,28 @@ function renderPanel(
 async function ask(text: string) {
   fireEvent.change(screen.getByLabelText("对助手说"), { target: { value: text } });
   fireEvent.click(screen.getByLabelText("发送"));
+}
+
+function storedConversation(question: string): AssistantSession {
+  const answer = `回答：${question}`;
+  return {
+    turns: [
+      {
+        id: `turn-${question}`,
+        question,
+        answer,
+        actions: [],
+        tools: [],
+        canceled: false,
+        actionResults: [],
+      },
+    ],
+    history: [
+      { role: "user", content: question },
+      { role: "assistant", content: answer },
+    ],
+    draft: "",
+  };
 }
 
 describe("AssistantPanel", () => {
@@ -951,6 +977,62 @@ describe("AssistantPanel", () => {
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     await waitFor(() => expect(historyButton).toHaveFocus());
     expect(historyButton).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("新建时优先复用已有空会话，不堆积同名空条目", () => {
+    const initial = readAssistantConversations(1);
+    const emptyId = initial.activeId as string;
+    createAssistantConversation({
+      id: "conversation-current",
+      session: storedConversation("当前非空会话"),
+      now: 2,
+    });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "新对话" }));
+
+    const after = readAssistantConversations();
+    expect(after.conversations).toHaveLength(2);
+    expect(after.activeId).toBe(emptyId);
+    expect(screen.queryByText("回答：当前非空会话")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("对助手说")).toHaveValue("");
+  });
+
+  it("二十个非空会话时明确提示上限且不切换或删除历史", () => {
+    const initial = readAssistantConversations(1);
+    const firstId = initial.activeId as string;
+    upsertAssistantConversation({ id: firstId, session: storedConversation("会话 0") }, 2);
+    for (let index = 1; index < MAX_ASSISTANT_CONVERSATIONS; index += 1) {
+      createAssistantConversation({
+        id: `conversation-panel-${index}`,
+        session: storedConversation(`会话 ${index}`),
+        now: index + 2,
+      });
+    }
+    const before = readAssistantConversations(100);
+    const snapshots = new Map(
+      before.conversations.map(({ id }) => [
+        id,
+        localStorage.getItem(assistantConversationStorageKey(id)),
+      ]),
+    );
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "新对话" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "已保留 20 个非空会话。历史不会被自动删除，暂时无法新建；请继续使用现有会话。",
+    );
+    const after = readAssistantConversations();
+    expect(after.conversations.map(({ id }) => id).sort()).toEqual(
+      before.conversations.map(({ id }) => id).sort(),
+    );
+    expect(after.activeId).toBe(before.activeId);
+    expect(after.conversations).toHaveLength(MAX_ASSISTANT_CONVERSATIONS);
+    expect(screen.getByText("回答：会话 19")).toBeInTheDocument();
+    for (const [id, snapshot] of snapshots) {
+      expect(localStorage.getItem(assistantConversationStorageKey(id))).toBe(snapshot);
+    }
   });
 
   it("重新回答不会把同一个问题重复写入最近问题", async () => {

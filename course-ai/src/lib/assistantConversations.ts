@@ -58,6 +58,7 @@ export interface CreateAssistantConversationResult {
   state: AssistantConversationsState;
   createdId: string | null;
   persisted: boolean;
+  status: "created" | "reused" | "limit" | "storage_error";
 }
 
 export interface SetActiveAssistantConversationResult {
@@ -107,7 +108,7 @@ function readSummary(value: unknown): AssistantConversationSummary | null {
   };
 }
 
-function sortAndLimitConversations(conversations: AssistantConversationSummary[]) {
+function sortConversations(conversations: AssistantConversationSummary[]) {
   const seen = new Set<string>();
   return conversations
     .filter((conversation) => {
@@ -115,8 +116,7 @@ function sortAndLimitConversations(conversations: AssistantConversationSummary[]
       seen.add(conversation.id);
       return true;
     })
-    .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
-    .slice(0, MAX_ASSISTANT_CONVERSATIONS);
+    .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id));
 }
 
 function parseIndex(serialized: string | null): AssistantConversationsState | null {
@@ -126,7 +126,7 @@ function parseIndex(serialized: string | null): AssistantConversationsState | nu
     if (!isRecord(value) || value.version !== INDEX_VERSION || !Array.isArray(value.conversations)) {
       return null;
     }
-    const conversations = sortAndLimitConversations(
+    const conversations = sortConversations(
       value.conversations
         .map(readSummary)
         .filter((conversation) => conversation !== null),
@@ -186,6 +186,68 @@ function persistConversationSnapshot(id: string, session: AssistantSession, now:
   }
 }
 
+interface ReadConversationSessionResult {
+  session: AssistantSession;
+  recyclable: boolean;
+}
+
+function readConversationSession(id: string, now: number): ReadConversationSessionResult {
+  const volatile = volatileConversationSessions.get(id);
+  if (volatile) return { session: volatile, recyclable: isEmptySession(volatile) };
+  try {
+    const serialized = localStorage.getItem(assistantConversationStorageKey(id));
+    if (serialized === null) return { session: EMPTY_SESSION, recyclable: false };
+    const value = JSON.parse(serialized) as unknown;
+    // 只有本模块写出的完整快照才能被判定为空。损坏或旧格式的数据宁可保留，
+    // 也不能为了腾位置把仍可能包含用户内容的会话当成空白回收。
+    if (
+      !isRecord(value) ||
+      !Array.isArray(value.turns) ||
+      !Array.isArray(value.history) ||
+      typeof value.draft !== "string"
+    ) {
+      return { session: EMPTY_SESSION, recyclable: false };
+    }
+    const knownKeys = new Set(["turns", "history", "draft", "promptHistory"]);
+    const hasUnknownFields = Object.keys(value).some((key) => !knownKeys.has(key));
+    const promptHistoryIsEmpty =
+      value.promptHistory === undefined ||
+      (Array.isArray(value.promptHistory) && value.promptHistory.length === 0);
+    return {
+      session: deserializeAssistantSession(serialized, now),
+      recyclable:
+        value.turns.length === 0 &&
+        value.history.length === 0 &&
+        value.draft.length === 0 &&
+        promptHistoryIsEmpty &&
+        !hasUnknownFields,
+    };
+  } catch {
+    return { session: EMPTY_SESSION, recyclable: false };
+  }
+}
+
+function isEmptySession(session: AssistantSession) {
+  return (
+    session.turns.length === 0 &&
+    session.history.length === 0 &&
+    session.draft.length === 0 &&
+    (session.promptHistory?.length ?? 0) === 0
+  );
+}
+
+function findReusableEmptyConversation(
+  state: AssistantConversationsState,
+  now: number,
+): AssistantConversation | null {
+  for (const summary of state.conversations) {
+    if (summary.title) continue;
+    const { session, recyclable } = readConversationSession(summary.id, now);
+    if (recyclable && isEmptySession(session)) return { ...summary, session };
+  }
+  return null;
+}
+
 function removeConversationSnapshot(id: string) {
   try {
     localStorage.removeItem(assistantConversationStorageKey(id));
@@ -232,17 +294,7 @@ export function readAssistantConversation(
   const state = readAssistantConversations(now);
   const summary = state.conversations.find((conversation) => conversation.id === id);
   if (!summary) return null;
-  try {
-    const serialized = localStorage.getItem(assistantConversationStorageKey(id));
-    return {
-      ...summary,
-      session: serialized
-        ? deserializeAssistantSession(serialized, now)
-        : (volatileConversationSessions.get(id) ?? EMPTY_SESSION),
-    };
-  } catch {
-    return { ...summary, session: volatileConversationSessions.get(id) ?? EMPTY_SESSION };
-  }
+  return { ...summary, session: readConversationSession(id, now).session };
 }
 
 export function saveAssistantConversation(
@@ -262,7 +314,7 @@ export function saveAssistantConversation(
     input.title === undefined
       ? previous?.title || deriveAssistantConversationTitle(input.session)
       : normalizeTitle(input.title);
-  const conversations = sortAndLimitConversations([
+  const conversations = sortConversations([
     { id: input.id, title, updatedAt },
     ...current.conversations.filter((conversation) => conversation.id !== input.id),
   ]);
@@ -274,12 +326,6 @@ export function saveAssistantConversation(
     conversations,
   };
   const indexSaved = persistIndex(next);
-  if (indexSaved) {
-    const kept = new Set(conversations.map((conversation) => conversation.id));
-    for (const conversation of current.conversations) {
-      if (!kept.has(conversation.id)) removeConversationSnapshot(conversation.id);
-    }
-  }
   return {
     state: indexSaved ? next : current,
     snapshotSaved: true,
@@ -300,19 +346,37 @@ export function tryCreateAssistantConversation(
   const now = options.now ?? Date.now();
   const current = readAssistantConversations(now);
   const reserved = new Set(current.conversations.map((conversation) => conversation.id));
-  const id = options.id ?? generateConversationId(now, reserved);
-  if (!isConversationId(id) || reserved.has(id)) {
+  if (options.id !== undefined && (!isConversationId(options.id) || reserved.has(options.id))) {
     throw new Error("Assistant conversation id must be unique and storage-safe");
   }
   const session = options.session ?? EMPTY_SESSION;
+  const reusable = findReusableEmptyConversation(current, now);
+  const reuseExistingId = options.id === undefined && reusable !== null;
+
+  if (current.conversations.length >= MAX_ASSISTANT_CONVERSATIONS && !reusable) {
+    return { state: current, createdId: null, persisted: false, status: "limit" };
+  }
+
+  const id = reuseExistingId
+    ? reusable.id
+    : (options.id ?? generateConversationId(now, reserved));
+  const reclaimedId =
+    current.conversations.length >= MAX_ASSISTANT_CONVERSATIONS && !reuseExistingId
+      ? reusable?.id ?? null
+      : null;
   if (!persistConversationSnapshot(id, session, now)) {
-    return { state: current, createdId: null, persisted: false };
+    return {
+      state: current,
+      createdId: null,
+      persisted: false,
+      status: "storage_error",
+    };
   }
   volatileConversationSessions.delete(id);
 
-  // 系统时间回拨时也要保证刚创建的会话不会被数量上限立即淘汰。
+  // 系统时间回拨时也要保证新建或复用的会话排在最前面。
   const updatedAt = Math.max(now, (current.conversations[0]?.updatedAt ?? -1) + 1);
-  const conversations = sortAndLimitConversations([
+  const conversations = sortConversations([
     {
       id,
       title: options.title === undefined
@@ -320,18 +384,34 @@ export function tryCreateAssistantConversation(
         : normalizeTitle(options.title),
       updatedAt,
     },
-    ...current.conversations,
+    ...current.conversations.filter(
+      (conversation) => conversation.id !== id && conversation.id !== reclaimedId,
+    ),
   ]);
   const next = { activeId: id, conversations };
   if (!persistIndex(next)) {
-    removeConversationSnapshot(id);
-    return { state: current, createdId: null, persisted: false };
+    if (reuseExistingId && reusable) {
+      persistConversationSnapshot(reusable.id, reusable.session, now);
+    } else {
+      removeConversationSnapshot(id);
+    }
+    return {
+      state: current,
+      createdId: null,
+      persisted: false,
+      status: "storage_error",
+    };
   }
-  const kept = new Set(conversations.map((conversation) => conversation.id));
-  for (const conversation of current.conversations) {
-    if (!kept.has(conversation.id)) removeConversationSnapshot(conversation.id);
+  if (reclaimedId) {
+    removeConversationSnapshot(reclaimedId);
+    volatileConversationSessions.delete(reclaimedId);
   }
-  return { state: next, createdId: id, persisted: true };
+  return {
+    state: next,
+    createdId: id,
+    persisted: true,
+    status: reuseExistingId ? "reused" : "created",
+  };
 }
 
 export function createAssistantConversation(
@@ -372,7 +452,7 @@ export function renameAssistantConversation(
   }
   const next = {
     activeId: current.activeId,
-    conversations: sortAndLimitConversations(
+    conversations: sortConversations(
       current.conversations.map((conversation) =>
         conversation.id === id
           ? { ...conversation, title: normalized, updatedAt: now }

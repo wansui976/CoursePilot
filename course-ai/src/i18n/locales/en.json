@@ -597,6 +597,7 @@
     "untitledConversation": "New conversation",
     "emptyConversationHistory": "No conversation history yet",
     "conversationSaveFailed": "This conversation could not be saved. Free up storage and try again",
+    "conversationLimitReached": "You already have {{count}} non-empty conversations. History will not be deleted automatically, so a new conversation cannot be started yet; continue in an existing conversation.",
     "dockLeft": "Dock to left",
     "dockRight": "Dock to right",
     "collapseAssistant": "Minimize assistant",

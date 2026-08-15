@@ -46,6 +46,7 @@ import {
 import {
   appendRecentAssistantQuestion,
   createAssistantConversation,
+  MAX_ASSISTANT_CONVERSATIONS,
   readAssistantConversation,
   readAssistantConversations,
   readRecentAssistantQuestions,
@@ -1538,7 +1539,12 @@ export function AssistantPanel({
     }
     const created = tryCreateAssistantConversation();
     if (!created.persisted || !created.createdId) {
-      setError(t("assistant.conversationSaveFailed"));
+      setHistoryOpen(false);
+      setError(
+        created.status === "limit"
+          ? t("assistant.conversationLimitReached", { count: MAX_ASSISTANT_CONVERSATIONS })
+          : t("assistant.conversationSaveFailed"),
+      );
       return;
     }
     activateConversation(created.createdId, created.state, EMPTY_ASSISTANT_SESSION);

@@ -597,6 +597,7 @@
     "untitledConversation": "新对话",
     "emptyConversationHistory": "还没有历史会话",
     "conversationSaveFailed": "当前会话未能保存，请释放存储空间后重试",
+    "conversationLimitReached": "已保留 {{count}} 个非空会话。历史不会被自动删除，暂时无法新建；请继续使用现有会话。",
     "dockLeft": "停靠到左边",
     "dockRight": "停靠到右边",
     "collapseAssistant": "收起助手",

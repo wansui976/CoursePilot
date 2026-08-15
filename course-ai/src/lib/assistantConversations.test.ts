@@ -162,7 +162,12 @@ describe("assistantConversations", () => {
         return originalSetItem.call(this, key, value);
       });
     const created = tryCreateAssistantConversation({ id: "conversation-not-published", now: 30 });
-    expect(created).toMatchObject({ state: initial, createdId: null, persisted: false });
+    expect(created).toMatchObject({
+      state: initial,
+      createdId: null,
+      persisted: false,
+      status: "storage_error",
+    });
     expect(localStorage.getItem(assistantConversationStorageKey("conversation-not-published"))).toBeNull();
     indexFailure.mockRestore();
   });
@@ -269,26 +274,149 @@ describe("assistantConversations", () => {
     expect(JSON.stringify(restored)).not.toContain("video-2");
   });
 
-  it("sorts by updatedAt, caps count and title/answer text, and removes evicted snapshots", () => {
+  it("refuses the twenty-first non-empty conversation without deleting old snapshots", () => {
     const initial = readAssistantConversations(1);
-    const evictedId = initial.activeId as string;
-    for (let index = 0; index <= MAX_ASSISTANT_CONVERSATIONS; index += 1) {
-      createAssistantConversation({
+    const firstId = initial.activeId as string;
+    upsertAssistantConversation({ id: firstId, session: session("问题 0") }, 10);
+    for (let index = 1; index < MAX_ASSISTANT_CONVERSATIONS; index += 1) {
+      const created = tryCreateAssistantConversation({
         id: `conversation-${index}`,
         title: "标题".repeat(MAX_ASSISTANT_CONVERSATION_TITLE_CHARS),
         session: session(`问题 ${index}`, "答".repeat(MAX_ASSISTANT_ANSWER_CHARS + 50)),
         now: index + 10,
       });
+      expect(created.status).toBe("created");
     }
 
-    const state = readAssistantConversations(1_000);
-    expect(state.conversations).toHaveLength(MAX_ASSISTANT_CONVERSATIONS);
-    expect(state.conversations[0].id).toBe(`conversation-${MAX_ASSISTANT_CONVERSATIONS}`);
-    expect(state.conversations.every((item) => item.title.length <= MAX_ASSISTANT_CONVERSATION_TITLE_CHARS)).toBe(true);
-    expect(localStorage.getItem(assistantConversationStorageKey(evictedId))).toBeNull();
-    expect(readAssistantConversation(state.conversations[0].id)?.session.turns[0].answer).toHaveLength(
+    const before = readAssistantConversations(1_000);
+    const snapshots = new Map(
+      before.conversations.map(({ id }) => [
+        id,
+        localStorage.getItem(assistantConversationStorageKey(id)),
+      ]),
+    );
+    const blocked = tryCreateAssistantConversation({
+      id: "conversation-over-limit",
+      session: session("绝不能挤掉旧会话"),
+      now: 2_000,
+    });
+
+    expect(blocked).toEqual({
+      state: before,
+      createdId: null,
+      persisted: false,
+      status: "limit",
+    });
+    expect(readAssistantConversations(2_001)).toEqual(before);
+    expect(localStorage.getItem(assistantConversationStorageKey("conversation-over-limit"))).toBeNull();
+    for (const [id, snapshot] of snapshots) {
+      expect(localStorage.getItem(assistantConversationStorageKey(id))).toBe(snapshot);
+    }
+    expect(before.conversations.every((item) => item.title.length <= MAX_ASSISTANT_CONVERSATION_TITLE_CHARS)).toBe(true);
+    expect(readAssistantConversation(before.conversations[0].id)?.session.turns[0].answer).toHaveLength(
       MAX_ASSISTANT_ANSWER_CHARS,
     );
+  });
+
+  it("reuses an existing empty conversation before allocating another slot", () => {
+    const initial = readAssistantConversations(1);
+    const firstId = initial.activeId as string;
+    upsertAssistantConversation({ id: firstId, session: session("保留的会话") }, 2);
+    const empty = tryCreateAssistantConversation({ id: "conversation-empty", now: 3 });
+    expect(empty.status).toBe("created");
+
+    const reused = tryCreateAssistantConversation({ now: 4 });
+    expect(reused).toMatchObject({
+      createdId: "conversation-empty",
+      persisted: true,
+      status: "reused",
+    });
+    expect(reused.state.conversations).toHaveLength(2);
+    expect(reused.state.activeId).toBe("conversation-empty");
+    expect(readAssistantConversation(firstId)?.session.turns[0].question).toBe("保留的会话");
+  });
+
+  it("reclaims an empty slot at the limit but preserves every non-empty conversation", () => {
+    const initial = readAssistantConversations(1);
+    const emptyId = initial.activeId as string;
+    for (let index = 1; index < MAX_ASSISTANT_CONVERSATIONS; index += 1) {
+      createAssistantConversation({
+        id: `conversation-${index}`,
+        session: session(`问题 ${index}`),
+        now: index + 1,
+      });
+    }
+
+    const nonEmptyIds = readAssistantConversations().conversations
+      .map(({ id }) => id)
+      .filter((id) => id !== emptyId);
+    const created = tryCreateAssistantConversation({
+      id: "conversation-replacement",
+      session: session("替换空槽"),
+      now: 100,
+    });
+
+    expect(created.status).toBe("created");
+    expect(created.state.conversations).toHaveLength(MAX_ASSISTANT_CONVERSATIONS);
+    expect(created.state.conversations.some(({ id }) => id === emptyId)).toBe(false);
+    expect(localStorage.getItem(assistantConversationStorageKey(emptyId))).toBeNull();
+    for (const id of nonEmptyIds) {
+      expect(readAssistantConversation(id)?.session.turns).not.toHaveLength(0);
+    }
+  });
+
+  it("rolls back a reused empty snapshot when the index cannot be saved", () => {
+    const initial = readAssistantConversations(1);
+    const emptyId = initial.activeId as string;
+    createAssistantConversation({
+      id: "conversation-non-empty",
+      session: session("保留的会话"),
+      now: 2,
+    });
+    const emptySnapshot = localStorage.getItem(assistantConversationStorageKey(emptyId));
+    const before = readAssistantConversations(3);
+    const originalSetItem = Storage.prototype.setItem;
+    const indexFailure = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key, value) {
+        if (key === assistantConversationsStorageKey) {
+          throw new DOMException("quota", "QuotaExceededError");
+        }
+        return originalSetItem.call(this, key, value);
+      });
+
+    try {
+      expect(tryCreateAssistantConversation({ now: 4 })).toEqual({
+        state: before,
+        createdId: null,
+        persisted: false,
+        status: "storage_error",
+      });
+      expect(localStorage.getItem(assistantConversationStorageKey(emptyId))).toBe(emptySnapshot);
+      expect(readAssistantConversations(5)).toEqual(before);
+    } finally {
+      indexFailure.mockRestore();
+    }
+  });
+
+  it.each([
+    ["corrupt", "broken"],
+    ["future format", JSON.stringify({ turns: [], history: [], draft: "", futureData: "keep" })],
+    ["whitespace draft", JSON.stringify({ turns: [], history: [], draft: " " })],
+  ])("does not recycle a %s snapshot", (_label, snapshot) => {
+    const initial = readAssistantConversations(1);
+    const candidateId = initial.activeId as string;
+    localStorage.setItem(assistantConversationStorageKey(candidateId), snapshot);
+    for (let index = 1; index < MAX_ASSISTANT_CONVERSATIONS; index += 1) {
+      createAssistantConversation({
+        id: `conversation-${index}`,
+        session: session(`问题 ${index}`),
+        now: index + 1,
+      });
+    }
+
+    expect(tryCreateAssistantConversation({ now: 100 }).status).toBe("limit");
+    expect(localStorage.getItem(assistantConversationStorageKey(candidateId))).toBe(snapshot);
   });
 
   it("renames and deletes metadata without resurrecting the legacy session", () => {
