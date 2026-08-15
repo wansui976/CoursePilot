@@ -37,10 +37,13 @@ import {
   historyBeforeLastQuestion,
   MAX_ASSISTANT_ANSWER_CHARS,
   MAX_ASSISTANT_REASONING_CHARS,
+  reconcileAssistantToolRuns,
   writeAssistantSession,
   type AssistantSession,
   type AssistantCheckpoint,
   type AssistantCheckpointActionKind,
+  type AssistantToolRun,
+  type AssistantToolRunStatus,
   type AssistantTurnRecord,
 } from "@/lib/assistantSession";
 import {
@@ -186,9 +189,55 @@ function initialDockTop() {
 type Turn = AssistantTurnRecord & {
   /** 只存在于当前流式请求中；完成后不落入会话存储。 */
   activeTool?: { callId: string; name: string };
-  /** 最近一次工具结束状态；只用于当前请求的过程反馈，不落入会话存储。 */
+  /** 最近一次工具结束状态；只用于当前请求的阶段反馈。 */
   toolExecutionStatus?: ToolExecutionStatus;
+  toolExecutionName?: string;
 };
+
+function recordToolStarted(
+  toolRuns: AssistantToolRun[],
+  callId: string,
+  name: string,
+): AssistantToolRun[] {
+  const existing = toolRuns.find((run) => run.callId === callId);
+  if (existing) return toolRuns;
+  const next: AssistantToolRun = { callId, name, status: "running" };
+  return [...toolRuns, next].slice(-MAX_STREAMED_TOOLS);
+}
+
+function recordToolFinished(
+  toolRuns: AssistantToolRun[],
+  callId: string,
+  name: string,
+  status: AssistantToolRunStatus,
+): AssistantToolRun[] {
+  const index = toolRuns.findIndex((run) => run.callId === callId);
+  if (index < 0) {
+    const next: AssistantToolRun = { callId, name, status };
+    return [...toolRuns, next].slice(-MAX_STREAMED_TOOLS);
+  }
+  // 重复或迟到事件不能把一个已经确定的终态改回另一种状态。
+  if (
+    toolRuns[index].status !== "running" &&
+    !(toolRuns[index].status === "unknown" && status !== "unknown")
+  ) {
+    return toolRuns;
+  }
+  return toolRuns.map((run, runIndex) =>
+    runIndex === index ? { ...run, name, status } : run,
+  );
+}
+
+function normalizeFinishedToolStatus(
+  status: unknown,
+  canceled: boolean,
+): AssistantToolRunStatus {
+  return status === "completed" || status === "failed" || status === "canceled"
+    ? status
+    : canceled
+      ? "canceled"
+      : "unknown";
+}
 
 const EMPTY_ASSISTANT_SESSION: AssistantSession = { turns: [], history: [], draft: "" };
 
@@ -387,15 +436,20 @@ export function AssistantPanel({
         defaultValue: pendingTurn.activeTool.name,
       })
     : null;
+  const finishedToolLabel = pendingTurn?.toolExecutionName
+    ? t(`assistantTools.${pendingTurn.toolExecutionName}`, {
+        defaultValue: pendingTurn.toolExecutionName,
+      })
+    : null;
   const streamingLabel = activeToolLabel
     ? t("assistant.usingTool", { tool: activeToolLabel })
     : pendingTurn?.toolExecutionStatus === "failed"
-      ? t("assistant.toolFailedContinuing")
+      ? t("assistant.toolFailedContinuing", { tool: finishedToolLabel })
       : pendingTurn?.toolExecutionStatus === "canceled"
-        ? t("assistant.toolCanceled")
+        ? t("assistant.toolCanceled", { tool: finishedToolLabel })
         : pendingTurn?.answer
           ? t("assistant.answering")
-          : pendingTurn?.tools.length
+          : (pendingTurn?.toolRuns?.length ?? 0) > 0 || pendingTurn?.tools.length
             ? t("assistant.organizing")
             : t("assistant.thinkingStatus");
   const setThemePref = useTheme((state) => state.setPref);
@@ -1224,6 +1278,12 @@ export function AssistantPanel({
       let bufferedReasoning: string[] = [];
       let bufferedReasoningChars = 0;
       let bufferedTools: string[] = [];
+      let hasToolOutcomePhase = false;
+      const seenToolCallIds = new Set<string>();
+      const finishedToolStatuses = new Map<string, AssistantToolRunStatus>();
+      const latestToolIssue: {
+        current: { name: string; status: "failed" | "canceled" } | null;
+      } = { current: null };
       const flushStream = () => {
         if (streamFrame != null) cancelAnimationFrame(streamFrame);
         streamFrame = null;
@@ -1272,9 +1332,23 @@ export function AssistantPanel({
             clearBufferedAnswer = true;
             bufferedAnswer = [];
             bufferedAnswerChars = 0;
-            patch((item) => ({ ...item, activeTool: undefined, toolExecutionStatus: undefined }));
+            hasToolOutcomePhase = false;
+            patch((item) => ({
+              ...item,
+              activeTool: undefined,
+              toolExecutionStatus: undefined,
+              toolExecutionName: undefined,
+            }));
             scheduleStreamFlush();
           } else if (event.type === "reasoning") {
+            if (hasToolOutcomePhase) {
+              hasToolOutcomePhase = false;
+              patch((item) => ({
+                ...item,
+                toolExecutionStatus: undefined,
+                toolExecutionName: undefined,
+              }));
+            }
             bufferedReasoningChars = appendStreamChunk(
               bufferedReasoning,
               bufferedReasoningChars,
@@ -1283,6 +1357,14 @@ export function AssistantPanel({
             );
             scheduleStreamFlush();
           } else if (event.type === "token") {
+            if (hasToolOutcomePhase) {
+              hasToolOutcomePhase = false;
+              patch((item) => ({
+                ...item,
+                toolExecutionStatus: undefined,
+                toolExecutionName: undefined,
+              }));
+            }
             bufferedAnswerChars = appendStreamChunk(
               bufferedAnswer,
               bufferedAnswerChars,
@@ -1291,22 +1373,48 @@ export function AssistantPanel({
             );
             scheduleStreamFlush();
           } else if (event.type === "tool") {
+            if (seenToolCallIds.has(event.call_id)) return;
+            seenToolCallIds.add(event.call_id);
             bufferedTools = [...bufferedTools, event.name].slice(-MAX_STREAMED_TOOLS);
+            hasToolOutcomePhase = false;
             patch((item) => ({
               ...item,
               activeTool: { callId: event.call_id, name: event.name },
               toolExecutionStatus: undefined,
+              toolExecutionName: undefined,
+              toolRuns: recordToolStarted(item.toolRuns ?? [], event.call_id, event.name),
             }));
             scheduleStreamFlush();
           } else if (event.type === "tool_finished") {
+            const toolStatus = normalizeFinishedToolStatus(event.status, event.canceled);
+            const previousStatus = finishedToolStatuses.get(event.call_id);
+            if (previousStatus && (previousStatus !== "unknown" || toolStatus === "unknown")) {
+              return;
+            }
+            seenToolCallIds.add(event.call_id);
+            finishedToolStatuses.set(event.call_id, toolStatus);
+            if (toolStatus === "failed" || toolStatus === "canceled") {
+              latestToolIssue.current = { name: event.name, status: toolStatus };
+            }
+            hasToolOutcomePhase = toolStatus === "failed" || toolStatus === "canceled";
             patch((item) => ({
               ...item,
               activeTool:
                 item.activeTool?.callId === event.call_id ? undefined : item.activeTool,
               toolExecutionStatus:
-                item.activeTool?.callId === event.call_id
-                  ? (event.status ?? (event.canceled ? "canceled" : "completed"))
-                  : item.toolExecutionStatus,
+                toolStatus === "failed" || toolStatus === "canceled"
+                  ? toolStatus
+                  : undefined,
+              toolExecutionName:
+                toolStatus === "failed" || toolStatus === "canceled"
+                  ? event.name
+                  : undefined,
+              toolRuns: recordToolFinished(
+                item.toolRuns ?? [],
+                event.call_id,
+                event.name,
+                toolStatus,
+              ),
             }));
           }
         },
@@ -1346,19 +1454,36 @@ export function AssistantPanel({
                     : capAssistantText(reply.answer, MAX_ASSISTANT_ANSWER_CHARS),
                 actions,
                 tools: reply.tools_used.slice(-MAX_STREAMED_TOOLS),
+                toolRuns: reconcileAssistantToolRuns(
+                  reply.tools_used,
+                  turn.toolRuns ?? [],
+                  true,
+                ),
                 canceled,
                 // 用户叫停的那一轮已经有自己的说明，再挂一条「没得出结论」是在替它
                 // 找借口——它没转不出来，是被你按停的。
                 hitTurnLimit: stopReason === "limit_reached" && !canceled,
                 activeTool: undefined,
                 toolExecutionStatus: undefined,
+                toolExecutionName: undefined,
                 pending: false,
               }
             : turn,
         ),
       );
+      const finalToolIssue = latestToolIssue.current;
+      const issueToolLabel = finalToolIssue
+        ? t(`assistantTools.${finalToolIssue.name}`, { defaultValue: finalToolIssue.name })
+        : undefined;
       setStatusAnnouncement(
-        canceled ? t("assistant.generationStopped") : t("assistant.responseComplete"),
+        canceled
+          ? t("assistant.generationStopped")
+          : finalToolIssue && issueToolLabel
+            ? t("assistant.responseCompleteWithToolStatus", {
+                tool: issueToolLabel,
+                status: t(`assistant.toolRunStatus.${finalToolIssue.status}`),
+              })
+            : t("assistant.responseComplete"),
       );
     } catch (e) {
       if (!mountedRef.current) return;
@@ -1890,7 +2015,7 @@ export function AssistantPanel({
 
             {/* 工具链摆在回答前面：它解释了这段回答是怎么来的，
                 也让「一轮里悄悄调了三次搜索」这种事看得见。 */}
-            <AssistantToolChips tools={turn.tools} />
+            <AssistantToolChips tools={turn.tools} toolRuns={turn.toolRuns} />
 
             {/* 推理模型的思考。它比正文先到，所以不能塞在「有答案才渲染」的分支里——
                 那样恰好在最想看它的那段时间（还没开始作答）什么都不显示。

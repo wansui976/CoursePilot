@@ -1,4 +1,9 @@
-import type { AssistantAction, AssistantContext, AssistantMessage } from "./types";
+import type {
+  AssistantAction,
+  AssistantContext,
+  AssistantMessage,
+  ToolExecutionStatus,
+} from "./types";
 
 const STORAGE_KEY = "course-ai-assistant-session:v1";
 export const MAX_ASSISTANT_TURNS = 20;
@@ -7,6 +12,7 @@ export const MAX_ASSISTANT_REASONING_CHARS = 16_000;
 const MAX_DRAFT_CHARS = 10_000;
 const MAX_QUESTION_CHARS = 10_000;
 const MAX_TOOL_NAME_CHARS = 200;
+const MAX_TOOL_CALL_ID_CHARS = 256;
 const MAX_TOOLS_PER_TURN = 50;
 const MAX_HISTORY_USER_TURNS = 8;
 const MAX_HISTORY_CHARS = 48_000;
@@ -52,6 +58,36 @@ export type AssistantInteractionState =
   | { status: "executing"; actions: CheckpointAction[] }
   | { status: "expired"; checkpoint?: AssistantCheckpoint };
 
+export type AssistantToolRunStatus = "running" | "unknown" | ToolExecutionStatus;
+
+export interface AssistantToolRun {
+  callId: string;
+  name: string;
+  status: AssistantToolRunStatus;
+}
+
+/**
+ * 以最终工具名列表为顺序基准补齐逐调用状态，同时保留流事件里独有的调用。
+ * `finalizeRunning` 只用于请求结束或会话恢复，不能让仍在执行的界面状态提前结束。
+ */
+export function reconcileAssistantToolRuns(
+  tools: string[],
+  toolRuns: AssistantToolRun[],
+  finalizeRunning = false,
+): AssistantToolRun[] {
+  const unmatched = toolRuns.map((run) =>
+    finalizeRunning && run.status === "running" ? { ...run, status: "unknown" as const } : run,
+  );
+  const ordered = tools.map((name, index) => {
+    const matchIndex = unmatched.findIndex((run) => run.name === name);
+    if (matchIndex < 0) {
+      return { callId: `legacy-${index}`, name, status: "unknown" as const };
+    }
+    return unmatched.splice(matchIndex, 1)[0];
+  });
+  return [...ordered, ...unmatched].slice(-MAX_TOOLS_PER_TURN);
+}
+
 export interface AssistantTurnRecord {
   id: string;
   question: string;
@@ -68,6 +104,8 @@ export interface AssistantTurnRecord {
   /** 重启后只用于解释等待过什么；不能转换回 AssistantAction。 */
   checkpoint?: AssistantCheckpoint;
   tools: string[];
+  /** 每次工具调用各自的终态；旧会话只有 tools，渲染时按状态未知兼容。 */
+  toolRuns?: AssistantToolRun[];
   canceled: boolean;
   /** 工具轮或上下文预算封顶且强制总结仍失败；这一轮回答不完整，重启后同样要说明。旧记录没有。 */
   hitTurnLimit?: boolean;
@@ -263,6 +301,38 @@ export function getAssistantInteractionState(
   return { status: "none" };
 }
 
+const TOOL_RUN_STATUSES = new Set<AssistantToolRunStatus>([
+  "running",
+  "unknown",
+  "completed",
+  "failed",
+  "canceled",
+]);
+
+function readToolRun(value: unknown): AssistantToolRun | null {
+  if (
+    !isRecord(value) ||
+    typeof value.callId !== "string" ||
+    !value.callId ||
+    typeof value.name !== "string" ||
+    !value.name
+  ) {
+    return null;
+  }
+  const status =
+    typeof value.status === "string" &&
+    TOOL_RUN_STATUSES.has(value.status as AssistantToolRunStatus) &&
+    value.status !== "running"
+      ? (value.status as AssistantToolRunStatus)
+      : "unknown";
+  return {
+    callId: capAssistantText(value.callId, MAX_TOOL_CALL_ID_CHARS),
+    name: capAssistantText(value.name, MAX_TOOL_NAME_CHARS),
+    // 持久化会话里不应出现仍在转动的工具；旧版本或手工数据一律按未知终态恢复。
+    status,
+  };
+}
+
 function readTurn(value: unknown, now: number): AssistantTurnRecord | null {
   if (!isRecord(value)) return null;
   if (
@@ -274,6 +344,22 @@ function readTurn(value: unknown, now: number): AssistantTurnRecord | null {
   }
 
   const checkpoint = readCheckpoint(value.checkpoint, now);
+  const tools = Array.isArray(value.tools)
+    ? value.tools
+        .filter((tool): tool is string => typeof tool === "string")
+        .map((tool) => capAssistantText(tool, MAX_TOOL_NAME_CHARS))
+        .slice(-MAX_TOOLS_PER_TURN)
+    : [];
+  const toolRuns = Array.isArray(value.toolRuns)
+    ? reconcileAssistantToolRuns(
+        tools,
+        value.toolRuns
+          .map(readToolRun)
+          .filter((run) => run !== null)
+          .slice(-MAX_TOOLS_PER_TURN),
+        true,
+      )
+    : undefined;
   return {
     id: value.id,
     question: capAssistantText(value.question, MAX_QUESTION_CHARS),
@@ -285,12 +371,8 @@ function readTurn(value: unknown, now: number): AssistantTurnRecord | null {
     actions: [],
     ...(value.actionsExpired === true || checkpoint ? { actionsExpired: true } : {}),
     ...(checkpoint ? { checkpoint } : {}),
-    tools: Array.isArray(value.tools)
-      ? value.tools
-          .filter((tool): tool is string => typeof tool === "string")
-          .map((tool) => capAssistantText(tool, MAX_TOOL_NAME_CHARS))
-          .slice(-MAX_TOOLS_PER_TURN)
-      : [],
+    tools,
+    ...(toolRuns ? { toolRuns } : {}),
     canceled: value.canceled === true,
     ...(value.hitTurnLimit === true ? { hitTurnLimit: true } : {}),
     actionResults: Array.isArray(value.actionResults)
@@ -537,6 +619,14 @@ export function serializeAssistantSession(session: AssistantSession, now = Date.
         : undefined,
       tools: turn.tools
         .map((tool) => capAssistantText(tool, MAX_TOOL_NAME_CHARS))
+        .slice(-MAX_TOOLS_PER_TURN),
+      toolRuns: turn.toolRuns
+        ?.map((run) => ({
+          callId: capAssistantText(run.callId, MAX_TOOL_CALL_ID_CHARS),
+          name: capAssistantText(run.name, MAX_TOOL_NAME_CHARS),
+          // 进程结束后已经无法判断调用是否真正完成，不能恢复成仍在运行。
+          status: run.status === "running" ? "unknown" : run.status,
+        }))
         .slice(-MAX_TOOLS_PER_TURN),
       actionResults: turn.actionResults
         .map((result) => capAssistantText(result, MAX_ACTION_RESULT_CHARS))

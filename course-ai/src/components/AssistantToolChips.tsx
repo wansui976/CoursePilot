@@ -1,10 +1,15 @@
 import {
   BookOpen,
+  Check,
+  CircleAlert,
+  CircleHelp,
+  CircleStop,
   Download,
   FolderPlus,
   Gauge,
   ListChecks,
   ListVideo,
+  LoaderCircle,
   Navigation,
   PenLine,
   Play,
@@ -16,6 +21,11 @@ import {
   Wrench,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import {
+  reconcileAssistantToolRuns,
+  type AssistantToolRun,
+  type AssistantToolRunStatus,
+} from "@/lib/assistantSession";
 
 /**
  * 助手这一轮调了哪些工具，按调用顺序显示。
@@ -49,31 +59,94 @@ const ICONS: Record<string, React.ReactNode> = {
   import_video: <Download className="h-3 w-3" />,
 };
 
-/** 相邻的同一个工具折叠成「×N」。连着搜三次就该显示「搜索 B 站 ×3」，而不是三颗一样的。 */
-function collapseRuns(tools: string[]): { name: string; count: number }[] {
-  const runs: { name: string; count: number }[] = [];
-  for (const name of tools) {
+interface CollapsedRun {
+  name: string;
+  status: AssistantToolRunStatus;
+  count: number;
+}
+
+/** 只有工具和终态都相同才折叠；同名调用一成一败必须分别显示。 */
+function collapseRuns(toolRuns: AssistantToolRun[]): CollapsedRun[] {
+  const runs: CollapsedRun[] = [];
+  for (const toolRun of toolRuns) {
     const last = runs[runs.length - 1];
-    if (last && last.name === name) last.count += 1;
-    else runs.push({ name, count: 1 });
+    if (last && last.name === toolRun.name && last.status === toolRun.status) {
+      last.count += 1;
+    } else {
+      runs.push({ name: toolRun.name, status: toolRun.status, count: 1 });
+    }
   }
   return runs;
 }
 
-export function AssistantToolChips({ tools }: { tools: string[] }) {
+const STATUS_STYLES: Record<AssistantToolRunStatus, string> = {
+  running: "border-[var(--accent-text)] bg-[var(--accent-weak)]",
+  completed: "border-[var(--status-ok)] bg-[var(--status-ok-bg)]",
+  failed: "border-[var(--status-err)] bg-[var(--status-err-bg)]",
+  canceled: "border-[var(--status-warn)] bg-[var(--status-warn-bg)]",
+  unknown: "border-[var(--border-subtle)] bg-[var(--surface-input)]",
+};
+
+function statusIcon(status: AssistantToolRunStatus) {
+  switch (status) {
+    case "running":
+      return <LoaderCircle className="h-3 w-3 animate-spin motion-reduce:animate-none" />;
+    case "completed":
+      return <Check className="h-3 w-3" />;
+    case "failed":
+      return <CircleAlert className="h-3 w-3" />;
+    case "canceled":
+      return <CircleStop className="h-3 w-3" />;
+    case "unknown":
+      return <CircleHelp className="h-3 w-3" />;
+  }
+}
+
+export function AssistantToolChips({
+  tools,
+  toolRuns,
+}: {
+  tools: string[];
+  toolRuns?: AssistantToolRun[];
+}) {
   const { t } = useTranslation();
-  if (tools.length === 0) return null;
+  const visibleRuns = reconcileAssistantToolRuns(tools, toolRuns ?? []);
+  if (visibleRuns.length === 0) return null;
   return (
-    <div className="flex flex-wrap gap-1" data-testid="tool-chips">
-      {collapseRuns(tools).map((run, i) => {
+    <div
+      className="flex flex-wrap gap-1"
+      data-testid="tool-chips"
+      role="list"
+      aria-label={t("assistant.toolTrace")}
+    >
+      {collapseRuns(visibleRuns).map((run, i) => {
+        const toolLabel = t(`assistantTools.${run.name}`, { defaultValue: run.name });
+        const statusLabel = t(`assistant.toolRunStatus.${run.status}`);
         return (
           <span
-            key={`${run.name}-${i}`}
-            className="inline-flex items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-0.5 text-[11px] text-[var(--text-muted)]"
+            key={`${run.name}-${run.status}-${i}`}
+            role="listitem"
+            aria-label={
+              run.count > 1
+                ? t("assistant.toolRunStatusCount", {
+                    tool: toolLabel,
+                    status: statusLabel,
+                    count: run.count,
+                  })
+                : t("assistant.toolRunStatusLabel", {
+                    tool: toolLabel,
+                    status: statusLabel,
+                  })
+            }
+            className={`inline-flex min-h-6 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-[var(--text-strong)] ${STATUS_STYLES[run.status]}`}
           >
-            {ICONS[run.name] ?? <Wrench className="h-3 w-3" />}
-            {t(`assistantTools.${run.name}`, { defaultValue: run.name })}
-            {run.count > 1 && <span className="text-[var(--text-faint)]">×{run.count}</span>}
+            <span aria-hidden="true">{ICONS[run.name] ?? <Wrench className="h-3 w-3" />}</span>
+            <span>{toolLabel}</span>
+            {run.count > 1 && <span aria-hidden="true">×{run.count}</span>}
+            <span className="inline-flex items-center gap-0.5" aria-hidden="true">
+              {statusIcon(run.status)}
+              {statusLabel}
+            </span>
           </span>
         );
       })}

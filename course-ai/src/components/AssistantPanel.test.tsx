@@ -317,16 +317,19 @@ describe("AssistantPanel", () => {
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("正在作答"));
   });
 
-  it("按类型化工具终态说明失败与取消，并由新工具覆盖旧状态", async () => {
+  it("保留每次工具调用的真实终态，失败后立即结束也不会消失", async () => {
     let emit!: (event: AssistantEvent) => void;
+    let finish!: (value: AssistantReply) => void;
     mockIpc.assistant.ask.mockImplementationOnce(
       (_q, _c, _h, _id, onEvent: (event: AssistantEvent) => void) => {
         emit = onEvent;
-        return new Promise<AssistantReply>(() => {});
+        return new Promise<AssistantReply>((resolve) => {
+          finish = resolve;
+        });
       },
     );
     renderPanel();
-    await ask("尝试两种查找方式");
+    await ask("换两种方式查找");
     await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalled());
 
     act(() => {
@@ -339,25 +342,176 @@ describe("AssistantPanel", () => {
         canceled: false,
       });
     });
-    await waitFor(() =>
-      expect(screen.getByRole("status")).toHaveTextContent("工具未能完成，正在调整方案"),
+    expect(
+      await screen.findByRole("listitem", { name: "搜索课程内容，失败" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "搜索课程内容未能完成，正在调整方案",
     );
 
-    act(() => emit({ type: "tool", call_id: "second", name: "list_videos" }));
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("正在查看视频列表"));
+    act(() => {
+      emit({ type: "tool", call_id: "second", name: "search_content" });
+      emit({
+        type: "tool_finished",
+        call_id: "second",
+        name: "search_content",
+        status: "completed",
+        canceled: false,
+      });
+      finish(
+        reply({
+          answer: "第二种方式查到了",
+          tools_used: ["search_content", "search_content"],
+        }),
+      );
+    });
 
-    act(() =>
+    expect(await screen.findByText("第二种方式查到了")).toBeInTheDocument();
+    expect(screen.getByRole("listitem", { name: "搜索课程内容，失败" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("listitem", { name: "搜索课程内容，已完成" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("×2")).not.toBeInTheDocument();
+  });
+
+  it("工具失败后立即结束时，最终读屏通知仍说明失败", async () => {
+    let emit!: (event: AssistantEvent) => void;
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask.mockImplementationOnce(
+      (_q, _c, _h, _id, onEvent: (event: AssistantEvent) => void) => {
+        emit = onEvent;
+        return new Promise<AssistantReply>((resolve) => {
+          finish = resolve;
+        });
+      },
+    );
+    renderPanel();
+    await ask("立刻结束");
+    await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalled());
+
+    act(() => {
+      emit({ type: "tool", call_id: "fast", name: "search_content" });
+      emit({
+        type: "tool_finished",
+        call_id: "fast",
+        name: "search_content",
+        status: "failed",
+        canceled: false,
+      });
+      finish(reply({ answer: "仍然给出结论", tools_used: ["search_content"] }));
+    });
+
+    expect(await screen.findByText("仍然给出结论")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("回答已完成；搜索课程内容失败");
+    expect(screen.getByRole("listitem", { name: "搜索课程内容，失败" })).toBeInTheDocument();
+  });
+
+  it("兼容缺状态与乱序事件，不把旧协议冒充成功也不重复工具", async () => {
+    let emit!: (event: AssistantEvent) => void;
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask.mockImplementationOnce(
+      (_q, _c, _h, _id, onEvent: (event: AssistantEvent) => void) => {
+        emit = onEvent;
+        return new Promise<AssistantReply>((resolve) => {
+          finish = resolve;
+        });
+      },
+    );
+    renderPanel();
+    await ask("查旧接口");
+    await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalled());
+
+    act(() => {
+      // finish 先到也要建记录；后续重复 start/finish 不能降级或重复追加。
+      emit({
+        type: "tool_finished",
+        call_id: "legacy",
+        name: "list_videos",
+        canceled: false,
+      });
+      emit({ type: "tool", call_id: "legacy", name: "list_videos" });
+      emit({
+        type: "tool_finished",
+        call_id: "legacy",
+        name: "list_videos",
+        status: "failed",
+        canceled: false,
+      });
+      emit({ type: "turn", turn: 2 });
+      emit({
+        type: "tool_finished",
+        call_id: "future-status",
+        name: "list_courses",
+        status: "future-status",
+        canceled: false,
+      } as unknown as AssistantEvent);
+      finish(reply({ answer: "已处理", tools_used: ["list_videos", "list_courses"] }));
+    });
+
+    expect(await screen.findByText("已处理")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem", { name: "查看视频列表，失败" })).toHaveLength(1);
+    expect(screen.getByRole("listitem", { name: "查看课程，已结束" })).toBeInTheDocument();
+    expect(screen.queryByRole("listitem", { name: "查看视频列表，已完成" })).toBeNull();
+  });
+
+  it("最终通知采用最后到达的工具失败，即使它先以未知状态结束", async () => {
+    let emit!: (event: AssistantEvent) => void;
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask.mockImplementationOnce(
+      (_q, _c, _h, _id, onEvent: (event: AssistantEvent) => void) => {
+        emit = onEvent;
+        return new Promise<AssistantReply>((resolve) => {
+          finish = resolve;
+        });
+      },
+    );
+    renderPanel();
+    await ask("处理乱序结果");
+    await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalled());
+
+    act(() => {
+      emit({
+        type: "tool_finished",
+        call_id: "first",
+        name: "search_content",
+        canceled: false,
+      });
       emit({
         type: "tool_finished",
         call_id: "second",
         name: "list_videos",
-        status: "canceled",
-        canceled: true,
-      }),
+        status: "failed",
+        canceled: false,
+      });
+      emit({
+        type: "tool_finished",
+        call_id: "first",
+        name: "search_content",
+        status: "failed",
+        canceled: false,
+      });
+      finish(
+        reply({
+          answer: "已结束",
+          tools_used: ["search_content", "list_videos"],
+        }),
+      );
+    });
+
+    expect(await screen.findByText("已结束")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("回答已完成；搜索课程内容失败");
+  });
+
+  it("只有最终 tools_used 的兼容响应显示为中性终态", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({ answer: "兼容回答", tools_used: ["get_study_progress"] }),
     );
-    await waitFor(() =>
-      expect(screen.getByRole("status")).toHaveTextContent("工具已停止，正在结束本轮"),
-    );
+    renderPanel();
+    await ask("看进度");
+
+    expect(
+      await screen.findByRole("listitem", { name: "读取学习进度，已结束" }),
+    ).toBeInTheDocument();
   });
 
   it("done 会先冲刷尚未到下一帧的思考片段", async () => {

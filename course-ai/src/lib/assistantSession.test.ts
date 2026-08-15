@@ -9,6 +9,7 @@ import {
   MAX_ASSISTANT_ANSWER_CHARS,
   MAX_ASSISTANT_REASONING_CHARS,
   readAssistantSession,
+  reconcileAssistantToolRuns,
   serializeAssistantSession,
   writeAssistantSession,
 } from "./assistantSession";
@@ -480,6 +481,113 @@ describe("assistantSession", () => {
     });
 
     expect(readAssistantSession().turns[0].hitTurnLimit).toBe(true);
+  });
+
+  it("persists per-call tool outcomes and downgrades unfinished calls to unknown", () => {
+    writeAssistantSession({
+      turns: [
+        {
+          id: "tool-runs",
+          question: "查一下",
+          answer: "查完了",
+          actions: [],
+          tools: ["search_content", "list_videos", "search_bilibili"],
+          toolRuns: [
+            { callId: "ok", name: "search_content", status: "completed" },
+            { callId: "bad", name: "list_videos", status: "failed" },
+            { callId: "open", name: "search_bilibili", status: "running" },
+          ],
+          canceled: false,
+          actionResults: [],
+        },
+      ],
+      history: [],
+      draft: "",
+    });
+
+    expect(readAssistantSession().turns[0].toolRuns).toEqual([
+      { callId: "ok", name: "search_content", status: "completed" },
+      { callId: "bad", name: "list_videos", status: "failed" },
+      { callId: "open", name: "search_bilibili", status: "unknown" },
+    ]);
+  });
+
+  it("reconciles partial tool events in the authoritative final order", () => {
+    expect(
+      reconcileAssistantToolRuns(
+        ["list_courses", "list_videos", "search_content"],
+        [
+          { callId: "course", name: "list_courses", status: "completed" },
+          { callId: "search", name: "search_content", status: "running" },
+        ],
+        true,
+      ),
+    ).toEqual([
+      { callId: "course", name: "list_courses", status: "completed" },
+      { callId: "legacy-1", name: "list_videos", status: "unknown" },
+      { callId: "search", name: "search_content", status: "unknown" },
+    ]);
+  });
+
+  it("uses legacy tool names to fill runs removed from a damaged snapshot", () => {
+    const restored = deserializeAssistantSession(
+      JSON.stringify({
+        turns: [
+          {
+            id: "partial-tool-runs",
+            question: "查一下",
+            answer: "查完了",
+            tools: ["list_courses", "list_videos", "search_content"],
+            toolRuns: [
+              { callId: 123, name: "list_courses", status: "completed" },
+              { callId: "video", name: "list_videos", status: "failed" },
+            ],
+            canceled: false,
+            actionResults: [],
+          },
+        ],
+        history: [],
+        draft: "",
+      }),
+    );
+
+    expect(restored.turns[0].toolRuns).toEqual([
+      { callId: "legacy-0", name: "list_courses", status: "unknown" },
+      { callId: "video", name: "list_videos", status: "failed" },
+      { callId: "legacy-2", name: "search_content", status: "unknown" },
+    ]);
+  });
+
+  it("sanitizes malformed tool runs without losing the rest of the turn", () => {
+    const long = "x".repeat(500);
+    const restored = deserializeAssistantSession(
+      JSON.stringify({
+        turns: [
+          {
+            id: "tool-runs",
+            question: "查一下",
+            answer: "查完了",
+            tools: ["search_content"],
+            toolRuns: [
+              { callId: "bad", name: "search_content", status: "invented" },
+              { callId: long, name: long, status: "failed" },
+            ],
+            canceled: false,
+            actionResults: [],
+          },
+        ],
+        history: [],
+        draft: "",
+      }),
+    );
+
+    expect(restored.turns).toHaveLength(1);
+    expect(restored.turns[0].toolRuns).toEqual([
+      { callId: "bad", name: "search_content", status: "unknown" },
+      expect.objectContaining({ status: "failed" }),
+    ]);
+    expect(restored.turns[0].toolRuns?.[1].callId).toHaveLength(256);
+    expect(restored.turns[0].toolRuns?.[1].name).toHaveLength(200);
   });
 
   it("does not persist an in-flight turn", () => {
