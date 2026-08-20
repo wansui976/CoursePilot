@@ -797,6 +797,7 @@
     "actionRecord": "操作记录",
     "actionResult": "操作结果：{{result}}",
     "actionResultAnnouncement": "操作状态更新：{{result}}",
+    "actionCheckpointSaveFailed": "无法安全记录执行状态，操作未执行。请释放存储空间后重试。",
     "expiredActions": "应用重启后，本轮原有操作按钮已失效。已完成结果见操作记录；未确认的操作没有执行，需要时请重新提出。",
     "expiredActionsTimeout": "这轮操作等待时间过长，原有按钮已失效。未确认的操作没有执行。",
     "expiredActionsInterrupted": "应用在操作执行期间关闭，结果可能已经生效。旧按钮已失效，请先重新核对当前状态，不要直接重复执行。",

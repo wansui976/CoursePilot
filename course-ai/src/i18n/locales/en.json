@@ -797,6 +797,7 @@
     "actionRecord": "Action log",
     "actionResult": "Action result: {{result}}",
     "actionResultAnnouncement": "Action status updated: {{result}}",
+    "actionCheckpointSaveFailed": "The execution state could not be saved safely, so the action was not run. Free up storage and try again.",
     "expiredActions": "This turn's previous action buttons expired after restart. Completed results remain in the action log; unconfirmed actions were not run. Ask again to recreate them.",
     "expiredActionsTimeout": "This action waited too long and its previous buttons expired. Unconfirmed actions were not run.",
     "expiredActionsInterrupted": "The app closed while this action was running, so the result may already be applied. The old buttons have expired. Recheck the current state before doing it again.",

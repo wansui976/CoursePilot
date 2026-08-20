@@ -48,6 +48,7 @@ import {
   historyBeforeLastQuestion,
   MAX_ASSISTANT_ANSWER_CHARS,
   MAX_ASSISTANT_REASONING_CHARS,
+  MAX_ASSISTANT_TURNS,
   reconcileAssistantToolRuns,
   writeAssistantSession,
   type AssistantSession,
@@ -107,7 +108,9 @@ const VIEWPORT_GAP = 16;
 const EDGE_SNAP_DISTANCE = 28;
 const SCROLL_FOLLOW_THRESHOLD = 32;
 const SESSION_PERSIST_DELAY_MS = 250;
-const MAX_RENDERED_TURNS = 50;
+// 只让用户操作确定能写进会话快照的轮次；否则第 21-50 轮的旧确认卡仍可见，
+// 但 serializer 会裁掉它的 executing checkpoint。
+const MAX_RENDERED_TURNS = MAX_ASSISTANT_TURNS;
 const MAX_STREAMED_TOOLS = 50;
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), summary, [href], [tabindex]:not([tabindex="-1"])';
@@ -754,14 +757,15 @@ export function AssistantPanel({
     epoch: number,
   ) {
     if (
+      !mountedRef.current ||
       epoch !== conversationEpochRef.current ||
       executingActions.length === 0 ||
       actionExecutionCountRef.current > 0
     ) {
       return false;
     }
+    const previousSnapshot = sessionSnapshotRef.current;
     actionExecutionCountRef.current = 1;
-    setActionExecutionCount(1);
     const executing = new Set(executingActions);
     updateTrackedTurns((previous) =>
       previous.map((turn) => {
@@ -774,9 +778,16 @@ export function AssistantPanel({
       }),
     );
     // 不可逆动作边界不能只等防抖或 React cleanup；窗口硬关闭时两者都不保证运行。
-    if (mountedRef.current) {
-      persistConversationSnapshot(activeConversationIdRef.current, sessionSnapshotRef.current);
+    if (!persistConversationSnapshot(activeConversationIdRef.current, sessionSnapshotRef.current)) {
+      actionExecutionCountRef.current = 0;
+      sessionSnapshotRef.current = previousSnapshot;
+      setTurns(previousSnapshot.turns);
+      setActionExecutionCount(0);
+      setError(t("assistant.actionCheckpointSaveFailed"));
+      setStatusAnnouncement(t("assistant.actionCheckpointSaveFailed"));
+      return false;
     }
+    setActionExecutionCount(1);
     return true;
   }
 
@@ -1489,7 +1500,7 @@ export function AssistantPanel({
 
   async function send(suggestedQuestion?: string, rememberQuestion = true) {
     const question = (suggestedQuestion ?? input).trim();
-    if (!question || busy || activeRequestRef.current) return;
+    if (!question || busy || activeRequestRef.current || actionExecutionCountRef.current > 0) return;
     const conversationId = activeConversationIdRef.current;
     const requestId = crypto.randomUUID();
     const turnId = crypto.randomUUID();
@@ -2587,8 +2598,9 @@ export function AssistantPanel({
                 <button
                   key={suggestion.prompt}
                   type="button"
+                  disabled={actionExecutionBusy}
                   onClick={() => void send(suggestion.prompt)}
-                  className="ca-touch-44 flex w-full items-center justify-between gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2.5 text-left text-sm text-[var(--text-normal)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none"
+                  className="ca-touch-44 flex w-full items-center justify-between gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2.5 text-left text-sm text-[var(--text-normal)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
                 >
                   <span>{suggestion.label}</span>
                   <ArrowUpRight className="h-3.5 w-3.5 flex-none text-[var(--text-faint)]" />
@@ -2968,7 +2980,7 @@ export function AssistantPanel({
                 size="icon"
                 aria-label={t("assistant.send")}
                 title={t("assistant.sendTitle")}
-                disabled={!input.trim()}
+                disabled={!input.trim() || actionExecutionBusy}
                 onClick={() => void send()}
                 className="ca-touch-44 h-8 w-8 flex-none rounded-lg"
               >

@@ -2406,6 +2406,86 @@ describe("确认卡", () => {
     expect(mockIpc.videos.updateTitle).toHaveBeenCalledTimes(1);
   });
 
+  it("执行检查点写入失败时不调用不可逆操作并保留确认按钮", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_rename",
+            video_id: "v1",
+            current_title: "未命名",
+            new_title: "第一讲",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("改名");
+    const confirm = await screen.findByRole("button", { name: "确认改名" });
+    const conversationId = readAssistantConversations().activeId as string;
+    const snapshotKey = assistantConversationStorageKey(conversationId);
+    const before = localStorage.getItem(snapshotKey);
+    expect(JSON.parse(before ?? "{}").turns[0].checkpoint.status).toBe("awaiting_user");
+    const originalSetItem = Storage.prototype.setItem;
+    const checkpointFailure = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key, value) {
+        if (key === snapshotKey) {
+          const stored = JSON.parse(String(value)) as {
+            turns?: Array<{ checkpoint?: { status?: string } }>;
+          };
+          if (stored.turns?.some((turn) => turn.checkpoint?.status === "executing")) {
+            throw new DOMException("quota", "QuotaExceededError");
+          }
+        }
+        return originalSetItem.call(this, key, value);
+      });
+
+    try {
+      fireEvent.click(confirm);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "无法安全记录执行状态，操作未执行",
+      );
+      expect(mockIpc.videos.updateTitle).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "确认改名" })).toBeEnabled();
+      expect(localStorage.getItem(snapshotKey)).toBe(before);
+    } finally {
+      checkpointFailure.mockRestore();
+    }
+  });
+
+  it("只保留能够持久化检查点的二十轮可交互对话", async () => {
+    mockIpc.assistant.ask.mockImplementation((question: string) =>
+      Promise.resolve(
+        reply({
+          answer: `回答 ${question}`,
+          actions:
+            question === "第 1 问"
+              ? [
+                  {
+                    kind: "propose_rename",
+                    video_id: "v1",
+                    current_title: "未命名",
+                    new_title: "第一讲",
+                  },
+                ]
+              : [],
+        }),
+      ),
+    );
+    renderPanel();
+
+    for (let index = 1; index <= 21; index += 1) {
+      await ask(`第 ${index} 问`);
+      await screen.findByText(`回答 第 ${index} 问`);
+    }
+
+    expect(screen.getByText("已隐藏更早的 1 条对话")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "确认改名" })).not.toBeInTheDocument();
+    expect(screen.queryByText("第 1 问")).not.toBeInTheDocument();
+  });
+
   it("确认动作执行中卸载后按结果不确定恢复，不能伪装成未执行", async () => {
     let finishRename!: () => void;
     mockIpc.videos.updateTitle.mockReturnValueOnce(
@@ -2486,6 +2566,13 @@ describe("确认卡", () => {
     expect(newConversation).toBeDisabled();
     expect(screen.getByRole("button", { name: "重新回答" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "停止剩余" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("对助手说"), {
+      target: { value: "执行期间的新问题" },
+    });
+    const sendButton = screen.getByRole("button", { name: "发送" });
+    expect(sendButton).toBeDisabled();
+    fireEvent.keyDown(screen.getByLabelText("对助手说"), { key: "Enter" });
+    expect(mockIpc.assistant.ask).toHaveBeenCalledTimes(1);
     fireEvent.click(newConversation);
     expect(screen.getByTestId("user-bubble")).toHaveTextContent("改名");
 
@@ -2494,6 +2581,7 @@ describe("确认卡", () => {
       await Promise.resolve();
     });
     await waitFor(() => expect(newConversation).toBeEnabled());
+    expect(sendButton).toBeEnabled();
     expect(screen.getByRole("button", { name: "重新回答" })).toBeEnabled();
     const persistedTurn = readAssistantSession().turns[0];
     expect(persistedTurn.actionResults).toEqual(["已完成改名：第一讲"]);
