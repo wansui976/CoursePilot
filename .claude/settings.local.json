@@ -39,7 +39,8 @@
       "Bash(pnpm config *)",
       "Bash(pnpm --version)",
       "Bash(pnpm tauri *)",
-      "Bash(CARGO_BUILD_JOBS=1 cargo test --lib -j 1 videos::tests)"
+      "Bash(CARGO_BUILD_JOBS=1 cargo test --lib -j 1 videos::tests)",
+      "Bash(python3 *)"
     ]
   },
   "enabledMcpjsonServers": [
