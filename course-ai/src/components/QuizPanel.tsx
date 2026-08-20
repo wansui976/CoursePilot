@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, Check, CircleHelp } from "lucide-react";
+import { Brain, Check, CheckCircle2, CircleHelp, RotateCcw, XCircle } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
@@ -9,6 +9,7 @@ import type { QuizQuestion } from "@/lib/types";
 import { PanelEmptyState } from "@/components/ui/empty-state";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { MathText } from "./MathText";
 import { PanelActions } from "./PanelActions";
 import {
@@ -60,11 +61,20 @@ function sanitizeQuestion(raw: unknown): QuizQuestion | null {
   };
 }
 
+/** 自评结果：对 / 错 / 跳过（可改判）。 */
+type SelfRating = "correct" | "wrong" | "skip";
+
 export function QuizPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
   const requestSeek = usePlayer((s) => s.requestSeek);
   const queryClient = useQueryClient();
-  const { data: raw, isLoading } = useQuery({
+  const {
+    data: raw,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: ["quiz", videoId],
     queryFn: () => ipc.ai.getQuiz(videoId),
   });
@@ -79,6 +89,8 @@ export function QuizPanel({ videoId }: { videoId: string }) {
     revealedState.videoId === videoId && revealedState.raw === raw
       ? revealedState.values
       : {};
+  // 每题自评（也随题库版本重置）。correct 数累积成小结。
+  const [ratings, setRatings] = useState<Record<number, SelfRating>>({});
 
   // 把这套题加入每日间隔重复复习。
   const addToReview = useMutation({
@@ -92,6 +104,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
     mutationFn: () => ipc.ai.generate(videoId, "quiz"),
     onSuccess: () => {
       setRevealedState({ videoId, raw, values: {} });
+      setRatings({});
       queryClient.invalidateQueries({ queryKey: ["quiz", videoId] });
       invalidateStaleArtifacts(queryClient, videoId);
     },
@@ -112,18 +125,26 @@ export function QuizPanel({ videoId }: { videoId: string }) {
     }
   }, [raw]);
 
-  // 加载中和空题库原先是提前 return 的，绕过了整个外壳——于是「点右下角生成」
-  // 承诺的那个按钮，恰恰在最需要它的空状态下不存在。三种状态共用一个外壳。
+  // 小结：全部自评过后出现「答对 x/y」。重置自评可重来。
+  const ratedCount = Object.keys(ratings).length;
+  const correctCount = questions.reduce(
+    (sum, _q, i) => (ratings[i] === "correct" ? sum + 1 : sum),
+    0,
+  );
+  const allRated = questions.length > 0 && ratedCount === questions.length;
+
+  function rate(index: number, value: SelfRating) {
+    setRatings((prev) => ({ ...prev, [index]: value }));
+  }
+
+  // 加载中和空题库原先共用外壳：右下角「生成」按钮在最需要的空状态下也存在。
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      {/* 内层自己滚：标签页容器是 overflow-hidden 的，面板不自带滚动区，题目一多
-          就被直接裁掉——不是滚不动，是压根没地方滚。文稿、笔记、章节都是这套写法。
-          pb-12 给右下角那组悬浮按钮让位，免得压住最后一题。 */}
       <div
         aria-label={t("quiz.scrollArea")}
         className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 pb-12"
       >
-        {generate.isError && (
+        {!isError && generate.isError && (
           <ErrorNote error={generate.error} onRetry={() => generate.mutate()} />
         )}
         {isLoading ? (
@@ -132,6 +153,8 @@ export function QuizPanel({ videoId }: { videoId: string }) {
               <Skeleton key={i} className="h-24 w-full" />
             ))}
           </div>
+        ) : isError ? (
+          <ErrorNote error={error} onRetry={() => void refetch()} />
         ) : questions.length === 0 ? (
           <PanelEmptyState
             icon={<CircleHelp className="h-7 w-7" />}
@@ -140,88 +163,188 @@ export function QuizPanel({ videoId }: { videoId: string }) {
           />
         ) : (
           <>
-            <button
-              onClick={() => addToReview.mutate()}
-              disabled={addToReview.isPending}
-              className="ca-touch-44 inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-60"
-            >
-              {addToReview.isSuccess ? (
-                <>
-                  <Check className="h-3.5 w-3.5 text-[var(--status-ok)]" />
-                  {t("quiz.addedToReview")}
-                </>
-              ) : (
-                <>
-                  <Brain className="h-3.5 w-3.5" />
-                  {addToReview.isPending ? t("quiz.addingToReview") : t("quiz.addToReview")}
-                </>
-              )}
-            </button>
-            {questions.map((q, i) => (
-              <div key={i} className="rounded border border-[var(--border-subtle)] p-3">
-                <div className="mb-2 text-sm">
-                  <span className="mr-1 text-[var(--text-faint)]">{i + 1}.</span>
-                  <MathText text={q.stem} />
+            {addToReview.isError && (
+              <ErrorNote
+                error={addToReview.error}
+                onRetry={() => addToReview.mutate()}
+              />
+            )}
+            {/* 进度：第 x/y 题 + 已自评进度条；全部自评后出小结。 */}
+            <div className="flex items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[var(--text-muted)]">
+                    {t("quiz.progress", {
+                      current: Math.min(ratedCount + 1, questions.length),
+                      total: questions.length,
+                    })}
+                  </span>
+                  <span className="tabular-nums text-[var(--text-faint)]">
+                    {t("quiz.ratedCount", { count: ratedCount, total: questions.length })}
+                  </span>
                 </div>
-                {q.options && (
-                  <ul className="mb-2 space-y-1 text-sm text-[var(--text-normal)]">
-                    {q.options.map((opt, j) => (
-                      <li key={j}>
-                        {String.fromCharCode(65 + j)}. <MathText text={opt} />
-                      </li>
-                    ))}
-                  </ul>
+                <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--surface-card-hover)]">
+                  <div
+                    className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-300 ease-out"
+                    style={{ width: `${(ratedCount / questions.length) * 100}%` }}
+                  />
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => addToReview.mutate()}
+                disabled={addToReview.isPending}
+                className="ca-touch-44 flex-none gap-1.5"
+              >
+                {addToReview.isSuccess ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-[var(--status-ok)]" />
+                    {t("quiz.addedToReview")}
+                  </>
+                ) : (
+                  <>
+                    <Brain className="h-3.5 w-3.5" />
+                    {addToReview.isPending ? t("quiz.addingToReview") : t("quiz.addToReview")}
+                  </>
                 )}
-                <button
-                  className="ca-touch-44 inline-flex items-center text-xs text-primary hover:underline"
-                  onClick={() =>
-                    setRevealedState((current) => {
-                      const values =
-                        current.videoId === videoId && current.raw === raw
-                          ? current.values
-                          : {};
-                      return {
-                        videoId,
-                        raw,
-                        values: { ...values, [i]: !values[i] },
-                      };
-                    })
-                  }
-                >
-                  {revealed[i] ? t("quiz.hideAnswer") : t("quiz.showAnswer")}
-                </button>
-                {revealed[i] && (
-                  <div className="mt-2 space-y-1 text-sm">
-                    {/* 答案色走主题 token：深浅主题对比都达标，不硬编码 tailwind 绿。 */}
-                    <div className="text-[var(--status-ok)]">
-                      {t("quiz.answerLabel")}<MathText text={answerText(q.answer, t)} />
-                    </div>
-                    {q.explanation && (
-                      <div className="text-[var(--text-muted)]">
-                        <MathText text={q.explanation} />
-                      </div>
-                    )}
-                    {typeof q.ref_ms === "number" && (
-                      <button
-                        className="ca-touch-44 inline-flex items-center text-xs text-primary"
-                        onClick={() => requestSeek(q.ref_ms!)}
-                      >
-                        {t("quiz.jumpTo", { time: formatMs(q.ref_ms) })}
-                      </button>
-                    )}
-                  </div>
+              </Button>
+            </div>
+
+            {allRated && (
+              <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text-strong)]">
+                  <CheckCircle2 className="h-4 w-4 text-[var(--status-ok)]" />
+                  {t("quiz.summaryTitle")}
+                </div>
+                <p className="mt-1 text-sm text-[var(--text-normal)]">
+                  {t("quiz.summaryDetail", { correct: correctCount, total: questions.length })}
+                </p>
+                {correctCount < questions.length && (
+                  <button
+                    type="button"
+                    onClick={() => setRatings({})}
+                    className="ca-touch-44 mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    {t("quiz.retrySelfReview")}
+                  </button>
                 )}
               </div>
-            ))}
+            )}
+
+            {questions.map((q, i) => {
+              const rating = ratings[i];
+              return (
+                <div
+                  key={i}
+                  className={`rounded border p-3 ${
+                    rating === "wrong"
+                      ? "border-[var(--status-err)]/50 bg-[var(--status-err-bg)]/40"
+                      : rating === "correct"
+                        ? "border-[var(--status-ok)]/50 bg-[var(--status-ok-bg)]/40"
+                        : "border-[var(--border-subtle)]"
+                  }`}
+                >
+                  <div className="mb-2 text-sm">
+                    <span className="mr-1 text-[var(--text-faint)]">{i + 1}.</span>
+                    <MathText text={q.stem} />
+                  </div>
+                  {q.options && (
+                    <ul className="mb-2 space-y-1 text-sm text-[var(--text-normal)]">
+                      {q.options.map((opt, j) => (
+                        <li key={j}>
+                          {String.fromCharCode(65 + j)}. <MathText text={opt} />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <button
+                      className="ca-touch-44 inline-flex items-center text-xs text-primary hover:underline"
+                      onClick={() =>
+                        setRevealedState((current) => {
+                          const values =
+                            current.videoId === videoId && current.raw === raw
+                              ? current.values
+                              : {};
+                          return {
+                            videoId,
+                            raw,
+                            values: { ...values, [i]: !values[i] },
+                          };
+                        })
+                      }
+                    >
+                      {revealed[i] ? t("quiz.hideAnswer") : t("quiz.showAnswer")}
+                    </button>
+                    {/* 自评：对/错/跳过。选中态有底色，可随时改判。 */}
+                    <span className="ml-auto flex items-center gap-1">
+                      {(
+                        [
+                          ["correct", t("quiz.selfCorrect"), CheckCircle2],
+                          ["wrong", t("quiz.selfWrong"), XCircle],
+                          ["skip", t("quiz.selfSkip"), CircleHelp],
+                        ] as const
+                      ).map(([value, label, Icon]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          aria-pressed={rating === value}
+                          onClick={() => rate(i, value)}
+                          className={`ca-touch-44 inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
+                            rating === value
+                              ? value === "correct"
+                                ? "border-[var(--status-ok)]/60 bg-[var(--status-ok)]/15 text-[var(--status-ok)]"
+                                : value === "wrong"
+                                  ? "border-[var(--status-err)]/60 bg-[var(--status-err)]/15 text-[var(--status-err)]"
+                                  : "border-[var(--border-strong)] bg-[var(--surface-card-hover)] text-[var(--text-normal)]"
+                              : "border-[var(--border-subtle)] text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-normal)]"
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                          {label}
+                        </button>
+                      ))}
+                    </span>
+                  </div>
+                  {revealed[i] && (
+                    <div className="mt-2 space-y-1 text-sm">
+                      {/* 答案色走主题 token：深浅主题对比都达标，不硬编码 tailwind 绿。 */}
+                      <div className="text-[var(--status-ok)]">
+                        {t("quiz.answerLabel")}<MathText text={answerText(q.answer, t)} />
+                      </div>
+                      {q.explanation && (
+                        <div className="text-[var(--text-muted)]">
+                          <MathText text={q.explanation} />
+                        </div>
+                      )}
+                      {/* 答错后给回看入口：直接跳去这句讲的地方。 */}
+                      {typeof q.ref_ms === "number" && (
+                        <button
+                          className="ca-touch-44 inline-flex items-center text-xs text-primary"
+                          onClick={() => requestSeek(q.ref_ms!)}
+                        >
+                          {t("quiz.jumpTo", { time: formatMs(q.ref_ms) })}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </>
         )}
       </div>
-      <PanelActions
-        onRegenerate={() => generate.mutate()}
-        regenerating={generate.isPending}
-        hasContent={questions.length > 0}
-        stale={stale.has("quiz")}
-      />
+      {!isError && (
+        <PanelActions
+          onRegenerate={() => generate.mutate()}
+          regenerating={generate.isPending}
+          hasContent={questions.length > 0}
+          stale={stale.has("quiz")}
+        />
+      )}
     </div>
   );
 }

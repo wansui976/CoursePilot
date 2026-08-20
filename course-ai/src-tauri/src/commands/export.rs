@@ -71,18 +71,27 @@ pub async fn cmd_export_notes(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     video_id: String,
+    content_markdown: Option<String>,
 ) -> AppResult<String> {
-    let md: Option<String> = sqlx::query_scalar("SELECT content_md FROM notes WHERE video_id=?")
-        .bind(&video_id)
-        .fetch_optional(&state.db.pool)
-        .await?
-        .flatten();
-    let md = md.ok_or_else(|| AppError::NotFound("no notes to export".into()))?;
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT content_md FROM notes WHERE video_id=?")
+            .bind(&video_id)
+            .fetch_optional(&state.db.pool)
+            .await?
+            .flatten();
+    let md = notes_markdown_for_export(content_markdown, stored)?;
     let video = load_video(&state, &video_id).await?;
     let dir = export_dir(&video, &app)?;
     let path = dir.join("notes.md");
     std::fs::write(&path, md)?;
     Ok(path.to_string_lossy().to_string())
+}
+
+fn notes_markdown_for_export(current: Option<String>, stored: Option<String>) -> AppResult<String> {
+    let markdown = current.or(stored);
+    markdown
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| AppError::NotFound("no notes to export".into()))
 }
 
 /// 导出测验为 Anki 可导入的 TSV（正面=题干+选项，背面=答案+解析），返回文件路径。
@@ -135,6 +144,27 @@ mod tests {
         assert_eq!(
             export_dir_from_root(root, "video-1"),
             PathBuf::from("/tmp/course-ai/exports/video-1")
+        );
+    }
+
+    #[test]
+    fn current_notes_snapshot_wins_over_legacy_markdown() {
+        assert_eq!(
+            notes_markdown_for_export(Some("# Current".into()), Some("# Stale".into())).unwrap(),
+            "# Current"
+        );
+    }
+
+    #[test]
+    fn blank_current_notes_do_not_fall_back_to_stale_markdown() {
+        assert!(notes_markdown_for_export(Some("  \n".into()), Some("# Stale".into())).is_err());
+    }
+
+    #[test]
+    fn legacy_callers_can_export_stored_markdown() {
+        assert_eq!(
+            notes_markdown_for_export(None, Some("# Stored".into())).unwrap(),
+            "# Stored"
         );
     }
 }

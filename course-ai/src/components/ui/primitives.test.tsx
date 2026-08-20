@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MoreHorizontal, Play } from "lucide-react";
+import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Badge } from "./badge";
@@ -48,6 +49,67 @@ describe("shared UI primitives", () => {
     expect(screen.getByRole("menuitem", { name: "删除" })).toHaveClass(
       "danger",
     );
+  });
+
+  it("moves menu focus with arrow/Home/End and restores its trigger on Escape", () => {
+    function MenuHarness() {
+      const [open, setOpen] = useState(false);
+      const triggerRef = useRef<HTMLButtonElement>(null);
+      return (
+        <>
+          <button ref={triggerRef} type="button" onClick={() => setOpen(true)}>
+            打开菜单
+          </button>
+          {open && (
+            <Menu
+              aria-label="测试菜单"
+              onClose={() => setOpen(false)}
+              triggerRef={triggerRef}
+            >
+              <MenuItem>第一项</MenuItem>
+              <MenuItem disabled>不可用项</MenuItem>
+              <MenuItem>第三项</MenuItem>
+            </Menu>
+          )}
+        </>
+      );
+    }
+
+    render(<MenuHarness />);
+    const trigger = screen.getByRole("button", { name: "打开菜单" });
+    fireEvent.click(trigger);
+
+    const first = screen.getByRole("menuitem", { name: "第一项" });
+    const third = screen.getByRole("menuitem", { name: "第三项" });
+    expect(first).toHaveFocus();
+
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    expect(third).toHaveFocus();
+    fireEvent.keyDown(third, { key: "ArrowDown" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "ArrowUp" });
+    expect(third).toHaveFocus();
+    fireEvent.keyDown(third, { key: "Home" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "End" });
+    expect(third).toHaveFocus();
+
+    fireEvent.keyDown(third, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "测试菜单" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+
+    fireEvent.click(trigger);
+    const reopened = screen.getByRole("menuitem", { name: "第一项" });
+    expect(reopened).toHaveFocus();
+    fireEvent.keyDown(reopened, { key: "Tab" });
+    expect(screen.queryByRole("menu", { name: "测试菜单" })).not.toBeInTheDocument();
+    expect(trigger).not.toHaveFocus();
+
+    fireEvent.click(trigger);
+    const reopenedBackwards = screen.getByRole("menuitem", { name: "第一项" });
+    fireEvent.keyDown(reopenedBackwards, { key: "Tab", shiftKey: true });
+    expect(screen.queryByRole("menu", { name: "测试菜单" })).not.toBeInTheDocument();
+    expect(trigger).not.toHaveFocus();
   });
 
   it("renders empty states with icon, copy, and optional action", () => {

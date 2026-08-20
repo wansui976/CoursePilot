@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
 import { isMobile } from "@/lib/platform";
 import {
-  formatSkipNotice,
   isSkipSilenceEnabled,
   setSkipSilenceEnabled,
   silenceSkipQueryKey,
@@ -23,6 +23,7 @@ const EMPTY_RANGES: SkipRange[] = [];
  * 用户自己点开的，就一路给回执：正在分析 → 找到几段 / 一段都没有。
  */
 export function useSilenceSkip(videoId: string) {
+  const { t } = useTranslation();
   const available = !isMobile();
   const [enabled, setEnabled] = useState(() => available && isSkipSilenceEnabled());
   const [notice, setNotice] = useState<string | null>(null);
@@ -76,15 +77,15 @@ export function useSilenceSkip(videoId: string) {
       rangesRef.current = [];
       setEnabled(false);
       setSkipSilenceEnabled(false);
-      showNotice("停顿分析失败，已关闭跳停顿");
+      showNotice(t("videoPlayer.skipSilenceFailed"));
       return;
     }
     if (!skipsQuery.isSuccess || !announceRef.current) return;
     announceRef.current = false;
     showNotice(
       ranges.length > 0
-        ? `跳停顿已开启，可跳过 ${ranges.length} 处停顿`
-        : "跳停顿已开启，这个视频没有可跳的停顿",
+        ? t("videoPlayer.skipSilenceFound", { count: ranges.length })
+        : t("videoPlayer.skipSilenceNone"),
     );
   }, [
     available,
@@ -94,6 +95,7 @@ export function useSilenceSkip(videoId: string) {
     skipsQuery.isError,
     skipsQuery.isFetching,
     skipsQuery.isSuccess,
+    t,
   ]);
 
   useEffect(() => clearNoticeTimer, []);
@@ -106,16 +108,17 @@ export function useSilenceSkip(videoId: string) {
       if (target == null) return false;
       const fromMs = video.currentTime * 1000;
       video.currentTime = target / 1000;
-      showNotice(formatSkipNotice(fromMs, target));
+      const seconds = Math.max(1, Math.round((target - fromMs) / 1000));
+      showNotice(t("videoPlayer.skippedSilence", { count: seconds }));
       return true;
     },
-    [enabled, showNotice],
+    [enabled, showNotice, t],
   );
 
   const toggle = useCallback(() => {
     if (!available) {
       setSkipSilenceEnabled(false);
-      showNotice("当前设备暂不支持跳停顿");
+      showNotice(t("videoPlayer.skipSilenceUnsupported"));
       return;
     }
     setEnabled((on) => {
@@ -124,13 +127,13 @@ export function useSilenceSkip(videoId: string) {
       if (next) {
         // 分析要好几秒，这句先顶上，免得点了像没反应。
         announceRef.current = true;
-        showNotice("正在找可跳的停顿…", true);
+        showNotice(t("videoPlayer.skipSilenceFinding"), true);
       } else {
-        showNotice("已关闭跳停顿");
+        showNotice(t("videoPlayer.skipSilenceClosed"));
       }
       return next;
     });
-  }, [available, showNotice]);
+  }, [available, showNotice, t]);
 
   return {
     enabled,

@@ -1,5 +1,7 @@
 pub mod ai;
+pub mod app;
 pub mod assistant;
+pub mod backup;
 pub mod clips;
 pub mod concepts;
 pub mod courses;

@@ -11,14 +11,19 @@ import {
   List,
   Loader2,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   Play,
   RotateCcw,
+  Search,
+  Shrink,
   Trash2,
   X,
 } from "lucide-react";
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -46,6 +51,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import { coarsePointer, useContainerWidth, useIsPortrait } from "@/lib/useContainerWidth";
 import { ipc, type DueCard } from "@/lib/ipc";
@@ -78,6 +84,7 @@ import { usePlayer } from "@/stores/player";
 import { AssistantPanel } from "@/components/AssistantPanel";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 import { accentVars, useTheme } from "@/stores/theme";
+import { useAssistantUi } from "@/stores/assistant";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const statusLabelKey = {
@@ -96,6 +103,16 @@ const statusTone: Record<Video["processed_status"], BadgeTone> = {
 
 const PANEL_WIDTH_STORAGE_KEY = "course-ai-study-panel-width";
 const VIEW_STORAGE_KEY = "course-ai-home-view";
+const GRID_DENSITY_KEY = "course-ai-grid-density";
+
+type GridDensity = "cozy" | "compact";
+
+function readGridDensity(): GridDensity {
+  if (typeof window === "undefined") return "cozy";
+  return window.localStorage.getItem(GRID_DENSITY_KEY) === "compact"
+    ? "compact"
+    : "cozy";
+}
 const STUDY_PANEL_MAX = 720;
 // 学习面板最小宽度：保证核心资料页签和正文都可正常阅读。
 const STUDY_PANEL_MIN = 384;
@@ -128,6 +145,11 @@ type KnowledgeReturnState = {
   courseId: string;
   navigationState: ConceptNavigationState;
 };
+
+type JobLoadState =
+  | { status: "loading" }
+  | { status: "ready" }
+  | { status: "error"; error: unknown };
 
 export function dispatchAssistantNavigation(
   action: AssistantAction,
@@ -194,7 +216,13 @@ export function Home() {
   const accent = useTheme((s) => s.accent);
   const customAccent = useTheme((s) => s.customAccent);
   const toggleTheme = useTheme((s) => s.toggle);
+  // 助手停靠成侧栏时，主内容要往内让出它占的宽度，别被盖住。
+  const assistantMode = useAssistantUi((s) => s.mode);
+  const assistantSide = useAssistantUi((s) => s.side);
+  const assistantWidth = useAssistantUi((s) => s.width);
   const [view, setView] = useState<LibraryView>(readInitialView);
+  // 网格卡片密度（舒适/紧凑）：只影响网格列宽，切到列表视图无意义但保留记忆。
+  const [gridDensity, setGridDensity] = useState<GridDensity>(readGridDensity);
   // 库内标题过滤（前端过滤，不落存储；切课程时清空）。
   const [videoQuery, setVideoQuery] = useState("");
   const [openMenuVideoId, setOpenMenuVideoId] = useState<string | null>(null);
@@ -202,12 +230,25 @@ export function Home() {
     id: string;
     title: string;
   } | null>(null);
+  const videoMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const renameOriginTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const renameDialogRef = useRef<HTMLDivElement | null>(null);
   const [queueOpen, setQueueOpen] = useState(false);
   const [queueTick, setQueueTick] = useState(0);
   const [queuedVideos, setQueuedVideos] = useState<Video[]>([]);
+  // 队列卡片的 jobs 是独立 IPC 请求；没有这层状态时，失败会落成「没有阶段」并显示等待中。
+  const [jobLoadStateByVideo, setJobLoadStateByVideo] = useState<
+    Record<string, JobLoadState>
+  >({});
+  const jobRequestRef = useRef<Record<string, number>>({});
+  const requestedJobIdsRef = useRef<Set<string>>(new Set());
   const { createCourse, creatingCourse, createError } = useCreateCourse();
   const [studyPanelWidth, setStudyPanelWidth] = useState(readPanelWidth);
   const [isResizingPanel, setIsResizingPanel] = useState(false);
+  // 面板整体收起：专注看片时把右栏整个藏掉（不是拖到 384 下限）。状态按视频记忆。
+  const [studyPanelCollapsed, setStudyPanelCollapsed] = useState(() =>
+    readVideoResumeState(selectedVideoId ?? "").studyPanelCollapsed ?? false,
+  );
   // 拖动期间的实时宽度（用 ref，不触发重渲染；松手才提交到 state）。
   const liveWidthRef = useRef(studyPanelWidth);
   // 拖拽 resize 的监听清理：中途卸载（快速切换视频/返回）时也要摘掉 window 上的监听，
@@ -222,6 +263,33 @@ export function Home() {
   const resetJobs = useJobs((s) => s.resetVideo);
   const generatedAfterAsr = useRef<Set<string>>(new Set());
   const appRef = useRef<HTMLDivElement>(null);
+  const settingsExitRequestRef = useRef<
+    ((continuation: () => void) => void) | null
+  >(null);
+  const settingsBackRequestRef = useRef<(() => void) | null>(null);
+  const transientCloseRef = useRef<(() => void) | null>(null);
+  const registerTransientClose = useCallback((close: (() => void) | null) => {
+    transientCloseRef.current = close;
+  }, []);
+  const registerSettingsExitRequest = useCallback(
+    (request: ((continuation: () => void) => void) | null) => {
+      settingsExitRequestRef.current = request;
+    },
+    [],
+  );
+  const registerSettingsBackRequest = useCallback((request: (() => void) | null) => {
+    settingsBackRequestRef.current = request;
+  }, []);
+  const runAfterSettingsExit = useCallback(
+    (continuation: () => void) => {
+      if (showSettings && settingsExitRequestRef.current) {
+        settingsExitRequestRef.current(continuation);
+        return;
+      }
+      continuation();
+    },
+    [showSettings],
+  );
   const bucket = useContainerWidth(appRef);
   const isLightTheme = theme === "light";
   const themeToggleLabel = isLightTheme ? t("home.themeLightLabel") : t("home.themeDarkLabel");
@@ -243,6 +311,7 @@ export function Home() {
   const isAndroidPlatform =
     typeof navigator !== "undefined" && /android/i.test(navigator.userAgent);
   const androidBackGuard = useRef(0);
+  const [videoFullscreen, setVideoFullscreen] = useState(false);
   const returnToLibrary = useCallback(() => {
     setSelectedVideoId(null);
     setKnowledgeReturn(null);
@@ -255,6 +324,7 @@ export function Home() {
 
   const {
     data: videos = [],
+    isPending: videosPending,
     isError: videosError,
     error: videosErrorObj,
     refetch: refetchVideos,
@@ -267,36 +337,145 @@ export function Home() {
     queryKey: ["courses"],
     queryFn: ipc.courses.list,
   });
-  const { data: activeProcessingVideos = [] } = useQuery({
+  // 顶栏副标「已看完 N 个」：本地按播放进度聚合，零后端改动。
+  // 不 memo：看完一集从工作台返回时 videos 引用不变（react-query 结构共享），
+  // memo 会停在旧值，而卡片 ov-bar 是渲染期直读 localStorage 反而是新的——同屏打架。
+  // 直接渲染期算（几十集的规模，localStorage 读几十次无开销），与卡片进度同源同步。
+  const watchedCount = videos.filter(
+    (video) => readPlaybackProgress(video.id).ratio >= WATCHED_RATIO,
+  ).length;
+  // 顶栏搜索框：按 / 全局聚焦（只在搜索框确实渲染时挂监听）。
+  const librarySearchRef = useRef<HTMLInputElement>(null);
+  const librarySearchVisible = Boolean(selectedCourseId && videos.length > 0);
+  useEffect(() => {
+    if (!librarySearchVisible) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      librarySearchRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [librarySearchVisible]);
+  const {
+    data: activeProcessingData,
+    isSuccess: activeProcessingSuccess,
+    isError: activeProcessingError,
+    error: activeProcessingErrorObj,
+    isLoading: activeProcessingLoading,
+    refetch: refetchActiveProcessing,
+  } = useQuery({
     queryKey: ["processing-videos"],
     queryFn: ipc.pipeline.active,
   });
+  const activeProcessingVideos = useMemo(
+    () => activeProcessingData ?? [],
+    [activeProcessingData],
+  );
   const selectedCourse = courses.find(
     (course) => course.id === selectedCourseId,
   );
 
-  useEffect(() => {
-    if (activeProcessingVideos.length === 0) return;
-    setQueuedVideos((items) => {
-      const known = new Set(items.map((item) => item.id));
-      const recovered = activeProcessingVideos.filter((video) => !known.has(video.id));
-      return recovered.length > 0 ? [...recovered, ...items] : items;
-    });
+  const loadJobsForVideo = useCallback(
+    (videoId: string) => {
+      const requestId = (jobRequestRef.current[videoId] ?? 0) + 1;
+      jobRequestRef.current[videoId] = requestId;
+      setJobLoadStateByVideo((states) => ({
+        ...states,
+        [videoId]: { status: "loading" },
+      }));
+      void ipc.pipeline
+        .jobs(videoId)
+        .then((rows) => {
+          if (jobRequestRef.current[videoId] !== requestId) return;
+          rows.forEach((job) =>
+            setJob({
+              video_id: job.video_id,
+              job_id: job.id,
+              stage: job.stage,
+              status: job.status,
+              progress: job.progress,
+              message: job.message,
+            }),
+          );
+          setJobLoadStateByVideo((states) => ({
+            ...states,
+            [videoId]: { status: "ready" },
+          }));
+        })
+        .catch((error: unknown) => {
+          if (jobRequestRef.current[videoId] !== requestId) return;
+          setJobLoadStateByVideo((states) => ({
+            ...states,
+            [videoId]: { status: "error", error },
+          }));
+        });
+    },
+    [setJob],
+  );
+
+  const retryJobsForVideo = useCallback(
+    (videoId: string) => {
+      requestedJobIdsRef.current.add(videoId);
+      loadJobsForVideo(videoId);
+    },
+    [loadJobsForVideo],
+  );
+
+  const retryActiveProcessing = useCallback(async () => {
+    // active 查询重试时同步清掉 jobs 的去重标记，否则同一批视频会继续显示旧错误。
     for (const video of activeProcessingVideos) {
-      void ipc.pipeline.jobs(video.id).then((rows) => {
-        rows.forEach((job) =>
-          setJob({
-            video_id: job.video_id,
-            job_id: job.id,
-            stage: job.stage,
-            status: job.status,
-            progress: job.progress,
-            message: job.message,
-          }),
-        );
+      requestedJobIdsRef.current.delete(video.id);
+    }
+    const result = await refetchActiveProcessing();
+    for (const video of result.data ?? activeProcessingVideos) {
+      requestedJobIdsRef.current.add(video.id);
+      loadJobsForVideo(video.id);
+    }
+  }, [activeProcessingVideos, loadJobsForVideo, refetchActiveProcessing]);
+
+  useEffect(() => {
+    if (activeProcessingSuccess) {
+      setQueuedVideos((items) => {
+        const known = new Set(items.map((item) => item.id));
+        const recovered = activeProcessingVideos.filter((video) => !known.has(video.id));
+        return recovered.length > 0 ? [...recovered, ...items] : items;
       });
     }
-  }, [activeProcessingVideos, setJob]);
+    const processing = new Map<string, Video>();
+    [
+      ...(activeProcessingSuccess ? activeProcessingVideos : []),
+      ...queuedVideos,
+    ].forEach((video) =>
+      processing.set(video.id, video),
+    );
+    for (const video of processing.values()) {
+      if (requestedJobIdsRef.current.has(video.id)) continue;
+      requestedJobIdsRef.current.add(video.id);
+      loadJobsForVideo(video.id);
+    }
+    for (const videoId of [...requestedJobIdsRef.current]) {
+      if (!processing.has(videoId)) {
+        requestedJobIdsRef.current.delete(videoId);
+        delete jobRequestRef.current[videoId];
+        setJobLoadStateByVideo((states) => {
+          if (!(videoId in states)) return states;
+          const next = { ...states };
+          delete next[videoId];
+          return next;
+        });
+      }
+    }
+  }, [activeProcessingSuccess, activeProcessingVideos, loadJobsForVideo, queuedVideos]);
 
   const normalizedQuery = videoQuery.trim().toLowerCase();
   // 过滤只影响展示；排序、菜单上移/下移等按全量 videos 计算。
@@ -330,22 +509,36 @@ export function Home() {
     window.localStorage.setItem(VIEW_STORAGE_KEY, next);
   }
 
+  // 网格密度：舒适 ↔ 紧凑，只影响网格列宽。
+  function toggleGridDensity() {
+    setGridDensity((current) => {
+      const next = current === "cozy" ? "compact" : "cozy";
+      window.localStorage.setItem(GRID_DENSITY_KEY, next);
+      return next;
+    });
+  }
+
   function openVideo(videoId: string) {
-    // 记录「该课程最近打开的视频」，回到课程库时给「继续上次」横幅。
-    // 用视频自己的 course_id（队列打开跨课程视频时 selectedCourseId 还是旧值）。
-    const target =
-      videos.find((video) => video.id === videoId) ??
-      queuedVideos.find((video) => video.id === videoId);
-    if (target) writeLastVideoId(target.course_id, videoId);
-    const savedWidth = readVideoResumeState(videoId).studyPanelWidth;
-    setStudyPanelWidth(
-      savedWidth != null
-        ? Math.min(STUDY_PANEL_MAX, Math.max(STUDY_PANEL_MIN, savedWidth))
-        : readPanelWidth(),
-    );
-    // 打开视频即回到工作台：合上可能叠在主区的设置/回收站/控制台/队列整页。
-    closeMainOverlays();
-    setSelectedVideoId(videoId);
+    runAfterSettingsExit(() => {
+      // 记录「该课程最近打开的视频」，回到课程库时给「继续上次」横幅。
+      // 用视频自己的 course_id（队列打开跨课程视频时 selectedCourseId 还是旧值）。
+      const target =
+        videos.find((video) => video.id === videoId) ??
+        queuedVideos.find((video) => video.id === videoId);
+      if (target) writeLastVideoId(target.course_id, videoId);
+      const savedWidth = readVideoResumeState(videoId).studyPanelWidth;
+      setStudyPanelWidth(
+        savedWidth != null
+          ? Math.min(STUDY_PANEL_MAX, Math.max(STUDY_PANEL_MIN, savedWidth))
+          : readPanelWidth(),
+      );
+      setStudyPanelCollapsed(
+        readVideoResumeState(videoId).studyPanelCollapsed,
+      );
+      // 打开视频即回到工作台：合上可能叠在主区的设置/回收站/控制台/队列整页。
+      closeMainOverlays();
+      setSelectedVideoId(videoId);
+    });
   }
 
   // 复习卡「回看出处」：关掉仪表盘、切到卡所属课程，跨视频跳转由 pendingSeek 驱动。
@@ -360,13 +553,15 @@ export function Home() {
 
   // 助手的导航动作。只有这里知道播放器和当前选中项，所以由 Home 执行。
   function assistantNavigate(action: AssistantAction) {
-    setKnowledgeReturn(null);
-    closeMainOverlays();
-    dispatchAssistantNavigation(action, selectedVideoId, {
-      selectCourse: setSelectedCourseId,
-      openAt: usePlayer.getState().requestOpenAt,
-      seek: usePlayer.getState().requestSeek,
-      clearPendingOpen: usePlayer.getState().clearPendingSeek,
+    runAfterSettingsExit(() => {
+      setKnowledgeReturn(null);
+      closeMainOverlays();
+      dispatchAssistantNavigation(action, selectedVideoId, {
+        selectCourse: setSelectedCourseId,
+        openAt: usePlayer.getState().requestOpenAt,
+        seek: usePlayer.getState().requestSeek,
+        clearPendingOpen: usePlayer.getState().clearPendingSeek,
+      });
     });
   }
 
@@ -384,10 +579,12 @@ export function Home() {
 
   // 仪表盘「继续学习」：切到该课程，打开上次的视频并跳到上次进度（秒→毫秒）。
   function resumeStudy(courseId: string, videoId: string, positionSec: number) {
-    setKnowledgeReturn(null);
-    closeMainOverlays();
-    setSelectedCourseId(courseId);
-    usePlayer.getState().requestOpenAt(videoId, Math.round(positionSec * 1000));
+    runAfterSettingsExit(() => {
+      setKnowledgeReturn(null);
+      closeMainOverlays();
+      setSelectedCourseId(courseId);
+      usePlayer.getState().requestOpenAt(videoId, Math.round(positionSec * 1000));
+    });
   }
 
   // 「知识点」出处点击：关面板、跳到该视频对应位置（同课程，pendingSeek 驱动开视频+seek）。
@@ -419,12 +616,14 @@ export function Home() {
   }, [knowledgeReturn]);
 
   const returnFromVideo = useCallback(() => {
-    if (knowledgeReturn) {
-      returnToKnowledge();
-    } else {
-      returnToLibrary();
-    }
-  }, [knowledgeReturn, returnToKnowledge, returnToLibrary]);
+    runAfterSettingsExit(() => {
+      if (knowledgeReturn) {
+        returnToKnowledge();
+      } else {
+        returnToLibrary();
+      }
+    });
+  }, [knowledgeReturn, returnToKnowledge, returnToLibrary, runAfterSettingsExit]);
 
   const selectedVideo =
     videos.find((video) => video.id === selectedVideoId) ??
@@ -432,7 +631,12 @@ export function Home() {
 
   // asset 协议在 macOS WKWebView 下放大文件会「有画面没声音」；改用本地 HTTP
   // 媒体服务（带 Range）提供视频，拿到 http://127.0.0.1 的 URL 再播。
-  const { data: mediaSrc } = useQuery({
+  const {
+    data: mediaSrc,
+    isError: mediaSrcError,
+    error: mediaSrcErrorObj,
+    refetch: refetchMediaSrc,
+  } = useQuery({
     queryKey: ["media-url", selectedVideo?.id],
     queryFn: () => ipc.videos.mediaUrl(selectedVideo!.id),
     enabled: !!selectedVideo,
@@ -476,42 +680,158 @@ export function Home() {
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [openMenuVideoId]);
 
+  const restoreFocus = useCallback((target: HTMLElement | null) => {
+    queueMicrotask(() => {
+      if (target?.isConnected) target.focus();
+    });
+  }, []);
+
+  const closeVideoMenuAndRestoreFocus = useCallback(() => {
+    const trigger = videoMenuTriggerRef.current;
+    setOpenMenuVideoId(null);
+    restoreFocus(trigger);
+  }, [restoreFocus]);
+
+  const cancelVideoRename = useCallback(() => {
+    const trigger = renameOriginTriggerRef.current;
+    setRenamingVideo(null);
+    restoreFocus(trigger);
+  }, [restoreFocus]);
+
   // 兜底：若拖拽 resize 进行中组件被卸载，卸载时摘掉残留的 window 监听。
   useEffect(() => () => resizeAbortRef.current?.abort(), []);
 
-  const goBackOneLevel = useCallback(() => {
+  const goBackOneLevel = useCallback((): boolean => {
     const now = Date.now();
-    if (now - androidBackGuard.current < 250) return;
+    if (now - androidBackGuard.current < 250) return true;
     androidBackGuard.current = now;
+
+    const visibleMenus = Array.from(
+      document.querySelectorAll<HTMLElement>('[role="menu"]:not([hidden])'),
+    ).filter(
+      (menu) =>
+        !menu.closest('[hidden], [aria-hidden="true"], [data-state="inactive"]'),
+    );
+    const dispatchEscape = (target: HTMLElement | Document) => {
+      const escape = new KeyboardEvent("keydown", {
+        key: "Escape",
+        code: "Escape",
+        bubbles: true,
+        cancelable: true,
+      });
+      target.dispatchEvent(escape);
+      return escape.defaultPrevented;
+    };
+
+    const visibleTransientLayers = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '[data-system-back-layer]:not([hidden])',
+      ),
+    ).filter(
+      (layer) =>
+        !layer.closest('[hidden], [aria-hidden="true"], [data-state="inactive"]'),
+    );
+
+    // 子组件自己的全屏模态（复习、移动助手、未保存确认、导入任务）比 Home
+    // 的页面层级更靠上。把 Android 返回等价成 Esc，让模态自行决定关闭或拦截。
+    const visibleModals = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '[role="dialog"][aria-modal="true"]:not([hidden])',
+      ),
+    ).filter(
+      (modal) =>
+        !modal.closest('[hidden], [aria-hidden="true"], [data-state="inactive"]'),
+    );
+    const modal = visibleModals[visibleModals.length - 1];
+
+    // 全屏播放器在模态助手之上；先关其内部菜单，再退出全屏。
+    if (videoFullscreen) {
+      const fullscreenLayer = document.querySelector<HTMLElement>("[data-video-fullscreen]");
+      const fullscreenMenu = [...visibleMenus]
+        .reverse()
+        .find((menu) => fullscreenLayer?.contains(menu));
+      if (fullscreenMenu && dispatchEscape(fullscreenMenu)) return true;
+      const fullscreenTransient = [...visibleTransientLayers]
+        .reverse()
+        .find((layer) => fullscreenLayer?.contains(layer));
+      if (fullscreenTransient && dispatchEscape(fullscreenTransient)) return true;
+      dispatchEscape(document);
+      return true;
+    }
+
+    // 模态内的菜单/临时层比模态本身更靠上；页面背后的临时层不能抢先消费返回。
+    if (modal) {
+      const modalMenu = [...visibleMenus].reverse().find((menu) => modal.contains(menu));
+      if (modalMenu && dispatchEscape(modalMenu)) return true;
+      const modalTransient = [...visibleTransientLayers]
+        .reverse()
+        .find((layer) => modal.contains(layer));
+      if (modalTransient && dispatchEscape(modalTransient)) return true;
+      dispatchEscape(modal);
+      return true;
+    }
+
+    if (transientCloseRef.current) {
+      transientCloseRef.current();
+      return true;
+    }
+
+    if (openMenuVideoId) {
+      closeVideoMenuAndRestoreFocus();
+      return true;
+    }
+    if (renamingVideo) {
+      cancelVideoRename();
+      return true;
+    }
+
+    // 导入、导出和倍速等页面菜单由子组件管理。Android 返回等价成 Escape。
+    const menu = visibleMenus[visibleMenus.length - 1];
+    if (menu && dispatchEscape(menu)) return true;
+
+    const transientLayer = visibleTransientLayers[visibleTransientLayers.length - 1];
+    if (transientLayer && dispatchEscape(transientLayer)) return true;
 
     if (showConcepts) {
       setShowConcepts(false);
       setKnowledgeReturn(null);
-      return;
+      return true;
     }
-    if (showSettings || showRecycleBin || showDevConsole || showDashboard) {
+    if (showSettings) {
+      if (settingsBackRequestRef.current) settingsBackRequestRef.current();
+      else runAfterSettingsExit(() => setShowSettings(false));
+      return true;
+    }
+    if (showDevConsole) {
+      setShowDevConsole(false);
+      setShowSettings(true);
+      return true;
+    }
+    if (showRecycleBin || showDashboard) {
       setShowSettings(false);
       setShowRecycleBin(false);
-      setShowDevConsole(false);
       setShowDashboard(false);
-      return;
+      return true;
     }
     if (queueOpen) {
       setSelectedVideoId(null);
       setQueueOpen(false);
-      return;
+      return true;
     }
     if (selectedVideoId) {
       returnFromVideo();
-      return;
+      return true;
     }
-    // 窄屏「课程」Tab:选了课程→退回课程列表;已在列表根层则不拦截(交系统)。
+    // 窄屏「课程」Tab:选了课程→退回课程列表；已在列表根层则由调用方结束 Activity。
     if (selectedCourseId) {
       setSelectedCourseId(null);
-      return;
+      return true;
     }
+    return false;
   }, [
     queueOpen,
+    openMenuVideoId,
+    renamingVideo,
     selectedCourseId,
     selectedVideoId,
     showDevConsole,
@@ -519,7 +839,11 @@ export function Home() {
     showSettings,
     showDashboard,
     showConcepts,
+    runAfterSettingsExit,
     returnFromVideo,
+    cancelVideoRename,
+    closeVideoMenuAndRestoreFocus,
+    videoFullscreen,
   ]);
 
   useEffect(() => {
@@ -532,10 +856,10 @@ export function Home() {
     void (async () => {
       closeListener = await getCurrentWindow().onCloseRequested((event) => {
         event.preventDefault();
-        goBackOneLevel();
+        if (!goBackOneLevel()) void ipc.app.exit();
       });
       backListener = await onBackButtonPress(() => {
-        goBackOneLevel();
+        if (!goBackOneLevel()) void ipc.app.exit();
       });
       if (cancelled) {
         closeListener?.();
@@ -633,6 +957,7 @@ export function Home() {
       }
     }
     resetJobs(videoId);
+    if (dismissProcessing.variables === videoId) dismissProcessing.reset();
     setQueuedVideos((items) => {
       const existing = items.some((item) => item.id === videoId);
       return existing
@@ -651,9 +976,20 @@ export function Home() {
     });
   }
 
+  const dismissProcessing = useMutation({
+    mutationFn: (videoId: string) => ipc.pipeline.dismiss(videoId),
+    onSuccess: (_data, videoId) => {
+      setQueuedVideos((items) => items.filter((item) => item.id !== videoId));
+      queryClient.setQueryData<Video[]>(["processing-videos"], (items) =>
+        items?.filter((item) => item.id !== videoId),
+      );
+      resetJobs(videoId);
+    },
+  });
+
   function removeQueuedVideo(videoId: string) {
-    setQueuedVideos((items) => items.filter((item) => item.id !== videoId));
-    resetJobs(videoId);
+    if (dismissProcessing.isPending) return;
+    dismissProcessing.mutate(videoId);
   }
 
   // 已有字幕时「仅重新纠错」：不重新识别，回到原始稿后重跑 AI 纠错，完成后刷新文稿。
@@ -709,17 +1045,34 @@ export function Home() {
       : null;
   const recorrectError = recorrectTarget ? recorrect.error : null;
 
+  async function requestRecorrection(video: VideoListItem) {
+    const confirmed = await confirmDialog(t("home.reCorrectConfirm"), {
+      title: t("home.reCorrectConfirmTitle"),
+      kind: "warning",
+      okLabel: t("home.reCorrectConfirmAction"),
+      cancelLabel: t("common.cancel"),
+    });
+    if (!confirmed) return;
+    recorrect.mutate({ videoId: video.id, courseId: video.course_id });
+  }
+
   async function saveRenamedVideo() {
     if (!renamingVideo) return;
+    const videoId = renamingVideo.id;
+    const originTrigger = renameOriginTriggerRef.current;
     const title = renamingVideo.title.trim();
     if (!title) return;
-    const current = videos.find((video) => video.id === renamingVideo.id);
+    const current = videos.find((video) => video.id === videoId);
     if (current && current.title === title) {
+      const shouldRestoreFocus = renameDialogRef.current?.contains(document.activeElement) ?? false;
       setRenamingVideo(null);
+      if (shouldRestoreFocus) restoreFocus(originTrigger);
       return;
     }
-    await ipc.videos.updateTitle(renamingVideo.id, title);
+    await ipc.videos.updateTitle(videoId, title);
+    const shouldRestoreFocus = renameDialogRef.current?.contains(document.activeElement) ?? false;
     setRenamingVideo(null);
+    if (shouldRestoreFocus) restoreFocus(originTrigger);
     await queryClient.invalidateQueries({ queryKey: ["videos", selectedCourseId] });
   }
 
@@ -750,11 +1103,15 @@ export function Home() {
   }
 
   function openMainView(view: "settings" | "recycle" | "dev" | "dashboard") {
-    setQueueOpen(false);
-    setShowSettings(view === "settings");
-    setShowRecycleBin(view === "recycle");
-    setShowDevConsole(view === "dev");
-    setShowDashboard(view === "dashboard");
+    const open = () => {
+      setQueueOpen(false);
+      setShowSettings(view === "settings");
+      setShowRecycleBin(view === "recycle");
+      setShowDevConsole(view === "dev");
+      setShowDashboard(view === "dashboard");
+    };
+    if (view === "settings") open();
+    else runAfterSettingsExit(open);
   }
 
   function beginStudyPanelResize(event: ReactPointerEvent<HTMLDivElement>) {
@@ -826,6 +1183,18 @@ export function Home() {
   // 双击分隔条:把面板宽度复位到默认值(480),省去手动拖回。
   function resetStudyPanelWidth() {
     commitStudyPanelWidth(480);
+  }
+
+  // 面板收起/展开：收起时右栏整体隐藏（不占宽度），展开恢复上次宽度。
+  function toggleStudyPanelCollapsed() {
+    setStudyPanelCollapsed((collapsed) => {
+      if (selectedVideoId) {
+        writeVideoResumeState(selectedVideoId, {
+          studyPanelCollapsed: !collapsed,
+        });
+      }
+      return !collapsed;
+    });
   }
 
   function panelMaxWidth(container: HTMLElement | null) {
@@ -915,42 +1284,51 @@ export function Home() {
   }
 
   function selectCourse(id: string) {
-    setKnowledgeReturn(null);
-    setSelectedCourseId(id);
-    setSelectedVideoId(null);
-    setVideoQuery("");
-    closeMainOverlays();
+    runAfterSettingsExit(() => {
+      setKnowledgeReturn(null);
+      setSelectedCourseId(id);
+      setSelectedVideoId(null);
+      setVideoQuery("");
+      closeMainOverlays();
+    });
   }
 
   function clearCourseSelection() {
-    setKnowledgeReturn(null);
-    setSelectedCourseId(null);
-    setSelectedVideoId(null);
-    setVideoQuery("");
-    closeMainOverlays();
+    runAfterSettingsExit(() => {
+      setKnowledgeReturn(null);
+      setSelectedCourseId(null);
+      setSelectedVideoId(null);
+      setVideoQuery("");
+      closeMainOverlays();
+    });
   }
 
   function toggleQueue() {
     // 先算出目标态再收起全部：closeMainOverlays 会把 queueOpen 置 false，
     // 这里用当前渲染的 queueOpen 求反，最终以 setQueueOpen 覆盖，保留「再点收起」的切换语义。
     const willOpen = !queueOpen;
-    if (willOpen) setKnowledgeReturn(null);
-    setSelectedVideoId(null);
-    closeMainOverlays();
-    setQueueOpen(willOpen);
+    runAfterSettingsExit(() => {
+      if (willOpen) setKnowledgeReturn(null);
+      setSelectedVideoId(null);
+      closeMainOverlays();
+      setQueueOpen(willOpen);
+    });
   }
 
   // 窄屏底部 Tab 切换：课程回到当前课程层级；学习/队列/设置打开对应整页。
   function selectCompactTab(tab: CompactTab) {
-    closeMainOverlays();
-    if (tab === "study") {
-      setShowDashboard(true);
-    } else if (tab === "queue") {
-      setQueueOpen(true);
-    } else if (tab === "settings") {
-      setShowSettings(true);
-    }
-    // tab === "courses"：closeMainOverlays 已收起全部，无需再开任何整页。
+    if (tab === "settings" && showSettings) return;
+    runAfterSettingsExit(() => {
+      closeMainOverlays();
+      if (tab === "study") {
+        setShowDashboard(true);
+      } else if (tab === "queue") {
+        setQueueOpen(true);
+      } else if (tab === "settings") {
+        setShowSettings(true);
+      }
+      // tab === "courses"：closeMainOverlays 已收起全部，无需再开任何整页。
+    });
   }
 
   function renderProcessingQueuePage() {
@@ -980,16 +1358,38 @@ export function Home() {
           </Badge>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
-          {queuedVideos.length === 0 ? (
+          {activeProcessingError && (
+            <ErrorNote
+              className="mb-4"
+              error={activeProcessingErrorObj}
+              onRetry={() => void retryActiveProcessing()}
+            />
+          )}
+          {activeProcessingLoading && queuedVideos.length === 0 ? (
+            <div
+              role="status"
+              className="flex h-full min-h-[240px] items-center justify-center gap-2 text-sm text-[var(--text-faint)]"
+            >
+              <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
+              {t("home.queueLoading")}
+            </div>
+          ) : queuedVideos.length === 0 && !activeProcessingError ? (
             <div className="flex h-full min-h-[240px] items-center justify-center text-sm text-[var(--text-faint)]">
               {t("home.queueEmpty")}
             </div>
-          ) : (
+          ) : queuedVideos.length > 0 ? (
             <div className="flex w-full flex-col gap-3">
               {queuedVideos.map((video) => {
                 const active = activeJobFor(video.id);
                 const percent = Math.floor(pipelineProgressFor(video.id) * 100);
-                const message = stageMessage(active);
+                const jobLoadState = jobLoadStateByVideo[video.id];
+                const jobLoadError =
+                  jobLoadState?.status === "error" ? jobLoadState.error : null;
+                const message = jobLoadError
+                  ? t("home.queueJobsLoadError")
+                  : jobLoadState?.status === "loading" && !active
+                    ? t("home.queueJobsLoading")
+                    : stageMessage(active, t);
                 const canCancel =
                   active?.status === "running" || active?.status === "pending";
                 const failed = active?.status === "failed";
@@ -1012,7 +1412,20 @@ export function Home() {
                           {percent}%
                         </span>
                       </div>
-                      <div className="mt-2 h-1.5 overflow-hidden rounded bg-[var(--surface-card-hover)]">
+                      <div
+                        role="progressbar"
+                        aria-label={t("home.queueTaskProgress", {
+                          title: displayTitle(video.title),
+                        })}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={percent}
+                        aria-valuetext={t("home.queueTaskProgressValue", {
+                          percent,
+                          message,
+                        })}
+                        className="mt-2 h-1.5 overflow-hidden rounded bg-[var(--surface-card-hover)]"
+                      >
                         <div
                           className={
                             active?.status === "failed"
@@ -1023,6 +1436,9 @@ export function Home() {
                         />
                       </div>
                       <div
+                        role={failed ? "alert" : "status"}
+                        aria-live={failed ? "assertive" : "polite"}
+                        aria-atomic="true"
                         className={
                           failed
                             ? "mt-1.5 whitespace-pre-wrap break-words pr-2 text-xs leading-relaxed text-[var(--status-err)]"
@@ -1032,6 +1448,23 @@ export function Home() {
                         {message}
                       </div>
                     </button>
+                    {jobLoadState?.status === "error" && (
+                      <div className="border-t border-[var(--border-faint)] px-4 py-2">
+                        <ErrorNote
+                          error={jobLoadState.error}
+                          onRetry={() => retryJobsForVideo(video.id)}
+                        />
+                      </div>
+                    )}
+                    {dismissProcessing.isError &&
+                      dismissProcessing.variables === video.id && (
+                        <div className="border-t border-[var(--border-faint)] px-4 py-2">
+                          <ErrorNote
+                            error={dismissProcessing.error}
+                            onRetry={() => dismissProcessing.mutate(video.id)}
+                          />
+                        </div>
+                      )}
                     {canCancel && (
                       <button
                         onClick={() => void ipc.pipeline.cancel(video.id)}
@@ -1053,6 +1486,10 @@ export function Home() {
                         <button
                           type="button"
                           onClick={() => removeQueuedVideo(video.id)}
+                          disabled={
+                            dismissProcessing.isPending &&
+                            dismissProcessing.variables === video.id
+                          }
                           className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)]"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -1064,7 +1501,7 @@ export function Home() {
                 );
               })}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     );
@@ -1074,15 +1511,19 @@ export function Home() {
   function videoOptionsButton(video: Video) {
     return (
       <IconButton
+        ref={(node) => {
+          if (openMenuVideoId === video.id && node) videoMenuTriggerRef.current = node;
+        }}
         type="button"
         aria-label={t("home.videoActions")}
         aria-haspopup="menu"
         aria-expanded={openMenuVideoId === video.id}
         data-video-menu
-        className="ca-touch-44 absolute right-3 top-3 h-7 w-7 rounded-full bg-[var(--surface-panel)] shadow"
-        onClick={() =>
-          setOpenMenuVideoId((id) => (id === video.id ? null : video.id))
-        }
+        className="ca-touch-44 absolute right-3 top-3 h-7 w-7 rounded-full bg-[var(--surface-panel)] shadow-[var(--shadow-raise)]"
+        onClick={(event) => {
+          videoMenuTriggerRef.current = event.currentTarget;
+          setOpenMenuVideoId((id) => (id === video.id ? null : video.id));
+        }}
       >
         <MoreHorizontal className="h-3.5 w-3.5" />
       </IconButton>
@@ -1106,10 +1547,13 @@ export function Home() {
         aria-label={t("home.videoActionsMenu")}
         data-video-menu
         className="absolute right-3 top-12 z-10 w-32"
+        onClose={() => setOpenMenuVideoId(null)}
+        triggerRef={videoMenuTriggerRef}
       >
         <MenuItem
           className="ca-touch-44"
           onClick={() => {
+            renameOriginTriggerRef.current = videoMenuTriggerRef.current;
             setOpenMenuVideoId(null);
             setRenamingVideo({ id: video.id, title: displayTitle(video.title) });
           }}
@@ -1134,7 +1578,7 @@ export function Home() {
             setOpenMenuVideoId(null);
             if (canRecorrect(video)) {
               if (recorrect.isPending) return;
-              recorrect.mutate({ videoId: video.id, courseId: video.course_id });
+              void requestRecorrection(video);
             } else {
               startProcessing(video);
             }
@@ -1165,6 +1609,7 @@ export function Home() {
     if (renamingVideo?.id !== video.id) return null;
     return (
       <div
+        ref={renameDialogRef}
         role="dialog"
         aria-label={t("home.editTitle")}
         className="absolute inset-x-3 top-12 z-20 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-2 shadow-[var(--shadow-pop)]"
@@ -1184,7 +1629,11 @@ export function Home() {
           }
           onKeyDown={(event) => {
             if (event.key === "Enter") void saveRenamedVideo();
-            if (event.key === "Escape") setRenamingVideo(null);
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              cancelVideoRename();
+            }
           }}
         />
         <div className="mt-2 flex justify-end gap-1">
@@ -1192,7 +1641,7 @@ export function Home() {
             type="button"
             aria-label={t("home.cancelEdit")}
             className="ca-touch-44 flex h-7 w-7 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)]"
-            onClick={() => setRenamingVideo(null)}
+            onClick={cancelVideoRename}
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -1242,6 +1691,15 @@ export function Home() {
               videoId={video.id}
               className="absolute inset-0 h-full w-full"
             />
+            {/* 悬停快捷播放：整卡本就是一个可点按钮，这里只做视觉 affordance（装饰，不嵌套真按钮）。 */}
+            <span
+              aria-hidden="true"
+              className="ca-card-play pointer-events-none absolute inset-0 z-10 grid place-items-center"
+            >
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white ring-1 ring-white/25 backdrop-blur-sm">
+                <Play className="h-6 w-6 fill-current" />
+              </span>
+            </span>
             <span className="st">{statusBadge(video)}</span>
             {/* 时长未知就不显示角标：假的「00:00」会让人以为视频是空的。 */}
             {durationMs != null && (
@@ -1266,6 +1724,7 @@ export function Home() {
             <span className="ca-card-title">
               {displayTitle(video.title)}
             </span>
+            {renderVideoMetaLine(video, progress, durationMs)}
           </span>
         </button>
         {videoOptionsButton(video)}
@@ -1273,6 +1732,65 @@ export function Home() {
         {videoRenameBox(video)}
       </article>
     );
+  }
+
+  /** 卡片 body 的学习信息行：时长 · 进度 / ✓ 已看完 / 处理中实时进度 / 失败提示。
+   *  时长未知只显示状态部分，不编假时长。 */
+  function renderVideoMetaLine(
+    video: VideoListItem,
+    progress: ReturnType<typeof readPlaybackProgress>,
+    durationMs: number | null,
+  ) {
+    const durationText = durationMs != null ? formatMs(durationMs) : null;
+    const jobs = jobsByVideo[video.id] ?? {};
+    const hasJobs = Object.keys(jobs).length > 0;
+    // 处理中：jobs 数据到了才接管 meta 行；没到退回静态「处理中」徽标，不显示空进度条。
+    if (video.processed_status === "processing" && hasJobs) {
+      const stage = activeJobFor(video.id);
+      return (
+        <span className="ca-card-meta">
+          <span className="ca-meta-progress" aria-hidden="true">
+            <i style={{ width: `${Math.round(pipelineProgressFor(video.id) * 100)}%` }} />
+          </span>
+          <span className="ca-meta-text accent truncate">
+            <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+            {stageMessage(stage, t)}
+          </span>
+        </span>
+      );
+    }
+    if (video.processed_status === "failed") {
+      return (
+        <span className="ca-card-meta">
+          <span className="ca-meta-text err truncate">{t("home.processingFailedMeta")}</span>
+        </span>
+      );
+    }
+    if (progress.ratio >= WATCHED_RATIO) {
+      return (
+        <span className="ca-card-meta">
+          {durationText != null && <span className="ca-meta-text">{durationText} · </span>}
+          {/* 整串带 ✓，避免与封面「已看完」徽标在文本查询上撞车。 */}
+          <span className="ca-meta-text ok">{`✓ ${t("home.watched")}`}</span>
+        </span>
+      );
+    }
+    if (progress.ratio > 0) {
+      const percent = Math.round(progress.ratio * 100);
+      return (
+        <span className="ca-card-meta">
+          {durationText != null && <span className="ca-meta-text">{durationText} · </span>}
+          <span className="ca-meta-text accent">
+            {t("home.watchedPercentShort", { percent })}
+          </span>
+        </span>
+      );
+    }
+    return durationText != null ? (
+      <span className="ca-card-meta">
+        <span className="ca-meta-text">{durationText}</span>
+      </span>
+    ) : null;
   }
 
   function renderVideoListRow(video: VideoListItem) {
@@ -1317,8 +1835,8 @@ export function Home() {
               <span className="s">{durationText}</span>
             </span>
           </span>
+          {renderListProgressCell(video, progress)}
           <span className="c-dur">{durationText}</span>
-          <span className="c-status">{statusBadge(video)}</span>
         </button>
         {videoOptionsButton(video)}
         {videoMenu(video)}
@@ -1327,7 +1845,39 @@ export function Home() {
     );
   }
 
-  // 「继续上次」横幅：该课程最近打开、且看了但没看完的视频，一键回到工作台
+  /** 列表「进度」列：处理中/失败由文字承担（状态徽标不再单列），看完/已看/未看三态文字。 */
+  function renderListProgressCell(
+    video: VideoListItem,
+    progress: ReturnType<typeof readPlaybackProgress>,
+  ) {
+    const jobs = jobsByVideo[video.id] ?? {};
+    const hasJobs = Object.keys(jobs).length > 0;
+    if (video.processed_status === "processing" && hasJobs) {
+      return (
+        <span className="c-progress processing">
+          <Loader2 className="h-3 w-3 flex-none animate-spin" aria-hidden="true" />
+          <span className="min-w-0 truncate">{stageMessage(activeJobFor(video.id), t)}</span>
+          <span className="accent flex-none">{Math.round(pipelineProgressFor(video.id) * 100)}%</span>
+        </span>
+      );
+    }
+    if (video.processed_status === "failed") {
+      return <span className="c-progress err">{t("home.processingFailedMeta")}</span>;
+    }
+    if (progress.ratio >= WATCHED_RATIO) {
+      return <span className="c-progress ok">{`✓ ${t("home.watched")}`}</span>;
+    }
+    if (progress.ratio > 0) {
+      return (
+        <span className="c-progress accent">
+          {t("home.watchedPercentShort", { percent: Math.round(progress.ratio * 100) })}
+        </span>
+      );
+    }
+    return <span className="c-progress">{t("home.notWatched")}</span>;
+  }
+
+  // 「继续学习」hero 卡：该课程最近打开、且看了但没看完的视频，一键回到工作台
   // （播放器自带断点续播）。搜索过滤时不显示（那会儿用户在找别的）。
   function renderContinueBanner() {
     if (!selectedCourseId || normalizedQuery) return null;
@@ -1337,23 +1887,93 @@ export function Home() {
     if (!lastVideo) return null;
     const progress = readPlaybackProgress(lastId);
     if (progress.ratio <= 0 || progress.ratio >= WATCHED_RATIO) return null;
+    const positionMs = Math.round(progress.positionSec * 1000);
+    const percent = Math.round(progress.ratio * 100);
     return (
       <button
         type="button"
-        className="ca-continue"
+        className="ca-continue-hero group"
+        aria-label={t("home.continueLearning", { title: displayTitle(lastVideo.title) })}
         onClick={() => openVideo(lastId)}
       >
-        <Play className="ic h-5 w-5" />
-        <span className="lbl">{t("home.continueLast")}</span>
-        <span className="ttl">{displayTitle(lastVideo.title)}</span>
-        <span className="pos">
-          {t("home.watchedTo", { time: formatMs(Math.round(progress.positionSec * 1000)) })}
+        <span className="ca-continue-cover">
+          <VideoCover
+            videoId={lastVideo.id}
+            className="absolute inset-0 h-full w-full"
+          />
+          <span className="ov-bar" aria-hidden="true">
+            <i style={{ width: `${progress.ratio * 100}%` }} />
+          </span>
+        </span>
+        <span className="min-w-0 flex-1 text-left">
+          <span className="ca-continue-label">{t("home.continueLearningLabel")}</span>
+          <span className="ca-continue-title truncate">{displayTitle(lastVideo.title)}</span>
+          <span className="ca-continue-pos">
+            {t("home.continueAt", { time: formatMs(positionMs) })}
+            <span className="ca-continue-pct"> · {t("home.watchedPercentShort", { percent })}</span>
+          </span>
+        </span>
+        <span className="ca-continue-play" aria-hidden="true">
+          <Play className="h-5 w-5" />
         </span>
       </button>
     );
   }
 
   function renderCourseVideoLibrary() {
+    // 视频列表还没回来时的骨架：顶栏照常（课程名来自 courses 查询，不闪），
+    // 正文按当前视图档位铺占位卡。条件必须带 selectedCourseId——
+    // enabled:false 时 isPending 恒为 true，不判课程 id 会让「未选课程」永远停在骨架。
+    function renderLibrarySkeleton() {
+      if (view === "list") {
+        return (
+          <div className="ca-list" role="status" aria-label={t("home.loadingVideos")}>
+            <div className="ca-list-head">
+              <span>{t("home.colName")}</span>
+              <span className="h-progress">{t("home.colProgress")}</span>
+              <span className="h-dur">{t("home.colDuration")}</span>
+            </div>
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className="ca-row" aria-hidden="true">
+                <div className="row-button pointer-events-none">
+                  <span className="row-main">
+                    <span className="row-thumb">
+                      <Skeleton className="absolute inset-0 h-full w-full rounded-none" />
+                    </span>
+                    <span className="row-name">
+                      <Skeleton className="h-3 w-full" />
+                      <Skeleton className="h-3 w-2/3" />
+                    </span>
+                  </span>
+                  <span className="c-progress">
+                    <Skeleton className="h-3 w-16" />
+                  </span>
+                  <span className="c-dur">
+                    <Skeleton className="h-3 w-10" />
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      }
+      return (
+        <div className="ca-grid" role="status" aria-label={t("home.loadingVideos")}>
+          {Array.from({ length: 8 }).map((_, index) => (
+            <div key={index} className="ca-card pointer-events-none" aria-hidden="true">
+              <div className="ca-thumb">
+                <Skeleton className="absolute inset-0 h-full w-full rounded-none" />
+              </div>
+              <div className="ca-card-body">
+                <Skeleton className="h-3.5 w-full" />
+                <Skeleton className="h-3.5 w-2/3" />
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
     return (
       <div className="ca-main-col">
         <header className="ca-topbar">
@@ -1373,25 +1993,56 @@ export function Home() {
               {/* h1 给课程名（用户关心「我在哪个课程」），数量降为副标题。 */}
               <h1>{selectedCourse ? selectedCourse.name : t("home.courseVideos")}</h1>
               <div className="sub">
-                {selectedCourse
-                  ? t("home.videoCount", { count: videos.length })
-                  : t("home.selectCourseHint")}
+                {selectedCourse ? (
+                  <>
+                    {t("home.videoCount", { count: videos.length })}
+                    {watchedCount > 0 && (
+                      <>
+                        <span aria-hidden="true"> · </span>
+                        <span>{t("home.watchedCount", { count: watchedCount })}</span>
+                        <span className="ca-sub-progress" aria-hidden="true">
+                          <i style={{ width: `${(watchedCount / videos.length) * 100}%` }} />
+                        </span>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  t("home.selectCourseHint")
+                )}
               </div>
             </div>
           </div>
           {selectedCourseId && (
             <div className="tb-actions">
               {videos.length > 0 && (
-                <input
-                  aria-label={t("home.searchVideos")}
-                  placeholder={t("home.searchVideos")}
-                  className="tb-search"
-                  value={videoQuery}
-                  onChange={(event) => setVideoQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") setVideoQuery("");
-                  }}
-                />
+                <div className="relative">
+                  <Search
+                    className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-faint)]"
+                    aria-hidden="true"
+                  />
+                  <input
+                    ref={librarySearchRef}
+                    aria-label={t("home.searchVideos")}
+                    placeholder={t("home.searchVideos")}
+                    className="tb-search ca-touch-44 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] py-2 pl-9 pr-9 text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:border-[var(--focus-ring)] [&::-webkit-search-cancel-button]:appearance-none"
+                    value={videoQuery}
+                    onChange={(event) => setVideoQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setVideoQuery("");
+                    }}
+                  />
+                  {videoQuery !== "" && (
+                    <button
+                      type="button"
+                      aria-label={t("home.clearSearch")}
+                      title={t("home.clearSearch")}
+                      onClick={() => setVideoQuery("")}
+                      className="ca-touch-44 absolute right-1 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md text-[var(--text-faint)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
               )}
               {videos.length > 0 && (
                 <div className="ca-seg">
@@ -1411,16 +2062,38 @@ export function Home() {
                       <Icon className="h-4 w-4" />
                     </button>
                   ))}
+                  {/* 网格密度：仅网格视图下有意义；图标随当前密度提示下一步切换。 */}
+                  {view === "grid" && (
+                    <button
+                      aria-label={
+                        gridDensity === "cozy"
+                          ? t("home.switchToCompact")
+                          : t("home.switchToCozy")
+                      }
+                      title={
+                        gridDensity === "cozy"
+                          ? t("home.switchToCompact")
+                          : t("home.switchToCozy")
+                      }
+                      aria-pressed={gridDensity === "compact"}
+                      onClick={toggleGridDensity}
+                      className={gridDensity === "compact" ? "on" : ""}
+                    >
+                      <Shrink className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               )}
               {videos.length > 0 && (
-                <button
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => setShowConcepts(true)}
-                  className="ca-touch-44 inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
+                  className="ca-touch-44"
                 >
                   <Lightbulb className="h-4 w-4" />
                   {t("home.knowledgePoints")}
-                </button>
+                </Button>
               )}
               <ImportVideoButton
                 courseId={selectedCourseId}
@@ -1442,7 +2115,9 @@ export function Home() {
             />
           )}
           {!videosError && renderContinueBanner()}
-          {selectedCourseId && videosError ? (
+          {selectedCourseId && videosPending ? (
+            renderLibrarySkeleton()
+          ) : selectedCourseId && videosError ? (
             // 加载失败不再静默留空：显示错误 + 重试，用户能看到问题也能自助恢复。
             <div className="flex h-full min-h-[320px] items-center justify-center p-4">
               <ErrorNote
@@ -1508,8 +2183,8 @@ export function Home() {
               <div className="ca-list">
                 <div className="ca-list-head">
                   <span>{t("home.colName")}</span>
+                  <span className="h-progress">{t("home.colProgress")}</span>
                   <span className="h-dur">{t("home.colDuration")}</span>
-                  <span className="h-status">{t("home.colStatus")}</span>
                 </div>
                 {visibleVideos.map((video) => (
                   <SortableVideoItem key={video.id} id={video.id}>
@@ -1525,7 +2200,7 @@ export function Home() {
               disabled={renamingVideo !== null || normalizedQuery !== ""}
               onReorder={(orderedIds) => reorderVideos.mutate(orderedIds)}
             >
-              <div className="ca-grid">
+              <div className="ca-grid" data-density={gridDensity} aria-label={t("home.videoGrid")}>
                 {visibleVideos.map((video) => (
                   <SortableVideoItem key={video.id} id={video.id}>
                     {renderVideoGridCard(video)}
@@ -1542,14 +2217,18 @@ export function Home() {
   function renderSelectedVideoWorkspace() {
     if (!selectedVideo) return null;
 
+    // 面板收起（仅宽屏分栏有意义）：整列隐藏，右侧浮一根展开把手。
+    const collapsed = isWorkbenchWide && studyPanelCollapsed;
+
     return (
       <div
         aria-label={t("home.workbenchLayout")}
         data-layout={isWorkbenchWide ? "wide" : "stacked"}
+        data-panel-collapsed={collapsed ? "" : undefined}
         className={`ca-wb ${isResizingPanel ? "is-resizing-panel" : ""}`}
         style={
           showResizer
-            ? ({ "--study-panel-width": `${studyPanelWidthForLayout}px` } as CSSProperties)
+            ? ({ "--study-panel-width": `${collapsed ? 0 : studyPanelWidthForLayout}px` } as CSSProperties)
             : undefined
         }
       >
@@ -1590,11 +2269,20 @@ export function Home() {
               </button>
             )}
             <div className="ca-stage">
-              {mediaSrc ? (
+              {mediaSrcError ? (
+                <div className="flex h-full items-center justify-center bg-black p-4">
+                  <ErrorNote
+                    className="w-full max-w-md"
+                    error={mediaSrcErrorObj}
+                    onRetry={() => void refetchMediaSrc()}
+                  />
+                </div>
+              ) : mediaSrc ? (
                 <VideoPlayer
                   src={mediaSrc}
                   videoId={selectedVideo.id}
                   immersive={isIOS()}
+                  onFullscreenChange={setVideoFullscreen}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">
@@ -1604,7 +2292,7 @@ export function Home() {
             </div>
           </div>
         </section>
-        {showResizer && (
+        {showResizer && !collapsed && (
           <div
             role="separator"
             aria-label={t("home.resizeStudy")}
@@ -1621,12 +2309,35 @@ export function Home() {
             onKeyDown={resizeStudyPanelFromKeyboard}
           />
         )}
-        <aside
-          aria-label={t("home.studyPanel")}
-          className="ca-panel-col"
-        >
-          <TabsPanel videoId={selectedVideo.id} />
-        </aside>
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={toggleStudyPanelCollapsed}
+            aria-label={t("home.expandStudyPanel")}
+            title={t("home.expandStudyPanel")}
+            className="ca-panel-reveal"
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </button>
+        ) : (
+          <aside
+            aria-label={t("home.studyPanel")}
+            className="ca-panel-col"
+          >
+            {isWorkbenchWide && (
+              <button
+                type="button"
+                onClick={toggleStudyPanelCollapsed}
+                aria-label={t("home.collapseStudyPanel")}
+                title={t("home.collapseStudyPanel")}
+                className="ca-panel-collapse ca-touch-44"
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </button>
+            )}
+            <TabsPanel videoId={selectedVideo.id} />
+          </aside>
+        )}
       </div>
     );
   }
@@ -1639,6 +2350,7 @@ export function Home() {
         onSelect={selectCourse}
         onClearSelection={clearCourseSelection}
         onOpenRecycleBin={() => openMainView("recycle")}
+        onTransientCloseChange={registerTransientClose}
       />
     );
   }
@@ -1659,7 +2371,7 @@ export function Home() {
   // 窄屏底部 Tab 仅在「非工作台」时显示(工作台全屏沉浸)。
   const showBottomTab = isPhoneDevice && !isWorkbenchView;
   // 底栏选中项由当前顶层视图派生，返回或由其它入口切页后不会保留旧高亮。
-  const activeCompactTab: CompactTab = showSettings
+  const activeCompactTab: CompactTab = showSettings || showDevConsole
     ? "settings"
     : showDashboard
       ? "study"
@@ -1702,9 +2414,17 @@ export function Home() {
       data-theme={theme}
       data-bucket={bucket}
       data-device={tabletWide ? "tablet" : "phone-or-desktop"}
+      data-shell={isPhoneDevice ? "stacked" : "sidebar"}
       data-view={isWorkbenchView || (!isPhoneDevice && inVideoSession) ? "workbench" : "library"}
       data-sidebar={isPhoneDevice ? undefined : sidebarIsCollapsed ? "collapsed" : "expanded"}
-      style={accentVars(accent, theme, customAccent) as CSSProperties}
+      style={{
+        ...(accentVars(accent, theme, customAccent) as CSSProperties),
+        ...(assistantMode === "docked"
+          ? assistantSide === "left"
+            ? { paddingLeft: assistantWidth }
+            : { paddingRight: assistantWidth }
+          : null),
+      }}
       className="ca-app"
     >
       {isPhoneDevice ? null : (
@@ -1713,6 +2433,11 @@ export function Home() {
           collapsed={sidebarIsCollapsed}
           onToggleCollapsed={toggleSidebarCollapsed}
           selectedCourseId={selectedCourseId}
+          selectedCourseWatchedRatio={
+            selectedCourseId && videos.length > 0
+              ? watchedCount / videos.length
+              : null
+          }
           onSelectCourse={selectCourse}
           onClearCourseSelection={clearCourseSelection}
           videos={videos}
@@ -1738,6 +2463,8 @@ export function Home() {
             <SettingsPanel
               onClose={() => setShowSettings(false)}
               onOpenDevConsole={() => openMainView("dev")}
+              onRegisterExitRequest={registerSettingsExitRequest}
+              onRegisterBackRequest={registerSettingsBackRequest}
             />
           ) : showRecycleBin ? (
             <RecycleBin onClose={() => setShowRecycleBin(false)} />
@@ -1749,7 +2476,12 @@ export function Home() {
               onJump={reviewJump}
             />
           ) : showDevConsole ? (
-            <DevConsole onClose={() => setShowDevConsole(false)} />
+            <DevConsole
+              onClose={() => {
+                setShowDevConsole(false);
+                setShowSettings(true);
+              }}
+            />
           ) : queueOpen ? (
             renderProcessingQueuePage()
           ) : selectedVideo ? (
@@ -1789,6 +2521,9 @@ export function Home() {
         onActionApplied={assistantActionApplied}
         compact={isPhoneDevice}
         bottomNavigationVisible={showBottomTab}
+        launcherVisible={
+          !showSettings && !showRecycleBin && !showDevConsole && !showDashboard
+        }
       />
     </div>
   );

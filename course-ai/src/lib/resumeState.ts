@@ -11,6 +11,8 @@ export interface VideoResumeState {
    *（换算成 transcriptScrollTop 后清零），不再写入新值。 */
   transcriptTopIndex: number;
   studyPanelWidth: number | null;
+  /** 学习面板是否整体收起（专注看片时藏掉右栏）。 */
+  studyPanelCollapsed: boolean;
 }
 
 const DEFAULT_RESUME_STATE: VideoResumeState = {
@@ -19,6 +21,7 @@ const DEFAULT_RESUME_STATE: VideoResumeState = {
   transcriptScrollTop: 0,
   transcriptTopIndex: 0,
   studyPanelWidth: null,
+  studyPanelCollapsed: false,
 };
 
 export function resumeStateKey(videoId: string) {
@@ -74,6 +77,7 @@ export function readVideoResumeState(videoId: string): VideoResumeState {
       transcriptScrollTop: Math.max(0, finiteNumber(parsed.transcriptScrollTop, 0)),
       transcriptTopIndex: Math.max(0, finiteNumber(parsed.transcriptTopIndex, 0)),
       studyPanelWidth: finiteNullableNumber(parsed.studyPanelWidth),
+      studyPanelCollapsed: parsed.studyPanelCollapsed === true,
     };
   } catch {
     return { ...DEFAULT_RESUME_STATE };

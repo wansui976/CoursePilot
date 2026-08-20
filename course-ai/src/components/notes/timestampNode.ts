@@ -12,6 +12,7 @@ export const TimestampNode = Node.create({
     return {
       ms: { default: 0 },
       label: { default: "" },
+      source: { default: false },
     };
   },
 
@@ -21,14 +22,17 @@ export const TimestampNode = Node.create({
 
   renderHTML({ HTMLAttributes }) {
     const ms = Number(HTMLAttributes.ms ?? 0);
+    const source =
+      HTMLAttributes.source === true || HTMLAttributes.source === "true";
     return [
       "span",
       mergeAttributes(HTMLAttributes, {
         "data-ms": String(ms),
-        class:
-          "ca-ts-chip cursor-pointer rounded bg-primary/20 px-1 text-xs text-primary align-middle",
+        class: source
+          ? "ca-ts-chip ca-ts-source-chip cursor-pointer rounded px-1 text-xs text-[var(--text-muted)] align-middle"
+          : "ca-ts-chip cursor-pointer rounded bg-primary/20 px-1 text-xs text-primary align-middle",
       }),
-      `▶ ${HTMLAttributes.label || formatMs(ms)}`,
+      `${source ? "" : "▶ "}${HTMLAttributes.label || formatMs(ms)}`,
     ];
   },
 });

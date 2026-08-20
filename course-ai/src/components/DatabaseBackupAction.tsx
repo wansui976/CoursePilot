@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Download, Share2 } from "lucide-react";
+import { Download, RotateCcw, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
-import { shareFile } from "@/lib/mobileFiles";
+import { pickPersistedFile, shareFile } from "@/lib/mobileFiles";
 import { isMobile } from "@/lib/platform";
 
 const SQLITE_MIME = "application/vnd.sqlite3";
@@ -33,14 +33,18 @@ function fileName(path: string): string {
 export function DatabaseBackupAction() {
   const { t } = useTranslation();
   const mobile = isMobile();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"backup" | "restore" | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<{
+    path: string;
+    name: string;
+  }>();
   const [status, setStatus] = useState<
     { kind: "success" | "error"; text: string } | undefined
   >();
 
   async function backup() {
     if (busy) return;
-    setBusy(true);
+    setBusy("backup");
     setStatus(undefined);
     try {
       let destinationPath: string | null = null;
@@ -63,16 +67,125 @@ export function DatabaseBackupAction() {
     } catch (error) {
       setStatus({ kind: "error", text: t("backup.backupFailed", { error: humanizeError(error) }) });
     } finally {
-      setBusy(false);
+      setBusy(null);
+    }
+  }
+
+  async function chooseRestore() {
+    if (busy) return;
+    setStatus(undefined);
+    try {
+      const picked = await pickPersistedFile({
+        category: "database-restore-imports",
+        fallbackName: `CoursePilot-restore-${Date.now()}.db`,
+        filters: [{ name: t("backup.sqliteFilter"), extensions: ["db", "sqlite", "sqlite3"] }],
+        prompt: t("backup.restore.pickerPrompt"),
+      });
+      if (!picked) return;
+      setPendingRestore({ path: picked.path, name: fileName(picked.path) });
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        text: t("backup.restore.failed", { error: humanizeError(error) }),
+      });
+    }
+  }
+
+  async function restore() {
+    if (busy || !pendingRestore) return;
+    setBusy("restore");
+    setStatus(undefined);
+    try {
+      const result = await ipc.backup.restore(pendingRestore.path);
+      setPendingRestore(undefined);
+      setStatus({
+        kind: "success",
+        text: result.restartRequested
+          ? t("backup.restore.restarting")
+          : result.requiresRestart
+            ? t("backup.restore.restartRequired")
+            : t("backup.restore.ready"),
+      });
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        text: t("backup.restore.failed", { error: humanizeError(error) }),
+      });
+    } finally {
+      setBusy(null);
     }
   }
 
   return (
-    <div className="flex flex-col items-start gap-2 sm:items-end">
-      <Button size="sm" variant="outline" disabled={busy} onClick={() => void backup()}>
-        {mobile ? <Share2 className="h-3.5 w-3.5" /> : <Download className="h-3.5 w-3.5" />}
-        {busy ? t("backup.busy") : mobile ? t("backup.shareButton") : t("backup.saveButton")}
-      </Button>
+    <div className="flex w-full flex-col items-start gap-2 sm:min-w-72 sm:items-end">
+      <div className="flex w-full flex-wrap items-center gap-2 sm:justify-end">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy !== null}
+          onClick={() => void backup()}
+        >
+          {mobile ? (
+            <Share2 className="h-3.5 w-3.5" />
+          ) : (
+            <Download className="h-3.5 w-3.5" />
+          )}
+          {busy === "backup"
+            ? t("backup.busy")
+            : mobile
+              ? t("backup.shareButton")
+              : t("backup.saveButton")}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy !== null}
+          onClick={() => void chooseRestore()}
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          {busy === "restore" ? t("backup.restore.busy") : t("backup.restore.button")}
+        </Button>
+      </div>
+      {pendingRestore && (
+        <div
+          role="group"
+          aria-label={t("backup.restore.confirmTitle")}
+          className="w-full rounded-lg border border-[var(--status-warn)] bg-[var(--status-warn-bg)] p-3 text-left"
+        >
+          <p className="text-xs font-semibold text-[var(--text-strong)]">
+            {t("backup.restore.confirmTitle")}
+          </p>
+          <p className="mt-1 break-words text-xs leading-relaxed text-[var(--text-muted)]">
+            {t(
+              mobile
+                ? "backup.restore.confirmBodyMobile"
+                : "backup.restore.confirmBodyDesktop",
+              { fileName: pendingRestore.name },
+            )}
+          </p>
+          <div className="mt-2 flex flex-wrap justify-end gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy !== null}
+              onClick={() => setPendingRestore(undefined)}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={busy !== null}
+              onClick={() => void restore()}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              {busy === "restore"
+                ? t("backup.restore.busy")
+                : t("backup.restore.confirmButton")}
+            </Button>
+          </div>
+        </div>
+      )}
       {status && (
         <p
           role={status.kind === "error" ? "alert" : "status"}

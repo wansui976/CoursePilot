@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { Check, Eye, EyeOff } from "lucide-react";
@@ -38,7 +38,47 @@ const ROUTING_TASKS = [
 // 它只是压缩，值得单独挂一个便宜模型，而那份手工配置不该在改任何模型设置时被静默盖掉。
 const TASKS_KEEPING_MANUAL_ROUTING = ["digest"] as const;
 
-export function LlmSettingsPanel() {
+interface LlmDraft {
+  profiles: LlmProfile[];
+  keys: Record<string, string>;
+  activeId: string | null;
+  manualRouting: Record<string, string>;
+}
+
+export interface LlmSettingsActions {
+  save: () => Promise<boolean>;
+  discard: () => void;
+}
+
+interface LlmSettingsPanelProps {
+  onDirtyChange?: (dirty: boolean) => void;
+  onRegisterActions?: (actions: LlmSettingsActions | null) => void;
+}
+
+function makeDraft(
+  profiles: LlmProfile[],
+  keys: Record<string, string>,
+  activeId: string | null,
+  manualRouting: Record<string, string>,
+): LlmDraft {
+  return {
+    profiles: profiles.map((profile) => ({ ...profile })),
+    keys: Object.fromEntries(
+      Object.entries(keys).filter(([, value]) => value !== ""),
+    ),
+    activeId,
+    manualRouting: { ...manualRouting },
+  };
+}
+
+function draftSignature(draft: LlmDraft): string {
+  return JSON.stringify(draft);
+}
+
+export function LlmSettingsPanel({
+  onDirtyChange,
+  onRegisterActions,
+}: LlmSettingsPanelProps = {}) {
   const { t } = useTranslation();
   const [profiles, setProfiles] = useState<LlmProfile[]>([]);
   const [keys, setKeys] = useState<Record<string, string>>({});
@@ -51,6 +91,29 @@ export function LlmSettingsPanel() {
   const [savedMsg, setSavedMsg] = useState("");
   const [savedIsError, setSavedIsError] = useState(false);
   const [saving, setSaving] = useState(false);
+  const savedDraftRef = useRef<LlmDraft | null>(null);
+  const currentDraft = useMemo(
+    () => makeDraft(profiles, keys, activeId, manualRouting),
+    [activeId, keys, manualRouting, profiles],
+  );
+  const dirty =
+    savedDraftRef.current !== null &&
+    draftSignature(currentDraft) !== draftSignature(savedDraftRef.current);
+  const saveActionRef = useRef<() => Promise<boolean>>(async () => false);
+  const discardActionRef = useRef<() => void>(() => undefined);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  useEffect(() => {
+    if (!onRegisterActions) return;
+    onRegisterActions({
+      save: () => saveActionRef.current(),
+      discard: () => discardActionRef.current(),
+    });
+    return () => onRegisterActions(null);
+  }, [onRegisterActions]);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,6 +155,8 @@ export function LlmSettingsPanel() {
         setActiveId(active);
         setManualRouting(manual);
         setHasKey(flags);
+        setKeys({});
+        savedDraftRef.current = makeDraft(ps, {}, active, manual);
         setLoadError("");
       } catch (error) {
         if (!cancelled) setLoadError(t("llmSettings.loadError", { error: String(error) }));
@@ -100,13 +165,15 @@ export function LlmSettingsPanel() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   function update(id: string, patch: Partial<LlmProfile>) {
+    clearSaveFeedback();
     setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   }
 
   function add() {
+    clearSaveFeedback();
     const id = uid();
     setProfiles((ps) => [
       ...ps,
@@ -124,45 +191,88 @@ export function LlmSettingsPanel() {
       cancelLabel: t("llmSettings.cancel"),
     });
     if (!ok) return;
+    clearSaveFeedback();
     setProfiles((ps) => ps.filter((p) => p.id !== profile.id));
     setActiveId((current) => (current === profile.id ? null : current));
   }
 
-  async function save() {
+  function clearSaveFeedback() {
+    setSavedMsg("");
+    setSavedIsError(false);
+  }
+
+  function discard() {
+    const saved = savedDraftRef.current;
+    if (!saved) return;
+    setProfiles(saved.profiles.map((profile) => ({ ...profile })));
+    setKeys({ ...saved.keys });
+    setActiveId(saved.activeId);
+    setManualRouting({ ...saved.manualRouting });
+    clearSaveFeedback();
+  }
+
+  async function save(): Promise<boolean> {
+    const draftToSave = makeDraft(profiles, keys, activeId, manualRouting);
     setSaving(true);
     try {
       const routing: Record<string, string> = {};
-      if (activeId && profiles.some((p) => p.id === activeId)) {
-        for (const task of ROUTING_TASKS) routing[task] = activeId;
+      if (
+        draftToSave.activeId &&
+        draftToSave.profiles.some((p) => p.id === draftToSave.activeId)
+      ) {
+        for (const task of ROUTING_TASKS) routing[task] = draftToSave.activeId;
         // 保住手工配的 digest 路由：原来这里把所有任务一律重写成 activeId，
         // 于是「给提要单独挂个便宜模型」的配置会在下次改任何设置时被悄悄覆盖。
         for (const task of TASKS_KEEPING_MANUAL_ROUTING) {
-          const manual = manualRouting[task];
-          if (manual && profiles.some((p) => p.id === manual)) routing[task] = manual;
+          const manual = draftToSave.manualRouting[task];
+          if (manual && draftToSave.profiles.some((p) => p.id === manual)) {
+            routing[task] = manual;
+          }
         }
       }
-      await ipc.ai.saveProfiles(JSON.stringify(profiles), JSON.stringify(routing));
-      for (const [id, key] of Object.entries(keys)) {
+      await ipc.ai.saveProfiles(
+        JSON.stringify(draftToSave.profiles),
+        JSON.stringify(routing),
+      );
+      for (const [id, key] of Object.entries(draftToSave.keys)) {
         if (key) await ipc.ai.setApiKey(id, key);
       }
       setHasKey((flags) => {
         const next = { ...flags };
-        for (const [id, key] of Object.entries(keys)) if (key) next[id] = true;
+        for (const [id, key] of Object.entries(draftToSave.keys)) {
+          if (key) next[id] = true;
+        }
         return next;
       });
-      setKeys({});
+      // 只清掉本次实际保存的 Key；若保存途中又输入了新值，它仍作为未保存草稿保留。
+      setKeys((current) => {
+        const next = { ...current };
+        for (const [id, key] of Object.entries(draftToSave.keys)) {
+          if (next[id] === key) delete next[id];
+        }
+        return next;
+      });
+      savedDraftRef.current = makeDraft(
+        draftToSave.profiles,
+        {},
+        draftToSave.activeId,
+        draftToSave.manualRouting,
+      );
       setSavedMsg(t("llmSettings.saved"));
       setSavedIsError(false);
-      setTimeout(() => setSavedMsg(""), 1500);
+      return true;
     } catch (error) {
       // 保存失败要说出来：否则界面上的配置和库里的从此各说各话。
       setSavedMsg(t("llmSettings.saveFailed", { error: String(error) }));
       setSavedIsError(true);
-      setTimeout(() => setSavedMsg(""), 6000);
+      return false;
     } finally {
       setSaving(false);
     }
   }
+
+  saveActionRef.current = save;
+  discardActionRef.current = discard;
 
   const effectiveActive =
     activeId && profiles.some((p) => p.id === activeId) ? activeId : profiles[0]?.id ?? null;
@@ -201,7 +311,10 @@ export function LlmSettingsPanel() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setActiveId(p.id)}
+                onClick={() => {
+                  clearSaveFeedback();
+                  setActiveId(p.id);
+                }}
                 aria-pressed={isActive}
                 title={isActive ? t("llmSettings.activeModel") : t("llmSettings.setDefault")}
                 className={`flex flex-none items-center gap-1.5 rounded-full px-2 py-1 text-xs transition ${
@@ -253,7 +366,10 @@ export function LlmSettingsPanel() {
                   placeholder={
                     hasKey[p.id] ? "••••••" : "API Key"
                   }
-                  onChange={(e) => setKeys((k) => ({ ...k, [p.id]: e.target.value }))}
+                  onChange={(e) => {
+                    clearSaveFeedback();
+                    setKeys((k) => ({ ...k, [p.id]: e.target.value }));
+                  }}
                 />
                 <button
                   type="button"
@@ -282,19 +398,22 @@ export function LlmSettingsPanel() {
           </div>
         );
       })}
-      <div className="flex items-center gap-3">
-        <Button size="sm" disabled={saving} onClick={save}>
-          {t("llmSettings.save")}
+      <div className="sticky bottom-0 z-10 flex items-center gap-3 border-t border-[var(--border-faint)] bg-[var(--surface-card)] py-3">
+        <Button size="sm" disabled={saving} onClick={() => void save()}>
+          {saving ? t("llmSettings.saving") : t("llmSettings.save")}
         </Button>
-        {savedMsg && (
+        {(dirty || savedMsg) && (
           <span
+            role={savedIsError ? "alert" : "status"}
             className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
               savedIsError
                 ? "bg-[var(--status-err-bg)] text-[var(--status-err)]"
-                : "bg-[var(--status-ok-bg)] text-[var(--status-ok)]"
+                : dirty
+                  ? "bg-[var(--status-warn-bg)] text-[var(--status-warn)]"
+                  : "bg-[var(--status-ok-bg)] text-[var(--status-ok)]"
             }`}
           >
-            {savedMsg}
+            {savedMsg || t("llmSettings.unsaved")}
           </span>
         )}
       </div>

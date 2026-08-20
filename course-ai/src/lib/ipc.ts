@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { CropStatus } from "./blackBars";
 import type { SkipRange } from "./silenceSkip";
 import type {
   AskEvent,
@@ -267,6 +268,10 @@ type AssistantRequestState = {
 const assistantRequestStates = new Map<string, AssistantRequestState>();
 
 export const ipc = {
+  app: {
+    // Android 的 AppPlugin 接管了系统返回键；根页面没有可退层级时显式结束 Activity。
+    exit: (): Promise<void> => invoke("cmd_exit_app"),
+  },
   sync: {
     status: (): Promise<CloudSyncStatus> => invoke("cmd_sync_status"),
     start: (): Promise<CloudSyncStatus> => invoke("cmd_sync_start"),
@@ -310,6 +315,13 @@ export const ipc = {
       invoke("cmd_add_local_batch", { courseId, paths }),
     ensurePlayable: (videoId: string): Promise<string> =>
       invoke("cmd_ensure_playable", { videoId }),
+    // 查询黑边探测结果：已测过返回 insets；没测过后台起任务并返回 detecting=true（轮询等结果）。
+    ensureCrop: (videoId: string): Promise<CropStatus> =>
+      invoke("cmd_ensure_crop", { videoId }),
+    // 离开视频时停掉它的黑边探测：探测要解码正片三处，切走了就没人要这个结果，
+    // 留着只会和下一个视频的起播抢磁盘。
+    cancelCropDetect: (videoId: string): Promise<void> =>
+      invoke("cmd_cancel_crop_detect", { videoId }),
     mediaUrl: (videoId: string): Promise<string> =>
       invoke("cmd_media_url", { videoId }),
     // 原始二进制（后端 ipc::Response），不是 JSON 数字数组。
@@ -599,6 +611,8 @@ export const ipc = {
       invoke("cmd_process_video", { videoId }),
     cancel: (videoId: string): Promise<void> =>
       invoke("cmd_cancel_processing", { videoId }),
+    dismiss: (videoId: string): Promise<void> =>
+      invoke("cmd_dismiss_processing_video", { videoId }),
     // 已有字幕时「仅重新纠错」：回到原始稿 + 重跑 AI 纠错，不重新识别。
     recorrect: (videoId: string): Promise<void> =>
       invoke("cmd_recorrect_transcript", { videoId }),
@@ -771,8 +785,8 @@ export const ipc = {
   export: {
     subtitles: (videoId: string, format: "srt" | "vtt"): Promise<string> =>
       invoke("cmd_export_subtitles", { videoId, format }),
-    notes: (videoId: string): Promise<string> =>
-      invoke("cmd_export_notes", { videoId }),
+    notes: (videoId: string, contentMarkdown?: string): Promise<string> =>
+      invoke("cmd_export_notes", { videoId, contentMarkdown }),
     quiz: (videoId: string): Promise<string> =>
       invoke("cmd_export_quiz", { videoId }),
     mindmap: (videoId: string): Promise<string> =>
@@ -781,6 +795,11 @@ export const ipc = {
   backup: {
     create: (destinationPath: string | null): Promise<string> =>
       invoke("cmd_backup_database", { destinationPath }),
+    restore: (sourcePath: string): Promise<{
+      snapshotPath: string;
+      requiresRestart: boolean;
+      restartRequested: boolean;
+    }> => invoke("cmd_restore_database", { sourcePath }),
   },
   tools: {
     ocr: (

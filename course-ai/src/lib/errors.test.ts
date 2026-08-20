@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import i18n from "@/i18n";
 import { humanizeError } from "./errors";
 
 describe("humanizeError", () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("zh-CN");
+  });
+
   it("normalizes Error, string and unknown inputs", () => {
     expect(humanizeError(new Error("请求超时"))).toContain("超时");
     expect(humanizeError("timed out")).toContain("超时");
@@ -67,5 +72,16 @@ describe("humanizeError", () => {
   it("maps disk / permission errors", () => {
     expect(humanizeError("No space left on device")).toContain("磁盘");
     expect(humanizeError("Permission denied (os error 13)")).toContain("权限");
+  });
+
+  it("uses the requested language for recognized errors", () => {
+    expect(humanizeError("timed out", "en")).toBe(
+      "The request timed out. Check your network and retry.",
+    );
+    expect(humanizeError("HTTP 402 Payment Required", "en")).toContain(
+      "insufficient balance",
+    );
+    expect(humanizeError(null, "en")).toBe("Something went wrong.");
+    expect(humanizeError("some weird thing", "en")).toBe("some weird thing");
   });
 });

@@ -4,6 +4,39 @@ import { describe, expect, it } from "vitest";
 
 const css = readFileSync(resolve("src/globals.css"), "utf8");
 
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (hex: string) => {
+    const channels = hex
+      .match(/[0-9a-f]{2}/gi)!
+      .map((channel) => Number.parseInt(channel, 16) / 255)
+      .map((channel) =>
+        channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
+      );
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  };
+  const foregroundLuminance = luminance(foreground);
+  const backgroundLuminance = luminance(background);
+  return (
+    (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+    (Math.min(foregroundLuminance, backgroundLuminance) + 0.05)
+  );
+}
+
+describe("浅色状态文字对比度", () => {
+  it("成功与警告小字在各自底色上至少达到 4.5:1", () => {
+    const light = css.match(/^:root\s*\{[\s\S]*?\n\}/m)?.[0] ?? "";
+    const token = (name: string) =>
+      light.match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})`, "i"))?.[1] ?? "";
+
+    expect(contrastRatio(token("status-ok"), token("status-ok-bg"))).toBeGreaterThanOrEqual(
+      4.5,
+    );
+    expect(
+      contrastRatio(token("status-warn"), token("status-warn-bg")),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
 describe("强调色令牌的用法约束", () => {
   it("前景色一律用 --accent-text，不用 --accent", () => {
     // --accent 是实心块的底色。它在暗色主题里刻意保持原值，白字才压得住；
@@ -99,10 +132,39 @@ describe("动效的实现约束", () => {
   });
 });
 
+describe("窄屏 shell 的响应式约束", () => {
+  it("wide 触控平板竖屏仍使用单列、底栏预留和稳定的叠放工作台", () => {
+    const shell =
+      css.match(/^\.ca-app\[data-shell="stacked"\]\s*\{[\s\S]*?\n\}/m)?.[0] ?? "";
+    const main =
+      css.match(/^\.ca-app\[data-shell="stacked"\] \.ca-main\s*\{[\s\S]*?\n\}/m)?.[0] ?? "";
+    const bottomInset =
+      css.match(
+        /^\.ca-app\[data-shell="stacked"\]\[data-view="library"\] \.ca-main\s*\{[\s\S]*?\n\}/m,
+      )?.[0] ?? "";
+    const stackedWorkbench =
+      css.match(/^\.ca-wb\[data-layout="stacked"\]\s*\{[\s\S]*?\n\}/m)?.[0] ?? "";
+
+    expect(shell).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\)/);
+    expect(main).toMatch(/safe-area-inset-top/);
+    expect(bottomInset).toMatch(/56px\s*\+\s*env\(safe-area-inset-bottom/);
+    expect(stackedWorkbench).toMatch(/display:\s*flex/);
+    expect(stackedWorkbench).toMatch(/flex-direction:\s*column/);
+    expect(css).toMatch(
+      /^\.ca-wb\[data-layout="stacked"\] \.ca-stage\s*\{\s*aspect-ratio:\s*16\s*\/\s*9;/m,
+    );
+    expect(css).toMatch(
+      /^\.ca-wb\[data-layout="stacked"\] \.ca-panel-col\s*\{[\s\S]*?min-height:\s*0;/m,
+    );
+  });
+});
+
 describe("阴影与过渡的写法约束", () => {
   function componentSources() {
-    const root = resolve("src/components");
     const files: string[] = [];
+    // 组件 + 页面两层都扫：裸 shadow 的案发地就在 src/pages/Home.tsx，
+    // 只扫 components 会放走页面里的同类问题。
+    const roots = [resolve("src/components"), resolve("src/pages")];
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
@@ -111,20 +173,23 @@ describe("阴影与过渡的写法约束", () => {
           files.push(full);
       }
     };
-    walk(root);
+    for (const root of roots) walk(root);
     return files;
   }
 
   it("阴影走主题令牌，不用 Tailwind 的原生档位", () => {
     // Tailwind 的 shadow-sm/lg/xl 是按浅色背景调的 10% 纯黑，放到暗色主题近黑的底上
     // 等于没有——浮层、选中丸、划选浮出的按钮全部与背景糊在一起。
+    // 裸 shadow 与 shadow-sm 同源同病（也是浅色 10% 纯黑），一并拦截。
     // 例外是视频舞台里那两处：它们永远压在纯黑上，原生阴影在那儿本来就是对的。
+    // 裸 shadow 的匹配只认「后面跟空白/引号/行尾」，shadow-[var(...)] 这类令牌引用不误伤。
+    const bareShadow = /(?:^|\s)["']?shadow(?=\s|["']|$)/;
     const offenders: string[] = [];
     for (const file of componentSources()) {
       readFileSync(file, "utf8")
         .split("\n")
         .forEach((line, index) => {
-          if (!/\bshadow-(sm|md|lg|xl|2xl)\b/.test(line)) return;
+          if (!/\bshadow-(sm|md|lg|xl|2xl)\b/.test(line) && !bareShadow.test(line)) return;
           if (line.includes("bg-black")) return;
           offenders.push(`${file.replace(resolve("src/components"), "")}:${index + 1}`);
         });

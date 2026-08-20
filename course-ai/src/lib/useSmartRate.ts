@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
-  formatRateNotice,
-  formatSmartRateSummary,
   isSmartRateEnabled,
   multiplierAt,
   planSmartRates,
   setSmartRateEnabled,
+  speedUpCoverageMs,
 } from "@/lib/smartRate";
 import type { TranscriptSegment } from "@/lib/types";
 
@@ -31,13 +31,22 @@ type MultiplierState = {
 };
 
 export function useSmartRate(segments: TranscriptSegment[], options: SmartRateOptions = {}) {
+  const { t } = useTranslation();
   const [enabled, setEnabled] = useState(isSmartRateEnabled);
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 倍率表只随字幕变化重算：一节 90 分钟的课有上千句，不该每次 timeupdate 都排一遍。
   const spans = useMemo(() => planSmartRates(segments), [segments]);
-  const summary = useMemo(() => formatSmartRateSummary(spans), [spans]);
+  const summary = useMemo(() => {
+    const coverage = speedUpCoverageMs(spans);
+    if (spans.length === 0) return t("videoPlayer.smartRateUnavailable");
+    if (coverage < 30_000) return t("videoPlayer.smartRateEven");
+    const minutes = Math.round(coverage / 60_000);
+    return minutes >= 1
+      ? t("videoPlayer.smartRateCoverage", { minutes })
+      : t("videoPlayer.smartRateEnabled");
+  }, [spans, t]);
   const appliedSpansRef = useRef(spans);
   const [multiplierState, setMultiplierState] = useState<MultiplierState>(() => ({
     resetKey: options.resetKey,
@@ -102,8 +111,10 @@ export function useSmartRate(segments: TranscriptSegment[], options: SmartRateOp
         const effective = Math.round(baseRate * next * 100) / 100;
         setNotice(
           capped
-            ? `${effective}x（已达设备流畅播放上限）`
-            : formatRateNotice(baseRate, next, options.maxEffectiveRate),
+            ? t("videoPlayer.smartRateCapped", { rate: effective })
+            : next <= 1
+              ? t("videoPlayer.smartRateDense", { rate: effective })
+              : t("videoPlayer.smartRateSlow", { rate: effective }),
         );
         clearNoticeTimer();
         noticeTimerRef.current = setTimeout(() => setNotice(null), NOTICE_MS);
@@ -118,6 +129,7 @@ export function useSmartRate(segments: TranscriptSegment[], options: SmartRateOp
       options.resetKey,
       planChanged,
       spans,
+      t,
     ],
   );
 

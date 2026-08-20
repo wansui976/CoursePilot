@@ -58,4 +58,29 @@ describe("WhisperModelsPanel", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
     expect(mockIpc.whisper.list).toHaveBeenCalledTimes(2);
   });
+
+  it("reports download failures and lets users retry without leaving the model stuck", async () => {
+    mockIpc.whisper.list.mockResolvedValue([
+      [
+        { id: "tiny", display_name: "tiny", size_bytes: 78_643_200, url: "" },
+        false,
+      ],
+    ]);
+    mockIpc.whisper.download
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockResolvedValueOnce(undefined);
+
+    render(<WhisperModelsPanel />);
+    const download = await screen.findByRole("button", { name: "下载" });
+    fireEvent.click(download);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("磁盘空间不足，请清理后重试");
+    expect(download).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+
+    await waitFor(() => expect(mockIpc.whisper.download).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(download).toBeEnabled();
+  });
 });

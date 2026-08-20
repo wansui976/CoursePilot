@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CheckCircle2, RotateCcw, X, XCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -84,6 +85,13 @@ export function ReviewSession({
   const [index, setIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
+  const exitButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(
+    typeof document !== "undefined" &&
+      document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
   const selectedOptionsRef = useRef<string[]>([]);
   const gradingRef = useRef(false);
   const cards = data ?? [];
@@ -141,13 +149,10 @@ export function ReviewSession({
     if (done) queryClient.invalidateQueries({ queryKey: ["srs-count-due"] });
   }, [done, queryClient]);
 
-  // 键盘：有选项时 A–Z 选答案，空格/回车翻面；翻面后 1–4 打分；Esc 关闭。
+  // 键盘：有选项时 A–Z 选答案，空格/回车翻面；翻面后 1–4 打分。
+  // Esc 和焦点约束交给 Dialog，避免全局监听与模态关闭重复触发。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-        return;
-      }
       if (!card) return;
       if (!revealed && choiceData && e.key.length === 1) {
         const optionIndex = e.key.toLowerCase().charCodeAt(0) - 97;
@@ -174,7 +179,30 @@ export function ReviewSession({
   }, [card, revealed]);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[var(--surface-app)]">
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-[var(--surface-app)]" />
+        <Dialog.Content
+          aria-modal="true"
+          aria-describedby={undefined}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            exitButtonRef.current?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            restoreFocusRef.current?.focus();
+          }}
+          className="fixed inset-0 z-50 flex flex-col bg-[var(--surface-app)]"
+        >
+      <Dialog.Title className="sr-only">
+        {concept ? `${t("review.title")}: ${concept.name}` : t("review.title")}
+      </Dialog.Title>
       <header className="flex flex-none items-center justify-between border-b border-[var(--border-subtle)] px-6 py-3">
         <span className="text-sm text-[var(--text-muted)]">
           {cards.length > 0 && !done
@@ -184,6 +212,8 @@ export function ReviewSession({
               : t("review.title")}
         </span>
         <button
+          ref={exitButtonRef}
+          type="button"
           aria-label={t("review.exit")}
           onClick={onClose}
           className="ca-icon-btn ca-touch-44"
@@ -276,12 +306,12 @@ export function ReviewSession({
                           className={cn(
                             "grid h-7 w-7 flex-none place-items-center rounded-md border text-xs font-semibold",
                             selected && !revealed
-                              ? "border-[var(--accent-text)] bg-[var(--accent-text)] !text-white"
+                              ? "border-[var(--accent)] bg-[var(--accent)] !text-[var(--on-accent)]"
                               : "border-[var(--border-strong)] text-[var(--text-muted)]",
                             correct &&
-                              "border-[var(--status-ok)] bg-[var(--status-ok)] !text-white",
+                              "border-[var(--status-ok)] bg-[var(--status-ok)] !text-[var(--on-status-ok)]",
                             selectedWrong &&
-                              "border-[var(--status-err)] bg-[var(--status-err)] !text-white",
+                              "border-[var(--status-err)] bg-[var(--status-err)] !text-[var(--on-status-err)]",
                           )}
                         >
                           {revealed && (correct || selectedWrong) ? (
@@ -402,6 +432,8 @@ export function ReviewSession({
           </div>
         </div>
       </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

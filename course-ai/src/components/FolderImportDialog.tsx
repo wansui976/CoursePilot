@@ -67,7 +67,7 @@ export function FolderImportDialog({
     >
       <Dialog.Overlay
         data-testid="folder-import-overlay"
-        className="ca-dialog-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+        className="ca-dialog-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       >
         <Dialog.Content
           aria-modal="true"
@@ -84,7 +84,7 @@ export function FolderImportDialog({
           onPointerDownOutside={(event) => {
             if (importBatch.isPending) event.preventDefault();
           }}
-          className="flex max-h-[80vh] w-[460px] flex-col rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-5 shadow-[var(--shadow-pop)]"
+          className="flex max-h-[calc(100dvh-2rem)] w-full max-w-[460px] flex-col overflow-y-auto rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-4 shadow-[var(--shadow-pop)] sm:p-5"
         >
         <Dialog.Title
           className="mb-1 flex items-center gap-2 text-sm font-semibold text-[var(--text-strong)]"
@@ -98,7 +98,7 @@ export function FolderImportDialog({
           {t("folderImport.found", { count: videos.length })}
         </Dialog.Description>
 
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
             onClick={toggleAll}
@@ -134,7 +134,7 @@ export function FolderImportDialog({
           <ErrorNote className="mt-2" error={importBatch.error} />
         )}
 
-        <div className="mt-3 flex justify-end gap-2">
+        <div className="mt-3 flex flex-wrap justify-end gap-2">
           <Button
             size="sm"
             variant="outline"

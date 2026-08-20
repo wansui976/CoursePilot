@@ -253,18 +253,18 @@ function circleRevealTheme(
 
 /** 应用明暗切换(mutate 里做真正的状态变更),按能力与场景选动画:
  *  1. reduce-motion:无论是否由按钮点击触发都直接瞬切;
- *  2. 可见高成本内容(data-theme-heavy):直接切——避免 VT/全树过渡放大成本;
- *  3. 有起点(点/键切换按钮):从按钮圆形扩散盖满整屏再切色(CSS transform 覆盖层);
+ *  2. 有起点(点/键切换按钮):从按钮圆形扩散盖满整屏再切色(CSS transform 覆盖层);
+ *  3. 无起点 + 可见重 DOM(data-theme-heavy):直接切——避免 VT/全树过渡放大成本;
  *  4. 无起点:View Transitions 交叉淡化,或全树过渡类兜底。 */
 function applyThemeChange(mutate: () => void, next: EffectiveTheme): void {
   if (typeof document === "undefined") return mutate();
   const origin = consumeThemeOrigin();
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return mutate();
-  if (hasVisibleHeavyDom()) return mutate();
   if (origin) {
     circleRevealTheme(mutate, next, origin);
     return;
   }
+  if (hasVisibleHeavyDom()) return mutate();
   if (typeof document.startViewTransition === "function") {
     // flushSync:让 React 在快照回调内同步提交 data-theme,否则新快照可能截到旧画面。
     document.startViewTransition(() => flushSync(mutate));
@@ -338,6 +338,48 @@ function readableForeground(background: string): "#000000" | "#ffffff" {
     : "#000000";
 }
 
+function mixHex(value: string, target: string, ratio: number): string {
+  const source = rgbFromHex(value);
+  const destination = rgbFromHex(target);
+  return `#${source
+    .map((channel, index) =>
+      Math.round(channel + (destination[index] - channel) * ratio)
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+}
+
+/** 保留强调色的色相倾向，同时确保小号文字在普通/选中交互表面上都达到 AA。 */
+function readableAccentText(base: string, effective: EffectiveTheme): string {
+  // 深色控件悬浮表面比主面板更亮；选中态还会叠加最多 24% 的强调色。
+  // 两种表面都纳入计算，避免颜色只在静止面板上达标、选中后反而失去对比。
+  const surface = effective === "dark" ? "#252a30" : "#ffffff";
+  const selectedSurface = mixHex(surface, base, 0.24);
+  const isReadable = (candidate: string) =>
+    [surface, selectedSurface].every(
+      (background) => contrastRatio(candidate, background) >= 4.5,
+    );
+  if (isReadable(base)) return base;
+  const target = effective === "dark" ? "#ffffff" : "#000000";
+  for (let step = 1; step <= 100; step += 1) {
+    const candidate = mixHex(base, target, step / 100);
+    if (isReadable(candidate)) return candidate;
+  }
+  return target;
+}
+
+/** 播放器控制层是近黑底，单独派生强调色，不能复用面板上的文字色。 */
+function readableVideoAccent(base: string): string {
+  const background = "#1a1a1a";
+  if (contrastRatio(base, background) >= 4.5) return base;
+  for (let step = 1; step <= 100; step += 1) {
+    const candidate = mixHex(base, "#ffffff", step / 100);
+    if (contrastRatio(candidate, background) >= 4.5) return candidate;
+  }
+  return "#ffffff";
+}
+
 function darkenHex(value: string, amount: number): string {
   return `#${rgbFromHex(value)
     .map((channel) => Math.round(channel * amount).toString(16).padStart(2, "0"))
@@ -367,15 +409,17 @@ export function accentVars(
   const press = accent === "custom" ? darkenHex(base, 0.88) : entry.press;
   const onAccent = readableForeground(base);
   const onAccentPress = readableForeground(press);
+  const statusOk = effective === "dark" ? "#34d399" : "#147a52";
+  const statusErr = effective === "dark" ? "#f87171" : "#c92a2a";
   return {
     "--accent": base,
     "--accent-press": press,
     "--on-accent": onAccent,
     "--on-accent-press": onAccentPress,
-    "--accent-text":
-      effective === "dark"
-        ? `color-mix(in srgb, ${base} 62%, white)`
-        : `color-mix(in srgb, ${base} 86%, black)`,
+    "--accent-text": readableAccentText(base, effective),
+    "--video-accent": readableVideoAccent(base),
+    "--on-status-ok": readableForeground(statusOk),
+    "--on-status-err": readableForeground(statusErr),
     "--accent-weak": `color-mix(in srgb, ${base} 14%, transparent)`,
     "--accent-weak-2": `color-mix(in srgb, ${base} 24%, transparent)`,
     // Tailwind 的 primary 系列(bg-primary/text-primary/accent-primary 等)走这个

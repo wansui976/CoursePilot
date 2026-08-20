@@ -2,12 +2,13 @@ use crate::error::AppResult;
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[derive(Clone)]
 pub struct Db {
     pub pool: SqlitePool,
+    pub(crate) path: PathBuf,
 }
 
 impl Db {
@@ -32,7 +33,15 @@ impl Db {
             .connect_with(opts)
             .await?;
         sqlx::migrate!("./migrations").run(&pool).await?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            path: db_path.to_owned(),
+        })
+    }
+
+    /// 返回当前应用数据库的实际文件路径，供一致性备份使用。
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 }
 

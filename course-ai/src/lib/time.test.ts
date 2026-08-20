@@ -51,6 +51,12 @@ describe("formatRelativeTime", () => {
   it("treats future timestamps as 刚刚 instead of showing negatives", () => {
     expect(formatRelativeTime(now + 5 * 60_000, now)).toBe("刚刚");
   });
+
+  it("uses English relative time and dates when requested", () => {
+    expect(formatRelativeTime(now - 3 * 3600_000, now, "en")).toBe("3 hours ago");
+    expect(formatRelativeTime(now - 8 * 24 * 3600_000, now, "en")).toBe("Jul 17");
+    expect(formatRelativeTime(now + 60_000, now, "en")).toBe("Just now");
+  });
 });
 
 describe("formatCountdown", () => {
@@ -69,6 +75,11 @@ describe("formatCountdown", () => {
   it("says 马上 for anything already due", () => {
     expect(ahead(0)).toBe("马上");
     expect(ahead(-3600_000)).toBe("马上");
+  });
+
+  it("uses English countdown wording when requested", () => {
+    expect(formatCountdown(now + 90_000, now, "en")).toBe("in 2 minutes");
+    expect(formatCountdown(now, now, "en")).toBe("Due now");
   });
 });
 
@@ -95,5 +106,11 @@ describe("formatStudyInterval", () => {
     expect(formatStudyInterval(70 * DAY)).toBe("2.3 个月");
     expect(formatStudyInterval(365 * DAY)).toBe("1 年");
     expect(formatStudyInterval(800 * DAY)).toBe("2.2 年");
+  });
+
+  it("pluralizes English study intervals", () => {
+    expect(formatStudyInterval(60_000, "en")).toBe("1 minute");
+    expect(formatStudyInterval(21 * DAY, "en")).toBe("21 days");
+    expect(formatStudyInterval(40 * DAY, "en")).toBe("1.3 months");
   });
 });

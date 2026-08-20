@@ -1,6 +1,8 @@
 package dev.courseai.mobilefiles
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.Intent
 import android.graphics.Bitmap
 import android.media.AudioFormat
 import android.media.MediaCodec
@@ -17,6 +19,7 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import androidx.core.content.FileProvider
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -64,6 +67,12 @@ class RecognizeImageTextArgs {
   lateinit var imagePath: String
 }
 
+@InvokeArg
+class ShareFileArgs {
+  lateinit var sourcePath: String
+  lateinit var mime: String
+}
+
 private data class AudioExportResult(val path: String, val mime: String, val format: String)
 
 @TauriPlugin
@@ -103,6 +112,55 @@ class MobileFilesPlugin(private val activity: Activity) : Plugin(activity) {
       invoke.resolve(result)
     } catch (error: Exception) {
       invoke.reject(error.message ?: "Failed to persist picked file", error)
+    }
+  }
+
+  @Command
+  fun shareFile(invoke: Invoke) {
+    try {
+      val args = invoke.parseArgs(ShareFileArgs::class.java)
+      ioExecutor.execute {
+        try {
+          val source = File(args.sourcePath)
+          if (!source.isFile) {
+            throw IllegalArgumentException("File to share was not found: ${args.sourcePath}")
+          }
+          val shareDir = File(activity.cacheDir, "shared-files")
+          if (!shareDir.exists() && !shareDir.mkdirs()) {
+            throw IllegalStateException("Failed to create share cache directory")
+          }
+          shareDir.listFiles()
+            ?.sortedByDescending { oldFile -> oldFile.lastModified() }
+            ?.drop(2)
+            ?.forEach { oldFile -> oldFile.delete() }
+          val sharedFile = File(shareDir, sanitizeName(source.name, "CoursePilot-backup.db"))
+          source.copyTo(sharedFile, overwrite = true)
+
+          val uri = FileProvider.getUriForFile(
+            activity,
+            "${activity.packageName}.fileprovider",
+            sharedFile,
+          )
+          val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = args.mime.ifBlank { "application/octet-stream" }
+            putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = ClipData.newRawUri(sharedFile.name, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+          }
+          activity.runOnUiThread {
+            try {
+              activity.startActivity(Intent.createChooser(sendIntent, null))
+              invoke.resolve(JSObject())
+            } catch (error: Exception) {
+              invoke.reject(error.message ?: "Failed to open share sheet", error)
+            }
+          }
+        } catch (error: Exception) {
+          invoke.reject(error.message ?: "Failed to share file", error)
+        }
+      }
+    } catch (error: Exception) {
+      invoke.reject(error.message ?: "Failed to share file", error)
     }
   }
 

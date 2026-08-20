@@ -7,7 +7,8 @@ import { NotesPanel } from "./NotesPanel";
 import { readVideoResumeState } from "@/lib/resumeState";
 import { useTimestampPrefs } from "@/stores/timestampPrefs";
 
-const { mockIpc, editorCapture } = vi.hoisted(() => ({
+const { mockIpc, editorCapture, confirmMock } = vi.hoisted(() => ({
+  confirmMock: vi.fn(),
   mockIpc: {
     ai: {
       getNotes: vi.fn(),
@@ -28,11 +29,17 @@ const { mockIpc, editorCapture } = vi.hoisted(() => ({
     const capture: {
       onUpdate?: (p: { editor: unknown }) => void;
       setContent: ReturnType<typeof vi.fn>;
-      editor: unknown;
+      getJSON: ReturnType<typeof vi.fn>;
+      editor: {
+        commands: { setContent: ReturnType<typeof vi.fn> };
+        getJSON: ReturnType<typeof vi.fn>;
+        isDestroyed: boolean;
+      } | null;
     } = {
       onUpdate: undefined,
       setContent: vi.fn(),
-      editor: undefined,
+      getJSON: vi.fn(),
+      editor: null,
     };
     capture.setContent = vi.fn((_content: unknown, options?: { emitUpdate?: boolean }) => {
       if (options?.emitUpdate === false) return;
@@ -40,13 +47,15 @@ const { mockIpc, editorCapture } = vi.hoisted(() => ({
     });
     capture.editor = {
       commands: { setContent: capture.setContent },
-      getJSON: () => ({ type: "doc", content: [{ type: "paragraph" }] }),
+      getJSON: capture.getJSON,
+      isDestroyed: false,
     };
     return capture;
   })(),
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: confirmMock }));
 vi.mock("@tiptap/starter-kit", () => ({ default: {} }));
 vi.mock("@tiptap/extension-table", () => ({ Table: { configure: () => ({}) } }));
 vi.mock("@tiptap/extension-table-row", () => ({ TableRow: {} }));
@@ -84,6 +93,11 @@ describe("NotesPanel", () => {
   beforeEach(() => {
     localStorage.clear();
     editorCapture.setContent.mockClear();
+    editorCapture.getJSON.mockReset().mockReturnValue({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+    editorCapture.editor!.isDestroyed = false;
     mockIpc.ai.getNotes.mockReset();
     mockIpc.ai.generate.mockReset();
     mockIpc.ai.saveNotes.mockReset();
@@ -93,6 +107,9 @@ describe("NotesPanel", () => {
     mockIpc.ai.getNotes.mockResolvedValue(
       JSON.stringify({ type: "doc", content: [{ type: "paragraph" }] }),
     );
+    mockIpc.ai.generate.mockResolvedValue(undefined);
+    mockIpc.ai.saveNotes.mockResolvedValue(undefined);
+    confirmMock.mockReset().mockResolvedValue(true);
     useTimestampPrefs.setState({ showTimestamps: true });
   });
 
@@ -303,6 +320,83 @@ describe("NotesPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /重试/ }));
 
     expect(await screen.findByText("笔记正文")).toBeInTheDocument();
+  });
+
+  it("exports the editor snapshot visible at click time", async () => {
+    editorCapture.getJSON.mockReturnValue({
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 1 },
+          content: [{ type: "text", text: "当前笔记" }],
+        },
+      ],
+    });
+    mockIpc.export.notes.mockResolvedValue("/tmp/notes.md");
+    renderNotesPanel("video-export", "export-current");
+    await screen.findByText("笔记正文");
+
+    fireEvent.click(screen.getByRole("button", { name: "导出" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Markdown" }));
+
+    await waitFor(() =>
+      expect(mockIpc.export.notes).toHaveBeenCalledWith(
+        "video-export",
+        "# 当前笔记",
+      ),
+    );
+  });
+
+  it("hides export while loading existing notes fails", async () => {
+    mockIpc.ai.getNotes.mockRejectedValue(new Error("notes load failed"));
+    renderNotesPanel("video-export-error", "export-error");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("notes load failed");
+    expect(screen.queryByRole("button", { name: "导出" })).not.toBeInTheDocument();
+  });
+
+  it("asks before replacing existing notes and leaves them untouched when cancelled", async () => {
+    confirmMock.mockResolvedValue(false);
+    renderNotesPanel("video-confirm-cancel", "confirm-cancel");
+    await screen.findByText("笔记正文");
+
+    fireEvent.click(screen.getByRole("button", { name: "重新生成" }));
+
+    await waitFor(() =>
+      expect(confirmMock).toHaveBeenCalledWith(
+        expect.stringContaining("永久替换当前笔记"),
+        expect.objectContaining({
+          title: "替换当前笔记？",
+          okLabel: "替换并重新生成",
+        }),
+      ),
+    );
+    expect(mockIpc.ai.generate).not.toHaveBeenCalled();
+    expect(mockIpc.ai.saveNotes).not.toHaveBeenCalled();
+  });
+
+  it("flushes a pending edit before confirmed regeneration", async () => {
+    renderNotesPanel("video-confirm-save", "confirm-save");
+    await screen.findByText("笔记正文");
+    act(() => {
+      editorCapture.onUpdate?.({ editor: editorCapture.editor });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "重新生成" }));
+
+    await waitFor(() =>
+      expect(mockIpc.ai.saveNotes).toHaveBeenCalledWith(
+        "video-confirm-save",
+        expect.any(String),
+      ),
+    );
+    await waitFor(() =>
+      expect(mockIpc.ai.generate).toHaveBeenCalledWith("video-confirm-save", "notes"),
+    );
+    expect(mockIpc.ai.saveNotes.mock.invocationCallOrder[0]).toBeLessThan(
+      mockIpc.ai.generate.mock.invocationCallOrder[0],
+    );
   });
 
   it("clears the editor when switching to a video that has no notes yet", async () => {

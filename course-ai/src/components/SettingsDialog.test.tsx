@@ -1,5 +1,5 @@
 import "@/i18n";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsPanel } from "./SettingsDialog";
 
@@ -33,6 +33,10 @@ const mockPlatform = vi.hoisted(() => ({
   isMobile: vi.fn(() => false),
   isTablet: vi.fn(() => false),
 }));
+const llmActionsMock = vi.hoisted(() => ({
+  save: vi.fn(),
+  discard: vi.fn(),
+}));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@/lib/mobileFiles", () => ({
@@ -46,7 +50,26 @@ vi.mock("./WhisperModelsPanel", () => ({
   WhisperModelsPanel: () => <div>Whisper 下载</div>,
 }));
 vi.mock("./LlmSettingsPanel", () => ({
-  LlmSettingsPanel: () => <div>LLM 配置</div>,
+  LlmSettingsPanel: ({
+    onDirtyChange,
+    onRegisterActions,
+  }: {
+    onDirtyChange?: (dirty: boolean) => void;
+    onRegisterActions?: (actions: {
+      save: () => Promise<boolean>;
+      discard: () => void;
+    }) => void;
+  }) => {
+    onRegisterActions?.(llmActionsMock);
+    return (
+      <div>
+        LLM 配置
+        <button type="button" onClick={() => onDirtyChange?.(true)}>
+          模拟修改 LLM
+        </button>
+      </div>
+    );
+  },
 }));
 
 describe("SettingsPanel", () => {
@@ -67,6 +90,8 @@ describe("SettingsPanel", () => {
     mockIpc.notify.mockReset().mockResolvedValue(undefined);
     saveFileMock.mockReset().mockResolvedValue("/tmp/CoursePilot-backup.db");
     shareFileMock.mockReset().mockResolvedValue(undefined);
+    llmActionsMock.save.mockReset().mockResolvedValue(true);
+    llmActionsMock.discard.mockReset();
     localStorage.clear();
   });
 
@@ -208,6 +233,30 @@ describe("SettingsPanel", () => {
     expect(await screen.findByText(/设置保存失败/)).toBeInTheDocument();
   });
 
+  it("does not let a different setting's success hide an earlier field failure", async () => {
+    let rejectLanguage!: (error: unknown) => void;
+    const languageWrite = new Promise<void>((_resolve, reject) => {
+      rejectLanguage = reject;
+    });
+    mockIpc.settings.set.mockImplementation((key: string) =>
+      key === "asr_language" ? languageWrite : Promise.resolve(),
+    );
+    render(<SettingsPanel onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "语音识别" }));
+    fireEvent.change(await screen.findByLabelText("识别语言"), {
+      target: { value: "en" },
+    });
+    fireEvent.click(screen.getByRole("switch", { name: "导入字幕后用 AI 纠错" }));
+    await waitFor(() =>
+      expect(mockIpc.settings.set).toHaveBeenCalledWith("subtitle_autocorrect", "false"),
+    );
+
+    act(() => rejectLanguage(new Error("language write failed")));
+
+    expect(await screen.findByText(/设置保存失败.*language write failed/)).toBeInTheDocument();
+  });
+
   it("surfaces initialization failures instead of leaving an unhandled rejection", async () => {
     mockIpc.settings.get.mockImplementation(async (key: string) => {
       if (key === "asr_language") throw new Error("database unavailable");
@@ -308,7 +357,7 @@ describe("SettingsPanel", () => {
     expect(localStorage.getItem("course-ai-custom-accent")).toBe("#123456");
   });
 
-  it("uses the tablet category sidebar on iPad with native mobile backends", async () => {
+  it("uses compact drill-down on iPad Split View while keeping native mobile backends", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("medium");
     mockPlatform.isMobile.mockReturnValue(true);
     mockPlatform.isTablet.mockReturnValue(true);
@@ -320,7 +369,7 @@ describe("SettingsPanel", () => {
     render(<SettingsPanel onClose={() => undefined} />);
 
     expect(await screen.findByRole("navigation", { name: "设置分类" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "外观", level: 2 })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "外观", level: 2 })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "语音识别" }));
 
     const backend = await screen.findByLabelText("识别后端");
@@ -329,8 +378,101 @@ describe("SettingsPanel", () => {
     expect(screen.getByRole("option", { name: "火山录音文件识别" })).toBeInTheDocument();
     expect(screen.getByLabelText("App ID")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "课件 / OCR" }));
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+    fireEvent.click(await screen.findByRole("button", { name: "课件 / OCR" }));
     expect(await screen.findByLabelText("OCR 引擎")).toHaveValue("local");
     expect(screen.getByRole("option", { name: "本地 OCR（离线）" })).toBeInTheDocument();
+  });
+
+  it("uses registered system back to leave compact detail before closing settings", async () => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("medium");
+    const onClose = vi.fn();
+    let requestBack: (() => void) | null = null;
+
+    render(
+      <SettingsPanel
+        onClose={onClose}
+        onRegisterBackRequest={(request) => {
+          requestBack = request;
+        }}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "语音识别" }));
+    expect(await screen.findByLabelText("识别后端")).toBeInTheDocument();
+
+    act(() => requestBack?.());
+
+    expect(await screen.findByRole("navigation", { name: "设置分类" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("识别后端")).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    act(() => requestBack?.());
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("blocks category changes until dirty LLM edits are saved or discarded", async () => {
+    render(<SettingsPanel onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole("button", { name: "大模型" }));
+    fireEvent.click(screen.getByRole("button", { name: "模拟修改 LLM" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "外观" }));
+
+    expect(
+      screen.getByRole("dialog", { name: "有未保存的 LLM 修改" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("LLM 配置")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "继续编辑" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText("LLM 配置")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "外观" }));
+    fireEvent.click(screen.getByRole("button", { name: "放弃修改" }));
+
+    expect(llmActionsMock.discard).toHaveBeenCalledOnce();
+    expect(screen.getByRole("heading", { name: "外观", level: 2 })).toBeInTheDocument();
+  });
+
+  it("saves dirty LLM edits before closing settings", async () => {
+    const onClose = vi.fn();
+    render(<SettingsPanel onClose={onClose} />);
+    fireEvent.click(await screen.findByRole("button", { name: "大模型" }));
+    fireEvent.click(screen.getByRole("button", { name: "模拟修改 LLM" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "保存并继续" }));
+
+    await waitFor(() => expect(llmActionsMock.save).toHaveBeenCalledOnce());
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  });
+
+  it("routes external navigation through the same dirty LLM guard", async () => {
+    const continuation = vi.fn();
+    let requestExit: ((next: () => void) => void) | null = null;
+    render(
+      <SettingsPanel
+        onClose={() => undefined}
+        onRegisterExitRequest={(request) => {
+          requestExit = request;
+        }}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "大模型" }));
+    fireEvent.click(screen.getByRole("button", { name: "模拟修改 LLM" }));
+
+    act(() => requestExit?.(continuation));
+
+    expect(continuation).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("dialog", { name: "有未保存的 LLM 修改" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "放弃修改" }));
+
+    expect(llmActionsMock.discard).toHaveBeenCalledOnce();
+    expect(continuation).toHaveBeenCalledOnce();
   });
 });

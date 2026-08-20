@@ -6,11 +6,14 @@ use sqlx::FromRow;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
-// 流水线阶段顺序：抽音频 → 语音识别 → 提取课件 → 课件文字 → 章节 → 摘要 → 笔记 → 出题 → 脑图。
+// 流水线阶段顺序：探测黑边 → 抽音频 → 语音识别 → 提取课件 → 课件文字 → 章节 → 摘要 → 笔记 → 出题 → 脑图。
 // 字幕之后的 AI 产物全部由流水线自动生成，用户无需手动点「生成」。
 // 课件两步与音频/识别并行跑（一个啃视频画面、一个啃音轨），但都在 AI 步骤之前收口，
 // 好让总结、出题这些看得到课件页上的板书文字。
+// 「crop」排最前：课件提取要按裁完的几何降采样采样帧，黑边探测必须在它之前收口。
+// 探测平时在导入后由后台任务完成，流水线里这一步通常只是确认缓存已就绪。
 pub const STAGES: &[&str] = &[
+    "crop",
     "audio",
     "asr",
     "slides",
@@ -60,6 +63,25 @@ pub async fn ensure_jobs(db: &Db, video_id: &str) -> AppResult<Vec<Job>> {
     }
     tx.commit().await?;
     Ok(output)
+}
+
+/// 只确保「黑边探测」这一行任务存在（导入后后台探测用）。
+/// 与 [`ensure_jobs`] 不同：不建整条流水线的全部阶段，只建 crop 一个。
+pub async fn ensure_crop_job(db: &Db, video_id: &str) -> AppResult<()> {
+    let id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO processing_jobs(id,video_id,stage,status,progress)
+         VALUES (?,?,?,?,?)
+         ON CONFLICT(video_id,stage) DO NOTHING",
+    )
+    .bind(&id)
+    .bind(video_id)
+    .bind("crop")
+    .bind("pending")
+    .bind(0.0)
+    .execute(&db.pool)
+    .await?;
+    Ok(())
 }
 
 pub async fn start(db: &Db, job_id: &str) -> AppResult<()> {
@@ -235,6 +257,32 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(row_count.0, STAGES.len() as i64);
+    }
+
+    #[tokio::test]
+    async fn ensure_crop_job_creates_only_the_crop_stage() {
+        // 导入后后台探测只建 crop 一行，不提前把整条流水线的阶段都排上。
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let video_path = dir.path().join("v.mp4");
+        std::fs::write(&video_path, b"x").unwrap();
+        let video = add_local_video(&db, &course.id, video_path, None)
+            .await
+            .unwrap();
+
+        ensure_crop_job(&db, &video.id).await.unwrap();
+        let jobs = list_for_video(&db, &video.id).await.unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].stage, "crop");
+
+        // 幂等：再调一次不重复建行。
+        ensure_crop_job(&db, &video.id).await.unwrap();
+        assert_eq!(list_for_video(&db, &video.id).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

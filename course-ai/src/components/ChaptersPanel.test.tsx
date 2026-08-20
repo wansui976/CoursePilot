@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChaptersPanel } from "./ChaptersPanel";
 
@@ -74,5 +74,23 @@ describe("ChaptersPanel", () => {
     await waitFor(() => {
       expect(player.requestSeek).toHaveBeenCalledWith(5000);
     });
+  });
+
+  it("shows a retryable read error instead of the empty state or generation entry", async () => {
+    mockIpc.ai.getChapters
+      .mockRejectedValueOnce(new Error("章节读取失败"))
+      .mockResolvedValueOnce([]);
+
+    renderChaptersPanel();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("章节读取失败");
+    expect(screen.queryByText(/还没有章节/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "生成" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+
+    await waitFor(() => expect(mockIpc.ai.getChapters).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/还没有章节/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "生成" })).toBeInTheDocument();
   });
 });

@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, StrictMode, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import i18n from "@/i18n";
 import { useSilenceSkip } from "./useSilenceSkip";
 import { silenceSkipQueryKey } from "./silenceSkip";
 
@@ -34,8 +35,9 @@ function fakeVideo(seconds: number) {
 }
 
 describe("useSilenceSkip", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     localStorage.clear();
+    await i18n.changeLanguage("zh-CN");
     mockIsMobile.mockReturnValue(false);
     mockIpc.videos.skips.mockReset().mockResolvedValue([
       { start_ms: 10_000, end_ms: 20_000 },

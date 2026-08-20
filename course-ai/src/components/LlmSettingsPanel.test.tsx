@@ -1,8 +1,11 @@
 import "@/i18n";
 import "@testing-library/jest-dom/vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { LlmSettingsPanel } from "./LlmSettingsPanel";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  LlmSettingsPanel,
+  type LlmSettingsActions,
+} from "./LlmSettingsPanel";
 
 const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
@@ -106,5 +109,43 @@ describe("LlmSettingsPanel", () => {
     render(<LlmSettingsPanel />);
     expect(await screen.findByLabelText("配置名称")).toHaveValue(profile.name);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("tracks unsaved edits and keeps the saved feedback visible", async () => {
+    const onDirtyChange = vi.fn();
+    render(<LlmSettingsPanel onDirtyChange={onDirtyChange} />);
+    const name = await screen.findByLabelText("配置名称");
+
+    fireEvent.change(name, { target: { value: "修改后的配置" } });
+
+    expect(await screen.findByText("未保存")).toBeInTheDocument();
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true));
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(mockIpc.ai.saveProfiles).toHaveBeenCalledOnce());
+    expect(await screen.findByText("已保存")).toBeInTheDocument();
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
+  });
+
+  it("exposes a discard action that restores the persisted draft", async () => {
+    let actions: LlmSettingsActions | null = null;
+    const onDirtyChange = vi.fn();
+    render(
+      <LlmSettingsPanel
+        onDirtyChange={onDirtyChange}
+        onRegisterActions={(next) => {
+          actions = next;
+        }}
+      />,
+    );
+    const name = await screen.findByLabelText("配置名称");
+    fireEvent.change(name, { target: { value: "不保存的修改" } });
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true));
+
+    act(() => actions?.discard());
+
+    expect(name).toHaveValue(profile.name);
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
   });
 });

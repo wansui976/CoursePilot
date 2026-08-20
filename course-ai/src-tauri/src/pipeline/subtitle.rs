@@ -109,7 +109,8 @@ pub async fn ingest_subtitle(
         .collect();
     let count = store_segments_with_backup(db, video_id, "bilibili_sub", &segs).await?;
     if let Some((provider, model)) = correct {
-        transcript_correction::autocorrect_transcript(db, &provider, &model, video_id).await?;
+        transcript_correction::autocorrect_transcript(db, &provider, &model, video_id, None)
+            .await?;
     }
     Ok(count)
 }

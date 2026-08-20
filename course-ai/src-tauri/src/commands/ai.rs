@@ -197,12 +197,22 @@ pub async fn cmd_stale_ai_artifacts(
 
 // ---------- generation ----------
 
+/// 自动流水线解析后的 Provider，同时保留路由命中的 Profile 身份。
+///
+/// 手动生成只需要 provider/model；自动流水线还要知道账号级错误属于哪个 Profile，
+/// 才不会把路由到其他账号的任务一起取消。
+pub struct ResolvedProvider {
+    pub provider: crate::llm::Provider,
+    pub model: String,
+    pub profile_id: String,
+}
+
 /// 解析某个任务要用的 LLM Provider；未配置 Profile 或 API Key 时返回 None，
 /// 供自动流水线「有就跑、没有就跳过」地复用，而不报致命错误。
-pub async fn provider_for_db(
+pub async fn resolved_provider_for_db(
     db: &crate::db::Db,
     task: AiTask,
-) -> AppResult<Option<(crate::llm::Provider, String)>> {
+) -> AppResult<Option<ResolvedProvider>> {
     let profiles = parse_profiles(get_setting(db, "llm_profiles").await?.as_deref())?;
     let routing = parse_routing(get_setting(db, "llm_task_routing").await?.as_deref())?;
     let Some(profile) = resolve_profile(&profiles, &routing, task).cloned() else {
@@ -211,7 +221,20 @@ pub async fn provider_for_db(
     let Some(key) = keychain::get_api_key(db, &profile.id).await? else {
         return Ok(None);
     };
-    Ok(Some((build_provider(&profile, key), profile.model.clone())))
+    Ok(Some(ResolvedProvider {
+        provider: build_provider(&profile, key),
+        model: profile.model,
+        profile_id: profile.id,
+    }))
+}
+
+pub async fn provider_for_db(
+    db: &crate::db::Db,
+    task: AiTask,
+) -> AppResult<Option<(crate::llm::Provider, String)>> {
+    Ok(resolved_provider_for_db(db, task)
+        .await?
+        .map(|resolved| (resolved.provider, resolved.model)))
 }
 
 async fn provider_for(state: &AppState, task: AiTask) -> AppResult<(crate::llm::Provider, String)> {
@@ -238,12 +261,12 @@ pub async fn cmd_generate_ai(
     let db = state.db.clone();
     match ai_task {
         AiTask::Chapters => {
-            ai::generate_chapters(&db, &provider, &model, &video_id).await?;
+            ai::generate_chapters(&db, &provider, &model, &video_id, None).await?;
         }
-        AiTask::Notes => ai::generate_notes(&db, &provider, &model, &video_id).await?,
-        AiTask::Summary => ai::generate_summary(&db, &provider, &model, &video_id).await?,
-        AiTask::Quiz => ai::generate_quiz(&db, &provider, &model, &video_id).await?,
-        AiTask::Mindmap => ai::generate_mindmap(&db, &provider, &model, &video_id).await?,
+        AiTask::Notes => ai::generate_notes(&db, &provider, &model, &video_id, None).await?,
+        AiTask::Summary => ai::generate_summary(&db, &provider, &model, &video_id, None).await?,
+        AiTask::Quiz => ai::generate_quiz(&db, &provider, &model, &video_id, None).await?,
+        AiTask::Mindmap => ai::generate_mindmap(&db, &provider, &model, &video_id, None).await?,
         AiTask::Rag => {
             return Err(AppError::Other(
                 "RAG 不通过 cmd_generate_ai 触发；用 cmd_build_embeddings / cmd_rag_query".into(),

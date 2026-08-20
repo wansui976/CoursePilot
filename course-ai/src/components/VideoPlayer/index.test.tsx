@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VideoPlayer } from ".";
+import i18n from "@/i18n";
 import { ipc } from "@/lib/ipc";
 import { usePlayer } from "@/stores/player";
 
@@ -10,6 +11,14 @@ const setFullscreen = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/ipc", () => ({
   ipc: {
     transcripts: { list: vi.fn().mockResolvedValue([]) },
+    videos: {
+      // 已探测过、无黑边。
+      ensureCrop: vi.fn().mockResolvedValue({
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+        detecting: false,
+      }),
+      cancelCropDetect: vi.fn().mockResolvedValue(undefined),
+    },
   },
 }));
 
@@ -25,7 +34,10 @@ vi.mock("@/lib/platform", () => ({
   isDesktop: () => false,
 }));
 
-function renderPlayer(immersive = true) {
+function renderPlayer(
+  immersive = true,
+  onFullscreenChange?: (fullscreen: boolean) => void,
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -35,12 +47,14 @@ function renderPlayer(immersive = true) {
         src="http://127.0.0.1:1234/m/abc"
         videoId="video-1"
         immersive={immersive}
+        onFullscreenChange={onFullscreenChange}
       />
     </QueryClientProvider>,
   );
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await i18n.changeLanguage("zh-CN");
   localStorage.removeItem("course-ai-playback-rate");
 });
 
@@ -53,8 +67,27 @@ describe("VideoPlayer iOS gestures", () => {
     expect(video).toHaveClass("bg-[var(--surface-stage)]");
     expect(video).not.toHaveClass("bg-black");
     expect(video).toHaveAttribute("data-theme-heavy");
-    expect(video.parentElement).toHaveClass("absolute", "inset-0", "overflow-hidden");
+    // 去黑边会放大并偏移 video，所以它套在 stageBox 里（relative overflow-hidden 裁剪负偏移），
+    // 而不是原先那个 absolute inset-0 的满铺容器。
+    expect(video.parentElement).toHaveClass("relative", "overflow-hidden");
+    expect(video.parentElement).not.toHaveClass("absolute");
     expect(video.parentElement).not.toHaveClass("rounded-xl");
+  });
+
+  it("keeps hidden desktop controls out of tab order and reveals them from the stage", () => {
+    renderPlayer(false);
+
+    const stage = screen.getByLabelText("课程视频舞台");
+    const controls = screen.getByLabelText("视频播放控制栏", { selector: "div" });
+    expect(stage).toHaveAttribute("tabindex", "0");
+    expect(controls).toHaveAttribute("aria-hidden", "true");
+    expect(controls).toHaveAttribute("inert");
+
+    fireEvent.focus(stage);
+
+    expect(controls).toHaveAttribute("aria-hidden", "false");
+    expect(controls).not.toHaveAttribute("inert");
+    expect(controls).toHaveClass("opacity-100");
   });
 
   it("restores and persists the selected base playback rate", () => {
@@ -118,6 +151,21 @@ describe("VideoPlayer iOS gestures", () => {
     });
 
     await waitFor(() => expect(setFullscreen).toHaveBeenCalledWith(true));
+  });
+
+  it("reports fullscreen changes and exits fullscreen on Escape", async () => {
+    const onFullscreenChange = vi.fn();
+    setFullscreen.mockClear();
+    setFullscreen.mockResolvedValue(undefined);
+    renderPlayer(true, onFullscreenChange);
+
+    fireEvent.click(screen.getByRole("button", { name: "全屏" }));
+    await waitFor(() => expect(onFullscreenChange).toHaveBeenLastCalledWith(true));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(setFullscreen).toHaveBeenLastCalledWith(false));
+    await waitFor(() => expect(onFullscreenChange).toHaveBeenLastCalledWith(false));
   });
 
   it("seeks forward on right swipe", () => {
@@ -261,7 +309,7 @@ describe("VideoPlayer iOS gestures", () => {
       clientY: 280,
     });
 
-    expect(screen.getByLabelText("亮度浮层")).toBeInTheDocument();
+    expect(screen.getByLabelText("播放手势提示")).toBeInTheDocument();
     expect(screen.getByText(/亮度/)).toBeInTheDocument();
     expect(video).toHaveStyle({ filter: "brightness(0.8)" });
   });
@@ -283,7 +331,7 @@ describe("VideoPlayer iOS gestures", () => {
       clientY: 120,
     });
 
-    expect(screen.getByLabelText("亮度浮层")).toBeInTheDocument();
+    expect(screen.getByLabelText("播放手势提示")).toBeInTheDocument();
     expect(screen.getByText(/音量/)).toBeInTheDocument();
   });
 

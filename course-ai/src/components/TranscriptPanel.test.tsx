@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptPanel } from "./TranscriptPanel";
 import { useInlineAsk } from "@/stores/inlineAsk";
 import { usePlayer } from "@/stores/player";
@@ -59,6 +59,10 @@ function renderTranscriptPanel(instanceKey = "one") {
 }
 
 describe("TranscriptPanel", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     localStorage.clear();
     mockIpc.transcripts.list.mockReset();
@@ -233,6 +237,40 @@ describe("TranscriptPanel", () => {
     );
   });
 
+  it("recenters without animation when reduced motion is requested", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(prefers-reduced-motion: reduce)",
+    }));
+    renderTranscriptPanel("reduced-motion");
+    await screen.findByText("00:01");
+
+    const scroller = screen.getByLabelText("文稿内容滚动区");
+    const row = scroller.querySelector<HTMLElement>('[data-row="20"]');
+    expect(row).not.toBeNull();
+    Object.defineProperty(scroller, "clientHeight", {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(row, "clientHeight", {
+      configurable: true,
+      value: 30,
+    });
+    scroller.scrollTop = 120;
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
+    vi.spyOn(row as HTMLElement, "getBoundingClientRect").mockReturnValue({ top: 300 } as DOMRect);
+    const scrollTo = vi.fn();
+    Object.defineProperty(scroller, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+    });
+
+    act(() => usePlayer.getState().setCurrentMs(21_500));
+
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({ top: 135, behavior: "auto" }),
+    );
+  });
+
   it("surfaces an error when saving a transcript edit fails", async () => {
     mockIpc.transcripts.update.mockRejectedValue(new Error("db locked"));
     renderTranscriptPanel();
@@ -249,6 +287,26 @@ describe("TranscriptPanel", () => {
     // 失败不能无声无息：编辑框内给出错误提示，编辑内容保留。
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.getByLabelText("编辑文稿")).toHaveValue("改过的句子");
+  });
+
+  it("treats an unsaved transcript edit as a cancellable system-back layer", async () => {
+    renderTranscriptPanel("edit-back");
+    await screen.findByText("00:01");
+
+    const trigger = screen.getAllByRole("button", { name: "编辑这句文稿" })[0];
+    fireEvent.click(trigger);
+    const input = screen.getByLabelText("编辑文稿");
+    fireEvent.change(input, { target: { value: "尚未保存的改动" } });
+    const layer = input.closest<HTMLElement>("[data-system-back-layer]");
+    expect(layer).not.toBeNull();
+
+    fireEvent.keyDown(layer!, { key: "Escape" });
+
+    expect(screen.queryByLabelText("编辑文稿")).not.toBeInTheDocument();
+    expect(mockIpc.transcripts.update).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "编辑这句文稿" })[0]).toHaveFocus(),
+    );
   });
 
   it("tags the scroller as theme-heavy so theme switches skip the fade", async () => {
@@ -306,6 +364,19 @@ describe("TranscriptPanel", () => {
     ).toBe(300);
   });
 
+  it("does not immediately replace a restored scroll position with active-row centering", async () => {
+    localStorage.setItem(
+      "course-ai-resume:video-1",
+      JSON.stringify({ transcriptScrollTop: 300 }),
+    );
+    usePlayer.setState({ currentMs: 21_500 });
+
+    renderTranscriptPanel("restore-before-follow");
+
+    const scroller = await screen.findByLabelText("文稿内容滚动区");
+    await waitFor(() => expect(scroller.scrollTop).toBe(300));
+  });
+
   it("migrates the legacy transcriptTopIndex and clears it after restoring", async () => {
     localStorage.setItem(
       "course-ai-resume:video-1",
@@ -322,5 +393,59 @@ describe("TranscriptPanel", () => {
       expect(saved.transcriptTopIndex).toBe(0);
       expect(saved.transcriptScrollTop).toBeGreaterThanOrEqual(0);
     });
+  });
+
+  it("toggles follow playback explicitly and reflects the state", async () => {
+    renderTranscriptPanel();
+    await screen.findByText("第 1 句文稿内容");
+
+    const toggle = screen.getByRole("button", { name: /跟随/ });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("highlights and steps through search matches in the transcript", async () => {
+    renderTranscriptPanel();
+    await screen.findByText("第 1 句文稿内容");
+
+    fireEvent.click(screen.getByRole("button", { name: "搜索文稿" }));
+    const input = screen.getByRole("searchbox", { name: "搜索文稿" });
+    expect(input).toHaveClass("focus:border-[var(--focus-ring)]");
+    // 「文稿内容」命中全部 60 段：能验证跨行步进与取模循环。
+    fireEvent.change(input, { target: { value: "文稿内容" } });
+
+    // 命中行高亮成 mark，且计数从 1/… 开始。
+    await waitFor(() => {
+      expect(screen.getAllByText("文稿内容", { selector: "mark" }).length).toBeGreaterThan(0);
+      expect(screen.getByText(/1\/\d+/)).toBeInTheDocument();
+    });
+
+    // 下一处 → 计数前进。
+    fireEvent.click(screen.getByRole("button", { name: "下一处匹配" }));
+    expect(screen.getByText(/2\/\d+/)).toBeInTheDocument();
+
+    // 上一处 → 退回。
+    fireEvent.click(screen.getByRole("button", { name: "上一处匹配" }));
+    expect(screen.getByText(/1\/\d+/)).toBeInTheDocument();
+  });
+
+  it("marks transcript search as a system-back layer and restores trigger focus on Escape", async () => {
+    renderTranscriptPanel();
+    await screen.findByText("第 1 句文稿内容");
+
+    const trigger = screen.getByRole("button", { name: "搜索文稿" });
+    fireEvent.click(trigger);
+    const input = screen.getByRole("searchbox", { name: "搜索文稿" });
+    expect(input).toHaveFocus();
+    expect(input.closest("[data-system-back-layer]")).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(screen.queryByRole("searchbox", { name: "搜索文稿" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 });

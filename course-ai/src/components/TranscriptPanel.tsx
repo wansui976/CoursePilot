@@ -1,13 +1,21 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { invalidateStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Captions, Check, X } from "lucide-react";
+import {
+  Captions,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Locate,
+  LocateFixed,
+  Search,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PanelEmptyState } from "@/components/ui/empty-state";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { TextSkeleton } from "@/components/ui/skeleton";
-import { coarsePointer } from "@/lib/useContainerWidth";
 import { ExportMenu } from "./ExportMenu";
 import { MathText } from "./MathText";
 import { ipc } from "@/lib/ipc";
@@ -22,6 +30,44 @@ import { findActiveSegmentIndex } from "@/lib/transcript";
 // 手动滚动后暂停「跟随播放自动居中」的时长；停手超过该窗口才恢复跟随。
 const FOLLOW_PAUSE_MS = 4000;
 
+// 搜索高亮：把命中的子串包成 <mark>（q 已小写，按下标切原文保留大小写）。
+// 含 $$ 数学公式的行不切——拆散后 MathText 就解析不了公式了，宁可不高亮。
+function highlightSegment(text: string, q: string): ReactNode {
+  const lowered = text.toLocaleLowerCase();
+  if (!q || !lowered.includes(q) || text.includes("$$")) {
+    return <MathText text={text} />;
+  }
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  let at = lowered.indexOf(q);
+  let key = 0;
+  while (at !== -1) {
+    if (at > cursor) parts.push(text.slice(cursor, at));
+    parts.push(
+      <mark key={key++} className="rounded bg-[var(--accent-weak-2)] text-[var(--accent-text)]">
+        {text.slice(at, at + q.length)}
+      </mark>,
+    );
+    cursor = at + q.length;
+    at = lowered.indexOf(q, cursor);
+  }
+  parts.push(text.slice(cursor));
+  return <>{parts}</>;
+}
+
+// 文稿头部的「播放位置」：只让这个小组件订阅进度（每秒几次重渲染），不波及文稿主体。
+function TranscriptPosition() {
+  const currentMs = usePlayer((s) => s.currentMs);
+  const durationMs = usePlayer((s) => s.durationMs);
+  if (durationMs <= 0) return null;
+  const percent = Math.min(100, Math.max(0, Math.round((currentMs / durationMs) * 100)));
+  return (
+    <span className="tabular-nums">
+      {formatMs(currentMs)} / {formatMs(durationMs)} · {percent}%
+    </span>
+  );
+}
+
 // content-visibility 按「块」而非按行：每块行数。块少两个数量级，滚动时浏览器的可见性
 // 簿记开销小得多；快滑时整块（约一屏半）一次性渲染进来，而不是一行行往外挤，基本不见空白。
 const CHUNK_SIZE = 30;
@@ -34,12 +80,18 @@ const TranscriptRow = memo(function TranscriptRow({
   index,
   segment,
   active,
+  highlight,
+  currentMatch,
   onSeek,
   onEdit,
 }: {
   index: number;
   segment: TranscriptSegment;
   active: boolean;
+  /** 搜索词（小写）。为空不做高亮。 */
+  highlight: string;
+  /** 当前命中的搜索匹配行（跳转目标）。 */
+  currentMatch: boolean;
   onSeek: (ms: number) => void;
   onEdit: (id: number, text: string) => void;
 }) {
@@ -49,7 +101,11 @@ const TranscriptRow = memo(function TranscriptRow({
       <div
         data-row={index}
         className={`group relative rounded ${
-          active ? "bg-primary/20" : "hover:bg-[var(--surface-card-hover)]"
+          active
+            ? "bg-primary/20"
+            : currentMatch
+              ? "bg-[var(--accent-weak)]"
+              : "hover:bg-[var(--surface-card-hover)]"
         }`}
       >
         {/* 文字占满整行宽度：纠错按钮改为绝对定位在右下角，不再在行内流式占位。 */}
@@ -65,11 +121,12 @@ const TranscriptRow = memo(function TranscriptRow({
           <span className="mr-2 text-xs text-[var(--text-muted)]">
             {formatMs(segment.start_ms)}
           </span>
-          <span>
+          {highlight ? highlightSegment(segment.text, highlight) : (
             <MathText text={segment.text} />
-          </span>
+          )}
         </button>
         <button
+          data-transcript-edit-id={segment.id}
           aria-label={t("transcript.editButton")}
           title={t("transcript.editButtonTitle")}
           onClick={() => onEdit(segment.id, segment.text)}
@@ -113,6 +170,20 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   const [clozeAdded, setClozeAdded] = useState(false);
   // 跟随播放的活动行下标。只在「跨段」时更新（见下方订阅），不随每个进度 tick 重渲染。
   const [activeRowIndex, setActiveRowIndex] = useState(-1);
+  // 「跟随播放」显式开关：默认开。手滚暂停跟随的隐式行为保留，开关是显式覆盖——
+  // 想钉住某处看别处时不被打断，而不是等 4 秒超时。
+  const [followEnabled, setFollowEnabled] = useState(true);
+  // 文稿内搜索：open 后出现搜索行；命中高亮 + 上一处/下一处跳转。
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [matchIndex, setMatchIndex] = useState(0);
+  const searchTriggerRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const restoreSearchFocusRef = useRef(false);
+  const editOriginIdRef = useRef<number | null>(null);
+  const restoreEditFocusRef = useRef(false);
+  // 高亮词用 deferred：打字时不逐键重渲染整表（上千行），松手后一次收敛。
+  const deferredHighlight = useDeferredValue(searchQuery.trim().toLocaleLowerCase());
 
   // 仅渲染非空分段：空段是纠错清空的语气词，原本也不显示（且无法被点开编辑）。
   const rows = useMemo(
@@ -141,12 +212,28 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
       setEditingId(null);
     },
   });
+  const resetUpdateRef = useRef(update.reset);
+  resetUpdateRef.current = update.reset;
 
   // memo 化行的稳定回调：身份不变，非活动行才不会因父组件重渲染而跟着重渲染。
   const startEdit = useCallback((id: number, text: string) => {
+    editOriginIdRef.current = id;
+    restoreEditFocusRef.current = false;
+    resetUpdateRef.current();
     setEditingId(id);
     setDraft(text);
   }, []);
+  const cancelEdit = useCallback(() => {
+    restoreEditFocusRef.current = true;
+    setEditingId(null);
+  }, []);
+  useEffect(() => {
+    if (editingId != null || !restoreEditFocusRef.current) return;
+    restoreEditFocusRef.current = false;
+    const id = editOriginIdRef.current;
+    if (id == null) return;
+    document.querySelector<HTMLButtonElement>(`[data-transcript-edit-id="${id}"]`)?.focus();
+  }, [editingId]);
   function save() {
     if (editingId == null) return;
     update.mutate({ id: editingId, text: draft });
@@ -196,24 +283,84 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     };
   }, [hasRows]);
 
-  // 活动行变化时将它放回视区中线（编辑时不打扰用户）。刚手动滚过则暂停；除此之外
-  // 每次换句都重新居中，不等活动行走到视区底部。原生 scrollTo 不做量高回改，故不抽搐。
+  // 活动行居中（原生 scrollTo 不做量高回改，故不抽搐）。被跟随播放与搜索跳转共用。
+  const centerOnRow = useCallback(
+    (rowIndex: number) => {
+      const scroller = scrollerRef.current;
+      const row = scroller?.querySelector<HTMLElement>(
+        `[data-row="${rowIndex}"]`,
+      );
+      if (!scroller || !row) return;
+      const sRect = scroller.getBoundingClientRect();
+      const rRect = row.getBoundingClientRect();
+      const target =
+        scroller.scrollTop +
+        (rRect.top - sRect.top) -
+        (scroller.clientHeight - row.clientHeight) / 2;
+      const reduceMotion =
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const top = Math.max(0, target);
+      if (typeof scroller.scrollTo === "function") {
+        scroller.scrollTo({
+          top,
+          behavior: reduceMotion ? "auto" : "smooth",
+        });
+      } else {
+        scroller.scrollTop = top;
+      }
+    },
+    [],
+  );
+
+  // 跟随播放：活动行变化时放回视区中线（编辑时不打扰用户）。刚手动滚过则暂停；
+  // 关闭开关后完全不跟随——手滚暂停的隐式行为叠加在显式开关之上。
   useEffect(() => {
-    if (activeRowIndex < 0 || editingId != null) return;
+    if (!followEnabled || activeRowIndex < 0 || editingId != null) return;
     if (Date.now() - userScrollRef.current < FOLLOW_PAUSE_MS) return;
-    const scroller = scrollerRef.current;
-    const row = scroller?.querySelector<HTMLElement>(
-      `[data-row="${activeRowIndex}"]`,
-    );
-    if (!scroller || !row) return;
-    const sRect = scroller.getBoundingClientRect();
-    const rRect = row.getBoundingClientRect();
-    const target =
-      scroller.scrollTop +
-      (rRect.top - sRect.top) -
-      (scroller.clientHeight - row.clientHeight) / 2;
-    scroller.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
-  }, [activeRowIndex, editingId]);
+    centerOnRow(activeRowIndex);
+  }, [followEnabled, activeRowIndex, editingId, centerOnRow]);
+
+  // 重新开启跟随：立即回到当前句，而不是等下一次换句才动。
+  function setFollow(next: boolean) {
+    setFollowEnabled(next);
+    if (next) {
+      userScrollRef.current = 0;
+      requestAnimationFrame(() => centerOnRow(activeRowIndex));
+    }
+  }
+
+  // 搜索命中行（在 rows 里的下标）；打开搜索后打开自动聚焦。
+  const searchMatches = useMemo(() => {
+    if (!deferredHighlight) return [];
+    return rows.reduce<number[]>((acc, row, index) => {
+      if (row.text.toLocaleLowerCase().includes(deferredHighlight)) acc.push(index);
+      return acc;
+    }, []);
+  }, [rows, deferredHighlight]);
+  useEffect(() => setMatchIndex(0), [deferredHighlight]);
+  useEffect(() => {
+    if (searchOpen) {
+      searchInputRef.current?.focus();
+      return;
+    }
+    if (!restoreSearchFocusRef.current) return;
+    restoreSearchFocusRef.current = false;
+    searchTriggerRef.current?.focus();
+  }, [searchOpen]);
+
+  const closeSearch = useCallback((clearQuery = false) => {
+    restoreSearchFocusRef.current = true;
+    setSearchOpen(false);
+    if (clearQuery) setSearchQuery("");
+  }, []);
+
+  function jumpToMatch(index: number) {
+    if (searchMatches.length === 0) return;
+    const clamped = (index + searchMatches.length) % searchMatches.length;
+    setMatchIndex(clamped);
+    centerOnRow(searchMatches[clamped]);
+  }
 
   // 滚动位置恢复：每个视频各恢复一次（组件被 TabsPanel 保活，换视频只变 prop 不重挂，
   // 必须按 videoId 重读、重恢复，否则新视频既不恢复位置、又会被写入旧视频的 scrollTop）。
@@ -224,6 +371,9 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   useEffect(() => {
     if (restoredForRef.current === videoId) return;
     const saved = readVideoResumeState(videoId);
+    // 切视频不能继承上一视频的手滚暂停窗口；但恢复了非零位置时，把恢复本身视作
+    // 一次用户定位，避免紧随其后的活动句更新立刻把保存位置抢走。
+    userScrollRef.current = saved.transcriptScrollTop > 0 ? Date.now() : 0;
     // 先记下本视频已存的值：即使字幕还没加载就切走，卸载写入也只会原值写回，不会污染。
     savedScrollTop.current = saved.transcriptScrollTop;
     if (rows.length === 0) return;
@@ -346,18 +496,118 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
 
   return (
     <div className="flex h-full flex-col text-[var(--text-normal)]">
-      <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2 text-xs">
-        <span className="text-[var(--text-faint)]">
-          {coarsePointer() ? t("transcript.editHintTouch") : t("transcript.editHintDesktop")}
-        </span>
-        <div className="ml-auto">
-          <ExportMenu
-            items={[
-              { label: t("transcript.srtExport"), run: () => ipc.export.subtitles(videoId, "srt"), mime: "application/x-subrip", saveAs: "subtitles.srt" },
-              { label: t("transcript.vttExport"), run: () => ipc.export.subtitles(videoId, "vtt"), mime: "text/vtt", saveAs: "subtitles.vtt" },
-            ]}
-          />
+      <div className="flex flex-none flex-col border-b border-[var(--border-subtle)]">
+        <div className="flex items-center gap-2 px-3 py-1.5 text-xs">
+          <button
+            type="button"
+            onClick={() => setFollow(!followEnabled)}
+            aria-pressed={followEnabled}
+            title={followEnabled ? t("transcript.followOff") : t("transcript.followOn")}
+            className={`ca-touch-44 inline-flex items-center gap-1 rounded px-1.5 py-1 font-medium transition-colors ${
+              followEnabled
+                ? "text-[var(--accent-text)]"
+                : "text-[var(--text-muted)] hover:text-[var(--text-normal)]"
+            }`}
+          >
+            {followEnabled ? (
+              <LocateFixed aria-hidden="true" className="h-3.5 w-3.5" />
+            ) : (
+              <Locate aria-hidden="true" className="h-3.5 w-3.5" />
+            )}
+            {t("transcript.follow")}
+          </button>
+          <span className="hidden min-w-0 truncate text-[var(--text-faint)] sm:block">
+            {t("transcript.rowOf", { current: activeRowIndex + 1, total: rows.length })}
+            {" · "}
+            <TranscriptPosition />
+          </span>
+          <div className="ml-auto flex items-center gap-0.5">
+            <button
+              ref={searchTriggerRef}
+              type="button"
+              onClick={() => {
+                if (searchOpen) closeSearch();
+                else setSearchOpen(true);
+              }}
+              aria-pressed={searchOpen}
+              aria-label={searchOpen ? t("transcript.closeSearch") : t("transcript.searchInTranscript")}
+              title={searchOpen ? t("transcript.closeSearch") : t("transcript.searchInTranscript")}
+              className={`ca-touch-44 grid h-8 w-8 place-items-center rounded-md transition-colors ${
+                searchOpen
+                  ? "bg-[var(--accent-weak)] text-[var(--accent-text)]"
+                  : "text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+              }`}
+            >
+              <Search aria-hidden="true" className="h-4 w-4" />
+            </button>
+            <ExportMenu
+              items={[
+                { label: t("transcript.srtExport"), run: () => ipc.export.subtitles(videoId, "srt"), mime: "application/x-subrip", saveAs: "subtitles.srt" },
+                { label: t("transcript.vttExport"), run: () => ipc.export.subtitles(videoId, "vtt"), mime: "text/vtt", saveAs: "subtitles.vtt" },
+              ]}
+            />
+          </div>
         </div>
+        {searchOpen && (
+          <div
+            data-system-back-layer
+            className="flex items-center gap-1.5 border-t border-[var(--border-subtle)] px-3 py-1.5 text-xs"
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              event.stopPropagation();
+              closeSearch();
+            }}
+          >
+            <Search aria-hidden="true" className="h-3.5 w-3.5 flex-none text-[var(--text-faint)]" />
+            <input
+              ref={searchInputRef}
+              type="search"
+              aria-label={t("transcript.searchInTranscript")}
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") jumpToMatch(matchIndex + 1);
+              }}
+              placeholder={t("transcript.searchPlaceholder")}
+              className="min-w-0 flex-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2.5 py-1 text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:border-[var(--focus-ring)] [&::-webkit-search-cancel-button]:appearance-none"
+            />
+            {deferredHighlight && searchMatches.length > 0 && (
+              <span className="flex-none tabular-nums text-[var(--text-faint)]">
+                {t("transcript.searchMatches", {
+                  current: matchIndex + 1,
+                  total: searchMatches.length,
+                })}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => jumpToMatch(matchIndex - 1)}
+              disabled={searchMatches.length === 0}
+              aria-label={t("transcript.previousMatch")}
+              className="ca-touch-44 grid h-8 w-8 place-items-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] disabled:opacity-35"
+            >
+              <ChevronUp aria-hidden="true" className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => jumpToMatch(matchIndex + 1)}
+              disabled={searchMatches.length === 0}
+              aria-label={t("transcript.nextMatch")}
+              className="ca-touch-44 grid h-8 w-8 place-items-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] disabled:opacity-35"
+            >
+              <ChevronDown aria-hidden="true" className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => closeSearch(true)}
+              aria-label={t("transcript.closeSearch")}
+              className="ca-touch-44 grid h-8 w-8 place-items-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+            >
+              <X aria-hidden="true" className="h-4 w-4" />
+            </button>
+          </div>
+        )}
       </div>
       <div
         ref={scrollerRef}
@@ -379,7 +629,17 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
             {chunk.map((segment, i) => {
               const index = chunkIndex * CHUNK_SIZE + i;
               return editingId === segment.id ? (
-            <div key={segment.id} className="px-3 py-0.5">
+            <div
+              key={segment.id}
+              data-system-back-layer
+              className="px-3 py-0.5"
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                event.stopPropagation();
+                cancelEdit();
+              }}
+            >
               <div className="rounded bg-[var(--surface-card)] p-2">
                 <textarea
                   aria-label={t("transcript.editSubtitle")}
@@ -388,7 +648,6 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
-                    if (e.key === "Escape") setEditingId(null);
                   }}
                   className="w-full resize-y rounded border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)] outline-none"
                   rows={2}
@@ -410,7 +669,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setEditingId(null)}
+                    onClick={cancelEdit}
                   >
                     <X className="h-3 w-3" />
                     {t("transcript.cancel")}
@@ -425,6 +684,8 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
               index={index}
               segment={segment}
               active={index === activeRowIndex}
+              highlight={deferredHighlight}
+              currentMatch={searchMatches[matchIndex] === index}
               onSeek={requestSeek}
               onEdit={startEdit}
             />

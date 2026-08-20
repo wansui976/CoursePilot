@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod cloud_sync;
 pub mod commands;
 pub mod db;
@@ -19,7 +20,9 @@ use crate::commands::ai::{
     cmd_get_quiz, cmd_get_summary, cmd_has_api_key, cmd_save_llm_profiles, cmd_save_notes,
     cmd_set_api_key, cmd_stale_ai_artifacts,
 };
+use crate::commands::app::cmd_exit_app;
 use crate::commands::assistant::{cmd_assistant_ask, cmd_cancel_assistant};
+use crate::commands::backup::{cmd_backup_database, cmd_restore_database};
 use crate::commands::clips::{cmd_add_clip, cmd_delete_clip, cmd_list_clips, cmd_update_clip};
 use crate::commands::concepts::{
     cmd_analyze_course_concepts, cmd_cancel_course_analysis, cmd_course_knowledge_chat_stream,
@@ -72,8 +75,8 @@ use crate::db::Db;
 use crate::dev_log::{cmd_clear_dev_logs, cmd_get_dev_logs};
 use crate::jobs::cmd_list_jobs;
 use crate::pipeline::{
-    cmd_cancel_processing, cmd_list_processing_videos, cmd_process_video, cmd_recorrect_transcript,
-    ProcessingTasks,
+    cmd_cancel_processing, cmd_dismiss_processing_video, cmd_list_processing_videos,
+    cmd_process_video, cmd_recorrect_transcript, ProcessingTasks,
 };
 use crate::usage_log::{cmd_clear_llm_usage, cmd_llm_usage};
 use tauri::Manager;
@@ -92,9 +95,28 @@ pub fn run() {
             tauri::async_runtime::block_on(async move {
                 let data_dir = handle.path().app_data_dir().expect("app_data_dir");
                 std::fs::create_dir_all(&data_dir).expect("create app data dir");
-                let db = Db::connect_and_migrate(&data_dir.join("courseai.db"))
+                let db_path = data_dir.join("courseai.db");
+                match crate::backup::apply_pending_restore(&data_dir, &db_path).await {
+                    Ok(true) => tracing::info!("applied pending database restore before opening SQLite"),
+                    Ok(false) => {}
+                    Err(error) => {
+                        // The restore implementation leaves the current database untouched on
+                        // every pre-replacement failure, so startup can safely continue here.
+                        tracing::error!("apply pending database restore failed: {error}")
+                    }
+                }
+                let database_existed = db_path.is_file();
+                let db = Db::connect_and_migrate(&db_path)
                     .await
                     .expect("db init");
+                if database_existed {
+                    match crate::backup::create_startup_snapshot(&db, &data_dir).await {
+                        Ok(path) => tracing::info!(path = %path.display(), "created startup database snapshot"),
+                        Err(error) => {
+                            tracing::warn!("create startup database snapshot failed: {error}")
+                        }
+                    }
+                }
                 if let Err(error) = crate::sync::identity::ensure_sync_identity(&db).await {
                     tracing::warn!("initialize sync identity failed: {error}");
                 }
@@ -139,6 +161,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            cmd_exit_app,
             cmd_create_course,
             cmd_list_courses,
             cmd_delete_course,
@@ -173,6 +196,7 @@ pub fn run() {
             cmd_list_jobs,
             cmd_process_video,
             cmd_cancel_processing,
+            cmd_dismiss_processing_video,
             cmd_list_processing_videos,
             cmd_recorrect_transcript,
             cmd_list_transcripts,
@@ -206,6 +230,8 @@ pub fn run() {
             cmd_export_notes,
             cmd_export_quiz,
             cmd_export_mindmap,
+            cmd_backup_database,
+            cmd_restore_database,
             cmd_rag_query,
             cmd_rag_query_stream,
             cmd_assistant_ask,

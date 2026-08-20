@@ -25,6 +25,7 @@ use crate::commands::courses::AppState;
 use crate::commands::videos::Video;
 use crate::error::{AppError, AppResult};
 use crate::jobs::{self, emit_update, JobEvent};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
@@ -167,6 +168,10 @@ async fn run_all(
             },
         );
     }
+
+    // 黑边探测排最前：课件提取要按裁完的几何降采样采样帧，必须在它之前收口。
+    // 平时导入后的后台任务已写好缓存，这一步通常只是标 done 跳过。
+    run_crop_stage(&app, &db, &video_id, &jobs_list).await;
 
     // 课件提取与语音识别并行：一个啃画面、一个啃音轨，互不抢资源。句柄留到 AI 步骤前收口。
     let slides_task = {
@@ -600,12 +605,34 @@ async fn run_all(
                         &db,
                         &video_id,
                         &asr_job.id,
-                        0.98,
+                        0.90,
                         "正在 AI 纠正文稿",
                     )
                     .await?;
+                    // 纠错分批跑，每批一次模型往返。把批进度铺进 0.90–0.99：
+                    // 长课要纠十几批，此前整段都压在一个静止的 98% 下面。
+                    let sink = {
+                        let app = app.clone();
+                        let video_id = video_id.clone();
+                        let job_id = asr_job.id.clone();
+                        move |at: f64, message: &str| {
+                            emit_stage(
+                                &app,
+                                &video_id,
+                                &job_id,
+                                "asr",
+                                "running",
+                                0.90 + 0.09 * at,
+                                Some(message),
+                            );
+                        }
+                    };
                     match transcript_correction::autocorrect_transcript(
-                        &db, &provider, &model, &video_id,
+                        &db,
+                        &provider,
+                        &model,
+                        &video_id,
+                        Some(&sink),
                     )
                     .await
                     {
@@ -866,6 +893,37 @@ async fn run_slides_stage(
                 Some(&msg),
             );
         }
+        // 引擎整体不可用时会止损，不再把同一错误打到剩余几十页。已写库的结果保留，
+        // 但作业必须明确失败，不能把未尝试页藏起来再报 done/100%。
+        Ok(outcome)
+            if outcome.stopped_early
+                || (outcome.attempted > 0 && outcome.failed == outcome.attempted) =>
+        {
+            let remaining = outcome.total.saturating_sub(outcome.attempted);
+            let msg = format!(
+                "OCR 提前停止：已尝试 {}/{} 页，{} 页认出文字，{} 页失败，剩余 {remaining} 页未尝试：{}",
+                outcome.attempted,
+                outcome.total,
+                outcome.recognized,
+                outcome.failed,
+                outcome.error.as_deref().unwrap_or("未知错误")
+            );
+            let _ = jobs::fail(db, &ocr_job.id, &msg).await;
+            let progress = if outcome.total == 0 {
+                0.0
+            } else {
+                outcome.attempted as f64 / outcome.total as f64
+            };
+            emit_stage(
+                app,
+                video_id,
+                &ocr_job.id,
+                "slides_ocr",
+                "failed",
+                progress,
+                Some(&msg),
+            );
+        }
         // 有页失败但不是全军覆没：识别出来的确实写进库了，这一步算完成，
         // 但失败必须写进步骤消息里——不然界面只报「认出 9 页」，另外 90 页的失败无处可查。
         Ok(outcome) if outcome.failed > 0 => {
@@ -915,9 +973,167 @@ async fn run_slides_stage(
     }
 }
 
+/// 是否已有黑边探测结果（crop_top 非空）。
+async fn crop_detected(db: &crate::db::Db, video_id: &str) -> bool {
+    sqlx::query_scalar::<_, Option<f64>>("SELECT crop_top FROM videos WHERE id=?")
+        .bind(video_id)
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten()
+        .is_some()
+}
+
+/// 「黑边探测」这一阶段，排在最前。课件提取要按裁完的几何降采样采样帧，
+/// 探测必须在它之前收口。平时导入后的后台任务已把结果写好，这里通常只是确认缓存。
+async fn run_crop_stage(
+    app: &AppHandle,
+    db: &crate::db::Db,
+    video_id: &str,
+    jobs_list: &[jobs::Job],
+) {
+    let Some(crop_job) = jobs_list.iter().find(|job| job.stage == "crop") else {
+        return;
+    };
+    // 已有探测结果：标 done 跳过（导入后台任务可能已测完）。
+    if crop_detected(db, video_id).await {
+        let _ = jobs::finish(db, &crop_job.id).await;
+        emit_stage(app, video_id, &crop_job.id, "crop", "done", 1.0, None);
+        return;
+    }
+    if crop_job.status == "done" {
+        return;
+    }
+    let state = app.state::<AppState>();
+    // 用取消登记表去重：导入后台任务（或播放器兜底）可能正在测同一段视频。
+    // 已经有人在测就等它收口，别起第二份 ffmpeg。
+    let key = crate::pipeline::crop_detect::cancel_key(video_id);
+    let Some(cancel) = state.register_cancel_if_free(&key) else {
+        for _ in 0..120 {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            if crop_detected(db, video_id).await {
+                break;
+            }
+            let status: Option<String> = sqlx::query_scalar(
+                "SELECT status FROM processing_jobs WHERE video_id=? AND stage='crop'",
+            )
+            .bind(video_id)
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten();
+            if matches!(status.as_deref(), Some("done" | "failed" | "canceled")) {
+                break;
+            }
+        }
+        return;
+    };
+    // 拿到了探测的独占权：自己测一遍（可被 cmd_cancel_crop_detect 收掉）。
+    let _ = jobs::start(db, &crop_job.id).await;
+    emit_stage(
+        app,
+        video_id,
+        &crop_job.id,
+        "crop",
+        "running",
+        0.1,
+        Some("探测黑边"),
+    );
+    let path: String = sqlx::query_scalar("SELECT file_path FROM videos WHERE id=?")
+        .bind(video_id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap_or_default();
+    let _ =
+        crate::pipeline::crop_detect::ensure_crop(db, video_id, PathBuf::from(path), &cancel).await;
+    let _ = jobs::finish(db, &crop_job.id).await;
+    emit_stage(app, video_id, &crop_job.id, "crop", "done", 1.0, None);
+    state.unregister_cancel(&key, &cancel);
+}
+
+/// 后台跑一次黑边探测（导入后 / 播放器发现没有记录时触发）。
+///
+/// 用取消登记表去重：同一视频已有探测在跑就不再起一份，避免两份 ffmpeg 抢同一段
+/// 视频。结果写库后，前端轮询 `cmd_ensure_crop` 就能读到。探测期间可被
+/// `cmd_cancel_crop_detect` 收掉（切走视频时）。
+pub fn spawn_crop_detection(app: AppHandle, video_id: String) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let db = state.db.clone();
+        let Some(video) =
+            sqlx::query_as::<_, Video>("SELECT * FROM videos WHERE id=? AND deleted_at IS NULL")
+                .bind(&video_id)
+                .fetch_optional(&db.pool)
+                .await
+                .ok()
+                .flatten()
+        else {
+            return;
+        };
+        if video.crop_top.is_some() {
+            return; // 已有缓存
+        }
+        let key = crate::pipeline::crop_detect::cancel_key(&video_id);
+        let Some(cancel) = state.register_cancel_if_free(&key) else {
+            return; // 已在测
+        };
+        let _ = jobs::ensure_crop_job(&db, &video_id).await;
+        let Some(job) = sqlx::query_as::<_, jobs::Job>(
+            "SELECT * FROM processing_jobs WHERE video_id=? AND stage='crop'",
+        )
+        .bind(&video_id)
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten() else {
+            state.unregister_cancel(&key, &cancel);
+            return;
+        };
+        let _ = jobs::start(&db, &job.id).await;
+        emit_stage(
+            &app,
+            &video_id,
+            &job.id,
+            "crop",
+            "running",
+            0.1,
+            Some("探测黑边"),
+        );
+        let _ = crate::pipeline::crop_detect::ensure_crop(
+            &db,
+            &video_id,
+            PathBuf::from(&video.file_path),
+            &cancel,
+        )
+        .await;
+        let _ = jobs::finish(&db, &job.id).await;
+        emit_stage(&app, &video_id, &job.id, "crop", "done", 1.0, None);
+        state.unregister_cancel(&key, &cancel);
+    });
+}
+
 /// 账号级问题（余额、密钥、权限）把后面几步一并跳过时给出的说明。
 const AI_HALTED_MESSAGE: &str =
     "已跳过：上一步因账号问题失败（余额、密钥或权限），接着跑也是同样结果。处理好之后，可在各面板右下角手动生成。";
+const AI_DEPENDENCY_HALTED_MESSAGE: &str =
+    "已跳过：生成讲稿提要的模型因账号问题失败，后续任务依赖同一份提要。处理好该 Profile 后，可在各面板右下角手动生成。";
+
+fn remember_failed_profile(
+    halted_profiles: &mut HashSet<String>,
+    halted_dependency_profile: &mut Option<String>,
+    profile_id: &str,
+    error: &AppError,
+) {
+    if error.is_account_failure() {
+        let failed_profile = error.account_profile_id().unwrap_or(profile_id);
+        halted_profiles.insert(failed_profile.to_string());
+        // 只有嵌套路由会给错误附 profile_id；当前唯一的嵌套 LLM 任务是所有产物
+        // 共用的讲稿 Digest。它失败后没有缓存，后续任务继续跑只会再次撞同一账号。
+        if error.account_profile_id().is_some() {
+            *halted_dependency_profile = Some(failed_profile.to_string());
+        }
+    }
+}
 
 /// ASR 之后自动生成章节、笔记。尽力而为：未配置大模型或单步失败都只标记该 job，
 /// 不回滚视频状态、不中断其余步骤。
@@ -931,7 +1147,8 @@ async fn run_ai_followups(
     jobs_list: &[jobs::Job],
 ) {
     use crate::llm::profiles::AiTask;
-    let mut halted = false;
+    let mut halted_profiles = HashSet::new();
+    let mut halted_dependency_profile = None;
     for (stage, task) in [
         ("chapters", AiTask::Chapters),
         ("summary", AiTask::Summary),
@@ -947,8 +1164,36 @@ async fn run_ai_followups(
             emit_stage(app, video_id, &job.id, stage, "done", 1.0, None);
             continue;
         }
-        if halted {
-            // 标成 canceled 而不是 failed：它们没失败，是根本没轮到。
+        if halted_dependency_profile.is_some() {
+            let _ = jobs::cancel(db, &job.id, AI_DEPENDENCY_HALTED_MESSAGE).await;
+            emit_stage(
+                app,
+                video_id,
+                &job.id,
+                stage,
+                "canceled",
+                0.0,
+                Some(AI_DEPENDENCY_HALTED_MESSAGE),
+            );
+            continue;
+        }
+        let resolved = match crate::commands::ai::resolved_provider_for_db(db, task).await {
+            Ok(Some(resolved)) => resolved,
+            Ok(None) => {
+                let msg = "未配置大模型，已跳过自动生成（可在设置→大模型配置后手动生成）";
+                let _ = jobs::cancel(db, &job.id, msg).await;
+                emit_stage(app, video_id, &job.id, stage, "canceled", 0.0, Some(msg));
+                continue;
+            }
+            Err(error) => {
+                let msg = error.to_string();
+                let _ = jobs::fail(db, &job.id, &msg).await;
+                emit_stage(app, video_id, &job.id, stage, "failed", 0.0, Some(&msg));
+                continue;
+            }
+        };
+        if halted_profiles.contains(&resolved.profile_id) {
+            // 标成 canceled 而不是 failed：它没失败，是这个 Profile 已经确定不可用，根本没发请求。
             let _ = jobs::cancel(db, &job.id, AI_HALTED_MESSAGE).await;
             emit_stage(
                 app,
@@ -968,34 +1213,47 @@ async fn run_ai_followups(
             &job.id,
             stage,
             "running",
-            0.1,
-            Some("生成中"),
+            0.02,
+            Some("排队中"),
         );
 
-        let (provider, model) = match crate::commands::ai::provider_for_db(db, task).await {
-            Ok(Some(p)) => p,
-            Ok(None) => {
-                let msg = "未配置大模型，已跳过自动生成（可在设置→大模型配置后手动生成）";
-                let _ = jobs::cancel(db, &job.id, msg).await;
-                emit_stage(app, video_id, &job.id, stage, "canceled", 0.0, Some(msg));
-                continue;
-            }
-            Err(error) => {
-                let msg = error.to_string();
-                let _ = jobs::fail(db, &job.id, &msg).await;
-                emit_stage(app, video_id, &job.id, stage, "failed", 0.0, Some(&msg));
-                continue;
+        let profile_id = resolved.profile_id;
+        let provider = resolved.provider;
+        let model = resolved.model;
+
+        // 步骤内进度直接转成事件。这里只发事件不落库（与课件提取那条支线一致）：
+        // 一次生成会报十几次，每次都写库既无必要又会和 finish 抢同一行。
+        let sink = {
+            let app = app.clone();
+            let video_id = video_id.to_string();
+            let job_id = job.id.clone();
+            let stage = stage.to_string();
+            move |at: f64, message: &str| {
+                emit_stage(
+                    &app,
+                    &video_id,
+                    &job_id,
+                    &stage,
+                    "running",
+                    at,
+                    Some(message),
+                );
             }
         };
+        let progress: ai::Progress<'_> = Some(&sink);
 
         let result = match task {
-            AiTask::Chapters => ai::generate_chapters(db, &provider, &model, video_id)
+            AiTask::Chapters => ai::generate_chapters(db, &provider, &model, video_id, progress)
                 .await
                 .map(|_| ()),
-            AiTask::Summary => ai::generate_summary(db, &provider, &model, video_id).await,
-            AiTask::Notes => ai::generate_notes(db, &provider, &model, video_id).await,
-            AiTask::Quiz => ai::generate_quiz(db, &provider, &model, video_id).await,
-            AiTask::Mindmap => ai::generate_mindmap(db, &provider, &model, video_id).await,
+            AiTask::Summary => {
+                ai::generate_summary(db, &provider, &model, video_id, progress).await
+            }
+            AiTask::Notes => ai::generate_notes(db, &provider, &model, video_id, progress).await,
+            AiTask::Quiz => ai::generate_quiz(db, &provider, &model, video_id, progress).await,
+            AiTask::Mindmap => {
+                ai::generate_mindmap(db, &provider, &model, video_id, progress).await
+            }
             _ => Ok(()),
         };
         match result {
@@ -1007,9 +1265,14 @@ async fn run_ai_followups(
                 let msg = error.to_string();
                 let _ = jobs::fail(db, &job.id, &msg).await;
                 emit_stage(app, video_id, &job.id, stage, "failed", 0.0, Some(&msg));
-                // 只有账号级的错误才连坐。内容本身有问题（某个任务解析不出结果）
-                // 不该拖累其余四个——它们各自的输入和提示词都不一样。
-                halted = error.is_permanent();
+                // 只有同一个 Profile 的账号级错误才连坐。请求内容或其他 Profile
+                // 不受影响，仍有机会正常生成。
+                remember_failed_profile(
+                    &mut halted_profiles,
+                    &mut halted_dependency_profile,
+                    &profile_id,
+                    &error,
+                );
             }
         }
     }
@@ -1103,7 +1366,7 @@ pub async fn recover_interrupted_processing(db: &crate::db::Db) -> AppResult<()>
     .execute(&mut *tx)
     .await?;
     sqlx::query(
-        "UPDATE videos SET processed_status='pending'
+        "UPDATE videos SET processed_status='failed'
          WHERE processed_status='processing'",
     )
     .execute(&mut *tx)
@@ -1166,21 +1429,58 @@ async fn stop_processing_task(task: ProcessingTask) {
 
 #[tauri::command]
 pub async fn cmd_list_processing_videos(app: AppHandle) -> AppResult<Vec<Video>> {
-    let active_ids: std::collections::HashSet<String> = app
+    let active_ids: HashSet<String> = app
         .state::<ProcessingTasks>()
         .video_ids()
         .into_iter()
         .collect();
-    if active_ids.is_empty() {
-        return Ok(Vec::new());
-    }
     let db = app.state::<AppState>().db.clone();
+    list_processing_videos_for_queue(&db, &active_ids).await
+}
+
+async fn list_processing_videos_for_queue(
+    db: &crate::db::Db,
+    active_ids: &HashSet<String>,
+) -> AppResult<Vec<Video>> {
     let mut videos: Vec<Video> =
         sqlx::query_as("SELECT * FROM videos WHERE deleted_at IS NULL ORDER BY created_at DESC")
             .fetch_all(&db.pool)
             .await?;
-    videos.retain(|video| active_ids.contains(&video.id));
+    videos.retain(|video| {
+        active_ids.contains(&video.id)
+            || video.processed_status == "processing"
+            || video.processed_status == "failed"
+    });
     Ok(videos)
+}
+
+/// Hide a failed queue item persistently without deleting the video or its diagnostic jobs.
+#[tauri::command]
+pub async fn cmd_dismiss_processing_video(app: AppHandle, video_id: String) -> AppResult<()> {
+    let db = app.state::<AppState>().db.clone();
+    dismiss_processing_video(&db, &video_id).await
+}
+
+async fn dismiss_processing_video(db: &crate::db::Db, video_id: &str) -> AppResult<()> {
+    let result = sqlx::query(
+        "UPDATE videos SET processed_status='pending'
+         WHERE id=? AND deleted_at IS NULL AND processed_status='failed'",
+    )
+    .bind(video_id)
+    .execute(&db.pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM videos WHERE id=? AND deleted_at IS NULL)",
+        )
+        .bind(video_id)
+        .fetch_one(&db.pool)
+        .await?;
+        if !exists {
+            return Err(AppError::NotFound(format!("video {video_id}")));
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1240,8 +1540,8 @@ pub async fn cmd_process_video(app: AppHandle, video_id: String) -> AppResult<()
     Ok(())
 }
 
-/// 仅重新 AI 纠错：视频已有字幕时用。先把原始 ASR 稿写回，再重跑纠错，
-/// 不重新抽音频、不重新识别。未配置大模型则报错。
+/// 仅重新 AI 纠错：视频已有字幕时用。以原始字幕快照生成候选结果，模型成功且
+/// 当前文稿仍与请求开始时一致时才原子替换；不重新抽音频、不重新识别。
 #[tauri::command]
 pub async fn cmd_recorrect_transcript(
     state: tauri::State<'_, AppState>,
@@ -1254,8 +1554,7 @@ pub async fn cmd_recorrect_transcript(
             .ok_or_else(|| {
                 AppError::Config("未配置大模型，无法纠错（请到设置 → 大模型 配置）".into())
             })?;
-    transcript_correction::restore_raw_transcript(&db, &video_id).await?;
-    transcript_correction::autocorrect_transcript(&db, &provider, &model, &video_id).await
+    transcript_correction::recorrect_transcript(&db, &provider, &model, &video_id, None).await
 }
 
 /// 取消某视频正在进行的处理：先中止并等待任务退出，再把 running/pending 步骤标为「已取消」
@@ -1306,6 +1605,43 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use tempfile::tempdir;
+
+    #[test]
+    fn ai_account_failures_only_halt_the_profile_that_failed() {
+        let mut halted = HashSet::new();
+        let mut dependency = None;
+
+        remember_failed_profile(
+            &mut halted,
+            &mut dependency,
+            "profile-a",
+            &AppError::account("余额不足".into()),
+        );
+        remember_failed_profile(
+            &mut halted,
+            &mut dependency,
+            "profile-b",
+            &AppError::Permanent("请求格式错误".into()),
+        );
+
+        assert!(halted.contains("profile-a"));
+        assert!(!halted.contains("profile-b"));
+        assert!(dependency.is_none());
+
+        let mut routed = HashSet::new();
+        let mut routed_dependency = None;
+        let digest_error =
+            AppError::account("摘要账号余额不足".into()).with_account_profile(Some("profile-b"));
+        remember_failed_profile(
+            &mut routed,
+            &mut routed_dependency,
+            "profile-a",
+            &digest_error,
+        );
+        assert!(!routed.contains("profile-a"));
+        assert!(routed.contains("profile-b"));
+        assert_eq!(routed_dependency.as_deref(), Some("profile-b"));
+    }
 
     #[tokio::test]
     async fn stopping_processing_task_waits_for_detached_slides_branch() {
@@ -1399,7 +1735,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn startup_recovery_marks_interrupted_work_retryable() {
+    async fn startup_recovery_keeps_interrupted_work_visible_until_dismissed() {
         let dir = tempdir().unwrap();
         let db = crate::db::Db::connect_and_migrate(&dir.path().join("test.db"))
             .await
@@ -1429,7 +1765,7 @@ mod tests {
                 .fetch_one(&db.pool)
                 .await
                 .unwrap();
-        assert_eq!(video_status, "pending");
+        assert_eq!(video_status, "failed");
         let recovered = jobs::list_for_video(&db, &video.id).await.unwrap();
         let audio = recovered.iter().find(|job| job.stage == "audio").unwrap();
         assert_eq!(audio.status, "failed");
@@ -1438,6 +1774,25 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("应用已重启"));
+
+        let queued = list_processing_videos_for_queue(&db, &HashSet::new())
+            .await
+            .unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].id, video.id);
+
+        dismiss_processing_video(&db, &video.id).await.unwrap();
+        let dismissed_status: String =
+            sqlx::query_scalar("SELECT processed_status FROM videos WHERE id=?")
+                .bind(&video.id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(dismissed_status, "pending");
+        assert!(list_processing_videos_for_queue(&db, &HashSet::new())
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

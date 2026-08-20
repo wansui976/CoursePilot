@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import { Camera, Images, ScanText, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PanelEmptyState } from "@/components/ui/empty-state";
 import { ErrorNote } from "@/components/ui/ErrorNote";
+import { TextSkeleton } from "@/components/ui/skeleton";
 import { humanizeError } from "@/lib/errors";
 import {
   ipc,
@@ -52,6 +53,47 @@ function ocrFeedbackText(outcome: SlidesOcrOutcome, t: TFunction): string {
   return outcome.recognized > 0 ? t("slides.recognized", { count: outcome.recognized }) : t("slides.ocrNoText");
 }
 
+type SlidesOperation = "extract" | "pages-ocr" | "capture" | "frame-ocr";
+type RequestOperation = { requestId: string };
+type PagesOcrRequest = RequestOperation & { force: boolean };
+type FrameRequest = { atMs: number };
+
+type OperationSnapshot<TData, TVariables> = {
+  status: "idle" | "pending" | "error" | "success";
+  submittedAt: number;
+  data: TData | undefined;
+  error: unknown;
+  variables: TVariables | undefined;
+};
+
+function operationKey(videoId: string, operation: SlidesOperation) {
+  return ["slides-panel", videoId, operation] as const;
+}
+
+/**
+ * useMutation 的 observer 会随面板卸载而消失，但 MutationCache 中的任务仍在运行。
+ * 从 cache 取同一视频、同一操作最近一次状态，让二级页切走再回来不会误回 idle。
+ */
+function useLatestOperation<TData, TVariables>(
+  mutationKey: ReturnType<typeof operationKey>,
+): OperationSnapshot<TData, TVariables> | undefined {
+  const snapshots = useMutationState({
+    filters: { mutationKey, exact: true },
+    select: (mutation) => ({
+      status: mutation.state.status,
+      submittedAt: mutation.state.submittedAt,
+      data: mutation.state.data as TData | undefined,
+      error: mutation.state.error,
+      variables: mutation.state.variables as TVariables | undefined,
+    }),
+  });
+  return snapshots.reduce<OperationSnapshot<TData, TVariables> | undefined>(
+    (latest, snapshot) =>
+      !latest || snapshot.submittedAt >= latest.submittedAt ? snapshot : latest,
+    undefined,
+  );
+}
+
 export function SlidesPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -70,18 +112,32 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   const slides = slidesQuery.data ?? [];
   const shots = shotsQuery.data ?? [];
 
+  const extractKey = operationKey(videoId, "extract");
+  const pagesOcrKey = operationKey(videoId, "pages-ocr");
+  const captureKey = operationKey(videoId, "capture");
+  const frameOcrKey = operationKey(videoId, "frame-ocr");
+
+  const extractState = useLatestOperation<number, RequestOperation>(extractKey);
+  const pagesOcrState = useLatestOperation<SlidesOcrOutcome, PagesOcrRequest>(pagesOcrKey);
+  const captureState = useLatestOperation<unknown, FrameRequest>(captureKey);
+  const frameOcrState = useLatestOperation<string, FrameRequest>(frameOcrKey);
+
+  const extractPending = extractState?.status === "pending";
+  const pagesOcrPending = pagesOcrState?.status === "pending";
+  const capturePending = captureState?.status === "pending";
+  const frameOcrPending = frameOcrState?.status === "pending";
+
   // 进行中那次提取的进度与 requestId（供「停止」定位后台任务）。
   const [progress, setProgress] = useState<SlidesProgress | null>(null);
   const extractRequest = useRef<string | null>(null);
   // 课件页文字识别的进度与 requestId。导入时会自动认一遍，这里是补跑/换引擎重认的入口。
   const [pagesOcrProgress, setPagesOcrProgress] = useState<SlidesOcrProgress | null>(null);
-  const [pagesOcrFeedback, setPagesOcrFeedback] = useState<SlidesOcrOutcome | null>(null);
-  const pagesOcrRequest = useRef<string | null>(null);
+  const startingOperations = useRef(new Set<SlidesOperation>());
 
-  const extract = useMutation({
+  const extract = useMutation<number, unknown, RequestOperation>({
+    mutationKey: extractKey,
     // 灵敏度在「设置 → 课件提取」里调，这里取当前值换算成门槛（"自动"档为 null）。
-    mutationFn: () => {
-      const requestId = crypto.randomUUID();
+    mutationFn: ({ requestId }) => {
       extractRequest.current = requestId;
       setProgress(null);
       return ipc.slides.extract(
@@ -100,26 +156,24 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
       setProgress(null);
     },
   });
-  const capture = useMutation({
-    mutationFn: () => ipc.slides.capture(videoId, Math.floor(currentMs())),
+  const capture = useMutation<unknown, unknown, FrameRequest>({
+    mutationKey: captureKey,
+    mutationFn: ({ atMs }) => ipc.slides.capture(videoId, atMs),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["screenshots", videoId] }),
   });
-  const ocr = useMutation<string, unknown, void>({
-    mutationFn: () => ipc.tools.ocr(videoId, Math.floor(currentMs())),
+  const ocr = useMutation<string, unknown, FrameRequest>({
+    mutationKey: frameOcrKey,
+    mutationFn: ({ atMs }) => ipc.tools.ocr(videoId, atMs),
   });
   // 整批认课件页上的文字。默认只认还没认过的页；按住 shift 点则全部重认（换了引擎时用）。
-  const pagesOcr = useMutation<SlidesOcrOutcome, unknown, boolean>({
-    mutationFn: (force: boolean) => {
-      const requestId = crypto.randomUUID();
-      pagesOcrRequest.current = requestId;
+  const pagesOcr = useMutation<SlidesOcrOutcome, unknown, PagesOcrRequest>({
+    mutationKey: pagesOcrKey,
+    mutationFn: ({ force, requestId }) => {
       setPagesOcrProgress(null);
-      setPagesOcrFeedback(null);
       return ipc.slides.ocr(videoId, requestId, force, setPagesOcrProgress);
     },
-    onSuccess: (outcome) => setPagesOcrFeedback(outcome),
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ["slides", videoId] });
-      pagesOcrRequest.current = null;
       setPagesOcrProgress(null);
     },
   });
@@ -132,13 +186,76 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   async function copyOcrResult() {
     // clipboard 可能不可用（权限受限等）：静默降级，不显示假的成功。
     try {
-      await navigator.clipboard.writeText(ocr.data ?? "");
+      await navigator.clipboard.writeText(ocrResult ?? "");
     } catch {
       return;
     }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   }
+
+  function startOnce(operation: SlidesOperation, start: () => void) {
+    if (startingOperations.current.has(operation)) return;
+    startingOperations.current.add(operation);
+    start();
+  }
+
+  function releaseStart(operation: SlidesOperation) {
+    startingOperations.current.delete(operation);
+  }
+
+  function startExtract() {
+    if (slidesQuery.isPending || slidesQuery.isError || extractPending || pagesOcrPending) return;
+    startOnce("extract", () =>
+      extract.mutate(
+        { requestId: crypto.randomUUID() },
+        { onSettled: () => releaseStart("extract") },
+      ),
+    );
+  }
+
+  function startPagesOcr(force: boolean) {
+    if (slidesQuery.isPending || slidesQuery.isError || pagesOcrPending || extractPending) return;
+    startOnce("pages-ocr", () =>
+      pagesOcr.mutate(
+        { force, requestId: crypto.randomUUID() },
+        { onSettled: () => releaseStart("pages-ocr") },
+      ),
+    );
+  }
+
+  function startCapture() {
+    if (capturePending) return;
+    startOnce("capture", () =>
+      capture.mutate(
+        { atMs: Math.floor(currentMs()) },
+        { onSettled: () => releaseStart("capture") },
+      ),
+    );
+  }
+
+  function clearSettledFrameOcr() {
+    ocr.reset();
+    const cache = qc.getMutationCache();
+    for (const mutation of cache.findAll({ mutationKey: frameOcrKey, exact: true })) {
+      if (mutation.state.status !== "pending") cache.remove(mutation);
+    }
+  }
+
+  function startFrameOcr() {
+    if (frameOcrPending) return;
+    clearSettledFrameOcr();
+    startOnce("frame-ocr", () =>
+      ocr.mutate(
+        { atMs: Math.floor(currentMs()) },
+        { onSettled: () => releaseStart("frame-ocr") },
+      ),
+    );
+  }
+
+  const pagesOcrFeedback =
+    pagesOcrState?.status === "success" ? pagesOcrState.data ?? null : null;
+  const ocrResult = frameOcrState?.status === "success" ? frameOcrState.data : undefined;
 
   return (
     <div className="flex h-full flex-col">
@@ -148,13 +265,13 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
           标题去掉了：外层标签已经写着「课件」，再写一遍「课件页」纯属占宽度。 */}
       <div className="flex flex-none flex-wrap items-center justify-end gap-x-2 gap-y-1.5 border-b border-[var(--border-subtle)] px-3 py-2.5">
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-          {slides.length > 0 &&
-            (pagesOcr.isPending ? (
+          {!slidesQuery.isPending && !slidesQuery.isError && slides.length > 0 &&
+            (pagesOcrPending ? (
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={() => {
-                  const requestId = pagesOcrRequest.current;
+                  const requestId = pagesOcrState.variables?.requestId;
                   if (requestId) void ipc.slides.cancelOcr(requestId);
                 }}
                 title={t("slides.stopOcrTitle")}
@@ -168,7 +285,8 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={(event) => pagesOcr.mutate(event.shiftKey)}
+                disabled={extractPending}
+                onClick={(event) => startPagesOcr(event.shiftKey)}
                 title={
                   pending === 0
                     ? t("slides.allRecognized")
@@ -182,29 +300,29 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
           <Button
             size="sm"
             variant="ghost"
-            disabled={ocr.isPending}
-            onClick={() => ocr.mutate()}
+            disabled={frameOcrPending}
+            onClick={startFrameOcr}
             title={t("slides.screenshotOcrTitle")}
           >
             <ScanText className="h-3.5 w-3.5" />
-            {ocr.isPending ? t("slides.screenshotOcrBusy") : t("slides.screenshotOcr")}
+            {frameOcrPending ? t("slides.screenshotOcrBusy") : t("slides.screenshotOcr")}
           </Button>
           <Button
             size="sm"
             variant="ghost"
-            disabled={capture.isPending}
-            onClick={() => capture.mutate()}
+            disabled={capturePending}
+            onClick={startCapture}
             title={t("slides.screenshotTitle")}
           >
             <Camera className="h-3.5 w-3.5" />
-            {capture.isPending ? t("slides.screenshotBusy") : t("slides.screenshot")}
+            {capturePending ? t("slides.screenshotBusy") : t("slides.screenshot")}
           </Button>
-          {extract.isPending && (
+          {extractPending && (
             <Button
               size="sm"
               variant="ghost"
               onClick={() => {
-                const requestId = extractRequest.current;
+                const requestId = extractState.variables?.requestId ?? extractRequest.current;
                 if (requestId) void ipc.slides.cancelExtract(requestId);
               }}
               title={t("slides.stopExtractTitle")}
@@ -213,30 +331,32 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
               {t("slides.stopExtract")}
             </Button>
           )}
-          <Button
-            size="sm"
-            disabled={extract.isPending}
-            onClick={() => extract.mutate()}
-            title={t("slides.extractTitle")}
-          >
-            <Images className="h-3.5 w-3.5" />
-            {extract.isPending
-              ? progressLabel(progress, t)
-              : slides.length
-                ? t("slides.reExtract")
-                : t("slides.extract")}
-          </Button>
+          {!slidesQuery.isPending && !slidesQuery.isError && (
+            <Button
+              size="sm"
+              disabled={extractPending || pagesOcrPending}
+              onClick={startExtract}
+              title={t("slides.extractTitle")}
+            >
+              <Images className="h-3.5 w-3.5" />
+              {extractPending
+                ? progressLabel(progress, t)
+                : slides.length
+                  ? t("slides.reExtract")
+                  : t("slides.extract")}
+            </Button>
+          )}
         </div>
       </div>
 
-      {pagesOcr.isError && (
+      {pagesOcrState?.status === "error" && (
         <ErrorNote
           className="mx-3 mb-2 flex-none"
-          error={pagesOcr.error}
-          onRetry={() => pagesOcr.mutate(false)}
+          error={pagesOcrState.error}
+          onRetry={() => startPagesOcr(pagesOcrState.variables?.force ?? false)}
         />
       )}
-      {pagesOcrFeedback && !pagesOcr.isError && (
+      {pagesOcrFeedback && (
         // 有页失败就不能用绿色的成功样式：识别出来的页确实写进库了，可另外那些没有，
         // 而额度耗尽、鉴权失效正是从半路开始一页页失败的样子。
         <div
@@ -252,11 +372,11 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
           {ocrFeedbackText(pagesOcrFeedback, t)}
         </div>
       )}
-      {extract.isError && (
+      {extractState?.status === "error" && (
         <ErrorNote
           className="mx-3 mb-2 flex-none"
-          error={extract.error}
-          onRetry={() => extract.mutate()}
+          error={extractState.error}
+          onRetry={startExtract}
         />
       )}
       {slidesQuery.isError && (
@@ -273,21 +393,21 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
           onRetry={() => void shotsQuery.refetch()}
         />
       )}
-      {capture.isError && (
+      {captureState?.status === "error" && (
         <ErrorNote
           className="mx-3 mb-2 flex-none"
-          error={capture.error}
-          onRetry={() => capture.mutate()}
+          error={captureState.error}
+          onRetry={startCapture}
         />
       )}
-      {ocr.isError && (
+      {frameOcrState?.status === "error" && (
         <ErrorNote
           className="mx-3 mb-2 flex-none"
-          error={ocr.error}
-          onRetry={() => ocr.mutate()}
+          error={frameOcrState.error}
+          onRetry={startFrameOcr}
         />
       )}
-      {ocr.data !== undefined && (
+      {ocrResult !== undefined && (
         <div className="flex-none border-b border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-xs">
           <div className="mb-1 flex items-center justify-between">
             <span className="flex items-center gap-2 font-medium text-[var(--text-muted)]">
@@ -301,7 +421,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
             <button
               aria-label={t("slides.closeOcr")}
               title={t("slides.close")}
-              onClick={() => ocr.reset()}
+              onClick={clearSettledFrameOcr}
               className="ca-touch-44 ca-workbench-touch grid h-9 w-9 place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
             >
               <X className="h-5 w-5" />
@@ -311,13 +431,17 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
             className="block max-h-40 w-full overflow-y-auto whitespace-pre-wrap text-left text-[var(--text-normal)] hover:text-[var(--text-strong)]"
             onClick={() => void copyOcrResult()}
           >
-            {ocr.data || t("slides.noOcrText")}
+            {ocrResult || t("slides.noOcrText")}
           </button>
         </div>
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {slidesQuery.isError ? null : slides.length === 0 ? (
+        {slidesQuery.isPending ? (
+          <div className="p-1">
+            <TextSkeleton lines={5} />
+          </div>
+        ) : slidesQuery.isError ? null : slides.length === 0 ? (
           <PanelEmptyState
             icon={<Images className="h-7 w-7" />}
             title={t("slides.emptyTitle")}

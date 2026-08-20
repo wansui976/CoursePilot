@@ -120,13 +120,13 @@ describe("CourseSidebar", () => {
   });
 
   it("relinks a course root through the directory picker", async () => {
-    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
+    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数", video_count: 2 }]);
     pickDirectoryPathMock.mockResolvedValue("/new/root");
     renderSidebar();
 
-    await screen.findByRole("button", { name: "线性代数" });
+    await screen.findByRole("button", { name: /线性代数/ });
     fireEvent.click(screen.getByRole("button", { name: "课程操作" }));
-    fireEvent.click(screen.getByRole("button", { name: "重新选择根目录" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "重新选择根目录" }));
 
     await waitFor(() =>
       expect(pickDirectoryPathMock).toHaveBeenCalledWith(["courses", "线性代数"]),
@@ -144,10 +144,10 @@ describe("CourseSidebar", () => {
       platform: "MacIntel",
       maxTouchPoints: 5,
     });
-    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
+    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数", video_count: 2 }]);
     renderSidebar();
 
-    await screen.findByRole("button", { name: "线性代数" });
+    await screen.findByRole("button", { name: /线性代数/ });
     expect(screen.getByRole("button", { name: "课程操作" })).toHaveClass("opacity-100");
   });
 
@@ -159,25 +159,25 @@ describe("CourseSidebar", () => {
       platform: "MacIntel",
       maxTouchPoints: 5,
     });
-    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
+    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数", video_count: 2 }]);
     renderSidebar();
 
-    const course = await screen.findByRole("button", { name: "线性代数" });
+    const course = await screen.findByRole("button", { name: /线性代数/ });
     fireEvent.pointerDown(course.parentElement!, { pointerType: "touch", clientX: 200, clientY: 30 });
     fireEvent.pointerMove(course.parentElement!, { pointerType: "touch", clientX: 140, clientY: 36 });
     fireEvent.pointerUp(course.parentElement!, { pointerType: "touch", clientX: 140, clientY: 36 });
 
-    expect(await screen.findByRole("button", { name: "重命名" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: "重命名" })).toBeInTheDocument();
   });
 
   it("clears the selection after deleting the only selected course", async () => {
     const onClearSelection = vi.fn();
-    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数" }]);
+    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "线性代数", video_count: 2 }]);
     renderSidebar({ selectedCourseId: "c1", onClearSelection });
 
-    await screen.findByRole("button", { name: "线性代数" });
+    await screen.findByRole("button", { name: /线性代数/ });
     fireEvent.click(screen.getByRole("button", { name: "课程操作" }));
-    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
 
     await waitFor(() => expect(mockIpc.courses.delete).toHaveBeenCalledWith("c1"));
     await waitFor(() => expect(onClearSelection).toHaveBeenCalledTimes(1));

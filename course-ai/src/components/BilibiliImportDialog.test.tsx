@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BilibiliImportDialog } from "./BilibiliImportDialog";
 
@@ -51,7 +51,9 @@ describe("BilibiliImportDialog", () => {
   it("starts at the URL step", () => {
     mockTools.hasBilibiliCookies.mockResolvedValue(true);
     renderDialog();
-    expect(screen.getByLabelText("视频链接")).toBeTruthy();
+    expect(screen.getByLabelText("视频链接")).toHaveClass(
+      "focus:border-[var(--focus-ring)]",
+    );
     expect(screen.getByText("下一步")).toBeTruthy();
   });
 
@@ -90,6 +92,29 @@ describe("BilibiliImportDialog", () => {
     expect(await screen.findByText("示例视频")).toBeInTheDocument();
   });
 
+  it("exposes quality as a labeled radio group and labels the subtitle selector", async () => {
+    mockTools.hasBilibiliCookies.mockResolvedValue(true);
+    mockTools.probeBilibili.mockResolvedValue({
+      title: "示例视频",
+      qualities: [1080, 720],
+      tracks: [{ lang: "zh-CN", name: "中文", auto: false }],
+    });
+    renderDialog();
+
+    fireEvent.change(screen.getByLabelText("视频链接"), { target: { value: "https://b23.tv/abc" } });
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+
+    const qualityGroup = await screen.findByRole("group", { name: "清晰度" });
+    const quality1080 = within(qualityGroup).getByRole("radio", { name: "1080P" });
+    const quality720 = within(qualityGroup).getByRole("radio", { name: "720P" });
+    expect(quality1080).toBeChecked();
+    fireEvent.click(quality720);
+    expect(quality720).toBeChecked();
+    expect(
+      screen.getByRole("combobox", { name: "检测到自带字幕，可用它替代 AI 转写" }),
+    ).toBeInTheDocument();
+  });
+
   it("shows cookie-check failures instead of leaving an unhandled rejection", async () => {
     mockTools.hasBilibiliCookies.mockRejectedValue(new Error("cookie check failed"));
     renderDialog();
@@ -99,7 +124,8 @@ describe("BilibiliImportDialog", () => {
     });
     fireEvent.click(screen.getByText("下一步"));
 
-    expect(await screen.findByText(/cookie check failed/)).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("cookie check failed");
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "下一步" })).toBeEnabled();
     expect(mockTools.probeBilibili).not.toHaveBeenCalled();
   });
@@ -232,6 +258,7 @@ describe("BilibiliImportDialog", () => {
       await screen.findByText(/服务器拒绝了请求（HTTP 412）/),
     ).toBeInTheDocument();
     expect(screen.getByText("选择 cookies.txt")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
   });
 
   it("exposes modal dialog semantics labelled by its title", () => {
@@ -240,6 +267,13 @@ describe("BilibiliImportDialog", () => {
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(dialog).toHaveAccessibleName("下载 B站视频");
+    expect(dialog).toHaveClass(
+      "max-h-[calc(100dvh-2rem)]",
+      "w-full",
+      "max-w-[420px]",
+      "overflow-y-auto",
+    );
+    expect(screen.getByTestId("bilibili-import-overlay")).toHaveClass("p-4");
   });
 
   it("closes on Escape", () => {

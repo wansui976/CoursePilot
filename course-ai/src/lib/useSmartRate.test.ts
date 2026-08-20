@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
+import i18n from "@/i18n";
 import { useSmartRate } from "./useSmartRate";
 import type { TranscriptSegment } from "./types";
 
@@ -30,7 +31,10 @@ const SLOW_MS = 100_000;
 const DENSE_MS = 180_000;
 
 describe("useSmartRate", () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(async () => {
+    localStorage.clear();
+    await i18n.changeLanguage("zh-CN");
+  });
 
   it("does nothing until switched on", () => {
     const { result } = renderHook(() => useSmartRate(segments));

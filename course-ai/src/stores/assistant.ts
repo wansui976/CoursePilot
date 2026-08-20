@@ -2,10 +2,14 @@ import { create } from "zustand";
 
 export type DockSide = "left" | "right";
 
-/** 存哪边、收没收起、多宽。存起来是因为这是个常驻控件，每次打开都要重新摆一遍很烦人。 */
+/** 浮动还是停靠成侧栏。停靠时面板贴边全高、内容让位，不再盖在阅读物上。 */
+export type AssistantMode = "float" | "docked";
+
+/** 存哪边、收没收起、多宽、浮/停靠。存起来是因为这是个常驻控件，每次打开都要重新摆一遍很烦人。 */
 const SIDE_KEY = "assistant_dock_side";
 const OPEN_KEY = "assistant_open";
 const WIDTH_KEY = "assistant_panel_width";
+const MODE_KEY = "assistant_mode";
 
 /**
  * 面板宽度的上下限。
@@ -49,6 +53,14 @@ function readWidth(): number {
   }
 }
 
+function readMode(): AssistantMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === "docked" ? "docked" : "float";
+  } catch {
+    return "float";
+  }
+}
+
 function persist(key: string, value: string) {
   try {
     localStorage.setItem(key, value);
@@ -62,17 +74,21 @@ interface AssistantUiState {
   side: DockSide;
   /** 桌面端面板宽度，用户拖内侧边框调，越界的值一律夹回区间。 */
   width: number;
+  /** 浮动（覆盖内容、可拖）还是停靠成侧栏（贴边全高、推开内容）。 */
+  mode: AssistantMode;
   setOpen: (open: boolean) => void;
   toggle: () => void;
   /** 吸附到某一边。 */
   dock: (side: DockSide) => void;
   setWidth: (width: number) => void;
+  setMode: (mode: AssistantMode) => void;
 }
 
 export const useAssistantUi = create<AssistantUiState>((set, get) => ({
   open: readOpen(),
   side: readSide(),
   width: readWidth(),
+  mode: readMode(),
   setOpen: (open) => {
     persist(OPEN_KEY, open ? "1" : "0");
     set({ open });
@@ -86,5 +102,9 @@ export const useAssistantUi = create<AssistantUiState>((set, get) => ({
     const clamped = clampPanelWidth(width);
     persist(WIDTH_KEY, String(clamped));
     set({ width: clamped });
+  },
+  setMode: (mode) => {
+    persist(MODE_KEY, mode);
+    set({ mode });
   },
 }));

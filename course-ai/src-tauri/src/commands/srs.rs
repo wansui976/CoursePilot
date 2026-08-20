@@ -10,8 +10,9 @@ pub(crate) const DAY_MS: i64 = 86_400_000;
 /// 题目出处与最近概念出现点最多相隔 5 分钟；超过后不再把后续无关内容归给该概念。
 const CONCEPT_CARD_MAX_DISTANCE_MS: i64 = 5 * 60 * 1000;
 
-// FSRS-4.5 默认权重（17 个）。⚠ 本环境离线，权重与公式变体凭记忆；上线前请对照
-// 官方 rs-fsrs / py-fsrs 校验这组权重与公式版本。
+// FSRS-4.5 DSR 核心，已对照官方 py-fsrs 2.2.1 的固定提交校验：
+// https://github.com/open-spaced-repetition/py-fsrs/tree/f443b6ebddd11f45124bb2a3569d25ed3e64c977
+// learning/relearning 步骤与 Again 的分钟级延迟属于 review_card 的应用策略，不属于下列公式。
 const FSRS_W: [f64; 17] = [
     0.4872, 1.4003, 3.7145, 13.8206, 5.1618, 1.2298, 0.8975, 0.0310, 1.6474, 0.1367, 1.0461,
     2.1072, 0.0793, 0.3246, 1.5870, 0.2272, 2.8755,
@@ -43,10 +44,10 @@ fn init_difficulty(rating: i64) -> f64 {
     (FSRS_W[4] - (rating as f64 - 3.0) * FSRS_W[5]).clamp(1.0, 10.0)
 }
 
-/// 难度更新：按评分升降，再向 Easy 的初始难度做均值回归；夹到 [1,10]。
+/// 难度更新：按评分升降，再向 Good 的初始难度 D0(3) 做均值回归；夹到 [1,10]。
 fn next_difficulty(difficulty: f64, rating: i64) -> f64 {
     let delta = difficulty - FSRS_W[6] * (rating as f64 - 3.0);
-    (FSRS_W[7] * init_difficulty(4) + (1.0 - FSRS_W[7]) * delta).clamp(1.0, 10.0)
+    (FSRS_W[7] * init_difficulty(3) + (1.0 - FSRS_W[7]) * delta).clamp(1.0, 10.0)
 }
 
 /// 回忆成功（rating≥2）后的新稳定度：难度低、当前稳定度低、当时可提取率低时增长更多；
@@ -59,7 +60,7 @@ fn next_recall_stability(difficulty: f64, stability: f64, r: f64, rating: i64) -
             + FSRS_W[8].exp()
                 * (11.0 - difficulty)
                 * stability.powf(-FSRS_W[9])
-                * (((1.0 - r) * FSRS_W[10]).exp() - 1.0)
+                * ((1.0 - r) * FSRS_W[10]).exp_m1()
                 * hard
                 * easy)
 }
@@ -1139,7 +1140,60 @@ mod tests {
         vid
     }
 
-    // FSRS 属性测试：不校验具体数值（权重凭记忆），只验证「像个正确的间隔重复排期器」。
+    fn assert_fsrs_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "FSRS reference mismatch: actual={actual:.12}, expected={expected:.12}"
+        );
+    }
+
+    #[test]
+    fn fsrs_45_default_weights_match_official_parameters() {
+        assert_eq!(
+            FSRS_W,
+            [
+                0.4872, 1.4003, 3.7145, 13.8206, 5.1618, 1.2298, 0.8975, 0.0310, 1.6474, 0.1367,
+                1.0461, 2.1072, 0.0793, 0.3246, 1.5870, 0.2272, 2.8755,
+            ]
+        );
+    }
+
+    #[test]
+    fn fsrs_45_matches_official_initial_state_reference() {
+        // FSRS-4.5 官方默认权重与 D0(G)=w4-(G-3)*w5。
+        let expected = [
+            (1, 0.4872, 7.6214),
+            (2, 1.4003, 6.3916),
+            (3, 3.7145, 5.1618),
+            (4, 13.8206, 3.9320),
+        ];
+
+        for (rating, expected_s, expected_d) in expected {
+            let (stability, difficulty) = fsrs_review(None, rating, 0.0);
+            assert_fsrs_close(stability, expected_s);
+            assert_fsrs_close(difficulty, expected_d);
+        }
+    }
+
+    #[test]
+    fn fsrs_45_matches_official_review_state_reference() {
+        // 官方公式参考向量：S=5、D=5、t=5 时 R=0.9，覆盖失败/成功、Hard/Easy 修正项。
+        let expected = [
+            (1, 1.714_849_773_397_375_8, 6.744_370_8, 2),
+            (2, 8.132_738_131_507_487, 5.874_693_3, 8),
+            (3, 18.788_460_085_860_414, 5.005_015_8, 19),
+            (4, 44.648_716_976_891_62, 4.135_338_3, 45),
+        ];
+
+        for (rating, expected_s, expected_d, expected_interval) in expected {
+            let (stability, difficulty) = fsrs_review(Some((5.0, 5.0)), rating, 5.0);
+            assert_fsrs_close(stability, expected_s);
+            assert_fsrs_close(difficulty, expected_d);
+            assert_eq!(interval_days_for(stability), expected_interval);
+        }
+    }
+
+    // 除固定参考向量外，再保留性质测试保护单调性和边界。
 
     #[test]
     fn fsrs_first_review_orders_stability_and_bounds_difficulty() {

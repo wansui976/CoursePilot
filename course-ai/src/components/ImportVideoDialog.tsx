@@ -7,7 +7,16 @@ import {
   ListVideo,
   Plus,
 } from "lucide-react";
-import { lazy, Suspense, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -39,6 +48,9 @@ export function ImportVideoButton({
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
   const [showBili, setShowBili] = useState(false);
   const [showPlaylist, setShowPlaylist] = useState(false);
   const [folderVideos, setFolderVideos] = useState<FolderVideo[] | null>(null);
@@ -47,6 +59,59 @@ export function ImportVideoButton({
   const mobile = isMobile();
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["videos", courseId] });
+
+  const menuItems = useCallback(
+    () =>
+      Array.from(menuRef.current?.querySelectorAll<HTMLElement>("[role='menuitem']") ?? []),
+    [],
+  );
+
+  const closeMenuAndRestoreFocus = useCallback(() => {
+    setMenuOpen(false);
+    triggerRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    menuItems()[0]?.focus();
+
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (menuRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      closeMenuAndRestoreFocus();
+    };
+
+    document.addEventListener("click", handleOutsideClick);
+    return () => document.removeEventListener("click", handleOutsideClick);
+  }, [closeMenuAndRestoreFocus, menuItems, menuOpen]);
+
+  const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const items = menuItems();
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeMenuAndRestoreFocus();
+      return;
+    }
+    if (event.key === "Tab") {
+      setMenuOpen(false);
+      return;
+    }
+    if (!items.length) return;
+
+    const activeIndex = items.indexOf(document.activeElement as HTMLElement);
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowDown") nextIndex = (activeIndex + 1) % items.length;
+    if (event.key === "ArrowUp") nextIndex = (activeIndex - 1 + items.length) % items.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = items.length - 1;
+    if (nextIndex == null) return;
+
+    event.preventDefault();
+    items[nextIndex]?.focus();
+  };
 
   // 选一个文件夹 → 扫描其中的视频 → 打开勾选清单批量导入。
   const folder = useMutation({
@@ -93,9 +158,11 @@ export function ImportVideoButton({
   return (
     <div className="relative flex-none">
       <Button
+        ref={triggerRef}
         size="sm"
         aria-haspopup="menu"
         aria-expanded={menuOpen}
+        aria-controls={menuOpen ? menuId : undefined}
         onClick={() => setMenuOpen((o) => !o)}
       >
         <Plus className="h-4 w-4" />
@@ -104,9 +171,18 @@ export function ImportVideoButton({
       </Button>
       {menuOpen && (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-          <div className="absolute right-0 top-full z-20 mt-1.5 w-72 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-1.5 shadow-[var(--shadow-pop)]">
+          <div className="fixed inset-0 z-10" aria-hidden="true" />
+          <div
+            ref={menuRef}
+            id={menuId}
+            role="menu"
+            aria-label={t("import.title")}
+            onKeyDown={handleMenuKeyDown}
+            className="absolute right-0 top-full z-20 mt-1.5 w-72 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-1.5 shadow-[var(--shadow-pop)]"
+          >
             <button
+              role="menuitem"
+              tabIndex={-1}
               onClick={() => {
                 setMenuOpen(false);
                 local.mutate();
@@ -126,6 +202,8 @@ export function ImportVideoButton({
 
             {!mobile && (
               <button
+                role="menuitem"
+                tabIndex={-1}
                 onClick={() => {
                   setMenuOpen(false);
                   folder.mutate();
@@ -148,6 +226,8 @@ export function ImportVideoButton({
               <>
                 <div className="my-1 border-t border-[var(--border-faint)]" />
                 <button
+                  role="menuitem"
+                  tabIndex={-1}
                   onClick={() => {
                     setMenuOpen(false);
                     setShowBili(true);
@@ -165,6 +245,8 @@ export function ImportVideoButton({
                   </span>
                 </button>
                 <button
+                  role="menuitem"
+                  tabIndex={-1}
                   onClick={() => {
                     setMenuOpen(false);
                     setShowPlaylist(true);

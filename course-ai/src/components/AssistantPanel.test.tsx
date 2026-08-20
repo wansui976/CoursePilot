@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import "@/i18n";
+import i18n from "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -74,6 +74,7 @@ function renderPanel(
   layout: {
     compact?: boolean;
     bottomNavigationVisible?: boolean;
+    launcherVisible?: boolean;
     context?: AssistantContext;
     onActionApplied?: (action: AssistantAction) => void;
   } = {},
@@ -87,6 +88,7 @@ function renderPanel(
         onActionApplied={layout.onActionApplied}
         compact={layout.compact}
         bottomNavigationVisible={layout.bottomNavigationVisible}
+        launcherVisible={layout.launcherVisible}
       />
     </QueryClientProvider>,
   );
@@ -121,7 +123,8 @@ function storedConversation(question: string): AssistantSession {
 }
 
 describe("AssistantPanel", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("zh-CN");
     vi.clearAllMocks();
     localStorage.clear();
     platformMock.mobile = false;
@@ -140,6 +143,8 @@ describe("AssistantPanel", () => {
     expect(dockStrip).toHaveAttribute("data-dock-side", "right");
     // 圆球：贴边但留一点空隙，不再是糊在边上的窄条。
     expect(dockStrip).toHaveClass("right-3", "h-14", "w-14", "rounded-full");
+    expect(dockStrip).toHaveClass("focus-visible:ring-[var(--focus-ring)]");
+    expect(dockStrip.querySelector("svg")).toHaveClass("text-[var(--accent-text)]");
     fireEvent.click(dockStrip);
     expect(screen.getByLabelText("对助手说")).toBeVisible();
   });
@@ -1766,6 +1771,28 @@ describe("AssistantPanel", () => {
     expect(await screen.findByText("助手这次没有给出回答。")).toBeInTheDocument();
   });
 
+  it("英文建议发送英文完整问题，并用英文说明空回答", async () => {
+    await i18n.changeLanguage("en");
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "" }));
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Summarize this video" }));
+
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenCalledWith(
+        "Summarize the main content of this video",
+        expect.objectContaining({ course_id: "c1", video_id: "v1" }),
+        expect.any(Array),
+        expect.any(String),
+        expect.any(Function),
+      ),
+    );
+    expect(
+      await screen.findByText("The assistant did not return an answer this time."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("助手这次没有给出回答。")).not.toBeInTheDocument();
+  });
+
   it("用户叫停的那一轮不挂「没得出结论」——它没转不出来，是被按停的", async () => {
     mockIpc.assistant.ask.mockResolvedValueOnce(
       reply({ answer: "", canceled: true, hit_turn_limit: true }),
@@ -1841,12 +1868,63 @@ describe("AssistantPanel", () => {
     expect(screen.getByLabelText("当前提问范围：当前视频")).toBeInTheDocument();
   });
 
+  it("提问范围菜单支持方向键并在 Escape 后回到触发按钮", async () => {
+    renderPanel();
+    const trigger = screen.getByRole("button", { name: "当前提问范围：当前视频" });
+
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("menu", { name: "选择提问范围" });
+    expect(trigger).toHaveAttribute("aria-controls", menu.id);
+    const items = screen.getAllByRole("menuitemradio");
+    expect(trigger).toHaveClass("focus-visible:ring-[var(--focus-ring)]");
+    expect(items.every((item) => item.tabIndex === -1)).toBe(true);
+    expect(items.every((item) => item.classList.contains("focus-visible:ring-[var(--focus-ring)]"))).toBe(true);
+    await waitFor(() => expect(items[0]).toHaveFocus());
+    expect(items.filter((item) => item.getAttribute("aria-checked") === "true")).toHaveLength(1);
+
+    fireEvent.keyDown(items[0], { key: "ArrowDown" });
+    expect(items[1]).toHaveFocus();
+    fireEvent.keyDown(items[1], { key: "End" });
+    expect(items[items.length - 1]).toHaveFocus();
+    fireEvent.keyDown(items[items.length - 1], { key: "Home" });
+    expect(items[0]).toHaveFocus();
+    fireEvent.keyDown(items[0], { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("menu", { name: "选择提问范围" })).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+
+    fireEvent.click(trigger);
+    const reopened = screen.getAllByRole("menuitemradio")[0];
+    await waitFor(() => expect(reopened).toHaveFocus());
+    fireEvent.keyDown(reopened, { key: "Tab" });
+    await waitFor(() => expect(screen.queryByRole("menu", { name: "选择提问范围" })).not.toBeInTheDocument());
+    expect(trigger).not.toHaveFocus();
+  });
+
   it("窄视口按移动抽屉渲染，并避开底部主导航", () => {
     renderPanel(vi.fn(), { compact: true, bottomNavigationVisible: true });
     const panel = screen.getByRole("dialog", { name: "助手" });
     expect(screen.queryByRole("button", { name: "拖动助手面板" })).not.toBeInTheDocument();
     expect(panel).toHaveClass("inset-x-0", "h-[70dvh]");
     expect(panel.getAttribute("style")).toContain("bottom: calc(56px");
+  });
+
+  it("工作台收起助手时避开面板右下角操作轨道", () => {
+    platformMock.mobile = true;
+    useAssistantUi.setState({ open: false });
+    renderPanel(vi.fn(), { compact: true, bottomNavigationVisible: false });
+    const launcher = screen.getByRole("button", { name: "打开助手" });
+    expect(launcher).toHaveClass("ca-workbench-assistant-launcher");
+    // jsdom 会规范化 env() 的 calc 顺序；保留几何契约的关键安全间距即可。
+    expect(launcher.getAttribute("style")).toContain("88px");
+  });
+
+  it("工具型整页可以收起浮动入口，避免遮挡行内操作", () => {
+    platformMock.mobile = true;
+    useAssistantUi.setState({ open: false });
+    renderPanel(vi.fn(), { compact: true, bottomNavigationVisible: true, launcherVisible: false });
+
+    expect(screen.queryByRole("button", { name: "打开助手" })).not.toBeInTheDocument();
   });
 
   it("移动抽屉有模态遮罩，焦点循环在抽屉内并可点击遮罩关闭", async () => {

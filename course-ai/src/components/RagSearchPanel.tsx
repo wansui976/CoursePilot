@@ -402,9 +402,12 @@ function AskChatPanel({ videoId }: { videoId: string }) {
     const tail = tailRef.current;
     if (!tail || typeof tail.scrollIntoView !== "function") return;
     // 流式期间用 auto（即时）：smooth 会被每次更新反复重启动画，反而卡顿。
+    const reduceMotion =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     tail.scrollIntoView({
       block: "end",
-      behavior: streaming ? "auto" : "smooth",
+      behavior: streaming || reduceMotion ? "auto" : "smooth",
     });
     // 依赖节流后的流式文本：逐字生成、气泡变高时跟随滚动到底，避免最新内容被输入框挡住。
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -507,7 +510,11 @@ function AskChatPanel({ videoId }: { videoId: string }) {
       </div>
       <div
         ref={scrollerRef}
+        role="log"
         aria-label={t("ragSearch.chatHistory")}
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-busy={busy}
         className="min-h-0 flex-1 space-y-5 overflow-y-auto p-3"
       >
         {history.length === 0 && inFlightQuery === undefined && (
@@ -693,6 +700,14 @@ function AskChatPanel({ videoId }: { videoId: string }) {
         <div ref={tailRef} />
       </div>
 
+      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {busy
+          ? t("ragSearch.generationStarted")
+          : ask.isSuccess
+            ? t("ragSearch.answerReady")
+            : ""}
+      </p>
+
       <div className="flex-none border-t border-[var(--border-subtle)] p-2.5">
         {pendingAsk && (
           <div className="mb-1.5 flex items-start gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-muted)]">
@@ -711,7 +726,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
             </button>
           </div>
         )}
-        <div className="flex items-center gap-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 transition focus-within:border-[var(--accent-text)]">
+        <div className="flex items-center gap-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 transition focus-within:border-[var(--focus-ring)]">
           {history.length > 0 && (
             <button
               type="button"

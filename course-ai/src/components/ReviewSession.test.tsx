@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReviewSession } from "./ReviewSession";
 
@@ -213,13 +214,29 @@ describe("ReviewSession", () => {
     expect(submit).toHaveClass("text-[var(--on-accent)]");
     expect(submit).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: /选项 B/ }));
+    const wrongOption = screen.getByRole("button", { name: /选项 B/ });
+    const wrongMarker = wrongOption.firstElementChild as HTMLElement;
+    fireEvent.click(wrongOption);
+    expect(wrongMarker).toHaveClass(
+      "bg-[var(--accent)]",
+      "!text-[var(--on-accent)]",
+    );
     expect(submit).toBeEnabled();
     fireEvent.click(submit);
 
     expect(screen.getByText("回答不正确")).toBeInTheDocument();
     expect(screen.getByText("正确答案")).toBeInTheDocument();
     expect(screen.getByText("你的选择")).toBeInTheDocument();
+    expect(wrongMarker).toHaveClass(
+      "bg-[var(--status-err)]",
+      "!text-[var(--on-status-err)]",
+    );
+    expect(
+      (screen.getByRole("button", { name: /选项 A/ }).firstElementChild as HTMLElement),
+    ).toHaveClass(
+      "bg-[var(--status-ok)]",
+      "!text-[var(--on-status-ok)]",
+    );
   });
 
   it("supports multiple-choice selection and leaves focused option space alone", async () => {
@@ -278,5 +295,43 @@ describe("ReviewSession", () => {
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(await screen.findByText("今天没有待复习的卡片")).toBeInTheDocument();
     expect(due).toHaveBeenCalledTimes(2);
+  });
+
+  it("traps focus in the modal and restores it after Escape", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      const qc = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      });
+      return (
+        <QueryClientProvider client={qc}>
+          <button type="button" onClick={() => setOpen(true)}>
+            开始复习
+          </button>
+          {open && <ReviewSession onClose={() => setOpen(false)} onJump={vi.fn()} />}
+        </QueryClientProvider>
+      );
+    }
+
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "开始复习" });
+    opener.focus();
+    fireEvent.click(opener);
+
+    const dialog = await screen.findByRole("dialog", { name: "复习" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    const exit = screen.getByRole("button", { name: "退出复习" });
+    await waitFor(() => expect(exit).toHaveFocus());
+
+    await screen.findByText("问题一");
+    fireEvent.click(screen.getByRole("button", { name: /选项 A/ }));
+    const submit = screen.getByRole("button", { name: /提交答案/ });
+    submit.focus();
+    fireEvent.keyDown(submit, { key: "Tab" });
+    expect(exit).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(opener).toHaveFocus());
   });
 });

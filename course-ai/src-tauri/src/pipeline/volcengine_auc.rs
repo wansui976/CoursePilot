@@ -268,17 +268,22 @@ enum PollAction {
     Fatal,
 }
 
-/// 状态码的首位标明是谁的问题，和 HTTP 一样：2 = 正常，4 = 请求方，5 = 服务端。
+/// 业务状态码的首位标明是谁的问题，和 HTTP 一样：2 = 正常，4 = 请求方，5 = 服务端。
 ///
 /// 关键是别把 5 开头的当终态。那类错误（真实遇到的是 55000000，网关取不到到后端的
 /// 连接）几秒后就自愈，而放弃的代价极不对称：这段音频已经付过钱了，扔掉要重付一次。
-fn classify_poll_status(status: Option<&str>) -> PollAction {
+/// 网关有时只返回 HTTP 状态而没有业务状态头；这时 429/5xx 也属于可恢复抖动。
+fn classify_poll_status(status: Option<&str>, http: reqwest::StatusCode) -> PollAction {
     match status {
         Some(STATUS_SUCCESS) => PollAction::Take,
         Some(STATUS_SILENT) => PollAction::Silent,
         Some(STATUS_PROCESSING) | Some(STATUS_QUEUED) => PollAction::KeepWaiting,
         Some(code) if code.starts_with('5') => PollAction::Hiccup,
-        _ => PollAction::Fatal,
+        Some(_) => PollAction::Fatal,
+        None if http == reqwest::StatusCode::TOO_MANY_REQUESTS || http.is_server_error() => {
+            PollAction::Hiccup
+        }
+        None => PollAction::Fatal,
     }
 }
 
@@ -323,7 +328,7 @@ async fn poll_until_done(
         };
         let status = header_value(&resp, STATUS_HEADER);
         let message = header_value(&resp, MESSAGE_HEADER);
-        match classify_poll_status(status.as_deref()) {
+        match classify_poll_status(status.as_deref(), resp.status()) {
             PollAction::Take => {
                 let payload: Value = resp.json().await.map_err(|error| {
                     AppError::Pipeline(format!("volcengine query decode: {error}"))
@@ -371,13 +376,10 @@ async fn poll_until_done(
     ))
 }
 
-/// 先看这一片之前认过没有；没有才真的去认，认完立刻记下来。
+/// 先看这一片之前认过没有；没有才真的去认，认完记下来。
 ///
-/// 断点续跑就靠这一层。注意「认完立刻存」而不是等整份合并完再落库——后者正是中断之后
-/// 必须从第一片重来的原因。识别那一步做成注入的，是为了这两半都能单测：不然测试只能
-/// 手动往缓存里塞一条，而「认完有没有存」这半根本没被验证到。
-///
-/// 缓存本身尽力而为：读写出任何问题都只退化成「重认一遍」，不会让识别失败。
+/// 断点续跑就靠这一层：中途退出时，已经认完、已经付过钱的分片留在库里，下次直接取回。
+/// 缓存本身是尽力而为的——读写出任何问题都只退化成「重认一遍」，不会让识别失败。
 async fn cached_or_recognize<F, Fut>(
     audio_bytes: &[u8],
     cache: Option<&crate::pipeline::asr_cache::ChunkCache<'_>>,
@@ -394,6 +396,7 @@ where
         }
     }
     let json = recognize().await?;
+    // 认完就存，别等整份合并完——「等全部认完再一起落库」正是中断后从头再来的原因。
     if let Some(cache) = cache {
         cache.put(audio_bytes, &json).await;
     }
@@ -716,29 +719,67 @@ mod tests {
         // 真实遇到的那一条：55000000，网关取不到到后端的连接（POOL_FAILURE），
         // 几秒后自愈。原来任何不认识的状态码都当场判死——而这一段音频已经付过钱了，
         // 放弃等于把它扔掉，重来还要再付一次；接着问只花几秒。
-        assert_eq!(classify_poll_status(Some("55000000")), PollAction::Hiccup);
-        assert_eq!(classify_poll_status(Some("55000031")), PollAction::Hiccup);
+        assert_eq!(
+            classify_poll_status(Some("55000000"), reqwest::StatusCode::OK),
+            PollAction::Hiccup
+        );
+        assert_eq!(
+            classify_poll_status(Some("55000031"), reqwest::StatusCode::BAD_GATEWAY),
+            PollAction::Hiccup
+        );
     }
 
     #[test]
     fn a_caller_side_status_is_still_final() {
         // 4 开头是我们自己的问题（参数错、鉴权失败、音频格式不对），再问一百遍
         // 也是同一个答复。把它也当抖动的话，一个必败的请求要空转到轮询上限才收场。
-        assert_eq!(classify_poll_status(Some("45000001")), PollAction::Fatal);
-        assert_eq!(classify_poll_status(Some("45000151")), PollAction::Fatal);
-        // 连状态码都没有：同样没什么可等的。
-        assert_eq!(classify_poll_status(None), PollAction::Fatal);
+        assert_eq!(
+            classify_poll_status(Some("45000001"), reqwest::StatusCode::OK),
+            PollAction::Fatal
+        );
+        assert_eq!(
+            classify_poll_status(Some("45000151"), reqwest::StatusCode::BAD_GATEWAY),
+            PollAction::Fatal
+        );
+        // 正常响应没有业务状态码，或请求本身被拒绝，都没有可等待的任务状态。
+        assert_eq!(
+            classify_poll_status(None, reqwest::StatusCode::OK),
+            PollAction::Fatal
+        );
+        assert_eq!(
+            classify_poll_status(None, reqwest::StatusCode::UNAUTHORIZED),
+            PollAction::Fatal
+        );
+    }
+
+    #[test]
+    fn an_http_gateway_failure_without_a_business_status_is_a_hiccup() {
+        for http in [
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            reqwest::StatusCode::BAD_GATEWAY,
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            reqwest::StatusCode::GATEWAY_TIMEOUT,
+        ] {
+            assert_eq!(classify_poll_status(None, http), PollAction::Hiccup);
+        }
     }
 
     #[test]
     fn the_four_known_statuses_keep_their_meaning() {
-        assert_eq!(classify_poll_status(Some(STATUS_SUCCESS)), PollAction::Take);
         assert_eq!(
-            classify_poll_status(Some(STATUS_SILENT)),
+            classify_poll_status(Some(STATUS_SUCCESS), reqwest::StatusCode::OK),
+            PollAction::Take
+        );
+        assert_eq!(
+            classify_poll_status(Some(STATUS_SILENT), reqwest::StatusCode::OK),
             PollAction::Silent
         );
         for code in [STATUS_PROCESSING, STATUS_QUEUED] {
-            assert_eq!(classify_poll_status(Some(code)), PollAction::KeepWaiting);
+            assert_eq!(
+                classify_poll_status(Some(code), reqwest::StatusCode::OK),
+                PollAction::KeepWaiting
+            );
         }
     }
 

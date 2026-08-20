@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { FileText, GitBranch, Scissors, Search } from "lucide-react";
 import { TextSkeleton } from "@/components/ui/skeleton";
 
 const SlidesPanel = lazy(() =>
@@ -20,6 +21,13 @@ const RagSearchPanel = lazy(() =>
 type MoreView = "slides" | "mindmap" | "clips" | "search";
 
 const MORE_VIEW_KEYS: MoreView[] = ["slides", "mindmap", "clips", "search"];
+// 与一级 tab 同款图标语言（下划线式 + 图标），二级导航不再用另一套药丸样式。
+const MORE_ICONS: Record<MoreView, typeof FileText> = {
+  slides: FileText,
+  mindmap: GitBranch,
+  clips: Scissors,
+  search: Search,
+};
 
 export function MoreStudyPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
@@ -27,27 +35,31 @@ export function MoreStudyPanel({ videoId }: { videoId: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex-none border-b border-[var(--border-subtle)] px-3 py-2">
+      <div className="flex-none border-b border-[var(--border-subtle)] px-2.5">
         <div
           role="group"
           aria-label={t("morePanel.label")}
-          className="inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-md bg-[var(--surface-card)] p-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex h-10 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
-          {MORE_VIEW_KEYS.map((key) => (
-            <button
-              key={key}
-              type="button"
-              aria-pressed={view === key}
-              onClick={() => setView(key)}
-              className={`ca-touch-44 min-w-max rounded px-3 py-1 text-xs font-medium transition-colors ${
-                view === key
-                  ? "bg-[var(--surface-panel)] text-[var(--text-strong)] shadow-[var(--shadow-raise)]"
-                  : "text-[var(--text-muted)] hover:text-[var(--text-normal)]"
-              }`}
-            >
-              {t(`morePanel.${key}`)}
-            </button>
-          ))}
+          {MORE_VIEW_KEYS.map((key) => {
+            const Icon = MORE_ICONS[key];
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={view === key}
+                onClick={() => setView(key)}
+                className={`ca-touch-44 flex min-h-10 min-w-max flex-1 items-center justify-center gap-1.5 border-b-[3px] px-3 py-2 text-xs font-semibold transition-colors ${
+                  view === key
+                    ? "border-primary text-[var(--text-strong)]"
+                    : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-normal)]"
+                }`}
+              >
+                <Icon aria-hidden="true" className="h-3.5 w-3.5 flex-none" />
+                {t(`morePanel.${key}`)}
+              </button>
+            );
+          })}
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">

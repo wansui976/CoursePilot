@@ -83,6 +83,8 @@ pub struct Course {
     pub cover_image: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// 课程下的视频数（未删除）。列表查询时聚合，新建时恒为 0。
+    pub video_count: i64,
 }
 
 pub async fn create_course(db: &Db, name: String, root_path: String) -> AppResult<Course> {
@@ -107,13 +109,16 @@ pub async fn create_course(db: &Db, name: String, root_path: String) -> AppResul
         cover_image: None,
         created_at: now,
         updated_at: now,
+        video_count: 0,
     })
 }
 
 pub async fn list_courses(db: &Db) -> AppResult<Vec<Course>> {
     Ok(sqlx::query_as::<_, Course>(
-        "SELECT id,name,root_path,cover_image,created_at,updated_at
-         FROM courses WHERE deleted_at IS NULL ORDER BY updated_at DESC",
+        "SELECT c.id,c.name,c.root_path,c.cover_image,c.created_at,c.updated_at,
+                (SELECT COUNT(*) FROM videos v WHERE v.course_id=c.id AND v.deleted_at IS NULL)
+                AS video_count
+         FROM courses c WHERE c.deleted_at IS NULL ORDER BY c.updated_at DESC",
     )
     .fetch_all(&db.pool)
     .await?)
@@ -437,6 +442,8 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, course.id);
         assert_eq!(list[0].name, "申论");
+        // 新建课程还没有视频，video_count 聚合应为 0。
+        assert_eq!(list[0].video_count, 0);
     }
 
     #[tokio::test]
@@ -473,6 +480,43 @@ mod tests {
             .unwrap();
         delete_course(&db, course.id).await.unwrap();
         assert_eq!(list_courses(&db).await.unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn delete_trashes_videos_and_course_together() {
+        // 复现：删课程后视频进了回收站、课程却还在。删除必须在同一事务里同时软删两者。
+        let dir = tempfile::tempdir().unwrap();
+        let db = fresh_db().await;
+        let course = create_course(&db, "申论".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let vpath = dir.path().join("a.mp4");
+        std::fs::write(&vpath, b"x").unwrap();
+        let video = crate::commands::videos::add_local_video(&db, &course.id, vpath, None)
+            .await
+            .unwrap();
+
+        delete_course(&db, course.id.clone()).await.unwrap();
+
+        // 课程从活跃列表消失，视频也从活跃列表消失（都进了回收站）。
+        assert!(list_courses(&db).await.unwrap().is_empty());
+        let active = crate::commands::videos::list_videos(&db, &course.id)
+            .await
+            .unwrap();
+        assert!(active.is_empty());
+        // 课程行本身确实被软删了（而不是只在列表层面漏掉）。
+        let deleted: Option<i64> = sqlx::query_scalar("SELECT deleted_at FROM courses WHERE id=?")
+            .bind(&course.id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert!(deleted.is_some(), "课程行必须被软删");
+        let v_deleted: Option<i64> = sqlx::query_scalar("SELECT deleted_at FROM videos WHERE id=?")
+            .bind(&video.id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert!(v_deleted.is_some(), "视频行必须被软删");
     }
 
     #[tokio::test]

@@ -60,6 +60,67 @@ describe("QuizPanel", () => {
     expect(await screen.findByText("已加入复习")).toBeInTheDocument();
   });
 
+  it("rates questions and shows a summary once all are rated", async () => {
+    mockIpc.ai.getQuiz.mockResolvedValue(
+      JSON.stringify([
+        { type: "judge", stem: "地球是圆的", answer: true },
+        { type: "judge", stem: "太阳从西边升起", answer: false },
+      ]),
+    );
+    renderQuizPanel();
+
+    await screen.findByText("第 1/2 题");
+    // 自评每题：第 1 题答对，第 2 题答错。
+    const firstCorrect = screen.getAllByRole("button", { name: "答对" })[0];
+    fireEvent.click(firstCorrect);
+    expect(screen.getByText("已评 1/2")).toBeInTheDocument();
+
+    const secondWrong = screen.getAllByRole("button", { name: "答错" })[1];
+    fireEvent.click(secondWrong);
+
+    // 全部自评后出现小结：答对 1 题。
+    expect(await screen.findByText("共 2 题，答对 1 题。")).toBeInTheDocument();
+    // 有答错 → 提供重新自评。
+    expect(screen.getByRole("button", { name: "重新自评" })).toBeInTheDocument();
+  });
+
+  it("shows and retries an add-to-review failure", async () => {
+    mockIpc.ai.getQuiz.mockResolvedValue(
+      JSON.stringify([{ type: "judge", stem: "地球是圆的", answer: true }]),
+    );
+    mockIpc.srs.generate
+      .mockRejectedValueOnce(new Error("复习任务保存失败"))
+      .mockResolvedValueOnce(1);
+    renderQuizPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: /加入每日复习/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("复习任务保存失败");
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+
+    await waitFor(() => expect(mockIpc.srs.generate).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("已加入复习")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows a retryable read error instead of the empty state or generation entry", async () => {
+    mockIpc.ai.getQuiz
+      .mockRejectedValueOnce(new Error("题库读取失败"))
+      .mockResolvedValueOnce(null);
+
+    renderQuizPanel();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("题库读取失败");
+    expect(screen.queryByText(/还没有题目/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "生成" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+
+    await waitFor(() => expect(mockIpc.ai.getQuiz).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/还没有题目/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "生成" })).toBeInTheDocument();
+  });
+
   it("renders LaTeX math in quiz stems, options, and explanations", async () => {
     mockIpc.ai.getQuiz.mockResolvedValue(
       JSON.stringify([

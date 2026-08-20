@@ -1,6 +1,14 @@
-import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import { Send, Sparkles, Square, Trash2, User } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { ErrorNote } from "@/components/ui/ErrorNote";
@@ -119,6 +127,57 @@ type ChatTurn = {
   citations?: Citation[];
 };
 type ChatRequest = { query: string; history: ChatMessage[]; requestId: string };
+type ChatStream = {
+  requestId: string;
+  reasoning: string;
+  text: string;
+  citations: Citation[];
+};
+
+// MutationCache 能跨抽屉卸载保住请求身份和结果，但流式 token 不属于 mutation state。
+// 这份按课程隔离的外部快照只活在当前应用进程中，让重挂的抽屉接回同一条流。
+const courseStreams = new Map<string, ChatStream>();
+const courseStreamListeners = new Map<string, Set<() => void>>();
+
+function readCourseStream(courseId: string): ChatStream | null {
+  return courseStreams.get(courseId) ?? null;
+}
+
+function notifyCourseStream(courseId: string) {
+  courseStreamListeners.get(courseId)?.forEach((listener) => listener());
+}
+
+function startCourseStream(courseId: string, requestId: string) {
+  courseStreams.set(courseId, { requestId, reasoning: "", text: "", citations: [] });
+  notifyCourseStream(courseId);
+}
+
+function updateCourseStream(
+  courseId: string,
+  requestId: string,
+  update: (current: ChatStream) => ChatStream,
+) {
+  const current = courseStreams.get(courseId);
+  if (!current || current.requestId !== requestId) return;
+  courseStreams.set(courseId, update(current));
+  notifyCourseStream(courseId);
+}
+
+function finishCourseStream(courseId: string, requestId: string) {
+  if (courseStreams.get(courseId)?.requestId !== requestId) return;
+  courseStreams.delete(courseId);
+  notifyCourseStream(courseId);
+}
+
+function subscribeCourseStream(courseId: string, listener: () => void) {
+  const listeners = courseStreamListeners.get(courseId) ?? new Set<() => void>();
+  listeners.add(listener);
+  courseStreamListeners.set(courseId, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) courseStreamListeners.delete(courseId);
+  };
+}
 
 // 最近多少轮问答作为上下文回传给后端（控制 token）。
 const CHAT_HISTORY_LIMIT = 6;
@@ -180,25 +239,17 @@ export function CourseChatPanel({
   onJump?: (videoId: string, startMs: number) => void;
 }) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [history, setHistory] = useState<ChatTurn[]>(() => readHistory(courseId));
-  // 进行中的流式回答（本轮 requestId + 推理思考 + 已累积文本 + 已到达的来源）。
-  const [streaming, setStreaming] = useState<{
-    requestId: string;
-    reasoning: string;
-    text: string;
-    citations: Citation[];
-  } | null>(null);
   const tailRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  // 组件卸载后不再 setState（后台请求仍会跑完并落库）。StrictMode 二次挂载需显式置回 true。
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  const subscribeToStream = useCallback(
+    (listener: () => void) => subscribeCourseStream(courseId, listener),
+    [courseId],
+  );
+  const getStreamSnapshot = useCallback(() => readCourseStream(courseId), [courseId]);
+  const streaming = useSyncExternalStore(subscribeToStream, getStreamSnapshot, () => null);
 
   useEffect(() => {
     setHistory(readHistory(courseId));
@@ -206,47 +257,82 @@ export function CourseChatPanel({
   }, [courseId]);
 
   const ask = useMutation<string, unknown, ChatRequest>({
+    mutationKey: ["course-chat", courseId],
     mutationFn: async ({ query, history, requestId }) => {
       // 思考内容与来源也累积到局部变量：随答案一起落库、保留（不受组件卸载影响）。
       let reasoningAcc = "";
       let citationsAcc: Citation[] = [];
-      if (mountedRef.current) setStreaming({ requestId, reasoning: "", text: "", citations: [] });
-      const answer = await ipc.concepts.chat(courseId, query, history, requestId, (e: AskEvent) => {
-        if (e.type === "reasoning") reasoningAcc += e.delta;
-        if (e.type === "citations") citationsAcc = e.citations;
-        if (!mountedRef.current) return;
-        setStreaming((prev) => {
-          if (!prev || prev.requestId !== requestId) return prev;
-          if (e.type === "reasoning") return { ...prev, reasoning: prev.reasoning + e.delta };
-          if (e.type === "token") return { ...prev, text: prev.text + e.delta };
-          if (e.type === "citations") return { ...prev, citations: e.citations };
-          return prev; // done：最终答案由落库 + 历史渲染接管
-        });
-      });
-      const next = [
-        ...readHistory(courseId),
-        {
-          id: crypto.randomUUID(),
+      startCourseStream(courseId, requestId);
+      try {
+        const answer = await ipc.concepts.chat(
+          courseId,
           query,
-          answer,
-          reasoning: reasoningAcc || undefined,
-          citations: citationsAcc.length > 0 ? citationsAcc : undefined,
-        },
-      ];
-      writeHistory(courseId, next);
-      if (mountedRef.current) setStreaming(null);
-      return answer;
-    },
-    onSuccess: () => setHistory(readHistory(courseId)),
-    onError: () => {
-      if (mountedRef.current) setStreaming(null);
+          history,
+          requestId,
+          (e: AskEvent) => {
+            if (e.type === "reasoning") reasoningAcc += e.delta;
+            if (e.type === "citations") citationsAcc = e.citations;
+            updateCourseStream(courseId, requestId, (current) => {
+              if (e.type === "reasoning") {
+                return { ...current, reasoning: current.reasoning + e.delta };
+              }
+              if (e.type === "token") return { ...current, text: current.text + e.delta };
+              if (e.type === "citations") return { ...current, citations: e.citations };
+              return current; // done：最终答案由落库 + 历史渲染接管
+            });
+          },
+        );
+        const next = [
+          ...readHistory(courseId),
+          {
+            id: crypto.randomUUID(),
+            query,
+            answer,
+            reasoning: reasoningAcc || undefined,
+            citations: citationsAcc.length > 0 ? citationsAcc : undefined,
+          },
+        ];
+        writeHistory(courseId, next);
+        return answer;
+      } finally {
+        // requestId 守卫避免旧请求的迟到收尾清掉后来一次重试的新流。
+        finishCourseStream(courseId, requestId);
+      }
     },
   });
 
-  const busy = ask.isPending;
-  const cancellableRequestId = streaming?.requestId ?? (busy ? ask.variables?.requestId : undefined);
-  // 进行中或失败的那一句也显示在对话里，体验更连贯。
-  const inFlightQuery = busy || ask.isError ? ask.variables?.query : undefined;
+  // MutationCache 跨组件卸载存活：抽屉重开后仍能恢复同一请求的 pending/error/result。
+  const requestStates = useMutationState({
+    filters: { mutationKey: ["course-chat", courseId] },
+    select: (mutation) => ({
+      status: mutation.state.status,
+      variables: mutation.state.variables as ChatRequest | undefined,
+      error: mutation.state.error,
+    }),
+  });
+  const pendingStates = requestStates.filter(
+    (request) => request.status === "pending" && request.variables,
+  );
+  const pendingRequest = pendingStates[pendingStates.length - 1]?.variables;
+  const latestRequest = requestStates[requestStates.length - 1];
+  const latestStatus = latestRequest?.status;
+  const failedRequest =
+    !pendingRequest && latestRequest?.status === "error" ? latestRequest : undefined;
+  const busy = pendingRequest !== undefined;
+  const cancellableRequestId = pendingRequest?.requestId;
+  // 进行中（含抽屉关闭期间）或失败的那一句也显示在对话里，体验更连贯。
+  const inFlightQuery = pendingRequest?.query ?? failedRequest?.variables?.query;
+  const hasPendingChatRequest = () =>
+    queryClient.getMutationCache().findAll({
+      mutationKey: ["course-chat", courseId],
+      exact: true,
+      status: "pending",
+    }).length > 0;
+
+  // mutationFn 先落盘、MutationCache 再进入 success；无论抽屉是否中途卸载都从同一处刷新。
+  useEffect(() => {
+    if (latestStatus === "success") setHistory(readHistory(courseId));
+  }, [courseId, latestStatus]);
 
   // 流式文本节流后再渲染：每个 token 只累积状态，全文解析至多 120ms 一次。
   const throttledStreamText = useThrottledValue(streaming?.text ?? "", 120);
@@ -255,13 +341,19 @@ export function CourseChatPanel({
     const tail = tailRef.current;
     if (!tail || typeof tail.scrollIntoView !== "function") return;
     // 流式期间用 auto（即时）：smooth 会被每次更新反复重启动画反而卡顿。
-    tail.scrollIntoView({ block: "end", behavior: streaming ? "auto" : "smooth" });
+    const reduceMotion =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    tail.scrollIntoView({
+      block: "end",
+      behavior: streaming || reduceMotion ? "auto" : "smooth",
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history, busy, ask.isError, throttledStreamText]);
+  }, [history, busy, failedRequest, throttledStreamText]);
 
   const submit = (raw?: string) => {
     const trimmed = (raw ?? query).trim();
-    if (!trimmed || busy) return;
+    if (!trimmed || busy || hasPendingChatRequest()) return;
     ask.mutate({
       query: trimmed,
       history: buildContext(history),
@@ -273,6 +365,11 @@ export function CourseChatPanel({
   const clearChat = () => {
     setHistory([]);
     writeHistory(courseId, []);
+    const mutationCache = queryClient.getMutationCache();
+    mutationCache
+      .findAll({ mutationKey: ["course-chat", courseId], exact: true })
+      .filter((mutation) => mutation.state.status !== "pending")
+      .forEach((mutation) => mutationCache.remove(mutation));
     ask.reset();
   };
 
@@ -290,7 +387,11 @@ export function CourseChatPanel({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div
+        role="log"
         aria-label={t("courseChat.chatHistory")}
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-busy={busy}
         className="min-h-0 flex-1 space-y-5 overflow-y-auto p-3"
       >
         {history.length === 0 && inFlightQuery === undefined && (
@@ -415,15 +516,19 @@ export function CourseChatPanel({
                 </div>
               </div>
             )}
-            {ask.isError && (
+            {failedRequest && (
               <div className="flex items-start gap-2">
                 {aiAvatar}
                 <ErrorNote
                   className="min-w-0 flex-1"
-                  error={ask.error}
+                  error={failedRequest.error}
                   onRetry={() =>
-                    ask.variables &&
-                    ask.mutate({ ...ask.variables, requestId: crypto.randomUUID() })
+                    failedRequest.variables &&
+                    !hasPendingChatRequest() &&
+                    ask.mutate({
+                      ...failedRequest.variables,
+                      requestId: crypto.randomUUID(),
+                    })
                   }
                 />
               </div>
@@ -433,8 +538,16 @@ export function CourseChatPanel({
         <div ref={tailRef} />
       </div>
 
+      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {busy
+          ? t("courseChat.generationStarted")
+          : latestStatus === "success"
+            ? t("courseChat.answerReady")
+            : ""}
+      </p>
+
       <div className="flex-none border-t border-[var(--border-subtle)] p-2.5">
-        <div className="flex items-center gap-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 transition focus-within:border-[var(--accent-text)]">
+        <div className="flex items-center gap-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 transition focus-within:border-[var(--focus-ring)]">
           {history.length > 0 && (
             <button
               type="button"

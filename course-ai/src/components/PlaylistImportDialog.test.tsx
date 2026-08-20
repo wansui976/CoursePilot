@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PlaylistImportDialog } from "./PlaylistImportDialog";
 
@@ -104,6 +104,23 @@ describe("PlaylistImportDialog", () => {
     expect(screen.getByText("已选 3 / 3")).toBeInTheDocument();
   });
 
+  it("exposes the quality limit as a keyboard-selectable radio group", async () => {
+    mockIpc.tools.probePlaylist.mockResolvedValue({
+      title: "合集",
+      episodes: [{ url: "u1", title: "第一讲", duration_ms: null }],
+    });
+    renderDialog();
+    fireEvent.change(screen.getByLabelText("播放列表链接"), { target: { value: "u" } });
+    fireEvent.click(screen.getByRole("button", { name: "枚举各集" }));
+
+    const qualityGroup = await screen.findByRole("group", { name: "清晰度上限" });
+    const best = within(qualityGroup).getByRole("radio", { name: "最高" });
+    const quality720 = within(qualityGroup).getByRole("radio", { name: "720P" });
+    expect(best).toBeChecked();
+    fireEvent.click(quality720);
+    expect(quality720).toBeChecked();
+  });
+
   it("lets you deselect episodes before importing", async () => {
     mockIpc.tools.probePlaylist.mockResolvedValue({
       title: "合集",
@@ -140,6 +157,16 @@ describe("PlaylistImportDialog", () => {
       name: "导入播放列表 / 合集",
     });
     expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveClass(
+      "max-h-[calc(100dvh-2rem)]",
+      "w-full",
+      "max-w-[460px]",
+      "overflow-y-auto",
+    );
+    expect(screen.getByTestId("playlist-import-overlay")).toHaveClass("p-4");
+    expect(screen.getByLabelText("播放列表链接")).toHaveClass(
+      "focus:border-[var(--focus-ring)]",
+    );
     await waitFor(() =>
       expect(screen.getByLabelText("播放列表链接")).toHaveFocus(),
     );
@@ -168,12 +195,29 @@ describe("PlaylistImportDialog", () => {
     await screen.findByText("合集");
     fireEvent.click(screen.getByRole("button", { name: "导入 1 个" }));
     await screen.findByText(/正在导入 0 \/ 1/);
+    expect(
+      screen.getByRole("progressbar", { name: "播放列表导入进度" }),
+    ).toHaveAttribute("aria-valuenow", "0");
 
     fireEvent.keyDown(document, { key: "Escape" });
     fireEvent.pointerDown(screen.getByTestId("playlist-import-overlay"));
     expect(onClose).not.toHaveBeenCalled();
 
     finishImport({ id: "v1" });
-    await screen.findByText(/导入完成：成功 1 个/);
+    const result = await screen.findByText(/导入完成：成功 1 个/);
+    expect(result).toHaveAttribute("role", "status");
+  });
+
+  it("announces URL-check failures and offers an in-place retry", async () => {
+    mockIpc.tools.hasBilibiliCookies.mockRejectedValue(new Error("cookie check failed"));
+    renderDialog();
+
+    fireEvent.change(screen.getByLabelText("播放列表链接"), {
+      target: { value: "https://b.com/list" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "枚举各集" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("cookie check failed");
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
   });
 });

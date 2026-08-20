@@ -11,12 +11,14 @@ export function CourseSidebar({
   onSelect,
   onClearSelection,
   onOpenRecycleBin,
+  onTransientCloseChange,
   className,
 }: {
   selectedCourseId: string | null;
   onSelect: (id: string) => void;
   onClearSelection?: () => void;
   onOpenRecycleBin?: () => void;
+  onTransientCloseChange?: (close: (() => void) | null) => void;
   className?: string;
 }) {
   const { t } = useTranslation();
@@ -67,6 +69,7 @@ export function CourseSidebar({
           selectedCourseId={selectedCourseId}
           onSelect={onSelect}
           onClearSelection={onClearSelection}
+          onTransientCloseChange={onTransientCloseChange}
         />
       </div>
     </aside>

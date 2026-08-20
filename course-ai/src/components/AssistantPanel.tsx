@@ -1,6 +1,8 @@
 import {
+  memo,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type KeyboardEvent,
@@ -8,12 +10,14 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   ArrowDown,
   ArrowUpRight,
   AtSign,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -21,10 +25,15 @@ import {
   History as HistoryIcon,
   LoaderCircle,
   MessageSquarePlus,
+  Move,
+  PanelLeft,
+  PenLine,
   RefreshCw,
+  Save,
   Send,
   Sparkles,
   Square,
+  Trash2,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -49,10 +58,12 @@ import {
 import {
   appendRecentAssistantQuestion,
   createAssistantConversation,
+  deleteAssistantConversation,
   MAX_ASSISTANT_CONVERSATIONS,
   readAssistantConversation,
   readAssistantConversations,
   readRecentAssistantQuestions,
+  renameAssistantConversation,
   saveAssistantConversation,
   tryCreateAssistantConversation,
   trySetActiveAssistantConversation,
@@ -60,6 +71,7 @@ import {
 } from "@/lib/assistantConversations";
 import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
+import { markdownToTiptap } from "@/lib/markdownToTiptap";
 import { isMobile, isTablet } from "@/lib/platform";
 import { formatMs } from "@/lib/time";
 import {
@@ -193,6 +205,9 @@ type Turn = AssistantTurnRecord & {
   toolExecutionStatus?: ToolExecutionStatus;
   toolExecutionName?: string;
 };
+
+/** 提问范围的用户选择。auto 跟随界面当前选中项，其余三档显式覆盖。 */
+type ScopeChoice = "auto" | "video" | "course" | "all";
 
 function recordToolStarted(
   toolRuns: AssistantToolRun[],
@@ -332,24 +347,68 @@ function checkpointSummary(checkpoint: AssistantCheckpoint, t: TFunction) {
 function suggestionsFor(context: AssistantContext, t: TFunction) {
   if (context.video_id) {
     return [
-      { label: t("assistant.suggestSummarizeVideo"), prompt: "概括当前视频的主要内容" },
-      { label: t("assistant.suggestFindExamples"), prompt: "查找当前视频里讲例题的位置" },
-      { label: t("assistant.suggestKeyPoints"), prompt: "梳理当前视频最重要的知识点" },
+      {
+        label: t("assistant.suggestSummarizeVideo"),
+        prompt: t("assistant.suggestSummarizeVideoPrompt"),
+      },
+      {
+        label: t("assistant.suggestFindExamples"),
+        prompt: t("assistant.suggestFindExamplesPrompt"),
+      },
+      {
+        label: t("assistant.suggestKeyPoints"),
+        prompt: t("assistant.suggestKeyPointsPrompt"),
+      },
     ];
   }
   if (context.course_id) {
     return [
-      { label: t("assistant.suggestOverviewCourse"), prompt: "概览这门课程的主要内容" },
-      { label: t("assistant.suggestVideoList"), prompt: "列出这门课程的全部视频" },
-      { label: t("assistant.suggestCourseKeyPoints"), prompt: "查找这门课程最重要的知识点" },
+      {
+        label: t("assistant.suggestOverviewCourse"),
+        prompt: t("assistant.suggestOverviewCoursePrompt"),
+      },
+      {
+        label: t("assistant.suggestVideoList"),
+        prompt: t("assistant.suggestVideoListPrompt"),
+      },
+      {
+        label: t("assistant.suggestCourseKeyPoints"),
+        prompt: t("assistant.suggestCourseKeyPointsPrompt"),
+      },
     ];
   }
   return [
-    { label: t("assistant.suggestMyCourses"), prompt: "列出我的全部课程" },
-    { label: t("assistant.suggestPlanStudy"), prompt: "根据我的课程规划下一步学习" },
-    { label: t("assistant.suggestDarkMode"), prompt: "切换到夜间模式" },
+    { label: t("assistant.suggestMyCourses"), prompt: t("assistant.suggestMyCoursesPrompt") },
+    {
+      label: t("assistant.suggestPlanStudy"),
+      prompt: t("assistant.suggestPlanStudyPrompt"),
+    },
+    { label: t("assistant.suggestDarkMode"), prompt: t("assistant.suggestDarkModePrompt") },
   ];
 }
+
+/**
+ * 回答正文的整段渲染。
+ *
+ * 用 memo 包一层：流式期间只有当前这一轮在变，已经完成的回答字符串完全不变，
+ * 不该因为 copiedTurnId、busy、scrolledAway 这类无关状态变化而被反复 parse（带公式的
+ * 长回答每帧重解析是 O(n²) 的浪费）。seek 回调走 ref 取最新 navigate，保持引用稳定。
+ */
+const MemoAnswer = memo(function MemoAnswer({
+  answer,
+  turn,
+  onSeek,
+}: {
+  answer: string;
+  turn: Turn;
+  onSeek: (turn: Turn, ms: number) => void;
+}) {
+  return (
+    <div className="break-words text-sm leading-relaxed text-[var(--text-normal)]">
+      {renderMarkdown(answer, (ms) => onSeek(turn, ms))}
+    </div>
+  );
+});
 
 export function AssistantPanel({
   context,
@@ -357,6 +416,7 @@ export function AssistantPanel({
   onActionApplied,
   compact = false,
   bottomNavigationVisible = false,
+  launcherVisible = true,
 }: {
   context: AssistantContext;
   /** 打开视频 / 跳转由外层执行——只有它知道播放器和路由。 */
@@ -367,9 +427,12 @@ export function AssistantPanel({
   compact?: boolean;
   /** 课程库窄屏下底部有 56px 主导航，抽屉和入口都要避开它。 */
   bottomNavigationVisible?: boolean;
+  /** 工具型整页可以暂时收起入口，避免浮钮盖住设置/回收站的行内操作。 */
+  launcherVisible?: boolean;
 }) {
   const { t, i18n } = useTranslation();
-  const { open, side, width, setOpen, dock, setWidth } = useAssistantUi();
+  const queryClient = useQueryClient();
+  const { open, side, width, mode, setOpen, dock, setWidth, setMode } = useAssistantUi();
   const [initialConversation] = useState(initialAssistantConversation);
   const initialSession = initialConversation.session;
   const [conversationState, setConversationState] = useState<AssistantConversationsState>(
@@ -403,6 +466,7 @@ export function AssistantPanel({
   const historyRef = useRef(initialSession.history);
   const conversationEpochRef = useRef(0);
   const copyTimerRef = useRef<number | null>(null);
+  const saveToNotesTimerRef = useRef<number | null>(null);
   const persistTimerRef = useRef<number | null>(null);
   const recentQuestionsRef = useRef(readRecentAssistantQuestions());
   const recentQuestionIndexRef = useRef<number | null>(null);
@@ -426,36 +490,130 @@ export function AssistantPanel({
   const [scrolledAway, setScrolledAway] = useState(false);
   /** 拖动内侧边框时的实时宽度。松手才写进偏好，免得一次拖动往磁盘上写几十遍。 */
   const [resizeWidth, setResizeWidth] = useState<number | null>(null);
+  /** 收起后又有新回答落下、用户还没回来看过。给球挂一个「完成点」。 */
+  const [hasUnread, setHasUnread] = useState(false);
+  /** 刚保存到笔记的那条回答，短暂显示对勾反馈。 */
+  const [savedToNotesTurnId, setSavedToNotesTurnId] = useState<string | null>(null);
+  /** 被 MAX_RENDERED_TURNS 截掉、不再显示在列表里的更早轮次数量。 */
+  const [hiddenTurnCount, setHiddenTurnCount] = useState(0);
+  /** 用户显式选择的提问范围；auto 跟随当前选中项。 */
+  const [scopeChoice, setScopeChoice] = useState<ScopeChoice>("auto");
+  const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
+  const scopeMenuId = `assistant-scope-menu-${useId()}`;
+  /** 正在重命名的会话 id 与其输入草稿。 */
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  /** 移动抽屉下滑关闭手势的实时位移；null 表示未在拖拽。 */
+  const [sheetDragY, setSheetDragY] = useState<number | null>(null);
   const toggleRef = useRef(() => {});
+  const navigateFromTurnRef = useRef<(turn: Turn, action: AssistantAction) => void>(() => {});
+  const scopeMenuRef = useRef<HTMLDivElement>(null);
+  const scopeTriggerRef = useRef<HTMLButtonElement>(null);
+  const scopeItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const panelWidth = resizeWidth ?? width;
 
   // 「现在在干什么」跟着流走：工具执行优先于此前已经吐出的思考或过场正文。
   const pendingTurn = turns.find((turn) => turn.pending);
-  const activeToolLabel = pendingTurn?.activeTool
-    ? t(`assistantTools.${pendingTurn.activeTool.name}`, {
-        defaultValue: pendingTurn.activeTool.name,
-      })
-    : null;
-  const finishedToolLabel = pendingTurn?.toolExecutionName
-    ? t(`assistantTools.${pendingTurn.toolExecutionName}`, {
-        defaultValue: pendingTurn.toolExecutionName,
-      })
-    : null;
-  const streamingLabel = activeToolLabel
-    ? t("assistant.usingTool", { tool: activeToolLabel })
-    : pendingTurn?.toolExecutionStatus === "failed"
-      ? t("assistant.toolFailedContinuing", { tool: finishedToolLabel })
-      : pendingTurn?.toolExecutionStatus === "canceled"
-        ? t("assistant.toolCanceled", { tool: finishedToolLabel })
-        : pendingTurn?.answer
-          ? t("assistant.answering")
-          : (pendingTurn?.toolRuns?.length ?? 0) > 0 || pendingTurn?.tools.length
-            ? t("assistant.organizing")
-            : t("assistant.thinkingStatus");
+  function streamingLabelFor(turn: Turn) {
+    const activeToolLabel = turn.activeTool
+      ? t(`assistantTools.${turn.activeTool.name}`, { defaultValue: turn.activeTool.name })
+      : null;
+    const finishedToolLabel = turn.toolExecutionName
+      ? t(`assistantTools.${turn.toolExecutionName}`, { defaultValue: turn.toolExecutionName })
+      : null;
+    return activeToolLabel
+      ? t("assistant.usingTool", { tool: activeToolLabel })
+      : turn.toolExecutionStatus === "failed"
+        ? t("assistant.toolFailedContinuing", { tool: finishedToolLabel })
+        : turn.toolExecutionStatus === "canceled"
+          ? t("assistant.toolCanceled", { tool: finishedToolLabel })
+          : turn.answer
+            ? t("assistant.answering")
+            : (turn.toolRuns?.length ?? 0) > 0 || turn.tools.length
+              ? t("assistant.organizing")
+              : t("assistant.thinkingStatus");
+  }
+  const streamingLabel = pendingTurn ? streamingLabelFor(pendingTurn) : "";
   const setThemePref = useTheme((state) => state.setPref);
   const pendingInlineAsk = useInlineAsk((state) => state.pending);
   const clearInlineAsk = useInlineAsk((state) => state.clear);
-  const scopeLabel = contextLabel(context, t);
+
+  // 范围选择：auto 跟随界面当前选中项；显式三档覆盖 context 后再发给后端。
+  const resolvedScope: "video" | "course" | "all" =
+    scopeChoice === "video" && context.video_id
+      ? "video"
+      : scopeChoice === "course" && context.course_id
+        ? "course"
+        : scopeChoice === "all"
+          ? "all"
+          : context.video_id
+            ? "video"
+            : context.course_id
+              ? "course"
+              : "all";
+  function scopedContext(scope: "video" | "course" | "all"): AssistantContext {
+    if (scope === "video") return context;
+    if (scope === "course")
+      return { course_id: context.course_id, video_id: null, position_ms: null };
+    return { course_id: null, video_id: null, position_ms: null };
+  }
+  const resolvedContext = scopedContext(resolvedScope);
+  const scopeLabel = contextLabel(resolvedContext, t);
+  const scopeOptions: { value: ScopeChoice; label: string; enabled: boolean }[] = [
+    { value: "auto", label: t("assistant.scopeAuto"), enabled: true },
+    {
+      value: "video",
+      label: t("assistant.scopeCurrentVideo"),
+      enabled: Boolean(context.video_id),
+    },
+    {
+      value: "course",
+      label: t("assistant.scopeCurrentCourse"),
+      enabled: Boolean(context.course_id),
+    },
+    { value: "all", label: t("assistant.scopeAllCourses"), enabled: true },
+  ];
+
+  const closeScopeMenu = useCallback((restoreFocus = true) => {
+    setScopeMenuOpen(false);
+    if (restoreFocus) {
+      requestAnimationFrame(() => scopeTriggerRef.current?.focus());
+    }
+  }, []);
+
+  const handleScopeMenuKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      const items = scopeItemRefs.current.filter(
+        (item): item is HTMLButtonElement => !!item && !item.disabled,
+      );
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeScopeMenu();
+        return;
+      }
+      if (event.key === "Tab") {
+        closeScopeMenu(false);
+        return;
+      }
+      if (!items.length) return;
+      const current = items.indexOf(document.activeElement as HTMLButtonElement);
+      let next: number | null = null;
+      if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+        next = current < 0 ? 0 : (current + 1) % items.length;
+      } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+        next = current <= 0 ? items.length - 1 : current - 1;
+      } else if (event.key === "Home") {
+        next = 0;
+      } else if (event.key === "End") {
+        next = items.length - 1;
+      }
+      if (next == null) return;
+      event.preventDefault();
+      items[next]?.focus();
+    },
+    [closeScopeMenu],
+  );
   const actionExecutionBusy = actionExecutionCount > 0;
   const generationStatus = stopping ? t("assistant.stopping") : streamingLabel;
 
@@ -684,6 +842,12 @@ export function AssistantPanel({
     onNavigate(action);
   }
 
+  // seek 回调保持引用稳定，供 MemoAnswer 的 memo 生效；始终读最新的 navigateFromTurn。
+  navigateFromTurnRef.current = navigateFromTurn;
+  const seekInTurn = useCallback((turn: Turn, ms: number) => {
+    navigateFromTurnRef.current(turn, { kind: "seek_to", at_ms: ms });
+  }, []);
+
   useEffect(() => {
     // 新一轮出来且用户原本在底部时才跟到底。用户主动翻看旧回答/动作卡后，
     // 工具状态或回执更新不能把视线强行抢回去。
@@ -768,6 +932,34 @@ export function AssistantPanel({
     requestAnimationFrame(() => launcherRef.current?.focus());
   }, [open]);
 
+  // 展开即视为「已读」，清掉球上的完成点。
+  useEffect(() => {
+    if (open) setHasUnread(false);
+  }, [open]);
+
+  // 范围菜单：点菜单外任意处收起。
+  useEffect(() => {
+    if (!scopeMenuOpen) return;
+    const frame = requestAnimationFrame(() => {
+      const enabled = scopeItemRefs.current.filter(
+        (item): item is HTMLButtonElement => !!item && !item.disabled,
+      );
+      const selectedIndex = enabled.findIndex(
+        (item) => item.getAttribute("aria-checked") === "true",
+      );
+      (enabled[selectedIndex >= 0 ? selectedIndex : 0] ?? enabled[0])?.focus();
+    });
+    const onPointerDown = (event: PointerEvent) => {
+      if (scopeMenuRef.current?.contains(event.target as Node)) return;
+      closeScopeMenu(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [closeScopeMenu, scopeMenuOpen]);
+
   useEffect(() => {
     if (!open || !mobile) return;
     const frame = requestAnimationFrame(() => inputRef.current?.focus());
@@ -800,6 +992,7 @@ export function AssistantPanel({
       mountedRef.current = false;
       dragCleanupRef.current?.();
       if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
+      if (saveToNotesTimerRef.current != null) window.clearTimeout(saveToNotesTimerRef.current);
       clearScheduledPersistence();
       persistConversationSnapshot(activeConversationIdRef.current, sessionSnapshotRef.current);
       const requestId = activeRequestRef.current;
@@ -863,6 +1056,17 @@ export function AssistantPanel({
     const nearestSide: DockSide =
       position.x + panel.width / 2 < viewportSize().width / 2 ? "left" : "right";
     dockToStrip(nearestSide, position.y, focusLauncher);
+  }
+
+  function enterDockMode() {
+    setMode("docked");
+    setOpen(true);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  function exitDockMode() {
+    setMode("float");
+    collapseToNearestSide(true);
   }
 
   function updateDrag(clientX: number, clientY: number) {
@@ -1083,7 +1287,18 @@ export function AssistantPanel({
     const startX = event.clientX;
     const startWidth = measurePanel().width;
     // 不动的那条边。左边框拖动时右边固定，反之亦然。
-    const anchor = fromLeftEdge ? position.x + startWidth : position.x;
+    // 浮动面板按 position（渲染真实值）；停靠侧栏时贴边渲染、position 是旧值，
+    // 改按实测矩形，jsdom 里矩形为 0 时退到贴边位置（右 0 → viewport.width，左 0 → 0）。
+    let anchor: number;
+    if (docked) {
+      const rect = panelRef.current?.getBoundingClientRect();
+      const viewport = viewportSize();
+      const panelLeft = rect?.width ? rect.left : side === "left" ? 0 : viewport.width - startWidth;
+      const panelRight = rect?.width ? rect.right : panelLeft + startWidth;
+      anchor = fromLeftEdge ? panelRight : panelLeft;
+    } else {
+      anchor = fromLeftEdge ? position.x + startWidth : position.x;
+    }
 
     try {
       handle.setPointerCapture(pointerId);
@@ -1218,6 +1433,41 @@ export function AssistantPanel({
     }
   }
 
+  // 移动抽屉的下滑关闭：从抓手往下拖，越过阈值就收起。只用 pointer capture，
+  // 不必像桌面面板那样挂 window 监听——这里是垂直单方向，手势要简单可靠。
+  const SHEET_CLOSE_THRESHOLD = 120;
+  function beginSheetCloseDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!mobile || (event.pointerType === "mouse" && event.button !== 0)) return;
+    const handle = event.currentTarget;
+    try {
+      handle.setPointerCapture(event.pointerId);
+    } catch {
+      // 缺少 pointer capture 时手势不可靠，直接放弃。
+    }
+    const startY = event.clientY;
+    const onMove = (moveEvent: PointerEvent) => {
+      setSheetDragY(Math.max(0, moveEvent.clientY - startY));
+    };
+    const onEnd = (endEvent: PointerEvent) => {
+      const dy = endEvent.clientY - startY;
+      setSheetDragY(null);
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onEnd);
+      handle.removeEventListener("pointercancel", onEnd);
+      try {
+        if (handle.hasPointerCapture(endEvent.pointerId)) {
+          handle.releasePointerCapture(endEvent.pointerId);
+        }
+      } catch {
+        // 同上。
+      }
+      if (dy > SHEET_CLOSE_THRESHOLD) collapseToNearestSide(true);
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onEnd);
+    handle.addEventListener("pointercancel", onEnd);
+  }
+
   async function send(suggestedQuestion?: string, rememberQuestion = true) {
     const question = (suggestedQuestion ?? input).trim();
     if (!question || busy || activeRequestRef.current) return;
@@ -1225,6 +1475,8 @@ export function AssistantPanel({
     const requestId = crypto.randomUUID();
     const turnId = crypto.randomUUID();
     const historyAtSend = historyRef.current;
+    // 范围选择在发送时定格：这轮「这个视频」指的是谁，就按那个上下文发出去、也按它存下来。
+    const askContext = scopedContext(resolvedScope);
     activeRequestRef.current = requestId;
     if (rememberQuestion) {
       recentQuestionsRef.current = appendRecentAssistantQuestion(question);
@@ -1250,6 +1502,9 @@ export function AssistantPanel({
     sessionSnapshotRef.current = startingSnapshot;
     persistConversationSnapshot(conversationId, startingSnapshot);
     // 长工具链可能要等几十秒；问题先进入对话，让用户立即确认自己发出了什么。
+    if (turns.length + 1 > MAX_RENDERED_TURNS) {
+      setHiddenTurnCount((count) => count + (turns.length + 1 - MAX_RENDERED_TURNS));
+    }
     setTurns((prev) =>
       [
         ...prev,
@@ -1262,7 +1517,7 @@ export function AssistantPanel({
           canceled: false,
           actionResults: [],
           pending: true,
-          context: { ...context },
+          context: { ...askContext },
         },
       ].slice(-MAX_RENDERED_TURNS),
     );
@@ -1322,7 +1577,7 @@ export function AssistantPanel({
       };
       const reply = await ipc.assistant.ask(
         question,
-        context,
+        askContext,
         historyAtSend,
         requestId,
         (event) => {
@@ -1485,6 +1740,8 @@ export function AssistantPanel({
               })
             : t("assistant.responseComplete"),
       );
+      // 收起时跑完的请求在球上留一个「完成点」；用户回来展开后清掉。
+      if (!canceled && !useAssistantUi.getState().open) setHasUnread(true);
     } catch (e) {
       if (!mountedRef.current) return;
       // 把问题放回输入框：让用户能直接重发，而不是重新打一遍。
@@ -1497,6 +1754,7 @@ export function AssistantPanel({
       });
       setError(humanizeError(e));
       setStatusAnnouncement("");
+      if (!useAssistantUi.getState().open) setHasUnread(true);
     } finally {
       locallyStoppedRequestsRef.current.delete(requestId);
       if (activeRequestRef.current === requestId) {
@@ -1521,6 +1779,42 @@ export function AssistantPanel({
       copyTimerRef.current = window.setTimeout(() => setCopiedTurnId(null), 1500);
     } catch (e) {
       setError(t("assistant.copyFailed", { error: humanizeError(e) }));
+    }
+  }
+
+  /** 把一条回答追加进当前视频的笔记（Tiptap 文档）。 */
+  async function saveToNotes(turn: Turn) {
+    const videoId = turn.context?.video_id ?? context.video_id;
+    if (!videoId) {
+      setError(t("assistant.notesNeedVideo"));
+      return;
+    }
+    try {
+      const existing = await ipc.ai.getNotes(videoId);
+      let doc = null as { type: string; content?: unknown[] } | null;
+      if (existing && existing.trim()) {
+        try {
+          const parsed = JSON.parse(existing) as { type?: unknown; content?: unknown };
+          if (parsed && parsed.type === "doc" && Array.isArray(parsed.content)) {
+            doc = parsed as { type: string; content?: unknown[] };
+          }
+        } catch {
+          // 非 JSON → 当 markdown 处理。
+        }
+      }
+      if (!doc) doc = markdownToTiptap(existing && existing.trim() ? existing : "");
+      const answerDoc = markdownToTiptap(turn.answer);
+      const merged = {
+        type: "doc",
+        content: [...(doc.content ?? []), ...(answerDoc.content ?? [])],
+      };
+      await ipc.ai.saveNotes(videoId, JSON.stringify(merged));
+      queryClient.invalidateQueries({ queryKey: ["notes", videoId] });
+      setSavedToNotesTurnId(turn.id);
+      if (saveToNotesTimerRef.current != null) window.clearTimeout(saveToNotesTimerRef.current);
+      saveToNotesTimerRef.current = window.setTimeout(() => setSavedToNotesTurnId(null), 1500);
+    } catch (e) {
+      setError(humanizeError(e));
     }
   }
 
@@ -1615,6 +1909,10 @@ export function AssistantPanel({
     setError("");
     setStatusAnnouncement("");
     setCopiedTurnId(null);
+    setSavedToNotesTurnId(null);
+    setHiddenTurnCount(0);
+    setRenamingId(null);
+    setRenameDraft("");
     setBusy(false);
     setStopping(false);
     actionExecutionCountRef.current = 0;
@@ -1675,23 +1973,68 @@ export function AssistantPanel({
     activateConversation(created.createdId, created.state, EMPTY_ASSISTANT_SESSION);
   }
 
+  function submitConversationRename(conversationId: string) {
+    const title = renameDraft.trim();
+    if (!title) {
+      setRenamingId(null);
+      setRenameDraft("");
+      return;
+    }
+    setConversationState(renameAssistantConversation(conversationId, title));
+    setRenamingId(null);
+    setRenameDraft("");
+  }
+
+  function removeConversation(conversationId: string) {
+    if (busy || activeRequestRef.current || actionExecutionCountRef.current > 0) return;
+    const next = deleteAssistantConversation(conversationId);
+    if (conversationId === activeConversationIdRef.current) {
+      // 删的是当前会话：切到删后仍激活的那个（可能为空）。
+      if (next.activeId) {
+        const target = readAssistantConversation(next.activeId);
+        if (target) {
+          activateConversation(next.activeId, next, target.session);
+          return;
+        }
+      }
+      // 没有剩余会话了：就地清空并新建一个。
+      const created = tryCreateAssistantConversation();
+      if (created.createdId) {
+        activateConversation(created.createdId, created.state, EMPTY_ASSISTANT_SESSION);
+      }
+      return;
+    }
+    setConversationState(next);
+  }
+
+  // 工作台隐藏主导航后，面板自己的右下角操作仍占用一条触控操作轨道。
+  // 助手入口必须停在这条轨道上方，不能与生成/导出按钮争抢同一组像素。
+  const launcherInWorkbench = mobile && !bottomNavigationVisible;
   const launcherBottom = bottomNavigationVisible
     ? "calc(56px + env(safe-area-inset-bottom, 0px) + 24px)"
-    : "calc(env(safe-area-inset-bottom, 0px) + 24px)";
+    : launcherInWorkbench
+      ? "calc(env(safe-area-inset-bottom, 0px) + 88px)"
+      : "calc(env(safe-area-inset-bottom, 0px) + 24px)";
+  // 桌面端「停靠为侧栏」：贴边全高、内容让位，不再盖在阅读物上。
+  const docked = !mobile && mode === "docked";
+  const panelShown = docked || open;
   const shell = mobile
     ? "fixed inset-x-0 z-[47] h-[70dvh] max-h-[calc(100dvh-56px)] rounded-t-2xl border-t"
-    : "fixed z-40 h-[min(720px,calc(100dvh-2rem))] max-w-[calc(100vw-2rem)] rounded-2xl border";
+    : docked
+      ? "fixed z-40 top-0 bottom-0 rounded-none border"
+      : "fixed z-40 h-[min(720px,calc(100dvh-2rem))] max-w-[calc(100vw-2rem)] rounded-2xl border";
   const panelBottom = bottomNavigationVisible
     ? "calc(56px + env(safe-area-inset-bottom, 0px))"
     : "env(safe-area-inset-bottom, 0px)";
 
   return (
     <>
-      {!open && (
+      {!panelShown && launcherVisible && (
       <button
         ref={launcherRef}
         type="button"
         aria-label={t("assistant.openAssistant")}
+        aria-busy={busy || undefined}
         title={t("assistant.openWithShortcut", { shortcut: toggleShortcutLabel() })}
         data-dock-side={mobile ? undefined : side}
         onClick={() => {
@@ -1716,13 +2059,23 @@ export function AssistantPanel({
         // hover 同理不能换成 card-hover（7% 的白），一悬停球就没了。
         className={
           mobile
-            ? "ca-touch-44 fixed right-4 z-40 grid h-12 w-12 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] transition-colors hover:border-[var(--border-strong)] motion-reduce:transition-none"
-            : `ca-touch-44 fixed z-40 grid h-14 w-14 touch-none select-none cursor-grab active:cursor-grabbing place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] transition hover:scale-105 hover:border-[var(--border-strong)] motion-reduce:transition-none motion-reduce:hover:scale-100 ${
+            ? `ca-touch-44 fixed right-4 z-40 grid h-12 w-12 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] transition-colors hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none ${launcherInWorkbench ? "ca-workbench-assistant-launcher" : ""}`
+            : `ca-touch-44 fixed z-40 grid h-14 w-14 touch-none select-none cursor-grab active:cursor-grabbing place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] transition hover:scale-105 hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none motion-reduce:hover:scale-100 ${
                 launcherPosition ? "" : side === "left" ? "left-3" : "right-3"
               }`
         }
       >
-        <Sparkles className="h-5 w-5 text-[var(--accent)]" aria-hidden="true" />
+        {busy ? (
+          <LoaderCircle className="h-5 w-5 animate-spin text-[var(--accent-text)]" aria-hidden="true" />
+        ) : (
+          <Sparkles className="h-5 w-5 text-[var(--accent-text)]" aria-hidden="true" />
+        )}
+        {hasUnread && !busy && (
+          <span
+            aria-hidden="true"
+            className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--surface-panel)] bg-[var(--accent)]"
+          />
+        )}
       </button>
       )}
       {open && mobile && (
@@ -1739,7 +2092,7 @@ export function AssistantPanel({
       aria-labelledby="assistant-panel-title"
       aria-modal={mobile ? true : undefined}
       role={mobile ? "dialog" : "complementary"}
-      hidden={!open}
+      hidden={!panelShown}
       onKeyDown={(event) => {
         if (event.key === "Tab" && mobile) {
           const focusable = focusableElements(event.currentTarget);
@@ -1763,9 +2116,17 @@ export function AssistantPanel({
         if (event.key !== "Escape") return;
         event.preventDefault();
         event.stopPropagation();
+        if (scopeMenuOpen) {
+          closeScopeMenu();
+          return;
+        }
         if (historyOpen) {
           setHistoryOpen(false);
           requestAnimationFrame(() => historyButtonRef.current?.focus());
+          return;
+        }
+        if (docked) {
+          exitDockMode();
           return;
         }
         collapseToNearestSide(true);
@@ -1774,13 +2135,25 @@ export function AssistantPanel({
       data-snap-side={mobile ? undefined : snapSide ?? undefined}
       style={
         mobile
-          ? { bottom: panelBottom }
-          : { left: position.x, top: position.y, width: panelWidth }
+          ? { bottom: panelBottom, transform: sheetDragY != null ? `translateY(${sheetDragY}px)` : undefined }
+          : docked
+            ? side === "left"
+              ? { left: 0, top: 0, width: panelWidth }
+              : { right: 0, top: 0, width: panelWidth }
+            : { left: position.x, top: position.y, width: panelWidth }
       }
-      className={`${open ? "flex" : "hidden"} ${shell} flex-col border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] ${
+      className={`${panelShown ? "flex" : "hidden"} ${shell} flex-col border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] ${
         snapSide ? "ring-2 ring-[var(--accent)]" : ""
-      }`}
+      } ${sheetDragY != null ? "transition-none" : ""}`}
     >
+      {mobile && (
+        <div
+          className="flex flex-none justify-center pb-1 pt-2"
+          onPointerDown={beginSheetCloseDrag}
+        >
+          <span className="h-1 w-10 rounded-full bg-[var(--border-control)]" aria-hidden="true" />
+        </div>
+      )}
       {/* 朝向屏幕内侧的那条边是宽度抓手。固定宽度对一段带列表和公式的长回答太窄了。 */}
       {!mobile && (
         <div
@@ -1793,7 +2166,7 @@ export function AssistantPanel({
           tabIndex={0}
           onPointerDown={beginResize}
           onKeyDown={resizeWithKeyboard}
-          className={`absolute inset-y-3 z-10 w-1.5 cursor-col-resize touch-none rounded-full transition-colors hover:bg-[var(--accent-weak-2)] focus-visible:outline-none focus-visible:bg-[var(--accent)] motion-reduce:transition-none ${
+          className={`absolute inset-y-3 z-10 w-2 cursor-col-resize touch-none rounded-full bg-[var(--border-subtle)] transition-colors hover:bg-[var(--accent)] focus-visible:outline-none focus-visible:bg-[var(--focus-ring)] motion-reduce:transition-none ${
             side === "right" ? "left-0" : "right-0"
           } ${resizeWidth === null ? "" : "bg-[var(--accent)]"}`}
         />
@@ -1803,7 +2176,7 @@ export function AssistantPanel({
             该待在你打字的地方，而不是滚动区顶上那条最容易被忽略的边。 */}
         {mobile ? (
           <>
-            <Sparkles className="h-4 w-4 flex-none text-[var(--accent)]" />
+            <Sparkles className="h-4 w-4 flex-none text-[var(--accent-text)]" />
             <span
               id="assistant-panel-title"
               className="min-w-0 flex-1 text-sm font-medium text-[var(--text-strong)]"
@@ -1811,6 +2184,16 @@ export function AssistantPanel({
               {t("assistant.title")}
             </span>
           </>
+        ) : docked ? (
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 px-1 py-1">
+            <Sparkles className="h-4 w-4 flex-none text-[var(--accent-text)]" />
+            <span
+              id="assistant-panel-title"
+              className="min-w-0 flex-1 text-sm font-medium text-[var(--text-strong)]"
+            >
+              {t("assistant.title")}
+            </span>
+          </span>
         ) : (
           <button
             type="button"
@@ -1818,10 +2201,10 @@ export function AssistantPanel({
             title={t("assistant.dragPanel")}
             onPointerDown={beginPanelDrag}
             onKeyDown={movePanelWithKeyboard}
-            className="-ml-1 flex min-w-0 flex-1 touch-none select-none items-center gap-1.5 rounded-md px-1 py-1 text-left cursor-grab active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+            className="-ml-1 flex min-w-0 flex-1 touch-none select-none items-center gap-1.5 rounded-md px-1 py-1 text-left cursor-grab active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
           >
             <GripHorizontal className="h-4 w-4 flex-none text-[var(--text-faint)]" />
-            <Sparkles className="h-4 w-4 flex-none text-[var(--accent)]" />
+            <Sparkles className="h-4 w-4 flex-none text-[var(--accent-text)]" />
             <span
               id="assistant-panel-title"
               className="min-w-0 flex-1 text-sm font-medium text-[var(--text-strong)]"
@@ -1867,8 +2250,8 @@ export function AssistantPanel({
             <MessageSquarePlus className="h-4 w-4" />
           </Button>
         )}
-        {/* 手机端没有左右可停靠的空间，只有桌面端给这个按钮。 */}
-        {!mobile && (
+        {/* 手机端没有左右可停靠的空间，只有桌面端给这个按钮；停靠成侧栏后位置固定，也无需左右切换。 */}
+        {!mobile && !docked && (
           <Button
             size="icon"
             variant="ghost"
@@ -1882,12 +2265,25 @@ export function AssistantPanel({
             )}
           </Button>
         )}
+        {/* 桌面端「停靠为侧栏 / 恢复浮动」。 */}
+        {!mobile && (
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label={docked ? t("assistant.undock") : t("assistant.dockAsSidebar")}
+            title={docked ? t("assistant.undock") : t("assistant.dockAsSidebar")}
+            onClick={docked ? exitDockMode : enterDockMode}
+            className="ca-touch-44"
+          >
+            {docked ? <Move className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}
+          </Button>
+        )}
         <Button
           size="icon"
           variant="ghost"
           aria-label={t("assistant.collapseAssistant")}
           title={t("assistant.collapseWithShortcut", { shortcut: toggleShortcutLabel() })}
-          onClick={() => collapseToNearestSide(true)}
+          onClick={() => (docked ? exitDockMode() : collapseToNearestSide(true))}
           className="ca-touch-44"
         >
           <X className="h-4 w-4" />
@@ -1922,33 +2318,90 @@ export function AssistantPanel({
                   i18n.resolvedLanguage ?? i18n.language,
                 );
                 return (
-                  <div key={conversation.id} role="listitem">
+                  <div
+                    key={conversation.id}
+                    role="listitem"
+                    className="flex items-center border-b border-[var(--border-subtle)]"
+                  >
+                    {renamingId === conversation.id ? (
+                      <div className="flex min-h-[52px] min-w-0 flex-1 items-center gap-2 px-3 py-2">
+                        <input
+                          autoFocus
+                          value={renameDraft}
+                          onChange={(event) => setRenameDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                              submitConversationRename(conversation.id);
+                            } else if (event.key === "Escape") {
+                              setRenamingId(null);
+                              setRenameDraft("");
+                            }
+                          }}
+                          aria-label={t("assistant.renameConversationLabel")}
+                          className="min-w-0 flex-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)] outline-none focus-visible:border-[var(--focus-ring)]"
+                        />
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={t("assistant.renameSave")}
+                          onClick={() => submitConversationRename(conversation.id)}
+                          className="ca-touch-44 h-8 w-8"
+                        >
+                          <Check className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-current={current ? "true" : undefined}
+                        disabled={busy || actionExecutionBusy}
+                        onClick={() => switchConversation(conversation.id)}
+                        className="ca-touch-44 flex min-h-[52px] min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface-card-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm text-[var(--text-strong)]">
+                            {conversation.title || t("assistant.untitledConversation")}
+                          </span>
+                          {updatedAt && (
+                            <time
+                              dateTime={new Date(conversation.updatedAt).toISOString()}
+                              className="mt-0.5 block text-[11px] text-[var(--text-faint)]"
+                            >
+                              {updatedAt}
+                            </time>
+                          )}
+                        </span>
+                        {current && (
+                          <span className="flex flex-none items-center gap-1 text-[11px] text-[var(--accent-text)]">
+                            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                            {t("assistant.currentConversation")}
+                          </span>
+                        )}
+                      </button>
+                    )}
+                    {renamingId !== conversation.id && (
+                      <button
+                        type="button"
+                        aria-label={t("assistant.renameConversation")}
+                        title={t("assistant.renameConversation")}
+                        onClick={() => {
+                          setRenamingId(conversation.id);
+                          setRenameDraft(conversation.title);
+                        }}
+                        className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-md text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
+                      >
+                        <PenLine className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                     <button
                       type="button"
-                      aria-current={current ? "true" : undefined}
+                      aria-label={t("assistant.deleteConversation")}
+                      title={t("assistant.deleteConversation")}
                       disabled={busy || actionExecutionBusy}
-                      onClick={() => switchConversation(conversation.id)}
-                      className="ca-touch-44 flex min-h-[52px] w-full items-center gap-3 border-b border-[var(--border-subtle)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface-card-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
+                      onClick={() => removeConversation(conversation.id)}
+                      className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-md text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm text-[var(--text-strong)]">
-                          {conversation.title || t("assistant.untitledConversation")}
-                        </span>
-                        {updatedAt && (
-                          <time
-                            dateTime={new Date(conversation.updatedAt).toISOString()}
-                            className="mt-0.5 block text-[11px] text-[var(--text-faint)]"
-                          >
-                            {updatedAt}
-                          </time>
-                        )}
-                      </span>
-                      {current && (
-                        <span className="flex flex-none items-center gap-1 text-[11px] text-[var(--accent-text)]">
-                          <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                          {t("assistant.currentConversation")}
-                        </span>
-                      )}
+                      <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 );
@@ -1986,12 +2439,12 @@ export function AssistantPanel({
               </p>
             </div>
             <div className="grid w-full gap-2">
-              {suggestionsFor(context, t).map((suggestion) => (
+              {suggestionsFor(resolvedContext, t).map((suggestion) => (
                 <button
                   key={suggestion.prompt}
                   type="button"
                   onClick={() => void send(suggestion.prompt)}
-                  className="ca-touch-44 flex w-full items-center justify-between gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2.5 text-left text-sm text-[var(--text-normal)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] motion-reduce:transition-none"
+                  className="ca-touch-44 flex w-full items-center justify-between gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2.5 text-left text-sm text-[var(--text-normal)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none"
                 >
                   <span>{suggestion.label}</span>
                   <ArrowUpRight className="h-3.5 w-3.5 flex-none text-[var(--text-faint)]" />
@@ -1999,6 +2452,11 @@ export function AssistantPanel({
               ))}
             </div>
           </div>
+        )}
+        {hiddenTurnCount > 0 && (
+          <p className="text-center text-[11px] text-[var(--text-faint)]">
+            {t("assistant.hiddenTurns", { count: hiddenTurnCount })}
+          </p>
         )}
         {turns.map((turn) => (
           <div key={turn.id} className="space-y-2">
@@ -2013,6 +2471,16 @@ export function AssistantPanel({
               </p>
             </div>
 
+            {/* 提问后、第一个工具/正文到达前，助手槽位是空的。给一个内联「正在思考」，
+                别让用户对着自己刚发的话干等。纯视觉：读屏状态由底部 live region 统一播报，
+                这里不加 role，避免多出一个 status 抢播。 */}
+            {turn.pending && !turn.answer && (
+              <div aria-hidden="true" className="flex items-center gap-2 text-xs text-[var(--text-faint)]">
+                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                <span>{streamingLabelFor(turn)}</span>
+              </div>
+            )}
+
             {/* 工具链摆在回答前面：它解释了这段回答是怎么来的，
                 也让「一轮里悄悄调了三次搜索」这种事看得见。 */}
             <AssistantToolChips tools={turn.tools} toolRuns={turn.toolRuns} />
@@ -2022,8 +2490,15 @@ export function AssistantPanel({
                 默认折叠：它是过程不是结论，摊开会把真正的回答挤下去。 */}
             {turn.reasoning && (
               <details className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card-hover)] px-2.5 py-1.5">
-                <summary className="cursor-pointer select-none text-xs text-[var(--text-faint)]">
-                  {t("assistant.thinking")}
+                <summary className="cursor-pointer select-none rounded text-xs text-[var(--text-faint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
+                  {turn.pending ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden="true" />
+                      {t("assistant.thinking")}
+                    </span>
+                  ) : (
+                    t("assistant.thinking")
+                  )}
                 </summary>
                 <div className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-muted)]">
                   {turn.reasoning}
@@ -2040,12 +2515,9 @@ export function AssistantPanel({
               <div className="group">
                 {/* 回答天然带 Markdown（列表、加粗、公式），当纯文本铺出来满屏 ** 和 -，
                     比没有格式还难读。复用问答面板那套渲染器，顺带白拿了
-                    公式渲染和 [mm:ss] 可点击跳转。 */}
-                <div className="break-words text-sm leading-relaxed text-[var(--text-normal)]">
-                  {renderMarkdown(turn.answer, (ms) =>
-                    navigateFromTurn(turn, { kind: "seek_to", at_ms: ms }),
-                  )}
-                </div>
+                    公式渲染和 [mm:ss] 可点击跳转。整段用 memo 包住，避免无关状态变化
+                    反复重解析已完成的回答。 */}
+                <MemoAnswer answer={turn.answer} turn={turn} onSeek={seekInTurn} />
                 {/* 每条回答底下常驻一排按钮，翻起来满屏都是灰图标。桌面端悬停或键盘聚焦才浮出来，
                     但位置一直留着——不留的话鼠标一进来整段就往上跳。触屏没有悬停，一直显示。 */}
                 <div
@@ -2069,6 +2541,31 @@ export function AssistantPanel({
                       <Copy className="h-3.5 w-3.5" />
                     )}
                   </Button>
+                  {/* 有视频上下文时才能存进笔记：笔记是挂在视频上的。 */}
+                  {(turn.context?.video_id ?? context.video_id) && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label={
+                        savedToNotesTurnId === turn.id
+                          ? t("assistant.savedToNotes")
+                          : t("assistant.saveToNotes")
+                      }
+                      title={
+                        savedToNotesTurnId === turn.id
+                          ? t("assistant.savedToNotes")
+                          : t("assistant.saveToNotes")
+                      }
+                      onClick={() => void saveToNotes(turn)}
+                      className="ca-touch-44 h-7 w-7 text-[var(--text-faint)]"
+                    >
+                      {savedToNotesTurnId === turn.id ? (
+                        <Check className="h-3.5 w-3.5 text-[var(--status-ok)]" />
+                      ) : (
+                        <Save className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  )}
                   {/* 只给最后一轮。往回重生成会让它后面的问答全部失去依据——那已经是分支，
                       不是重试了。 */}
                   {turn.id === turns[turns.length - 1]?.id && (
@@ -2100,8 +2597,8 @@ export function AssistantPanel({
                 <AlertCircle className="mt-[0.2em] h-3 w-3 flex-none" aria-hidden="true" />
                 <span className="min-w-0 break-words">
                   {turn.hitTurnLimit
-                    ? "助手连查了几轮也没能得出结论，已经停下。问得再具体一点通常能问出来。"
-                    : "助手这次没有给出回答。"}
+                    ? t("assistant.turnLimitFallback")
+                    : t("assistant.emptyAnswerFallback")}
                 </span>
                 {!turn.answer && turn.id === turns[turns.length - 1]?.id && (
                   <Button
@@ -2234,16 +2731,62 @@ export function AssistantPanel({
       {/* 输入框、范围提示和按钮合成一块。原来三样东西各管各的，输入区看着像张随手贴的表单。 */}
       {!historyOpen && (
       <div className="border-t border-[var(--border-subtle)] p-2">
-        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-input)] focus-within:border-[var(--accent)]">
-          <div className="px-2.5 pt-1.5">
-            <span
+        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-input)] focus-within:border-[var(--focus-ring)]">
+          <div ref={scopeMenuRef} className="relative px-2.5 pt-1.5">
+            <button
+              ref={scopeTriggerRef}
+              type="button"
               aria-label={t("assistant.scopeLabel", { scope: scopeLabel })}
+              aria-haspopup="menu"
+              aria-expanded={scopeMenuOpen}
+              aria-controls={scopeMenuOpen ? scopeMenuId : undefined}
               title={t("assistant.scopeHint")}
-              className="inline-flex max-w-full items-center gap-1 rounded-full bg-[var(--surface-card)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)]"
+              onClick={() => {
+                if (scopeMenuOpen) closeScopeMenu();
+                else setScopeMenuOpen(true);
+              }}
+              className="inline-flex max-w-full items-center gap-1 rounded-full bg-[var(--surface-card)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] transition-colors hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
             >
               <AtSign className="h-2.5 w-2.5 flex-none" aria-hidden="true" />
               <span className="truncate">{scopeLabel}</span>
-            </span>
+              <ChevronDown className="h-2.5 w-2.5 flex-none opacity-70" aria-hidden="true" />
+            </button>
+            {scopeMenuOpen && (
+              <div
+                id={scopeMenuId}
+                role="menu"
+                aria-label={t("assistant.scopeMenuLabel")}
+                onKeyDown={handleScopeMenuKeyDown}
+                className="absolute bottom-full left-0 z-20 mb-1 min-w-[180px] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-1 shadow-[var(--shadow-pop)]"
+              >
+                {scopeOptions.map((option, index) => {
+                  const active = option.value === scopeChoice;
+                  return (
+                    <button
+                      key={option.value}
+                      ref={(element) => {
+                        scopeItemRefs.current[index] = element;
+                      }}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={active}
+                      tabIndex={-1}
+                      disabled={!option.enabled}
+                      onClick={() => {
+                        setScopeChoice(option.value);
+                        closeScopeMenu();
+                      }}
+                      className="ca-touch-44 flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs text-[var(--text-normal)] transition-colors hover:bg-[var(--surface-card-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <span>{option.label}</span>
+                      {active && (
+                        <Check className="h-3.5 w-3.5 flex-none text-[var(--accent-text)]" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
           <div className="flex items-end gap-2 px-2 pb-1.5 pt-1">
             <textarea
@@ -2252,7 +2795,6 @@ export function AssistantPanel({
               rows={1}
               value={input}
               placeholder={t("assistant.inputPlaceholder")}
-              aria-keyshortcuts="ArrowUp ArrowDown"
               onChange={(e) => setInputFromUser(e.target.value)}
               onKeyDown={(e) => {
                 if (navigateRecentQuestions(e)) return;

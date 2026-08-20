@@ -1,7 +1,10 @@
-import { lazy, memo, Suspense, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
+import { Brain, Captions, LayoutGrid, Sparkles, StickyNote } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TextSkeleton } from "@/components/ui/skeleton";
+import { ipc } from "@/lib/ipc";
 import {
   readVideoResumeState,
   type StudyTab,
@@ -28,8 +31,79 @@ const MoreStudyPanel = lazy(() =>
 const TAB_KEYS: StudyTab[] = ["overview", "transcript", "notes", "quiz", "more"];
 type Tab = StudyTab;
 
+// 每个 tab 一个图标：下划线 tab 之间靠图标+文字一起辨识，避免面板窄到只剩图标时迷失。
+const TAB_ICONS: Record<Tab, typeof Sparkles> = {
+  overview: Sparkles,
+  transcript: Captions,
+  notes: StickyNote,
+  quiz: Brain,
+  more: LayoutGrid,
+};
+
 function PanelFallback() {
   return <TextSkeleton lines={6} />;
+}
+
+/** tab 徽标：练习显示题数（数字），概览/笔记有内容显示圆点。
+ *  只亮有内容的 tab——空状态不该挨个 tab 点开才知道哪里什么都没有。
+ *  独立成组件的原因：徽标查询状态更新只重渲染自己的 span，不带动整个面板
+ *  （尤其已保活的文稿/笔记等重面板）重渲染。 */
+function TabBadge({ tab, videoId }: { tab: Tab; videoId: string }) {
+  const quiz = useQuery({
+    queryKey: ["quiz", videoId],
+    queryFn: () => ipc.ai.getQuiz(videoId),
+    staleTime: 60_000,
+  });
+  const notes = useQuery({
+    queryKey: ["notes", videoId],
+    queryFn: () => ipc.ai.getNotes(videoId),
+    staleTime: 60_000,
+  });
+  const summary = useQuery({
+    queryKey: ["summary", videoId],
+    queryFn: () => ipc.ai.getSummary(videoId),
+    staleTime: 60_000,
+  });
+  const chapters = useQuery({
+    queryKey: ["chapters", videoId],
+    queryFn: () => ipc.ai.getChapters(videoId),
+    staleTime: 60_000,
+  });
+
+  // 徽标只数有效题：与 QuizPanel 的 sanitize 同口径的轻量近似（stem 非空即可）。
+  const quizCount = useMemo(() => {
+    if (tab !== "quiz") return 0;
+    const raw = quiz.data;
+    if (!raw) return 0;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return 0;
+      return parsed.filter(
+        (item) =>
+          item != null &&
+          typeof item.stem === "string" &&
+          item.stem.trim() !== "",
+      ).length;
+    } catch {
+      return 0;
+    }
+  }, [tab, quiz.data]);
+
+  if (tab === "quiz" && quizCount > 0) {
+    const shown = quizCount > 999 ? "999+" : String(quizCount);
+    return (
+      <span className="ml-1 rounded-full bg-[var(--surface-card-active)] px-1.5 py-px text-[10px] font-semibold leading-4 tabular-nums text-[var(--accent-text)]">
+        {shown}
+      </span>
+    );
+  }
+  if (tab === "overview" && (Boolean(summary.data) || (chapters.data?.length ?? 0) > 0)) {
+    return <span aria-hidden="true" className="ml-1 h-1.5 w-1.5 rounded-full bg-[var(--accent-text)]" />;
+  }
+  if (tab === "notes" && Boolean(notes.data?.trim())) {
+    return <span aria-hidden="true" className="ml-1 h-1.5 w-1.5 rounded-full bg-[var(--accent-text)]" />;
+  }
+  return null;
 }
 
 function VideoTabsPanel({ videoId }: { videoId: string }) {
@@ -42,17 +116,40 @@ function VideoTabsPanel({ videoId }: { videoId: string }) {
   // 未访问过的不渲染，保持懒加载、不拖累首屏。
   const [visited, setVisited] = useState<Set<Tab>>(() => new Set([activeTab]));
 
-  function changeTab(tab: Tab) {
-    if (tab !== activeTab && !visited.has(tab)) {
+  const changeTab = useCallback(
+    (tab: Tab) => {
       setVisited((prev) => {
+        if (prev.has(tab)) return prev;
         const next = new Set(prev);
         next.add(tab);
         return next;
       });
+      setActiveTab(tab);
+      writeVideoResumeState(videoId, { activeTab: tab });
+    },
+    [videoId],
+  );
+
+  // 数字键 1-5 直接切 tab（播放器快捷键不占数字键，无冲突）。
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        typeof target.closest === "function" &&
+        target.closest("input, textarea, select, [contenteditable]")
+      ) {
+        return;
+      }
+      const digit = Number(event.key);
+      if (!Number.isInteger(digit) || digit < 1 || digit > TAB_KEYS.length) return;
+      const tab = TAB_KEYS[digit - 1];
+      if (tab) changeTab(tab);
     }
-    setActiveTab(tab);
-    writeVideoResumeState(videoId, { activeTab: tab });
-  }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [changeTab]);
 
   const panels: { tab: Tab; node: React.ReactNode }[] = [
     { tab: "overview", node: <AiViewPanel videoId={videoId} /> },
@@ -71,16 +168,21 @@ function VideoTabsPanel({ videoId }: { videoId: string }) {
     >
       {/* 面板拖窄时允许横向滚动；核心任务保持一级可见，低频资料统一收进"更多"。 */}
       <TabsList className="flex h-12 items-stretch overflow-x-auto border-b border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2.5 [scrollbar-width:none] sm:h-14 sm:px-4 [&::-webkit-scrollbar]:hidden">
-        {TAB_KEYS.map((tab) => (
-          <TabsTrigger
-            key={tab}
-            value={tab}
-            onClick={() => changeTab(tab)}
-            className="ca-touch-44 ca-study-tab-trigger flex min-h-11 min-w-max flex-1 items-center justify-center border-b-[3px] border-transparent px-3 py-3 text-sm font-semibold text-[var(--text-muted)] transition-colors data-[state=active]:border-primary data-[state=active]:text-[var(--text-strong)] sm:min-h-12 sm:px-4 sm:text-base"
-          >
-            {t(`studyTab.${tab}`)}
-          </TabsTrigger>
-        ))}
+        {TAB_KEYS.map((tab) => {
+          const Icon = TAB_ICONS[tab];
+          return (
+            <TabsTrigger
+              key={tab}
+              value={tab}
+              onClick={() => changeTab(tab)}
+              className="ca-touch-44 ca-study-tab-trigger flex min-h-11 min-w-max flex-1 items-center justify-center gap-1.5 border-b-[3px] border-transparent px-3 py-3 text-sm font-semibold text-[var(--text-muted)] transition-colors data-[state=active]:border-primary data-[state=active]:text-[var(--text-strong)] sm:min-h-12 sm:px-4 sm:text-base"
+            >
+              <Icon aria-hidden="true" className="h-4 w-4 flex-none" />
+              <span>{t(`studyTab.${tab}`)}</span>
+              <TabBadge tab={tab} videoId={videoId} />
+            </TabsTrigger>
+          );
+        })}
       </TabsList>
       {panels.map(({ tab, node }) => (
         <TabsContent

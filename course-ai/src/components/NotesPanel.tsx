@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Table } from "@tiptap/extension-table";
@@ -16,10 +17,12 @@ import {
 } from "@/lib/useStaleArtifacts";
 import { ipc } from "@/lib/ipc";
 import { markdownToTiptap } from "@/lib/markdownToTiptap";
+import { tiptapToMarkdown } from "@/lib/tiptapToMarkdown";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { useEffect, useRef, useState } from "react";
 import { TimestampNode, installTimestampClick } from "./notes/timestampNode";
 import { MathNode } from "./notes/mathNode";
+import { NotesToolbar } from "./notes/NotesToolbar";
 import { TimestampToggle } from "./TimestampToggle";
 import { useTimestampPrefs } from "@/stores/timestampPrefs";
 import { NotesWriteQueue } from "@/lib/notesWriteQueue";
@@ -46,6 +49,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [saveError, setSaveError] = useState<unknown>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const [hasLocalEdits, setHasLocalEdits] = useState(false);
   const activeVideoIdRef = useRef(videoId);
   const mountedRef = useRef(true);
   activeVideoIdRef.current = videoId;
@@ -115,7 +119,10 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         class: "tiptap-notes max-w-none p-4 focus:outline-none",
       },
     },
-    onUpdate: ({ editor }) => debounceSave(JSON.stringify(editor.getJSON())),
+    onUpdate: ({ editor }) => {
+      setHasLocalEdits(true);
+      debounceSave(JSON.stringify(editor.getJSON()));
+    },
   });
 
   // 加载已有笔记：content_json（"{...}"）或 content_md（markdown）
@@ -128,7 +135,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   // 顺手把一份空文档存回库里，用户的笔记就没了。
   useEffect(() => {
     // 还在查库时什么都不动，免得先闪一下空编辑器。
-    if (!editor || notesQuery.isPending) return;
+    if (!editor || editor.isDestroyed || notesQuery.isPending) return;
     // 查询失败时 data 是 undefined，和「这个视频没有笔记」长得一模一样。此时绝不能
     // 按空笔记处理：编辑器一清空就会被当成用户把笔记删了。
     if (notesQuery.isError) return;
@@ -154,6 +161,10 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     editor.commands.setContent(markdownToTiptap(notesContent), { emitUpdate: false });
   }, [editor, notesContent, notesQuery.isError, notesQuery.isPending]);
 
+  useEffect(() => {
+    setHasLocalEdits(false);
+  }, [videoId]);
+
   // 切走视频 / 卸载前：若去抖窗口内还有未落库的编辑，立刻刷盘，避免丢失。
   // cleanup 在 videoId 变化时以「旧 videoId + 旧内容」运行，正好把上一条编辑存回原视频。
   useEffect(() => {
@@ -161,7 +172,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       if (saveTimer.current !== undefined) {
         clearTimeout(saveTimer.current);
         saveTimer.current = undefined;
-        if (editor) {
+        if (editor && !editor.isDestroyed) {
           void notesWriter.enqueue(videoId, JSON.stringify(editor.getJSON())).then(
             () => {
               backgroundSaveErrors.delete(videoId);
@@ -217,23 +228,45 @@ export function NotesPanel({ videoId }: { videoId: string }) {
 
   const generate = useMutation({
     mutationFn: async () => {
-      // An already-started autosave must finish before generation clears content_json.
+      // 确认覆盖后若仍在去抖窗口，先把编辑器当前内容放入写队列；生成失败时用户版本
+      // 仍已落库。已经开始的保存也必须先结束，再让后端清 content_json。
+      if (saveTimer.current !== undefined && editor) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = undefined;
+        await notesWriter.enqueue(videoId, JSON.stringify(editor.getJSON()));
+      }
       await notesWriter.flush(videoId);
       return ipc.ai.generate(videoId, "notes");
     },
-    // 取消可能挂起的自动保存，避免「删空笔记后生成」时旧的空内容把新笔记盖回去。
-    onMutate: () => clearTimeout(saveTimer.current),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["notes", videoId] });
       invalidateStaleArtifacts(qc, videoId);
     },
   });
 
+  async function requestGenerate() {
+    if (Boolean(notesContent?.trim()) || hasLocalEdits) {
+      const confirmed = await confirmDialog(t("notes.regenerateConfirm"), {
+        title: t("notes.regenerateConfirmTitle"),
+        kind: "warning",
+        okLabel: t("notes.regenerateConfirmAction"),
+        cancelLabel: t("notes.cancel"),
+      });
+      if (!confirmed) return;
+    }
+    generate.mutate();
+  }
+
   const stale = useStaleArtifacts(videoId);
   const exportItems: ExportItem[] = [
     {
       label: "Markdown",
-      run: () => ipc.export.notes(videoId),
+      run: () => {
+        if (!editor || editor.isDestroyed) {
+          return Promise.reject(new Error(t("notes.editorUnavailable")));
+        }
+        return ipc.export.notes(videoId, tiptapToMarkdown(editor.getJSON()));
+      },
       mime: "text/markdown",
       saveAs: "notes.md",
     },
@@ -246,6 +279,8 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       {...(showTimestamps ? {} : { "data-hide-timestamps": "" })}
       className="relative flex h-full flex-col"
     >
+      {/* 选中文字时的浮出格式条（tiptap BubbleMenu，不占布局空间）。 */}
+      {editor && <NotesToolbar editor={editor} />}
       {(saveStatus === "error" ||
         (!notesQuery.isPending && !notesQuery.isError)) && (
         <div className="flex flex-none justify-end border-b border-[var(--border-subtle)] px-3 py-2">
@@ -318,11 +353,11 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       </div>
       <PanelActions
         leading={<TimestampToggle />}
-        onRegenerate={() => generate.mutate()}
+        onRegenerate={() => void requestGenerate()}
         regenerating={generate.isPending}
         hasContent={!!notesContent}
         stale={stale.has("notes")}
-        exportItems={exportItems}
+        exportItems={notesQuery.isPending || notesQuery.isError ? [] : exportItems}
       />
     </div>
   );

@@ -184,7 +184,12 @@ describe("Dashboard", () => {
       name: `${today} · 学习 30 分钟 · 已达标`,
     });
     expect(todayCell).toHaveAttribute("aria-current", "date");
-    expect(todayCell).toHaveClass("rounded-[2px]", "outline-2");
+    expect(todayCell).toHaveClass(
+      "rounded-[2px]",
+      "outline-2",
+      "outline-[var(--accent-text)]",
+      "focus-visible:ring-[var(--focus-ring)]",
+    );
     expect(screen.queryByText("周一")).not.toBeInTheDocument();
     expect(screen.queryByText("周三")).not.toBeInTheDocument();
     expect(screen.queryByText("周五")).not.toBeInTheDocument();
@@ -272,6 +277,19 @@ describe("Dashboard", () => {
       expect(weekStat).toHaveTextContent("目标 7 小时 · 7%");
     });
     expect(localStorage.getItem("course-ai-daily-goal-min")).toBe("60");
+  });
+
+  it("uses a two-row summary at phone width so the daily goal stays readable", async () => {
+    window.innerWidth = 320;
+    renderDashboard();
+    const stats = await screen.findByRole("group", { name: "学习统计" });
+    expect(stats).toHaveClass("grid-cols-2", "min-[400px]:grid-cols-3");
+    expect(within(stats).getByRole("region", { name: "今日学习" })).toHaveClass(
+      "col-span-2",
+    );
+    expect(within(stats).getByRole("region", { name: "本周学习" })).toHaveClass(
+      "max-[399px]:border-t",
+    );
   });
 
   it("counts a review-only day as studied instead of breaking the streak", async () => {
@@ -370,5 +388,86 @@ describe("Dashboard", () => {
     await waitFor(() =>
       expect(screen.getByText(/还没有学习记录/)).toBeInTheDocument(),
     );
+  });
+
+  it("shows and retries a continue-learning query error", async () => {
+    continueLearning
+      .mockRejectedValueOnce(new Error("续学记录读取失败"))
+      .mockResolvedValueOnce([
+        {
+          course_id: "c1",
+          course_name: "申论课程",
+          video_id: "v-last",
+          video_title: "第三讲 归纳概括.mp4",
+          last_ts: Date.now(),
+        },
+      ]);
+    renderDashboard();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("续学记录读取失败");
+    expect(screen.queryByText("第三讲 归纳概括")).not.toBeInTheDocument();
+
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+    expect(await screen.findByText("第三讲 归纳概括")).toBeInTheDocument();
+    expect(continueLearning).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not report an empty review queue when the due-count query fails", async () => {
+    countDue
+      .mockRejectedValueOnce(new Error("复习计划读取失败"))
+      .mockResolvedValueOnce(0);
+    renderDashboard();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("复习计划读取失败");
+    expect(screen.queryByText("今天没有到期卡片")).not.toBeInTheDocument();
+    expect(screen.queryByText(/还没有排期中的卡片/)).not.toBeInTheDocument();
+
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+    expect(await screen.findByText("今天没有到期卡片")).toBeInTheDocument();
+    expect(countDue).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not show zero-value study statistics when daily totals fail", async () => {
+    dailyTotals
+      .mockRejectedValueOnce(new Error("学习统计读取失败"))
+      .mockResolvedValueOnce([
+        { day: today, watched_ms: 1_800_000, reviews: 0, good_reviews: 0 },
+      ]);
+    renderDashboard();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("学习统计读取失败");
+    expect(screen.queryByRole("group", { name: "学习统计" })).not.toBeInTheDocument();
+    expect(screen.queryByText("今天尚未学习")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("group", { name: "最近 26 周学习热力图" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+    const stats = await screen.findByRole("group", { name: "学习统计" });
+    expect(within(stats).getByRole("region", { name: "今日学习" })).toHaveTextContent(
+      "30 分钟",
+    );
+    expect(dailyTotals).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not report an empty course list when course statistics fail", async () => {
+    courseTotals
+      .mockRejectedValueOnce(new Error("课程统计读取失败"))
+      .mockResolvedValueOnce([
+        { course_id: "c1", watched_ms: 3_600_000, last_ts: Date.now() },
+      ]);
+    renderDashboard();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("课程统计读取失败");
+    expect(screen.queryByText(/还没有学习记录/)).not.toBeInTheDocument();
+    expect(screen.queryByText("申论课程")).not.toBeInTheDocument();
+
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+    expect(await screen.findByText("申论课程")).toBeInTheDocument();
+    expect(courseTotals).toHaveBeenCalledTimes(2);
   });
 });

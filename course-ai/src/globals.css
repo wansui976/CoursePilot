@@ -4,9 +4,10 @@
   --color-background: #0a0c10;
   --color-foreground: oklch(0.985 0 0);
   --color-primary: oklch(0.64 0.19 256);
+  --color-primary-foreground: var(--on-accent);
   --color-muted: oklch(0.25 0.01 256);
   --color-border: rgb(255 255 255 / 0.1);
-  --color-ring: oklch(0.64 0.19 256);
+  --color-ring: var(--focus-ring);
 
   /* 圆角单一刻度：让 Tailwind 的 rounded-md/lg/xl 对齐设计 token --r-sm/md/lg(8/12/16)，
      全局只此一套尺度（含 .ca-* 壳层）。极小元素(开关内圈等)仍可用 rounded-sm。 */
@@ -41,6 +42,7 @@
   --border-faint: #f0f1f4;
   /* hover 等需要比 subtle 更清晰的强调边框；深浅主题各自定义，别写死浅色灰。 */
   --border-strong: #dde0e6;
+  --border-control: #858b96;
   --border-titlebar: #e9eaee;
 
   --text-strong: #1c1e24;
@@ -49,15 +51,33 @@
   /* 抬到约 4.5:1（白底）以满足正文对比；空状态/占位符等都吃这个变量。 */
   --text-faint: #71767f;
 
+  /* 焦点提示不随用户强调色变化，避免亮黄/浅灰强调色在浅底上失去轮廓。 */
+  --focus-ring: #1d4ed8;
+  --on-accent: #ffffff;
+  --on-accent-press: #ffffff;
+
   --accent-weak: #eef3fd;
   --accent-weak-2: #e3ecfc;
   --accent-text: #2a63d8;
-  --status-ok: #1f9d6b;
+  --video-accent: #7aa6ff;
+  /* 小号状态文字在对应浅色底上均保持至少 4.5:1。 */
+  --status-ok: #147a52;
+  --on-status-ok: #ffffff;
   --status-ok-bg: #e9f6f0;
-  --status-warn: #c98a1e;
+  --status-warn: #975a00;
   --status-warn-bg: #faf2e0;
   --status-err: #c92a2a;
+  --on-status-err: #ffffff;
   --status-err-bg: #fbeaea;
+
+  /* 知识点主题色板：按主题在课程里的序号取模轮换，给长列表提供空间定位色。
+     只用于色点/色条等小面积图形（3:1 即达标），不当正文文字色用。 */
+  --topic-0: #2563eb;
+  --topic-1: #0d9488;
+  --topic-2: #d97706;
+  --topic-3: #7c3aed;
+  --topic-4: #db2777;
+  --topic-5: #65a30d;
 
   --scrollbar-thumb: #e0e2e8;
   --scrollbar-thumb-hover: #d0d3da;
@@ -89,25 +109,41 @@
   --surface-stage: #000000;
   --surface-titlebar: #0f1217;
 
-  --border-subtle: rgb(255 255 255 / 0.06);
-  --border-faint: rgb(255 255 255 / 0.04);
-  --border-strong: rgb(255 255 255 / 0.16);
+  --border-subtle: #414956;
+  --border-faint: #303742;
+  --border-strong: #687487;
+  /* #687487 在最亮的深色控件底 #252a30 上仍有 3.05:1。 */
+  --border-control: #687487;
   --border-titlebar: rgb(255 255 255 / 0.06);
 
   --text-strong: rgb(244 247 255 / 0.96);
   --text-normal: rgb(228 234 245 / 0.72);
-  --text-muted: rgb(220 228 242 / 0.5);
-  --text-faint: rgb(214 224 240 / 0.38);
+  --text-muted: #a1abba;
+  /* 在深色 hover/active 表面上仍不低于正常小字所需的 4.5:1。 */
+  --text-faint: #8993a3;
+
+  --focus-ring: #8bb4ff;
 
   --accent-weak: rgb(74 132 255 / 0.16);
   --accent-weak-2: rgb(74 132 255 / 0.24);
   --accent-text: #8fb3ff;
+  --video-accent: #8fb3ff;
   --status-ok: #34d399;
+  --on-status-ok: #000000;
   --status-ok-bg: rgb(31 157 107 / 0.14);
   --status-warn: #fbbf24;
   --status-warn-bg: rgb(201 138 30 / 0.16);
   --status-err: #f87171;
+  --on-status-err: #000000;
   --status-err-bg: rgb(201 42 42 / 0.18);
+
+  /* 主题色板深色档：整体抬亮，保证在近黑底上仍清晰可辨。 */
+  --topic-0: #8fb3ff;
+  --topic-1: #5eead4;
+  --topic-2: #fbbf24;
+  --topic-3: #c4b5fd;
+  --topic-4: #f9a8d4;
+  --topic-5: #bef264;
 
   --scrollbar-thumb: rgb(255 255 255 / 0.14);
   --scrollbar-thumb-hover: rgb(255 255 255 / 0.26);
@@ -189,7 +225,8 @@ button {
 
 /* 键盘聚焦才显示的统一焦点环（无障碍）。 */
 :focus-visible {
-  outline: 2px solid var(--color-primary);
+  --tw-ring-color: var(--focus-ring) !important;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: 6px;
 }
@@ -201,8 +238,8 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
   outline: none;
-  border-color: var(--accent-text);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-text) 25%, transparent);
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 28%, transparent);
 }
 
 /* 提问输入框：外层药丸已用 focus-within 显示聚焦，内层 input 不再叠加主色焦点环/描边。 */
@@ -215,9 +252,12 @@ select:focus-visible {
 .ca-app {
   --accent: #2f6cea;
   --accent-press: #255cd0;
+  --on-accent: #ffffff;
+  --on-accent-press: #ffffff;
   --accent-weak: #eef3fd;
   --accent-weak-2: #e3ecfc;
   --accent-text: #2a63d8;
+  --video-accent: #7aa6ff;
   --bg-app: var(--surface-app);
   --bg-sidebar: var(--surface-sidebar);
   --bg-panel: var(--surface-panel);
@@ -258,15 +298,53 @@ select:focus-visible {
   --accent-weak: #1a2640;
   --accent-weak-2: #22335a;
   --accent-text: #7aa6ff;
+  --video-accent: #7aa6ff;
 }
 
-.ca-app[data-bucket="compact"]:not([data-device="tablet"]),
-.ca-app[data-bucket="medium"]:not([data-device="tablet"]) {
+/* 仅把交互控件的边界抬到 3:1；分区线继续使用较安静的 subtle/faint 层级。 */
+[data-theme="dark"] :where(
+  button,
+  input,
+  textarea,
+  select,
+  [role="button"],
+  [role="tab"],
+  [role="slider"]
+) {
+  --border-subtle: var(--border-control);
+  --line: var(--border-control);
+}
+
+/* Tailwind 的 text-white 是静态色；实色 primary/强调色控件改走动态前景 token。 */
+.ca-app [class~="text-primary"] {
+  color: var(--accent-text) !important;
+}
+
+.ca-app [class~="bg-primary"][class~="text-white"]:not(:disabled),
+.ca-app [class~="bg-primary"][class~="!text-white"]:not(:disabled),
+.ca-app [class~="bg-[var(--accent)]"][class~="text-white"]:not(:disabled),
+.ca-app [class~="bg-[var(--accent)]"][class~="!text-white"]:not(:disabled) {
+  color: var(--on-accent) !important;
+}
+
+@media (hover: hover) {
+  .ca-app [class~="hover:bg-primary"][class~="hover:!text-white"]:hover,
+  .ca-app .group:hover [class~="group-hover:bg-primary"][class~="group-hover:text-white"] {
+    color: var(--on-accent) !important;
+  }
+
+  .ca-app [class~="bg-[var(--accent)]"][class~="hover:bg-[var(--accent-press)]"]:hover {
+    color: var(--on-accent-press) !important;
+  }
+}
+
+/* Shell 由实际导航结构决定，不能只看宽度 bucket：12.9" iPad
+   竖屏虽是 wide，React 仍会隐藏侧栏并使用底部导航。 */
+.ca-app[data-shell="stacked"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.ca-app[data-bucket="compact"]:not([data-device="tablet"]) .ca-main,
-.ca-app[data-bucket="medium"]:not([data-device="tablet"]) .ca-main {
+.ca-app[data-shell="stacked"] .ca-main {
   padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
 }
 
@@ -354,7 +432,7 @@ select:focus-visible {
   padding: 0 4px;
   border-radius: 999px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 10px;
   font-weight: 600;
   line-height: 16px;
@@ -428,7 +506,7 @@ select:focus-visible {
   border: 1px solid transparent !important;
   border-radius: var(--r-sm) !important;
   background: var(--accent) !important;
-  color: #fff !important;
+  color: var(--on-accent) !important;
   font-size: 13.5px;
   font-weight: 600;
   display: flex;
@@ -440,6 +518,7 @@ select:focus-visible {
 
 .ca-new-btn:hover {
   background: var(--accent-press) !important;
+  color: var(--on-accent-press) !important;
 }
 
 .ca-nav-label {
@@ -510,8 +589,25 @@ select:focus-visible {
 
 .ca-nav-button .nm {
   min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 课程条目右侧的集数/进度（12集·46% / ✓）。 */
+.course-meta {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.course-meta .pct {
+  color: var(--accent-text);
 }
 
 /* 工作台展开态：选中课程条目下内联的视频列表（缩进对齐课程名文字）。 */
@@ -637,6 +733,25 @@ select:focus-visible {
   text-overflow: ellipsis;
 }
 
+/* 副标里的完成度迷你进度条（80×4，accent 值）。 */
+.ca-sub-progress {
+  display: inline-block;
+  vertical-align: 1px;
+  width: 80px;
+  height: 4px;
+  margin-left: 8px;
+  border-radius: 999px;
+  background: var(--surface-card-hover);
+  overflow: hidden;
+}
+
+.ca-sub-progress i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
 .tb-actions {
   margin-left: auto;
   display: flex;
@@ -705,16 +820,12 @@ select:focus-visible {
 
 /* 顶栏搜索框：与视图切换段同高，窄屏靠 topbar 的 flex-wrap 换行。 */
 .tb-search {
-  width: 160px;
+  /* 边框/背景/内边距/圆角/字号由 Tailwind 类提供（与知识点页输入框逐字对齐），
+     这里只负责宽度与弹性。 */
+  width: 220px;
   height: 38px;
   flex: 0 1 auto;
   min-width: 0;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--surface-input);
-  padding: 0 12px;
-  font-size: 13px;
-  color: var(--text-1);
 }
 
 .tb-search::placeholder {
@@ -761,17 +872,17 @@ select:focus-visible {
   padding: 10px 30px 34px;
 }
 
-/* 「继续上次」横幅：课程库顶部一条，点击直达最近看的视频。 */
-.ca-continue {
+/* 「继续学习」hero 卡：最近看的未看完视频，整卡可点直达工作台（断点续播）。 */
+.ca-continue-hero {
   width: 100%;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 13px;
+  gap: 16px;
   margin: 2px 0 18px;
-  padding: 16px 20px;
+  padding: 16px;
   border-radius: var(--r-lg);
-  border: 1px solid var(--line);
+  border: 1px solid var(--accent-weak-2);
   background: var(--accent-weak);
   color: var(--text-1);
   cursor: pointer;
@@ -780,40 +891,115 @@ select:focus-visible {
 }
 
 @media (hover: hover) {
-.ca-continue:hover {
+.ca-continue-hero:hover {
   background: var(--accent-weak-2);
   border-color: var(--line-strong);
 }
 }
 
-.ca-continue .ic {
+.ca-continue-cover {
+  position: relative;
+  width: 128px;
+  height: 72px;
   flex: 0 0 auto;
-  color: var(--accent-text);
-}
-
-.ca-continue .lbl {
-  flex: 0 0 auto;
-  font-size: 13px;
-  font-weight: 650;
-  color: var(--accent-text);
-}
-
-.ca-continue .ttl {
-  min-width: 0;
+  border-radius: var(--r-md);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 15.5px;
+  background: var(--stage);
+}
+
+.ca-continue-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-text);
+}
+
+.ca-continue-title {
+  display: block;
+  margin-top: 2px;
+  font-size: 15px;
   font-weight: 600;
 }
 
-.ca-continue .pos {
-  flex: 0 0 auto;
-  margin-left: auto;
-  font-family: var(--mono);
+.ca-continue-pos {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  font-size: 13.5px;
   color: var(--text-3);
+}
+
+.ca-continue-pos .ca-continue-pct {
+  color: var(--accent-text);
+}
+
+.ca-continue-play {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  transition: transform 0.12s;
+}
+
+@media (hover: hover) {
+.ca-continue-hero:hover .ca-continue-play {
+  transform: scale(1.05);
+}
+}
+
+@media (max-width: 640px) {
+  .ca-continue-cover {
+    width: 96px;
+    height: 54px;
+  }
+}
+
+/* 卡片 body 的学习信息行：时长 · 进度 / ✓ 已看完 / 处理中实时进度 / 失败提示。 */
+.ca-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.ca-meta-text {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.ca-meta-text.accent {
+  color: var(--accent-text);
+}
+
+.ca-meta-text.ok {
+  color: var(--status-ok);
+}
+
+.ca-meta-text.err {
+  color: var(--status-err);
+}
+
+/* 处理中卡片：mini 进度条（宽 = 流水线整体进度）+ 阶段文案。 */
+.ca-meta-progress {
+  flex: 1 1 auto;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-card-hover);
+  overflow: hidden;
+}
+
+.ca-meta-progress i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
 }
 
 .ca-grid {
@@ -821,8 +1007,21 @@ select:focus-visible {
   gap: 18px;
   align-content: start;
   /* auto-fit（而非 auto-fill）：卡片不足以铺满一行时，空轨道会塌缩，
-     卡片拉伸填满宽度。否则侧栏折叠、主区变宽后会在最右侧留出空白轨道。 */
+     卡片拉伸填满宽度。否则侧栏折叠、主区变宽后会在最右侧留出空白轨道。
+     最小列宽按密度档：舒适（默认）240px，紧凑 176px 一排塞更多卡。 */
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.ca-grid[data-density="compact"] {
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
+}
+
+@media (hover: hover) {
+  .ca-grid[data-density="compact"] .ca-thumb .dur,
+  .ca-grid[data-density="compact"] .ca-card-title {
+    font-size: 13px;
+  }
 }
 
 .ca-card {
@@ -856,6 +1055,18 @@ select:focus-visible {
   align-items: center;
   justify-content: center;
   color: #fff;
+}
+
+/* 悬停快捷播放 affordance：整卡可点，这里只是视觉提示；触屏无 hover 就不显示。 */
+.ca-card-play {
+  opacity: 0;
+  transition: opacity 0.16s var(--ease);
+}
+
+@media (hover: hover) {
+  .ca-card:hover .ca-card-play {
+    opacity: 1;
+  }
 }
 
 /* 处理状态徽标：覆盖在封面左上角（与右下角的时长对角呼应）。 */
@@ -914,7 +1125,8 @@ select:focus-visible {
 
 /* 封面底部的「看到哪了」进度条（参考自适应课程库的 ov-bar）。 */
 .ca-thumb .ov-bar,
-.row-thumb .ov-bar {
+.row-thumb .ov-bar,
+.ca-continue-cover .ov-bar {
   position: absolute;
   left: 0;
   right: 0;
@@ -925,7 +1137,8 @@ select:focus-visible {
 }
 
 .ca-thumb .ov-bar > i,
-.row-thumb .ov-bar > i {
+.row-thumb .ov-bar > i,
+.ca-continue-cover .ov-bar > i {
   display: block;
   height: 100%;
   background: var(--accent);
@@ -1103,7 +1316,7 @@ select:focus-visible {
 
 .ca-list-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px 120px;
+  grid-template-columns: minmax(0, 1fr) 110px 80px;
   gap: 16px;
   /* 右侧留出与行内一致的空间（行尾有绝对定位的「操作」按钮），让表头列与行内列对齐。 */
   padding: 0 54px 10px 14px;
@@ -1114,9 +1327,9 @@ select:focus-visible {
   border-bottom: 1px solid var(--line);
 }
 
-/* 「时长/状态」表头文字居中。 */
+/* 「进度/时长」表头文字居中。 */
 .ca-list-head .h-dur,
-.ca-list-head .h-status {
+.ca-list-head .h-progress {
   text-align: center;
 }
 
@@ -1136,7 +1349,7 @@ select:focus-visible {
 .ca-row .row-button {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px 120px;
+  grid-template-columns: minmax(0, 1fr) 110px 80px;
   gap: 16px;
   align-items: center;
   /* 右内边距要盖过行尾绝对定位的「操作」按钮（right:12px + 宽 32px = 44px）再留出间隙，
@@ -1196,9 +1409,34 @@ select:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-.ca-row .c-status {
+/* 列表「进度」列：已看/看完/未看/处理中/失败五态，居中对齐。 */
+.ca-row .c-progress {
   display: flex;
+  align-items: center;
   justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.ca-row .c-progress.accent {
+  color: var(--accent-text);
+}
+
+.ca-row .c-progress.ok {
+  color: var(--status-ok);
+}
+
+.ca-row .c-progress.err {
+  color: var(--status-err);
+}
+
+.ca-row .c-progress.processing .accent {
+  color: var(--accent-text);
 }
 
 .ca-wb {
@@ -1214,8 +1452,32 @@ select:focus-visible {
 }
 
 .ca-wb[data-layout="stacked"] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* `data-layout` 是 Home 的真实布局决策。这层基础规则让 wide 平板竖屏也获得
+   与 compact/medium 相同的稳定播放器高度和剩余学习区；medium 横屏的左右分栏
+   会由后面 orientation 媒体查询覆盖。 */
+.ca-wb[data-layout="stacked"] .ca-player-col {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+  overflow: visible;
+}
+
+.ca-wb[data-layout="stacked"] .ca-panel-col {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ca-wb[data-layout="stacked"] .ca-stage-wrap {
   display: block;
-  overflow-y: auto;
+  padding: 0;
+}
+
+.ca-wb[data-layout="stacked"] .ca-stage {
+  aspect-ratio: 16 / 9;
 }
 
 .ca-player-col {
@@ -1313,6 +1575,47 @@ select:focus-visible {
   padding-left: max(12px, env(safe-area-inset-left, 0px));
 }
 
+/* 宽容器使用完整控制行；窄播放器把次级动作收进固定菜单，避免分栏时被视频舞台裁掉。 */
+.ca-player-controls-desktop {
+  display: contents;
+}
+
+.ca-player-mobile-more {
+  display: none;
+}
+
+.ca-player-mobile-menu-backdrop {
+  position: fixed;
+  z-index: 69;
+  inset: 0;
+  border: 0;
+  background: rgb(0 0 0 / 0.32);
+}
+
+.ca-player-mobile-menu {
+  position: fixed;
+  z-index: 70;
+  right: max(8px, env(safe-area-inset-right, 0px));
+  bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  width: min(280px, calc(100vw - 16px));
+  max-height: min(70dvh, 480px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 8px;
+  background: rgb(10 10 12 / 0.96);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.45);
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 常驻进度条（桌面）：贴在视频底边，安全区内缩；悬停时由 ProgressBar 自己加粗。 */
+.ca-progress-shell {
+  padding-top: 2px;
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+  padding-bottom: max(2px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+}
+
 .ca-resizer {
   position: relative;
   width: 18px;
@@ -1379,6 +1682,7 @@ select:focus-visible {
 }
 
 .ca-panel-col {
+  position: relative;
   min-width: 0;
   min-height: 0;
   width: 100%;
@@ -1388,6 +1692,74 @@ select:focus-visible {
   overflow: hidden;
 }
 
+/* 面板收起：整列宽度归零、隐藏分栏，右侧浮一根「展开」把手（专注看片时唤醒）。 */
+.ca-wb[data-panel-collapsed] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ca-wb[data-panel-collapsed] .ca-resizer {
+  display: none;
+}
+
+.ca-panel-collapse {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  z-index: 6;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 56px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-panel);
+  color: var(--text-3);
+  box-shadow: var(--shadow-raise);
+  opacity: 0.55;
+  transition: opacity 0.12s, color 0.12s;
+}
+
+.ca-panel-col:hover .ca-panel-collapse,
+.ca-panel-collapse:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .ca-panel-collapse {
+    opacity: 1;
+  }
+}
+
+.ca-panel-collapse:hover {
+  color: var(--text-1);
+}
+
+/* 收起后的展开把手：钉在右缘中间，垂直小竖条 + 图标。 */
+.ca-panel-reveal {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  z-index: 6;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 56px;
+  border-radius: 8px 0 0 8px;
+  border: 1px solid var(--line);
+  border-right: none;
+  background: var(--bg-panel);
+  color: var(--text-3);
+  box-shadow: var(--shadow-raise);
+  transition: color 0.12s, width 0.14s var(--ease);
+}
+
+.ca-panel-reveal:hover {
+  color: var(--text-1);
+  width: 30px;
+}
+
 /* 拖动分隔条时：只冻结「文稿」栏（DOM 巨大、是卡顿来源）；其余栏较轻，照常同步随宽度渲染。
    把文稿面板冻结成固定尺寸、完全自包含（contain: strict = size+layout+style+paint）的盒子，
    浏览器重排工作台时对这棵子树做「零工作」（不重排、不重评估 content-visibility），内容仍可见；
@@ -1395,7 +1767,7 @@ select:focus-visible {
    max-width:100% 兜住「拖窄」：冻结宽度取自拖动起点，往窄拖时它比当前列更宽，会溢出被
    overflow:hidden 裁掉右半（片段被挡住）——封顶到当前列宽即不再溢出（往窄拖时按需回流，
    往宽拖/稳态仍是零工作的冻结）。 */
-.ca-wb.is-resizing-panel .ca-panel-col > [data-study-tab="文稿"] {
+.ca-wb.is-resizing-panel .ca-panel-col > [data-study-tab="transcript"] {
   width: var(--panel-frozen-width);
   max-width: 100%;
   height: 100%;
@@ -1417,6 +1789,10 @@ select:focus-visible {
   overflow: hidden;
 }
 
+.ca-app[data-bucket="compact"] .ca-wb-head {
+  padding: 14px 16px 0;
+}
+
 .ca-app[data-bucket="compact"] .ca-player-col {
   flex: 0 0 auto;
   border-bottom: 1px solid var(--line);
@@ -1435,10 +1811,6 @@ select:focus-visible {
 
 .ca-app[data-bucket="compact"] .ca-stage {
   aspect-ratio: 16 / 9;
-}
-
-.ca-app[data-bucket="compact"] .ca-wb-head {
-  padding: 14px 16px 0;
 }
 
 /* ---- medium 竖屏（iPad Air 11" 竖屏等）：上下堆叠 ---- */
@@ -1559,7 +1931,7 @@ select:focus-visible {
 .course-video-progress,
 .course-video-volume {
   --progress-percent: 0%;
-  --video-control-color: var(--accent);
+  --video-control-color: var(--video-accent);
   --video-track: rgb(255 255 255 / 0.22);
   appearance: none;
   cursor: pointer;
@@ -1702,6 +2074,28 @@ select:focus-visible {
   }
 }
 
+.ca-player-controls[data-controls-layout="compact"] {
+  width: 100%;
+  min-width: 0;
+  padding-right: max(8px, env(safe-area-inset-right, 0px));
+  padding-left: max(8px, env(safe-area-inset-left, 0px));
+}
+
+.ca-player-controls[data-controls-layout="compact"] .ca-player-controls-desktop {
+  display: none;
+}
+
+.ca-player-controls[data-controls-layout="compact"] .ca-player-mobile-more {
+  display: block;
+  flex: none;
+}
+
+.ca-player-controls[data-controls-layout="compact"] .ca-player-controls-time {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 文稿原生滚动（无 JS 虚拟列表的量高回改，故不抽搐）。content-visibility 按「块」
    （每块约 30 行，见 TranscriptPanel 的 CHUNK_SIZE）而非按行：
    - 性能：滚动时浏览器只需跟踪几十个块边界（而非上千个行边界），簿记开销小得多；
@@ -1718,6 +2112,27 @@ select:focus-visible {
   display: none;
 }
 
+/* 多个连续时间点是段落来源，不再作为一排高亮标签抢正文注意力。 */
+.tiptap-notes p:has(> .ca-ts-source-chip) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+  color: var(--text-faint);
+  font-size: 0.6875rem;
+}
+
+.tiptap-notes p:has(> .ca-ts-source-chip) .ca-ts-source-chip:hover {
+  background: var(--surface-card-hover);
+  color: var(--text-strong);
+}
+
+[data-hide-timestamps] .ca-ts-source-row,
+[data-hide-timestamps] .tiptap-notes p:has(> .ca-ts-source-chip) {
+  display: none;
+}
+
 /* 用户要求减少动效时：全局兜底，几乎关掉所有过渡与动画（前庭敏感友好）。 */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -1727,6 +2142,12 @@ select:focus-visible {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
+  }
+
+  html.theme-circle-vt::view-transition-old(root),
+  html.theme-circle-vt::view-transition-new(root) {
+    animation: none !important;
+    clip-path: none !important;
   }
 }
 
@@ -1779,10 +2200,8 @@ html.theme-circle-vt::view-transition-new(root) {
   }
 }
 
-/* 注意:此处不再用 @media (prefers-reduced-motion: reduce) 关掉圆形揭开。
-   圆形揭开只在用户「亲手点击切换按钮」时触发(theme.ts 里带起点的路径),属于对用户
-   直接操作的即时反馈、时长很短,即便系统开了「减弱动态效果」也照常展示——否则会重现
-   「只切色、永远看不到圆」的问题。跟随系统明暗的自动切换仍走瞬切(见 theme.ts)。 */
+/* 减弱动态效果时，theme.ts 会在进入 View Transition/覆盖层路径前直接提交新主题；
+   上面的媒体查询再兜底清除残留快照动画。 */
 
 /* 明暗切换兜底(引擎不支持 View Transitions 时)：切换瞬间由 JS 给 <html> 加
    .theme-animating(~300ms)，让整树颜色一起淡变，避免「按钮淡变、背景/文字/卡片
@@ -1848,6 +2267,26 @@ html.theme-circle-vt::view-transition-new(root) {
 @media (prefers-reduced-motion: no-preference) {
   .ca-tab-content[data-state="active"] {
     animation: ca-fade-in 0.18s ease;
+  }
+}
+
+/* 知识点手风琴展开：挂载时轻微淡入下移（只动 transform/opacity，不重排——
+   长讲解 + 长出处列表下 grid-rows/height 动画会每帧重排整棵子树，globals.test 不允许）。
+   收起不播动画、直接卸载——与对话框同理：关闭要比打开利落。 */
+@keyframes ca-concept-expand {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-concept-expand {
+    animation: ca-concept-expand 0.22s var(--ease) backwards;
   }
 }
 
@@ -2116,7 +2555,7 @@ html.theme-circle-vt::view-transition-new(root) {
   padding: 0 4px;
   border-radius: 999px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 10px;
   font-weight: 700;
   line-height: 16px;
@@ -2124,8 +2563,7 @@ html.theme-circle-vt::view-transition-new(root) {
 }
 
 /* 有底部 Tab 时,窄屏「非工作台」主区底部留出 Tab 高度(含安全区) */
-.ca-app[data-bucket="compact"][data-view="library"] .ca-main,
-.ca-app[data-bucket="medium"][data-view="library"] .ca-main {
+.ca-app[data-shell="stacked"][data-view="library"] .ca-main {
   padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
 }
 

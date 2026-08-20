@@ -16,6 +16,7 @@ import { ipc, type DueCard } from "@/lib/ipc";
 import { isWatchedThrough, readPlaybackProgress } from "@/lib/playback";
 import { formatCountdown } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
+import { ErrorNote } from "@/components/ui/ErrorNote";
 import { ProgressRing } from "@/components/ui/ProgressRing";
 import { DailyGoalDialog } from "./DailyGoalDialog";
 import { ReviewSession } from "./ReviewSession";
@@ -154,13 +155,13 @@ function HeatSquare({
         event.preventDefault();
         onNavigate(cell.day, offset);
       }}
-      className={`h-3 w-3 flex-none cursor-pointer rounded-[2px] ${HEAT_LEVEL_BG[cell.level]} transition-colors focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-card)] ${
+      className={`h-3 w-3 flex-none cursor-pointer rounded-[2px] ${HEAT_LEVEL_BG[cell.level]} transition-colors focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-card)] ${
         isToday
-          ? "outline outline-2 outline-offset-1 outline-primary"
+          ? "outline outline-2 outline-offset-1 outline-[var(--accent-text)]"
           : active
             ? "outline outline-1 outline-offset-1 outline-[var(--text-muted)]"
             : reached
-              ? "outline outline-1 outline-offset-1 outline-primary/60"
+              ? "outline outline-1 outline-offset-1 outline-[var(--accent-text)] opacity-80"
               : ""
       }`}
     />
@@ -194,7 +195,7 @@ export function Dashboard({
     name: string;
   } | null>(null);
 
-  const { data: weak = [] } = useQuery({
+  const weakQuery = useQuery({
     queryKey: ["weak-concepts"],
     queryFn: () => ipc.srs.weakConcepts(),
   });
@@ -206,46 +207,77 @@ export function Dashboard({
     queryClient.invalidateQueries({ queryKey: ["srs-count-due"] });
   }
 
-  const { data: dueCount = 0 } = useQuery({
+  const dueCountQuery = useQuery({
     queryKey: ["srs-count-due"],
     queryFn: () => ipc.srs.countDue(),
   });
 
   // 下一批到期时刻：没有到期卡时用它代替一个点不动的禁用按钮。
-  const { data: nextDueAt = null } = useQuery({
+  const nextDueAtQuery = useQuery({
     queryKey: ["srs-next-due"],
     queryFn: () => ipc.stats.nextDueAt(),
   });
 
-  const { data: continueRows = [] } = useQuery({
+  const continueQuery = useQuery({
     queryKey: ["stats-continue"],
     queryFn: () => ipc.stats.continueLearning(),
   });
 
-  const { data: daily = [] } = useQuery({
+  const dailyQuery = useQuery({
     queryKey: ["stats-daily", today],
     queryFn: () => ipc.stats.dailyTotals(fromTs, Date.now()),
   });
-  const { data: courseTotals = [] } = useQuery({
+  const courseTotalsQuery = useQuery({
     queryKey: ["stats-courses"],
     queryFn: () => ipc.stats.courseTotals(),
   });
-  const { data: courses = [] } = useQuery({
+  const coursesQuery = useQuery({
     queryKey: ["courses"],
     queryFn: ipc.courses.list,
   });
-  const { data: courseVideoIds = [] } = useQuery({
+  const courseVideoIdsQuery = useQuery({
     queryKey: ["stats-course-video-ids"],
     queryFn: () => ipc.stats.courseVideoIds(),
   });
-  const { data: dueByCourse = [] } = useQuery({
+  const dueByCourseQuery = useQuery({
     queryKey: ["srs-due-by-course"],
     queryFn: () => ipc.srs.dueByCourse(),
   });
-  const { data: progressRows = [] } = useQuery({
+  const progressRowsQuery = useQuery({
     queryKey: ["stats-video-progress"],
     queryFn: () => ipc.stats.videoProgress(),
   });
+
+  const weak = weakQuery.data ?? [];
+  const dueCount = dueCountQuery.data ?? 0;
+  const nextDueAt = nextDueAtQuery.data ?? null;
+  const continueRows = continueQuery.data ?? [];
+  const daily = useMemo(() => dailyQuery.data ?? [], [dailyQuery.data]);
+  const courseTotals = courseTotalsQuery.data ?? [];
+  const courses = useMemo(() => coursesQuery.data ?? [], [coursesQuery.data]);
+  const courseVideoIds = useMemo(
+    () => courseVideoIdsQuery.data ?? [],
+    [courseVideoIdsQuery.data],
+  );
+  const dueByCourse = useMemo(
+    () => dueByCourseQuery.data ?? [],
+    [dueByCourseQuery.data],
+  );
+  const progressRows = useMemo(
+    () => progressRowsQuery.data ?? [],
+    [progressRowsQuery.data],
+  );
+
+  const courseStatsQueries = [
+    courseTotalsQuery,
+    coursesQuery,
+    courseVideoIdsQuery,
+    dueByCourseQuery,
+    progressRowsQuery,
+  ];
+  const courseStatsFailed = courseStatsQueries.some((query) => query.isError);
+  const courseStatsError = courseStatsQueries.find((query) => query.isError)?.error;
+  const courseStatsPending = courseStatsQueries.some((query) => query.isPending);
 
   // 每门课的完成度（已看完/总数）。「已看完」优先看库里的播放进度，没有那条记录
   // 才回落到本地记录——清缓存/换设备后完成度不会再凭空归零。
@@ -339,13 +371,25 @@ export function Dashboard({
       ? Math.round((recentReviews.good / recentReviews.reviews) * 100)
       : 0;
   const reviewOutputLine =
-    recentReviews.reviews > 0
-      ? t("dashboard.recentReviews", { reviews: recentReviews.reviews, rate: goodRate })
-      : t("dashboard.srsIntro");
+    dailyQuery.isPending || dailyQuery.isError
+      ? null
+      : recentReviews.reviews > 0
+        ? t("dashboard.recentReviews", { reviews: recentReviews.reviews, rate: goodRate })
+        : t("dashboard.srsIntro");
   const nameOf = useMemo(() => {
     const map = new Map(courses.map((c) => [c.id, c.name]));
     return (id: string) => map.get(id) ?? t("dashboard.deletedCourse");
   }, [courses, t]);
+
+  function retryCourseStats() {
+    void Promise.all([
+      courseTotalsQuery.refetch(),
+      coursesQuery.refetch(),
+      courseVideoIdsQuery.refetch(),
+      dueByCourseQuery.refetch(),
+      progressRowsQuery.refetch(),
+    ]);
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
@@ -365,9 +409,25 @@ export function Dashboard({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
         <div className="mx-auto max-w-2xl space-y-6">
-          {continueRows.length > 0 && (
-            <div>
-              <div className="mb-2 text-sm font-semibold text-[var(--text-strong)]">
+          {continueQuery.isError ? (
+            <section aria-labelledby="dashboard-continue-title">
+              <div
+                id="dashboard-continue-title"
+                className="mb-2 text-sm font-semibold text-[var(--text-strong)]"
+              >
+                {t("dashboard.continueLearning")}
+              </div>
+              <ErrorNote
+                error={continueQuery.error}
+                onRetry={() => void continueQuery.refetch()}
+              />
+            </section>
+          ) : continueRows.length > 0 ? (
+            <section aria-labelledby="dashboard-continue-title">
+              <div
+                id="dashboard-continue-title"
+                className="mb-2 text-sm font-semibold text-[var(--text-strong)]"
+              >
                 {t("dashboard.continueLearning")}
               </div>
               <ul className="space-y-2">
@@ -407,10 +467,19 @@ export function Dashboard({
                   );
                 })}
               </ul>
-            </div>
-          )}
+            </section>
+          ) : null}
 
-          {dueCount > 0 ? (
+          {dueCountQuery.isPending ? (
+            <p className="text-sm text-[var(--text-muted)]" aria-live="polite">
+              {t("common.loading")}
+            </p>
+          ) : dueCountQuery.isError ? (
+            <ErrorNote
+              error={dueCountQuery.error}
+              onRetry={() => void dueCountQuery.refetch()}
+            />
+          ) : dueCount > 0 ? (
             <button
               onClick={() => setReviewing(true)}
               className="flex w-full items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
@@ -422,12 +491,25 @@ export function Dashboard({
                 <span className="block text-sm font-medium text-[var(--text-strong)]">
                   {t("dashboard.reviewDue", { count: dueCount })}
                 </span>
-                <span className="block text-xs text-[var(--text-muted)]">{reviewOutputLine}</span>
+                {reviewOutputLine && (
+                  <span className="block text-xs text-[var(--text-muted)]">
+                    {reviewOutputLine}
+                  </span>
+                )}
               </span>
               <span className="flex-none rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white">
                 {t("dashboard.startReview")}
               </span>
             </button>
+          ) : nextDueAtQuery.isPending ? (
+            <p className="text-sm text-[var(--text-muted)]" aria-live="polite">
+              {t("common.loading")}
+            </p>
+          ) : nextDueAtQuery.isError ? (
+            <ErrorNote
+              error={nextDueAtQuery.error}
+              onRetry={() => void nextDueAtQuery.refetch()}
+            />
           ) : (
             // 没有到期卡时不摆一个点不动的禁用按钮（读屏也读不到它）：改成说明下一批什么时候来。
             <div className="flex w-full items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
@@ -443,19 +525,34 @@ export function Dashboard({
                     ? t("dashboard.nextDue", { time: formatCountdown(nextDueAt) })
                     : t("dashboard.noScheduledCards")}
                 </div>
-                {recentReviews.reviews > 0 && (
+                {reviewOutputLine && recentReviews.reviews > 0 && (
                   <div className="mt-0.5 text-xs text-[var(--text-faint)]">{reviewOutputLine}</div>
                 )}
               </div>
             </div>
           )}
 
-          <div
-            role="group"
-            aria-label={t("dashboard.stats")}
-            className="grid grid-cols-3 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)]"
-          >
-            <section aria-label={t("dashboard.todayStudy")} className="min-w-0 px-3 py-3">
+          {dailyQuery.isPending ? (
+            <p className="text-sm text-[var(--text-muted)]" aria-live="polite">
+              {t("common.loading")}
+            </p>
+          ) : dailyQuery.isError ? (
+            <section aria-label={t("dashboard.stats")}>
+              <ErrorNote
+                error={dailyQuery.error}
+                onRetry={() => void dailyQuery.refetch()}
+              />
+            </section>
+          ) : (
+            <div
+              role="group"
+              aria-label={t("dashboard.stats")}
+              className="ca-dashboard-stats grid grid-cols-2 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] min-[400px]:grid-cols-3"
+            >
+            <section
+              aria-label={t("dashboard.todayStudy")}
+              className="ca-dashboard-stat-today col-span-2 min-w-0 px-3 py-3 min-[400px]:col-span-1"
+            >
               <div className="flex min-h-7 items-center justify-between gap-1">
                 <span className="text-xs text-[var(--text-muted)]">{t("dashboard.todayStudy")}</span>
                 <DailyGoalDialog value={goalMin} onSave={saveGoal} />
@@ -484,7 +581,7 @@ export function Dashboard({
 
             <section
               aria-label={t("dashboard.weekStudy")}
-              className="min-w-0 border-l border-[var(--border-subtle)] px-3 py-3"
+              className="ca-dashboard-stat-week min-w-0 border-l border-[var(--border-subtle)] px-3 py-3 max-[399px]:border-l-0 max-[399px]:border-t"
             >
               <div className="min-h-7 text-xs leading-7 text-[var(--text-muted)]">{t("dashboard.weekStudy")}</div>
               <div className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-strong)]">
@@ -497,7 +594,7 @@ export function Dashboard({
 
             <section
               aria-label={t("dashboard.streak")}
-              className="min-w-0 border-l border-[var(--border-subtle)] px-3 py-3"
+              className="ca-dashboard-stat-streak min-w-0 border-l border-[var(--border-subtle)] px-3 py-3 max-[399px]:border-t"
             >
               <div className="min-h-7 text-xs leading-7 text-[var(--text-muted)]">{t("dashboard.streak")}</div>
               <div className="mt-1 flex items-center gap-1.5 text-lg font-semibold tabular-nums text-[var(--text-strong)]">
@@ -510,11 +607,29 @@ export function Dashboard({
                 {todayWatched > 0 || todayReviews > 0 ? t("dashboard.studiedToday") : t("dashboard.notStudiedToday")}
               </div>
             </section>
-          </div>
+            </div>
+          )}
 
-          {weak.length > 0 && (
-            <div>
-              <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-[var(--text-strong)]">
+          {weakQuery.isError ? (
+            <section aria-labelledby="dashboard-weak-title">
+              <div
+                id="dashboard-weak-title"
+                className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-[var(--text-strong)]"
+              >
+                <TrendingDown className="h-4 w-4 text-[var(--status-warn,#e08a00)]" />
+                {t("dashboard.weakTopics")}
+              </div>
+              <ErrorNote
+                error={weakQuery.error}
+                onRetry={() => void weakQuery.refetch()}
+              />
+            </section>
+          ) : weak.length > 0 ? (
+            <section aria-labelledby="dashboard-weak-title">
+              <div
+                id="dashboard-weak-title"
+                className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-[var(--text-strong)]"
+              >
                 <TrendingDown className="h-4 w-4 text-[var(--status-warn,#e08a00)]" />
                 {t("dashboard.weakTopics")}
               </div>
@@ -536,7 +651,12 @@ export function Dashboard({
                           {w.name}
                         </div>
                         <div className="mt-0.5 truncate text-xs text-[var(--text-muted)]">
-                          {t("dashboard.weakDetail", { course: w.course_name, rate: Math.round(w.again_rate * 100), fails: w.fails })}{w.reviews}）
+                          {t("dashboard.weakDetail", {
+                            course: w.course_name,
+                            rate: Math.round(w.again_rate * 100),
+                            fails: w.fails,
+                            reviews: w.reviews,
+                          })}
                         </div>
                       </div>
                       <span className="flex-none rounded-md bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary">
@@ -546,10 +666,11 @@ export function Dashboard({
                   </li>
                 ))}
               </ul>
-            </div>
-          )}
+            </section>
+          ) : null}
 
-          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
+          {!dailyQuery.isPending && !dailyQuery.isError && (
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
             <div className="mb-2 flex items-center justify-between">
               <div className="text-sm font-semibold text-[var(--text-strong)]">{t("dashboard.heatmap")}</div>
               <div className="flex items-center gap-1 text-[11px] text-[var(--text-faint)]">
@@ -624,13 +745,20 @@ export function Dashboard({
                 ? heatCellLabel(activeHeatCell, goalMs > 0 && activeHeatCell.ms >= goalMs, t)
                 : t("dashboard.noRecords")}
             </div>
-          </div>
+            </div>
+          )}
 
           <div>
             <div className="mb-2 text-sm font-semibold text-[var(--text-strong)]">
               {t("dashboard.courses")}
             </div>
-            {courseTotals.length === 0 ? (
+            {courseStatsFailed ? (
+              <ErrorNote error={courseStatsError} onRetry={retryCourseStats} />
+            ) : courseStatsPending ? (
+              <p className="text-sm text-[var(--text-muted)]" aria-live="polite">
+                {t("common.loading")}
+              </p>
+            ) : courseTotals.length === 0 ? (
               <p className="rounded-lg border border-[var(--border-faint)] bg-[var(--surface-card)] px-4 py-6 text-center text-sm text-[var(--text-muted)]">
                 {t("dashboard.noStudyRecords")}
               </p>

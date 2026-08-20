@@ -1,6 +1,11 @@
 import { Fragment, type ReactNode } from "react";
 import { MathText } from "@/components/MathText";
+import i18n from "@/i18n";
 import { withClickableTimestamps } from "@/lib/clickableTimestamps";
+import {
+  splitTrailingTimestampSources,
+  type TimestampSource,
+} from "@/lib/markdownToTiptap";
 
 type Seek = (ms: number) => void;
 
@@ -40,11 +45,61 @@ function inlineRich(text: string, onSeek: Seek, key: string): ReactNode {
   );
 }
 
+function timestampSources(sources: TimestampSource[], onSeek: Seek) {
+  const label = i18n.t("markdown.sources");
+  return (
+    <span
+      role="group"
+      aria-label={label}
+      className="ca-ts-source-row mt-1 flex flex-wrap items-center gap-1 text-[11px] text-[var(--text-faint)]"
+    >
+      <span className="mr-0.5">{label}</span>
+      {sources.map((source, index) => (
+        <button
+          key={`${source.ms}-${index}`}
+          type="button"
+          aria-label={i18n.t("markdown.jumpTo", { time: source.label })}
+          onClick={() => onSeek(source.ms)}
+          className="ca-ts-chip rounded px-1.5 py-0.5 tabular-nums text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+        >
+          {source.label}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+function blockRich(
+  text: string,
+  onSeek: Seek,
+  key: string,
+  trailing?: ReactNode,
+) {
+  const { body, sources } = splitTrailingTimestampSources(text);
+  if (sources.length === 0) {
+    return (
+      <>
+        {inlineRich(text, onSeek, key)}
+        {trailing}
+      </>
+    );
+  }
+  return (
+    <>
+      {body ? inlineRich(body, onSeek, key) : null}
+      {timestampSources(sources, onSeek)}
+      {trailing}
+    </>
+  );
+}
+
 type Block =
   | { kind: "p"; text: string }
-  | { kind: "h"; text: string }
+  | { kind: "h"; level: 1 | 2 | 3 | 4 | 5 | 6; text: string }
   | { kind: "ul"; items: string[] }
   | { kind: "ol"; items: string[] };
+
+type HeadingElement = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
 
 function parseBlocks(md: string): Block[] {
   const blocks: Block[] = [];
@@ -63,12 +118,16 @@ function parseBlocks(md: string): Block[] {
       flushPara();
       continue;
     }
-    const heading = t.match(/^#{1,6}\s+(.*)$/);
+    const heading = t.match(/^(#{1,6})\s+(.*)$/);
     const bullet = t.match(/^[-*]\s+(.*)$/);
     const ordered = t.match(/^\d+\.\s+(.*)$/);
     if (heading) {
       flushPara();
-      blocks.push({ kind: "h", text: heading[1] });
+      blocks.push({
+        kind: "h",
+        level: heading[1].length as 1 | 2 | 3 | 4 | 5 | 6,
+        text: heading[2],
+      });
     } else if (bullet) {
       flushPara();
       const last = blocks[blocks.length - 1];
@@ -104,14 +163,14 @@ export function renderMarkdown(
     const key = `b-${bi}`;
     const tail = trailing && bi === lastIdx ? trailing : null;
     if (block.kind === "h") {
+      const HeadingTag = `h${block.level}` as HeadingElement;
       return (
-        <p
+        <HeadingTag
           key={key}
           className="mt-3 mb-1 text-sm font-semibold text-[var(--text-strong)]"
         >
-          {inlineRich(block.text, onSeek, key)}
-          {tail}
-        </p>
+          {blockRich(block.text, onSeek, key, tail)}
+        </HeadingTag>
       );
     }
     if (block.kind === "ul" || block.kind === "ol") {
@@ -128,8 +187,12 @@ export function renderMarkdown(
               key={i}
               className="text-sm leading-relaxed text-[var(--text-normal)]"
             >
-              {inlineRich(it, onSeek, `${key}-${i}`)}
-              {tail && i === lastItem ? tail : null}
+              {blockRich(
+                it,
+                onSeek,
+                `${key}-${i}`,
+                tail && i === lastItem ? tail : undefined,
+              )}
             </li>
           ))}
         </ListTag>
@@ -140,8 +203,7 @@ export function renderMarkdown(
         key={key}
         className="my-1.5 whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-normal)]"
       >
-        {inlineRich(block.text, onSeek, key)}
-        {tail}
+        {blockRich(block.text, onSeek, key, tail)}
       </p>
     );
   });

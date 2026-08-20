@@ -4,6 +4,8 @@ use crate::error::{AppError, AppResult};
 use crate::llm::Provider;
 use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 // 一批的段数。模型只返回需要修改的 patch（按 id 引用）。
 //
@@ -201,12 +203,24 @@ pub fn parse_corrections(
     Ok(out)
 }
 
-pub async fn overwrite_transcript_texts(
+async fn overwrite_transcript_texts_if_unchanged(
     db: &Db,
     video_id: &str,
+    expected: &[TranscriptSegment],
     corrected: &[CorrectionSegment],
 ) -> AppResult<()> {
-    let mut tx = db.pool.begin().await?;
+    if expected.len() != corrected.len() {
+        return Err(AppError::Other("transcript row count mismatch".into()));
+    }
+    for (row, segment) in expected.iter().zip(corrected) {
+        if row.start_ms != segment.start_ms || row.end_ms != segment.end_ms {
+            return Err(AppError::Other("transcript timestamp mismatch".into()));
+        }
+    }
+
+    // 模型纠错可能跑数分钟。先拿写锁再重读文稿，并与请求开始时的完整快照比较，
+    // 最终写入就成为一次 compare-and-swap：请求期间发生的人工编辑始终优先。
+    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
     let rows: Vec<TranscriptSegment> = sqlx::query_as(
         "SELECT id,video_id,segment_idx,start_ms,end_ms,text
          FROM transcripts WHERE video_id=? ORDER BY segment_idx",
@@ -214,24 +228,30 @@ pub async fn overwrite_transcript_texts(
     .bind(video_id)
     .fetch_all(&mut *tx)
     .await?;
-    if rows.len() != corrected.len() {
-        return Err(AppError::Other("transcript row count mismatch".into()));
+    let unchanged = rows.len() == expected.len()
+        && rows.iter().zip(expected).all(|(current, original)| {
+            current.id == original.id
+                && current.video_id == original.video_id
+                && current.segment_idx == original.segment_idx
+                && current.start_ms == original.start_ms
+                && current.end_ms == original.end_ms
+                && current.text == original.text
+        });
+    if !unchanged {
+        return Err(AppError::Other(
+            "文稿在纠错期间已被修改，已保留人工修订，请重新发起纠错".into(),
+        ));
     }
-
-    for (row, segment) in rows.iter().zip(corrected) {
-        if row.start_ms != segment.start_ms || row.end_ms != segment.end_ms {
-            return Err(AppError::Other("transcript timestamp mismatch".into()));
-        }
-    }
-    for (row, segment) in rows.iter().zip(corrected) {
-        let result = sqlx::query("UPDATE transcripts SET text=? WHERE id=?")
+    for ((row, original), segment) in rows.iter().zip(expected).zip(corrected) {
+        let result = sqlx::query("UPDATE transcripts SET text=? WHERE id=? AND text=?")
             .bind(segment.text.trim())
             .bind(row.id)
+            .bind(&original.text)
             .execute(&mut *tx)
             .await?;
         if result.rows_affected() != 1 {
             return Err(AppError::Other(
-                "transcript changed while correcting".into(),
+                "文稿在纠错期间已被修改，已保留人工修订，请重新发起纠错".into(),
             ));
         }
     }
@@ -239,9 +259,25 @@ pub async fn overwrite_transcript_texts(
     Ok(())
 }
 
+pub async fn overwrite_transcript_texts(
+    db: &Db,
+    video_id: &str,
+    corrected: &[CorrectionSegment],
+) -> AppResult<()> {
+    let expected = list_segments(db, video_id).await?;
+    overwrite_transcript_texts_if_unchanged(db, video_id, &expected, corrected).await
+}
+
 // 每批的最大尝试次数。失败（限流/超时/解析不符）后重试，给一次机会，
 // 而不是一遇错就保留原文导致「只处理了一部分」。
 const CORRECTION_MAX_ATTEMPTS: usize = 3;
+
+fn correction_error_is_final(error: &AppError, account_halted: &AtomicBool) -> bool {
+    if error.is_account_failure() {
+        account_halted.store(true, Ordering::SeqCst);
+    }
+    error.is_permanent()
+}
 
 /// 单次尝试：调用模型并解析，结果记入开发控制台（含第几次尝试）。
 async fn correct_batch_once(
@@ -288,13 +324,24 @@ async fn correct_batch(
     model: &str,
     video_id: &str,
     batch: &[CorrectionSegment],
-) -> AppResult<Vec<CorrectionSegment>> {
+    account_halted: &AtomicBool,
+) -> AppResult<Option<Vec<CorrectionSegment>>> {
     let batch_json = build_batch_request_json(batch)?;
     let mut last_err: Option<AppError> = None;
     for attempt in 1..=CORRECTION_MAX_ATTEMPTS {
+        // 其他并发批次已经确认账号不可用时，不再发新的请求。已经在途的请求无法
+        // 撤回，但它们返回后也会在下面立即停止，不会继续吃后续重试预算。
+        if account_halted.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
         match correct_batch_once(provider, model, video_id, batch, &batch_json, attempt).await {
-            Ok(fixed) => return Ok(fixed),
+            Ok(fixed) => return Ok(Some(fixed)),
             Err(error) => {
+                // 鉴权、余额、权限以及确定的请求错误不会随退避改变。账号错误还会
+                // 通过上面的共享标志阻止其他批次继续调用同一个端点。
+                if correction_error_is_final(&error, account_halted) {
+                    return Err(error);
+                }
                 last_err = Some(error);
                 if attempt < CORRECTION_MAX_ATTEMPTS {
                     // 退避，缓解限流：第 1 次失败等 0.5s，第 2 次等 1s。
@@ -307,17 +354,43 @@ async fn correct_batch(
     Err(last_err.unwrap_or_else(|| AppError::Pipeline("transcript correction failed".into())))
 }
 
-fn assemble_corrections(
-    results: Vec<(bool, Vec<CorrectionSegment>)>,
-) -> AppResult<Vec<CorrectionSegment>> {
-    let failed_count = results.iter().filter(|(ok, _)| !*ok).count();
+struct CorrectionBatchResult {
+    applied: bool,
+    segments: Vec<CorrectionSegment>,
+    error: Option<AppError>,
+}
+
+fn assemble_corrections(results: Vec<CorrectionBatchResult>) -> AppResult<Vec<CorrectionSegment>> {
+    // 账号错误必须原样冒泡：消息里有充值/Key/权限提示，变体里还可能带真正失败的
+    // Profile。把它压成通用 Pipeline 错误会同时丢掉用户提示与上层停机所需的 scope。
+    if results.iter().any(|result| {
+        result
+            .error
+            .as_ref()
+            .is_some_and(AppError::is_account_failure)
+    }) {
+        for result in results {
+            if let Some(error) = result.error {
+                if error.is_account_failure() {
+                    return Err(error);
+                }
+            }
+        }
+        unreachable!("账号错误检查与取出结果必须一致");
+    }
+
+    let failed_count = results.iter().filter(|result| !result.applied).count();
     // 仅当「全部批次」都失败时才整体报错（多为模型/网络不可用）。
     // 否则：成功批应用纠正结果，失败批沿用其原始分段，二者按顺序拼回——
     // 失败批保留原文，但已识别成功的批次照常落库，不再因个别批失败而整篇放弃。
     if failed_count == results.len() {
-        return Err(AppError::Pipeline(
-            "所有分段纠错均失败（模型输出可能被截断或格式不符）".into(),
-        ));
+        let first_error = results.into_iter().find_map(|result| result.error);
+        return Err(match first_error {
+            Some(error) => error.rewrap(format!(
+                "所有分段纠错均失败（模型输出可能被截断或格式不符）：{error}"
+            )),
+            None => AppError::Pipeline("所有分段纠错均失败（模型输出可能被截断或格式不符）".into()),
+        });
     }
     if failed_count > 0 {
         eprintln!(
@@ -326,8 +399,8 @@ fn assemble_corrections(
     }
 
     let mut corrected = Vec::new();
-    for (_, part) in results {
-        corrected.extend(part);
+    for result in results {
+        corrected.extend(result.segments);
     }
     Ok(corrected)
 }
@@ -338,16 +411,11 @@ struct RawBackupSegment {
     text: String,
 }
 
-/// 把最近一份原始快照写回 transcripts.text。
-/// 用于「仅重新纠错」：先回到原始稿，再重跑纠错，避免在已纠错文本上反复改写。
-/// 没有任何备份时返回 false（沿用当前文本）。
-///
-/// 优先取原始 ASR 稿；没有就退到最近的一份**任何来源**的备份——视频自带字幕
-/// （B 站/本地 SRT）走的是导入而不是语音识别，备份记的是 `bilibili_sub` 之类的来源。
-/// 只认 raw_asr 的话，这类视频每次「重新纠错」都是在上一次的纠错结果上再纠一遍，
-/// 改动会一轮轮累积漂移。
-pub async fn restore_raw_transcript(db: &Db, video_id: &str) -> AppResult<bool> {
-    let mut tx = db.pool.begin().await?;
+async fn raw_correction_segments(
+    db: &Db,
+    video_id: &str,
+    current: &[TranscriptSegment],
+) -> AppResult<Vec<CorrectionSegment>> {
     let raw: Option<String> = sqlx::query_scalar(
         "SELECT segments_json FROM transcript_backups
          WHERE video_id=?
@@ -355,57 +423,51 @@ pub async fn restore_raw_transcript(db: &Db, video_id: &str) -> AppResult<bool> 
          LIMIT 1",
     )
     .bind(video_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&db.pool)
     .await?;
     let Some(json) = raw else {
-        return Ok(false);
+        return Ok(load_correction_segments(current));
     };
-    let segments: Vec<RawBackupSegment> = serde_json::from_str(&json)?;
-    let current_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM transcripts WHERE video_id=?")
-            .bind(video_id)
-            .fetch_one(&mut *tx)
-            .await?;
-    if current_count != segments.len() as i64 {
+
+    let backups: Vec<RawBackupSegment> = serde_json::from_str(&json)?;
+    if backups.len() != current.len() {
         return Err(AppError::Other(
             "raw transcript backup row count mismatch".into(),
         ));
     }
-    for segment in &segments {
-        let result =
-            sqlx::query("UPDATE transcripts SET text=? WHERE video_id=? AND segment_idx=?")
-                .bind(segment.text.trim())
-                .bind(video_id)
-                .bind(segment.segment_idx)
-                .execute(&mut *tx)
-                .await?;
-        if result.rows_affected() != 1 {
+    let mut by_index = std::collections::HashMap::with_capacity(backups.len());
+    for segment in backups {
+        if by_index.insert(segment.segment_idx, segment.text).is_some() {
             return Err(AppError::Other(
-                "raw transcript backup does not match current segments".into(),
+                "raw transcript backup contains duplicate segments".into(),
             ));
         }
     }
-    tx.commit().await?;
-    Ok(true)
+
+    current
+        .iter()
+        .map(|row| {
+            let text = by_index.remove(&row.segment_idx).ok_or_else(|| {
+                AppError::Other("raw transcript backup does not match current segments".into())
+            })?;
+            Ok(CorrectionSegment {
+                start_ms: row.start_ms,
+                end_ms: row.end_ms,
+                text: text.trim().to_string(),
+            })
+        })
+        .collect()
 }
 
-pub async fn autocorrect_transcript(
+async fn correct_transcript_segments(
     db: &Db,
     provider: &Provider,
     model: &str,
     video_id: &str,
-) -> AppResult<()> {
-    let rows = list_segments(db, video_id).await?;
-    if rows.is_empty() {
-        // 说人话并给出下一步。这是「重新纠错」最后的一道拦截，用户看到的就是这句话；
-        // 原来吐的是 `no transcript for <一串 id>`，既看不懂也不知道该干什么。
-        return Err(AppError::NotFound(
-            "这个视频还没有文稿，先「开始处理」生成字幕之后才能纠错".into(),
-        ));
-    }
-
+    segments: Vec<CorrectionSegment>,
+    progress: crate::pipeline::ai::Progress<'_>,
+) -> AppResult<Vec<CorrectionSegment>> {
     let concurrency = correction_concurrency(db).await;
-    let segments = load_correction_segments(&rows);
     // 用拥有所有权的批，避免在 async 闭包里借用引用形参（HRTB 生命周期问题）。
     let batches: Vec<Vec<CorrectionSegment>> = segments
         .chunks(CORRECTION_BATCH_SIZE)
@@ -414,25 +476,100 @@ pub async fn autocorrect_transcript(
 
     // 并发跑各批（buffered 保持原顺序）：批之间独立，并发后 1 小时视频快很多。
     // 任一批失败（截断/格式不符/调用出错）都不落库部分成果，避免正式文稿半纠错半原文。
-    let results: Vec<(bool, Vec<CorrectionSegment>)> = futures_util::stream::iter(batches)
-        .map(|batch| async move {
-            match correct_batch(provider, model, video_id, &batch).await {
-                Ok(fixed) => (true, fixed),
-                Err(error) => {
-                    eprintln!(
-                        "transcript correction batch failed, keeping raw transcript: {error}"
-                    );
-                    (false, batch)
+    let account_halted = Arc::new(AtomicBool::new(false));
+    let total = batches.len();
+    let mut results: Vec<CorrectionBatchResult> = Vec::with_capacity(total);
+    let mut stream = futures_util::stream::iter(batches)
+        .map(|batch| {
+            let account_halted = Arc::clone(&account_halted);
+            async move {
+                match correct_batch(provider, model, video_id, &batch, &account_halted).await {
+                    Ok(Some(fixed)) => CorrectionBatchResult {
+                        applied: true,
+                        segments: fixed,
+                        error: None,
+                    },
+                    // 另一个批次已确认账号不可用，本批没有发请求，保留原文等首个
+                    // Account 错误在汇总时原样冒泡。
+                    Ok(None) => CorrectionBatchResult {
+                        applied: false,
+                        segments: batch,
+                        error: None,
+                    },
+                    Err(error) => {
+                        eprintln!(
+                            "transcript correction batch failed, keeping raw transcript: {error}"
+                        );
+                        CorrectionBatchResult {
+                            applied: false,
+                            segments: batch,
+                            error: Some(error),
+                        }
+                    }
                 }
             }
         })
-        .buffered(concurrency)
-        .collect()
-        .await;
+        .buffered(concurrency);
 
-    let corrected = assemble_corrections(results)?;
+    // 逐批上报。这一段此前整个压在一个静止的 98% 底下：一小时的课要纠十几批，
+    // 每批一次模型往返，用户看到的是进度条卡死在 98% 好几分钟。
+    while let Some(item) = stream.next().await {
+        results.push(item);
+        let done = results.len();
+        crate::pipeline::ai::report(
+            progress,
+            done as f64 / total as f64,
+            &format!("AI 纠正文稿 {done}/{total} 段"),
+        );
+    }
+    drop(stream);
 
-    overwrite_transcript_texts(db, video_id, &corrected).await
+    assemble_corrections(results)
+}
+
+fn transcript_required(rows: &[TranscriptSegment]) -> AppResult<()> {
+    if rows.is_empty() {
+        // 说人话并给出下一步。这是「重新纠错」最后的一道拦截，用户看到的就是这句话；
+        // 原来吐的是 `no transcript for <一串 id>`，既看不懂也不知道该干什么。
+        return Err(AppError::NotFound(
+            "这个视频还没有文稿，先「开始处理」生成字幕之后才能纠错".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub async fn autocorrect_transcript(
+    db: &Db,
+    provider: &Provider,
+    model: &str,
+    video_id: &str,
+    progress: crate::pipeline::ai::Progress<'_>,
+) -> AppResult<()> {
+    let rows = list_segments(db, video_id).await?;
+    transcript_required(&rows)?;
+    let segments = load_correction_segments(&rows);
+    let corrected =
+        correct_transcript_segments(db, provider, model, video_id, segments, progress).await?;
+
+    overwrite_transcript_texts_if_unchanged(db, video_id, &rows, &corrected).await
+}
+
+/// 从不可变的导入/ASR 备份重新纠错，但不先用备份覆盖当前文稿。只有模型成功且
+/// 当前文稿仍匹配请求开始时的快照，才替换正式分段。
+pub async fn recorrect_transcript(
+    db: &Db,
+    provider: &Provider,
+    model: &str,
+    video_id: &str,
+    progress: crate::pipeline::ai::Progress<'_>,
+) -> AppResult<()> {
+    let current = list_segments(db, video_id).await?;
+    transcript_required(&current)?;
+    let raw = raw_correction_segments(db, video_id, &current).await?;
+    let corrected =
+        correct_transcript_segments(db, provider, model, video_id, raw, progress).await?;
+
+    overwrite_transcript_texts_if_unchanged(db, video_id, &current, &corrected).await
 }
 
 #[cfg(test)]
@@ -462,6 +599,25 @@ mod tests {
         .await
         .unwrap();
         (db, video.id, dir)
+    }
+
+    async fn insert_raw_backup(db: &Db, video_id: &str, text: &str) {
+        let backup = serde_json::json!([{
+            "segment_idx": 0,
+            "start_ms": 0,
+            "end_ms": 5_000,
+            "text": text,
+            "words_json": "[]",
+        }]);
+        sqlx::query(
+            "INSERT INTO transcript_backups(video_id,source,segments_json,created_at)
+             VALUES (?,'raw_asr',?,1)",
+        )
+        .bind(video_id)
+        .bind(backup.to_string())
+        .execute(&db.pool)
+        .await
+        .unwrap();
     }
 
     #[test]
@@ -672,22 +828,24 @@ mod tests {
     fn assemble_corrections_applies_successful_batches_on_partial_failure() {
         // 一批成功一批失败：成功批用纠正结果，失败批沿用原文，整体仍应用（不再整篇放弃）。
         let out = assemble_corrections(vec![
-            (
-                true,
-                vec![CorrectionSegment {
+            CorrectionBatchResult {
+                applied: true,
+                segments: vec![CorrectionSegment {
                     start_ms: 0,
                     end_ms: 1000,
                     text: "第一段已纠正".into(),
                 }],
-            ),
-            (
-                false,
-                vec![CorrectionSegment {
+                error: None,
+            },
+            CorrectionBatchResult {
+                applied: false,
+                segments: vec![CorrectionSegment {
                     start_ms: 1000,
                     end_ms: 2000,
                     text: "第二段原文".into(),
                 }],
-            ),
+                error: Some(AppError::Other("输出格式错误".into())),
+            },
         ])
         .unwrap();
 
@@ -698,16 +856,100 @@ mod tests {
 
     #[test]
     fn assemble_corrections_errors_only_when_all_failed() {
-        let err = assemble_corrections(vec![(
-            false,
-            vec![CorrectionSegment {
+        let err = assemble_corrections(vec![CorrectionBatchResult {
+            applied: false,
+            segments: vec![CorrectionSegment {
                 start_ms: 0,
                 end_ms: 1000,
                 text: "原文".into(),
             }],
-        )])
+            error: Some(AppError::Other("模型输出不是 JSON".into())),
+        }])
         .unwrap_err();
         assert!(err.to_string().contains("所有分段纠错均失败"));
+    }
+
+    #[tokio::test]
+    async fn a_permanent_failure_is_not_retried() {
+        let provider = Provider::Failing {
+            permanent: true,
+            message: "模型名无效".into(),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let halted = AtomicBool::new(false);
+        let batch = vec![CorrectionSegment {
+            start_ms: 0,
+            end_ms: 1000,
+            text: "原文".into(),
+        }];
+
+        let error = correct_batch(&provider, "m", "video", &batch, &halted)
+            .await
+            .unwrap_err();
+
+        assert!(error.is_permanent());
+        assert_eq!(provider.call_count(), 1, "永久错误只能调用一次");
+        assert!(
+            !halted.load(Ordering::SeqCst),
+            "普通永久错误不应停掉其他批次"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_account_halt_prevents_a_new_batch_call() {
+        let provider = Provider::Failing {
+            permanent: false,
+            message: "不应发出请求".into(),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let halted = AtomicBool::new(true);
+        let batch = vec![CorrectionSegment {
+            start_ms: 0,
+            end_ms: 1000,
+            text: "原文".into(),
+        }];
+
+        let result = correct_batch(&provider, "m", "video", &batch, &halted)
+            .await
+            .unwrap();
+
+        assert!(result.is_none());
+        assert_eq!(provider.call_count(), 0, "停机后的批次不应再调用模型");
+    }
+
+    #[test]
+    fn an_account_error_halts_batches_and_survives_aggregation() {
+        let halted = AtomicBool::new(false);
+        let account =
+            AppError::account("余额不足".into()).with_account_profile(Some("correction-profile"));
+        assert!(correction_error_is_final(&account, &halted));
+        assert!(halted.load(Ordering::SeqCst));
+
+        let error = assemble_corrections(vec![
+            CorrectionBatchResult {
+                applied: true,
+                segments: vec![CorrectionSegment {
+                    start_ms: 0,
+                    end_ms: 1000,
+                    text: "已纠正".into(),
+                }],
+                error: None,
+            },
+            CorrectionBatchResult {
+                applied: false,
+                segments: vec![CorrectionSegment {
+                    start_ms: 1000,
+                    end_ms: 2000,
+                    text: "原文".into(),
+                }],
+                error: Some(account),
+            },
+        ])
+        .unwrap_err();
+
+        assert!(error.is_account_failure());
+        assert_eq!(error.account_profile_id(), Some("correction-profile"));
+        assert_eq!(error.to_string(), "余额不足");
     }
 
     #[tokio::test]
@@ -733,14 +975,75 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(restore_raw_transcript(&db, &vid).await.unwrap());
+        let current = list_segments(&db, &vid).await.unwrap();
+        let candidate = raw_correction_segments(&db, &vid, &current).await.unwrap();
+        assert_eq!(candidate[0].text, "导入时的原始字幕");
 
         let text: String = sqlx::query_scalar("SELECT text FROM transcripts WHERE video_id=?")
             .bind(&vid)
             .fetch_one(&db.pool)
             .await
             .unwrap();
-        assert_eq!(text, "导入时的原始字幕");
+        assert_eq!(text, "上一轮纠错后的文本");
+    }
+
+    /// 收集进度上报，供断言使用。
+    fn recorder() -> (
+        std::sync::Arc<std::sync::Mutex<Vec<(f64, String)>>>,
+        impl Fn(f64, &str) + Send + Sync,
+    ) {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let seen = std::sync::Arc::clone(&seen);
+            move |at: f64, message: &str| {
+                seen.lock().unwrap().push((at, message.to_string()));
+            }
+        };
+        (seen, sink)
+    }
+
+    /// 纠错要逐批报进度。此前整段压在一个静止的 98% 底下：一小时的课分十几批、
+    /// 每批一次模型往返，用户盯着不动的进度条只会以为卡死了。
+    #[tokio::test]
+    async fn autocorrect_reports_progress_batch_by_batch() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        // 铺够三批（每批 CORRECTION_BATCH_SIZE 句），才看得出「逐批」而不是一次到底。
+        let wanted = CORRECTION_BATCH_SIZE * 2 + 1;
+        for idx in 1..wanted {
+            sqlx::query(
+                "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)",
+            )
+            .bind(&vid)
+            .bind(idx as i64)
+            .bind((idx * 1000) as i64)
+            .bind((idx * 1000 + 900) as i64)
+            .bind(format!("第 {idx} 句"))
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        }
+
+        let (seen, sink) = recorder();
+        // 空补丁：不改任何字，本测试只关心进度上报。
+        let provider = Provider::Mock {
+            canned: "[]".into(),
+        };
+        autocorrect_transcript(&db, &provider, "m", &vid, Some(&sink))
+            .await
+            .unwrap();
+
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 3, "三批就该报三次，实际 {seen:?}");
+        assert!(
+            seen.windows(2).all(|pair| pair[0].0 < pair[1].0),
+            "进度必须单调递增，实际 {seen:?}"
+        );
+        assert_eq!(seen.last().unwrap().0, 1.0, "跑完要到满格");
+        assert!(
+            seen[0].1.contains("1/3"),
+            "文案要说清是第几批，实际 {:?}",
+            seen[0].1
+        );
     }
 
     #[tokio::test]
@@ -749,7 +1052,7 @@ mod tests {
         let provider = Provider::Mock {
             canned: r#"[{"id":0,"replacedtext":"纠正后的第一部分"}]"#.into(),
         };
-        autocorrect_transcript(&db, &provider, "m", &vid)
+        autocorrect_transcript(&db, &provider, "m", &vid, None)
             .await
             .unwrap();
         let joined = crate::pipeline::ai::transcript_text(&db, &vid)
@@ -759,33 +1062,92 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restore_raw_transcript_writes_backup_text_back() {
+    async fn raw_backup_builds_a_candidate_without_changing_the_live_transcript() {
         let (db, vid, _d) = seed_video_with_transcript().await;
-        // 模拟一份原始 ASR 备份，文本与当前不同。
-        let backup = r#"[{"segment_idx":0,"start_ms":0,"end_ms":5000,"text":"原始未纠错文本","words_json":"[]"}]"#;
-        sqlx::query(
-            "INSERT INTO transcript_backups(video_id,source,segments_json,created_at) VALUES (?,?,?,?)",
-        )
-        .bind(&vid)
-        .bind("raw_asr")
-        .bind(backup)
-        .bind(1_i64)
-        .execute(&db.pool)
-        .await
-        .unwrap();
-
-        let restored = restore_raw_transcript(&db, &vid).await.unwrap();
-        assert!(restored);
-        let joined = crate::pipeline::ai::transcript_text(&db, &vid)
+        insert_raw_backup(&db, &vid, "原始未纠错文本").await;
+        sqlx::query("UPDATE transcripts SET text='用户人工修订' WHERE video_id=?")
+            .bind(&vid)
+            .execute(&db.pool)
             .await
             .unwrap();
-        assert!(joined.contains("原始未纠错文本"));
+
+        let current = list_segments(&db, &vid).await.unwrap();
+        let candidate = raw_correction_segments(&db, &vid, &current).await.unwrap();
+
+        assert_eq!(candidate[0].text, "原始未纠错文本");
+        let live: String = sqlx::query_scalar("SELECT text FROM transcripts WHERE video_id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(live, "用户人工修订");
     }
 
     #[tokio::test]
-    async fn restore_raw_transcript_is_noop_without_backup() {
+    async fn recorrection_without_a_backup_uses_the_current_text_as_its_candidate() {
         let (db, vid, _d) = seed_video_with_transcript().await;
-        assert!(!restore_raw_transcript(&db, &vid).await.unwrap());
+        let current = list_segments(&db, &vid).await.unwrap();
+
+        let candidate = raw_correction_segments(&db, &vid, &current).await.unwrap();
+
+        assert_eq!(candidate, load_correction_segments(&current));
+    }
+
+    #[tokio::test]
+    async fn failed_recorrection_preserves_manual_edits_exactly() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        insert_raw_backup(&db, &vid, "原始未纠错文本").await;
+        let manual = "  用户人工修订，保留首尾空格  ";
+        sqlx::query("UPDATE transcripts SET text=? WHERE video_id=?")
+            .bind(manual)
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        let provider = Provider::Mock {
+            canned: "这不是 JSON".into(),
+        };
+
+        let error = recorrect_transcript(&db, &provider, "m", &vid, None)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("所有分段纠错均失败"));
+        let live: String = sqlx::query_scalar("SELECT text FROM transcripts WHERE video_id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(live, manual);
+    }
+
+    #[tokio::test]
+    async fn stale_correction_cannot_overwrite_a_concurrent_manual_edit() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let request_snapshot = list_segments(&db, &vid).await.unwrap();
+        sqlx::query("UPDATE transcripts SET text='纠错期间的人工修订' WHERE video_id=?")
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        let stale_result = vec![CorrectionSegment {
+            start_ms: 0,
+            end_ms: 5_000,
+            text: "旧请求返回的纠错结果".into(),
+        }];
+
+        let error =
+            overwrite_transcript_texts_if_unchanged(&db, &vid, &request_snapshot, &stale_result)
+                .await
+                .unwrap_err();
+
+        assert!(error.to_string().contains("已保留人工修订"));
+        let live: String = sqlx::query_scalar("SELECT text FROM transcripts WHERE video_id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(live, "纠错期间的人工修订");
     }
 
     #[tokio::test]
@@ -794,7 +1156,7 @@ mod tests {
         let provider = Provider::Mock {
             canned: "这不是 JSON".into(),
         };
-        let err = autocorrect_transcript(&db, &provider, "m", &vid)
+        let err = autocorrect_transcript(&db, &provider, "m", &vid, None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("所有分段纠错均失败"));
@@ -865,7 +1227,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mismatched_raw_backup_does_not_partially_restore_transcript() {
+    async fn mismatched_raw_backup_does_not_change_the_live_transcript() {
         let (db, vid, _d) = seed_video_with_transcript().await;
         let backup = r#"[{"segment_idx":0,"text":"第一段原始文本"},{"segment_idx":1,"text":"第二段原始文本"}]"#;
         sqlx::query(
@@ -878,7 +1240,8 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(restore_raw_transcript(&db, &vid).await.is_err());
+        let current = list_segments(&db, &vid).await.unwrap();
+        assert!(raw_correction_segments(&db, &vid, &current).await.is_err());
 
         let text: String = sqlx::query_scalar("SELECT text FROM transcripts WHERE video_id=?")
             .bind(&vid)

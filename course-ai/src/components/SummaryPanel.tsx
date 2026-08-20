@@ -38,7 +38,13 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
   const qc = useQueryClient();
   const requestSeek = usePlayer((s) => s.requestSeek);
   const [collapsed, setCollapsed] = useState(loadCollapsed);
-  const { data: summary, isLoading } = useQuery({
+  const {
+    data: summary,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: ["summary", videoId],
     queryFn: () => ipc.ai.getSummary(videoId),
   });
@@ -78,10 +84,15 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
         />
         {t("summary.title")}
       </button>
+      {collapsed && isError && (
+        <div className="px-3 pb-3">
+          <ErrorNote error={error} onRetry={() => void refetch()} />
+        </div>
+      )}
       {!collapsed && (
         <>
           <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-12 pt-1">
-            {generate.isError && (
+            {!isError && generate.isError && (
               <ErrorNote
                 className="mb-2"
                 error={generate.error}
@@ -90,6 +101,8 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
             )}
             {isLoading ? (
               <TextSkeleton lines={5} className="p-0" />
+            ) : isError ? (
+              <ErrorNote error={error} onRetry={() => void refetch()} />
             ) : summary ? (
               renderMarkdown(summary, requestSeek)
             ) : (
@@ -100,12 +113,14 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
               />
             )}
           </div>
-          <PanelActions
-            onRegenerate={() => generate.mutate()}
-            regenerating={generate.isPending}
-            hasContent={!!summary}
-            stale={stale.has("summary")}
-          />
+          {!isError && (
+            <PanelActions
+              onRegenerate={() => generate.mutate()}
+              regenerating={generate.isPending}
+              hasContent={!!summary}
+              stale={stale.has("summary")}
+            />
+          )}
         </>
       )}
     </div>

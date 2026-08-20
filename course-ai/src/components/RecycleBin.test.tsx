@@ -172,6 +172,18 @@ describe("RecycleBin 分组与批量操作", () => {
     expect(urgent.className).toContain("status-err");
     expect(screen.getByText("剩余 26 天").className).not.toContain("status-err");
   });
+
+  it("moves item actions below the content at phone width", async () => {
+    mockIpc.trash.list.mockResolvedValue([trashedVideo("v1", "申论", 26)]);
+    renderBin();
+
+    const checkbox = await screen.findByRole("checkbox", { name: "选择 v1.mp4" });
+    const row = checkbox.closest("li");
+    const actions = row?.querySelector("[data-recycle-row-actions]");
+
+    expect(row).toHaveClass("grid-cols-[44px_71px_minmax(0,1fr)]", "sm:flex");
+    expect(actions).toHaveClass("col-span-3", "sm:contents");
+  });
 });
 
 describe("RecycleBin 清空回收站", () => {
@@ -202,6 +214,23 @@ describe("RecycleBin 清空回收站", () => {
     expect(
       screen.queryByRole("button", { name: "清空回收站" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows a retryable load error instead of the empty state", async () => {
+    mockIpc.trash.list
+      .mockRejectedValueOnce(new Error("trash database unavailable"))
+      .mockResolvedValueOnce([]);
+    renderBin();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "trash database unavailable",
+    );
+    expect(screen.queryByText("回收站是空的")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+
+    await waitFor(() => expect(mockIpc.trash.list).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("回收站是空的")).toBeInTheDocument();
   });
 
   it("surfaces an alert when purge-all fails instead of failing silently", async () => {

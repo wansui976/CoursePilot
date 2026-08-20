@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setThemeToggleOrigin, useTheme } from "./theme";
+import { ACCENTS, accentVars, setThemeToggleOrigin, useTheme } from "./theme";
 
 // lib.dom 把 startViewTransition 的返回值定为 ViewTransition;测试替身只关心回调执行,
 // 这里绕开原签名以便赋入/删除 vi.fn。
@@ -17,6 +17,96 @@ async function flushFrames() {
   // circleRevealWithOverlay 用 rAF + 16ms timeout 启动扩散。
   await vi.advanceTimersByTimeAsync(16);
 }
+
+function contrastRatio(a: string, b: string): number {
+  const luminance = (value: string) => {
+    const channels = [value.slice(1, 3), value.slice(3, 5), value.slice(5, 7)].map(
+      (hex) => {
+        const srgb = Number.parseInt(hex, 16) / 255;
+        return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+      },
+    );
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  };
+  const lighter = Math.max(luminance(a), luminance(b));
+  const darker = Math.min(luminance(a), luminance(b));
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+describe("accent CSS variables", () => {
+  it.each(ACCENTS)("keeps $label text readable on its accent", ({ key, accent }) => {
+    const vars = accentVars(key, "light", accent);
+
+    expect(contrastRatio(vars["--on-accent"], vars["--accent"])).toBeGreaterThanOrEqual(4.5);
+    expect(
+      contrastRatio(vars["--on-accent-press"], vars["--accent-press"]),
+    ).toBeGreaterThanOrEqual(4.5);
+    expect(vars["--color-primary-foreground"]).toBe(vars["--on-accent"]);
+  });
+
+  it.each(["#ffffff", "#000000", "#ffeb00", "#777777", "#5a31ff"])(
+    "derives a readable foreground for custom accent %s",
+    (customAccent) => {
+      const vars = accentVars("custom", "dark", customAccent);
+
+      expect(contrastRatio(vars["--on-accent"], customAccent)).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+
+  it.each(["light", "dark"] as const)(
+    "keeps custom accent text readable on the %s interaction surfaces",
+    (effective) => {
+      const surface = effective === "dark" ? "#252a30" : "#ffffff";
+      for (const customAccent of [
+        "#ffffff",
+        "#000000",
+        "#ffeb00",
+        "#777777",
+        "#5a31ff",
+        "#545048",
+      ]) {
+        const vars = accentVars("custom", effective, customAccent);
+        const channels = (value: string) =>
+          [value.slice(1, 3), value.slice(3, 5), value.slice(5, 7)].map((hex) =>
+            Number.parseInt(hex, 16),
+          );
+        const surfaceChannels = channels(surface);
+        const accentChannels = channels(customAccent);
+        const selectedSurface = `#${surfaceChannels
+          .map((channel, index) =>
+            Math.round(channel + (accentChannels[index] - channel) * 0.24)
+              .toString(16)
+              .padStart(2, "0"),
+          )
+          .join("")}`;
+
+        expect(contrastRatio(vars["--accent-text"], surface)).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio(vars["--accent-text"], selectedSurface)).toBeGreaterThanOrEqual(
+          4.5,
+        );
+      }
+    },
+  );
+
+  it.each(["#ffffff", "#000000", "#ffeb00", "#777777", "#5a31ff", "#545048"])(
+    "keeps custom video accent %s readable on the dark controls",
+    (customAccent) => {
+      const vars = accentVars("custom", "light", customAccent);
+      expect(contrastRatio(vars["--video-accent"], "#1a1a1a")).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+
+  it.each(["light", "dark"] as const)(
+    "derives readable status foregrounds in the %s theme",
+    (effective) => {
+      const vars = accentVars("blue", effective);
+      const ok = effective === "dark" ? "#34d399" : "#147a52";
+      const error = effective === "dark" ? "#f87171" : "#c92a2a";
+      expect(contrastRatio(vars["--on-status-ok"], ok)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(vars["--on-status-err"], error)).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+});
 
 describe("theme store light/dark transition", () => {
   beforeEach(() => {
@@ -151,7 +241,9 @@ describe("theme store light/dark transition", () => {
     expect(root.style.getPropertyValue("--theme-circle-x")).toBe("");
   });
 
-  it("switches instantly from an explicit origin when visible heavy DOM is present", () => {
+  it("keeps the circular reveal even when visible heavy DOM is present", async () => {
+    // 回归:显式点击(带起点)优先于重 DOM 瞬切——用户亲手点的主题按钮必须出圆。
+    vi.useFakeTimers();
     const startViewTransition = vi.fn((cb: () => void) => {
       cb();
       return { finished: Promise.resolve() };
@@ -165,9 +257,10 @@ describe("theme store light/dark transition", () => {
     setThemeToggleOrigin(24, 680);
     useTheme.getState().toggle();
 
-    expect(startViewTransition).not.toHaveBeenCalled();
-    expect(document.documentElement.classList.contains("theme-circle-vt")).toBe(false);
+    expect(startViewTransition).toHaveBeenCalledTimes(1);
+    expect(document.documentElement.classList.contains("theme-circle-vt")).toBe(true);
     expect(useTheme.getState().effective).toBe("dark");
+    await vi.advanceTimersByTimeAsync(1100);
   });
 
   it("falls back to the whole-tree transition class without view transitions", () => {

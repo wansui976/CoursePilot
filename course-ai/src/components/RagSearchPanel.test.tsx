@@ -103,6 +103,9 @@ describe("RagSearchPanel", () => {
     expect(await screen.findByText(/基于所选 00:05：贝叶斯定理/)).toBeInTheDocument();
 
     const input = screen.getByLabelText("聊天内容");
+    expect(input.parentElement).toHaveClass(
+      "focus-within:border-[var(--focus-ring)]",
+    );
     fireEvent.change(input, { target: { value: "这是什么意思" } });
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
 
@@ -145,6 +148,11 @@ describe("RagSearchPanel", () => {
     expect(screen.getByRole("article", { name: "AI 回复" })).toHaveTextContent(
       "第一轮回复",
     );
+    const log = screen.getByRole("log", { name: "聊天记录" });
+    expect(log).toHaveAttribute("aria-live", "polite");
+    expect(log).toHaveAttribute("aria-relevant", "additions");
+    expect(log).toHaveAttribute("aria-busy", "false");
+    expect(screen.getByRole("status")).toHaveTextContent("回答已生成");
 
     fireEvent.change(input, { target: { value: "第二轮问题" } });
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });

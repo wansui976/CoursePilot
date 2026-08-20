@@ -172,7 +172,7 @@ export function DevConsole({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
-      <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-4">
+      <header className="flex flex-none flex-wrap items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-3 py-3 sm:flex-nowrap sm:gap-3 sm:px-7 sm:py-4">
         <button
           aria-label={t("devConsole.back")}
           onClick={onClose}
@@ -199,30 +199,49 @@ export function DevConsole({ onClose }: { onClose: () => void }) {
             )}
           </p>
         </div>
-        <Button size="sm" variant="outline" disabled={logs.length === 0} onClick={copyAll}>
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-          {copied ? t("devConsole.copied") : t("devConsole.copyAll")}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => qc.invalidateQueries({ queryKey: ["dev-logs"] })}
+        <div
+          aria-label={t("devConsole.actions")}
+          role="toolbar"
+          className="order-3 flex w-full items-center justify-end gap-2 sm:order-none sm:w-auto"
         >
-          <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
-          {t("devConsole.refresh")}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={clear.isPending || (logs.length === 0 && usage.length === 0)}
-          onClick={() => clear.mutate()}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          {t("devConsole.clear")}
-        </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={logs.length === 0}
+            onClick={copyAll}
+            aria-label={copied ? t("devConsole.copied") : t("devConsole.copyAll")}
+            title={copied ? t("devConsole.copied") : t("devConsole.copyAll")}
+          >
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            <span className="max-[399px]:sr-only">
+              {copied ? t("devConsole.copied") : t("devConsole.copyAll")}
+            </span>
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => qc.invalidateQueries({ queryKey: ["dev-logs"] })}
+            aria-label={t("devConsole.refresh")}
+            title={t("devConsole.refresh")}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
+            <span className="max-[399px]:sr-only">{t("devConsole.refresh")}</span>
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={clear.isPending || (logs.length === 0 && usage.length === 0)}
+            onClick={() => clear.mutate()}
+            aria-label={t("devConsole.clear")}
+            title={t("devConsole.clear")}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            <span className="max-[399px]:sr-only">{t("devConsole.clear")}</span>
+          </Button>
+        </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-7 sm:py-6">
         <div className="mx-auto mb-6 max-w-3xl space-y-2">
           <h3 className="text-sm font-semibold text-[var(--text-strong)]">{t("devConsole.tokenUsage")}</h3>
           <p className="text-xs text-[var(--text-muted)]">

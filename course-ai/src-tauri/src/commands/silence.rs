@@ -139,11 +139,13 @@ where
     F: FnOnce() -> Fut,
     Fut: Future<Output = AppResult<Vec<silence::Silence>>>,
 {
+    // Register this caller before the first await so requests polled in the same
+    // batch cannot race through the database check and create separate locks.
+    let lock = scan_lock(video_id);
     if already_scanned(state, video_id).await? {
         return Ok(());
     }
 
-    let lock = scan_lock(video_id);
     let _guard = lock.gate.lock().await;
     // 另一个请求可能在等待期间已经完成并落库，锁内必须再查一次。
     if already_scanned(state, video_id).await? {

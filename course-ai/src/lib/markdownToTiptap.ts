@@ -26,6 +26,50 @@ export const TIMESTAMP_RE = new RegExp(
   "g",
 );
 
+export interface TimestampSource {
+  label: string;
+  ms: number;
+}
+
+/**
+ * 把段尾连续出现的多个时间戳从正文中分离出来，供渲染层收成一行“来源”。
+ * 单个时间戳和夹在正文中的时间戳保持原位，避免改变句子语义。
+ */
+export function splitTrailingTimestampSources(text: string): {
+  body: string;
+  sources: TimestampSource[];
+} {
+  const matches = Array.from(text.matchAll(new RegExp(TIMESTAMP_RE.source, "g")));
+  if (matches.length < 2) return { body: text, sources: [] };
+
+  const last = matches[matches.length - 1];
+  const lastEnd = (last.index ?? 0) + last[0].length;
+  if (text.slice(lastEnd).trim() !== "") return { body: text, sources: [] };
+
+  let firstSource = matches.length - 1;
+  for (let index = matches.length - 2; index >= 0; index -= 1) {
+    const current = matches[index];
+    const next = matches[index + 1];
+    const between = text.slice(
+      (current.index ?? 0) + current[0].length,
+      next.index ?? 0,
+    );
+    if (!/^[\s,，、;；/|·]*$/.test(between)) break;
+    firstSource = index;
+  }
+
+  const sourceMatches = matches.slice(firstSource);
+  if (sourceMatches.length < 2) return { body: text, sources: [] };
+
+  return {
+    body: text.slice(0, sourceMatches[0].index ?? 0).trimEnd(),
+    sources: sourceMatches.map((match) => ({
+      label: match[1],
+      ms: parseTimestamp(match[1]),
+    })),
+  };
+}
+
 // 数学公式定界符：\[..\] 与 $$..$$ 为行间公式，\(..\) 与 $..$ 为行内公式。
 export const MATH_RE =
   /\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g;
@@ -168,6 +212,29 @@ function cell(type: "tableHeader" | "tableCell", text: string): Node {
   return { type, content: [{ type: "paragraph", content: inline(text) }] };
 }
 
+function sourceParagraph(sources: TimestampSource[]): Node {
+  const content: Node[] = [{ type: "text", text: "来源 " }];
+  sources.forEach((source, index) => {
+    if (index > 0) content.push({ type: "text", text: " " });
+    content.push({
+      type: "timestamp",
+      attrs: { ms: source.ms, label: source.label, source: true },
+    });
+  });
+  return { type: "paragraph", content };
+}
+
+function paragraphNodes(text: string): Node[] {
+  const { body, sources } = splitTrailingTimestampSources(text);
+  if (sources.length === 0) {
+    return [{ type: "paragraph", content: inline(text) }];
+  }
+  return [
+    ...(body ? [{ type: "paragraph", content: inline(body) }] : []),
+    sourceParagraph(sources),
+  ];
+}
+
 /** 从 lines[start] 开始尽量吃下一张表格，返回 [表格节点, 下一行索引]。 */
 function parseTable(lines: string[], start: number): [Node, number] {
   const header = splitCells(lines[start]);
@@ -259,7 +326,7 @@ export function markdownToTiptap(md: string): Node {
       flushBullets();
       orderedBuffer.push({
         type: "listItem",
-        content: [{ type: "paragraph", content: inline(ordered[1]) }],
+        content: paragraphNodes(ordered[1]),
       });
       continue;
     }
@@ -269,13 +336,13 @@ export function markdownToTiptap(md: string): Node {
       flushOrdered();
       bulletBuffer.push({
         type: "listItem",
-        content: [{ type: "paragraph", content: inline(bullet[1]) }],
+        content: paragraphNodes(bullet[1]),
       });
       continue;
     }
 
     flushLists();
-    content.push({ type: "paragraph", content: inline(line) });
+    content.push(...paragraphNodes(line));
   }
   flushLists();
   return {

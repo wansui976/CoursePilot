@@ -75,6 +75,17 @@ describe("FolderImportDialog", () => {
     expect(addLocalBatch).not.toHaveBeenCalled();
   });
 
+  it("keeps the modal inside narrow and short viewports", () => {
+    renderDialog();
+    expect(screen.getByRole("dialog", { name: "导入文件夹视频" })).toHaveClass(
+      "max-h-[calc(100dvh-2rem)]",
+      "w-full",
+      "max-w-[460px]",
+      "overflow-y-auto",
+    );
+    expect(screen.getByTestId("folder-import-overlay")).toHaveClass("p-4");
+  });
+
   it("restores focus to the opener after Escape closes the modal", async () => {
     function Harness() {
       const [open, setOpen] = useState(false);

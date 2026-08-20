@@ -94,6 +94,17 @@ describe("Android native plugin threading", () => {
     );
     expect(body).toContain("Tasks.await");
   });
+
+  it("shares generated backups through a read-only FileProvider URI", () => {
+    const source = readFileSync(pluginSourcePath, "utf8");
+    const body = commandBody(source, "shareFile");
+
+    expect(body).toContain("ioExecutor.execute");
+    expect(body).toContain("FileProvider.getUriForFile");
+    expect(body).toContain("Intent.ACTION_SEND");
+    expect(body).toContain("Intent.FLAG_GRANT_READ_URI_PERMISSION");
+    expect(body).toContain("activity.cacheDir");
+  });
 });
 
 describe("Apple Vision OCR", () => {

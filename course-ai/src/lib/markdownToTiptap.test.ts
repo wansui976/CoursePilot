@@ -46,6 +46,33 @@ describe("markdownToTiptap", () => {
     expect(ts!.attrs!.ms).toBe((105 * 60 + 30) * 1000);
   });
 
+  it("moves consecutive trailing timestamps into a paragraph-level source row", () => {
+    const doc = markdownToTiptap("核心结论。 [01:05] [02:10] [03:15]");
+
+    expect(doc.content).toHaveLength(2);
+    expect(doc.content![0]).toMatchObject({
+      type: "paragraph",
+      content: [{ type: "text", text: "核心结论。" }],
+    });
+    expect(doc.content![1].content![0]).toMatchObject({
+      type: "text",
+      text: "来源 ",
+    });
+    const sources = doc.content![1].content!.filter(
+      (node) => node.type === "timestamp",
+    );
+    expect(sources).toHaveLength(3);
+    expect(sources.every((node) => node.attrs?.source === true)).toBe(true);
+  });
+
+  it("keeps a single trailing timestamp inline", () => {
+    const doc = markdownToTiptap("核心结论 [01:05]");
+
+    expect(doc.content).toHaveLength(1);
+    expect(doc.content![0].content!.find((node) => node.type === "timestamp")?.attrs)
+      .not.toHaveProperty("source", true);
+  });
+
   it("turns a time range [mm:ss-mm:ss] into one timestamp at the start", () => {
     const doc = markdownToTiptap("要点 [72:48-72:52]");
     const para = doc.content![0];

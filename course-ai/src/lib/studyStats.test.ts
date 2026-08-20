@@ -86,6 +86,13 @@ describe("formatDuration", () => {
     expect(formatDuration(3_600_000)).toBe("1 小时");
     expect(formatDuration(3_600_000 + 15 * 60_000)).toBe("1 小时 15 分");
   });
+
+  it("uses English units and pluralization when requested", () => {
+    expect(formatDuration(0, "en")).toBe("0 minutes");
+    expect(formatDuration(60_000, "en")).toBe("1 minute");
+    expect(formatDuration(3_600_000, "en")).toBe("1 hour");
+    expect(formatDuration(3_600_000 + 15 * 60_000, "en")).toBe("1 hr 15 min");
+  });
 });
 
 describe("relativeDay", () => {
@@ -94,6 +101,18 @@ describe("relativeDay", () => {
     expect(relativeDay(new Date("2026-07-20T09:00:00").getTime(), today)).toBe("今天");
     expect(relativeDay(new Date("2026-07-19T23:00:00").getTime(), today)).toBe("昨天");
     expect(relativeDay(new Date("2026-07-16T10:00:00").getTime(), today)).toBe("4 天前");
+  });
+
+  it("uses English relative-day labels when requested", () => {
+    expect(relativeDay(new Date("2026-07-20T09:00:00").getTime(), today, "en")).toBe(
+      "Today",
+    );
+    expect(relativeDay(new Date("2026-07-19T23:00:00").getTime(), today, "en")).toBe(
+      "Yesterday",
+    );
+    expect(relativeDay(new Date("2026-07-16T10:00:00").getTime(), today, "en")).toBe(
+      "4 days ago",
+    );
   });
 });
 

@@ -174,7 +174,7 @@ export function DailyGoalDialog({
           type="button"
           aria-label={t("dailyGoal.editGoal")}
           title={t("dailyGoal.editGoal")}
-          className="ca-touch-44 grid h-7 w-7 flex-none cursor-pointer place-items-center rounded-md text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          className="ca-touch-44 grid h-7 w-7 flex-none cursor-pointer place-items-center rounded-md text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
         >
           <PencilLine className="h-3.5 w-3.5" />
         </button>
@@ -189,7 +189,7 @@ export function DailyGoalDialog({
             event.preventDefault();
             dialRef.current?.focus();
           }}
-          className="fixed left-1/2 top-1/2 z-[51] w-[calc(100%-2rem)] max-w-xs -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-5 text-[var(--text-normal)] shadow-[var(--shadow-pop)]"
+          className="fixed left-1/2 top-1/2 z-[51] max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-xs -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-5 text-[var(--text-normal)] shadow-[var(--shadow-pop)]"
         >
           <div className="mb-3 flex items-center justify-between gap-3">
             <Dialog.Title className="text-sm font-semibold text-[var(--text-strong)]">
@@ -200,7 +200,7 @@ export function DailyGoalDialog({
                 type="button"
                 aria-label={t("dailyGoal.close")}
                 title={t("dailyGoal.close")}
-                className="ca-icon-btn grid flex-none cursor-pointer place-items-center text-[var(--text-muted)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                className="ca-icon-btn grid flex-none cursor-pointer place-items-center text-[var(--text-muted)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -224,12 +224,11 @@ export function DailyGoalDialog({
             onLostPointerCapture={() => {
               draggingPointer.current = null;
             }}
-            className="relative mx-auto h-52 w-52 cursor-grab touch-none select-none !rounded-full outline-none active:cursor-grabbing focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--surface-panel)]"
+            className="relative mx-auto h-52 w-52 max-h-[45dvh] max-w-[45dvh] cursor-grab touch-none select-none !rounded-full outline-none active:cursor-grabbing focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--surface-panel)]"
             style={{ touchAction: "none" }}
           >
             <svg
-              width={DIAL_SIZE}
-              height={DIAL_SIZE}
+              className="h-full w-full"
               viewBox={`0 0 ${DIAL_SIZE} ${DIAL_SIZE}`}
               aria-hidden="true"
             >

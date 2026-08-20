@@ -35,13 +35,16 @@ import {
 import { defaultAsrBackend, normalizeAsrBackend } from "@/lib/asrDefaults";
 import { defaultOcrBackend, normalizeOcrBackend } from "@/lib/ocrDefaults";
 import { changeLanguage } from "@/i18n";
-import { isMobile, isTablet } from "@/lib/platform";
+import { isMobile } from "@/lib/platform";
 import { readReminderEnabled, writeReminderEnabled } from "@/lib/studyReminder";
 import { pickDirectoryPath } from "@/lib/mobileFiles";
 import { createSettingsWriter } from "@/lib/settingsWriteQueue";
 import { Switch } from "@/components/ui/switch";
 import { WhisperModelsPanel } from "./WhisperModelsPanel";
-import { LlmSettingsPanel } from "./LlmSettingsPanel";
+import {
+  LlmSettingsPanel,
+  type LlmSettingsActions,
+} from "./LlmSettingsPanel";
 import { DatabaseBackupAction } from "./DatabaseBackupAction";
 
 const FIELD =
@@ -83,6 +86,13 @@ type SettingsCategory =
   | "llm"
   | "courseware"
   | "dev";
+
+type PendingSettingsExit =
+  | { kind: "category"; category: SettingsCategory }
+  | { kind: "category-list" }
+  | { kind: "close" }
+  | { kind: "dev-console" }
+  | { kind: "external"; continuation: () => void };
 
 const CATEGORY_META: Record<
   SettingsCategory,
@@ -253,19 +263,38 @@ function useSecretConfigured(name: string) {
 export function SettingsPanel({
   onClose,
   onOpenDevConsole,
+  onRegisterExitRequest,
+  onRegisterBackRequest,
 }: {
   onClose: () => void;
   onOpenDevConsole?: () => void;
+  onRegisterExitRequest?: (
+    request: ((continuation: () => void) => void) | null,
+  ) => void;
+  onRegisterBackRequest?: (request: (() => void) | null) => void;
 }) {
   const { t, i18n } = useTranslation();
   const mobile = isMobile();
-  const tablet = isTablet();
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>("appearance");
+  const [llmDirty, setLlmDirty] = useState(false);
+  const llmActionsRef = useRef<LlmSettingsActions | null>(null);
+  const [pendingExit, setPendingExit] = useState<PendingSettingsExit | null>(null);
+  const [resolvingPendingExit, setResolvingPendingExit] = useState(false);
+  const resolvingPendingExitRef = useRef(false);
+  resolvingPendingExitRef.current = resolvingPendingExit;
+  const pendingDialogRef = useRef<HTMLDivElement>(null);
+  const registerLlmActions = useCallback((actions: LlmSettingsActions | null) => {
+    llmActionsRef.current = actions;
+  }, []);
+  const externalExitRequestRef = useRef<(continuation: () => void) => void>(
+    (continuation) => continuation(),
+  );
+  const backRequestRef = useRef<() => void>(() => undefined);
   // 竖屏（手机 / 平板竖屏）：取消左侧分类栏，改成「分类列表 → 进入某分类」的下钻，
   // 顶部左上角放返回按钮 + 当前层级标题。entered=false 显示分类列表，true 显示该分类详情。
   // 设置面板自身随 .ca-app 宽度走窄屏下钻；非宽屏即紧凑。
   const settingsRef = useRef<HTMLDivElement>(null);
-  const compact = useContainerWidth(settingsRef) !== "wide" && !tablet;
+  const compact = useContainerWidth(settingsRef) !== "wide";
   // 密钥字段是否已配置：保存后清空输入框，靠这个在字段旁回显「已配置」，
   // 让用户知道当前确实存了凭证（不回读明文）。
   const volcSecret = useSecretConfigured("volcengine_asr_access_token");
@@ -313,6 +342,39 @@ export function SettingsPanel({
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [capturing, setBinding]);
+
+  useEffect(() => {
+    if (!pendingExit) return;
+    const dialog = pendingDialogRef.current;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const focusable = () =>
+      [...(dialog?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? [])];
+    focusable()[0]?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !resolvingPendingExitRef.current) {
+        event.preventDefault();
+        setPendingExit(null);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    dialog?.addEventListener("keydown", onKeyDown);
+    return () => {
+      dialog?.removeEventListener("keydown", onKeyDown);
+      previousFocus?.focus();
+    };
+  }, [pendingExit]);
   const [root, setRoot] = useState("");
   const [model, setModel] = useState("large-v3-turbo");
   const [asrBackend, setAsrBackend] = useState(defaultAsrBackend());
@@ -353,16 +415,25 @@ export function SettingsPanel({
   if (!settingsWriterRef.current) {
     settingsWriterRef.current = createSettingsWriter(ipc.settings.set);
   }
-  const latestSaveRef = useRef(0);
+  const latestSaveByKeyRef = useRef(new Map<string, number>());
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
+  const saveError = Object.values(saveErrors)[0] ?? null;
   const saveSetting = useCallback(async (key: string, value: string) => {
-    const requestId = ++latestSaveRef.current;
+    const requestId = (latestSaveByKeyRef.current.get(key) ?? 0) + 1;
+    latestSaveByKeyRef.current.set(key, requestId);
     try {
       await settingsWriterRef.current!(key, value);
-      if (requestId === latestSaveRef.current) setSaveError(null);
+      if (requestId !== latestSaveByKeyRef.current.get(key)) return;
+      setSaveErrors((current) => {
+        if (!(key in current)) return current;
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
     } catch (error) {
-      if (requestId === latestSaveRef.current) setSaveError(String(error));
+      if (requestId !== latestSaveByKeyRef.current.get(key)) return;
+      setSaveErrors((current) => ({ ...current, [key]: String(error) }));
     }
   }, []);
   // 凭证保存进行中：禁用保存按钮防连点。
@@ -572,15 +643,97 @@ export function SettingsPanel({
   ];
   if (onOpenDevConsole) categories.push("dev");
 
+  function applySettingsExit(intent: PendingSettingsExit) {
+    if (intent.kind === "category") {
+      setActiveCategory(intent.category);
+      if (compact) setEntered(true);
+      return;
+    }
+    if (intent.kind === "category-list") {
+      setEntered(false);
+      return;
+    }
+    if (intent.kind === "dev-console") {
+      onOpenDevConsole?.();
+      return;
+    }
+    if (intent.kind === "external") {
+      intent.continuation();
+      return;
+    }
+    onClose();
+  }
+
+  function requestSettingsExit(intent: PendingSettingsExit) {
+    if (
+      intent.kind === "category" &&
+      intent.category === activeCategory &&
+      (!compact || entered)
+    ) {
+      return;
+    }
+    if (activeCategory === "llm" && llmDirty) {
+      setPendingExit(intent);
+      return;
+    }
+    applySettingsExit(intent);
+  }
+
+  externalExitRequestRef.current = (continuation) =>
+    requestSettingsExit({ kind: "external", continuation });
+  // 系统返回是层级回退：窄屏详情先回分类列表，根层才关闭设置。
+  // 两条路径都继续走 requestSettingsExit，因此 LLM 未保存保护不会被绕过。
+  backRequestRef.current = () =>
+    requestSettingsExit(compact && entered ? { kind: "category-list" } : { kind: "close" });
+
+  useEffect(() => {
+    if (!onRegisterExitRequest) return;
+    const request = (continuation: () => void) =>
+      externalExitRequestRef.current(continuation);
+    onRegisterExitRequest(request);
+    return () => onRegisterExitRequest(null);
+  }, [onRegisterExitRequest]);
+
+  useEffect(() => {
+    if (!onRegisterBackRequest) return;
+    const request = () => backRequestRef.current();
+    onRegisterBackRequest(request);
+    return () => onRegisterBackRequest(null);
+  }, [onRegisterBackRequest]);
+
+  async function saveAndContinue() {
+    const intent = pendingExit;
+    const actions = llmActionsRef.current;
+    if (!intent || !actions) return;
+    setResolvingPendingExit(true);
+    const saved = await actions.save();
+    setResolvingPendingExit(false);
+    if (!saved) return;
+    setLlmDirty(false);
+    setPendingExit(null);
+    applySettingsExit(intent);
+  }
+
+  function discardAndContinue() {
+    if (!pendingExit) return;
+    const intent = pendingExit;
+    llmActionsRef.current?.discard();
+    setLlmDirty(false);
+    setPendingExit(null);
+    applySettingsExit(intent);
+  }
+
   // 竖屏下钻时：进入了某分类则顶栏显示该分类名 + 返回到分类列表；否则显示「设置」+ 关闭。
   const inDetail = compact && entered;
   const headerTitle = inDetail ? t(CATEGORY_META[activeCategory].i18nKey) : t("settings.title");
-  const onHeaderBack = inDetail ? () => setEntered(false) : onClose;
+  const onHeaderBack = inDetail
+    ? () => requestSettingsExit({ kind: "category-list" })
+    : () => requestSettingsExit({ kind: "close" });
 
   return (
     <div
       ref={settingsRef}
-      className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]"
+      className="relative flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]"
     >
       {/* 头部 */}
       <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-5 py-3.5">
@@ -607,7 +760,9 @@ export function SettingsPanel({
               return (
                 <button
                   key={key}
-                  onClick={() => setActiveCategory(key)}
+                  onClick={() =>
+                    requestSettingsExit({ kind: "category", category: key })
+                  }
                   aria-current={active ? "page" : undefined}
                   className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition ${
                     active
@@ -640,8 +795,7 @@ export function SettingsPanel({
                   <button
                     key={key}
                     onClick={() => {
-                      setActiveCategory(key);
-                      setEntered(true);
+                      requestSettingsExit({ kind: "category", category: key });
                     }}
                     className="flex min-h-[52px] w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)] active:bg-[var(--surface-card-active)]"
                   >
@@ -1112,7 +1266,10 @@ export function SettingsPanel({
             {activeCategory === "llm" && (
               <Group header={t("settings.llm.title")}>
                 <StackRow>
-                  <LlmSettingsPanel />
+                  <LlmSettingsPanel
+                    onDirtyChange={setLlmDirty}
+                    onRegisterActions={registerLlmActions}
+                  />
                 </StackRow>
               </Group>
             )}
@@ -1255,7 +1412,11 @@ export function SettingsPanel({
                 footnote={t("settings.dev.footnote")}
               >
                 <StackRow>
-                  <Button variant="outline" size="sm" onClick={onOpenDevConsole}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => requestSettingsExit({ kind: "dev-console" })}
+                  >
                     <Terminal className="h-3.5 w-3.5" />
                     {t("settings.dev.openConsole")}
                   </Button>
@@ -1266,6 +1427,57 @@ export function SettingsPanel({
         </div>
         )}
       </div>
+      {pendingExit && (
+        <div className="absolute inset-0 z-30 grid place-items-center bg-black/30 p-4">
+          <div
+            ref={pendingDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="llm-unsaved-title"
+            aria-describedby="llm-unsaved-description"
+            className="w-full max-w-sm rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-5 shadow-[var(--shadow-pop)]"
+          >
+            <h3
+              id="llm-unsaved-title"
+              className="text-base font-semibold text-[var(--text-strong)]"
+            >
+              {t("settings.unsavedChangesTitle")}
+            </h3>
+            <p
+              id="llm-unsaved-description"
+              className="mt-2 text-sm leading-relaxed text-[var(--text-muted)]"
+            >
+              {t("settings.unsavedChangesDescription")}
+            </p>
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <Button
+                variant="ghost"
+                disabled={resolvingPendingExit}
+                onClick={() => setPendingExit(null)}
+              >
+                {t("settings.keepEditing")}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={resolvingPendingExit}
+                onClick={discardAndContinue}
+                className="text-[var(--status-err)]"
+              >
+                {t("settings.discardChanges")}
+              </Button>
+              <Button
+                variant="primary"
+                disabled={resolvingPendingExit}
+                onClick={() => void saveAndContinue()}
+              >
+                {resolvingPendingExit
+                  ? t("llmSettings.saving")
+                  : t("settings.saveAndContinue")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

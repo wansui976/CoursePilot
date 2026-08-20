@@ -138,6 +138,7 @@ pub async fn cmd_ocr_region(
 /// 下载 B 站 / URL 视频到课程目录并登记。可选清晰度上限与字幕轨。
 #[tauri::command]
 pub async fn cmd_import_bilibili(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     course_id: String,
     url: String,
@@ -201,7 +202,8 @@ pub async fn cmd_import_bilibili(
         video.subtitle_lang = Some(lang.to_string());
         video.subtitle_autocorrect = subtitle_autocorrect;
     }
-    crate::commands::videos::apply_detected_crop(&state.db, &mut video).await;
+    // 黑边探测挪到后台：不再阻塞下载完成的这几秒，结果写库后播放器直接读缓存。
+    crate::pipeline::spawn_crop_detection(app, video.id.clone());
     Ok(video)
 }
 

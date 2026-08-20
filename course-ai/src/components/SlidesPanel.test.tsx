@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SlidesPanel } from "./SlidesPanel";
 import type { SlidesOcrOutcome } from "@/lib/ipc";
@@ -30,15 +30,28 @@ vi.mock("@/stores/player", () => {
   return { usePlayer };
 });
 
-function renderPanel() {
-  const queryClient = new QueryClient({
+function createQueryClient() {
+  return new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+}
+
+function renderPanel(queryClient = createQueryClient()) {
   return render(
     <QueryClientProvider client={queryClient}>
       <SlidesPanel videoId="video-1" />
     </QueryClientProvider>,
   );
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 describe("SlidesPanel", () => {
@@ -152,6 +165,111 @@ describe("SlidesPanel", () => {
 
     await waitFor(() => expect(mockIpc.slides.list).toHaveBeenCalledTimes(2));
     expect(await screen.findByText(/还没有课件页/)).toBeInTheDocument();
+  });
+
+  it("shows a real loading state and withholds the empty state and extraction entry", async () => {
+    const loading = deferred<never[]>();
+    mockIpc.slides.list.mockReset().mockReturnValue(loading.promise);
+    renderPanel();
+
+    expect(await screen.findByRole("status", { name: "加载中…" })).toBeInTheDocument();
+    expect(screen.queryByText(/还没有课件页/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /提取课件/ })).not.toBeInTheDocument();
+
+    await act(async () => {
+      loading.resolve([]);
+      await loading.promise;
+    });
+    expect(await screen.findByText(/还没有课件页/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /提取课件/ })).toBeInTheDocument();
+  });
+
+  it("keeps extraction locked and cancellable after the panel remounts", async () => {
+    const extraction = deferred<number>();
+    let requestId = "";
+    mockIpc.slides.extract.mockImplementation(
+      (
+        _videoId: string,
+        _threshold: number | null,
+        nextRequestId: string,
+      ) => {
+        requestId = nextRequestId;
+        return extraction.promise;
+      },
+    );
+    const queryClient = createQueryClient();
+    const first = renderPanel(queryClient);
+
+    fireEvent.click(await screen.findByRole("button", { name: /提取课件/ }));
+    await waitFor(() => expect(mockIpc.slides.extract).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    renderPanel(queryClient);
+    const pending = await screen.findByRole("button", { name: /提取中/ });
+    expect(pending).toBeDisabled();
+    fireEvent.click(pending);
+    expect(mockIpc.slides.extract).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "停止" }));
+    expect(mockIpc.slides.cancelExtract).toHaveBeenCalledWith(requestId);
+
+    await act(async () => {
+      extraction.resolve(1);
+      await extraction.promise;
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: /提取课件/ })).toBeEnabled());
+  });
+
+  it("keeps screenshot capture locked after the panel remounts", async () => {
+    const capture = deferred<unknown>();
+    mockIpc.slides.capture.mockReturnValue(capture.promise);
+    const queryClient = createQueryClient();
+    const first = renderPanel(queryClient);
+
+    fireEvent.click(await screen.findByRole("button", { name: "截图" }));
+    await waitFor(() => expect(mockIpc.slides.capture).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    renderPanel(queryClient);
+    const pending = await screen.findByRole("button", { name: "截图中…" });
+    expect(pending).toBeDisabled();
+    fireEvent.click(pending);
+    expect(mockIpc.slides.capture).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      capture.resolve({});
+      await capture.promise;
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "截图" })).toBeEnabled());
+  });
+
+  it("restores a frame OCR failure after remount and retries without a duplicate start", async () => {
+    const firstOcr = deferred<string>();
+    mockIpc.tools.ocr
+      .mockReturnValueOnce(firstOcr.promise)
+      .mockResolvedValueOnce("重试后的文字");
+    const queryClient = createQueryClient();
+    const first = renderPanel(queryClient);
+
+    fireEvent.click(await screen.findByRole("button", { name: "截图OCR" }));
+    await waitFor(() => expect(mockIpc.tools.ocr).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    renderPanel(queryClient);
+    const pending = await screen.findByRole("button", { name: "识别中…" });
+    expect(pending).toBeDisabled();
+    fireEvent.click(pending);
+    expect(mockIpc.tools.ocr).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      firstOcr.reject(new Error("ocr unavailable"));
+      await firstOcr.promise.catch(() => undefined);
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("ocr unavailable");
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(mockIpc.tools.ocr).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("重试后的文字")).toBeInTheDocument();
   });
 
   it("surfaces screenshot failures and allows retry", async () => {
@@ -353,6 +471,40 @@ describe("SlidesPanel page OCR", () => {
     fireEvent.click(await screen.findByRole("button", { name: /识别文字/ }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("阿里云 OCR 鉴权失败");
+  });
+
+  it("keeps page OCR pending across remount and preserves the eventual result", async () => {
+    mockIpc.slides.list.mockReset().mockResolvedValue(pages);
+    const recognition = deferred<SlidesOcrOutcome>();
+    let requestId = "";
+    mockIpc.slides.ocr.mockImplementation(
+      (
+        _videoId: string,
+        nextRequestId: string,
+      ) => {
+        requestId = nextRequestId;
+        return recognition.promise;
+      },
+    );
+    const queryClient = createQueryClient();
+    const first = renderPanel(queryClient);
+
+    fireEvent.click(await screen.findByRole("button", { name: /识别文字/ }));
+    await waitFor(() => expect(mockIpc.slides.ocr).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    renderPanel(queryClient);
+    const stop = await screen.findByRole("button", { name: "识别中…" });
+    expect(screen.queryByRole("button", { name: /^识别文字$/ })).not.toBeInTheDocument();
+    fireEvent.click(stop);
+    expect(mockIpc.slides.cancelOcr).toHaveBeenCalledWith(requestId);
+    expect(mockIpc.slides.ocr).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      recognition.resolve(outcome({ recognized: 1, total: 2 }));
+      await recognition.promise;
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("已识别 1 页");
   });
 
   it("hides the button when there are no slides to recognize", async () => {

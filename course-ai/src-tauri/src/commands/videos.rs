@@ -717,7 +717,8 @@ pub async fn cmd_add_local_video(
             .await?;
         video.duration_ms = duration_ms;
     }
-    apply_detected_crop(&state.db, &mut video).await;
+    // 黑边探测挪到后台：不再阻塞导入的这几秒。结果写库后播放器/课件提取直接读缓存。
+    crate::pipeline::spawn_crop_detection(_app, video.id.clone());
     Ok(video)
 }
 
@@ -728,11 +729,17 @@ pub async fn cmd_scan_folder(dir: String) -> AppResult<Vec<FolderVideo>> {
 
 #[tauri::command]
 pub async fn cmd_add_local_batch(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     course_id: String,
     paths: Vec<String>,
 ) -> AppResult<Vec<Video>> {
-    add_local_batch(&state.db, &course_id, paths).await
+    let videos = add_local_batch(&state.db, &course_id, paths).await?;
+    // 批量导入同样在后台触发黑边探测（并发由 crop_detect 的信号量限住）。
+    for video in &videos {
+        crate::pipeline::spawn_crop_detection(app.clone(), video.id.clone());
+    }
+    Ok(videos)
 }
 
 /// 导入后用 ffmpeg cropdetect 探测黑边并写库，同时回填到返回的 Video，
@@ -748,43 +755,47 @@ pub async fn apply_detected_crop(db: &Db, video: &mut Video) {
 }
 
 /// 打开视频时的兜底：若该视频还没有 crop 记录（crop_top IS NULL，多为导入早于本功能的旧视频），
-/// 后台补测一次黑边并写库；已测过的直接返回库里的值。返回四边占比（无黑边为 0）。
+/// 黑边探测的即时状态。`insets` 有值表示已探测过（无黑边为全 0）；`detecting`
+/// 表示后台正在测，前端该轮询等结果。
+#[derive(serde::Serialize)]
+pub struct CropStatus {
+    pub insets: Option<crate::pipeline::crop_detect::CropInsets>,
+    pub detecting: bool,
+}
+
+/// 查询黑边探测结果。已测过直接返回库里的值；没测过就在后台起一次探测，
+/// 立即返回 `detecting=true`（前端轮询直到 `insets` 有值），不再阻塞调用方。
 #[tauri::command]
 pub async fn cmd_ensure_crop(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     video_id: String,
-) -> AppResult<crate::pipeline::crop_detect::CropInsets> {
-    let row = sqlx::query_as::<_, (Option<f64>, Option<f64>, Option<f64>, Option<f64>, String)>(
-        "SELECT crop_top,crop_right,crop_bottom,crop_left,file_path
+) -> AppResult<CropStatus> {
+    let row = sqlx::query_as::<_, (Option<f64>, Option<f64>, Option<f64>, Option<f64>)>(
+        "SELECT crop_top,crop_right,crop_bottom,crop_left
          FROM videos WHERE id=? AND deleted_at IS NULL",
     )
     .bind(&video_id)
     .fetch_optional(&state.db.pool)
     .await?
     .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
-    if let (Some(top), right, bottom, left, _) = (row.0, row.1, row.2, row.3, &row.4) {
-        return Ok(crate::pipeline::crop_detect::CropInsets {
-            top,
-            right: right.unwrap_or(0.0),
-            bottom: bottom.unwrap_or(0.0),
-            left: left.unwrap_or(0.0),
+    if let Some(top) = row.0 {
+        return Ok(CropStatus {
+            insets: Some(crate::pipeline::crop_detect::CropInsets {
+                top,
+                right: row.1.unwrap_or(0.0),
+                bottom: row.2.unwrap_or(0.0),
+                left: row.3.unwrap_or(0.0),
+            }),
+            detecting: false,
         });
     }
-    // 同一个视频已经在测了（前端重挂、窗口重新聚焦都会再问一次）就不再起第二趟：
-    // 那只会多占一份解码。这次先按「无黑边」返回，正在跑的那趟测完会写库，下次即生效。
-    let key = crate::pipeline::crop_detect::cancel_key(&video_id);
-    let Some(cancel) = state.register_cancel_if_free(&key) else {
-        return Ok(crate::pipeline::crop_detect::NO_CROP);
-    };
-    let insets = crate::pipeline::crop_detect::ensure_crop(
-        &state.db,
-        &video_id,
-        PathBuf::from(row.4),
-        &cancel,
-    )
-    .await;
-    state.unregister_cancel(&key, &cancel);
-    Ok(insets)
+    // 没测过：后台起任务（内部按视频去重、可取消），先告诉前端「在测」。
+    crate::pipeline::spawn_crop_detection(app, video_id);
+    Ok(CropStatus {
+        insets: None,
+        detecting: true,
+    })
 }
 
 /// 离开视频时停掉它的黑边探测。

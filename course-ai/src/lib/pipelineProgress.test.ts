@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import i18n from "@/i18n";
 import {
   currentStage,
   overallProgress,
@@ -113,5 +114,55 @@ describe("处理队列的整体进度", () => {
   it("什么都没有时是 0，不是 NaN", () => {
     expect(overallProgress({})).toBe(0);
     expect(stageMessage(currentStage({}))).toBe("等待中");
+  });
+
+  it("英文界面翻译阶段、等待和已知的后端进度", () => {
+    const t = i18n.getFixedT("en");
+    expect(stageMessage(undefined, t)).toBe("Waiting");
+    expect(stageMessage({ stage: "quiz", status: "pending", progress: 0 }, t)).toBe(
+      "Generating quiz",
+    );
+    expect(
+      stageMessage(
+        {
+          stage: "asr",
+          status: "running",
+          progress: 0.95,
+          message: "AI 纠正文稿 3/12 段",
+        },
+        t,
+      ),
+    ).toBe("Correcting transcript with AI, segment 3 of 12");
+  });
+
+  it("英文界面不会原样显示未知的中文运行细节，但失败仍保留诊断", () => {
+    const t = i18n.getFixedT("en");
+    expect(
+      stageMessage(
+        { stage: "asr", status: "running", progress: 0.4, message: "新的后端内部步骤" },
+        t,
+      ),
+    ).toBe("Transcribing audio");
+    expect(
+      stageMessage(
+        { stage: "asr", status: "failed", progress: 0.4, message: "provider error 500" },
+        t,
+      ),
+    ).toBe("Transcribing audio failed: provider error 500");
+  });
+
+  it("英文界面会本地化重启中断错误", () => {
+    const t = i18n.getFixedT("en");
+    expect(
+      stageMessage(
+        {
+          stage: "asr",
+          status: "failed",
+          progress: 0,
+          message: "应用已重启，处理被中断，请重试",
+        },
+        t,
+      ),
+    ).toBe("Processing was interrupted when the app restarted. Retry this task.");
   });
 });

@@ -41,7 +41,13 @@ function groupByCourse(items: TrashedVideo[]): CourseGroup[] {
 export function RecycleBin({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const { data: items = [], isLoading } = useQuery({
+  const {
+    data: items = [],
+    isLoading,
+    isError,
+    error: loadError,
+    refetch,
+  } = useQuery({
     queryKey: ["trash"],
     queryFn: ipc.trash.list,
   });
@@ -150,15 +156,17 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
     return (
       <li
         key={item.id}
-        className="flex items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 transition hover:bg-[var(--surface-card-hover)]"
+        className="grid grid-cols-[44px_71px_minmax(0,1fr)] items-center gap-x-2 gap-y-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 transition hover:bg-[var(--surface-card-hover)] sm:flex sm:gap-3"
       >
-        <input
-          type="checkbox"
-          aria-label={t("recycleBin.selectItem", { title: item.title })}
-          checked={selected.has(item.id)}
-          onChange={() => toggleOne(item.id)}
-          className="ca-touch-44 h-4 w-4 flex-none accent-[var(--accent,#888)]"
-        />
+        <label className="inline-flex h-11 w-11 flex-none items-center justify-center">
+          <input
+            type="checkbox"
+            aria-label={t("recycleBin.selectItem", { title: item.title })}
+            checked={selected.has(item.id)}
+            onChange={() => toggleOne(item.id)}
+            className="h-4 w-4 accent-[var(--accent,#888)]"
+          />
+        </label>
         <span className="relative h-10 w-[71px] flex-none overflow-hidden rounded-md bg-[var(--surface-card-hover)]">
           <VideoCover
             videoId={item.id}
@@ -182,26 +190,31 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
             </span>
           </div>
         </div>
-        <button
-          onClick={() => restore.mutate(item.id)}
-          disabled={restore.isPending || busy}
-          title={t("recycleBin.restoreTitle")}
-          aria-label={t("recycleBin.restoreItem", { title: item.title })}
-          className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
+        <div
+          data-recycle-row-actions
+          className="col-span-3 flex items-center justify-end gap-2 border-t border-[var(--border-faint)] pt-2 sm:contents"
         >
-          <RotateCcw className="h-3.5 w-3.5" />
-          {t("recycleBin.restore")}
-        </button>
-        <button
-          onClick={() => void confirmPurge(item)}
-          disabled={busy}
-          title={t("recycleBin.permanentDeleteTitle")}
-          aria-label={t("recycleBin.deleteItem", { title: item.title })}
-          className="ca-touch-44 inline-flex items-center gap-1 rounded-md px-3 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          {t("recycleBin.permanentDelete")}
-        </button>
+          <button
+            onClick={() => restore.mutate(item.id)}
+            disabled={restore.isPending || busy}
+            title={t("recycleBin.restoreTitle")}
+            aria-label={t("recycleBin.restoreItem", { title: item.title })}
+            className="ca-touch-44 inline-flex items-center justify-center gap-1 rounded-md border border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            {t("recycleBin.restore")}
+          </button>
+          <button
+            onClick={() => void confirmPurge(item)}
+            disabled={busy}
+            title={t("recycleBin.permanentDeleteTitle")}
+            aria-label={t("recycleBin.deleteItem", { title: item.title })}
+            className="ca-touch-44 inline-flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {t("recycleBin.permanentDelete")}
+          </button>
+        </div>
       </li>
     );
   }
@@ -235,7 +248,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
-      <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-4">
+      <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-3 py-3 sm:px-7 sm:py-4">
         <button
           aria-label={t("common.back")}
           onClick={onClose}
@@ -256,21 +269,30 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
           <button
             onClick={() => void confirmPurgeAll()}
             disabled={busy}
-            className="ca-touch-44 ml-auto inline-flex flex-none items-center gap-1 rounded-md px-3 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
+            title={t("recycleBin.clearAll")}
+            aria-label={t("recycleBin.clearAll")}
+            className="ca-touch-44 ml-auto inline-flex flex-none items-center justify-center gap-1 rounded-md px-2 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50 min-[400px]:px-3"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            {t("recycleBin.clearAll")}
+            <span className="sr-only min-[400px]:not-sr-only">
+              {t("recycleBin.clearAll")}
+            </span>
           </button>
         )}
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-7 sm:py-6">
         <div className="mx-auto max-w-2xl">
           {opError && <ErrorNote error={opError} className="mb-4" />}
           {isLoading ? (
             <p role="status" className="p-4 text-sm text-[var(--text-faint)]">
               {t("recycleBin.loading")}
             </p>
+          ) : isError ? (
+            <ErrorNote
+              error={loadError}
+              onRetry={() => void refetch()}
+            />
           ) : items.length === 0 ? (
             <p className="p-6 text-center text-sm text-[var(--text-faint)]">
               {t("recycleBin.empty")}
@@ -280,15 +302,15 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
           )}
 
           {selected.size > 0 && (
-            <div className="sticky bottom-2 mt-6 flex items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-4 py-3 shadow-[var(--shadow-pop)]">
+            <div className="sticky bottom-2 mt-6 flex flex-col items-stretch gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-3 py-3 shadow-[var(--shadow-pop)] min-[400px]:flex-row min-[400px]:items-center min-[400px]:gap-3 min-[400px]:px-4">
               <span className="text-sm text-[var(--text-strong)]">
                 {t("recycleBin.selected", { count: selected.size })}
               </span>
-              <div className="ml-auto flex items-center gap-2">
+              <div className="grid w-full grid-cols-1 gap-2 min-[400px]:ml-auto min-[400px]:flex min-[400px]:w-auto min-[400px]:items-center">
                 <button
                   onClick={() => restoreMany.mutate([...selected])}
                   disabled={busy}
-                  className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
+                  className="ca-touch-44 inline-flex items-center justify-center gap-1 rounded-md border border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                   {t("recycleBin.restoreSelected")}
@@ -296,7 +318,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
                 <button
                   onClick={() => void confirmPurgeSelected()}
                   disabled={busy}
-                  className="ca-touch-44 inline-flex items-center gap-1 rounded-md px-3 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
+                  className="ca-touch-44 inline-flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   {t("recycleBin.deleteSelected")}

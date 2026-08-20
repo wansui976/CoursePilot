@@ -1,7 +1,7 @@
 import "@/i18n";
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SummaryPanel } from "./SummaryPanel";
 
@@ -93,5 +93,33 @@ describe("SummaryPanel", () => {
 
     await screen.findByText("最新的摘要");
     expect(screen.queryByText("已过期")).not.toBeInTheDocument();
+  });
+
+  it("shows a retryable read error instead of the empty state or generation entry", async () => {
+    mockIpc.ai.getSummary
+      .mockRejectedValueOnce(new Error("摘要读取失败"))
+      .mockResolvedValueOnce(null);
+
+    renderSummaryPanel();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("摘要读取失败");
+    expect(screen.queryByText(/还没有摘要/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "生成" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+
+    await waitFor(() => expect(mockIpc.ai.getSummary).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/还没有摘要/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "生成" })).toBeInTheDocument();
+  });
+
+  it("keeps a read error visible while the summary is collapsed", async () => {
+    localStorage.setItem("course-ai-summary-collapsed", "1");
+    mockIpc.ai.getSummary.mockRejectedValueOnce(new Error("折叠时读取失败"));
+
+    renderSummaryPanel();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("折叠时读取失败");
+    expect(screen.queryByRole("button", { name: "生成" })).not.toBeInTheDocument();
   });
 });

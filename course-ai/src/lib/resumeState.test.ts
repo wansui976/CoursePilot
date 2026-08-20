@@ -21,6 +21,7 @@ describe("resumeState", () => {
       notesScrollTop: 120,
       transcriptScrollTop: 0,
       studyPanelWidth: null,
+      studyPanelCollapsed: false,
     });
     expect(readVideoResumeState("video-2").activeTab).toBeNull();
   });
@@ -76,6 +77,14 @@ describe("resumeState", () => {
       notesScrollTop: 0,
       transcriptScrollTop: 0,
       studyPanelWidth: null,
+      studyPanelCollapsed: false,
     });
+  });
+
+  it("stores the study panel collapsed state per video", () => {
+    writeVideoResumeState("video-1", { studyPanelCollapsed: true });
+
+    expect(readVideoResumeState("video-1").studyPanelCollapsed).toBe(true);
+    expect(readVideoResumeState("video-2").studyPanelCollapsed).toBe(false);
   });
 });

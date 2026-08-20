@@ -107,14 +107,69 @@ describe("ImportVideoButton", () => {
     );
   });
 
-  it("marks the import trigger as a menu button and toggles aria-expanded", () => {
+  it("opens an announced menu and focuses its first item", async () => {
     renderButton();
     const trigger = screen.getByRole("button", { name: "导入" });
     expect(trigger).toHaveAttribute("aria-haspopup", "menu");
     expect(trigger).toHaveAttribute("aria-expanded", "false");
 
     fireEvent.click(trigger);
+    const menu = screen.getByRole("menu", { name: "导入" });
     expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(trigger).toHaveAttribute("aria-controls", menu.id);
+    await waitFor(() => expect(screen.getAllByRole("menuitem")[0]).toHaveFocus());
+  });
+
+  it("supports arrow, Home, End and Escape keyboard navigation", async () => {
+    isMobileMock.mockReturnValue(false);
+    renderButton();
+    const trigger = screen.getByRole("button", { name: "导入" });
+
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("menu", { name: "导入" });
+    const items = screen.getAllByRole("menuitem");
+    expect(items.every((item) => item.tabIndex === -1)).toBe(true);
+    await waitFor(() => expect(items[0]).toHaveFocus());
+
+    fireEvent.keyDown(items[0], { key: "ArrowDown" });
+    expect(items[1]).toHaveFocus();
+    fireEvent.keyDown(items[1], { key: "End" });
+    expect(items[items.length - 1]).toHaveFocus();
+    fireEvent.keyDown(items[items.length - 1]!, { key: "Home" });
+    expect(items[0]).toHaveFocus();
+    fireEvent.keyDown(items[0], { key: "ArrowUp" });
+    expect(items[items.length - 1]).toHaveFocus();
+
+    fireEvent.keyDown(menu, { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveFocus();
+  });
+
+  it("closes on Tab without forcing focus back to the trigger", async () => {
+    renderButton();
+    const trigger = screen.getByRole("button", { name: "导入" });
+    fireEvent.click(trigger);
+
+    const first = screen.getAllByRole("menuitem")[0];
+    await waitFor(() => expect(first).toHaveFocus());
+    fireEvent.keyDown(first, { key: "Tab" });
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).not.toHaveFocus();
+  });
+
+  it("closes on an outside click and restores trigger focus", async () => {
+    renderButton();
+    const trigger = screen.getByRole("button", { name: "导入" });
+
+    fireEvent.click(trigger);
+    await waitFor(() => expect(screen.getAllByRole("menuitem")[0]).toHaveFocus());
+    fireEvent.click(document.body);
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveFocus();
   });
 
   it("surfaces an import failure as a themed alert", async () => {

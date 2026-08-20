@@ -1,6 +1,8 @@
+import i18n from "@/i18n";
+
 /**
  * 把后端/工具链抛出的原始报错（Rust AppError 文案、yt-dlp/ffmpeg 输出、HTTP 状态等）
- * 映射成中文可读、带下一步建议的提示。识别不了的原文原样返回，避免吞掉有用信息。
+ * 映射成当前语言可读、带下一步建议的提示。识别不了的原文原样返回，避免吞掉有用信息。
  *
  * 仅用于「展示」；需要按错误类型分支处理的逻辑（如 B站 412 引导重导 cookie）请
  * 直接匹配原始报错，不要依赖这里的输出文案。
@@ -16,7 +18,17 @@ function hasStatus(text: string, code: number): boolean {
   return new RegExp(`(?<![0-9a-z])${code}(?![0-9a-z])`).test(text);
 }
 
-export function humanizeError(error: unknown): string {
+function languageOf(language?: string) {
+  const candidate = language ?? i18n.language;
+  return candidate?.toLowerCase().startsWith("en") ? "en" : "zh-CN";
+}
+
+function translated(key: string, language: string): string {
+  return i18n.t(`errors.${key}`, { lng: language });
+}
+
+export function humanizeError(error: unknown, language?: string): string {
+  const locale = languageOf(language);
   const raw =
     error instanceof Error
       ? error.message
@@ -25,7 +37,7 @@ export function humanizeError(error: unknown): string {
         : error == null
           ? ""
           : String(error);
-  if (!raw.trim()) return "发生未知错误。";
+  if (!raw.trim()) return translated("unknown", locale);
   const s = raw.toLowerCase();
 
   // B站登录态失效 / 触发风控（HTTP 412）——放在通用 403/forbidden 之前判断。
@@ -37,10 +49,10 @@ export function humanizeError(error: unknown): string {
       s.includes("需要登录") ||
       s.includes("风控"))
   ) {
-    return "B站登录态已失效或触发风控（HTTP 412）：请用 Get cookies.txt LOCALLY 扩展重新导出并导入 cookies.txt。";
+    return translated("bilibiliLogin", locale);
   }
   if (hasStatus(s, 412) || s.includes("precondition")) {
-    return "服务器拒绝了请求（HTTP 412）：登录态可能已失效，请重新导入 cookies.txt 后重试。";
+    return translated("precondition", locale);
   }
 
   // 余额耗尽（402）和「密钥无效」是两回事：密钥是对的，就是没钱了，让人去检查
@@ -53,7 +65,7 @@ export function humanizeError(error: unknown): string {
     s.includes("exceeded your current quota") ||
     s.includes("余额")
   ) {
-    return "大模型账户余额不足：请充值或更换 API Key 后重试。";
+    return translated("quota", locale);
   }
   if (
     s.includes("api key") ||
@@ -63,13 +75,13 @@ export function humanizeError(error: unknown): string {
     s.includes("no profile") ||
     s.includes("未配置")
   ) {
-    return "未配置或密钥无效：请到「设置」检查大模型 / 语音的 API Key。";
+    return translated("apiKey", locale);
   }
   if (s.includes("大模型请求超时")) {
-    return "大模型生成超过 10 分钟，服务端可能仍在处理。请稍后检查，避免立即重复生成。";
+    return translated("longTimeout", locale);
   }
   if (s.includes("timeout") || s.includes("timed out") || s.includes("超时")) {
-    return "请求超时，请检查网络后重试。";
+    return translated("timeout", locale);
   }
   if (
     s.includes("network") ||
@@ -77,23 +89,23 @@ export function humanizeError(error: unknown): string {
     s.includes("fetch") ||
     s.includes("dns")
   ) {
-    return "网络连接失败，请检查网络后重试。";
+    return translated("network", locale);
   }
   if (s.includes("rate") && s.includes("limit")) {
-    return "请求过于频繁（限流），请稍后重试。";
+    return translated("rateLimit", locale);
   }
   if (s.includes("no space") || s.includes("磁盘") || s.includes("disk full")) {
-    return "磁盘空间不足，请清理后重试。";
+    return translated("disk", locale);
   }
   if (s.includes("permission denied") || s.includes("权限") || s.includes("eacces")) {
-    return "没有文件访问权限，请检查目录权限后重试。";
+    return translated("permission", locale);
   }
   if (s.includes("ffmpeg")) {
-    return "缺少 ffmpeg 或音频处理失败。";
+    return translated("ffmpeg", locale);
   }
   // yt-dlp / 下载类失败（放在具体分支之后兜底）。
   if (s.includes("yt-dlp") || s.includes("download") || s.includes("下载")) {
-    return "视频下载失败：请检查链接是否有效，或稍后重试。";
+    return translated("download", locale);
   }
   return raw;
 }

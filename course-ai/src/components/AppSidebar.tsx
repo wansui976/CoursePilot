@@ -27,6 +27,7 @@ export function AppSidebar({
   collapsed,
   onToggleCollapsed,
   selectedCourseId,
+  selectedCourseWatchedRatio,
   onSelectCourse,
   onClearCourseSelection,
   videos = [],
@@ -47,6 +48,8 @@ export function AppSidebar({
   collapsed: boolean;
   onToggleCollapsed: () => void;
   selectedCourseId: string | null;
+  /** 选中课程已看完比例（0-1）；null = 没有数据（侧栏仅显示集数）。 */
+  selectedCourseWatchedRatio?: number | null;
   onSelectCourse: (id: string) => void;
   onClearCourseSelection?: () => void;
   videos?: Video[];
@@ -204,6 +207,7 @@ export function AppSidebar({
       <div className="ca-nav">
         <CourseList
           selectedCourseId={selectedCourseId}
+          selectedCourseWatchedRatio={selectedCourseWatchedRatio}
           onSelect={onSelectCourse}
           onClearSelection={onClearCourseSelection}
           queueOpen={queueOpen}

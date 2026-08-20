@@ -38,6 +38,7 @@ const course = {
   cover_image: null,
   created_at: 1,
   updated_at: 1,
+  video_count: 1,
 };
 const video = {
   id: "video-1",

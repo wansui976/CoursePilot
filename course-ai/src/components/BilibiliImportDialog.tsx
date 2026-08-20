@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { humanizeError } from "@/lib/errors";
+import { ErrorNote } from "@/components/ui/ErrorNote";
 import { ipc } from "@/lib/ipc";
 import type { ProbeResult, Video } from "@/lib/types";
 
@@ -169,7 +169,7 @@ export function BilibiliImportDialog({
     >
       <Dialog.Overlay
         data-testid="bilibili-import-overlay"
-        className="ca-dialog-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+        className="ca-dialog-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       >
         <Dialog.Content
           aria-modal="true"
@@ -187,7 +187,7 @@ export function BilibiliImportDialog({
           onPointerDownOutside={(event) => {
             if (closeBlocked) event.preventDefault();
           }}
-          className="w-[420px] rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-5 shadow-[var(--shadow-pop)]"
+          className="max-h-[calc(100dvh-2rem)] w-full max-w-[420px] overflow-y-auto rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-4 shadow-[var(--shadow-pop)] sm:p-5"
         >
         <Dialog.Title
           className="mb-3 text-sm font-semibold text-[var(--text-strong)]"
@@ -200,13 +200,13 @@ export function BilibiliImportDialog({
             <input
               aria-label={t("bilibiliImport.linkLabel")}
               autoFocus
-              className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm outline-none focus:border-primary/70"
+              className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm outline-none focus:border-[var(--focus-ring)]"
               placeholder={t("bilibiliImport.linkPlaceholder")}
               value={url}
               onChange={(e) => setUrl(e.target.value)}
             />
-            {error && <p className="text-xs text-[var(--status-err)]">{humanizeError(error)}</p>}
-            <div className="flex justify-end gap-2">
+            {error && <ErrorNote error={error} onRetry={() => void startUrl()} />}
+            <div className="flex flex-wrap justify-end gap-2">
               <Button
                 size="sm"
                 variant="outline"
@@ -244,12 +244,8 @@ export function BilibiliImportDialog({
               <li>{t("bilibiliImport.cookieStep1")}</li>
               <li>{t("bilibiliImport.cookieStep2")}</li>
             </ol>
-            {error && (
-              <p className="whitespace-pre-wrap break-words text-xs text-[var(--status-err)]">
-                {humanizeError(error)}
-              </p>
-            )}
-            <div className="flex justify-end gap-2">
+            {error && <ErrorNote error={error} onRetry={() => void pickCookie()} />}
+            <div className="flex flex-wrap justify-end gap-2">
               <Button
                 size="sm"
                 variant="outline"
@@ -266,7 +262,7 @@ export function BilibiliImportDialog({
         )}
 
         {step === "probing" && (
-          <p className="py-6 text-center text-sm text-[var(--text-muted)]">
+          <p role="status" aria-live="polite" className="py-6 text-center text-sm text-[var(--text-muted)]">
             {t("bilibiliImport.probing")}
           </p>
         )}
@@ -275,10 +271,10 @@ export function BilibiliImportDialog({
           <div className="space-y-4">
             <p className="text-xs text-[var(--text-faint)]">{probe.title}</p>
 
-            <div>
-              <div className="mb-1 text-xs font-medium text-[var(--text-muted)]">
+            <fieldset>
+              <legend className="mb-1 text-xs font-medium text-[var(--text-muted)]">
                 {t("bilibiliImport.quality")}
-              </div>
+              </legend>
               <div className="flex flex-wrap gap-1.5">
                 {probe.qualities.length === 0 && (
                   <span className="text-xs text-[var(--text-faint)]">
@@ -286,22 +282,29 @@ export function BilibiliImportDialog({
                   </span>
                 )}
                 {probe.qualities.map((q) => (
-                  <button
+                  <label
                     key={q}
-                    onClick={() => setQuality(q)}
-                    className={`rounded px-2 py-1 text-xs ${quality === q ? "bg-primary/20 text-primary" : "bg-[var(--surface-card-hover)]"}`}
+                    className={`ca-touch-44 inline-flex cursor-pointer items-center rounded px-2 py-1 text-xs focus-within:outline-none focus-within:ring-2 focus-within:ring-[var(--focus-ring)] ${quality === q ? "bg-primary/20 text-primary" : "bg-[var(--surface-card-hover)]"}`}
                   >
+                    <input
+                      type="radio"
+                      name="bilibili-quality"
+                      value={q}
+                      checked={quality === q}
+                      onChange={() => setQuality(q)}
+                      className="sr-only"
+                    />
                     {q}P
-                  </button>
+                  </label>
                 ))}
               </div>
-            </div>
+            </fieldset>
 
             {probe.tracks.length > 0 ? (
-              <div>
-                <div className="mb-1 text-xs font-medium text-[var(--text-muted)]">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
                   {t("bilibiliImport.subtitleDetected")}
-                </div>
+                </span>
                 <select
                   className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1.5 text-sm"
                   value={subLang}
@@ -314,6 +317,14 @@ export function BilibiliImportDialog({
                     </option>
                   ))}
                 </select>
+              </label>
+            ) : (
+              <p className="text-xs text-[var(--text-faint)]">
+                {t("bilibiliImport.noSubtitle")}
+              </p>
+            )}
+            {probe.tracks.length > 0 && (
+              <div>
                 <label className="mt-2 flex items-center gap-2 text-xs text-[var(--text-normal)]">
                   <input
                     type="checkbox"
@@ -327,14 +338,10 @@ export function BilibiliImportDialog({
                   {t("bilibiliImport.aiCorrectionNote")}
                 </p>
               </div>
-            ) : (
-              <p className="text-xs text-[var(--text-faint)]">
-                {t("bilibiliImport.noSubtitle")}
-              </p>
             )}
 
-            {error && <p className="text-xs text-[var(--status-err)]">{humanizeError(error)}</p>}
-            <div className="flex justify-end gap-2">
+            {error && <ErrorNote error={error} />}
+            <div className="flex flex-wrap justify-end gap-2">
               {probe.tracks.length > 0 && (
                 <Button
                   size="sm"

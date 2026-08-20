@@ -214,6 +214,10 @@ pub struct OcrBatchOutcome {
     pub failed: usize,
     /// 本次需要处理的总页数。
     pub total: usize,
+    /// 实际向 OCR 引擎提交过的页数。提前停止时小于 total。
+    pub attempted: usize,
+    /// 因引擎整体不可用而提前停止，仍有页面未尝试。
+    pub stopped_early: bool,
     /// 用户中途叫停。
     pub canceled: bool,
     /// 首个失败原因，用于在界面上说清「为什么失败」。
@@ -333,12 +337,28 @@ pub async fn ocr_slides_for_video(
         }
         on_progress(done, total);
 
+        // 用户可能在这一批请求进行期间点停止。最后一批之后没有下一轮循环，
+        // 因此必须在请求收口后再读一次，不能只在每批开始前检查。
+        if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            canceled = true;
+            break;
+        }
+
         // 同一批三页全部执行失败且此前一次都没成功过，通常表示引擎整体不可用。
         if hopeless || (executed == 0 && chunk_failed == chunk.len()) {
             break;
         }
     }
-    finish_ocr_batch(recognized, executed, failed, total, canceled, first_error)
+    let stopped_early = !canceled && done < total;
+    Ok(finish_ocr_batch(
+        recognized,
+        failed,
+        done,
+        total,
+        canceled,
+        stopped_early,
+        first_error,
+    ))
 }
 
 /// 这一页要不要（重新）识别。
@@ -352,30 +372,27 @@ fn needs_ocr(force: bool, ocr_text: Option<&str>) -> bool {
 
 /// 把这一轮的计数收成结果。
 ///
-/// 只有「一页都没跑成」才当作错误——那时候库里什么都没变，报错是唯一能说的话。
-/// 部分失败仍然算成功返回，但失败页数和原因跟着一起带出去：识别出来的页确实写进库了，
-/// 把它们连同已完成的工作一起判成失败同样是在撒谎。措辞交给界面。
+/// 不在这里把「全部失败」压成字符串错误：批次结果还要携带 attempted/total，
+/// 让自动流水线和手动面板都能说清还有多少页根本没尝试。调用方再按是否全部失败、
+/// 是否提前停止决定 failed 或 warning；已经写库的部分结果始终保留。
 fn finish_ocr_batch(
     recognized: usize,
-    executed: usize,
     failed: usize,
+    attempted: usize,
     total: usize,
     canceled: bool,
+    stopped_early: bool,
     first_error: Option<String>,
-) -> AppResult<OcrBatchOutcome> {
-    if executed == 0 && failed > 0 {
-        return Err(AppError::Pipeline(format!(
-            "课件 OCR 无法执行：{failed} 页全部失败。首个错误：{}",
-            first_error.unwrap_or_else(|| "未知错误".into())
-        )));
-    }
-    Ok(OcrBatchOutcome {
+) -> OcrBatchOutcome {
+    OcrBatchOutcome {
         recognized,
         failed,
         total,
+        attempted,
+        stopped_early,
         canceled,
         error: first_error,
-    })
+    }
 }
 
 /// 识别课件页上的文字（板书/公式/定义常常写在片子上却没被念出来，字幕里根本不存在）。
@@ -516,18 +533,19 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn batch_ocr_reports_when_the_engine_never_runs_successfully() {
-        let error = finish_ocr_batch(0, 0, 3, 35, false, Some("鉴权失败".into()))
-            .unwrap_err()
-            .to_string();
+    fn batch_ocr_reports_unattempted_pages_when_the_engine_never_runs() {
+        let outcome = finish_ocr_batch(0, 3, 3, 35, false, true, Some("鉴权失败".into()));
 
-        assert!(error.contains("3 页全部失败"));
-        assert!(error.contains("鉴权失败"));
+        assert_eq!(outcome.failed, 3);
+        assert_eq!(outcome.attempted, 3);
+        assert_eq!(outcome.total, 35);
+        assert!(outcome.stopped_early);
+        assert_eq!(outcome.error.as_deref(), Some("鉴权失败"));
     }
 
     #[test]
     fn batch_ocr_can_finish_with_no_usable_text_after_successful_execution() {
-        let outcome = finish_ocr_batch(0, 3, 0, 3, false, None).unwrap();
+        let outcome = finish_ocr_batch(0, 0, 3, 3, false, false, None);
         assert_eq!(outcome.recognized, 0);
         assert_eq!(outcome.failed, 0);
     }
@@ -537,11 +555,20 @@ mod tests {
         // 这是原来漏掉的那一格：有页成功、有页失败。只要成功过一页，旧实现就返回
         // 一个成功的页数，失败页数统计了却不参与任何判断——额度在第 10 页耗尽，
         // 界面照样弹绿色的「已识别 9 页」，另外 90 页的失败无处可查。
-        let outcome = finish_ocr_batch(9, 9, 90, 99, false, Some("余额不足".into())).unwrap();
+        let outcome = finish_ocr_batch(9, 90, 99, 99, false, false, Some("余额不足".into()));
 
         assert_eq!(outcome.recognized, 9, "认出来的页确实写进库了，不能算失败");
         assert_eq!(outcome.failed, 90);
         assert_eq!(outcome.error.as_deref(), Some("余额不足"));
+    }
+
+    #[test]
+    fn an_early_stop_reports_unattempted_pages() {
+        let outcome = finish_ocr_batch(9, 3, 12, 99, false, true, Some("余额不足".into()));
+
+        assert_eq!(outcome.attempted, 12);
+        assert_eq!(outcome.total, 99);
+        assert!(outcome.stopped_early);
     }
 
     #[test]
@@ -563,11 +590,11 @@ mod tests {
     fn cancelling_is_not_the_same_as_finishing() {
         // 叫停走的也是成功路径，但界面要说得出「是你停的」——原来两者返回值一模一样，
         // 按下停止弹的是「识别完成」。
-        let stopped = finish_ocr_batch(4, 4, 0, 40, true, None).unwrap();
+        let stopped = finish_ocr_batch(4, 0, 4, 40, true, false, None);
         assert!(stopped.canceled);
         assert_eq!(stopped.recognized, 4);
 
-        assert!(!finish_ocr_batch(4, 4, 0, 4, false, None).unwrap().canceled);
+        assert!(!finish_ocr_batch(4, 0, 4, 4, false, false, None).canceled);
     }
 
     #[tokio::test]

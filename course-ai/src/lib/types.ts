@@ -5,6 +5,8 @@ export interface Course {
   cover_image: string | null;
   created_at: number;
   updated_at: number;
+  /** 课程下的视频数（未删除）。后端列表接口聚合返回。 */
+  video_count: number;
 }
 
 export interface Video {

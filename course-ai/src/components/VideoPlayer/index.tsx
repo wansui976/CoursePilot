@@ -1,9 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { cropStyle } from "@/lib/blackBars";
 import { useSilenceSkip } from "@/lib/useSilenceSkip";
 import { useSmartRate } from "@/lib/useSmartRate";
 import { ipc } from "@/lib/ipc";
+import { useVideoCrop } from "./useVideoCrop";
 import { posKey, durKey, syncPlaybackProgress } from "@/lib/playback";
 import { isIOS } from "@/lib/platform";
 import { findActiveSegmentIndex } from "@/lib/transcript";
@@ -13,6 +16,7 @@ import { usePlayer } from "@/stores/player";
 import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
 import { CaptionOverlay } from "./CaptionOverlay";
 import { Controls } from "./Controls";
+import { ProgressBar } from "./ProgressBar";
 
 // 距片尾 15s 内不再续播（视为看完），从头开始。
 const RESUME_TAIL_GUARD = 15;
@@ -79,11 +83,14 @@ export function VideoPlayer({
   src,
   videoId,
   immersive = false,
+  onFullscreenChange,
 }: {
   src: string;
   videoId: string;
   immersive?: boolean;
+  onFullscreenChange?: (fullscreen: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const regionRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLVideoElement>(null);
@@ -104,12 +111,32 @@ export function VideoPlayer({
   const [muted, setMuted] = useState(false);
   const [captionsOn, setCaptionsOn] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    onFullscreenChange?.(fullscreen);
+  }, [fullscreen, onFullscreenChange]);
+  useEffect(
+    () => () => {
+      onFullscreenChange?.(false);
+    },
+    [onFullscreenChange],
+  );
   // 控制栏可见性：桌面默认收起、悬停视频后展开；沉浸式（手机）进入时先显示一下、
   // 随后自动隐藏，之后点视频切换。
   const [controlsVisible, setControlsVisible] = useState(true);
   const [desktopControlsVisible, setDesktopControlsVisible] = useState(false);
   const hideControlsTimer = useRef<number | undefined>(undefined);
   const desktopHideTimer = useRef<number | undefined>(undefined);
+  // 去黑边：状态、后台探测、stageBox 几何全在 hook 里，播放器只管把结果套到 video 上。
+  const {
+    cropOn,
+    cropInsets,
+    cropNotice,
+    effectiveCrop,
+    stageBox,
+    toggleCrop,
+    markMetadata,
+    markPlayable,
+  } = useVideoCrop(videoId, regionRef);
   // 沉浸式单/双击判定：单击切控制栏、双击左右两侧 ±10s（中间播放/暂停）。
   const tapRef = useRef<{ t: number; timer?: number }>({ t: 0 });
   const gestureRef = useRef<GestureState | null>(null);
@@ -248,7 +275,13 @@ export function VideoPlayer({
     clearHideTimer();
     if (!immersive) return;
     hideControlsTimer.current = window.setTimeout(() => {
-      if (ref.current && !ref.current.paused) setControlsVisible(false);
+      if (
+        ref.current &&
+        !ref.current.paused &&
+        !controlsRef.current?.contains(document.activeElement)
+      ) {
+        setControlsVisible(false);
+      }
     }, 3000);
   }
   function revealControls() {
@@ -458,8 +491,23 @@ export function VideoPlayer({
     if (immersive) return;
     clearDesktopHideTimer();
     desktopHideTimer.current = window.setTimeout(() => {
-      setDesktopControlsVisible(false);
+      if (!controlsRef.current?.contains(document.activeElement)) {
+        setDesktopControlsVisible(false);
+      }
     }, 80);
+  }
+
+  function revealControlsForKeyboard() {
+    clearHideTimer();
+    clearDesktopHideTimer();
+    if (immersive) setControlsVisible(true);
+    else setDesktopControlsVisible(true);
+  }
+
+  function handleControlsBlur(event: React.FocusEvent<HTMLDivElement>) {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    if (immersive) scheduleHideControls();
+    else scheduleDesktopHideControls();
   }
 
   useEffect(() => {
@@ -652,8 +700,11 @@ export function VideoPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullscreen]);
 
+  const playbackControlsVisible = immersive ? controlsVisible : desktopControlsVisible;
+
   return (
     <div
+      data-video-fullscreen={fullscreen ? "" : undefined}
       className={`flex flex-col ${
         fullscreen
           ? "fixed inset-0 z-50 bg-black"
@@ -662,18 +713,27 @@ export function VideoPlayer({
     >
       <div
         ref={regionRef}
-        aria-label="课程视频舞台"
+        aria-label={t("videoPlayer.stage")}
+        tabIndex={0}
+        onFocus={revealControlsForKeyboard}
         onClick={immersive && !isIosImmersive ? handleStageTap : undefined}
         onMouseEnter={!immersive ? revealDesktopControls : undefined}
         onMouseLeave={!immersive ? scheduleDesktopHideControls : undefined}
-        className={`relative min-h-0 w-full min-w-0 flex-1 overflow-hidden ${
+        className={`relative flex min-h-0 w-full min-w-0 flex-1 items-center justify-center overflow-hidden ${
           fullscreen ? "bg-black" : "bg-[var(--surface-stage)]"
         }`}
       >
-        <div className="absolute inset-0 overflow-hidden">
+        <div
+          className="relative overflow-hidden"
+          style={
+            stageBox
+              ? { width: stageBox.width, height: stageBox.height }
+              : { width: "100%", height: "100%" }
+          }
+        >
           <video
             ref={ref}
-            aria-label="课程视频播放器"
+            aria-label={t("videoPlayer.player")}
             data-theme-heavy=""
             src={src}
             playsInline
@@ -684,6 +744,7 @@ export function VideoPlayer({
             // 提升到独立 GPU 合成层：暂停后让这一帧留在自己的层上，减少回退到
             // 「栅格化再缩放」的软化；backface-visibility 进一步固定层、避免半像素抖动。
             style={{
+              ...(stageBox ? cropStyle(stageBox, effectiveCrop) : {}),
               transform: "translateZ(0)",
               willChange: "transform",
               backfaceVisibility: "hidden",
@@ -715,6 +776,8 @@ export function VideoPlayer({
             }}
             onLoadedMetadata={(event) => {
               const video = event.currentTarget;
+              // 记录视频固有比例，去黑边的 stageBox 要靠它做等比缩放。
+              markMetadata(video.videoWidth, video.videoHeight);
               // 某些 WebKit 版本在资源加载后才重置速率；metadata 到达时再兜底应用一次。
               video.defaultPlaybackRate = effectiveRate;
               video.playbackRate = effectiveRate;
@@ -743,6 +806,8 @@ export function VideoPlayer({
                 }
               }
             }}
+            // 缓冲够起播了才放黑边探测进场：那一趟解码不该和首帧抢磁盘。
+            onCanPlay={markPlayable}
             onPlay={() => {
               setPlaying(true);
               scheduleHideControls();
@@ -769,7 +834,7 @@ export function VideoPlayer({
           />
           {isIosImmersive && (
             <div
-              aria-label="课程视频手势层"
+              aria-label={t("videoPlayer.gestureLayer")}
               className="absolute inset-0 z-10"
               onPointerDown={handleIosPointerDown}
               onPointerMove={handleIosPointerMove}
@@ -796,16 +861,28 @@ export function VideoPlayer({
           )}
           {gestureHint && (
             <div
-              aria-label="亮度浮层"
+              aria-label={t("videoPlayer.gestureOverlay")}
               className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/20 text-white"
             >
               <div className="rounded-lg bg-black/70 px-4 py-2 text-sm font-medium">
-                {gestureHint.kind === "brightness" && `亮度 ${(gestureHint.value * 100).toFixed(0)}%`}
-                {gestureHint.kind === "volume" && `音量 ${(gestureHint.value * 100).toFixed(0)}%`}
-                {gestureHint.kind === "scrub" && "进度调整"}
-                {gestureHint.kind === "rate" && `${gestureHint.value}x 快进中`}
-                {gestureHint.kind === "rewind" && "快退中"}
+                {gestureHint.kind === "brightness" &&
+                  t("videoPlayer.brightnessPercent", {
+                    percent: (gestureHint.value * 100).toFixed(0),
+                  })}
+                {gestureHint.kind === "volume" &&
+                  t("videoPlayer.volumePercent", {
+                    percent: (gestureHint.value * 100).toFixed(0),
+                  })}
+                {gestureHint.kind === "scrub" && t("videoPlayer.scrubbing")}
+                {gestureHint.kind === "rate" &&
+                  t("videoPlayer.fastForwarding", { rate: gestureHint.value })}
+                {gestureHint.kind === "rewind" && t("videoPlayer.rewinding")}
               </div>
+            </div>
+          )}
+          {cropNotice && (
+            <div className="pointer-events-none absolute inset-x-4 top-6 z-20 mx-auto w-fit max-w-full whitespace-pre-line rounded-lg bg-black/75 px-3 py-1.5 text-center text-xs font-medium leading-relaxed text-white">
+              {cropNotice}
             </div>
           )}
         </div>
@@ -825,73 +902,89 @@ export function VideoPlayer({
       </div>
       <div
         ref={controlsRef}
-        aria-label="视频播放控制栏"
-        aria-hidden={immersive ? !controlsVisible : !desktopControlsVisible}
-        onClick={immersive ? (e) => e.stopPropagation() : undefined}
+        className="absolute inset-x-0 bottom-0 z-10"
         onMouseEnter={!immersive ? revealDesktopControls : undefined}
         onMouseLeave={!immersive ? scheduleDesktopHideControls : undefined}
         onPointerDown={immersive ? () => revealControls() : undefined}
-        className={
-          immersive
-            ? `absolute inset-x-0 bottom-0 z-10 transition-opacity duration-200 ${
-                controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
-              }`
-            : // 桌面控制栏改为绝对定位悬浮在视频底边:收起时不再占据列布局高度,
-              // 视频舞台(flex-1)直接铺到容器底部,不留空隙;悬停时浮现,不引起重排。
-              `absolute inset-x-0 bottom-0 z-10 transition-opacity duration-200 ${
-                desktopControlsVisible
-                  ? "opacity-100"
-                  : "pointer-events-none opacity-0"
-              }`
-        }
       >
-        <Controls
-          playing={playing}
-          rate={rate}
-          effectiveRate={effectiveRate}
-          volume={volume}
-          muted={muted}
-          captionsOn={captionsOn}
-          smartRate={smartRate.enabled}
-          smartRateAvailable={smartRate.available}
-          skipSilence={silenceSkip.enabled}
-          skipSilenceAvailable={silenceSkip.available}
-          skipSilenceLoading={silenceSkip.loading}
-          skipRanges={silenceSkip.ranges}
-          fullscreen={fullscreen}
-          onToggleCaptions={() => setCaptionsOn((on) => !on)}
-          onToggleSmartRate={smartRate.toggle}
-          onToggleSkipSilence={silenceSkip.toggle}
-          onPreviewSkip={(ms) => {
-            // 试跳要「看得到跳」：暂停着不会触发跳过判定，所以顺手接着播。
-            const video = ref.current;
-            if (!video) return;
-            video.currentTime = ms / 1000;
-            if (video.paused) void video.play();
-          }}
-          onPlayPause={() => {
-            const video = ref.current;
-            if (!video) return;
-            if (video.paused) {
-              void video.play();
-            } else {
-              video.pause();
-            }
-          }}
-          onSeek={(ms) => {
-            if (ref.current) ref.current.currentTime = ms / 1000;
-          }}
-          onRate={(nextRate) => {
-            setRate(nextRate);
-            persistPlaybackRate(nextRate);
-          }}
-          onVolume={(value) => {
-            setVolume(value);
-            setMuted(value === 0);
-          }}
-          onMuteToggle={() => setMuted((value) => !value)}
-          onFullscreenToggle={toggleFullscreen}
-        />
+        {/* 按钮行：桌面悬停浮现；沉浸式随点按显隐。进度条已拆出去常驻。 */}
+        <div
+          aria-label={t("videoPlayer.controls")}
+          aria-hidden={!playbackControlsVisible}
+          inert={playbackControlsVisible ? undefined : true}
+          onFocusCapture={revealControlsForKeyboard}
+          onBlurCapture={handleControlsBlur}
+          onClick={immersive ? (e) => e.stopPropagation() : undefined}
+          className={`transition-opacity duration-200 ${
+            playbackControlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
+          }`}
+        >
+          <Controls
+            playing={playing}
+            rate={rate}
+            effectiveRate={effectiveRate}
+            volume={volume}
+            muted={muted}
+            captionsOn={captionsOn}
+            smartRate={smartRate.enabled}
+            smartRateAvailable={smartRate.available}
+            skipSilence={silenceSkip.enabled}
+            skipSilenceAvailable={silenceSkip.available}
+            skipSilenceLoading={silenceSkip.loading}
+            skipRanges={silenceSkip.ranges}
+            cropOn={cropOn}
+            cropInsets={cropInsets}
+            fullscreen={fullscreen}
+            onToggleCrop={toggleCrop}
+            onToggleCaptions={() => setCaptionsOn((on) => !on)}
+            onToggleSmartRate={smartRate.toggle}
+            onToggleSkipSilence={silenceSkip.toggle}
+            onPreviewSkip={(ms) => {
+              // 试跳要「看得到跳」：暂停着不会触发跳过判定，所以顺手接着播。
+              const video = ref.current;
+              if (!video) return;
+              video.currentTime = ms / 1000;
+              if (video.paused) void video.play();
+            }}
+            onPlayPause={() => {
+              const video = ref.current;
+              if (!video) return;
+              if (video.paused) {
+                void video.play();
+              } else {
+                video.pause();
+              }
+            }}
+            onRate={(nextRate) => {
+              setRate(nextRate);
+              persistPlaybackRate(nextRate);
+            }}
+            onVolume={(value) => {
+              setVolume(value);
+              setMuted(value === 0);
+            }}
+            onMuteToggle={() => setMuted((value) => !value)}
+            onFullscreenToggle={toggleFullscreen}
+          />
+        </div>
+        {/* 进度条：桌面常驻视频底边；沉浸式随控制栏显隐。 */}
+        <div
+          className={
+            immersive
+              ? `transition-opacity duration-200 ${
+                  controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
+                }`
+              : undefined
+          }
+        >
+          <ProgressBar
+            videoId={videoId}
+            skipRanges={silenceSkip.ranges}
+            onSeek={(ms) => {
+              if (ref.current) ref.current.currentTime = ms / 1000;
+            }}
+          />
+        </div>
       </div>
     </div>
   );

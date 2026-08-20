@@ -17,7 +17,8 @@ fn body_snippet(body: &str) -> String {
 
 /// 把一个非 2xx 应答变成错误，并顺手判定它值不值得重试。
 ///
-/// 4xx 里只有 429（限流）和 408（请求超时）会因为「等一会儿再来」而改变结果。
+/// 4xx 里 408（请求超时）、409（并发冲突）和普通 429（限流）会因为
+/// 「等一会儿再来」而改变结果。429 也可能表示账号额度已用尽，这种情况不应重试。
 /// 其余 4xx——密钥不对、余额不足、模型名写错、请求体超限——再发一遍还是同一句话。
 /// 之所以要区分：上游的退避重试是为网络抖动准备的，拿它去撞一个 402，只会让用户
 /// 多等三轮退避，最后拿到一模一样的答复。5xx 归入可重试，服务端故障常常是暂时的。
@@ -26,6 +27,8 @@ fn http_error(what: &str, status: reqwest::StatusCode, body: &str) -> AppError {
     // `{"error":{"message":"Insufficient Balance",...}}` 出去，用户得自己去翻译；
     // 而这条消息会一路传到流水线的步骤列表里，那里没有第二次解释的机会。
     // 原始应答仍附在后面——排查时要看的就是它。
+    let quota_exhausted =
+        status == reqwest::StatusCode::TOO_MANY_REQUESTS && openai_quota_exhausted(body);
     let hint = match status {
         reqwest::StatusCode::PAYMENT_REQUIRED => {
             "大模型账户余额不足：请充值或更换 API Key 后重试。"
@@ -33,6 +36,9 @@ fn http_error(what: &str, status: reqwest::StatusCode, body: &str) -> AppError {
         reqwest::StatusCode::UNAUTHORIZED => "API Key 无效或已过期：请到「设置」检查大模型配置。",
         reqwest::StatusCode::FORBIDDEN => {
             "这个 API Key 没有调用该模型的权限：请检查模型名与账号权限。"
+        }
+        _ if quota_exhausted => {
+            "大模型账户余额或额度已用尽：请充值、提升额度或更换 API Key 后重试。"
         }
         _ => "",
     };
@@ -42,14 +48,80 @@ fn http_error(what: &str, status: reqwest::StatusCode, body: &str) -> AppError {
     } else {
         format!("{hint}（{detail}）")
     };
-    if status.is_client_error()
+    let account_failure = matches!(
+        status,
+        reqwest::StatusCode::UNAUTHORIZED
+            | reqwest::StatusCode::PAYMENT_REQUIRED
+            | reqwest::StatusCode::FORBIDDEN
+    );
+    if account_failure || quota_exhausted {
+        AppError::account(text)
+    } else if status.is_client_error()
         && status != reqwest::StatusCode::TOO_MANY_REQUESTS
         && status != reqwest::StatusCode::REQUEST_TIMEOUT
+        && status != reqwest::StatusCode::CONFLICT
     {
         AppError::Permanent(text)
     } else {
         AppError::Other(text)
     }
+}
+
+/// OpenAI 把「短时限流」和「账号额度用尽」都放在 HTTP 429 里。
+/// 只有应答是 JSON 且错误字段明确时才判成额度问题；网关返回的纯文本 429
+/// 无法区分原因，保守地保留重试。
+fn openai_quota_exhausted(body: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(body) else {
+        return false;
+    };
+    let error = value.get("error").unwrap_or(&value);
+
+    for field in ["code", "type"] {
+        if error
+            .get(field)
+            .and_then(Value::as_str)
+            .is_some_and(quota_marker)
+        {
+            return true;
+        }
+    }
+
+    error
+        .get("message")
+        .and_then(Value::as_str)
+        .is_some_and(quota_message)
+}
+
+fn quota_marker(marker: &str) -> bool {
+    let marker = marker.to_ascii_lowercase().replace(['-', ' '], "_");
+    marker.contains("insufficient_quota")
+        || marker.contains("quota_exhaust")
+        || marker.contains("quota_exceed")
+        || marker.contains("billing_hard_limit")
+        || marker.contains("billing_not_active")
+        || marker.contains("insufficient_balance")
+        || marker.contains("balance_exhaust")
+        || (marker.contains("credit")
+            && (marker.contains("insufficient") || marker.contains("exhaust")))
+}
+
+fn quota_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("exceeded your current quota")
+        || lower.contains("insufficient balance")
+        || (lower.contains("balance")
+            && (lower.contains("exhausted")
+                || lower.contains("depleted")
+                || lower.contains("too low")))
+        || (lower.contains("credit")
+            && (lower.contains("exhausted")
+                || lower.contains("depleted")
+                || lower.contains("insufficient")))
+        || message.contains("余额不足")
+        || message.contains("余额已用尽")
+        || message.contains("额度不足")
+        || message.contains("额度已用尽")
+        || message.contains("额度已耗尽")
 }
 
 fn request_error(error: reqwest::Error) -> AppError {
@@ -599,11 +671,19 @@ mod tests {
 
     #[test]
     fn account_level_failures_are_not_worth_retrying() {
+        for status in [
+            reqwest::StatusCode::UNAUTHORIZED,
+            reqwest::StatusCode::PAYMENT_REQUIRED,
+            reqwest::StatusCode::FORBIDDEN,
+        ] {
+            let error = http_error("OpenAI", status, "account failure");
+            assert!(error.is_permanent(), "{status}");
+            assert!(error.is_account_failure(), "{status}");
+        }
+
         // 真实遇到的那一条：余额耗尽。重试三轮还是余额耗尽，只是让用户白等二十多秒。
         let body = r#"{"error":{"message":"Insufficient Balance","type":"unknown_error"}}"#;
         let error = http_error("OpenAI", reqwest::StatusCode::PAYMENT_REQUIRED, body);
-
-        assert!(error.is_permanent());
         // 说人话的部分在最前面：这条消息会一路传到流水线的步骤列表，那里不会再解释一次。
         let text = error.to_string();
         assert!(text.starts_with("大模型账户余额不足"), "{text}");
@@ -627,10 +707,50 @@ mod tests {
     }
 
     #[test]
+    fn a_429_insufficient_quota_response_is_permanent() {
+        let bodies = [
+            r#"{"error":{"message":"You exceeded your current quota.","type":"insufficient_quota","code":"insufficient_quota"}}"#,
+            r#"{"error":{"message":"Billing rejected","type":"billing_hard_limit_reached"}}"#,
+            r#"{"error":{"message":"账户余额不足","type":"api_error"}}"#,
+        ];
+
+        for body in bodies {
+            let error = http_error("OpenAI", reqwest::StatusCode::TOO_MANY_REQUESTS, body);
+            assert!(error.is_permanent(), "{body} 应当是永久错误");
+            assert!(error.is_account_failure(), "{body} 应当是账号级错误");
+            assert!(error.to_string().starts_with("大模型账户余额或额度已用尽"));
+        }
+    }
+
+    #[test]
+    fn a_429_rate_limit_response_stays_retryable() {
+        let body = r#"{"error":{"message":"Rate limit reached for requests","type":"requests","code":"rate_limit_exceeded"}}"#;
+        let error = http_error("OpenAI", reqwest::StatusCode::TOO_MANY_REQUESTS, body);
+        assert!(!error.is_permanent());
+        assert!(!error.is_account_failure());
+
+        // 纯文本可能来自网关，没有足够信息证明是账号额度问题。
+        let error = http_error("OpenAI", reqwest::StatusCode::TOO_MANY_REQUESTS, "busy");
+        assert!(!error.is_permanent());
+    }
+
+    #[test]
+    fn a_409_conflict_stays_retryable() {
+        let error = http_error("OpenAI", reqwest::StatusCode::CONFLICT, "conflict");
+        assert!(!error.is_permanent());
+    }
+
+    #[test]
     fn a_bad_request_is_permanent_too() {
-        // 模型名写错、请求体超限：同一个请求再发一遍还是同一个 400。
-        let error = http_error("OpenAI", reqwest::StatusCode::BAD_REQUEST, "no such model");
-        assert!(error.is_permanent());
+        // 模型名写错、请求体超限：同一个请求再发一遍还是同一个 4xx。
+        for status in [
+            reqwest::StatusCode::BAD_REQUEST,
+            reqwest::StatusCode::NOT_FOUND,
+        ] {
+            let error = http_error("OpenAI", status, "no such model");
+            assert!(error.is_permanent(), "{status}");
+            assert!(!error.is_account_failure(), "{status}");
+        }
     }
 
     /// 把整段 SSE 按给定大小切块喂进状态机，模拟网络分包。

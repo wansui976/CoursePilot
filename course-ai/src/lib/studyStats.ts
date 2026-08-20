@@ -1,4 +1,16 @@
 import type { DayTotal } from "./ipc";
+import i18n from "@/i18n";
+
+type SupportedLanguage = "zh-CN" | "en";
+
+function currentLanguage(language?: string): SupportedLanguage {
+  const candidate = language ?? i18n.resolvedLanguage ?? i18n.language;
+  return candidate?.toLowerCase().startsWith("en") ? "en" : "zh-CN";
+}
+
+function translated(key: string, language: SupportedLanguage, values?: Record<string, number>) {
+  return i18n.t(key, { lng: language, ...values });
+}
 
 /** 本地日期 'YYYY-MM-DD'（与后端 daily_totals 的 date(...,'localtime') 对齐）。 */
 export function localDay(date: Date): string {
@@ -95,13 +107,16 @@ export function dayReviews(rows: DayTotal[], day: string): number {
 }
 
 /** 人类可读时长：分钟 / 小时+分。 */
-export function formatDuration(ms: number): string {
+export function formatDuration(ms: number, language?: string): string {
+  const locale = currentLanguage(language);
   const min = Math.round(ms / 60000);
-  if (min <= 0) return "0 分钟";
-  if (min < 60) return `${min} 分钟`;
+  if (min <= 0) return translated("time.minute", locale, { count: 0 });
+  if (min < 60) return translated("time.minute", locale, { count: min });
   const h = Math.floor(min / 60);
   const m = min % 60;
-  return m ? `${h} 小时 ${m} 分` : `${h} 小时`;
+  return m
+    ? translated("time.durationHoursMinutes", locale, { count: h, hours: h, minutes: m })
+    : translated("time.hour", locale, { count: h });
 }
 
 /** 热力图一格：某天的日期、观看毫秒、复习张数与强度等级 0–4；null 表示补位（今天之后的未来格）。 */
@@ -157,15 +172,19 @@ export function heatmapGrid(rows: DayTotal[], today: string, weeks: number): Hea
 }
 
 /** 相对某天的「今天 / 昨天 / N 天前」。 */
-export function relativeDay(ts: number, today: string): string {
+export function relativeDay(ts: number, today: string, language?: string): string {
+  const locale = currentLanguage(language);
   const then = localDay(new Date(ts));
-  if (then === today) return "今天";
+  if (then === today) return translated("time.today", locale);
   const t = new Date(`${today}T00:00:00`);
   t.setDate(t.getDate() - 1);
-  if (then === localDay(t)) return "昨天";
+  if (then === localDay(t)) return translated("time.yesterday", locale);
   const diffDays = Math.round(
     (new Date(`${today}T00:00:00`).getTime() - new Date(`${then}T00:00:00`).getTime()) /
       86_400_000,
   );
-  return `${diffDays} 天前`;
+  if (locale === "zh-CN") {
+    return `${translated("time.day", locale, { count: Math.abs(diffDays) })}${diffDays >= 0 ? "前" : "后"}`;
+  }
+  return new Intl.RelativeTimeFormat(locale, { numeric: "always" }).format(-diffDays, "day");
 }

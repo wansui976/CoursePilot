@@ -560,6 +560,41 @@ pub struct LectureInput {
     pub fingerprint: Fingerprint,
 }
 
+/// 步骤内进度上报：(0..=1 的完成度, 给用户看的一句话)。None 表示调用方不关心。
+///
+/// 用共享引用的 `dyn Fn` 而不是 `FnMut`：它要跨多个 await 活着，可变借用会把调用方
+/// 整段卡住；Send + Sync 是因为流水线整个跑在 tokio 任务里。
+pub type Progress<'a> = Option<&'a (dyn Fn(f64, &str) + Send + Sync)>;
+
+/// 报一次进度（没有回调就什么都不做）。
+pub fn report(progress: Progress<'_>, at: f64, message: &str) {
+    if let Some(sink) = progress {
+        sink(at.clamp(0.0, 1.0), message);
+    }
+}
+
+/// 把子步骤自己的 0..1 映射到父步骤进度条的 [from, to] 区间。
+///
+/// 长讲稿要先压提要，那是真正耗时的一段且有 N/M 可数；它占「准备讲稿」这半截，
+/// 后面留给模型调用。没有这层映射，子步骤会把整条进度条走满再回退。
+fn scoped<'a>(progress: Progress<'a>, from: f64, to: f64) -> impl Fn(f64, &str) + Send + Sync + 'a {
+    move |fraction: f64, message: &str| {
+        report(
+            progress,
+            from + (to - from) * fraction.clamp(0.0, 1.0),
+            message,
+        );
+    }
+}
+
+// 单次模型调用切不出内部进度，只能给出阶段位置。数值本身不重要，重要的是
+// 进度条在「开始→取到讲稿→发出请求→拿到回复→写库」之间确实动过几次——
+// 一条长时间纹丝不动的进度条，用户读到的是「卡死了」。
+const AT_CONTEXT: f64 = 0.05;
+const AT_REQUEST: f64 = 0.55;
+const AT_PARSE: f64 = 0.85;
+const AT_STORE: f64 = 0.95;
+
 /// 取一份送得进模型的讲稿。
 ///
 /// 短片直接整篇；长片改用**提要稿**——原来五个任务各把整份讲稿发一遍且没有任何上限，
@@ -572,6 +607,7 @@ pub async fn budgeted_context(
     provider: &Provider,
     model: &str,
     video_id: &str,
+    progress: Progress<'_>,
 ) -> AppResult<LectureInput> {
     let full = lecture_context(db, video_id).await?;
     let fingerprint = context_fingerprint(&full);
@@ -589,7 +625,7 @@ pub async fn budgeted_context(
         });
     }
 
-    let digest = build_digest(db, provider, model, &full).await?;
+    let digest = build_digest(db, provider, model, &full, progress).await?;
     sqlx::query(
         "INSERT INTO transcript_digests(video_id,fingerprint,content,generated_at)
          VALUES (?,?,?,?)
@@ -635,11 +671,16 @@ async fn build_digest(
     fallback_provider: &Provider,
     fallback_model: &str,
     full: &str,
+    progress: Progress<'_>,
 ) -> AppResult<String> {
-    let routed = crate::commands::ai::provider_for_db(db, AiTask::Digest).await?;
-    let (provider, model) = match &routed {
-        Some((provider, model)) => (provider, model.as_str()),
-        None => (fallback_provider, fallback_model),
+    let routed = crate::commands::ai::resolved_provider_for_db(db, AiTask::Digest).await?;
+    let (provider, model, profile_id) = match &routed {
+        Some(resolved) => (
+            &resolved.provider,
+            resolved.model.as_str(),
+            Some(resolved.profile_id.as_str()),
+        ),
+        None => (fallback_provider, fallback_model, None),
     };
 
     let chunks = crate::pipeline::rag::split_by_chars(full, DIGEST_CHUNK_CHARS);
@@ -654,12 +695,20 @@ async fn build_digest(
             // rewrap 而不是 Other：这层只是加了句说明，「重试救不了」的判断得原样传上去，
             // 上层靠它决定后面四个任务还跑不跑。
             .map_err(|error| {
-                error.rewrap(format!(
-                    "讲稿提要第 {}/{total} 块失败，整份作废（缺一块会让五个产物都漏掉那一段）：{error}",
-                    index + 1
-                ))
+                error
+                    .rewrap(format!(
+                        "讲稿提要第 {}/{total} 块失败，整份作废（缺一块会让五个产物都漏掉那一段）：{error}",
+                        index + 1
+                    ))
+                    .with_account_profile(profile_id)
             })?;
         parts.push(text);
+        // 长讲座这里是真正的耗时大头，每块都报一次——用户看得见它在往前走。
+        report(
+            progress,
+            (index + 1) as f64 / total as f64,
+            &format!("压缩长讲稿 {}/{total} 块", index + 1),
+        );
     }
     Ok(parts.join("\n\n"))
 }
@@ -705,12 +754,19 @@ pub async fn generate_chapters(
     provider: &Provider,
     model: &str,
     video_id: &str,
+    progress: Progress<'_>,
 ) -> AppResult<usize> {
-    let input = budgeted_context(db, provider, model, video_id).await?;
+    report(progress, AT_CONTEXT, "准备讲稿");
+    // 提要占进度条的前半截；短讲稿不压提要，这一段会一闪而过。
+    let prep = scoped(progress, AT_CONTEXT, AT_REQUEST);
+    let input = budgeted_context(db, provider, model, video_id, Some(&prep)).await?;
     let transcript = &input.context;
     let req = crate::llm::prompts::chapters_request(model, transcript);
+    report(progress, AT_REQUEST, "正在请求模型划分章节");
     let resp = provider.complete(&req).await?;
+    report(progress, AT_PARSE, "解析章节");
     let drafts = parse_chapters(&resp.content)?;
+    report(progress, AT_STORE, "写入章节");
     let count = store_chapters(db, video_id, &drafts).await?;
     record_artifact_source(db, video_id, "chapters", &input.fingerprint).await?;
     Ok(count)
@@ -721,12 +777,19 @@ pub async fn generate_quiz(
     provider: &Provider,
     model: &str,
     video_id: &str,
+    progress: Progress<'_>,
 ) -> AppResult<()> {
-    let input = budgeted_context(db, provider, model, video_id).await?;
+    report(progress, AT_CONTEXT, "准备讲稿");
+    // 提要占进度条的前半截；短讲稿不压提要，这一段会一闪而过。
+    let prep = scoped(progress, AT_CONTEXT, AT_REQUEST);
+    let input = budgeted_context(db, provider, model, video_id, Some(&prep)).await?;
     let transcript = &input.context;
     let req = crate::llm::prompts::quiz_request(model, transcript);
+    report(progress, AT_REQUEST, "正在请求模型出题");
     let resp = provider.complete(&req).await?;
+    report(progress, AT_PARSE, "校验题目");
     let json = validate_quiz_json(&resp.content)?;
+    report(progress, AT_STORE, "写入题库");
     sqlx::query(
         "INSERT INTO quizzes(video_id,questions_json,generated_at) VALUES (?,?,?)
          ON CONFLICT(video_id) DO UPDATE SET questions_json=excluded.questions_json, generated_at=excluded.generated_at",
@@ -745,11 +808,17 @@ pub async fn generate_mindmap(
     provider: &Provider,
     model: &str,
     video_id: &str,
+    progress: Progress<'_>,
 ) -> AppResult<()> {
-    let input = budgeted_context(db, provider, model, video_id).await?;
+    report(progress, AT_CONTEXT, "准备讲稿");
+    // 提要占进度条的前半截；短讲稿不压提要，这一段会一闪而过。
+    let prep = scoped(progress, AT_CONTEXT, AT_REQUEST);
+    let input = budgeted_context(db, provider, model, video_id, Some(&prep)).await?;
     let transcript = &input.context;
     let req = crate::llm::prompts::mindmap_request(model, transcript);
+    report(progress, AT_REQUEST, "正在请求模型生成脑图");
     let md = provider.complete(&req).await?.content;
+    report(progress, AT_STORE, "写入脑图");
     let md = strip_code_fence(&md).to_string();
     sqlx::query(
         "INSERT INTO mindmaps(video_id,markmap_md,generated_at) VALUES (?,?,?)
@@ -769,11 +838,17 @@ pub async fn generate_summary(
     provider: &Provider,
     model: &str,
     video_id: &str,
+    progress: Progress<'_>,
 ) -> AppResult<()> {
-    let input = budgeted_context(db, provider, model, video_id).await?;
+    report(progress, AT_CONTEXT, "准备讲稿");
+    // 提要占进度条的前半截；短讲稿不压提要，这一段会一闪而过。
+    let prep = scoped(progress, AT_CONTEXT, AT_REQUEST);
+    let input = budgeted_context(db, provider, model, video_id, Some(&prep)).await?;
     let transcript = &input.context;
     let req = crate::llm::prompts::summary_request(model, transcript);
+    report(progress, AT_REQUEST, "正在请求模型写摘要");
     let md = provider.complete(&req).await?.content;
+    report(progress, AT_STORE, "写入摘要");
     let md = strip_code_fence(&md).to_string();
     sqlx::query(
         "INSERT INTO summaries(video_id,content_md,generated_at) VALUES (?,?,?)
@@ -793,11 +868,17 @@ pub async fn generate_notes(
     provider: &Provider,
     model: &str,
     video_id: &str,
+    progress: Progress<'_>,
 ) -> AppResult<()> {
-    let input = budgeted_context(db, provider, model, video_id).await?;
+    report(progress, AT_CONTEXT, "准备讲稿");
+    // 提要占进度条的前半截；短讲稿不压提要，这一段会一闪而过。
+    let prep = scoped(progress, AT_CONTEXT, AT_REQUEST);
+    let input = budgeted_context(db, provider, model, video_id, Some(&prep)).await?;
     let transcript = &input.context;
     let req = crate::llm::prompts::notes_request(model, transcript);
+    report(progress, AT_REQUEST, "正在请求模型整理笔记");
     let md = provider.complete(&req).await?.content;
+    report(progress, AT_STORE, "写入笔记");
     let md = strip_code_fence(&md).to_string();
     let now = chrono::Utc::now().timestamp_millis();
     // 重新生成时清掉用户编辑过的 content_json，否则它会盖住新生成的 content_md
@@ -1017,7 +1098,9 @@ mod tests {
         let provider = Provider::Mock {
             canned: "不该被用到".into(),
         };
-        let input = budgeted_context(&db, &provider, "m", &vid).await.unwrap();
+        let input = budgeted_context(&db, &provider, "m", &vid, None)
+            .await
+            .unwrap();
         // 短片不压缩：内容与讲稿逐字相同（这也是五个任务命中前缀缓存的前提）。
         assert_eq!(input.context, lecture_context(&db, &vid).await.unwrap());
     }
@@ -1035,7 +1118,9 @@ mod tests {
             canned: "要点：这一块讲了什么。".into(),
         };
 
-        let first = budgeted_context(&db, &provider, "m", &vid).await.unwrap();
+        let first = budgeted_context(&db, &provider, "m", &vid, None)
+            .await
+            .unwrap();
         assert!(first.context.chars().count() < full.chars().count());
         // 指纹算在**原始讲稿**上：产物过期要跟字幕走，不跟我们内部的压缩结果走。
         assert_eq!(first.fingerprint, context_fingerprint(&full));
@@ -1048,7 +1133,9 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(stored, 1);
-        let second = budgeted_context(&db, &provider, "m", &vid).await.unwrap();
+        let second = budgeted_context(&db, &provider, "m", &vid, None)
+            .await
+            .unwrap();
         assert_eq!(second.context, first.context);
     }
 
@@ -1100,7 +1187,7 @@ mod tests {
         seed_long_transcript(&db, &vid, 500).await;
         let provider = failing_provider(true, "OpenAI 402 Payment Required: Insufficient Balance");
 
-        let error = match budgeted_context(&db, &provider, "m", &vid).await {
+        let error = match budgeted_context(&db, &provider, "m", &vid, None).await {
             Err(error) => error,
             Ok(_) => panic!("每一块都失败，不该交付提要"),
         };
@@ -1117,7 +1204,7 @@ mod tests {
         // 于是缺一整段内容的提要仍会被五个下游产物复用，界面上看不出来。
         let provider = Provider::Mock { canned: " ".into() };
 
-        let result = budgeted_context(&db, &provider, "m", &vid).await;
+        let result = budgeted_context(&db, &provider, "m", &vid, None).await;
 
         assert!(result.is_err(), "有块失败就该整份作废");
         let stored: i64 =
@@ -1136,7 +1223,9 @@ mod tests {
         let provider = Provider::Mock {
             canned: "旧提要".into(),
         };
-        let before = budgeted_context(&db, &provider, "m", &vid).await.unwrap();
+        let before = budgeted_context(&db, &provider, "m", &vid, None)
+            .await
+            .unwrap();
 
         sqlx::query("UPDATE transcripts SET text=? WHERE video_id=? AND segment_idx=1")
             .bind("改过的一句")
@@ -1148,7 +1237,9 @@ mod tests {
         let provider = Provider::Mock {
             canned: "新提要".into(),
         };
-        let after = budgeted_context(&db, &provider, "m", &vid).await.unwrap();
+        let after = budgeted_context(&db, &provider, "m", &vid, None)
+            .await
+            .unwrap();
         assert_ne!(after.fingerprint, before.fingerprint);
         assert!(after.context.contains("新提要"), "指纹不匹配就该重做提要");
     }
@@ -1340,7 +1431,9 @@ mod tests {
         let provider = Provider::Mock {
             canned: r#"[{"title":"开场","summary":"导论","start_ms":0,"end_ms":5000}]"#.into(),
         };
-        let n = generate_chapters(&db, &provider, "m", &vid).await.unwrap();
+        let n = generate_chapters(&db, &provider, "m", &vid, None)
+            .await
+            .unwrap();
         assert_eq!(n, 1);
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM chapters WHERE video_id=?")
             .bind(&vid)
@@ -1416,6 +1509,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn generate_reports_phase_progress() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(f64, String)>::new()));
+        let sink = {
+            let seen = std::sync::Arc::clone(&seen);
+            move |at: f64, message: &str| {
+                seen.lock().unwrap().push((at, message.to_string()));
+            }
+        };
+
+        generate_summary(
+            &db,
+            &Provider::Mock {
+                canned: "# 摘要".into(),
+            },
+            "m",
+            &vid,
+            Some(&sink),
+        )
+        .await
+        .unwrap();
+
+        let seen = seen.lock().unwrap().clone();
+        // 单次模型调用切不出内部进度，但进度条至少要在几个阶段之间动过——
+        // 此前它整段停在 0.1「生成中」，长视频上和卡死无从分辨。
+        assert!(seen.len() >= 3, "阶段太少，实际 {seen:?}");
+        assert!(
+            seen.windows(2).all(|pair| pair[0].0 <= pair[1].0),
+            "进度不能倒退，实际 {seen:?}"
+        );
+        assert!(
+            seen.iter().any(|(_, message)| message.contains("请求模型")),
+            "要说清正在等模型，实际 {seen:?}"
+        );
+        assert!(
+            seen.last().unwrap().0 > 0.5,
+            "写库那一步该到后段，实际 {seen:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn generate_quiz_and_mindmap_and_notes_persist() {
         let (db, vid, _d) = seed_video_with_transcript().await;
         generate_quiz(
@@ -1425,6 +1559,7 @@ mod tests {
             },
             "m",
             &vid,
+            None,
         )
         .await
         .unwrap();
@@ -1435,6 +1570,7 @@ mod tests {
             },
             "m",
             &vid,
+            None,
         )
         .await
         .unwrap();
@@ -1445,6 +1581,7 @@ mod tests {
             },
             "m",
             &vid,
+            None,
         )
         .await
         .unwrap();
@@ -1485,6 +1622,7 @@ mod tests {
             },
             "m",
             &vid,
+            None,
         )
         .await
         .unwrap();

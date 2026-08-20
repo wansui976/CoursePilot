@@ -135,4 +135,22 @@ describe("MindmapPanel", () => {
 
     expect(await screen.findByText(/模型没配好/)).toBeInTheDocument();
   });
+
+  it("shows a retryable read error instead of the empty state or generation entry", async () => {
+    mockIpc.ai.getMindmap
+      .mockRejectedValueOnce(new Error("脑图读取失败"))
+      .mockResolvedValueOnce(null);
+
+    renderPanel();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("脑图读取失败");
+    expect(screen.queryByText(/还没有脑图/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "生成" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+
+    await waitFor(() => expect(mockIpc.ai.getMindmap).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/还没有脑图/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "生成" })).toBeInTheDocument();
+  });
 });

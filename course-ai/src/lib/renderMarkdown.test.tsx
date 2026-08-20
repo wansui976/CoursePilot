@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import i18n from "@/i18n";
 import { renderMarkdown } from "./renderMarkdown";
 
 function renderMd(md: string, onSeek = vi.fn()) {
@@ -8,6 +9,10 @@ function renderMd(md: string, onSeek = vi.fn()) {
 }
 
 describe("renderMarkdown", () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("zh-CN");
+  });
+
   it("renders **bold** as <strong>", () => {
     const { getByText } = renderMd("这是**重点**内容");
     const strong = getByText("重点");
@@ -26,9 +31,12 @@ describe("renderMarkdown", () => {
     expect(container.querySelectorAll("ol > li")).toHaveLength(3);
   });
 
-  it("renders headings as emphasized text", () => {
-    const { getByText } = renderMd("## 小标题");
-    expect(getByText("小标题").className).toContain("font-semibold");
+  it("preserves markdown heading levels as semantic headings", () => {
+    const { container, getByText } = renderMd("# 一级\n### 三级\n###### 六级");
+    expect(container.querySelector("h1")).toHaveTextContent("一级");
+    expect(container.querySelector("h3")).toHaveTextContent("三级");
+    expect(container.querySelector("h6")).toHaveTextContent("六级");
+    expect(getByText("三级").className).toContain("font-semibold");
   });
 
   it("keeps KaTeX math and clickable timestamps working inside markdown", () => {
@@ -59,5 +67,42 @@ describe("renderMarkdown", () => {
       </div>,
     );
     expect(getAllByTestId("caret")).toHaveLength(1);
+  });
+
+  it("groups consecutive trailing timestamps as quiet paragraph sources", () => {
+    const onSeek = vi.fn();
+    renderMd(
+      "核心结论。 [00:05] [00:18] [01:02]",
+      onSeek,
+    );
+
+    const sources = screen.getByRole("group", { name: "来源" });
+    expect(sources).toHaveTextContent("来源");
+    expect(sources).not.toHaveTextContent("▶");
+    expect(
+      Array.from(sources.querySelectorAll("button")).every(
+        (button) => !button.classList.contains("bg-primary/15"),
+      ),
+    ).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "跳转到 00:18" }));
+    expect(onSeek).toHaveBeenCalledWith(18_000);
+  });
+
+  it("keeps a single timestamp inline", () => {
+    renderMd("核心结论 [00:05]");
+
+    expect(screen.queryByRole("group", { name: "来源" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /00:05/ })).toHaveTextContent("▶");
+  });
+
+  it("localizes source labels and jump actions", async () => {
+    await i18n.changeLanguage("en");
+    const onSeek = vi.fn();
+    renderMd("Conclusion. [00:05] [00:18]", onSeek);
+
+    expect(screen.getByRole("group", { name: "Sources" })).toHaveTextContent("Sources");
+    fireEvent.click(screen.getByRole("button", { name: "Jump to 00:18" }));
+    expect(onSeek).toHaveBeenCalledWith(18_000);
   });
 });

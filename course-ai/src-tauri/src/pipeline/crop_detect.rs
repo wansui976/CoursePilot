@@ -9,8 +9,20 @@
 use crate::sidecar::{resolve, FFMPEG};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::process::Command;
+use tokio::sync::Semaphore;
+
+/// 并发探测上限。探测要 ffmpeg 解码正片几十秒画面，是实打实的磁盘和 CPU 开销；
+/// 导入改成后台任务后，一次连开多门课会同时排起好几个探测，必须限住并发，
+/// 否则它们会互相抢磁盘、拖慢一切。2 足够：一个在跑、一个在等，其余排队。
+const CROP_DETECT_MAX_CONCURRENT: usize = 2;
+
+fn crop_semaphore() -> &'static Semaphore {
+    static CROP_DETECT_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
+    CROP_DETECT_SEMAPHORE.get_or_init(|| Semaphore::new(CROP_DETECT_MAX_CONCURRENT))
+}
 
 /// 取消标志的轮询间隔。一趟探测要解好几十秒的画面，等它自己跑完再看标志就太迟了。
 const CANCEL_POLL: Duration = Duration::from_millis(200);
@@ -187,6 +199,9 @@ pub async fn ensure_crop(
     path: PathBuf,
     cancel: &AtomicBool,
 ) -> CropInsets {
+    // 并发上限：导入后台任务、流水线、课件提取、播放器兜底会同时要探测，
+    // 不该让 ffmpeg 成批抢磁盘。拿不到许可就排队等，取消照旧在解码循环里生效。
+    let _permit = crop_semaphore().acquire().await;
     let Some(samples) = sample_insets(&path, cancel).await else {
         return NO_CROP;
     };

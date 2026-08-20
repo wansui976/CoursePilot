@@ -1,34 +1,80 @@
+import i18n from "@/i18n";
+
+type SupportedLanguage = "zh-CN" | "en";
+type RelativeUnit = "minute" | "hour" | "day";
+type StudyUnit = RelativeUnit | "month" | "year";
+
+function currentLanguage(language?: string): SupportedLanguage {
+  const candidate = language ?? i18n.resolvedLanguage ?? i18n.language;
+  return candidate?.toLowerCase().startsWith("en") ? "en" : "zh-CN";
+}
+
+function translated(
+  key: string,
+  language: SupportedLanguage,
+  values?: Record<string, number | string>,
+): string {
+  return i18n.t(key, { lng: language, ...values });
+}
+
+function relative(value: number, unit: RelativeUnit, language: SupportedLanguage): string {
+  if (language === "zh-CN") {
+    const count = Math.abs(value);
+    return `${studyUnit(count, unit, language)}${value < 0 ? "前" : "后"}`;
+  }
+  return new Intl.RelativeTimeFormat(language, { numeric: "always" }).format(value, unit);
+}
+
+function studyUnit(value: number, unit: StudyUnit, language: SupportedLanguage): string {
+  return translated(`time.${unit}`, language, { count: value });
+}
+
 /**
  * 时间戳（epoch 毫秒）的相对表述：刚刚 / N 分钟前 / N 小时前 / N 天前，超过一周落到日期。
  * 未来时间（时钟回拨等）当作「刚刚」，不显示负数。
  */
-export function formatRelativeTime(ms: number, now = Date.now()): string {
+export function formatRelativeTime(
+  ms: number,
+  now = Date.now(),
+  language?: string,
+): string {
+  const locale = currentLanguage(language);
   const diffMinutes = Math.floor((now - ms) / 60_000);
-  if (diffMinutes < 1) return "刚刚";
-  if (diffMinutes < 60) return `${diffMinutes} 分钟前`;
+  if (diffMinutes < 1) return translated("time.justNow", locale);
+  if (diffMinutes < 60) return relative(-diffMinutes, "minute", locale);
   const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours} 小时前`;
+  if (diffHours < 24) return relative(-diffHours, "hour", locale);
   const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 7) return `${diffDays} 天前`;
+  if (diffDays < 7) return relative(-diffDays, "day", locale);
   const date = new Date(ms);
   const sameYear = date.getFullYear() === new Date(now).getFullYear();
-  const day = `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
-  return sameYear ? day : `${date.getFullYear()} 年 ${day}`;
+  if (locale === "zh-CN") {
+    const values = {
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      day: date.getDate(),
+    };
+    return translated(sameYear ? "time.dateSameYear" : "time.dateWithYear", locale, values);
+  }
+  const options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  if (!sameYear) options.year = "numeric";
+  return new Intl.DateTimeFormat(locale, options).format(date);
 }
 
 /**
  * 距未来某时刻还有多久：N 分钟后 / N 小时后 / N 天后。
  * 已经过去（或不足一分钟）时返回「马上」，不显示负数。
  */
-export function formatCountdown(ms: number, now = Date.now()): string {
+export function formatCountdown(ms: number, now = Date.now(), language?: string): string {
+  const locale = currentLanguage(language);
   // 向上取整：还差 30 秒说「1 分钟后」，差 2 小时 59 分说「3 小时后」——倒计时说大不说小，
   // 也免得「3 小时后到期」因为几毫秒的流逝就退化成「2 小时后」。
   const diffMinutes = Math.ceil((ms - now) / 60_000);
-  if (diffMinutes < 1) return "马上";
-  if (diffMinutes < 60) return `${diffMinutes} 分钟后`;
+  if (diffMinutes < 1) return translated("time.soon", locale);
+  if (diffMinutes < 60) return relative(diffMinutes, "minute", locale);
   const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours} 小时后`;
-  return `${Math.floor(diffHours / 24)} 天后`;
+  if (diffHours < 24) return relative(diffHours, "hour", locale);
+  return relative(Math.floor(diffHours / 24), "day", locale);
 }
 
 /**
@@ -38,17 +84,18 @@ export function formatCountdown(ms: number, now = Date.now()): string {
  * 每个只有一行的宽度。月和年保留一位小数（去掉多余的 .0），否则 40 天和 70 天都成了「1 个月」，
  * 分不出哪个档更划算。
  */
-export function formatStudyInterval(ms: number): string {
-  const oneDecimal = (value: number) => value.toFixed(1).replace(/\.0$/, "");
+export function formatStudyInterval(ms: number, language?: string): string {
+  const locale = currentLanguage(language);
+  const oneDecimal = (value: number) => Math.round(value * 10) / 10;
   const minutes = Math.max(1, Math.round(ms / 60_000));
-  if (minutes < 60) return `${minutes} 分钟`;
+  if (minutes < 60) return studyUnit(minutes, "minute", locale);
   const hours = ms / 3_600_000;
-  if (hours < 24) return `${Math.round(hours)} 小时`;
+  if (hours < 24) return studyUnit(Math.round(hours), "hour", locale);
   const days = ms / 86_400_000;
-  if (days < 30) return `${Math.round(days)} 天`;
+  if (days < 30) return studyUnit(Math.round(days), "day", locale);
   const months = days / 30;
-  if (months < 12) return `${oneDecimal(months)} 个月`;
-  return `${oneDecimal(days / 365)} 年`;
+  if (months < 12) return studyUnit(oneDecimal(months), "month", locale);
+  return studyUnit(oneDecimal(days / 365), "year", locale);
 }
 
 export function formatMs(ms: number): string {

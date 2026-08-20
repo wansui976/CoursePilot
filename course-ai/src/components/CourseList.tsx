@@ -3,6 +3,7 @@ import { FolderOpen, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Fragment,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -12,6 +13,7 @@ import {
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
+import type { Course } from "@/lib/types";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { isIOS, pickDirectoryPath } from "@/lib/mobileFiles";
 
@@ -58,17 +60,23 @@ export function useCreateCourse() {
 /** 课程列表:条目 + `…` 菜单(重命名/重选根目录/删除)+ iOS 左滑出菜单 + 空态。 */
 export function CourseList({
   selectedCourseId,
+  selectedCourseWatchedRatio,
   onSelect,
   onClearSelection,
   queueOpen = false,
   selectedCourseExtra,
+  onTransientCloseChange,
 }: {
   selectedCourseId: string | null;
+  /** 选中课程已看完比例（0-1）；null = 没有数据（仅显示集数）。 */
+  selectedCourseWatchedRatio?: number | null;
   onSelect: (id: string) => void;
   onClearSelection?: () => void;
   queueOpen?: boolean;
   /** 渲染在「选中课程」条目正下方(工作台内联视频列表插槽)。 */
   selectedCourseExtra?: ReactNode;
+  /** 窄屏根页把临时菜单纳入系统返回层级；打开时注册关闭函数，收起时注销。 */
+  onTransientCloseChange?: (close: (() => void) | null) => void;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -87,6 +95,10 @@ export function CourseList({
   // 不再被 `.ca-nav`（overflow-y:auto）滚动容器裁掉。
   const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
   const menuButtonRefs = useRef(new Map<string, HTMLButtonElement | null>());
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const renameOriginRef = useRef<HTMLButtonElement | null>(null);
+  const skipRenameBlurRef = useRef(false);
+  const renamePendingRef = useRef(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [swipedCourseId, setSwipedCourseId] = useState<string | null>(null);
@@ -96,6 +108,35 @@ export function CourseList({
     const el = button ?? menuButtonRefs.current.get(courseId);
     if (el) setMenuAnchor(el.getBoundingClientRect());
     setMenuFor(courseId);
+  }
+
+  /** 课程条目的集数/进度：非选中课程只显示集数；选中课程有观看记录时追加百分比，
+   *  全部看完只显示 ✓。 */
+  function renderCourseMeta(course: Course) {
+    if (course.video_count <= 0) return null;
+    const isSelected = course.id === selectedCourseId;
+    if (isSelected && selectedCourseWatchedRatio != null) {
+      if (selectedCourseWatchedRatio >= 1) {
+        return (
+          <span className="course-meta" aria-label={t("courseList.allWatched")}>
+            <span className="pct">✓</span>
+          </span>
+        );
+      }
+      if (selectedCourseWatchedRatio > 0) {
+        return (
+          <span className="course-meta">
+            {t("courseList.videoCountShort", { count: course.video_count })}
+            <span className="pct">·{Math.round(selectedCourseWatchedRatio * 100)}%</span>
+          </span>
+        );
+      }
+    }
+    return (
+      <span className="course-meta">
+        {t("courseList.videoCountShort", { count: course.video_count })}
+      </span>
+    );
   }
 
   useEffect(() => {
@@ -115,17 +156,73 @@ export function CourseList({
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, []);
 
-  function closeMenu() {
+  const closeMenu = useCallback(() => {
     setMenuFor(null);
     setMenuAnchor(null);
     setSwipedCourseId(null);
-  }
+  }, []);
+
+  const closeMenuAndRestoreFocus = useCallback(() => {
+    const courseId = menuFor;
+    closeMenu();
+    if (courseId) {
+      queueMicrotask(() => menuButtonRefs.current.get(courseId)?.focus());
+    }
+  }, [closeMenu, menuFor]);
+
+  const cancelRenameAndRestoreFocus = useCallback(() => {
+    if (renamePendingRef.current) return;
+    const courseId = renamingId;
+    skipRenameBlurRef.current = true;
+    setRenamingId(null);
+    setRenameDraft("");
+    if (courseId) {
+      queueMicrotask(() => {
+        const origin = renameOriginRef.current;
+        const target = origin?.isConnected
+          ? origin
+          : menuButtonRefs.current.get(courseId);
+        target?.focus();
+      });
+    }
+  }, [renamingId]);
+
+  useEffect(() => {
+    if (!menuFor || !menuAnchor) return;
+    menuRef.current
+      ?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')
+      ?.focus();
+  }, [menuAnchor, menuFor]);
+
+  useEffect(() => {
+    if (!onTransientCloseChange) return;
+    onTransientCloseChange(
+      menuFor
+        ? closeMenuAndRestoreFocus
+        : renamingId
+          ? cancelRenameAndRestoreFocus
+          : null,
+    );
+    return () => onTransientCloseChange(null);
+  }, [
+    cancelRenameAndRestoreFocus,
+    closeMenuAndRestoreFocus,
+    menuFor,
+    onTransientCloseChange,
+    renamingId,
+  ]);
 
   const rename = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
       ipc.courses.rename(id, name),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["courses"] }),
+    onSuccess: async (_data, { id }) => {
+      await queryClient.invalidateQueries({ queryKey: ["courses"] });
+      setRenamingId(null);
+      setRenameDraft("");
+      queueMicrotask(() => menuButtonRefs.current.get(id)?.focus());
+    },
   });
+  renamePendingRef.current = rename.isPending;
   const remove = useMutation({
     mutationFn: (id: string) => ipc.courses.delete(id),
     onSuccess: (_data, id) => {
@@ -154,14 +251,21 @@ export function CourseList({
   });
 
   function startRename(id: string, name: string) {
+    renameOriginRef.current = menuButtonRefs.current.get(id) ?? null;
+    skipRenameBlurRef.current = false;
     closeMenu();
+    rename.reset();
     setRenamingId(id);
     setRenameDraft(name);
   }
   function commitRename() {
+    if (skipRenameBlurRef.current) {
+      skipRenameBlurRef.current = false;
+      return;
+    }
+    if (rename.isPending) return;
     const name = renameDraft.trim();
     if (renamingId && name) rename.mutate({ id: renamingId, name });
-    setRenamingId(null);
   }
   async function confirmDelete(id: string, name: string) {
     closeMenu();
@@ -217,12 +321,20 @@ export function CourseList({
                 value={renameDraft}
                 onChange={(e) => setRenameDraft(e.target.value)}
                 onBlur={commitRename}
+                disabled={rename.isPending}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") commitRename();
-                  if (e.key === "Escape") setRenamingId(null);
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    cancelRenameAndRestoreFocus();
+                  }
                 }}
                 className="w-full rounded-md border border-[var(--accent-text)] bg-[var(--surface-input)] px-2.5 py-2 text-sm text-[var(--text-strong)] outline-none"
               />
+              {rename.isError && rename.variables?.id === course.id && (
+                <ErrorNote className="mx-1 mt-1" error={rename.error} />
+              )}
               {selected && selectedCourseExtra}
             </Fragment>
           );
@@ -244,9 +356,13 @@ export function CourseList({
               >
                 <FolderOpen className="ic h-4 w-4" />
                 <span className="nm">{course.name}</span>
+                {renderCourseMeta(course)}
               </button>
               <button
                 aria-label={t("courseList.courseActions")}
+                aria-haspopup="menu"
+                aria-expanded={menuFor === course.id}
+                aria-controls={menuFor === course.id ? `course-actions-${course.id}` : undefined}
                 data-course-menu
                 ref={(el) => {
                   if (el) menuButtonRefs.current.set(course.id, el);
@@ -281,19 +397,66 @@ export function CourseList({
             {t("courseList.noCourses")}
           </div>
         ))}
+      {(remove.isError || relink.isError) && (
+        <ErrorNote className="mx-2 my-1" error={remove.error ?? relink.error} />
+      )}
       {openCourse &&
         menuAnchor &&
         createPortal(
           <>
             {/* 透明背板：点菜单外区域即关闭。z-[60]/[61] 明确高于侧栏(40)/底栏(45)/
                 全屏(50) 等所有 z token，避免 portal 到 body 后被它们盖住。 */}
-            <div className="fixed inset-0 z-[60]" onClick={closeMenu} />
             <div
+              data-course-menu-backdrop
+              className="fixed inset-0 z-[60]"
+              onClick={closeMenu}
+            />
+            <div
+              ref={menuRef}
+              id={`course-actions-${openCourse.id}`}
+              role="menu"
+              aria-label={t("courseList.courseActions")}
               data-course-menu
               className="fixed z-[61] w-40 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 shadow-[var(--shadow-pop)]"
               style={menuPosition(menuAnchor)}
+              onKeyDown={(event) => {
+                const items = Array.from(
+                  event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                    '[role="menuitem"]:not(:disabled)',
+                  ),
+                );
+                const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+                let nextIndex: number | null = null;
+
+                if (event.key === "Tab") {
+                  closeMenu();
+                  return;
+                } else if (event.key === "ArrowDown") {
+                  nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % items.length;
+                } else if (event.key === "ArrowUp") {
+                  nextIndex = currentIndex < 0
+                    ? items.length - 1
+                    : (currentIndex - 1 + items.length) % items.length;
+                } else if (event.key === "Home") {
+                  nextIndex = 0;
+                } else if (event.key === "End") {
+                  nextIndex = items.length - 1;
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  closeMenuAndRestoreFocus();
+                  return;
+                }
+
+                if (nextIndex != null && items[nextIndex]) {
+                  event.preventDefault();
+                  items[nextIndex].focus();
+                }
+              }}
             >
               <button
+                role="menuitem"
+                tabIndex={-1}
                 onClick={() => startRename(openCourse.id, openCourse.name)}
                 className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
               >
@@ -301,6 +464,8 @@ export function CourseList({
                 {t("courseList.rename")}
               </button>
               <button
+                role="menuitem"
+                tabIndex={-1}
                 onClick={() => void handleRelinkRoot(openCourse.id, openCourse.name)}
                 className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
               >
@@ -308,6 +473,8 @@ export function CourseList({
                 {t("courseList.relinkRoot")}
               </button>
               <button
+                role="menuitem"
+                tabIndex={-1}
                 onClick={() => void confirmDelete(openCourse.id, openCourse.name)}
                 className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--status-err)] hover:bg-[var(--surface-card-hover)]"
               >

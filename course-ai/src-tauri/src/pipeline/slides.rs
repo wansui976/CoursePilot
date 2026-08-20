@@ -546,22 +546,31 @@ pub async fn extract_slides(
         .block_delta
         .unwrap_or_else(|| dynamic_block_delta(&frames));
     let pages = detect_slide_pages(&frames, block_delta);
-    let mut out = Vec::new();
+    let total = pages.len();
+    let mut captured = Vec::with_capacity(total);
+    let mut first_error = None;
     for (page, spec) in pages.iter().enumerate() {
         if cancel.load(Ordering::SeqCst) {
             return Err(cancelled());
         }
         let start_ms = spec.start_index as i64 * interval_ms;
         let image = slides_dir.join(format!("{:04}.jpg", page + 1));
-        capture_jpeg_at(video, &image, spec.capture_index as i64 * interval_ms, None).await?;
-        out.push(SlideFrame {
-            page_no: page as i64,
-            image_path: image.to_string_lossy().to_string(),
-            start_ms,
-        });
-        on_progress(ExtractProgress::capture(out.len(), pages.len()));
+        match capture_jpeg_at(video, &image, spec.capture_index as i64 * interval_ms, None).await {
+            Ok(()) => captured.push(SlideFrame {
+                page_no: page as i64,
+                image_path: image.to_string_lossy().to_string(),
+                start_ms,
+            }),
+            Err(error) => {
+                tracing::warn!(page_no = page, %error, "移动端课件页截图失败，跳过这一页");
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+        on_progress(ExtractProgress::capture(page + 1, total));
     }
-    Ok(out)
+    keep_captured(captured, total, first_error)
 }
 
 /// 抽课件页：降采样灰度帧 → 分块变化比例找换页点 → 为每页截一张全分辨率图。

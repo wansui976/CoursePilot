@@ -17,16 +17,26 @@ function renderDialog(value = 30, onSave = vi.fn()) {
 
 describe("DailyGoalDialog", () => {
   it("opens an accessible dial and saves keyboard adjustments", async () => {
-    const { onSave } = renderDialog();
+    const { onSave, trigger } = renderDialog();
     const dialog = screen.getByRole("dialog", { name: "设置每日目标" });
     const dial = within(dialog).getByRole("slider", { name: "每日学习目标" });
+    const close = within(dialog).getByRole("button", { name: "关闭" });
     const themeRoot = screen.getByTestId("theme-root");
 
+    expect(trigger).toHaveClass("focus-visible:ring-[var(--focus-ring)]");
+    expect(close).toHaveClass("focus-visible:ring-[var(--focus-ring)]");
     expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveClass("max-h-[calc(100dvh-2rem)]", "overflow-y-auto");
     expect(themeRoot).toContainElement(dialog);
     expect(dial).toHaveAttribute("aria-valuemin", "5");
     expect(dial).toHaveAttribute("aria-valuemax", "180");
     expect(dial).toHaveAttribute("aria-valuenow", "30");
+    expect(dial).toHaveClass(
+      "max-h-[45dvh]",
+      "max-w-[45dvh]",
+      "focus-visible:ring-[var(--focus-ring)]",
+    );
+    expect(dial.querySelector("svg")).toHaveClass("h-full", "w-full");
     await waitFor(() => expect(dial).toHaveFocus());
 
     fireEvent.keyDown(dial, { key: "PageUp" });
