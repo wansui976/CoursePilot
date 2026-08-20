@@ -18,7 +18,7 @@
 use crate::commands::courses::Course;
 use crate::commands::videos::Video;
 use crate::db::Db;
-use crate::llm::agent::{parse_arguments, ToolBox, ToolOutcome};
+use crate::llm::agent::{parse_arguments, ToolBox, ToolExecutionStatus, ToolOutcome};
 use crate::llm::{ToolCall, ToolSpec};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -190,6 +190,19 @@ impl<'a> AssistantTools<'a> {
         self.actions.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
 
+    /// 一次工具调用的动作是一个事务边界。领域失败或取消时，必须丢掉本次新增动作，
+    /// 但保留此前已经成功通过策略的动作。
+    fn rollback_actions(&self, tool_name: &str, action_start: usize) -> Result<(), ToolOutcome> {
+        let mut actions = self.actions.lock().unwrap_or_else(|e| e.into_inner());
+        if action_start > actions.len() {
+            return Err(ToolOutcome::failed(format!(
+                "工具策略内部状态异常：{tool_name} 执行期间动作列表被缩短，本次结果已拒绝"
+            )));
+        }
+        actions.truncate(action_start);
+        Ok(())
+    }
+
     /// postflight 只看本次调用新增的动作。发现声明与产物不一致时立即回滚新增部分，
     /// 但保留前面已经通过策略的动作，避免一个坏工具污染或抹掉整轮结果。
     fn enforce_effect(
@@ -217,6 +230,30 @@ impl<'a> AssistantTools<'a> {
             )));
         }
         Ok(())
+    }
+
+    fn finish_tool_call(
+        &self,
+        tool_name: &str,
+        effect: ToolEffect,
+        action_start: usize,
+        result: Result<ToolOutcome, ToolOutcome>,
+    ) -> ToolOutcome {
+        let failed = result.is_err()
+            || result
+                .as_ref()
+                .is_ok_and(|outcome| outcome.status != ToolExecutionStatus::Completed);
+        let outcome = result.unwrap_or_else(|outcome| outcome);
+        if failed {
+            return match self.rollback_actions(tool_name, action_start) {
+                Ok(()) => outcome,
+                Err(policy_error) => policy_error,
+            };
+        }
+        match self.enforce_effect(tool_name, effect, action_start) {
+            Ok(()) => outcome,
+            Err(policy_error) => policy_error,
+        }
     }
 
     fn mutation_target(action: &AssistantAction) -> Option<String> {
@@ -1172,13 +1209,7 @@ impl ToolBox for AssistantTools<'_> {
         };
         let action_start = self.action_count();
         let result = self.dispatch(call).await;
-        if let Err(outcome) = self.enforce_effect(&call.name, effect, action_start) {
-            return outcome;
-        }
-        match result {
-            Ok(outcome) => outcome,
-            Err(outcome) => outcome,
-        }
+        self.finish_tool_call(&call.name, effect, action_start, result)
     }
 }
 
@@ -1553,7 +1584,7 @@ impl AssistantTools<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::agent::{self, AgentEvent, AgentStopReason, MAX_TURNS};
+    use crate::llm::agent::{self, AgentEvent, AgentStopReason, ToolExecutionStatus, MAX_TURNS};
     use crate::llm::{ChatMessage, ChatResponse, Provider};
     use std::sync::atomic::AtomicBool;
 
@@ -1562,6 +1593,7 @@ mod tests {
         stop_reason: AgentStopReason,
         turns: usize,
         tools: Vec<String>,
+        tool_statuses: Vec<ToolExecutionStatus>,
         actions: Vec<&'static str>,
         tool_results: Vec<String>,
     }
@@ -1617,6 +1649,7 @@ mod tests {
         let tools = AssistantTools::new(db, context);
         let cancel = AtomicBool::new(canceled);
         let mut trace = Vec::new();
+        let mut tool_statuses = Vec::new();
         let outcome = agent::run(
             &provider,
             "scripted-eval",
@@ -1624,10 +1657,10 @@ mod tests {
             vec![ChatMessage::user("离线评测请求")],
             &tools,
             &cancel,
-            &mut |event| {
-                if let AgentEvent::ToolStarted(call) = event {
-                    trace.push(call.name.clone());
-                }
+            &mut |event| match event {
+                AgentEvent::ToolStarted(call) => trace.push(call.name.clone()),
+                AgentEvent::ToolFinished { status, .. } => tool_statuses.push(status),
+                _ => {}
             },
         )
         .await
@@ -1647,6 +1680,7 @@ mod tests {
             stop_reason: outcome.stop_reason,
             turns: outcome.turns,
             tools: trace,
+            tool_statuses,
             actions,
             tool_results,
         }
@@ -1692,7 +1726,32 @@ mod tests {
         assert_eq!(snapshot.stop_reason, AgentStopReason::Completed);
         assert_eq!(snapshot.turns, 2);
         assert_eq!(snapshot.tools, ["list_videos"]);
+        assert_eq!(snapshot.tool_statuses, [ToolExecutionStatus::Completed]);
         assert!(snapshot.actions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn scripted_eval_domain_failure_has_a_typed_status_and_no_actions() {
+        let (db, _course_id, _video_id, _dir) = seed().await;
+        let snapshot = run_scripted_eval(
+            &db,
+            AssistantContext::default(),
+            vec![
+                scripted_tools(vec![scripted_call("videos", "list_videos", "{}")]),
+                scripted_answer(),
+            ],
+            false,
+        )
+        .await;
+
+        assert_eq!(snapshot.stop_reason, AgentStopReason::Completed);
+        assert_eq!(snapshot.tools, ["list_videos"]);
+        assert_eq!(snapshot.tool_statuses, [ToolExecutionStatus::Failed]);
+        assert!(snapshot.actions.is_empty());
+        assert!(snapshot
+            .tool_results
+            .iter()
+            .any(|result| result.contains("没有指定课程")));
     }
 
     #[tokio::test]
@@ -2901,6 +2960,39 @@ mod tests {
         match tools.take_actions().as_slice() {
             [AssistantAction::SetTheme { pref }] => assert_eq!(pref, "dark"),
             other => panic!("错配动作应回滚，之前的合法动作应保留，实际 {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_tool_rolls_back_only_its_new_actions() {
+        let (db, _course_id, _video_id, _d) = seed().await;
+        let tools = AssistantTools::new(&db, AssistantContext::default());
+        assert!(tools
+            .record(AssistantAction::SetTheme {
+                pref: "dark".into(),
+            })
+            .is_ok());
+        let action_start = tools.action_count();
+        assert!(tools
+            .record(AssistantAction::ProposeSetting {
+                key: "subtitle_autocorrect".into(),
+                label: "字幕 AI 纠错".into(),
+                current: Some("false".into()),
+                value: "true".into(),
+            })
+            .is_ok());
+
+        let outcome = tools.finish_tool_call(
+            "failed_after_proposal",
+            ToolEffect::MutationProposal,
+            action_start,
+            Err(ToolOutcome::failed("提案生成后的领域校验失败")),
+        );
+
+        assert_eq!(outcome.status, ToolExecutionStatus::Failed);
+        match tools.take_actions().as_slice() {
+            [AssistantAction::SetTheme { pref }] => assert_eq!(pref, "dark"),
+            other => panic!("失败调用的新动作应回滚，之前的合法动作应保留，实际 {other:?}"),
         }
     }
 
