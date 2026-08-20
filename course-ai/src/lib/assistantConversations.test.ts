@@ -15,6 +15,8 @@ import {
   saveAssistantConversation,
   setActiveAssistantConversation,
   tryCreateAssistantConversation,
+  tryDeleteAssistantConversation,
+  tryRenameAssistantConversation,
   trySetActiveAssistantConversation,
   upsertAssistantConversation,
   writeRecentAssistantQuestions,
@@ -546,9 +548,74 @@ describe("assistantConversations", () => {
 
     const afterActiveDelete = deleteAssistantConversation("conversation-two", 4);
     expect(afterActiveDelete.activeId).toBe(firstId);
-    const empty = deleteAssistantConversation(firstId, 5);
-    expect(empty).toEqual({ activeId: null, conversations: [] });
-    expect(readAssistantConversations(6)).toEqual(empty);
+    const replacement = deleteAssistantConversation(firstId, 5);
+    expect(replacement.activeId).not.toBe(firstId);
+    expect(replacement.conversations).toEqual([
+      expect.objectContaining({ id: replacement.activeId, title: "" }),
+    ]);
+    expect(readAssistantConversation(replacement.activeId as string)?.session).toEqual({
+      turns: [],
+      history: [],
+      draft: "",
+    });
+    expect(readAssistantConversations(6)).toEqual(replacement);
+  });
+
+  it("does not publish rename or delete when the index cannot be saved", () => {
+    const initial = readAssistantConversations(1);
+    const firstId = initial.activeId as string;
+    createAssistantConversation({ id: "conversation-two", session: session("第二条"), now: 2 });
+    const before = readAssistantConversations(3);
+    const beforeBytes = localStorageBytes();
+    const originalSetItem = Storage.prototype.setItem;
+    const indexFailure = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key, value) {
+        if (key === assistantConversationsStorageKey) {
+          throw new DOMException("quota", "QuotaExceededError");
+        }
+        return originalSetItem.call(this, key, value);
+      });
+
+    try {
+      expect(tryRenameAssistantConversation(firstId, "不会发布", 4)).toEqual({
+        state: before,
+        persisted: false,
+      });
+      expect(tryDeleteAssistantConversation("conversation-two", 5)).toEqual({
+        state: before,
+        persisted: false,
+      });
+      expect(localStorageBytes()).toEqual(beforeBytes);
+    } finally {
+      indexFailure.mockRestore();
+    }
+  });
+
+  it("keeps the last conversation intact when replacement index publishing fails", () => {
+    const before = readAssistantConversations(1);
+    const id = before.activeId as string;
+    const beforeBytes = localStorageBytes();
+    const originalSetItem = Storage.prototype.setItem;
+    const indexFailure = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key, value) {
+        if (key === assistantConversationsStorageKey) {
+          throw new DOMException("quota", "QuotaExceededError");
+        }
+        return originalSetItem.call(this, key, value);
+      });
+
+    try {
+      expect(tryDeleteAssistantConversation(id, 2)).toEqual({
+        state: before,
+        persisted: false,
+      });
+      expect(localStorageBytes()).toEqual(beforeBytes);
+      expect(readAssistantConversation(id)?.session).not.toBeNull();
+    } finally {
+      indexFailure.mockRestore();
+    }
   });
 
   it("reads a corrupt snapshot as empty without changing its bytes", () => {

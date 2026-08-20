@@ -31,7 +31,8 @@ import type {
   AssistantReply,
 } from "@/lib/types";
 
-const { mockIpc, platformMock } = vi.hoisted(() => ({
+const { confirmMock, mockIpc, platformMock } = vi.hoisted(() => ({
+  confirmMock: vi.fn(),
   mockIpc: {
     assistant: { ask: vi.fn(), cancel: vi.fn() },
     videos: { list: vi.fn(), updateTitle: vi.fn(), delete: vi.fn() },
@@ -48,6 +49,7 @@ const { mockIpc, platformMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: confirmMock }));
 vi.mock("@/lib/platform", () => ({
   isMobile: () => platformMock.mobile,
   isAndroid: () => platformMock.mobile,
@@ -133,6 +135,7 @@ describe("AssistantPanel", () => {
     useInlineAsk.setState({ pending: null });
     mockIpc.assistant.ask.mockResolvedValue(reply());
     mockIpc.assistant.cancel.mockResolvedValue(undefined);
+    confirmMock.mockResolvedValue(true);
   });
 
   it("收起时在界面边缘留一颗可点开的球", () => {
@@ -1114,7 +1117,10 @@ describe("AssistantPanel", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
-    const firstConversation = screen.getByRole("button", { name: /第一会话问题/ });
+    const firstConversation = screen.getByRole("button", { name: /^第一会话问题/ });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^第二会话问题/ })).toHaveFocus(),
+    );
     expect(firstConversation).toHaveClass("ca-touch-44", "min-h-[52px]");
     expect(screen.queryByLabelText("对助手说")).not.toBeInTheDocument();
     fireEvent.click(firstConversation);
@@ -1124,7 +1130,7 @@ describe("AssistantPanel", () => {
     expect(screen.getByLabelText("对助手说")).toHaveValue("第一会话草稿");
 
     fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
-    fireEvent.click(screen.getByRole("button", { name: /第二会话问题/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^第二会话问题/ }));
 
     expect(screen.getByText("第二会话回答")).toBeInTheDocument();
     expect(screen.queryByText("第一会话回答")).not.toBeInTheDocument();
@@ -1136,6 +1142,157 @@ describe("AssistantPanel", () => {
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     await waitFor(() => expect(historyButton).toHaveFocus());
     expect(historyButton).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("历史改名支持取消与保存，并把焦点归还到对应会话", async () => {
+    const initial = readAssistantConversations(1);
+    const firstId = initial.activeId as string;
+    upsertAssistantConversation({ id: firstId, session: storedConversation("待整理会话") }, 2);
+    createAssistantConversation({
+      id: "conversation-current",
+      session: storedConversation("当前会话"),
+      now: 3,
+    });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
+    const rename = screen.getByRole("button", { name: "重命名会话「待整理会话」" });
+    fireEvent.click(rename);
+    const titleInput = screen.getByRole("textbox", { name: "会话标题" });
+    fireEvent.change(titleInput, { target: { value: "课程复盘" } });
+    fireEvent.keyDown(titleInput, { key: "Escape" });
+
+    expect(screen.getByRole("heading", { name: "会话历史" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "重命名会话「待整理会话」" }),
+      ).toHaveFocus(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "重命名会话「待整理会话」" }));
+    const editingInput = screen.getByRole("textbox", { name: "会话标题" });
+    fireEvent.change(editingInput, { target: { value: "课程复盘" } });
+    fireEvent.keyDown(editingInput, { key: "Enter" });
+
+    const renamedConversation = screen.getByRole("button", { name: /^课程复盘/ });
+    await waitFor(() => expect(renamedConversation).toHaveFocus());
+    expect(screen.getByRole("status")).toHaveTextContent("会话已重命名为「课程复盘」");
+    expect(readAssistantConversations().conversations.find(({ id }) => id === firstId)?.title).toBe(
+      "课程复盘",
+    );
+  });
+
+  it("删除历史会话先确认，取消后保留数据，确认后聚焦相邻会话", async () => {
+    const initial = readAssistantConversations(1);
+    const firstId = initial.activeId as string;
+    upsertAssistantConversation({ id: firstId, session: storedConversation("待删除会话") }, 2);
+    createAssistantConversation({
+      id: "conversation-current",
+      session: storedConversation("保留会话"),
+      now: 3,
+    });
+    const snapshot = localStorage.getItem(assistantConversationStorageKey(firstId));
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
+
+    confirmMock.mockResolvedValueOnce(false);
+    const deleteButton = screen.getByRole("button", { name: "删除会话「待删除会话」" });
+    fireEvent.click(deleteButton);
+    await waitFor(() => expect(deleteButton).toHaveFocus());
+    expect(confirmMock).toHaveBeenCalledWith(
+      "确定删除会话「待删除会话」吗？其中的问答和草稿将永久删除。",
+      {
+        title: "删除会话",
+        kind: "warning",
+        okLabel: "删除",
+        cancelLabel: "取消",
+      },
+    );
+    expect(localStorage.getItem(assistantConversationStorageKey(firstId))).toBe(snapshot);
+
+    confirmMock.mockResolvedValueOnce(true);
+    fireEvent.click(deleteButton);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "删除会话「待删除会话」" })).not.toBeInTheDocument(),
+    );
+    expect(localStorage.getItem(assistantConversationStorageKey(firstId))).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("会话「待删除会话」已删除");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^保留会话/ })).toHaveFocus(),
+    );
+  });
+
+  it("会话索引写失败时保留重命名编辑和删除目标并原地报错", async () => {
+    const initial = readAssistantConversations(1);
+    const firstId = initial.activeId as string;
+    upsertAssistantConversation({ id: firstId, session: storedConversation("不能丢的会话") }, 2);
+    createAssistantConversation({
+      id: "conversation-current",
+      session: storedConversation("当前保留会话"),
+      now: 3,
+    });
+    const before = localStorage.getItem(assistantConversationStorageKey(firstId));
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
+
+    const originalSetItem = Storage.prototype.setItem;
+    const indexFailure = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key, value) {
+        if (key === assistantConversationsStorageKey) {
+          throw new DOMException("quota", "QuotaExceededError");
+        }
+        return originalSetItem.call(this, key, value);
+      });
+    try {
+      fireEvent.click(
+        screen.getByRole("button", { name: "重命名会话「不能丢的会话」" }),
+      );
+      const input = screen.getByRole("textbox", { name: "会话标题" });
+      fireEvent.change(input, { target: { value: "不会假成功" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("会话历史未能保存");
+      expect(input).toHaveValue("不会假成功");
+      expect(readAssistantConversations().conversations.find(({ id }) => id === firstId)?.title).toBe(
+        "不能丢的会话",
+      );
+
+      fireEvent.keyDown(input, { key: "Escape" });
+      const deleteButton = screen.getByRole("button", {
+        name: "删除会话「不能丢的会话」",
+      });
+      fireEvent.click(deleteButton);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("会话历史未能保存");
+      expect(localStorage.getItem(assistantConversationStorageKey(firstId))).toBe(before);
+      expect(screen.getByRole("button", { name: /^不能丢的会话/ })).toBeInTheDocument();
+      await waitFor(() => expect(deleteButton).toHaveFocus());
+    } finally {
+      indexFailure.mockRestore();
+    }
+  });
+
+  it("删除最后一个会话时原子切换到新的空会话", async () => {
+    const initial = readAssistantConversations(1);
+    const oldId = initial.activeId as string;
+    upsertAssistantConversation({ id: oldId, session: storedConversation("唯一会话") }, 2);
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除会话「唯一会话」" }));
+
+    await waitFor(() => expect(screen.getByLabelText("对助手说")).toHaveFocus());
+    expect(screen.queryByText("回答：唯一会话")).not.toBeInTheDocument();
+    const after = readAssistantConversations();
+    expect(after.activeId).not.toBe(oldId);
+    expect(after.conversations).toHaveLength(1);
+    expect(localStorage.getItem(assistantConversationStorageKey(oldId))).toBeNull();
+    expect(readAssistantConversation(after.activeId as string)?.session).toEqual({
+      turns: [],
+      history: [],
+      draft: "",
+    });
   });
 
   it("新建时优先复用已有空会话，不堆积同名空条目", () => {
@@ -1272,7 +1429,7 @@ describe("AssistantPanel", () => {
         return originalSetItem.call(this, key, value);
       });
     try {
-      fireEvent.click(screen.getByRole("button", { name: /第一会话问题/ }));
+      fireEvent.click(screen.getByRole("button", { name: /^第一会话问题/ }));
       expect(await screen.findByRole("alert")).toHaveTextContent("当前会话未能保存");
       expect(screen.getByText("第二会话回答")).toBeInTheDocument();
       expect(screen.queryByText("第一会话回答")).not.toBeInTheDocument();
@@ -1305,7 +1462,7 @@ describe("AssistantPanel", () => {
         return originalSetItem.call(this, key, value);
       });
     try {
-      fireEvent.click(screen.getByRole("button", { name: /索引场景第一问/ }));
+      fireEvent.click(screen.getByRole("button", { name: /^索引场景第一问/ }));
       expect(await screen.findByRole("alert")).toHaveTextContent("当前会话未能保存");
       expect(screen.getByText("索引场景第二答")).toBeInTheDocument();
       expect(screen.queryByText("索引场景第一答")).not.toBeInTheDocument();

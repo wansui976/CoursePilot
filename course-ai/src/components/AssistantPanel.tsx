@@ -7,10 +7,12 @@ import {
   useState,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQueryClient } from "@tanstack/react-query";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import {
   AlertCircle,
   ArrowDown,
@@ -58,14 +60,14 @@ import {
 import {
   appendRecentAssistantQuestion,
   createAssistantConversation,
-  deleteAssistantConversation,
   MAX_ASSISTANT_CONVERSATIONS,
   readAssistantConversation,
   readAssistantConversations,
   readRecentAssistantQuestions,
-  renameAssistantConversation,
   saveAssistantConversation,
   tryCreateAssistantConversation,
+  tryDeleteAssistantConversation,
+  tryRenameAssistantConversation,
   trySetActiveAssistantConversation,
   type AssistantConversationsState,
 } from "@/lib/assistantConversations";
@@ -461,6 +463,7 @@ export function AssistantPanel({
   const activeRequestRef = useRef<string | null>(null);
   const activeConversationIdRef = useRef(initialConversation.conversations.activeId);
   const actionExecutionCountRef = useRef(0);
+  const deletingConversationIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const locallyStoppedRequestsRef = useRef(new Set<string>());
   const historyRef = useRef(initialSession.history);
@@ -503,6 +506,7 @@ export function AssistantPanel({
   /** 正在重命名的会话 id 与其输入草稿。 */
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
   /** 移动抽屉下滑关闭手势的实时位移；null 表示未在拖拽。 */
   const [sheetDragY, setSheetDragY] = useState<number | null>(null);
   const toggleRef = useRef(() => {});
@@ -510,6 +514,9 @@ export function AssistantPanel({
   const scopeMenuRef = useRef<HTMLDivElement>(null);
   const scopeTriggerRef = useRef<HTMLButtonElement>(null);
   const scopeItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const conversationButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const renameButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const panelWidth = resizeWidth ?? width;
 
   // 「现在在干什么」跟着流走：工具执行优先于此前已经吐出的思考或过场正文。
@@ -615,6 +622,7 @@ export function AssistantPanel({
     [closeScopeMenu],
   );
   const actionExecutionBusy = actionExecutionCount > 0;
+  const conversationMutationBusy = deletingConversationId !== null;
   const generationStatus = stopping ? t("assistant.stopping") : streamingLabel;
 
   // 视觉阶段和读屏通知共用一个 live region，但不能互相遮住：旧确认卡可能在新一轮
@@ -622,6 +630,17 @@ export function AssistantPanel({
   useEffect(() => {
     if (busy) setStatusAnnouncement(generationStatus);
   }, [busy, generationStatus]);
+
+  useEffect(() => {
+    if (!historyOpen) return;
+    const frame = requestAnimationFrame(() => {
+      const activeId = activeConversationIdRef.current;
+      const activeButton = activeId ? conversationButtonRefs.current.get(activeId) : null;
+      const firstButton = conversationButtonRefs.current.values().next().value;
+      (activeButton ?? firstButton)?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [historyOpen, conversationState.activeId]);
 
   const persistConversationSnapshot = useCallback(
     (conversationId: string | null, snapshot: AssistantSession, now = Date.now()) => {
@@ -1973,38 +1992,104 @@ export function AssistantPanel({
     activateConversation(created.createdId, created.state, EMPTY_ASSISTANT_SESSION);
   }
 
+  function focusConversationControl(
+    conversationId: string,
+    controls: RefObject<Map<string, HTMLButtonElement>>,
+  ) {
+    requestAnimationFrame(() => controls.current.get(conversationId)?.focus());
+  }
+
+  function cancelConversationRename(conversationId: string) {
+    setRenamingId(null);
+    setRenameDraft("");
+    focusConversationControl(conversationId, renameButtonRefs);
+  }
+
   function submitConversationRename(conversationId: string) {
     const title = renameDraft.trim();
     if (!title) {
-      setRenamingId(null);
-      setRenameDraft("");
+      cancelConversationRename(conversationId);
       return;
     }
-    setConversationState(renameAssistantConversation(conversationId, title));
+    const renamed = tryRenameAssistantConversation(conversationId, title);
+    if (!renamed.persisted) {
+      setError(t("assistant.conversationHistorySaveFailed"));
+      return;
+    }
+    setConversationState(renamed.state);
+    setError("");
+    setStatusAnnouncement(t("assistant.conversationRenamed", { title }));
     setRenamingId(null);
     setRenameDraft("");
+    focusConversationControl(conversationId, conversationButtonRefs);
   }
 
-  function removeConversation(conversationId: string) {
-    if (busy || activeRequestRef.current || actionExecutionCountRef.current > 0) return;
-    const next = deleteAssistantConversation(conversationId);
-    if (conversationId === activeConversationIdRef.current) {
-      // 删的是当前会话：切到删后仍激活的那个（可能为空）。
-      if (next.activeId) {
-        const target = readAssistantConversation(next.activeId);
-        if (target) {
-          activateConversation(next.activeId, next, target.session);
-          return;
-        }
-      }
-      // 没有剩余会话了：就地清空并新建一个。
-      const created = tryCreateAssistantConversation();
-      if (created.createdId) {
-        activateConversation(created.createdId, created.state, EMPTY_ASSISTANT_SESSION);
-      }
+  async function removeConversation(conversationId: string) {
+    if (
+      busy ||
+      activeRequestRef.current ||
+      actionExecutionCountRef.current > 0 ||
+      deletingConversationIdRef.current
+    ) {
       return;
     }
-    setConversationState(next);
+    const conversation = conversationState.conversations.find(({ id }) => id === conversationId);
+    if (!conversation) return;
+    const title = conversation.title || t("assistant.untitledConversation");
+    const index = conversationState.conversations.findIndex(({ id }) => id === conversationId);
+    const focusAfterDeleteId =
+      conversationState.conversations[index + 1]?.id ??
+      conversationState.conversations[index - 1]?.id ??
+      null;
+    let restoreDeleteFocus = true;
+    deletingConversationIdRef.current = conversationId;
+    setDeletingConversationId(conversationId);
+    setError("");
+    setStatusAnnouncement("");
+    try {
+      const confirmed = await confirmDialog(
+        t("assistant.deleteConversationConfirm", { title }),
+        {
+          title: t("assistant.deleteConversationTitle"),
+          kind: "warning",
+          okLabel: t("assistant.deleteConversationAction"),
+          cancelLabel: t("assistant.deleteConversationCancel"),
+        },
+      );
+      if (!confirmed) return;
+
+      const deleted = tryDeleteAssistantConversation(conversationId);
+      if (!deleted.persisted) {
+        setError(t("assistant.conversationHistorySaveFailed"));
+        return;
+      }
+
+      const announcement = t("assistant.conversationDeleted", { title });
+      if (conversationId === activeConversationIdRef.current && deleted.state.activeId) {
+        const target = readAssistantConversation(deleted.state.activeId);
+        if (!target) {
+          setConversationState(deleted.state);
+          setError(t("assistant.conversationHistorySaveFailed"));
+          return;
+        }
+        restoreDeleteFocus = false;
+        activateConversation(deleted.state.activeId, deleted.state, target.session);
+        setStatusAnnouncement(announcement);
+        return;
+      }
+
+      restoreDeleteFocus = false;
+      setConversationState(deleted.state);
+      setStatusAnnouncement(announcement);
+      const nextFocusId = focusAfterDeleteId ?? deleted.state.activeId;
+      if (nextFocusId) focusConversationControl(nextFocusId, conversationButtonRefs);
+    } catch (cause) {
+      setError(t("assistant.deleteConversationFailed", { error: humanizeError(cause) }));
+    } finally {
+      deletingConversationIdRef.current = null;
+      setDeletingConversationId(null);
+      if (restoreDeleteFocus) focusConversationControl(conversationId, deleteButtonRefs);
+    }
   }
 
   // 工作台隐藏主导航后，面板自己的右下角操作仍占用一条触控操作轨道。
@@ -2122,6 +2207,8 @@ export function AssistantPanel({
         }
         if (historyOpen) {
           setHistoryOpen(false);
+          setRenamingId(null);
+          setRenameDraft("");
           requestAnimationFrame(() => historyButtonRef.current?.focus());
           return;
         }
@@ -2230,8 +2317,18 @@ export function AssistantPanel({
             }
             aria-expanded={historyOpen}
             aria-controls="assistant-conversation-history"
-            disabled={busy || actionExecutionBusy}
-            onClick={() => setHistoryOpen((current) => !current)}
+            disabled={busy || actionExecutionBusy || conversationMutationBusy}
+            onClick={() => {
+              if (historyOpen) {
+                setRenamingId(null);
+                setRenameDraft("");
+                setHistoryOpen(false);
+                return;
+              }
+              setError("");
+              setStatusAnnouncement("");
+              setHistoryOpen(true);
+            }}
             className="ca-touch-44"
           >
             <HistoryIcon className="h-4 w-4" />
@@ -2243,7 +2340,7 @@ export function AssistantPanel({
             variant="ghost"
             aria-label={t("assistant.newChat")}
             title={t("assistant.newChat")}
-            disabled={busy || actionExecutionBusy}
+            disabled={busy || actionExecutionBusy || conversationMutationBusy}
             onClick={startNewConversation}
             className="ca-touch-44"
           >
@@ -2305,6 +2402,15 @@ export function AssistantPanel({
               {t("assistant.conversationHistory")}
             </h2>
           </div>
+          {error && (
+            <div
+              role="alert"
+              className="m-3 mb-1 flex items-start gap-1.5 rounded-lg bg-[var(--status-err-bg)] px-2.5 py-2 text-xs text-[var(--status-err)]"
+            >
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" aria-hidden="true" />
+              <span>{error}</span>
+            </div>
+          )}
           {conversationState.conversations.length > 0 ? (
             <div
               role="list"
@@ -2317,6 +2423,8 @@ export function AssistantPanel({
                   conversation.updatedAt,
                   i18n.resolvedLanguage ?? i18n.language,
                 );
+                const conversationTitle =
+                  conversation.title || t("assistant.untitledConversation");
                 return (
                   <div
                     key={conversation.id}
@@ -2331,10 +2439,13 @@ export function AssistantPanel({
                           onChange={(event) => setRenameDraft(event.target.value)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                              event.preventDefault();
+                              event.stopPropagation();
                               submitConversationRename(conversation.id);
                             } else if (event.key === "Escape") {
-                              setRenamingId(null);
-                              setRenameDraft("");
+                              event.preventDefault();
+                              event.stopPropagation();
+                              cancelConversationRename(conversation.id);
                             }
                           }}
                           aria-label={t("assistant.renameConversationLabel")}
@@ -2343,7 +2454,10 @@ export function AssistantPanel({
                         <Button
                           size="icon"
                           variant="ghost"
-                          aria-label={t("assistant.renameSave")}
+                          aria-label={t("assistant.renameSaveTarget", {
+                            title: renameDraft.trim() || conversationTitle,
+                          })}
+                          disabled={conversationMutationBusy}
                           onClick={() => submitConversationRename(conversation.id)}
                           className="ca-touch-44 h-8 w-8"
                         >
@@ -2352,15 +2466,19 @@ export function AssistantPanel({
                       </div>
                     ) : (
                       <button
+                        ref={(node) => {
+                          if (node) conversationButtonRefs.current.set(conversation.id, node);
+                          else conversationButtonRefs.current.delete(conversation.id);
+                        }}
                         type="button"
                         aria-current={current ? "true" : undefined}
-                        disabled={busy || actionExecutionBusy}
+                        disabled={busy || actionExecutionBusy || conversationMutationBusy}
                         onClick={() => switchConversation(conversation.id)}
                         className="ca-touch-44 flex min-h-[52px] min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface-card-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
                       >
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-sm text-[var(--text-strong)]">
-                            {conversation.title || t("assistant.untitledConversation")}
+                            {conversationTitle}
                           </span>
                           {updatedAt && (
                             <time
@@ -2381,10 +2499,21 @@ export function AssistantPanel({
                     )}
                     {renamingId !== conversation.id && (
                       <button
+                        ref={(node) => {
+                          if (node) renameButtonRefs.current.set(conversation.id, node);
+                          else renameButtonRefs.current.delete(conversation.id);
+                        }}
                         type="button"
-                        aria-label={t("assistant.renameConversation")}
-                        title={t("assistant.renameConversation")}
+                        aria-label={t("assistant.renameConversationTarget", {
+                          title: conversationTitle,
+                        })}
+                        title={t("assistant.renameConversationTarget", {
+                          title: conversationTitle,
+                        })}
+                        disabled={busy || actionExecutionBusy || conversationMutationBusy}
                         onClick={() => {
+                          setError("");
+                          setStatusAnnouncement("");
                           setRenamingId(conversation.id);
                           setRenameDraft(conversation.title);
                         }}
@@ -2394,14 +2523,26 @@ export function AssistantPanel({
                       </button>
                     )}
                     <button
+                      ref={(node) => {
+                        if (node) deleteButtonRefs.current.set(conversation.id, node);
+                        else deleteButtonRefs.current.delete(conversation.id);
+                      }}
                       type="button"
-                      aria-label={t("assistant.deleteConversation")}
-                      title={t("assistant.deleteConversation")}
-                      disabled={busy || actionExecutionBusy}
-                      onClick={() => removeConversation(conversation.id)}
+                      aria-label={t("assistant.deleteConversationTarget", {
+                        title: conversationTitle,
+                      })}
+                      title={t("assistant.deleteConversationTarget", {
+                        title: conversationTitle,
+                      })}
+                      disabled={busy || actionExecutionBusy || conversationMutationBusy}
+                      onClick={() => void removeConversation(conversation.id)}
                       className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-md text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      {deletingConversationId === conversation.id ? (
+                        <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
                     </button>
                   </div>
                 );
@@ -2412,6 +2553,9 @@ export function AssistantPanel({
               {t("assistant.emptyConversationHistory")}
             </p>
           )}
+          <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+            {statusAnnouncement}
+          </div>
         </section>
       ) : (
       <>

@@ -66,6 +66,16 @@ export interface SetActiveAssistantConversationResult {
   persisted: boolean;
 }
 
+export interface RenameAssistantConversationResult {
+  state: AssistantConversationsState;
+  persisted: boolean;
+}
+
+export interface DeleteAssistantConversationResult {
+  state: AssistantConversationsState;
+  persisted: boolean;
+}
+
 interface PersistedConversationIndex {
   version: typeof INDEX_VERSION;
   activeId: string | null;
@@ -511,17 +521,17 @@ export function setActiveAssistantConversation(
   return trySetActiveAssistantConversation(id, now).state;
 }
 
-export function renameAssistantConversation(
+export function tryRenameAssistantConversation(
   id: string,
   title: string,
   now = Date.now(),
-): AssistantConversationsState {
+): RenameAssistantConversationResult {
   const resolved = resolveAssistantConversations(now);
   const current = resolved.state;
-  if (!resolved.writable) return current;
+  if (!resolved.writable) return { state: current, persisted: false };
   const normalized = normalizeTitle(title);
   if (!normalized || !current.conversations.some((conversation) => conversation.id === id)) {
-    return current;
+    return { state: current, persisted: false };
   }
   const next = {
     activeId: current.activeId,
@@ -533,26 +543,67 @@ export function renameAssistantConversation(
       ),
     ),
   };
-  persistIndex(next);
-  return next;
+  const persisted = persistIndex(next);
+  return { state: persisted ? next : current, persisted };
+}
+
+export function renameAssistantConversation(
+  id: string,
+  title: string,
+  now = Date.now(),
+): AssistantConversationsState {
+  return tryRenameAssistantConversation(id, title, now).state;
+}
+
+export function tryDeleteAssistantConversation(
+  id: string,
+  now = Date.now(),
+): DeleteAssistantConversationResult {
+  const resolved = resolveAssistantConversations(now);
+  const current = resolved.state;
+  if (!resolved.writable) return { state: current, persisted: false };
+  if (!current.conversations.some((conversation) => conversation.id === id)) {
+    return { state: current, persisted: false };
+  }
+  const conversations = current.conversations.filter((conversation) => conversation.id !== id);
+
+  // 删除最后一条时先建立空替代会话，再发布索引，最后才清理旧快照。
+  // 任一步失败都保留原索引和原快照，避免面板落入无 activeId 的半删除状态。
+  if (conversations.length === 0) {
+    const replacementId = generateConversationId(now, new Set([id]));
+    if (!persistConversationSnapshot(replacementId, EMPTY_SESSION, now)) {
+      return { state: current, persisted: false };
+    }
+    const replacement: AssistantConversationSummary = {
+      id: replacementId,
+      title: "",
+      updatedAt: Math.max(now, (current.conversations[0]?.updatedAt ?? -1) + 1),
+    };
+    const next = { activeId: replacementId, conversations: [replacement] };
+    if (!persistIndex(next)) {
+      removeConversationSnapshot(replacementId);
+      return { state: current, persisted: false };
+    }
+    removeConversationSnapshot(id);
+    volatileConversationSessions.delete(id);
+    return { state: next, persisted: true };
+  }
+
+  const next = {
+    activeId: current.activeId === id ? (conversations[0]?.id ?? null) : current.activeId,
+    conversations,
+  };
+  if (!persistIndex(next)) return { state: current, persisted: false };
+  removeConversationSnapshot(id);
+  volatileConversationSessions.delete(id);
+  return { state: next, persisted: true };
 }
 
 export function deleteAssistantConversation(
   id: string,
   now = Date.now(),
 ): AssistantConversationsState {
-  const resolved = resolveAssistantConversations(now);
-  const current = resolved.state;
-  if (!resolved.writable) return current;
-  if (!current.conversations.some((conversation) => conversation.id === id)) return current;
-  const conversations = current.conversations.filter((conversation) => conversation.id !== id);
-  const next = {
-    activeId: current.activeId === id ? (conversations[0]?.id ?? null) : current.activeId,
-    conversations,
-  };
-  if (persistIndex(next)) removeConversationSnapshot(id);
-  volatileConversationSessions.delete(id);
-  return next;
+  return tryDeleteAssistantConversation(id, now).state;
 }
 
 export function readRecentAssistantQuestions(): string[] {
