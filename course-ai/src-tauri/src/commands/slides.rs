@@ -1,9 +1,11 @@
 use crate::commands::courses::AppState;
-use crate::commands::tools::{aliyun_ocr_config, ocr_langs, resolve_ocr_backend};
+use crate::commands::tools::{
+    aliyun_ocr_config, deepseek_ocr_config, ocr_langs, resolve_ocr_backend,
+};
 use crate::commands::videos::Video;
 use crate::error::{AppError, AppResult};
 use crate::pipeline::crop_detect::{CropInsets, NO_CROP};
-use crate::pipeline::{aliyun_ocr, ocr, slides};
+use crate::pipeline::{aliyun_ocr, deepseek_ocr, ocr, slides};
 use serde::Serialize;
 use std::path::Path;
 use tauri::{Emitter, State};
@@ -263,6 +265,11 @@ pub async fn ocr_slides_for_video(
     } else {
         None
     };
+    let deepseek = if backend == "deepseek" {
+        Some(deepseek_ocr_config(&state.db).await?)
+    } else {
+        None
+    };
     let langs = ocr_langs(&state.db).await;
 
     let mut recognized = 0;
@@ -279,10 +286,24 @@ pub async fn ocr_slides_for_video(
         }
         let jobs = chunk.iter().map(|(id, path)| {
             let aliyun = aliyun.as_ref();
+            let deepseek = deepseek.as_ref();
             let langs = langs.as_str();
             async move {
-                let text = match aliyun {
-                    Some(config) => match tokio::fs::read(path).await {
+                let text = if let Some(config) = deepseek {
+                    match tokio::fs::read(path).await {
+                        Ok(bytes) => {
+                            deepseek_ocr::run_deepseek_ocr(
+                                &bytes,
+                                &config.api_key,
+                                &config.base_url,
+                                &config.model,
+                            )
+                            .await
+                        }
+                        Err(error) => Err(AppError::Io(error)),
+                    }
+                } else if let Some(config) = aliyun {
+                    match tokio::fs::read(path).await {
                         Ok(bytes) => {
                             aliyun_ocr::run_aliyun_ocr(
                                 &bytes,
@@ -293,8 +314,9 @@ pub async fn ocr_slides_for_video(
                             .await
                         }
                         Err(error) => Err(AppError::Io(error)),
-                    },
-                    None => ocr::run_ocr_on_image(Path::new(path), langs).await,
+                    }
+                } else {
+                    ocr::run_ocr_on_image(Path::new(path), langs).await
                 };
                 (*id, path.as_str(), text)
             }

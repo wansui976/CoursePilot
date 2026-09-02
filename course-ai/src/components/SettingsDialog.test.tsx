@@ -125,6 +125,7 @@ describe("SettingsPanel", () => {
       "volcengine_asr_access_token",
       "secret-token",
     );
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
   });
 
   it("keeps the study reminder switch in settings, not on the dashboard", async () => {
@@ -295,7 +296,14 @@ describe("SettingsPanel", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "保存火山 ASR 凭证" }));
 
-    expect(await screen.findByText(/保存失败/)).toBeInTheDocument();
+    const failure = await screen.findByRole("alert");
+    expect(failure).toHaveTextContent(/保存失败/);
+
+    // 错误需要留到下一次保存，用户可能要先离开窗口定位凭证或网络问题。
+    vi.useFakeTimers();
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(failure).toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it("turns automatic slide extraction off and persists the choice", async () => {
@@ -355,6 +363,39 @@ describe("SettingsPanel", () => {
 
     expect(localStorage.getItem("course-ai-accent")).toBe("custom");
     expect(localStorage.getItem("course-ai-custom-accent")).toBe("#123456");
+  });
+
+  it("lets users choose DeepSeek Vision OCR and save model, base URL, and API key", async () => {
+    render(<SettingsPanel onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "课件 / OCR" }));
+    fireEvent.change(await screen.findByLabelText("OCR 引擎"), {
+      target: { value: "deepseek" },
+    });
+
+    // 选 DeepSeek 后出现模型、地址、API Key 三个输入与保存按钮。
+    await waitFor(() =>
+      expect(mockIpc.settings.set).toHaveBeenCalledWith("ocr_backend", "deepseek"),
+    );
+    fireEvent.change(screen.getByLabelText("模型"), {
+      target: { value: "deepseek-v4-flash-vision-exp" },
+    });
+    fireEvent.change(screen.getByLabelText("地址 (Base URL)"), {
+      target: { value: "https://api.deepseek.com" },
+    });
+    fireEvent.change(screen.getByLabelText("API Key"), {
+      target: { value: "sk-ds-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存 DeepSeek 视觉识别凭证" }));
+
+    await waitFor(() =>
+      expect(mockIpc.settings.set).toHaveBeenCalledWith("deepseek_ocr_model", "deepseek-v4-flash-vision-exp"),
+    );
+    await waitFor(() =>
+      expect(mockIpc.settings.set).toHaveBeenCalledWith("deepseek_ocr_base_url", "https://api.deepseek.com"),
+    );
+    expect(mockIpc.secrets.set).toHaveBeenCalledWith("deepseek_ocr_api_key", "sk-ds-key");
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
   });
 
   it("uses compact drill-down on iPad Split View while keeping native mobile backends", async () => {

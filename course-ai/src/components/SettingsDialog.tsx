@@ -232,6 +232,9 @@ function SavedBadge({ text, isError = false }: { text: string; isError?: boolean
   if (!text) return null;
   return (
     <span
+      role={isError ? "alert" : "status"}
+      aria-live={isError ? "assertive" : "polite"}
+      aria-atomic="true"
       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
         isError
           ? "bg-[var(--status-err-bg)] text-[var(--status-err)]"
@@ -300,6 +303,7 @@ export function SettingsPanel({
   const volcSecret = useSecretConfigured("volcengine_asr_access_token");
   const dashSecret = useSecretConfigured("dashscope_api_key");
   const ocrSecret2 = useSecretConfigured("aliyun_ocr_access_key_secret");
+  const deepseekSecret = useSecretConfigured("deepseek_ocr_api_key");
   const [entered, setEntered] = useState(false);
   const themePref = useTheme((s) => s.pref);
   const setThemePref = useTheme((s) => s.setPref);
@@ -400,6 +404,11 @@ export function SettingsPanel({
   const [ocrSecret, setOcrSecret] = useState("");
   const [ocrSaved, setOcrSaved] = useState("");
   const [ocrSavedErr, setOcrSavedErr] = useState(false);
+  const [deepseekModel, setDeepseekModel] = useState("deepseek-v4-flash-vision-exp");
+  const [deepseekBaseUrl, setDeepseekBaseUrl] = useState("https://api.deepseek.com");
+  const [deepseekKey, setDeepseekKey] = useState("");
+  const [deepseekSaved, setDeepseekSaved] = useState("");
+  const [deepseekSavedErr, setDeepseekSavedErr] = useState(false);
   const [slidesSensitivity, setSlidesSensitivityState] = useState(() =>
     getSlidesSensitivity(),
   );
@@ -437,7 +446,7 @@ export function SettingsPanel({
     }
   }, []);
   // 凭证保存进行中：禁用保存按钮防连点。
-  const [savingCred, setSavingCred] = useState<"volc" | "ctx" | "dash" | "ocr" | null>(null);
+  const [savingCred, setSavingCred] = useState<"volc" | "ctx" | "dash" | "ocr" | "deepseek" | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -462,6 +471,12 @@ export function SettingsPanel({
       load("ocr_backend", (value) => setOcrBackend(normalizeOcrBackend(value))),
       load("aliyun_ocr_type", (value) => setOcrType(value ?? "Advanced")),
       load("aliyun_ocr_access_key_id", (value) => setOcrKeyId(value ?? "")),
+      load("deepseek_ocr_model", (value) =>
+        setDeepseekModel(value ?? "deepseek-v4-flash-vision-exp"),
+      ),
+      load("deepseek_ocr_base_url", (value) =>
+        setDeepseekBaseUrl(value ?? "https://api.deepseek.com"),
+      ),
     ];
     void Promise.allSettled(requests).then((results) => {
       if (cancelled) return;
@@ -535,6 +550,8 @@ export function SettingsPanel({
     const appId = volcengineAppId.trim();
     const token = volcengineToken.trim();
     if (!appId && !token) return;
+    setVolcengineSaved("");
+    setVolcengineSavedErr(false);
     setSavingCred("volc");
     try {
       if (appId) await ipc.settings.set("volcengine_asr_app_id", appId);
@@ -545,29 +562,27 @@ export function SettingsPanel({
       }
       setVolcengineSaved(t("settings.saved"));
       setVolcengineSavedErr(false);
-      setTimeout(() => setVolcengineSaved(""), 1500);
     } catch (error) {
       // 不再无声失败：把后端写入错误直接显示出来，便于定位（例如 DB 不可写）。
       setVolcengineSaved(t("settings.saveFailed", { error }));
       setVolcengineSavedErr(true);
-      setTimeout(() => setVolcengineSaved(""), 6000);
     } finally {
       setSavingCred(null);
     }
   }
 
   async function saveVolcengineContext() {
+    setVolcengineCtxSaved("");
+    setVolcengineCtxSavedErr(false);
     setSavingCred("ctx");
     try {
       await ipc.settings.set("volcengine_asr_hotwords", volcengineHotwords.trim());
       await ipc.settings.set("volcengine_asr_context", volcengineContext.trim());
       setVolcengineCtxSaved(t("settings.saved"));
       setVolcengineCtxSavedErr(false);
-      setTimeout(() => setVolcengineCtxSaved(""), 1500);
     } catch (error) {
       setVolcengineCtxSaved(t("settings.saveFailed", { error }));
       setVolcengineCtxSavedErr(true);
-      setTimeout(() => setVolcengineCtxSaved(""), 6000);
     } finally {
       setSavingCred(null);
     }
@@ -580,6 +595,8 @@ export function SettingsPanel({
 
   async function saveDashscopeKey() {
     if (!dashscopeKey.trim()) return;
+    setDashscopeSaved("");
+    setDashscopeSavedErr(false);
     setSavingCred("dash");
     try {
       await ipc.secrets.set("dashscope_api_key", dashscopeKey.trim());
@@ -587,11 +604,9 @@ export function SettingsPanel({
       setDashscopeKey("");
       setDashscopeSaved(t("settings.saved"));
       setDashscopeSavedErr(false);
-      setTimeout(() => setDashscopeSaved(""), 1500);
     } catch (error) {
       setDashscopeSaved(t("settings.saveFailed", { error }));
       setDashscopeSavedErr(true);
-      setTimeout(() => setDashscopeSaved(""), 6000);
     } finally {
       setSavingCred(null);
     }
@@ -612,6 +627,8 @@ export function SettingsPanel({
     const keyId = ocrKeyId.trim();
     const secret = ocrSecret.trim();
     if (!keyId && !secret) return;
+    setOcrSaved("");
+    setOcrSavedErr(false);
     setSavingCred("ocr");
     try {
       if (keyId) await ipc.settings.set("aliyun_ocr_access_key_id", keyId);
@@ -622,11 +639,35 @@ export function SettingsPanel({
       }
       setOcrSaved(t("settings.saved"));
       setOcrSavedErr(false);
-      setTimeout(() => setOcrSaved(""), 1500);
     } catch (error) {
       setOcrSaved(t("settings.saveFailed", { error }));
       setOcrSavedErr(true);
-      setTimeout(() => setOcrSaved(""), 6000);
+    } finally {
+      setSavingCred(null);
+    }
+  }
+
+  async function saveDeepseekOcr() {
+    const model = deepseekModel.trim();
+    const baseUrl = deepseekBaseUrl.trim();
+    const key = deepseekKey.trim();
+    if (!key && !model && !baseUrl) return;
+    setDeepseekSaved("");
+    setDeepseekSavedErr(false);
+    setSavingCred("deepseek");
+    try {
+      if (model) await ipc.settings.set("deepseek_ocr_model", model);
+      if (baseUrl) await ipc.settings.set("deepseek_ocr_base_url", baseUrl);
+      if (key) {
+        await ipc.secrets.set("deepseek_ocr_api_key", key);
+        deepseekSecret.refresh();
+        setDeepseekKey("");
+      }
+      setDeepseekSaved(t("settings.saved"));
+      setDeepseekSavedErr(false);
+    } catch (error) {
+      setDeepseekSaved(t("settings.saveFailed", { error }));
+      setDeepseekSavedErr(true);
     } finally {
       setSavingCred(null);
     }
@@ -1288,6 +1329,7 @@ export function SettingsPanel({
                       >
                         <option value="local">{t("settings.ocr.localOcr")}</option>
                         <option value="aliyun">{t("settings.ocr.aliyunOcr")}</option>
+                        <option value="deepseek">{t("settings.ocr.deepseekOcr")}</option>
                       </Select>
                     </div>
                   </Row>
@@ -1348,6 +1390,68 @@ export function SettingsPanel({
                             {t("settings.ocr.saveAliyunOcr")}
                           </Button>
                           <SavedBadge text={ocrSaved} isError={ocrSavedErr} />
+                        </div>
+                      </StackRow>
+                    </>
+                  )}
+
+                  {ocrBackend === "deepseek" && (
+                    <>
+                      <Row
+                        label={t("settings.ocr.deepseekModel")}
+                        htmlFor="deepseek-ocr-model"
+                      >
+                        <input
+                          id="deepseek-ocr-model"
+                          type="text"
+                          className={`${FIELD} w-full sm:w-64`}
+                          value={deepseekModel}
+                          placeholder="deepseek-v4-flash-vision-exp"
+                          onChange={(event) => setDeepseekModel(event.target.value)}
+                        />
+                      </Row>
+                      <Row
+                        label={t("settings.ocr.deepseekBaseUrl")}
+                        htmlFor="deepseek-ocr-base-url"
+                      >
+                        <input
+                          id="deepseek-ocr-base-url"
+                          type="text"
+                          className={`${FIELD} w-full sm:w-64`}
+                          value={deepseekBaseUrl}
+                          placeholder="https://api.deepseek.com"
+                          onChange={(event) => setDeepseekBaseUrl(event.target.value)}
+                        />
+                      </Row>
+                      <Row
+                        label={t("settings.ocr.deepseekApiKey")}
+                        htmlFor="deepseek-ocr-key"
+                        hint={
+                          deepseekSecret.configured
+                            ? t("settings.ocr.deepseekConfigured")
+                            : t("settings.ocr.deepseekNotConfigured")
+                        }
+                      >
+                        <input
+                          id="deepseek-ocr-key"
+                          type="password"
+                          className={`${FIELD} w-full sm:w-64`}
+                          value={deepseekKey}
+                          placeholder="••••••••"
+                          onChange={(event) => setDeepseekKey(event.target.value)}
+                        />
+                      </Row>
+                      <StackRow>
+                        <div className="flex items-center gap-3">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={savingCred !== null}
+                            onClick={saveDeepseekOcr}
+                          >
+                            {t("settings.ocr.saveDeepseekOcr")}
+                          </Button>
+                          <SavedBadge text={deepseekSaved} isError={deepseekSavedErr} />
                         </div>
                       </StackRow>
                     </>

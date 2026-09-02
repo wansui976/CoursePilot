@@ -2,7 +2,7 @@ use crate::commands::courses::AppState;
 use crate::commands::settings::get_setting;
 use crate::commands::videos::{add_local_video, Video};
 use crate::error::{AppError, AppResult};
-use crate::pipeline::{aliyun_ocr, download, ocr};
+use crate::pipeline::{aliyun_ocr, deepseek_ocr, download, ocr};
 use std::path::{Path, PathBuf};
 use tauri::State;
 
@@ -21,6 +21,7 @@ fn normalize_ocr_backend(value: &str) -> Option<&'static str> {
         // `tesseract` 是旧版设置值；本地引擎现在按平台分派。
         "local" | "tesseract" => Some("local"),
         "aliyun" => Some("aliyun"),
+        "deepseek" => Some("deepseek"),
         _ => None,
     }
 }
@@ -78,6 +79,27 @@ pub async fn aliyun_ocr_config(db: &crate::db::Db) -> AppResult<AliyunOcrConfig>
     })
 }
 
+/// DeepSeek 视觉 OCR 需要的凭证与模型/端点配置。
+pub struct DeepSeekOcrConfig {
+    pub api_key: String,
+    pub model: String,
+    pub base_url: String,
+}
+
+pub async fn deepseek_ocr_config(db: &crate::db::Db) -> AppResult<DeepSeekOcrConfig> {
+    Ok(DeepSeekOcrConfig {
+        api_key: crate::llm::keychain::get_secret_or_legacy(db, "deepseek_ocr_api_key")
+            .await?
+            .unwrap_or_default(),
+        model: get_setting(db, "deepseek_ocr_model")
+            .await?
+            .unwrap_or_else(|| deepseek_ocr::DEFAULT_MODEL.to_string()),
+        base_url: get_setting(db, "deepseek_ocr_base_url")
+            .await?
+            .unwrap_or_else(|| deepseek_ocr::DEFAULT_BASE_URL.to_string()),
+    })
+}
+
 /// 本地 Tesseract 回退引擎的语言包设置。
 pub async fn ocr_langs(db: &crate::db::Db) -> String {
     get_setting(db, "ocr_langs")
@@ -105,23 +127,44 @@ pub async fn cmd_ocr_region(
         .await?
         .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
     let rect = ocr::Rect { x, y, w, h };
-    if resolve_ocr_backend(&state.db).await == "aliyun" {
-        let config = aliyun_ocr_config(&state.db).await?;
-        let image = ocr::grab_frame(
-            Path::new(&video.file_path),
-            Path::new(&video.data_dir),
-            at_ms,
-            rect,
-        )
-        .await?;
-        let bytes = tokio::fs::read(&image).await?;
-        return aliyun_ocr::run_aliyun_ocr(
-            &bytes,
-            &config.access_key_id,
-            &config.access_key_secret,
-            &config.ocr_type,
-        )
-        .await;
+    match resolve_ocr_backend(&state.db).await.as_str() {
+        "aliyun" => {
+            let config = aliyun_ocr_config(&state.db).await?;
+            let image = ocr::grab_frame(
+                Path::new(&video.file_path),
+                Path::new(&video.data_dir),
+                at_ms,
+                rect,
+            )
+            .await?;
+            let bytes = tokio::fs::read(&image).await?;
+            return aliyun_ocr::run_aliyun_ocr(
+                &bytes,
+                &config.access_key_id,
+                &config.access_key_secret,
+                &config.ocr_type,
+            )
+            .await;
+        }
+        "deepseek" => {
+            let config = deepseek_ocr_config(&state.db).await?;
+            let image = ocr::grab_frame(
+                Path::new(&video.file_path),
+                Path::new(&video.data_dir),
+                at_ms,
+                rect,
+            )
+            .await?;
+            let bytes = tokio::fs::read(&image).await?;
+            return deepseek_ocr::run_deepseek_ocr(
+                &bytes,
+                &config.api_key,
+                &config.base_url,
+                &config.model,
+            )
+            .await;
+        }
+        _ => {}
     }
 
     let langs = ocr_langs(&state.db).await;
@@ -280,6 +323,7 @@ mod tests {
         assert_eq!(normalize_ocr_backend("local"), Some("local"));
         assert_eq!(normalize_ocr_backend(" tesseract "), Some("local"));
         assert_eq!(normalize_ocr_backend("aliyun"), Some("aliyun"));
+        assert_eq!(normalize_ocr_backend("deepseek"), Some("deepseek"));
         assert_eq!(normalize_ocr_backend("unknown"), None);
     }
 }

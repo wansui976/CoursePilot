@@ -15,6 +15,7 @@ tauri-utils = { version = "2", features = ["build-2"] }
 
 [dependencies]
 anyhow = "1"
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 flate2 = "1.1.9"
 futures-util = "0.3"

@@ -5,7 +5,9 @@ export function defaultOcrBackend() {
 export function normalizeOcrBackend(value: string | null | undefined) {
   const trimmed = value?.trim();
   if (trimmed === "tesseract") return "local";
-  return trimmed === "local" || trimmed === "aliyun" ? trimmed : defaultOcrBackend();
+  return trimmed === "local" || trimmed === "aliyun" || trimmed === "deepseek"
+    ? trimmed
+    : defaultOcrBackend();
 }
 
 export function ocrBackendOrDefault(value: string | null | undefined) {

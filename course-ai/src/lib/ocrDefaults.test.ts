@@ -34,6 +34,7 @@ describe("OCR defaults", () => {
 
     expect(defaultOcrBackend()).toBe("local");
     expect(ocrBackendOrDefault("aliyun")).toBe("aliyun");
+    expect(ocrBackendOrDefault("deepseek")).toBe("deepseek");
     expect(ocrBackendOrDefault("tesseract")).toBe("local");
   });
 });
