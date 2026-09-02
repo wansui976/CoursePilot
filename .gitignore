@@ -43,3 +43,7 @@ course-ai/scripts/
 
 # Local resume drafts
 CoursePilot-项目简历.md
+
+# Local AI session metadata / scratch
+deepseek.json
+course-ai/src-tauri/.claude/
