@@ -19,6 +19,7 @@ function reply(): AssistantReply {
     actions: [],
     turns: 1,
     tools_used: [],
+    usage: null,
     history: [],
   };
 }

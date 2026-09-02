@@ -863,6 +863,87 @@ pub async fn generate_summary(
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NotesEditSnapshot {
+    row_exists: bool,
+    content_json: Option<String>,
+    user_edited_at: Option<i64>,
+}
+
+fn notes_edit_snapshot_from_row(row: Option<(Option<String>, Option<i64>)>) -> NotesEditSnapshot {
+    match row {
+        Some((content_json, user_edited_at)) => NotesEditSnapshot {
+            row_exists: true,
+            content_json,
+            user_edited_at,
+        },
+        None => NotesEditSnapshot {
+            row_exists: false,
+            content_json: None,
+            user_edited_at: None,
+        },
+    }
+}
+
+async fn capture_notes_edit_snapshot(db: &Db, video_id: &str) -> AppResult<NotesEditSnapshot> {
+    let row = sqlx::query_as("SELECT content_json,user_edited_at FROM notes WHERE video_id=?")
+        .bind(video_id)
+        .fetch_optional(&db.pool)
+        .await?;
+    Ok(notes_edit_snapshot_from_row(row))
+}
+
+async fn store_generated_notes_if_unchanged(
+    db: &Db,
+    video_id: &str,
+    markdown: &str,
+    expected: &NotesEditSnapshot,
+    generated_at: i64,
+) -> AppResult<()> {
+    // The model can run for minutes. Take the SQLite write lock before the final
+    // read so no manual save can slip between the comparison and replacement.
+    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let current = notes_edit_snapshot_from_row(
+        sqlx::query_as("SELECT content_json,user_edited_at FROM notes WHERE video_id=?")
+            .bind(video_id)
+            .fetch_optional(&mut *tx)
+            .await?,
+    );
+    if &current != expected {
+        return Err(AppError::Other(
+            "笔记在生成期间已被修改，已保留新的人工编辑；本次生成结果未覆盖笔记，请确认后重试"
+                .into(),
+        ));
+    }
+
+    let result = if current.row_exists {
+        sqlx::query(
+            "UPDATE notes
+             SET content_md=?, ai_generated_at=?, content_json=NULL
+             WHERE video_id=?",
+        )
+        .bind(markdown)
+        .bind(generated_at)
+        .bind(video_id)
+        .execute(&mut *tx)
+        .await?
+    } else {
+        sqlx::query("INSERT INTO notes(video_id,content_md,ai_generated_at) VALUES (?,?,?)")
+            .bind(video_id)
+            .bind(markdown)
+            .bind(generated_at)
+            .execute(&mut *tx)
+            .await?
+    };
+    if result.rows_affected() != 1 {
+        return Err(AppError::Other(
+            "笔记在生成期间已变化，本次生成结果未写入".into(),
+        ));
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn generate_notes(
     db: &Db,
     provider: &Provider,
@@ -870,6 +951,9 @@ pub async fn generate_notes(
     video_id: &str,
     progress: Progress<'_>,
 ) -> AppResult<()> {
+    // Capture only the user-owned fields. AI metadata may legitimately change in
+    // parallel, but any manual note save during this request must win.
+    let edit_snapshot = capture_notes_edit_snapshot(db, video_id).await?;
     report(progress, AT_CONTEXT, "准备讲稿");
     // 提要占进度条的前半截；短讲稿不压提要，这一段会一闪而过。
     let prep = scoped(progress, AT_CONTEXT, AT_REQUEST);
@@ -883,15 +967,7 @@ pub async fn generate_notes(
     let now = chrono::Utc::now().timestamp_millis();
     // 重新生成时清掉用户编辑过的 content_json，否则它会盖住新生成的 content_md
     //（cmd_get_notes 优先返回 content_json），表现为「点了生成却没变化」。
-    sqlx::query(
-        "INSERT INTO notes(video_id,content_md,ai_generated_at) VALUES (?,?,?)
-         ON CONFLICT(video_id) DO UPDATE SET content_md=excluded.content_md, ai_generated_at=excluded.ai_generated_at, content_json=NULL",
-    )
-    .bind(video_id)
-    .bind(md)
-    .bind(now)
-    .execute(&db.pool)
-    .await?;
+    store_generated_notes_if_unchanged(db, video_id, &md, &edit_snapshot, now).await?;
     record_artifact_source(db, video_id, "notes", &input.fingerprint).await?;
     Ok(())
 }
@@ -1609,9 +1685,10 @@ mod tests {
     async fn regenerating_notes_clears_user_edited_json() {
         let (db, vid, _d) = seed_video_with_transcript().await;
         // 模拟用户编辑（含「删空」）后保存的 content_json。
-        sqlx::query("INSERT INTO notes(video_id,content_json) VALUES (?,?)")
+        sqlx::query("INSERT INTO notes(video_id,content_json,user_edited_at) VALUES (?,?,?)")
             .bind(&vid)
             .bind(r#"{"type":"doc","content":[{"type":"paragraph"}]}"#)
+            .bind(1_000_i64)
             .execute(&db.pool)
             .await
             .unwrap();
@@ -1627,16 +1704,67 @@ mod tests {
         .await
         .unwrap();
         // 重新生成后 content_json 必须被清空，否则会盖住新的 content_md。
-        let row: (Option<String>, Option<String>) =
-            sqlx::query_as("SELECT content_json, content_md FROM notes WHERE video_id=?")
-                .bind(&vid)
-                .fetch_one(&db.pool)
-                .await
-                .unwrap();
+        let row: (Option<String>, Option<String>, Option<i64>) = sqlx::query_as(
+            "SELECT content_json, content_md, user_edited_at FROM notes WHERE video_id=?",
+        )
+        .bind(&vid)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
         assert!(
             row.0.is_none(),
             "content_json should be cleared on regenerate"
         );
         assert!(row.1.unwrap().contains("重新生成的要点"));
+        assert_eq!(row.2, Some(1_000), "原有的人工编辑时钟不应被伪造成新编辑");
+    }
+
+    #[tokio::test]
+    async fn concurrent_manual_note_edit_wins_over_a_stale_generation() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let original = r#"{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"请求开始前"}]}]}"#;
+        let manual = r#"{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"生成期间的人工修改"}]}]}"#;
+        sqlx::query(
+            "INSERT INTO notes(video_id,content_json,content_md,user_edited_at) VALUES (?,?,?,?)",
+        )
+        .bind(&vid)
+        .bind(original)
+        .bind("# 上一版 AI 笔记")
+        .bind(1_000_i64)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        let request_snapshot = capture_notes_edit_snapshot(&db, &vid).await.unwrap();
+
+        // 模型请求在外部运行时，用户又保存了新文档。
+        sqlx::query("UPDATE notes SET content_json=?,user_edited_at=? WHERE video_id=?")
+            .bind(manual)
+            .bind(2_000_i64)
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        let error = store_generated_notes_if_unchanged(
+            &db,
+            &vid,
+            "# 已经过期的生成结果",
+            &request_snapshot,
+            3_000,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("已保留新的人工编辑"));
+        let row: (Option<String>, Option<String>, Option<i64>) = sqlx::query_as(
+            "SELECT content_json,content_md,user_edited_at FROM notes WHERE video_id=?",
+        )
+        .bind(&vid)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+        assert_eq!(row.0.as_deref(), Some(manual));
+        assert_eq!(row.1.as_deref(), Some("# 上一版 AI 笔记"));
+        assert_eq!(row.2, Some(2_000));
     }
 }

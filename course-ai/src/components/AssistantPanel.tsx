@@ -39,7 +39,10 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { AssistantActionList } from "@/components/AssistantActionCard";
+import {
+  AssistantActionList,
+  type AssistantActionOutcome,
+} from "@/components/AssistantActionCard";
 import { AssistantToolChips } from "@/components/AssistantToolChips";
 import {
   boundTrustedAssistantHistory,
@@ -74,7 +77,7 @@ import {
 } from "@/lib/assistantConversations";
 import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
-import { markdownToTiptap } from "@/lib/markdownToTiptap";
+import { notesCoordinator } from "@/lib/notesCoordinator";
 import { isMobile, isTablet } from "@/lib/platform";
 import { formatMs } from "@/lib/time";
 import {
@@ -93,6 +96,7 @@ import type {
   AssistantContext,
   AssistantMessage,
   AssistantReply,
+  AssistantUsage,
   ToolExecutionStatus,
 } from "@/lib/types";
 
@@ -102,6 +106,11 @@ import type {
  * 桌面端可拖动，移到左右边缘时吸附成窄条；手机端没有「边缘停靠」的余地，
  * 改成底部抽屉——两种外壳共用同一套状态和消息流，切换的只是容器。
  */
+
+/** 一次完整回答实际消耗的 token 数：输入 + 正式输出 + 推理模型的思考输出。 */
+function usageTokens(usage: AssistantUsage): number {
+  return usage.prompt_tokens + usage.completion_tokens + usage.reasoning_tokens;
+}
 
 const PANEL_MAX_HEIGHT = 720;
 const VIEWPORT_GAP = 16;
@@ -209,6 +218,8 @@ type Turn = AssistantTurnRecord & {
   /** 最近一次工具结束状态；只用于当前请求的阶段反馈。 */
   toolExecutionStatus?: ToolExecutionStatus;
   toolExecutionName?: string;
+  /** 工具链已撞上限、正在强制总结；只用于当前请求的阶段反馈。 */
+  turnLimitNoticed?: boolean;
 };
 
 /** 提问范围的用户选择。auto 跟随界面当前选中项，其余三档显式覆盖。 */
@@ -467,8 +478,10 @@ export function AssistantPanel({
   const activeConversationIdRef = useRef(initialConversation.conversations.activeId);
   const actionExecutionCountRef = useRef(0);
   const deletingConversationIdRef = useRef<string | null>(null);
+  const pendingDeleteFocusRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const locallyStoppedRequestsRef = useRef(new Set<string>());
+  const actionEventsByRequestRef = useRef(new Map<string, AssistantMessage[]>());
   const historyRef = useRef(initialSession.history);
   const conversationEpochRef = useRef(0);
   const copyTimerRef = useRef<number | null>(null);
@@ -533,7 +546,9 @@ export function AssistantPanel({
       : null;
     return activeToolLabel
       ? t("assistant.usingTool", { tool: activeToolLabel })
-      : turn.toolExecutionStatus === "failed"
+      : turn.turnLimitNoticed
+        ? t("assistant.turnLimitSummarizing")
+        : turn.toolExecutionStatus === "failed"
         ? t("assistant.toolFailedContinuing", { tool: finishedToolLabel })
         : turn.toolExecutionStatus === "canceled"
           ? t("assistant.toolCanceled", { tool: finishedToolLabel })
@@ -630,6 +645,19 @@ export function AssistantPanel({
 
   // 视觉阶段和读屏通知共用一个 live region，但不能互相遮住：旧确认卡可能在新一轮
   // 生成期间完成，动作回执必须先被读屏播报，再由下一次阶段变化接管通知文本。
+  // 删除失败后要把焦点还给删除按钮，但删除中按钮是 disabled 的：此时 focus() 静默无效。
+  // 必须等 deletingConversationId 置空、按钮恢复可聚焦后的那一帧再聚焦。
+  useEffect(() => {
+    if (deletingConversationId !== null) return;
+    const restoreId = pendingDeleteFocusRef.current;
+    if (!restoreId) return;
+    pendingDeleteFocusRef.current = null;
+    const frame = requestAnimationFrame(() =>
+      deleteButtonRefs.current.get(restoreId)?.focus(),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [deletingConversationId]);
+
   useEffect(() => {
     if (busy) setStatusAnnouncement(generationStatus);
   }, [busy, generationStatus]);
@@ -791,63 +819,70 @@ export function AssistantPanel({
     return true;
   }
 
-  function endActionExecution(
-    turnId: string,
-    finishedActions: AssistantAction[],
-    epoch: number,
-  ) {
+  function endActionExecution() {
     actionExecutionCountRef.current = 0;
     if (mountedRef.current) setActionExecutionCount(0);
-    if (epoch !== conversationEpochRef.current || finishedActions.length === 0) return;
-    const finished = new Set(finishedActions);
-    updateTrackedTurns((previous) =>
-      previous.map((turn) => {
-        if (turn.id !== turnId || !turn.executingActionIndexes?.length) return turn;
-        const indexes = turn.executingActionIndexes.filter(
-          (index) => !finished.has(turn.actions[index]),
-        );
-        return indexes.length === turn.executingActionIndexes.length
-          ? turn
-          : { ...turn, executingActionIndexes: indexes.length > 0 ? indexes : undefined };
-      }),
-    );
-    if (mountedRef.current) {
-      persistConversationSnapshot(activeConversationIdRef.current, sessionSnapshotRef.current);
-    }
   }
 
-  function markTurnActionsResolved(
+  function commitActionOutcome(
     turnId: string,
-    resolvedActions: AssistantAction[],
+    outcome: AssistantActionOutcome,
     epoch: number,
   ) {
-    if (epoch !== conversationEpochRef.current || resolvedActions.length === 0) return;
-    const resolved = new Set(resolvedActions);
-    updateTrackedTurns((previous) =>
-      previous.map((turn) => {
+    if (epoch !== conversationEpochRef.current) return;
+    const resolved = new Set(outcome.resolvedActions);
+    const finished = new Set(outcome.finishedActions);
+    const nextTurns = sessionSnapshotRef.current.turns.map((turn) => {
         if (turn.id !== turnId) return turn;
         const indexes = new Set(turn.resolvedActionIndexes ?? []);
-        const resolvedNow = new Set<number>();
         turn.actions.forEach((action, index) => {
-          if (resolved.has(action)) {
-            indexes.add(index);
-            resolvedNow.add(index);
-          }
+          if (resolved.has(action)) indexes.add(index);
         });
         const executingActionIndexes = turn.executingActionIndexes?.filter(
-          (index) => !resolvedNow.has(index),
+          (index) => !finished.has(turn.actions[index]),
         );
         return {
           ...turn,
-          resolvedActionIndexes: [...indexes].sort((a, b) => a - b),
+          resolvedActionIndexes:
+            indexes.size > 0 ? [...indexes].sort((a, b) => a - b) : undefined,
           executingActionIndexes:
             executingActionIndexes && executingActionIndexes.length > 0
               ? executingActionIndexes
               : undefined,
+          actionResults:
+            outcome.resultMessages.length > 0
+              ? [...turn.actionResults, ...outcome.resultMessages]
+              : turn.actionResults,
         };
-      }),
-    );
+      });
+    const actionEvents: AssistantMessage[] = outcome.resultMessages.map((message) => ({
+      role: "assistant",
+      content: t("assistant.uiActionResult", { message }),
+    }));
+    const requestId = activeRequestRef.current;
+    if (requestId && actionEvents.length > 0) {
+      actionEventsByRequestRef.current.get(requestId)?.push(...actionEvents);
+    }
+    const nextHistory =
+      actionEvents.length > 0
+        ? boundTrustedAssistantHistory([...historyRef.current, ...actionEvents])
+        : historyRef.current;
+    historyRef.current = nextHistory;
+    sessionSnapshotRef.current = {
+      ...sessionSnapshotRef.current,
+      turns: nextTurns,
+      history: nextHistory,
+    };
     if (mountedRef.current) {
+      setTurns(nextTurns);
+      if (actionEvents.length > 0) {
+        setHistory(nextHistory);
+        setStatusAnnouncement(
+          t("assistant.actionResultAnnouncement", {
+            result: outcome.resultMessages[outcome.resultMessages.length - 1],
+          }),
+        );
+      }
       persistConversationSnapshot(activeConversationIdRef.current, sessionSnapshotRef.current);
     }
   }
@@ -1501,6 +1536,10 @@ export function AssistantPanel({
   async function send(suggestedQuestion?: string, rememberQuestion = true) {
     const question = (suggestedQuestion ?? input).trim();
     if (!question || busy || activeRequestRef.current || actionExecutionCountRef.current > 0) return;
+    // 防御：同一问题不该出现两个「处理中」回合（曾出现过一问题显示两条「正在整理结果」）。
+    // 个别触发路径（如 Enter 与发送按钮竞态、重开面板残留）会重复创建 pending 回合，
+    // 其中一条收尾、另一条永远卡在整理态。遇到已存在同问题的 pending 回合就不再重复发起。
+    if (turns.some((turn) => turn.pending && turn.question === question)) return;
     const conversationId = activeConversationIdRef.current;
     const requestId = crypto.randomUUID();
     const turnId = crypto.randomUUID();
@@ -1701,6 +1740,17 @@ export function AssistantPanel({
                 toolStatus,
               ),
             }));
+          } else if (event.type === "turn_limit") {
+            // 撞上限到总结完成之间可能还有十几秒，期间没有任何其他事件；
+            // 挂出进行中状态，否则用户只看到卡住。
+            patch((item) => ({
+              ...item,
+              turnLimitNoticed: true,
+              activeTool: undefined,
+              toolExecutionStatus: undefined,
+              toolExecutionName: undefined,
+            }));
+            scheduleStreamFlush();
           }
         },
       );
@@ -1748,12 +1798,19 @@ export function AssistantPanel({
                 // 用户叫停的那一轮已经有自己的说明，再挂一条「没得出结论」是在替它
                 // 找借口——它没转不出来，是被你按停的。
                 hitTurnLimit: stopReason === "limit_reached" && !canceled,
+                usage: reply.usage,
                 activeTool: undefined,
                 toolExecutionStatus: undefined,
                 toolExecutionName: undefined,
+                turnLimitNoticed: undefined,
                 pending: false,
               }
-            : turn,
+            : // 收尾兜底：真实回答到达时，把同问题的残留「处理中」回合一并结束。
+              // 曾因个别触发路径产生过重复 pending 回合（一个收尾、另一个永远卡在整理态），
+              // 这里让迟到完成的回合顺带清理同问的孤儿，杜绝「一问题两条正在整理结果」。
+              turn.pending && turn.question === question
+              ? { ...turn, pending: false, activeTool: undefined }
+              : turn,
         ),
       );
       const finalToolIssue = latestToolIssue.current;
@@ -1820,26 +1877,8 @@ export function AssistantPanel({
       return;
     }
     try {
-      const existing = await ipc.ai.getNotes(videoId);
-      let doc = null as { type: string; content?: unknown[] } | null;
-      if (existing && existing.trim()) {
-        try {
-          const parsed = JSON.parse(existing) as { type?: unknown; content?: unknown };
-          if (parsed && parsed.type === "doc" && Array.isArray(parsed.content)) {
-            doc = parsed as { type: string; content?: unknown[] };
-          }
-        } catch {
-          // 非 JSON → 当 markdown 处理。
-        }
-      }
-      if (!doc) doc = markdownToTiptap(existing && existing.trim() ? existing : "");
-      const answerDoc = markdownToTiptap(turn.answer);
-      const merged = {
-        type: "doc",
-        content: [...(doc.content ?? []), ...(answerDoc.content ?? [])],
-      };
-      await ipc.ai.saveNotes(videoId, JSON.stringify(merged));
-      queryClient.invalidateQueries({ queryKey: ["notes", videoId] });
+      await notesCoordinator.appendAnswer(videoId, turn.answer);
+      void queryClient.invalidateQueries({ queryKey: ["notes", videoId] });
       setSavedToNotesTurnId(turn.id);
       if (saveToNotesTimerRef.current != null) window.clearTimeout(saveToNotesTimerRef.current);
       saveToNotesTimerRef.current = window.setTimeout(() => setSavedToNotesTurnId(null), 1500);
@@ -1873,34 +1912,6 @@ export function AssistantPanel({
     if (box) box.scrollTop = box.scrollHeight;
     followScrollRef.current = true;
     setScrolledAway(false);
-  }
-
-  function recordActionResult(turnId: string, message: string, epoch: number) {
-    // 用户可以在确认卡执行期间开始新对话。旧操作照常完成，但它的回执不能写进
-    // 已经重置的会话，尤其不能混入新会话正在进行的请求。
-    if (epoch !== conversationEpochRef.current) return;
-    // 独立追加而不是改写“最后一条回答”：用户可能回头执行旧轮次的卡片，附到最新回答
-    // 会把两个不相干的操作串在一起。assistant 角色也不会消耗后端的用户轮次上限。
-    updateTrackedTurns((previous) =>
-      previous.map((turn) =>
-        turn.id === turnId
-          ? { ...turn, actionResults: [...turn.actionResults, message] }
-          : turn,
-      ),
-    );
-    historyRef.current = boundTrustedAssistantHistory([
-      ...historyRef.current,
-      { role: "assistant", content: t("assistant.uiActionResult", { message }) },
-    ]);
-    sessionSnapshotRef.current = {
-      ...sessionSnapshotRef.current,
-      history: historyRef.current,
-    };
-    setHistory(historyRef.current);
-    setStatusAnnouncement(t("assistant.actionResultAnnouncement", { result: message }));
-    if (mountedRef.current) {
-      persistConversationSnapshot(activeConversationIdRef.current, sessionSnapshotRef.current);
-    }
   }
 
   async function stop() {
@@ -2099,7 +2110,7 @@ export function AssistantPanel({
     } finally {
       deletingConversationIdRef.current = null;
       setDeletingConversationId(null);
-      if (restoreDeleteFocus) focusConversationControl(conversationId, deleteButtonRefs);
+      if (restoreDeleteFocus) pendingDeleteFocusRef.current = conversationId;
     }
   }
 
@@ -2629,13 +2640,18 @@ export function AssistantPanel({
 
             {/* 提问后、第一个工具/正文到达前，助手槽位是空的。给一个内联「正在思考」，
                 别让用户对着自己刚发的话干等。纯视觉：读屏状态由底部 live region 统一播报，
-                这里不加 role，避免多出一个 status 抢播。 */}
-            {turn.pending && !turn.answer && (
-              <div aria-hidden="true" className="flex items-center gap-2 text-xs text-[var(--text-faint)]">
-                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                <span>{streamingLabelFor(turn)}</span>
-              </div>
-            )}
+                这里不加 role，避免多出一个 status 抢播。
+                只对唯一 pending 的回合显示：曾出现过同问题产生两个 pending 回合、界面
+                同时显示两条「整理结果」的情况（其中一条永远卡住）。收敛到 pendingTurn（第一个
+                pending）后，无论数据层有几个，界面始终只有一条状态，不会重复。 */}
+            {turn.pending &&
+              !turn.answer &&
+              turn.id === pendingTurn?.id && (
+                <div aria-hidden="true" className="flex items-center gap-2 text-xs text-[var(--text-faint)]">
+                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                  <span>{streamingLabelFor(turn)}</span>
+                </div>
+              )}
 
             {/* 工具链摆在回答前面：它解释了这段回答是怎么来的，
                 也让「一轮里悄悄调了三次搜索」这种事看得见。 */}
@@ -2738,6 +2754,18 @@ export function AssistantPanel({
                     </Button>
                   )}
                 </div>
+                {/* 这一轮实际花了多少，完成之后给一个不抢眼但可见的数字；
+                    端点没报用量就不显示——把「没报」当成零消耗是撒谎。 */}
+                {!turn.pending && turn.usage && (
+                  <p
+                    data-testid="turn-usage"
+                    className="mt-0.5 text-[10px] text-[var(--text-faint)]"
+                  >
+                    {t("assistant.usageTokens", {
+                      tokens: usageTokens(turn.usage).toLocaleString(),
+                    })}
+                  </p>
+                )}
               </div>
             )}
 
@@ -2774,17 +2802,14 @@ export function AssistantPanel({
             <AssistantActionList
               actions={turn.actions}
               onNavigate={(action) => navigateFromTurn(turn, action)}
-              onResult={(message) => recordActionResult(turn.id, message, conversationEpoch)}
+              onOutcome={(outcome) =>
+                commitActionOutcome(turn.id, outcome, conversationEpoch)
+              }
               executionLocked={actionExecutionBusy}
               onExecutionStart={(actions) =>
                 beginActionExecution(turn.id, actions, conversationEpoch)
               }
-              onExecutionEnd={(actions) =>
-                endActionExecution(turn.id, actions, conversationEpoch)
-              }
-              onActionsResolved={(actions) =>
-                markTurnActionsResolved(turn.id, actions, conversationEpoch)
-              }
+              onExecutionEnd={() => endActionExecution()}
               onApplied={onActionApplied}
             />
 

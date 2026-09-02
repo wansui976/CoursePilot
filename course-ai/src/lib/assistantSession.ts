@@ -2,6 +2,7 @@ import type {
   AssistantAction,
   AssistantContext,
   AssistantMessage,
+  AssistantUsage,
   ToolExecutionStatus,
 } from "./types";
 
@@ -32,7 +33,11 @@ export const ASSISTANT_CHECKPOINT_TTL_MS = 24 * 60 * 60 * 1_000;
 export const MAX_ASSISTANT_PROMPT_HISTORY = 50;
 export const MAX_ASSISTANT_PROMPT_CHARS = MAX_QUESTION_CHARS;
 
-type CheckpointAction = Exclude<AssistantAction, { kind: "set_theme" }>;
+// 主题即时生效无需检查点；笔记追加不幂等（中断后自动重试会重复写一段），同样不纳入恢复。
+type CheckpointAction = Exclude<
+  AssistantAction,
+  { kind: "set_theme" } | { kind: "propose_create_note" }
+>;
 export type AssistantCheckpointActionKind = CheckpointAction["kind"];
 
 export interface AssistantCheckpointTarget {
@@ -109,6 +114,8 @@ export interface AssistantTurnRecord {
   canceled: boolean;
   /** 工具轮或上下文预算封顶且强制总结仍失败；这一轮回答不完整，重启后同样要说明。旧记录没有。 */
   hitTurnLimit?: boolean;
+  /** 这一轮全部模型请求的 token 用量合计；端点不报则缺失，界面不应显示成零。旧记录没有。 */
+  usage?: AssistantUsage | null;
   /** 确认卡的实际执行结果；重启后仍需告诉用户已经完成、失败或取消。 */
   actionResults: string[];
   pending?: boolean;

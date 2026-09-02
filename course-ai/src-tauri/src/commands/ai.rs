@@ -6,7 +6,40 @@ use crate::llm::keychain;
 use crate::llm::profiles::{parse_profiles, parse_routing, resolve_profile, AiTask, LlmProfile};
 use crate::pipeline::ai;
 use serde::Serialize;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use tauri::State;
+
+/// Releases the per-video/task generation slot even if provider code returns an
+/// error or unwinds. The shared AppState registry also covers separate webviews.
+struct AiGenerationRegistration {
+    state: AppState,
+    request_id: String,
+    registration: Arc<AtomicBool>,
+}
+
+impl Drop for AiGenerationRegistration {
+    fn drop(&mut self) {
+        self.state
+            .unregister_cancel(&self.request_id, &self.registration);
+    }
+}
+
+fn register_ai_generation(
+    state: &AppState,
+    video_id: &str,
+    task: &str,
+) -> AppResult<AiGenerationRegistration> {
+    let request_id = format!("ai-generation:{video_id}:{task}");
+    let registration = state
+        .register_cancel_if_free(&request_id)
+        .ok_or_else(|| AppError::Other("这项内容正在生成，请等待当前任务完成后再试".into()))?;
+    Ok(AiGenerationRegistration {
+        state: state.clone(),
+        request_id,
+        registration,
+    })
+}
 
 // ---------- profiles & keys ----------
 
@@ -247,7 +280,7 @@ async fn provider_for(state: &AppState, task: AiTask) -> AppResult<(crate::llm::
 pub async fn cmd_generate_ai(
     state: State<'_, AppState>,
     video_id: String,
-    task: String, // "chapters" | "notes" | "quiz" | "mindmap"
+    task: String, // "chapters" | "notes" | "summary" | "quiz" | "mindmap"
 ) -> AppResult<()> {
     let ai_task = match task.as_str() {
         "chapters" => AiTask::Chapters,
@@ -257,6 +290,9 @@ pub async fn cmd_generate_ai(
         "mindmap" => AiTask::Mindmap,
         other => return Err(AppError::Other(format!("unknown task {other}"))),
     };
+    // React Query prevents duplicate clicks in one window; this process-wide slot
+    // is the final defense for two windows/webviews invoking the same paid task.
+    let _registration = register_ai_generation(&state, &video_id, &task)?;
     let (provider, model) = provider_for(&state, ai_task).await?;
     let db = state.db.clone();
     match ai_task {
@@ -297,6 +333,29 @@ mod tests {
     use crate::commands::settings::set_setting;
     use crate::db::Db;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn generation_registry_rejects_the_same_video_task_until_release() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("generation-lock.db"))
+            .await
+            .unwrap();
+        let state = AppState::new(db);
+
+        let first = register_ai_generation(&state, "video-1", "summary").unwrap();
+        let duplicate = register_ai_generation(&state, "video-1", "summary")
+            .err()
+            .expect("duplicate generation must be rejected");
+        assert!(duplicate.to_string().contains("正在生成"));
+
+        // Different tasks and videos do not block one another.
+        let other_task = register_ai_generation(&state, "video-1", "quiz").unwrap();
+        let other_video = register_ai_generation(&state, "video-2", "summary").unwrap();
+        drop((other_task, other_video));
+
+        drop(first);
+        assert!(register_ai_generation(&state, "video-1", "summary").is_ok());
+    }
 
     #[tokio::test]
     async fn subtitle_correction_uses_the_model_the_user_picked() {

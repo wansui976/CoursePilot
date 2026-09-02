@@ -341,7 +341,15 @@ export type AssistantAction =
       new_name: string;
     }
   /** 主题不走确认卡：无破坏性、一眼可见、再说一句就能改回来。 */
-  | { kind: "set_theme"; pref: "dark" | "light" | "auto" };
+  | { kind: "set_theme"; pref: "dark" | "light" | "auto" }
+  /** 提案：把生成好的 Markdown 追加进某视频的笔记。用户确认才写入，预览内容已包含在内。 */
+  | {
+      kind: "propose_create_note";
+      video_id: string;
+      video_title: string;
+      topic: string;
+      markdown: string;
+    };
 
 export type AgentStopReason =
   | "completed"
@@ -350,6 +358,14 @@ export type AgentStopReason =
   | "limit_reached";
 
 export type ToolExecutionStatus = "completed" | "failed" | "canceled";
+
+/** 一次模型请求的 token 用量（与后端 llm::Usage 对应）。 */
+export interface AssistantUsage {
+  prompt_tokens: number;
+  cached_tokens: number;
+  completion_tokens: number;
+  reasoning_tokens: number;
+}
 
 export interface AssistantReply {
   answer: string;
@@ -364,6 +380,8 @@ export interface AssistantReply {
   actions: AssistantAction[];
   turns: number;
   tools_used: string[];
+  /** 整轮全部模型请求的 token 用量合计。端点不报则为 null，界面不应显示成零消耗。 */
+  usage: AssistantUsage | null;
   history: AssistantMessage[];
 }
 
@@ -387,6 +405,8 @@ export type AssistantEvent =
       status?: ToolExecutionStatus;
       canceled: boolean;
     }
+  /** 工具链撞到轮次/预算上限，转入强制总结；到 done 为止界面应显示进行中状态。 */
+  | { type: "turn_limit" }
   | { type: "done"; reply: AssistantReply }
   | { type: "error"; message: string };
 

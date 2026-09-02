@@ -64,6 +64,33 @@ pub fn notes_request(model: &str, transcript: &str) -> ChatRequest {
     )
 }
 
+/// 助手把「整理成笔记」的请求落成一段可追加进视频笔记的 Markdown。
+///
+/// 输入是助手从对话/检索里整理好的要点，不是整篇讲稿——
+/// 所以约束是「别编造」，而不是全视频笔记的「每条都要有出处」。
+pub fn note_snippet_request(model: &str, topic: &str, points: &str) -> ChatRequest {
+    ChatRequest {
+        model: model.to_string(),
+        system: Some(
+            "你是应试类网课的笔记助手。输出 Markdown，不要代码围栏。\
+             这段笔记会追加到用户该视频的笔记里，供课后复习和考前速查。规则：\
+             1. 只写用户要求整理的这段内容，不要扩写成整节视频的笔记。\
+             2. 用「## 主题」分节，节内用「- 」列要点；要点写成可执行的动作或可判断的结论，\
+                不要写成「介绍了 X」这类目录式空话。\
+             3. 用户给的口诀、模板、固定表述逐字保留，不要改写成同义句。\
+             4. 只依据用户给出的要点整理，不编造要点之外的内容。"
+                .to_string(),
+        ),
+        cacheable_context: None,
+        messages: vec![ChatMessage::user(format!(
+            "把下面的内容整理成一段 Markdown 笔记。\n主题：{topic}\n要点：\n{points}"
+        ))],
+        temperature: 0.3,
+        tools: Vec::new(),
+        label: "note_snippet",
+    }
+}
+
 pub fn quiz_request(model: &str, transcript: &str) -> ChatRequest {
     base(
         "quiz",
@@ -134,6 +161,30 @@ pub fn digest_request(model: &str, chunk: &str) -> ChatRequest {
         temperature: 0.2,
         tools: Vec::new(),
         label: "digest",
+    }
+}
+
+/// 长对话的早段压缩：把更早的提问与答复压成一条要点摘要。
+///
+/// 对话历史没有讲稿版 `digest_request` 要摘的 [mm:ss] 原句，直接复用会让模型在
+/// 历史里找不存在的行首时间戳；这里只保留「用户问过什么、查到过什么、达成了什么」——
+/// 后续轮次真正需要的上下文，体量压进 300 字。
+pub fn history_digest_request(model: &str, history: &str) -> ChatRequest {
+    ChatRequest {
+        model: model.to_string(),
+        system: Some("你是对话压缩助手。输出纯文本，不要代码围栏、不要任何解释。".into()),
+        cacheable_context: None,
+        messages: vec![ChatMessage::user(format!(
+            "把下面这段更早的用户与助手对话压成一条要点摘要：\n{history}\n\n\
+                 要求：\n\
+                 - 按时间顺序列出：用户问过什么、助手查到过什么资料、得出过什么结论、\n\
+                   还有哪些待确认的操作（如「重命名/删除提案待确认」）；\n\
+                 - 保留具体名词与结论（课程名、视频名、搜索结果），丢掉寒暄和过程；\n\
+                 - 不超过 300 字；只用对话里有的内容，不要补充。"
+        ))],
+        temperature: 0.2,
+        tools: Vec::new(),
+        label: "history_digest",
     }
 }
 

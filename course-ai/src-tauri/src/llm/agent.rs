@@ -34,6 +34,14 @@ const FORCE_SUMMARY_INSTRUCTION: &str =
 直接给用户完整、准确、简洁的最终答复；不要再调用工具，也不要只说正在查询。\
 如果现有资料不足，请明确说明不足之处以及已经能够确认的内容。";
 
+/// 助手流式调用的抖动重试退避（秒），与批量管线的 `DIGEST_CHUNK_BACKOFF_SECS`
+/// 同一模式：429/5xx/超时先别急着红条，等一会儿再发一次。测试时归零，不让
+/// 断言等上真实的退避时长。
+#[cfg(not(test))]
+const AGENT_STREAM_RETRY_BACKOFF_SECS: &[u64] = &[2, 4];
+#[cfg(test)]
+const AGENT_STREAM_RETRY_BACKOFF_SECS: &[u64] = &[0, 0];
+
 /// 一次工具执行的结果。
 ///
 /// 失败也是一种结果，不是错误：`Err` 会打断整段对话，而把失败文本喂回去，
@@ -118,6 +126,14 @@ pub trait ToolBox {
         preflight_tool_call(&self.specs(), call)
     }
 
+    /// 工具是否只读（不产生副作用，可与其他只读工具并发执行）。
+    ///
+    /// 默认 false 保守安全：只有声明了只读的调用才会进并发批次，
+    /// 写操作永远串行，模型依赖上一笔副作用时行为不变。
+    fn is_read_only(&self, _name: &str) -> bool {
+        false
+    }
+
     async fn run_unchecked(&self, call: &ToolCall) -> ToolOutcome;
 
     /// 业务调用方使用的标准入口。Agent 循环只在自己已经完成同一 preflight 后，
@@ -199,6 +215,9 @@ pub struct AgentOutcome {
     pub hit_turn_limit: bool,
     /// 唯一终态。上面的兼容布尔值必须由它推导，不能形成互相矛盾的组合。
     pub stop_reason: AgentStopReason,
+    /// 循环里全部模型请求的 token 用量合计（含工具轮与强制总结）。
+    /// 端点不报则保持 None；只要报过就逐次累加，供界面把这一轮的实际成本展示给用户。
+    pub usage: Option<crate::llm::Usage>,
 }
 
 impl AgentOutcome {
@@ -207,11 +226,13 @@ impl AgentOutcome {
         messages: Vec<ChatMessage>,
         turns: usize,
         stop_reason: AgentStopReason,
+        usage: Option<crate::llm::Usage>,
     ) -> Self {
         Self {
             answer,
             messages,
             turns,
+            usage,
             canceled: stop_reason == AgentStopReason::Canceled,
             hit_turn_limit: stop_reason == AgentStopReason::LimitReached,
             stop_reason,
@@ -264,6 +285,111 @@ fn cap_tool_result(content: String, remaining_chars: usize) -> (String, usize, b
     (capped, used, true)
 }
 
+/// 工具循环跨批次累计的状态：调用数与结果字符预算。
+///
+/// 拆成批量执行后各批次必须共享同一份累计，预算检查才不会被每个批次开头「归零」。
+#[derive(Default)]
+struct ToolLoopState {
+    tool_calls: usize,
+    tool_result_chars: usize,
+    budget_exhausted: bool,
+}
+
+/// 执行一批类型一致的调用（全部只读或全部非只读）。
+///
+/// 调用方保证：多调用批次只含只读工具，非只读调用永远是单元素批次（写操作必须串行）。
+/// 因此这里对批内调用一律并发（`join_all`）；单元素批次并发与否在时序上没有差别。
+///
+/// 对外观察行为与原串行循环逐条一致，只是把执行段重叠起来：
+/// - 取消后不再执行剩下的工具，但每条调用都补一条结果，保持消息结构完整；
+/// - 预算封顶后剩余的调用补 `TOOL_BUDGET_EXHAUSTED`，并置位 `budget_exhausted`；
+/// - 被 preflight 拒绝的调用不发 ToolStarted/ToolFinished（从未进入执行）；
+/// - 事件按调用序号成对发出，tool result 按序号写回，前端看到的顺序不受并发影响。
+async fn run_batch<'a, T: ToolBox>(
+    tools: &T,
+    batch: &'a [ToolCall],
+    cancel: &AtomicBool,
+    on_event: &mut (dyn FnMut(AgentEvent<'a>) + Send),
+    messages: &mut Vec<ChatMessage>,
+    state: &mut ToolLoopState,
+) {
+    enum Pending<'a> {
+        Run { call: &'a ToolCall },
+        Rejected { call: &'a ToolCall, outcome: ToolOutcome },
+        Canceled { call: &'a ToolCall },
+        Exhausted { call: &'a ToolCall },
+    }
+
+    // 第一遍只做决定、不落结果：占位与执行结果都留到最后统一按调用序号写回，
+    // 否则并发批次里先处理的占位会跑到还没执行完的结果前面，消息顺序就乱了。
+    let mut pending: Vec<Pending<'a>> = Vec::with_capacity(batch.len());
+    let mut futures = Vec::with_capacity(batch.len());
+    for call in batch {
+        // 取消后不再执行剩下的工具，但已经执行过的结果要留在对话里——
+        // 缺了任何一条结果，下一次请求同样是孤儿调用。
+        if cancel.load(Ordering::SeqCst) {
+            pending.push(Pending::Canceled { call });
+            continue;
+        }
+        if state.tool_calls >= MAX_TOOL_CALLS
+            || state.tool_result_chars >= MAX_TOTAL_TOOL_RESULT_CHARS
+        {
+            pending.push(Pending::Exhausted { call });
+            state.budget_exhausted = true;
+            continue;
+        }
+        state.tool_calls += 1;
+        match tools.preflight(call) {
+            Ok(()) => {
+                on_event(AgentEvent::ToolStarted(call));
+                pending.push(Pending::Run { call });
+                futures.push(run_tool_or_cancel(tools, call, cancel));
+            }
+            // 被策略拒绝的调用从未进入领域 dispatch，不能对界面谎报成「工具已开始」。
+            // 失败仍要作为 tool result 回给模型，保持消息结构完整并允许它修正。
+            Err(outcome) => pending.push(Pending::Rejected { call, outcome }),
+        }
+    }
+
+    // 只读批次在这里并发执行；join_all 保持输入顺序，结果按调用序号回收。
+    let mut outcomes = futures_util::future::join_all(futures).await.into_iter();
+    for entry in pending {
+        let (call, outcome) = match entry {
+            Pending::Run { call } => {
+                let outcome = outcomes
+                    .next()
+                    .expect("每个 Run 槽都对应一个 future，join_all 保序返回");
+                on_event(AgentEvent::ToolFinished {
+                    call,
+                    status: outcome
+                        .as_ref()
+                        .map(|outcome| outcome.status)
+                        .unwrap_or(ToolExecutionStatus::Canceled),
+                });
+                (call, outcome)
+            }
+            Pending::Rejected { call, outcome } => (call, Some(outcome)),
+            Pending::Canceled { call } => {
+                messages.push(ChatMessage::tool_result(&call.id, "已取消，未执行。".to_string()));
+                continue;
+            }
+            Pending::Exhausted { call } => {
+                messages.push(ChatMessage::tool_result(&call.id, TOOL_BUDGET_EXHAUSTED.to_string()));
+                continue;
+            }
+        };
+        let raw_content = outcome
+            .map(|outcome| outcome.content)
+            .unwrap_or_else(|| "已取消，执行未完成。".to_string());
+        let remaining_chars = MAX_TOTAL_TOOL_RESULT_CHARS - state.tool_result_chars;
+        let (content, used_chars, truncated) = cap_tool_result(raw_content, remaining_chars);
+        state.tool_result_chars += used_chars;
+        state.budget_exhausted |=
+            truncated || state.tool_result_chars >= MAX_TOTAL_TOOL_RESULT_CHARS;
+        messages.push(ChatMessage::tool_result(&call.id, content));
+    }
+}
+
 fn forced_summary_request(
     model: &str,
     system: Option<&str>,
@@ -285,6 +411,71 @@ fn forced_summary_request(
     }
 }
 
+/// 流式调用的抖动重试。
+///
+/// 网络抖动对批量管线是可重试的（`digest_one_chunk` 有指数退避），同一场抖动
+/// 落到助手头上就直接红条，等于把最常用的入口做成了最脆的。重试只在两个条件
+/// **同时**成立时发生，其余一律维持现状上抛：
+///
+/// - 错误本身可重试：`is_permanent` 的（鉴权、余额、参数错）再发一遍还是同一句话，
+///   重试只是让用户白等退避。
+/// - 本轮尚未吐出任何正文或工具调用：流已经开了再断掉，重发会把前半截再输出一遍，
+///   界面出现重复文字比红条更糟。
+///
+/// 每次重试前查取消标志——用户在失败与重试之间点了停止，就绝不再发请求。
+async fn complete_stream_with_retry(
+    provider: &Provider,
+    req: &ChatRequest,
+    cancel: &AtomicBool,
+    on_event: &mut (dyn FnMut(AgentEvent) + Send),
+) -> AppResult<crate::llm::StreamOutcome> {
+    // 闭包要求 Send，用 AtomicBool 而非 Cell；跨不跨线程无所谓，重点是能过边界。
+    let emitted = AtomicBool::new(false);
+    let mut attempt = 0usize;
+    loop {
+        let mut on_piece = |piece: crate::llm::StreamPiece| {
+            emitted.store(true, Ordering::SeqCst);
+            match piece {
+                crate::llm::StreamPiece::Content(delta) => on_event(AgentEvent::Content(delta)),
+                crate::llm::StreamPiece::Reasoning(delta) => {
+                    on_event(AgentEvent::Reasoning(delta))
+                }
+            }
+        };
+        match provider.complete_stream(req, cancel, &mut on_piece).await {
+            Ok(outcome) => return Ok(outcome),
+            Err(error) if error.is_permanent() => return Err(error),
+            Err(_error)
+                if attempt < AGENT_STREAM_RETRY_BACKOFF_SECS.len()
+                    && !emitted.load(Ordering::SeqCst)
+                    && !cancel.load(Ordering::SeqCst) =>
+            {
+                let backoff =
+                    std::time::Duration::from_secs(AGENT_STREAM_RETRY_BACKOFF_SECS[attempt]);
+                tokio::time::sleep(backoff).await;
+                attempt += 1;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// 把一次请求报的用量累加进合计。端点不报（None）就当没发生，不把缺失当成零。
+fn accumulate_usage(total: &mut Option<crate::llm::Usage>, incoming: Option<crate::llm::Usage>) {
+    let Some(incoming) = incoming else {
+        return;
+    };
+    match total {
+        Some(total) => {
+            total.prompt_tokens += incoming.prompt_tokens;
+            total.cached_tokens += incoming.cached_tokens;
+            total.completion_tokens += incoming.completion_tokens;
+            total.reasoning_tokens += incoming.reasoning_tokens;
+        }
+        None => *total = Some(incoming),
+    }
+}
+
 /// 跑工具调用循环，直到模型给出答复；达到工具轮次或上下文预算上限后再尝试一次无工具总结。
 ///
 /// `messages` 是起始对话（通常是系统状态 + 用户这句话）；返回时会带上循环中产生的
@@ -301,9 +492,8 @@ pub async fn run<T: ToolBox>(
     let specs = tools.specs();
     let mut answer = String::new();
     let mut turns = 0;
-    let mut tool_calls = 0;
-    let mut tool_result_chars = 0;
-    let mut budget_exhausted = false;
+    let mut state = ToolLoopState::default();
+    let mut usage: Option<crate::llm::Usage> = None;
 
     'agent: for turn in 0..MAX_TURNS {
         if cancel.load(Ordering::SeqCst) {
@@ -325,13 +515,9 @@ pub async fn run<T: ToolBox>(
         // 走流式：思考与正文一边生成一边交给调用方显示。
         // 取消同样不必等到请求超时——complete_stream 在等待网络数据的间隙也查标志，
         // 而这个循环最需要被打断的时刻，恰恰就是某一次调用卡住的时候。
-        let mut on_piece = |piece: crate::llm::StreamPiece| match piece {
-            crate::llm::StreamPiece::Content(delta) => on_event(AgentEvent::Content(delta)),
-            crate::llm::StreamPiece::Reasoning(delta) => on_event(AgentEvent::Reasoning(delta)),
-        };
-        let streamed = provider
-            .complete_stream(&req, cancel, &mut on_piece)
-            .await?;
+        // 网络抖动由 complete_stream_with_retry 消化：可重试且尚未吐字的失败会退避重发。
+        let streamed = complete_stream_with_retry(provider, &req, cancel, on_event).await?;
+        accumulate_usage(&mut usage, streamed.usage);
         // 取消时把已经吐出来的半截丢掉：它不是一个完整答复，也没有对应的工具结果。
         if cancel.load(Ordering::SeqCst) {
             break;
@@ -354,6 +540,7 @@ pub async fn run<T: ToolBox>(
                 messages,
                 turns,
                 AgentStopReason::Completed,
+                usage,
             ));
         }
 
@@ -365,46 +552,42 @@ pub async fn run<T: ToolBox>(
             response.tool_calls.clone(),
         ));
 
-        for call in &response.tool_calls {
-            // 取消后不再执行剩下的工具，但已经执行过的结果要留在对话里——
-            // 缺了任何一条结果，下一次请求同样是孤儿调用。
-            if cancel.load(Ordering::SeqCst) {
-                messages.push(ChatMessage::tool_result(&call.id, "已取消，未执行。"));
+        // 一轮里的多个调用按「连续只读」并成批次：只读工具不产生动作、不改数据，
+        // 天然可并发；写操作保持串行，模型依赖上一笔副作用时行为不变。
+        // 事件仍按调用序号成对发出，前端看到的顺序不受并发影响。
+        let mut index = 0;
+        while index < response.tool_calls.len() {
+            if !tools.is_read_only(&response.tool_calls[index].name) {
+                // 非只读调用单独成批：绝不与其他调用并发，保持原串行语义。
+                run_batch(
+                    tools,
+                    &response.tool_calls[index..index + 1],
+                    cancel,
+                    on_event,
+                    &mut messages,
+                    &mut state,
+                )
+                .await;
+                index += 1;
                 continue;
             }
-            if tool_calls >= MAX_TOOL_CALLS || tool_result_chars >= MAX_TOTAL_TOOL_RESULT_CHARS {
-                messages.push(ChatMessage::tool_result(&call.id, TOOL_BUDGET_EXHAUSTED));
-                budget_exhausted = true;
-                continue;
+            let batch_start = index;
+            while index < response.tool_calls.len()
+                && tools.is_read_only(&response.tool_calls[index].name)
+            {
+                index += 1;
             }
-            tool_calls += 1;
-            let outcome = match tools.preflight(call) {
-                Ok(()) => {
-                    on_event(AgentEvent::ToolStarted(call));
-                    let outcome = run_tool_or_cancel(tools, call, cancel).await;
-                    on_event(AgentEvent::ToolFinished {
-                        call,
-                        status: outcome
-                            .as_ref()
-                            .map(|outcome| outcome.status)
-                            .unwrap_or(ToolExecutionStatus::Canceled),
-                    });
-                    outcome
-                }
-                // 被策略拒绝的调用从未进入领域 dispatch，不能对界面谎报成“工具已开始”。
-                // 失败仍要作为 tool result 回给模型，保持消息结构完整并允许它修正。
-                Err(outcome) => Some(outcome),
-            };
-            let raw_content = outcome
-                .map(|outcome| outcome.content)
-                .unwrap_or_else(|| "已取消，执行未完成。".to_string());
-            let remaining_chars = MAX_TOTAL_TOOL_RESULT_CHARS - tool_result_chars;
-            let (content, used_chars, truncated) = cap_tool_result(raw_content, remaining_chars);
-            tool_result_chars += used_chars;
-            budget_exhausted |= truncated || tool_result_chars >= MAX_TOTAL_TOOL_RESULT_CHARS;
-            messages.push(ChatMessage::tool_result(&call.id, content));
+            run_batch(
+                tools,
+                &response.tool_calls[batch_start..index],
+                cancel,
+                on_event,
+                &mut messages,
+                &mut state,
+            )
+            .await;
         }
-        if budget_exhausted {
+        if state.budget_exhausted {
             break 'agent;
         }
     }
@@ -412,20 +595,15 @@ pub async fn run<T: ToolBox>(
     // 被取消不算撞上限。两者都会走到这里，但对用户是两件事：
     // 一个是「你叫停的」，一个是「它自己转不出来了」。
     let canceled = cancel.load(Ordering::SeqCst);
-    if (turns >= MAX_TURNS || budget_exhausted) && !canceled {
+    if (turns >= MAX_TURNS || state.budget_exhausted) && !canceled {
         // 先发出边界事件，让调用方知道工具链已经封顶；随后这一次请求明确不带工具，
         // 只负责把已有检索结果整理成最终答复。总结请求失败时仍保留上限标记。
         on_event(AgentEvent::HitTurnLimit);
         let summary_turn = turns + 1;
         on_event(AgentEvent::TurnStarted(summary_turn));
         let summary_req = forced_summary_request(model, system.as_deref(), messages.clone());
-        let mut on_piece = |piece: crate::llm::StreamPiece| match piece {
-            crate::llm::StreamPiece::Content(delta) => on_event(AgentEvent::Content(delta)),
-            crate::llm::StreamPiece::Reasoning(delta) => on_event(AgentEvent::Reasoning(delta)),
-        };
-        let summary = match provider
-            .complete_stream(&summary_req, cancel, &mut on_piece)
-            .await
+        // 总结请求同样吃抖动重试：它是封顶后的最后一步，抖动把它打掉用户连兜底都没有。
+        let summary = match complete_stream_with_retry(provider, &summary_req, cancel, on_event).await
         {
             Ok(summary) => summary,
             // 强制总结是封顶后的兜底。它自己失败时不能把前面已经取得的资料和动作
@@ -441,9 +619,11 @@ pub async fn run<T: ToolBox>(
                     } else {
                         AgentStopReason::LimitReached
                     },
+                    usage,
                 ));
             }
         };
+        accumulate_usage(&mut usage, summary.usage);
         // 和工具循环一样，取消时丢掉总结请求吐出的半截内容，不把它写进下一轮历史。
         if cancel.load(Ordering::SeqCst) {
             return Ok(AgentOutcome::finished(
@@ -451,6 +631,7 @@ pub async fn run<T: ToolBox>(
                 messages,
                 summary_turn,
                 AgentStopReason::Canceled,
+                usage,
             ));
         }
         // 兼容端点即使在请求体没有 tools 时仍返回 tool_calls，也绝不执行它们；有正文就
@@ -463,6 +644,7 @@ pub async fn run<T: ToolBox>(
                 messages,
                 summary_turn,
                 AgentStopReason::SummarizedAfterLimit,
+                usage,
             ));
         }
         // 总结没有产出正文：把已取得的资料和过场答复交出去，并保留上限标记，供界面给出
@@ -472,6 +654,7 @@ pub async fn run<T: ToolBox>(
             messages,
             summary_turn,
             AgentStopReason::LimitReached,
+            usage,
         ));
     }
 
@@ -485,6 +668,7 @@ pub async fn run<T: ToolBox>(
         } else {
             AgentStopReason::Completed
         },
+        usage,
     ))
 }
 
@@ -546,6 +730,22 @@ mod tests {
         }
     }
 
+    fn flaky(
+        failures: usize,
+        permanent: bool,
+        steps: Vec<crate::llm::ChatResponse>,
+        cancel_on_fail: Option<std::sync::Arc<AtomicBool>>,
+    ) -> Provider {
+        Provider::Flaky {
+            failures: Mutex::new(failures),
+            permanent,
+            message: "网关抖动（测试注入）".into(),
+            steps: Mutex::new(steps),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+            cancel_on_fail,
+        }
+    }
+
     #[test]
     fn the_forced_summary_request_disables_tools_and_keeps_the_collected_history() {
         let request = forced_summary_request(
@@ -573,10 +773,100 @@ mod tests {
         ];
 
         for (reason, canceled, hit_turn_limit) in cases {
-            let outcome = AgentOutcome::finished(String::new(), Vec::new(), 0, reason);
+            let outcome = AgentOutcome::finished(String::new(), Vec::new(), 0, reason, None);
             assert_eq!(outcome.canceled, canceled, "{reason:?}");
             assert_eq!(outcome.hit_turn_limit, hit_turn_limit, "{reason:?}");
         }
+    }
+
+    #[test]
+    fn usage_from_every_request_is_accumulated_into_the_outcome() {
+        let mut total: Option<crate::llm::Usage> = None;
+        accumulate_usage(
+            &mut total,
+            Some(crate::llm::Usage {
+                prompt_tokens: 100,
+                cached_tokens: 40,
+                completion_tokens: 10,
+                reasoning_tokens: 5,
+            }),
+        );
+        accumulate_usage(
+            &mut total,
+            Some(crate::llm::Usage {
+                prompt_tokens: 50,
+                cached_tokens: 0,
+                completion_tokens: 8,
+                reasoning_tokens: 0,
+            }),
+        );
+        accumulate_usage(&mut total, None);
+        let total = total.expect("报过用量就一定有合计");
+        assert_eq!(total.prompt_tokens, 150);
+        assert_eq!(total.cached_tokens, 40);
+        assert_eq!(total.completion_tokens, 18);
+        assert_eq!(total.reasoning_tokens, 5);
+        // 从没报过用量时保持 None，不把缺失当成零消耗。
+        let mut never: Option<crate::llm::Usage> = None;
+        accumulate_usage(&mut never, None);
+        assert!(never.is_none());
+    }
+
+    /// 循环里每一次请求报的用量都要累加进最终结果：工具轮 + 答复轮 = 合计，
+    /// 界面据此展示「这一轮实际花了多少」。
+    #[tokio::test]
+    async fn token_usage_is_accumulated_across_turns() {
+        let mut tool_turn = wants(vec![call("c1", "probe", "{}")]);
+        tool_turn.usage = Some(crate::llm::Usage {
+            prompt_tokens: 100,
+            cached_tokens: 0,
+            completion_tokens: 10,
+            reasoning_tokens: 0,
+        });
+        let mut answer_turn = says("查完了");
+        answer_turn.usage = Some(crate::llm::Usage {
+            prompt_tokens: 200,
+            cached_tokens: 50,
+            completion_tokens: 20,
+            reasoning_tokens: 3,
+        });
+        let provider = scripted(vec![tool_turn, answer_turn]);
+        let out = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("查一下")],
+            &Recorder::new(false),
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+
+        let usage = out.usage.expect("端点报了用量就要透出");
+        assert_eq!(usage.prompt_tokens, 300);
+        assert_eq!(usage.cached_tokens, 50);
+        assert_eq!(usage.completion_tokens, 30);
+        assert_eq!(usage.reasoning_tokens, 3);
+    }
+
+    /// 端点全程不报用量的运行保持 None，界面不能把「没报」当成「免费」。
+    #[tokio::test]
+    async fn a_run_without_reported_usage_keeps_usage_none() {
+        let provider = scripted(vec![says("没报用量")]);
+        let out = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("问")],
+            &Recorder::new(false),
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+
+        assert!(out.usage.is_none());
     }
 
     /// 记录被执行过哪些工具；`fail` 时一律执行失败。
@@ -812,7 +1102,7 @@ mod tests {
         steps.push(says("基于已经查到的资料，最终答案如下"));
         let provider = scripted(steps);
         let tools = Recorder::new(false);
-        let mut hit_limit = false;
+        let mut trace: Vec<String> = Vec::new();
         let out = run(
             &provider,
             "m",
@@ -820,17 +1110,26 @@ mod tests {
             vec![ChatMessage::user("一直做")],
             &tools,
             &AtomicBool::new(false),
-            &mut |e| {
-                if matches!(e, AgentEvent::HitTurnLimit) {
-                    hit_limit = true;
-                }
+            &mut |event| match event {
+                AgentEvent::HitTurnLimit => trace.push("limit".into()),
+                AgentEvent::TurnStarted(turn) => trace.push(format!("turn:{turn}")),
+                // 工具轮的过场话是空串，也会触发一次 Content 回调；只记真正有字的正文。
+                AgentEvent::Content(delta) if !delta.is_empty() => trace.push("text".into()),
+                _ => {}
             },
         )
         .await
         .unwrap();
 
         assert_eq!(out.turns, MAX_TURNS + 1, "最后一次只负责总结");
-        assert!(hit_limit, "工具轮撞上限要发出内部事件");
+        // 撞上限事件必须先于总结轮开始、先于总结正文：界面据此知道「封顶」早于「完成」。
+        let limit_at = trace.iter().position(|e| e == "limit").expect("要发撞上限事件");
+        let summary_at = trace
+            .iter()
+            .position(|e| e == format!("turn:{}", MAX_TURNS + 1).as_str())
+            .expect("总结轮要单独播报");
+        let text_at = trace.iter().position(|e| e == "text").expect("总结正文要播出");
+        assert!(limit_at < summary_at && summary_at < text_at, "顺序应为 撞上限→总结轮→总结正文，实际 {trace:?}");
         assert_eq!(out.answer, "基于已经查到的资料，最终答案如下");
         assert!(
             !out.hit_turn_limit,
@@ -1330,5 +1629,265 @@ mod tests {
             parameters: serde_json::json!({}),
         }])
         .is_ok());
+    }
+
+    /// 抖动重试的成功路径：第一次被网络抖动打断，第二次拿到答案。
+    /// 没有重试的话，这次失败直接变红条——批量管线能忍的抖动，助手也必须能忍。
+    #[tokio::test]
+    async fn a_retryable_stream_failure_is_retried_until_it_succeeds() {
+        let provider = flaky(1, false, vec![says("第二次才答上")], None);
+        let out = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("问")],
+            &Recorder::new(false),
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(provider.call_count(), 2, "失败一次后应当重试并成功");
+        assert_eq!(out.answer, "第二次才答上");
+        assert_eq!(out.stop_reason, AgentStopReason::Completed);
+    }
+
+    /// 重试次数有上限（2 次）：退避预算耗尽后仍失败才上抛，不会无限重试。
+    #[tokio::test]
+    async fn retry_gives_up_after_the_backoff_budget_is_exhausted() {
+        let provider = flaky(5, false, Vec::new(), None);
+        let error = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("问")],
+            &Recorder::new(false),
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .await
+        .err()
+        .expect("应当报错");
+
+        // 初始 1 次 + 2 次重试；第 3 次失败时预算耗尽，原样上抛。
+        assert_eq!(provider.call_count(), 3);
+        assert!(error.to_string().contains("网关抖动"));
+    }
+
+    /// 鉴权、余额这类错误再发一遍还是同一句话，重试只是让用户白等退避。
+    #[tokio::test]
+    async fn a_permanent_failure_is_not_retried() {
+        let provider = flaky(1, true, Vec::new(), None);
+        let error = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("问")],
+            &Recorder::new(false),
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .await
+        .err()
+        .expect("应当报错");
+
+        assert!(error.is_permanent());
+        assert_eq!(provider.call_count(), 1, "permanent 错误不该触发任何重试");
+    }
+
+    /// 用户在失败与重试之间点了停止：重试前的取消检查必须拦住下一次请求，
+    /// 否则「停止」之后模型请求还在背后继续发。
+    #[tokio::test]
+    async fn a_canceled_between_failure_and_retry_stops_sending_requests() {
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        // Flaky 在失败时置位这个标志，确定性模拟「失败之后、重试之前用户点了停止」。
+        let provider = flaky(1, false, vec![says("不该走到这里")], Some(cancel.clone()));
+        let error = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("问")],
+            &Recorder::new(false),
+            &cancel,
+            &mut |_| {},
+        )
+        .await
+        .err()
+        .expect("应当报错");
+
+        assert!(cancel.load(Ordering::SeqCst), "注入的失败应当置位取消标志");
+        assert_eq!(provider.call_count(), 1, "取消后绝不能再发请求");
+        assert!(error.to_string().contains("网关抖动"));
+    }
+
+    /// 并发探针工具集：`read_a`/`read_b` 只读，`write` 非只读。
+    /// 每个调用执行期间把活跃计数 +1 并记录最大值——串行执行 max_active
+    /// 永远是 1，并发执行才会到 2；这是并发唯一不依赖时钟的硬证据。
+    #[derive(Default)]
+    struct Probe {
+        active: std::sync::atomic::AtomicUsize,
+        max_active: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ToolBox for Probe {
+        fn specs(&self) -> Vec<ToolSpec> {
+            ["read_a", "read_b", "write"]
+                .into_iter()
+                .map(|name| ToolSpec {
+                    name: name.into(),
+                    description: "并发探针".into(),
+                    parameters: serde_json::json!({ "type": "object" }),
+                })
+                .collect()
+        }
+
+        fn is_read_only(&self, name: &str) -> bool {
+            name != "write"
+        }
+
+        async fn run_unchecked(&self, call: &ToolCall) -> ToolOutcome {
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(active, Ordering::SeqCst);
+            // 停留一小段，让并发的调用有时间重叠。
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            self.active.fetch_sub(1, Ordering::SeqCst);
+            ToolOutcome::ok(format!("{} 完成", call.name))
+        }
+    }
+
+    /// 只读工具在一轮里并发执行，事件仍按调用序号成对：
+    /// 两个「开始」按序聚簇播出，两个「结束」按序回收，前端看到的顺序不受并发影响。
+    #[tokio::test]
+    async fn read_only_calls_run_concurrently_with_events_paired_in_call_order() {
+        let provider = scripted(vec![
+            wants(vec![call("c1", "read_a", "{}"), call("c2", "read_b", "{}")]),
+            says("两个都查完了"),
+        ]);
+        let probe = Probe::default();
+        let mut trace: Vec<String> = Vec::new();
+        let out = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("并发查两处")],
+            &probe,
+            &AtomicBool::new(false),
+            &mut |event| match event {
+                AgentEvent::ToolStarted(call) => trace.push(format!("start:{}", call.id)),
+                AgentEvent::ToolFinished { call, status } => {
+                    trace.push(format!("finish:{}:{}", call.id, status.as_str()))
+                }
+                _ => {}
+            },
+        )
+        .await
+        .unwrap();
+
+        // 同一时刻有两个调用在执行——串行实现永远到不了 2。
+        assert_eq!(probe.max_active.load(Ordering::SeqCst), 2, "只读工具应当并发执行");
+        assert_eq!(
+            trace,
+            ["start:c1", "start:c2", "finish:c1:completed", "finish:c2:completed"],
+            "事件按调用序号成对：Started 聚簇在前，Finished 保序在后"
+        );
+        // 工具结果按调用序号写回对话，模型看到的顺序不乱。
+        let tool_ids: Vec<&str> = out
+            .messages
+            .iter()
+            .filter_map(|message| message.tool_call_id.as_deref())
+            .collect();
+        assert_eq!(tool_ids, ["c1", "c2"]);
+        assert_eq!(out.answer, "两个都查完了");
+    }
+
+    /// 非只读调用即使连续出现也单独成批：写操作保持串行，
+    /// 模型依赖上一笔副作用时行为与旧实现完全一致。
+    #[tokio::test]
+    async fn mutating_calls_stay_serial_even_when_consecutive() {
+        let provider = scripted(vec![
+            wants(vec![call("c1", "write", "{}"), call("c2", "write", "{}")]),
+            says("两个写操作都做完了"),
+        ]);
+        let probe = Probe::default();
+        let mut trace: Vec<String> = Vec::new();
+        let out = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("连做两笔写")],
+            &probe,
+            &AtomicBool::new(false),
+            &mut |event| match event {
+                AgentEvent::ToolStarted(call) => trace.push(format!("start:{}", call.id)),
+                AgentEvent::ToolFinished { call, status } => {
+                    trace.push(format!("finish:{}:{}", call.id, status.as_str()))
+                }
+                _ => {}
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(probe.max_active.load(Ordering::SeqCst), 1, "写操作必须串行，不能并发");
+        // 串行批次的事件仍严格交错：c1 结束之后 c2 才开始。
+        assert_eq!(
+            trace,
+            ["start:c1", "finish:c1:completed", "start:c2", "finish:c2:completed"],
+            "非只读调用逐个执行、事件逐对回收"
+        );
+        assert_eq!(out.answer, "两个写操作都做完了");
+    }
+
+    /// 混合序列只并发「连续只读」前缀：c1/c2 并发，c3（写）单独串行，c4 单独执行。
+    /// 分批边界由只读性决定，与调用之间的其他内容无关。
+    #[tokio::test]
+    async fn a_mixed_run_parallelizes_only_the_consecutive_read_only_prefix() {
+        let provider = scripted(vec![
+            wants(vec![
+                call("c1", "read_a", "{}"),
+                call("c2", "read_b", "{}"),
+                call("c3", "write", "{}"),
+                call("c4", "read_a", "{}"),
+            ]),
+            says("全部完成"),
+        ]);
+        let probe = Probe::default();
+        let mut trace: Vec<String> = Vec::new();
+        let out = run(
+            &provider,
+            "m",
+            None,
+            vec![ChatMessage::user("混合调用")],
+            &probe,
+            &AtomicBool::new(false),
+            &mut |event| match event {
+                AgentEvent::ToolStarted(call) => trace.push(format!("start:{}", call.id)),
+                AgentEvent::ToolFinished { call, status } => {
+                    trace.push(format!("finish:{}:{}", call.id, status.as_str()))
+                }
+                _ => {}
+            },
+        )
+        .await
+        .unwrap();
+
+        // 只读前缀并发到 2；写与之后的单独读都不能再与其他调用重叠。
+        assert_eq!(probe.max_active.load(Ordering::SeqCst), 2, "只有连续只读前缀并发");
+        assert_eq!(
+            trace,
+            [
+                "start:c1",
+                "start:c2",
+                "finish:c1:completed",
+                "finish:c2:completed",
+                "start:c3",
+                "finish:c3:completed",
+                "start:c4",
+                "finish:c4:completed",
+            ],
+            "写操作两侧的批次边界清晰：读前缀聚簇，写与后续单读严格串行"
+        );
+        assert_eq!(out.answer, "全部完成");
     }
 }

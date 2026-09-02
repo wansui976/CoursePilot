@@ -47,8 +47,14 @@ const { confirmMock, mockIpc, platformMock } = vi.hoisted(() => ({
   },
   platformMock: { mobile: false, tablet: false },
 }));
+const notesCoordinatorMock = vi.hoisted(() => ({
+  appendAnswer: vi.fn(),
+}));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
+vi.mock("@/lib/notesCoordinator", () => ({
+  notesCoordinator: notesCoordinatorMock,
+}));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: confirmMock }));
 vi.mock("@/lib/platform", () => ({
   isMobile: () => platformMock.mobile,
@@ -66,6 +72,7 @@ function reply(over: Partial<AssistantReply> = {}): AssistantReply {
     actions: [],
     turns: 1,
     tools_used: [],
+    usage: null,
     history: [],
     ...over,
   };
@@ -135,6 +142,7 @@ describe("AssistantPanel", () => {
     useInlineAsk.setState({ pending: null });
     mockIpc.assistant.ask.mockResolvedValue(reply());
     mockIpc.assistant.cancel.mockResolvedValue(undefined);
+    notesCoordinatorMock.appendAnswer.mockResolvedValue({ contentJson: "{}" });
     confirmMock.mockResolvedValue(true);
   });
 
@@ -323,6 +331,91 @@ describe("AssistantPanel", () => {
     });
     expect(await screen.findByText("这节课讲的是导数。")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("正在作答"));
+  });
+
+  it("撞到工具轮次上限时提示正在整理，直到回答完成", async () => {
+    // 撞上限到总结完成之间可能还有十几秒，期间没有其他任何事件；
+    // 没有这条提示，用户只看到「卡住了」。
+    let emit!: (event: AssistantEvent) => void;
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask.mockImplementationOnce(
+      (_q, _c, _h, _id, onEvent: (event: AssistantEvent) => void) => {
+        emit = onEvent;
+        return new Promise<AssistantReply>((resolve) => {
+          finish = resolve;
+        });
+      },
+    );
+    renderPanel();
+    await ask("帮我整理资料");
+    await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalled());
+
+    act(() => {
+      emit({ type: "turn_limit" });
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "工具轮次已达上限，正在整理已查到的资料…",
+      ),
+    );
+
+    act(() => {
+      finish(reply({ answer: "整理好了" }));
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("回答已完成"),
+    );
+    expect(screen.getByText("整理好了")).toBeInTheDocument();
+  });
+
+  it("回答完成后在下方显示本次消耗的 tokens", async () => {
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask.mockImplementationOnce(
+      (_q, _c, _h, _id, _onEvent: (event: AssistantEvent) => void) =>
+        new Promise<AssistantReply>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    renderPanel();
+    await ask("查一下");
+    await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalled());
+
+    act(() => {
+      finish(
+        reply({
+          answer: "查到了",
+          usage: {
+            prompt_tokens: 1200,
+            cached_tokens: 400,
+            completion_tokens: 300,
+            reasoning_tokens: 50,
+          },
+        }),
+      );
+    });
+    expect(await screen.findByText("查到了")).toBeInTheDocument();
+    // 输入 + 正式输出 + 推理输出 = 1,550；缓存是输入的子集，不重复计。
+    expect(screen.getByTestId("turn-usage")).toHaveTextContent("本次消耗 1,550 tokens");
+  });
+
+  it("端点没报用量时不显示消耗行", async () => {
+    let finish!: (value: AssistantReply) => void;
+    mockIpc.assistant.ask.mockImplementationOnce(
+      (_q, _c, _h, _id, _onEvent: (event: AssistantEvent) => void) =>
+        new Promise<AssistantReply>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    renderPanel();
+    await ask("查一下");
+    await waitFor(() => expect(mockIpc.assistant.ask).toHaveBeenCalled());
+
+    act(() => {
+      finish(reply({ answer: "查到了" }));
+    });
+    expect(await screen.findByText("查到了")).toBeInTheDocument();
+    // 把「没报」当成零消耗是撒谎，宁可不显示。
+    expect(screen.queryByTestId("turn-usage")).not.toBeInTheDocument();
   });
 
   it("保留每次工具调用的真实终态，失败后立即结束也不会消失", async () => {
@@ -582,11 +675,17 @@ describe("AssistantPanel", () => {
     expect(setItem).not.toHaveBeenCalled();
 
     act(() => finish(reply({ answer: "高频流式回答" })));
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("回答已完成"));
-    await waitFor(() =>
-      expect(
-        setItem.mock.calls.filter(([key]) => key === assistantSessionStorageKey),
-      ).toHaveLength(1),
+    // 全量并行时 jsdom 负载高，完成态通知和随后的快照序列化可能超过默认 5s 窗口；
+    // 只放宽等待窗口，不改变断言内容（单跑均在几百 ms 内满足）。
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("回答已完成"), {
+      timeout: 30_000,
+    });
+    await waitFor(
+      () =>
+        expect(
+          setItem.mock.calls.filter(([key]) => key === assistantSessionStorageKey),
+        ).toHaveLength(1),
+      { timeout: 30_000 },
     );
 
     setItem.mockRestore();
@@ -1528,6 +1627,65 @@ describe("AssistantPanel", () => {
     expect(screen.getByRole("button", { name: "已复制" })).toBeInTheDocument();
   });
 
+  it("通过统一协调器把回答追加到当前视频笔记", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "需要保存的回答" }));
+    renderPanel(vi.fn(), { context: { course_id: "c1", video_id: "v1" } });
+    await ask("记下来");
+
+    fireEvent.click(await screen.findByRole("button", { name: "保存到笔记" }));
+
+    await waitFor(() =>
+      expect(notesCoordinatorMock.appendAnswer).toHaveBeenCalledWith(
+        "v1",
+        "需要保存的回答",
+      ),
+    );
+    expect(screen.getByRole("button", { name: "已保存到笔记" })).toBeInTheDocument();
+  });
+
+  it("笔记提案先展示预览，用户确认后才由协调器写入", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_create_note",
+            video_id: "v1",
+            video_title: "第一讲",
+            topic: "梯度下降为什么卡住",
+            markdown: "## 梯度下降为什么卡住\n- 学习率过大导致震荡",
+          },
+        ],
+      }),
+    );
+    renderPanel(vi.fn(), { context: { course_id: "c1", video_id: "v1" } });
+    await ask("把这段整理成笔记");
+
+    // 预览摆出来，但没点确认之前一个字都不能写。
+    expect(await screen.findByText(/学习率过大导致震荡/)).toBeInTheDocument();
+    expect(notesCoordinatorMock.appendAnswer).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "写入笔记" }));
+    await waitFor(() =>
+      expect(notesCoordinatorMock.appendAnswer).toHaveBeenCalledWith(
+        "v1",
+        "## 梯度下降为什么卡住\n- 学习率过大导致震荡",
+      ),
+    );
+  });
+
+  it("保留统一笔记写入失败，避免显示假的保存成功", async () => {
+    notesCoordinatorMock.appendAnswer.mockRejectedValueOnce(new Error("database locked"));
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "尚未落库的回答" }));
+    renderPanel();
+    await ask("记下来");
+
+    fireEvent.click(await screen.findByRole("button", { name: "保存到笔记" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("database locked");
+    expect(screen.getByRole("button", { name: "保存到笔记" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "已保存到笔记" })).not.toBeInTheDocument();
+  });
+
   it("旧回答里的时间戳会回到回答产生时的视频", async () => {
     mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "回看 [01:30]" }));
     const onNavigate = vi.fn();
@@ -2456,6 +2614,8 @@ describe("确认卡", () => {
   });
 
   it("只保留能够持久化检查点的二十轮可交互对话", async () => {
+    // 21 轮每轮都渲染 + 持久化检查点，全量并行跑时机器负载高，默认 5s 不够。
+    // 业务逻辑本身无时序依赖，放宽超时只防误报。
     mockIpc.assistant.ask.mockImplementation((question: string) =>
       Promise.resolve(
         reply({
@@ -2484,7 +2644,7 @@ describe("确认卡", () => {
     expect(screen.getByText("已隐藏更早的 1 条对话")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "确认改名" })).not.toBeInTheDocument();
     expect(screen.queryByText("第 1 问")).not.toBeInTheDocument();
-  });
+  }, 30000);
 
   it("确认动作执行中卸载后按结果不确定恢复，不能伪装成未执行", async () => {
     let finishRename!: () => void;

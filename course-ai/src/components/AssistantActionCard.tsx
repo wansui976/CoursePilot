@@ -5,6 +5,7 @@ import {
   Check,
   Download,
   FolderPlus,
+  NotebookPen,
   PenLine,
   Settings2,
   Trash2,
@@ -15,6 +16,7 @@ import i18n from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
+import { notesCoordinator } from "@/lib/notesCoordinator";
 import type { AssistantAction } from "@/lib/types";
 
 /**
@@ -31,6 +33,15 @@ type Proposal = Exclude<
   AssistantAction,
   { kind: "open_video" } | { kind: "seek_to" } | { kind: "set_theme" }
 >;
+
+export interface AssistantActionOutcome {
+  /** 已经不应再显示确认按钮的动作。 */
+  resolvedActions: readonly AssistantAction[];
+  /** 本次执行尝试已经结束、应从 executing checkpoint 移除的动作。 */
+  finishedActions: readonly AssistantAction[];
+  /** 按用户可读顺序追加到操作记录和上下文的回执。 */
+  resultMessages: readonly string[];
+}
 
 type Status = "pending" | "running" | "paused" | "done" | "failed" | "stale";
 
@@ -59,6 +70,9 @@ async function refreshAfter(action: Proposal, queryClient: QueryClient) {
       return;
     case "propose_setting":
       // 设置各处按需读取，没有统一的查询键可失效。
+      return;
+    case "propose_create_note":
+      // 笔记写入走 notesCoordinator 的事件订阅，不经过 query 缓存。
       return;
   }
 }
@@ -167,6 +181,10 @@ async function execute(action: Proposal, importResume?: ImportResume) {
       return;
     case "propose_rename_course":
       await ipc.courses.rename(action.course_id, action.new_name);
+      return;
+    case "propose_create_note":
+      await notesCoordinator.appendAnswer(action.video_id, action.markdown);
+      return;
   }
 }
 
@@ -282,6 +300,11 @@ function describe(action: Proposal): { primary: string; secondary?: string; cont
       return { primary: action.name, secondary: i18n.t("assistantActions.createAt", { path: action.root_path }) };
     case "propose_rename_course":
       return { primary: action.new_name, secondary: action.current_name };
+    case "propose_create_note":
+      return {
+        primary: action.topic,
+        secondary: i18n.t("assistantActions.noteIntoVideo", { title: action.video_title }),
+      };
   }
 }
 
@@ -316,6 +339,11 @@ const META: Record<
     titleKey: "assistantActions.courseRenameTitle",
     confirmKey: "assistantActions.courseRenameConfirm",
   },
+  propose_create_note: {
+    icon: <NotebookPen className="h-3.5 w-3.5" />,
+    titleKey: "assistantActions.noteTitle",
+    confirmKey: "assistantActions.noteConfirm",
+  },
 };
 
 function formatMs(ms: number | null | undefined) {
@@ -336,20 +364,18 @@ function formatMs(ms: number | null | undefined) {
 function ProposalGroup({
   actions,
   onDone,
-  onResult,
+  onOutcome,
   executionLocked,
   onExecutionStart,
   onExecutionEnd,
-  onResolved,
   onApplied,
 }: {
   actions: Proposal[];
   onDone: () => void;
-  onResult?: (message: string) => void;
+  onOutcome?: (outcome: AssistantActionOutcome) => void;
   executionLocked?: boolean;
   onExecutionStart?: (actions: Proposal[]) => boolean;
-  onExecutionEnd?: (actions: Proposal[]) => void;
-  onResolved?: (actions: Proposal[]) => void;
+  onExecutionEnd?: () => void;
   onApplied?: (action: Proposal) => void;
 }) {
   const { t } = useTranslation();
@@ -396,13 +422,13 @@ function ProposalGroup({
     stopRequestedRef.current = false;
     setStopRequested(false);
     try {
-      await executeRemaining();
+      await executeRemaining(actionSnapshot);
     } finally {
-      onExecutionEnd?.(actionSnapshot);
+      onExecutionEnd?.();
     }
   }
 
-  async function executeRemaining() {
+  async function executeRemaining(actionSnapshot: Proposal[]) {
     try {
       await assertActionsFresh(remaining.map(({ action }) => action));
     } catch (e) {
@@ -410,14 +436,11 @@ function ProposalGroup({
       setError(message);
       const stale = e instanceof StaleAssistantActionError;
       setStatus(stale ? "stale" : "failed");
-      if (stale) {
-        try {
-          onResolved?.(remaining.map(({ action }) => action));
-        } catch {
-          // 失效状态已经确定，外层记录失败不能让旧动作重新变成可执行。
-        }
-      }
-      onResult?.(t("assistantActions.executionError", { error: message }));
+      onOutcome?.({
+        resolvedActions: stale ? remaining.map(({ action }) => action) : [],
+        finishedActions: actionSnapshot,
+        resultMessages: [t("assistantActions.executionError", { error: message })],
+      });
       return;
     }
     const succeeded: number[] = [];
@@ -451,19 +474,45 @@ function ProposalGroup({
         });
       }
     }
+    const resultMessages: string[] = [];
     if (succeeded.length > 0) {
       setCompleted((prev) => new Set([...prev, ...succeeded]));
-      try {
-        onResolved?.(succeeded.map((index) => actions[index]));
-      } catch {
-        // 动作已经落库；外层持久化记录失败不能把它重新暴露为待确认。
-      }
-      onResult?.(
-        t("assistantActions.completeResult", { title, details: succeeded
-          .map((index) => describe(actions[index]).primary)
-          .join("、") }),
+      resultMessages.push(
+        t("assistantActions.completeResult", {
+          title,
+          details: succeeded.map((index) => describe(actions[index]).primary).join("、"),
+        }),
       );
     }
+    const completedAfter = new Set([...completed, ...succeeded]);
+    const unfinishedAfter = chosen.filter(({ i }) => !completedAfter.has(i));
+    if (interrupted) {
+      setWarning(t("assistantActions.stoppedResult", { count: unfinishedAfter.length }));
+      resultMessages.push(
+        t("assistantActions.canceledResult", {
+          title,
+          details: unfinishedAfter.map(({ action }) => describe(action).primary).join("、"),
+        }),
+      );
+    } else if (failures.length > 0) {
+      // 批量里失败几项时必须说清是哪几项。只报一条错，用户无从知道该重做什么。
+      const failureMessage = t("assistantActions.executionError", {
+        error: failures.map(({ message }) => message).join("；"),
+      });
+      resultMessages.push(failureMessage);
+      setError(
+        t("assistantActions.partialResult", {
+          succeeded: succeeded.length,
+          failed: failures.length,
+          details: failures.map(({ message }) => message).join("；"),
+        }),
+      );
+    }
+    onOutcome?.({
+      resolvedActions: succeeded.map((index) => actions[index]),
+      finishedActions: actionSnapshot,
+      resultMessages,
+    });
     if (shouldRefresh) {
       try {
         await refreshAfter(actions[0], queryClient);
@@ -472,30 +521,13 @@ function ProposalGroup({
         setWarning(t("assistantActions.refreshFailed"));
       }
     }
-    const completedAfter = new Set([...completed, ...succeeded]);
-    const unfinishedAfter = chosen.filter(({ i }) => !completedAfter.has(i));
     if (interrupted) {
-      setWarning(t("assistantActions.stoppedResult", { count: unfinishedAfter.length }));
-      onResult?.(
-        t("assistantActions.canceledResult", { title, details: unfinishedAfter
-          .map(({ action }) => describe(action).primary)
-          .join("、") }),
-      );
       setStatus("paused");
-      return;
-    }
-    if (failures.length === 0) {
+    } else if (failures.length === 0) {
       setStatus("done");
-      return;
+    } else {
+      setStatus("failed");
     }
-    // 批量里失败几项时必须说清是哪几项。只报一条错，用户无从知道该重做什么。
-    setError(
-      t("assistantActions.partialResult", { succeeded: succeeded.length, failed: failures.length, details: failures
-        .map(({ message }) => message)
-        .join("；") }),
-    );
-    onResult?.(t("assistantActions.executionError", { error: failures.map(({ message }) => message).join("；") }));
-    setStatus("failed");
   }
 
   function stopRemaining() {
@@ -504,20 +536,29 @@ function ProposalGroup({
   }
 
   function dismiss() {
-    onResolved?.(remaining.map(({ action }) => action));
-    onResult?.(
-      t("assistantActions.canceledResult", { title, details: remaining
-        .map(({ action }) => describe(action).primary)
-        .join("、") }),
-    );
+    onOutcome?.({
+      resolvedActions: remaining.map(({ action }) => action),
+      finishedActions: [],
+      resultMessages: [
+        t("assistantActions.canceledResult", {
+          title,
+          details: remaining.map(({ action }) => describe(action).primary).join("、"),
+        }),
+      ],
+    });
     onDone();
   }
 
   function skip(index: number, action: Proposal) {
     if (completed.has(index)) return;
     setSkipped((prev) => new Set(prev).add(index));
-    onResolved?.([action]);
-    onResult?.(t("assistantActions.canceledResult", { title, details: describe(action).primary }));
+    onOutcome?.({
+      resolvedActions: [action],
+      finishedActions: [],
+      resultMessages: [
+        t("assistantActions.canceledResult", { title, details: describe(action).primary }),
+      ],
+    });
   }
 
   if (chosen.length === 0) return null;
@@ -576,6 +617,12 @@ function ProposalGroup({
           );
         })}
       </ul>
+
+      {actions[0].kind === "propose_create_note" && (
+        <div className="mb-2 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2 text-xs leading-relaxed text-[var(--text-muted)]">
+          {actions[0].markdown}
+        </div>
+      )}
 
       {actions[0].kind === "propose_delete" && (
         <p className="mb-2 text-[var(--text-muted)]">{t("assistantActions.recycleBinNote")}</p>
@@ -657,20 +704,18 @@ function ProposalGroup({
 export function AssistantActionList({
   actions,
   onNavigate,
-  onResult,
+  onOutcome,
   executionLocked,
   onExecutionStart,
   onExecutionEnd,
-  onActionsResolved,
   onApplied,
 }: {
   actions: AssistantAction[];
   onNavigate: (action: AssistantAction) => void;
-  onResult?: (message: string) => void;
+  onOutcome?: (outcome: AssistantActionOutcome) => void;
   executionLocked?: boolean;
   onExecutionStart?: (actions: AssistantAction[]) => boolean;
-  onExecutionEnd?: (actions: AssistantAction[]) => void;
-  onActionsResolved?: (actions: AssistantAction[]) => void;
+  onExecutionEnd?: () => void;
   onApplied?: (action: AssistantAction) => void;
 }) {
   const { t } = useTranslation();
@@ -718,9 +763,20 @@ export function AssistantActionList({
                   if (onExecutionStart && !onExecutionStart([first])) return;
                   try {
                     onNavigate(first);
-                    onActionsResolved?.([first]);
+                    onOutcome?.({
+                      resolvedActions: [first],
+                      finishedActions: [first],
+                      resultMessages: [],
+                    });
+                  } catch (error) {
+                    onOutcome?.({
+                      resolvedActions: [],
+                      finishedActions: [first],
+                      resultMessages: [],
+                    });
+                    throw error;
                   } finally {
-                    onExecutionEnd?.([first]);
+                    onExecutionEnd?.();
                   }
                 }}
                 className="ca-touch-44 block w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-2 text-left text-xs text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)] disabled:cursor-not-allowed disabled:opacity-50"
@@ -734,11 +790,10 @@ export function AssistantActionList({
               key={group.key}
               actions={group.items as Proposal[]}
               onDone={() => setDismissed((prev) => new Set(prev).add(group.key))}
-              onResult={onResult}
+              onOutcome={onOutcome}
               executionLocked={executionLocked}
               onExecutionStart={onExecutionStart}
               onExecutionEnd={onExecutionEnd}
-              onResolved={onActionsResolved}
               onApplied={onApplied}
             />
           );

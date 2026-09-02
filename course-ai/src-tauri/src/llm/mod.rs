@@ -456,6 +456,20 @@ pub enum Provider {
         message: String,
         calls: std::sync::atomic::AtomicUsize,
     },
+    /// 测试用：前 `failures` 次调用失败（`permanent` 决定值不值得重试），
+    /// 之后按 Scripted 逐次返回剩余步骤。`cancel_on_fail` 在每次失败时置位，
+    /// 用来确定性模拟「重试之前用户点了停止」。
+    ///
+    /// 助手循环的抖动重试需要它：Scripted 只在剧本耗尽时才失败，
+    /// 既测不了「失败一次后成功」，也测不了「失败与重试之间被取消」。
+    Flaky {
+        failures: std::sync::Mutex<usize>,
+        permanent: bool,
+        message: String,
+        steps: std::sync::Mutex<Vec<ChatResponse>>,
+        calls: std::sync::atomic::AtomicUsize,
+        cancel_on_fail: Option<std::sync::Arc<AtomicBool>>,
+    },
 }
 
 impl Provider {
@@ -488,6 +502,42 @@ impl Provider {
                 }
             }
             Provider::Failing { .. } => Err(self.canned_failure()),
+            Provider::Flaky { .. } => self.flaky_step(),
+        }
+    }
+
+    /// `Flaky` 端点这一次调用：还有失败额度就失败（并置位 `cancel_on_fail`），
+    /// 否则按剧本弹出下一步。每次调用都计数——重试是否发生要靠它断言。
+    fn flaky_step(&self) -> AppResult<ChatResponse> {
+        let Provider::Flaky {
+            failures,
+            permanent,
+            message,
+            steps,
+            calls,
+            cancel_on_fail,
+        } = self
+        else {
+            unreachable!("只有 Flaky 会走到这里");
+        };
+        calls.fetch_add(1, Ordering::SeqCst);
+        let mut remaining = failures.lock().unwrap_or_else(|e| e.into_inner());
+        if *remaining > 0 {
+            *remaining -= 1;
+            if let Some(flag) = cancel_on_fail {
+                flag.store(true, Ordering::SeqCst);
+            }
+            return if *permanent {
+                Err(crate::error::AppError::Permanent(message.clone()))
+            } else {
+                Err(crate::error::AppError::Other(message.clone()))
+            };
+        }
+        let mut steps = steps.lock().unwrap_or_else(|e| e.into_inner());
+        if steps.is_empty() {
+            Err(crate::error::AppError::Other("剧本已用尽".into()))
+        } else {
+            Ok(steps.remove(0))
         }
     }
 
@@ -512,7 +562,9 @@ impl Provider {
     /// `Failing` 至今被调用了多少次。
     pub fn call_count(&self) -> usize {
         match self {
-            Provider::Failing { calls, .. } => calls.load(Ordering::SeqCst),
+            Provider::Failing { calls, .. } | Provider::Flaky { calls, .. } => {
+                calls.load(Ordering::SeqCst)
+            }
             _ => 0,
         }
     }
@@ -531,7 +583,9 @@ impl Provider {
                 api_key,
                 client,
             } => openai::complete_stream(base_url, api_key, client, req, cancel, on_piece).await,
-            Provider::Scripted { .. } => {
+            Provider::Scripted { .. } | Provider::Flaky { .. } => {
+                // Flaky 与 Scripted 流式行为一致：失败发生在正文吐出之前，
+                // 成功时把整条应答一次性发出——重点在「调用会不会失败」，不在逐字。
                 let response = self.complete(req).await?;
                 on_piece(StreamPiece::Content(&response.content));
                 Ok(StreamOutcome {
@@ -578,7 +632,7 @@ impl Provider {
                 api_key,
                 client,
             } => openai::embed(base_url, api_key, client, model, inputs).await,
-            Provider::Mock { .. } | Provider::Scripted { .. } => {
+            Provider::Mock { .. } | Provider::Scripted { .. } | Provider::Flaky { .. } => {
                 Ok(inputs.iter().map(|s| mock_embed(s)).collect())
             }
             Provider::Failing { .. } => Err(self.canned_failure()),
