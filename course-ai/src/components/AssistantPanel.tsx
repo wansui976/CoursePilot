@@ -643,8 +643,10 @@ export function AssistantPanel({
   const conversationMutationBusy = deletingConversationId !== null;
   const generationStatus = stopping ? t("assistant.stopping") : streamingLabel;
 
-  // 视觉阶段和读屏通知共用一个 live region，但不能互相遮住：旧确认卡可能在新一轮
-  // 生成期间完成，动作回执必须先被读屏播报，再由下一次阶段变化接管通知文本。
+  // 读屏播报走 sr-only 的 live region；可见的阶段提示只有回合内那一条内联状态，
+  // 之前底部再渲染一份可见状态，和内联那条完全重复。live region 与动作回执共用
+  // 一个状态，不能互相遮住：旧确认卡可能在新一轮生成期间完成，动作回执必须先被
+  // 读屏播报，再由下一次阶段变化接管通知文本。
   // 删除失败后要把焦点还给删除按钮，但删除中按钮是 disabled 的：此时 focus() 静默无效。
   // 必须等 deletingConversationId 置空、按钮恢复可聚焦后的那一帧再聚焦。
   useEffect(() => {
@@ -2882,15 +2884,8 @@ export function AssistantPanel({
         )}
       </div>
 
-      <div
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        className={busy ? "flex items-center gap-2 px-3 pb-2 text-xs text-[var(--text-faint)]" : "sr-only"}
-      >
-        {busy && <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
-        {busy && <span aria-hidden="true">{generationStatus}</span>}
-        <span className={busy ? "sr-only" : undefined}>{statusAnnouncement}</span>
+      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {statusAnnouncement}
       </div>
 
       {/* 翻上去看旧回答时，新回答落在屏幕外，原来没有任何提示，也没有回来的路——
