@@ -203,7 +203,9 @@ pub async fn cmd_import_bilibili(
         video.subtitle_autocorrect = subtitle_autocorrect;
     }
     // 黑边探测挪到后台：不再阻塞下载完成的这几秒，结果写库后播放器直接读缓存。
-    crate::pipeline::spawn_crop_detection(app, video.id.clone());
+    crate::pipeline::spawn_crop_detection(app.clone(), video.id.clone());
+    // B 站弹幕与评论区也在后台抓并缓存，避免播放时联网等待。
+    crate::pipeline::spawn_bilibili_extras(app, video.id.clone());
     Ok(video)
 }
 

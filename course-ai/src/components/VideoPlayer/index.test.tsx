@@ -11,6 +11,9 @@ const setFullscreen = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/ipc", () => ({
   ipc: {
     transcripts: { list: vi.fn().mockResolvedValue([]) },
+    danmaku: {
+      list: vi.fn().mockResolvedValue([]),
+    },
     videos: {
       // 已探测过、无黑边。
       ensureCrop: vi.fn().mockResolvedValue({
@@ -586,7 +589,9 @@ describe("VideoPlayer iOS gestures", () => {
       renderPlayer(false);
 
       const caption = await screen.findByText("这句字幕不能被控制栏挡住");
-      const group = caption.parentElement as HTMLElement;
+      // 字幕框的 DOM 层级在可访问性重构后加深了（text → span → button → group），
+      // transform 始终加在最外层 .group 上，不能再用 parentElement。
+      const group = caption.closest(".group") as HTMLElement;
       expect(group.style.transform).toBe("translateY(-48px)");
     } finally {
       Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetDesc);

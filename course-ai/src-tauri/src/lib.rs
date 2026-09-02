@@ -32,6 +32,7 @@ use crate::commands::courses::{
     cmd_create_course, cmd_delete_course, cmd_list_courses, cmd_relink_course_root,
     cmd_rename_course, AppState,
 };
+use crate::commands::danmaku::{cmd_get_comments, cmd_get_danmaku};
 use crate::commands::export::{
     cmd_export_mindmap, cmd_export_notes, cmd_export_quiz, cmd_export_subtitles,
 };
@@ -243,6 +244,8 @@ pub fn run() {
             cmd_probe_bilibili,
             cmd_probe_playlist,
             cmd_set_bilibili_cookies,
+            cmd_get_danmaku,
+            cmd_get_comments,
             cmd_log_watch,
             cmd_daily_totals,
             cmd_course_totals,

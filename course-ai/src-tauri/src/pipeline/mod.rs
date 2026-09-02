@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod aliyun_asr;
 pub mod aliyun_ocr;
+pub mod bilibili_extra;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod apple_vision;
 pub mod asr;
@@ -1109,6 +1110,60 @@ pub fn spawn_crop_detection(app: AppHandle, video_id: String) {
         let _ = jobs::finish(&db, &job.id).await;
         emit_stage(&app, &video_id, &job.id, "crop", "done", 1.0, None);
         state.unregister_cancel(&key, &cancel);
+    });
+}
+
+/// 后台抓取 B 站视频的弹幕与评论区并写库（导入后 / 重连时触发）。
+///
+/// 尽力而为：网络失败只记日志，不影响视频可用。同一个视频重复触发时，
+/// `ensure_*` 内部按「库里已有数据就返回」去重，不会重复请求。
+pub fn spawn_bilibili_extras(app: AppHandle, video_id: String) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let db = state.db.clone();
+        let Some(video) =
+            sqlx::query_as::<_, Video>("SELECT * FROM videos WHERE id=? AND deleted_at IS NULL")
+                .bind(&video_id)
+                .fetch_optional(&db.pool)
+                .await
+                .ok()
+                .flatten()
+        else {
+            return;
+        };
+        if video.source_type != "bilibili" {
+            return;
+        }
+        let cookies = crate::commands::settings::get_setting(&db, "bilibili_cookies")
+            .await
+            .ok()
+            .flatten()
+            .and_then(|raw| {
+                crate::pipeline::bilibili_extra::cookie_header_from_setting(Some(&raw))
+            });
+        let (source_type, source_uri, cid) = (
+            video.source_type.clone(),
+            video.source_uri.clone(),
+            video.bilibili_cid.clone(),
+        );
+        let _ = crate::pipeline::bilibili_extra::ensure_danmaku(
+            &db,
+            &video.id,
+            &source_type,
+            source_uri.as_deref(),
+            cid.as_deref(),
+            cookies.as_deref(),
+        )
+        .await;
+        let _ = crate::pipeline::bilibili_extra::ensure_comments(
+            &db,
+            &video.id,
+            &source_type,
+            video.source_uri.as_deref(),
+            video.bilibili_cid.as_deref(),
+            cookies.as_deref(),
+        )
+        .await;
     });
 }
 

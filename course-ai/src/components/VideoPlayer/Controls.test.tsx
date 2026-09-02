@@ -65,8 +65,11 @@ function renderControls(props: Partial<Parameters<typeof Controls>[0]> = {}) {
     cropOn: false,
     cropInsets: NO_INSETS,
     fullscreen: false,
+    danmakuAvailable: false,
+    danmakuOn: false,
     onToggleCrop: vi.fn(),
     onToggleCaptions: vi.fn(),
+    onToggleDanmaku: vi.fn(),
     onToggleSkipSilence: vi.fn(),
     onToggleSmartRate: vi.fn(),
     onPreviewSkip: vi.fn(),
@@ -528,7 +531,7 @@ describe("Controls unified on-state and compact skip-nav", () => {
     // 开启时统一为 accent 底 + 内描边（不再是以前那种只看文字变色的弱反馈）。
     for (const name of ["字幕", "去黑边，已开启"]) {
       const button = screen.getByRole("button", { name });
-      expect(button.className).toContain("bg-white/10");
+      expect(button.className).toContain("bg-[var(--surface-card-active)]");
       expect(button.className).toContain("ring-inset");
     }
   });
@@ -548,5 +551,41 @@ describe("Controls unified on-state and compact skip-nav", () => {
     expect(prev.querySelector("svg")).not.toBeNull();
     expect(next.querySelector("svg")).not.toBeNull();
     expect(prev.textContent).toBe("");
+  });
+});
+
+describe("Controls danmaku toggle", () => {
+  beforeEach(() => {
+    usePlayer.setState({ currentMs: 0, durationMs: 60_000 });
+  });
+
+  it("hides the danmaku toggle when data is unavailable", () => {
+    renderControls({ danmakuAvailable: false });
+
+    expect(screen.queryByRole("button", { name: "弹幕" })).not.toBeInTheDocument();
+  });
+
+  it("shows the danmaku toggle only for videos with danmaku and toggles it", () => {
+    const onToggleDanmaku = vi.fn();
+    renderControls({ danmakuAvailable: true, danmakuOn: true, onToggleDanmaku });
+
+    const button = screen.getByRole("button", { name: "弹幕" });
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(button);
+    expect(onToggleDanmaku).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes danmaku in the compact more-menu", () => {
+    renderControls({
+      danmakuAvailable: true,
+      danmakuOn: true,
+    });
+    resizeControls(360);
+
+    const trigger = screen.getByRole("button", { name: "更多" });
+    fireEvent.click(trigger);
+
+    const danmakuItem = screen.getByRole("menuitemcheckbox", { name: "弹幕" });
+    expect(danmakuItem).toHaveAttribute("aria-checked", "true");
   });
 });

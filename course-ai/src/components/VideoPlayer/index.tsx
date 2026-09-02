@@ -10,12 +10,13 @@ import { useVideoCrop } from "./useVideoCrop";
 import { posKey, durKey, syncPlaybackProgress } from "@/lib/playback";
 import { isIOS } from "@/lib/platform";
 import { findActiveSegmentIndex } from "@/lib/transcript";
-import type { TranscriptSegment } from "@/lib/types";
+import type { DanmakuEntry, TranscriptSegment } from "@/lib/types";
 import { useWatchLogger } from "@/lib/useWatchLogger";
 import { usePlayer } from "@/stores/player";
 import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
 import { CaptionOverlay } from "./CaptionOverlay";
 import { Controls } from "./Controls";
+import { DanmakuOverlay } from "./DanmakuOverlay";
 import { ProgressBar } from "./ProgressBar";
 
 // 距片尾 15s 内不再续播（视为看完），从头开始。
@@ -29,8 +30,10 @@ const BRIGHTNESS_STEP = 0.0025;
 const VOLUME_STEP = 0.0025;
 const APPLE_MAX_PLAYBACK_RATE = 2;
 const PLAYBACK_RATE_KEY = "course-ai-playback-rate";
+const DANMAKU_ENABLED_KEY = "course-ai-danmaku-enabled";
 const SUPPORTED_PLAYBACK_RATES = new Set([0.5, 0.75, 1, 1.25, 1.5, 2]);
 const EMPTY_TRANSCRIPT_SEGMENTS: TranscriptSegment[] = [];
+const EMPTY_DANMAKU: DanmakuEntry[] = [];
 
 function loadPlaybackRate() {
   try {
@@ -46,6 +49,23 @@ function persistPlaybackRate(rate: number) {
     localStorage.setItem(PLAYBACK_RATE_KEY, String(rate));
   } catch {
     // 隐私模式无法持久化时，本次播放器会话内仍然生效。
+  }
+}
+
+// 弹幕开关：全局偏好（跨视频记住），默认开。
+function loadDanmakuEnabled() {
+  try {
+    return localStorage.getItem(DANMAKU_ENABLED_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function persistDanmakuEnabled(enabled: boolean) {
+  try {
+    localStorage.setItem(DANMAKU_ENABLED_KEY, enabled ? "1" : "0");
+  } catch {
+    // 同上：持久化失败不挡本次会话。
   }
 }
 
@@ -168,6 +188,15 @@ export function VideoPlayer({
     refetchInterval: (query) =>
       query.state.data && query.state.data.length > 0 ? false : 2000,
   });
+  // 弹幕：B 站视频才有数据（其余源后端直接返回空）。库里没有时后端会先在线
+  // 抓一次并缓存，首开可能慢几秒——抓到前开关不出现，不打扰本地视频。
+  const { data: queriedDanmaku } = useQuery({
+    queryKey: ["danmaku", videoId],
+    queryFn: () => ipc.danmaku.list(videoId),
+    staleTime: Infinity,
+  });
+  const danmaku = queriedDanmaku ?? EMPTY_DANMAKU;
+  const [danmakuOn, setDanmakuOn] = useState(loadDanmakuEnabled);
   // 查询 pending 时保持同一个空数组引用，避免智能倍率计划被当作“新文稿”反复重建。
   const segments = queriedSegments ?? EMPTY_TRANSCRIPT_SEGMENTS;
   const applePlaybackEngine = useMemo(usesApplePlaybackEngine, []);
@@ -832,6 +861,9 @@ export function VideoPlayer({
               setMuted(event.currentTarget.muted);
             }}
           />
+          {danmakuOn && danmaku.length > 0 && (
+            <DanmakuOverlay entries={danmaku} videoRef={ref} />
+          )}
           {isIosImmersive && (
             <div
               aria-label={t("videoPlayer.gestureLayer")}
@@ -902,7 +934,7 @@ export function VideoPlayer({
       </div>
       <div
         ref={controlsRef}
-        className="absolute inset-x-0 bottom-0 z-10"
+        className="absolute inset-x-0 bottom-0 z-10 bg-[var(--surface-panel)]/92 backdrop-blur-sm"
         onMouseEnter={!immersive ? revealDesktopControls : undefined}
         onMouseLeave={!immersive ? scheduleDesktopHideControls : undefined}
         onPointerDown={immersive ? () => revealControls() : undefined}
@@ -935,8 +967,15 @@ export function VideoPlayer({
             cropOn={cropOn}
             cropInsets={cropInsets}
             fullscreen={fullscreen}
+            danmakuAvailable={danmaku.length > 0}
+            danmakuOn={danmakuOn}
             onToggleCrop={toggleCrop}
             onToggleCaptions={() => setCaptionsOn((on) => !on)}
+            onToggleDanmaku={() => {
+              const next = !danmakuOn;
+              setDanmakuOn(next);
+              persistDanmakuEnabled(next);
+            }}
             onToggleSmartRate={smartRate.toggle}
             onToggleSkipSilence={silenceSkip.toggle}
             onPreviewSkip={(ms) => {

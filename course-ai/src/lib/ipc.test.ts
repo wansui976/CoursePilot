@@ -29,3 +29,21 @@ describe("ipc.assistant", () => {
     expect(unlistenMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ipc.danmaku", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("fetches danmaku for a video", async () => {
+    invokeMock.mockResolvedValueOnce([]);
+    await ipc.danmaku.list("video-1");
+    expect(invokeMock).toHaveBeenCalledWith("cmd_get_danmaku", { videoId: "video-1" });
+  });
+
+  it("fetches comments for a video", async () => {
+    invokeMock.mockResolvedValueOnce([]);
+    await ipc.danmaku.comments("video-1");
+    expect(invokeMock).toHaveBeenCalledWith("cmd_get_comments", { videoId: "video-1" });
+  });
+});

@@ -12,7 +12,9 @@ import type {
   ChatMessage,
   Citation,
   Clip,
+  CommentSection,
   Course,
+  DanmakuEntry,
   DevLogEntry,
   Job,
   LlmProfile,
@@ -835,5 +837,12 @@ export const ipc = {
       invoke("cmd_set_bilibili_cookies", { filePath }),
     hasBilibiliCookies: (): Promise<boolean> =>
       invoke("cmd_has_bilibili_cookies"),
+  },
+  danmaku: {
+    // 库里没有且是在线 B 站视频时，后端会先在线抓一次并缓存（尽力而为）。
+    list: (videoId: string): Promise<DanmakuEntry[]> =>
+      invoke("cmd_get_danmaku", { videoId }),
+    comments: (videoId: string): Promise<CommentSection> =>
+      invoke("cmd_get_comments", { videoId }),
   },
 };

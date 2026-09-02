@@ -33,11 +33,11 @@ import { useTranslation } from "react-i18next";
 
 const SPEEDS = [2, 1.5, 1.25, 1, 0.75, 0.5];
 const iconButtonClass =
-  "flex h-7 w-7 items-center justify-center rounded-lg text-white/90 transition hover:bg-white/10 hover:text-white";
+  "flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]";
 const textButtonClass =
-  "h-7 whitespace-nowrap rounded-lg px-2 text-[13px] font-medium text-white/85 transition hover:bg-white/10 hover:text-white";
+  "h-7 whitespace-nowrap rounded-lg px-2 text-[13px] font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]";
 const mobileMenuItemClass =
-  "flex min-h-11 w-full items-center gap-3 px-3 py-2 text-left text-sm font-medium text-white transition hover:bg-white/10 focus-visible:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/80 disabled:cursor-not-allowed disabled:opacity-35";
+  "flex min-h-11 w-full items-center gap-3 px-3 py-2 text-left text-sm font-medium text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)] focus-visible:bg-[var(--surface-card-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-35";
 
 function formatRate(rate: number) {
   const rounded = Math.round(rate * 100) / 100;
@@ -60,8 +60,11 @@ export function Controls({
   cropOn,
   cropInsets,
   fullscreen,
+  danmakuAvailable,
+  danmakuOn,
   onToggleCrop,
   onToggleCaptions,
+  onToggleDanmaku,
   onToggleSkipSilence,
   onToggleSmartRate,
   onPreviewSkip,
@@ -87,8 +90,12 @@ export function Controls({
   cropOn: boolean;
   cropInsets: Insets;
   fullscreen: boolean;
+  /** 有弹幕数据（B 站视频且抓到了）才出弹幕开关。 */
+  danmakuAvailable: boolean;
+  danmakuOn: boolean;
   onToggleCrop: () => void;
   onToggleCaptions: () => void;
+  onToggleDanmaku: () => void;
   onToggleSkipSilence: () => void;
   onToggleSmartRate: () => void;
   onPreviewSkip: (ms: number) => void;
@@ -111,7 +118,10 @@ export function Controls({
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const controlsRootRef = useRef<HTMLDivElement>(null);
   // 分栏会让播放器远窄于窗口；控制组必须按自身可用宽度收起，而不是按 viewport 猜测。
-  const compactControls = useContainerWidth(controlsRootRef) !== "wide";
+  // 只有真正窄（compact <600px，手机分栏/极窄）才把次级动作收进「更多」菜单；
+  // medium（600–899）在工作台分栏下完全放得下那排按钮，应继续平铺，不能算 compact——
+  // 否则半个屏宽的播放器（如 652px）会只剩 播放/时间/更多/全屏。
+  const compactControls = useContainerWidth(controlsRootRef) === "compact";
   // 首次开启要扫一遍音轨，几秒内还跳不了；按钮上直说，别让人以为已经在跳了。
   const skipSilenceLabel = skipSilenceLoading
     ? t("videoPlayer.skipSilenceAnalyzingShort")
@@ -268,7 +278,7 @@ export function Controls({
     <div
       ref={controlsRootRef}
       data-controls-layout={compactControls ? "compact" : "full"}
-      className="ca-player-controls mt-1 flex items-center gap-1.5 text-sm text-white/75"
+      className="ca-player-controls mt-1 flex items-center gap-1.5 text-sm text-[var(--text-normal)]"
     >
       <Button
         size="icon"
@@ -276,11 +286,11 @@ export function Controls({
         onClick={onPlayPause}
         aria-label={playing ? t("videoPlayer.pause") : t("videoPlayer.play")}
         title={playing ? t("videoPlayer.pause") : t("videoPlayer.play")}
-        className="h-7 w-7 rounded-lg text-white hover:bg-white/10 hover:text-white"
+        className="h-7 w-7 rounded-lg text-[var(--text-strong)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
       >
         {playing ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}
       </Button>
-      <span className="ca-player-controls-time whitespace-nowrap text-sm font-medium tabular-nums tracking-wide text-white/85">
+      <span className="ca-player-controls-time whitespace-nowrap text-sm font-medium tabular-nums tracking-wide text-[var(--text-strong)]">
         {formatMs(currentMs)} / {formatMs(durationMs)}
       </span>
 
@@ -309,7 +319,7 @@ export function Controls({
             role="menu"
             aria-label={t("videoPlayer.rate")}
             onKeyDown={handleSpeedMenuKeyDown}
-            className="absolute bottom-full left-1/2 mb-2 w-24 -translate-x-1/2 overflow-hidden rounded-md bg-black/90 py-1.5 shadow-2xl ring-1 ring-white/12 backdrop-blur"
+            className="absolute bottom-full left-1/2 mb-2 w-24 -translate-x-1/2 overflow-hidden rounded-md bg-[var(--surface-panel)] py-1.5 shadow-[var(--shadow-pop)] ring-1 ring-[var(--border-subtle)]"
           >
             {SPEEDS.map((speed, index) => (
               <button
@@ -322,8 +332,8 @@ export function Controls({
                 aria-checked={rate === speed}
                 tabIndex={-1}
                 className={`flex w-full items-center justify-center gap-1.5 px-4 py-1.5 text-sm font-medium ${
-                  rate === speed ? "text-[var(--video-accent)]" : "text-white"
-                } hover:bg-white/10 focus-visible:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/80`}
+                  rate === speed ? "text-[var(--video-accent)]" : "text-[var(--text-strong)]"
+                } hover:bg-[var(--surface-card-hover)] focus-visible:bg-[var(--surface-card-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]`}
                 onClick={() => {
                   onRate(speed);
                   setSpeedOpen(false);
@@ -355,7 +365,7 @@ export function Controls({
               : t("videoPlayer.smartRateUnavailable")
         }
         className={`${textButtonClass} disabled:opacity-35 ${
-          smartRate ? "bg-white/10 text-[var(--video-accent)] ring-1 ring-inset ring-[var(--video-accent)]/60" : ""
+          smartRate ? "bg-[var(--surface-card-active)] text-[var(--video-accent)] ring-1 ring-inset ring-[var(--video-accent)]/60" : ""
         }`}
       >
         {t("videoPlayer.smartRateLabel", {
@@ -385,7 +395,7 @@ export function Controls({
         // 开启时给一层强调色底＋描边，并在文字后面直接写「开」。
         className={`${textButtonClass} disabled:opacity-35 ${
           skipSilence
-            ? "bg-white/10 text-[var(--video-accent)] ring-1 ring-inset ring-[var(--video-accent)]/60"
+            ? "bg-[var(--surface-card-active)] text-[var(--video-accent)] ring-1 ring-inset ring-[var(--video-accent)]/60"
             : ""
         }`}
       >
@@ -433,12 +443,27 @@ export function Controls({
         }
         className={`${textButtonClass} ${
           cropOn && hasCrop
-            ? "bg-white/10 text-[var(--video-accent)] ring-1 ring-inset ring-[var(--video-accent)]/60"
+            ? "bg-[var(--surface-card-active)] text-[var(--video-accent)] ring-1 ring-inset ring-[var(--video-accent)]/60"
             : ""
         }`}
       >
         {t("videoPlayer.cropBlackBars")}
       </button>
+      {danmakuAvailable && (
+        <button
+          type="button"
+          onClick={onToggleDanmaku}
+          aria-pressed={danmakuOn}
+          title={danmakuOn ? t("videoPlayer.danmakuOff") : t("videoPlayer.danmakuOn")}
+          className={`${textButtonClass} ${
+            danmakuOn
+              ? "bg-[var(--surface-card-active)] text-[var(--video-accent)] ring-1 ring-inset ring-[var(--video-accent)]/60"
+              : ""
+          }`}
+        >
+          {t("videoPlayer.danmaku")}
+        </button>
+      )}
       <button
         type="button"
         onClick={onToggleCaptions}
@@ -446,7 +471,7 @@ export function Controls({
         title={captionsOn ? t("videoPlayer.captionsOff") : t("videoPlayer.captionsOn")}
         className={`${textButtonClass} ${
           captionsOn
-            ? "bg-white/10 text-[var(--video-accent)] ring-1 ring-inset ring-[var(--video-accent)]/60"
+            ? "bg-[var(--surface-card-active)] text-[var(--video-accent)] ring-1 ring-inset ring-[var(--video-accent)]/60"
             : ""
         }`}
       >
@@ -521,7 +546,7 @@ export function Controls({
             >
               <div
                 role="presentation"
-                className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase text-white/55"
+                className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase text-[var(--text-faint)]"
               >
                 {t("videoPlayer.rate")}
               </div>
@@ -546,7 +571,7 @@ export function Controls({
                 ))}
               </div>
 
-              <div role="separator" className="my-1 h-px bg-white/10" />
+              <div role="separator" className="my-1 h-px bg-[var(--border-subtle)]" />
 
               <button
                 type="button"
@@ -663,6 +688,24 @@ export function Controls({
                 </span>
                 {t("videoPlayer.cropBlackBars")}
               </button>
+
+              {danmakuAvailable && (
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={danmakuOn}
+                  tabIndex={-1}
+                  className={`${mobileMenuItemClass} ${
+                    danmakuOn ? "text-[var(--video-accent)]" : ""
+                  }`}
+                  onClick={() => runMoreAction(onToggleDanmaku)}
+                >
+                  <span className="flex w-4 flex-none justify-center">
+                    {danmakuOn && <Check className="h-4 w-4" />}
+                  </span>
+                  {t("videoPlayer.danmaku")}
+                </button>
+              )}
 
               <button
                 type="button"

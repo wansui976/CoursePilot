@@ -1,8 +1,18 @@
 import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText, GitBranch, Scissors, Search } from "lucide-react";
+import {
+  Brain,
+  FileText,
+  GitBranch,
+  MessagesSquare,
+  Scissors,
+  Search,
+} from "lucide-react";
 import { TextSkeleton } from "@/components/ui/skeleton";
 
+const QuizPanel = lazy(() =>
+  import("./QuizPanel").then((module) => ({ default: module.QuizPanel })),
+);
 const SlidesPanel = lazy(() =>
   import("./SlidesPanel").then((module) => ({ default: module.SlidesPanel })),
 );
@@ -17,21 +27,40 @@ const RagSearchPanel = lazy(() =>
     default: module.RagSearchPanel,
   })),
 );
+const CommentsPanel = lazy(() =>
+  import("./CommentsPanel").then((module) => ({ default: module.CommentsPanel })),
+);
 
-type MoreView = "slides" | "mindmap" | "clips" | "search";
+type MoreView = "quiz" | "slides" | "mindmap" | "clips" | "search" | "comments";
 
-const MORE_VIEW_KEYS: MoreView[] = ["slides", "mindmap", "clips", "search"];
+const MORE_VIEW_KEYS: MoreView[] = [
+  "quiz",
+  "slides",
+  "mindmap",
+  "clips",
+  "search",
+  "comments",
+];
 // 与一级 tab 同款图标语言（下划线式 + 图标），二级导航不再用另一套药丸样式。
 const MORE_ICONS: Record<MoreView, typeof FileText> = {
+  quiz: Brain,
   slides: FileText,
   mindmap: GitBranch,
   clips: Scissors,
   search: Search,
+  comments: MessagesSquare,
 };
 
-export function MoreStudyPanel({ videoId }: { videoId: string }) {
+/** initialView：上层把存量「练习」一级标签迁进来时，落点直接定位到练习视图。 */
+export function MoreStudyPanel({
+  videoId,
+  initialView,
+}: {
+  videoId: string;
+  initialView?: MoreView;
+}) {
   const { t } = useTranslation();
-  const [view, setView] = useState<MoreView>("slides");
+  const [view, setView] = useState<MoreView>(initialView ?? "quiz");
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -49,7 +78,7 @@ export function MoreStudyPanel({ videoId }: { videoId: string }) {
                 type="button"
                 aria-pressed={view === key}
                 onClick={() => setView(key)}
-                className={`ca-touch-44 flex min-h-10 min-w-max flex-1 items-center justify-center gap-1.5 border-b-[3px] px-3 py-2 text-xs font-semibold transition-colors ${
+                className={`ca-touch-44 flex min-h-10 min-w-max flex-1 items-center justify-center gap-1 border-b-[3px] px-2 py-2 text-xs font-semibold transition-colors ${
                   view === key
                     ? "border-primary text-[var(--text-strong)]"
                     : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-normal)]"
@@ -70,12 +99,14 @@ export function MoreStudyPanel({ videoId }: { videoId: string }) {
             </div>
           }
         >
+          {view === "quiz" && <QuizPanel videoId={videoId} />}
           {view === "slides" && <SlidesPanel videoId={videoId} />}
           {view === "mindmap" && <MindmapPanel videoId={videoId} />}
           {view === "clips" && <ClipsPanel videoId={videoId} />}
           {view === "search" && (
             <RagSearchPanel videoId={videoId} mode="search" />
           )}
+          {view === "comments" && <CommentsPanel videoId={videoId} />}
         </Suspense>
       </div>
     </div>

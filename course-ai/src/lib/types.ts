@@ -32,6 +32,50 @@ export interface Video {
   crop_right?: number | null;
   crop_bottom?: number | null;
   crop_left?: number | null;
+  // B 站分 P 的 cid：弹幕接口按它寻址；导入时反查到会落回库里。
+  bilibili_cid?: string | null;
+}
+
+/** 一条弹幕。按 start_ms 排期，mode 决定滚动/顶部/底部。 */
+export interface DanmakuEntry {
+  mode: "scroll" | "top" | "bottom";
+  start_ms: number;
+  text: string;
+  /** 弹幕颜色（#RRGGBB）；null = B 站默认白。 */
+  color: string | null;
+  font_size: number | null;
+}
+
+/** 一条评论：根评论（parent_rpid 为 null）或楼中楼回复。只作静态展示。 */
+export interface CommentEntry {
+  /** B 站评论 id（超出 JS 安全整数，后端转成字符串）。 */
+  rpid: string | null;
+  author: string;
+  text: string;
+  like_count: number;
+  /** 评论时间（Unix 秒）。 */
+  ctime: number;
+  /** 所属根评论的 rpid；null = 根评论本身。 */
+  parent_rpid: string | null;
+  /** 根评论的回复总数（回复恒为 0）。 */
+  reply_count: number;
+  /** 「回复另一条回复」时的直接父回复 rpid；直接回复根评论时 = parent_rpid。 */
+  direct_parent_rpid: string | null;
+  /** B 站头像图 URL；可能为空。 */
+  avatar: string | null;
+}
+
+/** 一个 B 站表情：文本标记（如 `[doge]`）→ 图片 URL。size 1 小表情 / 2 大表情。 */
+export interface CommentEmote {
+  text: string;
+  url: string;
+  size: number;
+}
+
+/** 评论区整体：评论平铺列表 + 表情映射（渲染时把标记替换成图片）。 */
+export interface CommentSection {
+  comments: CommentEntry[];
+  emotes: CommentEmote[];
 }
 
 /**

@@ -5,6 +5,7 @@ pub mod backup;
 pub mod clips;
 pub mod concepts;
 pub mod courses;
+pub mod danmaku;
 pub mod export;
 pub mod notify;
 pub mod rag;
