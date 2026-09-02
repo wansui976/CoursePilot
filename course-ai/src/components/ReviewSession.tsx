@@ -16,6 +16,7 @@ const GRADES: { rating: number; labelKey: string; key: string }[] = [
   { rating: 4, labelKey: "review.easy", key: "4" },
 ];
 const SESSION_LIMIT = 50;
+let reviewSessionSequence = 0;
 
 type ChoiceData = {
   options: string[];
@@ -69,16 +70,21 @@ export function ReviewSession({
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  // 每次打开都是一副新的到期牌组。会话内锁定列表避免卡片位移，重新打开时
+  // 则必须重新查库，不能复用上一轮已经评分过的卡。
+  const [sessionId] = useState(() => ++reviewSessionSequence);
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: concept
-      ? ["srs-due-concept", concept.courseId, concept.conceptId]
-      : ["srs-due-session"],
+      ? ["srs-due-concept", concept.courseId, concept.conceptId, sessionId]
+      : ["srs-due-session", sessionId],
     queryFn: () =>
       concept
         ? ipc.srs.dueByConcept(concept.courseId, concept.conceptId)
         : ipc.srs.due(SESSION_LIMIT),
     // 会话期间锁定这批卡，复习不即时刷新列表（避免卡片在脚下位移）。
     staleTime: Infinity,
+    // 关闭后立刻丢弃这副牌；下一次打开必须按最新排期重新取数。
+    gcTime: 0,
     refetchOnWindowFocus: false,
   });
 
@@ -109,6 +115,13 @@ export function ReviewSession({
     gradingRef.current = true;
     try {
       await review.mutateAsync({ cardId: card.id, rating });
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["srs-count-due"] }),
+        queryClient.invalidateQueries({ queryKey: ["srs-next-due"] }),
+        queryClient.invalidateQueries({ queryKey: ["srs-due-by-course"] }),
+        queryClient.invalidateQueries({ queryKey: ["srs-concept-due"] }),
+        queryClient.invalidateQueries({ queryKey: ["weak-concepts"] }),
+      ]);
       setRevealed(false);
       selectedOptionsRef.current = [];
       setSelectedOptions([]);
@@ -182,7 +195,7 @@ export function ReviewSession({
     <Dialog.Root
       open
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open && !review.isPending) onClose();
       }}
     >
       <Dialog.Portal>
@@ -198,6 +211,10 @@ export function ReviewSession({
             event.preventDefault();
             restoreFocusRef.current?.focus();
           }}
+          onEscapeKeyDown={(event) => {
+            if (review.isPending) event.preventDefault();
+          }}
+          aria-busy={review.isPending}
           className="fixed inset-0 z-50 flex flex-col bg-[var(--surface-app)]"
         >
       <Dialog.Title className="sr-only">
@@ -216,6 +233,7 @@ export function ReviewSession({
           type="button"
           aria-label={t("review.exit")}
           onClick={onClose}
+          disabled={review.isPending}
           className="ca-icon-btn ca-touch-44"
         >
           <X className="h-5 w-5" />
@@ -372,7 +390,8 @@ export function ReviewSession({
                     {card.source_ms != null && card.video_id && (
                       <button
                         onClick={() => onJump(card)}
-                        className="ca-touch-44 mt-3 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                        disabled={review.isPending}
+                        className="ca-touch-44 mt-3 inline-flex items-center gap-1 text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
                         {t("review.reviewSource")}

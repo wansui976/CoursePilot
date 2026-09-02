@@ -1,7 +1,7 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { Brain, Captions, LayoutGrid, Sparkles, StickyNote } from "lucide-react";
+import { Captions, LayoutGrid, Sparkles, StickyNote } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TextSkeleton } from "@/components/ui/skeleton";
 import { ipc } from "@/lib/ipc";
@@ -21,22 +21,25 @@ const NotesPanel = lazy(() =>
 const TranscriptPanel = lazy(() =>
   import("./TranscriptPanel").then((m) => ({ default: m.TranscriptPanel })),
 );
-const QuizPanel = lazy(() =>
-  import("./QuizPanel").then((m) => ({ default: m.QuizPanel })),
-);
 const MoreStudyPanel = lazy(() =>
   import("./MoreStudyPanel").then((m) => ({ default: m.MoreStudyPanel })),
 );
 
-const TAB_KEYS: StudyTab[] = ["overview", "transcript", "notes", "quiz", "more"];
-type Tab = StudyTab;
+// 练习收进「更多」后只剩 4 个一级 tab：面板拖到最窄（384px）也能全部放下，
+// 「更多」不会再被挤出可视区。StudyTab 里的 "quiz" 只作为存量存储值被迁移读取。
+const TAB_KEYS: Exclude<StudyTab, "quiz">[] = [
+  "overview",
+  "transcript",
+  "notes",
+  "more",
+];
+type Tab = Exclude<StudyTab, "quiz">;
 
 // 每个 tab 一个图标：下划线 tab 之间靠图标+文字一起辨识，避免面板窄到只剩图标时迷失。
 const TAB_ICONS: Record<Tab, typeof Sparkles> = {
   overview: Sparkles,
   transcript: Captions,
   notes: StickyNote,
-  quiz: Brain,
   more: LayoutGrid,
 };
 
@@ -44,7 +47,7 @@ function PanelFallback() {
   return <TextSkeleton lines={6} />;
 }
 
-/** tab 徽标：练习显示题数（数字），概览/笔记有内容显示圆点。
+/** tab 徽标：「更多」显示练习题数（数字，练习已收进更多），概览/笔记有内容显示圆点。
  *  只亮有内容的 tab——空状态不该挨个 tab 点开才知道哪里什么都没有。
  *  独立成组件的原因：徽标查询状态更新只重渲染自己的 span，不带动整个面板
  *  （尤其已保活的文稿/笔记等重面板）重渲染。 */
@@ -72,7 +75,7 @@ function TabBadge({ tab, videoId }: { tab: Tab; videoId: string }) {
 
   // 徽标只数有效题：与 QuizPanel 的 sanitize 同口径的轻量近似（stem 非空即可）。
   const quizCount = useMemo(() => {
-    if (tab !== "quiz") return 0;
+    if (tab !== "more") return 0;
     const raw = quiz.data;
     if (!raw) return 0;
     try {
@@ -89,7 +92,7 @@ function TabBadge({ tab, videoId }: { tab: Tab; videoId: string }) {
     }
   }, [tab, quiz.data]);
 
-  if (tab === "quiz" && quizCount > 0) {
+  if (tab === "more" && quizCount > 0) {
     const shown = quizCount > 999 ? "999+" : String(quizCount);
     return (
       <span className="ml-1 rounded-full bg-[var(--surface-card-active)] px-1.5 py-px text-[10px] font-semibold leading-4 tabular-nums text-[var(--accent-text)]">
@@ -108,9 +111,14 @@ function TabBadge({ tab, videoId }: { tab: Tab; videoId: string }) {
 
 function VideoTabsPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<Tab>(
-    () => readVideoResumeState(videoId).activeTab ?? "overview",
+  // 存量恢复：练习已并入「更多」，读到旧值 "quiz" 时落到更多并直接定位练习视图。
+  const [restored] = useState(() => readVideoResumeState(videoId));
+  const [activeTab, setActiveTab] = useState<Tab>(() =>
+    restored.activeTab === "quiz"
+      ? "more"
+      : (restored.activeTab as Tab | null) ?? "overview",
   );
+  const restoredQuizView = restored.activeTab === "quiz";
   // 保活：记录访问过的标签。访问过的面板用 forceMount 常驻 DOM（非活动时隐藏），
   // 再切回时不必重建重组件（tiptap/markmap）或上千行文稿 DOM —— 切换从此瞬时完成。
   // 未访问过的不渲染，保持懒加载、不拖累首屏。
@@ -130,7 +138,7 @@ function VideoTabsPanel({ videoId }: { videoId: string }) {
     [videoId],
   );
 
-  // 数字键 1-5 直接切 tab（播放器快捷键不占数字键，无冲突）。
+  // 数字键 1-4 直接切 tab（播放器快捷键不占数字键，无冲突）。
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -155,8 +163,15 @@ function VideoTabsPanel({ videoId }: { videoId: string }) {
     { tab: "overview", node: <AiViewPanel videoId={videoId} /> },
     { tab: "transcript", node: <TranscriptPanel videoId={videoId} /> },
     { tab: "notes", node: <NotesPanel videoId={videoId} /> },
-    { tab: "quiz", node: <QuizPanel videoId={videoId} /> },
-    { tab: "more", node: <MoreStudyPanel videoId={videoId} /> },
+    {
+      tab: "more",
+      node: (
+        <MoreStudyPanel
+          videoId={videoId}
+          initialView={restoredQuizView ? "quiz" : undefined}
+        />
+      ),
+    },
   ];
 
   return (

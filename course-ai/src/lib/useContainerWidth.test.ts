@@ -1,7 +1,12 @@
 import { renderHook } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { bucketForWidth, coarsePointer, useContainerWidth } from "./useContainerWidth";
+import {
+  bucketForWidth,
+  coarsePointer,
+  useContainerPixelWidth,
+  useContainerWidth,
+} from "./useContainerWidth";
 
 describe("bucketForWidth", () => {
   it("maps width ranges to buckets at the documented breakpoints", () => {
@@ -49,5 +54,31 @@ describe("useContainerWidth", () => {
     window.innerWidth = 1280;
     const { result } = renderHook(() => useContainerWidth(useRef<HTMLDivElement>(null)));
     expect(result.current).toBe("wide");
+  });
+});
+
+describe("useContainerPixelWidth", () => {
+  afterEach(() => {
+    window.innerWidth = 1024;
+  });
+
+  it("falls back to the window width while the container is detached", () => {
+    window.innerWidth = 744;
+    const { result } = renderHook(() =>
+      useContainerPixelWidth(useRef<HTMLDivElement>(null)),
+    );
+    expect(result.current).toBe(744);
+  });
+
+  it("measures the mounted container instead of assuming its width bucket", () => {
+    const element = document.createElement("div");
+    Object.defineProperty(element, "clientWidth", { value: 612 });
+
+    const { result } = renderHook(() => {
+      const ref = useRef<HTMLDivElement | null>(element);
+      return useContainerPixelWidth(ref);
+    });
+
+    expect(result.current).toBe(612);
   });
 });

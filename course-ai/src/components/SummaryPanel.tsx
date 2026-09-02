@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, FileText } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { renderMarkdown } from "@/lib/renderMarkdown";
@@ -9,10 +9,8 @@ import { TextSkeleton } from "@/components/ui/skeleton";
 import { PanelEmptyState } from "@/components/ui/empty-state";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { PanelActions } from "./PanelActions";
-import {
-  invalidateStaleArtifacts,
-  useStaleArtifacts,
-} from "@/lib/useStaleArtifacts";
+import { useStaleArtifacts } from "@/lib/useStaleArtifacts";
+import { useAiGeneration } from "@/lib/useAiGeneration";
 
 // 折叠是全局 UI 偏好（非按视频），存一个 localStorage 布尔即可。
 const COLLAPSE_KEY = "course-ai-summary-collapsed";
@@ -35,7 +33,6 @@ function saveCollapsed(value: boolean) {
 
 export function SummaryPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
-  const qc = useQueryClient();
   const requestSeek = usePlayer((s) => s.requestSeek);
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const {
@@ -49,13 +46,7 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
     queryFn: () => ipc.ai.getSummary(videoId),
   });
   const stale = useStaleArtifacts(videoId);
-  const generate = useMutation({
-    mutationFn: () => ipc.ai.generate(videoId, "summary"),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["summary", videoId] });
-      invalidateStaleArtifacts(qc, videoId);
-    },
-  });
+  const generate = useAiGeneration(videoId, "summary");
 
   function toggleCollapsed() {
     setCollapsed((c) => {
@@ -65,12 +56,13 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
     });
   }
 
-  // 折叠时只剩标题条、不占 45%，把整块高度让给下方「重点章节」。
+  // 折叠时只剩标题条，把整块高度让给下方「重点章节」。
+  // ca-summary-panel 的尺寸/分隔线规则在 globals.css：默认最多占 45%；
+  // 章节收回贴底时（:has 命中）摘要填满底栏以上全部空间，底边线摘掉（线随章节栏走）。
   return (
     <div
-      className={`relative flex shrink-0 flex-col border-b border-[var(--border-subtle)] ${
-        collapsed ? "" : "max-h-[45%]"
-      }`}
+      data-summary-collapsed={collapsed ? true : undefined}
+      className="ca-summary-panel"
     >
       <button
         type="button"
@@ -96,7 +88,7 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
               <ErrorNote
                 className="mb-2"
                 error={generate.error}
-                onRetry={() => generate.mutate()}
+                onRetry={generate.start}
               />
             )}
             {isLoading ? (
@@ -115,7 +107,7 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
           </div>
           {!isError && (
             <PanelActions
-              onRegenerate={() => generate.mutate()}
+              onRegenerate={generate.start}
               regenerating={generate.isPending}
               hasContent={!!summary}
               stale={stale.has("summary")}

@@ -927,8 +927,13 @@ pub async fn due_by_course(db: &Db, now: i64) -> AppResult<Vec<(String, i64)>> {
     .await?)
 }
 
-/// 复习评分：按 FSRS 更新排期 + 记一条 review 事件（含卡 id 与评分）。
-pub async fn review_card(db: &Db, card_id: &str, rating: i64, now: i64) -> AppResult<()> {
+async fn review_card_with_policy(
+    db: &Db,
+    card_id: &str,
+    rating: i64,
+    now: i64,
+    require_due: bool,
+) -> AppResult<()> {
     if !(1..=4).contains(&rating) {
         return Err(AppError::Config(format!(
             "review rating must be between 1 and 4, got {rating}"
@@ -940,11 +945,12 @@ pub async fn review_card(db: &Db, card_id: &str, rating: i64, now: i64) -> AppRe
         f64,
         i64,
         i64,
+        i64,
         Option<i64>,
         Option<String>,
         Option<String>,
     )> = sqlx::query_as(
-        "SELECT s.stability, s.difficulty, s.reps, s.lapses, s.last_reviewed,
+        "SELECT s.stability, s.difficulty, s.due_at, s.reps, s.lapses, s.last_reviewed,
                 COALESCE(v.course_id, c.course_id), c.video_id
          FROM card_schedule s
          JOIN cards c ON c.id = s.card_id
@@ -958,10 +964,24 @@ pub async fn review_card(db: &Db, card_id: &str, rating: i64, now: i64) -> AppRe
     .bind(card_id)
     .fetch_optional(&mut *tx)
     .await?;
-    let Some((stability, difficulty, reps, lapses, last_reviewed, course_id, video_id)) = row
+    let Some((
+        stability,
+        difficulty,
+        expected_due_at,
+        reps,
+        lapses,
+        last_reviewed,
+        course_id,
+        video_id,
+    )) = row
     else {
         return Err(AppError::NotFound(format!("active card {card_id}")));
     };
+    if require_due && expected_due_at > now {
+        return Err(AppError::Other(
+            "这张卡已不在待复习队列，请刷新后再试".into(),
+        ));
+    }
 
     // 递推交给 step_review：同步收方向的事件重放、以及打分按钮上的间隔预览走的是同一个
     // 函数，三者不可能算出不同的排期。
@@ -976,9 +996,9 @@ pub async fn review_card(db: &Db, card_id: &str, rating: i64, now: i64) -> AppRe
     };
     step_review(&mut schedule, rating, now);
 
-    sqlx::query(
+    let updated = sqlx::query(
         "UPDATE card_schedule SET due_at=?, stability=?, difficulty=?, interval_days=?, reps=?, lapses=?, last_reviewed=?
-         WHERE card_id=?",
+         WHERE card_id=? AND due_at=? AND last_reviewed IS ?",
     )
     .bind(schedule.due_at)
     .bind(schedule.stability)
@@ -988,8 +1008,15 @@ pub async fn review_card(db: &Db, card_id: &str, rating: i64, now: i64) -> AppRe
     .bind(schedule.lapses)
     .bind(now)
     .bind(card_id)
+    .bind(expected_due_at)
+    .bind(last_reviewed)
     .execute(&mut *tx)
     .await?;
+    if updated.rows_affected() != 1 {
+        return Err(AppError::Other(
+            "这张卡的排期已在其他会话中更新，请刷新后再试".into(),
+        ));
+    }
 
     // 复习流水（供仪表盘/掌握度聚合）。课程以存活视频的实际归属为准。
     let meta = format!(
@@ -1010,6 +1037,16 @@ pub async fn review_card(db: &Db, card_id: &str, rating: i64, now: i64) -> AppRe
     .await?;
     tx.commit().await?;
     Ok(())
+}
+
+/// 内部事件重放与调度测试可以指定任意时间推进排期。
+pub async fn review_card(db: &Db, card_id: &str, rating: i64, now: i64) -> AppResult<()> {
+    review_card_with_policy(db, card_id, rating, now, false).await
+}
+
+/// 用户界面评分只接受当前到期的卡，并用排期快照阻止并发重复提交。
+pub async fn review_due_card(db: &Db, card_id: &str, rating: i64, now: i64) -> AppResult<()> {
+    review_card_with_policy(db, card_id, rating, now, true).await
 }
 
 #[tauri::command]
@@ -1042,7 +1079,7 @@ pub async fn cmd_review_card(
     card_id: String,
     rating: i64,
 ) -> AppResult<()> {
-    review_card(
+    review_due_card(
         &state.db,
         &card_id,
         rating,
@@ -1324,6 +1361,37 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(last_reviewed, None);
+    }
+
+    #[tokio::test]
+    async fn user_review_rejects_a_card_that_another_session_already_scheduled() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(&db, r#"[{"stem":"Q","answer":"A"}]"#).await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let card_id = quiz_card_id(&vid, "Q");
+        let first_due: i64 = sqlx::query_scalar("SELECT due_at FROM card_schedule WHERE card_id=?")
+            .bind(&card_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+
+        review_due_card(&db, &card_id, 3, first_due).await.unwrap();
+        let error = review_due_card(&db, &card_id, 3, first_due + 1)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("已不在待复习队列"));
+        let (events, reps): (i64, i64) = sqlx::query_as(
+            "SELECT
+               (SELECT COUNT(*) FROM study_events WHERE kind='review' AND meta_json LIKE ?),
+               (SELECT reps FROM card_schedule WHERE card_id=?)",
+        )
+        .bind(format!("%{}%", card_id))
+        .bind(&card_id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+        assert_eq!((events, reps), (1, 1));
     }
 
     #[tokio::test]

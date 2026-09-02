@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FolderInput } from "lucide-react";
@@ -13,11 +13,13 @@ export function FolderImportDialog({
   videos,
   onClose,
   onImported,
+  returnFocusRef,
 }: {
   courseId: string;
   videos: FolderVideo[];
   onClose: () => void;
   onImported?: () => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const { t } = useTranslation();
   const restoreFocusRef = useRef<HTMLElement | null>(
@@ -73,7 +75,7 @@ export function FolderImportDialog({
           aria-modal="true"
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            restoreFocusRef.current?.focus();
+            (returnFocusRef?.current ?? restoreFocusRef.current)?.focus();
           }}
           onEscapeKeyDown={(event) => {
             if (importBatch.isPending) event.preventDefault();

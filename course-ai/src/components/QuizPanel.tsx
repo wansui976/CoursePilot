@@ -12,10 +12,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { MathText } from "./MathText";
 import { PanelActions } from "./PanelActions";
-import {
-  invalidateStaleArtifacts,
-  useStaleArtifacts,
-} from "@/lib/useStaleArtifacts";
+import { useStaleArtifacts } from "@/lib/useStaleArtifacts";
+import { useAiGeneration } from "@/lib/useAiGeneration";
 
 function answerText(answer: QuizQuestion["answer"], t: (key: string) => string): string {
   if (Array.isArray(answer)) return answer.join("、");
@@ -90,7 +88,15 @@ export function QuizPanel({ videoId }: { videoId: string }) {
       ? revealedState.values
       : {};
   // 每题自评（也随题库版本重置）。correct 数累积成小结。
-  const [ratings, setRatings] = useState<Record<number, SelfRating>>({});
+  const [ratingsState, setRatingsState] = useState<{
+    videoId: string;
+    raw: string | null | undefined;
+    values: Record<number, SelfRating>;
+  }>({ videoId, raw, values: {} });
+  const ratings =
+    ratingsState.videoId === videoId && ratingsState.raw === raw
+      ? ratingsState.values
+      : {};
 
   // 把这套题加入每日间隔重复复习。
   const addToReview = useMutation({
@@ -100,15 +106,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
   });
 
   const stale = useStaleArtifacts(videoId);
-  const generate = useMutation({
-    mutationFn: () => ipc.ai.generate(videoId, "quiz"),
-    onSuccess: () => {
-      setRevealedState({ videoId, raw, values: {} });
-      setRatings({});
-      queryClient.invalidateQueries({ queryKey: ["quiz", videoId] });
-      invalidateStaleArtifacts(queryClient, videoId);
-    },
-  });
+  const generate = useAiGeneration(videoId, "quiz");
 
   const questions = useMemo<QuizQuestion[]>(() => {
     if (!raw) return [];
@@ -134,7 +132,18 @@ export function QuizPanel({ videoId }: { videoId: string }) {
   const allRated = questions.length > 0 && ratedCount === questions.length;
 
   function rate(index: number, value: SelfRating) {
-    setRatings((prev) => ({ ...prev, [index]: value }));
+    setRatingsState((current) => ({
+      videoId,
+      raw,
+      values: {
+        ...(current.videoId === videoId && current.raw === raw ? current.values : {}),
+        [index]: value,
+      },
+    }));
+  }
+
+  function clearRatings() {
+    setRatingsState({ videoId, raw, values: {} });
   }
 
   // 加载中和空题库原先共用外壳：右下角「生成」按钮在最需要的空状态下也存在。
@@ -145,7 +154,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
         className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 pb-12"
       >
         {!isError && generate.isError && (
-          <ErrorNote error={generate.error} onRetry={() => generate.mutate()} />
+          <ErrorNote error={generate.error} onRetry={generate.start} />
         )}
         {isLoading ? (
           <div className="space-y-4" role="status" aria-label={t("quiz.loading")}>
@@ -224,7 +233,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
                 {correctCount < questions.length && (
                   <button
                     type="button"
-                    onClick={() => setRatings({})}
+                    onClick={clearRatings}
                     className="ca-touch-44 mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
@@ -339,7 +348,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
       </div>
       {!isError && (
         <PanelActions
-          onRegenerate={() => generate.mutate()}
+          onRegenerate={generate.start}
           regenerating={generate.isPending}
           hasContent={questions.length > 0}
           stale={stale.has("quiz")}

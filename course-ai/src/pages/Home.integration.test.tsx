@@ -134,6 +134,7 @@ vi.mock("@/components/ConceptsPanel", () => ({
 }));
 const mockUseContainerWidth = vi.hoisted(() => ({
   useContainerWidth: vi.fn(),
+  useContainerPixelWidth: vi.fn(() => 1024),
   coarsePointer: vi.fn(() => false),
   useIsPortrait: vi.fn(() => false),
 }));
@@ -210,7 +211,12 @@ describe("Home selected-video integration", () => {
 
   beforeEach(() => {
     localStorage.clear();
-    useAssistantUi.setState({ open: false, side: "right", width: 380 });
+    useAssistantUi.setState({
+      open: false,
+      side: "right",
+      width: 380,
+      mode: "float",
+    });
     usePlayer.setState({
       videoId: null,
       currentMs: 0,
@@ -219,6 +225,7 @@ describe("Home selected-video integration", () => {
       pendingSeek: null,
     });
     mockUseContainerWidth.useContainerWidth.mockReturnValue("wide");
+    mockUseContainerWidth.useContainerPixelWidth.mockReturnValue(1024);
     mockUseContainerWidth.coarsePointer.mockReturnValue(false);
     mockUseContainerWidth.useIsPortrait.mockReturnValue(false);
     mockPlatform.isTablet.mockReturnValue(false);
@@ -295,7 +302,6 @@ describe("Home selected-video integration", () => {
     expect(screen.getByRole("tab", { name: "概览" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "文稿" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "笔记" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "练习" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "更多" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "笔记" }));
@@ -309,6 +315,8 @@ describe("Home selected-video integration", () => {
     expect(
       await screen.findByRole("group", { name: "更多学习资料" }),
     ).toBeInTheDocument();
+    // 练习已并入更多，是这里的默认视图。
+    expect(screen.getByRole("button", { name: "练习" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "课件" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "脑图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "片段" })).toBeInTheDocument();
@@ -563,7 +571,7 @@ describe("Home selected-video integration", () => {
     expect(mockIpc.app.exit).not.toHaveBeenCalled();
   });
 
-  it("cancels an unsaved transcript edit before leaving the Android workspace", async () => {
+  it("keeps an unsaved transcript edit visible on Android back", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
     mockIpc.transcripts.list.mockResolvedValue([
@@ -592,10 +600,188 @@ describe("Home selected-video integration", () => {
     ]?.[0] as ((payload: { canGoBack: boolean }) => void) | undefined;
     act(() => handler?.({ canGoBack: false }));
 
-    await waitFor(() => expect(screen.queryByLabelText("编辑文稿")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("编辑文稿")).toHaveValue("尚未保存的字幕改动");
     expect(screen.getByRole("region", { name: "学习工作台" })).toBeInTheDocument();
     expect(mockIpc.transcripts.update).not.toHaveBeenCalled();
     expect(mockIpc.app.exit).not.toHaveBeenCalled();
+  });
+
+  it("dismisses transcript search before the visible phone back returns to the library", async () => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
+    mockIpc.transcripts.list.mockResolvedValue([
+      {
+        id: 1,
+        video_id: video.id,
+        segment_idx: 0,
+        start_ms: 0,
+        end_ms: 1_000,
+        text: "第一句文稿",
+      },
+    ]);
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "搜索文稿" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "学习工作台" })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("searchbox", { name: "搜索文稿" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Downloads" })).toBeInTheDocument();
+  });
+
+  it("keeps a dirty transcript draft when the visible phone back is pressed", async () => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
+    mockIpc.transcripts.list.mockResolvedValue([
+      {
+        id: 1,
+        video_id: video.id,
+        segment_idx: 0,
+        start_ms: 0,
+        end_ms: 1_000,
+        text: "第一句文稿",
+      },
+    ]);
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "编辑这句文稿" }))[0]);
+    fireEvent.change(screen.getByLabelText("编辑文稿"), {
+      target: { value: "手机返回不能丢的草稿" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+
+    expect(screen.getByRole("region", { name: "学习工作台" })).toBeInTheDocument();
+    expect(screen.getByLabelText("编辑文稿")).toHaveValue("手机返回不能丢的草稿");
+    expect(mockIpc.transcripts.update).not.toHaveBeenCalled();
+  });
+
+  it("dismisses transcript search before the desktop rail returns to the library", async () => {
+    mockIpc.transcripts.list.mockResolvedValue([
+      {
+        id: 1,
+        video_id: video.id,
+        segment_idx: 0,
+        start_ms: 0,
+        end_ms: 1_000,
+        text: "第一句文稿",
+      },
+    ]);
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "搜索文稿" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "返回课程库" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "学习工作台" })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("searchbox", { name: "搜索文稿" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Downloads" })).toBeInTheDocument();
+  });
+
+  it("keeps a dirty edit instead of switching videos from the expanded sidebar", async () => {
+    const secondVideo: Video = {
+      ...video,
+      id: "video-2",
+      title: "02.第二课.mp4",
+      file_path: "/tmp/video-2.mp4",
+      order_index: 1,
+    };
+    mockIpc.videos.list.mockResolvedValue([video, secondVideo]);
+    mockIpc.transcripts.list.mockResolvedValue([
+      {
+        id: 1,
+        video_id: video.id,
+        segment_idx: 0,
+        start_ms: 0,
+        end_ms: 1_000,
+        text: "第一句文稿",
+      },
+    ]);
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "编辑这句文稿" }))[0]);
+    fireEvent.change(screen.getByLabelText("编辑文稿"), {
+      target: { value: "切换前未保存的文稿" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "展开侧栏" }));
+
+    fireEvent.click(screen.getByRole("button", { name: displayTitle(secondVideo.title) }));
+
+    expect(screen.getByRole("heading", { name: displayTitle(video.title) })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: displayTitle(secondVideo.title) }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("编辑文稿")).toHaveValue("切换前未保存的文稿");
+    expect(mockIpc.transcripts.update).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /取消/ }));
+    fireEvent.click(screen.getByRole("button", { name: "搜索文稿" }));
+    fireEvent.click(screen.getByRole("button", { name: displayTitle(secondVideo.title) }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: displayTitle(secondVideo.title) }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("searchbox", { name: "搜索文稿" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a pending transcript save visible when the rail requests navigation", async () => {
+    let rejectUpdate!: (reason: unknown) => void;
+    mockIpc.transcripts.update.mockReturnValueOnce(
+      new Promise<void>((_resolve, reject) => {
+        rejectUpdate = reject;
+      }),
+    );
+    mockIpc.transcripts.list.mockResolvedValue([
+      {
+        id: 1,
+        video_id: video.id,
+        segment_idx: 0,
+        start_ms: 0,
+        end_ms: 1_000,
+        text: "第一句文稿",
+      },
+    ]);
+    renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "编辑这句文稿" }))[0]);
+    fireEvent.change(screen.getByLabelText("编辑文稿"), {
+      target: { value: "正在保存的文稿" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /取消/ })).toBeDisabled(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "返回课程库" }));
+
+    expect(screen.getByRole("region", { name: "学习工作台" })).toBeInTheDocument();
+    expect(screen.getByLabelText("编辑文稿")).toHaveValue("正在保存的文稿");
+
+    await act(async () => rejectUpdate(new Error("db locked")));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("db locked");
+    expect(screen.getByLabelText("编辑文稿")).toHaveValue("正在保存的文稿");
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
   });
 
   it("cancels inline video rename on the system back path without leaving the course", async () => {
@@ -1037,5 +1223,32 @@ describe("Home selected-video integration", () => {
       "data-layout",
       "wide",
     );
+  });
+
+  it("stacks a 1024px desktop workbench when the docked assistant consumes the split width", async () => {
+    mockUseContainerWidth.useContainerWidth.mockReturnValue("wide");
+    mockUseContainerWidth.useContainerPixelWidth.mockReturnValue(1024);
+    useAssistantUi.setState({
+      open: true,
+      side: "right",
+      width: 380,
+      mode: "docked",
+    });
+
+    const { container } = renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
+
+    const app = container.firstElementChild as HTMLElement;
+    expect(app).toHaveAttribute("data-shell", "sidebar");
+    expect(app).toHaveStyle({ paddingRight: "380px" });
+    expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
+      "data-layout",
+      "stacked",
+    );
+    expect(
+      screen.queryByRole("separator", { name: "调整学习资料宽度" }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -181,7 +181,9 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const restoreSearchFocusRef = useRef(false);
   const editOriginIdRef = useRef<number | null>(null);
+  const editOriginalTextRef = useRef("");
   const restoreEditFocusRef = useRef(false);
+  const updatePendingRef = useRef(false);
   // 高亮词用 deferred：打字时不逐键重渲染整表（上千行），松手后一次收敛。
   const deferredHighlight = useDeferredValue(searchQuery.trim().toLocaleLowerCase());
 
@@ -211,6 +213,9 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
       invalidateStaleArtifacts(qc, videoId);
       setEditingId(null);
     },
+    onSettled: () => {
+      updatePendingRef.current = false;
+    },
   });
   const resetUpdateRef = useRef(update.reset);
   resetUpdateRef.current = update.reset;
@@ -218,12 +223,15 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   // memo 化行的稳定回调：身份不变，非活动行才不会因父组件重渲染而跟着重渲染。
   const startEdit = useCallback((id: number, text: string) => {
     editOriginIdRef.current = id;
+    editOriginalTextRef.current = text;
     restoreEditFocusRef.current = false;
     resetUpdateRef.current();
     setEditingId(id);
     setDraft(text);
   }, []);
   const cancelEdit = useCallback(() => {
+    // 保存已经交给后端后不能让返回/取消把编辑器先撤掉，否则失败时草稿和重试入口都会丢失。
+    if (updatePendingRef.current) return;
     restoreEditFocusRef.current = true;
     setEditingId(null);
   }, []);
@@ -235,9 +243,11 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     document.querySelector<HTMLButtonElement>(`[data-transcript-edit-id="${id}"]`)?.focus();
   }, [editingId]);
   function save() {
-    if (editingId == null) return;
+    if (editingId == null || updatePendingRef.current) return;
+    updatePendingRef.current = true;
     update.mutate({ id: editingId, text: draft });
   }
+  const editDirty = editingId != null && draft !== editOriginalTextRef.current;
 
   // 跟随播放：订阅进度，只在活动行真正变化时 setState，避免每个 tick 重渲染可见行。
   useEffect(() => {
@@ -459,6 +469,14 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     });
   }
 
+  const closeAskAnchor = useCallback((restoreFocus = false) => {
+    window.getSelection()?.removeAllRanges();
+    setAskAnchor(null);
+    if (restoreFocus) {
+      queueMicrotask(() => scrollerRef.current?.focus());
+    }
+  }, []);
+
   // 挖空成卡：把所选词在其所在句里挖空，做成 cloze 复习卡。
   const addCloze = useMutation({
     mutationFn: (vars: { front: string; back: string; startMs: number | null }) =>
@@ -611,6 +629,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
       </div>
       <div
         ref={scrollerRef}
+        tabIndex={-1}
         aria-label={t("transcript.scrollArea")}
         // 大 DOM 标记:可见时主题切换走瞬切(见 stores/theme.ts hasVisibleHeavyDom),
         // 避免 VT 双全屏快照/全树过渡在数千节点上造成冻结;tab 非活动(display:none)不算在场。
@@ -632,11 +651,14 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
             <div
               key={segment.id}
               data-system-back-layer
+              data-system-back-pending={update.isPending ? "" : undefined}
+              data-system-back-dirty={editDirty ? "" : undefined}
               className="px-3 py-0.5"
               onKeyDown={(event) => {
                 if (event.key !== "Escape") return;
                 event.preventDefault();
                 event.stopPropagation();
+                if (updatePendingRef.current || editDirty) return;
                 cancelEdit();
               }}
             >
@@ -654,7 +676,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                 />
                 {/* 保存失败不能无声无息：编辑框还开着、内容保留，给出原因可重试。 */}
                 {update.isError && (
-                  <ErrorNote className="mt-1" error={update.error} />
+                  <ErrorNote className="mt-1" error={update.error} onRetry={save} />
                 )}
                 <div className="mt-1 flex items-center gap-2 text-xs">
                   <Button
@@ -670,6 +692,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                     variant="ghost"
                     size="sm"
                     onClick={cancelEdit}
+                    disabled={update.isPending}
                   >
                     <X className="h-3 w-3" />
                     {t("transcript.cancel")}
@@ -696,21 +719,28 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
       </div>
       {askAnchor && (
         <div
+          data-system-back-layer
           // 选区上方浮出；fixed + 视口坐标，不受滚动容器裁剪。
           className="fixed z-50 flex -translate-x-1/2 -translate-y-full gap-1"
           style={{ left: askAnchor.left, top: askAnchor.top - 6 }}
           // 别让按钮抢焦点而清掉选区（文本/时间戳已存进 askAnchor，读取本就安全）。
           onMouseDown={(e) => e.preventDefault()}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            closeAskAnchor(true);
+          }}
         >
           <Button
             type="button"
+            autoFocus
             variant="primary"
             size="sm"
             className="shadow-[var(--shadow-pop)]"
             onClick={() => {
               useInlineAsk.getState().askAbout(askAnchor.text, askAnchor.startMs);
-              window.getSelection()?.removeAllRanges();
-              setAskAnchor(null);
+              closeAskAnchor();
             }}
           >
             {t("transcript.askAi")}
@@ -724,8 +754,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
               onClick={() => {
                 const { front, back } = buildCloze(askAnchor.segmentText!, askAnchor.text);
                 addCloze.mutate({ front, back, startMs: askAnchor.startMs });
-                window.getSelection()?.removeAllRanges();
-                setAskAnchor(null);
+                closeAskAnchor();
               }}
             >
               {t("transcript.clozeCard")}

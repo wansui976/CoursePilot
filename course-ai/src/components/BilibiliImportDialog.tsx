@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import * as Dialog from "@radix-ui/react-dialog";
-import { useRef, useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -20,10 +20,12 @@ export function BilibiliImportDialog({
   courseId,
   onClose,
   onStartProcessing,
+  returnFocusRef,
 }: {
   courseId: string;
   onClose: () => void;
   onStartProcessing?: (video: Video) => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const { t } = useTranslation();
   const restoreFocusRef = useRef<HTMLElement | null>(
@@ -176,7 +178,7 @@ export function BilibiliImportDialog({
           aria-describedby={undefined}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            restoreFocusRef.current?.focus();
+            (returnFocusRef?.current ?? restoreFocusRef.current)?.focus();
           }}
           onEscapeKeyDown={(event) => {
             if (closeBlocked) event.preventDefault();

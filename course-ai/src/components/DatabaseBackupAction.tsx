@@ -1,4 +1,5 @@
-import { useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Download, RotateCcw, Share2 } from "lucide-react";
@@ -33,6 +34,8 @@ function fileName(path: string): string {
 export function DatabaseBackupAction() {
   const { t } = useTranslation();
   const mobile = isMobile();
+  const restoreTriggerRef = useRef<HTMLButtonElement>(null);
+  const cancelRestoreRef = useRef<HTMLButtonElement>(null);
   const [busy, setBusy] = useState<"backup" | "restore" | null>(null);
   const [pendingRestore, setPendingRestore] = useState<{
     path: string;
@@ -41,6 +44,10 @@ export function DatabaseBackupAction() {
   const [status, setStatus] = useState<
     { kind: "success" | "error"; text: string } | undefined
   >();
+
+  function closeRestoreConfirmation() {
+    setPendingRestore(undefined);
+  }
 
   async function backup() {
     if (busy) return;
@@ -97,7 +104,7 @@ export function DatabaseBackupAction() {
     setStatus(undefined);
     try {
       const result = await ipc.backup.restore(pendingRestore.path);
-      setPendingRestore(undefined);
+      closeRestoreConfirmation();
       setStatus({
         kind: "success",
         text: result.restartRequested
@@ -137,6 +144,7 @@ export function DatabaseBackupAction() {
               : t("backup.saveButton")}
         </Button>
         <Button
+          ref={restoreTriggerRef}
           size="sm"
           variant="outline"
           disabled={busy !== null}
@@ -146,47 +154,81 @@ export function DatabaseBackupAction() {
           {busy === "restore" ? t("backup.restore.busy") : t("backup.restore.button")}
         </Button>
       </div>
-      {pendingRestore && (
-        <div
-          role="group"
-          aria-label={t("backup.restore.confirmTitle")}
-          className="w-full rounded-lg border border-[var(--status-warn)] bg-[var(--status-warn-bg)] p-3 text-left"
-        >
-          <p className="text-xs font-semibold text-[var(--text-strong)]">
-            {t("backup.restore.confirmTitle")}
-          </p>
-          <p className="mt-1 break-words text-xs leading-relaxed text-[var(--text-muted)]">
-            {t(
-              mobile
-                ? "backup.restore.confirmBodyMobile"
-                : "backup.restore.confirmBodyDesktop",
-              { fileName: pendingRestore.name },
+      <Dialog.Root
+        open={pendingRestore != null}
+        onOpenChange={(open) => {
+          if (!open && busy !== "restore") closeRestoreConfirmation();
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay
+            data-testid="database-restore-overlay"
+            className="ca-dialog-overlay fixed inset-0 z-50 bg-black/50"
+          />
+          <Dialog.Content
+            role="alertdialog"
+            aria-modal="true"
+            onOpenAutoFocus={(event) => {
+              event.preventDefault();
+              cancelRestoreRef.current?.focus();
+            }}
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              restoreTriggerRef.current?.focus();
+            }}
+            onEscapeKeyDown={(event) => {
+              if (busy === "restore") event.preventDefault();
+            }}
+            onInteractOutside={(event) => {
+              if (busy === "restore") event.preventDefault();
+            }}
+            className="fixed left-1/2 top-1/2 z-[51] max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-[var(--status-warn)] bg-[var(--surface-panel)] p-5 text-left shadow-[var(--shadow-pop)]"
+          >
+            <Dialog.Title className="text-sm font-semibold text-[var(--text-strong)]">
+              {t("backup.restore.confirmTitle")}
+            </Dialog.Title>
+            <Dialog.Description className="mt-2 break-words text-xs leading-relaxed text-[var(--text-muted)]">
+              {t(
+                mobile
+                  ? "backup.restore.confirmBodyMobile"
+                  : "backup.restore.confirmBodyDesktop",
+                { fileName: pendingRestore?.name ?? "" },
+              )}
+            </Dialog.Description>
+            {status?.kind === "error" && (
+              <p
+                role="alert"
+                className="mt-3 rounded-lg bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)]"
+              >
+                {status.text}
+              </p>
             )}
-          </p>
-          <div className="mt-2 flex flex-wrap justify-end gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={busy !== null}
-              onClick={() => setPendingRestore(undefined)}
-            >
-              {t("common.cancel")}
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              disabled={busy !== null}
-              onClick={() => void restore()}
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              {busy === "restore"
-                ? t("backup.restore.busy")
-                : t("backup.restore.confirmButton")}
-            </Button>
-          </div>
-        </div>
-      )}
-      {status && (
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <Button
+                ref={cancelRestoreRef}
+                size="sm"
+                variant="ghost"
+                disabled={busy !== null}
+                onClick={closeRestoreConfirmation}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={busy !== null}
+                onClick={() => void restore()}
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                {busy === "restore"
+                  ? t("backup.restore.busy")
+                  : t("backup.restore.confirmButton")}
+              </Button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+      {status && !pendingRestore && (
         <p
           role={status.kind === "error" ? "alert" : "status"}
           className={`max-w-full text-xs ${

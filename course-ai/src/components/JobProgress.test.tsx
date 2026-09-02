@@ -1,7 +1,19 @@
 import "@/i18n";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JobProgress } from "./JobProgress";
+
+function renderJobProgress(videoId: string) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <JobProgress videoId={videoId} />
+    </QueryClientProvider>,
+  );
+}
 
 const { mockIpc } = vi.hoisted(() => ({
   mockIpc: { pipeline: { jobs: vi.fn(), process: vi.fn() } },
@@ -27,7 +39,7 @@ describe("JobProgress", () => {
       job("slides", "done", 1),
     ]);
 
-    render(<JobProgress videoId="v1" />);
+    renderJobProgress("v1");
 
     const labels = (await screen.findAllByText(/语音识别|提取课件|识别课件文字|生成章节/)).map(
       (node) => node.textContent,

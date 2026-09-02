@@ -274,6 +274,7 @@ export function ImportVideoButton({
             courseId={courseId}
             onClose={() => setShowBili(false)}
             onStartProcessing={onStartProcessing}
+            returnFocusRef={triggerRef}
           />
         </Suspense>
       )}
@@ -283,6 +284,7 @@ export function ImportVideoButton({
             courseId={courseId}
             videos={folderVideos}
             onClose={() => setFolderVideos(null)}
+            returnFocusRef={triggerRef}
           />
         </Suspense>
       )}
@@ -292,6 +294,7 @@ export function ImportVideoButton({
             courseId={courseId}
             onClose={() => setShowPlaylist(false)}
             onStartProcessing={onStartProcessing}
+            returnFocusRef={triggerRef}
           />
         </Suspense>
       )}

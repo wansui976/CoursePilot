@@ -85,6 +85,28 @@ describe("ImportVideoButton", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
+  it("returns focus to the import trigger after a child dialog closes", async () => {
+    isMobileMock.mockReturnValue(false);
+    pickDirectoryPathMock.mockResolvedValue("/course/folder");
+    scanFolderMock.mockResolvedValue([
+      { path: "/course/folder/01.mp4", name: "01" },
+    ]);
+
+    renderButton();
+    const trigger = screen.getByRole("button", { name: "导入" });
+    fireEvent.click(trigger);
+    const folderItem = screen.getByText("导入整个文件夹").closest("button")!;
+    await waitFor(() => expect(screen.getAllByRole("menuitem")[0]).toHaveFocus());
+    fireEvent.click(folderItem);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(trigger).not.toHaveFocus();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+  });
+
   it("hides the folder-import entry on mobile", () => {
     isMobileMock.mockReturnValue(true);
     renderButton();

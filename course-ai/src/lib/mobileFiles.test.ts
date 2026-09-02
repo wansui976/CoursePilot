@@ -178,6 +178,12 @@ describe("pickDirectoryPath", () => {
       platform: "MacIntel",
       maxTouchPoints: 5,
     });
+    // iPadOS 桌面模式 UA 伪装成 Mac，但硬件触摸仍在（ontouchstart 有值）。
+    // jsdom 没有 touch 事件接口，需显式补上，否则 isIPadOSDesktopClass 判不出。
+    vi.stubGlobal("ontouchstart", () => {});
+    // 真 iPad 是触摸设备，媒体查询报 (hover: none)；MacBook 触控板是 (hover: hover)。
+    window.matchMedia = (query: string) =>
+      ({ matches: query === "(hover: none)", media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false } as unknown as MediaQueryList);
 
     const { pickDirectoryPath } = await import("./mobileFiles");
     const result = await pickDirectoryPath(["courses", "新课程"]);

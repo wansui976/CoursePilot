@@ -136,9 +136,11 @@ describe("DatabaseBackupAction", () => {
       ),
     );
     expect(mocks.restore).not.toHaveBeenCalled();
-    expect(
-      screen.getByRole("group", { name: "替换当前学习数据库？" }),
-    ).toHaveTextContent("CoursePilot-backup.db");
+    const dialog = screen.getByRole("alertdialog", {
+      name: "替换当前学习数据库？",
+    });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveTextContent("CoursePilot-backup.db");
 
     fireEvent.click(screen.getByRole("button", { name: "确认恢复" }));
 
@@ -157,15 +159,73 @@ describe("DatabaseBackupAction", () => {
     render(<DatabaseBackupAction />);
 
     fireEvent.click(screen.getByRole("button", { name: "从文件恢复…" }));
-    await screen.findByRole("group", { name: "替换当前学习数据库？" });
+    await screen.findByRole("alertdialog", { name: "替换当前学习数据库？" });
     fireEvent.click(screen.getByRole("button", { name: "确认恢复" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "恢复失败：恢复文件版本过新",
     );
     expect(
-      screen.getByRole("group", { name: "替换当前学习数据库？" }),
+      screen.getByRole("alertdialog", { name: "替换当前学习数据库？" }),
     ).toBeInTheDocument();
+  });
+
+  it("traps focus in the restore confirmation and returns it after Escape", async () => {
+    render(<DatabaseBackupAction />);
+
+    const trigger = screen.getByRole("button", { name: "从文件恢复…" });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    await screen.findByRole("alertdialog", { name: "替换当前学习数据库？" });
+    const cancel = screen.getByRole("button", { name: "取消" });
+    const confirm = screen.getByRole("button", { name: "确认恢复" });
+    await waitFor(() => expect(cancel).toHaveFocus());
+
+    confirm.focus();
+    fireEvent.keyDown(confirm, { key: "Tab" });
+    expect(cancel).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("cannot dismiss the restore confirmation while validation is pending", async () => {
+    let finishRestore!: (result: {
+      snapshotPath: string;
+      requiresRestart: boolean;
+      restartRequested: boolean;
+    }) => void;
+    mocks.restore.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishRestore = resolve;
+        }),
+    );
+    render(<DatabaseBackupAction />);
+
+    fireEvent.click(screen.getByRole("button", { name: "从文件恢复…" }));
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "替换当前学习数据库？",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "确认恢复" }));
+    await waitFor(() => expect(mocks.restore).toHaveBeenCalledOnce());
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.pointerDown(screen.getByTestId("database-restore-overlay"));
+    expect(dialog).toBeInTheDocument();
+
+    finishRestore({
+      snapshotPath: "/app/backups/restore/pre-restore.db",
+      requiresRestart: true,
+      restartRequested: true,
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
+    );
   });
 
   it("tells mobile users to fully reopen the app after validation", async () => {

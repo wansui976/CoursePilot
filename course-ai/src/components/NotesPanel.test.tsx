@@ -399,6 +399,29 @@ describe("NotesPanel", () => {
     );
   });
 
+  it("shows a regeneration conflict and reconfirms before retrying", async () => {
+    mockIpc.ai.generate
+      .mockRejectedValueOnce(
+        new Error("笔记在生成期间已被修改，已保留新的人工编辑"),
+      )
+      .mockResolvedValueOnce(undefined);
+    renderNotesPanel("video-regenerate-conflict", "regenerate-conflict");
+    await screen.findByText("笔记正文");
+
+    fireEvent.click(screen.getByRole("button", { name: "重新生成" }));
+
+    const conflict = await screen.findByRole("alert");
+    expect(conflict).toHaveTextContent("已保留新的人工编辑");
+    expect(screen.getByText("笔记正文")).toBeInTheDocument();
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockIpc.ai.generate).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
   it("clears the editor when switching to a video that has no notes yet", async () => {
     // 面板在标签之间是保活的（不重建）。切到一个还没有笔记的视频时若不清空，
     // 编辑器会继续显示上一讲的笔记；用户接着打字，那份内容就被存到新视频名下了。

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Maximize2, Share2, ZoomIn, ZoomOut } from "lucide-react";
 import { Transformer } from "markmap-lib";
 import { Markmap } from "markmap-view";
@@ -10,16 +10,13 @@ import { PanelEmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTheme } from "@/stores/theme";
 import { PanelActions } from "./PanelActions";
-import {
-  invalidateStaleArtifacts,
-  useStaleArtifacts,
-} from "@/lib/useStaleArtifacts";
+import { useStaleArtifacts } from "@/lib/useStaleArtifacts";
+import { useAiGeneration } from "@/lib/useAiGeneration";
 
 const transformer = new Transformer();
 
 export function MindmapPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
-  const qc = useQueryClient();
   const theme = useTheme((s) => s.effective);
   const svgRef = useRef<SVGSVGElement>(null);
   const mmRef = useRef<Markmap | undefined>(undefined);
@@ -34,13 +31,7 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
     queryFn: () => ipc.ai.getMindmap(videoId),
   });
   const stale = useStaleArtifacts(videoId);
-  const generate = useMutation({
-    mutationFn: () => ipc.ai.generate(videoId, "mindmap"),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["mindmap", videoId] });
-      invalidateStaleArtifacts(qc, videoId);
-    },
-  });
+  const generate = useAiGeneration(videoId, "mindmap");
 
   useEffect(() => {
     if (!svgRef.current || !md) return;
@@ -85,7 +76,7 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
       )}
       {!isError && generate.isError && (
         <div className="shrink-0 px-4 pt-4">
-          <ErrorNote error={generate.error} onRetry={() => generate.mutate()} />
+        <ErrorNote error={generate.error} onRetry={generate.start} />
         </div>
       )}
       {isLoading && (
@@ -117,7 +108,7 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
           承诺的那个按钮，恰恰在最需要它的空状态下不存在。 */}
       {!isError && (
         <PanelActions
-          onRegenerate={() => generate.mutate()}
+          onRegenerate={generate.start}
           regenerating={generate.isPending}
           hasContent={!!md}
           stale={stale.has("mindmap")}

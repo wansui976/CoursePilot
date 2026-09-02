@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { MATH_RE } from "@/lib/markdownToTiptap";
 
 // KaTeX 较重，仅在字幕真含公式时按需加载，避免拖累播放器首屏。
@@ -27,6 +28,8 @@ type Corner = "nw" | "ne" | "sw" | "se";
 const STORAGE_KEY = "caption-box";
 const DEFAULT_BOX: Box = { left: 0.08, top: 0.8, width: 0.84, height: 0.14 };
 const MIN = 0.05;
+const KEYBOARD_STEP = 0.01;
+const KEYBOARD_LARGE_STEP = 0.05;
 const CAPTION_SAFE_LINES = 2;
 const CAPTION_LINE_HEIGHT = 1.375; // Tailwind `leading-snug`
 const CAPTION_SAFE_HEIGHT_RATIO = 0.9;
@@ -53,6 +56,19 @@ const CORNER_CLASS: Record<Corner, string> = {
   se: "right-0 bottom-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize",
 };
 
+const CORNER_LABEL_KEY: Record<
+  Corner,
+  | "videoPlayer.captionCornerNw"
+  | "videoPlayer.captionCornerNe"
+  | "videoPlayer.captionCornerSw"
+  | "videoPlayer.captionCornerSe"
+> = {
+  nw: "videoPlayer.captionCornerNw",
+  ne: "videoPlayer.captionCornerNe",
+  sw: "videoPlayer.captionCornerSw",
+  se: "videoPlayer.captionCornerSe",
+};
+
 // 字幕底边与控制栏顶边之间再留一点呼吸空隙。
 const CAPTION_BAR_GAP = 8;
 
@@ -68,6 +84,9 @@ export function CaptionOverlay({
   // 传实测高度而非「可见时才传」——控制栏是悬浮出没的，字幕位置不应随之跳动。
   bottomInset?: number;
 }) {
+  const { t } = useTranslation();
+  const keyboardHintId = useId();
+  const captionTextId = useId();
   const [box, setBox] = useState<Box>(loadBox);
   const boxRef = useRef(box);
   boxRef.current = box;
@@ -179,6 +198,76 @@ export function CaptionOverlay({
     };
   }
 
+  function consumeKeyboardAdjustment(event: React.KeyboardEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function handleMoveKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "Home") {
+      consumeKeyboardAdjustment(event);
+      setBox({ ...DEFAULT_BOX });
+      return;
+    }
+
+    const step = event.shiftKey ? KEYBOARD_LARGE_STEP : KEYBOARD_STEP;
+    let dx = 0;
+    let dy = 0;
+    if (event.key === "ArrowLeft") dx = -step;
+    else if (event.key === "ArrowRight") dx = step;
+    else if (event.key === "ArrowUp") dy = -step;
+    else if (event.key === "ArrowDown") dy = step;
+    else return;
+
+    consumeKeyboardAdjustment(event);
+    setBox((current) => ({
+      ...current,
+      left: clamp(current.left + dx, 0, 1 - current.width),
+      top: clamp(current.top + dy, 0, 1 - current.height),
+    }));
+  }
+
+  function handleResizeKeyDown(
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    corner: Corner,
+  ) {
+    if (event.key === "Home") {
+      consumeKeyboardAdjustment(event);
+      setBox({ ...DEFAULT_BOX });
+      return;
+    }
+
+    const step = event.shiftKey ? KEYBOARD_LARGE_STEP : KEYBOARD_STEP;
+    let dx = 0;
+    let dy = 0;
+    if (event.key === "ArrowLeft") dx = -step;
+    else if (event.key === "ArrowRight") dx = step;
+    else if (event.key === "ArrowUp") dy = -step;
+    else if (event.key === "ArrowDown") dy = step;
+    else return;
+
+    consumeKeyboardAdjustment(event);
+    setBox((current) => {
+      let left = current.left;
+      let right = current.left + current.width;
+      let top = current.top;
+      let bottom = current.top + current.height;
+
+      if (corner === "nw" || corner === "sw") {
+        left = clamp(left + dx, 0, right - MIN);
+      } else {
+        right = clamp(right + dx, left + MIN, 1);
+      }
+      if (corner === "nw" || corner === "ne") {
+        top = clamp(top + dy, 0, bottom - MIN);
+      } else {
+        bottom = clamp(bottom + dy, top + MIN, 1);
+      }
+
+      return { left, top, width: right - left, height: bottom - top };
+    });
+  }
+
   // 字幕框负责可视区域；字号只在这个区域里受限自适应，给两行字幕留出安全余量，避免高框时把字顶到边上。
   const fontSize = clamp(
     (stageHeight * box.height * CAPTION_SAFE_HEIGHT_RATIO) /
@@ -212,18 +301,40 @@ export function CaptionOverlay({
         transition: dragging ? "none" : undefined,
       }}
     >
-      <div
+      <span id={keyboardHintId} className="sr-only">
+        {t("videoPlayer.captionKeyboardHint")}
+      </span>
+      <button
+        type="button"
+        aria-label={t("videoPlayer.captionMoveLabel", {
+          left: Math.round(box.left * 100),
+          top: Math.round(box.top * 100),
+        })}
+        aria-describedby={`${captionTextId} ${keyboardHintId}`}
+        aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Shift+ArrowUp Shift+ArrowDown Shift+ArrowLeft Shift+ArrowRight Home"
         onPointerDown={startMove}
-        className="flex h-full w-full cursor-move items-center justify-center overflow-hidden rounded bg-black/70 px-3 text-center leading-snug text-white shadow-lg ring-1 ring-transparent [text-shadow:0_1px_2px_rgba(0,0,0,0.9)] group-hover:ring-white/30"
+        onKeyDown={handleMoveKeyDown}
+        className="flex h-full w-full cursor-move items-center justify-center overflow-hidden rounded border-0 bg-transparent px-3 text-center leading-snug text-white shadow-[var(--shadow-pop)] ring-1 ring-transparent [text-shadow:0_1px_2px_rgba(0,0,0,0.9)] group-hover:ring-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
         style={{ fontSize }}
       >
-        <CaptionText text={text} />
-      </div>
+        <span id={captionTextId}>
+          <CaptionText text={text} />
+        </span>
+      </button>
       {(Object.keys(CORNER_CLASS) as Corner[]).map((corner) => (
-        <span
+        <button
           key={corner}
+          type="button"
+          aria-label={t("videoPlayer.captionResizeLabel", {
+            corner: t(CORNER_LABEL_KEY[corner]),
+            width: Math.round(box.width * 100),
+            height: Math.round(box.height * 100),
+          })}
+          aria-describedby={keyboardHintId}
+          aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Shift+ArrowUp Shift+ArrowDown Shift+ArrowLeft Shift+ArrowRight Home"
           onPointerDown={startResize(corner)}
-          className={`absolute h-3.5 w-3.5 rounded-full border border-white/80 bg-primary opacity-0 transition-opacity group-hover:opacity-100 ${CORNER_CLASS[corner]}`}
+          onKeyDown={(event) => handleResizeKeyDown(event, corner)}
+          className={`absolute h-3.5 w-3.5 rounded-full border border-white/80 bg-[var(--video-accent)] p-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${CORNER_CLASS[corner]}`}
         />
       ))}
     </div>

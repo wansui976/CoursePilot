@@ -31,7 +31,6 @@
     "overview": "Overview",
     "transcript": "Transcript",
     "notes": "Notes",
-    "quiz": "Quiz",
     "more": "More"
   },
   "pipelineProgress": {
@@ -150,6 +149,16 @@
     "captions": "Captions",
     "captionsOn": "Turn captions on",
     "captionsOff": "Turn captions off",
+    "danmaku": "Danmaku",
+    "danmakuOn": "Show danmaku",
+    "danmakuOff": "Hide danmaku",
+    "captionMoveLabel": "Move caption box, currently {{left}}% from the left and {{top}}% from the top",
+    "captionResizeLabel": "Resize caption box from the {{corner}}, currently {{width}}% wide and {{height}}% high",
+    "captionCornerNw": "top-left corner",
+    "captionCornerNe": "top-right corner",
+    "captionCornerSw": "bottom-left corner",
+    "captionCornerSe": "bottom-right corner",
+    "captionKeyboardHint": "Use the arrow keys for small adjustments. Hold Shift for larger steps. Press Home to restore the default position and size.",
     "mute": "Mute",
     "unmute": "Unmute",
     "volume": "Volume",
@@ -162,11 +171,24 @@
     "rewinding": "Rewinding"
   },
   "morePanel": {
+    "quiz": "Quiz",
     "slides": "Slides",
     "mindmap": "Mind Map",
     "clips": "Clips",
     "search": "Search",
+    "comments": "Comments",
     "label": "More study materials"
+  },
+  "commentsPanel": {
+    "title": "Comments",
+    "loading": "Fetching all comments (including nested replies); popular videos take a while…",
+    "empty": "No comments here yet. Comments are available for Bilibili videos and are fetched automatically.",
+    "summary": "{{total}} comments ({{replies}} replies)",
+    "replies": "{{count}} replies",
+    "expandReplies": "Show {{count}} more replies",
+    "collapseReplies": "Collapse replies",
+    "replyTo": "replying to @{{name}}",
+    "anonymous": "Anonymous"
   },
   "courseList": {
     "newCourse": "New Course",
@@ -291,8 +313,12 @@
     "done": "Done",
     "failed": "Failed",
     "canceled": "Skipped",
+    "loading": "Loading processing status…",
     "notStarted": "Not started",
-    "retry": "Retry"
+    "start": "Start processing",
+    "starting": "Starting…",
+    "retry": "Retry",
+    "retrying": "Retrying…"
   },
   "slides": {
     "extracting": "Extracting…",
@@ -311,7 +337,7 @@
     "ocrPending": "Recognize text on slide pages ({{count}} pages remaining). Hold Shift to re-recognize all",
     "reRecognize": "Re-recognize",
     "recognizeText": "Recognize text",
-    "screenshotOcrTitle": "Full-frame OCR (engine selected in Settings: local OCR or Alibaba Cloud OCR)",
+    "screenshotOcrTitle": "Full-frame OCR (engine selected in Settings: local OCR, Alibaba Cloud OCR, or DeepSeek Vision)",
     "screenshotOcrBusy": "Recognizing…",
     "screenshotOcr": "Screenshot OCR",
     "screenshotTitle": "Save current frame as screenshot",
@@ -539,7 +565,11 @@
     "regenerateConfirm": "Regenerating will permanently replace the current notes, including your edits. This cannot be undone.",
     "regenerateConfirmAction": "Replace and regenerate",
     "editorUnavailable": "Notes editor is not ready",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "emptyTitle": "No notes yet",
+    "emptyDescription": "Let AI draft notes from the transcript, or start writing directly here.",
+    "generating": "Generating…",
+    "generateNotes": "Generate notes with AI"
   },
   "quiz": {
     "correct": "Correct",
@@ -739,6 +769,7 @@
       "engine": "OCR engine",
       "localOcr": "Local OCR (offline)",
       "aliyunOcr": "Alibaba Cloud OCR",
+      "deepseekOcr": "DeepSeek Vision (AI)",
       "aliyunType": "Recognition type",
       "advanced": "General text (high precision)",
       "general": "General text",
@@ -748,7 +779,13 @@
       "accessKeyPlaceholder": "Alibaba Cloud RAM AccessKey ID",
       "aliyunSecretConfigured": "Configured · leave blank to keep; enable OCR in Alibaba Cloud console",
       "aliyunSecretNotConfigured": "Leave blank to keep; enable OCR in Alibaba Cloud console",
-      "saveAliyunOcr": "Save Alibaba Cloud OCR credentials"
+      "saveAliyunOcr": "Save Alibaba Cloud OCR credentials",
+      "deepseekModel": "Model",
+      "deepseekBaseUrl": "Base URL",
+      "deepseekApiKey": "API Key",
+      "deepseekConfigured": "Configured · leave blank to keep; create an API key and enable a vision model in DeepSeek platform",
+      "deepseekNotConfigured": "Leave blank to keep; create an API key and enable a vision model in DeepSeek platform",
+      "saveDeepseekOcr": "Save DeepSeek Vision credentials"
     },
     "courseware": {
       "title": "Slide Extraction",
@@ -814,6 +851,7 @@
     "thinkingStatus": "Thinking…",
     "thinkingWithTools": "Thinking and calling tools…",
     "organizing": "Organizing results…",
+    "turnLimitSummarizing": "Tool turn limit reached; organizing what was found…",
     "toolFailedContinuing": "{{tool}} did not complete; adjusting the approach…",
     "toolCanceled": "{{tool}} stopped; finishing this turn…",
     "toolTrace": "Tool activity",
@@ -828,6 +866,7 @@
     "toolRunStatusCount": "{{tool}}, {{status}}, {{count}} times",
     "responseComplete": "Response complete",
     "responseCompleteWithToolStatus": "Response complete; {{tool}} {{status}}",
+    "usageTokens": "This turn used {{tokens}} tokens",
     "usingTool": "Using {{tool}}…",
     "scrollToLatest": "Scroll to latest",
     "scopeLabel": "Current scope: {{scope}}",
@@ -907,7 +946,10 @@
     "delete_video": "Preparing delete",
     "update_setting": "Preparing setting change",
     "create_course": "Preparing new course",
-    "import_video": "Preparing import"
+    "import_video": "Preparing import",
+    "get_video_summary": "Read video summary",
+    "get_video_chapters": "Read key chapters",
+    "get_video_notes": "Read notes"
   },
   "assistantActions": {
     "renameTitle": "Rename",
@@ -922,6 +964,9 @@
     "createConfirm": "Confirm create",
     "courseRenameTitle": "Rename course",
     "courseRenameConfirm": "Confirm rename",
+    "noteTitle": "Save to notes",
+    "noteConfirm": "Append to notes",
+    "noteIntoVideo": "Will append to notes of \"{{title}}\"",
     "completed": "Completed",
     "skip": "Skip {{name}}",
     "recycleBinNote": "Moved to recycle bin, restorable within 30 days.",
@@ -1247,7 +1292,9 @@
     "continueLearning": "Continue: {{title}}",
     "continueLearningLabel": "Continue learning",
     "continueAt": "Continue from {{time}}",
-    "colProgress": "Progress"
+    "colProgress": "Progress",
+    "cancelAll": "Cancel all",
+    "retryAll": "Retry all"
   },
   "time": {
     "justNow": "Just now",

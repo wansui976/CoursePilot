@@ -104,6 +104,79 @@ describe("ReviewSession", () => {
     expect(await screen.findByText("问题二")).toBeInTheDocument();
   });
 
+  it("blocks every exit path while a grade write is pending", async () => {
+    const pending = deferred();
+    review.mockReturnValueOnce(pending.promise);
+
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      const qc = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      });
+      return (
+        <QueryClientProvider client={qc}>
+          <button type="button" onClick={() => setOpen(true)}>
+            开始复习
+          </button>
+          {open && <ReviewSession onClose={() => setOpen(false)} onJump={vi.fn()} />}
+        </QueryClientProvider>
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "开始复习" }));
+    await screen.findByText("问题一");
+    fireEvent.click(screen.getByRole("button", { name: /选项 A/ }));
+    fireEvent.click(screen.getByRole("button", { name: /提交答案/ }));
+    fireEvent.click(screen.getByRole("button", { name: /良好/ }));
+
+    const exit = screen.getByRole("button", { name: "退出复习" });
+    await waitFor(() => expect(exit).toBeDisabled());
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "复习" })).toBeInTheDocument();
+
+    pending.resolve();
+    await screen.findByText("问题二");
+    expect(exit).toBeEnabled();
+    fireEvent.click(exit);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("loads a fresh due deck when a closed session is opened again", async () => {
+    due.mockResolvedValueOnce(cards).mockResolvedValueOnce([cards[1]]);
+
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      const qc = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      });
+      return (
+        <QueryClientProvider client={qc}>
+          <button type="button" onClick={() => setOpen(true)}>
+            开始复习
+          </button>
+          {open && <ReviewSession onClose={() => setOpen(false)} onJump={vi.fn()} />}
+        </QueryClientProvider>
+      );
+    }
+
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "开始复习" });
+    fireEvent.click(opener);
+    await screen.findByText("问题一");
+    fireEvent.click(screen.getByRole("button", { name: /选项 A/ }));
+    fireEvent.click(screen.getByRole("button", { name: /提交答案/ }));
+    fireEvent.click(screen.getByRole("button", { name: /良好/ }));
+    await screen.findByText("问题二");
+    fireEvent.click(screen.getByRole("button", { name: "退出复习" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    fireEvent.click(opener);
+    expect(await screen.findByText("问题二")).toBeInTheDocument();
+    expect(screen.queryByText("问题一")).not.toBeInTheDocument();
+    expect(due).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps the current card visible when saving a grade fails", async () => {
     review.mockRejectedValueOnce(new Error("database locked"));
     renderSession();

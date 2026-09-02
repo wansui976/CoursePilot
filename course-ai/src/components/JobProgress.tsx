@@ -1,7 +1,10 @@
 import { useEffect } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Loader2, Play, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
+import { ErrorNote } from "@/components/ui/ErrorNote";
 
 // 流水线顺序（与后端 jobs::STAGES 对应）。
 const STAGE_ORDER = [
@@ -46,40 +49,115 @@ export function JobProgress({ videoId }: { videoId: string }) {
   const jobs = useJobs((s) => s.byVideo[videoId] ?? EMPTY_JOBS);
   const setOne = useJobs((s) => s.setOne);
 
+  const jobsQuery = useQuery({
+    queryKey: ["pipeline-jobs", videoId],
+    queryFn: () => ipc.pipeline.jobs(videoId),
+  });
+
   useEffect(() => {
-    void ipc.pipeline.jobs(videoId).then((rows) => {
-      rows.forEach((job) =>
-        setOne({
-          video_id: job.video_id,
-          job_id: job.id,
-          stage: job.stage,
-          status: job.status,
-          progress: job.progress,
-          message: job.message,
-        }),
-      );
-    });
-  }, [setOne, videoId]);
+    jobsQuery.data?.forEach((job) =>
+      setOne({
+        video_id: job.video_id,
+        job_id: job.id,
+        stage: job.stage,
+        status: job.status,
+        progress: job.progress,
+        message: job.message,
+      }),
+    );
+  }, [jobsQuery.data, setOne]);
+
+  const process = useMutation({
+    mutationKey: ["pipeline-process", videoId],
+    mutationFn: () => ipc.pipeline.process(videoId),
+    onSuccess: () => jobsQuery.refetch(),
+  });
+
+  if (jobsQuery.isLoading) {
+    return (
+      <p
+        role="status"
+        className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]"
+      >
+        <Loader2
+          aria-hidden="true"
+          className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none"
+        />
+        {t("job.loading")}
+      </p>
+    );
+  }
+
+  if (jobsQuery.isError) {
+    return (
+      <ErrorNote
+        error={jobsQuery.error}
+        onRetry={() => void jobsQuery.refetch()}
+      />
+    );
+  }
 
   const list = Object.values(jobs).sort(
     (a, b) => stageRank(a.stage) - stageRank(b.stage),
   );
-  if (list.length === 0) return <p className="text-xs text-[var(--text-faint)]">{t("job.notStarted")}</p>;
-
   const hasFailed = list.some((job) => job.status === "failed");
+  const actionLabel = process.isPending
+    ? hasFailed
+      ? t("job.retrying")
+      : t("job.starting")
+    : hasFailed
+      ? t("job.retry")
+      : t("job.start");
+  const action = (
+    <button
+      type="button"
+      disabled={process.isPending}
+      className="inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] px-2 py-0.5 text-xs text-primary hover:bg-[var(--surface-card)] disabled:cursor-not-allowed disabled:opacity-60"
+      onClick={() => process.mutate()}
+    >
+      {process.isPending ? (
+        <Loader2
+          aria-hidden="true"
+          className="h-3 w-3 animate-spin motion-reduce:animate-none"
+        />
+      ) : hasFailed ? (
+        <RefreshCw aria-hidden="true" className="h-3 w-3" />
+      ) : (
+        <Play aria-hidden="true" className="h-3 w-3" />
+      )}
+      {actionLabel}
+    </button>
+  );
+
+  if (list.length === 0) {
+    return (
+      <div className="space-y-2">
+        {process.isError ? (
+          <ErrorNote error={process.error} onRetry={() => process.mutate()} />
+        ) : (
+          <p className="text-xs text-[var(--text-faint)]">
+            {t("job.notStarted")}
+          </p>
+        )}
+        {!process.isError && action}
+      </div>
+    );
+  }
 
   return (
     <ul className="space-y-1">
-      {hasFailed && (
-        <li className="flex justify-end">
-          <button
-            className="rounded border border-[var(--border-subtle)] px-2 py-0.5 text-xs text-primary hover:bg-[var(--surface-card)]"
-            onClick={() => void ipc.pipeline.process(videoId)}
-          >
-            {t("job.retry")}
-          </button>
+      {process.isError ? (
+        <li>
+          <ErrorNote
+            error={process.error}
+            onRetry={() => process.mutate()}
+          />
         </li>
-      )}
+      ) : hasFailed ? (
+        <li className="flex justify-end">
+          {action}
+        </li>
+      ) : null}
       {list.map((job) => (
         <li key={job.stage} className="text-xs">
           <div className="flex justify-between">

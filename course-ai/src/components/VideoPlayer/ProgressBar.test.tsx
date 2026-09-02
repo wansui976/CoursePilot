@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ProgressBar } from "./ProgressBar";
@@ -37,21 +37,67 @@ describe("ProgressBar", () => {
 
   it("exposes a keyboard-accessible seek slider", () => {
     const onSeek = vi.fn();
+    usePlayer.setState({ currentMs: 30_000, durationMs: 60_000 });
     renderProgressBar({ onSeek });
     const slider = screen.getByRole("slider", { name: "播放进度" });
     expect(slider).toHaveAttribute("max", "60000");
-    expect(slider).toHaveValue("0");
+    expect(slider).toHaveAttribute("step", "1");
+    expect(slider).toHaveAttribute("aria-valuetext", "00:30 / 01:00");
+    expect(slider).toHaveValue("30000");
   });
 
-  it("seeks via the native range input", () => {
+  it("keeps millisecond precision when seeking via the native range input", () => {
     const onSeek = vi.fn();
     usePlayer.setState({ currentMs: 30_000, durationMs: 60_000 });
     renderProgressBar({ onSeek });
 
     fireEvent.change(screen.getByRole("slider", { name: "播放进度" }), {
-      target: { value: "45" },
+      target: { value: "45123" },
     });
-    expect(onSeek).toHaveBeenCalledWith(45);
+    expect(onSeek).toHaveBeenCalledWith(45_123);
+  });
+
+  it("seeks in useful increments without moving focus away from the slider", () => {
+    const onSeek = vi.fn();
+    usePlayer.setState({ currentMs: 30_000, durationMs: 60_000 });
+    renderProgressBar({ onSeek });
+    const slider = screen.getByRole("slider", { name: "播放进度" });
+    slider.focus();
+
+    fireEvent.keyDown(slider, { key: "ArrowLeft" });
+    fireEvent.keyDown(slider, { key: "ArrowRight" });
+    fireEvent.keyDown(slider, { key: "ArrowDown" });
+    fireEvent.keyDown(slider, { key: "ArrowUp" });
+    fireEvent.keyDown(slider, { key: "PageDown" });
+    fireEvent.keyDown(slider, { key: "PageUp" });
+    fireEvent.keyDown(slider, { key: "Home" });
+    fireEvent.keyDown(slider, { key: "End" });
+
+    expect(onSeek.mock.calls.map(([ms]) => ms)).toEqual([
+      25_000,
+      35_000,
+      25_000,
+      35_000,
+      20_000,
+      40_000,
+      0,
+      60_000,
+    ]);
+    expect(slider).toHaveFocus();
+  });
+
+  it("clamps keyboard seeks to the media bounds", () => {
+    const onSeek = vi.fn();
+    usePlayer.setState({ currentMs: 1_000, durationMs: 60_000 });
+    renderProgressBar({ onSeek });
+    const slider = screen.getByRole("slider", { name: "播放进度" });
+
+    fireEvent.keyDown(slider, { key: "ArrowLeft" });
+    act(() => usePlayer.setState({ currentMs: 59_000 }));
+    fireEvent.keyDown(slider, { key: "ArrowRight" });
+
+    expect(onSeek).toHaveBeenNthCalledWith(1, 0);
+    expect(onSeek).toHaveBeenNthCalledWith(2, 60_000);
   });
 
   it("renders chapter tick marks from the shared chapters query", async () => {

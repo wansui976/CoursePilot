@@ -8,6 +8,8 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { type ExportItem } from "./ExportMenu";
+import { Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { TextSkeleton } from "@/components/ui/skeleton";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { PanelActions } from "./PanelActions";
@@ -25,16 +27,12 @@ import { MathNode } from "./notes/mathNode";
 import { NotesToolbar } from "./notes/NotesToolbar";
 import { TimestampToggle } from "./TimestampToggle";
 import { useTimestampPrefs } from "@/stores/timestampPrefs";
-import { NotesWriteQueue } from "@/lib/notesWriteQueue";
+import {
+  notesCoordinator,
+  type NotesSaveStatus,
+} from "@/lib/notesCoordinator";
 
-const notesWriter = new NotesWriteQueue((videoId, contentJson) =>
-  ipc.ai.saveNotes(videoId, contentJson),
-);
-const backgroundSaveErrors = new Map<string, unknown>();
-
-type SaveStatus = "unsaved" | "saving" | "saved" | "error";
-
-const SAVE_STATUS_I18N: Record<SaveStatus, string> = {
+const SAVE_STATUS_I18N: Record<NotesSaveStatus, string> = {
   unsaved: "notes.unsaved",
   saving: "notes.saving",
   saved: "notes.saved",
@@ -46,27 +44,16 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   const qc = useQueryClient();
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const [saveError, setSaveError] = useState<unknown>(null);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const [writeState, setWriteState] = useState(() =>
+    notesCoordinator.getState(videoId),
+  );
   const [hasLocalEdits, setHasLocalEdits] = useState(false);
   const activeVideoIdRef = useRef(videoId);
-  const mountedRef = useRef(true);
   activeVideoIdRef.current = videoId;
 
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    const error = backgroundSaveErrors.get(videoId);
-    setSaveError(error ?? null);
-    setSaveStatus(
-      error ? "error" : notesWriter.hasPending(videoId) ? "unsaved" : "saved",
-    );
+    setWriteState(notesCoordinator.getState(videoId));
+    return notesCoordinator.subscribe(videoId, setWriteState);
   }, [videoId]);
 
   const notesQuery = useQuery({
@@ -74,33 +61,11 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     queryFn: () => ipc.ai.getNotes(videoId),
   });
   const notesContent = notesQuery.data;
+  const localDraft = notesCoordinator.getDraft(videoId);
 
   function debounceSave(json: string) {
     const targetVideoId = activeVideoIdRef.current;
-    clearTimeout(saveTimer.current);
-    backgroundSaveErrors.delete(targetVideoId);
-    setSaveError(null);
-    setSaveStatus("unsaved");
-    saveTimer.current = setTimeout(() => {
-      saveTimer.current = undefined;
-      if (activeVideoIdRef.current === targetVideoId) setSaveStatus("saving");
-      void notesWriter.enqueue(targetVideoId, json).then(
-        () => {
-          backgroundSaveErrors.delete(targetVideoId);
-          if (mountedRef.current && activeVideoIdRef.current === targetVideoId) {
-            setSaveError(null);
-            setSaveStatus("saved");
-          }
-        },
-        (error) => {
-          backgroundSaveErrors.set(targetVideoId, error);
-          if (mountedRef.current && activeVideoIdRef.current === targetVideoId) {
-            setSaveError(error);
-            setSaveStatus("error");
-          }
-        },
-      );
-    }, 800);
+    notesCoordinator.scheduleSave(targetVideoId, json);
   }
 
   const editor = useEditor({
@@ -125,6 +90,17 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     },
   });
 
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    return notesCoordinator.registerEditor(videoId, {
+      getDocument: () => editor.getJSON(),
+      replaceDocument: (document) => {
+        editor.commands.setContent(document, { emitUpdate: false });
+        setHasLocalEdits(true);
+      },
+    });
+  }, [editor, videoId]);
+
   // 加载已有笔记：content_json（"{...}"）或 content_md（markdown）
   //
   // 三处 setContent 都必须显式 emitUpdate:false。**装载不是编辑**，而 tiptap 3 的
@@ -134,8 +110,22 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   // 更糟的是下面那条清空分支：查询失败时 notesContent 是 undefined，编辑器被清空、
   // 顺手把一份空文档存回库里，用户的笔记就没了。
   useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    // 卸载刷盘失败或助手追加失败时，协调器里的草稿比数据库查询更新，必须优先恢复。
+    const recoverableDraft = notesCoordinator.getDraft(videoId);
+    if (recoverableDraft) {
+      try {
+        const parsed = JSON.parse(recoverableDraft);
+        if (parsed?.type === "doc") {
+          editor.commands.setContent(parsed, { emitUpdate: false });
+        }
+      } catch {
+        // 协调器只接收 Tiptap JSON；损坏草稿保留错误状态，不拿空文档覆盖它。
+      }
+      return;
+    }
     // 还在查库时什么都不动，免得先闪一下空编辑器。
-    if (!editor || editor.isDestroyed || notesQuery.isPending) return;
+    if (notesQuery.isPending) return;
     // 查询失败时 data 是 undefined，和「这个视频没有笔记」长得一模一样。此时绝不能
     // 按空笔记处理：编辑器一清空就会被当成用户把笔记删了。
     if (notesQuery.isError) return;
@@ -159,43 +149,20 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       // 非 JSON → 当作 markdown
     }
     editor.commands.setContent(markdownToTiptap(notesContent), { emitUpdate: false });
-  }, [editor, notesContent, notesQuery.isError, notesQuery.isPending]);
+  }, [editor, videoId, notesContent, notesQuery.isError, notesQuery.isPending]);
 
   useEffect(() => {
     setHasLocalEdits(false);
   }, [videoId]);
 
-  // 切走视频 / 卸载前：若去抖窗口内还有未落库的编辑，立刻刷盘，避免丢失。
-  // cleanup 在 videoId 变化时以「旧 videoId + 旧内容」运行，正好把上一条编辑存回原视频。
+  // 每次 onUpdate 都已经同步进入协调器草稿；切视频/卸载只需取消去抖并立刻刷盘。
   useEffect(() => {
     return () => {
-      if (saveTimer.current !== undefined) {
-        clearTimeout(saveTimer.current);
-        saveTimer.current = undefined;
-        if (editor && !editor.isDestroyed) {
-          void notesWriter.enqueue(videoId, JSON.stringify(editor.getJSON())).then(
-            () => {
-              backgroundSaveErrors.delete(videoId);
-              if (mountedRef.current && activeVideoIdRef.current === videoId) {
-                setSaveError(null);
-                setSaveStatus("saved");
-              }
-            },
-            (error) => {
-              backgroundSaveErrors.set(videoId, error);
-              // 组件可能已经卸载，无法再显示就地反馈；记录错误并在该视频下次
-              // 打开时恢复“保存失败”，确保卸载刷盘失败不会被静默吞掉。
-              console.error(`Failed to flush notes for video ${videoId}`, error);
-              if (mountedRef.current && activeVideoIdRef.current === videoId) {
-                setSaveError(error);
-                setSaveStatus("error");
-              }
-            },
-          );
-        }
-      }
+      void notesCoordinator.flush(videoId).catch((error) => {
+        console.error(`Failed to flush notes for video ${videoId}`, error);
+      });
     };
-  }, [videoId, editor]);
+  }, [videoId]);
 
   useEffect(() => {
     if (rootRef.current) return installTimestampClick(rootRef.current);
@@ -228,14 +195,8 @@ export function NotesPanel({ videoId }: { videoId: string }) {
 
   const generate = useMutation({
     mutationFn: async () => {
-      // 确认覆盖后若仍在去抖窗口，先把编辑器当前内容放入写队列；生成失败时用户版本
-      // 仍已落库。已经开始的保存也必须先结束，再让后端清 content_json。
-      if (saveTimer.current !== undefined && editor) {
-        clearTimeout(saveTimer.current);
-        saveTimer.current = undefined;
-        await notesWriter.enqueue(videoId, JSON.stringify(editor.getJSON()));
-      }
-      await notesWriter.flush(videoId);
+      // 生成前先把协调器中的实时草稿刷盘；后端还会用内容快照 CAS 防止请求期间的新编辑。
+      await notesCoordinator.flush(videoId);
       return ipc.ai.generate(videoId, "notes");
     },
     onSuccess: () => {
@@ -281,7 +242,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     >
       {/* 选中文字时的浮出格式条（tiptap BubbleMenu，不占布局空间）。 */}
       {editor && <NotesToolbar editor={editor} />}
-      {(saveStatus === "error" ||
+      {(writeState.status === "error" ||
         (!notesQuery.isPending && !notesQuery.isError)) && (
         <div className="flex flex-none justify-end border-b border-[var(--border-subtle)] px-3 py-2">
           <span
@@ -289,12 +250,12 @@ export function NotesPanel({ videoId }: { videoId: string }) {
             aria-live="polite"
             aria-atomic="true"
             className={`text-xs ${
-              saveStatus === "error"
+              writeState.status === "error"
                 ? "text-[var(--status-err)]"
                 : "text-[var(--text-faint)]"
             }`}
           >
-            {t(SAVE_STATUS_I18N[saveStatus])}
+            {t(SAVE_STATUS_I18N[writeState.status])}
           </span>
         </div>
       )}
@@ -302,31 +263,17 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         <ErrorNote
           className="mx-3 mb-2"
           error={generate.error}
-          onRetry={() => generate.mutate()}
+          // 冲突说明首次确认后又有了新编辑；重试必须重新走覆盖确认，
+          // 不能从错误条直接开始另一次会清掉新内容的生成。
+          onRetry={() => void requestGenerate()}
         />
       )}
-      {saveError != null && (
+      {writeState.error != null && (
         <ErrorNote
           className="mx-3 mb-2"
-          error={saveError}
+          error={writeState.error}
           onRetry={() => {
-            setSaveStatus("saving");
-            void notesWriter.flush(videoId).then(
-              () => {
-                backgroundSaveErrors.delete(videoId);
-                if (activeVideoIdRef.current === videoId) {
-                  setSaveError(null);
-                  setSaveStatus("saved");
-                }
-              },
-              (error) => {
-                backgroundSaveErrors.set(videoId, error);
-                if (activeVideoIdRef.current === videoId) {
-                  setSaveError(error);
-                  setSaveStatus("error");
-                }
-              },
-            );
+            void notesCoordinator.flush(videoId).catch(() => {});
           }}
         />
       )}
@@ -343,21 +290,52 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         className="min-h-0 flex-1 overflow-y-auto pb-12"
         onScroll={rememberNotesScroll}
       >
-        {notesQuery.isPending ? (
+        {notesQuery.isPending && !localDraft ? (
           <div className="p-4">
             <TextSkeleton lines={5} />
           </div>
-        ) : notesQuery.isError ? null : (
-          <EditorContent editor={editor} />
+        ) : notesQuery.isError && !localDraft ? null : (
+          <>
+            {/* 空态引导：没有已存笔记、也没开始写时，提示可让 AI 生成。开始打字即消失。 */}
+            {!localDraft && !hasLocalEdits && !notesContent?.trim() && (
+              <div className="mx-4 mt-4 flex items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-4">
+                <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-[var(--accent-weak)] text-[var(--accent-text)]">
+                  <Sparkles className="h-4 w-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-[var(--text-strong)]">
+                    {t("notes.emptyTitle")}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
+                    {t("notes.emptyDescription")}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={() => void requestGenerate()}
+                    disabled={generate.isPending}
+                    className="ca-touch-44 mt-2 gap-1.5"
+                  >
+                    <Sparkles className={`h-3.5 w-3.5 ${generate.isPending ? "animate-pulse" : ""}`} />
+                    {generate.isPending ? t("notes.generating") : t("notes.generateNotes")}
+                  </Button>
+                </div>
+              </div>
+            )}
+            <EditorContent editor={editor} />
+          </>
         )}
       </div>
       <PanelActions
         leading={<TimestampToggle />}
         onRegenerate={() => void requestGenerate()}
         regenerating={generate.isPending}
-        hasContent={!!notesContent}
+        hasContent={Boolean(localDraft ?? notesContent) || hasLocalEdits}
         stale={stale.has("notes")}
-        exportItems={notesQuery.isPending || notesQuery.isError ? [] : exportItems}
+        exportItems={
+          (notesQuery.isPending || notesQuery.isError) && !localDraft ? [] : exportItems
+        }
       />
     </div>
   );

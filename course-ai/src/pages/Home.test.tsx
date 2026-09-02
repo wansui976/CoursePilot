@@ -365,7 +365,8 @@ describe("Home", () => {
     });
     expect(separator).toHaveAttribute("tabindex", "0");
     expect(separator).toHaveAttribute("aria-valuemin", "384");
-    expect(separator).toHaveAttribute("aria-valuemax", "720");
+    // 1024px 宽的工作台要为播放器保留至少 320px：右栏最大只能到 640px。
+    expect(separator).toHaveAttribute("aria-valuemax", "640");
     expect(separator).toHaveAttribute("aria-valuenow", "480");
 
     fireEvent.keyDown(separator, { key: "ArrowLeft" });
@@ -379,7 +380,7 @@ describe("Home", () => {
     expect(separator).toHaveAttribute("aria-valuenow", "384");
 
     fireEvent.keyDown(separator, { key: "End" });
-    expect(separator).toHaveAttribute("aria-valuenow", "720");
+    expect(separator).toHaveAttribute("aria-valuenow", "640");
 
     fireEvent.keyDown(separator, { key: "Enter" });
     expect(separator).toHaveAttribute("aria-valuenow", "480");

@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptPanel } from "./TranscriptPanel";
 import { useInlineAsk } from "@/stores/inlineAsk";
@@ -138,6 +138,36 @@ describe("TranscriptPanel", () => {
       text: "第 1 句文稿内容",
       startMs: 1000,
     });
+  });
+
+  it("closes the selection action layer on Escape and restores focus to the transcript", async () => {
+    renderTranscriptPanel("selection-back");
+    const textEl = await screen.findByText("第 1 句文稿内容");
+    const removeAllRanges = vi.fn();
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      isCollapsed: false,
+      anchorNode: textEl.firstChild ?? textEl,
+      toString: () => "文稿",
+      getRangeAt: () => ({
+        getBoundingClientRect: () => ({ left: 100, width: 20, top: 200 }),
+      }),
+      removeAllRanges,
+    } as unknown as Selection);
+
+    const scroller = screen.getByLabelText("文稿内容滚动区");
+    fireEvent.mouseUp(scroller);
+    const action = await screen.findByRole("button", { name: "问 AI" });
+    const layer = action.closest<HTMLElement>("[data-system-back-layer]");
+    expect(layer).not.toBeNull();
+    expect(action).toHaveFocus();
+
+    const escape = createEvent.keyDown(action, { key: "Escape", cancelable: true });
+    fireEvent(action, escape);
+
+    expect(escape.defaultPrevented).toBe(true);
+    expect(screen.queryByRole("button", { name: "问 AI" })).not.toBeInTheDocument();
+    expect(removeAllRanges).toHaveBeenCalledOnce();
+    await waitFor(() => expect(scroller).toHaveFocus());
   });
 
   it("makes a cloze card from a selected term within a sentence", async () => {
@@ -289,7 +319,7 @@ describe("TranscriptPanel", () => {
     expect(screen.getByLabelText("编辑文稿")).toHaveValue("改过的句子");
   });
 
-  it("treats an unsaved transcript edit as a cancellable system-back layer", async () => {
+  it("consumes system back without discarding a dirty transcript draft", async () => {
     renderTranscriptPanel("edit-back");
     await screen.findByText("00:01");
 
@@ -299,14 +329,66 @@ describe("TranscriptPanel", () => {
     fireEvent.change(input, { target: { value: "尚未保存的改动" } });
     const layer = input.closest<HTMLElement>("[data-system-back-layer]");
     expect(layer).not.toBeNull();
+    expect(layer).toHaveAttribute("data-system-back-dirty");
+
+    const escape = createEvent.keyDown(layer!, { key: "Escape", cancelable: true });
+    fireEvent(layer!, escape);
+
+    expect(escape.defaultPrevented).toBe(true);
+    expect(screen.getByLabelText("编辑文稿")).toHaveValue("尚未保存的改动");
+    expect(mockIpc.transcripts.update).not.toHaveBeenCalled();
+  });
+
+  it("closes an unchanged transcript edit on Escape and restores its trigger", async () => {
+    renderTranscriptPanel("clean-edit-back");
+    await screen.findByText("00:01");
+
+    const trigger = screen.getAllByRole("button", { name: "编辑这句文稿" })[0];
+    fireEvent.click(trigger);
+    const input = screen.getByLabelText("编辑文稿");
+    const layer = input.closest<HTMLElement>("[data-system-back-layer]");
+    expect(layer).not.toHaveAttribute("data-system-back-dirty");
 
     fireEvent.keyDown(layer!, { key: "Escape" });
 
     expect(screen.queryByLabelText("编辑文稿")).not.toBeInTheDocument();
-    expect(mockIpc.transcripts.update).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(screen.getAllByRole("button", { name: "编辑这句文稿" })[0]).toHaveFocus(),
     );
+  });
+
+  it("consumes system back while a save is pending and keeps a failed draft retryable", async () => {
+    let rejectUpdate!: (reason: unknown) => void;
+    mockIpc.transcripts.update.mockReturnValueOnce(
+      new Promise<void>((_resolve, reject) => {
+        rejectUpdate = reject;
+      }),
+    );
+    renderTranscriptPanel("edit-pending-back");
+    await screen.findByText("00:01");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "编辑这句文稿" })[0]);
+    const input = screen.getByLabelText("编辑文稿");
+    fireEvent.change(input, { target: { value: "等待保存的改动" } });
+    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+    const layer = input.closest<HTMLElement>("[data-system-back-layer]");
+    expect(layer).not.toBeNull();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /取消/ })).toBeDisabled(),
+    );
+
+    const escape = createEvent.keyDown(layer!, { key: "Escape", cancelable: true });
+    fireEvent(layer!, escape);
+
+    expect(escape.defaultPrevented).toBe(true);
+    expect(screen.getByLabelText("编辑文稿")).toHaveValue("等待保存的改动");
+
+    await act(async () => rejectUpdate(new Error("db locked")));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("db locked");
+    expect(screen.getByLabelText("编辑文稿")).toHaveValue("等待保存的改动");
+    expect(within(alert).getByRole("button", { name: "重试" })).toBeInTheDocument();
   });
 
   it("tags the scroller as theme-heavy so theme switches skip the fade", async () => {

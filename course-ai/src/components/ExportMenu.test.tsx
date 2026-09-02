@@ -63,7 +63,9 @@ describe("ExportMenu", () => {
 
     await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
     expect(await screen.findByRole("status")).toHaveTextContent("current-notes.md");
-    await waitFor(() => expect(trigger).toHaveFocus());
+    // 全量并行时 jsdom 负载高，导出完成后的焦点归还可能超过默认 5s 窗口；
+    // 只放宽等待窗口，不改变断言内容（单跑均在几百 ms 内满足）。
+    await waitFor(() => expect(trigger).toHaveFocus(), { timeout: 30_000 });
   });
 
   it("announces export errors without visually truncating them", async () => {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ListTree } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
@@ -9,10 +9,8 @@ import { ErrorNote } from "@/components/ui/ErrorNote";
 import { PanelEmptyState } from "@/components/ui/empty-state";
 import { TextSkeleton } from "@/components/ui/skeleton";
 import { PanelActions } from "./PanelActions";
-import {
-  invalidateStaleArtifacts,
-  useStaleArtifacts,
-} from "@/lib/useStaleArtifacts";
+import { useStaleArtifacts } from "@/lib/useStaleArtifacts";
+import { useAiGeneration } from "@/lib/useAiGeneration";
 
 // 折叠是全局 UI 偏好（与摘要面板一致）：存一个 localStorage 布尔即可。
 const COLLAPSE_KEY = "course-ai-chapters-collapsed";
@@ -35,7 +33,6 @@ function saveCollapsed(value: boolean) {
 
 export function ChaptersPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
-  const qc = useQueryClient();
   const requestSeek = usePlayer((s) => s.requestSeek);
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const {
@@ -49,16 +46,19 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
     queryFn: () => ipc.ai.getChapters(videoId),
   });
   const stale = useStaleArtifacts(videoId);
-  const generate = useMutation({
-    mutationFn: () => ipc.ai.generate(videoId, "chapters"),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["chapters", videoId] });
-      invalidateStaleArtifacts(qc, videoId);
-    },
-  });
+  const generate = useAiGeneration(videoId, "chapters");
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    // 收回后只剩标题条（shrink-0 + mt-auto 贴底），整块高度让给上方摘要；
+    // 展开时才 flex-1 占据下半区。与摘要的分隔线归本面板顶边所有：
+    // 展开时线在摘要和章节之间（与原摘要 border-b 同一位置），
+    // 收回时线贴着底栏上缘，不再有孤零零浮在中间的线。
+    <div
+      data-chapters-collapsed={collapsed ? true : undefined}
+      className={`relative flex flex-col ${
+        collapsed ? "mt-auto shrink-0 border-t border-[var(--border-subtle)]" : "min-h-0 flex-1"
+      }`}
+    >
       <button
         type="button"
         onClick={() => {
@@ -69,7 +69,9 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
         }}
         aria-expanded={!collapsed}
         title={collapsed ? t("chapters.expand") : t("chapters.collapse")}
-        className="ca-touch-44 flex shrink-0 items-center gap-1 px-3 pt-2 text-sm text-[var(--text-muted)] transition-colors hover:text-[var(--text-normal)]"
+        className={`ca-touch-44 flex shrink-0 items-center gap-1 px-3 text-sm text-[var(--text-muted)] transition-colors hover:text-[var(--text-normal)] ${
+          collapsed ? "py-2" : "pt-2"
+        }`}
       >
         <ChevronDown
           aria-hidden="true"
@@ -83,7 +85,7 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
             <ErrorNote
               className="mb-2"
               error={generate.error}
-              onRetry={() => generate.mutate()}
+              onRetry={generate.start}
             />
           )}
           {isLoading ? (
@@ -115,9 +117,10 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
             ))}
         </div>
       )}
-      {!isError && (
+      {/* 收回成底栏时悬浮按钮会叠在标题条上，与摘要面板同款：收回即隐藏。 */}
+      {!collapsed && !isError && (
         <PanelActions
-          onRegenerate={() => generate.mutate()}
+          onRegenerate={generate.start}
           regenerating={generate.isPending}
           hasContent={chapters.length > 0}
           stale={stale.has("chapters")}

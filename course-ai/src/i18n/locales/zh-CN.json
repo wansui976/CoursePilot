@@ -31,7 +31,6 @@
     "overview": "概览",
     "transcript": "文稿",
     "notes": "笔记",
-    "quiz": "练习",
     "more": "更多"
   },
   "pipelineProgress": {
@@ -150,6 +149,16 @@
     "captions": "字幕",
     "captionsOn": "开启字幕",
     "captionsOff": "关闭字幕",
+    "danmaku": "弹幕",
+    "danmakuOn": "开启弹幕",
+    "danmakuOff": "关闭弹幕",
+    "captionMoveLabel": "移动字幕框，当前左侧 {{left}}%，顶部 {{top}}%",
+    "captionResizeLabel": "调整字幕框{{corner}}，当前宽度 {{width}}%，高度 {{height}}%",
+    "captionCornerNw": "左上角",
+    "captionCornerNe": "右上角",
+    "captionCornerSw": "左下角",
+    "captionCornerSe": "右下角",
+    "captionKeyboardHint": "使用方向键微调；按住 Shift 可大步调整；按 Home 恢复默认位置和大小。",
     "mute": "静音",
     "unmute": "取消静音",
     "volume": "音量",
@@ -162,11 +171,24 @@
     "rewinding": "快退中"
   },
   "morePanel": {
+    "quiz": "练习",
     "slides": "课件",
     "mindmap": "脑图",
     "clips": "片段",
     "search": "搜索",
+    "comments": "评论",
     "label": "更多学习资料"
+  },
+  "commentsPanel": {
+    "title": "评论区",
+    "loading": "正在抓取全部评论（含楼中楼），评论越多越慢，请稍等…",
+    "empty": "这里还没有评论。评论区仅 B 站视频提供，打开视频后会自动抓取。",
+    "summary": "共 {{total}} 条（含回复 {{replies}} 条）",
+    "replies": "{{count}} 条回复",
+    "expandReplies": "展开 {{count}} 条回复",
+    "collapseReplies": "收起回复",
+    "replyTo": "回复 @{{name}}",
+    "anonymous": "匿名"
   },
   "courseList": {
     "newCourse": "新课程",
@@ -291,8 +313,12 @@
     "done": "完成",
     "failed": "失败",
     "canceled": "已跳过",
+    "loading": "正在加载处理状态…",
     "notStarted": "未开始",
-    "retry": "重试"
+    "start": "开始处理",
+    "starting": "正在启动…",
+    "retry": "重试",
+    "retrying": "正在重试…"
   },
   "slides": {
     "extracting": "提取中…",
@@ -311,7 +337,7 @@
     "ocrPending": "识别课件页上的文字（还有 {{count}} 页没认）。按住 Shift 点可全部重认",
     "reRecognize": "重认文字",
     "recognizeText": "识别文字",
-    "screenshotOcrTitle": "对当前帧整屏 OCR（引擎在设置里选择：本地 OCR 或阿里云 OCR）",
+    "screenshotOcrTitle": "对当前帧整屏 OCR（引擎在设置里选择：本地 OCR / 阿里云 OCR / DeepSeek 视觉）",
     "screenshotOcrBusy": "识别中…",
     "screenshotOcr": "截图OCR",
     "screenshotTitle": "把当前帧存为截图",
@@ -539,7 +565,11 @@
     "regenerateConfirm": "重新生成会永久替换当前笔记，包括你手动编辑的内容。此操作无法撤销。",
     "regenerateConfirmAction": "替换并重新生成",
     "editorUnavailable": "笔记编辑器尚未就绪",
-    "cancel": "取消"
+    "cancel": "取消",
+    "emptyTitle": "还没有笔记",
+    "emptyDescription": "点击下方按钮，AI 会根据讲稿帮你整理成笔记；也可以直接在这里开始写。",
+    "generating": "生成中…",
+    "generateNotes": "用 AI 生成笔记"
   },
   "quiz": {
     "correct": "正确",
@@ -739,6 +769,7 @@
       "engine": "OCR 引擎",
       "localOcr": "本地 OCR（离线）",
       "aliyunOcr": "阿里云 OCR 统一识别",
+      "deepseekOcr": "DeepSeek 视觉模型（AI 识别）",
       "aliyunType": "识别类型",
       "advanced": "通用文字识别（高精版）",
       "general": "通用文字识别",
@@ -748,7 +779,13 @@
       "accessKeyPlaceholder": "阿里云 RAM 账号 AccessKey ID",
       "aliyunSecretConfigured": "已配置 · 留空 = 不修改；需在阿里云控制台开通「文字识别 OCR」",
       "aliyunSecretNotConfigured": "留空 = 不修改；需在阿里云控制台开通「文字识别 OCR」",
-      "saveAliyunOcr": "保存阿里云 OCR 凭证"
+      "saveAliyunOcr": "保存阿里云 OCR 凭证",
+      "deepseekModel": "模型",
+      "deepseekBaseUrl": "地址 (Base URL)",
+      "deepseekApiKey": "API Key",
+      "deepseekConfigured": "已配置 · 留空 = 不修改；需在 DeepSeek 平台创建 API Key 并开通视觉模型",
+      "deepseekNotConfigured": "留空 = 不修改；需在 DeepSeek 平台创建 API Key 并开通视觉模型",
+      "saveDeepseekOcr": "保存 DeepSeek 视觉识别凭证"
     },
     "courseware": {
       "title": "课件提取",
@@ -814,6 +851,7 @@
     "thinkingStatus": "正在思考…",
     "thinkingWithTools": "正在思考并调用工具…",
     "organizing": "正在整理结果…",
+    "turnLimitSummarizing": "工具轮次已达上限，正在整理已查到的资料…",
     "toolFailedContinuing": "{{tool}}未能完成，正在调整方案…",
     "toolCanceled": "{{tool}}已停止，正在结束本轮…",
     "toolTrace": "工具调用记录",
@@ -828,6 +866,7 @@
     "toolRunStatusCount": "{{tool}}，{{status}}，{{count}} 次",
     "responseComplete": "回答已完成",
     "responseCompleteWithToolStatus": "回答已完成；{{tool}}{{status}}",
+    "usageTokens": "本次消耗 {{tokens}} tokens",
     "usingTool": "正在{{tool}}…",
     "scrollToLatest": "回到最新",
     "scopeLabel": "当前提问范围：{{scope}}",
@@ -907,7 +946,10 @@
     "delete_video": "准备删除",
     "update_setting": "准备改设置",
     "create_course": "准备新建课程",
-    "import_video": "准备导入"
+    "import_video": "准备导入",
+    "get_video_summary": "读取视频概要",
+    "get_video_chapters": "读取重点章节",
+    "get_video_notes": "读取笔记"
   },
   "assistantActions": {
     "renameTitle": "改名",
@@ -922,6 +964,9 @@
     "createConfirm": "确认创建",
     "courseRenameTitle": "课程改名",
     "courseRenameConfirm": "确认改名",
+    "noteTitle": "保存到笔记",
+    "noteConfirm": "写入笔记",
+    "noteIntoVideo": "将追加到《{{title}}》的笔记",
     "completed": "已完成",
     "skip": "跳过 {{name}}",
     "recycleBinNote": "进回收站，30 天内可还原。",
@@ -1247,7 +1292,9 @@
     "continueLearning": "继续学习：{{title}}",
     "continueLearningLabel": "继续学习",
     "continueAt": "从 {{time}} 继续",
-    "colProgress": "进度"
+    "colProgress": "进度",
+    "cancelAll": "全部取消",
+    "retryAll": "全部重试"
   },
   "time": {
     "justNow": "刚刚",

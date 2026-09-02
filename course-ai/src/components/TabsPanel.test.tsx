@@ -16,9 +16,6 @@ const transcriptPanel = vi.fn(() => <div>文稿内容</div>);
 vi.mock("./TranscriptPanel", () => ({
   TranscriptPanel: () => transcriptPanel(),
 }));
-vi.mock("./QuizPanel", () => ({
-  QuizPanel: () => <div>练习内容</div>,
-}));
 vi.mock("./MoreStudyPanel", () => ({
   MoreStudyPanel: () => <div>更多内容</div>,
 }));
@@ -56,9 +53,9 @@ describe("TabsPanel", () => {
   it("exposes the flattened primary learning tasks", async () => {
     renderPanel();
     await screen.findByText("概览内容");
-    // 徽标在空数据下不出声，纯标签文字保持原样。
+    // 徽标在空数据下不出声，纯标签文字保持原样。练习已收进「更多」，一级只剩 4 个。
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(
-      ["概览", "文稿", "笔记", "练习", "更多"],
+      ["概览", "文稿", "笔记", "更多"],
     );
   });
 
@@ -71,16 +68,16 @@ describe("TabsPanel", () => {
     renderPanel();
 
     const tabs = screen.getAllByRole("tab");
-    // 练习 1 题、笔记圆点；概览（无摘要/章节）与文稿不亮。
+    // 练习题数挂在「更多」上、笔记圆点；概览（无摘要/章节）与文稿不亮。
     await waitFor(() =>
-      expect(screen.getByRole("tab", { name: /练习/ })).toHaveTextContent("1"),
+      expect(screen.getByRole("tab", { name: /更多/ })).toHaveTextContent("1"),
     );
     expect(tabs[0].querySelector(".rounded-full")).toBeNull();
     expect(tabs[1].querySelector(".rounded-full")).toBeNull();
     expect(tabs[2].querySelector(".rounded-full")).not.toBeNull();
   });
 
-  it("switches tabs with number keys 1-5", async () => {
+  it("switches tabs with number keys 1-4", async () => {
     renderPanel();
     await screen.findByText("概览内容");
 
@@ -90,7 +87,27 @@ describe("TabsPanel", () => {
       "active",
     );
 
+    fireEvent.keyDown(document.body, { key: "4" });
+    expect(screen.getByRole("tab", { name: "更多" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+
+    // 练习并入更多后 5 已不是有效档位，保持当前 tab 不动。
     fireEvent.keyDown(document.body, { key: "5" });
+    expect(screen.getByRole("tab", { name: "更多" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+  });
+
+  it("lands legacy quiz-tab resume state on 更多", () => {
+    localStorage.setItem(
+      "course-ai-resume:video-1",
+      JSON.stringify({ activeTab: "quiz" }),
+    );
+    renderPanel();
+
     expect(screen.getByRole("tab", { name: "更多" })).toHaveAttribute(
       "data-state",
       "active",

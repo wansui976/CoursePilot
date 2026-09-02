@@ -57,6 +57,23 @@ function widthFromWindow(): number {
   return window.innerWidth || 0;
 }
 
+/** Returns the measured width of the element, with the window as a detached/SSR fallback. */
+export function useContainerPixelWidth(ref: RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(widthFromWindow);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const measure = () => setWidth(el?.clientWidth || widthFromWindow());
+    measure();
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+
+  return width;
+}
+
 function initialBucket(): WidthBucket {
   const w = widthFromWindow();
   // 宽度未知（SSR/极端情况）默认 wide，保证测试/桌面按宽屏结构渲染。
