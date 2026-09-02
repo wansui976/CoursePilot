@@ -10,7 +10,7 @@ Works with local files, Bilibili links, and any video URL. Local-first, your dat
 
 Website: [https://wansui976.github.io/CoursePilot/](https://wansui976.github.io/CoursePilot/)
 
-> **Note:** The app UI and screenshots are currently in Chinese. Internationalization (i18n) is on the roadmap.
+> **Note:** The app supports both Chinese and English — switch anytime in **Settings → Appearance → Language**. Screenshots below are from the Chinese UI.
 
 ---
 
@@ -22,11 +22,11 @@ Website: [https://wansui976.github.io/CoursePilot/](https://wansui976.github.io/
 
 **AI-generated study materials** — Chapters, overview, notes, quizzes, and mind maps — all generated from the transcript by an LLM. Slide text (formulas, definitions, board writing) is OCR'd and fed to the AI alongside the transcript, so content shown on screen but not spoken aloud is never lost. Everything is editable.
 
-**Slide extraction & OCR** — Detects page changes by frame-difference ratio, captures the stable frame after animations, skips solid-color and transition frames. Batch OCR on every extracted page. Runs in parallel with speech recognition during import. Hardware-decoded sampling, concurrent screenshots, and automatic black-bar cropping.
+**Slide extraction & OCR** — Detects page changes by frame-difference ratio, captures the stable frame after animations, skips solid-color and transition frames. Batch OCR on every extracted page (local tesseract, Alibaba Cloud OCR, or the DeepSeek vision model). Runs in parallel with speech recognition during import. Hardware-decoded sampling, concurrent screenshots, and automatic black-bar cropping.
 
 **Course Q&A** — Single-video Q&A retrieves relevant context by relevance — no need to stuff the entire transcript into the prompt. Course-level Q&A works across all videos with two-stage reranking. Answers include `[mm:ss]` citations you can click to jump to. Select text in the transcript to ask a follow-up with automatic context. If a query returns no results, the system rewrites it and tries again.
 
-**AI assistant** — A floating orb in the corner. Tap it to open an AI assistant that can operate the app for you: search Bilibili for videos, create and manage courses, jump to specific videos, check your study progress and due reviews, analyze weak knowledge points — all in natural language. Chat is displayed as a bubble stream, tool calls are explained in plain language with a final-status chip per call (running / completed / failed / canceled), and the panel supports drag-to-dock and resizing. Assistant conversations survive restarts and are never silently evicted; stale action buttons expire after a restart with a notice telling you to re-issue them, but tool results and chat history are preserved.
+**AI assistant** — A floating orb in the corner. Tap it to open an AI assistant that can operate the app for you: search Bilibili for videos, create and manage courses, jump to specific videos, check your study progress and due reviews, analyze weak knowledge points — and turn what you discussed into a note that gets appended to the video's notes after your confirmation. All in natural language, no menu digging. Actions that change data go through a confirmation card first — nothing happens until you approve. Read-only queries run concurrently and retry automatically on failure. Chat is displayed as a bubble stream, tool calls are explained in plain language with a final-status chip per call (running / completed / failed / canceled), and the panel supports drag-to-dock and resizing. Assistant conversations survive restarts and are never silently evicted; stale action buttons expire after a restart with a notice telling you to re-issue them, but tool results and chat history are preserved.
 
 **Study dashboard** — Home screen shows a study heatmap, completion rings per course, due-review badges, a "continue studying" shortcut, and weak topics aggregated from review performance. Set daily study goals with completion feedback; desktop supports native study reminders.
 
@@ -38,11 +38,15 @@ Website: [https://wansui976.github.io/CoursePilot/](https://wansui976.github.io/
 
 **Player** — *Skip silence*: automatically skips pauses where the instructor is writing on the board or waiting; has "previous / next silence" preview buttons. *Smart speed*: dynamically adjusts playback speed by information density — sparse segments speed up, dense derivations return to your chosen speed, never slower. *Clip bookmarks*: two clicks to mark a segment, add a note, jump back anytime. Hold arrow keys for fast scan, tap for ±5s. Subtitle overlay is freely draggable within the video frame.
 
+**Bilibili danmaku & comments** — After you import a Bilibili video, its danmaku (bullet comments) and comment section are fetched in the background and cached locally. Toggle the danmaku overlay in the player anytime; browse the full comment thread — replies, avatars, emotes — in the "More" panel.
+
 **Background processing queue** — After import, videos automatically go through every pipeline stage. Progress is shown in real time, you can pause anytime, and individual failed stages can be retried.
 
 **Cross-device sync** — Sync study records across devices via Apple CloudKit. Supports conflict-free merging of seven record types. Automatic retry with backoff on poor network.
 
 **Recycle bin** — Accidentally deleted? Recover from the recycle bin. Grouped by course, with thumbnails, batch restore and purge.
+
+**Database backup** — Back up the entire database with one click from Settings, and restore from a backup file anytime. A daily snapshot is also kept in the app directory on first launch. Backup files contain your saved API keys — keep them safe.
 
 **Export** — Subtitles (SRT / VTT), notes, mind maps, and quizzes can all be exported.
 
@@ -92,8 +96,8 @@ ASR and slide extraction run in parallel. Any stage that fails can be retried in
 | Audio extraction / Slide capture / Screenshot | ffmpeg | Native AVFoundation / MediaMetadataRetriever |
 | Local ASR | whisper.cpp | Cloud ASR |
 | Video download | yt-dlp | Local import only (for now) |
-| Local OCR | tesseract | Alibaba Cloud OCR |
-| Credential storage | System keychain | System keychain |
+| Local OCR | tesseract | Cloud OCR (Alibaba / DeepSeek) |
+| Credential storage | Local app database (system keychain migration planned) | Same |
 | Cross-device sync | Apple CloudKit | Apple CloudKit |
 
 ---
@@ -101,7 +105,7 @@ ASR and slide extraction run in parallel. Any stage that fails can be retried in
 ## Privacy & data
 
 - All study materials (database, subtitles, slide images, notes) are stored **on your own device**.
-- Cloud ASR, LLM, and OCR features use **your own API keys**, stored in the system keychain — nothing is proxied through a third-party server.
+- Cloud ASR, LLM, and OCR features use **your own API keys**. Keys are stored only in the local app database — the UI cannot read them back in plaintext (system keychain migration is planned) — and nothing is proxied through a third-party server.
 - Running only local transcription, slide extraction, and local OCR? CoursePilot works **fully offline**.
 
 ---
@@ -112,7 +116,7 @@ ASR and slide extraction run in parallel. Any stage that fails can be retried in
 - **Frontend**: React 19, TypeScript, Vite, Tailwind CSS
 - **Backend**: Rust, SQLite, sqlx
 - **Media processing**: ffmpeg, whisper.cpp, yt-dlp, tesseract
-- **AI integration**: OpenAI-compatible (DeepSeek, Anthropic, etc.), Volcengine ASR, Alibaba DashScope
+- **AI integration**: OpenAI-compatible endpoints (DeepSeek etc.), Volcengine ASR, Alibaba DashScope, DeepSeek vision OCR
 - **Review algorithm**: FSRS-4.5
 
 ## Project structure
@@ -189,7 +193,7 @@ pnpm build
 
 5. **Configure OCR (optional)** —
    - Local tesseract is the default and works fine.
-   - For better accuracy, switch to Alibaba Cloud OCR in **Settings → OCR**.
+   - For better accuracy, switch to Alibaba Cloud OCR or the DeepSeek vision model in **Settings → OCR**.
 
 ---
 
@@ -213,7 +217,7 @@ pnpm build
 
 - **No LLM configured = no AI features.** Chapters, summaries, notes, Q&A — all require an API key in **Settings → LLM**.
 - **Q&A doesn't need embeddings.** It feeds transcript context directly to the LLM. Transcript search is local keyword matching — no vector database needed.
-- **Alibaba Cloud OCR and ASR use different credentials.** OCR uses AccessKey ID / Secret; DashScope ASR uses an API Key. Don't mix them up.
+- **Alibaba Cloud OCR and ASR use different credentials.** OCR uses AccessKey ID / Secret; DashScope ASR uses an API Key. Don't mix them up. The DeepSeek vision OCR key is stored separately too — it's not shared with LLM profiles.
 
 ---
 
