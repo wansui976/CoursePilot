@@ -40,3 +40,6 @@ course-ai/scripts/
 # Local Codex/Superpowers scratch state
 **/.superpowers/
 .worktrees/
+
+# Local resume drafts
+CoursePilot-项目简历.md
