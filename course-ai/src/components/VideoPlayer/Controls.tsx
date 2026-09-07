@@ -286,7 +286,7 @@ export function Controls({
         onClick={onPlayPause}
         aria-label={playing ? t("videoPlayer.pause") : t("videoPlayer.play")}
         title={playing ? t("videoPlayer.pause") : t("videoPlayer.play")}
-        className="h-7 w-7 rounded-lg text-[var(--text-strong)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+        className="h-9 w-9 flex-none rounded-full bg-[var(--accent)] text-[var(--on-accent)] shadow-[0_1px_3px_rgb(0_0_0/0.25)] transition hover:bg-[var(--accent-press)] hover:text-[var(--on-accent-press)]"
       >
         {playing ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}
       </Button>

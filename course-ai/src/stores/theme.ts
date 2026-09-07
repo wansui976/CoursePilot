@@ -62,7 +62,7 @@ function hasVisibleHeavyDom(): boolean {
 /** 与 globals.css 中 --surface-app 保持一致。覆盖层直接用常量，避免临时改 data-theme
  *  触发整页重算/闪一下，也避免读到旧主题色导致「圆与背景同色看不见」。 */
 const SURFACE_APP: Record<EffectiveTheme, string> = {
-  light: "#f3f4f6",
+  light: "#f5f5f7",
   dark: "#0a0c10",
 };
 

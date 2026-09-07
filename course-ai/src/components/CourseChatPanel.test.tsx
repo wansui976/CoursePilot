@@ -156,7 +156,8 @@ describe("CourseChatPanel", () => {
     );
 
     const input = screen.getByRole("textbox", { name: "课程问答输入" });
-    expect(input.parentElement).toHaveClass("focus-within:border-[var(--focus-ring)]");
+    // 聚焦提示走柔和的 border-strong，不再用整圈 focus-ring 蓝。
+    expect(input.parentElement).toHaveClass("focus-within:border-[var(--border-strong)]");
     fireEvent.change(input, { target: { value: "不能重复提交" } });
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
     expect(chat).toHaveBeenCalledTimes(1);

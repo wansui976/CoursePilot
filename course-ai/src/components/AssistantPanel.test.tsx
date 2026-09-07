@@ -138,7 +138,7 @@ describe("AssistantPanel", () => {
     localStorage.clear();
     platformMock.mobile = false;
     platformMock.tablet = false;
-    useAssistantUi.setState({ open: true, side: "right", width: 380 });
+    useAssistantUi.setState({ open: true, side: "right", width: 380, mode: "float" });
     useInlineAsk.setState({ pending: null });
     mockIpc.assistant.ask.mockResolvedValue(reply());
     mockIpc.assistant.cancel.mockResolvedValue(undefined);
@@ -468,6 +468,8 @@ describe("AssistantPanel", () => {
     });
 
     expect(await screen.findByText("第二种方式查到了")).toBeInTheDocument();
+    // 收尾后有两个工具调用，默认折叠成一行计数；展开后两个终态都要还在。
+    fireEvent.click(screen.getByRole("button", { name: "使用了 2 个工具" }));
     expect(screen.getByRole("listitem", { name: "搜索课程内容，失败" })).toBeInTheDocument();
     expect(
       screen.getByRole("listitem", { name: "搜索课程内容，已完成" }),
@@ -550,6 +552,7 @@ describe("AssistantPanel", () => {
     });
 
     expect(await screen.findByText("已处理")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "使用了 2 个工具" }));
     expect(screen.getAllByRole("listitem", { name: "查看视频列表，失败" })).toHaveLength(1);
     expect(screen.getByRole("listitem", { name: "查看课程，已结束" })).toBeInTheDocument();
     expect(screen.queryByRole("listitem", { name: "查看视频列表，已完成" })).toBeNull();
@@ -1753,7 +1756,10 @@ describe("AssistantPanel", () => {
     );
     renderPanel();
     await ask("找找看");
+    // 多个工具默认折叠成一行计数，展开后才看明细。
     const chips = await screen.findByTestId("tool-chips");
+    expect(chips).toHaveTextContent("使用了 4 个工具");
+    fireEvent.click(screen.getByRole("button", { name: "使用了 4 个工具" }));
     expect(chips).toHaveTextContent("读取学习进度");
     expect(chips).toHaveTextContent("查看待复习");
     expect(chips).toHaveTextContent("搜索课程内容");
@@ -1771,6 +1777,8 @@ describe("AssistantPanel", () => {
     renderPanel();
     await ask("找视频");
     const chips = await screen.findByTestId("tool-chips");
+    expect(chips).toHaveTextContent("使用了 3 个工具");
+    fireEvent.click(screen.getByRole("button", { name: "使用了 3 个工具" }));
     expect(chips).toHaveTextContent("搜索 B 站");
     expect(chips).toHaveTextContent("×3");
   });
@@ -2175,6 +2183,15 @@ describe("AssistantPanel", () => {
     expect(screen.getByLabelText("对助手说")).toBeInTheDocument();
   });
 
+  it("换边与停靠切换收进「⋯」菜单", () => {
+    renderPanel();
+    // 常驻按钮只留高频的：历史、新会话、更多、收起。停靠这类一次性设置不再一字排开。
+    expect(screen.queryByLabelText("停靠为侧栏")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "停靠为侧栏" }));
+    expect(useAssistantUi.getState().mode).toBe("docked");
+  });
+
   it("宽屏 iPad 跟随布局档位使用桌面面板", () => {
     platformMock.mobile = true;
     platformMock.tablet = true;
@@ -2307,7 +2324,7 @@ describe("确认卡", () => {
     localStorage.clear();
     platformMock.mobile = false;
     platformMock.tablet = false;
-    useAssistantUi.setState({ open: true, side: "right" });
+    useAssistantUi.setState({ open: true, side: "right", mode: "float" });
     mockIpc.assistant.ask.mockResolvedValue(reply());
     mockIpc.assistant.cancel.mockResolvedValue(undefined);
     mockIpc.courses.list.mockResolvedValue([

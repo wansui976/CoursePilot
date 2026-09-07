@@ -195,7 +195,7 @@ export function AppSidebar({
               <ClipboardList className="h-4 w-4" />
               {t("nav.queue")}
               {queueCount > 0 && (
-                <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/15 px-1.5 text-[11px] leading-none text-primary">
+                <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--accent-weak-2)] px-1.5 text-[11px] leading-none text-[var(--accent-text)]">
                   {queueCount}
                 </span>
               )}

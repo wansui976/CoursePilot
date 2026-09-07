@@ -9,7 +9,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
-import { Send, Sparkles, Square, Trash2, User } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Send, Sparkles, Square, Trash2, User } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { renderMarkdown } from "@/lib/renderMarkdown";
@@ -374,12 +374,12 @@ export function CourseChatPanel({
   };
 
   const aiAvatar = (
-    <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full bg-primary/15 text-primary">
+    <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full ca-fill-brand text-[var(--on-accent)]">
       <Sparkles className="h-4 w-4" />
     </span>
   );
   const userAvatar = (
-    <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full bg-[var(--surface-card-active)] text-[var(--text-muted)]">
+    <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full bg-[var(--accent-weak-2)] text-[var(--accent-text)]">
       <User className="h-4 w-4" />
     </span>
   );
@@ -396,7 +396,7 @@ export function CourseChatPanel({
       >
         {history.length === 0 && inFlightQuery === undefined && (
           <div className="flex flex-col items-center gap-3 px-2 pt-6 text-center">
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/12 text-primary">
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl ca-fill-brand text-[var(--on-accent)]">
               <Sparkles className="h-6 w-6" />
             </span>
             <div>
@@ -405,15 +405,16 @@ export function CourseChatPanel({
                 {t("courseChat.courseQaHint")}
               </p>
             </div>
-            <div className="flex flex-wrap justify-center gap-2">
+            <div className="grid w-full gap-1">
               {SUGGESTION_KEYS.map((key) => (
                 <button
                   key={key}
                   type="button"
                   onClick={() => submit(t(key))}
-                  className="rounded-full border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-1.5 text-xs text-[var(--text-normal)] transition hover:border-[var(--accent-text)] hover:bg-[var(--surface-card-hover)]"
+                  className="ca-touch-44 flex w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-left text-sm text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none"
                 >
-                  {t(key)}
+                  <span>{t(key)}</span>
+                  <ArrowUpRight className="h-3.5 w-3.5 flex-none text-[var(--text-faint)]" />
                 </button>
               ))}
             </div>
@@ -421,13 +422,13 @@ export function CourseChatPanel({
         )}
 
         {history.map((turn) => (
-          <div key={turn.id} className="space-y-3">
+          <div key={turn.id} className="ca-msg-in space-y-3">
             <div className="flex flex-row-reverse items-start gap-2">
               {userAvatar}
               <div
                 role="article"
                 aria-label={t("courseChat.myQuestion")}
-                className="max-w-[82%] rounded-2xl rounded-tr-sm bg-primary/15 px-3 py-2"
+                className="max-w-[82%] rounded-2xl rounded-tr-sm bg-[var(--accent-weak-2)] px-3 py-2"
               >
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-strong)]">
                   {turn.query}
@@ -436,17 +437,23 @@ export function CourseChatPanel({
             </div>
             <div className="flex items-start gap-2">
               {aiAvatar}
+              {/* 助手的回答铺满不套气泡，与全局助手面板同一套观感：气泡是给一两行
+                  短句用的，回答是带列表和公式的长文。 */}
               <div
                 role="article"
                 aria-label={t("courseChat.aiReply")}
-                className="min-w-0 max-w-[82%] rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2"
+                className="min-w-0 flex-1 py-0.5"
               >
                 {turn.reasoning && (
-                  <details className="mb-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card-hover)] px-2.5 py-1.5">
-                    <summary className="cursor-pointer select-none text-xs text-[var(--text-faint)]">
+                  <details className="group/think mb-1">
+                    <summary className="-ml-1 flex w-fit cursor-pointer select-none items-center gap-1 rounded px-1 py-0.5 text-[11px] text-[var(--text-faint)] transition-colors hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none">
+                      <ChevronRight
+                        aria-hidden="true"
+                        className="h-3 w-3 flex-none transition-transform group-open/think:rotate-90 motion-reduce:transition-none"
+                      />
                       {t("courseChat.thinking")}
                     </summary>
-                    <div className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-muted)]">
+                    <div className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap border-l-2 border-[var(--border-faint)] pl-2 text-xs leading-relaxed text-[var(--text-muted)]">
                       {turn.reasoning}
                     </div>
                   </details>
@@ -465,7 +472,7 @@ export function CourseChatPanel({
               <div
                 role="article"
                 aria-label={t("courseChat.myQuestion")}
-                className="max-w-[82%] rounded-2xl rounded-tr-sm bg-primary/15 px-3 py-2"
+                className="max-w-[82%] rounded-2xl rounded-tr-sm bg-[var(--accent-weak-2)] px-3 py-2"
               >
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-strong)]">
                   {inFlightQuery}
@@ -475,26 +482,26 @@ export function CourseChatPanel({
             {busy && (
               <div className="flex items-start gap-2">
                 {aiAvatar}
-                <div className="min-w-0 max-w-[82%] space-y-1.5">
+                <div className="min-w-0 flex-1 space-y-1.5 py-0.5">
                   {streaming?.reasoning && (
                     <details
                       open
-                      className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card-hover)] px-2.5 py-1.5"
+                      className="group/think"
                     >
-                      <summary className="cursor-pointer select-none text-xs text-[var(--text-faint)]">
+                      <summary className="-ml-1 flex w-fit cursor-pointer select-none items-center gap-1 rounded px-1 py-0.5 text-[11px] text-[var(--text-faint)] transition-colors hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none">
+                        <ChevronRight
+                          aria-hidden="true"
+                          className="h-3 w-3 flex-none transition-transform group-open/think:rotate-90 motion-reduce:transition-none"
+                        />
                         {t("courseChat.thinking")}
                       </summary>
-                      <div className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-muted)]">
+                      <div className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap border-l-2 border-[var(--border-faint)] pl-2 text-xs leading-relaxed text-[var(--text-muted)]">
                         {streaming.reasoning}
                       </div>
                     </details>
                   )}
                   {streaming?.text ? (
-                    <div
-                      role="article"
-                      aria-label={t("courseChat.aiReply")}
-                      className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2"
-                    >
+                    <div role="article" aria-label={t("courseChat.aiReply")}>
                       <AnswerText
                         text={throttledStreamText || streaming.text}
                         trailing={STREAM_CARET}
@@ -502,16 +509,14 @@ export function CourseChatPanel({
                       <ChatSources citations={streaming.citations} onJump={onJump} />
                     </div>
                   ) : streaming?.reasoning ? null : (
-                    <div className="rounded-2xl rounded-tl-sm border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-3">
-                      <span
-                        className="ca-typing inline-flex items-center gap-1 text-[var(--text-muted)]"
-                        aria-label={t("courseChat.thinkingLabel")}
-                      >
-                        <i className="ca-typing-dot" />
-                        <i className="ca-typing-dot" style={{ animationDelay: "0.15s" }} />
-                        <i className="ca-typing-dot" style={{ animationDelay: "0.3s" }} />
-                      </span>
-                    </div>
+                    <span
+                      className="ca-typing inline-flex items-center gap-1 text-[var(--text-muted)]"
+                      aria-label={t("courseChat.thinkingLabel")}
+                    >
+                      <i className="ca-typing-dot" />
+                      <i className="ca-typing-dot" style={{ animationDelay: "0.15s" }} />
+                      <i className="ca-typing-dot" style={{ animationDelay: "0.3s" }} />
+                    </span>
                   )}
                 </div>
               </div>
@@ -547,7 +552,7 @@ export function CourseChatPanel({
       </p>
 
       <div className="flex-none border-t border-[var(--border-subtle)] p-2.5">
-        <div className="flex items-center gap-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 transition focus-within:border-[var(--focus-ring)]">
+        <div className="flex items-center gap-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 transition-colors focus-within:border-[var(--border-strong)] motion-reduce:transition-none">
           {history.length > 0 && (
             <button
               type="button"
@@ -591,7 +596,7 @@ export function CourseChatPanel({
               disabled={busy || !query.trim()}
               aria-label={t("courseChat.send")}
               title={t("courseChat.sendTitle")}
-              className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full bg-primary text-white transition hover:opacity-90 disabled:bg-[var(--surface-card-active)] disabled:text-[var(--text-muted)] disabled:hover:opacity-100"
+              className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full ca-fill-brand text-[var(--on-accent)] transition hover:opacity-90 disabled:bg-[var(--surface-card-active)] disabled:text-[var(--text-muted)] disabled:hover:opacity-100"
             >
               <Send className="h-4 w-4" />
             </button>

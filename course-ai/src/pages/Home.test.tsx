@@ -8,6 +8,7 @@ import { durKey, posKey } from "@/lib/playback";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { displayTitle } from "@/lib/videoTitle";
 import { useJobs } from "@/stores/jobs";
+import { useAssistantUi } from "@/stores/assistant";
 
 const { mockIpc, confirmMock } = vi.hoisted(() => ({
   confirmMock: vi.fn(),
@@ -131,6 +132,8 @@ describe("Home", () => {
   beforeEach(() => {
     localStorage.clear();
     document.documentElement.removeAttribute("data-theme");
+    // 本文件只测 Home 自身布局；助手停靠让位是集成测试的事，这里固定浮动态。
+    useAssistantUi.setState({ open: false, side: "right", width: 380, mode: "float" });
     useJobs.getState().resetVideo(video.id);
     mockIpc.courses.list.mockResolvedValue([course, otherCourse]);
     mockIpc.videos.list.mockImplementation(async (courseId: string) =>

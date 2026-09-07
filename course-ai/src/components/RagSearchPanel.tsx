@@ -473,12 +473,12 @@ function AskChatPanel({ videoId }: { videoId: string }) {
       : {};
 
   const aiAvatar = (
-    <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full bg-primary/15 text-primary">
+    <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full ca-fill-brand text-[var(--on-accent)]">
       <Sparkles className="h-4 w-4" />
     </span>
   );
   const userAvatar = (
-    <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full bg-[var(--surface-card-active)] text-[var(--text-muted)]">
+    <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full bg-[var(--accent-weak-2)] text-[var(--accent-text)]">
       <User className="h-4 w-4" />
     </span>
   );
@@ -519,7 +519,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
       >
         {history.length === 0 && inFlightQuery === undefined && (
           <div className="flex flex-col items-center gap-3 px-2 pt-6 text-center">
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/12 text-primary">
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl ca-fill-brand text-[var(--on-accent)]">
               <Sparkles className="h-6 w-6" />
             </span>
             <div>
@@ -550,7 +550,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
               <div
                 role="article"
                 aria-label={t("ragSearch.myQuestion")}
-                className="max-w-[82%] rounded-2xl rounded-tr-sm bg-primary/15 px-3 py-2"
+                className="max-w-[82%] rounded-2xl rounded-tr-sm bg-[var(--accent-weak-2)] px-3 py-2"
               >
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-strong)]">
                   {turn.query}
@@ -615,7 +615,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
               <div
                 role="article"
                 aria-label={t("ragSearch.myQuestion")}
-                className="max-w-[82%] rounded-2xl rounded-tr-sm bg-primary/15 px-3 py-2"
+                className="max-w-[82%] rounded-2xl rounded-tr-sm bg-[var(--accent-weak-2)] px-3 py-2"
               >
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-strong)]">
                   {inFlightQuery}
@@ -770,7 +770,7 @@ function AskChatPanel({ videoId }: { videoId: string }) {
               disabled={busy || !query.trim()}
               aria-label={t("ragSearch.send")}
               title={t("ragSearch.sendTitle")}
-              className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full bg-primary text-white transition hover:opacity-90 disabled:bg-[var(--surface-card-active)] disabled:text-[var(--text-muted)] disabled:hover:opacity-100"
+              className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-full ca-fill-brand text-[var(--on-accent)] transition hover:opacity-90 disabled:bg-[var(--surface-card-active)] disabled:text-[var(--text-muted)] disabled:hover:opacity-100"
             >
               <Send className="h-4 w-4" />
             </button>

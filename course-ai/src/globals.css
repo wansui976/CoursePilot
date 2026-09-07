@@ -9,15 +9,17 @@
   --color-border: rgb(255 255 255 / 0.1);
   --color-ring: var(--focus-ring);
 
-  /* 圆角单一刻度：让 Tailwind 的 rounded-md/lg/xl 对齐设计 token --r-sm/md/lg(8/12/16)，
-     全局只此一套尺度（含 .ca-* 壳层）。极小元素(开关内圈等)仍可用 rounded-sm。 */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  /* 圆角单一刻度：让 Tailwind 的 rounded-md/lg/xl 对齐设计 token --r-sm/md/lg。
+     比默认偏大一档，走「更软、更圆润」的系统观感，全局只此一套尺度（含 .ca-* 壳层）。
+     极小元素(开关内圈等)仍可用 rounded-sm。 */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
 }
 
-/* 浅色（默认）：参考稿冷灰面板与蓝色点缀。 */
+/* 浅色（默认）：苹果式分层灰阶——chrome 用略暖的系统灰，内容层回到纯白，
+   靠「相邻层明度差 + 柔和投影」分层，App 刻意少用 1px 硬描边。 */
 :root {
   color-scheme: light;
 
@@ -25,25 +27,30 @@
   --font-app: -apple-system, BlinkMacSystemFont, "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
 
-  --surface-app: #f3f4f6;
-  --surface-rail: #fafafb;
-  --surface-sidebar: #fafafb;
+  --surface-app: #f5f5f7;
+  --surface-rail: #fcfcfd;
+  --surface-sidebar: #fcfcfd;
   --surface-panel: #ffffff;
   --surface-header: #ffffff;
   --surface-card: #ffffff;
-  --surface-card-hover: #f0f1f4;
-  --surface-card-active: #eef3fd;
-  --surface-input: #fafafb;
+  --surface-card-hover: #f2f2f5;
+  --surface-card-active: #eff3fc;
+  --surface-input: #fcfcfd;
   /* 视频舞台的信箱留白：浅色主题用纯白，深色主题用纯黑（见深色块）。 */
   --surface-stage: #ffffff;
-  --surface-titlebar: linear-gradient(#fbfbfc, #f2f3f5);
+  /* 舞台上方的通知/手势提示：永远压在产品画面上，深浅主题都走近黑 scrim，
+     与网站本身的灰阶分离（--surface-stage 在浅色下是白的，不能拿来做徽标底）。 */
+  --surface-stage-overlay: rgb(0 0 0 / 0.72);
+  --surface-stage-scrim: rgb(0 0 0 / 0.2);
+  --surface-titlebar: linear-gradient(#fdfdfe, #f3f3f5);
 
-  --border-subtle: #e9eaee;
-  --border-faint: #f0f1f4;
+  /* 发丝线（hairline）整体调柔：能靠明度/投影分层的地方不再依赖重描边。 */
+  --border-subtle: #e3e4e8;
+  --border-faint: #ebedf0;
   /* hover 等需要比 subtle 更清晰的强调边框；深浅主题各自定义，别写死浅色灰。 */
-  --border-strong: #dde0e6;
-  --border-control: #858b96;
-  --border-titlebar: #e9eaee;
+  --border-strong: #d4d7dd;
+  --border-control: #848a94;
+  --border-titlebar: rgb(0 0 0 / 0.06);
 
   --text-strong: #1c1e24;
   --text-normal: #565b66;
@@ -270,9 +277,28 @@ select:focus-visible {
   --line: var(--border-subtle);
   --line-soft: var(--border-faint);
   --line-strong: var(--border-strong);
-  --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 16px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+  /* 签名视觉语言：全应用唯一反复出现的动态渐变，构成「学习中」的辨识记忆点。
+     --grad-accent：进度条/进度环统一的「强调色→亮调」扫描，柔和、永远与当前强调色和谐；
+     --grad-brand：logo 与主强调面用更浓更彩的一档，负责品牌存在感。 */
+  --grad-accent: linear-gradient(
+    120deg,
+    var(--accent) 0%,
+    color-mix(in srgb, var(--accent) 60%, #ffffff) 100%
+  );
+  --grad-brand: linear-gradient(
+    135deg,
+    var(--accent) 12%,
+    color-mix(in srgb, var(--accent) 46%, #7d6bf0) 100%
+  );
+  /* 播放进度（seek）专用渐变，主题感知：
+     浅色默认就是壳层 --grad-accent（白底上色深、对比足）；深色被 .ca-app[data-theme=dark]
+     覆盖为基于 --video-accent 的版本——那是给近黑面派生的亮色，解决 --accent 在深色控制栏
+     上仅 ~2.9:1（低于非文字 3:1）的问题。seek/ProgressBar 在浅色(白)与深色(暗)控制栏下
+     都使用这个 token。 */
+  --grad-video-progress: var(--grad-accent);
   /* 层级刻度（从低到高），新增浮层时请引用这些变量而非裸写数字： */
   --z-rail: 5; /* 工作台细侧栏 */
   --z-sidebar: 40; /* 宽屏完整侧栏 */
@@ -299,6 +325,13 @@ select:focus-visible {
   --accent-weak-2: #22335a;
   --accent-text: #7aa6ff;
   --video-accent: #7aa6ff;
+  /* 深色控制栏是近黑面：seek 填充改用 --video-accent（为近黑派生的亮色）渐层，
+     起始端 ≥4.5:1、亮化端更高，全程满足非文字 3:1。 */
+  --grad-video-progress: linear-gradient(
+    120deg,
+    var(--video-accent) 0%,
+    color-mix(in srgb, var(--video-accent) 50%, #ffffff) 100%
+  );
 }
 
 /* 仅把交互控件的边界抬到 3:1；分区线继续使用较安静的 subtle/faint 层级。 */
@@ -371,7 +404,7 @@ select:focus-visible {
   border-radius: 9px;
   margin-bottom: 8px;
   flex: 0 0 auto;
-  background: linear-gradient(135deg, var(--accent), #4f86ff);
+  background: var(--grad-brand);
   color: #fff;
   display: flex;
   align-items: center;
@@ -484,7 +517,7 @@ select:focus-visible {
   height: 30px;
   border-radius: 9px;
   flex: 0 0 auto;
-  background: linear-gradient(135deg, var(--accent), #4f86ff);
+  background: var(--grad-brand);
   color: #fff;
   display: flex;
   align-items: center;
@@ -681,7 +714,7 @@ select:focus-visible {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 20px 30px 14px;
+  padding: 24px 34px 16px;
   flex-wrap: wrap;
 }
 
@@ -749,7 +782,7 @@ select:focus-visible {
   display: block;
   height: 100%;
   border-radius: 999px;
-  background: var(--accent);
+  background: var(--grad-accent);
 }
 
 .tb-actions {
@@ -869,7 +902,7 @@ select:focus-visible {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 10px 30px 34px;
+  padding: 16px 34px 40px;
 }
 
 /* 「继续学习」hero 卡：最近看的未看完视频，整卡可点直达工作台（断点续播）。 */
@@ -951,6 +984,24 @@ select:focus-visible {
 }
 }
 
+/* 续看 hero 的播放钮悬停时轻微缩放呼吸，提示「从这里继续」。
+   只动 transform（合成器扛得住，不触发布局/重排）；在 hover 且未减弱动效时才播放。 */
+@keyframes ca-play-pulse {
+  0%,
+  100% {
+    transform: scale(1.04);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .ca-continue-hero:hover .ca-continue-play {
+    animation: ca-play-pulse 2.2s var(--ease) infinite;
+  }
+}
+
 @media (max-width: 640px) {
   .ca-continue-cover {
     width: 96px;
@@ -999,12 +1050,12 @@ select:focus-visible {
   display: block;
   height: 100%;
   border-radius: 999px;
-  background: var(--accent);
+  background: var(--grad-accent);
 }
 
 .ca-grid {
   display: grid;
-  gap: 18px;
+  gap: 20px;
   align-content: start;
   /* auto-fit（而非 auto-fill）：卡片不足以铺满一行时，空轨道会塌缩，
      卡片拉伸填满宽度。否则侧栏折叠、主区变宽后会在最右侧留出空白轨道。
@@ -1042,6 +1093,23 @@ select:focus-visible {
   box-shadow: var(--shadow-card-hover);
   border-color: var(--line-strong);
 }
+}
+
+/* 封面图 hover 细微放大（超出部分被 .ca-thumb 的 overflow:hidden 裁掉），
+   与整卡上浮合成统一的「拾起」手感；三处封面（卡片/列表行/续看 hero）行为一致。
+   reduce-motion 下全局过渡被压到 0.01ms，自动退化为静止。 */
+@media (hover: hover) {
+  .ca-thumb img,
+  .row-thumb img,
+  .ca-continue-cover img {
+    transition: transform 0.5s var(--ease);
+  }
+  .ca-card:hover .ca-thumb img,
+  .ca-row:hover .row-thumb img,
+  .ca-continue-hero:hover .ca-continue-cover img {
+    transform: scale(1.05);
+    will-change: transform;
+  }
 }
 
 .ca-thumb {
@@ -1141,7 +1209,7 @@ select:focus-visible {
 .ca-continue-cover .ov-bar > i {
   display: block;
   height: 100%;
-  background: var(--accent);
+  background: var(--grad-accent);
 }
 
 .row-thumb .ov-bar {
@@ -1149,10 +1217,10 @@ select:focus-visible {
 }
 
 .ca-card-body {
-  padding: 12px 14px 14px;
+  padding: 14px 16px 16px;
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 12px;
 }
 
 .ca-card-title {
@@ -1909,12 +1977,12 @@ select:focus-visible {
 /* ---- 共享紧凑 chrome（compact + medium）：顶栏 / 滚动区 / 抽屉 / 标题 / 网格 / 列表 / 触控 ---- */
 .ca-app[data-bucket="compact"] .ca-topbar,
 .ca-app[data-bucket="medium"] .ca-topbar {
-  padding: 16px 16px 12px;
+  padding: 18px 18px 14px;
 }
 
 .ca-app[data-bucket="compact"] .ca-scroll,
 .ca-app[data-bucket="medium"] .ca-scroll {
-  padding: 8px 16px 30px;
+  padding: 12px 18px 34px;
 }
 
 
@@ -2354,6 +2422,27 @@ html.theme-circle-vt::view-transition-new(root) {
   background-image: none;
 }
 
+/* 进度渐层填充（工作台内部各进度条共用）：把签名渐变 --grad-accent 作 background-image
+   铺上。别用 Tailwind 的 bg-[var(--grad-accent)]——那会编译成 background-color，而渐变是
+   图像，直接 bg 会被浏览器忽略。语义就是「(一段)学习中」的进度承载面。 */
+.ca-fill-grad {
+  background: var(--grad-accent);
+}
+
+/* 品牌渐变填充（图形面）：把签名品牌渐变 --grad-brand 作 background-image 铺上，
+   仅供头像、图标、发送键等**不含正文**的图形承载面使用。绝不可用于消息气泡/大段文字
+   底色——渐变在两段之间的明度跨度大，正文对比度无法在两段同时达标（见设计文档 §3.2
+   「渐变不应用于小字号文字或大面积正文」，只服务图形面积）。文字在前景读 var(--on-accent)。 */
+.ca-fill-brand {
+  background: var(--grad-brand);
+}
+
+/* 播放进度填充（主题感知）：吃 --grad-video-progress，浅色为 accent 渐层、深色自动切为
+   近黑安全的 --video-accent 渐层。仅用于播放 seek 等「可能压在近黑面上」的进度。 */
+.ca-fill-video-grad {
+  background: var(--grad-video-progress);
+}
+
 /* 模态框的进出。此前四个对话框都是硬切：黑幕瞬间铺满、面板凭空出现在正中，
    关闭时又一起消失，没有任何东西说明它从哪来、到哪去。
    Radix 会在 Overlay / Content 上打 data-state="open|closed"，并且在 closed 期间
@@ -2625,6 +2714,38 @@ a,
 [role="button"],
 [role="tab"] {
   touch-action: manipulation;
+}
+
+/* 流式状态文字的轻呼吸：比再加一个转圈安静，也让「还活着」可感知。
+   只动 opacity，走合成器；减动效由全局兜底压平。 */
+@keyframes ca-pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.ca-pulse-soft {
+  animation: ca-pulse-soft 1.6s infinite ease-in-out;
+}
+
+/* 新一轮消息的入场：轻轻落下来而不是凭空出现。 */
+@keyframes ca-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ca-msg-in {
+  animation: ca-msg-in 0.18s ease-out;
 }
 
 /* 提问助手「思考中」打字指示器：三个错峰跳动的小圆点。 */

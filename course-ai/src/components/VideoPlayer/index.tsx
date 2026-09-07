@@ -878,7 +878,7 @@ export function VideoPlayer({
           {smartRate.notice && (
             <div
               aria-live="polite"
-              className="pointer-events-none absolute right-4 top-6 z-20 rounded-full bg-black/70 px-3 py-1 text-xs font-medium text-white"
+              className="pointer-events-none absolute right-4 top-6 z-20 rounded-full bg-[var(--surface-stage-overlay)] px-3 py-1 text-xs font-medium text-white"
             >
               {smartRate.notice}
             </div>
@@ -886,7 +886,7 @@ export function VideoPlayer({
           {silenceSkip.notice && (
             <div
               aria-live="polite"
-              className="pointer-events-none absolute left-1/2 top-6 z-20 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-xs font-medium text-white"
+              className="pointer-events-none absolute left-1/2 top-6 z-20 -translate-x-1/2 rounded-full bg-[var(--surface-stage-overlay)] px-3 py-1 text-xs font-medium text-white"
             >
               {silenceSkip.notice}
             </div>
@@ -894,9 +894,9 @@ export function VideoPlayer({
           {gestureHint && (
             <div
               aria-label={t("videoPlayer.gestureOverlay")}
-              className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/20 text-white"
+              className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[var(--surface-stage-scrim)] text-white"
             >
-              <div className="rounded-lg bg-black/70 px-4 py-2 text-sm font-medium">
+              <div className="rounded-lg bg-[var(--surface-stage-overlay)] px-4 py-2 text-sm font-medium">
                 {gestureHint.kind === "brightness" &&
                   t("videoPlayer.brightnessPercent", {
                     percent: (gestureHint.value * 100).toFixed(0),
@@ -913,7 +913,7 @@ export function VideoPlayer({
             </div>
           )}
           {cropNotice && (
-            <div className="pointer-events-none absolute inset-x-4 top-6 z-20 mx-auto w-fit max-w-full whitespace-pre-line rounded-lg bg-black/75 px-3 py-1.5 text-center text-xs font-medium leading-relaxed text-white">
+            <div className="pointer-events-none absolute inset-x-4 top-6 z-20 mx-auto w-fit max-w-full whitespace-pre-line rounded-lg bg-[var(--surface-stage-overlay)] px-3 py-1.5 text-center text-xs font-medium leading-relaxed text-white">
               {cropNotice}
             </div>
           )}
@@ -934,7 +934,7 @@ export function VideoPlayer({
       </div>
       <div
         ref={controlsRef}
-        className="absolute inset-x-0 bottom-0 z-10 bg-[var(--surface-panel)]/92 backdrop-blur-sm"
+        className="absolute inset-x-0 bottom-0 z-10 border-t border-[var(--border-faint)] bg-[var(--surface-panel)]/92 backdrop-blur"
         onMouseEnter={!immersive ? revealDesktopControls : undefined}
         onMouseLeave={!immersive ? scheduleDesktopHideControls : undefined}
         onPointerDown={immersive ? () => revealControls() : undefined}

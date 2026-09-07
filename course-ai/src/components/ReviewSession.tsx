@@ -217,6 +217,15 @@ export function ReviewSession({
           aria-busy={review.isPending}
           className="fixed inset-0 z-50 flex flex-col bg-[var(--surface-app)]"
         >
+      {/* 会话完成度：渐变进度承载「复习到哪了」，与全应用的进度语义一致。 */}
+      {cards.length > 0 && !done && (
+        <div role="progressbar" aria-label={t("review.title")} aria-valuemin={0} aria-valuemax={cards.length} aria-valuenow={index} className="h-1 w-full flex-none bg-[var(--surface-card-active)]">
+          <div
+            className="ca-fill-grad h-full transition-[width] duration-300 ease-out"
+            style={{ width: `${Math.min(100, Math.round((index / cards.length) * 100))}%` }}
+          />
+        </div>
+      )}
       <Dialog.Title className="sr-only">
         {concept ? `${t("review.title")}: ${concept.name}` : t("review.title")}
       </Dialog.Title>

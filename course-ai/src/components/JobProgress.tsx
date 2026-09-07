@@ -170,7 +170,7 @@ export function JobProgress({ videoId }: { videoId: string }) {
           </div>
           <div className="h-1 overflow-hidden rounded bg-[var(--surface-card-hover)]">
             <div
-              className="h-1 bg-primary"
+              className="ca-fill-grad h-1"
               style={{ width: `${job.progress * 100}%` }}
             />
           </div>

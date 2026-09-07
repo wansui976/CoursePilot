@@ -757,7 +757,7 @@ export function ConceptsPanel({
               </div>
               <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[var(--surface-panel)]">
                 <div
-                  className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
+                  className="ca-fill-grad h-full rounded-full transition-[width] duration-300 ease-out"
                   style={{
                     width: `${progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 8}%`,
                   }}
@@ -799,7 +799,7 @@ export function ConceptsPanel({
             <ErrorNote error={error} onRetry={() => refetch()} />
           ) : !hasKnowledge ? (
             <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 px-2 text-center">
-              <span className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/12 text-primary">
+              <span className="flex h-12 w-12 items-center justify-center rounded-lg ca-fill-brand text-[var(--on-accent)]">
                 <Sparkles className="h-6 w-6" />
               </span>
               <h2 className="text-base font-semibold text-[var(--text-strong)]">{t("concepts.noKnowledge")}</h2>
@@ -1113,7 +1113,7 @@ export function ConceptsPanel({
                                   <button
                                     type="button"
                                     onClick={() => setReviewing({ conceptId: concept.id, name: concept.name })}
-                                    className="ca-touch-44 my-auto inline-flex flex-none items-center gap-1 rounded-lg bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary hover:!text-white"
+                                    className="ca-touch-44 my-auto inline-flex flex-none items-center gap-1 rounded-lg bg-[var(--accent-weak-2)] px-2.5 py-1 text-xs font-medium text-[var(--accent-text)] transition hover:bg-[var(--accent)] hover:text-[var(--on-accent)]"
                                   >
                                     <Brain className="h-3.5 w-3.5" />
                                     {t("concepts.reviewDue", { count: due })}

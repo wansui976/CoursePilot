@@ -855,6 +855,7 @@
     "toolFailedContinuing": "{{tool}}未能完成，正在调整方案…",
     "toolCanceled": "{{tool}}已停止，正在结束本轮…",
     "toolTrace": "工具调用记录",
+    "toolTraceSummary": "使用了 {{count}} 个工具",
     "toolRunStatus": {
       "running": "进行中",
       "completed": "已完成",
@@ -885,6 +886,7 @@
     "scopeAuto": "跟随当前选择",
     "scopeMenuLabel": "选择提问范围",
     "dockAsSidebar": "停靠为侧栏",
+    "headerMenu": "更多操作",
     "undock": "恢复浮动",
     "renameConversation": "重命名会话",
     "renameConversationTarget": "重命名会话「{{title}}」",

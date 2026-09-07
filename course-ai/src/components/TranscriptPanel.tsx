@@ -102,7 +102,7 @@ const TranscriptRow = memo(function TranscriptRow({
         data-row={index}
         className={`group relative rounded ${
           active
-            ? "bg-primary/20"
+            ? "bg-[var(--accent-weak-2)]"
             : currentMatch
               ? "bg-[var(--accent-weak)]"
               : "hover:bg-[var(--surface-card-hover)]"

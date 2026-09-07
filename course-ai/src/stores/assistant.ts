@@ -53,11 +53,18 @@ function readWidth(): number {
   }
 }
 
+/**
+ * 没有历史偏好时的初始形态。默认停靠成侧栏——这是 IDE 式助手的主形态：
+ * 全高、不挡内容、随手可用；浮球是收起后的入口，不是第一印象。
+ */
+export const DEFAULT_ASSISTANT_MODE: AssistantMode = "docked";
+
 function readMode(): AssistantMode {
   try {
-    return localStorage.getItem(MODE_KEY) === "docked" ? "docked" : "float";
+    const stored = localStorage.getItem(MODE_KEY);
+    return stored === "float" || stored === "docked" ? stored : DEFAULT_ASSISTANT_MODE;
   } catch {
-    return "float";
+    return DEFAULT_ASSISTANT_MODE;
   }
 }
 

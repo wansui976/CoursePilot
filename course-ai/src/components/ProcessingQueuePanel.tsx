@@ -158,7 +158,7 @@ export function ProcessingQueuePanel({
                     >
                       <div
                         className={
-                          failed ? "h-full bg-[var(--status-err)]" : "h-full bg-primary"
+                          failed ? "h-full bg-[var(--status-err)]" : "ca-fill-grad h-full"
                         }
                         style={{ width: `${percent}%` }}
                       />

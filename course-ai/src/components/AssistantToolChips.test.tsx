@@ -1,8 +1,13 @@
 import "@testing-library/jest-dom/vitest";
 import "@/i18n";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { AssistantToolChips } from "./AssistantToolChips";
+
+/** 多个工具时默认折叠成一行计数，先展开再断言明细。 */
+function expandSummary(count: number) {
+  fireEvent.click(screen.getByRole("button", { name: `使用了 ${count} 个工具` }));
+}
 
 describe("AssistantToolChips", () => {
   it("shows resume learning in user-facing language", () => {
@@ -26,7 +31,7 @@ describe("AssistantToolChips", () => {
     expect(chips).not.toHaveTextContent("get_course_outline");
   });
 
-  it("shows each tool outcome in text and does not merge opposite outcomes", () => {
+  it("collapses several calls into one summary line until expanded", () => {
     render(
       <AssistantToolChips
         tools={["search_content", "search_content"]}
@@ -36,6 +41,10 @@ describe("AssistantToolChips", () => {
         ]}
       />,
     );
+
+    // 默认只留一行灰色计数，明细收起来。
+    expect(screen.queryByRole("list", { name: "工具调用记录" })).not.toBeInTheDocument();
+    expandSummary(2);
 
     expect(screen.getByRole("list", { name: "工具调用记录" })).toBeInTheDocument();
     expect(screen.getByRole("listitem", { name: "搜索课程内容，已完成" })).toBeInTheDocument();
@@ -55,6 +64,7 @@ describe("AssistantToolChips", () => {
       />,
     );
 
+    expandSummary(3);
     expect(
       screen.getByRole("listitem", { name: "搜索 B 站，已完成，2 次" }),
     ).toHaveTextContent("×2");
@@ -74,14 +84,31 @@ describe("AssistantToolChips", () => {
       />,
     );
 
+    expandSummary(3);
     const items = screen.getAllByRole("listitem");
     expect(items.map((item) => item.getAttribute("aria-label"))).toEqual([
       "查看课程，已结束",
       "查看视频列表，失败",
       "搜索课程内容，已结束",
     ]);
-    for (const item of items) {
-      expect(item).toHaveClass("text-[var(--text-strong)]");
-    }
+    // 状态降噪：只有失败/停止借用状态色，其余保持中性。
+    expect(items[1]).toHaveClass("text-[var(--status-err)]");
+    expect(items[0]).toHaveClass("text-[var(--text-muted)]");
+    expect(items[2]).toHaveClass("text-[var(--text-muted)]");
+  });
+
+  it("shows the running tool on the collapsed summary line", () => {
+    render(
+      <AssistantToolChips
+        tools={["search_content", "list_videos"]}
+        toolRuns={[
+          { callId: "one", name: "search_content", status: "completed" },
+          { callId: "two", name: "list_videos", status: "running" },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "正在查看视频列表…" })).toBeInTheDocument();
+    expect(screen.queryByText("查看课程")).not.toBeInTheDocument();
   });
 });

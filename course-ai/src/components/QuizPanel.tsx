@@ -194,7 +194,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
                 </div>
                 <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--surface-card-hover)]">
                   <div
-                    className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-300 ease-out"
+                    className="ca-fill-grad h-full rounded-full transition-[width] duration-300 ease-out"
                     style={{ width: `${(ratedCount / questions.length) * 100}%` }}
                   />
                 </div>
@@ -248,7 +248,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
               return (
                 <div
                   key={i}
-                  className={`rounded border p-3 ${
+                  className={`rounded-lg border p-3 ${
                     rating === "wrong"
                       ? "border-[var(--status-err)]/50 bg-[var(--status-err-bg)]/40"
                       : rating === "correct"

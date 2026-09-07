@@ -439,9 +439,9 @@ export function Dashboard({
                         onClick={() => onResume(row.course_id, row.video_id, positionSec)}
                         className="group flex w-full items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
                       >
-                        <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-primary/15 text-primary transition group-hover:bg-primary group-hover:text-white">
-                          <Play className="h-4 w-4" />
-                        </span>
+                        <span className="grid h-9 w-9 flex-none place-items-center rounded-lg ca-fill-brand text-[var(--on-accent)] transition-transform group-hover:scale-105">
+                <Play className="h-4 w-4" />
+              </span>
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium text-[var(--text-strong)]">
                             {displayTitle(row.video_title)}
@@ -453,7 +453,7 @@ export function Dashboard({
                           {ratio > 0 && (
                             <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--surface-card-active)]">
                               <div
-                                className="h-full rounded-full bg-primary"
+                                className="ca-fill-grad h-full rounded-full"
                                 style={{ width: `${Math.round(ratio * 100)}%` }}
                               />
                             </div>
@@ -484,7 +484,7 @@ export function Dashboard({
               onClick={() => setReviewing(true)}
               className="flex w-full items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
             >
-              <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-primary/15 text-primary">
+              <span className="grid h-9 w-9 flex-none place-items-center rounded-lg ca-fill-brand text-[var(--on-accent)]">
                 <Brain className="h-5 w-5" />
               </span>
               <span className="min-w-0 flex-1">
@@ -497,7 +497,7 @@ export function Dashboard({
                   </span>
                 )}
               </span>
-              <span className="flex-none rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white">
+              <span className="ca-sheen flex-none rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white">
                 {t("dashboard.startReview")}
               </span>
             </button>
@@ -573,7 +573,7 @@ export function Dashboard({
                 className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--surface-card-active)]"
               >
                 <div
-                  className={`h-full rounded-full ${goalReached ? "bg-[var(--accent-text)]" : "bg-primary"}`}
+                  className={`h-full rounded-full ${goalReached ? "bg-[var(--accent-text)]" : "ca-fill-grad"}`}
                   style={{ width: `${goalPercent}%` }}
                 />
               </div>
@@ -659,7 +659,7 @@ export function Dashboard({
                           })}
                         </div>
                       </div>
-                      <span className="flex-none rounded-md bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary">
+                      <span className="flex-none rounded-md bg-[var(--accent-weak-2)] px-3 py-1.5 text-xs font-medium text-[var(--accent-text)]">
                         {t("dashboard.reviewButton")}
                       </span>
                     </button>
@@ -791,7 +791,7 @@ export function Dashboard({
                           </div>
                         </div>
                         {due > 0 && (
-                          <span className="flex-none rounded-md bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary">
+                          <span className="flex-none rounded-md bg-[var(--accent-weak-2)] px-2.5 py-1 text-xs font-medium text-[var(--accent-text)]">
                             {t("dashboard.courseDue", { count: due })}
                           </span>
                         )}

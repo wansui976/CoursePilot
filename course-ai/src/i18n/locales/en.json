@@ -855,6 +855,7 @@
     "toolFailedContinuing": "{{tool}} did not complete; adjusting the approach…",
     "toolCanceled": "{{tool}} stopped; finishing this turn…",
     "toolTrace": "Tool activity",
+    "toolTraceSummary": "Used {{count}} tools",
     "toolRunStatus": {
       "running": "Running",
       "completed": "Completed",
@@ -885,6 +886,7 @@
     "scopeAuto": "Follow selection",
     "scopeMenuLabel": "Choose question scope",
     "dockAsSidebar": "Dock as sidebar",
+    "headerMenu": "More actions",
     "undock": "Undock",
     "renameConversation": "Rename conversation",
     "renameConversationTarget": "Rename conversation \"{{title}}\"",

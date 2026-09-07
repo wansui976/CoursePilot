@@ -122,7 +122,7 @@ export function ProgressBar({
         {/* 视觉轨：3px 细线，悬停加粗成 5px。 */}
         <div className="pointer-events-none absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[var(--surface-card-hover)] transition-[height] duration-150 group-hover/progress:h-[5px]">
           <div
-            className="h-full rounded-full bg-[var(--accent)]"
+            className="ca-fill-video-grad h-full rounded-full"
             style={{ width: `${progressPercent}%` }}
           />
           {/* 跳停顿段灰显：这部分播放时会直接跃过。 */}

@@ -1,12 +1,9 @@
 import {
-  memo,
   useCallback,
   useEffect,
-  useId,
   useRef,
   useState,
   type KeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -14,40 +11,24 @@ import type { TFunction } from "i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import {
-  AlertCircle,
-  ArrowDown,
-  ArrowUpRight,
-  AtSign,
-  Check,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Copy,
   GripHorizontal,
   History as HistoryIcon,
   LoaderCircle,
   MessageSquarePlus,
+  MoreHorizontal,
   Move,
   PanelLeft,
-  PenLine,
-  RefreshCw,
-  Save,
-  Send,
   Sparkles,
-  Square,
-  Trash2,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  AssistantActionList,
-  type AssistantActionOutcome,
-} from "@/components/AssistantActionCard";
-import { AssistantToolChips } from "@/components/AssistantToolChips";
+import { Menu, MenuItem } from "@/components/ui/menu";
+import type { AssistantActionOutcome } from "@/components/AssistantActionCard";
 import {
   boundTrustedAssistantHistory,
   capAssistantText,
-  getAssistantInteractionState,
   historyBeforeLastQuestion,
   MAX_ASSISTANT_ANSWER_CHARS,
   MAX_ASSISTANT_REASONING_CHARS,
@@ -55,11 +36,8 @@ import {
   reconcileAssistantToolRuns,
   writeAssistantSession,
   type AssistantSession,
-  type AssistantCheckpoint,
-  type AssistantCheckpointActionKind,
   type AssistantToolRun,
   type AssistantToolRunStatus,
-  type AssistantTurnRecord,
 } from "@/lib/assistantSession";
 import {
   appendRecentAssistantQuestion,
@@ -81,23 +59,34 @@ import { notesCoordinator } from "@/lib/notesCoordinator";
 import { isMobile, isTablet } from "@/lib/platform";
 import { formatMs } from "@/lib/time";
 import {
-  clampPanelWidth,
   MAX_PANEL_WIDTH,
   MIN_PANEL_WIDTH,
-  type DockSide,
   useAssistantUi,
 } from "@/stores/assistant";
 import { useInlineAsk } from "@/stores/inlineAsk";
 import { useTheme } from "@/stores/theme";
-import { renderMarkdown } from "@/lib/renderMarkdown";
+import { usePanelWindowing } from "@/components/assistant/usePanelWindowing";
+import { ConversationHistory } from "@/components/assistant/ConversationHistory";
+import {
+  AssistantEmptyState,
+  AssistantTurn,
+  JumpToLatest,
+} from "@/components/assistant/AssistantTurn";
+import {
+  streamingLabelFor,
+  type Turn,
+} from "@/components/assistant/turnModel";
+import {
+  AssistantComposer,
+  type ScopeChoice,
+  type ScopeOption,
+} from "@/components/assistant/AssistantComposer";
 import type {
   AgentStopReason,
   AssistantAction,
   AssistantContext,
   AssistantMessage,
   AssistantReply,
-  AssistantUsage,
-  ToolExecutionStatus,
 } from "@/lib/types";
 
 /**
@@ -107,14 +96,6 @@ import type {
  * 改成底部抽屉——两种外壳共用同一套状态和消息流，切换的只是容器。
  */
 
-/** 一次完整回答实际消耗的 token 数：输入 + 正式输出 + 推理模型的思考输出。 */
-function usageTokens(usage: AssistantUsage): number {
-  return usage.prompt_tokens + usage.completion_tokens + usage.reasoning_tokens;
-}
-
-const PANEL_MAX_HEIGHT = 720;
-const VIEWPORT_GAP = 16;
-const EDGE_SNAP_DISTANCE = 28;
 const SCROLL_FOLLOW_THRESHOLD = 32;
 const SESSION_PERSIST_DELAY_MS = 250;
 // 只让用户操作确定能写进会话快照的轮次；否则第 21-50 轮的旧确认卡仍可见，
@@ -123,14 +104,6 @@ const MAX_RENDERED_TURNS = MAX_ASSISTANT_TURNS;
 const MAX_STREAMED_TOOLS = 50;
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), summary, [href], [tabindex]:not([tabindex="-1"])';
-/// 收起时那颗球的直径。停靠位置的夹取与展开/收起时的居中都按它算，
-/// 改了尺寸这些数会自动跟上。
-const LAUNCHER_SIZE = 56;
-/// 球贴边时离边框的距离，与它的 left-3 / right-3 一致——拖动时按同一个数夹取，
-/// 松手贴回去才不会横着弹一下。
-const LAUNCHER_MARGIN = 12;
-const KEYBOARD_MOVE_STEP = 24;
-const KEYBOARD_RESIZE_STEP = 32;
 
 function appendStreamChunk(
   chunks: string[],
@@ -145,61 +118,6 @@ function appendStreamChunk(
   if (chunks.length >= 256) chunks.splice(0, chunks.length, chunks.join(""));
   return currentChars + kept.length;
 }
-const DRAG_START_DISTANCE = 4;
-
-interface PanelPosition {
-  x: number;
-  y: number;
-}
-
-interface DragSession {
-  source: "panel" | "dock";
-  pointerId: number;
-  startX: number;
-  startY: number;
-  offsetX: number;
-  offsetY: number;
-  /** 被拖对象的尺寸：面板拖的是面板，球拖的是球。 */
-  width: number;
-  height: number;
-  moved: boolean;
-  position: PanelPosition;
-  snapSide: DockSide | null;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), Math.max(min, max));
-}
-
-function viewportSize() {
-  if (typeof window === "undefined") return { width: 1024, height: 768 };
-  return { width: window.innerWidth, height: window.innerHeight };
-}
-
-/**
- * 面板还没排版时的估算尺寸。宽度直接从 store 读当前值而不是收参数：这些估算会在
- * 窗口 resize 之类的长期监听里被调用，收参数的话闭包会把某一次渲染时的宽度冻在里面，
- * 用户拉宽面板之后那些监听还按旧宽度算。
- */
-function fallbackPanelSize() {
-  const viewport = viewportSize();
-  return {
-    width: Math.min(
-      useAssistantUi.getState().width,
-      Math.max(0, viewport.width - VIEWPORT_GAP * 2),
-    ),
-    height: Math.min(PANEL_MAX_HEIGHT, Math.max(0, viewport.height - VIEWPORT_GAP * 2)),
-  };
-}
-
-function initialPanelPosition(side: DockSide): PanelPosition {
-  const viewport = viewportSize();
-  const panel = fallbackPanelSize();
-  return {
-    x: side === "left" ? VIEWPORT_GAP : viewport.width - panel.width - VIEWPORT_GAP,
-    y: VIEWPORT_GAP,
-  };
-}
 
 /** 呼出快捷键的显示写法。Mac 用 ⌘，其余平台用 Ctrl。 */
 function toggleShortcutLabel() {
@@ -207,23 +125,6 @@ function toggleShortcutLabel() {
   return /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent) ? "⌘J" : "Ctrl+J";
 }
 
-function initialDockTop() {
-  const { height } = viewportSize();
-  return Math.max(VIEWPORT_GAP, height - LAUNCHER_SIZE - 24);
-}
-
-type Turn = AssistantTurnRecord & {
-  /** 只存在于当前流式请求中；完成后不落入会话存储。 */
-  activeTool?: { callId: string; name: string };
-  /** 最近一次工具结束状态；只用于当前请求的阶段反馈。 */
-  toolExecutionStatus?: ToolExecutionStatus;
-  toolExecutionName?: string;
-  /** 工具链已撞上限、正在强制总结；只用于当前请求的阶段反馈。 */
-  turnLimitNoticed?: boolean;
-};
-
-/** 提问范围的用户选择。auto 跟随界面当前选中项，其余三档显式覆盖。 */
-type ScopeChoice = "auto" | "video" | "course" | "all";
 
 function recordToolStarted(
   toolRuns: AssistantToolRun[],
@@ -282,19 +183,6 @@ function initialAssistantConversation() {
   return { conversations, session };
 }
 
-function formatConversationTime(updatedAt: number, locale: string) {
-  try {
-    return new Intl.DateTimeFormat(locale, {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(updatedAt));
-  } catch {
-    return "";
-  }
-}
-
 function normalizedStopReason(reply: AssistantReply): AgentStopReason {
   if (reply.stop_reason) return reply.stop_reason;
   if (reply.canceled) return "canceled";
@@ -328,80 +216,7 @@ function contextLabel(context: AssistantContext, t: TFunction) {
   return t("assistant.scopeAllCourses");
 }
 
-const CHECKPOINT_ACTION_LABEL_KEYS: Record<AssistantCheckpointActionKind, string> = {
-  open_video: "assistantTools.open_video",
-  seek_to: "assistantTools.seek_to",
-  propose_rename: "assistantActions.renameTitle",
-  propose_delete: "assistantActions.deleteTitle",
-  propose_setting: "assistantActions.settingTitle",
-  propose_import: "assistantActions.importTitle",
-  propose_create_course: "assistantActions.createTitle",
-  propose_rename_course: "assistantActions.courseRenameTitle",
-};
 
-function checkpointSummary(checkpoint: AssistantCheckpoint, t: TFunction) {
-  const visible = checkpoint.targets.slice(0, 3).map((target) => {
-    const action = t(CHECKPOINT_ACTION_LABEL_KEYS[target.action], {
-      defaultValue: target.action,
-    });
-    const subject =
-      target.label && target.courseLabel
-        ? t("assistant.checkpointTargetCourse", {
-            target: target.label,
-            course: target.courseLabel,
-          })
-        : target.label ?? target.courseLabel;
-    return subject ? t("assistant.checkpointTarget", { action, target: subject }) : action;
-  });
-  const hidden = checkpoint.targets.length - visible.length;
-  return t("assistant.checkpointSummary", {
-    targets: visible.join(t("assistant.checkpointSeparator")),
-    more: hidden > 0 ? t("assistant.checkpointMore", { count: hidden }) : "",
-  });
-}
-
-function suggestionsFor(context: AssistantContext, t: TFunction) {
-  if (context.video_id) {
-    return [
-      {
-        label: t("assistant.suggestSummarizeVideo"),
-        prompt: t("assistant.suggestSummarizeVideoPrompt"),
-      },
-      {
-        label: t("assistant.suggestFindExamples"),
-        prompt: t("assistant.suggestFindExamplesPrompt"),
-      },
-      {
-        label: t("assistant.suggestKeyPoints"),
-        prompt: t("assistant.suggestKeyPointsPrompt"),
-      },
-    ];
-  }
-  if (context.course_id) {
-    return [
-      {
-        label: t("assistant.suggestOverviewCourse"),
-        prompt: t("assistant.suggestOverviewCoursePrompt"),
-      },
-      {
-        label: t("assistant.suggestVideoList"),
-        prompt: t("assistant.suggestVideoListPrompt"),
-      },
-      {
-        label: t("assistant.suggestCourseKeyPoints"),
-        prompt: t("assistant.suggestCourseKeyPointsPrompt"),
-      },
-    ];
-  }
-  return [
-    { label: t("assistant.suggestMyCourses"), prompt: t("assistant.suggestMyCoursesPrompt") },
-    {
-      label: t("assistant.suggestPlanStudy"),
-      prompt: t("assistant.suggestPlanStudyPrompt"),
-    },
-    { label: t("assistant.suggestDarkMode"), prompt: t("assistant.suggestDarkModePrompt") },
-  ];
-}
 
 /**
  * 回答正文的整段渲染。
@@ -410,21 +225,6 @@ function suggestionsFor(context: AssistantContext, t: TFunction) {
  * 不该因为 copiedTurnId、busy、scrolledAway 这类无关状态变化而被反复 parse（带公式的
  * 长回答每帧重解析是 O(n²) 的浪费）。seek 回调走 ref 取最新 navigate，保持引用稳定。
  */
-const MemoAnswer = memo(function MemoAnswer({
-  answer,
-  turn,
-  onSeek,
-}: {
-  answer: string;
-  turn: Turn;
-  onSeek: (turn: Turn, ms: number) => void;
-}) {
-  return (
-    <div className="break-words text-sm leading-relaxed text-[var(--text-normal)]">
-      {renderMarkdown(answer, (ms) => onSeek(turn, ms))}
-    </div>
-  );
-});
 
 export function AssistantPanel({
   context,
@@ -446,9 +246,9 @@ export function AssistantPanel({
   /** 工具型整页可以暂时收起入口，避免浮钮盖住设置/回收站的行内操作。 */
   launcherVisible?: boolean;
 }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { open, side, width, mode, setOpen, dock, setWidth, setMode } = useAssistantUi();
+  const { open, side, width, setOpen } = useAssistantUi();
   const [initialConversation] = useState(initialAssistantConversation);
   const initialSession = initialConversation.session;
   const [conversationState, setConversationState] = useState<AssistantConversationsState>(
@@ -471,9 +271,6 @@ export function AssistantPanel({
   const historyButtonRef = useRef<HTMLButtonElement>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
-  const dragRef = useRef<DragSession | null>(null);
-  const dragCleanupRef = useRef<(() => void) | null>(null);
-  const suppressLauncherClickRef = useRef(false);
   const activeRequestRef = useRef<string | null>(null);
   const activeConversationIdRef = useRef(initialConversation.conversations.activeId);
   const actionExecutionCountRef = useRef(0);
@@ -496,19 +293,39 @@ export function AssistantPanel({
     history: initialSession.history,
     draft: initialSession.draft,
   });
-  const focusLauncherAfterCloseRef = useRef(false);
   // iPad 宽屏有足够空间使用可拖动面板；真正决定布局的是视口档位，不是触屏 UA。
   const mobile = compact || (isMobile() && !isTablet());
-  const [position, setPosition] = useState<PanelPosition>(() => initialPanelPosition(side));
-  const [dockTop, setDockTop] = useState(initialDockTop);
-  /** 拖动中球的落点；不在拖动时为 null，球回到 left-3 / right-3 + dockTop 的贴边位置。 */
-  const [launcherPosition, setLauncherPosition] = useState<PanelPosition | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const [snapSide, setSnapSide] = useState<DockSide | null>(null);
+  // 拖动、吸附、缩放、抽屉手势这套「窗口化」交互整体在 usePanelWindowing 里。
+  const windowing = usePanelWindowing({
+    mobile,
+    panelRef,
+    focusInput: () => requestAnimationFrame(() => inputRef.current?.focus()),
+  });
+  const {
+    position,
+    dockTop,
+    launcherPosition,
+    dragging,
+    snapSide,
+    panelWidth,
+    sheetDragY,
+    suppressLauncherClickRef,
+    focusLauncherAfterCloseRef,
+    docked,
+    movePanelToSide,
+    openFromDock,
+    collapseToNearestSide,
+    enterDockMode,
+    exitDockMode,
+    beginPanelDrag,
+    beginDockDrag,
+    beginResize,
+    resizeWithKeyboard,
+    movePanelWithKeyboard,
+    beginSheetCloseDrag,
+  } = windowing;
   /** 用户翻上去看旧消息了吗。翻上去了就给一个「回到最新」的按钮，不然新回答落在屏幕外没人知道。 */
   const [scrolledAway, setScrolledAway] = useState(false);
-  /** 拖动内侧边框时的实时宽度。松手才写进偏好，免得一次拖动往磁盘上写几十遍。 */
-  const [resizeWidth, setResizeWidth] = useState<number | null>(null);
   /** 收起后又有新回答落下、用户还没回来看过。给球挂一个「完成点」。 */
   const [hasUnread, setHasUnread] = useState(false);
   /** 刚保存到笔记的那条回答，短暂显示对勾反馈。 */
@@ -517,48 +334,23 @@ export function AssistantPanel({
   const [hiddenTurnCount, setHiddenTurnCount] = useState(0);
   /** 用户显式选择的提问范围；auto 跟随当前选中项。 */
   const [scopeChoice, setScopeChoice] = useState<ScopeChoice>("auto");
-  const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
-  const scopeMenuId = `assistant-scope-menu-${useId()}`;
   /** 正在重命名的会话 id 与其输入草稿。 */
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
-  /** 移动抽屉下滑关闭手势的实时位移；null 表示未在拖拽。 */
-  const [sheetDragY, setSheetDragY] = useState<number | null>(null);
+  /** 头部「⋯」菜单：收纳换边、停靠切换这类一次性低频操作。 */
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const headerMenuRef = useRef<HTMLDivElement>(null);
+  const headerMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const toggleRef = useRef(() => {});
   const navigateFromTurnRef = useRef<(turn: Turn, action: AssistantAction) => void>(() => {});
-  const scopeMenuRef = useRef<HTMLDivElement>(null);
-  const scopeTriggerRef = useRef<HTMLButtonElement>(null);
-  const scopeItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const conversationButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const renameButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement>());
-  const panelWidth = resizeWidth ?? width;
 
   // 「现在在干什么」跟着流走：工具执行优先于此前已经吐出的思考或过场正文。
   const pendingTurn = turns.find((turn) => turn.pending);
-  function streamingLabelFor(turn: Turn) {
-    const activeToolLabel = turn.activeTool
-      ? t(`assistantTools.${turn.activeTool.name}`, { defaultValue: turn.activeTool.name })
-      : null;
-    const finishedToolLabel = turn.toolExecutionName
-      ? t(`assistantTools.${turn.toolExecutionName}`, { defaultValue: turn.toolExecutionName })
-      : null;
-    return activeToolLabel
-      ? t("assistant.usingTool", { tool: activeToolLabel })
-      : turn.turnLimitNoticed
-        ? t("assistant.turnLimitSummarizing")
-        : turn.toolExecutionStatus === "failed"
-        ? t("assistant.toolFailedContinuing", { tool: finishedToolLabel })
-        : turn.toolExecutionStatus === "canceled"
-          ? t("assistant.toolCanceled", { tool: finishedToolLabel })
-          : turn.answer
-            ? t("assistant.answering")
-            : (turn.toolRuns?.length ?? 0) > 0 || turn.tools.length
-              ? t("assistant.organizing")
-              : t("assistant.thinkingStatus");
-  }
-  const streamingLabel = pendingTurn ? streamingLabelFor(pendingTurn) : "";
+  const streamingLabel = pendingTurn ? streamingLabelFor(pendingTurn, t) : "";
   const setThemePref = useTheme((state) => state.setPref);
   const pendingInlineAsk = useInlineAsk((state) => state.pending);
   const clearInlineAsk = useInlineAsk((state) => state.clear);
@@ -584,7 +376,7 @@ export function AssistantPanel({
   }
   const resolvedContext = scopedContext(resolvedScope);
   const scopeLabel = contextLabel(resolvedContext, t);
-  const scopeOptions: { value: ScopeChoice; label: string; enabled: boolean }[] = [
+  const scopeOptions: ScopeOption[] = [
     { value: "auto", label: t("assistant.scopeAuto"), enabled: true },
     {
       value: "video",
@@ -599,46 +391,6 @@ export function AssistantPanel({
     { value: "all", label: t("assistant.scopeAllCourses"), enabled: true },
   ];
 
-  const closeScopeMenu = useCallback((restoreFocus = true) => {
-    setScopeMenuOpen(false);
-    if (restoreFocus) {
-      requestAnimationFrame(() => scopeTriggerRef.current?.focus());
-    }
-  }, []);
-
-  const handleScopeMenuKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      const items = scopeItemRefs.current.filter(
-        (item): item is HTMLButtonElement => !!item && !item.disabled,
-      );
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        closeScopeMenu();
-        return;
-      }
-      if (event.key === "Tab") {
-        closeScopeMenu(false);
-        return;
-      }
-      if (!items.length) return;
-      const current = items.indexOf(document.activeElement as HTMLButtonElement);
-      let next: number | null = null;
-      if (event.key === "ArrowDown" || event.key === "ArrowRight") {
-        next = current < 0 ? 0 : (current + 1) % items.length;
-      } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
-        next = current <= 0 ? items.length - 1 : current - 1;
-      } else if (event.key === "Home") {
-        next = 0;
-      } else if (event.key === "End") {
-        next = items.length - 1;
-      }
-      if (next == null) return;
-      event.preventDefault();
-      items[next]?.focus();
-    },
-    [closeScopeMenu],
-  );
   const actionExecutionBusy = actionExecutionCount > 0;
   const conversationMutationBusy = deletingConversationId !== null;
   const generationStatus = stopping ? t("assistant.stopping") : streamingLabel;
@@ -997,7 +749,7 @@ export function AssistantPanel({
     if (open || !focusLauncherAfterCloseRef.current) return;
     focusLauncherAfterCloseRef.current = false;
     requestAnimationFrame(() => launcherRef.current?.focus());
-  }, [open]);
+  }, [open, focusLauncherAfterCloseRef]);
 
   // 展开即视为「已读」，清掉球上的完成点。
   useEffect(() => {
@@ -1005,27 +757,18 @@ export function AssistantPanel({
   }, [open]);
 
   // 范围菜单：点菜单外任意处收起。
+
+  // 头部「⋯」菜单：点菜单外任意处收起。
   useEffect(() => {
-    if (!scopeMenuOpen) return;
-    const frame = requestAnimationFrame(() => {
-      const enabled = scopeItemRefs.current.filter(
-        (item): item is HTMLButtonElement => !!item && !item.disabled,
-      );
-      const selectedIndex = enabled.findIndex(
-        (item) => item.getAttribute("aria-checked") === "true",
-      );
-      (enabled[selectedIndex >= 0 ? selectedIndex : 0] ?? enabled[0])?.focus();
-    });
+    if (!headerMenuOpen) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (scopeMenuRef.current?.contains(event.target as Node)) return;
-      closeScopeMenu(false);
+      if (headerMenuRef.current?.contains(event.target as Node)) return;
+      if (headerMenuTriggerRef.current?.contains(event.target as Node)) return;
+      setHeaderMenuOpen(false);
     };
     document.addEventListener("pointerdown", onPointerDown);
-    return () => {
-      cancelAnimationFrame(frame);
-      document.removeEventListener("pointerdown", onPointerDown);
-    };
-  }, [closeScopeMenu, scopeMenuOpen]);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [headerMenuOpen]);
 
   useEffect(() => {
     if (!open || !mobile) return;
@@ -1033,31 +776,12 @@ export function AssistantPanel({
     return () => cancelAnimationFrame(frame);
   }, [open, mobile]);
 
-  useEffect(() => {
-    if (mobile) return;
-
-    const keepInsideViewport = () => {
-      const panel = measurePanel();
-      const viewport = viewportSize();
-      setPosition((current) => ({
-        x: clamp(current.x, VIEWPORT_GAP, viewport.width - panel.width - VIEWPORT_GAP),
-        y: clamp(current.y, VIEWPORT_GAP, viewport.height - panel.height - VIEWPORT_GAP),
-      }));
-      setDockTop((current) =>
-        clamp(current, VIEWPORT_GAP, viewport.height - LAUNCHER_SIZE - VIEWPORT_GAP),
-      );
-    };
-
-    window.addEventListener("resize", keepInsideViewport);
-    return () => window.removeEventListener("resize", keepInsideViewport);
-  }, [mobile]);
 
   useEffect(() => {
     mountedRef.current = true;
     const locallyStoppedRequests = locallyStoppedRequestsRef.current;
     return () => {
       mountedRef.current = false;
-      dragCleanupRef.current?.();
       if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
       if (saveToNotesTimerRef.current != null) window.clearTimeout(saveToNotesTimerRef.current);
       clearScheduledPersistence();
@@ -1071,469 +795,6 @@ export function AssistantPanel({
       }
     };
   }, [clearScheduledPersistence, persistConversationSnapshot]);
-
-  function measurePanel() {
-    const fallback = fallbackPanelSize();
-    const rect = panelRef.current?.getBoundingClientRect();
-    return {
-      width: rect?.width || fallback.width,
-      height: rect?.height || fallback.height,
-    };
-  }
-
-  function positionAtSide(nextSide: DockSide, y: number) {
-    const viewport = viewportSize();
-    const panel = measurePanel();
-    return {
-      x:
-        nextSide === "left"
-          ? VIEWPORT_GAP
-          : viewport.width - panel.width - VIEWPORT_GAP,
-      y: clamp(y, VIEWPORT_GAP, viewport.height - panel.height - VIEWPORT_GAP),
-    };
-  }
-
-  function movePanelToSide(nextSide: DockSide) {
-    dock(nextSide);
-    setPosition((current) => positionAtSide(nextSide, current.y));
-  }
-
-  function dockToStrip(nextSide: DockSide, y: number, focusLauncher = false) {
-    const { height } = viewportSize();
-    const panel = measurePanel();
-    const centeredTop = y + panel.height / 2 - LAUNCHER_SIZE / 2;
-    setDockTop(
-      clamp(centeredTop, VIEWPORT_GAP, height - LAUNCHER_SIZE - VIEWPORT_GAP),
-    );
-    dock(nextSide);
-    focusLauncherAfterCloseRef.current = focusLauncher;
-    setOpen(false);
-  }
-
-  function openFromDock() {
-    const panel = measurePanel();
-    const centeredTop = dockTop + LAUNCHER_SIZE / 2 - panel.height / 2;
-    setPosition(positionAtSide(side, centeredTop));
-    setOpen(true);
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }
-
-  function collapseToNearestSide(focusLauncher = false) {
-    const panel = measurePanel();
-    const nearestSide: DockSide =
-      position.x + panel.width / 2 < viewportSize().width / 2 ? "left" : "right";
-    dockToStrip(nearestSide, position.y, focusLauncher);
-  }
-
-  function enterDockMode() {
-    setMode("docked");
-    setOpen(true);
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }
-
-  function exitDockMode() {
-    setMode("float");
-    collapseToNearestSide(true);
-  }
-
-  function updateDrag(clientX: number, clientY: number) {
-    const session = dragRef.current;
-    if (!session) return null;
-
-    if (!session.moved) {
-      const distance = Math.hypot(clientX - session.startX, clientY - session.startY);
-      if (distance < DRAG_START_DISTANCE) return session;
-      session.moved = true;
-    }
-
-    const viewport = viewportSize();
-    const rawX = clientX - session.offsetX;
-    const rawY = clientY - session.offsetY;
-
-    if (session.source === "dock") {
-      // 球跟着指针走，松手时贴回最近的一边。
-      //
-      // 这里原先还有一档「向内拖过 16px 就展开成面板」。挪个位置和打开面板是两件事，
-      // 揉进同一个手势的结果是：想把球往下挪一点，整块面板弹了出来——16px 的门槛低到
-      // 任何一次真实拖动都会顺手越过。开面板交给点击就够了。
-      const x = clamp(
-        rawX,
-        LAUNCHER_MARGIN,
-        viewport.width - session.width - LAUNCHER_MARGIN,
-      );
-      const y = clamp(
-        rawY,
-        VIEWPORT_GAP,
-        viewport.height - session.height - VIEWPORT_GAP,
-      );
-      session.position = { x, y };
-      session.snapSide = x + session.width / 2 < viewport.width / 2 ? "left" : "right";
-      setLauncherPosition(session.position);
-      return session;
-    }
-
-    const nearLeft = rawX <= EDGE_SNAP_DISTANCE;
-    const nearRight =
-      rawX + session.width >= viewport.width - EDGE_SNAP_DISTANCE;
-    const nextSnapSide: DockSide | null =
-      nearLeft && nearRight
-        ? clientX < viewport.width / 2
-          ? "left"
-          : "right"
-        : nearLeft
-          ? "left"
-          : nearRight
-            ? "right"
-            : null;
-
-    session.position = {
-      x:
-        nextSnapSide === "left"
-          ? 0
-          : nextSnapSide === "right"
-            ? viewport.width - session.width
-            : clamp(rawX, VIEWPORT_GAP, viewport.width - session.width - VIEWPORT_GAP),
-      y: clamp(rawY, VIEWPORT_GAP, viewport.height - session.height - VIEWPORT_GAP),
-    };
-    session.snapSide = nextSnapSide;
-    setPosition(session.position);
-    setSnapSide(nextSnapSide);
-    return session;
-  }
-
-  function trackDrag(event: ReactPointerEvent<HTMLButtonElement>, session: DragSession) {
-    if (mobile || (event.pointerType === "mouse" && event.button !== 0)) return;
-
-    dragCleanupRef.current?.();
-    const handle = event.currentTarget;
-    dragRef.current = session;
-    setDragging(session.source === "panel");
-    setSnapSide(null);
-
-    try {
-      handle.setPointerCapture(event.pointerId);
-    } catch {
-      // WebView / jsdom 可能没有指针捕获；window 监听仍能保证拖出标题栏后继续移动。
-    }
-
-    const removeListeners = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onCancel);
-      try {
-        if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
-      } catch {
-        // 与 setPointerCapture 相同，缺少该 API 时无需额外处理。
-      }
-      if (dragCleanupRef.current === removeListeners) dragCleanupRef.current = null;
-    };
-
-    const finish = (pointerEvent: PointerEvent, cancelled: boolean) => {
-      const session = dragRef.current;
-      if (!session || pointerEvent.pointerId !== session.pointerId) return;
-      const completed = cancelled ? session : updateDrag(pointerEvent.clientX, pointerEvent.clientY);
-      removeListeners();
-      dragRef.current = null;
-      setDragging(false);
-      setSnapSide(null);
-
-      if (completed?.source === "dock") {
-        setLauncherPosition(null);
-        if (!completed.moved) return;
-        // 拖完浏览器还会补一个 click，得把它吃掉。
-        //
-        // 原来是置位后用 setTimeout(0) 复位，指望「click 比定时器先到」。真实浏览器里
-        // pointerup 与 click 之间隔着一次事件循环，定时器完全可能插在中间先跑——
-        // 于是标志被提前清掉，那一下拖动结束就顺手把面板打开了。
-        // 测试没抓到是因为它把 pointerUp 和 click 排在同一个同步块里，定时器根本没机会跑。
-        //
-        // 改成由 click 自己消费；万一这次没有 click（比如松手时指针已经离开按钮），
-        // 下一次 pointerdown 会清掉它，不会误伤后面那次真正的点击。
-        suppressLauncherClickRef.current = true;
-        // 取消（指针被系统收走）就当这次拖动没发生过：球回到原来贴边的位置。
-        if (cancelled) return;
-        setDockTop(completed.position.y);
-        if (completed.snapSide) dock(completed.snapSide);
-        return;
-      }
-
-      if (!cancelled && completed?.moved && completed.snapSide) {
-        dockToStrip(completed.snapSide, completed.position.y);
-      }
-    };
-
-    function onMove(pointerEvent: PointerEvent) {
-      if (pointerEvent.pointerId !== dragRef.current?.pointerId) return;
-      pointerEvent.preventDefault();
-      updateDrag(pointerEvent.clientX, pointerEvent.clientY);
-    }
-
-    function onUp(pointerEvent: PointerEvent) {
-      finish(pointerEvent, false);
-    }
-
-    function onCancel(pointerEvent: PointerEvent) {
-      finish(pointerEvent, true);
-    }
-
-    window.addEventListener("pointermove", onMove, { passive: false });
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onCancel);
-    dragCleanupRef.current = removeListeners;
-  }
-
-  function beginPanelDrag(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (mobile || (event.pointerType === "mouse" && event.button !== 0)) return;
-
-    const panel = measurePanel();
-    const rect = panelRef.current?.getBoundingClientRect();
-    const panelLeft = rect?.width ? rect.left : position.x;
-    const panelTop = rect?.height ? rect.top : position.y;
-    trackDrag(event, {
-      source: "panel",
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      offsetX: event.clientX - panelLeft,
-      offsetY: event.clientY - panelTop,
-      width: panel.width,
-      height: panel.height,
-      moved: false,
-      position,
-      snapSide: null,
-    });
-  }
-
-  function beginDockDrag(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (mobile || (event.pointerType === "mouse" && event.button !== 0)) return;
-    // 上一次拖动如果没等到 click（松手时指针已经不在球上），标志会留着。
-    // 每次按下先清一次，保证它只压制紧随其后的那一下。
-    suppressLauncherClickRef.current = false;
-
-    // 按球自己的盒子算偏移量，指针才会稳稳停在按下时的那一点上。
-    const viewport = viewportSize();
-    const rect = event.currentTarget.getBoundingClientRect();
-    const ball = {
-      x: rect.width
-        ? rect.left
-        : side === "left"
-          ? LAUNCHER_MARGIN
-          : viewport.width - LAUNCHER_SIZE - LAUNCHER_MARGIN,
-      y: rect.height ? rect.top : dockTop,
-    };
-    trackDrag(event, {
-      source: "dock",
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      offsetX: event.clientX - ball.x,
-      offsetY: event.clientY - ball.y,
-      width: LAUNCHER_SIZE,
-      height: LAUNCHER_SIZE,
-      moved: false,
-      position: ball,
-      snapSide: side,
-    });
-  }
-
-  /**
-   * 拉宽/收窄面板。
-   *
-   * 固定 360px 对一段带列表和公式的长回答太窄了——每行放不下十几个字，一条列表项要折三行。
-   * 抓手放在朝向屏幕内侧的那条边（停在右边就抓左边框），拖的时候贴边的那一侧不动：
-   * 面板向内长出来，而不是整块跟着手跑出屏幕。
-   */
-  function beginResize(event: ReactPointerEvent<HTMLDivElement>) {
-    if (mobile || (event.pointerType === "mouse" && event.button !== 0)) return;
-    event.preventDefault();
-    dragCleanupRef.current?.();
-
-    const handle = event.currentTarget;
-    const { pointerId } = event;
-    const fromLeftEdge = side === "right";
-    const startX = event.clientX;
-    const startWidth = measurePanel().width;
-    // 不动的那条边。左边框拖动时右边固定，反之亦然。
-    // 浮动面板按 position（渲染真实值）；停靠侧栏时贴边渲染、position 是旧值，
-    // 改按实测矩形，jsdom 里矩形为 0 时退到贴边位置（右 0 → viewport.width，左 0 → 0）。
-    let anchor: number;
-    if (docked) {
-      const rect = panelRef.current?.getBoundingClientRect();
-      const viewport = viewportSize();
-      const panelLeft = rect?.width ? rect.left : side === "left" ? 0 : viewport.width - startWidth;
-      const panelRight = rect?.width ? rect.right : panelLeft + startWidth;
-      anchor = fromLeftEdge ? panelRight : panelLeft;
-    } else {
-      anchor = fromLeftEdge ? position.x + startWidth : position.x;
-    }
-
-    try {
-      handle.setPointerCapture(pointerId);
-    } catch {
-      // 与拖动一样：没有指针捕获时靠 window 监听也能跟到底。
-    }
-
-    const widthAt = (clientX: number) => {
-      const viewport = viewportSize();
-      const room = fromLeftEdge ? anchor - VIEWPORT_GAP : viewport.width - anchor - VIEWPORT_GAP;
-      const dragged = fromLeftEdge ? startX - clientX : clientX - startX;
-      const wanted = clampPanelWidth(startWidth + dragged);
-      // 视口比偏好上限还窄时，宽度让位给视口，但不缩到读不了。
-      return Math.min(wanted, Math.max(MIN_PANEL_WIDTH, room));
-    };
-
-    const apply = (clientX: number) => {
-      const next = widthAt(clientX);
-      setResizeWidth(next);
-      if (fromLeftEdge) setPosition((current) => ({ ...current, x: anchor - next }));
-      return next;
-    };
-
-    const removeListeners = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onCancel);
-      try {
-        if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
-      } catch {
-        // 同上，缺少该 API 时无需额外处理。
-      }
-      if (dragCleanupRef.current === removeListeners) dragCleanupRef.current = null;
-    };
-
-    function onMove(pointerEvent: PointerEvent) {
-      if (pointerEvent.pointerId !== pointerId) return;
-      pointerEvent.preventDefault();
-      apply(pointerEvent.clientX);
-    }
-
-    function onUp(pointerEvent: PointerEvent) {
-      if (pointerEvent.pointerId !== pointerId) return;
-      setWidth(apply(pointerEvent.clientX));
-      setResizeWidth(null);
-      removeListeners();
-    }
-
-    function onCancel(pointerEvent: PointerEvent) {
-      if (pointerEvent.pointerId !== pointerId) return;
-      // 指针被系统收走就当这次没拖过：回到偏好里存着的宽度。
-      setResizeWidth(null);
-      if (fromLeftEdge) setPosition((current) => ({ ...current, x: anchor - startWidth }));
-      removeListeners();
-    }
-
-    window.addEventListener("pointermove", onMove, { passive: false });
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onCancel);
-    dragCleanupRef.current = removeListeners;
-  }
-
-  function resizeWithKeyboard(event: KeyboardEvent<HTMLDivElement>) {
-    // 抓手在哪边，「往外拉」就是哪个方向：停在右边时抓的是左边框，向左即变宽。
-    const widen = side === "right" ? "ArrowLeft" : "ArrowRight";
-    const narrow = side === "right" ? "ArrowRight" : "ArrowLeft";
-    const delta =
-      event.key === widen
-        ? KEYBOARD_RESIZE_STEP
-        : event.key === narrow
-          ? -KEYBOARD_RESIZE_STEP
-          : 0;
-    if (!delta) return;
-    event.preventDefault();
-
-    const next = clampPanelWidth(width + delta);
-    setWidth(next);
-    if (side === "right") {
-      const viewport = viewportSize();
-      setPosition((current) => ({
-        ...current,
-        x: clamp(current.x + (width - next), VIEWPORT_GAP, viewport.width - next - VIEWPORT_GAP),
-      }));
-    }
-  }
-
-  function movePanelWithKeyboard(event: KeyboardEvent<HTMLButtonElement>) {
-    if (mobile) return;
-    if (event.key === "Home" || event.key === "End") {
-      event.preventDefault();
-      dockToStrip(event.key === "Home" ? "left" : "right", position.y, true);
-      return;
-    }
-
-    const step = event.shiftKey ? KEYBOARD_MOVE_STEP * 2 : KEYBOARD_MOVE_STEP;
-    const delta =
-      event.key === "ArrowLeft"
-        ? { x: -step, y: 0 }
-        : event.key === "ArrowRight"
-          ? { x: step, y: 0 }
-          : event.key === "ArrowUp"
-            ? { x: 0, y: -step }
-            : event.key === "ArrowDown"
-              ? { x: 0, y: step }
-              : null;
-    if (!delta) return;
-    event.preventDefault();
-
-    const viewport = viewportSize();
-    const panel = measurePanel();
-    const next = {
-      x: clamp(
-        position.x + delta.x,
-        VIEWPORT_GAP,
-        viewport.width - panel.width - VIEWPORT_GAP,
-      ),
-      y: clamp(
-        position.y + delta.y,
-        VIEWPORT_GAP,
-        viewport.height - panel.height - VIEWPORT_GAP,
-      ),
-    };
-    if (event.key === "ArrowLeft" && next.x === VIEWPORT_GAP) {
-      dockToStrip("left", next.y, true);
-    } else if (
-      event.key === "ArrowRight" &&
-      next.x === viewport.width - panel.width - VIEWPORT_GAP
-    ) {
-      dockToStrip("right", next.y, true);
-    } else {
-      setPosition(next);
-    }
-  }
-
-  // 移动抽屉的下滑关闭：从抓手往下拖，越过阈值就收起。只用 pointer capture，
-  // 不必像桌面面板那样挂 window 监听——这里是垂直单方向，手势要简单可靠。
-  const SHEET_CLOSE_THRESHOLD = 120;
-  function beginSheetCloseDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!mobile || (event.pointerType === "mouse" && event.button !== 0)) return;
-    const handle = event.currentTarget;
-    try {
-      handle.setPointerCapture(event.pointerId);
-    } catch {
-      // 缺少 pointer capture 时手势不可靠，直接放弃。
-    }
-    const startY = event.clientY;
-    const onMove = (moveEvent: PointerEvent) => {
-      setSheetDragY(Math.max(0, moveEvent.clientY - startY));
-    };
-    const onEnd = (endEvent: PointerEvent) => {
-      const dy = endEvent.clientY - startY;
-      setSheetDragY(null);
-      handle.removeEventListener("pointermove", onMove);
-      handle.removeEventListener("pointerup", onEnd);
-      handle.removeEventListener("pointercancel", onEnd);
-      try {
-        if (handle.hasPointerCapture(endEvent.pointerId)) {
-          handle.releasePointerCapture(endEvent.pointerId);
-        }
-      } catch {
-        // 同上。
-      }
-      if (dy > SHEET_CLOSE_THRESHOLD) collapseToNearestSide(true);
-    };
-    handle.addEventListener("pointermove", onMove);
-    handle.addEventListener("pointerup", onEnd);
-    handle.addEventListener("pointercancel", onEnd);
-  }
 
   async function send(suggestedQuestion?: string, rememberQuestion = true) {
     const question = (suggestedQuestion ?? input).trim();
@@ -2125,7 +1386,6 @@ export function AssistantPanel({
       ? "calc(env(safe-area-inset-bottom, 0px) + 88px)"
       : "calc(env(safe-area-inset-bottom, 0px) + 24px)";
   // 桌面端「停靠为侧栏」：贴边全高、内容让位，不再盖在阅读物上。
-  const docked = !mobile && mode === "docked";
   const panelShown = docked || open;
   const shell = mobile
     ? "fixed inset-x-0 z-[47] h-[70dvh] max-h-[calc(100dvh-56px)] rounded-t-2xl border-t"
@@ -2225,8 +1485,10 @@ export function AssistantPanel({
         if (event.key !== "Escape") return;
         event.preventDefault();
         event.stopPropagation();
-        if (scopeMenuOpen) {
-          closeScopeMenu();
+        // 范围菜单的 Escape 由 AssistantComposer 自行处理并拦截。
+        if (headerMenuOpen) {
+          setHeaderMenuOpen(false);
+          requestAnimationFrame(() => headerMenuTriggerRef.current?.focus());
           return;
         }
         if (historyOpen) {
@@ -2279,7 +1541,7 @@ export function AssistantPanel({
           onKeyDown={resizeWithKeyboard}
           className={`absolute inset-y-3 z-10 w-2 cursor-col-resize touch-none rounded-full bg-[var(--border-subtle)] transition-colors hover:bg-[var(--accent)] focus-visible:outline-none focus-visible:bg-[var(--focus-ring)] motion-reduce:transition-none ${
             side === "right" ? "left-0" : "right-0"
-          } ${resizeWidth === null ? "" : "bg-[var(--accent)]"}`}
+          } ${panelWidth !== width ? "bg-[var(--accent)]" : ""}`}
         />
       )}
       <header className="flex items-center gap-1 border-b border-[var(--border-subtle)] px-3 py-2">
@@ -2371,33 +1633,67 @@ export function AssistantPanel({
             <MessageSquarePlus className="h-4 w-4" />
           </Button>
         )}
-        {/* 手机端没有左右可停靠的空间，只有桌面端给这个按钮；停靠成侧栏后位置固定，也无需左右切换。 */}
-        {!mobile && !docked && (
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label={side === "left" ? t("assistant.dockRight") : t("assistant.dockLeft")}
-            onClick={() => movePanelToSide(side === "left" ? "right" : "left")}
-          >
-            {side === "left" ? (
-              <ChevronRight className="h-4 w-4" />
-            ) : (
-              <ChevronLeft className="h-4 w-4" />
-            )}
-          </Button>
-        )}
-        {/* 桌面端「停靠为侧栏 / 恢复浮动」。 */}
+        {/* 换边、停靠切换是一辈子用不了几次的一次性设置，收进「⋯」；
+            常驻按钮只留高频的：历史、新会话、关闭。 */}
         {!mobile && (
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label={docked ? t("assistant.undock") : t("assistant.dockAsSidebar")}
-            title={docked ? t("assistant.undock") : t("assistant.dockAsSidebar")}
-            onClick={docked ? exitDockMode : enterDockMode}
-            className="ca-touch-44"
+          <div
+            ref={headerMenuRef}
+            className="relative"
           >
-            {docked ? <Move className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}
-          </Button>
+            <Button
+              ref={headerMenuTriggerRef}
+              size="icon"
+              variant="ghost"
+              aria-label={t("assistant.headerMenu")}
+              aria-haspopup="menu"
+              aria-expanded={headerMenuOpen}
+              title={t("assistant.headerMenu")}
+              onClick={() => setHeaderMenuOpen((value) => !value)}
+              className="ca-touch-44"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+            {headerMenuOpen && (
+              <Menu
+                aria-label={t("assistant.headerMenu")}
+                onClose={() => {
+                  setHeaderMenuOpen(false);
+                  requestAnimationFrame(() => headerMenuTriggerRef.current?.focus());
+                }}
+                className="absolute right-0 top-full z-30 mt-1"
+              >
+                {!docked && (
+                  <MenuItem
+                    className="flex items-center gap-2"
+                    onClick={() => {
+                      movePanelToSide(side === "left" ? "right" : "left");
+                      setHeaderMenuOpen(false);
+                      requestAnimationFrame(() => headerMenuTriggerRef.current?.focus());
+                    }}
+                  >
+                    {side === "left" ? (
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    )}
+                    {side === "left" ? t("assistant.dockRight") : t("assistant.dockLeft")}
+                  </MenuItem>
+                )}
+                <MenuItem
+                  className="flex items-center gap-2"
+                  onClick={() => {
+                    if (docked) exitDockMode();
+                    else enterDockMode();
+                    setHeaderMenuOpen(false);
+                    requestAnimationFrame(() => headerMenuTriggerRef.current?.focus());
+                  }}
+                >
+                  {docked ? <Move className="h-3.5 w-3.5" /> : <PanelLeft className="h-3.5 w-3.5" />}
+                  {docked ? t("assistant.undock") : t("assistant.dockAsSidebar")}
+                </MenuItem>
+              </Menu>
+            )}
+          </div>
         )}
         <Button
           size="icon"
@@ -2413,174 +1709,31 @@ export function AssistantPanel({
 
       <div className="relative flex min-h-0 flex-1 flex-col">
       {historyOpen ? (
-        <section
-          id="assistant-conversation-history"
-          aria-labelledby="assistant-conversation-history-title"
-          className="flex min-h-0 flex-1 flex-col"
-        >
-          <div className="border-b border-[var(--border-subtle)] px-3 py-2.5">
-            <h2
-              id="assistant-conversation-history-title"
-              className="text-sm font-medium text-[var(--text-strong)]"
-            >
-              {t("assistant.conversationHistory")}
-            </h2>
-          </div>
-          {error && (
-            <div
-              role="alert"
-              className="m-3 mb-1 flex items-start gap-1.5 rounded-lg bg-[var(--status-err-bg)] px-2.5 py-2 text-xs text-[var(--status-err)]"
-            >
-              <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" aria-hidden="true" />
-              <span>{error}</span>
-            </div>
-          )}
-          {conversationState.conversations.length > 0 ? (
-            <div
-              role="list"
-              aria-label={t("assistant.conversationList")}
-              className="min-h-0 flex-1 overflow-y-auto"
-            >
-              {conversationState.conversations.map((conversation) => {
-                const current = conversation.id === conversationState.activeId;
-                const updatedAt = formatConversationTime(
-                  conversation.updatedAt,
-                  i18n.resolvedLanguage ?? i18n.language,
-                );
-                const conversationTitle =
-                  conversation.title || t("assistant.untitledConversation");
-                return (
-                  <div
-                    key={conversation.id}
-                    role="listitem"
-                    className="flex items-center border-b border-[var(--border-subtle)]"
-                  >
-                    {renamingId === conversation.id ? (
-                      <div className="flex min-h-[52px] min-w-0 flex-1 items-center gap-2 px-3 py-2">
-                        <input
-                          autoFocus
-                          value={renameDraft}
-                          onChange={(event) => setRenameDraft(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" && !event.nativeEvent.isComposing) {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              submitConversationRename(conversation.id);
-                            } else if (event.key === "Escape") {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              cancelConversationRename(conversation.id);
-                            }
-                          }}
-                          aria-label={t("assistant.renameConversationLabel")}
-                          className="min-w-0 flex-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 text-sm text-[var(--text-strong)] outline-none focus-visible:border-[var(--focus-ring)]"
-                        />
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          aria-label={t("assistant.renameSaveTarget", {
-                            title: renameDraft.trim() || conversationTitle,
-                          })}
-                          disabled={conversationMutationBusy}
-                          onClick={() => submitConversationRename(conversation.id)}
-                          className="ca-touch-44 h-8 w-8"
-                        >
-                          <Check className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <button
-                        ref={(node) => {
-                          if (node) conversationButtonRefs.current.set(conversation.id, node);
-                          else conversationButtonRefs.current.delete(conversation.id);
-                        }}
-                        type="button"
-                        aria-current={current ? "true" : undefined}
-                        disabled={busy || actionExecutionBusy || conversationMutationBusy}
-                        onClick={() => switchConversation(conversation.id)}
-                        className="ca-touch-44 flex min-h-[52px] min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface-card-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm text-[var(--text-strong)]">
-                            {conversationTitle}
-                          </span>
-                          {updatedAt && (
-                            <time
-                              dateTime={new Date(conversation.updatedAt).toISOString()}
-                              className="mt-0.5 block text-[11px] text-[var(--text-faint)]"
-                            >
-                              {updatedAt}
-                            </time>
-                          )}
-                        </span>
-                        {current && (
-                          <span className="flex flex-none items-center gap-1 text-[11px] text-[var(--accent-text)]">
-                            <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                            {t("assistant.currentConversation")}
-                          </span>
-                        )}
-                      </button>
-                    )}
-                    {renamingId !== conversation.id && (
-                      <button
-                        ref={(node) => {
-                          if (node) renameButtonRefs.current.set(conversation.id, node);
-                          else renameButtonRefs.current.delete(conversation.id);
-                        }}
-                        type="button"
-                        aria-label={t("assistant.renameConversationTarget", {
-                          title: conversationTitle,
-                        })}
-                        title={t("assistant.renameConversationTarget", {
-                          title: conversationTitle,
-                        })}
-                        disabled={busy || actionExecutionBusy || conversationMutationBusy}
-                        onClick={() => {
-                          setError("");
-                          setStatusAnnouncement("");
-                          setRenamingId(conversation.id);
-                          setRenameDraft(conversation.title);
-                        }}
-                        className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-md text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
-                      >
-                        <PenLine className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    <button
-                      ref={(node) => {
-                        if (node) deleteButtonRefs.current.set(conversation.id, node);
-                        else deleteButtonRefs.current.delete(conversation.id);
-                      }}
-                      type="button"
-                      aria-label={t("assistant.deleteConversationTarget", {
-                        title: conversationTitle,
-                      })}
-                      title={t("assistant.deleteConversationTarget", {
-                        title: conversationTitle,
-                      })}
-                      disabled={busy || actionExecutionBusy || conversationMutationBusy}
-                      onClick={() => void removeConversation(conversation.id)}
-                      className="ca-touch-44 grid h-8 w-8 flex-none place-items-center rounded-md text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {deletingConversationId === conversation.id ? (
-                        <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                      ) : (
-                        <Trash2 className="h-3.5 w-3.5" />
-                      )}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="px-3 py-6 text-center text-xs text-[var(--text-faint)]">
-              {t("assistant.emptyConversationHistory")}
-            </p>
-          )}
-          <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-            {statusAnnouncement}
-          </div>
-        </section>
+        <ConversationHistory
+          conversations={conversationState}
+          error={error}
+          statusAnnouncement={statusAnnouncement}
+          busy={busy}
+          actionExecutionBusy={actionExecutionBusy}
+          conversationMutationBusy={conversationMutationBusy}
+          renamingId={renamingId}
+          renameDraft={renameDraft}
+          deletingConversationId={deletingConversationId}
+          conversationButtonRefs={conversationButtonRefs}
+          renameButtonRefs={renameButtonRefs}
+          deleteButtonRefs={deleteButtonRefs}
+          onSwitch={switchConversation}
+          onStartRename={(id, title) => {
+            setError("");
+            setStatusAnnouncement("");
+            setRenamingId(id);
+            setRenameDraft(title);
+          }}
+          onRenameDraftChange={setRenameDraft}
+          onSubmitRename={submitConversationRename}
+          onCancelRename={cancelConversationRename}
+          onRemove={(id) => void removeConversation(id)}
+        />
       ) : (
       <>
       <div
@@ -2599,28 +1752,12 @@ export function AssistantPanel({
         className="flex-1 space-y-4 overflow-y-auto px-3 py-3"
       >
         {turns.length === 0 && !busy && !error && (
-          <div className="flex min-h-full flex-col justify-center gap-4">
-            <div>
-              <p className="text-[15px] font-medium text-[var(--text-strong)]">{t("assistant.greeting")}</p>
-              <p className="mt-1 text-xs leading-relaxed text-[var(--text-faint)]">
-                {t("assistant.greetingHint", { scope: scopeLabel })}
-              </p>
-            </div>
-            <div className="grid w-full gap-2">
-              {suggestionsFor(resolvedContext, t).map((suggestion) => (
-                <button
-                  key={suggestion.prompt}
-                  type="button"
-                  disabled={actionExecutionBusy}
-                  onClick={() => void send(suggestion.prompt)}
-                  className="ca-touch-44 flex w-full items-center justify-between gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2.5 text-left text-sm text-[var(--text-normal)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
-                >
-                  <span>{suggestion.label}</span>
-                  <ArrowUpRight className="h-3.5 w-3.5 flex-none text-[var(--text-faint)]" />
-                </button>
-              ))}
-            </div>
-          </div>
+          <AssistantEmptyState
+            scopeLabel={scopeLabel}
+            context={resolvedContext}
+            actionExecutionBusy={actionExecutionBusy}
+            onSend={(prompt) => void send(prompt)}
+          />
         )}
         {hiddenTurnCount > 0 && (
           <p className="text-center text-[11px] text-[var(--text-faint)]">
@@ -2628,257 +1765,34 @@ export function AssistantPanel({
           </p>
         )}
         {turns.map((turn) => (
-          <div key={turn.id} className="space-y-2">
-            {/* 自己说的话靠右、带底色；助手的靠左。一眼能分清谁说的，
-                比让两边都是同一坨灰字强得多。 */}
-            <div className="flex justify-end">
-              <p
-                data-testid="user-bubble"
-                className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-[var(--accent-weak)] px-3 py-1.5 text-sm text-[var(--accent-text)]"
-              >
-                {turn.question}
-              </p>
-            </div>
-
-            {/* 提问后、第一个工具/正文到达前，助手槽位是空的。给一个内联「正在思考」，
-                别让用户对着自己刚发的话干等。纯视觉：读屏状态由底部 live region 统一播报，
-                这里不加 role，避免多出一个 status 抢播。
-                只对唯一 pending 的回合显示：曾出现过同问题产生两个 pending 回合、界面
-                同时显示两条「整理结果」的情况（其中一条永远卡住）。收敛到 pendingTurn（第一个
-                pending）后，无论数据层有几个，界面始终只有一条状态，不会重复。 */}
-            {turn.pending &&
-              !turn.answer &&
-              turn.id === pendingTurn?.id && (
-                <div aria-hidden="true" className="flex items-center gap-2 text-xs text-[var(--text-faint)]">
-                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                  <span>{streamingLabelFor(turn)}</span>
-                </div>
-              )}
-
-            {/* 工具链摆在回答前面：它解释了这段回答是怎么来的，
-                也让「一轮里悄悄调了三次搜索」这种事看得见。 */}
-            <AssistantToolChips tools={turn.tools} toolRuns={turn.toolRuns} />
-
-            {/* 推理模型的思考。它比正文先到，所以不能塞在「有答案才渲染」的分支里——
-                那样恰好在最想看它的那段时间（还没开始作答）什么都不显示。
-                默认折叠：它是过程不是结论，摊开会把真正的回答挤下去。 */}
-            {turn.reasoning && (
-              <details className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card-hover)] px-2.5 py-1.5">
-                <summary className="cursor-pointer select-none rounded text-xs text-[var(--text-faint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
-                  {turn.pending ? (
-                    <span className="inline-flex items-center gap-1.5">
-                      <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden="true" />
-                      {t("assistant.thinking")}
-                    </span>
-                  ) : (
-                    t("assistant.thinking")
-                  )}
-                </summary>
-                <div className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-muted)]">
-                  {turn.reasoning}
-                </div>
-              </details>
-            )}
-
-            {turn.answer && (
-              /* 回答不套气泡，整幅铺开。
-                 气泡是给一两行的短句用的；回答是长文——带列表、公式、代码。在一块本来就窄的
-                 面板里，边框加左右内边距再加 8% 的留白，等于每行少掉四五个字，一条列表项要多折
-                 一行。成熟的助手都是这么分的：你说的话进气泡，它答的话铺满。左右不对称本身
-                 已经把「谁在说」讲清楚了。 */
-              <div className="group">
-                {/* 回答天然带 Markdown（列表、加粗、公式），当纯文本铺出来满屏 ** 和 -，
-                    比没有格式还难读。复用问答面板那套渲染器，顺带白拿了
-                    公式渲染和 [mm:ss] 可点击跳转。整段用 memo 包住，避免无关状态变化
-                    反复重解析已完成的回答。 */}
-                <MemoAnswer answer={turn.answer} turn={turn} onSeek={seekInTurn} />
-                {/* 每条回答底下常驻一排按钮，翻起来满屏都是灰图标。桌面端悬停或键盘聚焦才浮出来，
-                    但位置一直留着——不留的话鼠标一进来整段就往上跳。触屏没有悬停，一直显示。 */}
-                <div
-                  className={`-ml-1.5 mt-0.5 flex items-center gap-0.5 ${
-                    mobile
-                      ? "h-11"
-                      : "h-7 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none"
-                  }`}
-                >
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label={copiedTurnId === turn.id ? t("assistant.copiedLabel") : t("assistant.copyAnswer")}
-                    title={copiedTurnId === turn.id ? t("assistant.copiedLabel") : t("assistant.copyAnswer")}
-                    onClick={() => void copyAnswer(turn)}
-                    className="ca-touch-44 h-7 w-7 text-[var(--text-faint)]"
-                  >
-                    {copiedTurnId === turn.id ? (
-                      <Check className="h-3.5 w-3.5 text-[var(--status-ok)]" />
-                    ) : (
-                      <Copy className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
-                  {/* 有视频上下文时才能存进笔记：笔记是挂在视频上的。 */}
-                  {(turn.context?.video_id ?? context.video_id) && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label={
-                        savedToNotesTurnId === turn.id
-                          ? t("assistant.savedToNotes")
-                          : t("assistant.saveToNotes")
-                      }
-                      title={
-                        savedToNotesTurnId === turn.id
-                          ? t("assistant.savedToNotes")
-                          : t("assistant.saveToNotes")
-                      }
-                      onClick={() => void saveToNotes(turn)}
-                      className="ca-touch-44 h-7 w-7 text-[var(--text-faint)]"
-                    >
-                      {savedToNotesTurnId === turn.id ? (
-                        <Check className="h-3.5 w-3.5 text-[var(--status-ok)]" />
-                      ) : (
-                        <Save className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
-                  )}
-                  {/* 只给最后一轮。往回重生成会让它后面的问答全部失去依据——那已经是分支，
-                      不是重试了。 */}
-                  {turn.id === turns[turns.length - 1]?.id && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label={t("assistant.regenerate")}
-                      title={t("assistant.regenerate")}
-                      disabled={busy || actionExecutionBusy}
-                      onClick={() => regenerate(turn)}
-                      className="ca-touch-44 h-7 w-7 text-[var(--text-faint)]"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                </div>
-                {/* 这一轮实际花了多少，完成之后给一个不抢眼但可见的数字；
-                    端点没报用量就不显示——把「没报」当成零消耗是撒谎。 */}
-                {!turn.pending && turn.usage && (
-                  <p
-                    data-testid="turn-usage"
-                    className="mt-0.5 text-[10px] text-[var(--text-faint)]"
-                  >
-                    {t("assistant.usageTokens", {
-                      tokens: usageTokens(turn.usage).toLocaleString(),
-                    })}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* 这一轮没能好好结束时说清楚。
-                工具轮或上下文预算封顶且强制总结仍失败时，answer 里留的往往是它某一轮的过场话
-                （「我先查一下这门课有哪些视频」），甚至是空串。照原样铺出来，用户要么
-                把过场话当成最终答复，要么问完之后**什么都没有**——后者和程序坏了长得
-                一模一样，而它其实是查得太久被截断了，换个具体点的问法就能过去。
-                正文空着的时候顺带把重新回答放在这儿：那排悬停按钮挂在回答上，
-                恰恰是最需要重试的这种情况反而没有入口。 */}
-            {!turn.pending && (turn.hitTurnLimit || (!turn.answer && !turn.canceled)) && (
-              <div className="flex items-start gap-1.5 text-[11px] text-[var(--text-muted)]">
-                <AlertCircle className="mt-[0.2em] h-3 w-3 flex-none" aria-hidden="true" />
-                <span className="min-w-0 break-words">
-                  {turn.hitTurnLimit
-                    ? t("assistant.turnLimitFallback")
-                    : t("assistant.emptyAnswerFallback")}
-                </span>
-                {!turn.answer && turn.id === turns[turns.length - 1]?.id && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={busy || actionExecutionBusy}
-                    onClick={() => regenerate(turn)}
-                    className="-my-1 h-6 flex-none px-1.5 text-[11px]"
-                  >
-                    <RefreshCw className="mr-1 h-3 w-3" aria-hidden="true" />
-                    {t("assistant.regenerate")}
-                  </Button>
-                )}
-              </div>
-            )}
-
-            <AssistantActionList
-              actions={turn.actions}
-              onNavigate={(action) => navigateFromTurn(turn, action)}
-              onOutcome={(outcome) =>
-                commitActionOutcome(turn.id, outcome, conversationEpoch)
-              }
-              executionLocked={actionExecutionBusy}
-              onExecutionStart={(actions) =>
-                beginActionExecution(turn.id, actions, conversationEpoch)
-              }
-              onExecutionEnd={() => endActionExecution()}
+          <div key={turn.id} className="ca-msg-in space-y-2">
+            <AssistantTurn
+              turn={turn}
+              isLast={turn.id === turns[turns.length - 1]?.id}
+              isPendingTurn={turn.id === pendingTurn?.id}
+              mobile={mobile}
+              busy={busy}
+              actionExecutionBusy={actionExecutionBusy}
+              hasVideoContext={Boolean(turn.context?.video_id ?? context.video_id)}
+              copied={copiedTurnId === turn.id}
+              savedToNotes={savedToNotesTurnId === turn.id}
+              onCopy={(item) => void copyAnswer(item)}
+              onSaveToNotes={(item) => void saveToNotes(item)}
+              onRegenerate={regenerate}
+              onSeek={seekInTurn}
+              onNavigate={navigateFromTurn}
+              onOutcome={(id, outcome) => commitActionOutcome(id, outcome, conversationEpoch)}
+              onExecutionStart={(id, actions) => beginActionExecution(id, actions, conversationEpoch)}
+              onExecutionEnd={endActionExecution}
               onApplied={onActionApplied}
             />
-
-            {getAssistantInteractionState(turn).status === "expired" && (
-              <div className="flex items-start gap-1.5 text-[11px] text-[var(--status-warn)]">
-                <AlertCircle className="mt-[0.2em] h-3 w-3 flex-none" aria-hidden="true" />
-                <div className="min-w-0 flex-1 space-y-0.5">
-                  <p className="break-words">
-                    {turn.checkpoint?.expiredReason === "interrupted"
-                      ? t("assistant.expiredActionsInterrupted")
-                      : turn.checkpoint?.expiredReason === "timeout"
-                        ? t("assistant.expiredActionsTimeout")
-                        : t("assistant.expiredActions")}
-                  </p>
-                  {turn.checkpoint && (
-                    <p className="break-words text-[var(--text-faint)]">
-                      {checkpointSummary(turn.checkpoint, t)}
-                    </p>
-                  )}
-                </div>
-                {turn.id === turns[turns.length - 1]?.id && (
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label={t("assistant.recheckExpired")}
-                    title={t("assistant.recheckExpired")}
-                    disabled={busy || actionExecutionBusy}
-                    onClick={() => regenerate(turn)}
-                    className="-my-1 h-6 w-6 flex-none text-[var(--status-warn)]"
-                  >
-                    <RefreshCw className="h-3 w-3" aria-hidden="true" />
-                  </Button>
-                )}
-              </div>
-            )}
-
-            {turn.actionResults.length > 0 && (
-              <div aria-label={t("assistant.actionRecord")} className="space-y-1">
-                {turn.actionResults.map((result, index) => (
-                  <p
-                    key={`${turn.id}-result-${index}`}
-                    className="flex items-start gap-1.5 text-[11px] text-[var(--text-muted)]"
-                  >
-                    <span
-                      className="mt-[0.45em] h-1.5 w-1.5 flex-none rounded-full bg-[var(--accent)]"
-                      aria-hidden="true"
-                    />
-                    <span className="min-w-0 break-words">{t("assistant.actionResult", { result })}</span>
-                  </p>
-                ))}
-              </div>
-            )}
-
-            {turn.canceled && (
-              <p className="flex items-center gap-1 text-[10px] text-[var(--text-faint)]">
-                <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
-                {t("assistant.stopped")}
-              </p>
-            )}
           </div>
         ))}
         {error && (
           <div
             role="alert"
-            className="flex items-start gap-1.5 rounded-lg bg-[var(--status-err-bg)] px-2.5 py-2 text-xs text-[var(--status-err)]"
+            className="border-l-2 border-[var(--status-err)] pl-2 text-xs text-[var(--status-err)]"
           >
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" aria-hidden="true" />
             <span>{error}</span>
           </div>
         )}
@@ -2890,126 +1804,37 @@ export function AssistantPanel({
 
       {/* 翻上去看旧回答时，新回答落在屏幕外，原来没有任何提示，也没有回来的路——
           只能自己往下拖。给一个浮在滚动区底部的按钮。 */}
-      {scrolledAway && turns.length > 0 && (
-        <button
-          type="button"
-          onClick={jumpToLatest}
-          className="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] shadow-[var(--shadow-pop)] transition-colors hover:text-[var(--text-strong)] motion-reduce:transition-none"
-        >
-          <ArrowDown className="h-3 w-3" aria-hidden="true" />
-          {t("assistant.scrollToLatest")}
-        </button>
-      )}
+      {scrolledAway && turns.length > 0 && <JumpToLatest onClick={jumpToLatest} />}
       </>
       )}
       </div>
 
-      {/* 输入框、范围提示和按钮合成一块。原来三样东西各管各的，输入区看着像张随手贴的表单。 */}
+      {/* 输入框、范围提示和按钮合成一块。整个面板只保留外框一条线：
+          composer 自身的描边就是与消息区的分界，不再叠一条 border-t。 */}
       {!historyOpen && (
-      <div className="border-t border-[var(--border-subtle)] p-2">
-        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-input)] focus-within:border-[var(--focus-ring)]">
-          <div ref={scopeMenuRef} className="relative px-2.5 pt-1.5">
-            <button
-              ref={scopeTriggerRef}
-              type="button"
-              aria-label={t("assistant.scopeLabel", { scope: scopeLabel })}
-              aria-haspopup="menu"
-              aria-expanded={scopeMenuOpen}
-              aria-controls={scopeMenuOpen ? scopeMenuId : undefined}
-              title={t("assistant.scopeHint")}
-              onClick={() => {
-                if (scopeMenuOpen) closeScopeMenu();
-                else setScopeMenuOpen(true);
-              }}
-              className="inline-flex max-w-full items-center gap-1 rounded-full bg-[var(--surface-card)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] transition-colors hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-            >
-              <AtSign className="h-2.5 w-2.5 flex-none" aria-hidden="true" />
-              <span className="truncate">{scopeLabel}</span>
-              <ChevronDown className="h-2.5 w-2.5 flex-none opacity-70" aria-hidden="true" />
-            </button>
-            {scopeMenuOpen && (
-              <div
-                id={scopeMenuId}
-                role="menu"
-                aria-label={t("assistant.scopeMenuLabel")}
-                onKeyDown={handleScopeMenuKeyDown}
-                className="absolute bottom-full left-0 z-20 mb-1 min-w-[180px] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-1 shadow-[var(--shadow-pop)]"
-              >
-                {scopeOptions.map((option, index) => {
-                  const active = option.value === scopeChoice;
-                  return (
-                    <button
-                      key={option.value}
-                      ref={(element) => {
-                        scopeItemRefs.current[index] = element;
-                      }}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={active}
-                      tabIndex={-1}
-                      disabled={!option.enabled}
-                      onClick={() => {
-                        setScopeChoice(option.value);
-                        closeScopeMenu();
-                      }}
-                      className="ca-touch-44 flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs text-[var(--text-normal)] transition-colors hover:bg-[var(--surface-card-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <span>{option.label}</span>
-                      {active && (
-                        <Check className="h-3.5 w-3.5 flex-none text-[var(--accent-text)]" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          <div className="flex items-end gap-2 px-2 pb-1.5 pt-1">
-            <textarea
-              ref={inputRef}
-              aria-label={t("assistant.inputLabel")}
-              rows={1}
-              value={input}
-              placeholder={t("assistant.inputPlaceholder")}
-              onChange={(e) => setInputFromUser(e.target.value)}
-              onKeyDown={(e) => {
-                if (navigateRecentQuestions(e)) return;
-                // Enter 发送、Shift+Enter 换行。输入法组词时的 Enter 不能当发送，
-                // 否则中文用户每选一次候选词就误发一条。
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  void send();
-                }
-              }}
-              className="ca-ask-input max-h-24 flex-1 resize-none bg-transparent px-0.5 py-1 text-sm text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)]"
-            />
-            {busy ? (
-              <Button
-                size="icon"
-                variant="outline"
-                aria-label={t("assistant.stopGeneration")}
-                title={t("assistant.stopGeneration")}
-                disabled={stopping}
-                onClick={stop}
-                className="ca-touch-44 h-8 w-8 flex-none rounded-lg"
-              >
-                <Square className="h-3.5 w-3.5 fill-current" />
-              </Button>
-            ) : (
-              <Button
-                size="icon"
-                aria-label={t("assistant.send")}
-                title={t("assistant.sendTitle")}
-                disabled={!input.trim() || actionExecutionBusy}
-                onClick={() => void send()}
-                className="ca-touch-44 h-8 w-8 flex-none rounded-lg"
-              >
-                <Send className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
+        <AssistantComposer
+          inputRef={inputRef}
+          input={input}
+          onInput={setInputFromUser}
+          onKeyDown={(event) => {
+            if (navigateRecentQuestions(event)) return;
+            // Enter 发送、Shift+Enter 换行。输入法组词时的 Enter 不能当发送，
+            // 否则中文用户每选一次候选词就误发一条。
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              void send();
+            }
+          }}
+          busy={busy}
+          stopping={stopping}
+          actionExecutionBusy={actionExecutionBusy}
+          onSend={() => void send()}
+          onStop={stop}
+          scopeLabel={scopeLabel}
+          scopeOptions={scopeOptions}
+          scopeChoice={scopeChoice}
+          onScopeChoice={setScopeChoice}
+        />
       )}
     </aside>
     </>

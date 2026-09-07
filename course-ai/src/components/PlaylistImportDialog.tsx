@@ -316,7 +316,7 @@ export function PlaylistImportDialog({
                   {QUALITY_PRESETS.map((q) => (
                     <label
                       key={q.label}
-                      className={`ca-touch-44 inline-flex cursor-pointer items-center rounded px-2 py-1 text-xs focus-within:outline-none focus-within:ring-2 focus-within:ring-[var(--focus-ring)] ${maxHeight === q.value ? "bg-primary/20 text-primary" : "bg-[var(--surface-card-hover)]"}`}
+                      className={`ca-touch-44 inline-flex cursor-pointer items-center rounded px-2 py-1 text-xs focus-within:outline-none focus-within:ring-2 focus-within:ring-[var(--focus-ring)] ${maxHeight === q.value ? "bg-[var(--accent-weak-2)] text-[var(--accent-text)]" : "bg-[var(--surface-card-hover)]"}`}
                     >
                       <input
                         type="radio"
@@ -388,7 +388,7 @@ export function PlaylistImportDialog({
               className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-card-active)]"
             >
               <div
-                className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none"
+                className="ca-fill-grad h-full rounded-full transition-[width] duration-300 ease-out motion-reduce:transition-none"
                 style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }}
               />
             </div>
