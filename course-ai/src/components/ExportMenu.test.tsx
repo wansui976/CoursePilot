@@ -59,12 +59,16 @@ describe("ExportMenu", () => {
 
     const trigger = screen.getByRole("button", { name: "导出" });
     fireEvent.click(trigger);
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Markdown" }));
+    // 全量并行时 jsdom 负载高，菜单项、状态公告与焦点归还都可能超过默认窗口；
+    // 只放宽等待窗口，不改变断言内容（单跑均在几百 ms 内满足）。
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Markdown" }, { timeout: 30_000 }),
+    );
 
     await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
-    expect(await screen.findByRole("status")).toHaveTextContent("current-notes.md");
-    // 全量并行时 jsdom 负载高，导出完成后的焦点归还可能超过默认 5s 窗口；
-    // 只放宽等待窗口，不改变断言内容（单跑均在几百 ms 内满足）。
+    expect(
+      await screen.findByRole("status", {}, { timeout: 30_000 }),
+    ).toHaveTextContent("current-notes.md");
     await waitFor(() => expect(trigger).toHaveFocus(), { timeout: 30_000 });
   });
 
