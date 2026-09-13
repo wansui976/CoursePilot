@@ -18,6 +18,7 @@ import { formatCountdown } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { ProgressRing } from "@/components/ui/ProgressRing";
+import { Skeleton } from "@/components/ui/skeleton";
 import { DailyGoalDialog } from "./DailyGoalDialog";
 import { ReviewSession } from "./ReviewSession";
 import {
@@ -471,9 +472,7 @@ export function Dashboard({
           ) : null}
 
           {dueCountQuery.isPending ? (
-            <p className="text-sm text-[var(--text-muted)]" aria-live="polite">
-              {t("common.loading")}
-            </p>
+            <Skeleton aria-label={t("common.loading")} className="h-14 w-full rounded-xl" />
           ) : dueCountQuery.isError ? (
             <ErrorNote
               error={dueCountQuery.error}
@@ -502,9 +501,7 @@ export function Dashboard({
               </span>
             </button>
           ) : nextDueAtQuery.isPending ? (
-            <p className="text-sm text-[var(--text-muted)]" aria-live="polite">
-              {t("common.loading")}
-            </p>
+            <Skeleton aria-label={t("common.loading")} className="h-14 w-full rounded-xl" />
           ) : nextDueAtQuery.isError ? (
             <ErrorNote
               error={nextDueAtQuery.error}
@@ -533,9 +530,7 @@ export function Dashboard({
           )}
 
           {dailyQuery.isPending ? (
-            <p className="text-sm text-[var(--text-muted)]" aria-live="polite">
-              {t("common.loading")}
-            </p>
+            <Skeleton aria-label={t("common.loading")} className="h-28 w-full rounded-xl" />
           ) : dailyQuery.isError ? (
             <section aria-label={t("dashboard.stats")}>
               <ErrorNote
@@ -673,7 +668,7 @@ export function Dashboard({
             <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
             <div className="mb-2 flex items-center justify-between">
               <div className="text-sm font-semibold text-[var(--text-strong)]">{t("dashboard.heatmap")}</div>
-              <div className="flex items-center gap-1 text-[11px] text-[var(--text-faint)]">
+              <div className="flex items-center gap-1 ca-t-2xs text-[var(--text-faint)]">
                 <span>{t("dashboard.less")}</span>
                 {HEAT_LEVEL_BG.map((bg, i) => (
                   <span key={i} className={`h-3 w-3 rounded-[2px] ${bg}`} />
@@ -693,7 +688,7 @@ export function Dashboard({
                         width: `calc(${segment.span} * 0.75rem + ${segment.span - 1} * 0.25rem)`,
                       }}
                     >
-                      <span className="absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap text-[10px] leading-4 text-[var(--text-faint)]">
+                      <span className="absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap ca-t-2xs leading-4 text-[var(--text-faint)]">
                         {segment.label}
                       </span>
                     </span>
@@ -755,9 +750,7 @@ export function Dashboard({
             {courseStatsFailed ? (
               <ErrorNote error={courseStatsError} onRetry={retryCourseStats} />
             ) : courseStatsPending ? (
-              <p className="text-sm text-[var(--text-muted)]" aria-live="polite">
-                {t("common.loading")}
-              </p>
+              <Skeleton aria-label={t("common.loading")} className="h-16 w-full rounded-xl" />
             ) : courseTotals.length === 0 ? (
               <p className="rounded-lg border border-[var(--border-faint)] bg-[var(--surface-card)] px-4 py-6 text-center text-sm text-[var(--text-muted)]">
                 {t("dashboard.noStudyRecords")}
@@ -775,7 +768,7 @@ export function Dashboard({
                       >
                         {total > 0 && (
                           <ProgressRing value={watched / total}>
-                            <span className="text-[10px] font-semibold tabular-nums text-[var(--text-strong)]">
+                            <span className="ca-t-2xs font-semibold tabular-nums text-[var(--text-strong)]">
                               {watched}/{total}
                             </span>
                           </ProgressRing>

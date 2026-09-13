@@ -58,7 +58,7 @@ function CitationSources({
   if (!citations || citations.length === 0) return null;
   return (
     <div className="mt-2 border-t border-[var(--border-subtle)] pt-1.5">
-      <div className="mb-1 text-[11px] font-medium text-[var(--text-faint)]">{t("ragSearch.sources")}</div>
+      <div className="mb-1 ca-t-2xs font-medium text-[var(--text-faint)]">{t("ragSearch.sources")}</div>
       <div className="space-y-0.5">
         {citations.map((c) => (
           <button
@@ -73,7 +73,7 @@ function CitationSources({
             <span className="mr-1.5 text-primary">{formatMs(c.start_ms)}</span>
             {/* 这条出处来自课件画面而不是老师念的话——不标一下，读者会以为是原话。 */}
             {c.slide_image && (
-              <span className="mr-1.5 rounded bg-[var(--surface-card-hover)] px-1 text-[10px] text-[var(--text-muted)]">
+              <span className="mr-1.5 rounded bg-[var(--surface-card-hover)] px-1 ca-t-2xs text-[var(--text-muted)]">
                 {t("ragSearch.slidePage", { page: c.slide_page ?? 0 })}
               </span>
             )}

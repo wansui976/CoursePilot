@@ -148,7 +148,7 @@ export function ProgressBar({
         {/* 悬停章节名：锚在指针 x 处，边缘夹回可见范围。 */}
         {hoverChapter && hoverPct != null && (
           <div
-            className="pointer-events-none absolute -top-8 z-10 max-w-[60%] -translate-x-1/2 truncate rounded-md bg-[var(--surface-panel)] px-2 py-1 text-[11px] text-[var(--text-strong)] shadow-[var(--shadow-pop)] ring-1 ring-[var(--border-subtle)]"
+            className="pointer-events-none absolute -top-8 z-10 max-w-[60%] -translate-x-1/2 truncate rounded-md bg-[var(--surface-panel)] px-2 py-1 ca-t-2xs text-[var(--text-strong)] shadow-[var(--shadow-pop)] ring-1 ring-[var(--border-subtle)]"
             style={{ left: `${Math.min(88, Math.max(12, hoverPct))}%` }}
           >
             {formatMs(hoverChapter.start_ms)} {hoverChapter.title}

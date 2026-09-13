@@ -51,7 +51,7 @@ function timestampSources(sources: TimestampSource[], onSeek: Seek) {
     <span
       role="group"
       aria-label={label}
-      className="ca-ts-source-row mt-1 flex flex-wrap items-center gap-1 text-[11px] text-[var(--text-faint)]"
+      className="ca-ts-source-row mt-1 flex flex-wrap items-center gap-1 ca-t-2xs text-[var(--text-faint)]"
     >
       <span className="mr-0.5">{label}</span>
       {sources.map((source, index) => (

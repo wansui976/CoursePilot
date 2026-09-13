@@ -142,7 +142,7 @@ export function AssistantComposer({
                 if (scopeMenuOpen) closeScopeMenu();
                 else setScopeMenuOpen(true);
               }}
-              className="inline-flex max-w-full items-center gap-1 rounded-full bg-[var(--surface-card)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] transition-colors hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+              className="inline-flex max-w-full items-center gap-1 rounded-full bg-[var(--surface-card)] px-1.5 py-0.5 ca-t-2xs text-[var(--text-muted)] transition-colors hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
             >
               <AtSign className="h-2.5 w-2.5 flex-none" aria-hidden="true" />
               <span className="truncate">{scopeLabel}</span>

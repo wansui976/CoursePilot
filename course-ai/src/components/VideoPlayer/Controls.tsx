@@ -35,7 +35,7 @@ const SPEEDS = [2, 1.5, 1.25, 1, 0.75, 0.5];
 const iconButtonClass =
   "flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]";
 const textButtonClass =
-  "h-7 whitespace-nowrap rounded-lg px-2 text-[13px] font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]";
+  "h-7 whitespace-nowrap rounded-lg px-2 ca-t-sm font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]";
 const mobileMenuItemClass =
   "flex min-h-11 w-full items-center gap-3 px-3 py-2 text-left text-sm font-medium text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)] focus-visible:bg-[var(--surface-card-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-35";
 
@@ -546,7 +546,7 @@ export function Controls({
             >
               <div
                 role="presentation"
-                className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase text-[var(--text-faint)]"
+                className="px-3 pb-1 pt-2 ca-t-2xs font-semibold uppercase text-[var(--text-faint)]"
               >
                 {t("videoPlayer.rate")}
               </div>

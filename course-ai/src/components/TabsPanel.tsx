@@ -95,7 +95,7 @@ function TabBadge({ tab, videoId }: { tab: Tab; videoId: string }) {
   if (tab === "more" && quizCount > 0) {
     const shown = quizCount > 999 ? "999+" : String(quizCount);
     return (
-      <span className="ml-1 rounded-full bg-[var(--surface-card-active)] px-1.5 py-px text-[10px] font-semibold leading-4 tabular-nums text-[var(--accent-text)]">
+      <span className="ml-1 rounded-full bg-[var(--surface-card-active)] px-1.5 py-px ca-t-2xs font-semibold leading-4 tabular-nums text-[var(--accent-text)]">
         {shown}
       </span>
     );

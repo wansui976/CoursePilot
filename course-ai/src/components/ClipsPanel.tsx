@@ -326,7 +326,7 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
                     <span
                       role="status"
                       aria-live="polite"
-                      className="mt-1 block text-[11px] text-[var(--text-faint)]"
+                      className="mt-1 block ca-t-2xs text-[var(--text-faint)]"
                     >
                       {notePending ? t("clips.saving") : t("clips.unsaved")}
                     </span>

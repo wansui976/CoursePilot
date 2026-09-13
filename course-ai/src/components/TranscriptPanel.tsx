@@ -133,7 +133,7 @@ const TranscriptRow = memo(function TranscriptRow({
           // 用轻量字形代替 lucide SVG：每行少一棵 SVG 子树，屏外行渲染更快、快滑空白更小。
           // 悬停才出现且盖在文字上方；按钮表面保持透明，不挡住文稿内容。
           // 触屏没有 hover：.ca-transcript-edit 在 pointer:coarse 下强制可见（globals.css）。
-          className="ca-transcript-edit ca-touch-44 ca-workbench-touch absolute bottom-0.5 right-1 grid h-7 w-7 place-items-center rounded border border-transparent bg-transparent text-[15px] leading-none text-[var(--text-muted)] opacity-0 shadow-none transition hover:bg-transparent hover:text-[var(--text-strong)] focus-visible:opacity-100 group-hover:opacity-100"
+          className="ca-transcript-edit ca-touch-44 ca-workbench-touch absolute bottom-0.5 right-1 grid h-7 w-7 place-items-center rounded border border-transparent bg-transparent ca-t-md leading-none text-[var(--text-muted)] opacity-0 shadow-none transition hover:bg-transparent hover:text-[var(--text-strong)] focus-visible:opacity-100 group-hover:opacity-100"
         >
           <span aria-hidden="true">✎</span>
         </button>

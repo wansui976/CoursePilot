@@ -260,7 +260,7 @@ export function CommentsPanel({ videoId }: { videoId: string }) {
                         data-testid="replies-group"
                         className="mt-2 space-y-3 border-l-2 border-[var(--border-subtle)] pl-3"
                       >
-                        <p className="text-[11px] font-medium text-[var(--text-faint)]">
+                        <p className="ca-t-2xs font-medium text-[var(--text-faint)]">
                           {t("commentsPanel.replies", { count: root.reply_count || replies.length })}
                         </p>
                         {visibleTops.map((node) => (

@@ -158,7 +158,7 @@ function Group({
   return (
     <div className="mb-7">
       {header && (
-        <h3 className="mb-2 px-4 text-[13px] font-semibold text-[var(--text-muted)]">
+        <h3 className="mb-2 px-4 ca-t-sm font-semibold text-[var(--text-muted)]">
           {header}
         </h3>
       )}
@@ -189,7 +189,7 @@ function Row({
       <div className="min-w-0">
         <label
           htmlFor={htmlFor}
-          className="block text-[14px] font-medium tracking-[-0.01em] text-[var(--text-strong)]"
+          className="block text-sm font-medium tracking-[-0.01em] text-[var(--text-strong)]"
         >
           {label}
         </label>
@@ -217,7 +217,7 @@ function StackRow({
       {label && (
         <label
           htmlFor={htmlFor}
-          className="block text-[14px] font-medium tracking-[-0.01em] text-[var(--text-strong)]"
+          className="block text-sm font-medium tracking-[-0.01em] text-[var(--text-strong)]"
         >
           {label}
         </label>
@@ -785,7 +785,7 @@ export function SettingsPanel({
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
-        <h2 className="text-[15px] font-semibold text-[var(--text-strong)]">{headerTitle}</h2>
+        <h2 className="ca-t-md font-semibold text-[var(--text-strong)]">{headerTitle}</h2>
       </header>
 
       {/* 侧栏分类 + 右侧分组卡片；竖屏改为「分类列表 → 下钻」 */}
@@ -805,7 +805,7 @@ export function SettingsPanel({
                     requestSettingsExit({ kind: "category", category: key })
                   }
                   aria-current={active ? "page" : undefined}
-                  className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition ${
+                  className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left ca-t-sm transition ${
                     active
                       ? "bg-[var(--accent-weak)] font-medium text-[var(--accent-text)]"
                       : "text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
@@ -846,7 +846,7 @@ export function SettingsPanel({
                     >
                       {meta.icon}
                     </span>
-                    <span className="flex-1 text-[15px] text-[var(--text-strong)]">
+                    <span className="flex-1 ca-t-md text-[var(--text-strong)]">
                       {t(meta.i18nKey)}
                     </span>
                     <ChevronRight className="h-4 w-4 flex-none text-[var(--text-faint)]" />
@@ -859,7 +859,7 @@ export function SettingsPanel({
         <div className={`min-h-0 flex-1 overflow-y-auto ${compact ? "px-4 py-5" : "px-8 py-6"}`}>
           <div className="mx-auto max-w-2xl">
             {!compact && (
-              <h2 className="mb-5 text-[22px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">
+              <h2 className="mb-5 ca-t-xl font-semibold tracking-[-0.02em] text-[var(--text-strong)]">
                 {t(CATEGORY_META[activeCategory].i18nKey)}
               </h2>
             )}

@@ -68,7 +68,7 @@ export function AssistantEmptyState({
   return (
     <div className="flex min-h-full flex-col justify-center gap-4">
       <div>
-        <p className="text-[15px] font-medium text-[var(--text-strong)]">{t("assistant.greeting")}</p>
+        <p className="ca-t-md font-medium text-[var(--text-strong)]">{t("assistant.greeting")}</p>
         <p className="mt-1 text-xs leading-relaxed text-[var(--text-faint)]">
           {t("assistant.greetingHint", { scope: scopeLabel })}
         </p>
@@ -168,7 +168,7 @@ export function AssistantTurn({
           默认折叠：它是过程不是结论，摊开会把真正的回答挤下去。 */}
       {turn.reasoning && (
         <details className="group/think">
-          <summary className="-ml-1 flex w-fit cursor-pointer select-none items-center gap-1 rounded px-1 py-0.5 text-[11px] text-[var(--text-faint)] transition-colors hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none">
+          <summary className="-ml-1 flex w-fit cursor-pointer select-none items-center gap-1 rounded px-1 py-0.5 ca-t-2xs text-[var(--text-faint)] transition-colors hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none">
             <ChevronRight
               aria-hidden="true"
               className="h-3 w-3 flex-none transition-transform group-open/think:rotate-90 motion-reduce:transition-none"
@@ -256,7 +256,7 @@ export function AssistantTurn({
             {!turn.pending && turn.usage && (
               <span
                 data-testid="turn-usage"
-                className="ml-1 whitespace-nowrap text-[10px] text-[var(--text-faint)]"
+                className="ml-1 whitespace-nowrap ca-t-2xs text-[var(--text-faint)]"
               >
                 {t("assistant.usageTokens", {
                   tokens: usageTokens(turn.usage).toLocaleString(),
@@ -275,7 +275,7 @@ export function AssistantTurn({
           正文空着的时候顺带把重新回答放在这儿：那排悬停按钮挂在回答上，
           恰恰是最需要重试的这种情况反而没有入口。 */}
       {!turn.pending && (turn.hitTurnLimit || (!turn.answer && !turn.canceled)) && (
-        <div className="flex items-start gap-1.5 border-l-2 border-[var(--border-strong)] pl-2 text-[11px] text-[var(--text-muted)]">
+        <div className="flex items-start gap-1.5 border-l-2 border-[var(--border-strong)] pl-2 ca-t-2xs text-[var(--text-muted)]">
           <span className="min-w-0 flex-1 break-words">
             {turn.hitTurnLimit
               ? t("assistant.turnLimitFallback")
@@ -287,7 +287,7 @@ export function AssistantTurn({
               variant="ghost"
               disabled={busy || actionExecutionBusy}
               onClick={() => onRegenerate(turn)}
-              className="-my-1 h-6 flex-none px-1.5 text-[11px]"
+              className="-my-1 h-6 flex-none px-1.5 ca-t-2xs"
             >
               <RefreshCw className="mr-1 h-3 w-3" aria-hidden="true" />
               {t("assistant.regenerate")}
@@ -307,7 +307,7 @@ export function AssistantTurn({
       />
 
       {getAssistantInteractionState(turn).status === "expired" && (
-        <div className="flex items-start gap-1.5 border-l-2 border-[var(--status-warn)] pl-2 text-[11px] text-[var(--status-warn)]">
+        <div className="flex items-start gap-1.5 border-l-2 border-[var(--status-warn)] pl-2 ca-t-2xs text-[var(--status-warn)]">
           <div className="min-w-0 flex-1 space-y-0.5">
             <p className="break-words">
               {turn.checkpoint?.expiredReason === "interrupted"
@@ -343,7 +343,7 @@ export function AssistantTurn({
           {turn.actionResults.map((result, index) => (
             <p
               key={`${turn.id}-result-${index}`}
-              className="flex items-start gap-1.5 text-[11px] text-[var(--text-muted)]"
+              className="flex items-start gap-1.5 ca-t-2xs text-[var(--text-muted)]"
             >
               <span
                 className="mt-[0.45em] h-1.5 w-1.5 flex-none rounded-full bg-[var(--accent)]"
@@ -356,7 +356,7 @@ export function AssistantTurn({
       )}
 
       {turn.canceled && (
-        <p className="border-l-2 border-[var(--border-faint)] pl-2 text-[11px] text-[var(--text-faint)]">
+        <p className="border-l-2 border-[var(--border-faint)] pl-2 ca-t-2xs text-[var(--text-faint)]">
           {t("assistant.stopped")}
         </p>
       )}
@@ -371,7 +371,7 @@ export function JumpToLatest({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] shadow-[var(--shadow-pop)] transition-colors hover:text-[var(--text-strong)] motion-reduce:transition-none"
+      className="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2.5 py-1 ca-t-2xs text-[var(--text-muted)] shadow-[var(--shadow-pop)] transition-colors hover:text-[var(--text-strong)] motion-reduce:transition-none"
     >
       <ArrowDown className="h-3 w-3" aria-hidden="true" />
       {t("assistant.scrollToLatest")}

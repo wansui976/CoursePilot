@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
 import type { Course } from "@/lib/types";
 import { ErrorNote } from "@/components/ui/ErrorNote";
+import { Skeleton } from "@/components/ui/skeleton";
 import { isIOS, pickDirectoryPath } from "@/lib/mobileFiles";
 
 function nextCourseName(courses: { name: string }[], t: (key: string, opts?: Record<string, unknown>) => string) {
@@ -82,6 +83,7 @@ export function CourseList({
   const queryClient = useQueryClient();
   const {
     data: courses = [],
+    isPending: coursesPending,
     isError: coursesError,
     error: coursesErrorObj,
     refetch: refetchCourses,
@@ -392,6 +394,13 @@ export function CourseList({
         (coursesError ? (
           // 课程加载失败：显示错误 + 重试，而不是伪装成「还没有课程」。
           <ErrorNote error={coursesErrorObj} onRetry={() => refetchCourses()} />
+        ) : coursesPending ? (
+          // 首次加载（尚无课程）时摆骨架行，贴合 44px 行高，避免「暂无课程」闪跳。
+          <div className="space-y-1 px-3 py-2" aria-label={t("common.loading")}>
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-11 w-full rounded-md" />
+            ))}
+          </div>
         ) : (
           <div className="px-3 py-4 text-xs text-[var(--text-faint)]">
             {t("courseList.noCourses")}

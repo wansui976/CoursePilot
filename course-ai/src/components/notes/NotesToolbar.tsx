@@ -104,7 +104,7 @@ export function NotesToolbar({ editor }: { editor: Editor }) {
             onClick={() => editor.chain().focus().addRowAfter().run()}
             className={btn(false)}
           >
-            <span className="text-[13px] font-semibold leading-none">＋行</span>
+            <span className="ca-t-sm font-semibold leading-none">＋行</span>
           </button>
           <button
             type="button"
@@ -114,7 +114,7 @@ export function NotesToolbar({ editor }: { editor: Editor }) {
             onClick={() => editor.chain().focus().addColumnAfter().run()}
             className={btn(false)}
           >
-            <span className="text-[13px] font-semibold leading-none">＋列</span>
+            <span className="ca-t-sm font-semibold leading-none">＋列</span>
           </button>
           <button
             type="button"

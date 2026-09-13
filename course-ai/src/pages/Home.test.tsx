@@ -598,6 +598,15 @@ describe("Home", () => {
     expect(app).toHaveAttribute("data-sidebar", "expanded");
   });
 
+  it("dedupes global actions: settings/dashboard live only in the rail, not the sidebar", async () => {
+    renderHome();
+    const sidebar = await screen.findByRole("complementary", { name: "课程侧栏" });
+    // 全局动作只出现在常驻 rail，侧栏里去重
+    expect(within(sidebar).queryByRole("button", { name: "设置" })).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: "学习面板" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "设置" })).toHaveLength(1);
+  });
+
   it("workbench expanded sidebar lists the course videos inline", async () => {
     localStorage.setItem(
       "course-ai-sidebar-collapsed",
@@ -630,8 +639,7 @@ describe("Home", () => {
     renderHome();
 
     await waitFor(() => expect(mockIpc.pipeline.jobs).toHaveBeenCalledWith(video.id));
-    const sidebar = await screen.findByRole("complementary", { name: "课程侧栏" });
-    fireEvent.click(within(sidebar).getByRole("button", { name: "处理队列" }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", { name: "处理队列" }));
 
     const queuePage = screen.getByLabelText("处理队列页面");
     expect(within(queuePage).getByText(displayTitle(video.title))).toBeInTheDocument();
@@ -645,8 +653,7 @@ describe("Home", () => {
       .mockResolvedValueOnce([]);
     renderHome();
 
-    const sidebar = await screen.findByRole("complementary", { name: "课程侧栏" });
-    fireEvent.click(within(sidebar).getByRole("button", { name: "处理队列" }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", { name: "处理队列" }));
     const queuePage = screen.getByLabelText("处理队列页面");
 
     expect(await within(queuePage).findByRole("alert")).toHaveTextContent(
@@ -667,12 +674,12 @@ describe("Home", () => {
 
   it("routes desktop sidebar navigation through the registered settings exit guard", async () => {
     renderHome();
-    const sidebar = await screen.findByRole("complementary", { name: "课程侧栏" });
+    const rail = await screen.findByRole("navigation", { name: "工具栏" });
 
-    fireEvent.click(within(sidebar).getByRole("button", { name: "设置" }));
+    fireEvent.click(within(rail).getByRole("button", { name: "设置" }));
     expect(screen.getByText("设置面板")).toBeInTheDocument();
 
-    fireEvent.click(within(sidebar).getByRole("button", { name: "学习面板" }));
+    fireEvent.click(within(rail).getByRole("button", { name: "学习面板" }));
 
     expect(settingsExitRequestMock).toHaveBeenCalledOnce();
     expect(screen.getByText("设置面板")).toBeInTheDocument();
@@ -686,8 +693,9 @@ describe("Home", () => {
 
   it("guards course selection while settings has an unresolved draft", async () => {
     renderHome();
+    const rail = await screen.findByRole("navigation", { name: "工具栏" });
     const sidebar = await screen.findByRole("complementary", { name: "课程侧栏" });
-    fireEvent.click(within(sidebar).getByRole("button", { name: "设置" }));
+    fireEvent.click(within(rail).getByRole("button", { name: "设置" }));
 
     fireEvent.click(within(sidebar).getByRole("button", { name: /申论课程/ }));
 
@@ -719,8 +727,7 @@ describe("Home", () => {
     renderHome();
 
     await waitFor(() => expect(mockIpc.pipeline.jobs).toHaveBeenCalledWith(video.id));
-    const sidebar = await screen.findByRole("complementary", { name: "课程侧栏" });
-    fireEvent.click(within(sidebar).getByRole("button", { name: "处理队列" }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", { name: "处理队列" }));
     const queuePage = screen.getByLabelText("处理队列页面");
 
     expect(await within(queuePage).findByText("任务进度读取失败")).toBeInTheDocument();
@@ -752,8 +759,7 @@ describe("Home", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "开始处理" }));
     await waitFor(() => expect(mockIpc.pipeline.process).toHaveBeenCalledWith(video.id));
 
-    const sidebar = screen.getByRole("complementary", { name: "课程侧栏" });
-    fireEvent.click(within(sidebar).getByRole("button", { name: "处理队列" }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", { name: "处理队列" }));
     expect(
       within(screen.getByLabelText("处理队列页面")).getByText(displayTitle(video.title)),
     ).toBeInTheDocument();
@@ -768,8 +774,7 @@ describe("Home", () => {
     await waitFor(() => expect(mockIpc.pipeline.process).toHaveBeenCalledWith(video.id));
 
     fireEvent.click(await screen.findByRole("button", { name: /数学课程/ }));
-    const sidebar = screen.getByRole("complementary", { name: "课程侧栏" });
-    fireEvent.click(within(sidebar).getByRole("button", { name: "处理队列" }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", { name: "处理队列" }));
 
     const queuePage = screen.getByLabelText("处理队列页面");
     const queuedTitle = within(queuePage).getByText(displayTitle(video.title));
@@ -793,7 +798,7 @@ describe("Home", () => {
     await waitFor(() => expect(mockIpc.pipeline.process).toHaveBeenCalledWith(video.id));
 
     fireEvent.click(
-      within(screen.getByRole("complementary", { name: "课程侧栏" })).getByRole("button", {
+      within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", {
         name: "处理队列",
       }),
     );
@@ -827,7 +832,7 @@ describe("Home", () => {
     });
 
     fireEvent.click(
-      within(screen.getByRole("complementary", { name: "课程侧栏" })).getByRole("button", {
+      within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", {
         name: "处理队列",
       }),
     );
@@ -1032,7 +1037,7 @@ describe("Home", () => {
     });
 
     fireEvent.click(
-      within(screen.getByRole("complementary", { name: "课程侧栏" })).getByRole("button", {
+      within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", {
         name: "处理队列",
       }),
     );

@@ -1516,6 +1516,8 @@ export function AssistantPanel({
             : { left: position.x, top: position.y, width: panelWidth }
       }
       className={`${panelShown ? "flex" : "hidden"} ${shell} flex-col border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] ${
+        docked ? "ca-assistant-dock" : ""
+      } ${
         snapSide ? "ring-2 ring-[var(--accent)]" : ""
       } ${sheetDragY != null ? "transition-none" : ""}`}
     >
@@ -1760,7 +1762,7 @@ export function AssistantPanel({
           />
         )}
         {hiddenTurnCount > 0 && (
-          <p className="text-center text-[11px] text-[var(--text-faint)]">
+          <p className="text-center ca-t-2xs text-[var(--text-faint)]">
             {t("assistant.hiddenTurns", { count: hiddenTurnCount })}
           </p>
         )}

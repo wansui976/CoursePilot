@@ -159,14 +159,14 @@ export function ConversationHistory({
                       {updatedAt && (
                         <time
                           dateTime={new Date(conversation.updatedAt).toISOString()}
-                          className="mt-0.5 block text-[11px] text-[var(--text-faint)]"
+                          className="mt-0.5 block ca-t-2xs text-[var(--text-faint)]"
                         >
                           {updatedAt}
                         </time>
                       )}
                     </span>
                     {current && (
-                      <span className="flex flex-none items-center gap-1 text-[11px] text-[var(--accent-text)]">
+                      <span className="flex flex-none items-center gap-1 ca-t-2xs text-[var(--accent-text)]">
                         <Check className="h-3.5 w-3.5" aria-hidden="true" />
                         {t("assistant.currentConversation")}
                       </span>

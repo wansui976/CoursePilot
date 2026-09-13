@@ -306,12 +306,33 @@ select:focus-visible {
   --z-fullscreen: 50; /* 播放器全屏 */
   --font: var(--font-app);
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  /* 动效节奏：统一时长，别处别裸写 0.12s/0.3s。 */
+  --dur-fast: 0.12s;
+  --dur: 0.18s;
+  --dur-slow: 0.28s;
   --ease: cubic-bezier(.22, .61, .36, 1);
+  /* 字阶（scoped，勿放 @theme 以免覆盖 Tailwind 全局 text-*）。
+     映射参考：--fs-2xs≈text-[11px]＝text-xs，--fs-xs≈text-xs，--fs-sm≈text-sm，
+     --fs-md≈text-[15px]，--fs-lg≈text-[17px]，--fs-xl≈text-[20px]，--fs-2xl≈text-[28px]。 */
+  --fs-2xs: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 20px;
+  --fs-2xl: 28px;
+  --lh-2xs: 1.4;
+  --lh-xs: 1.4;
+  --lh-sm: 1.45;
+  --lh-md: 1.5;
+  --lh-lg: 1.4;
+  --lh-xl: 1.3;
+  --lh-2xl: 1.25;
   height: 100%;
   width: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: 256px minmax(0, 1fr);
+  grid-template-columns: 56px 256px minmax(0, 1fr);
   transition: grid-template-columns 0.18s var(--ease);
   background: var(--bg-app);
   color: var(--text-1);
@@ -381,9 +402,9 @@ select:focus-visible {
   padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
 }
 
-/* 侧栏折叠时首列收成 56px 图标栏;展开回 256px。列宽随折叠切换做一次性过渡。 */
+/* rail 常驻占首列 56px；宽栏展开=256px、折叠=0（两列定长可平滑插值）。 */
 .ca-app[data-sidebar="collapsed"] {
-  grid-template-columns: 56px minmax(0, 1fr);
+  grid-template-columns: 56px 0px minmax(0, 1fr);
 }
 
 .ca-rail {
@@ -473,12 +494,18 @@ select:focus-visible {
 }
 
 .ca-main {
+  grid-column: 3;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: var(--bg-app);
+}
+
+/* 窄屏（stacked）只有单列，主区钉回第 1 列，避免被上面的 grid-column:3 挤出隐式列。 */
+.ca-app[data-shell="stacked"] .ca-main {
+  grid-column: 1;
 }
 
 .ca-main-col {
@@ -492,15 +519,17 @@ select:focus-visible {
 }
 
 .ca-side {
-  width: 256px;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
-  flex: 0 0 256px;
+  overflow: hidden;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  padding: 16px 14px 14px;
+  padding: 16px 12px 12px;
   z-index: var(--z-sidebar);
+  grid-column: 2;
 }
 
 .ca-brand {
@@ -526,7 +555,7 @@ select:focus-visible {
 }
 
 .ca-brand h1 {
-  font-size: 15.5px;
+  font-size: var(--fs-md);
   font-weight: 680;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -535,7 +564,7 @@ select:focus-visible {
 .ca-new-btn {
   width: 100%;
   height: 44px;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
   border: 1px solid transparent !important;
   border-radius: var(--r-sm) !important;
   background: var(--accent) !important;
@@ -1570,30 +1599,12 @@ select:focus-visible {
 .wb-title {
   min-width: 0;
   color: var(--text-1);
-  font-size: 19px;
+  font-size: var(--fs-xl);
   font-weight: 680;
   letter-spacing: 0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.rail-btn {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-3);
-  transition: background 0.12s, color 0.12s;
-}
-
-@media (hover: hover) {
-.rail-btn:hover {
-  background: var(--bg-sunken);
-  color: var(--text-1);
-}
 }
 
 /* 视频舞台全出血到播放器列边缘；交互控件在自身容器内单独避让系统安全区。 */
@@ -2355,6 +2366,33 @@ html.theme-circle-vt::view-transition-new(root) {
     animation: ca-view-in 0.24s var(--ease) backwards;
   }
 }
+
+/* 助手停靠侧栏滑入：从右侧横向淡入。display:none→flex 时重触发。 */
+@keyframes ca-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-assistant-dock {
+    animation: ca-panel-in var(--dur-slow) var(--ease) backwards;
+  }
+}
+
+/* 字阶工具类：显式字号+行高，替代散落的 text-[13px]/[15px] 等。 */
+.ca-app .ca-t-2xs { font-size: var(--fs-2xs); line-height: var(--lh-2xs); }
+.ca-app .ca-t-xs { font-size: var(--fs-xs); line-height: var(--lh-xs); }
+.ca-app .ca-t-sm { font-size: var(--fs-sm); line-height: var(--lh-sm); }
+.ca-app .ca-t-md { font-size: var(--fs-md); line-height: var(--lh-md); }
+.ca-app .ca-t-lg { font-size: var(--fs-lg); line-height: var(--lh-lg); }
+.ca-app .ca-t-xl { font-size: var(--fs-xl); line-height: var(--lh-xl); }
+.ca-app .ca-t-2xl { font-size: var(--fs-2xl); line-height: var(--lh-2xl); }
 
 /* 学习标签切换：内容变为活动时轻微淡入，补上此前「无过渡的瞬切」。只动透明度不位移。 */
 @keyframes ca-fade-in {

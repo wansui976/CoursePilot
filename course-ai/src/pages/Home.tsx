@@ -31,6 +31,7 @@ import {
 import { onBackButtonPress } from "@tauri-apps/api/app";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { AppSidebar } from "@/components/AppSidebar";
+import { AppRail } from "@/components/AppRail";
 import { CourseSidebar } from "@/components/CourseSidebar";
 import { useCreateCourse } from "@/components/CourseList";
 import { RecycleBin } from "@/components/RecycleBin";
@@ -226,6 +227,23 @@ export function Home() {
   const assistantMode = useAssistantUi((s) => s.mode);
   const assistantSide = useAssistantUi((s) => s.side);
   const assistantWidth = useAssistantUi((s) => s.width);
+  const assistantOpen = useAssistantUi((s) => s.open);
+  const setAssistantOpen = useAssistantUi((s) => s.setOpen);
+  const setAssistantMode = useAssistantUi((s) => s.setMode);
+  /** rail 上的助手开关高亮：停靠或浮窗展开都算「助手在」。 */
+  const assistantActive = assistantMode === "docked" || assistantOpen;
+  function toggleAssistantFromRail() {
+    // 三态循环：停靠侧栏 → 收回成浮球 → 重新停靠侧栏。
+    if (assistantMode === "docked") {
+      setAssistantMode("float");
+      setAssistantOpen(false);
+    } else if (assistantOpen) {
+      setAssistantOpen(false);
+    } else {
+      setAssistantMode("docked");
+      setAssistantOpen(true);
+    }
+  }
   const [view, setView] = useState<LibraryView>(readInitialView);
   // 网格卡片密度（舒适/紧凑）：只影响网格列宽，切到列表视图无意义但保留记忆。
   const [gridDensity, setGridDensity] = useState<GridDensity>(readGridDensity);
@@ -328,10 +346,9 @@ export function Home() {
   // A docked assistant consumes space inside the app shell. Base the split
   // decision on the remaining main-column width, so a 1024px window cannot
   // keep a two-column workbench with a 380px assistant and a cropped player.
+  // rail 常驻消耗 56px；宽栏只在展开时再占 256px，折叠时为 0。宽度总和喂给工作台布局。
   const sidebarWidth = shellWide
-    ? sidebarCollapsed[selectedVideoId ? "workbench" : "library"]
-      ? 56
-      : 256
+    ? 56 + (sidebarCollapsed[selectedVideoId ? "workbench" : "library"] ? 0 : 256)
     : 0;
   const dockWidth = shellWide && assistantMode === "docked" ? assistantWidth : 0;
   const workbenchAvailableWidth = Math.max(0, appPixelWidth - sidebarWidth - dockWidth);
@@ -1443,6 +1460,8 @@ export function Home() {
     });
   }
 
+  // rail logo（library 态）回课程库首页：与「清除课程选择」同义，直接复用 clearCourseSelection。
+
   function toggleQueue() {
     // 先算出目标态再收起全部：closeMainOverlays 会把 queueOpen 置 false，
     // 这里用当前渲染的 queueOpen 求反，最终以 setQueueOpen 覆盖，保留「再点收起」的切换语义。
@@ -2441,32 +2460,44 @@ export function Home() {
       className="ca-app"
     >
       {isPhoneDevice ? null : (
-        <AppSidebar
-          view={sidebarView}
-          collapsed={sidebarIsCollapsed}
-          onToggleCollapsed={toggleSidebarCollapsed}
-          selectedCourseId={selectedCourseId}
-          selectedCourseWatchedRatio={
-            selectedCourseId && videos.length > 0
-              ? watchedCount / videos.length
-              : null
-          }
-          onSelectCourse={selectCourse}
-          onClearCourseSelection={clearCourseSelection}
-          videos={videos}
-          selectedVideoId={selectedVideoId}
-          onOpenVideo={openVideo}
-          onBackToLibrary={returnFromVideo}
-          theme={theme}
-          themeToggleLabel={themeToggleLabel}
-          onToggleTheme={toggleTheme}
-          onOpenSettings={() => openMainView("settings")}
-          onOpenRecycleBin={() => openMainView("recycle")}
-          onOpenDashboard={() => openMainView("dashboard")}
-          queueOpen={queueOpen}
-          queueCount={queuedVideos.length}
-          onToggleQueue={toggleQueue}
-        />
+        <>
+          <AppRail
+            view={sidebarView}
+            sidebarExpanded={!sidebarIsCollapsed}
+            onExpandSidebar={() => toggleSidebarCollapsed()}
+            queueOpen={queueOpen}
+            queueCount={queuedVideos.length}
+            onToggleQueue={toggleQueue}
+            onOpenDashboard={() => openMainView("dashboard")}
+            assistantActive={assistantActive}
+            onToggleAssistant={toggleAssistantFromRail}
+            theme={theme}
+            themeToggleLabel={themeToggleLabel}
+            onToggleTheme={toggleTheme}
+            onOpenRecycleBin={() => openMainView("recycle")}
+            onOpenSettings={() => openMainView("settings")}
+            onBackToLibrary={returnFromVideo}
+            onGoLibraryHome={clearCourseSelection}
+          />
+          {!sidebarIsCollapsed && (
+            <AppSidebar
+              view={sidebarView}
+              onToggleCollapsed={() => toggleSidebarCollapsed()}
+              selectedCourseId={selectedCourseId}
+              selectedCourseWatchedRatio={
+                selectedCourseId && videos.length > 0
+                  ? watchedCount / videos.length
+                  : null
+              }
+              onSelectCourse={selectCourse}
+              onClearCourseSelection={clearCourseSelection}
+              videos={videos}
+              selectedVideoId={selectedVideoId}
+              onOpenVideo={openVideo}
+              queueOpen={queueOpen}
+            />
+          )}
+        </>
       )}
       <main className="ca-main">
         {/* key=视图类型(而非视频 id):切换顶层视图时重挂以重播入场动画;在工作台内

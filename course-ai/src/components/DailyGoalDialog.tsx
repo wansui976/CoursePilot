@@ -270,10 +270,10 @@ export function DailyGoalDialog({
               </span>
               <span className="mt-1 text-xs text-[var(--text-muted)]">{t("dailyGoal.minutes")}</span>
             </div>
-            <span className="pointer-events-none absolute bottom-4 left-5 text-[10px] tabular-nums text-[var(--text-faint)]">
+            <span className="pointer-events-none absolute bottom-4 left-5 ca-t-2xs tabular-nums text-[var(--text-faint)]">
               {MIN_GOAL_MINUTES}
             </span>
-            <span className="pointer-events-none absolute bottom-4 right-3 text-[10px] tabular-nums text-[var(--text-faint)]">
+            <span className="pointer-events-none absolute bottom-4 right-3 ca-t-2xs tabular-nums text-[var(--text-faint)]">
               {maxGoalMinutes}
             </span>
           </div>

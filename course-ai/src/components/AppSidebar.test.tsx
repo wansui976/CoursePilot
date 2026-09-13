@@ -20,17 +20,6 @@ vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: vi.fn(), message: vi.fn() }));
 vi.mock("@/lib/mobileFiles", () => ({ isIOS: () => false, pickDirectoryPath: vi.fn() }));
 
-const { mockSetThemeToggleOrigin } = vi.hoisted(() => ({
-  mockSetThemeToggleOrigin: vi.fn(),
-}));
-vi.mock("@/stores/theme", async () => {
-  const actual = await vi.importActual<typeof import("@/stores/theme")>("@/stores/theme");
-  return {
-    ...actual,
-    setThemeToggleOrigin: mockSetThemeToggleOrigin,
-  };
-});
-
 const course = {
   id: "course-1",
   name: "申论课程",
@@ -59,19 +48,10 @@ const video = {
 function baseProps(overrides: Partial<Parameters<typeof AppSidebar>[0]> = {}) {
   return {
     view: "library" as const,
-    collapsed: false,
     onToggleCollapsed: vi.fn(),
     selectedCourseId: "course-1",
     onSelectCourse: vi.fn(),
-    theme: "light" as const,
-    themeToggleLabel: "切换到夜晚模式",
-    onToggleTheme: vi.fn(),
-    onOpenSettings: vi.fn(),
-    onOpenRecycleBin: vi.fn(),
-    onOpenDashboard: vi.fn(),
     queueOpen: false,
-    queueCount: 0,
-    onToggleQueue: vi.fn(),
     ...overrides,
   };
 }
@@ -90,72 +70,29 @@ function renderSidebar(overrides: Partial<Parameters<typeof AppSidebar>[0]> = {}
 describe("AppSidebar", () => {
   beforeEach(() => {
     mockIpc.courses.list.mockReset().mockResolvedValue([course]);
-    mockSetThemeToggleOrigin.mockReset();
   });
 
-  it("renders the expanded library sidebar with unified entries", async () => {
+  it("renders the expanded library sidebar: brand, add button, course list", async () => {
     renderSidebar();
     expect(screen.getByRole("complementary", { name: "课程侧栏" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加课程文件夹" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "处理队列" })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /申论课程/ })).toBeInTheDocument();
-    // 底部固定功能区
-    expect(screen.getByRole("button", { name: "切换到夜晚模式" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "回收站" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
   });
 
-  it("records the theme toggle origin from the bottom-left button center", async () => {
-    const onToggleTheme = vi.fn();
-    renderSidebar({ onToggleTheme });
-    const button = screen.getByRole("button", { name: "切换到夜晚模式" });
-    const rect = { left: 12, top: 700, width: 36, height: 36, right: 48, bottom: 736, x: 12, y: 700, toJSON: () => ({}) };
-    vi.spyOn(button, "getBoundingClientRect").mockReturnValue(rect as DOMRect);
-    fireEvent.click(button);
-    expect(mockSetThemeToggleOrigin).toHaveBeenCalledWith(30, 718);
-    expect(onToggleTheme).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows the queue badge and collapse toggle in the expanded state", async () => {
+  it("renders a collapse button in the brand row that triggers collapse", () => {
     const onToggleCollapsed = vi.fn();
-    renderSidebar({ queueCount: 4, onToggleCollapsed });
-    expect(screen.getByText("4")).toBeInTheDocument();
+    renderSidebar({ onToggleCollapsed });
     fireEvent.click(screen.getByRole("button", { name: "折叠侧栏" }));
-    expect(onToggleCollapsed).toHaveBeenCalled();
+    expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
   });
 
-  it("renders the collapsed rail with all tool entries", () => {
-    renderSidebar({ collapsed: true, queueCount: 2 });
-    const rail = screen.getByRole("navigation", { name: "工具栏" });
-    expect(rail).toBeInTheDocument();
-    expect(rail.querySelector(".rail-logo")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "展开侧栏" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "处理队列" })).toBeInTheDocument();
-    expect(screen.getByText("2")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "切换到夜晚模式" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "回收站" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
-    // 课程库折叠态没有「返回课程库」与「课程视频」
-    expect(screen.queryByRole("button", { name: "返回课程库" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "课程视频" })).not.toBeInTheDocument();
-  });
-
-  it("workbench collapsed rail: logo goes back, and drops the library queue button", () => {
-    const onBackToLibrary = vi.fn();
-    renderSidebar({
-      collapsed: true,
-      view: "workbench",
-      videos: [video],
-      selectedVideoId: "video-1",
-      onBackToLibrary,
-    });
+  it("does not render any navigation/global actions (now owned by AppRail)", async () => {
+    renderSidebar();
+    await screen.findByRole("button", { name: /申论课程/ });
     expect(screen.queryByRole("button", { name: "处理队列" })).not.toBeInTheDocument();
-    // 「课程视频」按钮及其弹层已移除;视频列表改由展开态侧栏内联提供。
-    expect(screen.queryByRole("button", { name: "课程视频" })).not.toBeInTheDocument();
-    const backButton = screen.getByRole("button", { name: "返回课程库" });
-    expect(backButton).toHaveClass("rail-logo");
-    fireEvent.click(backButton);
-    expect(onBackToLibrary).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "设置" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "回收站" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "切换到夜晚模式" })).not.toBeInTheDocument();
   });
 
   it("workbench expanded: inlines the current course videos under the selected course", async () => {
@@ -168,15 +105,13 @@ describe("AppSidebar", () => {
     });
     const item = await screen.findByRole("button", { name: /底层逻辑/ });
     expect(item).toHaveAttribute("aria-current", "page");
-    expect(item.querySelector("svg")).not.toBeInTheDocument();
     fireEvent.click(item);
     expect(onOpenVideo).toHaveBeenCalledWith("video-1");
   });
 
-  it("workbench expanded: hides course creation and processing queue entries", () => {
+  it("workbench expanded: hides course creation", () => {
     renderSidebar({ view: "workbench" });
     expect(screen.queryByRole("button", { name: "添加课程文件夹" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "处理队列" })).not.toBeInTheDocument();
   });
 
   it("library expanded: does not inline videos", async () => {
@@ -185,17 +120,10 @@ describe("AppSidebar", () => {
     expect(screen.queryByRole("button", { name: /底层逻辑/ })).not.toBeInTheDocument();
   });
 
-  it("lets the processing queue nav item span the sidebar width", () => {
-    renderSidebar();
-    expect(screen.getByRole("button", { name: "处理队列" })).toHaveClass("w-full");
-  });
-
   it("clears the selected course highlight while the processing queue is open", async () => {
     renderSidebar({ selectedCourseId: "course-1", queueOpen: true });
     const item = await screen.findByRole("button", { name: /申论课程/ });
-    // 队列是当前视图时，下方已选课程不应再保留蓝色高亮。
     expect(item.closest(".ca-nav-item")).not.toHaveClass("active");
-    expect(screen.getByRole("button", { name: "处理队列" })).toHaveClass("active");
   });
 
   it("highlights the selected course when the queue is closed", async () => {

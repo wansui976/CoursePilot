@@ -36,7 +36,7 @@ function ChatSources({
   if (!citations || citations.length === 0) return null;
   return (
     <div className="mt-2 border-t border-[var(--border-subtle)] pt-1.5">
-      <div className="mb-1 text-[11px] font-medium text-[var(--text-faint)]">{t("courseChat.sources")}</div>
+      <div className="mb-1 ca-t-2xs font-medium text-[var(--text-faint)]">{t("courseChat.sources")}</div>
       <div className="space-y-0.5">
         {citations.map((c) => {
           const label = (
@@ -446,7 +446,7 @@ export function CourseChatPanel({
               >
                 {turn.reasoning && (
                   <details className="group/think mb-1">
-                    <summary className="-ml-1 flex w-fit cursor-pointer select-none items-center gap-1 rounded px-1 py-0.5 text-[11px] text-[var(--text-faint)] transition-colors hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none">
+                    <summary className="-ml-1 flex w-fit cursor-pointer select-none items-center gap-1 rounded px-1 py-0.5 ca-t-2xs text-[var(--text-faint)] transition-colors hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none">
                       <ChevronRight
                         aria-hidden="true"
                         className="h-3 w-3 flex-none transition-transform group-open/think:rotate-90 motion-reduce:transition-none"
@@ -488,7 +488,7 @@ export function CourseChatPanel({
                       open
                       className="group/think"
                     >
-                      <summary className="-ml-1 flex w-fit cursor-pointer select-none items-center gap-1 rounded px-1 py-0.5 text-[11px] text-[var(--text-faint)] transition-colors hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none">
+                      <summary className="-ml-1 flex w-fit cursor-pointer select-none items-center gap-1 rounded px-1 py-0.5 ca-t-2xs text-[var(--text-faint)] transition-colors hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none">
                         <ChevronRight
                           aria-hidden="true"
                           className="h-3 w-3 flex-none transition-transform group-open/think:rotate-90 motion-reduce:transition-none"

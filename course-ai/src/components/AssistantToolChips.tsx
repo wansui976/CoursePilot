@@ -91,7 +91,7 @@ export function AssistantToolChips({
   const showList = !multi || expanded;
 
   return (
-    <div data-testid="tool-chips" className="text-[11px]">
+    <div data-testid="tool-chips" className="ca-t-2xs">
       {multi && (
         <button
           type="button"

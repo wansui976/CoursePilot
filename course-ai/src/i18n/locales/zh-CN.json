@@ -12,6 +12,7 @@
     "expandSidebar": "展开侧栏",
     "collapseSidebar": "折叠侧栏",
     "backToLibrary": "返回课程库",
+    "libraryHome": "回到课程库首页",
     "addCourseFolder": "添加课程文件夹",
     "addingCourse": "添加中",
     "mainNav": "主导航",
@@ -805,6 +806,7 @@
     }
   },
   "assistant": {
+    "toggleAssistant": "切换助手",
     "openAssistant": "打开助手",
     "openWithShortcut": "打开助手 ({{shortcut}})",
     "closeAssistant": "关闭助手",

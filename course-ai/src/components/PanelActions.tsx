@@ -32,7 +32,7 @@ export function PanelActions({
           讲的还是旧稿的事，界面上却看不出任何区别。 */}
       {stale && (
         <span
-          className="rounded-md border border-[var(--accent-text)]/45 bg-[var(--accent)]/15 px-2 py-1 text-[11px] font-medium text-[var(--accent-text)]"
+          className="rounded-md border border-[var(--accent-text)]/45 bg-[var(--accent)]/15 px-2 py-1 ca-t-2xs font-medium text-[var(--accent-text)]"
           title={t("panelActions.staleTitle")}
         >
           {t("panelActions.stale")}

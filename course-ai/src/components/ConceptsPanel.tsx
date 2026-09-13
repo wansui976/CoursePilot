@@ -287,7 +287,7 @@ function ConceptSources({
                       <span className="min-w-0 flex-1 truncate font-medium text-[var(--text-normal)]">
                         {highlightQuery(displayTitle(occurrence.video_title), query)}
                       </span>
-                      <span className="flex-none rounded bg-[var(--accent-weak)] px-1.5 py-0.5 font-mono text-[11px] font-medium tabular-nums text-[var(--accent-text)]">
+                      <span className="flex-none rounded bg-[var(--accent-weak)] px-1.5 py-0.5 font-mono ca-t-2xs font-medium tabular-nums text-[var(--accent-text)]">
                         {formatMs(occurrence.start_ms)}
                       </span>
                     </span>

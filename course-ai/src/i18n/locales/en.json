@@ -12,6 +12,7 @@
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
     "backToLibrary": "Back to courses",
+    "libraryHome": "Back to course hub",
     "addCourseFolder": "New Course Folder",
     "addingCourse": "Adding…",
     "mainNav": "Main navigation",
@@ -805,6 +806,7 @@
     }
   },
   "assistant": {
+    "toggleAssistant": "Toggle assistant",
     "openAssistant": "Open assistant",
     "openWithShortcut": "Open assistant ({{shortcut}})",
     "closeAssistant": "Close assistant",
