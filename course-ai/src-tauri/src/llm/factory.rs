@@ -5,7 +5,7 @@ use std::time::Duration;
 pub const LLM_REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
 pub const LLM_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// 由 profile + 明文 key 构造 Provider。key 由调用方从 keychain（settings 表）取出。
+/// 由 profile + 明文 key 构造 Provider。key 由调用方从 keychain（系统钥匙串）取出。
 pub fn build_provider(profile: &LlmProfile, api_key: String) -> Provider {
     // 长笔记和推理模型可能超过三分钟才返回，给完整生成留出十分钟；连接阶段仍快速失败。
     // tcp_nodelay 禁用 Nagle 算法：对 SSE 流式场景可减少 TCP 小包延迟，

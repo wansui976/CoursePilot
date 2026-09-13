@@ -27,7 +27,7 @@
 - Profile 管理 + 任务路由；设置页 LLM 配置 UI。
 - 笔记 Tab（TipTap + AI 生成 + `[mm:ss]` 时间戳节点 + 自动保存）。
 - AI看 Tab（重点章节）、AI 出题、AI 脑图（markmap）。
-- **偏离 spec #2**：API Key 暂存 `settings` 表（键 `llm_key_*`），**非系统钥匙串**。原因：`keyring` crate 无法在沙箱下载。迁移点隔离在 `src-tauri/src/llm/keychain.rs`，发行前应换回 keyring（你的开发机有网可装）。
+- ~~偏离 spec #2~~（已解决）：API Key 已存系统钥匙串（`keyring` crate，`src-tauri/src/llm/keychain.rs`）；钥匙串不可用时回退 settings 表，读取时自动迁移旧明文。
 - 验证：后端单测全绿；前端 typecheck/test/build 通过。
 
 ## Phase 3a — 课件 + 截图（✅ 完成并验证）
@@ -68,14 +68,15 @@
 一轮外部审计提出 24 条问题，其中判定为真且已修的部分见 git 历史（`fix(course-ai): …`
 系列提交）。以下几条**做不了或没验证**，都需要你的机器，发行前应逐条处理。
 
-### 1. API Key 仍未进系统钥匙串（安全，发行前必做）
+### 1. ~~API Key 仍未进系统钥匙串~~（✅ 2026-09-13 已完成）
 
-密钥仍存在 SQLite `settings` 表（前缀 `llm_key_` / `secret_`）。
+密钥已迁入系统钥匙串（`keyring` v3，service 名 `dev.courseai.app`，改动集中在
+`llm/keychain.rs`）：钥匙串优先、不可用时回退 `settings` 表，读取时自动把表内
+旧明文迁进钥匙串并清掉；`save_llm_profiles` 删除孤儿 profile 时会连钥匙串条目
+一起删。单元测试强制走回退路径，避免测试密钥污染真实钥匙串——钥匙串本体路径
+需在真机上跑一次确认（读写一个 Key 后用「钥匙串访问」查看条目）。
 
-- 已做：通用设置接口的读和写都挡掉了凭证键（含旧版本直接存明文的几个键名），
-  WebView 侧不再有任何回读明文的路径；「是否已配置」只回布尔。
-- 未做：搬进系统钥匙串本身。需要 `keyring` crate，本沙箱装不了（见「环境限制」）。
-  改动仍然隔离在 `llm/keychain.rs`，换掉那四个读写函数即可。
+附带行为变化：API Key 不再进数据库备份文件，恢复备份后需重新填写 Key。
 
 ### 2. CSP 仍然关闭（安全，发行前必做）
 

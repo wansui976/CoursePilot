@@ -3,8 +3,8 @@ use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use tauri::State;
 
-/// 密钥存储自己用的键前缀。凭证目前和普通设置同住一张表（见 `llm::keychain`），
-/// 所以这两组前缀下的值必须挡在通用设置接口之外。
+/// 密钥存储自己用的键前缀（实际存系统钥匙串，见 `llm::keychain`；
+/// 钥匙串不可用时的回退也落在这两个前缀下）。这两组前缀下的值必须挡在通用设置接口之外。
 const SECRET_PREFIXES: &[&str] = &["llm_key_", "secret_"];
 
 /// 历史包袱：旧版本把这几项凭证的明文直接存在同名设置里，新版本改存到 `secret_*`

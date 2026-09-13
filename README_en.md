@@ -46,7 +46,7 @@ Website: [https://wansui976.github.io/CoursePilot/](https://wansui976.github.io/
 
 **Recycle bin** — Accidentally deleted? Recover from the recycle bin. Grouped by course, with thumbnails, batch restore and purge.
 
-**Database backup** — Back up the entire database with one click from Settings, and restore from a backup file anytime. A daily snapshot is also kept in the app directory on first launch. Backup files contain your saved API keys — keep them safe.
+**Database backup** — Back up the entire database with one click from Settings, and restore from a backup file anytime. A daily snapshot is also kept in the app directory on first launch. API keys live in the system keychain and are not part of backup files, so re-enter them once after a restore.
 
 **Export** — Subtitles (SRT / VTT), notes, mind maps, and quizzes can all be exported.
 
@@ -97,7 +97,7 @@ ASR and slide extraction run in parallel. Any stage that fails can be retried in
 | Local ASR | whisper.cpp | Cloud ASR |
 | Video download | yt-dlp | Local import only (for now) |
 | Local OCR | tesseract | Cloud OCR (Alibaba / DeepSeek) |
-| Credential storage | Local app database (system keychain migration planned) | Same |
+| Credential storage | System keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service) | Same |
 | Cross-device sync | Apple CloudKit | Apple CloudKit |
 
 ---
@@ -105,7 +105,7 @@ ASR and slide extraction run in parallel. Any stage that fails can be retried in
 ## Privacy & data
 
 - All study materials (database, subtitles, slide images, notes) are stored **on your own device**.
-- Cloud ASR, LLM, and OCR features use **your own API keys**. Keys are stored only in the local app database — the UI cannot read them back in plaintext (system keychain migration is planned) — and nothing is proxied through a third-party server.
+- Cloud ASR, LLM, and OCR features use **your own API keys**. Keys are stored in the system keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service) — the UI cannot read them back in plaintext — and nothing is proxied through a third-party server.
 - Running only local transcription, slide extraction, and local OCR? CoursePilot works **fully offline**.
 
 ---

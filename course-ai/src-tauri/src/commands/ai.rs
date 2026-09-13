@@ -66,6 +66,17 @@ pub async fn save_llm_profiles(
     let profiles = parse_profiles(Some(profiles_json))?;
     parse_routing(Some(routing_json))?;
 
+    // 密钥可能存在系统钥匙串里（表内无行可枚举），所以先对比新旧 profile
+    // 列表，把被移除的 profile 的密钥一并删掉；清理失败不阻塞保存。
+    let old_profiles = parse_profiles(get_setting(db, "llm_profiles").await?.as_deref())?;
+    for old in &old_profiles {
+        if !profiles.iter().any(|profile| profile.id == old.id) {
+            if let Err(err) = keychain::delete_api_key(db, &old.id).await {
+                tracing::warn!(profile_id = %old.id, %err, "failed to delete orphaned api key");
+            }
+        }
+    }
+
     let mut tx = db.pool.begin().await?;
     for (key, value) in [
         ("llm_profiles", profiles_json),
@@ -81,8 +92,8 @@ pub async fn save_llm_profiles(
         .await?;
     }
 
-    // API keys currently share the settings table. Remove keys whose profile no
-    // longer exists in the same transaction as the profile/routing update.
+    // 兜底：清掉仍在 settings 表里的孤儿密钥行（回退存储或升级前残留），
+    // 与 profile/routing 更新同事务。键名由 keychain 模块统一管理。
     let stored_keys: Vec<String> =
         sqlx::query_scalar("SELECT key FROM settings WHERE key GLOB 'llm_key_*'")
             .fetch_all(&mut *tx)
