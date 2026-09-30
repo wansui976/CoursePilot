@@ -1,6 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { qk } from "@/lib/queryKeys";
-import * as Dialog from "@radix-ui/react-dialog";
 import { useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -10,6 +9,7 @@ import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import type { PlaylistInfo, Video } from "@/lib/types";
+import { Modal } from "@/components/ui/dialog";
 
 type Step = "url" | "cookie" | "probing" | "confirm" | "importing" | "done";
 
@@ -178,251 +178,231 @@ export function PlaylistImportDialog({
     preparing || step === "probing" || step === "importing";
 
   return (
-    <Dialog.Root
+    <Modal
       open
       onOpenChange={(open) => {
-        if (!open && !closeBlocked) onClose();
+        if (!open) onClose();
       }}
+      locked={closeBlocked}
+      title={t("playlistImport.title")}
+      titleClassName="mb-3 flex-none"
+      size="lg"
+      className="flex flex-col"
+      overlayTestId="playlist-import-overlay"
+      returnFocusTo={() => returnFocusRef?.current ?? restoreFocusRef.current}
     >
-      <Dialog.Overlay
-        data-testid="playlist-import-overlay"
-        className="ca-dialog-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      >
-        <Dialog.Content
-          aria-modal="true"
-          aria-describedby={undefined}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            (returnFocusRef?.current ?? restoreFocusRef.current)?.focus();
-          }}
-          onEscapeKeyDown={(event) => {
-            if (closeBlocked) event.preventDefault();
-          }}
-          onInteractOutside={(event) => {
-            if (closeBlocked) event.preventDefault();
-          }}
-          onPointerDownOutside={(event) => {
-            if (closeBlocked) event.preventDefault();
-          }}
-          className="flex max-h-[calc(100dvh-2rem)] w-full max-w-[460px] flex-col overflow-y-auto rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-4 shadow-[var(--shadow-pop)] sm:p-5"
-        >
-        <Dialog.Title className="mb-3 flex-none text-sm font-semibold text-[var(--text-strong)]">
-          {t("playlistImport.title")}
-        </Dialog.Title>
 
-        {step === "url" && (
-          <div className="space-y-3">
-            <input
-              aria-label={t("playlistImport.linkLabel")}
-              autoFocus
-              className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm outline-none focus:border-[var(--focus-ring)]"
-              placeholder={t("playlistImport.linkPlaceholder")}
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-            />
-            {error && <ErrorNote error={error} onRetry={() => void startUrl()} />}
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={closeBlocked}
-                onClick={onClose}
-              >
-                {t("playlistImport.cancel")}
-              </Button>
-              <Button size="sm" disabled={!url.trim() || preparing} onClick={startUrl}>
-                {preparing ? t("playlistImport.checking") : t("playlistImport.enumerate")}
-              </Button>
+      {step === "url" && (
+        <div className="space-y-3">
+          <input
+            aria-label={t("playlistImport.linkLabel")}
+            autoFocus
+            className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm outline-none focus:border-[var(--focus-ring)]"
+            placeholder={t("playlistImport.linkPlaceholder")}
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          {error && <ErrorNote error={error} onRetry={() => void startUrl()} />}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={closeBlocked}
+              onClick={onClose}
+            >
+              {t("playlistImport.cancel")}
+            </Button>
+            <Button size="sm" disabled={!url.trim() || preparing} onClick={startUrl}>
+              {preparing ? t("playlistImport.checking") : t("playlistImport.enumerate")}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {step === "cookie" && (
+        <div className="space-y-3 text-sm text-[var(--text-muted)]">
+          {cookieReason === "expired" ? (
+            <p dangerouslySetInnerHTML={{ __html: t("playlistImport.cookieExpired") }} />
+          ) : (
+            <p>{t("playlistImport.cookieNeeded")}</p>
+          )}
+          <ol className="list-decimal space-y-1 pl-5 text-xs leading-relaxed">
+            <li dangerouslySetInnerHTML={{ __html: t("playlistImport.chromeExtension") }} />
+            <li>{t("playlistImport.cookieStep1")}</li>
+            <li>{t("playlistImport.cookieStep2")}</li>
+          </ol>
+          {error && <ErrorNote error={error} onRetry={() => void pickCookie()} />}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={closeBlocked}
+              onClick={() => setStep("url")}
+            >
+              {t("playlistImport.back")}
+            </Button>
+            <Button size="sm" disabled={preparing} onClick={pickCookie}>
+              {preparing ? t("playlistImport.importing") : t("playlistImport.selectCookies")}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {step === "probing" && (
+        <p role="status" aria-live="polite" className="py-6 text-center text-sm text-[var(--text-muted)]">
+          {t("playlistImport.enumerating")}
+        </p>
+      )}
+
+      {step === "confirm" && info && (
+        <>
+          <p className="mb-2 flex-none truncate text-xs text-[var(--text-faint)]">{info.title}</p>
+          <div className="mb-2 flex flex-none flex-wrap items-center justify-between gap-2">
+            <Button size="sm" variant="outline" onClick={toggleAll}>
+              {allSelected ? t("playlistImport.deselectAll") : t("playlistImport.selectAll")}
+            </Button>
+            <span className="text-xs text-[var(--text-muted)]">
+              {t("playlistImport.selected", { selected: selected.size, total: info.episodes.length })}
+            </span>
+          </div>
+          {/* 整个清单一条细滚动条：长标题不截断，横向滑动时各行一起移动。 */}
+          <div className="ca-thin-scroll mb-3 min-h-0 flex-1 overflow-auto rounded-lg border border-[var(--border-subtle)] p-1.5">
+            <div className="min-w-max space-y-0.5">
+              {info.episodes.map((ep) => (
+                <label
+                  key={ep.url}
+                  className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-2 py-1.5 text-sm hover:bg-[var(--surface-card-hover)]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(ep.url)}
+                    onChange={() => toggle(ep.url)}
+                    className="h-3.5 w-3.5 flex-none accent-[var(--accent-text)]"
+                  />
+                  <span title={ep.title} className="text-[var(--text-normal)]">
+                    {ep.title}
+                  </span>
+                  {ep.duration_ms != null && (
+                    <span className="ml-auto flex-none pl-3 text-xs tabular-nums text-[var(--text-faint)]">
+                      {formatMs(ep.duration_ms)}
+                    </span>
+                  )}
+                </label>
+              ))}
             </div>
           </div>
-        )}
 
-        {step === "cookie" && (
-          <div className="space-y-3 text-sm text-[var(--text-muted)]">
-            {cookieReason === "expired" ? (
-              <p dangerouslySetInnerHTML={{ __html: t("playlistImport.cookieExpired") }} />
-            ) : (
-              <p>{t("playlistImport.cookieNeeded")}</p>
-            )}
-            <ol className="list-decimal space-y-1 pl-5 text-xs leading-relaxed">
-              <li dangerouslySetInnerHTML={{ __html: t("playlistImport.chromeExtension") }} />
-              <li>{t("playlistImport.cookieStep1")}</li>
-              <li>{t("playlistImport.cookieStep2")}</li>
-            </ol>
-            {error && <ErrorNote error={error} onRetry={() => void pickCookie()} />}
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={closeBlocked}
-                onClick={() => setStep("url")}
-              >
-                {t("playlistImport.back")}
-              </Button>
-              <Button size="sm" disabled={preparing} onClick={pickCookie}>
-                {preparing ? t("playlistImport.importing") : t("playlistImport.selectCookies")}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {step === "probing" && (
-          <p role="status" aria-live="polite" className="py-6 text-center text-sm text-[var(--text-muted)]">
-            {t("playlistImport.enumerating")}
-          </p>
-        )}
-
-        {step === "confirm" && info && (
-          <>
-            <p className="mb-2 flex-none truncate text-xs text-[var(--text-faint)]">{info.title}</p>
-            <div className="mb-2 flex flex-none flex-wrap items-center justify-between gap-2">
-              <Button size="sm" variant="outline" onClick={toggleAll}>
-                {allSelected ? t("playlistImport.deselectAll") : t("playlistImport.selectAll")}
-              </Button>
-              <span className="text-xs text-[var(--text-muted)]">
-                {t("playlistImport.selected", { selected: selected.size, total: info.episodes.length })}
-              </span>
-            </div>
-            {/* 整个清单一条细滚动条：长标题不截断，横向滑动时各行一起移动。 */}
-            <div className="ca-thin-scroll mb-3 min-h-0 flex-1 overflow-auto rounded-lg border border-[var(--border-subtle)] p-1.5">
-              <div className="min-w-max space-y-0.5">
-                {info.episodes.map((ep) => (
+          <div className="flex-none space-y-2">
+            <fieldset>
+              <legend className="mb-1 text-xs font-medium text-[var(--text-muted)]">{t("playlistImport.qualityLimit")}</legend>
+              <div className="flex flex-wrap gap-1.5">
+                {QUALITY_PRESETS.map((q) => (
                   <label
-                    key={ep.url}
-                    className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-2 py-1.5 text-sm hover:bg-[var(--surface-card-hover)]"
+                    key={q.label}
+                    className={`ca-touch-44 inline-flex cursor-pointer items-center rounded px-2 py-1 text-xs focus-within:outline-none focus-within:ring-2 focus-within:ring-[var(--focus-ring)] ${maxHeight === q.value ? "bg-[var(--accent-weak-2)] text-[var(--accent-text)]" : "bg-[var(--surface-card-hover)]"}`}
                   >
                     <input
-                      type="checkbox"
-                      checked={selected.has(ep.url)}
-                      onChange={() => toggle(ep.url)}
-                      className="h-3.5 w-3.5 flex-none accent-[var(--accent-text)]"
+                      type="radio"
+                      name="playlist-quality"
+                      value={q.value ?? "best"}
+                      checked={maxHeight === q.value}
+                      onChange={() => setMaxHeight(q.value)}
+                      className="sr-only"
                     />
-                    <span title={ep.title} className="text-[var(--text-normal)]">
-                      {ep.title}
-                    </span>
-                    {ep.duration_ms != null && (
-                      <span className="ml-auto flex-none pl-3 text-xs tabular-nums text-[var(--text-faint)]">
-                        {formatMs(ep.duration_ms)}
-                      </span>
-                    )}
+                    {q.labelKey ? t(q.labelKey) : q.label}
                   </label>
                 ))}
               </div>
-            </div>
-
-            <div className="flex-none space-y-2">
-              <fieldset>
-                <legend className="mb-1 text-xs font-medium text-[var(--text-muted)]">{t("playlistImport.qualityLimit")}</legend>
-                <div className="flex flex-wrap gap-1.5">
-                  {QUALITY_PRESETS.map((q) => (
-                    <label
-                      key={q.label}
-                      className={`ca-touch-44 inline-flex cursor-pointer items-center rounded px-2 py-1 text-xs focus-within:outline-none focus-within:ring-2 focus-within:ring-[var(--focus-ring)] ${maxHeight === q.value ? "bg-[var(--accent-weak-2)] text-[var(--accent-text)]" : "bg-[var(--surface-card-hover)]"}`}
-                    >
-                      <input
-                        type="radio"
-                        name="playlist-quality"
-                        value={q.value ?? "best"}
-                        checked={maxHeight === q.value}
-                        onChange={() => setMaxHeight(q.value)}
-                        className="sr-only"
-                      />
-                      {q.labelKey ? t(q.labelKey) : q.label}
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-              <label className="flex items-center gap-2 text-xs text-[var(--text-normal)]">
+            </fieldset>
+            <label className="flex items-center gap-2 text-xs text-[var(--text-normal)]">
+              <input
+                type="checkbox"
+                checked={useSub}
+                onChange={(e) => setUseSub(e.target.checked)}
+                className="h-3.5 w-3.5 accent-[var(--accent-text)]"
+              />
+              {t("playlistImport.preferSubtitle")}
+            </label>
+            {useSub && (
+              <label className="flex items-center gap-2 pl-5 text-xs text-[var(--text-normal)]">
                 <input
                   type="checkbox"
-                  checked={useSub}
-                  onChange={(e) => setUseSub(e.target.checked)}
+                  checked={autocorrect}
+                  onChange={(e) => setAutocorrect(e.target.checked)}
                   className="h-3.5 w-3.5 accent-[var(--accent-text)]"
                 />
-                {t("playlistImport.preferSubtitle")}
+                {t("playlistImport.aiCorrection")}
               </label>
-              {useSub && (
-                <label className="flex items-center gap-2 pl-5 text-xs text-[var(--text-normal)]">
-                  <input
-                    type="checkbox"
-                    checked={autocorrect}
-                    onChange={(e) => setAutocorrect(e.target.checked)}
-                    className="h-3.5 w-3.5 accent-[var(--accent-text)]"
-                  />
-                  {t("playlistImport.aiCorrection")}
-                </label>
-              )}
-              {error && <ErrorNote error={error} />}
-              <div className="flex flex-wrap justify-end gap-2 pt-1">
-                <Button size="sm" variant="outline" onClick={onClose}>
-                  {t("playlistImport.cancel")}
-                </Button>
-                <Button size="sm" disabled={selected.size === 0} onClick={runImport}>
-                  {t("playlistImport.importCount", { count: selected.size })}
-                </Button>
-              </div>
-            </div>
-          </>
-        )}
-
-        {step === "importing" && progress && (
-          <div
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-            className="space-y-3 py-4"
-          >
-            <p className="text-center text-sm text-[var(--text-muted)]">
-              {t("playlistImport.progress", { done: progress.done, total: progress.total })}
-            </p>
-            <p className="break-words text-center text-xs text-[var(--text-faint)]">{progress.title}</p>
-            <div
-              role="progressbar"
-              aria-label={t("playlistImport.progressAria")}
-              aria-valuemin={0}
-              aria-valuemax={progress.total}
-              aria-valuenow={progress.done}
-              aria-valuetext={t("playlistImport.progress", {
-                done: progress.done,
-                total: progress.total,
-              })}
-              className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-card-active)]"
-            >
-              <div
-                className="ca-fill-grad h-full rounded-full transition-[width] duration-300 ease-out motion-reduce:transition-none"
-                style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }}
-              />
-            </div>
-            <p className="text-center text-xs text-[var(--text-faint)]">
-              {t("playlistImport.progressNote")}
-            </p>
-          </div>
-        )}
-
-        {step === "done" && results && (
-          <div className="space-y-3">
-            <p role="status" aria-live="polite" className="text-sm text-[var(--text-strong)]">
-              {t("playlistImport.resultOk", { ok: results.ok })}
-              {results.failures.length > 0 && t("playlistImport.resultFail", { fail: results.failures.length })}
-            </p>
-            {results.failures.length > 0 && (
-              <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-[var(--border-subtle)] p-2 text-xs">
-                {results.failures.map((f, i) => (
-                  <div key={i} className="text-[var(--status-err)]">
-                    <span className="text-[var(--text-normal)]">{f.title}</span>：{f.error}
-                  </div>
-                ))}
-              </div>
             )}
-            <div className="flex justify-end">
-              <Button size="sm" onClick={onClose}>
-                {t("playlistImport.done")}
+            {error && <ErrorNote error={error} />}
+            <div className="flex flex-wrap justify-end gap-2 pt-1">
+              <Button size="sm" variant="outline" onClick={onClose}>
+                {t("playlistImport.cancel")}
+              </Button>
+              <Button size="sm" disabled={selected.size === 0} onClick={runImport}>
+                {t("playlistImport.importCount", { count: selected.size })}
               </Button>
             </div>
           </div>
-        )}
-        </Dialog.Content>
-      </Dialog.Overlay>
-    </Dialog.Root>
+        </>
+      )}
+
+      {step === "importing" && progress && (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="space-y-3 py-4"
+        >
+          <p className="text-center text-sm text-[var(--text-muted)]">
+            {t("playlistImport.progress", { done: progress.done, total: progress.total })}
+          </p>
+          <p className="break-words text-center text-xs text-[var(--text-faint)]">{progress.title}</p>
+          <div
+            role="progressbar"
+            aria-label={t("playlistImport.progressAria")}
+            aria-valuemin={0}
+            aria-valuemax={progress.total}
+            aria-valuenow={progress.done}
+            aria-valuetext={t("playlistImport.progress", {
+              done: progress.done,
+              total: progress.total,
+            })}
+            className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-card-active)]"
+          >
+            <div
+              className="ca-fill-grad h-full rounded-full transition-[width] duration-300 ease-out motion-reduce:transition-none"
+              style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }}
+            />
+          </div>
+          <p className="text-center text-xs text-[var(--text-faint)]">
+            {t("playlistImport.progressNote")}
+          </p>
+        </div>
+      )}
+
+      {step === "done" && results && (
+        <div className="space-y-3">
+          <p role="status" aria-live="polite" className="text-sm text-[var(--text-strong)]">
+            {t("playlistImport.resultOk", { ok: results.ok })}
+            {results.failures.length > 0 && t("playlistImport.resultFail", { fail: results.failures.length })}
+          </p>
+          {results.failures.length > 0 && (
+            <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-[var(--border-subtle)] p-2 text-xs">
+              {results.failures.map((f, i) => (
+                <div key={i} className="text-[var(--status-err)]">
+                  <span className="text-[var(--text-normal)]">{f.title}</span>：{f.error}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex justify-end">
+            <Button size="sm" onClick={onClose}>
+              {t("playlistImport.done")}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }

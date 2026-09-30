@@ -1,4 +1,4 @@
-import * as Dialog from "@radix-ui/react-dialog";
+import { Modal } from "@/components/ui/dialog";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -154,80 +154,57 @@ export function DatabaseBackupAction() {
           {busy === "restore" ? t("backup.restore.busy") : t("backup.restore.button")}
         </Button>
       </div>
-      <Dialog.Root
+      <Modal
         open={pendingRestore != null}
         onOpenChange={(open) => {
-          if (!open && busy !== "restore") closeRestoreConfirmation();
+          if (!open) closeRestoreConfirmation();
         }}
+        locked={busy === "restore"}
+        role="alertdialog"
+        tone="warning"
+        size="sm"
+        className="text-left"
+        title={t("backup.restore.confirmTitle")}
+        description={t(
+          mobile ? "backup.restore.confirmBodyMobile" : "backup.restore.confirmBodyDesktop",
+          { fileName: pendingRestore?.name ?? "" },
+        )}
+        descriptionClassName="mt-2"
+        overlayTestId="database-restore-overlay"
+        initialFocusRef={cancelRestoreRef}
+        returnFocusTo={() => restoreTriggerRef.current}
       >
-        <Dialog.Portal>
-          <Dialog.Overlay
-            data-testid="database-restore-overlay"
-            className="ca-dialog-overlay fixed inset-0 z-50 bg-black/50"
-          />
-          <Dialog.Content
-            role="alertdialog"
-            aria-modal="true"
-            onOpenAutoFocus={(event) => {
-              event.preventDefault();
-              cancelRestoreRef.current?.focus();
-            }}
-            onCloseAutoFocus={(event) => {
-              event.preventDefault();
-              restoreTriggerRef.current?.focus();
-            }}
-            onEscapeKeyDown={(event) => {
-              if (busy === "restore") event.preventDefault();
-            }}
-            onInteractOutside={(event) => {
-              if (busy === "restore") event.preventDefault();
-            }}
-            className="fixed left-1/2 top-1/2 z-[51] max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-[var(--status-warn)] bg-[var(--surface-panel)] p-5 text-left shadow-[var(--shadow-pop)]"
+        {status?.kind === "error" && (
+          <p
+            role="alert"
+            className="mt-3 rounded-lg bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)]"
           >
-            <Dialog.Title className="text-sm font-semibold text-[var(--text-strong)]">
-              {t("backup.restore.confirmTitle")}
-            </Dialog.Title>
-            <Dialog.Description className="mt-2 break-words text-xs leading-relaxed text-[var(--text-muted)]">
-              {t(
-                mobile
-                  ? "backup.restore.confirmBodyMobile"
-                  : "backup.restore.confirmBodyDesktop",
-                { fileName: pendingRestore?.name ?? "" },
-              )}
-            </Dialog.Description>
-            {status?.kind === "error" && (
-              <p
-                role="alert"
-                className="mt-3 rounded-lg bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)]"
-              >
-                {status.text}
-              </p>
-            )}
-            <div className="mt-4 flex flex-wrap justify-end gap-2">
-              <Button
-                ref={cancelRestoreRef}
-                size="sm"
-                variant="ghost"
-                disabled={busy !== null}
-                onClick={closeRestoreConfirmation}
-              >
-                {t("common.cancel")}
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                disabled={busy !== null}
-                onClick={() => void restore()}
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                {busy === "restore"
-                  ? t("backup.restore.busy")
-                  : t("backup.restore.confirmButton")}
-              </Button>
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+            {status.text}
+          </p>
+        )}
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <Button
+            ref={cancelRestoreRef}
+            size="sm"
+            variant="ghost"
+            disabled={busy !== null}
+            onClick={closeRestoreConfirmation}
+          >
+            {t("common.cancel")}
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            disabled={busy !== null}
+            onClick={() => void restore()}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            {busy === "restore"
+              ? t("backup.restore.busy")
+              : t("backup.restore.confirmButton")}
+          </Button>
+        </div>
+      </Modal>
       {status && !pendingRestore && (
         <p
           role={status.kind === "error" ? "alert" : "status"}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/dialog";
 import { LlmSettingsPanel, type LlmSettingsActions } from "@/components/LlmSettingsPanel";
 import { useContainerWidth } from "@/lib/useContainerWidth";
 import { CATEGORY_META, SETTINGS_CATEGORIES, type SettingsCategory } from "./categories";
@@ -56,9 +57,6 @@ export function SettingsPanel({
   const llmActionsRef = useRef<LlmSettingsActions | null>(null);
   const [pendingExit, setPendingExit] = useState<PendingSettingsExit | null>(null);
   const [resolvingPendingExit, setResolvingPendingExit] = useState(false);
-  const resolvingPendingExitRef = useRef(false);
-  resolvingPendingExitRef.current = resolvingPendingExit;
-  const pendingDialogRef = useRef<HTMLDivElement>(null);
   const registerLlmActions = useCallback((actions: LlmSettingsActions | null) => {
     llmActionsRef.current = actions;
   }, []);
@@ -78,39 +76,6 @@ export function SettingsPanel({
   // 窄屏下「进入了某分类」才显示详情；宽屏始终显示当前分类。
   const inDetail = compact && routeCategory !== null;
   const shownCategory = compact ? (inDetail ? activeCategory : null) : activeCategory;
-
-  useEffect(() => {
-    if (!pendingExit) return;
-    const dialog = pendingDialogRef.current;
-    const previousFocus = document.activeElement as HTMLElement | null;
-    const focusable = () =>
-      [...(dialog?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? [])];
-    focusable()[0]?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !resolvingPendingExitRef.current) {
-        event.preventDefault();
-        setPendingExit(null);
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const items = focusable();
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    dialog?.addEventListener("keydown", onKeyDown);
-    return () => {
-      dialog?.removeEventListener("keydown", onKeyDown);
-      previousFocus?.focus();
-    };
-  }, [pendingExit]);
 
   function applySettingsExit(intent: PendingSettingsExit) {
     if (intent.kind === "category") {
@@ -327,57 +292,45 @@ export function SettingsPanel({
           </div>
         )}
       </div>
-      {pendingExit && (
-        <div className="absolute inset-0 z-30 grid place-items-center bg-black/30 p-4">
-          <div
-            ref={pendingDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="llm-unsaved-title"
-            aria-describedby="llm-unsaved-description"
-            className="w-full max-w-sm rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-5 shadow-[var(--shadow-pop)]"
+      <Modal
+        open={pendingExit !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingExit(null);
+        }}
+        locked={resolvingPendingExit}
+        size="sm"
+        title={t("settings.unsavedChangesTitle")}
+        titleClassName="text-base"
+        description={t("settings.unsavedChangesDescription")}
+        descriptionClassName="mt-2 text-sm"
+      >
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <Button
+            variant="ghost"
+            disabled={resolvingPendingExit}
+            onClick={() => setPendingExit(null)}
           >
-            <h3
-              id="llm-unsaved-title"
-              className="text-base font-semibold text-[var(--text-strong)]"
-            >
-              {t("settings.unsavedChangesTitle")}
-            </h3>
-            <p
-              id="llm-unsaved-description"
-              className="mt-2 text-sm leading-relaxed text-[var(--text-muted)]"
-            >
-              {t("settings.unsavedChangesDescription")}
-            </p>
-            <div className="mt-5 flex flex-wrap justify-end gap-2">
-              <Button
-                variant="ghost"
-                disabled={resolvingPendingExit}
-                onClick={() => setPendingExit(null)}
-              >
-                {t("settings.keepEditing")}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={resolvingPendingExit}
-                onClick={discardAndContinue}
-                className="text-[var(--status-err)]"
-              >
-                {t("settings.discardChanges")}
-              </Button>
-              <Button
-                variant="primary"
-                disabled={resolvingPendingExit}
-                onClick={() => void saveAndContinue()}
-              >
-                {resolvingPendingExit
-                  ? t("llmSettings.saving")
-                  : t("settings.saveAndContinue")}
-              </Button>
-            </div>
-          </div>
+            {t("settings.keepEditing")}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={resolvingPendingExit}
+            onClick={discardAndContinue}
+            className="text-[var(--status-err)]"
+          >
+            {t("settings.discardChanges")}
+          </Button>
+          <Button
+            variant="primary"
+            disabled={resolvingPendingExit}
+            onClick={() => void saveAndContinue()}
+          >
+            {resolvingPendingExit
+              ? t("llmSettings.saving")
+              : t("settings.saveAndContinue")}
+          </Button>
         </div>
-      )}
+      </Modal>
     </div>
   );
 }

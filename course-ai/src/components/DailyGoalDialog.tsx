@@ -1,4 +1,4 @@
-import * as Dialog from "@radix-ui/react-dialog";
+import { Modal, ModalClose } from "@/components/ui/dialog";
 import { PencilLine, X } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -167,8 +167,26 @@ export function DailyGoalDialog({
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
-      <Dialog.Trigger asChild>
+    <Modal
+      open={open}
+      onOpenChange={handleOpenChange}
+      size="xs"
+      portalContainer={portalContainer}
+      initialFocusRef={dialRef}
+      title={t("dailyGoal.setDailyGoal")}
+      headerAction={
+        <ModalClose asChild>
+          <button
+            type="button"
+            aria-label={t("dailyGoal.close")}
+            title={t("dailyGoal.close")}
+            className="ca-icon-btn grid flex-none cursor-pointer place-items-center text-[var(--text-muted)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </ModalClose>
+      }
+      trigger={
         <button
           ref={triggerRef}
           type="button"
@@ -178,123 +196,95 @@ export function DailyGoalDialog({
         >
           <PencilLine className="h-3.5 w-3.5" />
         </button>
-      </Dialog.Trigger>
+      }
+    >
 
-      <Dialog.Portal container={portalContainer ?? undefined}>
-        <Dialog.Overlay className="ca-dialog-overlay fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content
-          aria-modal="true"
-          aria-describedby={undefined}
-          onOpenAutoFocus={(event) => {
-            event.preventDefault();
-            dialRef.current?.focus();
-          }}
-          className="fixed left-1/2 top-1/2 z-[51] max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-xs -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-5 text-[var(--text-normal)] shadow-[var(--shadow-pop)]"
+      <div
+        ref={dialRef}
+        role="slider"
+        tabIndex={0}
+        aria-label={t("dailyGoal.dailyStudyGoal")}
+        aria-valuemin={MIN_GOAL_MINUTES}
+        aria-valuemax={maxGoalMinutes}
+        aria-valuenow={draft}
+        aria-valuetext={t("dailyGoal.minutesValue", { value: draft })}
+        onKeyDown={handleKeyDown}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishPointer}
+        onPointerCancel={finishPointer}
+        onLostPointerCapture={() => {
+          draggingPointer.current = null;
+        }}
+        className="relative mx-auto h-52 w-52 max-h-[45dvh] max-w-[45dvh] cursor-grab touch-none select-none !rounded-full outline-none active:cursor-grabbing focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--surface-panel)]"
+        style={{ touchAction: "none" }}
+      >
+        <svg
+          className="h-full w-full"
+          viewBox={`0 0 ${DIAL_SIZE} ${DIAL_SIZE}`}
+          aria-hidden="true"
         >
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <Dialog.Title className="text-sm font-semibold text-[var(--text-strong)]">
-              {t("dailyGoal.setDailyGoal")}
-            </Dialog.Title>
-            <Dialog.Close asChild>
-              <button
-                type="button"
-                aria-label={t("dailyGoal.close")}
-                title={t("dailyGoal.close")}
-                className="ca-icon-btn grid flex-none cursor-pointer place-items-center text-[var(--text-muted)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </Dialog.Close>
-          </div>
-
-          <div
-            ref={dialRef}
-            role="slider"
-            tabIndex={0}
-            aria-label={t("dailyGoal.dailyStudyGoal")}
-            aria-valuemin={MIN_GOAL_MINUTES}
-            aria-valuemax={maxGoalMinutes}
-            aria-valuenow={draft}
-            aria-valuetext={t("dailyGoal.minutesValue", { value: draft })}
-            onKeyDown={handleKeyDown}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={finishPointer}
-            onPointerCancel={finishPointer}
-            onLostPointerCapture={() => {
-              draggingPointer.current = null;
-            }}
-            className="relative mx-auto h-52 w-52 max-h-[45dvh] max-w-[45dvh] cursor-grab touch-none select-none !rounded-full outline-none active:cursor-grabbing focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--surface-panel)]"
-            style={{ touchAction: "none" }}
-          >
-            <svg
-              className="h-full w-full"
-              viewBox={`0 0 ${DIAL_SIZE} ${DIAL_SIZE}`}
-              aria-hidden="true"
-            >
-              <path
-                d={arcPath(
-                  ARC_START_DEGREES,
-                  ARC_START_DEGREES + ARC_SWEEP_DEGREES,
-                )}
-                fill="none"
-                stroke="var(--surface-card-active)"
-                strokeWidth="14"
-                strokeLinecap="round"
-              />
-              {ratio > 0 && (
-                <path
-                  d={arcPath(
-                    ARC_START_DEGREES,
-                    ARC_START_DEGREES + ARC_SWEEP_DEGREES * ratio,
-                  )}
-                  fill="none"
-                  stroke="var(--accent-text)"
-                  strokeWidth="14"
-                  strokeLinecap="round"
-                />
+          <path
+            d={arcPath(
+              ARC_START_DEGREES,
+              ARC_START_DEGREES + ARC_SWEEP_DEGREES,
+            )}
+            fill="none"
+            stroke="var(--surface-card-active)"
+            strokeWidth="14"
+            strokeLinecap="round"
+          />
+          {ratio > 0 && (
+            <path
+              d={arcPath(
+                ARC_START_DEGREES,
+                ARC_START_DEGREES + ARC_SWEEP_DEGREES * ratio,
               )}
-              <circle
-                cx={thumb.x}
-                cy={thumb.y}
-                r="9"
-                fill="var(--surface-panel)"
-                stroke="var(--accent-text)"
-                strokeWidth="4"
-              />
-            </svg>
+              fill="none"
+              stroke="var(--accent-text)"
+              strokeWidth="14"
+              strokeLinecap="round"
+            />
+          )}
+          <circle
+            cx={thumb.x}
+            cy={thumb.y}
+            r="9"
+            fill="var(--surface-panel)"
+            stroke="var(--accent-text)"
+            strokeWidth="4"
+          />
+        </svg>
 
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-4xl font-semibold tabular-nums text-[var(--text-strong)]">
-                {draft}
-              </span>
-              <span className="mt-1 text-xs text-[var(--text-muted)]">{t("dailyGoal.minutes")}</span>
-            </div>
-            <span className="pointer-events-none absolute bottom-4 left-5 ca-t-2xs tabular-nums text-[var(--text-faint)]">
-              {MIN_GOAL_MINUTES}
-            </span>
-            <span className="pointer-events-none absolute bottom-4 right-3 ca-t-2xs tabular-nums text-[var(--text-faint)]">
-              {maxGoalMinutes}
-            </span>
-          </div>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-4xl font-semibold tabular-nums text-[var(--text-strong)]">
+            {draft}
+          </span>
+          <span className="mt-1 text-xs text-[var(--text-muted)]">{t("dailyGoal.minutes")}</span>
+        </div>
+        <span className="pointer-events-none absolute bottom-4 left-5 ca-t-2xs tabular-nums text-[var(--text-faint)]">
+          {MIN_GOAL_MINUTES}
+        </span>
+        <span className="pointer-events-none absolute bottom-4 right-3 ca-t-2xs tabular-nums text-[var(--text-faint)]">
+          {maxGoalMinutes}
+        </span>
+      </div>
 
-          <div className="mt-3 flex justify-end gap-2">
-            <Dialog.Close asChild>
-              <Button type="button" size="sm" variant="outline">
-                {t("dailyGoal.cancel")}
-              </Button>
-            </Dialog.Close>
-            <Button
-              type="button"
-              variant="primary"
-              size="sm"
-              onClick={save}
-            >
-              {t("dailyGoal.save")}
-            </Button>
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+      <div className="mt-3 flex justify-end gap-2">
+        <ModalClose asChild>
+          <Button type="button" size="sm" variant="outline">
+            {t("dailyGoal.cancel")}
+          </Button>
+        </ModalClose>
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          onClick={save}
+        >
+          {t("dailyGoal.save")}
+        </Button>
+      </div>
+    </Modal>
   );
 }

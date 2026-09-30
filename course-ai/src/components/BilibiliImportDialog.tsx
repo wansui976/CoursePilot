@@ -1,6 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { qk } from "@/lib/queryKeys";
-import * as Dialog from "@radix-ui/react-dialog";
 import { useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -8,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { ipc } from "@/lib/ipc";
 import type { ProbeResult, Video } from "@/lib/types";
+import { Modal } from "@/components/ui/dialog";
 
 type Step = "url" | "cookie" | "probing" | "confirm";
 type ImportRequest = {
@@ -164,227 +164,203 @@ export function BilibiliImportDialog({
     preparing || step === "probing" || importMutation.isPending;
 
   return (
-    <Dialog.Root
+    <Modal
       open
       onOpenChange={(open) => {
-        if (!open && !closeBlocked) onClose();
+        if (!open) onClose();
       }}
+      locked={closeBlocked}
+      title={t("bilibiliImport.title")}
+      titleClassName="mb-3"
+      overlayTestId="bilibili-import-overlay"
+      returnFocusTo={() => returnFocusRef?.current ?? restoreFocusRef.current}
     >
-      <Dialog.Overlay
-        data-testid="bilibili-import-overlay"
-        className="ca-dialog-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      >
-        <Dialog.Content
-          aria-modal="true"
-          aria-describedby={undefined}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            (returnFocusRef?.current ?? restoreFocusRef.current)?.focus();
-          }}
-          onEscapeKeyDown={(event) => {
-            if (closeBlocked) event.preventDefault();
-          }}
-          onInteractOutside={(event) => {
-            if (closeBlocked) event.preventDefault();
-          }}
-          onPointerDownOutside={(event) => {
-            if (closeBlocked) event.preventDefault();
-          }}
-          className="max-h-[calc(100dvh-2rem)] w-full max-w-[420px] overflow-y-auto rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-4 shadow-[var(--shadow-pop)] sm:p-5"
-        >
-        <Dialog.Title
-          className="mb-3 text-sm font-semibold text-[var(--text-strong)]"
-        >
-          {t("bilibiliImport.title")}
-        </Dialog.Title>
 
-        {step === "url" && (
-          <div className="space-y-3">
-            <input
-              aria-label={t("bilibiliImport.linkLabel")}
-              autoFocus
-              className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm outline-none focus:border-[var(--focus-ring)]"
-              placeholder={t("bilibiliImport.linkPlaceholder")}
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-            />
-            {error && <ErrorNote error={error} onRetry={() => void startUrl()} />}
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={closeBlocked}
-                onClick={onClose}
-              >
-                {t("bilibiliImport.cancel")}
-              </Button>
-              <Button
-                size="sm"
-                disabled={!url.trim() || preparing}
-                onClick={startUrl}
-              >
-                {preparing ? t("bilibiliImport.checking") : t("bilibiliImport.next")}
-              </Button>
-            </div>
+      {step === "url" && (
+        <div className="space-y-3">
+          <input
+            aria-label={t("bilibiliImport.linkLabel")}
+            autoFocus
+            className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm outline-none focus:border-[var(--focus-ring)]"
+            placeholder={t("bilibiliImport.linkPlaceholder")}
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          {error && <ErrorNote error={error} onRetry={() => void startUrl()} />}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={closeBlocked}
+              onClick={onClose}
+            >
+              {t("bilibiliImport.cancel")}
+            </Button>
+            <Button
+              size="sm"
+              disabled={!url.trim() || preparing}
+              onClick={startUrl}
+            >
+              {preparing ? t("bilibiliImport.checking") : t("bilibiliImport.next")}
+            </Button>
           </div>
-        )}
+        </div>
+      )}
 
-        {step === "cookie" && (
-          <div className="space-y-3 text-sm text-[var(--text-muted)]">
-            {cookieReason === "expired" ? (
-              <p dangerouslySetInnerHTML={{ __html: t("bilibiliImport.cookieExpired") }} />
-            ) : (
-              <p>{t("bilibiliImport.cookieNeeded")}</p>
-            )}
-            <ol className="list-decimal space-y-1 pl-5 text-xs leading-relaxed">
-              <li>
-                {t("bilibiliImport.chromeExtension")}
-                <b className="text-[var(--text-strong)]">
-                  {" "}
-                  Get cookies.txt LOCALLY{" "}
-                </b>
-              </li>
-              <li>{t("bilibiliImport.cookieStep1")}</li>
-              <li>{t("bilibiliImport.cookieStep2")}</li>
-            </ol>
-            {error && <ErrorNote error={error} onRetry={() => void pickCookie()} />}
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={closeBlocked}
-                onClick={() => setStep("url")}
-              >
-                {t("bilibiliImport.back")}
-              </Button>
-              <Button size="sm" disabled={preparing} onClick={pickCookie}>
-                {preparing ? t("bilibiliImport.importing") : t("bilibiliImport.selectCookies")}
-              </Button>
-            </div>
+      {step === "cookie" && (
+        <div className="space-y-3 text-sm text-[var(--text-muted)]">
+          {cookieReason === "expired" ? (
+            <p dangerouslySetInnerHTML={{ __html: t("bilibiliImport.cookieExpired") }} />
+          ) : (
+            <p>{t("bilibiliImport.cookieNeeded")}</p>
+          )}
+          <ol className="list-decimal space-y-1 pl-5 text-xs leading-relaxed">
+            <li>
+              {t("bilibiliImport.chromeExtension")}
+              <b className="text-[var(--text-strong)]">
+                {" "}
+                Get cookies.txt LOCALLY{" "}
+              </b>
+            </li>
+            <li>{t("bilibiliImport.cookieStep1")}</li>
+            <li>{t("bilibiliImport.cookieStep2")}</li>
+          </ol>
+          {error && <ErrorNote error={error} onRetry={() => void pickCookie()} />}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={closeBlocked}
+              onClick={() => setStep("url")}
+            >
+              {t("bilibiliImport.back")}
+            </Button>
+            <Button size="sm" disabled={preparing} onClick={pickCookie}>
+              {preparing ? t("bilibiliImport.importing") : t("bilibiliImport.selectCookies")}
+            </Button>
           </div>
-        )}
+        </div>
+      )}
 
-        {step === "probing" && (
-          <p role="status" aria-live="polite" className="py-6 text-center text-sm text-[var(--text-muted)]">
-            {t("bilibiliImport.probing")}
-          </p>
-        )}
+      {step === "probing" && (
+        <p role="status" aria-live="polite" className="py-6 text-center text-sm text-[var(--text-muted)]">
+          {t("bilibiliImport.probing")}
+        </p>
+      )}
 
-        {step === "confirm" && probe && (
-          <div className="space-y-4">
-            <p className="text-xs text-[var(--text-faint)]">{probe.title}</p>
+      {step === "confirm" && probe && (
+        <div className="space-y-4">
+          <p className="text-xs text-[var(--text-faint)]">{probe.title}</p>
 
-            <fieldset>
-              <legend className="mb-1 text-xs font-medium text-[var(--text-muted)]">
-                {t("bilibiliImport.quality")}
-              </legend>
-              <div className="flex flex-wrap gap-1.5">
-                {probe.qualities.length === 0 && (
-                  <span className="text-xs text-[var(--text-faint)]">
-                    {t("bilibiliImport.bestAvailable")}
-                  </span>
-                )}
-                {probe.qualities.map((q) => (
-                  <label
-                    key={q}
-                    className={`ca-touch-44 inline-flex cursor-pointer items-center rounded px-2 py-1 text-xs focus-within:outline-none focus-within:ring-2 focus-within:ring-[var(--focus-ring)] ${quality === q ? "bg-[var(--accent-weak-2)] text-[var(--accent-text)]" : "bg-[var(--surface-card-hover)]"}`}
-                  >
-                    <input
-                      type="radio"
-                      name="bilibili-quality"
-                      value={q}
-                      checked={quality === q}
-                      onChange={() => setQuality(q)}
-                      className="sr-only"
-                    />
-                    {q}P
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-
-            {probe.tracks.length > 0 ? (
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
-                  {t("bilibiliImport.subtitleDetected")}
+          <fieldset>
+            <legend className="mb-1 text-xs font-medium text-[var(--text-muted)]">
+              {t("bilibiliImport.quality")}
+            </legend>
+            <div className="flex flex-wrap gap-1.5">
+              {probe.qualities.length === 0 && (
+                <span className="text-xs text-[var(--text-faint)]">
+                  {t("bilibiliImport.bestAvailable")}
                 </span>
-                <select
-                  className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1.5 text-sm"
-                  value={subLang}
-                  onChange={(e) => setSubLang(e.target.value)}
-                >
-                  {probe.tracks.map((t) => (
-                    <option key={t.lang} value={t.lang}>
-                      {t.name}
-                      {t.auto ? "（AI）" : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : (
-              <p className="text-xs text-[var(--text-faint)]">
-                {t("bilibiliImport.noSubtitle")}
-              </p>
-            )}
-            {probe.tracks.length > 0 && (
-              <div>
-                <label className="mt-2 flex items-center gap-2 text-xs text-[var(--text-normal)]">
-                  <input
-                    type="checkbox"
-                    checked={autocorrect}
-                    onChange={(e) => setAutocorrect(e.target.checked)}
-                    className="h-3.5 w-3.5 accent-[var(--accent,#888)]"
-                  />
-                  {t("bilibiliImport.aiCorrection")}
-                </label>
-                <p className="mt-1 text-xs text-[var(--text-faint)]">
-                  {t("bilibiliImport.aiCorrectionNote")}
-                </p>
-              </div>
-            )}
-
-            {error && <ErrorNote error={error} />}
-            <div className="flex flex-wrap justify-end gap-2">
-              {probe.tracks.length > 0 && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={importMutation.isPending}
-                  onClick={() =>
-                    importMutation.mutate({
-                      useSub: false,
-                      quality: quality ?? probe.qualities[0],
-                      subLang,
-                      autocorrect,
-                    })
-                  }
-                >
-                  {t("bilibiliImport.skipSubtitle")}
-                </Button>
               )}
+              {probe.qualities.map((q) => (
+                <label
+                  key={q}
+                  className={`ca-touch-44 inline-flex cursor-pointer items-center rounded px-2 py-1 text-xs focus-within:outline-none focus-within:ring-2 focus-within:ring-[var(--focus-ring)] ${quality === q ? "bg-[var(--accent-weak-2)] text-[var(--accent-text)]" : "bg-[var(--surface-card-hover)]"}`}
+                >
+                  <input
+                    type="radio"
+                    name="bilibili-quality"
+                    value={q}
+                    checked={quality === q}
+                    onChange={() => setQuality(q)}
+                    className="sr-only"
+                  />
+                  {q}P
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          {probe.tracks.length > 0 ? (
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
+                {t("bilibiliImport.subtitleDetected")}
+              </span>
+              <select
+                className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1.5 text-sm"
+                value={subLang}
+                onChange={(e) => setSubLang(e.target.value)}
+              >
+                {probe.tracks.map((t) => (
+                  <option key={t.lang} value={t.lang}>
+                    {t.name}
+                    {t.auto ? "（AI）" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <p className="text-xs text-[var(--text-faint)]">
+              {t("bilibiliImport.noSubtitle")}
+            </p>
+          )}
+          {probe.tracks.length > 0 && (
+            <div>
+              <label className="mt-2 flex items-center gap-2 text-xs text-[var(--text-normal)]">
+                <input
+                  type="checkbox"
+                  checked={autocorrect}
+                  onChange={(e) => setAutocorrect(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-[var(--accent,#888)]"
+                />
+                {t("bilibiliImport.aiCorrection")}
+              </label>
+              <p className="mt-1 text-xs text-[var(--text-faint)]">
+                {t("bilibiliImport.aiCorrectionNote")}
+              </p>
+            </div>
+          )}
+
+          {error && <ErrorNote error={error} />}
+          <div className="flex flex-wrap justify-end gap-2">
+            {probe.tracks.length > 0 && (
               <Button
                 size="sm"
+                variant="outline"
                 disabled={importMutation.isPending}
                 onClick={() =>
                   importMutation.mutate({
-                    useSub: probe.tracks.length > 0,
+                    useSub: false,
                     quality: quality ?? probe.qualities[0],
                     subLang,
                     autocorrect,
                   })
                 }
               >
-                {importMutation.isPending
-                  ? t("bilibiliImport.downloading")
-                  : probe.tracks.length > 0
-                    ? t("bilibiliImport.downloadWithSub")
-                    : t("bilibiliImport.download")}
+                {t("bilibiliImport.skipSubtitle")}
               </Button>
-            </div>
+            )}
+            <Button
+              size="sm"
+              disabled={importMutation.isPending}
+              onClick={() =>
+                importMutation.mutate({
+                  useSub: probe.tracks.length > 0,
+                  quality: quality ?? probe.qualities[0],
+                  subLang,
+                  autocorrect,
+                })
+              }
+            >
+              {importMutation.isPending
+                ? t("bilibiliImport.downloading")
+                : probe.tracks.length > 0
+                  ? t("bilibiliImport.downloadWithSub")
+                  : t("bilibiliImport.download")}
+            </Button>
           </div>
-        )}
-        </Dialog.Content>
-      </Dialog.Overlay>
-    </Dialog.Root>
+        </div>
+      )}
+    </Modal>
   );
 }
