@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { MathText } from "@/components/MathText";
+import { MathText } from "@/ui/MathText";
 import i18n from "@/i18n";
 import { withClickableTimestamps } from "@/lib/clickableTimestamps";
 import {

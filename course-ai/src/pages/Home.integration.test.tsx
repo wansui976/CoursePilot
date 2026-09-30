@@ -89,7 +89,7 @@ const { mockIpc } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
-vi.mock("@/components/ConceptsPanel", () => ({
+vi.mock("@/features/knowledge/ConceptsPanel", () => ({
   ConceptsPanel: ({
     onClose,
     onJump,

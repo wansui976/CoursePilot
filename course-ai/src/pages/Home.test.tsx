@@ -47,16 +47,16 @@ const settingsExitRequestMock = vi.hoisted(() =>
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: confirmMock }));
-vi.mock("@/components/ImportVideoDialog", () => ({
+vi.mock("@/features/library/ImportVideoDialog", () => ({
   ImportVideoButton: () => <button>导入</button>,
 }));
-vi.mock("@/components/JobProgress", () => ({
+vi.mock("@/features/library/JobProgress", () => ({
   JobProgress: () => <div>处理进度</div>,
 }));
-vi.mock("@/components/RagSearchPanel", () => ({
+vi.mock("@/features/workspace/RagSearchPanel", () => ({
   RagSearchPanel: () => <input aria-label="课程问答" placeholder="向这节课提问或搜索文稿" />,
 }));
-vi.mock("@/components/settings/SettingsPanel", () => ({
+vi.mock("@/features/settings/SettingsPanel", () => ({
   SettingsPanel: ({
     onRegisterExitRequest,
   }: {
@@ -68,10 +68,10 @@ vi.mock("@/components/settings/SettingsPanel", () => ({
     return <div>设置面板</div>;
   },
 }));
-vi.mock("@/components/TabsPanel", () => ({
+vi.mock("@/features/workspace/TabsPanel", () => ({
   TabsPanel: () => <aside>学习资料面板</aside>,
 }));
-vi.mock("@/components/VideoPlayer", () => ({
+vi.mock("@/features/player", () => ({
   VideoPlayer: () => <div aria-label="视频播放器">视频播放器</div>,
 }));
 

@@ -170,9 +170,9 @@ describe("窄屏 shell 的响应式约束", () => {
 describe("阴影与过渡的写法约束", () => {
   function componentSources() {
     const files: string[] = [];
-    // 组件 + 页面两层都扫：裸 shadow 的案发地就在 src/pages/Home.tsx，
-    // 只扫 components 会放走页面里的同类问题。
-    const roots = [resolve("src/components"), resolve("src/pages")];
+    // 功能模块、通用 UI 与页面都扫：裸 shadow 的案发地就在 src/pages/Home.tsx，
+    // 只扫组件会放走页面里的同类问题。
+    const roots = [resolve("src/features"), resolve("src/ui"), resolve("src/pages")];
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
@@ -199,7 +199,7 @@ describe("阴影与过渡的写法约束", () => {
         .forEach((line, index) => {
           if (!/\bshadow-(sm|md|lg|xl|2xl)\b/.test(line) && !bareShadow.test(line)) return;
           if (line.includes("bg-black")) return;
-          offenders.push(`${file.replace(resolve("src/components"), "")}:${index + 1}`);
+          offenders.push(`${file.replace(resolve("src"), "")}:${index + 1}`);
         });
     }
 
@@ -246,6 +246,6 @@ describe("阴影与过渡的写法约束", () => {
       /\btransition-all\b/.test(readFileSync(file, "utf8")),
     );
 
-    expect(offenders.map((file) => file.replace(resolve("src/components"), ""))).toEqual([]);
+    expect(offenders.map((file) => file.replace(resolve("src"), ""))).toEqual([]);
   });
 });
