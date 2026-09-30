@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { qk } from "@/lib/queryKeys";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -56,17 +57,17 @@ async function refreshAfter(action: Proposal, queryClient: QueryClient) {
   switch (action.kind) {
     case "propose_rename":
     case "propose_import":
-      await queryClient.invalidateQueries({ queryKey: ["videos"] });
+      await queryClient.invalidateQueries({ queryKey: qk.videos.all() });
       return;
     case "propose_delete":
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["videos"] }),
-        queryClient.invalidateQueries({ queryKey: ["trash"] }),
+        queryClient.invalidateQueries({ queryKey: qk.videos.all() }),
+        queryClient.invalidateQueries({ queryKey: qk.trash() }),
       ]);
       return;
     case "propose_create_course":
     case "propose_rename_course":
-      await queryClient.invalidateQueries({ queryKey: ["courses"] });
+      await queryClient.invalidateQueries({ queryKey: qk.courses() });
       return;
     case "propose_setting":
       // 设置各处按需读取，没有统一的查询键可失效。

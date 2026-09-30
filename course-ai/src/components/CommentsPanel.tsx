@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { qk } from "@/lib/queryKeys";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, ThumbsUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -182,7 +183,7 @@ function ReplyItem({
 export function CommentsPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
   const { data, isPending, error } = useQuery({
-    queryKey: ["videoComments", videoId],
+    queryKey: qk.comments(videoId),
     queryFn: () => ipc.danmaku.comments(videoId),
     staleTime: Infinity,
     // 热门视频全量抓取（含楼中楼）要几十秒：面板挂载时不打断后台那次抓取。

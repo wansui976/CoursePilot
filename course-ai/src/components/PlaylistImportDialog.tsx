@@ -1,4 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { qk } from "@/lib/queryKeys";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
@@ -167,7 +168,7 @@ export function PlaylistImportDialog({
         failures.push({ title: ep.title, error: humanizeError(String(e)) });
       }
     }
-    queryClient.invalidateQueries({ queryKey: ["videos", courseId] });
+    queryClient.invalidateQueries({ queryKey: qk.videos.list(courseId) });
     setProgress({ done: eps.length, total: eps.length, title: "" });
     setResults({ ok, failures });
     setStep("done");

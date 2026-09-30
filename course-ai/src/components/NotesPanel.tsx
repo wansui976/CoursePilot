@@ -1,4 +1,6 @@
 import { useTranslation } from "react-i18next";
+import { queries } from "@/lib/queries";
+import { qk } from "@/lib/queryKeys";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { EditorContent, useEditor } from "@tiptap/react";
@@ -56,10 +58,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     return notesCoordinator.subscribe(videoId, setWriteState);
   }, [videoId]);
 
-  const notesQuery = useQuery({
-    queryKey: ["notes", videoId],
-    queryFn: () => ipc.ai.getNotes(videoId),
-  });
+  const notesQuery = useQuery(queries.notes(videoId));
   const notesContent = notesQuery.data;
   const localDraft = notesCoordinator.getDraft(videoId);
 
@@ -200,7 +199,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       return ipc.ai.generate(videoId, "notes");
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["notes", videoId] });
+      qc.invalidateQueries({ queryKey: qk.artifact("notes", videoId) });
       invalidateStaleArtifacts(qc, videoId);
     },
   });

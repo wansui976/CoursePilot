@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { queries } from "@/lib/queries";
+import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Brain, Check, CheckCircle2, CircleHelp, RotateCcw, XCircle } from "lucide-react";
@@ -72,10 +74,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
     isError,
     error,
     refetch,
-  } = useQuery({
-    queryKey: ["quiz", videoId],
-    queryFn: () => ipc.ai.getQuiz(videoId),
-  });
+  } = useQuery(queries.quiz(videoId));
   const [revealedState, setRevealedState] = useState<{
     videoId: string;
     raw: string | null | undefined;
@@ -102,7 +101,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
   const addToReview = useMutation({
     mutationFn: () => ipc.srs.generate(videoId),
     onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["srs-count-due"] }),
+      queryClient.invalidateQueries({ queryKey: qk.srs.countDue() }),
   });
 
   const stale = useStaleArtifacts(videoId);

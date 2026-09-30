@@ -1,4 +1,6 @@
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { queries } from "@/lib/queries";
+import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { invalidateStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -145,12 +147,7 @@ const TranscriptRow = memo(function TranscriptRow({
 export function TranscriptPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const transcriptQuery = useQuery({
-    queryKey: ["transcripts", videoId],
-    queryFn: () => ipc.transcripts.list(videoId),
-    refetchInterval: (query) =>
-      query.state.data && query.state.data.length > 0 ? false : 2000,
-  });
+  const transcriptQuery = useQuery(queries.transcripts(videoId));
   const segments = transcriptQuery.data ?? EMPTY_SEGMENTS;
   const requestSeek = usePlayer((s) => s.requestSeek);
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -208,7 +205,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     mutationFn: ({ id, text }: { id: number; text: string }) =>
       ipc.transcripts.update(id, text),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["transcripts", videoId] });
+      qc.invalidateQueries({ queryKey: qk.transcripts(videoId) });
       // 改过字幕之后，摘要/章节/笔记/题库/脑图讲的都还是旧稿的内容，重新算一次过期标记。
       invalidateStaleArtifacts(qc, videoId);
       setEditingId(null);
@@ -482,7 +479,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     mutationFn: (vars: { front: string; back: string; startMs: number | null }) =>
       ipc.srs.addCard(videoId, "cloze", vars.front, vars.back, vars.startMs),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["srs-count-due"] });
+      qc.invalidateQueries({ queryKey: qk.srs.countDue() });
       setClozeAdded(true);
       window.setTimeout(() => setClozeAdded(false), 1600);
     },

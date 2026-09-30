@@ -1,4 +1,5 @@
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
+import { qk } from "@/lib/queryKeys";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, RotateCcw, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -48,7 +49,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
     error: loadError,
     refetch,
   } = useQuery({
-    queryKey: ["trash"],
+    queryKey: qk.trash(),
     queryFn: ipc.trash.list,
   });
   const groups = useMemo(() => groupByCourse(items), [items]);
@@ -84,9 +85,9 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
   }
 
   function refresh() {
-    qc.invalidateQueries({ queryKey: ["trash"] });
-    qc.invalidateQueries({ queryKey: ["courses"] });
-    qc.invalidateQueries({ queryKey: ["videos"] });
+    qc.invalidateQueries({ queryKey: qk.trash() });
+    qc.invalidateQueries({ queryKey: qk.courses() });
+    qc.invalidateQueries({ queryKey: qk.videos.all() });
   }
 
   const restore = useMutation({

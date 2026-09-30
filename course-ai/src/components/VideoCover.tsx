@@ -1,4 +1,5 @@
 import { Film } from "lucide-react";
+import { qk } from "@/lib/queryKeys";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ipc } from "@/lib/ipc";
@@ -14,7 +15,7 @@ export function VideoCover({
   className: string;
 }) {
   const { data } = useQuery({
-    queryKey: ["video-cover", videoId],
+    queryKey: qk.videoCover(videoId),
     queryFn: () => ipc.videos.cover(videoId),
     staleTime: Infinity,
     gcTime: 30 * 60_000,

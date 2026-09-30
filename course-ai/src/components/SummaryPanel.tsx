@@ -1,8 +1,8 @@
 import { useState } from "react";
+import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, FileText } from "lucide-react";
-import { ipc } from "@/lib/ipc";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { usePlayer } from "@/stores/player";
 import { TextSkeleton } from "@/components/ui/skeleton";
@@ -41,10 +41,7 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
     isError,
     error,
     refetch,
-  } = useQuery({
-    queryKey: ["summary", videoId],
-    queryFn: () => ipc.ai.getSummary(videoId),
-  });
+  } = useQuery(queries.summary(videoId));
   const stale = useStaleArtifacts(videoId);
   const generate = useAiGeneration(videoId, "summary");
 

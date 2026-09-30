@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/queryKeys";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
@@ -6,7 +7,6 @@ import { isMobile } from "@/lib/platform";
 import {
   isSkipSilenceEnabled,
   setSkipSilenceEnabled,
-  silenceSkipQueryKey,
   skipTargetMs,
   type SkipRange,
 } from "@/lib/silenceSkip";
@@ -50,7 +50,7 @@ export function useSilenceSkip(videoId: string) {
   }, []);
 
   const skipsQuery = useQuery({
-    queryKey: silenceSkipQueryKey(videoId),
+    queryKey: qk.silenceSkips(videoId),
     queryFn: () => ipc.videos.skips(videoId),
     enabled: enabled && available,
     retry: false,

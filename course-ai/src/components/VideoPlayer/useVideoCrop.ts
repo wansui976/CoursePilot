@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/queryKeys";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -72,7 +73,7 @@ export function useVideoCrop(
   // 探测结果查询。已测过立即返回；没测过且在播放中就后台起任务（后端去重），
   // detecting=true 期间每 2s 轮询，直到 insets 落地。
   const { data: status } = useQuery({
-    queryKey: ["video-crop", videoId],
+    queryKey: qk.videoCrop(videoId),
     queryFn: () => ipc.videos.ensureCrop(videoId),
     enabled: cropOn && playbackReady,
     refetchInterval: (query) => (query.state.data?.detecting ? 2000 : false),

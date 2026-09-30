@@ -1,4 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
+import { qk } from "@/lib/queryKeys";
 import { useMemo, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -37,7 +38,7 @@ export function FolderImportDialog({
   const importBatch = useMutation({
     mutationFn: (paths: string[]) => ipc.videos.addLocalBatch(courseId, paths),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["videos", courseId] });
+      queryClient.invalidateQueries({ queryKey: qk.videos.list(courseId) });
       onImported?.();
       onClose();
     },

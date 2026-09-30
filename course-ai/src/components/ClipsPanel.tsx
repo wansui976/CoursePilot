@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
@@ -55,7 +56,7 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
     error,
     refetch,
   } = useQuery({
-    queryKey: ["clips", videoId],
+    queryKey: qk.clips(videoId),
     queryFn: () => ipc.clips.list(videoId),
   });
 
@@ -86,7 +87,7 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
   }, [clips, videoId]);
 
   const invalidate = () =>
-    qc.invalidateQueries({ queryKey: ["clips", videoId] });
+    qc.invalidateQueries({ queryKey: qk.clips(videoId) });
 
   const add = useMutation({
     mutationFn: (v: { start: number; end: number }) =>
@@ -145,7 +146,7 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
             item.id === savedClip.id ? { ...item, note: savedClip.note } : item,
           ),
         );
-        void qc.invalidateQueries({ queryKey: ["clips", savedClip.video_id] });
+        void qc.invalidateQueries({ queryKey: qk.clips(savedClip.video_id) });
       },
       onError: (_error, failedClip) => {
         const key = noteKey(failedClip);

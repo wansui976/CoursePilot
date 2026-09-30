@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { qk } from "@/lib/queryKeys";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
@@ -21,7 +22,7 @@ export function SlideImage({
   const { t } = useTranslation();
   // 字节走 Query 缓存（staleTime: Infinity）：切 tab 重挂时不再逐张重新走 IPC。
   const { data, isError } = useQuery({
-    queryKey: ["slide-image", videoId, imagePath],
+    queryKey: qk.slideImage(videoId, imagePath),
     queryFn: () => ipc.slides.image(videoId, imagePath),
     staleTime: Infinity,
     gcTime: 30 * 60_000,

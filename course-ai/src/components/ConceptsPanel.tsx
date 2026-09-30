@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
+import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -378,7 +379,7 @@ export function ConceptsPanel({
     error,
     refetch,
   } = useQuery({
-    queryKey: ["course-knowledge", courseId],
+    queryKey: qk.courseKnowledge(courseId),
     queryFn: () => ipc.concepts.get(courseId),
   });
 
@@ -388,7 +389,7 @@ export function ConceptsPanel({
     isPending: dueCountsPending,
     isError: dueCountsError,
   } = useQuery({
-    queryKey: ["srs-concept-due", courseId],
+    queryKey: qk.srs.conceptDue.course(courseId),
     queryFn: () => ipc.srs.conceptDueCounts(courseId),
   });
   const dueCountByConcept = useMemo(
@@ -408,9 +409,9 @@ export function ConceptsPanel({
   }, [initialNavigationState, isLoading]);
 
   function invalidateKnowledge() {
-    void queryClient.invalidateQueries({ queryKey: ["course-knowledge", courseId] });
-    void queryClient.invalidateQueries({ queryKey: ["course-concepts", courseId] });
-    void queryClient.invalidateQueries({ queryKey: ["srs-concept-due", courseId] });
+    void queryClient.invalidateQueries({ queryKey: qk.courseKnowledge(courseId) });
+    void queryClient.invalidateQueries({ queryKey: qk.courseConcepts(courseId) });
+    void queryClient.invalidateQueries({ queryKey: qk.srs.conceptDue.course(courseId) });
   }
 
   const analyzeKey = analyzeMutationKey(courseId);
@@ -546,16 +547,16 @@ export function ConceptsPanel({
       );
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ["srs-concept-due", courseId] });
-      void queryClient.invalidateQueries({ queryKey: ["srs-count-due"] });
+      void queryClient.invalidateQueries({ queryKey: qk.srs.conceptDue.course(courseId) });
+      void queryClient.invalidateQueries({ queryKey: qk.srs.countDue() });
     },
   });
 
   // 复习结束（或退出）：刷新概念待复习数与仪表盘计数。
   function closeReview() {
     setReviewing(null);
-    void queryClient.invalidateQueries({ queryKey: ["srs-concept-due", courseId] });
-    void queryClient.invalidateQueries({ queryKey: ["srs-count-due"] });
+    void queryClient.invalidateQueries({ queryKey: qk.srs.conceptDue.course(courseId) });
+    void queryClient.invalidateQueries({ queryKey: qk.srs.countDue() });
   }
 
   const allConcepts = knowledge?.groups.flatMap((group) => group.concepts) ?? [];

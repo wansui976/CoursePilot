@@ -1,4 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { qk } from "@/lib/queryKeys";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
@@ -139,7 +140,7 @@ export function BilibiliImportDialog({
         request.useSub ? request.autocorrect : undefined,
       ),
     onSuccess: (video, request) => {
-      queryClient.invalidateQueries({ queryKey: ["videos", courseId] });
+      queryClient.invalidateQueries({ queryKey: qk.videos.list(courseId) });
       // 选用了字幕：立即跑流水线，让字幕被消化成文稿（ASR 阶段会走字幕分支、
       // 跳过语音识别），用户无需再手动「开始处理」。
       if (request.useSub) {

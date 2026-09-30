@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, Copy, RefreshCw, Terminal, Trash2 } from "lucide-react";
@@ -130,12 +131,12 @@ export function DevConsole({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { data: logs = [], isFetching } = useQuery({
-    queryKey: ["dev-logs"],
+    queryKey: qk.devLogs(),
     queryFn: ipc.dev.logs,
     refetchInterval: 3000,
   });
   const { data: usage = [] } = useQuery({
-    queryKey: ["llm-usage"],
+    queryKey: qk.llmUsage(),
     queryFn: ipc.dev.llmUsage,
     refetchInterval: 3000,
   });
@@ -145,8 +146,8 @@ export function DevConsole({ onClose }: { onClose: () => void }) {
       await ipc.dev.clearLlmUsage();
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["dev-logs"] });
-      qc.invalidateQueries({ queryKey: ["llm-usage"] });
+      qc.invalidateQueries({ queryKey: qk.devLogs() });
+      qc.invalidateQueries({ queryKey: qk.llmUsage() });
     },
   });
   const [copied, setCopied] = useState(false);
@@ -220,7 +221,7 @@ export function DevConsole({ onClose }: { onClose: () => void }) {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => qc.invalidateQueries({ queryKey: ["dev-logs"] })}
+            onClick={() => qc.invalidateQueries({ queryKey: qk.devLogs() })}
             aria-label={t("devConsole.refresh")}
             title={t("devConsole.refresh")}
           >

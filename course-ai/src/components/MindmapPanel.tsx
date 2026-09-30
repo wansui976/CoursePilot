@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Maximize2, Share2, ZoomIn, ZoomOut } from "lucide-react";
@@ -27,7 +28,7 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
     error,
     refetch,
   } = useQuery({
-    queryKey: ["mindmap", videoId],
+    queryKey: qk.artifact("mindmap", videoId),
     queryFn: () => ipc.ai.getMindmap(videoId),
   });
   const stale = useStaleArtifacts(videoId);

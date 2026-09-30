@@ -1,8 +1,8 @@
 import { useState } from "react";
+import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ListTree } from "lucide-react";
-import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import { ErrorNote } from "@/components/ui/ErrorNote";
@@ -41,10 +41,7 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
     isError,
     error,
     refetch,
-  } = useQuery({
-    queryKey: ["chapters", videoId],
-    queryFn: () => ipc.ai.getChapters(videoId),
-  });
+  } = useQuery(queries.chapters(videoId));
   const stale = useStaleArtifacts(videoId);
   const generate = useAiGeneration(videoId, "chapters");
 

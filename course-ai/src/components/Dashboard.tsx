@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { queries } from "@/lib/queries";
+import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -197,55 +199,52 @@ export function Dashboard({
   } | null>(null);
 
   const weakQuery = useQuery({
-    queryKey: ["weak-concepts"],
+    queryKey: qk.weakConcepts(),
     queryFn: () => ipc.srs.weakConcepts(),
   });
 
   // 概念复习结束：刷新薄弱榜与待复习计数。
   function closeWeakReview() {
     setWeakReview(null);
-    queryClient.invalidateQueries({ queryKey: ["weak-concepts"] });
-    queryClient.invalidateQueries({ queryKey: ["srs-count-due"] });
+    queryClient.invalidateQueries({ queryKey: qk.weakConcepts() });
+    queryClient.invalidateQueries({ queryKey: qk.srs.countDue() });
   }
 
   const dueCountQuery = useQuery({
-    queryKey: ["srs-count-due"],
+    queryKey: qk.srs.countDue(),
     queryFn: () => ipc.srs.countDue(),
   });
 
   // 下一批到期时刻：没有到期卡时用它代替一个点不动的禁用按钮。
   const nextDueAtQuery = useQuery({
-    queryKey: ["srs-next-due"],
+    queryKey: qk.srs.nextDue(),
     queryFn: () => ipc.stats.nextDueAt(),
   });
 
   const continueQuery = useQuery({
-    queryKey: ["stats-continue"],
+    queryKey: qk.stats.continue(),
     queryFn: () => ipc.stats.continueLearning(),
   });
 
   const dailyQuery = useQuery({
-    queryKey: ["stats-daily", today],
+    queryKey: qk.stats.daily(today),
     queryFn: () => ipc.stats.dailyTotals(fromTs, Date.now()),
   });
   const courseTotalsQuery = useQuery({
-    queryKey: ["stats-courses"],
+    queryKey: qk.stats.courses(),
     queryFn: () => ipc.stats.courseTotals(),
   });
-  const coursesQuery = useQuery({
-    queryKey: ["courses"],
-    queryFn: ipc.courses.list,
-  });
+  const coursesQuery = useQuery(queries.courses());
   const courseVideoIdsQuery = useQuery({
-    queryKey: ["stats-course-video-ids"],
+    queryKey: qk.stats.courseVideoIds(),
     queryFn: () => ipc.stats.courseVideoIds(),
   });
   const dueByCourseQuery = useQuery({
-    queryKey: ["srs-due-by-course"],
+    queryKey: qk.srs.dueByCourse(),
     queryFn: () => ipc.srs.dueByCourse(),
   });
   const progressRowsQuery = useQuery({
-    queryKey: ["stats-video-progress"],
+    queryKey: qk.stats.videoProgress(),
     queryFn: () => ipc.stats.videoProgress(),
   });
 

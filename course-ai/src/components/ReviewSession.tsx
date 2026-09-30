@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { qk } from "@/lib/queryKeys";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CheckCircle2, RotateCcw, X, XCircle } from "lucide-react";
@@ -75,8 +76,8 @@ export function ReviewSession({
   const [sessionId] = useState(() => ++reviewSessionSequence);
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: concept
-      ? ["srs-due-concept", concept.courseId, concept.conceptId, sessionId]
-      : ["srs-due-session", sessionId],
+      ? qk.srs.conceptSession(concept.courseId, concept.conceptId, sessionId)
+      : qk.srs.session(sessionId),
     queryFn: () =>
       concept
         ? ipc.srs.dueByConcept(concept.courseId, concept.conceptId)
@@ -116,11 +117,11 @@ export function ReviewSession({
     try {
       await review.mutateAsync({ cardId: card.id, rating });
       void Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["srs-count-due"] }),
-        queryClient.invalidateQueries({ queryKey: ["srs-next-due"] }),
-        queryClient.invalidateQueries({ queryKey: ["srs-due-by-course"] }),
-        queryClient.invalidateQueries({ queryKey: ["srs-concept-due"] }),
-        queryClient.invalidateQueries({ queryKey: ["weak-concepts"] }),
+        queryClient.invalidateQueries({ queryKey: qk.srs.countDue() }),
+        queryClient.invalidateQueries({ queryKey: qk.srs.nextDue() }),
+        queryClient.invalidateQueries({ queryKey: qk.srs.dueByCourse() }),
+        queryClient.invalidateQueries({ queryKey: qk.srs.conceptDue.all() }),
+        queryClient.invalidateQueries({ queryKey: qk.weakConcepts() }),
       ]);
       setRevealed(false);
       selectedOptionsRef.current = [];
@@ -159,7 +160,7 @@ export function ReviewSession({
 
   // 会话结束刷新待复习计数（仪表盘据此更新）。
   useEffect(() => {
-    if (done) queryClient.invalidateQueries({ queryKey: ["srs-count-due"] });
+    if (done) queryClient.invalidateQueries({ queryKey: qk.srs.countDue() });
   }, [done, queryClient]);
 
   // 键盘：有选项时 A–Z 选答案，空格/回车翻面；翻面后 1–4 打分。

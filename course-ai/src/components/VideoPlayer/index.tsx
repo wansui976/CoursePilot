@@ -1,4 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import { queries } from "@/lib/queries";
+import { qk } from "@/lib/queryKeys";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -182,16 +184,11 @@ export function VideoPlayer({
     prevPitch?: boolean;
   } | null>(null);
 
-  const { data: queriedSegments } = useQuery({
-    queryKey: ["transcripts", videoId],
-    queryFn: () => ipc.transcripts.list(videoId),
-    refetchInterval: (query) =>
-      query.state.data && query.state.data.length > 0 ? false : 2000,
-  });
+  const { data: queriedSegments } = useQuery(queries.transcripts(videoId));
   // 弹幕：B 站视频才有数据（其余源后端直接返回空）。库里没有时后端会先在线
   // 抓一次并缓存，首开可能慢几秒——抓到前开关不出现，不打扰本地视频。
   const { data: queriedDanmaku } = useQuery({
-    queryKey: ["danmaku", videoId],
+    queryKey: qk.danmaku(videoId),
     queryFn: () => ipc.danmaku.list(videoId),
     staleTime: Infinity,
   });

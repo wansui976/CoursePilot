@@ -18,6 +18,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { qk } from "@/lib/queryKeys";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { humanizeError } from "@/lib/errors";
@@ -58,7 +59,7 @@ export function ImportVideoButton({
   // 移动端无 yt-dlp sidecar / 无法扫描任意文件夹，隐藏「下载网络视频」「导入整个文件夹」入口。
   const mobile = isMobile();
   const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ["videos", courseId] });
+    queryClient.invalidateQueries({ queryKey: qk.videos.list(courseId) });
 
   const menuItems = useCallback(
     () =>

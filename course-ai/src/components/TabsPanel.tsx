@@ -1,10 +1,10 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Captions, LayoutGrid, Sparkles, StickyNote } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TextSkeleton } from "@/components/ui/skeleton";
-import { ipc } from "@/lib/ipc";
 import {
   readVideoResumeState,
   type StudyTab,
@@ -52,26 +52,10 @@ function PanelFallback() {
  *  独立成组件的原因：徽标查询状态更新只重渲染自己的 span，不带动整个面板
  *  （尤其已保活的文稿/笔记等重面板）重渲染。 */
 function TabBadge({ tab, videoId }: { tab: Tab; videoId: string }) {
-  const quiz = useQuery({
-    queryKey: ["quiz", videoId],
-    queryFn: () => ipc.ai.getQuiz(videoId),
-    staleTime: 60_000,
-  });
-  const notes = useQuery({
-    queryKey: ["notes", videoId],
-    queryFn: () => ipc.ai.getNotes(videoId),
-    staleTime: 60_000,
-  });
-  const summary = useQuery({
-    queryKey: ["summary", videoId],
-    queryFn: () => ipc.ai.getSummary(videoId),
-    staleTime: 60_000,
-  });
-  const chapters = useQuery({
-    queryKey: ["chapters", videoId],
-    queryFn: () => ipc.ai.getChapters(videoId),
-    staleTime: 60_000,
-  });
+  const quiz = useQuery({ ...queries.quiz(videoId), staleTime: 60_000 });
+  const notes = useQuery({ ...queries.notes(videoId), staleTime: 60_000 });
+  const summary = useQuery({ ...queries.summary(videoId), staleTime: 60_000 });
+  const chapters = useQuery({ ...queries.chapters(videoId), staleTime: 60_000 });
 
   // 徽标只数有效题：与 QuizPanel 的 sanitize 同口径的轻量近似（stem 非空即可）。
   const quizCount = useMemo(() => {

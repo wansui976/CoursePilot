@@ -7,6 +7,7 @@ import {
   type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { qk } from "@/lib/queryKeys";
 import type { TFunction } from "i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
@@ -1141,7 +1142,7 @@ export function AssistantPanel({
     }
     try {
       await notesCoordinator.appendAnswer(videoId, turn.answer);
-      void queryClient.invalidateQueries({ queryKey: ["notes", videoId] });
+      void queryClient.invalidateQueries({ queryKey: qk.artifact("notes", videoId) });
       setSavedToNotesTurnId(turn.id);
       if (saveToNotesTimerRef.current != null) window.clearTimeout(saveToNotesTimerRef.current);
       saveToNotesTimerRef.current = window.setTimeout(() => setSavedToNotesTurnId(null), 1500);

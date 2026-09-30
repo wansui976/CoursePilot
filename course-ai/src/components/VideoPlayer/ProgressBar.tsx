@@ -1,10 +1,9 @@
 import { useState } from "react";
+import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { formatMs } from "@/lib/time";
-import { ipc } from "@/lib/ipc";
 import { usePlayer } from "@/stores/player";
-import type { Chapter } from "@/lib/types";
 import type { SkipRange } from "@/lib/silenceSkip";
 
 const ARROW_SEEK_STEP_MS = 5_000;
@@ -31,10 +30,7 @@ export function ProgressBar({
   const durationMs = usePlayer((s) => s.durationMs);
   const [hoverPct, setHoverPct] = useState<number | null>(null);
   // 章节刻度数据与章节面板共用同一查询键，缓存命中即零成本。
-  const { data: chapters = [] } = useQuery<Chapter[]>({
-    queryKey: ["chapters", videoId],
-    queryFn: () => ipc.ai.getChapters(videoId),
-  });
+  const { data: chapters = [] } = useQuery(queries.chapters(videoId));
   const safeDuration = Math.max(0, durationMs);
   const safeCurrentMs = Math.min(safeDuration, Math.max(0, currentMs));
   const progressPercent =

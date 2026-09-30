@@ -1,4 +1,6 @@
 import { confirm as confirmDialog, message as messageDialog } from "@tauri-apps/plugin-dialog";
+import { queries } from "@/lib/queries";
+import { qk } from "@/lib/queryKeys";
 import { FolderOpen, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -31,10 +33,7 @@ function nextCourseName(courses: { name: string }[], t: (key: string, opts?: Rec
 export function useCreateCourse() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { data: courses = [] } = useQuery({
-    queryKey: ["courses"],
-    queryFn: ipc.courses.list,
-  });
+  const { data: courses = [] } = useQuery(queries.courses());
   const [creatingCourse, setCreatingCourse] = useState(false);
   const [createError, setCreateError] = useState<Error | null>(null);
 
@@ -47,7 +46,7 @@ export function useCreateCourse() {
       const dir = await pickDirectoryPath(["courses", name]);
       if (!dir) return;
       await ipc.courses.create(name, dir);
-      await queryClient.invalidateQueries({ queryKey: ["courses"] });
+      await queryClient.invalidateQueries({ queryKey: qk.courses() });
     } catch (error) {
       setCreateError(error instanceof Error ? error : new Error(String(error)));
     } finally {
@@ -87,10 +86,7 @@ export function CourseList({
     isError: coursesError,
     error: coursesErrorObj,
     refetch: refetchCourses,
-  } = useQuery({
-    queryKey: ["courses"],
-    queryFn: ipc.courses.list,
-  });
+  } = useQuery(queries.courses());
 
   const [menuFor, setMenuFor] = useState<string | null>(null);
   // 打开时记录触发按钮的屏幕坐标：菜单 portal 到 body 用 fixed 定位，
@@ -218,7 +214,7 @@ export function CourseList({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
       ipc.courses.rename(id, name),
     onSuccess: async (_data, { id }) => {
-      await queryClient.invalidateQueries({ queryKey: ["courses"] });
+      await queryClient.invalidateQueries({ queryKey: qk.courses() });
       setRenamingId(null);
       setRenameDraft("");
       queueMicrotask(() => menuButtonRefs.current.get(id)?.focus());
@@ -228,7 +224,7 @@ export function CourseList({
   const remove = useMutation({
     mutationFn: (id: string) => ipc.courses.delete(id),
     onSuccess: (_data, id) => {
-      queryClient.invalidateQueries({ queryKey: ["courses"] });
+      queryClient.invalidateQueries({ queryKey: qk.courses() });
       if (id === selectedCourseId) {
         const next = courses.find((course) => course.id !== id);
         if (next) onSelect(next.id);
@@ -240,9 +236,9 @@ export function CourseList({
     mutationFn: ({ id, root }: { id: string; root: string }) =>
       ipc.courses.relinkRoot(id, root),
     onSuccess: async (res, { id }) => {
-      await queryClient.invalidateQueries({ queryKey: ["courses"] });
-      await queryClient.invalidateQueries({ queryKey: ["videos", id] });
-      await queryClient.invalidateQueries({ queryKey: ["media-url"] });
+      await queryClient.invalidateQueries({ queryKey: qk.courses() });
+      await queryClient.invalidateQueries({ queryKey: qk.videos.list(id) });
+      await queryClient.invalidateQueries({ queryKey: qk.mediaUrl.all() });
       const lines = [t("courseList.relinkResult", { relinked: res.relinked, total: res.total })];
       if (res.missing.length)
         lines.push(t("courseList.relinkMissing", { count: res.missing.length, names: res.missing.join("、") }));

@@ -1,4 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queries } from "@/lib/queries";
+import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { invalidateStaleArtifacts } from "@/lib/useStaleArtifacts";
 import {
@@ -74,7 +76,6 @@ import type {
 } from "@/lib/types";
 import { buildAssistantContext, reconcileAssistantAction } from "@/lib/assistantHome";
 import { formatMs } from "@/lib/time";
-import { silenceSkipQueryKey } from "@/lib/silenceSkip";
 import { displayTitle } from "@/lib/videoTitle";
 import {
   WATCHED_RATIO,
@@ -389,15 +390,8 @@ export function Home() {
     isError: videosError,
     error: videosErrorObj,
     refetch: refetchVideos,
-  } = useQuery({
-    queryKey: ["videos", selectedCourseId],
-    queryFn: () => ipc.videos.list(selectedCourseId!),
-    enabled: !!selectedCourseId,
-  });
-  const { data: courses = [] } = useQuery({
-    queryKey: ["courses"],
-    queryFn: ipc.courses.list,
-  });
+  } = useQuery(queries.videos(selectedCourseId));
+  const { data: courses = [] } = useQuery(queries.courses());
   // 顶栏副标「已看完 N 个」：本地按播放进度聚合，零后端改动。
   // 不 memo：看完一集从工作台返回时 videos 引用不变（react-query 结构共享），
   // memo 会停在旧值，而卡片 ov-bar 是渲染期直读 localStorage 反而是新的——同屏打架。
@@ -435,7 +429,7 @@ export function Home() {
     isLoading: activeProcessingLoading,
     refetch: refetchActiveProcessing,
   } = useQuery({
-    queryKey: ["processing-videos"],
+    queryKey: qk.processingVideos(),
     queryFn: ipc.pipeline.active,
   });
   const activeProcessingVideos = useMemo(
@@ -560,7 +554,7 @@ export function Home() {
     },
     onError: () => {
       void queryClient.invalidateQueries({
-        queryKey: ["videos", selectedCourseId],
+        queryKey: qk.videos.list(selectedCourseId),
       });
     },
   });
@@ -715,7 +709,7 @@ export function Home() {
     error: mediaSrcErrorObj,
     refetch: refetchMediaSrc,
   } = useQuery({
-    queryKey: ["media-url", selectedVideo?.id],
+    queryKey: qk.mediaUrl.video(selectedVideo?.id),
     queryFn: () => ipc.videos.mediaUrl(selectedVideo!.id),
     enabled: !!selectedVideo,
   });
@@ -1028,16 +1022,16 @@ export function Home() {
       const asrKey = `${videoId}:asr`;
       if (jobs.asr?.status === "done" && !generatedAfterAsr.current.has(asrKey)) {
         generatedAfterAsr.current.add(asrKey);
-        queryClient.invalidateQueries({ queryKey: ["videos"] });
+        queryClient.invalidateQueries({ queryKey: qk.videos.all() });
       }
       for (const stage of ["slides", "slides_ocr"] as const) {
         const key = `${videoId}:${stage}`;
         if (jobs[stage]?.status === "done" && !generatedAfterAsr.current.has(key)) {
           generatedAfterAsr.current.add(key);
-          queryClient.invalidateQueries({ queryKey: ["slides", videoId] });
+          queryClient.invalidateQueries({ queryKey: qk.slides(videoId) });
           // OCR 只补页面文字，不改变换页时间；只在 slides 真正重提取后重规划跳停顿。
           if (stage === "slides") {
-            queryClient.invalidateQueries({ queryKey: silenceSkipQueryKey(videoId) });
+            queryClient.invalidateQueries({ queryKey: qk.silenceSkips(videoId) });
           }
         }
       }
@@ -1046,8 +1040,8 @@ export function Home() {
         const key = `${videoId}:${stage}`;
         if (jobs[stage]?.status === "done" && !generatedAfterAsr.current.has(key)) {
           generatedAfterAsr.current.add(key);
-          queryClient.invalidateQueries({ queryKey: [stage, videoId] });
-          queryClient.invalidateQueries({ queryKey: ["videos", selectedCourseId] });
+          queryClient.invalidateQueries({ queryKey: qk.artifact(stage, videoId) });
+          queryClient.invalidateQueries({ queryKey: qk.videos.list(selectedCourseId) });
         }
       }
     });
@@ -1149,7 +1143,7 @@ export function Home() {
     mutationFn: (target: { videoId: string; courseId: string }) =>
       ipc.pipeline.recorrect(target.videoId),
     onSuccess: (_d, target) => {
-      queryClient.invalidateQueries({ queryKey: ["transcripts", target.videoId] });
+      queryClient.invalidateQueries({ queryKey: qk.transcripts(target.videoId) });
       // 纠错重写了整份文稿：各 AI 产物据此重新判断是否已过期。
       invalidateStaleArtifacts(queryClient, target.videoId);
     },
@@ -1225,7 +1219,7 @@ export function Home() {
     const shouldRestoreFocus = renameDialogRef.current?.contains(document.activeElement) ?? false;
     setRenamingVideo(null);
     if (shouldRestoreFocus) restoreFocus(originTrigger);
-    await queryClient.invalidateQueries({ queryKey: ["videos", selectedCourseId] });
+    await queryClient.invalidateQueries({ queryKey: qk.videos.list(selectedCourseId) });
   }
 
   async function deleteVideo(videoId: string) {
@@ -1237,8 +1231,8 @@ export function Home() {
     await ipc.videos.delete(videoId);
     setQueuedVideos((items) => items.filter((item) => item.id !== videoId));
     if (selectedVideoId === videoId) setSelectedVideoId(null);
-    await queryClient.invalidateQueries({ queryKey: ["videos", selectedCourseId] });
-    await queryClient.invalidateQueries({ queryKey: ["trash"] });
+    await queryClient.invalidateQueries({ queryKey: qk.videos.list(selectedCourseId) });
+    await queryClient.invalidateQueries({ queryKey: qk.trash() });
   }
 
   // 设置 / 回收站作为主区域整页，与处理队列一致；互斥切换。保留当前选中的视频，

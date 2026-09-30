@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { qk } from "@/lib/queryKeys";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, Play, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -50,7 +51,7 @@ export function JobProgress({ videoId }: { videoId: string }) {
   const setOne = useJobs((s) => s.setOne);
 
   const jobsQuery = useQuery({
-    queryKey: ["pipeline-jobs", videoId],
+    queryKey: qk.pipelineJobs(videoId),
     queryFn: () => ipc.pipeline.jobs(videoId),
   });
 

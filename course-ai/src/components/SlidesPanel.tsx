@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -17,7 +18,6 @@ import {
 import { SlideImage } from "@/components/SlideImage";
 import { formatMs } from "@/lib/time";
 import { getSlidesSensitivity, sensitivityToThreshold } from "@/lib/slides";
-import { silenceSkipQueryKey } from "@/lib/silenceSkip";
 import { usePlayer } from "@/stores/player";
 
 /**
@@ -102,11 +102,11 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   const currentMs = () => usePlayer.getState().currentMs;
 
   const slidesQuery = useQuery({
-    queryKey: ["slides", videoId],
+    queryKey: qk.slides(videoId),
     queryFn: () => ipc.slides.list(videoId),
   });
   const shotsQuery = useQuery({
-    queryKey: ["screenshots", videoId],
+    queryKey: qk.screenshots(videoId),
     queryFn: () => ipc.slides.screenshots(videoId),
   });
   const slides = slidesQuery.data ?? [];
@@ -148,8 +148,8 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
       );
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["slides", videoId] });
-      void qc.invalidateQueries({ queryKey: silenceSkipQueryKey(videoId) });
+      void qc.invalidateQueries({ queryKey: qk.slides(videoId) });
+      void qc.invalidateQueries({ queryKey: qk.silenceSkips(videoId) });
     },
     onSettled: () => {
       extractRequest.current = null;
@@ -159,7 +159,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   const capture = useMutation<unknown, unknown, FrameRequest>({
     mutationKey: captureKey,
     mutationFn: ({ atMs }) => ipc.slides.capture(videoId, atMs),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["screenshots", videoId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.screenshots(videoId) }),
   });
   const ocr = useMutation<string, unknown, FrameRequest>({
     mutationKey: frameOcrKey,
@@ -173,7 +173,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
       return ipc.slides.ocr(videoId, requestId, force, setPagesOcrProgress);
     },
     onSettled: () => {
-      void qc.invalidateQueries({ queryKey: ["slides", videoId] });
+      void qc.invalidateQueries({ queryKey: qk.slides(videoId) });
       setPagesOcrProgress(null);
     },
   });
