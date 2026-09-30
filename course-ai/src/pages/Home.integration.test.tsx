@@ -215,7 +215,6 @@ describe("Home selected-video integration", () => {
       open: false,
       side: "right",
       width: 380,
-      mode: "float",
     });
     usePlayer.setState({
       videoId: null,
@@ -1225,30 +1224,23 @@ describe("Home selected-video integration", () => {
     );
   });
 
-  it("stacks a 1024px desktop workbench when the docked assistant consumes the split width", async () => {
+  it("keeps a 1024px desktop workbench two-column while the floating assistant is open", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("wide");
     mockUseContainerWidth.useContainerPixelWidth.mockReturnValue(1024);
-    useAssistantUi.setState({
-      open: true,
-      side: "right",
-      width: 380,
-      mode: "docked",
-    });
+    useAssistantUi.setState({ open: true, side: "right", width: 380 });
 
     const { container } = renderHome();
 
     fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
+    // 助手浮在内容上方，不再让主区让出宽度。
     const app = container.firstElementChild as HTMLElement;
-    expect(app).toHaveAttribute("data-shell", "sidebar");
-    expect(app).toHaveStyle({ paddingRight: "380px" });
+    expect(app.style.paddingRight).toBe("");
+    expect(app.style.paddingLeft).toBe("");
     expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
       "data-layout",
-      "stacked",
+      "wide",
     );
-    expect(
-      screen.queryByRole("separator", { name: "调整学习资料宽度" }),
-    ).not.toBeInTheDocument();
   });
 });

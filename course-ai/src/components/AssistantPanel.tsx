@@ -19,8 +19,6 @@ import {
   LoaderCircle,
   MessageSquarePlus,
   MoreHorizontal,
-  Move,
-  PanelLeft,
   Sparkles,
   X,
 } from "lucide-react";
@@ -312,12 +310,9 @@ export function AssistantPanel({
     sheetDragY,
     suppressLauncherClickRef,
     focusLauncherAfterCloseRef,
-    docked,
     movePanelToSide,
     openFromDock,
     collapseToNearestSide,
-    enterDockMode,
-    exitDockMode,
     beginPanelDrag,
     beginDockDrag,
     beginResize,
@@ -339,7 +334,7 @@ export function AssistantPanel({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
-  /** 头部「⋯」菜单：收纳换边、停靠切换这类一次性低频操作。 */
+  /** 头部「⋯」菜单：收纳换边这类一次性低频操作。 */
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const headerMenuRef = useRef<HTMLDivElement>(null);
   const headerMenuTriggerRef = useRef<HTMLButtonElement>(null);
@@ -1386,13 +1381,11 @@ export function AssistantPanel({
     : launcherInWorkbench
       ? "calc(env(safe-area-inset-bottom, 0px) + 88px)"
       : "calc(env(safe-area-inset-bottom, 0px) + 24px)";
-  // 桌面端「停靠为侧栏」：贴边全高、内容让位，不再盖在阅读物上。
-  const panelShown = docked || open;
+  // 桌面端只有浮动一种形态：覆盖在内容上、可拖动，不挤占播放器与学习面板的空间。
+  const panelShown = open;
   const shell = mobile
     ? "fixed inset-x-0 z-[47] h-[70dvh] max-h-[calc(100dvh-56px)] rounded-t-2xl border-t"
-    : docked
-      ? "fixed z-40 top-0 bottom-0 rounded-none border"
-      : "fixed z-40 h-[min(720px,calc(100dvh-2rem))] max-w-[calc(100vw-2rem)] rounded-2xl border";
+    : "fixed z-40 h-[min(720px,calc(100dvh-2rem))] max-w-[calc(100vw-2rem)] rounded-2xl border";
   const panelBottom = bottomNavigationVisible
     ? "calc(56px + env(safe-area-inset-bottom, 0px))"
     : "env(safe-area-inset-bottom, 0px)";
@@ -1499,10 +1492,6 @@ export function AssistantPanel({
           requestAnimationFrame(() => historyButtonRef.current?.focus());
           return;
         }
-        if (docked) {
-          exitDockMode();
-          return;
-        }
         collapseToNearestSide(true);
       }}
       data-dragging={mobile ? undefined : dragging}
@@ -1510,15 +1499,9 @@ export function AssistantPanel({
       style={
         mobile
           ? { bottom: panelBottom, transform: sheetDragY != null ? `translateY(${sheetDragY}px)` : undefined }
-          : docked
-            ? side === "left"
-              ? { left: 0, top: 0, width: panelWidth }
-              : { right: 0, top: 0, width: panelWidth }
-            : { left: position.x, top: position.y, width: panelWidth }
+          : { left: position.x, top: position.y, width: panelWidth }
       }
       className={`${panelShown ? "flex" : "hidden"} ${shell} flex-col border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] ${
-        docked ? "ca-assistant-dock" : ""
-      } ${
         snapSide ? "ring-2 ring-[var(--accent)]" : ""
       } ${sheetDragY != null ? "transition-none" : ""}`}
     >
@@ -1530,7 +1513,9 @@ export function AssistantPanel({
           <span className="h-1 w-10 rounded-full bg-[var(--border-control)]" aria-hidden="true" />
         </div>
       )}
-      {/* 朝向屏幕内侧的那条边是宽度抓手。固定宽度对一段带列表和公式的长回答太窄了。 */}
+      {/* 朝向屏幕内侧的那条边是宽度抓手。固定宽度对一段带列表和公式的长回答太窄了。
+          抓取区全高、骑在边框上（内外各 6px），不占内容宽度；可见反馈就是面板那条边本身：
+          指示层与面板外框重合、同半径圆角，悬停/拖动/聚焦时整条边连同上下圆角一起点亮。 */}
       {!mobile && (
         <div
           role="separator"
@@ -1542,10 +1527,20 @@ export function AssistantPanel({
           tabIndex={0}
           onPointerDown={beginResize}
           onKeyDown={resizeWithKeyboard}
-          className={`absolute inset-y-3 z-10 w-2 cursor-col-resize touch-none rounded-full bg-[var(--border-subtle)] transition-colors hover:bg-[var(--accent)] focus-visible:outline-none focus-visible:bg-[var(--focus-ring)] motion-reduce:transition-none ${
-            side === "right" ? "left-0" : "right-0"
-          } ${panelWidth !== width ? "bg-[var(--accent)]" : ""}`}
-        />
+          data-resizing={panelWidth !== width || undefined}
+          className={`group absolute inset-y-0 z-10 w-3 cursor-col-resize touch-none focus-visible:outline-none ${
+            side === "right" ? "-left-[6px]" : "-right-[6px]"
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className={`pointer-events-none absolute -inset-y-px w-4 border-transparent transition-colors motion-reduce:transition-none group-hover:border-[var(--accent)] group-focus-visible:border-[var(--focus-ring)] group-data-[resizing]:border-[var(--accent)] ${
+              side === "right"
+                ? "left-[5px] rounded-l-2xl border-l-2"
+                : "right-[5px] rounded-r-2xl border-r-2"
+            }`}
+          />
+        </div>
       )}
       <header className="flex items-center gap-1 border-b border-[var(--border-subtle)] px-3 py-2">
         {/* 提问范围原先挤在标题旁边，11px 一行灰字。它决定了「这个视频」指的是谁，
@@ -1560,16 +1555,6 @@ export function AssistantPanel({
               {t("assistant.title")}
             </span>
           </>
-        ) : docked ? (
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 px-1 py-1">
-            <Sparkles className="h-4 w-4 flex-none text-[var(--accent-text)]" />
-            <span
-              id="assistant-panel-title"
-              className="min-w-0 flex-1 text-sm font-medium text-[var(--text-strong)]"
-            >
-              {t("assistant.title")}
-            </span>
-          </span>
         ) : (
           <button
             type="button"
@@ -1636,7 +1621,7 @@ export function AssistantPanel({
             <MessageSquarePlus className="h-4 w-4" />
           </Button>
         )}
-        {/* 换边、停靠切换是一辈子用不了几次的一次性设置，收进「⋯」；
+        {/* 换边是一辈子用不了几次的一次性设置，收进「⋯」；
             常驻按钮只留高频的：历史、新会话、关闭。 */}
         {!mobile && (
           <div
@@ -1665,34 +1650,20 @@ export function AssistantPanel({
                 }}
                 className="absolute right-0 top-full z-30 mt-1"
               >
-                {!docked && (
-                  <MenuItem
-                    className="flex items-center gap-2"
-                    onClick={() => {
-                      movePanelToSide(side === "left" ? "right" : "left");
-                      setHeaderMenuOpen(false);
-                      requestAnimationFrame(() => headerMenuTriggerRef.current?.focus());
-                    }}
-                  >
-                    {side === "left" ? (
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    ) : (
-                      <ChevronLeft className="h-3.5 w-3.5" />
-                    )}
-                    {side === "left" ? t("assistant.dockRight") : t("assistant.dockLeft")}
-                  </MenuItem>
-                )}
                 <MenuItem
                   className="flex items-center gap-2"
                   onClick={() => {
-                    if (docked) exitDockMode();
-                    else enterDockMode();
+                    movePanelToSide(side === "left" ? "right" : "left");
                     setHeaderMenuOpen(false);
                     requestAnimationFrame(() => headerMenuTriggerRef.current?.focus());
                   }}
                 >
-                  {docked ? <Move className="h-3.5 w-3.5" /> : <PanelLeft className="h-3.5 w-3.5" />}
-                  {docked ? t("assistant.undock") : t("assistant.dockAsSidebar")}
+                  {side === "left" ? (
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  ) : (
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  )}
+                  {side === "left" ? t("assistant.dockRight") : t("assistant.dockLeft")}
                 </MenuItem>
               </Menu>
             )}
@@ -1703,7 +1674,7 @@ export function AssistantPanel({
           variant="ghost"
           aria-label={t("assistant.collapseAssistant")}
           title={t("assistant.collapseWithShortcut", { shortcut: toggleShortcutLabel() })}
-          onClick={() => (docked ? exitDockMode() : collapseToNearestSide(true))}
+          onClick={() => collapseToNearestSide(true)}
           className="ca-touch-44"
         >
           <X className="h-4 w-4" />

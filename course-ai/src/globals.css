@@ -2367,22 +2367,52 @@ html.theme-circle-vt::view-transition-new(root) {
   }
 }
 
-/* 助手停靠侧栏滑入：从右侧横向淡入。display:none→flex 时重触发。 */
-@keyframes ca-panel-in {
-  from {
-    opacity: 0;
-    transform: translateX(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+/* ===== 次级视图统一头部（ViewHeader 组件）=====
+   Apple 式字阶层级：20px semibold 收紧字距 + 13px muted 描述，纯字无图标锁扣。
+   取代此前各视图手搓的 text-lg/text-2xl 混杂头部；分隔线降到 faint 档，
+   内容区的层级靠字阶和留白而不是粗线。 */
+.ca-view-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 28px 16px;
+  border-bottom: 1px solid var(--border-faint);
+  background: var(--surface-header);
+  flex: none;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .ca-assistant-dock {
-    animation: ca-panel-in var(--dur-slow) var(--ease) backwards;
-  }
+.ca-view-header-text {
+  min-width: 0;
+}
+
+.ca-view-title {
+  margin: 0;
+  font-size: var(--fs-xl);
+  line-height: var(--lh-xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-1);
+}
+
+.ca-view-desc {
+  margin: 3px 0 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-3);
+}
+
+.ca-view-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.ca-app[data-bucket="compact"] .ca-view-header,
+.ca-app[data-bucket="medium"] .ca-view-header {
+  flex-wrap: wrap;
+  padding: 12px 16px;
 }
 
 /* 字阶工具类：显式字号+行高，替代散落的 text-[13px]/[15px] 等。 */

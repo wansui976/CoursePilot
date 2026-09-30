@@ -224,27 +224,9 @@ export function Home() {
   const accent = useTheme((s) => s.accent);
   const customAccent = useTheme((s) => s.customAccent);
   const toggleTheme = useTheme((s) => s.toggle);
-  // 助手停靠成侧栏时，主内容要往内让出它占的宽度，别被盖住。
-  const assistantMode = useAssistantUi((s) => s.mode);
-  const assistantSide = useAssistantUi((s) => s.side);
-  const assistantWidth = useAssistantUi((s) => s.width);
+  // 助手只有浮动一种形态，盖在内容上方，不占主区宽度；rail 按钮就是开/关。
   const assistantOpen = useAssistantUi((s) => s.open);
-  const setAssistantOpen = useAssistantUi((s) => s.setOpen);
-  const setAssistantMode = useAssistantUi((s) => s.setMode);
-  /** rail 上的助手开关高亮：停靠或浮窗展开都算「助手在」。 */
-  const assistantActive = assistantMode === "docked" || assistantOpen;
-  function toggleAssistantFromRail() {
-    // 三态循环：停靠侧栏 → 收回成浮球 → 重新停靠侧栏。
-    if (assistantMode === "docked") {
-      setAssistantMode("float");
-      setAssistantOpen(false);
-    } else if (assistantOpen) {
-      setAssistantOpen(false);
-    } else {
-      setAssistantMode("docked");
-      setAssistantOpen(true);
-    }
-  }
+  const toggleAssistant = useAssistantUi((s) => s.toggle);
   const [view, setView] = useState<LibraryView>(readInitialView);
   // 网格卡片密度（舒适/紧凑）：只影响网格列宽，切到列表视图无意义但保留记忆。
   const [gridDensity, setGridDensity] = useState<GridDensity>(readGridDensity);
@@ -344,15 +326,11 @@ export function Home() {
   const shellWide = bucket === "wide" && !stackedPortrait;
   const tabletWide = tabletDevice && shellWide;
   const isPhoneDevice = !shellWide;
-  // A docked assistant consumes space inside the app shell. Base the split
-  // decision on the remaining main-column width, so a 1024px window cannot
-  // keep a two-column workbench with a 380px assistant and a cropped player.
   // rail 常驻消耗 56px；宽栏只在展开时再占 256px，折叠时为 0。宽度总和喂给工作台布局。
   const sidebarWidth = shellWide
     ? 56 + (sidebarCollapsed[selectedVideoId ? "workbench" : "library"] ? 0 : 256)
     : 0;
-  const dockWidth = shellWide && assistantMode === "docked" ? assistantWidth : 0;
-  const workbenchAvailableWidth = Math.max(0, appPixelWidth - sidebarWidth - dockWidth);
+  const workbenchAvailableWidth = Math.max(0, appPixelWidth - sidebarWidth);
   const maxStudyPanelWidthForLayout = Math.min(
     STUDY_PANEL_MAX,
     Math.max(
@@ -2443,14 +2421,7 @@ export function Home() {
       data-shell={isPhoneDevice ? "stacked" : "sidebar"}
       data-view={isWorkbenchView || (!isPhoneDevice && inVideoSession) ? "workbench" : "library"}
       data-sidebar={isPhoneDevice ? undefined : sidebarIsCollapsed ? "collapsed" : "expanded"}
-      style={{
-        ...(accentVars(accent, theme, customAccent) as CSSProperties),
-        ...(assistantMode === "docked" && shellWide
-          ? assistantSide === "left"
-            ? { paddingLeft: assistantWidth }
-            : { paddingRight: assistantWidth }
-          : null),
-      }}
+      style={accentVars(accent, theme, customAccent) as CSSProperties}
       className="ca-app"
     >
       {isPhoneDevice ? null : (
@@ -2463,8 +2434,8 @@ export function Home() {
             queueCount={queuedVideos.length}
             onToggleQueue={toggleQueue}
             onOpenDashboard={() => openMainView("dashboard")}
-            assistantActive={assistantActive}
-            onToggleAssistant={toggleAssistantFromRail}
+            assistantActive={assistantOpen}
+            onToggleAssistant={toggleAssistant}
             theme={theme}
             themeToggleLabel={themeToggleLabel}
             onToggleTheme={toggleTheme}

@@ -138,7 +138,7 @@ describe("AssistantPanel", () => {
     localStorage.clear();
     platformMock.mobile = false;
     platformMock.tablet = false;
-    useAssistantUi.setState({ open: true, side: "right", width: 380, mode: "float" });
+    useAssistantUi.setState({ open: true, side: "right", width: 380 });
     useInlineAsk.setState({ pending: null });
     mockIpc.assistant.ask.mockResolvedValue(reply());
     mockIpc.assistant.cancel.mockResolvedValue(undefined);
@@ -2183,13 +2183,12 @@ describe("AssistantPanel", () => {
     expect(screen.getByLabelText("对助手说")).toBeInTheDocument();
   });
 
-  it("换边与停靠切换收进「⋯」菜单", () => {
+  it("只有浮动形态：「⋯」菜单里只剩换边，没有停靠为侧栏", () => {
     renderPanel();
-    // 常驻按钮只留高频的：历史、新会话、更多、收起。停靠这类一次性设置不再一字排开。
-    expect(screen.queryByLabelText("停靠为侧栏")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "停靠为侧栏" }));
-    expect(useAssistantUi.getState().mode).toBe("docked");
+    expect(screen.getAllByRole("menuitem")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("menuitem", { name: /停靠到左/ }));
+    expect(useAssistantUi.getState().side).toBe("left");
   });
 
   it("宽屏 iPad 跟随布局档位使用桌面面板", () => {
@@ -2324,7 +2323,7 @@ describe("确认卡", () => {
     localStorage.clear();
     platformMock.mobile = false;
     platformMock.tablet = false;
-    useAssistantUi.setState({ open: true, side: "right", mode: "float" });
+    useAssistantUi.setState({ open: true, side: "right" });
     mockIpc.assistant.ask.mockResolvedValue(reply());
     mockIpc.assistant.cancel.mockResolvedValue(undefined);
     mockIpc.courses.list.mockResolvedValue([

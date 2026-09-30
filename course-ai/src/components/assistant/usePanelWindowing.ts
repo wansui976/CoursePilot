@@ -94,7 +94,7 @@ export function usePanelWindowing({
   /** 打开/停靠后聚焦输入框；输入框归面板的对话层管，这里只拿回调。 */
   focusInput: () => void;
 }) {
-  const { side, width, mode, dock, setWidth, setMode, setOpen } = useAssistantUi();
+  const { side, width, dock, setWidth, setOpen } = useAssistantUi();
   const [position, setPosition] = useState<PanelPosition>(() => initialPanelPosition(side));
   const [dockTop, setDockTop] = useState(initialDockTop);
   /** 拖动中球的落点；不在拖动时为 null，球回到 left-3 / right-3 + dockTop 的贴边位置。 */
@@ -111,7 +111,6 @@ export function usePanelWindowing({
   const suppressLauncherClickRef = useRef(false);
   /** 收起后焦点是否该回到球上；由 dockToStrip 写、面板层在收起后消费。 */
   const focusLauncherAfterCloseRef = useRef(false);
-  const docked = !mobile && mode === "docked";
 
   const measurePanel = useCallback(function measurePanel() {
     const fallback = fallbackPanelSize();
@@ -164,17 +163,6 @@ export function usePanelWindowing({
     const nearestSide: DockSide =
       position.x + panel.width / 2 < viewportSize().width / 2 ? "left" : "right";
     dockToStrip(nearestSide, position.y, focusLauncher);
-  }
-
-  function enterDockMode() {
-    setMode("docked");
-    setOpen(true);
-    focusInput();
-  }
-
-  function exitDockMode() {
-    setMode("float");
-    collapseToNearestSide(true);
   }
 
   function updateDrag(clientX: number, clientY: number) {
@@ -395,18 +383,7 @@ export function usePanelWindowing({
     const startX = event.clientX;
     const startWidth = measurePanel().width;
     // 不动的那条边。左边框拖动时右边固定，反之亦然。
-    // 浮动面板按 position（渲染真实值）；停靠侧栏时贴边渲染、position 是旧值，
-    // 改按实测矩形，jsdom 里矩形为 0 时退到贴边位置（右 0 → viewport.width，左 0 → 0）。
-    let anchor: number;
-    if (docked) {
-      const rect = panelRef.current?.getBoundingClientRect();
-      const viewport = viewportSize();
-      const panelLeft = rect?.width ? rect.left : side === "left" ? 0 : viewport.width - startWidth;
-      const panelRight = rect?.width ? rect.right : panelLeft + startWidth;
-      anchor = fromLeftEdge ? panelRight : panelLeft;
-    } else {
-      anchor = fromLeftEdge ? position.x + startWidth : position.x;
-    }
+    const anchor = fromLeftEdge ? position.x + startWidth : position.x;
 
     try {
       handle.setPointerCapture(pointerId);
@@ -614,12 +591,9 @@ export function usePanelWindowing({
     sheetDragY,
     suppressLauncherClickRef,
     focusLauncherAfterCloseRef,
-    docked,
     movePanelToSide,
     openFromDock,
     collapseToNearestSide,
-    enterDockMode,
-    exitDockMode,
     beginPanelDrag,
     beginDockDrag,
     beginResize,
