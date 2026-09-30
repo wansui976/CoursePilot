@@ -13,8 +13,6 @@ import {
   List,
   Loader2,
   MoreHorizontal,
-  PanelLeftClose,
-  PanelLeftOpen,
   Play,
   Search,
   Shrink,
@@ -27,8 +25,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { onBackButtonPress } from "@tauri-apps/api/app";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
@@ -41,8 +37,10 @@ import { Dashboard } from "@/components/Dashboard";
 import { ConceptsPanel, type ConceptNavigationState } from "@/components/ConceptsPanel";
 import { DevConsole } from "@/components/DevConsole";
 import { ImportVideoButton } from "@/components/ImportVideoDialog";
-import { SettingsPanel } from "@/components/SettingsDialog";
+import { SettingsPanel } from "@/components/settings/SettingsPanel";
+import { isSettingsCategory } from "@/components/settings/categories";
 import { TabsPanel } from "@/components/TabsPanel";
+import { WorkspaceLayout } from "@/components/workspace/WorkspaceLayout";
 import { ProcessingQueuePanel } from "@/components/ProcessingQueuePanel";
 import { SortableVideoItem, SortableVideos } from "@/components/SortableVideos";
 import { VideoCover } from "@/components/VideoCover";
@@ -83,7 +81,6 @@ import {
   readPlaybackProgress,
   writeLastVideoId,
 } from "@/lib/playback";
-import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { useStudyReminder } from "@/lib/useStudyReminder";
 import { isIOS, isTablet } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
@@ -91,6 +88,7 @@ import { AssistantPanel } from "@/components/AssistantPanel";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 import { accentVars, useTheme } from "@/stores/theme";
 import { useAssistantUi } from "@/stores/assistant";
+import { useHomeRoute } from "@/app/homeRoute";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const statusLabelKey = {
@@ -107,7 +105,6 @@ const statusTone: Record<Video["processed_status"], BadgeTone> = {
   failed: "danger",
 };
 
-const PANEL_WIDTH_STORAGE_KEY = "course-ai-study-panel-width";
 const VIEW_STORAGE_KEY = "course-ai-home-view";
 const GRID_DENSITY_KEY = "course-ai-grid-density";
 
@@ -119,11 +116,6 @@ function readGridDensity(): GridDensity {
     ? "compact"
     : "cozy";
 }
-const STUDY_PANEL_MAX = 720;
-// 学习面板最小宽度：保证核心资料页签和正文都可正常阅读。
-const STUDY_PANEL_MIN = 384;
-const PLAYER_MIN_WIDTH = 320;
-const STUDY_RESIZER_WIDTH = 8;
 
 type LibraryView = "grid" | "list";
 
@@ -132,17 +124,6 @@ function readInitialView(): LibraryView {
   return window.localStorage.getItem(VIEW_STORAGE_KEY) === "list"
     ? "list"
     : "grid";
-}
-
-function readPanelWidth() {
-  if (typeof window === "undefined") return 480;
-  // 没存过要走默认 480：Number(null) 是 0（有限数），不先判空会被下面夹成下限 360。
-  const raw = window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
-  if (!raw) return 480;
-  const saved = Number(raw);
-  return Number.isFinite(saved)
-    ? Math.min(STUDY_PANEL_MAX, Math.max(STUDY_PANEL_MIN, saved))
-    : 480;
 }
 
 const SIDEBAR_COLLAPSED_KEY = "course-ai-sidebar-collapsed";
@@ -209,13 +190,20 @@ function readSidebarCollapsed(): SidebarCollapsed {
 
 
 export function Home() {
-  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
-  const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showRecycleBin, setShowRecycleBin] = useState(false);
-  const [showDevConsole, setShowDevConsole] = useState(false);
-  const [showDashboard, setShowDashboard] = useState(false);
-  const [showConcepts, setShowConcepts] = useState(false);
+  // 主区视图与课程/视频选择都由路由承载（见 app/homeRoute）；视图互斥由路径天然保证。
+  const {
+    view: mainView,
+    courseId: selectedCourseId,
+    videoId: selectedVideoId,
+    settingsCategory,
+    go,
+  } = useHomeRoute();
+  const showSettings = mainView === "settings";
+  const showRecycleBin = mainView === "recycle";
+  const showDevConsole = mainView === "dev";
+  const showDashboard = mainView === "dashboard";
+  const showConcepts = mainView === "concepts";
+  const queueOpen = mainView === "queue";
   const [knowledgeReturn, setKnowledgeReturn] = useState<KnowledgeReturnState | null>(null);
   const { t } = useTranslation();
   // 应用打开时的学习提醒（开启且今天有到期卡才发，每天至多一次）。
@@ -240,7 +228,6 @@ export function Home() {
   const videoMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const renameOriginTriggerRef = useRef<HTMLButtonElement | null>(null);
   const renameDialogRef = useRef<HTMLDivElement | null>(null);
-  const [queueOpen, setQueueOpen] = useState(false);
   const [queueTick, setQueueTick] = useState(0);
   const [queuedVideos, setQueuedVideos] = useState<Video[]>([]);
   // 队列卡片的 jobs 是独立 IPC 请求；没有这层状态时，失败会落成「没有阶段」并显示等待中。
@@ -250,17 +237,6 @@ export function Home() {
   const jobRequestRef = useRef<Record<string, number>>({});
   const requestedJobIdsRef = useRef<Set<string>>(new Set());
   const { createCourse, creatingCourse, createError } = useCreateCourse();
-  const [studyPanelWidth, setStudyPanelWidth] = useState(readPanelWidth);
-  const [isResizingPanel, setIsResizingPanel] = useState(false);
-  // 面板整体收起：专注看片时把右栏整个藏掉（不是拖到 384 下限）。状态按视频记忆。
-  const [studyPanelCollapsed, setStudyPanelCollapsed] = useState(() =>
-    readVideoResumeState(selectedVideoId ?? "").studyPanelCollapsed ?? false,
-  );
-  // 拖动期间的实时宽度（用 ref，不触发重渲染；松手才提交到 state）。
-  const liveWidthRef = useRef(studyPanelWidth);
-  // 拖拽 resize 的监听清理：中途卸载（快速切换视频/返回）时也要摘掉 window 上的监听，
-  // 否则残留的 pointermove/pointerup 会引用已解绑的 DOM 节点。
-  const resizeAbortRef = useRef<AbortController | null>(null);
   // 统一侧栏折叠状态：分视图记忆（课程库 / 工作台）。
   const [sidebarCollapsed, setSidebarCollapsed] = useState<SidebarCollapsed>(readSidebarCollapsed);
   const queryClient = useQueryClient();
@@ -331,21 +307,6 @@ export function Home() {
     ? 56 + (sidebarCollapsed[selectedVideoId ? "workbench" : "library"] ? 0 : 256)
     : 0;
   const workbenchAvailableWidth = Math.max(0, appPixelWidth - sidebarWidth);
-  const maxStudyPanelWidthForLayout = Math.min(
-    STUDY_PANEL_MAX,
-    Math.max(
-      STUDY_PANEL_MIN,
-      workbenchAvailableWidth - PLAYER_MIN_WIDTH - STUDY_RESIZER_WIDTH,
-    ),
-  );
-  const isWorkbenchWide =
-    shellWide &&
-    workbenchAvailableWidth >= STUDY_PANEL_MIN + PLAYER_MIN_WIDTH + STUDY_RESIZER_WIDTH;
-  // 只有横屏宽布局才保留可拖的竖向分隔条。
-  const showResizer = isWorkbenchWide;
-  const studyPanelWidthForLayout = isResizingPanel
-    ? liveWidthRef.current
-    : Math.min(studyPanelWidth, maxStudyPanelWidthForLayout);
   // 硬件返回键是「平台能力」（仅 Android 有），与布局宽度无关：用 UA 判平台，
   // 避免在桌面拦截窗口关闭。
   const isAndroidPlatform =
@@ -353,14 +314,9 @@ export function Home() {
   const androidBackGuard = useRef(0);
   const [videoFullscreen, setVideoFullscreen] = useState(false);
   const returnToLibrary = useCallback(() => {
-    setSelectedVideoId(null);
     setKnowledgeReturn(null);
-    setShowSettings(false);
-    setShowRecycleBin(false);
-    setShowDevConsole(false);
-    setShowDashboard(false);
-    setQueueOpen(false);
-  }, []);
+    go({ view: "library", videoId: null });
+  }, [go]);
 
   const {
     data: videos = [],
@@ -559,18 +515,8 @@ export function Home() {
         videos.find((video) => video.id === videoId) ??
         queuedVideos.find((video) => video.id === videoId);
       if (target) writeLastVideoId(target.course_id, videoId);
-      const savedWidth = readVideoResumeState(videoId).studyPanelWidth;
-      setStudyPanelWidth(
-        savedWidth != null
-          ? Math.min(STUDY_PANEL_MAX, Math.max(STUDY_PANEL_MIN, savedWidth))
-          : readPanelWidth(),
-      );
-      setStudyPanelCollapsed(
-        readVideoResumeState(videoId).studyPanelCollapsed,
-      );
       // 打开视频即回到工作台：合上可能叠在主区的设置/回收站/控制台/队列整页。
-      closeMainOverlays();
-      setSelectedVideoId(videoId);
+      go({ view: "library", videoId });
     });
   }
 
@@ -578,8 +524,7 @@ export function Home() {
   function reviewJump(card: DueCard) {
     runAfterWorkspaceTransient(() => {
       setKnowledgeReturn(null);
-      closeMainOverlays();
-      if (card.course_id) setSelectedCourseId(card.course_id);
+      go(card.course_id ? { view: "library", courseId: card.course_id } : { view: "library" });
       if (card.video_id && card.source_ms != null) {
         usePlayer.getState().requestOpenAt(card.video_id, card.source_ms);
       }
@@ -592,7 +537,7 @@ export function Home() {
       setKnowledgeReturn(null);
       closeMainOverlays();
       dispatchAssistantNavigation(action, selectedVideoId, {
-        selectCourse: setSelectedCourseId,
+        selectCourse: (courseId) => go({ courseId }),
         openAt: usePlayer.getState().requestOpenAt,
         seek: usePlayer.getState().requestSeek,
         clearPendingOpen: usePlayer.getState().clearPendingSeek,
@@ -610,7 +555,7 @@ export function Home() {
     reconcileAssistantAction(action, selectedVideoId, {
       removeQueuedVideo: (videoId) =>
         setQueuedVideos((items) => items.filter((item) => item.id !== videoId)),
-      clearCurrentVideo: () => setSelectedVideoId(null),
+      clearCurrentVideo: () => go({ videoId: null }),
       clearPendingOpen: (videoId) => {
         const player = usePlayer.getState();
         if (player.pendingSeek?.videoId === videoId) player.clearPendingSeek();
@@ -622,8 +567,7 @@ export function Home() {
   function resumeStudy(courseId: string, videoId: string, positionSec: number) {
     runAfterWorkspaceTransient(() => {
       setKnowledgeReturn(null);
-      closeMainOverlays();
-      setSelectedCourseId(courseId);
+      go({ view: "library", courseId });
       usePlayer.getState().requestOpenAt(videoId, Math.round(positionSec * 1000));
     });
   }
@@ -639,22 +583,15 @@ export function Home() {
     } else {
       setKnowledgeReturn(null);
     }
-    setShowConcepts(false);
+    go({ view: "library" });
     usePlayer.getState().requestOpenAt(videoId, startMs);
   }
 
   const performReturnToKnowledge = useCallback(() => {
     if (!knowledgeReturn) return;
     usePlayer.getState().clearPendingSeek();
-    setSelectedCourseId(knowledgeReturn.courseId);
-    setSelectedVideoId(null);
-    setShowSettings(false);
-    setShowRecycleBin(false);
-    setShowDevConsole(false);
-    setShowDashboard(false);
-    setQueueOpen(false);
-    setShowConcepts(true);
-  }, [knowledgeReturn]);
+    go({ view: "concepts", courseId: knowledgeReturn.courseId, videoId: null });
+  }, [go, knowledgeReturn]);
 
   const returnToKnowledge = useCallback(() => {
     runAfterWorkspaceTransient(performReturnToKnowledge);
@@ -747,9 +684,6 @@ export function Home() {
     setRenamingVideo(null);
     restoreFocus(trigger);
   }, [restoreFocus]);
-
-  // 兜底：若拖拽 resize 进行中组件被卸载，卸载时摘掉残留的 window 监听。
-  useEffect(() => () => resizeAbortRef.current?.abort(), []);
 
   const dismissVisibleTransient = useCallback(
     (continuation?: () => void): boolean => {
@@ -905,29 +839,26 @@ export function Home() {
     if (dismissVisibleTransient()) return true;
 
     if (showConcepts) {
-      setShowConcepts(false);
+      go({ view: "library" });
       setKnowledgeReturn(null);
       return true;
     }
     if (showSettings) {
       if (settingsBackRequestRef.current) settingsBackRequestRef.current();
-      else runAfterSettingsExit(() => setShowSettings(false));
+      else runAfterSettingsExit(() => go({ view: "library" }));
       return true;
     }
     if (showDevConsole) {
-      setShowDevConsole(false);
-      setShowSettings(true);
+      // 控制台从设置的「开发者」分类进入，返回也回到那里。
+      go({ view: "settings", settingsCategory: "dev" });
       return true;
     }
     if (showRecycleBin || showDashboard) {
-      setShowSettings(false);
-      setShowRecycleBin(false);
-      setShowDashboard(false);
+      go({ view: "library" });
       return true;
     }
     if (queueOpen) {
-      setSelectedVideoId(null);
-      setQueueOpen(false);
+      go({ view: "library", videoId: null });
       return true;
     }
     if (selectedVideoId) {
@@ -936,11 +867,12 @@ export function Home() {
     }
     // 窄屏「课程」Tab:选了课程→退回课程列表；已在列表根层则由调用方结束 Activity。
     if (selectedCourseId) {
-      setSelectedCourseId(null);
+      go({ courseId: null });
       return true;
     }
     return false;
   }, [
+    go,
     queueOpen,
     selectedCourseId,
     selectedVideoId,
@@ -1208,7 +1140,7 @@ export function Home() {
     if (!ok) return;
     await ipc.videos.delete(videoId);
     setQueuedVideos((items) => items.filter((item) => item.id !== videoId));
-    if (selectedVideoId === videoId) setSelectedVideoId(null);
+    if (selectedVideoId === videoId) go({ videoId: null });
     await queryClient.invalidateQueries({ queryKey: qk.videos.list(selectedCourseId) });
     await queryClient.invalidateQueries({ queryKey: qk.trash() });
   }
@@ -1218,154 +1150,11 @@ export function Home() {
   // 收起主区所有整页浮层（设置/回收站/控制台/队列）。新增浮层态时只改这一处，
   // 避免在各处手写「四个 setXxx(false)」漏改而出现两页同显。
   function closeMainOverlays() {
-    setShowSettings(false);
-    setShowRecycleBin(false);
-    setShowDevConsole(false);
-    setShowDashboard(false);
-    setShowConcepts(false);
-    setQueueOpen(false);
+    go({ view: "library" });
   }
 
   function openMainView(view: "settings" | "recycle" | "dev" | "dashboard") {
-    const open = () => {
-      setQueueOpen(false);
-      setShowSettings(view === "settings");
-      setShowRecycleBin(view === "recycle");
-      setShowDevConsole(view === "dev");
-      setShowDashboard(view === "dashboard");
-    };
-    runAfterWorkspaceTransient(open);
-  }
-
-  function beginStudyPanelResize(event: ReactPointerEvent<HTMLDivElement>) {
-    event.preventDefault();
-    // 拖动期间直接改 .ca-wb 上的 CSS 变量（不触发 React 重渲染、不写 storage），
-    // 松手时才提交一次 state + 持久化，避免每次 pointermove 重渲染整个工作台。
-    const wb = event.currentTarget.parentElement as HTMLElement | null;
-    const startX = event.clientX;
-    const startWidth = studyPanelWidthForLayout;
-    liveWidthRef.current = startWidth;
-    // 冻结右侧面板内容宽度：拖动期间内容不随列宽连续 reflow（长文稿尤其卡），
-    // 松手后（去掉 is-resizing-panel 类）再一次性回流到最终宽度。
-    wb?.style.setProperty("--panel-frozen-width", `${startWidth}px`);
-    setIsResizingPanel(true);
-    // 按工作台实际宽度限制：面板最小 STUDY_PANEL_MIN（保证标签都放得下），
-    // 且至少给视频留 320，避免小屏（手机横屏）被挤没。
-    const containerW = wb?.clientWidth ?? 0;
-    const minPanel = STUDY_PANEL_MIN;
-    const maxPanel =
-      containerW > 0
-        ? Math.min(
-            STUDY_PANEL_MAX,
-            Math.max(minPanel, containerW - PLAYER_MIN_WIDTH - STUDY_RESIZER_WIDTH),
-          )
-        : STUDY_PANEL_MAX;
-    // rAF 合帧：一帧内多次 pointermove 只写一次（即只触发一次网格重排）。
-    let raf = 0;
-    let pendingX = startX;
-    const apply = () => {
-      raf = 0;
-      const next = Math.min(maxPanel, Math.max(minPanel, startWidth - (pendingX - startX)));
-      liveWidthRef.current = next;
-      // 内联写 grid-template-columns（须与 globals.css 的 .ca-wb 列定义一致），
-      // 而不是每帧改 --study-panel-width：自定义属性向整棵工作台子树继承，每帧一写
-      // 会让全量文稿 DOM（数千节点）做样式重算——文稿打开时拖动卡顿的来源；
-      // contain 只隔离布局/绘制，挡不住继承失效。内联属性只失效 .ca-wb 自身样式。
-      wb?.style.setProperty(
-        "grid-template-columns",
-        `minmax(0, 1fr) 8px ${next}px`,
-      );
-    };
-    const onMove = (move: PointerEvent) => {
-      pendingX = move.clientX;
-      if (!raf) raf = requestAnimationFrame(apply);
-    };
-    const onUp = () => {
-      if (raf) cancelAnimationFrame(raf);
-      setIsResizingPanel(false);
-      const finalWidth = liveWidthRef.current;
-      setStudyPanelWidth(finalWidth);
-      // 先把最终宽度写回稳态变量、再撤掉拖动期的内联覆盖：与 React 提交先后无关，
-      // 计算宽度始终等于 finalWidth，不会闪动。
-      wb?.style.setProperty("--study-panel-width", `${finalWidth}px`);
-      wb?.style.removeProperty("grid-template-columns");
-      window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(finalWidth));
-      if (selectedVideoId) {
-        writeVideoResumeState(selectedVideoId, { studyPanelWidth: finalWidth });
-      }
-      // abort() 一并摘掉下面用同一 signal 注册的 pointermove/pointerup。
-      resizeAbortRef.current?.abort();
-      resizeAbortRef.current = null;
-    };
-    // 用 AbortController 统一管理监听：onUp 里 abort，组件卸载时的 effect 也 abort，
-    // 两条路径都能确保监听不残留（中途卸载不再泄漏对已解绑 DOM 的引用）。
-    resizeAbortRef.current?.abort();
-    const controller = new AbortController();
-    resizeAbortRef.current = controller;
-    window.addEventListener("pointermove", onMove, { signal: controller.signal });
-    window.addEventListener("pointerup", onUp, { signal: controller.signal });
-  }
-
-  // 双击分隔条:把面板宽度复位到默认值(480),省去手动拖回。
-  function resetStudyPanelWidth() {
-    commitStudyPanelWidth(480);
-  }
-
-  // 面板收起/展开：收起时右栏整体隐藏（不占宽度），展开恢复上次宽度。
-  function toggleStudyPanelCollapsed() {
-    setStudyPanelCollapsed((collapsed) => {
-      if (selectedVideoId) {
-        writeVideoResumeState(selectedVideoId, {
-          studyPanelCollapsed: !collapsed,
-        });
-      }
-      return !collapsed;
-    });
-  }
-
-  function panelMaxWidth(container: HTMLElement | null) {
-    const containerWidth = container?.clientWidth ?? 0;
-    return containerWidth > 0
-        ? Math.min(
-          STUDY_PANEL_MAX,
-          Math.max(
-            STUDY_PANEL_MIN,
-            containerWidth - PLAYER_MIN_WIDTH - STUDY_RESIZER_WIDTH,
-          ),
-        )
-      : STUDY_PANEL_MAX;
-  }
-
-  function commitStudyPanelWidth(nextWidth: number, container?: HTMLElement | null) {
-    const next = Math.min(
-      panelMaxWidth(container ?? null),
-      Math.max(STUDY_PANEL_MIN, nextWidth),
-    );
-    liveWidthRef.current = next;
-    setStudyPanelWidth(next);
-    container?.style.setProperty("--study-panel-width", `${next}px`);
-    window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(next));
-    if (selectedVideoId) {
-      writeVideoResumeState(selectedVideoId, { studyPanelWidth: next });
-    }
-  }
-
-  function resizeStudyPanelFromKeyboard(
-    event: ReactKeyboardEvent<HTMLDivElement>,
-  ) {
-    const container = event.currentTarget.parentElement as HTMLElement | null;
-    const step = event.shiftKey ? 72 : 24;
-    let next: number | null = null;
-
-    if (event.key === "ArrowLeft") next = liveWidthRef.current + step;
-    else if (event.key === "ArrowRight") next = liveWidthRef.current - step;
-    else if (event.key === "Home") next = STUDY_PANEL_MIN;
-    else if (event.key === "End") next = panelMaxWidth(container);
-    else if (event.key === "Enter") next = 480;
-
-    if (next == null) return;
-    event.preventDefault();
-    commitStudyPanelWidth(next, container);
+    runAfterWorkspaceTransient(() => go({ view }));
   }
 
   /** 语音识别没有真进度可报的那一段（0.12–0.9），按时间往前爬一点，免得看着像死了。
@@ -1405,44 +1194,34 @@ export function Home() {
   }
 
   function openQueuedVideo(video: Video) {
-    setQueueOpen(false);
-    if (selectedCourseId !== video.course_id) {
-      setSelectedCourseId(video.course_id);
-    }
+    go({ view: "library", courseId: video.course_id });
     openVideo(video.id);
   }
 
   function selectCourse(id: string) {
     runAfterWorkspaceTransient(() => {
       setKnowledgeReturn(null);
-      setSelectedCourseId(id);
-      setSelectedVideoId(null);
+      go({ view: "library", courseId: id, videoId: null });
       setVideoQuery("");
-      closeMainOverlays();
     });
   }
 
   function clearCourseSelection() {
     runAfterWorkspaceTransient(() => {
       setKnowledgeReturn(null);
-      setSelectedCourseId(null);
-      setSelectedVideoId(null);
+      go({ view: "library", courseId: null, videoId: null });
       setVideoQuery("");
-      closeMainOverlays();
     });
   }
 
   // rail logo（library 态）回课程库首页：与「清除课程选择」同义，直接复用 clearCourseSelection。
 
   function toggleQueue() {
-    // 先算出目标态再收起全部：closeMainOverlays 会把 queueOpen 置 false，
-    // 这里用当前渲染的 queueOpen 求反，最终以 setQueueOpen 覆盖，保留「再点收起」的切换语义。
+    // 用当前渲染的 queueOpen 求反，保留「再点收起」的切换语义。
     const willOpen = !queueOpen;
     runAfterWorkspaceTransient(() => {
       if (willOpen) setKnowledgeReturn(null);
-      setSelectedVideoId(null);
-      closeMainOverlays();
-      setQueueOpen(willOpen);
+      go({ view: willOpen ? "queue" : "library", videoId: null });
     });
   }
 
@@ -1450,15 +1229,16 @@ export function Home() {
   function selectCompactTab(tab: CompactTab) {
     if (tab === "settings" && showSettings) return;
     runAfterWorkspaceTransient(() => {
-      closeMainOverlays();
-      if (tab === "study") {
-        setShowDashboard(true);
-      } else if (tab === "queue") {
-        setQueueOpen(true);
-      } else if (tab === "settings") {
-        setShowSettings(true);
-      }
-      // tab === "courses"：closeMainOverlays 已收起全部，无需再开任何整页。
+      go({
+        view:
+          tab === "study"
+            ? "dashboard"
+            : tab === "queue"
+              ? "queue"
+              : tab === "settings"
+                ? "settings"
+                : "library",
+      });
     });
   }
 
@@ -1986,7 +1766,7 @@ export function Home() {
               <button
                 type="button"
                 className="hamb"
-                onClick={() => setSelectedCourseId(null)}
+                onClick={() => go({ courseId: null })}
                 title={t("home.backToLibrary")}
                 aria-label={t("home.backToLibrary")}
               >
@@ -2092,7 +1872,7 @@ export function Home() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setShowConcepts(true)}
+                  onClick={() => go({ view: "concepts" })}
                   className="ca-touch-44"
                 >
                   <Lightbulb className="h-4 w-4" />
@@ -2221,128 +2001,75 @@ export function Home() {
   function renderSelectedVideoWorkspace() {
     if (!selectedVideo) return null;
 
-    // 面板收起（仅宽屏分栏有意义）：整列隐藏，右侧浮一根展开把手。
-    const collapsed = isWorkbenchWide && studyPanelCollapsed;
-
     return (
-      <div
-        aria-label={t("home.workbenchLayout")}
-        data-layout={isWorkbenchWide ? "wide" : "stacked"}
-        data-panel-collapsed={collapsed ? "" : undefined}
-        className={`ca-wb ${isResizingPanel ? "is-resizing-panel" : ""}`}
-        style={
-          showResizer
-            ? ({ "--study-panel-width": `${collapsed ? 0 : studyPanelWidthForLayout}px` } as CSSProperties)
-            : undefined
-        }
-      >
-        <section aria-label={t("home.workbench")} className="ca-player-col">
-          {!isPhoneDevice && (
-            <header className="ca-wb-head">
-              <div className="wb-title-row">
-                {knowledgeReturn && (
-                  <button
-                    type="button"
-                    onClick={returnToKnowledge}
-                    aria-label={t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName })}
-                    title={t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName })}
-                    className="ca-touch-44 inline-flex max-w-[45%] flex-none items-center gap-1 text-sm font-medium text-primary transition hover:opacity-80"
-                  >
-                    <ChevronLeft className="h-4 w-4 flex-none" />
-                    <span className="truncate">{t("home.backToConcepts", { name: knowledgeReturn.navigationState.conceptName })}</span>
-                  </button>
-                )}
-                <div className="min-w-0">
-                  <h1 className="wb-title" title={displayTitle(selectedVideo.title)}>
-                    {displayTitle(selectedVideo.title)}
-                  </h1>
+      <WorkspaceLayout
+        videoId={selectedVideo.id}
+        shellWide={shellWide}
+        availableWidth={workbenchAvailableWidth}
+        panel={<TabsPanel videoId={selectedVideo.id} />}
+        player={
+          <section aria-label={t("home.workbench")} className="ca-player-col">
+            {!isPhoneDevice && (
+              <header className="ca-wb-head">
+                <div className="wb-title-row">
+                  {knowledgeReturn && (
+                    <button
+                      type="button"
+                      onClick={returnToKnowledge}
+                      aria-label={t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName })}
+                      title={t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName })}
+                      className="ca-touch-44 inline-flex max-w-[45%] flex-none items-center gap-1 text-sm font-medium text-primary transition hover:opacity-80"
+                    >
+                      <ChevronLeft className="h-4 w-4 flex-none" />
+                      <span className="truncate">{t("home.backToConcepts", { name: knowledgeReturn.navigationState.conceptName })}</span>
+                    </button>
+                  )}
+                  <div className="min-w-0">
+                    <h1 className="wb-title" title={displayTitle(selectedVideo.title)}>
+                      {displayTitle(selectedVideo.title)}
+                    </h1>
+                  </div>
                 </div>
-              </div>
-            </header>
-          )}
-          <div className="ca-stage-wrap">
-            {isPhoneDevice && (
-              <button
-                type="button"
-                className="ca-back-fab"
-                onClick={returnFromVideo}
-                title={knowledgeReturn ? t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName }) : t("nav.back")}
-                aria-label={knowledgeReturn ? t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName }) : t("nav.back")}
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
+              </header>
             )}
-            <div className="ca-stage">
-              {mediaSrcError ? (
-                <div className="flex h-full items-center justify-center bg-black p-4">
-                  <ErrorNote
-                    className="w-full max-w-md"
-                    error={mediaSrcErrorObj}
-                    onRetry={() => void refetchMediaSrc()}
-                  />
-                </div>
-              ) : mediaSrc ? (
-                <VideoPlayer
-                  src={mediaSrc}
-                  videoId={selectedVideo.id}
-                  immersive={isIOS()}
-                  onFullscreenChange={setVideoFullscreen}
-                />
-              ) : (
-                <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">
-                  {t("home.preparing")}
-                </div>
+            <div className="ca-stage-wrap">
+              {isPhoneDevice && (
+                <button
+                  type="button"
+                  className="ca-back-fab"
+                  onClick={returnFromVideo}
+                  title={knowledgeReturn ? t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName }) : t("nav.back")}
+                  aria-label={knowledgeReturn ? t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName }) : t("nav.back")}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
               )}
+              <div className="ca-stage">
+                {mediaSrcError ? (
+                  <div className="flex h-full items-center justify-center bg-black p-4">
+                    <ErrorNote
+                      className="w-full max-w-md"
+                      error={mediaSrcErrorObj}
+                      onRetry={() => void refetchMediaSrc()}
+                    />
+                  </div>
+                ) : mediaSrc ? (
+                  <VideoPlayer
+                    src={mediaSrc}
+                    videoId={selectedVideo.id}
+                    immersive={isIOS()}
+                    onFullscreenChange={setVideoFullscreen}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">
+                    {t("home.preparing")}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        </section>
-        {showResizer && !collapsed && (
-          <div
-            role="separator"
-            aria-label={t("home.resizeStudy")}
-            aria-orientation="vertical"
-            aria-valuemin={STUDY_PANEL_MIN}
-            aria-valuemax={Math.round(maxStudyPanelWidthForLayout)}
-            aria-valuenow={Math.round(studyPanelWidthForLayout)}
-            aria-valuetext={t("home.pixelValue", { width: Math.round(studyPanelWidthForLayout) })}
-            tabIndex={0}
-            title={t("home.resizeHint")}
-            className={`ca-resizer ${isResizingPanel ? "is-resizing" : ""}`}
-            onPointerDown={beginStudyPanelResize}
-            onDoubleClick={resetStudyPanelWidth}
-            onKeyDown={resizeStudyPanelFromKeyboard}
-          />
-        )}
-        {collapsed ? (
-          <button
-            type="button"
-            onClick={toggleStudyPanelCollapsed}
-            aria-label={t("home.expandStudyPanel")}
-            title={t("home.expandStudyPanel")}
-            className="ca-panel-reveal"
-          >
-            <PanelLeftOpen className="h-4 w-4" />
-          </button>
-        ) : (
-          <aside
-            aria-label={t("home.studyPanel")}
-            className="ca-panel-col"
-          >
-            {isWorkbenchWide && (
-              <button
-                type="button"
-                onClick={toggleStudyPanelCollapsed}
-                aria-label={t("home.collapseStudyPanel")}
-                title={t("home.collapseStudyPanel")}
-                className="ca-panel-collapse ca-touch-44"
-              >
-                <PanelLeftClose className="h-4 w-4" />
-              </button>
-            )}
-            <TabsPanel videoId={selectedVideo.id} />
-          </aside>
-        )}
-      </div>
+          </section>
+        }
+      />
     );
   }
 
@@ -2470,26 +2197,25 @@ export function Home() {
         <div key={mainViewKey} className="ca-view">
           {showSettings ? (
             <SettingsPanel
-              onClose={() => setShowSettings(false)}
+              category={isSettingsCategory(settingsCategory) ? settingsCategory : null}
+              onCategoryChange={(category) => go({ settingsCategory: category })}
+              onClose={() => go({ view: "library" })}
               onOpenDevConsole={() => openMainView("dev")}
               onRegisterExitRequest={registerSettingsExitRequest}
               onRegisterBackRequest={registerSettingsBackRequest}
             />
           ) : showRecycleBin ? (
-            <RecycleBin onClose={() => setShowRecycleBin(false)} />
+            <RecycleBin onClose={() => go({ view: "library" })} />
           ) : showDashboard ? (
             <Dashboard
-              onClose={() => setShowDashboard(false)}
+              onClose={() => go({ view: "library" })}
               onOpenCourse={selectCourse}
               onResume={resumeStudy}
               onJump={reviewJump}
             />
           ) : showDevConsole ? (
             <DevConsole
-              onClose={() => {
-                setShowDevConsole(false);
-                setShowSettings(true);
-              }}
+              onClose={() => go({ view: "settings", settingsCategory: "dev" })}
             />
           ) : queueOpen ? (
             renderProcessingQueuePage()
@@ -2500,7 +2226,7 @@ export function Home() {
               courseId={selectedCourseId}
               courseName={selectedCourse?.name}
               onClose={() => {
-                setShowConcepts(false);
+                go({ view: "library" });
                 setKnowledgeReturn(null);
               }}
               onJump={conceptJump}

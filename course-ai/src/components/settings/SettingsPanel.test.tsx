@@ -1,7 +1,7 @@
 import "@/i18n";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SettingsPanel } from "./SettingsDialog";
+import { SettingsPanel } from "./SettingsPanel";
 
 const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
@@ -46,10 +46,10 @@ vi.mock("@/lib/mobileFiles", () => ({
 vi.mock("@/lib/useContainerWidth", () => mockUseContainerWidth);
 vi.mock("@/lib/platform", () => mockPlatform);
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: saveFileMock }));
-vi.mock("./WhisperModelsPanel", () => ({
+vi.mock("@/components/WhisperModelsPanel", () => ({
   WhisperModelsPanel: () => <div>Whisper 下载</div>,
 }));
-vi.mock("./LlmSettingsPanel", () => ({
+vi.mock("@/components/LlmSettingsPanel", () => ({
   LlmSettingsPanel: ({
     onDirtyChange,
     onRegisterActions,
@@ -488,6 +488,42 @@ describe("SettingsPanel", () => {
 
     await waitFor(() => expect(llmActionsMock.save).toHaveBeenCalledOnce());
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  });
+
+  it("follows a controlled category and reports category changes to the host", async () => {
+    const onCategoryChange = vi.fn();
+    const { rerender } = render(
+      <SettingsPanel category="asr" onCategoryChange={onCategoryChange} onClose={() => undefined} />,
+    );
+    expect(await screen.findByRole("heading", { name: "语音识别", level: 2 })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "大模型" }));
+    expect(onCategoryChange).toHaveBeenCalledWith("llm");
+    // 受控：宿主没改 category 前页面不动。
+    expect(screen.getByRole("heading", { name: "语音识别", level: 2 })).toBeInTheDocument();
+
+    rerender(
+      <SettingsPanel category="llm" onCategoryChange={onCategoryChange} onClose={() => undefined} />,
+    );
+    expect(screen.getByText("LLM 配置")).toBeInTheDocument();
+  });
+
+  it("guards controlled category changes behind the dirty LLM dialog", async () => {
+    const onCategoryChange = vi.fn();
+    render(
+      <SettingsPanel category="llm" onCategoryChange={onCategoryChange} onClose={() => undefined} />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "模拟修改 LLM" }));
+    fireEvent.click(screen.getByRole("button", { name: "外观" }));
+
+    expect(onCategoryChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "放弃修改" }));
+    expect(onCategoryChange).toHaveBeenCalledWith("appearance");
+  });
+
+  it("falls back to the first category for an unknown controlled value", async () => {
+    render(<SettingsPanel category={null} onCategoryChange={vi.fn()} onClose={() => undefined} />);
+    expect(await screen.findByRole("heading", { name: "外观", level: 2 })).toBeInTheDocument();
   });
 
   it("routes external navigation through the same dirty LLM guard", async () => {
