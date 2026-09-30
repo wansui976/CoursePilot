@@ -1,0 +1,605 @@
+/* 课程库内容：续看 hero、卡片网格、封面、徽标、菜单、空状态与列表视图。 */
+
+/* 「继续学习」hero 卡：最近看的未看完视频，整卡可点直达工作台（断点续播）。 */
+.ca-continue-hero {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 2px 0 18px;
+  padding: 16px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--accent-weak-2);
+  background: var(--accent-weak);
+  color: var(--text-1);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+@media (hover: hover) {
+.ca-continue-hero:hover {
+  background: var(--accent-weak-2);
+  border-color: var(--line-strong);
+}
+}
+
+.ca-continue-cover {
+  position: relative;
+  width: 128px;
+  height: 72px;
+  flex: 0 0 auto;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--stage);
+}
+
+.ca-continue-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-text);
+}
+
+.ca-continue-title {
+  display: block;
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ca-continue-pos {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.ca-continue-pos .ca-continue-pct {
+  color: var(--accent-text);
+}
+
+.ca-continue-play {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  transition: transform 0.12s;
+}
+
+@media (hover: hover) {
+.ca-continue-hero:hover .ca-continue-play {
+  transform: scale(1.05);
+}
+}
+
+/* 续看 hero 的播放钮悬停时轻微缩放呼吸，提示「从这里继续」。
+   只动 transform（合成器扛得住，不触发布局/重排）；在 hover 且未减弱动效时才播放。 */
+@keyframes ca-play-pulse {
+  0%,
+  100% {
+    transform: scale(1.04);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .ca-continue-hero:hover .ca-continue-play {
+    animation: ca-play-pulse 2.2s var(--ease) infinite;
+  }
+}
+
+@media (max-width: 640px) {
+  .ca-continue-cover {
+    width: 96px;
+    height: 54px;
+  }
+}
+
+/* 卡片 body 的学习信息行：时长 · 进度 / ✓ 已看完 / 处理中实时进度 / 失败提示。 */
+.ca-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.ca-meta-text {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.ca-meta-text.accent {
+  color: var(--accent-text);
+}
+
+.ca-meta-text.ok {
+  color: var(--status-ok);
+}
+
+.ca-meta-text.err {
+  color: var(--status-err);
+}
+
+/* 处理中卡片：mini 进度条（宽 = 流水线整体进度）+ 阶段文案。 */
+.ca-meta-progress {
+  flex: 1 1 auto;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-card-hover);
+  overflow: hidden;
+}
+
+.ca-meta-progress i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--grad-accent);
+}
+
+.ca-grid {
+  display: grid;
+  gap: 20px;
+  align-content: start;
+  /* auto-fit（而非 auto-fill）：卡片不足以铺满一行时，空轨道会塌缩，
+     卡片拉伸填满宽度。否则侧栏折叠、主区变宽后会在最右侧留出空白轨道。
+     最小列宽按密度档：舒适（默认）240px，紧凑 176px 一排塞更多卡。 */
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.ca-grid[data-density="compact"] {
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
+}
+
+@media (hover: hover) {
+  .ca-grid[data-density="compact"] .ca-thumb .dur,
+  .ca-grid[data-density="compact"] .ca-card-title {
+    font-size: 13px;
+  }
+}
+
+.ca-card {
+  min-width: 0;
+  /* 不能 overflow:hidden：卡片内绝对定位的「⋯」菜单/重命名框会在窄卡上被裁掉。
+     圆角裁剪职责下放给 .ca-thumb（自身已 overflow:hidden）。 */
+  cursor: pointer;
+  background: var(--bg-panel);
+  /* 静态描边降到 faint：卡片与底已有明度差 + 投影分层，硬描边只在 hover 时出现。 */
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
+  transition: transform 0.16s var(--ease), box-shadow 0.16s, border-color 0.16s;
+}
+
+@media (hover: hover) {
+.ca-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-card-hover);
+  border-color: var(--line);
+}
+}
+
+/* 封面图 hover 细微放大（超出部分被 .ca-thumb 的 overflow:hidden 裁掉），
+   与整卡上浮合成统一的「拾起」手感；三处封面（卡片/列表行/续看 hero）行为一致。
+   reduce-motion 下全局过渡被压到 0.01ms，自动退化为静止。 */
+@media (hover: hover) {
+  .ca-thumb img,
+  .row-thumb img,
+  .ca-continue-cover img {
+    transition: transform 0.5s var(--ease);
+  }
+  .ca-card:hover .ca-thumb img,
+  .ca-row:hover .row-thumb img,
+  .ca-continue-hero:hover .ca-continue-cover img {
+    transform: scale(1.05);
+    will-change: transform;
+  }
+}
+
+.ca-thumb {
+  aspect-ratio: 16 / 9;
+  position: relative;
+  overflow: hidden;
+  /* 顶部圆角跟随卡片（卡片本身不再 overflow:hidden），-1px 抵掉卡片边框。 */
+  border-radius: calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px) 0 0;
+  background: var(--stage);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+
+/* 悬停快捷播放 affordance：整卡可点，这里只是视觉提示；触屏无 hover 就不显示。 */
+.ca-card-play {
+  opacity: 0;
+  transition: opacity 0.16s var(--ease);
+}
+
+@media (hover: hover) {
+  .ca-card:hover .ca-card-play {
+    opacity: 1;
+  }
+}
+
+/* 处理状态徽标：覆盖在封面左上角（与右下角的时长对角呼应）。 */
+.ca-thumb .st {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 2;
+}
+
+/* 叠在视频画面上的徽标不吃主题变量：深色模式下半透明白底 + 半透明文字对比
+   不达标。与右下角时长角标一致，永远用深色实底 scrim + 高亮文字，状态色留在
+   圆点上（文字 + 圆点双通道，不只靠颜色）。 */
+.ca-thumb .st .ca-badge {
+  box-shadow: 0 1px 3px rgb(15 18 28 / 0.35);
+  background: rgb(15 18 28 / 0.72);
+  color: rgb(255 255 255 / 0.92);
+}
+
+.ca-thumb .dur {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: #fff;
+  background: rgb(15 18 28 / 0.7);
+  padding: 2px 7px;
+  border-radius: 5px;
+}
+
+/* 「已看完」标记：进度条到头后隐藏，靠它区分看完与没看过。列表缩略图太窄，只留图标。 */
+.ca-thumb .done,
+.row-thumb .done {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(255 255 255 / 0.92);
+  background: rgb(15 18 28 / 0.72);
+  padding: 2px 7px;
+  border-radius: 5px;
+}
+
+.row-thumb .done {
+  left: 4px;
+  bottom: 4px;
+  padding: 2px 4px;
+}
+
+/* 封面底部的「看到哪了」进度条（参考自适应课程库的 ov-bar）。 */
+.ca-thumb .ov-bar,
+.row-thumb .ov-bar,
+.ca-continue-cover .ov-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  height: 4px;
+  background: rgb(15 18 28 / 0.45);
+}
+
+.ca-thumb .ov-bar > i,
+.row-thumb .ov-bar > i,
+.ca-continue-cover .ov-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--grad-accent);
+}
+
+.row-thumb .ov-bar {
+  height: 3px;
+}
+
+.ca-card-body {
+  padding: 12px 14px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ca-card-title {
+  color: var(--text-1);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ca-badge,
+.ca-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+}
+
+.ca-badge .dot,
+.ca-chip .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.ca-badge.success,
+.ca-chip.done {
+  color: var(--status-ok);
+  background: var(--status-ok-bg);
+}
+
+.ca-badge.success .dot,
+.ca-chip.done .dot {
+  background: var(--status-ok);
+}
+
+.ca-badge.neutral,
+.ca-chip.pending,
+.ca-chip.failed {
+  color: var(--text-3);
+  background: var(--bg-sunken);
+}
+
+.ca-badge.neutral .dot,
+.ca-chip.pending .dot,
+.ca-chip.failed .dot {
+  background: var(--text-4);
+}
+
+.ca-badge.warning,
+.ca-badge.processing,
+.ca-chip.processing {
+  color: var(--status-warn);
+  background: var(--status-warn-bg);
+}
+
+.ca-badge.warning .dot,
+.ca-badge.processing .dot,
+.ca-chip.processing .dot {
+  background: var(--status-warn);
+}
+
+.ca-badge.danger {
+  color: var(--status-err);
+  background: var(--status-err-bg);
+}
+
+.ca-badge.danger .dot {
+  background: var(--status-err);
+}
+
+.ca-menu {
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-panel);
+  padding: 4px 0;
+  font-size: 14px;
+  box-shadow: var(--shadow-pop);
+}
+
+.ca-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  color: var(--text-1);
+  transition: background 0.12s, color 0.12s;
+}
+
+.ca-menu-item:hover {
+  background: var(--bg-sunken);
+}
+
+.ca-menu-item.danger {
+  color: var(--status-err);
+}
+
+.ca-empty-state {
+  max-width: 360px;
+  margin: 0 auto;
+  text-align: center;
+  color: var(--text-3);
+}
+
+.ca-empty-state-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-soft);
+  /* 底色之上叠一层极淡的自上而下渐变 + 顶部高光：56px 的方块纯色一片会显得是块贴纸，
+     给一点光向就成了嵌在面板里的实物。渐变用半透明白，两套主题下都成立。 */
+  background-color: var(--bg-panel);
+  background-image: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 0.06),
+    rgb(255 255 255 / 0)
+  );
+  box-shadow: var(--shadow-raise);
+  /* 前景用 --accent-text 而非 --accent：后者是实心块的底色，暗色主题下不跟着变亮，
+     当图标/文字色时在近黑底上只有 3.7:1，且与别处的强调蓝不是同一个颜色。 */
+  color: var(--accent-text);
+}
+
+.ca-empty-state-title {
+  color: var(--text-1);
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.ca-empty-state-description {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-3);
+}
+
+.ca-empty-state-action {
+  margin-top: 14px;
+  display: flex;
+  justify-content: center;
+}
+
+.ca-list {
+  /* 不设 max-width：列表铺满主区宽度。否则宽屏（尤其折叠侧栏后主区变宽）会停在
+     980px 靠左，最右侧留出空白、行「没有铺满」。名称列是 1fr，变宽只是标题更宽。 */
+  display: flex;
+  flex-direction: column;
+}
+
+.ca-list-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px 80px;
+  gap: 16px;
+  /* 右侧留出与行内一致的空间（行尾有绝对定位的「操作」按钮），让表头列与行内列对齐。 */
+  padding: 0 54px 10px 14px;
+  color: var(--text-4);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--line);
+}
+
+/* 「进度/时长」表头文字居中。 */
+.ca-list-head .h-dur,
+.ca-list-head .h-progress {
+  text-align: center;
+}
+
+.ca-row {
+  border-bottom: 1px solid var(--line-soft);
+  border-radius: 10px;
+  transition: background 0.12s, box-shadow 0.12s;
+}
+
+@media (hover: hover) {
+.ca-row:hover {
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-card);
+}
+}
+
+.ca-row .row-button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px 80px;
+  gap: 16px;
+  align-items: center;
+  /* 右内边距要盖过行尾绝对定位的「操作」按钮（right:12px + 宽 32px = 44px）再留出间隙，
+     否则右对齐的状态徽标会和三个点按钮重叠。 */
+  padding: 12px 54px 12px 14px;
+  text-align: left;
+}
+
+.row-thumb {
+  width: 64px;
+  height: 40px;
+  border-radius: 7px;
+  flex: 0 0 auto;
+  position: relative;
+  overflow: hidden;
+  background: var(--stage);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ca-row .row-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.ca-row .row-name {
+  min-width: 0;
+  display: block;
+}
+
+.ca-row .t {
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-size: 13.5px;
+  font-weight: 550;
+}
+
+.ca-row .s {
+  display: none;
+  margin-top: 2px;
+  color: var(--text-4);
+  font-size: 12px;
+}
+
+.ca-row .c-dur {
+  font-family: var(--mono);
+  color: var(--text-3);
+  font-size: 12.5px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 列表「进度」列：已看/看完/未看/处理中/失败五态，居中对齐。 */
+.ca-row .c-progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.ca-row .c-progress.accent {
+  color: var(--accent-text);
+}
+
+.ca-row .c-progress.ok {
+  color: var(--status-ok);
+}
+
+.ca-row .c-progress.err {
+  color: var(--status-err);
+}
+
+.ca-row .c-progress.processing .accent {
+  color: var(--accent-text);
+}

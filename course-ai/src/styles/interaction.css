@@ -1,0 +1,184 @@
+/* 触摸按压反馈、流式与打字指示动画、iOS 触控收尾。须留在最后以覆盖各处 :hover。 */
+
+/* ===================== 触摸按压反馈（P0） =====================
+   hover 在触屏不触发，给可点元素补 :active 即时反馈；并去掉系统默认点按高亮。
+   放在文件末尾，确保 :active 在桌面同时 hover 时也能覆盖各处 :hover。 */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 去掉触屏 300ms 点击延迟（仍允许滚动/缩放手势）。 */
+button,
+a,
+[role="button"],
+[role="tab"] {
+  touch-action: manipulation;
+}
+
+/* 流式状态文字的轻呼吸：比再加一个转圈安静，也让「还活着」可感知。
+   只动 opacity，走合成器；减动效由全局兜底压平。 */
+@keyframes ca-pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.ca-pulse-soft {
+  animation: ca-pulse-soft 1.6s infinite ease-in-out;
+}
+
+/* 新一轮消息的入场：轻轻落下来而不是凭空出现。 */
+@keyframes ca-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ca-msg-in {
+  animation: ca-msg-in 0.18s ease-out;
+}
+
+/* 提问助手「思考中」打字指示器：三个错峰跳动的小圆点。 */
+@keyframes ca-typing-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+.ca-typing-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: ca-typing-dot 1.1s infinite ease-in-out;
+}
+
+/* 流式生成时的末尾光标：默认稳定显示，无减弱动效偏好时闪烁。 */
+@keyframes ca-stream-caret {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.ca-stream-caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  border-radius: 1px;
+  opacity: 0.7;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-stream-caret {
+    animation: ca-stream-caret 1s steps(1, end) infinite;
+  }
+}
+
+/* 卡片本就有 transform 过渡：按压轻微缩放 */
+.ca-card:active {
+  transform: scale(0.985);
+}
+
+/* 列表行 / 侧栏项 / rail 按钮本就有背景过渡：按压加深背景 */
+.ca-row:active {
+  background: var(--surface-card-active);
+}
+
+.ca-nav-item:active,
+.rail-btn:active {
+  background: var(--bg-sunken);
+}
+
+/* 本无过渡的图标按钮 / 底部 Tab：补过渡 + 按压态 */
+.hamb,
+.ca-back-fab,
+.ca-bottom-tab-btn {
+  transition:
+    transform 0.1s,
+    background-color 0.12s,
+    opacity 0.12s;
+}
+
+.hamb:active {
+  transform: scale(0.92);
+  background: var(--bg-sunken);
+}
+
+.ca-back-fab:active {
+  transform: scale(0.92);
+  background: rgb(0 0 0 / 0.62);
+}
+
+.ca-bottom-tab-btn:active {
+  opacity: 0.55;
+}
+
+/* ===================== iOS 触控收尾 ===================== */
+
+/* 滚动链隔离：任一内部滚动区到底后不把弹跳/滚动传给祖先（嵌套滚动、堆叠工作台尤其明显）。
+   只阻断链接，不改变正常滚动手感。 */
+.overflow-y-auto,
+.overflow-auto,
+.ca-scroll,
+.ca-nav {
+  overscroll-behavior: contain;
+}
+
+/* 长按 callout：iOS 上长按可点元素会弹出系统「拷贝/查询/分享」菜单。关掉它即可，
+   不影响文本选择——所以这条可以宽泛地覆盖到所有按钮/链接（含文稿可点行）。 */
+button,
+a,
+[role="button"],
+[role="tab"] {
+  -webkit-touch-callout: none;
+}
+
+/* 误选中 / 放大镜：长按纯控件（图标键、导航、卡片、分段器等）会触发文字放大镜或选中
+   控件文案，毫无意义。只对这些「非正文」chrome 关掉文本选择；刻意排除裸 button / a，
+   保留文稿可点行、幻灯片文本等正文仍可长按选词复制。 */
+[role="button"],
+[role="tab"],
+.ca-card,
+.ca-row,
+.ca-nav-item,
+.rail-btn,
+.ca-icon-btn,
+.ca-bottom-tab-btn,
+.hamb,
+.ca-back-fab,
+.ca-seg,
+.ca-chip {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 视频元素：禁掉长按弹出的「存储图片/拷贝」菜单，避免观看时误触打断。 */
+video {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}

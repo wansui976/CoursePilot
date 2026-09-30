@@ -1,8 +1,16 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const css = readFileSync(resolve("src/globals.css"), "utf8");
+/** 按 @import 顺序内联本地样式文件，得到与构建时同序的整份样式表。 */
+function readStylesheet(file: string): string {
+  return readFileSync(file, "utf8").replace(
+    /^@import "(\.[^"]+)";$/gm,
+    (_, relative: string) => readStylesheet(resolve(dirname(file), relative)),
+  );
+}
+
+const css = readStylesheet(resolve("src/globals.css"));
 
 function contrastRatio(foreground: string, background: string): number {
   const luminance = (hex: string) => {

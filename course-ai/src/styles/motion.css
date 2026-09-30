@@ -1,0 +1,122 @@
+/* 动效：减弱动效兜底、颜色过渡、明暗切换 View Transition、顶层视图入场。 */
+
+/* 用户要求减少动效时：全局兜底，几乎关掉所有过渡与动画（前庭敏感友好）。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+
+  html.theme-circle-vt::view-transition-old(root),
+  html.theme-circle-vt::view-transition-new(root) {
+    animation: none !important;
+    clip-path: none !important;
+  }
+}
+
+/* 平滑的颜色过渡：悬停态。只动颜色类属性，不引起重排。 */
+@media (prefers-reduced-motion: no-preference) {
+  button,
+  a,
+  [role="tab"],
+  input[type="range"] {
+    transition:
+      background-color 0.16s ease,
+      border-color 0.16s ease,
+      color 0.16s ease,
+      box-shadow 0.16s ease;
+  }
+}
+
+/* 明暗切换默认 View Transitions(theme.ts):两张快照 GPU 交叉淡化。
+   从左下角按钮切换时会改走圆形揭开（见 .theme-circle-vt）。 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.3s;
+}
+
+/* 按钮触发的圆形切色：新主题快照从点击点以 clip-path 圆扩到整屏。 */
+html.theme-circle-vt {
+  /* 默认值兜底，真正数值由 theme.ts 在切换前写入。 */
+  --theme-circle-x: 50%;
+  --theme-circle-y: 50%;
+  --theme-circle-r: 100vmax;
+}
+
+html.theme-circle-vt::view-transition-old(root) {
+  /* 旧画面保持静止垫底，让圆扩散更清晰。 */
+  animation: none;
+  z-index: 1;
+}
+
+html.theme-circle-vt::view-transition-new(root) {
+  animation: ca-theme-circle-reveal 0.6s cubic-bezier(0.2, 0, 0, 1) both;
+  z-index: 2147483646;
+}
+
+@keyframes ca-theme-circle-reveal {
+  from {
+    clip-path: circle(0px at var(--theme-circle-x) var(--theme-circle-y));
+  }
+  to {
+    clip-path: circle(var(--theme-circle-r) at var(--theme-circle-x) var(--theme-circle-y));
+  }
+}
+
+/* 减弱动态效果时，theme.ts 会在进入 View Transition/覆盖层路径前直接提交新主题；
+   上面的媒体查询再兜底清除残留快照动画。 */
+
+/* 明暗切换兜底(引擎不支持 View Transitions 时)：切换瞬间由 JS 给 <html> 加
+   .theme-animating(~300ms)，让整树颜色一起淡变，避免「按钮淡变、背景/文字/卡片
+   却瞬间跳变」的先后错位。只在这段窗口内对全树挂过渡，平时不挂(否则会拖累
+   hover/拖动等交互)。注意:全树逐元素过渡在大 DOM 下逐帧整屏重绘,开销大,
+   仅作兜底。reduce-motion 时 JS 直接不加这个类。 */
+@media (prefers-reduced-motion: no-preference) {
+  html.theme-animating,
+  html.theme-animating *,
+  html.theme-animating *::before,
+  html.theme-animating *::after {
+    transition:
+      background-color 0.3s ease,
+      border-color 0.3s ease,
+      color 0.3s ease,
+      fill 0.3s ease,
+      stroke 0.3s ease,
+      box-shadow 0.3s ease !important;
+    transition-delay: 0s !important;
+  }
+}
+
+/* 顶层视图入场：进入工作台 / 课程库 / 队列 / 设置等时，整块内容轻微淡入上移，
+   与首页卡片的灵动观感一致，不再是生硬的瞬切。由 React 的 key=视图类型 触发重挂
+   来重播动画——切换视频不改 key，故不会打断播放器（音量/倍速/进度保留）。
+   用 backwards 只在动画开始前应用 from 态、结束后不留存 transform，避免给 .ca-wb
+   留下 transform 而把全屏视频的 fixed 定位困在工作台内。 */
+@keyframes ca-view-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ca-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-view {
+    animation: ca-view-in 0.24s var(--ease) backwards;
+  }
+}
