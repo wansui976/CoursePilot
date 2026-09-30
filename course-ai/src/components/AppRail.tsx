@@ -68,7 +68,7 @@ export function AppRail({
     <nav className="ca-rail" aria-label={t("nav.toolbar")}>
       <button
         className="rail-logo"
-        title={inWorkbench ? t("nav.backToLibrary") : t("nav.libraryHome")}
+        data-tip={inWorkbench ? t("nav.backToLibrary") : t("nav.libraryHome")}
         aria-label={inWorkbench ? t("nav.backToLibrary") : t("nav.libraryHome")}
         onClick={inWorkbench ? onBackToLibrary : onGoLibraryHome}
       >
@@ -77,7 +77,7 @@ export function AppRail({
       {!sidebarExpanded && (
         <button
           className="rail-btn"
-          title={t("nav.expandSidebar")}
+          data-tip={t("nav.expandSidebar")}
           aria-label={t("nav.expandSidebar")}
           onClick={onExpandSidebar}
         >
@@ -87,7 +87,7 @@ export function AppRail({
       {view === "library" && (
         <button
           className={`rail-btn ${queueOpen ? "active" : ""}`}
-          title={t("nav.queue")}
+          data-tip={t("nav.queue")}
           aria-label={t("nav.queue")}
           onClick={onToggleQueue}
         >
@@ -97,7 +97,7 @@ export function AppRail({
       )}
       <button
         className="rail-btn"
-        title={t("nav.dashboard")}
+        data-tip={t("nav.dashboard")}
         aria-label={t("nav.dashboard")}
         onClick={onOpenDashboard}
       >
@@ -105,16 +105,17 @@ export function AppRail({
       </button>
       <button
         className={`rail-btn ${assistantActive ? "active" : ""}`}
-        title={t("assistant.toggleAssistant")}
+        data-tip={t("assistant.toggleAssistant")}
         aria-label={t("assistant.toggleAssistant")}
         onClick={onToggleAssistant}
       >
         <Sparkles className="h-5 w-5" />
       </button>
       <div className="rail-sp" />
+      <div className="rail-divider" aria-hidden="true" />
       <button
         className="rail-btn"
-        title={themeToggleLabel}
+        data-tip={themeToggleLabel}
         aria-label={themeToggleLabel}
         onClick={toggleThemeFrom}
       >
@@ -122,7 +123,7 @@ export function AppRail({
       </button>
       <button
         className="rail-btn"
-        title={t("nav.recycleBin")}
+        data-tip={t("nav.recycleBin")}
         aria-label={t("nav.recycleBin")}
         onClick={onOpenRecycleBin}
       >
@@ -130,7 +131,7 @@ export function AppRail({
       </button>
       <button
         className="rail-btn"
-        title={t("nav.settings")}
+        data-tip={t("nav.settings")}
         aria-label={t("nav.settings")}
         onClick={onOpenSettings}
       >

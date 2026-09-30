@@ -8,6 +8,7 @@ import {
   LoaderCircle,
   RefreshCw,
   Save,
+  Sparkles,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -66,21 +67,34 @@ export function AssistantEmptyState({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex min-h-full flex-col justify-center gap-4">
+    <div className="flex min-h-full flex-col justify-center gap-5 px-1">
       <div>
-        <p className="ca-t-md font-medium text-[var(--text-strong)]">{t("assistant.greeting")}</p>
-        <p className="mt-1 text-xs leading-relaxed text-[var(--text-faint)]">
+        {/* 品牌小砖：给空态一个视觉锚点，不然问候语浮在白底上没有落点。 */}
+        <div
+          aria-hidden="true"
+          className="ca-fill-brand mb-3 grid h-9 w-9 place-items-center rounded-[10px] text-[var(--on-accent)] shadow-[var(--shadow-raise)]"
+        >
+          <Sparkles className="h-[18px] w-[18px]" />
+        </div>
+        <p className="ca-t-lg font-semibold tracking-[-0.01em] text-[var(--text-strong)]">
+          {t("assistant.greeting")}
+        </p>
+        <p className="mt-1.5 ca-t-sm leading-relaxed text-[var(--text-muted)]">
           {t("assistant.greetingHint", { scope: scopeLabel })}
         </p>
       </div>
-      <div className="grid w-full gap-1">
-        {suggestionsFor(context, t).map((suggestion) => (
+      {/* 建议问题收成 iOS 分组列表：一个圆角容器 + 发丝分隔线，
+          比三条各自悬停的裸文字行更成形。 */}
+      <div className="w-full overflow-hidden rounded-xl border border-[var(--border-faint)] bg-[var(--surface-card)]">
+        {suggestionsFor(context, t).map((suggestion, index) => (
           <button
             key={suggestion.prompt}
             type="button"
             disabled={actionExecutionBusy}
             onClick={() => onSend(suggestion.prompt)}
-            className="ca-touch-44 flex w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-left text-sm text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
+            className={`ca-touch-44 flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm text-[var(--text-normal)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none ${
+              index > 0 ? "border-t border-[var(--border-faint)]" : ""
+            }`}
           >
             <span>{suggestion.label}</span>
             <ArrowUpRight className="h-3.5 w-3.5 flex-none text-[var(--text-faint)]" />

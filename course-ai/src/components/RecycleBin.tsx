@@ -1,14 +1,16 @@
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { qk } from "@/lib/queryKeys";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, RotateCcw, Trash2 } from "lucide-react";
+import { RotateCcw, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { VideoCover } from "@/components/VideoCover";
+import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorNote } from "@/components/ui/ErrorNote";
+import { ViewHeader } from "@/components/ui/view-header";
 import type { TrashedVideo } from "@/lib/types";
 
 function daysLeft(expiresAt: number): number {
@@ -249,38 +251,27 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
-      <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-3 py-3 sm:px-7 sm:py-4">
-        <button
-          aria-label={t("common.back")}
-          onClick={onClose}
-          className="ca-icon-btn ca-touch-44 ml-0"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-        <div className="min-w-0">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-[var(--text-strong)]">
-            <Trash2 className="h-4 w-4" />
-            {t("recycleBin.title")}
-          </h2>
-          <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-            {t("recycleBin.description")}
-          </p>
-        </div>
-        {items.length > 0 && (
-          <button
-            onClick={() => void confirmPurgeAll()}
-            disabled={busy}
-            title={t("recycleBin.clearAll")}
-            aria-label={t("recycleBin.clearAll")}
-            className="ca-touch-44 ml-auto inline-flex flex-none items-center justify-center gap-1 rounded-md px-2 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50 min-[400px]:px-3"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            <span className="sr-only min-[400px]:not-sr-only">
-              {t("recycleBin.clearAll")}
-            </span>
-          </button>
-        )}
-      </header>
+      <ViewHeader
+        title={t("recycleBin.title")}
+        description={t("recycleBin.description")}
+        onBack={onClose}
+        actions={
+          items.length > 0 ? (
+            <button
+              onClick={() => void confirmPurgeAll()}
+              disabled={busy}
+              title={t("recycleBin.clearAll")}
+              aria-label={t("recycleBin.clearAll")}
+              className="ca-touch-44 inline-flex flex-none items-center justify-center gap-1 rounded-md px-2 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50 min-[400px]:px-3"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span className="sr-only min-[400px]:not-sr-only">
+                {t("recycleBin.clearAll")}
+              </span>
+            </button>
+          ) : undefined
+        }
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-7 sm:py-6">
         <div className="mx-auto max-w-2xl">
@@ -295,9 +286,12 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
               onRetry={() => void refetch()}
             />
           ) : items.length === 0 ? (
-            <p className="p-6 text-center text-sm text-[var(--text-faint)]">
-              {t("recycleBin.empty")}
-            </p>
+            <div className="flex min-h-[320px] items-center justify-center">
+              <EmptyState
+                icon={<Trash2 className="h-6 w-6" />}
+                title={t("recycleBin.empty")}
+              />
+            </div>
           ) : (
             <div className="space-y-6">{groups.map(renderGroup)}</div>
           )}

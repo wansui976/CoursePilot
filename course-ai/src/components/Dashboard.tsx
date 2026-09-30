@@ -7,10 +7,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
   Check,
-  ChevronLeft,
   Clock,
   Flame,
-  LayoutDashboard,
   Play,
   TrendingDown,
 } from "lucide-react";
@@ -21,6 +19,7 @@ import { displayTitle } from "@/lib/videoTitle";
 import { ErrorNote } from "@/components/ui/ErrorNote";
 import { ProgressRing } from "@/components/ui/ProgressRing";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ViewHeader } from "@/components/ui/view-header";
 import { DailyGoalDialog } from "./DailyGoalDialog";
 import { ReviewSession } from "./ReviewSession";
 import {
@@ -393,19 +392,11 @@ export function Dashboard({
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
-      <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-4">
-        <button
-          aria-label={t("dashboard.back")}
-          onClick={onClose}
-          className="ca-icon-btn ca-touch-44 ml-0"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-        <h2 className="flex items-center gap-2 text-lg font-semibold text-[var(--text-strong)]">
-          <LayoutDashboard className="h-4 w-4" />
-          {t("dashboard.title")}
-        </h2>
-      </header>
+      <ViewHeader
+        title={t("dashboard.title")}
+        onBack={onClose}
+        backLabel={t("dashboard.back")}
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
         <div className="mx-auto max-w-2xl space-y-6">

@@ -203,7 +203,7 @@
     "relinkResult": "Relinked {{relinked}}/{{total}} videos",
     "relinkMissing": "Missing {{count}}: {{names}}",
     "relinkAmbiguous": "Skipped {{count}} duplicates: {{names}}",
-    "deleteCourseConfirm": "Delete course \"{{name}}\"?\nVideos will be moved to the recycle bin and can be restored within 30 days.",
+    "deleteCourseConfirm": "Delete course \"{{name}}\"?\nLocation: {{path}}\nVideos: {{count}}\n\nVideos will be moved to the recycle bin and can be restored within 30 days.",
     "deleteCourseTitle": "Delete Course",
     "cancel": "Cancel",
     "videoCountShort": "{{count}} videos",

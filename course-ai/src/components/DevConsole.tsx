@@ -2,8 +2,9 @@ import { useState } from "react";
 import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronLeft, Copy, RefreshCw, Terminal, Trash2 } from "lucide-react";
+import { Check, Copy, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ViewHeader } from "@/components/ui/view-header";
 import { ipc } from "@/lib/ipc";
 import type { DevLogEntry, LlmUsageTotals } from "@/lib/types";
 
@@ -173,20 +174,12 @@ export function DevConsole({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
-      <header className="flex flex-none flex-wrap items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-3 py-3 sm:flex-nowrap sm:gap-3 sm:px-7 sm:py-4">
-        <button
-          aria-label={t("devConsole.back")}
-          onClick={onClose}
-          className="ca-icon-btn ca-touch-44 ml-0"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-        <div className="min-w-0 flex-1">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-[var(--text-strong)]">
-            <Terminal className="h-4 w-4" />
-            {t("devConsole.title")}
-          </h2>
-          <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+      <ViewHeader
+        title={t("devConsole.title")}
+        onBack={onClose}
+        backLabel={t("devConsole.back")}
+        description={
+          <>
             {t("devConsole.subtitle")}
             {logs.length > 0 && (
               <>
@@ -198,49 +191,51 @@ export function DevConsole({ onClose }: { onClose: () => void }) {
                 <span className={failed > 0 ? "text-red-500" : ""}>{t("devConsole.failed", { count: failed })}</span>
               </>
             )}
-          </p>
-        </div>
-        <div
-          aria-label={t("devConsole.actions")}
-          role="toolbar"
-          className="order-3 flex w-full items-center justify-end gap-2 sm:order-none sm:w-auto"
-        >
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={logs.length === 0}
-            onClick={copyAll}
-            aria-label={copied ? t("devConsole.copied") : t("devConsole.copyAll")}
-            title={copied ? t("devConsole.copied") : t("devConsole.copyAll")}
+          </>
+        }
+        actions={
+          <div
+            aria-label={t("devConsole.actions")}
+            role="toolbar"
+            className="flex items-center justify-end gap-2"
           >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-            <span className="max-[399px]:sr-only">
-              {copied ? t("devConsole.copied") : t("devConsole.copyAll")}
-            </span>
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => qc.invalidateQueries({ queryKey: qk.devLogs() })}
-            aria-label={t("devConsole.refresh")}
-            title={t("devConsole.refresh")}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
-            <span className="max-[399px]:sr-only">{t("devConsole.refresh")}</span>
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={clear.isPending || (logs.length === 0 && usage.length === 0)}
-            onClick={() => clear.mutate()}
-            aria-label={t("devConsole.clear")}
-            title={t("devConsole.clear")}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            <span className="max-[399px]:sr-only">{t("devConsole.clear")}</span>
-          </Button>
-        </div>
-      </header>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={logs.length === 0}
+              onClick={copyAll}
+              aria-label={copied ? t("devConsole.copied") : t("devConsole.copyAll")}
+              title={copied ? t("devConsole.copied") : t("devConsole.copyAll")}
+            >
+              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              <span className="max-[399px]:sr-only">
+                {copied ? t("devConsole.copied") : t("devConsole.copyAll")}
+              </span>
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => qc.invalidateQueries({ queryKey: qk.devLogs() })}
+              aria-label={t("devConsole.refresh")}
+              title={t("devConsole.refresh")}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
+              <span className="max-[399px]:sr-only">{t("devConsole.refresh")}</span>
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={clear.isPending || (logs.length === 0 && usage.length === 0)}
+              onClick={() => clear.mutate()}
+              aria-label={t("devConsole.clear")}
+              title={t("devConsole.clear")}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span className="max-[399px]:sr-only">{t("devConsole.clear")}</span>
+            </Button>
+          </div>
+        }
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-7 sm:py-6">
         <div className="mx-auto mb-6 max-w-3xl space-y-2">

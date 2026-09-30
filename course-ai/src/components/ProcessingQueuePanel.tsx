@@ -1,9 +1,10 @@
 import { useTranslation } from "react-i18next";
-import { ChevronLeft, Loader2, RotateCcw, Trash2, X } from "lucide-react";
+import { ClipboardList, Loader2, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { IconButton } from "@/components/ui/icon-button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorNote } from "@/components/ui/ErrorNote";
+import { ViewHeader } from "@/components/ui/view-header";
 import { displayTitle } from "@/lib/videoTitle";
 import type { Video } from "@/lib/types";
 
@@ -68,41 +69,31 @@ export function ProcessingQueuePanel({
       aria-label={t("home.queueTitle")}
       className="flex min-h-0 flex-1 flex-col overflow-hidden"
     >
-      <header className="flex flex-none items-start justify-between gap-4 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-7 py-5">
-        <div className="flex min-w-0 items-start gap-3">
-          <IconButton
-            className="mt-0.5"
-            onClick={onBack}
-            aria-label={t("home.queueBack")}
-            title={t("home.queueBack")}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </IconButton>
-          <div className="min-w-0">
-            <h1 className="text-2xl font-semibold text-[var(--text-strong)]">
-              {t("home.queueLabel")}
-            </h1>
-          </div>
-        </div>
-        <div className="flex flex-none items-center gap-2">
-          {/* 批量操作：有运行/排队中的任务时「全部取消」，有失败任务时「全部重试」。 */}
-          {hasCancellable && (
-            <Button variant="outline" size="sm" onClick={onCancelAll} className="ca-touch-44">
-              <X className="h-3.5 w-3.5" />
-              {t("home.cancelAll")}
-            </Button>
-          )}
-          {hasFailed && (
-            <Button variant="outline" size="sm" onClick={onRetryAll} className="ca-touch-44">
-              <RotateCcw className="h-3.5 w-3.5" />
-              {t("home.retryAll")}
-            </Button>
-          )}
-          <Badge tone="neutral" dot={false}>
-            {t("home.queueCount", { count: items.length })}
-          </Badge>
-        </div>
-      </header>
+      <ViewHeader
+        title={t("home.queueLabel")}
+        onBack={onBack}
+        backLabel={t("home.queueBack")}
+        actions={
+          <>
+            {/* 批量操作：有运行/排队中的任务时「全部取消」，有失败任务时「全部重试」。 */}
+            {hasCancellable && (
+              <Button variant="outline" size="sm" onClick={onCancelAll} className="ca-touch-44">
+                <X className="h-3.5 w-3.5" />
+                {t("home.cancelAll")}
+              </Button>
+            )}
+            {hasFailed && (
+              <Button variant="outline" size="sm" onClick={onRetryAll} className="ca-touch-44">
+                <RotateCcw className="h-3.5 w-3.5" />
+                {t("home.retryAll")}
+              </Button>
+            )}
+            <Badge tone="neutral" dot={false}>
+              {t("home.queueCount", { count: items.length })}
+            </Badge>
+          </>
+        }
+      />
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
         {error && (
           <ErrorNote className="mb-4" error={errorObj} onRetry={onRetryLoad} />
@@ -116,8 +107,11 @@ export function ProcessingQueuePanel({
             {t("home.queueLoading")}
           </div>
         ) : items.length === 0 && !error ? (
-          <div className="flex h-full min-h-[240px] items-center justify-center text-sm text-[var(--text-faint)]">
-            {t("home.queueEmpty")}
+          <div className="flex h-full min-h-[240px] items-center justify-center">
+            <EmptyState
+              icon={<ClipboardList className="h-6 w-6" />}
+              title={t("home.queueEmpty")}
+            />
           </div>
         ) : items.length > 0 ? (
           <div className="flex w-full flex-col gap-3">

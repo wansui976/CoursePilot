@@ -38,8 +38,8 @@ describe("DevConsole", () => {
   it("wraps header actions into a dedicated phone-width toolbar", () => {
     renderConsole();
     const toolbar = screen.getByRole("toolbar");
-    expect(toolbar).toHaveClass("w-full", "sm:w-auto");
-    expect(toolbar.closest("header")).toHaveClass("flex-wrap", "sm:flex-nowrap", "px-3");
+    // 窄屏换行由 ViewHeader 的 .ca-view-header 按 data-bucket 接管，不再是 Tailwind 类。
+    expect(toolbar.closest("header")).toHaveClass("ca-view-header");
     expect(screen.getByRole("button", { name: "复制全部" })).toHaveAttribute(
       "title",
       "复制全部",

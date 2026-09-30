@@ -265,13 +265,17 @@ export function CourseList({
     const name = renameDraft.trim();
     if (renamingId && name) rename.mutate({ id: renamingId, name });
   }
-  async function confirmDelete(id: string, name: string) {
+  async function confirmDelete(course: Course) {
     closeMenu();
     const ok = await confirmDialog(
-      t("courseList.deleteCourseConfirm", { name }),
+      t("courseList.deleteCourseConfirm", {
+        name: course.name,
+        path: course.root_path,
+        count: course.video_count,
+      }),
       { title: t("courseList.deleteCourseTitle"), kind: "warning", okLabel: t("courseList.delete"), cancelLabel: t("courseList.cancel") },
     );
-    if (ok) remove.mutate(id);
+    if (ok) remove.mutate(course.id);
   }
 
   async function handleRelinkRoot(id: string, name: string) {
@@ -480,7 +484,7 @@ export function CourseList({
               <button
                 role="menuitem"
                 tabIndex={-1}
-                onClick={() => void confirmDelete(openCourse.id, openCourse.name)}
+                onClick={() => void confirmDelete(openCourse)}
                 className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--status-err)] hover:bg-[var(--surface-card-hover)]"
               >
                 <Trash2 className="h-4 w-4" />

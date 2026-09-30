@@ -436,7 +436,7 @@ select:focus-visible {
 .ca-rail .rail-btn {
   width: 44px;
   height: 44px;
-  border-radius: 10px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -491,6 +491,50 @@ select:focus-visible {
   font-weight: 600;
   line-height: 16px;
   text-align: center;
+}
+
+/* 主导航组与底部系统组之间的分隔线：比裸 spacer 多一层「这是两区」的可读性。 */
+.ca-rail .rail-divider {
+  width: 24px;
+  height: 1px;
+  margin: 2px 0 6px;
+  flex: none;
+  background: var(--line);
+}
+
+/* Rail 自定义 tooltip：原生 title 延迟 ~1.5s 且样式不可控；改走 data-tip 伪元素，
+   悬停 0.4s 后淡入、离开即消失，macOS 式近黑胶囊。aria-label 仍保留给读屏，
+   只在精确指针(鼠标)下启用，触屏不弹。 */
+@media (hover: hover) and (pointer: fine) {
+  .ca-rail [data-tip] {
+    position: relative;
+  }
+
+  .ca-rail [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    left: calc(100% + 8px);
+    top: 50%;
+    translate: 0 -50%;
+    padding: 5px 9px;
+    border-radius: 8px;
+    background: var(--surface-stage-overlay);
+    color: #fff;
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    line-height: 1.3;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur-fast) var(--ease);
+    z-index: 60;
+  }
+
+  .ca-rail [data-tip]:hover::after,
+  .ca-rail [data-tip]:focus-visible::after {
+    opacity: 1;
+    transition-delay: 0.4s;
+  }
 }
 
 .ca-main {
@@ -779,9 +823,11 @@ select:focus-visible {
 }
 
 .tb-titles h1 {
-  font-size: 21px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+  /* 课程库是根视图：给 Apple 式大标题（28px/紧字距），与次级视图 20px 的
+     ViewHeader 拉开层级；窄屏由下方 bucket 覆盖降到 fs-xl。 */
+  font-size: var(--fs-2xl);
+  font-weight: 650;
+  letter-spacing: -0.02em;
   line-height: 1.15;
 }
 
@@ -925,6 +971,70 @@ select:focus-visible {
   background: var(--bg-panel);
   color: var(--accent-text);
   box-shadow: var(--shadow-card);
+}
+
+/* ===== 学习面板页签：Apple 分段控件 =====
+   下划线 tab 换成 macOS 分段控件：凹槽轨道(--bg-sunken) + 选中丸浮起
+   （面板色 + raise 影）。顺带修掉旧下划线用静态 --color-primary、不随用户
+   强调色变化的问题——分段控件是中性控件，选中态靠明度与投影表达。
+   Radix TabsList 基类带 inline-flex，band 显式 display:block 撑满面板宽。 */
+.ca-study-tabs-band {
+  display: block;
+  flex: none;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-panel);
+}
+
+.ca-study-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  background: var(--bg-sunken);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ca-study-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.ca-study-tab {
+  flex: 1 1 0;
+  /* 空间够时等分；不够时不压缩文字、整条轨道横向滚动。 */
+  min-width: max-content;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-3);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .ca-study-tab:not([data-state="active"]):hover {
+    color: var(--text-1);
+  }
+}
+
+.ca-study-tab[data-state="active"] {
+  background-color: var(--bg-panel);
+  color: var(--text-1);
+  font-weight: 600;
+  box-shadow: var(--shadow-raise);
 }
 
 .ca-scroll {
@@ -1110,7 +1220,8 @@ select:focus-visible {
      圆角裁剪职责下放给 .ca-thumb（自身已 overflow:hidden）。 */
   cursor: pointer;
   background: var(--bg-panel);
-  border: 1px solid var(--line);
+  /* 静态描边降到 faint：卡片与底已有明度差 + 投影分层，硬描边只在 hover 时出现。 */
+  border: 1px solid var(--line-soft);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
   transition: transform 0.16s var(--ease), box-shadow 0.16s, border-color 0.16s;
@@ -1120,7 +1231,7 @@ select:focus-visible {
 .ca-card:hover {
   transform: translateY(-4px);
   box-shadow: var(--shadow-card-hover);
-  border-color: var(--line-strong);
+  border-color: var(--line);
 }
 }
 
@@ -1246,17 +1357,18 @@ select:focus-visible {
 }
 
 .ca-card-body {
-  padding: 14px 16px 16px;
+  padding: 12px 14px 13px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
 }
 
 .ca-card-title {
   color: var(--text-1);
-  font-size: 14.5px;
+  font-size: var(--fs-md);
   font-weight: 600;
-  line-height: 1.45;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1599,9 +1711,10 @@ select:focus-visible {
 .wb-title {
   min-width: 0;
   color: var(--text-1);
+  /* 与 ViewHeader 大标题同一套字阶语言：600 字重 + 负字距。 */
   font-size: var(--fs-xl);
-  font-weight: 680;
-  letter-spacing: 0.01em;
+  font-weight: 600;
+  letter-spacing: -0.02em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2007,6 +2120,11 @@ select:focus-visible {
   white-space: normal;
 }
 
+.ca-app[data-bucket="compact"] .tb-titles h1,
+.ca-app[data-bucket="medium"] .tb-titles h1 {
+  font-size: var(--fs-xl);
+}
+
 .ca-app[data-bucket="compact"] .tb-actions,
 .ca-app[data-bucket="medium"] .tb-actions {
   width: 100%;
@@ -2170,12 +2288,6 @@ select:focus-visible {
   /* 文稿行的纠错按钮桌面上悬停才出现；触屏没有 hover，必须常显。 */
   .ca-transcript-edit {
     opacity: 1;
-  }
-
-  /* 工作台顶部 tab：触屏下放宽命中区，点到文字旁边也算。 */
-  .ca-study-tab-trigger {
-    min-width: 72px;
-    min-height: 48px;
   }
 
   /* iOS 会在聚焦 font-size<16px 的输入框时自动放大整页(聚焦后页面跳动、失焦不复原)。

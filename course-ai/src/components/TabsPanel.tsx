@@ -165,23 +165,26 @@ function VideoTabsPanel({ videoId }: { videoId: string }) {
       data-study-tab={activeTab}
       className="flex h-full flex-col bg-[var(--surface-panel)] text-[var(--text-normal)]"
     >
-      {/* 面板拖窄时允许横向滚动；核心任务保持一级可见，低频资料统一收进"更多"。 */}
-      <TabsList className="flex h-12 items-stretch overflow-x-auto border-b border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2.5 [scrollbar-width:none] sm:h-14 sm:px-4 [&::-webkit-scrollbar]:hidden">
-        {TAB_KEYS.map((tab) => {
-          const Icon = TAB_ICONS[tab];
-          return (
-            <TabsTrigger
-              key={tab}
-              value={tab}
-              onClick={() => changeTab(tab)}
-              className="ca-touch-44 ca-study-tab-trigger flex min-h-11 min-w-max flex-1 items-center justify-center gap-1.5 border-b-[3px] border-transparent px-3 py-3 text-sm font-semibold text-[var(--text-muted)] transition-colors data-[state=active]:border-primary data-[state=active]:text-[var(--text-strong)] sm:min-h-12 sm:px-4 sm:text-base"
-            >
-              <Icon aria-hidden="true" className="h-4 w-4 flex-none" />
-              <span>{t(`studyTab.${tab}`)}</span>
-              <TabBadge tab={tab} videoId={videoId} />
-            </TabsTrigger>
-          );
-        })}
+      {/* 分段控件：macOS 式凹槽轨道 + 选中丸，取代下划线 tab。面板拖窄时轨道横向
+          滚动；核心任务保持一级可见，低频资料统一收进「更多」。 */}
+      <TabsList className="ca-study-tabs-band">
+        <div className="ca-study-tabs">
+          {TAB_KEYS.map((tab) => {
+            const Icon = TAB_ICONS[tab];
+            return (
+              <TabsTrigger
+                key={tab}
+                value={tab}
+                onClick={() => changeTab(tab)}
+                className="ca-study-tab ca-touch-44"
+              >
+                <Icon aria-hidden="true" className="h-4 w-4 flex-none" />
+                <span>{t(`studyTab.${tab}`)}</span>
+                <TabBadge tab={tab} videoId={videoId} />
+              </TabsTrigger>
+            );
+          })}
+        </div>
       </TabsList>
       {panels.map(({ tab, node }) => (
         <TabsContent

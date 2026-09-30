@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ErrorNote } from "@/components/ui/ErrorNote";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import type { AssistantActionOutcome } from "@/components/AssistantActionCard";
 import {
@@ -1542,7 +1543,7 @@ export function AssistantPanel({
           />
         </div>
       )}
-      <header className="flex items-center gap-1 border-b border-[var(--border-subtle)] px-3 py-2">
+      <header className="flex items-center gap-1 border-b border-[var(--border-faint)] px-3 py-2">
         {/* 提问范围原先挤在标题旁边，11px 一行灰字。它决定了「这个视频」指的是谁，
             该待在你打字的地方，而不是滚动区顶上那条最容易被忽略的边。 */}
         {mobile ? (
@@ -1762,14 +1763,7 @@ export function AssistantPanel({
             />
           </div>
         ))}
-        {error && (
-          <div
-            role="alert"
-            className="border-l-2 border-[var(--status-err)] pl-2 text-xs text-[var(--status-err)]"
-          >
-            <span>{error}</span>
-          </div>
-        )}
+        {error && <ErrorNote error={error} />}
       </div>
 
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">

@@ -274,4 +274,28 @@ describe("CourseList", () => {
     );
     expect(screen.getByRole("button", { name: /行测课程/ })).toBeInTheDocument();
   });
+
+  it("identifies the exact same-named course in the delete confirmation", async () => {
+    const { confirm } = await import("@tauri-apps/plugin-dialog");
+    // 模块级 mock 不随用例清空：上一条删除用例已调用过一次 confirm。
+    vi.mocked(confirm).mockClear();
+    vi.mocked(confirm).mockResolvedValue(true);
+    const sameNamedCourses = [
+      { ...courses[0], name: "同名课程", root_path: "/courses/first", video_count: 3 },
+      { ...courses[1], name: "同名课程", root_path: "/courses/second", video_count: 8 },
+    ];
+    mockIpc.courses.list.mockResolvedValue(sameNamedCourses);
+
+    renderList({ selectedCourseId: "c1" });
+    const triggers = await screen.findAllByRole("button", { name: "课程操作" });
+    fireEvent.click(triggers[1]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
+
+    await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+    const prompt = vi.mocked(confirm).mock.calls[0]?.[0];
+    expect(prompt).toContain("同名课程");
+    expect(prompt).toContain("/courses/second");
+    expect(prompt).toContain("视频：8 个");
+    await waitFor(() => expect(mockIpc.courses.delete).toHaveBeenCalledWith("c2"));
+  });
 });

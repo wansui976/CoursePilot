@@ -203,7 +203,7 @@
     "relinkResult": "已重连 {{relinked}}/{{total}} 个视频",
     "relinkMissing": "缺失 {{count}} 个：{{names}}",
     "relinkAmbiguous": "重名跳过 {{count}} 个：{{names}}",
-    "deleteCourseConfirm": "删除课程「{{name}}」？\n该课程下的视频会移入回收站，可在 30 天内恢复。",
+    "deleteCourseConfirm": "删除课程「{{name}}」？\n位置：{{path}}\n视频：{{count}} 个\n\n该课程下的视频会移入回收站，可在 30 天内恢复。",
     "deleteCourseTitle": "删除课程",
     "cancel": "取消",
     "videoCountShort": "{{count}}集",
