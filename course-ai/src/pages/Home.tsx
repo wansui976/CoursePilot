@@ -125,6 +125,16 @@ export function Home() {
   const accent = useTheme((s) => s.accent);
   const customAccent = useTheme((s) => s.customAccent);
   const toggleTheme = useTheme((s) => s.toggle);
+  // 强调色同时写到 <html>：经 Portal 挂到 body 的浮层（对话框、复习会话、菜单）不在
+  // .ca-app 里，只写 .ca-app 的话浮层里的 --accent 是未定义。
+  useEffect(() => {
+    const root = document.documentElement;
+    const vars = accentVars(accent, theme, customAccent);
+    for (const [name, value] of Object.entries(vars)) root.style.setProperty(name, value);
+    return () => {
+      for (const name of Object.keys(vars)) root.style.removeProperty(name);
+    };
+  }, [accent, theme, customAccent]);
   // 助手只有浮动一种形态，盖在内容上方，不占主区宽度；rail 按钮就是开/关。
   const assistantOpen = useAssistantUi((s) => s.open);
   const toggleAssistant = useAssistantUi((s) => s.toggle);

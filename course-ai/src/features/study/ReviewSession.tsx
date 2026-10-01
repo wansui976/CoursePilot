@@ -9,6 +9,7 @@ import { ipc, type DueCard } from "@/lib/ipc";
 import { formatStudyInterval } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { MathText } from "@/ui/MathText";
+import { renderInlineMarkdown } from "@/lib/renderMarkdown";
 
 const GRADES: { rating: number; labelKey: string; key: string }[] = [
   { rating: 1, labelKey: "review.again", key: "1" },
@@ -289,10 +290,10 @@ export function ReviewSession({
           ) : card ? (
             <div
               key={card.id}
-              className="ca-card-enter rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6"
+              className="ca-card-enter rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 shadow-[var(--shadow-card)] sm:p-8"
             >
-              <div className="whitespace-pre-wrap text-center text-lg text-[var(--text-strong)]">
-                <MathText text={card.front} />
+              <div className="whitespace-pre-wrap text-center text-xl font-semibold leading-relaxed tracking-[-0.01em] text-[var(--text-strong)]">
+                {renderInlineMarkdown(card.front)}
               </div>
 
               {choiceData && (
@@ -395,7 +396,7 @@ export function ReviewSession({
                   )}
                   <div className="mt-4 border-t border-[var(--border-subtle)] pt-4 text-center">
                     <div className="whitespace-pre-wrap text-[var(--text-normal)]">
-                      <MathText text={card.back} />
+                      {renderInlineMarkdown(card.back)}
                     </div>
                     {card.source_ms != null && card.video_id && (
                       <button
@@ -424,15 +425,14 @@ export function ReviewSession({
                               ? t(g.labelKey)
                               : t("review.nextReviewIn", { label: t(g.labelKey), interval: formatStudyInterval(interval) })
                           }
-                          className="ca-touch-44 rounded-lg border border-[var(--border-subtle)] px-1 py-2 text-sm text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
+                          data-grade={g.rating}
+                          className="ca-grade ca-touch-44"
                         >
-                          <span className="block font-medium">{t(g.labelKey)}</span>
+                          <span className="ca-grade-label">{t(g.labelKey)}</span>
                           {interval != null && (
-                            <span className="mt-0.5 block truncate text-xs tabular-nums text-[var(--text-muted)]">
-                              {formatStudyInterval(interval)}
-                            </span>
+                            <span className="ca-grade-interval">{formatStudyInterval(interval)}</span>
                           )}
-                          <span className="text-xs text-[var(--text-faint)]">{g.key}</span>
+                          <kbd className="ca-grade-key">{g.key}</kbd>
                         </button>
                       );
                     })}

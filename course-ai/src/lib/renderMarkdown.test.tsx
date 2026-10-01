@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import i18n from "@/i18n";
-import { renderMarkdown } from "./renderMarkdown";
+import { renderInlineMarkdown, renderMarkdown } from "./renderMarkdown";
 
 function renderMd(md: string, onSeek = vi.fn()) {
   return render(<div data-testid="root">{renderMarkdown(md, onSeek)}</div>);
@@ -104,5 +104,24 @@ describe("renderMarkdown", () => {
     expect(screen.getByRole("group", { name: "Sources" })).toHaveTextContent("Sources");
     fireEvent.click(screen.getByRole("button", { name: "Jump to 00:18" }));
     expect(onSeek).toHaveBeenCalledWith(18_000);
+  });
+
+  it("merges consecutive > lines into one blockquote with inline formatting", () => {
+    const { container } = renderMd("正文\n\n> 直觉：**下山**\n> 每步朝最陡处");
+    const quotes = container.querySelectorAll("blockquote");
+    expect(quotes).toHaveLength(1);
+    // 两行合成同一个引用块（toHaveTextContent 会把换行折成空格）。
+    expect(quotes[0]).toHaveTextContent("直觉：下山 每步朝最陡处");
+    expect(quotes[0].querySelector("strong")).toHaveTextContent("下山");
+    expect(container.textContent).not.toContain(">");
+  });
+});
+
+describe("renderInlineMarkdown", () => {
+  it("renders bold without wrapping the text in block elements", () => {
+    const { container } = render(<div>{renderInlineMarkdown("会来回**震荡**")}</div>);
+    expect(container.querySelector("strong")).toHaveTextContent("震荡");
+    expect(container.querySelector("p, ul, blockquote")).toBeNull();
+    expect(container.textContent).toBe("会来回震荡");
   });
 });

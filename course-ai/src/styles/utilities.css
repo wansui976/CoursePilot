@@ -189,3 +189,72 @@
     animation: ca-fade-in 0.18s ease;
   }
 }
+
+/* ===== 复习评分按钮：四档各有语义色 =====
+   重来 / 困难 / 良好 / 容易 → 错误红 / 警示琥珀 / 成功绿 / 强调色。平时只是淡淡着色，
+   悬停加深并轻抬；快捷键挪到右上角的小键帽，不再单占一行。 */
+.ca-grade {
+  --grade: var(--text-3);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px 6px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--grade) 26%, var(--line-soft));
+  background: color-mix(in srgb, var(--grade) 7%, var(--bg-panel));
+  transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast) var(--ease);
+}
+
+.ca-grade[data-grade="1"] { --grade: var(--status-err); }
+.ca-grade[data-grade="2"] { --grade: var(--status-warn); }
+.ca-grade[data-grade="3"] { --grade: var(--status-ok); }
+.ca-grade[data-grade="4"] { --grade: var(--accent); }
+
+@media (hover: hover) {
+  .ca-grade:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--grade) 14%, var(--bg-panel));
+    border-color: color-mix(in srgb, var(--grade) 48%, var(--line));
+    transform: translateY(-1px);
+  }
+}
+
+.ca-grade:disabled {
+  opacity: 0.55;
+}
+
+.ca-grade-label {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  font-weight: 600;
+  color: color-mix(in srgb, var(--grade) 72%, var(--text-1));
+}
+
+.ca-grade-interval {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.ca-grade-key {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--text-4);
+  background: var(--bg-sunken);
+  font-variant-numeric: tabular-nums;
+}

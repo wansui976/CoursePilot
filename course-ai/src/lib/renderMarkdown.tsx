@@ -97,7 +97,8 @@ type Block =
   | { kind: "p"; text: string }
   | { kind: "h"; level: 1 | 2 | 3 | 4 | 5 | 6; text: string }
   | { kind: "ul"; items: string[] }
-  | { kind: "ol"; items: string[] };
+  | { kind: "ol"; items: string[] }
+  | { kind: "quote"; text: string };
 
 type HeadingElement = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
 
@@ -119,6 +120,7 @@ function parseBlocks(md: string): Block[] {
       continue;
     }
     const heading = t.match(/^(#{1,6})\s+(.*)$/);
+    const quote = t.match(/^>\s?(.*)$/);
     const bullet = t.match(/^[-*]\s+(.*)$/);
     const ordered = t.match(/^\d+\.\s+(.*)$/);
     if (heading) {
@@ -128,6 +130,12 @@ function parseBlocks(md: string): Block[] {
         level: heading[1].length as 1 | 2 | 3 | 4 | 5 | 6,
         text: heading[2],
       });
+    } else if (quote) {
+      // 连续的 `>` 行合成一个引用块（AI 摘要常用它写「直觉 / 提示」）。
+      flushPara();
+      const last = blocks[blocks.length - 1];
+      if (last && last.kind === "quote") last.text += `\n${quote[1]}`;
+      else blocks.push({ kind: "quote", text: quote[1] });
     } else if (bullet) {
       flushPara();
       const last = blocks[blocks.length - 1];
@@ -144,6 +152,12 @@ function parseBlocks(md: string): Block[] {
   }
   flushPara();
   return blocks;
+}
+
+/** 只渲染行内格式（加粗、KaTeX、时间戳），不切段落/列表：给居中的单段文字用，
+ *  如复习卡的正反面。 */
+export function renderInlineMarkdown(text: string, onSeek: Seek = () => {}): ReactNode {
+  return inlineRich(text, onSeek, "inline");
 }
 
 /**
@@ -171,6 +185,16 @@ export function renderMarkdown(
         >
           {blockRich(block.text, onSeek, key, tail)}
         </HeadingTag>
+      );
+    }
+    if (block.kind === "quote") {
+      return (
+        <blockquote
+          key={key}
+          className="my-2 whitespace-pre-wrap rounded-r-md border-l-2 border-[var(--accent)] bg-[var(--accent-weak)] px-3 py-1.5 text-sm leading-relaxed text-[var(--text-normal)]"
+        >
+          {blockRich(block.text, onSeek, key, tail)}
+        </blockquote>
       );
     }
     if (block.kind === "ul" || block.kind === "ol") {

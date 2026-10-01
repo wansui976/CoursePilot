@@ -833,9 +833,9 @@ export function ConceptsPanel({
                         {t("concepts.courseOverview")}
                       </h2>
                       {knowledge?.overview ? (
-                        <p className="mt-2 max-w-3xl whitespace-pre-wrap text-sm leading-6 text-[var(--text-normal)]">
-                          {knowledge.overview}
-                        </p>
+                        <div className="mt-2 max-w-3xl">
+                          {renderMarkdown(knowledge.overview, NO_SEEK)}
+                        </div>
                       ) : (
                         <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
                           {t("concepts.knowledgeIndexNote")}

@@ -1,6 +1,10 @@
 /* .ca-app 作用域令牌，以及交互控件对比度、强调色前景的适配规则。 */
 
 /* UI 重构 reference shell: scoped class names mirror the files in ../UI 重构. */
+/* 别名令牌同时挂在 :root 上：Radix 对话框/复习会话等经 Portal 挂到 body，不在 .ca-app
+   里面——只挂在 .ca-app 上时这些变量在浮层里全是未定义，实色按钮失去底色、
+   color-mix() 整条失效。 */
+:root,
 .ca-app {
   --accent: #2f6cea;
   --accent-press: #255cd0;
@@ -73,6 +77,10 @@
   --lh-lg: 1.4;
   --lh-xl: 1.3;
   --lh-2xl: 1.25;
+}
+
+/* 应用外壳本身的布局；只属于 .ca-app，不能跟着上面的令牌挂到 :root（否则 <html> 也变成网格）。 */
+.ca-app {
   height: 100%;
   width: 100%;
   min-height: 0;
@@ -86,6 +94,7 @@
   position: relative;
 }
 
+:root[data-theme="dark"],
 .ca-app[data-theme="dark"] {
   --accent-weak: #1a2640;
   --accent-weak-2: #22335a;
@@ -115,24 +124,24 @@
 }
 
 /* Tailwind 的 text-white 是静态色；实色 primary/强调色控件改走动态前景 token。 */
-.ca-app [class~="text-primary"] {
+:root [class~="text-primary"] {
   color: var(--accent-text) !important;
 }
 
-.ca-app [class~="bg-primary"][class~="text-white"]:not(:disabled),
-.ca-app [class~="bg-primary"][class~="!text-white"]:not(:disabled),
-.ca-app [class~="bg-[var(--accent)]"][class~="text-white"]:not(:disabled),
-.ca-app [class~="bg-[var(--accent)]"][class~="!text-white"]:not(:disabled) {
+:root [class~="bg-primary"][class~="text-white"]:not(:disabled),
+:root [class~="bg-primary"][class~="!text-white"]:not(:disabled),
+:root [class~="bg-[var(--accent)]"][class~="text-white"]:not(:disabled),
+:root [class~="bg-[var(--accent)]"][class~="!text-white"]:not(:disabled) {
   color: var(--on-accent) !important;
 }
 
 @media (hover: hover) {
-  .ca-app [class~="hover:bg-primary"][class~="hover:!text-white"]:hover,
-  .ca-app .group:hover [class~="group-hover:bg-primary"][class~="group-hover:text-white"] {
+  :root [class~="hover:bg-primary"][class~="hover:!text-white"]:hover,
+  :root .group:hover [class~="group-hover:bg-primary"][class~="group-hover:text-white"] {
     color: var(--on-accent) !important;
   }
 
-  .ca-app [class~="bg-[var(--accent)]"][class~="hover:bg-[var(--accent-press)]"]:hover {
+  :root [class~="bg-[var(--accent)]"][class~="hover:bg-[var(--accent-press)]"]:hover {
     color: var(--on-accent-press) !important;
   }
 }
