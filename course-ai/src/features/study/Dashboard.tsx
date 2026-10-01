@@ -179,14 +179,18 @@ function HeatSquare({
         event.preventDefault();
         onNavigate(cell.day, offset);
       }}
-      className={`h-3 w-3 flex-none cursor-pointer rounded-[2px] ${HEAT_LEVEL_BG[cell.level]} transition-colors focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-card)] ${
+      // 达标日在格子中心点一个小白点：原先每个达标格都描一圈边、再压暗 20%，大多数日子
+      // 都达标时整片热力图变成一张描边网格。今天与选中格的描边保留。
+      className={`relative h-3 w-3 flex-none cursor-pointer rounded-[2px] ${HEAT_LEVEL_BG[cell.level]} transition-colors focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-card)] ${
+        reached
+          ? "after:absolute after:left-1/2 after:top-1/2 after:h-[3px] after:w-[3px] after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-white/75 after:content-['']"
+          : ""
+      } ${
         isToday
           ? "outline outline-2 outline-offset-1 outline-[var(--accent-text)]"
           : active
             ? "outline outline-1 outline-offset-1 outline-[var(--text-muted)]"
-            : reached
-              ? "outline outline-1 outline-offset-1 outline-[var(--accent-text)] opacity-80"
-              : ""
+            : ""
       }`}
     />
   );
@@ -701,7 +705,12 @@ export function Dashboard({
                         width: `calc(${segment.span} * 0.75rem + ${segment.span - 1} * 0.25rem)`,
                       }}
                     >
-                      <span className="absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap ca-t-2xs leading-4 text-[var(--text-faint)]">
+                      <span
+                        // 最后一段常只有一两列宽：居中标签会伸出容器被裁掉，改为贴右。
+                        className={`absolute top-0 whitespace-nowrap ca-t-2xs leading-4 text-[var(--text-faint)] ${
+                          index === heatMonths.length - 1 ? "right-0" : "left-1/2 -translate-x-1/2"
+                        }`}
+                      >
                         {segment.label}
                       </span>
                     </span>
