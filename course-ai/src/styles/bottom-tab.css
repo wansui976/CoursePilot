@@ -74,3 +74,59 @@
   background: var(--bg-sidebar);
   padding: calc(16px + env(safe-area-inset-top, 0px)) 16px 16px;
 }
+
+/* 整屏课程列表做成 iOS 内嵌分组列表：内容限宽居中（平板上不再一行横跨整屏），
+   课程装进圆角分组卡，行高 56、细分隔线从文字处起头，文件夹图标改成淡强调色的圆角小砖。
+   只作用于手机/平板根屏（.ca-course-screen），桌面侧栏（.ca-side）不受影响。 */
+.ca-course-screen > * {
+  width: 100%;
+  max-width: 680px;
+  margin-inline: auto;
+}
+
+.ca-course-screen .ca-nav {
+  /* 侧栏里 .ca-nav 要撑满剩余高度；分组卡则只包住内容，课程多了再收缩滚动。 */
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  gap: 0;
+  padding: 4px 0;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line-soft);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-card);
+}
+
+.ca-course-screen .ca-nav-item {
+  min-height: 56px;
+  border-radius: 0;
+  font-size: var(--fs-md);
+}
+
+.ca-course-screen .ca-nav-item + .ca-nav-item::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 58px;
+  height: 1px;
+  background: var(--line-soft);
+}
+
+.ca-course-screen .ca-nav-button {
+  min-height: 56px;
+  gap: 12px;
+  padding: 0 12px;
+}
+
+.ca-course-screen .ca-nav-button .ic {
+  box-sizing: content-box;
+  padding: 7px;
+  border-radius: 9px;
+  color: var(--accent-text);
+  background: var(--accent-weak);
+}
+
+.ca-course-screen .course-meta {
+  font-size: var(--fs-xs);
+}
