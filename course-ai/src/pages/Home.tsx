@@ -652,6 +652,8 @@ export function Home() {
 
   function renderSelectedVideoWorkspace() {
     if (!selectedVideo) return null;
+    // 本集在课程中的位置（从 1 起）；队列打开的跨课程视频不在当前列表里时为 0，不显示。
+    const videoPosition = videos.findIndex((video) => video.id === selectedVideo.id) + 1;
 
     return (
       <WorkspaceLayout
@@ -677,6 +679,24 @@ export function Home() {
                     </button>
                   )}
                   <div className="min-w-0">
+                    {selectedCourse && (
+                      <div className="wb-crumb">
+                        <button
+                          type="button"
+                          onClick={returnFromVideo}
+                          aria-label={t("home.backToCourse", { name: selectedCourse.name })}
+                          className="wb-crumb-course"
+                        >
+                          {selectedCourse.name}
+                        </button>
+                        {videoPosition > 0 && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span>{t("home.episodeOf", { index: videoPosition, total: videos.length })}</span>
+                          </>
+                        )}
+                      </div>
+                    )}
                     <h1 className="wb-title" title={displayTitle(selectedVideo.title)}>
                       {displayTitle(selectedVideo.title)}
                     </h1>

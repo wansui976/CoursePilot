@@ -1249,6 +1249,8 @@
     "continueLast": "继续上次",
     "watchedTo": "看到 {{time}}",
     "backToLibrary": "返回课程库",
+    "backToCourse": "返回「{{name}}」",
+    "episodeOf": "第 {{index}} 讲 / 共 {{total}} 讲",
     "courseVideos": "课程视频",
     "videoCount": "{{count}} 个视频",
     "selectCourseHint": "选择课程后导入或管理视频",

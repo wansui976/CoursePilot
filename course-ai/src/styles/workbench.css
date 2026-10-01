@@ -352,3 +352,136 @@
   flex: none;
   contain: strict;
 }
+
+/* 工作台标题上方的面包屑：课程名（可点回课程）· 第几讲 / 共几讲。 */
+.wb-crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 2px;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.wb-crumb-course {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--text-2);
+  border-radius: 4px;
+  transition: color var(--dur-fast);
+}
+
+@media (hover: hover) {
+  .wb-crumb-course:hover {
+    color: var(--accent-text);
+  }
+}
+
+/* ===== 重点章节：时间线 =====
+   竖线串起各章节点：已播过的点实心、当前章节点外圈发光并整行淡着色，未到的空心。 */
+.ca-chapter-timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ca-chapter-timeline > li {
+  position: relative;
+}
+
+.ca-chapter-timeline > li::before {
+  content: "";
+  position: absolute;
+  left: 15px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--line-soft);
+}
+
+.ca-chapter-timeline > li:first-child::before {
+  top: 18px;
+}
+
+.ca-chapter-timeline > li:last-child::before {
+  bottom: calc(100% - 18px);
+}
+
+.ca-chapter-timeline > li[data-past]::before {
+  background: color-mix(in srgb, var(--accent) 35%, var(--line-soft));
+}
+
+.ca-chapter {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: baseline;
+  width: 100%;
+  padding: 9px 10px 9px 34px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  transition: background var(--dur-fast);
+}
+
+@media (hover: hover) {
+  .ca-chapter:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+.ca-chapter-dot {
+  position: absolute;
+  left: 11px;
+  top: 14px;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 2px solid var(--line-strong);
+  background: var(--bg-panel);
+  transition: background var(--dur), border-color var(--dur), box-shadow var(--dur);
+}
+
+li[data-past] > .ca-chapter .ca-chapter-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+li[data-active] > .ca-chapter {
+  background: var(--accent-weak);
+}
+
+li[data-active] > .ca-chapter .ca-chapter-dot {
+  border-color: var(--accent);
+  background: var(--bg-panel);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.ca-chapter-time {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-text);
+}
+
+.ca-chapter-title {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.ca-chapter-summary {
+  grid-column: 2;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-3);
+}

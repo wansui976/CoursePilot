@@ -1249,6 +1249,8 @@
     "continueLast": "Continue",
     "watchedTo": "At {{time}}",
     "backToLibrary": "Back to courses",
+    "backToCourse": "Back to \"{{name}}\"",
+    "episodeOf": "Episode {{index}} of {{total}}",
     "courseVideos": "Course Videos",
     "videoCount": "{{count}} videos",
     "selectCourseHint": "Select a course to import or manage videos",

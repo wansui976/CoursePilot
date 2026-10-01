@@ -31,6 +31,16 @@ function saveCollapsed(value: boolean) {
   }
 }
 
+/** 当前播放位置所在章节的下标；还没进入第一章（或没有章节）时为 -1。 */
+function activeChapterIndex(chapters: { start_ms: number }[], currentMs: number) {
+  let index = -1;
+  for (let i = 0; i < chapters.length; i++) {
+    if (chapters[i].start_ms <= currentMs) index = i;
+    else break;
+  }
+  return index;
+}
+
 export function ChaptersPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
   const requestSeek = usePlayer((s) => s.requestSeek);
@@ -44,6 +54,10 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
   } = useQuery(queries.chapters(videoId));
   const stale = useStaleArtifacts(videoId);
   const generate = useAiGeneration(videoId, "chapters");
+  // 只订阅「当前落在第几章」：章节切换时才重渲染，而不是跟着 timeupdate 每秒刷几次。
+  const activeIndex = usePlayer((s) =>
+    s.videoId === videoId ? activeChapterIndex(chapters, s.currentMs) : -1,
+  );
 
   return (
     // 收回后只剩标题条（shrink-0 + mt-auto 贴底），整块高度让给上方摘要；
@@ -96,22 +110,29 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
               description={t("chapters.emptyDescription")}
             />
           ) : null}
-          {!isError &&
-            chapters.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => requestSeek(c.start_ms)}
-                className="block w-full rounded px-2 py-2 text-left hover:bg-[var(--surface-card-hover)]"
-              >
-                <div className="flex items-baseline gap-2">
-                  <span className="text-xs text-primary">{formatMs(c.start_ms)}</span>
-                  <span className="text-sm">{c.title}</span>
-                </div>
-                {c.summary && (
-                  <p className="mt-0.5 text-xs text-[var(--text-faint)]">{c.summary}</p>
-                )}
-              </button>
-            ))}
+          {!isError && chapters.length > 0 && (
+            <ol className="ca-chapter-timeline">
+              {chapters.map((c, index) => (
+                <li
+                  key={c.id}
+                  data-active={index === activeIndex || undefined}
+                  data-past={index < activeIndex || undefined}
+                >
+                  <button
+                    type="button"
+                    onClick={() => requestSeek(c.start_ms)}
+                    aria-current={index === activeIndex ? "true" : undefined}
+                    className="ca-chapter"
+                  >
+                    <span className="ca-chapter-dot" aria-hidden="true" />
+                    <span className="ca-chapter-time">{formatMs(c.start_ms)}</span>
+                    <span className="ca-chapter-title">{c.title}</span>
+                    {c.summary && <span className="ca-chapter-summary">{c.summary}</span>}
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
         </div>
       )}
       {/* 收回成底栏时悬浮按钮会叠在标题条上，与摘要面板同款：收回即隐藏。 */}
