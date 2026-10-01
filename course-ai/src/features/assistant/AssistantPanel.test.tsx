@@ -172,7 +172,8 @@ describe("AssistantPanel", () => {
       pointerType: "mouse",
       button: 0,
       clientX: 22,
-      clientY: 680,
+      // 按在球上：默认位置是 innerHeight(768) - 球高 56 - 底部让位 72 = 640。
+      clientY: 632,
     });
     fireEvent.pointerMove(window, { pointerId: 3, clientX: 900, clientY: 300 });
     // 拖动中球跟着指针走，不是钉死在边上。
@@ -196,7 +197,8 @@ describe("AssistantPanel", () => {
       pointerType: "mouse",
       button: 0,
       clientX: 22,
-      clientY: 680,
+      // 按在球上：默认位置是 innerHeight(768) - 球高 56 - 底部让位 72 = 640。
+      clientY: 632,
     });
     fireEvent.pointerMove(window, { pointerId: 4, clientX: 22, clientY: 530 });
     fireEvent.pointerUp(window, { pointerId: 4, clientX: 22, clientY: 530 });

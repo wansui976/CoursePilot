@@ -186,15 +186,9 @@ body {
   overflow-x: hidden;
 }
 
-button,
-input,
-select {
-  font: inherit;
-}
-
-button {
-  color: inherit;
-}
+/* 按钮/表单控件的 font 与 color 继承由 Tailwind preflight 在 base 层提供。这里不要再写
+   无层级的元素选择器：无层级规则压过所有工具类，按钮上的 text-xs、text-[var(--on-accent)]
+   会被悄悄改回继承值（实色按钮变成灰字、小号按钮被放大）。 */
 
 * {
   box-sizing: border-box;

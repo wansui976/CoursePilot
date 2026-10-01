@@ -64,11 +64,13 @@ export function MoreStudyPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex-none border-b border-[var(--border-subtle)] px-2.5">
+      {/* 二级切换用轻量胶囊，与上方一级的分段控件拉开层级（原先的下划线页签和分段控件
+          叠在一起，两层导航长得像两套设计）。 */}
+      <div className="flex-none border-b border-[var(--border-faint)] px-3 py-2">
         <div
           role="group"
           aria-label={t("morePanel.label")}
-          className="flex h-10 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {MORE_VIEW_KEYS.map((key) => {
             const Icon = MORE_ICONS[key];
@@ -78,10 +80,10 @@ export function MoreStudyPanel({
                 type="button"
                 aria-pressed={view === key}
                 onClick={() => setView(key)}
-                className={`ca-touch-44 flex min-h-10 min-w-max flex-1 items-center justify-center gap-1 border-b-[3px] px-2 py-2 text-xs font-semibold transition-colors ${
+                className={`ca-touch-44 flex h-8 min-w-max items-center justify-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${
                   view === key
-                    ? "border-primary text-[var(--text-strong)]"
-                    : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-normal)]"
+                    ? "bg-[var(--accent-weak)] text-[var(--accent-text)]"
+                    : "text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-normal)]"
                 }`}
               >
                 <Icon aria-hidden="true" className="h-3.5 w-3.5 flex-none" />

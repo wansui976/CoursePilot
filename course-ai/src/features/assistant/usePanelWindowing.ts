@@ -78,9 +78,13 @@ function initialPanelPosition(side: DockSide): PanelPosition {
   };
 }
 
+/** 浮球默认离窗口底边的距离：要越过学习面板右下角那排操作钮（bottom-3 + 36px 高）
+ *  再留出间隙，否则默认位置正好盖住「生成 / 导出」这些按钮。 */
+const LAUNCHER_BOTTOM_CLEARANCE = 72;
+
 function initialDockTop() {
   const { height } = viewportSize();
-  return Math.max(VIEWPORT_GAP, height - LAUNCHER_SIZE - 24);
+  return Math.max(VIEWPORT_GAP, height - LAUNCHER_SIZE - LAUNCHER_BOTTOM_CLEARANCE);
 }
 
 export function usePanelWindowing({
