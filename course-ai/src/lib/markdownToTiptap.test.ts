@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { markdownToTiptap, parseTimestamp } from "./markdownToTiptap";
+import { tiptapToMarkdown } from "./tiptapToMarkdown";
 
 describe("parseTimestamp", () => {
   it("parses mm:ss to ms", () => {
@@ -203,3 +204,20 @@ describe("markdownToTiptap", () => {
     expect(table!.content![1].content![0].type).toBe("tableCell");
   });
 });
+
+describe("markdownToTiptap blockquotes", () => {
+  it("parses consecutive > lines into one blockquote with nested formatting", () => {
+    const doc = markdownToTiptap("正文\n\n> 一句话：**下山**\n> - 每步朝最陡处");
+    const quote = doc.content?.find((node) => node.type === "blockquote");
+    expect(quote).toBeDefined();
+    expect(quote?.content?.map((node) => node.type)).toEqual(["paragraph", "bulletList"]);
+    expect(JSON.stringify(quote)).toContain('"bold"');
+    expect(JSON.stringify(doc)).not.toContain("> ");
+  });
+
+  it("round-trips a quote through the editor document unchanged", () => {
+    const md = "> 蒙着眼下山，每一步朝最陡处迈一小步。";
+    expect(tiptapToMarkdown(markdownToTiptap(md)).trim()).toBe(md);
+  });
+});
+

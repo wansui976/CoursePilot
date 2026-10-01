@@ -54,11 +54,22 @@
 .tiptap-notes li > p {
   margin: 0;
 }
+/* 与摘要面板（renderMarkdown）的引用块同一长相：强调色竖条 + 淡强调色底。 */
 .tiptap-notes blockquote {
   margin: 0.6em 0;
-  padding-left: 0.9em;
-  border-left: 3px solid var(--border-subtle);
-  color: var(--text-muted);
+  padding: 0.45em 0.9em;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  background: var(--accent-weak);
+  color: var(--text-normal);
+}
+
+.tiptap-notes blockquote > :first-child {
+  margin-top: 0;
+}
+
+.tiptap-notes blockquote > :last-child {
+  margin-bottom: 0;
 }
 .tiptap-notes code {
   background: var(--surface-input);
