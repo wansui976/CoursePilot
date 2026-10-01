@@ -53,7 +53,7 @@ export function AppearanceSection() {
 
   return (
     <>
-      <Group header={t("settings.appearance.title")}>
+      <Group header={t("settings.appearance.themeGroup")}>
         <StackRow>
           <div className="flex gap-6">
             {THEME_OPTIONS.map((opt) => {

@@ -665,6 +665,7 @@
     },
     "appearance": {
       "title": "外观",
+      "themeGroup": "主题",
       "accentColor": "强调色",
       "customAccent": "自定义强调色",
       "language": "语言",
@@ -763,7 +764,8 @@
       "saveAliyunKey": "保存百炼 API Key"
     },
     "llm": {
-      "title": "大模型"
+      "title": "大模型",
+      "profilesGroup": "模型配置"
     },
     "ocr": {
       "title": "图文识别 (OCR)",

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
-import { Check, Eye, EyeOff } from "lucide-react";
+import { Check, Eye, EyeOff, Plus } from "lucide-react";
 import { Button } from "@/ui/button";
 import { ipc } from "@/lib/ipc";
 import type { LlmProfile } from "@/lib/types";
@@ -281,6 +281,7 @@ export function LlmSettingsPanel({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <Button size="sm" variant="outline" onClick={add}>
+          <Plus className="h-3.5 w-3.5" />
           {t("llmSettings.add")}
         </Button>
       </div>
@@ -399,7 +400,13 @@ export function LlmSettingsPanel({
         );
       })}
       <div className="sticky bottom-0 z-10 flex items-center gap-3 border-t border-[var(--border-faint)] bg-[var(--surface-card)] py-3">
-        <Button size="sm" disabled={saving} onClick={() => void save()}>
+        {/* 有未保存修改时「保存」升为主操作，否则退成普通按钮，不和「新增」抢注意力。 */}
+        <Button
+          size="sm"
+          variant={dirty ? "primary" : "default"}
+          disabled={saving}
+          onClick={() => void save()}
+        >
           {saving ? t("llmSettings.saving") : t("llmSettings.save")}
         </Button>
         {(dirty || savedMsg) && (

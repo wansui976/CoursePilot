@@ -264,7 +264,7 @@ export function SettingsPanel({
               {activeCategory === "storage" && <StorageSection form={form} />}
               {activeCategory === "asr" && <AsrSection form={form} />}
               {activeCategory === "llm" && (
-                <Group header={t("settings.llm.title")}>
+                <Group header={t("settings.llm.profilesGroup")}>
                   <StackRow>
                     <LlmSettingsPanel
                       onDirtyChange={setLlmDirty}
