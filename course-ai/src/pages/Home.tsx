@@ -906,6 +906,8 @@ export function Home() {
                 forgetQueuedVideo(videoId);
                 if (selectedVideoId === videoId) go({ videoId: null });
               }}
+              onSelectCourse={selectCourse}
+              onResume={resumeStudy}
               onTransientCloseChange={registerTransientClose}
             />
           )}

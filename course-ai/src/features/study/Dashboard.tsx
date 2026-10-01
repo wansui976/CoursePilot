@@ -43,8 +43,13 @@ const HEATMAP_WEEKS = {
   medium: 18,
   wide: 26,
 } as const;
+// 量得到容器宽度时铺满整行，最多一年（与 GitHub 贡献图同一尺度）。
+const HEATMAP_MAX_WEEKS = 53;
+// 每列 = 方块 w-3（12px）+ 列间 gap-1（4px）。
+const HEAT_COLUMN_PX = 16;
+const HEAT_GAP_PX = 4;
 // 覆盖热力图所需的历史范围（含今天所在周的补位），略放宽。
-const LOOKBACK_DAYS = HEATMAP_WEEKS.wide * 7 + 7;
+const LOOKBACK_DAYS = HEATMAP_MAX_WEEKS * 7 + 7;
 
 // 热力图各强度等级的背景（level 0–4）；用主题主色的不同透明度，深浅主题都成立。
 const HEAT_LEVEL_BG = [
@@ -66,16 +71,33 @@ function viewportWidth(): number {
   return window.innerWidth || 1024;
 }
 
-function useHeatmapWeeks(): number {
-  const [weeks, setWeeks] = useState(() => weeksForViewport(viewportWidth()));
+/** 热力图周数：量得到容器宽度就按宽度铺满（不留右侧空白），量不到（jsdom、
+ *  旧 WebView 无 ResizeObserver）退回按窗口宽度分档。 */
+function useHeatmapWeeks(container: HTMLElement | null): number {
+  const [fallback, setFallback] = useState(() => weeksForViewport(viewportWidth()));
+  const [fitted, setFitted] = useState<number | null>(null);
 
   useEffect(() => {
-    const update = () => setWeeks(weeksForViewport(viewportWidth()));
+    const update = () => setFallback(weeksForViewport(viewportWidth()));
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
   }, []);
 
-  return weeks;
+  useEffect(() => {
+    if (!container || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const width = container.clientWidth;
+      setFitted(width > 0 ? Math.floor((width + HEAT_GAP_PX) / HEAT_COLUMN_PX) : null);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [container]);
+
+  return fitted == null
+    ? fallback
+    : Math.min(HEATMAP_MAX_WEEKS, Math.max(HEATMAP_WEEKS.compact, fitted));
 }
 
 function heatCellLabel(cell: NonNullable<HeatCell>, reached: boolean, t: TFunction): string {
@@ -185,7 +207,8 @@ export function Dashboard({
   const { t } = useTranslation();
   const today = localDay(new Date());
   const fromTs = Date.now() - LOOKBACK_DAYS * 86_400_000;
-  const heatmapWeeks = useHeatmapWeeks();
+  const [heatmapBox, setHeatmapBox] = useState<HTMLDivElement | null>(null);
+  const heatmapWeeks = useHeatmapWeeks(heatmapBox);
   const queryClient = useQueryClient();
   const [reviewing, setReviewing] = useState(false);
   const [activeHeatDay, setActiveHeatDay] = useState(today);
@@ -666,7 +689,7 @@ export function Dashboard({
                 <span>{t("dashboard.more")}</span>
               </div>
             </div>
-            <div className="overflow-x-auto pb-1">
+            <div ref={setHeatmapBox} className="overflow-x-auto pb-1">
               <div className="grid min-w-max grid-cols-[auto] grid-rows-[1rem_auto] gap-y-1">
                 <div aria-hidden="true" className="flex h-4 gap-1">
                   {heatMonths.map((segment, index) => (

@@ -40,6 +40,7 @@ import { WATCHED_RATIO, readLastVideoId, readPlaybackProgress } from "@/lib/play
 import { useJobs } from "@/stores/jobs";
 import type { ProcessingQueue } from "./useProcessingQueue";
 import type { Recorrection } from "./useRecorrection";
+import { LibraryOverview } from "./LibraryOverview";
 
 const statusLabelKey = {
   pending: "home.statusPending",
@@ -104,6 +105,8 @@ export function CourseLibraryView({
   onBackToCourses,
   onOpenConcepts,
   onVideoDeleted,
+  onSelectCourse,
+  onResume,
   onTransientCloseChange,
 }: {
   courseId: string | null;
@@ -116,6 +119,8 @@ export function CourseLibraryView({
   onBackToCourses: () => void;
   onOpenConcepts: () => void;
   onVideoDeleted: (videoId: string) => void;
+  onSelectCourse: (courseId: string) => void;
+  onResume: (courseId: string, videoId: string, positionSec: number) => void;
   onTransientCloseChange?: (close: (() => HTMLElement | null) | null) => void;
 }) {
   const { t } = useTranslation();
@@ -292,7 +297,7 @@ export function CourseLibraryView({
         aria-haspopup="menu"
         aria-expanded={openMenuVideoId === video.id}
         data-video-menu
-        className="ca-touch-44 absolute right-3 top-3 h-7 w-7 rounded-full bg-[var(--surface-panel)] shadow-[var(--shadow-raise)]"
+        className="ca-touch-44 ca-card-more absolute right-3 top-3 h-7 w-7 rounded-full"
         onClick={(event) => {
           videoMenuTriggerRef.current = event.currentTarget;
           setOpenMenuVideoId((id) => (id === video.id ? null : video.id));
@@ -473,7 +478,8 @@ export function CourseLibraryView({
                 <Play className="h-6 w-6 fill-current" />
               </span>
             </span>
-            <span className="st">{statusBadge(video)}</span>
+            {/* 「已处理」是常态，不再每张卡都挂徽标；只有待处理/处理中/失败才提示。 */}
+            {video.processed_status !== "done" && <span className="st">{statusBadge(video)}</span>}
             {/* 时长未知就不显示角标：假的「00:00」会让人以为视频是空的。 */}
             {durationMs != null && (
               <span className="dur">{formatMs(durationMs)}</span>
@@ -1013,6 +1019,20 @@ export function CourseLibraryView({
     openMenuVideoId,
     renaming,
   ]);
+
+  // 有课程但尚未选中：课程库首页（问候、继续学习、全部课程）。没有课程时才落到下面的空态。
+  if (!selectedCourseId && courses.length > 0) {
+    return (
+      <LibraryOverview
+        courses={courses}
+        onSelectCourse={onSelectCourse}
+        onResume={onResume}
+        onCreateCourse={() => void createCourse()}
+        creatingCourse={creatingCourse}
+        createError={createError}
+      />
+    );
+  }
 
   return renderCourseVideoLibrary();
 }

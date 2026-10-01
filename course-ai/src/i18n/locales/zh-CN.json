@@ -1352,5 +1352,20 @@
     "tableAddRow": "添加行",
     "tableAddCol": "添加列",
     "tableDelete": "删除表格"
+  },
+  "library": {
+    "greetingNight": "夜深了",
+    "greetingMorning": "早上好",
+    "greetingNoon": "中午好",
+    "greetingAfternoon": "下午好",
+    "greetingEvening": "晚上好",
+    "overviewSub": "{{courses}} 门课程 · {{videos}} 个视频",
+    "continueSection": "继续学习",
+    "allCourses": "全部课程",
+    "openCourse": "打开课程「{{name}}」",
+    "courseVideos": "{{count}} 个视频",
+    "courseEmpty": "还没有视频",
+    "courseWatched": "已看完 {{count}} 个",
+    "courseAllWatched": "全部看完"
   }
 }

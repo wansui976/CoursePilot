@@ -366,6 +366,8 @@ export function CourseList({
                 aria-expanded={menuFor === course.id}
                 aria-controls={menuFor === course.id ? `course-actions-${course.id}` : undefined}
                 data-course-menu
+                // 常显（iOS）时按钮仍占位；否则悬停时叠在集数上方，不挤占课程名的宽度。
+                data-persistent={isIOS() || undefined}
                 ref={(el) => {
                   if (el) menuButtonRefs.current.set(course.id, el);
                   else menuButtonRefs.current.delete(course.id);

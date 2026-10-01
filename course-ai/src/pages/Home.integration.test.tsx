@@ -293,7 +293,7 @@ describe("Home selected-video integration", () => {
     const { container } = await renderHome();
 
     fireEvent.click(
-      await screen.findByRole("button", { name: /Downloads/ }, { timeout: 5_000 }),
+      await screen.findByRole("button", { name: /^Downloads/ }, { timeout: 5_000 }),
     );
     fireEvent.click(
       await screen.findByRole("button", { name: /底层逻辑/ }, { timeout: 5_000 }),
@@ -332,7 +332,7 @@ describe("Home selected-video integration", () => {
       .mockResolvedValueOnce("http://127.0.0.1:1234/m/video-1");
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     const alert = await screen.findByRole("alert");
@@ -353,7 +353,7 @@ describe("Home selected-video integration", () => {
 
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
 
     // 失败不再静默留空：出现错误提示 + 重试按钮。
     const alert = await screen.findByRole("alert");
@@ -365,7 +365,7 @@ describe("Home selected-video integration", () => {
 
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
@@ -383,7 +383,7 @@ describe("Home selected-video integration", () => {
 
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
@@ -401,7 +401,7 @@ describe("Home selected-video integration", () => {
 
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(screen.getByRole("button", { name: "队列" }));
 
     expect(screen.getByLabelText("处理队列页面")).toBeInTheDocument();
@@ -497,7 +497,7 @@ describe("Home selected-video integration", () => {
     vi.stubGlobal("navigator", { userAgent: "Android" });
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     const trigger = await screen.findByRole("button", { name: "视频操作" });
     fireEvent.click(trigger);
     expect(screen.getByRole("menuitem", { name: "修改标题" })).toHaveFocus();
@@ -521,7 +521,7 @@ describe("Home selected-video integration", () => {
     vi.stubGlobal("navigator", { userAgent: "Android" });
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     const importTrigger = screen.getByRole("button", { name: "导入" });
     fireEvent.click(importTrigger);
     expect(screen.getByRole("menu", { name: "导入" })).toBeInTheDocument();
@@ -554,7 +554,7 @@ describe("Home selected-video integration", () => {
     ]);
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     const searchTrigger = await screen.findByRole("button", { name: "搜索文稿" });
@@ -589,7 +589,7 @@ describe("Home selected-video integration", () => {
     ]);
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click((await screen.findAllByRole("button", { name: "编辑这句文稿" }))[0]);
@@ -623,7 +623,7 @@ describe("Home selected-video integration", () => {
     ]);
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click(await screen.findByRole("button", { name: "搜索文稿" }));
@@ -651,7 +651,7 @@ describe("Home selected-video integration", () => {
     ]);
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click((await screen.findAllByRole("button", { name: "编辑这句文稿" }))[0]);
@@ -679,7 +679,7 @@ describe("Home selected-video integration", () => {
     ]);
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click(await screen.findByRole("button", { name: "搜索文稿" }));
@@ -714,7 +714,7 @@ describe("Home selected-video integration", () => {
     ]);
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click((await screen.findAllByRole("button", { name: "编辑这句文稿" }))[0]);
@@ -763,7 +763,7 @@ describe("Home selected-video integration", () => {
     ]);
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click((await screen.findAllByRole("button", { name: "编辑这句文稿" }))[0]);
@@ -792,7 +792,7 @@ describe("Home selected-video integration", () => {
     vi.stubGlobal("navigator", { userAgent: "Android" });
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     const trigger = await screen.findByRole("button", { name: "视频操作" });
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("menuitem", { name: "修改标题" }));
@@ -848,7 +848,7 @@ describe("Home selected-video integration", () => {
     ]);
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click(await screen.findByRole("button", { name: "搜索文稿" }));
@@ -873,7 +873,7 @@ describe("Home selected-video integration", () => {
     vi.stubGlobal("navigator", { userAgent: "Android" });
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     const stage = await screen.findByLabelText("课程视频舞台");
     fireEvent.mouseEnter(stage);
@@ -1026,7 +1026,7 @@ describe("Home selected-video integration", () => {
 
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     await screen.findByText(displayTitle(video.title));
     fireEvent.click(screen.getByRole("button", { name: "知识点" }));
 
@@ -1053,7 +1053,7 @@ describe("Home selected-video integration", () => {
   it("returns from a subtitle source to the same concept context", async () => {
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     await screen.findByText(displayTitle(video.title));
     fireEvent.click(screen.getByRole("button", { name: "知识点" }));
     fireEvent.click(screen.getByRole("button", { name: "回看字幕证据" }));
@@ -1073,7 +1073,7 @@ describe("Home selected-video integration", () => {
     vi.stubGlobal("navigator", { userAgent: "Android" });
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     await screen.findByText(displayTitle(video.title));
     fireEvent.click(screen.getByRole("button", { name: "知识点" }));
     fireEvent.click(screen.getByRole("button", { name: "回看字幕证据" }));
@@ -1168,7 +1168,7 @@ describe("Home selected-video integration", () => {
 
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
@@ -1193,7 +1193,7 @@ describe("Home selected-video integration", () => {
     expect(screen.queryByRole("navigation", { name: "工具栏" })).not.toBeInTheDocument();
     expect(await screen.findByRole("navigation", { name: "主导航" })).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
@@ -1211,7 +1211,7 @@ describe("Home selected-video integration", () => {
 
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
@@ -1229,7 +1229,7 @@ describe("Home selected-video integration", () => {
 
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
@@ -1245,7 +1245,7 @@ describe("Home selected-video integration", () => {
 
     const { container } = await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     // 助手浮在内容上方，不再让主区让出宽度。

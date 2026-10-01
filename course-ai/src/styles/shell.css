@@ -389,3 +389,23 @@
   color: var(--text-1);
 }
 }
+
+/* 课程条目的「⋯」：精确指针下叠在集数上方、悬停才出现，不再常驻占掉课程名的宽度。
+   iOS 等常显场景（data-persistent）保持原先的并排布局。 */
+@media (hover: hover) and (pointer: fine) {
+  .ca-nav-item > [data-course-menu]:not([data-persistent]) {
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    translate: 0 -50%;
+    margin: 0;
+  }
+  .ca-nav-item:has(> [data-course-menu]:not([data-persistent])) .course-meta {
+    transition: opacity var(--dur-fast) var(--ease);
+  }
+  .ca-nav-item:hover:has(> [data-course-menu]:not([data-persistent])) .course-meta,
+  .ca-nav-item:focus-within:has(> [data-course-menu]:not([data-persistent])) .course-meta,
+  .ca-nav-item:has(> [data-course-menu][aria-expanded="true"]) .course-meta {
+    opacity: 0;
+  }
+}

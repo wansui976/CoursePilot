@@ -1356,5 +1356,20 @@
     "tableAddRow": "Add row",
     "tableAddCol": "Add column",
     "tableDelete": "Delete table"
+  },
+  "library": {
+    "greetingNight": "Burning the midnight oil",
+    "greetingMorning": "Good morning",
+    "greetingNoon": "Good afternoon",
+    "greetingAfternoon": "Good afternoon",
+    "greetingEvening": "Good evening",
+    "overviewSub": "{{courses}} courses · {{videos}} videos",
+    "continueSection": "Continue learning",
+    "allCourses": "All courses",
+    "openCourse": "Open course \"{{name}}\"",
+    "courseVideos": "{{count}} videos",
+    "courseEmpty": "No videos yet",
+    "courseWatched": "{{count}} watched",
+    "courseAllWatched": "All watched"
   }
 }

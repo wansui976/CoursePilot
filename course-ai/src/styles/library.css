@@ -10,18 +10,21 @@
   margin: 2px 0 18px;
   padding: 16px;
   border-radius: var(--r-lg);
-  border: 1px solid var(--accent-weak-2);
-  background: var(--accent-weak);
+  /* 从强调色淡洗到面板色：比整块浅蓝底安静，又保留「这是给你的下一步」的指向。 */
+  border: 1px solid var(--line-soft);
+  background: linear-gradient(110deg, var(--accent-weak) 0%, var(--bg-panel) 72%);
+  box-shadow: var(--shadow-card);
   color: var(--text-1);
   cursor: pointer;
   text-align: left;
-  transition: background 0.12s, border-color 0.12s;
+  transition: transform 0.16s var(--ease), box-shadow 0.16s, border-color 0.16s;
 }
 
 @media (hover: hover) {
 .ca-continue-hero:hover {
-  background: var(--accent-weak-2);
-  border-color: var(--line-strong);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card-hover);
+  border-color: var(--line);
 }
 }
 
@@ -290,7 +293,8 @@
 /* 封面底部的「看到哪了」进度条（参考自适应课程库的 ov-bar）。 */
 .ca-thumb .ov-bar,
 .row-thumb .ov-bar,
-.ca-continue-cover .ov-bar {
+.ca-continue-cover .ov-bar,
+.ca-resume-cover .ov-bar {
   position: absolute;
   left: 0;
   right: 0;
@@ -302,7 +306,8 @@
 
 .ca-thumb .ov-bar > i,
 .row-thumb .ov-bar > i,
-.ca-continue-cover .ov-bar > i {
+.ca-continue-cover .ov-bar > i,
+.ca-resume-cover .ov-bar > i {
   display: block;
   height: 100%;
   background: var(--grad-accent);
@@ -602,4 +607,276 @@
 
 .ca-row .c-progress.processing .accent {
   color: var(--accent-text);
+}
+
+/* ===== 视频卡片「⋯」：封面上的磨砂小圆钮 =====
+   原先是 44px 的白色方块（.ca-icon-btn 的宽高压过了 h-7/w-7），每张卡都抢在封面上。
+   改成半透明深色磨砂圆钮：精确指针下悬停/聚焦/菜单展开时才出现，触屏常显。 */
+.ca-card .ca-card-more {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgb(12 14 20 / 0.42);
+  border: 1px solid rgb(255 255 255 / 0.16);
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  backdrop-filter: blur(10px) saturate(1.4);
+  z-index: 12;
+  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast);
+}
+
+@media (hover: hover) {
+  .ca-card .ca-card-more:hover {
+    color: #fff;
+    background: rgb(12 14 20 / 0.62);
+  }
+}
+
+/* 列表行：没有封面可叠，退回行尾的透明图标钮，垂直居中。 */
+.ca-row .ca-card-more {
+  top: 50%;
+  right: 10px;
+  translate: 0 -50%;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  background: transparent;
+  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast), color var(--dur-fast);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ca-card .ca-card-more,
+  .ca-row .ca-card-more {
+    opacity: 0;
+  }
+  .ca-card:hover .ca-card-more,
+  .ca-card:focus-within .ca-card-more,
+  .ca-row:hover .ca-card-more,
+  .ca-row:focus-within .ca-card-more,
+  .ca-card-more[aria-expanded="true"] {
+    opacity: 1;
+  }
+}
+
+/* ===== 课程库首页（有课程、未选中时）===== */
+.ca-overview-section {
+  margin-bottom: 32px;
+}
+
+.ca-overview-heading {
+  margin: 0 2px 12px;
+  font-size: var(--fs-md);
+  line-height: var(--lh-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-1);
+}
+
+/* 继续学习：每门课一张横卡，封面 + 课程名 + 视频名 + 位置。 */
+.ca-resume-row {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.ca-resume-card {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  text-align: left;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line-soft);
+  background: linear-gradient(110deg, var(--accent-weak) 0%, var(--bg-panel) 65%);
+  box-shadow: var(--shadow-card);
+  transition: transform 0.16s var(--ease), box-shadow 0.16s, border-color 0.16s;
+}
+
+.ca-resume-cover {
+  position: relative;
+  flex: 0 0 auto;
+  width: 120px;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-sunken);
+}
+
+.ca-resume-play {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+
+.ca-resume-play > svg {
+  box-sizing: content-box;
+  padding: 8px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.45);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  transition: transform 0.2s var(--ease), background 0.2s;
+}
+
+.ca-resume-course,
+.ca-resume-title,
+.ca-resume-pos {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ca-resume-course {
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-2xs);
+  font-weight: 600;
+  color: var(--accent-text);
+}
+
+.ca-resume-title {
+  margin-top: 2px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.ca-resume-pos {
+  margin-top: 3px;
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-2xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 全部课程：封面拼贴（前四集首帧 2×2；不足四集取一张；没有视频按课程名着色）。 */
+.ca-course-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
+.ca-course-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line-soft);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-card);
+  transition: transform 0.16s var(--ease), box-shadow 0.16s, border-color 0.16s;
+}
+
+.ca-course-cover {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  display: grid;
+  gap: 2px;
+  overflow: hidden;
+  background: var(--bg-sunken);
+}
+
+.ca-course-cover[data-tiles="4"] {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.ca-course-cover[data-tiles="0"] {
+  place-items: center;
+  background: linear-gradient(
+    135deg,
+    hsl(var(--course-hue, 220) 46% 56%),
+    hsl(calc(var(--course-hue, 220) + 32) 42% 36%)
+  );
+}
+
+.ca-course-tile {
+  position: relative;
+  overflow: hidden;
+}
+
+.ca-course-initial {
+  font-size: 46px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: rgb(255 255 255 / 0.92);
+  text-shadow: 0 2px 14px rgb(0 0 0 / 0.18);
+}
+
+.ca-course-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px 14px;
+}
+
+.ca-course-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-md);
+  line-height: var(--lh-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-1);
+}
+
+.ca-course-meta {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.ca-course-progress {
+  margin-top: 9px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+}
+
+.ca-course-progress > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--grad-accent);
+}
+
+@media (hover: hover) {
+  .ca-resume-card:hover,
+  .ca-course-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-card-hover);
+    border-color: var(--line);
+  }
+  .ca-resume-card:hover .ca-resume-play > svg {
+    transform: scale(1.08);
+    background: var(--accent);
+  }
+  .ca-course-tile img,
+  .ca-resume-cover img {
+    transition: transform 0.5s var(--ease);
+  }
+  .ca-course-card:hover .ca-course-tile img,
+  .ca-resume-card:hover .ca-resume-cover img {
+    transform: scale(1.05);
+  }
+}
+
+/* 打开了「⋯」菜单或改名框的那一项要压过后面的卡片：卡片悬停上浮和拖拽包裹层的
+   transform 都会各自建层叠上下文，菜单的 z-index 出不了自己那张卡，否则会被
+   下一行的卡片盖住（最后的「删除」首当其冲）。 */
+.ca-grid > :has([data-video-menu][aria-expanded="true"], [role="dialog"]),
+.ca-list > :has([data-video-menu][aria-expanded="true"], [role="dialog"]) {
+  position: relative;
+  z-index: 30;
 }
