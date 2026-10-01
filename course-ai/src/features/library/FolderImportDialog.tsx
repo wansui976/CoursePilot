@@ -125,6 +125,7 @@ export function FolderImportDialog({
           {t("folderImport.cancel")}
         </Button>
         <Button
+          variant="primary"
           size="sm"
           disabled={selected.size === 0 || importBatch.isPending}
           onClick={() => importBatch.mutate(orderedPaths)}

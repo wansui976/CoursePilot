@@ -212,7 +212,7 @@ export function PlaylistImportDialog({
             >
               {t("playlistImport.cancel")}
             </Button>
-            <Button size="sm" disabled={!url.trim() || preparing} onClick={startUrl}>
+            <Button variant="primary" size="sm" disabled={!url.trim() || preparing} onClick={startUrl}>
               {preparing ? t("playlistImport.checking") : t("playlistImport.enumerate")}
             </Button>
           </div>
@@ -339,7 +339,7 @@ export function PlaylistImportDialog({
               <Button size="sm" variant="outline" onClick={onClose}>
                 {t("playlistImport.cancel")}
               </Button>
-              <Button size="sm" disabled={selected.size === 0} onClick={runImport}>
+              <Button variant="primary" size="sm" disabled={selected.size === 0} onClick={runImport}>
                 {t("playlistImport.importCount", { count: selected.size })}
               </Button>
             </div>
@@ -397,7 +397,7 @@ export function PlaylistImportDialog({
             </div>
           )}
           <div className="flex justify-end">
-            <Button size="sm" onClick={onClose}>
+            <Button variant="primary" size="sm" onClick={onClose}>
               {t("playlistImport.done")}
             </Button>
           </div>

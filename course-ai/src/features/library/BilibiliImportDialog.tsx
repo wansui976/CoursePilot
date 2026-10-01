@@ -197,6 +197,7 @@ export function BilibiliImportDialog({
               {t("bilibiliImport.cancel")}
             </Button>
             <Button
+              variant="primary"
               size="sm"
               disabled={!url.trim() || preparing}
               onClick={startUrl}
@@ -341,6 +342,7 @@ export function BilibiliImportDialog({
               </Button>
             )}
             <Button
+              variant="primary"
               size="sm"
               disabled={importMutation.isPending}
               onClick={() =>
