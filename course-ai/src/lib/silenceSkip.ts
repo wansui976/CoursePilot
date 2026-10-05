@@ -7,10 +7,6 @@ export type SkipRange = { start_ms: number; end_ms: number };
 
 const ENABLED_KEY = "skip-silence";
 
-export function silenceSkipQueryKey(videoId: string) {
-  return ["video-skips", videoId] as const;
-}
-
 /** 默认关：跳过是会改变观看内容的行为，得由用户主动打开。 */
 export function isSkipSilenceEnabled(): boolean {
   try {

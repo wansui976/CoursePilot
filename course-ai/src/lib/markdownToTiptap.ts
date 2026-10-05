@@ -310,6 +310,24 @@ export function markdownToTiptap(md: string): Node {
       continue;
     }
 
+    // 引用块：连续的 `>` 行去掉前缀后递归解析，块内的标题/列表/加粗照常保留。
+    // tiptapToMarkdown 会把 blockquote 写回 `> …`，这里不解析的话存一次读一次就成了字面 `>`。
+    if (/^\s*>/.test(line)) {
+      flushLists();
+      const quoted: string[] = [];
+      while (idx < lines.length && /^\s*>/.test(lines[idx])) {
+        quoted.push(lines[idx].replace(/^\s*>\s?/, ""));
+        idx++;
+      }
+      idx--;
+      const inner = markdownToTiptap(quoted.join("\n")).content ?? [];
+      content.push({
+        type: "blockquote",
+        content: inner.length ? inner : [{ type: "paragraph" }],
+      });
+      continue;
+    }
+
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
       flushLists();

@@ -1,0 +1,197 @@
+/* 设计令牌：Tailwind @theme、浅色 :root 与深色主题变量。 */
+
+@theme {
+  --color-background: #0a0c10;
+  --color-foreground: oklch(0.985 0 0);
+  --color-primary: oklch(0.64 0.19 256);
+  --color-primary-foreground: var(--on-accent);
+  --color-muted: oklch(0.25 0.01 256);
+  --color-border: rgb(255 255 255 / 0.1);
+  --color-ring: var(--focus-ring);
+
+  /* 圆角单一刻度：让 Tailwind 的 rounded-md/lg/xl 对齐设计 token --r-sm/md/lg。
+     比默认偏大一档，走「更软、更圆润」的系统观感，全局只此一套尺度（含 .ca-* 壳层）。
+     极小元素(开关内圈等)仍可用 rounded-sm。 */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+}
+
+/* 浅色（默认）：苹果式分层灰阶——chrome 用略暖的系统灰，内容层回到纯白，
+   靠「相邻层明度差 + 柔和投影」分层，App 刻意少用 1px 硬描边。 */
+:root {
+  color-scheme: light;
+
+  /* 全局唯一字体栈：body 与 .ca-app 共用,避免挂到 body 的浮层回退到未加载的 Inter。 */
+  --font-app: -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+
+  --surface-app: #f5f5f7;
+  --surface-rail: #fcfcfd;
+  --surface-sidebar: #fcfcfd;
+  --surface-panel: #ffffff;
+  --surface-header: #ffffff;
+  --surface-card: #ffffff;
+  --surface-card-hover: #f2f2f5;
+  --surface-card-active: #eff3fc;
+  --surface-input: #fcfcfd;
+  /* 视频舞台的信箱留白：浅色主题用纯白，深色主题用纯黑（见深色块）。 */
+  --surface-stage: #ffffff;
+  /* 舞台上方的通知/手势提示：永远压在产品画面上，深浅主题都走近黑 scrim，
+     与网站本身的灰阶分离（--surface-stage 在浅色下是白的，不能拿来做徽标底）。 */
+  --surface-stage-overlay: rgb(0 0 0 / 0.72);
+  --surface-stage-scrim: rgb(0 0 0 / 0.2);
+  --surface-titlebar: linear-gradient(#fdfdfe, #f3f3f5);
+
+  /* 发丝线（hairline）整体调柔：能靠明度/投影分层的地方不再依赖重描边。 */
+  --border-subtle: #e3e4e8;
+  --border-faint: #ebedf0;
+  /* hover 等需要比 subtle 更清晰的强调边框；深浅主题各自定义，别写死浅色灰。 */
+  --border-strong: #d4d7dd;
+  --border-control: #848a94;
+  --border-titlebar: rgb(0 0 0 / 0.06);
+
+  --text-strong: #1c1e24;
+  --text-normal: #565b66;
+  --text-muted: #6b7280;
+  /* 抬到约 4.5:1（白底）以满足正文对比；空状态/占位符等都吃这个变量。 */
+  --text-faint: #71767f;
+
+  /* 焦点提示不随用户强调色变化，避免亮黄/浅灰强调色在浅底上失去轮廓。 */
+  --focus-ring: #1d4ed8;
+  --on-accent: #ffffff;
+  --on-accent-press: #ffffff;
+
+  --accent-weak: #eef3fd;
+  --accent-weak-2: #e3ecfc;
+  --accent-text: #2a63d8;
+  --video-accent: #7aa6ff;
+  /* 小号状态文字在对应浅色底上均保持至少 4.5:1。 */
+  --status-ok: #147a52;
+  --on-status-ok: #ffffff;
+  --status-ok-bg: #e9f6f0;
+  --status-warn: #975a00;
+  --status-warn-bg: #faf2e0;
+  --status-err: #c92a2a;
+  --on-status-err: #ffffff;
+  --status-err-bg: #fbeaea;
+
+  /* 知识点主题色板：按主题在课程里的序号取模轮换，给长列表提供空间定位色。
+     只用于色点/色条等小面积图形（3:1 即达标），不当正文文字色用。 */
+  --topic-0: #2563eb;
+  --topic-1: #0d9488;
+  --topic-2: #d97706;
+  --topic-3: #7c3aed;
+  --topic-4: #db2777;
+  --topic-5: #65a30d;
+
+  --scrollbar-thumb: #e0e2e8;
+  --scrollbar-thumb-hover: #d0d3da;
+
+  /* 最轻的一档：分段控件的选中丸、悬浮小图标按钮那种「浮起 1mm」。
+     此前这些地方直接写 Tailwind 的 shadow-sm——那是按浅色背景调的 10% 纯黑，
+     放到暗色主题近黑的底上等于没有，浮层与背景完全糊在一起。
+     名字刻意不叫 --shadow-sm：Tailwind v4 自己在 @theme 里定义了同名变量，
+     重名会连带改掉全应用 shadow-sm 工具类的输出。 */
+  --shadow-raise: 0 1px 2px rgb(20 24 40 / 0.06), 0 1px 1px rgb(20 24 40 / 0.04);
+  --shadow-card: 0 1px 2px rgb(20 24 40 / 0.05), 0 4px 14px rgb(20 24 40 / 0.04);
+  --shadow-card-hover: 0 10px 26px rgb(20 24 40 / 0.1);
+  --shadow-pop: 0 8px 30px rgb(20 24 40 / 0.1);
+}
+
+/* 深色：沿用当前冷调近黑层级，覆盖默认浅色变量。 */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface-app: #0a0c10;
+  --surface-rail: #0f1217;
+  --surface-sidebar: #12161c;
+  --surface-panel: #151a21;
+  --surface-header: #0e1116;
+  --surface-card: rgb(255 255 255 / 0.035);
+  --surface-card-hover: rgb(255 255 255 / 0.07);
+  --surface-card-active: rgb(74 132 255 / 0.16);
+  --surface-input: rgb(255 255 255 / 0.06);
+  --surface-stage: #000000;
+  --surface-titlebar: #0f1217;
+
+  --border-subtle: #414956;
+  --border-faint: #303742;
+  --border-strong: #687487;
+  /* #687487 在最亮的深色控件底 #252a30 上仍有 3.05:1。 */
+  --border-control: #687487;
+  --border-titlebar: rgb(255 255 255 / 0.06);
+
+  --text-strong: rgb(244 247 255 / 0.96);
+  --text-normal: rgb(228 234 245 / 0.72);
+  --text-muted: #a1abba;
+  /* 在深色 hover/active 表面上仍不低于正常小字所需的 4.5:1。 */
+  --text-faint: #8993a3;
+
+  --focus-ring: #8bb4ff;
+
+  --accent-weak: rgb(74 132 255 / 0.16);
+  --accent-weak-2: rgb(74 132 255 / 0.24);
+  --accent-text: #8fb3ff;
+  --video-accent: #8fb3ff;
+  --status-ok: #34d399;
+  --on-status-ok: #000000;
+  --status-ok-bg: rgb(31 157 107 / 0.14);
+  --status-warn: #fbbf24;
+  --status-warn-bg: rgb(201 138 30 / 0.16);
+  --status-err: #f87171;
+  --on-status-err: #000000;
+  --status-err-bg: rgb(201 42 42 / 0.18);
+
+  /* 主题色板深色档：整体抬亮，保证在近黑底上仍清晰可辨。 */
+  --topic-0: #8fb3ff;
+  --topic-1: #5eead4;
+  --topic-2: #fbbf24;
+  --topic-3: #c4b5fd;
+  --topic-4: #f9a8d4;
+  --topic-5: #bef264;
+
+  --scrollbar-thumb: rgb(255 255 255 / 0.14);
+  --scrollbar-thumb-hover: rgb(255 255 255 / 0.26);
+
+  /* 暗色下光靠投影是分不开层次的：底已经接近纯黑，再黑也黑不出边界。
+     所以每档都叠一道 inset 顶部高光——模拟光从上方来，让抬起的面自己有一条亮边。
+     越高的层高光越亮，与投影一起构成「离底多远」的唯一线索。 */
+  --shadow-raise: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.45);
+  --shadow-card: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-card-hover:
+    inset 0 1px 0 rgb(255 255 255 / 0.07), 0 10px 26px rgb(0 0 0 / 0.5);
+  --shadow-pop:
+    inset 0 1px 0 rgb(255 255 255 / 0.08), 0 12px 32px -8px rgb(0 0 0 / 0.6);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--surface-app);
+  color: var(--text-strong);
+  font-family: var(--font-app);
+  overflow: hidden;
+  /* iOS：禁掉最外层橡皮筋/下拉刷新——壳层不滚动，内部滚动到底也不该把弹跳甩给页面。 */
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+/* 按钮/表单控件的 font 与 color 继承由 Tailwind preflight 在 base 层提供。这里不要再写
+   无层级的元素选择器：无层级规则压过所有工具类，按钮上的 text-xs、text-[var(--on-accent)]
+   会被悄悄改回继承值（实色按钮变成灰字、小号按钮被放大）。 */
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}

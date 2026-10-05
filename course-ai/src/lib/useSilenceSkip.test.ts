@@ -4,7 +4,7 @@ import { createElement, StrictMode, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { useSilenceSkip } from "./useSilenceSkip";
-import { silenceSkipQueryKey } from "./silenceSkip";
+import { qk } from "./queryKeys";
 
 const { mockIpc, mockIsMobile } = vi.hoisted(() => ({
   mockIpc: { videos: { skips: vi.fn() } },
@@ -145,7 +145,7 @@ describe("useSilenceSkip", () => {
 
     mockIpc.videos.skips.mockResolvedValue([{ start_ms: 30_000, end_ms: 35_000 }]);
     await act(async () => {
-      await client.invalidateQueries({ queryKey: silenceSkipQueryKey("v1") });
+      await client.invalidateQueries({ queryKey: qk.silenceSkips("v1") });
     });
 
     await waitFor(() => expect(result.current.ranges[0]?.end_ms).toBe(35_000));

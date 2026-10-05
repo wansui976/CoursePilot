@@ -1,0 +1,358 @@
+/* 窄屏响应式（compact / medium）、触控尺寸，以及文稿滚动与时间戳显隐。 */
+
+/* ===== 窄屏（compact 手机竖 + medium 手机横/小平板）响应式 ===== */
+
+/* compact（竖屏）是上下堆叠，没有左右两栏可拖，隐藏分隔条；medium 横屏并排则保留。 */
+.ca-app[data-bucket="compact"] .ca-resizer {
+  display: none;
+}
+
+/* ---- compact（手机竖屏）：视频钉顶（标题 + 16:9），资料面板填满余下高度独立滚动 ---- */
+.ca-app[data-bucket="compact"] .ca-wb {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ca-app[data-bucket="compact"] .ca-wb-head {
+  padding: 14px 16px 0;
+}
+
+.ca-app[data-bucket="compact"] .ca-player-col {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+  overflow: visible;
+}
+
+.ca-app[data-bucket="compact"] .ca-panel-col {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ca-app[data-bucket="compact"] .ca-stage-wrap {
+  display: block;
+  padding: 0;
+}
+
+.ca-app[data-bucket="compact"] .ca-stage {
+  aspect-ratio: 16 / 9;
+}
+
+/* ---- medium 竖屏（iPad Air 11" 竖屏等）：上下堆叠 ---- */
+.ca-app[data-bucket="medium"] .ca-wb {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ca-app[data-bucket="medium"] .ca-player-col {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+  overflow: visible;
+}
+
+.ca-app[data-bucket="medium"] .ca-panel-col {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ca-app[data-bucket="medium"] .ca-stage-wrap {
+  display: block;
+  padding: 0;
+}
+
+.ca-app[data-bucket="medium"] .ca-stage {
+  aspect-ratio: 16 / 9;
+}
+
+/* ---- medium 横屏（手机横屏 / 小平板横屏）：左右并排 ---- */
+@media (orientation: landscape) {
+  .ca-app[data-bucket="medium"] .ca-wb {
+    flex-direction: row;
+  }
+
+  .ca-app[data-bucket="medium"] .ca-player-col {
+    flex: 1 1 0;
+    min-height: 0;
+    border-bottom: none;
+    overflow: hidden;
+  }
+
+  .ca-app[data-bucket="medium"] .ca-panel-col {
+    /* 默认 min(46%, 460px)；拖动后用 --study-panel-width，并夹在 [280px, 60%] 防止挤没视频。 */
+    flex: 0 0 clamp(280px, var(--study-panel-width, min(46%, 460px)), 60%);
+    min-height: 0;
+    border-left: 1px solid var(--line);
+  }
+
+  .ca-app[data-bucket="medium"] .ca-stage-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    padding: 0;
+  }
+
+  .ca-app[data-bucket="medium"] .ca-stage {
+    aspect-ratio: auto;
+  }
+}
+
+/* ---- 共享紧凑 chrome（compact + medium）：顶栏 / 滚动区 / 抽屉 / 标题 / 网格 / 列表 / 触控 ---- */
+.ca-app[data-bucket="compact"] .ca-topbar,
+.ca-app[data-bucket="medium"] .ca-topbar {
+  padding: 18px 18px 14px;
+}
+
+.ca-app[data-bucket="compact"] .ca-scroll,
+.ca-app[data-bucket="medium"] .ca-scroll {
+  padding: 12px 18px 34px;
+}
+
+
+.ca-app[data-bucket="compact"] .tb-lead,
+.ca-app[data-bucket="medium"] .tb-lead {
+  align-items: flex-start;
+}
+
+.ca-app[data-bucket="compact"] .tb-titles .sub,
+.ca-app[data-bucket="medium"] .tb-titles .sub {
+  white-space: normal;
+}
+
+.ca-app[data-bucket="compact"] .tb-titles h1,
+.ca-app[data-bucket="medium"] .tb-titles h1 {
+  font-size: var(--fs-xl);
+}
+
+.ca-app[data-bucket="compact"] .tb-actions,
+.ca-app[data-bucket="medium"] .tb-actions {
+  width: 100%;
+  margin-left: 0;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.ca-app[data-bucket="compact"] .ca-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ca-app[data-bucket="medium"] .ca-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ca-app[data-bucket="compact"] .hamb,
+.ca-app[data-bucket="medium"] .hamb {
+  width: 44px;
+  height: 44px;
+}
+
+.ca-app[data-bucket="compact"] .ca-row .row-button,
+.ca-app[data-bucket="medium"] .ca-row .row-button {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.ca-app[data-bucket="compact"] .ca-list-head .h-dur,
+.ca-app[data-bucket="compact"] .ca-row .c-dur,
+.ca-app[data-bucket="medium"] .ca-list-head .h-dur,
+.ca-app[data-bucket="medium"] .ca-row .c-dur {
+  display: none;
+}
+
+.course-video-progress,
+.course-video-volume {
+  --progress-percent: 0%;
+  --video-control-color: var(--video-accent);
+  --video-track: rgb(255 255 255 / 0.22);
+  appearance: none;
+  cursor: pointer;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--video-control-color) 0 var(--progress-percent),
+    var(--video-track) var(--progress-percent) 100%
+  );
+}
+
+.course-video-progress {
+  height: 5px;
+}
+
+.course-video-volume {
+  height: 4px;
+}
+
+.course-video-progress::-webkit-slider-runnable-track,
+.course-video-volume::-webkit-slider-runnable-track {
+  height: 100%;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.course-video-progress::-webkit-slider-thumb,
+.course-video-volume::-webkit-slider-thumb {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: var(--video-control-color);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--video-control-color) 22%, transparent);
+}
+
+.course-video-progress::-webkit-slider-thumb {
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+
+.course-video-progress:hover::-webkit-slider-thumb,
+.course-video-progress:focus-visible::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -3.5px;
+  opacity: 1;
+}
+
+.course-video-volume::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+}
+
+.course-video-progress::-moz-range-track,
+.course-video-volume::-moz-range-track {
+  height: 100%;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.course-video-progress::-moz-range-thumb,
+.course-video-volume::-moz-range-thumb {
+  border: 0;
+  border-radius: 999px;
+  background: var(--video-control-color);
+}
+
+.course-video-progress::-moz-range-thumb {
+  width: 0;
+  height: 0;
+}
+
+.course-video-progress:hover::-moz-range-thumb,
+.course-video-progress:focus-visible::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+}
+
+.course-video-volume::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+}
+
+/* 触控设备或移动宽度：控制栏走紧凑高度，命中区放宽到 44px；
+   进度条拇指常显、轨道略加高，便于拇指拖动（默认拇指靠 hover/focus 才出现，触屏摸不到）。 */
+@media (pointer: coarse), (max-width: 767px) {
+  .ca-player-controls button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .course-video-progress {
+    height: 8px;
+  }
+
+  .course-video-progress::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+    margin-top: -2px;
+    opacity: 1;
+  }
+
+  .course-video-progress::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* 触控命中区兜底:桌面保持紧凑视觉尺寸,触屏上撑到 44×44(图标仍居中)。
+     仅用于四周有留白、放大不会与邻键重叠的小按钮。 */
+  .ca-touch-44 {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* 学习工作台里的小图标按钮：触屏下再放大一档，避免只点到图标边缘。 */
+  .ca-workbench-touch {
+    min-width: 48px;
+    min-height: 48px;
+  }
+
+  /* 文稿行的纠错按钮桌面上悬停才出现；触屏没有 hover，必须常显。 */
+  .ca-transcript-edit {
+    opacity: 1;
+  }
+
+  /* iOS 会在聚焦 font-size<16px 的输入框时自动放大整页(聚焦后页面跳动、失焦不复原)。
+     触屏上把表单控件统一撑到 16px，从根上避免聚焦缩放。桌面(fine pointer)不受影响。 */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+.ca-player-controls[data-controls-layout="compact"] {
+  width: 100%;
+  min-width: 0;
+  padding-right: max(8px, env(safe-area-inset-right, 0px));
+  padding-left: max(8px, env(safe-area-inset-left, 0px));
+}
+
+.ca-player-controls[data-controls-layout="compact"] .ca-player-controls-desktop {
+  display: none;
+}
+
+.ca-player-controls[data-controls-layout="compact"] .ca-player-mobile-more {
+  display: block;
+  flex: none;
+}
+
+.ca-player-controls[data-controls-layout="compact"] .ca-player-controls-time {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 文稿原生滚动（无 JS 虚拟列表的量高回改，故不抽搐）。content-visibility 按「块」
+   （每块约 30 行，见 TranscriptPanel 的 CHUNK_SIZE）而非按行：
+   - 性能：滚动时浏览器只需跟踪几十个块边界（而非上千个行边界），簿记开销小得多；
+   - 快滑不空白：块一进入渲染距离就整块（约一屏半）一次性画好，等于自带大幅预渲染。
+   contain-intrinsic-size 给屏外块预留近似高度（auto=记住上次实测），使滚动条稳定。 */
+.ca-transcript-chunk {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1200px;
+}
+
+/* 笔记 / 提问的时间戳开关：根节点挂 data-hide-timestamps 时，纯 CSS 收起所有
+   ▶ 时间戳片，tiptap 与问答都不必重渲染（见 stores/timestampPrefs.ts）。 */
+[data-hide-timestamps] .ca-ts-chip {
+  display: none;
+}
+
+/* 多个连续时间点是段落来源，不再作为一排高亮标签抢正文注意力。 */
+.tiptap-notes p:has(> .ca-ts-source-chip) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+  color: var(--text-faint);
+  font-size: 0.6875rem;
+}
+
+.tiptap-notes p:has(> .ca-ts-source-chip) .ca-ts-source-chip:hover {
+  background: var(--surface-card-hover);
+  color: var(--text-strong);
+}
+
+[data-hide-timestamps] .ca-ts-source-row,
+[data-hide-timestamps] .tiptap-notes p:has(> .ca-ts-source-chip) {
+  display: none;
+}

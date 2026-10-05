@@ -203,7 +203,7 @@
     "relinkResult": "Relinked {{relinked}}/{{total}} videos",
     "relinkMissing": "Missing {{count}}: {{names}}",
     "relinkAmbiguous": "Skipped {{count}} duplicates: {{names}}",
-    "deleteCourseConfirm": "Delete course \"{{name}}\"?\nVideos will be moved to the recycle bin and can be restored within 30 days.",
+    "deleteCourseConfirm": "Delete course \"{{name}}\"?\nLocation: {{path}}\nVideos: {{count}}\n\nVideos will be moved to the recycle bin and can be restored within 30 days.",
     "deleteCourseTitle": "Delete Course",
     "cancel": "Cancel",
     "videoCountShort": "{{count}} videos",
@@ -665,6 +665,7 @@
     },
     "appearance": {
       "title": "Appearance",
+      "themeGroup": "Theme",
       "accentColor": "Accent color",
       "customAccent": "Custom accent color",
       "language": "Language",
@@ -763,7 +764,8 @@
       "saveAliyunKey": "Save Bailian API Key"
     },
     "llm": {
-      "title": "LLM"
+      "title": "LLM",
+      "profilesGroup": "Model profiles"
     },
     "ocr": {
       "title": "OCR",
@@ -887,9 +889,7 @@
     "scopeAllCourses": "All courses",
     "scopeAuto": "Follow selection",
     "scopeMenuLabel": "Choose question scope",
-    "dockAsSidebar": "Dock as sidebar",
     "headerMenu": "More actions",
-    "undock": "Undock",
     "renameConversation": "Rename conversation",
     "renameConversationTarget": "Rename conversation \"{{title}}\"",
     "renameConversationLabel": "Conversation title",
@@ -1251,6 +1251,8 @@
     "continueLast": "Continue",
     "watchedTo": "At {{time}}",
     "backToLibrary": "Back to courses",
+    "backToCourse": "Back to \"{{name}}\"",
+    "episodeOf": "Episode {{index}} of {{total}}",
     "courseVideos": "Course Videos",
     "videoCount": "{{count}} videos",
     "selectCourseHint": "Select a course to import or manage videos",
@@ -1358,5 +1360,20 @@
     "tableAddRow": "Add row",
     "tableAddCol": "Add column",
     "tableDelete": "Delete table"
+  },
+  "library": {
+    "greetingNight": "Burning the midnight oil",
+    "greetingMorning": "Good morning",
+    "greetingNoon": "Good afternoon",
+    "greetingAfternoon": "Good afternoon",
+    "greetingEvening": "Good evening",
+    "overviewSub": "{{courses}} courses · {{videos}} videos",
+    "continueSection": "Continue learning",
+    "allCourses": "All courses",
+    "openCourse": "Open course \"{{name}}\"",
+    "courseVideos": "{{count}} videos",
+    "courseEmpty": "No videos yet",
+    "courseWatched": "{{count}} watched",
+    "courseAllWatched": "All watched"
   }
 }

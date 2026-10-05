@@ -1,0 +1,1027 @@
+import { useQuery } from "@tanstack/react-query";
+import { queries } from "@/lib/queries";
+import { qk } from "@/lib/queryKeys";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { cropStyle } from "@/lib/blackBars";
+import { useSilenceSkip } from "@/lib/useSilenceSkip";
+import { useSmartRate } from "@/lib/useSmartRate";
+import { ipc } from "@/lib/ipc";
+import { useVideoCrop } from "./useVideoCrop";
+import { posKey, durKey, syncPlaybackProgress } from "@/lib/playback";
+import { isIOS } from "@/lib/platform";
+import { findActiveSegmentIndex } from "@/lib/transcript";
+import type { DanmakuEntry, TranscriptSegment } from "@/lib/types";
+import { useWatchLogger } from "@/lib/useWatchLogger";
+import { usePlayer } from "@/stores/player";
+import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
+import { CaptionOverlay } from "./CaptionOverlay";
+import { Controls } from "./Controls";
+import { DanmakuOverlay } from "./DanmakuOverlay";
+import { ProgressBar } from "./ProgressBar";
+
+// 距片尾 15s 内不再续播（视为看完），从头开始。
+const RESUME_TAIL_GUARD = 15;
+const TAP_DELAY_MS = 240;
+const LONG_PRESS_MS = 360;
+const TAP_MOVE_TOLERANCE_PX = 12;
+const AXIS_LOCK_PX = 16;
+const SCRUB_MS_PER_PIXEL = 100;
+const BRIGHTNESS_STEP = 0.0025;
+const VOLUME_STEP = 0.0025;
+const APPLE_MAX_PLAYBACK_RATE = 2;
+const PLAYBACK_RATE_KEY = "course-ai-playback-rate";
+const DANMAKU_ENABLED_KEY = "course-ai-danmaku-enabled";
+const SUPPORTED_PLAYBACK_RATES = new Set([0.5, 0.75, 1, 1.25, 1.5, 2]);
+const EMPTY_TRANSCRIPT_SEGMENTS: TranscriptSegment[] = [];
+const EMPTY_DANMAKU: DanmakuEntry[] = [];
+
+function loadPlaybackRate() {
+  try {
+    const stored = Number(localStorage.getItem(PLAYBACK_RATE_KEY));
+    return SUPPORTED_PLAYBACK_RATES.has(stored) ? stored : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function persistPlaybackRate(rate: number) {
+  try {
+    localStorage.setItem(PLAYBACK_RATE_KEY, String(rate));
+  } catch {
+    // 隐私模式无法持久化时，本次播放器会话内仍然生效。
+  }
+}
+
+// 弹幕开关：全局偏好（跨视频记住），默认开。
+function loadDanmakuEnabled() {
+  try {
+    return localStorage.getItem(DANMAKU_ENABLED_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function persistDanmakuEnabled(enabled: boolean) {
+  try {
+    localStorage.setItem(DANMAKU_ENABLED_KEY, enabled ? "1" : "0");
+  } catch {
+    // 同上：持久化失败不挡本次会话。
+  }
+}
+
+function usesApplePlaybackEngine() {
+  if (isIOS()) return true;
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent ?? "";
+  return (
+    /Macintosh|Mac OS X/i.test(ua) &&
+    /AppleWebKit/i.test(ua) &&
+    !/Chrome|Chromium|Edg|OPR/i.test(ua)
+  );
+}
+
+type GestureMode = "idle" | "brightness" | "volume" | "scrub";
+
+type GestureState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  startTime: number;
+  startRate: number;
+  startPreservesPitch: boolean;
+  startVolume: number;
+  startBrightness: number;
+  mode: GestureMode;
+  side: "left" | "right";
+  tapTimer?: number;
+  longPressTimer?: number;
+  longPressActive: boolean;
+  swiped: boolean;
+};
+
+export function VideoPlayer({
+  src,
+  videoId,
+  immersive = false,
+  onFullscreenChange,
+}: {
+  src: string;
+  videoId: string;
+  immersive?: boolean;
+  onFullscreenChange?: (fullscreen: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const regionRef = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLVideoElement>(null);
+  // 控制栏实测高度：字幕据此在控制栏显示时上移，浮在其上方（控制栏悬浮遮住舞台底部）。
+  const [controlsHeight, setControlsHeight] = useState(0);
+  const lastSavedRef = useRef(0);
+  const [playing, setPlaying] = useState(false);
+  // 把「播放中时长」记入学习事件日志（供仪表盘统计 / 间隔重复排期）。
+  useWatchLogger(videoId, playing);
+  // 离开/切换视频时把进度同步进库（暂停时也同步一次，见 onPause）。
+  useEffect(() => {
+    if (!videoId) return;
+    return () => syncPlaybackProgress(videoId);
+  }, [videoId]);
+  const [rate, setRate] = useState(loadPlaybackRate);
+  const silenceSkip = useSilenceSkip(videoId);
+  const [volume, setVolume] = useState(1);
+  const [muted, setMuted] = useState(false);
+  const [captionsOn, setCaptionsOn] = useState(true);
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    onFullscreenChange?.(fullscreen);
+  }, [fullscreen, onFullscreenChange]);
+  useEffect(
+    () => () => {
+      onFullscreenChange?.(false);
+    },
+    [onFullscreenChange],
+  );
+  // 控制栏可见性：桌面默认收起、悬停视频后展开；沉浸式（手机）进入时先显示一下、
+  // 随后自动隐藏，之后点视频切换。
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [desktopControlsVisible, setDesktopControlsVisible] = useState(false);
+  const hideControlsTimer = useRef<number | undefined>(undefined);
+  const desktopHideTimer = useRef<number | undefined>(undefined);
+  // 去黑边：状态、后台探测、stageBox 几何全在 hook 里，播放器只管把结果套到 video 上。
+  const {
+    cropOn,
+    cropInsets,
+    cropNotice,
+    effectiveCrop,
+    stageBox,
+    toggleCrop,
+    markMetadata,
+    markPlayable,
+  } = useVideoCrop(videoId, regionRef);
+  // 沉浸式单/双击判定：单击切控制栏、双击左右两侧 ±10s（中间播放/暂停）。
+  const tapRef = useRef<{ t: number; timer?: number }>({ t: 0 });
+  const gestureRef = useRef<GestureState | null>(null);
+  const setCurrentMs = usePlayer((s) => s.setCurrentMs);
+  const setDurationMs = usePlayer((s) => s.setDurationMs);
+  const seekRequest = usePlayer((s) => s.seekRequest);
+  // 不在这里订阅 currentMs（否则播放时整个播放器每秒重渲染 4 次）。
+  // 进度由 Controls 自己订阅；字幕只在「跨段」时更新。
+  const [caption, setCaption] = useState<string | undefined>(undefined);
+  const [brightness, setBrightness] = useState(1);
+  const [gestureHint, setGestureHint] = useState<{
+    kind: "brightness" | "volume" | "scrub" | "rate" | "rewind";
+    value: number;
+  } | null>(null);
+  const gestureHintTimerRef = useRef<number | undefined>(undefined);
+  // 方向键长按快进/快退（B 站式）的进行中状态（见键盘快捷键 effect）。
+  const keyScanRef = useRef<{
+    action: "seekBack" | "seekForward";
+    engaged: boolean;
+    timer: number;
+    interval?: number;
+    prevRate?: number;
+    prevPitch?: boolean;
+  } | null>(null);
+
+  const { data: queriedSegments } = useQuery(queries.transcripts(videoId));
+  // 弹幕：B 站视频才有数据（其余源后端直接返回空）。库里没有时后端会先在线
+  // 抓一次并缓存，首开可能慢几秒——抓到前开关不出现，不打扰本地视频。
+  const { data: queriedDanmaku } = useQuery({
+    queryKey: qk.danmaku(videoId),
+    queryFn: () => ipc.danmaku.list(videoId),
+    staleTime: Infinity,
+  });
+  const danmaku = queriedDanmaku ?? EMPTY_DANMAKU;
+  const [danmakuOn, setDanmakuOn] = useState(loadDanmakuEnabled);
+  // 查询 pending 时保持同一个空数组引用，避免智能倍率计划被当作“新文稿”反复重建。
+  const segments = queriedSegments ?? EMPTY_TRANSCRIPT_SEGMENTS;
+  const applePlaybackEngine = useMemo(usesApplePlaybackEngine, []);
+  const smartRate = useSmartRate(segments, {
+    resetKey: videoId,
+    maxEffectiveRate: applePlaybackEngine ? APPLE_MAX_PLAYBACK_RATE : undefined,
+  });
+  const effectiveRate = applePlaybackEngine
+    ? Math.min(APPLE_MAX_PLAYBACK_RATE, rate * smartRate.multiplier)
+    : rate * smartRate.multiplier;
+  // 字幕跳转用：始终持有按 start_ms 排好序的最新分句，供键盘处理器读取（避免闭包过期）。
+  const sortedSegments = useMemo(
+    () => [...segments].sort((a, b) => a.start_ms - b.start_ms),
+    [segments],
+  );
+  const segmentsRef = useRef<typeof segments>([]);
+  useEffect(() => {
+    segmentsRef.current = sortedSegments;
+  }, [sortedSegments]);
+
+  // 跟随播放进度更新字幕：订阅播放器 store，但只在字幕文本变化时才 setState，
+  // 避免每个 currentMs tick 都重渲染。
+  useEffect(() => {
+    const compute = (ms: number) => {
+      const index = findActiveSegmentIndex(sortedSegments, ms);
+      const text = index >= 0 ? sortedSegments[index].text : undefined;
+      setCaption((prev) => (prev === text ? prev : text));
+    };
+    compute(usePlayer.getState().currentMs);
+    return usePlayer.subscribe((state, previousState) => {
+      if (state.currentMs !== previousState.currentMs) compute(state.currentMs);
+    });
+  }, [sortedSegments]);
+
+  useLayoutEffect(() => {
+    ref.current?.setAttribute("webkit-playsinline", "true");
+  }, []);
+
+  // 跟踪控制栏高度，供字幕避让（控制栏内容/换行时高度会变）。
+  useEffect(() => {
+    const el = controlsRef.current;
+    if (!el) return;
+    const update = () => setControlsHeight(el.offsetHeight);
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!ref.current || !seekRequest) return;
+    ref.current.currentTime = seekRequest.ms / 1000;
+  }, [seekRequest]);
+
+  useEffect(() => {
+    // 智能倍速是在用户选的倍速之上叠加的倍率，所以这里生效的是两者之积。
+    const video = ref.current;
+    if (!video || gestureRef.current?.longPressActive) return;
+    // 媒体资源加载会把 playbackRate 还原为 defaultPlaybackRate；两者一起更新，
+    // 切到目标倍速相同的新视频时也不会悄悄掉回 1x。
+    video.defaultPlaybackRate = effectiveRate;
+    if (video.playbackRate !== effectiveRate) video.playbackRate = effectiveRate;
+  }, [effectiveRate, src]);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    ref.current.volume = volume;
+    ref.current.muted = muted || volume === 0;
+  }, [muted, volume]);
+
+  const isIosImmersive = immersive && isIOS();
+
+  // 视频全屏：CSS 把播放器铺满视口（盖住应用其它 UI），同时让窗口铺满物理屏幕，
+  // 视觉上就是纯视频全屏，而非「程序全屏」。WKWebView 不支持元素级全屏，所以走这套。
+  const setVideoFullscreen = async (next: boolean) => {
+    setFullscreen(next);
+    try {
+      await getCurrentWindow().setFullscreen(next);
+    } catch {
+      // 窗口全屏失败也无妨：CSS 覆盖已让视频铺满当前窗口。
+    }
+  };
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") void setVideoFullscreen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+     
+  }, [fullscreen]);
+
+  const toggleFullscreen = () => void setVideoFullscreen(!fullscreen);
+
+  // 沉浸式（手机）控制栏：默认显示，播放 3 秒后自动隐藏；点视频切换显隐；暂停时常显。
+  function clearHideTimer() {
+    if (hideControlsTimer.current) window.clearTimeout(hideControlsTimer.current);
+  }
+  function clearDesktopHideTimer() {
+    if (desktopHideTimer.current) window.clearTimeout(desktopHideTimer.current);
+  }
+  function scheduleHideControls() {
+    clearHideTimer();
+    if (!immersive) return;
+    hideControlsTimer.current = window.setTimeout(() => {
+      if (
+        ref.current &&
+        !ref.current.paused &&
+        !controlsRef.current?.contains(document.activeElement)
+      ) {
+        setControlsVisible(false);
+      }
+    }, 3000);
+  }
+  function revealControls() {
+    setControlsVisible(true);
+    scheduleHideControls();
+  }
+  function toggleControls() {
+    if (controlsVisible) {
+      clearHideTimer();
+      setControlsVisible(false);
+    } else {
+      revealControls();
+    }
+  }
+  function clearTapTimer() {
+    if (tapRef.current.timer) window.clearTimeout(tapRef.current.timer);
+    tapRef.current = { t: 0 };
+  }
+  function clearGestureTimer(gesture: GestureState | null) {
+    if (!gesture) return;
+    if (gesture.tapTimer) window.clearTimeout(gesture.tapTimer);
+    if (gesture.longPressTimer) window.clearTimeout(gesture.longPressTimer);
+  }
+  function revealGestureHint(kind: "brightness" | "volume" | "scrub", value: number) {
+    setGestureHint({ kind, value });
+    if (gestureHintTimerRef.current) window.clearTimeout(gestureHintTimerRef.current);
+    gestureHintTimerRef.current = window.setTimeout(() => setGestureHint(null), 650);
+  }
+  function handleIosPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (!isIosImmersive || event.pointerType === "mouse") return;
+    clearGestureTimer(gestureRef.current);
+    const video = ref.current;
+    const width = window.innerWidth || event.currentTarget.getBoundingClientRect().width || 0;
+    const gesture: GestureState = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startTime: video?.currentTime ?? 0,
+      startRate: video?.playbackRate ?? rate,
+      startPreservesPitch: video?.preservesPitch ?? true,
+      startVolume: volume,
+      startBrightness: brightness,
+      mode: "idle",
+      side: event.clientX < width / 2 ? "left" : "right",
+      longPressActive: false,
+      swiped: false,
+    };
+    gestureRef.current = gesture;
+    const target = event.currentTarget;
+    if ("setPointerCapture" in target) {
+      try {
+        target.setPointerCapture(event.pointerId);
+      } catch {
+        // Safari/测试环境可能不支持，忽略即可。
+      }
+    }
+    gesture.longPressTimer = window.setTimeout(() => {
+      const current = gestureRef.current;
+      const activeVideo = ref.current;
+      if (!current || current.pointerId !== event.pointerId || !activeVideo) return;
+      if (current.swiped || current.longPressActive) return;
+      current.longPressActive = true;
+      // 长按只临时改播放器的有效倍速，不能把已经叠过智能倍率的值写回基础 rate。
+      // 先关变调可避免 WKWebView 重建音频管线时的明显停顿。
+      activeVideo.preservesPitch = false;
+      const next = Math.min(APPLE_MAX_PLAYBACK_RATE, current.startRate * 2);
+      activeVideo.playbackRate = next;
+      setGestureHint({ kind: "rate", value: next });
+    }, LONG_PRESS_MS);
+  }
+  function handleIosPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId || !isIosImmersive) return;
+    const dx = event.clientX - gesture.startX;
+    const dy = event.clientY - gesture.startY;
+    const adx = Math.abs(dx);
+    const ady = Math.abs(dy);
+    if (adx > TAP_MOVE_TOLERANCE_PX || ady > TAP_MOVE_TOLERANCE_PX) {
+      if (gesture.longPressTimer) {
+        window.clearTimeout(gesture.longPressTimer);
+        gesture.longPressTimer = undefined;
+      }
+    }
+    if (gesture.mode === "idle") {
+      if (adx < AXIS_LOCK_PX && ady < AXIS_LOCK_PX) return;
+      gesture.mode = adx > ady ? "scrub" : gesture.side === "left" ? "brightness" : "volume";
+    }
+    if (gesture.mode === "brightness") {
+      const next = Math.min(
+        1,
+        Math.max(0, gesture.startBrightness + (gesture.startY - event.clientY) * BRIGHTNESS_STEP),
+      );
+      setBrightness(next);
+      revealGestureHint("brightness", next);
+      return;
+    }
+    if (gesture.mode === "volume") {
+      const next = Math.min(
+        1,
+        Math.max(0, gesture.startVolume + (gesture.startY - event.clientY) * VOLUME_STEP),
+      );
+      setVolume(next);
+      setMuted(next === 0);
+      revealGestureHint("volume", next);
+      return;
+    }
+    if (gesture.mode === "scrub") {
+      gesture.swiped = true;
+      const video = ref.current;
+      if (!video) return;
+      const next = gesture.startTime + (dx * SCRUB_MS_PER_PIXEL) / 1000;
+      if (Number.isFinite(video.duration) && video.duration > 0) {
+        video.currentTime = Math.min(video.duration, Math.max(0, next));
+      } else {
+        video.currentTime = Math.max(0, next);
+      }
+      revealGestureHint("scrub", next);
+    }
+  }
+  function handleIosPointerUp(event: React.PointerEvent<HTMLDivElement>) {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId || !isIosImmersive) return;
+    clearGestureTimer(gesture);
+    const dx = event.clientX - gesture.startX;
+    const dy = event.clientY - gesture.startY;
+    const adx = Math.abs(dx);
+    const ady = Math.abs(dy);
+    if (gesture.longPressActive) {
+      const video = ref.current;
+      if (video) {
+        video.playbackRate = gesture.startRate;
+        video.preservesPitch = gesture.startPreservesPitch;
+      }
+      setGestureHint(null);
+      revealControls();
+    } else if (gesture.mode === "scrub" || (gesture.swiped && adx > ady)) {
+      revealControls();
+    } else {
+      const now = Date.now();
+      const prev = tapRef.current;
+      if (now - prev.t < TAP_DELAY_MS) {
+        if (prev.timer) window.clearTimeout(prev.timer);
+        tapRef.current = { t: 0 };
+        void setVideoFullscreen(!fullscreen);
+      } else {
+        const timer = window.setTimeout(() => {
+          tapRef.current = { t: 0 };
+          toggleControls();
+        }, TAP_DELAY_MS);
+        tapRef.current = { t: now, timer };
+      }
+    }
+    gestureRef.current = null;
+  }
+  function handleIosPointerCancel(event: React.PointerEvent<HTMLDivElement>) {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId || !isIosImmersive) return;
+    clearGestureTimer(gesture);
+    if (gesture.longPressActive) {
+      const video = ref.current;
+      if (video) {
+        video.playbackRate = gesture.startRate;
+        video.preservesPitch = gesture.startPreservesPitch;
+      }
+      setGestureHint(null);
+    }
+    gestureRef.current = null;
+  }
+  // 沉浸式（手机）点视频：区分单/双击。单击延后 240ms 才切控制栏，期间若来第二击则
+  // 判为双击——按落点在视频左/中/右执行 后退10s / 播放暂停 / 前进10s。桌面不走这套。
+  function handleStageTap(event: React.MouseEvent<HTMLDivElement>) {
+    if (!immersive) return;
+    const now = Date.now();
+    const prev = tapRef.current;
+    if (now - prev.t < 240) {
+      if (prev.timer) window.clearTimeout(prev.timer);
+      tapRef.current = { t: 0 };
+      const video = ref.current;
+      if (!video) return;
+      const rect = regionRef.current?.getBoundingClientRect();
+      const zone = rect && rect.width ? (event.clientX - rect.left) / rect.width : 0.5;
+      if (zone < 0.4) {
+        video.currentTime = Math.max(0, video.currentTime - 10);
+        revealControls();
+      } else if (zone > 0.6) {
+        video.currentTime = video.currentTime + 10;
+        revealControls();
+      } else if (video.paused) {
+        void video.play();
+      } else {
+        video.pause();
+      }
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      tapRef.current = { t: 0 };
+      toggleControls();
+    }, 240);
+    tapRef.current = { t: now, timer };
+  }
+  function revealDesktopControls() {
+    if (immersive) return;
+    clearDesktopHideTimer();
+    setDesktopControlsVisible(true);
+  }
+  function scheduleDesktopHideControls() {
+    if (immersive) return;
+    clearDesktopHideTimer();
+    desktopHideTimer.current = window.setTimeout(() => {
+      if (!controlsRef.current?.contains(document.activeElement)) {
+        setDesktopControlsVisible(false);
+      }
+    }, 80);
+  }
+
+  function revealControlsForKeyboard() {
+    clearHideTimer();
+    clearDesktopHideTimer();
+    if (immersive) setControlsVisible(true);
+    else setDesktopControlsVisible(true);
+  }
+
+  function handleControlsBlur(event: React.FocusEvent<HTMLDivElement>) {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    if (immersive) scheduleHideControls();
+    else scheduleDesktopHideControls();
+  }
+
+  useEffect(() => {
+    if (!immersive) {
+      setDesktopControlsVisible(false);
+      clearHideTimer();
+      clearDesktopHideTimer();
+      return;
+    }
+    // 沉浸式：进入时先显示一下让用户知道有控制栏，2.5s 后自动收起（无论是否在播放）。
+    setControlsVisible(true);
+    clearHideTimer();
+    hideControlsTimer.current = window.setTimeout(
+      () => setControlsVisible(false),
+      2500,
+    );
+    return clearHideTimer;
+     
+  }, [immersive]);
+
+  useEffect(
+    () => () => {
+      clearHideTimer();
+      clearDesktopHideTimer();
+      clearTapTimer();
+      if (gestureHintTimerRef.current) window.clearTimeout(gestureHintTimerRef.current);
+    },
+    [],
+  );
+
+  // 跳到上一句/下一句字幕的开头；该视频还没有字幕时回退到 ±10s 快退/快进。
+  const jumpSubtitle = (dir: -1 | 1) => {
+    const video = ref.current;
+    if (!video) return;
+    const segs = segmentsRef.current;
+    if (segs.length === 0) {
+      video.currentTime =
+        dir < 0
+          ? Math.max(0, video.currentTime - 10)
+          : video.currentTime + 10;
+      return;
+    }
+    const nowMs = video.currentTime * 1000;
+    if (dir > 0) {
+      const next = segs.find((s) => s.start_ms > nowMs);
+      video.currentTime = next
+        ? next.start_ms / 1000
+        : video.duration || video.currentTime;
+    } else {
+      let targetMs = 0;
+      for (const s of segs) {
+        if (s.start_ms < nowMs) targetMs = s.start_ms;
+        else break;
+      }
+      video.currentTime = Math.max(0, targetMs / 1000);
+    }
+  };
+
+  // 键盘快捷键：动作 → 按键的映射在设置里可改（见 stores/shortcuts）。空格在未被
+  // 占用时永远兜底为播放/暂停。聚焦输入框时不拦截，避免影响打字。
+  // 快退/快进键是 B 站式长短按：短按 ±5s（松键提交）；按住 ≥200ms 进入扫描——
+  // 快进 = 2 倍速播放、快退 = 周期回退，松开恢复原倍速。
+  // 2x 是 macOS WKWebView 完整逐帧解码的上限：超过 2x AVFoundation 会降级成
+  // 只渲染关键帧（约 1 秒 1 帧）；Blink（网页版/Windows）没有这个限制。
+  useEffect(() => {
+    const KEY_HOLD_MS = 200;
+    const KEY_HOLD_RATE = 2;
+    const KEY_REWIND_TICK_MS = 200;
+    const KEY_REWIND_STEP_S = 0.8;
+
+    // 结束长按流程。commitTap（keyup）：未进入扫描则补上短按 ±5s；
+    // blur/卸载不补——用户没有完成一次「按一下」，且失焦后 keyup 会丢。
+    const endKeyScan = (commitTap: boolean) => {
+      const scan = keyScanRef.current;
+      if (!scan) return;
+      keyScanRef.current = null;
+      window.clearTimeout(scan.timer);
+      if (scan.interval) window.clearInterval(scan.interval);
+      const video = ref.current;
+      if (scan.engaged) {
+        if (video && scan.prevRate != null) video.playbackRate = scan.prevRate;
+        if (video && scan.prevPitch != null) video.preservesPitch = scan.prevPitch;
+        setGestureHint(null);
+      } else if (commitTap && video) {
+        video.currentTime =
+          scan.action === "seekBack"
+            ? Math.max(0, video.currentTime - 5)
+            : video.currentTime + 5;
+      }
+    };
+
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const video = ref.current;
+      if (!video) return;
+      const bindings = useShortcuts.getState().bindings;
+      const action =
+        actionForKey(bindings, event.key) ??
+        (normalizeKey(event.key) === " " ? "playPause" : null);
+      if (!action) return;
+      event.preventDefault();
+      const clamp = (v: number) => Math.min(1, Math.max(0, v));
+      switch (action) {
+        case "playPause":
+          if (video.paused) void video.play();
+          else video.pause();
+          break;
+        case "seekBack":
+        case "seekForward": {
+          // 系统 auto-repeat 不打断长按流程；一次只允许一个方向键在按住。
+          if (event.repeat || keyScanRef.current) break;
+          const timer = window.setTimeout(() => {
+            const scan = keyScanRef.current;
+            const v = ref.current;
+            if (!scan || !v) return;
+            scan.engaged = true;
+            if (scan.action === "seekForward") {
+              scan.prevRate = v.playbackRate;
+              // 先关「变速不变调」再变速：WKWebView 切换倍速时要重建音频变调
+              // 管线并重对音画，按下/松开各卡一下。扫描期间音调略升，换取无卡顿。
+              scan.prevPitch = v.preservesPitch;
+              v.preservesPitch = false;
+              v.playbackRate = KEY_HOLD_RATE;
+              // 暂停中长按 = 直接以倍速开播（对齐 B 站）。
+              if (v.paused) void v.play();
+              setGestureHint({ kind: "rate", value: KEY_HOLD_RATE });
+            } else {
+              scan.interval = window.setInterval(() => {
+                const vv = ref.current;
+                if (vv) {
+                  vv.currentTime = Math.max(0, vv.currentTime - KEY_REWIND_STEP_S);
+                }
+              }, KEY_REWIND_TICK_MS);
+              setGestureHint({ kind: "rewind", value: 0 });
+            }
+          }, KEY_HOLD_MS);
+          keyScanRef.current = { action, engaged: false, timer };
+          break;
+        }
+        case "prevSubtitle":
+          jumpSubtitle(-1);
+          break;
+        case "nextSubtitle":
+          jumpSubtitle(1);
+          break;
+        case "volumeUp":
+          setMuted(false);
+          setVolume((v) => clamp(v + 0.1));
+          break;
+        case "volumeDown":
+          setVolume((v) => clamp(v - 0.1));
+          break;
+        case "mute":
+          setMuted((v) => !v);
+          break;
+        case "fullscreen":
+          toggleFullscreen();
+          break;
+        case "captions":
+          setCaptionsOn((v) => !v);
+          break;
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      const scan = keyScanRef.current;
+      if (!scan) return;
+      const action = actionForKey(useShortcuts.getState().bindings, event.key);
+      if (action === scan.action) endKeyScan(true);
+    };
+    const onBlur = () => endKeyScan(false);
+
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+      endKeyScan(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullscreen]);
+
+  const playbackControlsVisible = immersive ? controlsVisible : desktopControlsVisible;
+
+  return (
+    <div
+      data-video-fullscreen={fullscreen ? "" : undefined}
+      className={`flex flex-col ${
+        fullscreen
+          ? "fixed inset-0 z-50 bg-black"
+          : "relative h-full min-h-0 bg-transparent"
+      }`}
+    >
+      <div
+        ref={regionRef}
+        aria-label={t("videoPlayer.stage")}
+        tabIndex={0}
+        onFocus={revealControlsForKeyboard}
+        onClick={immersive && !isIosImmersive ? handleStageTap : undefined}
+        onMouseEnter={!immersive ? revealDesktopControls : undefined}
+        onMouseLeave={!immersive ? scheduleDesktopHideControls : undefined}
+        className={`relative flex min-h-0 w-full min-w-0 flex-1 items-center justify-center overflow-hidden ${
+          fullscreen ? "bg-black" : "bg-[var(--surface-stage)]"
+        }`}
+      >
+        <div
+          className="relative overflow-hidden"
+          style={
+            stageBox
+              ? { width: stageBox.width, height: stageBox.height }
+              : { width: "100%", height: "100%" }
+          }
+        >
+          <video
+            ref={ref}
+            aria-label={t("videoPlayer.player")}
+            data-theme-heavy=""
+            src={src}
+            playsInline
+            disablePictureInPicture
+            className={`h-full w-full object-contain ${
+              fullscreen ? "bg-black" : "bg-[var(--surface-stage)]"
+            } ${isIosImmersive ? "pointer-events-none" : ""}`}
+            // 提升到独立 GPU 合成层：暂停后让这一帧留在自己的层上，减少回退到
+            // 「栅格化再缩放」的软化；backface-visibility 进一步固定层、避免半像素抖动。
+            style={{
+              ...(stageBox ? cropStyle(stageBox, effectiveCrop) : {}),
+              transform: "translateZ(0)",
+              willChange: "transform",
+              backfaceVisibility: "hidden",
+              // A no-op filter still creates extra compositing work for video frames.
+              filter: brightness < 1 ? `brightness(${brightness})` : undefined,
+            }}
+            onTimeUpdate={(event) => {
+              // 跳停顿：落在无声区间里就直接跃过去，跳完这一轮不再按旧位置记进度。
+              if (silenceSkip.handleTimeUpdate(event.currentTarget)) return;
+              const t = event.currentTarget.currentTime;
+              // 长按快进时播放器的 playbackRate 由手势直接改，这时别去抢。
+              if (!keyScanRef.current?.engaged && !gestureRef.current?.longPressActive) {
+                smartRate.update(t * 1000, rate);
+              }
+              setCurrentMs(Math.floor(t * 1000));
+              // 每 5 秒（或回退时）记录一次进度，避免频繁写 localStorage。
+              if (Math.abs(t - lastSavedRef.current) >= 5) {
+                lastSavedRef.current = t;
+                const dur = event.currentTarget.duration;
+                if (dur && t > dur - RESUME_TAIL_GUARD) {
+                  // 看到尾部：记成整段时长（= 已看完）。以前是删掉记录，于是「已看完」
+                  // 角标和仪表盘完成度反而永远不出现——看完一讲把它算成没看。
+                  // 续播那边本来就会跳过尾部附近的位置，不会再从末尾开始播。
+                  localStorage.setItem(posKey(videoId), String(dur));
+                } else if (t > 2) {
+                  localStorage.setItem(posKey(videoId), String(t));
+                }
+              }
+            }}
+            onLoadedMetadata={(event) => {
+              const video = event.currentTarget;
+              // 记录视频固有比例，去黑边的 stageBox 要靠它做等比缩放。
+              markMetadata(video.videoWidth, video.videoHeight);
+              // 某些 WebKit 版本在资源加载后才重置速率；metadata 到达时再兜底应用一次。
+              video.defaultPlaybackRate = effectiveRate;
+              video.playbackRate = effectiveRate;
+              setDurationMs(Math.floor(video.duration * 1000));
+              // 记录总时长，供首页显示「时长 + 进度条」（DB 里 duration_ms 常为空）。
+              if (Number.isFinite(video.duration) && video.duration > 0) {
+                localStorage.setItem(durKey(videoId), String(video.duration));
+              }
+              // 跨视频跳转优先：若有落在本视频的 pendingSeek（课程级搜索点来的），
+              // 直接跳到该处、消费掉，压过断点续播。
+              const pending = usePlayer.getState().pendingSeek;
+              if (pending && pending.videoId === videoId) {
+                video.currentTime = Math.max(0, pending.ms / 1000);
+                usePlayer.getState().clearPendingSeek();
+              } else {
+                // 断点续播：恢复上次离开的位置。
+                const saved = Number(localStorage.getItem(posKey(videoId)));
+                if (
+                  Number.isFinite(saved) &&
+                  saved > 2 &&
+                  video.duration &&
+                  saved < video.duration - RESUME_TAIL_GUARD
+                ) {
+                  video.currentTime = saved;
+                  lastSavedRef.current = saved;
+                }
+              }
+            }}
+            // 缓冲够起播了才放黑边探测进场：那一趟解码不该和首帧抢磁盘。
+            onCanPlay={markPlayable}
+            onPlay={() => {
+              setPlaying(true);
+              scheduleHideControls();
+            }}
+            onPause={(event) => {
+              setPlaying(false);
+              setControlsVisible(true);
+              clearHideTimer();
+              const t = event.currentTarget.currentTime;
+              const dur = event.currentTarget.duration;
+              if (t > 2) {
+                // 尾部附近按「看完」记（同 onTimeUpdate）。
+                const saved = dur && t > dur - RESUME_TAIL_GUARD ? dur : t;
+                localStorage.setItem(posKey(videoId), String(saved));
+                lastSavedRef.current = saved;
+              }
+              // 暂停是同步进库的好时机：完成度以库里那份为准。
+              syncPlaybackProgress(videoId);
+            }}
+            onVolumeChange={(event) => {
+              setVolume(event.currentTarget.volume);
+              setMuted(event.currentTarget.muted);
+            }}
+          />
+          {danmakuOn && danmaku.length > 0 && (
+            <DanmakuOverlay entries={danmaku} videoRef={ref} />
+          )}
+          {isIosImmersive && (
+            <div
+              aria-label={t("videoPlayer.gestureLayer")}
+              className="absolute inset-0 z-10"
+              onPointerDown={handleIosPointerDown}
+              onPointerMove={handleIosPointerMove}
+              onPointerUp={handleIosPointerUp}
+              onPointerCancel={handleIosPointerCancel}
+              style={{ touchAction: "none" }}
+            />
+          )}
+          {smartRate.notice && (
+            <div
+              aria-live="polite"
+              className="pointer-events-none absolute right-4 top-6 z-20 rounded-full bg-[var(--surface-stage-overlay)] px-3 py-1 text-xs font-medium text-white"
+            >
+              {smartRate.notice}
+            </div>
+          )}
+          {silenceSkip.notice && (
+            <div
+              aria-live="polite"
+              className="pointer-events-none absolute left-1/2 top-6 z-20 -translate-x-1/2 rounded-full bg-[var(--surface-stage-overlay)] px-3 py-1 text-xs font-medium text-white"
+            >
+              {silenceSkip.notice}
+            </div>
+          )}
+          {gestureHint && (
+            <div
+              aria-label={t("videoPlayer.gestureOverlay")}
+              className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[var(--surface-stage-scrim)] text-white"
+            >
+              <div className="rounded-lg bg-[var(--surface-stage-overlay)] px-4 py-2 text-sm font-medium">
+                {gestureHint.kind === "brightness" &&
+                  t("videoPlayer.brightnessPercent", {
+                    percent: (gestureHint.value * 100).toFixed(0),
+                  })}
+                {gestureHint.kind === "volume" &&
+                  t("videoPlayer.volumePercent", {
+                    percent: (gestureHint.value * 100).toFixed(0),
+                  })}
+                {gestureHint.kind === "scrub" && t("videoPlayer.scrubbing")}
+                {gestureHint.kind === "rate" &&
+                  t("videoPlayer.fastForwarding", { rate: gestureHint.value })}
+                {gestureHint.kind === "rewind" && t("videoPlayer.rewinding")}
+              </div>
+            </div>
+          )}
+          {cropNotice && (
+            <div className="pointer-events-none absolute inset-x-4 top-6 z-20 mx-auto w-fit max-w-full whitespace-pre-line rounded-lg bg-[var(--surface-stage-overlay)] px-3 py-1.5 text-center text-xs font-medium leading-relaxed text-white">
+              {cropNotice}
+            </div>
+          )}
+        </div>
+        {/* 字幕定位相对「舞台」区域（含黑边），因此可拖到整个舞台内任意处，不限于视频画面框。
+            控制栏悬浮遮住舞台底部 controlsHeight 像素：字幕**常年**避开该占位区，
+            而不是等控制栏可见才躲——否则每次唤出控制栏都先盖住字幕、等过渡完才让开，
+            字幕还会随控制栏出没上下跳。 */}
+        {/* 只按 captionsOn 挂载（不按 caption），换句时不卸载重挂——避免重挂时先以 0 高度
+            算出最小字号、量到真实高度后再瞬间变大的跳变。空文本时组件内部返回 null。 */}
+        {captionsOn && (
+          <CaptionOverlay
+            text={caption ?? ""}
+            containerRef={regionRef}
+            bottomInset={controlsHeight}
+          />
+        )}
+      </div>
+      <div
+        ref={controlsRef}
+        className="absolute inset-x-0 bottom-0 z-10 border-t border-[var(--border-faint)] bg-[var(--surface-panel)]/92 backdrop-blur"
+        onMouseEnter={!immersive ? revealDesktopControls : undefined}
+        onMouseLeave={!immersive ? scheduleDesktopHideControls : undefined}
+        onPointerDown={immersive ? () => revealControls() : undefined}
+      >
+        {/* 按钮行：桌面悬停浮现；沉浸式随点按显隐。进度条已拆出去常驻。 */}
+        <div
+          aria-label={t("videoPlayer.controls")}
+          aria-hidden={!playbackControlsVisible}
+          inert={playbackControlsVisible ? undefined : true}
+          onFocusCapture={revealControlsForKeyboard}
+          onBlurCapture={handleControlsBlur}
+          onClick={immersive ? (e) => e.stopPropagation() : undefined}
+          className={`transition-opacity duration-200 ${
+            playbackControlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
+          }`}
+        >
+          <Controls
+            playing={playing}
+            rate={rate}
+            effectiveRate={effectiveRate}
+            volume={volume}
+            muted={muted}
+            captionsOn={captionsOn}
+            smartRate={smartRate.enabled}
+            smartRateAvailable={smartRate.available}
+            skipSilence={silenceSkip.enabled}
+            skipSilenceAvailable={silenceSkip.available}
+            skipSilenceLoading={silenceSkip.loading}
+            skipRanges={silenceSkip.ranges}
+            cropOn={cropOn}
+            cropInsets={cropInsets}
+            fullscreen={fullscreen}
+            danmakuAvailable={danmaku.length > 0}
+            danmakuOn={danmakuOn}
+            onToggleCrop={toggleCrop}
+            onToggleCaptions={() => setCaptionsOn((on) => !on)}
+            onToggleDanmaku={() => {
+              const next = !danmakuOn;
+              setDanmakuOn(next);
+              persistDanmakuEnabled(next);
+            }}
+            onToggleSmartRate={smartRate.toggle}
+            onToggleSkipSilence={silenceSkip.toggle}
+            onPreviewSkip={(ms) => {
+              // 试跳要「看得到跳」：暂停着不会触发跳过判定，所以顺手接着播。
+              const video = ref.current;
+              if (!video) return;
+              video.currentTime = ms / 1000;
+              if (video.paused) void video.play();
+            }}
+            onPlayPause={() => {
+              const video = ref.current;
+              if (!video) return;
+              if (video.paused) {
+                void video.play();
+              } else {
+                video.pause();
+              }
+            }}
+            onRate={(nextRate) => {
+              setRate(nextRate);
+              persistPlaybackRate(nextRate);
+            }}
+            onVolume={(value) => {
+              setVolume(value);
+              setMuted(value === 0);
+            }}
+            onMuteToggle={() => setMuted((value) => !value)}
+            onFullscreenToggle={toggleFullscreen}
+          />
+        </div>
+        {/* 进度条：桌面常驻视频底边；沉浸式随控制栏显隐。 */}
+        <div
+          className={
+            immersive
+              ? `transition-opacity duration-200 ${
+                  controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
+                }`
+              : undefined
+          }
+        >
+          <ProgressBar
+            videoId={videoId}
+            skipRanges={silenceSkip.ranges}
+            onSeek={(ms) => {
+              if (ref.current) ref.current.currentTime = ms / 1000;
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}

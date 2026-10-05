@@ -1,10 +1,6 @@
 import { useQuery, type QueryClient } from "@tanstack/react-query";
+import { qk } from "@/lib/queryKeys";
 import { ipc } from "@/lib/ipc";
-
-/** 产物名（与后端的 TRACKED_ARTIFACTS 一致）。 */
-export type Artifact = "chapters" | "summary" | "notes" | "quiz" | "mindmap";
-
-export const staleArtifactsKey = (videoId: string) => ["ai-stale", videoId] as const;
 
 /**
  * 哪些 AI 产物是基于旧讲稿生成的。
@@ -14,7 +10,7 @@ export const staleArtifactsKey = (videoId: string) => ["ai-stale", videoId] as c
  */
 export function useStaleArtifacts(videoId: string) {
   const { data } = useQuery({
-    queryKey: staleArtifactsKey(videoId),
+    queryKey: qk.staleArtifacts(videoId),
     queryFn: () => ipc.ai.staleArtifacts(videoId),
     // 讲稿变化由调用方显式失效（改字幕、重跑纠错、重新生成），不靠轮询。
     staleTime: Infinity,
@@ -24,5 +20,5 @@ export function useStaleArtifacts(videoId: string) {
 
 /** 讲稿或产物变化后调用，让「已过期」标记重新算一次。 */
 export function invalidateStaleArtifacts(qc: QueryClient, videoId: string) {
-  void qc.invalidateQueries({ queryKey: staleArtifactsKey(videoId) });
+  void qc.invalidateQueries({ queryKey: qk.staleArtifacts(videoId) });
 }

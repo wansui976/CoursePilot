@@ -1,0 +1,260 @@
+/* 工具类与小动效：字阶、页签与手风琴淡入、实色按钮受光面、渐变填充、模态与卡片过渡。 */
+
+/* 字阶工具类：显式字号+行高，替代散落的 text-[13px]/[15px] 等。 */
+.ca-app .ca-t-2xs { font-size: var(--fs-2xs); line-height: var(--lh-2xs); }
+.ca-app .ca-t-xs { font-size: var(--fs-xs); line-height: var(--lh-xs); }
+.ca-app .ca-t-sm { font-size: var(--fs-sm); line-height: var(--lh-sm); }
+.ca-app .ca-t-md { font-size: var(--fs-md); line-height: var(--lh-md); }
+.ca-app .ca-t-lg { font-size: var(--fs-lg); line-height: var(--lh-lg); }
+.ca-app .ca-t-xl { font-size: var(--fs-xl); line-height: var(--lh-xl); }
+.ca-app .ca-t-2xl { font-size: var(--fs-2xl); line-height: var(--lh-2xl); }
+
+/* 学习标签切换：内容变为活动时轻微淡入，补上此前「无过渡的瞬切」。只动透明度不位移。 */
+@keyframes ca-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-tab-content[data-state="active"] {
+    animation: ca-fade-in 0.18s ease;
+  }
+}
+
+/* 知识点手风琴展开：挂载时轻微淡入下移（只动 transform/opacity，不重排——
+   长讲解 + 长出处列表下 grid-rows/height 动画会每帧重排整棵子树，globals.test 不允许）。
+   收起不播动画、直接卸载——与对话框同理：关闭要比打开利落。 */
+@keyframes ca-concept-expand {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-concept-expand {
+    animation: ca-concept-expand 0.22s var(--ease) backwards;
+  }
+}
+
+/* 实色按钮的受光面。纯色矩形看着像一块贴上去的色片；叠一道自上而下的白色渐变
+   加一条顶部内高光，它就成了受光的凸起——这是实体按钮唯一需要的那点立体感，
+   再多就成了 2010 年的拟物。
+   用 background-image 而非 background：底色仍由 Tailwind 的 bg-[var(--accent)] 提供，
+   两者分层叠加，换主题、换按下色都不用改这里。
+   悬停时高光减半：按钮压下去，受光自然变少。
+   顶部那条 1px 亮边也走 background-image 而不是 inset box-shadow：浮层上的强调按钮
+   本身还挂着 --shadow-pop，两个 box-shadow 会互相覆盖而不是叠加，做成背景层就没这问题。
+   1px 线定位在 padding box 顶边，正好落在描边内侧，圆角自动裁掉两端。 */
+.ca-sheen {
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.18), rgb(255 255 255 / 0.18)),
+    linear-gradient(180deg, rgb(255 255 255 / 0.11), rgb(255 255 255 / 0));
+  background-size: 100% 1px, auto;
+  background-position: top, top;
+  background-repeat: no-repeat, repeat;
+}
+
+@media (hover: hover) {
+  .ca-sheen:hover {
+    background-image:
+      linear-gradient(rgb(255 255 255 / 0.1), rgb(255 255 255 / 0.1)),
+      linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0));
+  }
+}
+
+.ca-sheen:disabled {
+  background-image: none;
+}
+
+/* 进度渐层填充（工作台内部各进度条共用）：把签名渐变 --grad-accent 作 background-image
+   铺上。别用 Tailwind 的 bg-[var(--grad-accent)]——那会编译成 background-color，而渐变是
+   图像，直接 bg 会被浏览器忽略。语义就是「(一段)学习中」的进度承载面。 */
+.ca-fill-grad {
+  background: var(--grad-accent);
+}
+
+/* 品牌渐变填充（图形面）：把签名品牌渐变 --grad-brand 作 background-image 铺上，
+   仅供头像、图标、发送键等**不含正文**的图形承载面使用。绝不可用于消息气泡/大段文字
+   底色——渐变在两段之间的明度跨度大，正文对比度无法在两段同时达标（见设计文档 §3.2
+   「渐变不应用于小字号文字或大面积正文」，只服务图形面积）。文字在前景读 var(--on-accent)。 */
+.ca-fill-brand {
+  background: var(--grad-brand);
+}
+
+/* 播放进度填充（主题感知）：吃 --grad-video-progress，浅色为 accent 渐层、深色自动切为
+   近黑安全的 --video-accent 渐层。仅用于播放 seek 等「可能压在近黑面上」的进度。 */
+.ca-fill-video-grad {
+  background: var(--grad-video-progress);
+}
+
+/* 模态框的进出。此前四个对话框都是硬切：黑幕瞬间铺满、面板凭空出现在正中，
+   关闭时又一起消失，没有任何东西说明它从哪来、到哪去。
+   Radix 会在 Overlay / Content 上打 data-state="open|closed"，并且在 closed 期间
+   保持挂载直到 CSS 动画跑完，所以退场动画不需要额外的状态管理。
+   面板从 96% 稍稍放大并上浮 8px——只动 transform 和 opacity，不触发布局。
+   进场 0.18s、退场 0.14s：关闭要比打开更利落，否则会觉得对话框「粘手」。 */
+@keyframes ca-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes ca-overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes ca-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ca-dialog-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-dialog-overlay[data-state="open"] {
+    animation: ca-overlay-in 0.18s ease;
+  }
+
+  .ca-dialog-overlay[data-state="closed"] {
+    animation: ca-overlay-out 0.14s ease;
+  }
+
+  /* 用 role 选择器而不是类：任何 Radix 对话框都自动获得进出动画，
+     新加的对话框不会因为忘记加类就退回硬切。手搓的 role="dialog"（如就地改名框）
+     没有 data-state，选不中，不受影响。 */
+  [role="dialog"][data-state="open"] {
+    animation: ca-dialog-in 0.18s var(--ease, cubic-bezier(0.22, 0.61, 0.36, 1));
+  }
+
+  [role="dialog"][data-state="closed"] {
+    animation: ca-dialog-out 0.14s var(--ease, cubic-bezier(0.22, 0.61, 0.36, 1));
+  }
+}
+
+/* 卡片换人。复习会话此前是硬替换：打完分，下一张凭空出现在同一位置，看不出「翻过去一张」。
+   淡入加 6px 上浮，短到不挡住连续打分（按钮立即可点，动画不拦输入）。
+   由 React 的 key=卡片 id 触发重挂来重播——展开答案不换 key，故不会在原地闪一下。 */
+@keyframes ca-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-card-enter {
+    animation: ca-card-enter 0.16s var(--ease, cubic-bezier(0.22, 0.61, 0.36, 1))
+      backwards;
+  }
+
+  /* 展开答案时，答案与四个评分档一起淡入，而不是「啪」地把卡片撑长。
+     只动透明度：高度变化本来就要发生，再叠一层高度动画会让按钮位置追着手指跑。 */
+  .ca-reveal-enter {
+    animation: ca-fade-in 0.18s ease;
+  }
+}
+
+/* ===== 复习评分按钮：四档各有语义色 =====
+   重来 / 困难 / 良好 / 容易 → 错误红 / 警示琥珀 / 成功绿 / 强调色。平时只是淡淡着色，
+   悬停加深并轻抬；快捷键挪到右上角的小键帽，不再单占一行。 */
+.ca-grade {
+  --grade: var(--text-3);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px 6px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--grade) 26%, var(--line-soft));
+  background: color-mix(in srgb, var(--grade) 7%, var(--bg-panel));
+  transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast) var(--ease);
+}
+
+.ca-grade[data-grade="1"] { --grade: var(--status-err); }
+.ca-grade[data-grade="2"] { --grade: var(--status-warn); }
+.ca-grade[data-grade="3"] { --grade: var(--status-ok); }
+.ca-grade[data-grade="4"] { --grade: var(--accent); }
+
+@media (hover: hover) {
+  .ca-grade:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--grade) 14%, var(--bg-panel));
+    border-color: color-mix(in srgb, var(--grade) 48%, var(--line));
+    transform: translateY(-1px);
+  }
+}
+
+.ca-grade:disabled {
+  opacity: 0.55;
+}
+
+.ca-grade-label {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  font-weight: 600;
+  color: color-mix(in srgb, var(--grade) 72%, var(--text-1));
+}
+
+.ca-grade-interval {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.ca-grade-key {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--text-4);
+  background: var(--bg-sunken);
+  font-variant-numeric: tabular-nums;
+}

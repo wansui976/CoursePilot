@@ -203,7 +203,7 @@
     "relinkResult": "已重连 {{relinked}}/{{total}} 个视频",
     "relinkMissing": "缺失 {{count}} 个：{{names}}",
     "relinkAmbiguous": "重名跳过 {{count}} 个：{{names}}",
-    "deleteCourseConfirm": "删除课程「{{name}}」？\n该课程下的视频会移入回收站，可在 30 天内恢复。",
+    "deleteCourseConfirm": "删除课程「{{name}}」？\n位置：{{path}}\n视频：{{count}} 个\n\n该课程下的视频会移入回收站，可在 30 天内恢复。",
     "deleteCourseTitle": "删除课程",
     "cancel": "取消",
     "videoCountShort": "{{count}}集",
@@ -665,6 +665,7 @@
     },
     "appearance": {
       "title": "外观",
+      "themeGroup": "主题",
       "accentColor": "强调色",
       "customAccent": "自定义强调色",
       "language": "语言",
@@ -763,7 +764,8 @@
       "saveAliyunKey": "保存百炼 API Key"
     },
     "llm": {
-      "title": "大模型"
+      "title": "大模型",
+      "profilesGroup": "模型配置"
     },
     "ocr": {
       "title": "图文识别 (OCR)",
@@ -887,9 +889,7 @@
     "scopeAllCourses": "全部课程",
     "scopeAuto": "跟随当前选择",
     "scopeMenuLabel": "选择提问范围",
-    "dockAsSidebar": "停靠为侧栏",
     "headerMenu": "更多操作",
-    "undock": "恢复浮动",
     "renameConversation": "重命名会话",
     "renameConversationTarget": "重命名会话「{{title}}」",
     "renameConversationLabel": "会话标题",
@@ -1251,6 +1251,8 @@
     "continueLast": "继续上次",
     "watchedTo": "看到 {{time}}",
     "backToLibrary": "返回课程库",
+    "backToCourse": "返回「{{name}}」",
+    "episodeOf": "第 {{index}} 讲 / 共 {{total}} 讲",
     "courseVideos": "课程视频",
     "videoCount": "{{count}} 个视频",
     "selectCourseHint": "选择课程后导入或管理视频",
@@ -1354,5 +1356,20 @@
     "tableAddRow": "添加行",
     "tableAddCol": "添加列",
     "tableDelete": "删除表格"
+  },
+  "library": {
+    "greetingNight": "夜深了",
+    "greetingMorning": "早上好",
+    "greetingNoon": "中午好",
+    "greetingAfternoon": "下午好",
+    "greetingEvening": "晚上好",
+    "overviewSub": "{{courses}} 门课程 · {{videos}} 个视频",
+    "continueSection": "继续学习",
+    "allCourses": "全部课程",
+    "openCourse": "打开课程「{{name}}」",
+    "courseVideos": "{{count}} 个视频",
+    "courseEmpty": "还没有视频",
+    "courseWatched": "已看完 {{count}} 个",
+    "courseAllWatched": "全部看完"
   }
 }

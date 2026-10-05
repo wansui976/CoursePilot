@@ -44,7 +44,7 @@ export default tseslint.config(
   },
   {
     // shadcn/ui 组件文件常在同文件导出 variants 等常量，Fast Refresh 提示无意义。
-    files: ["src/components/ui/**/*.{ts,tsx}"],
+    files: ["src/ui/**/*.{ts,tsx}"],
     rules: {
       "react-refresh/only-export-components": "off",
     },

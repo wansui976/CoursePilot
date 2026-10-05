@@ -1,0 +1,411 @@
+/* 应用外壳：外壳网格、rail、主区列、课程侧栏与图标按钮。 */
+
+/* Shell 由实际导航结构决定，不能只看宽度 bucket：12.9" iPad
+   竖屏虽是 wide，React 仍会隐藏侧栏并使用底部导航。 */
+.ca-app[data-shell="stacked"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ca-app[data-shell="stacked"] .ca-main {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
+}
+
+/* rail 常驻占首列 56px；宽栏展开=256px、折叠=0（两列定长可平滑插值）。 */
+.ca-app[data-sidebar="collapsed"] {
+  grid-template-columns: 56px 0px minmax(0, 1fr);
+}
+
+.ca-rail {
+  grid-column: 1;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 4px;
+  z-index: var(--z-rail);
+}
+
+.ca-rail .rail-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  margin-bottom: 8px;
+  flex: 0 0 auto;
+  background: var(--grad-brand);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgb(47 108 234 / 0.35);
+}
+
+.ca-rail .rail-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  border: none;
+  background: transparent;
+}
+
+@media (hover: hover) {
+.ca-rail .rail-btn:hover {
+  background: var(--bg-sunken);
+  color: var(--text-1);
+}
+}
+
+.ca-rail .rail-btn.active {
+  background: var(--accent-weak);
+  /* 前景用 --accent-text 而非 --accent：后者是实心块的底色，暗色主题下不跟着变亮，
+     当图标/文字色时在近黑底上只有 3.7:1，且与别处的强调蓝不是同一个颜色。 */
+  color: var(--accent-text);
+}
+
+.ca-rail .rail-sp {
+  flex: 1;
+}
+
+/* rail-logo 在工作台是「返回课程库」按钮：抹掉 button 默认样式。 */
+.ca-rail button.rail-logo {
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* 折叠态队列计数徽标：钉在按钮右上角。 */
+.ca-rail .rail-btn {
+  position: relative;
+}
+
+.ca-rail .rail-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* 主导航组与底部系统组之间的分隔线：比裸 spacer 多一层「这是两区」的可读性。 */
+.ca-rail .rail-divider {
+  width: 24px;
+  height: 1px;
+  margin: 2px 0 6px;
+  flex: none;
+  background: var(--line);
+}
+
+/* Rail 自定义 tooltip：原生 title 延迟 ~1.5s 且样式不可控；改走 data-tip 伪元素，
+   悬停 0.4s 后淡入、离开即消失，macOS 式近黑胶囊。aria-label 仍保留给读屏，
+   只在精确指针(鼠标)下启用，触屏不弹。 */
+@media (hover: hover) and (pointer: fine) {
+  .ca-rail [data-tip] {
+    position: relative;
+  }
+
+  .ca-rail [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    left: calc(100% + 8px);
+    top: 50%;
+    translate: 0 -50%;
+    padding: 5px 9px;
+    border-radius: 8px;
+    background: var(--surface-stage-overlay);
+    color: #fff;
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    line-height: 1.3;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur-fast) var(--ease);
+    z-index: 60;
+  }
+
+  .ca-rail [data-tip]:hover::after,
+  .ca-rail [data-tip]:focus-visible::after {
+    opacity: 1;
+    transition-delay: 0.4s;
+  }
+}
+
+.ca-main {
+  grid-column: 3;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-app);
+}
+
+/* 窄屏（stacked）只有单列，主区钉回第 1 列，避免被上面的 grid-column:3 挤出隐式列。 */
+.ca-app[data-shell="stacked"] .ca-main {
+  grid-column: 1;
+}
+
+.ca-main-col {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-app);
+}
+
+.ca-side {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px 12px;
+  z-index: var(--z-sidebar);
+  grid-column: 2;
+}
+
+.ca-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  margin-bottom: 16px;
+  padding: 6px 8px 0;
+}
+
+.ca-brand .logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  flex: 0 0 auto;
+  background: var(--grad-brand);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgb(47 108 234 / 0.35);
+}
+
+.ca-brand h1 {
+  font-size: var(--fs-md);
+  font-weight: 680;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.ca-new-btn {
+  width: 100%;
+  height: 44px;
+  margin-bottom: 16px;
+  border: 1px solid transparent !important;
+  border-radius: var(--r-sm) !important;
+  background: var(--accent) !important;
+  color: var(--on-accent) !important;
+  font-size: 13.5px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 1px 2px rgb(47 108 234 / 0.3);
+}
+
+.ca-new-btn:hover {
+  background: var(--accent-press) !important;
+  color: var(--on-accent-press) !important;
+}
+
+.ca-nav-label {
+  margin: 6px 0 7px;
+  padding: 4px 9px 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-4);
+}
+
+.ca-nav {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.ca-nav-item {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-radius: var(--r-sm);
+  color: var(--text-1);
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+  position: relative;
+}
+
+@media (hover: hover) {
+.ca-nav-item:hover {
+  background: var(--bg-sunken);
+}
+}
+
+.ca-nav-item.active {
+  background: var(--accent-weak);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.ca-nav-button {
+  min-width: 0;
+  flex: 1;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 9px;
+  text-align: left;
+}
+
+.ca-nav-button .ic {
+  flex: 0 0 auto;
+  color: var(--text-3);
+}
+
+.ca-nav-item.active .ic {
+  /* 前景用 --accent-text 而非 --accent：后者是实心块的底色，暗色主题下不跟着变亮，
+     当图标/文字色时在近黑底上只有 3.7:1，且与别处的强调蓝不是同一个颜色。 */
+  color: var(--accent-text);
+}
+
+.ca-nav-button .nm {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 课程条目右侧的集数/进度（12集·46% / ✓）。 */
+.course-meta {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.course-meta .pct {
+  color: var(--accent-text);
+}
+
+/* 工作台展开态：选中课程条目下内联的视频列表（缩进对齐课程名文字）。 */
+.ca-side-videos {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 6px;
+  padding-left: 26px;
+}
+
+.ca-side-video {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ca-side-video .nm {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .ca-side-video:hover {
+    background: var(--bg-sunken);
+    color: var(--text-1);
+  }
+}
+
+.ca-side-video.on {
+  background: var(--accent-weak);
+  color: var(--accent-text);
+}
+
+.ca-side-videos-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-4);
+}
+
+.ca-icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+  transition: background 0.12s, color 0.12s;
+}
+
+@media (hover: hover) {
+.ca-icon-btn:hover {
+  background: var(--bg-sunken);
+  color: var(--text-1);
+}
+}
+
+/* 课程条目的「⋯」：精确指针下叠在集数上方、悬停才出现，不再常驻占掉课程名的宽度。
+   iOS 等常显场景（data-persistent）保持原先的并排布局。 */
+@media (hover: hover) and (pointer: fine) {
+  .ca-nav-item > [data-course-menu]:not([data-persistent]) {
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    translate: 0 -50%;
+    margin: 0;
+  }
+  .ca-nav-item:has(> [data-course-menu]:not([data-persistent])) .course-meta {
+    transition: opacity var(--dur-fast) var(--ease);
+  }
+  .ca-nav-item:hover:has(> [data-course-menu]:not([data-persistent])) .course-meta,
+  .ca-nav-item:focus-within:has(> [data-course-menu]:not([data-persistent])) .course-meta,
+  .ca-nav-item:has(> [data-course-menu][aria-expanded="true"]) .course-meta {
+    opacity: 0;
+  }
+}

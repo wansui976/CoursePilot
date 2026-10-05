@@ -1,0 +1,132 @@
+/* 窄屏底部 Tab 与整屏课程列表。 */
+
+/* ===================== 窄屏底部 Tab + 整屏课程列表(P1) ===================== */
+
+/* 底部主导航 */
+.ca-bottom-tab {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-bottom-tab);
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.ca-bottom-tab-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: var(--text-3);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.ca-bottom-tab-btn.on {
+  /* 前景用 --accent-text 而非 --accent：后者是实心块的底色，暗色主题下不跟着变亮，
+     当图标/文字色时在近黑底上只有 3.7:1，且与别处的强调蓝不是同一个颜色。 */
+  color: var(--accent-text);
+}
+
+.ca-bottom-tab-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.ca-bottom-tab-badge {
+  position: absolute;
+  top: -5px;
+  left: 12px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* 有底部 Tab 时,窄屏「非工作台」主区底部留出 Tab 高度(含安全区) */
+.ca-app[data-shell="stacked"][data-view="library"] .ca-main {
+  padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+}
+
+/* 整屏课程列表(CourseSidebar variant="screen") */
+.ca-course-screen {
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 16px 16px;
+}
+
+/* 整屏课程列表做成 iOS 内嵌分组列表：内容限宽居中（平板上不再一行横跨整屏），
+   课程装进圆角分组卡，行高 56、细分隔线从文字处起头，文件夹图标改成淡强调色的圆角小砖。
+   只作用于手机/平板根屏（.ca-course-screen），桌面侧栏（.ca-side）不受影响。 */
+.ca-course-screen > * {
+  width: 100%;
+  max-width: 680px;
+  margin-inline: auto;
+}
+
+.ca-course-screen .ca-nav {
+  /* 侧栏里 .ca-nav 要撑满剩余高度；分组卡则只包住内容，课程多了再收缩滚动。 */
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  gap: 0;
+  padding: 4px 0;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line-soft);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-card);
+}
+
+.ca-course-screen .ca-nav-item {
+  min-height: 56px;
+  border-radius: 0;
+  font-size: var(--fs-md);
+}
+
+.ca-course-screen .ca-nav-item + .ca-nav-item::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 58px;
+  height: 1px;
+  background: var(--line-soft);
+}
+
+.ca-course-screen .ca-nav-button {
+  min-height: 56px;
+  gap: 12px;
+  padding: 0 12px;
+}
+
+.ca-course-screen .ca-nav-button .ic {
+  box-sizing: content-box;
+  padding: 7px;
+  border-radius: 9px;
+  color: var(--accent-text);
+  background: var(--accent-weak);
+}
+
+.ca-course-screen .course-meta {
+  font-size: var(--fs-xs);
+}

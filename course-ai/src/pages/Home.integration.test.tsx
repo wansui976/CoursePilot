@@ -1,9 +1,10 @@
 import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RouterProvider } from "@tanstack/react-router";
+import { createAppRouter } from "@/app/router";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Home } from "./Home";
 import type { Course, Video } from "@/lib/types";
 import { displayTitle } from "@/lib/videoTitle";
 import { usePlayer } from "@/stores/player";
@@ -88,7 +89,7 @@ const { mockIpc } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
-vi.mock("@/components/ConceptsPanel", () => ({
+vi.mock("@/features/knowledge/ConceptsPanel", () => ({
   ConceptsPanel: ({
     onClose,
     onJump,
@@ -189,7 +190,10 @@ const video: Video = {
   created_at: 1,
 };
 
-function renderHome() {
+// Home 是根路由组件：先让路由器完成首轮匹配，渲染才是同步可断言的。
+async function renderHome() {
+  const router = createAppRouter();
+  await router.load();
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -199,7 +203,7 @@ function renderHome() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <Home />
+      <RouterProvider router={router} />
     </QueryClientProvider>,
   );
 }
@@ -215,7 +219,6 @@ describe("Home selected-video integration", () => {
       open: false,
       side: "right",
       width: 380,
-      mode: "float",
     });
     usePlayer.setState({
       videoId: null,
@@ -287,10 +290,10 @@ describe("Home selected-video integration", () => {
   });
 
   it("keeps visible learning UI when the real selected-video panels mount", async () => {
-    const { container } = renderHome();
+    const { container } = await renderHome();
 
     fireEvent.click(
-      await screen.findByRole("button", { name: /Downloads/ }, { timeout: 5_000 }),
+      await screen.findByRole("button", { name: /^Downloads/ }, { timeout: 5_000 }),
     );
     fireEvent.click(
       await screen.findByRole("button", { name: /底层逻辑/ }, { timeout: 5_000 }),
@@ -327,9 +330,9 @@ describe("Home selected-video integration", () => {
     mockIpc.videos.mediaUrl
       .mockRejectedValueOnce(new Error("media service unavailable"))
       .mockResolvedValueOnce("http://127.0.0.1:1234/m/video-1");
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     const alert = await screen.findByRole("alert");
@@ -348,9 +351,9 @@ describe("Home selected-video integration", () => {
   it("shows an error with retry when the videos query fails", async () => {
     mockIpc.videos.list.mockRejectedValue(new Error("boom"));
 
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
 
     // 失败不再静默留空：出现错误提示 + 重试按钮。
     const alert = await screen.findByRole("alert");
@@ -360,9 +363,9 @@ describe("Home selected-video integration", () => {
   it("switches the selected-video shell to a stacked layout on narrow screens", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
 
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
@@ -378,9 +381,9 @@ describe("Home selected-video integration", () => {
   it("shows a rail instead of the full sidebar for iPad landscape workspaces", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("wide");
 
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
@@ -396,9 +399,9 @@ describe("Home selected-video integration", () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
 
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(screen.getByRole("button", { name: "队列" }));
 
     expect(screen.getByLabelText("处理队列页面")).toBeInTheDocument();
@@ -427,7 +430,7 @@ describe("Home selected-video integration", () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
 
-    renderHome();
+    await renderHome();
 
     await screen.findByRole("navigation", { name: "主导航" });
     await waitFor(() => expect(mockBackButtonPress.onBackButtonPress).toHaveBeenCalled());
@@ -443,7 +446,7 @@ describe("Home selected-video integration", () => {
   it("closes the course action menu before exiting the Android root", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
-    renderHome();
+    await renderHome();
 
     const action = (await screen.findAllByRole("button", { name: "课程操作" }))[0];
     fireEvent.click(action);
@@ -464,7 +467,7 @@ describe("Home selected-video integration", () => {
   it("cancels course renaming before exiting the Android root", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
-    renderHome();
+    await renderHome();
 
     const action = (await screen.findAllByRole("button", { name: "课程操作" }))[0];
     fireEvent.click(action);
@@ -492,9 +495,9 @@ describe("Home selected-video integration", () => {
   it("closes the video action menu on Android back and restores its trigger", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     const trigger = await screen.findByRole("button", { name: "视频操作" });
     fireEvent.click(trigger);
     expect(screen.getByRole("menuitem", { name: "修改标题" })).toHaveFocus();
@@ -516,9 +519,9 @@ describe("Home selected-video integration", () => {
   it("closes an open import menu before leaving the selected course on Android back", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     const importTrigger = screen.getByRole("button", { name: "导入" });
     fireEvent.click(importTrigger);
     expect(screen.getByRole("menu", { name: "导入" })).toBeInTheDocument();
@@ -549,9 +552,9 @@ describe("Home selected-video integration", () => {
         text: "第一句文稿",
       },
     ]);
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     const searchTrigger = await screen.findByRole("button", { name: "搜索文稿" });
@@ -584,9 +587,9 @@ describe("Home selected-video integration", () => {
         text: "第一句文稿",
       },
     ]);
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click((await screen.findAllByRole("button", { name: "编辑这句文稿" }))[0]);
@@ -618,9 +621,9 @@ describe("Home selected-video integration", () => {
         text: "第一句文稿",
       },
     ]);
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click(await screen.findByRole("button", { name: "搜索文稿" }));
@@ -646,9 +649,9 @@ describe("Home selected-video integration", () => {
         text: "第一句文稿",
       },
     ]);
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click((await screen.findAllByRole("button", { name: "编辑这句文稿" }))[0]);
@@ -674,9 +677,9 @@ describe("Home selected-video integration", () => {
         text: "第一句文稿",
       },
     ]);
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click(await screen.findByRole("button", { name: "搜索文稿" }));
@@ -709,9 +712,9 @@ describe("Home selected-video integration", () => {
         text: "第一句文稿",
       },
     ]);
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click((await screen.findAllByRole("button", { name: "编辑这句文稿" }))[0]);
@@ -758,9 +761,9 @@ describe("Home selected-video integration", () => {
         text: "第一句文稿",
       },
     ]);
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click((await screen.findAllByRole("button", { name: "编辑这句文稿" }))[0]);
@@ -787,9 +790,9 @@ describe("Home selected-video integration", () => {
   it("cancels inline video rename on the system back path without leaving the course", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     const trigger = await screen.findByRole("button", { name: "视频操作" });
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("menuitem", { name: "修改标题" }));
@@ -814,7 +817,7 @@ describe("Home selected-video integration", () => {
   it("closes the visible assistant before handling the underlying Android page", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
-    renderHome();
+    await renderHome();
 
     fireEvent.click(await screen.findByRole("button", { name: "打开助手" }));
     expect(await screen.findByRole("dialog", { name: "助手" })).toBeVisible();
@@ -843,9 +846,9 @@ describe("Home selected-video integration", () => {
         text: "第一句文稿",
       },
     ]);
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click(await screen.findByRole("button", { name: "搜索文稿" }));
@@ -868,9 +871,9 @@ describe("Home selected-video integration", () => {
   it("exits video fullscreen before leaving the Android learning workspace", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
     const stage = await screen.findByLabelText("课程视频舞台");
     fireEvent.mouseEnter(stage);
@@ -893,7 +896,7 @@ describe("Home selected-video integration", () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
 
-    renderHome();
+    await renderHome();
 
     fireEvent.click(await screen.findByRole("button", { name: "设置" }));
     fireEvent.click(await screen.findByRole("button", { name: "大模型" }));
@@ -934,7 +937,7 @@ describe("Home selected-video integration", () => {
   it("uses Android back to leave a settings detail before closing settings", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
-    renderHome();
+    await renderHome();
 
     fireEvent.click(await screen.findByRole("button", { name: "设置" }));
     fireEvent.click(await screen.findByRole("button", { name: "外观" }));
@@ -954,7 +957,7 @@ describe("Home selected-video integration", () => {
   it("returns from the developer console to settings and keeps its bottom tab selected", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
-    renderHome();
+    await renderHome();
 
     const nav = await screen.findByRole("navigation", { name: "主导航" });
     fireEvent.click(within(nav).getByRole("button", { name: "设置" }));
@@ -973,19 +976,29 @@ describe("Home selected-video integration", () => {
     ]?.[0] as ((payload: { canGoBack: boolean }) => void) | undefined;
     act(() => handler?.({ canGoBack: false }));
 
-    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+    // 返回逐级退：控制台 → 它的入口「开发者」分类 → 设置分类列表。
+    expect(await screen.findByRole("heading", { name: "开发者", level: 2 })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "开发控制台" })).not.toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: "设置" })).toHaveAttribute(
       "aria-current",
       "page",
     );
+
+    // 返回键有 250ms 去抖（系统会连发重复事件），第二次按下要隔开。
+    await act(() => new Promise((resolve) => setTimeout(resolve, 260)));
+    const calls = mockBackButtonPress.onBackButtonPress.mock.calls;
+    const latestHandler = calls[calls.length - 1]?.[0] as
+      | ((payload: { canGoBack: boolean }) => void)
+      | undefined;
+    act(() => latestHandler?.({ canGoBack: false }));
+    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
     expect(mockIpc.app.exit).not.toHaveBeenCalled();
   });
 
   it("guards compact bottom-tab navigation while LLM settings is dirty", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
 
-    renderHome();
+    await renderHome();
 
     fireEvent.click(await screen.findByRole("button", { name: "设置" }));
     fireEvent.click(await screen.findByRole("button", { name: "大模型" }));
@@ -1011,9 +1024,9 @@ describe("Home selected-video integration", () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
 
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     await screen.findByText(displayTitle(video.title));
     fireEvent.click(screen.getByRole("button", { name: "知识点" }));
 
@@ -1038,9 +1051,9 @@ describe("Home selected-video integration", () => {
   });
 
   it("returns from a subtitle source to the same concept context", async () => {
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     await screen.findByText(displayTitle(video.title));
     fireEvent.click(screen.getByRole("button", { name: "知识点" }));
     fireEvent.click(screen.getByRole("button", { name: "回看字幕证据" }));
@@ -1058,9 +1071,9 @@ describe("Home selected-video integration", () => {
   it("uses Android back to return from a source video to its concept", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     await screen.findByText(displayTitle(video.title));
     fireEvent.click(screen.getByRole("button", { name: "知识点" }));
     fireEvent.click(screen.getByRole("button", { name: "回看字幕证据" }));
@@ -1081,7 +1094,7 @@ describe("Home selected-video integration", () => {
 
   it("uses bottom tabs and course-list drill-down on a compact screen", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
-    renderHome();
+    await renderHome();
 
     const nav = await screen.findByRole("navigation", { name: "主导航" });
     expect(within(nav).getByRole("button", { name: "课程" })).toHaveAttribute(
@@ -1141,7 +1154,7 @@ describe("Home selected-video integration", () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("medium");
     mockPlatform.isTablet.mockReturnValue(true);
 
-    renderHome();
+    await renderHome();
 
     expect(await screen.findByRole("complementary", { name: "课程侧栏" })).toHaveClass(
       "ca-course-screen",
@@ -1153,9 +1166,9 @@ describe("Home selected-video integration", () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("medium");
     mockPlatform.isTablet.mockReturnValue(true);
 
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
@@ -1173,14 +1186,14 @@ describe("Home selected-video integration", () => {
     mockUseContainerWidth.useIsPortrait.mockReturnValue(true);
     mockPlatform.isTablet.mockReturnValue(true);
 
-    const { container } = renderHome();
+    const { container } = await renderHome();
 
     expect(container.firstElementChild).toHaveAttribute("data-bucket", "wide");
     expect(container.firstElementChild).toHaveAttribute("data-shell", "stacked");
     expect(screen.queryByRole("navigation", { name: "工具栏" })).not.toBeInTheDocument();
     expect(await screen.findByRole("navigation", { name: "主导航" })).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
@@ -1196,9 +1209,9 @@ describe("Home selected-video integration", () => {
     mockUseContainerWidth.useIsPortrait.mockReturnValue(true);
     mockPlatform.isTablet.mockReturnValue(true);
 
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
@@ -1214,9 +1227,9 @@ describe("Home selected-video integration", () => {
     mockUseContainerWidth.useIsPortrait.mockReturnValue(false);
     mockPlatform.isTablet.mockReturnValue(true);
 
-    renderHome();
+    await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
     expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
@@ -1225,30 +1238,23 @@ describe("Home selected-video integration", () => {
     );
   });
 
-  it("stacks a 1024px desktop workbench when the docked assistant consumes the split width", async () => {
+  it("keeps a 1024px desktop workbench two-column while the floating assistant is open", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("wide");
     mockUseContainerWidth.useContainerPixelWidth.mockReturnValue(1024);
-    useAssistantUi.setState({
-      open: true,
-      side: "right",
-      width: 380,
-      mode: "docked",
-    });
+    useAssistantUi.setState({ open: true, side: "right", width: 380 });
 
-    const { container } = renderHome();
+    const { container } = await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Downloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(await screen.findByRole("button", { name: /底层逻辑/ }));
 
+    // 助手浮在内容上方，不再让主区让出宽度。
     const app = container.firstElementChild as HTMLElement;
-    expect(app).toHaveAttribute("data-shell", "sidebar");
-    expect(app).toHaveStyle({ paddingRight: "380px" });
+    expect(app.style.paddingRight).toBe("");
+    expect(app.style.paddingLeft).toBe("");
     expect(screen.getByLabelText("学习工作台响应布局")).toHaveAttribute(
       "data-layout",
-      "stacked",
+      "wide",
     );
-    expect(
-      screen.queryByRole("separator", { name: "调整学习资料宽度" }),
-    ).not.toBeInTheDocument();
   });
 });

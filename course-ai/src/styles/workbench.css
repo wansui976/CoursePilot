@@ -1,0 +1,487 @@
+/* 学习工作台：分栏布局、播放器列、分隔条、学习面板与收起把手。 */
+
+.ca-wb {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  /* 列定义须与 Home.tsx 拖动分隔条时内联写的 grid-template-columns 保持一致：
+     拖动期间内联直写整条列定义（只失效 .ca-wb 自身样式），不改继承型 CSS 变量，
+     否则每帧全子树样式重算，文稿打开时明显卡顿。 */
+  grid-template-columns: minmax(0, 1fr) 8px var(--study-panel-width, 480px);
+  overflow: hidden;
+}
+
+.ca-wb[data-layout="stacked"] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* `data-layout` 是 Home 的真实布局决策。这层基础规则让 wide 平板竖屏也获得
+   与 compact/medium 相同的稳定播放器高度和剩余学习区；medium 横屏的左右分栏
+   会由后面 orientation 媒体查询覆盖。 */
+.ca-wb[data-layout="stacked"] .ca-player-col {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+  overflow: visible;
+}
+
+.ca-wb[data-layout="stacked"] .ca-panel-col {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ca-wb[data-layout="stacked"] .ca-stage-wrap {
+  display: block;
+  padding: 0;
+}
+
+.ca-wb[data-layout="stacked"] .ca-stage {
+  aspect-ratio: 16 / 9;
+}
+
+.ca-player-col {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.ca-wb-head {
+  padding: 18px 24px 0;
+}
+
+.wb-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.wb-title {
+  min-width: 0;
+  color: var(--text-1);
+  /* 与 ViewHeader 大标题同一套字阶语言：600 字重 + 负字距。 */
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 视频舞台全出血到播放器列边缘；交互控件在自身容器内单独避让系统安全区。 */
+.ca-stage-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  display: flex;
+}
+
+/* 手机工作台：去掉标题行后，返回键浮在视频左上角（避让横屏刘海安全区）。 */
+.ca-back-fab {
+  position: absolute;
+  z-index: 5;
+  left: max(16px, env(safe-area-inset-left, 0px));
+  top: 12px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.45);
+  color: #fff;
+  backdrop-filter: blur(4px);
+}
+
+.ca-stage {
+  flex: 1;
+  min-height: 0;
+  background: var(--stage);
+  border-radius: 0;
+  position: relative;
+  overflow: hidden;
+  /* 纵向（column）而非默认 row：让 .ca-stage > * 的 flex: 1 作用到高度方向，
+     视频容器才能真正撑满舞台高度——否则 absolute bottom-0 的控制栏会超出
+     舞台底边、被 overflow:hidden 裁掉（全屏 fixed 不受影响，所以只有非全屏看不见）。 */
+  display: flex;
+  flex-direction: column;
+}
+
+.ca-stage > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ca-player-controls-shell {
+  padding-top: 4px;
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+  padding-bottom: max(4px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+}
+
+/* 宽容器使用完整控制行；窄播放器把次级动作收进固定菜单，避免分栏时被视频舞台裁掉。 */
+.ca-player-controls-desktop {
+  display: contents;
+}
+
+.ca-player-mobile-more {
+  display: none;
+}
+
+.ca-player-mobile-menu-backdrop {
+  position: fixed;
+  z-index: 69;
+  inset: 0;
+  border: 0;
+  background: rgb(0 0 0 / 0.32);
+}
+
+.ca-player-mobile-menu {
+  position: fixed;
+  z-index: 70;
+  right: max(8px, env(safe-area-inset-right, 0px));
+  bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  width: min(280px, calc(100vw - 16px));
+  max-height: min(70dvh, 480px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 8px;
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-pop);
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 常驻进度条（桌面）：贴在视频底边，安全区内缩；悬停时由 ProgressBar 自己加粗。 */
+.ca-progress-shell {
+  padding-top: 2px;
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+  padding-bottom: max(2px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+}
+
+.ca-resizer {
+  position: relative;
+  /* 网格轨道只有 8px 宽，18px 的热区默认按 start 落位、向右溢出到面板底下，
+     灰色竖条会被后面的面板盖掉一半而看起来偏左；居中落位 + 抬高一层的绘制顺序，
+     让竖条、抓手与分栏边界三者同心。 */
+  justify-self: center;
+  z-index: 1;
+  width: 18px;
+  flex: none;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  /* 触摸拖拽时禁止浏览器把手势当成滚动 */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 可见竖条：用居中的伪元素，拖动时可超出 8px 轨道变粗而不挤动布局 */
+.ca-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 10px;
+  transform: translateX(-50%);
+  background: var(--line);
+  transition: width 0.14s, background 0.12s;
+}
+
+/* 中间的「抓手」短条：平时灰色较小，悬停略大，拖动时明显放大并高亮 */
+.ca-resizer::before {
+  content: "";
+  position: relative;
+  z-index: 1;
+  width: 6px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--text-3);
+  opacity: 0.55;
+  transition: width 0.14s, height 0.14s, background 0.12s, opacity 0.12s;
+}
+
+.ca-resizer:hover::after {
+  background: var(--bg-sunken);
+}
+
+.ca-resizer:hover::before {
+  height: 48px;
+  opacity: 0.9;
+}
+
+/* 拖动中（鼠标按住或手指拖拽，由 JS 加 .is-resizing）：抓手短条明显变粗变长、高亮；竖条保持细 */
+.ca-resizer.is-resizing::after,
+.ca-resizer:active::after {
+  background: var(--bg-sunken);
+}
+
+.ca-resizer.is-resizing::before,
+.ca-resizer:active::before {
+  width: 12px;
+  height: 72px;
+  background: var(--accent);
+  opacity: 1;
+}
+
+.ca-panel-col {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+/* 概览上半区（整体摘要）：默认最多占 45%、余下高度让给「重点章节」；
+   底边 border-b 就是「摘要/章节」分隔线。 */
+.ca-summary-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  max-height: 45%;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* 「重点章节」收回贴底后（见 ChaptersPanel：线随章节栏走）：
+   摘要摘掉 45% 高度帽和底边线，填满底栏以上全部空间（内容区内部滚动），
+   不然上方一大块空白、摘要却在 45% 处被截断。
+   摘要自己也收回时不命中（顶栏保住底边线）。:has 在 WKWebView 15.4+/WebView2
+   均已支持；不支持时退回默认的 45% 帽 + 常驻分隔线，只影响观感不影响布局。 */
+.ca-ai-view:has([data-chapters-collapsed])
+  .ca-summary-panel:not([data-summary-collapsed]) {
+  flex: 1 1 0%;
+  min-height: 0;
+  max-height: none;
+  border-bottom: none;
+}
+
+/* 面板收起：整列宽度归零、隐藏分栏，右侧浮一根「展开」把手（专注看片时唤醒）。 */
+.ca-wb[data-panel-collapsed] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ca-wb[data-panel-collapsed] .ca-resizer {
+  display: none;
+}
+
+.ca-panel-collapse {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  z-index: 6;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 56px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-panel);
+  color: var(--text-3);
+  box-shadow: var(--shadow-raise);
+  opacity: 0.55;
+  transition: opacity 0.12s, color 0.12s;
+}
+
+.ca-panel-col:hover .ca-panel-collapse,
+.ca-panel-collapse:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .ca-panel-collapse {
+    opacity: 1;
+  }
+}
+
+.ca-panel-collapse:hover {
+  color: var(--text-1);
+}
+
+/* 收起后的展开把手：钉在右缘中间，垂直小竖条 + 图标。 */
+.ca-panel-reveal {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  z-index: 6;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 56px;
+  border-radius: 8px 0 0 8px;
+  border: 1px solid var(--line);
+  border-right: none;
+  background: var(--bg-panel);
+  color: var(--text-3);
+  box-shadow: var(--shadow-raise);
+  transition: color 0.12s, width 0.14s var(--ease);
+}
+
+.ca-panel-reveal:hover {
+  color: var(--text-1);
+  width: 30px;
+}
+
+/* 拖动分隔条时：只冻结「文稿」栏（DOM 巨大、是卡顿来源）；其余栏较轻，照常同步随宽度渲染。
+   把文稿面板冻结成固定尺寸、完全自包含（contain: strict = size+layout+style+paint）的盒子，
+   浏览器重排工作台时对这棵子树做「零工作」（不重排、不重评估 content-visibility），内容仍可见；
+   松手去掉此类后回流一次到最终宽度。
+   max-width:100% 兜住「拖窄」：冻结宽度取自拖动起点，往窄拖时它比当前列更宽，会溢出被
+   overflow:hidden 裁掉右半（片段被挡住）——封顶到当前列宽即不再溢出（往窄拖时按需回流，
+   往宽拖/稳态仍是零工作的冻结）。 */
+.ca-wb.is-resizing-panel .ca-panel-col > [data-study-tab="transcript"] {
+  width: var(--panel-frozen-width);
+  max-width: 100%;
+  height: 100%;
+  flex: none;
+  contain: strict;
+}
+
+/* 工作台标题上方的面包屑：课程名（可点回课程）· 第几讲 / 共几讲。 */
+.wb-crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 2px;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.wb-crumb-course {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--text-2);
+  border-radius: 4px;
+  transition: color var(--dur-fast);
+}
+
+@media (hover: hover) {
+  .wb-crumb-course:hover {
+    color: var(--accent-text);
+  }
+}
+
+/* ===== 重点章节：时间线 =====
+   竖线串起各章节点：已播过的点实心、当前章节点外圈发光并整行淡着色，未到的空心。 */
+.ca-chapter-timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ca-chapter-timeline > li {
+  position: relative;
+}
+
+.ca-chapter-timeline > li::before {
+  content: "";
+  position: absolute;
+  left: 15px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--line-soft);
+}
+
+.ca-chapter-timeline > li:first-child::before {
+  top: 18px;
+}
+
+.ca-chapter-timeline > li:last-child::before {
+  bottom: calc(100% - 18px);
+}
+
+.ca-chapter-timeline > li[data-past]::before {
+  background: color-mix(in srgb, var(--accent) 35%, var(--line-soft));
+}
+
+.ca-chapter {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: baseline;
+  width: 100%;
+  padding: 9px 10px 9px 34px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  transition: background var(--dur-fast);
+}
+
+@media (hover: hover) {
+  .ca-chapter:hover {
+    background: var(--bg-sunken);
+  }
+}
+
+.ca-chapter-dot {
+  position: absolute;
+  left: 11px;
+  top: 14px;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 2px solid var(--line-strong);
+  background: var(--bg-panel);
+  transition: background var(--dur), border-color var(--dur), box-shadow var(--dur);
+}
+
+li[data-past] > .ca-chapter .ca-chapter-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+li[data-active] > .ca-chapter {
+  background: var(--accent-weak);
+}
+
+li[data-active] > .ca-chapter .ca-chapter-dot {
+  border-color: var(--accent);
+  background: var(--bg-panel);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.ca-chapter-time {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-text);
+}
+
+.ca-chapter-title {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.ca-chapter-summary {
+  grid-column: 2;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-3);
+}
