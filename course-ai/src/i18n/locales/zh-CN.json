@@ -628,7 +628,9 @@
     "exportAndShare": "导出并分享",
     "exportButton": "导出",
     "sharing": "分享中…",
-    "exporting": "导出中…"
+    "exporting": "导出中…",
+    "notesImage": "分享长图（PNG）",
+    "mindmapImage": "分享图片（PNG）"
   },
   "timestamp": {
     "hide": "隐藏时间戳",
@@ -1150,7 +1152,10 @@
     "noStudy": "未学习",
     "reached": "已达标",
     "recentReviews": "最近 7 天复习 {{reviews}} 张 · 良好率 {{rate}}%",
-    "srsIntro": "间隔重复 · 出题自动生成卡片"
+    "srsIntro": "间隔重复 · 出题自动生成卡片",
+    "shareWeekly": "周报图",
+    "shareWeeklyBusy": "生成中…",
+    "shareWeeklyTitle": "把最近 7 天的学习情况生成一张分享图"
   },
   "whisperModels": {
     "title": "Whisper 模型",
@@ -1376,5 +1381,23 @@
     "courseEmpty": "还没有视频",
     "courseWatched": "已看完 {{count}} 个",
     "courseAllWatched": "全部看完"
+  },
+  "shareCard": {
+    "tagline": "把课程视频变成真正记得住的东西",
+    "truncated": "……完整笔记请在 CoursePilot 中查看",
+    "notesKind": "课堂笔记",
+    "mindmapKind": "知识脑图",
+    "notesFile": "笔记长图",
+    "mindmapFile": "脑图",
+    "weeklyFile": "学习周报",
+    "weeklyTitle": "我的学习周报",
+    "totalTime": "本周学习",
+    "studiedDays": "学习天数",
+    "reviews": "复习卡片",
+    "accuracy": "答对率",
+    "streak": "连续学习 {{days}} 天",
+    "minutesChart": "每日学习（分钟）",
+    "weakTopics": "需要加强",
+    "noWeakTopics": "暂无，继续保持"
   }
 }

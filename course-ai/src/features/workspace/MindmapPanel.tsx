@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Maximize2, Share2, ZoomIn, ZoomOut } from "lucide-react";
 import { Transformer } from "markmap-lib";
 import { Markmap } from "markmap-view";
@@ -11,6 +11,10 @@ import { PanelEmptyState } from "@/ui/empty-state";
 import { Skeleton } from "@/ui/skeleton";
 import { useTheme } from "@/stores/theme";
 import { PanelActions } from "./PanelActions";
+import { type ExportItem } from "./ExportMenu";
+import { saveShareCard, shareCardHeader, useShareCardLabels } from "./useShareCard";
+import { renderMindmapCard } from "@/lib/shareCard/render";
+import { markmapToTree } from "@/lib/shareCard/mindmapTree";
 import { useStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useAiGeneration } from "@/lib/useAiGeneration";
 
@@ -33,6 +37,29 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
   });
   const stale = useStaleArtifacts(videoId);
   const generate = useAiGeneration(videoId, "mindmap");
+  const queryClient = useQueryClient();
+  const shareLabels = useShareCardLabels();
+  const exportItems: ExportItem[] = md
+    ? [
+        {
+          label: t("export.mindmapImage"),
+          run: () => {
+            const shareHeader = shareCardHeader(queryClient, videoId, t("shareCard.mindmapKind"));
+            const tree = markmapToTree(md, shareHeader.title);
+            if (!tree) return Promise.reject(new Error(t("mindmap.emptyTitle")));
+            const canvas = renderMindmapCard(shareHeader, tree, shareLabels);
+            return saveShareCard(canvas, { videoId, fileName: t("shareCard.mindmapFile") });
+          },
+          mime: "image/png",
+        },
+        {
+          label: "Markdown",
+          run: () => ipc.export.mindmap(videoId),
+          mime: "text/markdown",
+          saveAs: "mindmap.md",
+        },
+      ]
+    : [];
 
   useEffect(() => {
     if (!svgRef.current || !md) return;
@@ -113,6 +140,7 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
           regenerating={generate.isPending}
           hasContent={!!md}
           stale={stale.has("mindmap")}
+          exportItems={exportItems}
         />
       )}
     </div>

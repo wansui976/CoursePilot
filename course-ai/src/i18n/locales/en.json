@@ -628,7 +628,9 @@
     "exportAndShare": "Export & Share",
     "exportButton": "Export",
     "sharing": "Sharing…",
-    "exporting": "Exporting…"
+    "exporting": "Exporting…",
+    "notesImage": "Share image (PNG)",
+    "mindmapImage": "Share image (PNG)"
   },
   "timestamp": {
     "hide": "Hide timestamps",
@@ -1150,7 +1152,10 @@
     "noStudy": "No study",
     "reached": "Goal reached",
     "recentReviews": "{{reviews}} cards reviewed in past 7 days · {{rate}}% good rate",
-    "srsIntro": "Spaced repetition · cards auto-generated from quizzes"
+    "srsIntro": "Spaced repetition · cards auto-generated from quizzes",
+    "shareWeekly": "Weekly card",
+    "shareWeeklyBusy": "Creating…",
+    "shareWeeklyTitle": "Create a shareable image of your last 7 days"
   },
   "whisperModels": {
     "title": "Whisper Models",
@@ -1380,5 +1385,23 @@
     "courseEmpty": "No videos yet",
     "courseWatched": "{{count}} watched",
     "courseAllWatched": "All watched"
+  },
+  "shareCard": {
+    "tagline": "Turn course videos into something you remember",
+    "truncated": "…open CoursePilot for the full notes",
+    "notesKind": "Lecture notes",
+    "mindmapKind": "Mind map",
+    "notesFile": "notes",
+    "mindmapFile": "mindmap",
+    "weeklyFile": "weekly-report",
+    "weeklyTitle": "My study week",
+    "totalTime": "Studied this week",
+    "studiedDays": "Days studied",
+    "reviews": "Cards reviewed",
+    "accuracy": "Accuracy",
+    "streak": "{{days}}-day streak",
+    "minutesChart": "Minutes per day",
+    "weakTopics": "Needs work",
+    "noWeakTopics": "Nothing yet — keep it up"
   }
 }

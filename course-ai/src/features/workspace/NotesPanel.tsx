@@ -15,6 +15,8 @@ import { Button } from "@/ui/button";
 import { TextSkeleton } from "@/ui/skeleton";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { PanelActions } from "./PanelActions";
+import { saveShareCard, shareCardHeader, useShareCardLabels } from "./useShareCard";
+import { renderNotesCard } from "@/lib/shareCard/render";
 import {
   invalidateStaleArtifacts,
   useStaleArtifacts,
@@ -218,6 +220,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   }
 
   const stale = useStaleArtifacts(videoId);
+  const shareLabels = useShareCardLabels();
   const exportItems: ExportItem[] = [
     {
       label: "Markdown",
@@ -229,6 +232,22 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       },
       mime: "text/markdown",
       saveAs: "notes.md",
+    },
+    {
+      // 分享长图：按当前编辑器里的内容画，用户刚改的也算。
+      label: t("export.notesImage"),
+      run: () => {
+        if (!editor || editor.isDestroyed) {
+          return Promise.reject(new Error(t("notes.editorUnavailable")));
+        }
+        const canvas = renderNotesCard(
+          shareCardHeader(qc, videoId, t("shareCard.notesKind")),
+          tiptapToMarkdown(editor.getJSON()),
+          shareLabels,
+        );
+        return saveShareCard(canvas, { videoId, fileName: t("shareCard.notesFile") });
+      },
+      mime: "image/png",
     },
   ];
 

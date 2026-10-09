@@ -21,7 +21,9 @@ pub fn is_media_ext(ext: &str) -> bool {
 pub fn has_video_stream_in(ffmpeg_stderr: &str) -> bool {
     ffmpeg_stderr.lines().any(|line| {
         let line = line.trim_start();
-        line.starts_with("Stream #") && line.contains(": Video:") && !line.contains("(attached pic)")
+        line.starts_with("Stream #")
+            && line.contains(": Video:")
+            && !line.contains("(attached pic)")
     })
 }
 
@@ -87,7 +89,8 @@ mod tests {
 
     #[test]
     fn plain_audio_is_not_video() {
-        let stderr = "Input #0, wav, from 'talk.wav':\n  Stream #0:0: Audio: pcm_s16le, 16000 Hz, mono\n";
+        let stderr =
+            "Input #0, wav, from 'talk.wav':\n  Stream #0:0: Audio: pcm_s16le, 16000 Hz, mono\n";
         assert!(!has_video_stream_in(stderr));
     }
 }

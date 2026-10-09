@@ -4,6 +4,7 @@ import { displayTitle } from "./videoTitle";
 describe("displayTitle", () => {
   it("strips a trailing video extension", () => {
     expect(displayTitle("01.底层逻辑.mp4")).toBe("01.底层逻辑");
+    expect(displayTitle("播客第 12 期.m4a")).toBe("播客第 12 期");
     expect(displayTitle("lecture.MKV")).toBe("lecture");
   });
 

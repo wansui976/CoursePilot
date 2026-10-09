@@ -223,9 +223,88 @@ pub async fn cmd_export_handout(
     Ok(path.to_string_lossy().to_string())
 }
 
+/// 分享图文件名只留安全字符：不能带路径分隔符，统一以 .png 结尾。
+fn share_image_name(name: &str) -> String {
+    let stem: String = name
+        .trim()
+        .trim_end_matches(".png")
+        .chars()
+        .map(|c| {
+            let unsafe_char =
+                matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control();
+            if unsafe_char {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let stem = stem.trim_matches(|c: char| c == '.' || c.is_whitespace());
+    let stem: String = stem.chars().take(80).collect();
+    format!("{}.png", if stem.is_empty() { "share" } else { &stem })
+}
+
+/// 保存前端画好的分享图（PNG base64）。有 video_id 时放进该视频的导出目录，
+/// 否则（学习周报）放进应用数据目录下的 exports/share。`open` 时桌面端顺手用系统看图打开。
+#[tauri::command]
+pub async fn cmd_save_share_image(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    video_id: Option<String>,
+    file_name: String,
+    png_base64: String,
+    open: bool,
+) -> AppResult<String> {
+    use base64::Engine as _;
+    use tauri::Manager as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(png_base64.trim())
+        .map_err(|error| AppError::Other(format!("invalid image data: {error}")))?;
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err(AppError::Other("invalid image data: not a PNG".into()));
+    }
+    let dir = match video_id {
+        Some(id) => {
+            let video = load_video(&state, &id).await?;
+            export_dir(&video, &app)?
+        }
+        None => {
+            let root = app
+                .path()
+                .app_data_dir()
+                .map_err(|error| AppError::Config(format!("app_data_dir: {error}")))?;
+            let dir = root.join("exports").join("share");
+            std::fs::create_dir_all(&dir)?;
+            dir
+        }
+    };
+    let path = dir.join(share_image_name(&file_name));
+    std::fs::write(&path, bytes)?;
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if open {
+        use tauri_plugin_opener::OpenerExt as _;
+        app.opener()
+            .open_path(path.to_string_lossy(), None::<&str>)
+            .map_err(|error| AppError::Other(format!("open image: {error}")))?;
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let _ = open;
+
+    Ok(path.to_string_lossy().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn share_image_names_are_sanitized_png_files() {
+        assert_eq!(share_image_name("笔记长图"), "笔记长图.png");
+        assert_eq!(share_image_name("../../etc/passwd"), "_.._etc_passwd.png");
+        assert_eq!(share_image_name("a:b?.png"), "a_b_.png");
+        assert_eq!(share_image_name("  "), "share.png");
+    }
 
     #[test]
     fn export_dir_is_nested_under_exports_and_video_id() {

@@ -3,13 +3,14 @@ import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
   Check,
   Clock,
   Flame,
   Play,
+  Share2,
   TrendingDown,
 } from "lucide-react";
 import { ipc, type DueCard } from "@/lib/ipc";
@@ -20,6 +21,10 @@ import { ErrorNote } from "@/ui/ErrorNote";
 import { ProgressRing } from "@/ui/ProgressRing";
 import { Skeleton } from "@/ui/skeleton";
 import { ViewHeader } from "@/ui/view-header";
+import { Button } from "@/ui/button";
+import { renderWeeklyCard } from "@/lib/shareCard/render";
+import { buildWeeklyReport } from "@/lib/shareCard/weekly";
+import { saveShareCard, useShareCardLabels } from "@/features/workspace/useShareCard";
 import { DailyGoalDialog } from "./DailyGoalDialog";
 import { ReviewSession } from "./ReviewSession";
 import {
@@ -208,7 +213,7 @@ export function Dashboard({
   onResume: (courseId: string, videoId: string, positionSec: number) => void;
   onJump: (card: DueCard) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const today = localDay(new Date());
   const fromTs = Date.now() - LOOKBACK_DAYS * 86_400_000;
   const [heatmapBox, setHeatmapBox] = useState<HTMLDivElement | null>(null);
@@ -392,6 +397,26 @@ export function Dashboard({
 
   // 复习产出：观看时长只说明投入，这行说明「有没有学会」。
   const recentReviews = useMemo(() => reviewTotals(daily, today), [daily, today]);
+  const shareLabels = useShareCardLabels();
+  // 学习周报分享图：最近 7 天的时长、复习、连续天数与薄弱主题。
+  const shareWeekly = useMutation({
+    mutationFn: () => {
+      const report = buildWeeklyReport(daily, today, streak, weak, i18n.language);
+      const canvas = renderWeeklyCard(report, {
+        ...shareLabels,
+        title: t("shareCard.weeklyTitle"),
+        totalTime: t("shareCard.totalTime"),
+        studiedDays: t("shareCard.studiedDays"),
+        reviews: t("shareCard.reviews"),
+        accuracy: t("shareCard.accuracy"),
+        streak: t("shareCard.streak", { days: "{{days}}" }),
+        minutesChart: t("shareCard.minutesChart"),
+        weakTopics: t("shareCard.weakTopics"),
+        noWeakTopics: t("shareCard.noWeakTopics"),
+      });
+      return saveShareCard(canvas, { videoId: null, fileName: `${t("shareCard.weeklyFile")}-${today}` });
+    },
+  });
   const goodRate =
     recentReviews.reviews > 0
       ? Math.round((recentReviews.good / recentReviews.reviews) * 100)
@@ -423,7 +448,26 @@ export function Dashboard({
         title={t("dashboard.title")}
         onBack={onClose}
         backLabel={t("dashboard.back")}
+        actions={
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={shareWeekly.isPending || dailyQuery.isPending}
+            onClick={() => shareWeekly.mutate()}
+            title={t("dashboard.shareWeeklyTitle")}
+          >
+            <Share2 className="h-3.5 w-3.5" />
+            {shareWeekly.isPending ? t("dashboard.shareWeeklyBusy") : t("dashboard.shareWeekly")}
+          </Button>
+        }
       />
+      {shareWeekly.isError && (
+        <ErrorNote
+          className="mx-7 mt-3 flex-none"
+          error={shareWeekly.error}
+          onRetry={() => shareWeekly.mutate()}
+        />
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
         <div className="mx-auto max-w-2xl space-y-6">

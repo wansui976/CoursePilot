@@ -220,6 +220,14 @@ export const exporting = {
     videoId: string,
     options: { useAi: boolean; english: boolean; open: boolean },
   ): Promise<string> => invoke("cmd_export_handout", { videoId, ...options }),
+  /** 保存前端画好的分享图（PNG base64）。videoId 为 null 时存进通用分享目录（学习周报）。 */
+  shareImage: (
+    videoId: string | null,
+    fileName: string,
+    pngBase64: string,
+    open: boolean,
+  ): Promise<string> =>
+    invoke("cmd_save_share_image", { videoId, fileName, pngBase64, open }),
 };
 
 export const danmaku = {
