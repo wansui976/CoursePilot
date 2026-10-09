@@ -6,7 +6,7 @@
     <title>CoursePilot — 把课程视频变成真正记得住的东西</title>
     <meta
       name="description"
-      content="把课程视频变成真正记得住的东西——自动转写、笔记、章节、课件截图、脑图、练习题、知识点抽取、间隔复习，还有一个能帮你操作应用的 AI 助手。本地优先，数据在你手里。"
+      content="开源的 AI 网课学习工具：导入本地或 B 站课程视频，自动转写、笔记、章节、课件截图、脑图、练习题、知识点抽取、间隔复习，还有一个能帮你操作应用的 AI 助手。本地优先，数据在你手里。"
     />
     <meta name="theme-color" content="#000000" />
 
@@ -17,7 +17,12 @@
       property="og:description"
       content="自动转写、笔记、章节、课件截图、脑图、练习题、知识点抽取、间隔复习，还有 AI 助手帮你操作应用。本地优先，数据在你手里。"
     />
-    <meta property="og:image" content="./og-image.png" />
+    <meta property="og:url" content="https://wansui976.github.io/CoursePilot/" />
+    <meta property="og:image" content="https://wansui976.github.io/CoursePilot/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://wansui976.github.io/CoursePilot/og-image.png" />
 
     <!-- SF Pro 的开源替身 Inter（Apple 设备上 system-ui 会优先解析为真正的 SF Pro） -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -471,7 +476,7 @@
         content: " ›";
       }
 
-      /* ---------------- 应用界面样机（充当“产品图”，吃唯一投影） ---------------- */
+      /* ---------------- 产品截图（吃唯一投影） ---------------- */
       .product-shot {
         --motion-y: 0px;
         --tilt-x: 0deg;
@@ -525,6 +530,13 @@
         opacity: 0.62;
         transform: skewX(-12deg) translateX(780%);
       }
+      .product-shot > img {
+        display: block;
+        width: 100%;
+        height: auto;
+        position: relative;
+        z-index: 1;
+      }
       .product-shot--wide {
         width: min(1180px, 100%);
       }
@@ -532,216 +544,7 @@
         scroll-margin-top: 64px;
       }
 
-      @keyframes mockPulse {
-        0%,
-        100% {
-          opacity: 0.72;
-          transform: scale(1);
-        }
-        50% {
-          opacity: 1;
-          transform: scale(1.018);
-        }
-      }
 
-      .mock__bar {
-        height: 38px;
-        background: #2a2a2c;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 0 14px;
-        position: relative;
-        z-index: 2;
-      }
-      .mock__dot {
-        width: 11px;
-        height: 11px;
-        border-radius: 50%;
-      }
-      .mock__bar-title {
-        position: absolute;
-        left: 0;
-        right: 0;
-        text-align: center;
-        font-size: 12px;
-        letter-spacing: 0.2px;
-        color: rgba(255, 255, 255, 0.5);
-        pointer-events: none;
-      }
-      .mock__body {
-        display: grid;
-        grid-template-columns: 56px minmax(0, 1.5fr) minmax(320px, 0.95fr);
-        min-height: 520px;
-        text-align: left;
-        position: relative;
-        z-index: 1;
-        background: var(--canvas);
-      }
-      /* 窄图标侧栏（忠实还原真实 App 的左栏） */
-      .app-rail {
-        background: #f5f6f8;
-        border-right: 1px solid var(--divider-soft);
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 14px;
-        padding: 14px 0;
-      }
-      .app-rail__logo {
-        width: 30px;
-        height: 30px;
-        border-radius: 8px;
-        background: var(--primary);
-        color: #fff;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .app-rail__logo svg {
-        width: 17px;
-        height: 17px;
-      }
-      .app-rail__btn {
-        width: 30px;
-        height: 30px;
-        border-radius: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--ink-muted-48);
-      }
-      .app-rail__btn.is-active {
-        background: #fff;
-        color: var(--ink);
-        border: 1px solid var(--divider-soft);
-      }
-      .app-rail__btn svg {
-        width: 18px;
-        height: 18px;
-      }
-      .app-rail__spacer {
-        flex: 1;
-      }
-      /* 中间：视频标题 + 黑色播放器 */
-      .app-main {
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
-        padding: 18px 20px;
-        min-width: 0;
-        background: var(--canvas);
-      }
-      .app-main__title {
-        font-family: var(--font-display);
-        font-size: 16px;
-        font-weight: 600;
-        line-height: 1.3;
-        letter-spacing: -0.3px;
-        color: var(--ink);
-      }
-      .app-video {
-        position: relative;
-        flex: 1;
-        min-height: 300px;
-        border-radius: var(--r-md);
-        background: radial-gradient(120% 120% at 50% 28%, #15171c, #050507 72%);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        overflow: hidden;
-      }
-      .app-video__play {
-        width: 58px;
-        height: 58px;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.12);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        animation: mockPulse 3.8s ease-in-out infinite;
-      }
-      .app-video__play::after {
-        content: "";
-        border-style: solid;
-        border-width: 10px 0 10px 16px;
-        border-color: transparent transparent transparent rgba(255, 255, 255, 0.85);
-        margin-left: 4px;
-      }
-      .mock__panel {
-        background: var(--canvas);
-        border-left: 1px solid var(--divider-soft);
-        display: flex;
-        flex-direction: column;
-        position: relative;
-        min-width: 0;
-      }
-      .mock__tabs {
-        display: flex;
-        gap: 22px;
-        padding: 16px 20px 0;
-        border-bottom: 1px solid var(--divider-soft);
-      }
-      .mock__tab {
-        font-size: 14px;
-        font-weight: 400;
-        letter-spacing: -0.2px;
-        color: var(--ink-muted-48);
-        padding-bottom: 12px;
-        border-bottom: 2px solid transparent;
-      }
-      .mock__tab.is-active {
-        color: var(--ink);
-        font-weight: 600;
-        border-bottom-color: var(--primary);
-      }
-      .mock__subtabs {
-        display: flex;
-        gap: 6px;
-        padding: 12px 20px 0;
-      }
-      .mock__subtab {
-        font-size: 12px;
-        color: var(--ink-muted-48);
-        padding: 4px 10px;
-        border-radius: var(--r-pill);
-      }
-      .mock__subtab.is-active {
-        color: var(--primary);
-        background: rgba(0, 102, 204, 0.1);
-        font-weight: 600;
-      }
-      .mock__content {
-        padding: 14px 20px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        overflow: hidden;
-      }
-      /* AI 概览：整体摘要 / 核心要点 / 重点章节 */
-      .ov-h {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--ink);
-        margin-top: 4px;
-      }
-      .ov-h:first-child {
-        margin-top: 0;
-      }
-      .ov-summary {
-        font-size: 12.5px;
-        line-height: 1.55;
-        color: var(--ink-muted-80);
-      }
-      .ov-point {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: 10px;
-        font-size: 12.5px;
-        line-height: 1.5;
-        color: var(--ink-muted-80);
-      }
       .ts {
         color: var(--primary);
         font-weight: 600;
@@ -751,125 +554,6 @@
       .ts::before {
         content: "▶ ";
         font-size: 9px;
-      }
-      .ov-chapter {
-        padding-top: 9px;
-        border-top: 1px solid var(--divider-soft);
-      }
-      .ov-chapter:first-of-type {
-        border-top: 0;
-        padding-top: 0;
-      }
-      .ov-chapter b {
-        font-size: 12.5px;
-        font-weight: 600;
-        color: var(--ink);
-      }
-      .ov-chapter .ts {
-        margin-right: 6px;
-      }
-      .ov-chapter p {
-        font-size: 11.5px;
-        line-height: 1.4;
-        color: var(--ink-muted-48);
-        margin-top: 3px;
-      }
-      /* 课件画廊 */
-      .slide-tools {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-      }
-      .slide-tool {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        font-size: 11.5px;
-        font-weight: 600;
-        color: var(--primary);
-        background: rgba(0, 102, 204, 0.08);
-        border: 1px solid rgba(0, 102, 204, 0.16);
-        border-radius: var(--r-pill);
-        padding: 4px 10px;
-      }
-      .slide-tool svg {
-        width: 13px;
-        height: 13px;
-      }
-      .slide-meta {
-        font-size: 11.5px;
-        color: var(--ink-muted-48);
-      }
-      .slide-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-      }
-      .slide-card {
-        border: 1px solid var(--divider-soft);
-        border-radius: var(--r-sm);
-        overflow: hidden;
-        background: var(--canvas);
-      }
-      .slide-card.is-active {
-        border-color: var(--primary);
-        box-shadow: 0 0 0 1px var(--primary);
-      }
-      .slide-card__thumb {
-        aspect-ratio: 16 / 9;
-        background: #f4f5f7;
-        padding: 10px 11px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        justify-content: center;
-      }
-      .slide-card__thumb strong {
-        font-size: 11px;
-        line-height: 1.25;
-        color: var(--ink);
-      }
-      .slide-card__thumb i {
-        display: block;
-        height: 5px;
-        border-radius: 3px;
-        background: var(--divider-soft);
-      }
-      .slide-card__foot {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 6px 9px;
-        font-size: 10.5px;
-        color: var(--ink-muted-48);
-      }
-      .slide-card__ocr {
-        color: var(--primary);
-        font-weight: 600;
-      }
-      /* 悬浮操作按钮（↻ / ↓） */
-      .app-fab {
-        position: absolute;
-        right: 16px;
-        bottom: 16px;
-        display: flex;
-        gap: 8px;
-      }
-      .app-fab button {
-        width: 30px;
-        height: 30px;
-        border-radius: 50%;
-        border: 1px solid var(--divider-soft);
-        background: #fff;
-        color: var(--ink-muted-48);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
-      }
-      .app-fab svg {
-        width: 15px;
-        height: 15px;
       }
       .timestamp {
         color: var(--primary);
@@ -993,6 +677,14 @@
         border-radius: var(--r-lg);
         overflow: hidden;
       }
+      .asset-grid--gallery {
+        width: min(1120px, 100%);
+      }
+      .asset-grid--gallery img {
+        aspect-ratio: 4 / 3;
+        object-fit: cover;
+        object-position: top;
+      }
       .asset-card img {
         width: 100%;
         aspect-ratio: 16 / 10;
@@ -1048,7 +740,7 @@
         max-width: 1024px;
         margin: var(--s-lg) auto 0;
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(3, 1fr);
         gap: var(--s-lg);
         text-align: left;
       }
@@ -1184,30 +876,6 @@
         .footer__cols {
           grid-template-columns: repeat(2, 1fr);
         }
-        .mock__body {
-          grid-template-columns: 1fr;
-        }
-        .app-rail {
-          flex-direction: row;
-          justify-content: flex-start;
-          gap: 16px;
-          padding: 10px 16px;
-          border-right: 0;
-          border-bottom: 1px solid var(--divider-soft);
-        }
-        .app-rail__spacer {
-          flex: 1;
-        }
-        .mock__panel {
-          border-left: 0;
-          border-top: 1px solid var(--divider-soft);
-        }
-        .app-video {
-          min-height: 220px;
-        }
-        .slide-grid {
-          grid-template-columns: 1fr;
-        }
         .capability-band,
         .asset-grid {
           grid-template-columns: 1fr;
@@ -1248,9 +916,6 @@
         }
         .product-shot::after {
           display: none;
-        }
-        .app-video__play {
-          animation: none !important;
         }
         * {
           transition: none !important;
@@ -1303,67 +968,10 @@
             <a class="btn-pill btn-dark-link" href="https://github.com/wansui976/CoursePilot" data-magnetic>GitHub 源码</a>
             <a class="text-link" href="#workbench">看看流程</a>
           </div>
-          <p class="caption" data-animate="hero" style="--motion-delay: 380ms">macOS · iPhone · iPad · Android · 资料存在本地 · 跨设备同步 · AI 功能使用你自己的 API Key</p>
+          <p class="caption" data-animate="hero" style="--motion-delay: 380ms">macOS · Windows · iPhone · iPad · Android · 资料存在本地 · AI 功能使用你自己的 API Key</p>
 
-          <!-- Screenshot source: website/promo-hero.png -->
-          <div class="product-shot shot-frame" id="promo-hero" data-animate="scale" data-parallax role="img" aria-label="CoursePilot 学习工作台界面预览：左侧图标侧栏，中间播放课程视频，右侧为 AI 概览 / 笔记 / 文稿 / 课件 标签，当前为 AI 概览">
-            <div class="mock__bar">
-              <span class="mock__dot" style="background:#ff5f57"></span>
-              <span class="mock__dot" style="background:#febc2e"></span>
-              <span class="mock__dot" style="background:#28c840"></span>
-              <span class="mock__bar-title">course-ai</span>
-            </div>
-            <div class="mock__body">
-              <nav class="app-rail" aria-hidden="true">
-                <span class="app-rail__logo">
-                  <svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="3.5" width="19" height="17" rx="4" stroke="currentColor" stroke-width="1.7" /><path d="M10 9.2v5.6l4.6-2.8z" fill="currentColor" /></svg>
-                </span>
-                <span class="app-rail__btn">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                </span>
-                <span class="app-rail__btn is-active">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
-                </span>
-                <span class="app-rail__spacer"></span>
-                <span class="app-rail__btn">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.2 6.2 0 0 0 9.5 9.5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" /></svg>
-                </span>
-                <span class="app-rail__btn">
-                  <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7" /><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
-                </span>
-              </nav>
-              <div class="app-main">
-                <div class="app-main__title">机器学习导论 · 第 6 讲 梯度下降与反向传播</div>
-                <div class="app-video">
-                  <span class="app-video__play" aria-hidden="true"></span>
-                </div>
-              </div>
-              <div class="mock__panel">
-                <div class="mock__tabs">
-                  <span class="mock__tab is-active">AI 概览</span>
-                  <span class="mock__tab">笔记</span>
-                  <span class="mock__tab">文稿</span>
-                  <span class="mock__tab">课件</span>
-                </div>
-                <div class="mock__content">
-                  <div class="ov-h">整体摘要</div>
-                  <p class="ov-summary">本节从损失函数出发，讲清梯度下降为什么沿负梯度方向更新参数，学习率如何影响收敛，并引出反向传播如何沿计算图高效地把梯度传回每一层。</p>
-                  <div class="ov-h">核心要点</div>
-                  <div class="ov-point"><span>梯度指向上升最快的方向，反方向就是最快的下降路径</span><span class="ts">02:14</span></div>
-                  <div class="ov-point"><span>学习率决定每一步走多远</span><span class="ts">05:30</span></div>
-                  <div class="ov-point"><span>学习率过大，参数会在谷底两侧震荡甚至发散</span><span class="ts">08:12</span></div>
-                  <div class="ov-point"><span>反向传播沿计算图复用中间梯度</span><span class="ts">15:06</span></div>
-                  <div class="ov-h">重点章节</div>
-                  <div class="ov-chapter"><span class="ts">02:14</span><b>梯度下降的直观理解</b><p>用下山的类比说明为什么要沿负梯度方向更新。</p></div>
-                  <div class="ov-chapter"><span class="ts">08:00</span><b>学习率与收敛</b><p>步长过大或过小分别会带来什么后果。</p></div>
-                </div>
-                <div class="app-fab" aria-hidden="true">
-                  <button title="重新生成">
-                    <svg viewBox="0 0 24 24" fill="none"><path d="M20 11a8 8 0 1 0-.6 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><path d="M20 4v5h-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                  </button>
-                </div>
-              </div>
-            </div>
+          <div class="product-shot shot-frame" id="promo-hero" data-animate="scale" data-parallax>
+            <img src="./screenshots/workbench-overview.webp" width="1600" height="1005" alt="CoursePilot 学习工作台：左侧播放课程视频，右侧是 AI 概览——整体摘要、带时间戳的核心要点和重点章节时间线" />
           </div>
           <p class="caption media-note" data-animate>本地优先 · 开源 MIT · 资料不上传 · 凭证存在系统钥匙串</p>
         </div>
@@ -1468,82 +1076,8 @@
           <p class="lead" data-animate>
             按画面变化比例判断换页，截取动画稳定后的那一帧，跳过纯色页和转场。每一页整批 OCR，板书上的公式和定义不会丢。导入时自动和语音识别并行提取，硬件解码采样，还会先裁掉视频自带的黑边。
           </p>
-          <!-- Screenshot source: website/promo-workbench.png -->
-          <div class="product-shot product-shot--wide shot-frame" id="promo-workbench" data-animate="scale" data-parallax role="img" aria-label="CoursePilot 课件界面预览：左侧图标侧栏，中间播放课程视频，右侧为「课件」标签下自动留存的课件页与 OCR">
-            <div class="mock__bar">
-              <span class="mock__dot" style="background:#ff5f57"></span>
-              <span class="mock__dot" style="background:#febc2e"></span>
-              <span class="mock__dot" style="background:#28c840"></span>
-              <span class="mock__bar-title">course-ai</span>
-            </div>
-            <div class="mock__body">
-              <nav class="app-rail" aria-hidden="true">
-                <span class="app-rail__logo">
-                  <svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="3.5" width="19" height="17" rx="4" stroke="currentColor" stroke-width="1.7" /><path d="M10 9.2v5.6l4.6-2.8z" fill="currentColor" /></svg>
-                </span>
-                <span class="app-rail__btn">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                </span>
-                <span class="app-rail__btn is-active">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
-                </span>
-                <span class="app-rail__spacer"></span>
-                <span class="app-rail__btn">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.2 6.2 0 0 0 9.5 9.5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" /></svg>
-                </span>
-                <span class="app-rail__btn">
-                  <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7" /><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
-                </span>
-              </nav>
-              <div class="app-main">
-                <div class="app-main__title">机器学习导论 · 第 6 讲 梯度下降与反向传播</div>
-                <div class="app-video">
-                  <span class="app-video__play" aria-hidden="true"></span>
-                </div>
-              </div>
-              <div class="mock__panel">
-                <div class="mock__tabs">
-                  <span class="mock__tab">AI 概览</span>
-                  <span class="mock__tab">笔记</span>
-                  <span class="mock__tab">文稿</span>
-                  <span class="mock__tab is-active">课件</span>
-                </div>
-                <div class="mock__content">
-                  <div class="slide-tools">
-                    <span class="slide-tool"><svg viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3" stroke="currentColor" stroke-width="1.6"/></svg>提取课件</span>
-                    <span class="slide-tool"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M8 19l4-5 3 3 2-2 3 4" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>截图</span>
-                    <span class="slide-tool"><svg viewBox="0 0 24 24" fill="none"><path d="M5 5v14M5 8h12M5 13h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>OCR</span>
-                  </div>
-                  <p class="slide-meta">课件 18 / 32 · 自动换页 · 本地或阿里云 OCR</p>
-                  <div class="slide-grid">
-                    <div class="slide-card">
-                      <div class="slide-card__thumb"><strong>损失函数与梯度</strong><i style="width:86%"></i><i style="width:64%"></i></div>
-                      <div class="slide-card__foot"><span>p.06</span><span class="ts">02:14</span></div>
-                    </div>
-                    <div class="slide-card">
-                      <div class="slide-card__thumb"><strong>学习率的影响</strong><i style="width:78%"></i><i style="width:70%"></i></div>
-                      <div class="slide-card__foot"><span class="slide-card__ocr">OCR ✓</span><span class="ts">08:00</span></div>
-                    </div>
-                    <div class="slide-card is-active">
-                      <div class="slide-card__thumb"><strong>反向传播：链式法则</strong><i style="width:90%"></i><i style="width:58%"></i></div>
-                      <div class="slide-card__foot"><span>p.18 · OCR 38 字</span><span class="ts">14:30</span></div>
-                    </div>
-                    <div class="slide-card">
-                      <div class="slide-card__thumb"><strong>小批量与收敛</strong><i style="width:72%"></i><i style="width:66%"></i></div>
-                      <div class="slide-card__foot"><span>p.24</span><span class="ts">21:05</span></div>
-                    </div>
-                  </div>
-                </div>
-                <div class="app-fab" aria-hidden="true">
-                  <button title="导出">
-                    <svg viewBox="0 0 24 24" fill="none"><path d="M12 4v10m0 0l-3.5-3.5M12 14l3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 19h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-                  </button>
-                  <button title="重新提取">
-                    <svg viewBox="0 0 24 24" fill="none"><path d="M20 11a8 8 0 1 0-.6 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><path d="M20 4v5h-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                  </button>
-                </div>
-              </div>
-            </div>
+          <div class="product-shot product-shot--wide shot-frame" id="promo-workbench" data-animate="scale" data-parallax>
+            <img src="./screenshots/slides.webp" width="1600" height="1005" loading="lazy" alt="CoursePilot 课件页：按换页自动截取的课件缩略图，带页码和时间戳，可整批 OCR" />
           </div>
           <div class="capability-band" data-animate>
             <div class="capability">
@@ -1552,7 +1086,7 @@
             </div>
             <div class="capability">
               <strong>OCR 可本地可云端。</strong>
-              <p>离线时用本地 tesseract；课件文字复杂时，可以换成阿里云 OCR。整批识别，一页失败不影响其他页。</p>
+              <p>离线时用本地 tesseract；课件文字复杂时，换成阿里云 OCR 或 DeepSeek 视觉模型。整批识别，一页失败不影响其他页。</p>
             </div>
             <div class="capability">
               <strong>板书喂给 AI。</strong>
@@ -1570,16 +1104,10 @@
           <p class="lead" data-animate>
             单个视频的问答按相关性检索上下文，不用把整份字幕塞进去；课程级问答可以跨视频提问，两段式重排挑最相关的段落。在文稿里选中一段也能直接追问。问句搜不到东西时，会自动改写问题再试一次。
           </p>
-          <div class="qa-demo" data-animate>
-            <div class="qa-demo__row">
-              <span class="qa-demo__label">你问</span>
-              <p>这一节为什么说学习率太大会发散？</p>
-            </div>
-            <div class="qa-demo__row">
-              <span class="qa-demo__label">CoursePilot 答</span>
-              <p>因为每一步更新都会越过损失函数的低点，新的参数反而让误差变大。老师在讲梯度下降动画时指出，步长过大时点会在谷底两侧来回跳，甚至越跳越远。<span class="timestamp">[14:22]</span> 如果课程字幕没有讲到某个细节，我会明确说明没有依据。</p>
-            </div>
+          <div class="product-shot product-shot--wide shot-frame" data-animate="scale">
+            <img src="./screenshots/assistant.webp" width="1600" height="1005" loading="lazy" alt="对着当前视频提问：回答引用了课件第 5 页和 04:22、35:41 等时间点，旁边是这节课的 AI 概览" />
           </div>
+          <p class="caption media-note" data-animate>真实对话截图：回答引用课件页码和 [mm:ss] 出处，点一下就跳到视频对应位置。</p>
         </div>
       </section>
 
@@ -1603,16 +1131,16 @@
           </div>
           <div class="capability-band" data-animate>
             <div class="capability">
-              <strong>对话式操作。</strong>
-              <p>气泡流对话，工具调用的过程用大白话解释。面板可拖拽吸附、可拉宽，收起后变成悬浮球。</p>
+              <strong>改数据前先问你。</strong>
+              <p>新建课程、追加笔记这类会改数据的操作，先弹确认卡，你点头它才动手；工具调用过程用大白话解释，每一步都有成功 / 失败标签。</p>
             </div>
             <div class="capability">
               <strong>了解你的学习进度。</strong>
               <p>助手可以读取你的学习进度、待复习内容和薄弱知识点，基于真实数据给建议。</p>
             </div>
             <div class="capability">
-              <strong>接着上次继续。</strong>
-              <p>会话支持连续性，可以继续上次的学习对话，不用每次重新说明上下文。</p>
+              <strong>聊完直接进笔记。</strong>
+              <p>把对话里有用的内容整理成笔记，确认后追加进视频笔记。会话跨重启保留，随时接着上次聊。</p>
             </div>
           </div>
         </div>
@@ -1687,6 +1215,20 @@
               <p>两次点击框出一段，记个笔记，随时跳回。方向键长按进入快扫，短按 ±5 秒。字幕浮层可在画面内自由拖动。</p>
             </div>
           </div>
+          <div class="capability-band" data-animate>
+            <div class="capability">
+              <strong>B 站链接一贴就走。</strong>
+              <p>粘贴视频链接自动下载，整个播放列表 / 合集也能批量导入，导入后自动排队处理。</p>
+            </div>
+            <div class="capability">
+              <strong>弹幕和评论区都在。</strong>
+              <p>B 站弹幕与评论在后台抓取并缓存到本地：播放器里随时开关弹幕层，评论面板保留楼中楼和表情。</p>
+            </div>
+            <div class="capability">
+              <strong>去黑边，画面更大。</strong>
+              <p>自动识别视频自带的黑边并裁掉，课件截图同样先去黑边再识别。</p>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -1727,37 +1269,73 @@
             <h3>用你自己的 Key</h3>
             <p>大模型、云端识别和云端 OCR 都填你自己的 API Key，并存进系统钥匙串。</p>
           </div>
+          <div class="ucard" data-animate style="--motion-delay: 300ms">
+            <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <ellipse cx="12" cy="6" rx="7" ry="3" stroke="currentColor" stroke-width="1.7" />
+              <path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" stroke="currentColor" stroke-width="1.7" />
+            </svg>
+            <h3>一键备份</h3>
+            <p>整个数据库一键备份、随时恢复；每天首次启动还会自动留一份快照。</p>
+          </div>
+          <div class="ucard" data-animate style="--motion-delay: 360ms">
+            <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <h3>删错也不怕</h3>
+            <p>删除的课程和视频先进回收站，按课程分组、带缩略图，可批量恢复。</p>
+          </div>
         </div>
       </section>
 
-      <!-- ============ 宣传截图资产 ============ -->
-      <section class="tile tile--light" id="media">
+      <!-- ============ 界面一览 ============ -->
+      <section class="tile tile--light" id="gallery">
         <div class="tile__inner">
-          <p class="eyebrow" data-animate>媒体资产</p>
-          <h2 class="display-lg" data-animate>产品介绍图已经备好。</h2>
+          <p class="eyebrow" data-animate>界面一览</p>
+          <h2 class="display-lg" data-animate>一节课，能变成这么多东西。</h2>
           <p class="lead" data-animate>
-            首屏、工作台和分享卡片都从真实界面截图生成。官网能直接用，应用商店的说明图也有一版干净底稿。
+            以下都是真实界面截图：同一节课自动生成的脑图、笔记和练习题，以及课程级的知识清单和学习面板。
           </p>
-          <div class="asset-grid" data-animate>
-            <a class="asset-card" href="./promo-hero.png" aria-label="打开首屏宣传图 promo-hero.png" data-animate style="--motion-delay: 70ms">
-              <img src="./promo-hero.png" alt="CoursePilot 首屏产品宣传截图" loading="lazy" />
+          <div class="asset-grid asset-grid--gallery" data-animate>
+            <a class="asset-card" href="./screenshots/mindmap.webp" data-animate style="--motion-delay: 70ms">
+              <img src="./screenshots/mindmap-thumb.webp" width="800" height="600" alt="CoursePilot 脑图界面截图" loading="lazy" />
               <div>
-                <strong>promo-hero.png</strong>
-                <span>官网首屏 / 产品介绍头图</span>
+                <strong>脑图</strong>
+                <span>整节课的知识结构，一张图看全。</span>
               </div>
             </a>
-            <a class="asset-card" href="./promo-workbench.png" aria-label="打开工作台宣传图 promo-workbench.png" data-animate style="--motion-delay: 140ms">
-              <img src="./promo-workbench.png" alt="CoursePilot 工作台宣传截图" loading="lazy" />
+            <a class="asset-card" href="./screenshots/notes.webp" data-animate style="--motion-delay: 140ms">
+              <img src="./screenshots/notes-thumb.webp" width="800" height="600" alt="CoursePilot 图文笔记界面截图" loading="lazy" />
               <div>
-                <strong>promo-workbench.png</strong>
-                <span>功能页 / 应用商店说明图</span>
+                <strong>图文笔记</strong>
+                <span>速查表、要点和可点击的时间戳。</span>
               </div>
             </a>
-            <a class="asset-card" href="./og-image.png" aria-label="打开分享卡片 og-image.png" data-animate style="--motion-delay: 210ms">
-              <img src="./og-image.png" alt="CoursePilot 分享卡片截图" loading="lazy" />
+            <a class="asset-card" href="./screenshots/quiz.webp" data-animate style="--motion-delay: 210ms">
+              <img src="./screenshots/quiz-thumb.webp" width="800" height="600" alt="CoursePilot 练习题界面截图" loading="lazy" />
               <div>
-                <strong>og-image.png</strong>
-                <span>Open Graph / 社交分享卡片</span>
+                <strong>练习题</strong>
+                <span>按课程内容出题，答完直接进复习。</span>
+              </div>
+            </a>
+            <a class="asset-card" href="./screenshots/concepts.webp" data-animate style="--motion-delay: 70ms">
+              <img src="./screenshots/concepts-thumb.webp" width="800" height="600" alt="CoursePilot 课程知识界面截图" loading="lazy" />
+              <div>
+                <strong>课程知识</strong>
+                <span>跨视频合并的知识点和下一步该复习什么。</span>
+              </div>
+            </a>
+            <a class="asset-card" href="./screenshots/dashboard.webp" data-animate style="--motion-delay: 140ms">
+              <img src="./screenshots/dashboard-thumb.webp" width="800" height="600" alt="CoursePilot 学习面板界面截图" loading="lazy" />
+              <div>
+                <strong>学习面板</strong>
+                <span>热力图、每门课进度和待复习提醒。</span>
+              </div>
+            </a>
+            <a class="asset-card" href="./screenshots/dark-mode.webp" data-animate style="--motion-delay: 210ms">
+              <img src="./screenshots/dark-mode-thumb.webp" width="800" height="600" alt="CoursePilot 夜间模式界面截图" loading="lazy" />
+              <div>
+                <strong>夜间模式</strong>
+                <span>深色界面，晚上学习不刺眼。</span>
               </div>
             </a>
           </div>
@@ -1767,12 +1345,13 @@
       <!-- ============ 下载 ============ -->
       <section class="tile tile--dark spotlight" id="download">
         <div class="tile__inner">
-          <h2 class="display-lg" data-animate>先从源码跑起来。</h2>
-          <p class="lead" data-animate>移动版还在准备上架。桌面版可以先从 GitHub 源码构建；等商店链接可用，这里会换成正式下载入口。</p>
+          <h2 class="display-lg" data-animate>下载，拖进第一节课。</h2>
+          <p class="lead" data-animate>桌面版安装包已内置 ffmpeg、whisper.cpp 等依赖，装好就能用。移动版正在准备上架。</p>
           <div class="cta-row" data-animate>
-            <a class="btn-pill" href="https://github.com/wansui976/CoursePilot" data-magnetic>打开 wansui976/CoursePilot</a>
-            <a class="text-link" href="https://github.com/wansui976/CoursePilot/releases">查看发布版本</a>
+            <a class="btn-pill" href="https://github.com/wansui976/CoursePilot/releases/latest" data-magnetic>下载最新版本</a>
+            <a class="btn-pill btn-dark-link" href="https://github.com/wansui976/CoursePilot" data-magnetic>GitHub 源码</a>
           </div>
+          <p class="caption" data-animate>macOS（Apple Silicon，.dmg）· Windows（x64，.exe / .msi）· 开源 MIT</p>
           <div class="store-row" data-animate>
             <a class="store-badge" href="#" aria-label="App Store 版本即将上线">
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -1797,7 +1376,7 @@
               </span>
             </a>
           </div>
-          <p class="caption">移动版即将上线 · 桌面版可从 GitHub 构建 · 当前页面不代替隐私政策和商店审核材料</p>
+          <p class="caption">iOS / Android 版即将上线 · 喜欢的话欢迎到 GitHub 点个 Star ⭐</p>
         </div>
       </section>
     </main>
@@ -1810,7 +1389,7 @@
             <h4>产品</h4>
             <a href="#features">学习资料</a>
             <a href="#workbench">学习工作台</a>
-            <a href="#media">宣传截图</a>
+            <a href="#gallery">界面一览</a>
             <a href="#download">下载</a>
           </div>
           <div class="footer__col">

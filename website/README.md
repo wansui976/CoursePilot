@@ -9,21 +9,27 @@ cd website
 python3 -m http.server 8000   # 然后打开 http://localhost:8000
 ```
 
-## 宣传截图资产
+## 截图资产
 
-当前主页直接引用三张由真实 CoursePilot UI 截图生成的宣传图：
+页面里的产品图都是真实 CoursePilot 界面截图（2026-10，v0.2.0 之后的新界面），统一放在 `screenshots/`：
 
-- `promo-hero.png`：首屏产品介绍图。
-- `promo-workbench.png`：工作台 / 课件 / OCR 联动介绍图。
-- `og-image.png`：Open Graph / 社交分享卡片，`index.html` 的 `og:image` 指向它。
+- `workbench-overview.webp`、`slides.webp`、`assistant.webp`：首屏、课件、提问三处大图。
+- `mindmap` / `notes` / `quiz` / `concepts` / `dashboard` / `dark-mode`：「界面一览」画廊。每张都有完整截图（点开看）和一张 4:3 的 `*-thumb.webp` 局部缩略图（卡片里显示）。
+- 其余（`library`、`transcript`、`settings`）供仓库根目录 README 使用。
 
-原始截图保存在 `real-screenshots/`，包括 AI 概览、笔记、出题、脑图、文稿和提问界面。重新生成时运行：
+由截图派生的三张 PNG：
+
+- `promo-hero.png`：首屏产品介绍图，仓库 README 顶部也用它。
+- `promo-workbench.png`：课件 / OCR 介绍图，可作应用商店说明图底稿。
+- `og-image.png`：Open Graph / 社交分享卡片，`og:image` 用绝对地址指向它。
+
+替换截图后重新生成：
 
 ```bash
 python3 website/generate_mock_screenshots.py
 ```
 
-`screenshot-studio.html` 仍保留为备用的静态模拟截图源，但当前宣传图优先使用真实产品截图。
+`screenshot-studio.html` 仍保留为备用的静态模拟截图源。
 
 ## 动效
 
