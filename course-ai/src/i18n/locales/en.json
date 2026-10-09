@@ -97,6 +97,8 @@
     "gestureOverlay": "Playback gesture feedback",
     "controls": "Video playback controls",
     "progress": "Playback progress",
+    "danmakuCount": "{{count}} danmaku",
+    "danmakuPeak": "Danmaku peak at {{time}}",
     "play": "Play",
     "pause": "Pause",
     "rate": "Speed",

@@ -97,6 +97,8 @@
     "gestureOverlay": "播放手势提示",
     "controls": "视频播放控制栏",
     "progress": "播放进度",
+    "danmakuCount": "弹幕 {{count}}",
+    "danmakuPeak": "弹幕高峰 {{time}}",
     "play": "播放",
     "pause": "暂停",
     "rate": "倍速",

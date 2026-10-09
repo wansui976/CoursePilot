@@ -111,4 +111,35 @@ describe("ProgressBar", () => {
       expect(container.querySelectorAll(".w-px")).toHaveLength(2);
     });
   });
+
+  it("draws a danmaku heat curve with clickable peaks when danmaku is passed", () => {
+    const onSeek = vi.fn();
+    usePlayer.setState({ currentMs: 0, durationMs: 600_000 });
+    const danmaku = [
+      ...Array.from({ length: 40 }, (_, i) => i * 15_000),
+      ...Array.from({ length: 100 }, (_, i) => 300_000 + i),
+    ].map((start_ms) => ({
+      mode: "scroll" as const,
+      start_ms,
+      text: "前方高能",
+      color: null,
+      font_size: null,
+    }));
+    renderProgressBar({ onSeek, danmaku });
+
+    expect(screen.getByTestId("danmaku-heat")).toBeInTheDocument();
+    const peak = screen.getByRole("button", { name: /^弹幕高峰 05:0/ });
+    fireEvent.click(peak);
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(onSeek.mock.calls[0][0]).toBeGreaterThanOrEqual(300_000);
+    expect(onSeek.mock.calls[0][0]).toBeLessThan(305_000);
+  });
+
+  it("skips the heat curve when there are too few danmaku", () => {
+    renderProgressBar({
+      danmaku: [{ mode: "scroll", start_ms: 1000, text: "hi", color: null, font_size: null }],
+    });
+    expect(screen.queryByTestId("danmaku-heat")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /弹幕高峰/ })).not.toBeInTheDocument();
+  });
 });

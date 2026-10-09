@@ -1,27 +1,34 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import type { SkipRange } from "@/lib/silenceSkip";
+import type { DanmakuEntry } from "@/lib/types";
+import { danmakuHeat, heatAreaPath, heatPeaks } from "@/lib/danmakuHeat";
 
 const ARROW_SEEK_STEP_MS = 5_000;
 const MIN_PAGE_SEEK_STEP_MS = 10_000;
 const MAX_PAGE_SEEK_STEP_MS = 60_000;
+const NO_DANMAKU: DanmakuEntry[] = [];
 
 /**
  * 播放进度条。桌面端从控制栏剥离、常驻视频底边：3px 细线，悬停加粗。
  * 在原生 range（键盘/读屏/拖动免费）之上叠加章节刻度：每个章节 start_ms 一条竖线，
  * 悬停显示章节名；跳停顿段灰显（这部分播放时会直接跃过）。
+ * 传入弹幕时在轨道上方画弹幕热度曲线，高峰处打点、可点击跳转，悬停显示该处弹幕数。
  */
 export function ProgressBar({
   videoId,
   skipRanges,
+  danmaku = NO_DANMAKU,
   onSeek,
 }: {
   videoId: string;
   skipRanges: SkipRange[];
+  /** 弹幕开着时传入；不足以成曲线（太少）时不画。 */
+  danmaku?: DanmakuEntry[];
   onSeek: (ms: number) => void;
 }) {
   const { t } = useTranslation();
@@ -37,6 +44,9 @@ export function ProgressBar({
     safeDuration > 0 ? (safeCurrentMs / safeDuration) * 100 : 0;
   const pct = (ms: number) =>
     safeDuration > 0 ? Math.min(100, Math.max(0, (ms / safeDuration) * 100)) : 0;
+  const heat = useMemo(() => danmakuHeat(danmaku, safeDuration), [danmaku, safeDuration]);
+  const heatPath = useMemo(() => (heat ? heatAreaPath(heat.levels) : ""), [heat]);
+  const peaks = useMemo(() => (heat ? heatPeaks(heat) : []), [heat]);
 
   const hoverMs =
     hoverPct != null && safeDuration > 0 ? (hoverPct / 100) * safeDuration : null;
@@ -47,6 +57,10 @@ export function ProgressBar({
           ? chapters[chapters.length - 1]
           : null))
       : null;
+  const hoverDanmakuCount =
+    heat && hoverMs != null
+      ? heat.counts[Math.min(heat.counts.length - 1, Math.floor(hoverMs / heat.binMs))]
+      : 0;
 
   function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -115,6 +129,18 @@ export function ProgressBar({
           onKeyDown={handleKeyDown}
           className="peer absolute inset-0 h-full w-full cursor-pointer opacity-0"
         />
+        {/* 弹幕热度：轨道上方一条面积曲线，平时淡、悬停清晰。 */}
+        {heat && (
+          <svg
+            data-testid="danmaku-heat"
+            aria-hidden="true"
+            viewBox="0 0 1000 100"
+            preserveAspectRatio="none"
+            className="pointer-events-none absolute inset-x-0 bottom-[calc(50%+3px)] h-3 w-full text-[var(--video-accent)] opacity-50 transition-opacity duration-150 group-hover/progress:opacity-80"
+          >
+            <path d={heatPath} fill="currentColor" />
+          </svg>
+        )}
         {/* 视觉轨：3px 细线，悬停加粗成 5px。 */}
         <div className="pointer-events-none absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[var(--surface-card-hover)] transition-[height] duration-150 group-hover/progress:h-[5px]">
           <div
@@ -141,13 +167,28 @@ export function ProgressBar({
             />
           ))}
         </div>
-        {/* 悬停章节名：锚在指针 x 处，边缘夹回可见范围。 */}
-        {hoverChapter && hoverPct != null && (
+        {/* 弹幕高峰：曲线顶上的小圆点，点击直接跳过去。 */}
+        {peaks.map((peak) => (
+          <button
+            key={`peak-${peak.ms}`}
+            type="button"
+            aria-label={t("videoPlayer.danmakuPeak", { time: formatMs(peak.ms) })}
+            title={`${formatMs(peak.ms)} · ${t("videoPlayer.danmakuCount", { count: peak.count })}`}
+            onClick={() => onSeek(peak.ms)}
+            className="absolute z-[1] h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--video-accent)] ring-2 ring-[var(--surface-panel)]"
+            // 曲线占轨道上方 12px（顶边在命中区 -3px 处），圆点落在该处曲线高度上。
+            style={{ left: `${pct(peak.ms)}%`, top: `${-3 + (1 - peak.level) * 12}px` }}
+          />
+        ))}
+        {/* 悬停提示：章节名与该处弹幕数，锚在指针 x 处，边缘夹回可见范围。 */}
+        {hoverPct != null && (hoverChapter || hoverDanmakuCount > 0) && (
           <div
             className="pointer-events-none absolute -top-8 z-10 max-w-[60%] -translate-x-1/2 truncate rounded-md bg-[var(--surface-panel)] px-2 py-1 ca-t-2xs text-[var(--text-strong)] shadow-[var(--shadow-pop)] ring-1 ring-[var(--border-subtle)]"
             style={{ left: `${Math.min(88, Math.max(12, hoverPct))}%` }}
           >
-            {formatMs(hoverChapter.start_ms)} {hoverChapter.title}
+            {hoverChapter && `${formatMs(hoverChapter.start_ms)} ${hoverChapter.title}`}
+            {hoverChapter && hoverDanmakuCount > 0 && " · "}
+            {hoverDanmakuCount > 0 && t("videoPlayer.danmakuCount", { count: hoverDanmakuCount })}
           </div>
         )}
         {/* 焦点环：input 透明看不见，键盘聚焦时给整条命中区一个可见轮廓。 */}

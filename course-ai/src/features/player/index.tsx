@@ -1016,6 +1016,7 @@ export function VideoPlayer({
           <ProgressBar
             videoId={videoId}
             skipRanges={silenceSkip.ranges}
+            danmaku={danmakuOn ? danmaku : undefined}
             onSeek={(ms) => {
               if (ref.current) ref.current.currentTime = ms / 1000;
             }}
