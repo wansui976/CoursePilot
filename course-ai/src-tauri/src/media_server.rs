@@ -200,6 +200,10 @@ fn content_type(path: &Path) -> &'static str {
         Some("ogv") => "video/ogg",
         Some("m4a") => "audio/mp4",
         Some("mp3") => "audio/mpeg",
+        Some("aac") => "audio/aac",
+        Some("wav") => "audio/wav",
+        Some("flac") => "audio/flac",
+        Some("ogg" | "opus") => "audio/ogg",
         _ => "video/mp4", // mp4/mov/m4v 及默认
     }
 }
@@ -232,6 +236,8 @@ mod tests {
         assert_eq!(content_type(Path::new("a.mp4")), "video/mp4");
         assert_eq!(content_type(Path::new("a.MOV")), "video/mp4");
         assert_eq!(content_type(Path::new("a.webm")), "video/webm");
+        assert_eq!(content_type(Path::new("ep.MP3")), "audio/mpeg");
+        assert_eq!(content_type(Path::new("ep.opus")), "audio/ogg");
     }
 
     // 前端「自动裁黑边」用一个离屏 <video crossOrigin="anonymous"> 加载本服务的

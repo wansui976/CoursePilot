@@ -19,6 +19,7 @@ import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
 import { notesCoordinator } from "@/lib/notesCoordinator";
 import type { AssistantAction } from "@/lib/types";
+import { isBilibiliUrl } from "@/lib/sourceUrl";
 
 /**
  * 助手动作的渲染。
@@ -109,15 +110,6 @@ async function processImportedVideo(videoId: string) {
     throw new AssistantActionError(
       i18n.t("assistantActions.importSuccess", { error: humanizeError(error) }),
     );
-  }
-}
-
-function isBilibiliUrl(value: string) {
-  try {
-    const host = new URL(value).hostname.toLowerCase();
-    return host === "b23.tv" || host === "bilibili.com" || host.endsWith(".bilibili.com");
-  } catch {
-    return false;
   }
 }
 

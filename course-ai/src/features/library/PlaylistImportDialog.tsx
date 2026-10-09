@@ -10,6 +10,7 @@ import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import type { PlaylistInfo, Video } from "@/lib/types";
 import { Modal } from "@/ui/dialog";
+import { isBilibiliUrl } from "@/lib/sourceUrl";
 
 type Step = "url" | "cookie" | "probing" | "confirm" | "importing" | "done";
 
@@ -93,8 +94,10 @@ export function PlaylistImportDialog({
     setError(null);
     setPreparing(true);
     try {
-      const hasCookies = await ipc.tools.hasBilibiliCookies();
-      if (!hasCookies) {
+      // 只有 B 站需要登录态；YouTube、播客等其他站点直接探测。
+      const needsCookies =
+        isBilibiliUrl(url) && !(await ipc.tools.hasBilibiliCookies());
+      if (needsCookies) {
         setCookieReason("missing");
         setStep("cookie");
       } else {

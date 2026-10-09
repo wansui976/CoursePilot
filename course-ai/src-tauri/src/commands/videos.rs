@@ -299,9 +299,6 @@ pub async fn add_local_video(
     Ok(video)
 }
 
-/// 可批量导入的本地视频扩展名（与单文件导入对话框的过滤器一致）。
-const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "mov", "webm", "m4v"];
-
 #[derive(Serialize)]
 pub struct FolderVideo {
     pub path: String,
@@ -359,12 +356,13 @@ pub fn scan_folder(dir: &Path) -> AppResult<Vec<FolderVideo>> {
         if !path.is_file() {
             continue;
         }
-        let is_video = path
+        // 视频和纯音频（播客、录音）都收：音频同样能转写、做笔记，只是没有课件。
+        let is_media = path
             .extension()
             .and_then(|e| e.to_str())
-            .map(|e| VIDEO_EXTS.contains(&e.to_lowercase().as_str()))
+            .map(crate::pipeline::media_kind::is_media_ext)
             .unwrap_or(false);
-        if !is_video {
+        if !is_media {
             continue;
         }
         let file_name = path

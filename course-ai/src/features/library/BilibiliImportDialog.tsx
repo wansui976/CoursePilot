@@ -8,6 +8,7 @@ import { ErrorNote } from "@/ui/ErrorNote";
 import { ipc } from "@/lib/ipc";
 import type { ProbeResult, Video } from "@/lib/types";
 import { Modal } from "@/ui/dialog";
+import { isBilibiliUrl } from "@/lib/sourceUrl";
 
 type Step = "url" | "cookie" | "probing" | "confirm";
 type ImportRequest = {
@@ -114,8 +115,10 @@ export function BilibiliImportDialog({
     try {
       // 只有确实导入了 cookies.txt（文件存在且非空）才放行；否则先引导导入，
       // 避免设置里残留旧路径却在下载时报 412。
-      const hasCookies = await ipc.tools.hasBilibiliCookies();
-      if (!hasCookies) {
+      // 只有 B 站需要登录态；YouTube、播客等其他站点直接探测。
+      const needsCookies =
+        isBilibiliUrl(url) && !(await ipc.tools.hasBilibiliCookies());
+      if (needsCookies) {
         setCookieReason("missing");
         setStep("cookie");
       } else {

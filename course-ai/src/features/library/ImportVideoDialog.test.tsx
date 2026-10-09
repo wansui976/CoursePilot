@@ -122,7 +122,7 @@ describe("ImportVideoButton", () => {
 
     renderButton();
     fireEvent.click(screen.getByRole("button", { name: "导入" }));
-    fireEvent.click(screen.getByText("上传本地视频").closest("button")!);
+    fireEvent.click(screen.getByText("上传本地视频 / 音频").closest("button")!);
 
     await waitFor(() =>
       expect(addLocalMock).toHaveBeenCalledWith("course-1", "/tmp/clip.mov", 12_345),
@@ -200,7 +200,7 @@ describe("ImportVideoButton", () => {
 
     renderButton();
     fireEvent.click(screen.getByRole("button", { name: "导入" }));
-    fireEvent.click(screen.getByText("上传本地视频").closest("button")!);
+    fireEvent.click(screen.getByText("上传本地视频 / 音频").closest("button")!);
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/导入失败/);

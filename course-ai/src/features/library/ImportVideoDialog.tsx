@@ -140,7 +140,10 @@ export function ImportVideoButton({
         category: "videos",
         fallbackName: "video.mp4",
         filters: [
-          { name: "Video", extensions: ["mp4", "mkv", "mov", "webm", "m4v"] },
+          {
+            name: "Video / Audio",
+            extensions: ["mp4", "mkv", "mov", "webm", "m4v", "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"],
+          },
         ],
         prompt: t("import.selectLocalVideo"),
       });

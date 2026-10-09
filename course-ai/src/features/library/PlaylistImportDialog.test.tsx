@@ -213,11 +213,28 @@ describe("PlaylistImportDialog", () => {
     renderDialog();
 
     fireEvent.change(screen.getByLabelText("播放列表链接"), {
-      target: { value: "https://b.com/list" },
+      target: { value: "https://www.bilibili.com/list/1" },
     });
     fireEvent.click(screen.getByRole("button", { name: "枚举各集" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("cookie check failed");
     expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
+  });
+
+  it("probes non-Bilibili links without asking for Bilibili cookies", async () => {
+    mockIpc.tools.hasBilibiliCookies.mockResolvedValue(false);
+    mockIpc.tools.probePlaylist.mockResolvedValue({
+      title: "Lecture series",
+      episodes: [{ url: "https://www.youtube.com/watch?v=a", title: "Lecture 1", duration_ms: null }],
+    });
+    renderDialog();
+
+    fireEvent.change(screen.getByLabelText("播放列表链接"), {
+      target: { value: "https://www.youtube.com/playlist?list=PL1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "枚举各集" }));
+
+    expect(await screen.findByText("Lecture series")).toBeInTheDocument();
+    expect(mockIpc.tools.hasBilibiliCookies).not.toHaveBeenCalled();
   });
 });

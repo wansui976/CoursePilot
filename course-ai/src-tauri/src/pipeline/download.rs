@@ -34,10 +34,13 @@ pub fn build_ytdlp_args(
         "mp4".to_string(),
         "--no-playlist".to_string(),
     ];
-    if let Some(h) = max_height {
-        args.push("-f".to_string());
-        args.push(format!("bv*[height<={h}]+ba/b[height<={h}]"));
-    }
+    // 末尾兜底纯音频：播客等没有视频流的来源，「音视频合并 / 带音轨的单文件」都选不到。
+    // 指定了高度时，选不到该高度先退回最佳画质，最后才退到纯音频。
+    args.push("-f".to_string());
+    args.push(match max_height {
+        Some(h) => format!("bv*[height<={h}]+ba/b[height<={h}]/bv*+ba/b/ba"),
+        None => "bv*+ba/b/ba".to_string(),
+    });
     if let Some(lang) = sub_lang {
         if !lang.trim().is_empty() {
             // B站 AI 字幕（ai-zh）在 yt-dlp 里需 --write-auto-subs 才会拉取；
@@ -153,8 +156,12 @@ fn claim_downloaded(
     out_dir: &Path,
     sub_lang: Option<&str>,
 ) -> AppResult<DownloadResult> {
-    let video = newest_with_ext(staging, "mp4")?
-        .ok_or_else(|| AppError::Pipeline("yt-dlp produced no mp4".into()))?;
+    // 一般是合并好的 mp4；纯音频来源（播客）则是 m4a / mp3 / opus 等，原样收下。
+    let video = match newest_with_ext(staging, "mp4")? {
+        Some(path) => path,
+        None => newest_media(staging)?
+            .ok_or_else(|| AppError::Pipeline("yt-dlp 没有下载到音视频文件".into()))?,
+    };
     // 请求了字幕却没下到（这一集没有该语言的轨）就是没有，不去别处找。
     let subtitle = if sub_lang.map(|l| !l.trim().is_empty()).unwrap_or(false) {
         newest_with_ext(staging, "srt")?
@@ -198,6 +205,30 @@ fn vacant_path(dir: &Path, name: &Path) -> PathBuf {
         }
     }
     first
+}
+
+/// 返回暂存目录里最新的音视频文件（任意可导入的扩展名）。
+fn newest_media(out_dir: &Path) -> AppResult<Option<PathBuf>> {
+    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
+    for entry in std::fs::read_dir(out_dir)? {
+        let path = entry?.path();
+        let is_media = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(crate::pipeline::media_kind::is_media_ext)
+            .unwrap_or(false);
+        if !is_media {
+            continue;
+        }
+        let mtime = path
+            .metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        if newest.as_ref().map(|(t, _)| mtime > *t).unwrap_or(true) {
+            newest = Some((mtime, path));
+        }
+    }
+    Ok(newest.map(|(_, p)| p))
 }
 
 /// 返回 out_dir 里扩展名为 ext 的最新文件。
@@ -521,6 +552,45 @@ mod tests {
     }
 
     #[test]
+    fn an_audio_only_download_is_claimed_as_is() {
+        let dir = tempdir().unwrap();
+        let course = dir.path();
+        let staging = course.join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("第 12 期播客.m4a"), b"m4a").unwrap();
+        std::fs::write(staging.join("第 12 期播客.info.json"), b"{}").unwrap();
+
+        let result = claim_downloaded(&staging, course, None).unwrap();
+
+        assert_eq!(result.video, course.join("第 12 期播客.m4a"));
+        assert_eq!(result.subtitle, None);
+    }
+
+    #[test]
+    fn a_download_with_no_media_file_is_an_error() {
+        let dir = tempdir().unwrap();
+        let staging = dir.path().join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("x.part"), b"partial").unwrap();
+        assert!(claim_downloaded(&staging, dir.path(), None).is_err());
+    }
+
+    #[test]
+    fn quality_cap_falls_back_to_audio_only_sources() {
+        let args = build_ytdlp_args(
+            "https://www.youtube.com/watch?v=x",
+            "/out/%(title)s.%(ext)s",
+            None,
+            Some(720),
+            None,
+        );
+        let format = &args[args.iter().position(|a| a == "-f").unwrap() + 1];
+        assert_eq!(format, "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b/ba");
+        // 非 B 站链接不带 B 站的 referer。
+        assert!(!args.contains(&"--referer".to_string()));
+    }
+
+    #[test]
     fn ytdlp_args_basic() {
         let args = build_ytdlp_args(
             "https://b23.tv/x",
@@ -531,6 +601,8 @@ mod tests {
         );
         assert!(args.contains(&"--merge-output-format".to_string()));
         assert!(args.contains(&"mp4".to_string()));
+        let f = args.iter().position(|a| a == "-f").unwrap();
+        assert_eq!(args[f + 1], "bv*+ba/b/ba");
         assert_eq!(args.last().unwrap(), "https://b23.tv/x");
         assert!(!args.contains(&"--cookies".to_string()));
     }
@@ -629,7 +701,7 @@ mod tests {
             Some("ai-zh"),
         );
         let f = args.iter().position(|a| a == "-f").unwrap();
-        assert_eq!(args[f + 1], "bv*[height<=720]+ba/b[height<=720]");
+        assert_eq!(args[f + 1], "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b/ba");
         assert!(args.contains(&"--write-subs".to_string()));
         let sl = args.iter().position(|a| a == "--sub-langs").unwrap();
         assert_eq!(args[sl + 1], "ai-zh");
@@ -638,7 +710,9 @@ mod tests {
     #[test]
     fn ytdlp_args_no_quality_no_subs() {
         let args = build_ytdlp_args("https://b23.tv/x", "t", None, None, None);
-        assert!(!args.contains(&"-f".to_string()));
+        // 不限清晰度时仍要给格式：默认的 bv*+ba/b 在纯音频来源上选不到东西。
+        let f = args.iter().position(|a| a == "-f").unwrap();
+        assert!(!args[f + 1].contains("height"));
         assert!(!args.contains(&"--write-subs".to_string()));
     }
 

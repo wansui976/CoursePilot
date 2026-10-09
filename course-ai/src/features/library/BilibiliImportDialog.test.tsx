@@ -266,7 +266,7 @@ describe("BilibiliImportDialog", () => {
     renderDialog();
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(dialog).toHaveAccessibleName("下载 B站视频");
+    expect(dialog).toHaveAccessibleName("下载网络视频");
     expect(dialog).toHaveClass(
       "max-h-[calc(100dvh-2rem)]",
       "w-full",

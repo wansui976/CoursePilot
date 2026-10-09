@@ -17,6 +17,7 @@ pub mod playable;
 pub mod rag;
 pub mod search_terms;
 pub mod silence;
+pub mod media_kind;
 pub mod slides;
 pub mod subtitle;
 pub mod transcript_correction;
@@ -734,6 +735,23 @@ async fn run_slides_stage(
             );
         }
         return;
+    }
+
+    // 播客、录音等纯音频没有画面，课件两步直接跳过（不当成失败标红）。
+    if extract_job.status != "done" {
+        let path: String = sqlx::query_scalar("SELECT file_path FROM videos WHERE id=?")
+            .bind(video_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap_or_default();
+        if !path.is_empty() && !media_kind::has_video_stream(std::path::Path::new(&path)).await {
+            let msg = "音频没有画面，已跳过课件";
+            for job in [extract_job, ocr_job] {
+                let _ = jobs::cancel(db, &job.id, msg).await;
+                emit_stage(app, video_id, &job.id, &job.stage, "canceled", 0.0, Some(msg));
+            }
+            return;
+        }
     }
 
     let state = app.state::<AppState>();
