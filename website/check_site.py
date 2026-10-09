@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -21,9 +22,11 @@ required_text = [
     "prefers-reduced-motion",
     "is-visible",
     "nav-scrolled",
-    "promo-hero.png",
-    "promo-workbench.png",
+    "screenshots/workbench-overview.webp",
+    "screenshots/slides.webp",
+    "screenshots/assistant.webp",
     "og-image.png",
+    "releases/latest",
     "gsap@3.13",
     "ScrollTrigger.min.js",
     "DOMContentLoaded",
@@ -67,10 +70,9 @@ if studio_missing:
     raise SystemExit(f"Missing screenshot studio mock data: {studio_missing}")
 
 generator_required_text = [
-    "generated realistic screenshots from real CoursePilot UI",
-    "real-screenshots",
-    "ai-overview.png",
-    "notes.png",
+    "generated promo images from real CoursePilot screenshots",
+    "screenshots",
+    "workbench-overview.webp",
     "promo-hero.png",
     "promo-workbench.png",
     "og-image.png",
@@ -80,12 +82,13 @@ generator_missing = [text for text in generator_required_text if text not in gen
 if generator_missing:
     raise SystemExit(f"Missing screenshot generator content: {generator_missing}")
 
-for source in ["ai-overview.png", "notes.png", "quiz.png", "mindmap.png", "transcript.png", "qa.png"]:
-    path = root / "real-screenshots" / source
+for source in sorted(set(re.findall(r"\./screenshots/([\w-]+\.webp)", html))):
+    path = root / "screenshots" / source
     if not path.exists() or path.stat().st_size < 10_000:
-        raise SystemExit(f"Missing or tiny real screenshot source: {source}")
-    if path.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
-        raise SystemExit(f"Real screenshot source is not a PNG file: {source}")
+        raise SystemExit(f"Missing or tiny screenshot: {source}")
+    data = path.read_bytes()
+    if data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        raise SystemExit(f"Screenshot is not a WebP file: {source}")
 
 for asset in ["promo-hero.png", "promo-workbench.png", "og-image.png"]:
     path = root / asset
