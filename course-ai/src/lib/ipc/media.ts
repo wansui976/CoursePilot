@@ -215,6 +215,11 @@ export const exporting = {
     invoke("cmd_export_quiz", { videoId }),
   mindmap: (videoId: string): Promise<string> =>
     invoke("cmd_export_mindmap", { videoId }),
+  /** 讲义 HTML：每页课件配讲解要点。`open` 时桌面端导出后直接用浏览器打开（自动弹打印框）。 */
+  handout: (
+    videoId: string,
+    options: { useAi: boolean; english: boolean; open: boolean },
+  ): Promise<string> => invoke("cmd_export_handout", { videoId, ...options }),
 };
 
 export const danmaku = {

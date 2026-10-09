@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import "@/i18n";
+import i18n from "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +19,7 @@ const { mockIpc, player } = vi.hoisted(() => ({
       cancelOcr: vi.fn(),
     },
     tools: { ocr: vi.fn() },
+    export: { handout: vi.fn() },
   },
   player: { currentMs: 0, requestSeek: vi.fn() },
 }));
@@ -525,5 +526,57 @@ describe("SlidesPanel page OCR", () => {
     const group = main.parentElement as HTMLElement;
     expect(group.className).toContain("flex-wrap");
     expect((group.parentElement as HTMLElement).className).toContain("flex-wrap");
+  });
+});
+
+describe("SlidesPanel handout", () => {
+  const page = {
+    id: 1,
+    video_id: "video-1",
+    image_path: "/p1.jpg",
+    composed_path: null,
+    start_ms: 0,
+    end_ms: 1000,
+    page_no: 1,
+    ocr_text: null,
+  };
+
+  beforeEach(async () => {
+    await i18n.changeLanguage("zh-CN");
+    mockIpc.slides.list.mockReset().mockResolvedValue([page]);
+    mockIpc.slides.screenshots.mockReset().mockResolvedValue([]);
+    mockIpc.slides.image.mockReset().mockResolvedValue(new ArrayBuffer(1));
+    mockIpc.export.handout.mockReset();
+  });
+
+  it("exports the handout with AI points and opens it on desktop", async () => {
+    mockIpc.export.handout.mockResolvedValue("/exports/video-1/handout.html");
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "讲义" }));
+
+    await waitFor(() =>
+      expect(mockIpc.export.handout).toHaveBeenCalledWith("video-1", {
+        useAi: true,
+        english: false,
+        open: true,
+      }),
+    );
+  });
+
+  it("shows a retryable error when the export fails", async () => {
+    mockIpc.export.handout.mockRejectedValue(new Error("no slides to export"));
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "讲义" }));
+
+    expect(await screen.findByText(/no slides to export/)).toBeInTheDocument();
+  });
+
+  it("hides the handout button until there are slides", async () => {
+    mockIpc.slides.list.mockResolvedValue([]);
+    renderPanel();
+    await waitFor(() => expect(mockIpc.slides.list).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "讲义" })).not.toBeInTheDocument();
   });
 });

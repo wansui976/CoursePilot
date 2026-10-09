@@ -109,6 +109,20 @@ pub fn quiz_to_anki(questions_json: &str) -> AppResult<String> {
     Ok(out)
 }
 
+/// 导出文件里展示的标题：去掉常见音视频扩展名（库里仍保存原始标题）。
+pub fn display_title(title: &str) -> String {
+    let lower = title.to_ascii_lowercase();
+    for ext in [
+        ".mp4", ".m4v", ".mkv", ".mov", ".webm", ".avi", ".flv", ".mp3", ".m4a", ".wav", ".aac", ".flac",
+        ".ogg", ".opus",
+    ] {
+        if lower.ends_with(ext) && title.len() > ext.len() {
+            return title[..title.len() - ext.len()].to_string();
+        }
+    }
+    title.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,5 +185,13 @@ mod tests {
     #[test]
     fn quiz_anki_errors_on_empty() {
         assert!(quiz_to_anki("[]").is_err());
+    }
+
+    #[test]
+    fn display_title_drops_media_extensions_only() {
+        assert_eq!(display_title("第 1 讲.MP4"), "第 1 讲");
+        assert_eq!(display_title("播客 12 期.m4a"), "播客 12 期");
+        assert_eq!(display_title("v1.2 版本说明"), "v1.2 版本说明");
+        assert_eq!(display_title(".mp4"), ".mp4");
     }
 }

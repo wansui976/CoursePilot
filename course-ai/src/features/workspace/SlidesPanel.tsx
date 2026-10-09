@@ -3,12 +3,13 @@ import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
-import { Camera, Images, ScanText, Square, X } from "lucide-react";
+import { Camera, FileText, Images, ScanText, Square, X } from "lucide-react";
 import { Button } from "@/ui/button";
 import { PanelEmptyState } from "@/ui/empty-state";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { TextSkeleton } from "@/ui/skeleton";
 import { humanizeError } from "@/lib/errors";
+import { isMobile, shareFile } from "@/lib/mobileFiles";
 import {
   ipc,
   type SlidesOcrOutcome,
@@ -95,7 +96,7 @@ function useLatestOperation<TData, TVariables>(
 }
 
 export function SlidesPanel({ videoId }: { videoId: string }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const qc = useQueryClient();
   const requestSeek = usePlayer((s) => s.requestSeek);
   // 不订阅 currentMs（避免播放时每秒 4 次重渲染）；点「截图/OCR」时按需读取当前进度。
@@ -164,6 +165,20 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   const ocr = useMutation<string, unknown, FrameRequest>({
     mutationKey: frameOcrKey,
     mutationFn: ({ atMs }) => ipc.tools.ocr(videoId, atMs),
+  });
+  // 讲义：每页课件配这一页的讲解要点。桌面端导出后直接在浏览器里打开（自动弹打印框，
+  // 存成 PDF 一步到位）；移动端走系统分享。没配大模型时后端自动退回讲稿摘录。
+  const handout = useMutation<string, unknown, void>({
+    mutationFn: async () => {
+      const mobile = isMobile();
+      const path = await ipc.export.handout(videoId, {
+        useAi: true,
+        english: i18n.language.startsWith("en"),
+        open: !mobile,
+      });
+      if (mobile) await shareFile(path, "text/html");
+      return path;
+    },
   });
   // 整批认课件页上的文字。默认只认还没认过的页；按住 shift 点则全部重认（换了引擎时用）。
   const pagesOcr = useMutation<SlidesOcrOutcome, unknown, PagesOcrRequest>({
@@ -297,6 +312,18 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
                 {pending === 0 ? t("slides.reRecognize") : t("slides.recognizeText")}
               </Button>
             ))}
+          {!slidesQuery.isPending && !slidesQuery.isError && slides.length > 0 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={handout.isPending || extractPending}
+              onClick={() => handout.mutate()}
+              title={t("slides.handoutTitle")}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              {handout.isPending ? t("slides.handoutBusy") : t("slides.handout")}
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
@@ -371,6 +398,13 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
         >
           {ocrFeedbackText(pagesOcrFeedback, t)}
         </div>
+      )}
+      {handout.isError && (
+        <ErrorNote
+          className="mx-3 mb-2 flex-none"
+          error={handout.error}
+          onRetry={() => handout.mutate()}
+        />
       )}
       {extractState?.status === "error" && (
         <ErrorNote

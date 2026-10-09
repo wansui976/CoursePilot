@@ -134,6 +134,95 @@ pub async fn cmd_export_mindmap(
     Ok(path.to_string_lossy().to_string())
 }
 
+/// 导出讲义：每页课件配这一页的讲解要点，存成自包含 HTML（浏览器里打印即可存 PDF）。
+///
+/// `use_ai`：用大模型把每页讲稿提炼成要点（走笔记任务的模型）；没配模型时自动退回讲稿摘录。
+/// `open`：桌面端导出后直接用系统浏览器打开（页面会自动弹出打印框）。
+#[tauri::command]
+pub async fn cmd_export_handout(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    video_id: String,
+    use_ai: bool,
+    english: bool,
+    open: bool,
+) -> AppResult<String> {
+    use crate::pipeline::handout::{
+        assign_speech, image_data_uri, render_html, summarize_pages, HandoutDoc, HandoutSlide,
+    };
+    let video = load_video(&state, &video_id).await?;
+    let slides: Vec<(i64, i64, Option<i64>, String)> = sqlx::query_as(
+        "SELECT page_no, start_ms, end_ms, image_path FROM slides WHERE video_id=? ORDER BY start_ms, page_no",
+    )
+    .bind(&video_id)
+    .fetch_all(&state.db.pool)
+    .await?;
+    if slides.is_empty() {
+        return Err(AppError::NotFound("no slides to export".into()));
+    }
+    let slides: Vec<HandoutSlide> = slides
+        .into_iter()
+        .map(|(page_no, start_ms, end_ms, image_path)| HandoutSlide { page_no, start_ms, end_ms, image_path })
+        .collect();
+    let segments = list_segments(&state.db, &video_id).await?;
+    let video_end_ms = video
+        .duration_ms
+        .or_else(|| segments.last().map(|s| s.end_ms))
+        .unwrap_or(0);
+    let mut pages = assign_speech(&slides, &segments, video_end_ms);
+
+    if use_ai {
+        if let Some((provider, model)) =
+            crate::commands::ai::provider_for_db(&state.db, crate::llm::profiles::AiTask::Notes).await?
+        {
+            summarize_pages(&provider, &model, &mut pages).await;
+        }
+    }
+
+    let chapters: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT start_ms, title FROM chapters WHERE video_id=? ORDER BY start_ms, order_index",
+    )
+    .bind(&video_id)
+    .fetch_all(&state.db.pool)
+    .await?;
+    let course: String = sqlx::query_scalar("SELECT name FROM courses WHERE id=?")
+        .bind(&video.course_id)
+        .fetch_optional(&state.db.pool)
+        .await?
+        .unwrap_or_default();
+    let paths: Vec<String> = pages.iter().map(|p| p.image_path.clone()).collect();
+    let images = tokio::task::spawn_blocking(move || {
+        paths.iter().map(|p| image_data_uri(Path::new(p))).collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|error| AppError::Other(format!("read slide images: {error}")))?;
+    let title = crate::export::display_title(&video.title);
+    let html = render_html(&HandoutDoc {
+        title: &title,
+        course: &course,
+        generated_at_ms: chrono::Utc::now().timestamp_millis(),
+        chapters: &chapters,
+        pages: &pages,
+        images: &images,
+        english,
+    });
+    let dir = export_dir(&video, &app)?;
+    let path = dir.join("handout.html");
+    std::fs::write(&path, html)?;
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if open {
+        use tauri_plugin_opener::OpenerExt as _;
+        app.opener()
+            .open_path(path.to_string_lossy(), None::<&str>)
+            .map_err(|error| AppError::Other(format!("open handout: {error}")))?;
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let _ = open;
+
+    Ok(path.to_string_lossy().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

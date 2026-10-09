@@ -34,7 +34,8 @@ use crate::commands::courses::{
 };
 use crate::commands::danmaku::{cmd_get_comments, cmd_get_danmaku};
 use crate::commands::export::{
-    cmd_export_mindmap, cmd_export_notes, cmd_export_quiz, cmd_export_subtitles,
+    cmd_export_handout, cmd_export_mindmap, cmd_export_notes, cmd_export_quiz,
+    cmd_export_subtitles,
 };
 use crate::commands::notify::cmd_notify;
 use crate::commands::rag::{
@@ -231,6 +232,7 @@ pub fn run() {
             cmd_export_notes,
             cmd_export_quiz,
             cmd_export_mindmap,
+            cmd_export_handout,
             cmd_backup_database,
             cmd_restore_database,
             cmd_rag_query,
