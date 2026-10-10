@@ -36,8 +36,20 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 - 💬 **Answers with sources** — ask about one video or a whole course; answers cite `[mm:ss]` timestamps and slide pages you can click to jump back.
 - 🧠 **Built for retention** — FSRS-4.5 spaced repetition, knowledge points merged across videos, a study heatmap, and weak-topic analysis.
 - 🤖 **Run the app in plain language** — the AI assistant searches Bilibili, creates courses, checks your progress, and turns a chat into notes. It asks before changing anything.
-- 📺 **Bilibili-friendly** — paste a link to download, batch-import playlists or collections, and keep the danmaku and comment threads.
+- 📺 **Bilibili-friendly** — paste a link to download, batch-import playlists or collections, keep the danmaku and comment threads, and follow collections so new videos import themselves.
+- 🌍 **Beyond Bilibili** — YouTube, podcast links and local audio (mp3, m4a…) work too, and foreign-language lectures get one-click translated, bilingual subtitles.
+- 📤 **Made to share** — export a slide-by-slide handout as PDF, and turn notes, mind maps or your study week into share-ready images.
 - 🔒 **Your data stays yours** — everything lives on your device and uses your own API keys (stored in the system keychain). It runs fully offline with local transcription and OCR.
+
+## 🆕 New in v0.3.0
+
+- **Danmaku heat curve** — danmaku density drawn above the progress bar, with clickable dots on the busiest moments.
+- **Lecture handouts** — every slide with the key points said while it was on screen, grouped by chapter, ready to save as PDF from your browser.
+- **Share images** — notes, mind maps and a weekly study report as 1080px-wide images.
+- **Translated, bilingual subtitles** — translate into Chinese, English, Japanese or Korean, then switch the player between original, bilingual and translated.
+- **Follow collections** — tick “follow” when importing a playlist; the app checks every 6 hours and imports and processes new videos.
+- **More sources** — YouTube and podcast links no longer ask for Bilibili cookies; local audio files import directly (slide extraction is skipped).
+- **Better formulas** — slide OCR, notes, summaries and quizzes write formulas as LaTeX and render them.
 
 ## 📸 Screenshots
 
@@ -97,7 +109,8 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 
 ### Import & processing
 
-- **Course library** — organize videos into course folders with drag-and-drop ordering. Import local files or Bilibili links, or batch-import folders and Bilibili playlists/collections.
+- **Course library** — organize videos into course folders with drag-and-drop ordering. Import local video or audio, Bilibili / YouTube / podcast links, or batch-import folders and playlists/collections.
+- **Followed collections** — follow a playlist while importing it; new videos are imported and processed automatically (up to 3 per check, preferring built-in subtitles). Manage them under “Subscriptions” in the course menu.
 - **Background queue** — every imported video runs through all steps automatically, with live progress. Pause anytime; retry just the failed step.
 - **Transcription** — local whisper.cpp or cloud ASR (Volcengine, Alibaba). An LLM then cleans up filler words, typos, and swallowed syllables. Cloud ASR resumes from checkpoints. If you edit a transcript, materials generated from the old version are marked outdated.
 - **Slide extraction & OCR** — detects page turns by frame-difference ratio, captures the stable frame after animations, skips solid-color and transition frames, and crops black bars first. Batch OCR runs through local tesseract, Alibaba Cloud OCR, or the DeepSeek vision model, in parallel with speech recognition.
@@ -107,6 +120,10 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 - **One-click generation** — chapters, overview, notes, quizzes, and mind maps, generated from the transcript plus slide text. All editable.
 - **Knowledge points** — extracted from every video, with duplicates and synonyms merged into a course-wide list. Each point gets an explanation, AI Q&A, progress tracking, and a shortcut to add flashcards.
 - **Full-text search** — searches transcripts and slide text across videos and jumps straight to the moment. Chinese search uses bigram tokenization weighted by rarity, so natural-language questions match too.
+- **Subtitle translation** — your LLM translates subtitles into Chinese, English, Japanese or Korean, aligned line by line; after edits only the changed lines are re-translated.
+- **Formulas** — slide OCR (DeepSeek vision), notes, summaries and quizzes write formulas as LaTeX, rendered with KaTeX.
+- **Handouts** — each slide with the key points said during it (transcript excerpts without an LLM), grouped by chapter, one click from PDF.
+- **Share images** — notes, mind maps and weekly study reports with the course and lecture title.
 - **Export** — subtitles (SRT / VTT), notes, mind maps, and quizzes.
 
 ### Q&A and the AI assistant
@@ -125,6 +142,8 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 - **Smart speed** — adapts playback speed to information density and never drops below the speed you picked.
 - **Clips** — mark a range with two clicks, attach a note, and jump back anytime.
 - **Bilibili danmaku & comments** — fetched in the background and cached locally. Toggle the danmaku layer anytime; the comment panel keeps nested replies, avatars, and emotes.
+- **Danmaku heat curve** — danmaku density above the progress bar with clickable peaks; opening and sign-off bursts are ignored.
+- **Bilingual subtitles** — translated lectures switch between original, bilingual and translated captions.
 - Hold the arrow keys to scrub, tap for ±5s; the subtitle overlay can be dragged and resized.
 
 ### Data & safety
