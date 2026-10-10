@@ -216,7 +216,8 @@
     "deleteCourseTitle": "删除课程",
     "cancel": "取消",
     "videoCountShort": "{{count}}集",
-    "allWatched": "已全部看完"
+    "allWatched": "已全部看完",
+    "subscriptions": "订阅更新"
   },
   "recycleBin": {
     "title": "回收站",
@@ -1116,7 +1117,8 @@
     "resultFail": "，失败 {{fail}} 个",
     "done": "完成",
     "best": "最高",
-    "noVideosFound": "这个链接里没有找到可导入的视频"
+    "noVideosFound": "这个链接里没有找到可导入的视频",
+    "subscribeOnly": "只订阅以后的新视频"
   },
   "dashboard": {
     "back": "返回",
@@ -1418,5 +1420,21 @@
     "minutesChart": "每日学习（分钟）",
     "weakTopics": "需要加强",
     "noWeakTopics": "暂无，继续保持"
+  },
+  "subscriptions": {
+    "title": "「{{course}}」的订阅",
+    "description": "跟踪中的合集、播放列表或 UP 主投稿页：应用开着时每 6 小时检查一次，新视频自动导入并开始处理。",
+    "empty": "还没有订阅。在「导入播放列表 / 合集」里勾选「订阅这个合集」即可。",
+    "lastChecked": "上次检查：{{when}}",
+    "neverChecked": "还没检查过",
+    "lastError": "上次出错：{{error}}",
+    "imported": "导入了 {{count}} 个新视频",
+    "upToDate": "没有新视频",
+    "checkNow": "立即检查",
+    "checking": "检查中…",
+    "checkNowLabel": "立即检查 {{title}}",
+    "unsubscribe": "取消订阅",
+    "unsubscribeLabel": "取消订阅 {{title}}",
+    "subscribeOption": "订阅这个合集：以后有新视频自动导入并处理"
   }
 }

@@ -189,6 +189,28 @@ pub async fn cmd_import_bilibili(
     sub_lang: Option<String>,
     subtitle_autocorrect: Option<bool>,
 ) -> AppResult<Video> {
+    import_url(
+        app,
+        &state,
+        course_id,
+        url,
+        max_height,
+        sub_lang,
+        subtitle_autocorrect,
+    )
+    .await
+}
+
+/// `cmd_import_bilibili` 的实现，订阅自动导入也走这里。
+pub async fn import_url(
+    app: tauri::AppHandle,
+    state: &AppState,
+    course_id: String,
+    url: String,
+    max_height: Option<u32>,
+    sub_lang: Option<String>,
+    subtitle_autocorrect: Option<bool>,
+) -> AppResult<Video> {
     if is_mobile_os(std::env::consts::OS) {
         return Err(crate::error::AppError::Config(
             "移动端暂不支持 B 站 / 网络视频下载，请先在桌面端导入后同步到移动端".into(),

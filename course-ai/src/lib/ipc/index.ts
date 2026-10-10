@@ -3,7 +3,7 @@
  * 调用方和测试（`vi.mock("@/lib/ipc")`）都只认这个入口。
  */
 import { app, sync, secrets, dev, notify, settings, whisper, backup, tools } from "./system";
-import { courses, videos, trash } from "./library";
+import { courses, videos, trash, subscriptions } from "./library";
 import { srs, stats, concepts } from "./study";
 import { assistant } from "./assistant";
 import { pipeline, transcripts, ai, slides, clips, exporting, danmaku, translation } from "./media";
@@ -16,6 +16,7 @@ export const ipc = {
   courses,
   videos,
   trash,
+  subscriptions,
   srs,
   stats,
   concepts,

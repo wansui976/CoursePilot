@@ -48,6 +48,8 @@ export function PlaylistImportDialog({
   const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
   const [useSub, setUseSub] = useState(true);
   const [autocorrect, setAutocorrect] = useState(true);
+  // 订阅：把当前各集记为见过，以后合集里出现新视频时后台自动导入。
+  const [subscribe, setSubscribe] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [cookieReason, setCookieReason] = useState<"missing" | "expired">("missing");
@@ -148,9 +150,27 @@ export function PlaylistImportDialog({
   const runImport = async () => {
     if (!info) return;
     const eps = info.episodes.filter((e) => selected.has(e.url));
-    if (eps.length === 0) return;
-    setStep("importing");
+    if (eps.length === 0 && !subscribe) return;
     const failures: { title: string; error: string }[] = [];
+    if (subscribe) {
+      try {
+        await ipc.subscriptions.create(
+          courseId,
+          url.trim(),
+          info.title,
+          info.episodes.map((e) => e.url),
+        );
+        void queryClient.invalidateQueries({ queryKey: qk.subscriptions(courseId) });
+      } catch (e) {
+        failures.push({ title: t("subscriptions.subscribeOption"), error: humanizeError(String(e)) });
+      }
+      // 只订阅、不导入存量：订好就关。
+      if (eps.length === 0 && failures.length === 0) {
+        onClose();
+        return;
+      }
+    }
+    setStep("importing");
     let ok = 0;
     for (let i = 0; i < eps.length; i++) {
       const ep = eps[i];
@@ -337,13 +357,29 @@ export function PlaylistImportDialog({
                 {t("playlistImport.aiCorrection")}
               </label>
             )}
+            <label className="flex items-center gap-2 text-xs text-[var(--text-normal)]">
+              <input
+                type="checkbox"
+                checked={subscribe}
+                onChange={(e) => setSubscribe(e.target.checked)}
+                className="h-3.5 w-3.5 accent-[var(--accent-text)]"
+              />
+              {t("subscriptions.subscribeOption")}
+            </label>
             {error && <ErrorNote error={error} />}
             <div className="flex flex-wrap justify-end gap-2 pt-1">
               <Button size="sm" variant="outline" onClick={onClose}>
                 {t("playlistImport.cancel")}
               </Button>
-              <Button variant="primary" size="sm" disabled={selected.size === 0} onClick={runImport}>
-                {t("playlistImport.importCount", { count: selected.size })}
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={selected.size === 0 && !subscribe}
+                onClick={runImport}
+              >
+                {selected.size === 0 && subscribe
+                  ? t("playlistImport.subscribeOnly")
+                  : t("playlistImport.importCount", { count: selected.size })}
               </Button>
             </div>
           </div>

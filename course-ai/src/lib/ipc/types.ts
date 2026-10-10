@@ -236,3 +236,15 @@ export interface TranslateProgress {
   done: number;
   total: number;
 }
+
+/** 订阅：跟踪一个合集 / 播放列表 / UP 主投稿页，有新视频时自动导入到课程。 */
+export interface Subscription {
+  id: string;
+  course_id: string;
+  url: string;
+  title: string;
+  auto_process: boolean;
+  last_checked_at: number | null;
+  last_error: string | null;
+  created_at: number;
+}

@@ -94,13 +94,14 @@ describe("CourseList", () => {
 
     fireEvent.keyDown(items[0], { key: "ArrowDown" });
     expect(items[1]).toHaveFocus();
+    const last = items[items.length - 1];
     fireEvent.keyDown(items[1], { key: "End" });
-    expect(items[2]).toHaveFocus();
-    fireEvent.keyDown(items[2], { key: "ArrowDown" });
+    expect(last).toHaveFocus();
+    fireEvent.keyDown(last, { key: "ArrowDown" });
     expect(items[0]).toHaveFocus();
     fireEvent.keyDown(items[0], { key: "ArrowUp" });
-    expect(items[2]).toHaveFocus();
-    fireEvent.keyDown(items[2], { key: "Home" });
+    expect(last).toHaveFocus();
+    fireEvent.keyDown(last, { key: "Home" });
     expect(items[0]).toHaveFocus();
 
     fireEvent.keyDown(menu, { key: "Escape" });

@@ -38,6 +38,10 @@ use crate::commands::export::{
     cmd_export_subtitles, cmd_save_share_image,
 };
 use crate::commands::notify::cmd_notify;
+use crate::commands::subscriptions::{
+    cmd_check_subscription, cmd_create_subscription, cmd_delete_subscription,
+    cmd_list_subscriptions,
+};
 use crate::commands::translate::{
     cmd_cancel_translation, cmd_get_translations, cmd_translate_transcript,
 };
@@ -158,6 +162,8 @@ pub fn run() {
                     tracing::warn!("purge expired trash failed: {error}");
                 }
                 handle.manage(ProcessingTasks::default());
+                // 订阅的合集 / 播放列表：后台定时检查新视频并自动导入。
+                crate::commands::subscriptions::spawn_scheduler(handle.clone());
                 let media = crate::media_server::start()
                     .await
                     .expect("media server start");
@@ -240,6 +246,10 @@ pub fn run() {
             cmd_translate_transcript,
             cmd_cancel_translation,
             cmd_get_translations,
+            cmd_create_subscription,
+            cmd_list_subscriptions,
+            cmd_delete_subscription,
+            cmd_check_subscription,
             cmd_backup_database,
             cmd_restore_database,
             cmd_rag_query,

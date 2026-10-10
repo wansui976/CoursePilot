@@ -9,6 +9,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
+    subscriptions: { create: vi.fn() },
     tools: {
       probePlaylist: vi.fn(),
       hasBilibiliCookies: vi.fn(),
@@ -36,6 +37,7 @@ function renderDialog(onStartProcessing = vi.fn(), onClose = vi.fn()) {
 describe("PlaylistImportDialog", () => {
   beforeEach(() => {
     mockIpc.tools.probePlaylist.mockReset();
+    mockIpc.subscriptions.create.mockReset().mockResolvedValue({ id: "s1" });
     mockIpc.tools.hasBilibiliCookies.mockReset().mockResolvedValue(true);
     mockIpc.tools.importBilibili.mockReset();
     mockIpc.settings.get.mockReset().mockResolvedValue(null);
@@ -236,5 +238,36 @@ describe("PlaylistImportDialog", () => {
 
     expect(await screen.findByText("Lecture series")).toBeInTheDocument();
     expect(mockIpc.tools.hasBilibiliCookies).not.toHaveBeenCalled();
+  });
+
+  it("can follow a collection without importing the existing episodes", async () => {
+    mockIpc.tools.probePlaylist.mockResolvedValue({
+      title: "我的合集",
+      episodes: [
+        { url: "u1", title: "第一讲", duration_ms: null },
+        { url: "u2", title: "第二讲", duration_ms: null },
+      ],
+    });
+    const { onClose } = renderDialog();
+    fireEvent.change(screen.getByLabelText("播放列表链接"), {
+      target: { value: "https://www.bilibili.com/list/1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "枚举各集" }));
+    expect(await screen.findByText("我的合集")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "全不选" }));
+    fireEvent.click(screen.getByLabelText(/订阅这个合集/));
+    fireEvent.click(screen.getByRole("button", { name: "只订阅以后的新视频" }));
+
+    await waitFor(() =>
+      expect(mockIpc.subscriptions.create).toHaveBeenCalledWith(
+        "c1",
+        "https://www.bilibili.com/list/1",
+        "我的合集",
+        ["u1", "u2"],
+      ),
+    );
+    expect(mockIpc.tools.importBilibili).not.toHaveBeenCalled();
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 });

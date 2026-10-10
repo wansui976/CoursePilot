@@ -11,7 +11,25 @@ import type {
 } from "../types";
 import type {
   FolderVideo,
+  Subscription,
 } from "./types";
+
+export const subscriptions = {
+  /** 订阅一个合集 / 播放列表：`baseline` 是订阅时已有各集的地址，之后只导入新出现的。 */
+  create: (
+    courseId: string,
+    url: string,
+    title: string,
+    baseline: string[],
+    autoProcess = true,
+  ): Promise<Subscription> =>
+    invoke("cmd_create_subscription", { courseId, url, title, baseline, autoProcess }),
+  list: (courseId: string): Promise<Subscription[]> =>
+    invoke("cmd_list_subscriptions", { courseId }),
+  remove: (id: string): Promise<void> => invoke("cmd_delete_subscription", { id }),
+  /** 立即检查，返回本次导入的集数。 */
+  check: (id: string): Promise<number> => invoke("cmd_check_subscription", { id }),
+};
 
 export const courses = {
   list: (): Promise<Course[]> => invoke("cmd_list_courses"),

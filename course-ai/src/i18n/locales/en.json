@@ -216,7 +216,8 @@
     "deleteCourseTitle": "Delete Course",
     "cancel": "Cancel",
     "videoCountShort": "{{count}} videos",
-    "allWatched": "All watched"
+    "allWatched": "All watched",
+    "subscriptions": "Subscriptions"
   },
   "recycleBin": {
     "title": "Recycle Bin",
@@ -1116,7 +1117,8 @@
     "resultFail": ", {{fail}} failed",
     "done": "Done",
     "best": "Best",
-    "noVideosFound": "No importable videos found at this link"
+    "noVideosFound": "No importable videos found at this link",
+    "subscribeOnly": "Follow future videos only"
   },
   "dashboard": {
     "back": "Back",
@@ -1422,5 +1424,21 @@
     "minutesChart": "Minutes per day",
     "weakTopics": "Needs work",
     "noWeakTopics": "Nothing yet — keep it up"
+  },
+  "subscriptions": {
+    "title": "Subscriptions for “{{course}}”",
+    "description": "Collections, playlists or channels being followed. While the app is open they're checked every 6 hours, and new videos are imported and processed automatically.",
+    "empty": "No subscriptions yet. Tick “Follow this collection” in Import playlist / collection.",
+    "lastChecked": "Last checked: {{when}}",
+    "neverChecked": "Not checked yet",
+    "lastError": "Last error: {{error}}",
+    "imported": "Imported {{count}} new videos",
+    "upToDate": "No new videos",
+    "checkNow": "Check now",
+    "checking": "Checking…",
+    "checkNowLabel": "Check {{title}} now",
+    "unsubscribe": "Unsubscribe",
+    "unsubscribeLabel": "Unsubscribe from {{title}}",
+    "subscribeOption": "Follow this collection: import and process new videos automatically"
   }
 }

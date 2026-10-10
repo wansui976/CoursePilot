@@ -1,7 +1,8 @@
 import { confirm as confirmDialog, message as messageDialog } from "@tauri-apps/plugin-dialog";
 import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
-import { FolderOpen, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { FolderOpen, MoreHorizontal, Pencil, Rss, Trash2 } from "lucide-react";
+import { SubscriptionsDialog } from "./SubscriptionsDialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Fragment,
@@ -89,6 +90,7 @@ export function CourseList({
   } = useQuery(queries.courses());
 
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [subscriptionsFor, setSubscriptionsFor] = useState<{ id: string; name: string } | null>(null);
   // 打开时记录触发按钮的屏幕坐标：菜单 portal 到 body 用 fixed 定位，
   // 不再被 `.ca-nav`（overflow-y:auto）滚动容器裁掉。
   const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
@@ -486,6 +488,18 @@ export function CourseList({
               <button
                 role="menuitem"
                 tabIndex={-1}
+                onClick={() => {
+                  setSubscriptionsFor({ id: openCourse.id, name: openCourse.name });
+                  closeMenu();
+                }}
+                className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
+              >
+                <Rss className="h-4 w-4" />
+                {t("courseList.subscriptions")}
+              </button>
+              <button
+                role="menuitem"
+                tabIndex={-1}
                 onClick={() => void confirmDelete(openCourse)}
                 className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--status-err)] hover:bg-[var(--surface-card-hover)]"
               >
@@ -496,6 +510,13 @@ export function CourseList({
           </>,
           document.body,
         )}
+      {subscriptionsFor && (
+        <SubscriptionsDialog
+          courseId={subscriptionsFor.id}
+          courseName={subscriptionsFor.name}
+          onClose={() => setSubscriptionsFor(null)}
+        />
+      )}
     </>
   );
 }

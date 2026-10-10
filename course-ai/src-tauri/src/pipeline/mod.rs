@@ -18,6 +18,7 @@ pub mod rag;
 pub mod search_terms;
 pub mod silence;
 pub mod handout;
+pub mod subscriptions;
 pub mod translate;
 pub mod media_kind;
 pub mod slides;
