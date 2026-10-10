@@ -43,7 +43,10 @@ Download-File "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.
 # whisper.cpp
 $whisperZip = Join-Path $tempDir "whisper.zip"
 $whisperOut = Join-Path $tempDir "whisper"
-Download-File "https://github.com/ggml-org/whisper.cpp/releases/latest/download/whisper-bin-x64.zip" $whisperZip
+# 固定版本：whisper.cpp 自 v1.9.3 起把预编译包发在 bNNNN 构建版里，打了 vX.Y.Z 的
+# 「latest」release 没有资产，latest/download 会 404。升级时把这里换成新的构建号。
+$whisperTag = if ($env:WHISPER_CPP_TAG) { $env:WHISPER_CPP_TAG } else { "b5454" }
+Download-File "https://github.com/ggml-org/whisper.cpp/releases/download/$whisperTag/whisper-bin-x64.zip" $whisperZip
 Expand-Archive -Path $whisperZip -DestinationPath $whisperOut -Force
 Copy-FirstMatch $whisperOut "whisper-cli.exe" (Join-Path $binaryDir "whisper-cli-$target.exe")
 Get-ChildItem -Path $whisperOut -Filter "*.dll" -Recurse | ForEach-Object {
