@@ -47,3 +47,6 @@ CoursePilot-项目简历.md
 # Local AI session metadata / scratch
 deepseek.json
 course-ai/src-tauri/.claude/
+
+# Claude Code 本地权限配置（个人、按机器）
+.claude/settings.local.json
