@@ -6,7 +6,7 @@ import { app, sync, secrets, dev, notify, settings, whisper, backup, tools } fro
 import { courses, videos, trash } from "./library";
 import { srs, stats, concepts } from "./study";
 import { assistant } from "./assistant";
-import { pipeline, transcripts, ai, slides, clips, exporting, danmaku } from "./media";
+import { pipeline, transcripts, ai, slides, clips, exporting, danmaku, translation } from "./media";
 
 export * from "./types";
 
@@ -31,6 +31,7 @@ export const ipc = {
   slides,
   clips,
   export: exporting,
+  translation,
   backup,
   tools,
   danmaku,

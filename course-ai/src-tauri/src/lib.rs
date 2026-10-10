@@ -38,6 +38,9 @@ use crate::commands::export::{
     cmd_export_subtitles, cmd_save_share_image,
 };
 use crate::commands::notify::cmd_notify;
+use crate::commands::translate::{
+    cmd_cancel_translation, cmd_get_translations, cmd_translate_transcript,
+};
 use crate::commands::rag::{
     cmd_cancel_rag_query, cmd_rag_query, cmd_rag_query_stream, cmd_search_transcript,
 };
@@ -234,6 +237,9 @@ pub fn run() {
             cmd_export_mindmap,
             cmd_export_handout,
             cmd_save_share_image,
+            cmd_translate_transcript,
+            cmd_cancel_translation,
+            cmd_get_translations,
             cmd_backup_database,
             cmd_restore_database,
             cmd_rag_query,

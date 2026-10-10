@@ -588,4 +588,21 @@ describe("Controls danmaku toggle", () => {
     const danmakuItem = screen.getByRole("menuitemcheckbox", { name: "弹幕" });
     expect(danmakuItem).toHaveAttribute("aria-checked", "true");
   });
+
+  it("offers the subtitle mode switch only when a translation exists", () => {
+    const onCycleCaptionMode = vi.fn();
+    const { unmount } = renderControls({ captionsOn: true, onCycleCaptionMode });
+    expect(screen.queryByRole("button", { name: /字幕：/ })).not.toBeInTheDocument();
+    unmount();
+
+    renderControls({
+      captionsOn: true,
+      translationAvailable: true,
+      captionMode: "bilingual",
+      onCycleCaptionMode,
+    });
+    const button = screen.getByRole("button", { name: "字幕：双语" });
+    fireEvent.click(button);
+    expect(onCycleCaptionMode).toHaveBeenCalledTimes(1);
+  });
 });

@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Captions,
   Check,
+  Languages,
   ChevronDown,
   ChevronUp,
   Locate,
@@ -28,6 +29,8 @@ import { usePlayer } from "@/stores/player";
 import { useInlineAsk } from "@/stores/inlineAsk";
 import type { TranscriptSegment } from "@/lib/types";
 import { findActiveSegmentIndex } from "@/lib/transcript";
+import { TRANSLATION_LANGS, useCaptionPrefs, type TranslationLang } from "@/stores/captionPrefs";
+import type { TranslateProgress } from "@/lib/ipc";
 
 // 手动滚动后暂停「跟随播放自动居中」的时长；停手超过该窗口才恢复跟随。
 const FOLLOW_PAUSE_MS = 4000;
@@ -84,11 +87,14 @@ const TranscriptRow = memo(function TranscriptRow({
   active,
   highlight,
   currentMatch,
+  translation,
   onSeek,
   onEdit,
 }: {
   index: number;
   segment: TranscriptSegment;
+  /** 双语 / 译文模式下这一句的译文，显示在原文下方。 */
+  translation?: string;
   active: boolean;
   /** 搜索词（小写）。为空不做高亮。 */
   highlight: string;
@@ -126,6 +132,11 @@ const TranscriptRow = memo(function TranscriptRow({
           {highlight ? highlightSegment(segment.text, highlight) : (
             <MathText text={segment.text} />
           )}
+          {translation && (
+            <span data-transcript-translation="" className="mt-0.5 block text-[0.92em] text-[var(--text-muted)]">
+              {translation}
+            </span>
+          )}
         </button>
         <button
           data-transcript-edit-id={segment.id}
@@ -150,6 +161,38 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   const transcriptQuery = useQuery(queries.transcripts(videoId));
   const segments = transcriptQuery.data ?? EMPTY_SEGMENTS;
   const requestSeek = usePlayer((s) => s.requestSeek);
+  // 字幕翻译：译文存在本地库里，播放器字幕和这里的双语文稿共用。
+  const captionMode = useCaptionPrefs((s) => s.mode);
+  const translationLang = useCaptionPrefs((s) => s.lang);
+  const setTranslationLang = useCaptionPrefs((s) => s.setLang);
+  const setCaptionMode = useCaptionPrefs((s) => s.setMode);
+  const translationsQuery = useQuery({
+    queryKey: qk.translations(videoId, translationLang),
+    queryFn: () => ipc.translation.list(videoId, translationLang),
+  });
+  const translationByIdx = useMemo(
+    () => new Map((translationsQuery.data ?? []).map((row) => [row.segment_idx, row.text])),
+    [translationsQuery.data],
+  );
+  const [translateProgress, setTranslateProgress] = useState<TranslateProgress | null>(null);
+  const translateRequest = useRef<string | null>(null);
+  const translate = useMutation({
+    mutationFn: () => {
+      const requestId = crypto.randomUUID();
+      translateRequest.current = requestId;
+      setTranslateProgress(null);
+      return ipc.translation.run(videoId, translationLang, requestId, setTranslateProgress);
+    },
+    onSuccess: () => {
+      // 翻完直接切到双语，免得用户还要去找开关。
+      if (useCaptionPrefs.getState().mode === "original") setCaptionMode("bilingual");
+    },
+    onSettled: () => {
+      translateRequest.current = null;
+      setTranslateProgress(null);
+      void qc.invalidateQueries({ queryKey: qk.translations(videoId, translationLang) });
+    },
+  });
   const scrollerRef = useRef<HTMLDivElement>(null);
   // 用户手动滚动时间戳：其后一小段窗口内暂停「跟随播放自动居中」，避免与手滚打架而抽搐。
   const userScrollRef = useRef(0);
@@ -537,6 +580,38 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
             <TranscriptPosition />
           </span>
           <div className="ml-auto flex items-center gap-0.5">
+            <select
+              aria-label={t("transcript.translateLang")}
+              value={translationLang}
+              disabled={translate.isPending}
+              onChange={(event) => setTranslationLang(event.target.value as TranslationLang)}
+              className="h-7 rounded-md border-0 bg-transparent px-1 text-xs text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+            >
+              {TRANSLATION_LANGS.map((lang) => (
+                <option key={lang} value={lang}>
+                  {t(`transcript.translateLangs.${lang}`)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => {
+                if (translate.isPending) {
+                  if (translateRequest.current) void ipc.translation.cancel(translateRequest.current);
+                } else {
+                  translate.mutate();
+                }
+              }}
+              title={translate.isPending ? t("transcript.translateStop") : t("transcript.translateTitle")}
+              className="ca-touch-44 inline-flex h-8 items-center gap-1 rounded-md px-1.5 text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+            >
+              <Languages aria-hidden="true" className="h-4 w-4" />
+              {translate.isPending
+                ? translateProgress && translateProgress.total > 0
+                  ? t("transcript.translateProgress", { done: translateProgress.done, total: translateProgress.total })
+                  : t("transcript.translating")
+                : t("transcript.translate")}
+            </button>
             <button
               ref={searchTriggerRef}
               type="button"
@@ -706,6 +781,9 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
               active={index === activeRowIndex}
               highlight={deferredHighlight}
               currentMatch={searchMatches[matchIndex] === index}
+              translation={
+                captionMode === "original" ? undefined : translationByIdx.get(segment.segment_idx)
+              }
               onSeek={requestSeek}
               onEdit={startEdit}
             />

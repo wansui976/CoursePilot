@@ -186,4 +186,41 @@ describe("CaptionOverlay", () => {
     expect(numericStyle(box, "left")).toBeCloseTo(0.16);
     expect(numericStyle(box, "top")).toBeCloseTo(0.85);
   });
+
+  describe("translation modes", () => {
+    function renderWith(mode: "original" | "bilingual" | "translation", translation?: string) {
+      const stage = document.createElement("div");
+      Object.defineProperty(stage, "clientHeight", { configurable: true, value: 400 });
+      render(
+        <CaptionOverlay
+          text="Gradient descent"
+          translation={translation}
+          mode={mode}
+          containerRef={{ current: stage }}
+        />,
+      );
+    }
+
+    it("shows the original above the translation in bilingual mode", () => {
+      renderWith("bilingual", "梯度下降");
+      expect(screen.getByText("Gradient descent")).toBeInTheDocument();
+      expect(screen.getByText("梯度下降")).toHaveAttribute("data-caption-translation");
+    });
+
+    it("shows only the translation in translation mode", () => {
+      renderWith("translation", "梯度下降");
+      expect(screen.getByText("梯度下降")).toBeInTheDocument();
+      expect(screen.queryByText("Gradient descent")).not.toBeInTheDocument();
+    });
+
+    it("falls back to the original when the line has no translation", () => {
+      renderWith("translation", undefined);
+      expect(screen.getByText("Gradient descent")).toBeInTheDocument();
+    });
+
+    it("ignores the translation in original mode", () => {
+      renderWith("original", "梯度下降");
+      expect(screen.queryByText("梯度下降")).not.toBeInTheDocument();
+    });
+  });
 });

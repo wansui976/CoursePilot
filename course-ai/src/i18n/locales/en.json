@@ -171,7 +171,14 @@
     "volumePercent": "Volume {{percent}}%",
     "scrubbing": "Adjusting playback position",
     "fastForwarding": "Fast-forwarding at {{rate}}x",
-    "rewinding": "Rewinding"
+    "rewinding": "Rewinding",
+    "captionMode": {
+      "original": "Original",
+      "bilingual": "Bilingual",
+      "translation": "Translated"
+    },
+    "captionModeLabel": "Subtitles: {{mode}}",
+    "captionModeTitle": "Switch subtitles: original → bilingual → translated"
   },
   "morePanel": {
     "quiz": "Quiz",
@@ -559,7 +566,19 @@
     "closeSearch": "Close search",
     "searchMatches": "{{current}}/{{total}}",
     "previousMatch": "Previous match",
-    "nextMatch": "Next match"
+    "nextMatch": "Next match",
+    "translate": "Translate",
+    "translating": "Translating…",
+    "translateProgress": "Translating {{done}}/{{total}}",
+    "translateStop": "Stop translating (finished lines are kept)",
+    "translateTitle": "Translate the subtitles with your LLM for bilingual captions",
+    "translateLang": "Translation language",
+    "translateLangs": {
+      "zh": "中文",
+      "en": "English",
+      "ja": "日本語",
+      "ko": "한국어"
+    }
   },
   "notes": {
     "unsaved": "Unsaved",

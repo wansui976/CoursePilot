@@ -17,5 +17,6 @@ pub mod stats;
 pub mod sync;
 pub mod tools;
 pub mod transcripts;
+pub mod translate;
 pub mod videos;
 pub mod whisper;

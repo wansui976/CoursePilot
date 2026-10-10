@@ -171,7 +171,14 @@
     "volumePercent": "音量 {{percent}}%",
     "scrubbing": "进度调整",
     "fastForwarding": "{{rate}}x 快进中",
-    "rewinding": "快退中"
+    "rewinding": "快退中",
+    "captionMode": {
+      "original": "原文",
+      "bilingual": "双语",
+      "translation": "译文"
+    },
+    "captionModeLabel": "字幕：{{mode}}",
+    "captionModeTitle": "切换字幕：原文 → 双语 → 译文"
   },
   "morePanel": {
     "quiz": "练习",
@@ -559,7 +566,19 @@
     "searchPlaceholder": "搜索这段文稿…",
     "searchMatches": "{{current}}/{{total}}",
     "previousMatch": "上一处匹配",
-    "nextMatch": "下一处匹配"
+    "nextMatch": "下一处匹配",
+    "translate": "翻译",
+    "translating": "翻译中…",
+    "translateProgress": "翻译中 {{done}}/{{total}}",
+    "translateStop": "停止翻译（已翻的句子会保留）",
+    "translateTitle": "用大模型把字幕翻译成所选语言，播放器可显示双语字幕",
+    "translateLang": "翻译目标语言",
+    "translateLangs": {
+      "zh": "中文",
+      "en": "English",
+      "ja": "日本語",
+      "ko": "한국어"
+    }
   },
   "notes": {
     "unsaved": "未保存",

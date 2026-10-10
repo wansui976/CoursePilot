@@ -35,6 +35,7 @@ export const qk = {
   clips: (videoId: string) => ["clips", videoId] as const,
   comments: (videoId: string) => ["videoComments", videoId] as const,
   danmaku: (videoId: string) => ["danmaku", videoId] as const,
+  translations: (videoId: string, lang: string) => ["translations", videoId, lang] as const,
   videoCover: (videoId: string) => ["video-cover", videoId] as const,
   videoCrop: (videoId: string) => ["video-crop", videoId] as const,
   silenceSkips: (videoId: string) => ["video-skips", videoId] as const,

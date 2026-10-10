@@ -19,6 +19,7 @@ import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
 import { CaptionOverlay } from "./CaptionOverlay";
 import { Controls } from "./Controls";
 import { DanmakuOverlay } from "./DanmakuOverlay";
+import { useCaptionPrefs } from "@/stores/captionPrefs";
 import { ProgressBar } from "./ProgressBar";
 
 // 距片尾 15s 内不再续播（视为看完），从头开始。
@@ -168,6 +169,7 @@ export function VideoPlayer({
   // 不在这里订阅 currentMs（否则播放时整个播放器每秒重渲染 4 次）。
   // 进度由 Controls 自己订阅；字幕只在「跨段」时更新。
   const [caption, setCaption] = useState<string | undefined>(undefined);
+  const [captionTranslation, setCaptionTranslation] = useState<string | undefined>(undefined);
   const [brightness, setBrightness] = useState(1);
   const [gestureHint, setGestureHint] = useState<{
     kind: "brightness" | "volume" | "scrub" | "rate" | "rewind";
@@ -193,6 +195,18 @@ export function VideoPlayer({
     staleTime: Infinity,
   });
   const danmaku = queriedDanmaku ?? EMPTY_DANMAKU;
+  // 字幕译文：本地库里读，翻过才有。原文模式下也读，用来决定要不要出「原文/双语/译文」切换。
+  const captionMode = useCaptionPrefs((s) => s.mode);
+  const translationLang = useCaptionPrefs((s) => s.lang);
+  const cycleCaptionMode = useCaptionPrefs((s) => s.cycleMode);
+  const { data: translations } = useQuery({
+    queryKey: qk.translations(videoId, translationLang),
+    queryFn: () => ipc.translation.list(videoId, translationLang),
+  });
+  const translationByIdx = useMemo(
+    () => new Map((translations ?? []).map((row) => [row.segment_idx, row.text])),
+    [translations],
+  );
   const [danmakuOn, setDanmakuOn] = useState(loadDanmakuEnabled);
   // 查询 pending 时保持同一个空数组引用，避免智能倍率计划被当作“新文稿”反复重建。
   const segments = queriedSegments ?? EMPTY_TRANSCRIPT_SEGMENTS;
@@ -221,12 +235,15 @@ export function VideoPlayer({
       const index = findActiveSegmentIndex(sortedSegments, ms);
       const text = index >= 0 ? sortedSegments[index].text : undefined;
       setCaption((prev) => (prev === text ? prev : text));
+      const translated =
+        index >= 0 ? translationByIdx.get(sortedSegments[index].segment_idx) : undefined;
+      setCaptionTranslation((prev) => (prev === translated ? prev : translated));
     };
     compute(usePlayer.getState().currentMs);
     return usePlayer.subscribe((state, previousState) => {
       if (state.currentMs !== previousState.currentMs) compute(state.currentMs);
     });
-  }, [sortedSegments]);
+  }, [sortedSegments, translationByIdx]);
 
   useLayoutEffect(() => {
     ref.current?.setAttribute("webkit-playsinline", "true");
@@ -924,6 +941,8 @@ export function VideoPlayer({
         {captionsOn && (
           <CaptionOverlay
             text={caption ?? ""}
+            translation={captionTranslation}
+            mode={captionMode}
             containerRef={regionRef}
             bottomInset={controlsHeight}
           />
@@ -966,6 +985,9 @@ export function VideoPlayer({
             fullscreen={fullscreen}
             danmakuAvailable={danmaku.length > 0}
             danmakuOn={danmakuOn}
+            captionMode={captionMode}
+            translationAvailable={translationByIdx.size > 0}
+            onCycleCaptionMode={cycleCaptionMode}
             onToggleCrop={toggleCrop}
             onToggleCaptions={() => setCaptionsOn((on) => !on)}
             onToggleDanmaku={() => {

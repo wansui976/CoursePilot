@@ -30,6 +30,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
+import type { CaptionMode } from "@/stores/captionPrefs";
 
 const SPEEDS = [2, 1.5, 1.25, 1, 0.75, 0.5];
 const iconButtonClass =
@@ -62,6 +63,9 @@ export function Controls({
   fullscreen,
   danmakuAvailable,
   danmakuOn,
+  captionMode = "original",
+  translationAvailable = false,
+  onCycleCaptionMode,
   onToggleCrop,
   onToggleCaptions,
   onToggleDanmaku,
@@ -93,6 +97,10 @@ export function Controls({
   /** 有弹幕数据（B 站视频且抓到了）才出弹幕开关。 */
   danmakuAvailable: boolean;
   danmakuOn: boolean;
+  /** 字幕显示模式（原文 / 双语 / 译文）；有当前语言的译文才出切换按钮。 */
+  captionMode?: CaptionMode;
+  translationAvailable?: boolean;
+  onCycleCaptionMode?: () => void;
   onToggleCrop: () => void;
   onToggleCaptions: () => void;
   onToggleDanmaku: () => void;
@@ -477,6 +485,23 @@ export function Controls({
       >
         {t("videoPlayer.captions")}
       </button>
+      {captionsOn && translationAvailable && onCycleCaptionMode && (
+        <button
+          type="button"
+          onClick={onCycleCaptionMode}
+          title={t("videoPlayer.captionModeTitle")}
+          aria-label={t("videoPlayer.captionModeLabel", {
+            mode: t(`videoPlayer.captionMode.${captionMode}`),
+          })}
+          className={`${textButtonClass} ${
+            captionMode !== "original"
+              ? "bg-[var(--surface-card-active)] text-[var(--video-accent)] ring-1 ring-inset ring-[var(--video-accent)]/60"
+              : ""
+          }`}
+        >
+          {t(`videoPlayer.captionMode.${captionMode}`)}
+        </button>
+      )}
       <Button
         size="icon"
         variant="ghost"
@@ -722,6 +747,23 @@ export function Controls({
                 </span>
                 {t("videoPlayer.captions")}
               </button>
+
+              {captionsOn && translationAvailable && onCycleCaptionMode && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  tabIndex={-1}
+                  className={`${mobileMenuItemClass} ${
+                    captionMode !== "original" ? "text-[var(--video-accent)]" : ""
+                  }`}
+                  onClick={() => runMoreAction(onCycleCaptionMode)}
+                >
+                  <span className="flex w-4 flex-none justify-center" />
+                  {t("videoPlayer.captionModeLabel", {
+                    mode: t(`videoPlayer.captionMode.${captionMode}`),
+                  })}
+                </button>
+              )}
 
               <button
                 type="button"

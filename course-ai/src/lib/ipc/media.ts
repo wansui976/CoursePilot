@@ -23,6 +23,8 @@ import type {
   SlidesOcrProgress,
   SlidesOcrEvent,
   SlidesOcrOutcome,
+  TranslateProgress,
+  TranslationRow,
 } from "./types";
 
 export const pipeline = {
@@ -45,6 +47,32 @@ export const transcripts = {
     invoke("cmd_list_transcripts", { videoId }),
   update: (segmentId: number, text: string): Promise<void> =>
     invoke("cmd_update_transcript", { segmentId, text }),
+};
+
+export const translation = {
+  /** 把讲稿翻成目标语言，返回新翻的句数。已翻且原文没变的句子会跳过。 */
+  run: async (
+    videoId: string,
+    lang: string,
+    requestId: string,
+    onProgress?: (progress: TranslateProgress) => void,
+  ): Promise<number> => {
+    // 先注册监听再 invoke，避免漏掉早到的事件。
+    const unlisten = await listen<{ type: "progress" } & TranslateProgress>(
+      `translate:${requestId}`,
+      (evt) => {
+        if (evt.payload.type === "progress") onProgress?.(evt.payload);
+      },
+    );
+    try {
+      return await invoke<number>("cmd_translate_transcript", { videoId, lang, requestId });
+    } finally {
+      unlisten();
+    }
+  },
+  cancel: (requestId: string): Promise<void> => invoke("cmd_cancel_translation", { requestId }),
+  list: (videoId: string, lang: string): Promise<TranslationRow[]> =>
+    invoke("cmd_get_translations", { videoId, lang }),
 };
 
 export const ai = {

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MATH_RE } from "@/lib/markdownToTiptap";
+import type { CaptionMode } from "@/stores/captionPrefs";
 
 // KaTeX 较重，仅在字幕真含公式时按需加载，避免拖累播放器首屏。
 const MathText = lazy(() =>
@@ -74,10 +75,15 @@ const CAPTION_BAR_GAP = 8;
 
 export function CaptionOverlay({
   text,
+  translation,
+  mode = "original",
   containerRef,
   bottomInset = 0,
 }: {
   text: string;
+  /** 当前句的译文；没有时双语 / 译文模式都退回只显示原文。 */
+  translation?: string;
+  mode?: CaptionMode;
   // 定位参照容器：「舞台」区域（含黑边），字幕可在其内任意拖动/缩放。
   containerRef: React.RefObject<HTMLDivElement | null>;
   // 底部控制栏的占位高度（像素）：字幕落入此区时上移，保证永远在控制栏上方。
@@ -268,10 +274,13 @@ export function CaptionOverlay({
     });
   }
 
+  const showTranslation = mode !== "original" && !!translation?.trim();
+  const primary = showTranslation && mode === "translation" ? translation! : text;
   // 字幕框负责可视区域；字号只在这个区域里受限自适应，给两行字幕留出安全余量，避免高框时把字顶到边上。
+  // 双语多出一行（译文按 0.82 倍字号算），字号相应收一点，别把译文挤出框。
+  const safeLines = CAPTION_SAFE_LINES + (showTranslation && mode === "bilingual" ? 0.82 : 0);
   const fontSize = clamp(
-    (stageHeight * box.height * CAPTION_SAFE_HEIGHT_RATIO) /
-      (CAPTION_SAFE_LINES * CAPTION_LINE_HEIGHT),
+    (stageHeight * box.height * CAPTION_SAFE_HEIGHT_RATIO) / (safeLines * CAPTION_LINE_HEIGHT),
     12,
     120,
   );
@@ -286,7 +295,7 @@ export function CaptionOverlay({
       : 0;
 
   // 段间空文本：组件保持挂载（stageHeight 不丢），仅不显示字幕框。
-  if (!text.trim()) return null;
+  if (!primary.trim()) return null;
 
   return (
     <div
@@ -317,8 +326,16 @@ export function CaptionOverlay({
         className="flex h-full w-full cursor-move items-center justify-center overflow-hidden rounded border-0 bg-transparent px-3 text-center leading-snug text-white shadow-[var(--shadow-pop)] ring-1 ring-transparent [text-shadow:0_1px_2px_rgba(0,0,0,0.9)] group-hover:ring-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
         style={{ fontSize }}
       >
-        <span id={captionTextId}>
-          <CaptionText text={text} />
+        <span id={captionTextId} className="flex flex-col items-center">
+          <span>
+            <CaptionText text={primary} />
+          </span>
+          {showTranslation && mode === "bilingual" && (
+            // 双语：原文在上，译文在下、略小略淡。
+            <span data-caption-translation="" className="mt-0.5 text-[0.82em] opacity-90">
+              {translation}
+            </span>
+          )}
         </span>
       </button>
       {(Object.keys(CORNER_CLASS) as Corner[]).map((corner) => (

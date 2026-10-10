@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptPanel } from "./TranscriptPanel";
 import { useInlineAsk } from "@/stores/inlineAsk";
 import { usePlayer } from "@/stores/player";
+import { useCaptionPrefs } from "@/stores/captionPrefs";
 import type { TranscriptSegment } from "@/lib/types";
 
 const { mockIpc } = vi.hoisted(() => ({
@@ -19,6 +20,11 @@ const { mockIpc } = vi.hoisted(() => ({
     },
     srs: {
       addCard: vi.fn(),
+    },
+    translation: {
+      list: vi.fn(),
+      run: vi.fn(),
+      cancel: vi.fn(),
     },
   },
 }));
@@ -70,6 +76,10 @@ describe("TranscriptPanel", () => {
     mockIpc.export.subtitles.mockReset();
     mockIpc.transcripts.list.mockResolvedValue(makeSegments(60));
     mockIpc.srs.addCard.mockReset().mockResolvedValue("m:1");
+    mockIpc.translation.list.mockReset().mockResolvedValue([]);
+    mockIpc.translation.run.mockReset();
+    mockIpc.translation.cancel.mockReset().mockResolvedValue(undefined);
+    useCaptionPrefs.setState({ mode: "original", lang: "zh" });
     useInlineAsk.setState({ pending: null });
     usePlayer.setState({
       videoId: null,
@@ -529,5 +539,34 @@ describe("TranscriptPanel", () => {
 
     expect(screen.queryByRole("searchbox", { name: "搜索文稿" })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+
+  it("translates into the chosen language and switches to bilingual when done", async () => {
+    mockIpc.translation.run.mockImplementation(
+      async (_v: string, _l: string, _id: string, onProgress?: (p: { done: number; total: number }) => void) => {
+        onProgress?.({ done: 40, total: 60 });
+        return 60;
+      },
+    );
+    renderTranscriptPanel();
+    await screen.findByText("第 1 句文稿内容");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "翻译目标语言" }), { target: { value: "en" } });
+    mockIpc.translation.list.mockResolvedValue([{ segment_idx: 0, text: "Line one" }]);
+    fireEvent.click(screen.getByRole("button", { name: "翻译" }));
+
+    await waitFor(() =>
+      expect(mockIpc.translation.run).toHaveBeenCalledWith("video-1", "en", expect.any(String), expect.any(Function)),
+    );
+    await waitFor(() => expect(useCaptionPrefs.getState().mode).toBe("bilingual"));
+    expect(await screen.findByText("Line one")).toBeInTheDocument();
+  });
+
+  it("hides translations in original mode", async () => {
+    mockIpc.translation.list.mockResolvedValue([{ segment_idx: 0, text: "Line one" }]);
+    renderTranscriptPanel();
+    await screen.findByText("第 1 句文稿内容");
+    await waitFor(() => expect(mockIpc.translation.list).toHaveBeenCalled());
+    expect(screen.queryByText("Line one")).not.toBeInTheDocument();
   });
 });

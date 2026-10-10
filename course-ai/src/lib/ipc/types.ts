@@ -224,3 +224,15 @@ export interface CourseKnowledge {
   total_videos: number;
   stale: boolean;
 }
+
+/** 一句字幕的译文（按分句序号对齐讲稿）。 */
+export interface TranslationRow {
+  segment_idx: number;
+  text: string;
+}
+
+/** 字幕翻译进度：已翻 / 待翻句数。 */
+export interface TranslateProgress {
+  done: number;
+  total: number;
+}
