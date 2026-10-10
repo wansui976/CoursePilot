@@ -32,6 +32,26 @@ jobs:
             echo "RELEASE_TAG=${GITHUB_REF_NAME%%+*}" >> "$GITHUB_ENV"
           fi
 
+      # 先建好 release（带 .github/release-notes/<tag>.md 的说明），再开始漫长的构建：
+      # Windows 那边的 tauri-action 发现 release 已存在就只上传资产，两边不会抢着创建。
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          notes=".github/release-notes/${RELEASE_TAG}.md"
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            if [[ -f "$notes" ]]; then
+              gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$notes"
+            fi
+          elif [[ -f "$notes" ]]; then
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "CoursePilot ${RELEASE_TAG}" --notes-file "$notes" --verify-tag
+          else
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "CoursePilot ${RELEASE_TAG}" --generate-notes --verify-tag
+          fi
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
