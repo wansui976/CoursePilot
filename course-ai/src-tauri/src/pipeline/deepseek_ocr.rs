@@ -18,7 +18,8 @@ pub const DEFAULT_BASE_URL: &str = "https://api.deepseek.com";
 /// 识别图片里的全部文字，按原文顺序逐行返回。
 const OCR_PROMPT: &str = "请逐字识别这张图片中的全部文字，保持原有的换行与顺序，\
 不要翻译，不要解释，不要输出任何多余内容，只输出识别到的文字本身。\
-图片里没有文字时输出空内容。";
+图中的数学、物理、化学公式写成 LaTeX：行内用 \\( ... \\)，独立成行的公式用 \\[ ... \\]；\
+其余文字照原样输出。图片里没有文字时输出空内容。";
 
 fn truncate(s: &str, max_chars: usize) -> String {
     let t: String = s.chars().take(max_chars).collect();
@@ -177,5 +178,11 @@ mod tests {
     fn default_constants_match_deepseek_vision() {
         assert_eq!(DEFAULT_MODEL, "deepseek-v4-flash-vision-exp");
         assert_eq!(DEFAULT_BASE_URL, "https://api.deepseek.com");
+    }
+
+    #[test]
+    fn prompt_asks_for_formulas_as_latex() {
+        assert!(OCR_PROMPT.contains("LaTeX"));
+        assert!(OCR_PROMPT.contains(r"\( ... \)"));
     }
 }

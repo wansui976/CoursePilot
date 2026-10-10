@@ -17,6 +17,7 @@ import {
   type SlidesProgress,
 } from "@/lib/ipc";
 import { SlideImage } from "./SlideImage";
+import { MathText } from "@/ui/MathText";
 import { formatMs } from "@/lib/time";
 import { getSlidesSensitivity, sensitivityToThreshold } from "@/lib/slides";
 import { usePlayer } from "@/stores/player";
@@ -465,7 +466,8 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
             className="block max-h-40 w-full overflow-y-auto whitespace-pre-wrap text-left text-[var(--text-normal)] hover:text-[var(--text-strong)]"
             onClick={() => void copyOcrResult()}
           >
-            {ocrResult || t("slides.noOcrText")}
+            {/* 视觉模型会把公式认成 LaTeX，这里按 KaTeX 渲染；复制出去的仍是原文。 */}
+            {ocrResult ? <MathText text={ocrResult} /> : t("slides.noOcrText")}
           </button>
         </div>
       )}

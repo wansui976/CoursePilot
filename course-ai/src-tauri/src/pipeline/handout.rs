@@ -214,6 +214,14 @@ pub struct HandoutDoc<'a> {
     pub english: bool,
 }
 
+/// 讲义是静态 HTML、不带 KaTeX：去掉 LaTeX 定界符，公式至少按原样可读。
+fn strip_math_delimiters(text: &str) -> String {
+    text.replace("\\(", "")
+        .replace("\\)", "")
+        .replace("\\[", "")
+        .replace("\\]", "")
+}
+
 fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -322,13 +330,16 @@ pub fn render_html(doc: &HandoutDoc<'_>) -> String {
             let items: String = page
                 .points
                 .iter()
-                .map(|p| format!("<li>{}</li>", escape(p)))
+                .map(|p| format!("<li>{}</li>", escape(&strip_math_delimiters(p))))
                 .collect();
             format!("<ul>{items}</ul>")
         } else if !page.speech.trim().is_empty() {
             format!(
                 "<p class=\"excerpt\">{}</p>",
-                escape(&truncate_chars(page.speech.trim(), EXCERPT_CHARS))
+                escape(&strip_math_delimiters(&truncate_chars(
+                    page.speech.trim(),
+                    EXCERPT_CHARS
+                )))
             )
         } else {
             format!("<p class=\"empty\">{no_speech}</p>")
@@ -456,7 +467,7 @@ mod tests {
             &[seg(1000, "讲 <b>粗体</b>"), seg(31_000, "第二页")],
             120_000,
         );
-        pages[1].points = vec!["A & B".into()];
+        pages[1].points = vec!["A & B".into(), r"速度 \(v^2\)".into()];
         let chapters = vec![
             (0, "开场".to_string()),
             (20_000, "被跳过的短章".to_string()),
@@ -476,6 +487,7 @@ mod tests {
         assert!(html.contains("<title>第 1 讲 &lt;导论&gt;</title>"));
         assert!(html.contains("讲 &lt;b&gt;粗体&lt;/b&gt;"));
         assert!(html.contains("<li>A &amp; B</li>"));
+        assert!(html.contains("<li>速度 v^2</li>"));
         assert!(html.contains("这一页没有讲实质内容"));
         assert!(html.contains("data:image/jpeg;base64,AA=="));
         // 两页之间跨过多个章节时只写离页面最近的那一章。

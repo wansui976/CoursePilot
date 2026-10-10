@@ -14,6 +14,9 @@ export type NoteBlock =
 /** 去掉行内 Markdown 记号与时间戳：分享图里不需要可点击的 [mm:ss]。 */
 export function plainInline(text: string): string {
   return text
+    // 分享图画不了 KaTeX：去掉 LaTeX 定界符，公式至少按原样可读。
+    .replace(/\\[()[\]]/g, "")
+    .replace(/\$\$([^$]+)\$\$/g, "$1")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/▶?\s*\[\d{1,2}:\d{2}(?::\d{2})?\]/g, "")

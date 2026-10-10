@@ -10,6 +10,7 @@ describe("plainInline", () => {
       "口诀：先看 R 再看链接",
     );
     expect(plainInline("用 *假设分配* 法")).toBe("用 假设分配 法");
+    expect(plainInline("速度 \\(v^2\\) 与 \\[E=mc^2\\]")).toBe("速度 v^2 与 E=mc^2");
   });
 });
 

@@ -1,5 +1,13 @@
 use crate::llm::{ChatMessage, ChatRequest};
 
+/// 公式写法：笔记、摘要、出题统一用 LaTeX 定界符，前端（笔记、题目、字幕、文稿）都按 KaTeX 渲染。
+macro_rules! formula_rule {
+    () => {
+        "数学、物理、化学公式写成 LaTeX：行内用 \\( ... \\)，独立的长公式用 \\[ ... \\]；\
+         只把公式部分写成 LaTeX，其余照常写中文，不要整句包成公式。"
+    };
+}
+
 fn base(
     label: &'static str,
     model: &str,
@@ -45,7 +53,8 @@ pub fn notes_request(model: &str, transcript: &str) -> ChatRequest {
     base(
         "notes",
         model,
-        "你是应试类网课的笔记助手。输出 Markdown，不要代码围栏。\
+        concat!(
+            "你是应试类网课的笔记助手。输出 Markdown，不要代码围栏。\
          写给「课后复习 + 考前速查」的人看：他没时间重看视频，要能直接拿去用。\
          规则：\
          1. 只写视频真讲过的。每一条都要能在讲稿里找到出处，找不到就不写；\
@@ -58,7 +67,10 @@ pub fn notes_request(model: &str, transcript: &str) -> ChatRequest {
          5. 例题只在老师完整讲了解法时才写，固定三行：题目 → 关键判断（他是怎么看出\
             该用这个方法的）→ 答法。不要抄整道题面。\
          6. 结尾写一节「## 速查表」，Markdown 表格，列为：考点 | 怎么判 | 怎么答。\
-            只收本视频真正讲到的考点，三到八行。",
+            只收本视频真正讲到的考点，三到八行。\
+         7. ",
+            formula_rule!()
+        ),
         transcript,
         "根据讲稿写笔记。",
     )
@@ -72,14 +84,18 @@ pub fn note_snippet_request(model: &str, topic: &str, points: &str) -> ChatReque
     ChatRequest {
         model: model.to_string(),
         system: Some(
-            "你是应试类网课的笔记助手。输出 Markdown，不要代码围栏。\
+            concat!(
+                "你是应试类网课的笔记助手。输出 Markdown，不要代码围栏。\
              这段笔记会追加到用户该视频的笔记里，供课后复习和考前速查。规则：\
              1. 只写用户要求整理的这段内容，不要扩写成整节视频的笔记。\
              2. 用「## 主题」分节，节内用「- 」列要点；要点写成可执行的动作或可判断的结论，\
                 不要写成「介绍了 X」这类目录式空话。\
              3. 用户给的口诀、模板、固定表述逐字保留，不要改写成同义句。\
-             4. 只依据用户给出的要点整理，不编造要点之外的内容。"
-                .to_string(),
+             4. 只依据用户给出的要点整理，不编造要点之外的内容。\
+             5. ",
+                formula_rule!()
+            )
+            .to_string(),
         ),
         cacheable_context: None,
         messages: vec![ChatMessage::user(format!(
@@ -97,7 +113,8 @@ pub fn quiz_request(model: &str, transcript: &str) -> ChatRequest {
         model,
         "你是应试类网课的出题助手。只输出 JSON 数组，不要解释或代码围栏。",
         transcript,
-        "紧扣视频真正讲到的考点出 5-8 道题，覆盖不同章节。输出 JSON 数组，每项 \
+        concat!(
+            "紧扣视频真正讲到的考点出 5-8 道题，覆盖不同章节。输出 JSON 数组，每项 \
          {\"type\":\"single\"|\"multi\"|\"judge\",\"stem\":题干,\
          \"options\":[字符串...],\"answer\":单选为字符串/多选为字符串数组/判断为 true|false,\
          \"explanation\":一句话说明依据,\"ref_ms\":该考点在讲稿里的毫秒时间}。要求：\
@@ -107,7 +124,11 @@ pub fn quiz_request(model: &str, transcript: &str) -> ChatRequest {
          3. single 至少 4 个选项；multi 有 2 个及以上正确项；judge 不要给 options。\
          4. answer 必须与 options 完全一致（用选项原文，不要用字母 A/B/C）。\
          5. explanation 只写一句：指出依据在讲稿的哪个说法上。不要复述题干，不要展开教学。\
-         6. ref_ms 取自相关讲稿行的毫秒时间，不要编造。",
+         6. ref_ms 取自相关讲稿行的毫秒时间，不要编造。\
+         7. 题干、选项、解析里的",
+            formula_rule!(),
+            "JSON 字符串里的反斜杠要写成两个（\\\\）。"
+        ),
     )
 }
 
@@ -131,11 +152,14 @@ pub fn summary_request(model: &str, transcript: &str) -> ChatRequest {
         model,
         "你是课程摘要助手。输出简洁的 Markdown，不要代码围栏。",
         transcript,
-        "为这段课程视频写一份整体摘要，帮助学习者快速把握全貌。结构：\
+        concat!(
+            "为这段课程视频写一份整体摘要，帮助学习者快速把握全貌。结构：\
          先用 2-3 句话概括视频主旨与讲了什么（一段文字，写清主题和落点）；\
          再用 ## 核心要点 列出 4-8 条最重要的知识点，每条一行短句、用名词性短语写清「讲了什么/结论是什么」，\
          并在每条末尾附上该要点对应的 [mm:ss] 时间戳（照抄字幕里那一行行首的时间，便于点击跳转）。\
          只讲内容本身，紧扣字幕、不展开无关知识，不要寒暄。",
+            formula_rule!()
+        ),
     )
 }
 
@@ -375,6 +399,24 @@ mod tests {
         // 字幕本来就按时间分段，再加标点只会让画面更碎。
         assert!(system.contains("不要添加原文没有的标点符号"));
         assert!(!system.contains("正确使用中文逗号"), "不该再要求补标点");
+    }
+
+    #[test]
+    fn study_material_prompts_ask_for_latex_formulas() {
+        let notes = notes_request("m", "t");
+        let quiz = quiz_request("m", "t");
+        let summary = summary_request("m", "t");
+        let snippet = note_snippet_request("m", "topic", "points");
+        for text in [
+            notes.system.as_deref().unwrap(),
+            quiz.messages[0].content.as_str(),
+            summary.messages[0].content.as_str(),
+            snippet.system.as_deref().unwrap(),
+        ] {
+            assert!(text.contains("LaTeX"), "{text}");
+            assert!(text.contains(r"\( ... \)"), "{text}");
+        }
+        assert!(quiz.messages[0].content.contains(r"\\"));
     }
 
     #[test]
