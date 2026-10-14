@@ -26,3 +26,6 @@ dist-ssr
 # 本地 cookie 文件（含登录态，禁止提交）
 *_cookies*.txt
 cookies*.txt
+
+# pnpm shots 的界面截图输出
+/ui-shots/
