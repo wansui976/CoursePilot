@@ -552,16 +552,24 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     );
   }
 
+  const translateLabel = translate.isPending
+    ? translateProgress && translateProgress.total > 0
+      ? t("transcript.translateProgress", { done: translateProgress.done, total: translateProgress.total })
+      : t("transcript.translating")
+    : t("transcript.translate");
+
   return (
     <div className="flex h-full flex-col text-[var(--text-normal)]">
       <div className="flex flex-none flex-col border-b border-[var(--border-subtle)]">
-        <div className="flex items-center gap-2 px-3 py-1.5 text-xs">
+        {/* 工具条按自身宽度（面板可拖 384–720）取舍：状态文字只在够宽时显示，再窄「翻译」
+            只留图标；按钮文字一律不折行（原先挤到「跟/随」「翻/译」逐字竖排）。 */}
+        <div className="@container flex items-center gap-2 px-3 py-1.5 text-xs">
           <button
             type="button"
             onClick={() => setFollow(!followEnabled)}
             aria-pressed={followEnabled}
             title={followEnabled ? t("transcript.followOff") : t("transcript.followOn")}
-            className={`ca-touch-44 inline-flex items-center gap-1 rounded px-1.5 py-1 font-medium transition-colors ${
+            className={`ca-touch-44 inline-flex flex-none items-center gap-1 whitespace-nowrap rounded px-1.5 py-1 font-medium transition-colors ${
               followEnabled
                 ? "text-[var(--accent-text)]"
                 : "text-[var(--text-muted)] hover:text-[var(--text-normal)]"
@@ -574,7 +582,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
             )}
             {t("transcript.follow")}
           </button>
-          <span className="hidden min-w-0 truncate text-[var(--text-faint)] sm:block">
+          <span className="hidden min-w-0 truncate text-[var(--text-faint)] @lg:block">
             {t("transcript.rowOf", { current: activeRowIndex + 1, total: rows.length })}
             {" · "}
             <TranscriptPosition />
@@ -603,14 +611,13 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                 }
               }}
               title={translate.isPending ? t("transcript.translateStop") : t("transcript.translateTitle")}
-              className="ca-touch-44 inline-flex h-8 items-center gap-1 rounded-md px-1.5 text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+              aria-label={translateLabel}
+              className="ca-touch-44 inline-flex h-8 flex-none items-center gap-1 whitespace-nowrap rounded-md px-1.5 text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
             >
               <Languages aria-hidden="true" className="h-4 w-4" />
-              {translate.isPending
-                ? translateProgress && translateProgress.total > 0
-                  ? t("transcript.translateProgress", { done: translateProgress.done, total: translateProgress.total })
-                  : t("transcript.translating")
-                : t("transcript.translate")}
+              <span aria-hidden="true" className="hidden @sm:inline">
+                {translateLabel}
+              </span>
             </button>
             <button
               ref={searchTriggerRef}
