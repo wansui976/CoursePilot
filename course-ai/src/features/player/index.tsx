@@ -4,6 +4,7 @@ import { qk } from "@/lib/queryKeys";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AudioLines } from "lucide-react";
 import { cropStyle } from "@/lib/blackBars";
 import { useSilenceSkip } from "@/lib/useSilenceSkip";
 import { useSmartRate } from "@/lib/useSmartRate";
@@ -121,6 +122,9 @@ export function VideoPlayer({
   const [controlsHeight, setControlsHeight] = useState(0);
   const lastSavedRef = useRef(0);
   const [playing, setPlaying] = useState(false);
+  // 纯音频源（播客、本地音频导入）：没有画面，舞台换成音频卡片而不是一整块空白。
+  const [audioOnly, setAudioOnly] = useState(false);
+  useEffect(() => setAudioOnly(false), [src]);
   // 把「播放中时长」记入学习事件日志（供仪表盘统计 / 间隔重复排期）。
   useWatchLogger(videoId, playing);
   // 离开/切换视频时把进度同步进库（暂停时也同步一次，见 onPause）。
@@ -763,7 +767,7 @@ export function VideoPlayer({
         onMouseEnter={!immersive ? revealDesktopControls : undefined}
         onMouseLeave={!immersive ? scheduleDesktopHideControls : undefined}
         className={`relative flex min-h-0 w-full min-w-0 flex-1 items-center justify-center overflow-hidden ${
-          fullscreen ? "bg-black" : "bg-[var(--surface-stage)]"
+          fullscreen ? "bg-black" : audioOnly ? "bg-[#0b0d12]" : "bg-[var(--surface-stage)]"
         }`}
       >
         <div
@@ -782,7 +786,7 @@ export function VideoPlayer({
             playsInline
             disablePictureInPicture
             className={`h-full w-full object-contain ${
-              fullscreen ? "bg-black" : "bg-[var(--surface-stage)]"
+              fullscreen ? "bg-black" : audioOnly ? "bg-[#0b0d12]" : "bg-[var(--surface-stage)]"
             } ${isIosImmersive ? "pointer-events-none" : ""}`}
             // 提升到独立 GPU 合成层：暂停后让这一帧留在自己的层上，减少回退到
             // 「栅格化再缩放」的软化；backface-visibility 进一步固定层、避免半像素抖动。
@@ -821,6 +825,7 @@ export function VideoPlayer({
               const video = event.currentTarget;
               // 记录视频固有比例，去黑边的 stageBox 要靠它做等比缩放。
               markMetadata(video.videoWidth, video.videoHeight);
+              setAudioOnly(video.videoWidth === 0 && video.videoHeight === 0);
               // 某些 WebKit 版本在资源加载后才重置速率；metadata 到达时再兜底应用一次。
               video.defaultPlaybackRate = effectiveRate;
               video.playbackRate = effectiveRate;
@@ -875,6 +880,22 @@ export function VideoPlayer({
               setMuted(event.currentTarget.muted);
             }}
           />
+          {audioOnly && (
+            // pointer-events:none：点按/双击/手势照常落到 <video> 上。
+            <div className="ca-audio-stage" aria-hidden="true">
+              <div className="ca-audio-art">
+                <AudioLines className="h-12 w-12" />
+              </div>
+              <div className="ca-audio-eq" data-playing={playing || undefined}>
+                <i />
+                <i />
+                <i />
+                <i />
+                <i />
+              </div>
+              <span className="ca-audio-label">{t("videoPlayer.audioOnly")}</span>
+            </div>
+          )}
           {danmakuOn && danmaku.length > 0 && (
             <DanmakuOverlay entries={danmaku} videoRef={ref} />
           )}

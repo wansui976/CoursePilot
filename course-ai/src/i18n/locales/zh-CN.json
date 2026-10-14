@@ -93,6 +93,7 @@
   "videoPlayer": {
     "stage": "课程视频舞台",
     "player": "课程视频播放器",
+    "audioOnly": "音频",
     "gestureLayer": "课程视频手势层",
     "gestureOverlay": "播放手势提示",
     "controls": "视频播放控制栏",

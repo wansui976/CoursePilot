@@ -93,6 +93,7 @@
   "videoPlayer": {
     "stage": "Course video stage",
     "player": "Course video player",
+    "audioOnly": "Audio",
     "gestureLayer": "Course video gesture layer",
     "gestureOverlay": "Playback gesture feedback",
     "controls": "Video playback controls",

@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MATH_RE } from "@/lib/markdownToTiptap";
 import type { CaptionMode } from "@/stores/captionPrefs";
+import { captionRequiredHeight, fitCaptionFontSize } from "./captionFit";
 
 // KaTeX 较重，仅在字幕真含公式时按需加载，避免拖累播放器首屏。
 const MathText = lazy(() =>
@@ -31,9 +32,6 @@ const DEFAULT_BOX: Box = { left: 0.08, top: 0.8, width: 0.84, height: 0.14 };
 const MIN = 0.05;
 const KEYBOARD_STEP = 0.01;
 const KEYBOARD_LARGE_STEP = 0.05;
-const CAPTION_SAFE_LINES = 2;
-const CAPTION_LINE_HEIGHT = 1.375; // Tailwind `leading-snug`
-const CAPTION_SAFE_HEIGHT_RATIO = 0.9;
 
 function clamp(v: number, lo: number, hi: number) {
   if (hi < lo) hi = lo;
@@ -97,6 +95,7 @@ export function CaptionOverlay({
   const boxRef = useRef(box);
   boxRef.current = box;
   const [stageHeight, setStageHeight] = useState(0);
+  const [stageWidth, setStageWidth] = useState(0);
   // 拖动/缩放期间置真：此时字幕跟手直改 top/left，不抬升、也不过渡，避免抽搐。
   const [dragging, setDragging] = useState(false);
 
@@ -108,7 +107,10 @@ export function CaptionOverlay({
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const update = () => setStageHeight(el.clientHeight);
+    const update = () => {
+      setStageHeight(el.clientHeight);
+      setStageWidth(el.clientWidth);
+    };
     update();
     // jsdom / 极旧 WebView 无 ResizeObserver：至少量一次，尺寸变化不再跟踪。
     if (typeof ResizeObserver === "undefined") return;
@@ -276,13 +278,27 @@ export function CaptionOverlay({
 
   const showTranslation = mode !== "original" && !!translation?.trim();
   const primary = showTranslation && mode === "translation" ? translation! : text;
-  // 字幕框负责可视区域；字号只在这个区域里受限自适应，给两行字幕留出安全余量，避免高框时把字顶到边上。
-  // 双语多出一行（译文按 0.82 倍字号算），字号相应收一点，别把译文挤出框。
-  const safeLines = CAPTION_SAFE_LINES + (showTranslation && mode === "bilingual" ? 0.82 : 0);
-  const fontSize = clamp(
-    (stageHeight * box.height * CAPTION_SAFE_HEIGHT_RATIO) / (safeLines * CAPTION_LINE_HEIGHT),
-    12,
-    120,
+  // 字幕框负责可视区域；字号只在这个区域里受限自适应：按框高给两行（双语再加一行译文）
+  // 留余量，再按框宽估算折行——窄屏上长译文折成两行时继续收小，不让框把字裁掉。
+  const bilingualTranslation = showTranslation && mode === "bilingual" ? translation : undefined;
+  const fontSize = fitCaptionFontSize({
+    boxWidthPx: stageWidth * box.width,
+    boxHeightPx: stageHeight * box.height,
+    primary,
+    translation: bilingualTranslation,
+  });
+  // 字号到下限仍放不下（手机竖屏的矮舞台 + 双语）：框底边不动，向上长高到够用，
+  // 最多长到舞台顶边——宁可多遮一点画面，也不把字幕裁成半行。
+  const growPx = clamp(
+    captionRequiredHeight({
+      fontSize,
+      boxWidthPx: stageWidth * box.width,
+      primary,
+      translation: bilingualTranslation,
+    }) -
+      stageHeight * box.height,
+    0,
+    box.top * stageHeight,
   );
 
   // 字幕上移量：字幕底边探入控制栏占位区（bottomInset）时抬起，
@@ -302,9 +318,9 @@ export function CaptionOverlay({
       className="group absolute touch-none select-none transition-transform duration-200"
       style={{
         left: `${box.left * 100}%`,
-        top: `${box.top * 100}%`,
+        top: growPx > 0 ? `calc(${box.top * 100}% - ${growPx}px)` : `${box.top * 100}%`,
         width: `${box.width * 100}%`,
-        height: `${box.height * 100}%`,
+        height: growPx > 0 ? `calc(${box.height * 100}% + ${growPx}px)` : `${box.height * 100}%`,
         transform: lift > 0 ? `translateY(${-lift}px)` : undefined,
         // 拖动时关掉 transform 过渡，避免位置追着 200ms 缓动走而抖动。
         transition: dragging ? "none" : undefined,
