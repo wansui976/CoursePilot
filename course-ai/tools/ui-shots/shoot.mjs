@@ -103,7 +103,7 @@ try {
         };
         try {
           await page.goto(BASE, { waitUntil: "networkidle" });
-          await scene.run({ page, shot, device, theme });
+          await scene.run({ page, shot, device, theme, out: opts.out });
         } catch (error) {
           failures.push(`${device}/${theme}/${scene.name}: ${String(error).split("\n")[0]}`);
         }

@@ -3,6 +3,9 @@
  * `devices` 缺省表示只在桌面拍；手机/平板的导航是底部 Tab，入口与桌面 rail 不同。
  */
 
+import { writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 const COURSE = /^机器学习导论/;
 const VIDEO = /梯度下降的直觉/;
 
@@ -20,6 +23,24 @@ async function openCourse(page) {
 async function openVideo(page) {
   await openCourse(page);
   await page.getByRole("button", { name: VIDEO }).first().click();
+}
+
+/** 写入字幕显示偏好后刷新：模式（original / bilingual / translation）与译文语言。 */
+async function captionPrefs(page, mode, lang) {
+  await page.evaluate(([m, l]) => {
+    localStorage.setItem("course-ai-caption-mode", m);
+    localStorage.setItem("course-ai-translation-lang", l);
+  }, [mode, lang]);
+  await page.reload({ waitUntil: "networkidle" });
+}
+
+/** 把 mock 截获的分享图（前端画好、交给后端保存的 PNG）落盘，便于直接审图。 */
+async function dumpShareImages(page, out, prefix) {
+  const images = await page.evaluate(() => window.__shareImages.splice(0));
+  for (const [k, image] of images.entries()) {
+    writeFileSync(resolve(out, `${prefix}-${k}-${image.fileName}.png`), Buffer.from(image.pngBase64, "base64"));
+  }
+  return images.length;
 }
 
 const ALL = ["desktop", "phone", "tablet"];
@@ -137,6 +158,64 @@ export const scenes = [
       await shot();
       await page.getByRole("button", { name: /显示答案/ }).first().click();
       await shot("answer");
+    },
+  },
+  {
+    name: "subscriptions",
+    run: async ({ page, shot }) => {
+      await openCourse(page);
+      await page.getByRole("button", { name: "课程操作" }).first().click();
+      await page.getByRole("menuitem", { name: /订阅更新/ }).click();
+      await shot();
+    },
+  },
+  {
+    name: "player",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await captionPrefs(page, "bilingual", "en");
+      await openVideo(page);
+      await page.waitForTimeout(800);
+      await shot();
+      const bar = page.locator("[role='slider']").first();
+      if (await bar.isVisible().catch(() => false)) {
+        await bar.hover();
+        await shot("progress-hover");
+      }
+    },
+  },
+  {
+    name: "translation",
+    run: async ({ page, shot }) => {
+      await captionPrefs(page, "bilingual", "en");
+      await openVideo(page);
+      await page.getByRole("tab", { name: /文稿/ }).click();
+      await shot();
+    },
+  },
+  {
+    name: "share",
+    run: async ({ page, shot, out, device, theme }) => {
+      const prefix = `${device}-${theme}-share`;
+      await openVideo(page);
+      await page.getByRole("tab", { name: /笔记/ }).click();
+      await page.getByRole("button", { name: "导出" }).first().click();
+      await shot("notes-menu");
+      await page.getByRole("menuitem", { name: /分享长图/ }).click();
+      await page.waitForTimeout(1500);
+      await page.getByRole("tab", { name: /更多/ }).click();
+      await page.getByRole("button", { name: /脑图/ }).first().click();
+      await page.waitForTimeout(800);
+      await shot("mindmap");
+      await page.getByRole("button", { name: "导出" }).first().click();
+      await page.getByRole("menuitem", { name: /分享图片/ }).click();
+      await page.waitForTimeout(1500);
+      await page.goto(page.url(), { waitUntil: "networkidle" });
+      await nav(page, "学习面板", "学习");
+      await page.getByRole("button", { name: /周报图/ }).first().click();
+      await page.waitForTimeout(1500);
+      const saved = await dumpShareImages(page, out, prefix);
+      if (saved === 0) throw new Error("没有截获到分享图");
     },
   },
   {

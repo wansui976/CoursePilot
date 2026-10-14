@@ -80,7 +80,8 @@ export function installMockIpc({ theme }) {
     "这就是为什么实践中常用学习率衰减。",
     "接下来看随机梯度下降：每次只用一个小批量估计梯度。",
   ];
-  const transcript = Array.from({ length: 40 }, (_, k) => ({
+  // 覆盖整集（第 3 集 26:23，每句 15 秒）：续播落在中后段时也有字幕可显示。
+  const transcript = Array.from({ length: 106 }, (_, k) => ({
     id: k, video_id: "v3", segment_idx: k, start_ms: k * 15_000, end_ms: k * 15_000 + 14_000, text: lines[k % lines.length],
   }));
   const chapters = [
@@ -125,11 +126,75 @@ export function installMockIpc({ theme }) {
     daily.push({ day: dayKey(ts), watched_ms: minutes * 60_000, reviews: Math.round(r * 30), good_reviews: Math.round(r * 22) });
   }
 
+  // —— 播放源：按时长生成一段静音 WAV（blob URL）。没有 ffmpeg 也能让 <video> 拿到真实
+  // 时长与进度，进度条、弹幕热度曲线、双语字幕都能按正常播放态渲染。——
+  const mediaUrls = new Map();
+  function silentWav(seconds) {
+    const rate = 3000;
+    const samples = Math.round(seconds * rate);
+    const bytes = new Uint8Array(44 + samples);
+    const view = new DataView(bytes.buffer);
+    const ascii = (offset, text) => [...text].forEach((ch, k) => view.setUint8(offset + k, ch.charCodeAt(0)));
+    ascii(0, "RIFF"); view.setUint32(4, 36 + samples, true); ascii(8, "WAVE");
+    ascii(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, rate, true); view.setUint32(28, rate, true); view.setUint16(32, 1, true); view.setUint16(34, 8, true);
+    ascii(36, "data"); view.setUint32(40, samples, true);
+    bytes.fill(128, 44); // 8-bit PCM 的静音是 128
+    return URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
+  }
+  function mediaUrl(videoId) {
+    if (!mediaUrls.has(videoId)) {
+      const video = videos.find((v) => v.id === videoId);
+      mediaUrls.set(videoId, silentWav((video?.duration_ms ?? 600_000) / 1000));
+    }
+    return mediaUrls.get(videoId);
+  }
+
+  // —— 弹幕：三个讨论高峰（讲到学习率、震荡演示、小批量），其余零星 ——
+  const danmakuTexts = ["原来如此", "这里讲得好清楚", "学习率太大就震荡了", "前方高能", "mark 一下", "老师的比喻绝了", "终于懂了梯度"];
+  const danmaku = [];
+  for (let k = 0; k < 420; k++) {
+    const r = Math.abs((Math.sin(k * 78.233) * 43758.5453) % 1);
+    const peak = [190_000, 470_000, 700_000][k % 3];
+    const start = k % 4 === 0 ? Math.round(r * 1_500_000) : Math.round(peak + (r - 0.5) * 90_000);
+    danmaku.push({ mode: k % 11 === 0 ? "top" : "scroll", start_ms: start, text: danmakuTexts[k % danmakuTexts.length], color: k % 9 === 0 ? "#fde047" : null, font_size: null });
+  }
+
+  const translationsEn = [
+    "Let's first recall last lecture's loss function.",
+    "The gradient points where the function grows fastest, so we move along the negative gradient.",
+    "Too large a learning rate makes parameters oscillate across the valley; too small and convergence crawls.",
+    "That is why learning-rate decay is common in practice.",
+    "Next, stochastic gradient descent: estimate the gradient from a mini-batch each step.",
+  ];
+  const mindmap = "# 梯度下降\n## 核心思想\n### 沿负梯度迭代\n### 损失越来越小\n## 学习率\n### 过大：震荡、发散\n### 过小：收敛慢\n### 衰减策略\n## 变体\n### 随机梯度下降\n### 小批量\n### 动量";
+  window.__shareImages = [];
+
   const handlers = {
+    cmd_get_danmaku: () => danmaku,
+    cmd_get_translations: ({ lang }) =>
+      lang === "en" ? transcript.map((row) => ({ segment_idx: row.segment_idx, text: translationsEn[row.segment_idx % translationsEn.length] })) : [],
+    cmd_list_subscriptions: ({ courseId }) =>
+      courseId === "c1"
+        ? [
+            { id: "s1", course_id: "c1", url: "https://space.bilibili.com/123/channel/collectiondetail?sid=1", title: "吴恩达机器学习 2024 合集", auto_process: true, last_checked_at: now - 2 * 3_600_000, last_error: null, created_at: now - 20 * DAY },
+            { id: "s2", course_id: "c1", url: "https://www.youtube.com/playlist?list=PL-demo", title: "Stanford CS229 Lectures", auto_process: false, last_checked_at: now - 26 * 3_600_000, last_error: "网络超时，下次检查时重试", created_at: now - 5 * DAY },
+          ]
+        : [],
+    cmd_check_subscription: () => 2,
+    cmd_save_share_image: ({ fileName, pngBase64 }) => {
+      window.__shareImages.push({ fileName, pngBase64 });
+      return `/Users/demo/Desktop/${fileName}.png`;
+    },
+    cmd_list_whisper_models: () => [
+      [{ id: "large-v3-turbo", display_name: "large-v3-turbo（推荐）", size_bytes: 1_620_000_000, url: "" }, true],
+      [{ id: "medium", display_name: "medium", size_bytes: 1_530_000_000, url: "" }, false],
+      [{ id: "small", display_name: "small", size_bytes: 488_000_000, url: "" }, false],
+    ],
     cmd_list_courses: () => courses,
     cmd_list_videos: ({ courseId }) => (courseId === "c1" ? videos : []),
     cmd_video_cover: ({ videoId }) => cover(videoId),
-    cmd_media_url: () => "",
+    cmd_media_url: ({ videoId }) => mediaUrl(videoId),
     cmd_list_processing_videos: () => [videos[6]],
     cmd_list_jobs: ({ videoId }) =>
       videoId === "v7"
@@ -140,12 +205,11 @@ export function installMockIpc({ theme }) {
     cmd_get_summary: () => summary,
     cmd_get_notes: () => notes,
     cmd_get_quiz: () => null,
-    cmd_get_mindmap: () => null,
+    cmd_get_mindmap: () => mindmap,
     cmd_stale_ai_artifacts: () => [],
     cmd_get_slides: () => [],
     cmd_get_screenshots: () => [],
     cmd_list_clips: () => [],
-    cmd_get_danmaku: () => [],
     cmd_video_skips: () => [],
     cmd_get_setting: () => null,
     cmd_has_secret: () => false,
