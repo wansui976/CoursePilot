@@ -66,6 +66,13 @@ vi.mock("./notes/timestampNode", () => ({
   installTimestampClick: () => undefined,
 }));
 vi.mock("./notes/mathNode", () => ({ MathNode: {} }));
+// 替身编辑器没有 state/view；清历史的那一半由 notes/loadDocument.test 用真编辑器验证。
+vi.mock("./notes/loadDocument", () => ({
+  loadDocument: (
+    editor: { commands: { setContent: (c: unknown, o: { emitUpdate: boolean }) => void } },
+    content: unknown,
+  ) => editor.commands.setContent(content, { emitUpdate: false }),
+}));
 vi.mock("@tiptap/react", () => ({
   EditorContent: () => <div>笔记正文</div>,
   useEditor: (opts: { onUpdate?: (p: { editor: unknown }) => void }) => {

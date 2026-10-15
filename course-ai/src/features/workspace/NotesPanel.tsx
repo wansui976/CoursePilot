@@ -28,6 +28,7 @@ import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { useEffect, useRef, useState } from "react";
 import { TimestampNode, installTimestampClick } from "./notes/timestampNode";
 import { MathNode } from "./notes/mathNode";
+import { loadDocument } from "./notes/loadDocument";
 import { NotesToolbar } from "./notes/NotesToolbar";
 import { TimestampToggle } from "./TimestampToggle";
 import { useTimestampPrefs } from "@/stores/timestampPrefs";
@@ -104,7 +105,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
 
   // 加载已有笔记：content_json（"{...}"）或 content_md（markdown）
   //
-  // 三处 setContent 都必须显式 emitUpdate:false。**装载不是编辑**，而 tiptap 3 的
+  // 装载（loadDocument）里的 setContent 必须显式 emitUpdate:false。**装载不是编辑**，而 tiptap 3 的
   // setContent 默认会发 update 事件（2.x 默认不发，升级时这个默认值反过来了）。
   // 不关掉的话，光是打开笔记标签就会走一遍去抖自动保存：把刚读出来的内容原样写回、
   // 盖上「用户编辑于此刻」的戳、再推一条云同步——内容一个字都没变。
@@ -118,7 +119,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       try {
         const parsed = JSON.parse(recoverableDraft);
         if (parsed?.type === "doc") {
-          editor.commands.setContent(parsed, { emitUpdate: false });
+          loadDocument(editor, parsed);
         }
       } catch {
         // 协调器只接收 Tiptap JSON；损坏草稿保留错误状态，不拿空文档覆盖它。
@@ -134,22 +135,19 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       // 这个视频还没有笔记 —— 必须把编辑器清空。面板在标签之间是保活的（不重建），
       // 早退就会继续显示上一个视频的笔记；用户一旦在上面接着打字，那份内容会被
       // 存到**新视频**名下，等于把别人的笔记搬了家。
-      editor.commands.setContent(
-        { type: "doc", content: [{ type: "paragraph" }] },
-        { emitUpdate: false },
-      );
+      loadDocument(editor, { type: "doc", content: [{ type: "paragraph" }] });
       return;
     }
     try {
       const parsed = JSON.parse(notesContent);
       if (parsed && parsed.type === "doc") {
-        editor.commands.setContent(parsed, { emitUpdate: false });
+        loadDocument(editor, parsed);
         return;
       }
     } catch {
       // 非 JSON → 当作 markdown
     }
-    editor.commands.setContent(markdownToTiptap(notesContent), { emitUpdate: false });
+    loadDocument(editor, markdownToTiptap(notesContent));
   }, [editor, videoId, notesContent, notesQuery.isError, notesQuery.isPending]);
 
   useEffect(() => {
