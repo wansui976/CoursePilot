@@ -205,6 +205,17 @@ export const scenes = [
     },
   },
   {
+    name: "note-history",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await openVideo(page);
+      await page.getByRole("tab", { name: /笔记/ }).click();
+      await page.getByRole("button", { name: "历史版本" }).filter({ visible: true }).first().click();
+      await page.getByRole("dialog", { name: "笔记历史" }).waitFor();
+      await shot();
+    },
+  },
+  {
     name: "share",
     devices: ALL,
     run: async ({ page, shot, out, device, theme }) => {

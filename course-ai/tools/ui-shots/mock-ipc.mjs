@@ -204,6 +204,11 @@ export function installMockIpc({ theme }) {
     cmd_get_chapters: () => chapters,
     cmd_get_summary: () => summary,
     cmd_get_notes: () => notes,
+    cmd_list_note_versions: () => [
+      { id: "h:3", source: "history", edited_at: now - 25 * 60_000, captured_at: now - 20 * 60_000, content: notes.replace("> 一句话", "> 草稿：一句话") },
+      { id: "h:2", source: "history", edited_at: now - 3 * 3_600_000, captured_at: now - 2 * 3_600_000, content: "# 梯度下降笔记\n\n## 核心思想\n\n沿负梯度方向迭代更新参数。[00:15]" },
+      { id: "b:courseai-startup-20261013.db", source: "backup", edited_at: now - 2 * 86_400_000, captured_at: now - 86_400_000, content: "# 梯度下降\n\n- 学习率：步子迈多大\n- 小批量：用部分样本估计梯度" },
+    ],
     cmd_get_quiz: () => null,
     cmd_get_mindmap: () => mindmap,
     cmd_stale_ai_artifacts: () => [],
