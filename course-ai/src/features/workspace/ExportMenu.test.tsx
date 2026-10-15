@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import "@/i18n";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ExportMenu } from "./ExportMenu";
 
@@ -53,23 +53,35 @@ describe("ExportMenu", () => {
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
+  it("导出耗时较长（按钮禁用期间）也会在结束后把焦点还给导出按钮", async () => {
+    let finish: (path: string) => void = () => {};
+    const run = vi.fn(() => new Promise<string>((resolve) => (finish = resolve)));
+    render(<ExportMenu items={[{ label: "Markdown", run }]} />);
+
+    const trigger = screen.getByRole("button", { name: "导出" });
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Markdown" }));
+
+    // 导出进行中：按钮禁用，下一帧的焦点归还落空。等过这一帧再结束导出。
+    await waitFor(() => expect(trigger).toBeDisabled());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(trigger).not.toHaveFocus();
+
+    await act(async () => finish("/tmp/slow-notes.md"));
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
   it("announces success and returns focus after an export", async () => {
     const run = vi.fn().mockResolvedValue("/tmp/current-notes.md");
     render(<ExportMenu items={[{ label: "Markdown", run }]} />);
 
     const trigger = screen.getByRole("button", { name: "导出" });
     fireEvent.click(trigger);
-    // 全量并行时 jsdom 负载高，菜单项、状态公告与焦点归还都可能超过默认窗口；
-    // 只放宽等待窗口，不改变断言内容（单跑均在几百 ms 内满足）。
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Markdown" }, { timeout: 30_000 }),
-    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Markdown" }));
 
     await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
-    expect(
-      await screen.findByRole("status", {}, { timeout: 30_000 }),
-    ).toHaveTextContent("current-notes.md");
-    await waitFor(() => expect(trigger).toHaveFocus(), { timeout: 30_000 });
+    expect(await screen.findByRole("status")).toHaveTextContent("current-notes.md");
+    await waitFor(() => expect(trigger).toHaveFocus());
   });
 
   it("announces export errors without visually truncating them", async () => {

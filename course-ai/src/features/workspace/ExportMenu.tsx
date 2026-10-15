@@ -39,6 +39,8 @@ export function ExportMenu({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const messageTimerRef = useRef<number | null>(null);
+  // 导出期间触发按钮是 disabled，焦点进不去；先记下，导出结束后再还。
+  const pendingFocusRef = useRef(false);
   const menuId = useId();
 
   useEffect(() => {
@@ -55,6 +57,12 @@ export function ExportMenu({
     window.requestAnimationFrame(() => itemRefs.current[0]?.focus());
   }, [open]);
 
+  useEffect(() => {
+    if (busy || !pendingFocusRef.current) return;
+    pendingFocusRef.current = false;
+    triggerRef.current?.focus();
+  }, [busy]);
+
   if (items.length === 0) return null;
   const mobile = isMobile();
   const directShare = mobile && items.length === 1;
@@ -62,7 +70,14 @@ export function ExportMenu({
   const popClass = up ? "bottom-full mb-1" : "top-full mt-1";
 
   function restoreTriggerFocus() {
-    window.requestAnimationFrame(() => triggerRef.current?.focus());
+    pendingFocusRef.current = true;
+    window.requestAnimationFrame(() => {
+      const trigger = triggerRef.current;
+      // 导出已经开始、按钮禁用中：留给上面的 effect 在 busy 结束时还焦点。
+      if (!pendingFocusRef.current || !trigger || trigger.disabled) return;
+      pendingFocusRef.current = false;
+      trigger.focus();
+    });
   }
 
   function closeMenu(restoreFocus = false) {
