@@ -25,6 +25,7 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
   const theme = useTheme((s) => s.effective);
   const svgRef = useRef<SVGSVGElement>(null);
   const mmRef = useRef<Markmap | undefined>(undefined);
+  const rootRef = useRef<ReturnType<typeof transformer.transform>["root"] | null>(null);
   const {
     data: md,
     isLoading,
@@ -64,12 +65,33 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
   useEffect(() => {
     if (!svgRef.current || !md) return;
     if (!mmRef.current) {
-      mmRef.current = Markmap.create(svgRef.current);
+      mmRef.current = Markmap.create(svgRef.current, { fitRatio: 0.82 });
     }
     const { root } = transformer.transform(md);
+    rootRef.current = root;
     mmRef.current.setData(root);
     void mmRef.current.fit();
   }, [md]);
+
+  // 面板常常是先藏着挂载的（「更多」页签没选中时 display:none）：那时 markmap 量到的
+  // 节点尺寸和画布都是 0，布局与 fit 全错，切过来看到的是根节点贴在右边、分支出界。
+  // 从不可见变可见时按真实尺寸重排一次；之后尺寸再变（拖宽侧栏）就只重新 fit。
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || typeof ResizeObserver === "undefined") return;
+    let wasVisible = svg.clientWidth > 0 && svg.clientHeight > 0;
+    const observer = new ResizeObserver(() => {
+      const mm = mmRef.current;
+      const visible = svg.clientWidth > 0 && svg.clientHeight > 0;
+      if (mm && visible) {
+        if (!wasVisible && rootRef.current) void mm.setData(rootRef.current).then(() => mm.fit());
+        else void mm.fit();
+      }
+      wasVisible = visible;
+    });
+    observer.observe(svg);
+    return () => observer.disconnect();
+  }, []);
 
   function zoom(scale: number) {
     void mmRef.current?.rescale(scale);
