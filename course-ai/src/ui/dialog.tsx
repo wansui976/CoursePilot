@@ -7,6 +7,8 @@ const SIZE = {
   sm: "max-w-sm",
   md: "max-w-[420px]",
   lg: "max-w-[460px]",
+  /** 左右分栏的浏览型对话框（如笔记历史）。 */
+  xl: "max-w-[760px]",
 } as const;
 
 /**

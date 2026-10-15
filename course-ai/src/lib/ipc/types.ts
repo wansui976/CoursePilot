@@ -248,3 +248,16 @@ export interface Subscription {
   last_error: string | null;
   created_at: number;
 }
+
+/** 笔记的一个历史版本（cmd_list_note_versions）。 */
+export interface NoteVersion {
+  /** `h:<id>` 本机留底；`b:<文件名>` 每日启动快照。 */
+  id: string;
+  source: "history" | "backup";
+  /** 这份内容最后被写入的时间（毫秒）。 */
+  edited_at: number | null;
+  /** 留底 / 快照的时间（毫秒）。 */
+  captured_at: number;
+  /** 与 getNotes 同形：Tiptap JSON 字符串或 markdown。 */
+  content: string;
+}

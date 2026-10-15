@@ -10,11 +10,13 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { type ExportItem } from "./ExportMenu";
-import { Sparkles } from "lucide-react";
+import { ArchiveRestore, Sparkles, X } from "lucide-react";
 import { Button } from "@/ui/button";
 import { TextSkeleton } from "@/ui/skeleton";
 import { ErrorNote } from "@/ui/ErrorNote";
-import { PanelActions } from "./PanelActions";
+import { PanelActions, panelActionButtonClass } from "./PanelActions";
+import { NoteHistoryDialog } from "./notes/NoteHistoryDialog";
+import { noteContentToDoc } from "./notes/noteVersionContent";
 import { saveShareCard, shareCardHeader, useShareCardLabels } from "./useShareCard";
 import { renderNotesCard } from "@/lib/shareCard/render";
 import {
@@ -43,6 +45,14 @@ const SAVE_STATUS_I18N: Record<NotesSaveStatus, string> = {
   saved: "notes.saved",
   error: "notes.error",
 };
+/** 一次改动后正文只剩不到这个比例、且原先至少这么长，就提示「笔记一下子少了一大半」。 */
+const DROP_RATIO = 0.2;
+const DROP_MIN_LENGTH = 200;
+
+function docTextLength(editor: { state?: { doc: { textContent: string } } }): number {
+  return editor.state?.doc.textContent.length ?? 0;
+}
+
 export function NotesPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
   const showTimestamps = useTimestampPrefs((s) => s.showTimestamps);
@@ -64,6 +74,11 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   const notesQuery = useQuery(queries.notes(videoId));
   const notesContent = notesQuery.data;
   const localDraft = notesCoordinator.getDraft(videoId);
+
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [dropAlert, setDropAlert] = useState(false);
+  // 上一次的正文长度：装载时重置，每次编辑后更新，用来发现「一下子少了一大半」。
+  const lastTextLengthRef = useRef(0);
 
   function debounceSave(json: string) {
     const targetVideoId = activeVideoIdRef.current;
@@ -88,6 +103,11 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     },
     onUpdate: ({ editor }) => {
       setHasLocalEdits(true);
+      const length = docTextLength(editor);
+      const previous = lastTextLengthRef.current;
+      if (previous >= DROP_MIN_LENGTH && length < previous * DROP_RATIO) setDropAlert(true);
+      else if (length >= previous * DROP_RATIO) setDropAlert(false);
+      lastTextLengthRef.current = length;
       debounceSave(JSON.stringify(editor.getJSON()));
     },
   });
@@ -113,13 +133,18 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   // 顺手把一份空文档存回库里，用户的笔记就没了。
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
+    const loadInto = (content: Parameters<typeof loadDocument>[1]) => {
+      loadDocument(editor, content);
+      lastTextLengthRef.current = docTextLength(editor);
+      setDropAlert(false);
+    };
     // 卸载刷盘失败或助手追加失败时，协调器里的草稿比数据库查询更新，必须优先恢复。
     const recoverableDraft = notesCoordinator.getDraft(videoId);
     if (recoverableDraft) {
       try {
         const parsed = JSON.parse(recoverableDraft);
         if (parsed?.type === "doc") {
-          loadDocument(editor, parsed);
+          loadInto(parsed);
         }
       } catch {
         // 协调器只接收 Tiptap JSON；损坏草稿保留错误状态，不拿空文档覆盖它。
@@ -135,19 +160,19 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       // 这个视频还没有笔记 —— 必须把编辑器清空。面板在标签之间是保活的（不重建），
       // 早退就会继续显示上一个视频的笔记；用户一旦在上面接着打字，那份内容会被
       // 存到**新视频**名下，等于把别人的笔记搬了家。
-      loadDocument(editor, { type: "doc", content: [{ type: "paragraph" }] });
+      loadInto({ type: "doc", content: [{ type: "paragraph" }] });
       return;
     }
     try {
       const parsed = JSON.parse(notesContent);
       if (parsed && parsed.type === "doc") {
-        loadDocument(editor, parsed);
+        loadInto(parsed);
         return;
       }
     } catch {
       // 非 JSON → 当作 markdown
     }
-    loadDocument(editor, markdownToTiptap(notesContent));
+    loadInto(markdownToTiptap(notesContent));
   }, [editor, videoId, notesContent, notesQuery.isError, notesQuery.isPending]);
 
   useEffect(() => {
@@ -300,6 +325,39 @@ export function NotesPanel({ videoId }: { videoId: string }) {
           onRetry={() => void notesQuery.refetch()}
         />
       )}
+      {dropAlert && (
+        <div
+          role="status"
+          className="mx-3 mt-2 flex flex-none items-center gap-2 rounded-lg border border-[var(--status-warn,#d97706)]/40 bg-[var(--status-warn,#d97706)]/10 px-3 py-2 text-xs text-[var(--text-strong)]"
+        >
+          <span className="min-w-0 flex-1">{t("notes.dropAlert")}</span>
+          <button
+            type="button"
+            className="ca-touch-44 flex-none rounded-md px-2 py-1 font-medium text-[var(--accent-text)] hover:bg-[var(--surface-card-hover)]"
+            onClick={() => {
+              editor?.commands.undo();
+              setDropAlert(false);
+            }}
+          >
+            {t("notes.dropUndo")}
+          </button>
+          <button
+            type="button"
+            className="ca-touch-44 flex-none rounded-md px-2 py-1 font-medium text-[var(--accent-text)] hover:bg-[var(--surface-card-hover)]"
+            onClick={() => setHistoryOpen(true)}
+          >
+            {t("notes.viewHistory")}
+          </button>
+          <button
+            type="button"
+            aria-label={t("notes.dismissDropAlert")}
+            className="ca-touch-44 grid h-6 w-6 flex-none place-items-center rounded-md text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)]"
+            onClick={() => setDropAlert(false)}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
       <div
         ref={scrollerRef}
         aria-label={t("notes.scrollArea")}
@@ -344,7 +402,20 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         )}
       </div>
       <PanelActions
-        leading={<TimestampToggle />}
+        leading={
+          <>
+            <button
+              type="button"
+              aria-label={t("notes.history")}
+              title={t("notes.history")}
+              onClick={() => setHistoryOpen(true)}
+              className={panelActionButtonClass}
+            >
+              <ArchiveRestore className="h-4 w-4" />
+            </button>
+            <TimestampToggle />
+          </>
+        }
         onRegenerate={() => void requestGenerate()}
         regenerating={generate.isPending}
         hasContent={Boolean(localDraft ?? notesContent) || hasLocalEdits}
@@ -352,6 +423,16 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         exportItems={
           (notesQuery.isPending || notesQuery.isError) && !localDraft ? [] : exportItems
         }
+      />
+      <NoteHistoryDialog
+        videoId={videoId}
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        onRestore={(content) => {
+          // 恢复是一次普通编辑：可以 ⌘Z 撤回，也照常自动保存（覆盖前的内容会再留一份底）。
+          editor?.chain().focus().setContent(noteContentToDoc(content)).run();
+          setDropAlert(false);
+        }}
       />
     </div>
   );

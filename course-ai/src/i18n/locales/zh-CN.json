@@ -589,14 +589,19 @@
     "error": "保存失败",
     "scrollArea": "笔记内容滚动区",
     "regenerateConfirmTitle": "替换当前笔记？",
-    "regenerateConfirm": "重新生成会永久替换当前笔记，包括你手动编辑的内容。此操作无法撤销。",
+    "regenerateConfirm": "重新生成会替换当前笔记，包括你手动编辑的内容。替换前的笔记会留在「历史版本」里，可以随时恢复。",
     "regenerateConfirmAction": "替换并重新生成",
     "editorUnavailable": "笔记编辑器尚未就绪",
     "cancel": "取消",
     "emptyTitle": "还没有笔记",
     "emptyDescription": "点击下方按钮，AI 会根据讲稿帮你整理成笔记；也可以直接在这里开始写。",
     "generating": "生成中…",
-    "generateNotes": "用 AI 生成笔记"
+    "generateNotes": "用 AI 生成笔记",
+    "history": "历史版本",
+    "dropAlert": "笔记一下子少了一大半。",
+    "dropUndo": "撤销",
+    "viewHistory": "查看历史",
+    "dismissDropAlert": "关闭提示"
   },
   "quiz": {
     "correct": "正确",
@@ -1437,5 +1442,18 @@
     "unsubscribe": "取消订阅",
     "unsubscribeLabel": "取消订阅 {{title}}",
     "subscribeOption": "订阅这个合集：以后有新视频自动导入并处理"
+  },
+  "noteHistory": {
+    "title": "笔记历史",
+    "description": "笔记被大幅改动或每隔 10 分钟会自动留底，也包括每天启动时的备份。",
+    "empty": "还没有历史版本。笔记被大幅改动、或持续编辑一段时间后，这里会出现可恢复的旧版本。",
+    "listLabel": "历史版本列表",
+    "previewLabel": "版本预览",
+    "autoSaved": "自动留底",
+    "fromBackup": "每日备份",
+    "length_one": "约 {{count}} 字",
+    "length_other": "约 {{count}} 字",
+    "writtenAt": "内容写于 {{time}}",
+    "restore": "恢复此版本"
   }
 }

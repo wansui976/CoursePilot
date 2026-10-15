@@ -589,14 +589,19 @@
     "error": "Save failed",
     "scrollArea": "Notes scroll area",
     "regenerateConfirmTitle": "Replace current notes?",
-    "regenerateConfirm": "Regenerating will permanently replace the current notes, including your edits. This cannot be undone.",
+    "regenerateConfirm": "Regenerating replaces the current note, including your manual edits. The old note stays in Version history and can be restored anytime.",
     "regenerateConfirmAction": "Replace and regenerate",
     "editorUnavailable": "Notes editor is not ready",
     "cancel": "Cancel",
     "emptyTitle": "No notes yet",
     "emptyDescription": "Let AI draft notes from the transcript, or start writing directly here.",
     "generating": "Generating…",
-    "generateNotes": "Generate notes with AI"
+    "generateNotes": "Generate notes with AI",
+    "history": "Version history",
+    "dropAlert": "Most of this note was just removed.",
+    "dropUndo": "Undo",
+    "viewHistory": "View history",
+    "dismissDropAlert": "Dismiss"
   },
   "quiz": {
     "correct": "Correct",
@@ -1441,5 +1446,18 @@
     "unsubscribe": "Unsubscribe",
     "unsubscribeLabel": "Unsubscribe from {{title}}",
     "subscribeOption": "Follow this collection: import and process new videos automatically"
+  },
+  "noteHistory": {
+    "title": "Note history",
+    "description": "A version is kept automatically after big changes or every 10 minutes of editing, plus daily startup backups.",
+    "empty": "No versions yet. After a big change or a while of editing, earlier versions you can restore will appear here.",
+    "listLabel": "Versions",
+    "previewLabel": "Version preview",
+    "autoSaved": "Auto-saved",
+    "fromBackup": "Daily backup",
+    "length_one": "~{{count}} char",
+    "length_other": "~{{count}} chars",
+    "writtenAt": "Written {{time}}",
+    "restore": "Restore this version"
   }
 }

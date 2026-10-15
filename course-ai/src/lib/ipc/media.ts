@@ -18,6 +18,7 @@ import type {
   Video,
 } from "../types";
 import type {
+  NoteVersion,
   SlidesProgress,
   SlidesExtractEvent,
   SlidesOcrProgress,
@@ -97,6 +98,9 @@ export const ai = {
     invoke("cmd_get_summary", { videoId }),
   saveNotes: (videoId: string, contentJson: string): Promise<void> =>
     invoke("cmd_save_notes", { videoId, contentJson }),
+  // 笔记的历史版本（本机留底 + 每日启动快照），新的在前；只读，恢复由前端装回编辑器。
+  noteVersions: (videoId: string): Promise<NoteVersion[]> =>
+    invoke("cmd_list_note_versions", { videoId }),
   getQuiz: (videoId: string): Promise<string | null> =>
     invoke("cmd_get_quiz", { videoId }),
   getMindmap: (videoId: string): Promise<string | null> =>

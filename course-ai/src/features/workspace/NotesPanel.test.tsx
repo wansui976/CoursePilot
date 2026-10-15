@@ -12,6 +12,7 @@ const { mockIpc, editorCapture, confirmMock } = vi.hoisted(() => ({
   mockIpc: {
     ai: {
       getNotes: vi.fn(),
+      noteVersions: vi.fn(),
       generate: vi.fn(),
       saveNotes: vi.fn(),
     },
@@ -30,8 +31,11 @@ const { mockIpc, editorCapture, confirmMock } = vi.hoisted(() => ({
       onUpdate?: (p: { editor: unknown }) => void;
       setContent: ReturnType<typeof vi.fn>;
       getJSON: ReturnType<typeof vi.fn>;
+      undo: ReturnType<typeof vi.fn>;
+      restore: ReturnType<typeof vi.fn<(doc: unknown) => void>>;
       editor: {
-        commands: { setContent: ReturnType<typeof vi.fn> };
+        commands: { setContent: ReturnType<typeof vi.fn>; undo: ReturnType<typeof vi.fn> };
+        chain: () => unknown;
         getJSON: ReturnType<typeof vi.fn>;
         isDestroyed: boolean;
       } | null;
@@ -39,6 +43,8 @@ const { mockIpc, editorCapture, confirmMock } = vi.hoisted(() => ({
       onUpdate: undefined,
       setContent: vi.fn(),
       getJSON: vi.fn(),
+      undo: vi.fn(),
+      restore: vi.fn<(doc: unknown) => void>(),
       editor: null,
     };
     capture.setContent = vi.fn((_content: unknown, options?: { emitUpdate?: boolean }) => {
@@ -46,7 +52,13 @@ const { mockIpc, editorCapture, confirmMock } = vi.hoisted(() => ({
       capture.onUpdate?.({ editor: capture.editor });
     });
     capture.editor = {
-      commands: { setContent: capture.setContent },
+      commands: { setContent: capture.setContent, undo: capture.undo },
+      // 恢复历史版本走 chain().focus().setContent(doc).run()：一次普通（可撤销）编辑。
+      chain: () => ({
+        focus: () => ({
+          setContent: (doc: unknown) => ({ run: () => capture.restore(doc) }),
+        }),
+      }),
       getJSON: capture.getJSON,
       isDestroyed: false,
     };
@@ -100,6 +112,9 @@ describe("NotesPanel", () => {
   beforeEach(() => {
     localStorage.clear();
     editorCapture.setContent.mockClear();
+    editorCapture.undo.mockClear();
+    editorCapture.restore.mockClear();
+    mockIpc.ai.noteVersions.mockReset().mockResolvedValue([]);
     editorCapture.getJSON.mockReset().mockReturnValue({
       type: "doc",
       content: [{ type: "paragraph" }],
@@ -372,7 +387,7 @@ describe("NotesPanel", () => {
 
     await waitFor(() =>
       expect(confirmMock).toHaveBeenCalledWith(
-        expect.stringContaining("永久替换当前笔记"),
+        expect.stringContaining("替换当前笔记"),
         expect.objectContaining({
           title: "替换当前笔记？",
           okLabel: "替换并重新生成",
@@ -472,5 +487,53 @@ describe("NotesPanel", () => {
         { emitUpdate: false },
       ),
     );
+  });
+
+  it("一次改动删掉大半篇时提示，并能撤销或查看历史", async () => {
+    renderNotesPanel("video-1", "drop");
+    await screen.findByText("笔记正文");
+    const edit = (text: string) =>
+      act(() => {
+        editorCapture.onUpdate?.({
+          editor: {
+            getJSON: () => ({ type: "doc", content: [{ type: "paragraph" }] }),
+            state: { doc: { textContent: text } },
+          },
+        });
+      });
+
+    edit("字".repeat(300));
+    expect(screen.queryByText("笔记一下子少了一大半。")).not.toBeInTheDocument();
+    edit("字");
+    expect(screen.getByText("笔记一下子少了一大半。")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "撤销" }));
+    expect(editorCapture.undo).toHaveBeenCalledOnce();
+    expect(screen.queryByText("笔记一下子少了一大半。")).not.toBeInTheDocument();
+  });
+
+  it("从历史版本恢复笔记：装回编辑器当作一次普通编辑", async () => {
+    mockIpc.ai.noteVersions.mockResolvedValue([
+      {
+        id: "h:1",
+        source: "history",
+        edited_at: Date.now() - 3_600_000,
+        captured_at: Date.now() - 60_000,
+        content: "## 梯度下降\n- 沿负梯度走",
+      },
+    ]);
+    renderNotesPanel("video-1", "history");
+    await screen.findByText("笔记正文");
+
+    fireEvent.click(screen.getByRole("button", { name: "历史版本" }));
+    const dialog = await screen.findByRole("dialog", { name: "笔记历史" });
+    expect(await screen.findByText("沿负梯度走")).toBeInTheDocument();
+    expect(mockIpc.ai.noteVersions).toHaveBeenCalledWith("video-1");
+
+    fireEvent.click(screen.getByRole("button", { name: "恢复此版本" }));
+    expect(editorCapture.restore).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "doc" }),
+    );
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
   });
 });
