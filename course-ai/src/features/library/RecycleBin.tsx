@@ -229,17 +229,20 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
     const allSelected = selectedCount === group.items.length;
     return (
       <section key={group.courseId} aria-label={t("recycleBin.courseGroup", { name: group.courseName })}>
-        <div className="mb-2 flex items-center gap-2">
-          <input
-            type="checkbox"
-            aria-label={t("recycleBin.selectAllInCourse", { name: group.courseName })}
-            checked={allSelected}
-            ref={(el) => {
-              if (el) el.indeterminate = selectedCount > 0 && !allSelected;
-            }}
-            onChange={() => toggleGroup(group)}
-            className="ca-touch-44 h-4 w-4 flex-none accent-[var(--accent,#888)]"
-          />
+        <div className="mb-1 flex items-center gap-2 px-3 sm:gap-3">
+          {/* 与行内勾选框同一列：44px 的触控区给 label，框本身仍是 16px。 */}
+          <label className="inline-flex h-11 w-11 flex-none items-center justify-center">
+            <input
+              type="checkbox"
+              aria-label={t("recycleBin.selectAllInCourse", { name: group.courseName })}
+              checked={allSelected}
+              ref={(el) => {
+                if (el) el.indeterminate = selectedCount > 0 && !allSelected;
+              }}
+              onChange={() => toggleGroup(group)}
+              className="h-4 w-4 accent-[var(--accent,#888)]"
+            />
+          </label>
           <h3 className="text-sm font-semibold text-[var(--text-strong)]">
             {group.courseName} ({group.items.length})
           </h3>

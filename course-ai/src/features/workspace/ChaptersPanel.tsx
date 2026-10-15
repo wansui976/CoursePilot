@@ -70,6 +70,7 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
         collapsed ? "mt-auto shrink-0 border-t border-[var(--border-subtle)]" : "min-h-0 flex-1"
       }`}
     >
+      <div className={`flex shrink-0 items-center pr-2 ${collapsed ? "" : "pt-1"}`}>
       <button
         type="button"
         onClick={() => {
@@ -81,7 +82,7 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
         aria-expanded={!collapsed}
         title={collapsed ? t("chapters.expand") : t("chapters.collapse")}
         className={`ca-touch-44 flex shrink-0 items-center gap-1 px-3 text-sm text-[var(--text-muted)] transition-colors hover:text-[var(--text-normal)] ${
-          collapsed ? "py-2" : "pt-2"
+          "py-2"
         }`}
       >
         <ChevronDown
@@ -90,8 +91,19 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
         />
         {t("chapters.keyChapters")}
       </button>
+      {/* 收回成底栏时只留标题，与摘要面板同款。 */}
+      {!collapsed && !isError && (
+        <PanelActions
+          inline
+          onRegenerate={generate.start}
+          regenerating={generate.isPending}
+          hasContent={chapters.length > 0}
+          stale={stale.has("chapters")}
+        />
+      )}
+      </div>
       {!collapsed && (
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-12 pt-1">
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-4 pt-1">
           {!isError && generate.isError && (
             <ErrorNote
               className="mb-2"
@@ -134,15 +146,6 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
             </ol>
           )}
         </div>
-      )}
-      {/* 收回成底栏时悬浮按钮会叠在标题条上，与摘要面板同款：收回即隐藏。 */}
-      {!collapsed && !isError && (
-        <PanelActions
-          onRegenerate={generate.start}
-          regenerating={generate.isPending}
-          hasContent={chapters.length > 0}
-          stale={stale.has("chapters")}
-        />
       )}
     </div>
   );

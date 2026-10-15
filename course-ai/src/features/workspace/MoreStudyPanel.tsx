@@ -80,7 +80,7 @@ export function MoreStudyPanel({
                 type="button"
                 aria-pressed={view === key}
                 onClick={() => setView(key)}
-                className={`ca-touch-44 flex h-8 min-w-max items-center justify-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${
+                className={`ca-touch-44 flex h-8 flex-none items-center whitespace-nowrap justify-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${
                   view === key
                     ? "bg-[var(--accent-weak)] text-[var(--accent-text)]"
                     : "text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-normal)]"

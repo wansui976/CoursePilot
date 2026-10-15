@@ -8,6 +8,10 @@ import { ExportMenu, type ExportItem } from "./ExportMenu";
 export const panelActionButtonClass =
   "ca-touch-44 ca-workbench-touch grid h-9 w-9 place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)]/90 text-[var(--text-muted)] shadow-[var(--shadow-raise)] backdrop-blur transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] disabled:cursor-not-allowed disabled:opacity-40";
 
+/** 标题条里的同款按钮：不带浮起的边框与阴影，只是一个安静的图标。 */
+const inlineActionButtonClass =
+  "ca-touch-44 grid h-7 w-7 place-items-center rounded-md text-[var(--text-faint)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] disabled:cursor-not-allowed disabled:opacity-40";
+
 export function PanelActions({
   onRegenerate,
   regenerating,
@@ -15,6 +19,7 @@ export function PanelActions({
   stale,
   exportItems = [],
   leading,
+  inline = false,
 }: {
   onRegenerate?: () => void;
   regenerating?: boolean;
@@ -23,11 +28,19 @@ export function PanelActions({
   stale?: boolean;
   exportItems?: ExportItem[];
   leading?: ReactNode;
+  /** 放进分区标题条（与标题同一行），不再悬浮盖在可滚动的正文上。 */
+  inline?: boolean;
 }) {
   const { t } = useTranslation();
   if (!leading && !onRegenerate && exportItems.length === 0) return null;
   return (
-    <div className="ca-workbench-panel-actions absolute bottom-3 right-3 z-10 flex items-center gap-1.5">
+    <div
+      className={
+        inline
+          ? "ml-auto flex flex-none items-center gap-1"
+          : "ca-workbench-panel-actions absolute bottom-3 right-3 z-10 flex items-center gap-1.5"
+      }
+    >
       {/* 只标记、不自动重跑：重跑要花钱，跑不跑由用户决定。不标出来的话，这份内容
           讲的还是旧稿的事，界面上却看不出任何区别。 */}
       {stale && (
@@ -55,7 +68,7 @@ export function PanelActions({
                 ? t("panelActions.regenerate")
                 : t("panelActions.generate")
           }
-          className={`${panelActionButtonClass} ${
+          className={`${inline ? inlineActionButtonClass : panelActionButtonClass} ${
             stale ? "border-[var(--accent-text)]/60 text-[var(--accent-text)]" : ""
           }`}
         >

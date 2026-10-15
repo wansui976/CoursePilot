@@ -61,6 +61,7 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
       data-summary-collapsed={collapsed ? true : undefined}
       className="ca-summary-panel"
     >
+      <div className="flex shrink-0 items-center pr-2">
       <button
         type="button"
         onClick={toggleCollapsed}
@@ -73,6 +74,16 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
         />
         {t("summary.title")}
       </button>
+      {!collapsed && !isError && (
+        <PanelActions
+          inline
+          onRegenerate={generate.start}
+          regenerating={generate.isPending}
+          hasContent={!!summary}
+          stale={stale.has("summary")}
+        />
+      )}
+      </div>
       {collapsed && isError && (
         <div className="px-3 pb-3">
           <ErrorNote error={error} onRetry={() => void refetch()} />
@@ -80,7 +91,7 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
       )}
       {!collapsed && (
         <>
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-12 pt-1">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-1">
             {!isError && generate.isError && (
               <ErrorNote
                 className="mb-2"
@@ -102,14 +113,6 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
               />
             )}
           </div>
-          {!isError && (
-            <PanelActions
-              onRegenerate={generate.start}
-              regenerating={generate.isPending}
-              hasContent={!!summary}
-              stale={stale.has("summary")}
-            />
-          )}
         </>
       )}
     </div>

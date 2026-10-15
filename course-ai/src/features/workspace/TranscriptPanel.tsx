@@ -124,7 +124,7 @@ const TranscriptRow = memo(function TranscriptRow({
             if (sel && !sel.isCollapsed) return;
             onSeek(segment.start_ms);
           }}
-          className="block w-full px-2 py-1 text-left text-sm leading-relaxed"
+          className="ca-transcript-text block w-full px-2 py-1 text-left text-sm leading-relaxed"
         >
           <span className="mr-2 text-xs text-[var(--text-muted)]">
             {formatMs(segment.start_ms)}

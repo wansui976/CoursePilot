@@ -289,6 +289,11 @@
     opacity: 1;
   }
 
+  /* 常显之后它会压在折行文字的行尾上：给正文让出按钮那一列。 */
+  .ca-transcript-text {
+    padding-right: 44px;
+  }
+
   /* iOS 会在聚焦 font-size<16px 的输入框时自动放大整页(聚焦后页面跳动、失焦不复原)。
      触屏上把表单控件统一撑到 16px，从根上避免聚焦缩放。桌面(fine pointer)不受影响。 */
   input,
