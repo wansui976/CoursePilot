@@ -65,7 +65,7 @@ async function ensureServer() {
 }
 
 const opts = parseArgs(process.argv.slice(2));
-const devices = opts.device === "all" ? Object.keys(DEVICES) : [opts.device];
+const devices = opts.device === "all" ? Object.keys(DEVICES) : opts.device.split(",");
 const themes = opts.theme === "both" ? ["light", "dark"] : [opts.theme];
 for (const device of devices) if (!DEVICES[device]) throw new Error(`未知设备 ${device}`);
 const unknownScenes = (opts.scenes ?? []).filter((name) => !scenes.some((s) => s.name === name));

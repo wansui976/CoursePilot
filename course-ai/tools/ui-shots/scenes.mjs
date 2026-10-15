@@ -58,6 +58,7 @@ export const scenes = [
   },
   {
     name: "course-list",
+    devices: ALL,
     run: async ({ page, shot }) => {
       await openCourse(page);
       await page.getByRole("button", { name: "列表视图" }).click();
@@ -66,6 +67,7 @@ export const scenes = [
   },
   {
     name: "card-menu",
+    devices: ALL,
     run: async ({ page, shot }) => {
       await openCourse(page);
       const card = page.locator("article.ca-card").nth(2);
@@ -77,6 +79,7 @@ export const scenes = [
   },
   {
     name: "import",
+    devices: ALL,
     run: async ({ page, shot }) => {
       await openCourse(page);
       await page.getByRole("button", { name: /^导入/ }).first().click();
@@ -104,6 +107,7 @@ export const scenes = [
   },
   {
     name: "workbench-tabs",
+    devices: ALL,
     run: async ({ page, shot }) => {
       await openVideo(page);
       for (const [label, suffix] of [["文稿", "transcript"], ["笔记", "notes"], ["更多", "more"]]) {
@@ -114,6 +118,7 @@ export const scenes = [
   },
   {
     name: "assistant",
+    devices: ALL,
     run: async ({ page, shot }) => {
       await openVideo(page);
       await page.getByRole("button", { name: "打开助手" }).click();
@@ -122,6 +127,7 @@ export const scenes = [
   },
   {
     name: "concepts",
+    devices: ALL,
     run: async ({ page, shot }) => {
       await openCourse(page);
       await page.getByRole("button", { name: "知识点" }).click();
@@ -153,6 +159,7 @@ export const scenes = [
   },
   {
     name: "review",
+    devices: ALL,
     run: async ({ page, shot }) => {
       await nav(page, "学习面板", "学习");
       await page.getByRole("button", { name: "开始复习" }).first().click();
@@ -163,8 +170,10 @@ export const scenes = [
   },
   {
     name: "subscriptions",
-    run: async ({ page, shot }) => {
-      await openCourse(page);
+    devices: ALL,
+    run: async ({ page, shot, device }) => {
+      // 窄屏进了课程就离开了课程列表；直接在「课程」Tab 的列表上打开菜单。
+      if (device === "desktop") await openCourse(page);
       await page.getByRole("button", { name: "课程操作" }).first().click();
       await page.getByRole("menuitem", { name: /订阅更新/ }).click();
       await shot();
@@ -187,6 +196,7 @@ export const scenes = [
   },
   {
     name: "translation",
+    devices: ALL,
     run: async ({ page, shot }) => {
       await captionPrefs(page, "bilingual", "en");
       await openVideo(page);
@@ -196,6 +206,7 @@ export const scenes = [
   },
   {
     name: "share",
+    devices: ALL,
     run: async ({ page, shot, out, device, theme }) => {
       const prefix = `${device}-${theme}-share`;
       let saved = 0;
@@ -226,6 +237,7 @@ export const scenes = [
   },
   {
     name: "trash",
+    devices: ALL,
     run: async ({ page, shot }) => {
       await nav(page, "回收站", "回收站");
       await shot();
