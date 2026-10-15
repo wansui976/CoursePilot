@@ -25,6 +25,12 @@ async function openVideo(page) {
   await page.getByRole("button", { name: VIDEO }).first().click();
 }
 
+/** 切到笔记：平板竖屏分栏时笔记常驻右边，没有这个标签。 */
+async function openNotes(page) {
+  const tab = page.getByRole("tab", { name: /笔记/ });
+  if (await tab.count()) await tab.click();
+}
+
 /** 写入字幕显示偏好后刷新：模式（original / bilingual / translation）与译文语言。 */
 async function captionPrefs(page, mode, lang) {
   await page.evaluate(([m, l]) => {
@@ -111,7 +117,10 @@ export const scenes = [
     run: async ({ page, shot }) => {
       await openVideo(page);
       for (const [label, suffix] of [["文稿", "transcript"], ["笔记", "notes"], ["更多", "more"]]) {
-        await page.getByRole("tab", { name: new RegExp(label) }).click();
+        const tab = page.getByRole("tab", { name: new RegExp(label) });
+        // 平板竖屏分栏时笔记常驻右边、不是标签。
+        if (!(await tab.count())) continue;
+        await tab.click();
         await shot(suffix);
       }
     },
@@ -209,7 +218,7 @@ export const scenes = [
     devices: ALL,
     run: async ({ page, shot }) => {
       await openVideo(page);
-      await page.getByRole("tab", { name: /笔记/ }).click();
+      await openNotes(page);
       await page.getByRole("button", { name: "历史版本" }).filter({ visible: true }).first().click();
       await page.getByRole("dialog", { name: "笔记历史" }).waitFor();
       await shot();
@@ -227,7 +236,7 @@ export const scenes = [
         saved += await dumpShareImages(page, out, `${prefix}-card-${name}`);
       };
       await openVideo(page);
-      await page.getByRole("tab", { name: /笔记/ }).click();
+      await openNotes(page);
       await page.getByRole("button", { name: "导出" }).filter({ visible: true }).first().click();
       await shot("notes-menu");
       await page.getByRole("menuitem", { name: /分享长图/ }).click();
