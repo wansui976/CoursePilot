@@ -6,12 +6,15 @@
  *   pnpm shots --scenes home,workbench      # 只拍指定场景
  *   pnpm shots --device phone --theme dark  # 设备：desktop | phone | tablet | all
  *   pnpm shots --out /tmp/shots             # 默认输出到 ui-shots/（已忽略）
+ *   pnpm shots --update-baseline            # 拍完把这批图存为基准（ui-shots-baseline/，已忽略）
+ *   pnpm shots --compare [--threshold 0.5]  # 拍完与基准逐像素比对，变化超过 0.5% 的列出并出差异图
  *
  * 端口 1420 已有 dev server 就复用，否则自己起一个、结束时关掉。
  * 有场景失败或页面抛错时以非零码退出；未处理的 IPC 命令会列出来，便于补假数据。
  */
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
+import { compareWithBaseline, updateBaseline } from "./compare.mjs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
@@ -28,17 +31,61 @@ const DEVICES = {
 };
 
 function parseArgs(argv) {
-  const opts = { scenes: null, device: "desktop", theme: "both", out: resolve(ROOT, "ui-shots") };
+  const opts = {
+    scenes: null,
+    device: "desktop",
+    theme: "both",
+    out: resolve(ROOT, "ui-shots"),
+    baseline: resolve(ROOT, "ui-shots-baseline"),
+    updateBaseline: false,
+    compare: false,
+    threshold: 0.5,
+  };
   for (let i = 0; i < argv.length; i++) {
     const [key, inline] = argv[i].split("=");
+    if (key === "--update-baseline") {
+      opts.updateBaseline = true;
+      continue;
+    }
+    if (key === "--compare") {
+      opts.compare = true;
+      continue;
+    }
     const value = inline ?? argv[++i];
     if (key === "--scenes") opts.scenes = value.split(",").filter(Boolean);
     else if (key === "--device") opts.device = value;
     else if (key === "--theme") opts.theme = value;
     else if (key === "--out") opts.out = resolve(value);
+    else if (key === "--baseline") opts.baseline = resolve(value);
+    else if (key === "--threshold") opts.threshold = Number(value);
     else if (key !== "--") throw new Error(`未知参数 ${key}`);
   }
   return opts;
+}
+
+/** 在页面里跑：等媒体就绪、再等所有滚动容器的位置连续几次不变（文稿「跟随」是平滑滚动，
+ *  截到半路的话两次截图就对不上）。各最多等 3 秒。 */
+async function waitForScrollIdle() {
+  // 先等媒体就绪：播放器在 loadedmetadata 时才跳到上次进度，文稿据此才开始跟随滚动。
+  for (let i = 0; i < 30; i++) {
+    const media = [...document.querySelectorAll("video, audio")];
+    if (media.every((el) => el.readyState >= 1)) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  const positions = () =>
+    [document.scrollingElement, ...document.querySelectorAll("*")]
+      .filter((el) => el && el.scrollHeight > el.clientHeight)
+      .map((el) => `${el.scrollTop},${el.scrollLeft}`)
+      .join("|");
+  let last = positions();
+  let stable = 0;
+  for (let i = 0; i < 30 && stable < 3; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    const now = positions();
+    stable = now === last ? stable + 1 : 0;
+    last = now;
+  }
 }
 
 async function serverUp() {
@@ -78,6 +125,7 @@ const failures = [];
 const pageErrors = new Set();
 const unknownCmds = new Set();
 let count = 0;
+const shotNames = [];
 
 try {
   for (const device of devices) {
@@ -97,8 +145,11 @@ try {
         });
         const shot = async (suffix) => {
           await page.waitForTimeout(700); // 等入场动画与异步封面落定
+          await page.evaluate(waitForScrollIdle);
           const name = [device, theme, scene.name, suffix].filter(Boolean).join("-");
-          await page.screenshot({ path: resolve(opts.out, `${name}.png`) });
+          // 停掉动画（无限循环的直接取消、有限的快进到终态），同一界面两次截图才逐像素一致。
+          await page.screenshot({ path: resolve(opts.out, `${name}.png`), animations: "disabled" });
+          shotNames.push(`${name}.png`);
           count++;
         };
         try {
@@ -121,4 +172,27 @@ console.log(`截图 ${count} 张 → ${opts.out}`);
 if (unknownCmds.size) console.log(`未处理的 IPC 命令（返回了空值）：${[...unknownCmds].sort().join(", ")}`);
 if (failures.length) console.log(`场景失败：\n  ${failures.join("\n  ")}`);
 if (pageErrors.size) console.log(`页面错误：\n  ${[...pageErrors].slice(0, 10).join("\n  ")}`);
-process.exitCode = failures.length || pageErrors.size ? 1 : 0;
+let regressions = 0;
+if (opts.updateBaseline) {
+  console.log(`已把 ${updateBaseline(shotNames, opts.out, opts.baseline)} 张存为基准 → ${opts.baseline}`);
+}
+if (opts.compare) {
+  const { changed, missing, compared } = compareWithBaseline(
+    shotNames,
+    opts.out,
+    opts.baseline,
+    opts.threshold / 100,
+  );
+  console.log(`与基准比对 ${compared} 张（阈值 ${opts.threshold}%）`);
+  if (missing.length) console.log(`没有基准（先跑 --update-baseline）：${missing.join(", ")}`);
+  if (changed.length) {
+    console.log(`有变化（差异图在 ${resolve(opts.out, "diff")}）：`);
+    for (const { name, ratio } of changed.sort((a, b) => b.ratio - a.ratio)) {
+      console.log(`  ${(ratio * 100).toFixed(2).padStart(6)}%  ${name}`);
+    }
+  } else if (compared) {
+    console.log("全部与基准一致");
+  }
+  regressions = changed.length;
+}
+process.exitCode = failures.length || pageErrors.size || regressions ? 1 : 0;

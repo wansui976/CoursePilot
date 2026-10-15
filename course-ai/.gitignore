@@ -29,3 +29,4 @@ cookies*.txt
 
 # pnpm shots 的界面截图输出
 /ui-shots/
+/ui-shots-baseline/
