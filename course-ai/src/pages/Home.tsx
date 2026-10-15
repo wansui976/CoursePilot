@@ -1,28 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { queries } from "@/lib/queries";
-import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
-import { ChevronLeft } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { onBackButtonPress } from "@tauri-apps/api/app";
 import { AppSidebar } from "@/features/shell/AppSidebar";
 import { AppRail } from "@/features/shell/AppRail";
-import { CourseSidebar } from "@/features/library/CourseSidebar";
-import { RecycleBin } from "@/features/library/RecycleBin";
-import { Dashboard } from "@/features/study/Dashboard";
-import { ConceptsPanel, type ConceptNavigationState } from "@/features/knowledge/ConceptsPanel";
-import { DevConsole } from "@/features/settings/DevConsole";
-import { SettingsPanel } from "@/features/settings/SettingsPanel";
-import { isSettingsCategory } from "@/features/settings/categories";
-import { TabsPanel } from "@/features/workspace/TabsPanel";
-import { WorkspaceLayout } from "@/features/workspace/WorkspaceLayout";
-import { ProcessingQueueView } from "@/features/library/ProcessingQueueView";
+import type { ConceptNavigationState } from "@/features/knowledge/ConceptsPanel";
 import { useProcessingQueue } from "@/features/library/useProcessingQueue";
-import { CourseLibraryView } from "@/features/library/CourseLibraryView";
 import { useRecorrection } from "@/features/library/useRecorrection";
-import { VideoPlayer } from "@/features/player";
 import { BottomTabBar, type CompactTab } from "@/features/shell/BottomTabBar";
-import { ErrorNote } from "@/ui/ErrorNote";
 import {
   coarsePointer,
   useContainerPixelWidth,
@@ -31,58 +17,29 @@ import {
 } from "@/lib/useContainerWidth";
 import { ipc, type DueCard } from "@/lib/ipc";
 import type { AssistantAction, Video } from "@/lib/types";
-import { buildAssistantContext, reconcileAssistantAction } from "@/lib/assistantHome";
-import { displayTitle } from "@/lib/videoTitle";
+import {
+  buildAssistantContext,
+  dispatchAssistantNavigation,
+  reconcileAssistantAction,
+} from "@/lib/assistantHome";
 import { WATCHED_RATIO, readPlaybackProgress, writeLastVideoId } from "@/lib/playback";
 import { useStudyReminder } from "@/lib/useStudyReminder";
-import { isIOS, isTablet } from "@/lib/platform";
+import { isTablet } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
 import { AssistantPanel } from "@/features/assistant/AssistantPanel";
 import { accentVars, useTheme } from "@/stores/theme";
 import { useAssistantUi } from "@/stores/assistant";
 import { useHomeRoute } from "@/app/homeRoute";
+import { ShellContext, type KnowledgeReturnState, type Shell } from "@/app/shell";
+import { MAIN_VIEW_COMPONENTS } from "@/app/mainViews";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const SIDEBAR_COLLAPSED_KEY = "course-ai-sidebar-collapsed";
 
 type SidebarCollapsed = { library: boolean; workbench: boolean };
 
-type KnowledgeReturnState = {
-  courseId: string;
-  navigationState: ConceptNavigationState;
-};
 
 
-export function dispatchAssistantNavigation(
-  action: AssistantAction,
-  currentVideoId: string | null,
-  commands: {
-    selectCourse: (courseId: string) => void;
-    openAt: (videoId: string, atMs: number) => void;
-    seek: (atMs: number) => void;
-    clearPendingOpen: () => void;
-  },
-) {
-  if (action.kind === "open_video") {
-    if (action.course_id) commands.selectCourse(action.course_id);
-
-    const atMs = Math.max(0, action.at_ms ?? 0);
-    if (action.video_id === currentVideoId) {
-      // pendingSeek 只在 loadedmetadata 时消费；当前视频不会重新触发该事件，必须直接 seek。
-      commands.clearPendingOpen();
-      if (action.at_ms != null) commands.seek(atMs);
-      return;
-    }
-
-    commands.openAt(action.video_id, atMs);
-    return;
-  }
-
-  if (action.kind === "seek_to") {
-    commands.clearPendingOpen();
-    commands.seek(Math.max(0, action.at_ms));
-  }
-}
 
 // 首次默认：课程库展开（选课要概览）、工作台折叠（看视频省空间）。
 function readSidebarCollapsed(): SidebarCollapsed {
@@ -108,7 +65,6 @@ export function Home() {
     view: mainView,
     courseId: selectedCourseId,
     videoId: selectedVideoId,
-    settingsCategory,
     go,
   } = useHomeRoute();
   const showSettings = mainView === "settings";
@@ -341,18 +297,6 @@ export function Home() {
     videos.find((video) => video.id === selectedVideoId) ??
     queuedVideos.find((video) => video.id === selectedVideoId);
 
-  // asset 协议在 macOS WKWebView 下放大文件会「有画面没声音」；改用本地 HTTP
-  // 媒体服务（带 Range）提供视频，拿到 http://127.0.0.1 的 URL 再播。
-  const {
-    data: mediaSrc,
-    isError: mediaSrcError,
-    error: mediaSrcErrorObj,
-    refetch: refetchMediaSrc,
-  } = useQuery({
-    queryKey: qk.mediaUrl.video(selectedVideo?.id),
-    queryFn: () => ipc.videos.mediaUrl(selectedVideo!.id),
-    enabled: !!selectedVideo,
-  });
 
   // 启动时按已保存的偏好同步主题与强调色（auto 解析系统明暗）。
   useEffect(() => {
@@ -660,113 +604,6 @@ export function Home() {
 
 
 
-  function renderSelectedVideoWorkspace() {
-    if (!selectedVideo) return null;
-    // 本集在课程中的位置（从 1 起）；队列打开的跨课程视频不在当前列表里时为 0，不显示。
-    const videoPosition = videos.findIndex((video) => video.id === selectedVideo.id) + 1;
-
-    return (
-      <WorkspaceLayout
-        videoId={selectedVideo.id}
-        shellWide={shellWide}
-        availableWidth={workbenchAvailableWidth}
-        panel={<TabsPanel videoId={selectedVideo.id} />}
-        player={
-          <section aria-label={t("home.workbench")} className="ca-player-col">
-            {!isPhoneDevice && (
-              <header className="ca-wb-head">
-                <div className="wb-title-row">
-                  {knowledgeReturn && (
-                    <button
-                      type="button"
-                      onClick={returnToKnowledge}
-                      aria-label={t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName })}
-                      title={t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName })}
-                      className="ca-touch-44 inline-flex max-w-[45%] flex-none items-center gap-1 text-sm font-medium text-primary transition hover:opacity-80"
-                    >
-                      <ChevronLeft className="h-4 w-4 flex-none" />
-                      <span className="truncate">{t("home.backToConcepts", { name: knowledgeReturn.navigationState.conceptName })}</span>
-                    </button>
-                  )}
-                  <div className="min-w-0">
-                    {selectedCourse && (
-                      <div className="wb-crumb">
-                        <button
-                          type="button"
-                          onClick={returnFromVideo}
-                          aria-label={t("home.backToCourse", { name: selectedCourse.name })}
-                          className="wb-crumb-course"
-                        >
-                          {selectedCourse.name}
-                        </button>
-                        {videoPosition > 0 && (
-                          <>
-                            <span aria-hidden="true">·</span>
-                            <span>{t("home.episodeOf", { index: videoPosition, total: videos.length })}</span>
-                          </>
-                        )}
-                      </div>
-                    )}
-                    <h1 className="wb-title" title={displayTitle(selectedVideo.title)}>
-                      {displayTitle(selectedVideo.title)}
-                    </h1>
-                  </div>
-                </div>
-              </header>
-            )}
-            <div className="ca-stage-wrap">
-              {isPhoneDevice && (
-                <button
-                  type="button"
-                  className="ca-back-fab"
-                  onClick={returnFromVideo}
-                  title={knowledgeReturn ? t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName }) : t("nav.back")}
-                  aria-label={knowledgeReturn ? t("home.backToConcept", { name: knowledgeReturn.navigationState.conceptName }) : t("nav.back")}
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </button>
-              )}
-              <div className="ca-stage">
-                {mediaSrcError ? (
-                  <div className="flex h-full items-center justify-center bg-black p-4">
-                    <ErrorNote
-                      className="w-full max-w-md"
-                      error={mediaSrcErrorObj}
-                      onRetry={() => void refetchMediaSrc()}
-                    />
-                  </div>
-                ) : mediaSrc ? (
-                  <VideoPlayer
-                    src={mediaSrc}
-                    videoId={selectedVideo.id}
-                    immersive={isIOS()}
-                    onFullscreenChange={setVideoFullscreen}
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">
-                    {t("home.preparing")}
-                  </div>
-                )}
-              </div>
-            </div>
-          </section>
-        }
-      />
-    );
-  }
-
-  // 窄屏「课程」Tab 的根页:整屏课程列表(复用 CourseSidebar 的增删改),回收站置于右上。
-  function renderCourseListScreen() {
-    return (
-      <CourseSidebar
-        selectedCourseId={selectedCourseId}
-        onSelect={selectCourse}
-        onClearSelection={clearCourseSelection}
-        onOpenRecycleBin={() => openMainView("recycle")}
-        onTransientCloseChange={registerTransientClose}
-      />
-    );
-  }
 
   const isWorkbenchView = !!selectedVideo && !showSettings && !showRecycleBin && !showDevConsole && !showDashboard && !queueOpen;
   // 桌面：进入某个视频的工作台会话后，即便在主区叠开设置/回收站/控制台/队列整页，
@@ -821,7 +658,45 @@ export function Home() {
                 ? "courselist"
                 : "library";
 
+  const MainViewComponent = MAIN_VIEW_COMPONENTS[mainView];
+  const shell: Shell = {
+    isPhoneDevice,
+    shellWide,
+    workbenchAvailableWidth,
+    showCourseListScreen,
+    courseVideos: videos,
+    selectedCourse,
+    selectedVideo,
+    knowledgeReturn,
+    queue,
+    recorrection,
+    videoQuery,
+    setVideoQuery,
+    selectCourse,
+    clearCourseSelection,
+    openVideo,
+    openQueuedVideo,
+    openMainView,
+    closeToLibrary: closeMainOverlays,
+    resumeStudy,
+    reviewJump,
+    conceptJump,
+    closeConcepts: () => {
+      go({ view: "library" });
+      setKnowledgeReturn(null);
+    },
+    returnToKnowledge,
+    returnFromVideo,
+    goBackOneLevel,
+    forgetQueuedVideo,
+    setVideoFullscreen,
+    registerTransientClose,
+    registerSettingsExitRequest,
+    registerSettingsBackRequest,
+  };
+
   return (
+    <ShellContext.Provider value={shell}>
     <div
       ref={appRef}
       data-theme={theme}
@@ -877,70 +752,7 @@ export function Home() {
         {/* key=视图类型(而非视频 id):切换顶层视图时重挂以重播入场动画;在工作台内
             切换视频时 key 不变,播放器与面板状态保留、不被打断。 */}
         <div key={mainViewKey} className="ca-view">
-          {showSettings ? (
-            <SettingsPanel
-              category={isSettingsCategory(settingsCategory) ? settingsCategory : null}
-              onCategoryChange={(category) => go({ settingsCategory: category })}
-              onClose={() => go({ view: "library" })}
-              onOpenDevConsole={() => openMainView("dev")}
-              onRegisterExitRequest={registerSettingsExitRequest}
-              onRegisterBackRequest={registerSettingsBackRequest}
-            />
-          ) : showRecycleBin ? (
-            <RecycleBin onClose={() => go({ view: "library" })} />
-          ) : showDashboard ? (
-            <Dashboard
-              onClose={() => go({ view: "library" })}
-              onOpenCourse={selectCourse}
-              onResume={resumeStudy}
-              onJump={reviewJump}
-            />
-          ) : showDevConsole ? (
-            <DevConsole
-              onClose={() => go({ view: "settings", settingsCategory: "dev" })}
-            />
-          ) : queueOpen ? (
-            <ProcessingQueueView queue={queue} onBack={goBackOneLevel} onOpenVideo={openQueuedVideo} />
-          ) : selectedVideo ? (
-            renderSelectedVideoWorkspace()
-          ) : showConcepts && selectedCourseId ? (
-            <ConceptsPanel
-              courseId={selectedCourseId}
-              courseName={selectedCourse?.name}
-              onClose={() => {
-                go({ view: "library" });
-                setKnowledgeReturn(null);
-              }}
-              onJump={conceptJump}
-              initialNavigationState={
-                knowledgeReturn?.courseId === selectedCourseId
-                  ? knowledgeReturn.navigationState
-                  : null
-              }
-            />
-          ) : showCourseListScreen ? (
-            renderCourseListScreen()
-          ) : (
-            <CourseLibraryView
-              key={selectedCourseId ?? "none"}
-              courseId={selectedCourseId}
-              videoQuery={videoQuery}
-              onVideoQueryChange={setVideoQuery}
-              isPhoneDevice={isPhoneDevice}
-              queue={queue}
-              recorrection={recorrection}
-              openVideo={openVideo}
-              onBackToCourses={() => go({ courseId: null })}
-              onOpenConcepts={() => go({ view: "concepts" })}
-              onVideoDeleted={(videoId) => {
-                forgetQueuedVideo(videoId);
-                if (selectedVideoId === videoId) go({ videoId: null });
-              }}
-              onSelectCourse={selectCourse}
-              onResume={resumeStudy}
-              onTransientCloseChange={registerTransientClose}
-            />
-          )}
+          <MainViewComponent />
         </div>
       </main>
       {showBottomTab && (
@@ -961,5 +773,6 @@ export function Home() {
         }
       />
     </div>
+    </ShellContext.Provider>
   );
 }

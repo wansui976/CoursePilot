@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AssistantAction } from "@/lib/types";
-import { dispatchAssistantNavigation } from "./Home";
+import { dispatchAssistantNavigation } from "@/lib/assistantHome";
 
 function commands() {
   return {

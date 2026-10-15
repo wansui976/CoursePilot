@@ -7,8 +7,8 @@ import {
 import { Home } from "@/pages/Home";
 import { VIEW_PATHS, validateHomeSearch } from "@/app/homeRoute";
 
-// 过渡期：Home 仍是整个外壳并按当前路径渲染主区，子路由只登记路径、不带组件。
-// 后续把各视图拆成独立路由组件时，再在 Home 主区放 <Outlet />。
+// Home 是外壳，按当前路径从 app/mainViews 选主区组件；子路由只登记路径、不带组件
+// （为什么不用 <Outlet /> 见 mainViews）。
 const rootRoute = createRootRoute({
   component: Home,
   validateSearch: validateHomeSearch,
