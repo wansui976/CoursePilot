@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
-import { onBackButtonPress } from "@tauri-apps/api/app";
 import { AppSidebar } from "@/features/shell/AppSidebar";
 import { AppRail } from "@/features/shell/AppRail";
 import type { ConceptNavigationState } from "@/features/knowledge/ConceptsPanel";
@@ -15,7 +14,7 @@ import {
   useContainerWidth,
   useIsPortrait,
 } from "@/lib/useContainerWidth";
-import { ipc, type DueCard } from "@/lib/ipc";
+import type { DueCard } from "@/lib/ipc";
 import type { AssistantAction, Video } from "@/lib/types";
 import {
   buildAssistantContext,
@@ -32,7 +31,7 @@ import { useAssistantUi } from "@/stores/assistant";
 import { useHomeRoute } from "@/app/homeRoute";
 import { ShellContext, type KnowledgeReturnState, type Shell } from "@/app/shell";
 import { MAIN_VIEW_COMPONENTS } from "@/app/mainViews";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useAndroidBack, useTransientDismissal } from "@/features/shell/systemBack";
 
 const SIDEBAR_COLLAPSED_KEY = "course-ai-sidebar-collapsed";
 
@@ -106,13 +105,11 @@ export function Home() {
     ((continuation: () => void) => void) | null
   >(null);
   const settingsBackRequestRef = useRef<(() => void) | null>(null);
-  const transientCloseRef = useRef<(() => HTMLElement | null | void) | null>(null);
-  const dismissVisibleTransientRef = useRef<
-    ((continuation?: () => void) => boolean) | null
-  >(null);
-  const registerTransientClose = useCallback((close: (() => HTMLElement | null | void) | null) => {
-    transientCloseRef.current = close;
-  }, []);
+  const [videoFullscreen, setVideoFullscreen] = useState(false);
+  // 返回 / 显式导航前先关掉最上层的临时态（菜单、模态、全屏播放器……），见 shell/systemBack。
+  const { dismissVisibleTransient, registerTransientClose } = useTransientDismissal({
+    videoFullscreen,
+  });
   const registerSettingsExitRequest = useCallback(
     (request: ((continuation: () => void) => void) | null) => {
       settingsExitRequestRef.current = request;
@@ -137,14 +134,14 @@ export function Home() {
       runAfterSettingsExit(() => {
         if (
           selectedVideoId &&
-          dismissVisibleTransientRef.current?.(continuation)
+          dismissVisibleTransient(continuation)
         ) {
           return;
         }
         continuation();
       });
     },
-    [runAfterSettingsExit, selectedVideoId],
+    [dismissVisibleTransient, runAfterSettingsExit, selectedVideoId],
   );
   const bucket = useContainerWidth(appRef);
   const appPixelWidth = useContainerPixelWidth(appRef);
@@ -163,12 +160,7 @@ export function Home() {
     ? 56 + (sidebarCollapsed[selectedVideoId ? "workbench" : "library"] ? 0 : 256)
     : 0;
   const workbenchAvailableWidth = Math.max(0, appPixelWidth - sidebarWidth);
-  // 硬件返回键是「平台能力」（仅 Android 有），与布局宽度无关：用 UA 判平台，
-  // 避免在桌面拦截窗口关闭。
-  const isAndroidPlatform =
-    typeof navigator !== "undefined" && /android/i.test(navigator.userAgent);
   const androidBackGuard = useRef(0);
-  const [videoFullscreen, setVideoFullscreen] = useState(false);
   const returnToLibrary = useCallback(() => {
     setKnowledgeReturn(null);
     go({ view: "library", videoId: null });
@@ -324,137 +316,6 @@ export function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingSeek]);
 
-  const dismissVisibleTransient = useCallback(
-    (continuation?: () => void): boolean => {
-      const visibleMenus = Array.from(
-        document.querySelectorAll<HTMLElement>('[role="menu"]:not([hidden])'),
-      ).filter(
-        (menu) =>
-          !menu.closest('[hidden], [aria-hidden="true"], [data-state="inactive"]'),
-      );
-      const dispatchEscape = (target: HTMLElement | Document) => {
-        const escape = new KeyboardEvent("keydown", {
-          key: "Escape",
-          code: "Escape",
-          bubbles: true,
-          cancelable: true,
-        });
-        target.dispatchEvent(escape);
-        return escape.defaultPrevented;
-      };
-
-      const visibleTransientLayers = Array.from(
-        document.querySelectorAll<HTMLElement>(
-          '[data-system-back-layer]:not([hidden])',
-        ),
-      ).filter(
-        (layer) =>
-          !layer.closest('[hidden], [aria-hidden="true"], [data-state="inactive"]'),
-      );
-
-      // 子组件自己的全屏模态（复习、移动助手、未保存确认、导入任务）比 Home
-      // 的页面层级更靠上。把 Android 返回等价成 Esc，让模态自行决定关闭或拦截。
-      const visibleModals = Array.from(
-        document.querySelectorAll<HTMLElement>(
-          '[role="dialog"][aria-modal="true"]:not([hidden])',
-        ),
-      ).filter(
-        (modal) =>
-          !modal.closest('[hidden], [aria-hidden="true"], [data-state="inactive"]'),
-      );
-      const modal = visibleModals[visibleModals.length - 1];
-
-      const continueAfterDismissal = (target?: HTMLElement | null) => {
-        if (
-          !continuation ||
-          target?.hasAttribute("data-system-back-pending") ||
-          target?.hasAttribute("data-system-back-dirty")
-        ) {
-          return;
-        }
-        queueMicrotask(() => {
-          const stillVisible =
-            target?.isConnected &&
-            !target.closest('[hidden], [aria-hidden="true"], [data-state="inactive"]');
-          if (stillVisible) return;
-          // 显式导航可能叠着多层（例如移动助手盖在文稿编辑器上）：逐层关闭，
-          // 直到没有可见临时态才执行原导航；dirty / pending 层会在上面直接截断。
-          if (dismissVisibleTransientRef.current?.(continuation)) return;
-          continuation();
-        });
-      };
-
-      // 全屏播放器在模态助手之上；先关其内部菜单，再退出全屏。
-      if (videoFullscreen) {
-        const fullscreenLayer =
-          document.querySelector<HTMLElement>("[data-video-fullscreen]");
-        const fullscreenMenu = [...visibleMenus]
-          .reverse()
-          .find((menu) => fullscreenLayer?.contains(menu));
-        if (fullscreenMenu && dispatchEscape(fullscreenMenu)) {
-          continueAfterDismissal(fullscreenMenu);
-          return true;
-        }
-        const fullscreenTransient = [...visibleTransientLayers]
-          .reverse()
-          .find((layer) => fullscreenLayer?.contains(layer));
-        if (fullscreenTransient && dispatchEscape(fullscreenTransient)) {
-          continueAfterDismissal(fullscreenTransient);
-          return true;
-        }
-        dispatchEscape(document);
-        continueAfterDismissal(fullscreenLayer);
-        return true;
-      }
-
-      // 模态内的菜单/临时层比模态本身更靠上；页面背后的临时层不能抢先消费返回。
-      if (modal) {
-        const modalMenu = [...visibleMenus]
-          .reverse()
-          .find((menu) => modal.contains(menu));
-        if (modalMenu && dispatchEscape(modalMenu)) {
-          continueAfterDismissal(modalMenu);
-          return true;
-        }
-        const modalTransient = [...visibleTransientLayers]
-          .reverse()
-          .find((layer) => modal.contains(layer));
-        if (modalTransient && dispatchEscape(modalTransient)) {
-          continueAfterDismissal(modalTransient);
-          return true;
-        }
-        dispatchEscape(modal);
-        continueAfterDismissal(modal);
-        return true;
-      }
-
-      if (transientCloseRef.current) {
-        const closed = transientCloseRef.current();
-        continueAfterDismissal(closed ?? undefined);
-        return true;
-      }
-
-
-      // 导入、导出和倍速等页面菜单由子组件管理。Android 返回等价成 Escape。
-      const menu = visibleMenus[visibleMenus.length - 1];
-      if (menu && dispatchEscape(menu)) {
-        continueAfterDismissal(menu);
-        return true;
-      }
-
-      const transientLayer = visibleTransientLayers[visibleTransientLayers.length - 1];
-      if (transientLayer && dispatchEscape(transientLayer)) {
-        continueAfterDismissal(transientLayer);
-        return true;
-      }
-
-      return false;
-    },
-    [
-      videoFullscreen,
-    ],
-  );
-  dismissVisibleTransientRef.current = dismissVisibleTransient;
 
   const goBackOneLevel = useCallback((): boolean => {
     const now = Date.now();
@@ -510,34 +371,8 @@ export function Home() {
     returnFromVideo,
     dismissVisibleTransient,
   ]);
+  useAndroidBack(goBackOneLevel);
 
-  useEffect(() => {
-    if (!isAndroidPlatform) return;
-
-    let cancelled = false;
-    let closeListener: (() => void) | null = null;
-    let backListener: { unregister: () => Promise<void> } | null = null;
-
-    void (async () => {
-      closeListener = await getCurrentWindow().onCloseRequested((event) => {
-        event.preventDefault();
-        if (!goBackOneLevel()) void ipc.app.exit();
-      });
-      backListener = await onBackButtonPress(() => {
-        if (!goBackOneLevel()) void ipc.app.exit();
-      });
-      if (cancelled) {
-        closeListener?.();
-        void backListener.unregister();
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      closeListener?.();
-      void backListener?.unregister();
-    };
-  }, [goBackOneLevel, isAndroidPlatform]);
 
 
   // 设置 / 回收站作为主区域整页，与处理队列一致；互斥切换。保留当前选中的视频，
