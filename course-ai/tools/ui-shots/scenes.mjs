@@ -38,7 +38,8 @@ async function captionPrefs(page, mode, lang) {
 async function dumpShareImages(page, out, prefix) {
   const images = await page.evaluate(() => window.__shareImages.splice(0));
   for (const [k, image] of images.entries()) {
-    writeFileSync(resolve(out, `${prefix}-${k}-${image.fileName}.png`), Buffer.from(image.pngBase64, "base64"));
+    const suffix = images.length > 1 ? `-${k}` : "";
+    writeFileSync(resolve(out, `${prefix}${suffix}.png`), Buffer.from(image.pngBase64, "base64"));
   }
   return images.length;
 }
@@ -197,25 +198,30 @@ export const scenes = [
     name: "share",
     run: async ({ page, shot, out, device, theme }) => {
       const prefix = `${device}-${theme}-share`;
+      let saved = 0;
+      // 每拍完一张就落盘：后面要刷新页面去仪表盘，mock 重新注入会清空截获列表。
+      const collect = async (name) => {
+        await page.waitForTimeout(1500);
+        saved += await dumpShareImages(page, out, `${prefix}-card-${name}`);
+      };
       await openVideo(page);
       await page.getByRole("tab", { name: /笔记/ }).click();
-      await page.getByRole("button", { name: "导出" }).first().click();
+      await page.getByRole("button", { name: "导出" }).filter({ visible: true }).first().click();
       await shot("notes-menu");
       await page.getByRole("menuitem", { name: /分享长图/ }).click();
-      await page.waitForTimeout(1500);
+      await collect("notes");
       await page.getByRole("tab", { name: /更多/ }).click();
       await page.getByRole("button", { name: /脑图/ }).first().click();
       await page.waitForTimeout(800);
       await shot("mindmap");
-      await page.getByRole("button", { name: "导出" }).first().click();
+      await page.getByRole("button", { name: "导出" }).filter({ visible: true }).first().click();
       await page.getByRole("menuitem", { name: /分享图片/ }).click();
-      await page.waitForTimeout(1500);
+      await collect("mindmap");
       await page.goto(page.url(), { waitUntil: "networkidle" });
       await nav(page, "学习面板", "学习");
       await page.getByRole("button", { name: /周报图/ }).first().click();
-      await page.waitForTimeout(1500);
-      const saved = await dumpShareImages(page, out, prefix);
-      if (saved === 0) throw new Error("没有截获到分享图");
+      await collect("weekly");
+      if (saved < 3) throw new Error(`分享图只截获到 ${saved} 张（应为 3）`);
     },
   },
   {
