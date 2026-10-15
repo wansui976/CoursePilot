@@ -18,6 +18,18 @@ const STUDY_PANEL_MIN = 384;
 const STUDY_PANEL_DEFAULT = 480;
 const PLAYER_MIN_WIDTH = 320;
 const STUDY_RESIZER_WIDTH = 8;
+/** 叠放布局下学习区宽到这个程度（平板竖屏、窄桌面窗口），笔记就单独占右半边常驻。 */
+const SPLIT_NOTES_MIN_WIDTH = 720;
+
+/** 播放器与学习面板左右分栏，还是上下叠放。 */
+export function isWideWorkbench(shellWide: boolean, availableWidth: number): boolean {
+  return shellWide && availableWidth >= STUDY_PANEL_MIN + PLAYER_MIN_WIDTH + STUDY_RESIZER_WIDTH;
+}
+
+/** 叠放布局且足够宽：学习区分成左右两栏，左边标签页、右边笔记常驻。 */
+export function shouldSplitNotes(shellWide: boolean, availableWidth: number): boolean {
+  return !isWideWorkbench(shellWide, availableWidth) && availableWidth >= SPLIT_NOTES_MIN_WIDTH;
+}
 
 function clampWidth(width: number, max = STUDY_PANEL_MAX) {
   return Math.min(max, Math.max(STUDY_PANEL_MIN, width));
@@ -92,8 +104,7 @@ export function WorkspaceLayout({
   useEffect(() => () => resizeAbortRef.current?.abort(), []);
 
   const maxWidthForLayout = maxPanelWidthFor(availableWidth);
-  const isWide =
-    shellWide && availableWidth >= STUDY_PANEL_MIN + PLAYER_MIN_WIDTH + STUDY_RESIZER_WIDTH;
+  const isWide = isWideWorkbench(shellWide, availableWidth);
   const widthForLayout = isResizing
     ? liveWidthRef.current
     : Math.min(panelWidth, maxWidthForLayout);

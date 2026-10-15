@@ -1,9 +1,10 @@
 import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "@/lib/ipc";
+import { writeVideoResumeState } from "@/lib/resumeState";
 import { TabsPanel } from "./TabsPanel";
 
 vi.mock("./AiViewPanel", () => ({
@@ -30,11 +31,11 @@ vi.mock("@/lib/ipc", () => ({
   },
 }));
 
-function renderPanel() {
+function renderPanel(split = false) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <TabsPanel videoId="video-1" />
+      <TabsPanel videoId="video-1" {...(split ? { split } : {})} />
     </QueryClientProvider>,
   );
 }
@@ -128,6 +129,24 @@ describe("TabsPanel", () => {
       "data-state",
       "active",
     );
+  });
+
+  it("分栏时笔记常驻右边，左边只留其余标签；记住的笔记标签落到概览", async () => {
+    writeVideoResumeState("video-1", { activeTab: "notes" });
+    renderPanel(true);
+
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "概览",
+      "文稿",
+      "更多",
+    ]);
+    expect(await screen.findByText("概览内容")).toBeVisible();
+    const notes = screen.getByRole("region", { name: "笔记" });
+    expect(await within(notes).findByText("笔记内容")).toBeInTheDocument();
+
+    // 数字键按左边剩下的标签编号：2 = 文稿。
+    fireEvent.keyDown(window, { key: "2" });
+    expect(await screen.findByText("文稿内容")).toBeVisible();
   });
 
   it("restores the active study tab for the video when remounted", () => {

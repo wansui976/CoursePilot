@@ -93,7 +93,7 @@ function TabBadge({ tab, videoId }: { tab: Tab; videoId: string }) {
   return null;
 }
 
-function VideoTabsPanel({ videoId }: { videoId: string }) {
+function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean }) {
   const { t } = useTranslation();
   // 存量恢复：练习已并入「更多」，读到旧值 "quiz" 时落到更多并直接定位练习视图。
   const [restored] = useState(() => readVideoResumeState(videoId));
@@ -107,6 +107,12 @@ function VideoTabsPanel({ videoId }: { videoId: string }) {
   // 再切回时不必重建重组件（tiptap/markmap）或上千行文稿 DOM —— 切换从此瞬时完成。
   // 未访问过的不渲染，保持懒加载、不拖累首屏。
   const [visited, setVisited] = useState<Set<Tab>>(() => new Set([activeTab]));
+  // 分栏时笔记在右边常驻，不再是一个标签；记住的标签若是笔记，左边先显示概览。
+  const tabKeys = useMemo(
+    () => (split ? TAB_KEYS.filter((tab) => tab !== "notes") : TAB_KEYS),
+    [split],
+  );
+  const shownTab: Tab = split && activeTab === "notes" ? "overview" : activeTab;
 
   const changeTab = useCallback(
     (tab: Tab) => {
@@ -135,13 +141,13 @@ function VideoTabsPanel({ videoId }: { videoId: string }) {
         return;
       }
       const digit = Number(event.key);
-      if (!Number.isInteger(digit) || digit < 1 || digit > TAB_KEYS.length) return;
-      const tab = TAB_KEYS[digit - 1];
+      if (!Number.isInteger(digit) || digit < 1 || digit > tabKeys.length) return;
+      const tab = tabKeys[digit - 1];
       if (tab) changeTab(tab);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [changeTab]);
+  }, [changeTab, tabKeys]);
 
   const panels: { tab: Tab; node: React.ReactNode }[] = [
     { tab: "overview", node: <AiViewPanel videoId={videoId} /> },
@@ -158,18 +164,18 @@ function VideoTabsPanel({ videoId }: { videoId: string }) {
     },
   ];
 
-  return (
+  const tabs = (
     <Tabs
-      value={activeTab}
+      value={shownTab}
       onValueChange={(value) => changeTab(value as Tab)}
-      data-study-tab={activeTab}
+      data-study-tab={shownTab}
       className="flex h-full flex-col bg-[var(--surface-panel)] text-[var(--text-normal)]"
     >
       {/* 分段控件：macOS 式凹槽轨道 + 选中丸，取代下划线 tab。面板拖窄时轨道横向
           滚动；核心任务保持一级可见，低频资料统一收进「更多」。 */}
       <TabsList className="ca-study-tabs-band">
         <div className="ca-study-tabs">
-          {TAB_KEYS.map((tab) => {
+          {tabKeys.map((tab) => {
             const Icon = TAB_ICONS[tab];
             return (
               <TabsTrigger
@@ -186,25 +192,59 @@ function VideoTabsPanel({ videoId }: { videoId: string }) {
           })}
         </div>
       </TabsList>
-      {panels.map(({ tab, node }) => (
-        <TabsContent
-          key={tab}
-          value={tab}
-          // 访问过即常驻：Radix 在非活动时不再卸载，由 data-[state=inactive]:hidden 隐藏。
-          forceMount={visited.has(tab) ? true : undefined}
-          className="ca-tab-content min-h-0 flex-1 overflow-hidden data-[state=inactive]:hidden"
-        >
-          {visited.has(tab) ? (
-            <Suspense fallback={<PanelFallback />}>{node}</Suspense>
-          ) : null}
-        </TabsContent>
-      ))}
+      {panels
+        .filter(({ tab }) => tabKeys.includes(tab))
+        .map(({ tab, node }) => {
+          const mounted = visited.has(tab) || tab === shownTab;
+          return (
+            <TabsContent
+              key={tab}
+              value={tab}
+              // 访问过即常驻：Radix 在非活动时不再卸载，由 data-[state=inactive]:hidden 隐藏。
+              forceMount={mounted ? true : undefined}
+              className="ca-tab-content min-h-0 flex-1 overflow-hidden data-[state=inactive]:hidden"
+            >
+              {mounted ? <Suspense fallback={<PanelFallback />}>{node}</Suspense> : null}
+            </TabsContent>
+          );
+        })}
     </Tabs>
+  );
+
+  if (!split) return tabs;
+  return (
+    <div className="ca-study-split">
+      {tabs}
+      <section aria-label={t("studyTab.notes")} className="ca-study-split-notes">
+        {/* 与左边标签条同一套结构（同高同底色），只有一个常亮的「笔记」。 */}
+        <div className="ca-study-tabs-band">
+          <div className="ca-study-tabs">
+            <span className="ca-study-tab ca-touch-44" data-state="active">
+              <StickyNote aria-hidden="true" className="h-4 w-4 flex-none" />
+              <span>{t("studyTab.notes")}</span>
+              <TabBadge tab="notes" videoId={videoId} />
+            </span>
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <Suspense fallback={<PanelFallback />}>
+            <NotesPanel videoId={videoId} />
+          </Suspense>
+        </div>
+      </section>
+    </div>
   );
 }
 
-export const TabsPanel = memo(function TabsPanel({ videoId }: { videoId: string }) {
+export const TabsPanel = memo(function TabsPanel({
+  videoId,
+  split = false,
+}: {
+  videoId: string;
+  /** 叠放且够宽（平板竖屏）：笔记移到右半边常驻，左边只留其余标签。 */
+  split?: boolean;
+}) {
   // videoId 是学习现场的边界。换视频时重建内部状态，重新读取该视频保存的
   // activeTab，同时让 visited 只从当前标签开始，避免上一视频的重面板继续保活。
-  return <VideoTabsPanel key={videoId} videoId={videoId} />;
+  return <VideoTabsPanel key={videoId} videoId={videoId} split={split} />;
 });

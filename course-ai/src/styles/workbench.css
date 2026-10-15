@@ -512,6 +512,14 @@ li[data-active] > .ca-chapter .ca-chapter-dot {
   );
 }
 
+/* 整组往上提：画面下部是字幕区，居中的话「音频」标签会压在字幕底下。
+   cqh 以 .ca-audio-stage 为容器，只能写在后代上；更矮时下面的容器查询会改写图块定位。 */
+.ca-audio-art,
+.ca-audio-eq,
+.ca-audio-label {
+  translate: 0 -12cqh;
+}
+
 .ca-audio-art {
   display: grid;
   place-items: center;
@@ -584,4 +592,41 @@ li[data-active] > .ca-chapter .ca-chapter-dot {
     height: 32%;
     translate: -50% 0;
   }
+}
+
+/* —— 平板竖屏 / 窄桌面窗口：学习区左右两栏，左边标签页、右边笔记常驻 —— */
+.ca-study-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.ca-study-split > * {
+  min-height: 0;
+}
+
+.ca-study-split-notes {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line-soft);
+  background: var(--bg-panel);
+}
+
+.ca-study-split-notes .ca-study-tab {
+  cursor: default;
+}
+
+.ca-study-split-notes .ca-study-tabs {
+  background: transparent;
+}
+
+/* 右栏的「笔记」只是栏标题，不是可点的标签：左对齐、不画选中丸。 */
+.ca-study-split-notes .ca-study-tab,
+.ca-study-split-notes .ca-study-tab[data-state="active"] {
+  flex: 0 0 auto;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-1);
+  padding-left: 4px;
 }

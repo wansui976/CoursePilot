@@ -9,7 +9,7 @@ import type { Course, Video } from "@/lib/types";
 import { displayTitle } from "@/lib/videoTitle";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { TabsPanel } from "./TabsPanel";
-import { WorkspaceLayout } from "./WorkspaceLayout";
+import { shouldSplitNotes, WorkspaceLayout } from "./WorkspaceLayout";
 
 /** 单个视频的学习工作台：标题条 + 播放舞台 + 右侧（窄屏下方）学习面板。 */
 export function VideoWorkbench({
@@ -60,7 +60,9 @@ export function VideoWorkbench({
       videoId={video.id}
       shellWide={shellWide}
       availableWidth={availableWidth}
-      panel={<TabsPanel videoId={video.id} />}
+      panel={
+        <TabsPanel videoId={video.id} split={shouldSplitNotes(shellWide, availableWidth)} />
+      }
       player={
         <section aria-label={t("home.workbench")} className="ca-player-col">
           {!isPhoneDevice && (
