@@ -333,32 +333,51 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     };
   }, [hasRows]);
 
-  // 活动行居中（原生 scrollTo 不做量高回改，故不抽搐）。被跟随播放与搜索跳转共用。
+  // 活动行居中。被跟随播放与搜索跳转共用。
+  //
+  // 文稿按块 content-visibility：没画过的块只占一个估计高度（1200px）。远距离跳转时，
+  // 按估计算出的目标与块真正画出来后的位置对不上——平滑滚过去会停在几分钟之前的地方。
+  // 所以远跳直接定位、再逐帧量一次纠偏直到对准；近处（周边块已画好、量得准）才平滑滚。
   const centerOnRow = useCallback(
     (rowIndex: number) => {
       const scroller = scrollerRef.current;
-      const row = scroller?.querySelector<HTMLElement>(
-        `[data-row="${rowIndex}"]`,
-      );
-      if (!scroller || !row) return;
-      const sRect = scroller.getBoundingClientRect();
-      const rRect = row.getBoundingClientRect();
-      const target =
-        scroller.scrollTop +
-        (rRect.top - sRect.top) -
-        (scroller.clientHeight - row.clientHeight) / 2;
+      if (!scroller) return;
+      const targetTop = () => {
+        const row = scroller.querySelector<HTMLElement>(`[data-row="${rowIndex}"]`);
+        if (!row) return null;
+        const sRect = scroller.getBoundingClientRect();
+        const rRect = row.getBoundingClientRect();
+        const target =
+          scroller.scrollTop +
+          (rRect.top - sRect.top) -
+          (scroller.clientHeight - row.clientHeight) / 2;
+        return Math.max(0, target);
+      };
+      const top = targetTop();
+      if (top == null) return;
       const reduceMotion =
         typeof window.matchMedia === "function" &&
         window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const top = Math.max(0, target);
-      if (typeof scroller.scrollTo === "function") {
-        scroller.scrollTo({
-          top,
-          behavior: reduceMotion ? "auto" : "smooth",
-        });
-      } else {
-        scroller.scrollTop = top;
+      const far = Math.abs(top - scroller.scrollTop) > scroller.clientHeight * 1.5;
+      if (!far && !reduceMotion && typeof scroller.scrollTo === "function") {
+        scroller.scrollTo({ top, behavior: "smooth" });
+        return;
       }
+      const jump = (y: number) => {
+        if (typeof scroller.scrollTo === "function") scroller.scrollTo({ top: y, behavior: "auto" });
+        else scroller.scrollTop = y;
+      };
+      jump(top);
+      let lastTarget = top;
+      let corrections = 0;
+      const correct = () => {
+        const next = targetTop();
+        if (next == null || Math.abs(next - lastTarget) <= 1 || corrections++ >= 6) return;
+        lastTarget = next;
+        jump(next);
+        requestAnimationFrame(correct);
+      };
+      requestAnimationFrame(correct);
     },
     [],
   );
@@ -370,6 +389,17 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     if (Date.now() - userScrollRef.current < FOLLOW_PAUSE_MS) return;
     centerOnRow(activeRowIndex);
   }, [followEnabled, activeRowIndex, editingId, centerOnRow]);
+
+  // 译文晚于居中到达：上方每行都多出一行译文，当前句被挤离中线。跟随时随即再对准一次。
+  const showsTranslation = captionMode !== "original";
+  useEffect(() => {
+    if (!showsTranslation || translationByIdx.size === 0) return;
+    if (!followEnabled || activeRowIndex < 0 || editingId != null) return;
+    if (Date.now() - userScrollRef.current < FOLLOW_PAUSE_MS) return;
+    requestAnimationFrame(() => centerOnRow(activeRowIndex));
+    // 只在译文内容变化时触发；活动行变化已由上面的跟随负责。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [translationByIdx, showsTranslation]);
 
   // 重新开启跟随：立即回到当前句，而不是等下一次换句才动。
   function setFollow(next: boolean) {

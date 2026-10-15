@@ -277,6 +277,37 @@ describe("TranscriptPanel", () => {
     );
   });
 
+  it("远距离跟随先直接定位，块画出来后按真实位置纠偏", async () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    renderTranscriptPanel("far-jump");
+    await screen.findByText("00:01");
+
+    const scroller = screen.getByLabelText("文稿内容滚动区");
+    const row = scroller.querySelector<HTMLElement>('[data-row="20"]');
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 400 });
+    Object.defineProperty(row, "clientHeight", { configurable: true, value: 30 });
+    scroller.scrollTop = 0;
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
+    // 第一次量到的是按块估计高度算的位置；块画出来后，同一行的真实位置更靠下。
+    vi.spyOn(row as HTMLElement, "getBoundingClientRect")
+      .mockReturnValueOnce({ top: 3000 } as DOMRect)
+      .mockReturnValue({ top: 3600 } as DOMRect);
+    const scrollTo = vi.fn();
+    Object.defineProperty(scroller, "scrollTo", { configurable: true, value: scrollTo });
+
+    act(() => usePlayer.getState().setCurrentMs(21_500));
+
+    // 估计目标 3000-100-185 = 2715：远跳不走平滑滚动。
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({ top: 2715, behavior: "auto" }),
+    );
+    // 下一帧按真实位置纠偏：3600-100-185 = 3315（scrollTop 仍为 0，因为 scrollTo 是替身）。
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({ top: 3315, behavior: "auto" }),
+    );
+    expect(scrollTo).not.toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
+  });
+
   it("recenters without animation when reduced motion is requested", async () => {
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: query === "(prefers-reduced-motion: reduce)",
