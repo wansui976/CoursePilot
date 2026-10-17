@@ -196,6 +196,12 @@ export const scenes = [
       await openVideo(page);
       await page.waitForTimeout(800);
       await shot();
+      // 鼠标移到画面底部的控制条区域唤出控制条（平时自动隐藏；画面中央有字幕层挡着）。
+      const stage = await page.locator(".ca-stage").first().boundingBox();
+      if (stage) {
+        await page.mouse.move(stage.x + stage.width / 2, stage.y + stage.height - 12);
+        await shot("controls");
+      }
       const bar = page.locator("[role='slider']").first();
       if (await bar.isVisible().catch(() => false)) {
         await bar.hover();

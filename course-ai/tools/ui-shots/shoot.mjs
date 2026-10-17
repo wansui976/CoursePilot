@@ -98,7 +98,8 @@ async function waitForScrollIdle() {
  *   1. 图标（svg，预设样式是 display:block）和文字并排放在非 flex / grid 容器里——图标会
  *      独占一行，把文字挤到下面、把卡片撑高；
  *   2. 写了 Tailwind 显示类却没生效（被未分层的全局规则压掉）；
- *   3. 文字被裁掉却没有省略号。
+ *   3. 文字被裁掉却没有省略号；
+ *   4. 文字与背景对比度过低（< 3:1）。
  * 返回问题元素的简短描述。
  */
 function auditLayout() {
@@ -169,6 +170,57 @@ function auditLayout() {
     // sr-only 等仅供读屏的文字本来就被裁成 1px，不算。
     if (rect.width <= 1 || rect.height <= 1) continue;
     if (el.scrollWidth > el.clientWidth + 1) issues.push(`${describe(el)} 文字被截断却没有省略号`);
+  }
+  // 第四类：文字与背景对比度过低（< 3:1）。背景取最近的不透明底色；途中遇到渐变或
+  // 图片背景就跳过（算不准）。禁用态与仅供读屏的文字不算。
+  // 计算样式里的颜色可能是 oklab()/oklch()/color-mix() 等：画到 1px 画布上再读回 RGBA，
+  // 任何写法都能统一换算（只认 rgb() 的话会跳过这层背景，误判对比度）。
+  const probe = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+  const parseColor = (value) => {
+    if (!value || value === "transparent") return [0, 0, 0, 0];
+    probe.clearRect(0, 0, 1, 1);
+    probe.fillStyle = "rgba(0,0,0,0)";
+    probe.fillStyle = value;
+    probe.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = probe.getImageData(0, 0, 1, 1).data;
+    return [r, g, b, a / 255];
+  };
+  const luminance = ([r, g, b]) => {
+    const ch = (v) => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b);
+  };
+  const backgroundOf = (el) => {
+    for (let node = el; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.backgroundImage !== "none") return null;
+      const color = parseColor(style.backgroundColor);
+      if (color && color[3] >= 0.95) return color;
+      if (color && color[3] > 0.05) return null;
+    }
+    return [255, 255, 255, 1];
+  };
+  for (const el of document.querySelectorAll("body *")) {
+    const ownText = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim());
+    if (!ownText || el.closest("[disabled], [aria-disabled='true']")) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 1 || rect.height <= 1) continue;
+    const style = getComputedStyle(el);
+    if (style.visibility === "hidden") continue;
+    // 自动隐藏的控件（如播放器控制条）是祖先透明：沿途累乘透明度，看不见的不算。
+    let opacity = 1;
+    for (let node = el; node && opacity >= 0.9; node = node.parentElement) {
+      opacity *= Number(getComputedStyle(node).opacity);
+    }
+    if (opacity < 0.9) continue;
+    const fg = parseColor(style.color);
+    const bg = backgroundOf(el);
+    if (!fg || !bg || fg[3] < 0.9) continue;
+    const [l1, l2] = [luminance(fg), luminance(bg)].sort((a, b) => b - a);
+    const ratio = (l1 + 0.05) / (l2 + 0.05);
+    if (ratio < 3) issues.push(`${describe(el)} 对比度 ${ratio.toFixed(2)}:1`);
   }
   return [...new Set(issues)];
 }
