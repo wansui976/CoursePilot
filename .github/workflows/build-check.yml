@@ -113,6 +113,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: course-ai
         run: pnpm install --frozen-lockfile
+      - name: Prepare macOS sidecars
+        # 在 macOS 主机上跑 Rust 测试时，tauri-build 会按 macOS 配置检查 externalBin 是否存在。
+        run: ./.github/scripts/prepare-macos-sidecars.sh
       - name: Rust tests
         working-directory: course-ai/src-tauri
         run: cargo test --lib
@@ -124,8 +127,6 @@ jobs:
   android:
     name: Android (debug APK)
     runs-on: ubuntu-latest
-    env:
-      NDK_VERSION: 27.2.12479018
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -141,11 +142,13 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
-      - name: Install Android NDK
+      - name: Use preinstalled Android NDK
+        # GitHub 的 Ubuntu 机器预装了 Android SDK 与 NDK，直接用；第三方 setup-android
+        # 会重新跑 sdkmanager 装旧组件而失败。
         run: |
-          sdkmanager --install "ndk;${NDK_VERSION}"
-          echo "NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" >> "$GITHUB_ENV"
+          echo "NDK_HOME=${ANDROID_NDK_LATEST_HOME}" >> "$GITHUB_ENV"
+          echo "Using NDK at ${ANDROID_NDK_LATEST_HOME}"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
