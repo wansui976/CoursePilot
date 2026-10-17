@@ -6,6 +6,9 @@
  *   pnpm shots --scenes home,workbench      # 只拍指定场景
  *   pnpm shots --device phone --theme dark  # 设备：desktop | phone | tablet | all（以上三种）
  *   pnpm shots --device platforms           # 按 iOS / Android / Windows 真实身份模拟（含横屏）
+ *   pnpm shots --engine webkit              # 用 WebKit 渲染（= macOS / iOS 的 WKWebView 内核；
+ *                                           #   原生控件外观等只在 WebKit 出现的问题）。首次先
+ *                                           #   node_modules/.bin/playwright-core install webkit
  *   pnpm shots --out /tmp/shots             # 默认输出到 ui-shots/（已忽略）
  *   pnpm shots --update-baseline            # 拍完把这批图存为基准（ui-shots-baseline/，已忽略）
  *   pnpm shots --compare [--threshold 0.5]  # 拍完与基准逐像素比对，变化超过 0.5% 的列出并出差异图
@@ -19,7 +22,7 @@ import { mkdirSync } from "node:fs";
 import { compareWithBaseline, updateBaseline } from "./compare.mjs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright-core";
+import { chromium, webkit } from "playwright-core";
 import { installMockIpc } from "./mock-ipc.mjs";
 import { scenes } from "./scenes.mjs";
 
@@ -67,6 +70,7 @@ function parseArgs(argv) {
     theme: "both",
     out: resolve(ROOT, "ui-shots"),
     baseline: resolve(ROOT, "ui-shots-baseline"),
+    engine: "chromium",
     updateBaseline: false,
     compare: false,
     threshold: 0.5,
@@ -89,6 +93,7 @@ function parseArgs(argv) {
     if (key === "--scenes") opts.scenes = value.split(",").filter(Boolean);
     else if (key === "--device") opts.device = value;
     else if (key === "--theme") opts.theme = value;
+    else if (key === "--engine") opts.engine = value;
     else if (key === "--out") opts.out = resolve(value);
     else if (key === "--baseline") opts.baseline = resolve(value);
     else if (key === "--threshold") opts.threshold = Number(value);
@@ -128,7 +133,8 @@ async function waitForScrollIdle() {
  *      独占一行，把文字挤到下面、把卡片撑高；
  *   2. 写了 Tailwind 显示类却没生效（被未分层的全局规则压掉）；
  *   3. 文字被裁掉却没有省略号；
- *   4. 文字与背景对比度过低（< 3:1）。
+ *   4. 文字与背景对比度过低（< 3:1）；
+ *   5. 原生外观的下拉框与带步进箭头的数字输入框（在 WebKit 里是系统旧式外观）。
  * 返回问题元素的简短描述。
  */
 function auditLayout() {
@@ -251,6 +257,25 @@ function auditLayout() {
     const ratio = (l1 + 0.05) / (l2 + 0.05);
     if (ratio < 3) issues.push(`${describe(el)} 对比度 ${ratio.toFixed(2)}:1`);
   }
+  // 第五类：可见的原生外观下拉框。WebKit（macOS / iOS）会把它画成系统灰色弹出按钮，
+  // 与应用的扁平控件不搭——应改用 ui/select 的 Select / GhostSelect。
+  for (const input of document.querySelectorAll('input[type="number"]')) {
+    const rect = input.getBoundingClientRect();
+    if (rect.width <= 1 || rect.height <= 1) continue;
+    const appearance = getComputedStyle(input).appearance;
+    if (appearance && appearance !== "textfield" && appearance !== "none") {
+      issues.push(`${describe(input)} 数字输入框带原生步进箭头（appearance:${appearance}）`);
+    }
+  }
+  for (const select of document.querySelectorAll("select")) {
+    const style = getComputedStyle(select);
+    const rect = select.getBoundingClientRect();
+    if (rect.width <= 1 || rect.height <= 1 || Number(style.opacity) < 0.05) continue;
+    const appearance = style.appearance || style.webkitAppearance;
+    if (appearance && appearance !== "none") {
+      issues.push(`${describe(select)} 是原生外观的下拉框（appearance:${appearance}）`);
+    }
+  }
   return [...new Set(issues)];
 }
 
@@ -298,7 +323,12 @@ if (unknownScenes.length) throw new Error(`未知场景 ${unknownScenes.join(", 
 
 mkdirSync(opts.out, { recursive: true });
 const stopServer = await ensureServer();
-const browser = await chromium.launch({ channel: "chrome", headless: true });
+if (!["chromium", "webkit"].includes(opts.engine)) throw new Error(`未知引擎 ${opts.engine}`);
+// Chromium 用本机 Chrome（免下载）；WebKit 用 Playwright 自带的构建。
+const browser =
+  opts.engine === "webkit"
+    ? await webkit.launch({ headless: true })
+    : await chromium.launch({ channel: "chrome", headless: true });
 const failures = [];
 const pageErrors = new Set();
 const unknownCmds = new Set();
@@ -329,7 +359,9 @@ try {
         const shot = async (suffix) => {
           await page.waitForTimeout(700); // 等入场动画与异步封面落定
           await page.evaluate(waitForScrollIdle);
-          const name = [device, theme, scene.name, suffix].filter(Boolean).join("-");
+          const name = [opts.engine === "webkit" ? "webkit" : "", device, theme, scene.name, suffix]
+            .filter(Boolean)
+            .join("-");
           // 停掉动画（无限循环的直接取消、有限的快进到终态），同一界面两次截图才逐像素一致。
           await page.screenshot({ path: resolve(opts.out, `${name}.png`), animations: "disabled" });
           shotNames.push(`${name}.png`);
