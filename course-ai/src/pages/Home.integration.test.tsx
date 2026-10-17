@@ -977,7 +977,7 @@ describe("Home selected-video integration", () => {
     act(() => handler?.({ canGoBack: false }));
 
     // 返回逐级退：控制台 → 它的入口「开发者」分类 → 设置分类列表。
-    expect(await screen.findByRole("heading", { name: "开发者", level: 2 })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "开发者", level: 1 })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "开发控制台" })).not.toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: "设置" })).toHaveAttribute(
       "aria-current",

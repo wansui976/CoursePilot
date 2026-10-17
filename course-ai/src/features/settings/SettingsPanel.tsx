@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronLeft, ChevronRight, Terminal } from "lucide-react";
+import { ChevronRight, Terminal } from "lucide-react";
+import { ViewHeader } from "@/ui/view-header";
 import { Button } from "@/ui/button";
 import { Modal } from "@/ui/dialog";
 import { LlmSettingsPanel, type LlmSettingsActions } from "./LlmSettingsPanel";
@@ -156,17 +157,7 @@ export function SettingsPanel({
       ref={settingsRef}
       className="relative flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]"
     >
-      {/* 头部 */}
-      <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-5 py-3.5">
-        <button
-          aria-label={t("settings.back")}
-          onClick={onHeaderBack}
-          className="ca-icon-btn ca-touch-44 ml-0"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-        <h2 className="ca-t-md font-semibold text-[var(--text-strong)]">{headerTitle}</h2>
-      </header>
+      <ViewHeader title={headerTitle} onBack={onHeaderBack} backLabel={t("settings.back")} />
 
       {/* 侧栏分类 + 右侧分组卡片；竖屏改为「分类列表 → 下钻」 */}
       <div className="flex min-h-0 flex-1">
