@@ -97,7 +97,8 @@ async function waitForScrollIdle() {
  * 在页面里跑的布局审计，查两类问题：
  *   1. 图标（svg，预设样式是 display:block）和文字并排放在非 flex / grid 容器里——图标会
  *      独占一行，把文字挤到下面、把卡片撑高；
- *   2. 写了 Tailwind 显示类却没生效（被未分层的全局规则压掉）。
+ *   2. 写了 Tailwind 显示类却没生效（被未分层的全局规则压掉）；
+ *   3. 文字被裁掉却没有省略号。
  * 返回问题元素的简短描述。
  */
 function auditLayout() {
@@ -155,6 +156,19 @@ function auditLayout() {
     if (actual !== expected) {
       issues.push(`${describe(el)} 写了 ${wanted[0]}，实际 display:${actual}`);
     }
+  }
+  // 第三类：文字被裁掉却没有省略号（overflow 隐藏、不换行、内容超宽、没设 ellipsis），
+  // 看上去像字被生生切掉一截。
+  for (const el of document.querySelectorAll("body *")) {
+    const style = getComputedStyle(el);
+    if (style.overflowX !== "hidden" && style.overflowX !== "clip") continue;
+    if (style.whiteSpace !== "nowrap" || style.textOverflow === "ellipsis") continue;
+    const ownText = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim());
+    if (!ownText) continue;
+    const rect = el.getBoundingClientRect();
+    // sr-only 等仅供读屏的文字本来就被裁成 1px，不算。
+    if (rect.width <= 1 || rect.height <= 1) continue;
+    if (el.scrollWidth > el.clientWidth + 1) issues.push(`${describe(el)} 文字被截断却没有省略号`);
   }
   return [...new Set(issues)];
 }
