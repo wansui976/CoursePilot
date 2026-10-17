@@ -52,3 +52,18 @@ select:focus-visible {
   outline: none;
   box-shadow: none;
 }
+
+/* 数字输入框去掉原生步进箭头：WebKit（macOS / iOS）里是一对系统旧式小箭头，与应用的输入框
+   不搭。仍可直接输入，键盘上下键照常增减。放在 base 层，调用方的工具类可以覆盖。 */
+@layer base {
+  input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}

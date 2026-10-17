@@ -2,6 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { qk } from "@/lib/queryKeys";
 import { useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
+import { Select } from "@/ui/select";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
@@ -290,18 +291,14 @@ export function BilibiliImportDialog({
               <span className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
                 {t("bilibiliImport.subtitleDetected")}
               </span>
-              <select
-                className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1.5 text-sm"
-                value={subLang}
-                onChange={(e) => setSubLang(e.target.value)}
-              >
+              <Select value={subLang} onChange={(e) => setSubLang(e.target.value)}>
                 {probe.tracks.map((t) => (
                   <option key={t.lang} value={t.lang}>
                     {t.name}
                     {t.auto ? "（AI）" : ""}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
           ) : (
             <p className="text-xs text-[var(--text-faint)]">

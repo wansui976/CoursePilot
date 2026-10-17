@@ -2,6 +2,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useSta
 import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
+import { GhostSelect } from "@/ui/select";
 import { invalidateStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -29,7 +30,7 @@ import { usePlayer } from "@/stores/player";
 import { useInlineAsk } from "@/stores/inlineAsk";
 import type { TranscriptSegment } from "@/lib/types";
 import { findActiveSegmentIndex } from "@/lib/transcript";
-import { TRANSLATION_LANGS, useCaptionPrefs, type TranslationLang } from "@/stores/captionPrefs";
+import { TRANSLATION_LANGS, useCaptionPrefs } from "@/stores/captionPrefs";
 import type { TranslateProgress } from "@/lib/ipc";
 
 // 手动滚动后暂停「跟随播放自动居中」的时长；停手超过该窗口才恢复跟随。
@@ -618,19 +619,16 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
             <TranscriptPosition />
           </span>
           <div className="ml-auto flex items-center gap-0.5">
-            <select
+            <GhostSelect
               aria-label={t("transcript.translateLang")}
               value={translationLang}
               disabled={translate.isPending}
-              onChange={(event) => setTranslationLang(event.target.value as TranslationLang)}
-              className="h-7 rounded-md border-0 bg-transparent px-1 text-xs [field-sizing:content] text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
-            >
-              {TRANSLATION_LANGS.map((lang) => (
-                <option key={lang} value={lang}>
-                  {t(`transcript.translateLangs.${lang}`)}
-                </option>
-              ))}
-            </select>
+              onChange={setTranslationLang}
+              options={TRANSLATION_LANGS.map((lang) => ({
+                value: lang,
+                label: t(`transcript.translateLangs.${lang}`),
+              }))}
+            />
             <button
               type="button"
               onClick={() => {

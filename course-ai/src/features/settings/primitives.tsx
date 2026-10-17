@@ -1,36 +1,12 @@
 /** 设置页通用的行、分组与字段组件（仿系统设置的分组卡片风格）。 */
-import type { ChangeEvent, ReactNode } from "react";
-import { Check, ChevronDown, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { Check, X } from "lucide-react";
 
 export const FIELD =
   "w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] outline-none transition placeholder:text-[var(--text-faint)]";
 
-/** 统一外观的下拉框：去掉原生箭头，加自定义 chevron，和输入框风格一致。 */
-export function Select({
-  id,
-  value,
-  onChange,
-  children,
-}: {
-  id?: string;
-  value: string;
-  onChange: (event: ChangeEvent<HTMLSelectElement>) => void;
-  children: ReactNode;
-}) {
-  return (
-    <div className="relative">
-      <select
-        id={id}
-        value={value}
-        onChange={onChange}
-        className={`${FIELD} cursor-pointer appearance-none pr-9`}
-      >
-        {children}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
-    </div>
-  );
-}
+/** 设置页的下拉框与其它表单共用 ui/select（去掉原生外观、自绘箭头）。 */
+export { Select } from "@/ui/select";
 
 export function Group({
   header,
