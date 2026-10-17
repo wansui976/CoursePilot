@@ -1,6 +1,18 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, Download, Share2, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Download,
+  FileCode,
+  FileDown,
+  FileText,
+  FileType,
+  Image as ImageIcon,
+  Share2,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { Button } from "@/ui/button";
 import { humanizeError } from "@/lib/errors";
 import { isMobile, shareFile } from "@/lib/mobileFiles";
@@ -12,6 +24,21 @@ export interface ExportItem {
   run: () => Promise<string>;
   mime?: string;
   saveAs?: string;
+}
+
+/** 按导出格式配图标：与应用里其它菜单一样，条目带图标更好扫读。 */
+function exportIcon(item: ExportItem): LucideIcon {
+  const kind = `${item.mime ?? ""} ${item.saveAs ?? ""}`.toLowerCase();
+  if (kind.includes("image") || kind.includes(".png")) return ImageIcon;
+  if (kind.includes("pdf")) return FileType;
+  if (kind.includes("html")) return FileCode;
+  if (kind.includes("markdown") || kind.includes("text") || kind.includes(".md")) return FileText;
+  return FileDown;
+}
+
+function ExportItemIcon({ item }: { item: ExportItem }) {
+  const Icon = exportIcon(item);
+  return <Icon aria-hidden="true" className="h-4 w-4 flex-none text-[var(--text-3)]" />;
 }
 
 /**
@@ -217,7 +244,7 @@ export function ExportMenu({
             role="menu"
             aria-label={t("export.exportButton")}
             onKeyDown={onMenuKeyDown}
-            className={`absolute right-0 z-20 w-40 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 shadow-[var(--shadow-pop)] ${popClass}`}
+            className={`ca-menu absolute right-0 z-20 w-48 ${popClass}`}
           >
             {items.map((item, index) => (
               <div key={item.label} className="flex items-center">
@@ -230,9 +257,13 @@ export function ExportMenu({
                   tabIndex={index === activeIndex ? 0 : -1}
                   onFocus={() => setActiveIndex(index)}
                   onClick={() => void (mobile ? share(item) : run(item))}
-                  className="ca-touch-44 flex-1 px-3 py-1.5 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
+                  className="ca-menu-item ca-touch-44 flex-1"
                 >
-                  {item.label}
+                  {/* .ca-menu-item 是 display:block（未分层，压过 Tailwind 的 flex），横排放在内层。 */}
+                  <span className="flex items-center gap-2">
+                    <ExportItemIcon item={item} />
+                    <span className="min-w-0 truncate">{item.label}</span>
+                  </span>
                 </button>
               </div>
             ))}

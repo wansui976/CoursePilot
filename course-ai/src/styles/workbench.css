@@ -635,3 +635,9 @@ li[data-active] > .ca-chapter .ca-chapter-dot {
   color: var(--text-1);
   padding-left: 4px;
 }
+
+/* 面板角落的导出菜单向上弹出时会碰到助手悬浮按钮（z-40）：菜单打开期间把整组操作
+   提到它之上。只在菜单打开时生效，平时仍让悬浮按钮在上。 */
+.ca-workbench-panel-actions:has([role="menu"]) {
+  z-index: 45;
+}
