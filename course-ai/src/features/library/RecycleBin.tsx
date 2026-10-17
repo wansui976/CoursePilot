@@ -277,7 +277,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-7 sm:py-6">
-        <div className="mx-auto max-w-2xl">
+        <div className="mx-auto max-w-3xl">
           {opError && <ErrorNote error={opError} className="mb-4" />}
           {isLoading ? (
             <p role="status" className="p-4 text-sm text-[var(--text-faint)]">

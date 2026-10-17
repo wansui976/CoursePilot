@@ -470,7 +470,7 @@ export function Dashboard({
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
-        <div className="mx-auto max-w-2xl space-y-6">
+        <div className="mx-auto max-w-3xl space-y-6">
           {continueQuery.isError ? (
             <section aria-labelledby="dashboard-continue-title">
               <div
@@ -521,7 +521,8 @@ export function Dashboard({
                             </div>
                           )}
                         </div>
-                        <span className="flex-none text-xs font-medium text-[var(--text-muted)] transition group-hover:text-[var(--text-strong)]">
+                        {/* 与同页「复习」同款的浅色强调按钮，整行仍是点击区。 */}
+                        <span className="flex-none rounded-md bg-[var(--accent-weak-2)] px-3 py-1.5 text-xs font-medium text-[var(--accent-text)]">
                           {ratio > 0 ? t("dashboard.continue") : t("dashboard.start")}
                         </span>
                       </button>

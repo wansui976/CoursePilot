@@ -17,7 +17,6 @@ import type { TFunction } from "i18next";
 import {
   Brain,
   ChevronDown,
-  ChevronLeft,
   FileText,
   Layers,
   Lightbulb,
@@ -38,6 +37,7 @@ import {
 } from "@/lib/ipc";
 import { formatMs, formatRelativeTime } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
+import { ViewHeader } from "@/ui/view-header";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { Skeleton } from "@/ui/skeleton";
@@ -669,27 +669,20 @@ export function ConceptsPanel({
       ref={panelRef}
       className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-[var(--surface-app)] text-[var(--text-normal)]"
     >
-      <header className="flex flex-none items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-4 py-3 sm:px-7 sm:py-4">
-        <button
-          aria-label={t("concepts.backToVideos")}
-          onClick={onClose}
-          className="ca-icon-btn ca-touch-44 ml-0"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-        <div className="min-w-0">
-          <h1 className="flex items-center gap-2 text-lg font-semibold text-[var(--text-strong)]">
-            <Lightbulb className="h-4 w-4 flex-none" />
-            {t("concepts.title")}
-          </h1>
-          {courseName && (
-            <p className="truncate text-xs text-[var(--text-muted)]" title={courseName}>
+      <ViewHeader
+        title={t("concepts.title")}
+        description={
+          courseName ? (
+            <span className="block truncate" title={courseName}>
               {courseName}
-            </p>
-          )}
-        </div>
-        {hasKnowledge && (
-          <div className="ml-auto flex flex-none items-center gap-2">
+            </span>
+          ) : undefined
+        }
+        onBack={onClose}
+        backLabel={t("concepts.backToVideos")}
+        actions={
+          hasKnowledge ? (
+            <>
             <Button
               ref={chatToggleRef}
               type="button"
@@ -717,16 +710,17 @@ export function ConceptsPanel({
               <RefreshCw className={`h-3.5 w-3.5 ${analyzePending ? "animate-spin" : ""}`} />
               <span className="hidden sm:inline">{analyzePending ? t("concepts.analyzing") : t("concepts.reanalyzeShort")}</span>
             </Button>
-          </div>
-        )}
-      </header>
+            </>
+          ) : undefined
+        }
+      />
 
       <div className="relative flex min-h-0 flex-1">
         <div
           ref={mainScrollRef}
           className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-6"
         >
-        <main className="mx-auto max-w-4xl space-y-6">
+        <main className="mx-auto max-w-3xl space-y-6">
           <p className="sr-only" aria-live="polite">
             {announcement || recoveredAnnouncement}
           </p>
