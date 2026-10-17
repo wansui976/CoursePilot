@@ -623,7 +623,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
               value={translationLang}
               disabled={translate.isPending}
               onChange={(event) => setTranslationLang(event.target.value as TranslationLang)}
-              className="h-7 rounded-md border-0 bg-transparent px-1 text-xs text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+              className="h-7 rounded-md border-0 bg-transparent px-1 text-xs [field-sizing:content] text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
             >
               {TRANSLATION_LANGS.map((lang) => (
                 <option key={lang} value={lang}>
