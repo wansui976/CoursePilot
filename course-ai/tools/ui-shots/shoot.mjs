@@ -8,6 +8,7 @@
  *   pnpm shots --out /tmp/shots             # 默认输出到 ui-shots/（已忽略）
  *   pnpm shots --update-baseline            # 拍完把这批图存为基准（ui-shots-baseline/，已忽略）
  *   pnpm shots --compare [--threshold 0.5]  # 拍完与基准逐像素比对，变化超过 0.5% 的列出并出差异图
+ *   pnpm shots --audit                      # 顺带做布局审计（如图标被挤成独占一行），问题列在最后
  *
  * 端口 1420 已有 dev server 就复用，否则自己起一个、结束时关掉。
  * 有场景失败或页面抛错时以非零码退出；未处理的 IPC 命令会列出来，便于补假数据。
@@ -45,6 +46,10 @@ function parseArgs(argv) {
     const [key, inline] = argv[i].split("=");
     if (key === "--update-baseline") {
       opts.updateBaseline = true;
+      continue;
+    }
+    if (key === "--audit") {
+      opts.audit = true;
       continue;
     }
     if (key === "--compare") {
@@ -88,6 +93,38 @@ async function waitForScrollIdle() {
   }
 }
 
+/**
+ * 在页面里跑的布局审计。目前查一类问题：图标（svg，预设样式是 display:block）和文字并排
+ * 放在一个非 flex / grid 的容器里——图标会独占一行，把文字挤到下面、把卡片撑高。
+ * 只看可见元素；返回问题容器的简短描述。
+ */
+function auditLayout() {
+  const issues = [];
+  const describe = (el) => {
+    const text = (el.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 40);
+    const cls = typeof el.className === "string" ? el.className.split(/\s+/).slice(0, 3).join(".") : "";
+    return `<${el.tagName.toLowerCase()}${cls ? "." + cls : ""}> "${text}"`;
+  };
+  for (const svg of document.querySelectorAll("svg")) {
+    const parent = svg.parentElement;
+    const svgStyle = getComputedStyle(svg);
+    if (!parent || svgStyle.display !== "block") continue;
+    // 绝对定位的图标（下拉箭头、角标）不参与排版，不会挤占文字。
+    if (svgStyle.position === "absolute" || svgStyle.position === "fixed") continue;
+    const rect = svg.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) continue;
+    const display = getComputedStyle(parent).display;
+    if (/flex|grid/.test(display)) continue;
+    const hasText = [...parent.childNodes].some(
+      (node) =>
+        (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) ||
+        (node.nodeType === Node.ELEMENT_NODE && node !== svg && getComputedStyle(node).display.startsWith("inline") && node.textContent.trim()),
+    );
+    if (hasText) issues.push(describe(parent));
+  }
+  return [...new Set(issues)];
+}
+
 async function serverUp() {
   try {
     return (await fetch(BASE)).ok;
@@ -126,6 +163,7 @@ const pageErrors = new Set();
 const unknownCmds = new Set();
 let count = 0;
 const shotNames = [];
+const auditIssues = new Set();
 
 try {
   for (const device of devices) {
@@ -150,6 +188,9 @@ try {
           // 停掉动画（无限循环的直接取消、有限的快进到终态），同一界面两次截图才逐像素一致。
           await page.screenshot({ path: resolve(opts.out, `${name}.png`), animations: "disabled" });
           shotNames.push(`${name}.png`);
+          if (opts.audit) {
+            for (const issue of await page.evaluate(auditLayout)) auditIssues.add(`${name}: ${issue}`);
+          }
           count++;
         };
         try {
@@ -172,6 +213,13 @@ console.log(`截图 ${count} 张 → ${opts.out}`);
 if (unknownCmds.size) console.log(`未处理的 IPC 命令（返回了空值）：${[...unknownCmds].sort().join(", ")}`);
 if (failures.length) console.log(`场景失败：\n  ${failures.join("\n  ")}`);
 if (pageErrors.size) console.log(`页面错误：\n  ${[...pageErrors].slice(0, 10).join("\n  ")}`);
+if (opts.audit) {
+  console.log(
+    auditIssues.size
+      ? `布局审计发现 ${auditIssues.size} 处图标独占一行：\n  ${[...auditIssues].join("\n  ")}`
+      : "布局审计：没有发现问题",
+  );
+}
 let regressions = 0;
 if (opts.updateBaseline) {
   console.log(`已把 ${updateBaseline(shotNames, opts.out, opts.baseline)} 张存为基准 → ${opts.baseline}`);
