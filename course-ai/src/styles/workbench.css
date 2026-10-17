@@ -279,22 +279,22 @@
   display: none;
 }
 
+/* 收起按钮放在标签条最右端（标签条为它让出右侧空位），与标签同高对齐；
+   原先钉在面板右缘正中，会压住文稿、章节等正文的行尾。 */
 .ca-panel-collapse {
   position: absolute;
-  top: 50%;
-  right: 6px;
+  top: 10px;
+  right: 10px;
   z-index: 6;
-  transform: translateY(-50%);
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 56px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--bg-panel);
+  width: 32px;
+  height: 36px;
+  border-radius: var(--r-sm);
+  border: none;
+  background: transparent;
   color: var(--text-3);
-  box-shadow: var(--shadow-raise);
-  opacity: 0.55;
+  opacity: 0.7;
   transition: opacity 0.12s, color 0.12s;
 }
 
@@ -311,6 +311,11 @@
 
 .ca-panel-collapse:hover {
   color: var(--text-1);
+  background: var(--surface-card-hover);
+}
+
+.ca-wb[data-layout="wide"] .ca-panel-col .ca-study-tabs-band {
+  padding-right: 50px;
 }
 
 /* 收起后的展开把手：钉在右缘中间，垂直小竖条 + 图标。 */
