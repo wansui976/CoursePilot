@@ -240,8 +240,20 @@ async function ensureServer() {
     cwd: ROOT,
     stdio: "ignore",
   });
+  // 截图进程被中断（Ctrl+C、超时被杀）时 finally 不会执行：在这里兜底关掉自己起的 vite，
+  // 否则它会成为孤儿进程一直占着 1420，`pnpm tauri dev` 起不来。
+  const stop = () => {
+    if (vite.exitCode === null) vite.kill();
+  };
+  process.once("exit", stop);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.once(signal, () => {
+      stop();
+      process.exit(130);
+    });
+  }
   for (let i = 0; i < 60; i++) {
-    if (await serverUp()) return () => vite.kill();
+    if (await serverUp()) return stop;
     await new Promise((r) => setTimeout(r, 500));
   }
   vite.kill();
