@@ -16,6 +16,11 @@ import {
   Search,
   Shrink,
   X,
+  ArrowDown,
+  ArrowUp,
+  Pencil,
+  Trash2,
+  Wand2,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
@@ -324,33 +329,36 @@ export function CourseLibraryView({
       <Menu
         aria-label={t("home.videoActionsMenu")}
         data-video-menu
-        className="absolute right-3 top-12 z-10 w-32"
+        className="absolute right-3 top-12 z-10 w-40"
         onClose={() => setOpenMenuVideoId(null)}
         triggerRef={videoMenuTriggerRef}
       >
         <MenuItem
-          className="ca-touch-44"
+          className="ca-touch-44 flex items-center gap-2"
           onClick={() => {
             renameOriginTriggerRef.current = videoMenuTriggerRef.current;
             setOpenMenuVideoId(null);
             setRenamingVideo({ id: video.id, title: displayTitle(video.title) });
           }}
         >
+          <Pencil aria-hidden="true" className="h-4 w-4 flex-none text-[var(--text-3)]" />
           {t("home.editTitle")}
         </MenuItem>
         {/* 过滤态下移动的是全量列表位置、界面上看不出效果，藏掉避免困惑。 */}
         {!normalizedQuery && index > 0 && (
-          <MenuItem className="ca-touch-44" onClick={() => moveTo(index - 1)}>
+          <MenuItem className="ca-touch-44 flex items-center gap-2" onClick={() => moveTo(index - 1)}>
+            <ArrowUp aria-hidden="true" className="h-4 w-4 flex-none text-[var(--text-3)]" />
             {t("home.moveUp")}
           </MenuItem>
         )}
         {!normalizedQuery && index !== -1 && index < videos.length - 1 && (
-          <MenuItem className="ca-touch-44" onClick={() => moveTo(index + 1)}>
+          <MenuItem className="ca-touch-44 flex items-center gap-2" onClick={() => moveTo(index + 1)}>
+            <ArrowDown aria-hidden="true" className="h-4 w-4 flex-none text-[var(--text-3)]" />
             {t("home.moveDown")}
           </MenuItem>
         )}
         <MenuItem
-          className="ca-touch-44"
+          className="ca-touch-44 flex items-center gap-2"
           disabled={canRecorrect(video) && recorrect.isPending}
           onClick={() => {
             setOpenMenuVideoId(null);
@@ -362,6 +370,11 @@ export function CourseLibraryView({
             }
           }}
         >
+          {canRecorrect(video) ? (
+            <Wand2 aria-hidden="true" className="h-4 w-4 flex-none text-[var(--text-3)]" />
+          ) : (
+            <Play aria-hidden="true" className="h-4 w-4 flex-none text-[var(--text-3)]" />
+          )}
           {canRecorrect(video)
             ? recorrect.isPending && recorrect.variables?.videoId === video.id
               ? t("home.correcting")
@@ -371,12 +384,13 @@ export function CourseLibraryView({
         {/* 危险操作放最后并用分隔线隔开，避免夹在常规操作中间被误点。 */}
         <MenuItem
           tone="danger"
-          className="ca-touch-44 mt-1 border-t border-[var(--border-subtle)] pt-2.5"
+          className="ca-touch-44 mt-1 flex items-center gap-2 border-t border-[var(--border-subtle)] pt-2.5"
           onClick={() => {
             setOpenMenuVideoId(null);
             void deleteVideo(video.id);
           }}
         >
+          <Trash2 aria-hidden="true" className="h-4 w-4 flex-none" />
           {t("home.delete")}
         </MenuItem>
       </Menu>

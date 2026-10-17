@@ -401,31 +401,35 @@
   background: var(--status-err);
 }
 
-.ca-menu {
-  overflow: hidden;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--line);
-  background: var(--bg-panel);
-  padding: 4px 0;
-  font-size: 14px;
-  box-shadow: var(--shadow-pop);
-}
+/* 通用菜单放在 components 层：未分层的规则会压过 Tailwind 工具类（例如给菜单项加
+   flex items-center 横排图标会失效），放进层里后调用方的工具类才能正常覆盖。 */
+@layer components {
+  .ca-menu {
+    overflow: hidden;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--line);
+    background: var(--bg-panel);
+    padding: 4px 0;
+    font-size: 14px;
+    box-shadow: var(--shadow-pop);
+  }
 
-.ca-menu-item {
-  display: block;
-  width: 100%;
-  padding: 8px 12px;
-  text-align: left;
-  color: var(--text-1);
-  transition: background 0.12s, color 0.12s;
-}
+  .ca-menu-item {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    text-align: left;
+    color: var(--text-1);
+    transition: background 0.12s, color 0.12s;
+  }
 
-.ca-menu-item:hover {
-  background: var(--bg-sunken);
-}
+  .ca-menu-item:hover {
+    background: var(--bg-sunken);
+  }
 
-.ca-menu-item.danger {
-  color: var(--status-err);
+  .ca-menu-item.danger {
+    color: var(--status-err);
+  }
 }
 
 .ca-empty-state {
