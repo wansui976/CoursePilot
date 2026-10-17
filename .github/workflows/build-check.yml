@@ -1,0 +1,167 @@
+name: Build Check
+
+# 三端只编译、不发布：每次推送到 main / 提 PR 时确认 Windows、iOS、Android 都能编出来。
+# 不需要任何签名密钥，不碰 GitHub Release；产物只作为构建附件保留几天，方便下载试装。
+# 正式发布仍走 windows-release / macos-release / ios-release。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "course-ai/**"
+      - ".github/workflows/build-check.yml"
+      - ".github/scripts/**"
+  pull_request:
+    paths:
+      - "course-ai/**"
+      - ".github/workflows/build-check.yml"
+      - ".github/scripts/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PNPM_VERSION: 10.34.1
+  NODE_VERSION: 24
+
+jobs:
+  web:
+    name: Frontend (typecheck, lint, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: course-ai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: course-ai/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc --noEmit -p .
+      - run: pnpm lint
+      - run: pnpm test
+
+  windows:
+    name: Windows (unsigned installer)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: course-ai/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: course-ai/src-tauri
+      - name: Install frontend dependencies
+        working-directory: course-ai
+        run: pnpm install --frozen-lockfile
+      - name: Prepare Windows sidecars
+        shell: pwsh
+        run: .\.github\scripts\prepare-windows-sidecars.ps1
+      - name: Build
+        working-directory: course-ai
+        run: pnpm tauri build --ci
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-unsigned
+          path: |
+            course-ai/src-tauri/target/release/bundle/nsis/*.exe
+            course-ai/src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
+          retention-days: 7
+
+  ios:
+    name: iOS (simulator build) + Rust tests
+    # 带完整 Xcode 与 iOS SDK；Rust 单测也在这里跑（build.rs 在 macOS 上要编 Swift 云同步模块）。
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: course-ai/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: course-ai/src-tauri
+      - name: Install frontend dependencies
+        working-directory: course-ai
+        run: pnpm install --frozen-lockfile
+      - name: Rust tests
+        working-directory: course-ai/src-tauri
+        run: cargo test --lib
+      - name: Build for iOS Simulator
+        # 模拟器构建用本机临时签名，不需要证书与描述文件。
+        working-directory: course-ai
+        run: pnpm tauri ios build --target aarch64-sim --debug --ci
+
+  android:
+    name: Android (debug APK)
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: 27.2.12479018
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: course-ai/pnpm-lock.yaml
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Install Android NDK
+        run: |
+          sdkmanager --install "ndk;${NDK_VERSION}"
+          echo "NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: course-ai/src-tauri
+      - name: Install frontend dependencies
+        working-directory: course-ai
+        run: pnpm install --frozen-lockfile
+      - name: Build debug APK
+        working-directory: course-ai
+        run: pnpm tauri android build --debug --apk --target aarch64 --ci
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk
+          path: course-ai/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          retention-days: 7
