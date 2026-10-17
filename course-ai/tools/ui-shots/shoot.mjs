@@ -4,7 +4,8 @@
  *
  *   pnpm shots                              # 全部场景，桌面，浅色+深色
  *   pnpm shots --scenes home,workbench      # 只拍指定场景
- *   pnpm shots --device phone --theme dark  # 设备：desktop | phone | tablet | all
+ *   pnpm shots --device phone --theme dark  # 设备：desktop | phone | tablet | all（以上三种）
+ *   pnpm shots --device platforms           # 按 iOS / Android / Windows 真实身份模拟（含横屏）
  *   pnpm shots --out /tmp/shots             # 默认输出到 ui-shots/（已忽略）
  *   pnpm shots --update-baseline            # 拍完把这批图存为基准（ui-shots-baseline/，已忽略）
  *   pnpm shots --compare [--threshold 0.5]  # 拍完与基准逐像素比对，变化超过 0.5% 的列出并出差异图
@@ -25,10 +26,38 @@ import { scenes } from "./scenes.mjs";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BASE = "http://localhost:1420/";
 
+const IOS_UA =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
+const IPAD_UA =
+  "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
+const ANDROID_UA =
+  "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/129.0.0.0 Mobile Safari/537.36";
+const ANDROID_TABLET_UA =
+  "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/129.0.0.0 Safari/537.36";
+const WINDOWS_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0";
+
+const touch = { isMobile: true, hasTouch: true };
+
+/** kind 决定场景里走哪套导航（desktop = 侧栏/rail，phone/tablet = 底部 Tab 的入口判断在场景里按可见性做）。 */
 const DEVICES = {
-  desktop: { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 },
-  phone: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
-  tablet: { viewport: { width: 820, height: 1180 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+  desktop: { kind: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 },
+  phone: { kind: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, ...touch },
+  tablet: { kind: "tablet", viewport: { width: 820, height: 1180 }, deviceScaleFactor: 2, ...touch },
+  // —— 按真实平台身份模拟（UA + 触屏 + 横竖屏），走到 iOS / Android / Windows 专属分支 ——
+  iphone: { kind: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, userAgent: IOS_UA, ...touch },
+  "iphone-landscape": { kind: "phone", viewport: { width: 844, height: 390 }, deviceScaleFactor: 3, userAgent: IOS_UA, ...touch },
+  ipad: { kind: "tablet", viewport: { width: 820, height: 1180 }, deviceScaleFactor: 2, userAgent: IPAD_UA, ...touch },
+  "ipad-landscape": { kind: "tablet", viewport: { width: 1180, height: 820 }, deviceScaleFactor: 2, userAgent: IPAD_UA, ...touch },
+  android: { kind: "phone", viewport: { width: 412, height: 915 }, deviceScaleFactor: 2.625, userAgent: ANDROID_UA, ...touch },
+  "android-landscape": { kind: "phone", viewport: { width: 915, height: 412 }, deviceScaleFactor: 2.625, userAgent: ANDROID_UA, ...touch },
+  "android-tablet": { kind: "tablet", viewport: { width: 800, height: 1280 }, deviceScaleFactor: 2, userAgent: ANDROID_TABLET_UA, ...touch },
+  windows: { kind: "desktop", viewport: { width: 1366, height: 768 }, deviceScaleFactor: 1.25, userAgent: WINDOWS_UA },
+};
+
+const DEVICE_GROUPS = {
+  all: ["desktop", "phone", "tablet"],
+  platforms: ["iphone", "iphone-landscape", "ipad", "ipad-landscape", "android", "android-landscape", "android-tablet", "windows"],
 };
 
 function parseArgs(argv) {
@@ -261,7 +290,7 @@ async function ensureServer() {
 }
 
 const opts = parseArgs(process.argv.slice(2));
-const devices = opts.device === "all" ? Object.keys(DEVICES) : opts.device.split(",");
+const devices = opts.device.split(",").flatMap((name) => DEVICE_GROUPS[name] ?? [name]);
 const themes = opts.theme === "both" ? ["light", "dark"] : [opts.theme];
 for (const device of devices) if (!DEVICES[device]) throw new Error(`未知设备 ${device}`);
 const unknownScenes = (opts.scenes ?? []).filter((name) => !scenes.some((s) => s.name === name));
@@ -281,12 +310,16 @@ try {
   for (const device of devices) {
     for (const theme of themes) {
       const selected = scenes.filter(
-        (s) => (s.devices ?? ["desktop"]).includes(device) && (!opts.scenes || opts.scenes.includes(s.name)),
+        (s) =>
+          (s.devices ?? ["desktop"]).includes(DEVICES[device].kind) &&
+          (!opts.scenes || opts.scenes.includes(s.name)),
       );
       for (const scene of selected) {
         // 每个场景一个全新上下文：localStorage 不跨场景残留（列表视图、助手展开等偏好
         // 会写进存储，带到下一个场景就会挡住按钮或换掉布局）。
-        const context = await browser.newContext({ ...DEVICES[device], locale: "zh-CN" });
+        const contextOptions = { ...DEVICES[device] };
+        delete contextOptions.kind; // 只是给场景用的分类，不是 Playwright 的上下文选项
+        const context = await browser.newContext({ ...contextOptions, locale: "zh-CN" });
         await context.addInitScript(installMockIpc, { theme });
         const page = await context.newPage();
         page.on("pageerror", (error) => pageErrors.add(String(error)));
@@ -307,9 +340,9 @@ try {
         };
         try {
           await page.goto(BASE, { waitUntil: "networkidle" });
-          await scene.run({ page, shot, device, theme, out: opts.out });
+          await scene.run({ page, shot, device, kind: DEVICES[device].kind, theme, out: opts.out });
         } catch (error) {
-          failures.push(`${device}/${theme}/${scene.name}: ${String(error).split("\n")[0]}`);
+          failures.push(`${device}/${theme}/${scene.name}: ${String(error).split("\n").slice(0, 4).join(" | ")}`);
         }
         for (const cmd of (await page.evaluate(() => window.__unknownCmds ?? []).catch(() => []))) unknownCmds.add(cmd);
         await context.close();

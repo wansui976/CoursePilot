@@ -16,6 +16,11 @@ async function nav(page, railLabel, tabLabel) {
   return page.getByRole("button", { name: tabLabel, exact: true }).first().click();
 }
 
+/** 应用当前是桌面式侧栏布局，还是窄屏上下叠放 + 底部 Tab（与设备无关：iPad 横屏也是侧栏）。 */
+async function sidebarShell(page) {
+  return (await page.locator(".ca-app").first().getAttribute("data-shell")) === "sidebar";
+}
+
 async function openCourse(page) {
   await page.getByRole("button", { name: COURSE }).first().click();
 }
@@ -90,7 +95,10 @@ export const scenes = [
       await openCourse(page);
       await page.getByRole("button", { name: /^导入/ }).first().click();
       await shot("menu");
-      await page.getByRole("menuitem", { name: /下载网络视频/ }).click();
+      // 移动端只能上传本地文件（没有下载器、也不能导入文件夹）。
+      const download = page.getByRole("menuitem", { name: /下载网络视频/ });
+      if (!(await download.count())) return;
+      await download.click();
       await page.getByRole("dialog").getByRole("textbox").first().fill("https://www.bilibili.com/video/BV1xx411c7mD");
       await shot("dialog");
     },
@@ -148,12 +156,18 @@ export const scenes = [
   {
     name: "settings",
     devices: ALL,
-    run: async ({ page, shot, device }) => {
+    run: async ({ page, shot }) => {
       await nav(page, "设置", "设置");
       await shot();
-      if (device !== "desktop") return;
+      // 设置页按自身宽度决定形态：宽时左侧分类导航常驻；窄时是「分类列表 → 下钻」，
+      // 看完一个分类要先返回列表才点得到下一个。手机竖屏只拍列表。
+      if (!(await sidebarShell(page))) return;
       for (const [label, suffix] of [["语音识别", "asr"], ["大模型", "llm"], ["存储", "storage"]]) {
-        await page.getByRole("button", { name: label }).first().click();
+        const category = page.getByRole("button", { name: label }).first();
+        if (!(await category.isVisible())) {
+          await page.getByRole("button", { name: "返回", exact: true }).first().click();
+        }
+        await category.click();
         await shot(suffix);
       }
     },
@@ -180,9 +194,9 @@ export const scenes = [
   {
     name: "subscriptions",
     devices: ALL,
-    run: async ({ page, shot, device }) => {
+    run: async ({ page, shot }) => {
       // 窄屏进了课程就离开了课程列表；直接在「课程」Tab 的列表上打开菜单。
-      if (device === "desktop") await openCourse(page);
+      if (await sidebarShell(page)) await openCourse(page);
       await page.getByRole("button", { name: "课程操作" }).first().click();
       await page.getByRole("menuitem", { name: /订阅更新/ }).click();
       await shot();
@@ -238,7 +252,10 @@ export const scenes = [
       let saved = 0;
       // 每拍完一张就落盘：后面要刷新页面去仪表盘，mock 重新注入会清空截获列表。
       const collect = async (name) => {
-        await page.waitForTimeout(1500);
+        // 等分享图真正交给「后端」再落盘（画图有快有慢，固定等 1.5 秒偶尔会漏一张）。
+        await page
+          .waitForFunction(() => (window.__shareImages?.length ?? 0) > 0, null, { timeout: 8000 })
+          .catch(() => {});
         saved += await dumpShareImages(page, out, `${prefix}-card-${name}`);
       };
       await openVideo(page);
