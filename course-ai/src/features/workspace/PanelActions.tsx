@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Sparkles } from "lucide-react";
+import { Button } from "@/ui/button";
 import { ExportMenu, type ExportItem } from "./ExportMenu";
 
 /** 面板右下角悬浮的图标操作（重新生成 / 导出）。内容由流水线自动生成，
@@ -76,5 +77,29 @@ export function PanelActions({
         </button>
       )}
     </div>
+  );
+}
+
+/** 空态里的「用 AI 生成」：与笔记空态同款，不再让用户去角落里找图标按钮。 */
+export function GenerateEmptyAction({
+  onGenerate,
+  generating,
+}: {
+  onGenerate: () => void;
+  generating?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Button
+      type="button"
+      variant="primary"
+      size="sm"
+      onClick={onGenerate}
+      disabled={generating}
+      className="ca-touch-44 gap-1.5"
+    >
+      <Sparkles className={`h-3.5 w-3.5 ${generating ? "animate-pulse" : ""}`} />
+      {generating ? t("panelActions.generating") : t("panelActions.generateWithAi")}
+    </Button>
   );
 }

@@ -10,7 +10,7 @@ import { ErrorNote } from "@/ui/ErrorNote";
 import { PanelEmptyState } from "@/ui/empty-state";
 import { Skeleton } from "@/ui/skeleton";
 import { useTheme } from "@/stores/theme";
-import { PanelActions } from "./PanelActions";
+import { PanelActions, GenerateEmptyAction } from "./PanelActions";
 import { type ExportItem } from "./ExportMenu";
 import { saveShareCard, shareCardHeader, useShareCardLabels } from "./useShareCard";
 import { renderMindmapCard } from "@/lib/shareCard/render";
@@ -144,6 +144,7 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
           icon={<Share2 className="h-7 w-7" />}
           title={t("mindmap.emptyTitle")}
           description={t("mindmap.emptyDescription")}
+          action={<GenerateEmptyAction onGenerate={generate.start} generating={generate.isPending} />}
         />
       )}
       {/* svg 常驻，没图时只是藏起来。它一旦卸载再挂回来就是个新节点，而 Markmap 实例

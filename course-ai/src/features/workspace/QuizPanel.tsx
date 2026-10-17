@@ -13,7 +13,7 @@ import { ErrorNote } from "@/ui/ErrorNote";
 import { Skeleton } from "@/ui/skeleton";
 import { Button } from "@/ui/button";
 import { MathText } from "@/ui/MathText";
-import { PanelActions } from "./PanelActions";
+import { PanelActions, GenerateEmptyAction } from "./PanelActions";
 import { useStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useAiGeneration } from "@/lib/useAiGeneration";
 
@@ -168,6 +168,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
             icon={<CircleHelp className="h-7 w-7" />}
             title={t("quiz.emptyTitle")}
             description={t("quiz.emptyDescription")}
+            action={<GenerateEmptyAction onGenerate={generate.start} generating={generate.isPending} />}
           />
         ) : (
           <>

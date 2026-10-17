@@ -8,7 +8,7 @@ import { usePlayer } from "@/stores/player";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { PanelEmptyState } from "@/ui/empty-state";
 import { TextSkeleton } from "@/ui/skeleton";
-import { PanelActions } from "./PanelActions";
+import { PanelActions, GenerateEmptyAction } from "./PanelActions";
 import { useStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useAiGeneration } from "@/lib/useAiGeneration";
 
@@ -120,6 +120,7 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
               icon={<ListTree className="h-7 w-7" />}
               title={t("chapters.emptyTitle")}
               description={t("chapters.emptyDescription")}
+              action={<GenerateEmptyAction onGenerate={generate.start} generating={generate.isPending} />}
             />
           ) : null}
           {!isError && chapters.length > 0 && (

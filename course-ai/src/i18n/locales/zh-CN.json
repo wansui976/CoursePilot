@@ -395,7 +395,7 @@
   "chapters": {
     "keyChapters": "重点章节",
     "emptyTitle": "还没有章节",
-    "emptyDescription": "字幕就绪后会自动生成，也可以点右下角手动生成。",
+    "emptyDescription": "字幕就绪后会自动生成，也可以现在手动生成。",
     "collapse": "收起章节",
     "expand": "展开章节"
   },
@@ -609,7 +609,7 @@
     "scrollArea": "练习内容滚动区",
     "loading": "加载中…",
     "emptyTitle": "还没有题目",
-    "emptyDescription": "字幕就绪后会自动生成，也可以点右下角手动生成。",
+    "emptyDescription": "字幕就绪后会自动生成，也可以现在手动生成。",
     "addedToReview": "已加入复习",
     "addingToReview": "加入中…",
     "addToReview": "加入每日复习",
@@ -631,7 +631,7 @@
     "collapseTitle": "折叠整体摘要",
     "title": "整体摘要",
     "emptyTitle": "还没有摘要",
-    "emptyDescription": "字幕就绪后会自动生成，也可以点右下角手动生成。"
+    "emptyDescription": "字幕就绪后会自动生成，也可以现在手动生成。"
   },
   "mindmap": {
     "zoomIn": "放大",
@@ -639,14 +639,16 @@
     "fitWindow": "适应窗口",
     "loading": "加载中…",
     "emptyTitle": "还没有脑图",
-    "emptyDescription": "字幕就绪后会自动生成，也可以点右下角手动生成。"
+    "emptyDescription": "字幕就绪后会自动生成，也可以现在手动生成。"
   },
   "panelActions": {
     "staleTitle": "字幕已更新，这份内容还是照着旧稿生成的。要用新稿重做，点右边的重新生成。",
     "stale": "已过期",
     "regenerate": "重新生成",
     "generate": "生成",
-    "staleRegenerate": "字幕已更新：用新稿重新生成"
+    "staleRegenerate": "字幕已更新：用新稿重新生成",
+    "generateWithAi": "用 AI 生成",
+    "generating": "生成中…"
   },
   "export": {
     "shared": "已分享 · {{path}}",

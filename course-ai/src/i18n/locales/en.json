@@ -395,7 +395,7 @@
   "chapters": {
     "keyChapters": "Key Chapters",
     "emptyTitle": "No chapters yet",
-    "emptyDescription": "Chapters are auto-generated after subtitles are ready, or click the button at the bottom right to generate manually.",
+    "emptyDescription": "Chapters are auto-generated after subtitles are ready, or you can generate it now.",
     "collapse": "Collapse chapters",
     "expand": "Expand chapters"
   },
@@ -609,7 +609,7 @@
     "scrollArea": "Quiz scroll area",
     "loading": "Loading…",
     "emptyTitle": "No questions yet",
-    "emptyDescription": "Questions are auto-generated after subtitles are ready, or click the button at the bottom right to generate manually.",
+    "emptyDescription": "Questions are auto-generated after subtitles are ready, or you can generate it now.",
     "addedToReview": "Added to review",
     "addingToReview": "Adding…",
     "addToReview": "Add to daily review",
@@ -631,7 +631,7 @@
     "collapseTitle": "Collapse summary",
     "title": "Summary",
     "emptyTitle": "No summary yet",
-    "emptyDescription": "A summary is auto-generated after subtitles are ready, or click the button at the bottom right to generate manually."
+    "emptyDescription": "A summary is auto-generated after subtitles are ready, or you can generate it now."
   },
   "mindmap": {
     "zoomIn": "Zoom in",
@@ -639,14 +639,16 @@
     "fitWindow": "Fit to window",
     "loading": "Loading…",
     "emptyTitle": "No mind map yet",
-    "emptyDescription": "A mind map is auto-generated after subtitles are ready, or click the button at the bottom right to generate manually."
+    "emptyDescription": "A mind map is auto-generated after subtitles are ready, or you can generate it now."
   },
   "panelActions": {
     "staleTitle": "Subtitles have been updated, but this content was generated from the old transcript. Click regenerate to redo with the new transcript.",
     "stale": "Outdated",
     "regenerate": "Regenerate",
     "generate": "Generate",
-    "staleRegenerate": "Subtitles updated: regenerate with new transcript"
+    "staleRegenerate": "Subtitles updated: regenerate with new transcript",
+    "generateWithAi": "Generate with AI",
+    "generating": "Generating…"
   },
   "export": {
     "shared": "Shared · {{path}}",

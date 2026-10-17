@@ -8,7 +8,7 @@ import { usePlayer } from "@/stores/player";
 import { TextSkeleton } from "@/ui/skeleton";
 import { PanelEmptyState } from "@/ui/empty-state";
 import { ErrorNote } from "@/ui/ErrorNote";
-import { PanelActions } from "./PanelActions";
+import { PanelActions, GenerateEmptyAction } from "./PanelActions";
 import { useStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useAiGeneration } from "@/lib/useAiGeneration";
 
@@ -110,6 +110,7 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
                 icon={<FileText className="h-7 w-7" />}
                 title={t("summary.emptyTitle")}
                 description={t("summary.emptyDescription")}
+                action={<GenerateEmptyAction onGenerate={generate.start} generating={generate.isPending} />}
               />
             )}
           </div>
