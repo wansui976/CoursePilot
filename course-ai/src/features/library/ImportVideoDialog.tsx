@@ -199,7 +199,7 @@ export function ImportVideoButton({
                   {t("import.uploadLocal")}
                 </span>
                 <span className="block text-xs text-[var(--text-muted)]">
-                  {t("import.uploadHint")}
+                  {t(mobile ? "import.uploadHintMobile" : "import.uploadHint")}
                 </span>
               </span>
             </button>

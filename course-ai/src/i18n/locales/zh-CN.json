@@ -1054,7 +1054,8 @@
     "importPlaylistHint": "B 站合集·多 P / YouTube 播放列表，批量下载",
     "importFailed": "导入失败：{{error}}",
     "selectLocalVideo": "选择本地视频或音频",
-    "noVideosInFolder": "该文件夹里没有可导入的视频或音频"
+    "noVideosInFolder": "该文件夹里没有可导入的视频或音频",
+    "uploadHintMobile": "从「文件」中选择 mp4 / mov / mp3 / m4a…"
   },
   "bilibiliImport": {
     "title": "下载网络视频",

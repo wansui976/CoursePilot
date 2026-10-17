@@ -35,7 +35,7 @@ function renderPanel(split = false) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <TabsPanel videoId="video-1" {...(split ? { split } : {})} />
+      <TabsPanel videoId="video-1" {...(split ? { allowSplit: true } : {})} />
     </QueryClientProvider>,
   );
 }

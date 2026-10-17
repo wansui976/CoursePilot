@@ -1054,7 +1054,8 @@
     "importPlaylistHint": "Bilibili collection · multi-P / YouTube playlist, batch download",
     "importFailed": "Import failed: {{error}}",
     "selectLocalVideo": "Select local video or audio",
-    "noVideosInFolder": "No importable video or audio in this folder"
+    "noVideosInFolder": "No importable video or audio in this folder",
+    "uploadHintMobile": "Pick mp4 / mov / mp3 / m4a… from Files"
   },
   "bilibiliImport": {
     "title": "Download Online Video",

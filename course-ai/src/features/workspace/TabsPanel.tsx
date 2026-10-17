@@ -1,4 +1,6 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useContainerPixelWidth } from "@/lib/useContainerWidth";
+import { SPLIT_NOTES_MIN_WIDTH } from "./workbenchLayout";
 import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -238,13 +240,20 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
 
 export const TabsPanel = memo(function TabsPanel({
   videoId,
-  split = false,
+  allowSplit = false,
 }: {
   videoId: string;
-  /** 叠放且够宽（平板竖屏）：笔记移到右半边常驻，左边只留其余标签。 */
-  split?: boolean;
+  /** 布局允许分栏（播放器不与面板并排）；真正分不分，看面板自身是否够宽。 */
+  allowSplit?: boolean;
 }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const width = useContainerPixelWidth(rootRef);
+  const split = allowSplit && width >= SPLIT_NOTES_MIN_WIDTH;
   // videoId 是学习现场的边界。换视频时重建内部状态，重新读取该视频保存的
   // activeTab，同时让 visited 只从当前标签开始，避免上一视频的重面板继续保活。
-  return <VideoTabsPanel key={videoId} videoId={videoId} split={split} />;
+  return (
+    <div ref={rootRef} className="h-full min-h-0">
+      <VideoTabsPanel key={videoId} videoId={videoId} split={split} />
+    </div>
+  );
 });
