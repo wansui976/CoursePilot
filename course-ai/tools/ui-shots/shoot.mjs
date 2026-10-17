@@ -94,9 +94,11 @@ async function waitForScrollIdle() {
 }
 
 /**
- * 在页面里跑的布局审计。目前查一类问题：图标（svg，预设样式是 display:block）和文字并排
- * 放在一个非 flex / grid 的容器里——图标会独占一行，把文字挤到下面、把卡片撑高。
- * 只看可见元素；返回问题容器的简短描述。
+ * 在页面里跑的布局审计，查两类问题：
+ *   1. 图标（svg，预设样式是 display:block）和文字并排放在非 flex / grid 容器里——图标会
+ *      独占一行，把文字挤到下面、把卡片撑高；
+ *   2. 写了 Tailwind 显示类却没生效（被未分层的全局规则压掉）。
+ * 返回问题元素的简短描述。
  */
 function auditLayout() {
   const issues = [];
@@ -121,6 +123,38 @@ function auditLayout() {
         (node.nodeType === Node.ELEMENT_NODE && node !== svg && getComputedStyle(node).display.startsWith("inline") && node.textContent.trim()),
     );
     if (hasText) issues.push(describe(parent));
+  }
+  // 第二类：元素上写了 Tailwind 的显示类（flex / grid / hidden …），实际 display 却不是——
+  // 说明被某条未分层的全局规则压掉了（未分层规则优先于 @layer utilities）。
+  // 带变体前缀的（sm:flex、data-[…]:hidden）依赖状态，不判。
+  const DISPLAY = {
+    flex: "flex",
+    "inline-flex": "inline-flex",
+    grid: "grid",
+    "inline-grid": "inline-grid",
+    block: "block",
+    "inline-block": "inline-block",
+    hidden: "none",
+  };
+  for (const el of document.querySelectorAll("[class]")) {
+    if (typeof el.className !== "string") continue;
+    const classes = el.className.split(/\s+/);
+    if (classes.some((c) => /:(flex|inline-flex|grid|inline-grid|block|inline-block|inline|hidden|contents|table)$/.test(c))) continue;
+    const wanted = classes.filter((c) => c in DISPLAY);
+    if (wanted.length !== 1) continue;
+    // inline-flex 与 flex（inline-grid 与 grid）只差外层是行内还是块级，内部排版相同；
+    // 而 flex / grid 容器的子项本来就会被「块级化」。两者都按同一种算。
+    const outerless = (d) => d.replace(/^inline-(flex|grid)$/, "$1");
+    let parent = el.parentElement;
+    while (parent && getComputedStyle(parent).display === "contents") parent = parent.parentElement;
+    let expected = outerless(DISPLAY[wanted[0]]);
+    if (parent && /flex|grid/.test(getComputedStyle(parent).display) && expected === "inline-block") {
+      expected = "block";
+    }
+    const actual = outerless(getComputedStyle(el).display);
+    if (actual !== expected) {
+      issues.push(`${describe(el)} 写了 ${wanted[0]}，实际 display:${actual}`);
+    }
   }
   return [...new Set(issues)];
 }
@@ -216,7 +250,7 @@ if (pageErrors.size) console.log(`页面错误：\n  ${[...pageErrors].slice(0, 
 if (opts.audit) {
   console.log(
     auditIssues.size
-      ? `布局审计发现 ${auditIssues.size} 处图标独占一行：\n  ${[...auditIssues].join("\n  ")}`
+      ? `布局审计发现 ${auditIssues.size} 处问题：\n  ${[...auditIssues].join("\n  ")}`
       : "布局审计：没有发现问题",
   );
 }

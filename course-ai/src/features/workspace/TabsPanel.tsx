@@ -173,7 +173,7 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
     >
       {/* 分段控件：macOS 式凹槽轨道 + 选中丸，取代下划线 tab。面板拖窄时轨道横向
           滚动；核心任务保持一级可见，低频资料统一收进「更多」。 */}
-      <TabsList className="ca-study-tabs-band">
+      <TabsList className="ca-study-tabs-band block">
         <div className="ca-study-tabs">
           {tabKeys.map((tab) => {
             const Icon = TAB_ICONS[tab];
