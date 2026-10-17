@@ -232,12 +232,15 @@ export function ReviewSession({
         {concept ? `${t("review.title")}: ${concept.name}` : t("review.title")}
       </Dialog.Title>
       <header className="flex flex-none items-center justify-between border-b border-[var(--border-subtle)] px-6 py-3">
-        <span className="text-sm text-[var(--text-muted)]">
-          {cards.length > 0 && !done
-            ? `${index + 1} / ${cards.length}`
-            : concept
-              ? concept.name
-              : t("review.title")}
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-semibold text-[var(--text-strong)]">
+            {concept ? concept.name : t("review.title")}
+          </span>
+          {cards.length > 0 && !done && (
+            <span className="flex-none rounded-full bg-[var(--surface-card-active)] px-2 py-0.5 text-xs font-medium tabular-nums text-[var(--text-muted)]">
+              {index + 1} / {cards.length}
+            </span>
+          )}
         </span>
         <button
           ref={exitButtonRef}
@@ -251,7 +254,7 @@ export function ReviewSession({
         </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+      <div className="ca-review-stage min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
         <div className="mx-auto flex min-h-full w-full max-w-xl items-center">
           <div className="w-full">
           {isLoading ? (

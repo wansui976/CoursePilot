@@ -789,13 +789,39 @@
   grid-template-rows: 1fr 1fr;
 }
 
+/* 还没有视频封面的课程：同色相的低饱和浅底 + 与视频封面同款的同心圆纹样，
+   大字用同色相深色——放在真实封面旁边不再是一块高饱和色块。 */
 .ca-course-cover[data-tiles="0"] {
+  --tint: var(--course-hue, 220);
   place-items: center;
-  background: linear-gradient(
-    135deg,
-    hsl(var(--course-hue, 220) 46% 56%),
-    hsl(calc(var(--course-hue, 220) + 32) 42% 36%)
-  );
+  background:
+    repeating-radial-gradient(
+      circle at 82% 28%,
+      hsl(var(--tint) 40% 50% / 0.07) 0 1px,
+      transparent 1px 22px
+    ),
+    radial-gradient(circle at 82% 28%, hsl(var(--tint) 60% 70% / 0.28), transparent 55%),
+    linear-gradient(140deg, hsl(var(--tint) 38% 94%), hsl(calc(var(--tint) + 24) 32% 86%));
+}
+
+.ca-course-cover[data-tiles="0"] .ca-course-initial {
+  color: hsl(var(--tint) 34% 38%);
+  text-shadow: none;
+}
+
+[data-theme="dark"] .ca-course-cover[data-tiles="0"] {
+  background:
+    repeating-radial-gradient(
+      circle at 82% 28%,
+      hsl(var(--tint) 40% 70% / 0.06) 0 1px,
+      transparent 1px 22px
+    ),
+    radial-gradient(circle at 82% 28%, hsl(var(--tint) 50% 45% / 0.25), transparent 55%),
+    linear-gradient(140deg, hsl(var(--tint) 22% 22%), hsl(calc(var(--tint) + 24) 20% 16%));
+}
+
+[data-theme="dark"] .ca-course-cover[data-tiles="0"] .ca-course-initial {
+  color: hsl(var(--tint) 40% 76%);
 }
 
 .ca-course-tile {

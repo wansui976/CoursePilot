@@ -258,3 +258,10 @@
   background: var(--bg-sunken);
   font-variant-numeric: tabular-nums;
 }
+
+/* 复习会话的舞台：卡片背后一圈很淡的强调色光晕，整屏不再是一片空灰。 */
+.ca-review-stage {
+  background:
+    radial-gradient(ellipse 60% 45% at 50% 46%, var(--accent-weak), transparent 70%),
+    var(--surface-app);
+}
