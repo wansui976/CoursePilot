@@ -531,9 +531,10 @@ export function CourseLibraryView({
           <span className="ca-meta-progress" aria-hidden="true">
             <i style={{ width: `${Math.round(pipelineProgressFor(video.id) * 100)}%` }} />
           </span>
-          <span className="ca-meta-text accent truncate">
-            <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
-            {stageMessage(stage, t)}
+          {/* svg 默认是 block：不包成横向 flex，转圈图标会独占一行、把卡片撑高一截。 */}
+          <span className="ca-meta-text accent flex flex-none items-center gap-1">
+            <Loader2 className="h-3 w-3 flex-none animate-spin" aria-hidden="true" />
+            <span className="max-w-[9em] truncate">{stageMessage(stage, t)}</span>
           </span>
         </span>
       );
