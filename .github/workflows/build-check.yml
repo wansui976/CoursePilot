@@ -113,9 +113,17 @@ jobs:
       - name: Install frontend dependencies
         working-directory: course-ai
         run: pnpm install --frozen-lockfile
-      - name: Prepare macOS sidecars
-        # 在 macOS 主机上跑 Rust 测试时，tauri-build 会按 macOS 配置检查 externalBin 是否存在。
-        run: ./.github/scripts/prepare-macos-sidecars.sh
+      - name: Placeholder macOS sidecars
+        # 在 macOS 主机上跑 Rust 测试时，tauri-build 按 macOS 配置检查 externalBin 文件是否
+        # 存在；测试并不运行它们。放占位文件即可，不依赖外部下载（发布流程才需要真的二进制）。
+        working-directory: course-ai/src-tauri
+        run: |
+          target="$(rustc -vV | awk '/^host:/ { print $2 }')"
+          mkdir -p binaries
+          for bin in ffmpeg yt-dlp; do
+            printf '#!/bin/sh\nexit 0\n' > "binaries/${bin}-${target}"
+            chmod 755 "binaries/${bin}-${target}"
+          done
       - name: Rust tests
         working-directory: course-ai/src-tauri
         run: cargo test --lib
