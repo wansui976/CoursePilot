@@ -109,6 +109,15 @@ pub async fn download(
             "移动端暂不支持网络视频下载，请先在桌面端导入".into(),
         ));
     }
+    // 课程目录在没接上的外置硬盘上时，create_dir_all 会去 root 所有的 /Volumes 下建
+    // 挂载点，报的是 Permission denied，前端就只能说「没有文件访问权限」，让人去查一个
+    // 根本没问题的目录权限。先把真正的原因说出来。
+    if let Some(volume) = unmounted_volume(out_dir) {
+        return Err(AppError::Other(format!(
+            "课程目录所在的外置硬盘「{volume}」未接入：{}。请接上硬盘后重试。",
+            out_dir.display()
+        )));
+    }
     std::fs::create_dir_all(out_dir)?;
     // 先下到本次导入专用的空目录，再挪进课程目录。
     //
@@ -148,6 +157,22 @@ pub async fn download(
     let claimed = claim_downloaded(&staging, out_dir, sub_lang);
     let _ = std::fs::remove_dir_all(&staging);
     claimed
+}
+
+/// `dir` 位于 macOS `/Volumes/<卷名>` 下而该卷没有挂载时，返回卷名。
+fn unmounted_volume(dir: &Path) -> Option<String> {
+    let mut parts = dir.components();
+    if parts.next() != Some(std::path::Component::RootDir) {
+        return None;
+    }
+    if parts.next()?.as_os_str() != "Volumes" {
+        return None;
+    }
+    let name = parts.next()?.as_os_str();
+    if Path::new("/Volumes").join(name).exists() {
+        return None;
+    }
+    Some(name.to_string_lossy().into_owned())
 }
 
 /// 把这一次下到的东西从暂存目录挪进课程目录。
@@ -496,6 +521,17 @@ pub async fn probe(url: &str, cookies: Option<&str>) -> AppResult<ProbeResult> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn a_course_on_an_unplugged_drive_is_reported_as_such() {
+        assert_eq!(
+            unmounted_volume(Path::new("/Volumes/courseai-no-such-drive/网课")),
+            Some("courseai-no-such-drive".into())
+        );
+        assert_eq!(unmounted_volume(Path::new("/Users/someone/网课")), None);
+        assert_eq!(unmounted_volume(Path::new("/Volumes")), None);
+        assert_eq!(unmounted_volume(Path::new("Volumes/x/y")), None);
+    }
 
     #[test]
     fn a_missing_subtitle_never_picks_up_the_previous_episode_s() {
