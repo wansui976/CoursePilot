@@ -19,12 +19,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 /// 带工具的循环最多来回几次。
 ///
-/// 总结请求不计入这个上限：第 6 轮工具结果回来后，最多再发一次不带工具的模型请求，
+/// 总结请求不计入这个上限：最后一轮工具结果回来后，最多再发一次不带工具的模型请求，
 /// 避免模型已经查到资料却因为封顶只能把「我先查一下」交给用户。
-pub const MAX_TURNS: usize = 6;
-const MAX_TOOL_CALLS: usize = 24;
+pub const MAX_TURNS: usize = 20;
+const MAX_TOOL_CALLS: usize = 40;
 const MAX_TOOL_RESULT_CHARS: usize = 12_000;
-const MAX_TOTAL_TOOL_RESULT_CHARS: usize = 32_000;
+const MAX_TOTAL_TOOL_RESULT_CHARS: usize = 120_000;
 const TOOL_BUDGET_EXHAUSTED: &str =
     "工具预算已用完，本次调用未执行。请直接基于已有结果总结，不要继续调用工具。";
 const TOOL_RESULT_TRUNCATED: &str = "\n（工具结果已按本轮上下文预算截断；请基于现有内容总结。）";
