@@ -976,6 +976,7 @@
     "list_weak_concepts": "查看薄弱知识点",
     "list_due_reviews": "查看待复习",
     "search_content": "搜索课程内容",
+    "get_transcript_around": "读取播放位置附近原文",
     "search_bilibili": "搜索 B 站",
     "open_video": "打开视频",
     "seek_to": "跳转",

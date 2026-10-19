@@ -976,6 +976,7 @@
     "list_weak_concepts": "View weak concepts",
     "list_due_reviews": "View due reviews",
     "search_content": "Search course content",
+    "get_transcript_around": "Read transcript around playback",
     "search_bilibili": "Search Bilibili",
     "open_video": "Open video",
     "seek_to": "Jump to",

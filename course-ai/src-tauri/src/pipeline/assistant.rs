@@ -763,6 +763,73 @@ fn cap_tool_output(text: String, max_chars: usize) -> String {
     capped
 }
 
+/// 「这里讲的什么」默认往前看多少秒。往后只看一半：用户问的多半是刚听完的那句。
+const TRANSCRIPT_WINDOW_DEFAULT_S: i64 = 60;
+const TRANSCRIPT_WINDOW_MIN_S: i64 = 10;
+const TRANSCRIPT_WINDOW_MAX_S: i64 = 300;
+/// 单页课件 OCR 最多带多少字。整页文字可能很长，挤掉的是字幕原文。
+const TRANSCRIPT_SLIDE_CHARS: usize = 1_500;
+
+/// 把时间窗内的字幕段和课件页铺成模型可读的文本。纯函数，可单测。
+///
+/// `slides` 是开始时刻早于窗口结束的全部课件页（按开始时刻升序）：窗口开始前已经
+/// 翻到、到窗口里还没翻走的那一页也要算上——讲解时屏幕上停着的往往就是它。
+fn format_transcript_window(
+    title: &str,
+    at_ms: i64,
+    (from, to): (i64, i64),
+    segments: &[(i64, i64, String)],
+    slides: &[(i64, i64, Option<i64>, String)],
+) -> String {
+    use crate::pipeline::rag::mmss;
+
+    let carried = slides
+        .iter()
+        .rposition(|(_, start, _, _)| *start <= from)
+        .filter(|&i| slides[i].2.is_none_or(|end| end > from));
+    let pages: Vec<_> = slides
+        .iter()
+        .enumerate()
+        .filter(|(i, (_, start, _, _))| *start > from || Some(*i) == carried)
+        .map(|(_, page)| page)
+        .collect();
+
+    if segments.is_empty() && pages.is_empty() {
+        return format!(
+            "《{title}》在 {} 附近没有字幕或课件文字，可能还没转写。\
+             可以请用户先生成字幕，或改用 get_video_summary 看整体内容。",
+            mmss(at_ms)
+        );
+    }
+
+    // 播放位置落在两句之间的空隙里时，标出刚说完的那句。
+    let current = segments.iter().rposition(|(start, _, _)| *start <= at_ms);
+    let mut out = format!(
+        "《{title}》{}–{} 的原文，播放位置 {}（▶ 标出当时那句）：\n",
+        mmss(from),
+        mmss(to),
+        mmss(at_ms)
+    );
+    if !segments.is_empty() {
+        out.push_str("\n字幕：\n");
+        for (i, (start, _, text)) in segments.iter().enumerate() {
+            let mark = if Some(i) == current { "▶ " } else { "" };
+            out.push_str(&format!("{mark}{} {}\n", mmss(*start), text.trim()));
+        }
+    }
+    if !pages.is_empty() {
+        out.push_str("\n课件：\n");
+        for (page_no, start, _, text) in pages {
+            out.push_str(&format!(
+                "第 {page_no} 页（{} 起）：{}\n",
+                mmss(*start),
+                compact_tool_text(text, TRANSCRIPT_SLIDE_CHARS)
+            ));
+        }
+    }
+    cap_tool_output(out, OUTLINE_TOTAL_CHARS)
+}
+
 fn format_course_outline(
     course: &Course,
     knowledge: &crate::pipeline::concepts::CourseKnowledge,
@@ -1002,6 +1069,16 @@ struct VideoScopeArgs {
 }
 
 #[derive(Deserialize)]
+struct TranscriptAroundArgs {
+    #[serde(default)]
+    video_id: Option<String>,
+    #[serde(default)]
+    at_ms: Option<i64>,
+    #[serde(default)]
+    window_s: Option<i64>,
+}
+
+#[derive(Deserialize)]
 struct OpenVideoArgs {
     video_id: String,
     #[serde(default)]
@@ -1126,6 +1203,7 @@ const TOOL_POLICIES: &[ToolPolicy] = &[
     policy("list_weak_concepts", ToolEffect::ReadOnly),
     policy("list_due_reviews", ToolEffect::ReadOnly),
     policy("search_content", ToolEffect::ReadOnly),
+    policy("get_transcript_around", ToolEffect::ReadOnly),
     policy("open_video", ToolEffect::ClientAction),
     policy("seek_to", ToolEffect::ClientAction),
     policy("rename_video", ToolEffect::MutationProposal),
@@ -1224,6 +1302,24 @@ pub fn tool_specs() -> Vec<ToolSpec> {
                               "description": "默认 course"}
                 }),
                 &["query"],
+            ),
+        },
+        ToolSpec {
+            name: "get_transcript_around".into(),
+            description: "按时间点读取某个视频附近的字幕原文和同时段的课件文字，播放位置所在的那句会标出来。\
+                 用户问「这里/刚才讲的什么」「这句什么意思」时用这个——问题指向的是播放位置，\
+                 不是某个关键词，猜关键词去 search_content 容易搜不中。\
+                 不给 video_id 和 at_ms 时读当前视频的当前播放位置；读别的视频必须给 at_ms。\
+                 只读、不会改动任何内容。"
+                .into(),
+            parameters: object(
+                json!({
+                    "video_id": {"type": "string"},
+                    "at_ms": {"type": "integer", "description": "时间点（毫秒）；不给时用当前播放位置"},
+                    "window_s": {"type": "integer",
+                                 "description": "往前看多少秒（往后看一半），默认 60，范围 10–300"}
+                }),
+                &[],
             ),
         },
         ToolSpec {
@@ -1485,6 +1581,11 @@ impl AssistantTools<'_> {
             "get_video_comments" => {
                 let args: VideoScopeArgs = parse_arguments(call)?;
                 self.video_comments(&args).await
+            }
+
+            "get_transcript_around" => {
+                let args: TranscriptAroundArgs = parse_arguments(call)?;
+                self.transcript_around(&args).await
             }
 
             "open_video" => {
@@ -1872,6 +1973,73 @@ impl AssistantTools<'_> {
         Ok(ToolOutcome::ok(
             "已生成笔记提案。用户确认后才会写入笔记，工具本身没有写库。",
         ))
+    }
+
+    /// 读播放位置附近的字幕与课件。
+    ///
+    /// 「刚才这段什么意思」指向的是一个时刻，不是一个关键词。只有关键词检索时模型只能
+    /// 猜词去搜，猜不中就会说「课程里没讲」——那是把检索方式的短板伪装成内容判断。
+    async fn transcript_around(
+        &self,
+        args: &TranscriptAroundArgs,
+    ) -> Result<ToolOutcome, ToolOutcome> {
+        // 界面报告的播放位置只属于当前视频：拿它去读另一个视频，读到的是不相干的一段。
+        let other_video = args
+            .video_id
+            .as_deref()
+            .is_some_and(|given| self.context.video_id.as_deref() != Some(given));
+        let at_ms = match args.at_ms {
+            Some(at) => at.max(0),
+            None if other_video => {
+                return Err(ToolOutcome::failed(
+                    "读别的视频时要给 at_ms（毫秒）；当前播放位置只适用于正在看的视频",
+                ))
+            }
+            None => self.context.position_ms.map(|at| at.max(0)).ok_or_else(|| {
+                ToolOutcome::failed(
+                    "没给 at_ms，界面也没有报告播放位置。请问用户是哪个时间点，或改用 search_content",
+                )
+            })?,
+        };
+        let video_id = self.resolve_video_id(args.video_id.clone())?;
+        let video = self.find_video(&video_id).await?;
+
+        let window_ms = args
+            .window_s
+            .unwrap_or(TRANSCRIPT_WINDOW_DEFAULT_S)
+            .clamp(TRANSCRIPT_WINDOW_MIN_S, TRANSCRIPT_WINDOW_MAX_S)
+            * 1000;
+        let from = at_ms.saturating_sub(window_ms).max(0);
+        let to = at_ms.saturating_add(window_ms / 2);
+
+        let segments: Vec<(i64, i64, String)> = sqlx::query_as(
+            "SELECT start_ms,end_ms,text FROM transcripts
+             WHERE video_id=? AND end_ms>? AND start_ms<? ORDER BY start_ms",
+        )
+        .bind(&video_id)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.db.pool)
+        .await
+        .map_err(ToolOutcome::failed)?;
+        let slides: Vec<(i64, i64, Option<i64>, String)> = sqlx::query_as(
+            "SELECT page_no,start_ms,end_ms,ocr_text FROM slides
+             WHERE video_id=? AND start_ms<? AND ocr_text IS NOT NULL AND TRIM(ocr_text)<>''
+             ORDER BY start_ms",
+        )
+        .bind(&video_id)
+        .bind(to)
+        .fetch_all(&self.db.pool)
+        .await
+        .map_err(ToolOutcome::failed)?;
+
+        Ok(ToolOutcome::ok(format_transcript_window(
+            &video.title,
+            at_ms,
+            (from, to),
+            &segments,
+            &slides,
+        )))
     }
 
     async fn video_summary(&self, args: &VideoScopeArgs) -> Result<ToolOutcome, ToolOutcome> {
@@ -2755,6 +2923,113 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn transcript_around_reads_the_window_at_the_playback_position() {
+        // 「刚才这句什么意思」：没有关键词可搜，只能按播放位置读原文。
+        let (db, course_id, video_id, _dir) = seed().await;
+        for (idx, start, text) in [
+            (0, 0_i64, "开场白"),
+            (1, 60_000, "先回顾上节的矩阵乘法"),
+            (2, 110_000, "行列式可以看成体积的缩放比例"),
+            (3, 120_000, "所以行列式为零意味着空间被压扁"),
+            (4, 400_000, "下一节讲特征值"),
+        ] {
+            sqlx::query(
+                "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)",
+            )
+            .bind(&video_id)
+            .bind(idx)
+            .bind(start)
+            .bind(start + 5_000)
+            .bind(text)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        }
+        // 第 2 页在窗口开始前就翻到了、一直停到窗口里；第 1 页早已翻走。
+        for (page, start, end, text) in [
+            (1, 0_i64, Some(30_000_i64), "目录"),
+            (2, 30_000, None, "行列式 = 有向体积"),
+        ] {
+            sqlx::query(
+                "INSERT INTO slides(video_id,image_path,start_ms,end_ms,page_no,ocr_text) VALUES (?,'p.png',?,?,?,?)",
+            )
+            .bind(&video_id)
+            .bind(start)
+            .bind(end)
+            .bind(page)
+            .bind(text)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        }
+
+        let tools = AssistantTools::new(
+            &db,
+            AssistantContext {
+                course_id: Some(course_id),
+                video_id: Some(video_id.clone()),
+                position_ms: Some(122_000),
+            },
+        );
+        let out = tools.run(&call("get_transcript_around", "{}")).await;
+        assert_eq!(out.status, ToolExecutionStatus::Completed);
+        assert!(out.content.contains("先回顾上节的矩阵乘法"));
+        assert!(out
+            .content
+            .contains("▶ 02:00 所以行列式为零意味着空间被压扁"));
+        assert!(!out.content.contains("开场白"), "窗口之外的字幕不该带上");
+        assert!(!out.content.contains("下一节讲特征值"));
+        assert!(out.content.contains("第 2 页"), "停在屏幕上的课件页要带上");
+        assert!(!out.content.contains("目录"), "早已翻走的课件页不该带上");
+        assert!(tools.take_actions().is_empty(), "读原文必须保持只读");
+
+        let narrow = tools
+            .run(&call(
+                "get_transcript_around",
+                r#"{"at_ms":400000,"window_s":10}"#,
+            ))
+            .await;
+        assert!(narrow.content.contains("下一节讲特征值"));
+        assert!(!narrow.content.contains("空间被压扁"));
+    }
+
+    #[tokio::test]
+    async fn transcript_around_never_applies_the_playback_position_to_another_video() {
+        let (db, course_id, video_id, _dir) = seed().await;
+        let tools = AssistantTools::new(
+            &db,
+            AssistantContext {
+                course_id: Some(course_id),
+                video_id: Some(video_id),
+                position_ms: Some(122_000),
+            },
+        );
+        let out = tools
+            .run(&call("get_transcript_around", r#"{"video_id":"other"}"#))
+            .await;
+        assert_eq!(out.status, ToolExecutionStatus::Failed);
+        assert!(out.content.contains("at_ms"));
+
+        let no_position = AssistantTools::new(&db, AssistantContext::default())
+            .run(&call("get_transcript_around", "{}"))
+            .await;
+        assert_eq!(no_position.status, ToolExecutionStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn transcript_around_says_plainly_when_there_is_no_text_yet() {
+        let (db, _course_id, video_id, _dir) = seed().await;
+        let out = AssistantTools::new(&db, AssistantContext::default())
+            .run(&call(
+                "get_transcript_around",
+                &format!(r#"{{"video_id":"{video_id}","at_ms":5000}}"#),
+            ))
+            .await;
+        assert_eq!(out.status, ToolExecutionStatus::Completed);
+        assert!(out.content.contains("没有字幕或课件文字"));
+    }
+
+    #[tokio::test]
     async fn stale_course_outline_never_exposes_its_old_content_as_authoritative() {
         let (db, course_id, _video_id, _dir) = seed().await;
         let course = crate::commands::courses::list_courses(&db)
@@ -3554,6 +3829,7 @@ mod tests {
                 "list_weak_concepts",
                 "list_due_reviews",
                 "search_content",
+                "get_transcript_around",
                 "open_video",
                 "seek_to",
                 "rename_video",
@@ -3595,6 +3871,7 @@ mod tests {
             "list_weak_concepts",
             "list_due_reviews",
             "search_content",
+            "get_transcript_around",
             "search_bilibili",
             "get_video_comments",
         ] {
