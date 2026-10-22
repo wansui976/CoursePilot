@@ -7,7 +7,7 @@ import { ipc } from "@/lib/ipc";
 import { usePlayer } from "@/stores/player";
 
 const setFullscreen = vi.hoisted(() => vi.fn());
-const platform = vi.hoisted(() => ({ android: false }));
+const platform = vi.hoisted(() => ({ mobile: true }));
 
 vi.mock("@/lib/ipc", () => ({
   ipc: {
@@ -32,8 +32,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 vi.mock("@/lib/platform", () => ({
   isIOS: () => true,
-  isMobile: () => true,
-  isAndroid: () => platform.android,
+  isMobile: () => platform.mobile,
+  isAndroid: () => false,
   isTablet: () => false,
   isDesktop: () => false,
 }));
@@ -58,7 +58,7 @@ function renderPlayer(
 }
 
 beforeEach(async () => {
-  platform.android = false;
+  platform.mobile = true;
   await i18n.changeLanguage("zh-CN");
   localStorage.removeItem("course-ai-playback-rate");
 });
@@ -79,16 +79,17 @@ describe("VideoPlayer iOS gestures", () => {
     expect(video.parentElement).not.toHaveClass("rounded-xl");
   });
 
-  it("gives the video a transparent poster on Android only", () => {
-    // Android WebView 会给没设 poster 的视频画一张灰底大播放图标，盖住画面。
-    platform.android = true;
+  it("gives the video a poster on mobile only", () => {
+    // 手机上没播过的视频不画首帧（Android 是灰底大播放图标，iOS 整块留白）；
+    // 封面还没取到时先用透明图。
+    platform.mobile = true;
     const { unmount } = renderPlayer(false);
     expect(screen.getByLabelText("课程视频播放器").getAttribute("poster")).toMatch(
       /^data:image\/gif;base64,/,
     );
     unmount();
 
-    platform.android = false;
+    platform.mobile = false;
     renderPlayer(false);
     expect(screen.getByLabelText("课程视频播放器")).not.toHaveAttribute("poster");
   });

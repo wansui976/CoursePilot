@@ -11,7 +11,7 @@ import { useSmartRate } from "@/lib/useSmartRate";
 import { ipc } from "@/lib/ipc";
 import { useVideoCrop } from "./useVideoCrop";
 import { posKey, durKey, syncPlaybackProgress } from "@/lib/playback";
-import { isAndroid, isIOS } from "@/lib/platform";
+import { isIOS, isMobile } from "@/lib/platform";
 import { findActiveSegmentIndex } from "@/lib/transcript";
 import type { DanmakuEntry, TranscriptSegment } from "@/lib/types";
 import { useVideoCoverUrl } from "@/lib/useVideoCoverUrl";
@@ -25,9 +25,9 @@ import { useCaptionPrefs } from "@/stores/captionPrefs";
 import { ProgressBar } from "./ProgressBar";
 
 /**
- * Android WebView 给没设 poster、还没播过的 <video> 画一张自带的灰底大播放图标，
- * 盖住整个画面。那边改用视频封面当 poster；封面还没取到时先用透明图，只露出舞台底色。
- * 一旦开始播放或跳到上次的进度，真实画面照常出现。
+ * 手机上还没播过的视频不画首帧：Android WebView 画一张自带的灰底大播放图标盖住画面，
+ * iOS 则整块留白，看着像没加载出来。所以移动端用视频封面当 poster；封面还没取到时
+ * 先用透明图，只露出舞台底色。一旦开始播放或跳到上次的进度，真实画面照常出现。
  */
 const TRANSPARENT_POSTER =
   "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
@@ -177,8 +177,8 @@ export function VideoPlayer({
   const tapRef = useRef<{ t: number; timer?: number }>({ t: 0 });
   const gestureRef = useRef<GestureState | null>(null);
   const setCurrentMs = usePlayer((s) => s.setCurrentMs);
-  const android = isAndroid();
-  const coverUrl = useVideoCoverUrl(videoId, android);
+  const mobile = isMobile();
+  const coverUrl = useVideoCoverUrl(videoId, mobile);
   const setDurationMs = usePlayer((s) => s.setDurationMs);
   const seekRequest = usePlayer((s) => s.seekRequest);
   // 不在这里订阅 currentMs（否则播放时整个播放器每秒重渲染 4 次）。
@@ -794,7 +794,7 @@ export function VideoPlayer({
             aria-label={t("videoPlayer.player")}
             data-theme-heavy=""
             src={src}
-            poster={android ? (coverUrl ?? TRANSPARENT_POSTER) : undefined}
+            poster={mobile ? (coverUrl ?? TRANSPARENT_POSTER) : undefined}
             playsInline
             disablePictureInPicture
             className={`h-full w-full object-contain ${
