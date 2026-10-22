@@ -87,17 +87,38 @@ pub async fn grab_frame(
 /// 对一张已落地的图片跑本地 tesseract。课件页 OCR 直接认已有的页图，不必重新截帧。
 #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "macos")))]
 pub async fn run_ocr_on_image(image: &Path, langs: &str) -> AppResult<String> {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+
     let tesseract = resolve(&TESSERACT, None)?;
-    let args = build_tesseract_args(&image.to_string_lossy(), langs);
+    // Windows 上 tesseract 按系统代码页（ANSI）接收命令行参数和环境变量，路径里有代码页
+    // 表示不了的字符（英文版系统上的中文课程目录或用户名）就打不开。所以图片从 stdin
+    // 喂进去，字库目录也写成相对 tesseract 所在目录的路径，命令行里不出现任何长路径。
+    let image_bytes = tokio::fs::read(image).await?;
+    let args = build_tesseract_args("stdin", langs);
     let mut cmd = crate::sidecar::command(&tesseract);
-    cmd.args(&args);
-    if let Some(tessdata) = crate::sidecar::bundled_tessdata_dir(&tesseract) {
-        cmd.env("TESSDATA_PREFIX", tessdata);
+    cmd.args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    if let (Some(dir), Some(tessdata)) = (
+        tesseract.parent(),
+        crate::sidecar::bundled_tessdata_dir(&tesseract),
+    ) {
+        cmd.current_dir(dir).env("TESSDATA_PREFIX", tessdata);
     }
-    let output = cmd
-        .output()
-        .await
+    let mut child = cmd
+        .spawn()
         .map_err(|e| AppError::Pipeline(format!("tesseract spawn: {e}")))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        // 写失败（tesseract 提前退出、关了管道）不在这里报：退出码和 stderr 才说明了原因。
+        let _ = stdin.write_all(&image_bytes).await;
+    }
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|e| AppError::Pipeline(format!("tesseract wait: {e}")))?;
     if !output.status.success() {
         return Err(AppError::Pipeline(format!(
             "tesseract failed: {}",

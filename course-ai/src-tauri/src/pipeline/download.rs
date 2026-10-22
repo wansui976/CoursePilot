@@ -112,7 +112,7 @@ pub async fn download(
     // 课程目录在没接上的外置硬盘上时，create_dir_all 会去 root 所有的 /Volumes 下建
     // 挂载点，报的是 Permission denied，前端就只能说「没有文件访问权限」，让人去查一个
     // 根本没问题的目录权限。先把真正的原因说出来。
-    if let Some(volume) = unmounted_volume(out_dir) {
+    if let Some(volume) = unmounted_volume(out_dir).or_else(|| missing_drive(out_dir)) {
         return Err(AppError::Other(format!(
             "课程目录所在的外置硬盘「{volume}」未接入：{}。请接上硬盘后重试。",
             out_dir.display()
@@ -346,6 +346,20 @@ fn unmounted_volume(dir: &Path) -> Option<String> {
         return None;
     }
     Some(name.to_string_lossy().into_owned())
+}
+
+/// Windows 上 `dir` 所在的盘符（外置硬盘拔掉后的 E: 之类）不存在时，返回盘符。
+/// 其他平台的路径没有盘符，总是 None。
+fn missing_drive(dir: &Path) -> Option<String> {
+    use std::path::{Component, Prefix};
+    let Some(Component::Prefix(prefix)) = dir.components().next() else {
+        return None;
+    };
+    let (Prefix::Disk(letter) | Prefix::VerbatimDisk(letter)) = prefix.kind() else {
+        return None;
+    };
+    let drive = format!("{}:", letter as char);
+    (!Path::new(&format!("{drive}\\")).exists()).then_some(drive)
 }
 
 /// 把这一次下到的东西从暂存目录挪进课程目录。
@@ -694,6 +708,26 @@ pub async fn probe(url: &str, cookies: Option<&str>) -> AppResult<ProbeResult> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn paths_without_a_drive_letter_never_count_as_a_missing_drive() {
+        assert_eq!(missing_drive(Path::new("/Users/me/网课")), None);
+        assert_eq!(missing_drive(Path::new("relative/dir")), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_course_on_a_missing_drive_letter_is_reported_as_such() {
+        let letter = ('D'..='Z')
+            .rev()
+            .find(|l| !Path::new(&format!("{l}:\\")).exists())
+            .expect("an unused drive letter");
+        assert_eq!(
+            missing_drive(Path::new(&format!("{letter}:\\网课\\第一章"))),
+            Some(format!("{letter}:"))
+        );
+        assert_eq!(missing_drive(Path::new("C:\\Windows")), None);
+    }
 
     #[test]
     fn parses_ytdlp_progress_lines() {

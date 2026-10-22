@@ -245,8 +245,20 @@ pub async fn run_whisper(
         .kill_on_drop(true)
         .args(["-m"])
         .arg(model)
-        .args(["-f"])
-        .arg(audio)
+        .args(["-f"]);
+    // Windows 上 whisper-cli 按系统代码页（ANSI）接收命令行参数：课程目录里有代码页
+    // 表示不了的字符（英文版系统上的中文目录、GBK 以外的字符）时，它就找不到音频。
+    // 在音频所在目录里运行、只传文件名（audio.wav），音频和旁边输出的 .json 都不再
+    // 经过命令行里的长路径。
+    match (audio.parent(), audio.file_name()) {
+        (Some(dir), Some(name)) if !dir.as_os_str().is_empty() => {
+            command.current_dir(dir).arg(name);
+        }
+        _ => {
+            command.arg(audio);
+        }
+    }
+    command
         .args(["-oj", "-ojf", "-pp"])
         // whisper-cli 默认只用 4 线程，多核机器大量算力被闲置。
         // 按机器实际核数放开，转写显著提速（GPU 构建下也能加快非 GPU 部分）。

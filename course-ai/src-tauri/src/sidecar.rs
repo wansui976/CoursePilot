@@ -63,13 +63,14 @@ pub fn command(program: impl AsRef<OsStr>) -> tokio::process::Command {
     command
 }
 
-/// 随安装包附带的 Tesseract 字库目录。Windows 包里的 tesseract.exe 是交叉编译的，
-/// 编译期写死的字库路径（/home/debian/...）在用户机器上不存在，必须显式告诉它。
-pub fn bundled_tessdata_dir(tesseract: &Path) -> Option<PathBuf> {
+/// 随安装包附带的 Tesseract 字库目录，**相对 tesseract 所在目录**。Windows 包里的
+/// tesseract.exe 是交叉编译的，编译期写死的字库路径（/home/debian/...）在用户机器上
+/// 不存在，必须显式告诉它；给相对路径是为了不经过 ANSI 编码不了的安装路径。
+pub fn bundled_tessdata_dir(tesseract: &Path) -> Option<&'static str> {
     let dir = tesseract.parent()?;
-    [dir.join("binaries").join("tessdata"), dir.join("tessdata")]
+    ["binaries/tessdata", "tessdata"]
         .into_iter()
-        .find(|path| path.is_dir())
+        .find(|relative| dir.join(relative).is_dir())
 }
 
 fn find_in_dir(spec: &BinarySpec, dir: &std::path::Path) -> Option<PathBuf> {
@@ -189,9 +190,8 @@ mod tests {
         let bin = dir.path().join("tesseract.exe");
         File::create(&bin).unwrap();
         assert_eq!(bundled_tessdata_dir(&bin), None);
-        let tessdata = dir.path().join("binaries").join("tessdata");
-        fs::create_dir_all(&tessdata).unwrap();
-        assert_eq!(bundled_tessdata_dir(&bin), Some(tessdata));
+        fs::create_dir_all(dir.path().join("binaries").join("tessdata")).unwrap();
+        assert_eq!(bundled_tessdata_dir(&bin), Some("binaries/tessdata"));
     }
 
     #[test]
