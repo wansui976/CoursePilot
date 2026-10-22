@@ -126,36 +126,19 @@ jobs:
           echo "IPA_SOURCE=course-ai/src-tauri/gen/apple/build/arm64/course-ai.ipa" >> "$GITHUB_ENV"
           echo "IPA_KIND=iOS" >> "$GITHUB_ENV"
 
-      # 没有证书时：用 XCODE_XCCONFIG_FILE 在最高优先级关掉签名，归档照常完成，
-      # 导出那一步（必须签名）会失败——直接从归档里取 .app 打成未签名 IPA，
+      # 没有证书时：tauri 的 --no-sign 跳过签名归档，直接从归档里打出未签名 IPA，
       # 供用户用 AltStore / Sideloadly 等工具自签安装。
       - name: Build unsigned iOS/iPadOS IPA
         if: env.IOS_SIGNED != 'true'
         shell: bash
         run: |
-          xcconfig="$RUNNER_TEMP/unsigned.xcconfig"
-          cat > "$xcconfig" <<'EOF'
-          CODE_SIGNING_ALLOWED = NO
-          CODE_SIGNING_REQUIRED = NO
-          CODE_SIGN_IDENTITY =
-          CODE_SIGN_ENTITLEMENTS =
-          DEVELOPMENT_TEAM =
-          PROVISIONING_PROFILE_SPECIFIER =
-          EOF
-          export XCODE_XCCONFIG_FILE="$xcconfig"
-          (cd course-ai && CI=true pnpm tauri ios build --ci) || echo "::notice::Export failed as expected without signing; packaging from the archive."
-          archive=$(find course-ai/src-tauri/gen/apple/build -maxdepth 3 -name "*.xcarchive" -type d | head -n 1)
-          app=$(find "${archive:-/nonexistent}/Products/Applications" -maxdepth 1 -name "*.app" -type d 2>/dev/null | head -n 1)
-          if [[ -z "$app" ]]; then
-            echo "::error::No .app found in the Xcode archive"
-            find course-ai/src-tauri/gen/apple/build -maxdepth 4 | head -50
+          (cd course-ai && CI=true pnpm tauri ios build --no-sign --ci)
+          ipa=$(find course-ai/src-tauri/gen/apple/build -name "*.ipa" -type f | head -n 1)
+          if [[ -z "$ipa" ]]; then
+            echo "::error::No IPA produced"
             exit 1
           fi
-          staging="$RUNNER_TEMP/ipa"
-          mkdir -p "$staging/Payload"
-          cp -R "$app" "$staging/Payload/"
-          (cd "$staging" && zip -qry unsigned.ipa Payload)
-          echo "IPA_SOURCE=$staging/unsigned.ipa" >> "$GITHUB_ENV"
+          echo "IPA_SOURCE=$ipa" >> "$GITHUB_ENV"
           echo "IPA_KIND=iOS_unsigned" >> "$GITHUB_ENV"
 
       - name: Name IPA
