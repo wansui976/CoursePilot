@@ -1,0 +1,128 @@
+name: Android Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to upload the APK to (leave empty to only keep the artifact)
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: Build signed Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 手动运行且没填 tag 时只留构建产物，不上传。
+      - name: Resolve release tag
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "RELEASE_TAG=${{ inputs.tag }}" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TAG=${GITHUB_REF_NAME%%+*}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.1
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: course-ai/pnpm-lock.yaml
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Use preinstalled Android NDK
+        # GitHub 的 Ubuntu 机器预装了 Android SDK 与 NDK，直接用（与 Build Check 一致）。
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" >> "$GITHUB_ENV"
+          echo "NDK_HOME=${ANDROID_NDK_LATEST_HOME}" >> "$GITHUB_ENV"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install frontend dependencies
+        working-directory: course-ai
+        run: pnpm install --frozen-lockfile
+
+      # build.gradle.kts 只要找到 app/keystore.properties 就用它给 release 包签名。
+      - name: Configure release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          if [[ -z "$ANDROID_KEYSTORE_BASE64" ]]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set"
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/coursepilot-release.jks"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          cat > course-ai/src-tauri/gen/android/app/keystore.properties <<EOF
+          storeFile=$keystore
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+
+      - name: Build release APK
+        working-directory: course-ai
+        run: pnpm tauri android build --apk --target aarch64 --ci
+
+      - name: Collect APK
+        shell: bash
+        run: |
+          apk=$(find course-ai/src-tauri/gen/android/app/build/outputs/apk -name "*release*.apk" ! -name "*unsigned*" | head -n 1)
+          if [[ -z "$apk" ]]; then
+            echo "::error::No signed release APK found"
+            find course-ai/src-tauri/gen/android/app/build/outputs -name "*.apk"
+            exit 1
+          fi
+          version=$(node -p "require('./course-ai/package.json').version")
+          out="CoursePilot_${version}_android_arm64-v8a-release.apk"
+          cp "$apk" "$out"
+          echo "APK_PATH=$out" >> "$GITHUB_ENV"
+
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk
+          path: ${{ env.APK_PATH }}
+          if-no-files-found: error
+
+      # release 由 macOS 发布流程先创建；这里等它出现再上传，避免抢着创建。
+      - name: Upload APK to release
+        if: env.RELEASE_TAG != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          for _ in $(seq 1 60); do
+            gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
+            sleep 30
+          done
+          gh release upload "$RELEASE_TAG" "$APK_PATH" --clobber --repo "$GITHUB_REPOSITORY"

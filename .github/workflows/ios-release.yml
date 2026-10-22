@@ -1,0 +1,187 @@
+name: iOS Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      upload_release_tag:
+        description: "Existing release tag to upload the IPA to (leave empty to only attach as artifact)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ios:
+    name: Build iOS/iPadOS IPA
+    # macOS runner ships with full Xcode + iOS SDK
+    runs-on: macos-15
+
+    env:
+      APPLE_DEVELOPMENT_TEAM: "${{ secrets.APPLE_DEVELOPMENT_TEAM || 'D4572P92SB' }}"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          if [[ -n "${{ github.event.inputs.upload_release_tag }}" ]]; then
+            echo "RELEASE_TAG=${{ github.event.inputs.upload_release_tag }}" >> "$GITHUB_ENV"
+          elif [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            echo "RELEASE_TAG=${GITHUB_REF_NAME%%+*}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.1
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: course-ai/pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        working-directory: course-ai
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare macOS sidecars
+        run: ./.github/scripts/prepare-macos-sidecars.sh
+
+      - name: Detect signing certificate
+        env:
+          APPLE_CERTIFICATE: "${{ secrets.APPLE_CERTIFICATE }}"
+          APPLE_CERTIFICATE_BASE64: "${{ secrets.APPLE_CERTIFICATE_BASE64 }}"
+        shell: bash
+        run: |
+          if [[ -n "$APPLE_CERTIFICATE_BASE64" || -n "$APPLE_CERTIFICATE" ]]; then
+            echo "IOS_SIGNED=true" >> "$GITHUB_ENV"
+          else
+            echo "IOS_SIGNED=false" >> "$GITHUB_ENV"
+            echo "::notice::No Apple signing certificate configured; building an unsigned IPA for self-signing."
+          fi
+
+      - name: Import signing certificate and provisioning profile
+        if: env.IOS_SIGNED == 'true'
+        env:
+          APPLE_CERTIFICATE: "${{ secrets.APPLE_CERTIFICATE }}"
+          APPLE_CERTIFICATE_BASE64: "${{ secrets.APPLE_CERTIFICATE_BASE64 }}"
+          APPLE_CERTIFICATE_PASSWORD: "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
+          APPLE_PROVISIONING_PROFILE: "${{ secrets.APPLE_PROVISIONING_PROFILE }}"
+        shell: bash
+        run: |
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$RANDOM
+
+          # Decode the certificate (accept either raw or base64-encoded secret)
+          if [[ -n "$APPLE_CERTIFICATE" && -f "$APPLE_CERTIFICATE" ]]; then
+            cp "$APPLE_CERTIFICATE" "$CERTIFICATE_PATH.p12"
+          else
+            echo -n "${APPLE_CERTIFICATE_BASE64:-$APPLE_CERTIFICATE}" | base64 --decode --output "$CERTIFICATE_PATH.p12"
+          fi
+
+          # Install the provisioning profile
+          if [[ -n "$APPLE_PROVISIONING_PROFILE" ]]; then
+            PP_PATH="$RUNNER_TEMP/build_pp.mobileprovision"
+            echo -n "$APPLE_PROVISIONING_PROFILE" | base64 --decode --output "$PP_PATH"
+            mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+            cp "$PP_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/"
+          fi
+
+          # Create a temporary keychain and import the certificate
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH.p12" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+
+      - name: Build signed iOS/iPadOS IPA
+        if: env.IOS_SIGNED == 'true'
+        working-directory: course-ai
+        shell: bash
+        run: |
+          CI=true pnpm tauri ios build
+          echo "IPA_SOURCE=course-ai/src-tauri/gen/apple/build/arm64/course-ai.ipa" >> "$GITHUB_ENV"
+          echo "IPA_KIND=iOS" >> "$GITHUB_ENV"
+
+      # 没有证书时：用 XCODE_XCCONFIG_FILE 在最高优先级关掉签名，归档照常完成，
+      # 导出那一步（必须签名）会失败——直接从归档里取 .app 打成未签名 IPA，
+      # 供用户用 AltStore / Sideloadly 等工具自签安装。
+      - name: Build unsigned iOS/iPadOS IPA
+        if: env.IOS_SIGNED != 'true'
+        shell: bash
+        run: |
+          xcconfig="$RUNNER_TEMP/unsigned.xcconfig"
+          cat > "$xcconfig" <<'EOF'
+          CODE_SIGNING_ALLOWED = NO
+          CODE_SIGNING_REQUIRED = NO
+          CODE_SIGN_IDENTITY =
+          CODE_SIGN_ENTITLEMENTS =
+          DEVELOPMENT_TEAM =
+          PROVISIONING_PROFILE_SPECIFIER =
+          EOF
+          export XCODE_XCCONFIG_FILE="$xcconfig"
+          (cd course-ai && CI=true pnpm tauri ios build --ci) || echo "::notice::Export failed as expected without signing; packaging from the archive."
+          archive=$(find course-ai/src-tauri/gen/apple/build -maxdepth 3 -name "*.xcarchive" -type d | head -n 1)
+          app=$(find "${archive:-/nonexistent}/Products/Applications" -maxdepth 1 -name "*.app" -type d 2>/dev/null | head -n 1)
+          if [[ -z "$app" ]]; then
+            echo "::error::No .app found in the Xcode archive"
+            find course-ai/src-tauri/gen/apple/build -maxdepth 4 | head -50
+            exit 1
+          fi
+          staging="$RUNNER_TEMP/ipa"
+          mkdir -p "$staging/Payload"
+          cp -R "$app" "$staging/Payload/"
+          (cd "$staging" && zip -qry unsigned.ipa Payload)
+          echo "IPA_SOURCE=$staging/unsigned.ipa" >> "$GITHUB_ENV"
+          echo "IPA_KIND=iOS_unsigned" >> "$GITHUB_ENV"
+
+      - name: Name IPA
+        shell: bash
+        run: |
+          version=$(node -p "require('./course-ai/package.json').version")
+          out="CoursePilot_${version}_${IPA_KIND}.ipa"
+          cp "$IPA_SOURCE" "$out"
+          echo "IPA_PATH=$out" >> "$GITHUB_ENV"
+
+      - name: Upload IPA as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: course-ai-ios
+          path: ${{ env.IPA_PATH }}
+          if-no-files-found: error
+
+      # release 由 macOS 发布流程先创建；这里等它出现再上传，避免抢着创建。
+      - name: Upload IPA to release
+        if: env.RELEASE_TAG != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          for _ in $(seq 1 60); do
+            gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
+            sleep 30
+          done
+          gh release upload "$RELEASE_TAG" "$IPA_PATH" --clobber --repo "$GITHUB_REPOSITORY"
