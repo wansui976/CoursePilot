@@ -502,21 +502,58 @@ final class MobileFilesPlugin: Plugin {
     try data.write(to: output)
   }
 
+  /// 抽出识别用的音轨，统一重采样成 16kHz 单声道。格式由 Rust 侧按 ASR 服务选
+  /// （见 pipeline/audio.rs 的 mobile_export_format）：火山要 WAV，阿里云要 M4A。
+  /// 这里支持的格式必须和 Android 那边（MobileFilesPlugin.kt）一致——原来只有 WAV，
+  /// 阿里云（移动端默认的识别服务）一请求 M4A 就失败，iOS 上任何视频都处理不了。
   private func exportAudioForAsr(_ args: ExportAudioForAsrArgs) throws -> (path: String, mime: String, format: String) {
-    let preferredFormat = args.preferredFormat.lowercased()
-    guard preferredFormat == "wav" else {
+    let format = args.preferredFormat.lowercased()
+    let fileName: String
+    let fileType: AVFileType
+    let mime: String
+    let settings: [String: Any]
+    switch format {
+    case "wav":
+      fileName = "audio.wav"
+      fileType = .wav
+      mime = "audio/wav"
+      settings = [
+        AVFormatIDKey: kAudioFormatLinearPCM,
+        AVSampleRateKey: 16000,
+        AVNumberOfChannelsKey: 1,
+        AVLinearPCMBitDepthKey: 16,
+        AVLinearPCMIsBigEndianKey: false,
+        AVLinearPCMIsFloatKey: false,
+        AVLinearPCMIsNonInterleaved: false,
+      ]
+    case "m4a":
+      // AAC 单声道：一小时的课十几 MB，比 WAV 小一个数量级，上传和内存都省。
+      fileName = "audio.m4a"
+      fileType = .m4a
+      mime = "audio/mp4"
+      settings = [
+        AVFormatIDKey: kAudioFormatMPEG4AAC,
+        AVSampleRateKey: 16000,
+        AVNumberOfChannelsKey: 1,
+      ]
+    default:
       throw MobileFilesError.unsupportedFormat(args.preferredFormat)
     }
 
     let outDir = URL(fileURLWithPath: args.outDir, isDirectory: true)
     try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
-    let outFile = outDir.appendingPathComponent("audio.wav")
+    let outFile = outDir.appendingPathComponent(fileName)
     if FileManager.default.fileExists(atPath: outFile.path) {
       try FileManager.default.removeItem(at: outFile)
     }
 
-    try exportWav(source: URL(fileURLWithPath: args.sourcePath), output: outFile)
-    return (outFile.path, "audio/wav", "wav")
+    try exportAudio(
+      source: URL(fileURLWithPath: args.sourcePath),
+      output: outFile,
+      fileType: fileType,
+      audioSettings: settings
+    )
+    return (outFile.path, mime, format)
   }
 
   /// 取出 asset 的第一条音轨。
@@ -544,7 +581,12 @@ final class MobileFilesPlugin: Plugin {
     return audioTrack
   }
 
-  private func exportWav(source: URL, output: URL) throws {
+  private func exportAudio(
+    source: URL,
+    output: URL,
+    fileType: AVFileType,
+    audioSettings: [String: Any]
+  ) throws {
     let asset = AVURLAsset(url: source)
     let audioTrack = try firstAudioTrack(of: asset)
 
@@ -565,16 +607,7 @@ final class MobileFilesPlugin: Plugin {
     }
     reader.add(readerOutput)
 
-    let audioSettings: [String: Any] = [
-      AVFormatIDKey: kAudioFormatLinearPCM,
-      AVSampleRateKey: 16000,
-      AVNumberOfChannelsKey: 1,
-      AVLinearPCMBitDepthKey: 16,
-      AVLinearPCMIsBigEndianKey: false,
-      AVLinearPCMIsFloatKey: false,
-      AVLinearPCMIsNonInterleaved: false,
-    ]
-    let writer = try AVAssetWriter(outputURL: output, fileType: .wav)
+    let writer = try AVAssetWriter(outputURL: output, fileType: fileType)
     let writerInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
     writerInput.expectsMediaDataInRealTime = false
     guard writer.canAdd(writerInput) else {
@@ -683,7 +716,7 @@ enum MobileFilesError: LocalizedError {
     case .cannotReadAudio:
       return "Failed to decode audio track"
     case .cannotWriteAudio:
-      return "Failed to write WAV audio"
+      return "Failed to write audio"
     case .cannotWriteImage:
       return "Failed to encode cover image"
     case .cannotReadVideo:

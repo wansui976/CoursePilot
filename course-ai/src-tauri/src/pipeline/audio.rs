@@ -79,20 +79,23 @@ pub enum CloudAsrProvider {
     Aliyun,
 }
 
+/// 移动端原生桥（Android 的 MobileFilesPlugin.kt、iOS 的 MobileFilesPlugin.swift）导出
+/// 识别音频用的格式。两边都得支持这里给出的每一种：iOS 原来只会 WAV，阿里云这一请求
+/// M4A，iOS 上就一个视频都处理不了。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AndroidExportFormat {
+pub struct MobileExportFormat {
     pub format: &'static str,
     pub mime: &'static str,
 }
 
 impl CloudAsrProvider {
-    pub fn android_export_format(self) -> AndroidExportFormat {
+    pub fn mobile_export_format(self) -> MobileExportFormat {
         match self {
-            CloudAsrProvider::Aliyun => AndroidExportFormat {
+            CloudAsrProvider::Aliyun => MobileExportFormat {
                 format: "m4a",
                 mime: "audio/mp4",
             },
-            CloudAsrProvider::Volcengine => AndroidExportFormat {
+            CloudAsrProvider::Volcengine => MobileExportFormat {
                 format: "wav",
                 mime: "audio/wav",
             },
@@ -153,7 +156,7 @@ async fn prepare_cloud_audio(
     out_dir: &Path,
     provider: CloudAsrProvider,
 ) -> AppResult<PreparedAudio> {
-    let target = provider.android_export_format();
+    let target = provider.mobile_export_format();
     let exported = crate::mobile_files::export_audio_for_asr(
         app.clone(),
         video.to_string_lossy().to_string(),
@@ -174,7 +177,8 @@ async fn prepare_cloud_audio(
 /// 阿里云那条原来是把**原始视频**直接交上去的，而上传路径要把整个文件读进内存、
 /// base64 一遍（×4/3）、再塞进一个 JSON 字符串（又一份）——一节 1GB 的课峰值内存
 /// 三四个 GB，iOS 直接把进程杀掉。抽出来的音轨通常只有视频的几十分之一，
-/// 这条路才走得通。原生桥本来就支持按格式导出（火山那条一直在用）。
+/// 这条路才走得通。注意 iOS 原生桥起初只会导 WAV（火山用的），阿里云要的 M4A
+/// 是后来补上的——两家的格式都得在原生桥里有实现。
 #[cfg(target_os = "ios")]
 async fn prepare_cloud_audio(
     app: &tauri::AppHandle,
@@ -182,7 +186,7 @@ async fn prepare_cloud_audio(
     out_dir: &Path,
     provider: CloudAsrProvider,
 ) -> AppResult<PreparedAudio> {
-    let target = provider.android_export_format();
+    let target = provider.mobile_export_format();
     let exported = crate::mobile_files::export_audio_for_asr(
         app.clone(),
         video.to_string_lossy().to_string(),
@@ -406,15 +410,15 @@ mod tests {
     #[test]
     fn android_cloud_export_target_matches_provider_format_support() {
         assert_eq!(
-            CloudAsrProvider::Aliyun.android_export_format(),
-            AndroidExportFormat {
+            CloudAsrProvider::Aliyun.mobile_export_format(),
+            MobileExportFormat {
                 format: "m4a",
                 mime: "audio/mp4"
             }
         );
         assert_eq!(
-            CloudAsrProvider::Volcengine.android_export_format(),
-            AndroidExportFormat {
+            CloudAsrProvider::Volcengine.mobile_export_format(),
+            MobileExportFormat {
                 format: "wav",
                 mime: "audio/wav"
             }
