@@ -140,6 +140,14 @@ describe("动效的实现约束", () => {
   });
 });
 
+describe("WebKit 18 兼容", () => {
+  it("课程卡封面显式写满宽，否则旧版 WebKit 里 flex 纵向的 button 不拉伸子项，封面塌掉", () => {
+    const rule = css.match(/^\.ca-course-cover\s*\{[\s\S]*?\n\}/m)?.[0] ?? "";
+    expect(rule).toMatch(/width:\s*100%/);
+    expect(rule).toMatch(/aspect-ratio:\s*16 \/ 10/);
+  });
+});
+
 describe("安全区", () => {
   it("四个方向都取 env() 和 Android 原生系统栏边距的较大值", () => {
     for (const side of ["top", "right", "bottom", "left"]) {

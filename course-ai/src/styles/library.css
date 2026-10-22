@@ -781,6 +781,9 @@
 
 .ca-course-cover {
   position: relative;
+  /* 显式写满宽：卡片是 flex 纵向排列的 <button>，WebKit 18 及以前不会把它的子项拉满，
+     aspect-ratio 拿不到宽度，封面塌成一行字那么高（macOS 14/15、iOS 17/18 上整块封面消失）。 */
+  width: 100%;
   aspect-ratio: 16 / 10;
   display: grid;
   gap: 2px;
