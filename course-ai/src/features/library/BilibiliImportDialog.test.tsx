@@ -181,9 +181,34 @@ describe("BilibiliImportDialog", () => {
         "https://b23.tv/abc",
         1080,
         "zh-CN",
-        false,
+        false,        expect.any(Function),
       ),
     );
+  });
+
+  it("shows download progress on the button while downloading", async () => {
+    mockTools.hasBilibiliCookies.mockResolvedValue(true);
+    mockTools.probeBilibili.mockResolvedValue({
+      title: "示例视频",
+      qualities: [1080],
+      tracks: [],
+    });
+    // 推一条进度后一直挂着，模拟下载进行中。
+    mockTools.importBilibili.mockImplementation(
+      (_c, _u, _q, _s, _a, onEvent?: (event: unknown) => void) => {
+        onEvent?.({ type: "progress", downloaded: 42, total: 100, speed: null, eta: null });
+        return new Promise(() => {});
+      },
+    );
+    renderDialog();
+
+    fireEvent.change(screen.getByLabelText("视频链接"), {
+      target: { value: "https://b23.tv/abc" },
+    });
+    fireEvent.click(screen.getByText("下一步"));
+    fireEvent.click(await screen.findByText("下载"));
+
+    expect(await screen.findByRole("button", { name: "下载中 42%" })).toBeDisabled();
   });
 
   it("hands subtitle auto-processing back to the home queue", async () => {
@@ -235,7 +260,7 @@ describe("BilibiliImportDialog", () => {
         "https://b23.tv/abc",
         1080,
         undefined,
-        undefined,
+        undefined,        expect.any(Function),
       ),
     );
   });

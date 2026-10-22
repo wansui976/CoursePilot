@@ -4,7 +4,7 @@ use crate::commands::videos::{add_local_video, Video};
 use crate::error::{AppError, AppResult};
 use crate::pipeline::{aliyun_ocr, deepseek_ocr, download, ocr};
 use std::path::{Path, PathBuf};
-use tauri::State;
+use tauri::{Emitter, State};
 
 const DEFAULT_OCR_LANGS: &str = "chi_sim+eng";
 
@@ -188,6 +188,7 @@ pub async fn cmd_import_bilibili(
     max_height: Option<u32>,
     sub_lang: Option<String>,
     subtitle_autocorrect: Option<bool>,
+    request_id: Option<String>,
 ) -> AppResult<Video> {
     import_url(
         app,
@@ -197,11 +198,14 @@ pub async fn cmd_import_bilibili(
         max_height,
         sub_lang,
         subtitle_autocorrect,
+        request_id,
     )
     .await
 }
 
 /// `cmd_import_bilibili` 的实现，订阅自动导入也走这里。
+/// 给了 `request_id` 时，下载进度走 `url-import:<request_id>` 事件。
+#[allow(clippy::too_many_arguments)]
 pub async fn import_url(
     app: tauri::AppHandle,
     state: &AppState,
@@ -210,6 +214,7 @@ pub async fn import_url(
     max_height: Option<u32>,
     sub_lang: Option<String>,
     subtitle_autocorrect: Option<bool>,
+    request_id: Option<String>,
 ) -> AppResult<Video> {
     if is_mobile_os(std::env::consts::OS) {
         return Err(crate::error::AppError::Config(
@@ -228,12 +233,20 @@ pub async fn import_url(
         None
     };
     let out_dir = PathBuf::from(&root_path);
+    let event_name = request_id.map(|id| format!("url-import:{id}"));
+    let progress_app = app.clone();
+    let on_event = move |event: download::DownloadEvent| {
+        if let Some(name) = &event_name {
+            let _ = progress_app.emit(name, event);
+        }
+    };
     let result = download::download(
         &url,
         &out_dir,
         cookies.as_deref(),
         max_height,
         sub_lang.as_deref(),
+        &on_event,
     )
     .await?;
     let mut video = add_local_video(&state.db, &course_id, result.video, None).await?;

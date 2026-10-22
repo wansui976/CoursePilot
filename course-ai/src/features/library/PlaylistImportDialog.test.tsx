@@ -149,6 +149,7 @@ describe("PlaylistImportDialog", () => {
       undefined,
       "ai-zh",
       true,
+      expect.any(Function),
     );
     expect(onStartProcessing).toHaveBeenCalledTimes(1);
   });

@@ -10,6 +10,7 @@ import { ipc } from "@/lib/ipc";
 import type { ProbeResult, Video } from "@/lib/types";
 import { Modal } from "@/ui/dialog";
 import { isBilibiliUrl } from "@/lib/sourceUrl";
+import { describeDownload } from "@/lib/downloadProgress";
 
 type Step = "url" | "cookie" | "probing" | "confirm";
 type ImportRequest = {
@@ -47,6 +48,8 @@ export function BilibiliImportDialog({
   const [autocorrect, setAutocorrect] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
+  // 下载中的进度文字（百分比、速度、合并、断流降档重试）；没收到事件前为 null。
+  const [downloadStatus, setDownloadStatus] = useState<string | null>(null);
   // cookie 步骤是「首次缺失」还是「登录态失效需重导」，用于切换引导文案。
   const [cookieReason, setCookieReason] = useState<"missing" | "expired">(
     "missing",
@@ -134,15 +137,18 @@ export function BilibiliImportDialog({
   };
 
   const importMutation = useMutation({
-    mutationFn: (request: ImportRequest) =>
-      ipc.tools.importBilibili(
+    mutationFn: (request: ImportRequest) => {
+      setDownloadStatus(null);
+      return ipc.tools.importBilibili(
         courseId,
         url.trim(),
         request.quality,
         request.useSub ? request.subLang : undefined,
         // 纠错偏好只对带字幕导入有意义；不带字幕不写偏好（保持 NULL）。
         request.useSub ? request.autocorrect : undefined,
-      ),
+        (event) => setDownloadStatus(describeDownload(event, t)),
+      );
+    },
     onSuccess: (video, request) => {
       queryClient.invalidateQueries({ queryKey: qk.videos.list(courseId) });
       // 选用了字幕：立即跑流水线，让字幕被消化成文稿（ASR 阶段会走字幕分支、
@@ -355,7 +361,7 @@ export function BilibiliImportDialog({
               }
             >
               {importMutation.isPending
-                ? t("bilibiliImport.downloading")
+                ? (downloadStatus ?? t("bilibiliImport.downloading"))
                 : probe.tracks.length > 0
                   ? t("bilibiliImport.downloadWithSub")
                   : t("bilibiliImport.download")}

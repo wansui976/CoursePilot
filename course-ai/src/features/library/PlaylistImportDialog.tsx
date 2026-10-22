@@ -2,6 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { qk } from "@/lib/queryKeys";
 import { useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
+import { describeDownload } from "@/lib/downloadProgress";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
@@ -56,6 +57,8 @@ export function PlaylistImportDialog({
   const [progress, setProgress] = useState<{ done: number; total: number; title: string } | null>(
     null,
   );
+  // 当前这一集的下载进度文字（百分比、速度、合并、断流降档重试）。
+  const [episodeStatus, setEpisodeStatus] = useState<string | null>(null);
   const [results, setResults] = useState<{ ok: number; failures: { title: string; error: string }[] } | null>(
     null,
   );
@@ -175,6 +178,7 @@ export function PlaylistImportDialog({
     for (let i = 0; i < eps.length; i++) {
       const ep = eps[i];
       setProgress({ done: i, total: eps.length, title: ep.title });
+      setEpisodeStatus(null);
       try {
         const video = await ipc.tools.importBilibili(
           courseId,
@@ -182,6 +186,7 @@ export function PlaylistImportDialog({
           maxHeight,
           useSub ? "ai-zh" : undefined,
           useSub ? autocorrect : undefined,
+          (event) => setEpisodeStatus(describeDownload(event, t)),
         );
         ok += 1;
         // 批量导入一律走处理流水线（用户不会挨个手点「开始处理」）。
@@ -397,6 +402,11 @@ export function PlaylistImportDialog({
             {t("playlistImport.progress", { done: progress.done, total: progress.total })}
           </p>
           <p className="break-words text-center text-xs text-[var(--text-faint)]">{progress.title}</p>
+          {episodeStatus && (
+            <p className="text-center text-xs tabular-nums text-[var(--text-faint)]">
+              {episodeStatus}
+            </p>
+          )}
           <div
             role="progressbar"
             aria-label={t("playlistImport.progressAria")}

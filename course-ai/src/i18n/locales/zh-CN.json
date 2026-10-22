@@ -1097,6 +1097,13 @@
     "importing": "导入中…",
     "importCount": "导入 ({{count}})"
   },
+  "urlImport": {
+    "percent": "下载中 {{percent}}%",
+    "bytes": "下载中 {{size}}",
+    "speed": "{{label}} · {{speed}}/s",
+    "merging": "正在合并音视频…",
+    "retrying": "视频流中途断开，正在降到 {{height}}P 重新下载…"
+  },
   "playlistImport": {
     "title": "导入播放列表 / 合集",
     "linkLabel": "播放列表链接",
@@ -1374,7 +1381,8 @@
     "disk": "磁盘空间不足，请清理后重试。",
     "permission": "没有文件访问权限，请检查目录权限后重试。",
     "ffmpeg": "缺少 ffmpeg 或音频处理失败。",
-    "download": "视频下载失败：请检查链接是否有效，或稍后重试。"
+    "download": "视频下载失败：请检查链接是否有效，或稍后重试。",
+    "downloadInterrupted": "视频流在下载中途被服务器断开（已自动降低清晰度重试）。链接本身没有问题，请稍后重试，或换低一档清晰度。"
   },
   "common": {
     "cancel": "取消",

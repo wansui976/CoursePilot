@@ -1,5 +1,6 @@
 /** 应用级能力：窗口/退出、云同步、密钥、开发日志、系统通知、设置、语音模型、备份与外部工具。 */
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
   DevLogEntry,
   LlmUsageTotals,
@@ -14,6 +15,7 @@ import type {
   CloudSyncProbeArmResult,
   CloudSyncProbeStatus,
   CloudSyncProbeStopResult,
+  UrlImportEvent,
 } from "./types";
 
 export const app = {
@@ -93,21 +95,29 @@ export const tools = {
     h = 0,
   ): Promise<string> =>
     invoke("cmd_ocr_region", { videoId, atMs, x, y, w, h }),
-  importBilibili: (
+  importBilibili: async (
     courseId: string,
     url: string,
     maxHeight?: number,
     subLang?: string,
     // 本次导入的字幕 AI 纠错偏好；undefined = 跟随全局设置。
     subtitleAutocorrect?: boolean,
-  ): Promise<Video> =>
-    invoke("cmd_import_bilibili", {
-      courseId,
-      url,
-      maxHeight,
-      subLang,
-      subtitleAutocorrect,
-    }),
+    // 下载进度回调（百分比、速度、合并、断流降档重试）。
+    onEvent?: (event: UrlImportEvent) => void,
+  ): Promise<Video> => {
+    const args = { courseId, url, maxHeight, subLang, subtitleAutocorrect };
+    if (!onEvent) return invoke("cmd_import_bilibili", args);
+    const requestId = crypto.randomUUID();
+    // 先注册监听再 invoke，避免漏掉早到的事件。
+    const unlisten = await listen<UrlImportEvent>(`url-import:${requestId}`, (evt) =>
+      onEvent(evt.payload),
+    );
+    try {
+      return await invoke<Video>("cmd_import_bilibili", { ...args, requestId });
+    } finally {
+      unlisten();
+    }
+  },
   probeBilibili: (url: string): Promise<ProbeResult> =>
     invoke("cmd_probe_bilibili", { url }),
   // 扁平枚举播放列表/合集（不下载正片），得到各集清单。

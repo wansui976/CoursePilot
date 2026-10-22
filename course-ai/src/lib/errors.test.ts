@@ -69,6 +69,17 @@ describe("humanizeError", () => {
     expect(humanizeError("yt-dlp failed: unable to extract")).toContain("下载");
   });
 
+  it("does not blame the link when the CDN cuts the stream mid-download", () => {
+    const raw =
+      "视频流在传输中途被服务器断开（已自动降低清晰度重试），链接本身没有问题。请稍后重试，或换低一档清晰度。\n" +
+      "ERROR: [download] Got error: 512 bytes read, 109722057 more expected. Giving up after 10 retries";
+    expect(humanizeError(raw)).toContain("中途");
+    expect(humanizeError(raw)).not.toContain("检查链接");
+    expect(humanizeError("yt-dlp failed: Got error: 512 bytes read, 1 more expected")).toContain(
+      "中途",
+    );
+  });
+
   it("maps disk / permission errors", () => {
     expect(humanizeError("No space left on device")).toContain("磁盘");
     expect(humanizeError("Permission denied (os error 13)")).toContain("权限");

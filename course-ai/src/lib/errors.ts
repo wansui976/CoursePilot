@@ -77,6 +77,15 @@ export function humanizeError(error: unknown, language?: string): string {
   ) {
     return translated("apiKey", locale);
   }
+  // 视频流传输到一半被 CDN 掐断（B 站常见）。链接本身没问题，不能落到下面的
+  // 「请检查链接」兜底；报错里还常带 Connection reset，也得排在「网络」之前。
+  if (
+    s.includes("中途被服务器断开") ||
+    s.includes("more expected") ||
+    s.includes("incompleteread")
+  ) {
+    return translated("downloadInterrupted", locale);
+  }
   if (s.includes("大模型请求超时")) {
     return translated("longTimeout", locale);
   }

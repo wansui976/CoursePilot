@@ -67,6 +67,7 @@ async fn check_one(app: &tauri::AppHandle, subscription: &Subscription) -> AppRe
             Some(AUTO_IMPORT_MAX_HEIGHT),
             sub_lang,
             None,
+            None,
         )
         .await
         {

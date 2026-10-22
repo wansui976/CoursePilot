@@ -102,6 +102,7 @@ pub async fn download(
     cookies: Option<&str>,
     max_height: Option<u32>,
     sub_lang: Option<&str>,
+    on_event: &(dyn Fn(DownloadEvent) + Send + Sync),
 ) -> AppResult<DownloadResult> {
     if is_mobile_os(std::env::consts::OS) {
         return Err(AppError::Config(
@@ -133,29 +134,202 @@ pub async fn download(
     std::fs::create_dir_all(&staging)?;
     let template = staging.join("%(title).80s.%(ext)s");
     let ytdlp = resolve(&YTDLP, None)?;
-    let args = build_ytdlp_args(
-        url,
-        &template.to_string_lossy(),
-        cookies,
-        max_height,
-        sub_lang,
-    );
-    let output = crate::sidecar::command(&ytdlp)
-        .args(ffmpeg_location_args())
-        .args(&args)
-        .output()
-        .await
-        .map_err(|e| AppError::Pipeline(format!("yt-dlp spawn: {e}")))?;
-    if !output.status.success() {
+    // B 站 CDN 时常在传输中途掐断某一档清晰度的视频流（yt-dlp 报 `512 bytes read,
+    // 109722057 more expected`，重试 10 次也续不上），链接本身没问题，换一档清晰度通常
+    // 就能下完。所以断流时自动降一档重下，而不是直接失败。
+    let mut height = max_height;
+    let mut fallbacks = 0;
+    loop {
+        let args = build_ytdlp_args(
+            url,
+            &template.to_string_lossy(),
+            cookies,
+            height,
+            sub_lang,
+        );
+        let stderr = match run_ytdlp(&ytdlp, &args, on_event).await {
+            Ok(None) => break,
+            Ok(Some(stderr)) => stderr,
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&staging);
+                return Err(error);
+            }
+        };
+        if is_stream_interrupted(&stderr) {
+            if let Some(lower) = lower_height(height).filter(|_| fallbacks < MAX_QUALITY_FALLBACKS)
+            {
+                fallbacks += 1;
+                height = Some(lower);
+                on_event(DownloadEvent::Retrying { max_height: lower });
+                continue;
+            }
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(AppError::Pipeline(format!(
+                "{STREAM_INTERRUPTED_MESSAGE}\n{}",
+                stderr_tail(&stderr)
+            )));
+        }
         let _ = std::fs::remove_dir_all(&staging);
-        return Err(AppError::Pipeline(format!(
-            "yt-dlp failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        )));
+        return Err(AppError::Pipeline(format!("yt-dlp failed: {stderr}")));
     }
     let claimed = claim_downloaded(&staging, out_dir, sub_lang);
     let _ = std::fs::remove_dir_all(&staging);
     claimed
+}
+
+/// 断流时最多降几档清晰度重下。
+const MAX_QUALITY_FALLBACKS: usize = 3;
+/// 降档的阶梯；没指定清晰度（取最高）时从 1080P 开始降。
+const HEIGHT_LADDER: [u32; 6] = [2160, 1440, 1080, 720, 480, 360];
+/// 断流最终失败时的提示。前端按其中的「中途被服务器断开」认出这类错误，
+/// 不再笼统地让用户去检查链接。
+const STREAM_INTERRUPTED_MESSAGE: &str =
+    "视频流在传输中途被服务器断开（已自动降低清晰度重试），链接本身没有问题。请稍后重试，或换低一档清晰度。";
+/// yt-dlp 进度行的前缀；用自定义模板输出机器可读的进度，避免解析给人看的进度条。
+const PROGRESS_PREFIX: &str = "courseai-progress";
+
+/// 下载过程中的事件，经 `url-import:<request_id>` 推给前端。
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum DownloadEvent {
+    /// 当前这一路流的进度。B 站是视频流、音频流分开下的，每路各走一遍 0→100%。
+    Progress {
+        downloaded: u64,
+        total: Option<u64>,
+        /// 字节/秒
+        speed: Option<f64>,
+        /// 剩余秒数
+        eta: Option<u64>,
+    },
+    /// 下完了，正在用 ffmpeg 合并音视频。
+    Merging,
+    /// 视频流中途断开，正在降到这一档清晰度重下。
+    #[serde(rename_all = "camelCase")]
+    Retrying { max_height: u32 },
+}
+
+/// 跑一次 yt-dlp，边跑边把进度推出去。返回 `Some(stderr)` 表示 yt-dlp 失败退出。
+async fn run_ytdlp(
+    ytdlp: &Path,
+    args: &[String],
+    on_event: &(dyn Fn(DownloadEvent) + Send + Sync),
+) -> AppResult<Option<String>> {
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+
+    let mut child = crate::sidecar::command(ytdlp)
+        .args(ffmpeg_location_args())
+        .args([
+            "--newline",
+            "--progress",
+            "--progress-template",
+            &format!(
+                "download:{PROGRESS_PREFIX} %(progress.downloaded_bytes)s \
+                 %(progress.total_bytes)s %(progress.total_bytes_estimate)s \
+                 %(progress.speed)s %(progress.eta)s"
+            ),
+        ])
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| AppError::Pipeline(format!("yt-dlp spawn: {e}")))?;
+    // stderr 另起任务读完，免得管道写满把 yt-dlp 卡住。
+    let mut stderr = child.stderr.take().expect("stderr is piped");
+    let stderr_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        let _ = stderr.read_to_end(&mut buf).await;
+        buf
+    });
+    // 不用 lines()：Windows 上 yt-dlp 按系统代码页输出文件名，不一定是合法 UTF-8。
+    let mut lines = BufReader::new(child.stdout.take().expect("stdout is piped")).split(b'\n');
+    // yt-dlp 每读一块就报一次进度，一秒能有几十行；限一下频率再推给前端。
+    let mut last_progress: Option<std::time::Instant> = None;
+    while let Some(line) = lines
+        .next_segment()
+        .await
+        .map_err(|e| AppError::Pipeline(format!("yt-dlp output: {e}")))?
+    {
+        let Some(event) = parse_progress_line(&String::from_utf8_lossy(&line)) else {
+            continue;
+        };
+        if let DownloadEvent::Progress {
+            downloaded, total, ..
+        } = &event
+        {
+            let finished = total.is_some_and(|total| *downloaded >= total);
+            if !finished
+                && last_progress.is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(250))
+            {
+                continue;
+            }
+            last_progress = Some(std::time::Instant::now());
+        }
+        on_event(event);
+    }
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| AppError::Pipeline(format!("yt-dlp wait: {e}")))?;
+    let stderr = stderr_task.await.unwrap_or_default();
+    if status.success() {
+        Ok(None)
+    } else {
+        Ok(Some(String::from_utf8_lossy(&stderr).into_owned()))
+    }
+}
+
+/// 解析 yt-dlp 的一行输出；不是进度 / 合并的行返回 None。
+fn parse_progress_line(line: &str) -> Option<DownloadEvent> {
+    let line = line.trim();
+    if line.starts_with("[Merger]") {
+        return Some(DownloadEvent::Merging);
+    }
+    let mut fields = line.strip_prefix(PROGRESS_PREFIX)?.split_whitespace();
+    // 拿不到的字段 yt-dlp 输出 "NA"。
+    let mut next = || {
+        fields
+            .next()
+            .and_then(|field| field.parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value >= 0.0)
+    };
+    let downloaded = next()? as u64;
+    let total = next();
+    let estimate = next();
+    let speed = next();
+    let eta = next();
+    Some(DownloadEvent::Progress {
+        downloaded,
+        total: total.or(estimate).map(|value| value as u64),
+        speed,
+        eta: eta.map(|value| value as u64),
+    })
+}
+
+/// 是不是「流在传输中途断开」——服务器掐了连接，而不是链接 / 权限 / 格式的问题。
+fn is_stream_interrupted(stderr: &str) -> bool {
+    let s = stderr.to_ascii_lowercase();
+    s.contains("more expected")
+        || s.contains("incompleteread")
+        || s.contains("contenttooshorterror")
+        || s.contains("connection reset")
+        || s.contains("connectionreseterror")
+}
+
+/// 比当前上限低一档的清晰度；已经是最低档时返回 None。
+fn lower_height(current: Option<u32>) -> Option<u32> {
+    match current {
+        None => Some(1080),
+        Some(current) => HEIGHT_LADDER.into_iter().find(|h| *h < current),
+    }
+}
+
+/// yt-dlp 报错只留最后几行：前面是一长串重试日志，真正的原因在末尾。
+fn stderr_tail(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+    lines[lines.len().saturating_sub(3)..].join("\n")
 }
 
 /// `dir` 位于 macOS `/Volumes/<卷名>` 下而该卷没有挂载时，返回卷名。
@@ -520,6 +694,65 @@ pub async fn probe(url: &str, cookies: Option<&str>) -> AppResult<ProbeResult> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn parses_ytdlp_progress_lines() {
+        assert_eq!(
+            parse_progress_line("courseai-progress 1048576 4194304 NA 524288.5 6\r"),
+            Some(DownloadEvent::Progress {
+                downloaded: 1_048_576,
+                total: Some(4_194_304),
+                speed: Some(524_288.5),
+                eta: Some(6),
+            })
+        );
+        // 没有准确大小时退回估计值；速度、剩余时间拿不到是 NA。
+        assert_eq!(
+            parse_progress_line("courseai-progress 1024 NA 2048.0 NA NA"),
+            Some(DownloadEvent::Progress {
+                downloaded: 1024,
+                total: Some(2048),
+                speed: None,
+                eta: None,
+            })
+        );
+        assert_eq!(
+            parse_progress_line("[Merger] Merging formats into \"a.mp4\""),
+            Some(DownloadEvent::Merging)
+        );
+        assert_eq!(parse_progress_line("[download] Destination: a.m4s"), None);
+        assert_eq!(parse_progress_line("courseai-progress NA NA NA NA NA"), None);
+    }
+
+    #[test]
+    fn a_stream_cut_off_midway_is_recognised() {
+        assert!(is_stream_interrupted(
+            "ERROR: [download] Got error: 512 bytes read, 109722057 more expected. Giving up after 10 retries"
+        ));
+        assert!(!is_stream_interrupted("ERROR: [BiliBili] BV1xx: HTTP Error 412: Precondition Failed"));
+        assert!(!is_stream_interrupted("ERROR: Unsupported URL: https://example.com"));
+    }
+
+    #[test]
+    fn quality_fallback_steps_down_one_rung_at_a_time() {
+        assert_eq!(lower_height(None), Some(1080));
+        assert_eq!(lower_height(Some(1080)), Some(720));
+        assert_eq!(lower_height(Some(1000)), Some(720));
+        assert_eq!(lower_height(Some(4320)), Some(2160));
+        assert_eq!(lower_height(Some(360)), None);
+    }
+
+    #[test]
+    fn download_event_is_serialized_for_the_frontend() {
+        assert_eq!(
+            serde_json::to_value(DownloadEvent::Retrying { max_height: 720 }).unwrap(),
+            serde_json::json!({ "type": "retrying", "maxHeight": 720 })
+        );
+        assert_eq!(
+            serde_json::to_value(DownloadEvent::Merging).unwrap(),
+            serde_json::json!({ "type": "merging" })
+        );
+    }
 
     #[test]
     fn a_course_on_an_unplugged_drive_is_reported_as_such() {

@@ -194,6 +194,24 @@ export interface SlidesOcrProgress {
 export type SlidesOcrEvent = { type: "progress" } & SlidesOcrProgress;
 
 /**
+ * 网络视频下载过程中的事件（`url-import:<requestId>`）。
+ * B 站的视频流、音频流分开下，progress 每一路各走一遍 0→100%。
+ */
+export type UrlImportEvent =
+  | {
+      type: "progress";
+      downloaded: number;
+      total: number | null;
+      /** 字节/秒 */
+      speed: number | null;
+      /** 剩余秒数 */
+      eta: number | null;
+    }
+  | { type: "merging" }
+  /** 视频流中途断开，正在降到这一档清晰度重下。 */
+  | { type: "retrying"; maxHeight: number };
+
+/**
  * 一次批量识别的结果。
  *
  * 原来这里只有一个「认出几页」的数字，部分失败根本传不出来：只要有一页成功，
