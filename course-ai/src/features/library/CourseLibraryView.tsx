@@ -141,18 +141,17 @@ export function CourseLibraryView({
    * 卡片上显示的处理状态。列表里的 processed_status 是查询缓存：后端在流水线真正
    * 跑起来时才把它改成 processing，而列表要等语音识别完成才会刷新——这段时间里
    * 卡片一直显示「待处理」（重试失败的视频时则一直显示「处理失败」）。
-   * 刚排进队列、或已有任务在跑的，按「处理中」显示。
+   * 所以有任务在跑的按「处理中」显示；排进队列的看当前阶段：失败了就是「处理失败」
+   * （失败的视频会留在队列里显示原因，缓存却还停在「待处理」），其余都算「处理中」。
+   * 已处理完的不改：之后续跑的 AI 步骤失败不代表视频处理失败。
    */
   function displayStatus(video: Video): Video["processed_status"] {
     const status = video.processed_status;
-    if (status === "pending" && queuedVideoIds.has(video.id)) return "processing";
-    if (
-      (status === "pending" || status === "failed") &&
-      Object.values(jobsByVideo[video.id] ?? {}).some((job) => job.status === "running")
-    ) {
-      return "processing";
-    }
-    return status;
+    if (status === "done") return status;
+    const active = activeJobFor(video.id);
+    if (active?.status === "running") return "processing";
+    if (!queuedVideoIds.has(video.id)) return status;
+    return active?.status === "failed" ? "failed" : "processing";
   }
   const {
     data: videos = [],

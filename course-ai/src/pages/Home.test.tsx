@@ -801,6 +801,42 @@ describe("Home", () => {
     );
   });
 
+  it("shows a queued video as failed once a stage fails, even before the list refreshes", async () => {
+    await renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /视频操作/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "开始处理" }));
+    await waitFor(() => expect(mockIpc.pipeline.process).toHaveBeenCalledWith(video.id));
+    await waitFor(() =>
+      expect(screen.getByTestId("video-status-badge")).toHaveTextContent("处理中"),
+    );
+
+    // 列表缓存仍是 pending；失败的视频留在队列里显示原因，卡片不能还说「处理中」。
+    act(() => {
+      useJobs.getState().setOne({
+        video_id: video.id,
+        job_id: "audio-job",
+        stage: "audio",
+        status: "failed",
+        progress: 0,
+        message: "Unsupported ASR audio export format: m4a",
+      });
+      useJobs.getState().setOne({
+        video_id: video.id,
+        job_id: "asr-job",
+        stage: "asr",
+        status: "pending",
+        progress: 0,
+        message: null,
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("video-status-badge")).toHaveTextContent("处理失败"),
+    );
+  });
+
   it("keeps queued videos visible and openable after switching courses", async () => {
     await renderHome();
 
