@@ -306,8 +306,8 @@
 .ca-player-controls[data-controls-layout="compact"] {
   width: 100%;
   min-width: 0;
-  padding-right: max(8px, env(safe-area-inset-right, 0px));
-  padding-left: max(8px, env(safe-area-inset-left, 0px));
+  padding-right: max(8px, var(--safe-right));
+  padding-left: max(8px, var(--safe-left));
 }
 
 .ca-player-controls[data-controls-layout="compact"] .ca-player-controls-desktop {

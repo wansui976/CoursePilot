@@ -11,7 +11,12 @@ fn main() {
             .plugin(
                 "mobile-files",
                 tauri_build::InlinedPlugin::new()
-                    .commands(&["persist_picked_file", "pick_and_persist_file", "share_file"])
+                    .commands(&[
+                        "persist_picked_file",
+                        "pick_and_persist_file",
+                        "share_file",
+                        "system_bar_insets",
+                    ])
                     .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
             )
             .plugin(

@@ -13,7 +13,7 @@
   align-items: stretch;
   background: var(--bg-panel);
   border-top: 1px solid var(--line);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: var(--safe-bottom);
 }
 
 .ca-bottom-tab-btn {
@@ -61,7 +61,7 @@
 
 /* 有底部 Tab 时,窄屏「非工作台」主区底部留出 Tab 高度(含安全区) */
 .ca-app[data-shell="stacked"][data-view="library"] .ca-main {
-  padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(56px + var(--safe-bottom));
 }
 
 /* 整屏课程列表(CourseSidebar variant="screen") */

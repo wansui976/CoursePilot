@@ -85,7 +85,7 @@
 .ca-back-fab {
   position: absolute;
   z-index: 5;
-  left: max(16px, env(safe-area-inset-left, 0px));
+  left: max(16px, var(--safe-left));
   top: 12px;
   display: grid;
   place-items: center;
@@ -119,9 +119,9 @@
 
 .ca-player-controls-shell {
   padding-top: 4px;
-  padding-right: max(12px, env(safe-area-inset-right, 0px));
-  padding-bottom: max(4px, env(safe-area-inset-bottom, 0px));
-  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: max(12px, var(--safe-right));
+  padding-bottom: max(4px, var(--safe-bottom));
+  padding-left: max(12px, var(--safe-left));
 }
 
 /* 宽容器使用完整控制行；窄播放器把次级动作收进固定菜单，避免分栏时被视频舞台裁掉。 */
@@ -144,8 +144,8 @@
 .ca-player-mobile-menu {
   position: fixed;
   z-index: 70;
-  right: max(8px, env(safe-area-inset-right, 0px));
-  bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  right: max(8px, var(--safe-right));
+  bottom: max(8px, var(--safe-bottom));
   width: min(280px, calc(100vw - 16px));
   max-height: min(70dvh, 480px);
   overflow-y: auto;
@@ -160,9 +160,9 @@
 /* 常驻进度条（桌面）：贴在视频底边，安全区内缩；悬停时由 ProgressBar 自己加粗。 */
 .ca-progress-shell {
   padding-top: 2px;
-  padding-right: max(12px, env(safe-area-inset-right, 0px));
-  padding-bottom: max(2px, env(safe-area-inset-bottom, 0px));
-  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: max(12px, var(--safe-right));
+  padding-bottom: max(2px, var(--safe-bottom));
+  padding-left: max(12px, var(--safe-left));
 }
 
 .ca-resizer {

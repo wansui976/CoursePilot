@@ -1,5 +1,15 @@
 /* 应用外壳：外壳网格、rail、主区列、课程侧栏与图标按钮。 */
 
+/* 安全区。iOS 由 env() 给准；Android WebView 的 env() 只报挖孔、不报状态栏和导航栏，
+   系统栏占掉的边距由原生桥写进 --native-inset-*（见 lib/nativeInsets.ts）。
+   用到安全区的地方一律走这四个变量，不要直接写 env(safe-area-inset-*)。 */
+:root {
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--native-inset-top, 0px));
+  --safe-right: max(env(safe-area-inset-right, 0px), var(--native-inset-right, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--native-inset-bottom, 0px));
+  --safe-left: max(env(safe-area-inset-left, 0px), var(--native-inset-left, 0px));
+}
+
 /* Shell 由实际导航结构决定，不能只看宽度 bucket：12.9" iPad
    竖屏虽是 wide，React 仍会隐藏侧栏并使用底部导航。 */
 .ca-app[data-shell="stacked"] {
@@ -7,7 +17,7 @@
 }
 
 .ca-app[data-shell="stacked"] .ca-main {
-  padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
+  padding-top: calc(var(--safe-top) + 8px);
 }
 
 /* rail 常驻占首列 56px；宽栏展开=256px、折叠=0（两列定长可平滑插值）。 */

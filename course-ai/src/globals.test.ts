@@ -140,6 +140,29 @@ describe("动效的实现约束", () => {
   });
 });
 
+describe("安全区", () => {
+  it("四个方向都取 env() 和 Android 原生系统栏边距的较大值", () => {
+    for (const side of ["top", "right", "bottom", "left"]) {
+      expect(css).toMatch(
+        new RegExp(
+          `--safe-${side}:\\s*max\\(env\\(safe-area-inset-${side}, 0px\\), var\\(--native-inset-${side}, 0px\\)\\)`,
+        ),
+      );
+    }
+  });
+
+  it("其余地方不直接用 env(safe-area-inset-*)，否则 Android 上拿不到系统栏的边距", () => {
+    const direct = css
+      .split("\n")
+      .filter(
+        (line) =>
+          /env\(safe-area-inset-(top|right|bottom|left)/.test(line) &&
+          !/--safe-(top|right|bottom|left):/.test(line),
+      );
+    expect(direct).toEqual([]);
+  });
+});
+
 describe("窄屏 shell 的响应式约束", () => {
   it("wide 触控平板竖屏仍使用单列、底栏预留和稳定的叠放工作台", () => {
     const shell =
@@ -154,8 +177,8 @@ describe("窄屏 shell 的响应式约束", () => {
       css.match(/^\.ca-wb\[data-layout="stacked"\]\s*\{[\s\S]*?\n\}/m)?.[0] ?? "";
 
     expect(shell).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\)/);
-    expect(main).toMatch(/safe-area-inset-top/);
-    expect(bottomInset).toMatch(/56px\s*\+\s*env\(safe-area-inset-bottom/);
+    expect(main).toMatch(/var\(--safe-top\)/);
+    expect(bottomInset).toMatch(/56px\s*\+\s*var\(--safe-bottom\)/);
     expect(stackedWorkbench).toMatch(/display:\s*flex/);
     expect(stackedWorkbench).toMatch(/flex-direction:\s*column/);
     expect(css).toMatch(

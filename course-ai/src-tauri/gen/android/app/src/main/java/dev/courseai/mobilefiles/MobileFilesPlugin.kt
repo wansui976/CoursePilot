@@ -20,6 +20,8 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -250,6 +252,24 @@ class MobileFilesPlugin(private val activity: Activity) : Plugin(activity) {
       }
     } catch (error: Exception) {
       invoke.reject(error.message ?: "Failed to export luma frames", error)
+    }
+  }
+
+  // 状态栏、导航栏和挖孔占掉的边距（CSS 像素）。targetSdk 35 起强制全面屏，页面会画到
+  // 系统栏下面，而 WebView 的 env(safe-area-inset-*) 只报挖孔、不报系统栏——底部导航
+  // 被手势条压住，没有挖孔的机器上页头还会钻进状态栏。前端拿这组值补上。
+  @Command
+  fun systemBarInsets(invoke: Invoke) {
+    activity.runOnUiThread {
+      val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)
+        ?.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+      val density = activity.resources.displayMetrics.density
+      val result = JSObject()
+      result.put("top", (insets?.top ?: 0) / density.toDouble())
+      result.put("right", (insets?.right ?: 0) / density.toDouble())
+      result.put("bottom", (insets?.bottom ?: 0) / density.toDouble())
+      result.put("left", (insets?.left ?: 0) / density.toDouble())
+      invoke.resolve(result)
     }
   }
 

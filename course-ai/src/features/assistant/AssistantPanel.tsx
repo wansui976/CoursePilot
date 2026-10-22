@@ -1378,18 +1378,18 @@ export function AssistantPanel({
   // 助手入口必须停在这条轨道上方，不能与生成/导出按钮争抢同一组像素。
   const launcherInWorkbench = mobile && !bottomNavigationVisible;
   const launcherBottom = bottomNavigationVisible
-    ? "calc(56px + env(safe-area-inset-bottom, 0px) + 24px)"
+    ? "calc(56px + var(--safe-bottom) + 24px)"
     : launcherInWorkbench
-      ? "calc(env(safe-area-inset-bottom, 0px) + 88px)"
-      : "calc(env(safe-area-inset-bottom, 0px) + 24px)";
+      ? "calc(var(--safe-bottom) + 88px)"
+      : "calc(var(--safe-bottom) + 24px)";
   // 桌面端只有浮动一种形态：覆盖在内容上、可拖动，不挤占播放器与学习面板的空间。
   const panelShown = open;
   const shell = mobile
     ? "fixed inset-x-0 z-[47] h-[70dvh] max-h-[calc(100dvh-56px)] rounded-t-2xl border-t"
     : "fixed z-40 h-[min(720px,calc(100dvh-2rem))] max-w-[calc(100vw-2rem)] rounded-2xl border";
   const panelBottom = bottomNavigationVisible
-    ? "calc(56px + env(safe-area-inset-bottom, 0px))"
-    : "env(safe-area-inset-bottom, 0px)";
+    ? "calc(56px + var(--safe-bottom))"
+    : "var(--safe-bottom)";
 
   return (
     <>
