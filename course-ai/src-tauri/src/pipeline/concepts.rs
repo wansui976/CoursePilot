@@ -252,6 +252,7 @@ struct TranscriptSegment {
 #[derive(Debug, Clone)]
 struct VideoContext {
     title: String,
+    order_index: i64,
     segments: Vec<TranscriptSegment>,
 }
 
@@ -295,11 +296,12 @@ async fn load_course_context(db: &Db, course_id: &str) -> AppResult<HashMap<Stri
 
     let mut context: HashMap<String, VideoContext> = videos
         .into_iter()
-        .map(|(id, title, _order_index)| {
+        .map(|(id, title, order_index)| {
             (
                 id,
                 VideoContext {
                     title,
+                    order_index,
                     segments: Vec::new(),
                 },
             )
@@ -342,12 +344,23 @@ fn materialize_candidate_concepts(
     let mut concepts = Vec::new();
 
     for concept in merged {
-        let occurrences: Vec<(String, i64)> = concept
+        // 整理成与入库后读回来（`list_course_concepts`）一样的形状：按讲课顺序排、去掉
+        // 重复出现。总结快照的指纹是按这份候选算的，而界面判断「内容是否已变化」用的是
+        // 库里读回来的那份——两边顺序或条数不一样，刚分析完的总结就会被误报为过时。
+        let mut occurrences: Vec<(String, i64)> = concept
             .occurrences
             .iter()
             .filter(|(video_id, _)| context.contains_key(video_id))
             .cloned()
             .collect();
+        occurrences.sort_by(|(a_video, a_start), (b_video, b_start)| {
+            context[a_video]
+                .order_index
+                .cmp(&context[b_video].order_index)
+                .then(a_start.cmp(b_start))
+                .then(a_video.cmp(b_video))
+        });
+        occurrences.dedup();
         let resolved: Vec<ConceptOccurrence> = occurrences
             .iter()
             .filter_map(|(video_id, start_ms)| enrich_occurrence(video_id, *start_ms, context))
@@ -368,8 +381,20 @@ fn materialize_candidate_concepts(
             occurrences: resolved,
         });
     }
+    sort_by_frequency(&mut concepts);
 
     (persisted, concepts)
+}
+
+/// 概念列表的规范顺序：出现次数降序、名字升序。它参与 knowledge_catalog 的指纹，
+/// 候选集与库里读回来的列表必须用同一个排序。
+fn sort_by_frequency(concepts: &mut [CourseConcept]) {
+    concepts.sort_by(|a, b| {
+        b.occurrences
+            .len()
+            .cmp(&a.occurrences.len())
+            .then(a.name.cmp(&b.name))
+    });
 }
 
 async fn candidate_concepts_from_merged(
@@ -492,7 +517,7 @@ async fn list_course_concepts_ranked(
          JOIN concept_occurrences o ON o.concept_id = c.id
          JOIN videos v ON v.id = o.video_id AND v.deleted_at IS NULL
          WHERE c.course_id = ?
-         ORDER BY v.order_index, o.start_ms",
+         ORDER BY v.order_index, o.start_ms, v.id",
     )
     .bind(course_id)
     .fetch_all(&db.pool)
@@ -518,12 +543,7 @@ async fn list_course_concepts_ranked(
             out[i].occurrences.push(occurrence);
         }
     }
-    out.sort_by(|a, b| {
-        b.occurrences
-            .len()
-            .cmp(&a.occurrences.len())
-            .then(a.name.cmp(&b.name))
-    });
+    sort_by_frequency(&mut out);
     Ok((out, teaching_order))
 }
 
@@ -2206,6 +2226,7 @@ mod tests {
             "v1".to_string(),
             VideoContext {
                 title: "第一讲".into(),
+                order_index: 0,
                 segments: vec![
                     TranscriptSegment {
                         start_ms: 0,
@@ -2607,6 +2628,44 @@ mod tests {
         let list = list_course_concepts(&db, &course.id).await.unwrap();
         let second = list.iter().find(|c| c.name == "乙概念").unwrap();
         assert_eq!(second.explanation.as_deref(), Some("乙概念的旧解释。"));
+    }
+
+    #[tokio::test]
+    async fn freshly_analyzed_summary_is_not_reported_as_stale() {
+        // 分析时总结快照的指纹按内存里的候选知识点算，界面判断是否过时用的是入库后
+        // 读回来的列表。两边顺序不同（归并顺序 vs 出现次数排序、讲课顺序）或有重复出现时，
+        // 刚分析完就会提示「课程内容已有变化」。
+        let db = fresh_db().await;
+        let course = create_course(&db, "c".into(), "/tmp/c".into())
+            .await
+            .unwrap();
+        let first = seed_video(&db, &course.id, "第一讲", 0).await;
+        let second = seed_video(&db, &course.id, "第二讲", 1).await;
+        seed_transcript(&db, &first, 0, 2_000, "第一讲字幕。").await;
+        seed_transcript(&db, &first, 2_000, 4_000, "第一讲后半。").await;
+        seed_transcript(&db, &second, 0, 2_000, "第二讲字幕。").await;
+        let merged = vec![
+            MergedConcept {
+                name: "甲概念".into(),
+                occurrences: vec![(second.clone(), 0), (first.clone(), 0), (first.clone(), 0)],
+            },
+            MergedConcept {
+                name: "乙概念".into(),
+                occurrences: vec![(second.clone(), 0), (first.clone(), 2_000), (first.clone(), 0)],
+            },
+        ];
+
+        let context = load_course_context(&db, &course.id).await.unwrap();
+        let (persisted, candidates) = materialize_candidate_concepts(&merged, &context);
+        replace_course_concepts(&db, &course.id, &persisted)
+            .await
+            .unwrap();
+        let stored = list_course_concepts(&db, &course.id).await.unwrap();
+
+        assert_eq!(
+            knowledge_catalog(&candidates).unwrap().fingerprint,
+            knowledge_catalog(&stored).unwrap().fingerprint
+        );
     }
 
     #[tokio::test]
