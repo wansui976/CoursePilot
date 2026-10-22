@@ -132,9 +132,28 @@ export function CourseLibraryView({
   const queryClient = useQueryClient();
   const selectedCourseId = courseId;
   const setVideoQuery = onVideoQueryChange;
-  const { startProcessing, activeJobFor, pipelineProgressFor } = queue;
+  const { startProcessing, activeJobFor, pipelineProgressFor, queuedVideos } = queue;
   const { recorrect, recorrectTarget, recorrectError, requestRecorrection } = recorrection;
   const jobsByVideo = useJobs((s) => s.byVideo);
+  const queuedVideoIds = new Set(queuedVideos.map((video) => video.id));
+
+  /**
+   * 卡片上显示的处理状态。列表里的 processed_status 是查询缓存：后端在流水线真正
+   * 跑起来时才把它改成 processing，而列表要等语音识别完成才会刷新——这段时间里
+   * 卡片一直显示「待处理」（重试失败的视频时则一直显示「处理失败」）。
+   * 刚排进队列、或已有任务在跑的，按「处理中」显示。
+   */
+  function displayStatus(video: Video): Video["processed_status"] {
+    const status = video.processed_status;
+    if (status === "pending" && queuedVideoIds.has(video.id)) return "processing";
+    if (
+      (status === "pending" || status === "failed") &&
+      Object.values(jobsByVideo[video.id] ?? {}).some((job) => job.status === "running")
+    ) {
+      return "processing";
+    }
+    return status;
+  }
   const {
     data: videos = [],
     isPending: videosPending,
@@ -452,7 +471,7 @@ export function CourseLibraryView({
   }
 
   function statusBadge(video: Video) {
-    const status = video.processed_status;
+    const status = displayStatus(video);
     return (
       <Badge
         data-testid="video-status-badge"
@@ -493,7 +512,7 @@ export function CourseLibraryView({
               </span>
             </span>
             {/* 「已处理」是常态，不再每张卡都挂徽标；只有待处理/处理中/失败才提示。 */}
-            {video.processed_status !== "done" && <span className="st">{statusBadge(video)}</span>}
+            {displayStatus(video) !== "done" && <span className="st">{statusBadge(video)}</span>}
             {/* 时长未知就不显示角标：假的「00:00」会让人以为视频是空的。 */}
             {durationMs != null && (
               <span className="dur">{formatMs(durationMs)}</span>
@@ -538,7 +557,7 @@ export function CourseLibraryView({
     const jobs = jobsByVideo[video.id] ?? {};
     const hasJobs = Object.keys(jobs).length > 0;
     // 处理中：jobs 数据到了才接管 meta 行；没到退回静态「处理中」徽标，不显示空进度条。
-    if (video.processed_status === "processing" && hasJobs) {
+    if (displayStatus(video) === "processing" && hasJobs) {
       const stage = activeJobFor(video.id);
       return (
         <span className="ca-card-meta">
@@ -553,7 +572,7 @@ export function CourseLibraryView({
         </span>
       );
     }
-    if (video.processed_status === "failed") {
+    if (displayStatus(video) === "failed") {
       return (
         <span className="ca-card-meta">
           <span className="ca-meta-text err truncate">{t("home.processingFailedMeta")}</span>
@@ -646,7 +665,7 @@ export function CourseLibraryView({
   ) {
     const jobs = jobsByVideo[video.id] ?? {};
     const hasJobs = Object.keys(jobs).length > 0;
-    if (video.processed_status === "processing" && hasJobs) {
+    if (displayStatus(video) === "processing" && hasJobs) {
       return (
         <span className="c-progress processing">
           <Loader2 className="h-3 w-3 flex-none animate-spin" aria-hidden="true" />
@@ -655,7 +674,7 @@ export function CourseLibraryView({
         </span>
       );
     }
-    if (video.processed_status === "failed") {
+    if (displayStatus(video) === "failed") {
       return <span className="c-progress err">{t("home.processingFailedMeta")}</span>;
     }
     if (progress.ratio >= WATCHED_RATIO) {

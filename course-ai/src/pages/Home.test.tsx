@@ -786,6 +786,21 @@ describe("Home", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows a just-started video as processing before the video list refreshes", async () => {
+    await renderHome();
+
+    fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+    expect(await screen.findByTestId("video-status-badge")).toHaveTextContent("待处理");
+    fireEvent.click(await screen.findByRole("button", { name: /视频操作/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "开始处理" }));
+    await waitFor(() => expect(mockIpc.pipeline.process).toHaveBeenCalledWith(video.id));
+
+    // 列表缓存里仍是 pending（后端稍后才改状态），卡片不该继续显示「待处理」。
+    await waitFor(() =>
+      expect(screen.getByTestId("video-status-badge")).toHaveTextContent("处理中"),
+    );
+  });
+
   it("keeps queued videos visible and openable after switching courses", async () => {
     await renderHome();
 
