@@ -55,6 +55,13 @@ final class MobileFilesPlugin: Plugin {
   private var pendingPickerDelegate: DocumentPickerDelegate?
   fileprivate var pendingPickerHandled = false
 
+  /// 让页面真正铺满整屏。滚动视图默认的 .automatic 会把刘海和底部横条算成内边距，
+  /// 页面可用高度少了这两块，而 CSS（viewport-fit=cover）又按 env(safe-area-inset-*)
+  /// 再留一遍——底部导航下面平白空出一截，内容也被提前截断。
+  override public func load(webview: WKWebView) {
+    webview.scrollView.contentInsetAdjustmentBehavior = .never
+  }
+
   @objc public func persistPickedFile(_ invoke: Invoke) throws {
     let args = try invoke.parseArgs(PersistPickedFileArgs.self)
     workQueue.async {

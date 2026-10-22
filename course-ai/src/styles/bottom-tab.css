@@ -72,7 +72,9 @@
   display: flex;
   flex-direction: column;
   background: var(--bg-sidebar);
-  padding: calc(16px + env(safe-area-inset-top, 0px)) 16px 16px;
+  /* 顶部安全区已由外壳的 .ca-main 留出（只有窄屏 stacked 外壳会出这一屏），这里再加
+     就是双份，课程库标题被推下去一大截。 */
+  padding: 16px;
 }
 
 /* 整屏课程列表做成 iOS 内嵌分组列表：内容限宽居中（平板上不再一行横跨整屏），
