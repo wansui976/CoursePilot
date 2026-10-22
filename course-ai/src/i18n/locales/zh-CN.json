@@ -654,6 +654,7 @@
     "shared": "已分享 · {{path}}",
     "exported": "已导出 · {{path}}",
     "exportAndShare": "导出并分享",
+    "revealInFolder": "在文件夹中显示",
     "exportButton": "导出",
     "sharing": "分享中…",
     "exporting": "导出中…",

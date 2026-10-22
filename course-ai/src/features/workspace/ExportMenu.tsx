@@ -13,6 +13,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Button } from "@/ui/button";
 import { humanizeError } from "@/lib/errors";
 import { isMobile, shareFile } from "@/lib/mobileFiles";
@@ -61,7 +62,9 @@ export function ExportMenu({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
+  // path：桌面端导出成功后的文件位置。导出落在课程目录下的隐藏目录里，
+  // 只报文件名用户找不到它，所以给一个「在文件夹中显示」。
+  const [msg, setMsg] = useState<{ text: string; error?: boolean; path?: string } | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -112,17 +115,21 @@ export function ExportMenu({
     if (restoreFocus) restoreTriggerFocus();
   }
 
-  function showMessage(next: { text: string; error?: boolean }) {
+  function showMessage(next: { text: string; error?: boolean; path?: string }) {
     setMsg(next);
     if (messageTimerRef.current !== null) {
       window.clearTimeout(messageTimerRef.current);
       messageTimerRef.current = null;
     }
     if (!next.error) {
-      messageTimerRef.current = window.setTimeout(() => {
-        setMsg(null);
-        messageTimerRef.current = null;
-      }, 4000);
+      // 带「在文件夹中显示」时多留一会儿，来得及点。
+      messageTimerRef.current = window.setTimeout(
+        () => {
+          setMsg(null);
+          messageTimerRef.current = null;
+        },
+        next.path ? 10000 : 4000,
+      );
     }
   }
 
@@ -147,7 +154,7 @@ export function ExportMenu({
     setBusy(true);
     try {
       const path = await item.run();
-      showMessage({ text: t("export.exported", { path: shorten(path) }) });
+      showMessage({ text: t("export.exported", { path: shorten(path) }), path });
     } catch (error) {
       showMessage({ text: humanizeError(error), error: true });
     } finally {
@@ -294,9 +301,26 @@ export function ExportMenu({
               </button>
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1">
-              <Check className="h-3 w-3 flex-none" />
-              {msg.text}
+            <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="inline-flex items-center gap-1">
+                <Check className="h-3 w-3 flex-none" />
+                {msg.text}
+              </span>
+              {msg.path && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const path = msg.path;
+                    if (!path) return;
+                    revealItemInDir(path).catch((error) =>
+                      showMessage({ text: humanizeError(error), error: true }),
+                    );
+                  }}
+                  className="rounded px-1 text-[var(--accent-text)] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+                >
+                  {t("export.revealInFolder")}
+                </button>
+              )}
             </span>
           )}
         </div>

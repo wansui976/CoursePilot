@@ -654,6 +654,7 @@
     "shared": "Shared · {{path}}",
     "exported": "Exported · {{path}}",
     "exportAndShare": "Export & Share",
+    "revealInFolder": "Show in folder",
     "exportButton": "Export",
     "sharing": "Sharing…",
     "exporting": "Exporting…",
