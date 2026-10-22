@@ -13,8 +13,6 @@ use crate::sidecar::{resolve, FFMPEG};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-use tokio::process::Command;
 
 /// 扫描 MP4 顶层 box，判断 `moov` 是否排在 `mdat` 之前（即已 faststart）。
 /// 解析不了（非 MP4 / 截断）时返回 true，按「无需处理」对待。
@@ -95,7 +93,7 @@ pub async fn ensure_playable(original: &Path, data_dir: &Path) -> AppResult<Path
     let ffmpeg = resolve(&FFMPEG, None)?;
     let tmp = data_dir.join("playable.partial.mp4");
     let _ = std::fs::remove_file(&tmp);
-    let status = Command::new(&ffmpeg)
+    let status = crate::sidecar::command(&ffmpeg)
         .args(["-y", "-i"])
         .arg(original)
         .args(["-c", "copy", "-movflags", "+faststart"])

@@ -187,7 +187,7 @@ pub async fn detect_silences(
     use crate::sidecar::{resolve, FFMPEG};
     let ffmpeg = resolve(&FFMPEG, None)?;
     let args = build_silencedetect_args(&input.to_string_lossy(), noise_db, min_silence_ms);
-    let output = tokio::process::Command::new(&ffmpeg)
+    let output = crate::sidecar::command(&ffmpeg)
         .args(&args)
         .kill_on_drop(true)
         .output()

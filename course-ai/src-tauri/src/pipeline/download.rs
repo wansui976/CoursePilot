@@ -8,7 +8,6 @@ use crate::sidecar::{resolve, FFMPEG, YTDLP};
 use reqwest::Url;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use tokio::process::Command;
 
 const BILIBILI_REFERER: &str = "https://www.bilibili.com/";
 const BROWSER_USER_AGENT: &str =
@@ -141,7 +140,7 @@ pub async fn download(
         max_height,
         sub_lang,
     );
-    let output = Command::new(&ytdlp)
+    let output = crate::sidecar::command(&ytdlp)
         .args(ffmpeg_location_args())
         .args(&args)
         .output()
@@ -433,7 +432,7 @@ pub fn parse_playlist_json(json: &str) -> AppResult<PlaylistInfo> {
 /// 代价是较大合集枚举更慢。
 pub async fn probe_playlist(url: &str, cookies: Option<&str>) -> AppResult<PlaylistInfo> {
     let ytdlp = resolve(&YTDLP, None)?;
-    let mut cmd = Command::new(&ytdlp);
+    let mut cmd = crate::sidecar::command(&ytdlp);
     cmd.args(["-J", "--skip-download", "--no-warnings"]);
     if is_bilibili_url(url) {
         cmd.args([
@@ -477,7 +476,7 @@ pub fn pick_default_track(tracks: &[SubtitleTrack]) -> Option<&SubtitleTrack> {
 /// 用 yt-dlp 探测视频元信息（字幕轨 + 清晰度）。
 pub async fn probe(url: &str, cookies: Option<&str>) -> AppResult<ProbeResult> {
     let ytdlp = resolve(&YTDLP, None)?;
-    let mut cmd = Command::new(&ytdlp);
+    let mut cmd = crate::sidecar::command(&ytdlp);
     // 关键：B站 extractor 只在请求写字幕时才去拉字幕列表；不带这些 flag 时
     // subtitles/automatic_captions 会是空的（这正是「有字幕却检测不到」的根因）。
     // -J 隐含 --simulate，不会真的把字幕写到磁盘。

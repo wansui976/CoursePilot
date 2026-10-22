@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
-use tokio::process::Command;
 use tokio::sync::Semaphore;
 
 /// 并发探测上限。探测要 ffmpeg 解码正片几十秒画面，是实打实的磁盘和 CPU 开销；
@@ -69,7 +68,7 @@ async fn run_cropdetect(
         return None;
     }
     let ffmpeg = resolve(&FFMPEG, None).ok()?;
-    let child = Command::new(&ffmpeg)
+    let child = crate::sidecar::command(&ffmpeg)
         .kill_on_drop(true)
         // cropdetect 在窗口内累积包围盒；null 输出不落地、不编码。
         .args([

@@ -36,7 +36,7 @@ pub async fn has_video_stream(path: &Path) -> bool {
         return true;
     };
     // 只给输入不给输出，ffmpeg 打完流信息就以非零码退出，stderr 里正是要的内容。
-    let Ok(output) = tokio::process::Command::new(&ffmpeg)
+    let Ok(output) = crate::sidecar::command(&ffmpeg)
         .args(["-hide_banner", "-i"])
         .arg(path)
         .stdout(std::process::Stdio::null())

@@ -6,8 +6,6 @@ use crate::sidecar::TESSERACT;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::sidecar::{resolve, FFMPEG};
 use std::path::{Path, PathBuf};
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-use tokio::process::Command;
 
 /// 像素矩形；w 或 h 为 0 表示整帧。
 #[derive(Debug, Clone, Copy)]
@@ -66,7 +64,7 @@ pub async fn grab_frame(
     let out = out_dir.join(format!("ocr_{at_ms}.png"));
     let seconds = at_ms as f64 / 1000.0;
     let ffmpeg = resolve(&FFMPEG, None)?;
-    let mut cmd = Command::new(&ffmpeg);
+    let mut cmd = crate::sidecar::command(&ffmpeg);
     cmd.args(["-y", "-ss", &format!("{seconds}"), "-i"])
         .arg(video)
         .args(["-frames:v", "1"]);
@@ -91,8 +89,12 @@ pub async fn grab_frame(
 pub async fn run_ocr_on_image(image: &Path, langs: &str) -> AppResult<String> {
     let tesseract = resolve(&TESSERACT, None)?;
     let args = build_tesseract_args(&image.to_string_lossy(), langs);
-    let output = Command::new(&tesseract)
-        .args(&args)
+    let mut cmd = crate::sidecar::command(&tesseract);
+    cmd.args(&args);
+    if let Some(tessdata) = crate::sidecar::bundled_tessdata_dir(&tesseract) {
+        cmd.env("TESSDATA_PREFIX", tessdata);
+    }
+    let output = cmd
         .output()
         .await
         .map_err(|e| AppError::Pipeline(format!("tesseract spawn: {e}")))?;

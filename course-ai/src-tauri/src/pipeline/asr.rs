@@ -4,7 +4,6 @@ use crate::sidecar::{resolve, WHISPER};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use tokio::process::Command;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WhisperJson {
@@ -241,7 +240,7 @@ pub async fn run_whisper(
     let json_path = whisper_json_path(audio);
     let _ = std::fs::remove_file(&json_path);
     let bin = resolve(&WHISPER, None)?;
-    let mut command = Command::new(&bin);
+    let mut command = crate::sidecar::command(&bin);
     command
         .kill_on_drop(true)
         .args(["-m"])

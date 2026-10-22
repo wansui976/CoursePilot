@@ -16,7 +16,6 @@ use futures_util::stream::StreamExt;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tokio::process::Command;
 use uuid::Uuid;
 
 const SUBMIT_URL: &str = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit";
@@ -446,7 +445,7 @@ async fn split_audio_to_mp3(
 ) -> AppResult<Vec<PathBuf>> {
     let ffmpeg = resolve(&FFMPEG, None)?;
     let pattern = out_dir.join("chunk_%04d.mp3");
-    let status = Command::new(&ffmpeg)
+    let status = crate::sidecar::command(&ffmpeg)
         .kill_on_drop(true)
         .args(["-y", "-i"])
         .arg(wav)

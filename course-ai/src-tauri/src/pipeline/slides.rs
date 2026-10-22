@@ -8,8 +8,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tokio::io::AsyncReadExt;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-use tokio::process::Command;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SlideFrame {
@@ -217,7 +215,7 @@ async fn sample_luma_frames(
     on_progress: &mut (dyn FnMut(ExtractProgress) + Send),
 ) -> AppResult<Vec<Vec<u8>>> {
     let ffmpeg = resolve(&FFMPEG, None)?;
-    let mut command = Command::new(&ffmpeg);
+    let mut command = crate::sidecar::command(&ffmpeg);
     command.args(["-hide_banner", "-nostdin"]);
     if hwaccel {
         command.args(["-hwaccel", "auto"]);
@@ -482,7 +480,7 @@ async fn capture_jpeg_at(
 ) -> AppResult<()> {
     let seconds = at_ms as f64 / 1000.0;
     let ffmpeg = resolve(&FFMPEG, None)?;
-    let mut command = Command::new(&ffmpeg);
+    let mut command = crate::sidecar::command(&ffmpeg);
     command
         .args([
             "-hide_banner",

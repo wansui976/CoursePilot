@@ -7,7 +7,7 @@
       "binaries/tesseract"
     ],
     "resources": {
-      "binaries/*.dll": "binaries/",
+      "binaries/*.dll": "",
       "binaries/tessdata/*": "binaries/tessdata/"
     }
   }

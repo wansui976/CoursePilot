@@ -2,8 +2,6 @@ use crate::error::{AppError, AppResult};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::sidecar::{resolve, FFMPEG};
 use std::path::{Path, PathBuf};
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-use tokio::process::Command;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedAudio {
@@ -232,7 +230,7 @@ async fn cloud_audio_from_video(
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 async fn probe_audio_stream(video: &Path) -> AppResult<bool> {
     let ffmpeg = resolve(&FFMPEG, None)?;
-    let output = Command::new(&ffmpeg)
+    let output = crate::sidecar::command(&ffmpeg)
         .kill_on_drop(true)
         .args(["-hide_banner", "-nostdin", "-i"])
         .arg(video)
@@ -262,7 +260,7 @@ pub async fn extract_audio(video: &Path, out_dir: &Path) -> AppResult<PathBuf> {
     std::fs::create_dir_all(out_dir)?;
     let out = out_dir.join("audio.wav");
     let ffmpeg = resolve(&FFMPEG, None)?;
-    let output = Command::new(&ffmpeg)
+    let output = crate::sidecar::command(&ffmpeg)
         .kill_on_drop(true)
         .args(["-y", "-i"])
         .arg(video)
@@ -288,7 +286,7 @@ pub async fn extract_audio(video: &Path, out_dir: &Path) -> AppResult<PathBuf> {
 pub async fn wav_to_mp3(wav: &Path) -> AppResult<PathBuf> {
     let out = wav.with_file_name("audio.mp3");
     let ffmpeg = resolve(&FFMPEG, None)?;
-    let output = Command::new(&ffmpeg)
+    let output = crate::sidecar::command(&ffmpeg)
         .kill_on_drop(true)
         .args(["-y", "-i"])
         .arg(wav)

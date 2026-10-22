@@ -1,6 +1,7 @@
 use crate::error::{AppError, AppResult};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 
 pub struct BinarySpec {
     pub name: &'static str,
@@ -47,6 +48,28 @@ pub fn resolve(spec: &BinarySpec, sidecar_dir: Option<&PathBuf>) -> AppResult<Pa
         "binary '{}' not found in sidecar dir or $PATH (tried: {:?})",
         spec.name, spec.candidates_on_path
     )))
+}
+
+/// 创建调用外部程序的命令。Windows 上加 CREATE_NO_WINDOW：GUI 应用启动控制台程序时
+/// 默认会给每个子进程弹一个控制台窗口（课件 OCR 时每页一个），还会抢焦点。
+pub fn command(program: impl AsRef<OsStr>) -> tokio::process::Command {
+    #[allow(unused_mut)]
+    let mut command = tokio::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
+/// 随安装包附带的 Tesseract 字库目录。Windows 包里的 tesseract.exe 是交叉编译的，
+/// 编译期写死的字库路径（/home/debian/...）在用户机器上不存在，必须显式告诉它。
+pub fn bundled_tessdata_dir(tesseract: &Path) -> Option<PathBuf> {
+    let dir = tesseract.parent()?;
+    [dir.join("binaries").join("tessdata"), dir.join("tessdata")]
+        .into_iter()
+        .find(|path| path.is_dir())
 }
 
 fn find_in_dir(spec: &BinarySpec, dir: &std::path::Path) -> Option<PathBuf> {
@@ -104,15 +127,24 @@ fn target_triple() -> Option<&'static str> {
 mod tests {
     use super::*;
     use std::fs::{self, File};
-    use std::os::unix::fs::PermissionsExt;
     use tempfile::tempdir;
+
+    fn make_executable(path: &Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        #[cfg(not(unix))]
+        let _ = path;
+    }
 
     #[test]
     fn prefers_sidecar_dir_over_path() {
         let dir = tempdir().unwrap();
         let fake = dir.path().join("ffmpeg");
         File::create(&fake).unwrap();
-        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        make_executable(&fake);
 
         let resolved = resolve(&FFMPEG, Some(&dir.path().to_path_buf())).unwrap();
         assert_eq!(resolved, fake);
@@ -125,12 +157,13 @@ mod tests {
             .path()
             .join(format!("ffmpeg-{}", target_triple().unwrap()));
         File::create(&fake).unwrap();
-        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        make_executable(&fake);
 
         let resolved = resolve(&FFMPEG, Some(&dir.path().to_path_buf())).unwrap();
         assert_eq!(resolved, fake);
     }
 
+    #[cfg(unix)]
     #[test]
     fn falls_back_to_path_when_sidecar_missing() {
         let spec = BinarySpec {
@@ -148,6 +181,31 @@ mod tests {
             candidates_on_path: &["definitely-does-not-exist-xyz"],
         };
         assert!(resolve(&spec, None).is_err());
+    }
+
+    #[test]
+    fn finds_bundled_tessdata_next_to_binary() {
+        let dir = tempdir().unwrap();
+        let bin = dir.path().join("tesseract.exe");
+        File::create(&bin).unwrap();
+        assert_eq!(bundled_tessdata_dir(&bin), None);
+        let tessdata = dir.path().join("binaries").join("tessdata");
+        fs::create_dir_all(&tessdata).unwrap();
+        assert_eq!(bundled_tessdata_dir(&bin), Some(tessdata));
+    }
+
+    #[test]
+    fn windows_bundle_puts_dlls_next_to_sidecars() {
+        // whisper-cli.exe / tesseract.exe 装在安装目录根部；Windows 只在 exe 所在目录
+        // 和系统目录里找依赖 DLL，DLL 放进 binaries\ 子目录会让它们一启动就崩溃。
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let tauri_config =
+            fs::read_to_string(manifest_dir.join("tauri.windows.conf.json")).unwrap();
+        let config: serde_json::Value = serde_json::from_str(&tauri_config).unwrap();
+        assert_eq!(
+            config.pointer("/bundle/resources/binaries~1*.dll"),
+            Some(&serde_json::Value::String(String::new()))
+        );
     }
 
     #[test]
