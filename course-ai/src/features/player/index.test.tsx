@@ -7,6 +7,7 @@ import { ipc } from "@/lib/ipc";
 import { usePlayer } from "@/stores/player";
 
 const setFullscreen = vi.hoisted(() => vi.fn());
+const platform = vi.hoisted(() => ({ android: false }));
 
 vi.mock("@/lib/ipc", () => ({
   ipc: {
@@ -32,7 +33,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 vi.mock("@/lib/platform", () => ({
   isIOS: () => true,
   isMobile: () => true,
-  isAndroid: () => false,
+  isAndroid: () => platform.android,
   isTablet: () => false,
   isDesktop: () => false,
 }));
@@ -57,6 +58,7 @@ function renderPlayer(
 }
 
 beforeEach(async () => {
+  platform.android = false;
   await i18n.changeLanguage("zh-CN");
   localStorage.removeItem("course-ai-playback-rate");
 });
@@ -75,6 +77,31 @@ describe("VideoPlayer iOS gestures", () => {
     expect(video.parentElement).toHaveClass("relative", "overflow-hidden");
     expect(video.parentElement).not.toHaveClass("absolute");
     expect(video.parentElement).not.toHaveClass("rounded-xl");
+  });
+
+  it("gives the video a transparent poster on Android only", () => {
+    // Android WebView 会给没设 poster 的视频画一张灰底大播放图标，盖住画面。
+    platform.android = true;
+    const { unmount } = renderPlayer(false);
+    expect(screen.getByLabelText("课程视频播放器").getAttribute("poster")).toMatch(
+      /^data:image\/gif;base64,/,
+    );
+    unmount();
+
+    platform.android = false;
+    renderPlayer(false);
+    expect(screen.getByLabelText("课程视频播放器")).not.toHaveAttribute("poster");
+  });
+
+  it("moves the playback clock to the seek target as soon as a seek starts", () => {
+    // 没缓冲到的位置要先拉数据，跳转完成可能要一两秒；这期间时间不能还停在旧位置。
+    renderPlayer(false);
+    const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
+    Object.defineProperty(video, "currentTime", { configurable: true, get: () => 15 });
+
+    fireEvent.seeking(video);
+
+    expect(usePlayer.getState().currentMs).toBe(15_000);
   });
 
   it("keeps hidden desktop controls out of tab order and reveals them from the stage", () => {

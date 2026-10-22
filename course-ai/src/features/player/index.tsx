@@ -11,9 +11,10 @@ import { useSmartRate } from "@/lib/useSmartRate";
 import { ipc } from "@/lib/ipc";
 import { useVideoCrop } from "./useVideoCrop";
 import { posKey, durKey, syncPlaybackProgress } from "@/lib/playback";
-import { isIOS } from "@/lib/platform";
+import { isAndroid, isIOS } from "@/lib/platform";
 import { findActiveSegmentIndex } from "@/lib/transcript";
 import type { DanmakuEntry, TranscriptSegment } from "@/lib/types";
+import { useVideoCoverUrl } from "@/lib/useVideoCoverUrl";
 import { useWatchLogger } from "@/lib/useWatchLogger";
 import { usePlayer } from "@/stores/player";
 import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
@@ -22,6 +23,14 @@ import { Controls } from "./Controls";
 import { DanmakuOverlay } from "./DanmakuOverlay";
 import { useCaptionPrefs } from "@/stores/captionPrefs";
 import { ProgressBar } from "./ProgressBar";
+
+/**
+ * Android WebView 给没设 poster、还没播过的 <video> 画一张自带的灰底大播放图标，
+ * 盖住整个画面。那边改用视频封面当 poster；封面还没取到时先用透明图，只露出舞台底色。
+ * 一旦开始播放或跳到上次的进度，真实画面照常出现。
+ */
+const TRANSPARENT_POSTER =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
 // 距片尾 15s 内不再续播（视为看完），从头开始。
 const RESUME_TAIL_GUARD = 15;
@@ -168,6 +177,8 @@ export function VideoPlayer({
   const tapRef = useRef<{ t: number; timer?: number }>({ t: 0 });
   const gestureRef = useRef<GestureState | null>(null);
   const setCurrentMs = usePlayer((s) => s.setCurrentMs);
+  const android = isAndroid();
+  const coverUrl = useVideoCoverUrl(videoId, android);
   const setDurationMs = usePlayer((s) => s.setDurationMs);
   const seekRequest = usePlayer((s) => s.seekRequest);
   // 不在这里订阅 currentMs（否则播放时整个播放器每秒重渲染 4 次）。
@@ -783,6 +794,7 @@ export function VideoPlayer({
             aria-label={t("videoPlayer.player")}
             data-theme-heavy=""
             src={src}
+            poster={android ? (coverUrl ?? TRANSPARENT_POSTER) : undefined}
             playsInline
             disablePictureInPicture
             className={`h-full w-full object-contain ${
@@ -798,6 +810,10 @@ export function VideoPlayer({
               // A no-op filter still creates extra compositing work for video frames.
               filter: brightness < 1 ? `brightness(${brightness})` : undefined,
             }}
+            // 一开始跳转就把时间改成目标位置，不等跳转完成：没缓冲到的位置要先拉一段数据，
+            // Android 上常要一两秒，这期间进度条会弹回原处、时间还是旧的，此时点「标记起点」
+            // 记下的也是旧时间。所有跳转（拖进度条、快进快退、点章节 / 文稿）都经过这里。
+            onSeeking={(event) => setCurrentMs(Math.floor(event.currentTarget.currentTime * 1000))}
             onTimeUpdate={(event) => {
               // 跳停顿：落在无声区间里就直接跃过去，跳完这一轮不再按旧位置记进度。
               if (silenceSkip.handleTimeUpdate(event.currentTarget)) return;
