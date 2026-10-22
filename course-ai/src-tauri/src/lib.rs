@@ -138,6 +138,17 @@ pub fn run() {
                         }
                     }
                 }
+                // iOS 每次更新 / 重装应用，沙盒路径里的 UUID 都会变，库里存的绝对路径要跟着改。
+                #[cfg(target_os = "ios")]
+                if let Some(current_root) =
+                    data_dir.to_str().and_then(crate::storage::ios_container_root)
+                {
+                    match crate::storage::rebase_ios_container_paths(&db, current_root).await {
+                        Ok(0) => {}
+                        Ok(changed) => tracing::info!(changed, "已把旧沙盒路径改到当前沙盒"),
+                        Err(error) => tracing::warn!("rebase iOS container paths failed: {error}"),
+                    }
+                }
                 if let Err(error) = crate::sync::identity::ensure_sync_identity(&db).await {
                     tracing::warn!("initialize sync identity failed: {error}");
                 }
