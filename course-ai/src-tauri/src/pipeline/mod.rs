@@ -407,16 +407,27 @@ async fn run_all(
                 .fetch_optional(&db.pool)
                 .await?,
             );
-            emit_running_progress(
-                &app,
-                &db,
-                &video_id,
-                &asr_job.id,
-                0.18,
-                &format!("Whisper 识别中（{lang}）"),
-            )
-            .await?;
-            asr::run_whisper(&audio_path, &model_path, Some(&lang)).await
+            let message = format!("Whisper 识别中（{lang}）");
+            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.18, &message).await?;
+            // whisper-cli 边转边报，铺进 0.18–0.88：长课本地转写要好几分钟，
+            // 此前从开始到转完一直停在 18%。
+            let sink = {
+                let app = app.clone();
+                let video_id = video_id.clone();
+                let job_id = asr_job.id.clone();
+                move |at: f64, _: &str| {
+                    emit_stage(
+                        &app,
+                        &video_id,
+                        &job_id,
+                        "asr",
+                        "running",
+                        0.18 + 0.70 * at,
+                        Some(&message),
+                    );
+                }
+            };
+            asr::run_whisper(&audio_path, &model_path, Some(&lang), Some(&sink)).await
         }
         AsrBackend::Volcengine => {
             let app_id = sqlx::query_scalar::<_, String>(
@@ -1942,7 +1953,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let whisper = asr::run_whisper(&audio_path, &model, Some("en"))
+        let whisper = asr::run_whisper(&audio_path, &model, Some("en"), None)
             .await
             .unwrap();
         let inserted = asr::store_transcripts(&db, &video.id, &whisper)

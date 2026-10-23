@@ -1,9 +1,12 @@
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::pipeline::ai::{report, Progress};
 use crate::sidecar::{resolve, WHISPER};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::{ExitStatus, Stdio};
+use tokio::io::AsyncBufReadExt;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WhisperJson {
@@ -235,17 +238,14 @@ pub async fn run_whisper(
     audio: &Path,
     model: &Path,
     language: Option<&str>,
+    progress: Progress<'_>,
 ) -> AppResult<WhisperJson> {
     validate_whisper_model(model)?;
     let json_path = whisper_json_path(audio);
     let _ = std::fs::remove_file(&json_path);
     let bin = resolve(&WHISPER, None)?;
     let mut command = crate::sidecar::command(&bin);
-    command
-        .kill_on_drop(true)
-        .args(["-m"])
-        .arg(model)
-        .args(["-f"]);
+    command.args(["-m"]).arg(model).args(["-f"]);
     // Windows 上 whisper-cli 按系统代码页（ANSI）接收命令行参数：课程目录里有代码页
     // 表示不了的字符（英文版系统上的中文目录、GBK 以外的字符）时，它就找不到音频。
     // 在音频所在目录里运行、只传文件名（audio.wav），音频和旁边输出的 .json 都不再
@@ -266,18 +266,53 @@ pub async fn run_whisper(
     if let Some(lang) = language {
         command.args(["-l", lang]);
     }
-    let output = command
-        .output()
-        .await
-        .map_err(|error| AppError::Pipeline(format!("whisper spawn: {error}")))?;
-    if !output.status.success() {
+    let (status, stderr) = run_reporting_progress(command, progress).await?;
+    if !status.success() {
         return Err(AppError::Pipeline(format!(
-            "whisper failed: {}\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
+            "whisper failed: {status}\n{stderr}"
         )));
     }
     parse_whisper_json(&std::fs::read_to_string(&json_path)?)
+}
+
+/// 跑 whisper-cli，边跑边把 `-pp` 打在 stderr 里的进度行报上去。
+///
+/// 原先用 `.output()` 等进程结束才一次性读输出，`-pp` 的进度一行都没用上：本地转写从
+/// 开始到结束一直停在同一个进度上，长课要转好几分钟，看着像卡死。返回退出状态和 stderr
+/// 里除进度行以外的内容（失败时拼进报错）。stdout 是逐句打印的文稿，结果走 `-oj` 写的
+/// JSON，这里直接丢掉——接了管道却不读的话，长课的输出会把管道塞满、把进程卡住。
+async fn run_reporting_progress(
+    mut command: tokio::process::Command,
+    progress: Progress<'_>,
+) -> AppResult<(ExitStatus, String)> {
+    command
+        .kill_on_drop(true)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|error| AppError::Pipeline(format!("whisper spawn: {error}")))?;
+    let mut stderr = tokio::io::BufReader::new(child.stderr.take().expect("stderr is piped"));
+    let mut log = String::new();
+    let mut line = Vec::new();
+    // 按字节读行：Windows 上报错里的路径按系统代码页编码，不一定是合法 UTF-8。
+    while stderr.read_until(b'\n', &mut line).await? > 0 {
+        let text = String::from_utf8_lossy(&line);
+        match whisper_progress(&text) {
+            Some(at) => report(progress, at, "Whisper 识别中"),
+            None => log.push_str(&text),
+        }
+        line.clear();
+    }
+    Ok((child.wait().await?, log))
+}
+
+/// `-pp` 的进度行（`whisper_print_progress_callback: progress =  45%`）→ 0..=1。
+fn whisper_progress(line: &str) -> Option<f64> {
+    let (_, rest) = line.split_once("progress =")?;
+    let percent: u32 = rest.trim().strip_suffix('%')?.trim().parse().ok()?;
+    Some(f64::from(percent.min(100)) / 100.0)
 }
 
 pub async fn store_transcripts(db: &Db, video_id: &str, json: &WhisperJson) -> AppResult<usize> {
@@ -331,7 +366,9 @@ mod tests {
         std::fs::write(&model, b"<!DOCTYPE HTML><html>403 Forbidden</html>").unwrap();
         let audio = dir.path().join("audio.wav");
 
-        let err = run_whisper(&audio, &model, Some("zh")).await.unwrap_err();
+        let err = run_whisper(&audio, &model, Some("zh"), None)
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("invalid whisper model"));
     }
 
@@ -556,8 +593,85 @@ mod tests {
         let local_audio = dir.path().join("jfk.wav");
         std::fs::copy(audio, &local_audio).unwrap();
 
-        let json = run_whisper(&local_audio, model, Some("en")).await.unwrap();
+        let json = run_whisper(&local_audio, model, Some("en"), None)
+            .await
+            .unwrap();
         assert!(json.transcription.len() <= 32);
         assert!(local_audio.with_file_name("jfk.wav.json").is_file());
+    }
+
+    #[test]
+    fn reads_whisper_print_progress_lines() {
+        assert_eq!(
+            whisper_progress("whisper_print_progress_callback: progress =  45%\n"),
+            Some(0.45)
+        );
+        assert_eq!(
+            whisper_progress("whisper_print_progress_callback: progress =   5%\r\n"),
+            Some(0.05)
+        );
+        assert_eq!(
+            whisper_progress("whisper_print_progress_callback: progress = 100%"),
+            Some(1.0)
+        );
+        assert_eq!(
+            whisper_progress("whisper_model_load: n_vocab       = 51865"),
+            None
+        );
+        assert_eq!(
+            whisper_progress("main: processing 'audio.wav' (412000 samples, 25.8 sec)"),
+            None
+        );
+    }
+
+    /// 进度要在 whisper-cli 还在跑的时候就报上来：脚本报完第一个进度后一直等，直到回调
+    /// 收到进度（建出标记文件）才往下走。原先 `.output()` 等进程结束才读输出，会一直等下去。
+    /// 中间往 stdout 打二十多万字节：stdout 接了管道却不读的话，进程会被塞住。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reports_progress_while_whisper_is_still_running() {
+        let dir = tempdir().unwrap();
+        let marker = dir.path().join("reported");
+        let seen = std::sync::Mutex::new(Vec::new());
+        let sink = |at: f64, _: &str| {
+            seen.lock().unwrap().push(at);
+            std::fs::write(&marker, b"").unwrap();
+        };
+        let script = format!(
+            "echo 'whisper_model_load: loading model' >&2
+             i=0; while [ $i -lt 5000 ]; do echo \"[00:00:00.000 --> 00:00:01.000]  第 $i 句\"; i=$((i+1)); done
+             echo 'whisper_print_progress_callback: progress =   5%' >&2
+             while [ ! -f '{}' ]; do sleep 0.05; done
+             echo 'whisper_print_progress_callback: progress =  50%' >&2
+             echo 'main: done' >&2",
+            marker.display()
+        );
+        let mut command = tokio::process::Command::new("sh");
+        command.args(["-c", &script]);
+        let (status, stderr) = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            run_reporting_progress(command, Some(&sink)),
+        )
+        .await
+        .expect("进度没有在进程运行期间报上来")
+        .unwrap();
+
+        assert!(status.success());
+        assert_eq!(*seen.lock().unwrap(), [0.05, 0.5]);
+        assert!(
+            stderr.contains("loading model") && stderr.contains("main: done"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("progress ="), "{stderr}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn keeps_stderr_of_a_failed_run_for_the_error_message() {
+        let mut command = tokio::process::Command::new("sh");
+        command.args(["-c", "echo 'error: failed to read audio file' >&2; exit 3"]);
+        let (status, stderr) = run_reporting_progress(command, None).await.unwrap();
+        assert!(!status.success());
+        assert!(stderr.contains("failed to read audio file"), "{stderr}");
     }
 }
