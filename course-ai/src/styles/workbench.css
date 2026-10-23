@@ -641,3 +641,18 @@ li[data-active] > .ca-chapter .ca-chapter-dot {
 .ca-workbench-panel-actions:has([role="menu"]) {
   z-index: 45;
 }
+
+/* 叠放外壳（手机、iPad 竖屏）里学习面板一直铺到屏幕底边：角落的操作按钮让开底部指示条 /
+   手势条，贴着面板底边的列表（摘要、章节）滚到底时最后一项也要露出来。左右分栏的外壳
+   自己已经让过了，不能再加。 */
+.ca-app[data-shell="stacked"] .ca-workbench-panel-actions {
+  bottom: calc(0.75rem + var(--safe-bottom));
+}
+
+.ca-panel-scroll-end {
+  padding-bottom: 1rem;
+}
+
+.ca-app[data-shell="stacked"] .ca-panel-scroll-end {
+  padding-bottom: calc(1rem + var(--safe-bottom));
+}

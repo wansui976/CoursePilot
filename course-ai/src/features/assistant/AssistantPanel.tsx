@@ -1412,7 +1412,8 @@ export function AssistantPanel({
         onPointerDown={mobile ? undefined : beginDockDrag}
         style={
           mobile
-            ? { bottom: launcherBottom }
+            ? // 横屏时右侧可能是刘海 / 灵动岛 / 挖孔，入口得留在安全区里。
+              { bottom: launcherBottom, right: "calc(1rem + var(--safe-right))" }
             : launcherPosition
               ? { left: launcherPosition.x, top: launcherPosition.y }
               : { top: dockTop }
@@ -1423,7 +1424,7 @@ export function AssistantPanel({
         // hover 同理不能换成 card-hover（7% 的白），一悬停球就没了。
         className={
           mobile
-            ? `ca-touch-44 fixed right-4 z-40 grid h-12 w-12 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] transition-colors hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none ${launcherInWorkbench ? "ca-workbench-assistant-launcher" : ""}`
+            ? `ca-touch-44 fixed z-40 grid h-12 w-12 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] transition-colors hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none ${launcherInWorkbench ? "ca-workbench-assistant-launcher" : ""}`
             : `ca-touch-44 fixed z-40 grid h-14 w-14 touch-none select-none cursor-grab active:cursor-grabbing place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] transition hover:scale-105 hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none motion-reduce:hover:scale-100 ${
                 launcherPosition ? "" : side === "left" ? "left-3" : "right-3"
               }`
@@ -1499,7 +1500,13 @@ export function AssistantPanel({
       data-snap-side={mobile ? undefined : snapSide ?? undefined}
       style={
         mobile
-          ? { bottom: panelBottom, transform: sheetDragY != null ? `translateY(${sheetDragY}px)` : undefined }
+          ? {
+              bottom: panelBottom,
+              // 底部抽屉铺满整宽：横屏时内容让开左右两侧的刘海 / 挖孔。
+              paddingLeft: "var(--safe-left)",
+              paddingRight: "var(--safe-right)",
+              transform: sheetDragY != null ? `translateY(${sheetDragY}px)` : undefined,
+            }
           : { left: position.x, top: position.y, width: panelWidth }
       }
       className={`${panelShown ? "flex" : "hidden"} ${shell} flex-col border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] ${

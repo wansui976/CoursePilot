@@ -13,7 +13,10 @@
   align-items: stretch;
   background: var(--bg-panel);
   border-top: 1px solid var(--line);
+  /* 横屏时刘海、灵动岛和挖孔在左右两侧：底栏铺满整宽，首尾两个 Tab 不能伸到它们底下。 */
+  padding-right: var(--safe-right);
   padding-bottom: var(--safe-bottom);
+  padding-left: var(--safe-left);
 }
 
 .ca-bottom-tab-btn {

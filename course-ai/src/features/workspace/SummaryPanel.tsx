@@ -91,7 +91,7 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
       )}
       {!collapsed && (
         <>
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-1">
+          <div className="ca-panel-scroll-end min-h-0 flex-1 overflow-y-auto px-3 pt-1">
             {!isError && generate.isError && (
               <ErrorNote
                 className="mb-2"

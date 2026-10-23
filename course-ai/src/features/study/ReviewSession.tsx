@@ -217,6 +217,8 @@ export function ReviewSession({
             if (review.isPending) event.preventDefault();
           }}
           aria-busy={review.isPending}
+          // 整屏覆盖：退出按钮和翻卡按钮都得让开状态栏、刘海和底部指示条。
+          style={{ padding: "var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left)" }}
           className="fixed inset-0 z-50 flex flex-col bg-[var(--surface-app)]"
         >
       {/* 会话完成度：渐变进度承载「复习到哪了」，与全应用的进度语义一致。 */}

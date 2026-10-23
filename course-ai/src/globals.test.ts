@@ -210,6 +210,19 @@ describe("窄屏 shell 的响应式约束", () => {
     expect(sidebarShell).toMatch(/padding-bottom:\s*var\(--safe-bottom\);/);
     expect(css).not.toMatch(/#root:has/);
   });
+
+  it("铺满整宽、贴底的移动端元素自己让开安全区（外壳的内边距管不到 fixed / absolute）", () => {
+    const bottomTab = css.match(/^\.ca-bottom-tab\s*\{[\s\S]*?\n\}/m)?.[0] ?? "";
+    const panelActions =
+      css.match(/^\.ca-app\[data-shell="stacked"\] \.ca-workbench-panel-actions\s*\{[\s\S]*?\n\}/m)?.[0] ?? "";
+    const scrollEnd =
+      css.match(/^\.ca-app\[data-shell="stacked"\] \.ca-panel-scroll-end\s*\{[\s\S]*?\n\}/m)?.[0] ?? "";
+
+    expect(bottomTab).toMatch(/padding-right:\s*var\(--safe-right\);/);
+    expect(bottomTab).toMatch(/padding-left:\s*var\(--safe-left\);/);
+    expect(panelActions).toMatch(/var\(--safe-bottom\)/);
+    expect(scrollEnd).toMatch(/var\(--safe-bottom\)/);
+  });
 });
 
 describe("阴影与过渡的写法约束", () => {
