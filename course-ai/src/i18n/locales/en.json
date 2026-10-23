@@ -59,6 +59,7 @@
       "splittingAudio": "Splitting and preparing audio for upload",
       "volcengineAsr": "Transcribing with Volcengine",
       "volcengineChunkedAsr": "Transcribing audio chunks with Volcengine",
+      "volcengineChunkedAsrProgress": "Transcribing audio chunks with Volcengine, {{done}} of {{total}} done",
       "preparingUpload": "Preparing audio upload",
       "parsingAsr": "Parsing transcription results",
       "savingTranscript": "Saving the original transcript",

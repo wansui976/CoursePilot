@@ -133,6 +133,17 @@ describe("处理队列的整体进度", () => {
         t,
       ),
     ).toBe("Correcting transcript with AI, segment 3 of 12");
+    expect(
+      stageMessage(
+        {
+          stage: "asr",
+          status: "running",
+          progress: 0.5,
+          message: "云端分段识别中（火山引擎），已完成 5/12 段",
+        },
+        t,
+      ),
+    ).toBe("Transcribing audio chunks with Volcengine, 5 of 12 done");
   });
 
   it("英文界面不会原样显示未知的中文运行细节，但失败仍保留诊断", () => {

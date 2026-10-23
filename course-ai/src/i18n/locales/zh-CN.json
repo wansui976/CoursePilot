@@ -59,6 +59,7 @@
       "splittingAudio": "正在切分并准备上传音频",
       "volcengineAsr": "正在通过火山引擎识别",
       "volcengineChunkedAsr": "正在通过火山引擎分段识别",
+      "volcengineChunkedAsrProgress": "正在通过火山引擎分段识别，已完成 {{done}}/{{total}} 段",
       "preparingUpload": "正在准备上传音频",
       "parsingAsr": "正在解析识别结果",
       "savingTranscript": "正在写入原始文稿",

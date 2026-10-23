@@ -92,6 +92,13 @@ function localizedDetail(detail: string, t: Translate): string | undefined {
       total: Number(match[2]),
     });
   }
+  match = detail.match(/^云端分段识别中（火山引擎），已完成 (\d+)\/(\d+) 段$/);
+  if (match) {
+    return t("pipelineProgress.details.volcengineChunkedAsrProgress", {
+      done: Number(match[1]),
+      total: Number(match[2]),
+    });
+  }
   match = detail.match(/^压缩长讲稿 (\d+)\/(\d+) 块$/);
   if (match) {
     return t("pipelineProgress.details.compressingTranscript", {
