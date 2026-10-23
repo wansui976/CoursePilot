@@ -86,6 +86,10 @@ export function humanizeError(error: unknown, language?: string): string {
   ) {
     return translated("downloadInterrupted", locale);
   }
+  // iOS 原生层打不开选中的视频（MKV、WebM 等）。原文是 AVFoundation 的 Cannot Open，看不懂。
+  if (s.includes("unsupported_media_format")) {
+    return translated("unsupportedMediaFormat", locale);
+  }
   if (s.includes("大模型请求超时")) {
     return translated("longTimeout", locale);
   }

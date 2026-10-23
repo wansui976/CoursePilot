@@ -23,6 +23,13 @@ describe("humanizeError", () => {
     expect(message).toContain("避免立即重复生成");
   });
 
+  it("explains videos the iOS native layer can't open instead of showing AVFoundation's error", () => {
+    // iOS 插件 reject 的原样格式：「<NSError domain> (<code>): <errorDescription>」。
+    const raw = "course_ai.MobileFilesError (6): unsupported_media_format: mkv";
+    expect(humanizeError(raw)).toContain("转成 MP4");
+    expect(humanizeError(raw, "en")).toContain("Convert it to MP4");
+  });
+
   it("maps API key / auth errors", () => {
     expect(humanizeError("HTTP 401 Unauthorized")).toContain("API Key");
     expect(humanizeError("未配置大模型")).toContain("API Key");

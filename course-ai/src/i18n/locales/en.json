@@ -1391,7 +1391,8 @@
     "permission": "File access is not permitted. Check the folder permissions and retry.",
     "ffmpeg": "ffmpeg is missing or audio processing failed.",
     "download": "Video download failed. Check the link or try again later.",
-    "downloadInterrupted": "The server cut off the video stream mid-download (already retried at lower quality). The link is fine; try again later or pick a lower quality."
+    "downloadInterrupted": "The server cut off the video stream mid-download (already retried at lower quality). The link is fine; try again later or pick a lower quality.",
+    "unsupportedMediaFormat": "This device can't open this video format (e.g. MKV, WebM), so it couldn't be played or processed. Convert it to MP4 and import again."
   },
   "common": {
     "cancel": "Cancel",

@@ -43,9 +43,15 @@ struct PickAndPersistFileArgs: Decodable {
   let prompt: String?
 }
 
-struct PickAndPersistFileResult: Encodable {
+struct PickAndPersistFileResult {
   let path: String
-  let durationMs: Int64
+  /// 只有视频导入才有时长；备份等其他文件为 nil。
+  let durationMs: Int64?
+
+  /// JsonObject 里的 nil 序列化不了，空时长要写成 NSNull。
+  var json: JsonObject {
+    ["path": path, "durationMs": durationMs.map { NSNumber(value: $0) as Any } ?? NSNull()]
+  }
 }
 
 final class MobileFilesPlugin: Plugin {
@@ -67,10 +73,7 @@ final class MobileFilesPlugin: Plugin {
     workQueue.async {
       do {
         let result = try self.persistPickedFile(args)
-        invoke.resolve([
-          "path": result.path,
-          "durationMs": result.durationMs,
-        ])
+        invoke.resolve(result.json)
       } catch {
         if let nsError = error as NSError? {
           invoke.reject("\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)")
@@ -240,8 +243,7 @@ final class MobileFilesPlugin: Plugin {
       }
     }
     try FileManager.default.copyItem(at: source, to: destination)
-    let durationMs = try loadedDurationMs(of: AVURLAsset(url: destination))
-    return PickAndPersistFileResult(path: destination.path, durationMs: durationMs)
+    return try finishPersisting(destination, category: args.category)
   }
 
   private func pickAndPersistFile(_ args: PickAndPersistFileArgs, invoke: Invoke) throws {
@@ -290,10 +292,7 @@ final class MobileFilesPlugin: Plugin {
         DispatchQueue.main.async {
           self.pendingPicker = nil
           self.pendingPickerDelegate = nil
-          invoke.resolve([
-            "path": result.path,
-            "durationMs": result.durationMs,
-          ])
+          invoke.resolve(result.json)
         }
       } catch {
         DispatchQueue.main.async {
@@ -319,6 +318,13 @@ final class MobileFilesPlugin: Plugin {
     let sourceName = sanitizedFileName(source.lastPathComponent, fallback: fallback)
     let destination = uniqueDestination(in: destinationDir, preferredName: sourceName)
 
+    // 选择器是 asCopy 打开的，系统已经把文件拷进了本应用的 tmp：直接挪过去，不再拷第二遍。
+    // 原先再拷一遍，两 G 的课导入时要占四 G、多花一倍时间，tmp 里那份还一直留着。
+    if isInsideTemporaryDirectory(source) {
+      try FileManager.default.moveItem(at: source, to: destination)
+      return try finishPersisting(destination, category: category)
+    }
+
     let coordinator = NSFileCoordinator()
     var coordinationError: NSError?
     var copyError: Error?
@@ -335,6 +341,7 @@ final class MobileFilesPlugin: Plugin {
         }
         try FileManager.default.copyItem(at: coordinatedURL, to: destination)
       } catch {
+        try? FileManager.default.removeItem(at: destination)
         copyError = error
       }
     }
@@ -344,8 +351,29 @@ final class MobileFilesPlugin: Plugin {
     if let copyError {
       throw copyError
     }
-    let durationMs = try loadedDurationMs(of: AVURLAsset(url: destination))
-    return PickAndPersistFileResult(path: destination.path, durationMs: durationMs)
+    return try finishPersisting(destination, category: category)
+  }
+
+  /// 只有导入视频才读时长：备份等其他文件 AVFoundation 打不开，原先一读就整个失败——
+  /// 「从文件恢复备份」在 iOS 上因此一直报 Cannot Open。视频打不开（MKV、WebM 等）时
+  /// 删掉拷进来的文件，报一个前端认得的错：这种格式在 iOS 上导进来也没法播放和处理。
+  private func finishPersisting(_ destination: URL, category: String) throws -> PickAndPersistFileResult {
+    guard category == "videos" else {
+      return PickAndPersistFileResult(path: destination.path, durationMs: nil)
+    }
+    do {
+      let durationMs = try loadedDurationMs(of: AVURLAsset(url: destination))
+      return PickAndPersistFileResult(path: destination.path, durationMs: durationMs)
+    } catch {
+      try? FileManager.default.removeItem(at: destination)
+      throw MobileFilesError.unsupportedMedia(destination.pathExtension.lowercased())
+    }
+  }
+
+  private func isInsideTemporaryDirectory(_ url: URL) -> Bool {
+    let tmp = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().path
+    let prefix = tmp.hasSuffix("/") ? tmp : tmp + "/"
+    return url.resolvingSymlinksInPath().path.hasPrefix(prefix)
   }
 
   private func shareFile(_ args: ShareFileArgs) throws {
@@ -713,6 +741,7 @@ enum MobileFilesError: LocalizedError {
   case cannotWriteAudio
   case cannotWriteImage
   case cannotReadVideo
+  case unsupportedMedia(String)
 
   var errorDescription: String? {
     switch self {
@@ -728,6 +757,9 @@ enum MobileFilesError: LocalizedError {
       return "Failed to encode cover image"
     case .cannotReadVideo:
       return "Failed to read video for slide extraction"
+    case .unsupportedMedia(let ext):
+      // 前端按 unsupported_media_format 认出来，换成「请先转成 MP4」的提示。
+      return "unsupported_media_format: \(ext)"
     }
   }
 }
