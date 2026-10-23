@@ -87,31 +87,36 @@ class MobileFilesPlugin(private val activity: Activity) : Plugin(activity) {
   fun persistPickedFile(invoke: Invoke) {
     try {
       val args = invoke.parseArgs(PersistPickedFileArgs::class.java)
-      val source = args.sourceUri
-      val uri = Uri.parse(source)
-      val folderName = sanitizeName(args.category, "picked")
-      val displayName = sanitizeName(displayName(uri) ?: uri.lastPathSegment ?: args.fallbackName, args.fallbackName)
-      val fileName = "${java.lang.Long.toString(System.currentTimeMillis(), 36)}-$displayName"
-      val dir = File(File(activity.dataDir, "picked"), folderName)
-      if (!dir.exists() && !dir.mkdirs()) {
-        throw IllegalStateException("Failed to create picked file directory")
-      }
+      // 插件命令跑在 UI 线程上，拷一节上 G 的课会卡死界面、弹「应用无响应」，拷贝放到 IO 线程。
+      runOnIoThread(invoke, "Failed to persist picked file") {
+        val source = args.sourceUri
+        val uri = Uri.parse(source)
+        val folderName = sanitizeName(args.category, "picked")
+        val displayName = sanitizeName(displayName(uri) ?: uri.lastPathSegment ?: args.fallbackName, args.fallbackName)
+        val dir = File(File(activity.dataDir, "picked"), folderName)
+        if (!dir.exists() && !dir.mkdirs()) {
+          throw IllegalStateException("Failed to create picked file directory")
+        }
 
-      val outFile = File(dir, fileName)
-      val input = when (uri.scheme) {
-        "content", "file" -> activity.contentResolver.openInputStream(uri)
-        else -> File(source).inputStream()
-      } ?: throw IllegalArgumentException("Cannot open picked file")
+        val input = when (uri.scheme) {
+          "content", "file" -> activity.contentResolver.openInputStream(uri)
+          else -> File(source).inputStream()
+        } ?: throw IllegalArgumentException("Cannot open picked file")
 
-      input.use { inputStream ->
-        outFile.outputStream().use { outputStream ->
-          inputStream.copyTo(outputStream, 1024 * 1024)
+        input.use { inputStream ->
+          // 视频标题取自文件名，保留原名（以前加的时间戳前缀会原样出现在标题里）。
+          val outFile = createUniqueFile(dir, displayName)
+          try {
+            outFile.outputStream().use { outputStream ->
+              inputStream.copyTo(outputStream, 1024 * 1024)
+            }
+          } catch (error: Exception) {
+            outFile.delete()
+            throw error
+          }
+          JSObject().apply { put("path", outFile.absolutePath) }
         }
       }
-
-      val result = JSObject()
-      result.put("path", outFile.absolutePath)
-      invoke.resolve(result)
     } catch (error: Exception) {
       invoke.reject(error.message ?: "Failed to persist picked file", error)
     }
@@ -335,6 +340,21 @@ class MobileFilesPlugin(private val activity: Activity) : Plugin(activity) {
       cursor?.close()
     }
     return null
+  }
+
+  // 与 iOS 一致：重名时依次试「名字-1」「名字-2」……createNewFile 占位，两次导入同名文件也不会撞上。
+  private fun createUniqueFile(dir: File, preferredName: String): File {
+    val dot = preferredName.lastIndexOf('.')
+    val stem = if (dot > 0) preferredName.substring(0, dot) else preferredName
+    val extension = if (dot > 0) preferredName.substring(dot) else ""
+    var index = 0
+    while (true) {
+      val candidate = File(dir, if (index == 0) preferredName else "$stem-$index$extension")
+      if (candidate.createNewFile()) {
+        return candidate
+      }
+      index += 1
+    }
   }
 
   private fun sanitizeName(name: String, fallback: String): String {
