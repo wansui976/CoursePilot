@@ -4,6 +4,9 @@
 //! Linux Secret Service，经 `keyring` crate），service 名为应用 identifier。
 //! `keyring` 是阻塞调用，统一经 `spawn_blocking` 包装。
 //!
+//! Android 不用钥匙串：`keyring` 在那里没有后端，会悄悄退回进程内的 mock 存储，
+//! 写入「成功」、下次读就没了。那边密钥直接存 settings 表（库在应用私有目录里）。
+//!
 //! 回退策略：钥匙串写不进（无桌面环境、Keychain 拒绝访问等）时退回
 //! `settings` 表（键前缀 `llm_key_` / `secret_`），保证应用在极端环境下仍可用。
 //! 读取时表里的非空值优先：只有钥匙串写不进才会落表（升级前的存量也在表里），
@@ -20,9 +23,16 @@ use crate::error::AppResult;
 
 const KEYRING_SERVICE: &str = "dev.courseai.app";
 
-/// 单元测试中关闭系统钥匙串，全部走 settings 回退。
+/// `keyring` 有真正存储后端的系统。别的系统（Android）它会悄悄退回进程内的 mock 存储：
+/// 写入「成功」，下一次 `Entry::new` 就读不到——Android 上存的每一把密钥都随手丢了，
+/// 设置页刚填完的 Key、ASR 凭证全部读不到，云端功能一律报「未配置」。
+fn keyring_backed(os: &str) -> bool {
+    matches!(os, "macos" | "ios" | "windows" | "linux" | "freebsd" | "openbsd")
+}
+
+/// 单元测试中关闭系统钥匙串，全部走 settings 回退；没有真正钥匙串的系统同样只用 settings 表。
 fn keyring_enabled() -> bool {
-    !cfg!(test)
+    !cfg!(test) && keyring_backed(std::env::consts::OS)
 }
 
 trait Keyring {
@@ -201,6 +211,15 @@ pub async fn get_secret_or_legacy(db: &Db, name: &str) -> AppResult<Option<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn android_does_not_use_the_mock_keyring() {
+        // Android 上 keyring 只有不持久的 mock，用它等于把密钥丢掉。
+        assert!(!keyring_backed("android"));
+        for os in ["macos", "ios", "windows", "linux"] {
+            assert!(keyring_backed(os), "{os} 有真正的钥匙串");
+        }
+    }
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
