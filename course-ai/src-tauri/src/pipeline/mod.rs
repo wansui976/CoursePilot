@@ -56,6 +56,10 @@ enum VolcengineUploadMode {
     Chunked,
 }
 
+/// 云端整段识别交上去就只能干等，这段进度按耗时往前爬（见 [`ai::creep_while`]）。
+/// 每分钟一成，从 28% 起六分钟爬到 88%：和原先前端估算的快慢一样。
+const CLOUD_ASR_CREEP: std::time::Duration = std::time::Duration::from_secs(6 * 60);
+
 fn asr_done_message(count: usize, outcome: TranscriptCorrectionOutcome) -> String {
     match outcome {
         TranscriptCorrectionOutcome::Applied => format!("{count} segments"),
@@ -276,8 +280,11 @@ async fn run_all(
             emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.6, "正在 AI 纠正字幕")
                 .await?;
         }
+        // 纠错逐批报进度，铺进 0.60–0.99：长字幕要纠好几分钟，不能一直停在 60%。
+        let sink = asr_progress_sink(&app, &video_id, &asr_job.id, 0.60, 0.99);
 
-        let count = subtitle::ingest_subtitle(&db, &video_id, &srt_text, correct).await?;
+        let count =
+            subtitle::ingest_subtitle(&db, &video_id, &srt_text, correct, Some(&sink)).await?;
 
         // 消化完成：清空 path（保留 lang 作来源展示），标记完成。
         sqlx::query("UPDATE videos SET subtitle_path=NULL, processed_status='done' WHERE id=?")
@@ -506,21 +513,21 @@ async fn run_all(
             match volcengine_upload_mode_for_os(std::env::consts::OS) {
                 VolcengineUploadMode::WholeFile => {
                     let _ = (chunk_secs, concurrency);
-                    emit_running_progress(
-                        &app,
-                        &db,
-                        &video_id,
-                        &asr_job.id,
-                        0.28,
-                        "云端识别中（火山引擎）",
-                    )
-                    .await?;
-                    volcengine_auc::run_volcengine_file(
-                        &audio_path,
-                        &app_id,
-                        &access_token,
-                        context.as_deref(),
-                        &prepared_audio.format,
+                    let message = "云端识别中（火山引擎）";
+                    emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.28, message).await?;
+                    // 整段交上去就只能干等结果，这段按耗时往 0.88 爬。
+                    let sink = asr_progress_sink(&app, &video_id, &asr_job.id, 0.28, 0.88);
+                    ai::creep_while(
+                        volcengine_auc::run_volcengine_file(
+                            &audio_path,
+                            &app_id,
+                            &access_token,
+                            context.as_deref(),
+                            &prepared_audio.format,
+                        ),
+                        Some(&sink),
+                        CLOUD_ASR_CREEP,
+                        message,
                     )
                     .await
                 }
@@ -547,22 +554,7 @@ async fn run_all(
                     };
                     // 分段陆续认完，把进度铺进 0.28–0.88：两小时的课切出二十多段，
                     // 此前从开始识别到全部认完一直停在 28%。
-                    let sink = {
-                        let app = app.clone();
-                        let video_id = video_id.clone();
-                        let job_id = asr_job.id.clone();
-                        move |at: f64, message: &str| {
-                            emit_stage(
-                                &app,
-                                &video_id,
-                                &job_id,
-                                "asr",
-                                "running",
-                                0.28 + 0.60 * at,
-                                Some(message),
-                            );
-                        }
-                    };
+                    let sink = asr_progress_sink(&app, &video_id, &asr_job.id, 0.28, 0.88);
                     volcengine_auc::run_volcengine_file_chunked(
                         &audio_path,
                         &app_id,
@@ -598,21 +590,21 @@ async fn run_all(
                 .map(str::trim)
                 .filter(|l| !l.is_empty() && *l != "auto");
             emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.16, "准备上传音频").await?;
-            emit_running_progress(
-                &app,
-                &db,
-                &video_id,
-                &asr_job.id,
-                0.28,
-                &format!("云端识别中（阿里云 {model}）"),
-            )
-            .await?;
-            aliyun_asr::run_aliyun(
-                &audio_path,
-                &prepared_audio.mime,
-                &api_key,
-                &model,
-                language,
+            let message = format!("云端识别中（阿里云 {model}）");
+            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.28, &message).await?;
+            // 交上去就只能干等结果，这段按耗时往 0.88 爬。
+            let sink = asr_progress_sink(&app, &video_id, &asr_job.id, 0.28, 0.88);
+            ai::creep_while(
+                aliyun_asr::run_aliyun(
+                    &audio_path,
+                    &prepared_audio.mime,
+                    &api_key,
+                    &model,
+                    language,
+                ),
+                Some(&sink),
+                CLOUD_ASR_CREEP,
+                &message,
             )
             .await
         }
@@ -620,8 +612,10 @@ async fn run_all(
 
     match asr_result {
         Ok(json) => {
-            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.92, "解析识别结果").await?;
-            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.95, "写入原始文稿").await?;
+            // 识别铺到 0.88、纠错从 0.90 起报，这两步得夹在中间：原来报 0.92、0.95，
+            // 一开始纠错，进度条就从 95% 退回 90%。
+            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.89, "解析识别结果").await?;
+            emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.90, "写入原始文稿").await?;
             let count = asr::store_transcripts_with_raw_backup(&db, &video_id, &json).await?;
             // 整份文稿已经落库，分片断点缓存的使命就结束了。留着的话，用户明确要求
             // 「重新处理」时会静默拿回旧结果——那时他要的恰恰是重认一遍。
@@ -647,22 +641,7 @@ async fn run_all(
                     .await?;
                     // 纠错分批跑，每批一次模型往返。把批进度铺进 0.90–0.99：
                     // 长课要纠十几批，此前整段都压在一个静止的 98% 下面。
-                    let sink = {
-                        let app = app.clone();
-                        let video_id = video_id.clone();
-                        let job_id = asr_job.id.clone();
-                        move |at: f64, message: &str| {
-                            emit_stage(
-                                &app,
-                                &video_id,
-                                &job_id,
-                                "asr",
-                                "running",
-                                0.90 + 0.09 * at,
-                                Some(message),
-                            );
-                        }
-                    };
+                    let sink = asr_progress_sink(&app, &video_id, &asr_job.id, 0.90, 0.99);
                     match transcript_correction::autocorrect_transcript(
                         &db,
                         &provider,
@@ -1405,6 +1384,31 @@ fn emit_stage(
             message: message.map(str::to_string),
         },
     );
+}
+
+/// 把识别任务里一段子进度（0..1）铺进它进度条的 [from, to]。和别处的细进度一样只发事件、
+/// 不落库，库里只留阶段里程碑。
+fn asr_progress_sink(
+    app: &AppHandle,
+    video_id: &str,
+    job_id: &str,
+    from: f64,
+    to: f64,
+) -> impl Fn(f64, &str) + Send + Sync {
+    let app = app.clone();
+    let video_id = video_id.to_string();
+    let job_id = job_id.to_string();
+    move |at: f64, message: &str| {
+        emit_stage(
+            &app,
+            &video_id,
+            &job_id,
+            "asr",
+            "running",
+            from + (to - from) * at,
+            Some(message),
+        );
+    }
 }
 
 async fn fail_asr<T>(

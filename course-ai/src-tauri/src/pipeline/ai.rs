@@ -604,6 +604,43 @@ fn scoped<'a>(progress: Progress<'a>, from: f64, to: f64) -> impl Fn(f64, &str) 
     }
 }
 
+/// 等一个报不出进度的调用时（云端整段识别：交上去就只能干等结果），按耗时往前爬，
+/// `full_after` 爬满，免得进度条好几分钟纹丝不动、看着像死了。爬满就停在那儿接着等，
+/// 不替它报完成。
+///
+/// 只给真没有进度可报的调用用。有真进度的步骤（Whisper、分段识别、纠错）再叠一层估算，
+/// 估算一跑到真进度前头，下一条真进度一来，进度条就往回跳。
+pub async fn creep_while<T>(
+    work: impl std::future::Future<Output = T>,
+    progress: Progress<'_>,
+    full_after: std::time::Duration,
+    message: &str,
+) -> T {
+    if progress.is_none() {
+        return work.await;
+    }
+    tokio::pin!(work);
+    let started = tokio::time::Instant::now();
+    let step = full_after / CREEP_STEPS;
+    let mut ticks = tokio::time::interval_at(started + step, step);
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            output = &mut work => return output,
+            _ = ticks.tick() => {
+                let at = started.elapsed().as_secs_f64() / full_after.as_secs_f64();
+                report(progress, at, message);
+                if at >= 1.0 {
+                    return work.await;
+                }
+            }
+        }
+    }
+}
+
+/// 爬满分几步报：六分钟爬满就是三秒一报。
+const CREEP_STEPS: u32 = 120;
+
 // 单次模型调用切不出内部进度，只能给出阶段位置。数值本身不重要，重要的是
 // 进度条在「开始→取到讲稿→发出请求→拿到回复→写库」之间确实动过几次——
 // 一条长时间纹丝不动的进度条，用户读到的是「卡死了」。
@@ -1689,6 +1726,81 @@ mod tests {
         assert!(
             seen.last().unwrap().0 > 0.5,
             "写库那一步该到后段，实际 {seen:?}"
+        );
+    }
+
+    fn recording_sink() -> (
+        std::sync::Arc<std::sync::Mutex<Vec<(f64, String)>>>,
+        impl Fn(f64, &str) + Send + Sync,
+    ) {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(f64, String)>::new()));
+        let sink = {
+            let seen = std::sync::Arc::clone(&seen);
+            move |at: f64, message: &str| {
+                seen.lock().unwrap().push((at, message.to_string()));
+            }
+        };
+        (seen, sink)
+    }
+
+    #[tokio::test]
+    async fn creep_while_inches_forward_until_the_work_returns() {
+        let (seen, sink) = recording_sink();
+
+        let output = creep_while(
+            async {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                "识别结果"
+            },
+            Some(&sink),
+            std::time::Duration::from_secs(3),
+            "云端识别中（阿里云 paraformer-v2）",
+        )
+        .await;
+        let reported = seen.lock().unwrap().len();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        assert_eq!(output, "识别结果");
+        let seen = seen.lock().unwrap().clone();
+        // 三秒爬满、等了 0.2 秒：该报过好几次，都是一小截，而且只进不退。
+        assert!(seen.len() >= 3, "等的时候该一直往前爬，实际 {seen:?}");
+        assert!(
+            seen.windows(2).all(|pair| pair[0].0 < pair[1].0),
+            "进度不能倒退，实际 {seen:?}"
+        );
+        assert!(
+            seen.iter().all(|(at, _)| *at > 0.0 && *at < 0.2),
+            "实际 {seen:?}"
+        );
+        assert!(seen
+            .iter()
+            .all(|(_, message)| message == "云端识别中（阿里云 paraformer-v2）"));
+        assert_eq!(seen.len(), reported, "调用返回后不能再报");
+    }
+
+    #[tokio::test]
+    async fn creep_while_stops_at_full_and_keeps_waiting() {
+        let (seen, sink) = recording_sink();
+
+        let output = creep_while(
+            async {
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                7
+            },
+            Some(&sink),
+            std::time::Duration::from_millis(120),
+            "云端识别中（火山引擎）",
+        )
+        .await;
+
+        // 调用还没回来，爬满就停：不越过 1，也不在满格上一直重复报。
+        assert_eq!(output, 7);
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.last().map(|(at, _)| *at), Some(1.0), "实际 {seen:?}");
+        assert_eq!(
+            seen.iter().filter(|(at, _)| *at >= 1.0).count(),
+            1,
+            "实际 {seen:?}"
         );
     }
 

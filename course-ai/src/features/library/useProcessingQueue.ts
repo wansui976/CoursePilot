@@ -19,20 +19,17 @@ export type JobLoadState =
  * 在 Home 实例化一次，队列页、课程库卡片与 rail 徽标共用同一份状态。
  */
 export function useProcessingQueue({
-  queueOpen,
   selectedCourseId,
 }: {
-  /** 队列页可见时才每 2 秒重绘一次，让识别阶段的估算进度往前爬。 */
-  queueOpen: boolean;
   /** AI 产物完成时刷新当前课程的视频列表（has_* 标记）。 */
   selectedCourseId: string | null;
 }) {
   const queryClient = useQueryClient();
   const jobsByVideo = useJobs((s) => s.byVideo);
   const setJob = useJobs((s) => s.setOne);
+  const seedJob = useJobs((s) => s.seed);
   const resetJobs = useJobs((s) => s.resetVideo);
   const generatedAfterAsr = useRef<Set<string>>(new Set());
-  const [queueTick, setQueueTick] = useState(0);
   const [queuedVideos, setQueuedVideos] = useState<Video[]>([]);
   // 队列卡片的 jobs 是独立 IPC 请求；没有这层状态时，失败会落成「没有阶段」并显示等待中。
   const [jobLoadStateByVideo, setJobLoadStateByVideo] = useState<
@@ -70,7 +67,7 @@ export function useProcessingQueue({
         .then((rows) => {
           if (jobRequestRef.current[videoId] !== requestId) return;
           rows.forEach((job) =>
-            setJob({
+            seedJob({
               video_id: job.video_id,
               job_id: job.id,
               stage: job.stage,
@@ -92,7 +89,7 @@ export function useProcessingQueue({
           }));
         });
     },
-    [setJob],
+    [seedJob],
   );
 
   const retryJobsForVideo = useCallback(
@@ -213,14 +210,6 @@ export function useProcessingQueue({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobsByVideo, queuedVideos]);
 
-  useEffect(() => {
-    if (!queueOpen || queuedVideos.length === 0) return;
-    const timer = window.setInterval(() => {
-      setQueueTick((tick) => tick + 1);
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [queueOpen, queuedVideos.length]);
-
   function startProcessing(video: Video) {
     const videoId = video.id;
     // 清掉这个视频的全部「已处理」标记：不仅 videoId，还有各 AI 阶段的
@@ -283,40 +272,15 @@ export function useProcessingQueue({
     }
   }
 
-  /** 语音识别没有真进度可报的那一段（0.12–0.9），按时间往前爬一点，免得看着像死了。
-   *  纠错阶段（0.9 起）有逐批的真进度，不需要也不应该被估计值盖住。 */
-  function displayProgress(job: JobUpdate | undefined) {
-    if (!job) return 0;
-    let progress = job.progress;
-    if (
-      job.stage === "asr" &&
-      job.status === "running" &&
-      progress >= 0.12 &&
-      progress < 0.9 &&
-      job.updatedAt
-    ) {
-      const elapsedMs = Date.now() - job.updatedAt + queueTick * 0;
-      const estimated = progress + elapsedMs / 600_000;
-      progress = Math.min(0.88, Math.max(progress, estimated));
-    }
-    return Math.max(0, Math.min(1, progress));
-  }
-
   function activeJobFor(videoId: string) {
     return currentStage(jobsByVideo[videoId] ?? {}) as JobUpdate | undefined;
   }
 
   /** 整条流水线的完成度：识别做完只是开头，后面还有课件与五个 AI 步骤。
-   *  当前阶段自身的估计进度并进整体，好让识别那段也在动。 */
+   *  照后端报的算，不再按时间估：识别、纠错都有真进度了，估算一跑到真进度前头，
+   *  下一条真进度一来进度条就往回跳。报不出进度的云端识别由后端按耗时往前爬。 */
   function pipelineProgressFor(videoId: string) {
-    const byStage = jobsByVideo[videoId] ?? {};
-    const active = activeJobFor(videoId);
-    if (!active || active.status !== "running") return overallProgress(byStage);
-    const patched = {
-      ...byStage,
-      [active.stage]: { ...active, progress: displayProgress(active) },
-    };
-    return overallProgress(patched);
+    return overallProgress(jobsByVideo[videoId] ?? {});
   }
 
   const forgetQueuedVideo = useCallback((videoId: string) => {

@@ -913,6 +913,90 @@ describe("Home", () => {
     expect(screen.getByText("42%")).toBeInTheDocument();
   });
 
+  it("queue progress shows what the backend reported instead of running ahead on a timer", async () => {
+    await renderHome();
+    fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /视频操作/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "开始处理" }));
+    await waitFor(() => expect(mockIpc.pipeline.jobs).toHaveBeenCalledWith(video.id));
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(
+        within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", {
+          name: "处理队列",
+        }),
+      );
+      const asrRunning = (progress: number) =>
+        useJobs.getState().setOne({
+          video_id: video.id,
+          job_id: "asr-job",
+          stage: "asr",
+          status: "running",
+          progress,
+          message: "Whisper 识别中（zh）",
+        });
+      act(() => asrRunning(0.2));
+      // 慢机器上的长课：Whisper 隔好几分钟才报下一个 5%。按时间估着往前爬的话，
+      // 这时早跑到真进度前头了，下一条真进度一来就往回跳。
+      act(() => vi.advanceTimersByTime(3 * 60_000));
+      expect(screen.getByText("20%")).toBeInTheDocument();
+
+      act(() => asrRunning(0.235));
+      expect(screen.getByText("23%")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a late jobs snapshot does not pull back progress the queue already received", async () => {
+    let resolveJobs: (rows: unknown[]) => void = () => {};
+    mockIpc.pipeline.jobs.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveJobs = resolve;
+        }),
+    );
+    await renderHome();
+    fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /视频操作/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "开始处理" }));
+    await waitFor(() => expect(mockIpc.pipeline.jobs).toHaveBeenCalledWith(video.id));
+
+    act(() => {
+      useJobs.getState().setOne({
+        video_id: video.id,
+        job_id: "asr-job",
+        stage: "asr",
+        status: "running",
+        progress: 0.6,
+        message: "Whisper 识别中（zh）",
+      });
+    });
+    // 细进度只走事件、不落库，快照里只有进入识别时的 18%。
+    await act(async () => {
+      resolveJobs([
+        {
+          id: "asr-job",
+          video_id: video.id,
+          stage: "asr",
+          status: "running",
+          progress: 0.18,
+          message: "Whisper 识别中（zh）",
+          started_at: null,
+          finished_at: null,
+        },
+      ]);
+    });
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", {
+        name: "处理队列",
+      }),
+    );
+
+    expect(screen.getByText("60%")).toBeInTheDocument();
+  });
+
   it("refreshes has_transcript once when ASR finishes without LLM follow-ups", async () => {
     const { queryClient } = await renderHome();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");

@@ -97,7 +97,7 @@ export function Home() {
   const [videoQuery, setVideoQuery] = useState("");
   // 统一侧栏折叠状态：分视图记忆（课程库 / 工作台）。
   const [sidebarCollapsed, setSidebarCollapsed] = useState<SidebarCollapsed>(readSidebarCollapsed);
-  const queue = useProcessingQueue({ queueOpen, selectedCourseId });
+  const queue = useProcessingQueue({ selectedCourseId });
   const { queuedVideos, forgetQueuedVideo } = queue;
   const setVideo = usePlayer((s) => s.setVideo);
   const appRef = useRef<HTMLDivElement>(null);

@@ -97,6 +97,7 @@ pub async fn ingest_subtitle(
     video_id: &str,
     srt_text: &str,
     correct: Option<(Provider, String)>,
+    progress: crate::pipeline::ai::Progress<'_>,
 ) -> AppResult<usize> {
     let segs: Vec<StoredSegment> = parse_srt(srt_text)
         .into_iter()
@@ -109,7 +110,7 @@ pub async fn ingest_subtitle(
         .collect();
     let count = store_segments_with_backup(db, video_id, "bilibili_sub", &segs).await?;
     if let Some((provider, model)) = correct {
-        transcript_correction::autocorrect_transcript(db, &provider, &model, video_id, None)
+        transcript_correction::autocorrect_transcript(db, &provider, &model, video_id, progress)
             .await?;
     }
     Ok(count)
@@ -240,7 +241,9 @@ mod tests {
 
         let srt =
             "1\n00:00:00,000 --> 00:00:01,000\n第一句\n\n2\n00:00:01,000 --> 00:00:02,000\n第二句";
-        let n = ingest_subtitle(&db, &video.id, srt, None).await.unwrap();
+        let n = ingest_subtitle(&db, &video.id, srt, None, None)
+            .await
+            .unwrap();
         assert_eq!(n, 2);
         let cnt: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transcripts WHERE video_id=?")
             .bind(&video.id)
@@ -248,6 +251,47 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cnt, 2);
+    }
+
+    /// 字幕纠错也要逐批报进度：此前整段停在 60%，进度条只靠前端按时间估着往前挪。
+    #[tokio::test]
+    async fn subtitle_correction_reports_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let vpath = dir.path().join("v.mp4");
+        std::fs::write(&vpath, b"x").unwrap();
+        let video = crate::commands::videos::add_local_video(&db, &course.id, vpath, None)
+            .await
+            .unwrap();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(f64, String)>::new()));
+        let sink = {
+            let seen = std::sync::Arc::clone(&seen);
+            move |at: f64, message: &str| seen.lock().unwrap().push((at, message.to_string()))
+        };
+
+        let srt = "1\n00:00:00,000 --> 00:00:01,000\n第一句";
+        // 空补丁：不改任何字，这里只看进度有没有报出来。
+        let correct = Some((
+            Provider::Mock {
+                canned: "[]".into(),
+            },
+            "m".to_string(),
+        ));
+        ingest_subtitle(&db, &video.id, srt, correct, Some(&sink))
+            .await
+            .unwrap();
+
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.last().map(|(at, _)| *at), Some(1.0), "实际 {seen:?}");
     }
 
     #[tokio::test]
@@ -269,7 +313,9 @@ mod tests {
             .await
             .unwrap();
         let valid = "1\n00:00:00,000 --> 00:00:01,000\n原文";
-        ingest_subtitle(&db, &video.id, valid, None).await.unwrap();
+        ingest_subtitle(&db, &video.id, valid, None, None)
+            .await
+            .unwrap();
         let backups_before: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM transcript_backups WHERE video_id=?")
                 .bind(&video.id)
@@ -277,9 +323,11 @@ mod tests {
                 .await
                 .unwrap();
 
-        assert!(ingest_subtitle(&db, &video.id, "not an srt file", None)
-            .await
-            .is_err());
+        assert!(
+            ingest_subtitle(&db, &video.id, "not an srt file", None, None)
+                .await
+                .is_err()
+        );
 
         let texts: Vec<String> = sqlx::query_scalar(
             "SELECT text FROM transcripts WHERE video_id=? ORDER BY segment_idx",
