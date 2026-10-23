@@ -16,6 +16,7 @@ fn main() {
                         "pick_and_persist_file",
                         "share_file",
                         "system_bar_insets",
+                        "move_task_to_back",
                     ])
                     .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
             )

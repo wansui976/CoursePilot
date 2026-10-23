@@ -12,7 +12,7 @@ import { useAssistantUi } from "@/stores/assistant";
 
 const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
-    app: { exit: vi.fn() },
+    app: { exit: vi.fn(), moveToBackground: vi.fn() },
     courses: { list: vi.fn(), create: vi.fn(), rename: vi.fn() },
     videos: {
       list: vi.fn(),
@@ -242,6 +242,7 @@ describe("Home selected-video integration", () => {
     mockIpc.courses.list.mockResolvedValue([course]);
     mockIpc.courses.rename.mockReset().mockResolvedValue(undefined);
     mockIpc.app.exit.mockReset().mockResolvedValue(undefined);
+    mockIpc.app.moveToBackground.mockReset().mockResolvedValue(undefined);
     mockIpc.videos.list.mockResolvedValue([video]);
     mockIpc.videos.mediaUrl.mockResolvedValue("http://127.0.0.1:1234/m/video-1");
     mockIpc.videos.cover.mockResolvedValue([]);
@@ -423,10 +424,10 @@ describe("Home selected-video integration", () => {
     );
     // 标题层级调整后，选中课程时 h1 显示课程名。
     expect(screen.getByRole("heading", { name: "Downloads" })).toBeInTheDocument();
-    expect(mockIpc.app.exit).not.toHaveBeenCalled();
+    expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
   });
 
-  it("exits Android once when back is pressed at the course-list root", async () => {
+  it("moves Android to the background once when back is pressed at the course-list root", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
 
@@ -440,10 +441,11 @@ describe("Home selected-video integration", () => {
 
     act(() => handler?.({ canGoBack: false }));
 
-    await waitFor(() => expect(mockIpc.app.exit).toHaveBeenCalledOnce());
+    await waitFor(() => expect(mockIpc.app.moveToBackground).toHaveBeenCalledOnce());
+    expect(mockIpc.app.exit).not.toHaveBeenCalled();
   });
 
-  it("closes the course action menu before exiting the Android root", async () => {
+  it("closes the course action menu before leaving the Android root", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
     await renderHome();
@@ -461,10 +463,10 @@ describe("Home selected-video integration", () => {
     await waitFor(() =>
       expect(screen.queryByRole("menuitem", { name: "重命名" })).not.toBeInTheDocument(),
     );
-    expect(mockIpc.app.exit).not.toHaveBeenCalled();
+    expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
   });
 
-  it("cancels course renaming before exiting the Android root", async () => {
+  it("cancels course renaming before leaving the Android root", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
     vi.stubGlobal("navigator", { userAgent: "Android" });
     await renderHome();
@@ -489,7 +491,7 @@ describe("Home selected-video integration", () => {
       expect(screen.getAllByRole("button", { name: "课程操作" })[0]).toHaveFocus(),
     );
     expect(mockIpc.courses.rename).not.toHaveBeenCalled();
-    expect(mockIpc.app.exit).not.toHaveBeenCalled();
+    expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
   });
 
   it("closes the video action menu on Android back and restores its trigger", async () => {
@@ -513,7 +515,7 @@ describe("Home selected-video integration", () => {
     );
     expect(trigger).toHaveFocus();
     expect(screen.getByRole("heading", { name: "Downloads" })).toBeInTheDocument();
-    expect(mockIpc.app.exit).not.toHaveBeenCalled();
+    expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
   });
 
   it("closes an open import menu before leaving the selected course on Android back", async () => {
@@ -536,7 +538,7 @@ describe("Home selected-video integration", () => {
     expect(screen.queryByRole("menu", { name: "导入" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Downloads" })).toBeInTheDocument();
     expect(importTrigger).toHaveFocus();
-    expect(mockIpc.app.exit).not.toHaveBeenCalled();
+    expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
   });
 
   it("closes transcript search before leaving the video workspace on Android back", async () => {
@@ -571,7 +573,7 @@ describe("Home selected-video integration", () => {
     expect(screen.queryByRole("searchbox", { name: "搜索文稿" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "学习工作台" })).toBeInTheDocument();
     expect(searchTrigger).toHaveFocus();
-    expect(mockIpc.app.exit).not.toHaveBeenCalled();
+    expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
   });
 
   it("keeps an unsaved transcript edit visible on Android back", async () => {
@@ -606,7 +608,7 @@ describe("Home selected-video integration", () => {
     expect(screen.getByLabelText("编辑文稿")).toHaveValue("尚未保存的字幕改动");
     expect(screen.getByRole("region", { name: "学习工作台" })).toBeInTheDocument();
     expect(mockIpc.transcripts.update).not.toHaveBeenCalled();
-    expect(mockIpc.app.exit).not.toHaveBeenCalled();
+    expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
   });
 
   it("dismisses transcript search before the visible phone back returns to the library", async () => {
@@ -811,7 +813,7 @@ describe("Home selected-video integration", () => {
     );
     expect(trigger).toHaveFocus();
     expect(screen.getByRole("heading", { name: "Downloads" })).toBeInTheDocument();
-    expect(mockIpc.app.exit).not.toHaveBeenCalled();
+    expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
   });
 
   it("closes the visible assistant before handling the underlying Android page", async () => {
@@ -830,7 +832,7 @@ describe("Home selected-video integration", () => {
 
     await waitFor(() => expect(useAssistantUi.getState().open).toBe(false));
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
-    expect(mockIpc.app.exit).not.toHaveBeenCalled();
+    expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
   });
 
   it("closes the assistant before a transcript search hidden behind it on Android back", async () => {
@@ -865,7 +867,7 @@ describe("Home selected-video integration", () => {
     await waitFor(() => expect(useAssistantUi.getState().open).toBe(false));
     expect(screen.getByRole("searchbox", { name: "搜索文稿" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "学习工作台" })).toBeInTheDocument();
-    expect(mockIpc.app.exit).not.toHaveBeenCalled();
+    expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
   });
 
   it("exits video fullscreen before leaving the Android learning workspace", async () => {
@@ -889,7 +891,7 @@ describe("Home selected-video integration", () => {
     await waitFor(() => expect(mockCurrentWindow.setFullscreen).toHaveBeenLastCalledWith(false));
     expect(screen.getByRole("region", { name: "学习工作台" })).toBeInTheDocument();
     expect(screen.getByLabelText("课程视频播放器")).toBeInTheDocument();
-    expect(mockIpc.app.exit).not.toHaveBeenCalled();
+    expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
   });
 
   it("lets the settings dirty guard consume Android back before closing", async () => {
@@ -951,7 +953,7 @@ describe("Home selected-video integration", () => {
 
     expect(await screen.findByRole("navigation", { name: "设置分类" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "设置" })).toBeInTheDocument();
-    expect(mockIpc.app.exit).not.toHaveBeenCalled();
+    expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
   });
 
   it("returns from the developer console to settings and keeps its bottom tab selected", async () => {
@@ -992,7 +994,7 @@ describe("Home selected-video integration", () => {
       | undefined;
     act(() => latestHandler?.({ canGoBack: false }));
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
-    expect(mockIpc.app.exit).not.toHaveBeenCalled();
+    expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
   });
 
   it("guards compact bottom-tab navigation while LLM settings is dirty", async () => {

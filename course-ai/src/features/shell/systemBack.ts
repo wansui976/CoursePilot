@@ -164,7 +164,8 @@ export function useTransientDismissal({ videoFullscreen }: { videoFullscreen: bo
 }
 
 /**
- * Android 的硬件返回键与窗口关闭：交给 goBackOneLevel 退一级，退到底才退出应用。
+ * Android 的硬件返回键与窗口关闭：交给 goBackOneLevel 退一级。退到底时返回键把应用
+ * 退到后台（与系统对根 Activity 的默认做法一致）：直接退出会把正在跑的处理任务一起杀掉。
  * 硬件返回键是「平台能力」（仅 Android 有），与布局宽度无关：用 UA 判平台，避免在
  * 桌面拦截窗口关闭。
  */
@@ -185,7 +186,7 @@ export function useAndroidBack(goBackOneLevel: () => boolean) {
         if (!goBackOneLevel()) void ipc.app.exit();
       });
       backListener = await onBackButtonPress(() => {
-        if (!goBackOneLevel()) void ipc.app.exit();
+        if (!goBackOneLevel()) void ipc.app.moveToBackground();
       });
       if (cancelled) {
         closeListener?.();

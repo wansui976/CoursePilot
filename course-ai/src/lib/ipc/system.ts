@@ -19,8 +19,9 @@ import type {
 } from "./types";
 
 export const app = {
-  // Android 的 AppPlugin 接管了系统返回键；根页面没有可退层级时显式结束 Activity。
   exit: (): Promise<void> => invoke("cmd_exit_app"),
+  // Android 的 AppPlugin 接管了系统返回键；根页面没有可退层级时退到后台（不结束进程）。
+  moveToBackground: (): Promise<void> => invoke("plugin:mobile-files|move_task_to_back"),
 };
 
 export const sync = {

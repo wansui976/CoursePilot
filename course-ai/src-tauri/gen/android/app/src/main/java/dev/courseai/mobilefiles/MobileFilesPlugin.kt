@@ -278,6 +278,16 @@ class MobileFilesPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  // 根页面按返回：照 Android 12 起系统对根 Activity 的默认做法退到后台，不结束进程——
+  // 正在跑的处理任务、播放位置和页面都还在，回来时原样继续。
+  @Command
+  fun moveTaskToBack(invoke: Invoke) {
+    activity.runOnUiThread {
+      activity.moveTaskToBack(true)
+      invoke.resolve()
+    }
+  }
+
   // bundled ML Kit 中文模型：图片始终留在设备上，不依赖首次联网下载。
   @Command
   fun recognizeImageText(invoke: Invoke) {
