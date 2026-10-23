@@ -12,7 +12,8 @@ function setPlatformEnv({
   platform?: string;
   maxTouchPoints?: number;
   ua?: string;
-  touch?: boolean;
+  // true：ontouchstart 是函数；"null"：属性在、值为 null（真 iPad 的 WKWebView 就是这样）。
+  touch?: boolean | "null";
   // 真触摸设备（iPad 桌面模式）报 (hover: none)；MacBook 触控板是 (hover: hover)。
   hoverNone?: boolean;
 } = {}) {
@@ -30,7 +31,7 @@ function setPlatformEnv({
   });
   Object.defineProperty(window, "ontouchstart", {
     configurable: true,
-    get: () => (touch ? (() => {}) : undefined),
+    get: () => (touch === "null" ? null : touch ? (() => {}) : undefined),
   });
   window.matchMedia = (query: string) =>
     ({ matches: query === "(hover: none)" ? hoverNone : false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false } as unknown as MediaQueryList);
@@ -76,6 +77,16 @@ describe("platform", () => {
     const platform = await import("./platform");
     expect(platform.isIOS()).toBe(true);
     expect(platform.isTablet()).toBe(true);
+  });
+
+  it("真 iPad 的 WKWebView 里 ontouchstart 存在但为 null，仍识别为 iPad", async () => {
+    // iPad Pro 11 模拟器（iPadOS 26.3）实测：maxTouchPoints 5、hover:none、
+    // "ontouchstart" in window 为 true，值是 null。
+    setPlatformEnv({ maxTouchPoints: 5, touch: "null", hoverNone: true });
+    const platform = await import("./platform");
+    expect(platform.isIOS()).toBe(true);
+    expect(platform.isTablet()).toBe(true);
+    expect(platform.isMobile()).toBe(true);
   });
 
   it("iPhone UA 识别为 iOS 而非平板", async () => {

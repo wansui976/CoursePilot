@@ -15,10 +15,13 @@ function isIPadOSDesktopClass() {
   const coarse = typeof window.matchMedia === "function"
     ? window.matchMedia("(hover: none)").matches
     : false;
+  // 只看 ontouchstart 这个属性在不在：真 iPad 的 WKWebView 里它存在、值却是 null，
+  // 原来写 `!= null` 会把每台用默认桌面模式的 iPad 都当成 Mac——建课程、导入、导出
+  // 全走了桌面分支。区分 Mac 靠上面的 (hover: none)。
   return (
     nav.platform === "MacIntel" &&
     (nav.maxTouchPoints ?? 0) > 1 &&
-    window.ontouchstart != null &&
+    "ontouchstart" in window &&
     coarse
   );
 }
