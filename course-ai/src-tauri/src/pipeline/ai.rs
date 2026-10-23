@@ -11,10 +11,22 @@ fn stamp(start_ms: i64) -> String {
     format!("[{:02}:{:02}]", total / 60, total % 60)
 }
 
-/// 相邻讲稿行合并成一块的时间窗与字数上限。
-/// 45 秒足够定位（产物里的时间戳是给人点击跳转的），200 字避免把一整段挤成一行。
+/// 相邻讲稿行合并成一块的时间窗上限与字数上限。
+/// 45 秒足够定位长讲座（产物里的时间戳是给人点击跳转的），200 字避免把一整段挤成一行。
 const MERGE_WINDOW_MS: i64 = 45_000;
 const MERGE_MAX_CHARS: usize = 200;
+/// 合并窗口的下限：短视频按比例缩小窗口，但不细到逐句。
+const MIN_MERGE_WINDOW_MS: i64 = 5_000;
+
+/// 合并窗口随讲稿时长缩放：讲稿跨度的 1/60，夹在 5～45 秒之间。
+///
+/// 45 分钟以上的长讲座照旧 45 秒（省前缀开销的初衷不变，讲稿口径也跟以前一模一样）。
+/// 短视频原来也用 45 秒，一分钟内的内容整篇并成 `[00:00]` 一块，模型只见得到这一个
+/// 时间——章节全是 00:00，摘要和笔记里的出处也全指向开头。
+fn merge_window_ms(lines: &[ContextLine]) -> i64 {
+    let span = lines.iter().map(|line| line.start_ms).max().unwrap_or(0);
+    (span / 60).clamp(MIN_MERGE_WINDOW_MS, MERGE_WINDOW_MS)
+}
 
 /// 一行上下文：讲稿或板书。
 #[derive(Clone)]
@@ -52,7 +64,7 @@ pub async fn transcript_text(db: &Db, video_id: &str) -> AppResult<String> {
 /// 输出与从前完全一致（纯讲稿），所以对未提取课件的视频没有任何行为变化。
 pub async fn lecture_context(db: &Db, video_id: &str) -> AppResult<String> {
     let lines = lecture_lines(db, video_id).await?;
-    Ok(format_lines(&merge_speech(&lines)))
+    Ok(format_lines(&merge_speech(&lines, merge_window_ms(&lines))))
 }
 
 /// 讲稿 + 板书，按时间排好序的原始行（未合并）。
@@ -114,7 +126,7 @@ async fn lecture_lines(db: &Db, video_id: &str) -> AppResult<Vec<ContextLine>> {
 ///
 /// 必须是纯函数且**结果确定**：五个 AI 任务共用同一份上下文才能命中前缀缓存，
 /// 这里一旦引入任何随机/时间/迭代顺序相关的东西，缓存就废了。
-fn merge_speech(lines: &[ContextLine]) -> Vec<ContextLine> {
+fn merge_speech(lines: &[ContextLine], window_ms: i64) -> Vec<ContextLine> {
     let mut out: Vec<ContextLine> = Vec::with_capacity(lines.len());
     for line in lines {
         if line.text.is_empty() {
@@ -127,7 +139,7 @@ fn merge_speech(lines: &[ContextLine]) -> Vec<ContextLine> {
         }
         let can_extend = out.last().is_some_and(|last| {
             !last.is_slide
-                && line.start_ms - last.start_ms < MERGE_WINDOW_MS
+                && line.start_ms - last.start_ms < window_ms
                 && last.text.chars().count() + 1 + line.text.chars().count() <= MERGE_MAX_CHARS
         });
         if can_extend {
@@ -464,14 +476,18 @@ pub async fn stale_artifacts(db: &Db, video_id: &str) -> AppResult<Vec<String>> 
 
 /// 讲稿口径版本。改变 `lecture_context` 输出（合并规则、板书格式…）时要加一，
 /// 迁移逻辑据此判断是否需要改写已记录的指纹。
-const CONTEXT_SCHEMA_VERSION: &str = "2";
+const CONTEXT_SCHEMA_VERSION: &str = "3";
 
 const CONTEXT_SCHEMA_SETTING: &str = "ai_context_schema_version";
 
-/// 未合并的旧口径讲稿。**只给指纹迁移用**，不要用于生成。
-async fn legacy_lecture_context(db: &Db, video_id: &str) -> AppResult<String> {
+/// 以前各版口径下的讲稿。**只给指纹迁移用**，不要用于生成。
+/// 第 1 版不合并；第 2 版不论长短一律按 45 秒合并。
+async fn legacy_lecture_contexts(db: &Db, video_id: &str) -> AppResult<[String; 2]> {
     let lines = lecture_lines(db, video_id).await?;
-    Ok(format_lines(&lines))
+    Ok([
+        format_lines(&lines),
+        format_lines(&merge_speech(&lines, MERGE_WINDOW_MS)),
+    ])
 }
 
 /// 讲稿口径变了之后，把仍然对得上的产物指纹改写成新口径。
@@ -496,21 +512,22 @@ pub async fn migrate_context_fingerprints(db: &Db) -> AppResult<usize> {
             .await?;
     let mut rewritten = 0usize;
     for video_id in videos {
-        let (Ok(legacy), Ok(fresh)) = (
-            legacy_lecture_context(db, &video_id).await,
+        let (Ok([v1, v2]), Ok(fresh)) = (
+            legacy_lecture_contexts(db, &video_id).await,
             lecture_context(db, &video_id).await,
         ) else {
             continue; // 字幕已被删掉之类，跳过
         };
-        let legacy_fingerprint = context_fingerprint(&legacy);
         let fresh_fingerprint = context_fingerprint(&fresh);
         let result = sqlx::query(
             "UPDATE ai_artifact_sources SET fingerprint=?
-             WHERE video_id=? AND fingerprint=?",
+             WHERE video_id=? AND fingerprint IN (?, ?) AND fingerprint<>?",
         )
         .bind(&fresh_fingerprint.0)
         .bind(&video_id)
-        .bind(&legacy_fingerprint.0)
+        .bind(&context_fingerprint(&v1).0)
+        .bind(&context_fingerprint(&v2).0)
+        .bind(&fresh_fingerprint.0)
         .execute(&db.pool)
         .await?;
         rewritten += result.rows_affected() as usize;
@@ -1074,8 +1091,15 @@ mod tests {
     #[tokio::test]
     async fn speech_lines_merge_into_blocks_but_slides_do_not() {
         let (db, vid, _d) = seed_video_with_transcript().await;
-        // 每 5 秒一句（ASR 的真实粒度），跨过 45 秒窗口。
-        for (idx, start) in [(1_i64, 5_000_i64), (2, 10_000), (3, 15_000), (4, 60_000)] {
+        // 每 5 秒一句（ASR 的真实粒度），跨过 45 秒窗口；最后一句在 45 分钟处，
+        // 让这节课够长、合并窗口取满 45 秒。
+        for (idx, start) in [
+            (1_i64, 5_000_i64),
+            (2, 10_000),
+            (3, 15_000),
+            (4, 60_000),
+            (5, 2_700_000),
+        ] {
             sqlx::query(
                 "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)",
             )
@@ -1112,7 +1136,34 @@ mod tests {
         assert_eq!(lines[1], "[00:12] (板书) 板书内容");
         assert_eq!(lines[2], "[00:15] 第3句");
         assert_eq!(lines[3], "[01:00] 第4句");
-        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[4], "[45:00] 第5句");
+        assert_eq!(lines.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn a_short_video_keeps_fine_grained_timestamps() {
+        // 26 秒的短视频（真机上测出来的）：原来按 45 秒合并，整篇并成 [00:00] 一块，
+        // 生成的章节全在 00:00，摘要和笔记的出处也都指向开头。
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        for (idx, start) in [(1_i64, 3_000_i64), (2, 7_000), (3, 11_000), (4, 14_000), (5, 21_000)] {
+            sqlx::query(
+                "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)",
+            )
+            .bind(&vid)
+            .bind(idx)
+            .bind(start)
+            .bind(start + 3_000)
+            .bind(format!("第{idx}句"))
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        }
+
+        let context = lecture_context(&db, &vid).await.unwrap();
+        let stamps: Vec<&str> = context.lines().map(|line| &line[..7]).collect();
+
+        // 窗口缩到 5 秒：相隔不到 5 秒的才并一块（0 与 3、7 与 11），其余各自保留时间。
+        assert_eq!(stamps, ["[00:00]", "[00:07]", "[00:14]", "[00:21]"]);
     }
 
     #[tokio::test]
@@ -1129,19 +1180,35 @@ mod tests {
     #[tokio::test]
     async fn the_schema_migration_keeps_unchanged_products_out_of_the_stale_list() {
         let (db, vid, _d) = seed_video_with_transcript().await;
-        seed_long_transcript(&db, &vid, 20).await;
-        // 模拟升级前的记录：指纹按**旧口径**（未合并）算。
-        let legacy = legacy_lecture_context(&db, &vid).await.unwrap();
-        record_artifact_source(&db, &vid, "summary", &context_fingerprint(&legacy))
+        // 每 2 秒一短句、共 80 秒：三版口径（不合并 / 一律 45 秒 / 按时长缩放的 5 秒）各不相同。
+        for idx in 1..=40_i64 {
+            sqlx::query(
+                "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)",
+            )
+            .bind(&vid)
+            .bind(idx)
+            .bind(idx * 2_000)
+            .bind(idx * 2_000 + 1_500)
+            .bind(format!("第{idx}句"))
+            .execute(&db.pool)
             .await
             .unwrap();
-        // 新口径下它对不上，所以升级后本来会被标成过期。
+        }
+        // 模拟升级前的记录：一份按第 1 版口径（未合并）算，一份按第 2 版（一律 45 秒合并）。
+        let [v1, v2] = legacy_lecture_contexts(&db, &vid).await.unwrap();
+        record_artifact_source(&db, &vid, "summary", &context_fingerprint(&v1))
+            .await
+            .unwrap();
+        record_artifact_source(&db, &vid, "notes", &context_fingerprint(&v2))
+            .await
+            .unwrap();
+        // 新口径下它们对不上，所以升级后本来会被标成过期。
         assert_eq!(
             stale_artifacts(&db, &vid).await.unwrap(),
-            vec!["summary".to_string()]
+            vec!["notes".to_string(), "summary".to_string()]
         );
 
-        assert_eq!(migrate_context_fingerprints(&db).await.unwrap(), 1);
+        assert_eq!(migrate_context_fingerprints(&db).await.unwrap(), 2);
         assert!(
             stale_artifacts(&db, &vid).await.unwrap().is_empty(),
             "字幕没变过的产物不该因为我们换了讲稿口径而被标成过期"
