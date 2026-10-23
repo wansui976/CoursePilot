@@ -81,4 +81,18 @@ describe("useContainerPixelWidth", () => {
 
     expect(result.current).toBe(612);
   });
+
+  it("subtracts horizontal padding when asked for the content box", () => {
+    const element = document.createElement("div");
+    Object.defineProperty(element, "clientWidth", { value: 915 });
+    element.style.paddingLeft = "52px";
+    element.style.paddingRight = "0px";
+
+    const { result } = renderHook(() => {
+      const ref = useRef<HTMLDivElement | null>(element);
+      return useContainerPixelWidth(ref, { contentBox: true });
+    });
+
+    expect(result.current).toBe(863);
+  });
 });

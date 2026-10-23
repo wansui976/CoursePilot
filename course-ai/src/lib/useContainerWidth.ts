@@ -57,21 +57,35 @@ function widthFromWindow(): number {
   return window.innerWidth || 0;
 }
 
-/** Returns the measured width of the element, with the window as a detached/SSR fallback. */
-export function useContainerPixelWidth(ref: RefObject<HTMLElement | null>): number {
+/**
+ * Returns the measured width of the element, with the window as a detached/SSR fallback.
+ * `contentBox` 去掉左右内边距：外壳横屏时用内边距让开挖孔和系统栏，里面实际能排版的宽度
+ * 要扣掉它们。内边距变化时内容盒尺寸跟着变，ResizeObserver 照样会通知。
+ */
+export function useContainerPixelWidth(
+  ref: RefObject<HTMLElement | null>,
+  { contentBox = false }: { contentBox?: boolean } = {},
+): number {
   const [width, setWidth] = useState(widthFromWindow);
 
   useLayoutEffect(() => {
     const el = ref.current;
-    const measure = () => setWidth(el?.clientWidth || widthFromWindow());
+    const measure = () =>
+      setWidth((el && (contentBox ? contentWidth(el) : el.clientWidth)) || widthFromWindow());
     measure();
     if (!el || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [ref]);
+  }, [ref, contentBox]);
 
   return width;
+}
+
+function contentWidth(el: HTMLElement): number {
+  const style = getComputedStyle(el);
+  const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+  return Math.max(0, el.clientWidth - padding);
 }
 
 function initialBucket(): WidthBucket {

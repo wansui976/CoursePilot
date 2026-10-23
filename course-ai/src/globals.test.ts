@@ -196,6 +196,20 @@ describe("窄屏 shell 的响应式约束", () => {
       /^\.ca-wb\[data-layout="stacked"\] \.ca-panel-col\s*\{[\s\S]*?min-height:\s*0;/m,
     );
   });
+
+  it("横屏让开安全区：左右两种外壳都让，上下只有左右分栏自己让；内边距挂在 .ca-app 上", () => {
+    // 挂在 .ca-app 外面（如 #root）会让外壳的 clientWidth 随内边距变：手机横屏让出挖孔后
+    // 跌破 wide 档、换成叠放外壳、内边距撤掉又回到 wide，两种外壳来回闪。
+    const sides = css.match(/^\.ca-app\s*\{\s*padding-right[\s\S]*?\n\}/m)?.[0] ?? "";
+    const sidebarShell =
+      css.match(/^\.ca-app\[data-shell="sidebar"\]\s*\{[\s\S]*?\n\}/m)?.[0] ?? "";
+
+    expect(sides).toMatch(/padding-right:\s*var\(--safe-right\);/);
+    expect(sides).toMatch(/padding-left:\s*var\(--safe-left\);/);
+    expect(sidebarShell).toMatch(/padding-top:\s*var\(--safe-top\);/);
+    expect(sidebarShell).toMatch(/padding-bottom:\s*var\(--safe-bottom\);/);
+    expect(css).not.toMatch(/#root:has/);
+  });
 });
 
 describe("阴影与过渡的写法约束", () => {

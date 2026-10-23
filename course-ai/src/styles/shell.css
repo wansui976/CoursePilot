@@ -20,6 +20,23 @@
   padding-top: calc(var(--safe-top) + 8px);
 }
 
+/* 横屏时挖孔、三键导航栏会落在左右两侧，两种外壳都要让开；左右分栏（桌面、平板和手机
+   横屏）还要让开顶部状态栏和底部手势条，叠放外壳的顶部和底部由 .ca-main 与底栏各自处理。
+   桌面上四个值都是 0。
+   内边距必须挂在 .ca-app 自己身上：用哪种外壳看的是它的 clientWidth（含内边距），不能随
+   内边距变。否则手机横屏 915px 让出 52px 挖孔后跌破 wide 档，换成叠放外壳、内边距撤掉又
+   回到 wide，两种外壳来回闪。工作台按去掉内边距后的宽度排版（useContainerPixelWidth 的
+   contentBox）。 */
+.ca-app {
+  padding-right: var(--safe-right);
+  padding-left: var(--safe-left);
+}
+
+.ca-app[data-shell="sidebar"] {
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+}
+
 /* rail 常驻占首列 56px；宽栏展开=256px、折叠=0（两列定长可平滑插值）。 */
 .ca-app[data-sidebar="collapsed"] {
   grid-template-columns: 56px 0px minmax(0, 1fr);

@@ -144,7 +144,8 @@ export function Home() {
     [dismissVisibleTransient, runAfterSettingsExit, selectedVideoId],
   );
   const bucket = useContainerWidth(appRef);
-  const appPixelWidth = useContainerPixelWidth(appRef);
+  // 外壳横屏时有让开挖孔的左右内边距：选外壳看整宽（bucket），工作台排版看扣掉内边距的宽度。
+  const appPixelWidth = useContainerPixelWidth(appRef, { contentBox: true });
   const isLightTheme = theme === "light";
   const themeToggleLabel = isLightTheme ? t("home.themeLightLabel") : t("home.themeDarkLabel");
   const tabletDevice = isTablet();
