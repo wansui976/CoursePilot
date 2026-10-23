@@ -60,7 +60,7 @@ describe("ImportVideoButton", () => {
   beforeEach(() => {
     addLocalMock.mockReset();
     scanFolderMock.mockReset();
-    addLocalBatchMock.mockReset().mockResolvedValue([]);
+    addLocalBatchMock.mockReset().mockResolvedValue({ videos: [], failed: [] });
     pickPersistedFileMock.mockReset();
     pickDirectoryPathMock.mockReset();
     isMobileMock.mockReturnValue(true);

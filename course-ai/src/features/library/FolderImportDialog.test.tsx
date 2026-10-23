@@ -28,7 +28,9 @@ function renderDialog(onClose = vi.fn()) {
 }
 
 describe("FolderImportDialog", () => {
-  beforeEach(() => addLocalBatch.mockReset().mockResolvedValue([]));
+  beforeEach(() =>
+    addLocalBatch.mockReset().mockResolvedValue({ videos: [], failed: [] }),
+  );
 
   it("selects everything by default and imports the checked paths in order", async () => {
     const { onClose } = renderDialog();
@@ -43,6 +45,24 @@ describe("FolderImportDialog", () => {
         "/f/part10.mp4",
       ]),
     );
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("stays open and lists the files that could not be imported", async () => {
+    addLocalBatch.mockResolvedValue({
+      videos: [{ id: "v1" }, { id: "v3" }],
+      failed: [{ path: "/f/part2.mp4", error: "not found: video file: /f/part2.mp4" }],
+    });
+    const { onClose } = renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "导入 (3)" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("有 1 个视频没导入：");
+    expect(alert).toHaveTextContent("part2：");
+    expect(onClose).not.toHaveBeenCalled();
+    // 已经导进来了一部分，再叫「取消」就不对了。
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -126,8 +146,8 @@ describe("FolderImportDialog", () => {
   });
 
   it("cannot close with Escape or an outside pointer while importing", async () => {
-    let finishImport!: (videos: never[]) => void;
-    const importing = new Promise<never[]>((resolve) => {
+    let finishImport!: (result: { videos: never[]; failed: never[] }) => void;
+    const importing = new Promise<{ videos: never[]; failed: never[] }>((resolve) => {
       finishImport = resolve;
     });
     addLocalBatch.mockReturnValue(importing);
@@ -140,7 +160,7 @@ describe("FolderImportDialog", () => {
 
     expect(onClose).not.toHaveBeenCalled();
 
-    finishImport([]);
+    finishImport({ videos: [], failed: [] });
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 });

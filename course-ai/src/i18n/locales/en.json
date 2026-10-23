@@ -1096,7 +1096,10 @@
     "selectItem": "Select {{name}}",
     "cancel": "Cancel",
     "importing": "Importing…",
-    "importCount": "Import ({{count}})"
+    "importCount": "Import ({{count}})",
+    "failed_one": "{{count}} video wasn't imported:",
+    "failed_other": "{{count}} videos weren't imported:",
+    "failedItem": "{{name}}: {{reason}}"
   },
   "urlImport": {
     "percent": "Downloading {{percent}}%",

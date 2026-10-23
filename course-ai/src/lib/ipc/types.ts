@@ -1,4 +1,5 @@
 /** ipc 各领域共用的载荷与进度事件类型。 */
+import type { Video } from "../types";
 
 export interface WhisperModel {
   id: string;
@@ -71,6 +72,17 @@ export interface CloudSyncProbeStopResult {
 export interface FolderVideo {
   path: string;
   name: string;
+}
+
+/** 批量导入的结果：导进来的视频，加上没导进来的文件和原因。 */
+export interface BatchImport {
+  videos: Video[];
+  failed: ImportFailure[];
+}
+
+export interface ImportFailure {
+  path: string;
+  error: string;
 }
 
 /** 间隔重复：到期待复习卡片。 */

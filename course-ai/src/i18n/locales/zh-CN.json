@@ -1096,7 +1096,9 @@
     "selectItem": "选择 {{name}}",
     "cancel": "取消",
     "importing": "导入中…",
-    "importCount": "导入 ({{count}})"
+    "importCount": "导入 ({{count}})",
+    "failed": "有 {{count}} 个视频没导入：",
+    "failedItem": "{{name}}：{{reason}}"
   },
   "urlImport": {
     "percent": "下载中 {{percent}}%",

@@ -8,7 +8,6 @@ use sqlx::FromRow;
 use std::borrow::Cow;
 // Path 被 scan_folder / cmd_scan_folder（文件夹批量导入）无条件使用，故不再 gate。
 use std::path::{Path, PathBuf};
-#[cfg(any(target_os = "android", target_os = "ios"))]
 use tauri::Manager;
 use tauri::State;
 use uuid::Uuid;
@@ -382,21 +381,45 @@ pub fn scan_folder(dir: &Path) -> AppResult<Vec<FolderVideo>> {
     Ok(out.into_iter().map(|(_, v)| v).collect())
 }
 
+/// 批量导入的结果：导进来的视频，加上没导进来的文件和原因。
+#[derive(Debug, Serialize)]
+pub struct BatchImport {
+    pub videos: Vec<Video>,
+    pub failed: Vec<ImportFailure>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImportFailure {
+    pub path: String,
+    pub error: String,
+}
+
 /// 批量导入本地视频：逐个复用幂等的 add_local_video（同文件返回既有、不建重复行）。
-/// 单个文件失败（如导入前被移走）跳过、不中断整批。
+/// 单个文件失败（如导入前被移走）不中断整批，但要带着原因报回去——原先悄悄跳过，
+/// 对话框照常关掉，用户以为全导进来了。`data_root` 给出每个文件的 override_root。
 pub async fn add_local_batch(
     db: &Db,
     course_id: &str,
     paths: Vec<String>,
-) -> AppResult<Vec<Video>> {
+    data_root: impl Fn(&Path) -> Option<PathBuf>,
+) -> AppResult<BatchImport> {
     ensure_active_course(db, course_id).await?;
-    let mut added = Vec::new();
-    for p in paths {
-        if let Ok(v) = add_local_video(db, course_id, PathBuf::from(&p), None).await {
-            added.push(v);
+    let mut imported = BatchImport {
+        videos: Vec::new(),
+        failed: Vec::new(),
+    };
+    for path in paths {
+        let file = PathBuf::from(&path);
+        let override_root = data_root(&file);
+        match add_local_video(db, course_id, file, override_root).await {
+            Ok(video) => imported.videos.push(video),
+            Err(error) => imported.failed.push(ImportFailure {
+                path,
+                error: error.to_string(),
+            }),
         }
     }
-    Ok(added)
+    Ok(imported)
 }
 
 pub async fn list_videos(db: &Db, course_id: &str) -> AppResult<Vec<Video>> {
@@ -679,37 +702,66 @@ pub async fn purge_expired_trash(db: &Db) -> AppResult<u64> {
     Ok(result.rows_affected())
 }
 
+/// 新导入的视频，数据目录（音频、课件图等处理产物）放哪。
+///
+/// 桌面端设了「默认存储位置」就一律放那里，没设就放视频旁边的 `.courseai`；旁边写不进
+/// （只读网盘、光盘、没有写权限的目录）时退到应用数据目录——原先直接报「拒绝访问」，
+/// 整个导入失败。移动端一律放应用数据目录。单个导入和文件夹批量导入都走这里：
+/// 批量导入原先连「默认存储位置」都不看。
+struct DataRoots {
+    preferred: Option<PathBuf>,
+    fallback: PathBuf,
+}
+
+impl DataRoots {
+    async fn load(app: &tauri::AppHandle, db: &Db) -> AppResult<Self> {
+        let app_videos = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| AppError::Config(format!("app_data_dir: {error}")))?
+            .join("videos");
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        let preferred = crate::commands::settings::get_setting(db, "default_storage_root")
+            .await?
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from);
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        let preferred = {
+            let _ = db;
+            Some(app_videos.clone())
+        };
+        Ok(Self {
+            preferred,
+            fallback: app_videos,
+        })
+    }
+
+    /// 传给 add_local_video 的 `override_root`（`None` = 放视频旁边）。
+    fn for_video(&self, video: &Path) -> Option<PathBuf> {
+        if self.preferred.is_some() {
+            return self.preferred.clone();
+        }
+        // 文件不在时 add_local_video 自会报「找不到」，不必为它在目录里留个空的 .courseai。
+        if !video.is_file() || crate::storage::sibling_data_root_writable(video) {
+            return None;
+        }
+        Some(self.fallback.clone())
+    }
+}
+
 #[tauri::command]
 pub async fn cmd_add_local_video(
-    _app: tauri::AppHandle,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     course_id: String,
     file_path: String,
     duration_ms: Option<i64>,
 ) -> AppResult<Video> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let override_root = sqlx::query_scalar::<_, String>(
-        "SELECT value FROM settings WHERE key='default_storage_root'",
-    )
-    .fetch_optional(&state.db.pool)
-    .await?
-    .filter(|value| !value.trim().is_empty())
-    .map(PathBuf::from);
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    let override_root = Some(
-        _app.path()
-            .app_data_dir()
-            .map_err(|error| AppError::Config(format!("app_data_dir: {error}")))?
-            .join("videos"),
-    );
-
-    let mut video = add_local_video(
-        &state.db,
-        &course_id,
-        PathBuf::from(file_path),
-        override_root,
-    )
-    .await?;
+    let file_path = PathBuf::from(file_path);
+    let override_root = DataRoots::load(&app, &state.db)
+        .await?
+        .for_video(&file_path);
+    let mut video = add_local_video(&state.db, &course_id, file_path, override_root).await?;
     if duration_ms.is_some() {
         sqlx::query("UPDATE videos SET duration_ms=? WHERE id=?")
             .bind(duration_ms)
@@ -719,7 +771,7 @@ pub async fn cmd_add_local_video(
         video.duration_ms = duration_ms;
     }
     // 黑边探测挪到后台：不再阻塞导入的这几秒。结果写库后播放器/课件提取直接读缓存。
-    crate::pipeline::spawn_crop_detection(_app, video.id.clone());
+    crate::pipeline::spawn_crop_detection(app, video.id.clone());
     Ok(video)
 }
 
@@ -734,13 +786,15 @@ pub async fn cmd_add_local_batch(
     state: State<'_, AppState>,
     course_id: String,
     paths: Vec<String>,
-) -> AppResult<Vec<Video>> {
-    let videos = add_local_batch(&state.db, &course_id, paths).await?;
+) -> AppResult<BatchImport> {
+    let roots = DataRoots::load(&app, &state.db).await?;
+    let imported =
+        add_local_batch(&state.db, &course_id, paths, |video| roots.for_video(video)).await?;
     // 批量导入同样在后台触发黑边探测（并发由 crop_detect 的信号量限住）。
-    for video in &videos {
+    for video in &imported.videos {
         crate::pipeline::spawn_crop_detection(app.clone(), video.id.clone());
     }
-    Ok(videos)
+    Ok(imported)
 }
 
 /// 导入后用 ffmpeg cropdetect 探测黑边并写库，同时回填到返回的 Video，
@@ -1222,17 +1276,20 @@ mod tests {
             })
             .collect();
 
-        let added = add_local_batch(&db, &course.id, paths.clone())
+        let added = add_local_batch(&db, &course.id, paths.clone(), |_| None)
             .await
             .unwrap();
-        assert_eq!(added.len(), 2);
+        assert_eq!(added.videos.len(), 2);
+        assert!(added.failed.is_empty());
         // 再导一次：幂等，不产生重复行。
-        add_local_batch(&db, &course.id, paths).await.unwrap();
+        add_local_batch(&db, &course.id, paths, |_| None)
+            .await
+            .unwrap();
         assert_eq!(list_videos(&db, &course.id).await.unwrap().len(), 2);
     }
 
     #[tokio::test]
-    async fn add_local_batch_skips_missing_files_without_aborting() {
+    async fn add_local_batch_reports_files_it_could_not_import() {
         let dir = tempdir().unwrap();
         let db = Db::connect_and_migrate(&dir.path().join("test.db"))
             .await
@@ -1244,15 +1301,85 @@ mod tests {
         std::fs::write(&good, b"x").unwrap();
         let missing = dir.path().join("gone.mp4").to_string_lossy().to_string();
 
-        let added = add_local_batch(
+        let imported = add_local_batch(
             &db,
             &course.id,
-            vec![missing, good.to_string_lossy().to_string()],
+            vec![missing.clone(), good.to_string_lossy().to_string()],
+            |_| None,
         )
         .await
         .unwrap();
-        assert_eq!(added.len(), 1);
-        assert_eq!(added[0].file_path, good.to_string_lossy());
+        // 坏的一个不拖累整批，但要带着原因报回去，而不是悄悄跳过。
+        assert_eq!(imported.videos.len(), 1);
+        assert_eq!(imported.videos[0].file_path, good.to_string_lossy());
+        assert_eq!(imported.failed.len(), 1);
+        assert_eq!(imported.failed[0].path, missing);
+        assert!(
+            imported.failed[0].error.starts_with("not found"),
+            "{}",
+            imported.failed[0].error
+        );
+    }
+
+    #[test]
+    fn data_roots_prefer_the_configured_storage_root() {
+        let dir = tempdir().unwrap();
+        let video = dir.path().join("v.mp4");
+        std::fs::write(&video, b"x").unwrap();
+        let roots = DataRoots {
+            preferred: Some(dir.path().join("store")),
+            fallback: dir.path().join("app"),
+        };
+        assert_eq!(roots.for_video(&video), Some(dir.path().join("store")));
+        let roots = DataRoots {
+            preferred: None,
+            fallback: dir.path().join("app"),
+        };
+        assert_eq!(roots.for_video(&video), None, "能写就放视频旁边");
+    }
+
+    /// 视频放在只读的地方（网盘、光盘、没有写权限的目录）也要能导入：数据目录退到
+    /// 应用数据目录。原先在视频旁边建 `.courseai` 失败，整个导入报「拒绝访问」。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn batch_import_from_a_read_only_folder_keeps_data_in_the_app_dir() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let share = dir.path().join("share");
+        std::fs::create_dir(&share).unwrap();
+        let video = share.join("v.mp4");
+        std::fs::write(&video, b"x").unwrap();
+        std::fs::set_permissions(&share, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let roots = DataRoots {
+            preferred: None,
+            fallback: dir.path().join("app").join("videos"),
+        };
+        let imported = add_local_batch(
+            &db,
+            &course.id,
+            vec![video.to_string_lossy().to_string()],
+            |file| roots.for_video(file),
+        )
+        .await;
+        std::fs::set_permissions(&share, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let imported = imported.unwrap();
+        assert!(imported.failed.is_empty(), "{:?}", imported.failed);
+        assert_eq!(imported.videos.len(), 1);
+        assert!(
+            Path::new(&imported.videos[0].data_dir)
+                .starts_with(dir.path().join("app").join("videos")),
+            "{}",
+            imported.videos[0].data_dir
+        );
+        assert!(!share.join(".courseai").exists());
     }
 
     #[tokio::test]

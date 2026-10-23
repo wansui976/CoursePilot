@@ -4,8 +4,19 @@ pub fn video_data_dir(video_file: &Path, video_id: &str, override_root: Option<&
     if let Some(root) = override_root {
         return root.join(video_id);
     }
+    sibling_data_root(video_file).join(video_id)
+}
+
+/// 没指定存储位置时，视频的数据目录建在它旁边的 `.courseai` 里。
+fn sibling_data_root(video_file: &Path) -> PathBuf {
     let parent = video_file.parent().unwrap_or_else(|| Path::new("."));
-    parent.join(".courseai").join(video_id)
+    parent.join(".courseai")
+}
+
+/// 视频旁边建不建得出 `.courseai`。只读网盘、光盘、没有写权限的目录都建不出来，
+/// 这时数据目录得另找地方，不然导入直接报「拒绝访问」。
+pub fn sibling_data_root_writable(video_file: &Path) -> bool {
+    std::fs::create_dir_all(sibling_data_root(video_file)).is_ok()
 }
 
 /// iOS 应用沙盒路径里的固定段：`…/Containers/Data/Application/<UUID>/…`。
@@ -172,5 +183,22 @@ mod tests {
             Some(&PathBuf::from("/global/store")),
         );
         assert_eq!(path, PathBuf::from("/global/store/abc"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sibling_data_root_is_not_writable_in_a_read_only_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let writable = dir.path().join("ok").join("v.mp4");
+        assert!(sibling_data_root_writable(&writable));
+
+        let locked = dir.path().join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let readonly = locked.join("v.mp4");
+        let result = sibling_data_root_writable(&readonly);
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!result);
     }
 }

@@ -10,6 +10,7 @@ import type {
   VideoListItem,
 } from "../types";
 import type {
+  BatchImport,
   FolderVideo,
   Subscription,
 } from "./types";
@@ -53,8 +54,8 @@ export const videos = {
   // 枚举目录顶层的视频文件（自然序）。
   scanFolder: (dir: string): Promise<FolderVideo[]> =>
     invoke("cmd_scan_folder", { dir }),
-  // 批量导入本地视频（幂等：已导入的文件跳过）。返回新增/既有的视频。
-  addLocalBatch: (courseId: string, paths: string[]): Promise<Video[]> =>
+  // 批量导入本地视频（幂等：已导入的文件跳过）。返回新增/既有的视频，以及没导进来的文件和原因。
+  addLocalBatch: (courseId: string, paths: string[]): Promise<BatchImport> =>
     invoke("cmd_add_local_batch", { courseId, paths }),
   ensurePlayable: (videoId: string): Promise<string> =>
     invoke("cmd_ensure_playable", { videoId }),

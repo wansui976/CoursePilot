@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FolderInput } from "lucide-react";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
+import { humanizeError } from "@/lib/errors";
 import { ipc, type FolderVideo } from "@/lib/ipc";
 import { Modal } from "@/ui/dialog";
 
@@ -22,7 +23,7 @@ export function FolderImportDialog({
   onImported?: () => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const restoreFocusRef = useRef<HTMLElement | null>(
     typeof document !== "undefined" &&
       document.activeElement instanceof HTMLElement
@@ -37,12 +38,15 @@ export function FolderImportDialog({
 
   const importBatch = useMutation({
     mutationFn: (paths: string[]) => ipc.videos.addLocalBatch(courseId, paths),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: qk.videos.list(courseId) });
       onImported?.();
-      onClose();
+      // 有文件没导进来就留着对话框把它们列出来；原先悄悄跳过、照常关掉，用户以为全导进来了。
+      if (result.failed.length === 0) onClose();
     },
   });
+  const failed = importBatch.data?.failed ?? [];
+  const nameOf = (path: string) => videos.find((v) => v.path === path)?.name ?? path;
 
   function toggle(path: string) {
     setSelected((prev) => {
@@ -114,6 +118,24 @@ export function FolderImportDialog({
       {importBatch.isError && (
         <ErrorNote className="mt-2" error={importBatch.error} />
       )}
+      {failed.length > 0 && (
+        <div
+          role="alert"
+          className="mt-2 rounded-lg bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)]"
+        >
+          <p className="font-medium">{t("folderImport.failed", { count: failed.length })}</p>
+          <ul className="mt-1 space-y-0.5">
+            {failed.map((f) => (
+              <li key={f.path} className="break-words">
+                {t("folderImport.failedItem", {
+                  name: nameOf(f.path),
+                  reason: humanizeError(f.error, i18n.language),
+                })}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="mt-3 flex flex-wrap justify-end gap-2">
         <Button
@@ -122,7 +144,7 @@ export function FolderImportDialog({
           disabled={importBatch.isPending}
           onClick={onClose}
         >
-          {t("folderImport.cancel")}
+          {importBatch.isSuccess ? t("common.close") : t("folderImport.cancel")}
         </Button>
         <Button
           variant="primary"
