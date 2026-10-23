@@ -111,6 +111,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(cloud_sync::init())
         .plugin(mobile_files::init())
+        .manage(ProcessingTasks::default())
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
@@ -130,14 +131,6 @@ pub fn run() {
                 let db = Db::connect_and_migrate(&db_path)
                     .await
                     .expect("db init");
-                if database_existed {
-                    match crate::backup::create_startup_snapshot(&db, &data_dir).await {
-                        Ok(path) => tracing::info!(path = %path.display(), "created startup database snapshot"),
-                        Err(error) => {
-                            tracing::warn!("create startup database snapshot failed: {error}")
-                        }
-                    }
-                }
                 // iOS 每次更新 / 重装应用，沙盒路径里的 UUID 都会变，库里存的绝对路径要跟着改。
                 #[cfg(target_os = "ios")]
                 if let Some(current_root) =
@@ -151,6 +144,16 @@ pub fn run() {
                 }
                 if let Err(error) = crate::sync::identity::ensure_sync_identity(&db).await {
                     tracing::warn!("initialize sync identity failed: {error}");
+                }
+                if let Err(error) = crate::pipeline::recover_interrupted_processing(&db).await {
+                    tracing::warn!("recover interrupted processing failed: {error}");
+                }
+                // 讲稿口径变更后改写仍然对得上的产物指纹，避免用户一开视频就看到
+                // 五个产物全标「已过期」（内容其实没问题）。只跑一次，见函数注释。
+                match crate::pipeline::ai::migrate_context_fingerprints(&db).await {
+                    Ok(0) => {}
+                    Ok(rewritten) => tracing::info!(rewritten, "已按新讲稿口径改写产物指纹"),
+                    Err(error) => tracing::warn!("migrate context fingerprints failed: {error}"),
                 }
                 let app_state = AppState::new(db.clone());
                 let sync_transition = app_state.sync_transition.clone();
@@ -170,28 +173,36 @@ pub fn run() {
                         tracing::warn!("resume CloudKit transport probe failed: {error}");
                     }
                 });
-                if let Err(error) = crate::pipeline::recover_interrupted_processing(&db).await {
-                    tracing::warn!("recover interrupted processing failed: {error}");
-                }
-                // 讲稿口径变更后改写仍然对得上的产物指纹，避免用户一开视频就看到
-                // 五个产物全标「已过期」（内容其实没问题）。只跑一次，见函数注释。
-                match crate::pipeline::ai::migrate_context_fingerprints(&db).await {
-                    Ok(0) => {}
-                    Ok(rewritten) => tracing::info!(rewritten, "已按新讲稿口径改写产物指纹"),
-                    Err(error) => tracing::warn!("migrate context fingerprints failed: {error}"),
-                }
-                // 启动时清理过期回收站（超过保留期的视频永久删除）。
-                if let Err(error) = crate::commands::videos::purge_expired_trash(&db).await {
-                    tracing::warn!("purge expired trash failed: {error}");
-                }
-                handle.manage(ProcessingTasks::default());
-                // 订阅的合集 / 播放列表：后台定时检查新视频并自动导入。
-                crate::commands::subscriptions::spawn_scheduler(handle.clone());
                 let media = crate::media_server::start()
                     .await
                     .expect("media server start");
                 handle.manage(media);
+                // 窗口要等 setup 跑完才出现，慢的善后放到后台，别拖慢启动。
+                // 启动快照用 VACUUM INTO，与并发写入互不影响。
+                tauri::async_runtime::spawn(async move {
+                    if database_existed {
+                        match crate::backup::create_startup_snapshot(&db, &data_dir).await {
+                            Ok(path) => tracing::info!(path = %path.display(), "created startup database snapshot"),
+                            Err(error) => {
+                                tracing::warn!("create startup database snapshot failed: {error}")
+                            }
+                        }
+                    }
+                    // 启动时清理过期回收站（超过保留期的视频永久删除）。
+                    if let Err(error) = crate::commands::videos::purge_expired_trash(&db).await {
+                        tracing::warn!("purge expired trash failed: {error}");
+                    }
+                });
+                // 订阅的合集 / 播放列表：后台定时检查新视频并自动导入。
+                crate::commands::subscriptions::spawn_scheduler(handle.clone());
             });
+            // 配置里的窗口标了 create: false，到这里状态都挂好了才建。Tauri 默认在 setup 之前
+            // 建窗口：桌面端主线程被 setup 占着，前端请求会等；移动端网页照常加载，请求和初始化
+            // 并行，Android 正式版一启动 cmd_list_processing_videos 就因「state() called
+            // before manage()」panic，课程列表的请求也一直不返回。
+            for window in app.config().app.windows.iter().filter(|window| !window.create) {
+                tauri::WebviewWindowBuilder::from_config(app.handle(), window)?.build()?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

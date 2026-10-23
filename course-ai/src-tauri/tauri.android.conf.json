@@ -6,6 +6,7 @@
     "windows": [
       {
         "title": "course-ai",
+        "create": false,
         "width": 1080,
         "height": 1920,
         "resizable": true
