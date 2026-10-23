@@ -6,7 +6,25 @@
  * 这个函数经 Playwright 的 addInitScript 序列化后在页面里执行：必须完全自包含，
  * 不能引用模块作用域里的任何东西。未处理的命令记在 window.__unknownCmds。
  */
-export function installMockIpc({ theme }) {
+export function installMockIpc({ theme, safeArea }) {
+  // 模拟真机安全区：iOS 上页面读 env()（浏览器里恒为 0），直接写 --native-inset-*；
+  // Android 上页面会经 system_bar_insets 重取一遍，下面的 handler 返回同一组值。
+  if (safeArea) {
+    const applySafeArea = () => {
+      for (const [side, value] of Object.entries(safeArea)) {
+        document.documentElement.style.setProperty(`--native-inset-${side}`, `${value}px`);
+      }
+    };
+    // WebKit 跑 init script 时 <html> 还没建出来（Chromium 已经有了），等它插进文档再写。
+    if (document.documentElement) applySafeArea();
+    else {
+      new MutationObserver((_, observer) => {
+        if (!document.documentElement) return;
+        observer.disconnect();
+        applySafeArea();
+      }).observe(document, { childList: true });
+    }
+  }
   const now = Date.now();
   const DAY = 86_400_000;
   const dayKey = (ts) => {
@@ -264,6 +282,7 @@ export function installMockIpc({ theme }) {
     unregisterCallback: () => {},
     convertFileSrc: (path) => path,
     invoke: async (cmd, args) => {
+      if (cmd === "plugin:mobile-files|system_bar_insets") return safeArea ?? { top: 0, right: 0, bottom: 0, left: 0 };
       if (cmd.startsWith("plugin:")) return cmd.endsWith("|listen") ? ++callbackId : null;
       const handler = handlers[cmd];
       if (handler) return handler(args ?? {});

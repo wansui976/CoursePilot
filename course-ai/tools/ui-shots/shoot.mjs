@@ -42,6 +42,22 @@ const WINDOWS_UA =
 
 const touch = { isMobile: true, hasTouch: true };
 
+/**
+ * 各机型的安全区（CSS 像素）。浏览器里 env(safe-area-inset-*) 恒为 0，不补的话刘海、灵动岛、
+ * 状态栏、手势条和挖孔一概看不出来——横屏左右分栏钻进挖孔下面就是这样漏掉的。
+ * 页面的 --safe-* 取 env() 与 --native-inset-* 的较大值，这里把真机的值写进后者。
+ * iPhone 取刘海机（12–14），iPad 取状态栏 + 主屏指示条；Android 是 Pixel 模拟器上实测的值。
+ */
+const SAFE_AREAS = {
+  iphone: { top: 47, right: 0, bottom: 34, left: 0 },
+  "iphone-landscape": { top: 0, right: 47, bottom: 21, left: 47 },
+  ipad: { top: 24, right: 0, bottom: 20, left: 0 },
+  "ipad-landscape": { top: 24, right: 0, bottom: 20, left: 0 },
+  android: { top: 51, right: 0, bottom: 24, left: 0 },
+  "android-landscape": { top: 28, right: 0, bottom: 24, left: 52 },
+  "android-tablet": { top: 24, right: 0, bottom: 24, left: 0 },
+};
+
 /** kind 决定场景里走哪套导航（desktop = 侧栏/rail，phone/tablet = 底部 Tab 的入口判断在场景里按可见性做）。 */
 const DEVICES = {
   desktop: { kind: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 },
@@ -134,7 +150,8 @@ async function waitForScrollIdle() {
  *   2. 写了 Tailwind 显示类却没生效（被未分层的全局规则压掉）；
  *   3. 文字被裁掉却没有省略号；
  *   4. 文字与背景对比度过低（< 3:1）；
- *   5. 原生外观的下拉框与带步进箭头的数字输入框（在 WebKit 里是系统旧式外观）。
+ *   5. 原生外观的下拉框与带步进箭头的数字输入框（在 WebKit 里是系统旧式外观）；
+ *   6. 可点的控件伸进了模拟出来的安全区（刘海、挖孔、状态栏、手势条底下）。
  * 返回问题元素的简短描述。
  */
 function auditLayout() {
@@ -276,6 +293,78 @@ function auditLayout() {
       issues.push(`${describe(select)} 是原生外观的下拉框（appearance:${appearance}）`);
     }
   }
+  // 第六类：可点的控件伸进了安全区（刘海、灵动岛、挖孔、状态栏、手势条底下）。安全区取模拟
+  // 真机时写进的 --native-inset-*（浏览器里 env() 恒为 0）；桌面上全是 0，不查。
+  //   - 在伸进去的那一块取个点，看最上层是不是它自己：被滚动容器裁掉、被底栏盖住的不算；
+  //   - 盖满整屏的遮罩（点空白处关闭）本来就铺在安全区里，不算；
+  //   - 滚动列表里的项目滚一下就能离开安全区，不算；但列表滚到底以后最后几项仍压在
+  //     底部安全区里（滚动区没留够底部内边距），算。
+  const inset = (side) =>
+    parseFloat(document.documentElement.style.getPropertyValue(`--native-inset-${side}`)) || 0;
+  const safe = { top: inset("top"), right: inset("right"), bottom: inset("bottom"), left: inset("left") };
+  if (safe.top || safe.right || safe.bottom || safe.left) {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const bands = {
+      上: { left: 0, top: 0, right: vw, bottom: safe.top },
+      下: { left: 0, top: vh - safe.bottom, right: vw, bottom: vh },
+      左: { left: 0, top: 0, right: safe.left, bottom: vh },
+      右: { left: vw - safe.right, top: 0, right: vw, bottom: vh },
+    };
+    const CONTROLS =
+      'button, a[href], input, textarea, select, [role="button"], [role="tab"], [role="menuitem"], [role="slider"]';
+    const scrollable = (el) => {
+      const overflowY = getComputedStyle(el).overflowY;
+      return (overflowY === "auto" || overflowY === "scroll") && el.scrollHeight > el.clientHeight + 1;
+    };
+    const scrollerOf = (el) => {
+      for (let p = el.parentElement; p; p = p.parentElement) if (scrollable(p)) return p;
+      return null;
+    };
+    const intrusions = (el) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 1 || rect.height <= 1) return [];
+      if (rect.width >= vw - 1 && rect.height >= vh - 1) return [];
+      const hits = [];
+      for (const [name, band] of Object.entries(bands)) {
+        const left = Math.max(rect.left, band.left);
+        const right = Math.min(rect.right, band.right);
+        const top = Math.max(rect.top, band.top);
+        const bottom = Math.min(rect.bottom, band.bottom);
+        if (right - left < 2 || bottom - top < 2) continue;
+        const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+        if (!hit || (hit !== el && !el.contains(hit))) continue;
+        hits.push({ name, depth: Math.round(name === "上" || name === "下" ? bottom - top : right - left) });
+      }
+      return hits;
+    };
+    const label = (hits) => hits.map(({ name, depth }) => `${name} ${depth}px`).join("、");
+    for (const el of document.querySelectorAll(CONTROLS)) {
+      const scroller = scrollerOf(el);
+      const hits = intrusions(el).filter(({ name }) => {
+        if (!scroller) return true;
+        if (name === "下") return false; // 往下还能滚的，下面单独按「滚到底」查
+        if (name === "上") return scroller.scrollTop <= 0;
+        return true;
+      });
+      if (hits.length) issues.push(`${describe(el)} 伸进安全区（${label(hits)}）`);
+    }
+    if (safe.bottom) {
+      for (const scroller of document.querySelectorAll("body *")) {
+        if (!scrollable(scroller)) continue;
+        const rect = scroller.getBoundingClientRect();
+        if (rect.bottom <= vh - safe.bottom + 1 || rect.height <= 1) continue;
+        const before = scroller.scrollTop;
+        scroller.scrollTo({ top: scroller.scrollHeight, behavior: "instant" });
+        for (const el of scroller.querySelectorAll(CONTROLS)) {
+          if (scrollerOf(el) !== scroller) continue;
+          const hits = intrusions(el).filter(({ name }) => name === "下");
+          if (hits.length) issues.push(`${describe(el)} 列表滚到底仍压在底部安全区（${label(hits)}）`);
+        }
+        scroller.scrollTo({ top: before, behavior: "instant" });
+      }
+    }
+  }
   return [...new Set(issues)];
 }
 
@@ -350,7 +439,7 @@ try {
         const contextOptions = { ...DEVICES[device] };
         delete contextOptions.kind; // 只是给场景用的分类，不是 Playwright 的上下文选项
         const context = await browser.newContext({ ...contextOptions, locale: "zh-CN" });
-        await context.addInitScript(installMockIpc, { theme });
+        await context.addInitScript(installMockIpc, { theme, safeArea: SAFE_AREAS[device] ?? null });
         const page = await context.newPage();
         page.on("pageerror", (error) => pageErrors.add(String(error)));
         page.on("console", (msg) => {
