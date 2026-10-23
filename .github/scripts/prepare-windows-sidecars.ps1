@@ -53,6 +53,32 @@ Get-ChildItem -Path $whisperOut -Filter "*.dll" -Recurse | ForEach-Object {
   Copy-Item $_.FullName (Join-Path $binaryDir $_.Name) -Force
 }
 
+# whisper.cpp 的预编译包是 MSVC 编的，依赖 VC++ 运行库（ggml-base 还要 OpenMP 的 vcomp140）。
+# 干净的 Windows 默认没装运行库，whisper-cli 一启动就报 0xc0000135（找不到 DLL），
+# 本地转写整个不可用。从 runner 上 Visual Studio 的可再发行目录拷 x64 版本，和 exe 放在一起。
+$vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+$vsRoot = & $vswhere -latest -products * -property installationPath
+$redistRoot = Get-ChildItem -Path (Join-Path $vsRoot "VC\Redist\MSVC") -Directory |
+  Where-Object { $_.Name -match '^\d+\.\d+' } |
+  Sort-Object { [version]$_.Name } -Descending |
+  Select-Object -First 1
+if (-not $redistRoot) {
+  throw "MSVC redist directory not found under $vsRoot"
+}
+$crtDir = Get-ChildItem -Path (Join-Path $redistRoot.FullName "x64") -Directory -Filter "Microsoft.VC14*.CRT" | Select-Object -First 1
+$ompDir = Get-ChildItem -Path (Join-Path $redistRoot.FullName "x64") -Directory -Filter "Microsoft.VC14*.OpenMP" | Select-Object -First 1
+foreach ($dll in @(
+    (Join-Path $crtDir.FullName "msvcp140.dll"),
+    (Join-Path $crtDir.FullName "vcruntime140.dll"),
+    (Join-Path $crtDir.FullName "vcruntime140_1.dll"),
+    (Join-Path $ompDir.FullName "vcomp140.dll")
+  )) {
+  if (-not (Test-Path $dll)) {
+    throw "MSVC runtime DLL not found: $dll"
+  }
+  Copy-Item $dll $binaryDir -Force
+}
+
 # Tesseract OCR. Install on the runner, then bundle the runtime files we need.
 choco install tesseract --yes --no-progress
 $tesseractRoot = "C:\Program Files\Tesseract-OCR"
