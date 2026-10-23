@@ -9,6 +9,7 @@
 //! 对「处理已录好的课程视频」这个场景，比流式协议更稳、更简单。
 
 use crate::error::{AppError, AppResult};
+use crate::pipeline::ai::{report, Progress};
 use crate::pipeline::asr::WhisperJson;
 use crate::pipeline::volcengine_asr::response_payload_to_transcript;
 use crate::sidecar::{resolve, FFMPEG};
@@ -102,6 +103,10 @@ pub async fn run_volcengine_file(
 /// 分段并行识别：把长音频按固定时长切成多段 MP3，分别提交、并行轮询，再按各段
 /// 的时间偏移合并。相比整段上传更快——服务端可并行处理、单次上传体积也更小。
 /// 每段都带「指数回退重试两次」，个别分段抖动不会让整条任务失败。
+///
+/// `progress` 收到「已完成几段 / 共几段」：长课切出二三十段、要认好几分钟，
+/// 不报的话整段都停在开始识别那一刻的进度上，看着像卡死。
+#[allow(clippy::too_many_arguments)] // 凭证/切片/并发/上下文/缓存/进度各有其义。
 pub async fn run_volcengine_file_chunked(
     wav: &Path,
     app_id: &str,
@@ -110,6 +115,7 @@ pub async fn run_volcengine_file_chunked(
     concurrency: usize,
     context: Option<String>,
     cache: Option<&crate::pipeline::asr_cache::ChunkCache<'_>>,
+    progress: Progress<'_>,
 ) -> AppResult<WhisperJson> {
     let (app_id, access_token) = check_credentials(app_id, access_token)?;
     let chunk_secs = if chunk_secs == 0 {
@@ -158,31 +164,32 @@ pub async fn run_volcengine_file_chunked(
     }
 
     let client = asr_client();
+    let total = chunks.len();
+    report(progress, 0.0, &chunk_progress_message(0, total));
+    let pending = futures_util::stream::iter(chunks.into_iter().enumerate().map(|(idx, path)| {
+        let client = client.clone();
+        let app_id = app_id.clone();
+        let access_token = access_token.clone();
+        let context = context.clone();
+        async move {
+            let bytes = tokio::fs::read(&path).await?;
+            let json = cached_or_recognize(&bytes, cache, || {
+                recognize_bytes_with_retry(
+                    &client,
+                    &app_id,
+                    &access_token,
+                    &bytes,
+                    context.as_deref(),
+                    "mp3",
+                )
+            })
+            .await?;
+            Ok((idx, json))
+        }
+    }))
+    .buffer_unordered(concurrency);
     let results: Vec<AppResult<(usize, WhisperJson)>> =
-        futures_util::stream::iter(chunks.into_iter().enumerate().map(|(idx, path)| {
-            let client = client.clone();
-            let app_id = app_id.clone();
-            let access_token = access_token.clone();
-            let context = context.clone();
-            async move {
-                let bytes = tokio::fs::read(&path).await?;
-                let json = cached_or_recognize(&bytes, cache, || {
-                    recognize_bytes_with_retry(
-                        &client,
-                        &app_id,
-                        &access_token,
-                        &bytes,
-                        context.as_deref(),
-                        "mp3",
-                    )
-                })
-                .await?;
-                Ok((idx, json))
-            }
-        }))
-        .buffer_unordered(concurrency)
-        .collect()
-        .await;
+        collect_reporting_progress(pending, total, progress).await;
 
     let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
 
@@ -192,6 +199,29 @@ pub async fn run_volcengine_file_chunked(
         parts.push(result?);
     }
     Ok(merge_chunk_transcripts(parts, chunk_secs as i64 * 1000))
+}
+
+/// 逐个收齐分段结果，每认完一段报一次进度（谁先认完算谁，不按顺序）。
+async fn collect_reporting_progress<S: futures_util::Stream>(
+    results: S,
+    total: usize,
+    progress: Progress<'_>,
+) -> Vec<S::Item> {
+    let mut results = std::pin::pin!(results);
+    let mut collected = Vec::with_capacity(total);
+    while let Some(result) = results.next().await {
+        collected.push(result);
+        report(
+            progress,
+            collected.len() as f64 / total.max(1) as f64,
+            &chunk_progress_message(collected.len(), total),
+        );
+    }
+    collected
+}
+
+fn chunk_progress_message(done: usize, total: usize) -> String {
+    format!("云端分段识别中（火山引擎），已完成 {done}/{total} 段")
 }
 
 fn check_credentials(app_id: &str, access_token: &str) -> AppResult<(String, String)> {
@@ -929,5 +959,21 @@ mod tests {
         assert_eq!(t.transcription[0].text, "你好，世界。");
         assert_eq!(t.transcription[0].offsets.from, 100);
         assert_eq!(t.transcription[0].tokens[1].text, "世界");
+    }
+
+    /// 分段识别要逐段报进度，谁先认完报谁。此前整段停在开始识别时的进度上，
+    /// 两小时的课认好几分钟，看着像卡死。
+    #[tokio::test]
+    async fn chunk_progress_counts_completed_segments() {
+        let seen = std::sync::Mutex::new(Vec::new());
+        let sink = |at: f64, message: &str| seen.lock().unwrap().push((at, message.to_string()));
+        let results =
+            collect_reporting_progress(futures_util::stream::iter(["b", "a", "c"]), 3, Some(&sink))
+                .await;
+        assert_eq!(results, ["b", "a", "c"]);
+        let seen = seen.into_inner().unwrap();
+        let fractions: Vec<f64> = seen.iter().map(|(at, _)| *at).collect();
+        assert_eq!(fractions, [1.0 / 3.0, 2.0 / 3.0, 1.0]);
+        assert_eq!(seen[1].1, "云端分段识别中（火山引擎），已完成 2/3 段");
     }
 }

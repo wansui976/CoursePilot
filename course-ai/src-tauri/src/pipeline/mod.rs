@@ -534,6 +534,24 @@ async fn run_all(
                             context.as_deref().unwrap_or_default()
                         ),
                     };
+                    // 分段陆续认完，把进度铺进 0.28–0.88：两小时的课切出二十多段，
+                    // 此前从开始识别到全部认完一直停在 28%。
+                    let sink = {
+                        let app = app.clone();
+                        let video_id = video_id.clone();
+                        let job_id = asr_job.id.clone();
+                        move |at: f64, message: &str| {
+                            emit_stage(
+                                &app,
+                                &video_id,
+                                &job_id,
+                                "asr",
+                                "running",
+                                0.28 + 0.60 * at,
+                                Some(message),
+                            );
+                        }
+                    };
                     volcengine_auc::run_volcengine_file_chunked(
                         &audio_path,
                         &app_id,
@@ -542,6 +560,7 @@ async fn run_all(
                         concurrency,
                         context.clone(),
                         Some(&cache),
+                        Some(&sink),
                     )
                     .await
                 }
