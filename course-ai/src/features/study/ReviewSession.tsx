@@ -297,7 +297,7 @@ export function ReviewSession({
               key={card.id}
               className="ca-card-enter rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 shadow-[var(--shadow-card)] sm:p-8"
             >
-              <div className="whitespace-pre-wrap text-center text-xl font-semibold leading-relaxed tracking-[-0.01em] text-[var(--text-strong)]">
+              <div className="ca-reading whitespace-pre-wrap text-center text-xl font-semibold leading-relaxed text-[var(--text-strong)]">
                 {renderInlineMarkdown(card.front)}
               </div>
 
@@ -400,7 +400,7 @@ export function ReviewSession({
                     </div>
                   )}
                   <div className="mt-4 border-t border-[var(--border-subtle)] pt-4 text-center">
-                    <div className="whitespace-pre-wrap text-[var(--text-normal)]">
+                    <div className="ca-reading whitespace-pre-wrap text-[var(--text-normal)]">
                       {renderInlineMarkdown(card.back)}
                     </div>
                     {card.source_ms != null && card.video_id && (

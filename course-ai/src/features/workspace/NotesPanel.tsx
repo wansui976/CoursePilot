@@ -98,7 +98,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     content: { type: "doc", content: [{ type: "paragraph" }] },
     editorProps: {
       attributes: {
-        class: "tiptap-notes max-w-none p-4 focus:outline-none",
+        class: "tiptap-notes ca-reading max-w-none p-4 focus:outline-none",
       },
     },
     onUpdate: ({ editor }) => {

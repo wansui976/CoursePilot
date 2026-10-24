@@ -10,12 +10,11 @@
   --color-ring: var(--focus-ring);
 
   /* 圆角单一刻度：让 Tailwind 的 rounded-md/lg/xl 对齐设计 token --r-sm/md/lg。
-     比默认偏大一档，走「更软、更圆润」的系统观感，全局只此一套尺度（含 .ca-* 壳层）。
-     极小元素(开关内圈等)仍可用 rounded-sm。 */
-  --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+     收紧一档（工具感，参考 Linear / Zotero）：大圆角 + 软阴影是模板化界面的标志。 */
+  --radius-sm: 5px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
 }
 
 /* 浅色（默认）：苹果式分层灰阶——chrome 用略暖的系统灰，内容层回到纯白，
@@ -24,8 +23,14 @@
   color-scheme: light;
 
   /* 全局唯一字体栈：body 与 .ca-app 共用,避免挂到 body 的浮层回退到未加载的 Inter。 */
-  --font-app: -apple-system, BlinkMacSystemFont, "PingFang SC",
+  --font-app: BlinkMacSystemFont, "PingFang SC", -apple-system,
     "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  /* 阅读字体：笔记、摘要、复习卡片等「读」的内容用衬线（参考 Apple 图书 / Readwise），
+     界面操作仍用上面的无衬线。中文：macOS/iOS 宋体、Android 思源宋体；Windows 没有像样的
+     自带中文衬线（SimSun 小字号发虚），故意不写 serif 兜底，让中文落回雅黑、西文仍是 Georgia。 */
+  --font-reading: "Iowan Old Style", "Charter", "Georgia", "Songti SC", "STSong",
+    "Source Han Serif SC", "Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif CN",
+    var(--font-app);
 
   --surface-app: #f5f5f7;
   --surface-rail: #fcfcfd;
@@ -42,7 +47,7 @@
      与网站本身的灰阶分离（--surface-stage 在浅色下是白的，不能拿来做徽标底）。 */
   --surface-stage-overlay: rgb(0 0 0 / 0.72);
   --surface-stage-scrim: rgb(0 0 0 / 0.2);
-  --surface-titlebar: linear-gradient(#fdfdfe, #f3f3f5);
+  --surface-titlebar: #f6f6f8;
 
   /* 发丝线（hairline）整体调柔：能靠明度/投影分层的地方不再依赖重描边。 */
   --border-subtle: #e3e4e8;
@@ -95,8 +100,9 @@
      名字刻意不叫 --shadow-sm：Tailwind v4 自己在 @theme 里定义了同名变量，
      重名会连带改掉全应用 shadow-sm 工具类的输出。 */
   --shadow-raise: 0 1px 2px rgb(20 24 40 / 0.06), 0 1px 1px rgb(20 24 40 / 0.04);
-  --shadow-card: 0 1px 2px rgb(20 24 40 / 0.05), 0 4px 14px rgb(20 24 40 / 0.04);
-  --shadow-card-hover: 0 10px 26px rgb(20 24 40 / 0.1);
+  /* 卡片几乎不投影：分层靠发丝线与底色明度差，阴影只留给真正浮起的菜单 / 对话框。 */
+  --shadow-card: 0 1px 1px rgb(20 24 40 / 0.03);
+  --shadow-card-hover: 0 1px 3px rgb(20 24 40 / 0.06);
   --shadow-pop: 0 8px 30px rgb(20 24 40 / 0.1);
 }
 
@@ -159,9 +165,9 @@
      所以每档都叠一道 inset 顶部高光——模拟光从上方来，让抬起的面自己有一条亮边。
      越高的层高光越亮，与投影一起构成「离底多远」的唯一线索。 */
   --shadow-raise: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.45);
-  --shadow-card: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-card-hover:
-    inset 0 1px 0 rgb(255 255 255 / 0.07), 0 10px 26px rgb(0 0 0 / 0.5);
+  /* 卡片不投影，只留一道极淡的顶部亮边——近黑底上分层靠它与发丝线。 */
+  --shadow-card: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  --shadow-card-hover: inset 0 1px 0 rgb(255 255 255 / 0.05);
   --shadow-pop:
     inset 0 1px 0 rgb(255 255 255 / 0.08), 0 12px 32px -8px rgb(0 0 0 / 0.6);
 }

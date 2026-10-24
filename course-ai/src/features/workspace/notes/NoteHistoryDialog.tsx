@@ -120,7 +120,7 @@ export function NoteHistoryDialog({
               aria-label={t("noteHistory.previewLabel")}
               className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)]"
             >
-              <div className="ca-note-history-preview min-h-0 flex-1 overflow-y-auto px-4 py-3 text-sm">
+              <div className="ca-note-history-preview ca-reading min-h-0 flex-1 overflow-y-auto px-4 py-3 text-sm">
                 {renderMarkdown(noteContentToMarkdown(selected.content), () => {})}
               </div>
               <div className="flex flex-none items-center gap-2 border-t border-[var(--border-faint)] px-3 py-2">

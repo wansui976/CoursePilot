@@ -827,7 +827,7 @@ export function ConceptsPanel({
                         {t("concepts.courseOverview")}
                       </h2>
                       {knowledge?.overview ? (
-                        <div className="mt-2 max-w-3xl">
+                        <div className="ca-reading mt-2 max-w-3xl">
                           {renderMarkdown(knowledge.overview, NO_SEEK)}
                         </div>
                       ) : (
@@ -1127,7 +1127,7 @@ export function ConceptsPanel({
                                       {t("concepts.explanationLabel")}
                                     </p>
                                     {concept.explanation ? (
-                                      <div className="text-sm leading-6 text-[var(--text-normal)]">
+                                      <div className="ca-reading text-sm leading-6 text-[var(--text-normal)]">
                                         {renderMarkdown(concept.explanation, NO_SEEK)}
                                       </div>
                                     ) : (

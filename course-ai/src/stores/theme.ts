@@ -17,13 +17,13 @@ export type AccentKey =
 const THEME_KEY = "course-ai-theme";
 const ACCENT_KEY = "course-ai-accent";
 const CUSTOM_ACCENT_KEY = "course-ai-custom-accent";
-const DEFAULT_CUSTOM_ACCENT = "#2f6cea";
+const DEFAULT_CUSTOM_ACCENT = "#1f5fd1";
 
 /** 强调色：accent 为基色、press 深一档；text/weak 用 color-mix 随明暗派生。
  *  custom = 用户通过系统色板选择的第一颗强调色。 */
 export const ACCENTS: { key: AccentKey; i18nKey: string; accent: string; press: string }[] = [
-  { key: "custom", i18nKey: "settings.appearance.accentCustom", accent: DEFAULT_CUSTOM_ACCENT, press: "#255cd0" },
-  { key: "blue", i18nKey: "settings.appearance.accentBlue", accent: "#2f6cea", press: "#255cd0" },
+  { key: "custom", i18nKey: "settings.appearance.accentCustom", accent: DEFAULT_CUSTOM_ACCENT, press: "#194fae" },
+  { key: "blue", i18nKey: "settings.appearance.accentBlue", accent: "#1f5fd1", press: "#194fae" },
   { key: "purple", i18nKey: "settings.appearance.accentPurple", accent: "#8a4bdb", press: "#763bc4" },
   { key: "pink", i18nKey: "settings.appearance.accentPink", accent: "#e0568f", press: "#c8447b" },
   { key: "red", i18nKey: "settings.appearance.accentRed", accent: "#e0483d", press: "#c63a31" },
@@ -296,9 +296,10 @@ function readPref(): ThemePref {
 }
 
 function readAccent(): AccentKey {
-  if (typeof window === "undefined") return "custom";
+  // 没选过时默认蓝色（沉稳的墨蓝，参考 Apple / Linear）。
+  if (typeof window === "undefined") return "blue";
   const value = window.localStorage.getItem(ACCENT_KEY);
-  return ACCENTS.some((a) => a.key === value) ? (value as AccentKey) : "custom";
+  return ACCENTS.some((a) => a.key === value) ? (value as AccentKey) : "blue";
 }
 
 function isHexColor(value: string | null): value is string {

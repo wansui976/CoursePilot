@@ -104,7 +104,7 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
             ) : isError ? (
               <ErrorNote error={error} onRetry={() => void refetch()} />
             ) : summary ? (
-              renderMarkdown(summary, requestSeek)
+              <div className="ca-reading">{renderMarkdown(summary, requestSeek)}</div>
             ) : (
               <PanelEmptyState
                 icon={<FileText className="h-7 w-7" />}

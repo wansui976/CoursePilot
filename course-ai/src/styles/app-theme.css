@@ -6,8 +6,8 @@
    color-mix() 整条失效。 */
 :root,
 .ca-app {
-  --accent: #2f6cea;
-  --accent-press: #255cd0;
+  --accent: #1f5fd1;
+  --accent-press: #194fae;
   --on-accent: #ffffff;
   --on-accent-press: #ffffff;
   --accent-weak: #eef3fd;
@@ -26,22 +26,13 @@
   --line: var(--border-subtle);
   --line-soft: var(--border-faint);
   --line-strong: var(--border-strong);
-  --r-sm: 10px;
-  --r-md: 14px;
-  --r-lg: 18px;
-  /* 签名视觉语言：全应用唯一反复出现的动态渐变，构成「学习中」的辨识记忆点。
-     --grad-accent：进度条/进度环统一的「强调色→亮调」扫描，柔和、永远与当前强调色和谐；
-     --grad-brand：logo 与主强调面用更浓更彩的一档，负责品牌存在感。 */
-  --grad-accent: linear-gradient(
-    120deg,
-    var(--accent) 0%,
-    color-mix(in srgb, var(--accent) 60%, #ffffff) 100%
-  );
-  --grad-brand: linear-gradient(
-    135deg,
-    var(--accent) 12%,
-    color-mix(in srgb, var(--accent) 46%, #7d6bf0) 100%
-  );
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  /* 进度与品牌面一律纯色：渐变 / 光晕是模板化界面的标志，颜色只表达含义（选中、主操作、进度）。
+     变量名保留，供进度条、logo 等处继续引用。 */
+  --grad-accent: var(--accent);
+  --grad-brand: var(--accent);
   /* 播放进度（seek）专用渐变，主题感知：
      浅色默认就是壳层 --grad-accent（白底上色深、对比足）；深色被 .ca-app[data-theme=dark]
      覆盖为基于 --video-accent 的版本——那是给近黑面派生的亮色，解决 --accent 在深色控制栏
@@ -102,11 +93,7 @@
   --video-accent: #7aa6ff;
   /* 深色控制栏是近黑面：seek 填充改用 --video-accent（为近黑派生的亮色）渐层，
      起始端 ≥4.5:1、亮化端更高，全程满足非文字 3:1。 */
-  --grad-video-progress: linear-gradient(
-    120deg,
-    var(--video-accent) 0%,
-    color-mix(in srgb, var(--video-accent) 50%, #ffffff) 100%
-  );
+  --grad-video-progress: var(--video-accent);
 }
 
 /* 仅把交互控件的边界抬到 3:1；分区线继续使用较安静的 subtle/faint 层级。 */

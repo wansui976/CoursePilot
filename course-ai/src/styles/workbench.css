@@ -510,11 +510,6 @@ li[data-active] > .ca-chapter .ca-chapter-dot {
   gap: clamp(8px, 4%, 18px);
   pointer-events: none;
   container-type: size;
-  background: radial-gradient(
-    ellipse at 50% 45%,
-    color-mix(in srgb, var(--accent) 22%, transparent) 0%,
-    transparent 62%
-  );
 }
 
 /* 整组往上提：画面下部是字幕区，居中的话「音频」标签会压在字幕底下。
@@ -531,9 +526,10 @@ li[data-active] > .ca-chapter .ca-chapter-dot {
   height: clamp(48px, 34%, 200px);
   aspect-ratio: 1;
   border-radius: 22%;
-  color: #fff;
-  background: linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #000));
-  box-shadow: 0 18px 40px -12px color-mix(in srgb, var(--accent) 60%, transparent);
+  /* 中性的深色图块：纯音频只需一个安静的占位，不要发光的彩色徽章。 */
+  color: rgb(255 255 255 / 0.82);
+  background: rgb(255 255 255 / 0.07);
+  border: 1px solid rgb(255 255 255 / 0.1);
 }
 
 .ca-audio-art > svg {

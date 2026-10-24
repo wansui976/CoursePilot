@@ -54,24 +54,8 @@
    顶部那条 1px 亮边也走 background-image 而不是 inset box-shadow：浮层上的强调按钮
    本身还挂着 --shadow-pop，两个 box-shadow 会互相覆盖而不是叠加，做成背景层就没这问题。
    1px 线定位在 padding box 顶边，正好落在描边内侧，圆角自动裁掉两端。 */
+/* 已停用：主按钮不再叠高光（拟物反光是模板化界面的标志）。类名保留，调用处无需改动。 */
 .ca-sheen {
-  background-image:
-    linear-gradient(rgb(255 255 255 / 0.18), rgb(255 255 255 / 0.18)),
-    linear-gradient(180deg, rgb(255 255 255 / 0.11), rgb(255 255 255 / 0));
-  background-size: 100% 1px, auto;
-  background-position: top, top;
-  background-repeat: no-repeat, repeat;
-}
-
-@media (hover: hover) {
-  .ca-sheen:hover {
-    background-image:
-      linear-gradient(rgb(255 255 255 / 0.1), rgb(255 255 255 / 0.1)),
-      linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0));
-  }
-}
-
-.ca-sheen:disabled {
   background-image: none;
 }
 
@@ -217,7 +201,6 @@
   .ca-grade:hover:not(:disabled) {
     background: color-mix(in srgb, var(--grade) 14%, var(--bg-panel));
     border-color: color-mix(in srgb, var(--grade) 48%, var(--line));
-    transform: translateY(-1px);
   }
 }
 
@@ -262,6 +245,14 @@
 /* 复习会话的舞台：卡片背后一圈很淡的强调色光晕，整屏不再是一片空灰。 */
 .ca-review-stage {
   background:
-    radial-gradient(ellipse 60% 45% at 50% 46%, var(--accent-weak), transparent 70%),
     var(--surface-app);
+}
+
+/* 阅读区：笔记、摘要、复习卡片等「读」的内容用衬线与更松的行距（参考 Apple 图书 / Readwise）。
+   界面控件不挂这个类。 */
+.ca-reading {
+  font-family: var(--font-reading);
+  line-height: 1.8;
+  letter-spacing: 0.01em;
+  font-feature-settings: "kern", "liga";
 }
