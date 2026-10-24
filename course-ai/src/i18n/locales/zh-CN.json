@@ -716,7 +716,16 @@
       "accentOrange": "橙",
       "accentYellow": "黄",
       "accentGreen": "绿",
-      "accentGray": "灰"
+      "accentGray": "灰",
+      "readingFont": "阅读字体",
+      "readingFontFootnote": "用于笔记、摘要、复习卡片等阅读内容，界面文字不受影响。",
+      "readingFontSerif": "宋体",
+      "readingFontSans": "黑体",
+      "readingFontKai": "楷体",
+      "readingFontFangsong": "仿宋",
+      "readingFontMissing": "本机未安装",
+      "readingFontSample": "学而时习之 Aa",
+      "readingFontMacHint": "楷体、仿宋可在 macOS 的「字体册」中免费下载，下载后重启应用即可使用。"
     },
     "studyReminder": {
       "title": "学习提醒",

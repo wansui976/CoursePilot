@@ -716,7 +716,16 @@
       "accentOrange": "Orange",
       "accentYellow": "Yellow",
       "accentGreen": "Green",
-      "accentGray": "Gray"
+      "accentGray": "Gray",
+      "readingFont": "Reading font",
+      "readingFontFootnote": "Used for notes, summaries, review cards and other reading content. Interface text is not affected.",
+      "readingFontSerif": "Serif",
+      "readingFontSans": "Sans",
+      "readingFontKai": "Kai",
+      "readingFontFangsong": "Fangsong",
+      "readingFontMissing": "not installed",
+      "readingFontSample": "学而时习之 Aa",
+      "readingFontMacHint": "Kai and Fangsong can be downloaded for free in Font Book on macOS; restart the app afterwards."
     },
     "studyReminder": {
       "title": "Study Reminder",

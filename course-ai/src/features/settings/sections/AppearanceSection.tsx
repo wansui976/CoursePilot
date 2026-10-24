@@ -1,9 +1,22 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { changeLanguage } from "@/i18n";
 import { ACCENTS, useTheme, type ThemePref } from "@/stores/theme";
+import {
+  isReadingFontAvailable,
+  READING_FONTS,
+  readingFontStack,
+  useReadingFont,
+} from "@/stores/readingFont";
 import { Select, Group, Row, StackRow } from "@/features/settings/primitives";
+import { isIOS } from "@/lib/platform";
 
-/** 外观：主题、强调色与界面语言。 */
+/** 桌面版 macOS（iPadOS 桌面模式会伪装成 Mac，由 isIOS 排除）。 */
+function isMacDesktop() {
+  return typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navigator.userAgent) && !isIOS();
+}
+
+/** 外观：主题、强调色、阅读字体与界面语言。 */
 const THEME_OPTIONS: { key: ThemePref; i18nKey: string }[] = [
   { key: "light", i18nKey: "settings.theme.light" },
   { key: "dark", i18nKey: "settings.theme.dark" },
@@ -50,6 +63,12 @@ export function AppearanceSection() {
   const customAccent = useTheme((s) => s.customAccent);
   const setAccent = useTheme((s) => s.setAccent);
   const setCustomAccent = useTheme((s) => s.setCustomAccent);
+  const readingFont = useReadingFont((s) => s.font);
+  const setReadingFont = useReadingFont((s) => s.setFont);
+  // 量一次即可：本机字体在应用运行期间不会变。
+  const [fontAvailable] = useState(() =>
+    Object.fromEntries(READING_FONTS.map((option) => [option.key, isReadingFontAvailable(option.key)])),
+  );
 
   return (
     <>
@@ -140,6 +159,56 @@ export function AppearanceSection() {
                     className="h-5 w-5 rounded-full"
                     style={{ background: option.accent }}
                   />
+                </button>
+              );
+            })}
+          </div>
+        </StackRow>
+      </Group>
+
+      <Group
+        header={t("settings.appearance.readingFont")}
+        footnote={
+          <>
+            {t("settings.appearance.readingFontFootnote")}
+            {/* macOS 的楷体、仿宋是「可选下载」的系统字体：告诉用户去哪儿拿。 */}
+            {isMacDesktop() && Object.values(fontAvailable).some((ok) => !ok) && (
+              <span className="mt-1 block">{t("settings.appearance.readingFontMacHint")}</span>
+            )}
+          </>
+        }
+      >
+        <StackRow>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {READING_FONTS.map((option) => {
+              const selected = readingFont === option.key;
+              const available = fontAvailable[option.key];
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  aria-pressed={selected}
+                  disabled={!available}
+                  onClick={() => setReadingFont(option.key)}
+                  title={available ? undefined : t("settings.appearance.readingFontMissing")}
+                  className={`flex flex-col items-start gap-1.5 rounded-lg border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                    selected
+                      ? "border-[var(--accent)] ring-1 ring-[var(--accent)]"
+                      : "border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
+                  }`}
+                >
+                  {/* 示例直接用该字体排：选之前就看得出是什么样子。 */}
+                  <span
+                    aria-hidden="true"
+                    className="text-base leading-snug text-[var(--text-strong)]"
+                    style={{ fontFamily: readingFontStack(option.key) }}
+                  >
+                    {t("settings.appearance.readingFontSample")}
+                  </span>
+                  <span className={`text-xs ${selected ? "font-medium text-[var(--text-strong)]" : "text-[var(--text-muted)]"}`}>
+                    {t(option.i18nKey)}
+                    {!available && ` · ${t("settings.appearance.readingFontMissing")}`}
+                  </span>
                 </button>
               );
             })}

@@ -365,6 +365,19 @@ describe("SettingsPanel", () => {
     expect(localStorage.getItem("course-ai-custom-accent")).toBe("#123456");
   });
 
+  it("外观里可选阅读字体，选中即应用到阅读区并记住", () => {
+    render(<SettingsPanel onClose={() => undefined} />);
+
+    const kai = screen.getByRole("button", { name: /楷体/ });
+    expect(screen.getByRole("button", { name: /宋体/ })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(kai);
+
+    expect(kai).toHaveAttribute("aria-pressed", "true");
+    expect(localStorage.getItem("course-ai-reading-font")).toBe("kai");
+    expect(document.documentElement.style.getPropertyValue("--font-reading")).toContain('"Kaiti SC"');
+  });
+
   it("lets users choose DeepSeek Vision OCR and save model, base URL, and API key", async () => {
     render(<SettingsPanel onClose={() => undefined} />);
 
