@@ -887,11 +887,7 @@ async fn run_slides_stage(
         Some("识别课件文字"),
     );
     let mut on_progress = |done: usize, total: usize| {
-        let value = if total == 0 {
-            1.0
-        } else {
-            done as f64 / total as f64
-        };
+        let value = slides_ocr_progress(done, total);
         emit_stage(
             app,
             video_id,
@@ -1384,6 +1380,16 @@ fn emit_stage(
             message: message.map(str::to_string),
         },
     );
+}
+
+/// 课件文字识别的进度。开始时已经报过 2%（「识别课件文字」），逐页进度接在它后面；
+/// 直接用 done/total 的话，第一条 0/n 就把进度拉回 0。
+fn slides_ocr_progress(done: usize, total: usize) -> f64 {
+    if total == 0 {
+        1.0
+    } else {
+        0.02 + 0.98 * done as f64 / total as f64
+    }
 }
 
 /// 把识别任务里一段子进度（0..1）铺进它进度条的 [from, to]。和别处的细进度一样只发事件、
@@ -1981,6 +1987,25 @@ mod tests {
         let (id, path) = select_whisper_model(dir.path(), "base").unwrap();
         assert_eq!(id, "tiny");
         assert_eq!(path, tiny);
+    }
+
+    #[test]
+    fn slides_ocr_progress_starts_where_the_stage_start_left_off() {
+        // 开始时报的是 2%：逐页进度不能再从 0 起，否则一开始识别进度条就往回退。
+        let values: Vec<f64> = (0..=4).map(|done| slides_ocr_progress(done, 4)).collect();
+        assert_eq!(values[0], 0.02);
+        assert!(
+            values.windows(2).all(|pair| pair[0] < pair[1]),
+            "{values:?}"
+        );
+        assert_eq!(values[4], 1.0);
+        assert_eq!(slides_ocr_progress(0, 0), 1.0);
+    }
+
+    #[test]
+    fn pipeline_errors_read_without_a_type_prefix() {
+        let error = AppError::Pipeline("volcengine submit 失败：鉴权失败".into());
+        assert_eq!(error.to_string(), "volcengine submit 失败：鉴权失败");
     }
 
     #[test]

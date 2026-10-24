@@ -14,7 +14,9 @@ pub enum AppError {
     Config(String),
     #[error("not found: {0}")]
     NotFound(String),
-    #[error("pipeline error: {0}")]
+    /// 处理流水线的失败原因本身就是写给用户看的一句话（「volcengine submit 失败：…」），
+    /// 会原样出现在处理队列的卡片上，所以不加类型前缀。
+    #[error("{0}")]
     Pipeline(String),
     /// 再试一次也是同一个答复：鉴权失败、额度耗尽、请求本身有问题。
     ///
