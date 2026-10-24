@@ -29,7 +29,7 @@ export function withClickableTimestamps(
         key={`${keyPrefix}-b-${i}`}
         type="button"
         onClick={() => onSeek(ms)}
-        className="ca-ts-chip mx-0.5 inline-flex items-center rounded bg-[var(--accent-weak-2)] px-1 align-baseline text-xs font-medium text-[var(--accent-text)] hover:bg-[var(--accent-weak)]"
+        className="ca-ts-chip mx-0.5 inline-flex items-center rounded px-0.5 align-baseline [font-family:var(--font-app)] text-xs tabular-nums text-[var(--accent-text)] hover:bg-[var(--surface-card-hover)]"
       >
         ▶ {match[1]}
       </button>,

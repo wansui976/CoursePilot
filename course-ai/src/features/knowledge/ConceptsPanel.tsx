@@ -908,9 +908,9 @@ export function ConceptsPanel({
                 </dl>
               </section>
 
-              {/* 「下一步」行动条：全页唯一的主动作，用强调底色从内容流里抬出来。 */}
-              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--accent-weak-2)] bg-[var(--accent-weak)] px-4 py-3">
-                <span className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-[var(--surface-card)] text-[var(--accent-text)] shadow-[var(--shadow-raise)]">
+              {/* 「下一步」行动条：全页唯一的主动作。只靠行尾的主按钮突出，不再整块铺强调底色。 */}
+              <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
+                <span className="flex h-9 w-9 flex-none items-center justify-center rounded-md bg-[var(--surface-card-hover)] text-[var(--text-muted)]">
                   {nextReview ? (
                     <Brain aria-hidden="true" className="h-4 w-4" />
                   ) : (
@@ -1108,7 +1108,7 @@ export function ConceptsPanel({
                                   <button
                                     type="button"
                                     onClick={() => setReviewing({ conceptId: concept.id, name: concept.name })}
-                                    className="ca-touch-44 my-auto inline-flex flex-none items-center gap-1 rounded-lg bg-[var(--accent-weak-2)] px-2.5 py-1 text-xs font-medium text-[var(--accent-text)] transition hover:bg-[var(--accent)] hover:text-[var(--on-accent)]"
+                                    className="ca-touch-44 my-auto inline-flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--accent-text)] transition hover:bg-[var(--surface-card-hover)]"
                                   >
                                     <Brain className="h-3.5 w-3.5" />
                                     {t("concepts.reviewDue", { count: due })}

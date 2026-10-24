@@ -165,7 +165,6 @@ export function QuizPanel({ videoId }: { videoId: string }) {
           <ErrorNote error={error} onRetry={() => void refetch()} />
         ) : questions.length === 0 ? (
           <PanelEmptyState
-            icon={<CircleHelp className="h-7 w-7" />}
             title={t("quiz.emptyTitle")}
             description={t("quiz.emptyDescription")}
             action={<GenerateEmptyAction onGenerate={generate.start} generating={generate.isPending} />}

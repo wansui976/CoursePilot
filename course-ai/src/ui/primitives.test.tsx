@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { MoreHorizontal, Play } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -112,10 +112,9 @@ describe("shared UI primitives", () => {
     expect(trigger).not.toHaveFocus();
   });
 
-  it("renders empty states with icon, copy, and optional action", () => {
+  it("renders empty states with copy and an optional action", () => {
     render(
       <EmptyState
-        icon={<Play aria-hidden="true" />}
         title="还没有视频"
         description="导入本地视频或粘贴视频链接后，会在这里形成课程视频列表。"
         action={<button type="button">导入</button>}
@@ -172,7 +171,6 @@ describe("shared UI primitives", () => {
   it("面板空态在剩余空间里居中，且与首页空态是同一套外观", () => {
     render(
       <PanelEmptyState
-        icon={<Play aria-hidden="true" />}
         title="还没有章节"
         description="字幕就绪后会自动生成。"
       />,

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Maximize2, Share2, ZoomIn, ZoomOut } from "lucide-react";
+import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import { Transformer } from "markmap-lib";
 import { Markmap } from "markmap-view";
 import { ipc } from "@/lib/ipc";
@@ -141,7 +141,6 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
       )}
       {!isLoading && !isError && !md && (
         <PanelEmptyState
-          icon={<Share2 className="h-7 w-7" />}
           title={t("mindmap.emptyTitle")}
           description={t("mindmap.emptyDescription")}
           action={<GenerateEmptyAction onGenerate={generate.start} generating={generate.isPending} />}

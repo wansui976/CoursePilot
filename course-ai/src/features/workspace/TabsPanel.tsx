@@ -4,7 +4,6 @@ import { SPLIT_NOTES_MIN_WIDTH } from "./workbenchLayout";
 import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { Captions, LayoutGrid, Sparkles, StickyNote } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs";
 import { TextSkeleton } from "@/ui/skeleton";
 import {
@@ -37,13 +36,6 @@ const TAB_KEYS: Exclude<StudyTab, "quiz">[] = [
 ];
 type Tab = Exclude<StudyTab, "quiz">;
 
-// 每个 tab 一个图标：下划线 tab 之间靠图标+文字一起辨识，避免面板窄到只剩图标时迷失。
-const TAB_ICONS: Record<Tab, typeof Sparkles> = {
-  overview: Sparkles,
-  transcript: Captions,
-  notes: StickyNote,
-  more: LayoutGrid,
-};
 
 function PanelFallback() {
   return <TextSkeleton lines={6} />;
@@ -178,7 +170,6 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
       <TabsList className="ca-study-tabs-band block">
         <div className="ca-study-tabs">
           {tabKeys.map((tab) => {
-            const Icon = TAB_ICONS[tab];
             return (
               <TabsTrigger
                 key={tab}
@@ -186,7 +177,6 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
                 onClick={() => changeTab(tab)}
                 className="ca-study-tab ca-touch-44"
               >
-                <Icon aria-hidden="true" className="h-4 w-4 flex-none" />
                 <span>{t(`studyTab.${tab}`)}</span>
                 <TabBadge tab={tab} videoId={videoId} />
               </TabsTrigger>
@@ -222,7 +212,6 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
         <div className="ca-study-tabs-band">
           <div className="ca-study-tabs">
             <span className="ca-study-tab ca-touch-44" data-state="active">
-              <StickyNote aria-hidden="true" className="h-4 w-4 flex-none" />
               <span>{t("studyTab.notes")}</span>
               <TabBadge tab="notes" videoId={videoId} />
             </span>

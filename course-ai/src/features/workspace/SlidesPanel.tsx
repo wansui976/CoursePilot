@@ -479,7 +479,6 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
           </div>
         ) : slidesQuery.isError ? null : slides.length === 0 ? (
           <PanelEmptyState
-            icon={<Images className="h-7 w-7" />}
             title={t("slides.emptyTitle")}
             description={t("slides.emptyDescription")}
           />

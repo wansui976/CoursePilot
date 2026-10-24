@@ -1,13 +1,5 @@
 import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Brain,
-  FileText,
-  GitBranch,
-  MessagesSquare,
-  Scissors,
-  Search,
-} from "lucide-react";
 import { TextSkeleton } from "@/ui/skeleton";
 
 const QuizPanel = lazy(() =>
@@ -42,14 +34,6 @@ const MORE_VIEW_KEYS: MoreView[] = [
   "comments",
 ];
 // 与一级 tab 同款图标语言（下划线式 + 图标），二级导航不再用另一套药丸样式。
-const MORE_ICONS: Record<MoreView, typeof FileText> = {
-  quiz: Brain,
-  slides: FileText,
-  mindmap: GitBranch,
-  clips: Scissors,
-  search: Search,
-  comments: MessagesSquare,
-};
 
 /** initialView：上层把存量「练习」一级标签迁进来时，落点直接定位到练习视图。 */
 export function MoreStudyPanel({
@@ -73,20 +57,18 @@ export function MoreStudyPanel({
           className="flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {MORE_VIEW_KEYS.map((key) => {
-            const Icon = MORE_ICONS[key];
             return (
               <button
                 key={key}
                 type="button"
                 aria-pressed={view === key}
                 onClick={() => setView(key)}
-                className={`ca-touch-44 flex h-8 flex-none items-center whitespace-nowrap justify-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${
+                className={`ca-touch-44 flex h-8 flex-none items-center whitespace-nowrap justify-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors ${
                   view === key
-                    ? "bg-[var(--accent-weak)] text-[var(--accent-text)]"
+                    ? "bg-[var(--surface-card-hover)] text-[var(--text-strong)]"
                     : "text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-normal)]"
                 }`}
               >
-                <Icon aria-hidden="true" className="h-3.5 w-3.5 flex-none" />
                 {t(`morePanel.${key}`)}
               </button>
             );

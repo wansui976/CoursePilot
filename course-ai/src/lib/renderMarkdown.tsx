@@ -191,7 +191,7 @@ export function renderMarkdown(
       return (
         <blockquote
           key={key}
-          className="my-2 whitespace-pre-wrap rounded-r-md border-l-2 border-[var(--accent)] bg-[var(--accent-weak)] px-3 py-1.5 text-sm leading-relaxed text-[var(--text-normal)]"
+          className="my-3 whitespace-pre-wrap border-l-2 border-[var(--border-strong)] py-0.5 pl-3 text-sm leading-relaxed text-[var(--text-muted)]"
         >
           {blockRich(block.text, onSeek, key, tail)}
         </blockquote>

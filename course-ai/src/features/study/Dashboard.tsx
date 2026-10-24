@@ -8,10 +8,8 @@ import {
   Brain,
   Check,
   Clock,
-  Flame,
   Play,
   Share2,
-  TrendingDown,
 } from "lucide-react";
 import { ipc, type DueCard } from "@/lib/ipc";
 import { isWatchedThrough, readPlaybackProgress } from "@/lib/playback";
@@ -492,16 +490,16 @@ export function Dashboard({
               >
                 {t("dashboard.continueLearning")}
               </div>
-              <ul className="space-y-2">
+              <ul className="divide-y divide-[var(--border-faint)] overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)]">
                 {continueRows.map((row) => {
                   const { positionSec, ratio } = readPlaybackProgress(row.video_id);
                   return (
                     <li key={row.course_id}>
                       <button
                         onClick={() => onResume(row.course_id, row.video_id, positionSec)}
-                        className="group flex w-full items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
+                        className="group flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
                       >
-                        <span className="grid h-9 w-9 flex-none place-items-center rounded-lg ca-fill-brand text-[var(--on-accent)] transition-transform group-hover:scale-105">
+                        <span className="grid h-9 w-9 flex-none place-items-center rounded-md bg-[var(--surface-card-hover)] text-[var(--text-muted)]">
                 <Play className="h-4 w-4" />
               </span>
                         <div className="min-w-0 flex-1">
@@ -521,8 +519,8 @@ export function Dashboard({
                             </div>
                           )}
                         </div>
-                        {/* 与同页「复习」同款的浅色强调按钮，整行仍是点击区。 */}
-                        <span className="flex-none rounded-md bg-[var(--accent-weak-2)] px-3 py-1.5 text-xs font-medium text-[var(--accent-text)]">
+                        {/* 行尾动作只用强调色文字表示，整行是点击区。 */}
+                        <span className="flex-none text-xs font-medium text-[var(--accent-text)]">
                           {ratio > 0 ? t("dashboard.continue") : t("dashboard.start")}
                         </span>
                       </button>
@@ -545,7 +543,7 @@ export function Dashboard({
               onClick={() => setReviewing(true)}
               className="flex w-full items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
             >
-              <span className="grid h-9 w-9 flex-none place-items-center rounded-lg ca-fill-brand text-[var(--on-accent)]">
+              <span className="grid h-9 w-9 flex-none place-items-center rounded-md bg-[var(--surface-card-hover)] text-[var(--text-muted)]">
                 <Brain className="h-5 w-5" />
               </span>
               <span className="min-w-0 flex-1">
@@ -655,9 +653,6 @@ export function Dashboard({
             >
               <div className="min-h-7 text-xs leading-7 text-[var(--text-muted)]">{t("dashboard.streak")}</div>
               <div className="mt-1 flex items-center gap-1.5 text-lg font-semibold tabular-nums text-[var(--text-strong)]">
-                <Flame
-                  className={`h-4 w-4 flex-none ${streak > 0 ? "text-[var(--status-warn,#e08a00)]" : "text-[var(--text-faint)]"}`}
-                />
                 {t("dashboard.streakDays", { days: streak })}
               </div>
               <div className="mt-1 text-xs leading-tight text-[var(--text-muted)]">
@@ -673,7 +668,6 @@ export function Dashboard({
                 id="dashboard-weak-title"
                 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-[var(--text-strong)]"
               >
-                <TrendingDown className="h-4 w-4 text-[var(--status-warn,#e08a00)]" />
                 {t("dashboard.weakTopics")}
               </div>
               <ErrorNote
@@ -687,10 +681,9 @@ export function Dashboard({
                 id="dashboard-weak-title"
                 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-[var(--text-strong)]"
               >
-                <TrendingDown className="h-4 w-4 text-[var(--status-warn,#e08a00)]" />
                 {t("dashboard.weakTopics")}
               </div>
-              <ul className="space-y-2">
+              <ul className="divide-y divide-[var(--border-faint)] overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)]">
                 {weak.map((w) => (
                   <li key={`${w.course_id}-${w.concept_id}`}>
                     <button
@@ -701,7 +694,7 @@ export function Dashboard({
                           name: w.name,
                         })
                       }
-                      className="flex w-full items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
+                      className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium text-[var(--text-strong)]">
@@ -716,7 +709,7 @@ export function Dashboard({
                           })}
                         </div>
                       </div>
-                      <span className="flex-none rounded-md bg-[var(--accent-weak-2)] px-3 py-1.5 text-xs font-medium text-[var(--accent-text)]">
+                      <span className="flex-none text-xs font-medium text-[var(--accent-text)]">
                         {t("dashboard.reviewButton")}
                       </span>
                     </button>
@@ -823,7 +816,7 @@ export function Dashboard({
                 {t("dashboard.noStudyRecords")}
               </p>
             ) : (
-              <ul className="space-y-2">
+              <ul className="divide-y divide-[var(--border-faint)] overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)]">
                 {courseTotals.map((c) => {
                   const { watched, total } = completionOf(c.course_id);
                   const due = dueOf.get(c.course_id) ?? 0;
@@ -831,7 +824,7 @@ export function Dashboard({
                     <li key={c.course_id}>
                       <button
                         onClick={() => onOpenCourse(c.course_id)}
-                        className="flex w-full items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
+                        className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
                       >
                         {total > 0 && (
                           <ProgressRing value={watched / total}>
@@ -851,7 +844,7 @@ export function Dashboard({
                           </div>
                         </div>
                         {due > 0 && (
-                          <span className="flex-none rounded-md bg-[var(--accent-weak-2)] px-2.5 py-1 text-xs font-medium text-[var(--accent-text)]">
+                          <span className="flex-none text-xs font-medium text-[var(--accent-text)]">
                             {t("dashboard.courseDue", { count: due })}
                           </span>
                         )}

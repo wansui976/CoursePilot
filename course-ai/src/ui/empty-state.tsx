@@ -2,13 +2,11 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export function EmptyState({
-  icon,
   title,
   description,
   action,
   className,
 }: {
-  icon?: ReactNode;
   title: string;
   description?: string;
   action?: ReactNode;
@@ -16,13 +14,17 @@ export function EmptyState({
 }) {
   return (
     <div role="status" className={cn("ca-empty-state", className)}>
-      {icon && <div className="ca-empty-state-icon">{icon}</div>}
       <h2 className="ca-empty-state-title">{title}</h2>
       {description && <p className="ca-empty-state-description">{description}</p>}
       {action && <div className="ca-empty-state-action">{action}</div>}
     </div>
   );
 }
+
+/**
+ * 空态只有一句标题、一句说明和可选的动作——不放图标方块（居中大图标 + 两行字是模板化
+ * 界面的标志，图标也说不出比标题更多的信息）。
+ */
 
 /**
  * 面板里的空态：在剩余空间中居中。
@@ -33,7 +35,6 @@ export function EmptyState({
  * 收到这里之后，加空态只需给图标和两句话。
  */
 export function PanelEmptyState(props: {
-  icon?: ReactNode;
   title: string;
   description?: string;
   action?: ReactNode;

@@ -55,13 +55,12 @@
   margin: 0;
 }
 /* 与摘要面板（renderMarkdown）的引用块同一长相：强调色竖条 + 淡强调色底。 */
+/* 书页式引用：一道中性细线 + 稍淡的字，不加底色（浅蓝底卡片式引用是模板化界面的标志）。 */
 .tiptap-notes blockquote {
-  margin: 0.6em 0;
-  padding: 0.45em 0.9em;
-  border-left: 2px solid var(--accent);
-  border-radius: 0 6px 6px 0;
-  background: var(--accent-weak);
-  color: var(--text-normal);
+  margin: 0.8em 0;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-muted);
 }
 
 .tiptap-notes blockquote > :first-child {

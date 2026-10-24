@@ -174,18 +174,12 @@ export function SettingsPanel({
                   key={key}
                   onClick={() => requestSettingsExit({ kind: "category", category: key })}
                   aria-current={active ? "page" : undefined}
-                  className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left ca-t-sm transition ${
+                  className={`flex w-full items-center rounded-md px-2.5 py-1.5 text-left ca-t-sm transition ${
                     active
-                      ? "bg-[var(--accent-weak)] font-medium text-[var(--accent-text)]"
+                      ? "bg-[var(--surface-card-hover)] font-medium text-[var(--text-strong)]"
                       : "text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
                   }`}
                 >
-                  <span
-                    className="grid h-6 w-6 flex-none place-items-center rounded-[6px] text-white"
-                    style={{ background: meta.tint }}
-                  >
-                    {meta.icon}
-                  </span>
                   {t(meta.i18nKey)}
                 </button>
               );
@@ -198,7 +192,7 @@ export function SettingsPanel({
             aria-label={t("settings.category")}
             className="min-h-0 flex-1 overflow-y-auto px-4 py-5"
           >
-            <div className="mx-auto max-w-2xl divide-y divide-[var(--border-faint)] overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)]">
+            <div className="mx-auto max-w-2xl divide-y divide-[var(--border-faint)] overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)]">
               {categories.map((key) => {
                 const meta = CATEGORY_META[key];
                 return (
@@ -207,12 +201,6 @@ export function SettingsPanel({
                     onClick={() => requestSettingsExit({ kind: "category", category: key })}
                     className="flex min-h-[52px] w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)] active:bg-[var(--surface-card-active)]"
                   >
-                    <span
-                      className="grid h-7 w-7 flex-none place-items-center rounded-[7px] text-white"
-                      style={{ background: meta.tint }}
-                    >
-                      {meta.icon}
-                    </span>
                     <span className="flex-1 ca-t-md text-[var(--text-strong)]">
                       {t(meta.i18nKey)}
                     </span>

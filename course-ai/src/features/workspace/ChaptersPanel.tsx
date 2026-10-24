@@ -2,7 +2,7 @@ import { useState } from "react";
 import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ListTree } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import { ErrorNote } from "@/ui/ErrorNote";
@@ -117,7 +117,6 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
             <ErrorNote error={error} onRetry={() => void refetch()} />
           ) : chapters.length === 0 ? (
             <PanelEmptyState
-              icon={<ListTree className="h-7 w-7" />}
               title={t("chapters.emptyTitle")}
               description={t("chapters.emptyDescription")}
               action={<GenerateEmptyAction onGenerate={generate.start} generating={generate.isPending} />}

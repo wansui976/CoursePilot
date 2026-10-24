@@ -3,7 +3,7 @@ import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
-import { Play, Scissors, Trash2, X } from "lucide-react";
+import { Play, Trash2, X } from "lucide-react";
 import { Button } from "@/ui/button";
 import { PanelEmptyState } from "@/ui/empty-state";
 import { ErrorNote } from "@/ui/ErrorNote";
@@ -224,7 +224,6 @@ export function ClipsPanel({ videoId }: { videoId: string }) {
           <ErrorNote error={error} onRetry={() => void refetch()} />
         ) : clips.length === 0 ? (
           <PanelEmptyState
-            icon={<Scissors className="h-7 w-7" />}
             title={t("clips.emptyTitle")}
             description={t("clips.emptyDescription")}
           />

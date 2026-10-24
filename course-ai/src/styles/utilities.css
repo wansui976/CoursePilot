@@ -187,9 +187,10 @@
   min-width: 0;
   padding: 12px 6px 10px;
   border-radius: var(--r-md);
-  border: 1px solid color-mix(in srgb, var(--grade) 26%, var(--line-soft));
-  background: color-mix(in srgb, var(--grade) 7%, var(--bg-panel));
-  transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast) var(--ease);
+  /* 中性按钮，只让评分字带颜色（参考 Anki）：四块粉彩底并排是模板化界面的标志。 */
+  border: 1px solid var(--line);
+  background: var(--bg-panel);
+  transition: background var(--dur-fast), border-color var(--dur-fast);
 }
 
 .ca-grade[data-grade="1"] { --grade: var(--status-err); }
@@ -199,8 +200,8 @@
 
 @media (hover: hover) {
   .ca-grade:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--grade) 14%, var(--bg-panel));
-    border-color: color-mix(in srgb, var(--grade) 48%, var(--line));
+    background: var(--bg-sunken);
+    border-color: var(--line-strong);
   }
 }
 

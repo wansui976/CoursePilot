@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { ClipboardList, Loader2, RotateCcw, Trash2, X } from "lucide-react";
+import { Loader2, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/ui/button";
 import { Badge } from "@/ui/badge";
 import { EmptyState } from "@/ui/empty-state";
@@ -109,7 +109,6 @@ export function ProcessingQueuePanel({
         ) : items.length === 0 && !error ? (
           <div className="flex h-full min-h-[240px] items-center justify-center">
             <EmptyState
-              icon={<ClipboardList className="h-6 w-6" />}
               title={t("home.queueEmpty")}
             />
           </div>

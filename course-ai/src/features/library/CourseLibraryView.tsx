@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import {
   Check,
   ChevronLeft,
-  Film,
   FolderPlus,
   LayoutGrid,
   Lightbulb,
@@ -941,7 +940,6 @@ export function CourseLibraryView({
           ) : !selectedCourseId || videos.length === 0 ? (
             <div className="flex h-full min-h-[320px] items-center justify-center">
               <EmptyState
-                icon={<Film className="h-7 w-7" />}
                 title={selectedCourseId ? t("home.noVideos") : t("home.noCourses")}
                 description={
                   selectedCourseId
@@ -979,7 +977,6 @@ export function CourseLibraryView({
           ) : visibleVideos.length === 0 ? (
             <div className="flex h-full min-h-[320px] items-center justify-center">
               <EmptyState
-                icon={<Film className="h-7 w-7" />}
                 title={t("home.noMatch")}
                 description={t("home.noMatchDesc", { query: videoQuery.trim() })}
               />

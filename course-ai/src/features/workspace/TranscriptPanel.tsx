@@ -6,7 +6,6 @@ import { GhostSelect } from "@/ui/select";
 import { invalidateStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Captions,
   Check,
   Languages,
   ChevronDown,
@@ -576,7 +575,6 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   if (rows.length === 0) {
     return (
       <PanelEmptyState
-        icon={<Captions className="h-7 w-7" />}
         title={t("transcript.emptyTitle")}
         description={t("transcript.emptyDescription")}
       />

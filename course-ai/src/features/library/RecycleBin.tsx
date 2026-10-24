@@ -291,7 +291,6 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
           ) : items.length === 0 ? (
             <div className="flex min-h-[320px] items-center justify-center">
               <EmptyState
-                icon={<Trash2 className="h-6 w-6" />}
                 title={t("recycleBin.empty")}
               />
             </div>

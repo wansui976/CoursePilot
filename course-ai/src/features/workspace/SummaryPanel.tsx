@@ -2,7 +2,7 @@ import { useState } from "react";
 import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, FileText } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { usePlayer } from "@/stores/player";
 import { TextSkeleton } from "@/ui/skeleton";
@@ -107,7 +107,6 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
               <div className="ca-reading">{renderMarkdown(summary, requestSeek)}</div>
             ) : (
               <PanelEmptyState
-                icon={<FileText className="h-7 w-7" />}
                 title={t("summary.emptyTitle")}
                 description={t("summary.emptyDescription")}
                 action={<GenerateEmptyAction onGenerate={generate.start} generating={generate.isPending} />}

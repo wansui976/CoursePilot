@@ -30,7 +30,7 @@ export const TimestampNode = Node.create({
         "data-ms": String(ms),
         class: source
           ? "ca-ts-chip ca-ts-source-chip cursor-pointer rounded px-1 text-xs text-[var(--text-muted)] align-middle"
-          : "ca-ts-chip cursor-pointer rounded bg-[var(--accent-weak-2)] px-1 text-xs text-[var(--accent-text)] align-middle",
+          : "ca-ts-chip cursor-pointer rounded px-0.5 [font-family:var(--font-app)] text-xs tabular-nums text-[var(--accent-text)] align-middle hover:bg-[var(--surface-card-hover)]",
       }),
       `${source ? "" : "▶ "}${HTMLAttributes.label || formatMs(ms)}`,
     ];
