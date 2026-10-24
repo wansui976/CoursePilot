@@ -1358,7 +1358,9 @@
     "continueAt": "Continue from {{time}}",
     "colProgress": "Progress",
     "cancelAll": "Cancel all",
-    "retryAll": "Retry all"
+    "retryAll": "Retry all",
+    "readingFocus": "Focus reading",
+    "exitReadingFocus": "Exit focus reading (Esc)"
   },
   "time": {
     "justNow": "Just now",

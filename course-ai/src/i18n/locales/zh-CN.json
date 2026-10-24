@@ -1357,7 +1357,9 @@
     "continueAt": "从 {{time}} 继续",
     "colProgress": "进度",
     "cancelAll": "全部取消",
-    "retryAll": "全部重试"
+    "retryAll": "全部重试",
+    "readingFocus": "专注阅读",
+    "exitReadingFocus": "退出专注阅读（Esc）"
   },
   "time": {
     "justNow": "刚刚",

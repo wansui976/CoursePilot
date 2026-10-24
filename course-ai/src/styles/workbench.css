@@ -244,15 +244,21 @@
   display: none;
 }
 
-/* 学习面板开关：钉在播放器列右上角，与视频标题同一行；收起 / 展开都用它，位置不变
-   （参考 Xcode 检查器、Safari 侧栏）。分隔线往右拖到底也能收起。 */
-.ca-panel-toggle {
+/* 工作台工具（专注阅读、学习面板开关）：钉在播放器列右上角，与视频标题同一行；
+   收起 / 展开都用同一个开关，位置不变（参考 Xcode 检查器、Safari 侧栏）。
+   分隔线往右拖到底也能收起。 */
+.ca-wb-tools {
   grid-column: 1;
   grid-row: 1;
   justify-self: end;
   align-self: start;
   z-index: 4;
   margin: 14px 16px 0 0;
+  display: flex;
+  gap: 2px;
+}
+
+.ca-wb-tool {
   display: grid;
   place-items: center;
   width: 32px;
@@ -262,14 +268,14 @@
   transition: color 0.12s, background 0.12s;
 }
 
-.ca-panel-toggle:hover {
+.ca-wb-tool:hover {
   color: var(--text-1);
   background: var(--surface-card-hover);
 }
 
-/* 标题行给开关让出位置，长标题不会钻到按钮底下。 */
+/* 标题行给工具让出位置，长标题不会钻到按钮底下。 */
 .ca-wb[data-layout="wide"] .ca-wb-head {
-  padding-right: 60px;
+  padding-right: 96px;
 }
 
 /* 拖动分隔条时：只冻结「文稿」栏（DOM 巨大、是卡顿来源）；其余栏较轻，照常同步随宽度渲染。
@@ -603,4 +609,44 @@ li[data-active] > .ca-chapter .ca-chapter-dot {
 .ca-wb[data-collapse-pending] > .ca-panel-col {
   opacity: 0.4;
   transition: opacity 0.12s;
+}
+
+/* 专注阅读：播放器让位（只隐藏、不卸载，课可以继续放），学习面板占满工作台，
+   正文居中在舒适行宽内。退出按钮移到面板右上角。 */
+.ca-wb[data-reading-focus] {
+  grid-template-columns: 0 0 minmax(0, 1fr);
+}
+
+.ca-wb[data-reading-focus] > .ca-player-col {
+  visibility: hidden;
+  overflow: hidden;
+}
+
+.ca-wb[data-reading-focus] > .ca-resizer {
+  display: none;
+}
+
+.ca-wb[data-reading-focus] > .ca-wb-tools {
+  grid-column: 3;
+  margin-top: 12px;
+}
+
+.ca-wb[data-reading-focus] .ca-study-tabs-band {
+  padding-right: 56px;
+}
+
+.ca-wb[data-reading-focus] .ca-study-tabs {
+  max-width: 560px;
+  margin-inline: auto;
+}
+
+/* 整块标签内容收进一条居中的阅读栏：概览、文稿、笔记都在同一列里。 */
+.ca-wb[data-reading-focus] .ca-tab-content {
+  width: 100%;
+  max-width: 760px;
+  margin-inline: auto;
+}
+
+.ca-wb[data-reading-focus] .tiptap-notes {
+  padding-top: 32px;
 }

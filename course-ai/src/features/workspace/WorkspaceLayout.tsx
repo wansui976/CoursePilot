@@ -14,7 +14,7 @@ import {
   STUDY_PANEL_MIN,
   STUDY_RESIZER_WIDTH,
 } from "./workbenchLayout";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { BookOpenText, Minimize2, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 
 const PANEL_WIDTH_STORAGE_KEY = "course-ai-study-panel-width";
@@ -96,13 +96,28 @@ export function WorkspaceLayout({
 
   useEffect(() => () => resizeAbortRef.current?.abort(), []);
 
+  // 专注阅读：播放器让位、学习面板占满工作台，正文居中（参考 Apple 图书的阅读视图）。
+  // 播放器只是隐藏，不卸载——正在播放的课可以继续听。不存储，是一次性的阅读状态。
+  const [readingFocusPref, setReadingFocus] = useState(false);
+  const readingFocus = isWideWorkbench(shellWide, availableWidth) && readingFocusPref;
+  useEffect(() => {
+    if (!readingFocus) return;
+    function onKeyDown(event: KeyboardEvent) {
+      // 菜单、对话框等先处理过的 Esc 不再拿来退出。
+      if (event.key === "Escape" && !event.defaultPrevented) setReadingFocus(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [readingFocus]);
+
   const maxWidthForLayout = maxPanelWidthFor(availableWidth);
   const isWide = isWideWorkbench(shellWide, availableWidth);
   const widthForLayout = isResizing
     ? liveWidthRef.current
     : Math.min(panelWidth, maxWidthForLayout);
   // 收起只在分栏时有意义：叠放布局下面板总是展示。
-  const collapsed = isWide && collapsedPref;
+  // 专注阅读时面板必然展开（就是要读它）。
+  const collapsed = isWide && collapsedPref && !readingFocus;
 
   function persistWidth(width: number) {
     window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(width));
@@ -213,6 +228,7 @@ export function WorkspaceLayout({
       aria-label={t("home.workbenchLayout")}
       data-layout={isWide ? "wide" : "stacked"}
       data-panel-collapsed={collapsed ? "" : undefined}
+      data-reading-focus={readingFocus ? "" : undefined}
       className={`ca-wb ${isResizing ? "is-resizing-panel" : ""}`}
       style={
         isWide
@@ -247,20 +263,46 @@ export function WorkspaceLayout({
         </aside>
       )}
       {isWide && (
-        <button
-          type="button"
-          onClick={() => setCollapsed(!collapsed)}
-          aria-label={collapsed ? t("home.expandStudyPanel") : t("home.collapseStudyPanel")}
-          aria-pressed={!collapsed}
-          title={collapsed ? t("home.expandStudyPanel") : t("home.collapseStudyPanel")}
-          className="ca-panel-toggle ca-touch-44"
-        >
-          {collapsed ? (
-            <PanelRightOpen aria-hidden="true" className="h-[18px] w-[18px]" />
+        // 工作台工具：钉在标题行右端；专注阅读时移到面板右上角，只留「退出」。
+        <div className="ca-wb-tools">
+          {readingFocus ? (
+            <button
+              type="button"
+              onClick={() => setReadingFocus(false)}
+              aria-label={t("home.exitReadingFocus")}
+              title={t("home.exitReadingFocus")}
+              className="ca-wb-tool ca-touch-44"
+            >
+              <Minimize2 aria-hidden="true" className="h-[18px] w-[18px]" />
+            </button>
           ) : (
-            <PanelRightClose aria-hidden="true" className="h-[18px] w-[18px]" />
+            <>
+              <button
+                type="button"
+                onClick={() => setReadingFocus(true)}
+                aria-label={t("home.readingFocus")}
+                title={t("home.readingFocus")}
+                className="ca-wb-tool ca-touch-44"
+              >
+                <BookOpenText aria-hidden="true" className="h-[18px] w-[18px]" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setCollapsed(!collapsed)}
+                aria-label={collapsed ? t("home.expandStudyPanel") : t("home.collapseStudyPanel")}
+                aria-pressed={!collapsed}
+                title={collapsed ? t("home.expandStudyPanel") : t("home.collapseStudyPanel")}
+                className="ca-wb-tool ca-touch-44"
+              >
+                {collapsed ? (
+                  <PanelRightOpen aria-hidden="true" className="h-[18px] w-[18px]" />
+                ) : (
+                  <PanelRightClose aria-hidden="true" className="h-[18px] w-[18px]" />
+                )}
+              </button>
+            </>
           )}
-        </button>
+        </div>
       )}
     </div>
   );

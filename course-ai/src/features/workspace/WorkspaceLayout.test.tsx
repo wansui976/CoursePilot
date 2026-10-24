@@ -82,6 +82,24 @@ describe("WorkspaceLayout", () => {
     }
   });
 
+  it("专注阅读：面板占满、播放器只隐藏不卸载，收起的面板也会展开，Esc 退出", () => {
+    writeVideoResumeState("a", { studyPanelCollapsed: true });
+    render(layout("a"));
+    const wb = screen.getByLabelText("学习工作台响应布局");
+    const player = screen.getByTestId("player");
+
+    fireEvent.click(screen.getByRole("button", { name: "专注阅读" }));
+    expect(wb).toHaveAttribute("data-reading-focus");
+    expect(wb).not.toHaveAttribute("data-panel-collapsed");
+    expect(screen.getByRole("complementary", { name: "学习资料面板" })).toBeInTheDocument();
+    expect(screen.getByTestId("player")).toBe(player);
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(wb).not.toHaveAttribute("data-reading-focus");
+    // 退出后回到原来的收起状态。
+    expect(wb).toHaveAttribute("data-panel-collapsed");
+  });
+
   it("persists keyboard resizing per video and globally", () => {
     render(layout("a"));
     fireEvent.keyDown(separator(), { key: "ArrowLeft" });
