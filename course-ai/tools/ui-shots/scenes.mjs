@@ -117,6 +117,12 @@ export const scenes = [
     run: async ({ page, shot }) => {
       await openVideo(page);
       await shot();
+      // 分栏布局下再拍一张收起学习面板的样子（开关在标题行右端）。
+      const collapse = page.getByRole("button", { name: "收起学习资料面板" });
+      if (await collapse.count()) {
+        await collapse.click();
+        await shot("collapsed");
+      }
     },
   },
   {
