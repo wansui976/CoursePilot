@@ -122,6 +122,11 @@ export const scenes = [
       if (await collapse.count()) {
         await collapse.click();
         await shot("collapsed");
+        // 专注阅读：面板占满、正文居中。
+        await page.getByRole("button", { name: "专注阅读" }).click();
+        await page.getByRole("tab", { name: /笔记/ }).click();
+        await shot("focus");
+        await page.keyboard.press("Escape");
       }
     },
   },
