@@ -311,28 +311,6 @@
       "ready": "Backup validated and scheduled for restore."
     }
   },
-  "job": {
-    "audio": "Extract audio",
-    "asr": "Speech recognition",
-    "slides": "Extract slides",
-    "slides_ocr": "OCR slide text",
-    "chapters": "Generate chapters",
-    "summary": "Generate summary",
-    "notes": "Generate notes",
-    "quiz": "Generate quiz",
-    "mindmap": "Generate mind map",
-    "pending": "Pending",
-    "running": "In progress",
-    "done": "Done",
-    "failed": "Failed",
-    "canceled": "Skipped",
-    "loading": "Loading processing status…",
-    "notStarted": "Not started",
-    "start": "Start processing",
-    "starting": "Starting…",
-    "retry": "Retry",
-    "retrying": "Retrying…"
-  },
   "slides": {
     "extracting": "Extracting…",
     "captureProgress": "Capturing {{done}}/{{total}}",

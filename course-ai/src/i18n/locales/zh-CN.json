@@ -311,28 +311,6 @@
       "ready": "备份已通过校验并安排恢复。"
     }
   },
-  "job": {
-    "audio": "提取音频",
-    "asr": "语音识别",
-    "slides": "提取课件",
-    "slides_ocr": "识别课件文字",
-    "chapters": "生成章节",
-    "summary": "生成摘要",
-    "notes": "生成笔记",
-    "quiz": "生成出题",
-    "mindmap": "生成脑图",
-    "pending": "待处理",
-    "running": "进行中",
-    "done": "完成",
-    "failed": "失败",
-    "canceled": "已跳过",
-    "loading": "正在加载处理状态…",
-    "notStarted": "未开始",
-    "start": "开始处理",
-    "starting": "正在启动…",
-    "retry": "重试",
-    "retrying": "正在重试…"
-  },
   "slides": {
     "extracting": "提取中…",
     "captureProgress": "截图 {{done}}/{{total}}",

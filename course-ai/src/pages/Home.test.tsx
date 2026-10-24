@@ -50,9 +50,6 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: confirmMoc
 vi.mock("@/features/library/ImportVideoDialog", () => ({
   ImportVideoButton: () => <button>导入</button>,
 }));
-vi.mock("@/features/library/JobProgress", () => ({
-  JobProgress: () => <div>处理进度</div>,
-}));
 vi.mock("@/features/workspace/RagSearchPanel", () => ({
   RagSearchPanel: () => <input aria-label="课程问答" placeholder="向这节课提问或搜索文稿" />,
 }));
