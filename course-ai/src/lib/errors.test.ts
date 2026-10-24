@@ -92,6 +92,13 @@ describe("humanizeError", () => {
     expect(humanizeError("Permission denied (os error 13)")).toContain("权限");
   });
 
+  it("maps Windows access-denied errors to the permission hint", () => {
+    expect(humanizeError("io error: 拒绝访问。 (os error 5)")).toContain("权限");
+    expect(humanizeError("io error: Access is denied. (os error 5)")).toContain("权限");
+    // 别的错误码不能被当成权限问题。
+    expect(humanizeError("io error: (os error 53)")).not.toContain("权限");
+  });
+
   it("uses the requested language for recognized errors", () => {
     expect(humanizeError("timed out", "en")).toBe(
       "The request timed out. Check your network and retry.",

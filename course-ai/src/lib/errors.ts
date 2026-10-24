@@ -110,7 +110,16 @@ export function humanizeError(error: unknown, language?: string): string {
   if (s.includes("no space") || s.includes("磁盘") || s.includes("disk full")) {
     return translated("disk", locale);
   }
-  if (s.includes("permission denied") || s.includes("权限") || s.includes("eacces")) {
+  // Windows 的权限错误是「拒绝访问。 (os error 5)」（英文系统上是 Access is denied）。
+  // 错误码要连括号一起比：os error 50、53 是别的错误。
+  if (
+    s.includes("permission denied") ||
+    s.includes("权限") ||
+    s.includes("eacces") ||
+    s.includes("拒绝访问") ||
+    s.includes("access is denied") ||
+    s.includes("(os error 5)")
+  ) {
     return translated("permission", locale);
   }
   if (s.includes("ffmpeg")) {
