@@ -256,4 +256,19 @@
   line-height: 1.8;
   letter-spacing: 0.01em;
   font-feature-settings: "kern", "liga";
+  /* 阅读字号（设置 → 外观）：renderMarkdown 的正文字号读 --md-size，只在阅读区里随档位缩放，
+     助手对话等非阅读区不设它、保持 14px。 */
+  --md-size: calc(0.875rem * var(--reading-scale, 1));
+  /* 中文排版（渐进增强，不支持的平台保持原样）：
+     中西文之间自动留空、相邻标点挤压、末行不留孤字、行首不放标点、行尾标点悬挂。 */
+  text-autospace: normal;
+  text-spacing-trim: normal;
+  text-wrap: pretty;
+  line-break: strict;
+  hanging-punctuation: allow-end;
+}
+
+/* 长文行宽：面板拉宽时正文不跟着一行拉满（中文约 42 字一行最舒服）。 */
+.ca-reading-measure {
+  max-width: 42em;
 }

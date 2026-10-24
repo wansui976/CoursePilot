@@ -181,7 +181,7 @@ export function renderMarkdown(
       return (
         <HeadingTag
           key={key}
-          className="mt-3 mb-1 text-sm font-semibold text-[var(--text-strong)]"
+          className="mt-3 mb-1 text-[length:var(--md-size,0.875rem)] font-semibold text-[var(--text-strong)]"
         >
           {blockRich(block.text, onSeek, key, tail)}
         </HeadingTag>
@@ -191,7 +191,7 @@ export function renderMarkdown(
       return (
         <blockquote
           key={key}
-          className="my-3 whitespace-pre-wrap border-l-2 border-[var(--border-strong)] py-0.5 pl-3 text-sm leading-relaxed text-[var(--text-muted)]"
+          className="my-3 whitespace-pre-wrap border-l-2 border-[var(--border-strong)] py-0.5 pl-3 text-[length:var(--md-size,0.875rem)] leading-relaxed text-[var(--text-muted)]"
         >
           {blockRich(block.text, onSeek, key, tail)}
         </blockquote>
@@ -209,7 +209,7 @@ export function renderMarkdown(
           {block.items.map((it, i) => (
             <li
               key={i}
-              className="text-sm leading-relaxed text-[var(--text-normal)]"
+              className="text-[length:var(--md-size,0.875rem)] leading-relaxed text-[var(--text-normal)]"
             >
               {blockRich(
                 it,
@@ -225,7 +225,7 @@ export function renderMarkdown(
     return (
       <p
         key={key}
-        className="my-1.5 whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-normal)]"
+        className="my-1.5 whitespace-pre-wrap text-[length:var(--md-size,0.875rem)] leading-relaxed text-[var(--text-normal)]"
       >
         {blockRich(block.text, onSeek, key, tail)}
       </p>

@@ -15,6 +15,9 @@
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 10px;
+  /* 2xl / 3xl 也收进同一刻度：对话气泡、对话框等不再是 16px+ 的大圆角。 */
+  --radius-2xl: 12px;
+  --radius-3xl: 14px;
 }
 
 /* 浅色（默认）：苹果式分层灰阶——chrome 用略暖的系统灰，内容层回到纯白，

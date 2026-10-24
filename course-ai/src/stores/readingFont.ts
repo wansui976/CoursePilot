@@ -1,14 +1,25 @@
 import { create } from "zustand";
 
 /**
- * 阅读字体：笔记、摘要、复习卡片等「读」的内容（.ca-reading）用哪款字体。界面文字不受影响。
+ * 阅读字体与字号：笔记、摘要、复习卡片等「读」的内容（.ca-reading）用哪款字体、多大。
+ * 界面文字不受影响。
  *
  * 各平台自带的中文字体不同：楷体、仿宋 macOS 与 Windows 自带，iOS / Android 通常没有；
  * Windows 没有像样的宋体。所以每个选项都先检测本机是否有，没有就在设置里置灰。
  */
 export type ReadingFont = "serif" | "sans" | "kai" | "fangsong";
+/** 阅读字号档位：缩放阅读区正文（--reading-scale），界面文字不变。 */
+export type ReadingSize = "small" | "medium" | "large";
 
 const STORAGE_KEY = "course-ai-reading-font";
+const SIZE_STORAGE_KEY = "course-ai-reading-size";
+const DEFAULT_SIZE: ReadingSize = "medium";
+
+export const READING_SIZES: { key: ReadingSize; i18nKey: string; scale: number }[] = [
+  { key: "small", i18nKey: "settings.appearance.readingSizeSmall", scale: 0.92 },
+  { key: "medium", i18nKey: "settings.appearance.readingSizeMedium", scale: 1 },
+  { key: "large", i18nKey: "settings.appearance.readingSizeLarge", scale: 1.12 },
+];
 const DEFAULT_FONT: ReadingFont = "serif";
 
 /** 中文字体候选（按平台常见名排列）；西文部分与兜底随后统一拼上。 */
@@ -69,30 +80,59 @@ function readFont(): ReadingFont {
   }
 }
 
+function readSize(): ReadingSize {
+  try {
+    const value = localStorage.getItem(SIZE_STORAGE_KEY);
+    return READING_SIZES.some((option) => option.key === value) ? (value as ReadingSize) : DEFAULT_SIZE;
+  } catch {
+    return DEFAULT_SIZE;
+  }
+}
+
 /** 写到 <html> 上：浮层（对话框、复习会话）经 Portal 挂在 body，也要拿到同一个值。 */
 function apply(font: ReadingFont) {
   if (typeof document === "undefined") return;
   document.documentElement.style.setProperty("--font-reading", readingFontStack(font));
 }
 
+function applySize(size: ReadingSize) {
+  if (typeof document === "undefined") return;
+  const scale = READING_SIZES.find((option) => option.key === size)?.scale ?? 1;
+  document.documentElement.style.setProperty("--reading-scale", String(scale));
+}
+
+function persist(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // 存不下只是下次启动回到默认，不影响这次切换。
+  }
+}
+
 interface ReadingFontState {
   font: ReadingFont;
+  size: ReadingSize;
   setFont: (font: ReadingFont) => void;
+  setSize: (size: ReadingSize) => void;
 }
 
 export const useReadingFont = create<ReadingFontState>((set) => {
   const initial = readFont();
+  const initialSize = readSize();
   apply(initial);
+  applySize(initialSize);
   return {
     font: initial,
+    size: initialSize,
     setFont: (font) => {
-      try {
-        localStorage.setItem(STORAGE_KEY, font);
-      } catch {
-        // 存不下只是下次启动回到默认，不影响这次切换。
-      }
+      persist(STORAGE_KEY, font);
       apply(font);
       set({ font });
+    },
+    setSize: (size) => {
+      persist(SIZE_STORAGE_KEY, size);
+      applySize(size);
+      set({ size });
     },
   };
 });

@@ -4,7 +4,8 @@
    兼顾深浅两种主题，并让表格、列表、标题、时间戳都有清晰可读的样式。 */
 .tiptap-notes {
   color: var(--text-normal);
-  font-size: 0.9rem;
+  /* 随设置里的「阅读字号」缩放；标题用 em，跟着正文一起变。 */
+  font-size: calc(0.9rem * var(--reading-scale, 1));
   line-height: 1.7;
 }
 .tiptap-notes h1,
@@ -17,18 +18,18 @@
   margin: 1.1em 0 0.5em;
 }
 .tiptap-notes h1 {
-  font-size: 1.4rem;
+  font-size: 1.556em;
   padding-bottom: 0.3em;
   border-bottom: 1px solid var(--border-subtle);
 }
 .tiptap-notes h2 {
-  font-size: 1.18rem;
+  font-size: 1.311em;
 }
 .tiptap-notes h3 {
-  font-size: 1.05rem;
+  font-size: 1.167em;
 }
 .tiptap-notes h4 {
-  font-size: 0.95rem;
+  font-size: 1.056em;
 }
 .tiptap-notes p {
   margin: 0.5em 0;
@@ -54,7 +55,6 @@
 .tiptap-notes li > p {
   margin: 0;
 }
-/* 与摘要面板（renderMarkdown）的引用块同一长相：强调色竖条 + 淡强调色底。 */
 /* 书页式引用：一道中性细线 + 稍淡的字，不加底色（浅蓝底卡片式引用是模板化界面的标志）。 */
 .tiptap-notes blockquote {
   margin: 0.8em 0;

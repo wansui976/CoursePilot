@@ -9,6 +9,7 @@ describe("阅读字体", () => {
   beforeEach(() => {
     localStorage.clear();
     document.documentElement.style.removeProperty("--font-reading");
+    document.documentElement.style.removeProperty("--reading-scale");
   });
 
   it("没选过时默认宋体，并在加载时就写到 <html> 上", async () => {
@@ -42,5 +43,20 @@ describe("阅读字体", () => {
       expect(stack.endsWith("var(--font-app)")).toBe(true);
       expect(stack).not.toMatch(/SimSun|(^|,\s*)serif\s*(,|$)/);
     }
+  });
+
+  it("阅读字号默认标准；切换后写 --reading-scale 并记住，非法值回到标准", async () => {
+    const first = await freshStore();
+    expect(first.useReadingFont.getState().size).toBe("medium");
+    expect(document.documentElement.style.getPropertyValue("--reading-scale")).toBe("1");
+
+    first.useReadingFont.getState().setSize("large");
+    expect(document.documentElement.style.getPropertyValue("--reading-scale")).toBe("1.12");
+    const second = await freshStore();
+    expect(second.useReadingFont.getState().size).toBe("large");
+
+    localStorage.setItem("course-ai-reading-size", "huge");
+    const third = await freshStore();
+    expect(third.useReadingFont.getState().size).toBe("medium");
   });
 });

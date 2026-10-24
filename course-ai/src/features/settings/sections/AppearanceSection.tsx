@@ -5,6 +5,7 @@ import { ACCENTS, useTheme, type ThemePref } from "@/stores/theme";
 import {
   isReadingFontAvailable,
   READING_FONTS,
+  READING_SIZES,
   readingFontStack,
   useReadingFont,
 } from "@/stores/readingFont";
@@ -65,6 +66,8 @@ export function AppearanceSection() {
   const setCustomAccent = useTheme((s) => s.setCustomAccent);
   const readingFont = useReadingFont((s) => s.font);
   const setReadingFont = useReadingFont((s) => s.setFont);
+  const readingSize = useReadingFont((s) => s.size);
+  const setReadingSize = useReadingFont((s) => s.setSize);
   // 量一次即可：本机字体在应用运行期间不会变。
   const [fontAvailable] = useState(() =>
     Object.fromEntries(READING_FONTS.map((option) => [option.key, isReadingFontAvailable(option.key)])),
@@ -214,6 +217,32 @@ export function AppearanceSection() {
             })}
           </div>
         </StackRow>
+        <Row label={t("settings.appearance.readingSize")}>
+          <div
+            role="group"
+            aria-label={t("settings.appearance.readingSize")}
+            className="inline-flex rounded-md border border-[var(--border-subtle)] p-0.5"
+          >
+            {READING_SIZES.map((option) => {
+              const selected = readingSize === option.key;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setReadingSize(option.key)}
+                  className={`ca-touch-44 rounded-[5px] px-3 py-1 text-xs transition-colors ${
+                    selected
+                      ? "bg-[var(--surface-card-hover)] font-medium text-[var(--text-strong)]"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-strong)]"
+                  }`}
+                >
+                  {t(option.i18nKey)}
+                </button>
+              );
+            })}
+          </div>
+        </Row>
       </Group>
 
       <Group header={t("settings.appearance.language")}>

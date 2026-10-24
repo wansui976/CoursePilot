@@ -671,7 +671,8 @@
       "asr": "语音识别",
       "llm": "大模型",
       "courseware": "课件 / OCR",
-      "dev": "开发者"
+      "dev": "开发者",
+      "about": "关于"
     },
     "theme": {
       "light": "浅色",
@@ -703,7 +704,11 @@
       "readingFontFangsong": "仿宋",
       "readingFontMissing": "本机未安装",
       "readingFontSample": "学而时习之 Aa",
-      "readingFontMacHint": "楷体、仿宋可在 macOS 的「字体册」中免费下载，下载后重启应用即可使用。"
+      "readingFontMacHint": "楷体、仿宋可在 macOS 的「字体册」中免费下载，下载后重启应用即可使用。",
+      "readingSize": "字号",
+      "readingSizeSmall": "小",
+      "readingSizeMedium": "标准",
+      "readingSizeLarge": "大"
     },
     "studyReminder": {
       "title": "学习提醒",
@@ -829,6 +834,19 @@
       "title": "开发者",
       "footnote": "查看 AI 文稿纠错的请求与回复",
       "openConsole": "打开开发控制台"
+    },
+    "about": {
+      "title": "版本",
+      "version": "当前版本",
+      "update": "更新",
+      "check": "检查更新",
+      "checking": "正在检查…",
+      "upToDate": "已是最新版本",
+      "available": "有新版本 {{version}}",
+      "view": "查看",
+      "failed": "检查失败：{{error}}",
+      "autoCheck": "自动检查新版本",
+      "autoCheckHint": "每天最多查一次，只向 GitHub 询问最新的版本号，不上传任何数据。"
     }
   },
   "assistant": {
@@ -1454,5 +1472,10 @@
     "length_other": "约 {{count}} 字",
     "writtenAt": "内容写于 {{time}}",
     "restore": "恢复此版本"
+  },
+  "update": {
+    "available": "CoursePilot {{version}} 已发布",
+    "view": "查看更新",
+    "ignore": "不再提示这个版本"
   }
 }

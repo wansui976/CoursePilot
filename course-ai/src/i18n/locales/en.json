@@ -671,7 +671,8 @@
       "asr": "Speech Recognition",
       "llm": "LLM",
       "courseware": "Slides / OCR",
-      "dev": "Developer"
+      "dev": "Developer",
+      "about": "About"
     },
     "theme": {
       "light": "Light",
@@ -703,7 +704,11 @@
       "readingFontFangsong": "Fangsong",
       "readingFontMissing": "not installed",
       "readingFontSample": "学而时习之 Aa",
-      "readingFontMacHint": "Kai and Fangsong can be downloaded for free in Font Book on macOS; restart the app afterwards."
+      "readingFontMacHint": "Kai and Fangsong can be downloaded for free in Font Book on macOS; restart the app afterwards.",
+      "readingSize": "Size",
+      "readingSizeSmall": "Small",
+      "readingSizeMedium": "Standard",
+      "readingSizeLarge": "Large"
     },
     "studyReminder": {
       "title": "Study Reminder",
@@ -829,6 +834,19 @@
       "title": "Developer",
       "footnote": "View AI transcript correction requests and responses",
       "openConsole": "Open developer console"
+    },
+    "about": {
+      "title": "Version",
+      "version": "Current version",
+      "update": "Updates",
+      "check": "Check for updates",
+      "checking": "Checking…",
+      "upToDate": "You're on the latest version",
+      "available": "Version {{version}} is available",
+      "view": "View",
+      "failed": "Couldn't check: {{error}}",
+      "autoCheck": "Check for new versions automatically",
+      "autoCheckHint": "At most once a day. Only asks GitHub for the latest version number; nothing is uploaded."
     }
   },
   "assistant": {
@@ -1459,5 +1477,10 @@
     "length_other": "~{{count}} chars",
     "writtenAt": "Written {{time}}",
     "restore": "Restore this version"
+  },
+  "update": {
+    "available": "CoursePilot {{version}} is out",
+    "view": "See what's new",
+    "ignore": "Don't remind me about this version"
   }
 }
