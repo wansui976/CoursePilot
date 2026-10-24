@@ -272,7 +272,68 @@ pub async fn run_whisper(
             "whisper failed: {status}\n{stderr}"
         )));
     }
-    parse_whisper_json(&std::fs::read_to_string(&json_path)?)
+    let raw = std::fs::read_to_string(&json_path)?;
+    let mut json = parse_whisper_json(&raw)?;
+    simplify_mandarin(&mut json, language, detected_language(&raw).as_deref());
+    Ok(json)
+}
+
+/// whisper-cli 的 JSON 里记着它认定的语言（`-l auto` 时就是自动检测的结果）。
+fn detected_language(raw: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Output {
+        result: Option<Detected>,
+    }
+    #[derive(Deserialize)]
+    struct Detected {
+        language: String,
+    }
+    serde_json::from_str::<Output>(raw)
+        .ok()?
+        .result
+        .map(|result| result.language)
+}
+
+/// Whisper 认普通话常常吐繁体字（训练语料里两种都有），而云端识别给的、界面用的都是简体，
+/// 同一门课换个识别方式字形就变了。选了中文、或自动检测出中文时转成简体；粤语不转，
+/// 粤语字幕通常就写繁体。
+fn simplify_mandarin(json: &mut WhisperJson, requested: Option<&str>, detected: Option<&str>) {
+    let mandarin = match requested.map(str::trim) {
+        Some("zh") => true,
+        None | Some("") | Some("auto") => detected == Some("zh"),
+        Some(_) => false,
+    };
+    if !mandarin {
+        return;
+    }
+    for segment in &mut json.transcription {
+        segment.text = to_simplified(&segment.text);
+        for token in &mut segment.tokens {
+            token.text = to_simplified(&token.text);
+        }
+    }
+}
+
+/// 繁→简，用 OpenCC 的词库按词转：「著名」「乾隆」不会被逐字转错，「憑藉」会转成「凭借」。
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn to_simplified(text: &str) -> String {
+    use std::sync::OnceLock;
+    static T2S: OnceLock<Option<ferrous_opencc::OpenCC>> = OnceLock::new();
+    let converter = T2S.get_or_init(|| {
+        ferrous_opencc::OpenCC::from_config(ferrous_opencc::config::BuiltinConfig::T2s)
+            .map_err(|error| tracing::warn!(%error, "繁简转换词库加载失败，Whisper 文稿保持原样"))
+            .ok()
+    });
+    match converter {
+        Some(converter) => converter.convert(text),
+        None => text.to_string(),
+    }
+}
+
+/// 手机上不跑 Whisper，不带这份词库。
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn to_simplified(text: &str) -> String {
+    text.to_string()
 }
 
 /// 跑 whisper-cli，边跑边把 `-pp` 打在 stderr 里的进度行报上去。
@@ -357,6 +418,62 @@ mod tests {
         assert_eq!(json.transcription.len(), 2);
         assert_eq!(json.transcription[0].offsets.to, 900);
         assert_eq!(json.transcription[1].text.trim(), "world");
+    }
+
+    fn traditional_transcript() -> WhisperJson {
+        parse_whisper_json(
+            r#"{"transcription":[
+                {"text":"同學們好，這部著名的著作很顯著，憑藉乾隆年間的記載。","offsets":{"from":0,"to":4000},
+                 "tokens":[{"text":"同學","offsets":{"from":0,"to":400}},{"text":"們","offsets":{"from":400,"to":600}}]}
+            ]}"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn mandarin_from_whisper_comes_out_in_simplified_characters() {
+        let mut json = traditional_transcript();
+        simplify_mandarin(&mut json, Some("zh"), Some("zh"));
+        let segment = &json.transcription[0];
+        // 按词转：「著名」「乾隆」保持原样，「憑藉」转成「凭借」，不是逐字硬转。
+        assert_eq!(
+            segment.text,
+            "同学们好，这部著名的著作很显著，凭借乾隆年间的记载。"
+        );
+        let tokens: Vec<&str> = segment
+            .tokens
+            .iter()
+            .map(|token| token.text.as_str())
+            .collect();
+        assert_eq!(tokens, ["同学", "们"]);
+    }
+
+    #[test]
+    fn only_mandarin_is_simplified() {
+        let original = traditional_transcript().transcription[0].text.clone();
+        for (requested, detected, converted) in [
+            (Some("auto"), Some("zh"), true),
+            (None, Some("zh"), true),
+            (Some("auto"), Some("en"), false),
+            // 粤语字幕通常就写繁体。
+            (Some("yue"), Some("yue"), false),
+            (Some("en"), Some("en"), false),
+        ] {
+            let mut json = traditional_transcript();
+            simplify_mandarin(&mut json, requested, detected);
+            assert_eq!(
+                json.transcription[0].text != original,
+                converted,
+                "requested {requested:?}, detected {detected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn detected_language_is_read_from_the_full_json_output() {
+        let full = r#"{"result":{"language":"zh"},"transcription":[]}"#;
+        assert_eq!(detected_language(full).as_deref(), Some("zh"));
+        assert_eq!(detected_language(r#"{"transcription":[]}"#), None);
     }
 
     #[tokio::test]
