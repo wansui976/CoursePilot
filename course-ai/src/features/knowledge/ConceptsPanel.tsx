@@ -24,7 +24,6 @@ import {
   Play,
   RefreshCw,
   Search,
-  Sparkles,
   Video,
   Wand2,
   X,
@@ -644,7 +643,6 @@ export function ConceptsPanel({
   const chatBody = (
     <>
       <div className="flex flex-none items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-header)] px-3 py-2.5">
-        <Sparkles className="h-4 w-4 flex-none text-primary" />
         <span className="text-sm font-semibold text-[var(--text-strong)]">{t("concepts.chatTitle")}</span>
         <span className="truncate text-xs text-[var(--text-faint)]">{t("concepts.chatSubtitle")}</span>
         <button
@@ -794,9 +792,6 @@ export function ConceptsPanel({
             <ErrorNote error={error} onRetry={() => refetch()} />
           ) : !hasKnowledge ? (
             <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 px-2 text-center">
-              <span className="flex h-12 w-12 items-center justify-center rounded-lg ca-fill-brand text-[var(--on-accent)]">
-                <Sparkles className="h-6 w-6" />
-              </span>
               <h2 className="text-base font-semibold text-[var(--text-strong)]">{t("concepts.noKnowledge")}</h2>
               <p className="max-w-[340px] text-sm leading-relaxed text-[var(--text-muted)]">
                 {t("concepts.noKnowledgeDesc")}

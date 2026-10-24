@@ -155,7 +155,7 @@ describe("AssistantPanel", () => {
     // 圆球：贴边但留一点空隙，不再是糊在边上的窄条。
     expect(dockStrip).toHaveClass("right-3", "h-14", "w-14", "rounded-full");
     expect(dockStrip).toHaveClass("focus-visible:ring-[var(--focus-ring)]");
-    expect(dockStrip.querySelector("svg")).toHaveClass("text-[var(--accent-text)]");
+    expect(dockStrip.querySelector("svg")).toHaveClass("text-[var(--text-normal)]");
     fireEvent.click(dockStrip);
     expect(screen.getByLabelText("对助手说")).toBeVisible();
   });

@@ -113,7 +113,9 @@ export function AppearanceSection() {
                       onChange={(event) => setCustomAccent(event.target.value)}
                       className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                     />
+                    {/* 色轮表示「任选颜色」（同 macOS 取色器），是有含义的图形，审计放行。 */}
                     <span
+                      data-allow-gradient
                       className="h-5 w-5 rounded-full"
                       style={{
                         background:

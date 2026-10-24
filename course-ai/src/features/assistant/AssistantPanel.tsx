@@ -18,8 +18,8 @@ import {
   History as HistoryIcon,
   LoaderCircle,
   MessageSquarePlus,
+  MessageSquareText,
   MoreHorizontal,
-  Sparkles,
   X,
 } from "lucide-react";
 import { Button } from "@/ui/button";
@@ -324,7 +324,8 @@ export function AssistantPanel({
   /** 用户翻上去看旧消息了吗。翻上去了就给一个「回到最新」的按钮，不然新回答落在屏幕外没人知道。 */
   const [scrolledAway, setScrolledAway] = useState(false);
   /** 收起后又有新回答落下、用户还没回来看过。给球挂一个「完成点」。 */
-  const [hasUnread, setHasUnread] = useState(false);
+  const hasUnread = useAssistantUi((s) => s.unread);
+  const setHasUnread = useAssistantUi((s) => s.setUnread);
   /** 刚保存到笔记的那条回答，短暂显示对勾反馈。 */
   const [savedToNotesTurnId, setSavedToNotesTurnId] = useState<string | null>(null);
   /** 被 MAX_RENDERED_TURNS 截掉、不再显示在列表里的更早轮次数量。 */
@@ -1433,7 +1434,7 @@ export function AssistantPanel({
         {busy ? (
           <LoaderCircle className="h-5 w-5 animate-spin text-[var(--accent-text)]" aria-hidden="true" />
         ) : (
-          <Sparkles className="h-5 w-5 text-[var(--accent-text)]" aria-hidden="true" />
+          <MessageSquareText className="h-5 w-5 text-[var(--text-normal)]" aria-hidden="true" />
         )}
         {hasUnread && !busy && (
           <span
@@ -1555,7 +1556,6 @@ export function AssistantPanel({
             该待在你打字的地方，而不是滚动区顶上那条最容易被忽略的边。 */}
         {mobile ? (
           <>
-            <Sparkles className="h-4 w-4 flex-none text-[var(--accent-text)]" />
             <span
               id="assistant-panel-title"
               className="min-w-0 flex-1 text-sm font-medium text-[var(--text-strong)]"
@@ -1573,7 +1573,6 @@ export function AssistantPanel({
             className="-ml-1 flex min-w-0 flex-1 touch-none select-none items-center gap-1.5 rounded-md px-1 py-1 text-left cursor-grab active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
           >
             <GripHorizontal className="h-4 w-4 flex-none text-[var(--text-faint)]" />
-            <Sparkles className="h-4 w-4 flex-none text-[var(--accent-text)]" />
             <span
               id="assistant-panel-title"
               className="min-w-0 flex-1 text-sm font-medium text-[var(--text-strong)]"

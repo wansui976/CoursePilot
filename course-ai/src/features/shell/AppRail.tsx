@@ -6,13 +6,14 @@ import {
   Moon,
   PanelLeftOpen,
   Settings,
-  Sparkles,
+  MessageSquareText,
   Sun,
   Trash2,
 } from "lucide-react";
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { setThemeToggleOrigin } from "@/stores/theme";
+import { useAssistantUi } from "@/stores/assistant";
 
 /**
  * 全局唯一常驻细 rail（桌面端两态都渲染），接管所有全局动作：
@@ -54,6 +55,7 @@ export function AppRail({
   onBackToLibrary: () => void;
   onGoLibraryHome: () => void;
 }) {
+  const assistantUnread = useAssistantUi((state) => state.unread);
   const { t } = useTranslation();
 
   function toggleThemeFrom(event: MouseEvent<HTMLButtonElement>) {
@@ -109,7 +111,8 @@ export function AppRail({
         aria-label={t("assistant.toggleAssistant")}
         onClick={onToggleAssistant}
       >
-        <Sparkles className="h-5 w-5" />
+        <MessageSquareText className="h-5 w-5" />
+        {assistantUnread && !assistantActive && <span className="rail-dot" aria-hidden="true" />}
       </button>
       <div className="rail-sp" />
       <div className="rail-divider" aria-hidden="true" />

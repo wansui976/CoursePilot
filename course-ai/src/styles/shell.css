@@ -435,3 +435,19 @@
     opacity: 0;
   }
 }
+
+/* 助手有未读回复时，工具栏按钮右上角的小圆点（右下角浮球在桌面端已收进工具栏）。 */
+.ca-rail .rail-btn {
+  position: relative;
+}
+
+.ca-rail .rail-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-sidebar);
+}

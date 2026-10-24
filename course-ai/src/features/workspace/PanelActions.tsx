@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { RefreshCw, Sparkles } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { Button } from "@/ui/button";
 import { ExportMenu, type ExportItem } from "./ExportMenu";
 
@@ -98,7 +98,6 @@ export function GenerateEmptyAction({
       disabled={generating}
       className="ca-touch-44 gap-1.5"
     >
-      <Sparkles className={`h-3.5 w-3.5 ${generating ? "animate-pulse" : ""}`} />
       {generating ? t("panelActions.generating") : t("panelActions.generateWithAi")}
     </Button>
   );

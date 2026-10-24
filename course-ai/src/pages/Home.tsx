@@ -604,8 +604,10 @@ export function Home() {
         onActionApplied={assistantActionApplied}
         compact={isPhoneDevice}
         bottomNavigationVisible={showBottomTab}
+        // 桌面布局左侧工具栏里有助手按钮（⌘J 也能呼出），不再另外浮一个圆球；
+        // 只有窄屏（没有工具栏）才需要这个入口。
         launcherVisible={
-          !showSettings && !showRecycleBin && !showDevConsole && !showDashboard
+          isPhoneDevice && !showSettings && !showRecycleBin && !showDevConsole && !showDashboard
         }
       />
     </div>

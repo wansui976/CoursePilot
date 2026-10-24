@@ -9,7 +9,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, ChevronRight, Send, Sparkles, Square, Trash2, User } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Send, Square, Trash2 } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { renderMarkdown } from "@/lib/renderMarkdown";
@@ -373,16 +373,6 @@ export function CourseChatPanel({
     ask.reset();
   };
 
-  const aiAvatar = (
-    <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full ca-fill-brand text-[var(--on-accent)]">
-      <Sparkles className="h-4 w-4" />
-    </span>
-  );
-  const userAvatar = (
-    <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full bg-[var(--accent-weak-2)] text-[var(--accent-text)]">
-      <User className="h-4 w-4" />
-    </span>
-  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -396,9 +386,6 @@ export function CourseChatPanel({
       >
         {history.length === 0 && inFlightQuery === undefined && (
           <div className="flex flex-col items-center gap-3 px-2 pt-6 text-center">
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl ca-fill-brand text-[var(--on-accent)]">
-              <Sparkles className="h-6 w-6" />
-            </span>
             <div>
               <div className="text-sm font-medium text-[var(--text-strong)]">{t("courseChat.askCourse")}</div>
               <p className="mx-auto mt-1 max-w-[260px] text-xs leading-relaxed text-[var(--text-faint)]">
@@ -424,7 +411,6 @@ export function CourseChatPanel({
         {history.map((turn) => (
           <div key={turn.id} className="ca-msg-in space-y-3">
             <div className="flex flex-row-reverse items-start gap-2">
-              {userAvatar}
               <div
                 role="article"
                 aria-label={t("courseChat.myQuestion")}
@@ -436,7 +422,6 @@ export function CourseChatPanel({
               </div>
             </div>
             <div className="flex items-start gap-2">
-              {aiAvatar}
               {/* 助手的回答铺满不套气泡，与全局助手面板同一套观感：气泡是给一两行
                   短句用的，回答是带列表和公式的长文。 */}
               <div
@@ -468,7 +453,6 @@ export function CourseChatPanel({
         {inFlightQuery !== undefined && (
           <div className="space-y-3">
             <div className="flex flex-row-reverse items-start gap-2">
-              {userAvatar}
               <div
                 role="article"
                 aria-label={t("courseChat.myQuestion")}
@@ -481,7 +465,6 @@ export function CourseChatPanel({
             </div>
             {busy && (
               <div className="flex items-start gap-2">
-                {aiAvatar}
                 <div className="min-w-0 flex-1 space-y-1.5 py-0.5">
                   {streaming?.reasoning && (
                     <details
@@ -523,7 +506,6 @@ export function CourseChatPanel({
             )}
             {failedRequest && (
               <div className="flex items-start gap-2">
-                {aiAvatar}
                 <ErrorNote
                   className="min-w-0 flex-1"
                   error={failedRequest.error}

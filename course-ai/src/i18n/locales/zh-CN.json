@@ -866,8 +866,8 @@
     "dockRight": "停靠到右边",
     "collapseAssistant": "收起助手",
     "collapseWithShortcut": "收起助手 ({{shortcut}})",
-    "greeting": "有什么可以帮你的？",
-    "greetingHint": "问{{scope}}的内容，也可以让我打开视频、跳到某一处或改设置。",
+    "greeting": "向助手提问",
+    "greetingHint": "可以问{{scope}}的内容，也可以让它打开视频、跳到某一处或修改设置。",
     "thinking": "思考过程",
     "copiedLabel": "已复制",
     "copyAnswer": "复制回答",
@@ -1412,11 +1412,6 @@
     "tableDelete": "删除表格"
   },
   "library": {
-    "greetingNight": "夜深了",
-    "greetingMorning": "早上好",
-    "greetingNoon": "中午好",
-    "greetingAfternoon": "下午好",
-    "greetingEvening": "晚上好",
     "overviewSub": "{{courses}} 门课程 · {{videos}} 个视频",
     "continueSection": "继续学习",
     "allCourses": "全部课程",

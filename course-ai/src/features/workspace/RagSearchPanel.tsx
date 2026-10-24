@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useMutationState } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
-import { Check, Copy, Send, Sparkles, Square, Trash2, User } from "lucide-react";
+import { Check, Copy, Send, Square, Trash2 } from "lucide-react";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { ipc } from "@/lib/ipc";
@@ -472,16 +472,6 @@ function AskChatPanel({ videoId }: { videoId: string }) {
         }
       : {};
 
-  const aiAvatar = (
-    <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full ca-fill-brand text-[var(--on-accent)]">
-      <Sparkles className="h-4 w-4" />
-    </span>
-  );
-  const userAvatar = (
-    <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full bg-[var(--accent-weak-2)] text-[var(--accent-text)]">
-      <User className="h-4 w-4" />
-    </span>
-  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -519,9 +509,6 @@ function AskChatPanel({ videoId }: { videoId: string }) {
       >
         {history.length === 0 && inFlightQuery === undefined && (
           <div className="flex flex-col items-center gap-3 px-2 pt-6 text-center">
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl ca-fill-brand text-[var(--on-accent)]">
-              <Sparkles className="h-6 w-6" />
-            </span>
             <div>
               <div className="text-sm font-medium text-[var(--text-strong)]">{t("ragSearch.askVideo")}</div>
               <p className="mx-auto mt-1 max-w-[260px] text-xs leading-relaxed text-[var(--text-faint)]">
@@ -546,7 +533,6 @@ function AskChatPanel({ videoId }: { videoId: string }) {
         {history.map((turn) => (
           <div key={turn.id} className="space-y-3">
             <div className="flex flex-row-reverse items-start gap-2">
-              {userAvatar}
               <div
                 role="article"
                 aria-label={t("ragSearch.myQuestion")}
@@ -558,7 +544,6 @@ function AskChatPanel({ videoId }: { videoId: string }) {
               </div>
             </div>
             <div className="flex items-start gap-2">
-              {aiAvatar}
               <div
                 role="article"
                 aria-label={t("ragSearch.aiReply")}
@@ -611,7 +596,6 @@ function AskChatPanel({ videoId }: { videoId: string }) {
         {inFlightQuery !== undefined && (
           <div className="space-y-3">
             <div className="flex flex-row-reverse items-start gap-2">
-              {userAvatar}
               <div
                 role="article"
                 aria-label={t("ragSearch.myQuestion")}
@@ -624,7 +608,6 @@ function AskChatPanel({ videoId }: { videoId: string }) {
             </div>
             {busy && (
               <div className="flex items-start gap-2">
-                {aiAvatar}
                 <div className="min-w-0 max-w-[82%] space-y-1.5">
                   {/* 推理模型的「思考过程」：流式实时展示、可折叠、灰色小字。 */}
                   {streaming?.reasoning && (
@@ -681,7 +664,6 @@ function AskChatPanel({ videoId }: { videoId: string }) {
             )}
             {ask.isError && (
               <div className="flex items-start gap-2">
-                {aiAvatar}
                 <ErrorNote
                   className="min-w-0 flex-1"
                   error={ask.error}

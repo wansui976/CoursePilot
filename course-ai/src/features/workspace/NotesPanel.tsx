@@ -10,7 +10,7 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { type ExportItem } from "./ExportMenu";
-import { ArchiveRestore, Sparkles, X } from "lucide-react";
+import { ArchiveRestore, X } from "lucide-react";
 import { Button } from "@/ui/button";
 import { TextSkeleton } from "@/ui/skeleton";
 import { ErrorNote } from "@/ui/ErrorNote";
@@ -373,9 +373,6 @@ export function NotesPanel({ videoId }: { videoId: string }) {
             {/* 空态引导：没有已存笔记、也没开始写时，提示可让 AI 生成。开始打字即消失。 */}
             {!localDraft && !hasLocalEdits && !notesContent?.trim() && (
               <div className="mx-4 mt-4 flex items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-4">
-                <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-[var(--accent-weak)] text-[var(--accent-text)]">
-                  <Sparkles className="h-4 w-4" />
-                </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-[var(--text-strong)]">
                     {t("notes.emptyTitle")}
@@ -391,7 +388,6 @@ export function NotesPanel({ videoId }: { videoId: string }) {
                     disabled={generate.isPending}
                     className="ca-touch-44 mt-2 gap-1.5"
                   >
-                    <Sparkles className={`h-3.5 w-3.5 ${generate.isPending ? "animate-pulse" : ""}`} />
                     {generate.isPending ? t("notes.generating") : t("notes.generateNotes")}
                   </Button>
                 </div>

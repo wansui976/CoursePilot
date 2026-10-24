@@ -8,7 +8,6 @@ import {
   LoaderCircle,
   RefreshCw,
   Save,
-  Sparkles,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/ui/button";
@@ -69,13 +68,6 @@ export function AssistantEmptyState({
   return (
     <div className="flex min-h-full flex-col justify-center gap-5 px-1">
       <div>
-        {/* 品牌小砖：给空态一个视觉锚点，不然问候语浮在白底上没有落点。 */}
-        <div
-          aria-hidden="true"
-          className="ca-fill-brand mb-3 grid h-9 w-9 place-items-center rounded-[10px] text-[var(--on-accent)] shadow-[var(--shadow-raise)]"
-        >
-          <Sparkles className="h-[18px] w-[18px]" />
-        </div>
         <p className="ca-t-lg font-semibold tracking-[-0.01em] text-[var(--text-strong)]">
           {t("assistant.greeting")}
         </p>

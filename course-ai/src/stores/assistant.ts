@@ -68,12 +68,17 @@ interface AssistantUiState {
   /** 吸附到某一边。 */
   dock: (side: DockSide) => void;
   setWidth: (width: number) => void;
+  /** 面板关着时来了新回复：左侧工具栏与移动端入口都据此亮一个小圆点。 */
+  unread: boolean;
+  setUnread: (unread: boolean) => void;
 }
 
 export const useAssistantUi = create<AssistantUiState>((set, get) => ({
   open: readOpen(),
   side: readSide(),
   width: readWidth(),
+  unread: false,
+  setUnread: (unread) => set({ unread }),
   setOpen: (open) => {
     persist(OPEN_KEY, open ? "1" : "0");
     set({ open });

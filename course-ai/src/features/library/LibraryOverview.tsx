@@ -16,14 +16,6 @@ const MOSAIC = 4;
 /** 「继续学习」最多列几门课。 */
 const RESUME_LIMIT = 3;
 
-function greetingKey(hour: number) {
-  if (hour < 5) return "library.greetingNight";
-  if (hour < 11) return "library.greetingMorning";
-  if (hour < 13) return "library.greetingNoon";
-  if (hour < 18) return "library.greetingAfternoon";
-  return "library.greetingEvening";
-}
-
 /** 没有视频的课程：按课程名散列出一个稳定色相，封面不至于一片灰。 */
 function courseHue(name: string) {
   let hash = 0;
@@ -86,7 +78,7 @@ export function LibraryOverview({
       <header className="ca-topbar">
         <div className="tb-lead">
           <div className="tb-titles">
-            <h1>{t(greetingKey(new Date().getHours()))}</h1>
+            <h1>{t("nav.courseLibrary")}</h1>
             <div className="sub">
               {t("library.overviewSub", { courses: courses.length, videos: totalVideos })}
             </div>
