@@ -118,6 +118,14 @@ const SETTLE_MAX_FRAMES: usize = 5;
 const MIN_DWELL_FRAMES: usize = 2;
 // 块均值极差小于此值的帧视为近纯色（黑屏片头、白场转场），不作为课件页。
 const BLANK_SPREAD: f64 = 8.0;
+// 静止的幻灯片上只换了标题和一两行字：变的块远不到 CHANGE_RATIO（白底黑字的页，
+// 一次换页只动一成上下），但改的是这一页原有的字。原本有内容的块里至少改了这么多个
+// 才算换页；鼠标挪一下只动一两块。
+const TEXT_CHANGE_BLOCKS: usize = 3;
+// 相邻两帧一块都没变的比例至少这么高，才算 PPT 录屏、导出的幻灯片这类「静止」视频，
+// 才用上面那条小变化规则。讲师小窗、录屏操作这类一直有东西在动的视频达不到，仍只按
+// CHANGE_RATIO 判，不会被局部动静刷出一堆页。
+const STILL_SHARE: f64 = 0.7;
 // 自动块阈值的上下限（0~255 量纲，作用在单个块的均值差上）。
 const BLOCK_DELTA_MIN: f64 = 4.0;
 const BLOCK_DELTA_MAX: f64 = 24.0;
@@ -316,14 +324,47 @@ fn settle_index(blocks: &[Vec<f64>], start: usize, end: usize, delta: f64) -> us
     limit
 }
 
+/// 大部分时间画面一动不动的视频（每秒一帧，相邻两帧没有一块变化）：PPT 录屏、导出的幻灯片。
+fn is_still_slideshow(blocks: &[Vec<f64>], delta: f64) -> bool {
+    let pairs = blocks.len().saturating_sub(1);
+    let still = blocks
+        .windows(2)
+        .filter(|pair| changed_ratio(&pair[0], &pair[1], delta) == 0.0)
+        .count();
+    pairs > 0 && still as f64 >= STILL_SHARE * pairs as f64
+}
+
+/// 静止幻灯片上只换了字：画面已经停住（和下一帧一样，渐变、飞入做完了），而且这一页
+/// 原本有内容（不是底色）的块里至少 TEXT_CHANGE_BLOCKS 个变了。只在空白处多出几行字
+/// （逐行出现的动画）不算换页。
+fn rewrites_page_text(page: &[f64], current: &[f64], next: Option<&[f64]>, delta: f64) -> bool {
+    if page.is_empty() || page.len() != current.len() {
+        return false;
+    }
+    if next.is_some_and(|next| changed_ratio(current, next, delta) > 0.0) {
+        return false;
+    }
+    let background = median(page.to_vec());
+    let rewritten = page
+        .iter()
+        .zip(current)
+        .filter(|(before, after)| {
+            (*before - background).abs() > delta && (*before - *after).abs() > delta
+        })
+        .count();
+    rewritten >= TEXT_CHANGE_BLOCKS
+}
+
 /// 找出每一页课件：与前一帧、且与上一张已保存页都有足够比例的块发生变化，才算新的一页
-/// （后者去掉渐变/动画回弹造成的重复页）。近纯色帧不参与成页；停留过短的页按转场丢掉；
+/// （后者去掉渐变/动画回弹造成的重复页）；静止的幻灯片视频里，只改了这一页原有文字的
+/// 小变化也算（见 [`rewrites_page_text`]）。近纯色帧不参与成页；停留过短的页按转场丢掉；
 /// 每页再往后挑一帧稳定画面用于截图。`block_delta` 是单个块「算变了」的亮度差门槛。
 pub fn detect_slide_pages(frames: &[Vec<u8>], block_delta: f64) -> Vec<SlidePage> {
     if frames.is_empty() {
         return Vec::new();
     }
     let blocks: Vec<Vec<f64>> = frames.iter().map(|frame| block_means(frame)).collect();
+    let still_slideshow = is_still_slideshow(&blocks, block_delta);
 
     let mut starts: Vec<usize> = Vec::new();
     for i in 0..blocks.len() {
@@ -336,7 +377,15 @@ pub fn detect_slide_pages(frames: &[Vec<u8>], block_delta: f64) -> Vec<SlidePage
             Some(&page) => {
                 let from_prev = changed_ratio(&blocks[i - 1], &blocks[i], block_delta);
                 let from_page = changed_ratio(&blocks[page], &blocks[i], block_delta);
-                if from_prev >= CHANGE_RATIO && from_page >= CHANGE_RATIO {
+                let new_page = from_prev >= CHANGE_RATIO && from_page >= CHANGE_RATIO;
+                let rewritten = still_slideshow
+                    && rewrites_page_text(
+                        &blocks[page],
+                        &blocks[i],
+                        blocks.get(i + 1).map(Vec::as_slice),
+                        block_delta,
+                    );
+                if new_page || rewritten {
                     starts.push(i);
                 }
             }
@@ -866,6 +915,75 @@ mod tests {
         assert_eq!(starts_of(&pages), vec![0, 2]);
         assert_eq!(pages[1].start_index, 2);
         assert_eq!(pages[1].capture_index, 4);
+    }
+
+    /// 白底黑字的幻灯片：每行字是 (块行, 起始块列, 块数, 亮度)，其余是白底。
+    fn text_slide(lines: &[(usize, usize, usize, u8)]) -> Vec<u8> {
+        let mut frame = solid(250);
+        for &(row, from, count, value) in lines {
+            for y in row * BLOCK..(row + 1) * BLOCK {
+                for x in from * BLOCK..(from + count) * BLOCK {
+                    frame[y * SAMPLE_W + x] = value;
+                }
+            }
+        }
+        frame
+    }
+
+    fn held(frame: &[u8], seconds: usize) -> Vec<Vec<u8>> {
+        vec![frame.to_vec(); seconds]
+    }
+
+    #[test]
+    fn a_still_slide_that_only_changes_its_text_is_a_new_page() {
+        // 「一、牛顿第一定律 / 惯性：…」换成「二、牛顿第二定律 / F = ma …」：标题里变了
+        // 两个字，下一行整行换了。一共只动十来块（不到一成），此前一直被当成同一页。
+        let first = text_slide(&[(3, 2, 8, 120), (5, 2, 10, 140)]);
+        let second = text_slide(&[(3, 2, 2, 90), (3, 4, 6, 120), (5, 2, 7, 170)]);
+        let frames = [held(&first, 6), held(&second, 6)].concat();
+        assert!(changed_ratio(&block_means(&first), &block_means(&second), 8.0) < CHANGE_RATIO);
+        assert_eq!(starts_of(&detect_slide_pages(&frames, 8.0)), vec![0, 6]);
+    }
+
+    #[test]
+    fn lines_appearing_one_by_one_stay_on_one_page() {
+        // 逐行出现的动画只是在空白处添字，原有的字一个没动：还是同一页。
+        let title = text_slide(&[(3, 2, 8, 120)]);
+        let one_line = text_slide(&[(3, 2, 8, 120), (5, 2, 10, 140)]);
+        let two_lines = text_slide(&[(3, 2, 8, 120), (5, 2, 10, 140), (7, 2, 9, 140)]);
+        let frames = [held(&title, 4), held(&one_line, 4), held(&two_lines, 4)].concat();
+        assert_eq!(starts_of(&detect_slide_pages(&frames, 8.0)), vec![0]);
+    }
+
+    #[test]
+    fn a_cursor_parked_over_the_text_is_not_a_new_page() {
+        let slide = text_slide(&[(3, 2, 8, 120), (5, 2, 10, 140)]);
+        let mut cursor = slide.clone();
+        // 鼠标停在第一行字上：盖住两块。
+        for y in 3 * BLOCK..4 * BLOCK {
+            for x in 4 * BLOCK..6 * BLOCK {
+                cursor[y * SAMPLE_W + x] = 0;
+            }
+        }
+        let frames = [held(&slide, 5), held(&cursor, 5)].concat();
+        assert_eq!(starts_of(&detect_slide_pages(&frames, 8.0)), vec![0]);
+    }
+
+    #[test]
+    fn small_changes_count_only_in_a_still_video() {
+        // 讲师小窗一直在动的视频：偶尔停住两秒、换了个姿势，也只是几块的变化，
+        // 不能每停一下就截一页。这类视频仍只认大半屏的换页。
+        let slide = text_slide(&[(3, 2, 8, 120), (5, 2, 10, 140)]);
+        let presenter = |pose: u8| with_blocks(&slide, 3, 2, pose);
+        let mut frames = Vec::new();
+        for pose in [40, 90, 40, 90, 40, 90, 40, 90] {
+            frames.push(presenter(pose));
+        }
+        frames.extend(held(&presenter(160), 2));
+        for pose in [40, 90, 40, 90, 40, 90] {
+            frames.push(presenter(pose));
+        }
+        assert_eq!(starts_of(&detect_slide_pages(&frames, 8.0)), vec![0]);
     }
 
     #[test]
