@@ -144,9 +144,3 @@ cd src-tauri && cargo test
 
 > 播放器上的「去黑边」开关已撤除：它是按亮度猜的，猜错会削掉画面，代价却是点开视频
 > 时几秒 ffmpeg 解码。黑边探测保留在后端，仅用于把黑边裁出课件截图之外。
-
-See `docs/superpowers/STATUS.md` for the full implementation status, the two
-documented spec deviations (enum provider, settings-table key storage), and
-what still needs your machine (installer packaging, keychain hardening,
-optional PiP, and the runtime binaries `yt-dlp` plus Tesseract on fallback
-desktop platforms).

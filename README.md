@@ -211,8 +211,7 @@ cd src-tauri && cargo test   # 后端测试
 ├── course-ai/          # Tauri 应用主体
 │   ├── src/            # React 前端
 │   └── src-tauri/      # Rust 后端与桌面壳
-├── website/            # 官网（GitHub Pages）
-└── docs/               # 设计文档与实施计划
+└── website/            # 官网（GitHub Pages）
 ```
 
 ## ☁️ 云端服务怎么配

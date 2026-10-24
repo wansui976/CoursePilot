@@ -213,8 +213,7 @@ cd src-tauri && cargo test   # backend tests
 ├── course-ai/          # Tauri app
 │   ├── src/            # React frontend
 │   └── src-tauri/      # Rust backend & desktop shell
-├── website/            # Website (GitHub Pages)
-└── docs/               # Design docs & implementation plans
+└── website/            # Website (GitHub Pages)
 ```
 
 ## ☁️ Cloud services

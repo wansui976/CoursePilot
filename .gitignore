@@ -44,6 +44,9 @@ course-ai/scripts/
 # Local resume drafts
 CoursePilot-项目简历.md
 
+# 设计文档与实施计划：本地留存，不进仓库
+docs/
+
 # Local AI session metadata / scratch
 deepseek.json
 course-ai/src-tauri/.claude/
