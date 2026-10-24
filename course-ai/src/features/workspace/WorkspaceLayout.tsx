@@ -14,13 +14,15 @@ import {
   STUDY_PANEL_MIN,
   STUDY_RESIZER_WIDTH,
 } from "./workbenchLayout";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 
 const PANEL_WIDTH_STORAGE_KEY = "course-ai-study-panel-width";
 const STUDY_PANEL_MAX = 720;
 // 学习面板最小宽度：保证核心资料页签和正文都可正常阅读。
 const STUDY_PANEL_DEFAULT = 480;
+/** 分隔线拖到比最小宽度再窄这么多时松手，就收起面板（VS Code 式拖到底收起）。 */
+const COLLAPSE_SNAP = 96;
 
 function clampWidth(width: number, max = STUDY_PANEL_MAX) {
   return Math.min(max, Math.max(STUDY_PANEL_MIN, width));
@@ -123,15 +125,21 @@ export function WorkspaceLayout({
     // rAF 合帧：一帧内多次 pointermove 只写一次（即只触发一次网格重排）。
     let raf = 0;
     let pendingX = startX;
+    let collapseOnRelease = false;
     const apply = () => {
       raf = 0;
-      const next = clampWidth(startWidth - (pendingX - startX), maxPanel);
+      const raw = startWidth - (pendingX - startX);
+      const next = clampWidth(raw, maxPanel);
       liveWidthRef.current = next;
+      // 拖过收起阈值：面板变淡提示「松手就收起」，往回拖即恢复。
+      collapseOnRelease = raw < STUDY_PANEL_MIN - COLLAPSE_SNAP;
+      if (collapseOnRelease) wb?.setAttribute("data-collapse-pending", "");
+      else wb?.removeAttribute("data-collapse-pending");
       // 内联写 grid-template-columns（须与 globals.css 的 .ca-wb 列定义一致），
       // 而不是每帧改 --study-panel-width：自定义属性向整棵工作台子树继承，每帧一写
       // 会让全量文稿 DOM（数千节点）做样式重算——文稿打开时拖动卡顿的来源；
       // contain 只隔离布局/绘制，挡不住继承失效。内联属性只失效 .ca-wb 自身样式。
-      wb?.style.setProperty("grid-template-columns", `minmax(0, 1fr) 8px ${next}px`);
+      wb?.style.setProperty("grid-template-columns", `minmax(0, 1fr) 1px ${next}px`);
     };
     const onMove = (move: PointerEvent) => {
       pendingX = move.clientX;
@@ -140,6 +148,16 @@ export function WorkspaceLayout({
     const onUp = () => {
       if (raf) cancelAnimationFrame(raf);
       setIsResizing(false);
+      wb?.removeAttribute("data-collapse-pending");
+      if (collapseOnRelease) {
+        // 收起时保留拖动前的宽度：再展开回到原来的样子。
+        liveWidthRef.current = startWidth;
+        wb?.style.removeProperty("grid-template-columns");
+        setCollapsed(true);
+        resizeAbortRef.current?.abort();
+        resizeAbortRef.current = null;
+        return;
+      }
       const finalWidth = liveWidthRef.current;
       setPanelWidth(finalWidth);
       // 先把最终宽度写回稳态变量、再撤掉拖动期的内联覆盖：与 React 提交先后无关，
@@ -185,8 +203,7 @@ export function WorkspaceLayout({
   }
 
   // 面板收起/展开：收起时右栏整体隐藏（不占宽度），展开恢复上次宽度。
-  function toggleCollapsed() {
-    const next = !collapsedPref;
+  function setCollapsed(next: boolean) {
     setCollapsedPref(next);
     writeVideoResumeState(videoId, { studyPanelCollapsed: next });
   }
@@ -224,31 +241,26 @@ export function WorkspaceLayout({
           onKeyDown={resizeFromKeyboard}
         />
       )}
-      {collapsed ? (
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          aria-label={t("home.expandStudyPanel")}
-          title={t("home.expandStudyPanel")}
-          className="ca-panel-reveal"
-        >
-          <PanelLeftOpen className="h-4 w-4" />
-        </button>
-      ) : (
+      {!collapsed && (
         <aside aria-label={t("home.studyPanel")} className="ca-panel-col">
-          {isWide && (
-            <button
-              type="button"
-              onClick={toggleCollapsed}
-              aria-label={t("home.collapseStudyPanel")}
-              title={t("home.collapseStudyPanel")}
-              className="ca-panel-collapse ca-touch-44"
-            >
-              <PanelLeftClose className="h-4 w-4" />
-            </button>
-          )}
           {panel}
         </aside>
+      )}
+      {isWide && (
+        <button
+          type="button"
+          onClick={() => setCollapsed(!collapsed)}
+          aria-label={collapsed ? t("home.expandStudyPanel") : t("home.collapseStudyPanel")}
+          aria-pressed={!collapsed}
+          title={collapsed ? t("home.expandStudyPanel") : t("home.collapseStudyPanel")}
+          className="ca-panel-toggle ca-touch-44"
+        >
+          {collapsed ? (
+            <PanelRightOpen aria-hidden="true" className="h-[18px] w-[18px]" />
+          ) : (
+            <PanelRightClose aria-hidden="true" className="h-[18px] w-[18px]" />
+          )}
+        </button>
       )}
     </div>
   );

@@ -8,7 +8,7 @@
   /* 列定义须与 Home.tsx 拖动分隔条时内联写的 grid-template-columns 保持一致：
      拖动期间内联直写整条列定义（只失效 .ca-wb 自身样式），不改继承型 CSS 变量，
      否则每帧全子树样式重算，文稿打开时明显卡顿。 */
-  grid-template-columns: minmax(0, 1fr) 8px var(--study-panel-width, 480px);
+  grid-template-columns: minmax(0, 1fr) 1px var(--study-panel-width, 480px);
   overflow: hidden;
 }
 
@@ -165,20 +165,17 @@
   padding-left: max(12px, var(--safe-left));
 }
 
+/* 分隔线：平时就是一条 1px 发丝线（与其它分隔线同款），不画抓手、不画灰色粗条。
+   拖动热区是透明的伪元素，向两侧各伸 4px，只改光标、不遮内容；悬停 / 拖动时线变强调色。
+   参考 VS Code / Linear / Xcode 的分栏。 */
 .ca-resizer {
   position: relative;
-  /* 网格轨道只有 8px 宽，18px 的热区默认按 start 落位、向右溢出到面板底下，
-     灰色竖条会被后面的面板盖掉一半而看起来偏左；居中落位 + 抬高一层的绘制顺序，
-     让竖条、抓手与分栏边界三者同心。 */
-  justify-self: center;
-  z-index: 1;
-  width: 18px;
+  z-index: 3;
+  width: 1px;
   flex: none;
   cursor: col-resize;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
+  background: var(--line);
+  transition: background 0.12s;
   /* 触摸拖拽时禁止浏览器把手势当成滚动 */
   touch-action: none;
   user-select: none;
@@ -186,53 +183,21 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-/* 可见竖条：用居中的伪元素，拖动时可超出 8px 轨道变粗而不挤动布局 */
 .ca-resizer::after {
   content: "";
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 50%;
-  width: 10px;
-  transform: translateX(-50%);
-  background: var(--line);
-  transition: width 0.14s, background 0.12s;
+  left: -4px;
+  right: -4px;
 }
 
-/* 中间的「抓手」短条：平时灰色较小，悬停略大，拖动时明显放大并高亮 */
-.ca-resizer::before {
-  content: "";
-  position: relative;
-  z-index: 1;
-  width: 6px;
-  height: 34px;
-  border-radius: 999px;
-  background: var(--text-3);
-  opacity: 0.55;
-  transition: width 0.14s, height 0.14s, background 0.12s, opacity 0.12s;
-}
-
-.ca-resizer:hover::after {
-  background: var(--bg-sunken);
-}
-
-.ca-resizer:hover::before {
-  height: 48px;
-  opacity: 0.9;
-}
-
-/* 拖动中（鼠标按住或手指拖拽，由 JS 加 .is-resizing）：抓手短条明显变粗变长、高亮；竖条保持细 */
-.ca-resizer.is-resizing::after,
-.ca-resizer:active::after {
-  background: var(--bg-sunken);
-}
-
-.ca-resizer.is-resizing::before,
-.ca-resizer:active::before {
-  width: 12px;
-  height: 72px;
+.ca-resizer:hover,
+.ca-resizer:focus-visible,
+.ca-resizer.is-resizing {
   background: var(--accent);
-  opacity: 1;
+  box-shadow: 0 0 0 0.5px var(--accent);
+  outline: none;
 }
 
 .ca-panel-col {
@@ -270,7 +235,7 @@
   border-bottom: none;
 }
 
-/* 面板收起：整列宽度归零、隐藏分栏，右侧浮一根「展开」把手（专注看片时唤醒）。 */
+/* 面板收起：整列宽度归零、隐藏分隔线；展开用标题行右端的开关。 */
 .ca-wb[data-panel-collapsed] {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -279,68 +244,32 @@
   display: none;
 }
 
-/* 收起按钮放在标签条最右端（标签条为它让出右侧空位），与标签同高对齐；
-   原先钉在面板右缘正中，会压住文稿、章节等正文的行尾。 */
-.ca-panel-collapse {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 6;
+/* 学习面板开关：钉在播放器列右上角，与视频标题同一行；收起 / 展开都用它，位置不变
+   （参考 Xcode 检查器、Safari 侧栏）。分隔线往右拖到底也能收起。 */
+.ca-panel-toggle {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: end;
+  align-self: start;
+  z-index: 4;
+  margin: 14px 16px 0 0;
   display: grid;
   place-items: center;
   width: 32px;
-  height: 36px;
+  height: 32px;
   border-radius: var(--r-sm);
-  border: none;
-  background: transparent;
   color: var(--text-3);
-  opacity: 0.7;
-  transition: opacity 0.12s, color 0.12s;
+  transition: color 0.12s, background 0.12s;
 }
 
-.ca-panel-col:hover .ca-panel-collapse,
-.ca-panel-collapse:focus-visible {
-  opacity: 1;
-}
-
-@media (hover: none) {
-  .ca-panel-collapse {
-    opacity: 1;
-  }
-}
-
-.ca-panel-collapse:hover {
+.ca-panel-toggle:hover {
   color: var(--text-1);
   background: var(--surface-card-hover);
 }
 
-.ca-wb[data-layout="wide"] .ca-panel-col .ca-study-tabs-band {
-  padding-right: 50px;
-}
-
-/* 收起后的展开把手：钉在右缘中间，垂直小竖条 + 图标。 */
-.ca-panel-reveal {
-  position: absolute;
-  top: 50%;
-  right: 0;
-  z-index: 6;
-  transform: translateY(-50%);
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 56px;
-  border-radius: 8px 0 0 8px;
-  border: 1px solid var(--line);
-  border-right: none;
-  background: var(--bg-panel);
-  color: var(--text-3);
-  box-shadow: var(--shadow-raise);
-  transition: color 0.12s, width 0.14s var(--ease);
-}
-
-.ca-panel-reveal:hover {
-  color: var(--text-1);
-  width: 30px;
+/* 标题行给开关让出位置，长标题不会钻到按钮底下。 */
+.ca-wb[data-layout="wide"] .ca-wb-head {
+  padding-right: 60px;
 }
 
 /* 拖动分隔条时：只冻结「文稿」栏（DOM 巨大、是卡顿来源）；其余栏较轻，照常同步随宽度渲染。
@@ -651,4 +580,27 @@ li[data-active] > .ca-chapter .ca-chapter-dot {
 
 .ca-app[data-shell="stacked"] .ca-panel-scroll-end {
   padding-bottom: calc(1rem + var(--safe-bottom));
+}
+
+/* 分栏布局下三列显式落位：面板开关与播放器列叠在同一格（右上角），若不写明，
+   网格自动排布会为了避开开关把播放器挤到下一格。 */
+.ca-wb[data-layout="wide"] > .ca-player-col {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.ca-wb[data-layout="wide"] > .ca-resizer {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.ca-wb[data-layout="wide"] > .ca-panel-col {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+/* 拖过收起阈值：面板变淡，提示「松手就收起」。 */
+.ca-wb[data-collapse-pending] > .ca-panel-col {
+  opacity: 0.4;
+  transition: opacity 0.12s;
 }

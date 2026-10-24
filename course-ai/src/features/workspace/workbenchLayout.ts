@@ -2,7 +2,8 @@
 
 export const STUDY_PANEL_MIN = 384;
 export const PLAYER_MIN_WIDTH = 320;
-export const STUDY_RESIZER_WIDTH = 8;
+/** 分隔线在网格里只占 1px（拖动热区是向两侧伸出的透明伪元素，不占列宽）。 */
+export const STUDY_RESIZER_WIDTH = 1;
 
 /** 学习面板自身宽到这个程度（平板竖屏、窄桌面窗口），笔记就单独占右半边常驻。 */
 export const SPLIT_NOTES_MIN_WIDTH = 720;

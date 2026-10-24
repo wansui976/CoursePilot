@@ -348,7 +348,7 @@ describe("Home", () => {
       fireEvent.pointerMove(window, { clientX: 700 });
 
       // 每帧只写内联 grid-template-columns（样式失效被限制在 .ca-wb 自身）……
-      expect(wb.style.gridTemplateColumns).toBe("minmax(0, 1fr) 8px 580px");
+      expect(wb.style.gridTemplateColumns).toBe("minmax(0, 1fr) 1px 580px");
       // ……继承型自定义属性保持拖动前的值，不再每帧变化。
       expect(wb.style.getPropertyValue("--study-panel-width")).toBe("480px");
 
@@ -386,8 +386,8 @@ describe("Home", () => {
     });
     expect(separator).toHaveAttribute("tabindex", "0");
     expect(separator).toHaveAttribute("aria-valuemin", "384");
-    // 1024px 宽的工作台要为播放器保留至少 320px：右栏最大只能到 640px。
-    expect(separator).toHaveAttribute("aria-valuemax", "640");
+    // 工作台可用 968px（1024 减 56px 工具栏），为播放器保留至少 320px、分隔线占 1px：右栏最大 647px。
+    expect(separator).toHaveAttribute("aria-valuemax", "647");
     expect(separator).toHaveAttribute("aria-valuenow", "480");
 
     fireEvent.keyDown(separator, { key: "ArrowLeft" });
@@ -401,7 +401,7 @@ describe("Home", () => {
     expect(separator).toHaveAttribute("aria-valuenow", "384");
 
     fireEvent.keyDown(separator, { key: "End" });
-    expect(separator).toHaveAttribute("aria-valuenow", "640");
+    expect(separator).toHaveAttribute("aria-valuenow", "647");
 
     fireEvent.keyDown(separator, { key: "Enter" });
     expect(separator).toHaveAttribute("aria-valuenow", "480");

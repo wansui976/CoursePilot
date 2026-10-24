@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@/i18n";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { WorkspaceLayout } from "./WorkspaceLayout";
@@ -35,6 +35,51 @@ describe("WorkspaceLayout", () => {
 
     rerender(layout("a"));
     expect(separator()).toHaveAttribute("aria-valuenow", "500");
+  });
+
+  it("标题行右端的开关收起 / 展开面板，展开后回到原来的宽度", () => {
+    writeVideoResumeState("a", { studyPanelWidth: 560 });
+    render(layout("a"));
+    const wb = screen.getByLabelText("学习工作台响应布局");
+
+    fireEvent.click(screen.getByRole("button", { name: "收起学习资料面板" }));
+    expect(wb).toHaveAttribute("data-panel-collapsed");
+    expect(screen.queryByRole("complementary", { name: "学习资料面板" })).not.toBeInTheDocument();
+    expect(readVideoResumeState("a").studyPanelCollapsed).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "展开学习资料面板" }));
+    expect(wb).not.toHaveAttribute("data-panel-collapsed");
+    expect(separator()).toHaveAttribute("aria-valuenow", "560");
+  });
+
+  it("分隔线拖过最小宽度再往右一段就收起，并保留拖动前的宽度", () => {
+    // 同步执行回调并返回 0：代码在回调跑完后才记下返回值当「已排一帧」，返回非 0
+    // 会让后续的 pointermove 都以为上一帧还没跑而被跳过（真实浏览器里回调总在下一帧）。
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      cb(0);
+      return 0;
+    });
+    try {
+      writeVideoResumeState("a", { studyPanelWidth: 480 });
+      render(layout("a"));
+      const wb = screen.getByLabelText("学习工作台响应布局");
+
+      fireEvent.pointerDown(separator(), { clientX: 900 });
+      // 480 - 150 = 330：低于最小宽度但没过收起阈值（384 - 96 = 288），只是夹在最小宽度。
+      fireEvent.pointerMove(window, { clientX: 1050 });
+      expect(wb).not.toHaveAttribute("data-collapse-pending");
+      // 480 - 250 = 230：过了阈值，面板变淡提示松手即收起。
+      fireEvent.pointerMove(window, { clientX: 1150 });
+      expect(wb).toHaveAttribute("data-collapse-pending");
+      fireEvent.pointerUp(window);
+
+      expect(wb).toHaveAttribute("data-panel-collapsed");
+      expect(wb).not.toHaveAttribute("data-collapse-pending");
+      fireEvent.click(screen.getByRole("button", { name: "展开学习资料面板" }));
+      expect(separator()).toHaveAttribute("aria-valuenow", "480");
+    } finally {
+      raf.mockRestore();
+    }
   });
 
   it("persists keyboard resizing per video and globally", () => {
