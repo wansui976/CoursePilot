@@ -9,6 +9,7 @@ import type {
   Video,
 } from "../types";
 import type {
+  UpdateCheck,
   WhisperModel,
   CloudSyncProbeAccountChangeResult,
   CloudSyncStatus,
@@ -22,6 +23,8 @@ export const app = {
   exit: (): Promise<void> => invoke("cmd_exit_app"),
   // Android 的 AppPlugin 接管了系统返回键；根页面没有可退层级时退到后台（不结束进程）。
   moveToBackground: (): Promise<void> => invoke("plugin:mobile-files|move_task_to_back"),
+  // 问一次 GitHub 上的最新版本（只取版本号和发布页地址）。
+  checkUpdate: (): Promise<UpdateCheck> => invoke("cmd_check_update"),
 };
 
 export const sync = {

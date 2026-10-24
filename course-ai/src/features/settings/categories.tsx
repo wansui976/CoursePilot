@@ -8,6 +8,7 @@ export type SettingsCategory =
   | "asr"
   | "llm"
   | "courseware"
+  | "about"
   | "dev";
 
 export const CATEGORY_META: Record<
@@ -21,6 +22,7 @@ export const CATEGORY_META: Record<
   asr: { i18nKey: "settings.categories.asr" },
   llm: { i18nKey: "settings.categories.llm" },
   courseware: { i18nKey: "settings.categories.courseware" },
+  about: { i18nKey: "settings.categories.about" },
   dev: { i18nKey: "settings.categories.dev" },
 };
 
@@ -33,6 +35,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   "asr",
   "llm",
   "courseware",
+  "about",
   "dev",
 ];
 

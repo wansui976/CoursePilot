@@ -291,3 +291,15 @@ export interface NoteVersion {
   /** 与 getNotes 同形：Tiptap JSON 字符串或 markdown。 */
   content: string;
 }
+
+/** 一次版本检查的结果（GitHub 上最新的正式版）。 */
+export interface UpdateCheck {
+  /** 正在运行的版本。 */
+  current: string;
+  /** 最新的正式版，不带开头的 v。 */
+  latest: string;
+  /** 最新版比正在运行的新。 */
+  newer: boolean;
+  /** 发布页地址：更新说明和各平台的安装包。 */
+  url: string;
+}

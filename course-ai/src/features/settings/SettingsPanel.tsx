@@ -9,6 +9,7 @@ import { useContainerWidth } from "@/lib/useContainerWidth";
 import { CATEGORY_META, SETTINGS_CATEGORIES, type SettingsCategory } from "./categories";
 import { Group, StackRow } from "./primitives";
 import { useSettingsForm } from "./useSettingsForm";
+import { AboutSection } from "./sections/AboutSection";
 import { AppearanceSection } from "./sections/AppearanceSection";
 import { AsrSection } from "./sections/AsrSection";
 import { CoursewareSection } from "./sections/CoursewareSection";
@@ -253,6 +254,7 @@ export function SettingsPanel({
                 </Group>
               )}
               {activeCategory === "courseware" && <CoursewareSection form={form} />}
+              {activeCategory === "about" && <AboutSection />}
               {activeCategory === "dev" && (
                 <Group header={t("settings.dev.title")} footnote={t("settings.dev.footnote")}>
                   <StackRow>

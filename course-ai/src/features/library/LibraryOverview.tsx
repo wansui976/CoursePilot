@@ -9,6 +9,7 @@ import { WATCHED_RATIO, readLastVideoId, readPlaybackProgress } from "@/lib/play
 import { formatMs } from "@/lib/time";
 import type { Course, VideoListItem } from "@/lib/types";
 import { displayTitle } from "@/lib/videoTitle";
+import { UpdateNotice } from "./UpdateNotice";
 import { VideoCover } from "./VideoCover";
 
 /** 课程封面拼贴最多取几集。 */
@@ -103,6 +104,7 @@ export function LibraryOverview({
       </header>
       <div className="ca-scroll">
         {createError && <ErrorNote className="mb-4" error={createError} />}
+        <UpdateNotice className="mb-4" />
 
         {resumable.length > 0 && (
           <section aria-labelledby="library-resume" className="ca-overview-section">

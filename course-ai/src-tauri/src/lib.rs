@@ -20,7 +20,7 @@ use crate::commands::ai::{
     cmd_get_quiz, cmd_get_summary, cmd_has_api_key, cmd_save_llm_profiles, cmd_save_notes,
     cmd_set_api_key, cmd_stale_ai_artifacts,
 };
-use crate::commands::app::cmd_exit_app;
+use crate::commands::app::{cmd_check_update, cmd_exit_app};
 use crate::commands::note_history::cmd_list_note_versions;
 use crate::commands::assistant::{cmd_assistant_ask, cmd_cancel_assistant};
 use crate::commands::backup::{cmd_backup_database, cmd_restore_database};
@@ -207,6 +207,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             cmd_exit_app,
+            cmd_check_update,
             cmd_create_course,
             cmd_list_courses,
             cmd_delete_course,
