@@ -914,7 +914,7 @@
     "scopeLabel": "当前提问范围：{{scope}}",
     "scopeHint": "「这个视频」这类说法会落到这里",
     "inputLabel": "对助手说",
-    "inputPlaceholder": "想做什么？",
+    "inputPlaceholder": "输入问题或指令",
     "stopGeneration": "停止生成",
     "send": "发送",
     "sendTitle": "发送 (Enter)",

@@ -914,7 +914,7 @@
     "scopeLabel": "Current scope: {{scope}}",
     "scopeHint": "References like \"this video\" are resolved to this scope",
     "inputLabel": "Ask the assistant",
-    "inputPlaceholder": "What would you like to do?",
+    "inputPlaceholder": "Ask a question or give an instruction",
     "stopGeneration": "Stop generation",
     "send": "Send",
     "sendTitle": "Send (Enter)",

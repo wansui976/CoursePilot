@@ -124,12 +124,9 @@
   padding: 0 12px;
 }
 
+/* 列表行首的图标不套色块（彩色方块图标是模板化界面的标志），只是一个安静的中性图标。 */
 .ca-course-screen .ca-nav-button .ic {
-  box-sizing: content-box;
-  padding: 7px;
-  border-radius: 9px;
-  color: var(--accent-text);
-  background: var(--accent-weak);
+  color: var(--text-muted);
 }
 
 .ca-course-screen .course-meta {
