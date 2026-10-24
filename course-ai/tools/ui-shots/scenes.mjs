@@ -138,7 +138,12 @@ export const scenes = [
     devices: ALL,
     run: async ({ page, shot }) => {
       await openVideo(page);
-      await page.getByRole("button", { name: "打开助手" }).click();
+      // 桌面布局从左侧工具栏打开；窄屏没有工具栏，用右下角入口。
+      if (await sidebarShell(page)) {
+        await page.getByRole("button", { name: "切换助手" }).click();
+      } else {
+        await page.getByRole("button", { name: "打开助手" }).click();
+      }
       await shot();
     },
   },

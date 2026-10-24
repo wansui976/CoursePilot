@@ -276,6 +276,25 @@ function auditLayout() {
   }
   // 第五类：可见的原生外观下拉框。WebKit（macOS / iOS）会把它画成系统灰色弹出按钮，
   // 与应用的扁平控件不搭——应改用 ui/select 的 Select / GhostSelect。
+  // 第六类：模板化装饰——装饰性渐变 / 光晕与星星图标（应用的视觉原则：颜色只表达含义）。
+  // 进度条、滑块的「已完成 / 未完成」两段是硬分界的纯色，不算装饰，按元素排除。
+  // 有含义的渐变（如自定义颜色的色轮）在元素上写 data-allow-gradient 放行。
+  const fillTrack = (el) =>
+    el.matches(
+      'input[type="range"], .ca-slider, .course-video-progress, .course-video-volume, [data-allow-gradient]',
+    );
+  for (const el of document.querySelectorAll("body *")) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 1 || rect.height <= 1 || fillTrack(el)) continue;
+    const image = getComputedStyle(el).backgroundImage;
+    if (image && image.includes("gradient(")) {
+      issues.push(`${describe(el)} 用了装饰性渐变`);
+    }
+  }
+  for (const icon of document.querySelectorAll("svg.lucide-sparkles")) {
+    const rect = icon.getBoundingClientRect();
+    if (rect.width > 1 && rect.height > 1) issues.push(`${describe(icon.parentElement ?? icon)} 用了星星图标`);
+  }
   for (const input of document.querySelectorAll('input[type="number"]')) {
     const rect = input.getBoundingClientRect();
     if (rect.width <= 1 || rect.height <= 1) continue;
