@@ -36,7 +36,7 @@ course-ai/src-tauri/binaries/*
 
 # dav1d 的 iOS 静态库（1.3MB，交叉编译产物）：按本仓库对二进制的惯例不入库，
 # 需要时用 course-ai/scripts/build-dav1d-ios.sh 生成。头文件照常入库。
-course-ai/src-tauri/gen/apple/vendor/dav1d/lib/*.a
+course-ai/src-tauri/gen/apple/vendor/dav1d/lib/**/*.a
 
 # Local helper scripts
 course-ai/scripts/

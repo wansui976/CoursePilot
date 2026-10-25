@@ -76,8 +76,9 @@ targets:
       base:
         # dav1d（AV1 软件解码）静态库：iOS 不允许 sidecar 可执行文件，只能链进来。
         # 库路径走 -L 而不是 LIBRARY_SEARCH_PATHS——下面带 [arch=...] 的条目会盖掉通用值。
+        # 真机与模拟器各一份库，按 $(PLATFORM_NAME)（iphoneos / iphonesimulator）分目录。
         HEADER_SEARCH_PATHS: $(inherited) $(SRCROOT)/vendor/dav1d/include
-        OTHER_LDFLAGS: $(inherited) -L$(SRCROOT)/vendor/dav1d/lib -ldav1d
+        OTHER_LDFLAGS: $(inherited) -L$(SRCROOT)/vendor/dav1d/lib/$(PLATFORM_NAME) -ldav1d
         SWIFT_OBJC_BRIDGING_HEADER: $(SRCROOT)/Sources/course-ai/Dav1dProbe-Bridging-Header.h
         SWIFT_VERSION: "5.0"
         ENABLE_BITCODE: false

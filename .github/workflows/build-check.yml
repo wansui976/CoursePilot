@@ -120,6 +120,18 @@ jobs:
       - name: Rust tests
         working-directory: course-ai/src-tauri
         run: cargo test --lib
+      - name: Restore dav1d (AV1 decoder for on-device transcode)
+        # 静态库不入库（见 .gitignore），每次按脚本编；按脚本内容缓存，脚本不变就直接复用。
+        uses: actions/cache@v4
+        id: dav1d-cache
+        with:
+          path: course-ai/src-tauri/gen/apple/vendor/dav1d/lib
+          key: dav1d-${{ runner.os }}-${{ hashFiles('course-ai/scripts/build-dav1d-ios.sh') }}
+      - name: Compile dav1d
+        if: steps.dav1d-cache.outputs.cache-hit != 'true'
+        run: |
+          brew install meson ninja
+          ./course-ai/scripts/build-dav1d-ios.sh
       - name: Build for iOS Simulator
         # 模拟器构建用本机临时签名，不需要证书与描述文件。
         working-directory: course-ai
