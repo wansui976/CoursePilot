@@ -1,19 +1,34 @@
 import { useQuery } from "@tanstack/react-query";
+import { EditorContent, useEditor } from "@tiptap/react";
 import { Archive, History, RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc, type NoteVersion } from "@/lib/ipc";
-import { renderMarkdown } from "@/lib/renderMarkdown";
 import { formatRelativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Modal } from "@/ui/dialog";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { TextSkeleton } from "@/ui/skeleton";
-import { noteContentLength, noteContentToMarkdown } from "./noteVersionContent";
+import { notesExtensions } from "./extensions";
+import { noteContentLength, noteContentToDoc } from "./noteVersionContent";
 
 function versionTime(version: NoteVersion): number {
   return version.edited_at ?? version.captured_at;
+}
+
+/** 只读预览：和编辑器同一套节点，图片、待办、代码块都照原样显示。 */
+function NotePreview({ content }: { content: string }) {
+  const editor = useEditor(
+    {
+      editable: false,
+      extensions: notesExtensions(),
+      content: noteContentToDoc(content),
+      editorProps: { attributes: { class: "tiptap-notes ca-reading" } },
+    },
+    [content],
+  );
+  return <EditorContent editor={editor} />;
 }
 
 /**
@@ -120,8 +135,8 @@ export function NoteHistoryDialog({
               aria-label={t("noteHistory.previewLabel")}
               className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)]"
             >
-              <div className="ca-note-history-preview ca-reading min-h-0 flex-1 overflow-y-auto px-4 py-3 text-sm">
-                {renderMarkdown(noteContentToMarkdown(selected.content), () => {})}
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                <NotePreview content={selected.content} />
               </div>
               <div className="flex flex-none items-center gap-2 border-t border-[var(--border-faint)] px-3 py-2">
                 <span className="min-w-0 flex-1 truncate text-xs text-[var(--text-muted)]">

@@ -280,6 +280,12 @@ export interface Subscription {
 }
 
 /** 笔记的一个历史版本（cmd_list_note_versions）。 */
+export interface SavedNoteImage {
+  id: string;
+  /** 笔记里引用这张图用的 src（`note-image:<id>`）。 */
+  src: string;
+}
+
 export interface NoteVersion {
   /** `h:<id>` 本机留底；`b:<文件名>` 每日启动快照。 */
   id: string;

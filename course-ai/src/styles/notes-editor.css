@@ -104,3 +104,130 @@
 .tiptap-notes:focus-visible {
   outline: none;
 }
+
+/* 链接：强调色 + 细下划线；编辑时点链接只是放光标，打开走链接浮条。 */
+.tiptap-notes a {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+/* 代码块：等宽、不换行、横向滚动；与行内代码同一块底色。 */
+.tiptap-notes pre {
+  margin: 0.8em 0;
+  padding: 0.75em 1em;
+  border-radius: 6px;
+  background: var(--surface-input);
+  overflow-x: auto;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.82em;
+  line-height: 1.6;
+  white-space: pre;
+  /* 中文排版规则（悬挂标点、自动间距）只属于正文，代码里一律关掉。 */
+  text-autospace: no-autospace;
+  hanging-punctuation: none;
+}
+.tiptap-notes pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+.tiptap-notes code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.tiptap-notes hr {
+  margin: 1.4em 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.tiptap-notes hr.ProseMirror-selectednode {
+  border-top-color: var(--accent);
+}
+
+/* 待办：复选框放在行首、与首行文字对齐；勾掉的项变淡，不加删除线（还要能读）。 */
+.tiptap-notes ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0.2em;
+}
+.tiptap-notes ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+}
+.tiptap-notes ul[data-type="taskList"] li > label {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 1.7em;
+  user-select: none;
+}
+.tiptap-notes ul[data-type="taskList"] li > label input {
+  width: 0.95em;
+  height: 0.95em;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.tiptap-notes ul[data-type="taskList"] li > div {
+  flex: 1;
+  min-width: 0;
+}
+.tiptap-notes ul[data-type="taskList"] li[data-checked="true"] > div {
+  color: var(--text-faint);
+}
+.tiptap-notes ul[data-type="taskList"] ul[data-type="taskList"] {
+  margin: 0;
+}
+
+/* 图片：占满行宽为止，不放大小图；细边框让白底截图和页面分得开。 */
+.tiptap-notes .ca-note-image {
+  margin: 0.9em 0;
+  line-height: 0;
+}
+.tiptap-notes .ca-note-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  outline: 1px solid var(--border-faint, var(--border-subtle));
+  outline-offset: -1px;
+}
+.tiptap-notes .ca-note-image[data-state="loading"] img {
+  background: var(--surface-input);
+}
+.tiptap-notes .ca-note-image.ProseMirror-selectednode img {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.tiptap-notes .ca-note-image-missing {
+  display: block;
+  padding: 1.2em 1em;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-faint);
+  font-family: var(--font-app);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  text-align: center;
+}
+.tiptap-notes.ProseMirror-focused .ca-note-image-missing {
+  cursor: default;
+}
+
+/* 块间光标（图片、分隔线前后）：跟正文文字同色。 */
+.tiptap-notes .ProseMirror-gapcursor::after {
+  border-top-color: var(--text-strong);
+}
+
+/* 格式条：放不下时横向滑动，不显示滚动条。 */
+.ca-notes-toolbar {
+  scrollbar-width: none;
+}
+.ca-notes-toolbar::-webkit-scrollbar {
+  display: none;
+}
+.tiptap-notes ul[data-type="taskList"] li > div > p {
+  margin: 0;
+}

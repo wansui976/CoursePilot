@@ -3,12 +3,7 @@ import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
-import { EditorContent, useEditor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import { Table } from "@tiptap/extension-table";
-import { TableRow } from "@tiptap/extension-table-row";
-import { TableHeader } from "@tiptap/extension-table-header";
-import { TableCell } from "@tiptap/extension-table-cell";
+import { type Editor, EditorContent, useEditor } from "@tiptap/react";
 import { type ExportItem } from "./ExportMenu";
 import { ArchiveRestore, NotebookPen, X } from "lucide-react";
 import { Button } from "@/ui/button";
@@ -31,8 +26,18 @@ import { markdownToTiptap } from "@/lib/markdownToTiptap";
 import { tiptapToMarkdown } from "@/lib/tiptapToMarkdown";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { useEffect, useRef, useState } from "react";
-import { TimestampNode, installTimestampClick } from "./notes/timestampNode";
-import { MathNode } from "./notes/mathNode";
+import { installTimestampClick } from "./notes/timestampNode";
+import { notesExtensions } from "./notes/extensions";
+import {
+  captureFrameBlocks,
+  imageBlocks,
+  imageFiles,
+  insertBlocks,
+  storeNoteImage,
+  type StoredImage,
+} from "./notes/insertImages";
+import { ImageTooLargeError } from "./notes/prepareImage";
+import { looksLikeMarkdown, markdownPasteContent } from "./notes/pasteMarkdown";
 import { loadDocument } from "./notes/loadDocument";
 import { insertNoteStamp } from "./notes/insertNoteStamp";
 import { NotesToolbar } from "./notes/NotesToolbar";
@@ -85,25 +90,92 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   // 上一次的正文长度：装载时重置，每次编辑后更新，用来发现「一下子少了一大半」。
   const lastTextLengthRef = useRef(0);
 
+  // 图片：压缩、存库是异步的，期间按钮置灰；失败提示几秒后自己消失。
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState<unknown>(null);
+  const editorRef = useRef<Editor | null>(null);
+  const insertImagesRef = useRef<(files: File[], at?: number) => void>(() => {});
+
+  useEffect(() => {
+    if (imageError == null) return;
+    const timer = window.setTimeout(() => setImageError(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [imageError]);
+
+  async function withImageWork(work: (target: string) => Promise<void>) {
+    const target = videoId;
+    setImageBusy(true);
+    setImageError(null);
+    try {
+      await work(target);
+    } catch (error) {
+      setImageError(error instanceof ImageTooLargeError ? new Error(t("notes.imageTooLarge")) : error);
+    } finally {
+      setImageBusy(false);
+    }
+  }
+
+  /** 存好之后再插：面板在视频之间保活，存图期间切了视频就不插，免得进了别的视频的笔记。 */
+  function insertWhenStillHere(target: string, run: (editor: Editor) => void) {
+    const current = editorRef.current;
+    if (!current || current.isDestroyed || activeVideoIdRef.current !== target) return;
+    run(current);
+  }
+
+  function insertImages(files: File[], at?: number) {
+    void withImageWork(async (target) => {
+      const stored: StoredImage[] = [];
+      for (const file of files) stored.push(await storeNoteImage(target, file));
+      insertWhenStillHere(target, (editor) => insertBlocks(editor, imageBlocks(stored), at));
+    });
+  }
+  insertImagesRef.current = insertImages;
+
+  function captureFrame() {
+    void withImageWork(async (target) => {
+      const blocks = await captureFrameBlocks(target, usePlayer.getState().currentMs);
+      insertWhenStillHere(target, (editor) => insertBlocks(editor, blocks));
+    });
+  }
+
   function debounceSave(json: string) {
     const targetVideoId = activeVideoIdRef.current;
     notesCoordinator.scheduleSave(targetVideoId, json);
   }
 
   const editor = useEditor({
-    extensions: [
-      StarterKit,
-      TimestampNode,
-      MathNode,
-      Table.configure({ resizable: false }),
-      TableRow,
-      TableHeader,
-      TableCell,
-    ],
+    extensions: notesExtensions(),
     content: { type: "doc", content: [{ type: "paragraph" }] },
     editorProps: {
       attributes: {
         class: "tiptap-notes ca-reading ca-reading-measure p-4 focus:outline-none",
+      },
+      handlePaste: (_view, event) => {
+        const data = event.clipboardData;
+        if (!data) return false;
+        const text = data.getData("text/plain");
+        // 截图、从网页「拷贝图像」：剪贴板里只有图片，没有文字。
+        const files = imageFiles(data.files);
+        if (files.length && !text.trim()) {
+          insertImagesRef.current(files);
+          return true;
+        }
+        // 纯文本的 Markdown（.md 文件、代码编辑器、AI 对话里复制来的）转成格式；
+        // 带 HTML 的（网页、文档）交给编辑器默认处理。
+        if (!data.getData("text/html") && looksLikeMarkdown(text)) {
+          editorRef.current?.chain().focus().insertContent(markdownPasteContent(text)).run();
+          return true;
+        }
+        return false;
+      },
+      handleDrop: (view, event, _slice, moved) => {
+        if (moved) return false;
+        const files = imageFiles(event.dataTransfer?.files);
+        if (!files.length) return false;
+        event.preventDefault();
+        const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+        insertImagesRef.current(files, at);
+        return true;
       },
     },
     onUpdate: ({ editor }) => {
@@ -116,6 +188,8 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       debounceSave(JSON.stringify(editor.getJSON()));
     },
   });
+
+  editorRef.current = editor;
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
@@ -296,16 +370,24 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       {...(showTimestamps ? {} : { "data-hide-timestamps": "" })}
       className="relative flex h-full flex-col"
     >
-      {/* 选中文字时的浮出格式条（tiptap BubbleMenu，不占布局空间）。 */}
-      {editor && <NotesToolbar editor={editor} />}
       {(writeState.status === "error" ||
         (!notesQuery.isPending && !notesQuery.isError)) && (
-        <div className="flex flex-none justify-end border-b border-[var(--border-subtle)] px-3 py-2">
+        <div className="relative flex flex-none items-center gap-2 border-b border-[var(--border-subtle)] py-1 pl-2 pr-3">
+          {editor ? (
+            <NotesToolbar
+              editor={editor}
+              imageBusy={imageBusy}
+              onInsertImages={(files) => insertImages(files)}
+              onCaptureFrame={captureFrame}
+            />
+          ) : (
+            <span className="flex-1" />
+          )}
           <span
             role="status"
             aria-live="polite"
             aria-atomic="true"
-            className={`text-xs ${
+            className={`flex-none text-xs ${
               writeState.status === "error"
                 ? "text-[var(--status-err)]"
                 : "text-[var(--text-faint)]"
@@ -333,6 +415,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
           }}
         />
       )}
+      {imageError != null && <ErrorNote className="mx-3 mt-2" error={imageError} />}
       {notesQuery.isError && (
         <ErrorNote
           className="mx-3 mb-2"

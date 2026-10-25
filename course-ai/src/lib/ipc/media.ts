@@ -19,6 +19,7 @@ import type {
 } from "../types";
 import type {
   NoteVersion,
+  SavedNoteImage,
   SlidesProgress,
   SlidesExtractEvent,
   SlidesOcrProgress,
@@ -101,6 +102,14 @@ export const ai = {
   // 笔记的历史版本（本机留底 + 每日启动快照），新的在前；只读，恢复由前端装回编辑器。
   noteVersions: (videoId: string): Promise<NoteVersion[]> =>
     invoke("cmd_list_note_versions", { videoId }),
+  // 笔记图片：笔记里只存 src = "note-image:<id>" 的引用，图片本身单独存、单独同步。
+  saveNoteImage: (
+    videoId: string,
+    image: { mime: string; dataBase64: string; width?: number; height?: number },
+  ): Promise<SavedNoteImage> =>
+    invoke("cmd_save_note_image", { videoId, ...image }),
+  // 原始二进制（后端 ipc::Response），不是 JSON 数字数组。
+  readNoteImage: (id: string): Promise<ArrayBuffer> => invoke("cmd_read_note_image", { id }),
   getQuiz: (videoId: string): Promise<string | null> =>
     invoke("cmd_get_quiz", { videoId }),
   getMindmap: (videoId: string): Promise<string | null> =>

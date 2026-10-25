@@ -33,6 +33,10 @@ const { mockIpc, editorCapture, confirmMock } = vi.hoisted(() => ({
       getJSON: ReturnType<typeof vi.fn>;
       undo: ReturnType<typeof vi.fn>;
       restore: ReturnType<typeof vi.fn<(doc: unknown) => void>>;
+      inserted: ReturnType<typeof vi.fn<(content: unknown) => void>>;
+      editorProps?: {
+        handlePaste?: (view: unknown, event: unknown) => boolean;
+      };
       editor: {
         commands: { setContent: ReturnType<typeof vi.fn>; undo: ReturnType<typeof vi.fn> };
         chain: () => unknown;
@@ -45,6 +49,7 @@ const { mockIpc, editorCapture, confirmMock } = vi.hoisted(() => ({
       getJSON: vi.fn(),
       undo: vi.fn(),
       restore: vi.fn<(doc: unknown) => void>(),
+      inserted: vi.fn<(content: unknown) => void>(),
       editor: null,
     };
     capture.setContent = vi.fn((_content: unknown, options?: { emitUpdate?: boolean }) => {
@@ -57,6 +62,7 @@ const { mockIpc, editorCapture, confirmMock } = vi.hoisted(() => ({
       chain: () => ({
         focus: () => ({
           setContent: (doc: unknown) => ({ run: () => capture.restore(doc) }),
+          insertContent: (content: unknown) => ({ run: () => capture.inserted(content) }),
         }),
       }),
       getJSON: capture.getJSON,
@@ -68,16 +74,22 @@ const { mockIpc, editorCapture, confirmMock } = vi.hoisted(() => ({
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: confirmMock }));
-vi.mock("@tiptap/starter-kit", () => ({ default: {} }));
-vi.mock("@tiptap/extension-table", () => ({ Table: { configure: () => ({}) } }));
-vi.mock("@tiptap/extension-table-row", () => ({ TableRow: {} }));
-vi.mock("@tiptap/extension-table-header", () => ({ TableHeader: {} }));
-vi.mock("@tiptap/extension-table-cell", () => ({ TableCell: {} }));
+// 替身编辑器不认扩展，也画不出格式条（它要订阅真编辑器的状态）；
+// 格式条与图片节点各自用真编辑器测（notes/*.test）。
+vi.mock("./notes/extensions", () => ({ notesExtensions: () => [] }));
+vi.mock("./notes/NotesToolbar", () => ({ NotesToolbar: () => null }));
+const { storeNoteImage, insertBlocks } = vi.hoisted(() => ({
+  storeNoteImage: vi.fn(),
+  insertBlocks: vi.fn(),
+}));
+vi.mock("./notes/insertImages", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./notes/insertImages")>()),
+  storeNoteImage,
+  insertBlocks,
+}));
 vi.mock("./notes/timestampNode", () => ({
-  TimestampNode: {},
   installTimestampClick: () => undefined,
 }));
-vi.mock("./notes/mathNode", () => ({ MathNode: {} }));
 // 替身编辑器没有 state/view；清历史的那一半由 notes/loadDocument.test 用真编辑器验证。
 vi.mock("./notes/loadDocument", () => ({
   loadDocument: (
@@ -87,8 +99,12 @@ vi.mock("./notes/loadDocument", () => ({
 }));
 vi.mock("@tiptap/react", () => ({
   EditorContent: () => <div>笔记正文</div>,
-  useEditor: (opts: { onUpdate?: (p: { editor: unknown }) => void }) => {
+  useEditor: (opts: {
+    onUpdate?: (p: { editor: unknown }) => void;
+    editorProps?: typeof editorCapture.editorProps;
+  }) => {
     editorCapture.onUpdate = opts?.onUpdate;
+    editorCapture.editorProps = opts?.editorProps;
     return editorCapture.editor;
   },
 }));
@@ -527,7 +543,8 @@ describe("NotesPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "历史版本" }));
     const dialog = await screen.findByRole("dialog", { name: "笔记历史" });
-    expect(await screen.findByText("沿负梯度走")).toBeInTheDocument();
+    // 预览用的是只读编辑器（这里被替身顶替）；预览内容由 NoteHistoryDialog.test 用真编辑器验证。
+    expect(await screen.findByRole("button", { name: "恢复此版本" })).toBeInTheDocument();
     expect(mockIpc.ai.noteVersions).toHaveBeenCalledWith("video-1");
 
     fireEvent.click(screen.getByRole("button", { name: "恢复此版本" }));
@@ -536,4 +553,64 @@ describe("NotesPanel", () => {
     );
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
   });
+
+  describe("粘贴", () => {
+    function paste(data: { text?: string; html?: string; files?: File[] }) {
+      return editorCapture.editorProps!.handlePaste!(null, {
+        clipboardData: {
+          getData: (type: string) =>
+            type === "text/plain" ? (data.text ?? "") : type === "text/html" ? (data.html ?? "") : "",
+          files: data.files ?? [],
+        },
+      });
+    }
+
+    beforeEach(() => {
+      storeNoteImage.mockReset();
+      insertBlocks.mockReset();
+      editorCapture.inserted.mockClear();
+    });
+
+    it("剪贴板里只有图片时存进库、插进笔记", async () => {
+      storeNoteImage.mockResolvedValue({ src: "note-image:a", width: 10, height: 5 });
+      renderNotesPanel("video-1", "paste-image");
+      await screen.findByText("笔记正文");
+      const png = new File(["x"], "shot.png", { type: "image/png" });
+
+      expect(paste({ files: [png] })).toBe(true);
+
+      await waitFor(() => expect(insertBlocks).toHaveBeenCalledTimes(1));
+      expect(storeNoteImage).toHaveBeenCalledWith("video-1", png);
+      expect(insertBlocks.mock.calls[0][1]).toEqual([
+        { type: "image", attrs: { src: "note-image:a", width: 10, height: 5, alt: null } },
+      ]);
+    });
+
+    it("纯文本的 Markdown 转成格式；带 HTML 的交给编辑器默认处理", async () => {
+      renderNotesPanel("video-1", "paste-md");
+      await screen.findByText("笔记正文");
+
+      expect(paste({ text: "# 标题\n\n- 一" })).toBe(true);
+      expect(editorCapture.inserted).toHaveBeenCalledWith([
+        expect.objectContaining({ type: "heading" }),
+        expect.objectContaining({ type: "bulletList" }),
+      ]);
+
+      expect(paste({ text: "# 标题", html: "<h1>标题</h1>" })).toBe(false);
+      expect(paste({ text: "普通的一句话" })).toBe(false);
+    });
+
+    it("图片太大压不下来时提示，不插入", async () => {
+      const { ImageTooLargeError } = await import("./notes/prepareImage");
+      storeNoteImage.mockRejectedValue(new ImageTooLargeError("too large"));
+      renderNotesPanel("video-1", "paste-too-large");
+      await screen.findByText("笔记正文");
+
+      paste({ files: [new File(["x"], "big.png", { type: "image/png" })] });
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("图片太大");
+      expect(insertBlocks).not.toHaveBeenCalled();
+    });
+  });
 });
+
