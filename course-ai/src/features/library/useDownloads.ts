@@ -51,19 +51,31 @@ export function useDownloadsSync() {
     });
   }, [queryClient]);
 
-  // 一批全部下完：后端统一起流水线。清掉占位记录，让处理队列接上。
+  // 一批全部下完：清掉占位记录，让处理队列接上。后端随后按并发上限一条条起流水线，
+  // 每起一条再发一次 processing-started，处理队列跟着刷新。
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
+    const unlisteners: Array<() => void> = [];
+    let alive = true;
+    const keep = (fn: () => void) => {
+      if (alive) unlisteners.push(fn);
+      else fn();
+    };
     void listen<DownloadBatchDoneEvent>("download:batch-done", ({ payload }) => {
       clearFinished(payload.courseId);
       void queryClient.invalidateQueries({ queryKey: qk.videos.list(payload.courseId) });
       void queryClient.invalidateQueries({ queryKey: qk.processingVideos() });
     })
-      .then((fn) => {
-        unlisten = fn;
-      })
+      .then(keep)
       // 无 Tauri 运行时（测试/浏览器预览）里事件接口不可用；队列本身仍能靠快照工作。
       .catch(() => {});
-    return () => unlisten?.();
+    void listen("download:processing-started", () => {
+      void queryClient.invalidateQueries({ queryKey: qk.processingVideos() });
+    })
+      .then(keep)
+      .catch(() => {});
+    return () => {
+      alive = false;
+      unlisteners.forEach((fn) => fn());
+    };
   }, [clearFinished, queryClient]);
 }

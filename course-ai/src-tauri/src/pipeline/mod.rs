@@ -1539,6 +1539,15 @@ impl ProcessingTasks {
     }
 }
 
+/// 某视频的流水线是否还在跑（批量导入的处理调度据此决定什么时候起下一个）。
+pub fn is_processing(app: &AppHandle, video_id: &str) -> bool {
+    app.state::<ProcessingTasks>()
+        .tasks
+        .lock()
+        .unwrap()
+        .contains_key(video_id)
+}
+
 async fn stop_processing_task(task: ProcessingTask) {
     let ProcessingTask {
         handle,

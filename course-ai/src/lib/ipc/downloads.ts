@@ -10,5 +10,7 @@ export const downloads = {
     invoke("cmd_enqueue_downloads", { courseId, items }),
   list: (): Promise<DownloadJob[]> => invoke("cmd_list_downloads"),
   cancel: (id: string): Promise<void> => invoke("cmd_cancel_download", { id }),
+  /** 全部取消：连同已下完、正排着等处理的视频也不再处理。 */
+  cancelAll: (): Promise<void> => invoke("cmd_cancel_all_downloads"),
   remove: (id: string): Promise<void> => invoke("cmd_remove_download", { id }),
 };

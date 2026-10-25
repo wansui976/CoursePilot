@@ -11,6 +11,7 @@ use crate::pipeline::download::DownloadEvent;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Semaphore;
@@ -18,8 +19,15 @@ use uuid::Uuid;
 
 /// 同时下几个。B 站单条链路不稳，2 个是速度与稳定性的折中。
 const MAX_CONCURRENT: usize = 2;
+/// 一批下完后同时跑几条处理流水线。每条都要抽音频、语音识别、调大模型，
+/// 一口气全起会把机器和模型接口的限流一起打满。
+const BATCH_PROCESS_CONCURRENCY: usize = 2;
+/// 等前面的流水线跑完时多久看一次。
+const BATCH_PROCESS_POLL: std::time::Duration = std::time::Duration::from_secs(2);
 pub const EVENT_UPDATE: &str = "download:update";
 pub const EVENT_BATCH_DONE: &str = "download:batch-done";
+/// 批量下完后排着的视频轮到、起了流水线：前端据此刷新处理队列（这时 batch-done 早就发过了）。
+pub const EVENT_PROCESSING_STARTED: &str = "download:processing-started";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -84,6 +92,9 @@ struct Inner {
 pub struct DownloadQueue {
     inner: Mutex<Inner>,
     semaphore: Arc<Semaphore>,
+    /// 「全部取消」的代次：每按一次 +1。下完后排着等处理的视频据此知道用户已经
+    /// 不想要了，不再起流水线。
+    cancel_epoch: AtomicU64,
 }
 
 impl Default for DownloadQueue {
@@ -91,6 +102,7 @@ impl Default for DownloadQueue {
         Self {
             inner: Mutex::new(Inner::default()),
             semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT)),
+            cancel_epoch: AtomicU64::new(0),
         }
     }
 }
@@ -395,19 +407,83 @@ async fn finish_batch(app: &AppHandle, batch_id: &str) {
         (course_id, videos)
     };
 
-    // 全部下完再统一处理。某个视频起流水线失败不该影响其他视频。
-    for video_id in videos {
-        if let Err(error) = crate::pipeline::cmd_process_video(app.clone(), video_id.clone()).await
-        {
-            tracing::warn!("start processing downloaded video {video_id} failed: {error}");
-        }
-    }
+    // 全部下完再处理，但不一口气全起（见 spawn_batch_processing）。
+    spawn_batch_processing(app.clone(), videos);
     if let Some(course_id) = course_id {
         let _ = app.emit(
             EVENT_BATCH_DONE,
             serde_json::json!({ "courseId": course_id }),
         );
     }
+}
+
+/// 依次给一批刚下完的视频起处理流水线，同时最多跑 BATCH_PROCESS_CONCURRENCY 条，
+/// 跑完一条再起下一条。用户「全部取消」后不再起新的，并停掉这里起的、还在跑的。
+fn spawn_batch_processing(app: AppHandle, videos: Vec<String>) {
+    if videos.is_empty() {
+        return;
+    }
+    let epoch = app
+        .state::<DownloadQueue>()
+        .cancel_epoch
+        .load(Ordering::SeqCst);
+    tauri::async_runtime::spawn(async move {
+        let canceled = |app: &AppHandle| {
+            app.state::<DownloadQueue>()
+                .cancel_epoch
+                .load(Ordering::SeqCst)
+                != epoch
+        };
+        let mut running: Vec<String> = Vec::new();
+        for video_id in videos {
+            loop {
+                if canceled(&app) {
+                    for id in running {
+                        let _ = crate::pipeline::cancel_processing(&app, &id).await;
+                    }
+                    return;
+                }
+                running.retain(|id| crate::pipeline::is_processing(&app, id));
+                if running.len() < BATCH_PROCESS_CONCURRENCY {
+                    break;
+                }
+                tokio::time::sleep(BATCH_PROCESS_POLL).await;
+            }
+            if !awaiting_processing(&app, &video_id).await {
+                continue;
+            }
+            // 某个视频起流水线失败不该影响其他视频。
+            match crate::pipeline::cmd_process_video(app.clone(), video_id.clone()).await {
+                Ok(()) => {
+                    let _ = app.emit(
+                        EVENT_PROCESSING_STARTED,
+                        serde_json::json!({ "videoId": video_id }),
+                    );
+                    running.push(video_id);
+                }
+                Err(error) => {
+                    tracing::warn!("start processing downloaded video {video_id} failed: {error}")
+                }
+            }
+        }
+    });
+}
+
+/// 排着的视频轮到时是否还需要起流水线：等待期间用户可能已经手动点了「开始处理」
+/// （再起一遍会把跑了一半的重来），或者把视频删了。
+async fn awaiting_processing(app: &AppHandle, video_id: &str) -> bool {
+    if crate::pipeline::is_processing(app, video_id) {
+        return false;
+    }
+    let db = app.state::<AppState>().db.clone();
+    let status: Option<String> =
+        sqlx::query_scalar("SELECT processed_status FROM videos WHERE id=? AND deleted_at IS NULL")
+            .bind(video_id)
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten();
+    status.as_deref() == Some("pending")
 }
 
 /// 入队一批下载，立刻返回任务快照；真正的下载在后台跑。
@@ -521,6 +597,42 @@ pub async fn cmd_cancel_download(app: AppHandle, id: String) -> AppResult<()> {
         cleanup_staging(staging);
     }
     finish_batch(&app, &job.batch_id).await;
+    Ok(())
+}
+
+/// 全部取消：取消所有排队中 / 下载中的任务，并且不再给任何一批起处理流水线——
+/// 包括已经下完、正排着等处理的视频。逐个调 `cmd_cancel_download` 做不到这一点：
+/// 最后一个任务被取消时整批算「结束」，反而会把已下完的那些送去处理。
+#[tauri::command]
+pub async fn cmd_cancel_all_downloads(app: AppHandle) -> AppResult<()> {
+    let queue = app.state::<DownloadQueue>();
+    queue.cancel_epoch.fetch_add(1, Ordering::SeqCst);
+    let ids: Vec<String> = {
+        let mut inner = queue.inner.lock().unwrap();
+        for spec in inner.specs.values_mut() {
+            spec.auto_process = false;
+        }
+        inner.order.clone()
+    };
+    let mut batches: Vec<String> = Vec::new();
+    for id in ids {
+        let Some((job, handle, staging)) = queue.mark_canceled(&id) else {
+            continue;
+        };
+        emit_job(&app, &job);
+        if let Some(handle) = handle {
+            handle.abort();
+        }
+        if let Some(staging) = staging {
+            cleanup_staging(staging);
+        }
+        if !batches.contains(&job.batch_id) {
+            batches.push(job.batch_id);
+        }
+    }
+    for batch_id in batches {
+        finish_batch(&app, &batch_id).await;
+    }
     Ok(())
 }
 

@@ -84,12 +84,12 @@ export function ProcessingQueueView({
       onRetryJobs={queue.retryJobsForVideo}
       onCancelVideo={(id) => void ipc.pipeline.cancel(id)}
       onCancelAll={() => {
-        queue.cancelAllProcessing();
-        for (const item of downloads) {
-          if (item.canCancel) {
-            void ipc.downloads.cancel(item.job.id).catch(() => {});
-          }
-        }
+        // 先让后端停掉下载、并且不再给下完的视频起流水线，再取消正在跑的处理；
+        // 反过来的话，最后一个下载被取消时整批「结束」，又会起一批新的处理。
+        void ipc.downloads
+          .cancelAll()
+          .catch(() => {})
+          .finally(() => queue.cancelAllProcessing());
       }}
       onRetryAll={queue.retryFailedAll}
       dismiss={{

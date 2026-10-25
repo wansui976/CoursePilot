@@ -86,8 +86,8 @@ use crate::commands::whisper::{cmd_download_whisper_model, cmd_list_whisper_mode
 use crate::db::Db;
 use crate::dev_log::{cmd_clear_dev_logs, cmd_get_dev_logs};
 use crate::downloads::{
-    cmd_cancel_download, cmd_enqueue_downloads, cmd_list_downloads, cmd_remove_download,
-    DownloadQueue,
+    cmd_cancel_all_downloads, cmd_cancel_download, cmd_enqueue_downloads, cmd_list_downloads,
+    cmd_remove_download, DownloadQueue,
 };
 use crate::jobs::cmd_list_jobs;
 use crate::pipeline::{
@@ -329,6 +329,7 @@ pub fn run() {
             cmd_import_bilibili,
             cmd_enqueue_downloads,
             cmd_cancel_download,
+            cmd_cancel_all_downloads,
             cmd_remove_download,
             cmd_list_downloads,
             cmd_probe_bilibili,
