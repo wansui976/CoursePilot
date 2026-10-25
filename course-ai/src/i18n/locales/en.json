@@ -899,7 +899,6 @@
     "dockRight": "Dock to right",
     "collapseAssistant": "Minimize assistant",
     "collapseWithShortcut": "Minimize assistant ({{shortcut}})",
-    "greeting": "Ask the assistant",
     "greetingHint": "Ask about {{scope}}, or have it open a video, jump to a point, or change a setting.",
     "thinking": "Thinking process",
     "copiedLabel": "Copied",

@@ -1,7 +1,6 @@
 import { memo } from "react";
 import {
   ArrowDown,
-  ArrowUpRight,
   Check,
   ChevronRight,
   Copy,
@@ -66,30 +65,22 @@ export function AssistantEmptyState({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex min-h-full flex-col justify-center gap-5 px-1">
-      <div>
-        <p className="ca-t-lg font-semibold tracking-[-0.01em] text-[var(--text-strong)]">
-          {t("assistant.greeting")}
-        </p>
-        <p className="mt-1.5 ca-t-sm leading-relaxed text-[var(--text-muted)]">
-          {t("assistant.greetingHint", { scope: scopeLabel })}
-        </p>
-      </div>
-      {/* 建议问题收成 iOS 分组列表：一个圆角容器 + 发丝分隔线，
-          比三条各自悬停的裸文字行更成形。 */}
-      <div className="w-full overflow-hidden rounded-xl border border-[var(--border-faint)] bg-[var(--surface-card)]">
-        {suggestionsFor(context, t).map((suggestion, index) => (
+    // 空状态贴着输入框：一行灰字说明能问什么，下面几句可以直接点的示例问题。
+    // 不再是「大标题 + 带边框的建议列表 + 每行一个 ↗」——那是 AI 产品空状态的标准件。
+    <div className="flex min-h-full flex-col justify-end gap-2 px-1 pb-1">
+      <p className="ca-t-sm leading-relaxed text-[var(--text-muted)]">
+        {t("assistant.greetingHint", { scope: scopeLabel })}
+      </p>
+      <div className="flex flex-col items-start">
+        {suggestionsFor(context, t).map((suggestion) => (
           <button
             key={suggestion.prompt}
             type="button"
             disabled={actionExecutionBusy}
             onClick={() => onSend(suggestion.prompt)}
-            className={`ca-touch-44 flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm text-[var(--text-normal)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none ${
-              index > 0 ? "border-t border-[var(--border-faint)]" : ""
-            }`}
+            className="ca-touch-44 -mx-2 rounded-md px-2 py-1 text-left text-sm text-[var(--text-normal)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
           >
-            <span>{suggestion.label}</span>
-            <ArrowUpRight className="h-3.5 w-3.5 flex-none text-[var(--text-faint)]" />
+            {suggestion.label}
           </button>
         ))}
       </div>

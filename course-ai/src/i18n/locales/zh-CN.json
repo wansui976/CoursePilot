@@ -899,7 +899,6 @@
     "dockRight": "停靠到右边",
     "collapseAssistant": "收起助手",
     "collapseWithShortcut": "收起助手 ({{shortcut}})",
-    "greeting": "向助手提问",
     "greetingHint": "可以问{{scope}}的内容，也可以让它打开视频、跳到某一处或修改设置。",
     "thinking": "思考过程",
     "copiedLabel": "已复制",
