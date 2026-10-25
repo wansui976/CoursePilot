@@ -72,10 +72,14 @@ export function parseNoteBlocks(markdown: string): NoteBlock[] {
 
     const bullet = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(raw);
     if (bullet) {
-      const text = plainInline(bullet[3]);
+      // 待办：- [ ] / - [x] 画成方框，不把方括号当正文。
+      const task = /^\[([ xX])\]\s+(.*)$/.exec(bullet[3]);
+      const text = plainInline(task ? task[2] : bullet[3]);
       if (!text) continue;
       const depth = Math.min(3, Math.floor(bullet[1].replace(/\t/g, "  ").length / 2));
-      const marker = /\d/.test(bullet[2]) ? bullet[2].replace(")", ".") : "•";
+      const marker = task
+        ? task[1] === " " ? "☐" : "☑"
+        : /\d/.test(bullet[2]) ? bullet[2].replace(")", ".") : "•";
       blocks.push({ kind: "bullet", depth, marker, text });
       continue;
     }
@@ -87,6 +91,8 @@ export function parseNoteBlocks(markdown: string): NoteBlock[] {
     }
 
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) continue;
+    // 代码块的围栏行不画；里面的代码按普通段落画出来。
+    if (/^```/.test(line)) continue;
     const text = plainInline(line);
     if (text) blocks.push({ kind: "paragraph", text });
   }

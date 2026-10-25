@@ -1,9 +1,10 @@
 import type { JSONContent } from "@tiptap/core";
 
+// 方括号不转义：`\[ … \]` 是行间公式的定界符，转义了读回来会变成公式。
 function escapeText(value: string): string {
   return value
     .replace(/\\/g, "\\\\")
-    .replace(/([`*_[\]~])/g, "\\$1");
+    .replace(/([`*_~])/g, "\\$1");
 }
 
 function timestampLabel(node: JSONContent): string {
@@ -15,42 +16,89 @@ function timestampLabel(node: JSONContent): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function serializeText(node: JSONContent): string {
-  const marks = node.marks ?? [];
-  const code = marks.some((mark) => mark.type === "code");
-  let value = code
-    ? `\`${String(node.text ?? "").replace(/`/g, "\\`")}\``
-    : escapeText(String(node.text ?? ""));
+type Mark = NonNullable<JSONContent["marks"]>[number];
 
-  if (!code) {
-    for (const mark of marks) {
-      if (mark.type === "bold") value = `**${value}**`;
-      if (mark.type === "italic") value = `_${value}_`;
-      if (mark.type === "strike") value = `~~${value}~~`;
-      if (mark.type === "link" && typeof mark.attrs?.href === "string") {
-        value = `[${value}](${mark.attrs.href})`;
-      }
-    }
-  }
-  return value;
+// 由外到内的嵌套顺序；行内代码直接包在文字上，不参与嵌套。
+const MARK_ORDER = ["link", "bold", "italic", "strike"];
+const DELIMITER: Record<string, string> = { link: "[", bold: "**", italic: "_", strike: "~~" };
+
+function sortedMarks(node: JSONContent): Mark[] {
+  return (node.marks ?? [])
+    .filter(
+      (mark) =>
+        MARK_ORDER.includes(mark.type) &&
+        (mark.type !== "link" || typeof mark.attrs?.href === "string"),
+    )
+    .sort((a, b) => MARK_ORDER.indexOf(a.type) - MARK_ORDER.indexOf(b.type));
 }
 
+function sameMark(a: Mark, b: Mark): boolean {
+  return a.type === b.type && (a.type !== "link" || a.attrs?.href === b.attrs?.href);
+}
+
+function closeMark(mark: Mark): string {
+  return mark.type === "link" ? `](${String(mark.attrs?.href)})` : DELIMITER[mark.type];
+}
+
+function textContent(node: JSONContent): string {
+  const text = String(node.text ?? "");
+  return node.marks?.some((mark) => mark.type === "code")
+    ? `\`${text.replace(/`/g, "\\`")}\``
+    : escapeText(text);
+}
+
+function atomContent(node: JSONContent): string {
+  if (node.type === "hardBreak") return "  \n";
+  if (node.type === "timestamp") return `[${timestampLabel(node)}]`;
+  if (node.type === "math") {
+    const latex = String(node.attrs?.latex ?? "");
+    return node.attrs?.display ? `$$${latex}$$` : `$${latex}$`;
+  }
+  if (node.type === "image" && typeof node.attrs?.src === "string") return serializeImage(node);
+  return serializeInline(node.content ?? []);
+}
+
+/**
+ * 行内内容。相邻文字共用的标记只开一次（`**加粗 _斜体_**`，而不是 `**加粗 ****_斜体_**`），
+ * 标记两端的空格挪到定界符外面——`** 粗**` 在多数 Markdown 里不算加粗。
+ */
 function serializeInline(nodes: JSONContent[] = []): string {
-  return nodes
-    .map((node) => {
-      if (node.type === "text") return serializeText(node);
-      if (node.type === "hardBreak") return "  \n";
-      if (node.type === "timestamp") return `[${timestampLabel(node)}]`;
-      if (node.type === "math") {
-        const latex = String(node.attrs?.latex ?? "");
-        return node.attrs?.display ? `$$${latex}$$` : `$${latex}$`;
+  let out = "";
+  const stack: Mark[] = [];
+  const closeTo = (depth: number) => {
+    while (stack.length > depth) {
+      const mark = stack.pop()!;
+      const trailing = /\s*$/.exec(out)?.[0] ?? "";
+      out = out.slice(0, out.length - trailing.length) + closeMark(mark) + trailing;
+    }
+  };
+  for (const node of nodes) {
+    if (node.type !== "text") {
+      closeTo(0);
+      out += atomContent(node);
+      continue;
+    }
+    let text = textContent(node);
+    // 纯空白不改变标记：夹在两段加粗之间的空格不该把加粗切成两截。
+    const marks = text.trim() === "" ? [...stack] : sortedMarks(node);
+    let keep = 0;
+    while (keep < stack.length && keep < marks.length && sameMark(stack[keep], marks[keep])) {
+      keep += 1;
+    }
+    closeTo(keep);
+    if (marks.length > keep) {
+      const leading = /^\s*/.exec(text)?.[0] ?? "";
+      out += leading;
+      text = text.slice(leading.length);
+      for (const mark of marks.slice(keep)) {
+        stack.push(mark);
+        out += DELIMITER[mark.type];
       }
-      if (node.type === "image" && typeof node.attrs?.src === "string") {
-        return `![${escapeText(String(node.attrs?.alt ?? ""))}](${node.attrs.src})`;
-      }
-      return serializeInline(node.content ?? []);
-    })
-    .join("");
+    }
+    out += text;
+  }
+  closeTo(0);
+  return out;
 }
 
 function indentContinuation(value: string, spaces = 2): string {
@@ -61,8 +109,13 @@ function indentContinuation(value: string, spaces = 2): string {
     .join("\n");
 }
 
+function serializeImage(node: JSONContent): string {
+  return `![${escapeText(String(node.attrs?.alt ?? ""))}](${String(node.attrs?.src ?? "")})`;
+}
+
 function serializeList(node: JSONContent): string {
   const ordered = node.type === "orderedList";
+  const task = node.type === "taskList";
   const start = Number(node.attrs?.start ?? 1);
   return (node.content ?? [])
     .map((item, index) => {
@@ -71,7 +124,11 @@ function serializeList(node: JSONContent): string {
       const firstValue = first?.type === "paragraph"
         ? serializeInline(first.content ?? [])
         : serializeBlock(first);
-      const prefix = ordered ? `${start + index}. ` : "- ";
+      const prefix = ordered
+        ? `${start + index}. `
+        : task
+          ? `- [${item.attrs?.checked ? "x" : " "}] `
+          : "- ";
       const continuation = blocks
         .slice(1)
         .map((block) => indentContinuation(serializeBlock(block)))
@@ -113,7 +170,10 @@ function serializeBlock(node: JSONContent | undefined): string {
     const level = Math.min(6, Math.max(1, Number(node.attrs?.level ?? 1)));
     return `${"#".repeat(level)} ${serializeInline(node.content ?? [])}`;
   }
-  if (node.type === "bulletList" || node.type === "orderedList") return serializeList(node);
+  if (node.type === "bulletList" || node.type === "orderedList" || node.type === "taskList") {
+    return serializeList(node);
+  }
+  if (node.type === "image") return typeof node.attrs?.src === "string" ? serializeImage(node) : "";
   if (node.type === "blockquote") {
     return serializeBlocks(node.content ?? [])
       .split("\n")

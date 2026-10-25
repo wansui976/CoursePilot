@@ -11,7 +11,7 @@ interface Node {
   attrs?: Record<string, unknown>;
   content?: Node[];
   text?: string;
-  marks?: { type: string }[];
+  marks?: { type: string; attrs?: Record<string, unknown> }[];
 }
 
 // 匹配 [mm:ss] / [mmm:ss] / [hh:mm:ss]（分钟位允许 1-3 位，兼容长视频）。
@@ -124,8 +124,44 @@ function inline(text: string): Node[] {
   return nodes.length ? nodes : [{ type: "text", text: text || " " }];
 }
 
-/** 在纯文本里识别 [mm:ss] 时间戳，渲染为可点击的 timestamp 节点。 */
+// 行内标记（加粗另行处理）：反斜杠转义、`代码`、![图](地址)、[文字](链接)、~~删除线~~、*斜体* / _斜体_。
+// 斜体两侧不能紧挨字母数字，免得 2*3*4、snake_case_name 被当成斜体；中文不算 \w，「这是_重点_」照常识别。
+const INLINE_MARK_RE =
+  /\\([\\`*_[\]~])|`([^`\n]+)`|!\[([^\]\n]*)\]\(([^)\s]+)\)|\[([^\]\n]+)\]\(([^)\s]+)\)|~~([^~\n]+)~~|(?<![\w*\\])\*(?![\s*])([^*\n]+?)(?<![\s\\])\*(?![\w*])|(?<![\w\\])_(?![\s_])([^_\n]+?)(?<![\s\\])_(?!\w)/g;
+
+function withMark(nodes: Node[], mark: { type: string; attrs?: Record<string, unknown> }): Node[] {
+  return nodes.map((node) =>
+    node.type === "text" ? { ...node, marks: [...(node.marks ?? []), mark] } : node,
+  );
+}
+
+/** 在纯文本里识别行内标记与 [mm:ss] 时间戳。 */
 function inlinePlain(text: string): Node[] {
+  const nodes: Node[] = [];
+  const re = new RegExp(INLINE_MARK_RE.source, "g");
+  let last = 0;
+  let m: RegExpExecArray | null;
+  const pushText = (value: string) => {
+    if (value) nodes.push(...timestamps(value));
+  };
+  while ((m = re.exec(text)) !== null) {
+    pushText(text.slice(last, m.index));
+    if (m[1] !== undefined) nodes.push({ type: "text", text: m[1] });
+    else if (m[2] !== undefined) nodes.push({ type: "text", text: m[2], marks: [{ type: "code" }] });
+    // 图片是块级节点，夹在句子里时没法原地放；保留原文，整行只有图片时由块级解析接手。
+    else if (m[4] !== undefined) nodes.push({ type: "text", text: m[0] });
+    else if (m[6] !== undefined) {
+      nodes.push(...withMark(inlinePlain(m[5]), { type: "link", attrs: { href: m[6] } }));
+    } else if (m[7] !== undefined) nodes.push(...withMark(inlinePlain(m[7]), { type: "strike" }));
+    else nodes.push(...withMark(inlinePlain(m[8] ?? m[9] ?? ""), { type: "italic" }));
+    last = m.index + m[0].length;
+  }
+  pushText(text.slice(last));
+  return nodes;
+}
+
+/** 在纯文本里识别 [mm:ss] 时间戳，渲染为可点击的 timestamp 节点。 */
+function timestamps(text: string): Node[] {
   const nodes: Node[] = [];
   const re = new RegExp(TIMESTAMP_RE.source, "g");
   let last = 0;
@@ -257,11 +293,25 @@ function parseTable(lines: string[], start: number): [Node, number] {
   return [{ type: "table", content: rows }, i];
 }
 
+const IMAGE_RE = /!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+
+/** 整行只有图片（可以几张并排写）时，每张一个图片块；否则 null。 */
+function imageLine(line: string): Node[] | null {
+  if (line.replace(new RegExp(IMAGE_RE.source, "g"), "").trim() !== "") return null;
+  const images = Array.from(line.matchAll(new RegExp(IMAGE_RE.source, "g")));
+  if (images.length === 0) return null;
+  return images.map((match) => ({
+    type: "image",
+    attrs: { src: match[2], alt: match[1] || null },
+  }));
+}
+
 export function markdownToTiptap(md: string): Node {
   const lines = md.replace(/\r\n/g, "\n").split("\n");
   const content: Node[] = [];
   let bulletBuffer: Node[] = [];
   let orderedBuffer: Node[] = [];
+  let taskBuffer: Node[] = [];
 
   const flushBullets = () => {
     if (bulletBuffer.length) {
@@ -275,9 +325,16 @@ export function markdownToTiptap(md: string): Node {
       orderedBuffer = [];
     }
   };
+  const flushTasks = () => {
+    if (taskBuffer.length) {
+      content.push({ type: "taskList", content: taskBuffer });
+      taskBuffer = [];
+    }
+  };
   const flushLists = () => {
     flushBullets();
     flushOrdered();
+    flushTasks();
   };
 
   for (let idx = 0; idx < lines.length; idx++) {
@@ -285,6 +342,38 @@ export function markdownToTiptap(md: string): Node {
     const line = raw.trimEnd();
     if (!line.trim()) {
       flushLists();
+      continue;
+    }
+
+    // 代码块：``` 起、``` 止；里面原样保留，不再做任何行内解析。没闭合就吃到文末。
+    const fence = line.match(/^\s*```\s*([\w+#.-]*)\s*$/);
+    if (fence) {
+      flushLists();
+      const code: string[] = [];
+      idx += 1;
+      while (idx < lines.length && !/^\s*```\s*$/.test(lines[idx])) {
+        code.push(lines[idx]);
+        idx += 1;
+      }
+      const text = code.join("\n");
+      content.push({
+        type: "codeBlock",
+        attrs: { language: fence[1] || null },
+        ...(text ? { content: [{ type: "text", text }] } : {}),
+      });
+      continue;
+    }
+
+    if (/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      flushLists();
+      content.push({ type: "horizontalRule" });
+      continue;
+    }
+
+    const images = imageLine(line);
+    if (images) {
+      flushLists();
+      content.push(...images);
       continue;
     }
 
@@ -339,9 +428,22 @@ export function markdownToTiptap(md: string): Node {
       continue;
     }
 
+    const task = line.match(/^\s*[-*+]\s+\[([ xX])\]\s+(.*)$/);
+    if (task) {
+      flushBullets();
+      flushOrdered();
+      taskBuffer.push({
+        type: "taskItem",
+        attrs: { checked: task[1] !== " " },
+        content: paragraphNodes(task[2]),
+      });
+      continue;
+    }
+
     const ordered = line.match(/^\s*\d+[.)]\s+(.*)$/);
     if (ordered) {
       flushBullets();
+      flushTasks();
       orderedBuffer.push({
         type: "listItem",
         content: paragraphNodes(ordered[1]),
@@ -349,9 +451,10 @@ export function markdownToTiptap(md: string): Node {
       continue;
     }
 
-    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    const bullet = line.match(/^\s*[-*+]\s+(.*)$/);
     if (bullet) {
       flushOrdered();
+      flushTasks();
       bulletBuffer.push({
         type: "listItem",
         content: paragraphNodes(bullet[1]),

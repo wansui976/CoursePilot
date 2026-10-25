@@ -99,3 +99,15 @@ describe("layoutTree", () => {
     expect(layout.width).toBe(10 + 30 + 10 + 30 + 20);
   });
 });
+
+describe("分享图：编辑器新增的块", () => {
+  it("待办画成方框，代码块围栏与图片不画", () => {
+    expect(
+      parseNoteBlocks("- [ ] 推公式\n- [x] 看完\n\n```py\nlr = 0.01\n```\n\n![](note-image:a)"),
+    ).toEqual([
+      { kind: "bullet", depth: 0, marker: "☐", text: "推公式" },
+      { kind: "bullet", depth: 0, marker: "☑", text: "看完" },
+      { kind: "paragraph", text: "lr = 0.01" },
+    ]);
+  });
+});

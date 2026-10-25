@@ -221,3 +221,65 @@ describe("markdownToTiptap blockquotes", () => {
   });
 });
 
+
+describe("markdownToTiptap：编辑器支持的其余 Markdown", () => {
+  const roundTrip = (md: string) => tiptapToMarkdown(markdownToTiptap(md)).trim();
+
+  it("行内：斜体、删除线、行内代码、链接，写回后不变", () => {
+    for (const md of [
+      "这是 _重点_ 和 ~~废话~~，命令 `git log`。",
+      "参考 [官方文档](https://example.com/a_b) 第三节",
+      "**加粗里有 _斜体_**",
+    ]) {
+      expect(roundTrip(md)).toBe(md);
+    }
+    const marks = markdownToTiptap("见 [文档](https://x.dev)").content?.[0].content?.[1];
+    expect(marks).toEqual({
+      type: "text",
+      text: "文档",
+      marks: [{ type: "link", attrs: { href: "https://x.dev" } }],
+    });
+  });
+
+  it("不把乘号和 snake_case 当成斜体；转义字符还原成原字", () => {
+    const text = (md: string) =>
+      (markdownToTiptap(md).content?.[0].content ?? []).map((node) => node.text).join("");
+    expect(markdownToTiptap("2*3*4 与 snake_case_name").content?.[0].content).toEqual([
+      { type: "text", text: "2*3*4 与 snake_case_name" },
+    ]);
+    expect(text("1\\*2 与 a\\_b")).toBe("1*2 与 a_b");
+  });
+
+  it("代码块原样保留，里面的标记不解析", () => {
+    const md = "```python\nx = a * b * c  # **不加粗**\n```";
+    const block = markdownToTiptap(md).content?.[0];
+    expect(block).toEqual({
+      type: "codeBlock",
+      attrs: { language: "python" },
+      content: [{ type: "text", text: "x = a * b * c  # **不加粗**" }],
+    });
+    expect(roundTrip(md)).toBe(md);
+  });
+
+  it("分隔线、待办、整行图片", () => {
+    const md = [
+      "- [ ] 复习第三章",
+      "- [x] 看完视频",
+      "",
+      "---",
+      "",
+      "![板书](note-image:abc123)",
+    ].join("\n");
+    const doc = markdownToTiptap(md);
+    expect(doc.content?.map((node) => node.type)).toEqual(["taskList", "horizontalRule", "image"]);
+    expect(doc.content?.[0].content?.map((item) => item.attrs?.checked)).toEqual([false, true]);
+    expect(doc.content?.[2].attrs).toEqual({ src: "note-image:abc123", alt: "板书" });
+    expect(roundTrip(md)).toBe(md);
+  });
+
+  it("句子中间的图片语法保留为原文（图片是块级的，没法插在句子里）", () => {
+    const doc = markdownToTiptap("看 ![图](a.png) 这里");
+    expect(doc.content?.[0].type).toBe("paragraph");
+    expect(doc.content?.[0].content?.map((node) => node.text).join("")).toBe("看 ![图](a.png) 这里");
+  });
+});
