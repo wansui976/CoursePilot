@@ -5,9 +5,11 @@ import { Button } from "@/ui/button";
 import { ExportMenu, type ExportItem } from "./ExportMenu";
 
 /** 面板右下角悬浮的图标操作（重新生成 / 导出）。内容由流水线自动生成，
- *  这些按钮只是给需要手动重跑或导出的用户用，做成纯图标贴边放置，避免抢占内容区。 */
+ *  这些按钮只是给需要手动重跑或导出的用户用，做成纯图标贴边放置，避免抢占内容区。
+ *  按钮本身不带边框和阴影：一组按钮共用外面那一个磨砂底（.ca-workbench-panel-actions），
+ *  不再是一排各自描边、各自投影的小方块。 */
 export const panelActionButtonClass =
-  "ca-touch-44 ca-workbench-touch grid h-9 w-9 place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)]/90 text-[var(--text-muted)] shadow-[var(--shadow-raise)] backdrop-blur transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] disabled:cursor-not-allowed disabled:opacity-40";
+  "ca-touch-44 ca-workbench-touch grid h-8 w-8 place-items-center rounded-md text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] disabled:cursor-not-allowed disabled:opacity-40";
 
 /** 标题条里的同款按钮：不带浮起的边框与阴影，只是一个安静的图标。 */
 const inlineActionButtonClass =
@@ -39,14 +41,14 @@ export function PanelActions({
       className={
         inline
           ? "ml-auto flex flex-none items-center gap-1"
-          : "ca-workbench-panel-actions absolute bottom-3 right-3 z-10 flex items-center gap-1.5"
+          : "ca-workbench-panel-actions absolute bottom-3 right-3 z-10 flex items-center gap-0.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel)]/90 p-0.5 shadow-[var(--shadow-raise)] backdrop-blur"
       }
     >
       {/* 只标记、不自动重跑：重跑要花钱，跑不跑由用户决定。不标出来的话，这份内容
           讲的还是旧稿的事，界面上却看不出任何区别。 */}
       {stale && (
         <span
-          className="rounded-md border border-[var(--accent-text)]/45 bg-[var(--accent)]/15 px-2 py-1 ca-t-2xs font-medium text-[var(--accent-text)]"
+          className="px-2 py-1 ca-t-2xs font-medium text-[var(--accent-text)]"
           title={t("panelActions.staleTitle")}
         >
           {t("panelActions.stale")}
@@ -70,7 +72,7 @@ export function PanelActions({
                 : t("panelActions.generate")
           }
           className={`${inline ? inlineActionButtonClass : panelActionButtonClass} ${
-            stale ? "border-[var(--accent-text)]/60 text-[var(--accent-text)]" : ""
+            stale ? "text-[var(--accent-text)]" : ""
           }`}
         >
           <RefreshCw className={`h-4 w-4 ${regenerating ? "animate-spin" : ""}`} />

@@ -70,13 +70,15 @@ describe("TabsPanel", () => {
     renderPanel();
 
     const tabs = screen.getAllByRole("tab");
-    // 练习题数挂在「更多」上、笔记圆点；概览（无摘要/章节）与文稿不亮。
+    // 练习题数挂在「更多」上；概览（无摘要 / 章节）确实是空的，标成淡色；
+    // 有内容的笔记与文稿保持原样，不再挂圆点。
     await waitFor(() =>
       expect(screen.getByRole("tab", { name: /更多/ })).toHaveTextContent("1"),
     );
-    expect(tabs[0].querySelector(".rounded-full")).toBeNull();
-    expect(tabs[1].querySelector(".rounded-full")).toBeNull();
-    expect(tabs[2].querySelector(".rounded-full")).not.toBeNull();
+    await waitFor(() => expect(tabs[0].querySelector("[data-tab-empty]")).not.toBeNull());
+    expect(tabs[1].querySelector("[data-tab-empty]")).toBeNull();
+    expect(tabs[2].querySelector("[data-tab-empty]")).toBeNull();
+    expect(tabs[2].querySelector(".rounded-full")).toBeNull();
   });
 
   it("switches tabs with number keys 1-4", async () => {

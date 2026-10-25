@@ -42,8 +42,10 @@ function PanelFallback() {
   return <TextSkeleton lines={6} />;
 }
 
-/** tab 徽标：「更多」显示练习题数（数字，练习已收进更多），概览/笔记有内容显示圆点。
- *  只亮有内容的 tab——空状态不该挨个 tab 点开才知道哪里什么都没有。
+/** tab 徽标：「更多」后面跟练习题数（灰色小数字）。概览 / 笔记不再挂圆点——
+ *  有内容是常态，满排圆点只是噪音；反过来，查询回来确实是空的，就放一个
+ *  data-tab-empty 标记让这个 tab 的文字变淡（见 .ca-study-tab:has([data-tab-empty])），
+ *  不用挨个点开也看得出哪里什么都没有。
  *  独立成组件的原因：徽标查询状态更新只重渲染自己的 span，不带动整个面板
  *  （尤其已保活的文稿/笔记等重面板）重渲染。 */
 function TabBadge({ tab, videoId }: { tab: Tab; videoId: string }) {
@@ -74,17 +76,17 @@ function TabBadge({ tab, videoId }: { tab: Tab; videoId: string }) {
   if (tab === "more" && quizCount > 0) {
     const shown = quizCount > 999 ? "999+" : String(quizCount);
     return (
-      <span className="ml-1 rounded-full bg-[var(--surface-card-active)] px-1.5 py-px ca-t-2xs font-semibold leading-4 tabular-nums text-[var(--accent-text)]">
-        {shown}
-      </span>
+      <span className="ca-tab-count">{shown}</span>
     );
   }
-  if (tab === "overview" && (Boolean(summary.data) || (chapters.data?.length ?? 0) > 0)) {
-    return <span aria-hidden="true" className="ml-1 h-1.5 w-1.5 rounded-full bg-[var(--accent-text)]" />;
-  }
-  if (tab === "notes" && Boolean(notes.data?.trim())) {
-    return <span aria-hidden="true" className="ml-1 h-1.5 w-1.5 rounded-full bg-[var(--accent-text)]" />;
-  }
+  const overviewEmpty =
+    tab === "overview" &&
+    summary.isSuccess &&
+    chapters.isSuccess &&
+    !summary.data &&
+    (chapters.data?.length ?? 0) === 0;
+  const notesEmpty = tab === "notes" && notes.isSuccess && !notes.data?.trim();
+  if (overviewEmpty || notesEmpty) return <span data-tab-empty="" hidden />;
   return null;
 }
 

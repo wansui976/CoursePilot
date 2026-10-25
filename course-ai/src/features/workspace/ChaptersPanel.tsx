@@ -136,7 +136,6 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
                     aria-current={index === activeIndex ? "true" : undefined}
                     className="ca-chapter"
                   >
-                    <span className="ca-chapter-dot" aria-hidden="true" />
                     <span className="ca-chapter-time">{formatMs(c.start_ms)}</span>
                     <span className="ca-chapter-title">{c.title}</span>
                     {c.summary && <span className="ca-chapter-summary">{c.summary}</span>}
