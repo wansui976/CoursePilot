@@ -27,7 +27,9 @@ export function describeDownload(event: UrlImportEvent, t: TFunction): string {
 
 /** 下载任务的完成度（0–100）。合并、已完成都算 100%。 */
 export function jobPercent(job: DownloadJob): number {
-  if (job.status === "done" || job.status === "merging") return 100;
+  if (job.status === "done" || job.status === "merging" || job.status === "importing") {
+    return 100;
+  }
   if (!job.total || job.total <= 0) return 0;
   return Math.max(0, Math.min(100, Math.floor((job.downloaded / job.total) * 100)));
 }
@@ -38,6 +40,7 @@ export function describeDownloadJob(job: DownloadJob, t: TFunction): string {
   if (job.status === "queued") return t("downloads.queued");
   if (job.retryHeight != null) return t("urlImport.retrying", { height: job.retryHeight });
   if (job.status === "merging") return t("urlImport.merging");
+  if (job.status === "importing") return t("downloads.importing");
   const label =
     job.total && job.total > 0
       ? t("urlImport.percent", { percent: jobPercent(job) })

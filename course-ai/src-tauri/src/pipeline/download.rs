@@ -98,6 +98,9 @@ pub struct DownloadResult {
 /// 下载到 out_dir。max_height=None 取最高可用；sub_lang=Some 时一并下字幕。
 ///
 /// `staging` 由调用方给出（每个任务一个固定目录），取消任务时按它清理半成品。
+/// `begin_import` 在下完、往课程目录里挪文件之前调一次：返回 false 表示任务已被取消，
+/// 此时清掉暂存目录直接返回，课程目录与库里都不留东西；返回 true 之后就不能再取消了。
+#[allow(clippy::too_many_arguments)]
 pub async fn download(
     url: &str,
     out_dir: &Path,
@@ -106,6 +109,7 @@ pub async fn download(
     max_height: Option<u32>,
     sub_lang: Option<&str>,
     on_event: &(dyn Fn(DownloadEvent) + Send + Sync),
+    begin_import: &(dyn Fn() -> bool + Send + Sync),
 ) -> AppResult<DownloadResult> {
     if is_mobile_os(std::env::consts::OS) {
         return Err(AppError::Config(
@@ -166,10 +170,17 @@ pub async fn download(
         let _ = std::fs::remove_dir_all(staging);
         return Err(AppError::Pipeline(format!("yt-dlp failed: {stderr}")));
     }
+    if !begin_import() {
+        let _ = std::fs::remove_dir_all(staging);
+        return Err(AppError::Pipeline(DOWNLOAD_CANCELED_MESSAGE.into()));
+    }
     let claimed = claim_downloaded(staging, out_dir, sub_lang);
     let _ = std::fs::remove_dir_all(staging);
     claimed
 }
+
+/// 下完但入库前发现任务已被取消时的错误。
+pub const DOWNLOAD_CANCELED_MESSAGE: &str = "下载已取消";
 
 /// 断流时最多降几档清晰度重下。
 const MAX_QUALITY_FALLBACKS: usize = 3;

@@ -1142,6 +1142,7 @@
     "sectionTitle": "正在下载",
     "downloading": "下载中",
     "queued": "排队中…",
+    "importing": "正在存入课程…",
     "placeholder": "下载中 {{percent}}%",
     "failed": "下载失败",
     "cancel": "取消下载",

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { DownloadJob } from "@/lib/ipc";
 import {
   isActiveDownload,
+  isCancelableDownload,
   isVisibleDownload,
   selectDownloadCount,
   useDownloads,
@@ -99,5 +100,12 @@ describe("useDownloads", () => {
     expect(selectDownloadCount(useDownloads.getState())).toBe(4);
     expect(isActiveDownload("merging")).toBe(true);
     expect(isActiveDownload("failed")).toBe(false);
+  });
+
+  it("keeps an importing job visible but no longer cancelable", () => {
+    // 入库那一段在挪文件、写库：中途打断会留下只登记了一半的视频。
+    expect(isActiveDownload("importing")).toBe(true);
+    expect(isCancelableDownload("importing")).toBe(false);
+    expect(isCancelableDownload("downloading")).toBe(true);
   });
 });

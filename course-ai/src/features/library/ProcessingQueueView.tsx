@@ -5,7 +5,7 @@ import { describeDownloadJob, jobPercent } from "@/lib/downloadProgress";
 import { stageMessage } from "@/lib/pipelineProgress";
 import type { Video } from "@/lib/types";
 import {
-  isActiveDownload,
+  isCancelableDownload,
   isVisibleDownload,
   useDownloads,
 } from "@/stores/downloads";
@@ -35,7 +35,7 @@ export function ProcessingQueueView({
           percent: jobPercent(job),
           message: describeDownloadJob(job, t),
           failed: job.status === "failed",
-          canCancel: isActiveDownload(job.status),
+          canCancel: isCancelableDownload(job.status),
         })),
     [downloadOrder, downloadsById, t],
   );

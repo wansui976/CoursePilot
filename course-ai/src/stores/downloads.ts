@@ -18,6 +18,16 @@ interface State {
 }
 
 export function isActiveDownload(status: DownloadStatus | undefined): boolean {
+  return (
+    status === "queued" ||
+    status === "downloading" ||
+    status === "merging" ||
+    status === "importing"
+  );
+}
+
+/** 能不能取消：入库那一段已经在写课程目录和库，不再允许中途打断。 */
+export function isCancelableDownload(status: DownloadStatus | undefined): boolean {
   return status === "queued" || status === "downloading" || status === "merging";
 }
 

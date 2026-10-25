@@ -1143,6 +1143,7 @@
     "sectionTitle": "Downloading",
     "downloading": "Downloading",
     "queued": "Queued…",
+    "importing": "Saving to course…",
     "placeholder": "Downloading {{percent}}%",
     "failed": "Download failed",
     "cancel": "Cancel download",

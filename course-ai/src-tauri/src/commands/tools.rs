@@ -233,12 +233,15 @@ pub async fn import_url(
         subtitle_autocorrect,
         None,
         &on_event,
+        &|| true,
     )
     .await
 }
 
 /// 下载并登记一个网络视频。`staging` 为 None 时用临时目录；后台下载队列传入自己的
 /// 固定目录，取消任务时据此清理半成品。进度事件一律走 `on_event`。
+/// `begin_import` 见 [`download::download`]：它返回 true 之后才开始挪文件、写库，
+/// 这一段不会被取消打断，不会留下只登记了一半的视频。
 #[allow(clippy::too_many_arguments)]
 pub async fn import_url_with(
     app: tauri::AppHandle,
@@ -250,6 +253,7 @@ pub async fn import_url_with(
     subtitle_autocorrect: Option<bool>,
     staging: Option<PathBuf>,
     on_event: &(dyn Fn(download::DownloadEvent) + Send + Sync),
+    begin_import: &(dyn Fn() -> bool + Send + Sync),
 ) -> AppResult<Video> {
     if is_mobile_os(std::env::consts::OS) {
         return Err(crate::error::AppError::Config(
@@ -281,6 +285,7 @@ pub async fn import_url_with(
         max_height,
         sub_lang.as_deref(),
         on_event,
+        begin_import,
     )
     .await?;
     let mut video = add_local_video(&state.db, &course_id, result.video, None).await?;

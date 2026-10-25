@@ -29,7 +29,9 @@ pub struct DownloadJob {
     pub course_id: String,
     pub url: String,
     pub title: String,
-    /// queued | downloading | merging | done | failed | canceled
+    /// queued | downloading | merging | importing | done | failed | canceled
+    ///
+    /// importing：文件已下完，正在挪进课程目录、写库。这一段不能取消。
     pub status: String,
     pub downloaded: u64,
     pub total: Option<u64>,
@@ -123,6 +125,10 @@ impl DownloadQueue {
     fn apply_event(&self, id: &str, event: DownloadEvent) -> Option<DownloadJob> {
         let mut inner = self.inner.lock().unwrap();
         let job = inner.jobs.get_mut(id)?;
+        // 取消后子进程被杀前可能还吐出几行进度，别把任务改回「下载中」。
+        if job.status == "canceled" {
+            return None;
+        }
         match event {
             DownloadEvent::Progress {
                 downloaded,
@@ -158,6 +164,49 @@ impl DownloadQueue {
         Some(job.clone())
     }
 
+    /// 下完、入库之前：任务没被取消就转入 importing 并返回 true，此后取消是空操作；
+    /// 已被取消则返回 false，下载方据此放弃入库。和取消在同一把锁下判定，两边不会
+    /// 各自以为自己赢了。
+    fn begin_import(&self, id: &str) -> Option<DownloadJob> {
+        let mut inner = self.inner.lock().unwrap();
+        let job = inner.jobs.get_mut(id)?;
+        if job.status == "canceled" {
+            return None;
+        }
+        job.status = "importing".into();
+        job.downloaded = job.total.unwrap_or(job.downloaded);
+        job.speed = None;
+        job.eta = None;
+        job.retry_height = None;
+        Some(job.clone())
+    }
+
+    /// 把一个任务标成已取消，交回它的后台任务句柄与暂存目录供调用方收拾。
+    /// 已结束的、以及正在入库的（中途中止会留下只登记了一半的视频）返回 None。
+    #[allow(clippy::type_complexity)]
+    fn mark_canceled(
+        &self,
+        id: &str,
+    ) -> Option<(
+        DownloadJob,
+        Option<tauri::async_runtime::JoinHandle<()>>,
+        Option<PathBuf>,
+    )> {
+        let mut inner = self.inner.lock().unwrap();
+        let job = inner.jobs.get_mut(id)?;
+        if is_terminal(&job.status) || job.status == "importing" {
+            return None;
+        }
+        job.status = "canceled".into();
+        job.retry_height = None;
+        job.speed = None;
+        job.eta = None;
+        let snapshot = job.clone();
+        let handle = inner.tasks.remove(id);
+        let staging = inner.specs.get(id).map(|spec| spec.staging.clone());
+        Some((snapshot, handle, staging))
+    }
+
     fn set_status(
         &self,
         id: &str,
@@ -167,6 +216,10 @@ impl DownloadQueue {
     ) -> Option<DownloadJob> {
         let mut inner = self.inner.lock().unwrap();
         let job = inner.jobs.get_mut(id)?;
+        // 已取消的任务不能被事后的「完成 / 失败」改回来（取消与任务收尾可能同时发生）。
+        if job.status == "canceled" {
+            return None;
+        }
         job.status = status.into();
         if status == "done" {
             job.downloaded = job.total.unwrap_or(job.downloaded);
@@ -231,6 +284,15 @@ async fn run_job(app: AppHandle, job_id: String) {
             emit_job(&progress_app, &updated);
         }
     };
+    let import_app = app.clone();
+    let import_id = job_id.clone();
+    let begin_import = move || match import_app.state::<DownloadQueue>().begin_import(&import_id) {
+        Some(updated) => {
+            emit_job(&import_app, &updated);
+            true
+        }
+        None => false,
+    };
     let result = crate::commands::tools::import_url_with(
         app.clone(),
         &state,
@@ -241,6 +303,7 @@ async fn run_job(app: AppHandle, job_id: String) {
         spec.subtitle_autocorrect,
         Some(spec.staging.clone()),
         &on_event,
+        &begin_import,
     )
     .await;
 
@@ -447,23 +510,8 @@ pub async fn cmd_enqueue_downloads(
 /// 取消一个下载（排队中或下载中）。已结束的任务是空操作。
 #[tauri::command]
 pub async fn cmd_cancel_download(app: AppHandle, id: String) -> AppResult<()> {
-    let queue = app.state::<DownloadQueue>();
-    let (job, handle, staging) = {
-        let mut inner = queue.inner.lock().unwrap();
-        let Some(job) = inner.jobs.get_mut(&id) else {
-            return Ok(());
-        };
-        if is_terminal(&job.status) {
-            return Ok(());
-        }
-        job.status = "canceled".into();
-        job.retry_height = None;
-        job.speed = None;
-        job.eta = None;
-        let snapshot = job.clone();
-        let handle = inner.tasks.remove(&id);
-        let staging = inner.specs.get(&id).map(|spec| spec.staging.clone());
-        (snapshot, handle, staging)
+    let Some((job, handle, staging)) = app.state::<DownloadQueue>().mark_canceled(&id) else {
+        return Ok(());
     };
     emit_job(&app, &job);
     if let Some(handle) = handle {
@@ -526,6 +574,57 @@ mod tests {
             video_id: None,
             attempt: 1,
         }
+    }
+
+    fn queue_with(job: DownloadJob) -> DownloadQueue {
+        let queue = DownloadQueue::default();
+        queue.inner.lock().unwrap().jobs.insert(job.id.clone(), job);
+        queue
+    }
+
+    #[test]
+    fn a_job_canceled_before_import_is_never_imported() {
+        let queue = queue_with(sample_job("j1"));
+        assert!(queue.mark_canceled("j1").is_some());
+        // 下载方随后到达入库关口：必须放弃，不能把视频登记进库。
+        assert!(queue.begin_import("j1").is_none());
+        // 收尾时的「失败 / 完成」也不能把已取消改回去。
+        assert!(queue
+            .set_status("j1", "failed", Some("下载已取消".into()), None)
+            .is_none());
+        assert!(queue
+            .set_status("j1", "done", None, Some("v1".into()))
+            .is_none());
+        assert_eq!(queue.inner.lock().unwrap().jobs["j1"].status, "canceled");
+    }
+
+    #[test]
+    fn a_job_that_started_importing_can_no_longer_be_canceled() {
+        let queue = queue_with(sample_job("j1"));
+        let importing = queue.begin_import("j1").unwrap();
+        assert_eq!(importing.status, "importing");
+        assert!(queue.mark_canceled("j1").is_none());
+        let done = queue
+            .set_status("j1", "done", None, Some("v1".into()))
+            .unwrap();
+        assert_eq!(done.status, "done");
+    }
+
+    #[test]
+    fn late_progress_does_not_revive_a_canceled_job() {
+        let queue = queue_with(sample_job("j1"));
+        queue.mark_canceled("j1");
+        assert!(queue
+            .apply_event(
+                "j1",
+                DownloadEvent::Progress {
+                    downloaded: 1,
+                    total: Some(2),
+                    speed: None,
+                    eta: None,
+                },
+            )
+            .is_none());
     }
 
     #[test]

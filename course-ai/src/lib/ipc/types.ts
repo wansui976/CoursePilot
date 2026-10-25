@@ -228,6 +228,8 @@ export type DownloadStatus =
   | "queued"
   | "downloading"
   | "merging"
+  /** 已下完，正在挪进课程目录、写库；这一段不能取消。 */
+  | "importing"
   | "done"
   | "failed"
   | "canceled";
