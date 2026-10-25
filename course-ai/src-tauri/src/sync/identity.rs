@@ -68,6 +68,7 @@ pub async fn enqueue_local_snapshot(db: &Db) -> AppResult<()> {
         ("Course", "courses", "id"),
         ("Video", "videos", "id"),
         ("Note", "notes", "video_id"),
+        ("NoteImage", "note_images", "id"),
         ("Clip", "clips", "sync_id"),
         ("Card", "cards", "id"),
         ("StudyEvent", "study_events", "event_id"),

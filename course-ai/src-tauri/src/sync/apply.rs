@@ -112,7 +112,14 @@ pub async fn apply_incoming(
 fn is_supported(record_type: &str) -> bool {
     matches!(
         record_type,
-        "Course" | "Video" | "Note" | "Clip" | "Card" | "StudyEvent" | "VideoProgress"
+        "Course"
+            | "Video"
+            | "Note"
+            | "NoteImage"
+            | "Clip"
+            | "Card"
+            | "StudyEvent"
+            | "VideoProgress"
     )
 }
 
@@ -248,6 +255,7 @@ async fn apply_save(
         "Clip" => save_clip(tx, own_device, envelope).await,
         "Card" => save_card(tx, envelope).await,
         "StudyEvent" => save_event(tx, envelope).await,
+        "NoteImage" => save_note_image(tx, envelope).await,
         "VideoProgress" => save_progress(tx, own_device, envelope).await,
         other => Err(AppError::Config(format!("unsupported sync record {other}"))),
     }
@@ -266,6 +274,8 @@ async fn apply_delete(
         match envelope.record_type.as_str() {
             // 事件是不可变事实，任何删除都不接受。
             "StudyEvent" => return Ok(Outcome::Skipped),
+            // 图片内容不可变、只随视频一起删；历史版本还可能引用它。
+            "NoteImage" => return Ok(Outcome::Skipped),
             "Course" | "Video" => {
                 let table = if envelope.record_type == "Course" {
                     "courses"
@@ -954,6 +964,51 @@ async fn save_card(
 
 // ---------- 学习事件 ----------
 
+/// 笔记图片按内容寻址（id 即内容哈希），同一 id 必然是同一张图：已有即重复投递，没有即插入。
+async fn save_note_image(
+    tx: &mut Transaction<'_, Sqlite>,
+    envelope: &SyncEnvelope,
+) -> AppResult<Outcome> {
+    use base64::Engine as _;
+    let payload = &envelope.payload;
+    let video_id = payload_str(payload, "videoID")
+        .ok_or_else(|| AppError::Config("note image payload missing videoID".into()))?;
+    let video_exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM videos WHERE id=?)")
+        .bind(&video_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    if !video_exists {
+        return Ok(Outcome::Parked);
+    }
+    let mime = payload_str(payload, "mime")
+        .ok_or_else(|| AppError::Config("note image payload missing mime".into()))?;
+    let data = payload_str(payload, "dataBase64")
+        .ok_or_else(|| AppError::Config("note image payload missing data".into()))?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data.as_bytes())
+        .map_err(|error| AppError::Config(format!("note image payload data: {error}")))?;
+    let inserted = sqlx::query(
+        "INSERT OR IGNORE INTO note_images(id,video_id,mime,data,width,height,created_at)
+         VALUES (?,?,?,?,?,?,?)",
+    )
+    .bind(&envelope.record_id)
+    .bind(&video_id)
+    .bind(&mime)
+    .bind(&bytes)
+    .bind(payload_i64(payload, "width"))
+    .bind(payload_i64(payload, "height"))
+    .bind(payload_i64(payload, "createdAt").unwrap_or(envelope.updated_at))
+    .execute(&mut **tx)
+    .await?
+    .rows_affected()
+        > 0;
+    Ok(if inserted {
+        Outcome::Applied
+    } else {
+        Outcome::Skipped
+    })
+}
+
 async fn save_event(
     tx: &mut Transaction<'_, Sqlite>,
     envelope: &SyncEnvelope,
@@ -1270,7 +1325,7 @@ pub fn parked_parents(envelopes: &[SyncEnvelope]) -> BTreeSet<String> {
         .filter_map(|envelope| match envelope.record_type.as_str() {
             "Video" => payload_str(&envelope.payload, "courseID").map(|id| format!("Course:{id}")),
             "Note" | "VideoProgress" => Some(format!("Video:{}", envelope.record_id)),
-            "Clip" | "Card" => {
+            "Clip" | "Card" | "NoteImage" => {
                 payload_str(&envelope.payload, "videoID").map(|id| format!("Video:{id}"))
             }
             _ => None,
@@ -1823,6 +1878,44 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(deleted, None, "更晚的恢复不能被更早的删除撤销");
+    }
+
+    #[tokio::test]
+    async fn note_images_wait_for_their_video_and_union_by_id() {
+        let (db_b, dir_b, _incoming_b) = device().await;
+        let (db_a, _dir_a, incoming_a) = device().await;
+        let (_course, video) = seed_video(&db_b, dir_b.path()).await;
+        let image = envelope(
+            "NoteImage",
+            "img-1",
+            SyncOperation::Save,
+            1000,
+            json!({"id":"img-1","videoID":video,"mime":"image/png","dataBase64":"aGk=",
+                   "width":2,"height":1,"createdAt":1000}),
+        );
+        write_envelope(&incoming_a, "i1", &image);
+        let report = apply_incoming(&db_a, &incoming_a, None).await.unwrap();
+        assert_eq!(report.parked, 1, "视频还没到，图片先驻留");
+
+        // 视频（连同课程）从 B 送到 A，驻留的图片随之落地；再投一次是重复投递。
+        ship(&db_b, &db_a, &incoming_a).await;
+        write_envelope(&incoming_a, "i2", &image);
+        apply_incoming(&db_a, &incoming_a, None).await.unwrap();
+        let rows: Vec<(String, Vec<u8>)> =
+            sqlx::query_as("SELECT mime,data FROM note_images WHERE id='img-1'")
+                .fetch_all(&db_a.pool)
+                .await
+                .unwrap();
+        assert_eq!(rows, vec![("image/png".to_string(), b"hi".to_vec())]);
+
+        let delete = envelope("NoteImage", "img-1", SyncOperation::Delete, 9000, json!({}));
+        write_envelope(&incoming_a, "del", &delete);
+        apply_incoming(&db_a, &incoming_a, None).await.unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM note_images")
+            .fetch_one(&db_a.pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1, "图片只随视频删除，不接受单独删除");
     }
 
     #[tokio::test]

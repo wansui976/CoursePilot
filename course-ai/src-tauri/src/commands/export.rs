@@ -80,6 +80,7 @@ pub async fn cmd_export_notes(
             .await?
             .flatten();
     let md = notes_markdown_for_export(content_markdown, stored)?;
+    let md = crate::commands::note_images::inline_note_images(&state.db, &md).await?;
     let video = load_video(&state, &video_id).await?;
     let dir = export_dir(&video, &app)?;
     let path = dir.join("notes.md");

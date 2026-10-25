@@ -22,6 +22,7 @@ use crate::commands::ai::{
 };
 use crate::commands::app::{cmd_check_update, cmd_exit_app};
 use crate::commands::note_history::cmd_list_note_versions;
+use crate::commands::note_images::{cmd_read_note_image, cmd_save_note_image};
 use crate::commands::assistant::{cmd_assistant_ask, cmd_cancel_assistant};
 use crate::commands::backup::{cmd_backup_database, cmd_restore_database};
 use crate::commands::clips::{cmd_add_clip, cmd_delete_clip, cmd_list_clips, cmd_update_clip};
@@ -259,6 +260,8 @@ pub fn run() {
             cmd_get_notes,
             cmd_save_notes,
             cmd_list_note_versions,
+            cmd_save_note_image,
+            cmd_read_note_image,
             cmd_get_quiz,
             cmd_get_mindmap,
             cmd_get_summary,

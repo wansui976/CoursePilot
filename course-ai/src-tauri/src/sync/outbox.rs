@@ -375,6 +375,36 @@ pub(crate) async fn payload_for(
                 },
             )
         }
+        "NoteImage" => {
+            type ImageSyncRow = (
+                String,
+                String,
+                String,
+                Vec<u8>,
+                Option<i64>,
+                Option<i64>,
+                i64,
+            );
+            let row: Option<ImageSyncRow> = sqlx::query_as(
+                "SELECT id,video_id,mime,data,width,height,created_at
+                 FROM note_images WHERE id=?",
+            )
+            .bind(record_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+            row.map(|(id, video_id, mime, data, width, height, created_at)| {
+                use base64::Engine as _;
+                json!({
+                    "id": id,
+                    "videoID": video_id,
+                    "mime": mime,
+                    "dataBase64": base64::engine::general_purpose::STANDARD.encode(data),
+                    "width": width,
+                    "height": height,
+                    "createdAt": created_at,
+                })
+            })
+        }
         "StudyEvent" => {
             type EventSyncRow = (
                 String,

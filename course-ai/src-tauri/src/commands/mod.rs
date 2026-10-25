@@ -8,6 +8,7 @@ pub mod courses;
 pub mod danmaku;
 pub mod export;
 pub mod note_history;
+pub mod note_images;
 pub mod notify;
 pub mod rag;
 pub mod settings;
