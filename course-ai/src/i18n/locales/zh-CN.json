@@ -1179,7 +1179,9 @@
     "best": "最高",
     "noVideosFound": "这个链接里没有找到可导入的视频",
     "subscribeOnly": "只订阅以后的新视频",
-    "queuing": "入队中…"
+    "queuing": "入队中…",
+    "subscribeFailed": "订阅没有建成：{{error}}",
+    "subscribeFailedQueued": "订阅没有建成：{{error}}。勾选的各集已经加入下载队列，再点一次只会重试订阅。"
   },
   "dashboard": {
     "back": "返回",

@@ -1180,7 +1180,9 @@
     "best": "Best",
     "noVideosFound": "No importable videos found at this link",
     "subscribeOnly": "Follow future videos only",
-    "queuing": "Adding to queue…"
+    "queuing": "Adding to queue…",
+    "subscribeFailed": "Couldn't subscribe: {{error}}",
+    "subscribeFailedQueued": "Couldn't subscribe: {{error}}. The selected episodes are already in the download queue; trying again only retries the subscription."
   },
   "dashboard": {
     "back": "Back",

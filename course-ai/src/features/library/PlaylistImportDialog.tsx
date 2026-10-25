@@ -51,8 +51,16 @@ export function PlaylistImportDialog({
   // 订阅：把当前各集记为见过，以后合集里出现新视频时后台自动导入。
   const [subscribe, setSubscribe] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 订阅没建成的说明。单独存、单独显示：它是写好的整句话，ErrorNote 会把含「下载」
+  // 字样的文本整个替换成「视频下载失败」的通用提示。
+  const [subscribeNote, setSubscribeNote] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [enqueueing, setEnqueueing] = useState(false);
+  // 订阅与入队各自只做一次：其中一步失败后再点「导入」，只重试没成的那一步——
+  // 否则订阅成功、入队失败时重点会建出第二份订阅，入队成功、订阅失败时重点会把
+  // 各集再排一遍。
+  const subscribedRef = useRef(false);
+  const enqueuedRef = useRef(false);
   const [cookieReason, setCookieReason] = useState<"missing" | "expired">("missing");
 
 
@@ -140,46 +148,63 @@ export function PlaylistImportDialog({
     setSelected(allSelected ? new Set() : new Set(info!.episodes.map((e) => e.url)));
 
   // 勾选各集交给后台下载队列：并发与断点都在后端，全部下完再统一开始处理。
-  // 订阅先建好再入队，避免只订不导时白排队。
+  // 订阅和入队互不连累：订阅失败照样把勾选的各集排进去（以前也是这样），只是
+  // 弹窗留着说明原因；入队失败也不影响已经建好的订阅。
   const runImport = async () => {
     if (!info || enqueueing) return;
     const eps = info.episodes.filter((e) => selected.has(e.url));
     if (eps.length === 0 && !subscribe) return;
     setError(null);
+    setSubscribeNote(null);
     setEnqueueing(true);
+    let subscribeError: string | null = null;
     try {
-      if (subscribe) {
-        await ipc.subscriptions.create(
-          courseId,
-          url.trim(),
-          info.title,
-          info.episodes.map((e) => e.url),
-        );
-        void queryClient.invalidateQueries({ queryKey: qk.subscriptions(courseId) });
-        // 只订阅、不导入存量：订好就关。
-        if (eps.length === 0) {
-          onClose();
-          return;
+      if (subscribe && !subscribedRef.current) {
+        try {
+          await ipc.subscriptions.create(
+            courseId,
+            url.trim(),
+            info.title,
+            info.episodes.map((e) => e.url),
+          );
+          subscribedRef.current = true;
+          void queryClient.invalidateQueries({ queryKey: qk.subscriptions(courseId) });
+        } catch (e) {
+          subscribeError = humanizeError(String(e));
         }
       }
-      const jobs = await ipc.downloads.enqueue(
-        courseId,
-        eps.map((ep) => ({
-          url: ep.url,
-          title: ep.title,
-          maxHeight,
-          subLang: useSub ? "ai-zh" : undefined,
-          subtitleAutocorrect: useSub ? autocorrect : undefined,
-          // 批量导入：整批下完后再统一跑流水线（见后端 finish_batch）。
-          autoProcess: true,
-        })),
-      );
-      useDownloads.getState().addMany(jobs);
-      queryClient.invalidateQueries({ queryKey: qk.videos.list(courseId) });
+      if (eps.length > 0 && !enqueuedRef.current) {
+        const jobs = await ipc.downloads.enqueue(
+          courseId,
+          eps.map((ep) => ({
+            url: ep.url,
+            title: ep.title,
+            maxHeight,
+            subLang: useSub ? "ai-zh" : undefined,
+            subtitleAutocorrect: useSub ? autocorrect : undefined,
+            // 批量导入：整批下完后再统一跑流水线（见后端 finish_batch）。
+            autoProcess: true,
+          })),
+        );
+        enqueuedRef.current = true;
+        useDownloads.getState().addMany(jobs);
+        queryClient.invalidateQueries({ queryKey: qk.videos.list(courseId) });
+      }
+      if (subscribeError) return;
       onClose();
     } catch (e) {
       setError(humanizeError(String(e)));
     } finally {
+      if (subscribeError) {
+        setSubscribeNote(
+          t(
+            enqueuedRef.current
+              ? "playlistImport.subscribeFailedQueued"
+              : "playlistImport.subscribeFailed",
+            { error: subscribeError },
+          ),
+        );
+      }
       setEnqueueing(false);
     }
   };
@@ -352,6 +377,14 @@ export function PlaylistImportDialog({
               />
               {t("subscriptions.subscribeOption")}
             </label>
+            {subscribeNote && (
+              <div
+                role="alert"
+                className="rounded-lg bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)]"
+              >
+                {subscribeNote}
+              </div>
+            )}
             {error && <ErrorNote error={error} />}
             <div className="flex flex-wrap justify-end gap-2 pt-1">
               <Button size="sm" variant="outline" onClick={onClose}>

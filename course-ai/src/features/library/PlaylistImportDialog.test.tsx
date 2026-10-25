@@ -316,4 +316,56 @@ describe("PlaylistImportDialog", () => {
     expect(mockIpc.downloads.enqueue).not.toHaveBeenCalled();
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
+
+  async function openWithSubscription() {
+    mockIpc.tools.probePlaylist.mockResolvedValue({
+      title: "我的合集",
+      episodes: [
+        { url: "u1", title: "第一讲", duration_ms: null },
+        { url: "u2", title: "第二讲", duration_ms: null },
+      ],
+    });
+    const result = renderDialog();
+    fireEvent.change(screen.getByLabelText("播放列表链接"), {
+      target: { value: "https://www.bilibili.com/list/1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "枚举各集" }));
+    await screen.findByText("我的合集");
+    fireEvent.click(screen.getByLabelText(/订阅这个合集/));
+    return result;
+  }
+
+  it("still queues the episodes when the subscription fails, and a retry only retries the subscription", async () => {
+    mockIpc.subscriptions.create.mockRejectedValueOnce(new Error("subscription table locked"));
+    const { onClose } = await openWithSubscription();
+    const importButton = () => screen.getByRole("button", { name: /^导入/ });
+
+    fireEvent.click(importButton());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("订阅没有建成");
+    expect(mockIpc.downloads.enqueue).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(importButton());
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(mockIpc.subscriptions.create).toHaveBeenCalledTimes(2);
+    // 各集已经排过了，重试订阅时不能再排一遍。
+    expect(mockIpc.downloads.enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not create a second subscription when only the enqueue has to be retried", async () => {
+    mockIpc.downloads.enqueue.mockRejectedValueOnce(new Error("course root missing"));
+    const { onClose } = await openWithSubscription();
+    const importButton = () => screen.getByRole("button", { name: /^导入/ });
+
+    fireEvent.click(importButton());
+    expect(await screen.findByRole("alert")).toHaveTextContent("course root missing");
+
+    fireEvent.click(importButton());
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(mockIpc.subscriptions.create).toHaveBeenCalledTimes(1);
+    expect(mockIpc.downloads.enqueue).toHaveBeenCalledTimes(2);
+  });
 });
