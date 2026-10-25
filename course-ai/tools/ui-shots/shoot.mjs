@@ -291,6 +291,56 @@ function auditLayout() {
       issues.push(`${describe(el)} 用了装饰性渐变`);
     }
   }
+  // 第七类：强调色用量。强调色只给每屏的主操作，用多了就是模板感：
+  //   - 实色强调色块（按钮、徽标这类面积够大的底色）一屏超过 2 个；
+  //   - 强调色文字（链接、状态、标签）一屏超过 8 处。
+  // 细进度条、滑块的已完成段不算（高度不到 12px）。确实需要的写 data-allow-accent 放行。
+  const appRoot = document.querySelector(".ca-app") ?? document.documentElement;
+  const accentValue = getComputedStyle(appRoot).getPropertyValue("--accent").trim();
+  const accentTextValue = getComputedStyle(appRoot).getPropertyValue("--accent-text").trim();
+  if (accentValue) {
+    const same = (a, b) => a && b && a[3] > 0.9 && Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) < 9;
+    const accentRgb = parseColor(accentValue);
+    const accentTextRgb = accentTextValue ? parseColor(accentTextValue) : null;
+    const shown = (el) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 1 || rect.height <= 1) return null;
+      if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) return null;
+      if (el.closest("[data-allow-accent], [disabled], [aria-hidden='true']")) return null;
+      let opacity = 1;
+      for (let node = el; node && opacity >= 0.9; node = node.parentElement) {
+        opacity *= Number(getComputedStyle(node).opacity);
+      }
+      return opacity < 0.9 ? null : rect;
+    };
+    const solid = [];
+    const texts = [];
+    for (const el of document.querySelectorAll("body *")) {
+      const style = getComputedStyle(el);
+      if (same(parseColor(style.backgroundColor), accentRgb)) {
+        const rect = shown(el);
+        if (rect && rect.height >= 12 && rect.width >= 12) solid.push(el);
+      }
+      const ownText = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim());
+      if (ownText && (same(parseColor(style.color), accentTextRgb) || same(parseColor(style.color), accentRgb))) {
+        if (shown(el)) texts.push(el);
+      }
+    }
+    // 嵌套的只算最外层（按钮里的 span 与按钮同色，不重复计）。
+    const outermost = (list) => list.filter((el) => !list.some((other) => other !== el && other.contains(el)));
+    const solidBlocks = outermost(solid);
+    const accentTexts = outermost(texts);
+    if (solidBlocks.length > 2) {
+      issues.push(
+        `一屏有 ${solidBlocks.length} 个实色强调色块（主操作最多 1–2 个）：${solidBlocks.slice(0, 4).map(describe).join("、")}`,
+      );
+    }
+    if (accentTexts.length > 8) {
+      issues.push(
+        `一屏有 ${accentTexts.length} 处强调色文字（状态、标签改用灰阶）：${accentTexts.slice(0, 4).map(describe).join("、")}`,
+      );
+    }
+  }
   for (const icon of document.querySelectorAll("svg.lucide-sparkles")) {
     const rect = icon.getBoundingClientRect();
     if (rect.width > 1 && rect.height > 1) issues.push(`${describe(icon.parentElement ?? icon)} 用了星星图标`);

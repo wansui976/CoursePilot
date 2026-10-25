@@ -716,7 +716,8 @@ export function Dashboard({
           ) : null}
 
           {!dailyQuery.isPending && !dailyQuery.isError && (
-            <section aria-label={t("dashboard.heatmap")}>
+            // 热力图是数据图形，色阶本身就是信息：审计的「强调色用量」检查放行。
+            <section aria-label={t("dashboard.heatmap")} data-allow-accent="">
             <div className="mb-2 flex items-center justify-between">
               <div className="text-xs font-medium tracking-wide text-[var(--text-muted)]">{t("dashboard.heatmap")}</div>
               <div className="flex items-center gap-1 ca-t-2xs text-[var(--text-faint)]">
