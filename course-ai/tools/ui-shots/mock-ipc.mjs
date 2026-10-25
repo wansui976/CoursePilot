@@ -109,6 +109,7 @@ export function installMockIpc({ theme, safeArea }) {
     { id: 4, video_id: "v3", title: "随机与小批量梯度下降", summary: "用噪声换速度，以及为什么噪声有时是好事。", start_ms: 660_000, end_ms: 900_000, order_index: 3 },
   ];
   const summary = "## 本讲要点\n\n梯度下降把**最小化损失**变成一个反复迭代的过程：每一步沿负梯度方向移动一小段距离。\n\n- **梯度**：函数在当前点增长最快的方向\n- **学习率**：每一步走多远，过大震荡、过小缓慢\n- **小批量**：用部分样本估计梯度，换取速度与泛化\n\n> 直觉：蒙着眼下山，每一步都朝脚下最陡的方向迈一小步。";
+  const noteImages = new Map();
   const notes = "# 梯度下降笔记\n\n## 核心思想\n\n沿**负梯度**方向迭代更新参数，直到损失不再明显下降。[00:15]\n\n## 学习率\n\n- 太大：在谷底两侧来回震荡，甚至发散 [00:30]\n- 太小：收敛很慢\n- 实践：常用**学习率衰减** [00:45]\n\n> 一句话：蒙着眼下山，每一步朝最陡处迈一小步。";
 
   // —— 课程知识 ——
@@ -227,6 +228,15 @@ export function installMockIpc({ theme, safeArea }) {
       { id: "h:2", source: "history", edited_at: now - 3 * 3_600_000, captured_at: now - 2 * 3_600_000, content: "# 梯度下降笔记\n\n## 核心思想\n\n沿负梯度方向迭代更新参数。[00:15]" },
       { id: "b:courseai-startup-20261013.db", source: "backup", edited_at: now - 2 * 86_400_000, captured_at: now - 86_400_000, content: "# 梯度下降\n\n- 学习率：步子迈多大\n- 小批量：用部分样本估计梯度" },
     ],
+    cmd_save_note_image: ({ dataBase64 }) => {
+      const id = `img${noteImages.size + 1}`;
+      noteImages.set(id, Uint8Array.from(atob(dataBase64), (c) => c.charCodeAt(0)));
+      return { id, src: `note-image:${id}` };
+    },
+    cmd_read_note_image: ({ id }) => noteImages.get(id) ?? Promise.reject(`not found: note image ${id}`),
+    // 截取画面：拿封面当作那一帧。
+    cmd_capture_frame: ({ videoId, atMs }) => ({ id: 1, video_id: videoId, image_path: `/shots/${atMs}.jpg`, at_ms: atMs, created_at: now }),
+    cmd_read_slide_image: ({ videoId }) => cover(videoId),
     cmd_get_quiz: () => null,
     cmd_get_mindmap: () => mindmap,
     cmd_stale_ai_artifacts: () => [],

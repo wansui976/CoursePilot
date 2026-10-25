@@ -159,6 +159,30 @@ export const scenes = [
     },
   },
   {
+    name: "notes-editor",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await openVideo(page);
+      await openNotes(page);
+      const editor = page.locator(".tiptap-notes").first();
+      await editor.waitFor({ timeout: 5000 });
+      // 末尾用 Markdown 语法敲一段：标题、待办、代码块，再截一帧画面。
+      await editor.click();
+      await editor.evaluate((node) => node.editor?.commands.focus("end"));
+      await page.keyboard.press("Enter");
+      await page.keyboard.type("## 课后\n[ ] 推一遍梯度公式\n\n");
+      await page.keyboard.type("``` lr = 0.01");
+      await page.keyboard.press("ArrowDown");
+      await page.getByRole("button", { name: "截取当前画面" }).click();
+      await page.locator(".ca-note-image[data-state=ready]").first().waitFor({ timeout: 5000 }).catch(() => {});
+      await page.keyboard.type("这一帧是损失曲面");
+      await page.locator(".ca-note-image").first().scrollIntoViewIfNeeded().catch(() => {});
+      await shot();
+      await page.getByRole("button", { name: "更多格式" }).click();
+      await shot("more");
+    },
+  },
+  {
     name: "assistant",
     devices: ALL,
     run: async ({ page, shot }) => {
