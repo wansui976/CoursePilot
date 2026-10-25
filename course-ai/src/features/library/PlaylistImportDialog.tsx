@@ -2,18 +2,18 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { qk } from "@/lib/queryKeys";
 import { useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { describeDownload } from "@/lib/downloadProgress";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { humanizeError } from "@/lib/errors";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
-import type { PlaylistInfo, Video } from "@/lib/types";
+import type { PlaylistInfo } from "@/lib/types";
 import { Modal } from "@/ui/dialog";
 import { isBilibiliUrl } from "@/lib/sourceUrl";
+import { useDownloads } from "@/stores/downloads";
 
-type Step = "url" | "cookie" | "probing" | "confirm" | "importing" | "done";
+type Step = "url" | "cookie" | "probing" | "confirm";
 
 const QUALITY_PRESETS: { labelKey?: string; label: string; value: number | undefined }[] = [
   { labelKey: "playlistImport.best", label: "最高", value: undefined },
@@ -26,12 +26,10 @@ const QUALITY_PRESETS: { labelKey?: string; label: string; value: number | undef
 export function PlaylistImportDialog({
   courseId,
   onClose,
-  onStartProcessing,
   returnFocusRef,
 }: {
   courseId: string;
   onClose: () => void;
-  onStartProcessing?: (video: Video) => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const { t } = useTranslation();
@@ -53,15 +51,8 @@ export function PlaylistImportDialog({
   const [subscribe, setSubscribe] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
+  const [enqueueing, setEnqueueing] = useState(false);
   const [cookieReason, setCookieReason] = useState<"missing" | "expired">("missing");
-  const [progress, setProgress] = useState<{ done: number; total: number; title: string } | null>(
-    null,
-  );
-  // 当前这一集的下载进度文字（百分比、速度、合并、断流降档重试）。
-  const [episodeStatus, setEpisodeStatus] = useState<string | null>(null);
-  const [results, setResults] = useState<{ ok: number; failures: { title: string; error: string }[] } | null>(
-    null,
-  );
 
   const looksLikeCookieError = (msg: string) =>
     /412|precondition|forbidden|403|login|cookie|需要登录|风控/i.test(msg);
@@ -149,14 +140,16 @@ export function PlaylistImportDialog({
   const toggleAll = () =>
     setSelected(allSelected ? new Set() : new Set(info!.episodes.map((e) => e.url)));
 
-  // 逐集下载入库并处理；部分失败不中断，最后汇报。
+  // 勾选各集交给后台下载队列：并发与断点都在后端，全部下完再统一开始处理。
+  // 订阅先建好再入队，避免只订不导时白排队。
   const runImport = async () => {
-    if (!info) return;
+    if (!info || enqueueing) return;
     const eps = info.episodes.filter((e) => selected.has(e.url));
     if (eps.length === 0 && !subscribe) return;
-    const failures: { title: string; error: string }[] = [];
-    if (subscribe) {
-      try {
+    setError(null);
+    setEnqueueing(true);
+    try {
+      if (subscribe) {
         await ipc.subscriptions.create(
           courseId,
           url.trim(),
@@ -164,46 +157,35 @@ export function PlaylistImportDialog({
           info.episodes.map((e) => e.url),
         );
         void queryClient.invalidateQueries({ queryKey: qk.subscriptions(courseId) });
-      } catch (e) {
-        failures.push({ title: t("subscriptions.subscribeOption"), error: humanizeError(String(e)) });
+        // 只订阅、不导入存量：订好就关。
+        if (eps.length === 0) {
+          onClose();
+          return;
+        }
       }
-      // 只订阅、不导入存量：订好就关。
-      if (eps.length === 0 && failures.length === 0) {
-        onClose();
-        return;
-      }
-    }
-    setStep("importing");
-    let ok = 0;
-    for (let i = 0; i < eps.length; i++) {
-      const ep = eps[i];
-      setProgress({ done: i, total: eps.length, title: ep.title });
-      setEpisodeStatus(null);
-      try {
-        const video = await ipc.tools.importBilibili(
-          courseId,
-          ep.url,
+      const jobs = await ipc.downloads.enqueue(
+        courseId,
+        eps.map((ep) => ({
+          url: ep.url,
+          title: ep.title,
           maxHeight,
-          useSub ? "ai-zh" : undefined,
-          useSub ? autocorrect : undefined,
-          (event) => setEpisodeStatus(describeDownload(event, t)),
-        );
-        ok += 1;
-        // 批量导入一律走处理流水线（用户不会挨个手点「开始处理」）。
-        if (onStartProcessing) onStartProcessing(video);
-        else void ipc.pipeline.process(video.id);
-      } catch (e) {
-        failures.push({ title: ep.title, error: humanizeError(String(e)) });
-      }
+          subLang: useSub ? "ai-zh" : undefined,
+          subtitleAutocorrect: useSub ? autocorrect : undefined,
+          // 批量导入：整批下完后再统一跑流水线（见后端 finish_batch）。
+          autoProcess: true,
+        })),
+      );
+      useDownloads.getState().addMany(jobs);
+      queryClient.invalidateQueries({ queryKey: qk.videos.list(courseId) });
+      onClose();
+    } catch (e) {
+      setError(humanizeError(String(e)));
+    } finally {
+      setEnqueueing(false);
     }
-    queryClient.invalidateQueries({ queryKey: qk.videos.list(courseId) });
-    setProgress({ done: eps.length, total: eps.length, title: "" });
-    setResults({ ok, failures });
-    setStep("done");
   };
 
-  const closeBlocked =
-    preparing || step === "probing" || step === "importing";
+  const closeBlocked = preparing || step === "probing" || enqueueing;
 
   return (
     <Modal
@@ -379,78 +361,18 @@ export function PlaylistImportDialog({
               <Button
                 variant="primary"
                 size="sm"
-                disabled={selected.size === 0 && !subscribe}
+                disabled={(selected.size === 0 && !subscribe) || enqueueing}
                 onClick={runImport}
               >
-                {selected.size === 0 && subscribe
-                  ? t("playlistImport.subscribeOnly")
-                  : t("playlistImport.importCount", { count: selected.size })}
+                {enqueueing
+                  ? t("playlistImport.queuing")
+                  : selected.size === 0 && subscribe
+                    ? t("playlistImport.subscribeOnly")
+                    : t("playlistImport.importCount", { count: selected.size })}
               </Button>
             </div>
           </div>
         </>
-      )}
-
-      {step === "importing" && progress && (
-        <div
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          className="space-y-3 py-4"
-        >
-          <p className="text-center text-sm text-[var(--text-muted)]">
-            {t("playlistImport.progress", { done: progress.done, total: progress.total })}
-          </p>
-          <p className="break-words text-center text-xs text-[var(--text-faint)]">{progress.title}</p>
-          {episodeStatus && (
-            <p className="text-center text-xs tabular-nums text-[var(--text-faint)]">
-              {episodeStatus}
-            </p>
-          )}
-          <div
-            role="progressbar"
-            aria-label={t("playlistImport.progressAria")}
-            aria-valuemin={0}
-            aria-valuemax={progress.total}
-            aria-valuenow={progress.done}
-            aria-valuetext={t("playlistImport.progress", {
-              done: progress.done,
-              total: progress.total,
-            })}
-            className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-card-active)]"
-          >
-            <div
-              className="ca-fill-grad h-full rounded-full transition-[width] duration-300 ease-out motion-reduce:transition-none"
-              style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }}
-            />
-          </div>
-          <p className="text-center text-xs text-[var(--text-faint)]">
-            {t("playlistImport.progressNote")}
-          </p>
-        </div>
-      )}
-
-      {step === "done" && results && (
-        <div className="space-y-3">
-          <p role="status" aria-live="polite" className="text-sm text-[var(--text-strong)]">
-            {t("playlistImport.resultOk", { ok: results.ok })}
-            {results.failures.length > 0 && t("playlistImport.resultFail", { fail: results.failures.length })}
-          </p>
-          {results.failures.length > 0 && (
-            <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-[var(--border-subtle)] p-2 text-xs">
-              {results.failures.map((f, i) => (
-                <div key={i} className="text-[var(--status-err)]">
-                  <span className="text-[var(--text-normal)]">{f.title}</span>：{f.error}
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="flex justify-end">
-            <Button variant="primary" size="sm" onClick={onClose}>
-              {t("playlistImport.done")}
-            </Button>
-          </div>
-        </div>
       )}
     </Modal>
   );

@@ -39,6 +39,12 @@ const { mockIpc, confirmMock } = vi.hoisted(() => ({
     slides: {
       extract: vi.fn(),
     },
+    downloads: {
+      list: vi.fn(),
+      enqueue: vi.fn(),
+      cancel: vi.fn(),
+      remove: vi.fn(),
+    },
   },
 }));
 const settingsExitRequestMock = vi.hoisted(() =>
@@ -155,6 +161,7 @@ describe("Home", () => {
     settingsExitRequestMock.mockReset();
     mockIpc.ai.generate.mockResolvedValue(undefined);
     mockIpc.slides.extract.mockResolvedValue(0);
+    mockIpc.downloads.list.mockReset().mockResolvedValue([]);
   });
 
   it("starts in light theme without an in-app macOS titlebar", async () => {

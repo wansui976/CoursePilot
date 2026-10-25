@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import type { UrlImportEvent } from "@/lib/ipc";
+import type { DownloadJob, UrlImportEvent } from "@/lib/ipc";
 
 function formatBytes(bytes: number) {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
@@ -22,5 +22,27 @@ export function describeDownload(event: UrlImportEvent, t: TFunction): string {
       : t("urlImport.bytes", { size: formatBytes(event.downloaded) });
   return event.speed && event.speed > 0
     ? t("urlImport.speed", { label, speed: formatBytes(event.speed) })
+    : label;
+}
+
+/** 下载任务的完成度（0–100）。合并、已完成都算 100%。 */
+export function jobPercent(job: DownloadJob): number {
+  if (job.status === "done" || job.status === "merging") return 100;
+  if (!job.total || job.total <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.floor((job.downloaded / job.total) * 100)));
+}
+
+/** 把一条队列任务写成一行给人看的进度：「下载中 42% · 3.1 MB/s」。 */
+export function describeDownloadJob(job: DownloadJob, t: TFunction): string {
+  if (job.status === "failed") return job.error ?? t("downloads.failed");
+  if (job.status === "queued") return t("downloads.queued");
+  if (job.message) return job.message;
+  if (job.status === "merging") return t("urlImport.merging");
+  const label =
+    job.total && job.total > 0
+      ? t("urlImport.percent", { percent: jobPercent(job) })
+      : t("urlImport.bytes", { size: formatBytes(job.downloaded) });
+  return job.speed && job.speed > 0
+    ? t("urlImport.speed", { label, speed: formatBytes(job.speed) })
     : label;
 }

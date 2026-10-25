@@ -79,6 +79,12 @@ const { mockIpc } = vi.hoisted(() => ({
     settings: { get: vi.fn(), set: vi.fn() },
     secrets: { set: vi.fn(), has: vi.fn() },
     tools: { ocr: vi.fn(), importBilibili: vi.fn() },
+    downloads: {
+      list: vi.fn(),
+      enqueue: vi.fn(),
+      cancel: vi.fn(),
+      remove: vi.fn(),
+    },
     dev: {
       logs: vi.fn(),
       llmUsage: vi.fn(),
@@ -250,6 +256,7 @@ describe("Home selected-video integration", () => {
     mockIpc.pipeline.active.mockResolvedValue([]);
     mockIpc.pipeline.process.mockResolvedValue(undefined);
     mockIpc.pipeline.dismiss.mockResolvedValue(undefined);
+    mockIpc.downloads.list.mockReset().mockResolvedValue([]);
     mockIpc.transcripts.list.mockResolvedValue([]);
     mockIpc.transcripts.update.mockReset().mockResolvedValue(undefined);
     mockIpc.ai.getChapters.mockResolvedValue([]);

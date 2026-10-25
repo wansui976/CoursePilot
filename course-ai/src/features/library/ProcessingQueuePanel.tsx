@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Loader2, RotateCcw, Trash2, X } from "lucide-react";
+import { Download, Loader2, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/ui/button";
 import { Badge } from "@/ui/badge";
 import { EmptyState } from "@/ui/empty-state";
@@ -7,6 +7,7 @@ import { ErrorNote } from "@/ui/ErrorNote";
 import { ViewHeader } from "@/ui/view-header";
 import { displayTitle } from "@/lib/videoTitle";
 import type { Video } from "@/lib/types";
+import type { DownloadJob } from "@/lib/ipc";
 
 /** 队列里一个视频项的展示数据（由 Home 算好传入，避免把进度/阶段逻辑搬进展示组件）。 */
 export type QueueItem = {
@@ -21,6 +22,15 @@ export type QueueItem = {
   dismissPending: boolean;
 };
 
+/** 队列里一个下载项的展示数据（由 ProcessingQueueView 算好传入）。 */
+export type DownloadQueueItem = {
+  job: DownloadJob;
+  percent: number;
+  message: string;
+  failed: boolean;
+  canCancel: boolean;
+};
+
 export type DismissState = {
   isError: boolean;
   isPending: boolean;
@@ -31,6 +41,9 @@ export type DismissState = {
 
 export function ProcessingQueuePanel({
   items,
+  downloads,
+  onCancelDownload,
+  onRemoveDownload,
   loading,
   error,
   errorObj,
@@ -46,6 +59,9 @@ export function ProcessingQueuePanel({
   dismiss,
 }: {
   items: QueueItem[];
+  downloads: DownloadQueueItem[];
+  onCancelDownload: (id: string) => void;
+  onRemoveDownload: (id: string) => void;
   loading: boolean;
   error: boolean;
   errorObj: unknown;
@@ -61,8 +77,10 @@ export function ProcessingQueuePanel({
   dismiss: DismissState;
 }) {
   const { t } = useTranslation();
-  const hasCancellable = items.some((item) => item.canCancel);
+  const hasCancellable =
+    items.some((item) => item.canCancel) || downloads.some((item) => item.canCancel);
   const hasFailed = items.some((item) => item.failed);
+  const totalCount = items.length + downloads.length;
 
   return (
     <div
@@ -89,7 +107,7 @@ export function ProcessingQueuePanel({
               </Button>
             )}
             <Badge tone="neutral" dot={false}>
-              {t("home.queueCount", { count: items.length })}
+              {t("home.queueCount", { count: totalCount })}
             </Badge>
           </>
         }
@@ -106,14 +124,93 @@ export function ProcessingQueuePanel({
             <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
             {t("home.queueLoading")}
           </div>
-        ) : items.length === 0 && !error ? (
+        ) : totalCount === 0 && !error ? (
           <div className="flex h-full min-h-[240px] items-center justify-center">
             <EmptyState
               title={t("home.queueEmpty")}
             />
           </div>
-        ) : items.length > 0 ? (
+        ) : totalCount > 0 ? (
           <div className="flex w-full flex-col gap-3">
+            {downloads.length > 0 && (
+              <section className="flex flex-col gap-2">
+                <h2 className="flex items-center gap-1.5 px-1 text-xs font-medium text-[var(--text-muted)]">
+                  <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t("downloads.sectionTitle")}
+                </h2>
+                {downloads.map((item) => {
+                  const { job, percent, message, failed, canCancel } = item;
+                  return (
+                    <div
+                      key={job.id}
+                      className="relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]"
+                    >
+                      <div className={`px-4 py-3 ${failed ? "pr-24" : "pr-20"}`}>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0 truncate text-sm font-medium text-[var(--text-strong)]">
+                            {job.title}
+                          </div>
+                          <span className="shrink-0 tabular-nums text-xs text-[var(--text-muted)]">
+                            {percent}%
+                          </span>
+                        </div>
+                        <div
+                          role="progressbar"
+                          aria-label={t("downloads.progressAria", { title: job.title })}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={percent}
+                          aria-valuetext={t("downloads.progressAriaValue", {
+                            percent,
+                            message,
+                          })}
+                          className="mt-2 h-1.5 overflow-hidden rounded bg-[var(--surface-card-hover)]"
+                        >
+                          <div
+                            className={
+                              failed
+                                ? "h-full bg-[var(--status-err)]"
+                                : "ca-fill-grad h-full"
+                            }
+                            style={{ width: `${percent}%` }}
+                          />
+                        </div>
+                        <div
+                          role={failed ? "alert" : "status"}
+                          aria-live={failed ? "assertive" : "polite"}
+                          aria-atomic="true"
+                          className={
+                            failed
+                              ? "mt-1.5 whitespace-pre-wrap break-words pr-2 text-xs leading-relaxed text-[var(--status-err)]"
+                              : "mt-1.5 truncate text-xs text-[var(--text-muted)]"
+                          }
+                        >
+                          {message}
+                        </div>
+                      </div>
+                      {canCancel && (
+                        <button
+                          onClick={() => onCancelDownload(job.id)}
+                          className="ca-touch-44 absolute right-3 top-3 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
+                        >
+                          {t("downloads.cancel")}
+                        </button>
+                      )}
+                      {failed && (
+                        <button
+                          type="button"
+                          onClick={() => onRemoveDownload(job.id)}
+                          className="ca-touch-44 absolute right-3 top-3 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)]"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          {t("downloads.remove")}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </section>
+            )}
             {items.map((item) => {
               const { video, percent, message, failed, canCancel } = item;
               return (

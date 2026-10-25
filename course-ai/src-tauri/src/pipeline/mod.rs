@@ -1,29 +1,29 @@
 pub mod ai;
 pub mod aliyun_asr;
 pub mod aliyun_ocr;
-pub mod bilibili_extra;
-pub mod deepseek_ocr;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod apple_vision;
 pub mod asr;
 pub mod asr_cache;
 pub mod assistant;
 pub mod audio;
+pub mod bilibili_extra;
 pub mod concepts;
 pub mod crop_detect;
+pub mod deepseek_ocr;
 pub mod download;
+pub mod handout;
+pub mod media_kind;
 pub mod ocr;
 pub mod playable;
 pub mod rag;
 pub mod search_terms;
 pub mod silence;
-pub mod handout;
-pub mod subscriptions;
-pub mod translate;
-pub mod media_kind;
 pub mod slides;
+pub mod subscriptions;
 pub mod subtitle;
 pub mod transcript_correction;
+pub mod translate;
 pub mod volcengine_asr;
 pub mod volcengine_auc;
 
@@ -760,7 +760,15 @@ async fn run_slides_stage(
             let msg = "音频没有画面，已跳过课件";
             for job in [extract_job, ocr_job] {
                 let _ = jobs::cancel(db, &job.id, msg).await;
-                emit_stage(app, video_id, &job.id, &job.stage, "canceled", 0.0, Some(msg));
+                emit_stage(
+                    app,
+                    video_id,
+                    &job.id,
+                    &job.stage,
+                    "canceled",
+                    0.0,
+                    Some(msg),
+                );
             }
             return;
         }

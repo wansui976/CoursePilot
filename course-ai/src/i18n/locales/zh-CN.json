@@ -1115,7 +1115,8 @@
     "downloading": "下载中…",
     "downloadWithSub": "用所选字幕下载",
     "download": "下载",
-    "noVideosFound": "这个链接里没有找到可导入的视频"
+    "noVideosFound": "这个链接里没有找到可导入的视频",
+    "queuing": "入队中…"
   },
   "folderImport": {
     "title": "导入文件夹视频",
@@ -1136,6 +1137,17 @@
     "speed": "{{label}} · {{speed}}/s",
     "merging": "正在合并音视频…",
     "retrying": "视频流中途断开，正在降到 {{height}}P 重新下载…"
+  },
+  "downloads": {
+    "sectionTitle": "正在下载",
+    "downloading": "下载中",
+    "queued": "排队中…",
+    "placeholder": "下载中 {{percent}}%",
+    "failed": "下载失败",
+    "cancel": "取消下载",
+    "remove": "移除",
+    "progressAria": "{{title}} 下载进度",
+    "progressAriaValue": "已下载 {{percent}}%：{{message}}"
   },
   "playlistImport": {
     "title": "导入播放列表 / 合集",
@@ -1160,15 +1172,10 @@
     "preferSubtitle": "优先自带中文字幕（没有则语音转写）",
     "aiCorrection": "下载后用 AI 纠错字幕",
     "importCount": "导入 {{count}} 个",
-    "progress": "正在导入 {{done}} / {{total}}…",
-    "progressAria": "播放列表导入进度",
-    "progressNote": "下载中请勿关闭；失败的集不会中断其余项。",
-    "resultOk": "导入完成：成功 {{ok}} 个",
-    "resultFail": "，失败 {{fail}} 个",
-    "done": "完成",
     "best": "最高",
     "noVideosFound": "这个链接里没有找到可导入的视频",
-    "subscribeOnly": "只订阅以后的新视频"
+    "subscribeOnly": "只订阅以后的新视频",
+    "queuing": "入队中…"
   },
   "dashboard": {
     "back": "返回",

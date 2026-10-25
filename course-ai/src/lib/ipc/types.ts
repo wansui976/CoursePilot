@@ -223,6 +223,54 @@ export type UrlImportEvent =
   /** 视频流中途断开，正在降到这一档清晰度重下。 */
   | { type: "retrying"; maxHeight: number };
 
+/** 后台下载队列里的一个任务（`download:update` 事件与 `cmd_list_downloads` 共用）。 */
+export type DownloadStatus =
+  | "queued"
+  | "downloading"
+  | "merging"
+  | "done"
+  | "failed"
+  | "canceled";
+
+export interface DownloadJob {
+  id: string;
+  batchId: string;
+  courseId: string;
+  url: string;
+  title: string;
+  status: DownloadStatus;
+  downloaded: number;
+  total: number | null;
+  /** 字节/秒 */
+  speed: number | null;
+  /** 剩余秒数 */
+  eta: number | null;
+  /** 断流降档之类的临时提示 */
+  message: string | null;
+  error: string | null;
+  videoId: string | null;
+  /** 第几次尝试；断流降档重下时 +1，进度条据此归零重来。 */
+  attempt: number;
+}
+
+/** 入队一个下载。 */
+export interface DownloadRequest {
+  url: string;
+  title?: string;
+  maxHeight?: number;
+  subLang?: string;
+  /** 字幕 AI 纠错偏好；undefined = 跟随全局设置 */
+  subtitleAutocorrect?: boolean;
+  /** 这一集下完后自动跑流水线（批量导入为 true） */
+  autoProcess?: boolean;
+}
+
+/** 一批下载全部结束（`download:batch-done`）。 */
+export type DownloadBatchDoneEvent = { courseId: string };
+
+/** 网络视频下载过程中的事件（`download:update`）。 */
+export type DownloadJobEvent = DownloadJob;
+
 /**
  * 一次批量识别的结果。
  *

@@ -112,6 +112,20 @@ export const scenes = [
     },
   },
   {
+    name: "downloads",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      // 打开假下载队列后刷新：后端快照经过 useDownloadsSync 填进 store。
+      await page.evaluate(() => localStorage.setItem("__shot-downloads", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openCourse(page);
+      await shot("course");
+      await nav(page, "处理队列", "队列");
+      await shot("queue");
+      await page.evaluate(() => localStorage.removeItem("__shot-downloads"));
+    },
+  },
+  {
     name: "workbench",
     devices: ALL,
     run: async ({ page, shot }) => {

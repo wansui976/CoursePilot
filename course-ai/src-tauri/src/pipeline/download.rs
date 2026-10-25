@@ -96,9 +96,12 @@ pub struct DownloadResult {
 }
 
 /// 下载到 out_dir。max_height=None 取最高可用；sub_lang=Some 时一并下字幕。
+///
+/// `staging` 由调用方给出（每个任务一个固定目录），取消任务时按它清理半成品。
 pub async fn download(
     url: &str,
     out_dir: &Path,
+    staging: &Path,
     cookies: Option<&str>,
     max_height: Option<u32>,
     sub_lang: Option<&str>,
@@ -128,10 +131,7 @@ pub async fn download(
     // 从来没人清，所以这块「上一集的残留」一直都在。
     //
     // 在一个空目录里认领，就不可能认到别人头上。顺带也不再往用户的课程目录里散落文件。
-    let staging = out_dir
-        .join(".courseai-import")
-        .join(uuid::Uuid::new_v4().to_string());
-    std::fs::create_dir_all(&staging)?;
+    std::fs::create_dir_all(staging)?;
     let template = staging.join("%(title).80s.%(ext)s");
     let ytdlp = resolve(&YTDLP, None)?;
     // B 站 CDN 时常在传输中途掐断某一档清晰度的视频流（yt-dlp 报 `512 bytes read,
@@ -140,18 +140,12 @@ pub async fn download(
     let mut height = max_height;
     let mut fallbacks = 0;
     loop {
-        let args = build_ytdlp_args(
-            url,
-            &template.to_string_lossy(),
-            cookies,
-            height,
-            sub_lang,
-        );
+        let args = build_ytdlp_args(url, &template.to_string_lossy(), cookies, height, sub_lang);
         let stderr = match run_ytdlp(&ytdlp, &args, on_event).await {
             Ok(None) => break,
             Ok(Some(stderr)) => stderr,
             Err(error) => {
-                let _ = std::fs::remove_dir_all(&staging);
+                let _ = std::fs::remove_dir_all(staging);
                 return Err(error);
             }
         };
@@ -163,17 +157,17 @@ pub async fn download(
                 on_event(DownloadEvent::Retrying { max_height: lower });
                 continue;
             }
-            let _ = std::fs::remove_dir_all(&staging);
+            let _ = std::fs::remove_dir_all(staging);
             return Err(AppError::Pipeline(format!(
                 "{STREAM_INTERRUPTED_MESSAGE}\n{}",
                 stderr_tail(&stderr)
             )));
         }
-        let _ = std::fs::remove_dir_all(&staging);
+        let _ = std::fs::remove_dir_all(staging);
         return Err(AppError::Pipeline(format!("yt-dlp failed: {stderr}")));
     }
-    let claimed = claim_downloaded(&staging, out_dir, sub_lang);
-    let _ = std::fs::remove_dir_all(&staging);
+    let claimed = claim_downloaded(staging, out_dir, sub_lang);
+    let _ = std::fs::remove_dir_all(staging);
     claimed
 }
 
@@ -247,13 +241,46 @@ async fn run_ytdlp(
     let mut lines = BufReader::new(child.stdout.take().expect("stdout is piped")).split(b'\n');
     // yt-dlp 每读一块就报一次进度，一秒能有几十行；限一下频率再推给前端。
     let mut last_progress: Option<std::time::Instant> = None;
+    // B 站/YouTube 的 DASH 会把视频流、音频流分开下，各自 0→100%。直接透传会让前端的
+    // 进度条在换流时倒回 0；这里把已经下完的流折进 base，报出去的始终是一条总进度。
+    let mut base_downloaded = 0u64;
+    let mut base_total = 0u64;
+    let mut stream_downloaded = 0u64;
+    let mut stream_total: Option<u64> = None;
     while let Some(line) = lines
         .next_segment()
         .await
         .map_err(|e| AppError::Pipeline(format!("yt-dlp output: {e}")))?
     {
-        let Some(event) = parse_progress_line(&String::from_utf8_lossy(&line)) else {
+        let text = String::from_utf8_lossy(&line);
+        // 每开始一路新的下载，yt-dlp 会先打一行 Destination。
+        if text.trim_start().starts_with("[download] Destination:") {
+            base_downloaded += stream_downloaded;
+            base_total += stream_total.unwrap_or(stream_downloaded);
+            stream_downloaded = 0;
+            stream_total = None;
             continue;
+        }
+        let Some(event) = parse_progress_line(&text) else {
+            continue;
+        };
+        let event = match event {
+            DownloadEvent::Progress {
+                downloaded,
+                total,
+                speed,
+                eta,
+            } => {
+                stream_downloaded = downloaded;
+                stream_total = total;
+                DownloadEvent::Progress {
+                    downloaded: base_downloaded + downloaded,
+                    total: total.map(|total| base_total + total),
+                    speed,
+                    eta,
+                }
+            }
+            other => other,
         };
         if let DownloadEvent::Progress {
             downloaded, total, ..
@@ -261,7 +288,8 @@ async fn run_ytdlp(
         {
             let finished = total.is_some_and(|total| *downloaded >= total);
             if !finished
-                && last_progress.is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(250))
+                && last_progress
+                    .is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(250))
             {
                 continue;
             }
@@ -755,7 +783,10 @@ mod tests {
             Some(DownloadEvent::Merging)
         );
         assert_eq!(parse_progress_line("[download] Destination: a.m4s"), None);
-        assert_eq!(parse_progress_line("courseai-progress NA NA NA NA NA"), None);
+        assert_eq!(
+            parse_progress_line("courseai-progress NA NA NA NA NA"),
+            None
+        );
     }
 
     #[test]
@@ -763,8 +794,12 @@ mod tests {
         assert!(is_stream_interrupted(
             "ERROR: [download] Got error: 512 bytes read, 109722057 more expected. Giving up after 10 retries"
         ));
-        assert!(!is_stream_interrupted("ERROR: [BiliBili] BV1xx: HTTP Error 412: Precondition Failed"));
-        assert!(!is_stream_interrupted("ERROR: Unsupported URL: https://example.com"));
+        assert!(!is_stream_interrupted(
+            "ERROR: [BiliBili] BV1xx: HTTP Error 412: Precondition Failed"
+        ));
+        assert!(!is_stream_interrupted(
+            "ERROR: Unsupported URL: https://example.com"
+        ));
     }
 
     #[test]
@@ -1003,7 +1038,10 @@ mod tests {
             Some("ai-zh"),
         );
         let f = args.iter().position(|a| a == "-f").unwrap();
-        assert_eq!(args[f + 1], "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b/ba");
+        assert_eq!(
+            args[f + 1],
+            "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b/ba"
+        );
         assert!(args.contains(&"--write-subs".to_string()));
         let sl = args.iter().position(|a| a == "--sub-langs").unwrap();
         assert_eq!(args[sl + 1], "ai-zh");

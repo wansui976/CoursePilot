@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import {
   Check,
   ChevronLeft,
+  Download,
   FolderPlus,
   LayoutGrid,
   Lightbulb,
@@ -21,7 +22,7 @@ import {
   Trash2,
   Wand2,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { useCreateCourse } from "@/features/library/CourseList";
 import { ImportVideoButton } from "@/features/library/ImportVideoDialog";
@@ -42,6 +43,9 @@ import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { WATCHED_RATIO, readLastVideoId, readPlaybackProgress } from "@/lib/playback";
 import { useJobs } from "@/stores/jobs";
+import { isActiveDownload, useDownloads } from "@/stores/downloads";
+import { jobPercent } from "@/lib/downloadProgress";
+import type { DownloadJob } from "@/lib/ipc";
 import type { ProcessingQueue } from "./useProcessingQueue";
 import type { Recorrection } from "./useRecorrection";
 import { LibraryOverview } from "./LibraryOverview";
@@ -135,6 +139,8 @@ export function CourseLibraryView({
   const { recorrect, recorrectTarget, recorrectError, requestRecorrection } = recorrection;
   const jobsByVideo = useJobs((s) => s.byVideo);
   const queuedVideoIds = new Set(queuedVideos.map((video) => video.id));
+  const downloadsById = useDownloads((s) => s.byId);
+  const downloadOrder = useDownloads((s) => s.order);
 
   /**
    * 卡片上显示的处理状态。列表里的 processed_status 是查询缓存：后端在流水线真正
@@ -183,7 +189,16 @@ export function CourseLibraryView({
   ).length;
   // 顶栏搜索框：按 / 全局聚焦（只在搜索框确实渲染时挂监听）。
   const librarySearchRef = useRef<HTMLInputElement>(null);
-  const librarySearchVisible = Boolean(selectedCourseId && videos.length > 0);
+  // 下载中的占位行也算内容：只有它们时（视频查询还没回来）搜索框与视图切换照样要有。
+  const hasCourseDownloads = downloadOrder.some((id) => {
+    const job = downloadsById[id];
+    return (
+      !!job && job.courseId === selectedCourseId && isActiveDownload(job.status)
+    );
+  });
+  const librarySearchVisible = Boolean(
+    selectedCourseId && (videos.length > 0 || hasCourseDownloads),
+  );
   useEffect(() => {
     if (!librarySearchVisible) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -211,6 +226,20 @@ export function CourseLibraryView({
         displayTitle(video.title).toLowerCase().includes(normalizedQuery),
       )
     : videos;
+
+  // 下载中的占位行：属于当前课程、仍在下载，且匹配搜索词。完成后后端把视频登记进
+  // 课程，占位行随之消失（done/canceled 不再算 active）。
+  const courseDownloads = useMemo(() => {
+    if (!selectedCourseId) return [];
+    return downloadOrder
+      .map((id) => downloadsById[id])
+      .filter((job): job is DownloadJob => {
+        if (!job || job.courseId !== selectedCourseId) return false;
+        if (!isActiveDownload(job.status)) return false;
+        if (!normalizedQuery) return true;
+        return job.title.toLowerCase().includes(normalizedQuery);
+      });
+  }, [downloadOrder, downloadsById, normalizedQuery, selectedCourseId]);
 
   const reorderVideos = useMutation({
     mutationFn: (orderedIds: string[]) =>
@@ -477,6 +506,105 @@ export function CourseLibraryView({
       >
         {t(statusLabelKey[status])}
       </Badge>
+    );
+  }
+
+  // 下载中占位卡：真实视频要等下载完成才登记，先用一张卡把进度摆出来。
+  function renderDownloadGridCard(job: DownloadJob) {
+    const percent = jobPercent(job);
+    return (
+      <article
+        key={job.id}
+        className="ca-card relative"
+        data-testid="download-placeholder"
+      >
+        <div className="ca-thumb">
+          <span className="absolute inset-0 grid place-items-center bg-[var(--surface-card-hover)]">
+            <Download
+              className="h-6 w-6 text-[var(--text-faint)]"
+              aria-hidden="true"
+            />
+          </span>
+          <span className="st">
+            <Badge tone="processing">{t("downloads.downloading")}</Badge>
+          </span>
+          <span className="dur tabular-nums">
+            {t("downloads.placeholder", { percent })}
+          </span>
+        </div>
+        <div className="ca-card-body">
+          <span className="ca-card-title">{job.title}</span>
+          <span className="ca-card-meta">
+            <span className="ca-meta-progress" aria-hidden="true">
+              <i style={{ width: `${percent}%` }} />
+            </span>
+            <span className="ca-meta-text accent">
+              {t("downloads.placeholder", { percent })}
+            </span>
+          </span>
+        </div>
+        <button
+          type="button"
+          aria-label={t("downloads.cancel")}
+          title={t("downloads.cancel")}
+          onClick={() => {
+            void ipc.downloads.cancel(job.id).catch(() => {});
+          }}
+          className="ca-touch-44 absolute bottom-2 right-2 z-10 grid h-7 w-7 place-items-center rounded-full text-[var(--text-faint)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)]"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </article>
+    );
+  }
+
+  // 列表占位行：与真实行同列宽，进度列显示「下载中 N%」。
+  function renderDownloadListRow(job: DownloadJob) {
+    const percent = jobPercent(job);
+    return (
+      <article
+        key={job.id}
+        className="ca-row relative"
+        data-testid="download-placeholder"
+      >
+        <div className="row-button">
+          <span className="row-main">
+            <span className="row-thumb">
+              <span className="absolute inset-0 grid place-items-center bg-[var(--surface-card-hover)]">
+                <Download
+                  className="h-4 w-4 text-[var(--text-faint)]"
+                  aria-hidden="true"
+                />
+              </span>
+            </span>
+            <span className="row-name">
+              <span className="t">{job.title}</span>
+              <span className="s">{t("downloads.downloading")}</span>
+            </span>
+          </span>
+          <span className="c-progress processing">
+            <Loader2
+              className="h-3 w-3 flex-none animate-spin"
+              aria-hidden="true"
+            />
+            <span className="min-w-0 truncate">
+              {t("downloads.placeholder", { percent })}
+            </span>
+          </span>
+          <span className="c-dur">--:--</span>
+        </div>
+        <button
+          type="button"
+          aria-label={t("downloads.cancel")}
+          title={t("downloads.cancel")}
+          onClick={() => {
+            void ipc.downloads.cancel(job.id).catch(() => {});
+          }}
+          className="ca-touch-44 absolute right-3 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md text-[var(--text-faint)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)]"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </article>
     );
   }
 
@@ -825,7 +953,7 @@ export function CourseLibraryView({
           </div>
           {selectedCourseId && (
             <div className="tb-actions">
-              {videos.length > 0 && (
+              {(videos.length > 0 || hasCourseDownloads) && (
                 <div className="relative">
                   <Search
                     className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-faint)]"
@@ -855,7 +983,7 @@ export function CourseLibraryView({
                   )}
                 </div>
               )}
-              {videos.length > 0 && (
+              {(videos.length > 0 || hasCourseDownloads) && (
                 <div className="ca-seg">
                   {(
                     [
@@ -906,10 +1034,7 @@ export function CourseLibraryView({
                   {t("home.knowledgePoints")}
                 </Button>
               )}
-              <ImportVideoButton
-                courseId={selectedCourseId}
-                onStartProcessing={startProcessing}
-              />
+              <ImportVideoButton courseId={selectedCourseId} />
             </div>
           )}
         </header>
@@ -937,7 +1062,8 @@ export function CourseLibraryView({
                 className="max-w-md"
               />
             </div>
-          ) : !selectedCourseId || videos.length === 0 ? (
+          ) : !selectedCourseId ||
+            (videos.length === 0 && !hasCourseDownloads) ? (
             <div className="flex h-full min-h-[320px] items-center justify-center">
               <EmptyState
                 title={selectedCourseId ? t("home.noVideos") : t("home.noCourses")}
@@ -948,10 +1074,7 @@ export function CourseLibraryView({
                 }
                 action={
                   selectedCourseId ? (
-                    <ImportVideoButton
-                      courseId={selectedCourseId}
-                      onStartProcessing={startProcessing}
-                    />
+                    <ImportVideoButton courseId={selectedCourseId} />
                   ) : (
                     <div className="flex flex-col items-center gap-2">
                       <Button
@@ -974,7 +1097,7 @@ export function CourseLibraryView({
                 }
               />
             </div>
-          ) : visibleVideos.length === 0 ? (
+          ) : visibleVideos.length === 0 && courseDownloads.length === 0 ? (
             <div className="flex h-full min-h-[320px] items-center justify-center">
               <EmptyState
                 title={t("home.noMatch")}
@@ -995,6 +1118,7 @@ export function CourseLibraryView({
                   <span className="h-progress">{t("home.colProgress")}</span>
                   <span className="h-dur">{t("home.colDuration")}</span>
                 </div>
+                {courseDownloads.map(renderDownloadListRow)}
                 {visibleVideos.map((video) => (
                   <SortableVideoItem key={video.id} id={video.id}>
                     {renderVideoListRow(video)}
@@ -1010,6 +1134,7 @@ export function CourseLibraryView({
               onReorder={(orderedIds) => reorderVideos.mutate(orderedIds)}
             >
               <div className="ca-grid" data-density={gridDensity} aria-label={t("home.videoGrid")}>
+                {courseDownloads.map(renderDownloadGridCard)}
                 {visibleVideos.map((video) => (
                   <SortableVideoItem key={video.id} id={video.id}>
                     {renderVideoGridCard(video)}

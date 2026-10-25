@@ -6,6 +6,7 @@ import { AppSidebar } from "@/features/shell/AppSidebar";
 import { AppRail } from "@/features/shell/AppRail";
 import type { ConceptNavigationState } from "@/features/knowledge/ConceptsPanel";
 import { useProcessingQueue } from "@/features/library/useProcessingQueue";
+import { useDownloadsSync } from "@/features/library/useDownloads";
 import { useRecorrection } from "@/features/library/useRecorrection";
 import { BottomTabBar, type CompactTab } from "@/features/shell/BottomTabBar";
 import {
@@ -25,6 +26,7 @@ import { WATCHED_RATIO, readPlaybackProgress, writeLastVideoId } from "@/lib/pla
 import { useStudyReminder } from "@/lib/useStudyReminder";
 import { isTablet } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
+import { selectDownloadCount, useDownloads } from "@/stores/downloads";
 import { AssistantPanel } from "@/features/assistant/AssistantPanel";
 import { accentVars, useTheme } from "@/stores/theme";
 import { useAssistantUi } from "@/stores/assistant";
@@ -99,6 +101,8 @@ export function Home() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<SidebarCollapsed>(readSidebarCollapsed);
   const queue = useProcessingQueue({ selectedCourseId });
   const { queuedVideos, forgetQueuedVideo } = queue;
+  useDownloadsSync();
+  const downloadCount = useDownloads(selectDownloadCount);
   const setVideo = usePlayer((s) => s.setVideo);
   const appRef = useRef<HTMLDivElement>(null);
   const settingsExitRequestRef = useRef<
@@ -551,7 +555,7 @@ export function Home() {
             sidebarExpanded={!sidebarIsCollapsed}
             onExpandSidebar={() => toggleSidebarCollapsed()}
             queueOpen={queueOpen}
-            queueCount={queuedVideos.length}
+            queueCount={queuedVideos.length + downloadCount}
             onToggleQueue={toggleQueue}
             onOpenDashboard={() => openMainView("dashboard")}
             assistantActive={assistantOpen}
@@ -594,7 +598,7 @@ export function Home() {
       {showBottomTab && (
         <BottomTabBar
           active={activeCompactTab}
-          queueCount={queuedVideos.length}
+          queueCount={queuedVideos.length + downloadCount}
           onSelect={selectCompactTab}
         />
       )}

@@ -3,6 +3,7 @@ pub mod cloud_sync;
 pub mod commands;
 pub mod db;
 pub mod dev_log;
+pub mod downloads;
 pub mod error;
 pub mod export;
 pub mod jobs;
@@ -21,8 +22,6 @@ use crate::commands::ai::{
     cmd_set_api_key, cmd_stale_ai_artifacts,
 };
 use crate::commands::app::{cmd_check_update, cmd_exit_app};
-use crate::commands::note_history::cmd_list_note_versions;
-use crate::commands::note_images::{cmd_read_note_image, cmd_save_note_image};
 use crate::commands::assistant::{cmd_assistant_ask, cmd_cancel_assistant};
 use crate::commands::backup::{cmd_backup_database, cmd_restore_database};
 use crate::commands::clips::{cmd_add_clip, cmd_delete_clip, cmd_list_clips, cmd_update_clip};
@@ -39,14 +38,9 @@ use crate::commands::export::{
     cmd_export_handout, cmd_export_mindmap, cmd_export_notes, cmd_export_quiz,
     cmd_export_subtitles, cmd_save_share_image,
 };
+use crate::commands::note_history::cmd_list_note_versions;
+use crate::commands::note_images::{cmd_read_note_image, cmd_save_note_image};
 use crate::commands::notify::cmd_notify;
-use crate::commands::subscriptions::{
-    cmd_check_subscription, cmd_create_subscription, cmd_delete_subscription,
-    cmd_list_subscriptions,
-};
-use crate::commands::translate::{
-    cmd_cancel_translation, cmd_get_translations, cmd_translate_transcript,
-};
 use crate::commands::rag::{
     cmd_cancel_rag_query, cmd_rag_query, cmd_rag_query_stream, cmd_search_transcript,
 };
@@ -65,6 +59,10 @@ use crate::commands::stats::{
     cmd_continue_learning, cmd_course_totals, cmd_course_video_ids, cmd_daily_totals,
     cmd_log_watch, cmd_next_due_at, cmd_save_video_progress, cmd_video_progress,
 };
+use crate::commands::subscriptions::{
+    cmd_check_subscription, cmd_create_subscription, cmd_delete_subscription,
+    cmd_list_subscriptions,
+};
 use crate::commands::sync::{
     cmd_sync_now, cmd_sync_probe, cmd_sync_probe_confirm_account_change, cmd_sync_probe_send,
     cmd_sync_probe_status, cmd_sync_probe_stop, cmd_sync_set_enabled, cmd_sync_start,
@@ -75,6 +73,9 @@ use crate::commands::tools::{
     cmd_probe_playlist, cmd_set_bilibili_cookies,
 };
 use crate::commands::transcripts::{cmd_list_transcripts, cmd_update_transcript};
+use crate::commands::translate::{
+    cmd_cancel_translation, cmd_get_translations, cmd_translate_transcript,
+};
 use crate::commands::videos::{
     cmd_add_local_batch, cmd_add_local_video, cmd_cancel_crop_detect, cmd_delete_video,
     cmd_ensure_crop, cmd_ensure_playable, cmd_list_trash, cmd_list_videos, cmd_media_url,
@@ -84,6 +85,10 @@ use crate::commands::videos::{
 use crate::commands::whisper::{cmd_download_whisper_model, cmd_list_whisper_models};
 use crate::db::Db;
 use crate::dev_log::{cmd_clear_dev_logs, cmd_get_dev_logs};
+use crate::downloads::{
+    cmd_cancel_download, cmd_enqueue_downloads, cmd_list_downloads, cmd_remove_download,
+    DownloadQueue,
+};
 use crate::jobs::cmd_list_jobs;
 use crate::pipeline::{
     cmd_cancel_processing, cmd_dismiss_processing_video, cmd_list_processing_videos,
@@ -131,6 +136,7 @@ pub fn run() {
         .plugin(cloud_sync::init())
         .plugin(mobile_files::init())
         .manage(ProcessingTasks::default())
+        .manage(DownloadQueue::default())
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
@@ -321,6 +327,10 @@ pub fn run() {
             cmd_search_transcript,
             cmd_ocr_region,
             cmd_import_bilibili,
+            cmd_enqueue_downloads,
+            cmd_cancel_download,
+            cmd_remove_download,
+            cmd_list_downloads,
             cmd_probe_bilibili,
             cmd_probe_playlist,
             cmd_set_bilibili_cookies,

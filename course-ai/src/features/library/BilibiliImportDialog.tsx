@@ -1,16 +1,15 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { qk } from "@/lib/queryKeys";
 import { useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { Select } from "@/ui/select";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { ipc } from "@/lib/ipc";
-import type { ProbeResult, Video } from "@/lib/types";
+import type { ProbeResult } from "@/lib/types";
 import { Modal } from "@/ui/dialog";
 import { isBilibiliUrl } from "@/lib/sourceUrl";
-import { describeDownload } from "@/lib/downloadProgress";
+import { useDownloads } from "@/stores/downloads";
 
 type Step = "url" | "cookie" | "probing" | "confirm";
 type ImportRequest = {
@@ -23,12 +22,10 @@ type ImportRequest = {
 export function BilibiliImportDialog({
   courseId,
   onClose,
-  onStartProcessing,
   returnFocusRef,
 }: {
   courseId: string;
   onClose: () => void;
-  onStartProcessing?: (video: Video) => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const { t } = useTranslation();
@@ -38,7 +35,6 @@ export function BilibiliImportDialog({
       ? document.activeElement
       : null,
   );
-  const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>("url");
   const [url, setUrl] = useState("");
   const [probe, setProbe] = useState<ProbeResult | null>(null);
@@ -48,8 +44,6 @@ export function BilibiliImportDialog({
   const [autocorrect, setAutocorrect] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
-  // 下载中的进度文字（百分比、速度、合并、断流降档重试）；没收到事件前为 null。
-  const [downloadStatus, setDownloadStatus] = useState<string | null>(null);
   // cookie 步骤是「首次缺失」还是「登录态失效需重导」，用于切换引导文案。
   const [cookieReason, setCookieReason] = useState<"missing" | "expired">(
     "missing",
@@ -137,32 +131,31 @@ export function BilibiliImportDialog({
   };
 
   const importMutation = useMutation({
-    mutationFn: (request: ImportRequest) => {
-      setDownloadStatus(null);
-      return ipc.tools.importBilibili(
-        courseId,
-        url.trim(),
-        request.quality,
-        request.useSub ? request.subLang : undefined,
-        // 纠错偏好只对带字幕导入有意义；不带字幕不写偏好（保持 NULL）。
-        request.useSub ? request.autocorrect : undefined,
-        (event) => setDownloadStatus(describeDownload(event, t)),
-      );
+    mutationFn: async (request: ImportRequest) => {
+      const jobs = await ipc.downloads.enqueue(courseId, [
+        {
+          url: url.trim(),
+          title: probe?.title,
+          maxHeight: request.quality,
+          subLang: request.useSub ? request.subLang : undefined,
+          // 纠错偏好只对带字幕导入有意义；不带字幕不写偏好（保持 NULL）。
+          subtitleAutocorrect: request.useSub
+            ? request.autocorrect
+            : undefined,
+          // 选了字幕的导入按单集立即处理；不选字幕则等用户自己开始。
+          autoProcess: request.useSub,
+        },
+      ]);
+      useDownloads.getState().addMany(jobs);
     },
-    onSuccess: (video, request) => {
-      queryClient.invalidateQueries({ queryKey: qk.videos.list(courseId) });
-      // 选用了字幕：立即跑流水线，让字幕被消化成文稿（ASR 阶段会走字幕分支、
-      // 跳过语音识别），用户无需再手动「开始处理」。
-      if (request.useSub) {
-        if (onStartProcessing) onStartProcessing(video);
-        else void ipc.pipeline.process(video.id);
-      }
+    onSuccess: () => {
       onClose();
     },
     onError: (e) => {
       const msg = String(e);
       setError(msg);
       // 下载阶段的 412 / 需要登录，同样引导重新导入 cookies。
+      // （入队本身不联网，这里主要覆盖探测后凭证过期的情况。）
       if (looksLikeCookieError(msg)) {
         setCookieReason("expired");
         setStep("cookie");
@@ -361,7 +354,7 @@ export function BilibiliImportDialog({
               }
             >
               {importMutation.isPending
-                ? (downloadStatus ?? t("bilibiliImport.downloading"))
+                ? t("bilibiliImport.queuing")
                 : probe.tracks.length > 0
                   ? t("bilibiliImport.downloadWithSub")
                   : t("bilibiliImport.download")}

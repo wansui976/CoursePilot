@@ -25,7 +25,6 @@ import { humanizeError } from "@/lib/errors";
 import { ipc, type FolderVideo } from "@/lib/ipc";
 import { pickDirectoryPath, pickPersistedFile } from "@/lib/mobileFiles";
 import { isMobile } from "@/lib/platform";
-import type { Video } from "@/lib/types";
 
 // 按需懒加载：下载向导只在用户点击时才需要，避免把它（及 plugin-dialog 等）压进首屏 eager 包。
 const BilibiliImportDialog = lazy(() =>
@@ -39,13 +38,7 @@ const PlaylistImportDialog = lazy(() =>
 );
 
 /** 单一「导入」入口：点开后可选「上传本地视频」或「下载网络视频（B 站 / 链接）」。 */
-export function ImportVideoButton({
-  courseId,
-  onStartProcessing,
-}: {
-  courseId: string;
-  onStartProcessing?: (video: Video) => void;
-}) {
+export function ImportVideoButton({ courseId }: { courseId: string }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -277,7 +270,6 @@ export function ImportVideoButton({
           <BilibiliImportDialog
             courseId={courseId}
             onClose={() => setShowBili(false)}
-            onStartProcessing={onStartProcessing}
             returnFocusRef={triggerRef}
           />
         </Suspense>
@@ -297,7 +289,6 @@ export function ImportVideoButton({
           <PlaylistImportDialog
             courseId={courseId}
             onClose={() => setShowPlaylist(false)}
-            onStartProcessing={onStartProcessing}
             returnFocusRef={triggerRef}
           />
         </Suspense>

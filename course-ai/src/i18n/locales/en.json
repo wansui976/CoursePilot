@@ -1115,7 +1115,8 @@
     "downloading": "Downloading…",
     "downloadWithSub": "Download with selected subtitles",
     "download": "Download",
-    "noVideosFound": "No importable videos found at this link"
+    "noVideosFound": "No importable videos found at this link",
+    "queuing": "Adding to queue…"
   },
   "folderImport": {
     "title": "Import Folder Videos",
@@ -1137,6 +1138,17 @@
     "speed": "{{label}} · {{speed}}/s",
     "merging": "Merging audio and video…",
     "retrying": "The video stream was cut off; retrying at {{height}}p…"
+  },
+  "downloads": {
+    "sectionTitle": "Downloading",
+    "downloading": "Downloading",
+    "queued": "Queued…",
+    "placeholder": "Downloading {{percent}}%",
+    "failed": "Download failed",
+    "cancel": "Cancel download",
+    "remove": "Remove",
+    "progressAria": "{{title}} download progress",
+    "progressAriaValue": "{{percent}}% downloaded: {{message}}"
   },
   "playlistImport": {
     "title": "Import Playlist / Collection",
@@ -1161,15 +1173,10 @@
     "preferSubtitle": "Prefer built-in Chinese subtitles (speech recognition if unavailable)",
     "aiCorrection": "AI-correct subtitles after download",
     "importCount": "Import {{count}}",
-    "progress": "Importing {{done}} / {{total}}…",
-    "progressAria": "Playlist import progress",
-    "progressNote": "Do not close during download; failed episodes won't stop the rest.",
-    "resultOk": "Import complete: {{ok}} succeeded",
-    "resultFail": ", {{fail}} failed",
-    "done": "Done",
     "best": "Best",
     "noVideosFound": "No importable videos found at this link",
-    "subscribeOnly": "Follow future videos only"
+    "subscribeOnly": "Follow future videos only",
+    "queuing": "Adding to queue…"
   },
   "dashboard": {
     "back": "Back",

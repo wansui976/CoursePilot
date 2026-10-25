@@ -215,6 +215,26 @@ export function installMockIpc({ theme, safeArea }) {
     cmd_video_cover: ({ videoId }) => cover(videoId),
     cmd_media_url: ({ videoId }) => mediaUrl(videoId),
     cmd_list_processing_videos: () => [videos[6]],
+    // 下载占位只在专门场景里打开，避免改动其他截图的基准。
+    cmd_list_downloads: () => {
+      try {
+        if (localStorage.getItem("__shot-downloads") !== "1") return [];
+      } catch {
+        return [];
+      }
+      return [
+        {
+          id: "d1", batchId: "b1", courseId: "c1", url: "https://www.bilibili.com/video/BV1xx411c7mD",
+          title: "10 强化学习入门.mp4", status: "downloading", downloaded: 42, total: 100,
+          speed: 3.1 * 1024 ** 2, eta: 32, message: null, error: null, videoId: null, attempt: 1,
+        },
+        {
+          id: "d2", batchId: "b1", courseId: "c1", url: "https://www.bilibili.com/video/BV1yy411c7mE",
+          title: "11 生成模型与变分推断.mp4", status: "queued", downloaded: 0, total: null,
+          speed: null, eta: null, message: null, error: null, videoId: null, attempt: 1,
+        },
+      ];
+    },
     cmd_list_jobs: ({ videoId }) =>
       videoId === "v7"
         ? [{ id: "j1", video_id: "v7", stage: "asr", status: "running", progress: 0.46, message: "语音识别中", created_at: now, updated_at: now }]

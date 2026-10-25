@@ -4,34 +4,51 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BilibiliImportDialog } from "./BilibiliImportDialog";
+import { useDownloads } from "@/stores/downloads";
+import type { DownloadJob } from "@/lib/ipc";
 
-const { mockTools, mockSettings, mockPipeline } = vi.hoisted(() => ({
+const { mockTools, mockSettings, mockDownloads } = vi.hoisted(() => ({
   mockTools: {
     hasBilibiliCookies: vi.fn(),
     probeBilibili: vi.fn(),
     setBilibiliCookies: vi.fn(),
-    importBilibili: vi.fn(),
   },
   mockSettings: { get: vi.fn() },
-  mockPipeline: { process: vi.fn() },
+  mockDownloads: { enqueue: vi.fn() },
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("@/lib/ipc", () => ({
-  ipc: { tools: mockTools, settings: mockSettings, pipeline: mockPipeline },
+  ipc: { tools: mockTools, settings: mockSettings, downloads: mockDownloads },
 }));
 
-function renderDialog(onStartProcessing?: Parameters<typeof BilibiliImportDialog>[0]["onStartProcessing"]) {
+function downloadJob(overrides: Partial<DownloadJob> = {}): DownloadJob {
+  return {
+    id: "d1",
+    batchId: "b1",
+    courseId: "c1",
+    url: "https://b23.tv/abc",
+    title: "示例视频",
+    status: "queued",
+    downloaded: 0,
+    total: null,
+    speed: null,
+    eta: null,
+    message: null,
+    error: null,
+    videoId: null,
+    attempt: 0,
+    ...overrides,
+  };
+}
+
+function renderDialog(onClose: () => void = () => {}) {
   const qc = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={qc}>
-      <BilibiliImportDialog
-        courseId="c1"
-        onClose={() => {}}
-        onStartProcessing={onStartProcessing}
-      />
+      <BilibiliImportDialog courseId="c1" onClose={onClose} />
     </QueryClientProvider>,
   );
 }
@@ -41,11 +58,11 @@ describe("BilibiliImportDialog", () => {
     mockTools.hasBilibiliCookies.mockReset();
     mockTools.probeBilibili.mockReset();
     mockTools.setBilibiliCookies.mockReset();
-    mockTools.importBilibili.mockReset();
     mockSettings.get.mockReset();
-    mockPipeline.process.mockReset();
+    mockDownloads.enqueue.mockReset();
     mockSettings.get.mockResolvedValue(null);
-    mockPipeline.process.mockResolvedValue(undefined);
+    mockDownloads.enqueue.mockResolvedValue([downloadJob()]);
+    useDownloads.setState({ byId: {}, order: [] });
   });
 
   it("starts at the URL step", () => {
@@ -152,7 +169,7 @@ describe("BilibiliImportDialog", () => {
     expect(mockSettings.get).toHaveBeenCalledWith("subtitle_autocorrect");
   });
 
-  it("passes the checkbox value through to importBilibili", async () => {
+  it("enqueues the chosen quality and subtitle options", async () => {
     mockTools.hasBilibiliCookies.mockResolvedValue(true);
     mockSettings.get.mockResolvedValue(null); // 未设置 → 默认开（与后端一致）
     mockTools.probeBilibili.mockResolvedValue({
@@ -160,7 +177,6 @@ describe("BilibiliImportDialog", () => {
       qualities: [1080],
       tracks: [{ lang: "zh-CN", name: "中文（中国）", auto: false }],
     });
-    mockTools.importBilibili.mockResolvedValue({ id: "v1" });
     renderDialog();
 
     fireEvent.change(screen.getByLabelText("视频链接"), {
@@ -176,31 +192,31 @@ describe("BilibiliImportDialog", () => {
     fireEvent.click(screen.getByText("用所选字幕下载"));
 
     await waitFor(() =>
-      expect(mockTools.importBilibili).toHaveBeenCalledWith(
-        "c1",
-        "https://b23.tv/abc",
-        1080,
-        "zh-CN",
-        false,        expect.any(Function),
-      ),
+      expect(mockDownloads.enqueue).toHaveBeenCalledWith("c1", [
+        {
+          url: "https://b23.tv/abc",
+          title: "示例视频",
+          maxHeight: 1080,
+          subLang: "zh-CN",
+          subtitleAutocorrect: false,
+          autoProcess: true,
+        },
+      ]),
     );
   });
 
-  it("shows download progress on the button while downloading", async () => {
+  it("closes immediately and keeps the job in the download store", async () => {
+    const onClose = vi.fn();
     mockTools.hasBilibiliCookies.mockResolvedValue(true);
     mockTools.probeBilibili.mockResolvedValue({
       title: "示例视频",
       qualities: [1080],
       tracks: [],
     });
-    // 推一条进度后一直挂着，模拟下载进行中。
-    mockTools.importBilibili.mockImplementation(
-      (_c, _u, _q, _s, _a, onEvent?: (event: unknown) => void) => {
-        onEvent?.({ type: "progress", downloaded: 42, total: 100, speed: null, eta: null });
-        return new Promise(() => {});
-      },
-    );
-    renderDialog();
+    mockDownloads.enqueue.mockResolvedValue([
+      downloadJob({ status: "downloading", downloaded: 42, total: 100 }),
+    ]);
+    renderDialog(onClose);
 
     fireEvent.change(screen.getByLabelText("视频链接"), {
       target: { value: "https://b23.tv/abc" },
@@ -208,39 +224,41 @@ describe("BilibiliImportDialog", () => {
     fireEvent.click(screen.getByText("下一步"));
     fireEvent.click(await screen.findByText("下载"));
 
-    expect(await screen.findByRole("button", { name: "下载中 42%" })).toBeDisabled();
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(useDownloads.getState().byId.d1?.downloaded).toBe(42);
   });
 
-  it("hands subtitle auto-processing back to the home queue", async () => {
-    const onStartProcessing = vi.fn();
-    mockTools.hasBilibiliCookies.mockResolvedValue(true);
-    mockTools.probeBilibili.mockResolvedValue({
-      title: "示例视频",
-      qualities: [1080],
-      tracks: [{ lang: "zh-CN", name: "中文（中国）", auto: false }],
-    });
-    const imported = { id: "v1", title: "示例视频" };
-    mockTools.importBilibili.mockResolvedValue(imported);
-    renderDialog(onStartProcessing);
-
-    fireEvent.change(screen.getByLabelText("视频链接"), {
-      target: { value: "https://b23.tv/abc" },
-    });
-    fireEvent.click(screen.getByText("下一步"));
-    fireEvent.click(await screen.findByText("用所选字幕下载"));
-
-    await waitFor(() => expect(onStartProcessing).toHaveBeenCalledWith(imported));
-    expect(mockPipeline.process).not.toHaveBeenCalled();
-  });
-
-  it("omits the checkbox and the preference when the video has no subtitles", async () => {
+  it("shows a queueing label and stays open while enqueueing", async () => {
     mockTools.hasBilibiliCookies.mockResolvedValue(true);
     mockTools.probeBilibili.mockResolvedValue({
       title: "示例视频",
       qualities: [1080],
       tracks: [],
     });
-    mockTools.importBilibili.mockResolvedValue({ id: "v1" });
+    // 入队请求一直挂着：按钮显示「入队中…」，弹窗也不可关闭。
+    mockDownloads.enqueue.mockReturnValue(new Promise(() => {}));
+    const onClose = vi.fn();
+    renderDialog(onClose);
+
+    fireEvent.change(screen.getByLabelText("视频链接"), {
+      target: { value: "https://b23.tv/abc" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    await screen.findByText("示例视频");
+    fireEvent.click(screen.getByRole("button", { name: "下载" }));
+
+    expect(await screen.findByRole("button", { name: "入队中…" })).toBeDisabled();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("omits the subtitle options when the video has no subtitles", async () => {
+    mockTools.hasBilibiliCookies.mockResolvedValue(true);
+    mockTools.probeBilibili.mockResolvedValue({
+      title: "示例视频",
+      qualities: [1080],
+      tracks: [],
+    });
     renderDialog();
 
     fireEvent.change(screen.getByLabelText("视频链接"), {
@@ -255,13 +273,16 @@ describe("BilibiliImportDialog", () => {
 
     fireEvent.click(screen.getByText("下载"));
     await waitFor(() =>
-      expect(mockTools.importBilibili).toHaveBeenCalledWith(
-        "c1",
-        "https://b23.tv/abc",
-        1080,
-        undefined,
-        undefined,        expect.any(Function),
-      ),
+      expect(mockDownloads.enqueue).toHaveBeenCalledWith("c1", [
+        {
+          url: "https://b23.tv/abc",
+          title: "示例视频",
+          maxHeight: 1080,
+          subLang: undefined,
+          subtitleAutocorrect: undefined,
+          autoProcess: false,
+        },
+      ]),
     );
   });
 
@@ -304,12 +325,7 @@ describe("BilibiliImportDialog", () => {
   it("closes on Escape", () => {
     mockTools.hasBilibiliCookies.mockResolvedValue(true);
     const onClose = vi.fn();
-    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
-    render(
-      <QueryClientProvider client={qc}>
-        <BilibiliImportDialog courseId="c1" onClose={onClose} />
-      </QueryClientProvider>,
-    );
+    renderDialog(onClose);
 
     fireEvent.keyDown(document, { key: "Escape" });
 
@@ -328,41 +344,5 @@ describe("BilibiliImportDialog", () => {
     fireEvent.keyDown(lastButton, { key: "Tab" });
 
     expect(input).toHaveFocus();
-  });
-
-  it("cannot close with Escape or an outside pointer while downloading", async () => {
-    let finishImport!: (video: { id: string }) => void;
-    const importing = new Promise<{ id: string }>((resolve) => {
-      finishImport = resolve;
-    });
-    const onClose = vi.fn();
-    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
-    mockTools.hasBilibiliCookies.mockResolvedValue(true);
-    mockTools.probeBilibili.mockResolvedValue({
-      title: "示例视频",
-      qualities: [1080],
-      tracks: [],
-    });
-    mockTools.importBilibili.mockReturnValue(importing);
-    render(
-      <QueryClientProvider client={qc}>
-        <BilibiliImportDialog courseId="c1" onClose={onClose} />
-      </QueryClientProvider>,
-    );
-
-    fireEvent.change(screen.getByLabelText("视频链接"), {
-      target: { value: "https://b23.tv/abc" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
-    await screen.findByText("示例视频");
-    fireEvent.click(screen.getByRole("button", { name: "下载" }));
-    await screen.findByRole("button", { name: "下载中…" });
-
-    fireEvent.keyDown(document, { key: "Escape" });
-    fireEvent.pointerDown(screen.getByTestId("bilibili-import-overlay"));
-    expect(onClose).not.toHaveBeenCalled();
-
-    finishImport({ id: "v1" });
-    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 });

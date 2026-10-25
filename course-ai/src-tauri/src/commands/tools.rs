@@ -216,6 +216,41 @@ pub async fn import_url(
     subtitle_autocorrect: Option<bool>,
     request_id: Option<String>,
 ) -> AppResult<Video> {
+    let event_name = request_id.map(|id| format!("url-import:{id}"));
+    let progress_app = app.clone();
+    let on_event = move |event: download::DownloadEvent| {
+        if let Some(name) = &event_name {
+            let _ = progress_app.emit(name, event);
+        }
+    };
+    import_url_with(
+        app,
+        state,
+        course_id,
+        url,
+        max_height,
+        sub_lang,
+        subtitle_autocorrect,
+        None,
+        &on_event,
+    )
+    .await
+}
+
+/// 下载并登记一个网络视频。`staging` 为 None 时用临时目录；后台下载队列传入自己的
+/// 固定目录，取消任务时据此清理半成品。进度事件一律走 `on_event`。
+#[allow(clippy::too_many_arguments)]
+pub async fn import_url_with(
+    app: tauri::AppHandle,
+    state: &AppState,
+    course_id: String,
+    url: String,
+    max_height: Option<u32>,
+    sub_lang: Option<String>,
+    subtitle_autocorrect: Option<bool>,
+    staging: Option<PathBuf>,
+    on_event: &(dyn Fn(download::DownloadEvent) + Send + Sync),
+) -> AppResult<Video> {
     if is_mobile_os(std::env::consts::OS) {
         return Err(crate::error::AppError::Config(
             "移动端暂不支持 B 站 / 网络视频下载，请先在桌面端导入后同步到移动端".into(),
@@ -233,20 +268,19 @@ pub async fn import_url(
         None
     };
     let out_dir = PathBuf::from(&root_path);
-    let event_name = request_id.map(|id| format!("url-import:{id}"));
-    let progress_app = app.clone();
-    let on_event = move |event: download::DownloadEvent| {
-        if let Some(name) = &event_name {
-            let _ = progress_app.emit(name, event);
-        }
-    };
+    let staging = staging.unwrap_or_else(|| {
+        out_dir
+            .join(".courseai-import")
+            .join(uuid::Uuid::new_v4().to_string())
+    });
     let result = download::download(
         &url,
         &out_dir,
+        &staging,
         cookies.as_deref(),
         max_height,
         sub_lang.as_deref(),
-        &on_event,
+        on_event,
     )
     .await?;
     let mut video = add_local_video(&state.db, &course_id, result.video, None).await?;

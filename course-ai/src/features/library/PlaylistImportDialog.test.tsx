@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PlaylistImportDialog } from "./PlaylistImportDialog";
+import { useDownloads } from "@/stores/downloads";
+import type { DownloadJob } from "@/lib/ipc";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
@@ -13,25 +15,43 @@ const { mockIpc } = vi.hoisted(() => ({
     tools: {
       probePlaylist: vi.fn(),
       hasBilibiliCookies: vi.fn(),
-      importBilibili: vi.fn(),
       setBilibiliCookies: vi.fn(),
     },
     settings: { get: vi.fn() },
-    pipeline: { process: vi.fn() },
+    downloads: { enqueue: vi.fn() },
   },
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 
-function renderDialog(onStartProcessing = vi.fn(), onClose = vi.fn()) {
+function downloadJob(id: string, title: string): DownloadJob {
+  return {
+    id,
+    batchId: "b1",
+    courseId: "c1",
+    url: `u-${id}`,
+    title,
+    status: "queued",
+    downloaded: 0,
+    total: null,
+    speed: null,
+    eta: null,
+    message: null,
+    error: null,
+    videoId: null,
+    attempt: 0,
+  };
+}
+
+function renderDialog(onClose = vi.fn()) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
     <QueryClientProvider client={qc}>
-      <PlaylistImportDialog courseId="c1" onClose={onClose} onStartProcessing={onStartProcessing} />
+      <PlaylistImportDialog courseId="c1" onClose={onClose} />
     </QueryClientProvider>,
   );
-  return { onClose, onStartProcessing };
+  return { onClose };
 }
 
 describe("PlaylistImportDialog", () => {
@@ -39,12 +59,20 @@ describe("PlaylistImportDialog", () => {
     mockIpc.tools.probePlaylist.mockReset();
     mockIpc.subscriptions.create.mockReset().mockResolvedValue({ id: "s1" });
     mockIpc.tools.hasBilibiliCookies.mockReset().mockResolvedValue(true);
-    mockIpc.tools.importBilibili.mockReset();
     mockIpc.settings.get.mockReset().mockResolvedValue(null);
-    mockIpc.pipeline.process.mockReset();
+    mockIpc.downloads.enqueue.mockReset();
+    mockIpc.downloads.enqueue.mockImplementation(
+      (_courseId: string, items: { title?: string }[]) =>
+        Promise.resolve(
+          items.map((item, index) =>
+            downloadJob(`d${index}`, item.title ?? `第 ${index} 讲`),
+          ),
+        ),
+    );
+    useDownloads.setState({ byId: {}, order: [] });
   });
 
-  it("enumerates episodes then batch-imports, continuing past a failure", async () => {
+  it("enqueues every selected episode as one batch", async () => {
     mockIpc.tools.probePlaylist.mockResolvedValue({
       title: "我的合集",
       episodes: [
@@ -53,12 +81,8 @@ describe("PlaylistImportDialog", () => {
         { url: "u3", title: "第三讲", duration_ms: null },
       ],
     });
-    mockIpc.tools.importBilibili
-      .mockResolvedValueOnce({ id: "v1" })
-      .mockRejectedValueOnce(new Error("会员专享"))
-      .mockResolvedValueOnce({ id: "v3" });
 
-    const { onStartProcessing } = renderDialog();
+    const { onClose } = renderDialog();
 
     fireEvent.change(screen.getByLabelText("播放列表链接"), {
       target: { value: "https://b.com/list" },
@@ -70,13 +94,37 @@ describe("PlaylistImportDialog", () => {
     expect(screen.getByText("第一讲")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "导入 3 个" }));
 
-    // 三集都尝试导入；成功的两集进处理流水线。
-    await waitFor(() => expect(mockIpc.tools.importBilibili).toHaveBeenCalledTimes(3));
-    await waitFor(() => expect(onStartProcessing).toHaveBeenCalledTimes(2));
-
-    // 完成汇总：成功 2、失败 1，并列出失败的那一集。
-    expect(await screen.findByText(/成功 2 个，失败 1 个/)).toBeInTheDocument();
-    expect(screen.getByText("第二讲")).toBeInTheDocument();
+    // 三集一次性入队；autoProcess 让后端在整批下完后统一开始处理。
+    await waitFor(() =>
+      expect(mockIpc.downloads.enqueue).toHaveBeenCalledWith("c1", [
+        {
+          url: "u1",
+          title: "第一讲",
+          maxHeight: undefined,
+          subLang: "ai-zh",
+          subtitleAutocorrect: true,
+          autoProcess: true,
+        },
+        {
+          url: "u2",
+          title: "第二讲",
+          maxHeight: undefined,
+          subLang: "ai-zh",
+          subtitleAutocorrect: true,
+          autoProcess: true,
+        },
+        {
+          url: "u3",
+          title: "第三讲",
+          maxHeight: undefined,
+          subLang: "ai-zh",
+          subtitleAutocorrect: true,
+          autoProcess: true,
+        },
+      ]),
+    );
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(useDownloads.getState().order).toEqual(["d0", "d1", "d2"]);
   });
 
   it("toggles every episode with the 全选 / 全不选 button", async () => {
@@ -123,7 +171,7 @@ describe("PlaylistImportDialog", () => {
     expect(quality720).toBeChecked();
   });
 
-  it("lets you deselect episodes before importing", async () => {
+  it("only enqueues the episodes that stay selected", async () => {
     mockIpc.tools.probePlaylist.mockResolvedValue({
       title: "合集",
       episodes: [
@@ -131,27 +179,28 @@ describe("PlaylistImportDialog", () => {
         { url: "u2", title: "第二讲", duration_ms: null },
       ],
     });
-    mockIpc.tools.importBilibili.mockResolvedValue({ id: "v1" });
-    const { onStartProcessing } = renderDialog();
+    renderDialog();
 
     fireEvent.change(screen.getByLabelText("播放列表链接"), { target: { value: "u" } });
     fireEvent.click(screen.getByRole("button", { name: "枚举各集" }));
     await screen.findByText("合集");
 
-    // 取消勾选第二讲 → 只导入 1 个。
+    // 取消勾选第二讲 → 只入队 1 个。
     fireEvent.click(screen.getByText("第二讲"));
     fireEvent.click(screen.getByRole("button", { name: "导入 1 个" }));
 
-    await waitFor(() => expect(mockIpc.tools.importBilibili).toHaveBeenCalledTimes(1));
-    expect(mockIpc.tools.importBilibili).toHaveBeenCalledWith(
-      "c1",
-      "u1",
-      undefined,
-      "ai-zh",
-      true,
-      expect.any(Function),
+    await waitFor(() =>
+      expect(mockIpc.downloads.enqueue).toHaveBeenCalledWith("c1", [
+        {
+          url: "u1",
+          title: "第一讲",
+          maxHeight: undefined,
+          subLang: "ai-zh",
+          subtitleAutocorrect: true,
+          autoProcess: true,
+        },
+      ]),
     );
-    expect(onStartProcessing).toHaveBeenCalledTimes(1);
   });
 
   it("uses modal semantics, focuses the URL field, and closes on an outside pointer", async () => {
@@ -179,16 +228,16 @@ describe("PlaylistImportDialog", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
-  it("cannot close with Escape or an outside pointer while importing", async () => {
-    let finishImport!: (video: { id: string }) => void;
-    const importing = new Promise<{ id: string }>((resolve) => {
-      finishImport = resolve;
+  it("cannot close while the batch is being queued", async () => {
+    let finishEnqueue!: (jobs: DownloadJob[]) => void;
+    const enqueueing = new Promise<DownloadJob[]>((resolve) => {
+      finishEnqueue = resolve;
     });
     mockIpc.tools.probePlaylist.mockResolvedValue({
       title: "合集",
       episodes: [{ url: "u1", title: "第一讲", duration_ms: null }],
     });
-    mockIpc.tools.importBilibili.mockReturnValue(importing);
+    mockIpc.downloads.enqueue.mockReturnValue(enqueueing);
     const { onClose } = renderDialog();
 
     fireEvent.change(screen.getByLabelText("播放列表链接"), {
@@ -197,18 +246,14 @@ describe("PlaylistImportDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "枚举各集" }));
     await screen.findByText("合集");
     fireEvent.click(screen.getByRole("button", { name: "导入 1 个" }));
-    await screen.findByText(/正在导入 0 \/ 1/);
-    expect(
-      screen.getByRole("progressbar", { name: "播放列表导入进度" }),
-    ).toHaveAttribute("aria-valuenow", "0");
 
+    expect(await screen.findByRole("button", { name: "入队中…" })).toBeDisabled();
     fireEvent.keyDown(document, { key: "Escape" });
     fireEvent.pointerDown(screen.getByTestId("playlist-import-overlay"));
     expect(onClose).not.toHaveBeenCalled();
 
-    finishImport({ id: "v1" });
-    const result = await screen.findByText(/导入完成：成功 1 个/);
-    expect(result).toHaveAttribute("role", "status");
+    finishEnqueue([downloadJob("d1", "第一讲")]);
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
   it("announces URL-check failures and offers an in-place retry", async () => {
@@ -268,7 +313,7 @@ describe("PlaylistImportDialog", () => {
         ["u1", "u2"],
       ),
     );
-    expect(mockIpc.tools.importBilibili).not.toHaveBeenCalled();
+    expect(mockIpc.downloads.enqueue).not.toHaveBeenCalled();
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 });
