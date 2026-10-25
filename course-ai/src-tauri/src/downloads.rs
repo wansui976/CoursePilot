@@ -6,8 +6,9 @@
 //! （暂存目录会在下次入队时留给用户手动清理，不做跨重启续传）。
 
 use crate::commands::courses::AppState;
-use crate::error::AppResult;
-use crate::pipeline::download::DownloadEvent;
+use crate::commands::videos::{get_video, Video};
+use crate::error::{AppError, AppResult};
+use crate::pipeline::download::{DownloadEvent, DOWNLOAD_CANCELED_MESSAGE};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -77,6 +78,8 @@ struct JobSpec {
     sub_lang: Option<String>,
     subtitle_autocorrect: Option<bool>,
     auto_process: bool,
+    /// 另外把进度推到这个事件名（助手导入这类自己等结果的调用方）。
+    progress_event: Option<String>,
 }
 
 #[derive(Default)]
@@ -87,6 +90,8 @@ struct Inner {
     order: Vec<String>,
     tasks: HashMap<String, tauri::async_runtime::JoinHandle<()>>,
     batches: HashMap<String, Vec<String>>,
+    /// 等着某个任务结果的调用方（订阅、助手导入）：任务结束时收到视频 id 或错误。
+    waiters: HashMap<String, tokio::sync::oneshot::Sender<Result<String, String>>>,
 }
 
 pub struct DownloadQueue {
@@ -193,6 +198,82 @@ impl DownloadQueue {
         Some(job.clone())
     }
 
+    /// 把一批请求登记成排队中的任务（同一批共用一个 batch_id），返回快照。
+    fn register(
+        &self,
+        course_id: &str,
+        root_path: &str,
+        items: Vec<(DownloadRequest, Option<String>)>,
+    ) -> Vec<DownloadJob> {
+        let batch_id = Uuid::new_v4().to_string();
+        let mut inner = self.inner.lock().unwrap();
+        let mut created = Vec::new();
+        for (item, progress_event) in items {
+            let id = Uuid::new_v4().to_string();
+            let staging = PathBuf::from(root_path).join(".courseai-import").join(&id);
+            let title = if item.title.trim().is_empty() {
+                item.url.clone()
+            } else {
+                item.title.trim().to_string()
+            };
+            let job = DownloadJob {
+                id: id.clone(),
+                batch_id: batch_id.clone(),
+                course_id: course_id.to_string(),
+                url: item.url,
+                title,
+                status: "queued".into(),
+                downloaded: 0,
+                total: None,
+                speed: None,
+                eta: None,
+                retry_height: None,
+                error: None,
+                video_id: None,
+                attempt: 1,
+            };
+            inner.jobs.insert(id.clone(), job.clone());
+            inner.specs.insert(
+                id.clone(),
+                JobSpec {
+                    staging,
+                    max_height: item.max_height,
+                    sub_lang: item.sub_lang,
+                    subtitle_autocorrect: item.subtitle_autocorrect,
+                    auto_process: item.auto_process,
+                    progress_event,
+                },
+            );
+            inner.order.push(id.clone());
+            inner
+                .batches
+                .entry(batch_id.clone())
+                .or_default()
+                .push(id.clone());
+            created.push(job);
+        }
+        created
+    }
+
+    /// 任务已结束时，把结果交给等着它的调用方（见 `download_and_wait`）。
+    fn settle_waiter(&self, id: &str) {
+        let mut inner = self.inner.lock().unwrap();
+        let outcome = match inner.jobs.get(id) {
+            Some(job) if job.status == "done" => job
+                .video_id
+                .clone()
+                .ok_or_else(|| "下载完成但没有登记到视频".to_string()),
+            Some(job) if job.status == "failed" => {
+                Err(job.error.clone().unwrap_or_else(|| "下载失败".into()))
+            }
+            Some(job) if job.status == "canceled" => Err(DOWNLOAD_CANCELED_MESSAGE.into()),
+            _ => return,
+        };
+        if let Some(waiter) = inner.waiters.remove(id) {
+            let _ = waiter.send(outcome);
+        }
+    }
+
     /// 把一个任务标成已取消，交回它的后台任务句柄与暂存目录供调用方收拾。
     /// 已结束的、以及正在入库的（中途中止会留下只登记了一半的视频）返回 None。
     #[allow(clippy::type_complexity)]
@@ -290,7 +371,11 @@ async fn run_job(app: AppHandle, job_id: String) {
     let state = app.state::<AppState>();
     let progress_app = app.clone();
     let progress_id = job_id.clone();
+    let progress_event = spec.progress_event.clone();
     let on_event = move |event: DownloadEvent| {
+        if let Some(name) = &progress_event {
+            let _ = progress_app.emit(name, event.clone());
+        }
         let queue = progress_app.state::<DownloadQueue>();
         if let Some(updated) = queue.apply_event(&progress_id, event) {
             emit_job(&progress_app, &updated);
@@ -345,6 +430,7 @@ async fn run_job(app: AppHandle, job_id: String) {
         .unwrap()
         .tasks
         .remove(&job_id);
+    app.state::<DownloadQueue>().settle_waiter(&job_id);
     finish_batch(&app, &batch_id).await;
 }
 
@@ -497,72 +583,65 @@ pub async fn cmd_enqueue_downloads(
     if items.is_empty() {
         return Ok(Vec::new());
     }
+    let root_path = download_root(&state, &course_id).await?;
+    let created = app.state::<DownloadQueue>().register(
+        &course_id,
+        &root_path,
+        items.into_iter().map(|item| (item, None)).collect(),
+    );
+    start_jobs(&app, &created);
+    Ok(created)
+}
+
+/// 入队并等这一个任务结束，返回入库的视频。给需要拿到结果接着干活的调用方用
+/// （订阅自动导入、助手导入）：它们也排进同一个队列，受同一个并发上限约束，
+/// 在队列页看得到、取消得了。`progress_event` 给了时，进度另外推到这个事件名上。
+pub async fn download_and_wait(
+    app: &AppHandle,
+    course_id: String,
+    request: DownloadRequest,
+    progress_event: Option<String>,
+) -> AppResult<Video> {
+    let state = app.state::<AppState>();
+    let root_path = download_root(&state, &course_id).await?;
+    let queue = app.state::<DownloadQueue>();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let created = queue.register(&course_id, &root_path, vec![(request, progress_event)]);
+    {
+        let mut inner = queue.inner.lock().unwrap();
+        if let Some(job) = created.first() {
+            inner.waiters.insert(job.id.clone(), tx);
+        }
+    }
+    start_jobs(app, &created);
+    match rx.await {
+        Ok(Ok(video_id)) => get_video(&state.db, &video_id).await,
+        Ok(Err(message)) => Err(AppError::Pipeline(message)),
+        // 等待方被丢掉（任务记录被移除）：按取消处理。
+        Err(_) => Err(AppError::Pipeline(DOWNLOAD_CANCELED_MESSAGE.into())),
+    }
+}
+
+/// 下载要落到的课程目录；移动端不支持网络视频下载。
+async fn download_root(state: &AppState, course_id: &str) -> AppResult<String> {
     if is_mobile_os() {
-        return Err(crate::error::AppError::Config(
+        return Err(AppError::Config(
             "移动端暂不支持 B 站 / 网络视频下载，请先在桌面端导入后同步到移动端".into(),
         ));
     }
-    let root_path: String =
-        sqlx::query_scalar("SELECT root_path FROM courses WHERE id=? AND deleted_at IS NULL")
-            .bind(&course_id)
-            .fetch_optional(&state.db.pool)
-            .await?
-            .ok_or_else(|| crate::error::AppError::NotFound(format!("course {course_id}")))?;
+    sqlx::query_scalar("SELECT root_path FROM courses WHERE id=? AND deleted_at IS NULL")
+        .bind(course_id)
+        .fetch_optional(&state.db.pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("course {course_id}")))
+}
 
-    let batch_id = Uuid::new_v4().to_string();
-    let queue = app.state::<DownloadQueue>();
-    let mut created = Vec::new();
-    {
-        let mut inner = queue.inner.lock().unwrap();
-        for item in items {
-            let id = Uuid::new_v4().to_string();
-            let staging = PathBuf::from(&root_path).join(".courseai-import").join(&id);
-            let title = if item.title.trim().is_empty() {
-                item.url.clone()
-            } else {
-                item.title.trim().to_string()
-            };
-            let job = DownloadJob {
-                id: id.clone(),
-                batch_id: batch_id.clone(),
-                course_id: course_id.clone(),
-                url: item.url,
-                title,
-                status: "queued".into(),
-                downloaded: 0,
-                total: None,
-                speed: None,
-                eta: None,
-                retry_height: None,
-                error: None,
-                video_id: None,
-                attempt: 1,
-            };
-            inner.jobs.insert(id.clone(), job.clone());
-            inner.specs.insert(
-                id.clone(),
-                JobSpec {
-                    staging,
-                    max_height: item.max_height,
-                    sub_lang: item.sub_lang,
-                    subtitle_autocorrect: item.subtitle_autocorrect,
-                    auto_process: item.auto_process,
-                },
-            );
-            inner.order.push(id.clone());
-            inner
-                .batches
-                .entry(batch_id.clone())
-                .or_default()
-                .push(id.clone());
-            created.push(job);
-        }
+/// 推出入队快照并给每个任务起后台下载。
+fn start_jobs(app: &AppHandle, created: &[DownloadJob]) {
+    for job in created {
+        emit_job(app, job);
     }
-
-    for job in &created {
-        emit_job(&app, job);
-    }
-    for job in &created {
+    for job in created {
         let job_id = job.id.clone();
         let task_app = app.clone();
         let handle = tauri::async_runtime::spawn(async move {
@@ -580,7 +659,6 @@ pub async fn cmd_enqueue_downloads(
             inner.tasks.insert(job.id.clone(), handle);
         }
     }
-    Ok(created)
 }
 
 /// 取消一个下载（排队中或下载中）。已结束的任务是空操作。
@@ -589,6 +667,7 @@ pub async fn cmd_cancel_download(app: AppHandle, id: String) -> AppResult<()> {
     let Some((job, handle, staging)) = app.state::<DownloadQueue>().mark_canceled(&id) else {
         return Ok(());
     };
+    app.state::<DownloadQueue>().settle_waiter(&id);
     emit_job(&app, &job);
     if let Some(handle) = handle {
         handle.abort();
@@ -619,6 +698,7 @@ pub async fn cmd_cancel_all_downloads(app: AppHandle) -> AppResult<()> {
         let Some((job, handle, staging)) = queue.mark_canceled(&id) else {
             continue;
         };
+        queue.settle_waiter(&id);
         emit_job(&app, &job);
         if let Some(handle) = handle {
             handle.abort();
@@ -737,6 +817,53 @@ mod tests {
                 },
             )
             .is_none());
+    }
+
+    fn request(url: &str) -> DownloadRequest {
+        DownloadRequest {
+            url: url.into(),
+            title: String::new(),
+            max_height: None,
+            sub_lang: None,
+            subtitle_autocorrect: None,
+            auto_process: false,
+        }
+    }
+
+    #[test]
+    fn a_waiting_caller_gets_the_video_or_the_reason_it_did_not_arrive() {
+        let queue = DownloadQueue::default();
+        let jobs = queue.register(
+            "c1",
+            "/tmp/course",
+            vec![(request("u1"), None), (request("u2"), None)],
+        );
+        // 没给标题时用链接占位，同一批共用 batch_id。
+        assert_eq!(jobs[0].title, "u1");
+        assert_eq!(jobs[0].batch_id, jobs[1].batch_id);
+        let (done_tx, mut done_rx) = tokio::sync::oneshot::channel();
+        let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel();
+        {
+            let mut inner = queue.inner.lock().unwrap();
+            inner.waiters.insert(jobs[0].id.clone(), done_tx);
+            inner.waiters.insert(jobs[1].id.clone(), cancel_tx);
+        }
+
+        // 还没结束：不打扰等待方。
+        queue.settle_waiter(&jobs[0].id);
+        assert!(done_rx.try_recv().is_err());
+
+        queue.begin_import(&jobs[0].id);
+        queue.set_status(&jobs[0].id, "done", None, Some("v1".into()));
+        queue.settle_waiter(&jobs[0].id);
+        assert_eq!(done_rx.try_recv().unwrap(), Ok("v1".to_string()));
+
+        queue.mark_canceled(&jobs[1].id);
+        queue.settle_waiter(&jobs[1].id);
+        assert_eq!(
+            cancel_rx.try_recv().unwrap(),
+            Err(DOWNLOAD_CANCELED_MESSAGE.to_string())
+        );
     }
 
     #[test]

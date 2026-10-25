@@ -4,7 +4,7 @@ use crate::commands::videos::{add_local_video, Video};
 use crate::error::{AppError, AppResult};
 use crate::pipeline::{aliyun_ocr, deepseek_ocr, download, ocr};
 use std::path::{Path, PathBuf};
-use tauri::{Emitter, State};
+use tauri::State;
 
 const DEFAULT_OCR_LANGS: &str = "chi_sim+eng";
 
@@ -179,10 +179,11 @@ pub async fn cmd_ocr_region(
 }
 
 /// 下载 B 站 / URL 视频到课程目录并登记。可选清晰度上限与字幕轨。
+/// 排进后台下载队列并等它下完（助手导入用）；给了 `request_id` 时，
+/// 进度另外走 `url-import:<request_id>` 事件。
 #[tauri::command]
 pub async fn cmd_import_bilibili(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
     course_id: String,
     url: String,
     max_height: Option<u32>,
@@ -190,50 +191,18 @@ pub async fn cmd_import_bilibili(
     subtitle_autocorrect: Option<bool>,
     request_id: Option<String>,
 ) -> AppResult<Video> {
-    import_url(
-        app,
-        &state,
+    crate::downloads::download_and_wait(
+        &app,
         course_id,
-        url,
-        max_height,
-        sub_lang,
-        subtitle_autocorrect,
-        request_id,
-    )
-    .await
-}
-
-/// `cmd_import_bilibili` 的实现，订阅自动导入也走这里。
-/// 给了 `request_id` 时，下载进度走 `url-import:<request_id>` 事件。
-#[allow(clippy::too_many_arguments)]
-pub async fn import_url(
-    app: tauri::AppHandle,
-    state: &AppState,
-    course_id: String,
-    url: String,
-    max_height: Option<u32>,
-    sub_lang: Option<String>,
-    subtitle_autocorrect: Option<bool>,
-    request_id: Option<String>,
-) -> AppResult<Video> {
-    let event_name = request_id.map(|id| format!("url-import:{id}"));
-    let progress_app = app.clone();
-    let on_event = move |event: download::DownloadEvent| {
-        if let Some(name) = &event_name {
-            let _ = progress_app.emit(name, event);
-        }
-    };
-    import_url_with(
-        app,
-        state,
-        course_id,
-        url,
-        max_height,
-        sub_lang,
-        subtitle_autocorrect,
-        None,
-        &on_event,
-        &|| true,
+        crate::downloads::DownloadRequest {
+            url,
+            title: String::new(),
+            max_height,
+            sub_lang,
+            subtitle_autocorrect,
+            auto_process: false,
+        },
+        request_id.map(|id| format!("url-import:{id}")),
     )
     .await
 }

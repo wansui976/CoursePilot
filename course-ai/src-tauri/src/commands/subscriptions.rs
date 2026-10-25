@@ -59,14 +59,19 @@ async fn check_one(app: &tauri::AppHandle, subscription: &Subscription) -> AppRe
             .await
             .ok()
             .and_then(|probe| download::pick_default_track(&probe.tracks).map(|t| t.lang.clone()));
-        match crate::commands::tools::import_url(
-            app.clone(),
-            &state,
+        // 和手动导入排进同一个下载队列：受同一个并发上限约束，队列页看得到、取消得了。
+        match crate::downloads::download_and_wait(
+            app,
             subscription.course_id.clone(),
-            episode.url.clone(),
-            Some(AUTO_IMPORT_MAX_HEIGHT),
-            sub_lang,
-            None,
+            crate::downloads::DownloadRequest {
+                url: episode.url.clone(),
+                title: episode.title.clone(),
+                max_height: Some(AUTO_IMPORT_MAX_HEIGHT),
+                sub_lang,
+                subtitle_autocorrect: None,
+                // 处理由下面按订阅设置自己起，这里不让队列代劳。
+                auto_process: false,
+            },
             None,
         )
         .await
