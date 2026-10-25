@@ -26,6 +26,8 @@ pub struct NoteVersion {
 }
 
 type NoteRow = (Option<String>, Option<String>, Option<i64>, Option<i64>);
+/// note_versions 一行：id、content_json、content_md、edited_at、captured_at。
+type HistoryRow = (i64, Option<String>, Option<String>, Option<i64>, i64);
 
 fn pick_content(json: Option<String>, md: Option<String>) -> Option<String> {
     json.or(md).filter(|content| !content.trim().is_empty())
@@ -38,7 +40,12 @@ fn snapshot_time(path: &Path) -> Option<i64> {
     let digits = stem.rsplit('-').next()?;
     let date = NaiveDate::parse_from_str(digits.get(..8)?, "%Y%m%d").ok()?;
     let midnight = date.and_hms_opt(0, 0, 0)?;
-    Some(Local.from_local_datetime(&midnight).single()?.timestamp_millis())
+    Some(
+        Local
+            .from_local_datetime(&midnight)
+            .single()?
+            .timestamp_millis(),
+    )
 }
 
 async fn read_snapshot_note(path: &Path, video_id: &str) -> Option<NoteRow> {
@@ -80,7 +87,7 @@ pub async fn list_note_versions(
     }
 
     let mut versions = Vec::new();
-    let history: Vec<(i64, Option<String>, Option<String>, Option<i64>, i64)> = sqlx::query_as(
+    let history: Vec<HistoryRow> = sqlx::query_as(
         "SELECT id, content_json, content_md, edited_at, captured_at
          FROM note_versions WHERE video_id=? ORDER BY id DESC",
     )
@@ -88,7 +95,9 @@ pub async fn list_note_versions(
     .fetch_all(&db.pool)
     .await?;
     for (id, json, md, edited_at, captured_at) in history {
-        let Some(content) = pick_content(json, md) else { continue };
+        let Some(content) = pick_content(json, md) else {
+            continue;
+        };
         if !seen.insert(content.clone()) {
             continue;
         }
@@ -117,14 +126,19 @@ pub async fn list_note_versions(
             let Some((json, md, user, ai)) = read_snapshot_note(&path, video_id).await else {
                 continue;
             };
-            let Some(content) = pick_content(json, md) else { continue };
+            let Some(content) = pick_content(json, md) else {
+                continue;
+            };
             if !seen.insert(content.clone()) {
                 continue;
             }
             let edited_at = user.unwrap_or(0).max(ai.unwrap_or(0));
             let captured_at = snapshot_time(&path).unwrap_or(edited_at);
             versions.push(NoteVersion {
-                id: format!("b:{}", path.file_name().unwrap_or_default().to_string_lossy()),
+                id: format!(
+                    "b:{}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                ),
                 source: "backup",
                 edited_at: (edited_at > 0).then_some(edited_at),
                 captured_at,
@@ -133,7 +147,7 @@ pub async fn list_note_versions(
         }
     }
 
-    versions.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+    versions.sort_by_key(|version| std::cmp::Reverse(version.captured_at));
     Ok(versions)
 }
 
@@ -157,7 +171,9 @@ mod tests {
 
     async fn setup() -> (tempfile::TempDir, Db) {
         let dir = tempfile::tempdir().unwrap();
-        let db = Db::connect_and_migrate(&dir.path().join("test.db")).await.unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
         let course = crate::commands::courses::create_course(&db, "c".into(), "/tmp/c".into())
             .await
             .unwrap();
@@ -268,7 +284,9 @@ mod tests {
 
         save(&db, "{}").await;
 
-        let versions = list_note_versions(&db, Some(&snapshots), "v").await.unwrap();
+        let versions = list_note_versions(&db, Some(&snapshots), "v")
+            .await
+            .unwrap();
         // 留底与两份快照内容相同，只保留一份（最新的那条）。
         assert_eq!(versions.len(), 1);
         assert_eq!(versions[0].content, long("快照里的笔记"));
