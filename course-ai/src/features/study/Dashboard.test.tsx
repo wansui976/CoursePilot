@@ -187,7 +187,7 @@ describe("Dashboard", () => {
     expect(todayCell).toHaveClass(
       "rounded-[2px]",
       "outline-2",
-      "outline-[var(--accent-text)]",
+      "outline-[var(--text-strong)]",
       "focus-visible:ring-[var(--focus-ring)]",
     );
     expect(screen.queryByText("周一")).not.toBeInTheDocument();

@@ -5,9 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Brain,
   Check,
-  Clock,
   Play,
   Share2,
 } from "lucide-react";
@@ -54,14 +52,23 @@ const HEAT_GAP_PX = 4;
 // 覆盖热力图所需的历史范围（含今天所在周的补位），略放宽。
 const LOOKBACK_DAYS = HEATMAP_MAX_WEEKS * 7 + 7;
 
-// 热力图各强度等级的背景（level 0–4）；用主题主色的不同透明度，深浅主题都成立。
+// 热力图各强度等级的背景（level 0–4）：空白日是发丝线灰，有学习的日子用强调色的
+// 不同透明度。整体压浅一档，热力图是背景信息，不该是整页最抢眼的东西。
 const HEAT_LEVEL_BG = [
-  "bg-[var(--surface-card-active)]",
-  "bg-primary/30",
-  "bg-primary/50",
-  "bg-primary/75",
-  "bg-primary",
+  "bg-[var(--border-faint)]",
+  "bg-primary/20",
+  "bg-primary/40",
+  "bg-primary/65",
+  "bg-primary/90",
 ];
+
+// 平铺的列表与分区标题：不再每块装进一张带边框的白卡片，靠标题、留白和发丝线分组。
+const SECTION_TITLE = "mb-2 text-xs font-medium tracking-wide text-[var(--text-muted)]";
+const FLAT_LIST = "divide-y divide-[var(--border-faint)] border-y border-[var(--border-faint)]";
+const FLAT_ROW =
+  "group -mx-3 flex w-[calc(100%+1.5rem)] items-center gap-3 rounded-md px-3 py-3 text-left transition hover:bg-[var(--surface-card-hover)]";
+const ROW_ACTION =
+  "flex-none text-xs font-medium text-[var(--text-muted)] transition group-hover:text-[var(--text-strong)]";
 
 function weeksForViewport(width: number): number {
   if (width < 600) return HEATMAP_WEEKS.compact;
@@ -182,15 +189,11 @@ function HeatSquare({
         event.preventDefault();
         onNavigate(cell.day, offset);
       }}
-      // 达标日在格子中心点一个小白点：原先每个达标格都描一圈边、再压暗 20%，大多数日子
-      // 都达标时整片热力图变成一张描边网格。今天与选中格的描边保留。
-      className={`relative h-3 w-3 flex-none cursor-pointer rounded-[2px] ${HEAT_LEVEL_BG[cell.level]} transition-colors focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-card)] ${
-        reached
-          ? "after:absolute after:left-1/2 after:top-1/2 after:h-[3px] after:w-[3px] after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-white/75 after:content-['']"
-          : ""
-      } ${
+      // 达标与否写在格子的说明里（悬停 / 选中时下方显示），格子本身不再点小白点——
+      // 大多数日子都达标时，满屏的小点比描边网格还吵。今天与选中格保留描边。
+      className={`relative h-3 w-3 flex-none cursor-pointer rounded-[2px] ${HEAT_LEVEL_BG[cell.level]} transition-colors focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-app)] ${
         isToday
-          ? "outline outline-2 outline-offset-1 outline-[var(--accent-text)]"
+          ? "outline outline-2 outline-offset-1 outline-[var(--text-strong)]"
           : active
             ? "outline outline-1 outline-offset-1 outline-[var(--text-muted)]"
             : ""
@@ -468,12 +471,12 @@ export function Dashboard({
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
-        <div className="mx-auto max-w-3xl space-y-6">
+        <div className="mx-auto max-w-3xl space-y-9">
           {continueQuery.isError ? (
             <section aria-labelledby="dashboard-continue-title">
               <div
                 id="dashboard-continue-title"
-                className="mb-2 text-sm font-semibold text-[var(--text-strong)]"
+                className={SECTION_TITLE}
               >
                 {t("dashboard.continueLearning")}
               </div>
@@ -486,22 +489,20 @@ export function Dashboard({
             <section aria-labelledby="dashboard-continue-title">
               <div
                 id="dashboard-continue-title"
-                className="mb-2 text-sm font-semibold text-[var(--text-strong)]"
+                className={SECTION_TITLE}
               >
                 {t("dashboard.continueLearning")}
               </div>
-              <ul className="divide-y divide-[var(--border-faint)] overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)]">
+              <ul className={FLAT_LIST}>
                 {continueRows.map((row) => {
                   const { positionSec, ratio } = readPlaybackProgress(row.video_id);
                   return (
                     <li key={row.course_id}>
                       <button
                         onClick={() => onResume(row.course_id, row.video_id, positionSec)}
-                        className="group flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
+                        className={FLAT_ROW}
                       >
-                        <span className="grid h-9 w-9 flex-none place-items-center rounded-md bg-[var(--surface-card-hover)] text-[var(--text-muted)]">
-                <Play className="h-4 w-4" />
-              </span>
+                        <Play className="h-4 w-4 flex-none text-[var(--text-muted)]" />
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium text-[var(--text-strong)]">
                             {displayTitle(row.video_title)}
@@ -519,8 +520,8 @@ export function Dashboard({
                             </div>
                           )}
                         </div>
-                        {/* 行尾动作只用强调色文字表示，整行是点击区。 */}
-                        <span className="flex-none text-xs font-medium text-[var(--accent-text)]">
+                        {/* 行尾动作是灰字，悬停整行时才加深；整行是点击区。 */}
+                        <span className={ROW_ACTION}>
                           {ratio > 0 ? t("dashboard.continue") : t("dashboard.start")}
                         </span>
                       </button>
@@ -539,24 +540,22 @@ export function Dashboard({
               onRetry={() => void dueCountQuery.refetch()}
             />
           ) : dueCount > 0 ? (
+            // 整页唯一的实色主按钮：今天该复习了。
             <button
               onClick={() => setReviewing(true)}
-              className="flex w-full items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
+              className="group flex w-full items-center gap-4 border-y border-[var(--border-faint)] py-4 text-left"
             >
-              <span className="grid h-9 w-9 flex-none place-items-center rounded-md bg-[var(--surface-card-hover)] text-[var(--text-muted)]">
-                <Brain className="h-5 w-5" />
-              </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium text-[var(--text-strong)]">
+                <span className="block text-base font-semibold text-[var(--text-strong)]">
                   {t("dashboard.reviewDue", { count: dueCount })}
                 </span>
                 {reviewOutputLine && (
-                  <span className="block text-xs text-[var(--text-muted)]">
+                  <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
                     {reviewOutputLine}
                   </span>
                 )}
               </span>
-              <span className="ca-sheen flex-none rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white">
+              <span className="flex-none rounded-md bg-[var(--accent)] px-3.5 py-1.5 text-xs font-medium text-[var(--on-accent)] transition group-hover:bg-[var(--accent-press)] group-hover:text-[var(--on-accent-press)]">
                 {t("dashboard.startReview")}
               </span>
             </button>
@@ -569,10 +568,7 @@ export function Dashboard({
             />
           ) : (
             // 没有到期卡时不摆一个点不动的禁用按钮（读屏也读不到它）：改成说明下一批什么时候来。
-            <div className="flex w-full items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
-              <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-[var(--surface-card-active)] text-[var(--text-muted)]">
-                <Clock className="h-5 w-5" />
-              </span>
+            <div className="flex w-full items-center gap-3 border-y border-[var(--border-faint)] py-4">
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium text-[var(--text-strong)]">
                   {t("dashboard.noDueToday")}
@@ -602,21 +598,21 @@ export function Dashboard({
             <div
               role="group"
               aria-label={t("dashboard.stats")}
-              className="ca-dashboard-stats grid grid-cols-2 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] min-[400px]:grid-cols-3"
+              className="ca-dashboard-stats grid grid-cols-2 min-[400px]:grid-cols-3"
             >
             <section
               aria-label={t("dashboard.todayStudy")}
-              className="ca-dashboard-stat-today col-span-2 min-w-0 px-3 py-3 min-[400px]:col-span-1"
+              className="ca-dashboard-stat-today col-span-2 min-w-0 py-1 pr-4 min-[400px]:col-span-1"
             >
               <div className="flex min-h-7 items-center justify-between gap-1">
                 <span className="text-xs text-[var(--text-muted)]">{t("dashboard.todayStudy")}</span>
                 <DailyGoalDialog value={goalMin} onSave={saveGoal} />
               </div>
-              <div className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-strong)]">
+              <div className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-[var(--text-strong)]">
                 {formatDuration(todayWatched)}
               </div>
               {goalReached ? (
-                <div className="mt-1 flex items-center gap-1 text-xs font-medium text-[var(--accent-text)]">
+                <div className="mt-1 flex items-center gap-1 text-xs font-medium text-[var(--text-normal)]">
                   <Check className="h-3.5 w-3.5 flex-none" />
                   {t("dashboard.goalReached", { min: goalMin })}
                 </div>
@@ -628,7 +624,7 @@ export function Dashboard({
                 className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--surface-card-active)]"
               >
                 <div
-                  className={`h-full rounded-full ${goalReached ? "bg-[var(--accent-text)]" : "ca-fill-grad"}`}
+                  className="ca-fill-grad h-full rounded-full"
                   style={{ width: `${goalPercent}%` }}
                 />
               </div>
@@ -636,10 +632,10 @@ export function Dashboard({
 
             <section
               aria-label={t("dashboard.weekStudy")}
-              className="ca-dashboard-stat-week min-w-0 border-l border-[var(--border-subtle)] px-3 py-3 max-[399px]:border-l-0 max-[399px]:border-t"
+              className="ca-dashboard-stat-week min-w-0 border-l border-[var(--border-faint)] px-4 py-1 max-[399px]:mt-3 max-[399px]:border-l-0 max-[399px]:border-t max-[399px]:px-0 max-[399px]:pt-3"
             >
               <div className="min-h-7 text-xs leading-7 text-[var(--text-muted)]">{t("dashboard.weekStudy")}</div>
-              <div className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-strong)]">
+              <div className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-[var(--text-strong)]">
                 {formatDuration(week)}
               </div>
               <div className="mt-1 text-xs leading-tight text-[var(--text-muted)]">
@@ -649,10 +645,10 @@ export function Dashboard({
 
             <section
               aria-label={t("dashboard.streak")}
-              className="ca-dashboard-stat-streak min-w-0 border-l border-[var(--border-subtle)] px-3 py-3 max-[399px]:border-t"
+              className="ca-dashboard-stat-streak min-w-0 border-l border-[var(--border-faint)] px-4 py-1 max-[399px]:mt-3 max-[399px]:border-t max-[399px]:pt-3"
             >
               <div className="min-h-7 text-xs leading-7 text-[var(--text-muted)]">{t("dashboard.streak")}</div>
-              <div className="mt-1 flex items-center gap-1.5 text-lg font-semibold tabular-nums text-[var(--text-strong)]">
+              <div className="mt-1 flex items-center gap-1.5 text-2xl font-semibold tabular-nums tracking-tight text-[var(--text-strong)]">
                 {t("dashboard.streakDays", { days: streak })}
               </div>
               <div className="mt-1 text-xs leading-tight text-[var(--text-muted)]">
@@ -666,7 +662,7 @@ export function Dashboard({
             <section aria-labelledby="dashboard-weak-title">
               <div
                 id="dashboard-weak-title"
-                className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-[var(--text-strong)]"
+                className={SECTION_TITLE}
               >
                 {t("dashboard.weakTopics")}
               </div>
@@ -679,11 +675,11 @@ export function Dashboard({
             <section aria-labelledby="dashboard-weak-title">
               <div
                 id="dashboard-weak-title"
-                className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-[var(--text-strong)]"
+                className={SECTION_TITLE}
               >
                 {t("dashboard.weakTopics")}
               </div>
-              <ul className="divide-y divide-[var(--border-faint)] overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)]">
+              <ul className={FLAT_LIST}>
                 {weak.map((w) => (
                   <li key={`${w.course_id}-${w.concept_id}`}>
                     <button
@@ -694,7 +690,7 @@ export function Dashboard({
                           name: w.name,
                         })
                       }
-                      className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
+                      className={FLAT_ROW}
                     >
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium text-[var(--text-strong)]">
@@ -709,7 +705,7 @@ export function Dashboard({
                           })}
                         </div>
                       </div>
-                      <span className="flex-none text-xs font-medium text-[var(--accent-text)]">
+                      <span className={ROW_ACTION}>
                         {t("dashboard.reviewButton")}
                       </span>
                     </button>
@@ -720,9 +716,9 @@ export function Dashboard({
           ) : null}
 
           {!dailyQuery.isPending && !dailyQuery.isError && (
-            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
+            <section aria-label={t("dashboard.heatmap")}>
             <div className="mb-2 flex items-center justify-between">
-              <div className="text-sm font-semibold text-[var(--text-strong)]">{t("dashboard.heatmap")}</div>
+              <div className="text-xs font-medium tracking-wide text-[var(--text-muted)]">{t("dashboard.heatmap")}</div>
               <div className="flex items-center gap-1 ca-t-2xs text-[var(--text-faint)]">
                 <span>{t("dashboard.less")}</span>
                 {HEAT_LEVEL_BG.map((bg, i) => (
@@ -800,11 +796,11 @@ export function Dashboard({
                 ? heatCellLabel(activeHeatCell, goalMs > 0 && activeHeatCell.ms >= goalMs, t)
                 : t("dashboard.noRecords")}
             </div>
-            </div>
+            </section>
           )}
 
           <div>
-            <div className="mb-2 text-sm font-semibold text-[var(--text-strong)]">
+            <div className={SECTION_TITLE}>
               {t("dashboard.courses")}
             </div>
             {courseStatsFailed ? (
@@ -812,11 +808,11 @@ export function Dashboard({
             ) : courseStatsPending ? (
               <Skeleton aria-label={t("common.loading")} className="h-16 w-full rounded-xl" />
             ) : courseTotals.length === 0 ? (
-              <p className="rounded-lg border border-[var(--border-faint)] bg-[var(--surface-card)] px-4 py-6 text-center text-sm text-[var(--text-muted)]">
+              <p className="border-y border-[var(--border-faint)] py-6 text-center text-sm text-[var(--text-muted)]">
                 {t("dashboard.noStudyRecords")}
               </p>
             ) : (
-              <ul className="divide-y divide-[var(--border-faint)] overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)]">
+              <ul className={FLAT_LIST}>
                 {courseTotals.map((c) => {
                   const { watched, total } = completionOf(c.course_id);
                   const due = dueOf.get(c.course_id) ?? 0;
@@ -824,7 +820,7 @@ export function Dashboard({
                     <li key={c.course_id}>
                       <button
                         onClick={() => onOpenCourse(c.course_id)}
-                        className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)]"
+                        className={FLAT_ROW}
                       >
                         {total > 0 && (
                           <ProgressRing value={watched / total}>
@@ -844,7 +840,7 @@ export function Dashboard({
                           </div>
                         </div>
                         {due > 0 && (
-                          <span className="flex-none text-xs font-medium text-[var(--accent-text)]">
+                          <span className={ROW_ACTION}>
                             {t("dashboard.courseDue", { count: due })}
                           </span>
                         )}
