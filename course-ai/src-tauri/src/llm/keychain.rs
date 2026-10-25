@@ -45,6 +45,13 @@ trait Keyring {
 
     /// 删除；无条目视为成功。返回是否成功触及钥匙串。
     async fn delete(&self, account: &str) -> bool;
+
+    /// 是否有这一条（且非空）；`None` 同 `read`，表示钥匙串不可用。
+    async fn exists(&self, account: &str) -> Option<bool> {
+        self.read(account)
+            .await
+            .map(|value| value.is_some_and(|v| !v.is_empty()))
+    }
 }
 
 struct SystemKeyring;
@@ -121,6 +128,53 @@ impl Keyring for SystemKeyring {
             }
         }
     }
+
+    /// macOS 上只查条目属性、不取密码。取密码要过条目的访问控制：开发版是 ad-hoc 签名，
+    /// 每次重编代码哈希都变，系统不再认之前写入的条目，设置页每显示一项「已配置」
+    /// 就弹一次「course-ai 想使用钥匙串中的机密信息」。只查属性不触发授权。
+    #[cfg(target_os = "macos")]
+    async fn exists(&self, account: &str) -> Option<bool> {
+        if !keyring_enabled() {
+            return None;
+        }
+        let owned = account.to_owned();
+        let result = tokio::task::spawn_blocking(move || mac_item_exists(&owned)).await;
+        match result {
+            Ok(Ok(found)) => Some(found),
+            Ok(Err(err)) => {
+                tracing::warn!(%account, %err, "keyring lookup failed, falling back to settings");
+                None
+            }
+            Err(err) => {
+                tracing::warn!(%account, %err, "keyring lookup task panicked");
+                None
+            }
+        }
+    }
+}
+
+/// 与 `keyring` 的 macOS 后端查同一处：用户域默认钥匙串里 service + account 对上的通用密码。
+#[cfg(target_os = "macos")]
+fn mac_item_exists(account: &str) -> Result<bool, security_framework::base::Error> {
+    use security_framework::item::{ItemClass, ItemSearchOptions, Limit};
+    use security_framework::os::macos::keychain::{SecKeychain, SecPreferencesDomain};
+    // errSecItemNotFound
+    const ITEM_NOT_FOUND: i32 = -25300;
+
+    let keychain = SecKeychain::default_for_domain(SecPreferencesDomain::User)?;
+    let found = ItemSearchOptions::new()
+        .class(ItemClass::generic_password())
+        .keychains(&[keychain])
+        .service(KEYRING_SERVICE)
+        .account(account)
+        .load_attributes(true)
+        .limit(Limit::Max(1))
+        .search();
+    match found {
+        Ok(items) => Ok(!items.is_empty()),
+        Err(err) if err.code() == ITEM_NOT_FOUND => Ok(false),
+        Err(err) => Err(err),
+    }
 }
 
 /// 写进钥匙串并清掉表内明文；钥匙串写不进就落到表里。
@@ -154,6 +208,18 @@ async fn read_secret(keyring: &impl Keyring, db: &Db, account: &str) -> AppResul
         .filter(|v| !v.is_empty()))
 }
 
+/// 只判断有没有、不取密钥本身（理由见 `SystemKeyring::exists`），供设置页显示「已配置」。
+/// 表内明文的搬迁留给真正读取时做。
+async fn has_secret(keyring: &impl Keyring, db: &Db, account: &str) -> AppResult<bool> {
+    if get_setting(db, account)
+        .await?
+        .is_some_and(|v| !v.is_empty())
+    {
+        return Ok(true);
+    }
+    Ok(keyring.exists(account).await.unwrap_or(false))
+}
+
 /// 钥匙串条目和表内残留一并清理。
 async fn delete_secret(keyring: &impl Keyring, db: &Db, account: &str) -> AppResult<()> {
     keyring.delete(account).await;
@@ -173,7 +239,7 @@ pub async fn get_api_key(db: &Db, profile_id: &str) -> AppResult<Option<String>>
 }
 
 pub async fn has_api_key(db: &Db, profile_id: &str) -> AppResult<bool> {
-    Ok(get_api_key(db, profile_id).await?.is_some())
+    has_secret(&SystemKeyring, db, &key_setting(profile_id)).await
 }
 
 /// 删除指定 profile 的密钥。
@@ -196,6 +262,16 @@ pub async fn set_secret(db: &Db, name: &str, value: &str) -> AppResult<()> {
 
 pub async fn get_secret(db: &Db, name: &str) -> AppResult<Option<String>> {
     read_secret(&SystemKeyring, db, &secret_setting(name)).await
+}
+
+/// `get_secret_or_legacy` 是否有值，但不取密钥本身。
+pub async fn has_secret_or_legacy(db: &Db, name: &str) -> AppResult<bool> {
+    if has_secret(&SystemKeyring, db, &secret_setting(name)).await? {
+        return Ok(true);
+    }
+    Ok(get_setting(db, name)
+        .await?
+        .is_some_and(|v| !v.trim().is_empty()))
 }
 
 /// 优先读密钥存储；旧版本可能把明文存在同名设置里，作兼容回退。
@@ -411,6 +487,28 @@ mod tests {
         );
         assert_eq!(keyring.entry("llm_key_p1"), Some("sk-new".into()));
         assert_eq!(stored(&db, "llm_key_p1").await, None);
+    }
+
+    #[tokio::test]
+    async fn has_secret_sees_keyring_and_fallback_without_moving_plaintext() {
+        let (_dir, db) = test_db().await;
+        let keyring = MemoryKeyring::default();
+        assert!(!has_secret(&keyring, &db, "secret_ocr").await.unwrap());
+
+        write_secret(&keyring, &db, "secret_ocr", "sk-ocr")
+            .await
+            .unwrap();
+        assert!(has_secret(&keyring, &db, "secret_ocr").await.unwrap());
+
+        // 落在表里的也算；只查不搬，明文留给真正读取时搬进钥匙串。
+        keyring.set_read_only(true);
+        write_secret(&keyring, &db, "llm_key_p1", "sk-a")
+            .await
+            .unwrap();
+        keyring.set_read_only(false);
+        assert!(has_secret(&keyring, &db, "llm_key_p1").await.unwrap());
+        assert_eq!(keyring.entry("llm_key_p1"), None);
+        assert_eq!(stored(&db, "llm_key_p1").await, Some("sk-a".into()));
     }
 
     #[tokio::test]

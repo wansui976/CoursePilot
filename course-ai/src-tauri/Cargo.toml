@@ -38,6 +38,11 @@ uuid = { version = "1", features = ["v4", "serde"] }
 which = "6"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
+# 只查钥匙串条目在不在、不取密码：开发版每次重编签名都变，取密码会弹钥匙串授权框。
+# 与 keyring 的 macOS 后端同一个大版本。
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"
 # 本地 Whisper 认中文常吐繁体，转成简体用（只在桌面上跑 Whisper；只带繁→简词库）。
