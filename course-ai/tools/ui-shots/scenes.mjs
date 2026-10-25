@@ -145,6 +145,20 @@ export const scenes = [
     },
   },
   {
+    name: "take-note",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await openVideo(page);
+      // 「记一笔」：按 N → 暂停、切到笔记、末尾插入当前时间，光标停在后面。
+      await page.locator("body").click({ position: { x: 5, y: 5 } }).catch(() => {});
+      await page.keyboard.press("n");
+      // 等笔记装载完、时间戳插进去、光标就位，再接着写。
+      await page.locator(".tiptap-notes:focus").waitFor({ timeout: 5000 }).catch(() => {});
+      await page.keyboard.type("这里是梯度下降的关键一步");
+      await shot();
+    },
+  },
+  {
     name: "assistant",
     devices: ALL,
     run: async ({ page, shot }) => {
