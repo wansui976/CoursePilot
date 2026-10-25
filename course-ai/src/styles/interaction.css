@@ -15,6 +15,27 @@ a,
   touch-action: manipulation;
 }
 
+/* 开关（.ca-switch）的 44px 触摸区：药丸本体只有 38×22，是「控件长相即尺寸」的少数派。
+   别处用 ca-touch-44 靠 min-width/min-height 撑命中区，放到开关上会把药丸拉成 44×44 的
+   圆——触屏上开与关都成了一个带白点的圆球，既不像开关，也看不出哪边是开。
+   命中区改用居中的透明伪元素补足：视觉仍是 38×22，手指的落点仍是 44×44。
+   伪元素铺在按钮盒外 3px（横向）与 11px（纵向），仍在设置行的内边距里，不会被分组卡片
+   的 overflow:hidden 裁掉，也不会压到下一行。 */
+.ca-switch {
+  position: relative;
+}
+
+.ca-switch::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+  border-radius: 9999px;
+}
+
 /* 流式状态文字的轻呼吸：比再加一个转圈安静，也让「还活着」可感知。
    只动 opacity，走合成器；减动效由全局兜底压平。 */
 @keyframes ca-pulse-soft {

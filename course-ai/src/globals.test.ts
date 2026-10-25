@@ -306,4 +306,17 @@ describe("阴影与过渡的写法约束", () => {
 
     expect(offenders.map((file) => file.replace(resolve("src"), ""))).toEqual([]);
   });
+
+  it("开关的触摸区靠伪元素补足，不会把药丸撑成圆", () => {
+    // 开关是「控件长相即尺寸」的少数派：ca-touch-44 的 min-width/min-height 会把 38×22
+    // 的药丸拉成 44×44 的圆（触屏上开与关都成了带白点的圆球，像单选按钮）。
+    // 命中区必须来自居中的透明伪元素，且两个方向都不小于 44px。
+    const hit = css.match(/^\.ca-switch::after\s*\{[\s\S]*?\n\}/m)?.[0] ?? "";
+    expect(hit).toMatch(/width:\s*44px/);
+    expect(hit).toMatch(/height:\s*44px/);
+    // 居中：药丸视觉尺寸不变，命中区四周对称外扩，不会偏向一侧。
+    expect(hit).toMatch(/top:\s*50%/);
+    expect(hit).toMatch(/left:\s*50%/);
+    expect(hit).toMatch(/translate\(\s*-50%\s*,\s*-50%\s*\)/);
+  });
 });
