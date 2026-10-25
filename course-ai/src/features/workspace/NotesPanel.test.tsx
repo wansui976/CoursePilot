@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NotesPanel } from "./NotesPanel";
 import { readVideoResumeState } from "@/lib/resumeState";
 import { useTimestampPrefs } from "@/stores/timestampPrefs";
@@ -555,12 +555,18 @@ describe("NotesPanel", () => {
   });
 
   describe("粘贴", () => {
-    function paste(data: { text?: string; html?: string; files?: File[] }) {
+    function paste(data: {
+      text?: string;
+      html?: string;
+      files?: File[];
+      items?: { kind: string; type: string; getAsFile: () => File | null }[];
+    }) {
       return editorCapture.editorProps!.handlePaste!(null, {
         clipboardData: {
           getData: (type: string) =>
             type === "text/plain" ? (data.text ?? "") : type === "text/html" ? (data.html ?? "") : "",
           files: data.files ?? [],
+          items: data.items ?? [],
         },
       });
     }
@@ -584,6 +590,18 @@ describe("NotesPanel", () => {
       expect(insertBlocks.mock.calls[0][1]).toEqual([
         { type: "image", attrs: { src: "note-image:a", width: 10, height: 5, alt: null } },
       ]);
+    });
+
+    it("剪贴板只把图放进 items（WKWebView / Safari 粘贴截图）时也能贴进去", async () => {
+      storeNoteImage.mockResolvedValue({ src: "note-image:b", width: 10, height: 5 });
+      renderNotesPanel("video-1", "paste-items");
+      await screen.findByText("笔记正文");
+      const png = new File(["x"], "shot.png", { type: "image/png" });
+
+      expect(paste({ items: [{ kind: "file", type: "image/png", getAsFile: () => png }] })).toBe(true);
+
+      await waitFor(() => expect(insertBlocks).toHaveBeenCalledTimes(1));
+      expect(storeNoteImage).toHaveBeenCalledWith("video-1", png);
     });
 
     it("纯文本的 Markdown 转成格式；带 HTML 的交给编辑器默认处理", async () => {
@@ -610,6 +628,50 @@ describe("NotesPanel", () => {
 
       expect(await screen.findByRole("alert")).toHaveTextContent("图片太大");
       expect(insertBlocks).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("键盘弹出", () => {
+    // jsdom 没有 visualViewport：按 iOS 的样子造一个——布局视口 800 不变，视觉视口矮到 400。
+    function withKeyboard(height: number) {
+      const viewport = {
+        height,
+        offsetTop: 0,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      };
+      Object.defineProperty(window, "visualViewport", { configurable: true, value: viewport });
+      vi.stubGlobal("innerHeight", 800);
+    }
+
+    afterEach(() => {
+      Reflect.deleteProperty(window, "visualViewport");
+      vi.unstubAllGlobals();
+    });
+
+    it("格式条改成固定在键盘上沿，并留出等高的占位，正文不上跳", async () => {
+      withKeyboard(400);
+      renderNotesPanel("video-1", "keyboard-dock");
+      await screen.findByText("笔记正文");
+
+      const bar = document.querySelector("[data-notes-bar]") as HTMLElement;
+      await waitFor(() => expect(bar.style.position).toBe("fixed"));
+      expect(bar).toHaveAttribute("data-docked");
+      expect(bar.style.bottom).toBe("400px");
+      // 宽度跟着笔记面板走，不是整个窗口。
+      expect(bar.style.width).not.toBe("");
+      expect(bar.previousElementSibling).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("没有键盘时保持原来的布局（不动 position）", async () => {
+      withKeyboard(800);
+      renderNotesPanel("video-1", "keyboard-none");
+      await screen.findByText("笔记正文");
+
+      const bar = document.querySelector("[data-notes-bar]") as HTMLElement;
+      expect(bar).not.toHaveAttribute("data-docked");
+      expect(bar.style.position).toBe("");
+      expect(bar.previousElementSibling).toBeNull();
     });
   });
 });

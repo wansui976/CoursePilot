@@ -81,6 +81,8 @@ async fn handle(mut stream: TcpStream, registry: Registry) -> std::io::Result<()
         }
     }
 
+    // URL 上可能带 ?v=…（文件换了要换 URL 才会重新加载），查询串不参与 id 匹配。
+    let target = target.split('?').next().unwrap_or(target);
     let id = target.strip_prefix("/m/").unwrap_or("");
     let path = registry.lock().unwrap().get(id).cloned();
     let Some(path) = path else {

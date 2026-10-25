@@ -68,6 +68,14 @@ export const videos = {
     invoke("cmd_cancel_crop_detect", { videoId }),
   mediaUrl: (videoId: string): Promise<string> =>
     invoke("cmd_media_url", { videoId }),
+  // 视频轨的编码四字码（avc1 / hvc1 / av01 …）。只在播放失败后问一次，用来解释原因。
+  codec: (videoId: string): Promise<string | null> =>
+    invoke("cmd_video_codec", { videoId }),
+  // 端上转码进度（只 iOS 有）：idle / running / done / failed。
+  transcodeStatus: (videoId: string): Promise<{ state: string; percent: number }> =>
+    invoke("cmd_transcode_status", { videoId }),
+  startTranscode: (videoId: string): Promise<{ state: string; percent: number }> =>
+    invoke("cmd_start_transcode", { videoId }),
   // 原始二进制（后端 ipc::Response），不是 JSON 数字数组。
   cover: (videoId: string): Promise<ArrayBuffer> =>
     invoke("cmd_video_cover", { videoId }),

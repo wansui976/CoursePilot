@@ -78,10 +78,11 @@ use crate::commands::translate::{
 };
 use crate::commands::videos::{
     cmd_add_local_batch, cmd_add_local_video, cmd_cancel_crop_detect, cmd_delete_video,
-    cmd_ensure_crop, cmd_ensure_playable, cmd_list_trash, cmd_list_videos, cmd_media_url,
+    cmd_ensure_crop, cmd_ensure_playable, cmd_list_trash, cmd_list_videos, cmd_media_url, cmd_video_codec,
     cmd_purge_trash, cmd_purge_video, cmd_reorder_videos, cmd_restore_video, cmd_scan_folder,
     cmd_update_video_title, cmd_video_cover,
 };
+use crate::commands::transcode::{cmd_start_transcode, cmd_transcode_status};
 use crate::commands::whisper::{cmd_download_whisper_model, cmd_list_whisper_models};
 use crate::db::Db;
 use crate::dev_log::{cmd_clear_dev_logs, cmd_get_dev_logs};
@@ -202,6 +203,18 @@ pub fn run() {
                         tracing::warn!("resume CloudKit transport probe failed: {error}");
                     }
                 });
+                handle.manage(std::sync::Arc::new(
+                    crate::commands::transcode::TranscodeJobs::default(),
+                ));
+                // 调试用：Documents/transcode-now.txt 里写一个 video_id，启动时就转它。
+                // 真机验证转码链路时用——否则每改一版都要人拿手指点一次视频。
+                #[cfg(all(target_os = "ios", debug_assertions))]
+                {
+                    let probe_handle = handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        crate::commands::transcode::run_debug_trigger(&probe_handle).await;
+                    });
+                }
                 let media = crate::media_server::start()
                     .await
                     .expect("media server start");
@@ -257,6 +270,9 @@ pub fn run() {
             cmd_ensure_crop,
             cmd_cancel_crop_detect,
             cmd_media_url,
+            cmd_video_codec,
+            cmd_transcode_status,
+            cmd_start_transcode,
             cmd_video_cover,
             cmd_set_setting,
             cmd_get_setting,

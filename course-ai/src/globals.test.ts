@@ -296,6 +296,22 @@ describe("阴影与过渡的写法约束", () => {
     expect(sheen).not.toMatch(/box-shadow:/);
   });
 
+  it("分隔条的触摸热区足够宽，发丝线本身仍是 1px", () => {
+    // 触屏上没有鼠标的 1px 精度：热区来自透明伪元素，必须比线宽得多。
+    const line = css.match(/^\.ca-resizer\s*\{[\s\S]*?\n\}/m)?.[0] ?? "";
+    expect(line).toMatch(/width:\s*1px/);
+
+    const coarse = css.match(
+      /@media\s*\(pointer:\s*coarse\)[^{]*\{[\s\S]*?\.ca-resizer::after\s*\{([\s\S]*?)\}/,
+    )?.[1] ?? "";
+    const reach = Math.abs(Number(coarse.match(/left:\s*(-?\d+)px/)?.[1] ?? 0));
+    expect(reach).toBeGreaterThanOrEqual(10);
+    // 1px 的线 + 两侧各伸出 reach：触控靶至少 24px。
+    expect(1 + reach * 2).toBeGreaterThanOrEqual(24);
+    // 条件里必须有 any-pointer：iPad 接触控板时 pointer 是 fine，只写 pointer 会让手指拿不到热区。
+    expect(css).toMatch(/@media[^{]*\(any-pointer:\s*coarse\)[^{]*\{[\s\S]*?\.ca-resizer::after/);
+  });
+
   it("不用 transition-all", () => {
     // transition-all 会把「所有」属性都纳入过渡，包括 width/height 这类触发重排的。
     // 进度条正是这么写的：宽度由内联样式驱动，每帧都要重排一次父容器。

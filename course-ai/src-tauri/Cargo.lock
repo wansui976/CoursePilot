@@ -613,6 +613,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "keyring",
+ "libc",
  "objc2",
  "objc2-foundation",
  "objc2-vision",

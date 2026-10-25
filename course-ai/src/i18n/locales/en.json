@@ -194,7 +194,14 @@
       "none": "None",
       "translucent": "Soft",
       "solid": "Solid"
-    }
+    },
+    "decodeFailedTitle": "This video cannot play on this device",
+    "decodeFailedCodec": "The video track is {{codec}}, which this device's WebView cannot decode. This is common for downloads from Bilibili: they play on a Mac but not on older iPads/iPhones. Use an H.264 version, or transcode it on the Mac and sync that.",
+    "decodeFailedGeneric": "The video codec is unsupported, or the file is damaged. Try downloading it again, or open it on the Mac to check.",
+    "transcoding": "Transcoding on this device… {{percent}}%",
+    "transcodeFailed": "On-device transcoding failed. You can try again.",
+    "transcodeRetry": "Retry transcoding",
+    "transcodeDone": "Transcoding finished, opening…"
   },
   "morePanel": {
     "quiz": "Quiz",

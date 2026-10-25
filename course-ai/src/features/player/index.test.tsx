@@ -23,6 +23,9 @@ vi.mock("@/lib/ipc", () => ({
         detecting: false,
       }),
       cancelCropDetect: vi.fn().mockResolvedValue(undefined),
+      codec: vi.fn().mockResolvedValue("av01"),
+      transcodeStatus: vi.fn().mockResolvedValue({ state: "idle", percent: 0 }),
+      startTranscode: vi.fn().mockResolvedValue({ state: "running", percent: 1 }),
     },
   },
 }));
@@ -60,11 +63,62 @@ function renderPlayer(
 
 beforeEach(async () => {
   platform.mobile = true;
+  (ipc.videos.transcodeStatus as unknown as { mockResolvedValue: (v: unknown) => void })
+    .mockResolvedValue({ state: "idle", percent: 0 });
   await i18n.changeLanguage("zh-CN");
   localStorage.removeItem("course-ai-playback-rate");
 });
 
 describe("VideoPlayer iOS gestures", () => {
+  it("有画面轨却解出 0×0 时，不伪装成纯音频，而是说明编码", async () => {
+    (ipc.videos.codec as unknown as { mockResolvedValue: (v: string) => void }).mockResolvedValue("av01");
+    renderPlayer();
+    const video = document.querySelector("video")!;
+    Object.defineProperty(video, "videoWidth", { configurable: true, value: 0 });
+    Object.defineProperty(video, "videoHeight", { configurable: true, value: 0 });
+    Object.defineProperty(video, "duration", { configurable: true, value: 10 });
+
+    await act(async () => {
+      fireEvent.loadedMetadata(video);
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("av01");
+    expect(screen.queryByText("纯音频")).not.toBeInTheDocument();
+  });
+
+  it("解码失败后如果后端在转码，卡片改成显示进度", async () => {
+    (ipc.videos.transcodeStatus as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ state: "running", percent: 42 });
+    renderPlayer();
+    const video = document.querySelector("video")!;
+    Object.defineProperty(video, "error", { configurable: true, value: { code: 4 } });
+
+    await act(async () => {
+      fireEvent.error(video);
+    });
+
+    expect(await screen.findByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
+    expect(await screen.findByRole("alert")).toHaveTextContent("正在本机转码");
+  });
+
+  it("解码失败时把编码说出来，而不是留一块黑屏", async () => {
+    renderPlayer();
+    const video = document.querySelector("video")!;
+    Object.defineProperty(video, "error", {
+      configurable: true,
+      value: { code: 4, message: "" },
+    });
+
+    await act(async () => {
+      fireEvent.error(video);
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("放不出来");
+    expect(alert).toHaveTextContent("av01");
+  });
+
   it("expands the uncropped video element to every stage edge", () => {
     renderPlayer(false);
 

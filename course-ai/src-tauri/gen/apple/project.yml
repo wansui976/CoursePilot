@@ -61,20 +61,25 @@ targets:
           NSAllowsLocalNetworking: true
         UIBackgroundModes:
           - remote-notification
+    # 不声明 iCloud / 远程推送能力：代码里没有用到（云同步走自己的传输，通知是本地的），
+    # 而个人开发团队根本签不了这两项——带着它们连真机都装不上：
+    #   "Personal development teams ... do not support the Push Notifications and iCloud capabilities"
+    # 以后真要用 CloudKit 再往这里加回来。
     entitlements:
       path: course-ai_iOS/course-ai_iOS.entitlements
-      properties:
-        aps-environment: $(APS_ENVIRONMENT)
-        com.apple.developer.icloud-container-identifiers:
-          - iCloud.dev.courseai.app
-        com.apple.developer.icloud-services:
-          - CloudKit
+      properties: {}
     scheme:
       environmentVariables:
         RUST_BACKTRACE: full
         RUST_LOG: info
     settings:
       base:
+        # dav1d（AV1 软件解码）静态库：iOS 不允许 sidecar 可执行文件，只能链进来。
+        # 库路径走 -L 而不是 LIBRARY_SEARCH_PATHS——下面带 [arch=...] 的条目会盖掉通用值。
+        HEADER_SEARCH_PATHS: $(inherited) $(SRCROOT)/vendor/dav1d/include
+        OTHER_LDFLAGS: $(inherited) -L$(SRCROOT)/vendor/dav1d/lib -ldav1d
+        SWIFT_OBJC_BRIDGING_HEADER: $(SRCROOT)/Sources/course-ai/Dav1dProbe-Bridging-Header.h
+        SWIFT_VERSION: "5.0"
         ENABLE_BITCODE: false
         ARCHS: [arm64]
         VALID_ARCHS: arm64 

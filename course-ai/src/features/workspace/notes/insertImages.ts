@@ -22,8 +22,33 @@ export async function storeNoteImage(videoId: string, input: Blob): Promise<Stor
   return { src: saved.src, width: prepared.width, height: prepared.height };
 }
 
-export function imageFiles(list: FileList | null | undefined): File[] {
+export function imageFiles(list: ArrayLike<File> | null | undefined): File[] {
   return Array.from(list ?? []).filter((file) => file.type.startsWith("image/"));
+}
+
+/** 剪贴板 / 拖放数据的结构：粘贴事件给 ClipboardEvent.clipboardData，拖放给 DragEvent.dataTransfer。 */
+interface Transfer {
+  files?: ArrayLike<File> | null;
+  items?: ArrayLike<Pick<DataTransferItem, "kind" | "getAsFile">> | null;
+}
+
+/**
+ * 从剪贴板 / 拖放的数据里取图片文件。
+ *
+ * WebKit（Tauri 的 WKWebView、Safari）粘贴截图时，图有时只进 items、files 是空的；
+ * 从访达 / 相册拖进来的也一样。只读 files 的表现就是「粘贴了没反应」——两边都取一遍。
+ */
+export function imageFilesFromTransfer(data: Transfer | null | undefined): File[] {
+  if (!data) return [];
+  const direct = imageFiles(data.files);
+  if (direct.length) return direct;
+  const fromItems: File[] = [];
+  for (const item of Array.from(data.items ?? [])) {
+    if (item.kind !== "file") continue;
+    const file = item.getAsFile();
+    if (file && file.type.startsWith("image/")) fromItems.push(file);
+  }
+  return fromItems;
 }
 
 /**

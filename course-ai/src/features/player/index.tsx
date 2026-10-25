@@ -120,11 +120,14 @@ export function VideoPlayer({
   videoId,
   immersive = false,
   onFullscreenChange,
+  onTranscoded,
 }: {
   src: string;
   videoId: string;
   immersive?: boolean;
   onFullscreenChange?: (fullscreen: boolean) => void;
+  /** 本机转码完成：外层重新取一次 mediaUrl（此刻 data_dir 里已经有 playable.mp4）。 */
+  onTranscoded?: () => void;
 }) {
   const { t } = useTranslation();
   const regionRef = useRef<HTMLDivElement>(null);
@@ -136,7 +139,16 @@ export function VideoPlayer({
   const [playing, setPlaying] = useState(false);
   // 纯音频源（播客、本地音频导入）：没有画面，舞台换成音频卡片而不是一整块空白。
   const [audioOnly, setAudioOnly] = useState(false);
-  useEffect(() => setAudioOnly(false), [src]);
+  // 解码不了时把原因说出来。以前这里什么都不做：AV1 之类 WKWebView 解不了的编码
+  // （老款 iPad / iPhone）就是一块黑屏，用户不知道是文件坏了还是设备不行。
+  const [decodeFailure, setDecodeFailure] = useState<string | null>(null);
+  // 端上转码进度（只 iOS 会真有这个状态）。解码失败后开始轮询：
+  // 后端在 cmd_media_url 里已经点火，这里只负责显示进度和转完后的刷新。
+  const [transcode, setTranscode] = useState<{ state: string; percent: number } | null>(null);
+  useEffect(() => {
+    setAudioOnly(false);
+    setDecodeFailure(null);
+  }, [src]);
   // 把「播放中时长」记入学习事件日志（供仪表盘统计 / 间隔重复排期）。
   useWatchLogger(videoId, playing);
   // 「记一笔」（快捷键或笔记面板的按钮）：先暂停，写字时视频别往前跑。
@@ -154,6 +166,31 @@ export function VideoPlayer({
     if (!videoId) return;
     return () => syncPlaybackProgress(videoId);
   }, [videoId]);
+  useEffect(() => {
+    if (decodeFailure === null) return;
+    let cancelled = false;
+    let timer = 0;
+    const tick = async () => {
+      try {
+        const status = await ipc.videos.transcodeStatus(videoId);
+        if (cancelled) return;
+        setTranscode(status);
+        if (status.state === "done") {
+          onTranscoded?.();
+          return;
+        }
+      } catch {
+        // 转码状态拿不到就当没有转码，不影响播放本身。
+      }
+      if (!cancelled) timer = window.setTimeout(tick, 1000);
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [decodeFailure, videoId, onTranscoded]);
+
   const [rate, setRate] = useState(loadPlaybackRate);
   const silenceSkip = useSilenceSkip(videoId);
   const [volume, setVolume] = useState(1);
@@ -920,11 +957,32 @@ export function VideoPlayer({
                 }
               }
             }}
+            onError={(event) => {
+              // code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED：这类失败九成是编码问题，
+              // 问一下后端这条片到底是什么编码，好让提示能落地。
+              const code = event.currentTarget.error?.code;
+              if (code !== 4 && event.currentTarget.error != null) return;
+              setDecodeFailure("");
+              void ipc.videos
+                .codec(videoId)
+                .then((codec) => setDecodeFailure(codec ?? "unknown"))
+                .catch(() => setDecodeFailure("unknown"));
+            }}
             onLoadedMetadata={(event) => {
               const video = event.currentTarget;
               // 记录视频固有比例，去黑边的 stageBox 要靠它做等比缩放。
               markMetadata(video.videoWidth, video.videoHeight);
               setAudioOnly(video.videoWidth === 0 && video.videoHeight === 0);
+              // 有画面轨却解出来 0×0：WKWebView 遇到不支持的编码（AV1、hev1 封装的 HEVC）
+              // 就是这样，不是纯音频。问一下编码把原因说出来，别退化成「音频」卡片。
+              if (video.videoWidth === 0 && video.videoHeight === 0) {
+                void ipc.videos
+                  .codec(videoId)
+                  .then((codec) => {
+                    if (codec) setDecodeFailure(codec);
+                  })
+                  .catch(() => undefined);
+              }
               // 某些 WebKit 版本在资源加载后才重置速率；metadata 到达时再兜底应用一次。
               video.defaultPlaybackRate = effectiveRate;
               video.playbackRate = effectiveRate;
@@ -1044,6 +1102,50 @@ export function VideoPlayer({
                   t("videoPlayer.fastForwarding", { rate: gestureHint.value })}
                 {gestureHint.kind === "rewind" && t("videoPlayer.rewinding")}
               </div>
+            </div>
+          )}
+          {decodeFailure !== null && (
+            <div
+              role="alert"
+              className="absolute inset-x-4 top-1/2 z-30 mx-auto flex max-w-md -translate-y-1/2 flex-col gap-2 rounded-xl bg-[var(--surface-stage-overlay)] px-4 py-3 text-left text-white shadow-[var(--shadow-pop)]"
+            >
+              <p className="text-sm font-semibold">{t("videoPlayer.decodeFailedTitle")}</p>
+              <p className="text-xs leading-relaxed text-white/70">
+                {transcode?.state === "running"
+                  ? t("videoPlayer.transcoding", { percent: transcode.percent })
+                  : transcode?.state === "done"
+                    ? t("videoPlayer.transcodeDone")
+                    : transcode?.state === "failed"
+                    ? t("videoPlayer.transcodeFailed")
+                    : decodeFailure && decodeFailure !== "unknown"
+                      ? t("videoPlayer.decodeFailedCodec", { codec: decodeFailure })
+                      : t("videoPlayer.decodeFailedGeneric")}
+              </p>
+              {transcode?.state === "running" && (
+                <div
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={transcode.percent}
+                  className="h-1 w-full overflow-hidden rounded-full bg-white/15"
+                >
+                  <div
+                    className="h-full rounded-full bg-white/80 transition-[width] duration-300"
+                    style={{ width: `${transcode.percent}%` }}
+                  />
+                </div>
+              )}
+              {transcode?.state === "failed" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void ipc.videos.startTranscode(videoId).then(setTranscode).catch(() => undefined);
+                  }}
+                  className="ca-touch-44 self-start rounded-md bg-white/15 px-2.5 py-1 text-xs font-medium text-white"
+                >
+                  {t("videoPlayer.transcodeRetry")}
+                </button>
+              )}
             </div>
           )}
           {playFlash && (

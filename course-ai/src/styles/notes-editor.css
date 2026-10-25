@@ -228,6 +228,18 @@
 .ca-notes-toolbar::-webkit-scrollbar {
   display: none;
 }
+
+/* 键盘弹出时格式条贴在键盘上沿（见 useKeyboardInset）：浮在正文上方，加一道投影分开；
+   链接输入条原本向下展开，这时改成向上，否则一打开就钻进键盘后面。 */
+.ca-notes-bar[data-docked] {
+  box-shadow: var(--shadow-pop);
+}
+.ca-notes-bar[data-docked] .ca-notes-link-form {
+  top: auto;
+  bottom: 100%;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: none;
+}
 .tiptap-notes ul[data-type="taskList"] li > div > p {
   margin: 0;
 }

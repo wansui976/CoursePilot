@@ -32,6 +32,26 @@ describe("coarsePointer", () => {
     expect(coarsePointer()).toBe(true);
   });
 
+  it("iPad 接了触控板（主指针 fine）时，只要还有触摸屏就仍算触控", () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: q.includes("any-pointer"),
+      media: q,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    expect(coarsePointer()).toBe(true);
+  });
+
+  it("纯鼠标设备（两个查询都不匹配）不算触控", () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: false,
+      media: q,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    expect(coarsePointer()).toBe(false);
+  });
+
   it("returns false when matchMedia is unavailable", () => {
     vi.stubGlobal("matchMedia", undefined);
     expect(coarsePointer()).toBe(false);

@@ -249,7 +249,7 @@
 
 /* 触控设备或移动宽度：控制栏走紧凑高度，命中区放宽到 44px；
    进度条拇指常显、轨道略加高，便于拇指拖动（默认拇指靠 hover/focus 才出现，触屏摸不到）。 */
-@media (pointer: coarse), (max-width: 767px) {
+@media (pointer: coarse), (any-pointer: coarse), (max-width: 767px) {
   .ca-player-controls button {
     min-height: 44px;
     min-width: 44px;

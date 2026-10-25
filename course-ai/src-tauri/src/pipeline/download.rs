@@ -36,9 +36,15 @@ pub fn build_ytdlp_args(
     // 末尾兜底纯音频：播客等没有视频流的来源，「音视频合并 / 带音轨的单文件」都选不到。
     // 指定了高度时，选不到该高度先退回最佳画质，最后才退到纯音频。
     args.push("-f".to_string());
+    // 优先挑 H.264（avc1）的视频流：B 站 1080p 常同时提供 AV1 / HEVC / AVC，而 yt-dlp 的
+    // `bv*` 会挑到 AV1。AV1 在老款 iPhone / iPad 的 WKWebView 里根本没有解码器（M4 之前的
+    // iPad、A17 Pro 之前的 iPhone），下载完同步到移动端就是一块黑屏。
+    // 选不到 AVC 再逐级退回：同高度的任意编码 → 任意高度的最佳 → 纯音频（播客）。
     args.push(match max_height {
-        Some(h) => format!("bv*[height<={h}]+ba/b[height<={h}]/bv*+ba/b/ba"),
-        None => "bv*+ba/b/ba".to_string(),
+        Some(h) => format!(
+            "bv*[vcodec^=avc1][height<={h}]+ba/bv*[height<={h}]+ba/b[height<={h}]/bv*+ba/b/ba"
+        ),
+        None => "bv*[vcodec^=avc1]+ba/bv*+ba/b/ba".to_string(),
     });
     if let Some(lang) = sub_lang {
         if !lang.trim().is_empty() {
@@ -1018,7 +1024,10 @@ mod tests {
             None,
         );
         let format = &args[args.iter().position(|a| a == "-f").unwrap() + 1];
-        assert_eq!(format, "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b/ba");
+        assert_eq!(
+            format,
+            "bv*[vcodec^=avc1][height<=720]+ba/bv*[height<=720]+ba/b[height<=720]/bv*+ba/b/ba"
+        );
         // 非 B 站链接不带 B 站的 referer。
         assert!(!args.contains(&"--referer".to_string()));
     }
@@ -1035,9 +1044,21 @@ mod tests {
         assert!(args.contains(&"--merge-output-format".to_string()));
         assert!(args.contains(&"mp4".to_string()));
         let f = args.iter().position(|a| a == "-f").unwrap();
-        assert_eq!(args[f + 1], "bv*+ba/b/ba");
+        assert_eq!(args[f + 1], "bv*[vcodec^=avc1]+ba/bv*+ba/b/ba");
         assert_eq!(args.last().unwrap(), "https://b23.tv/x");
         assert!(!args.contains(&"--cookies".to_string()));
+    }
+
+    #[test]
+    fn downloads_prefer_h264_because_old_ios_cannot_decode_av1() {
+        // B 站同一条片同时有 AV1 / HEVC / AVC；老款 iPad 的 WKWebView 没有 AV1 解码器，
+        // 下到 AV1 同步过去就是黑屏。所以 AVC 必须排在第一顺位，后面还得留着逐级退回。
+        let args = build_ytdlp_args("https://www.bilibili.com/video/BV1", "t", None, None, None);
+        let format = &args[args.iter().position(|a| a == "-f").unwrap() + 1];
+        let avc = format.find("[vcodec^=avc1]").expect("应优先选 avc1");
+        let any = format.find("bv*+ba").expect("应保留任意编码的退路");
+        assert!(avc < any, "AVC 要排在任意编码之前：{format}");
+        assert!(format.ends_with("/bv*+ba/b/ba"), "末尾仍要能退到纯音频：{format}");
     }
 
     #[test]
@@ -1136,7 +1157,7 @@ mod tests {
         let f = args.iter().position(|a| a == "-f").unwrap();
         assert_eq!(
             args[f + 1],
-            "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b/ba"
+            "bv*[vcodec^=avc1][height<=720]+ba/bv*[height<=720]+ba/b[height<=720]/bv*+ba/b/ba"
         );
         assert!(args.contains(&"--write-subs".to_string()));
         let sl = args.iter().position(|a| a == "--sub-langs").unwrap();

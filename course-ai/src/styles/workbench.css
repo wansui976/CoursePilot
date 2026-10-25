@@ -250,6 +250,18 @@
   right: -4px;
 }
 
+/* 触屏（iPad 横屏、手机横屏并排）没有鼠标那种 1px 精度：手指落点误差是 8–10mm。
+   热区向两侧各伸 12px（总宽 25px），发丝线本身仍是 1px。
+   只在有触摸屏的设备加宽：桌面上 25px 的隐形热区会挡住面板边缘的点击。
+   必须带上 any-pointer：iPad 接了妙控键盘/触控板时主指针是 fine，只有 any-pointer 还报 coarse
+   ——只写 pointer 的话，最需要拖拽的场景（手指）反而拿不到加宽的热区。 */
+@media (pointer: coarse), (any-pointer: coarse) {
+  .ca-resizer::after {
+    left: -12px;
+    right: -12px;
+  }
+}
+
 .ca-resizer:hover,
 .ca-resizer:focus-visible,
 .ca-resizer.is-resizing {

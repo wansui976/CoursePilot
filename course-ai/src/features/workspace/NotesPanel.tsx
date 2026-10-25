@@ -25,13 +25,14 @@ import { ipc } from "@/lib/ipc";
 import { markdownToTiptap } from "@/lib/markdownToTiptap";
 import { tiptapToMarkdown } from "@/lib/tiptapToMarkdown";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
-import { useEffect, useRef, useState } from "react";
+import { useKeyboardInset } from "@/lib/useKeyboardInset";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { installTimestampClick } from "./notes/timestampNode";
 import { notesExtensions } from "./notes/extensions";
 import {
   captureFrameBlocks,
   imageBlocks,
-  imageFiles,
+  imageFilesFromTransfer,
   insertBlocks,
   storeNoteImage,
   type StoredImage,
@@ -89,6 +90,58 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   const [dropAlert, setDropAlert] = useState(false);
   // 上一次的正文长度：装载时重置，每次编辑后更新，用来发现「一下子少了一大半」。
   const lastTextLengthRef = useRef(0);
+
+  // 软键盘弹出时把格式条贴到键盘上沿（iOS 的 WKWebView 里 bottom: 0 在键盘后面）。
+  // 量下笔记面板的位置和格式条高度：格式条变成 position: fixed 后要按面板宽度落位，
+  // 再用一个等高的占位块顶住正文，免得它离开文档流时内容整体上跳。
+  const keyboard = useKeyboardInset();
+  const docked = keyboard > 0;
+  const barRef = useRef<HTMLDivElement>(null);
+  const [dock, setDock] = useState<{ left: number; width: number; height: number } | null>(null);
+  const measureDock = useCallback(() => {
+    const root = rootRef.current;
+    const bar = barRef.current;
+    if (!root || !bar) return;
+    const rect = root.getBoundingClientRect();
+    const left = Math.round(rect.left);
+    const width = Math.round(rect.width);
+    const height = bar.offsetHeight;
+    // 值没变就返回原对象：这个 effect 每次渲染后都跑，不能自己把自己再触发一遍。
+    setDock((prev) =>
+      prev && prev.left === left && prev.width === width && prev.height === height
+        ? prev
+        : { left, width, height },
+    );
+  }, []);
+  // 每次渲染后都重量一次（只在键盘弹着时）。格式条要等笔记装载完才出现，
+  // 只在 docked 变化时量会漏掉「先弹键盘、后出格式条」这一步，之后就再也量不到。
+  useLayoutEffect(() => {
+    if (docked) measureDock();
+  });
+  // 旋转、分栏宽度变化不会触发重渲染，另开监听主动重量。
+  useEffect(() => {
+    if (!docked) {
+      setDock(null);
+      return;
+    }
+    const viewport = window.visualViewport;
+    window.addEventListener("resize", measureDock);
+    viewport?.addEventListener("resize", measureDock);
+    return () => {
+      window.removeEventListener("resize", measureDock);
+      viewport?.removeEventListener("resize", measureDock);
+    };
+  }, [docked, measureDock]);
+  const dockStyle: CSSProperties | undefined =
+    docked && dock
+      ? {
+          position: "fixed",
+          left: dock.left,
+          width: dock.width,
+          bottom: keyboard,
+          zIndex: 20,
+        }
+      : undefined;
 
   // 图片：压缩、存库是异步的，期间按钮置灰；失败提示几秒后自己消失。
   const [imageBusy, setImageBusy] = useState(false);
@@ -155,7 +208,8 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         if (!data) return false;
         const text = data.getData("text/plain");
         // 截图、从网页「拷贝图像」：剪贴板里只有图片，没有文字。
-        const files = imageFiles(data.files);
+        // files 与 items 都看：WKWebView 里图常常只进 items（见 imageFilesFromTransfer）。
+        const files = imageFilesFromTransfer(data);
         if (files.length && !text.trim()) {
           insertImagesRef.current(files);
           return true;
@@ -170,7 +224,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       },
       handleDrop: (view, event, _slice, moved) => {
         if (moved) return false;
-        const files = imageFiles(event.dataTransfer?.files);
+        const files = imageFilesFromTransfer(event.dataTransfer);
         if (!files.length) return false;
         event.preventDefault();
         const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
@@ -372,30 +426,40 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     >
       {(writeState.status === "error" ||
         (!notesQuery.isPending && !notesQuery.isError)) && (
-        <div className="relative flex flex-none items-center gap-2 border-b border-[var(--border-subtle)] py-1 pl-2 pr-3">
-          {editor ? (
-            <NotesToolbar
-              editor={editor}
-              imageBusy={imageBusy}
-              onInsertImages={(files) => insertImages(files)}
-              onCaptureFrame={captureFrame}
-            />
-          ) : (
-            <span className="flex-1" />
-          )}
-          <span
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-            className={`flex-none text-xs ${
-              writeState.status === "error"
-                ? "text-[var(--status-err)]"
-                : "text-[var(--text-faint)]"
-            }`}
+        <>
+          {/* 格式条贴键盘时离开文档流，留一块等高的位置，正文不会跟着上跳。 */}
+          {docked && <div aria-hidden="true" className="flex-none" style={{ height: dock?.height ?? 0 }} />}
+          <div
+            ref={barRef}
+            data-notes-bar=""
+            data-docked={docked ? "" : undefined}
+            className="ca-notes-bar relative flex flex-none items-center gap-2 border-b border-[var(--border-subtle)] py-1 pl-2 pr-3"
+            style={dockStyle}
           >
-            {t(SAVE_STATUS_I18N[writeState.status])}
-          </span>
-        </div>
+            {editor ? (
+              <NotesToolbar
+                editor={editor}
+                imageBusy={imageBusy}
+                onInsertImages={(files) => insertImages(files)}
+                onCaptureFrame={captureFrame}
+              />
+            ) : (
+              <span className="flex-1" />
+            )}
+            <span
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className={`flex-none text-xs ${
+                writeState.status === "error"
+                  ? "text-[var(--status-err)]"
+                  : "text-[var(--text-faint)]"
+              }`}
+            >
+              {t(SAVE_STATUS_I18N[writeState.status])}
+            </span>
+          </div>
+        </>
       )}
       {generate.isError && (
         <ErrorNote

@@ -12,12 +12,21 @@ export function bucketForWidth(width: number): WidthBucket {
   return "wide";
 }
 
-/** 是否触控指针（决定触控目标尺寸、是否可依赖 hover），与宽度解耦。 */
+/**
+ * 是否有触控指针（决定触控目标尺寸、是否可依赖 hover），与宽度解耦。
+ *
+ * 两个查询都看：pointer 只说「主指针」，iPad 接上妙控键盘/触控板后主指针变成 fine，
+ * 手指却还在屏幕上——只看 pointer 会让触控按钮和加宽的热区在 iPad 上凭空消失
+ * （模拟器里也一样：鼠标输入，pointer 报 fine）。any-pointer 只要设备带触摸屏就是 coarse。
+ */
 export function coarsePointer(): boolean {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
     return false;
   }
-  return window.matchMedia("(pointer: coarse)").matches;
+  return (
+    window.matchMedia("(pointer: coarse)").matches ||
+    window.matchMedia("(any-pointer: coarse)").matches
+  );
 }
 
 /**

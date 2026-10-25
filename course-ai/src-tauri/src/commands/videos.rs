@@ -771,7 +771,10 @@ pub async fn cmd_add_local_video(
         video.duration_ms = duration_ms;
     }
     // 黑边探测挪到后台：不再阻塞导入的这几秒。结果写库后播放器/课件提取直接读缓存。
-    crate::pipeline::spawn_crop_detection(app, video.id.clone());
+    crate::pipeline::spawn_crop_detection(app.clone(), video.id.clone());
+    // 导入即转码：这台设备解不了的编码（老 iPad 上的 AV1）不等用户点播放就先转好，
+    // 省得他打开时先看到一块黑屏再等两分钟。
+    start_transcode_if_needed(&app, &video);
     Ok(video)
 }
 
@@ -793,8 +796,25 @@ pub async fn cmd_add_local_batch(
     // 批量导入同样在后台触发黑边探测（并发由 crop_detect 的信号量限住）。
     for video in &imported.videos {
         crate::pipeline::spawn_crop_detection(app.clone(), video.id.clone());
+        start_transcode_if_needed(&app, video);
     }
     Ok(imported)
+}
+
+
+/// 导入后如果这条视频的编码在本机放不出来，就在后台转一份 H.264（`data_dir/playable.mp4`）。
+/// 只 iOS 会真的转；Android 的 WebView 自带 AV1 软解，桌面更不用管。
+fn start_transcode_if_needed(app: &tauri::AppHandle, video: &Video) {
+    let Some(jobs) = app.try_state::<std::sync::Arc<crate::commands::transcode::TranscodeJobs>>()
+    else {
+        return;
+    };
+    let _ = crate::commands::transcode::ensure_transcode(
+        jobs.inner().clone(),
+        &video.id,
+        &video.file_path,
+        &video.data_dir,
+    );
 }
 
 /// 导入后用 ffmpeg cropdetect 探测黑边并写库，同时回填到返回的 Video，
@@ -864,7 +884,7 @@ pub async fn cmd_cancel_crop_detect(state: State<'_, AppState>, video_id: String
     Ok(())
 }
 
-async fn live_video_paths(db: &Db, video_id: &str) -> AppResult<(String, String)> {
+pub async fn live_video_paths(db: &Db, video_id: &str) -> AppResult<(String, String)> {
     sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=? AND deleted_at IS NULL")
         .bind(video_id)
         .fetch_optional(&db.pool)
@@ -982,11 +1002,29 @@ pub async fn cmd_media_url(
     let (file_path, data_dir) = live_video_paths(&state.db, &video_id).await?;
     let after_query = started.elapsed();
     let file_path = stabilize_mobile_video_file(&app, &state.db, &video_id, &file_path).await?;
+    // 编码这台设备解不了（比如老 iPad 上的 AV1）：后台转一份 H.264 放在 data_dir，
+    // cached_playable 下次就会优先用它。这里只负责点火，不等它转完。
+    if let Some(jobs) = app.try_state::<std::sync::Arc<crate::commands::transcode::TranscodeJobs>>() {
+        let _ = crate::commands::transcode::ensure_transcode(
+            jobs.inner().clone(),
+            &video_id,
+            &file_path,
+            &data_dir,
+        );
+    }
     let path = crate::pipeline::playable::cached_playable(
         std::path::Path::new(&file_path),
         std::path::Path::new(&data_dir),
     );
     media.register(&video_id, path.clone());
+    // 带上文件版本：转码完成后播放源换成了 playable.mp4，URL 若不变，<video> 不会重新加载，
+    // 用户就得手动退出再进来才看得到画面。
+    let version = std::fs::metadata(&path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|elapsed| elapsed.as_millis())
+        .unwrap_or(0);
     crate::dev_log::record(
         "media-url",
         &video_id,
@@ -998,7 +1036,23 @@ pub async fn cmd_media_url(
         ),
         "已交给播放器",
     );
-    Ok(media.url(&video_id))
+    Ok(format!("{}?v={version}", media.url(&video_id)))
+}
+
+/// 视频轨的编码四字码（`avc1` / `hvc1` / `av01` / `vp09` …）。
+///
+/// 播放器只在 `<video>` 报错之后问一次：那时用户已经看到「放不了」，多这一趟换来一句
+/// 能看懂的原因（而不是一块黑屏）。正常播放完全不碰它。
+#[tauri::command]
+pub async fn cmd_video_codec(
+    state: State<'_, AppState>,
+    video_id: String,
+) -> AppResult<Option<String>> {
+    let (file_path, _) = live_video_paths(&state.db, &video_id).await?;
+    Ok(
+        crate::pipeline::playable::video_codec(std::path::Path::new(&file_path))
+            .map(|codec| String::from_utf8_lossy(&codec).to_string()),
+    )
 }
 
 /// 视频封面（首帧）字节，前端转 blob 显示。首次调用时用 ffmpeg 截首帧并缓存。
@@ -1017,11 +1071,27 @@ pub async fn cmd_video_cover(
 /// 封面字节。回收站里的视频同样给得出——见 any_video_paths。
 pub async fn video_cover_bytes(db: &Db, video_id: &str) -> AppResult<Vec<u8>> {
     let (file_path, data_dir) = any_video_paths(db, video_id).await?;
-    let cover = crate::pipeline::slides::ensure_cover(
+    // 抽帧走「本机能播的那份」：AV1 原件在 A12X 这类机型上连解帧都做不了，
+    // 直接拿原件抽封面会得到一张全黑图（或者干脆失败）。转过码就用 playable.mp4。
+    let source = crate::pipeline::playable::cached_playable(
         std::path::Path::new(&file_path),
         std::path::Path::new(&data_dir),
-    )
-    .await?;
+    );
+    // 封面比可播放文件还旧 = 它是拿解不了的原件抽的（黑图）。丢掉重抽，
+    // 否则转码好了封面还是黑的，用户以为没封面。
+    if source != std::path::Path::new(&file_path) {
+        let cover_path = std::path::Path::new(&data_dir).join("cover.jpg");
+        let stale = std::fs::metadata(&cover_path)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .zip(std::fs::metadata(&source).and_then(|meta| meta.modified()).ok())
+            .map(|(cover, playable)| cover < playable)
+            .unwrap_or(false);
+        if stale {
+            let _ = std::fs::remove_file(&cover_path);
+        }
+    }
+    let cover = crate::pipeline::slides::ensure_cover(&source, std::path::Path::new(&data_dir)).await?;
     Ok(tokio::fs::read(&cover).await?)
 }
 

@@ -194,7 +194,14 @@
       "none": "无",
       "translucent": "半透明",
       "solid": "深色"
-    }
+    },
+    "decodeFailedTitle": "这个视频在这台设备上放不出来",
+    "decodeFailedCodec": "视频轨是 {{codec}} 编码，这台设备的 WebView 解不了。B 站下载的片子常见这种情况：Mac 上能放，旧款 iPad / iPhone 不行。换成 H.264 版本，或者在 Mac 上转码后再同步过来。",
+    "decodeFailedGeneric": "视频编码不受支持，或者文件已经损坏。可以试试重新下载，或者在 Mac 上打开确认一下。",
+    "transcoding": "正在本机转码 {{percent}}%…",
+    "transcodeFailed": "本机转码失败，可以重试一次。",
+    "transcodeRetry": "重试转码",
+    "transcodeDone": "转码完成，正在打开…"
   },
   "morePanel": {
     "quiz": "练习",

@@ -134,6 +134,7 @@ export function VideoWorkbench({
                   videoId={video.id}
                   immersive={isIOS()}
                   onFullscreenChange={onFullscreenChange}
+                  onTranscoded={() => void refetchMediaSrc()}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">
