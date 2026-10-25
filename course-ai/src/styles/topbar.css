@@ -43,8 +43,9 @@
   /* 课程库是根视图：给 Apple 式大标题（28px/紧字距），与次级视图 20px 的
      ViewHeader 拉开层级；窄屏由下方 bucket 覆盖降到 fs-xl。 */
   font-size: var(--fs-2xl);
-  font-weight: 650;
-  letter-spacing: -0.02em;
+  /* 650 的中文大标题发黑发闷；600 足以压住层级。中文字距不再收紧（-0.02em 会挤）。 */
+  font-weight: 600;
+  letter-spacing: -0.01em;
   line-height: 1.15;
 }
 

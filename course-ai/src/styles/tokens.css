@@ -195,6 +195,12 @@ body {
   overflow-x: hidden;
 }
 
+/* 图标线宽：lucide 默认 2px，在 16–18px 的小图标上显得粗笨。统一收到 1.75，
+   与正文字重更协调（CSS 的 stroke-width 会压过 svg 上的同名属性）。 */
+svg.lucide {
+  stroke-width: 1.75;
+}
+
 /* 按钮/表单控件的 font 与 color 继承由 Tailwind preflight 在 base 层提供。这里不要再写
    无层级的元素选择器：无层级规则压过所有工具类，按钮上的 text-xs、text-[var(--on-accent)]
    会被悄悄改回继承值（实色按钮变成灰字、小号按钮被放大）。 */
