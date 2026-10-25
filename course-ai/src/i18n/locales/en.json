@@ -559,7 +559,10 @@
       "en": "English",
       "ja": "日本語",
       "ko": "한국어"
-    }
+    },
+    "quoteToNotes": "Quote to notes",
+    "quotedToNotes": "Quoted to notes",
+    "quoteToNotesFailed": "Couldn't add to notes. Try again."
   },
   "notes": {
     "unsaved": "Unsaved",
@@ -580,7 +583,9 @@
     "dropAlert": "Most of this note was just removed.",
     "dropUndo": "Undo",
     "viewHistory": "View history",
-    "dismissDropAlert": "Dismiss"
+    "dismissDropAlert": "Dismiss",
+    "takeNote": "Take a note",
+    "takeNoteTitle": "Take a note at the current time ({{key}})"
   },
   "quiz": {
     "correct": "Correct",
@@ -738,7 +743,9 @@
       "fullscreen": "Fullscreen",
       "captions": "Captions",
       "notSet": "Not set",
-      "space": "Space"
+      "space": "Space",
+      "takeNote": "Take a note",
+      "takeNoteHint": "Pause and add the current time at the end of your notes"
     },
     "storage": {
       "title": "Storage Location",

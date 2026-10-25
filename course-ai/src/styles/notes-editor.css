@@ -98,3 +98,9 @@
 .tiptap-notes td > p {
   margin: 0;
 }
+
+/* 编辑器有光标就够了，不画焦点框：「记一笔」用快捷键把焦点送进来时浏览器判为键盘聚焦，
+   全局的 :focus-visible 焦点框会在正文四周画一圈蓝线。 */
+.tiptap-notes:focus-visible {
+  outline: none;
+}

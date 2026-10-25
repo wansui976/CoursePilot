@@ -3,6 +3,7 @@ import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { notesCoordinator } from "@/lib/notesCoordinator";
 import { TranscriptPanel } from "./TranscriptPanel";
 import { useInlineAsk } from "@/stores/inlineAsk";
 import { usePlayer } from "@/stores/player";
@@ -120,6 +121,31 @@ describe("TranscriptPanel", () => {
     expect(await screen.findByText(/尚无文稿/)).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "正在加载文稿" })).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("划选后「摘到笔记」：作为引用追加到笔记末尾，带上所在句的时间戳", async () => {
+    const append = vi
+      .spyOn(notesCoordinator, "appendAnswer")
+      .mockResolvedValue({ contentJson: "{}" });
+    renderTranscriptPanel("quote-to-notes");
+    const textEl = await screen.findByText("第 1 句文稿内容");
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      isCollapsed: false,
+      anchorNode: textEl.firstChild ?? textEl,
+      toString: () => "第 1 句\n文稿内容",
+      getRangeAt: () => ({ getBoundingClientRect: () => ({ left: 100, width: 40, top: 200 }) }),
+      removeAllRanges: () => {},
+    } as unknown as Selection);
+
+    fireEvent.mouseUp(screen.getByLabelText("文稿内容滚动区"));
+    fireEvent.click(await screen.findByRole("button", { name: "摘到笔记" }));
+
+    // 跨行选区合成一行；第 1 行 start_ms = 1000。
+    await waitFor(() =>
+      expect(append).toHaveBeenCalledWith("video-1", "> 第 1 句 文稿内容 [00:01]"),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("已摘到笔记");
+    append.mockRestore();
   });
 
   it("offers 问 AI on a selection and dispatches the text with its timestamp", async () => {

@@ -3,6 +3,7 @@ import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { GhostSelect } from "@/ui/select";
+import { notesCoordinator } from "@/lib/notesCoordinator";
 import { invalidateStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -207,7 +208,15 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     segmentText: string | null;
   } | null>(null);
   // 挖空成卡成功后短暂提示。
-  const [clozeAdded, setClozeAdded] = useState(false);
+  // 划选操作完成后的就地提示（已加入复习 / 已摘到笔记），一会儿自动消失。
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<number | undefined>(undefined);
+  const showNotice = useCallback((message: string) => {
+    window.clearTimeout(noticeTimer.current);
+    setNotice(message);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 1600);
+  }, []);
+  useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
   // 跟随播放的活动行下标。只在「跨段」时更新（见下方订阅），不随每个进度 tick 重渲染。
   const [activeRowIndex, setActiveRowIndex] = useState(-1);
   // 「跟随播放」显式开关：默认开。手滚暂停跟随的隐式行为保留，开关是显式覆盖——
@@ -553,9 +562,19 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
       ipc.srs.addCard(videoId, "cloze", vars.front, vars.back, vars.startMs),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.srs.countDue() });
-      setClozeAdded(true);
-      window.setTimeout(() => setClozeAdded(false), 1600);
+      showNotice(t("transcript.addedToReview"));
     },
+  });
+
+  // 摘到笔记：选中的文字作为引用追加到笔记末尾，带上所在句的时间戳（点它跳回原处）。
+  const quoteToNotes = useMutation({
+    mutationFn: (vars: { text: string; startMs: number | null }) =>
+      notesCoordinator.appendAnswer(
+        videoId,
+        `> ${vars.text.replace(/\s*\n\s*/g, " ")}${vars.startMs != null ? ` [${formatMs(vars.startMs)}]` : ""}`,
+      ),
+    onSuccess: () => showNotice(t("transcript.quotedToNotes")),
+    onError: () => showNotice(t("transcript.quoteToNotesFailed")),
   });
 
   if (transcriptQuery.isPending) {
@@ -853,6 +872,17 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
           >
             {t("transcript.askAi")}
           </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="shadow-[var(--shadow-pop)]"
+            onClick={() => {
+              quoteToNotes.mutate({ text: askAnchor.text, startMs: askAnchor.startMs });
+              closeAskAnchor();
+            }}
+          >
+            {t("transcript.quoteToNotes")}
+          </Button>
           {/* 仅当所选词落在单个句子内（可挖空）时提供。 */}
           {askAnchor.segmentText?.includes(askAnchor.text) && (
             <Button
@@ -870,12 +900,12 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
           )}
         </div>
       )}
-      {clozeAdded && (
+      {notice && (
         <div
           role="status"
           className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-[var(--surface-card)] px-3 py-1.5 text-xs text-[var(--text-strong)] shadow-[var(--shadow-pop)] ring-1 ring-[var(--border-subtle)]"
         >
-          {t("transcript.addedToReview")}
+          {notice}
         </div>
       )}
     </div>

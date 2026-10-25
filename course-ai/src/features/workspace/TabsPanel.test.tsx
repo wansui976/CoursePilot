@@ -1,10 +1,11 @@
 import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "@/lib/ipc";
 import { writeVideoResumeState } from "@/lib/resumeState";
+import { useNoteCapture } from "@/stores/noteCapture";
 import { TabsPanel } from "./TabsPanel";
 
 vi.mock("./AiViewPanel", () => ({
@@ -147,6 +148,17 @@ describe("TabsPanel", () => {
     // 数字键按左边剩下的标签编号：2 = 文稿。
     fireEvent.keyDown(window, { key: "2" });
     expect(await screen.findByText("文稿内容")).toBeVisible();
+  });
+
+  it("「记一笔」请求切到笔记；别的视频的请求不理会", async () => {
+    renderPanel();
+    await screen.findByText("概览内容");
+
+    act(() => useNoteCapture.getState().capture("other-video", 1000));
+    expect(screen.getByRole("tab", { name: "概览" })).toHaveAttribute("data-state", "active");
+
+    act(() => useNoteCapture.getState().capture("video-1", 1000));
+    expect(screen.getByRole("tab", { name: "笔记" })).toHaveAttribute("data-state", "active");
   });
 
   it("restores the active study tab for the video when remounted", () => {

@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs";
 import { TextSkeleton } from "@/ui/skeleton";
+import { useNoteCapture } from "@/stores/noteCapture";
 import {
   readVideoResumeState,
   type StudyTab,
@@ -120,6 +121,17 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
       writeVideoResumeState(videoId, { activeTab: tab });
     },
     [videoId],
+  );
+
+  // 「记一笔」：切到笔记（分栏时笔记本来就常驻在右边，不用切）。
+  useEffect(
+    () =>
+      useNoteCapture.subscribe((state, previous) => {
+        const request = state.request;
+        if (!request || request === previous.request || request.videoId !== videoId) return;
+        if (!split) changeTab("notes");
+      }),
+    [videoId, split, changeTab],
   );
 
   // 数字键 1-4 直接切 tab（播放器快捷键不占数字键，无冲突）。

@@ -11,7 +11,8 @@ export type ShortcutAction =
   | "volumeDown"
   | "mute"
   | "fullscreen"
-  | "captions";
+  | "captions"
+  | "takeNote";
 
 export type ShortcutBindings = Record<ShortcutAction, string>;
 
@@ -30,6 +31,7 @@ export const SHORTCUT_ACTIONS: {
   { action: "mute", i18nKey: "settings.shortcuts.mute" },
   { action: "fullscreen", i18nKey: "settings.shortcuts.fullscreen" },
   { action: "captions", i18nKey: "settings.shortcuts.captions" },
+  { action: "takeNote", i18nKey: "settings.shortcuts.takeNote", i18nHint: "settings.shortcuts.takeNoteHint" },
 ];
 
 export const DEFAULT_BINDINGS: ShortcutBindings = {
@@ -43,6 +45,7 @@ export const DEFAULT_BINDINGS: ShortcutBindings = {
   mute: "m",
   fullscreen: "f",
   captions: "c",
+  takeNote: "n",
 };
 
 const STORAGE_KEY = "course-ai-shortcuts";

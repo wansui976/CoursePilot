@@ -18,6 +18,7 @@ import { useVideoCoverUrl } from "@/lib/useVideoCoverUrl";
 import { useWatchLogger } from "@/lib/useWatchLogger";
 import { usePlayer } from "@/stores/player";
 import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
+import { useNoteCapture } from "@/stores/noteCapture";
 import { CaptionOverlay } from "./CaptionOverlay";
 import { Controls } from "./Controls";
 import { DanmakuOverlay } from "./DanmakuOverlay";
@@ -136,6 +137,16 @@ export function VideoPlayer({
   useEffect(() => setAudioOnly(false), [src]);
   // 把「播放中时长」记入学习事件日志（供仪表盘统计 / 间隔重复排期）。
   useWatchLogger(videoId, playing);
+  // 「记一笔」（快捷键或笔记面板的按钮）：先暂停，写字时视频别往前跑。
+  useEffect(
+    () =>
+      useNoteCapture.subscribe((state, previous) => {
+        const request = state.request;
+        if (!request || request === previous.request || request.videoId !== videoId) return;
+        ref.current?.pause();
+      }),
+    [videoId],
+  );
   // 离开/切换视频时把进度同步进库（暂停时也同步一次，见 onPause）。
   useEffect(() => {
     if (!videoId) return;
@@ -735,6 +746,12 @@ export function VideoPlayer({
           break;
         case "captions":
           setCaptionsOn((v) => !v);
+          break;
+        case "takeNote":
+          // 视频还没装载好（刚打开、尚未跳到上次进度）时 currentTime 还是 0，改用记录的进度。
+          useNoteCapture
+            .getState()
+            .capture(videoId, video.readyState > 0 ? video.currentTime * 1000 : usePlayer.getState().currentMs);
           break;
       }
     };

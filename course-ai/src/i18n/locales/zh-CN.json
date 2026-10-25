@@ -559,7 +559,10 @@
       "en": "English",
       "ja": "日本語",
       "ko": "한국어"
-    }
+    },
+    "quoteToNotes": "摘到笔记",
+    "quotedToNotes": "已摘到笔记",
+    "quoteToNotesFailed": "没能写进笔记，请重试"
   },
   "notes": {
     "unsaved": "未保存",
@@ -580,7 +583,9 @@
     "dropAlert": "笔记一下子少了一大半。",
     "dropUndo": "撤销",
     "viewHistory": "查看历史",
-    "dismissDropAlert": "关闭提示"
+    "dismissDropAlert": "关闭提示",
+    "takeNote": "记一笔",
+    "takeNoteTitle": "在当前时间记一笔（{{key}}）"
   },
   "quiz": {
     "correct": "正确",
@@ -738,7 +743,9 @@
       "fullscreen": "全屏",
       "captions": "字幕开关",
       "notSet": "未设置",
-      "space": "空格"
+      "space": "空格",
+      "takeNote": "记一笔",
+      "takeNoteHint": "暂停，在笔记末尾插入当前时间，接着写"
     },
     "storage": {
       "title": "存储位置",

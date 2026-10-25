@@ -10,10 +10,13 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { type ExportItem } from "./ExportMenu";
-import { ArchiveRestore, X } from "lucide-react";
+import { ArchiveRestore, NotebookPen, X } from "lucide-react";
 import { Button } from "@/ui/button";
 import { TextSkeleton } from "@/ui/skeleton";
 import { ErrorNote } from "@/ui/ErrorNote";
+import { useNoteCapture } from "@/stores/noteCapture";
+import { keyLabel, useShortcuts } from "@/stores/shortcuts";
+import { usePlayer } from "@/stores/player";
 import { PanelActions, panelActionButtonClass } from "./PanelActions";
 import { NoteHistoryDialog } from "./notes/NoteHistoryDialog";
 import { noteContentToDoc } from "./notes/noteVersionContent";
@@ -31,6 +34,7 @@ import { useEffect, useRef, useState } from "react";
 import { TimestampNode, installTimestampClick } from "./notes/timestampNode";
 import { MathNode } from "./notes/mathNode";
 import { loadDocument } from "./notes/loadDocument";
+import { insertNoteStamp } from "./notes/insertNoteStamp";
 import { NotesToolbar } from "./notes/NotesToolbar";
 import { TimestampToggle } from "./TimestampToggle";
 import { useTimestampPrefs } from "@/stores/timestampPrefs";
@@ -76,6 +80,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   const localDraft = notesCoordinator.getDraft(videoId);
 
   const [historyOpen, setHistoryOpen] = useState(false);
+  const takeNoteKey = useShortcuts((s) => s.bindings.takeNote);
   const [dropAlert, setDropAlert] = useState(false);
   // 上一次的正文长度：装载时重置，每次编辑后更新，用来发现「一下子少了一大半」。
   const lastTextLengthRef = useRef(0);
@@ -191,6 +196,16 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   useEffect(() => {
     if (rootRef.current) return installTimestampClick(rootRef.current);
   }, []);
+
+  // 「记一笔」：笔记装载完成后，在末尾插入当前时间戳并把光标停在后面接着写。
+  const captureRequest = useNoteCapture((s) => s.request);
+  useEffect(() => {
+    if (!captureRequest || captureRequest.videoId !== videoId) return;
+    if (!editor || editor.isDestroyed || notesQuery.isPending) return;
+    insertNoteStamp(editor, captureRequest.ms);
+    scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight });
+    useNoteCapture.getState().done(captureRequest.nonce);
+  }, [captureRequest, editor, notesQuery.isPending, videoId]);
 
   useEffect(() => {
     // 把 ref 快照进闭包：cleanup 运行时 scrollerRef.current 可能已被 React 置空。
@@ -400,6 +415,15 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       <PanelActions
         leading={
           <>
+            <button
+              type="button"
+              aria-label={t("notes.takeNote")}
+              title={t("notes.takeNoteTitle", { key: keyLabel(takeNoteKey, t) })}
+              onClick={() => useNoteCapture.getState().capture(videoId, usePlayer.getState().currentMs)}
+              className={panelActionButtonClass}
+            >
+              <NotebookPen className="h-4 w-4" />
+            </button>
             <button
               type="button"
               aria-label={t("notes.history")}
