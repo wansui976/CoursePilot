@@ -270,10 +270,20 @@ export const scenes = [
         await page.mouse.move(stage.x + stage.width / 2, stage.y + stage.height - 12);
         await shot("controls");
       }
-      const bar = page.locator("[role='slider']").first();
+      const bar = page.getByRole("slider", { name: "播放进度" }).first();
       if (await bar.isVisible().catch(() => false)) {
-        await bar.hover();
+        const box = await bar.boundingBox();
+        if (box) await page.mouse.move(box.x + box.width * 0.72, box.y + box.height / 2);
+        else await bar.hover();
+        await page.waitForTimeout(200);
         await shot("progress-hover");
+      }
+      // 播放设置：智能倍速 / 跳停顿 / 去黑边开关与字幕样式（窄播放器里还有倍速与弹幕）。
+      const settings = page.getByRole("button", { name: "播放设置" });
+      if (await settings.isVisible().catch(() => false)) {
+        await settings.click();
+        await page.waitForTimeout(250);
+        await shot("settings");
       }
     },
   },
