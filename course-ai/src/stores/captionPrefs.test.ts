@@ -4,7 +4,12 @@ import { useCaptionPrefs } from "./captionPrefs";
 describe("captionPrefs", () => {
   beforeEach(() => {
     localStorage.clear();
-    useCaptionPrefs.setState({ mode: "original", lang: "zh" });
+    useCaptionPrefs.setState({
+      mode: "original",
+      lang: "zh",
+      size: "medium",
+      background: "translucent",
+    });
   });
 
   it("cycles original → bilingual → translation → original and persists it", () => {
@@ -21,5 +26,13 @@ describe("captionPrefs", () => {
   it("persists the target language", () => {
     useCaptionPrefs.getState().setLang("ja");
     expect(localStorage.getItem("course-ai-translation-lang")).toBe("ja");
+  });
+
+  it("persists the caption size and background style", () => {
+    useCaptionPrefs.getState().setSize("large");
+    useCaptionPrefs.getState().setBackground("none");
+    expect(useCaptionPrefs.getState()).toMatchObject({ size: "large", background: "none" });
+    expect(localStorage.getItem("course-ai-caption-size")).toBe("large");
+    expect(localStorage.getItem("course-ai-caption-background")).toBe("none");
   });
 });

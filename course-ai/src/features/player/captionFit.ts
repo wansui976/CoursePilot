@@ -7,6 +7,8 @@ export const CAPTION_SAFE_HEIGHT_RATIO = 0.9;
 export const TRANSLATION_SCALE = 0.82;
 /** 字幕按钮左右内边距（px-3 × 2）。 */
 const PADDING_X = 24;
+/** 逐行字幕底左右各 0.32em 的内边距（见 .ca-caption-line）。 */
+const LINE_PADDING_EM = 0.64;
 const MAX_FONT = 120;
 
 // 全角范围：谚文字母、中日韩部首至彝文、谚文音节、兼容汉字、竖排标点、全角形式。
@@ -20,7 +22,9 @@ function emWidth(text: string): number {
 }
 
 function estimatedLines(text: string, fontSize: number, widthPx: number): number {
-  return Math.max(1, Math.ceil((emWidth(text) * fontSize) / widthPx));
+  const width = widthPx - LINE_PADDING_EM * fontSize;
+  if (width <= 0) return 1;
+  return Math.max(1, Math.ceil((emWidth(text) * fontSize) / width));
 }
 
 /**

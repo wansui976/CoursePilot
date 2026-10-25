@@ -165,6 +165,32 @@
   padding-left: max(12px, var(--safe-left));
 }
 
+/* 字幕行：底色逐行包住文字（折行后每行各自带底和圆角），而不是一整块矩形。
+   半透明 / 深色两档对齐 YouTube；「无底」对齐 B 站，靠一圈描边保证亮画面上也读得清。 */
+.ca-caption-line {
+  padding: 0.04em 0.32em;
+  border-radius: 0.2em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.ca-caption-line[data-bg="translucent"] {
+  background: rgb(8 8 8 / 0.6);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.45);
+}
+
+.ca-caption-line[data-bg="solid"] {
+  background: rgb(8 8 8 / 0.88);
+}
+
+.ca-caption-line[data-bg="none"] {
+  text-shadow:
+    0 0 1px rgb(0 0 0),
+    0 0 2px rgb(0 0 0),
+    0 1px 3px rgb(0 0 0 / 0.9),
+    0 0 6px rgb(0 0 0 / 0.5);
+}
+
 /* 分隔线：平时就是一条 1px 发丝线（与其它分隔线同款），不画抓手、不画灰色粗条。
    拖动热区是透明的伪元素，向两侧各伸 4px，只改光标、不遮内容；悬停 / 拖动时线变强调色。
    参考 VS Code / Linear / Xcode 的分栏。 */

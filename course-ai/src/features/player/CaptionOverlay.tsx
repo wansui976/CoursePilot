@@ -1,7 +1,11 @@
 import { lazy, Suspense, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MATH_RE } from "@/lib/markdownToTiptap";
-import type { CaptionMode } from "@/stores/captionPrefs";
+import {
+  CAPTION_SIZE_SCALE,
+  useCaptionPrefs,
+  type CaptionMode,
+} from "@/stores/captionPrefs";
 import { captionRequiredHeight, fitCaptionFontSize } from "./captionFit";
 
 // KaTeX 较重，仅在字幕真含公式时按需加载，避免拖累播放器首屏。
@@ -91,6 +95,8 @@ export function CaptionOverlay({
   const { t } = useTranslation();
   const keyboardHintId = useId();
   const captionTextId = useId();
+  const sizeScale = CAPTION_SIZE_SCALE[useCaptionPrefs((s) => s.size)];
+  const background = useCaptionPrefs((s) => s.background);
   const [box, setBox] = useState<Box>(loadBox);
   const boxRef = useRef(box);
   boxRef.current = box;
@@ -281,14 +287,16 @@ export function CaptionOverlay({
   // 字幕框负责可视区域；字号只在这个区域里受限自适应：按框高给两行（双语再加一行译文）
   // 留余量，再按框宽估算折行——窄屏上长译文折成两行时继续收小，不让框把字裁掉。
   const bilingualTranslation = showTranslation && mode === "bilingual" ? translation : undefined;
-  const fontSize = fitCaptionFontSize({
-    boxWidthPx: stageWidth * box.width,
-    boxHeightPx: stageHeight * box.height,
-    primary,
-    translation: bilingualTranslation,
-  });
-  // 字号到下限仍放不下（手机竖屏的矮舞台 + 双语）：框底边不动，向上长高到够用，
-  // 最多长到舞台顶边——宁可多遮一点画面，也不把字幕裁成半行。
+  // 用户选的字号档位乘在自适应字号上；调大后放不下的部分交给下面的「向上长高」。
+  const fontSize =
+    fitCaptionFontSize({
+      boxWidthPx: stageWidth * box.width,
+      boxHeightPx: stageHeight * box.height,
+      primary,
+      translation: bilingualTranslation,
+    }) * sizeScale;
+  // 字号到下限仍放不下（手机竖屏的矮舞台 + 双语、或调成了大字号）：框底边不动，
+  // 向上长高到够用，最多长到舞台顶边——宁可多遮一点画面，也不把字幕裁成半行。
   const growPx = clamp(
     captionRequiredHeight({
       fontSize,
@@ -339,17 +347,27 @@ export function CaptionOverlay({
         aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Shift+ArrowUp Shift+ArrowDown Shift+ArrowLeft Shift+ArrowRight Home"
         onPointerDown={startMove}
         onKeyDown={handleMoveKeyDown}
-        className="flex h-full w-full cursor-move items-center justify-center overflow-hidden rounded border-0 bg-transparent px-3 text-center leading-snug text-white shadow-[var(--shadow-pop)] ring-1 ring-transparent [text-shadow:0_1px_2px_rgba(0,0,0,0.9)] group-hover:ring-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
+        // 字幕贴着框底排、多出来的行往上长（YouTube / B 站都是这样）：换句时底行不跳。
+        // 底色逐行包住文字（见 .ca-caption-line），框本身透明，只在悬停时描一圈提示可拖。
+        className="flex h-full w-full cursor-move items-end justify-center overflow-hidden rounded-md border-0 bg-transparent px-3 pb-[0.2em] text-center font-medium leading-snug text-white ring-1 ring-transparent transition-[box-shadow] group-hover:ring-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
         style={{ fontSize }}
       >
-        <span id={captionTextId} className="flex flex-col items-center">
+        <span id={captionTextId} className="flex flex-col items-center gap-[0.12em]">
           <span>
-            <CaptionText text={primary} />
+            <span className="ca-caption-line" data-bg={background}>
+              <CaptionText text={primary} />
+            </span>
           </span>
           {showTranslation && mode === "bilingual" && (
             // 双语：原文在上，译文在下、略小略淡。
-            <span data-caption-translation="" className="mt-0.5 text-[0.82em] opacity-90">
-              {translation}
+            <span className="text-[0.82em]">
+              <span
+                data-caption-translation=""
+                data-bg={background}
+                className="ca-caption-line text-white/90"
+              >
+                {translation}
+              </span>
             </span>
           )}
         </span>
