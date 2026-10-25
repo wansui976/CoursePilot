@@ -320,3 +320,19 @@ describe("阴影与过渡的写法约束", () => {
     expect(hit).toMatch(/translate\(\s*-50%\s*,\s*-50%\s*\)/);
   });
 });
+
+describe("iPad 长按播放器", () => {
+  it("整个播放器表面（含盖在画面上的手势层）都关掉选中与 callout", () => {
+    // 长按的落点通常是盖在 <video> 上的透明手势层，不是 video 本身。只给 video
+    // 关选中时，选中会从覆盖层扩展成整块：iOS 给画面套一圈蓝框并弹「复制」。
+    const surface =
+      css.match(/\[data-video-player\],\s*\[data-video-player\] \*\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+
+    expect(surface).toMatch(/-webkit-touch-callout:\s*none/);
+    expect(surface).toMatch(/-webkit-user-select:\s*none/);
+    expect(surface).toMatch(/user-select:\s*none/);
+    expect(surface).toMatch(/-webkit-user-drag:\s*none/);
+    // 播放器外的正文（文稿、字幕、对话）仍要能选词复制：选择器不能宽到 html/body。
+    expect(surface).not.toMatch(/^(html|body|\*)/);
+  });
+});

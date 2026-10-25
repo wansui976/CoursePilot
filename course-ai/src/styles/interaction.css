@@ -197,9 +197,15 @@ a,
   user-select: none;
 }
 
-/* 视频元素：禁掉长按弹出的「存储图片/拷贝」菜单，避免观看时误触打断。 */
-video {
+/* 播放器表面：禁掉长按弹出的「拷贝/存储到照片」菜单，避免观看时误触打断。
+   范围是整个播放器而不只是 <video>：iOS 上长按的落点通常是盖在画面上的手势层，
+   只给 video 关选中时，选中会从覆盖层顺势扩展成整块——系统就给画面套一圈蓝色框、
+   弹出「复制」。文稿、字幕、对话等正文不在此列，仍可正常长按选词复制。 */
+video,
+[data-video-player],
+[data-video-player] * {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
+  -webkit-user-drag: none;
 }

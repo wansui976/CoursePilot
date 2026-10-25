@@ -95,6 +95,15 @@ describe("VideoPlayer iOS gestures", () => {
     expect(screen.getByLabelText("课程视频播放器")).not.toHaveAttribute("poster");
   });
 
+  it("拦掉播放器表面的 contextmenu，长按不弹系统「复制 / 存储到照片」", () => {
+    // iPad 上长按的落点是盖在画面上的手势层，系统菜单从那里弹出来。
+    // CSS 负责让这一整块不可选中，这里再兜一层，把 contextmenu 也拦下。
+    renderPlayer();
+
+    const player = document.querySelector("[data-video-player]")!;
+    expect(fireEvent.contextMenu(player)).toBe(false);
+  });
+
   it("moves the playback clock to the seek target as soon as a seek starts", () => {
     // 没缓冲到的位置要先拉数据，跳转完成可能要一两秒；这期间时间不能还停在旧位置。
     renderPlayer(false);

@@ -838,6 +838,10 @@ export function VideoPlayer({
     <div
       data-video-player=""
       data-video-fullscreen={fullscreen ? "" : undefined}
+      // iPadOS / WKWebView：长按视频会弹系统「复制 / 存储到照片」菜单并给画面套蓝框。
+      // CSS 已把播放器表面设为不可选，这里再拦掉 contextmenu 兜一层；只作用于播放器，
+      // 文稿、输入框等正文区不受影响。
+      onContextMenu={(event) => event.preventDefault()}
       className={`flex flex-col ${
         fullscreen
           ? "fixed inset-0 z-50 bg-black"
