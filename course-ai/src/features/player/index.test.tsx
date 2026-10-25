@@ -12,6 +12,7 @@ const platform = vi.hoisted(() => ({ mobile: true }));
 vi.mock("@/lib/ipc", () => ({
   ipc: {
     transcripts: { list: vi.fn().mockResolvedValue([]) },
+    ai: { getChapters: vi.fn().mockResolvedValue([]) },
     danmaku: {
       list: vi.fn().mockResolvedValue([]),
     },
@@ -119,6 +120,25 @@ describe("VideoPlayer iOS gestures", () => {
     expect(controls).toHaveAttribute("aria-hidden", "false");
     expect(controls).not.toHaveAttribute("inert");
     expect(controls).toHaveClass("opacity-100");
+  });
+
+  it("plays or pauses on a desktop click and goes fullscreen on double click", async () => {
+    setFullscreen.mockClear();
+    setFullscreen.mockResolvedValue(undefined);
+    renderPlayer(false);
+    const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
+    const play = vi.spyOn(video, "play").mockResolvedValue(undefined);
+    const stage = screen.getByLabelText("课程视频舞台");
+
+    fireEvent.click(video);
+    expect(play).toHaveBeenCalledTimes(1);
+
+    // 点控制栏里的按钮不算点画面。
+    fireEvent.click(screen.getByRole("button", { name: "播放设置", hidden: true }));
+    expect(play).toHaveBeenCalledTimes(1);
+
+    fireEvent.doubleClick(stage);
+    await waitFor(() => expect(setFullscreen).toHaveBeenCalledWith(true));
   });
 
   it("restores and persists the selected base playback rate", () => {

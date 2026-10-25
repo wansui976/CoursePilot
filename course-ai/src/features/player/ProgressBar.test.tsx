@@ -100,15 +100,18 @@ describe("ProgressBar", () => {
     expect(onSeek).toHaveBeenNthCalledWith(2, 60_000);
   });
 
-  it("renders chapter tick marks from the shared chapters query", async () => {
+  it("splits the track at chapter boundaries from the shared chapters query", async () => {
     mockIpc.ai.getChapters.mockResolvedValue([
       { id: 1, video_id: "v1", title: "开场", summary: null, start_ms: 0, end_ms: 10_000, order_index: 0 },
       { id: 2, video_id: "v1", title: "主体", summary: null, start_ms: 10_000, end_ms: 60_000, order_index: 1 },
     ]);
     const { container } = renderProgressBar();
-    // 章节刻度是绝对定位的 w-px 竖线，位于视觉轨 overlay 内；等章节查询解析。
+    // 轨道在章节分界处断开（YouTube 式）；片头 0 处不算分界。等章节查询解析。
     await waitFor(() => {
-      expect(container.querySelectorAll(".w-px")).toHaveLength(2);
+      expect(container.querySelector("[data-chapter-gaps]")).toHaveAttribute(
+        "data-chapter-gaps",
+        "1",
+      );
     });
   });
 
@@ -141,5 +144,26 @@ describe("ProgressBar", () => {
     });
     expect(screen.queryByTestId("danmaku-heat")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /弹幕高峰/ })).not.toBeInTheDocument();
+  });
+
+  it("always shows the time under the pointer, with the chapter title when there is one", async () => {
+    mockIpc.ai.getChapters.mockResolvedValue([
+      { id: 1, video_id: "v1", title: "开场", summary: null, start_ms: 0, end_ms: 30_000, order_index: 0 },
+      { id: 2, video_id: "v1", title: "主体", summary: null, start_ms: 30_000, end_ms: 60_000, order_index: 1 },
+    ]);
+    const { container } = renderProgressBar();
+    await waitFor(() =>
+      expect(container.querySelector("[data-chapter-gaps]")).toHaveAttribute("data-chapter-gaps", "1"),
+    );
+    const hit = container.querySelector(".group\\/progress") as HTMLElement;
+    hit.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 600, height: 16, right: 600, bottom: 16, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+
+    fireEvent.pointerMove(hit, { clientX: 450 });
+
+    expect(screen.getByText("主体")).toBeInTheDocument();
+    expect(screen.getByText("00:45")).toBeInTheDocument();
+    fireEvent.pointerLeave(hit);
+    expect(screen.queryByText("00:45")).not.toBeInTheDocument();
   });
 });

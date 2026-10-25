@@ -4,7 +4,7 @@ import { qk } from "@/lib/queryKeys";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AudioLines } from "lucide-react";
+import { AudioLines, Pause, Play } from "lucide-react";
 import { cropStyle } from "@/lib/blackBars";
 import { useSilenceSkip } from "@/lib/useSilenceSkip";
 import { useSmartRate } from "@/lib/useSmartRate";
@@ -23,7 +23,7 @@ import { CaptionOverlay } from "./CaptionOverlay";
 import { Controls } from "./Controls";
 import { DanmakuOverlay } from "./DanmakuOverlay";
 import { useCaptionPrefs } from "@/stores/captionPrefs";
-import { ProgressBar } from "./ProgressBar";
+import { MiniProgress, ProgressBar } from "./ProgressBar";
 
 /**
  * 手机上还没播过的视频不画首帧：Android WebView 画一张自带的灰底大播放图标盖住画面，
@@ -36,6 +36,8 @@ const TRANSPARENT_POSTER =
 // 距片尾 15s 内不再续播（视为看完），从头开始。
 const RESUME_TAIL_GUARD = 15;
 const TAP_DELAY_MS = 240;
+// 桌面：鼠标在画面上停着不动这么久（且在播放）就收起控制栏和指针（YouTube 式）。
+const DESKTOP_IDLE_HIDE_MS = 2500;
 const LONG_PRESS_MS = 360;
 const TAP_MOVE_TOLERANCE_PX = 12;
 const AXIS_LOCK_PX = 16;
@@ -202,6 +204,10 @@ export function VideoPlayer({
     value: number;
   } | null>(null);
   const gestureHintTimerRef = useRef<number | undefined>(undefined);
+  // 点画面 / 空格切换播放时，画面中央闪一下播放或暂停图标（YouTube 式），key 让动画每次重播。
+  const [playFlash, setPlayFlash] = useState<{ kind: "play" | "pause"; key: number } | null>(null);
+  const flashPlayState = (kind: "play" | "pause") =>
+    setPlayFlash((prev) => ({ kind, key: (prev?.key ?? 0) + 1 }));
   // 方向键长按快进/快退（B 站式）的进行中状态（见键盘快捷键 effect）。
   const keyScanRef = useRef<{
     action: "seekBack" | "seekForward";
@@ -221,10 +227,11 @@ export function VideoPlayer({
     staleTime: Infinity,
   });
   const danmaku = queriedDanmaku ?? EMPTY_DANMAKU;
+  // 章节：控制栏在时间后面显示当前章节名；与进度条、章节面板共用同一查询缓存。
+  const { data: chapters } = useQuery(queries.chapters(videoId));
   // 字幕译文：本地库里读，翻过才有。原文模式下也读，用来决定要不要出「原文/双语/译文」切换。
   const captionMode = useCaptionPrefs((s) => s.mode);
   const translationLang = useCaptionPrefs((s) => s.lang);
-  const cycleCaptionMode = useCaptionPrefs((s) => s.cycleMode);
   const { data: translations } = useQuery({
     queryKey: qk.translations(videoId, translationLang),
     queryFn: () => ipc.translation.list(videoId, translationLang),
@@ -334,6 +341,10 @@ export function VideoPlayer({
   const toggleFullscreen = () => void setVideoFullscreen(!fullscreen);
 
   // 沉浸式（手机）控制栏：默认显示，播放 3 秒后自动隐藏；点视频切换显隐；暂停时常显。
+  // 倍速 / 设置菜单开着时不收控制栏（窄屏的设置面板挂在 body 上，不在 controlsRef 里）。
+  function playerMenuOpen() {
+    return document.querySelector("[data-player-menu]") != null;
+  }
   function clearHideTimer() {
     if (hideControlsTimer.current) window.clearTimeout(hideControlsTimer.current);
   }
@@ -347,7 +358,8 @@ export function VideoPlayer({
       if (
         ref.current &&
         !ref.current.paused &&
-        !controlsRef.current?.contains(document.activeElement)
+        !controlsRef.current?.contains(document.activeElement) &&
+        !playerMenuOpen()
       ) {
         setControlsVisible(false);
       }
@@ -551,19 +563,57 @@ export function VideoPlayer({
     }, 240);
     tapRef.current = { t: now, timer };
   }
+  // 菜单开着、焦点在控制栏里、指针停在控制栏上时都不收：用户正在操作它。
+  function desktopControlsBusy() {
+    const controls = controlsRef.current;
+    if (!controls) return false;
+    return (
+      controls.contains(document.activeElement) ||
+      playerMenuOpen() ||
+      controls.matches(":hover")
+    );
+  }
   function revealDesktopControls() {
     if (immersive) return;
     clearDesktopHideTimer();
     setDesktopControlsVisible(true);
+    // 播放中鼠标停住不动一会儿就收起；暂停时只要鼠标还在画面上就一直显示。
+    desktopHideTimer.current = window.setTimeout(() => {
+      if (ref.current && !ref.current.paused && !desktopControlsBusy()) {
+        setDesktopControlsVisible(false);
+      }
+    }, DESKTOP_IDLE_HIDE_MS);
   }
   function scheduleDesktopHideControls() {
     if (immersive) return;
     clearDesktopHideTimer();
     desktopHideTimer.current = window.setTimeout(() => {
-      if (!controlsRef.current?.contains(document.activeElement)) {
+      if (!controlsRef.current?.contains(document.activeElement) && !playerMenuOpen()) {
         setDesktopControlsVisible(false);
       }
     }, 80);
+  }
+  // 桌面点画面：单击播放 / 暂停，双击全屏（两次单击一来一回抵消，和 YouTube 一样）。
+  // 字幕框、弹幕高峰点等自己就是按钮，点它们不算点画面。
+  function isStageSurface(target: EventTarget | null) {
+    const el = target as HTMLElement | null;
+    return !el?.closest("button, input, [role='menu'], a");
+  }
+  function handleDesktopStageClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (!isStageSurface(event.target)) return;
+    const video = ref.current;
+    if (!video) return;
+    if (video.paused) {
+      void video.play();
+      flashPlayState("play");
+    } else {
+      video.pause();
+      flashPlayState("pause");
+    }
+  }
+  function handleDesktopStageDoubleClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (!isStageSurface(event.target)) return;
+    toggleFullscreen();
   }
 
   function revealControlsForKeyboard() {
@@ -690,8 +740,13 @@ export function VideoPlayer({
       const clamp = (v: number) => Math.min(1, Math.max(0, v));
       switch (action) {
         case "playPause":
-          if (video.paused) void video.play();
-          else video.pause();
+          if (video.paused) {
+            void video.play();
+            flashPlayState("play");
+          } else {
+            video.pause();
+            flashPlayState("pause");
+          }
           break;
         case "seekBack":
         case "seekForward": {
@@ -776,9 +831,12 @@ export function VideoPlayer({
   }, [fullscreen]);
 
   const playbackControlsVisible = immersive ? controlsVisible : desktopControlsVisible;
+  // 桌面播放中控制栏因鼠标静止收起后，指针也一起藏起来，别在画面中间晃。
+  const hideCursor = !immersive && playing && !desktopControlsVisible;
 
   return (
     <div
+      data-video-player=""
       data-video-fullscreen={fullscreen ? "" : undefined}
       className={`flex flex-col ${
         fullscreen
@@ -791,12 +849,16 @@ export function VideoPlayer({
         aria-label={t("videoPlayer.stage")}
         tabIndex={0}
         onFocus={revealControlsForKeyboard}
-        onClick={immersive && !isIosImmersive ? handleStageTap : undefined}
+        onClick={
+          immersive ? (!isIosImmersive ? handleStageTap : undefined) : handleDesktopStageClick
+        }
+        onDoubleClick={!immersive ? handleDesktopStageDoubleClick : undefined}
         onMouseEnter={!immersive ? revealDesktopControls : undefined}
+        onMouseMove={!immersive ? revealDesktopControls : undefined}
         onMouseLeave={!immersive ? scheduleDesktopHideControls : undefined}
         className={`relative flex min-h-0 w-full min-w-0 flex-1 items-center justify-center overflow-hidden ${
           fullscreen ? "bg-black" : audioOnly ? "bg-[#0b0d12]" : "bg-[var(--surface-stage)]"
-        }`}
+        } ${hideCursor ? "cursor-none" : ""}`}
       >
         <div
           className="relative overflow-hidden"
@@ -980,6 +1042,20 @@ export function VideoPlayer({
               </div>
             </div>
           )}
+          {playFlash && (
+            <div
+              key={playFlash.key}
+              aria-hidden="true"
+              className="ca-play-flash pointer-events-none absolute left-1/2 top-1/2 z-20 flex h-16 w-16 items-center justify-center rounded-full bg-black/55 text-white"
+              onAnimationEnd={() => setPlayFlash(null)}
+            >
+              {playFlash.kind === "play" ? (
+                <Play className="h-7 w-7 translate-x-0.5 fill-current" />
+              ) : (
+                <Pause className="h-7 w-7 fill-current" />
+              )}
+            </div>
+          )}
           {cropNotice && (
             <div className="pointer-events-none absolute inset-x-4 top-6 z-20 mx-auto w-fit max-w-full whitespace-pre-line rounded-lg bg-[var(--surface-stage-overlay)] px-3 py-1.5 text-center text-xs font-medium leading-relaxed text-white">
               {cropNotice}
@@ -1004,12 +1080,20 @@ export function VideoPlayer({
       </div>
       <div
         ref={controlsRef}
-        className="absolute inset-x-0 bottom-0 z-10 border-t border-[var(--border-faint)] bg-[var(--surface-panel)]/92 backdrop-blur"
+        className="absolute inset-x-0 bottom-0 z-10"
         onMouseEnter={!immersive ? revealDesktopControls : undefined}
         onMouseLeave={!immersive ? scheduleDesktopHideControls : undefined}
         onPointerDown={immersive ? () => revealControls() : undefined}
       >
-        {/* 按钮行：桌面悬停浮现；沉浸式随点按显隐。进度条已拆出去常驻。 */}
+        {/* 托底渐变：只在控制栏唤出时出现，保证白色按钮在任何画面上都读得清（功能性，不是装饰）。 */}
+        <div
+          aria-hidden="true"
+          data-allow-gradient=""
+          className={`ca-player-scrim pointer-events-none transition-opacity duration-200 ${
+            playbackControlsVisible ? "opacity-100" : "opacity-0"
+          }`}
+        />
+        {/* 进度条在上、按钮行在下（YouTube / B 站布局）：桌面悬停浮现，沉浸式随点按显隐。 */}
         <div
           aria-label={t("videoPlayer.controls")}
           aria-hidden={!playbackControlsVisible}
@@ -1017,77 +1101,9 @@ export function VideoPlayer({
           onFocusCapture={revealControlsForKeyboard}
           onBlurCapture={handleControlsBlur}
           onClick={immersive ? (e) => e.stopPropagation() : undefined}
-          className={`transition-opacity duration-200 ${
+          className={`relative transition-opacity duration-200 ${
             playbackControlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
-        >
-          <Controls
-            playing={playing}
-            rate={rate}
-            effectiveRate={effectiveRate}
-            volume={volume}
-            muted={muted}
-            captionsOn={captionsOn}
-            smartRate={smartRate.enabled}
-            smartRateAvailable={smartRate.available}
-            skipSilence={silenceSkip.enabled}
-            skipSilenceAvailable={silenceSkip.available}
-            skipSilenceLoading={silenceSkip.loading}
-            skipRanges={silenceSkip.ranges}
-            cropOn={cropOn}
-            cropInsets={cropInsets}
-            fullscreen={fullscreen}
-            danmakuAvailable={danmaku.length > 0}
-            danmakuOn={danmakuOn}
-            captionMode={captionMode}
-            translationAvailable={translationByIdx.size > 0}
-            onCycleCaptionMode={cycleCaptionMode}
-            onToggleCrop={toggleCrop}
-            onToggleCaptions={() => setCaptionsOn((on) => !on)}
-            onToggleDanmaku={() => {
-              const next = !danmakuOn;
-              setDanmakuOn(next);
-              persistDanmakuEnabled(next);
-            }}
-            onToggleSmartRate={smartRate.toggle}
-            onToggleSkipSilence={silenceSkip.toggle}
-            onPreviewSkip={(ms) => {
-              // 试跳要「看得到跳」：暂停着不会触发跳过判定，所以顺手接着播。
-              const video = ref.current;
-              if (!video) return;
-              video.currentTime = ms / 1000;
-              if (video.paused) void video.play();
-            }}
-            onPlayPause={() => {
-              const video = ref.current;
-              if (!video) return;
-              if (video.paused) {
-                void video.play();
-              } else {
-                video.pause();
-              }
-            }}
-            onRate={(nextRate) => {
-              setRate(nextRate);
-              persistPlaybackRate(nextRate);
-            }}
-            onVolume={(value) => {
-              setVolume(value);
-              setMuted(value === 0);
-            }}
-            onMuteToggle={() => setMuted((value) => !value)}
-            onFullscreenToggle={toggleFullscreen}
-          />
-        </div>
-        {/* 进度条：桌面常驻视频底边；沉浸式随控制栏显隐。 */}
-        <div
-          className={
-            immersive
-              ? `transition-opacity duration-200 ${
-                  controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
-                }`
-              : undefined
-          }
         >
           <ProgressBar
             videoId={videoId}
@@ -1097,6 +1113,72 @@ export function VideoPlayer({
               if (ref.current) ref.current.currentTime = ms / 1000;
             }}
           />
+          <div className="ca-player-controls-shell">
+            <Controls
+              playing={playing}
+              rate={rate}
+              effectiveRate={effectiveRate}
+              volume={volume}
+              muted={muted}
+              captionsOn={captionsOn}
+              smartRate={smartRate.enabled}
+              smartRateAvailable={smartRate.available}
+              skipSilence={silenceSkip.enabled}
+              skipSilenceAvailable={silenceSkip.available}
+              skipSilenceLoading={silenceSkip.loading}
+              skipRanges={silenceSkip.ranges}
+              cropOn={cropOn}
+              cropInsets={cropInsets}
+              fullscreen={fullscreen}
+              danmakuAvailable={danmaku.length > 0}
+              danmakuOn={danmakuOn}
+              translationAvailable={translationByIdx.size > 0}
+              chapters={chapters}
+              onToggleCrop={toggleCrop}
+              onToggleCaptions={() => setCaptionsOn((on) => !on)}
+              onToggleDanmaku={() => {
+                const next = !danmakuOn;
+                setDanmakuOn(next);
+                persistDanmakuEnabled(next);
+              }}
+              onToggleSmartRate={smartRate.toggle}
+              onToggleSkipSilence={silenceSkip.toggle}
+              onPreviewSkip={(ms) => {
+                // 试跳要「看得到跳」：暂停着不会触发跳过判定，所以顺手接着播。
+                const video = ref.current;
+                if (!video) return;
+                video.currentTime = ms / 1000;
+                if (video.paused) void video.play();
+              }}
+              onPlayPause={() => {
+                const video = ref.current;
+                if (!video) return;
+                if (video.paused) {
+                  void video.play();
+                } else {
+                  video.pause();
+                }
+              }}
+              onRate={(nextRate) => {
+                setRate(nextRate);
+                persistPlaybackRate(nextRate);
+              }}
+              onVolume={(value) => {
+                setVolume(value);
+                setMuted(value === 0);
+              }}
+              onMuteToggle={() => setMuted((value) => !value)}
+              onFullscreenToggle={toggleFullscreen}
+            />
+          </div>
+        </div>
+        {/* 控制栏收起时：画面最底边留一条 2px 进度细线（B 站式）。 */}
+        <div
+          className={`pointer-events-none absolute inset-x-0 bottom-0 transition-opacity duration-200 ${
+            playbackControlsVisible ? "opacity-0" : "opacity-100"
+          }`}
+        >
+          <MiniProgress />
         </div>
       </div>
     </div>

@@ -271,6 +271,15 @@
     height: 16px;
   }
 
+  /* 播放进度的拖动圆点：触屏没有 hover，常显并略放大，拇指才找得到。 */
+  .ca-progress-thumb {
+    width: 14px;
+    height: 14px;
+    --tw-scale-x: 1;
+    --tw-scale-y: 1;
+    scale: 1;
+  }
+
   /* 触控命中区兜底:桌面保持紧凑视觉尺寸,触屏上撑到 44×44(图标仍居中)。
      仅用于四周有留白、放大不会与邻键重叠的小按钮。 */
   .ca-touch-44 {
@@ -301,22 +310,6 @@
   select {
     font-size: 16px;
   }
-}
-
-.ca-player-controls[data-controls-layout="compact"] {
-  width: 100%;
-  min-width: 0;
-  padding-right: max(8px, var(--safe-right));
-  padding-left: max(8px, var(--safe-left));
-}
-
-.ca-player-controls[data-controls-layout="compact"] .ca-player-controls-desktop {
-  display: none;
-}
-
-.ca-player-controls[data-controls-layout="compact"] .ca-player-mobile-more {
-  display: block;
-  flex: none;
 }
 
 .ca-player-controls[data-controls-layout="compact"] .ca-player-controls-time {

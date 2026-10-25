@@ -111,7 +111,6 @@
     "smartRateCloseNoTranscript": "Turn off adaptive speed (no usable transcript for this video)",
     "smartRateUnavailable": "A transcript is required to plan adaptive playback speed",
     "smartRateLabel": "Adaptive speed{{state}}",
-    "smartRateEnabledState": " · On",
     "cropBlackBars": "Crop",
     "cropOn": "Crop black bars, on",
     "cropOff": "Crop black bars, off",
@@ -179,8 +178,23 @@
       "bilingual": "Bilingual",
       "translation": "Translated"
     },
-    "captionModeLabel": "Subtitles: {{mode}}",
-    "captionModeTitle": "Switch subtitles: original → bilingual → translated"
+    "settings": "Playback settings",
+    "settingsPlayback": "Playback",
+    "settingsCaptions": "Subtitles",
+    "captionContent": "Show",
+    "captionSize": "Size",
+    "captionSizes": {
+      "small": "S",
+      "medium": "M",
+      "large": "L",
+      "xlarge": "XL"
+    },
+    "captionBackground": "Backdrop",
+    "captionBackgrounds": {
+      "none": "None",
+      "translucent": "Soft",
+      "solid": "Solid"
+    }
   },
   "morePanel": {
     "quiz": "Quiz",

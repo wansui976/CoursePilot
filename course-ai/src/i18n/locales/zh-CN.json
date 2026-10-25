@@ -111,7 +111,6 @@
     "smartRateCloseNoTranscript": "关闭智能倍速（当前视频没有可用字幕）",
     "smartRateUnavailable": "还没有字幕，智能倍速排不出来",
     "smartRateLabel": "智能倍速{{state}}",
-    "smartRateEnabledState": " · 开",
     "cropBlackBars": "去黑边",
     "cropOn": "去黑边，已开启",
     "cropOff": "去黑边，已关闭",
@@ -179,8 +178,23 @@
       "bilingual": "双语",
       "translation": "译文"
     },
-    "captionModeLabel": "字幕：{{mode}}",
-    "captionModeTitle": "切换字幕：原文 → 双语 → 译文"
+    "settings": "播放设置",
+    "settingsPlayback": "播放",
+    "settingsCaptions": "字幕",
+    "captionContent": "内容",
+    "captionSize": "字号",
+    "captionSizes": {
+      "small": "小",
+      "medium": "标准",
+      "large": "大",
+      "xlarge": "特大"
+    },
+    "captionBackground": "背景",
+    "captionBackgrounds": {
+      "none": "无",
+      "translucent": "半透明",
+      "solid": "深色"
+    }
   },
   "morePanel": {
     "quiz": "练习",
