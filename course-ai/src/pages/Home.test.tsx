@@ -475,9 +475,9 @@ describe("Home", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
     await screen.findByText(displayTitle(video.title));
 
-    expect(screen.getByText("已看完")).toBeInTheDocument();
     expect(screen.queryByLabelText(/已观看/)).not.toBeInTheDocument();
-    // 2.1 meta 行：看完态显示「✓ 已看完」（与封面徽标不重复计数）。
+    // 看完态只在信息行写「✓ 已看完」，封面上不再重复挂徽标。
+    expect(screen.queryByText("已看完")).not.toBeInTheDocument();
     expect(screen.getByText(/✓ 已看完/)).toBeInTheDocument();
   });
 

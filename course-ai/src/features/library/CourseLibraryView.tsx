@@ -643,12 +643,7 @@ export function CourseLibraryView({
             {durationMs != null && (
               <span className="dur">{formatMs(durationMs)}</span>
             )}
-            {progress.ratio >= WATCHED_RATIO && (
-              <span className="done">
-                <Check className="h-3 w-3" />
-                {t("home.watched")}
-              </span>
-            )}
+            {/* 「已看完」只写在卡片下方的信息行里，封面上不再重复挂一枚徽标。 */}
             {progress.ratio > 0 && progress.ratio < WATCHED_RATIO && (
               <span
                 className="ov-bar"
@@ -709,7 +704,6 @@ export function CourseLibraryView({
       return (
         <span className="ca-card-meta">
           {durationText != null && <span className="ca-meta-text">{durationText} · </span>}
-          {/* 整串带 ✓，避免与封面「已看完」徽标在文本查询上撞车。 */}
           <span className="ca-meta-text ok">{`✓ ${t("home.watched")}`}</span>
         </span>
       );

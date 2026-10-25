@@ -40,8 +40,8 @@
 .ca-continue-label {
   display: block;
   font-size: 12px;
-  font-weight: 600;
-  color: var(--accent-text);
+  font-weight: 500;
+  color: var(--text-3);
 }
 
 .ca-continue-title {
@@ -60,43 +60,27 @@
 }
 
 .ca-continue-pos .ca-continue-pct {
-  color: var(--accent-text);
+  color: var(--text-2);
 }
 
 .ca-continue-play {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   border-radius: 999px;
+  /* 课程页唯一的实色主操作。不再呼吸缩放：动个不停的按钮是模板感的来源之一。 */
   background: var(--accent);
   color: var(--on-accent);
-  transition: transform 0.12s;
+  transition: background 0.12s;
 }
 
 @media (hover: hover) {
 .ca-continue-hero:hover .ca-continue-play {
-  transform: scale(1.05);
+  background: var(--accent-press);
+  color: var(--on-accent-press);
 }
-}
-
-/* 续看 hero 的播放钮悬停时轻微缩放呼吸，提示「从这里继续」。
-   只动 transform（合成器扛得住，不触发布局/重排）；在 hover 且未减弱动效时才播放。 */
-@keyframes ca-play-pulse {
-  0%,
-  100% {
-    transform: scale(1.04);
-  }
-  50% {
-    transform: scale(1.08);
-  }
-}
-
-@media (hover: hover) and (prefers-reduced-motion: no-preference) {
-  .ca-continue-hero:hover .ca-continue-play {
-    animation: ca-play-pulse 2.2s var(--ease) infinite;
-  }
 }
 
 @media (max-width: 640px) {
@@ -122,12 +106,13 @@
   white-space: nowrap;
 }
 
+/* 观看进度、「已看完」都是普通信息，用灰阶；强调色只留给可点的主操作。 */
 .ca-meta-text.accent {
-  color: var(--accent-text);
+  color: var(--text-2);
 }
 
 .ca-meta-text.ok {
-  color: var(--status-ok);
+  color: var(--text-3);
 }
 
 .ca-meta-text.err {
@@ -264,8 +249,8 @@
   border-radius: 5px;
 }
 
-/* 「已看完」标记：进度条到头后隐藏，靠它区分看完与没看过。列表缩略图太窄，只留图标。 */
-.ca-thumb .done,
+/* 列表缩略图上的「已看完」小勾：窄屏时进度列会被收起，靠它区分看完与没看过。
+   网格卡片不挂——信息行里已经写着「✓ 已看完」。 */
 .row-thumb .done {
   position: absolute;
   left: 8px;
@@ -573,11 +558,11 @@
 }
 
 .ca-row .c-progress.accent {
-  color: var(--accent-text);
+  color: var(--text-2);
 }
 
 .ca-row .c-progress.ok {
-  color: var(--status-ok);
+  color: var(--text-3);
 }
 
 .ca-row .c-progress.err {
@@ -585,7 +570,7 @@
 }
 
 .ca-row .c-progress.processing .accent {
-  color: var(--accent-text);
+  color: var(--text-2);
 }
 
 /* ===== 视频卡片「⋯」：封面上的磨砂小圆钮 =====
@@ -714,8 +699,8 @@
 .ca-resume-course {
   font-size: var(--fs-2xs);
   line-height: var(--lh-2xs);
-  font-weight: 600;
-  color: var(--accent-text);
+  font-weight: 500;
+  color: var(--text-3);
 }
 
 .ca-resume-title {
@@ -771,26 +756,27 @@
   grid-template-rows: 1fr 1fr;
 }
 
-/* 还没有视频封面的课程：同色相的浅色平铺底 + 首字，不加纹样与光晕。 */
+/* 还没有视频封面的课程：像书的封面——中性冷灰底，左下角用阅读字体写课程名。
+   不再按课程名随机取色相（粉底、绿底一字排开很俗）。 */
 .ca-course-cover[data-tiles="0"] {
-  --tint: var(--course-hue, 220);
-  place-items: center;
-  background: hsl(var(--tint) 24% 93%);
+  place-items: end start;
+  padding: 16px 18px;
+  background: var(--bg-sunken);
 }
 
 .ca-course-cover[data-tiles="0"] .ca-course-initial {
-  color: hsl(var(--tint) 30% 38%);
-  text-shadow: none;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  max-width: 90%;
   font-family: var(--font-reading);
+  font-size: 19px;
   font-weight: 600;
-}
-
-[data-theme="dark"] .ca-course-cover[data-tiles="0"] {
-  background: hsl(var(--tint) 14% 18%);
-}
-
-[data-theme="dark"] .ca-course-cover[data-tiles="0"] .ca-course-initial {
-  color: hsl(var(--tint) 30% 74%);
+  line-height: 1.35;
+  letter-spacing: 0;
+  color: var(--text-2);
+  text-shadow: none;
 }
 
 .ca-course-tile {
@@ -853,8 +839,7 @@
     border-color: var(--line);
   }
   .ca-resume-card:hover .ca-resume-play > svg {
-    transform: scale(1.08);
-    background: var(--accent);
+    background: rgb(0 0 0 / 0.72);
   }
   .ca-course-tile img,
   .ca-resume-cover img {

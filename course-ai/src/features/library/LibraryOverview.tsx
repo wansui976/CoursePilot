@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { FolderPlus, Loader2, Play } from "lucide-react";
@@ -16,13 +15,6 @@ import { VideoCover } from "./VideoCover";
 const MOSAIC = 4;
 /** 「继续学习」最多列几门课。 */
 const RESUME_LIMIT = 3;
-
-/** 没有视频的课程：按课程名散列出一个稳定色相，封面不至于一片灰。 */
-function courseHue(name: string) {
-  let hash = 0;
-  for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return hash % 360;
-}
 
 type CourseSummary = {
   course: Course;
@@ -163,15 +155,11 @@ export function LibraryOverview({
                   <span
                     className="ca-course-cover"
                     data-tiles={covers.length >= MOSAIC ? MOSAIC : covers.length > 0 ? 1 : 0}
-                    style={
-                      covers.length === 0
-                        ? ({ "--course-hue": courseHue(course.name) } as CSSProperties)
-                        : undefined
-                    }
                   >
                     {covers.length === 0 ? (
+                      // 没有视频封面：像一本书的封面，中性底色上用阅读字体写课程名。
                       <span className="ca-course-initial" aria-hidden="true">
-                        {course.name.slice(0, 1)}
+                        {course.name}
                       </span>
                     ) : (
                       (covers.length >= MOSAIC ? covers : covers.slice(0, 1)).map((video) => (
