@@ -12,6 +12,7 @@ import type { PlaylistInfo } from "@/lib/types";
 import { Modal } from "@/ui/dialog";
 import { isBilibiliUrl } from "@/lib/sourceUrl";
 import { useDownloads } from "@/stores/downloads";
+import { looksLikeCookieError } from "@/lib/bilibiliCookies";
 
 type Step = "url" | "cookie" | "probing" | "confirm";
 
@@ -54,8 +55,6 @@ export function PlaylistImportDialog({
   const [enqueueing, setEnqueueing] = useState(false);
   const [cookieReason, setCookieReason] = useState<"missing" | "expired">("missing");
 
-  const looksLikeCookieError = (msg: string) =>
-    /412|precondition|forbidden|403|login|cookie|需要登录|风控/i.test(msg);
 
   const runProbe = async () => {
     setError(null);

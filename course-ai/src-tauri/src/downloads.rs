@@ -255,6 +255,29 @@ impl DownloadQueue {
         created
     }
 
+    /// 把一个失败的任务重新排进队列（换成单独一批：原来那批早已结束、清掉了）。
+    /// 下完后是否自动处理沿用原来的设置。不是失败状态的返回 None。
+    fn requeue_failed(&self, id: &str) -> Option<DownloadJob> {
+        let mut inner = self.inner.lock().unwrap();
+        let job = inner.jobs.get_mut(id)?;
+        if job.status != "failed" {
+            return None;
+        }
+        let batch_id = Uuid::new_v4().to_string();
+        job.batch_id = batch_id.clone();
+        job.status = "queued".into();
+        job.error = None;
+        job.downloaded = 0;
+        job.total = None;
+        job.speed = None;
+        job.eta = None;
+        job.retry_height = None;
+        job.attempt += 1;
+        let snapshot = job.clone();
+        inner.batches.insert(batch_id, vec![id.to_string()]);
+        Some(snapshot)
+    }
+
     /// 任务已结束时，把结果交给等着它的调用方（见 `download_and_wait`）。
     fn settle_waiter(&self, id: &str) {
         let mut inner = self.inner.lock().unwrap();
@@ -716,6 +739,15 @@ pub async fn cmd_cancel_all_downloads(app: AppHandle) -> AppResult<()> {
     Ok(())
 }
 
+/// 重试一个失败的下载（例如重新导入 B 站 cookies 之后）。
+#[tauri::command]
+pub async fn cmd_retry_download(app: AppHandle, id: String) -> AppResult<()> {
+    if let Some(job) = app.state::<DownloadQueue>().requeue_failed(&id) {
+        start_jobs(&app, &[job]);
+    }
+    Ok(())
+}
+
 /// 从队列里移除一条已结束（失败）的记录。
 #[tauri::command]
 pub async fn cmd_remove_download(app: AppHandle, id: String) -> AppResult<()> {
@@ -864,6 +896,23 @@ mod tests {
             cancel_rx.try_recv().unwrap(),
             Err(DOWNLOAD_CANCELED_MESSAGE.to_string())
         );
+    }
+
+    #[test]
+    fn a_failed_job_is_requeued_as_its_own_batch() {
+        let queue = DownloadQueue::default();
+        let jobs = queue.register("c1", "/tmp/course", vec![(request("u1"), None)]);
+        let id = jobs[0].id.clone();
+        assert!(queue.requeue_failed(&id).is_none(), "只有失败的才能重试");
+        queue.set_status(&id, "failed", Some("HTTP Error 412".into()), None);
+
+        let retried = queue.requeue_failed(&id).unwrap();
+        assert_eq!(retried.status, "queued");
+        assert_eq!(retried.error, None);
+        assert_eq!(retried.attempt, 2);
+        assert_ne!(retried.batch_id, jobs[0].batch_id);
+        let inner = queue.inner.lock().unwrap();
+        assert_eq!(inner.batches[&retried.batch_id], vec![id]);
     }
 
     #[test]

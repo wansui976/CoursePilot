@@ -13,4 +13,6 @@ export const downloads = {
   /** 全部取消：连同已下完、正排着等处理的视频也不再处理。 */
   cancelAll: (): Promise<void> => invoke("cmd_cancel_all_downloads"),
   remove: (id: string): Promise<void> => invoke("cmd_remove_download", { id }),
+  /** 重试一个失败的下载（例如重新导入 cookies 之后）。 */
+  retry: (id: string): Promise<void> => invoke("cmd_retry_download", { id }),
 };

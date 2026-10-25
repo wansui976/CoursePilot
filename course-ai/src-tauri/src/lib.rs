@@ -87,7 +87,7 @@ use crate::db::Db;
 use crate::dev_log::{cmd_clear_dev_logs, cmd_get_dev_logs};
 use crate::downloads::{
     cmd_cancel_all_downloads, cmd_cancel_download, cmd_enqueue_downloads, cmd_list_downloads,
-    cmd_remove_download, DownloadQueue,
+    cmd_remove_download, cmd_retry_download, DownloadQueue,
 };
 use crate::jobs::cmd_list_jobs;
 use crate::pipeline::{
@@ -330,6 +330,7 @@ pub fn run() {
             cmd_enqueue_downloads,
             cmd_cancel_download,
             cmd_cancel_all_downloads,
+            cmd_retry_download,
             cmd_remove_download,
             cmd_list_downloads,
             cmd_probe_bilibili,

@@ -1148,7 +1148,10 @@
     "cancel": "取消下载",
     "remove": "移除",
     "progressAria": "{{title}} 下载进度",
-    "progressAriaValue": "已下载 {{percent}}%：{{message}}"
+    "progressAriaValue": "已下载 {{percent}}%：{{message}}",
+    "retry": "重试",
+    "cookieExpired": "B 站登录凭证可能已失效（如 HTTP 412）：重新导入 cookies.txt 后再试。",
+    "reimportCookies": "重新导入 cookies 并重试"
   },
   "playlistImport": {
     "title": "导入播放列表 / 合集",

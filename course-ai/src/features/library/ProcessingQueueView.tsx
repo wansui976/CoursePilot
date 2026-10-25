@@ -2,6 +2,8 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc, type DownloadJob } from "@/lib/ipc";
 import { describeDownloadJob, jobPercent } from "@/lib/downloadProgress";
+import { looksLikeCookieError, pickBilibiliCookies } from "@/lib/bilibiliCookies";
+import { isBilibiliUrl } from "@/lib/sourceUrl";
 import { stageMessage } from "@/lib/pipelineProgress";
 import type { Video } from "@/lib/types";
 import {
@@ -30,13 +32,21 @@ export function ProcessingQueueView({
       downloadOrder
         .map((id) => downloadsById[id])
         .filter((job): job is DownloadJob => !!job && isVisibleDownload(job.status))
-        .map((job) => ({
-          job,
-          percent: jobPercent(job),
-          message: describeDownloadJob(job, t),
-          failed: job.status === "failed",
-          canCancel: isCancelableDownload(job.status),
-        })),
+        .map((job) => {
+          const failed = job.status === "failed";
+          // 下载在后台跑，弹窗早关了：B 站凭证过期（412 等）只能在这里说清楚、给出路。
+          const cookieExpired =
+            failed && isBilibiliUrl(job.url) && looksLikeCookieError(job.error ?? "");
+          const message = describeDownloadJob(job, t);
+          return {
+            job,
+            percent: jobPercent(job),
+            message: cookieExpired ? `${t("downloads.cookieExpired")}\n${message}` : message,
+            failed,
+            cookieExpired,
+            canCancel: isCancelableDownload(job.status),
+          };
+        }),
     [downloadOrder, downloadsById, t],
   );
   const items = queue.queuedVideos.map((video) => {
@@ -66,6 +76,14 @@ export function ProcessingQueueView({
       downloads={downloads}
       onCancelDownload={(id) => {
         void ipc.downloads.cancel(id).catch(() => {});
+      }}
+      onRetryDownload={(id) => {
+        void ipc.downloads.retry(id).catch(() => {});
+      }}
+      onReimportCookies={(id) => {
+        void pickBilibiliCookies()
+          .then((picked) => (picked ? ipc.downloads.retry(id) : undefined))
+          .catch(() => {});
       }}
       onRemoveDownload={(id) => {
         void ipc.downloads

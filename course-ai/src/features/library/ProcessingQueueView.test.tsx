@@ -7,10 +7,11 @@ import { useDownloads } from "@/stores/downloads";
 import { ProcessingQueueView } from "./ProcessingQueueView";
 import type { ProcessingQueue } from "./useProcessingQueue";
 
-const { mockIpc, calls } = vi.hoisted(() => {
+const { mockIpc, calls, pickBilibiliCookies } = vi.hoisted(() => {
   const calls: string[] = [];
   return {
     calls,
+    pickBilibiliCookies: vi.fn(async () => true),
     mockIpc: {
       downloads: {
         cancelAll: vi.fn(async () => {
@@ -18,6 +19,7 @@ const { mockIpc, calls } = vi.hoisted(() => {
         }),
         cancel: vi.fn(async () => {}),
         remove: vi.fn(async () => {}),
+        retry: vi.fn(async () => {}),
       },
       pipeline: { cancel: vi.fn(async () => {}) },
     },
@@ -25,6 +27,10 @@ const { mockIpc, calls } = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
+vi.mock("@/lib/bilibiliCookies", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/bilibiliCookies")>()),
+  pickBilibiliCookies,
+}));
 
 function downloadJob(overrides: Partial<DownloadJob> = {}): DownloadJob {
   return {
@@ -77,6 +83,7 @@ describe("ProcessingQueueView", () => {
   beforeEach(async () => {
     await i18n.changeLanguage("zh-CN");
     calls.length = 0;
+    vi.clearAllMocks();
     const job = downloadJob();
     useDownloads.setState({ byId: { [job.id]: job }, order: [job.id] });
   });
@@ -92,5 +99,43 @@ describe("ProcessingQueueView", () => {
       expect(calls).toEqual(["downloads.cancelAll", "queue.cancelAllProcessing"]),
     );
     expect(mockIpc.downloads.cancel).not.toHaveBeenCalled();
+  });
+
+  function showFailed(job: Partial<DownloadJob>) {
+    const failed = downloadJob({ status: "failed", ...job });
+    useDownloads.setState({ byId: { [failed.id]: failed }, order: [failed.id] });
+    render(<ProcessingQueueView queue={fakeQueue()} onBack={vi.fn()} onOpenVideo={vi.fn()} />);
+  }
+
+  it("retries an ordinary failed download from the queue", async () => {
+    showFailed({ error: "yt-dlp failed: network unreachable" });
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+
+    await waitFor(() => expect(mockIpc.downloads.retry).toHaveBeenCalledWith("d1"));
+  });
+
+  it("explains an expired Bilibili sign-in and retries after new cookies are imported", async () => {
+    showFailed({
+      url: "https://www.bilibili.com/video/BV1xx",
+      error: "ERROR: [BiliBili] HTTP Error 412: Precondition Failed",
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("B 站登录凭证可能已失效");
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重新导入 cookies 并重试" }));
+
+    await waitFor(() => expect(mockIpc.downloads.retry).toHaveBeenCalledWith("d1"));
+    expect(pickBilibiliCookies).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry when the cookie file picker is dismissed", async () => {
+    pickBilibiliCookies.mockResolvedValueOnce(false);
+    showFailed({ url: "https://b23.tv/abc", error: "HTTP Error 412" });
+
+    fireEvent.click(screen.getByRole("button", { name: "重新导入 cookies 并重试" }));
+
+    await waitFor(() => expect(pickBilibiliCookies).toHaveBeenCalled());
+    expect(mockIpc.downloads.retry).not.toHaveBeenCalled();
   });
 });

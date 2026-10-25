@@ -1149,7 +1149,10 @@
     "cancel": "Cancel download",
     "remove": "Remove",
     "progressAria": "{{title}} download progress",
-    "progressAriaValue": "{{percent}}% downloaded: {{message}}"
+    "progressAriaValue": "{{percent}}% downloaded: {{message}}",
+    "retry": "Retry",
+    "cookieExpired": "Your Bilibili sign-in may have expired (e.g. HTTP 412). Import a fresh cookies.txt and try again.",
+    "reimportCookies": "Import cookies and retry"
   },
   "playlistImport": {
     "title": "Import Playlist / Collection",

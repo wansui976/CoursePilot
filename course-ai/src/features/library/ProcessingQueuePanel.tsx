@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Download, Loader2, RotateCcw, Trash2, X } from "lucide-react";
+import { Download, KeyRound, Loader2, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/ui/button";
 import { Badge } from "@/ui/badge";
 import { EmptyState } from "@/ui/empty-state";
@@ -28,6 +28,8 @@ export type DownloadQueueItem = {
   percent: number;
   message: string;
   failed: boolean;
+  /** 失败原因像是 B 站登录凭证过期：给「重新导入 cookies 并重试」。 */
+  cookieExpired?: boolean;
   canCancel: boolean;
 };
 
@@ -43,6 +45,8 @@ export function ProcessingQueuePanel({
   items,
   downloads,
   onCancelDownload,
+  onRetryDownload,
+  onReimportCookies,
   onRemoveDownload,
   loading,
   error,
@@ -61,6 +65,8 @@ export function ProcessingQueuePanel({
   items: QueueItem[];
   downloads: DownloadQueueItem[];
   onCancelDownload: (id: string) => void;
+  onRetryDownload: (id: string) => void;
+  onReimportCookies: (id: string) => void;
   onRemoveDownload: (id: string) => void;
   loading: boolean;
   error: boolean;
@@ -139,13 +145,13 @@ export function ProcessingQueuePanel({
                   {t("downloads.sectionTitle")}
                 </h2>
                 {downloads.map((item) => {
-                  const { job, percent, message, failed, canCancel } = item;
+                  const { job, percent, message, failed, cookieExpired, canCancel } = item;
                   return (
                     <div
                       key={job.id}
                       className="relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]"
                     >
-                      <div className={`px-4 py-3 ${failed ? "pr-24" : "pr-20"}`}>
+                      <div className={`px-4 py-3 ${failed ? "" : "pr-20"}`}>
                         <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0 truncate text-sm font-medium text-[var(--text-strong)]">
                             {job.title}
@@ -187,6 +193,37 @@ export function ProcessingQueuePanel({
                         >
                           {message}
                         </div>
+                        {failed && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            {cookieExpired ? (
+                              <button
+                                type="button"
+                                onClick={() => onReimportCookies(job.id)}
+                                className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)]"
+                              >
+                                <KeyRound className="h-3.5 w-3.5" />
+                                {t("downloads.reimportCookies")}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => onRetryDownload(job.id)}
+                                className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)]"
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                                {t("downloads.retry")}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => onRemoveDownload(job.id)}
+                              className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)]"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              {t("downloads.remove")}
+                            </button>
+                          </div>
+                        )}
                       </div>
                       {canCancel && (
                         <button
@@ -194,16 +231,6 @@ export function ProcessingQueuePanel({
                           className="ca-touch-44 absolute right-3 top-3 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
                         >
                           {t("downloads.cancel")}
-                        </button>
-                      )}
-                      {failed && (
-                        <button
-                          type="button"
-                          onClick={() => onRemoveDownload(job.id)}
-                          className="ca-touch-44 absolute right-3 top-3 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)]"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          {t("downloads.remove")}
                         </button>
                       )}
                     </div>
