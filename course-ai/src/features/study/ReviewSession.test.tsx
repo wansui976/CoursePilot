@@ -345,7 +345,9 @@ describe("ReviewSession", () => {
     renderSession();
     await screen.findByText("问题二");
     const reveal = screen.getByRole("button", { name: /显示答案/ });
-    expect(reveal).toHaveClass("text-[var(--on-accent)]");
+    // 翻面是次要按钮（描边、按文字宽），空格键同样能翻。
+    expect(reveal).toHaveClass("bg-transparent", "text-[var(--text-strong)]");
+    expect(reveal).not.toHaveClass("w-full");
     fireEvent.keyDown(window, { key: " " });
     expect(screen.getByText("答案二")).toBeInTheDocument();
   });

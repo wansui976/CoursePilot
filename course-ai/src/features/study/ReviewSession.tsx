@@ -239,7 +239,7 @@ export function ReviewSession({
             {concept ? concept.name : t("review.title")}
           </span>
           {cards.length > 0 && !done && (
-            <span className="flex-none rounded-full bg-[var(--surface-card-active)] px-2 py-0.5 text-xs font-medium tabular-nums text-[var(--text-muted)]">
+            <span className="flex-none text-xs tabular-nums text-[var(--text-muted)]">
               {index + 1} / {cards.length}
             </span>
           )}
@@ -295,9 +295,10 @@ export function ReviewSession({
           ) : card ? (
             <div
               key={card.id}
-              className="ca-card-enter rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 shadow-[var(--shadow-card)] sm:p-8"
+              // 题目直接排在页面上，不再装进一张小卡片：大号衬线字就是这一屏的全部重心。
+              className="ca-card-enter px-2 py-6 sm:px-4"
             >
-              <div className="ca-reading whitespace-pre-wrap text-center text-[length:calc(1.25rem*var(--reading-scale,1))] font-semibold leading-relaxed text-[var(--text-strong)]">
+              <div className="ca-reading whitespace-pre-wrap text-center text-[length:calc(1.6rem*var(--reading-scale,1))] font-semibold leading-snug text-[var(--text-strong)]">
                 {renderInlineMarkdown(card.front)}
               </div>
 
@@ -452,11 +453,12 @@ export function ReviewSession({
                   )}
                 </div>
               ) : (
+                // 次要按钮、按文字宽：不再是一条横贯整张卡的蓝色长条（空格键同样能翻面）。
                 <Button
-                  variant="primary"
+                  variant={choiceData ? "primary" : "outline"}
                   onClick={revealAnswer}
                   disabled={Boolean(choiceData && selectedOptions.length === 0)}
-                  className="ca-touch-44 mt-5 w-full"
+                  className="ca-touch-44 mx-auto mt-10 flex min-w-40"
                 >
                   {choiceData ? t("review.submitAnswer") : t("review.showAnswer")}
                 </Button>
