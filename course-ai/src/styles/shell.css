@@ -37,7 +37,7 @@
   padding-bottom: var(--safe-bottom);
 }
 
-/* rail 常驻占首列 56px；宽栏展开=256px、折叠=0（两列定长可平滑插值）。 */
+/* 侧栏展开=第二列 256px（首列 0）；收起=首列 56px 的图标 rail（第二列 0）。两列定长可平滑插值。 */
 .ca-app[data-sidebar="collapsed"] {
   grid-template-columns: 56px 0px minmax(0, 1fr);
 }
@@ -54,23 +54,10 @@
   z-index: var(--z-rail);
 }
 
-.ca-rail .rail-logo {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  margin-bottom: 8px;
-  flex: 0 0 auto;
-  background: var(--grad-brand);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .ca-rail .rail-btn {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -88,22 +75,14 @@
 }
 }
 
+/* 当前页：中性底色 + 深色图标，不铺强调色（强调色留给每屏唯一的主操作）。 */
 .ca-rail .rail-btn.active {
-  background: var(--accent-weak);
-  /* 前景用 --accent-text 而非 --accent：后者是实心块的底色，暗色主题下不跟着变亮，
-     当图标/文字色时在近黑底上只有 3.7:1，且与别处的强调蓝不是同一个颜色。 */
-  color: var(--accent-text);
+  background: var(--bg-sunken);
+  color: var(--text-1);
 }
 
 .ca-rail .rail-sp {
   flex: 1;
-}
-
-/* rail-logo 在工作台是「返回课程库」按钮：抹掉 button 默认样式。 */
-.ca-rail button.rail-logo {
-  border: none;
-  cursor: pointer;
-  padding: 0;
 }
 
 /* 折叠态队列计数徽标：钉在按钮右上角。 */
@@ -119,8 +98,8 @@
   height: 16px;
   padding: 0 4px;
   border-radius: 999px;
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--text-2);
+  color: var(--bg-panel);
   font-size: 10px;
   font-weight: 600;
   line-height: 16px;
@@ -205,65 +184,131 @@
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  padding: 16px 12px 12px;
+  padding: 14px 10px 10px;
   z-index: var(--z-sidebar);
   grid-column: 2;
 }
 
-.ca-brand {
+.ca-side-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 30px;
-  margin-bottom: 16px;
-  padding: 6px 8px 0;
+  gap: 8px;
+  min-height: 32px;
+  margin-bottom: 12px;
+  padding: 0 4px 0 10px;
 }
 
-.ca-brand .logo {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  flex: 0 0 auto;
-  background: var(--grad-brand);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 8px rgb(47 108 234 / 0.35);
-}
-
-.ca-brand h1 {
-  font-size: var(--fs-md);
-  font-weight: 680;
+.ca-side-app {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
   letter-spacing: 0.01em;
+  color: var(--text-1);
   white-space: nowrap;
 }
 
-.ca-new-btn {
-  width: 100%;
-  height: 44px;
-  margin-bottom: 16px;
-  border: 1px solid transparent !important;
-  border-radius: var(--r-sm) !important;
-  background: var(--accent) !important;
-  color: var(--on-accent) !important;
-  font-size: 13.5px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  box-shadow: 0 1px 2px rgb(47 108 234 / 0.3);
+/* 侧栏里的小图标按钮（收起、添加课程、回收站、主题）：桌面上 28px，触屏仍撑到 44px。 */
+.ca-side .ca-side-mini {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 6px;
 }
 
-.ca-new-btn:hover {
-  background: var(--accent-press) !important;
-  color: var(--on-accent-press) !important;
+.ca-side .ca-side-mini.active {
+  background: var(--bg-sunken);
+  color: var(--text-1);
+}
+
+.ca-side-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 18px;
+}
+
+.ca-side-item {
+  min-height: 34px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+
+.ca-side-item .ic {
+  flex: none;
+  color: var(--text-3);
+}
+
+.ca-side-item .nm {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .ca-side-item:hover {
+    background: var(--bg-sunken);
+    color: var(--text-1);
+  }
+}
+
+.ca-side-item.active {
+  background: var(--bg-sunken);
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.ca-side-item.active .ic {
+  color: var(--text-1);
+}
+
+.ca-side-count {
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-4);
+}
+
+.ca-side-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.ca-side-foot {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.ca-side-foot .ca-side-item {
+  flex: 1;
+  min-width: 0;
 }
 
 .ca-nav-label {
-  margin: 6px 0 7px;
-  padding: 4px 9px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+  margin: 0 0 4px;
+  padding: 0 4px 0 10px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -280,13 +325,13 @@
 }
 
 .ca-nav-item {
-  min-height: 44px;
+  min-height: 34px;
   display: flex;
   align-items: center;
   gap: 11px;
-  border-radius: var(--r-sm);
-  color: var(--text-1);
-  font-size: 13.5px;
+  border-radius: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
   font-weight: 500;
   transition: background 0.12s, color 0.12s;
   white-space: nowrap;
@@ -300,19 +345,19 @@
 }
 
 .ca-nav-item.active {
-  background: var(--accent-weak);
-  color: var(--accent-text);
+  background: var(--bg-sunken);
+  color: var(--text-1);
   font-weight: 600;
 }
 
 .ca-nav-button {
   min-width: 0;
   flex: 1;
-  min-height: 44px;
+  min-height: 34px;
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 0 9px;
+  gap: 10px;
+  padding: 0 10px;
   text-align: left;
 }
 
@@ -322,9 +367,7 @@
 }
 
 .ca-nav-item.active .ic {
-  /* 前景用 --accent-text 而非 --accent：后者是实心块的底色，暗色主题下不跟着变亮，
-     当图标/文字色时在近黑底上只有 3.7:1，且与别处的强调蓝不是同一个颜色。 */
-  color: var(--accent-text);
+  color: var(--text-1);
 }
 
 .ca-nav-button .nm {
@@ -347,7 +390,7 @@
 }
 
 .course-meta .pct {
-  color: var(--accent-text);
+  color: var(--text-3);
 }
 
 /* 工作台展开态：选中课程条目下内联的视频列表（缩进对齐课程名文字）。 */
@@ -389,8 +432,9 @@
 }
 
 .ca-side-video.on {
-  background: var(--accent-weak);
-  color: var(--accent-text);
+  background: var(--bg-sunken);
+  color: var(--text-1);
+  font-weight: 600;
 }
 
 .ca-side-videos-empty {

@@ -1000,7 +1000,8 @@
     "suggestDarkModePrompt": "切换到夜间模式",
     "turnLimitFallback": "助手连查了几轮也没能得出结论，已经停下。问得再具体一点通常能问出来。",
     "emptyAnswerFallback": "助手这次没有给出回答。",
-    "explainTranscript": "请解释这段文稿{{source}}：\n\n{{text}}"
+    "explainTranscript": "请解释这段文稿{{source}}：\n\n{{text}}",
+    "unread": "有新回复"
   },
   "assistantTools": {
     "list_courses": "查看课程",

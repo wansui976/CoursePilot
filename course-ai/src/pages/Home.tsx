@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { AppSidebar } from "@/features/shell/AppSidebar";
 import { AppRail } from "@/features/shell/AppRail";
+import type { ShellNav } from "@/features/shell/shellNav";
 import type { ConceptNavigationState } from "@/features/knowledge/ConceptsPanel";
 import { useProcessingQueue } from "@/features/library/useProcessingQueue";
 import { useDownloadsSync } from "@/features/library/useDownloads";
@@ -160,9 +161,12 @@ export function Home() {
   const shellWide = bucket === "wide" && !stackedPortrait;
   const tabletWide = tabletDevice && shellWide;
   const isPhoneDevice = !shellWide;
-  // rail 常驻消耗 56px；宽栏只在展开时再占 256px，折叠时为 0。宽度总和喂给工作台布局。
+  // 侧栏展开占 256px（导航与课程列表在同一列），收起后换成 56px 的图标 rail。
+  // 宽度喂给工作台布局。
   const sidebarWidth = shellWide
-    ? 56 + (sidebarCollapsed[selectedVideoId ? "workbench" : "library"] ? 0 : 256)
+    ? sidebarCollapsed[selectedVideoId ? "workbench" : "library"]
+      ? 56
+      : 256
     : 0;
   const workbenchAvailableWidth = Math.max(0, appPixelWidth - sidebarWidth);
   const androidBackGuard = useRef(0);
@@ -499,6 +503,26 @@ export function Home() {
                 : "library";
 
   const MainViewComponent = MAIN_VIEW_COMPONENTS[mainView];
+  const shellNav: ShellNav = {
+    view: sidebarView,
+    libraryHomeActive: mainViewKey === "library" && !selectedCourseId,
+    queueOpen,
+    queueCount: queuedVideos.length + downloadCount,
+    onToggleQueue: toggleQueue,
+    dashboardOpen: showDashboard,
+    onOpenDashboard: () => openMainView("dashboard"),
+    assistantActive: assistantOpen,
+    onToggleAssistant: toggleAssistant,
+    theme,
+    themeToggleLabel,
+    onToggleTheme: toggleTheme,
+    recycleOpen: showRecycleBin,
+    onOpenRecycleBin: () => openMainView("recycle"),
+    settingsOpen: showSettings,
+    onOpenSettings: () => openMainView("settings"),
+    onBackToLibrary: returnFromVideo,
+    onGoLibraryHome: clearCourseSelection,
+  };
   const shell: Shell = {
     isPhoneDevice,
     shellWide,
@@ -548,29 +572,11 @@ export function Home() {
       style={accentVars(accent, theme, customAccent) as CSSProperties}
       className="ca-app"
     >
-      {isPhoneDevice ? null : (
-        <>
-          <AppRail
-            view={sidebarView}
-            sidebarExpanded={!sidebarIsCollapsed}
-            onExpandSidebar={() => toggleSidebarCollapsed()}
-            queueOpen={queueOpen}
-            queueCount={queuedVideos.length + downloadCount}
-            onToggleQueue={toggleQueue}
-            onOpenDashboard={() => openMainView("dashboard")}
-            assistantActive={assistantOpen}
-            onToggleAssistant={toggleAssistant}
-            theme={theme}
-            themeToggleLabel={themeToggleLabel}
-            onToggleTheme={toggleTheme}
-            onOpenRecycleBin={() => openMainView("recycle")}
-            onOpenSettings={() => openMainView("settings")}
-            onBackToLibrary={returnFromVideo}
-            onGoLibraryHome={clearCourseSelection}
-          />
-          {!sidebarIsCollapsed && (
-            <AppSidebar
-              view={sidebarView}
+      {isPhoneDevice ? null : sidebarIsCollapsed ? (
+        <AppRail nav={shellNav} onExpandSidebar={() => toggleSidebarCollapsed()} />
+      ) : (
+        <AppSidebar
+              nav={shellNav}
               onToggleCollapsed={() => toggleSidebarCollapsed()}
               selectedCourseId={selectedCourseId}
               selectedCourseWatchedRatio={
@@ -583,10 +589,7 @@ export function Home() {
               videos={videos}
               selectedVideoId={selectedVideoId}
               onOpenVideo={openVideo}
-              queueOpen={queueOpen}
             />
-          )}
-        </>
       )}
       <main className="ca-main">
         {/* key=视图类型(而非视频 id):切换顶层视图时重挂以重播入场动画;在工作台内

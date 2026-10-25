@@ -1000,7 +1000,8 @@
     "suggestDarkModePrompt": "Switch to dark mode",
     "turnLimitFallback": "The assistant stopped after several attempts without reaching a conclusion. Try asking a more specific question.",
     "emptyAnswerFallback": "The assistant did not return an answer this time.",
-    "explainTranscript": "Please explain this transcript excerpt{{source}}:\n\n{{text}}"
+    "explainTranscript": "Please explain this transcript excerpt{{source}}:\n\n{{text}}",
+    "unread": "New reply"
   },
   "assistantTools": {
     "list_courses": "View courses",

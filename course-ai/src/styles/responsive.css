@@ -282,6 +282,18 @@
 
   /* 触控命中区兜底:桌面保持紧凑视觉尺寸,触屏上撑到 44×44(图标仍居中)。
      仅用于四周有留白、放大不会与邻键重叠的小按钮。 */
+  /* 侧栏的行与小图标按钮：桌面上紧凑（34 / 28px），触屏撑到 44px。 */
+  .ca-side-item,
+  .ca-nav-item,
+  .ca-nav-button {
+    min-height: 44px;
+  }
+
+  .ca-side .ca-side-mini {
+    width: 44px;
+    height: 44px;
+  }
+
   .ca-touch-44 {
     min-width: 44px;
     min-height: 44px;

@@ -198,14 +198,14 @@ describe("Home", () => {
 
   it("applies the chosen accent color as a CSS var on the app root", async () => {
     // .ca-app 在 CSS 里本地定义了 --accent，必须把强调色写成 .ca-app 的内联 style 才生效。
-    localStorage.setItem("course-ai-accent", "green");
+    localStorage.setItem("course-ai-accent", "pine");
 
     const { container } = await renderHome();
     const root = container.firstElementChild as HTMLElement;
 
-    expect(root.style.getPropertyValue("--accent")).toBe("#34a853");
+    expect(root.style.getPropertyValue("--accent")).toBe("#2e6b5e");
     // Tailwind primary 系列也应跟随强调色。
-    expect(root.style.getPropertyValue("--color-primary")).toBe("#34a853");
+    expect(root.style.getPropertyValue("--color-primary")).toBe("#2e6b5e");
   });
 
   it("applies the user's custom accent color as a CSS var on the app root", async () => {
@@ -623,13 +623,14 @@ describe("Home", () => {
     expect(app).toHaveAttribute("data-sidebar", "expanded");
   });
 
-  it("dedupes global actions: settings/dashboard live only in the rail, not the sidebar", async () => {
+  it("keeps every global action in a single column: the expanded sidebar replaces the rail", async () => {
     await renderHome();
     const sidebar = await screen.findByRole("complementary", { name: "课程侧栏" });
-    // 全局动作只出现在常驻 rail，侧栏里去重
-    expect(within(sidebar).queryByRole("button", { name: "设置" })).not.toBeInTheDocument();
-    expect(within(sidebar).queryByRole("button", { name: "学习面板" })).not.toBeInTheDocument();
+    // 展开时导航与课程在同一列；细 rail 只在收起时出现，同一个入口不会出现两次。
+    expect(within(sidebar).getByRole("button", { name: "设置" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "学习面板" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "设置" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "展开侧栏" })).not.toBeInTheDocument();
   });
 
   it("workbench expanded sidebar lists the course videos inline", async () => {
@@ -664,7 +665,7 @@ describe("Home", () => {
     await renderHome();
 
     await waitFor(() => expect(mockIpc.pipeline.jobs).toHaveBeenCalledWith(video.id));
-    fireEvent.click(within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", { name: "处理队列" }));
+    fireEvent.click(screen.getByRole("button", { name: "处理队列" }));
 
     const queuePage = screen.getByLabelText("处理队列页面");
     expect(within(queuePage).getByText(displayTitle(video.title))).toBeInTheDocument();
@@ -678,7 +679,7 @@ describe("Home", () => {
       .mockResolvedValueOnce([]);
     await renderHome();
 
-    fireEvent.click(within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", { name: "处理队列" }));
+    fireEvent.click(screen.getByRole("button", { name: "处理队列" }));
     const queuePage = screen.getByLabelText("处理队列页面");
 
     expect(await within(queuePage).findByRole("alert")).toHaveTextContent(
@@ -699,7 +700,7 @@ describe("Home", () => {
 
   it("routes desktop sidebar navigation through the registered settings exit guard", async () => {
     await renderHome();
-    const rail = await screen.findByRole("navigation", { name: "工具栏" });
+    const rail = await screen.findByRole("complementary", { name: "课程侧栏" });
 
     fireEvent.click(within(rail).getByRole("button", { name: "设置" }));
     expect(screen.getByText("设置面板")).toBeInTheDocument();
@@ -718,7 +719,7 @@ describe("Home", () => {
 
   it("guards course selection while settings has an unresolved draft", async () => {
     await renderHome();
-    const rail = await screen.findByRole("navigation", { name: "工具栏" });
+    const rail = await screen.findByRole("complementary", { name: "课程侧栏" });
     const sidebar = await screen.findByRole("complementary", { name: "课程侧栏" });
     fireEvent.click(within(rail).getByRole("button", { name: "设置" }));
 
@@ -752,7 +753,7 @@ describe("Home", () => {
     await renderHome();
 
     await waitFor(() => expect(mockIpc.pipeline.jobs).toHaveBeenCalledWith(video.id));
-    fireEvent.click(within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", { name: "处理队列" }));
+    fireEvent.click(screen.getByRole("button", { name: "处理队列" }));
     const queuePage = screen.getByLabelText("处理队列页面");
 
     expect(await within(queuePage).findByText("任务进度读取失败")).toBeInTheDocument();
@@ -784,7 +785,7 @@ describe("Home", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "开始处理" }));
     await waitFor(() => expect(mockIpc.pipeline.process).toHaveBeenCalledWith(video.id));
 
-    fireEvent.click(within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", { name: "处理队列" }));
+    fireEvent.click(screen.getByRole("button", { name: "处理队列" }));
     expect(
       within(screen.getByLabelText("处理队列页面")).getByText(displayTitle(video.title)),
     ).toBeInTheDocument();
@@ -850,7 +851,7 @@ describe("Home", () => {
     await waitFor(() => expect(mockIpc.pipeline.process).toHaveBeenCalledWith(video.id));
 
     fireEvent.click(await screen.findByRole("button", { name: /^数学课程/ }));
-    fireEvent.click(within(screen.getByRole("navigation", { name: "工具栏" })).getByRole("button", { name: "处理队列" }));
+    fireEvent.click(screen.getByRole("button", { name: "处理队列" }));
 
     const queuePage = screen.getByLabelText("处理队列页面");
     const queuedTitle = within(queuePage).getByText(displayTitle(video.title));

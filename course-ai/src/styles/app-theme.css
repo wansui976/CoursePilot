@@ -76,7 +76,8 @@
   width: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: 56px 256px minmax(0, 1fr);
+  /* 首列是收起时的图标 rail，第二列是展开的侧栏：两者同一时刻只出现一个。 */
+  grid-template-columns: 0px 256px minmax(0, 1fr);
   transition: grid-template-columns 0.18s var(--ease);
   background: var(--bg-app);
   color: var(--text-1);
