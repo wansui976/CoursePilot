@@ -245,8 +245,8 @@ export interface DownloadJob {
   speed: number | null;
   /** 剩余秒数 */
   eta: number | null;
-  /** 断流降档之类的临时提示 */
-  message: string | null;
+  /** 视频流中途断开、正在降到这一档清晰度重下；正常进度时为 null。 */
+  retryHeight: number | null;
   error: string | null;
   videoId: string | null;
   /** 第几次尝试；断流降档重下时 +1，进度条据此归零重来。 */

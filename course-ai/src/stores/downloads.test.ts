@@ -19,7 +19,7 @@ function job(overrides: Partial<DownloadJob> = {}): DownloadJob {
     total: null,
     speed: null,
     eta: null,
-    message: null,
+    retryHeight: null,
     error: null,
     videoId: null,
     attempt: 0,

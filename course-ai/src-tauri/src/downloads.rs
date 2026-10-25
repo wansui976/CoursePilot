@@ -37,8 +37,9 @@ pub struct DownloadJob {
     pub speed: Option<f64>,
     /// 剩余秒数
     pub eta: Option<u64>,
-    /// 断流降档之类的临时提示；正常进度时为空。
-    pub message: Option<String>,
+    /// 视频流中途断开、正在降到这一档清晰度重下；正常进度时为空。
+    /// 只给数字，提示文案由前端按界面语言写。
+    pub retry_height: Option<u32>,
     pub error: Option<String>,
     pub video_id: Option<String>,
     /// 第几次尝试；断流降档重下时 +1，前端据此重置进度条。
@@ -134,14 +135,14 @@ impl DownloadQueue {
                 job.total = total;
                 job.speed = speed;
                 job.eta = eta;
-                job.message = None;
+                job.retry_height = None;
             }
             DownloadEvent::Merging => {
                 job.status = "merging".into();
                 job.downloaded = job.total.unwrap_or(job.downloaded);
                 job.speed = None;
                 job.eta = None;
-                job.message = None;
+                job.retry_height = None;
             }
             DownloadEvent::Retrying { max_height } => {
                 // 这是一次全新的尝试（换低一档清晰度重下），进度归零。
@@ -151,7 +152,7 @@ impl DownloadQueue {
                 job.total = None;
                 job.speed = None;
                 job.eta = None;
-                job.message = Some(format!("视频流中途断开，正在降到 {max_height}P 重新下载…"));
+                job.retry_height = Some(max_height);
             }
         }
         Some(job.clone())
@@ -171,7 +172,7 @@ impl DownloadQueue {
             job.downloaded = job.total.unwrap_or(job.downloaded);
             job.speed = None;
             job.eta = None;
-            job.message = None;
+            job.retry_height = None;
         }
         job.error = error;
         job.video_id = video_id;
@@ -393,7 +394,7 @@ pub async fn cmd_enqueue_downloads(
                 total: None,
                 speed: None,
                 eta: None,
-                message: None,
+                retry_height: None,
                 error: None,
                 video_id: None,
                 attempt: 1,
@@ -456,7 +457,7 @@ pub async fn cmd_cancel_download(app: AppHandle, id: String) -> AppResult<()> {
             return Ok(());
         }
         job.status = "canceled".into();
-        job.message = None;
+        job.retry_height = None;
         job.speed = None;
         job.eta = None;
         let snapshot = job.clone();
@@ -520,7 +521,7 @@ mod tests {
             total: None,
             speed: None,
             eta: None,
-            message: None,
+            retry_height: None,
             error: None,
             video_id: None,
             attempt: 1,
@@ -578,7 +579,7 @@ mod tests {
         assert_eq!(updated.attempt, 2);
         assert_eq!(updated.downloaded, 0);
         assert_eq!(updated.total, None);
-        assert!(updated.message.unwrap().contains("720P"));
+        assert_eq!(updated.retry_height, Some(720));
     }
 
     #[test]

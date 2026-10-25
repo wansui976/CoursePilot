@@ -36,7 +36,7 @@ export function jobPercent(job: DownloadJob): number {
 export function describeDownloadJob(job: DownloadJob, t: TFunction): string {
   if (job.status === "failed") return job.error ?? t("downloads.failed");
   if (job.status === "queued") return t("downloads.queued");
-  if (job.message) return job.message;
+  if (job.retryHeight != null) return t("urlImport.retrying", { height: job.retryHeight });
   if (job.status === "merging") return t("urlImport.merging");
   const label =
     job.total && job.total > 0

@@ -15,7 +15,7 @@ function job(overrides: Partial<DownloadJob> = {}): DownloadJob {
     total: null,
     speed: null,
     eta: null,
-    message: null,
+    retryHeight: null,
     error: null,
     videoId: null,
     attempt: 0,
@@ -81,13 +81,15 @@ describe("describeDownloadJob", () => {
     ).toBe("下载中 42% · 3.1 MB/s");
   });
 
-  it("shows the retry message from the backend", () => {
-    expect(
-      describeDownloadJob(
-        job({ message: "视频流中途断开，正在降到 720P 重新下载…" }),
-        t,
-      ),
-    ).toContain("720P");
+  it("writes the quality-fallback notice in the interface language", async () => {
+    expect(describeDownloadJob(job({ retryHeight: 720 }), t)).toContain("720P");
+    await i18n.changeLanguage("en");
+    try {
+      expect(describeDownloadJob(job({ retryHeight: 720 }), i18n.t.bind(i18n))).toMatch(/720p/i);
+      expect(describeDownloadJob(job({ retryHeight: 720 }), i18n.t.bind(i18n))).not.toMatch(/[\u4e00-\u9fff]/);
+    } finally {
+      await i18n.changeLanguage("zh-CN");
+    }
   });
 
   it("distinguishes queued and failed jobs", () => {
