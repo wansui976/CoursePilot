@@ -181,6 +181,52 @@ const STREAM_INTERRUPTED_MESSAGE: &str =
     "视频流在传输中途被服务器断开（已自动降低清晰度重试），链接本身没有问题。请稍后重试，或换低一档清晰度。";
 /// yt-dlp 进度行的前缀；用自定义模板输出机器可读的进度，避免解析给人看的进度条。
 const PROGRESS_PREFIX: &str = "courseai-progress";
+/// 开始下载前 yt-dlp 报一次「这次要下的所有流加起来多大」的行前缀（见 `run_ytdlp`）。
+const PLANNED_TOTAL_PREFIX: &str = "courseai-total";
+
+/// 把 yt-dlp 分流报的进度折成一条总进度。
+///
+/// B 站 / YouTube 的 DASH 把视频流、音频流分开下，各自 0→100%。只靠「下完的流折进
+/// base」是不够的：下视频流时还不知道后面有音频流，视频流一下满就报了 100%，音频流
+/// 一开始又退回九十几。所以开下之前先让 yt-dlp 报出所有流的总大小（`planned`），
+/// 总量取它与已知各流之和的较大者，进度从头到尾只进不退。拿不到预估时退回按流累加。
+#[derive(Default)]
+struct ProgressFolder {
+    planned: Option<u64>,
+    base_downloaded: u64,
+    base_total: u64,
+    stream_downloaded: u64,
+    stream_total: Option<u64>,
+}
+
+impl ProgressFolder {
+    fn plan(&mut self, total: u64) {
+        if total > 0 {
+            self.planned = Some(total);
+        }
+    }
+
+    /// 开始下下一路流。
+    fn next_stream(&mut self) {
+        self.base_downloaded += self.stream_downloaded;
+        self.base_total += self.stream_total.unwrap_or(self.stream_downloaded);
+        self.stream_downloaded = 0;
+        self.stream_total = None;
+    }
+
+    fn fold(&mut self, downloaded: u64, total: Option<u64>) -> (u64, Option<u64>) {
+        self.stream_downloaded = downloaded;
+        self.stream_total = total;
+        let downloaded = self.base_downloaded + downloaded;
+        let known = total.map(|total| self.base_total + total);
+        let total = match (known, self.planned) {
+            (Some(known), Some(planned)) => Some(known.max(planned)),
+            (None, Some(planned)) => Some(planned.max(downloaded)),
+            (known, None) => known,
+        };
+        (downloaded, total)
+    }
+}
 
 /// 下载过程中的事件，经 `url-import:<request_id>` 推给前端。
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -222,6 +268,13 @@ async fn run_ytdlp(
                  %(progress.total_bytes)s %(progress.total_bytes_estimate)s \
                  %(progress.speed)s %(progress.eta)s"
             ),
+            // 开下之前报一次本次所有流（视频+音频）的总大小，见 ProgressFolder。
+            // --print 默认会顺带打开 --simulate 与 --quiet：前者不下载，后者把
+            // Destination / [Merger] 行也吞掉，这两样都要显式关回去。
+            "--print",
+            &format!("before_dl:{PLANNED_TOTAL_PREFIX} %(filesize,filesize_approx)s"),
+            "--no-simulate",
+            "--no-quiet",
         ])
         .args(args)
         .stdin(Stdio::null())
@@ -241,24 +294,25 @@ async fn run_ytdlp(
     let mut lines = BufReader::new(child.stdout.take().expect("stdout is piped")).split(b'\n');
     // yt-dlp 每读一块就报一次进度，一秒能有几十行；限一下频率再推给前端。
     let mut last_progress: Option<std::time::Instant> = None;
-    // B 站/YouTube 的 DASH 会把视频流、音频流分开下，各自 0→100%。直接透传会让前端的
-    // 进度条在换流时倒回 0；这里把已经下完的流折进 base，报出去的始终是一条总进度。
-    let mut base_downloaded = 0u64;
-    let mut base_total = 0u64;
-    let mut stream_downloaded = 0u64;
-    let mut stream_total: Option<u64> = None;
+    // B 站/YouTube 的 DASH 会把视频流、音频流分开下，各自 0→100%；报出去的始终是
+    // 一条总进度（见 ProgressFolder）。
+    let mut folder = ProgressFolder::default();
     while let Some(line) = lines
         .next_segment()
         .await
         .map_err(|e| AppError::Pipeline(format!("yt-dlp output: {e}")))?
     {
         let text = String::from_utf8_lossy(&line);
+        if let Some(planned) = text.trim().strip_prefix(PLANNED_TOTAL_PREFIX) {
+            // 拿不到大小时 yt-dlp 输出 "NA"，就当没有预估。
+            if let Ok(total) = planned.trim().parse::<u64>() {
+                folder.plan(total);
+            }
+            continue;
+        }
         // 每开始一路新的下载，yt-dlp 会先打一行 Destination。
         if text.trim_start().starts_with("[download] Destination:") {
-            base_downloaded += stream_downloaded;
-            base_total += stream_total.unwrap_or(stream_downloaded);
-            stream_downloaded = 0;
-            stream_total = None;
+            folder.next_stream();
             continue;
         }
         let Some(event) = parse_progress_line(&text) else {
@@ -271,11 +325,10 @@ async fn run_ytdlp(
                 speed,
                 eta,
             } => {
-                stream_downloaded = downloaded;
-                stream_total = total;
+                let (downloaded, total) = folder.fold(downloaded, total);
                 DownloadEvent::Progress {
-                    downloaded: base_downloaded + downloaded,
-                    total: total.map(|total| base_total + total),
+                    downloaded,
+                    total,
                     speed,
                     eta,
                 }
@@ -736,6 +789,38 @@ pub async fn probe(url: &str, cookies: Option<&str>) -> AppResult<ProbeResult> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn dash_progress_never_hits_100_before_the_audio_stream() {
+        // 实测：B 站 360P 视频流约 15.3 MB、音频流约 12.3 MB，开下前 yt-dlp 报总计 27.66 MB。
+        let mut folder = ProgressFolder::default();
+        folder.plan(27_662_033);
+        folder.next_stream();
+        let (downloaded, total) = folder.fold(15_317_730, Some(15_317_730));
+        assert_eq!(downloaded, 15_317_730);
+        assert_eq!(total, Some(27_662_033));
+        // 换到音频流：进度接着往上走，不回退。
+        folder.next_stream();
+        let (downloaded, total) = folder.fold(1_024, Some(12_343_454));
+        assert_eq!(downloaded, 15_318_754);
+        assert_eq!(total, Some(27_662_033));
+        let (downloaded, total) = folder.fold(12_343_454, Some(12_343_454));
+        // 预估比实际少一点时，以实际为准，进度停在 100% 而不是超过。
+        assert_eq!(downloaded, 27_661_184);
+        assert_eq!(total, Some(27_662_033));
+    }
+
+    #[test]
+    fn dash_progress_falls_back_to_per_stream_sums_without_a_plan() {
+        let mut folder = ProgressFolder::default();
+        folder.next_stream();
+        assert_eq!(folder.fold(100, Some(100)), (100, Some(100)));
+        folder.next_stream();
+        assert_eq!(folder.fold(10, Some(40)), (110, Some(140)));
+        // 某一路报不出大小：总量也报不出，前端按已下字节显示。
+        folder.next_stream();
+        assert_eq!(folder.fold(5, None), (115, None));
+    }
 
     #[test]
     fn paths_without_a_drive_letter_never_count_as_a_missing_drive() {

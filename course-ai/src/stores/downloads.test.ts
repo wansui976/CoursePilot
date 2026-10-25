@@ -32,23 +32,15 @@ describe("useDownloads", () => {
     useDownloads.setState({ byId: {}, order: [] });
   });
 
-  it("keeps progress monotonic within one attempt", () => {
+  it("takes backend progress as-is instead of freezing it at a stale 100%", () => {
     const { upsert } = useDownloads.getState();
+    // 没有预估总量的来源：视频流下满后总量随音频流变大，进度应如实回落而不是卡在 100%。
     upsert(job({ downloaded: 100, total: 100 }));
-    // 音频流从 0 开始：同一轮尝试里不让进度条退回。
-    upsert(job({ downloaded: 0, total: 100 }));
+    upsert(job({ downloaded: 110, total: 140 }));
 
     const current = useDownloads.getState().byId.d1;
-    expect(current.downloaded).toBe(100);
-    expect(current.total).toBe(100);
-  });
-
-  it("allows the bar to reset after a quality fallback retry", () => {
-    const { upsert } = useDownloads.getState();
-    upsert(job({ downloaded: 100, total: 100 }));
-    upsert(job({ downloaded: 0, total: 100, attempt: 1 }));
-
-    expect(useDownloads.getState().byId.d1.downloaded).toBe(0);
+    expect(current.downloaded).toBe(110);
+    expect(current.total).toBe(140);
   });
 
   it("deduplicates by id and keeps enqueue order", () => {

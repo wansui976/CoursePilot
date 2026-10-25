@@ -1,7 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { DownloadJob, DownloadStatus } from "@/lib/ipc";
-import { jobPercent } from "@/lib/downloadProgress";
 
 interface State {
   byId: Record<string, DownloadJob>;
@@ -37,25 +36,14 @@ export const selectDownloadCount = (state: State): number =>
 export const useDownloads = create<State>((set) => ({
   byId: {},
   order: [],
+  // 后端报的就是整条总进度（开下前就拿到了视频流+音频流的总大小，见 download.rs 的
+  // ProgressFolder），原样收下。这里不再按百分比「只进不退」地夹：拿不到总大小的少数
+  // 来源换流时总量会变大，夹住的话进度条会在 100% 一直停到音频流下完。
   upsert: (job) =>
-    set((state) => {
-      const current = state.byId[job.id];
-      let next = job;
-      // 同一轮尝试里进度只进不退：视频流下满 100% 后音频流从 0 开始，
-      // 不夹一下进度条会从 100 跳回 90。换清晰度重下（attempt+1）才允许归零。
-      if (
-        current &&
-        current.attempt === job.attempt &&
-        job.status !== "done" &&
-        jobPercent(job) < jobPercent(current)
-      ) {
-        next = { ...job, downloaded: current.downloaded, total: current.total };
-      }
-      return {
-        byId: { ...state.byId, [job.id]: next },
-        order: state.byId[job.id] ? state.order : [...state.order, job.id],
-      };
-    }),
+    set((state) => ({
+      byId: { ...state.byId, [job.id]: job },
+      order: state.byId[job.id] ? state.order : [...state.order, job.id],
+    })),
   addMany: (jobs) =>
     set((state) => {
       if (jobs.length === 0) return state;
