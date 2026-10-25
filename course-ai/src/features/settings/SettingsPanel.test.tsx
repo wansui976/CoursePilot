@@ -348,13 +348,13 @@ describe("SettingsPanel", () => {
     expect(localStorage.getItem("slides-sensitivity")).toBe("auto");
   });
 
-  it("lets users choose the first accent color from a color picker", () => {
+  it("lets users pick any accent color from the color wheel", () => {
     render(<SettingsPanel onClose={() => undefined} />);
 
     const picker = screen.getByLabelText("自定义强调色");
     const swatch = picker.parentElement?.querySelector("span") as HTMLElement;
 
-    expect(picker.parentElement).toHaveAttribute("title", "多色");
+    expect(picker.closest("label")).toHaveAttribute("title", "自选");
     expect(swatch.style.background).toContain("conic-gradient");
 
     fireEvent.change(picker, {

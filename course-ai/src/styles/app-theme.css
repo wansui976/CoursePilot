@@ -6,13 +6,13 @@
    color-mix() 整条失效。 */
 :root,
 .ca-app {
-  --accent: #1f5fd1;
-  --accent-press: #194fae;
+  --accent: #2f5b9a;
+  --accent-press: #284d82;
   --on-accent: #ffffff;
   --on-accent-press: #ffffff;
-  --accent-weak: #eef3fd;
-  --accent-weak-2: #e3ecfc;
-  --accent-text: #2a63d8;
+  --accent-weak: #edf1f7;
+  --accent-weak-2: #e0e7f1;
+  --accent-text: #2f5b9a;
   --video-accent: #7aa6ff;
   --bg-app: var(--surface-app);
   --bg-sidebar: var(--surface-sidebar);

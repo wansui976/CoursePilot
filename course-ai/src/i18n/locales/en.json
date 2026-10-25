@@ -717,14 +717,6 @@
       "languageZh": "简体中文",
       "languageEn": "English",
       "accentCustom": "Custom",
-      "accentBlue": "Blue",
-      "accentPurple": "Purple",
-      "accentPink": "Pink",
-      "accentRed": "Red",
-      "accentOrange": "Orange",
-      "accentYellow": "Yellow",
-      "accentGreen": "Green",
-      "accentGray": "Gray",
       "readingFont": "Reading font",
       "readingFontFootnote": "Used for notes, summaries, review cards and other reading content. Interface text is not affected.",
       "readingFontSerif": "Serif",
@@ -737,7 +729,12 @@
       "readingSize": "Size",
       "readingSizeSmall": "Small",
       "readingSizeMedium": "Standard",
-      "readingSizeLarge": "Large"
+      "readingSizeLarge": "Large",
+      "accentInk": "Ink",
+      "accentSlate": "Slate",
+      "accentPine": "Pine",
+      "accentOchre": "Ochre",
+      "accentWine": "Wine"
     },
     "studyReminder": {
       "title": "Study Reminder",

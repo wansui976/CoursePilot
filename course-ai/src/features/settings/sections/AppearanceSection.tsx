@@ -116,18 +116,33 @@ export function AppearanceSection() {
         header={t("settings.appearance.accentColor")}
       >
         <StackRow>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-start gap-x-5 gap-y-3">
             {ACCENTS.map((option) => {
               const selected = accent === option.key;
+              // 选中环只在选中时画：深色主题的卡片底是半透明的，ring-offset 拿它当色，
+              // 没选中的色块也会套上一圈暗晕。
+              const swatchRing = `grid h-7 w-7 place-items-center rounded-full transition ${
+                selected
+                  ? "ring-2 ring-[var(--text-muted)] ring-offset-2 ring-offset-[var(--surface-panel)]"
+                  : ""
+              }`;
+              const caption = (
+                <span
+                  className={`ca-t-2xs ${
+                    selected ? "font-medium text-[var(--text-strong)]" : "text-[var(--text-muted)]"
+                  }`}
+                >
+                  {t(option.i18nKey)}
+                </span>
+              );
               if (option.key === "custom") {
                 return (
                   <label
                     key={option.key}
                     title={t(option.i18nKey)}
-                    className={`ca-touch-44 relative grid h-7 w-7 cursor-pointer place-items-center rounded-full ring-2 ring-offset-2 ring-offset-[var(--surface-card)] transition ${
-                      selected ? "ring-[var(--text-muted)]" : "ring-transparent"
-                    }`}
+                    className="ca-touch-44 relative flex cursor-pointer flex-col items-center gap-1.5"
                   >
+                    <span className={swatchRing}>
                     <input
                       aria-label={t("settings.appearance.customAccent")}
                       type="color"
@@ -144,6 +159,8 @@ export function AppearanceSection() {
                           "conic-gradient(from 210deg, #f25555, #f2a13d, #f2d83d, #5cc46b, #3d8bf2, #a05cf2, #f25590, #f25555)",
                       }}
                     />
+                    </span>
+                    {caption}
                   </label>
                 );
               }
@@ -151,17 +168,16 @@ export function AppearanceSection() {
                 <button
                   key={option.key}
                   onClick={() => setAccent(option.key)}
-                  title={t(option.i18nKey)}
-                  aria-label={t(option.i18nKey)}
                   aria-pressed={selected}
-                  className={`ca-touch-44 grid h-7 w-7 place-items-center rounded-full ring-2 ring-offset-2 ring-offset-[var(--surface-card)] transition ${
-                    selected ? "ring-[var(--text-muted)]" : "ring-transparent"
-                  }`}
+                  className="ca-touch-44 flex flex-col items-center gap-1.5"
                 >
-                  <span
-                    className="h-5 w-5 rounded-full"
-                    style={{ background: option.accent }}
-                  />
+                  <span className={swatchRing}>
+                    <span
+                      className="h-5 w-5 rounded-full"
+                      style={{ background: option.accent }}
+                    />
+                  </span>
+                  {caption}
                 </button>
               );
             })}
