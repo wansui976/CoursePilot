@@ -166,6 +166,9 @@ export function VideoPlayer({
     if (!videoId) return;
     return () => syncPlaybackProgress(videoId);
   }, [videoId]);
+  // 父组件每次渲染都传一个新的内联回调；放进 ref，免得轮询跟着父组件重渲染一遍遍重启。
+  const onTranscodedRef = useRef(onTranscoded);
+  onTranscodedRef.current = onTranscoded;
   useEffect(() => {
     if (decodeFailure === null) return;
     let cancelled = false;
@@ -176,7 +179,7 @@ export function VideoPlayer({
         if (cancelled) return;
         setTranscode(status);
         if (status.state === "done") {
-          onTranscoded?.();
+          onTranscodedRef.current?.();
           return;
         }
       } catch {
@@ -189,7 +192,7 @@ export function VideoPlayer({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [decodeFailure, videoId, onTranscoded]);
+  }, [decodeFailure, videoId]);
 
   const [rate, setRate] = useState(loadPlaybackRate);
   const silenceSkip = useSilenceSkip(videoId);
