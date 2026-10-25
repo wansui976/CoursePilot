@@ -60,6 +60,19 @@ describe("useDownloads", () => {
     expect(useDownloads.getState().byId.d1.status).toBe("merging");
   });
 
+  it("never lets the enqueue snapshot overwrite newer progress events", () => {
+    const { addMany, upsert } = useDownloads.getState();
+    // 任务瞬间失败：事件先到，入队响应（排队中、0 字节）后到。
+    upsert(job({ id: "d1", status: "failed", error: "HTTP Error 412" }));
+    addMany([job({ id: "d1", status: "queued" }), job({ id: "d2", status: "queued" })]);
+
+    expect(useDownloads.getState().byId.d1).toMatchObject({
+      status: "failed",
+      error: "HTTP Error 412",
+    });
+    expect(useDownloads.getState().order).toEqual(["d1", "d2"]);
+  });
+
   it("removes jobs and clears finished ones per course", () => {
     const { addMany, remove, clearFinished } = useDownloads.getState();
     addMany([

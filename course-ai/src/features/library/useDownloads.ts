@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import { ipc, type DownloadBatchDoneEvent } from "@/lib/ipc";
+import { ipc, type DownloadBatchDoneEvent, type DownloadJob } from "@/lib/ipc";
 import { qk } from "@/lib/queryKeys";
 import { useDownloads } from "@/stores/downloads";
 
@@ -14,7 +14,6 @@ import { useDownloads } from "@/stores/downloads";
  */
 export function useDownloadsSync() {
   const queryClient = useQueryClient();
-  const byId = useDownloads((s) => s.byId);
   const seed = useDownloads((s) => s.seed);
   const clearFinished = useDownloads((s) => s.clearFinished);
   const doneSeen = useRef<Set<string>>(new Set());
@@ -35,13 +34,22 @@ export function useDownloadsSync() {
   }, [seed]);
 
   // 视频已经入库：马上刷新课程列表，占位行换成真实视频。
+  // 在 store 外订阅，不用 hook 选 byId：进度事件一秒好几条，用 hook 会让挂着它的
+  // Home 整棵树跟着每条进度重渲染，而这里只关心「变成 done」这一下。
   useEffect(() => {
-    for (const job of Object.values(byId)) {
-      if (job.status !== "done" || doneSeen.current.has(job.id)) continue;
-      doneSeen.current.add(job.id);
-      void queryClient.invalidateQueries({ queryKey: qk.videos.list(job.courseId) });
-    }
-  }, [byId, queryClient]);
+    const seen = doneSeen.current;
+    const refreshDone = (byId: Record<string, DownloadJob>) => {
+      for (const job of Object.values(byId)) {
+        if (job.status !== "done" || seen.has(job.id)) continue;
+        seen.add(job.id);
+        void queryClient.invalidateQueries({ queryKey: qk.videos.list(job.courseId) });
+      }
+    };
+    refreshDone(useDownloads.getState().byId);
+    return useDownloads.subscribe((state, previous) => {
+      if (state.byId !== previous.byId) refreshDone(state.byId);
+    });
+  }, [queryClient]);
 
   // 一批全部下完：后端统一起流水线。清掉占位记录，让处理队列接上。
   useEffect(() => {

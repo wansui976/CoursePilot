@@ -9,7 +9,7 @@ interface State {
   order: string[];
   /** 后端推来的实时进度。 */
   upsert: (job: DownloadJob) => void;
-  /** 入队响应带来的任务（事件可能早于响应到达，合并时按 id 去重）。 */
+  /** 入队响应带来的任务（事件可能早于响应到达：已有记录的以事件为准）。 */
   addMany: (jobs: DownloadJob[]) => void;
   remove: (id: string) => void;
   /** 一批结束后清掉已完成的记录（失败的留着给用户看/移除）。 */
@@ -62,8 +62,12 @@ export const useDownloads = create<State>((set) => ({
       const byId = { ...state.byId };
       const order = [...state.order];
       for (const job of jobs) {
-        if (!byId[job.id]) order.push(job.id);
-        byId[job.id] = byId[job.id] ? { ...byId[job.id], ...job } : job;
+        // 入队响应只是入队那一刻的快照（排队中、0 字节）。后端起任务后立刻推进度事件，
+        // 这些事件常常比响应先到——已有记录就一定比快照新，不能拿快照盖回去，
+        // 否则下得飞快（或瞬间失败）的任务会被打回「排队中」，之后再没有事件来纠正。
+        if (byId[job.id]) continue;
+        order.push(job.id);
+        byId[job.id] = job;
       }
       return { byId, order };
     }),
