@@ -32,7 +32,13 @@ impl Db {
             .max_connections(5)
             .connect_with(opts)
             .await?;
-        sqlx::migrate!("./migrations").run(&pool).await?;
+        let mut migrator = sqlx::migrate!("./migrations");
+        // 库里有本版本不认识的迁移（被更新的版本开过）时照常打开，不报 VersionMissing。
+        // 开发版与正式版共用同一个数据目录，跑过开发版再装回正式版就是这种情况；
+        // 用户从新版退回旧版也一样。不忽略的话旧版一启动就闪退。
+        // 前提是迁移只做加法（加表、加列、加索引），旧代码对着新库照样能跑。
+        migrator.set_ignore_missing(true);
+        migrator.run(&pool).await?;
         Ok(Self {
             pool,
             path: db_path.to_owned(),
@@ -82,6 +88,25 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(row.0, "courses");
+    }
+
+    #[tokio::test]
+    async fn opens_database_migrated_by_a_newer_version() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db = Db::connect_and_migrate(&db_path).await.unwrap();
+        // 冒充一条本版本没有的迁移，模拟更新的版本开过这个库。
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations
+               (version, description, installed_on, success, checksum, execution_time)
+             VALUES (999999, 'from the future', CURRENT_TIMESTAMP, 1, x'00', 0)",
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        db.pool.close().await;
+
+        Db::connect_and_migrate(&db_path).await.unwrap();
     }
 
     #[tokio::test]

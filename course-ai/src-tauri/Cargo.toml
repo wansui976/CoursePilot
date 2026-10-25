@@ -47,6 +47,8 @@ security-framework = "3"
 tauri-plugin-single-instance = "2"
 # 本地 Whisper 认中文常吐繁体，转成简体用（只在桌面上跑 Whisper；只带繁→简词库）。
 ferrous-opencc = { version = "0.4", default-features = false, features = ["t2s-conversion"] }
+# 启动失败时弹原生错误框（tauri-plugin-dialog 已带进来；它的阻塞弹窗在主线程上会死锁）。
+rfd = { version = "0.16", default-features = false }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2 = "0.6.4"

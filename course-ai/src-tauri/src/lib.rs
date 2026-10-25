@@ -92,6 +92,24 @@ use crate::pipeline::{
 use crate::usage_log::{cmd_clear_llm_usage, cmd_llm_usage};
 use tauri::Manager;
 
+/// 启动时无法继续：先告诉用户原因再退出。setup 跑在不能 unwind 的回调里，
+/// 直接 panic 会被转成 abort，用户只看到「一打开就闪退」，原因只留在崩溃报告里。
+fn fatal_startup_error(message: &str) -> ! {
+    tracing::error!("{message}");
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    {
+        rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Error)
+            .set_title("course-ai 无法启动")
+            .set_description(message)
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+        std::process::exit(1);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    panic!("{message}");
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -129,9 +147,13 @@ pub fn run() {
                     }
                 }
                 let database_existed = db_path.is_file();
-                let db = Db::connect_and_migrate(&db_path)
-                    .await
-                    .expect("db init");
+                let db = match Db::connect_and_migrate(&db_path).await {
+                    Ok(db) => db,
+                    Err(error) => fatal_startup_error(&format!(
+                        "打开数据库失败：{error}\n\n数据库位置：{}",
+                        db_path.display()
+                    )),
+                };
                 // iOS 每次更新 / 重装应用，沙盒路径里的 UUID 都会变，库里存的绝对路径要跟着改。
                 #[cfg(target_os = "ios")]
                 if let Some(current_root) =
