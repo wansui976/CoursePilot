@@ -103,7 +103,8 @@ pub fn video_codec(path: &Path) -> Option<[u8; 4]> {
             continue;
         }
         let trak = child_boxes(&mut file, trak_start, trak_end);
-        let Some((_, mdia_start, mdia_end)) = trak.iter().find(|(kind, _, _)| kind == b"mdia").copied()
+        let Some((_, mdia_start, mdia_end)) =
+            trak.iter().find(|(kind, _, _)| kind == b"mdia").copied()
         else {
             continue;
         };
@@ -115,7 +116,8 @@ pub fn video_codec(path: &Path) -> Option<[u8; 4]> {
             continue;
         };
         let mut handler = [0_u8; 12];
-        if file.seek(SeekFrom::Start(hdlr_start)).is_err() || file.read_exact(&mut handler).is_err() {
+        if file.seek(SeekFrom::Start(hdlr_start)).is_err() || file.read_exact(&mut handler).is_err()
+        {
             continue;
         }
         if &handler[8..12] != b"vide" {
@@ -152,12 +154,14 @@ pub fn video_codec(path: &Path) -> Option<[u8; 4]> {
 
 /// 这个四字码在当前平台能不能放出来。
 ///
-/// iOS 的 WKWebView 只认 H.264 与 `hvc1` 封装的 HEVC；AV1 要 M4 / A17 Pro 起的硬解，
+/// iOS 的 WKWebView 只认 H.264（avc1 / avc3）、`hvc1` 封装的 HEVC 和杜比视界（dvh1）；
+/// AV1 要 M4 / A17 Pro 起的硬解，
 /// 老机型拿到 av01 就是一块黑屏。Android 的 WebView 是 Chromium，自带 AV1 软解，不设限。
 /// 桌面不判：macOS 上能放的东西比这里列的多，别拿移动端的白名单去卡桌面。
 pub fn codec_playable_here(codec: [u8; 4]) -> bool {
     if cfg!(target_os = "ios") {
-        return matches!(&codec, b"avc1" | b"hvc1");
+        // avc3 / dvh1（杜比视界）WKWebView 也放得了；HEVC 只认 hvc1 标签，hev1 不行。
+        return matches!(&codec, b"avc1" | b"avc3" | b"hvc1" | b"dvh1");
     }
     true
 }

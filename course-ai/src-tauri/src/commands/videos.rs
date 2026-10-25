@@ -801,7 +801,6 @@ pub async fn cmd_add_local_batch(
     Ok(imported)
 }
 
-
 /// 导入后如果这条视频的编码在本机放不出来，就在后台转一份 H.264（`data_dir/playable.mp4`）。
 /// 只 iOS 会真的转；Android 的 WebView 自带 AV1 软解，桌面更不用管。
 fn start_transcode_if_needed(app: &tauri::AppHandle, video: &Video) {
@@ -814,6 +813,7 @@ fn start_transcode_if_needed(app: &tauri::AppHandle, video: &Video) {
         &video.id,
         &video.file_path,
         &video.data_dir,
+        false,
     );
 }
 
@@ -1004,12 +1004,14 @@ pub async fn cmd_media_url(
     let file_path = stabilize_mobile_video_file(&app, &state.db, &video_id, &file_path).await?;
     // 编码这台设备解不了（比如老 iPad 上的 AV1）：后台转一份 H.264 放在 data_dir，
     // cached_playable 下次就会优先用它。这里只负责点火，不等它转完。
-    if let Some(jobs) = app.try_state::<std::sync::Arc<crate::commands::transcode::TranscodeJobs>>() {
+    if let Some(jobs) = app.try_state::<std::sync::Arc<crate::commands::transcode::TranscodeJobs>>()
+    {
         let _ = crate::commands::transcode::ensure_transcode(
             jobs.inner().clone(),
             &video_id,
             &file_path,
             &data_dir,
+            false,
         );
     }
     let path = crate::pipeline::playable::cached_playable(
@@ -1084,14 +1086,19 @@ pub async fn video_cover_bytes(db: &Db, video_id: &str) -> AppResult<Vec<u8>> {
         let stale = std::fs::metadata(&cover_path)
             .and_then(|meta| meta.modified())
             .ok()
-            .zip(std::fs::metadata(&source).and_then(|meta| meta.modified()).ok())
+            .zip(
+                std::fs::metadata(&source)
+                    .and_then(|meta| meta.modified())
+                    .ok(),
+            )
             .map(|(cover, playable)| cover < playable)
             .unwrap_or(false);
         if stale {
             let _ = std::fs::remove_file(&cover_path);
         }
     }
-    let cover = crate::pipeline::slides::ensure_cover(&source, std::path::Path::new(&data_dir)).await?;
+    let cover =
+        crate::pipeline::slides::ensure_cover(&source, std::path::Path::new(&data_dir)).await?;
     Ok(tokio::fs::read(&cover).await?)
 }
 

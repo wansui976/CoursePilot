@@ -41,11 +41,12 @@ private final class Writer {
     let width: Int
     let height: Int
     var frames = 0
-    var appendFailures = 0
     /// 上一帧的 pts（AVAssetWriter 要求时间单调，重复或不增会整段失败）。
     var lastPts = CMTime.invalid
     var skippedNonMonotonic = 0
-    var skippedNotReady = 0
+    /// 有一帧没写进去（编码器一直不收、像素缓冲建不出来、append 失败）。成片会缺帧，
+    /// 整次转码按失败算——宁可让用户重试，也不交出一段卡顿、跳帧的「成品」。
+    var failed = false
 
     init(writer: AVAssetWriter, width: Int, height: Int) {
         self.writer = writer
@@ -76,23 +77,27 @@ private final class Writer {
 
     /// dav1d 解出一帧就写一帧。
     func append(_ frame: Dav1dFrame) {
+        if failed { return }
         let input = videoInput
+        // 编码器忙时等它；30 秒还不收就是卡死了。
         var spins = 0
-        while !input.isReadyForMoreMediaData && spins < 2000 {
+        while !input.isReadyForMoreMediaData && spins < 30_000 && writer.status == .writing {
             usleep(1000)
             spins += 1
         }
-        // 还没准备好就硬写会抛 ObjC 异常（这个异常 Swift 接不住，直接闪退）。
-        // 宁可丢这一帧：下一帧进来时再试。
+        // 还没准备好就硬写会抛 ObjC 异常（这个异常 Swift 接不住，直接闪退），只能放弃。
         guard input.isReadyForMoreMediaData else {
-            skippedNotReady += 1
+            trace("encoder never became ready at frame \(frames)")
+            failed = true
             return
         }
         guard let buffer = makePixelBuffer(frame) else {
-            appendFailures += 1
+            trace("pixel buffer failed at frame \(frames) (bitdepth \(frame.bitdepth))")
+            failed = true
             return
         }
         let pts = CMTime(value: CMTimeValue(frame.pts), timescale: 1_000_000)
+        // 时间戳不增的只会是重复帧（同一时刻再显示一次），丢掉不缺画面。
         if lastPts.isValid && CMTimeCompare(pts, lastPts) <= 0 {
             skippedNonMonotonic += 1
             return
@@ -101,8 +106,8 @@ private final class Writer {
             frames += 1
             lastPts = pts
         } else {
-            appendFailures += 1
-            if frames < 8 { trace("append FAILED \(frames)") }
+            trace("append failed at frame \(frames): \(writer.error.map(String.init(describing:)) ?? "")")
+            failed = true
         }
     }
 
@@ -135,16 +140,28 @@ private final class Writer {
         guard CVPixelBufferLockBaseAddress(buffer, []) == kCVReturnSuccess else { return nil }
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
 
+        // 按解出来的帧实际尺寸拷：轨道头里的 naturalSize 可能比编码尺寸大（非方形像素、
+        // 裁切过的片子），照它拷会读出解码器缓冲区的边界。帧比画布小时，多出来的部分涂黑。
+        let copyWidth = min(width, Int(frame.width))
+        let copyHeight = min(height, Int(frame.height))
+        let partial = copyWidth < width || copyHeight < height
+
         if let destination = CVPixelBufferGetBaseAddressOfPlane(buffer, 0) {
             let stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
-            for row in 0..<height {
-                memcpy(destination + row * stride, y + row * frame.stride_y, width)
+            if partial {
+                memset(destination, 16, stride * CVPixelBufferGetHeightOfPlane(buffer, 0))
+            }
+            for row in 0..<copyHeight {
+                memcpy(destination + row * stride, y + row * frame.stride_y, copyWidth)
             }
         }
         if let destination = CVPixelBufferGetBaseAddressOfPlane(buffer, 1) {
             let stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 1)
-            let chromaWidth = (width + 1) / 2
-            let chromaHeight = (height + 1) / 2
+            if partial {
+                memset(destination, 128, stride * CVPixelBufferGetHeightOfPlane(buffer, 1))
+            }
+            let chromaWidth = (copyWidth + 1) / 2
+            let chromaHeight = (copyHeight + 1) / 2
             let target = destination.assumingMemoryBound(to: UInt8.self)
             for row in 0..<chromaHeight {
                 let sourceU = u + row * frame.stride_u
@@ -162,8 +179,10 @@ private final class Writer {
 
 
 /// 阶段跟踪：写到 Documents/transcode-trace.log。真机上 NSLog 进不了 syslog，
-/// 卡住时只有落盘的记录能说明停在哪儿。
+/// 卡住时只有落盘的记录能说明停在哪儿。只在调试构建里写：正式版不该往用户的
+/// 「文件」App 里塞一个只增不减的日志。
 private func trace(_ message: String) {
+    #if DEBUG
     guard let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
     let url = directory.appendingPathComponent("transcode-trace.log")
     let line = "\(Date().timeIntervalSince1970) \(message)\n"
@@ -175,6 +194,7 @@ private func trace(_ message: String) {
     } else {
         try? data.write(to: url)
     }
+    #endif
 }
 
 /// 转码入口。返回值：0 成功；负数为错误码。
@@ -254,19 +274,24 @@ public func courseai_transcode_video(
 
     trace("decoding")
     var samples = 0
-    while let sample = compressed.copyNextSampleBuffer() {
+    var decodeError: Int32 = 0
+    var bytes = [UInt8]()
+    while !sink.failed, decodeError == 0, let sample = compressed.copyNextSampleBuffer() {
         if samples == 0 { trace("first sample") }
         samples += 1
         let pts = CMSampleBufferGetPresentationTimeStamp(sample)
         let micros = UInt64(max(0, CMTimeGetSeconds(pts) * 1_000_000))
-        if let block = CMSampleBufferGetDataBuffer(sample) {
-            var length = 0
-            var pointer: UnsafeMutablePointer<Int8>?
-            if CMBlockBufferGetDataPointer(
-                block, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length,
-                dataPointerOut: &pointer) == kCMBlockBufferNoErr, let pointer {
-                pointer.withMemoryRebound(to: UInt8.self, capacity: length) { bytes in
-                    _ = dav1d_decoder_push(decoder, bytes, length, micros, callback, box)
+        if let block = CMSampleBufferGetDataBuffer(sample), CMBlockBufferGetDataLength(block) > 0 {
+            // 拷出来再送：样本的数据块可能由几段拼成，GetDataPointer 给的指针只管第一段，
+            // 按总长读会越界。
+            let length = CMBlockBufferGetDataLength(block)
+            if bytes.count < length { bytes = [UInt8](repeating: 0, count: length) }
+            let copied = bytes.withUnsafeMutableBytes { raw in
+                CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: raw.baseAddress!)
+            }
+            if copied == kCMBlockBufferNoErr {
+                decodeError = bytes.withUnsafeBufferPointer { buffer in
+                    dav1d_decoder_push(decoder, buffer.baseAddress!, length, micros, callback, box)
                 }
             }
         }
@@ -274,15 +299,21 @@ public func courseai_transcode_video(
             currentProgress = Int32(min(99, max(1, samples * 100 / estimatedFrames)))
         }
     }
-    trace("samples done: \(samples), frames \(sink.frames)")
-    _ = dav1d_decoder_flush(decoder, callback, box)
+    trace("samples done: \(samples), frames \(sink.frames), decode \(decodeError)")
+    if decodeError == 0, !sink.failed {
+        _ = dav1d_decoder_flush(decoder, callback, box)
+    }
     sink.videoInput.markAsFinished()
 
     let done = DispatchSemaphore(value: 0)
     writer.finishWriting { done.signal() }
     done.wait()
 
-    trace("writer finished status \(writer.status.rawValue) frames \(sink.frames)")
+    trace("writer finished status \(writer.status.rawValue) frames \(sink.frames) duplicates \(sink.skippedNonMonotonic)")
+    if decodeError != 0 || sink.failed {
+        try? FileManager.default.removeItem(at: partial)
+        return decodeError != 0 ? -13 : -14
+    }
     guard writer.status == .completed, sink.frames > 0 else {
         try? FileManager.default.removeItem(at: partial)
         return -11
@@ -338,12 +369,29 @@ private func muxAudio(videoOnly: URL, from source: AVURLAsset, into destination:
         trace("mux: mp4 unsupported \(export.supportedFileTypes)")
         return false
     }
-    try? FileManager.default.removeItem(at: destination)
-    export.outputURL = destination
+    // 先导出到旁边的临时文件，成功后再改名成 playable.mp4：Rust 那边只要见到
+    // playable.mp4 就当成品交给播放器，导出途中（或导出时被杀）不能让它出现半截文件。
+    // 临时名仍以 .mp4 结尾，AVFoundation 按扩展名认容器。
+    let exporting = destination.deletingLastPathComponent()
+        .appendingPathComponent("playable.exporting.mp4")
+    try? FileManager.default.removeItem(at: exporting)
+    export.outputURL = exporting
     export.outputFileType = .mp4
     let done = DispatchSemaphore(value: 0)
     export.exportAsynchronously { done.signal() }
     done.wait()
     trace("mux: export status \(export.status.rawValue) \(export.error.map(String.init(describing:)) ?? "")")
-    return export.status == .completed
+    guard export.status == .completed else {
+        try? FileManager.default.removeItem(at: exporting)
+        return false
+    }
+    do {
+        try? FileManager.default.removeItem(at: destination)
+        try FileManager.default.moveItem(at: exporting, to: destination)
+    } catch {
+        trace("mux: rename failed \(error)")
+        try? FileManager.default.removeItem(at: exporting)
+        return false
+    }
+    return true
 }
