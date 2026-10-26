@@ -897,7 +897,9 @@ export function ConceptsPanel({
                       {t("concepts.coveredVideos")}
                     </dt>
                     <dd className="mt-1 truncate text-lg font-semibold tabular-nums text-[var(--text-strong)]">
-                      {knowledge?.covered_videos ?? 0}/{knowledge?.total_videos ?? 0}
+                      {/* 知识点真正出自几个视频。不用 covered_videos（那是「有字幕的视频数」）：
+                          否则这里写 7/8，下面又说 5 个视频还没出现在知识点里，自相矛盾。 */}
+                      {analyzedVideos}/{knowledge?.total_videos ?? 0}
                     </dd>
                   </div>
                 </dl>

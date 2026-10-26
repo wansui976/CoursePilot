@@ -375,6 +375,8 @@ describe("ConceptsPanel", () => {
     expect(
       await screen.findByText(/有 1 个含字幕的视频还没出现在知识点里，需要重新分析/),
     ).toBeInTheDocument();
+    // 「已覆盖视频」数的是知识点真正出自几个视频，与上面这句话对得上（不是有字幕的 3 个）。
+    expect(screen.getByText("2/3")).toBeInTheDocument();
   });
 
   it("lets a concept without due cards generate only concept-scoped cards", async () => {
