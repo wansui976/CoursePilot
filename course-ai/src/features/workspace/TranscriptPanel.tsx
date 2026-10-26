@@ -30,7 +30,7 @@ import { usePlayer } from "@/stores/player";
 import { useInlineAsk } from "@/stores/inlineAsk";
 import type { TranscriptSegment } from "@/lib/types";
 import { findActiveSegmentIndex } from "@/lib/transcript";
-import { TRANSLATION_LANGS, useCaptionPrefs } from "@/stores/captionPrefs";
+import { TRANSLATION_LANGS, useCaptionPrefs, useTranslationLang } from "@/stores/captionPrefs";
 import type { TranslateProgress } from "@/lib/ipc";
 
 // 手动滚动后暂停「跟随播放自动居中」的时长；停手超过该窗口才恢复跟随。
@@ -178,7 +178,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   const requestSeek = usePlayer((s) => s.requestSeek);
   // 字幕翻译：译文存在本地库里，播放器字幕和这里的双语文稿共用。
   const captionMode = useCaptionPrefs((s) => s.mode);
-  const translationLang = useCaptionPrefs((s) => s.lang);
+  const translationLang = useTranslationLang(segments);
   const setTranslationLang = useCaptionPrefs((s) => s.setLang);
   const setCaptionMode = useCaptionPrefs((s) => s.setMode);
   const translationsQuery = useQuery({

@@ -22,7 +22,7 @@ import { useNoteCapture } from "@/stores/noteCapture";
 import { CaptionOverlay } from "./CaptionOverlay";
 import { Controls } from "./Controls";
 import { DanmakuOverlay } from "./DanmakuOverlay";
-import { useCaptionPrefs } from "@/stores/captionPrefs";
+import { useCaptionPrefs, useTranslationLang } from "@/stores/captionPrefs";
 import { MiniProgress, ProgressBar } from "./ProgressBar";
 
 /**
@@ -289,7 +289,7 @@ export function VideoPlayer({
   const { data: chapters } = useQuery(queries.chapters(videoId));
   // 字幕译文：本地库里读，翻过才有。原文模式下也读，用来决定要不要出「原文/双语/译文」切换。
   const captionMode = useCaptionPrefs((s) => s.mode);
-  const translationLang = useCaptionPrefs((s) => s.lang);
+  const translationLang = useTranslationLang(queriedSegments ?? EMPTY_TRANSCRIPT_SEGMENTS);
   const { data: translations } = useQuery({
     queryKey: qk.translations(videoId, translationLang),
     queryFn: () => ipc.translation.list(videoId, translationLang),

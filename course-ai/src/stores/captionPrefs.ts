@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { create } from "zustand";
 
 /** 字幕显示：只看原文、原文+译文、只看译文。 */
@@ -38,6 +39,8 @@ interface CaptionPrefsState {
   /** 全局、持久：外语课一般整门课都要看双语。 */
   mode: CaptionMode;
   lang: TranslationLang;
+  /** 用户亲手选过翻译目标语言。没选过时按文稿语言自动定（见 useTranslationLang）。 */
+  langChosen: boolean;
   size: CaptionSize;
   background: CaptionBackground;
   /** 原文 → 双语 → 译文 → 原文。 */
@@ -51,6 +54,7 @@ interface CaptionPrefsState {
 export const useCaptionPrefs = create<CaptionPrefsState>((set, get) => ({
   mode: read(MODE_KEY, MODES, "original"),
   lang: read(LANG_KEY, TRANSLATION_LANGS, "zh"),
+  langChosen: typeof window !== "undefined" && window.localStorage.getItem(LANG_KEY) !== null,
   size: read(SIZE_KEY, CAPTION_SIZES, "medium"),
   background: read(BACKGROUND_KEY, CAPTION_BACKGROUNDS, "translucent"),
   cycleMode: () => get().setMode(MODES[(MODES.indexOf(get().mode) + 1) % MODES.length]),
@@ -60,7 +64,7 @@ export const useCaptionPrefs = create<CaptionPrefsState>((set, get) => ({
   },
   setLang: (lang) => {
     write(LANG_KEY, lang);
-    set({ lang });
+    set({ lang, langChosen: true });
   },
   setSize: (size) => {
     write(SIZE_KEY, size);
@@ -71,3 +75,25 @@ export const useCaptionPrefs = create<CaptionPrefsState>((set, get) => ({
     set({ background });
   },
 }));
+
+/**
+ * 没选过目标语言时的默认值：中文文稿译成英文，其余（英文、日文、韩文…）译成中文。
+ * 原先一律默认中文，中文课点「翻译」就是把中文译成中文。
+ * 日文也有汉字，所以看到假名、谚文就不算中文。
+ */
+export function defaultTranslationLang(texts: readonly string[]): TranslationLang {
+  const sample = texts.slice(0, 30).join("");
+  if (!sample) return "zh";
+  if (/[\u3040-\u30ff\uac00-\ud7af]/.test(sample)) return "zh";
+  const han = sample.match(/[\u4e00-\u9fff]/g)?.length ?? 0;
+  const letters = sample.match(/[\p{L}]/gu)?.length ?? 0;
+  return letters > 0 && han / letters > 0.5 ? "en" : "zh";
+}
+
+/** 文稿与播放器字幕共用的翻译目标语言：用户选过就用选的，没选过按文稿语言定。 */
+export function useTranslationLang(segments: readonly { text: string }[]): TranslationLang {
+  const lang = useCaptionPrefs((s) => s.lang);
+  const chosen = useCaptionPrefs((s) => s.langChosen);
+  const auto = useMemo(() => defaultTranslationLang(segments.map((segment) => segment.text)), [segments]);
+  return chosen ? lang : auto;
+}

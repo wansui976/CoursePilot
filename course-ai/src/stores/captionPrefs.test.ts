@@ -36,3 +36,20 @@ describe("captionPrefs", () => {
     expect(localStorage.getItem("course-ai-caption-background")).toBe("none");
   });
 });
+
+describe("翻译目标语言的默认值", () => {
+  it("中文文稿默认译成英文，其余默认译成中文；日文有假名不算中文", async () => {
+    const { defaultTranslationLang } = await import("./captionPrefs");
+    expect(defaultTranslationLang(["今天我们学习牛顿第一定律", "惯性是物体本身的属性"])).toBe("en");
+    expect(defaultTranslationLang(["Today we study Newton's first law"])).toBe("zh");
+    expect(defaultTranslationLang(["今日は慣性について学びます"])).toBe("zh");
+    expect(defaultTranslationLang([])).toBe("zh");
+  });
+
+  it("用户选过就用选的", async () => {
+    const { useCaptionPrefs } = await import("./captionPrefs");
+    useCaptionPrefs.getState().setLang("ja");
+    expect(useCaptionPrefs.getState().langChosen).toBe(true);
+    expect(useCaptionPrefs.getState().lang).toBe("ja");
+  });
+});
