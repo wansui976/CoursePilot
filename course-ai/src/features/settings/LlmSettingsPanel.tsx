@@ -294,7 +294,7 @@ export function LlmSettingsPanel({
         </p>
       )}
       {!loadError && profiles.length === 0 && (
-        <p className="rounded-lg border border-dashed border-[var(--border-subtle)] px-3 py-4 text-center text-xs text-[var(--text-faint)]">
+        <p className="py-2 text-xs leading-relaxed text-[var(--text-muted)]">
           {t("llmSettings.emptyHint")}
         </p>
       )}

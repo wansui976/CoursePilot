@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Download, KeyRound, Loader2, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/ui/button";
-import { Badge } from "@/ui/badge";
 import { EmptyState } from "@/ui/empty-state";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { ViewHeader } from "@/ui/view-header";
@@ -112,9 +111,9 @@ export function ProcessingQueuePanel({
                 {t("home.retryAll")}
               </Button>
             )}
-            <Badge tone="neutral" dot={false}>
+            <span className="text-xs tabular-nums text-[var(--text-muted)]">
               {t("home.queueCount", { count: totalCount })}
-            </Badge>
+            </span>
           </>
         }
       />
@@ -137,10 +136,11 @@ export function ProcessingQueuePanel({
             />
           </div>
         ) : totalCount > 0 ? (
-          <div className="flex w-full flex-col gap-3">
+          // 平铺的列表：上下发丝线分隔，不再每个任务一张带框带影的卡片。
+          <div className="flex w-full flex-col">
             {downloads.length > 0 && (
-              <section className="flex flex-col gap-2">
-                <h2 className="flex items-center gap-1.5 px-1 text-xs font-medium text-[var(--text-muted)]">
+              <section className="mb-6 flex flex-col">
+                <h2 className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)]">
                   <Download className="h-3.5 w-3.5" aria-hidden="true" />
                   {t("downloads.sectionTitle")}
                 </h2>
@@ -149,7 +149,7 @@ export function ProcessingQueuePanel({
                   return (
                     <div
                       key={job.id}
-                      className="relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]"
+                      className="relative border-t border-[var(--border-faint)] last:border-b"
                     >
                       <div className={`px-4 py-3 ${failed ? "" : "pr-20"}`}>
                         <div className="flex items-center justify-between gap-3">
@@ -228,7 +228,7 @@ export function ProcessingQueuePanel({
                       {canCancel && (
                         <button
                           onClick={() => onCancelDownload(job.id)}
-                          className="ca-touch-44 absolute right-3 top-3 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
+                          className="ca-touch-44 absolute right-3 top-3 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)]"
                         >
                           {t("downloads.cancel")}
                         </button>
@@ -243,7 +243,7 @@ export function ProcessingQueuePanel({
               return (
                 <div
                   key={video.id}
-                  className="relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]"
+                  className="relative border-t border-[var(--border-faint)] last:border-b"
                 >
                   <button
                     onClick={() => onOpenVideo(video)}
@@ -309,7 +309,7 @@ export function ProcessingQueuePanel({
                   {canCancel && (
                     <button
                       onClick={() => onCancelVideo(video.id)}
-                      className="ca-touch-44 absolute right-3 top-3 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"
+                      className="ca-touch-44 absolute right-3 top-3 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)]"
                     >
                       {t("home.cancel")}
                     </button>

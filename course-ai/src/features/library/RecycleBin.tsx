@@ -159,7 +159,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
     return (
       <li
         key={item.id}
-        className="grid grid-cols-[44px_71px_minmax(0,1fr)] items-center gap-x-2 gap-y-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 transition hover:bg-[var(--surface-card-hover)] sm:flex sm:gap-3"
+        className="grid grid-cols-[44px_71px_minmax(0,1fr)] items-center gap-x-2 gap-y-2 rounded-md px-3 py-2 transition hover:bg-[var(--surface-card-hover)] sm:flex sm:gap-3"
       >
         <label className="inline-flex h-11 w-11 flex-none items-center justify-center">
           <input
@@ -212,7 +212,8 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
             disabled={busy}
             title={t("recycleBin.permanentDeleteTitle")}
             aria-label={t("recycleBin.deleteItem", { title: item.title })}
-            className="ca-touch-44 inline-flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
+            // 每一行都挂一个红色按钮，整页红成一片；平时灰色，悬停才变红（删除前还有确认）。
+            className="ca-touch-44 inline-flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)] disabled:opacity-50"
           >
             <Trash2 className="h-3.5 w-3.5" />
             {t("recycleBin.permanentDelete")}
@@ -247,7 +248,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
             {group.courseName} ({group.items.length})
           </h3>
         </div>
-        <ul className="space-y-1">{group.items.map(renderRow)}</ul>
+        <ul className="divide-y divide-[var(--border-faint)] border-y border-[var(--border-faint)]">{group.items.map(renderRow)}</ul>
       </section>
     );
   }
