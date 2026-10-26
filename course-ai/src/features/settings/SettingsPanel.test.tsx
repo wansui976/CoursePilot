@@ -333,6 +333,17 @@ describe("SettingsPanel", () => {
     expect((slider as HTMLElement).style.getPropertyValue("--slider-fill")).toBe("80%");
   });
 
+  it("改键撞上别的动作时两边互换，并说明换了什么", async () => {
+    render(<SettingsPanel onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole("button", { name: "快捷键" }));
+    fireEvent.click(await screen.findByRole("button", { name: "设置「记一笔」快捷键" }));
+    fireEvent.keyDown(window, { key: "k" });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "「K」原来是「播放 / 暂停」的快捷键，已改给「记一笔」；「播放 / 暂停」换成了「N」。",
+    );
+    expect(screen.getByRole("button", { name: "设置「播放 / 暂停」快捷键" })).toHaveTextContent("N");
+  });
+
   it("课件灵敏度默认自动（滑块不可调）；关掉自动可手调，再打开回到自动", async () => {
     render(<SettingsPanel onClose={() => undefined} />);
 

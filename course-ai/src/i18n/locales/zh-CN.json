@@ -766,7 +766,9 @@
       "notSet": "未设置",
       "space": "空格",
       "takeNote": "记一笔",
-      "takeNoteHint": "暂停，在笔记末尾插入当前时间，接着写"
+      "takeNoteHint": "暂停，在笔记末尾插入当前时间，接着写",
+      "swapped": "「{{key}}」原来是「{{other}}」的快捷键，已改给「{{action}}」；「{{other}}」换成了「{{previous}}」。",
+      "swappedUnset": "「{{key}}」原来是「{{other}}」的快捷键，已改给「{{action}}」；「{{other}}」现在没有快捷键。"
     },
     "storage": {
       "title": "存储位置",

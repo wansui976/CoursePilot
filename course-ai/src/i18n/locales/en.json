@@ -766,7 +766,9 @@
       "notSet": "Not set",
       "space": "Space",
       "takeNote": "Take a note",
-      "takeNoteHint": "Pause and add the current time at the end of your notes"
+      "takeNoteHint": "Pause and add the current time at the end of your notes",
+      "swapped": "\"{{key}}\" was the shortcut for \"{{other}}\" and now belongs to \"{{action}}\"; \"{{other}}\" uses \"{{previous}}\" instead.",
+      "swappedUnset": "\"{{key}}\" was the shortcut for \"{{other}}\" and now belongs to \"{{action}}\"; \"{{other}}\" has no shortcut now."
     },
     "storage": {
       "title": "Storage Location",

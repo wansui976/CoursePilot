@@ -104,26 +104,39 @@ function persist(bindings: ShortcutBindings) {
   }
 }
 
+/** 新键原本属于另一个动作时的交换结果：那个动作改用了本动作原来的键（原来没键则为空）。 */
+export interface ShortcutSwap {
+  action: ShortcutAction;
+  key: string;
+}
+
 interface ShortcutsState {
   bindings: ShortcutBindings;
-  setBinding: (action: ShortcutAction, key: string) => void;
+  setBinding: (action: ShortcutAction, key: string) => ShortcutSwap | null;
   resetBindings: () => void;
 }
 
-export const useShortcuts = create<ShortcutsState>((set) => ({
+export const useShortcuts = create<ShortcutsState>((set, get) => ({
   bindings: loadBindings(),
-  setBinding: (action, key) =>
-    set((state) => {
-      const norm = normalizeKey(key);
-      const next: ShortcutBindings = { ...state.bindings };
-      // 抢占：同一个键若已绑别的动作，先清掉那个，避免一键触发两件事。
-      for (const other of Object.keys(next) as ShortcutAction[]) {
-        if (other !== action && normalizeKey(next[other]) === norm) next[other] = "";
+  setBinding: (action, key) => {
+    const norm = normalizeKey(key);
+    const current = get().bindings;
+    const previous = current[action];
+    const next: ShortcutBindings = { ...current };
+    let swap: ShortcutSwap | null = null;
+    // 同一个键已绑别的动作：两边交换，而不是把那个动作清空——清空的话，比如把 K 给了
+    // 「记一笔」，「播放 / 暂停」就悄悄没了快捷键，用户毫不知情。
+    for (const other of Object.keys(next) as ShortcutAction[]) {
+      if (other !== action && normalizeKey(next[other]) === norm) {
+        next[other] = previous;
+        swap = { action: other, key: previous };
       }
-      next[action] = norm;
-      persist(next);
-      return { bindings: next };
-    }),
+    }
+    next[action] = norm;
+    persist(next);
+    set({ bindings: next });
+    return swap;
+  },
   resetBindings: () =>
     set(() => {
       const next = { ...DEFAULT_BINDINGS };
