@@ -83,6 +83,8 @@ describe("笔记格式条", () => {
     selectAll(editor);
     fireEvent.click(screen.getByRole("button", { name: "链接" }));
     const input = screen.getByRole("textbox", { name: "链接地址" });
+    // 不能交给浏览器按 type="url" 校验：不带协议的地址会被拦下，回车什么都不发生。
+    expect(input.closest("form")).toHaveAttribute("novalidate");
     fireEvent.change(input, { target: { value: "example.com/docs" } });
     fireEvent.submit(input.closest("form")!);
     expect(editor.getAttributes("link").href).toBe("https://example.com/docs");

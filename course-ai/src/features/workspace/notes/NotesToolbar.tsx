@@ -123,6 +123,15 @@ export function NotesToolbar({
   const { t } = useTranslation();
   const fileRef = useRef<HTMLInputElement>(null);
   const [linkDraft, setLinkDraft] = useState<string | null>(null);
+  const linkInputRef = useRef<HTMLInputElement>(null);
+  const linkOpen = linkDraft !== null;
+  // autoFocus 之外再补一次：编辑器在同一轮事件里可能把焦点要回去，地址框没拿到焦点的话，
+  // 接着打的网址会直接盖掉选中的正文。
+  useEffect(() => {
+    if (!linkOpen) return;
+    const frame = requestAnimationFrame(() => linkInputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [linkOpen]);
   const [touch] = useState(coarsePointer);
   const state = useEditorState({
     editor,
@@ -301,10 +310,14 @@ export function NotesToolbar({
 
       {linkDraft !== null && (
         <form
+          // 不让浏览器按 type="url" 校验：用户常写不带协议的 example.com，校验不过时回车
+          // 什么也不发生。地址由 normalizeLinkHref 自己补全和把关。
+          noValidate
           onSubmit={applyLink}
           className="ca-notes-link-form absolute inset-x-0 top-full z-20 flex items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-panel)] px-3 py-2 shadow-[var(--shadow-pop)]"
         >
           <input
+            ref={linkInputRef}
             autoFocus
             type="url"
             inputMode="url"

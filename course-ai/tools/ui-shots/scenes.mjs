@@ -197,6 +197,38 @@ export const scenes = [
     },
   },
   {
+    name: "notes-link",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await openVideo(page);
+      await openNotes(page);
+      const editor = page.locator(".tiptap-notes").first();
+      await editor.waitFor({ timeout: 5000 });
+      // 选中末尾两个字，点格式条上的「链接」：地址框必须拿到焦点，否则接着打的网址会盖掉选中的正文。
+      await editor.evaluate((node) => {
+        const ed = node.editor;
+        let end = 0;
+        ed.state.doc.descendants((child, pos) => {
+          if (child.isText) end = pos + child.nodeSize;
+        });
+        ed.chain().focus().setTextSelection({ from: end - 2, to: end }).run();
+      });
+      await page.getByRole("button", { name: "链接", exact: true }).click();
+      await page.waitForTimeout(300);
+      const focused = await page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.className);
+      if (focused !== "链接地址") throw new Error(`链接地址框没有拿到焦点，焦点在：${focused}`);
+      await page.keyboard.type("example.com");
+      await page.keyboard.press("Enter");
+      const href = await editor.evaluate((node) => node.editor.getAttributes("link").href ?? null);
+      await editor.evaluate((node) => {
+        const ed = node.editor;
+        ed.commands.setTextSelection(ed.state.doc.content.size - 2);
+      });
+      if (href !== "https://example.com") throw new Error(`链接没加上：${href}`);
+      await shot();
+    },
+  },
+  {
     name: "assistant",
     devices: ALL,
     run: async ({ page, shot }) => {
