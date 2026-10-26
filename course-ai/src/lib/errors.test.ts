@@ -69,7 +69,16 @@ describe("humanizeError", () => {
       "yt-dlp failed: ERROR: [BiliBili] Unable to download JSON metadata: HTTP Error 412: Precondition Failed",
     );
     expect(msg).toContain("cookies");
-    expect(msg).toContain("412");
+    expect(msg).toContain("登录");
+  });
+
+  it("treats Bilibili's anti-crawler page (no sign-in) as a cookie problem, not a broken link", () => {
+    // 2026-10 起 B 站对未登录请求直接回风控页；最新版 yt-dlp 也报这句。
+    const raw =
+      "yt-dlp failed: ERROR: [BiliBili] 1uv411q7Mv: Unable to extract initial state; please report this issue on https://github.com/yt-dlp/yt-dlp/issues";
+    const msg = humanizeError(raw);
+    expect(msg).toContain("cookies");
+    expect(msg).not.toContain("检查链接");
   });
 
   it("maps generic download failures", () => {

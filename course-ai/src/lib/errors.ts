@@ -47,7 +47,9 @@ export function humanizeError(error: unknown, language?: string): string {
       s.includes("precondition") ||
       s.includes("login") ||
       s.includes("需要登录") ||
-      s.includes("风控"))
+      s.includes("风控") ||
+      // 未登录时 B 站返回风控页，yt-dlp 报「拿不到页面数据」——不是链接坏了。
+      s.includes("unable to extract initial state"))
   ) {
     return translated("bilibiliLogin", locale);
   }

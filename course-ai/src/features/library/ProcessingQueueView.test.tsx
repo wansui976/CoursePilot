@@ -129,6 +129,15 @@ describe("ProcessingQueueView", () => {
     expect(pickBilibiliCookies).toHaveBeenCalledTimes(1);
   });
 
+  it("offers new cookies when Bilibili returns its sign-in wall instead of the video page", async () => {
+    showFailed({
+      url: "https://www.bilibili.com/video/BV1uv411q7Mv",
+      error: "yt-dlp failed: ERROR: [BiliBili] 1uv411q7Mv: Unable to extract initial state",
+    });
+
+    expect(screen.getByRole("button", { name: "重新导入 cookies 并重试" })).toBeInTheDocument();
+  });
+
   it("does not retry when the cookie file picker is dismissed", async () => {
     pickBilibiliCookies.mockResolvedValueOnce(false);
     showFailed({ url: "https://b23.tv/abc", error: "HTTP Error 412" });

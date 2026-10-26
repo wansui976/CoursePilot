@@ -1427,7 +1427,7 @@
   },
   "errors": {
     "unknown": "Something went wrong.",
-    "bilibiliLogin": "Bilibili login state expired or triggered risk control (HTTP 412). Export cookies.txt again with the Get cookies.txt LOCALLY extension, then import it.",
+    "bilibiliLogin": "Bilibili requires a sign-in to download (cookies not imported, the sign-in expired, or risk control was triggered). Export cookies.txt with the Get cookies.txt LOCALLY extension and import it.",
     "precondition": "The server rejected the request (HTTP 412). Your login state may have expired; import cookies.txt again and retry.",
     "quota": "The model account has insufficient balance. Add funds or use another API key, then retry.",
     "apiKey": "The model or speech API key is missing or invalid. Check it in Settings.",

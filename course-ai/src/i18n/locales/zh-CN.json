@@ -1422,7 +1422,7 @@
   },
   "errors": {
     "unknown": "发生未知错误。",
-    "bilibiliLogin": "B站登录态已失效或触发风控（HTTP 412）：请用 Get cookies.txt LOCALLY 扩展重新导出并导入 cookies.txt。",
+    "bilibiliLogin": "B 站需要登录才能下载（没有导入 cookies、登录态已失效，或触发了风控）：请用 Get cookies.txt LOCALLY 扩展导出 cookies.txt 并导入。",
     "precondition": "服务器拒绝了请求（HTTP 412）：登录态可能已失效，请重新导入 cookies.txt 后重试。",
     "quota": "大模型账户余额不足：请充值或更换 API Key 后重试。",
     "apiKey": "未配置或密钥无效：请到「设置」检查大模型 / 语音的 API Key。",
