@@ -99,7 +99,7 @@ describe("accent CSS variables", () => {
   it.each(["light", "dark"] as const)(
     "derives readable status foregrounds in the %s theme",
     (effective) => {
-      const vars = accentVars("ink", effective);
+      const vars = accentVars("blue", effective);
       const ok = effective === "dark" ? "#34d399" : "#147a52";
       const error = effective === "dark" ? "#f87171" : "#c92a2a";
       expect(contrastRatio(vars["--on-status-ok"], ok)).toBeGreaterThanOrEqual(4.5);
@@ -384,15 +384,24 @@ describe("accent presets", () => {
     useTheme.getState().sync();
   });
 
-  it("maps a saved accent from the old saturated palette to the closest muted preset", () => {
+  it("maps accents saved by earlier palettes to the closest current preset", () => {
+    // 上一版的低饱和预设
+    localStorage.setItem("course-ai-accent", "ochre");
+    useTheme.getState().sync();
+    expect(useTheme.getState().accent).toBe("orange");
+    // 更早九色里已经没有的
+    localStorage.setItem("course-ai-accent", "pink");
+    useTheme.getState().sync();
+    expect(useTheme.getState().accent).toBe("red");
+    // 两版都有的键原样保留
     localStorage.setItem("course-ai-accent", "green");
     useTheme.getState().sync();
-    expect(useTheme.getState().accent).toBe("pine");
+    expect(useTheme.getState().accent).toBe("green");
   });
 
-  it("defaults to ink when nothing (or something unknown) was saved", () => {
+  it("defaults to blue when nothing (or something unknown) was saved", () => {
     localStorage.setItem("course-ai-accent", "neon");
     useTheme.getState().sync();
-    expect(useTheme.getState().accent).toBe("ink");
+    expect(useTheme.getState().accent).toBe("blue");
   });
 });

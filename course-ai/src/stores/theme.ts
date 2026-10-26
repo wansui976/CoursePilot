@@ -3,37 +3,37 @@ import { create } from "zustand";
 
 export type ThemePref = "light" | "dark" | "auto";
 export type EffectiveTheme = "light" | "dark";
-export type AccentKey = "ink" | "slate" | "pine" | "ochre" | "wine" | "custom";
+export type AccentKey = "blue" | "purple" | "green" | "orange" | "red" | "custom";
 
 const THEME_KEY = "course-ai-theme";
 const ACCENT_KEY = "course-ai-accent";
 const CUSTOM_ACCENT_KEY = "course-ai-custom-accent";
-const DEFAULT_ACCENT: AccentKey = "ink";
-const DEFAULT_CUSTOM_ACCENT = "#2f5b9a";
+const DEFAULT_ACCENT: AccentKey = "blue";
+const DEFAULT_CUSTOM_ACCENT = "#0b6bcb";
 
 /** 强调色：accent 为基色、press 深一档；text/weak 用 color-mix 随明暗派生。
- *  五个预设都是低饱和、偏冷的「颜料色」（参考 Linear / Things / Apple 备忘录的克制取色），
- *  亮度压得较低，白字在上面都有 5.5:1 以上；不再给荧光感的高饱和色。
- *  custom = 用户通过系统色板任选（色轮）。 */
+ *  五个预设是明亮、饱和、色相干净的颜色（参考 Linear / Notion），亮度压在白字仍有
+ *  4.8:1 以上的位置；按下态再深一档。custom = 用户通过系统色板任选（色轮）。 */
 export const ACCENTS: { key: AccentKey; i18nKey: string; accent: string; press: string }[] = [
-  { key: "ink", i18nKey: "settings.appearance.accentInk", accent: "#2f5b9a", press: "#284d82" },
-  { key: "slate", i18nKey: "settings.appearance.accentSlate", accent: "#4b5263", press: "#3d4351" },
-  { key: "pine", i18nKey: "settings.appearance.accentPine", accent: "#2e6b5e", press: "#26584d" },
-  { key: "ochre", i18nKey: "settings.appearance.accentOchre", accent: "#96592b", press: "#7f4b24" },
-  { key: "wine", i18nKey: "settings.appearance.accentWine", accent: "#8b3a4e", press: "#743042" },
-  { key: "custom", i18nKey: "settings.appearance.accentCustom", accent: DEFAULT_CUSTOM_ACCENT, press: "#284d82" },
+  { key: "blue", i18nKey: "settings.appearance.accentBlue", accent: "#0b6bcb", press: "#0a5aab" },
+  { key: "purple", i18nKey: "settings.appearance.accentPurple", accent: "#7c3aed", press: "#6d28d9" },
+  { key: "green", i18nKey: "settings.appearance.accentGreen", accent: "#0c7f57", press: "#0a6b49" },
+  { key: "orange", i18nKey: "settings.appearance.accentOrange", accent: "#c2410c", press: "#9a3412" },
+  { key: "red", i18nKey: "settings.appearance.accentRed", accent: "#dc2626", press: "#b91c1c" },
+  { key: "custom", i18nKey: "settings.appearance.accentCustom", accent: DEFAULT_CUSTOM_ACCENT, press: "#0a5aab" },
 ];
 
-/** 旧版的高饱和色键 → 最接近的新预设，升级后不至于退回默认色。 */
+/** 以前存过的颜色键 → 最接近的新预设，升级后不会退回默认色。
+ *  ink…wine 是上一版的低饱和预设，pink / yellow / gray 是更早的九色里已经没有的。 */
 const LEGACY_ACCENTS: Record<string, AccentKey> = {
-  blue: "ink",
-  purple: "wine",
-  pink: "wine",
-  red: "wine",
-  orange: "ochre",
-  yellow: "ochre",
-  green: "pine",
-  gray: "slate",
+  ink: "blue",
+  slate: "blue",
+  pine: "green",
+  ochre: "orange",
+  wine: "red",
+  pink: "red",
+  yellow: "orange",
+  gray: "blue",
 };
 
 let themeAnimTimer: ReturnType<typeof setTimeout> | undefined;
@@ -299,7 +299,7 @@ function readPref(): ThemePref {
 }
 
 function readAccent(): AccentKey {
-  // 没选过时默认墨蓝。
+  // 没选过时默认天蓝。
   if (typeof window === "undefined") return DEFAULT_ACCENT;
   const value = window.localStorage.getItem(ACCENT_KEY);
   if (ACCENTS.some((a) => a.key === value)) return value as AccentKey;

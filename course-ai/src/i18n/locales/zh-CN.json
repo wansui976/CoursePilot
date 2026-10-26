@@ -729,11 +729,11 @@
       "readingSizeSmall": "小",
       "readingSizeMedium": "标准",
       "readingSizeLarge": "大",
-      "accentInk": "墨蓝",
-      "accentSlate": "石板",
-      "accentPine": "松绿",
-      "accentOchre": "赭石",
-      "accentWine": "酒红"
+      "accentBlue": "天蓝",
+      "accentPurple": "紫",
+      "accentGreen": "翠绿",
+      "accentOrange": "橙",
+      "accentRed": "红"
     },
     "studyReminder": {
       "title": "学习提醒",

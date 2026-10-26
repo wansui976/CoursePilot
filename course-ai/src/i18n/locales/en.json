@@ -729,11 +729,11 @@
       "readingSizeSmall": "Small",
       "readingSizeMedium": "Standard",
       "readingSizeLarge": "Large",
-      "accentInk": "Ink",
-      "accentSlate": "Slate",
-      "accentPine": "Pine",
-      "accentOchre": "Ochre",
-      "accentWine": "Wine"
+      "accentBlue": "Blue",
+      "accentPurple": "Purple",
+      "accentGreen": "Green",
+      "accentOrange": "Orange",
+      "accentRed": "Red"
     },
     "studyReminder": {
       "title": "Study Reminder",

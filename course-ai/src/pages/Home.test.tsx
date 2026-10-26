@@ -198,14 +198,14 @@ describe("Home", () => {
 
   it("applies the chosen accent color as a CSS var on the app root", async () => {
     // .ca-app 在 CSS 里本地定义了 --accent，必须把强调色写成 .ca-app 的内联 style 才生效。
-    localStorage.setItem("course-ai-accent", "pine");
+    localStorage.setItem("course-ai-accent", "green");
 
     const { container } = await renderHome();
     const root = container.firstElementChild as HTMLElement;
 
-    expect(root.style.getPropertyValue("--accent")).toBe("#2e6b5e");
+    expect(root.style.getPropertyValue("--accent")).toBe("#0c7f57");
     // Tailwind primary 系列也应跟随强调色。
-    expect(root.style.getPropertyValue("--color-primary")).toBe("#2e6b5e");
+    expect(root.style.getPropertyValue("--color-primary")).toBe("#0c7f57");
   });
 
   it("applies the user's custom accent color as a CSS var on the app root", async () => {
