@@ -14,7 +14,7 @@ import {
   STUDY_PANEL_MIN,
   STUDY_RESIZER_WIDTH,
 } from "./workbenchLayout";
-import { BookOpenText, Minimize2, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { BookOpenText, ChevronLeft, ChevronRight, Minimize2 } from "lucide-react";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 
 const PANEL_WIDTH_STORAGE_KEY = "course-ai-study-panel-width";
@@ -294,10 +294,11 @@ export function WorkspaceLayout({
                 title={collapsed ? t("home.expandStudyPanel") : t("home.collapseStudyPanel")}
                 className="ca-wb-tool ca-touch-44"
               >
+                {/* 学习面板在右边：收起是往右推（>），展开是拉回来（<）。与左侧栏同一套箭头。 */}
                 {collapsed ? (
-                  <PanelRightOpen aria-hidden="true" className="h-[18px] w-[18px]" />
+                  <ChevronLeft aria-hidden="true" className="h-[18px] w-[18px]" />
                 ) : (
-                  <PanelRightClose aria-hidden="true" className="h-[18px] w-[18px]" />
+                  <ChevronRight aria-hidden="true" className="h-[18px] w-[18px]" />
                 )}
               </button>
             </>
