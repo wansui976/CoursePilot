@@ -177,3 +177,11 @@ describe("处理队列的整体进度", () => {
     ).toBe("Processing was interrupted when the app restarted. Retry this task.");
   });
 });
+
+describe("旧任务的失败原因", () => {
+  it("去掉旧版后端加的「pipeline error: 」前缀", () => {
+    expect(
+      stageMessage({ stage: "asr", status: "failed", progress: 0.4, message: "pipeline error: volcengine submit 失败" }),
+    ).toBe("volcengine submit 失败");
+  });
+});

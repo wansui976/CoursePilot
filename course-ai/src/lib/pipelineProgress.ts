@@ -168,7 +168,9 @@ export function overallProgress(byStage: Record<string, StageJob>): number {
 /** 卡片上那行字：已知后端细节走 i18n，未知运行细节退回阶段名，失败保留诊断。 */
 export function stageMessage(job: StageJob | undefined, t?: Translate): string {
   if (!job) return t ? t("pipelineProgress.waiting") : "等待中";
-  const detail = job.message?.trim();
+  // 旧版后端存进库的失败原因带着「pipeline error: 」前缀（新版已不加）；老任务还留在队列里，
+  // 显示时去掉，免得用户看到一串类型名。
+  const detail = job.message?.trim().replace(/^pipeline error:\s*/i, "");
   if (!t) return detail || STAGE_LABEL[job.stage] || job.stage;
 
   const stage = STAGE_LABEL_KEY[job.stage]
