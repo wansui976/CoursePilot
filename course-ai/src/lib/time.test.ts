@@ -70,6 +70,10 @@ describe("formatCountdown", () => {
     expect(ahead(45 * 60_000)).toBe("45 分钟后");
     expect(ahead(5 * 3600_000)).toBe("5 小时后");
     expect(ahead(50 * 3600_000)).toBe("2 天后");
+    // 与打分按钮同一种取法：差 3.99 天就是「4 天后」，差 2 小时 59 分是「3 小时后」。
+    expect(ahead(3.99 * 86_400_000)).toBe("4 天后");
+    expect(ahead(179 * 60_000)).toBe("3 小时后");
+    expect(ahead(23.6 * 3600_000)).toBe("1 天后");
   });
 
   it("says 马上 for anything already due", () => {

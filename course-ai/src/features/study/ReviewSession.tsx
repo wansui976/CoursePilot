@@ -94,6 +94,7 @@ export function ReviewSession({
   const [revealed, setRevealed] = useState(false);
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const exitButtonRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(
     typeof document !== "undefined" &&
       document.activeElement instanceof HTMLElement
@@ -205,9 +206,13 @@ export function ReviewSession({
         <Dialog.Content
           aria-modal="true"
           aria-describedby={undefined}
+          // 焦点放在整屏容器上，不放在「退出」按钮上：界面提示「空格显示答案」，
+          // 而空格落在已聚焦的按钮上会直接按下它——一进来按空格就退出了复习。
+          ref={contentRef}
+          tabIndex={-1}
           onOpenAutoFocus={(event) => {
             event.preventDefault();
-            exitButtonRef.current?.focus();
+            contentRef.current?.focus();
           }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
@@ -219,7 +224,7 @@ export function ReviewSession({
           aria-busy={review.isPending}
           // 整屏覆盖：退出按钮和翻卡按钮都得让开状态栏、刘海和底部指示条。
           style={{ padding: "var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left)" }}
-          className="fixed inset-0 z-50 flex flex-col bg-[var(--surface-app)]"
+          className="fixed inset-0 z-50 flex flex-col bg-[var(--surface-app)] outline-none"
         >
       {/* 会话完成度：渐变进度承载「复习到哪了」，与全应用的进度语义一致。 */}
       {cards.length > 0 && !done && (

@@ -81,7 +81,18 @@ describe("ReviewSession", () => {
     fireEvent.click(screen.getByRole("button", { name: /容易/ }));
     await waitFor(() => expect(review).toHaveBeenLastCalledWith("b", 4));
 
-    expect(await screen.findByText("复习完成 🎉")).toBeInTheDocument();
+    expect(await screen.findByText("复习完成")).toBeInTheDocument();
+  });
+
+  it("一进复习就按空格是翻面，不是退出（焦点不在「退出」按钮上）", async () => {
+    due.mockResolvedValue([cards[1]]);
+    const onClose = vi.fn();
+    renderSession(vi.fn(), onClose);
+    expect(await screen.findByText("问题二")).toBeInTheDocument();
+    const target = document.activeElement ?? document.body;
+    fireEvent.keyDown(target, { key: " " });
+    expect(await screen.findByRole("button", { name: /良好/ })).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("waits for the grade write and ignores duplicate submissions", async () => {
@@ -396,7 +407,8 @@ describe("ReviewSession", () => {
     const dialog = await screen.findByRole("dialog", { name: "复习" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
     const exit = screen.getByRole("button", { name: "退出复习" });
-    await waitFor(() => expect(exit).toHaveFocus());
+    // 焦点在整屏容器上，不在「退出」上：否则按提示的空格去翻面，按下的是退出。
+    await waitFor(() => expect(dialog).toHaveFocus());
 
     await screen.findByText("问题一");
     fireEvent.click(screen.getByRole("button", { name: /选项 A/ }));

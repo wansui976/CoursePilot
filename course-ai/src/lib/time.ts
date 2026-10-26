@@ -67,14 +67,15 @@ export function formatRelativeTime(
  */
 export function formatCountdown(ms: number, now = Date.now(), language?: string): string {
   const locale = currentLanguage(language);
-  // 向上取整：还差 30 秒说「1 分钟后」，差 2 小时 59 分说「3 小时后」——倒计时说大不说小，
-  // 也免得「3 小时后到期」因为几毫秒的流逝就退化成「2 小时后」。
+  // 分钟向上取整：还差 30 秒说「1 分钟后」，免得「1 分钟后」因为几毫秒的流逝就变成「马上」。
+  // 小时、天四舍五入：和打分按钮上的间隔（formatStudyInterval）同一种取法——刚按了「良好 4 天」，
+  // 学习面板不该说「下一批 3 天后到期」（实际差 3.99 天，向下取整就成了 3）。
   const diffMinutes = Math.ceil((ms - now) / 60_000);
   if (diffMinutes < 1) return translated("time.soon", locale);
   if (diffMinutes < 60) return relative(diffMinutes, "minute", locale);
-  const diffHours = Math.floor(diffMinutes / 60);
+  const diffHours = Math.round(diffMinutes / 60);
   if (diffHours < 24) return relative(diffHours, "hour", locale);
-  return relative(Math.floor(diffHours / 24), "day", locale);
+  return relative(Math.max(1, Math.round(diffMinutes / 1440)), "day", locale);
 }
 
 /**
