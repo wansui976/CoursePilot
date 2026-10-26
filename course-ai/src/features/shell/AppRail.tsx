@@ -1,11 +1,11 @@
 import {
   ArrowLeft,
+  ChevronRight,
   ClipboardList,
   LayoutDashboard,
   Library,
   MessageSquareText,
   Moon,
-  PanelLeftOpen,
   Settings,
   Sun,
   Trash2,
@@ -31,7 +31,7 @@ export function AppRail({ nav, onExpandSidebar }: { nav: ShellNav; onExpandSideb
         aria-label={t("nav.expandSidebar")}
         onClick={onExpandSidebar}
       >
-        <PanelLeftOpen className="h-[18px] w-[18px]" />
+        <ChevronRight className="h-[18px] w-[18px]" />
       </button>
       <div className="rail-divider" aria-hidden="true" />
       <button
