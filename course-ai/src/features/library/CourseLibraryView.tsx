@@ -847,7 +847,7 @@ export function CourseLibraryView({
           </span>
         </span>
         <span className="ca-continue-play" aria-hidden="true">
-          <Play className="h-5 w-5" />
+          <Play className="h-4 w-4 translate-x-px" />
         </span>
       </button>
     );
@@ -1018,8 +1018,9 @@ export function CourseLibraryView({
                 </div>
               )}
               {videos.length > 0 && (
+                // 次要入口：无边框的文字按钮。顶栏右侧只留「导入」一个描边按钮，不再是一排方框。
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
                   onClick={onOpenConcepts}
                   className="ca-touch-44"

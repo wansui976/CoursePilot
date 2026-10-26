@@ -6,14 +6,13 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin: 2px 0 18px;
-  padding: 16px;
-  border-radius: var(--r-lg);
-  /* 从强调色淡洗到面板色：比整块浅蓝底安静，又保留「这是给你的下一步」的指向。 */
+  gap: 14px;
+  margin: 2px 0 20px;
+  /* 细长一条：只是「接着看」的捷径，不该比下面的视频网格更抢眼。 */
+  padding: 8px 14px 8px 8px;
+  border-radius: var(--r-md);
   border: 1px solid var(--line-soft);
   background: var(--bg-panel);
-  box-shadow: var(--shadow-card);
   color: var(--text-1);
   cursor: pointer;
   text-align: left;
@@ -22,15 +21,14 @@
 
 @media (hover: hover) {
 .ca-continue-hero:hover {
-  box-shadow: var(--shadow-card-hover);
   border-color: var(--line);
 }
 }
 
 .ca-continue-cover {
   position: relative;
-  width: 128px;
-  height: 72px;
+  width: 96px;
+  height: 54px;
   flex: 0 0 auto;
   border-radius: var(--r-md);
   overflow: hidden;
@@ -46,8 +44,8 @@
 
 .ca-continue-title {
   display: block;
-  margin-top: 2px;
-  font-size: 15px;
+  margin-top: 1px;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -67,8 +65,8 @@
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   border-radius: 999px;
   /* 课程页唯一的实色主操作。不再呼吸缩放：动个不停的按钮是模板感的来源之一。 */
   background: var(--accent);
@@ -85,8 +83,8 @@
 
 @media (max-width: 640px) {
   .ca-continue-cover {
-    width: 96px;
-    height: 54px;
+    width: 80px;
+    height: 45px;
   }
 }
 
