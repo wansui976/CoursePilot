@@ -197,6 +197,28 @@ export const scenes = [
     },
   },
   {
+    name: "transcript-select",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await openVideo(page);
+      await page.getByRole("tab", { name: /文稿/ }).first().click();
+      const row = page.locator(".ca-transcript-text").nth(2);
+      await row.scrollIntoViewIfNeeded();
+      const box = await row.boundingBox();
+      if (!box) throw new Error("找不到文稿句子");
+      // 真实拖选：句子是 role="button"，全局样式曾把它设成不可选中，拖不出选区。
+      await page.mouse.move(box.x + 70, box.y + 12);
+      await page.mouse.down();
+      await page.mouse.move(box.x + 230, box.y + 12, { steps: 8 });
+      await page.mouse.up();
+      await page.waitForTimeout(400);
+      const selected = await page.evaluate(() => getSelection()?.toString() ?? "");
+      if (!selected) throw new Error("文稿拖不出选区");
+      await page.getByRole("button", { name: "摘到笔记" }).waitFor({ timeout: 3000 });
+      await shot();
+    },
+  },
+  {
     name: "notes-link",
     devices: ["desktop"],
     run: async ({ page, shot }) => {
