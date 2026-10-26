@@ -299,6 +299,16 @@ async fn sample_luma_frames_with_fallback(
     }
 }
 
+/// 第 index 个采样帧对应的截图时刻：取这一秒的中间，不取开头。（移动端原生抽帧和截图
+/// 都按精确时刻取，两边是同一帧，不需要这一步。）
+///
+/// fps 滤镜给第 i 帧挑的是 i 秒附近、通常略晚于 i 秒的那一帧；按 i.000 秒去截，换页正好
+/// 发生在这一秒之内时截到的是上一页（实测：检测到 2:09 换页，截出来的图还是第一页）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn capture_at_ms(index: usize) -> i64 {
+    index as i64 * SAMPLE_INTERVAL_MS + SAMPLE_INTERVAL_MS / 2
+}
+
 /// 一页课件在采样序列里的位置。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlidePage {
@@ -673,7 +683,7 @@ pub async fn extract_slides(
                     image_path: image.to_string_lossy().to_string(),
                     start_ms: spec.start_index as i64 * SAMPLE_INTERVAL_MS,
                 },
-                spec.capture_index as i64 * SAMPLE_INTERVAL_MS,
+                capture_at_ms(spec.capture_index),
             )
         })
         .collect();
@@ -795,6 +805,14 @@ pub async fn capture_frame(video: &Path, out_dir: &Path, at_ms: i64) -> AppResul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn slide_screenshots_are_taken_mid_sample_not_at_its_start() {
+        // 第 129 个采样帧（1 fps）已经是新的一页，但 129.000 秒那一帧可能还是旧页。
+        assert_eq!(capture_at_ms(0), 500);
+        assert_eq!(capture_at_ms(129), 129_500);
+    }
     use crate::pipeline::crop_detect::NO_CROP;
     use std::process::Command as StdCommand;
     use tempfile::tempdir;

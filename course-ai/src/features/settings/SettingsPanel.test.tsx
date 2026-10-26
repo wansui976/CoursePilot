@@ -333,18 +333,20 @@ describe("SettingsPanel", () => {
     expect((slider as HTMLElement).style.getPropertyValue("--slider-fill")).toBe("80%");
   });
 
-  it("switches slides sensitivity to auto and disables the slider", async () => {
+  it("课件灵敏度默认自动（滑块不可调）；关掉自动可手调，再打开回到自动", async () => {
     render(<SettingsPanel onClose={() => undefined} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "课件 / OCR" }));
-    const slider = await screen.findByLabelText("课件提取灵敏度");
-    expect(slider).not.toBeDisabled();
-
-    fireEvent.click(screen.getByLabelText("课件提取自动灵敏度"));
-
-    // 自动档下门槛由后端按画面噪声定，手调滑块就不该再有作用。
+    // 没调过 = 自动：门槛由后端按画面噪声定，与导入时的自动提取一致，手调滑块不起作用。
     expect(await screen.findByLabelText("课件提取灵敏度")).toBeDisabled();
     expect(screen.getByText("自动")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("课件提取自动灵敏度"));
+    expect(await screen.findByLabelText("课件提取灵敏度")).not.toBeDisabled();
+    expect(localStorage.getItem("slides-sensitivity")).toBe("50");
+
+    fireEvent.click(screen.getByLabelText("课件提取自动灵敏度"));
+    expect(await screen.findByLabelText("课件提取灵敏度")).toBeDisabled();
     expect(localStorage.getItem("slides-sensitivity")).toBe("auto");
   });
 

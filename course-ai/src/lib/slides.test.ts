@@ -26,7 +26,8 @@ describe("slides sensitivity", () => {
   });
 
   it("persists both a manual level and auto", () => {
-    expect(getSlidesSensitivity()).toBe(DEFAULT_SLIDES_SENSITIVITY);
+    // 没调过 = 自动，与导入时的自动提取一致。
+    expect(getSlidesSensitivity()).toBe(AUTO_SENSITIVITY);
     setSlidesSensitivity(80);
     expect(getSlidesSensitivity()).toBe(80);
     setSlidesSensitivity(AUTO_SENSITIVITY);

@@ -8,7 +8,10 @@ export type SlidesSensitivity = number | typeof AUTO_SENSITIVITY;
 export function getSlidesSensitivity(): SlidesSensitivity {
   if (typeof window === "undefined") return DEFAULT_SLIDES_SENSITIVITY;
   const raw = window.localStorage.getItem(SENSITIVITY_KEY);
-  if (raw === AUTO_SENSITIVITY) return AUTO_SENSITIVITY;
+  // 没调过就用「自动」：与导入时的自动提取同一套门槛。原先没存值时落到 50 档（块阈值 14），
+  // 白底黑字、每页只换标题和一行字的课件在这个门槛下会漏页（实测 3 页只出 2 页），
+  // 而按画面噪声自估的门槛（这类视频约为 4）一页不漏。
+  if (raw === null || raw === AUTO_SENSITIVITY) return AUTO_SENSITIVITY;
   const saved = Number(raw);
   return Number.isFinite(saved) && saved > 0 ? saved : DEFAULT_SLIDES_SENSITIVITY;
 }
