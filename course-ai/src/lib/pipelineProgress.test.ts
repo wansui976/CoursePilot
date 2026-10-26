@@ -132,7 +132,7 @@ describe("处理队列的整体进度", () => {
         },
         t,
       ),
-    ).toBe("Correcting transcript with AI, segment 3 of 12");
+    ).toBe("Proofreading the transcript, segment 3 of 12");
     expect(
       stageMessage(
         {

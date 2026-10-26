@@ -128,7 +128,7 @@ describe("BilibiliImportDialog", () => {
     fireEvent.click(quality720);
     expect(quality720).toBeChecked();
     expect(
-      screen.getByRole("combobox", { name: "检测到自带字幕，可用它替代 AI 转写" }),
+      screen.getByRole("combobox", { name: "检测到自带字幕，可以直接用它，省去语音识别" }),
     ).toBeInTheDocument();
   });
 

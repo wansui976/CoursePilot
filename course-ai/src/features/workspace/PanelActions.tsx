@@ -82,7 +82,7 @@ export function PanelActions({
   );
 }
 
-/** 空态里的「用 AI 生成」：与笔记空态同款，不再让用户去角落里找图标按钮。 */
+/** 空态里的「生成」按钮：与笔记空态同款，不再让用户去角落里找图标按钮。 */
 export function GenerateEmptyAction({
   onGenerate,
   generating,

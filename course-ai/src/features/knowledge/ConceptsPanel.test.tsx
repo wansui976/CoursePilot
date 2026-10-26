@@ -216,7 +216,7 @@ describe("ConceptsPanel", () => {
 
   it("toggles the course AI chat drawer from the header", async () => {
     renderPanel();
-    const toggle = await screen.findByRole("button", { name: "课程 AI 问答" });
+    const toggle = await screen.findByRole("button", { name: "课程问答" });
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-pressed", "true");
@@ -230,12 +230,12 @@ describe("ConceptsPanel", () => {
       value: 320,
     });
     renderPanel();
-    const toggle = await screen.findByRole("button", { name: "课程 AI 问答" });
+    const toggle = await screen.findByRole("button", { name: "课程问答" });
     fireEvent.click(toggle);
 
-    const dialog = await screen.findByRole("dialog", { name: "课程 AI 问答" });
+    const dialog = await screen.findByRole("dialog", { name: "课程问答" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
-    const close = within(dialog).getByRole("button", { name: "关闭 AI 问答" });
+    const close = within(dialog).getByRole("button", { name: "关闭问答" });
     await waitFor(() => expect(close).toHaveFocus());
 
     fireEvent.keyDown(dialog, { key: "Escape" });
@@ -397,7 +397,7 @@ describe("ConceptsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "生成复习卡" }));
 
     expect(
-      (await screen.findAllByText("相关视频尚无 AI 题目，或题目出处不在这个知识点范围内。")).length,
+      (await screen.findAllByText("相关视频还没有题目，或题目出处不在这个知识点范围内。")).length,
     ).toBeGreaterThanOrEqual(1);
   });
 
