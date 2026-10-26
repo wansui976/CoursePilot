@@ -110,33 +110,26 @@ export function CourseList({
     setMenuFor(courseId);
   }
 
-  /** 课程条目的集数/进度：非选中课程只显示集数；选中课程有观看记录时追加百分比，
-   *  全部看完只显示 ✓。 */
+  /** 课程条目右侧只在选中课程上显示观看进度：看过一部分显示百分比，全部看完显示 ✓。
+   *  不显示集数——删 / 加视频后侧栏数字容易和课程页对不上，课程页标题里已经写着几个视频。 */
   function renderCourseMeta(course: Course) {
     if (course.video_count <= 0) return null;
-    const isSelected = course.id === selectedCourseId;
-    if (isSelected && selectedCourseWatchedRatio != null) {
-      if (selectedCourseWatchedRatio >= 1) {
-        return (
-          <span className="course-meta" aria-label={t("courseList.allWatched")}>
-            <span className="pct">✓</span>
-          </span>
-        );
-      }
-      if (selectedCourseWatchedRatio > 0) {
-        return (
-          <span className="course-meta">
-            {t("courseList.videoCountShort", { count: course.video_count })}
-            <span className="pct">·{Math.round(selectedCourseWatchedRatio * 100)}%</span>
-          </span>
-        );
-      }
+    if (course.id !== selectedCourseId || selectedCourseWatchedRatio == null) return null;
+    if (selectedCourseWatchedRatio >= 1) {
+      return (
+        <span className="course-meta" aria-label={t("courseList.allWatched")}>
+          <span className="pct">✓</span>
+        </span>
+      );
     }
-    return (
-      <span className="course-meta">
-        {t("courseList.videoCountShort", { count: course.video_count })}
-      </span>
-    );
+    if (selectedCourseWatchedRatio > 0) {
+      return (
+        <span className="course-meta">
+          <span className="pct">{Math.round(selectedCourseWatchedRatio * 100)}%</span>
+        </span>
+      );
+    }
+    return null;
   }
 
   useEffect(() => {

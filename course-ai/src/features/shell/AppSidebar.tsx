@@ -69,7 +69,7 @@ export function AppSidebar({
   /** 折叠侧栏：侧栏头部的收起按钮。 */
   onToggleCollapsed: () => void;
   selectedCourseId: string | null;
-  /** 选中课程已看完比例（0-1）；null = 没有数据（侧栏仅显示集数）。 */
+  /** 选中课程已看完比例（0-1）；null = 没有数据（侧栏不显示进度）。 */
   selectedCourseWatchedRatio?: number | null;
   onSelectCourse: (id: string) => void;
   onClearCourseSelection?: () => void;
