@@ -995,19 +995,12 @@ export function CourseLibraryView({
                       <Icon className="h-4 w-4" />
                     </button>
                   ))}
-                  {/* 网格密度：仅网格视图下有意义；图标随当前密度提示下一步切换。 */}
+                  {/* 网格密度：仅网格视图下有意义。这是个开关（aria-pressed），名字必须固定是
+                      「紧凑网格」——原先名字跟着状态变，紧凑时读成「舒适网格，已按下」，意思正好反了。 */}
                   {view === "grid" && (
                     <button
-                      aria-label={
-                        gridDensity === "cozy"
-                          ? t("home.switchToCompact")
-                          : t("home.switchToCozy")
-                      }
-                      title={
-                        gridDensity === "cozy"
-                          ? t("home.switchToCompact")
-                          : t("home.switchToCozy")
-                      }
+                      aria-label={t("home.switchToCompact")}
+                      title={t("home.switchToCompact")}
                       aria-pressed={gridDensity === "compact"}
                       onClick={toggleGridDensity}
                       className={gridDensity === "compact" ? "on" : ""}

@@ -242,14 +242,17 @@ describe("Home", () => {
 
     // 默认舒适；点一下切成紧凑（grid 容器挂 data-density=compact）。
     const toggle = screen.getByRole("button", { name: "紧凑网格" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(toggle);
     expect(screen.getByLabelText("课程视频网格")).toHaveAttribute(
       "data-density",
       "compact",
     );
+    // 开关的名字固定，状态只看 aria-pressed（读屏：「紧凑网格，已按下」）。
+    expect(screen.getByRole("button", { name: "紧凑网格" })).toHaveAttribute("aria-pressed", "true");
 
     // 再点回舒适。
-    fireEvent.click(screen.getByRole("button", { name: "舒适网格" }));
+    fireEvent.click(screen.getByRole("button", { name: "紧凑网格" }));
     expect(screen.getByLabelText("课程视频网格")).toHaveAttribute(
       "data-density",
       "cozy",
