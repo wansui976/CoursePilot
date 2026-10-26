@@ -582,6 +582,31 @@ describe("TranscriptPanel", () => {
     expect(screen.getByText(/1\/\d+/)).toBeInTheDocument();
   });
 
+  it("文稿句子不是 <button>：按钮里的文字在 Chromium 里拖不出选区；回车 / 空格仍可跳转", async () => {
+    renderTranscriptPanel();
+    const text = await screen.findByText("第 3 句文稿内容");
+    const row = text.closest("[role=button]") as HTMLElement;
+    expect(row.tagName).toBe("DIV");
+    expect(row).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(usePlayer.getState().seekRequest?.ms).toBe(3_000);
+    fireEvent.keyDown(row, { key: " " });
+    expect(usePlayer.getState().seekRequest?.ms).toBe(3_000);
+  });
+
+  it("搜索高亮时公式照常渲染，不露出 \\(…\\) 源码", async () => {
+    mockIpc.transcripts.list.mockResolvedValue([
+      { id: 1, video_id: "video-1", segment_idx: 0, start_ms: 0, end_ms: 900, text: "公式是\\(F=ma\\)，加速度与力成正比" },
+    ]);
+    const { container } = renderTranscriptPanel();
+    await screen.findByText(/加速度与力成正比/);
+    fireEvent.click(screen.getByRole("button", { name: "搜索文稿" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索文稿" }), { target: { value: "加速度" } });
+    await waitFor(() => expect(screen.getAllByText("加速度", { selector: "mark" }).length).toBe(1));
+    expect(container.textContent).not.toContain("\\(F=ma\\)");
+    expect(container.querySelector(".katex")).not.toBeNull();
+  });
+
   it("marks transcript search as a system-back layer and restores trigger focus on Escape", async () => {
     renderTranscriptPanel();
     await screen.findByText("第 1 句文稿内容");

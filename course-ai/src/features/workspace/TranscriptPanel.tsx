@@ -38,11 +38,8 @@ const FOLLOW_PAUSE_MS = 4000;
 
 // 搜索高亮：把命中的子串包成 <mark>（q 已小写，按下标切原文保留大小写）。
 // 含 $$ 数学公式的行不切——拆散后 MathText 就解析不了公式了，宁可不高亮。
-function highlightSegment(text: string, q: string): ReactNode {
+function highlightText(text: string, q: string): ReactNode {
   const lowered = text.toLocaleLowerCase();
-  if (!q || !lowered.includes(q) || text.includes("$$")) {
-    return <MathText text={text} />;
-  }
   const parts: ReactNode[] = [];
   let cursor = 0;
   let at = lowered.indexOf(q);
@@ -59,6 +56,12 @@ function highlightSegment(text: string, q: string): ReactNode {
   }
   parts.push(text.slice(cursor));
   return <>{parts}</>;
+}
+
+/** 搜索命中高亮：公式照常渲染，只在公式以外的文字里标出命中词。 */
+function highlightSegment(text: string, q: string): ReactNode {
+  if (!q || !text.toLocaleLowerCase().includes(q)) return <MathText text={text} />;
+  return <MathText text={text} renderText={(segment) => highlightText(segment, q)} />;
 }
 
 // 文稿头部的「播放位置」：只让这个小组件订阅进度（每秒几次重渲染），不波及文稿主体。
@@ -118,14 +121,25 @@ const TranscriptRow = memo(function TranscriptRow({
         }`}
       >
         {/* 文字占满整行宽度：纠错按钮改为绝对定位在右下角，不再在行内流式占位。 */}
-        <button
+        {/* 不用 <button>：按钮里的文字在 Chromium / WebView2 里拖不出选区，划选「问 AI /
+            摘到笔记 / 挖空成卡」就用不了。改成可聚焦的 div，回车 / 空格同样跳转。 */}
+        <div
+          role="button"
+          tabIndex={0}
           onClick={() => {
             // 划选文字后抬手会触发这次 click——此时有非空选区，别误触跳转（留给「问 AI」）。
             const sel = window.getSelection();
             if (sel && !sel.isCollapsed) return;
             onSeek(segment.start_ms);
           }}
-          className="ca-transcript-text block w-full px-2 py-1 text-left text-sm leading-relaxed"
+          onKeyDown={(event) => {
+            if (event.target !== event.currentTarget) return;
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onSeek(segment.start_ms);
+            }
+          }}
+          className="ca-transcript-text block w-full cursor-pointer select-text px-2 py-1 text-left text-sm leading-relaxed"
         >
           <span className="mr-2 text-xs text-[var(--text-muted)]">
             {formatMs(segment.start_ms)}
@@ -138,7 +152,7 @@ const TranscriptRow = memo(function TranscriptRow({
               {translation}
             </span>
           )}
-        </button>
+        </div>
         <button
           data-transcript-edit-id={segment.id}
           aria-label={t("transcript.editButton")}

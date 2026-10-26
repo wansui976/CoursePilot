@@ -13,6 +13,7 @@ import { isMobile } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
 import { useInlineAsk } from "@/stores/inlineAsk";
 import type { AskEvent, ChatMessage, Citation, RagAnswer } from "@/lib/types";
+import { MathText } from "@/ui/MathText";
 
 /**
  * 渲染回答：解析 Markdown（标题/列表/加粗）+ KaTeX 公式 + [mm:ss] 可点击跳转。
@@ -77,7 +78,7 @@ function CitationSources({
                 {t("ragSearch.slidePage", { page: c.slide_page ?? 0 })}
               </span>
             )}
-            <span className="text-[var(--text-normal)]">{c.text}</span>
+            <span className="text-[var(--text-normal)]"><MathText text={c.text} /></span>
           </button>
         ))}
       </div>
@@ -905,7 +906,7 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
                         </span>
                       )}
                       <span className="mr-1.5 text-primary">{formatMs(c.start_ms)}</span>
-                      <span className="text-[var(--text-normal)]">{c.text}</span>
+                      <span className="text-[var(--text-normal)]"><MathText text={c.text} /></span>
                     </span>
                   </button>
                 ))}
