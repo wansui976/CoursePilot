@@ -3,7 +3,6 @@ use crate::error::{AppError, AppResult};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use tokio::sync::Mutex;
@@ -76,7 +75,7 @@ async fn create_database_backup_locked(db: &Db, destination: &Path) -> AppResult
             .await?;
 
         verify_backup_file(&temp, None).await?;
-        File::open(&temp)?.sync_all()?;
+        sync_file(&temp)?;
         replace_file(&temp, destination)?;
         sync_parent_directory(destination_parent(destination))?;
         Ok(destination.to_owned())
@@ -190,7 +189,7 @@ async fn stage_database_restore_locked(
                 "恢复文件在复制过程中发生变化，请重新选择".into(),
             ));
         }
-        File::open(&temporary)?.sync_all()?;
+        sync_file(&temporary)?;
         replace_file(&temporary, &staged_path)?;
         sync_parent_directory(&pending_dir)?;
 
@@ -210,7 +209,7 @@ async fn stage_database_restore_locked(
         ));
         let bytes = serde_json::to_vec_pretty(&manifest)?;
         std::fs::write(&manifest_temp, bytes)?;
-        File::open(&manifest_temp)?.sync_all()?;
+        sync_file(&manifest_temp)?;
         replace_file(&manifest_temp, &manifest_path)?;
         sync_parent_directory(&pending_dir)?;
         Ok::<(), AppError>(())
@@ -588,9 +587,19 @@ fn remove_sqlite_sidecars(path: &Path) {
     }
 }
 
+/// 把文件内容刷到磁盘。必须带写权限打开：Windows 的 FlushFileBuffers 对只读句柄
+/// 直接返回「拒绝访问」（os error 5）——用 File::open 的话，备份、启动快照、恢复暂存
+/// 在 Windows 上每一次都会失败。
+fn sync_file(path: &Path) -> std::io::Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)?
+        .sync_all()
+}
+
 #[cfg(unix)]
 fn sync_parent_directory(parent: &Path) -> std::io::Result<()> {
-    File::open(parent)?.sync_all()
+    std::fs::File::open(parent)?.sync_all()
 }
 
 #[cfg(not(unix))]
