@@ -15,13 +15,16 @@
   gap: 12px;
 }
 
+/* 窄屏课程页的返回：只是一个箭头，不再是描边白底的方块；左边让出图标自身的留白，
+   箭头与下面的内容左缘对齐。 */
 .hamb {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 44px;
+  height: 44px;
+  margin-left: -12px;
+  border-radius: 8px;
   flex: 0 0 auto;
-  border: 1px solid var(--line);
-  background: var(--bg-panel);
+  border: none;
+  background: transparent;
   color: var(--text-1);
   display: inline-flex;
   align-items: center;

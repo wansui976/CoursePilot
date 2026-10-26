@@ -83,6 +83,47 @@
 /* 整屏课程列表做成 iOS 内嵌分组列表：内容限宽居中（平板上不再一行横跨整屏），
    课程装进圆角分组卡，行高 56、细分隔线从文字处起头，文件夹图标改成淡强调色的圆角小砖。
    只作用于手机/平板根屏（.ca-course-screen），桌面侧栏（.ca-side）不受影响。 */
+.ca-course-screen-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 18px;
+}
+
+.ca-course-screen-head h1 {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-2xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--text-1);
+}
+
+/* 安静的文字按钮：不再是一块满宽的描边大按钮。 */
+.ca-course-screen-add {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-2);
+  transition: background 0.12s, color 0.12s;
+}
+
+.ca-course-screen-add:hover {
+  background: var(--bg-sunken);
+  color: var(--text-1);
+}
+
+.ca-course-screen-add:disabled {
+  opacity: 0.6;
+}
+
 .ca-course-screen > * {
   width: 100%;
   max-width: 680px;

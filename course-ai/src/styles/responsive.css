@@ -128,8 +128,21 @@
 .ca-app[data-bucket="medium"] .tb-actions {
   width: 100%;
   margin-left: 0;
-  justify-content: flex-end;
+  justify-content: flex-start;
   flex-wrap: wrap;
+}
+
+/* 窄屏工具条：搜索框独占一行；下一行左边视图切换，右边知识点 / 导入。 */
+.ca-app[data-bucket="compact"] .tb-actions > .relative:first-child {
+  flex: 1 1 100%;
+}
+
+.ca-app[data-bucket="compact"] .tb-actions > .relative:first-child .tb-search {
+  width: 100%;
+}
+
+.ca-app[data-bucket="compact"] .tb-actions .ca-seg {
+  margin-right: auto;
 }
 
 .ca-app[data-bucket="compact"] .ca-grid {
@@ -297,6 +310,21 @@
   .ca-touch-44 {
     min-width: 44px;
     min-height: 44px;
+  }
+
+  /* 视频卡封面上的「⋯」：触屏常显，撑到 44px 的话每张卡上都压着一个大黑圆。
+     看上去仍是 28px 的小圆钮，点按区域靠伪元素向外扩到 44px。 */
+  .ca-card .ca-card-more {
+    min-width: 28px;
+    min-height: 28px;
+    width: 28px;
+    height: 28px;
+  }
+
+  .ca-card .ca-card-more::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
   }
 
   /* 学习工作台里的小图标按钮：触屏下再放大一档，避免只点到图标边缘。 */

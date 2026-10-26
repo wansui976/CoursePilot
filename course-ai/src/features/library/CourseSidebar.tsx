@@ -1,11 +1,10 @@
-import { Library, Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ErrorNote } from "@/ui/ErrorNote";
-import { Button } from "@/ui/button";
 import { CourseList, useCreateCourse } from "./CourseList";
 import { cn } from "@/lib/utils";
 
-/** 窄屏「课程」Tab 的整屏课程列表:品牌行 + 右上回收站 + 添加课程文件夹 + CourseList。 */
+/** 窄屏「课程」Tab 的整屏课程列表：标题行（添加课程文件夹、回收站）+ CourseList。 */
 export function CourseSidebar({
   selectedCourseId,
   onSelect,
@@ -26,31 +25,13 @@ export function CourseSidebar({
 
   return (
     <aside aria-label={t("nav.courseSidebar")} className={cn("ca-course-screen", className)}>
-      <div className="flex-none">
-        <div className="ca-brand">
-          <div className="logo">
-            <Library className="h-4 w-4" />
-          </div>
-          <div className="label">
-            <h1>{t("nav.courseLibrary")}</h1>
-          </div>
-          {onOpenRecycleBin && (
-            <button
-              type="button"
-              aria-label={t("nav.recycleBin")}
-              title={t("nav.recycleBin")}
-              className="ca-icon-btn ml-auto"
-              onClick={onOpenRecycleBin}
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-        <Button
+      {/* 一行装下：左边大标题，右边「添加课程文件夹」与回收站。 */}
+      <div className="ca-course-screen-head">
+        <h1>{t("nav.courseLibrary")}</h1>
+        <button
+          type="button"
           aria-label={t("nav.addCourseFolder")}
-          className="ca-new-btn"
-          size="sm"
-          variant="outline"
+          className="ca-course-screen-add"
           disabled={creatingCourse}
           onClick={() => void createCourse()}
         >
@@ -60,9 +41,20 @@ export function CourseSidebar({
             <Plus className="h-4 w-4" />
           )}
           {creatingCourse ? t("nav.addingCourse") : t("nav.addCourseFolder")}
-        </Button>
-        {createError && <ErrorNote className="mt-2" error={createError} />}
+        </button>
+        {onOpenRecycleBin && (
+          <button
+            type="button"
+            aria-label={t("nav.recycleBin")}
+            title={t("nav.recycleBin")}
+            className="ca-icon-btn flex-none"
+            onClick={onOpenRecycleBin}
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
       </div>
+      {createError && <ErrorNote className="mb-3" error={createError} />}
       <div className="ca-nav-label">{t("nav.myCourses")}</div>
       <div className="ca-nav">
         <CourseList
