@@ -82,19 +82,21 @@
 }
 
 /* 手机工作台：去掉标题行后，返回键浮在视频左上角（避让横屏刘海安全区）。 */
+/* 手机上叠在画面左上角的返回：只是一个白色箭头（带一点投影，亮画面上也看得清），
+   不再垫一块黑色圆底（YouTube 手机版同款）。点按区仍是 44px。 */
 .ca-back-fab {
   position: absolute;
   z-index: 5;
-  left: max(16px, var(--safe-left));
-  top: 12px;
+  left: max(4px, var(--safe-left));
+  top: 4px;
   display: grid;
   place-items: center;
   width: 44px;
   height: 44px;
   border-radius: 999px;
-  background: rgb(0 0 0 / 0.45);
+  background: transparent;
   color: #fff;
-  backdrop-filter: blur(4px);
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.6));
 }
 
 .ca-stage {

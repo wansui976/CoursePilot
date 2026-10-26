@@ -151,7 +151,7 @@ a,
 
 .ca-back-fab:active {
   transform: scale(0.92);
-  background: rgb(0 0 0 / 0.62);
+  background: rgb(0 0 0 / 0.3);
 }
 
 .ca-bottom-tab-btn:active {

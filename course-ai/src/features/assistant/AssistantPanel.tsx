@@ -1425,7 +1425,8 @@ export function AssistantPanel({
         // hover 同理不能换成 card-hover（7% 的白），一悬停球就没了。
         className={
           mobile
-            ? `ca-touch-44 fixed z-40 grid h-12 w-12 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] transition-colors hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none ${launcherInWorkbench ? "ca-workbench-assistant-launcher" : ""}`
+            ? // 手机：44px、半透明磨砂底、只留一层很轻的浮起，不再是一枚带大投影的白圆钮。
+              `ca-touch-44 fixed z-40 grid h-11 w-11 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)]/85 shadow-[var(--shadow-raise)] backdrop-blur transition-colors hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none ${launcherInWorkbench ? "ca-workbench-assistant-launcher" : ""}`
             : `ca-touch-44 fixed z-40 grid h-14 w-14 touch-none select-none cursor-grab active:cursor-grabbing place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] transition hover:scale-105 hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none motion-reduce:hover:scale-100 ${
                 launcherPosition ? "" : side === "left" ? "left-3" : "right-3"
               }`
