@@ -115,6 +115,24 @@ type GestureState = {
   swiped: boolean;
 };
 
+// 不是输入框的 <input>：进度条、音量条、复选框。点过进度条后焦点留在它上面，原先一律当成
+// 「正在打字」，空格就再也暂停不了。
+const NON_TEXT_INPUTS = new Set(["range", "checkbox", "radio", "button", "submit", "reset", "color", "file"]);
+// 滑块自己就响应方向键 / Home / End，这几个键留给它，不再额外快进快退一次。
+const SLIDER_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
+
+/** 这次按键归焦点所在的控件处理（正在输入文字，或滑块的方向键），播放器快捷键不接。 */
+function keyBelongsToTarget(event: KeyboardEvent): boolean {
+  const target = event.target as HTMLElement | null;
+  if (!target) return false;
+  if (target.tagName === "TEXTAREA" || target.isContentEditable) return true;
+  if (target.tagName === "SELECT") return true;
+  if (target.tagName !== "INPUT") return false;
+  const type = (target as HTMLInputElement).type;
+  if (!NON_TEXT_INPUTS.has(type)) return true;
+  return type === "range" && SLIDER_KEYS.has(event.key);
+}
+
 export function VideoPlayer({
   src,
   videoId,
@@ -759,15 +777,7 @@ export function VideoPlayer({
     };
 
     const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
-      ) {
-        return;
-      }
+      if (keyBelongsToTarget(event)) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const video = ref.current;
       if (!video) return;

@@ -558,6 +558,40 @@ describe("VideoPlayer iOS gestures", () => {
     }
   });
 
+  it("焦点在进度条上时空格照样暂停 / 播放；方向键留给进度条自己", () => {
+    renderPlayer();
+    const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
+    const play = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(video, "paused", { configurable: true, get: () => true });
+    Object.defineProperty(video, "play", { configurable: true, value: play });
+    const setCurrentTime = vi.fn();
+    Object.defineProperty(video, "currentTime", { configurable: true, get: () => 100, set: setCurrentTime });
+
+    const progress = screen.getByLabelText("播放进度");
+    progress.focus();
+    fireEvent.keyDown(progress, { key: " " });
+    expect(play).toHaveBeenCalledTimes(1);
+
+    // 进度条自己处理方向键（跳一次）；播放器快捷键不再叠加一次 ±5 秒。
+    fireEvent.keyDown(progress, { key: "ArrowRight" });
+    fireEvent.keyUp(progress, { key: "ArrowRight" });
+    expect(setCurrentTime).toHaveBeenCalledTimes(1);
+  });
+
+  it("在文本框里打字时不触发播放器快捷键", () => {
+    renderPlayer();
+    const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
+    const play = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(video, "paused", { configurable: true, get: () => true });
+    Object.defineProperty(video, "play", { configurable: true, value: play });
+    const input = document.createElement("input");
+    document.body.append(input);
+    input.focus();
+    fireEvent.keyDown(input, { key: " " });
+    expect(play).not.toHaveBeenCalled();
+    input.remove();
+  });
+
   it("seeks +5s on a short right-arrow tap (committed on release)", () => {
     renderPlayer();
     const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
