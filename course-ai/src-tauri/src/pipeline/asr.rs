@@ -160,14 +160,102 @@ pub async fn store_segments_with_backup(
     Ok(segs.len())
 }
 
-/// 把 whisper JSON 转成通用段（words_json 由 tokens 序列化）。
-fn whisper_to_segments(json: &WhisperJson) -> AppResult<Vec<StoredSegment>> {
-    json.transcription
+/// 比这更长的一段 whisper 输出才往下切。
+const SPLIT_SEGMENT_MS: i64 = 8_000;
+/// 句末标点处切开的最短长度；没有句末标点时，在逗号处切开的最短长度。
+const SENTENCE_SPLIT_MS: i64 = 2_000;
+const COMMA_SPLIT_MS: i64 = 6_000;
+/// 切到最后剩下不到这么长的尾巴，并回上一句，不单独成句。
+const TAIL_MERGE_MS: i64 = 1_500;
+
+/// whisper 的特殊 token（[_BEG_]、[_TT_123] 之类），不是正文。
+fn is_special_token(text: &str) -> bool {
+    let text = text.trim();
+    text.starts_with("[_") && text.ends_with(']')
+}
+
+fn without_whitespace(text: &str) -> String {
+    text.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+/// 把一段过长的 whisper 输出按 token 时间在标点处切成几句。
+///
+/// 一口气不停顿的讲解（TTS 合成的课尤其如此），whisper 常把二三十秒并成一段：文稿里只有
+/// 一行，点句跳转、按句纠错、问 AI 定位全都失去意义。token 自带起止时间，在句号 / 问号处切；
+/// 一直没有句号时，在讲了六秒以上之后的逗号处切。token 拼回来和原文对不上（多字节字被拆坏
+/// 等）就不切，原样保留。
+fn split_whisper_segment(segment: &WhisperSegment) -> Vec<Vec<&TokenObj>> {
+    let tokens: Vec<&TokenObj> = segment
+        .tokens
         .iter()
-        .map(|segment| -> AppResult<StoredSegment> {
+        .filter(|token| !is_special_token(&token.text))
+        .collect();
+    if segment.offsets.to - segment.offsets.from <= SPLIT_SEGMENT_MS || tokens.is_empty() {
+        return vec![tokens];
+    }
+    let joined: String = tokens.iter().map(|token| token.text.as_str()).collect();
+    if without_whitespace(&joined) != without_whitespace(&segment.text) {
+        return vec![tokens];
+    }
+    let mut pieces: Vec<Vec<&TokenObj>> = Vec::new();
+    let mut current: Vec<&TokenObj> = Vec::new();
+    for token in tokens {
+        current.push(token);
+        let duration = token.offsets.to - current[0].offsets.from;
+        let last = token.text.trim_end().chars().last();
+        let sentence_end = matches!(last, Some('。' | '！' | '？' | '!' | '?' | '；' | ';'));
+        let comma = matches!(last, Some('，' | ','));
+        if (sentence_end && duration >= SENTENCE_SPLIT_MS) || (comma && duration >= COMMA_SPLIT_MS)
+        {
+            pieces.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        let tail = current.last().map(|t| t.offsets.to).unwrap_or(0) - current[0].offsets.from;
+        match pieces.last_mut() {
+            Some(previous) if tail < TAIL_MERGE_MS => previous.extend(current),
+            _ => pieces.push(current),
+        }
+    }
+    pieces
+}
+
+/// 把 whisper JSON 转成通用段（words_json 由 tokens 序列化）；过长的段按标点切开。
+fn whisper_to_segments(json: &WhisperJson) -> AppResult<Vec<StoredSegment>> {
+    let mut out = Vec::new();
+    for segment in &json.transcription {
+        let pieces = split_whisper_segment(segment);
+        let count = pieces.len();
+        let mut start_ms = segment.offsets.from;
+        for (index, tokens) in pieces.into_iter().enumerate() {
+            let only = count == 1;
+            // 没切的段，words_json 与原来一样记全部 token（含特殊 token）。
+            let tokens: Vec<&TokenObj> = if only {
+                segment.tokens.iter().collect()
+            } else {
+                tokens
+            };
+            // 一段没切时文字照旧用 whisper 给的整段文本；切开后用这一句的 token 拼。
+            let text = if only {
+                segment.text.trim().to_string()
+            } else {
+                tokens
+                    .iter()
+                    .map(|token| token.text.as_str())
+                    .collect::<String>()
+                    .trim()
+                    .to_string()
+            };
+            let end_ms = if index + 1 == count {
+                segment.offsets.to
+            } else {
+                tokens
+                    .last()
+                    .map(|token| token.offsets.to)
+                    .unwrap_or(segment.offsets.to)
+            };
             let words_json = serde_json::to_string(
-                &segment
-                    .tokens
+                &tokens
                     .iter()
                     .map(|token| {
                         serde_json::json!({
@@ -178,14 +266,16 @@ fn whisper_to_segments(json: &WhisperJson) -> AppResult<Vec<StoredSegment>> {
                     })
                     .collect::<Vec<_>>(),
             )?;
-            Ok(StoredSegment {
-                start_ms: segment.offsets.from,
-                end_ms: segment.offsets.to,
-                text: segment.text.trim().to_string(),
+            out.push(StoredSegment {
+                start_ms,
+                end_ms,
+                text,
                 words_json,
-            })
-        })
-        .collect()
+            });
+            start_ms = end_ms;
+        }
+    }
+    Ok(out)
 }
 
 pub fn parse_whisper_json(input: &str) -> AppResult<WhisperJson> {
@@ -402,6 +492,82 @@ pub async fn store_raw_transcript_backup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn token(text: &str, from: i64, to: i64) -> TokenObj {
+        TokenObj {
+            text: text.into(),
+            offsets: Offsets { from, to },
+        }
+    }
+
+    #[test]
+    fn a_long_whisper_segment_is_split_at_punctuation() {
+        // 26 秒一口气讲完（TTS 合成的课）：whisper 并成一段，文稿只剩一行。
+        let segment = WhisperSegment {
+            text: "大家好,欢迎来到第1课,今天我们学习牛顿第一定律。第2部分,我们来看牛顿第二定律。"
+                .into(),
+            offsets: Offsets {
+                from: 0,
+                to: 26_000,
+            },
+            tokens: vec![
+                token("[_BEG_]", 0, 0),
+                token("大家好", 0, 1_500),
+                token(",", 1_500, 1_600),
+                token("欢迎来到第1课", 1_600, 4_000),
+                token(",", 4_000, 4_100),
+                token("今天我们学习牛顿第一定律", 4_100, 9_000),
+                token("。", 9_000, 9_200),
+                token("第2部分", 9_200, 11_000),
+                token(",", 11_000, 11_100),
+                token("我们来看牛顿第二定律", 11_100, 25_500),
+                token("。", 25_500, 25_800),
+            ],
+        };
+        let json = WhisperJson {
+            transcription: vec![segment],
+        };
+        let segs = whisper_to_segments(&json).unwrap();
+        let texts: Vec<&str> = segs.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "大家好,欢迎来到第1课,今天我们学习牛顿第一定律。",
+                "第2部分,我们来看牛顿第二定律。"
+            ]
+        );
+        // 首尾对齐原段，中间首尾相接、不留空档。
+        assert_eq!((segs[0].start_ms, segs[0].end_ms), (0, 9_200));
+        assert_eq!((segs[1].start_ms, segs[1].end_ms), (9_200, 26_000));
+    }
+
+    #[test]
+    fn short_segments_and_mismatched_tokens_are_left_alone() {
+        let short = WhisperSegment {
+            text: "很短的一句。".into(),
+            offsets: Offsets { from: 0, to: 3_000 },
+            tokens: vec![token("很短的一句", 0, 2_800), token("。", 2_800, 3_000)],
+        };
+        // token 拼起来和原文对不上（多字节字被拆坏之类）：不切。
+        let broken = WhisperSegment {
+            text: "第一句。第二句。".into(),
+            offsets: Offsets {
+                from: 0,
+                to: 20_000,
+            },
+            tokens: vec![
+                token("第一\u{fffd}", 0, 9_000),
+                token("。", 9_000, 9_100),
+                token("第二句。", 9_100, 20_000),
+            ],
+        };
+        let json = WhisperJson {
+            transcription: vec![short, broken],
+        };
+        let segs = whisper_to_segments(&json).unwrap();
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[1].text, "第一句。第二句。");
+    }
     use crate::commands::courses::create_course;
     use crate::commands::videos::add_local_video;
     use crate::db::Db;
