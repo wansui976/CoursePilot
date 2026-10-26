@@ -220,6 +220,9 @@ export const slides = {
     invoke("cmd_get_slides", { videoId }),
   capture: (videoId: string, atMs: number): Promise<Screenshot> =>
     invoke("cmd_capture_frame", { videoId, atMs }),
+  // 截一帧给笔记用：原始二进制，不登记到「我的截图」。
+  captureImage: (videoId: string, atMs: number): Promise<ArrayBuffer> =>
+    invoke("cmd_capture_frame_image", { videoId, atMs }),
   screenshots: (videoId: string): Promise<Screenshot[]> =>
     invoke("cmd_get_screenshots", { videoId }),
   // 原始二进制（后端 ipc::Response），不是 JSON 数字数组。

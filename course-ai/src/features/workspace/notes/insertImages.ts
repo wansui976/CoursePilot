@@ -73,8 +73,8 @@ export function imageBlocks(images: StoredImage[]): JSONContent[] {
 
 /** 截取视频当前画面：图片下面跟一行带时间戳的说明，光标停在后面接着写。 */
 export async function captureFrameBlocks(videoId: string, ms: number): Promise<JSONContent[]> {
-  const shot = await ipc.slides.capture(videoId, Math.max(0, Math.round(ms)));
-  const buffer = await ipc.slides.image(videoId, shot.image_path);
+  // 只取图片字节，不登记成课件页「我的截图」里的一张。
+  const buffer = await ipc.slides.captureImage(videoId, Math.max(0, Math.round(ms)));
   const image = await storeNoteImage(videoId, new Blob([buffer], { type: "image/jpeg" }));
   return [
     ...imageBlocks([image]),

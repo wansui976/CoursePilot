@@ -518,6 +518,30 @@ pub async fn cmd_capture_frame(
     })
 }
 
+/// 截一帧给笔记用：只返回图片字节，不登记到课件页的「我的截图」。
+/// （笔记里「截取当前画面」原先走 cmd_capture_frame，每截一张，课件页就无故多出一张截图。）
+#[tauri::command]
+pub async fn cmd_capture_frame_image(
+    state: State<'_, AppState>,
+    video_id: String,
+    at_ms: i64,
+) -> AppResult<tauri::ipc::Response> {
+    let video = load_video(&state, &video_id).await?;
+    let source = crate::pipeline::playable::cached_playable(
+        Path::new(&video.file_path),
+        Path::new(&video.data_dir),
+    );
+    let scratch = std::env::temp_dir()
+        .join("courseai-note-frames")
+        .join(Uuid::new_v4().to_string());
+    let bytes = match slides::capture_frame(&source, &scratch, at_ms).await {
+        Ok(path) => tokio::fs::read(&path).await.map_err(AppError::from),
+        Err(error) => Err(error),
+    };
+    let _ = std::fs::remove_dir_all(&scratch);
+    Ok(tauri::ipc::Response::new(bytes?))
+}
+
 #[tauri::command]
 pub async fn cmd_get_screenshots(
     state: State<'_, AppState>,

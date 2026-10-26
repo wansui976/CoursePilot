@@ -257,6 +257,7 @@ export function installMockIpc({ theme, safeArea }) {
     // 截取画面：拿封面当作那一帧。
     cmd_capture_frame: ({ videoId, atMs }) => ({ id: 1, video_id: videoId, image_path: `/shots/${atMs}.jpg`, at_ms: atMs, created_at: now }),
     cmd_read_slide_image: ({ videoId }) => cover(videoId),
+    cmd_capture_frame_image: ({ videoId }) => cover(videoId),
     cmd_get_quiz: () => null,
     cmd_get_mindmap: () => mindmap,
     cmd_stale_ai_artifacts: () => [],
