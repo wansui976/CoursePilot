@@ -134,6 +134,11 @@ export function Tour({
   // 开场时在的那些步骤（下标），以及当前走到第几个
   const [available, setAvailable] = useState<number[] | null>(null);
   const [cursor, setCursor] = useState(0);
+  // 本次会话里停下了（用户自己离开了引导要去的页面，或目标页始终出不来）：不再自动重开，
+  // 也不记为看过——下次打开应用再来。
+  const [stopped, setStopped] = useState(false);
+  // 跳转失败后已经退回上一步重试过的步骤；同一步只退一次，再失败就停下，免得来回弹。
+  const retriedRef = useRef<Set<number>>(new Set());
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const [pos, setPos] = useState<Position | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
@@ -144,7 +149,7 @@ export function Tour({
 
   // 等待阶段：锚点出现、没有别的对话框，并且抢到了位置，才开场。
   useEffect(() => {
-    if (!enabled || seen || open) return;
+    if (!enabled || seen || open || stopped) return;
     let cancelled = false;
     let timer = window.setTimeout(function poll() {
       if (cancelled) return;
@@ -153,6 +158,7 @@ export function Tour({
       // 第一步的锚点必须已经在页面上，引导才开场
       const firstPresent = present.find((index) => index >= 0);
       if (firstPresent !== undefined && !otherDialogOpen() && claim(id)) {
+        retriedRef.current = new Set();
         setAvailable(
           steps
             .map((step, index) => (present[index] >= 0 || step.awaitAnchor ? index : -1))
@@ -167,7 +173,7 @@ export function Tour({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [enabled, seen, open, claim, id, delay]);
+  }, [enabled, seen, open, stopped, claim, id, delay]);
 
   const done = useCallback(() => {
     setAvailable(null);
@@ -220,27 +226,46 @@ export function Tour({
         const grace = !seenOnce && stepsRef.current[stepIndex].awaitAnchor ? awaitMs : MISSING_MS;
         if (now - missingSince > grace) {
           setAnchorRect(null);
-          // 跳转后的目标页一直没出现（例如离开设置被「未保存」提示拦下）。
-          // 这时不能继续在错误的页面上把后面的步骤逐个等过期——那会把整组记成看过，
-          // 用户再也看不到语音识别和建课程两步。能退回上一步就退回，让它重试跳转。
-          if (!seenOnce && stepsRef.current[stepIndex].awaitAnchor) {
+          const steps = stepsRef.current;
+          const step = steps[stepIndex];
+          const nextIndex = cursor + 1 < available.length ? available[cursor + 1] : -1;
+          const stop = () => {
+            setAvailable(null);
+            setPos(null);
+            setStopped(true);
+            release(id);
+          };
+          // 1. 跳转后的目标页一直没出现（例如离开设置被「未保存」提示拦下）。不能在错误的
+          //    页面上把后面的步骤逐个等过期——那会把整组记成看过。退回上一步让用户重试；
+          //    同一步只退一次，再失败就停下（不记看过），免得永远走不完、来回弹。
+          if (!seenOnce && step.awaitAnchor) {
             const previous = cursor - 1;
             if (
+              !retriedRef.current.has(stepIndex) &&
               previous >= 0 &&
-              findAnchor(stepsRef.current[available[previous]].anchor)
+              findAnchor(steps[available[previous]].anchor)
             ) {
+              retriedRef.current.add(stepIndex);
               setCursor(previous);
             } else {
-              setAvailable(null);
-              setPos(null);
-              release(id);
+              stop();
             }
             return;
           }
-          // 锚点自己消失被自动跳过：这一步的「下一步」跳转仍然要执行，
-          // 否则下一步会在错误的页面上等 4 秒然后被跳过。
-          stepsRef.current[stepIndex].onNext?.();
-          if (cursor + 1 < available.length) setCursor(cursor + 1);
+          // 2. 锚点出现过、现在不在了。下一步的锚点已经在页面上：用户自己走到了下一步
+          //    所在的页面（比如「未保存」提示里晚点了继续），跟上就行，不用再跳转。
+          if (nextIndex >= 0 && findAnchor(steps[nextIndex].anchor)) {
+            setCursor(cursor + 1);
+            return;
+          }
+          // 3. 这是要跳页的步骤：用户自己离开了这一页。不替他跳转（那会把人拽回设置、
+          //    冒出莫名的「未保存」提示），安静地停下。
+          if (step.onNext || (nextIndex >= 0 && steps[nextIndex].awaitAnchor)) {
+            stop();
+            return;
+          }
+          // 4. 同一页面里的步骤（切了页签、收起了面板）：跳过这一步。
+          if (nextIndex >= 0) setCursor(cursor + 1);
           else done();
           return;
         }

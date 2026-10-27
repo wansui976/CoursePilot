@@ -174,7 +174,7 @@ describe("Tour", () => {
     expect(await screen.findByRole("dialog", { name: "填表这步" })).toBeInTheDocument();
   });
 
-  it("runs the skipped step's onNext before moving on", async () => {
+  it("follows the user to the next step's page without running onNext", async () => {
     const onNext = vi.fn();
     function Page({ showB }: { showB: boolean }) {
       return (
@@ -195,9 +195,41 @@ describe("Tour", () => {
     const { rerender } = render(<Page showB />);
     await screen.findByRole("dialog", { name: "会消失的一步" });
     rerender(<Page showB={false} />);
+    // 下一步的锚点已经在页面上：用户自己走过去了，跟上即可，不能再替他跳一次页面。
     expect(await screen.findByRole("dialog", { name: "留下的一步" })).toBeInTheDocument();
-    // 锚点消失不等于这一步的跳转可以不做：否则下一步会停在错误的页面上。
-    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it("stops quietly, without navigating, when the user leaves a page-jumping step", async () => {
+    const onNext = vi.fn();
+    function Page({ onSettings }: { onSettings: boolean }) {
+      return (
+        <>
+          {onSettings ? <Anchor name="llm" /> : <Anchor name="elsewhere" />}
+          <Tour
+            id="library"
+            delay={0}
+            steps={[
+              { anchor: "llm", title: "配大模型", onNext },
+              { anchor: "asr", awaitAnchor: true, title: "配语音识别" },
+            ]}
+          />
+        </>
+      );
+    }
+    const { rerender } = render(<Page onSettings />);
+    await screen.findByRole("dialog", { name: "配大模型" });
+    // 用户自己点去了别的页面
+    rerender(<Page onSettings={false} />);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 600)));
+    // 没有把人拽回设置，也没记成看过（下次打开应用再来），本次也不再自己弹出来
+    expect(onNext).not.toHaveBeenCalled();
+    expect(useTours.getState().seen.has("library")).toBe(false);
+    expect(useTours.getState().active).toBe(null);
+    rerender(<Page onSettings />);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("goes back for a retry when a jump target never appears instead of marking the tour seen", async () => {
@@ -225,6 +257,14 @@ describe("Tour", () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 150)));
     expect(useTours.getState().seen.has("library")).toBe(false);
     expect(useTours.getState().active).toBe("library");
+
+    // 再试一次还是出不来：只退一次，这回停下，不再来回弹，也不记为看过。
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useTours.getState().seen.has("library")).toBe(false);
+    expect(useTours.getState().active).toBe(null);
   });
 
   it("skips a step when its anchor goes away", async () => {
