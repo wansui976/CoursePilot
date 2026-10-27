@@ -272,6 +272,37 @@ Enable [audio file recognition (large model)](https://console.volcengine.com/spe
 </details>
 
 <details>
+<summary><b>Alibaba Cloud Model Studio / DashScope (speech recognition)</b></summary>
+
+Android and iOS use this backend by default. On desktop, choose "Alibaba Cloud DashScope file transcription" under **Settings → Speech Recognition → ASR backend**.
+
+1. Sign in to the [Alibaba Cloud Model Studio (Bailian) console](https://bailian.console.aliyun.com/) and enable the speech-recognition models (new accounts usually get a free quota).
+2. Create a **Model Studio API key** (starts with `sk-`). This is not the AccessKey ID/Secret used by Alibaba Cloud OCR.
+3. In **Settings → Speech Recognition**:
+   - **ASR backend**: Alibaba Cloud DashScope file transcription
+   - **Model**: `qwen3-asr-flash-filetrans` (default, good Chinese accuracy), `fun-asr` (word-level timestamps, multilingual), or `paraformer-v2` (older and stable)
+   - Paste the API key and click **Save Bailian API Key**.
+4. Import a video. Once the processing queue shows "Transcribing with Alibaba Cloud …", the path works.
+
+**How it works**: the desktop app extracts 16 kHz mono WAV, converts it to 32 kbps MP3, and mobile exports M4A (AAC). Audio is submitted inline as a base64 `data:` URI (no OSS upload needed); the app polls the async task and downloads the JSON result. The whole track is submitted at once, so a retry starts over (unlike Volcengine's per-chunk resume). Audio is uploaded to Alibaba Cloud — choose local Whisper if you need fully offline processing.
+
+**Limits**: the official async API itself allows up to 2 GB / 12 hours per file, but the app inlines the whole audio as base64 in one request, which hits Alibaba Cloud's **28,000,000-character** JSON string limit (tested; HTTP 400 beyond that). At the default 32 kbps MP3 that is roughly **87 minutes**. Split longer lectures before importing, or use local Whisper. The app checks the size before uploading and fails fast instead of wasting the upload. Polling runs every 3 seconds for up to 30 minutes. Billing is by transcribed duration on your own Alibaba Cloud account.
+
+**Troubleshooting**:
+
+| Symptom | Cause / fix |
+| --- | --- |
+| `InvalidApiKey`, HTTP 401 | The key is wrong, has leading/trailing spaces, or belongs to another Alibaba Cloud product. |
+| `Model not exist`, HTTP 400 | Wrong model name, or the model is not enabled for this account/region. |
+| `SUCCESS_WITH_NO_VALID_FRAGMENT` | No speech was detected (music-only or silent audio); the key is fine. |
+| Stuck in `PENDING` or times out after 30 minutes | The audio is long or queued; retry later, or switch to `paraformer-v2`. |
+| Upload is slow | The whole track is uploaded; cross-border networks can be slow. Split the lecture or use local Whisper. |
+
+> Tested on 2026-10-26 (Beijing region): all three models worked with base64 data URIs, MP3 and M4A were accepted, a bad key returned 401, an unknown model returned 400, and silence returned `SUCCESS_WITH_NO_VALID_FRAGMENT`. Full record: [`course-ai/tools/aliyun-asr/availability-2026-10-26.md`](course-ai/tools/aliyun-asr/availability-2026-10-26.md).
+
+</details>
+
+<details>
 <summary><b>DeepSeek vision (OCR)</b></summary>
 
 In **Settings → Slides / OCR**, choose "DeepSeek Vision (AI)" and fill in the Base URL (default `https://api.deepseek.com`), the model (default `deepseek-v4-flash-vision-exp`), and an API key. This key is stored separately from your LLM profile keys.
@@ -291,7 +322,8 @@ In **Settings → Slides / OCR**, choose "DeepSeek Vision (AI)" and fill in the 
 
 - **AI features are greyed out?** Add an API key in **Settings → LLM** first. Chapters, summaries, notes, and Q&A all depend on it.
 - **Does Q&A need embeddings?** No. Q&A selects relevant transcript passages and sends them to the LLM, and transcript search is local keyword matching, so there's nothing extra to configure.
-- **Can Alibaba OCR and DashScope ASR share credentials?** No. OCR uses an AccessKey ID/Secret, while DashScope uses an API key.
+- **Can Alibaba OCR and DashScope ASR share credentials?** No. OCR uses an AccessKey ID/Secret, while DashScope uses an API key; API keys are also region-specific.
+- **DashScope says "no speech detected"?** The endpoint and key are fine; the audio simply has no human speech (music-only, silent, or a broken track). Use built-in subtitles or local Whisper for those.
 - **AI stopped working after restoring a backup?** API keys live in the system keychain, not in backups, so re-enter them after restoring.
 
 ## 🤝 Contributing & support

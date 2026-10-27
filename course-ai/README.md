@@ -1,8 +1,9 @@
 # CourseAI Desktop
 
 Phase 1 MVP for a local course-video learning assistant. The app imports local
-videos, extracts audio with ffmpeg, runs local whisper.cpp ASR, and displays a
-clickable transcript synced to video playback.
+videos, extracts audio with ffmpeg, runs local whisper.cpp ASR or cloud ASR
+(Volcengine / Alibaba Cloud DashScope), and displays a clickable transcript
+synced to video playback.
 
 ## Prerequisites
 
@@ -34,6 +35,36 @@ pnpm tauri dev
 pnpm test
 cd src-tauri && cargo test
 ```
+
+## Cloud ASR (Alibaba Cloud DashScope)
+
+End users configure this in **Settings → Speech Recognition**: choose
+"Alibaba Cloud DashScope file transcription", pick a model, and save a Model
+Studio (Bailian) API key. Mobile builds default to this backend. Step-by-step
+setup, limits, and troubleshooting are in the [root README](../README.md).
+
+- `qwen3-asr-flash-filetrans` (default): `input.file_url` (singular), `parameters.language`, `enable_words=true`
+- `fun-asr` / `paraformer-v2`: `input.file_urls` (array), `parameters.language_hints`
+
+Desktop audio is 16 kHz mono WAV converted to 32 kbps MP3; mobile exports M4A
+(AAC). Both are sent as base64 data URIs, so no OSS bucket is required. The
+async task is polled every 3 seconds for up to 30 minutes.
+
+Alibaba Cloud parses the data URI as a single JSON string and caps it at
+28,000,000 characters, which is roughly 87 minutes at 32 kbps. Files over that
+limit are rejected locally before upload; split longer lectures or use local
+Whisper.
+
+Run the live end-to-end check (downloads Aliyun's public sample, tests all three
+models by default; the key is never printed):
+
+```bash
+DASHSCOPE_API_KEY=sk-... python3 tools/aliyun-asr/check_aliyun_asr.py
+DASHSCOPE_API_KEY=sk-... python3 tools/aliyun-asr/check_aliyun_asr.py --audio lesson.mp3 --mime audio/mpeg
+```
+
+The 2026-10-26 availability record (models, formats, error paths, payload sizes)
+is in [tools/aliyun-asr/availability-2026-10-26.md](tools/aliyun-asr/availability-2026-10-26.md).
 
 ## Phase 1 Scope
 

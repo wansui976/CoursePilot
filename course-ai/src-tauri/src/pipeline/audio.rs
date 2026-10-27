@@ -283,9 +283,15 @@ pub async fn extract_audio(video: &Path, out_dir: &Path) -> AppResult<PathBuf> {
     Ok(out)
 }
 
-/// 从已抽好的 16kHz 单声道 WAV 转成低码率 MP3（mono/16kHz/48kbps）。
-/// 云端录音文件识别要走 base64 data URI 上传，WAV 太大（1 小时≈115MB），
-/// 压成 MP3 后 1 小时≈20MB，base64 ≈28MB，单次 POST 可接受。
+/// 从已抽好的 16kHz 单声道 WAV 转成低码率 MP3（mono/16kHz/32kbps）。
+///
+/// 为什么是 32k 而不是 48k：阿里云把 base64 data URI 当一个 JSON 字符串解析，单个
+/// 字符串上限 28,000,000 字符（实测，超过返回 HTTP 400）。48k 下约 58 分钟的音频
+/// 就会顶到上限，而一节课通常 60–90 分钟；32k 把这个上限推到约 87 分钟，实测同一段
+/// 语音在 48k / 32k / 24k 下转写结果完全一致。再长的课仍需切分或本地 Whisper。
+///
+/// WAV 太大（1 小时≈115MB），压成 MP3 后 1 小时≈14MB。整段上传的耗时完全取决于
+/// 网络：实测跨境链路约 50KB/s，14MB 要几分钟，国内通常快得多。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn wav_to_mp3(wav: &Path) -> AppResult<PathBuf> {
     let out = wav.with_file_name("audio.mp3");
@@ -294,7 +300,7 @@ pub async fn wav_to_mp3(wav: &Path) -> AppResult<PathBuf> {
         .kill_on_drop(true)
         .args(["-y", "-i"])
         .arg(wav)
-        .args(["-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k"])
+        .args(["-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k"])
         .arg(&out)
         .output()
         .await

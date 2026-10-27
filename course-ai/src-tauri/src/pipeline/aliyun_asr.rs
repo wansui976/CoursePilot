@@ -8,10 +8,13 @@
 //!
 //! 本地文件没有公网 URL，改用 base64 data URI 传入。
 //!
-//! **未经真机验证的地方**：官方文档要求 file_url 是公网可访问的地址，没说支持
-//! data URI。如果服务端确实拒收，这条后端就需要先把音频传到一个可访问的地方
-//! （如 OSS）再提交，那是另一件事，不是改几行参数能解决的。字段名（单数/复数）
-//! 已经按模型区分，见 [`uses_singular_file_url`]。
+//! **data URI 已实测可用**：官方文档只写 `file_url` 必须公网可访问，没有承诺支持
+//! base64 data URI；2026-10-26 实测三个模型都接受，服务端会把 data URI 落到自己的
+//! OSS 再转写（记录见 `tools/aliyun-asr/availability-2026-10-26.md`）。代价是整段
+//! 音频随请求上传、没有分片，超长课程在慢网络下会很慢。
+//!
+//! 字段名按模型区分：qwen3 用单数 `file_url` / `parameters.language`，fun-asr 与
+//! paraformer 用复数 `file_urls` / `language_hints`，见 [`uses_singular_file_url`]。
 
 use crate::error::{AppError, AppResult};
 use crate::pipeline::asr::{Offsets, TokenObj, WhisperJson, WhisperSegment};
@@ -25,6 +28,13 @@ const TASK_URL_PREFIX: &str = "https://dashscope.aliyuncs.com/api/v1/tasks/";
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 const MAX_POLLS: u32 = 600; // 3s × 600 ≈ 30 分钟上限
 
+/// 服务端 JSON 解析器对单个字符串的上限（`StreamReadConstraints.getMaxStringLength()`）。
+/// data URI 是 JSON 里的一个字符串，超过它整次请求会以 HTTP 400 被拒——而且是在
+/// 传了约 28MB 之后才拒。实测解析到 28,049,408 字符时被拒，错误信息给出的上限是
+/// 28,000,000。这里留一点余量给 `data:<mime>;base64,` 前缀。
+pub const MAX_DATA_URI_CHARS: usize = 28_000_000;
+const MAX_AUDIO_BYTES: usize = MAX_DATA_URI_CHARS / 4 * 3 - 64;
+
 /// 默认模型；可被设置覆盖。
 pub const DEFAULT_MODEL: &str = "qwen3-asr-flash-filetrans";
 
@@ -37,8 +47,9 @@ pub async fn run_aliyun(
 ) -> AppResult<WhisperJson> {
     let api_key = api_key.trim();
     if api_key.is_empty() {
-        return Err(AppError::Config(
-            "missing DashScope API Key：请在设置里填写阿里云百炼 API Key".into(),
+        // 显示给用户的句子，不加 "config error:" 前缀；重试也不会变好。
+        return Err(AppError::Permanent(
+            "缺少阿里云百炼 API Key：请在设置 → 语音识别里填写并保存（Key 以 sk- 开头）".into(),
         ));
     }
     let model = if model.trim().is_empty() {
@@ -46,8 +57,15 @@ pub async fn run_aliyun(
     } else {
         model.trim()
     };
-    // 仅 paraformer-v2 / fun-asr 支持 language_hints；其它模型（如 qwen3-asr）自动识别。
-    let language_hint = language.filter(|_| supports_language_hints(model));
+    // qwen3-asr 用单数 parameters.language；paraformer-v2 / fun-asr 用 language_hints 数组。
+    // 空值和「自动检测」都不传，交给模型自己判断。
+    let language = language
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "auto");
+
+    // 先在本地卡体积，别把几十 MB 传完才被服务端的 JSON 字符串上限拒掉。
+    let size = tokio::fs::metadata(audio).await?.len() as usize;
+    ensure_fits_data_uri(size)?;
 
     let bytes = tokio::fs::read(audio).await?;
     let data_uri = audio_data_uri(mime, &bytes);
@@ -58,7 +76,7 @@ pub async fn run_aliyun(
         .post(SUBMIT_URL)
         .bearer_auth(api_key)
         .header("X-DashScope-Async", "enable")
-        .json(&build_submit_body(model, &data_uri, language_hint))
+        .json(&build_submit_body(model, &data_uri, language))
         .send()
         .await
         .map_err(|error| AppError::Pipeline(format!("dashscope submit: {error}")))?;
@@ -106,13 +124,25 @@ pub async fn run_aliyun(
     ))
 }
 
-pub fn audio_data_uri(mime: &str, bytes: &[u8]) -> String {
-    format!("data:{mime};base64,{}", base64_encode(bytes))
+/// base64 会膨胀 4/3，服务端又把 data URI 当一个 JSON 字符串解析，所以能提交的
+/// 原始音频有硬上限。超过时直接报错，并给出「大概多少分钟」和替代方案。
+pub fn ensure_fits_data_uri(audio_bytes: usize) -> AppResult<()> {
+    if audio_bytes <= MAX_AUDIO_BYTES {
+        return Ok(());
+    }
+    // 按应用桌面端默认的 32 kbps 估算时长，让用户知道这是「多长的一节课」。
+    let minutes = audio_bytes as f64 / (32_000.0 / 8.0) / 60.0;
+    Err(AppError::Permanent(format!(
+        "音频太大：{} MB（32 kbps 下约 {:.0} 分钟），base64 后会超过阿里云单次请求的 \
+         {} 字符上限。请把视频/音频切成几段再导入，或改用本地 Whisper。",
+        audio_bytes as f64 / 1_000_000.0,
+        minutes,
+        MAX_DATA_URI_CHARS
+    )))
 }
 
-/// 这些模型支持 language_hints 语言提示；其它模型自动识别语言。
-pub fn supports_language_hints(model: &str) -> bool {
-    model.contains("paraformer") || model.contains("fun-asr")
+pub fn audio_data_uri(mime: &str, bytes: &[u8]) -> String {
+    format!("data:{mime};base64,{}", base64_encode(bytes))
 }
 
 /// qwen3-asr 系列的录音文件识别接口收的是**单数** `file_url`（一次一个文件）；
@@ -122,8 +152,9 @@ pub fn uses_singular_file_url(model: &str) -> bool {
     model.contains("qwen3-asr")
 }
 
-pub fn build_submit_body(model: &str, file_url: &str, language_hint: Option<&str>) -> Value {
-    let input = if uses_singular_file_url(model) {
+pub fn build_submit_body(model: &str, file_url: &str, language: Option<&str>) -> Value {
+    let singular = uses_singular_file_url(model);
+    let input = if singular {
         json!({ "file_url": file_url })
     } else {
         json!({ "file_urls": [file_url] })
@@ -132,8 +163,25 @@ pub fn build_submit_body(model: &str, file_url: &str, language_hint: Option<&str
         "model": model,
         "input": input,
     });
-    if let Some(lang) = language_hint {
-        body["parameters"] = json!({ "language_hints": [lang] });
+
+    let mut parameters = serde_json::Map::new();
+    if let Some(lang) = language {
+        // 官方参数名不同：qwen3-asr 系列是单数 `language`（只能一个值），
+        // fun-asr / paraformer 是复数数组 `language_hints`。发错名字不会报错，
+        // 只会被当成未知参数忽略——语言设置看似生效、实际没生效。
+        if singular {
+            parameters.insert("language".into(), json!(lang));
+        } else {
+            parameters.insert("language_hints".into(), json!([lang]));
+        }
+    }
+    if singular {
+        // 默认 false：只返回句级时间戳，长句不会按标点切开。开启后才有字级
+        // 时间戳，文稿的逐句高亮和「按标点切长句」都依赖它。
+        parameters.insert("enable_words".into(), json!(true));
+    }
+    if !parameters.is_empty() {
+        body["parameters"] = Value::Object(parameters);
     }
     body
 }
@@ -234,11 +282,21 @@ fn dashscope_error(stage: &str, payload: &Value, http: reqwest::StatusCode) -> A
         .and_then(Value::as_str)
         .or_else(|| payload.pointer("/output/message").and_then(Value::as_str))
         .unwrap_or("");
-    let hint = if http.as_u16() == 401 || http.as_u16() == 403 {
-        "（鉴权失败：请核对百炼 API Key，并确认已开通对应模型）"
-    } else {
-        ""
+    let hint = match http.as_u16() {
+        401 | 403 => "（鉴权失败：请核对百炼 API Key，并确认已开通对应模型）",
+        429 => "（请求过于频繁：稍等片刻再试）",
+        _ => "",
     };
+    // 纯静音、纯音乐这类音频，任务最终是 FAILED，但 code 是
+    // SUCCESS_WITH_NO_VALID_FRAGMENT。直接把它抛给用户，看到的只有一串英文
+    // 错误码，完全不知道「不是 Key 错了，是这段音频没人说话」。
+    if code == "SUCCESS_WITH_NO_VALID_FRAGMENT" {
+        return AppError::Pipeline(
+            "阿里云没有从这段音频里检测到语音（SUCCESS_WITH_NO_VALID_FRAGMENT）。\
+             如果视频只有音乐或静音，可以改用 B 站自带字幕，或切到本地 Whisper。"
+                .into(),
+        );
+    }
     AppError::Pipeline(format!(
         "dashscope {stage} 失败：HTTP {} {code} {message}{hint}",
         http.as_u16()
@@ -272,6 +330,26 @@ mod tests {
     }
 
     #[test]
+    fn rejects_audio_that_would_exceed_the_string_limit() {
+        // 20MB 原始音频 base64 后约 27.9M 字符，能过。
+        assert!(ensure_fits_data_uri(20_000_000).is_ok());
+        // 22MB 原始音频 base64 后约 29.3M，服务端会 400；
+        // 本地就该拦下来，别让用户等十几分钟上传。
+        let err = ensure_fits_data_uri(22_000_000).unwrap_err().to_string();
+        assert!(err.contains("音频太大"), "{err}");
+        assert!(err.contains("28000000"), "{err}");
+        assert!(err.contains("本地 Whisper"), "{err}");
+    }
+
+    #[test]
+    fn preflight_boundary_keeps_the_data_uri_under_the_limit() {
+        // MAX_AUDIO_BYTES 是私有的，但边界必须真的落在 28,000,000 以内：
+        // base64 长度是 4*ceil(n/3)，再加 data URI 前缀。
+        let encoded = (MAX_AUDIO_BYTES + 2) / 3 * 4;
+        assert!(encoded + 64 <= MAX_DATA_URI_CHARS, "{encoded}");
+    }
+
+    #[test]
     fn audio_data_uri_keeps_supplied_mime() {
         assert_eq!(
             audio_data_uri("audio/mp4", b"ABC"),
@@ -283,13 +361,33 @@ mod tests {
     fn submit_body_adds_language_hints_when_set() {
         let body = build_submit_body("paraformer-v2", "u", Some("en"));
         assert_eq!(body["parameters"]["language_hints"][0], "en");
+        assert!(body["parameters"].get("language").is_none());
+        assert!(body["parameters"].get("enable_words").is_none());
     }
 
     #[test]
-    fn language_hints_only_for_supported_models() {
-        assert!(supports_language_hints("paraformer-v2"));
-        assert!(supports_language_hints("fun-asr"));
-        assert!(!supports_language_hints("qwen3-asr-flash-filetrans"));
+    fn qwen3_uses_singular_language_and_asks_for_word_timestamps() {
+        // 官方文档里 qwen3-asr 的语言参数叫 `language`，不是 `language_hints`。
+        // 参数名写错不会报错，只会被静默忽略——设置里选的语言等于没选。
+        let body = build_submit_body(DEFAULT_MODEL, "u", Some("zh"));
+        assert_eq!(body["parameters"]["language"], "zh");
+        assert!(body["parameters"].get("language_hints").is_none());
+        // 不开 enable_words 只有句级时间戳，长句也不会按标点切开。
+        assert_eq!(body["parameters"]["enable_words"], true);
+    }
+
+    #[test]
+    fn qwen3_still_enables_words_without_a_language() {
+        let body = build_submit_body(DEFAULT_MODEL, "u", None);
+        assert_eq!(body["parameters"]["enable_words"], true);
+        assert!(body["parameters"].get("language").is_none());
+    }
+
+    #[test]
+    fn fun_asr_does_not_get_qwen3_only_parameters() {
+        let body = build_submit_body("fun-asr", "u", Some("zh"));
+        assert_eq!(body["parameters"]["language_hints"][0], "zh");
+        assert!(body["parameters"].get("enable_words").is_none());
     }
 
     #[test]
@@ -329,5 +427,83 @@ mod tests {
         let err = dashscope_error("submit", &payload, reqwest::StatusCode::UNAUTHORIZED);
         assert!(err.to_string().contains("InvalidApiKey"));
         assert!(err.to_string().contains("bad key"));
+    }
+
+    #[tokio::test]
+    async fn empty_key_gets_a_readable_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audio.mp3");
+        std::fs::write(&path, b"not really audio").unwrap();
+        let err = run_aliyun(&path, "audio/mpeg", "  ", DEFAULT_MODEL, None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("缺少阿里云百炼 API Key"), "{err}");
+        assert!(!err.contains("config error"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn oversized_file_is_rejected_before_any_upload() {
+        // 稀疏文件，不真占 22MB；重点是 run_aliyun 在读文件、发请求之前就返回。
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.mp3");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(22_000_000)
+            .unwrap();
+        let err = run_aliyun(&path, "audio/mpeg", "sk-test", DEFAULT_MODEL, None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("音频太大"), "{err}");
+    }
+
+    /// 真网测试：默认不跑，配置好 Key 与一段音频后手动执行
+    /// `cargo test --lib live_aliyun -- --ignored --nocapture`。
+    /// 它走的是生产路径 `run_aliyun`，不是手搓请求体。
+    #[tokio::test]
+    #[ignore = "需要网络、DASHSCOPE_API_KEY 和 ALIYUN_ASR_AUDIO"]
+    async fn live_aliyun_transcribes_a_local_file() {
+        let key = std::env::var("DASHSCOPE_API_KEY").expect("DASHSCOPE_API_KEY");
+        let audio = std::env::var("ALIYUN_ASR_AUDIO").expect("ALIYUN_ASR_AUDIO");
+        let json = run_aliyun(
+            Path::new(&audio),
+            "audio/mpeg",
+            &key,
+            DEFAULT_MODEL,
+            Some("zh"),
+        )
+        .await
+        .expect("live aliyun asr");
+        let text: String = json
+            .transcription
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect();
+        eprintln!("live transcript: {text}");
+        assert!(!text.trim().is_empty(), "empty transcript");
+        assert!(
+            json.transcription
+                .iter()
+                .any(|segment| !segment.tokens.is_empty()),
+            "enable_words=true should return word timestamps"
+        );
+    }
+
+    #[test]
+    fn silent_audio_gets_a_readable_error() {
+        // 纯静音/纯音乐的任务是 FAILED，但 code 叫 SUCCESS_WITH_NO_VALID_FRAGMENT。
+        // 原样抛出去，用户只会看到一串英文错误码，不知道其实不是配置问题。
+        let payload = json!({
+            "output": {
+                "task_status": "FAILED",
+                "code": "SUCCESS_WITH_NO_VALID_FRAGMENT",
+                "message": "SUCCESS_WITH_NO_VALID_FRAGMENT"
+            }
+        });
+        let err = dashscope_error("query", &payload, reqwest::StatusCode::OK);
+        let text = err.to_string();
+        assert!(text.contains("没有从这段音频里检测到语音"), "{text}");
+        assert!(text.contains("SUCCESS_WITH_NO_VALID_FRAGMENT"), "{text}");
     }
 }
