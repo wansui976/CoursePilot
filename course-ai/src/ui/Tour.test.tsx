@@ -1,5 +1,6 @@
 import "@/i18n";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useTours } from "@/stores/tours";
 import { Tour, type TourStep } from "./Tour";
@@ -111,6 +112,66 @@ describe("Tour", () => {
     // 前一组看完，下一组才轮到
     fireEvent.click(screen.getByRole("button", { name: "知道了" }));
     expect(await screen.findByRole("dialog", { name: "另一组" })).toBeInTheDocument();
+  });
+
+  it("runs onNext before moving on and waits for an anchor on the page it navigated to", async () => {
+    function Flow() {
+      const [page, setPage] = useState<"home" | "settings">("home");
+      return (
+        <>
+          {page === "home" ? <Anchor name="settings" /> : <Anchor name="llm" x={400} />}
+          <Tour
+            id="library"
+            delay={0}
+            steps={[
+              { anchor: "settings", title: "去设置", body: "…", onNext: () => setTimeout(() => setPage("settings"), 800) },
+              { anchor: "llm", awaitAnchor: true, title: "配大模型", items: ["注册", "新增", "保存"] },
+            ]}
+          />
+        </>
+      );
+    }
+    render(<Flow />);
+    // 第二步的锚点开场时不在，但它是跳转后才出现的，也算一步
+    expect(await screen.findByRole("dialog", { name: "去设置" })).toHaveTextContent("1 / 2");
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    // 新页面 0.8 秒后才渲染出锚点：不能当成「锚点没了」跳过
+    const next = await screen.findByRole("dialog", { name: "配大模型" });
+    expect(next).toHaveTextContent("2 / 2");
+    expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual(["注册", "新增", "保存"]);
+  });
+
+  it("hides while its anchor is scrolled off screen instead of skipping the step", async () => {
+    let top = 100;
+    render(
+      <>
+        <button
+          type="button"
+          data-tour="far"
+          ref={(el) => {
+            if (el) {
+              el.getBoundingClientRect = () =>
+                ({ left: 100, top, right: 180, bottom: top + 30, width: 80, height: 30, x: 100, y: top }) as DOMRect;
+            }
+          }}
+        >
+          far
+        </button>
+        <Tour id="library" delay={0} steps={[STEPS[0], { anchor: "far", title: "填表这步", body: "…" }]} />
+        <Anchor name="a" />
+      </>,
+    );
+    await screen.findByRole("dialog", { name: "第一步" });
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    await screen.findByRole("dialog", { name: "填表这步" });
+    // 往下滚：锚点跑到屏幕上方外面
+    top = -500;
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 900)));
+    expect(useTours.getState().seen.has("library")).toBe(false);
+    // 滚回来：还是这一步
+    top = 100;
+    expect(await screen.findByRole("dialog", { name: "填表这步" })).toBeInTheDocument();
   });
 
   it("skips a step when its anchor goes away", async () => {

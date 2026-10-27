@@ -27,6 +27,8 @@
   text-align: left;
 }
 
+.ca-tour-bubble[data-wide] { width: 380px; }
+
 .ca-tour-arrow {
   position: absolute;
   width: 16px;
@@ -71,6 +73,31 @@
   font-size: 13.5px;
   line-height: 1.6;
   opacity: 0.95;
+}
+
+.ca-tour-items {
+  position: relative;
+  margin: 8px 0 0;
+  padding-left: 1.3em;
+  list-style: decimal;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.ca-tour-items li + li { margin-top: 4px; }
+.ca-tour-items li::marker { font-variant-numeric: tabular-nums; opacity: 0.8; }
+.ca-tour-bubble code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 0.18);
+  font-size: 12.5px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  word-break: break-all;
+}
+.ca-tour-link {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .ca-tour-foot {

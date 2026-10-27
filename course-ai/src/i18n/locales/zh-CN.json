@@ -1554,17 +1554,30 @@
     "done": "知道了",
     "progress": "{{current}} / {{total}}",
     "library": {
-      "addCourse": {
-        "title": "先建一门课",
-        "body": "选一个放课程视频的文件夹，里面的视频会自动导入。B 站、YouTube 链接可以进了课程再贴。"
-      },
       "settings": {
-        "title": "再配一个大模型",
-        "body": "在「设置 → 大模型」填一个 API Key，摘要、笔记、练习题和课程问答就都能用了。不配也可以先做本地转写。"
+        "title": "先配好两样：大模型和语音识别",
+        "body": "转写字幕要用语音识别，整理笔记、出题和问答要用大模型。点「下一步」，带你去设置里配好。"
       },
-      "assistant": {
-        "title": "不知道从哪下手，就问助手",
-        "body": "搜 B 站课程、建课程、查学习进度，用一句话说就行；它改数据之前会先问你。"
+      "llm": {
+        "title": "大模型：以 DeepSeek 为例",
+        "body": "兼容 OpenAI 格式的服务都能用，填法一样。",
+        "step1": "在 <link>DeepSeek 开放平台</link> 注册，创建一个 API Key（余额不足先充一点）",
+        "step2": "点「新增」，Base URL 填 <code>https://api.deepseek.com</code>",
+        "step3": "填好 API Key 和模型名，点「保存」"
+      },
+      "asr": {
+        "title": "语音识别：火山引擎或阿里云，二选一",
+        "body": "云端识别比本地 Whisper 准得多；不配的话会先用本地 Whisper 转写。",
+        "bodyMobile": "手机上只能用云端识别，配好其中一个才能转写字幕。",
+        "volc": "火山引擎：开通 <link>录音文件识别大模型版</link>，拿到 App ID 和 Access Token；「识别后端」选「火山录音文件识别」，填好后点「保存火山 ASR 凭证」",
+        "aliyun": "阿里云：在 <link>百炼控制台</link> 开通语音识别，创建百炼 API Key（<code>sk-</code> 开头）；「识别后端」选「阿里云 DashScope 录音文件识别」，填好后点「保存百炼 API Key」"
+      },
+      "addCourse": {
+        "title": "最后，建一门课、导入视频",
+        "step1": "点「添加课程文件夹」，选一个放课程视频的文件夹，里面的视频会自动导入",
+        "step2": "进了课程，点「导入」还能上传本地视频，或贴 B 站 / YouTube 链接（B 站第一次下载会提示导入 cookies.txt）",
+        "step2Mobile": "进了课程，点「导入」还能从相册或文件里选视频",
+        "step3": "导入后会自动转写、截取课件、整理笔记，进度在「处理队列」里看"
       }
     },
     "course": {

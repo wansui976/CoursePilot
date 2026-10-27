@@ -1559,17 +1559,30 @@
     "done": "Got it",
     "progress": "{{current}} of {{total}}",
     "library": {
-      "addCourse": {
-        "title": "Start with a course",
-        "body": "Pick a folder that holds your lecture videos — they'll be imported automatically. Bilibili and YouTube links can be added once you're in the course."
-      },
       "settings": {
-        "title": "Then add an LLM",
-        "body": "Add an API key in Settings → LLM to unlock summaries, notes, quizzes and course Q&A. Local transcription works without one."
+        "title": "First, set up an LLM and speech recognition",
+        "body": "Speech recognition turns lectures into transcripts; the LLM writes notes, quizzes and answers. Click Next and we’ll walk you through Settings."
       },
-      "assistant": {
-        "title": "Not sure where to begin? Ask the assistant",
-        "body": "Search Bilibili, create courses or check your progress in plain language. It asks before changing anything."
+      "llm": {
+        "title": "LLM — DeepSeek as an example",
+        "body": "Any OpenAI-compatible service works the same way.",
+        "step1": "Sign up on the <link>DeepSeek Platform</link> and create an API key (top up if your balance is low)",
+        "step2": "Click Add and set Base URL to <code>https://api.deepseek.com</code>",
+        "step3": "Enter the API key and model name, then click Save"
+      },
+      "asr": {
+        "title": "Speech recognition — Volcengine or Alibaba Cloud",
+        "body": "Cloud recognition is far more accurate than local Whisper; without it, local Whisper is used.",
+        "bodyMobile": "Phones only use cloud recognition, so set up one of these to get transcripts.",
+        "volc": "Volcengine: enable <link>Recording File Recognition (LLM)</link> to get an App ID and Access Token; set ASR backend to “Volcengine file transcription”, fill them in and click “Save Volcengine ASR credentials”",
+        "aliyun": "Alibaba Cloud: enable speech recognition in the <link>Bailian console</link> and create an API key (starts with <code>sk-</code>); set ASR backend to “Alibaba Cloud DashScope file transcription”, paste the key and click “Save Bailian API Key”"
+      },
+      "addCourse": {
+        "title": "Finally, create a course and import videos",
+        "step1": "Click “New Course Folder” and pick the folder that holds your lecture videos — they’re imported automatically",
+        "step2": "Inside a course, Import also takes local videos or Bilibili / YouTube links (the first Bilibili download asks for cookies.txt)",
+        "step2Mobile": "Inside a course, Import lets you pick videos from Photos or Files",
+        "step3": "Videos are transcribed, slides captured and notes written automatically — follow along in the processing queue"
       }
     },
     "course": {

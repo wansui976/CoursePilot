@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useTours, type TourId } from "@/stores/tours";
@@ -9,16 +9,25 @@ import { useTours, type TourId } from "@/stores/tours";
  *
  * - 页面只负责在合适的地方挂上 <Tour>（以及决定 enabled）；锚点用 data-tour 标在按钮上，
  *   同名锚点可以有多个（侧栏展开 / 收起两套按钮），取当前看得见的那个。
- * - 锚点不在（窄屏布局、功能没开）的步骤直接跳过，「第几步 / 共几步」只数开场时在的那些。
+ * - 锚点不在（窄屏布局、功能没开）的步骤直接跳过，「第几步 / 共几步」只数开场时在的那些；
+ *   标了 awaitAnchor 的步骤例外——它的锚点在上一步 onNext 跳转过去的页面上，开场时本来就不在。
  * - 每组只出现一次：看完、点关闭或按 Esc 都记为看过；引导中途离开页面也算看过，
  *   免得下次从头再来一遍。
  */
 export type TourStep = {
   anchor: string;
   title: string;
-  body: string;
+  body?: ReactNode;
+  /** 一步里要做的几件事，渲染成编号列表。 */
+  items?: ReactNode[];
+  /** 说明多的步骤用宽一点的气泡。 */
+  wide?: boolean;
   /** 优先放在锚点的哪一边；放不下时自动换边。默认下方。 */
   placement?: Placement;
+  /** 点「下一步」时先做的事（通常是跳到下一步所在的页面）。 */
+  onNext?: () => void;
+  /** 锚点在跳转后的页面上：开场时不在也算一步，并多等一会儿让页面加载出来。 */
+  awaitAnchor?: boolean;
 };
 type Placement = "top" | "bottom" | "left" | "right";
 
@@ -26,14 +35,23 @@ const GAP = 12; // 气泡与锚点的距离（含箭头）
 const MARGIN = 12; // 气泡离视口边缘的最小距离
 const ARROW = 8;
 const POLL_MS = 250;
+/** 锚点消失多久算「没了」，跳到下一步。跳转后的新页面多给些加载时间。 */
+const MISSING_MS = 500;
+const AWAIT_MS = 4000;
+
+/** 有尺寸（渲染出来了）的元素的矩形；没尺寸（display: none、没挂上）返回 null。 */
+function sizedRect(el: Element): DOMRect | null {
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0 ? rect : null;
+}
+
+function onScreen(rect: DOMRect) {
+  return !(rect.bottom < 0 || rect.right < 0 || rect.top > window.innerHeight || rect.left > window.innerWidth);
+}
 
 function visibleRect(el: Element): DOMRect | null {
-  const rect = el.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) return null;
-  if (rect.bottom < 0 || rect.right < 0 || rect.top > window.innerHeight || rect.left > window.innerWidth) {
-    return null;
-  }
-  return rect;
+  const rect = sizedRect(el);
+  return rect && onScreen(rect) ? rect : null;
 }
 
 /**
@@ -49,6 +67,11 @@ export function findAnchor(anchor: string): { el: Element; rect: DOMRect } | nul
     }
   }
   return best;
+}
+
+/** 锚点还在页面上、只是被滚出了屏幕（用户往下翻着填表）。 */
+function anchorScrolledAway(anchor: string): boolean {
+  return [...document.querySelectorAll(`[data-tour="${anchor}"]`)].some((el) => sizedRect(el) !== null);
 }
 
 /**
@@ -122,11 +145,16 @@ export function Tour({
     let cancelled = false;
     let timer = window.setTimeout(function poll() {
       if (cancelled) return;
-      const present = stepsRef.current
-        .map((step, index) => (findAnchor(step.anchor) ? index : -1))
-        .filter((index) => index >= 0);
-      if (present.length > 0 && !otherDialogOpen() && claim(id)) {
-        setAvailable(present);
+      const steps = stepsRef.current;
+      const present = steps.map((step, index) => (findAnchor(step.anchor) ? index : -1));
+      // 第一步的锚点必须已经在页面上，引导才开场
+      const firstPresent = present.find((index) => index >= 0);
+      if (firstPresent !== undefined && !otherDialogOpen() && claim(id)) {
+        setAvailable(
+          steps
+            .map((step, index) => (present[index] >= 0 || step.awaitAnchor ? index : -1))
+            .filter((index) => index >= firstPresent),
+        );
         setCursor(0);
         return;
       }
@@ -162,10 +190,12 @@ export function Tour({
     if (!available || stepIndex < 0) return;
     let frame = 0;
     let missingSince = 0;
+    let seenOnce = false;
     const track = () => {
       const found = findAnchor(stepsRef.current[stepIndex].anchor);
       if (found) {
         missingSince = 0;
+        seenOnce = true;
         setAnchorRect((prev) =>
           prev &&
           prev.left === found.rect.left &&
@@ -175,11 +205,17 @@ export function Tour({
             ? prev
             : found.rect,
         );
+      } else if (seenOnce && anchorScrolledAway(stepsRef.current[stepIndex].anchor)) {
+        // 被滚出屏幕：先把气泡收起来（不挡着用户往下填的东西），滚回来再出现；不算锚点没了。
+        missingSince = 0;
+        setAnchorRect(null);
       } else {
         const now = performance.now();
         if (!missingSince) missingSince = now;
-        // 锚点消失超过半秒（切了页签、收起了面板）：跳过这一步。
-        if (now - missingSince > 500) {
+        // 锚点消失超过半秒（切了页签、收起了面板）：跳过这一步。还没出现过的（刚跳转、
+        // 页面在加载）多等几秒。
+        const grace = !seenOnce && stepsRef.current[stepIndex].awaitAnchor ? AWAIT_MS : MISSING_MS;
+        if (now - missingSince > grace) {
           setAnchorRect(null);
           if (cursor + 1 < available.length) setCursor(cursor + 1);
           else done();
@@ -204,8 +240,10 @@ export function Tour({
     if (pos) primaryRef.current?.focus({ preventScroll: true });
   }, [stepIndex, pos !== null]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Esc 只在气泡看得见时关引导；气泡因为滚动收起时，Esc 留给页面自己用。
+  const bubbleShown = open && anchorRect !== null;
   useEffect(() => {
-    if (!open) return;
+    if (!bubbleShown) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.stopPropagation();
@@ -213,7 +251,7 @@ export function Tour({
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [open, done]);
+  }, [bubbleShown, done]);
 
   if (!available || stepIndex < 0 || !anchorRect) return null;
   const step = steps[stepIndex];
@@ -238,6 +276,7 @@ export function Tour({
         aria-modal="false"
         aria-labelledby={titleId}
         className="ca-tour-bubble"
+        data-wide={step.wide ? "" : undefined}
         data-placement={pos?.placement ?? "bottom"}
         style={{
           left: pos?.left ?? -9999,
@@ -264,7 +303,14 @@ export function Tour({
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
-        <p className="ca-tour-body">{step.body}</p>
+        {step.body && <p className="ca-tour-body">{step.body}</p>}
+        {step.items && (
+          <ol className="ca-tour-items">
+            {step.items.map((item, index) => (
+              <li key={index}>{item}</li>
+            ))}
+          </ol>
+        )}
         <div className="ca-tour-foot">
           {available.length > 1 && (
             <span className="ca-tour-count">
@@ -275,7 +321,16 @@ export function Tour({
             ref={primaryRef}
             type="button"
             className="ca-tour-next"
-            onClick={() => (last ? done() : setCursor(cursor + 1))}
+            onClick={() => {
+              if (last) {
+                done();
+                return;
+              }
+              step.onNext?.();
+              setAnchorRect(null);
+              setPos(null);
+              setCursor(cursor + 1);
+            }}
           >
             {last ? t("tour.done") : t("tour.next")}
           </button>

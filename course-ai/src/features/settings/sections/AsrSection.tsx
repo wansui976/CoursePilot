@@ -52,7 +52,7 @@ export function AsrSection({ form }: { form: SettingsForm }) {
     <>
       <Group header={t("settings.asr.engineTitle")}>
         <Row label={t("settings.asr.backend")} htmlFor="asr-backend">
-          <div className="w-full sm:w-56">
+          <div className="w-full sm:w-56" data-tour="asr-backend">
             <Select
               id="asr-backend"
               value={asrBackend}

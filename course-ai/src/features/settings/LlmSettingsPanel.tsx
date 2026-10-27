@@ -280,7 +280,7 @@ export function LlmSettingsPanel({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <Button size="sm" variant="outline" onClick={add}>
+        <Button size="sm" variant="outline" onClick={add} data-tour="llm-add">
           <Plus className="h-3.5 w-3.5" />
           {t("llmSettings.add")}
         </Button>

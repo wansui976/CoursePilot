@@ -630,6 +630,7 @@ export function Home() {
           downloadCount === 0
         }
         workbench={isWorkbenchView}
+        navigate={(patch) => runAfterSettingsExit(() => go(patch))}
       />
     </div>
     </ShellContext.Provider>
