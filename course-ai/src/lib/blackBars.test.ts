@@ -8,9 +8,20 @@ import {
 } from "./blackBars";
 
 describe("resolveCrop", () => {
-  it("drops a one-sided inset so a single detected bar is treated as a misjudgment", () => {
-    // 只检测到左边有「黑边」（右边 0）→ 整轴不裁，避免把暗色内容当黑边削掉。
-    expect(resolveCrop({ top: 0, right: 0, bottom: 0, left: 0.1 })).toEqual(NO_INSETS);
+  it("keeps a one-sided inset when the opposite edge is clean", () => {
+    // 课程录屏常见：顶部一条工具栏黑边、底部没有；不能因为不对称就整轴放弃。
+    expect(resolveCrop({ top: 0.037, right: 0.05, bottom: 0, left: 0.05 })).toEqual({
+      top: 0.037,
+      right: 0.05,
+      bottom: 0,
+      left: 0.05,
+    });
+    expect(resolveCrop({ top: 0, right: 0, bottom: 0, left: 0.1 })).toEqual({
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0.1,
+    });
   });
 
   it("leaves a wildly asymmetric axis alone instead of shaving the other side", () => {
