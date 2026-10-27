@@ -76,6 +76,16 @@ describe("cropStyle", () => {
     expect(s.left).toBe(0);
   });
 
+  it("opts out of preflight max-width so right/bottom bars can be clipped", () => {
+    // Tailwind preflight 的 `img, video { max-width: 100% }` 会把放大后的视频夹回舞台
+    // 宽度：left 偏移生效、右侧黑边却留在舞台里，看起来就像只裁了左边。
+    const crop: Insets = { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 };
+    const s = cropStyle({ width: 1280, height: 720 }, crop);
+    expect(s.width).toBeGreaterThan(1280);
+    expect(s.maxWidth).toBe("none");
+    expect(s.maxHeight).toBe("none");
+  });
+
   it("snaps crop geometry to device pixels when a dpr is provided", () => {
     const crop: Insets = { top: 0, right: 0.1, bottom: 0, left: 0.1 };
     const s = cropStyle({ width: 335.5, height: 240 }, crop, 2);

@@ -79,6 +79,12 @@ export function cropStyle(
     top: snapToDevicePixel(-height * crop.top, dpr) || 0,
     width,
     height,
+    // Tailwind preflight 里有 `img, video { max-width: 100%; height: auto; }`。
+    // 舞台宽度是 stageBox.width，视频要放大到 stageBox.width / (1-左右黑边) 才能把
+    // 右侧黑边推出舞台；被 preflight 夹回 100% 时，只有 left 负偏移生效，表现为
+    // 「只去掉了左侧黑边」，右侧留一条背景色。这里明确解除限制。
+    maxWidth: "none",
+    maxHeight: "none",
   };
 }
 
