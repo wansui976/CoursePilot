@@ -35,21 +35,29 @@ async fn cookies_for(state: &AppState, url: &str) -> AppResult<Option<String>> {
     }
 }
 
+const LOGIN_EXPIRED_NOTE: &str =
+    "B站登录态已失效，本轮按语音转写导入（自带字幕要登录才拿得到）。重新导入 cookies.txt 后，之后的集会恢复用自带字幕。";
+
+/// 本轮检查要记下的提醒：登录失效的说明在前，某几集导入失败的原因在后。
+fn check_note(login_expired: bool, last_error: Option<String>) -> Option<String> {
+    match (login_expired, last_error) {
+        (true, Some(error)) => Some(format!("{LOGIN_EXPIRED_NOTE}\n{error}")),
+        (true, None) => Some(LOGIN_EXPIRED_NOTE.to_string()),
+        (false, error) => error,
+    }
+}
+
 /// 检查一个订阅：枚举各集，没见过的导入（每次最多 MAX_IMPORTS_PER_CHECK 集），
 /// 导入成功的记为见过并按设置开始处理。返回本次导入的集数。
 async fn check_one(app: &tauri::AppHandle, subscription: &Subscription) -> AppResult<usize> {
     let state = app.state::<AppState>();
     let cookies = cookies_for(&state, &subscription.url).await?;
-    // 登录态只查一次（不是每集一次）：订阅是无人值守导入，登录过期时若继续，
-    // 每一集都会悄悄退化成语音转写，用户还以为 AI 字幕坏了。
-    if download::is_bilibili_url(&subscription.url)
+    // 登录态只查一次（不是每集一次）。和手动导入、助手导入一致：过期了照样导入，
+    // 拿不到自带字幕就退回语音转写；但要在订阅记录里说清楚，免得用户以为字幕坏了。
+    // 订阅是无人值守的，要是因此停掉，新的一集会一直堆着没人导。
+    let login_expired = download::is_bilibili_url(&subscription.url)
         && crate::pipeline::bilibili_extra::login_state_from_setting(cookies.as_deref()).await
-            == Some(false)
-    {
-        let message = "B站登录态已失效，本次订阅没有导入。请重新导入 cookies.txt，下次检查会继续。";
-        subscriptions::record_check(&state.db, &subscription.id, Some(message)).await?;
-        return Err(crate::error::AppError::Other(message.into()));
-    }
+            == Some(false);
     let info = match download::probe_playlist(&subscription.url, cookies.as_deref()).await {
         Ok(info) => info,
         Err(error) => {
@@ -100,7 +108,8 @@ async fn check_one(app: &tauri::AppHandle, subscription: &Subscription) -> AppRe
             Err(error) => last_error = Some(format!("{}：{error}", episode.title)),
         }
     }
-    subscriptions::record_check(&state.db, &subscription.id, last_error.as_deref()).await?;
+    let note = check_note(login_expired, last_error);
+    subscriptions::record_check(&state.db, &subscription.id, note.as_deref()).await?;
     if imported > 0 {
         let _ = app.emit(
             "subscriptions-imported",
@@ -208,4 +217,22 @@ pub async fn cmd_check_subscription(app: tauri::AppHandle, id: String) -> AppRes
     let db = app.state::<AppState>().db.clone();
     let subscription = subscriptions::get(&db, &id).await?;
     check_one(&app, &subscription).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_expired_login_is_noted_without_hiding_episode_errors() {
+        assert_eq!(check_note(false, None), None);
+        assert_eq!(
+            check_note(false, Some("第3集：断流".into())).as_deref(),
+            Some("第3集：断流")
+        );
+        assert_eq!(check_note(true, None).as_deref(), Some(LOGIN_EXPIRED_NOTE));
+        let both = check_note(true, Some("第3集：断流".into())).unwrap();
+        assert!(both.starts_with(LOGIN_EXPIRED_NOTE));
+        assert!(both.ends_with("第3集：断流"));
+    }
 }
