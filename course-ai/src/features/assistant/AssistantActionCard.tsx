@@ -258,8 +258,30 @@ async function assertActionsFresh(actions: Proposal[]) {
   }
 }
 
+type ImportProposal = Extract<Proposal, { kind: "propose_import" }>;
+
+/**
+ * 模型给的标题是否真的能当标题用。
+ *
+ * `import_video` 的 title 是可选参数：用户只丢一个链接过来时，模型手里并没有标题。
+ * 旧后端会拿链接顶上，于是确认卡把同一个链接显示两遍，看起来就像「没显示标题」。
+ * 空串、以及任何链接形态的字符串，都按「还没标题」处理，交给下面按链接识别。
+ */
+function isLinkLike(value: string) {
+  return /^[a-z][a-z\d+.-]*:\/\//i.test(value);
+}
+
+function importTitleOf(action: ImportProposal): string | undefined {
+  const title = action.title?.trim();
+  if (!title || isLinkLike(title)) return undefined;
+  return title;
+}
+
 /** 提案怎么显示：对象、补充信息和所属课程。单张卡和批量卡共用，保持一致。 */
-function describe(action: Proposal): { primary: string; secondary?: string; context?: string } {
+function describe(
+  action: Proposal,
+  resolvedImportTitle?: string,
+): { primary: string; secondary?: string; context?: string } {
   switch (action.kind) {
     case "propose_rename":
       return {
@@ -281,14 +303,18 @@ function describe(action: Proposal): { primary: string; secondary?: string; cont
         primary: action.label,
         secondary: i18n.t("assistantActions.settingChange", { current: action.current ?? i18n.t("assistantActions.notSet"), value: action.value }),
       };
-    case "propose_import":
+    case "propose_import": {
+      // 有真标题就显示标题，链接退成副行；没有标题时链接只出现一次，
+      // 不再让同一个字符串同时占标题位和链接位。
+      const title = resolvedImportTitle ?? importTitleOf(action);
       return {
-        primary: action.title,
-        secondary: action.url,
+        primary: title ?? action.url,
+        secondary: title && title !== action.url ? action.url : undefined,
         context: action.course_name
           ? i18n.t("assistantActions.importCourseContext", { course: action.course_name })
           : undefined,
       };
+    }
     case "propose_create_course":
       return { primary: action.name, secondary: i18n.t("assistantActions.createAt", { path: action.root_path }) };
     case "propose_rename_course":
@@ -393,6 +419,55 @@ function ProposalGroup({
     ({ action }) => action.kind === "propose_import" && !action.course_id,
   );
 
+  // 模型没给标题的导入卡，按链接自己认一次。认出来的标题就是下载时 yt-dlp 会写进库的
+  // 那个标题，用户才能在点「确认导入」之前核对「是不是 p=25 那一节」。
+  const [importTitles, setImportTitles] = useState<Record<string, string>>({});
+  const [failedImportTitles, setFailedImportTitles] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const untitledImportUrls = actions
+    .flatMap((action) =>
+      action.kind === "propose_import" && !importTitleOf(action) ? [action.url] : [],
+    )
+    .join("\n");
+
+  useEffect(() => {
+    if (!untitledImportUrls) return;
+    let cancelled = false;
+    for (const url of new Set(untitledImportUrls.split("\n"))) {
+      // 认不出来不是导入失败：退回只显示链接，确认按钮照常可用。
+      const giveUp = () => {
+        if (cancelled) return;
+        setFailedImportTitles((prev) =>
+          prev.has(url) ? prev : new Set(prev).add(url),
+        );
+      };
+      ipc.tools
+        .probeBilibili(url)
+        .then((probe) => {
+          const resolved = probe.title?.trim();
+          if (cancelled) return;
+          if (!resolved || isLinkLike(resolved)) {
+            giveUp();
+            return;
+          }
+          setImportTitles((prev) =>
+            prev[url] === resolved ? prev : { ...prev, [url]: resolved },
+          );
+        })
+        .catch(giveUp);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [untitledImportUrls]);
+
+  const labelOf = (action: Proposal) =>
+    describe(
+      action,
+      action.kind === "propose_import" ? importTitles[action.url] : undefined,
+    ).primary;
+
   useEffect(() => {
     if (status === "done") completionRef.current?.focus();
   }, [status]);
@@ -463,7 +538,7 @@ function ProposalGroup({
         shouldRefresh = true;
       } catch (e) {
         failures.push({
-          message: `${describe(action).primary}（${displayActionError(e)}）`,
+          message: `${labelOf(action)}（${displayActionError(e)}）`,
         });
       }
     }
@@ -473,7 +548,7 @@ function ProposalGroup({
       resultMessages.push(
         t("assistantActions.completeResult", {
           title,
-          details: succeeded.map((index) => describe(actions[index]).primary).join("、"),
+          details: succeeded.map((index) => labelOf(actions[index])).join("、"),
         }),
       );
     }
@@ -484,7 +559,7 @@ function ProposalGroup({
       resultMessages.push(
         t("assistantActions.canceledResult", {
           title,
-          details: unfinishedAfter.map(({ action }) => describe(action).primary).join("、"),
+          details: unfinishedAfter.map(({ action }) => labelOf(action)).join("、"),
         }),
       );
     } else if (failures.length > 0) {
@@ -535,7 +610,7 @@ function ProposalGroup({
       resultMessages: [
         t("assistantActions.canceledResult", {
           title,
-          details: remaining.map(({ action }) => describe(action).primary).join("、"),
+          details: remaining.map(({ action }) => labelOf(action)).join("、"),
         }),
       ],
     });
@@ -549,7 +624,7 @@ function ProposalGroup({
       resolvedActions: [action],
       finishedActions: [],
       resultMessages: [
-        t("assistantActions.canceledResult", { title, details: describe(action).primary }),
+        t("assistantActions.canceledResult", { title, details: labelOf(action) }),
       ],
     });
   }
@@ -572,7 +647,20 @@ function ProposalGroup({
 
       <ul className="mb-2 space-y-1">
         {chosen.map(({ action, i }) => {
-          const { primary, secondary, context } = describe(action);
+          const resolvedTitle =
+            action.kind === "propose_import" ? importTitles[action.url] : undefined;
+          const { primary, secondary, context } = describe(action, resolvedTitle);
+          // 标题识别中：链接先占副行，标题位给一句进度；识别失败就退回只显示链接。
+          const resolvingTitle =
+            action.kind === "propose_import" &&
+            !importTitleOf(action) &&
+            !resolvedTitle &&
+            !failedImportTitles.has(action.url) &&
+            status !== "done";
+          const shownPrimary = resolvingTitle
+            ? t("assistantActions.importTitleResolving")
+            : primary;
+          const shownSecondary = resolvingTitle ? action.url : secondary;
           const struck =
             action.kind === "propose_rename" || action.kind === "propose_rename_course";
           return (
@@ -581,14 +669,14 @@ function ProposalGroup({
                 {context && (
                   <p className="break-all text-[var(--text-muted)]">{context}</p>
                 )}
-                {secondary && (
+                {shownSecondary && (
                   <p
                     className={`break-all text-[var(--text-muted)] ${struck ? "line-through" : ""}`}
                   >
-                    {secondary}
+                    {shownSecondary}
                   </p>
                 )}
-                <p className="break-all text-[var(--text-strong)]">{primary}</p>
+                <p className="break-all text-[var(--text-strong)]">{shownPrimary}</p>
               </div>
               {completed.has(i) && (
                 <span className="flex flex-none items-center gap-1 text-[var(--status-ok)]">
@@ -599,7 +687,7 @@ function ProposalGroup({
               {batch && !completed.has(i) && (status === "pending" || status === "paused") && (
                 <button
                   type="button"
-                  aria-label={t("assistantActions.skip", { name: primary })}
+                  aria-label={t("assistantActions.skip", { name: labelOf(action) })}
                   onClick={() => skip(i, action)}
                   className="ca-touch-44 flex-none rounded p-0.5 text-[var(--text-faint)] transition hover:text-[var(--text-strong)]"
                 >

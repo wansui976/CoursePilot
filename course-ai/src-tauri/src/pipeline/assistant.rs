@@ -1409,7 +1409,9 @@ pub fn tool_specs() -> Vec<ToolSpec> {
         ToolSpec {
             name: "import_video".into(),
             description: "把一个视频链接导入课程。**会生成确认卡，用户点了才真的下载。** \
-                 必须明确目标 course_id；未提供时只能使用当前课程，首页应先调 list_courses。"
+                 必须明确目标 course_id；未提供时只能使用当前课程，首页应先调 list_courses。\
+                 title 只在确实知道视频标题时才传（例如 search_bilibili 返回的标题）；\
+                 不知道就省略，绝对不要把链接填进 title——界面会自己按链接识别标题。"
                 .into(),
             parameters: object(
                 json!({
@@ -1800,8 +1802,16 @@ impl AssistantTools<'_> {
                         )
                     })?;
                 let course = self.find_course(&course_id).await?;
+                // 没给标题就留空，不能拿链接顶上：确认卡会同时渲染 title 和 url，
+                // 那样同一个链接会出现两遍，真正该显示的标题反而没有位置。
+                // 界面会拿 url 去 probe 一次，把真实标题补到卡上。
+                let title = args
+                    .title
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty() && !is_http_url(t))
+                    .unwrap_or_default();
                 self.record(AssistantAction::ProposeImport {
-                    title: args.title.unwrap_or_else(|| url.clone()),
+                    title,
                     url,
                     course_id: Some(course.id.clone()),
                     course_name: course.name.clone(),
@@ -3494,12 +3504,36 @@ mod tests {
             [AssistantAction::ProposeImport {
                 course_id: Some(target),
                 course_name,
+                title,
                 ..
             }] => {
                 assert_eq!(target, &course_id);
                 assert_eq!(course_name, "线性代数");
+                assert_eq!(title, "线性代数第二讲");
             }
             other => panic!("应当生成带真实课程的导入卡，实际 {other:?}"),
+        }
+
+        // 只给链接时 title 必须留空：拿链接顶上会让确认卡把同一个字符串显示两遍。
+        let untitled_tools = AssistantTools::new(
+            &db,
+            AssistantContext {
+                course_id: Some(course_id),
+                ..Default::default()
+            },
+        );
+        let untitled = untitled_tools
+            .run(&call(
+                "import_video",
+                r#"{"url":"https://www.bilibili.com/video/BV1yy"}"#,
+            ))
+            .await;
+        assert!(untitled.content.contains("线性代数"));
+        match untitled_tools.take_actions().as_slice() {
+            [AssistantAction::ProposeImport { title, .. }] => {
+                assert_eq!(title, "", "没给标题时不能把链接当标题");
+            }
+            other => panic!("应当生成导入卡，实际 {other:?}"),
         }
     }
 

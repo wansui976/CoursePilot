@@ -3306,4 +3306,63 @@ describe("确认卡", () => {
     expect(await screen.findByText(/还没选课程/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "确认导入" })).toBeDisabled();
   });
+
+  it("导入卡没带标题时按链接识别出标题，不把同一个链接显示两遍", async () => {
+    // 真实反馈：用户只贴了一个 p=25 的链接，卡片上出现两行一模一样的链接，
+    // 看不到标题，也就没法在下载前确认是不是要的那一节。
+    const url = "https://www.bilibili.com/video/BV1p25?p=25";
+    mockIpc.tools.probeBilibili.mockResolvedValueOnce({
+      title: "申论 第 25 讲 综合分析",
+      qualities: [1080],
+      tracks: [],
+    });
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_import",
+            url,
+            // 旧后端会拿链接当标题，界面必须把它当作「没有标题」。
+            title: url,
+            course_id: "c1",
+            course_name: "申论",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("导入这个");
+    expect(await screen.findByText("申论 第 25 讲 综合分析")).toBeInTheDocument();
+    expect(mockIpc.tools.probeBilibili).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByText(url)).toHaveLength(1);
+  });
+
+  it("识别不到标题时退回只显示一次链接，仍然可以确认导入", async () => {
+    const url = "https://www.bilibili.com/video/BV1z";
+    mockIpc.tools.probeBilibili.mockRejectedValueOnce(new Error("network down"));
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_import",
+            url,
+            title: "",
+            course_id: "c1",
+            course_name: "申论",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await act(async () => {
+      await ask("导入这个");
+      // 让探测失败后的状态落定，别把 act 警告留给下一条断言。
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("正在识别标题…")).not.toBeInTheDocument(),
+    );
+    expect(screen.getAllByText(url)).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "确认导入" })).toBeEnabled();
+  });
 });
