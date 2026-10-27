@@ -21,14 +21,22 @@ export interface CropStatus {
 const MIN_EDGE_INSET = 0.02;
 /** 两侧相差超过这么多个百分点，就不是一条对称黑边（一侧多半是暗色误判）。 */
 const MAX_EDGE_GAP = 0.03;
+/**
+ * 单侧黑边（对侧干净）最多裁这么多。录屏顶部工具栏一条通常只有 3~4%；单侧大到
+ * 十几、几十个百分点，更像一块深色内容（深色主题录屏底部的终端、黑底课件），
+ * 不是黑边——没有对侧可以对照，裁错了就是切掉真实画面。
+ */
+const MAX_ONE_SIDED_INSET = 0.15;
 
-/** 一侧的裁剪量。对侧完全没测到黑边时，按本侧独立裁。 */
+/** 一侧的裁剪量。 */
 function sideValue(a: number, b: number): number {
-  // 对侧是 0：更像「画面偏在一侧」的真黑边（录屏顶部工具栏、上下留白不均），
-  // 不是「单边真黑边 + 另一侧暗色误判」——后者对侧通常会留下一个非零值。
-  // 只在两侧都测到非零值、且差得离谱时才整轴放弃。
-  if (b > 0 && Math.abs(a - b) > MAX_EDGE_GAP) return 0;
-  return a < MIN_EDGE_INSET ? 0 : a;
+  if (a < MIN_EDGE_INSET) return 0;
+  // 对侧干净（低于噪声阈值，不要求恰好是 0——cropdetect 按 2px 取整，干净的边也常测出
+  // 1~2px）：按单侧黑边处理，录屏顶部工具栏、上下留白不均都是这样。但单侧太宽就不裁。
+  if (b < MIN_EDGE_INSET) return a <= MAX_ONE_SIDED_INSET ? a : 0;
+  // 两侧都有黑边、但差得离谱：「真黑边 + 另一侧暗色误判」，整轴放弃。
+  if (Math.abs(a - b) > MAX_EDGE_GAP) return 0;
+  return a;
 }
 
 /**
@@ -39,10 +47,10 @@ function sideValue(a: number, b: number): number {
  * 现在各自裁各自的，两边都能完整去掉，裁剪只把画面往宽侧推一点点（差 ≤3%，
  * 最多 1.5%，肉眼不可见）。
  *
- * 单侧黑边（对侧为 0）也要裁：课程录屏经常只有顶部工具栏一条、或画面整体
- * 偏上/偏下，不能因为「不对称」就整轴放弃。只有两侧都非零且差得离谱时
- * （> MAX_EDGE_GAP）才视为「真黑边 + 暗色误判」，整轴不裁。
- * 各侧不足 MIN_EDGE_INSET 的按噪声忽略。
+ * 单侧黑边（对侧低于噪声阈值）也要裁：课程录屏经常只有顶部工具栏一条、或画面整体
+ * 偏上/偏下，不能因为「不对称」就整轴放弃；但单侧超过 MAX_ONE_SIDED_INSET 就不裁
+ * （多半是深色内容）。两侧都有黑边且差得离谱时（> MAX_EDGE_GAP）视为「真黑边 +
+ * 暗色误判」，整轴不裁。各侧不足 MIN_EDGE_INSET 的按噪声忽略。
  */
 export function resolveCrop(crop: Insets): Insets {
   return {

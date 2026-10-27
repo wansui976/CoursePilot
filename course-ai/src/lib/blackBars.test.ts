@@ -24,6 +24,22 @@ describe("resolveCrop", () => {
     });
   });
 
+  it("treats a few pixels of encoder noise on the opposite edge as clean", () => {
+    // cropdetect 按 2px 取整：干净的底边常测出 2/1080 ≈ 0.0019，不能因此把顶部工具栏黑边又放弃掉。
+    expect(resolveCrop({ top: 0.037, right: 0, bottom: 0.0019, left: 0 })).toEqual({
+      top: 0.037,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    });
+  });
+
+  it("does not crop a wide one-sided dark area that is probably content", () => {
+    // 深色主题录屏：底部 30% 是黑底终端，顶部没有黑边。没有对侧可以对照，不能当黑边整块切掉。
+    expect(resolveCrop({ top: 0, right: 0, bottom: 0.3, left: 0 })).toEqual(NO_INSETS);
+    expect(resolveCrop({ top: 0, right: 0.2, bottom: 0, left: 0.015 })).toEqual(NO_INSETS);
+  });
+
   it("leaves a wildly asymmetric axis alone instead of shaving the other side", () => {
     // 源片右边有一条真黑边（20%），左边只是画面偏暗被误判成 2%。
     // 两侧差太多就不是同一条黑边，照单全收会把暗色内容当黑边削掉。
