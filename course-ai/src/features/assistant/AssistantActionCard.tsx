@@ -16,8 +16,10 @@ import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { Button } from "@/ui/button";
 import { humanizeError } from "@/lib/errors";
+import { probeImport } from "@/lib/importProbeCache";
 import { ipc } from "@/lib/ipc";
 import { notesCoordinator } from "@/lib/notesCoordinator";
+import { looksLikeLink } from "@/lib/sourceUrl";
 import type { AssistantAction } from "@/lib/types";
 import { isBilibiliUrl } from "@/lib/sourceUrl";
 
@@ -46,6 +48,9 @@ export interface AssistantActionOutcome {
 }
 
 type Status = "pending" | "running" | "paused" | "done" | "failed" | "stale";
+
+/** 标题识别最多等这么久：yt-dlp 卡住时不能让卡片一直停在「正在识别标题…」。 */
+const TITLE_TIMEOUT_MS = 20_000;
 
 /**
  * 动作执行完必须让相关列表失效。
@@ -113,7 +118,11 @@ async function processImportedVideo(videoId: string) {
   }
 }
 
-async function importWithSubtitles(courseId: string, url: string, resume: ImportResume = {}) {
+async function importWithSubtitles(
+  courseId: string,
+  url: string,
+  resume: ImportResume = {},
+): Promise<string | undefined> {
   // 下载已经成功、只是后续流水线失败时，从检查点继续。重新 probe / import 会产生重复视频。
   if (resume.importedVideoId) {
     await processImportedVideo(resume.importedVideoId);
@@ -122,6 +131,7 @@ async function importWithSubtitles(courseId: string, url: string, resume: Import
 
   // B 站没有 cookies 会在下载阶段报 412。先说清楚，别让人对着一个原始错误码猜。
   // 检查本身出错时保留真实错误，不能伪装成「没有 cookies」。
+  let loginWarning: string | undefined;
   if (isBilibiliUrl(url)) {
     const hasCookies = await ipc.tools.hasBilibiliCookies();
     if (!hasCookies) {
@@ -130,11 +140,16 @@ async function importWithSubtitles(courseId: string, url: string, resume: Import
       );
     }
   }
-  const probe = await ipc.tools.probeBilibili(url);
-  // 登录态失效时 tracks 必然为空，但这句话不能当成「这个视频没有字幕」：
-  // 继续导入会静悄悄退化成语音转写，用户还以为 AI 字幕坏了。
-  if (probe.logged_in === false) {
-    throw new AssistantActionError(i18n.t("assistantActions.cookieExpired"));
+  const [probe, loggedIn] = await Promise.all([
+    probeImport(url),
+    isBilibiliUrl(url)
+      ? ipc.tools.bilibiliLoginState().catch(() => null)
+      : Promise.resolve(null),
+  ]);
+  // 登录态失效时 tracks 必然为空。这里不拦导入（和导入对话框保持一致：仍可语音转写），
+  // 但要把真实原因说出来，不能让用户以为这个视频没有 AI 字幕。
+  if (loggedIn === false) {
+    loginWarning = i18n.t("assistantActions.cookieExpired");
   }
   const track =
     probe.tracks.find((t) => !t.auto && t.lang.startsWith("zh")) ??
@@ -157,9 +172,13 @@ async function importWithSubtitles(courseId: string, url: string, resume: Import
   // 有字幕就立刻跑流水线：ASR 阶段会走字幕分支跳过语音识别，
   // 用户不必再手动点一次「开始处理」。
   if (track) await processImportedVideo(video.id);
+  return loginWarning;
 }
 
-async function execute(action: Proposal, importResume?: ImportResume) {
+async function execute(
+  action: Proposal,
+  importResume?: ImportResume,
+): Promise<string | undefined> {
   switch (action.kind) {
     case "propose_rename":
       await ipc.videos.updateTitle(action.video_id, action.new_title);
@@ -172,8 +191,7 @@ async function execute(action: Proposal, importResume?: ImportResume) {
       return;
     case "propose_import":
       if (!action.course_id) throw new Error(i18n.t("assistantActions.noCourseId"));
-      await importWithSubtitles(action.course_id, action.url, importResume);
-      return;
+      return importWithSubtitles(action.course_id, action.url, importResume);
     case "propose_create_course":
       await ipc.courses.create(action.name, action.root_path);
       return;
@@ -272,13 +290,9 @@ type ImportProposal = Extract<Proposal, { kind: "propose_import" }>;
  * 旧后端会拿链接顶上，于是确认卡把同一个链接显示两遍，看起来就像「没显示标题」。
  * 空串、以及任何链接形态的字符串，都按「还没标题」处理，交给下面按链接识别。
  */
-function isLinkLike(value: string) {
-  return /^[a-z][a-z\d+.-]*:\/\//i.test(value);
-}
-
 function importTitleOf(action: ImportProposal): string | undefined {
   const title = action.title?.trim();
-  if (!title || isLinkLike(title)) return undefined;
+  if (!title || looksLikeLink(title)) return undefined;
   return title;
 }
 
@@ -439,31 +453,42 @@ function ProposalGroup({
   useEffect(() => {
     if (!untitledImportUrls) return;
     let cancelled = false;
+    const timers: number[] = [];
     for (const url of new Set(untitledImportUrls.split("\n"))) {
       // 认不出来不是导入失败：退回只显示链接，确认按钮照常可用。
-      const giveUp = () => {
-        if (cancelled) return;
-        setFailedImportTitles((prev) =>
-          prev.has(url) ? prev : new Set(prev).add(url),
-        );
+      let settled = false;
+      const settle = (apply: () => void) => {
+        if (cancelled || settled) return;
+        settled = true;
+        apply();
       };
-      ipc.tools
-        .probeBilibili(url)
+      const giveUp = () =>
+        settle(() => {
+          setFailedImportTitles((prev) =>
+            prev.has(url) ? prev : new Set(prev).add(url),
+          );
+        });
+      const timer = window.setTimeout(giveUp, TITLE_TIMEOUT_MS);
+      timers.push(timer);
+      probeImport(url)
         .then((probe) => {
           const resolved = probe.title?.trim();
-          if (cancelled) return;
-          if (!resolved || isLinkLike(resolved)) {
+          if (!resolved || looksLikeLink(resolved)) {
             giveUp();
             return;
           }
-          setImportTitles((prev) =>
-            prev[url] === resolved ? prev : { ...prev, [url]: resolved },
-          );
+          settle(() => {
+            setImportTitles((prev) =>
+              prev[url] === resolved ? prev : { ...prev, [url]: resolved },
+            );
+          });
         })
-        .catch(giveUp);
+        .catch(giveUp)
+        .finally(() => window.clearTimeout(timer));
     }
     return () => {
       cancelled = true;
+      for (const timer of timers) window.clearTimeout(timer);
     };
   }, [untitledImportUrls]);
 
@@ -518,6 +543,7 @@ function ProposalGroup({
     }
     const succeeded: number[] = [];
     const failures: { message: string }[] = [];
+    const notices: string[] = [];
     let shouldRefresh = false;
     let interrupted = false;
     for (const { action, i } of remaining) {
@@ -526,13 +552,14 @@ function ProposalGroup({
         break;
       }
       try {
-        await execute(action, {
+        const notice = await execute(action, {
           importedVideoId: importCheckpoints.current.get(i),
           onImported: (videoId) => {
             importCheckpoints.current.set(i, videoId);
             shouldRefresh = true;
           },
         });
+        if (notice) notices.push(notice);
         // 后端动作已经成功，外层同步界面失败不能把它伪装成可重试的执行失败。
         try {
           onApplied?.(action);
@@ -560,7 +587,7 @@ function ProposalGroup({
     const completedAfter = new Set([...completed, ...succeeded]);
     const unfinishedAfter = chosen.filter(({ i }) => !completedAfter.has(i));
     if (interrupted) {
-      setWarning(t("assistantActions.stoppedResult", { count: unfinishedAfter.length }));
+      notices.push(t("assistantActions.stoppedResult", { count: unfinishedAfter.length }));
       resultMessages.push(
         t("assistantActions.canceledResult", {
           title,
@@ -591,9 +618,10 @@ function ProposalGroup({
         await refreshAfter(actions[0], queryClient);
       } catch {
         // 动作已经落库，刷新失败不能把它伪装成「执行失败」再让用户重做一次。
-        setWarning(t("assistantActions.refreshFailed"));
+        notices.push(t("assistantActions.refreshFailed"));
       }
     }
+    if (notices.length > 0) setWarning(notices.join("\n"));
     if (interrupted) {
       setStatus("paused");
     } else if (failures.length === 0) {

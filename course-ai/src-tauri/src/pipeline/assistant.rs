@@ -1145,6 +1145,29 @@ fn is_http_url(value: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// 标题看起来是不是一条链接。
+///
+/// 除了 `https://…`，也要认 `b23.tv/abc`、`www.bilibili.com/video/BV…` 这种省略 scheme
+/// 的写法——否则确认卡仍会把同一个链接显示两遍。正常标题里的斜杠（「第1/2讲」）没有
+/// 域名，或者域名末段不是至少两个 ASCII 字母，不会被误判。
+fn looks_like_link_title(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty() || value.chars().any(char::is_whitespace) {
+        return false;
+    }
+    if value.contains("://") {
+        return true;
+    }
+    let Some((host, _)) = value.split_once('/') else {
+        return false;
+    };
+    if !host.contains('.') {
+        return false;
+    }
+    let tld = host.rsplit('.').next().unwrap_or("");
+    tld.len() >= 2 && tld.chars().all(|c| c.is_ascii_alphabetic())
+}
+
 fn object(properties: serde_json::Value, required: &[&str]) -> serde_json::Value {
     json!({"type": "object", "properties": properties, "required": required})
 }
@@ -1808,7 +1831,7 @@ impl AssistantTools<'_> {
                 let title = args
                     .title
                     .map(|t| t.trim().to_string())
-                    .filter(|t| !t.is_empty() && !is_http_url(t))
+                    .filter(|t| !t.is_empty() && !looks_like_link_title(t))
                     .unwrap_or_default();
                 self.record(AssistantAction::ProposeImport {
                     title,
@@ -2241,6 +2264,20 @@ mod tests {
             direct_parent_rpid: None,
             avatar: None,
         }
+    }
+
+    #[test]
+    fn link_like_titles_are_recognized_with_or_without_a_scheme() {
+        assert!(looks_like_link_title(
+            "https://www.bilibili.com/video/BV1xx?p=25"
+        ));
+        assert!(looks_like_link_title("b23.tv/abc"));
+        assert!(looks_like_link_title("www.bilibili.com/video/BV1xx"));
+        // 正常标题里的斜杠不能被当成链接。
+        assert!(!looks_like_link_title("第1/2讲"));
+        assert!(!looks_like_link_title("3.5/5星"));
+        assert!(!looks_like_link_title("线性代数第二讲"));
+        assert!(!looks_like_link_title(""));
     }
 
     #[test]

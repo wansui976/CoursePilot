@@ -5,6 +5,7 @@ import { Select } from "@/ui/select";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
+import { clearImportProbeCache, probeImport } from "@/lib/importProbeCache";
 import { ipc } from "@/lib/ipc";
 import type { ProbeResult } from "@/lib/types";
 import { Modal } from "@/ui/dialog";
@@ -39,6 +40,8 @@ export function BilibiliImportDialog({
   const [step, setStep] = useState<Step>("url");
   const [url, setUrl] = useState("");
   const [probe, setProbe] = useState<ProbeResult | null>(null);
+  // B站登录态：探测本身拿不到 ai-zh 时，用它区分「视频没字幕」和「登录过期」。
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [quality, setQuality] = useState<number | undefined>(undefined);
   const [subLang, setSubLang] = useState<string | undefined>(undefined);
   // 本次导入是否对字幕做 AI 纠错；探测成功后用全局设置初始化为默认值。
@@ -55,8 +58,15 @@ export function BilibiliImportDialog({
     setError(null);
     setStep("probing");
     try {
-      const r = await ipc.tools.probeBilibili(url.trim());
+      const target = url.trim();
+      const [r, login] = await Promise.all([
+        probeImport(target),
+        isBilibiliUrl(target)
+          ? ipc.tools.bilibiliLoginState().catch(() => null)
+          : Promise.resolve(null),
+      ]);
       setProbe(r);
+      setLoggedIn(login);
       setQuality(r.qualities[0]);
       const def =
         r.tracks.find((t) => !t.auto && t.lang.startsWith("zh")) ??
@@ -70,6 +80,7 @@ export function BilibiliImportDialog({
       setAutocorrect(globalAutocorrect !== "false");
       setStep("confirm");
     } catch (e) {
+      setLoggedIn(null);
       const msg = String(e);
       // cookie 过期/风控（如 HTTP 412）：回到 cookie 步骤引导重新导出导入。
       if (looksLikeCookieError(msg)) {
@@ -95,6 +106,7 @@ export function BilibiliImportDialog({
       });
       if (!file || Array.isArray(file)) return;
       await ipc.tools.setBilibiliCookies(file);
+      clearImportProbeCache();
       await runProbe();
     } catch (e) {
       setError(String(e));
@@ -254,7 +266,7 @@ export function BilibiliImportDialog({
         <div className="space-y-4">
           <p className="text-xs text-[var(--text-faint)]">{probe.title}</p>
 
-          {probe.logged_in === false && (
+          {loggedIn === false && (
             <div
               role="status"
               className="rounded-lg border border-[var(--status-warn)] bg-[var(--status-warn-bg)] p-2 text-xs leading-relaxed text-[var(--status-warn)]"
@@ -319,7 +331,7 @@ export function BilibiliImportDialog({
             </label>
           ) : (
             <p className="text-xs text-[var(--text-faint)]">
-              {probe.logged_in === false
+              {loggedIn === false
                 ? t("bilibiliImport.subtitleNeedsLogin")
                 : t("bilibiliImport.noSubtitle")}
             </p>

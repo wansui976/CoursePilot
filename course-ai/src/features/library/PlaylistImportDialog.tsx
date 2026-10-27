@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { humanizeError } from "@/lib/errors";
+import { clearImportProbeCache } from "@/lib/importProbeCache";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import type { PlaylistInfo } from "@/lib/types";
@@ -126,6 +127,7 @@ export function PlaylistImportDialog({
       });
       if (!file || Array.isArray(file)) return;
       await ipc.tools.setBilibiliCookies(file);
+      clearImportProbeCache();
       await runProbe();
     } catch (e) {
       setError(String(e));

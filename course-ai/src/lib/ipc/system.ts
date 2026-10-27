@@ -124,6 +124,9 @@ export const tools = {
   },
   probeBilibili: (url: string): Promise<ProbeResult> =>
     invoke("cmd_probe_bilibili", { url }),
+  /** 当前 cookies 是否仍是 B站登录态；null = 查询失败/没配 cookies，不能据此下结论。 */
+  bilibiliLoginState: (): Promise<boolean | null> =>
+    invoke("cmd_bilibili_login_state"),
   // 扁平枚举播放列表/合集（不下载正片），得到各集清单。
   probePlaylist: (url: string): Promise<PlaylistInfo> =>
     invoke("cmd_probe_playlist", { url }),

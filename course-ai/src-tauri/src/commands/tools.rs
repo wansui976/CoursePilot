@@ -323,6 +323,16 @@ pub async fn cmd_probe_playlist(
     download::probe_playlist(&url, cookies.as_deref()).await
 }
 
+/// 当前 cookies 是否仍是 B站登录态（B站只为登录用户返回 AI 字幕）。
+///
+/// 与「cookies 文件存在」分开：文件在、但登录已过期时，探测会看不到任何字幕轨，
+/// 界面必须能区分「视频没字幕」和「登录失效」。
+#[tauri::command]
+pub async fn cmd_bilibili_login_state(state: State<'_, AppState>) -> AppResult<Option<bool>> {
+    let raw = get_setting(&state.db, "bilibili_cookies").await?;
+    Ok(crate::pipeline::bilibili_extra::login_state_from_setting(raw.as_deref()).await)
+}
+
 /// 是否已导入可用的 B站 cookies.txt：不仅设置里存了路径，且该文件仍存在且非空。
 /// 设置只保存文件路径，文件可能被删/移走，故必须落到磁盘校验，避免「过了下一步却 412」。
 #[tauri::command]

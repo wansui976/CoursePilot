@@ -609,10 +609,6 @@ pub struct ProbeResult {
     pub title: String,
     pub tracks: Vec<SubtitleTrack>,
     pub qualities: Vec<u32>, // 可选清晰度高度，降序去重
-    /// B站登录态。None = 不是 B站、没带 cookies 或查询失败（不能据此下结论）；
-    /// Some(false) = cookies 文件在、但已经不是登录状态。B站只为登录用户返回
-    /// AI 字幕，这种情况下 tracks 为空不代表视频没有字幕。
-    pub logged_in: Option<bool>,
 }
 
 /// 常见语言码 → 友好显示名；未知码原样返回。
@@ -686,8 +682,6 @@ pub fn parse_probe_json(json: &str) -> AppResult<ProbeResult> {
         title,
         tracks,
         qualities,
-        // 登录态要联网查，纯解析阶段不下结论。
-        logged_in: None,
     })
 }
 
@@ -833,27 +827,17 @@ pub async fn probe(url: &str, cookies: Option<&str>) -> AppResult<ProbeResult> {
         }
     }
     cmd.arg(url);
-    // 登录态和 yt-dlp 探测并行：多一次几百毫秒的请求不该拖慢「下一步」。
-    // 只有确实带了 cookies 才查——没带时前面已经会引导先导入。
-    let login = async {
-        if !is_bilibili_url(url) {
-            return None;
-        }
-        let header =
-            crate::pipeline::bilibili_extra::cookie_header_from_setting(cookies)?;
-        crate::pipeline::bilibili_extra::bilibili_login_state(&header).await
-    };
-    let (output, logged_in) = tokio::join!(cmd.output(), login);
-    let output = output.map_err(|e| AppError::Pipeline(format!("yt-dlp spawn: {e}")))?;
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| AppError::Pipeline(format!("yt-dlp spawn: {e}")))?;
     if !output.status.success() {
         return Err(AppError::Pipeline(format!(
             "yt-dlp probe failed: {}",
             String::from_utf8_lossy(&output.stderr)
         )));
     }
-    let mut probe = parse_probe_json(&String::from_utf8_lossy(&output.stdout))?;
-    probe.logged_in = logged_in;
-    Ok(probe)
+    parse_probe_json(&String::from_utf8_lossy(&output.stdout))
 }
 
 #[cfg(test)]

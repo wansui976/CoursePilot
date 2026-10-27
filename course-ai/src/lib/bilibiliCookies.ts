@@ -1,4 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { clearImportProbeCache } from "@/lib/importProbeCache";
 import { ipc } from "@/lib/ipc";
 
 /** B 站的 412 / 需要登录 / cookie 相关报错：多半是没导入 cookies，或者导入的已过期。
@@ -17,5 +18,6 @@ export async function pickBilibiliCookies(): Promise<boolean> {
   });
   if (!file || Array.isArray(file)) return false;
   await ipc.tools.setBilibiliCookies(file);
+  clearImportProbeCache();
   return true;
 }

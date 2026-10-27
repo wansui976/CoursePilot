@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantPanel } from "./AssistantPanel";
+import { clearImportProbeCache } from "@/lib/importProbeCache";
 import { useAssistantUi } from "@/stores/assistant";
 import { useTheme } from "@/stores/theme";
 import { useInlineAsk } from "@/stores/inlineAsk";
@@ -41,6 +42,7 @@ const { confirmMock, mockIpc, platformMock } = vi.hoisted(() => ({
     tools: {
       importBilibili: vi.fn(),
       probeBilibili: vi.fn(),
+      bilibiliLoginState: vi.fn(),
       hasBilibiliCookies: vi.fn(),
     },
     pipeline: { process: vi.fn() },
@@ -135,6 +137,7 @@ describe("AssistantPanel", () => {
   beforeEach(async () => {
     await i18n.changeLanguage("zh-CN");
     vi.clearAllMocks();
+    clearImportProbeCache();
     localStorage.clear();
     platformMock.mobile = false;
     platformMock.tablet = false;
@@ -2322,6 +2325,7 @@ describe("AssistantPanel", () => {
 describe("确认卡", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearImportProbeCache();
     localStorage.clear();
     platformMock.mobile = false;
     platformMock.tablet = false;
@@ -2340,6 +2344,7 @@ describe("确认卡", () => {
     ]);
     mockIpc.videos.list.mockResolvedValue([]);
     mockIpc.tools.hasBilibiliCookies.mockResolvedValue(true);
+    mockIpc.tools.bilibiliLoginState.mockResolvedValue(true);
     mockIpc.tools.probeBilibili.mockResolvedValue({
       title: "双曲线",
       qualities: [1080, 720],
@@ -3234,12 +3239,12 @@ describe("确认卡", () => {
     expect(mockIpc.tools.importBilibili).not.toHaveBeenCalled();
   });
 
-  it("cookies 登录态失效时不再把没有字幕说成视频本身没字幕", async () => {
+  it("cookies 登录态失效时仍可导入，但说明已改用语音转写", async () => {
+    mockIpc.tools.bilibiliLoginState.mockResolvedValueOnce(false);
     mockIpc.tools.probeBilibili.mockResolvedValueOnce({
       title: "双曲线",
       qualities: [1080],
       tracks: [],
-      logged_in: false,
     });
     mockIpc.assistant.ask.mockResolvedValueOnce(
       reply({
@@ -3257,9 +3262,17 @@ describe("确认卡", () => {
     await ask("导入这个");
     fireEvent.click(await screen.findByRole("button", { name: "确认导入" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("登录态已失效");
-    // 登录态失效时不能静悄悄退化成语音转写，让用户以为没有 AI 字幕。
-    expect(mockIpc.tools.importBilibili).not.toHaveBeenCalled();
+    // 和导入对话框一致：登录过期不拦导入，但没有字幕就要说清楚，不能静悄悄降级。
+    await waitFor(() =>
+      expect(mockIpc.tools.importBilibili).toHaveBeenCalledWith(
+        "c1",
+        "https://www.bilibili.com/video/BV1",
+        1080,
+        undefined,
+        undefined,
+      ),
+    );
+    expect(await screen.findByText(/已改用语音转写/)).toBeInTheDocument();
   });
 
   it("非 B 站链接不要求 B 站 cookies", async () => {
@@ -3363,6 +3376,13 @@ describe("确认卡", () => {
     expect(await screen.findByText("申论 第 25 讲 综合分析")).toBeInTheDocument();
     expect(mockIpc.tools.probeBilibili).toHaveBeenCalledTimes(1);
     expect(screen.getAllByText(url)).toHaveLength(1);
+
+    // 确认导入复用同一份探测结果，不再为同一个链接起第二个 yt-dlp。
+    fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
+    await waitFor(() =>
+      expect(mockIpc.tools.importBilibili).toHaveBeenCalledTimes(1),
+    );
+    expect(mockIpc.tools.probeBilibili).toHaveBeenCalledTimes(1);
   });
 
   it("识别不到标题时退回只显示一次链接，仍然可以确认导入", async () => {

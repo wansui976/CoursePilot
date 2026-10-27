@@ -287,6 +287,20 @@ pub async fn bilibili_login_state(cookies: &str) -> Option<bool> {
     parse_nav_login(&body)
 }
 
+/// 从设置值（cookies 文件路径）查登录态。
+///
+/// 文件读取放到 spawn_blocking：cookies 可能放在外置盘/网络盘上，同步 read
+/// 会把 tokio worker 卡住，连带拖慢同一时刻的其他任务。
+pub async fn login_state_from_setting(raw: Option<&str>) -> Option<bool> {
+    let owned = raw.map(str::to_owned);
+    let header = tokio::task::spawn_blocking(move || {
+        cookie_header_from_setting(owned.as_deref())
+    })
+    .await
+    .ok()??;
+    bilibili_login_state(&header).await
+}
+
 /// 解码弹幕接口的响应体。该接口无条件返回压缩数据（无视 `Accept-Encoding`），
 /// 且 `content-encoding: deflate` 里装的是 **raw deflate**——不按 RFC 7230 用
 /// zlib 包装，reqwest（未开解压特性）拿到的就是压缩字节。依次尝试

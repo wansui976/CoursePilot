@@ -40,6 +40,16 @@ async fn cookies_for(state: &AppState, url: &str) -> AppResult<Option<String>> {
 async fn check_one(app: &tauri::AppHandle, subscription: &Subscription) -> AppResult<usize> {
     let state = app.state::<AppState>();
     let cookies = cookies_for(&state, &subscription.url).await?;
+    // 登录态只查一次（不是每集一次）：订阅是无人值守导入，登录过期时若继续，
+    // 每一集都会悄悄退化成语音转写，用户还以为 AI 字幕坏了。
+    if download::is_bilibili_url(&subscription.url)
+        && crate::pipeline::bilibili_extra::login_state_from_setting(cookies.as_deref()).await
+            == Some(false)
+    {
+        let message = "B站登录态已失效，本次订阅没有导入。请重新导入 cookies.txt，下次检查会继续。";
+        subscriptions::record_check(&state.db, &subscription.id, Some(message)).await?;
+        return Err(crate::error::AppError::Other(message.into()));
+    }
     let info = match download::probe_playlist(&subscription.url, cookies.as_deref()).await {
         Ok(info) => info,
         Err(error) => {

@@ -4,12 +4,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BilibiliImportDialog } from "./BilibiliImportDialog";
+import { clearImportProbeCache } from "@/lib/importProbeCache";
 import { useDownloads } from "@/stores/downloads";
 import type { DownloadJob } from "@/lib/ipc";
 
 const { mockTools, mockSettings, mockDownloads } = vi.hoisted(() => ({
   mockTools: {
     hasBilibiliCookies: vi.fn(),
+    bilibiliLoginState: vi.fn(),
     probeBilibili: vi.fn(),
     setBilibiliCookies: vi.fn(),
   },
@@ -55,7 +57,10 @@ function renderDialog(onClose: () => void = () => {}) {
 
 describe("BilibiliImportDialog", () => {
   beforeEach(() => {
+    clearImportProbeCache();
     mockTools.hasBilibiliCookies.mockReset();
+    mockTools.bilibiliLoginState.mockReset();
+    mockTools.bilibiliLoginState.mockResolvedValue(true);
     mockTools.probeBilibili.mockReset();
     mockTools.setBilibiliCookies.mockReset();
     mockSettings.get.mockReset();
@@ -115,9 +120,9 @@ describe("BilibiliImportDialog", () => {
       title: "示例视频",
       qualities: [1080],
       tracks: [],
-      // cookies 文件在、但不是登录状态：B站不会返回 AI 字幕。
-      logged_in: false,
     });
+    // cookies 文件在、但不是登录状态：B站不会返回 AI 字幕。
+    mockTools.bilibiliLoginState.mockResolvedValue(false);
     renderDialog();
 
     fireEvent.change(screen.getByLabelText("视频链接"), {
