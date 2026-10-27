@@ -1077,7 +1077,7 @@
     "importTitleResolving": "正在识别标题…",
     "importSuccess": "视频已导入，但后续处理失败：{{error}}。重试只会继续处理，不会重复下载。",
     "noCookies": "还没有导入 B 站 cookies，下载会被拦截。请先在导入对话框里导入一次 cookies.txt",
-    "cookieExpired": "B 站登录态已失效，本次已改用语音转写；如需 AI 字幕，请在浏览器登录后重新导出 cookies.txt 再从导入对话框导入。",
+    "cookieExpired": "B 站登录态已失效，没拿到自带字幕：视频已导入，可以在处理队列里开始语音转写。需要 AI 字幕的话，请在浏览器登录后重新导出 cookies.txt，再从导入对话框导入。",
     "noCourseId": "没有指定要导入到哪门课程",
     "completeResult": "已完成{{title}}：{{details}}",
     "refreshFailed": "操作已经完成，但列表没有自动刷新。请手动刷新后确认结果。",

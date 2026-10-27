@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isBilibiliUrl, looksLikeLink } from "./sourceUrl";
+import { isBilibiliUrl, titleRepeatsUrl } from "./sourceUrl";
+import cases from "./titleRepeatsUrl.cases.json";
 
 describe("isBilibiliUrl", () => {
   it("matches bilibili hosts and short links", () => {
@@ -15,19 +16,9 @@ describe("isBilibiliUrl", () => {
   });
 });
 
-describe("looksLikeLink", () => {
-  it("recognizes links with or without a scheme", () => {
-    expect(looksLikeLink("https://www.bilibili.com/video/BV1xx?p=25")).toBe(true);
-    expect(looksLikeLink("b23.tv/abc")).toBe(true);
-    expect(looksLikeLink("www.bilibili.com/video/BV1xx")).toBe(true);
-    expect(looksLikeLink("  https://youtu.be/x  ")).toBe(true);
-  });
-
-  it("does not mistake ordinary titles containing slashes for links", () => {
-    expect(looksLikeLink("线性代数第二讲")).toBe(false);
-    expect(looksLikeLink("第1/2讲")).toBe(false);
-    expect(looksLikeLink("3.5/5星")).toBe(false);
-    expect(looksLikeLink("第 1/2 讲")).toBe(false);
-    expect(looksLikeLink("")).toBe(false);
+describe("titleRepeatsUrl", () => {
+  // 与 Rust 端 title_repeats_url 共用同一份用例，两边规则不能各改各的。
+  it.each(cases.cases)("$title → $repeats", ({ title, url, repeats }) => {
+    expect(titleRepeatsUrl(title, url)).toBe(repeats);
   });
 });

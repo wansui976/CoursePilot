@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantPanel } from "./AssistantPanel";
-import { clearImportProbeCache } from "@/lib/importProbeCache";
+import { resetImportProbeCacheForTests } from "@/lib/importProbeCache";
 import { useAssistantUi } from "@/stores/assistant";
 import { useTheme } from "@/stores/theme";
 import { useInlineAsk } from "@/stores/inlineAsk";
@@ -137,7 +137,7 @@ describe("AssistantPanel", () => {
   beforeEach(async () => {
     await i18n.changeLanguage("zh-CN");
     vi.clearAllMocks();
-    clearImportProbeCache();
+    resetImportProbeCacheForTests();
     localStorage.clear();
     platformMock.mobile = false;
     platformMock.tablet = false;
@@ -2325,7 +2325,7 @@ describe("AssistantPanel", () => {
 describe("确认卡", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearImportProbeCache();
+    resetImportProbeCacheForTests();
     localStorage.clear();
     platformMock.mobile = false;
     platformMock.tablet = false;
@@ -3239,7 +3239,7 @@ describe("确认卡", () => {
     expect(mockIpc.tools.importBilibili).not.toHaveBeenCalled();
   });
 
-  it("cookies 登录态失效时仍可导入，但说明已改用语音转写", async () => {
+  it("cookies 登录态失效时仍可导入，并如实说明没拿到字幕", async () => {
     mockIpc.tools.bilibiliLoginState.mockResolvedValueOnce(false);
     mockIpc.tools.probeBilibili.mockResolvedValueOnce({
       title: "双曲线",
@@ -3272,7 +3272,35 @@ describe("确认卡", () => {
         undefined,
       ),
     );
-    expect(await screen.findByText(/已改用语音转写/)).toBeInTheDocument();
+    // 没拿到字幕时和导入对话框一样只导入、不自动开始转写：提示要照实说，不能说「已改用语音转写」。
+    expect(await screen.findByText(/没拿到自带字幕：视频已导入/)).toBeInTheDocument();
+    expect(mockIpc.pipeline.process).not.toHaveBeenCalled();
+  });
+
+  it("登录态失效但仍拿到了公开字幕时，用字幕导入、不提醒", async () => {
+    mockIpc.tools.bilibiliLoginState.mockResolvedValueOnce(false);
+    mockIpc.tools.probeBilibili.mockResolvedValueOnce({
+      title: "双曲线",
+      qualities: [1080],
+      tracks: [{ lang: "zh-CN", name: "中文", auto: false }],
+    });
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_import",
+            url: "https://www.bilibili.com/video/BV1",
+            title: "双曲线",
+            course_id: "c1",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("导入这个");
+    fireEvent.click(await screen.findByRole("button", { name: "确认导入" }));
+    await waitFor(() => expect(mockIpc.pipeline.process).toHaveBeenCalled());
+    expect(screen.queryByText(/登录态已失效/)).not.toBeInTheDocument();
   });
 
   it("非 B 站链接不要求 B 站 cookies", async () => {

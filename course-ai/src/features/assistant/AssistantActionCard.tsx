@@ -16,10 +16,10 @@ import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { Button } from "@/ui/button";
 import { humanizeError } from "@/lib/errors";
-import { probeImport } from "@/lib/importProbeCache";
+import { bilibiliLoginStateOnce, probeImport } from "@/lib/importProbeCache";
 import { ipc } from "@/lib/ipc";
 import { notesCoordinator } from "@/lib/notesCoordinator";
-import { looksLikeLink } from "@/lib/sourceUrl";
+import { titleRepeatsUrl } from "@/lib/sourceUrl";
 import type { AssistantAction } from "@/lib/types";
 import { isBilibiliUrl } from "@/lib/sourceUrl";
 
@@ -142,19 +142,19 @@ async function importWithSubtitles(
   }
   const [probe, loggedIn] = await Promise.all([
     probeImport(url),
-    isBilibiliUrl(url)
-      ? ipc.tools.bilibiliLoginState().catch(() => null)
-      : Promise.resolve(null),
+    // 一拨批量导入里只查一次登录态（一分钟内复用），不是每集一次 nav 请求。
+    isBilibiliUrl(url) ? bilibiliLoginStateOnce() : Promise.resolve(null),
   ]);
-  // 登录态失效时 tracks 必然为空。这里不拦导入（和导入对话框保持一致：仍可语音转写），
-  // 但要把真实原因说出来，不能让用户以为这个视频没有 AI 字幕。
-  if (loggedIn === false) {
-    loginWarning = i18n.t("assistantActions.cookieExpired");
-  }
   const track =
     probe.tracks.find((t) => !t.auto && t.lang.startsWith("zh")) ??
     probe.tracks.find((t) => t.lang === "ai-zh") ??
     probe.tracks[0];
+  // 登录态失效时多半拿不到字幕。不拦导入（和导入对话框一致），但要把真实原因说出来，
+  // 不能让用户以为这个视频没有 AI 字幕。说法照实际结果来：公开的 CC 字幕没登录也拿得到，
+  // 那就用的是字幕、不必提醒；没拿到字幕时，和对话框一样只导入、不自动开始转写。
+  if (loggedIn === false && !track) {
+    loginWarning = i18n.t("assistantActions.cookieExpired");
+  }
   // 纠错偏好取全局设置（未设置视为开，与流水线一致）；不带字幕时不写偏好。
   const autocorrect = track
     ? (await ipc.settings.get("subtitle_autocorrect").catch(() => null)) !== "false"
@@ -288,11 +288,11 @@ type ImportProposal = Extract<Proposal, { kind: "propose_import" }>;
  *
  * `import_video` 的 title 是可选参数：用户只丢一个链接过来时，模型手里并没有标题。
  * 旧后端会拿链接顶上，于是确认卡把同一个链接显示两遍，看起来就像「没显示标题」。
- * 空串、以及任何链接形态的字符串，都按「还没标题」处理，交给下面按链接识别。
+ * 空串、以及把这条链接又写了一遍的，都按「还没标题」处理，交给下面按链接识别。
  */
 function importTitleOf(action: ImportProposal): string | undefined {
   const title = action.title?.trim();
-  if (!title || looksLikeLink(title)) return undefined;
+  if (!title || titleRepeatsUrl(title, action.url)) return undefined;
   return title;
 }
 
@@ -453,6 +453,8 @@ function ProposalGroup({
   useEffect(() => {
     if (!untitledImportUrls) return;
     let cancelled = false;
+    // 卡片关掉 / 换了一批链接：还在排队的识别直接撤掉，别占着全局的两个名额。
+    const controller = new AbortController();
     const timers: number[] = [];
     for (const url of new Set(untitledImportUrls.split("\n"))) {
       // 认不出来不是导入失败：退回只显示链接，确认按钮照常可用。
@@ -468,12 +470,17 @@ function ProposalGroup({
             prev.has(url) ? prev : new Set(prev).add(url),
           );
         });
-      const timer = window.setTimeout(giveUp, TITLE_TIMEOUT_MS);
-      timers.push(timer);
-      probeImport(url)
+      probeImport(url, {
+        signal: controller.signal,
+        // 等待上限从真正开始识别时算：排队等名额的时间不算，否则排在后面的链接
+        // 还没轮到就被判成超时。
+        onStart: () => {
+          if (!cancelled) timers.push(window.setTimeout(giveUp, TITLE_TIMEOUT_MS));
+        },
+      })
         .then((probe) => {
           const resolved = probe.title?.trim();
-          if (!resolved || looksLikeLink(resolved)) {
+          if (!resolved || titleRepeatsUrl(resolved, url)) {
             giveUp();
             return;
           }
@@ -483,11 +490,11 @@ function ProposalGroup({
             );
           });
         })
-        .catch(giveUp)
-        .finally(() => window.clearTimeout(timer));
+        .catch(giveUp);
     }
     return () => {
       cancelled = true;
+      controller.abort();
       for (const timer of timers) window.clearTimeout(timer);
     };
   }, [untitledImportUrls]);
@@ -621,7 +628,8 @@ function ProposalGroup({
         notices.push(t("assistantActions.refreshFailed"));
       }
     }
-    if (notices.length > 0) setWarning(notices.join("\n"));
+    // 批量导入时同一句提醒（比如登录态失效）每集都会给一次，只留一条。
+    if (notices.length > 0) setWarning([...new Set(notices)].join("\n"));
     if (interrupted) {
       setStatus("paused");
     } else if (failures.length === 0) {

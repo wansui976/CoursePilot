@@ -1,0 +1,20 @@
+{
+  "_comment": "titleRepeatsUrl（前端 src/lib/sourceUrl.ts）与 title_repeats_url（Rust pipeline/assistant.rs）共用的用例：两边规则必须一致，改规则时两边测试都会读这份文件。",
+  "cases": [
+    { "title": "https://www.bilibili.com/video/BV1xx?p=25", "url": "https://www.bilibili.com/video/BV1xx?p=25", "repeats": true },
+    { "title": "  https://youtu.be/x  ", "url": "https://www.youtube.com/watch?v=x", "repeats": true },
+    { "title": "www.bilibili.com/video/BV1xx?p=25", "url": "https://www.bilibili.com/video/BV1xx?p=25", "repeats": true },
+    { "title": "bilibili.com/video/BV1xx", "url": "https://www.bilibili.com/video/BV1xx", "repeats": true },
+    { "title": "b23.tv/abc", "url": "https://www.bilibili.com/video/BV1xx", "repeats": true },
+    { "title": "m.bilibili.com/video/BV1xx", "url": "https://www.bilibili.com/video/BV1xx", "repeats": true },
+    { "title": "youtube.com/watch?v=x", "url": "https://www.youtube.com/watch?v=x", "repeats": true },
+    { "title": "example.com/talks/1", "url": "https://example.com/talks/1", "repeats": true },
+    { "title": "Node.js/React入门", "url": "https://www.bilibili.com/video/BV1xx", "repeats": false },
+    { "title": "Vue.js/TS实战", "url": "https://www.bilibili.com/video/BV1xx", "repeats": false },
+    { "title": "第1/2讲", "url": "https://www.bilibili.com/video/BV1xx", "repeats": false },
+    { "title": "3.5/5星", "url": "https://www.bilibili.com/video/BV1xx", "repeats": false },
+    { "title": "第 1/2 讲", "url": "https://www.bilibili.com/video/BV1xx", "repeats": false },
+    { "title": "线性代数第二讲", "url": "https://www.bilibili.com/video/BV1xx", "repeats": false },
+    { "title": "", "url": "https://www.bilibili.com/video/BV1xx", "repeats": false }
+  ]
+}

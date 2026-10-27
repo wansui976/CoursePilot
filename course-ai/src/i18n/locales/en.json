@@ -1077,7 +1077,7 @@
     "importTitleResolving": "Identifying title…",
     "importSuccess": "Video imported, but processing failed: {{error}}. Retry will continue processing without re-downloading.",
     "noCookies": "Bilibili cookies not imported — downloads will be blocked. Please import cookies.txt in the import dialog first",
-    "cookieExpired": "Your Bilibili login has expired, so this import falls back to speech recognition. For AI subtitles, log in in your browser, export cookies.txt again, then import it from the import dialog.",
+    "cookieExpired": "Your Bilibili login has expired, so no built-in subtitles were available. The video was imported — start speech recognition from the processing queue. For AI subtitles, log in in your browser, export cookies.txt again, then import it from the import dialog.",
     "noCourseId": "No target course specified",
     "completeResult": "Completed {{title}}: {{details}}",
     "refreshFailed": "Action completed, but the list didn't refresh automatically. Please refresh manually to confirm.",

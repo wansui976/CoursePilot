@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BilibiliImportDialog } from "./BilibiliImportDialog";
-import { clearImportProbeCache } from "@/lib/importProbeCache";
+import { resetImportProbeCacheForTests } from "@/lib/importProbeCache";
 import { useDownloads } from "@/stores/downloads";
 import type { DownloadJob } from "@/lib/ipc";
 
@@ -57,7 +57,7 @@ function renderDialog(onClose: () => void = () => {}) {
 
 describe("BilibiliImportDialog", () => {
   beforeEach(() => {
-    clearImportProbeCache();
+    resetImportProbeCacheForTests();
     mockTools.hasBilibiliCookies.mockReset();
     mockTools.bilibiliLoginState.mockReset();
     mockTools.bilibiliLoginState.mockResolvedValue(true);

@@ -1145,27 +1145,47 @@ fn is_http_url(value: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// 标题看起来是不是一条链接。
+/// 一看就是视频链接的域名（短链、移动版）：标题以它们开头，必是把链接当标题填了。
+const VIDEO_LINK_HOSTS: &[&str] = &["b23.tv", "bilibili.com", "youtu.be", "youtube.com"];
+
+fn bare_host(host: &str) -> String {
+    let host = host.trim().to_ascii_lowercase();
+    host.strip_prefix("www.")
+        .map(str::to_string)
+        .unwrap_or(host)
+}
+
+/// 模型给的标题是不是把导入链接又写了一遍（确认卡会把同一个链接显示两遍）。
 ///
-/// 除了 `https://…`，也要认 `b23.tv/abc`、`www.bilibili.com/video/BV…` 这种省略 scheme
-/// 的写法——否则确认卡仍会把同一个链接显示两遍。正常标题里的斜杠（「第1/2讲」）没有
-/// 域名，或者域名末段不是至少两个 ASCII 字母，不会被误判。
-fn looks_like_link_title(value: &str) -> bool {
-    let value = value.trim();
-    if value.is_empty() || value.chars().any(char::is_whitespace) {
+/// 不能只看「长得像链接」：`Node.js/React入门` 也是「xx.yy/…」。只认三种：带 scheme 的；
+/// 开头的域名就是这条链接的域名（省略了 https://）；或者是 B 站 / YouTube 的链接域名
+/// （`b23.tv/abc`）。与前端 src/lib/sourceUrl.ts 的 titleRepeatsUrl 一致，两边测试共用
+/// src/lib/titleRepeatsUrl.cases.json。
+fn title_repeats_url(title: &str, url: &str) -> bool {
+    let title = title.trim();
+    if title.is_empty() || title.chars().any(char::is_whitespace) {
         return false;
     }
-    if value.contains("://") {
-        return true;
+    if let Some((scheme, _)) = title.split_once("://") {
+        let mut chars = scheme.chars();
+        if chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+            && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
+        {
+            return true;
+        }
     }
-    let Some((host, _)) = value.split_once('/') else {
-        return false;
-    };
-    if !host.contains('.') {
+    let title_host = bare_host(title.split('/').next().unwrap_or(""));
+    if !title_host.contains('.') {
         return false;
     }
-    let tld = host.rsplit('.').next().unwrap_or("");
-    tld.len() >= 2 && tld.chars().all(|c| c.is_ascii_alphabetic())
+    let url_host = reqwest::Url::parse(url.trim())
+        .ok()
+        .and_then(|u| u.host_str().map(bare_host))
+        .unwrap_or_default();
+    title_host == url_host
+        || VIDEO_LINK_HOSTS
+            .iter()
+            .any(|known| title_host == *known || title_host.ends_with(&format!(".{known}")))
 }
 
 fn object(properties: serde_json::Value, required: &[&str]) -> serde_json::Value {
@@ -1831,7 +1851,7 @@ impl AssistantTools<'_> {
                 let title = args
                     .title
                     .map(|t| t.trim().to_string())
-                    .filter(|t| !t.is_empty() && !looks_like_link_title(t))
+                    .filter(|t| !t.is_empty() && !title_repeats_url(t, &url))
                     .unwrap_or_default();
                 self.record(AssistantAction::ProposeImport {
                     title,
@@ -2267,17 +2287,19 @@ mod tests {
     }
 
     #[test]
-    fn link_like_titles_are_recognized_with_or_without_a_scheme() {
-        assert!(looks_like_link_title(
-            "https://www.bilibili.com/video/BV1xx?p=25"
-        ));
-        assert!(looks_like_link_title("b23.tv/abc"));
-        assert!(looks_like_link_title("www.bilibili.com/video/BV1xx"));
-        // 正常标题里的斜杠不能被当成链接。
-        assert!(!looks_like_link_title("第1/2讲"));
-        assert!(!looks_like_link_title("3.5/5星"));
-        assert!(!looks_like_link_title("线性代数第二讲"));
-        assert!(!looks_like_link_title(""));
+    fn titles_that_repeat_the_url_match_the_frontend_rule() {
+        // 与前端 titleRepeatsUrl 共用一份用例：两边规则不能各改各的。
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../../src/lib/titleRepeatsUrl.cases.json"))
+                .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let title = case["title"].as_str().unwrap();
+            let url = case["url"].as_str().unwrap();
+            let expected = case["repeats"].as_bool().unwrap();
+            assert_eq!(title_repeats_url(title, url), expected, "title {title:?}, url {url:?}");
+        }
     }
 
     #[test]
