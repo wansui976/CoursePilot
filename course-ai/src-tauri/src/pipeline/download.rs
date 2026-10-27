@@ -430,6 +430,32 @@ fn stderr_tail(stderr: &str) -> String {
     lines[lines.len().saturating_sub(3)..].join("\n")
 }
 
+/// `/Volumes/<卷名>` 是否真的挂着一个卷。
+///
+/// 只判断目录存在不够：外置硬盘拔掉后，macOS 有时会在 `/Volumes` 下留一个 root 所有的
+/// 空占位目录（`d--x--x--x`）。这时 `create_dir_all` 照样会报 Permission denied，
+/// 用户看到的就是「没有文件访问权限」，完全想不到是硬盘没接。
+#[cfg(target_os = "macos")]
+fn is_mount_point(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+
+    let Ok(cpath) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut info: libc::statfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statfs(cpath.as_ptr(), &mut info) } != 0 {
+        return false;
+    }
+    // f_mntonname 是实际挂载点；根卷挂载点仍是 "/"，不会被误认成 /Volumes/<卷名>。
+    let mounted = unsafe { std::ffi::CStr::from_ptr(info.f_mntonname.as_ptr()) };
+    mounted.to_bytes() == path.as_os_str().as_bytes()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn is_mount_point(_path: &Path) -> bool {
+    true
+}
+
 /// `dir` 位于 macOS `/Volumes/<卷名>` 下而该卷没有挂载时，返回卷名。
 fn unmounted_volume(dir: &Path) -> Option<String> {
     let mut parts = dir.components();
@@ -440,7 +466,9 @@ fn unmounted_volume(dir: &Path) -> Option<String> {
         return None;
     }
     let name = parts.next()?.as_os_str();
-    if Path::new("/Volumes").join(name).exists() {
+    let mount = Path::new("/Volumes").join(name);
+    // 挂载点目录不存在，或只剩一个占位目录（并非真正的挂载点），都算没接上。
+    if mount.exists() && is_mount_point(&mount) {
         return None;
     }
     Some(name.to_string_lossy().into_owned())
@@ -950,6 +978,16 @@ mod tests {
         assert_eq!(unmounted_volume(Path::new("/Users/someone/网课")), None);
         assert_eq!(unmounted_volume(Path::new("/Volumes")), None);
         assert_eq!(unmounted_volume(Path::new("Volumes/x/y")), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_mount_stub_is_not_mistaken_for_a_mounted_volume() {
+        // 根目录是真正的挂载点；普通目录不是。外置盘拔掉后留下的
+        // /Volumes/<卷名> 空占位目录与普通目录一样，不会被当成已挂载。
+        assert!(is_mount_point(Path::new("/")));
+        let dir = tempdir().unwrap();
+        assert!(!is_mount_point(dir.path()));
     }
 
     #[test]

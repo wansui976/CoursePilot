@@ -1611,7 +1611,10 @@ async fn dismiss_processing_video(db: &crate::db::Db, video_id: &str) -> AppResu
         .fetch_one(&db.pool)
         .await?;
         if !exists {
-            return Err(AppError::NotFound(format!("video {video_id}")));
+            // 队列项可能比视频活得久：视频已被删除/移入回收站，队列里还留着那一条。
+            // 「移除」的目的就是让这条记录消失；对象已经不在了，等于已经达成，
+            // 再报 NotFound 只会让这条记录永远删不掉，并在界面上留一个红条。
+            return Ok(());
         }
     }
     Ok(())
@@ -1927,6 +1930,30 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn dismissing_a_queue_item_whose_video_is_gone_is_idempotent() {
+        let dir = tempdir().unwrap();
+        let db = crate::db::Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let video_path = dir.path().join("v.mp4");
+        std::fs::write(&video_path, b"fake").unwrap();
+        let video = add_local_video(&db, &course.id, video_path, None)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE videos SET deleted_at=1 WHERE id=?")
+            .bind(&video.id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        // 视频被删了，队列里那一条还留着；「移除」必须成功，否则这条永远消不掉。
+        dismiss_processing_video(&db, &video.id).await.unwrap();
     }
 
     #[tokio::test]
