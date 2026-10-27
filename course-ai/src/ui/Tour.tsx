@@ -116,12 +116,15 @@ export function Tour({
   steps,
   enabled = true,
   delay = 700,
+  awaitMs = AWAIT_MS,
 }: {
   id: TourId;
   steps: TourStep[];
   enabled?: boolean;
   /** 页面出现后等多久再露面（等布局和数据稳定）。 */
   delay?: number;
+  /** awaitAnchor 的步骤最多等多久；测试里可以调短。 */
+  awaitMs?: number;
 }) {
   const { t } = useTranslation();
   const seen = useTours((s) => s.seen.has(id));
@@ -214,9 +217,29 @@ export function Tour({
         if (!missingSince) missingSince = now;
         // 锚点消失超过半秒（切了页签、收起了面板）：跳过这一步。还没出现过的（刚跳转、
         // 页面在加载）多等几秒。
-        const grace = !seenOnce && stepsRef.current[stepIndex].awaitAnchor ? AWAIT_MS : MISSING_MS;
+        const grace = !seenOnce && stepsRef.current[stepIndex].awaitAnchor ? awaitMs : MISSING_MS;
         if (now - missingSince > grace) {
           setAnchorRect(null);
+          // 跳转后的目标页一直没出现（例如离开设置被「未保存」提示拦下）。
+          // 这时不能继续在错误的页面上把后面的步骤逐个等过期——那会把整组记成看过，
+          // 用户再也看不到语音识别和建课程两步。能退回上一步就退回，让它重试跳转。
+          if (!seenOnce && stepsRef.current[stepIndex].awaitAnchor) {
+            const previous = cursor - 1;
+            if (
+              previous >= 0 &&
+              findAnchor(stepsRef.current[available[previous]].anchor)
+            ) {
+              setCursor(previous);
+            } else {
+              setAvailable(null);
+              setPos(null);
+              release(id);
+            }
+            return;
+          }
+          // 锚点自己消失被自动跳过：这一步的「下一步」跳转仍然要执行，
+          // 否则下一步会在错误的页面上等 4 秒然后被跳过。
+          stepsRef.current[stepIndex].onNext?.();
           if (cursor + 1 < available.length) setCursor(cursor + 1);
           else done();
           return;
@@ -226,7 +249,7 @@ export function Tour({
     };
     track();
     return () => window.cancelAnimationFrame(frame);
-  }, [available, cursor, stepIndex, done]);
+  }, [available, cursor, stepIndex, done, awaitMs, release, id]);
 
   // 量出气泡尺寸再定位置
   useLayoutEffect(() => {

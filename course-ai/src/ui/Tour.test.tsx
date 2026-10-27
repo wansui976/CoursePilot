@@ -1,7 +1,7 @@
 import "@/i18n";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useTours } from "@/stores/tours";
 import { Tour, type TourStep } from "./Tour";
 
@@ -172,6 +172,59 @@ describe("Tour", () => {
     // 滚回来：还是这一步
     top = 100;
     expect(await screen.findByRole("dialog", { name: "填表这步" })).toBeInTheDocument();
+  });
+
+  it("runs the skipped step's onNext before moving on", async () => {
+    const onNext = vi.fn();
+    function Page({ showB }: { showB: boolean }) {
+      return (
+        <>
+          <Anchor name="a" />
+          {showB && <Anchor name="b" x={300} />}
+          <Tour
+            id="library"
+            delay={0}
+            steps={[
+              { anchor: "b", title: "会消失的一步", onNext },
+              { anchor: "a", title: "留下的一步" },
+            ]}
+          />
+        </>
+      );
+    }
+    const { rerender } = render(<Page showB />);
+    await screen.findByRole("dialog", { name: "会消失的一步" });
+    rerender(<Page showB={false} />);
+    expect(await screen.findByRole("dialog", { name: "留下的一步" })).toBeInTheDocument();
+    // 锚点消失不等于这一步的跳转可以不做：否则下一步会停在错误的页面上。
+    expect(onNext).toHaveBeenCalledTimes(1);
+  });
+
+  it("goes back for a retry when a jump target never appears instead of marking the tour seen", async () => {
+    render(
+      <>
+        <Anchor name="a" />
+        <Tour
+          id="library"
+          delay={0}
+          awaitMs={50}
+          steps={[
+            // 模拟「离开设置被未保存提示拦下」：onNext 什么都没跳。
+            { anchor: "a", title: "第一步", onNext: () => undefined },
+            { anchor: "b", awaitAnchor: true, title: "第二步" },
+            { anchor: "c", awaitAnchor: true, title: "第三步" },
+          ]}
+        />
+      </>,
+    );
+    await screen.findByRole("dialog", { name: "第一步" });
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+
+    // 目标页没出现：退回上一步，让用户处理未保存提示后重试，而不是把后续步骤全跳过。
+    expect(await screen.findByRole("dialog", { name: "第一步" })).toBeInTheDocument();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 150)));
+    expect(useTours.getState().seen.has("library")).toBe(false);
+    expect(useTours.getState().active).toBe("library");
   });
 
   it("skips a step when its anchor goes away", async () => {
