@@ -99,6 +99,8 @@ export interface ProbeResult {
   title: string;
   tracks: SubtitleTrack[];
   qualities: number[];
+  /** B站登录态：null 表示不是 B站/没带 cookies/查询失败；false 表示 cookies 已退出登录。 */
+  logged_in?: boolean | null;
 }
 
 /** 播放列表/合集里的一集。 */

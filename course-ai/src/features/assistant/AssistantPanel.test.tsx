@@ -3234,6 +3234,34 @@ describe("确认卡", () => {
     expect(mockIpc.tools.importBilibili).not.toHaveBeenCalled();
   });
 
+  it("cookies 登录态失效时不再把没有字幕说成视频本身没字幕", async () => {
+    mockIpc.tools.probeBilibili.mockResolvedValueOnce({
+      title: "双曲线",
+      qualities: [1080],
+      tracks: [],
+      logged_in: false,
+    });
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_import",
+            url: "https://www.bilibili.com/video/BV1",
+            title: "双曲线",
+            course_id: "c1",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("导入这个");
+    fireEvent.click(await screen.findByRole("button", { name: "确认导入" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("登录态已失效");
+    // 登录态失效时不能静悄悄退化成语音转写，让用户以为没有 AI 字幕。
+    expect(mockIpc.tools.importBilibili).not.toHaveBeenCalled();
+  });
+
   it("非 B 站链接不要求 B 站 cookies", async () => {
     mockIpc.assistant.ask.mockResolvedValueOnce(
       reply({

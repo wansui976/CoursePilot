@@ -260,6 +260,33 @@ fn truncate(s: &str, max_chars: usize) -> String {
     }
 }
 
+/// 从 nav 接口响应里读登录态。未登录时接口会返回 `code=-101`，但
+/// `data.isLogin` 仍是可靠的 false；只有响应不是预期 JSON 时才返回 None。
+fn parse_nav_login(json: &str) -> Option<bool> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    v["data"]["isLogin"].as_bool()
+}
+
+/// 当前 cookies 是否仍是 B站登录态。
+///
+/// 为什么要单独查：B站只为登录用户返回 AI 字幕，cookies 文件「存在且非空」
+/// 并不等于「已登录」。不查这一下，界面只能看到 tracks 为空，于是把
+/// 「登录态失效」误报成「这个视频没有自带字幕」。
+///
+/// 查询失败返回 None——网络问题不能被说成登录失效。
+pub async fn bilibili_login_state(cookies: &str) -> Option<bool> {
+    let (status, body) = http_get(
+        "https://api.bilibili.com/x/web-interface/nav",
+        Some(cookies),
+    )
+    .await
+    .ok()?;
+    if !status.is_success() {
+        return None;
+    }
+    parse_nav_login(&body)
+}
+
 /// 解码弹幕接口的响应体。该接口无条件返回压缩数据（无视 `Accept-Encoding`），
 /// 且 `content-encoding: deflate` 里装的是 **raw deflate**——不按 RFC 7230 用
 /// zlib 包装，reqwest（未开解压特性）拿到的就是压缩字节。依次尝试
@@ -866,5 +893,21 @@ mod tests {
             Some("buvid3=TESTBUVID")
         );
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn nav_login_reads_is_login_even_when_not_logged_in() {
+        // 未登录时 nav 的 code=-101，但 data.isLogin 明确是 false；
+        // 这里必须读到 false，不能因为 code 非 0 就当成「查询失败」。
+        assert_eq!(
+            parse_nav_login(r#"{"code":-101,"message":"账号未登录","data":{"isLogin":false}}"#),
+            Some(false)
+        );
+        assert_eq!(
+            parse_nav_login(r#"{"code":0,"data":{"isLogin":true}}"#),
+            Some(true)
+        );
+        assert_eq!(parse_nav_login(r#"{"code":-352,"data":null}"#), None);
+        assert_eq!(parse_nav_login("<html>风控</html>"), None);
     }
 }

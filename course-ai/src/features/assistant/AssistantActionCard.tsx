@@ -131,6 +131,11 @@ async function importWithSubtitles(courseId: string, url: string, resume: Import
     }
   }
   const probe = await ipc.tools.probeBilibili(url);
+  // 登录态失效时 tracks 必然为空，但这句话不能当成「这个视频没有字幕」：
+  // 继续导入会静悄悄退化成语音转写，用户还以为 AI 字幕坏了。
+  if (probe.logged_in === false) {
+    throw new AssistantActionError(i18n.t("assistantActions.cookieExpired"));
+  }
   const track =
     probe.tracks.find((t) => !t.auto && t.lang.startsWith("zh")) ??
     probe.tracks.find((t) => t.lang === "ai-zh") ??

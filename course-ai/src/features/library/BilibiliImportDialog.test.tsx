@@ -109,6 +109,29 @@ describe("BilibiliImportDialog", () => {
     expect(await screen.findByText("示例视频")).toBeInTheDocument();
   });
 
+  it("says the login expired instead of claiming the video has no subtitles", async () => {
+    mockTools.hasBilibiliCookies.mockResolvedValue(true);
+    mockTools.probeBilibili.mockResolvedValue({
+      title: "示例视频",
+      qualities: [1080],
+      tracks: [],
+      // cookies 文件在、但不是登录状态：B站不会返回 AI 字幕。
+      logged_in: false,
+    });
+    renderDialog();
+
+    fireEvent.change(screen.getByLabelText("视频链接"), {
+      target: { value: "https://b23.tv/abc" },
+    });
+    fireEvent.click(screen.getByText("下一步"));
+
+    expect(await screen.findByText(/已不是登录状态/)).toBeInTheDocument();
+    expect(screen.getByText(/登录态已失效/)).toBeInTheDocument();
+    // 关键：不能把「登录态失效」说成「这个视频没有字幕」。
+    expect(screen.queryByText(/未检测到自带字幕/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "选择 cookies.txt" })).toBeInTheDocument();
+  });
+
   it("exposes quality as a labeled radio group and labels the subtitle selector", async () => {
     mockTools.hasBilibiliCookies.mockResolvedValue(true);
     mockTools.probeBilibili.mockResolvedValue({

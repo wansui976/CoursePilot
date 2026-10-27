@@ -254,6 +254,26 @@ export function BilibiliImportDialog({
         <div className="space-y-4">
           <p className="text-xs text-[var(--text-faint)]">{probe.title}</p>
 
+          {probe.logged_in === false && (
+            <div
+              role="status"
+              className="rounded-lg border border-[var(--status-warn)] bg-[var(--status-warn-bg)] p-2 text-xs leading-relaxed text-[var(--status-warn)]"
+            >
+              <p>{t("bilibiliImport.loginExpired")}</p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2 ca-touch-44"
+                disabled={preparing}
+                onClick={pickCookie}
+              >
+                {preparing
+                  ? t("bilibiliImport.importing")
+                  : t("bilibiliImport.selectCookies")}
+              </Button>
+            </div>
+          )}
+
           <fieldset>
             <legend className="mb-1 text-xs font-medium text-[var(--text-muted)]">
               {t("bilibiliImport.quality")}
@@ -299,7 +319,9 @@ export function BilibiliImportDialog({
             </label>
           ) : (
             <p className="text-xs text-[var(--text-faint)]">
-              {t("bilibiliImport.noSubtitle")}
+              {probe.logged_in === false
+                ? t("bilibiliImport.subtitleNeedsLogin")
+                : t("bilibiliImport.noSubtitle")}
             </p>
           )}
           {probe.tracks.length > 0 && (
