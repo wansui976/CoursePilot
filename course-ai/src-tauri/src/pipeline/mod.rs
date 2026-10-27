@@ -584,11 +584,6 @@ async fn run_all(
             )
             .fetch_optional(&db.pool)
             .await?;
-            // 「自动检测」或未设置时不传语言提示，让模型自动识别。
-            let language = language
-                .as_deref()
-                .map(str::trim)
-                .filter(|l| !l.is_empty() && *l != "auto");
             emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.16, "准备上传音频").await?;
             let message = format!("云端识别中（阿里云 {model}）");
             emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.28, &message).await?;
@@ -600,7 +595,8 @@ async fn run_all(
                     &prepared_audio.mime,
                     &api_key,
                     &model,
-                    language,
+                    language.as_deref(),
+                    video.duration_ms,
                 ),
                 Some(&sink),
                 CLOUD_ASR_CREEP,

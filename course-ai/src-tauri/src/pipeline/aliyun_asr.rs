@@ -44,6 +44,7 @@ pub async fn run_aliyun(
     api_key: &str,
     model: &str,
     language: Option<&str>,
+    duration_ms: Option<i64>,
 ) -> AppResult<WhisperJson> {
     let api_key = api_key.trim();
     if api_key.is_empty() {
@@ -65,7 +66,7 @@ pub async fn run_aliyun(
 
     // 先在本地卡体积，别把几十 MB 传完才被服务端的 JSON 字符串上限拒掉。
     let size = tokio::fs::metadata(audio).await?.len() as usize;
-    ensure_fits_data_uri(size)?;
+    ensure_fits_data_uri(size, duration_ms)?;
 
     let bytes = tokio::fs::read(audio).await?;
     let data_uri = audio_data_uri(mime, &bytes);
@@ -125,18 +126,26 @@ pub async fn run_aliyun(
 }
 
 /// base64 会膨胀 4/3，服务端又把 data URI 当一个 JSON 字符串解析，所以能提交的
-/// 原始音频有硬上限。超过时直接报错，并给出「大概多少分钟」和替代方案。
-pub fn ensure_fits_data_uri(audio_bytes: usize) -> AppResult<()> {
+/// 原始音频有硬上限。超过时直接报错，并给出真实时长和替代方案。
+///
+/// 不要按 32 kbps 反推时长：只有桌面端会把音频压到 32 kbps，Android 导出的 M4A
+/// 通常沿用原音轨（128 kbps 以上），同样 20 多分钟就会触顶。用视频本身的时长最准。
+pub fn ensure_fits_data_uri(audio_bytes: usize, duration_ms: Option<i64>) -> AppResult<()> {
     if audio_bytes <= MAX_AUDIO_BYTES {
         return Ok(());
     }
-    // 按应用桌面端默认的 32 kbps 估算时长，让用户知道这是「多长的一节课」。
-    let minutes = audio_bytes as f64 / (32_000.0 / 8.0) / 60.0;
+    let size = format!("{:.1} MB", audio_bytes as f64 / 1_000_000.0);
+    let length = match duration_ms {
+        Some(ms) if ms > 0 => {
+            let minutes = ((ms as f64 / 60_000.0).round() as i64).max(1);
+            format!("{size}（约 {minutes} 分钟）")
+        }
+        _ => size,
+    };
     Err(AppError::Permanent(format!(
-        "音频太大：{} MB（32 kbps 下约 {:.0} 分钟），base64 后会超过阿里云单次请求的 \
-         {} 字符上限。请把视频/音频切成几段再导入，或改用本地 Whisper。",
-        audio_bytes as f64 / 1_000_000.0,
-        minutes,
+        "音频太大：{length}，base64 后会超过阿里云单次请求的 {} 字符上限。\
+         移动端导出的音频码率更高，同样时长会更早触顶；请把视频/音频切成几段再导入，\
+         或改用本地 Whisper。",
         MAX_DATA_URI_CHARS
     )))
 }
@@ -332,11 +341,17 @@ mod tests {
     #[test]
     fn rejects_audio_that_would_exceed_the_string_limit() {
         // 20MB 原始音频 base64 后约 27.9M 字符，能过。
-        assert!(ensure_fits_data_uri(20_000_000).is_ok());
+        assert!(ensure_fits_data_uri(20_000_000, None).is_ok());
         // 22MB 原始音频 base64 后约 29.3M，服务端会 400；
         // 本地就该拦下来，别让用户等十几分钟上传。
-        let err = ensure_fits_data_uri(22_000_000).unwrap_err().to_string();
+        let err = ensure_fits_data_uri(21_234_567, Some(22 * 60_000))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("音频太大"), "{err}");
+        // 按真实时长报，而不是假装所有音频都是 32 kbps。
+        assert!(err.contains("21.2 MB"), "{err}");
+        assert!(err.contains("约 22 分钟"), "{err}");
+        assert!(!err.contains("32 kbps"), "{err}");
         assert!(err.contains("28000000"), "{err}");
         assert!(err.contains("本地 Whisper"), "{err}");
     }
@@ -434,7 +449,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("audio.mp3");
         std::fs::write(&path, b"not really audio").unwrap();
-        let err = run_aliyun(&path, "audio/mpeg", "  ", DEFAULT_MODEL, None)
+        let err = run_aliyun(&path, "audio/mpeg", "  ", DEFAULT_MODEL, None, None)
             .await
             .unwrap_err()
             .to_string();
@@ -451,7 +466,7 @@ mod tests {
             .unwrap()
             .set_len(22_000_000)
             .unwrap();
-        let err = run_aliyun(&path, "audio/mpeg", "sk-test", DEFAULT_MODEL, None)
+        let err = run_aliyun(&path, "audio/mpeg", "sk-test", DEFAULT_MODEL, None, None)
             .await
             .unwrap_err()
             .to_string();
@@ -472,6 +487,7 @@ mod tests {
             &key,
             DEFAULT_MODEL,
             Some("zh"),
+            None,
         )
         .await
         .expect("live aliyun asr");
