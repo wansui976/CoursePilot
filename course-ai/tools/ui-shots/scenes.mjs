@@ -104,6 +104,42 @@ export const scenes = [
     },
   },
   {
+    // 新手引导：空课程库 → 空课程 → 第一次进工作台，每组逐步拍下来。
+    name: "tour",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      const bubble = page.locator(".ca-tour-bubble");
+      const walk = async (prefix) => {
+        for (let i = 1; i <= 4; i += 1) {
+          await bubble.waitFor({ timeout: 4000 });
+          await page.waitForTimeout(250);
+          await shot(`${prefix}-${i}`);
+          const next = bubble.getByRole("button", { name: /下一步|知道了/ });
+          const label = await next.textContent();
+          await next.click();
+          if (label?.includes("知道了")) break;
+        }
+        await bubble.waitFor({ state: "detached", timeout: 2000 });
+      };
+      await page.evaluate(() => {
+        localStorage.setItem("__shot-tours", "1");
+        localStorage.setItem("__shot-empty", "1");
+      });
+      await page.reload({ waitUntil: "networkidle" });
+      await walk("library");
+      // 有课了：进一门还没有视频的课
+      await page.evaluate(() => localStorage.removeItem("__shot-empty"));
+      await page.reload({ waitUntil: "networkidle" });
+      await page.getByRole("button", { name: /^线性代数的本质/ }).first().click();
+      await walk("course");
+      // 手机上进了课程页就看不到课程列表了：回首页再打开视频
+      await page.reload({ waitUntil: "networkidle" });
+      await openVideo(page);
+      await walk("workbench");
+      await page.evaluate(() => localStorage.removeItem("__shot-tours"));
+    },
+  },
+  {
     name: "queue",
     devices: ALL,
     run: async ({ page, shot }) => {

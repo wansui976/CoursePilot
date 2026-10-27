@@ -30,6 +30,7 @@ export function BottomTabBar({
             key={key}
             type="button"
             aria-label={label}
+            data-tour={key === "settings" ? "settings" : undefined}
             aria-current={key === active ? "page" : undefined}
             className={`ca-bottom-tab-btn ${key === active ? "on" : ""}`}
             onClick={() => onSelect(key)}

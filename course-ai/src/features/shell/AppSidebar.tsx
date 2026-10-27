@@ -29,16 +29,20 @@ function SideNavItem({
   active = false,
   onClick,
   trailing,
+  tour,
 }: {
   icon: LucideIcon;
   label: string;
   active?: boolean;
   onClick: () => void;
   trailing?: ReactNode;
+  /** 新手引导锚点（data-tour） */
+  tour?: string;
 }) {
   return (
     <button
       type="button"
+      data-tour={tour}
       className={`ca-side-item ${active ? "active" : ""}`}
       aria-current={active ? "page" : undefined}
       onClick={onClick}
@@ -136,6 +140,7 @@ export function AppSidebar({
         <SideNavItem
           icon={MessageSquareText}
           label={t("assistant.title")}
+          tour="assistant"
           active={nav.assistantActive}
           onClick={nav.onToggleAssistant}
           trailing={
@@ -153,6 +158,7 @@ export function AppSidebar({
             type="button"
             aria-label={t("nav.addCourseFolder")}
             title={t("nav.addCourseFolder")}
+            data-tour="add-course"
             className="ca-icon-btn ca-side-mini"
             disabled={creatingCourse}
             onClick={() => void createCourse()}
@@ -200,6 +206,7 @@ export function AppSidebar({
         <SideNavItem
           icon={Settings}
           label={t("nav.settings")}
+          tour="settings"
           active={nav.settingsOpen}
           onClick={nav.onOpenSettings}
         />

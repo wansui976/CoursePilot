@@ -1068,6 +1068,7 @@ export function CourseLibraryView({
                       <Button
                         type="button"
                         disabled={creatingCourse}
+                        data-tour="add-course"
                         onClick={() => void createCourse()}
                       >
                         {creatingCourse ? (

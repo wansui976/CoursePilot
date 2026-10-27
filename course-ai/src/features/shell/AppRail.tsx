@@ -68,6 +68,7 @@ export function AppRail({ nav, onExpandSidebar }: { nav: ShellNav; onExpandSideb
       <button
         className={`rail-btn ${nav.assistantActive ? "active" : ""}`}
         data-tip={t("assistant.toggleAssistant")}
+        data-tour="assistant"
         aria-label={t("assistant.toggleAssistant")}
         onClick={nav.onToggleAssistant}
       >
@@ -100,6 +101,7 @@ export function AppRail({ nav, onExpandSidebar }: { nav: ShellNav; onExpandSideb
       <button
         className={`rail-btn ${nav.settingsOpen ? "active" : ""}`}
         data-tip={t("nav.settings")}
+        data-tour="settings"
         aria-label={t("nav.settings")}
         onClick={nav.onOpenSettings}
       >

@@ -8,6 +8,7 @@ vi.mock("@tauri-apps/api/app", () => ({ getVersion: () => Promise.resolve("0.3.4
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
 import { resetAutoCheckForTests, useUpdate } from "@/lib/updateCheck";
+import { useTours } from "@/stores/tours";
 import { AboutSection } from "./AboutSection";
 
 describe("AboutSection", () => {
@@ -47,5 +48,14 @@ describe("AboutSection", () => {
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "false");
     expect(localStorage.getItem("course-ai-update-auto")).toBe("0");
+  });
+
+  it("可以让新手引导重新出现", () => {
+    render(<AboutSection />);
+    expect(useTours.getState().seen.size).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "重新显示" }));
+    expect(useTours.getState().seen.size).toBe(0);
+    expect(screen.getByText("已重置，打开对应页面时会再出现")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重新显示" })).toBeDisabled();
   });
 });

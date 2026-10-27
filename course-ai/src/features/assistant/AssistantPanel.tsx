@@ -1398,6 +1398,7 @@ export function AssistantPanel({
       <button
         ref={launcherRef}
         type="button"
+        data-tour="assistant"
         aria-label={t("assistant.openAssistant")}
         aria-busy={busy || undefined}
         title={t("assistant.openWithShortcut", { shortcut: toggleShortcutLabel() })}

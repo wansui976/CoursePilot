@@ -58,6 +58,9 @@ export function installMockIpc({ theme, safeArea }) {
       if (progress[v.id]) localStorage.setItem(`video-pos:${v.id}`, String(dur * progress[v.id]));
     }
     localStorage.setItem("course-ai-last-video:c1", "v3");
+    // 新手引导默认记为看过，免得气泡挡住其他截图；只有 tour 场景打开它。
+    if (localStorage.getItem("__shot-tours") === "1") localStorage.removeItem("course-ai-tours-seen");
+    else localStorage.setItem("course-ai-tours-seen", JSON.stringify(["library", "course", "workbench"]));
   } catch {
     // 隐私模式等存储不可用：只是少了进度条，不影响截图。
   }
@@ -210,7 +213,15 @@ export function installMockIpc({ theme, safeArea }) {
       [{ id: "medium", display_name: "medium", size_bytes: 1_530_000_000, url: "" }, false],
       [{ id: "small", display_name: "small", size_bytes: 488_000_000, url: "" }, false],
     ],
-    cmd_list_courses: () => courses,
+    // __shot-empty：模拟第一次打开、一门课都没有（tour 场景用）。
+    cmd_list_courses: () => {
+      try {
+        if (localStorage.getItem("__shot-empty") === "1") return [];
+      } catch {
+        // 存储不可用：按有课处理
+      }
+      return courses;
+    },
     cmd_list_videos: ({ courseId }) => (courseId === "c1" ? videos : []),
     cmd_video_cover: ({ videoId }) => cover(videoId),
     cmd_media_url: ({ videoId }) => mediaUrl(videoId),

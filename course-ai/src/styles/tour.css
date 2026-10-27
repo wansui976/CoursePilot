@@ -1,0 +1,109 @@
+/* 新手引导气泡（ui/Tour.tsx）：强调色底、白字，箭头指向锚点；锚点外圈一道细环。
+   挂在 body 上（不在 .ca-app 里），所以颜色只用写在 <html> 上的强调色变量。 */
+.ca-tour-ring {
+  position: fixed;
+  z-index: 80;
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent);
+  pointer-events: none;
+  transition: left 0.18s ease, top 0.18s ease, width 0.18s ease, height 0.18s ease;
+}
+
+.ca-tour-bubble {
+  position: fixed;
+  z-index: 81;
+  width: 300px;
+  max-width: calc(100vw - 24px);
+  padding: 16px 16px 14px 18px;
+  border-radius: 14px;
+  /* 气泡本身就是一块强调色实心块。下面「知道了」是反色按钮（--on-accent 底），
+     字色要用这块底色本身：--accent 与 --on-accent 的对比度是成对保证的；
+     换成 --accent-text 的话，深色主题下是浅色字压在白底上。 */
+  --ca-tour-fill: var(--accent);
+  background: var(--ca-tour-fill);
+  color: var(--on-accent);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.22), 0 2px 6px rgb(0 0 0 / 0.12);
+  font-family: var(--font-app, system-ui, sans-serif);
+  text-align: left;
+}
+
+.ca-tour-arrow {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  background: inherit;
+  border-radius: 3px;
+  transform: rotate(45deg);
+}
+.ca-tour-bubble[data-placement="bottom"] .ca-tour-arrow { top: -6px; }
+.ca-tour-bubble[data-placement="top"] .ca-tour-arrow { bottom: -6px; }
+.ca-tour-bubble[data-placement="right"] .ca-tour-arrow { left: -6px; }
+.ca-tour-bubble[data-placement="left"] .ca-tour-arrow { right: -6px; }
+
+.ca-tour-head {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.ca-tour-title {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.ca-tour-close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin: -4px -6px 0 0;
+  border-radius: 6px;
+  color: inherit;
+  opacity: 0.85;
+}
+.ca-tour-close:hover { opacity: 1; background: rgb(255 255 255 / 0.16); }
+
+.ca-tour-body {
+  position: relative;
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  opacity: 0.95;
+}
+
+.ca-tour-foot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-top: 14px;
+}
+.ca-tour-count {
+  font-size: 12.5px;
+  opacity: 0.72;
+  font-variant-numeric: tabular-nums;
+}
+.ca-tour-next {
+  margin-left: auto;
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: var(--on-accent);
+  color: var(--ca-tour-fill);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.ca-tour-next:hover { opacity: 0.92; }
+.ca-tour-next:focus-visible,
+.ca-tour-close:focus-visible {
+  outline: 2px solid var(--on-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-tour-bubble { animation: ca-tour-in 0.18s ease-out; }
+}
+@keyframes ca-tour-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}

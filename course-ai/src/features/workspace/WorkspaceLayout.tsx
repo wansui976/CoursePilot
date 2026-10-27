@@ -280,6 +280,7 @@ export function WorkspaceLayout({
               <button
                 type="button"
                 onClick={() => setReadingFocus(true)}
+                data-tour="reading-focus"
                 aria-label={t("home.readingFocus")}
                 title={t("home.readingFocus")}
                 className="ca-wb-tool ca-touch-44"

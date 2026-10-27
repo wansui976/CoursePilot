@@ -83,6 +83,7 @@ export function LibraryOverview({
             size="sm"
             disabled={creatingCourse}
             onClick={onCreateCourse}
+            data-tour="add-course"
             className="ca-touch-44"
           >
             {creatingCourse ? (

@@ -32,6 +32,7 @@ export function CourseSidebar({
           type="button"
           aria-label={t("nav.addCourseFolder")}
           className="ca-course-screen-add"
+          data-tour="add-course"
           disabled={creatingCourse}
           onClick={() => void createCourse()}
         >

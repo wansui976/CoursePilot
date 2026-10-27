@@ -12,6 +12,7 @@ import {
   writeAutoCheck,
 } from "@/lib/updateCheck";
 import { Group, Row } from "@/features/settings/primitives";
+import { useTours } from "@/stores/tours";
 
 type CheckState =
   | { kind: "idle" }
@@ -25,6 +26,8 @@ export function AboutSection() {
   const running = useRunningVersion();
   const [auto, setAuto] = useState(() => readAutoCheck());
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
+  const resetTours = useTours((s) => s.resetAll);
+  const [toursReset, setToursReset] = useState(false);
 
   async function checkNow() {
     setCheck({ kind: "checking" });
@@ -85,6 +88,22 @@ export function AboutSection() {
             setAuto(next);
           }}
         />
+      </Row>
+      <Row
+        label={t("settings.about.tour")}
+        hint={toursReset ? t("settings.about.tourResetDone") : t("settings.about.tourHint")}
+      >
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={toursReset}
+          onClick={() => {
+            resetTours();
+            setToursReset(true);
+          }}
+        >
+          {t("settings.about.tourReset")}
+        </Button>
       </Row>
     </Group>
   );

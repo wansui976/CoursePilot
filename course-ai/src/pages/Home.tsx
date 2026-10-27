@@ -29,6 +29,7 @@ import { isTablet } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
 import { selectDownloadCount, useDownloads } from "@/stores/downloads";
 import { AssistantPanel } from "@/features/assistant/AssistantPanel";
+import { AppTours } from "@/features/shell/AppTours";
 import { accentVars, useTheme } from "@/stores/theme";
 import { useAssistantUi } from "@/stores/assistant";
 import { useHomeRoute } from "@/app/homeRoute";
@@ -175,8 +176,8 @@ export function Home() {
     go({ view: "library", videoId: null });
   }, [go]);
 
-  const { data: videos = [] } = useQuery(queries.videos(selectedCourseId));
-  const { data: courses = [] } = useQuery(queries.courses());
+  const { data: videos = [], isSuccess: videosLoaded } = useQuery(queries.videos(selectedCourseId));
+  const { data: courses = [], isSuccess: coursesLoaded } = useQuery(queries.courses());
   const recorrection = useRecorrection({ selectedCourseId, selectedVideoId, videos });
   // 顶栏副标「已看完 N 个」：本地按播放进度聚合，零后端改动。
   // 不 memo：看完一集从工作台返回时 videos 引用不变（react-query 结构共享），
@@ -616,6 +617,19 @@ export function Home() {
         launcherVisible={
           isPhoneDevice && !showSettings && !showRecycleBin && !showDevConsole && !showDashboard
         }
+      />
+      {/* 新手引导：课程库空着、课程里还没视频、第一次进工作台，各出现一次。 */}
+      <AppTours
+        library={mainView === "library" && !selectedCourseId && coursesLoaded && courses.length === 0}
+        course={
+          mainView === "library" &&
+          !!selectedCourseId &&
+          !isWorkbenchView &&
+          videosLoaded &&
+          videos.length === 0 &&
+          downloadCount === 0
+        }
+        workbench={isWorkbenchView}
       />
     </div>
     </ShellContext.Provider>

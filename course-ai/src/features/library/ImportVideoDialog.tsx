@@ -157,6 +157,7 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
       <Button
         ref={triggerRef}
         size="sm"
+        data-tour="import"
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         aria-controls={menuOpen ? menuId : undefined}

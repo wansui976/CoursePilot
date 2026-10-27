@@ -875,7 +875,11 @@
       "view": "View",
       "failed": "Couldn't check: {{error}}",
       "autoCheck": "Check for new versions automatically",
-      "autoCheckHint": "At most once a day. Only asks GitHub for the latest version number; nothing is uploaded."
+      "autoCheckHint": "At most once a day. Only asks GitHub for the latest version number; nothing is uploaded.",
+      "tour": "Feature tips",
+      "tourHint": "Tips on each page show only once. Bring them back here.",
+      "tourReset": "Show again",
+      "tourResetDone": "Reset — they'll show again when you open each page."
     }
   },
   "assistant": {
@@ -1548,5 +1552,53 @@
     "available": "CoursePilot {{version}} is out",
     "view": "See what's new",
     "ignore": "Don't remind me about this version"
+  },
+  "tour": {
+    "close": "Close tour",
+    "next": "Next",
+    "done": "Got it",
+    "progress": "{{current}} of {{total}}",
+    "library": {
+      "addCourse": {
+        "title": "Start with a course",
+        "body": "Pick a folder that holds your lecture videos — they'll be imported automatically. Bilibili and YouTube links can be added once you're in the course."
+      },
+      "settings": {
+        "title": "Then add an LLM",
+        "body": "Add an API key in Settings → LLM to unlock summaries, notes, quizzes and course Q&A. Local transcription works without one."
+      },
+      "assistant": {
+        "title": "Not sure where to begin? Ask the assistant",
+        "body": "Search Bilibili, create courses or check your progress in plain language. It asks before changing anything."
+      }
+    },
+    "course": {
+      "import": {
+        "title": "Bring in your videos",
+        "body": "Upload local video or audio, or paste a Bilibili / YouTube link. Imports are transcribed and slides are captured automatically; with an LLM they become notes too."
+      }
+    },
+    "workbench": {
+      "tabs": {
+        "title": "Your study materials live here",
+        "body": "Once processing finishes, the overview, transcript and notes appear here; quizzes, slides and mind maps are under More."
+      },
+      "notes": {
+        "title": "Press {{key}} to take a note",
+        "body": "The video pauses and the current timestamp is added to the end of your notes. Change the key in Settings → Shortcuts."
+      },
+      "transcript": {
+        "title": "Select a line in the transcript",
+        "body": "Highlight any text to ask AI about it, quote it to your notes, or make a cloze card."
+      },
+      "focus": {
+        "title": "Need to concentrate?",
+        "body": "Focus reading lets the study panel fill the workbench with the text centered while the video keeps playing. Press Esc to leave."
+      },
+      "notesTouch": {
+        "title": "Jot a note as you watch",
+        "body": "Tap Take a note in your notes: the video pauses and the current timestamp is added. With a keyboard, just press {{key}}."
+      }
+    }
   }
 }
