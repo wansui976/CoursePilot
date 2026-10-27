@@ -433,27 +433,35 @@ fn stderr_tail(stderr: &str) -> String {
 /// `/Volumes/<卷名>` 是否真的挂着一个卷。
 ///
 /// 只判断目录存在不够：外置硬盘拔掉后，macOS 有时会在 `/Volumes` 下留一个 root 所有的
-/// 空占位目录（`d--x--x--x`）。这时 `create_dir_all` 照样会报 Permission denied，
-/// 用户看到的就是「没有文件访问权限」，完全想不到是硬盘没接。
+/// 空占位目录（`d--x--x--x`）。但也不能只比较 `f_mntonname` 和传入路径的字节：
+///
+/// - `/Volumes/Macintosh HD` 可能是指向 `/` 的符号链接；
+/// - 卷名大小写、Unicode 规范化写法可能和实际目录不一致；
+/// - 网络盘偶尔取不到挂载信息。
+///
+/// 所以这里比较 `path` 与 `f_mntonname` 的 (dev, inode)：同一个目录就算同一个挂载点，
+/// 查不到（statfs/metadata 失败）返回 None，交给调用方按「未知」处理，避免误报。
 #[cfg(target_os = "macos")]
-fn is_mount_point(path: &Path) -> bool {
+fn is_mount_point(path: &Path) -> Option<bool> {
     use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
 
-    let Ok(cpath) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
-        return false;
-    };
+    let cpath = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
     let mut info: libc::statfs = unsafe { std::mem::zeroed() };
     if unsafe { libc::statfs(cpath.as_ptr(), &mut info) } != 0 {
-        return false;
+        return None;
     }
-    // f_mntonname 是实际挂载点；根卷挂载点仍是 "/"，不会被误认成 /Volumes/<卷名>。
     let mounted = unsafe { std::ffi::CStr::from_ptr(info.f_mntonname.as_ptr()) };
-    mounted.to_bytes() == path.as_os_str().as_bytes()
+    let mount_root = Path::new(std::ffi::OsStr::from_bytes(mounted.to_bytes()));
+
+    let here = std::fs::metadata(path).ok()?;
+    let root = std::fs::metadata(mount_root).ok()?;
+    Some(here.dev() == root.dev() && here.ino() == root.ino())
 }
 
 #[cfg(not(target_os = "macos"))]
-fn is_mount_point(_path: &Path) -> bool {
-    true
+fn is_mount_point(_path: &Path) -> Option<bool> {
+    Some(true)
 }
 
 /// `dir` 位于 macOS `/Volumes/<卷名>` 下而该卷没有挂载时，返回卷名。
@@ -467,11 +475,13 @@ fn unmounted_volume(dir: &Path) -> Option<String> {
     }
     let name = parts.next()?.as_os_str();
     let mount = Path::new("/Volumes").join(name);
-    // 挂载点目录不存在，或只剩一个占位目录（并非真正的挂载点），都算没接上。
-    if mount.exists() && is_mount_point(&mount) {
-        return None;
+    match is_mount_point(&mount) {
+        Some(true) => None,
+        Some(false) => Some(name.to_string_lossy().into_owned()),
+        // 挂载信息查不到（网络盘、权限受限）：宁可不报，也不能把正常盘说成没接。
+        None if mount.exists() => None,
+        None => Some(name.to_string_lossy().into_owned()),
     }
-    Some(name.to_string_lossy().into_owned())
 }
 
 /// Windows 上 `dir` 所在的盘符（外置硬盘拔掉后的 E: 之类）不存在时，返回盘符。
@@ -985,9 +995,15 @@ mod tests {
     fn a_mount_stub_is_not_mistaken_for_a_mounted_volume() {
         // 根目录是真正的挂载点；普通目录不是。外置盘拔掉后留下的
         // /Volumes/<卷名> 空占位目录与普通目录一样，不会被当成已挂载。
-        assert!(is_mount_point(Path::new("/")));
+        assert_eq!(is_mount_point(Path::new("/")), Some(true));
         let dir = tempdir().unwrap();
-        assert!(!is_mount_point(dir.path()));
+        assert_eq!(is_mount_point(dir.path()), Some(false));
+        // 指向系统盘的符号链接（/Volumes/Macintosh HD 就长这样）必须算已挂载。
+        let link = dir.path().join("system");
+        std::os::unix::fs::symlink("/", &link).unwrap();
+        assert_eq!(is_mount_point(&link), Some(true));
+        // 查不到就不下结论，避免把网络盘/权限受限误报成未接入。
+        assert_eq!(is_mount_point(&dir.path().join("missing")), None);
     }
 
     #[test]

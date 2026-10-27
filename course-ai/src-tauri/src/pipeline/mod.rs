@@ -1600,17 +1600,16 @@ async fn dismiss_processing_video(db: &crate::db::Db, video_id: &str) -> AppResu
     .execute(&db.pool)
     .await?;
     if result.rows_affected() == 0 {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM videos WHERE id=? AND deleted_at IS NULL)",
-        )
-        .bind(video_id)
-        .fetch_one(&db.pool)
-        .await?;
-        if !exists {
-            // 队列项可能比视频活得久：视频已被删除/移入回收站，队列里还留着那一条。
-            // 「移除」的目的就是让这条记录消失；对象已经不在了，等于已经达成，
-            // 再报 NotFound 只会让这条记录永远删不掉，并在界面上留一个红条。
-            return Ok(());
+        // 视频存在但已不在 failed（可能已被删除/移入回收站，或状态已经变过）：
+        // 队列项可能比视频活得久，「移除」的目的就是让它消失，对象不在了也算达成。
+        // 但 id 完全不存在时必须报错——传错 id 不能假装成功。
+        let known: Option<Option<i64>> =
+            sqlx::query_scalar("SELECT deleted_at FROM videos WHERE id=?")
+                .bind(video_id)
+                .fetch_optional(&db.pool)
+                .await?;
+        if known.is_none() {
+            return Err(AppError::NotFound(format!("video {video_id}")));
         }
     }
     Ok(())
@@ -1950,6 +1949,11 @@ mod tests {
 
         // 视频被删了，队列里那一条还留着；「移除」必须成功，否则这条永远消不掉。
         dismiss_processing_video(&db, &video.id).await.unwrap();
+        // 但一个根本不存在的 id 不能假装成功：那是调用方传错了对象。
+        assert!(matches!(
+            dismiss_processing_video(&db, "no-such-video").await,
+            Err(AppError::NotFound(_))
+        ));
     }
 
     #[tokio::test]
