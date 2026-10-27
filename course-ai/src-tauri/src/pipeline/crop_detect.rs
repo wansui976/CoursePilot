@@ -2,9 +2,10 @@
 //! 换算成四边占比 insets 存库，供播放器做非破坏式显示裁剪。
 //!
 //! cropdetect 在一段时间窗内累积「非黑包围盒」，天然保守——只要某帧某处不是黑，
-//! 该区域就不会被裁，因此不会误切真实内容。我们采样视频靠前的一段（跳过片头），
-//! 取最后一个稳定的 `crop=W:H:X:Y`，再按整帧分辨率换成比例。比例与像素纵横比（SAR）
-//! 无关，前端直接套到显示框上即可。
+//! 该区域就不会被裁。我们在正片里采样几处（片头不算，见 [`sample_insets`]），每处取
+//! 最后一个稳定的 `crop=W:H:X:Y`，按整帧分辨率换成比例，各处再按每边取最小值合并
+//! （见 [`merge_samples`]）：任一处看到画面的地方都不裁，因此不会误切真实内容。
+//! 比例与像素纵横比（SAR）无关，前端直接套到显示框上即可。
 
 use crate::sidecar::{resolve, FFMPEG};
 use std::path::{Path, PathBuf};
@@ -120,17 +121,19 @@ pub async fn detect_crop(path: &Path) -> Option<CropInsets> {
 
 /// 采样正片多处，返回各处测到的包围盒。
 ///
-/// 只看开头那一段是不够的：课程录像的片头常和正片取景不同（标题卡、片花、
-/// 全屏欢迎页），照着片头的黑边去裁，正片的真实画面就被削掉一条。
-/// 被取消时返回 None（而不是「已采到的那几处」）：只拿片头那一段去写库，
-/// 等于又回到「照着标题卡裁、把正片削掉一条」的老毛病。
+/// 开头那一段（3–33 秒）不能当正片看：课程录像的片头常和正片取景不同（标题卡、片花、
+/// 全屏欢迎页、铺满边缘的动画），cropdetect 又是在整个窗口里累积包围盒（reset=0），
+/// 片头里任何一帧铺到边缘，这一处就会测成「这条边没有黑边」，合并时把正片一直存在的
+/// 黑边否掉；照着标题卡的黑边去裁，又会把正片削掉一条。
+///
+/// 所以开头那一趟只用来读片长：够长（> [`BODY_SAMPLE_MIN_S`]）的视频改在正片 20% / 50% /
+/// 80% 三处采样，开头那段不参与合并；太短的视频没有正片可挑，才拿开头那段当样本。
+/// 正片几处都没测出来（解码失败等）时也退回开头那段。
+/// 被取消时返回 None（而不是「已采到的那几处」）：只拿一部分去写库会留下错误结论。
 async fn sample_insets(path: &Path, cancel: &AtomicBool) -> Option<Vec<CropInsets>> {
     let first = run_cropdetect(path, 3, 30, cancel).await?;
     let mut samples = Vec::new();
-    if let Some(insets) = measure_sample(&first) {
-        samples.push(insets);
-    }
-    for at_s in extra_offsets(parse_duration_ms(&first)) {
+    for at_s in body_offsets(parse_duration_ms(&first)) {
         let Some(stderr) = run_cropdetect(path, at_s, 20, cancel).await else {
             continue;
         };
@@ -141,22 +144,29 @@ async fn sample_insets(path: &Path, cancel: &AtomicBool) -> Option<Vec<CropInset
     if cancel.load(Ordering::SeqCst) {
         return None;
     }
+    if samples.is_empty() {
+        if let Some(insets) = measure_sample(&first) {
+            samples.push(insets);
+        }
+    }
     Some(samples)
 }
 
-/// 除开头之外还该采样哪几处（秒）。太短的视频没有中后段可采，就只看开头。
-pub fn extra_offsets(duration_ms: Option<i64>) -> Vec<i64> {
+/// 视频至少这么长（秒），才在正片里另外采样、不用开头那段。
+const BODY_SAMPLE_MIN_S: i64 = 120;
+
+/// 正片里该采样哪几处（秒）。太短的视频没有正片可挑，返回空、只看开头那段。
+pub fn body_offsets(duration_ms: Option<i64>) -> Vec<i64> {
     let Some(duration_s) = duration_ms.map(|ms| ms / 1000) else {
         return Vec::new();
     };
-    let mut out = Vec::new();
-    if duration_s > 120 {
-        out.push(duration_s * 40 / 100);
+    if duration_s <= BODY_SAMPLE_MIN_S {
+        return Vec::new();
     }
-    if duration_s > 300 {
-        out.push(duration_s * 75 / 100);
-    }
-    out
+    [20, 50, 80]
+        .into_iter()
+        .map(|percent| duration_s * percent / 100)
+        .collect()
 }
 
 /// 从 ffmpeg 头部信息里读片长（`Duration: 00:12:34.56`）。
@@ -174,43 +184,31 @@ pub fn parse_duration_ms(stderr: &str) -> Option<i64> {
     Some(((hours * 3600 + minutes * 60) as f64 + seconds).round() as i64 * 1000)
 }
 
-/// 合并多处采样。
+/// 合并多处采样：每边取**最小值**。
 ///
-/// 3 处及以上取每边的**中位数**：片头动画、转场、鼠标划过都可能让某一处测出
-/// 「这条边不是黑的」，取最小值会把另外两处的稳定黑边一并否掉（用户看到的就是
-/// 上下黑边去不掉）。中位数只要求多数采样同意。
-///
-/// 只有两处时仍取最小值：样本太少，中位数会变成平均值，反而可能把正片黑边
-/// 裁进画面；宁可保守。
-fn combine_side(mut values: Vec<f64>) -> f64 {
-    match values.len() {
-        0 => 0.0,
-        1 | 2 => values.into_iter().fold(f64::INFINITY, f64::min),
-        _ => {
-            values.sort_by(|a, b| a.total_cmp(b));
-            values[values.len() / 2]
-        }
-    }
-}
-
+/// 只要有一处看到这条边有画面，就不裁——宁可留一条黑边，也不切掉真实内容（课件页、
+/// 画中画、某一段满屏的演示）。片头带偏采样的问题不靠放宽合并规则解决，而是在
+/// [`sample_insets`] 里根本不让片头参与。
 pub fn merge_samples(samples: &[CropInsets]) -> Option<CropInsets> {
     if samples.is_empty() {
         return None;
     }
+    let min = |side: fn(&CropInsets) -> f64| samples.iter().map(side).fold(f64::INFINITY, f64::min);
     let merged = CropInsets {
-        top: combine_side(samples.iter().map(|s| s.top).collect()),
-        right: combine_side(samples.iter().map(|s| s.right).collect()),
-        bottom: combine_side(samples.iter().map(|s| s.bottom).collect()),
-        left: combine_side(samples.iter().map(|s| s.left).collect()),
+        top: min(|s| s.top),
+        right: min(|s| s.right),
+        bottom: min(|s| s.bottom),
+        left: min(|s| s.left),
     };
     meaningful(merged)
 }
 
 /// 探测并写库，返回 insets（无黑边为 0）。
 ///
-/// 只要 ffmpeg **跑过**（无论是否检出黑边）就写库——无黑边写 0，把该视频标记为「已探测」，
-/// 避免每次打开都重跑。ffmpeg 没跑成（spawn 失败）或中途被取消则不写库
-/// （保持 NULL，下次打开这个视频时再测）。
+/// 至少有一处**测出了结果**（无论是否检出黑边）才写库——无黑边写 0，把该视频标记为
+/// 「已探测」，避免每次打开都重跑。ffmpeg 没跑成（spawn 失败）、中途被取消，或者跑了
+/// 却一处都没解出画面（文件在没接上的外置盘上、解码失败），都不写库：保持 NULL，下次
+/// 打开这个视频时再测。否则会把「没测成」写成「测过、没黑边」，以后再也不补测。
 pub async fn ensure_crop(
     db: &crate::db::Db,
     video_id: &str,
@@ -223,6 +221,9 @@ pub async fn ensure_crop(
     let Some(samples) = sample_insets(&path, cancel).await else {
         return NO_CROP;
     };
+    if samples.is_empty() {
+        return NO_CROP;
+    }
     let insets = merge_samples(&samples).unwrap_or(NO_CROP);
     let _ = sqlx::query(
         "UPDATE videos SET crop_top=?,crop_right=?,crop_bottom=?,crop_left=? WHERE id=?",
@@ -368,6 +369,36 @@ mod tests {
         assert_ne!(cancel_key("v1"), cancel_key("v2"));
     }
 
+    #[tokio::test]
+    async fn a_detection_that_measured_nothing_writes_nothing() {
+        // 文件在没接上的外置盘上 / 解码失败：ffmpeg 跑了，但一处画面都没解出来。
+        // 不能把「没测成」写成「测过、没黑边」（0），那样以后再也不会补测。
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let video_path = dir.path().join("01.mp4");
+        std::fs::write(&video_path, b"not really a video").unwrap();
+        let video = crate::commands::videos::add_local_video(&db, &course.id, video_path, None)
+            .await
+            .unwrap();
+        let gone = PathBuf::from(&video.file_path).with_file_name("unplugged.mp4");
+        ensure_crop(&db, &video.id, gone, &never_cancel()).await;
+        let top: Option<f64> = sqlx::query_scalar("SELECT crop_top FROM videos WHERE id=?")
+            .bind(&video.id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(top, None);
+    }
+
     #[test]
     fn merging_samples_never_crops_more_than_the_least_black_one() {
         // 片头是 4:3 加左右黑边的标题卡，正片其实是满屏（或黑边窄得多）。
@@ -403,28 +434,16 @@ mod tests {
     }
 
     #[test]
-    fn median_ignores_one_sample_poisoned_by_the_intro() {
-        // 真实反馈：正片上下各有 5% 黑边，但片头 3 秒里画面临时铺到边缘，
-        // 第一处采样测成 top=3.7%、bottom=0。取最小值会把正片的上下黑边一起否掉。
-        let intro = CropInsets {
-            top: 0.037,
-            right: 0.05,
+    fn one_full_frame_sample_vetoes_cropping_even_against_two_with_bars() {
+        // 两处是带左右黑边的课件页，一处是满屏的演示：满屏那段的画面不能被切掉，
+        // 所以三处里只要一处是满屏，这条边就不裁（取最小值，不是少数服从多数）。
+        let pillarbox = CropInsets {
+            top: 0.0,
+            right: 0.125,
             bottom: 0.0,
-            left: 0.05,
+            left: 0.125,
         };
-        let body = CropInsets {
-            top: 0.05,
-            right: 0.05,
-            bottom: 0.05,
-            left: 0.05,
-        };
-        assert_eq!(merge_samples(&[intro, body, body]).unwrap(), body);
-
-        // 反过来：只有片头标题卡有黑边、正片两处都满屏时，中位数仍应判为不裁。
-        assert_eq!(
-            merge_samples(&[CropInsets { top: 0.1, right: 0.1, bottom: 0.1, left: 0.1 }, NO_CROP, NO_CROP]),
-            None
-        );
+        assert_eq!(merge_samples(&[pillarbox, pillarbox, NO_CROP]), None);
     }
 
     #[test]
@@ -446,12 +465,15 @@ mod tests {
     }
 
     #[test]
-    fn extra_sample_points_scale_with_length() {
-        // 太短的视频没有中后段可采。
-        assert!(extra_offsets(Some(90_000)).is_empty());
-        assert_eq!(extra_offsets(Some(200_000)), vec![80]);
-        assert_eq!(extra_offsets(Some(3_600_000)), vec![1_440, 2_700]);
-        assert!(extra_offsets(None).is_empty());
+    fn long_enough_videos_are_sampled_in_the_body_not_the_intro() {
+        // 太短的视频没有正片可挑，只看开头那段。
+        assert!(body_offsets(Some(90_000)).is_empty());
+        assert!(body_offsets(Some(120_000)).is_empty());
+        // 2~5 分钟的短课也在正片里采三处（原来只有一处，还和片头那段一起取最小值）。
+        assert_eq!(body_offsets(Some(240_000)), vec![48, 120, 192]);
+        // 三处都远离开头的片头。
+        assert_eq!(body_offsets(Some(3_600_000)), vec![720, 1_800, 2_880]);
+        assert!(body_offsets(None).is_empty());
     }
 
     #[test]
