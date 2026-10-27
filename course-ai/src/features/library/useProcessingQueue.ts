@@ -12,6 +12,9 @@ export type JobLoadState =
   | { status: "ready" }
   | { status: "error"; error: unknown };
 
+/** 怀疑队列项对应的视频已被删除时，先等这么久再向后端核实（给后端写好 failed 状态的时间）。 */
+export const GONE_VERIFY_DELAY_MS = 2_000;
+
 /** 后端对已删除/不存在的视频统一返回 `not found: video <id>`。 */
 function isVideoGone(error: unknown) {
   const text = error instanceof Error ? error.message : String(error);
@@ -91,32 +94,13 @@ export function useProcessingQueue({
         })
         .catch((error: unknown) => {
           if (jobRequestRef.current[videoId] !== requestId) return;
-          // 视频被删除/移入回收站后，队列里可能还留着它的条目：jobs 接口会直接
-          // NotFound。这不是「加载失败请重试」，重试多少次都不会变好，直接从队列清掉。
-          if (isVideoGone(error)) {
-            setQueuedVideos((items) => items.filter((item) => item.id !== videoId));
-            queryClient.setQueryData<Video[]>(qk.processingVideos(), (items) =>
-              items?.filter((item) => item.id !== videoId),
-            );
-            resetJobs(videoId);
-            requestedJobIdsRef.current.delete(videoId);
-            delete jobRequestRef.current[videoId];
-            delete queuedAtRef.current[videoId];
-            setJobLoadStateByVideo((states) => {
-              if (!(videoId in states)) return states;
-              const next = { ...states };
-              delete next[videoId];
-              return next;
-            });
-            return;
-          }
           setJobLoadStateByVideo((states) => ({
             ...states,
             [videoId]: { status: "error", error },
           }));
         });
     },
-    [seedJob, resetJobs, queryClient],
+    [seedJob],
   );
 
   const retryJobsForVideo = useCallback(
@@ -173,30 +157,57 @@ export function useProcessingQueue({
     }
   }, [activeProcessingSuccess, activeProcessingVideos, loadJobsForVideo, queuedVideos]);
 
-  // 视频被删掉后，active 列表不再返回它，但本地队列状态不会自己消失。失败项继续留着，
-  // 用户点「重试」只会一遍遍撞 NotFound。active 已经成功返回且它确实不在里面时清掉。
-  // 刚点开始处理的视频有 10 秒宽限，避免 active 查询还没刷新就被误删。
+  // 视频被删掉后，active 列表不再返回它，但本地队列状态不会自己消失；失败项继续留着，
+  // 用户点「重试」只会一遍遍撞 NotFound。
+  //
+  // 但缓存里的 active 列表不能直接当证据：开始处理、处理失败时都没人刷新它，刚失败的
+  // 视频本来就不在旧缓存里——按旧缓存清理，会把用户还没看到的错误连同「重试」一起吞掉。
+  // 所以只把它当「嫌疑」：等后端把 failed 状态写好，再重新拉一次；新列表里确实没有
+  // （失败的视频只要还在，active 一定会返回它）才清掉。刚点开始处理的有 10 秒宽限。
+  const verifyingGoneRef = useRef<Set<string>>(new Set());
+  const mountedRef = useRef(true);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
   useEffect(() => {
     if (!activeProcessingSuccess) return;
     const activeIds = new Set(activeProcessingVideos.map((video) => video.id));
-    setQueuedVideos((items) => {
-      const now = Date.now();
-      const kept = items.filter((item) => {
-        if (activeIds.has(item.id)) return true;
-        if (now - (queuedAtRef.current[item.id] ?? 0) < 10_000) return true;
-        const failed = Object.values(jobsByVideo[item.id] ?? {}).some(
-          (job) => job.status === "failed",
-        );
-        return !failed;
+    const now = Date.now();
+    const suspects = queuedVideos
+      .filter((item) => {
+        if (activeIds.has(item.id) || verifyingGoneRef.current.has(item.id)) return false;
+        if (now - (queuedAtRef.current[item.id] ?? 0) < 10_000) return false;
+        return Object.values(jobsByVideo[item.id] ?? {}).some((job) => job.status === "failed");
+      })
+      .map((item) => item.id);
+    if (suspects.length === 0) return;
+    // 计时器不随依赖变化清掉：jobsByVideo 随别的视频的进度事件不停变，清了就永远等不到。
+    suspects.forEach((id) => verifyingGoneRef.current.add(id));
+    window.setTimeout(() => {
+      void refetchActiveProcessing().then((result) => {
+        suspects.forEach((id) => verifyingGoneRef.current.delete(id));
+        if (!mountedRef.current || !result.isSuccess) return;
+        const fresh = new Set((result.data ?? []).map((video) => video.id));
+        const gone = new Set(suspects.filter((id) => !fresh.has(id)));
+        if (gone.size === 0) return;
+        setQueuedVideos((items) => items.filter((item) => !gone.has(item.id)));
+        for (const id of gone) {
+          delete queuedAtRef.current[id];
+          resetJobs(id);
+        }
       });
-      if (kept.length === items.length) return items;
-      const keptIds = new Set(kept.map((item) => item.id));
-      for (const item of items) {
-        if (!keptIds.has(item.id)) delete queuedAtRef.current[item.id];
-      }
-      return kept;
-    });
-  }, [activeProcessingSuccess, activeProcessingVideos, jobsByVideo]);
+    }, GONE_VERIFY_DELAY_MS);
+  }, [
+    activeProcessingSuccess,
+    activeProcessingVideos,
+    jobsByVideo,
+    queuedVideos,
+    refetchActiveProcessing,
+    resetJobs,
+  ]);
 
   // 课件抽取、文字识别、章节、摘要、笔记、出题、脑图全部由后端流水线作为可见任务
   // 自动续跑（见 pipeline::run_all / run_ai_followups），用户无需手动点「生成」。
@@ -294,7 +305,16 @@ export function useProcessingQueue({
   }
 
   const dismissProcessing = useMutation({
-    mutationFn: (videoId: string) => ipc.pipeline.dismiss(videoId),
+    mutationFn: async (videoId: string) => {
+      try {
+        await ipc.pipeline.dismiss(videoId);
+      } catch (error) {
+        // 回收站清空后视频行已被彻底删掉，后端分不清这和传错 id，只能报 NotFound。
+        // 对「移除」来说目的已经达到：队列项本来就该消失，不能留一条永远去不掉的红字。
+        if (isVideoGone(error)) return;
+        throw error;
+      }
+    },
     onSuccess: (_data, videoId) => {
       setQueuedVideos((items) => items.filter((item) => item.id !== videoId));
       queryClient.setQueryData<Video[]>(["processing-videos"], (items) =>
