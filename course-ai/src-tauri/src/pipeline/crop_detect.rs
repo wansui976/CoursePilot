@@ -174,16 +174,35 @@ pub fn parse_duration_ms(stderr: &str) -> Option<i64> {
     Some(((hours * 3600 + minutes * 60) as f64 + seconds).round() as i64 * 1000)
 }
 
-/// 合并多处采样：每边取最小值，等于「所有采样都同意这条边是黑的才裁」。
-/// 只会裁得更少，不会更多——过裁才是会吃掉画面的那一侧错误。
-pub fn merge_samples(samples: &[CropInsets]) -> Option<CropInsets> {
-    let mut merged = *samples.first()?;
-    for sample in &samples[1..] {
-        merged.top = merged.top.min(sample.top);
-        merged.right = merged.right.min(sample.right);
-        merged.bottom = merged.bottom.min(sample.bottom);
-        merged.left = merged.left.min(sample.left);
+/// 合并多处采样。
+///
+/// 3 处及以上取每边的**中位数**：片头动画、转场、鼠标划过都可能让某一处测出
+/// 「这条边不是黑的」，取最小值会把另外两处的稳定黑边一并否掉（用户看到的就是
+/// 上下黑边去不掉）。中位数只要求多数采样同意。
+///
+/// 只有两处时仍取最小值：样本太少，中位数会变成平均值，反而可能把正片黑边
+/// 裁进画面；宁可保守。
+fn combine_side(mut values: Vec<f64>) -> f64 {
+    match values.len() {
+        0 => 0.0,
+        1 | 2 => values.into_iter().fold(f64::INFINITY, f64::min),
+        _ => {
+            values.sort_by(|a, b| a.total_cmp(b));
+            values[values.len() / 2]
+        }
     }
+}
+
+pub fn merge_samples(samples: &[CropInsets]) -> Option<CropInsets> {
+    if samples.is_empty() {
+        return None;
+    }
+    let merged = CropInsets {
+        top: combine_side(samples.iter().map(|s| s.top).collect()),
+        right: combine_side(samples.iter().map(|s| s.right).collect()),
+        bottom: combine_side(samples.iter().map(|s| s.bottom).collect()),
+        left: combine_side(samples.iter().map(|s| s.left).collect()),
+    };
     meaningful(merged)
 }
 
@@ -381,6 +400,31 @@ mod tests {
         // 有一处明确「没有黑边」就不该裁——那是反对裁剪的最强证据。
         assert_eq!(merge_samples(&[letterbox, NO_CROP]), None);
         assert_eq!(merge_samples(&[]), None);
+    }
+
+    #[test]
+    fn median_ignores_one_sample_poisoned_by_the_intro() {
+        // 真实反馈：正片上下各有 5% 黑边，但片头 3 秒里画面临时铺到边缘，
+        // 第一处采样测成 top=3.7%、bottom=0。取最小值会把正片的上下黑边一起否掉。
+        let intro = CropInsets {
+            top: 0.037,
+            right: 0.05,
+            bottom: 0.0,
+            left: 0.05,
+        };
+        let body = CropInsets {
+            top: 0.05,
+            right: 0.05,
+            bottom: 0.05,
+            left: 0.05,
+        };
+        assert_eq!(merge_samples(&[intro, body, body]).unwrap(), body);
+
+        // 反过来：只有片头标题卡有黑边、正片两处都满屏时，中位数仍应判为不裁。
+        assert_eq!(
+            merge_samples(&[CropInsets { top: 0.1, right: 0.1, bottom: 0.1, left: 0.1 }, NO_CROP, NO_CROP]),
+            None
+        );
     }
 
     #[test]
