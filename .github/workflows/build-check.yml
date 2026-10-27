@@ -113,6 +113,16 @@ jobs:
       - name: Install frontend dependencies
         working-directory: course-ai
         run: pnpm install --frozen-lockfile
+      - name: Restore whisper-cli build
+        # whisper-cli 由 prepare-macos-sidecars.sh 从源码编（几分钟）；脚本不变就复用上次的产物，
+        # 脚本见到同版本的产物和版本戳会跳过编译。
+        uses: actions/cache@v4
+        with:
+          path: |
+            course-ai/src-tauri/binaries/whisper-cli-*
+            course-ai/src-tauri/binaries/.whisper-cli-*.tag
+          key: whisper-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/scripts/prepare-macos-sidecars.sh') }}
+
       - name: Prepare macOS sidecars
         # 与 macOS 发布用同一个脚本：在 macOS 主机上跑 Rust 测试时 tauri-build 要求 externalBin
         # 存在；同时也让每次推送都验证一遍发布脚本（下载地址失效会在这里先暴露）。

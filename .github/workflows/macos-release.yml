@@ -72,6 +72,16 @@ jobs:
         working-directory: course-ai
         run: pnpm install --frozen-lockfile
 
+      - name: Restore whisper-cli build
+        # whisper-cli 由 prepare-macos-sidecars.sh 从源码编（几分钟）；脚本不变就复用上次的产物，
+        # 脚本见到同版本的产物和版本戳会跳过编译。
+        uses: actions/cache@v4
+        with:
+          path: |
+            course-ai/src-tauri/binaries/whisper-cli-*
+            course-ai/src-tauri/binaries/.whisper-cli-*.tag
+          key: whisper-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/scripts/prepare-macos-sidecars.sh') }}
+
       - name: Prepare macOS sidecars
         run: ./.github/scripts/prepare-macos-sidecars.sh
 

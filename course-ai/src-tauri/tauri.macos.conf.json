@@ -1,6 +1,6 @@
 {
   "bundle": {
-    "externalBin": ["binaries/ffmpeg", "binaries/yt-dlp"],
+    "externalBin": ["binaries/ffmpeg", "binaries/yt-dlp", "binaries/whisper-cli"],
     "macOS": {
       "hardenedRuntime": false,
       "minimumSystemVersion": "14.0",
