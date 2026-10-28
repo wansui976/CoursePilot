@@ -21,7 +21,8 @@ function boldAndTimestamps(text: string, onSeek: Seek, key: string): ReactNode[]
           key={`${key}-b-${i}`}
           className="font-semibold text-[var(--text-strong)]"
         >
-          {part.slice(2, -2)}
+          {/* 加粗里也认时间戳：「**出现在 [11:04]**」这种强调句恰恰最常带时间点。 */}
+          {withClickableTimestamps(part.slice(2, -2), onSeek, `${key}-b${i}`)}
         </strong>,
       );
     } else {

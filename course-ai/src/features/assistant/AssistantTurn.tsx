@@ -23,6 +23,7 @@ import {
   checkpointSummary,
   streamingLabelFor,
   suggestionsFor,
+  bracketBareTimestamps,
 } from "./turnModel";
 
 /**
@@ -47,9 +48,10 @@ const MemoAnswer = memo(function MemoAnswer({
   turn: Turn;
   onSeek: (turn: Turn, ms: number) => void;
 }) {
+  const text = turn.context?.video_id ? bracketBareTimestamps(answer) : answer;
   return (
     <div className="break-words text-sm leading-relaxed text-[var(--text-normal)]">
-      {renderMarkdown(answer, (ms) => onSeek(turn, ms))}
+      {renderMarkdown(text, (ms) => onSeek(turn, ms))}
     </div>
   );
 });
@@ -222,34 +224,36 @@ export function AssistantTurn({
         </div>
       )}
 
-      {/* 工具链摆在回答前面：它解释了这段回答是怎么来的，
-          也让「一轮里悄悄调了三次搜索」这种事看得见。 */}
-      <AssistantToolChips tools={turn.tools} toolRuns={turn.toolRuns} />
+      {/* 工具链和思考过程合成一行摆在回答前面：它们解释了这段回答是怎么来的，
+          但都是折叠的过程信息，各占一行太占地方。展开的那个自己占满一行。 */}
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-0.5">
+        <AssistantToolChips tools={turn.tools} toolRuns={turn.toolRuns} />
 
-      {/* 推理模型的思考。它比正文先到，所以不能塞在「有答案才渲染」的分支里——
-          那样恰好在最想看它的那段时间（还没开始作答）什么都不显示。
-          默认折叠：它是过程不是结论，摊开会把真正的回答挤下去。 */}
-      {turn.reasoning && (
-        <details className="group/think">
-          <summary className="-ml-1 flex w-fit cursor-pointer select-none items-center gap-1 rounded px-1 py-0.5 ca-t-2xs text-[var(--text-faint)] transition-colors hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none">
-            <ChevronRight
-              aria-hidden="true"
-              className="h-3 w-3 flex-none transition-transform group-open/think:rotate-90 motion-reduce:transition-none"
-            />
-            {turn.pending ? (
-              <span className="inline-flex items-center gap-1.5">
-                <LoaderCircle className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                {t("assistant.thinking")}
-              </span>
-            ) : (
-              t("assistant.thinking")
-            )}
-          </summary>
-          <div className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap border-l-2 border-[var(--border-faint)] pl-2 text-xs leading-relaxed text-[var(--text-muted)]">
-            {turn.reasoning}
-          </div>
-        </details>
-      )}
+        {/* 推理模型的思考。它比正文先到，所以不能塞在「有答案才渲染」的分支里——
+            那样恰好在最想看它的那段时间（还没开始作答）什么都不显示。
+            默认折叠：它是过程不是结论，摊开会把真正的回答挤下去。 */}
+        {turn.reasoning && (
+          <details className="group/think open:basis-full">
+            <summary className="-ml-1 flex w-fit cursor-pointer select-none items-center gap-1 rounded px-1 py-0.5 ca-t-2xs text-[var(--text-faint)] transition-colors hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none">
+              <ChevronRight
+                aria-hidden="true"
+                className="h-3 w-3 flex-none transition-transform group-open/think:rotate-90 motion-reduce:transition-none"
+              />
+              {turn.pending ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <LoaderCircle className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                  {t("assistant.thinking")}
+                </span>
+              ) : (
+                t("assistant.thinking")
+              )}
+            </summary>
+            <div className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap border-l-2 border-[var(--border-faint)] pl-2 text-xs leading-relaxed text-[var(--text-muted)]">
+              {turn.reasoning}
+            </div>
+          </details>
+        )}
+      </div>
 
       {turn.answer && (
         /* 回答不套气泡，整幅铺开。
@@ -259,13 +263,16 @@ export function AssistantTurn({
            已经把「谁在说」讲清楚了。 */
         <div className="group">
           <MemoAnswer answer={turn.answer} turn={turn} onSeek={onSeek} />
-          {/* 每条回答底下常驻一排按钮，翻起来满屏都是灰图标。桌面端悬停或键盘聚焦才浮出来，
-              但位置一直留着——不留的话鼠标一进来整段就往上跳。触屏没有悬停，一直显示。 */}
+          {/* 每条回答底下常驻一排按钮，翻起来满屏都是灰图标。桌面端旧回答悬停或键盘聚焦才浮出来，
+              但位置一直留着——不留的话鼠标一进来整段就往上跳。最新一轮一直显示：复制、存笔记、
+              重新回答几乎都是冲着刚拿到的回答去的，藏起来等于让人去猜。触屏没有悬停，一直显示。 */}
           <div
             className={`-ml-1.5 mt-0.5 flex items-center gap-0.5 ${
               mobile
                 ? "h-11"
-                : "h-7 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none"
+                : isLast
+                  ? "h-7"
+                  : "h-7 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none"
             }`}
           >
             <Button

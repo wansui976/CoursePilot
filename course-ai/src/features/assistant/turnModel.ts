@@ -124,3 +124,17 @@ export function suggestionsFor(context: AssistantContext, t: TFunction) {
     { label: t("assistant.suggestDarkMode"), prompt: t("assistant.suggestDarkModePrompt") },
   ];
 }
+
+/**
+ * 把回答里裸写的时间点（12:34、1:02:03）补成方括号形式，交给时间戳渲染变成可点的跳转。
+ *
+ * 系统提示已要求模型写成 [12:34]，但模型并不总照做；裸写的时间点用户看得见却点不了，
+ * 比全都点不了还别扭。秒位必须是两位（排除 3:2 这种比分/比例），已在方括号里的不动。
+ * 只在这一轮有视频上下文时调用：没有视频，时间点无处可跳。
+ */
+export function bracketBareTimestamps(text: string): string {
+  return text.replace(
+    /(^|[^[\d:])(\d{1,2}:[0-5]\d(?::[0-5]\d)?)(?![\]\d:])/g,
+    (_match, before: string, clock: string) => `${before}[${clock}]`,
+  );
+}

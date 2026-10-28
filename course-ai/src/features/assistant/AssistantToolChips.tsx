@@ -3,7 +3,7 @@ import {
   Check,
   ChevronRight,
   CircleAlert,
-  CircleHelp,
+  Circle,
   CircleStop,
   LoaderCircle,
 } from "lucide-react";
@@ -67,8 +67,9 @@ function statusIcon(status: AssistantToolRunStatus) {
       return <CircleAlert className="h-3 w-3" />;
     case "canceled":
       return <CircleStop className="h-3 w-3" />;
+    // 重启后恢复的旧轮次大多是这个状态：调过、但结果没记下来。用问号的话一排看着像帮助按钮。
     case "unknown":
-      return <CircleHelp className="h-3 w-3" />;
+      return <Circle className="h-2 w-2" />;
   }
 }
 
@@ -91,14 +92,15 @@ export function AssistantToolChips({
   const showList = !multi || expanded;
 
   return (
-    <div data-testid="tool-chips" className="ca-t-2xs">
+    // 和「思考过程」排在同一行：不许被挤得截断，放不下就整个换到下一行。
+    <div data-testid="tool-chips" className="ca-t-2xs max-w-full flex-none">
       {multi && (
         <button
           type="button"
           aria-expanded={showList}
           aria-controls={listId}
           onClick={() => setExpanded((value) => !value)}
-          className="-ml-1 flex max-w-full items-center gap-1 rounded px-1 py-0.5 text-left text-[var(--text-faint)] transition-colors hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none"
+          className="-ml-1 inline-flex max-w-[calc(100%+0.25rem)] items-center gap-1 rounded px-1 py-0.5 text-left text-[var(--text-faint)] transition-colors hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none"
         >
           <ChevronRight
             aria-hidden="true"
