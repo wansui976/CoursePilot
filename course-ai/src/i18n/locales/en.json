@@ -265,7 +265,9 @@
     "deleteSingleConfirm": "Permanently delete \"{{title}}\"?\nThis cannot be undone.",
     "deleteConfirmTitle": "Delete permanently",
     "clearConfirmTitle": "Empty recycle bin",
-    "clear": "Empty"
+    "clear": "Empty",
+    "count_one": "{{count}} video",
+    "count_other": "{{count}} videos"
   },
   "review": {
     "title": "Review",

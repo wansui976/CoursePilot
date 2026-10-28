@@ -265,7 +265,8 @@
     "deleteSingleConfirm": "彻底删除「{{title}}」？\n此操作无法撤销。",
     "deleteConfirmTitle": "彻底删除",
     "clearConfirmTitle": "清空回收站",
-    "clear": "清空"
+    "clear": "清空",
+    "count": "{{count}} 个视频"
   },
   "review": {
     "title": "复习",

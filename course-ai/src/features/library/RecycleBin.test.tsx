@@ -181,8 +181,9 @@ describe("RecycleBin 分组与批量操作", () => {
     const row = checkbox.closest("li");
     const actions = row?.querySelector("[data-recycle-row-actions]");
 
-    expect(row).toHaveClass("grid-cols-[44px_71px_minmax(0,1fr)]", "sm:flex");
-    expect(actions).toHaveClass("col-span-3", "sm:contents");
+    // 窄屏允许换行，操作按钮整行铺开、落到内容下面；宽屏回到同一行。
+    expect(row).toHaveClass("ca-row", "flex-wrap", "sm:flex-nowrap");
+    expect(actions).toHaveClass("w-full", "sm:w-auto");
   });
 });
 

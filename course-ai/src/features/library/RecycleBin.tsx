@@ -1,7 +1,7 @@
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { qk } from "@/lib/queryKeys";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RotateCcw, Trash2 } from "lucide-react";
+import { FolderOpen, RotateCcw, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
@@ -9,6 +9,7 @@ import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { VideoCover } from "./VideoCover";
 import { EmptyState } from "@/ui/empty-state";
+import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { ViewHeader } from "@/ui/view-header";
 import type { TrashedVideo } from "@/lib/types";
@@ -154,14 +155,18 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
     purgeMany.error ??
     purgeAll.error;
 
+  // 外观与课程列表视图的行（.ca-row / .row-thumb）同一套：同样的缩略图尺寸、标题字号、
+  // 分隔线与悬停浮起。原来这里自成一派——居中窄栏、更大的缩略图、普通字重的标题，
+  // 和旁边的课程列表、处理队列放在一起像是另一个应用。
+  // 手机宽度下操作按钮换到第二行，否则标题会被挤得只剩几个字。
   function renderRow(item: TrashedVideo) {
     const left = daysLeft(item.expires_at);
     return (
       <li
         key={item.id}
-        className="grid grid-cols-[44px_71px_minmax(0,1fr)] items-center gap-x-2 gap-y-2 rounded-md px-3 py-2 transition hover:bg-[var(--surface-card-hover)] sm:flex sm:gap-3"
+        className="ca-row flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-2 sm:flex-nowrap sm:px-3"
       >
-        <label className="inline-flex h-11 w-11 flex-none items-center justify-center">
+        <label className="inline-flex h-11 w-8 flex-none cursor-pointer items-center justify-center">
           <input
             type="checkbox"
             aria-label={t("recycleBin.selectItem", { title: item.title })}
@@ -170,17 +175,14 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
             className="h-4 w-4 accent-[var(--accent,#888)]"
           />
         </label>
-        <span className="relative h-10 w-[71px] flex-none overflow-hidden rounded-md bg-[var(--surface-card-hover)]">
-          <VideoCover
-            videoId={item.id}
-            className="absolute inset-0 h-full w-full"
-          />
+        <span className="row-thumb">
+          <VideoCover videoId={item.id} className="absolute inset-0 h-full w-full" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm text-[var(--text-strong)]">
+          <div className="truncate text-[13.5px] font-[550] text-[var(--text-1)]">
             {displayTitle(item.title)}
           </div>
-          <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+          <div className="mt-0.5 flex items-center gap-2 text-xs tabular-nums text-[var(--text-muted)]">
             {item.duration_ms != null && <span>{formatMs(item.duration_ms)}</span>}
             <span
               className={
@@ -195,29 +197,33 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
         </div>
         <div
           data-recycle-row-actions
-          className="col-span-3 flex items-center justify-end gap-2 border-t border-[var(--border-faint)] pt-2 sm:contents"
+          className="flex w-full flex-none items-center justify-end gap-1 pl-11 sm:w-auto sm:pl-0"
         >
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => restore.mutate(item.id)}
             disabled={restore.isPending || busy}
             title={t("recycleBin.restoreTitle")}
             aria-label={t("recycleBin.restoreItem", { title: item.title })}
-            className="ca-touch-44 inline-flex items-center justify-center gap-1 rounded-md border border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
+            className="ca-touch-44 gap-1"
           >
             <RotateCcw className="h-3.5 w-3.5" />
             {t("recycleBin.restore")}
-          </button>
-          <button
+          </Button>
+          {/* 每一行都挂一个红色按钮，整页红成一片；平时灰色，悬停才变红（删除前还有确认）。 */}
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => void confirmPurge(item)}
             disabled={busy}
             title={t("recycleBin.permanentDeleteTitle")}
             aria-label={t("recycleBin.deleteItem", { title: item.title })}
-            // 每一行都挂一个红色按钮，整页红成一片；平时灰色，悬停才变红（删除前还有确认）。
-            className="ca-touch-44 inline-flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)] disabled:opacity-50"
+            className="ca-touch-44 gap-1 text-[var(--text-muted)] hover:text-[var(--status-err)]"
           >
             <Trash2 className="h-3.5 w-3.5" />
             {t("recycleBin.permanentDelete")}
-          </button>
+          </Button>
         </div>
       </li>
     );
@@ -230,9 +236,10 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
     const allSelected = selectedCount === group.items.length;
     return (
       <section key={group.courseId} aria-label={t("recycleBin.courseGroup", { name: group.courseName })}>
-        <div className="mb-1 flex items-center gap-2 px-3 sm:gap-3">
-          {/* 与行内勾选框同一列：44px 的触控区给 label，框本身仍是 16px。 */}
-          <label className="inline-flex h-11 w-11 flex-none items-center justify-center">
+        {/* 分区标题与处理队列的「正在下载」同款：小图标 + 次要色小字，不和条目抢视线。
+            整组勾选框与行内勾选框同一列。 */}
+        <div className="mb-1 flex items-center gap-3 px-2 sm:px-3">
+          <label className="inline-flex h-8 w-8 flex-none cursor-pointer items-center justify-center">
             <input
               type="checkbox"
               aria-label={t("recycleBin.selectAllInCourse", { name: group.courseName })}
@@ -244,11 +251,14 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
               className="h-4 w-4 accent-[var(--accent,#888)]"
             />
           </label>
-          <h3 className="text-sm font-semibold text-[var(--text-strong)]">
-            {group.courseName} ({group.items.length})
-          </h3>
+          <h2 className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-[var(--text-muted)]">
+            <FolderOpen className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+            <span className="truncate">
+              {group.courseName} ({group.items.length})
+            </span>
+          </h2>
         </div>
-        <ul className="divide-y divide-[var(--border-faint)] border-y border-[var(--border-faint)]">{group.items.map(renderRow)}</ul>
+        <ul>{group.items.map(renderRow)}</ul>
       </section>
     );
   }
@@ -261,24 +271,33 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
         onBack={onClose}
         actions={
           items.length > 0 ? (
-            <button
-              onClick={() => void confirmPurgeAll()}
-              disabled={busy}
-              title={t("recycleBin.clearAll")}
-              aria-label={t("recycleBin.clearAll")}
-              className="ca-touch-44 inline-flex flex-none items-center justify-center gap-1 rounded-md px-2 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50 min-[400px]:px-3"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              <span className="sr-only min-[400px]:not-sr-only">
-                {t("recycleBin.clearAll")}
+            // 与处理队列的「全部取消」同款：带边框的小按钮 + 右侧计数。
+            <div className="flex flex-none items-center gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void confirmPurgeAll()}
+                disabled={busy}
+                title={t("recycleBin.clearAll")}
+                aria-label={t("recycleBin.clearAll")}
+                className="ca-touch-44 gap-1 text-[var(--status-err)]"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span className="sr-only min-[400px]:not-sr-only">
+                  {t("recycleBin.clearAll")}
+                </span>
+              </Button>
+              <span className="hidden text-xs tabular-nums text-[var(--text-muted)] min-[400px]:inline">
+                {t("recycleBin.count", { count: items.length })}
               </span>
-            </button>
+            </div>
           ) : undefined
         }
       />
 
+      {/* 和处理队列同样的版心：左右 28px 铺满，左缘与标题对齐，不再居中缩成一条窄栏。 */}
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-7 sm:py-6">
-        <div className="mx-auto max-w-3xl">
+        <div>
           {opError && <ErrorNote error={opError} className="mb-4" />}
           {isLoading ? (
             <p role="status" className="p-4 text-sm text-[var(--text-faint)]">
@@ -305,22 +324,26 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
                 {t("recycleBin.selected", { count: selected.size })}
               </span>
               <div className="grid w-full grid-cols-1 gap-2 min-[400px]:ml-auto min-[400px]:flex min-[400px]:w-auto min-[400px]:items-center">
-                <button
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => restoreMany.mutate([...selected])}
                   disabled={busy}
-                  className="ca-touch-44 inline-flex items-center justify-center gap-1 rounded-md border border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
+                  className="ca-touch-44 gap-1"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                   {t("recycleBin.restoreSelected")}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => void confirmPurgeSelected()}
                   disabled={busy}
-                  className="ca-touch-44 inline-flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50"
+                  className="ca-touch-44 gap-1 text-[var(--status-err)]"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   {t("recycleBin.deleteSelected")}
-                </button>
+                </Button>
               </div>
             </div>
           )}
