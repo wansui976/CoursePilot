@@ -393,6 +393,10 @@ export function Home() {
     go({ view: "library" });
   }
 
+  function openSettingsCategory(category: string) {
+    runAfterWorkspaceTransient(() => go({ view: "settings", settingsCategory: category }));
+  }
+
   function openMainView(view: "settings" | "recycle" | "dev" | "dashboard") {
     runAfterWorkspaceTransient(() => go({ view }));
   }
@@ -542,6 +546,7 @@ export function Home() {
     openVideo,
     openQueuedVideo,
     openMainView,
+    openSettingsCategory,
     closeToLibrary: closeMainOverlays,
     resumeStudy,
     reviewJump,

@@ -133,3 +133,50 @@ export function humanizeError(error: unknown, language?: string): string {
   }
   return raw;
 }
+
+/** 报错能靠改设置解决时，指向哪个设置分类。 */
+export type ErrorFix = "llm" | "asr";
+
+/**
+ * 判断这条报错的「下一步」是不是去改设置，以及去哪一页。
+ * 语音识别的密钥错误里也带着「API Key」，所以先认语音识别、再认大模型。
+ * 网络、超时这类不是配置问题的，一律不给（给了只会让人白跑一趟设置页）。
+ */
+export function errorFixFor(error: unknown): ErrorFix | null {
+  const raw = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const s = raw.toLowerCase();
+  if (!s.trim()) return null;
+  const configLike =
+    s.includes("api key") ||
+    s.includes("apikey") ||
+    s.includes("未配置") ||
+    s.includes("尚未配置") ||
+    s.includes("鉴权") ||
+    s.includes("unauthorized") ||
+    hasStatus(s, 401) ||
+    s.includes("no profile") ||
+    s.includes("model");
+  if (!configLike) return null;
+  if (
+    s.includes("语音识别") ||
+    s.includes("百炼") ||
+    s.includes("dashscope") ||
+    s.includes("volcengine") ||
+    s.includes("火山") ||
+    s.includes("whisper")
+  ) {
+    return "asr";
+  }
+  if (
+    s.includes("大模型") ||
+    s.includes("llm") ||
+    s.includes("profile") ||
+    s.includes("api key") ||
+    s.includes("apikey") ||
+    s.includes("unauthorized") ||
+    hasStatus(s, 401)
+  ) {
+    return "llm";
+  }
+  return null;
+}

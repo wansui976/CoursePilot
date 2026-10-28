@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, ThumbsUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ErrorNote } from "@/ui/ErrorNote";
+import { PanelEmptyState } from "@/ui/empty-state";
 import { TextSkeleton } from "@/ui/skeleton";
 import { buildReplyTree, groupComments, splitEmoteText, type ReplyNode } from "@/lib/comments";
 import { ipc } from "@/lib/ipc";
@@ -235,9 +236,10 @@ export function CommentsPanel({ videoId }: { videoId: string }) {
         ) : error ? (
           <ErrorNote error={error} />
         ) : comments.length === 0 ? (
-          <p role="status" className="py-6 text-center text-xs leading-relaxed text-[var(--text-faint)]">
-            {t("commentsPanel.empty")}
-          </p>
+          <PanelEmptyState
+            title={t("commentsPanel.emptyTitle")}
+            description={t("commentsPanel.emptyDescription")}
+          />
         ) : (
           <>
             <p className="mb-3 text-xs text-[var(--text-faint)] tabular-nums">

@@ -39,6 +39,8 @@ export interface Shell {
   openVideo: (videoId: string) => void;
   openQueuedVideo: (video: Video) => void;
   openMainView: (view: "settings" | "recycle" | "dev" | "dashboard") => void;
+  /** 直接打开设置里的某个分类（报错旁的「去设置」）。 */
+  openSettingsCategory: (category: string) => void;
   closeToLibrary: () => void;
   resumeStudy: (courseId: string, videoId: string, positionSec: number) => void;
   reviewJump: (card: DueCard) => void;
@@ -56,6 +58,11 @@ export interface Shell {
 }
 
 export const ShellContext = createContext<Shell | null>(null);
+
+/** 不在外壳里（单测、独立浮层）时返回 null，调用方据此隐藏依赖导航的入口。 */
+export function useOptionalShell(): Shell | null {
+  return useContext(ShellContext);
+}
 
 export function useShell(): Shell {
   const shell = useContext(ShellContext);

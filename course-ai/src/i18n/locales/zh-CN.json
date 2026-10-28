@@ -215,13 +215,14 @@
   "commentsPanel": {
     "title": "评论区",
     "loading": "正在抓取全部评论（含楼中楼），评论越多越慢，请稍等…",
-    "empty": "这里还没有评论。评论区仅 B 站视频提供，打开视频后会自动抓取。",
     "summary": "共 {{total}} 条（含回复 {{replies}} 条）",
     "replies": "{{count}} 条回复",
     "expandReplies": "展开 {{count}} 条回复",
     "collapseReplies": "收起回复",
     "replyTo": "回复 @{{name}}",
-    "anonymous": "匿名"
+    "anonymous": "匿名",
+    "emptyTitle": "这里还没有评论",
+    "emptyDescription": "评论区只有 B 站视频才有，打开视频后会自动抓取。"
   },
   "courseList": {
     "newCourse": "新课程",
@@ -1509,7 +1510,9 @@
     "ffmpeg": "缺少 ffmpeg 或音频处理失败。",
     "download": "视频下载失败：请检查链接是否有效，或稍后重试。",
     "downloadInterrupted": "视频流在下载中途被服务器断开（已自动降低清晰度重试）。链接本身没有问题，请稍后重试，或换低一档清晰度。",
-    "unsupportedMediaFormat": "这台设备打不开这种格式的视频（如 MKV、WebM），导进来也没法播放和处理。请先转成 MP4 再导入。"
+    "unsupportedMediaFormat": "这台设备打不开这种格式的视频（如 MKV、WebM），导进来也没法播放和处理。请先转成 MP4 再导入。",
+    "fixLlm": "去配置大模型",
+    "fixAsr": "去配置语音识别"
   },
   "common": {
     "cancel": "取消",

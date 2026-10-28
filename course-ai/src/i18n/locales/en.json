@@ -215,13 +215,14 @@
   "commentsPanel": {
     "title": "Comments",
     "loading": "Fetching all comments (including nested replies); popular videos take a while…",
-    "empty": "No comments here yet. Comments are available for Bilibili videos and are fetched automatically.",
     "summary": "{{total}} comments ({{replies}} replies)",
     "replies": "{{count}} replies",
     "expandReplies": "Show {{count}} more replies",
     "collapseReplies": "Collapse replies",
     "replyTo": "replying to @{{name}}",
-    "anonymous": "Anonymous"
+    "anonymous": "Anonymous",
+    "emptyTitle": "No comments yet",
+    "emptyDescription": "Comments are only available for Bilibili videos and are fetched automatically."
   },
   "courseList": {
     "newCourse": "New Course",
@@ -1516,7 +1517,9 @@
     "ffmpeg": "ffmpeg is missing or audio processing failed.",
     "download": "Video download failed. Check the link or try again later.",
     "downloadInterrupted": "The server cut off the video stream mid-download (already retried at lower quality). The link is fine; try again later or pick a lower quality.",
-    "unsupportedMediaFormat": "This device can't open this video format (e.g. MKV, WebM), so it couldn't be played or processed. Convert it to MP4 and import again."
+    "unsupportedMediaFormat": "This device can't open this video format (e.g. MKV, WebM), so it couldn't be played or processed. Convert it to MP4 and import again.",
+    "fixLlm": "Set up model",
+    "fixAsr": "Set up speech recognition"
   },
   "common": {
     "cancel": "Cancel",

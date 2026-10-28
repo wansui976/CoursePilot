@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import i18n from "@/i18n";
-import { humanizeError } from "./errors";
+import { errorFixFor, humanizeError } from "./errors";
 
 describe("humanizeError", () => {
   beforeEach(async () => {
@@ -117,5 +117,25 @@ describe("humanizeError", () => {
     );
     expect(humanizeError(null, "en")).toBe("Something went wrong.");
     expect(humanizeError("some weird thing", "en")).toBe("some weird thing");
+  });
+});
+
+describe("errorFixFor", () => {
+  it("大模型未配置 / 密钥无效 → 大模型设置", () => {
+    expect(errorFixFor("尚未配置可用的大模型（设置 → 大模型）")).toBe("llm");
+    expect(errorFixFor("Profile「A」未设置 API Key")).toBe("llm");
+    expect(errorFixFor(new Error("HTTP 401 Unauthorized"))).toBe("llm");
+  });
+
+  it("语音识别的密钥错误 → 语音识别设置（即使也带着 API Key）", () => {
+    expect(errorFixFor("缺少阿里云百炼 API Key：请在设置 → 语音识别里填写并保存")).toBe("asr");
+    expect(errorFixFor("invalid whisper model")).toBe("asr");
+  });
+
+  it("网络、超时这类不是配置问题的不给", () => {
+    expect(errorFixFor("network error: connect refused")).toBeNull();
+    expect(errorFixFor("大模型请求超时")).toBeNull();
+    expect(errorFixFor("not found: video a4028f3c-401b")).toBeNull();
+    expect(errorFixFor(null)).toBeNull();
   });
 });
