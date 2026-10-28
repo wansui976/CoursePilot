@@ -27,3 +27,47 @@ export function matchSlashCommands(commands: SlashCommand[], query: string): Sla
       command.aliases.some((alias) => alias.startsWith(q)),
   );
 }
+
+type SlashCommandSpec = Omit<SlashCommand, "label" | "description">;
+
+/**
+ * 面板里实际可用的指令。提问类只在有视频时出现（问的都是「这个视频」），
+ * 「复制对话」要等至少有一轮完整问答。
+ */
+export function buildSlashCommands(
+  t: (key: string) => string,
+  {
+    hasVideo,
+    hasFinishedTurns,
+    onNewConversation,
+    onCopyConversation,
+  }: {
+    hasVideo: boolean;
+    hasFinishedTurns: boolean;
+    onNewConversation: () => void;
+    onCopyConversation: () => void;
+  },
+): SlashCommand[] {
+  const specs: SlashCommandSpec[] = [
+    ...(hasVideo
+      ? [
+          { id: "summary", keyword: "总结", aliases: ["summary", "zj"], prompt: t("assistant.slash.summaryPrompt") },
+          { id: "keypoints", keyword: "重点", aliases: ["key", "zd"], prompt: t("assistant.slash.keypointsPrompt") },
+          { id: "quiz", keyword: "出题", aliases: ["quiz", "ct"], prompt: t("assistant.slash.quizPrompt") },
+          { id: "explain", keyword: "解释", aliases: ["explain", "js"], prompt: t("assistant.slash.explainPrompt") },
+          { id: "source", keyword: "出处", aliases: ["source", "cc"], prompt: t("assistant.slash.sourcePrompt") },
+          { id: "note", keyword: "笔记", aliases: ["note", "bj"], prompt: t("assistant.slash.notePrompt") },
+        ]
+      : []),
+    { id: "progress", keyword: "进度", aliases: ["progress", "jd"], prompt: t("assistant.slash.progressPrompt") },
+    { id: "new", keyword: "新对话", aliases: ["new", "xdh"], action: onNewConversation },
+    ...(hasFinishedTurns
+      ? [{ id: "copy", keyword: "复制对话", aliases: ["copy", "fz"], action: onCopyConversation }]
+      : []),
+  ];
+  return specs.map((command) => ({
+    ...command,
+    label: t(`assistant.slash.${command.id}`),
+    description: t(`assistant.slash.${command.id}Hint`),
+  }));
+}

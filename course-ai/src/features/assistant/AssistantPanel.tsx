@@ -3,50 +3,28 @@ import {
   useEffect,
   useRef,
   useState,
-  type KeyboardEvent,
   type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { qk } from "@/lib/queryKeys";
-import type { TFunction } from "i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
-import {
-  ChevronLeft,
-  ChevronRight,
-  ClipboardCopy,
-  GripHorizontal,
-  History as HistoryIcon,
-  LoaderCircle,
-  MessageSquarePlus,
-  MessageSquareText,
-  MoreHorizontal,
-  X,
-} from "lucide-react";
-import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
-import { Menu, MenuItem } from "@/ui/menu";
 import type { AssistantActionOutcome } from "./AssistantActionCard";
 import {
   boundTrustedAssistantHistory,
   capAssistantText,
   historyBeforeLastQuestion,
   MAX_ASSISTANT_ANSWER_CHARS,
-  MAX_ASSISTANT_REASONING_CHARS,
   MAX_ASSISTANT_TURNS,
   reconcileAssistantToolRuns,
   writeAssistantSession,
   type AssistantSession,
-  type AssistantToolRun,
-  type AssistantToolRunStatus,
 } from "@/lib/assistantSession";
 import {
-  appendRecentAssistantQuestion,
-  createAssistantConversation,
   MAX_ASSISTANT_CONVERSATIONS,
   readAssistantConversation,
   readAssistantConversations,
-  readRecentAssistantQuestions,
   saveAssistantConversation,
   tryCreateAssistantConversation,
   tryDeleteAssistantConversation,
@@ -66,11 +44,7 @@ import { ipc } from "@/lib/ipc";
 import { notesCoordinator } from "@/lib/notesCoordinator";
 import { isMobile, isTablet } from "@/lib/platform";
 import { formatMs } from "@/lib/time";
-import {
-  MAX_PANEL_WIDTH,
-  MIN_PANEL_WIDTH,
-  useAssistantUi,
-} from "@/stores/assistant";
+import { useAssistantUi } from "@/stores/assistant";
 import { useInlineAsk } from "@/stores/inlineAsk";
 import { useTheme } from "@/stores/theme";
 import { usePanelWindowing } from "./usePanelWindowing";
@@ -87,15 +61,26 @@ import {
 import {
   AssistantComposer,
   type ScopeChoice,
-  type ScopeOption,
 } from "./AssistantComposer";
-import type { SlashCommand } from "./slashCommands";
+import { buildSlashCommands, type SlashCommand } from "./slashCommands";
+import { createTurnStream, MAX_STREAMED_TOOLS } from "./assistantStream";
+import { useRecentQuestions } from "./useRecentQuestions";
+import { AssistantHeader, AssistantLauncher, PanelResizeHandle } from "./AssistantChrome";
+import {
+  contextLabel,
+  EMPTY_ASSISTANT_SESSION,
+  focusableElements,
+  initialAssistantConversation,
+  isNearScrollEnd,
+  normalizedStopReason,
+  resolveScope,
+  scopedContext,
+  scopeOptionsFor,
+} from "./assistantPanelModel";
 import type {
-  AgentStopReason,
   AssistantAction,
   AssistantContext,
   AssistantMessage,
-  AssistantReply,
 } from "@/lib/types";
 
 /**
@@ -105,135 +90,10 @@ import type {
  * 改成底部抽屉——两种外壳共用同一套状态和消息流，切换的只是容器。
  */
 
-const SCROLL_FOLLOW_THRESHOLD = 32;
 const SESSION_PERSIST_DELAY_MS = 250;
 // 只让用户操作确定能写进会话快照的轮次；否则第 21-50 轮的旧确认卡仍可见，
 // 但 serializer 会裁掉它的 executing checkpoint。
 const MAX_RENDERED_TURNS = MAX_ASSISTANT_TURNS;
-const MAX_STREAMED_TOOLS = 50;
-const FOCUSABLE_SELECTOR =
-  'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), summary, [href], [tabindex]:not([tabindex="-1"])';
-
-function appendStreamChunk(
-  chunks: string[],
-  currentChars: number,
-  delta: string,
-  maxChars: number,
-) {
-  const kept = delta.slice(0, Math.max(0, maxChars - currentChars));
-  if (!kept) return currentChars;
-  chunks.push(kept);
-  // 后台标签页可能长时间不执行动画帧；偶尔合并小片段，避免数组对象本身无限增长。
-  if (chunks.length >= 256) chunks.splice(0, chunks.length, chunks.join(""));
-  return currentChars + kept.length;
-}
-
-/** 呼出快捷键的显示写法。Mac 用 ⌘，其余平台用 Ctrl。 */
-function toggleShortcutLabel() {
-  if (typeof navigator === "undefined") return "Ctrl+J";
-  return /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent) ? "⌘J" : "Ctrl+J";
-}
-
-
-function recordToolStarted(
-  toolRuns: AssistantToolRun[],
-  callId: string,
-  name: string,
-): AssistantToolRun[] {
-  const existing = toolRuns.find((run) => run.callId === callId);
-  if (existing) return toolRuns;
-  const next: AssistantToolRun = { callId, name, status: "running" };
-  return [...toolRuns, next].slice(-MAX_STREAMED_TOOLS);
-}
-
-function recordToolFinished(
-  toolRuns: AssistantToolRun[],
-  callId: string,
-  name: string,
-  status: AssistantToolRunStatus,
-): AssistantToolRun[] {
-  const index = toolRuns.findIndex((run) => run.callId === callId);
-  if (index < 0) {
-    const next: AssistantToolRun = { callId, name, status };
-    return [...toolRuns, next].slice(-MAX_STREAMED_TOOLS);
-  }
-  // 重复或迟到事件不能把一个已经确定的终态改回另一种状态。
-  if (
-    toolRuns[index].status !== "running" &&
-    !(toolRuns[index].status === "unknown" && status !== "unknown")
-  ) {
-    return toolRuns;
-  }
-  return toolRuns.map((run, runIndex) =>
-    runIndex === index ? { ...run, name, status } : run,
-  );
-}
-
-function normalizeFinishedToolStatus(
-  status: unknown,
-  canceled: boolean,
-): AssistantToolRunStatus {
-  return status === "completed" || status === "failed" || status === "canceled"
-    ? status
-    : canceled
-      ? "canceled"
-      : "unknown";
-}
-
-const EMPTY_ASSISTANT_SESSION: AssistantSession = { turns: [], history: [], draft: "" };
-
-function initialAssistantConversation() {
-  let conversations = readAssistantConversations();
-  if (!conversations.activeId) conversations = createAssistantConversation();
-  const activeId = conversations.activeId;
-  const session = activeId
-    ? (readAssistantConversation(activeId)?.session ?? EMPTY_ASSISTANT_SESSION)
-    : EMPTY_ASSISTANT_SESSION;
-  return { conversations, session };
-}
-
-function normalizedStopReason(reply: AssistantReply): AgentStopReason {
-  if (reply.stop_reason) return reply.stop_reason;
-  if (reply.canceled) return "canceled";
-  if (reply.hit_turn_limit) return "limit_reached";
-  return "completed";
-}
-
-function formatPosition(ms: number) {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(seconds / 60);
-  return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-}
-
-function isNearScrollEnd(box: HTMLElement) {
-  return box.scrollHeight - box.scrollTop - box.clientHeight <= SCROLL_FOLLOW_THRESHOLD;
-}
-
-function focusableElements(container: HTMLElement) {
-  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-    (element) => !element.hasAttribute("hidden") && element.getAttribute("aria-hidden") !== "true",
-  );
-}
-
-function contextLabel(context: AssistantContext, t: TFunction) {
-  if (context.video_id) {
-    return context.position_ms != null && context.position_ms > 0
-      ? t("assistant.scopeCurrentVideoAt", { position: formatPosition(context.position_ms) })
-      : t("assistant.scopeCurrentVideo");
-  }
-  if (context.course_id) return t("assistant.scopeCurrentCourse");
-  return t("assistant.scopeAllCourses");
-}
-
-
-
-/**
- * 回答正文的整段渲染。
- *
- * 用 memo 包一层：流式期间只有当前这一轮在变，已经完成的回答字符串完全不变，
- * 不该因为 copiedTurnId、busy、scrolledAway 这类无关状态变化而被反复 parse（带公式的
- * 长回答每帧重解析是 O(n²) 的浪费）。seek 回调走 ref 取最新 navigate，保持引用稳定。
- */
 
 export function AssistantPanel({
   context,
@@ -309,9 +169,7 @@ export function AssistantPanel({
   const copyTimerRef = useRef<number | null>(null);
   const saveToNotesTimerRef = useRef<number | null>(null);
   const persistTimerRef = useRef<number | null>(null);
-  const recentQuestionsRef = useRef(readRecentAssistantQuestions());
-  const recentQuestionIndexRef = useRef<number | null>(null);
-  const recentQuestionDraftRef = useRef(initialSession.draft);
+  const recent = useRecentQuestions({ initialDraft: initialSession.draft, setInput, inputRef });
   const hadPendingTurnRef = useRef(initialSession.turns.some((turn) => turn.pending));
   const sessionSnapshotRef = useRef({
     turns: initialSession.turns,
@@ -376,40 +234,10 @@ export function AssistantPanel({
   const clearInlineAsk = useInlineAsk((state) => state.clear);
 
   // 范围选择：auto 跟随界面当前选中项；显式三档覆盖 context 后再发给后端。
-  const resolvedScope: "video" | "course" | "all" =
-    scopeChoice === "video" && context.video_id
-      ? "video"
-      : scopeChoice === "course" && context.course_id
-        ? "course"
-        : scopeChoice === "all"
-          ? "all"
-          : context.video_id
-            ? "video"
-            : context.course_id
-              ? "course"
-              : "all";
-  function scopedContext(scope: "video" | "course" | "all"): AssistantContext {
-    if (scope === "video") return context;
-    if (scope === "course")
-      return { course_id: context.course_id, video_id: null, position_ms: null };
-    return { course_id: null, video_id: null, position_ms: null };
-  }
-  const resolvedContext = scopedContext(resolvedScope);
+  const resolvedScope = resolveScope(scopeChoice, context);
+  const resolvedContext = scopedContext(context, resolvedScope);
   const scopeLabel = contextLabel(resolvedContext, t);
-  const scopeOptions: ScopeOption[] = [
-    { value: "auto", label: t("assistant.scopeAuto"), enabled: true },
-    {
-      value: "video",
-      label: t("assistant.scopeCurrentVideo"),
-      enabled: Boolean(context.video_id),
-    },
-    {
-      value: "course",
-      label: t("assistant.scopeCurrentCourse"),
-      enabled: Boolean(context.course_id),
-    },
-    { value: "all", label: t("assistant.scopeAllCourses"), enabled: true },
-  ];
+  const scopeOptions = scopeOptionsFor(context, t);
 
   const actionExecutionBusy = actionExecutionCount > 0;
   const conversationMutationBusy = deletingConversationId !== null;
@@ -471,78 +299,9 @@ export function AssistantPanel({
     persistTimerRef.current = null;
   }, []);
 
-  function resetRecentQuestionNavigation(draft: string) {
-    recentQuestionIndexRef.current = null;
-    recentQuestionDraftRef.current = draft;
-  }
-
   function setInputFromUser(value: string) {
-    resetRecentQuestionNavigation(value);
+    recent.reset(value);
     setInput(value);
-  }
-
-  function moveInputCaretToEnd() {
-    requestAnimationFrame(() => {
-      const textarea = inputRef.current;
-      if (!textarea) return;
-      const end = textarea.value.length;
-      textarea.setSelectionRange(end, end);
-    });
-  }
-
-  function navigateRecentQuestions(event: KeyboardEvent<HTMLTextAreaElement>) {
-    const currentIndex = recentQuestionIndexRef.current;
-    if (
-      (event.key !== "ArrowUp" && event.key !== "ArrowDown") ||
-      event.shiftKey ||
-      event.altKey ||
-      event.ctrlKey ||
-      event.metaKey ||
-      event.nativeEvent.isComposing
-    ) {
-      return false;
-    }
-
-    if (event.currentTarget.selectionStart !== event.currentTarget.selectionEnd) {
-      if (currentIndex != null) resetRecentQuestionNavigation(event.currentTarget.value);
-      return false;
-    }
-    // 召回后光标会停在末尾，连续上下键继续浏览；一旦用户把光标移进文本中间，
-    // 就把当前内容当成普通草稿，方向键交还给 textarea 的多行编辑。
-    if (
-      currentIndex != null &&
-      event.currentTarget.selectionStart !== event.currentTarget.value.length
-    ) {
-      resetRecentQuestionNavigation(event.currentTarget.value);
-      return false;
-    }
-
-    const questions = recentQuestionsRef.current;
-    if (event.key === "ArrowUp") {
-      if (questions.length === 0 || (currentIndex == null && event.currentTarget.selectionStart !== 0)) {
-        return false;
-      }
-      if (currentIndex == null) recentQuestionDraftRef.current = event.currentTarget.value;
-      const nextIndex = Math.max(0, (currentIndex ?? questions.length) - 1);
-      event.preventDefault();
-      recentQuestionIndexRef.current = nextIndex;
-      setInput(questions[nextIndex]);
-      moveInputCaretToEnd();
-      return true;
-    }
-
-    if (currentIndex == null) return false;
-    event.preventDefault();
-    if (currentIndex < questions.length - 1) {
-      const nextIndex = currentIndex + 1;
-      recentQuestionIndexRef.current = nextIndex;
-      setInput(questions[nextIndex]);
-    } else {
-      recentQuestionIndexRef.current = null;
-      setInput(recentQuestionDraftRef.current);
-    }
-    moveInputCaretToEnd();
-    return true;
   }
 
   function updateTrackedTurns(update: (previous: Turn[]) => Turn[]) {
@@ -718,7 +477,7 @@ export function AssistantPanel({
 
   const pendingQuestion = turns.find((turn) => turn.pending)?.question ?? "";
   const persistedDraft =
-    recentQuestionIndexRef.current == null ? input : recentQuestionDraftRef.current;
+    recent.persistedDraft(input);
   sessionSnapshotRef.current = { turns, history, draft: persistedDraft || pendingQuestion };
   useEffect(() => {
     const conversationId = activeConversationIdRef.current;
@@ -756,14 +515,14 @@ export function AssistantPanel({
         ? ""
         : `（${formatMs(pendingInlineAsk.startMs)}）`;
     const draft = t("assistant.explainTranscript", { source, text: pendingInlineAsk.text });
-    recentQuestionIndexRef.current = null;
+    recent.stopBrowsing();
     setInput((current) =>
       current.trim() ? `${current.trimEnd()}\n\n${draft}` : draft,
     );
     setOpen(true);
     clearInlineAsk();
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, [clearInlineAsk, pendingInlineAsk, setOpen, t]);
+  }, [clearInlineAsk, pendingInlineAsk, recent, setOpen, t]);
 
   useEffect(() => {
     if (open || !focusLauncherAfterCloseRef.current) return;
@@ -775,20 +534,6 @@ export function AssistantPanel({
   useEffect(() => {
     if (open) setHasUnread(false);
   }, [open]);
-
-  // 范围菜单：点菜单外任意处收起。
-
-  // 头部「⋯」菜单：点菜单外任意处收起。
-  useEffect(() => {
-    if (!headerMenuOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (headerMenuRef.current?.contains(event.target as Node)) return;
-      if (headerMenuTriggerRef.current?.contains(event.target as Node)) return;
-      setHeaderMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [headerMenuOpen]);
 
   useEffect(() => {
     if (!open || !mobile) return;
@@ -903,10 +648,10 @@ export function AssistantPanel({
     const turnId = crypto.randomUUID();
     const historyAtSend = historyRef.current;
     // 范围选择在发送时定格：这轮「这个视频」指的是谁，就按那个上下文发出去、也按它存下来。
-    const askContext = scopedContext(resolvedScope);
+    const askContext = scopedContext(context, resolvedScope);
     activeRequestRef.current = requestId;
     if (rememberQuestion) {
-      recentQuestionsRef.current = appendRecentAssistantQuestion(question);
+      recent.remember(question);
     }
     // 新问题是用户主动发起的导航点，无论此前停在哪一段，都把它带到最新内容。
     followScrollRef.current = true;
@@ -914,11 +659,11 @@ export function AssistantPanel({
     // 只清从输入框发出的那一条。点建议、点重新回答时用户可能正打着别的字，
     // 不该被顺手抹掉。
     if (fromInput) {
-      resetRecentQuestionNavigation("");
+      recent.reset("");
       setInput("");
       setAttachments([]);
     } else {
-      resetRecentQuestionNavigation(input);
+      recent.reset(input);
     }
     setBusy(true);
     setStopping(false);
@@ -958,172 +703,21 @@ export function AssistantPanel({
       ].slice(-MAX_RENDERED_TURNS),
     );
     try {
-      const patch = (change: (turn: Turn) => Turn) =>
-        setTurns((prev) => prev.map((item) => (item.id === turnId ? change(item) : item)));
-      // SSE 常把一个字拆成一个事件。逐片 setState 会让 React 每秒渲染几十次，并反复复制
-      // 已有长字符串；先缓冲到下一帧，每帧最多更新一次。
-      let streamFrame: number | null = null;
-      let clearBufferedAnswer = false;
-      let bufferedAnswer: string[] = [];
-      let bufferedAnswerChars = 0;
-      let bufferedReasoning: string[] = [];
-      let bufferedReasoningChars = 0;
-      let bufferedTools: string[] = [];
-      let hasToolOutcomePhase = false;
-      const seenToolCallIds = new Set<string>();
-      const finishedToolStatuses = new Map<string, AssistantToolRunStatus>();
-      const latestToolIssue: {
-        current: { name: string; status: "failed" | "canceled" } | null;
-      } = { current: null };
-      const flushStream = () => {
-        if (streamFrame != null) cancelAnimationFrame(streamFrame);
-        streamFrame = null;
-        if (!mountedRef.current) return;
-        const answerDelta = bufferedAnswer.join("");
-        const reasoningDelta = bufferedReasoning.join("");
-        const toolsDelta = bufferedTools;
-        const shouldClear = clearBufferedAnswer;
-        bufferedAnswer = [];
-        bufferedAnswerChars = 0;
-        bufferedReasoning = [];
-        bufferedReasoningChars = 0;
-        bufferedTools = [];
-        clearBufferedAnswer = false;
-        if (!shouldClear && !answerDelta && !reasoningDelta && toolsDelta.length === 0) return;
-        patch((item) => ({
-          ...item,
-          answer: capAssistantText(
-            `${shouldClear ? "" : item.answer}${answerDelta}`,
-            MAX_ASSISTANT_ANSWER_CHARS,
-          ),
-          reasoning: reasoningDelta
-            ? capAssistantText(
-                `${item.reasoning ?? ""}${reasoningDelta}`,
-                MAX_ASSISTANT_REASONING_CHARS,
-              )
-            : item.reasoning,
-          tools:
-            toolsDelta.length > 0
-              ? [...item.tools, ...toolsDelta].slice(-MAX_STREAMED_TOOLS)
-              : item.tools,
-        }));
-      };
-      const scheduleStreamFlush = () => {
-        if (streamFrame == null) streamFrame = requestAnimationFrame(flushStream);
-      };
+      const stream = createTurnStream({
+        patch: (change) =>
+          setTurns((prev) => prev.map((item) => (item.id === turnId ? change(item) : item))),
+        isMounted: () => mountedRef.current,
+      });
       const reply = await ipc.assistant.ask(
         question,
         askContext,
         historyAtSend,
         requestId,
-        (event) => {
-          if (!mountedRef.current || event.type === "started") {
-            return;
-          } else if (event.type === "turn") {
-            clearBufferedAnswer = true;
-            bufferedAnswer = [];
-            bufferedAnswerChars = 0;
-            hasToolOutcomePhase = false;
-            patch((item) => ({
-              ...item,
-              activeTool: undefined,
-              toolExecutionStatus: undefined,
-              toolExecutionName: undefined,
-            }));
-            scheduleStreamFlush();
-          } else if (event.type === "reasoning") {
-            if (hasToolOutcomePhase) {
-              hasToolOutcomePhase = false;
-              patch((item) => ({
-                ...item,
-                toolExecutionStatus: undefined,
-                toolExecutionName: undefined,
-              }));
-            }
-            bufferedReasoningChars = appendStreamChunk(
-              bufferedReasoning,
-              bufferedReasoningChars,
-              event.delta,
-              MAX_ASSISTANT_REASONING_CHARS,
-            );
-            scheduleStreamFlush();
-          } else if (event.type === "token") {
-            if (hasToolOutcomePhase) {
-              hasToolOutcomePhase = false;
-              patch((item) => ({
-                ...item,
-                toolExecutionStatus: undefined,
-                toolExecutionName: undefined,
-              }));
-            }
-            bufferedAnswerChars = appendStreamChunk(
-              bufferedAnswer,
-              bufferedAnswerChars,
-              event.delta,
-              MAX_ASSISTANT_ANSWER_CHARS,
-            );
-            scheduleStreamFlush();
-          } else if (event.type === "tool") {
-            if (seenToolCallIds.has(event.call_id)) return;
-            seenToolCallIds.add(event.call_id);
-            bufferedTools = [...bufferedTools, event.name].slice(-MAX_STREAMED_TOOLS);
-            hasToolOutcomePhase = false;
-            patch((item) => ({
-              ...item,
-              activeTool: { callId: event.call_id, name: event.name },
-              toolExecutionStatus: undefined,
-              toolExecutionName: undefined,
-              toolRuns: recordToolStarted(item.toolRuns ?? [], event.call_id, event.name),
-            }));
-            scheduleStreamFlush();
-          } else if (event.type === "tool_finished") {
-            const toolStatus = normalizeFinishedToolStatus(event.status, event.canceled);
-            const previousStatus = finishedToolStatuses.get(event.call_id);
-            if (previousStatus && (previousStatus !== "unknown" || toolStatus === "unknown")) {
-              return;
-            }
-            seenToolCallIds.add(event.call_id);
-            finishedToolStatuses.set(event.call_id, toolStatus);
-            if (toolStatus === "failed" || toolStatus === "canceled") {
-              latestToolIssue.current = { name: event.name, status: toolStatus };
-            }
-            hasToolOutcomePhase = toolStatus === "failed" || toolStatus === "canceled";
-            patch((item) => ({
-              ...item,
-              activeTool:
-                item.activeTool?.callId === event.call_id ? undefined : item.activeTool,
-              toolExecutionStatus:
-                toolStatus === "failed" || toolStatus === "canceled"
-                  ? toolStatus
-                  : undefined,
-              toolExecutionName:
-                toolStatus === "failed" || toolStatus === "canceled"
-                  ? event.name
-                  : undefined,
-              toolRuns: recordToolFinished(
-                item.toolRuns ?? [],
-                event.call_id,
-                event.name,
-                toolStatus,
-              ),
-            }));
-          } else if (event.type === "turn_limit") {
-            // 撞上限到总结完成之间可能还有十几秒，期间没有任何其他事件；
-            // 挂出进行中状态，否则用户只看到卡住。
-            patch((item) => ({
-              ...item,
-              turnLimitNoticed: true,
-              activeTool: undefined,
-              toolExecutionStatus: undefined,
-              toolExecutionName: undefined,
-            }));
-            scheduleStreamFlush();
-          }
-        },
+        stream.onEvent,
         { images, profileId: modelProfileId },
       );
       if (!mountedRef.current) return;
-      flushStream();
+      stream.flush();
       const stopReason = normalizedStopReason(reply);
       const serverCanceled = stopReason === "canceled";
       const locallyStopped = locallyStoppedRequestsRef.current.has(requestId);
@@ -1182,7 +776,7 @@ export function AssistantPanel({
               : turn,
         ),
       );
-      const finalToolIssue = latestToolIssue.current;
+      const finalToolIssue = stream.latestToolIssue();
       const issueToolLabel = finalToolIssue
         ? t(`assistantTools.${finalToolIssue.name}`, { defaultValue: finalToolIssue.name })
         : undefined;
@@ -1205,7 +799,7 @@ export function AssistantPanel({
       setTurns((prev) => prev.filter((turn) => turn.id !== turnId));
       setInput((current) => {
         const next = current.trim() ? current : question;
-        resetRecentQuestionNavigation(next);
+        recent.reset(next);
         return next;
       });
       // 附图同理：失败时放回去，除非用户等待期间又贴了新的。
@@ -1299,7 +893,7 @@ export function AssistantPanel({
     setInputFromUser(turn.question);
     setAttachments(images.map((dataUrl) => ({ id: crypto.randomUUID(), dataUrl })));
     focusInput();
-    moveInputCaretToEnd();
+    recent.moveCaretToEnd();
   }
 
   function cancelEdit() {
@@ -1335,27 +929,12 @@ export function AssistantPanel({
   }
 
   /** 「/」快捷指令。提问类只把问法填进输入框（还能改），动作类直接执行。 */
-  const slashCommands: SlashCommand[] = [
-    ...(context.video_id
-      ? [
-          { id: "summary", keyword: "总结", aliases: ["summary", "zj"], prompt: t("assistant.slash.summaryPrompt") },
-          { id: "keypoints", keyword: "重点", aliases: ["key", "zd"], prompt: t("assistant.slash.keypointsPrompt") },
-          { id: "quiz", keyword: "出题", aliases: ["quiz", "ct"], prompt: t("assistant.slash.quizPrompt") },
-          { id: "explain", keyword: "解释", aliases: ["explain", "js"], prompt: t("assistant.slash.explainPrompt") },
-          { id: "source", keyword: "出处", aliases: ["source", "cc"], prompt: t("assistant.slash.sourcePrompt") },
-          { id: "note", keyword: "笔记", aliases: ["note", "bj"], prompt: t("assistant.slash.notePrompt") },
-        ]
-      : []),
-    { id: "progress", keyword: "进度", aliases: ["progress", "jd"], prompt: t("assistant.slash.progressPrompt") },
-    { id: "new", keyword: "新对话", aliases: ["new", "xdh"], action: startNewConversation },
-    ...(turns.some((turn) => !turn.pending)
-      ? [{ id: "copy", keyword: "复制对话", aliases: ["copy", "fz"], action: () => void copyConversation() }]
-      : []),
-  ].map((command) => ({
-    ...command,
-    label: t(`assistant.slash.${command.id}`),
-    description: t(`assistant.slash.${command.id}Hint`),
-  }));
+  const slashCommands = buildSlashCommands(t, {
+    hasVideo: Boolean(context.video_id),
+    hasFinishedTurns: turns.some((turn) => !turn.pending),
+    onNewConversation: startNewConversation,
+    onCopyConversation: () => void copyConversation(),
+  });
 
   function runSlashCommand(command: SlashCommand) {
     if (command.action) {
@@ -1366,7 +945,7 @@ export function AssistantPanel({
     if (command.prompt) {
       setInputFromUser(command.prompt);
       focusInput();
-      moveInputCaretToEnd();
+      recent.moveCaretToEnd();
     }
   }
 
@@ -1411,7 +990,7 @@ export function AssistantPanel({
     setInput(session.draft);
     setAttachments([]);
     setEditing(null);
-    resetRecentQuestionNavigation(session.draft);
+    recent.reset(session.draft);
     setError("");
     setStatusAnnouncement("");
     setCopiedTurnId(null);
@@ -1599,56 +1178,32 @@ export function AssistantPanel({
   return (
     <>
       {!panelShown && launcherVisible && (
-      <button
-        ref={launcherRef}
-        type="button"
-        data-tour="assistant"
-        aria-label={t("assistant.openAssistant")}
-        aria-busy={busy || undefined}
-        title={t("assistant.openWithShortcut", { shortcut: toggleShortcutLabel() })}
-        data-dock-side={mobile ? undefined : side}
-        onClick={() => {
-          if (suppressLauncherClickRef.current) {
-            // 用掉就清：这一下是拖动的尾巴，后面那次才是真点击。
-            suppressLauncherClickRef.current = false;
-            return;
+        <AssistantLauncher
+          launcherRef={launcherRef}
+          mobile={mobile}
+          side={side}
+          busy={busy}
+          hasUnread={hasUnread}
+          inWorkbench={launcherInWorkbench}
+          hasCustomPosition={Boolean(launcherPosition)}
+          onClick={() => {
+            if (suppressLauncherClickRef.current) {
+              // 用掉就清：这一下是拖动的尾巴，后面那次才是真点击。
+              suppressLauncherClickRef.current = false;
+              return;
+            }
+            openFromDock();
+          }}
+          onPointerDown={mobile ? undefined : beginDockDrag}
+          style={
+            mobile
+              ? // 横屏时右侧可能是刘海 / 灵动岛 / 挖孔，入口得留在安全区里。
+                { bottom: launcherBottom, right: "calc(1rem + var(--safe-right))" }
+              : launcherPosition
+                ? { left: launcherPosition.x, top: launcherPosition.y }
+                : { top: dockTop }
           }
-          openFromDock();
-        }}
-        onPointerDown={mobile ? undefined : beginDockDrag}
-        style={
-          mobile
-            ? // 横屏时右侧可能是刘海 / 灵动岛 / 挖孔，入口得留在安全区里。
-              { bottom: launcherBottom, right: "calc(1rem + var(--safe-right))" }
-            : launcherPosition
-              ? { left: launcherPosition.x, top: launcherPosition.y }
-              : { top: dockTop }
-        }
-        // 底色用 surface-panel 而不是 surface-card：深色主题下 card 是一层 3.5% 的白，
-        // 它是给「铺在某块不透明面板上的卡片」用的。球和面板都浮在整个应用之上，
-        // 底下没有那层不透明的东西——直接用就成了一块透明玻璃，字浮在页面内容上。
-        // hover 同理不能换成 card-hover（7% 的白），一悬停球就没了。
-        className={
-          mobile
-            ? // 手机：44px、半透明磨砂底、只留一层很轻的浮起，不再是一枚带大投影的白圆钮。
-              `ca-touch-44 fixed z-40 grid h-11 w-11 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)]/85 shadow-[var(--shadow-raise)] backdrop-blur transition-colors hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none ${launcherInWorkbench ? "ca-workbench-assistant-launcher" : ""}`
-            : `ca-touch-44 fixed z-40 grid h-14 w-14 touch-none select-none cursor-grab active:cursor-grabbing place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] shadow-[var(--shadow-pop)] transition hover:scale-105 hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] motion-reduce:transition-none motion-reduce:hover:scale-100 ${
-                launcherPosition ? "" : side === "left" ? "left-3" : "right-3"
-              }`
-        }
-      >
-        {busy ? (
-          <LoaderCircle className="h-5 w-5 animate-spin text-[var(--accent-text)]" aria-hidden="true" />
-        ) : (
-          <MessageSquareText className="h-5 w-5 text-[var(--text-normal)]" aria-hidden="true" />
-        )}
-        {hasUnread && !busy && (
-          <span
-            aria-hidden="true"
-            className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--surface-panel)] bg-[var(--accent)]"
-          />
-        )}
-      </button>
+        />
       )}
       {open && mobile && (
         <button
@@ -1728,184 +1283,48 @@ export function AssistantPanel({
           <span className="h-1 w-10 rounded-full bg-[var(--border-control)]" aria-hidden="true" />
         </div>
       )}
-      {/* 朝向屏幕内侧的那条边是宽度抓手。固定宽度对一段带列表和公式的长回答太窄了。
-          抓取区全高、骑在边框上（内外各 6px），不占内容宽度；可见反馈就是面板那条边本身：
-          指示层与面板外框重合、同半径圆角，悬停/拖动/聚焦时整条边连同上下圆角一起点亮。 */}
       {!mobile && (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={t("assistant.adjustWidth")}
-          aria-valuenow={panelWidth}
-          aria-valuemin={MIN_PANEL_WIDTH}
-          aria-valuemax={MAX_PANEL_WIDTH}
-          tabIndex={0}
+        <PanelResizeHandle
+          side={side}
+          panelWidth={panelWidth}
+          resizing={panelWidth !== width}
           onPointerDown={beginResize}
           onKeyDown={resizeWithKeyboard}
-          data-resizing={panelWidth !== width || undefined}
-          className={`group absolute inset-y-0 z-10 w-3 cursor-col-resize touch-none focus-visible:outline-none ${
-            side === "right" ? "-left-[6px]" : "-right-[6px]"
-          }`}
-        >
-          <span
-            aria-hidden="true"
-            className={`pointer-events-none absolute -inset-y-px w-4 border-transparent transition-colors motion-reduce:transition-none group-hover:border-[var(--accent)] group-focus-visible:border-[var(--focus-ring)] group-data-[resizing]:border-[var(--accent)] ${
-              side === "right"
-                ? "left-[5px] rounded-l-2xl border-l-2"
-                : "right-[5px] rounded-r-2xl border-r-2"
-            }`}
-          />
-        </div>
+        />
       )}
-      <header className="flex items-center gap-1 border-b border-[var(--border-faint)] px-3 py-2">
-        {/* 提问范围原先挤在标题旁边，11px 一行灰字。它决定了「这个视频」指的是谁，
-            该待在你打字的地方，而不是滚动区顶上那条最容易被忽略的边。 */}
-        {mobile ? (
-          <>
-            <span
-              id="assistant-panel-title"
-              className="min-w-0 flex-1 text-sm font-medium text-[var(--text-strong)]"
-            >
-              {t("assistant.title")}
-            </span>
-          </>
-        ) : (
-          <button
-            type="button"
-            aria-label={t("assistant.dragPanel")}
-            title={t("assistant.dragPanel")}
-            onPointerDown={beginPanelDrag}
-            onKeyDown={movePanelWithKeyboard}
-            className="-ml-1 flex min-w-0 flex-1 touch-none select-none items-center gap-1.5 rounded-md px-1 py-1 text-left cursor-grab active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-          >
-            <GripHorizontal className="h-4 w-4 flex-none text-[var(--text-faint)]" />
-            <span
-              id="assistant-panel-title"
-              className="min-w-0 flex-1 text-sm font-medium text-[var(--text-strong)]"
-            >
-              {t("assistant.title")}
-            </span>
-          </button>
-        )}
-        {(conversationState.conversations.length > 1 || turns.length > 0 || history.length > 0) && (
-          <Button
-            ref={historyButtonRef}
-            size="icon"
-            variant="ghost"
-            aria-label={
-              historyOpen
-                ? t("assistant.closeConversationHistory")
-                : t("assistant.conversationHistory")
-            }
-            title={
-              historyOpen
-                ? t("assistant.closeConversationHistory")
-                : t("assistant.conversationHistory")
-            }
-            aria-expanded={historyOpen}
-            aria-controls="assistant-conversation-history"
-            disabled={busy || actionExecutionBusy || conversationMutationBusy}
-            onClick={() => {
-              if (historyOpen) {
-                setRenamingId(null);
-                setRenameDraft("");
-                setHistoryOpen(false);
-                return;
-              }
-              setError("");
-              setStatusAnnouncement("");
-              setHistoryOpen(true);
-            }}
-            className="ca-touch-44"
-          >
-            <HistoryIcon className="h-4 w-4" />
-          </Button>
-        )}
-        {(turns.length > 0 || history.length > 0) && (
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label={t("assistant.newChat")}
-            title={t("assistant.newChat")}
-            disabled={busy || actionExecutionBusy || conversationMutationBusy}
-            onClick={startNewConversation}
-            className="ca-touch-44"
-          >
-            <MessageSquarePlus className="h-4 w-4" />
-          </Button>
-        )}
-        {/* 换边是一辈子用不了几次的一次性设置，收进「⋯」；
-            常驻按钮只留高频的：历史、新会话、关闭。 */}
-        {!mobile && (
-          <div
-            ref={headerMenuRef}
-            className="relative"
-          >
-            <Button
-              ref={headerMenuTriggerRef}
-              size="icon"
-              variant="ghost"
-              aria-label={t("assistant.headerMenu")}
-              aria-haspopup="menu"
-              aria-expanded={headerMenuOpen}
-              title={t("assistant.headerMenu")}
-              onClick={() => setHeaderMenuOpen((value) => !value)}
-              className="ca-touch-44"
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-            {headerMenuOpen && (
-              <Menu
-                aria-label={t("assistant.headerMenu")}
-                onClose={() => {
-                  setHeaderMenuOpen(false);
-                  requestAnimationFrame(() => headerMenuTriggerRef.current?.focus());
-                }}
-                // 触发它的按钮只有 36px 宽；不给宽度时菜单被压成按钮那么窄，中文一字一行。
-                className="absolute right-0 top-full z-30 mt-1 w-max min-w-[160px] whitespace-nowrap"
-              >
-                <MenuItem
-                  className="flex items-center gap-2"
-                  onClick={() => {
-                    movePanelToSide(side === "left" ? "right" : "left");
-                    setHeaderMenuOpen(false);
-                    requestAnimationFrame(() => headerMenuTriggerRef.current?.focus());
-                  }}
-                >
-                  {side === "left" ? (
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  ) : (
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                  )}
-                  {side === "left" ? t("assistant.dockRight") : t("assistant.dockLeft")}
-                </MenuItem>
-                <MenuItem
-                  className="flex items-center gap-2"
-                  disabled={!turns.some((turn) => !turn.pending)}
-                  onClick={() => {
-                    void copyConversation();
-                    setHeaderMenuOpen(false);
-                    requestAnimationFrame(() => headerMenuTriggerRef.current?.focus());
-                  }}
-                >
-                  <ClipboardCopy className="h-3.5 w-3.5" />
-                  {t("assistant.copyConversation")}
-                </MenuItem>
-              </Menu>
-            )}
-          </div>
-        )}
-        <Button
-          size="icon"
-          variant="ghost"
-          aria-label={t("assistant.collapseAssistant")}
-          title={t("assistant.collapseWithShortcut", { shortcut: toggleShortcutLabel() })}
-          onClick={() => collapseToNearestSide(true)}
-          className="ca-touch-44"
-        >
-          <X className="h-4 w-4" />
-        </Button>
-      </header>
+      <AssistantHeader
+        mobile={mobile}
+        side={side}
+        historyButtonRef={historyButtonRef}
+        menuRef={headerMenuRef}
+        menuTriggerRef={headerMenuTriggerRef}
+        showHistoryButton={
+          conversationState.conversations.length > 1 || turns.length > 0 || history.length > 0
+        }
+        historyOpen={historyOpen}
+        showNewChat={turns.length > 0 || history.length > 0}
+        controlsDisabled={busy || actionExecutionBusy || conversationMutationBusy}
+        menuOpen={headerMenuOpen}
+        canCopyConversation={turns.some((turn) => !turn.pending)}
+        onToggleHistory={() => {
+          if (historyOpen) {
+            setRenamingId(null);
+            setRenameDraft("");
+            setHistoryOpen(false);
+            return;
+          }
+          setError("");
+          setStatusAnnouncement("");
+          setHistoryOpen(true);
+        }}
+        onNewChat={startNewConversation}
+        onMenuOpenChange={setHeaderMenuOpen}
+        onMoveToSide={movePanelToSide}
+        onCopyConversation={() => void copyConversation()}
+        onCollapse={() => collapseToNearestSide(true)}
+        onDragStart={beginPanelDrag}
+        onDragKeyDown={movePanelWithKeyboard}
+      />
 
       <div className="relative flex min-h-0 flex-1 flex-col">
       {historyOpen ? (
@@ -2012,7 +1431,7 @@ export function AssistantPanel({
           input={input}
           onInput={setInputFromUser}
           onKeyDown={(event) => {
-            if (navigateRecentQuestions(event)) return;
+            if (recent.navigate(event)) return;
             // Enter 发送、Shift+Enter 换行。输入法组词时的 Enter 不能当发送，
             // 否则中文用户每选一次候选词就误发一条。
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
