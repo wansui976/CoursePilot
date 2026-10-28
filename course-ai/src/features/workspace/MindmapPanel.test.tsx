@@ -27,7 +27,6 @@ const { mockSetData, mockFit, mockRescale, mockCreate, mockTransform, mockIpc } 
         ai: {
           getMindmap: vi.fn(),
           generate: vi.fn(),
-          staleArtifacts: vi.fn(),
         },
       },
     };
@@ -71,7 +70,6 @@ describe("MindmapPanel", () => {
     mockTransform.mockClear();
     mockIpc.ai.getMindmap.mockReset().mockResolvedValue("# 根\n- 子节点");
     mockIpc.ai.generate.mockReset().mockResolvedValue(undefined);
-    mockIpc.ai.staleArtifacts.mockReset().mockResolvedValue([]);
   });
 
   afterEach(() => {

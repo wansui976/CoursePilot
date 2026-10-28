@@ -17,10 +17,6 @@ import { NoteHistoryDialog } from "./notes/NoteHistoryDialog";
 import { noteContentToDoc } from "./notes/noteVersionContent";
 import { saveShareCard, shareCardHeader, useShareCardLabels } from "./useShareCard";
 import { renderNotesCard } from "@/lib/shareCard/render";
-import {
-  invalidateStaleArtifacts,
-  useStaleArtifacts,
-} from "@/lib/useStaleArtifacts";
 import { ipc } from "@/lib/ipc";
 import { markdownToTiptap } from "@/lib/markdownToTiptap";
 import { tiptapToMarkdown } from "@/lib/tiptapToMarkdown";
@@ -368,7 +364,6 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.artifact("notes", videoId) });
-      invalidateStaleArtifacts(qc, videoId);
     },
   });
 
@@ -385,7 +380,6 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     generate.mutate();
   }
 
-  const stale = useStaleArtifacts(videoId);
   const shareLabels = useShareCardLabels();
   const exportItems: ExportItem[] = [
     {
@@ -586,7 +580,6 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         onRegenerate={() => void requestGenerate()}
         regenerating={generate.isPending}
         hasContent={Boolean(localDraft ?? notesContent) || hasLocalEdits}
-        stale={stale.has("notes")}
         exportItems={
           (notesQuery.isPending || notesQuery.isError) && !localDraft ? [] : exportItems
         }

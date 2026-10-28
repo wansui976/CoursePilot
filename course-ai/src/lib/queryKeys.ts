@@ -26,7 +26,6 @@ export const qk = {
   // —— 单个视频的资料 ——
   /** AI 产物键。流水线完成事件按阶段名失效，所以产物名必须与阶段名一致。 */
   artifact: (kind: ArtifactKind, videoId: string) => [kind, videoId] as const,
-  staleArtifacts: (videoId: string) => ["ai-stale", videoId] as const,
   transcripts: (videoId: string) => ["transcripts", videoId] as const,
   slides: (videoId: string) => ["slides", videoId] as const,
   slideImage: (videoId: string, imagePath: string) =>

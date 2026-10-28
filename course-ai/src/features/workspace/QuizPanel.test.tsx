@@ -10,7 +10,6 @@ const { mockIpc } = vi.hoisted(() => ({
     ai: {
       getQuiz: vi.fn(),
       generate: vi.fn(),
-      staleArtifacts: vi.fn(),
     },
     srs: {
       generate: vi.fn(),
@@ -42,7 +41,6 @@ describe("QuizPanel", () => {
   beforeEach(() => {
     mockIpc.ai.getQuiz.mockReset();
     mockIpc.ai.generate.mockReset().mockResolvedValue(undefined);
-    mockIpc.ai.staleArtifacts.mockReset().mockResolvedValue([]);
     mockIpc.srs.generate.mockReset().mockResolvedValue(1);
   });
 

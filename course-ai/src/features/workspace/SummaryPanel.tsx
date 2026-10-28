@@ -9,7 +9,6 @@ import { TextSkeleton } from "@/ui/skeleton";
 import { PanelEmptyState } from "@/ui/empty-state";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { PanelActions, GenerateEmptyAction } from "./PanelActions";
-import { useStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useAiGeneration } from "@/lib/useAiGeneration";
 
 // 折叠是全局 UI 偏好（非按视频），存一个 localStorage 布尔即可。
@@ -42,7 +41,6 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
     error,
     refetch,
   } = useQuery(queries.summary(videoId));
-  const stale = useStaleArtifacts(videoId);
   const generate = useAiGeneration(videoId, "summary");
 
   function toggleCollapsed() {
@@ -80,7 +78,6 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
           onRegenerate={generate.start}
           regenerating={generate.isPending}
           hasContent={!!summary}
-          stale={stale.has("summary")}
         />
       )}
       </div>

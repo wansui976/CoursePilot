@@ -15,7 +15,6 @@ import { type ExportItem } from "./ExportMenu";
 import { saveShareCard, shareCardHeader, useShareCardLabels } from "./useShareCard";
 import { renderMindmapCard } from "@/lib/shareCard/render";
 import { markmapToTree } from "@/lib/shareCard/mindmapTree";
-import { useStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useAiGeneration } from "@/lib/useAiGeneration";
 
 const transformer = new Transformer();
@@ -36,7 +35,6 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
     queryKey: qk.artifact("mindmap", videoId),
     queryFn: () => ipc.ai.getMindmap(videoId),
   });
-  const stale = useStaleArtifacts(videoId);
   const generate = useAiGeneration(videoId, "mindmap");
   const queryClient = useQueryClient();
   const shareLabels = useShareCardLabels();
@@ -161,7 +159,6 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
           onRegenerate={generate.start}
           regenerating={generate.isPending}
           hasContent={!!md}
-          stale={stale.has("mindmap")}
           exportItems={exportItems}
         />
       )}

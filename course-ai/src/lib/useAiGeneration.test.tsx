@@ -9,7 +9,6 @@ const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
     ai: {
       generate: vi.fn(),
-      staleArtifacts: vi.fn(),
     },
   },
 }));
@@ -45,7 +44,6 @@ function Harness() {
 describe("useAiGeneration", () => {
   beforeEach(() => {
     mockIpc.ai.generate.mockReset();
-    mockIpc.ai.staleArtifacts.mockReset().mockResolvedValue([]);
   });
 
   it("restores a pending generation after remount and prevents a duplicate request", async () => {

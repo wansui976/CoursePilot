@@ -649,11 +649,8 @@
     "emptyDescription": "A mind map is auto-generated after subtitles are ready, or you can generate it now."
   },
   "panelActions": {
-    "staleTitle": "Subtitles have been updated, but this content was generated from the old transcript. Click regenerate to redo with the new transcript.",
-    "stale": "Outdated",
     "regenerate": "Regenerate",
     "generate": "Generate",
-    "staleRegenerate": "Subtitles updated: regenerate with new transcript",
     "generateWithAi": "Start generating",
     "generating": "Generating…"
   },

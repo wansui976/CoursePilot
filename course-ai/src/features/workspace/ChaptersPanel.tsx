@@ -9,7 +9,6 @@ import { ErrorNote } from "@/ui/ErrorNote";
 import { PanelEmptyState } from "@/ui/empty-state";
 import { TextSkeleton } from "@/ui/skeleton";
 import { PanelActions, GenerateEmptyAction } from "./PanelActions";
-import { useStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useAiGeneration } from "@/lib/useAiGeneration";
 
 // 折叠是全局 UI 偏好（与摘要面板一致）：存一个 localStorage 布尔即可。
@@ -52,7 +51,6 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
     error,
     refetch,
   } = useQuery(queries.chapters(videoId));
-  const stale = useStaleArtifacts(videoId);
   const generate = useAiGeneration(videoId, "chapters");
   // 只订阅「当前落在第几章」：章节切换时才重渲染，而不是跟着 timeupdate 每秒刷几次。
   const activeIndex = usePlayer((s) =>
@@ -98,7 +96,6 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
           onRegenerate={generate.start}
           regenerating={generate.isPending}
           hasContent={chapters.length > 0}
-          stale={stale.has("chapters")}
         />
       )}
       </div>

@@ -5,7 +5,6 @@ import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/lib/queryKeys";
 import type { VideoListItem } from "@/lib/types";
-import { invalidateStaleArtifacts } from "@/lib/useStaleArtifacts";
 
 /**
  * 「仅重新纠错」这一付费请求的状态。放在 Home 实例化而非课程库视图里：打开视频时
@@ -28,8 +27,6 @@ export function useRecorrection({
       ipc.pipeline.recorrect(target.videoId),
     onSuccess: (_d, target) => {
       queryClient.invalidateQueries({ queryKey: qk.transcripts(target.videoId) });
-      // 纠错重写了整份文稿：各 AI 产物据此重新判断是否已过期。
-      invalidateStaleArtifacts(queryClient, target.videoId);
     },
   });
   const resetRecorrect = recorrect.reset;

@@ -14,7 +14,6 @@ import { Skeleton } from "@/ui/skeleton";
 import { Button } from "@/ui/button";
 import { MathText } from "@/ui/MathText";
 import { PanelActions, GenerateEmptyAction } from "./PanelActions";
-import { useStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useAiGeneration } from "@/lib/useAiGeneration";
 
 function answerText(answer: QuizQuestion["answer"], t: (key: string) => string): string {
@@ -104,7 +103,6 @@ export function QuizPanel({ videoId }: { videoId: string }) {
       queryClient.invalidateQueries({ queryKey: qk.srs.countDue() }),
   });
 
-  const stale = useStaleArtifacts(videoId);
   const generate = useAiGeneration(videoId, "quiz");
 
   const questions = useMemo<QuizQuestion[]>(() => {
@@ -350,7 +348,6 @@ export function QuizPanel({ videoId }: { videoId: string }) {
           onRegenerate={generate.start}
           regenerating={generate.isPending}
           hasContent={questions.length > 0}
-          stale={stale.has("quiz")}
         />
       )}
     </div>

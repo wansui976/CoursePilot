@@ -1,7 +1,6 @@
 import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import { qk } from "@/lib/queryKeys";
 import { ipc } from "@/lib/ipc";
-import { invalidateStaleArtifacts } from "@/lib/useStaleArtifacts";
 
 export type GeneratedArtifact = "summary" | "chapters" | "quiz" | "mindmap";
 
@@ -56,7 +55,6 @@ export function useAiGeneration(videoId: string, artifact: GeneratedArtifact) {
     gcTime: Infinity,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.artifact(artifact, videoId) });
-      invalidateStaleArtifacts(queryClient, videoId);
     },
     onSettled: () => {
       starting.delete(guardKey);

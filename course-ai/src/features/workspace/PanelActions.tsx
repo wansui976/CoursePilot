@@ -19,7 +19,6 @@ export function PanelActions({
   onRegenerate,
   regenerating,
   hasContent,
-  stale,
   exportItems = [],
   leading,
   inline = false,
@@ -27,8 +26,6 @@ export function PanelActions({
   onRegenerate?: () => void;
   regenerating?: boolean;
   hasContent?: boolean;
-  /** 这份内容是基于旧讲稿生成的（改过字幕、重跑过纠错、补认了课件文字）。 */
-  stale?: boolean;
   exportItems?: ExportItem[];
   leading?: ReactNode;
   /** 放进分区标题条（与标题同一行），不再悬浮盖在可滚动的正文上。 */
@@ -44,16 +41,6 @@ export function PanelActions({
           : "ca-workbench-panel-actions absolute bottom-3 right-3 z-10 flex items-center gap-0.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel)]/90 p-0.5 shadow-[var(--shadow-raise)] backdrop-blur"
       }
     >
-      {/* 只标记、不自动重跑：重跑要花钱，跑不跑由用户决定。不标出来的话，这份内容
-          讲的还是旧稿的事，界面上却看不出任何区别。 */}
-      {stale && (
-        <span
-          className="px-2 py-1 ca-t-2xs font-medium text-[var(--accent-text)]"
-          title={t("panelActions.staleTitle")}
-        >
-          {t("panelActions.stale")}
-        </span>
-      )}
       {leading}
       {exportItems.length > 0 && (
         <ExportMenu items={exportItems} icon placement="up" />
@@ -64,16 +51,8 @@ export function PanelActions({
           onClick={onRegenerate}
           disabled={regenerating}
           aria-label={hasContent ? t("panelActions.regenerate") : t("panelActions.generate")}
-          title={
-            stale
-              ? t("panelActions.staleRegenerate")
-              : hasContent
-                ? t("panelActions.regenerate")
-                : t("panelActions.generate")
-          }
-          className={`${inline ? inlineActionButtonClass : panelActionButtonClass} ${
-            stale ? "text-[var(--accent-text)]" : ""
-          }`}
+          title={hasContent ? t("panelActions.regenerate") : t("panelActions.generate")}
+          className={inline ? inlineActionButtonClass : panelActionButtonClass}
         >
           <RefreshCw className={`h-4 w-4 ${regenerating ? "animate-spin" : ""}`} />
         </button>

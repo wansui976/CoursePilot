@@ -4,7 +4,6 @@ import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { GhostSelect } from "@/ui/select";
 import { notesCoordinator } from "@/lib/notesCoordinator";
-import { invalidateStaleArtifacts } from "@/lib/useStaleArtifacts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
@@ -272,8 +271,6 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
       ipc.transcripts.update(id, text),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.transcripts(videoId) });
-      // 改过字幕之后，摘要/章节/笔记/题库/脑图讲的都还是旧稿的内容，重新算一次过期标记。
-      invalidateStaleArtifacts(qc, videoId);
       setEditingId(null);
     },
     onSettled: () => {
