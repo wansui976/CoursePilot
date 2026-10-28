@@ -4,7 +4,6 @@ import { qk } from "@/lib/queryKeys";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AudioLines, Pause, Play } from "lucide-react";
 import { cropStyle } from "@/lib/blackBars";
 import { useSilenceSkip } from "@/lib/useSilenceSkip";
 import { useSmartRate } from "@/lib/useSmartRate";
@@ -17,13 +16,31 @@ import type { DanmakuEntry, TranscriptSegment } from "@/lib/types";
 import { useVideoCoverUrl } from "@/lib/useVideoCoverUrl";
 import { useWatchLogger } from "@/lib/useWatchLogger";
 import { usePlayer } from "@/stores/player";
-import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
 import { useNoteCapture } from "@/stores/noteCapture";
 import { CaptionOverlay } from "./CaptionOverlay";
 import { Controls } from "./Controls";
 import { DanmakuOverlay } from "./DanmakuOverlay";
 import { useCaptionPrefs, useTranslationLang } from "@/stores/captionPrefs";
 import { MiniProgress, ProgressBar } from "./ProgressBar";
+import {
+  APPLE_MAX_PLAYBACK_RATE,
+  loadDanmakuEnabled,
+  loadPlaybackRate,
+  persistDanmakuEnabled,
+  persistPlaybackRate,
+  usesApplePlaybackEngine,
+  type GestureHint,
+} from "./playerPrefs";
+import { usePlayerKeyboard } from "./usePlayerKeyboard";
+import { useIosGestures, type TapState } from "./useIosGestures";
+import {
+  AudioStage,
+  DecodeFailureCard,
+  GestureHintOverlay,
+  PlayFlash,
+  StageNotice,
+  type TranscodeStatus,
+} from "./StageOverlays";
 
 /**
  * 手机上还没播过的视频不画首帧：Android WebView 画一张自带的灰底大播放图标盖住画面，
@@ -38,99 +55,8 @@ const RESUME_TAIL_GUARD = 15;
 const TAP_DELAY_MS = 240;
 // 桌面：鼠标在画面上停着不动这么久（且在播放）就收起控制栏和指针（YouTube 式）。
 const DESKTOP_IDLE_HIDE_MS = 2500;
-const LONG_PRESS_MS = 360;
-const TAP_MOVE_TOLERANCE_PX = 12;
-const AXIS_LOCK_PX = 16;
-const SCRUB_MS_PER_PIXEL = 100;
-const BRIGHTNESS_STEP = 0.0025;
-const VOLUME_STEP = 0.0025;
-const APPLE_MAX_PLAYBACK_RATE = 2;
-const PLAYBACK_RATE_KEY = "course-ai-playback-rate";
-const DANMAKU_ENABLED_KEY = "course-ai-danmaku-enabled";
-const SUPPORTED_PLAYBACK_RATES = new Set([0.5, 0.75, 1, 1.25, 1.5, 2]);
 const EMPTY_TRANSCRIPT_SEGMENTS: TranscriptSegment[] = [];
 const EMPTY_DANMAKU: DanmakuEntry[] = [];
-
-function loadPlaybackRate() {
-  try {
-    const stored = Number(localStorage.getItem(PLAYBACK_RATE_KEY));
-    return SUPPORTED_PLAYBACK_RATES.has(stored) ? stored : 1;
-  } catch {
-    return 1;
-  }
-}
-
-function persistPlaybackRate(rate: number) {
-  try {
-    localStorage.setItem(PLAYBACK_RATE_KEY, String(rate));
-  } catch {
-    // 隐私模式无法持久化时，本次播放器会话内仍然生效。
-  }
-}
-
-// 弹幕开关：全局偏好（跨视频记住），默认开。
-function loadDanmakuEnabled() {
-  try {
-    return localStorage.getItem(DANMAKU_ENABLED_KEY) !== "0";
-  } catch {
-    return true;
-  }
-}
-
-function persistDanmakuEnabled(enabled: boolean) {
-  try {
-    localStorage.setItem(DANMAKU_ENABLED_KEY, enabled ? "1" : "0");
-  } catch {
-    // 同上：持久化失败不挡本次会话。
-  }
-}
-
-function usesApplePlaybackEngine() {
-  if (isIOS()) return true;
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent ?? "";
-  return (
-    /Macintosh|Mac OS X/i.test(ua) &&
-    /AppleWebKit/i.test(ua) &&
-    !/Chrome|Chromium|Edg|OPR/i.test(ua)
-  );
-}
-
-type GestureMode = "idle" | "brightness" | "volume" | "scrub";
-
-type GestureState = {
-  pointerId: number;
-  startX: number;
-  startY: number;
-  startTime: number;
-  startRate: number;
-  startVolume: number;
-  startBrightness: number;
-  mode: GestureMode;
-  side: "left" | "right";
-  tapTimer?: number;
-  longPressTimer?: number;
-  longPressActive: boolean;
-  swiped: boolean;
-};
-
-// 不是输入框的 <input>：进度条、音量条、复选框。点过进度条后焦点留在它上面，原先一律当成
-// 「正在打字」，空格就再也暂停不了。
-const NON_TEXT_INPUTS = new Set(["range", "checkbox", "radio", "button", "submit", "reset", "color", "file"]);
-// 滑块自己就响应方向键 / Home / End，这几个键留给它，不再额外快进快退一次。
-const SLIDER_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
-
-/** 这次按键归焦点所在的控件处理（正在输入文字，或滑块的方向键），播放器快捷键不接。 */
-function keyBelongsToTarget(event: KeyboardEvent): boolean {
-  const target = event.target as HTMLElement | null;
-  if (!target) return false;
-  if (target.tagName === "TEXTAREA" || target.isContentEditable) return true;
-  if (target.tagName === "SELECT") return true;
-  if (target.tagName !== "INPUT") return false;
-  const type = (target as HTMLInputElement).type;
-  if (!NON_TEXT_INPUTS.has(type)) return true;
-  return type === "range" && SLIDER_KEYS.has(event.key);
-}
 
 export function VideoPlayer({
   src,
@@ -161,7 +87,7 @@ export function VideoPlayer({
   const [decodeFailure, setDecodeFailure] = useState<string | null>(null);
   // 端上转码进度（只 iOS 会真有这个状态）。解码失败后开始轮询：
   // 后端在 cmd_media_url 里已经点火，这里只负责显示进度和转完后的刷新。
-  const [transcode, setTranscode] = useState<{ state: string; percent: number } | null>(null);
+  const [transcode, setTranscode] = useState<TranscodeStatus | null>(null);
   useEffect(() => {
     setAudioOnly(false);
     setDecodeFailure(null);
@@ -244,8 +170,7 @@ export function VideoPlayer({
     markPlayable,
   } = useVideoCrop(videoId, regionRef);
   // 沉浸式单/双击判定：单击切控制栏、双击左右两侧 ±10s（中间播放/暂停）。
-  const tapRef = useRef<{ t: number; timer?: number }>({ t: 0 });
-  const gestureRef = useRef<GestureState | null>(null);
+  const tapRef = useRef<TapState>({ t: 0 });
   const setCurrentMs = usePlayer((s) => s.setCurrentMs);
   const mobile = isMobile();
   const coverUrl = useVideoCoverUrl(videoId, mobile);
@@ -256,24 +181,12 @@ export function VideoPlayer({
   const [caption, setCaption] = useState<string | undefined>(undefined);
   const [captionTranslation, setCaptionTranslation] = useState<string | undefined>(undefined);
   const [brightness, setBrightness] = useState(1);
-  const [gestureHint, setGestureHint] = useState<{
-    kind: "brightness" | "volume" | "scrub" | "rate" | "rewind";
-    value: number;
-  } | null>(null);
+  const [gestureHint, setGestureHint] = useState<GestureHint | null>(null);
   const gestureHintTimerRef = useRef<number | undefined>(undefined);
   // 点画面 / 空格切换播放时，画面中央闪一下播放或暂停图标（YouTube 式），key 让动画每次重播。
   const [playFlash, setPlayFlash] = useState<{ kind: "play" | "pause"; key: number } | null>(null);
   const flashPlayState = (kind: "play" | "pause") =>
     setPlayFlash((prev) => ({ kind, key: (prev?.key ?? 0) + 1 }));
-  // 方向键长按快进/快退（B 站式）的进行中状态（见键盘快捷键 effect）。
-  const keyScanRef = useRef<{
-    action: "seekBack" | "seekForward";
-    engaged: boolean;
-    timer: number;
-    interval?: number;
-    prevRate?: number;
-  } | null>(null);
-
   const { data: queriedSegments } = useQuery(queries.transcripts(videoId));
   // 弹幕：B 站视频才有数据（其余源后端直接返回空）。库里没有时后端会先在线
   // 抓一次并缓存，首开可能慢几秒——抓到前开关不出现，不打扰本地视频。
@@ -355,17 +268,6 @@ export function VideoPlayer({
     ref.current.currentTime = seekRequest.ms / 1000;
   }, [seekRequest]);
 
-  useEffect(() => {
-    // 智能倍速是在用户选的倍速之上叠加的倍率，所以这里生效的是两者之积。
-    const video = ref.current;
-    if (!video || gestureRef.current?.longPressActive) return;
-    // 媒体资源加载会把 playbackRate 还原为 defaultPlaybackRate；两者一起更新，
-    // 切到目标倍速相同的新视频时也不会悄悄掉回 1x。
-    video.defaultPlaybackRate = effectiveRate;
-    // 任何倍速（含长按 2x）都保持变速不变调，否则音调会明显升高。
-    video.preservesPitch = true;
-    if (video.playbackRate !== effectiveRate) video.playbackRate = effectiveRate;
-  }, [effectiveRate, src]);
 
   useEffect(() => {
     if (!ref.current) return;
@@ -439,146 +341,10 @@ export function VideoPlayer({
     if (tapRef.current.timer) window.clearTimeout(tapRef.current.timer);
     tapRef.current = { t: 0 };
   }
-  function clearGestureTimer(gesture: GestureState | null) {
-    if (!gesture) return;
-    if (gesture.tapTimer) window.clearTimeout(gesture.tapTimer);
-    if (gesture.longPressTimer) window.clearTimeout(gesture.longPressTimer);
-  }
   function revealGestureHint(kind: "brightness" | "volume" | "scrub", value: number) {
     setGestureHint({ kind, value });
     if (gestureHintTimerRef.current) window.clearTimeout(gestureHintTimerRef.current);
     gestureHintTimerRef.current = window.setTimeout(() => setGestureHint(null), 650);
-  }
-  function handleIosPointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (!isIosImmersive || event.pointerType === "mouse") return;
-    clearGestureTimer(gestureRef.current);
-    const video = ref.current;
-    const width = window.innerWidth || event.currentTarget.getBoundingClientRect().width || 0;
-    const gesture: GestureState = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      startTime: video?.currentTime ?? 0,
-      startRate: video?.playbackRate ?? rate,
-      startVolume: volume,
-      startBrightness: brightness,
-      mode: "idle",
-      side: event.clientX < width / 2 ? "left" : "right",
-      longPressActive: false,
-      swiped: false,
-    };
-    gestureRef.current = gesture;
-    const target = event.currentTarget;
-    if ("setPointerCapture" in target) {
-      try {
-        target.setPointerCapture(event.pointerId);
-      } catch {
-        // Safari/测试环境可能不支持，忽略即可。
-      }
-    }
-    gesture.longPressTimer = window.setTimeout(() => {
-      const current = gestureRef.current;
-      const activeVideo = ref.current;
-      if (!current || current.pointerId !== event.pointerId || !activeVideo) return;
-      if (current.swiped || current.longPressActive) return;
-      current.longPressActive = true;
-      // 长按只临时改播放器的有效倍速，不能把已经叠过智能倍率的值写回基础 rate。
-      const next = Math.min(APPLE_MAX_PLAYBACK_RATE, current.startRate * 2);
-      activeVideo.playbackRate = next;
-      setGestureHint({ kind: "rate", value: next });
-    }, LONG_PRESS_MS);
-  }
-  function handleIosPointerMove(event: React.PointerEvent<HTMLDivElement>) {
-    const gesture = gestureRef.current;
-    if (!gesture || gesture.pointerId !== event.pointerId || !isIosImmersive) return;
-    const dx = event.clientX - gesture.startX;
-    const dy = event.clientY - gesture.startY;
-    const adx = Math.abs(dx);
-    const ady = Math.abs(dy);
-    if (adx > TAP_MOVE_TOLERANCE_PX || ady > TAP_MOVE_TOLERANCE_PX) {
-      if (gesture.longPressTimer) {
-        window.clearTimeout(gesture.longPressTimer);
-        gesture.longPressTimer = undefined;
-      }
-    }
-    if (gesture.mode === "idle") {
-      if (adx < AXIS_LOCK_PX && ady < AXIS_LOCK_PX) return;
-      gesture.mode = adx > ady ? "scrub" : gesture.side === "left" ? "brightness" : "volume";
-    }
-    if (gesture.mode === "brightness") {
-      const next = Math.min(
-        1,
-        Math.max(0, gesture.startBrightness + (gesture.startY - event.clientY) * BRIGHTNESS_STEP),
-      );
-      setBrightness(next);
-      revealGestureHint("brightness", next);
-      return;
-    }
-    if (gesture.mode === "volume") {
-      const next = Math.min(
-        1,
-        Math.max(0, gesture.startVolume + (gesture.startY - event.clientY) * VOLUME_STEP),
-      );
-      setVolume(next);
-      setMuted(next === 0);
-      revealGestureHint("volume", next);
-      return;
-    }
-    if (gesture.mode === "scrub") {
-      gesture.swiped = true;
-      const video = ref.current;
-      if (!video) return;
-      const next = gesture.startTime + (dx * SCRUB_MS_PER_PIXEL) / 1000;
-      if (Number.isFinite(video.duration) && video.duration > 0) {
-        video.currentTime = Math.min(video.duration, Math.max(0, next));
-      } else {
-        video.currentTime = Math.max(0, next);
-      }
-      revealGestureHint("scrub", next);
-    }
-  }
-  function handleIosPointerUp(event: React.PointerEvent<HTMLDivElement>) {
-    const gesture = gestureRef.current;
-    if (!gesture || gesture.pointerId !== event.pointerId || !isIosImmersive) return;
-    clearGestureTimer(gesture);
-    const dx = event.clientX - gesture.startX;
-    const dy = event.clientY - gesture.startY;
-    const adx = Math.abs(dx);
-    const ady = Math.abs(dy);
-    if (gesture.longPressActive) {
-      const video = ref.current;
-      if (video) video.playbackRate = gesture.startRate;
-      setGestureHint(null);
-      revealControls();
-    } else if (gesture.mode === "scrub" || (gesture.swiped && adx > ady)) {
-      revealControls();
-    } else {
-      const now = Date.now();
-      const prev = tapRef.current;
-      if (now - prev.t < TAP_DELAY_MS) {
-        if (prev.timer) window.clearTimeout(prev.timer);
-        tapRef.current = { t: 0 };
-        void setVideoFullscreen(!fullscreen);
-      } else {
-        const timer = window.setTimeout(() => {
-          tapRef.current = { t: 0 };
-          toggleControls();
-        }, TAP_DELAY_MS);
-        tapRef.current = { t: now, timer };
-      }
-    }
-    gestureRef.current = null;
-  }
-  function handleIosPointerCancel(event: React.PointerEvent<HTMLDivElement>) {
-    const gesture = gestureRef.current;
-    if (!gesture || gesture.pointerId !== event.pointerId || !isIosImmersive) return;
-    clearGestureTimer(gesture);
-    if (gesture.longPressActive) {
-      const video = ref.current;
-      if (video) video.playbackRate = gesture.startRate;
-      setGestureHint(null);
-    }
-    gestureRef.current = null;
   }
   // 沉浸式（手机）点视频：区分单/双击。单击延后 240ms 才切控制栏，期间若来第二击则
   // 判为双击——按落点在视频左/中/右执行 后退10s / 播放暂停 / 前进10s。桌面不走这套。
@@ -586,7 +352,7 @@ export function VideoPlayer({
     if (!immersive) return;
     const now = Date.now();
     const prev = tapRef.current;
-    if (now - prev.t < 240) {
+    if (now - prev.t < TAP_DELAY_MS) {
       if (prev.timer) window.clearTimeout(prev.timer);
       tapRef.current = { t: 0 };
       const video = ref.current;
@@ -609,7 +375,7 @@ export function VideoPlayer({
     const timer = window.setTimeout(() => {
       tapRef.current = { t: 0 };
       toggleControls();
-    }, 240);
+    }, TAP_DELAY_MS);
     tapRef.current = { t: now, timer };
   }
   // 菜单开着、焦点在控制栏里、指针停在控制栏上时都不收：用户正在操作它。
@@ -706,165 +472,45 @@ export function VideoPlayer({
     [],
   );
 
-  // 跳到上一句/下一句字幕的开头；该视频还没有字幕时回退到 ±10s 快退/快进。
-  const jumpSubtitle = (dir: -1 | 1) => {
-    const video = ref.current;
-    if (!video) return;
-    const segs = segmentsRef.current;
-    if (segs.length === 0) {
-      video.currentTime =
-        dir < 0
-          ? Math.max(0, video.currentTime - 10)
-          : video.currentTime + 10;
-      return;
-    }
-    const nowMs = video.currentTime * 1000;
-    if (dir > 0) {
-      const next = segs.find((s) => s.start_ms > nowMs);
-      video.currentTime = next
-        ? next.start_ms / 1000
-        : video.duration || video.currentTime;
-    } else {
-      let targetMs = 0;
-      for (const s of segs) {
-        if (s.start_ms < nowMs) targetMs = s.start_ms;
-        else break;
-      }
-      video.currentTime = Math.max(0, targetMs / 1000);
-    }
-  };
+  const iosGestures = useIosGestures({
+    enabled: isIosImmersive,
+    videoRef: ref,
+    tapRef,
+    rate,
+    volume,
+    brightness,
+    setBrightness,
+    setVolume,
+    setMuted,
+    setGestureHint,
+    revealGestureHint,
+    revealControls,
+    toggleControls,
+    toggleFullscreen,
+  });
+  const gestureRef = iosGestures.gestureRef;
 
-  // 键盘快捷键：动作 → 按键的映射在设置里可改（见 stores/shortcuts）。空格在未被
-  // 占用时永远兜底为播放/暂停。聚焦输入框时不拦截，避免影响打字。
-  // 快退/快进键是 B 站式长短按：短按 ±5s（松键提交）；按住 ≥200ms 进入扫描——
-  // 快进 = 2 倍速播放、快退 = 周期回退，松开恢复原倍速。
-  // 2x 是 macOS WKWebView 完整逐帧解码的上限：超过 2x AVFoundation 会降级成
-  // 只渲染关键帧（约 1 秒 1 帧）；Blink（网页版/Windows）没有这个限制。
   useEffect(() => {
-    const KEY_HOLD_MS = 200;
-    const KEY_HOLD_RATE = 2;
-    const KEY_REWIND_TICK_MS = 200;
-    const KEY_REWIND_STEP_S = 0.8;
+    // 智能倍速是在用户选的倍速之上叠加的倍率，所以这里生效的是两者之积。
+    const video = ref.current;
+    if (!video || gestureRef.current?.longPressActive) return;
+    // 媒体资源加载会把 playbackRate 还原为 defaultPlaybackRate；两者一起更新，
+    // 切到目标倍速相同的新视频时也不会悄悄掉回 1x。
+    video.defaultPlaybackRate = effectiveRate;
+    // 任何倍速（含长按 2x）都保持变速不变调，否则音调会明显升高。
+    video.preservesPitch = true;
+    if (video.playbackRate !== effectiveRate) video.playbackRate = effectiveRate;
+  }, [effectiveRate, gestureRef, src]);
 
-    // 结束长按流程。commitTap（keyup）：未进入扫描则补上短按 ±5s；
-    // blur/卸载不补——用户没有完成一次「按一下」，且失焦后 keyup 会丢。
-    const endKeyScan = (commitTap: boolean) => {
-      const scan = keyScanRef.current;
-      if (!scan) return;
-      keyScanRef.current = null;
-      window.clearTimeout(scan.timer);
-      if (scan.interval) window.clearInterval(scan.interval);
-      const video = ref.current;
-      if (scan.engaged) {
-        if (video && scan.prevRate != null) video.playbackRate = scan.prevRate;
-        setGestureHint(null);
-      } else if (commitTap && video) {
-        video.currentTime =
-          scan.action === "seekBack"
-            ? Math.max(0, video.currentTime - 5)
-            : video.currentTime + 5;
-      }
-    };
-
-    const onKey = (event: KeyboardEvent) => {
-      if (keyBelongsToTarget(event)) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const video = ref.current;
-      if (!video) return;
-      const bindings = useShortcuts.getState().bindings;
-      const action =
-        actionForKey(bindings, event.key) ??
-        (normalizeKey(event.key) === " " ? "playPause" : null);
-      if (!action) return;
-      event.preventDefault();
-      const clamp = (v: number) => Math.min(1, Math.max(0, v));
-      switch (action) {
-        case "playPause":
-          if (video.paused) {
-            void video.play();
-            flashPlayState("play");
-          } else {
-            video.pause();
-            flashPlayState("pause");
-          }
-          break;
-        case "seekBack":
-        case "seekForward": {
-          // 系统 auto-repeat 不打断长按流程；一次只允许一个方向键在按住。
-          if (event.repeat || keyScanRef.current) break;
-          const timer = window.setTimeout(() => {
-            const scan = keyScanRef.current;
-            const v = ref.current;
-            if (!scan || !v) return;
-            scan.engaged = true;
-            if (scan.action === "seekForward") {
-              scan.prevRate = v.playbackRate;
-              v.playbackRate = KEY_HOLD_RATE;
-              // 暂停中长按 = 直接以倍速开播（对齐 B 站）。
-              if (v.paused) void v.play();
-              setGestureHint({ kind: "rate", value: KEY_HOLD_RATE });
-            } else {
-              scan.interval = window.setInterval(() => {
-                const vv = ref.current;
-                if (vv) {
-                  vv.currentTime = Math.max(0, vv.currentTime - KEY_REWIND_STEP_S);
-                }
-              }, KEY_REWIND_TICK_MS);
-              setGestureHint({ kind: "rewind", value: 0 });
-            }
-          }, KEY_HOLD_MS);
-          keyScanRef.current = { action, engaged: false, timer };
-          break;
-        }
-        case "prevSubtitle":
-          jumpSubtitle(-1);
-          break;
-        case "nextSubtitle":
-          jumpSubtitle(1);
-          break;
-        case "volumeUp":
-          setMuted(false);
-          setVolume((v) => clamp(v + 0.1));
-          break;
-        case "volumeDown":
-          setVolume((v) => clamp(v - 0.1));
-          break;
-        case "mute":
-          setMuted((v) => !v);
-          break;
-        case "fullscreen":
-          toggleFullscreen();
-          break;
-        case "captions":
-          setCaptionsOn((v) => !v);
-          break;
-        case "takeNote":
-          // 视频还没装载好（刚打开、尚未跳到上次进度）时 currentTime 还是 0，改用记录的进度。
-          useNoteCapture
-            .getState()
-            .capture(videoId, video.readyState > 0 ? video.currentTime * 1000 : usePlayer.getState().currentMs);
-          break;
-      }
-    };
-    const onKeyUp = (event: KeyboardEvent) => {
-      const scan = keyScanRef.current;
-      if (!scan) return;
-      const action = actionForKey(useShortcuts.getState().bindings, event.key);
-      if (action === scan.action) endKeyScan(true);
-    };
-    const onBlur = () => endKeyScan(false);
-
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("keyup", onKeyUp);
-    window.addEventListener("blur", onBlur);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("blur", onBlur);
-      endKeyScan(false);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullscreen]);
+  const keyScanRef = usePlayerKeyboard(ref, segmentsRef, {
+    videoId,
+    flashPlayState,
+    setGestureHint,
+    setMuted,
+    setVolume,
+    setCaptionsOn,
+    toggleFullscreen,
+  });
 
   const playbackControlsVisible = immersive ? controlsVisible : desktopControlsVisible;
   // 桌面播放中控制栏因鼠标静止收起后，指针也一起藏起来，别在画面中间晃。
@@ -1036,22 +682,7 @@ export function VideoPlayer({
               setMuted(event.currentTarget.muted);
             }}
           />
-          {audioOnly && (
-            // pointer-events:none：点按/双击/手势照常落到 <video> 上。
-            <div className="ca-audio-stage" aria-hidden="true">
-              <div className="ca-audio-art">
-                <AudioLines className="h-12 w-12" />
-              </div>
-              <div className="ca-audio-eq" data-playing={playing || undefined}>
-                <i />
-                <i />
-                <i />
-                <i />
-                <i />
-              </div>
-              <span className="ca-audio-label">{t("videoPlayer.audioOnly")}</span>
-            </div>
-          )}
+          {audioOnly && <AudioStage playing={playing} />}
           {danmakuOn && danmaku.length > 0 && (
             <DanmakuOverlay entries={danmaku} videoRef={ref} />
           )}
@@ -1059,107 +690,24 @@ export function VideoPlayer({
             <div
               aria-label={t("videoPlayer.gestureLayer")}
               className="absolute inset-0 z-10"
-              onPointerDown={handleIosPointerDown}
-              onPointerMove={handleIosPointerMove}
-              onPointerUp={handleIosPointerUp}
-              onPointerCancel={handleIosPointerCancel}
+              {...iosGestures.handlers}
               style={{ touchAction: "none" }}
             />
           )}
-          {smartRate.notice && (
-            <div
-              aria-live="polite"
-              className="pointer-events-none absolute right-4 top-6 z-20 rounded-full bg-[var(--surface-stage-overlay)] px-3 py-1 text-xs font-medium text-white"
-            >
-              {smartRate.notice}
-            </div>
-          )}
-          {silenceSkip.notice && (
-            <div
-              aria-live="polite"
-              className="pointer-events-none absolute left-1/2 top-6 z-20 -translate-x-1/2 rounded-full bg-[var(--surface-stage-overlay)] px-3 py-1 text-xs font-medium text-white"
-            >
-              {silenceSkip.notice}
-            </div>
-          )}
-          {gestureHint && (
-            <div
-              aria-label={t("videoPlayer.gestureOverlay")}
-              className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[var(--surface-stage-scrim)] text-white"
-            >
-              <div className="rounded-lg bg-[var(--surface-stage-overlay)] px-4 py-2 text-sm font-medium">
-                {gestureHint.kind === "brightness" &&
-                  t("videoPlayer.brightnessPercent", {
-                    percent: (gestureHint.value * 100).toFixed(0),
-                  })}
-                {gestureHint.kind === "volume" &&
-                  t("videoPlayer.volumePercent", {
-                    percent: (gestureHint.value * 100).toFixed(0),
-                  })}
-                {gestureHint.kind === "scrub" && t("videoPlayer.scrubbing")}
-                {gestureHint.kind === "rate" &&
-                  t("videoPlayer.fastForwarding", { rate: gestureHint.value })}
-                {gestureHint.kind === "rewind" && t("videoPlayer.rewinding")}
-              </div>
-            </div>
-          )}
+          {smartRate.notice && <StageNotice align="right">{smartRate.notice}</StageNotice>}
+          {silenceSkip.notice && <StageNotice align="center">{silenceSkip.notice}</StageNotice>}
+          {gestureHint && <GestureHintOverlay hint={gestureHint} />}
           {decodeFailure !== null && (
-            <div
-              role="alert"
-              className="absolute inset-x-4 top-1/2 z-30 mx-auto flex max-w-md -translate-y-1/2 flex-col gap-2 rounded-xl bg-[var(--surface-stage-overlay)] px-4 py-3 text-left text-white shadow-[var(--shadow-pop)]"
-            >
-              <p className="text-sm font-semibold">{t("videoPlayer.decodeFailedTitle")}</p>
-              <p className="text-xs leading-relaxed text-white/70">
-                {transcode?.state === "running"
-                  ? t("videoPlayer.transcoding", { percent: transcode.percent })
-                  : transcode?.state === "done"
-                    ? t("videoPlayer.transcodeDone")
-                    : transcode?.state === "failed"
-                    ? t("videoPlayer.transcodeFailed")
-                    : decodeFailure && decodeFailure !== "unknown"
-                      ? t("videoPlayer.decodeFailedCodec", { codec: decodeFailure })
-                      : t("videoPlayer.decodeFailedGeneric")}
-              </p>
-              {transcode?.state === "running" && (
-                <div
-                  role="progressbar"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={transcode.percent}
-                  className="h-1 w-full overflow-hidden rounded-full bg-white/15"
-                >
-                  <div
-                    className="h-full rounded-full bg-white/80 transition-[width] duration-300"
-                    style={{ width: `${transcode.percent}%` }}
-                  />
-                </div>
-              )}
-              {transcode?.state === "failed" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void ipc.videos.startTranscode(videoId).then(setTranscode).catch(() => undefined);
-                  }}
-                  className="ca-touch-44 self-start rounded-md bg-white/15 px-2.5 py-1 text-xs font-medium text-white"
-                >
-                  {t("videoPlayer.transcodeRetry")}
-                </button>
-              )}
-            </div>
+            <DecodeFailureCard
+              codec={decodeFailure}
+              transcode={transcode}
+              onRetryTranscode={() => {
+                void ipc.videos.startTranscode(videoId).then(setTranscode).catch(() => undefined);
+              }}
+            />
           )}
           {playFlash && (
-            <div
-              key={playFlash.key}
-              aria-hidden="true"
-              className="ca-play-flash pointer-events-none absolute left-1/2 top-1/2 z-20 flex h-16 w-16 items-center justify-center rounded-full bg-black/55 text-white"
-              onAnimationEnd={() => setPlayFlash(null)}
-            >
-              {playFlash.kind === "play" ? (
-                <Play className="h-7 w-7 translate-x-0.5 fill-current" />
-              ) : (
-                <Pause className="h-7 w-7 fill-current" />
-              )}
-            </div>
+            <PlayFlash key={playFlash.key} kind={playFlash.kind} onDone={() => setPlayFlash(null)} />
           )}
           {cropNotice && (
             <div className="pointer-events-none absolute inset-x-4 top-6 z-20 mx-auto w-fit max-w-full whitespace-pre-line rounded-lg bg-[var(--surface-stage-overlay)] px-3 py-1.5 text-center text-xs font-medium leading-relaxed text-white">
