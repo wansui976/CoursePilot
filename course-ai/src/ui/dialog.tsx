@@ -1,5 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import type { ReactNode, RefObject } from "react";
+import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
+import { useOptionalShell } from "@/app/shell";
+import { useKeyboardInset } from "@/lib/useKeyboardInset";
 import { cn } from "@/lib/utils";
 
 const SIZE = {
@@ -19,6 +21,9 @@ const SIZE = {
  * 都不会关闭——以及打开/关闭时的焦点落点。
  *
  * 始终带 aria-modal="true"：Home 的 Android 返回键靠它找到最上层模态并转成 Esc。
+ *
+ * 窄屏（手机、平板竖屏的叠放布局）默认呈现为底部弹层：贴底、满宽、顶部抓手，
+ * 单手够得着；往下拖过一段距离松手即关闭（locked 时拖不动）。弹层跟随软键盘上移。
  */
 export function Modal({
   open,
@@ -39,6 +44,7 @@ export function Modal({
   titleClassName,
   descriptionClassName,
   headerAction,
+  presentation = "auto",
   children,
 }: {
   open: boolean;
@@ -65,11 +71,17 @@ export function Modal({
   descriptionClassName?: string;
   /** 标题行右侧（如关闭按钮）。 */
   headerAction?: ReactNode;
+  /** auto：叠放布局（手机）用底部弹层，其余居中。 */
+  presentation?: "auto" | "center" | "sheet";
   children: ReactNode;
 }) {
+  const shell = useOptionalShell();
+  const sheet = presentation === "sheet" || (presentation === "auto" && Boolean(shell?.isPhoneDevice));
   const block = (event: Event) => {
     if (locked) event.preventDefault();
   };
+  const drag = useSheetDrag({ enabled: sheet && !locked, onDismiss: () => onOpenChange(false) });
+  const keyboard = useKeyboardInset();
   const heading = (
     <Dialog.Title
       className={cn(
@@ -94,7 +106,10 @@ export function Modal({
       <Dialog.Portal container={portalContainer ?? undefined}>
         <Dialog.Overlay
           data-testid={overlayTestId}
-          className="ca-dialog-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className={cn(
+            "ca-dialog-overlay fixed inset-0 z-50 flex justify-center bg-black/50",
+            sheet ? "items-end p-0" : "items-center p-4",
+          )}
         >
           <Dialog.Content
             role={role}
@@ -119,13 +134,40 @@ export function Modal({
             onEscapeKeyDown={block}
             onInteractOutside={block}
             onPointerDownOutside={block}
+            data-presentation={sheet ? "sheet" : "center"}
+            ref={drag.contentRef}
+            style={
+              sheet
+                ? {
+                    // 底部留出 Home 指示条；键盘弹起时整块抬到键盘上沿。
+                    paddingBottom: "calc(var(--safe-bottom) + 1rem)",
+                    marginBottom: keyboard || undefined,
+                    maxHeight: `calc(100dvh - var(--safe-top) - 1rem - ${keyboard}px)`,
+                  }
+                : undefined
+            }
             className={cn(
-              "max-h-[calc(100dvh-2rem)] w-full overflow-y-auto rounded-2xl border bg-[var(--surface-panel)] p-4 text-[var(--text-normal)] shadow-[var(--shadow-pop)] sm:p-5",
-              SIZE[size],
+              "w-full overflow-y-auto border bg-[var(--surface-panel)] p-4 text-[var(--text-normal)] shadow-[var(--shadow-pop)]",
+              sheet
+                ? "ca-sheet max-w-none rounded-t-2xl border-x-0 border-b-0 pt-0"
+                : cn("max-h-[calc(100dvh-2rem)] rounded-2xl sm:p-5", SIZE[size]),
               tone === "warning" ? "border-[var(--status-warn)]" : "border-[var(--border-subtle)]",
               className,
             )}
           >
+            {sheet && (
+              <div
+                aria-hidden="true"
+                data-testid="sheet-handle"
+                onPointerDown={drag.onPointerDown}
+                onPointerMove={drag.onPointerMove}
+                onPointerUp={drag.onPointerUp}
+                onPointerCancel={drag.onPointerUp}
+                className="sticky top-0 z-10 -mx-4 mb-1 flex touch-none justify-center bg-[var(--surface-panel)] pb-2 pt-2.5"
+              >
+                <span className="h-1 w-10 rounded-full bg-[var(--border-control)]" />
+              </div>
+            )}
             {headerAction ? (
               <div className="mb-3 flex items-center justify-between gap-3">
                 {heading}
@@ -154,3 +196,51 @@ export function Modal({
 
 /** 关闭按钮等需要 Radix 关闭语义的元素。 */
 export const ModalClose = Dialog.Close;
+
+/** 往下拖这么远（或甩得够快）松手就关。 */
+const SHEET_DISMISS_PX = 96;
+const SHEET_DISMISS_VELOCITY = 0.6; // px/ms
+
+/** 底部弹层的下拉关闭：拖动时直接改 transform（不过 React），松手决定关闭还是弹回。 */
+function useSheetDrag({ enabled, onDismiss }: { enabled: boolean; onDismiss: () => void }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [start] = useState(() => ({ y: 0, t: 0, id: -1, dy: 0 }));
+
+  function setOffset(dy: number, animate: boolean) {
+    const el = contentRef.current;
+    if (!el) return;
+    el.style.transition = animate ? "transform 0.2s cubic-bezier(0.2, 0, 0, 1)" : "none";
+    el.style.transform = dy > 0 ? `translateY(${dy}px)` : "";
+  }
+
+  return {
+    contentRef,
+    onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+      if (!enabled) return;
+      start.y = event.clientY;
+      start.t = performance.now();
+      start.id = event.pointerId;
+      start.dy = 0;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // 测试环境 / 旧 WebKit 不支持也无妨。
+      }
+    },
+    onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+      if (!enabled || event.pointerId !== start.id) return;
+      start.dy = Math.max(0, event.clientY - start.y);
+      setOffset(start.dy, false);
+    },
+    onPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+      if (!enabled || event.pointerId !== start.id) return;
+      start.id = -1;
+      const elapsed = Math.max(1, performance.now() - start.t);
+      if (start.dy > SHEET_DISMISS_PX || start.dy / elapsed > SHEET_DISMISS_VELOCITY) {
+        onDismiss();
+        return;
+      }
+      setOffset(0, true);
+    },
+  };
+}

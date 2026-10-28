@@ -1,4 +1,6 @@
 import * as React from "react";
+import { createPortal } from "react-dom";
+import { useOptionalShell } from "@/app/shell";
 import { cn } from "@/lib/utils";
 
 type MenuProps = React.HTMLAttributes<HTMLDivElement> & {
@@ -69,16 +71,35 @@ export function Menu({
     items[nextIndex].focus();
   }
 
-  return (
+  // 叠放布局（手机）：菜单改成贴底的操作弹层，挂到 body 上，避免被卡片的 overflow 裁掉。
+  // 调用方都按「点在菜单外」收起菜单（document 上的 pointerdown）；挂出去以后菜单不再是
+  // 调用方容器的子孙，所以在菜单根上截住 pointerdown，点菜单项不会被当成点外面。
+  const sheet = Boolean(useOptionalShell()?.isPhoneDevice);
+  const menu = (
     <div
       ref={menuRef}
       role="menu"
-      className={cn("ca-menu", className)}
+      data-sheet={sheet || undefined}
+      className={cn("ca-menu", sheet ? "ca-menu-sheet" : className)}
       onKeyDown={handleKeyDown}
+      onPointerDown={sheet ? (event) => event.stopPropagation() : undefined}
       {...props}
     >
       {children}
     </div>
+  );
+  if (!sheet || typeof document === "undefined") return menu;
+  return createPortal(
+    <>
+      <div
+        aria-hidden="true"
+        className="ca-menu-scrim"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={() => onClose?.()}
+      />
+      {menu}
+    </>,
+    document.body,
   );
 }
 

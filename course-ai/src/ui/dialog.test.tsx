@@ -1,8 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { Modal, ModalClose } from "./dialog";
+import { ShellContext, type Shell } from "@/app/shell";
 
 function Harness({
   locked = false,
@@ -62,5 +63,52 @@ describe("Modal", () => {
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
     expect(onOpenChange).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+});
+
+describe("Modal 在手机上呈现为底部弹层", () => {
+  const phoneShell = { isPhoneDevice: true } as unknown as Shell;
+
+  function renderSheet(locked: boolean, onOpenChange = vi.fn()) {
+    render(
+      <ShellContext.Provider value={phoneShell}>
+        <Modal open onOpenChange={onOpenChange} title="下载" locked={locked}>
+          <p>内容</p>
+        </Modal>
+      </ShellContext.Provider>,
+    );
+    return onOpenChange;
+  }
+
+  it("叠放布局下 data-presentation=sheet，并带抓手", () => {
+    renderSheet(false);
+    expect(screen.getByRole("dialog")).toHaveAttribute("data-presentation", "sheet");
+    expect(screen.getByTestId("sheet-handle")).toBeInTheDocument();
+  });
+
+  it("往下拖过阈值松手即关闭；locked 时拖不动", () => {
+    const onOpenChange = renderSheet(false);
+    const handle = screen.getByTestId("sheet-handle");
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 100 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 260 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientY: 260 });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    cleanup();
+
+    const lockedChange = renderSheet(true);
+    const lockedHandle = screen.getByTestId("sheet-handle");
+    fireEvent.pointerDown(lockedHandle, { pointerId: 1, clientY: 100 });
+    fireEvent.pointerMove(lockedHandle, { pointerId: 1, clientY: 400 });
+    fireEvent.pointerUp(lockedHandle, { pointerId: 1, clientY: 400 });
+    expect(lockedChange).not.toHaveBeenCalled();
+  });
+
+  it("桌面默认居中", () => {
+    render(
+      <Modal open onOpenChange={vi.fn()} title="下载">
+        <p>内容</p>
+      </Modal>,
+    );
+    expect(screen.getByRole("dialog")).toHaveAttribute("data-presentation", "center");
   });
 });

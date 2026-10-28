@@ -147,6 +147,35 @@
   }
 }
 
+/* 底部弹层（窄屏的 Modal）：从屏幕底边滑上来、滑下去，而不是居中缩放。 */
+@keyframes ca-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes ca-sheet-out {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [role="dialog"][data-presentation="sheet"][data-state="open"] {
+    animation: ca-sheet-in 0.26s cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  [role="dialog"][data-presentation="sheet"][data-state="closed"] {
+    animation: ca-sheet-out 0.18s cubic-bezier(0.4, 0, 1, 1);
+  }
+}
+
 /* 卡片换人。复习会话此前是硬替换：打完分，下一张凭空出现在同一位置，看不出「翻过去一张」。
    淡入加 6px 上浮，短到不挡住连续打分（按钮立即可点，动画不拦输入）。
    由 React 的 key=卡片 id 触发重挂来重播——展开答案不换 key，故不会在原地闪一下。 */
@@ -282,4 +311,41 @@
 /* 长文行宽：面板拉宽时正文不跟着一行拉满（中文约 42 字一行最舒服）。 */
 .ca-reading-measure {
   max-width: 42em;
+}
+
+/* 手机上的菜单：贴底操作弹层（ui/menu.tsx 在叠放布局下挂到 body）。
+   调用方原本给的定位类不再生效，这里统一铺满宽度、留出 Home 指示条。 */
+.ca-menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgb(0 0 0 / 0.32);
+}
+
+.ca-menu.ca-menu-sheet {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 56;
+  width: auto;
+  max-height: calc(100dvh - var(--safe-top) - 3rem);
+  overflow-y: auto;
+  margin: 0;
+  padding: 8px 8px calc(var(--safe-bottom) + 8px);
+  border-radius: 16px 16px 0 0;
+  border-width: 1px 0 0;
+}
+
+.ca-menu.ca-menu-sheet .ca-menu-item {
+  min-height: 48px;
+  font-size: var(--fs-md);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-menu-scrim {
+    animation: ca-overlay-in 0.18s ease;
+  }
+
+  .ca-menu.ca-menu-sheet {
+    animation: ca-sheet-in 0.24s cubic-bezier(0.2, 0, 0, 1);
+  }
 }
