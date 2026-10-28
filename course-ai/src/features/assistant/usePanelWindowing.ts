@@ -137,9 +137,10 @@ export function usePanelWindowing({
     };
   }
 
-  function movePanelToSide(nextSide: DockSide) {
+  /** 贴靠到某一边、保持打开。y 不给时沿用当前高度。 */
+  function movePanelToSide(nextSide: DockSide, y?: number) {
     dock(nextSide);
-    setPosition((current) => positionAtSide(nextSide, current.y));
+    setPosition((current) => positionAtSide(nextSide, y ?? current.y));
   }
 
   function dockToStrip(nextSide: DockSide, y: number, focusLauncher = false) {
@@ -290,8 +291,10 @@ export function usePanelWindowing({
         return;
       }
 
+      // 拖到边缘是「贴过去」，不是「收起来」。原来这里会直接收成边上的小球，
+      // 用户看到的是面板拖着拖着就没了，要再点一下才回来。收起交给 × 和快捷键。
       if (!cancelled && completed?.moved && completed.snapSide) {
-        dockToStrip(completed.snapSide, completed.position.y);
+        movePanelToSide(completed.snapSide, completed.position.y);
       }
     };
 
@@ -478,7 +481,7 @@ export function usePanelWindowing({
     if (mobile) return;
     if (event.key === "Home" || event.key === "End") {
       event.preventDefault();
-      dockToStrip(event.key === "Home" ? "left" : "right", position.y, true);
+      movePanelToSide(event.key === "Home" ? "left" : "right");
       return;
     }
 
@@ -510,13 +513,14 @@ export function usePanelWindowing({
         viewport.height - panel.height - VIEWPORT_GAP,
       ),
     };
+    // 挪到头就记下停在哪一边（之后窗口缩放、展开都按这一边算），面板照旧开着。
     if (event.key === "ArrowLeft" && next.x === VIEWPORT_GAP) {
-      dockToStrip("left", next.y, true);
+      movePanelToSide("left", next.y);
     } else if (
       event.key === "ArrowRight" &&
       next.x === viewport.width - panel.width - VIEWPORT_GAP
     ) {
-      dockToStrip("right", next.y, true);
+      movePanelToSide("right", next.y);
     } else {
       setPosition(next);
     }

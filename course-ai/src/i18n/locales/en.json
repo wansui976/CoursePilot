@@ -1020,7 +1020,6 @@
     "modelHint": "Only affects the assistant; the default model in Settings stays the same",
     "modelDefault": "Default model",
     "modelDefaultNamed": "Default · {{name}}",
-    "modelNoKey": "No key",
     "modelNone": "No models configured yet",
     "modelUnavailable": "The model you picked is no longer configured; switched back to the default"
   },

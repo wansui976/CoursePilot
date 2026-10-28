@@ -23,6 +23,32 @@ use crate::error::AppResult;
 
 const KEYRING_SERVICE: &str = "dev.courseai.app";
 
+/// 这次运行里已经从钥匙串读到的密钥。
+///
+/// 每次 AI 请求都要取一次 Key。取密码要过条目的访问控制：用户在授权框里点的是「允许」
+/// 而不是「始终允许」时，下一次读还会再弹——助手连问几句就弹几次。开发版是 ad-hoc 签名，
+/// 每次重编之后系统都不认之前的授权，同样会弹。读到一次就记在内存里，一次运行最多问一次；
+/// 写入和删除都会同步更新这份缓存，改了 Key 立即生效。
+static KEYRING_CACHE: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn cached_secret(account: &str) -> Option<String> {
+    KEYRING_CACHE.lock().ok()?.get(account).cloned()
+}
+
+fn cache_secret(account: &str, value: Option<&str>) {
+    if let Ok(mut cache) = KEYRING_CACHE.lock() {
+        match value {
+            Some(value) if !value.is_empty() => {
+                cache.insert(account.to_owned(), value.to_owned());
+            }
+            _ => {
+                cache.remove(account);
+            }
+        }
+    }
+}
+
 /// `keyring` 有真正存储后端的系统。别的系统（Android）它会悄悄退回进程内的 mock 存储：
 /// 写入「成功」，下一次 `Entry::new` 就读不到——Android 上存的每一把密钥都随手丢了，
 /// 设置页刚填完的 Key、ASR 凭证全部读不到，云端功能一律报「未配置」。
@@ -61,13 +87,19 @@ impl Keyring for SystemKeyring {
         if !keyring_enabled() {
             return None;
         }
+        if let Some(value) = cached_secret(account) {
+            return Some(Some(value));
+        }
         let owned = account.to_owned();
         let result = tokio::task::spawn_blocking(move || {
             keyring::Entry::new(KEYRING_SERVICE, &owned).and_then(|entry| entry.get_password())
         })
         .await;
         match result {
-            Ok(Ok(value)) => Some(Some(value)),
+            Ok(Ok(value)) => {
+                cache_secret(account, Some(&value));
+                Some(Some(value))
+            }
             Ok(Err(keyring::Error::NoEntry)) => Some(None),
             Ok(Err(err)) => {
                 tracing::warn!(%account, %err, "keyring read failed, falling back to settings");
@@ -89,14 +121,20 @@ impl Keyring for SystemKeyring {
         }
         let owned = account.to_owned();
         let value = value.to_owned();
+        let value_for_cache = value.clone();
         let result = tokio::task::spawn_blocking(move || {
             keyring::Entry::new(KEYRING_SERVICE, &owned)
                 .and_then(|entry| entry.set_password(&value))
         })
         .await;
         match result {
-            Ok(Ok(())) => true,
+            Ok(Ok(())) => {
+                cache_secret(account, Some(&value_for_cache));
+                true
+            }
             Ok(Err(err)) => {
+                // 写不进时旧值可能还在钥匙串里，缓存里的也不再可信。
+                cache_secret(account, None);
                 tracing::warn!(%account, %err, "keyring write failed, falling back to settings");
                 false
             }
@@ -111,6 +149,7 @@ impl Keyring for SystemKeyring {
         if !keyring_enabled() {
             return false;
         }
+        cache_secret(account, None);
         let owned = account.to_owned();
         let result = tokio::task::spawn_blocking(move || {
             keyring::Entry::new(KEYRING_SERVICE, &owned).and_then(|entry| entry.delete_credential())
@@ -287,6 +326,22 @@ pub async fn get_secret_or_legacy(db: &Db, name: &str) -> AppResult<Option<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_in_memory_cache_follows_writes_and_deletes() {
+        let account = "llm_key_cache_test";
+        assert_eq!(cached_secret(account), None);
+        cache_secret(account, Some("sk-1"));
+        assert_eq!(cached_secret(account).as_deref(), Some("sk-1"));
+        cache_secret(account, Some("sk-2"));
+        assert_eq!(cached_secret(account).as_deref(), Some("sk-2"));
+        // 空值等价于删除，和钥匙串的写入语义一致。
+        cache_secret(account, Some(""));
+        assert_eq!(cached_secret(account), None);
+        cache_secret(account, Some("sk-3"));
+        cache_secret(account, None);
+        assert_eq!(cached_secret(account), None);
+    }
 
     #[test]
     fn android_does_not_use_the_mock_keyring() {

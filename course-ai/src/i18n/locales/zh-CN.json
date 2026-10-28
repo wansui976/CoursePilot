@@ -1019,7 +1019,6 @@
     "modelHint": "只影响助手，不改设置里的默认模型",
     "modelDefault": "默认模型",
     "modelDefaultNamed": "默认 · {{name}}",
-    "modelNoKey": "未填 Key",
     "modelNone": "还没有配置模型",
     "modelUnavailable": "之前选的模型已不在配置里，已改回默认模型"
   },

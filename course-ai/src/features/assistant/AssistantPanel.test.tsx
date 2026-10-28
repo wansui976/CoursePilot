@@ -354,7 +354,6 @@ describe("AssistantPanel", () => {
       { id: "p1", name: "GPT-4o", kind: "openai", base_url: "u", model: "gpt-4o" },
       { id: "p2", name: "Qwen VL", kind: "openai", base_url: "u", model: "qwen-vl-max" },
     ]);
-    mockIpc.ai.hasApiKey.mockResolvedValue(true);
     renderPanel();
     fireEvent.click(await screen.findByRole("button", { name: "当前模型：默认 · GPT-4o" }));
     fireEvent.click(await screen.findByRole("menuitemradio", { name: /Qwen VL/ }));
@@ -373,13 +372,14 @@ describe("AssistantPanel", () => {
     );
   });
 
-  it("没填 Key 的模型不能选", async () => {
+  it("打开助手、展开模型菜单都不去钥匙串查 Key（macOS 上会弹授权框）", async () => {
     mockIpc.ai.getProfiles.mockResolvedValue([
       { id: "p1", name: "GPT-4o", kind: "openai", base_url: "u", model: "gpt-4o" },
     ]);
     renderPanel();
     fireEvent.click(await screen.findByRole("button", { name: "当前模型：默认 · GPT-4o" }));
-    expect(await screen.findByRole("menuitemradio", { name: /GPT-4o未填 Key/ })).toBeDisabled();
+    expect(await screen.findByRole("menuitemradio", { name: /GPT-4ogpt-4o/ })).toBeEnabled();
+    expect(mockIpc.ai.hasApiKey).not.toHaveBeenCalled();
   });
 
   it("记住的模型已被删掉时改回默认，并告诉用户", async () => {
@@ -870,7 +870,7 @@ describe("AssistantPanel", () => {
     expect(useAssistantUi.getState().open).toBe(true);
   });
 
-  it("拖到左侧边缘后自动吸附成球", () => {
+  it("拖到左侧边缘后贴靠过去，面板保持打开", () => {
     renderPanel();
     const panel = screen.getByRole("complementary", { name: "助手" });
     vi.spyOn(panel, "getBoundingClientRect").mockReturnValue({
@@ -897,33 +897,29 @@ describe("AssistantPanel", () => {
     expect(panel).toHaveAttribute("data-snap-side", "left");
     fireEvent.pointerUp(window, { pointerId: 2, clientX: 40, clientY: 180 });
 
-    const dockStrip = screen.getByRole("button", { name: "打开助手" });
-    expect(dockStrip).toHaveAttribute("data-dock-side", "left");
-    expect(dockStrip).toHaveClass("left-3", "h-14", "w-14", "rounded-full");
-    // 收起时按中心对齐，球矮了 56px，顶边就下移一半（28px）。
-    expect(dockStrip).toHaveStyle({ top: "424px" });
-    expect(useAssistantUi.getState()).toMatchObject({ open: false, side: "left" });
+    // 原来松手就收成小球，看起来像面板拖着拖着消失了。
+    expect(screen.queryByRole("button", { name: "打开助手" })).toBeNull();
+    expect(useAssistantUi.getState()).toMatchObject({ open: true, side: "left" });
+    expect(panel).toHaveStyle({ left: "16px" });
   });
 
-  it("键盘可以把面板吸附到左右边缘", () => {
+  it("键盘可以把面板贴靠到左右边缘", () => {
     renderPanel();
     fireEvent.keyDown(screen.getByRole("button", { name: "拖动助手面板" }), { key: "Home" });
-    expect(screen.getByRole("button", { name: "打开助手" })).toHaveAttribute(
-      "data-dock-side",
-      "left",
-    );
+    expect(useAssistantUi.getState()).toMatchObject({ open: true, side: "left" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "拖动助手面板" }), { key: "End" });
+    expect(useAssistantUi.getState()).toMatchObject({ open: true, side: "right" });
   });
 
-  it("方向键把面板吸附成入口后会把焦点交给入口", async () => {
+  it("方向键挪到边缘只记下停靠边，不把面板收起", () => {
     renderPanel();
     const handle = screen.getByRole("button", { name: "拖动助手面板" });
     handle.focus();
 
     fireEvent.keyDown(handle, { key: "ArrowRight" });
 
-    const launcher = screen.getByRole("button", { name: "打开助手" });
-    await waitFor(() => expect(launcher).toHaveFocus());
-    expect(launcher).toHaveAttribute("data-dock-side", "right");
+    expect(useAssistantUi.getState()).toMatchObject({ open: true, side: "right" });
+    expect(handle).toHaveFocus();
   });
 
   it("回答按 Markdown 渲染，而不是把 ** 和 - 原样铺出来", async () => {

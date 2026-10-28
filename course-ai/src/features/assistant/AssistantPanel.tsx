@@ -1722,7 +1722,8 @@ export function AssistantPanel({
                   setHeaderMenuOpen(false);
                   requestAnimationFrame(() => headerMenuTriggerRef.current?.focus());
                 }}
-                className="absolute right-0 top-full z-30 mt-1"
+                // 触发它的按钮只有 36px 宽；不给宽度时菜单被压成按钮那么窄，中文一字一行。
+                className="absolute right-0 top-full z-30 mt-1 w-max min-w-[160px] whitespace-nowrap"
               >
                 <MenuItem
                   className="flex items-center gap-2"

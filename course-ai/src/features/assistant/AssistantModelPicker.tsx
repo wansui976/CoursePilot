@@ -4,26 +4,23 @@ import { Check, ChevronDown, Cpu } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import type { LlmProfile } from "@/lib/types";
 
-interface ModelOption {
-  profile: LlmProfile;
-  hasKey: boolean;
-}
-
 interface LoadedModels {
-  options: ModelOption[];
+  profiles: LlmProfile[];
   /** 设置里给助手路由的那个（没配路由就是第一个）。用来给「默认」一项标上名字。 */
   defaultId: string | null;
 }
 
+/**
+ * 只读配置表，**不碰钥匙串**：判断「有没有填 Key」也要过钥匙串，macOS 上可能弹授权框，
+ * 而用户只是打开了助手、什么都没问。没填 Key 的模型照样列出来，选了它再提问时
+ * 后端会明确报「还没有填 API Key」。
+ */
 async function loadModels(): Promise<LoadedModels> {
   const profiles = await ipc.ai.getProfiles();
-  if (profiles.length === 0) return { options: [], defaultId: null };
-  const [flags, routingRaw] = await Promise.all([
-    Promise.all(profiles.map((p) => ipc.ai.hasApiKey(p.id).catch(() => false))),
-    Promise.resolve()
-      .then(() => ipc.settings.get("llm_task_routing"))
-      .catch(() => null),
-  ]);
+  if (profiles.length === 0) return { profiles: [], defaultId: null };
+  const routingRaw = await Promise.resolve()
+    .then(() => ipc.settings.get("llm_task_routing"))
+    .catch(() => null);
   let routed: string | null = null;
   try {
     const routing = routingRaw ? (JSON.parse(routingRaw) as Record<string, unknown>) : null;
@@ -32,10 +29,7 @@ async function loadModels(): Promise<LoadedModels> {
     // 路由 JSON 损坏时后端同样退回第一个，这里跟着走。
   }
   const defaultId = profiles.some((p) => p.id === routed) ? routed : (profiles[0]?.id ?? null);
-  return {
-    options: profiles.map((profile, index) => ({ profile, hasKey: flags[index] === true })),
-    defaultId,
-  };
+  return { profiles, defaultId };
 }
 
 /**
@@ -77,7 +71,7 @@ export function AssistantModelPicker({
 
   useEffect(() => {
     if (!models || !value) return;
-    if (models.options.some((option) => option.profile.id === value)) return;
+    if (models.profiles.some((profile) => profile.id === value)) return;
     onChange(null);
     onUnavailable?.();
   }, [models, value, onChange, onUnavailable]);
@@ -132,22 +126,17 @@ export function AssistantModelPicker({
     items[next]?.focus();
   }
 
-  const options = models?.options ?? [];
-  const defaultName = options.find((o) => o.profile.id === models?.defaultId)?.profile.name;
+  const profiles = models?.profiles ?? [];
+  const defaultName = profiles.find((p) => p.id === models?.defaultId)?.name;
   const defaultLabel = defaultName
     ? t("assistant.modelDefaultNamed", { name: defaultName })
     : t("assistant.modelDefault");
-  const selected = value ? options.find((o) => o.profile.id === value) : undefined;
-  const label = selected ? selected.profile.name : defaultLabel;
+  const selected = value ? profiles.find((p) => p.id === value) : undefined;
+  const label = selected ? selected.name : defaultLabel;
 
-  const rows: Array<{ id: string | null; label: string; detail?: string; enabled: boolean }> = [
-    { id: null, label: defaultLabel, enabled: true },
-    ...options.map((option) => ({
-      id: option.profile.id,
-      label: option.profile.name,
-      detail: option.hasKey ? option.profile.model : t("assistant.modelNoKey"),
-      enabled: option.hasKey,
-    })),
+  const rows: Array<{ id: string | null; label: string; detail?: string }> = [
+    { id: null, label: defaultLabel },
+    ...profiles.map((profile) => ({ id: profile.id, label: profile.name, detail: profile.model })),
   ];
 
   return (
@@ -195,7 +184,6 @@ export function AssistantModelPicker({
                 role="menuitemradio"
                 aria-checked={active}
                 tabIndex={-1}
-                disabled={!row.enabled}
                 onClick={() => {
                   onChange(row.id);
                   close();
@@ -214,7 +202,7 @@ export function AssistantModelPicker({
               </button>
             );
           })}
-          {models && options.length === 0 && (
+          {models && profiles.length === 0 && (
             <p className="px-2 py-1.5 ca-t-2xs text-[var(--text-faint)]">
               {t("assistant.modelNone")}
             </p>
