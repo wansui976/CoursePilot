@@ -1,4 +1,5 @@
 import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
+import { taskMeta } from "@/lib/backgroundTasks";
 import { qk } from "@/lib/queryKeys";
 import { ipc } from "@/lib/ipc";
 
@@ -51,6 +52,7 @@ export function useAiGeneration(videoId: string, artifact: GeneratedArtifact) {
 
   const mutation = useMutation<void, unknown, void>({
     mutationKey,
+    meta: taskMeta(artifact, { videoId }),
     mutationFn: () => ipc.ai.generate(videoId, artifact),
     gcTime: Infinity,
     onSuccess: () => {

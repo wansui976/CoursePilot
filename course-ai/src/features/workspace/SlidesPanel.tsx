@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { taskMeta } from "@/lib/backgroundTasks";
 import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
 import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -143,6 +144,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
 
   const extract = useMutation<number, unknown, RequestOperation>({
     mutationKey: extractKey,
+    meta: taskMeta("slides-extract", { videoId }),
     // 灵敏度在「设置 → 课件提取」里调，这里取当前值换算成门槛（"自动"档为 null）。
     mutationFn: ({ requestId }) => {
       extractRequest.current = requestId;
@@ -176,6 +178,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   // 存成 PDF 一步到位）；移动端走系统分享。没配大模型时后端自动退回讲稿摘录。
   const handout = useMutation<string, unknown, void>({
     mutationKey: handoutKey,
+    meta: taskMeta("handout", { videoId }),
     mutationFn: async () => {
       const mobile = isMobile();
       const path = await ipc.export.handout(videoId, {
@@ -190,6 +193,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   // 整批认课件页上的文字。默认只认还没认过的页；按住 shift 点则全部重认（换了引擎时用）。
   const pagesOcr = useMutation<SlidesOcrOutcome, unknown, PagesOcrRequest>({
     mutationKey: pagesOcrKey,
+    meta: taskMeta("slides-ocr", { videoId }),
     mutationFn: ({ force, requestId }) => {
       setPagesOcrProgress(null);
       return ipc.slides.ocr(videoId, requestId, force, setPagesOcrProgress);

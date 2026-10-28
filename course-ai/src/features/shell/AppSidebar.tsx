@@ -21,6 +21,7 @@ import { displayTitle } from "@/lib/videoTitle";
 import type { Video } from "@/lib/types";
 import { useAssistantUi } from "@/stores/assistant";
 import { toggleThemeFrom, type ShellNav } from "./shellNav";
+import { BackgroundTasksButton } from "./BackgroundTasks";
 
 /** 侧栏里的一行入口：图标 + 文字，当前页用中性的底色与字重标出（不铺强调色）。 */
 function SideNavItem({
@@ -149,6 +150,7 @@ export function AppSidebar({
             ) : null
           }
         />
+        <BackgroundTasksButton variant="sidebar" onOpenTask={nav.onOpenTask} />
       </nav>
 
       <div className="ca-nav-label">

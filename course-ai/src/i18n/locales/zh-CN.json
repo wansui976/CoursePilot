@@ -1681,5 +1681,24 @@
         "body": "点笔记里的「记一笔」，视频会暂停，并在末尾插入当前时间点；接了键盘也可以直接按 {{key}}。"
       }
     }
+  },
+  "backgroundTasks": {
+    "title": "后台任务",
+    "running": "{{count}} 个任务进行中",
+    "done": "{{what}}已完成",
+    "failed": "{{what}}失败了",
+    "view": "查看",
+    "kind": {
+      "summary": "生成摘要",
+      "chapters": "生成章节",
+      "quiz": "生成练习题",
+      "mindmap": "生成思维导图",
+      "notes": "生成笔记",
+      "slides-extract": "提取课件",
+      "slides-ocr": "识别课件文字",
+      "handout": "生成讲义",
+      "concepts-analyze": "分析知识点",
+      "concepts-summarize": "生成课程总览"
+    }
   }
 }

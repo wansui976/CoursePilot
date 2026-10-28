@@ -493,4 +493,20 @@ export const scenes = [
       await raw("close-end");
     },
   },
+  {
+    // 后台任务：在工作台点「重新生成」摘要（mock 永不返回），回课程库看入口与列表。
+    name: "bg-tasks",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-slow-ai", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openVideo(page);
+      await page.getByRole("button", { name: "重新生成" }).first().click();
+      await shot("workbench");
+      await nav(page, "返回课程库", "返回");
+      await shot("library");
+      await page.getByRole("button", { name: /后台任务|个任务进行中/ }).first().click();
+      await shot("list");
+    },
+  },
 ];

@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { taskMeta } from "@/lib/backgroundTasks";
 import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -357,6 +358,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   }
 
   const generate = useMutation({
+    meta: taskMeta("notes", { videoId }),
     mutationFn: async () => {
       // 生成前先把协调器中的实时草稿刷盘；后端还会用内容快照 CAS 防止请求期间的新编辑。
       await notesCoordinator.flush(videoId);

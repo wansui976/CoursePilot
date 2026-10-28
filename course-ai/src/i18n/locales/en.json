@@ -1688,5 +1688,24 @@
         "body": "Tap Take a note in your notes: the video pauses and the current timestamp is added. With a keyboard, just press {{key}}."
       }
     }
+  },
+  "backgroundTasks": {
+    "title": "Background tasks",
+    "running": "{{count}} running",
+    "done": "{{what}}: done",
+    "failed": "{{what}}: failed",
+    "view": "View",
+    "kind": {
+      "summary": "Summary",
+      "chapters": "Chapters",
+      "quiz": "Practice questions",
+      "mindmap": "Mind map",
+      "notes": "Notes",
+      "slides-extract": "Slide extraction",
+      "slides-ocr": "Slide text recognition",
+      "handout": "Handout",
+      "concepts-analyze": "Concept analysis",
+      "concepts-summarize": "Course overview"
+    }
   }
 }

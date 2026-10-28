@@ -1,3 +1,4 @@
+import { taskMeta } from "@/lib/backgroundTasks";
 import {
   useCallback,
   useDeferredValue,
@@ -426,6 +427,7 @@ export function ConceptsPanel({
 
   const analyze = useMutation<number, unknown, AnalyzeRequest>({
     mutationKey: analyzeKey,
+    meta: taskMeta("concepts-analyze", { courseId }),
     mutationFn: async ({ requestId }) => {
       startAnalyzeProgress(courseId, requestId);
       try {
@@ -472,6 +474,7 @@ export function ConceptsPanel({
 
   const summarize = useMutation<void, unknown, SummarizeRequest>({
     mutationKey: summarizeKey,
+    meta: taskMeta("concepts-summarize", { courseId }),
     mutationFn: () => ipc.concepts.summarize(courseId),
     onSuccess: () => setAnnouncement(t("concepts.summaryGenerated")),
     onSettled: () => {

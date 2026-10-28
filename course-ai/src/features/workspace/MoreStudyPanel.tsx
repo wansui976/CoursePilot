@@ -1,4 +1,5 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { useStudyNav } from "@/stores/studyNav";
 import { useTranslation } from "react-i18next";
 import { TextSkeleton } from "@/ui/skeleton";
 
@@ -45,6 +46,16 @@ export function MoreStudyPanel({
 }) {
   const { t } = useTranslation();
   const [view, setView] = useState<MoreView>(initialView ?? "quiz");
+  // 「去导图 / 题目 / 课件」的请求：面板已开着时当场切二级视图。
+  useEffect(
+    () =>
+      useStudyNav.subscribe((state, previous) => {
+        const request = state.request;
+        if (!request || request === previous.request || request.videoId !== videoId) return;
+        if (request.target.tab === "more") setView(request.target.moreView);
+      }),
+    [videoId],
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">

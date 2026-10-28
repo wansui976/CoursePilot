@@ -1,5 +1,6 @@
 import type { MouseEvent } from "react";
 import { setThemeToggleOrigin } from "@/stores/theme";
+import type { TaskMeta } from "@/lib/backgroundTasks";
 
 /**
  * 全局导航动作：课程库、学习面板、处理队列、助手、主题、回收站、设置。
@@ -26,6 +27,8 @@ export type ShellNav = {
   onOpenSettings: () => void;
   onBackToLibrary: () => void;
   onGoLibraryHome: () => void;
+  /** 后台任务列表里点一项：打开结果所在的位置。 */
+  onOpenTask: (task: TaskMeta) => void;
 };
 
 /** 主题切换：记下按钮中心，圆形揭开动画从这里展开。 */

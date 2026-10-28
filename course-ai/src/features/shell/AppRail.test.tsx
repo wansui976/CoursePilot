@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppRail } from "./AppRail";
 import type { ShellNav } from "./shellNav";
@@ -19,7 +20,11 @@ vi.mock("@/stores/theme", async () => {
 
 function renderRail(overrides: Partial<ShellNav> = {}, onExpandSidebar = vi.fn()) {
   const nav = makeNav(overrides);
-  render(<AppRail nav={nav} onExpandSidebar={onExpandSidebar} />);
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <AppRail nav={nav} onExpandSidebar={onExpandSidebar} />
+    </QueryClientProvider>,
+  );
   return { nav, onExpandSidebar };
 }
 

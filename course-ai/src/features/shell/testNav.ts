@@ -22,6 +22,7 @@ export function makeNav(overrides: Partial<ShellNav> = {}): ShellNav {
     onOpenSettings: vi.fn(),
     onBackToLibrary: vi.fn(),
     onGoLibraryHome: vi.fn(),
+    onOpenTask: vi.fn(),
     ...overrides,
   };
 }

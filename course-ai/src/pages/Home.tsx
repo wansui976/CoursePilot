@@ -32,6 +32,9 @@ import { AssistantPanel } from "@/features/assistant/AssistantPanel";
 import { AppTours } from "@/features/shell/AppTours";
 import { accentVars, useTheme } from "@/stores/theme";
 import { transitionToLibrary, transitionToVideo } from "@/lib/viewTransition";
+import { studyTargetFor, type TaskMeta } from "@/lib/backgroundTasks";
+import { useStudyNav } from "@/stores/studyNav";
+import { BackgroundTasksButton, TaskCompletionNotices } from "@/features/shell/BackgroundTasks";
 import { useAssistantUi } from "@/stores/assistant";
 import { useHomeRoute } from "@/app/homeRoute";
 import { ShellContext, type KnowledgeReturnState, type Shell } from "@/app/shell";
@@ -397,6 +400,27 @@ export function Home() {
     go({ view: "library" });
   }
 
+  // 后台任务列表 / 完成提示里点一项：视频任务打开那个视频并落在结果所在的页签，
+  // 知识点任务去这门课的知识点页。
+  function openTask(task: TaskMeta) {
+    const target = studyTargetFor(task.kind);
+    if (task.videoId && target) {
+      useStudyNav.getState().open(task.videoId, target);
+      openVideo(task.videoId);
+      return;
+    }
+    if (task.courseId) {
+      const courseId = task.courseId;
+      runAfterWorkspaceTransient(() => go({ view: "concepts", courseId, videoId: null }));
+    }
+  }
+
+  /** 用户此刻已经看着这项任务的结果：在那个视频的工作台里，或在那门课的知识点页。 */
+  function isWatchingTask(task: TaskMeta) {
+    if (task.videoId) return task.videoId === selectedVideoId && mainView === "library";
+    return mainView === "concepts" && task.courseId === selectedCourseId;
+  }
+
   function openSettingsCategory(category: string) {
     runAfterWorkspaceTransient(() => go({ view: "settings", settingsCategory: category }));
   }
@@ -531,6 +555,7 @@ export function Home() {
     onOpenSettings: () => openMainView("settings"),
     onBackToLibrary: returnFromVideo,
     onGoLibraryHome: clearCourseSelection,
+    onOpenTask: openTask,
   };
   const shell: Shell = {
     isPhoneDevice,
@@ -608,6 +633,15 @@ export function Home() {
           <MainViewComponent />
         </div>
       </main>
+      {/* 手机没有侧栏：后台任务的入口浮在底栏上方。 */}
+      {isPhoneDevice && !isWorkbenchView && (
+        <BackgroundTasksButton variant="floating" onOpenTask={openTask} />
+      )}
+      <TaskCompletionNotices
+        isWatching={isWatchingTask}
+        onOpenTask={openTask}
+        bottomOffset={showBottomTab ? 56 : 0}
+      />
       {showBottomTab && (
         <BottomTabBar
           active={activeCompactTab}

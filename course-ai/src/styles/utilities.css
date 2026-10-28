@@ -349,3 +349,29 @@
     animation: ca-sheet-in 0.24s cubic-bezier(0.2, 0, 0, 1);
   }
 }
+
+/* 手机上的后台任务胶囊：浮在底栏上方左侧（右侧是助手入口）。 */
+.ca-tasks-floating {
+  position: fixed;
+  left: calc(1rem + var(--safe-left));
+  bottom: calc(56px + var(--safe-bottom) + 24px);
+  z-index: 40;
+}
+
+/* 任务完成提示：从底部轻轻浮上来。 */
+@keyframes ca-notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-task-notice {
+    animation: ca-notice-in 0.2s cubic-bezier(0.2, 0, 0, 1);
+  }
+}

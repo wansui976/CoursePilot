@@ -5,6 +5,7 @@ import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs";
+import { pendingStudyTarget, useStudyNav } from "@/stores/studyNav";
 import { TextSkeleton } from "@/ui/skeleton";
 import { useNoteCapture } from "@/stores/noteCapture";
 import {
@@ -94,10 +95,14 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
   const { t } = useTranslation();
   // 存量恢复：练习已并入「更多」，读到旧值 "quiz" 时落到更多并直接定位练习视图。
   const [restored] = useState(() => readVideoResumeState(videoId));
+  // 从后台任务点进来时，直接落在那项结果所在的页签。
+  const [requested] = useState(() => pendingStudyTarget(videoId));
   const [activeTab, setActiveTab] = useState<Tab>(() =>
-    restored.activeTab === "quiz"
-      ? "more"
-      : (restored.activeTab as Tab | null) ?? "overview",
+    requested
+      ? requested.tab
+      : restored.activeTab === "quiz"
+        ? "more"
+        : (restored.activeTab as Tab | null) ?? "overview",
   );
   const restoredQuizView = restored.activeTab === "quiz";
   // 保活：记录访问过的标签。访问过的面板用 forceMount 常驻 DOM（非活动时隐藏），
@@ -136,6 +141,18 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
     [videoId, split, changeTab],
   );
 
+  // 面板开着时收到「去某一页」的请求：当场切过去。
+  useEffect(
+    () =>
+      useStudyNav.subscribe((state, previous) => {
+        const request = state.request;
+        if (!request || request === previous.request || request.videoId !== videoId) return;
+        if (split && request.target.tab === "notes") return;
+        changeTab(request.target.tab);
+      }),
+    [videoId, split, changeTab],
+  );
+
   // 数字键 1-4 直接切 tab（播放器快捷键不占数字键，无冲突）。
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -166,7 +183,9 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
       node: (
         <MoreStudyPanel
           videoId={videoId}
-          initialView={restoredQuizView ? "quiz" : undefined}
+          initialView={
+            requested?.tab === "more" ? requested.moreView : restoredQuizView ? "quiz" : undefined
+          }
         />
       ),
     },

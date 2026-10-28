@@ -213,6 +213,15 @@ export function installMockIpc({ theme, safeArea }) {
       [{ id: "medium", display_name: "medium", size_bytes: 1_530_000_000, url: "" }, false],
       [{ id: "small", display_name: "small", size_bytes: 488_000_000, url: "" }, false],
     ],
+    // __shot-slow-ai：生成一直不返回，用来拍「后台任务」进行中的样子。
+    cmd_generate_ai: () => {
+      try {
+        if (localStorage.getItem("__shot-slow-ai") === "1") return new Promise(() => {});
+      } catch {
+        // 存储不可用：按立即完成处理
+      }
+      return null;
+    },
     // __shot-empty：模拟第一次打开、一门课都没有（tour 场景用）。
     cmd_list_courses: () => {
       try {
