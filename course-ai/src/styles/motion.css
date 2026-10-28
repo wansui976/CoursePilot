@@ -120,3 +120,37 @@ html.theme-circle-vt::view-transition-new(root) {
     animation: ca-view-in 0.24s var(--ease) backwards;
   }
 }
+
+/* 课程库 ⇄ 工作台的共享元素过渡（lib/viewTransition.ts）。
+   封面与播放器舞台用同一个名字 ca-hero 配对：位置和尺寸由浏览器插值，
+   新旧两张快照都按 cover 铺满，比例不同时裁边而不是拉伸变形。
+   其余页面内容只做一次短促的交叉淡化，不抢主角。 */
+html[data-vt-nav]::view-transition-group(ca-hero) {
+  animation-duration: 0.36s;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  z-index: 10;
+}
+html[data-vt-nav]::view-transition-old(ca-hero),
+html[data-vt-nav]::view-transition-new(ca-hero) {
+  height: 100%;
+  object-fit: cover;
+}
+/* 旧快照（起点那张图）放大后会糊：前 40% 就淡掉，让终点画面尽早接手，而不是全程两张叠着。 */
+html[data-vt-nav]::view-transition-old(ca-hero) {
+  animation: ca-vt-hero-out 0.36s cubic-bezier(0.2, 0, 0, 1) both;
+}
+html[data-vt-nav]::view-transition-new(ca-hero) {
+  animation: ca-vt-hero-in 0.36s cubic-bezier(0.2, 0, 0, 1) both;
+}
+@keyframes ca-vt-hero-out {
+  from { opacity: 1; }
+  40%, to { opacity: 0; }
+}
+@keyframes ca-vt-hero-in {
+  from { opacity: 0; }
+  30%, to { opacity: 1; }
+}
+html[data-vt-nav]::view-transition-old(root),
+html[data-vt-nav]::view-transition-new(root) {
+  animation-duration: 0.22s;
+}

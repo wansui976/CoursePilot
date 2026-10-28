@@ -623,7 +623,7 @@ export function CourseLibraryView({
           aria-label={t("home.openVideo", { title: displayTitle(video.title) })}
           onClick={() => openVideo(video.id)}
         >
-          <span className="ca-thumb">
+          <span className="ca-thumb" data-vt-video={video.id}>
             <VideoCover
               videoId={video.id}
               className="absolute inset-0 h-full w-full"
@@ -744,7 +744,7 @@ export function CourseLibraryView({
           onClick={() => openVideo(video.id)}
         >
           <span className="row-main">
-            <span className="row-thumb">
+            <span className="row-thumb" data-vt-video={video.id}>
               <VideoCover
                 videoId={video.id}
                 className="absolute inset-0 h-full w-full"

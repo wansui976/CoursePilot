@@ -532,6 +532,7 @@ export function VideoPlayer({
     >
       <div
         ref={regionRef}
+        data-vt-stage=""
         aria-label={t("videoPlayer.stage")}
         tabIndex={0}
         onFocus={revealControlsForKeyboard}

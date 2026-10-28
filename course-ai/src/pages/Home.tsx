@@ -31,6 +31,7 @@ import { selectDownloadCount, useDownloads } from "@/stores/downloads";
 import { AssistantPanel } from "@/features/assistant/AssistantPanel";
 import { AppTours } from "@/features/shell/AppTours";
 import { accentVars, useTheme } from "@/stores/theme";
+import { transitionToLibrary, transitionToVideo } from "@/lib/viewTransition";
 import { useAssistantUi } from "@/stores/assistant";
 import { useHomeRoute } from "@/app/homeRoute";
 import { ShellContext, type KnowledgeReturnState, type Shell } from "@/app/shell";
@@ -173,8 +174,9 @@ export function Home() {
   const androidBackGuard = useRef(0);
   const returnToLibrary = useCallback(() => {
     setKnowledgeReturn(null);
-    go({ view: "library", videoId: null });
-  }, [go]);
+    // 舞台缩回这个视频在课程页上的封面。
+    transitionToLibrary(selectedVideoId, () => go({ view: "library", videoId: null }));
+  }, [go, selectedVideoId]);
 
   const { data: videos = [], isSuccess: videosLoaded } = useQuery(queries.videos(selectedCourseId));
   const { data: courses = [], isSuccess: coursesLoaded } = useQuery(queries.courses());
@@ -200,7 +202,9 @@ export function Home() {
         queuedVideos.find((video) => video.id === videoId);
       if (target) writeLastVideoId(target.course_id, videoId);
       // 打开视频即回到工作台：合上可能叠在主区的设置/回收站/控制台/队列整页。
-      go({ view: "library", videoId });
+      // 从课程页进来时封面放大成播放器；工作台里换视频不做过渡（播放器本来就在）。
+      if (selectedVideoId) go({ view: "library", videoId });
+      else transitionToVideo(videoId, () => go({ view: "library", videoId }));
     });
   }
 

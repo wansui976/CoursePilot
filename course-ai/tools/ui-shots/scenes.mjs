@@ -467,4 +467,30 @@ export const scenes = [
       await shot("workbench");
     },
   },
+  {
+    // 课程库 ⇄ 工作台的共享元素过渡：把动画放慢到 3 秒，在中途各拍一帧（不停动画）。
+    name: "vt-nav",
+    run: async ({ page, device, theme, out }) => {
+      await page.addStyleTag({
+        content: `::view-transition-group(*),
+          ::view-transition-old(*),
+          ::view-transition-new(*) { animation-duration: 3s !important; }`,
+      });
+      await openCourse(page);
+      await page.waitForTimeout(800);
+      const raw = async (suffix) =>
+        page.screenshot({ path: resolve(out, `${device}-${theme}-vt-nav-${suffix}.png`) });
+      await page.getByRole("button", { name: VIDEO }).first().click();
+      await page.waitForTimeout(900);
+      await raw("open-mid");
+      await page.waitForTimeout(2600);
+      await raw("open-end");
+      const back = page.getByRole("button", { name: "返回课程库" }).first();
+      await back.click();
+      await page.waitForTimeout(1200);
+      await raw("close-mid");
+      await page.waitForTimeout(2600);
+      await raw("close-end");
+    },
+  },
 ];
