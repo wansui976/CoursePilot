@@ -584,7 +584,8 @@
     },
     "quoteToNotes": "摘到笔记",
     "quotedToNotes": "已摘到笔记",
-    "quoteToNotesFailed": "没能写进笔记，请重试"
+    "quoteToNotesFailed": "没能写进笔记，请重试",
+    "guideMe": "引导我理解"
   },
   "notes": {
     "unsaved": "未保存",
@@ -1068,7 +1069,32 @@
       "new": "新对话",
       "newHint": "开始一段新的对话",
       "copy": "复制对话",
-      "copyHint": "把整段对话复制成 Markdown"
+      "copyHint": "把整段对话复制成 Markdown",
+      "guide": "引导模式",
+      "guideHint": "不直接给答案，一步步问你",
+      "guideOff": "关闭引导",
+      "guideOffHint": "回到普通问答"
+    },
+    "socratic": {
+      "toggle": "引导",
+      "toggleHint": "引导模式：不直接给答案，一步步问你，让你自己想明白",
+      "placeholder": "说说你的想法…",
+      "on": "已打开引导模式",
+      "off": "已关闭引导模式",
+      "badge": "引导",
+      "progress": "第 {{step}} / {{total}} 步",
+      "stepOnly": "第 {{step}} 步",
+      "options": "可选的回答",
+      "notSure": "不确定",
+      "hintN": "提示 {{n}}",
+      "showHint": "给我个提示",
+      "showNextHint": "再给个提示（{{n}}）",
+      "revealAnswer": "揭晓答案",
+      "summaryTitle": "你自己推出了",
+      "makeCard": "做成复习卡",
+      "cardSaved": "已加入复习",
+      "cardFailed": "没存上，再试一次",
+      "guideTranscript": "带我一步步理解这段文稿{{source}}：\n\n{{text}}"
     }
   },
   "assistantTools": {

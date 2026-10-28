@@ -46,6 +46,7 @@ const { confirmMock, mockIpc, platformMock } = vi.hoisted(() => ({
       hasBilibiliCookies: vi.fn(),
     },
     pipeline: { process: vi.fn() },
+    srs: { addCard: vi.fn() },
     ai: {
       getProfiles: vi.fn().mockResolvedValue([]),
       hasApiKey: vi.fn().mockResolvedValue(false),
@@ -3729,5 +3730,101 @@ describe("确认卡", () => {
     );
     expect(screen.getAllByText(url)).toHaveLength(1);
     expect(screen.getByRole("button", { name: "确认导入" })).toBeEnabled();
+  });
+});
+
+describe("引导模式", () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("zh-CN");
+    vi.clearAllMocks();
+    localStorage.clear();
+    platformMock.mobile = false;
+    platformMock.tablet = false;
+    useAssistantUi.setState({ open: true, side: "right", width: 380, modelProfileId: null });
+    useInlineAsk.setState({ pending: null });
+    mockIpc.ai.getProfiles.mockResolvedValue([]);
+    mockIpc.ai.hasApiKey.mockResolvedValue(false);
+    mockIpc.assistant.cancel.mockResolvedValue(undefined);
+  });
+
+  const guided =
+    '先想想：学习率很大时，每一步会迈多远？\n\n```socratic\n{"step":1,"total":3,"options":["迈得很远","迈得很近"],"hints":["想想步长 = 学习率 × 梯度"],"answer":"会越过谷底","done":false}\n```';
+
+  it("打开开关后提问带上 mode，回答画成进度、选项与提示；点选项就是下一句", async () => {
+    mockIpc.assistant.ask.mockResolvedValue(reply({ answer: guided }));
+    renderPanel();
+    const toggle = screen.getByRole("button", { name: /引导/, pressed: false });
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: /引导/, pressed: true })).toBeInTheDocument();
+    await ask("学习率太大会怎样");
+
+    await waitFor(() => expect(screen.getByText("第 1 / 3 步")).toBeInTheDocument());
+    expect(mockIpc.assistant.ask).toHaveBeenLastCalledWith(
+      "学习率太大会怎样",
+      expect.anything(),
+      expect.anything(),
+      expect.any(String),
+      expect.any(Function),
+      expect.objectContaining({ mode: "socratic" }),
+    );
+    // 结构块不出现在正文里。
+    expect(screen.queryByText(/```socratic/)).not.toBeInTheDocument();
+    expect(screen.getByText("先想想：学习率很大时，每一步会迈多远？")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "给我个提示" }));
+    expect(screen.getByText("想想步长 = 学习率 × 梯度")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "揭晓答案" }));
+    expect(screen.getByText("会越过谷底")).toBeInTheDocument();
+
+    mockIpc.assistant.ask.mockResolvedValue(reply({ answer: "对！" }));
+    fireEvent.click(screen.getByRole("button", { name: "迈得很远" }));
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenLastCalledWith(
+        "迈得很远",
+        expect.anything(),
+        expect.anything(),
+        expect.any(String),
+        expect.any(Function),
+        expect.objectContaining({ mode: "socratic" }),
+      ),
+    );
+  });
+
+  it("收尾时显示总结，并能做成复习卡（起点那一问做正面）", async () => {
+    mockIpc.srs.addCard.mockResolvedValue("card-1");
+    mockIpc.assistant.ask
+      .mockResolvedValueOnce(reply({ answer: guided }))
+      .mockResolvedValueOnce(
+        reply({
+          answer:
+            '没错。\n```socratic\n{"done":true,"summary":["步子太大会越过谷底","所以损失来回震荡"],"answer":"学习率过大导致震荡"}\n```',
+        }),
+      );
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /引导/, pressed: false }));
+    await ask("学习率太大会怎样");
+    await waitFor(() => expect(screen.getByText("第 1 / 3 步")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "迈得很远" }));
+    await waitFor(() => expect(screen.getByText("你自己推出了")).toBeInTheDocument());
+    expect(screen.getByText("步子太大会越过谷底")).toBeInTheDocument();
+    // 旧轮次的选项不能再点。
+    expect(screen.queryByRole("button", { name: "迈得很近" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "做成复习卡" }));
+    await waitFor(() => expect(screen.getByText("已加入复习")).toBeInTheDocument());
+    expect(mockIpc.srs.addCard).toHaveBeenCalledWith(
+      "v1",
+      "guided",
+      "学习率太大会怎样",
+      "1. 步子太大会越过谷底\n2. 所以损失来回震荡\n\n学习率过大导致震荡",
+      null,
+    );
+  });
+
+  it("「/引导」也能开关，会话记住开关状态", async () => {
+    renderPanel();
+    fireEvent.change(screen.getByLabelText("对 AI 助手说"), { target: { value: "/引导" } });
+    fireEvent.keyDown(screen.getByLabelText("对 AI 助手说"), { key: "Enter" });
+    expect(screen.getByRole("button", { name: /引导/, pressed: true })).toBeInTheDocument();
   });
 });

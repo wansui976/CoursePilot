@@ -126,16 +126,23 @@ export interface AssistantTurnRecord {
   context?: AssistantContext;
   /** 这一问附了几张图。原图不落盘，重启后只剩这个数字用来提示。旧记录没有。 */
   imageCount?: number;
+  /** 引导（苏格拉底）模式下的一轮：回答末尾带结构块，界面画成选项、提示和进度。 */
+  mode?: AssistantMode;
   /** 这一问附的图（data URL），只在当前进程里用来显示缩略图和「重新回答」；不落盘。 */
   images?: string[];
   /** 从发出到回答完成用了多久（毫秒）。旧记录没有。 */
   durationMs?: number;
 }
 
+/** 对话模式：普通问答，或引导（不直接给答案，一步步反问）。 */
+export type AssistantMode = "socratic";
+
 export interface AssistantSession {
   turns: AssistantTurnRecord[];
   history: AssistantMessage[];
   draft: string;
+  /** 这个会话开着引导模式；缺省是普通问答。 */
+  mode?: AssistantMode;
   /** 旧调用端可随会话保存；新版输入历史使用独立的全局存储。 */
   promptHistory?: string[];
 }
@@ -402,6 +409,7 @@ function readTurn(value: unknown, now: number): AssistantTurnRecord | null {
     value.imageCount > 0
       ? { imageCount: Math.min(value.imageCount, MAX_TURN_IMAGES) }
       : {}),
+    ...(value.mode === "socratic" ? { mode: "socratic" as const } : {}),
     actionResults: Array.isArray(value.actionResults)
       ? value.actionResults
           .filter((result): result is string => typeof result === "string")
@@ -611,6 +619,7 @@ export function deserializeAssistantSession(
       turns,
       history,
       draft,
+      ...(value.mode === "socratic" ? { mode: "socratic" as const } : {}),
       ...(promptHistory.length > 0 ? { promptHistory } : {}),
     };
   } catch {
@@ -684,6 +693,7 @@ export function serializeAssistantSession(session: AssistantSession, now = Date.
     turns,
     history,
     draft: session.draft.slice(0, MAX_DRAFT_CHARS),
+    ...(session.mode ? { mode: session.mode } : {}),
     ...(session.promptHistory?.length
       ? { promptHistory: boundAssistantPromptHistory(session.promptHistory) }
       : {}),

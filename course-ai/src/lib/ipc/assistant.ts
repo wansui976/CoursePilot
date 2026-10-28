@@ -27,6 +27,8 @@ export interface AssistantAskOptions {
   images?: string[];
   /** 指定用哪个模型；不给则跟随设置里的默认模型。 */
   profileId?: string | null;
+  /** 引导（苏格拉底）模式：不直接给答案，一步步反问。 */
+  mode?: "socratic";
 }
 
 export const assistant = {
@@ -83,6 +85,7 @@ export const assistant = {
         requestId,
         ...(options.images?.length ? { images: options.images } : {}),
         ...(options.profileId ? { profileId: options.profileId } : {}),
+        ...(options.mode ? { mode: options.mode } : {}),
       });
       requestState.askSettled = true;
       if (requestState.cancelRequested) {

@@ -64,6 +64,7 @@ import {
 } from "./AssistantComposer";
 import { buildSlashCommands, type SlashCommand } from "./slashCommands";
 import { createTurnStream, MAX_STREAMED_TOOLS } from "./assistantStream";
+import { guidedTopic, visibleAnswer, type SocraticBlock } from "./socratic";
 import { useRecentQuestions } from "./useRecentQuestions";
 import { AssistantHeader, AssistantLauncher, PanelResizeHandle } from "./AssistantChrome";
 import {
@@ -171,11 +172,14 @@ export function AssistantPanel({
   const persistTimerRef = useRef<number | null>(null);
   const recent = useRecentQuestions({ initialDraft: initialSession.draft, setInput, inputRef });
   const hadPendingTurnRef = useRef(initialSession.turns.some((turn) => turn.pending));
-  const sessionSnapshotRef = useRef({
+  const sessionSnapshotRef = useRef<AssistantSession>({
     turns: initialSession.turns,
     history: initialSession.history,
     draft: initialSession.draft,
+    ...(initialSession.mode ? { mode: initialSession.mode } : {}),
   });
+  /** 引导（苏格拉底）模式：会话级开关，跟着会话存取。 */
+  const [socratic, setSocratic] = useState(initialSession.mode === "socratic");
   // iPad 宽屏有足够空间使用可拖动面板；真正决定布局的是视口档位，不是触屏 UA。
   const mobile = compact || (isMobile() && !isTablet());
   // 拖动、吸附、缩放、抽屉手势这套「窗口化」交互整体在 usePanelWindowing 里。
@@ -478,7 +482,12 @@ export function AssistantPanel({
   const pendingQuestion = turns.find((turn) => turn.pending)?.question ?? "";
   const persistedDraft =
     recent.persistedDraft(input);
-  sessionSnapshotRef.current = { turns, history, draft: persistedDraft || pendingQuestion };
+  sessionSnapshotRef.current = {
+    turns,
+    history,
+    draft: persistedDraft || pendingQuestion,
+    ...(socratic ? { mode: "socratic" as const } : {}),
+  };
   useEffect(() => {
     const conversationId = activeConversationIdRef.current;
     const snapshot = sessionSnapshotRef.current;
@@ -499,7 +508,7 @@ export function AssistantPanel({
       window.clearTimeout(timer);
       if (persistTimerRef.current === timer) persistTimerRef.current = null;
     };
-  }, [clearScheduledPersistence, history, input, persistConversationSnapshot, turns]);
+  }, [clearScheduledPersistence, history, input, persistConversationSnapshot, socratic, turns]);
 
   useEffect(() => {
     const textarea = inputRef.current;
@@ -514,7 +523,11 @@ export function AssistantPanel({
       pendingInlineAsk.startMs == null
         ? ""
         : `（${formatMs(pendingInlineAsk.startMs)}）`;
-    const draft = t("assistant.explainTranscript", { source, text: pendingInlineAsk.text });
+    const draft = t(
+      pendingInlineAsk.mode === "socratic" ? "assistant.socratic.guideTranscript" : "assistant.explainTranscript",
+      { source, text: pendingInlineAsk.text },
+    );
+    if (pendingInlineAsk.mode === "socratic") setSocratic(true);
     recent.stopBrowsing();
     setInput((current) =>
       current.trim() ? `${current.trimEnd()}\n\n${draft}` : draft,
@@ -671,10 +684,11 @@ export function AssistantPanel({
     setStatusAnnouncement("");
     // 流式片段只做防抖持久化，但请求刚发出时先落一次草稿；即使应用随后退出，
     // 用户的问题也能回到输入框，而不是随着未完成轮次一起丢失。
-    const startingSnapshot = {
+    const startingSnapshot: AssistantSession = {
       turns: baseTurns,
       history: historyAtSend,
       draft: input || question,
+      ...(socratic ? { mode: "socratic" as const } : {}),
     };
     sessionSnapshotRef.current = startingSnapshot;
     persistConversationSnapshot(conversationId, startingSnapshot);
@@ -698,6 +712,7 @@ export function AssistantPanel({
           actionResults: [],
           pending: true,
           context: { ...askContext },
+          ...(socratic ? { mode: "socratic" as const } : {}),
           ...(images.length > 0 ? { images, imageCount: images.length } : {}),
         },
       ].slice(-MAX_RENDERED_TURNS),
@@ -714,7 +729,7 @@ export function AssistantPanel({
         historyAtSend,
         requestId,
         stream.onEvent,
-        { images, profileId: modelProfileId },
+        { images, profileId: modelProfileId, ...(socratic ? { mode: "socratic" as const } : {}) },
       );
       if (!mountedRef.current) return;
       stream.flush();
@@ -822,12 +837,13 @@ export function AssistantPanel({
   }
 
   async function copyAnswer(turn: Turn) {
-    if (!turn.answer || !navigator.clipboard?.writeText) {
+    const answer = visibleAnswer(turn);
+    if (!answer || !navigator.clipboard?.writeText) {
       setError(t("assistant.clipboardUnavailable"));
       return;
     }
     try {
-      await navigator.clipboard.writeText(turn.answer);
+      await navigator.clipboard.writeText(answer);
       setCopiedTurnId(turn.id);
       if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = window.setTimeout(() => setCopiedTurnId(null), 1500);
@@ -844,7 +860,7 @@ export function AssistantPanel({
       return;
     }
     try {
-      await notesCoordinator.appendAnswer(videoId, turn.answer);
+      await notesCoordinator.appendAnswer(videoId, visibleAnswer(turn));
       void queryClient.invalidateQueries({ queryKey: qk.artifact("notes", videoId) });
       setSavedToNotesTurnId(turn.id);
       if (saveToNotesTimerRef.current != null) window.clearTimeout(saveToNotesTimerRef.current);
@@ -915,7 +931,7 @@ export function AssistantPanel({
         const images = turn.imageCount
           ? `\n${t("assistant.transcriptImages", { count: turn.imageCount })}`
           : "";
-        const answer = turn.answer.trim() || t("assistant.emptyAnswerFallback");
+        const answer = visibleAnswer(turn).trim() || t("assistant.emptyAnswerFallback");
         return `**${me}**：${turn.question}${images}\n\n**${ai}**：\n${answer}`;
       })
       .join("\n\n---\n\n");
@@ -932,9 +948,33 @@ export function AssistantPanel({
   const slashCommands = buildSlashCommands(t, {
     hasVideo: Boolean(context.video_id),
     hasFinishedTurns: turns.some((turn) => !turn.pending),
+    socratic,
     onNewConversation: startNewConversation,
     onCopyConversation: () => void copyConversation(),
+    onToggleSocratic: toggleSocratic,
   });
+
+  /** 开关引导模式。只影响之后的提问；已经答完的轮次照原样显示。 */
+  function toggleSocratic() {
+    setSocratic((on) => {
+      const next = !on;
+      setStatusAnnouncement(next ? t("assistant.socratic.on") : t("assistant.socratic.off"));
+      return next;
+    });
+    focusInput();
+  }
+
+  /** 引导收尾：起点那一问做正面，推出的要点（和结论）做背面。 */
+  async function makeGuidedCard(turn: Turn, block: SocraticBlock) {
+    const videoId = turn.context?.video_id ?? context.video_id;
+    if (!videoId) throw new Error(t("assistant.notesNeedVideo"));
+    const front = guidedTopic(turns, turn.id) ?? turn.question;
+    const back = [
+      ...block.summary.map((point, index) => `${index + 1}. ${point}`),
+      ...(block.answer ? ["", block.answer] : []),
+    ].join("\n");
+    await ipc.srs.addCard(videoId, "guided", front, back, turn.context?.position_ms ?? null);
+  }
 
   function runSlashCommand(command: SlashCommand) {
     if (command.action) {
@@ -988,6 +1028,7 @@ export function AssistantPanel({
     sessionSnapshotRef.current = session;
     hadPendingTurnRef.current = false;
     setInput(session.draft);
+    setSocratic(session.mode === "socratic");
     setAttachments([]);
     setEditing(null);
     recent.reset(session.draft);
@@ -1406,6 +1447,8 @@ export function AssistantPanel({
               onExecutionStart={(id, actions) => beginActionExecution(id, actions, conversationEpoch)}
               onExecutionEnd={endActionExecution}
               onApplied={onActionApplied}
+              onPickReply={(reply) => void send(reply)}
+              onMakeCard={makeGuidedCard}
             />
           </div>
         ))}
@@ -1460,6 +1503,8 @@ export function AssistantPanel({
           onSlashCommand={runSlashCommand}
           editing={!!editing}
           onCancelEdit={cancelEdit}
+          socratic={socratic}
+          onToggleSocratic={toggleSocratic}
         />
       )}
     </aside>

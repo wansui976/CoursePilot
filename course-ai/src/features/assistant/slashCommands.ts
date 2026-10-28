@@ -39,13 +39,17 @@ export function buildSlashCommands(
   {
     hasVideo,
     hasFinishedTurns,
+    socratic = false,
     onNewConversation,
     onCopyConversation,
+    onToggleSocratic,
   }: {
     hasVideo: boolean;
     hasFinishedTurns: boolean;
+    socratic?: boolean;
     onNewConversation: () => void;
     onCopyConversation: () => void;
+    onToggleSocratic?: () => void;
   },
 ): SlashCommand[] {
   const specs: SlashCommandSpec[] = [
@@ -60,6 +64,16 @@ export function buildSlashCommands(
         ]
       : []),
     { id: "progress", keyword: "进度", aliases: ["progress", "jd"], prompt: t("assistant.slash.progressPrompt") },
+    ...(onToggleSocratic
+      ? [
+          {
+            id: socratic ? "guideOff" : "guide",
+            keyword: "引导",
+            aliases: ["guide", "socratic", "yd"],
+            action: onToggleSocratic,
+          },
+        ]
+      : []),
     { id: "new", keyword: "新对话", aliases: ["new", "xdh"], action: onNewConversation },
     ...(hasFinishedTurns
       ? [{ id: "copy", keyword: "复制对话", aliases: ["copy", "fz"], action: onCopyConversation }]

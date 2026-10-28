@@ -213,6 +213,23 @@ export function installMockIpc({ theme, safeArea }) {
       [{ id: "medium", display_name: "medium", size_bytes: 1_530_000_000, url: "" }, false],
       [{ id: "small", display_name: "small", size_bytes: 488_000_000, url: "" }, false],
     ],
+    // 助手：回放一条完整回答。__shot-guided 时回一段引导模式的回答（带结构块）。
+    cmd_assistant_ask: ({ requestId, query }) => {
+      const guided = localStorage.getItem("__shot-guided") === "1";
+      const answer = guided
+        ? query.includes("远")
+          ? '对，步子迈得太远就会越过谷底，到了另一侧又往回迈——于是来回震荡。\n\n```socratic\n{"done":true,"summary":["步长 = 学习率 × 梯度，学习率大步子就大","步子太大会越过谷底，在两侧来回跳","所以损失曲线震荡甚至发散"],"answer":"学习率过大时更新步长过大，参数在最优点两侧来回跳，损失震荡或发散。"}\n```'
+          : '先别急着记结论。想一想：每一步更新时，参数挪动的距离由什么决定？学习率很大的时候，这一步会迈多远？可以回看 [07:10] 老师画的那张图。\n\n```socratic\n{"step":1,"total":3,"options":["迈得很远","迈得很近","和学习率无关"],"hints":["更新公式：新参数 = 旧参数 − 学习率 × 梯度","把损失曲线想成一个山谷，步子太大会怎样？"],"answer":"步长和学习率成正比，学习率大，一步就迈得很远。","done":false}\n```'
+        : "梯度下降每一步沿负梯度方向走一小步，学习率决定步子大小。[03:00]";
+      setTimeout(() => {
+        window.__emit(`assistant-stream:${requestId}`, { type: "started" });
+        window.__emit(`assistant-stream:${requestId}`, {
+          type: "done",
+          reply: { answer, canceled: false, hit_turn_limit: false, actions: [], turns: 1, tools_used: ["search_content"], usage: null, history: [] },
+        });
+      }, 50);
+      return null;
+    },
     // __shot-slow-ai：生成一直不返回，用来拍「后台任务」进行中的样子。
     cmd_generate_ai: () => {
       try {
@@ -326,15 +343,31 @@ export function installMockIpc({ theme, safeArea }) {
 
   const unknown = new Set();
   let callbackId = 0;
+  // 事件：listen 时记下回调，window.__emit 按事件名回放（助手流式回答等靠它）。
+  const callbacks = new Map();
+  const listeners = new Map();
+  window.__emit = (event, payload) => {
+    for (const id of listeners.get(event) ?? []) callbacks.get(id)?.({ event, id, payload });
+  };
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   window.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
-    transformCallback: () => ++callbackId,
+    transformCallback: (callback) => {
+      const id = ++callbackId;
+      callbacks.set(id, callback);
+      return id;
+    },
     unregisterCallback: () => {},
     convertFileSrc: (path) => path,
     invoke: async (cmd, args) => {
       if (cmd === "plugin:mobile-files|system_bar_insets") return safeArea ?? { top: 0, right: 0, bottom: 0, left: 0 };
-      if (cmd.startsWith("plugin:")) return cmd.endsWith("|listen") ? ++callbackId : null;
+      if (cmd === "plugin:event|listen") {
+        const list = listeners.get(args.event) ?? [];
+        list.push(args.handler);
+        listeners.set(args.event, list);
+        return args.handler;
+      }
+      if (cmd.startsWith("plugin:")) return null;
       const handler = handlers[cmd];
       if (handler) return handler(args ?? {});
       unknown.add(cmd);

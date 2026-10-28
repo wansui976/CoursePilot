@@ -888,6 +888,17 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
             size="sm"
             className="shadow-[var(--shadow-pop)]"
             onClick={() => {
+              useInlineAsk.getState().askAbout(askAnchor.text, askAnchor.startMs, "socratic");
+              closeAskAnchor();
+            }}
+          >
+            {t("transcript.guideMe")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="shadow-[var(--shadow-pop)]"
+            onClick={() => {
               quoteToNotes.mutate({ text: askAnchor.text, startMs: askAnchor.startMs });
               closeAskAnchor();
             }}

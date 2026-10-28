@@ -243,8 +243,15 @@ export function ConversationHistory({
                     className="ca-touch-44 flex min-h-[52px] min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface-card-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm text-[var(--text-strong)]">
-                        {conversationTitle}
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="min-w-0 truncate text-sm text-[var(--text-strong)]">
+                          {conversationTitle}
+                        </span>
+                        {conversation.socratic && (
+                          <span className="flex-none rounded-full bg-[var(--accent-weak)] px-1.5 ca-t-2xs font-medium text-[var(--accent-text)]">
+                            {t("assistant.socratic.badge")}
+                          </span>
+                        )}
                       </span>
                       {source && (
                         <span

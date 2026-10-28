@@ -7,7 +7,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { AtSign, Check, ChevronDown, ImagePlus, PenLine, Send, Square, X } from "lucide-react";
+import { AtSign, Check, ChevronDown, GraduationCap, ImagePlus, PenLine, Send, Square, X } from "lucide-react";
 import { imageFilesFromClipboard, type AssistantImage } from "@/lib/assistantImages";
 import { AssistantModelPicker } from "./AssistantModelPicker";
 import { matchSlashCommands, slashQuery, type SlashCommand } from "./slashCommands";
@@ -51,6 +51,8 @@ export function AssistantComposer({
   onSlashCommand,
   editing = false,
   onCancelEdit,
+  socratic = false,
+  onToggleSocratic,
 }: {
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   input: string;
@@ -79,6 +81,9 @@ export function AssistantComposer({
   /** 正在编辑上一问：输入框上方挂一条说明，可取消。 */
   editing?: boolean;
   onCancelEdit?: () => void;
+  /** 引导（苏格拉底）模式开着：输入框描边换成强调色，提示语也换成「说说你的想法」。 */
+  socratic?: boolean;
+  onToggleSocratic?: () => void;
 }) {
   const { t } = useTranslation();
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
@@ -238,7 +243,14 @@ export function AssistantComposer({
           ))}
         </div>
       )}
-      <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-input)] transition-colors focus-within:border-[var(--border-strong)] motion-reduce:transition-none">
+      <div
+        data-socratic={socratic || undefined}
+        className={`rounded-xl border bg-[var(--surface-input)] transition-colors motion-reduce:transition-none ${
+          socratic
+            ? "border-[var(--accent)] focus-within:border-[var(--accent)]"
+            : "border-[var(--border-subtle)] focus-within:border-[var(--border-strong)]"
+        }`}
+      >
         {editing && (
           <div className="flex items-center gap-1.5 border-b border-[var(--border-faint)] px-2.5 py-1.5 ca-t-2xs text-[var(--text-muted)]">
             <PenLine className="h-3 w-3 flex-none" aria-hidden="true" />
@@ -292,7 +304,7 @@ export function AssistantComposer({
           aria-label={t("assistant.inputLabel")}
           rows={1}
           value={input}
-          placeholder={t("assistant.inputPlaceholder")}
+          placeholder={socratic ? t("assistant.socratic.placeholder") : t("assistant.inputPlaceholder")}
           onChange={(e) => onInput(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
@@ -390,6 +402,22 @@ export function AssistantComposer({
               onChange={onModelChange}
               onUnavailable={onModelUnavailable}
             />
+            {onToggleSocratic && (
+              <button
+                type="button"
+                aria-pressed={socratic}
+                title={t("assistant.socratic.toggleHint")}
+                onClick={onToggleSocratic}
+                className={`inline-flex flex-none items-center gap-1 rounded-full px-1.5 py-0.5 ca-t-2xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${
+                  socratic
+                    ? "bg-[var(--accent-weak)] font-medium text-[var(--accent-text)]"
+                    : "bg-[var(--surface-card)] text-[var(--text-muted)] hover:text-[var(--text-strong)]"
+                }`}
+              >
+                <GraduationCap className="h-2.5 w-2.5 flex-none" aria-hidden="true" />
+                {t("assistant.socratic.toggle")}
+              </button>
+            )}
           </div>
           {busy ? (
             <button

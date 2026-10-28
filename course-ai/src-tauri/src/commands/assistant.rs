@@ -42,6 +42,24 @@ const ASSISTANT_SYSTEM: &str = "你是这个课程学习应用里的助手，帮
    用户问截图或课件「在哪/什么时候讲的」，给课件页出现的时间；上下文里有「附图比对」结果时以它为准。\
 8. 回答里提到视频的时间点一律写成方括号形式，如 [12:34] 或 [1:02:03]，界面会把它变成可点的跳转。";
 
+/// 引导（苏格拉底）模式追加的规矩。
+///
+/// 界面靠回答末尾的 ```socratic 结构块画出选项按钮、分级提示、进度和收尾总结；
+/// 解析不了时界面按普通回答显示，所以格式写死、字段都可省。
+const SOCRATIC_RULES: &str = "\n\n【引导模式】用户打开了引导模式：他想自己想明白，而不是直接拿答案。严格遵守：\
+1. 不要直接给出最终答案或完整解法。每次只推进一小步：先用一两句话回应他上一句（对的肯定、错的指出哪里不对），\
+   再问一个具体、能回答的问题，引导他想到下一步。\
+2. 问题要依据课程内容（照样先用工具查），可以提示他回看某个时间点，如 [12:34]。\
+3. 用户说「不知道 / 给我提示」时给提示而不是答案；用户明确说「直接告诉我答案」时才完整讲解，并结束引导。\
+4. 每次回答的最后，必须单独附一个结构块（界面会把它画成按钮，用户看不到原文）：\n\
+```socratic\n\
+{\"step\":当前第几步,\"total\":预计共几步,\"options\":[\"两到三个可能的回答，短句\"],\
+\"hints\":[\"由浅到深的两级提示\"],\"answer\":\"这一步的答案（用户点了才看得到）\",\
+\"done\":是否已经推出结论,\"summary\":[\"done 为 true 时：用户自己推出的要点，2-4 条\"]}\n\
+```\n\
+   字段说明：options 是用户可以直接点选的回答，至少一个是对的、至少一个是常见误解；没有合适选项时给空数组。\
+   done 为 true 时 options、hints 给空数组，answer 给完整结论。结构块之外不要再重复这些内容。";
+
 const CONTEXT_PREFIX: &str = "（界面状态：";
 const MAX_HISTORY_USER_TURNS: usize = 8;
 const MAX_HISTORY_CHARS: usize = 48_000;
@@ -492,8 +510,10 @@ pub async fn cmd_assistant_ask(
     request_id: String,
     images: Option<Vec<String>>,
     profile_id: Option<String>,
+    mode: Option<String>,
 ) -> AppResult<()> {
     let query = query.trim().to_string();
+    let socratic = mode.as_deref() == Some("socratic");
     if query.is_empty() {
         return Err(AppError::Other("说点什么吧".into()));
     }
@@ -574,7 +594,7 @@ pub async fn cmd_assistant_ask(
             let result = agent::run(
                 &provider,
                 &model,
-                Some(ASSISTANT_SYSTEM.to_string()),
+                Some(system_prompt(socratic)),
                 messages,
                 &tools,
                 &cancel,
@@ -627,6 +647,15 @@ pub async fn cmd_assistant_ask(
     });
 
     Ok(())
+}
+
+/// 系统提示：引导模式在通用规矩之后追加引导规矩（通用的那几条照样要守）。
+fn system_prompt(socratic: bool) -> String {
+    if socratic {
+        format!("{ASSISTANT_SYSTEM}{SOCRATIC_RULES}")
+    } else {
+        ASSISTANT_SYSTEM.to_string()
+    }
 }
 
 fn assistant_error_kind(error: &AppError) -> &'static str {
@@ -766,6 +795,19 @@ mod tests {
         assert!(line.contains("当前课程《线性代数》 id=c1"));
         assert!(line.contains("当前视频《第 3 讲 行列式"), "标题要压成一行");
         assert!(line.contains("…》 id=v9"), "过长的标题要截短");
+    }
+
+    #[test]
+    fn socratic_mode_appends_guidance_rules_and_the_structured_block_format() {
+        let normal = system_prompt(false);
+        assert_eq!(normal, ASSISTANT_SYSTEM);
+        let guided = system_prompt(true);
+        assert!(guided.starts_with(ASSISTANT_SYSTEM), "通用规矩照样要守");
+        assert!(guided.contains("不要直接给出最终答案"));
+        assert!(guided.contains("```socratic"));
+        for field in ["step", "total", "options", "hints", "answer", "done", "summary"] {
+            assert!(guided.contains(&format!("\"{field}\"")), "结构块缺字段 {field}");
+        }
     }
 
     #[test]

@@ -585,7 +585,8 @@
     },
     "quoteToNotes": "Quote to notes",
     "quotedToNotes": "Quoted to notes",
-    "quoteToNotesFailed": "Couldn't add to notes. Try again."
+    "quoteToNotesFailed": "Couldn't add to notes. Try again.",
+    "guideMe": "Guide me"
   },
   "notes": {
     "unsaved": "Unsaved",
@@ -1070,7 +1071,32 @@
       "new": "New chat",
       "newHint": "Start a new conversation",
       "copy": "Copy chat",
-      "copyHint": "Copy the whole conversation as Markdown"
+      "copyHint": "Copy the whole conversation as Markdown",
+      "guide": "Guided mode",
+      "guideHint": "No direct answers — step-by-step questions",
+      "guideOff": "Turn off guide",
+      "guideOffHint": "Back to normal answers"
+    },
+    "socratic": {
+      "toggle": "Guide",
+      "toggleHint": "Guided mode: no direct answers — it asks you step by step so you work it out",
+      "placeholder": "Share your thinking…",
+      "on": "Guided mode on",
+      "off": "Guided mode off",
+      "badge": "Guided",
+      "progress": "Step {{step}} of {{total}}",
+      "stepOnly": "Step {{step}}",
+      "options": "Possible answers",
+      "notSure": "Not sure",
+      "hintN": "Hint {{n}}",
+      "showHint": "Give me a hint",
+      "showNextHint": "Another hint ({{n}})",
+      "revealAnswer": "Reveal answer",
+      "summaryTitle": "You worked out",
+      "makeCard": "Make a review card",
+      "cardSaved": "Added to review",
+      "cardFailed": "Couldn't save — try again",
+      "guideTranscript": "Guide me step by step through this transcript excerpt{{source}}:\n\n{{text}}"
     }
   },
   "assistantTools": {

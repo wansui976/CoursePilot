@@ -18,6 +18,8 @@ import type { AssistantAction, AssistantContext } from "@/lib/types";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { loadTurnImages } from "@/lib/assistantImageStore";
 import { ImageLightbox } from "./ImageLightbox";
+import { SocraticCard } from "./SocraticCard";
+import { splitSocratic, type SocraticBlock } from "./socratic";
 import {
   type Turn,
   usageTokens,
@@ -178,6 +180,8 @@ export function AssistantTurn({
   onExecutionStart,
   onExecutionEnd,
   onApplied,
+  onPickReply,
+  onMakeCard,
 }: {
   turn: Turn;
   isLast: boolean;
@@ -202,8 +206,15 @@ export function AssistantTurn({
   onExecutionStart: (turnId: string, actions: AssistantAction[]) => boolean;
   onExecutionEnd: () => void;
   onApplied?: (action: AssistantAction) => void;
+  /** 引导模式：点了某个可选回答，当作用户的下一句发出去。 */
+  onPickReply?: (reply: string) => void;
+  /** 引导模式收尾：把推出的要点做成复习卡。 */
+  onMakeCard?: (turn: Turn, block: SocraticBlock) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  // 引导模式：回答末尾的结构块不显示原文，画成下面那张卡。
+  const socratic = turn.mode === "socratic" ? splitSocratic(turn.answer) : null;
+  const shownAnswer = socratic ? socratic.text : turn.answer;
 
   return (
     <div className="space-y-2">
@@ -291,7 +302,17 @@ export function AssistantTurn({
            一行。成熟的助手都是这么分的：你说的话进气泡，它答的话铺满。左右不对称本身
            已经把「谁在说」讲清楚了。 */
         <div className="group">
-          <MemoAnswer answer={turn.answer} turn={turn} onSeek={onSeek} />
+          <MemoAnswer answer={shownAnswer} turn={turn} onSeek={onSeek} />
+          {socratic?.block && !turn.pending && (
+            <SocraticCard
+              block={socratic.block}
+              interactive={isLast && !busy && !actionExecutionBusy && Boolean(onPickReply)}
+              canMakeCard={hasVideoContext && Boolean(onMakeCard)}
+              onPick={(reply) => onPickReply?.(reply)}
+              onSeek={(ms) => onSeek(turn, ms)}
+              onMakeCard={() => onMakeCard?.(turn, socratic.block!) ?? Promise.resolve()}
+            />
+          )}
           {/* 每条回答底下常驻一排按钮，翻起来满屏都是灰图标。桌面端旧回答悬停或键盘聚焦才浮出来，
               但位置一直留着——不留的话鼠标一进来整段就往上跳。最新一轮一直显示：复制、存笔记、
               重新回答几乎都是冲着刚拿到的回答去的，藏起来等于让人去猜。触屏没有悬停，一直显示。 */}

@@ -29,6 +29,8 @@ export interface AssistantConversationSummary {
    * 存 id 不存标题：视频改了名，列表跟着显示新名字。旧索引没有这个字段。
    */
   sources?: AssistantConversationSource[];
+  /** 用过引导模式（任一轮是引导）：历史列表里标一个「引导」。 */
+  socratic?: boolean;
 }
 
 export interface AssistantConversationsState {
@@ -206,6 +208,7 @@ function readSummary(value: unknown): AssistantConversationSummary | null {
     updatedAt: value.updatedAt,
     // 出处是辅助信息：写坏了就丢掉这个字段，不能因此把整份索引判成损坏。
     ...withSources(readSources(value.sources)),
+    ...(value.socratic === true ? { socratic: true } : {}),
   };
 }
 
@@ -465,6 +468,11 @@ export function saveAssistantConversation(
       ...withSources(
         mergeSources(previous?.sources, deriveAssistantConversationSources(input.session)),
       ),
+      ...(previous?.socratic ||
+      input.session.mode === "socratic" ||
+      input.session.turns.some((turn) => turn.mode === "socratic")
+        ? { socratic: true }
+        : {}),
     },
     ...current.conversations.filter((conversation) => conversation.id !== input.id),
   ]);

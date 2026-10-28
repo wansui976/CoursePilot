@@ -509,4 +509,24 @@ export const scenes = [
       await shot("list");
     },
   },
+  {
+    // 引导模式：开开关 → 提问 → 回答画成进度 / 选项 / 提示 → 点选项 → 收尾总结。
+    name: "guided",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-guided", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openVideo(page);
+      await nav(page, "切换 AI 助手", "打开 AI 助手");
+      await page.getByRole("button", { name: /^引导$/ }).first().click();
+      await page.getByLabel("对 AI 助手说").fill("学习率太大会怎样？");
+      await page.getByLabel("发送").click();
+      await page.getByText("第 1 / 3 步").waitFor({ timeout: 4000 });
+      await page.getByRole("button", { name: "给我个提示" }).click();
+      await shot("step");
+      await page.getByRole("button", { name: "迈得很远" }).click();
+      await page.getByText("你自己推出了").waitFor({ timeout: 4000 });
+      await shot("done");
+    },
+  },
 ];
