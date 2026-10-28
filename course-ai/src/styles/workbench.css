@@ -696,3 +696,21 @@ li[data-active] > .ca-chapter .ca-chapter-time {
 .ca-wb[data-reading-focus] .tiptap-notes {
   padding-top: 32px;
 }
+
+/* 导图节点后的时间（lib/mindmapTimestamps）：小号、弱化，悬停才提亮，点了跳到视频那一刻。 */
+.ca-mm-time {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 0.8em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.ca-mm-time:hover,
+.ca-mm-time:focus-visible {
+  color: var(--accent-text);
+  background: var(--accent-weak);
+  outline: none;
+}

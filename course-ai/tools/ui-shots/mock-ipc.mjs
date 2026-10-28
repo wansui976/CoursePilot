@@ -189,7 +189,7 @@ export function installMockIpc({ theme, safeArea }) {
     "That is why learning-rate decay is common in practice.",
     "Next, stochastic gradient descent: estimate the gradient from a mini-batch each step.",
   ];
-  const mindmap = "# 梯度下降\n## 核心思想\n### 沿负梯度迭代\n### 损失越来越小\n## 学习率\n### 过大：震荡、发散\n### 过小：收敛慢\n### 衰减策略\n## 变体\n### 随机梯度下降\n### 小批量\n### 动量";
+  const mindmap = "# 梯度下降\n## 核心思想\n### 沿负梯度迭代 [03:00]\n### 损失越来越小 [04:20]\n## 学习率\n### 过大：震荡、发散 [07:10]\n### 过小：收敛慢 [08:05]\n### 衰减策略 [09:30]\n## 变体\n### 随机梯度下降 [11:00]\n### 小批量 [12:15]\n### 动量 [14:40]";
   window.__shareImages = [];
 
   const handlers = {

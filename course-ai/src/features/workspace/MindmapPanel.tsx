@@ -16,6 +16,12 @@ import { saveShareCard, shareCardHeader, useShareCardLabels } from "./useShareCa
 import { renderMindmapCard } from "@/lib/shareCard/render";
 import { markmapToTree } from "@/lib/shareCard/mindmapTree";
 import { useAiGeneration } from "@/lib/useAiGeneration";
+import {
+  linkMindmapTimestamps,
+  seekMsFromEvent,
+  stripMindmapTimestamps,
+} from "@/lib/mindmapTimestamps";
+import { usePlayer } from "@/stores/player";
 
 const transformer = new Transformer();
 
@@ -44,7 +50,7 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
           label: t("export.mindmapImage"),
           run: () => {
             const shareHeader = shareCardHeader(queryClient, videoId, t("shareCard.mindmapKind"));
-            const tree = markmapToTree(md, shareHeader.title);
+            const tree = markmapToTree(stripMindmapTimestamps(md), shareHeader.title);
             if (!tree) return Promise.reject(new Error(t("mindmap.emptyTitle")));
             const canvas = renderMindmapCard(shareHeader, tree, shareLabels);
             return saveShareCard(canvas, { videoId, fileName: t("shareCard.mindmapFile") });
@@ -66,6 +72,8 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
       mmRef.current = Markmap.create(svgRef.current, { fitRatio: 0.82 });
     }
     const { root } = transformer.transform(md);
+    // 叶子节点末尾的 [mm:ss] 换成可点的小时间（老导图没有，原样显示）。
+    linkMindmapTimestamps(root);
     rootRef.current = root;
     mmRef.current.setData(root);
     void mmRef.current.fit();
@@ -90,6 +98,28 @@ export function MindmapPanel({ videoId }: { videoId: string }) {
     observer.observe(svg);
     return () => observer.disconnect();
   }, []);
+
+  // 点节点后面的时间跳到视频那一刻。捕获阶段截住：markmap 自己在节点上监听点击（折叠分支），
+  // 点时间不该顺带把分支收起来。
+  const requestSeek = usePlayer((s) => s.requestSeek);
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onActivate = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== "Enter" && event.key !== " ") return;
+      const ms = seekMsFromEvent(event.target);
+      if (ms == null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      requestSeek(ms);
+    };
+    svg.addEventListener("click", onActivate, true);
+    svg.addEventListener("keydown", onActivate, true);
+    return () => {
+      svg.removeEventListener("click", onActivate, true);
+      svg.removeEventListener("keydown", onActivate, true);
+    };
+  }, [requestSeek]);
 
   function zoom(scale: number) {
     void mmRef.current?.rescale(scale);
