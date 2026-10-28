@@ -17,6 +17,43 @@ import {
 describe("assistantSession", () => {
   beforeEach(() => localStorage.clear());
 
+  it("附图只记张数，原图不落盘", () => {
+    const serialized = serializeAssistantSession({
+      turns: [
+        {
+          id: "with-image",
+          question: "这道题怎么做",
+          answer: "先求导",
+          actions: [],
+          tools: [],
+          canceled: false,
+          actionResults: [],
+          images: ["data:image/png;base64,AA=="],
+          imageCount: 1,
+        },
+      ],
+      history: [],
+      draft: "",
+    });
+    expect(serialized).not.toContain("base64");
+    const [turn] = deserializeAssistantSession(serialized).turns;
+    expect(turn.imageCount).toBe(1);
+    expect(turn.images).toBeUndefined();
+  });
+
+  it("读回的附图张数不合法时忽略", () => {
+    const session = deserializeAssistantSession(
+      JSON.stringify({
+        turns: [
+          { id: "a", question: "q", answer: "a", imageCount: -1 },
+          { id: "b", question: "q", answer: "a", imageCount: "3" },
+          { id: "c", question: "q", answer: "a", imageCount: 999 },
+        ],
+      }),
+    );
+    expect(session.turns.map((turn) => turn.imageCount)).toEqual([undefined, undefined, 4]);
+  });
+
   it("serializes and restores a session without depending on the fixed storage key", () => {
     const serialized = serializeAssistantSession(
       {

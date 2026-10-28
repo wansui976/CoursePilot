@@ -42,6 +42,13 @@ pub struct ChatMessage {
     /// 仅 tool 轮次：这条结果回应的是哪一次调用。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// 仅 user 轮次：随这句话一起发的图片，`data:image/...;base64,...` 形式的 data URL。
+    ///
+    /// 只在发出它的那一轮里带着。交回界面的历史会把它换成一行文字说明——
+    /// 一张截图的 base64 就有几百 KB，跟着历史来回传、存进本地会话，既占存储，
+    /// 又让之后每一轮都为同一张图重复付费。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
 }
 
 impl ChatMessage {
@@ -59,6 +66,15 @@ impl ChatMessage {
             content: content.into(),
             tool_calls: Vec::new(),
             tool_call_id: None,
+            images: Vec::new(),
+        }
+    }
+
+    /// 带图片的用户提问。
+    pub fn user_with_images(content: impl Into<String>, images: Vec<String>) -> Self {
+        Self {
+            images,
+            ..Self::user(content)
         }
     }
 
@@ -74,6 +90,7 @@ impl ChatMessage {
             content: content.into(),
             tool_calls: calls,
             tool_call_id: None,
+            images: Vec::new(),
         }
     }
 
@@ -85,6 +102,7 @@ impl ChatMessage {
             content: content.into(),
             tool_calls: Vec::new(),
             tool_call_id: Some(call_id.into()),
+            images: Vec::new(),
         }
     }
 }

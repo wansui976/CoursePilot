@@ -272,6 +272,29 @@ pub async fn resolved_provider_for_db(
     }))
 }
 
+/// 按 profile id 直接取 Provider，不看任务路由。助手页面里临时换模型走这里。
+///
+/// id 找不到或没存 Key 时报错，**不回退到默认模型**：用户明确选了这一个，
+/// 悄悄换成别的会把请求发去另一家、算在另一个账上。
+pub async fn provider_for_profile(
+    db: &crate::db::Db,
+    profile_id: &str,
+) -> AppResult<(crate::llm::Provider, String)> {
+    let profiles = parse_profiles(get_setting(db, "llm_profiles").await?.as_deref())?;
+    let Some(profile) = profiles.into_iter().find(|p| p.id == profile_id) else {
+        return Err(AppError::Config(
+            "所选模型已不在配置里，请在助手里重新选择".into(),
+        ));
+    };
+    let Some(key) = keychain::get_api_key(db, &profile.id).await? else {
+        return Err(AppError::Config(format!(
+            "模型「{}」还没有填 API Key（设置 → 大模型）",
+            profile.name
+        )));
+    };
+    Ok((build_provider(&profile, key), profile.model))
+}
+
 pub async fn provider_for_db(
     db: &crate::db::Db,
     task: AiTask,

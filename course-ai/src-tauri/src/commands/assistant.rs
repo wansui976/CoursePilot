@@ -45,6 +45,11 @@ const MAX_HISTORY_CHARS: usize = 48_000;
 /// 压缩历史的输入上限：溢出的老组拼接后先截到这个长度再送去摘要，
 /// 避免超长的老组把摘要请求自己撑爆。
 const MAX_DIGEST_INPUT_CHARS: usize = 24_000;
+/// 一次提问最多带几张图。界面同样限制，这里是兜底。
+const MAX_IMAGES_PER_QUESTION: usize = 4;
+/// 单张图 data URL 的长度上限（约 6 MB 原图）。界面会先压缩，正常截图远小于它；
+/// 超出说明绕过了界面，直接拒，免得把一个几十 MB 的请求体发出去。
+const MAX_IMAGE_DATA_URL_CHARS: usize = 8 * 1024 * 1024;
 
 /// 后台任务无论正常返回、报错、取消还是 panic，都必须释放 request id。
 struct AssistantCancelRegistration {
@@ -281,10 +286,12 @@ async fn prepare_history(
 ) -> Vec<ChatMessage> {
     let mut groups = Vec::new();
     let mut current = Vec::new();
-    for message in history {
+    for mut message in history {
         if message.role == "user" && message.content.starts_with(CONTEXT_PREFIX) {
             continue;
         }
+        // 图片只随发出它的那一轮发送；界面回传的历史里不该有，有也不信。
+        message.images.clear();
         if message.role == "user" {
             if valid_history_group(&current) {
                 groups.push(std::mem::take(&mut current));
@@ -400,7 +407,51 @@ fn history_for_next_turn(
         // 整轮不进入下次上下文，避免模型误以为一张并不存在的确认卡还在等用户。
         messages.truncate(completed_history_len.min(messages.len()));
     }
+    for message in &mut messages {
+        strip_images(message);
+    }
     messages
+}
+
+/// 把图片换成一行说明。留下说明是为了让模型之后知道「用户当时给过图」，
+/// 不至于把针对那张图的追问当成凭空提问；它对图的理解已经写在自己那轮的回答里了。
+fn strip_images(message: &mut ChatMessage) {
+    if message.images.is_empty() {
+        return;
+    }
+    let note = format!(
+        "（用户随这条消息附了 {} 张图片，之后的对话不再附带原图）",
+        message.images.len()
+    );
+    message.images.clear();
+    if message.content.is_empty() {
+        message.content = note;
+    } else {
+        message.content = format!("{}\n{note}", message.content);
+    }
+}
+
+/// 校验界面传来的图片：数量、格式、大小。只认常见的位图 data URL。
+fn validate_images(images: Vec<String>) -> AppResult<Vec<String>> {
+    if images.len() > MAX_IMAGES_PER_QUESTION {
+        return Err(AppError::Other(format!(
+            "一次最多附 {MAX_IMAGES_PER_QUESTION} 张图片"
+        )));
+    }
+    for image in &images {
+        let supported = ["png", "jpeg", "webp", "gif"]
+            .iter()
+            .any(|kind| image.starts_with(&format!("data:image/{kind};base64,")));
+        if !supported {
+            return Err(AppError::Other(
+                "图片格式不支持，只能附 PNG、JPEG、WebP 或 GIF".into(),
+            ));
+        }
+        if image.len() > MAX_IMAGE_DATA_URL_CHARS {
+            return Err(AppError::Other("图片太大了，换一张小一点的".into()));
+        }
+    }
+    Ok(images)
 }
 
 /// 流式提问。**命令立即返回，真正的活儿丢到后台任务里跑。**
@@ -409,6 +460,7 @@ fn history_for_next_turn(
 /// 那样就成了「不流式、最后一次性蹦出来」。后台任务发的事件才实时到达。
 /// 结果与错误都经 `assistant-stream:<request_id>` 事件送达（done / error）。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // 命令入口：参数名就是前端 invoke 的键，拆成结构体会改掉 IPC 形状。
 pub async fn cmd_assistant_ask(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -416,11 +468,14 @@ pub async fn cmd_assistant_ask(
     context: Option<AssistantContext>,
     history: Option<Vec<ChatMessage>>,
     request_id: String,
+    images: Option<Vec<String>>,
+    profile_id: Option<String>,
 ) -> AppResult<()> {
     let query = query.trim().to_string();
     if query.is_empty() {
         return Err(AppError::Other("说点什么吧".into()));
     }
+    let images = validate_images(images.unwrap_or_default())?;
     if request_id.trim().is_empty() {
         return Err(AppError::Other("缺少提问请求 id".into()));
     }
@@ -434,15 +489,14 @@ pub async fn cmd_assistant_ask(
 
     // 模型配置在返回前解析：没配大模型这类错误要当场由命令返回值报出去，
     // 而不是等前端订阅上事件之后才收到一条 error——那时错误提示会晚一拍。
-    let resolved = crate::commands::ai::provider_for_db(&state.db, AiTask::Assistant).await;
-    let (provider, model) = match resolved {
-        Ok(Some(pair)) => pair,
-        Ok(None) => {
-            return Err(AppError::Config(
-                "尚未配置可用的大模型（设置 → 大模型）".into(),
-            ))
-        }
-        Err(error) => return Err(error),
+    // 界面里选了具体模型就用它；没选（跟随设置）才走任务路由。
+    let (provider, model) = match profile_id.as_deref().filter(|id| !id.is_empty()) {
+        Some(id) => crate::commands::ai::provider_for_profile(&state.db, id).await?,
+        None => crate::commands::ai::provider_for_db(&state.db, AiTask::Assistant)
+            .await?
+            .ok_or_else(|| {
+                AppError::Config("尚未配置可用的大模型（设置 → 大模型）".into())
+            })?,
     };
 
     let db = state.db.clone();
@@ -465,7 +519,7 @@ pub async fn cmd_assistant_ask(
             if let Some(line) = context_line(&context, &names) {
                 messages.push(ChatMessage::user(line));
             }
-            messages.push(ChatMessage::user(&query));
+            messages.push(ChatMessage::user_with_images(&query, images));
 
             let tools = AssistantTools::new(&db, context);
             let mut tools_used: Vec<String> = Vec::new();
@@ -1048,5 +1102,47 @@ mod tests {
         );
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].content, previous.content);
+    }
+
+    #[test]
+    fn images_do_not_travel_back_in_follow_up_history() {
+        let history = history_for_next_turn(
+            vec![
+                ChatMessage::user_with_images("这道题", vec!["data:image/png;base64,AA==".into()]),
+                ChatMessage::assistant("是一道积分题"),
+            ],
+            0,
+            false,
+        );
+        assert!(history[0].images.is_empty());
+        assert!(history[0].content.starts_with("这道题\n"));
+        assert!(history[0].content.contains("1 张图片"));
+        assert_eq!(history[1].content, "是一道积分题");
+    }
+
+    #[tokio::test]
+    async fn images_smuggled_into_incoming_history_are_dropped() {
+        let prepared = prepare_history(
+            vec![
+                ChatMessage::user_with_images("旧问题", vec!["data:image/png;base64,AA==".into()]),
+                ChatMessage::assistant("旧回答"),
+            ],
+            &mock_provider("摘要"),
+            "m",
+        )
+        .await;
+        assert_eq!(prepared.len(), 2);
+        assert!(prepared[0].images.is_empty());
+    }
+
+    #[test]
+    fn image_validation_rejects_what_the_ui_would_never_send() {
+        let png = "data:image/png;base64,AA==".to_string();
+        assert_eq!(validate_images(vec![png.clone()]).unwrap().len(), 1);
+        assert!(validate_images(vec![png.clone(); MAX_IMAGES_PER_QUESTION + 1]).is_err());
+        assert!(validate_images(vec!["https://example.com/a.png".into()]).is_err());
+        assert!(validate_images(vec!["data:image/svg+xml;base64,AA==".into()]).is_err());
+        let huge = format!("data:image/png;base64,{}", "A".repeat(MAX_IMAGE_DATA_URL_CHARS));
+        assert!(validate_images(vec![huge]).is_err());
     }
 }

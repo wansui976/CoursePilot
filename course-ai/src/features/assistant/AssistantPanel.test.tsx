@@ -46,6 +46,10 @@ const { confirmMock, mockIpc, platformMock } = vi.hoisted(() => ({
       hasBilibiliCookies: vi.fn(),
     },
     pipeline: { process: vi.fn() },
+    ai: {
+      getProfiles: vi.fn().mockResolvedValue([]),
+      hasApiKey: vi.fn().mockResolvedValue(false),
+    },
   },
   platformMock: { mobile: false, tablet: false },
 }));
@@ -58,6 +62,11 @@ vi.mock("@/lib/notesCoordinator", () => ({
   notesCoordinator: notesCoordinatorMock,
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: confirmMock }));
+// jsdom 不解码图片也没有 canvas；压缩本身由 assistantImages 的单测覆盖。
+vi.mock("@/lib/assistantImages", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/assistantImages")>()),
+  prepareAssistantImage: vi.fn(async (file: File) => `data:${file.type};base64,AA==`),
+}));
 vi.mock("@/lib/platform", () => ({
   isMobile: () => platformMock.mobile,
   isAndroid: () => platformMock.mobile,
@@ -141,9 +150,11 @@ describe("AssistantPanel", () => {
     localStorage.clear();
     platformMock.mobile = false;
     platformMock.tablet = false;
-    useAssistantUi.setState({ open: true, side: "right", width: 380 });
+    useAssistantUi.setState({ open: true, side: "right", width: 380, modelProfileId: null });
     useInlineAsk.setState({ pending: null });
     mockIpc.assistant.ask.mockResolvedValue(reply());
+    mockIpc.ai.getProfiles.mockResolvedValue([]);
+    mockIpc.ai.hasApiKey.mockResolvedValue(false);
     mockIpc.assistant.cancel.mockResolvedValue(undefined);
     notesCoordinatorMock.appendAnswer.mockResolvedValue({ contentJson: "{}" });
     confirmMock.mockResolvedValue(true);
@@ -278,8 +289,109 @@ describe("AssistantPanel", () => {
         [],
         expect.any(String),
         expect.any(Function),
+        { images: [], profileId: null },
       ),
     );
+  });
+
+  function pasteImage(type = "image/png", text = "") {
+    const file = new File(["x"], "shot.png", { type });
+    fireEvent.paste(screen.getByLabelText("对助手说"), {
+      clipboardData: {
+        items: [{ kind: "file", type, getAsFile: () => file }],
+        getData: () => text,
+      },
+    });
+  }
+
+  it("粘贴的截图随问题一起发出，发出后输入框里的附图清空", async () => {
+    renderPanel();
+    pasteImage();
+    expect(await screen.findByLabelText("移除附图 1")).toBeInTheDocument();
+    await ask("这道题怎么做");
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenCalledWith(
+        "这道题怎么做",
+        expect.anything(),
+        [],
+        expect.any(String),
+        expect.any(Function),
+        { images: ["data:image/png;base64,AA=="], profileId: null },
+      ),
+    );
+    expect(screen.queryByLabelText("移除附图 1")).not.toBeInTheDocument();
+    // 提问气泡里留着缩略图，让人看得出这一问带了图。
+    expect(screen.getByAltText("附图 1")).toBeInTheDocument();
+  });
+
+  it("只贴图不打字也能发，用一句默认的问法", async () => {
+    renderPanel();
+    pasteImage("image/jpeg");
+    await screen.findByLabelText("移除附图 1");
+    fireEvent.click(screen.getByLabelText("发送"));
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenCalledWith(
+        "请看看这张图片",
+        expect.anything(),
+        [],
+        expect.any(String),
+        expect.any(Function),
+        { images: ["data:image/jpeg;base64,AA=="], profileId: null },
+      ),
+    );
+  });
+
+  it("附图超过上限时多出的不收，并说明原因", async () => {
+    renderPanel();
+    for (let i = 0; i < 5; i += 1) pasteImage();
+    expect(await screen.findByText("一次最多附 4 张图片")).toBeInTheDocument();
+    await screen.findByLabelText("移除附图 4");
+    expect(screen.queryByLabelText("移除附图 5")).not.toBeInTheDocument();
+  });
+
+  it("在助手里换模型后按所选模型提问，且记住选择", async () => {
+    mockIpc.ai.getProfiles.mockResolvedValue([
+      { id: "p1", name: "GPT-4o", kind: "openai", base_url: "u", model: "gpt-4o" },
+      { id: "p2", name: "Qwen VL", kind: "openai", base_url: "u", model: "qwen-vl-max" },
+    ]);
+    mockIpc.ai.hasApiKey.mockResolvedValue(true);
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "当前模型：默认 · GPT-4o" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Qwen VL/ }));
+    expect(await screen.findByRole("button", { name: "当前模型：Qwen VL" })).toBeInTheDocument();
+    expect(useAssistantUi.getState().modelProfileId).toBe("p2");
+    await ask("你好");
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenCalledWith(
+        "你好",
+        expect.anything(),
+        [],
+        expect.any(String),
+        expect.any(Function),
+        { images: [], profileId: "p2" },
+      ),
+    );
+  });
+
+  it("没填 Key 的模型不能选", async () => {
+    mockIpc.ai.getProfiles.mockResolvedValue([
+      { id: "p1", name: "GPT-4o", kind: "openai", base_url: "u", model: "gpt-4o" },
+    ]);
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "当前模型：默认 · GPT-4o" }));
+    expect(await screen.findByRole("menuitemradio", { name: /GPT-4o未填 Key/ })).toBeDisabled();
+  });
+
+  it("记住的模型已被删掉时改回默认，并告诉用户", async () => {
+    useAssistantUi.setState({ modelProfileId: "gone" });
+    mockIpc.ai.getProfiles.mockResolvedValue([
+      { id: "p1", name: "GPT-4o", kind: "openai", base_url: "u", model: "gpt-4o" },
+    ]);
+    renderPanel();
+    expect(
+      await screen.findByText("之前选的模型已不在配置里，已改回默认模型"),
+    ).toBeInTheDocument();
+    expect(useAssistantUi.getState().modelProfileId).toBeNull();
   });
 
   it("思考内容边生成边显示，且比答案先出现", async () => {
@@ -849,6 +961,7 @@ describe("AssistantPanel", () => {
         [],
         expect.any(String),
         expect.any(Function),
+        { images: [], profileId: null },
       ),
     );
   });
@@ -868,6 +981,7 @@ describe("AssistantPanel", () => {
         history,
         expect.any(String),
         expect.any(Function),
+        { images: [], profileId: null },
       ),
     );
   });
@@ -1093,6 +1207,7 @@ describe("AssistantPanel", () => {
         previousHistory,
         expect.any(String),
         expect.any(Function),
+        { images: [], profileId: null },
       ),
     );
   });
@@ -1118,6 +1233,7 @@ describe("AssistantPanel", () => {
         [],
         expect.any(String),
         expect.any(Function),
+        { images: [], profileId: null },
       ),
     );
   });
@@ -1619,6 +1735,7 @@ describe("AssistantPanel", () => {
         ],
         expect.any(String),
         expect.any(Function),
+        { images: [], profileId: null },
       ),
     );
   });
@@ -1905,6 +2022,7 @@ describe("AssistantPanel", () => {
         [],
         expect.any(String),
         expect.any(Function),
+        { images: [], profileId: null },
       ),
     );
     expect(await screen.findByText("换个说法")).toBeInTheDocument();
@@ -1965,6 +2083,7 @@ describe("AssistantPanel", () => {
         ],
         expect.any(String),
         expect.any(Function),
+        { images: [], profileId: null },
       ),
     );
     expect(JSON.stringify(mockIpc.assistant.ask.mock.calls[0])).not.toContain("stale-video-id");
@@ -2004,6 +2123,7 @@ describe("AssistantPanel", () => {
         ],
         expect.any(String),
         expect.any(Function),
+        { images: [], profileId: null },
       ),
     );
   });
@@ -2113,6 +2233,7 @@ describe("AssistantPanel", () => {
         expect.any(Array),
         expect.any(String),
         expect.any(Function),
+        { images: [], profileId: null },
       ),
     );
     expect(

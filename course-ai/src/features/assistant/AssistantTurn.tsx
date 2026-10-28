@@ -134,7 +134,24 @@ export function AssistantTurn({
     <div className="space-y-2">
       {/* 自己说的话靠右、带底色；助手的靠左。一眼能分清谁说的，
           比让两边都是同一坨灰字强得多。 */}
-      <div className="flex justify-end">
+      <div className="flex flex-col items-end gap-1">
+        {turn.images && turn.images.length > 0 ? (
+          <div className="flex max-w-[85%] flex-wrap justify-end gap-1">
+            {turn.images.map((src, index) => (
+              <img
+                key={index}
+                src={src}
+                alt={t("assistant.attachedImageAlt", { index: index + 1 })}
+                className="h-16 w-16 rounded-lg border border-[var(--border-subtle)] object-cover"
+              />
+            ))}
+          </div>
+        ) : turn.imageCount ? (
+          // 原图只在本次运行里留着；重启后照实说附过图，而不是装作这一问只有文字。
+          <span className="ca-t-2xs text-[var(--text-faint)]">
+            {t("assistant.attachedImagesNotKept", { count: turn.imageCount })}
+          </span>
+        ) : null}
         <p
           data-testid="user-bubble"
           className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-[var(--accent-weak-2)] px-3 py-1.5 text-sm text-[var(--accent-text)]"

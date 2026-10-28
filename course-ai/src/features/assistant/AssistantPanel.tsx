@@ -54,6 +54,12 @@ import {
   type AssistantConversationsState,
 } from "@/lib/assistantConversations";
 import { humanizeError } from "@/lib/errors";
+import {
+  AssistantImageError,
+  MAX_ASSISTANT_IMAGES,
+  prepareAssistantImage,
+  type AssistantImage,
+} from "@/lib/assistantImages";
 import { ipc } from "@/lib/ipc";
 import { notesCoordinator } from "@/lib/notesCoordinator";
 import { isMobile, isTablet } from "@/lib/platform";
@@ -248,7 +254,7 @@ export function AssistantPanel({
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { open, side, width, setOpen } = useAssistantUi();
+  const { open, side, width, setOpen, modelProfileId, setModelProfileId } = useAssistantUi();
   const [initialConversation] = useState(initialAssistantConversation);
   const initialSession = initialConversation.session;
   const [conversationState, setConversationState] = useState<AssistantConversationsState>(
@@ -256,6 +262,12 @@ export function AssistantPanel({
   );
   const [historyOpen, setHistoryOpen] = useState(false);
   const [input, setInput] = useState(initialSession.draft);
+  // 待随下一句发出的附图。只在内存里：切会话、发出去就清掉，不进草稿存储。
+  const [attachments, setAttachments] = useState<AssistantImage[]>([]);
+  const attachmentsRef = useRef<AssistantImage[]>([]);
+  attachmentsRef.current = attachments;
+  // 正在压缩、还没进列表的张数。连着粘贴几次时它们都还没落进 state，不算上就会超限。
+  const preparingImagesRef = useRef(0);
   const [busy, setBusy] = useState(false);
   const [actionExecutionCount, setActionExecutionCount] = useState(0);
   const [stopping, setStopping] = useState(false);
@@ -794,8 +806,53 @@ export function AssistantPanel({
     };
   }, [clearScheduledPersistence, persistConversationSnapshot]);
 
-  async function send(suggestedQuestion?: string, rememberQuestion = true) {
-    const question = (suggestedQuestion ?? input).trim();
+  // 记住的模型被删了：选择器已改回默认，这里说一声，免得用户以为还在用原来那个。
+  const showModelUnavailable = useCallback(() => setError(t("assistant.modelUnavailable")), [t]);
+
+  /** 粘贴或选中的图片：逐张压缩后加进待发列表，超出上限的丢掉并提示。 */
+  async function addImages(files: File[]) {
+    const room = MAX_ASSISTANT_IMAGES - attachmentsRef.current.length - preparingImagesRef.current;
+    if (files.length > room) {
+      setError(t("assistant.imageLimit", { count: MAX_ASSISTANT_IMAGES }));
+    }
+    const accepted = files.slice(0, Math.max(room, 0));
+    preparingImagesRef.current += accepted.length;
+    for (const file of accepted) {
+      try {
+        const dataUrl = await prepareAssistantImage(file);
+        if (!mountedRef.current) return;
+        setAttachments((current) =>
+          current.length >= MAX_ASSISTANT_IMAGES
+            ? current
+            : [...current, { id: crypto.randomUUID(), dataUrl }],
+        );
+      } catch (e) {
+        if (!mountedRef.current) return;
+        setError(
+          e instanceof AssistantImageError ? t("assistant.imageUnsupported") : humanizeError(e),
+        );
+      } finally {
+        preparingImagesRef.current -= 1;
+      }
+    }
+  }
+
+  /**
+   * `imagesOverride` 只给「重新回答」用：把那一问当时附的图原样再发一次。
+   * 从输入框发出时取待发附图；点建议问题时不带图——那是另一个问题，不该捎上用户正在准备的图。
+   */
+  async function send(
+    suggestedQuestion?: string,
+    rememberQuestion = true,
+    imagesOverride?: string[],
+  ) {
+    const fromInput = suggestedQuestion === undefined;
+    const pendingImages = fromInput ? attachmentsRef.current : [];
+    const images = imagesOverride ?? pendingImages.map((image) => image.dataUrl);
+    // 只贴了图没打字时给一句默认的问法，模型和对话记录里都不会出现一条空白提问。
+    const question =
+      (suggestedQuestion ?? input).trim() ||
+      (images.length > 0 ? t("assistant.imageOnlyQuestion") : "");
     if (!question || busy || activeRequestRef.current || actionExecutionCountRef.current > 0) return;
     // 防御：同一问题不该出现两个「处理中」回合（曾出现过一问题显示两条「正在整理结果」）。
     // 个别触发路径（如 Enter 与发送按钮竞态、重开面板残留）会重复创建 pending 回合，
@@ -816,9 +873,10 @@ export function AssistantPanel({
     setScrolledAway(false);
     // 只清从输入框发出的那一条。点建议、点重新回答时用户可能正打着别的字，
     // 不该被顺手抹掉。
-    if (suggestedQuestion === undefined) {
+    if (fromInput) {
       resetRecentQuestionNavigation("");
       setInput("");
+      setAttachments([]);
     } else {
       resetRecentQuestionNavigation(input);
     }
@@ -848,6 +906,7 @@ export function AssistantPanel({
           actionResults: [],
           pending: true,
           context: { ...askContext },
+          ...(images.length > 0 ? { images, imageCount: images.length } : {}),
         },
       ].slice(-MAX_RENDERED_TURNS),
     );
@@ -1014,6 +1073,7 @@ export function AssistantPanel({
             scheduleStreamFlush();
           }
         },
+        { images, profileId: modelProfileId },
       );
       if (!mountedRef.current) return;
       flushStream();
@@ -1100,6 +1160,10 @@ export function AssistantPanel({
         resetRecentQuestionNavigation(next);
         return next;
       });
+      // 附图同理：失败时放回去，除非用户等待期间又贴了新的。
+      if (pendingImages.length > 0) {
+        setAttachments((current) => (current.length > 0 ? current : pendingImages));
+      }
       setError(humanizeError(e));
       setStatusAnnouncement("");
       if (!useAssistantUi.getState().open) setHasUnread(true);
@@ -1165,7 +1229,7 @@ export function AssistantPanel({
     historyRef.current = before;
     setHistory(before);
     setTurns((previous) => previous.filter((item) => item.id !== turn.id));
-    void send(turn.question, false);
+    void send(turn.question, false, turn.images);
   }
 
   function jumpToLatest() {
@@ -1207,6 +1271,7 @@ export function AssistantPanel({
     sessionSnapshotRef.current = session;
     hadPendingTurnRef.current = false;
     setInput(session.draft);
+    setAttachments([]);
     resetRecentQuestionNavigation(session.draft);
     setError("");
     setStatusAnnouncement("");
@@ -1810,6 +1875,14 @@ export function AssistantPanel({
           scopeOptions={scopeOptions}
           scopeChoice={scopeChoice}
           onScopeChoice={setScopeChoice}
+          images={attachments}
+          onAddImages={(files) => void addImages(files)}
+          onRemoveImage={(id) =>
+            setAttachments((current) => current.filter((image) => image.id !== id))
+          }
+          modelProfileId={modelProfileId}
+          onModelChange={setModelProfileId}
+          onModelUnavailable={showModelUnavailable}
         />
       )}
     </aside>

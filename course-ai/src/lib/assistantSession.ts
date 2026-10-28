@@ -21,6 +21,7 @@ const MAX_ACTION_RESULTS = 50;
 const MAX_ACTION_RESULT_CHARS = 2_000;
 const MAX_CHECKPOINT_TARGETS = 12;
 const MAX_CHECKPOINT_LABEL_CHARS = 240;
+const MAX_TURN_IMAGES = 4;
 const CONTEXT_PREFIX = "（界面状态：";
 const EXPIRED_ACTION_HISTORY_NOTICE =
   "（界面操作结果：应用重启后，本轮旧操作按钮已失效；已经完成的结果以操作记录为准，尚未确认的操作未执行。如仍需操作，必须重新调用工具核对当前状态并生成新按钮。）";
@@ -121,6 +122,10 @@ export interface AssistantTurnRecord {
   pending?: boolean;
   /** 回答产生时的界面上下文，确保以后点时间戳仍回到原视频。 */
   context?: AssistantContext;
+  /** 这一问附了几张图。原图不落盘，重启后只剩这个数字用来提示。旧记录没有。 */
+  imageCount?: number;
+  /** 这一问附的图（data URL），只在当前进程里用来显示缩略图和「重新回答」；不落盘。 */
+  images?: string[];
 }
 
 export interface AssistantSession {
@@ -382,6 +387,11 @@ function readTurn(value: unknown, now: number): AssistantTurnRecord | null {
     ...(toolRuns ? { toolRuns } : {}),
     canceled: value.canceled === true,
     ...(value.hitTurnLimit === true ? { hitTurnLimit: true } : {}),
+    ...(typeof value.imageCount === "number" &&
+    Number.isInteger(value.imageCount) &&
+    value.imageCount > 0
+      ? { imageCount: Math.min(value.imageCount, MAX_TURN_IMAGES) }
+      : {}),
     actionResults: Array.isArray(value.actionResults)
       ? value.actionResults
           .filter((result): result is string => typeof result === "string")
@@ -644,6 +654,8 @@ export function serializeAssistantSession(session: AssistantSession, now = Date.
       actionsExpired: interaction.status !== "none" || undefined,
       checkpoint,
       pending: undefined,
+      // 一张截图的 base64 就有几百 KB，本地存储放不下几轮；只留张数。
+      images: undefined,
     };
   });
   const cleanHistory = boundAssistantHistory(session.history);

@@ -37,6 +37,36 @@ describe("ipc.assistant", () => {
     invokeMock.mockResolvedValue(undefined);
   });
 
+  it("附图和指定模型只在给了时才带上，原有请求形状不变", async () => {
+    const plain = ipc.assistant.ask("查一下", undefined, [], "request-plain");
+    await vi.waitFor(() => expect(invokeMock).toHaveBeenCalled());
+    expect(invokeMock).toHaveBeenLastCalledWith("cmd_assistant_ask", {
+      query: "查一下",
+      context: undefined,
+      history: [],
+      requestId: "request-plain",
+    });
+    emit({ payload: { type: "done", reply: reply() } });
+    await plain;
+
+    const withExtras = ipc.assistant.ask("看图", undefined, [], "request-img", () => {}, {
+      images: ["data:image/png;base64,AA=="],
+      profileId: "p2",
+    });
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenLastCalledWith("cmd_assistant_ask", {
+        query: "看图",
+        context: undefined,
+        history: [],
+        requestId: "request-img",
+        images: ["data:image/png;base64,AA=="],
+        profileId: "p2",
+      }),
+    );
+    emit({ payload: { type: "done", reply: reply() } });
+    await withExtras;
+  });
+
   it("记住早于后端登记的停止，并在 ask 返回后补发取消", async () => {
     let releaseAsk!: () => void;
     invokeMock.mockImplementation((command: string) => {

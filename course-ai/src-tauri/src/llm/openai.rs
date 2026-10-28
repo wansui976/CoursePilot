@@ -241,6 +241,18 @@ fn message_body(m: &crate::llm::ChatMessage) -> Value {
             })).collect::<Vec<_>>(),
         });
     }
+    if !m.images.is_empty() {
+        // 带图的提问用 OpenAI 的多段 content：文字一段、每张图一段。
+        // 文字为空时不发空的 text 段，有的端点会因此报参数错误。
+        let mut parts = Vec::new();
+        if !m.content.is_empty() {
+            parts.push(json!({"type": "text", "text": m.content}));
+        }
+        for url in &m.images {
+            parts.push(json!({"type": "image_url", "image_url": {"url": url}}));
+        }
+        return json!({"role": m.role, "content": parts});
+    }
     json!({"role": m.role, "content": m.content})
 }
 
@@ -893,6 +905,34 @@ mod tests {
             }],
         )];
         assert!(build_openai_body(&req)["messages"][1]["content"].is_null());
+    }
+
+    #[test]
+    fn a_question_with_images_is_sent_as_multipart_content() {
+        let mut req = sample_req();
+        req.messages = vec![ChatMessage::user_with_images(
+            "这道题怎么做",
+            vec!["data:image/png;base64,AA==".into(), "data:image/jpeg;base64,BB==".into()],
+        )];
+        let body = build_openai_body(&req);
+        let parts = body["messages"][1]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0], json!({"type": "text", "text": "这道题怎么做"}));
+        assert_eq!(parts[1]["type"], "image_url");
+        assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,AA==");
+        assert_eq!(parts[2]["image_url"]["url"], "data:image/jpeg;base64,BB==");
+
+        // 没有文字时不发空 text 段。
+        req.messages = vec![ChatMessage::user_with_images(
+            "",
+            vec!["data:image/png;base64,AA==".into()],
+        )];
+        let parts = build_openai_body(&req)["messages"][1]["content"].clone();
+        assert_eq!(parts.as_array().unwrap().len(), 1);
+
+        // 不带图的提问请求体形状不变：content 仍是字符串。
+        req.messages = vec![ChatMessage::user("hi")];
+        assert_eq!(build_openai_body(&req)["messages"][1]["content"], "hi");
     }
 
     #[test]

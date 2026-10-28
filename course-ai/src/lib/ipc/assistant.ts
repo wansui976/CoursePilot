@@ -21,6 +21,14 @@ type AssistantRequestState = {
 // locally and replay the cancellation once the ask command has returned.
 const assistantRequestStates = new Map<string, AssistantRequestState>();
 
+/** 一次提问的附加项。都不给时请求和原来一样。 */
+export interface AssistantAskOptions {
+  /** 随问题一起发的图片，data URL。 */
+  images?: string[];
+  /** 指定用哪个模型；不给则跟随设置里的默认模型。 */
+  profileId?: string | null;
+}
+
 export const assistant = {
   /**
    * 问一句，流式。history 传上一轮返回的 history 即可续聊；requestId 用来精确停止这一轮。
@@ -34,6 +42,7 @@ export const assistant = {
     history: AssistantMessage[] | undefined,
     requestId: string,
     onEvent: (e: AssistantEvent) => void = () => {},
+    options: AssistantAskOptions = {},
   ): Promise<AssistantReply> => {
     let resolveAskReady!: () => void;
     const askReady = new Promise<void>((resolve) => {
@@ -67,7 +76,14 @@ export const assistant = {
         },
       );
       // 命令本身只在「未配置大模型」这类配置错误时才 reject。
-      await invoke("cmd_assistant_ask", { query, context, history, requestId });
+      await invoke("cmd_assistant_ask", {
+        query,
+        context,
+        history,
+        requestId,
+        ...(options.images?.length ? { images: options.images } : {}),
+        ...(options.profileId ? { profileId: options.profileId } : {}),
+      });
       requestState.askSettled = true;
       if (requestState.cancelRequested) {
         // The first cancel may have run before the backend registered this id.

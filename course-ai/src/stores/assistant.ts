@@ -7,6 +7,8 @@ export type DockSide = "left" | "right";
 const SIDE_KEY = "assistant_dock_side";
 const OPEN_KEY = "assistant_open";
 const WIDTH_KEY = "assistant_panel_width";
+/** 助手页面里选的模型（LLM profile id）。不存 = 跟随设置里的默认模型。 */
+const MODEL_KEY = "assistant_model_profile";
 
 /**
  * 面板宽度的上下限。
@@ -50,6 +52,14 @@ function readWidth(): number {
   }
 }
 
+function readModel(): string | null {
+  try {
+    return localStorage.getItem(MODEL_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
 function persist(key: string, value: string) {
   try {
     localStorage.setItem(key, value);
@@ -71,6 +81,12 @@ interface AssistantUiState {
   /** 面板关着时来了新回复：左侧工具栏与移动端入口都据此亮一个小圆点。 */
   unread: boolean;
   setUnread: (unread: boolean) => void;
+  /**
+   * 助手用哪个模型。null 跟随设置（任务路由里的 assistant）。
+   * 只影响助手，不改设置里的路由——在这里换个模型试一句，不该连带把笔记、出题也换掉。
+   */
+  modelProfileId: string | null;
+  setModelProfileId: (id: string | null) => void;
 }
 
 export const useAssistantUi = create<AssistantUiState>((set, get) => ({
@@ -79,6 +95,16 @@ export const useAssistantUi = create<AssistantUiState>((set, get) => ({
   width: readWidth(),
   unread: false,
   setUnread: (unread) => set({ unread }),
+  modelProfileId: readModel(),
+  setModelProfileId: (id) => {
+    try {
+      if (id) localStorage.setItem(MODEL_KEY, id);
+      else localStorage.removeItem(MODEL_KEY);
+    } catch {
+      // 记不住就只在本次运行里生效。
+    }
+    set({ modelProfileId: id });
+  },
   setOpen: (open) => {
     persist(OPEN_KEY, open ? "1" : "0");
     set({ open });
