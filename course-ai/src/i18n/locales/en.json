@@ -1052,7 +1052,8 @@
     "import_video": "Preparing import",
     "get_video_summary": "Read video summary",
     "get_video_chapters": "Read key chapters",
-    "get_video_notes": "Read notes"
+    "get_video_notes": "Read notes",
+    "match_slides": "Match slides by image"
   },
   "assistantActions": {
     "renameTitle": "Rename",

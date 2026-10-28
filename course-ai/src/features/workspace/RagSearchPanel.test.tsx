@@ -694,7 +694,8 @@ describe("RagSearchPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "搜索" }));
 
     // 板书上的术语老师常写了不念，字幕里根本没有——命中要看得出来自课件第几页。
-    expect(await screen.findByText("课件 P2")).toBeInTheDocument();
+    // slide_page 是库里从 0 开始的序号；显示和课件面板一样从 1 数（第 3 页 = P3）。
+    expect(await screen.findByText("课件 P3")).toBeInTheDocument();
     await waitFor(() =>
       expect(mockIpc.slides.image).toHaveBeenCalledWith("video-1", "/pages/p2.jpg"),
     );

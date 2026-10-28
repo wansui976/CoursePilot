@@ -75,7 +75,7 @@ function CitationSources({
             {/* 这条出处来自课件画面而不是老师念的话——不标一下，读者会以为是原话。 */}
             {c.slide_image && (
               <span className="mr-1.5 rounded bg-[var(--surface-card-hover)] px-1 ca-t-2xs text-[var(--text-muted)]">
-                {t("ragSearch.slidePage", { page: c.slide_page ?? 0 })}
+                {t("ragSearch.slidePage", { page: (c.slide_page ?? 0) + 1 })}
               </span>
             )}
             <span className="text-[var(--text-normal)]"><MathText text={c.text} /></span>
@@ -889,7 +889,7 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
                       <SlideImage
                         videoId={c.video_id ?? videoId}
                         imagePath={c.slide_image}
-                        alt={t("ragSearch.slidePageAlt", { page: c.slide_page ?? 0 })}
+                        alt={t("ragSearch.slidePageAlt", { page: (c.slide_page ?? 0) + 1 })}
                         className="h-10 w-16 flex-none rounded object-cover"
                       />
                     )}
@@ -902,7 +902,7 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
                       )}
                       {c.slide_image && (
                         <span className="mr-1.5 rounded bg-[var(--surface-card-hover)] px-1 text-[var(--text-muted)]">
-                          {t("ragSearch.slidePage", { page: c.slide_page ?? 0 })}
+                          {t("ragSearch.slidePage", { page: (c.slide_page ?? 0) + 1 })}
                         </span>
                       )}
                       <span className="mr-1.5 text-primary">{formatMs(c.start_ms)}</span>

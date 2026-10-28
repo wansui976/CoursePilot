@@ -19,6 +19,7 @@ pub mod playable;
 pub mod rag;
 pub mod search_terms;
 pub mod silence;
+pub mod slide_match;
 pub mod slides;
 pub mod subscriptions;
 pub mod subtitle;

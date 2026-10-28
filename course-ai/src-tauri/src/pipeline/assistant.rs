@@ -1336,7 +1336,9 @@ pub fn tool_specs() -> Vec<ToolSpec> {
         ToolSpec {
             name: "search_content".into(),
             description: "在字幕和课件文字里搜关键词，返回命中的视频、时间点和原文。\
-                 要定位「讲过什么」时用这个，不要凭记忆回答。"
+                 要定位「讲过什么」时用这个，不要凭记忆回答。\
+                 课件页命中给的是这一页在画面上出现的区间，字幕命中给的是这句话开始说的时刻；\
+                 问「这页课件/这张图在哪」时用课件页的出现时间。"
                 .into(),
             parameters: object(
                 json!({
@@ -1894,14 +1896,23 @@ impl AssistantTools<'_> {
             .iter()
             .map(|c| {
                 let source = c.video_title.as_deref().unwrap_or("当前视频");
-                let where_ = if c.slide_page.is_some() {
-                    format!("课件第 {} 页", c.slide_page.unwrap_or(0))
-                } else {
-                    "字幕".to_string()
+                let mmss = crate::pipeline::rag::mmss;
+                // 两种时间要分清：课件页是「这一页出现在画面上」的区间，字幕是「这句话开始说」
+                // 的时刻。混写成同一种格式，模型拿字幕时间回答「这页课件在哪」，跳过去画面还没切到。
+                // 页码从 1 数，和课件面板上的 P1、P2 一致（库里存的是从 0 开始的序号）。
+                let where_ = match c.slide_page {
+                    Some(page) if c.end_ms > c.start_ms => format!(
+                        "课件第 {} 页，画面上停留 {}–{}",
+                        page + 1,
+                        mmss(c.start_ms),
+                        mmss(c.end_ms)
+                    ),
+                    Some(page) => format!("课件第 {} 页，出现于 {}", page + 1, mmss(c.start_ms)),
+                    None => "字幕，这句开始说的时刻".to_string(),
                 };
                 format!(
                     "- 《{source}》{} {}（{where_}）：{}",
-                    crate::pipeline::rag::mmss(c.start_ms),
+                    mmss(c.start_ms),
                     c.video_id
                         .as_deref()
                         .map(|id| format!("video_id={id}"))

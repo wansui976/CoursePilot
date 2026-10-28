@@ -1051,7 +1051,8 @@
     "import_video": "准备导入",
     "get_video_summary": "读取视频概要",
     "get_video_chapters": "读取重点章节",
-    "get_video_notes": "读取笔记"
+    "get_video_notes": "读取笔记",
+    "match_slides": "比对课件画面"
   },
   "assistantActions": {
     "renameTitle": "改名",

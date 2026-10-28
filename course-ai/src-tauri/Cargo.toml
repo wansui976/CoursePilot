@@ -17,6 +17,8 @@ tauri-utils = { version = "2", features = ["build-2"] }
 anyhow = "1"
 libc = "0.2"
 base64 = "0.22"
+# 助手里把用户贴的截图和课件页按画面比对（找出是哪一页、何时出现）。只开常见位图格式的解码。
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 chrono = { version = "0.4", features = ["serde"] }
 flate2 = "1.1.9"
 futures-util = "0.3"
@@ -66,3 +68,16 @@ objc2-vision = { version = "0.3.2", default-features = false, features = [
 
 [dev-dependencies]
 tempfile = "3"
+
+# 助手的截图比对要在开发版里解几百张课件图：解码库不开优化时慢十几倍（一次比对十几秒）。
+# 只给这几个解码相关的依赖开优化，不影响本项目自身的编译速度。
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+[profile.dev.package.zune-core]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
