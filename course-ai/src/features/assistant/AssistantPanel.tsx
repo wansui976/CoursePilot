@@ -14,6 +14,7 @@ import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import {
   ChevronLeft,
   ChevronRight,
+  ClipboardCopy,
   GripHorizontal,
   History as HistoryIcon,
   LoaderCircle,
@@ -88,6 +89,7 @@ import {
   type ScopeChoice,
   type ScopeOption,
 } from "./AssistantComposer";
+import type { SlashCommand } from "./slashCommands";
 import type {
   AgentStopReason,
   AssistantAction,
@@ -267,6 +269,16 @@ export function AssistantPanel({
   const [attachments, setAttachments] = useState<AssistantImage[]>([]);
   const attachmentsRef = useRef<AssistantImage[]>([]);
   attachmentsRef.current = attachments;
+  // 正在编辑重发的那一问；backup 是开始编辑前输入框里的东西，取消编辑时放回去。
+  const [editing, setEditingState] = useState<{
+    turnId: string;
+    backup: { input: string; attachments: AssistantImage[] };
+  } | null>(null);
+  const editingTurnIdRef = useRef<string | null>(null);
+  function setEditing(next: typeof editing) {
+    editingTurnIdRef.current = next?.turnId ?? null;
+    setEditingState(next);
+  }
   // 正在压缩、还没进列表的张数。连着粘贴几次时它们都还没落进 state，不算上就会超限。
   const preparingImagesRef = useRef(0);
   const [busy, setBusy] = useState(false);
@@ -309,11 +321,8 @@ export function AssistantPanel({
   // iPad 宽屏有足够空间使用可拖动面板；真正决定布局的是视口档位，不是触屏 UA。
   const mobile = compact || (isMobile() && !isTablet());
   // 拖动、吸附、缩放、抽屉手势这套「窗口化」交互整体在 usePanelWindowing 里。
-  const windowing = usePanelWindowing({
-    mobile,
-    panelRef,
-    focusInput: () => requestAnimationFrame(() => inputRef.current?.focus()),
-  });
+  const focusInput = () => requestAnimationFrame(() => inputRef.current?.focus());
+  const windowing = usePanelWindowing({ mobile, panelRef, focusInput });
   const {
     position,
     dockTop,
@@ -870,10 +879,25 @@ export function AssistantPanel({
       (suggestedQuestion ?? input).trim() ||
       (images.length > 0 ? t("assistant.imageOnlyQuestion") : "");
     if (!question || busy || activeRequestRef.current || actionExecutionCountRef.current > 0) return;
+    // 编辑上一问后重发：和「重新回答」一样先把上下文退回那一问之前，再把那一轮换掉。
+    // 不退的话模型看得见被改掉的旧问题和它的回答，改问就成了追问。
+    const editingId = fromInput ? editingTurnIdRef.current : null;
+    const editedTurn = editingId ? turns.find((turn) => turn.id === editingId) : undefined;
+    if (editingId) {
+      if (editedTurn) {
+        const before = editedTurn.canceled
+          ? historyRef.current
+          : historyBeforeLastQuestion(historyRef.current);
+        historyRef.current = before;
+        setHistory(before);
+      }
+      setEditing(null);
+    }
+    const baseTurns = editedTurn ? turns.filter((turn) => turn.id !== editedTurn.id) : turns;
     // 防御：同一问题不该出现两个「处理中」回合（曾出现过一问题显示两条「正在整理结果」）。
     // 个别触发路径（如 Enter 与发送按钮竞态、重开面板残留）会重复创建 pending 回合，
     // 其中一条收尾、另一条永远卡在整理态。遇到已存在同问题的 pending 回合就不再重复发起。
-    if (turns.some((turn) => turn.pending && turn.question === question)) return;
+    if (baseTurns.some((turn) => turn.pending && turn.question === question)) return;
     const conversationId = activeConversationIdRef.current;
     const requestId = crypto.randomUUID();
     const turnId = crypto.randomUUID();
@@ -902,18 +926,23 @@ export function AssistantPanel({
     setStatusAnnouncement("");
     // 流式片段只做防抖持久化，但请求刚发出时先落一次草稿；即使应用随后退出，
     // 用户的问题也能回到输入框，而不是随着未完成轮次一起丢失。
-    const startingSnapshot = { turns, history: historyAtSend, draft: input || question };
+    const startingSnapshot = {
+      turns: baseTurns,
+      history: historyAtSend,
+      draft: input || question,
+    };
     sessionSnapshotRef.current = startingSnapshot;
     persistConversationSnapshot(conversationId, startingSnapshot);
     // 长工具链可能要等几十秒；问题先进入对话，让用户立即确认自己发出了什么。
-    if (turns.length + 1 > MAX_RENDERED_TURNS) {
-      setHiddenTurnCount((count) => count + (turns.length + 1 - MAX_RENDERED_TURNS));
+    if (baseTurns.length + 1 > MAX_RENDERED_TURNS) {
+      setHiddenTurnCount((count) => count + (baseTurns.length + 1 - MAX_RENDERED_TURNS));
     }
+    const startedAt = Date.now();
     // 原图存进 IndexedDB：会话正文只记张数，重启后点开旧提问靠这里取回。
     if (images.length > 0) void saveTurnImages(turnId, images);
     setTurns((prev) =>
       [
-        ...prev,
+        ...(editedTurn ? prev.filter((turn) => turn.id !== editedTurn.id) : prev),
         {
           id: turnId,
           question,
@@ -1138,6 +1167,7 @@ export function AssistantPanel({
                 // 找借口——它没转不出来，是被你按停的。
                 hitTurnLimit: stopReason === "limit_reached" && !canceled,
                 usage: reply.usage,
+                durationMs: Date.now() - startedAt,
                 activeTool: undefined,
                 toolExecutionStatus: undefined,
                 toolExecutionName: undefined,
@@ -1254,6 +1284,92 @@ export function AssistantPanel({
     void send(turn.question, false, images);
   }
 
+  /**
+   * 编辑最后一问：把问题和当时的附图放回输入框，改完发出去替换掉原来那一轮。
+   * 只开放最后一轮，理由同「重新回答」：改中间某一问，后面的问答就都失去了依据。
+   */
+  async function startEdit(turn: Turn) {
+    if (busy || activeRequestRef.current || actionExecutionCountRef.current > 0) return;
+    const images =
+      turn.images ?? (turn.imageCount ? ((await loadTurnImages(turn.id)) ?? []) : []);
+    setEditing({
+      turnId: turn.id,
+      backup: { input, attachments: attachmentsRef.current },
+    });
+    setInputFromUser(turn.question);
+    setAttachments(images.map((dataUrl) => ({ id: crypto.randomUUID(), dataUrl })));
+    focusInput();
+    moveInputCaretToEnd();
+  }
+
+  function cancelEdit() {
+    if (!editing) return;
+    setInputFromUser(editing.backup.input);
+    setAttachments(editing.backup.attachments);
+    setEditing(null);
+    focusInput();
+  }
+
+  /** 整段对话按 Markdown 复制：拿去存笔记、发给同学或贴进别的工具都方便。 */
+  async function copyConversation() {
+    const visible = turns.filter((turn) => !turn.pending);
+    if (visible.length === 0) return;
+    const me = t("assistant.transcriptMe");
+    const ai = t("assistant.title");
+    const text = visible
+      .map((turn) => {
+        const images = turn.imageCount
+          ? `\n${t("assistant.transcriptImages", { count: turn.imageCount })}`
+          : "";
+        const answer = turn.answer.trim() || t("assistant.emptyAnswerFallback");
+        return `**${me}**：${turn.question}${images}\n\n**${ai}**：\n${answer}`;
+      })
+      .join("\n\n---\n\n");
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(text);
+      setStatusAnnouncement(t("assistant.conversationCopied"));
+    } catch {
+      setError(t("assistant.clipboardUnavailable"));
+    }
+  }
+
+  /** 「/」快捷指令。提问类只把问法填进输入框（还能改），动作类直接执行。 */
+  const slashCommands: SlashCommand[] = [
+    ...(context.video_id
+      ? [
+          { id: "summary", keyword: "总结", aliases: ["summary", "zj"], prompt: t("assistant.slash.summaryPrompt") },
+          { id: "keypoints", keyword: "重点", aliases: ["key", "zd"], prompt: t("assistant.slash.keypointsPrompt") },
+          { id: "quiz", keyword: "出题", aliases: ["quiz", "ct"], prompt: t("assistant.slash.quizPrompt") },
+          { id: "explain", keyword: "解释", aliases: ["explain", "js"], prompt: t("assistant.slash.explainPrompt") },
+          { id: "source", keyword: "出处", aliases: ["source", "cc"], prompt: t("assistant.slash.sourcePrompt") },
+          { id: "note", keyword: "笔记", aliases: ["note", "bj"], prompt: t("assistant.slash.notePrompt") },
+        ]
+      : []),
+    { id: "progress", keyword: "进度", aliases: ["progress", "jd"], prompt: t("assistant.slash.progressPrompt") },
+    { id: "new", keyword: "新对话", aliases: ["new", "xdh"], action: startNewConversation },
+    ...(turns.some((turn) => !turn.pending)
+      ? [{ id: "copy", keyword: "复制对话", aliases: ["copy", "fz"], action: () => void copyConversation() }]
+      : []),
+  ].map((command) => ({
+    ...command,
+    label: t(`assistant.slash.${command.id}`),
+    description: t(`assistant.slash.${command.id}Hint`),
+  }));
+
+  function runSlashCommand(command: SlashCommand) {
+    if (command.action) {
+      setInputFromUser("");
+      command.action();
+      return;
+    }
+    if (command.prompt) {
+      setInputFromUser(command.prompt);
+      focusInput();
+      moveInputCaretToEnd();
+    }
+  }
+
   function jumpToLatest() {
     const box = scrollRef.current;
     if (box) box.scrollTop = box.scrollHeight;
@@ -1294,6 +1410,7 @@ export function AssistantPanel({
     hadPendingTurnRef.current = false;
     setInput(session.draft);
     setAttachments([]);
+    setEditing(null);
     resetRecentQuestionNavigation(session.draft);
     setError("");
     setStatusAnnouncement("");
@@ -1762,6 +1879,18 @@ export function AssistantPanel({
                   )}
                   {side === "left" ? t("assistant.dockRight") : t("assistant.dockLeft")}
                 </MenuItem>
+                <MenuItem
+                  className="flex items-center gap-2"
+                  disabled={!turns.some((turn) => !turn.pending)}
+                  onClick={() => {
+                    void copyConversation();
+                    setHeaderMenuOpen(false);
+                    requestAnimationFrame(() => headerMenuTriggerRef.current?.focus());
+                  }}
+                >
+                  <ClipboardCopy className="h-3.5 w-3.5" />
+                  {t("assistant.copyConversation")}
+                </MenuItem>
               </Menu>
             )}
           </div>
@@ -1850,6 +1979,8 @@ export function AssistantPanel({
               onCopy={(item) => void copyAnswer(item)}
               onSaveToNotes={(item) => void saveToNotes(item)}
               onRegenerate={(turn) => void regenerate(turn)}
+              onEdit={(item) => void startEdit(item)}
+              editing={editing?.turnId === turn.id}
               onSeek={seekInTurn}
               onNavigate={navigateFromTurn}
               onOutcome={(id, outcome) => commitActionOutcome(id, outcome, conversationEpoch)}
@@ -1906,6 +2037,10 @@ export function AssistantPanel({
           modelProfileId={modelProfileId}
           onModelChange={setModelProfileId}
           onModelUnavailable={showModelUnavailable}
+          slashCommands={slashCommands}
+          onSlashCommand={runSlashCommand}
+          editing={!!editing}
+          onCancelEdit={cancelEdit}
         />
       )}
     </aside>

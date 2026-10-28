@@ -7,9 +7,10 @@ import {
   type KeyboardEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { AtSign, Check, ChevronDown, ImagePlus, Send, Square, X } from "lucide-react";
+import { AtSign, Check, ChevronDown, ImagePlus, PenLine, Send, Square, X } from "lucide-react";
 import { imageFilesFromClipboard, type AssistantImage } from "@/lib/assistantImages";
 import { AssistantModelPicker } from "./AssistantModelPicker";
+import { matchSlashCommands, slashQuery, type SlashCommand } from "./slashCommands";
 import { ImageLightbox } from "./ImageLightbox";
 
 /** 提问范围的用户选择。auto 跟随界面当前选中项，其余三档显式覆盖。 */
@@ -46,6 +47,10 @@ export function AssistantComposer({
   modelProfileId,
   onModelChange,
   onModelUnavailable,
+  slashCommands = [],
+  onSlashCommand,
+  editing = false,
+  onCancelEdit,
 }: {
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   input: string;
@@ -69,6 +74,11 @@ export function AssistantComposer({
   modelProfileId: string | null;
   onModelChange: (profileId: string | null) => void;
   onModelUnavailable?: () => void;
+  slashCommands?: SlashCommand[];
+  onSlashCommand?: (command: SlashCommand) => void;
+  /** 正在编辑上一问：输入框上方挂一条说明，可取消。 */
+  editing?: boolean;
+  onCancelEdit?: () => void;
 }) {
   const { t } = useTranslation();
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
@@ -77,6 +87,51 @@ export function AssistantComposer({
   const scopeItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const scopeMenuId = `assistant-scope-menu-${useId()}`;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const slashListId = `assistant-slash-${useId()}`;
+  const query = slashQuery(input);
+  const slashMatches = query === null ? [] : matchSlashCommands(slashCommands, query);
+  // 按 Esc 收起后，在输入内容变化之前不再弹出来。
+  const [slashDismissedFor, setSlashDismissedFor] = useState<string | null>(null);
+  const slashOpen = slashMatches.length > 0 && slashDismissedFor !== input;
+  const [slashIndex, setSlashIndex] = useState(0);
+  const activeSlash = Math.min(slashIndex, Math.max(0, slashMatches.length - 1));
+
+  function chooseSlash(command: SlashCommand) {
+    setSlashIndex(0);
+    onSlashCommand?.(command);
+  }
+
+  // 指令菜单开着时，上下键、回车、Tab 归菜单；Esc 先关菜单、再退出编辑；其余照常交给面板
+  //（上下键召回历史问题、Enter 发送）。
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.nativeEvent.isComposing) return onKeyDown(event);
+    if (slashOpen) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        setSlashIndex((activeSlash + step + slashMatches.length) % slashMatches.length);
+        return;
+      }
+      if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
+        event.preventDefault();
+        chooseSlash(slashMatches[activeSlash]);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setSlashDismissedFor(input);
+        return;
+      }
+    }
+    if (event.key === "Escape" && editing) {
+      event.preventDefault();
+      event.stopPropagation();
+      onCancelEdit?.();
+      return;
+    }
+    onKeyDown(event);
+  }
   const [previewing, setPreviewing] = useState<number | null>(null);
   const canSend = (!!input.trim() || images.length > 0) && !actionExecutionBusy;
 
@@ -152,7 +207,51 @@ export function AssistantComposer({
 
   return (
     <div className="p-2 pt-1">
+      {slashOpen && (
+        <div
+          id={slashListId}
+          role="listbox"
+          aria-label={t("assistant.slash.menuLabel")}
+          className="mb-1 max-h-64 overflow-y-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-1 shadow-[var(--shadow-pop)]"
+        >
+          {slashMatches.map((command, index) => (
+            <div
+              key={command.id}
+              id={`${slashListId}-${command.id}`}
+              role="option"
+              aria-selected={index === activeSlash}
+              // 用 mousedown：点击会先让输入框失焦，click 到达时菜单可能已经随状态变化消失。
+              onMouseDown={(event) => {
+                event.preventDefault();
+                chooseSlash(command);
+              }}
+              onMouseEnter={() => setSlashIndex(index)}
+              className={`flex cursor-pointer items-baseline gap-2 rounded-md px-2 py-1.5 text-xs ${
+                index === activeSlash
+                  ? "bg-[var(--surface-card-hover)] text-[var(--text-strong)]"
+                  : "text-[var(--text-normal)]"
+              }`}
+            >
+              <span className="flex-none font-medium">/{command.keyword}</span>
+              <span className="min-w-0 truncate text-[var(--text-muted)]">{command.description}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-input)] transition-colors focus-within:border-[var(--border-strong)] motion-reduce:transition-none">
+        {editing && (
+          <div className="flex items-center gap-1.5 border-b border-[var(--border-faint)] px-2.5 py-1.5 ca-t-2xs text-[var(--text-muted)]">
+            <PenLine className="h-3 w-3 flex-none" aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate">{t("assistant.editingQuestion")}</span>
+            <button
+              type="button"
+              onClick={onCancelEdit}
+              className="flex-none rounded px-1 text-[var(--text-muted)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+            >
+              {t("assistant.cancelEdit")}
+            </button>
+          </div>
+        )}
         {images.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-2 pt-2">
             {images.map((image, index) => (
@@ -195,8 +294,14 @@ export function AssistantComposer({
           value={input}
           placeholder={t("assistant.inputPlaceholder")}
           onChange={(e) => onInput(e.target.value)}
-          onKeyDown={onKeyDown}
+          onKeyDown={handleKeyDown}
           onPaste={handlePaste}
+          aria-autocomplete="list"
+          aria-controls={slashOpen ? slashListId : undefined}
+          aria-expanded={slashOpen}
+          aria-activedescendant={
+            slashOpen ? `${slashListId}-${slashMatches[activeSlash]?.id}` : undefined
+          }
           className="ca-ask-input block max-h-24 w-full resize-none bg-transparent px-2.5 pb-0 pt-2 text-sm text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)]"
         />
         <div className="flex items-end gap-2 px-1.5 pb-1.5 pt-1">

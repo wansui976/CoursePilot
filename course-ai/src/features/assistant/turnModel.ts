@@ -138,3 +138,15 @@ export function bracketBareTimestamps(text: string): string {
     (_match, before: string, clock: string) => `${before}[${clock}]`,
   );
 }
+
+/** 「用时 4.2 秒」「用时 1 分 05 秒」：十秒内带一位小数，再长就到秒。 */
+export function formatElapsed(ms: number, t: TFunction): string {
+  const seconds = ms / 1000;
+  if (seconds < 10) return t("assistant.elapsedSeconds", { seconds: seconds.toFixed(1) });
+  if (seconds < 60) return t("assistant.elapsedSeconds", { seconds: Math.round(seconds) });
+  const total = Math.round(seconds);
+  return t("assistant.elapsedMinutes", {
+    minutes: Math.floor(total / 60),
+    seconds: String(total % 60).padStart(2, "0"),
+  });
+}

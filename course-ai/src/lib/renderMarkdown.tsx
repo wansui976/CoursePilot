@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from "react";
+import { CodeBlock } from "@/ui/CodeBlock";
 import { MathText } from "@/ui/MathText";
 import i18n from "@/i18n";
 import { withClickableTimestamps } from "@/lib/clickableTimestamps";
@@ -36,8 +37,27 @@ function boldAndTimestamps(text: string, onSeek: Seek, key: string): ReactNode[]
   return nodes;
 }
 
-/** 行内富文本：KaTeX 公式在最外层，非公式片段里再处理 **加粗** 与 [mm:ss]。 */
+/**
+ * 行内富文本：`行内代码` 最先切出来原样显示（代码里的 $、**、12:34 都不是公式、加粗或时间戳），
+ * 其余片段 KaTeX 公式在最外层，非公式片段里再处理 **加粗** 与 [mm:ss]。
+ */
 function inlineRich(text: string, onSeek: Seek, key: string): ReactNode {
+  if (!text.includes("`")) return mathAndRest(text, onSeek, key);
+  return text.split(/(`[^`\n]+`)/g).map((part, i) =>
+    part.length > 2 && part.startsWith("`") && part.endsWith("`") ? (
+      <code
+        key={`${key}-c-${i}`}
+        className="rounded bg-[var(--surface-card-hover)] px-1 py-px font-[family-name:var(--mono)] text-[0.9em] text-[var(--text-strong)]"
+      >
+        {part.slice(1, -1)}
+      </code>
+    ) : part ? (
+      <Fragment key={`${key}-m-${i}`}>{mathAndRest(part, onSeek, `${key}-${i}`)}</Fragment>
+    ) : null,
+  );
+}
+
+function mathAndRest(text: string, onSeek: Seek, key: string): ReactNode {
   return (
     <MathText
       text={text}
@@ -45,6 +65,7 @@ function inlineRich(text: string, onSeek: Seek, key: string): ReactNode {
     />
   );
 }
+
 
 function timestampSources(sources: TimestampSource[], onSeek: Seek) {
   const label = i18n.t("markdown.sources");
@@ -99,7 +120,8 @@ type Block =
   | { kind: "h"; level: 1 | 2 | 3 | 4 | 5 | 6; text: string }
   | { kind: "ul"; items: string[] }
   | { kind: "ol"; items: string[] }
-  | { kind: "quote"; text: string };
+  | { kind: "quote"; text: string }
+  | { kind: "code"; lang: string; text: string };
 
 type HeadingElement = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
 
@@ -113,7 +135,25 @@ function parseBlocks(md: string): Block[] {
     }
   };
 
+  // 围栏代码块里的行原样收下，不认标题、列表、空行分段。流式输出时闭合的 ``` 还没到，
+  // 就先把已到的部分当代码显示，等闭合了也不会跳变。
+  let code: { lang: string; lines: string[] } | null = null;
   for (const raw of md.split("\n")) {
+    const fence = raw.trim().match(/^```\s*([\w+#.-]*)\s*$/);
+    if (code) {
+      if (fence && !fence[1]) {
+        blocks.push({ kind: "code", lang: code.lang, text: code.lines.join("\n") });
+        code = null;
+      } else {
+        code.lines.push(raw);
+      }
+      continue;
+    }
+    if (fence) {
+      flushPara();
+      code = { lang: fence[1], lines: [] };
+      continue;
+    }
     const line = raw.replace(/\s+$/, "");
     const t = line.trim();
     if (t === "") {
@@ -152,6 +192,7 @@ function parseBlocks(md: string): Block[] {
     }
   }
   flushPara();
+  if (code) blocks.push({ kind: "code", lang: code.lang, text: code.lines.join("\n") });
   return blocks;
 }
 
@@ -163,7 +204,7 @@ export function renderInlineMarkdown(text: string, onSeek: Seek = () => {}): Rea
 
 /**
  * 极简 Markdown 渲染：`#` 标题、`-`/`*` 与 `1.` 列表、空行分段、`**加粗**`、
- * KaTeX 公式、`[mm:ss]` 跳转。够问答/摘要用，避免再引 markdown 依赖。
+ * KaTeX 公式、`[mm:ss]` 跳转、``` 代码块与 `行内代码`。够问答/摘要用，避免再引 markdown 依赖。
  * `trailing`：可选，追加到最后一个块的末尾（如流式生成光标）。
  */
 export function renderMarkdown(
@@ -186,6 +227,14 @@ export function renderMarkdown(
         >
           {blockRich(block.text, onSeek, key, tail)}
         </HeadingTag>
+      );
+    }
+    if (block.kind === "code") {
+      return (
+        <Fragment key={key}>
+          <CodeBlock code={block.text} lang={block.lang} />
+          {tail}
+        </Fragment>
       );
     }
     if (block.kind === "quote") {

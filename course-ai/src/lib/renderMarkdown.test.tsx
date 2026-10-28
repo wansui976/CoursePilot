@@ -13,6 +13,39 @@ describe("renderMarkdown", () => {
     await i18n.changeLanguage("zh-CN");
   });
 
+  it("renders fenced code blocks verbatim, without lists, timestamps or math inside", () => {
+    const md = "看这段：\n\n```python\n- not a list\nprint('[12:34]', 2 * $x$)\n\n# not a heading\n```\n\n之后";
+    const { container } = renderMd(md);
+    const code = container.querySelector("pre > code")!;
+    expect(code).toHaveAttribute("data-lang", "python");
+    expect(code.textContent).toBe("- not a list\nprint('[12:34]', 2 * $x$)\n\n# not a heading");
+    expect(container.querySelector("ul")).toBeNull();
+    expect(container.querySelector("h1")).toBeNull();
+    expect(screen.queryByRole("button", { name: /12:34/ })).toBeNull();
+    expect(screen.getByText("之后")).toBeInTheDocument();
+  });
+
+  it("shows an unclosed fence as code while it is still streaming", () => {
+    const { container } = renderMd("```js\nconst a = 1;\nconst b");
+    expect(container.querySelector("pre > code")?.textContent).toBe("const a = 1;\nconst b");
+  });
+
+  it("copies a code block", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderMd("```\nls -la\n```");
+    fireEvent.click(screen.getByRole("button", { name: "复制代码" }));
+    expect(writeText).toHaveBeenCalledWith("ls -la");
+    expect(await screen.findByRole("button", { name: "已复制" })).toBeInTheDocument();
+  });
+
+  it("renders `inline code` literally", () => {
+    const { container } = renderMd("运行 `**a** 12:34 $x$` 即可");
+    const code = container.querySelector("p code")!;
+    expect(code.textContent).toBe("**a** 12:34 $x$");
+    expect(container.querySelector("strong")).toBeNull();
+  });
+
   it("renders **bold** as <strong>", () => {
     const { getByText } = renderMd("这是**重点**内容");
     const strong = getByText("重点");

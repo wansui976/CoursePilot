@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Copy,
   LoaderCircle,
+  PenLine,
   RefreshCw,
   Save,
 } from "lucide-react";
@@ -24,6 +25,7 @@ import {
   streamingLabelFor,
   suggestionsFor,
   bracketBareTimestamps,
+  formatElapsed,
 } from "./turnModel";
 
 /**
@@ -168,6 +170,8 @@ export function AssistantTurn({
   onCopy,
   onSaveToNotes,
   onRegenerate,
+  onEdit,
+  editing = false,
   onSeek,
   onNavigate,
   onOutcome,
@@ -188,6 +192,10 @@ export function AssistantTurn({
   onCopy: (turn: Turn) => void;
   onSaveToNotes: (turn: Turn) => void;
   onRegenerate: (turn: Turn) => void;
+  /** 编辑这一问后重发（只给最后一轮）。 */
+  onEdit?: (turn: Turn) => void;
+  /** 这一问正在输入框里被编辑。 */
+  editing?: boolean;
   onSeek: (turn: Turn, ms: number) => void;
   onNavigate: (turn: Turn, action: AssistantAction) => void;
   onOutcome: (turnId: string, outcome: AssistantActionOutcome) => void;
@@ -203,12 +211,33 @@ export function AssistantTurn({
           比让两边都是同一坨灰字强得多。 */}
       <div className="flex flex-col items-end gap-1">
         <TurnImages turn={turn} />
-        <p
-          data-testid="user-bubble"
-          className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-[var(--accent-weak-2)] px-3 py-1.5 text-sm text-[var(--accent-text)]"
-        >
-          {turn.question}
-        </p>
+        <div className="group/q flex max-w-full items-end justify-end gap-1">
+          {/* 改最后一问再发一次（成熟的对话应用都有）：问法不对时不用整句重打。
+              和重新回答一样只给最后一轮。桌面端悬停才出现，触屏一直显示。 */}
+          {isLast && onEdit && !turn.pending && !editing && (
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label={t("assistant.editQuestion")}
+              title={t("assistant.editQuestion")}
+              disabled={busy || actionExecutionBusy}
+              onClick={() => onEdit(turn)}
+              className={`ca-touch-44 h-7 w-7 flex-none text-[var(--text-faint)] ${
+                mobile
+                  ? ""
+                  : "opacity-0 transition-opacity focus-visible:opacity-100 group-hover/q:opacity-100 motion-reduce:transition-none"
+              }`}
+            >
+              <PenLine className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          <p
+            data-testid="user-bubble"
+            className={`${editing ? "opacity-50 " : ""}max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-[var(--accent-weak-2)] px-3 py-1.5 text-sm text-[var(--accent-text)]`}
+          >
+            {turn.question}
+          </p>
+        </div>
       </div>
 
       {/* 提问后、第一个工具/正文到达前，助手槽位是空的。给一个内联「正在思考」,
@@ -323,14 +352,22 @@ export function AssistantTurn({
             )}
             {/* 这一轮实际花了多少：跟操作按钮同一排、同样只在 hover 时出现。
                 端点没报用量就不显示——把「没报」当成零消耗是撒谎。 */}
-            {!turn.pending && turn.usage && (
+            {/* 用时和用量：等了多久、花了多少，都该看得见。 */}
+            {!turn.pending && (turn.usage || turn.durationMs) && (
               <span
                 data-testid="turn-usage"
-                className="ml-1 whitespace-nowrap ca-t-2xs text-[var(--text-faint)]"
+                className="ml-1 whitespace-nowrap ca-t-2xs tabular-nums text-[var(--text-faint)]"
               >
-                {t("assistant.usageTokens", {
-                  tokens: usageTokens(turn.usage).toLocaleString(),
-                })}
+                {[
+                  turn.durationMs ? formatElapsed(turn.durationMs, t) : null,
+                  turn.usage
+                    ? t("assistant.usageTokens", {
+                        tokens: usageTokens(turn.usage).toLocaleString(),
+                      })
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </span>
             )}
           </div>

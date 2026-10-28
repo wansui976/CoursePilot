@@ -41,6 +41,19 @@ describe("assistantSession", () => {
     expect(turn.images).toBeUndefined();
   });
 
+  it("回答用时随轮次保存，坏数据丢掉", () => {
+    const session = deserializeAssistantSession(
+      JSON.stringify({
+        turns: [
+          { id: "a", question: "q", answer: "a", durationMs: 8_200.4 },
+          { id: "b", question: "q", answer: "a", durationMs: -1 },
+          { id: "c", question: "q", answer: "a", durationMs: 9e9 },
+        ],
+      }),
+    );
+    expect(session.turns.map((turn) => turn.durationMs)).toEqual([8200, undefined, undefined]);
+  });
+
   it("读回的附图张数不合法时忽略", () => {
     const session = deserializeAssistantSession(
       JSON.stringify({

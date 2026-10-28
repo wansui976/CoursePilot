@@ -22,6 +22,8 @@ const MAX_ACTION_RESULT_CHARS = 2_000;
 const MAX_CHECKPOINT_TARGETS = 12;
 const MAX_CHECKPOINT_LABEL_CHARS = 240;
 const MAX_TURN_IMAGES = 4;
+/** 超过一天的「用时」只可能是坏数据（系统时间被改过之类），不显示。 */
+const MAX_TURN_DURATION_MS = 86_400_000;
 const CONTEXT_PREFIX = "（界面状态：";
 const EXPIRED_ACTION_HISTORY_NOTICE =
   "（界面操作结果：应用重启后，本轮旧操作按钮已失效；已经完成的结果以操作记录为准，尚未确认的操作未执行。如仍需操作，必须重新调用工具核对当前状态并生成新按钮。）";
@@ -126,6 +128,8 @@ export interface AssistantTurnRecord {
   imageCount?: number;
   /** 这一问附的图（data URL），只在当前进程里用来显示缩略图和「重新回答」；不落盘。 */
   images?: string[];
+  /** 从发出到回答完成用了多久（毫秒）。旧记录没有。 */
+  durationMs?: number;
 }
 
 export interface AssistantSession {
@@ -387,6 +391,12 @@ function readTurn(value: unknown, now: number): AssistantTurnRecord | null {
     ...(toolRuns ? { toolRuns } : {}),
     canceled: value.canceled === true,
     ...(value.hitTurnLimit === true ? { hitTurnLimit: true } : {}),
+    ...(typeof value.durationMs === "number" &&
+    Number.isFinite(value.durationMs) &&
+    value.durationMs > 0 &&
+    value.durationMs < MAX_TURN_DURATION_MS
+      ? { durationMs: Math.round(value.durationMs) }
+      : {}),
     ...(typeof value.imageCount === "number" &&
     Number.isInteger(value.imageCount) &&
     value.imageCount > 0

@@ -560,8 +560,10 @@ describe("AssistantPanel", () => {
       finish(reply({ answer: "查到了" }));
     });
     expect(await screen.findByText("查到了")).toBeInTheDocument();
-    // 把「没报」当成零消耗是撒谎，宁可不显示。
-    expect(screen.queryByTestId("turn-usage")).not.toBeInTheDocument();
+    // 把「没报」当成零消耗是撒谎，宁可不显示；用时照常显示。
+    const meta = screen.getByTestId("turn-usage");
+    expect(meta).not.toHaveTextContent("tokens");
+    expect(meta).toHaveTextContent(/用时 [\d.]+ 秒/);
   });
 
   it("保留每次工具调用的真实终态，失败后立即结束也不会消失", async () => {
@@ -2056,6 +2058,142 @@ describe("AssistantPanel", () => {
     expect(screen.getAllByTestId("user-bubble")).toHaveLength(1);
   });
 
+  it("编辑上一问后重发：换掉那一轮，上下文退回到它之前，附图一起带回来", async () => {
+    mockIpc.assistant.ask
+      .mockResolvedValueOnce(
+        reply({
+          answer: "第一答",
+          history: [
+            { role: "user", content: "这页讲的啥" },
+            { role: "assistant", content: "第一答" },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(reply({ answer: "改问后的回答" }));
+    renderPanel();
+    pasteImage();
+    await screen.findByLabelText("移除附图 1");
+    await ask("这页讲的啥");
+    await screen.findByText("第一答");
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑问题" }));
+    const input = screen.getByLabelText("对 AI 助手说");
+    expect(input).toHaveValue("这页讲的啥");
+    expect(await screen.findByLabelText("移除附图 1")).toBeInTheDocument();
+    expect(screen.getByText("正在编辑上一问，发送后替换原来的回答")).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "这页的公式怎么推出来的" } });
+    fireEvent.click(screen.getByLabelText("发送"));
+
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenLastCalledWith(
+        "这页的公式怎么推出来的",
+        expect.anything(),
+        [],
+        expect.any(String),
+        expect.any(Function),
+        { images: ["data:image/png;base64,AA=="], profileId: null },
+      ),
+    );
+    expect(await screen.findByText("改问后的回答")).toBeInTheDocument();
+    expect(screen.queryByText("第一答")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("user-bubble")).toHaveLength(1);
+  });
+
+  it("取消编辑把输入框恢复成编辑前的草稿，Esc 不会顺带收起面板", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "第一答" }));
+    renderPanel();
+    await ask("原来的问题");
+    await screen.findByText("第一答");
+    const input = screen.getByLabelText("对 AI 助手说");
+    fireEvent.change(input, { target: { value: "正在打的草稿" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑问题" }));
+    expect(input).toHaveValue("原来的问题");
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(input).toHaveValue("正在打的草稿");
+    expect(screen.queryByText("正在编辑上一问，发送后替换原来的回答")).not.toBeInTheDocument();
+    expect(useAssistantUi.getState().open).toBe(true);
+    expect(screen.getByText("第一答")).toBeInTheDocument();
+  });
+
+  it("「/」弹出快捷指令，可筛选，回车把问法填进输入框", () => {
+    renderPanel();
+    const input = screen.getByLabelText("对 AI 助手说");
+    fireEvent.change(input, { target: { value: "/" } });
+    const menu = screen.getByRole("listbox", { name: "快捷指令" });
+    expect(within(menu).getByText("/总结")).toBeInTheDocument();
+    expect(within(menu).getByText("/新对话")).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "/quiz" } });
+    expect(within(screen.getByRole("listbox")).getAllByRole("option")).toHaveLength(1);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input).toHaveValue("根据这节课的内容出 5 道练习题，难度由浅到深，答案和解析放在最后。");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    // 只填进输入框，不替用户发出去：问法还能改。
+    expect(mockIpc.assistant.ask).not.toHaveBeenCalled();
+  });
+
+  it("快捷指令菜单 Esc 只关菜单，不收起面板；方向键在菜单里移动而不是召回历史问题", () => {
+    renderPanel();
+    const input = screen.getByLabelText("对 AI 助手说");
+    fireEvent.change(input, { target: { value: "/" } });
+    const options = within(screen.getByRole("listbox")).getAllByRole("option");
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(within(screen.getByRole("listbox")).getAllByRole("option")[1]).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(input).toHaveValue("/");
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(useAssistantUi.getState().open).toBe(true);
+  });
+
+  it("没有在看视频时，只列不依赖视频的快捷指令", () => {
+    renderPanel(vi.fn(), { context: { course_id: "c1" } });
+    fireEvent.change(screen.getByLabelText("对 AI 助手说"), { target: { value: "/" } });
+    const labels = within(screen.getByRole("listbox"))
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+    expect(labels.some((label) => label?.startsWith("/总结"))).toBe(false);
+    expect(labels.some((label) => label?.startsWith("/进度"))).toBe(true);
+  });
+
+  it("复制整段对话为 Markdown", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "梯度下降沿负梯度走" }));
+    renderPanel();
+    await ask("讲了什么");
+    await screen.findByText("梯度下降沿负梯度走");
+
+    fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "复制整段对话" }));
+
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        "**我**：讲了什么\n\n**AI 助手**：\n梯度下降沿负梯度走",
+      ),
+    );
+  });
+
+  it("会话历史可以按标题搜索", async () => {
+    upsertAssistantConversation({ id: "conv-a", session: storedConversation("梯度下降是什么") });
+    upsertAssistantConversation({ id: "conv-b", session: storedConversation("行列式怎么算") });
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
+    fireEvent.change(screen.getByLabelText("搜索会话"), { target: { value: "行列式" } });
+    expect(screen.getByRole("button", { name: /^行列式怎么算/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^梯度下降是什么/ })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("搜索会话"), { target: { value: "不存在的词" } });
+    expect(screen.getByText("没有找到相关会话")).toBeInTheDocument();
+  });
+
   it("重启后的检查点说明旧操作，并只用当前上下文重新核对", async () => {
     writeAssistantSession(
       {
@@ -2334,10 +2472,15 @@ describe("AssistantPanel", () => {
     expect(screen.getByLabelText("对 AI 助手说")).toBeInTheDocument();
   });
 
-  it("只有浮动形态：「⋯」菜单里只剩换边，没有停靠为侧栏", () => {
+  it("只有浮动形态：「⋯」菜单里只有换边和复制对话，没有停靠为侧栏", () => {
     renderPanel();
     fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
-    expect(screen.getAllByRole("menuitem")).toHaveLength(1);
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "停靠到左边",
+      "复制整段对话",
+    ]);
+    // 还没有任何对话时复制无从谈起。
+    expect(screen.getByRole("menuitem", { name: "复制整段对话" })).toBeDisabled();
     fireEvent.click(screen.getByRole("menuitem", { name: /停靠到左/ }));
     expect(useAssistantUi.getState().side).toBe("left");
   });

@@ -1,8 +1,8 @@
-import { useMemo, type RefObject } from "react";
+import { useMemo, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Check, LoaderCircle, PenLine, PlayCircle, Trash2 } from "lucide-react";
+import { Check, LoaderCircle, PenLine, PlayCircle, Search, Trash2 } from "lucide-react";
 import { Button } from "@/ui/button";
 import type {
   AssistantConversationSource,
@@ -125,6 +125,16 @@ export function ConversationHistory({
   const { t, i18n } = useTranslation();
   const locked = busy || actionExecutionBusy || conversationMutationBusy;
   const sourceNames = useSourceNames(conversations);
+  // 按标题和出处（视频名、课程名）筛。会话多了以后，靠翻找不如直接搜。
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLowerCase();
+  const visible = needle
+    ? conversations.conversations.filter((conversation) =>
+        [conversation.title, sourceLabel(conversation.sources, sourceNames, t) ?? ""].some(
+          (text) => text.toLowerCase().includes(needle),
+        ),
+      )
+    : conversations.conversations;
 
   return (
     <section
@@ -139,6 +149,19 @@ export function ConversationHistory({
         >
           {t("assistant.conversationHistory")}
         </h2>
+        {conversations.conversations.length > 1 && (
+          <label className="mt-2 flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1 focus-within:border-[var(--border-strong)]">
+            <Search className="h-3.5 w-3.5 flex-none text-[var(--text-faint)]" aria-hidden="true" />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              aria-label={t("assistant.searchConversations")}
+              placeholder={t("assistant.searchConversations")}
+              className="min-w-0 flex-1 bg-transparent text-xs text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)]"
+            />
+          </label>
+        )}
       </div>
       {error && (
         <div
@@ -154,7 +177,12 @@ export function ConversationHistory({
           aria-label={t("assistant.conversationList")}
           className="min-h-0 flex-1 overflow-y-auto"
         >
-          {conversations.conversations.map((conversation) => {
+          {visible.length === 0 && (
+            <p className="px-3 py-6 text-center text-xs text-[var(--text-faint)]">
+              {t("assistant.noConversationMatch")}
+            </p>
+          )}
+          {visible.map((conversation) => {
             const current = conversation.id === conversations.activeId;
             const updatedAt = formatConversationTime(
               conversation.updatedAt,
