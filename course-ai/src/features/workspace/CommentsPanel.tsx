@@ -110,7 +110,7 @@ function CommentBody({
           </span>
           <LikeCount count={comment.like_count} />
         </div>
-        <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--text-normal)]">
+        <p className="ca-prose whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-normal)]">
           <EmoteText text={comment.text} emotes={emotes} />
         </p>
         <p className="mt-0.5 text-xs text-[var(--text-faint)]">
@@ -156,7 +156,7 @@ function ReplyItem({
             </span>
             <LikeCount count={node.reply.like_count} />
           </div>
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--text-normal)]">
+          <p className="ca-prose whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-normal)]">
             <EmoteText text={node.reply.text} emotes={emotes} />
           </p>
           <p className="mt-0.5 text-xs text-[var(--text-faint)]">

@@ -138,7 +138,7 @@ const TranscriptRow = memo(function TranscriptRow({
               onSeek(segment.start_ms);
             }
           }}
-          className="ca-transcript-text block w-full cursor-pointer select-text px-2 py-1 text-left text-sm leading-relaxed"
+          className="ca-transcript-text ca-prose block w-full cursor-pointer select-text px-2 py-1 text-left text-sm leading-relaxed"
         >
           <span className="mr-2 text-xs text-[var(--text-muted)]">
             {formatMs(segment.start_ms)}

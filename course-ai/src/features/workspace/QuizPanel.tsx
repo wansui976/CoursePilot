@@ -253,12 +253,12 @@ export function QuizPanel({ videoId }: { videoId: string }) {
                         : "border-[var(--border-subtle)]"
                   }`}
                 >
-                  <div className="mb-2 text-sm">
+                  <div className="ca-prose mb-2 text-sm leading-relaxed">
                     <span className="mr-1 text-[var(--text-faint)]">{i + 1}.</span>
                     <MathText text={q.stem} />
                   </div>
                   {q.options && (
-                    <ul className="mb-2 space-y-1 text-sm text-[var(--text-normal)]">
+                    <ul className="ca-prose mb-2 space-y-1 text-sm leading-relaxed text-[var(--text-normal)]">
                       {q.options.map((opt, j) => (
                         <li key={j}>
                           {String.fromCharCode(65 + j)}. <MathText text={opt} />
@@ -316,7 +316,7 @@ export function QuizPanel({ videoId }: { videoId: string }) {
                     </span>
                   </div>
                   {revealed[i] && (
-                    <div className="mt-2 space-y-1 text-sm">
+                    <div className="ca-prose mt-2 space-y-1 text-sm leading-relaxed">
                       {/* 答案色走主题 token：深浅主题对比都达标，不硬编码 tailwind 绿。 */}
                       <div className="text-[var(--status-ok)]">
                         {t("quiz.answerLabel")}<MathText text={answerText(q.answer, t)} />

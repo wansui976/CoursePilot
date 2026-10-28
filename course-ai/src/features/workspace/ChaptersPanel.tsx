@@ -135,7 +135,7 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
                   >
                     <span className="ca-chapter-time">{formatMs(c.start_ms)}</span>
                     <span className="ca-chapter-title">{c.title}</span>
-                    {c.summary && <span className="ca-chapter-summary">{c.summary}</span>}
+                    {c.summary && <span className="ca-chapter-summary ca-prose">{c.summary}</span>}
                   </button>
                 </li>
               ))}

@@ -268,6 +268,17 @@
   hanging-punctuation: allow-end;
 }
 
+/* 正文排版（无衬线）：AI 回答、文稿、题目、评论这些「不是阅读区、但也是成段文字」的地方。
+   字体跟界面一致，只补中文排版规则：中西文自动留空、标点挤压、末行不留孤字、行首不放标点；
+   长链接 / 长公式在窄面板里允许断开，不把面板撑出横向滚动。 */
+.ca-prose {
+  text-autospace: normal;
+  text-spacing-trim: normal;
+  text-wrap: pretty;
+  line-break: strict;
+  overflow-wrap: anywhere;
+}
+
 /* 长文行宽：面板拉宽时正文不跟着一行拉满（中文约 42 字一行最舒服）。 */
 .ca-reading-measure {
   max-width: 42em;

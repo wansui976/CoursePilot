@@ -86,7 +86,7 @@ const AnswerText = memo(function AnswerText({
   trailing?: ReactNode;
 }) {
   return (
-    <div className="text-sm leading-relaxed text-[var(--text-normal)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+    <div className="ca-prose text-sm leading-relaxed text-[var(--text-normal)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       {renderMarkdown(text, NO_SEEK, trailing)}
     </div>
   );
@@ -416,7 +416,7 @@ export function CourseChatPanel({
                 aria-label={t("courseChat.myQuestion")}
                 className="max-w-[82%] rounded-2xl rounded-tr-sm bg-[var(--accent-weak-2)] px-3 py-2"
               >
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-strong)]">
+                <p className="ca-prose whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-strong)]">
                   {turn.query}
                 </p>
               </div>
@@ -458,7 +458,7 @@ export function CourseChatPanel({
                 aria-label={t("courseChat.myQuestion")}
                 className="max-w-[82%] rounded-2xl rounded-tr-sm bg-[var(--accent-weak-2)] px-3 py-2"
               >
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-strong)]">
+                <p className="ca-prose whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-strong)]">
                   {inFlightQuery}
                 </p>
               </div>

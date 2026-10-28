@@ -52,7 +52,7 @@ const MemoAnswer = memo(function MemoAnswer({
 }) {
   const text = turn.context?.video_id ? bracketBareTimestamps(answer) : answer;
   return (
-    <div className="break-words text-sm leading-relaxed text-[var(--text-normal)]">
+    <div className="ca-prose text-sm leading-relaxed text-[var(--text-normal)]">
       {renderMarkdown(text, (ms) => onSeek(turn, ms))}
     </div>
   );
@@ -233,7 +233,7 @@ export function AssistantTurn({
           )}
           <p
             data-testid="user-bubble"
-            className={`${editing ? "opacity-50 " : ""}max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-[var(--accent-weak-2)] px-3 py-1.5 text-sm text-[var(--accent-text)]`}
+            className={`${editing ? "opacity-50 " : ""}ca-prose max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-[var(--accent-weak-2)] px-3 py-1.5 text-sm text-[var(--accent-text)]`}
           >
             {turn.question}
           </p>
