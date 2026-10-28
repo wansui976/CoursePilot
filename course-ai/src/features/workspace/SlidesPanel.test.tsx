@@ -573,6 +573,49 @@ describe("SlidesPanel handout", () => {
     expect(await screen.findByText(/no slides to export/)).toBeInTheDocument();
   });
 
+  it("keeps the handout busy after switching away and back, and finishes normally", async () => {
+    // 讲义要等大模型逐页写讲解：生成途中切到别的界面再回来，按钮不能变回可点、
+    // 「生成讲义中…」也不能消失——任务还在后台跑，再点一次就重复生成、重复计费。
+    const handout = deferred<string>();
+    mockIpc.export.handout.mockReturnValue(handout.promise);
+    const queryClient = createQueryClient();
+    const first = renderPanel(queryClient);
+
+    fireEvent.click(await screen.findByRole("button", { name: "讲义" }));
+    await waitFor(() => expect(mockIpc.export.handout).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    renderPanel(queryClient);
+    const busy = await screen.findByRole("button", { name: "生成讲义中…" });
+    expect(busy).toBeDisabled();
+    fireEvent.click(busy);
+    expect(mockIpc.export.handout).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      handout.resolve("/exports/video-1/handout.html");
+      await handout.promise;
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "讲义" })).toBeEnabled());
+  });
+
+  it("keeps a handout failure visible after switching away and back", async () => {
+    const handout = deferred<string>();
+    mockIpc.export.handout.mockReturnValue(handout.promise);
+    const queryClient = createQueryClient();
+    const first = renderPanel(queryClient);
+
+    fireEvent.click(await screen.findByRole("button", { name: "讲义" }));
+    await waitFor(() => expect(mockIpc.export.handout).toHaveBeenCalledTimes(1));
+    first.unmount();
+    await act(async () => {
+      handout.reject(new Error("model quota exhausted"));
+      await handout.promise.catch(() => {});
+    });
+
+    renderPanel(queryClient);
+    expect(await screen.findByText(/model quota exhausted/)).toBeInTheDocument();
+  });
+
   it("hides the handout button until there are slides", async () => {
     mockIpc.slides.list.mockResolvedValue([]);
     renderPanel();

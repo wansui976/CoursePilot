@@ -55,7 +55,7 @@ function ocrFeedbackText(outcome: SlidesOcrOutcome, t: TFunction): string {
   return outcome.recognized > 0 ? t("slides.recognized", { count: outcome.recognized }) : t("slides.ocrNoText");
 }
 
-type SlidesOperation = "extract" | "pages-ocr" | "capture" | "frame-ocr";
+type SlidesOperation = "extract" | "pages-ocr" | "capture" | "frame-ocr" | "handout";
 type RequestOperation = { requestId: string };
 type PagesOcrRequest = RequestOperation & { force: boolean };
 type FrameRequest = { atMs: number };
@@ -118,16 +118,21 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   const pagesOcrKey = operationKey(videoId, "pages-ocr");
   const captureKey = operationKey(videoId, "capture");
   const frameOcrKey = operationKey(videoId, "frame-ocr");
+  const handoutKey = operationKey(videoId, "handout");
 
   const extractState = useLatestOperation<number, RequestOperation>(extractKey);
   const pagesOcrState = useLatestOperation<SlidesOcrOutcome, PagesOcrRequest>(pagesOcrKey);
   const captureState = useLatestOperation<unknown, FrameRequest>(captureKey);
   const frameOcrState = useLatestOperation<string, FrameRequest>(frameOcrKey);
+  // 讲义要等大模型逐页写讲解，一份要几十秒。切到别的界面再回来时，组件已经重新挂载，
+  // 只看 useMutation 自己的状态会回到空闲——任务明明还在后台跑，按钮却又能点了。
+  const handoutState = useLatestOperation<string, void>(handoutKey);
 
   const extractPending = extractState?.status === "pending";
   const pagesOcrPending = pagesOcrState?.status === "pending";
   const capturePending = captureState?.status === "pending";
   const frameOcrPending = frameOcrState?.status === "pending";
+  const handoutPending = handoutState?.status === "pending";
 
   // 进行中那次提取的进度与 requestId（供「停止」定位后台任务）。
   const [progress, setProgress] = useState<SlidesProgress | null>(null);
@@ -170,6 +175,7 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
   // 讲义：每页课件配这一页的讲解要点。桌面端导出后直接在浏览器里打开（自动弹打印框，
   // 存成 PDF 一步到位）；移动端走系统分享。没配大模型时后端自动退回讲稿摘录。
   const handout = useMutation<string, unknown, void>({
+    mutationKey: handoutKey,
     mutationFn: async () => {
       const mobile = isMobile();
       const path = await ipc.export.handout(videoId, {
@@ -228,6 +234,11 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
         { onSettled: () => releaseStart("extract") },
       ),
     );
+  }
+
+  function startHandout() {
+    if (handoutPending) return;
+    startOnce("handout", () => handout.mutate(undefined, { onSettled: () => releaseStart("handout") }));
   }
 
   function startPagesOcr(force: boolean) {
@@ -317,12 +328,12 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
             <Button
               size="sm"
               variant="ghost"
-              disabled={handout.isPending || extractPending}
-              onClick={() => handout.mutate()}
+              disabled={handoutPending || extractPending}
+              onClick={startHandout}
               title={t("slides.handoutTitle")}
             >
               <FileText className="h-3.5 w-3.5" />
-              {handout.isPending ? t("slides.handoutBusy") : t("slides.handout")}
+              {handoutPending ? t("slides.handoutBusy") : t("slides.handout")}
             </Button>
           )}
           <Button
@@ -400,11 +411,11 @@ export function SlidesPanel({ videoId }: { videoId: string }) {
           {ocrFeedbackText(pagesOcrFeedback, t)}
         </div>
       )}
-      {handout.isError && (
+      {handoutState?.status === "error" && (
         <ErrorNote
           className="mx-3 mb-2 flex-none"
-          error={handout.error}
-          onRetry={() => handout.mutate()}
+          error={handoutState.error}
+          onRetry={startHandout}
         />
       )}
       {extractState?.status === "error" && (
