@@ -54,6 +54,7 @@ import {
   type AssistantConversationsState,
 } from "@/lib/assistantConversations";
 import { humanizeError } from "@/lib/errors";
+import { loadTurnImages, pruneTurnImages, saveTurnImages } from "@/lib/assistantImageStore";
 import {
   AssistantImageError,
   MAX_ASSISTANT_IMAGES,
@@ -806,6 +807,21 @@ export function AssistantPanel({
     };
   }, [clearScheduledPersistence, persistConversationSnapshot]);
 
+  // 打开助手后稍等片刻，回收已被删掉的会话或被裁掉的轮次留下的附图。
+  // 只在挂载时做一次：之后新发的图都属于还在的轮次。
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const keep = new Set<string>();
+      for (const summary of readAssistantConversations().conversations) {
+        for (const turn of readAssistantConversation(summary.id)?.session.turns ?? []) {
+          keep.add(turn.id);
+        }
+      }
+      void pruneTurnImages(keep);
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   // 记住的模型被删了：选择器已改回默认，这里说一声，免得用户以为还在用原来那个。
   const showModelUnavailable = useCallback(() => setError(t("assistant.modelUnavailable")), [t]);
 
@@ -893,6 +909,8 @@ export function AssistantPanel({
     if (turns.length + 1 > MAX_RENDERED_TURNS) {
       setHiddenTurnCount((count) => count + (turns.length + 1 - MAX_RENDERED_TURNS));
     }
+    // 原图存进 IndexedDB：会话正文只记张数，重启后点开旧提问靠这里取回。
+    if (images.length > 0) void saveTurnImages(turnId, images);
     setTurns((prev) =>
       [
         ...prev,
@@ -1221,7 +1239,11 @@ export function AssistantPanel({
    * 被停掉的那一轮是个例外：它整轮都没进上下文（后端返回的 history 被丢弃了），
    * 现在的 history 已经就是提问之前的样子，再退一轮会把上一次真正的问答也砍掉。
    */
-  function regenerate(turn: Turn) {
+  async function regenerate(turn: Turn) {
+    if (busy || activeRequestRef.current || actionExecutionCountRef.current > 0) return;
+    // 重启后恢复的旧提问只有张数，原图在 IndexedDB 里；读不到就只能不带图重问。
+    const images =
+      turn.images ?? (turn.imageCount ? ((await loadTurnImages(turn.id)) ?? undefined) : undefined);
     if (busy || activeRequestRef.current || actionExecutionCountRef.current > 0) return;
     const before = turn.canceled
       ? historyRef.current
@@ -1229,7 +1251,7 @@ export function AssistantPanel({
     historyRef.current = before;
     setHistory(before);
     setTurns((previous) => previous.filter((item) => item.id !== turn.id));
-    void send(turn.question, false, turn.images);
+    void send(turn.question, false, images);
   }
 
   function jumpToLatest() {
@@ -1827,7 +1849,7 @@ export function AssistantPanel({
               savedToNotes={savedToNotesTurnId === turn.id}
               onCopy={(item) => void copyAnswer(item)}
               onSaveToNotes={(item) => void saveToNotes(item)}
-              onRegenerate={regenerate}
+              onRegenerate={(turn) => void regenerate(turn)}
               onSeek={seekInTurn}
               onNavigate={navigateFromTurn}
               onOutcome={(id, outcome) => commitActionOutcome(id, outcome, conversationEpoch)}

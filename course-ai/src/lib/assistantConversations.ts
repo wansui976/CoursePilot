@@ -15,10 +15,20 @@ const LEGACY_CONVERSATION_ID = "conversation-legacy";
 export const MAX_ASSISTANT_CONVERSATIONS = 20;
 export const MAX_ASSISTANT_CONVERSATION_TITLE_CHARS = 80;
 
+export interface AssistantConversationSource {
+  course_id?: string;
+  video_id?: string;
+}
+
 export interface AssistantConversationSummary {
   id: string;
   title: string;
   updatedAt: number;
+  /**
+   * 这段对话问的是哪些视频（按首次出现的顺序，最多几个），供历史列表标出处。
+   * 存 id 不存标题：视频改了名，列表跟着显示新名字。旧索引没有这个字段。
+   */
+  sources?: AssistantConversationSource[];
 }
 
 export interface AssistantConversationsState {
@@ -114,6 +124,66 @@ function normalizeTitle(value: unknown) {
   return value.trim().replace(/\s+/g, " ").slice(0, MAX_ASSISTANT_CONVERSATION_TITLE_CHARS);
 }
 
+export const MAX_ASSISTANT_CONVERSATION_SOURCES = 3;
+const MAX_SOURCE_ID_CHARS = 128;
+
+/** 从每一轮提问时的界面上下文里收集出处：同一个视频只记一次，没有视频时记课程。 */
+export function deriveAssistantConversationSources(
+  session: AssistantSession,
+): AssistantConversationSource[] {
+  const sources: AssistantConversationSource[] = [];
+  const seen = new Set<string>();
+  for (const turn of session.turns) {
+    const source = readSource(turn.context);
+    if (!source) continue;
+    const key = source.video_id ? `v:${source.video_id}` : `c:${source.course_id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sources.push(source);
+    if (sources.length >= MAX_ASSISTANT_CONVERSATION_SOURCES) break;
+  }
+  return sources;
+}
+
+function readSource(value: unknown): AssistantConversationSource | null {
+  if (!isRecord(value)) return null;
+  const id = (raw: unknown) =>
+    typeof raw === "string" && raw && raw.length <= MAX_SOURCE_ID_CHARS ? raw : undefined;
+  const course_id = id(value.course_id);
+  const video_id = id(value.video_id);
+  if (!course_id && !video_id) return null;
+  return { ...(course_id ? { course_id } : {}), ...(video_id ? { video_id } : {}) };
+}
+
+function readSources(value: unknown): AssistantConversationSource[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const sources = value
+    .map(readSource)
+    .filter((source) => source !== null)
+    .slice(0, MAX_ASSISTANT_CONVERSATION_SOURCES);
+  return sources.length > 0 ? sources : undefined;
+}
+
+function mergeSources(
+  previous: AssistantConversationSource[] | undefined,
+  next: AssistantConversationSource[],
+): AssistantConversationSource[] {
+  const key = (source: AssistantConversationSource) =>
+    source.video_id ? `v:${source.video_id}` : `c:${source.course_id}`;
+  const merged: AssistantConversationSource[] = [];
+  const seen = new Set<string>();
+  for (const source of [...(previous ?? []), ...next]) {
+    if (seen.has(key(source))) continue;
+    seen.add(key(source));
+    merged.push(source);
+  }
+  return merged.slice(0, MAX_ASSISTANT_CONVERSATION_SOURCES);
+}
+
+function withSources(sources: AssistantConversationSource[] | undefined) {
+  return sources && sources.length > 0 ? { sources } : {};
+}
+
 export function deriveAssistantConversationTitle(session: AssistantSession) {
   const question = session.turns.find((turn) => turn.question.trim())?.question ?? "";
   return normalizeTitle(question);
@@ -134,6 +204,8 @@ function readSummary(value: unknown): AssistantConversationSummary | null {
     id: value.id,
     title: normalizeTitle(value.title),
     updatedAt: value.updatedAt,
+    // 出处是辅助信息：写坏了就丢掉这个字段，不能因此把整份索引判成损坏。
+    ...withSources(readSources(value.sources)),
   };
 }
 
@@ -327,6 +399,7 @@ function migrateLegacyAssistantSession(now: number): AssistantConversationsState
         id,
         title: deriveAssistantConversationTitle(session),
         updatedAt: now,
+        ...withSources(deriveAssistantConversationSources(session)),
       },
     ],
   };
@@ -384,7 +457,15 @@ export function saveAssistantConversation(
       ? previous?.title || deriveAssistantConversationTitle(input.session)
       : normalizeTitle(input.title);
   const conversations = sortConversations([
-    { id: input.id, title, updatedAt },
+    {
+      id: input.id,
+      title,
+      updatedAt,
+      // 轮次被裁掉后早期的出处会跟着消失；保留之前记下的，避免列表上的出处忽有忽无。
+      ...withSources(
+        mergeSources(previous?.sources, deriveAssistantConversationSources(input.session)),
+      ),
+    },
     ...current.conversations.filter((conversation) => conversation.id !== input.id),
   ]);
   const next: AssistantConversationsState = {
@@ -462,6 +543,7 @@ export function tryCreateAssistantConversation(
         ? deriveAssistantConversationTitle(session)
         : normalizeTitle(options.title),
       updatedAt,
+      ...withSources(deriveAssistantConversationSources(session)),
     },
     ...current.conversations.filter(
       (conversation) => conversation.id !== id && conversation.id !== reclaimedId,

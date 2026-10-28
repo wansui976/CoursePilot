@@ -61,6 +61,43 @@ function localStorageBytes() {
 describe("assistantConversations", () => {
   beforeEach(() => localStorage.clear());
 
+  it("记下会话问过哪些视频，供历史列表标出处", () => {
+    const base = session("第一问");
+    const withContext: AssistantSession = {
+      ...base,
+      turns: [
+        { ...base.turns[0], id: "t1", context: { course_id: "c1", video_id: "v1" } },
+        { ...base.turns[0], id: "t2", context: { course_id: "c1", video_id: "v1" } },
+        { ...base.turns[0], id: "t3", context: { course_id: "c1" } },
+        { ...base.turns[0], id: "t4", context: { course_id: "c2", video_id: "v9" } },
+      ],
+    };
+    const created = createAssistantConversation({ session: withContext, now: 10 });
+    const id = created.activeId!;
+    expect(readAssistantConversations().conversations[0].sources).toEqual([
+      { course_id: "c1", video_id: "v1" },
+      { course_id: "c1" },
+      { course_id: "c2", video_id: "v9" },
+    ]);
+
+    // 早期轮次被裁掉后，之前记下的出处仍保留。
+    saveAssistantConversation({ id, session: { ...withContext, turns: withContext.turns.slice(3) } }, 20);
+    expect(readAssistantConversations().conversations[0].sources?.[0]).toEqual({
+      course_id: "c1",
+      video_id: "v1",
+    });
+  });
+
+  it("出处字段写坏了只丢掉出处，不把整份索引判成损坏", () => {
+    createAssistantConversation({ session: session("问题"), now: 10 });
+    const raw = JSON.parse(localStorage.getItem(assistantConversationsStorageKey)!);
+    raw.conversations[0].sources = [{ video_id: 42 }, "x"];
+    localStorage.setItem(assistantConversationsStorageKey, JSON.stringify(raw));
+    const state = readAssistantConversations();
+    expect(state.conversations.length).toBe(raw.conversations.length);
+    expect(state.conversations.every((conversation) => !conversation.sources)).toBe(true);
+  });
+
   it("migrates the legacy session once and keeps actions non-executable", () => {
     writeAssistantSession(
       {

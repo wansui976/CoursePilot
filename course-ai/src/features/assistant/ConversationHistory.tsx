@@ -1,8 +1,15 @@
-import type { RefObject } from "react";
+import { useMemo, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, LoaderCircle, PenLine, Trash2 } from "lucide-react";
+import type { TFunction } from "i18next";
+import { useQueries, useQuery } from "@tanstack/react-query";
+import { Check, LoaderCircle, PenLine, PlayCircle, Trash2 } from "lucide-react";
 import { Button } from "@/ui/button";
-import type { AssistantConversationsState } from "@/lib/assistantConversations";
+import type {
+  AssistantConversationSource,
+  AssistantConversationsState,
+} from "@/lib/assistantConversations";
+import { queries } from "@/lib/queries";
+import { displayTitle } from "@/lib/videoTitle";
 
 /**
  * 会话历史列表：切换、重命名、删除。
@@ -21,6 +28,59 @@ function formatConversationTime(updatedAt: number, locale: string) {
   } catch {
     return "";
   }
+}
+
+/**
+ * 把各会话的出处 id 解析成名字。只读课程和各课程视频列表的缓存（资料库页面平时就在用），
+ * 不为历史列表单独开后端查询；视频被删了就退回课程名。
+ */
+function useSourceNames(conversations: AssistantConversationsState) {
+  const courseIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const conversation of conversations.conversations) {
+      for (const source of conversation.sources ?? []) {
+        if (source.course_id) ids.add(source.course_id);
+      }
+    }
+    return [...ids];
+  }, [conversations]);
+  const courses = useQuery({ ...queries.courses(), enabled: courseIds.length > 0 });
+  const videoLists = useQueries({ queries: courseIds.map((id) => queries.videos(id)) });
+  return useMemo(() => {
+    const courseNames = new Map<string, string>();
+    for (const course of courses.data ?? []) courseNames.set(course.id, course.name);
+    const videoTitles = new Map<string, string>();
+    for (const list of videoLists) {
+      for (const video of list.data ?? []) videoTitles.set(video.id, displayTitle(video.title));
+    }
+    return { courseNames, videoTitles };
+    // useQueries 每次渲染都返回新数组；按各列表的数据引用判断是否需要重算。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courses.data, ...videoLists.map((list) => list.data)]);
+}
+
+/** 「出自《视频》」；多个视频时只写第一个再加「等 N 个视频」，没有视频时写课程名。 */
+function sourceLabel(
+  sources: AssistantConversationSource[] | undefined,
+  names: ReturnType<typeof useSourceNames>,
+  t: TFunction,
+): string | null {
+  if (!sources?.length) return null;
+  const labels = sources
+    .map((source) =>
+      (source.video_id && names.videoTitles.get(source.video_id)) ||
+      (source.course_id && names.courseNames.get(source.course_id)) ||
+      null,
+    )
+    .filter((label): label is string => !!label);
+  if (labels.length === 0) return null;
+  return labels.length === 1
+    ? labels[0]
+    : t("assistant.conversationSourceMore", {
+        first: labels[0],
+        count: labels.length,
+        others: labels.length - 1,
+      });
 }
 
 export function ConversationHistory({
@@ -64,6 +124,7 @@ export function ConversationHistory({
 }) {
   const { t, i18n } = useTranslation();
   const locked = busy || actionExecutionBusy || conversationMutationBusy;
+  const sourceNames = useSourceNames(conversations);
 
   return (
     <section
@@ -101,6 +162,7 @@ export function ConversationHistory({
             );
             const conversationTitle =
               conversation.title || t("assistant.untitledConversation");
+            const source = sourceLabel(conversation.sources, sourceNames, t);
             return (
               <div
                 key={conversation.id}
@@ -156,6 +218,16 @@ export function ConversationHistory({
                       <span className="block truncate text-sm text-[var(--text-strong)]">
                         {conversationTitle}
                       </span>
+                      {source && (
+                        <span
+                          className="mt-0.5 flex min-w-0 items-center gap-1 ca-t-2xs text-[var(--text-muted)]"
+                          title={source}
+                        >
+                          <PlayCircle className="h-3 w-3 flex-none" aria-hidden="true" />
+                          <span className="sr-only">{t("assistant.conversationSource")}</span>
+                          <span className="truncate">{source}</span>
+                        </span>
+                      )}
                       {updatedAt && (
                         <time
                           dateTime={new Date(conversation.updatedAt).toISOString()}

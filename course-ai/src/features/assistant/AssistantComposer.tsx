@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { AtSign, Check, ChevronDown, ImagePlus, Send, Square, X } from "lucide-react";
 import { imageFilesFromClipboard, type AssistantImage } from "@/lib/assistantImages";
 import { AssistantModelPicker } from "./AssistantModelPicker";
+import { ImageLightbox } from "./ImageLightbox";
 
 /** 提问范围的用户选择。auto 跟随界面当前选中项，其余三档显式覆盖。 */
 export type ScopeChoice = "auto" | "video" | "course" | "all";
@@ -76,6 +77,7 @@ export function AssistantComposer({
   const scopeItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const scopeMenuId = `assistant-scope-menu-${useId()}`;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewing, setPreviewing] = useState<number | null>(null);
   const canSend = (!!input.trim() || images.length > 0) && !actionExecutionBusy;
 
   // 剪贴板里有图片就收下图片；同时带的文字（如从网页复制的图文）照常粘进输入框。
@@ -155,11 +157,19 @@ export function AssistantComposer({
           <div className="flex flex-wrap gap-1.5 px-2 pt-2">
             {images.map((image, index) => (
               <div key={image.id} className="relative">
-                <img
-                  src={image.dataUrl}
-                  alt={t("assistant.attachedImageAlt", { index: index + 1 })}
-                  className="h-14 w-14 rounded-lg border border-[var(--border-subtle)] object-cover"
-                />
+                <button
+                  type="button"
+                  aria-label={t("assistant.viewImage", { index: index + 1 })}
+                  title={t("assistant.viewImage", { index: index + 1 })}
+                  onClick={() => setPreviewing(index)}
+                  className="block overflow-hidden rounded-lg border border-[var(--border-subtle)] transition hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+                >
+                  <img
+                    src={image.dataUrl}
+                    alt={t("assistant.attachedImageAlt", { index: index + 1 })}
+                    className="h-14 w-14 object-cover"
+                  />
+                </button>
                 <button
                   type="button"
                   aria-label={t("assistant.removeImage", { index: index + 1 })}
@@ -171,6 +181,11 @@ export function AssistantComposer({
                 </button>
               </div>
             ))}
+            <ImageLightbox
+              images={images.map((image) => image.dataUrl)}
+              index={previewing}
+              onClose={() => setPreviewing(null)}
+            />
           </div>
         )}
         <textarea

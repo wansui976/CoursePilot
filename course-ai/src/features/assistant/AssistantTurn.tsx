@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import {
   ArrowDown,
   Check,
@@ -15,6 +15,8 @@ import { AssistantToolChips } from "./AssistantToolChips";
 import { getAssistantInteractionState } from "@/lib/assistantSession";
 import type { AssistantAction, AssistantContext } from "@/lib/types";
 import { renderMarkdown } from "@/lib/renderMarkdown";
+import { loadTurnImages } from "@/lib/assistantImageStore";
+import { ImageLightbox } from "./ImageLightbox";
 import {
   type Turn,
   usageTokens,
@@ -51,6 +53,69 @@ const MemoAnswer = memo(function MemoAnswer({
     </div>
   );
 });
+
+/**
+ * 这一问附的图：本次运行里刚发的直接在内存里；重启后恢复的旧提问只剩张数，
+ * 去 IndexedDB 按轮次 id 取回来。取不到就只能如实说原图没保存。
+ */
+function useTurnImages(turn: Turn) {
+  const [stored, setStored] = useState<string[] | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const inMemory = turn.images && turn.images.length > 0 ? turn.images : null;
+  const needsLoad = !inMemory && !!turn.imageCount;
+  useEffect(() => {
+    if (!needsLoad) return;
+    let cancelled = false;
+    void loadTurnImages(turn.id).then((images) => {
+      if (cancelled) return;
+      setStored(images && images.length > 0 ? images : null);
+      setLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [needsLoad, turn.id]);
+  return { images: inMemory ?? stored, loading: needsLoad && !loaded };
+}
+
+/** 提问气泡上方的附图缩略图，点开看大图。 */
+function TurnImages({ turn }: { turn: Turn }) {
+  const { t } = useTranslation();
+  const { images, loading } = useTurnImages(turn);
+  const [viewing, setViewing] = useState<number | null>(null);
+  if (images) {
+    return (
+      <>
+        <div className="flex max-w-[85%] flex-wrap justify-end gap-1">
+          {images.map((src, index) => (
+            <button
+              key={index}
+              type="button"
+              aria-label={t("assistant.viewImage", { index: index + 1 })}
+              title={t("assistant.viewImage", { index: index + 1 })}
+              onClick={() => setViewing(index)}
+              className="overflow-hidden rounded-lg border border-[var(--border-subtle)] transition hover:border-[var(--border-strong)] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+            >
+              <img
+                src={src}
+                alt={t("assistant.attachedImageAlt", { index: index + 1 })}
+                className="h-16 w-16 object-cover"
+              />
+            </button>
+          ))}
+        </div>
+        <ImageLightbox images={images} index={viewing} onClose={() => setViewing(null)} />
+      </>
+    );
+  }
+  if (!turn.imageCount || loading) return null;
+  // 读不回原图（存储被清过、旧版本没存）：照实说附过图，而不是装作这一问只有文字。
+  return (
+    <span className="ca-t-2xs text-[var(--text-faint)]">
+      {t("assistant.attachedImagesNotKept", { count: turn.imageCount })}
+    </span>
+  );
+}
 
 export function AssistantEmptyState({
   scopeLabel,
@@ -135,23 +200,7 @@ export function AssistantTurn({
       {/* 自己说的话靠右、带底色；助手的靠左。一眼能分清谁说的，
           比让两边都是同一坨灰字强得多。 */}
       <div className="flex flex-col items-end gap-1">
-        {turn.images && turn.images.length > 0 ? (
-          <div className="flex max-w-[85%] flex-wrap justify-end gap-1">
-            {turn.images.map((src, index) => (
-              <img
-                key={index}
-                src={src}
-                alt={t("assistant.attachedImageAlt", { index: index + 1 })}
-                className="h-16 w-16 rounded-lg border border-[var(--border-subtle)] object-cover"
-              />
-            ))}
-          </div>
-        ) : turn.imageCount ? (
-          // 原图只在本次运行里留着；重启后照实说附过图，而不是装作这一问只有文字。
-          <span className="ca-t-2xs text-[var(--text-faint)]">
-            {t("assistant.attachedImagesNotKept", { count: turn.imageCount })}
-          </span>
-        ) : null}
+        <TurnImages turn={turn} />
         <p
           data-testid="user-bubble"
           className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-[var(--accent-weak-2)] px-3 py-1.5 text-sm text-[var(--accent-text)]"

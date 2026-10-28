@@ -1021,7 +1021,14 @@
     "modelDefault": "Default model",
     "modelDefaultNamed": "Default · {{name}}",
     "modelNone": "No models configured yet",
-    "modelUnavailable": "The model you picked is no longer configured; switched back to the default"
+    "modelUnavailable": "The model you picked is no longer configured; switched back to the default",
+    "viewImage": "View image {{index}}",
+    "imageViewerTitle": "Image {{index}} of {{count}}",
+    "closeImageViewer": "Close",
+    "previousImage": "Previous image",
+    "nextImage": "Next image",
+    "conversationSource": "From: ",
+    "conversationSourceMore": "{{first}} and {{others}} more"
   },
   "assistantTools": {
     "list_courses": "View courses",

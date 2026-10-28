@@ -1020,7 +1020,14 @@
     "modelDefault": "默认模型",
     "modelDefaultNamed": "默认 · {{name}}",
     "modelNone": "还没有配置模型",
-    "modelUnavailable": "之前选的模型已不在配置里，已改回默认模型"
+    "modelUnavailable": "之前选的模型已不在配置里，已改回默认模型",
+    "viewImage": "查看附图 {{index}}",
+    "imageViewerTitle": "附图 {{index}} / {{count}}",
+    "closeImageViewer": "关闭",
+    "previousImage": "上一张",
+    "nextImage": "下一张",
+    "conversationSource": "出自：",
+    "conversationSourceMore": "{{first}} 等 {{count}} 处"
   },
   "assistantTools": {
     "list_courses": "查看课程",

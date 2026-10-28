@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import i18n from "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantPanel } from "./AssistantPanel";
 import { resetImportProbeCacheForTests } from "@/lib/importProbeCache";
@@ -347,6 +347,35 @@ describe("AssistantPanel", () => {
     expect(await screen.findByText("一次最多附 4 张图片")).toBeInTheDocument();
     await screen.findByLabelText("移除附图 4");
     expect(screen.queryByLabelText("移除附图 5")).not.toBeInTheDocument();
+  });
+
+  it("发过的附图可以点开看大图", async () => {
+    renderPanel();
+    pasteImage();
+    await screen.findByLabelText("移除附图 1");
+    await ask("这道题怎么做");
+    await screen.findByText("好了");
+    fireEvent.click(screen.getByRole("button", { name: "查看附图 1" }));
+    const viewer = await screen.findByRole("dialog", { name: "附图 1 / 1" });
+    expect(within(viewer).getByAltText("附图 1")).toHaveAttribute(
+      "src",
+      "data:image/png;base64,AA==",
+    );
+    fireEvent.keyDown(viewer, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    // Esc 只关大图，不能顺带把助手面板也收起来。
+    expect(useAssistantUi.getState().open).toBe(true);
+  });
+
+  it("会话历史里标出每段对话出自哪个视频", async () => {
+    mockIpc.courses.list.mockResolvedValue([{ id: "c1", name: "机器学习" }]);
+    mockIpc.videos.list.mockResolvedValue([{ id: "v1", title: "03 梯度下降.mp4" }]);
+    renderPanel();
+    await ask("这节讲什么");
+    await screen.findByText("好了");
+    fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
+    const item = screen.getByRole("button", { name: /^这节讲什么/ });
+    expect(await within(item).findByText("03 梯度下降")).toBeInTheDocument();
   });
 
   it("在助手里换模型后按所选模型提问，且记住选择", async () => {
