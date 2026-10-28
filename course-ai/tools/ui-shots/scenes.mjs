@@ -293,9 +293,9 @@ export const scenes = [
       await openVideo(page);
       // 桌面布局从左侧工具栏打开；窄屏没有工具栏，用右下角入口。
       if (await sidebarShell(page)) {
-        await page.getByRole("button", { name: "切换助手" }).click();
+        await page.getByRole("button", { name: "切换 AI 助手" }).click();
       } else {
-        await page.getByRole("button", { name: "打开助手" }).click();
+        await page.getByRole("button", { name: "打开 AI 助手" }).click();
       }
       await shot();
     },

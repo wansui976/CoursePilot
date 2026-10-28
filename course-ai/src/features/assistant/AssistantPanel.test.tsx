@@ -116,7 +116,7 @@ function renderPanel(
 }
 
 async function ask(text: string) {
-  fireEvent.change(screen.getByLabelText("对助手说"), { target: { value: text } });
+  fireEvent.change(screen.getByLabelText("对 AI 助手说"), { target: { value: text } });
   fireEvent.click(screen.getByLabelText("发送"));
 }
 
@@ -163,15 +163,15 @@ describe("AssistantPanel", () => {
   it("收起时在界面边缘留一颗可点开的球", () => {
     useAssistantUi.setState({ open: false });
     renderPanel();
-    expect(screen.getByLabelText("对助手说")).not.toBeVisible();
-    const dockStrip = screen.getByLabelText("打开助手");
+    expect(screen.getByLabelText("对 AI 助手说")).not.toBeVisible();
+    const dockStrip = screen.getByLabelText("打开 AI 助手");
     expect(dockStrip).toHaveAttribute("data-dock-side", "right");
     // 圆球：贴边但留一点空隙，不再是糊在边上的窄条。
     expect(dockStrip).toHaveClass("right-3", "h-14", "w-14", "rounded-full");
     expect(dockStrip).toHaveClass("focus-visible:ring-[var(--focus-ring)]");
     expect(dockStrip.querySelector("svg")).toHaveClass("text-[var(--text-normal)]");
     fireEvent.click(dockStrip);
-    expect(screen.getByLabelText("对助手说")).toBeVisible();
+    expect(screen.getByLabelText("对 AI 助手说")).toBeVisible();
   });
 
   it("拖动球只是把球挪个地方，不会顺手把面板拽出来", () => {
@@ -179,7 +179,7 @@ describe("AssistantPanel", () => {
     // ——向内拖过 16px 就展开——而任何一次拖动都会顺手越过这个门槛。
     useAssistantUi.setState({ open: false, side: "left" });
     renderPanel();
-    const ball = screen.getByRole("button", { name: "打开助手" });
+    const ball = screen.getByRole("button", { name: "打开 AI 助手" });
 
     fireEvent.pointerDown(ball, {
       pointerId: 3,
@@ -198,13 +198,13 @@ describe("AssistantPanel", () => {
     expect(ball).toHaveClass("right-3");
     expect(ball).toHaveStyle({ top: "308px" });
     expect(useAssistantUi.getState()).toMatchObject({ open: false, side: "right" });
-    expect(screen.getByLabelText("对助手说")).not.toBeVisible();
+    expect(screen.getByLabelText("对 AI 助手说")).not.toBeVisible();
   });
 
   it("球沿边缘拖动只调整位置，不会被随后的 click 误打开", async () => {
     useAssistantUi.setState({ open: false, side: "left" });
     renderPanel();
-    const dockStrip = screen.getByRole("button", { name: "打开助手" });
+    const dockStrip = screen.getByRole("button", { name: "打开 AI 助手" });
 
     fireEvent.pointerDown(dockStrip, {
       pointerId: 4,
@@ -223,7 +223,7 @@ describe("AssistantPanel", () => {
 
     // 球比原来的窄条矮 56px，能停到更靠下的位置，所以下界跟着降。
     expect(dockStrip).toHaveStyle({ top: "538px" });
-    expect(screen.getByLabelText("对助手说")).not.toBeVisible();
+    expect(screen.getByLabelText("对 AI 助手说")).not.toBeVisible();
     expect(useAssistantUi.getState().open).toBe(false);
   });
 
@@ -232,7 +232,7 @@ describe("AssistantPanel", () => {
     // 会把后面那次真正的点击一起吃掉——面板从此点不开。
     useAssistantUi.setState({ open: false, side: "left" });
     renderPanel();
-    const ball = screen.getByRole("button", { name: "打开助手" });
+    const ball = screen.getByRole("button", { name: "打开 AI 助手" });
 
     fireEvent.pointerDown(ball, {
       pointerId: 7,
@@ -272,7 +272,7 @@ describe("AssistantPanel", () => {
     act(() => useInlineAsk.getState().askAbout("贝叶斯定理", 5_000));
 
     await waitFor(() => expect(useAssistantUi.getState().open).toBe(true));
-    expect(screen.getByLabelText("对助手说")).toHaveValue(
+    expect(screen.getByLabelText("对 AI 助手说")).toHaveValue(
       "请解释这段文稿（00:05）：\n\n贝叶斯定理",
     );
     expect(useInlineAsk.getState().pending).toBeNull();
@@ -296,7 +296,7 @@ describe("AssistantPanel", () => {
 
   function pasteImage(type = "image/png", text = "") {
     const file = new File(["x"], "shot.png", { type });
-    fireEvent.paste(screen.getByLabelText("对助手说"), {
+    fireEvent.paste(screen.getByLabelText("对 AI 助手说"), {
       clipboardData: {
         items: [{ kind: "file", type, getAsFile: () => file }],
         getData: () => text,
@@ -871,7 +871,7 @@ describe("AssistantPanel", () => {
 
   it("可以从标题栏拖动桌面面板", () => {
     renderPanel();
-    const panel = screen.getByRole("complementary", { name: "助手" });
+    const panel = screen.getByRole("complementary", { name: "AI 助手" });
     vi.spyOn(panel, "getBoundingClientRect").mockReturnValue({
       left: 648,
       top: 16,
@@ -884,7 +884,7 @@ describe("AssistantPanel", () => {
       toJSON: () => ({}),
     });
 
-    const handle = screen.getByRole("button", { name: "拖动助手面板" });
+    const handle = screen.getByRole("button", { name: "拖动 AI 助手面板" });
     fireEvent.pointerDown(handle, {
       pointerId: 1,
       pointerType: "mouse",
@@ -901,7 +901,7 @@ describe("AssistantPanel", () => {
 
   it("拖到左侧边缘后贴靠过去，面板保持打开", () => {
     renderPanel();
-    const panel = screen.getByRole("complementary", { name: "助手" });
+    const panel = screen.getByRole("complementary", { name: "AI 助手" });
     vi.spyOn(panel, "getBoundingClientRect").mockReturnValue({
       left: 648,
       top: 16,
@@ -914,7 +914,7 @@ describe("AssistantPanel", () => {
       toJSON: () => ({}),
     });
 
-    const handle = screen.getByRole("button", { name: "拖动助手面板" });
+    const handle = screen.getByRole("button", { name: "拖动 AI 助手面板" });
     fireEvent.pointerDown(handle, {
       pointerId: 2,
       pointerType: "mouse",
@@ -927,22 +927,22 @@ describe("AssistantPanel", () => {
     fireEvent.pointerUp(window, { pointerId: 2, clientX: 40, clientY: 180 });
 
     // 原来松手就收成小球，看起来像面板拖着拖着消失了。
-    expect(screen.queryByRole("button", { name: "打开助手" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "打开 AI 助手" })).toBeNull();
     expect(useAssistantUi.getState()).toMatchObject({ open: true, side: "left" });
     expect(panel).toHaveStyle({ left: "16px" });
   });
 
   it("键盘可以把面板贴靠到左右边缘", () => {
     renderPanel();
-    fireEvent.keyDown(screen.getByRole("button", { name: "拖动助手面板" }), { key: "Home" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "拖动 AI 助手面板" }), { key: "Home" });
     expect(useAssistantUi.getState()).toMatchObject({ open: true, side: "left" });
-    fireEvent.keyDown(screen.getByRole("button", { name: "拖动助手面板" }), { key: "End" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "拖动 AI 助手面板" }), { key: "End" });
     expect(useAssistantUi.getState()).toMatchObject({ open: true, side: "right" });
   });
 
   it("方向键挪到边缘只记下停靠边，不把面板收起", () => {
     renderPanel();
-    const handle = screen.getByRole("button", { name: "拖动助手面板" });
+    const handle = screen.getByRole("button", { name: "拖动 AI 助手面板" });
     handle.focus();
 
     fireEvent.keyDown(handle, { key: "ArrowRight" });
@@ -1016,7 +1016,7 @@ describe("AssistantPanel", () => {
     renderPanel();
     await ask("帮我查查");
     await screen.findByRole("alert");
-    expect(screen.getByLabelText("对助手说")).toHaveValue("帮我查查");
+    expect(screen.getByLabelText("对 AI 助手说")).toHaveValue("帮我查查");
   });
 
   it("把后端错误翻成人能处理的提示", async () => {
@@ -1274,7 +1274,7 @@ describe("AssistantPanel", () => {
     await ask("第二条问题");
     await screen.findByText("第二答");
 
-    const input = screen.getByLabelText("对助手说") as HTMLTextAreaElement;
+    const input = screen.getByLabelText("对 AI 助手说") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "还没发送的草稿" } });
     input.setSelectionRange(0, 0);
 
@@ -1295,7 +1295,7 @@ describe("AssistantPanel", () => {
     writeRecentAssistantQuestions(["上一条已发送问题"]);
     renderPanel();
 
-    const input = screen.getByLabelText("对助手说") as HTMLTextAreaElement;
+    const input = screen.getByLabelText("对 AI 助手说") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "第一行\n第二行" } });
     input.setSelectionRange(4, 4);
     fireEvent.keyDown(input, { key: "ArrowUp" });
@@ -1317,7 +1317,7 @@ describe("AssistantPanel", () => {
     writeRecentAssistantQuestions(["上一条已发送问题"]);
     renderPanel();
 
-    const input = screen.getByLabelText("对助手说") as HTMLTextAreaElement;
+    const input = screen.getByLabelText("对 AI 助手说") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "需要保留的草稿" } });
     input.setSelectionRange(0, 0);
     fireEvent.keyDown(input, { key: "ArrowUp" });
@@ -1326,14 +1326,14 @@ describe("AssistantPanel", () => {
     cleanup();
     useAssistantUi.setState({ open: true, side: "right" });
     renderPanel();
-    expect(screen.getByLabelText("对助手说")).toHaveValue("需要保留的草稿");
+    expect(screen.getByLabelText("对 AI 助手说")).toHaveValue("需要保留的草稿");
   });
 
   it("召回问题后把光标移到文本中间会退出历史浏览", () => {
     writeRecentAssistantQuestions(["更早的问题", "一条较长的历史问题"]);
     renderPanel();
 
-    const input = screen.getByLabelText("对助手说") as HTMLTextAreaElement;
+    const input = screen.getByLabelText("对 AI 助手说") as HTMLTextAreaElement;
     input.setSelectionRange(0, 0);
     fireEvent.keyDown(input, { key: "ArrowUp" });
     expect(input).toHaveValue("一条较长的历史问题");
@@ -1353,14 +1353,14 @@ describe("AssistantPanel", () => {
 
     await ask("第一会话问题");
     await screen.findByText("第一会话回答");
-    fireEvent.change(screen.getByLabelText("对助手说"), {
+    fireEvent.change(screen.getByLabelText("对 AI 助手说"), {
       target: { value: "第一会话草稿" },
     });
     fireEvent.click(screen.getByRole("button", { name: "新对话" }));
 
     await ask("第二会话问题");
     await screen.findByText("第二会话回答");
-    fireEvent.change(screen.getByLabelText("对助手说"), {
+    fireEvent.change(screen.getByLabelText("对 AI 助手说"), {
       target: { value: "第二会话草稿" },
     });
 
@@ -1370,19 +1370,19 @@ describe("AssistantPanel", () => {
       expect(screen.getByRole("button", { name: /^第二会话问题/ })).toHaveFocus(),
     );
     expect(firstConversation).toHaveClass("ca-touch-44", "min-h-[52px]");
-    expect(screen.queryByLabelText("对助手说")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("对 AI 助手说")).not.toBeInTheDocument();
     fireEvent.click(firstConversation);
 
     expect(screen.getByText("第一会话回答")).toBeInTheDocument();
     expect(screen.queryByText("第二会话回答")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("对助手说")).toHaveValue("第一会话草稿");
+    expect(screen.getByLabelText("对 AI 助手说")).toHaveValue("第一会话草稿");
 
     fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
     fireEvent.click(screen.getByRole("button", { name: /^第二会话问题/ }));
 
     expect(screen.getByText("第二会话回答")).toBeInTheDocument();
     expect(screen.queryByText("第一会话回答")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("对助手说")).toHaveValue("第二会话草稿");
+    expect(screen.getByLabelText("对 AI 助手说")).toHaveValue("第二会话草稿");
 
     const historyButton = screen.getByRole("button", { name: "会话历史" });
     fireEvent.click(historyButton);
@@ -1530,7 +1530,7 @@ describe("AssistantPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
     fireEvent.click(screen.getByRole("button", { name: "删除会话「唯一会话」" }));
 
-    await waitFor(() => expect(screen.getByLabelText("对助手说")).toHaveFocus());
+    await waitFor(() => expect(screen.getByLabelText("对 AI 助手说")).toHaveFocus());
     expect(screen.queryByText("回答：唯一会话")).not.toBeInTheDocument();
     const after = readAssistantConversations();
     expect(after.activeId).not.toBe(oldId);
@@ -1559,7 +1559,7 @@ describe("AssistantPanel", () => {
     expect(after.conversations).toHaveLength(2);
     expect(after.activeId).toBe(emptyId);
     expect(screen.queryByText("回答：当前非空会话")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("对助手说")).toHaveValue("");
+    expect(screen.getByLabelText("对 AI 助手说")).toHaveValue("");
   });
 
   it("二十个非空会话时明确提示上限且不切换或删除历史", () => {
@@ -1627,14 +1627,14 @@ describe("AssistantPanel", () => {
     vi.useFakeTimers();
     const clearTimeout = vi.spyOn(window, "clearTimeout").mockImplementation(() => undefined);
     try {
-      fireEvent.change(screen.getByLabelText("对助手说"), {
+      fireEvent.change(screen.getByLabelText("对 AI 助手说"), {
         target: { value: "旧会话未发送草稿" },
       });
       fireEvent.click(screen.getByRole("button", { name: "新对话" }));
       const newConversationId = readAssistantConversations().activeId;
       expect(newConversationId).not.toBe(oldConversationId);
 
-      fireEvent.change(screen.getByLabelText("对助手说"), {
+      fireEvent.change(screen.getByLabelText("对 AI 助手说"), {
         target: { value: "新会话未发送草稿" },
       });
       act(() => vi.advanceTimersByTime(300));
@@ -1661,7 +1661,7 @@ describe("AssistantPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "新对话" }));
     await ask("第二会话问题");
     await screen.findByText("第二会话回答");
-    fireEvent.change(screen.getByLabelText("对助手说"), {
+    fireEvent.change(screen.getByLabelText("对 AI 助手说"), {
       target: { value: "不能丢的草稿" },
     });
     fireEvent.click(screen.getByRole("button", { name: "会话历史" }));
@@ -1681,7 +1681,7 @@ describe("AssistantPanel", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent("当前会话未能保存");
       expect(screen.getByText("第二会话回答")).toBeInTheDocument();
       expect(screen.queryByText("第一会话回答")).not.toBeInTheDocument();
-      expect(screen.getByLabelText("对助手说")).toHaveValue("不能丢的草稿");
+      expect(screen.getByLabelText("对 AI 助手说")).toHaveValue("不能丢的草稿");
     } finally {
       setItem.mockRestore();
     }
@@ -1735,7 +1735,7 @@ describe("AssistantPanel", () => {
     renderPanel();
     await ask("删掉第一讲");
     expect(await screen.findByRole("button", { name: "确认删除" })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("对助手说"), { target: { value: "接着问" } });
+    fireEvent.change(screen.getByLabelText("对 AI 助手说"), { target: { value: "接着问" } });
 
     cleanup();
     useAssistantUi.setState({ open: true, side: "right" });
@@ -1743,7 +1743,7 @@ describe("AssistantPanel", () => {
 
     expect(screen.getByText("已经准备好，等你确认")).toBeInTheDocument();
     expect(screen.getByText(/本轮原有操作按钮已失效/)).toBeInTheDocument();
-    expect(screen.getByLabelText("对助手说")).toHaveValue("接着问");
+    expect(screen.getByLabelText("对 AI 助手说")).toHaveValue("接着问");
     expect(screen.queryByRole("button", { name: "确认删除" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText("发送"));
@@ -1860,12 +1860,12 @@ describe("AssistantPanel", () => {
   it("打开后聚焦输入框，Escape 收起并把焦点还给入口", async () => {
     useAssistantUi.setState({ open: false, side: "right" });
     renderPanel();
-    fireEvent.click(screen.getByRole("button", { name: "打开助手" }));
-    const input = screen.getByLabelText("对助手说");
+    fireEvent.click(screen.getByRole("button", { name: "打开 AI 助手" }));
+    const input = screen.getByLabelText("对 AI 助手说");
     await waitFor(() => expect(input).toHaveFocus());
 
     fireEvent.keyDown(input, { key: "Escape" });
-    const launcher = screen.getByRole("button", { name: "打开助手" });
+    const launcher = screen.getByRole("button", { name: "打开 AI 助手" });
     await waitFor(() => expect(launcher).toHaveFocus());
     expect(input).not.toBeVisible();
   });
@@ -1944,11 +1944,11 @@ describe("AssistantPanel", () => {
   it("拖内侧边框能把面板拉宽，贴边的那一侧不动", () => {
     // 固定 360px 对一段带列表和公式的长回答太窄了：每行放不下十几个字，一条列表项要折三行。
     renderPanel();
-    const panel = screen.getByRole("complementary", { name: "助手" });
+    const panel = screen.getByRole("complementary", { name: "AI 助手" });
     // 停在右边时抓的是左边框，右边缘应当钉住不动——不然拉宽会把整块面板推出屏幕。
     expect(panel).toHaveStyle({ left: "628px", width: "380px" });
 
-    const handle = screen.getByRole("separator", { name: "调整助手宽度" });
+    const handle = screen.getByRole("separator", { name: "调整 AI 助手宽度" });
     fireEvent.pointerDown(handle, { pointerId: 9, pointerType: "mouse", button: 0, clientX: 628 });
     fireEvent.pointerMove(window, { pointerId: 9, clientX: 528 });
     expect(panel).toHaveStyle({ left: "528px", width: "480px" });
@@ -1962,8 +1962,8 @@ describe("AssistantPanel", () => {
 
   it("宽度夹在能读的区间里，既拉不成半个屏幕也压不成一条缝", () => {
     renderPanel();
-    const panel = screen.getByRole("complementary", { name: "助手" });
-    const handle = screen.getByRole("separator", { name: "调整助手宽度" });
+    const panel = screen.getByRole("complementary", { name: "AI 助手" });
+    const handle = screen.getByRole("separator", { name: "调整 AI 助手宽度" });
 
     fireEvent.pointerDown(handle, { pointerId: 4, pointerType: "mouse", button: 0, clientX: 628 });
     fireEvent.pointerMove(window, { pointerId: 4, clientX: -4000 });
@@ -1975,8 +1975,8 @@ describe("AssistantPanel", () => {
 
   it("键盘也能调面板宽度", () => {
     renderPanel();
-    const panel = screen.getByRole("complementary", { name: "助手" });
-    const handle = screen.getByRole("separator", { name: "调整助手宽度" });
+    const panel = screen.getByRole("complementary", { name: "AI 助手" });
+    const handle = screen.getByRole("separator", { name: "调整 AI 助手宽度" });
 
     // 抓手在左边框上，向左即变宽。
     fireEvent.keyDown(handle, { key: "ArrowLeft" });
@@ -1992,14 +1992,14 @@ describe("AssistantPanel", () => {
     renderPanel();
 
     fireEvent.keyDown(window, { key: "j", metaKey: true });
-    await waitFor(() => expect(screen.getByLabelText("对助手说")).toBeVisible());
+    await waitFor(() => expect(screen.getByLabelText("对 AI 助手说")).toBeVisible());
 
     fireEvent.keyDown(window, { key: "j", ctrlKey: true });
-    await waitFor(() => expect(screen.getByLabelText("对助手说")).not.toBeVisible());
+    await waitFor(() => expect(screen.getByLabelText("对 AI 助手说")).not.toBeVisible());
 
     // 光按 j 不能生效，否则往输入框里打一个 j 就把面板关了。
     fireEvent.keyDown(window, { key: "j" });
-    expect(screen.getByLabelText("对助手说")).not.toBeVisible();
+    expect(screen.getByLabelText("对 AI 助手说")).not.toBeVisible();
   });
 
   it("翻上去看旧消息时留一条回到最新的路", async () => {
@@ -2159,7 +2159,7 @@ describe("AssistantPanel", () => {
     await ask("讲了什么");
     await screen.findByText("第一答");
 
-    const box = screen.getByLabelText("对助手说");
+    const box = screen.getByLabelText("对 AI 助手说");
     fireEvent.change(box, { target: { value: "顺手打的下一个问题" } });
     fireEvent.click(screen.getByRole("button", { name: "重新回答" }));
 
@@ -2241,7 +2241,7 @@ describe("AssistantPanel", () => {
     renderPanel();
     await ask("讲讲这段");
 
-    expect(await screen.findByText("助手这次没有给出回答。")).toBeInTheDocument();
+    expect(await screen.findByText("AI 助手这次没有给出回答。")).toBeInTheDocument();
   });
 
   it("英文建议发送英文完整问题，并用英文说明空回答", async () => {
@@ -2264,7 +2264,7 @@ describe("AssistantPanel", () => {
     expect(
       await screen.findByText("The assistant did not return an answer this time."),
     ).toBeInTheDocument();
-    expect(screen.queryByText("助手这次没有给出回答。")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI 助手这次没有给出回答。")).not.toBeInTheDocument();
   });
 
   it("用户叫停的那一轮不挂「没得出结论」——它没转不出来，是被按停的", async () => {
@@ -2277,7 +2277,7 @@ describe("AssistantPanel", () => {
     expect(await screen.findByText("已停止，未继续执行")).toBeInTheDocument();
     expect(screen.queryByText(/没能得出结论/)).not.toBeInTheDocument();
     // 「已停止」已经把话说完了，再补一句「这次没有给出回答」是同一件事说两遍。
-    expect(screen.queryByText("助手这次没有给出回答。")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI 助手这次没有给出回答。")).not.toBeInTheDocument();
   });
 
   it("stop_reason 标记取消时不执行旧字段携带的动作", async () => {
@@ -2307,12 +2307,12 @@ describe("AssistantPanel", () => {
     await screen.findByText("好了");
 
     expect(screen.queryByText(/没能得出结论/)).not.toBeInTheDocument();
-    expect(screen.queryByText("助手这次没有给出回答。")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI 助手这次没有给出回答。")).not.toBeInTheDocument();
   });
 
   it("输入法组词时的回车不发送", async () => {
     renderPanel();
-    const box = screen.getByLabelText("对助手说");
+    const box = screen.getByLabelText("对 AI 助手说");
     fireEvent.change(box, { target: { value: "梯度" } });
     // 中文用户每选一次候选词都会敲回车，当成发送就会不停误发。
     fireEvent.keyDown(box, { key: "Enter", isComposing: true });
@@ -2323,15 +2323,15 @@ describe("AssistantPanel", () => {
 
   it("组合输入区聚焦时不叠加输入框自身的焦点环", () => {
     renderPanel();
-    expect(screen.getByLabelText("对助手说")).toHaveClass("ca-ask-input");
+    expect(screen.getByLabelText("对 AI 助手说")).toHaveClass("ca-ask-input");
   });
 
   it("手机端不显示左右停靠按钮", async () => {
     platformMock.mobile = true;
     renderPanel();
     expect(screen.queryByLabelText(/停靠到/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "拖动助手面板" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("对助手说")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "拖动 AI 助手面板" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("对 AI 助手说")).toBeInTheDocument();
   });
 
   it("只有浮动形态：「⋯」菜单里只剩换边，没有停靠为侧栏", () => {
@@ -2346,7 +2346,7 @@ describe("AssistantPanel", () => {
     platformMock.mobile = true;
     platformMock.tablet = true;
     renderPanel(vi.fn(), { compact: false });
-    expect(screen.getByRole("button", { name: "拖动助手面板" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "拖动 AI 助手面板" })).toBeInTheDocument();
     expect(screen.getByLabelText("当前提问范围：当前视频")).toBeInTheDocument();
   });
 
@@ -2385,8 +2385,8 @@ describe("AssistantPanel", () => {
 
   it("窄视口按移动抽屉渲染，并避开底部主导航", () => {
     renderPanel(vi.fn(), { compact: true, bottomNavigationVisible: true });
-    const panel = screen.getByRole("dialog", { name: "助手" });
-    expect(screen.queryByRole("button", { name: "拖动助手面板" })).not.toBeInTheDocument();
+    const panel = screen.getByRole("dialog", { name: "AI 助手" });
+    expect(screen.queryByRole("button", { name: "拖动 AI 助手面板" })).not.toBeInTheDocument();
     expect(panel).toHaveClass("inset-x-0", "h-[70dvh]");
     expect(panel.getAttribute("style")).toContain("bottom: calc(56px");
   });
@@ -2395,7 +2395,7 @@ describe("AssistantPanel", () => {
     platformMock.mobile = true;
     useAssistantUi.setState({ open: false });
     renderPanel(vi.fn(), { compact: true, bottomNavigationVisible: false });
-    const launcher = screen.getByRole("button", { name: "打开助手" });
+    const launcher = screen.getByRole("button", { name: "打开 AI 助手" });
     expect(launcher).toHaveClass("ca-workbench-assistant-launcher");
     // jsdom 会规范化 env() 的 calc 顺序；保留几何契约的关键安全间距即可。
     expect(launcher.getAttribute("style")).toContain("88px");
@@ -2406,16 +2406,16 @@ describe("AssistantPanel", () => {
     useAssistantUi.setState({ open: false });
     renderPanel(vi.fn(), { compact: true, bottomNavigationVisible: true, launcherVisible: false });
 
-    expect(screen.queryByRole("button", { name: "打开助手" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "打开 AI 助手" })).not.toBeInTheDocument();
   });
 
   it("移动抽屉有模态遮罩，焦点循环在抽屉内并可点击遮罩关闭", async () => {
     renderPanel(vi.fn(), { compact: true });
-    const panel = screen.getByRole("dialog", { name: "助手" });
+    const panel = screen.getByRole("dialog", { name: "AI 助手" });
     expect(panel).toHaveAttribute("aria-modal", "true");
-    const input = screen.getByLabelText("对助手说");
+    const input = screen.getByLabelText("对 AI 助手说");
     const send = screen.getByLabelText("发送");
-    const close = screen.getByLabelText("收起助手");
+    const close = screen.getByLabelText("收起 AI 助手");
     expect(send).toHaveClass("ca-touch-44");
     expect(close).toHaveClass("ca-touch-44");
     await waitFor(() => expect(input).toHaveFocus());
@@ -2427,14 +2427,14 @@ describe("AssistantPanel", () => {
     fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
     expect(send).toHaveFocus();
 
-    fireEvent.click(screen.getByRole("button", { name: "关闭助手" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "打开助手" })).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "关闭 AI 助手" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "打开 AI 助手" })).toHaveFocus());
     expect(panel).not.toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "打开助手" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开 AI 助手" }));
     await waitFor(() => expect(input).toHaveFocus());
-    fireEvent.click(screen.getByRole("button", { name: "收起助手" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "打开助手" })).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "收起 AI 助手" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "打开 AI 助手" })).toHaveFocus());
   });
 
   it("移动抽屉的思考摘要参与键盘焦点循环", async () => {
@@ -2552,8 +2552,8 @@ describe("确认卡", () => {
     fireEvent.click(await screen.findByRole("button", { name: "确认改名" }));
     expect(await screen.findByText("已生效")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "收起助手" }));
-    fireEvent.click(screen.getByRole("button", { name: "打开助手" }));
+    fireEvent.click(screen.getByRole("button", { name: "收起 AI 助手" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开 AI 助手" }));
 
     expect(screen.getByText("已生效")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "确认改名" })).not.toBeInTheDocument();
@@ -2895,12 +2895,12 @@ describe("确认卡", () => {
     expect(newConversation).toBeDisabled();
     expect(screen.getByRole("button", { name: "重新回答" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "停止剩余" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("对助手说"), {
+    fireEvent.change(screen.getByLabelText("对 AI 助手说"), {
       target: { value: "执行期间的新问题" },
     });
     const sendButton = screen.getByRole("button", { name: "发送" });
     expect(sendButton).toBeDisabled();
-    fireEvent.keyDown(screen.getByLabelText("对助手说"), { key: "Enter" });
+    fireEvent.keyDown(screen.getByLabelText("对 AI 助手说"), { key: "Enter" });
     expect(mockIpc.assistant.ask).toHaveBeenCalledTimes(1);
     fireEvent.click(newConversation);
     expect(screen.getByTestId("user-bubble")).toHaveTextContent("改名");

@@ -828,8 +828,8 @@ describe("Home selected-video integration", () => {
     vi.stubGlobal("navigator", { userAgent: "Android" });
     await renderHome();
 
-    fireEvent.click(await screen.findByRole("button", { name: "打开助手" }));
-    expect(await screen.findByRole("dialog", { name: "助手" })).toBeVisible();
+    fireEvent.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    expect(await screen.findByRole("dialog", { name: "AI 助手" })).toBeVisible();
     await waitFor(() => expect(mockBackButtonPress.onBackButtonPress).toHaveBeenCalled());
     const handler = mockBackButtonPress.onBackButtonPress.mock.calls[
       mockBackButtonPress.onBackButtonPress.mock.calls.length - 1
@@ -862,8 +862,8 @@ describe("Home selected-video integration", () => {
     fireEvent.click(await screen.findByRole("tab", { name: /文稿/ }));
     fireEvent.click(await screen.findByRole("button", { name: "搜索文稿" }));
     expect(screen.getByRole("searchbox", { name: "搜索文稿" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "打开助手" }));
-    expect(await screen.findByRole("dialog", { name: "助手" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "打开 AI 助手" }));
+    expect(await screen.findByRole("dialog", { name: "AI 助手" })).toBeVisible();
 
     await waitFor(() => expect(mockBackButtonPress.onBackButtonPress).toHaveBeenCalled());
     const handler = mockBackButtonPress.onBackButtonPress.mock.calls[

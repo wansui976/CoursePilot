@@ -32,7 +32,7 @@ describe("AppRail (collapsed sidebar)", () => {
     renderRail();
     expect(screen.getByRole("navigation", { name: "工具栏" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "学习面板" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "切换助手" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "切换 AI 助手" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "回收站" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
   });
@@ -77,7 +77,7 @@ describe("AppRail (collapsed sidebar)", () => {
 
   it("reflects assistant active state and toggles it", () => {
     const { nav } = renderRail({ assistantActive: true });
-    const btn = screen.getByRole("button", { name: "切换助手" });
+    const btn = screen.getByRole("button", { name: "切换 AI 助手" });
     expect(btn).toHaveClass("active");
     fireEvent.click(btn);
     expect(nav.onToggleAssistant).toHaveBeenCalledTimes(1);

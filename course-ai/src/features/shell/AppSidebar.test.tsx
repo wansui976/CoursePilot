@@ -92,7 +92,7 @@ describe("AppSidebar", () => {
   it("lists every global entry in the same column as the courses", async () => {
     const props = renderSidebar({ nav: { queueCount: 2 } });
     await screen.findByRole("button", { name: /申论课程/ });
-    for (const name of ["课程库", "学习面板", /处理队列/, "助手", "设置", "回收站", "切换到夜晚模式"]) {
+    for (const name of ["课程库", "学习面板", /处理队列/, "AI 助手", "设置", "回收站", "切换到夜晚模式"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
     fireEvent.click(screen.getByRole("button", { name: "设置" }));
