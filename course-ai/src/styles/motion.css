@@ -121,6 +121,23 @@ html.theme-circle-vt::view-transition-new(root) {
   }
 }
 
+/* 学习面板换页签：新页签淡入一下。非活动页签是 display:none，切回来时动画会自动重播。
+   只动透明度、不加位移：面板里有 fixed 定位的浮层（全屏、菜单），transform 会把它们困住。 */
+@keyframes ca-tab-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-tab-content[data-state="active"] {
+    animation: ca-tab-in 0.16s var(--ease) both;
+  }
+}
+
 /* 课程库 ⇄ 工作台的共享元素过渡（lib/viewTransition.ts）。
    封面与播放器舞台用同一个名字 ca-hero 配对：位置和尺寸由浏览器插值，
    新旧两张快照都按 cover 铺满，比例不同时裁边而不是拉伸变形。
