@@ -454,4 +454,17 @@ export const scenes = [
       await shot();
     },
   },
+  {
+    // 界面密度「紧凑」：课程库、课程页、工作台各拍一张，和默认档对比看有没有挤压换行。
+    name: "density-compact",
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("course-ai-density", "compact"));
+      await page.reload({ waitUntil: "networkidle" });
+      await shot("home");
+      await openCourse(page);
+      await shot("course");
+      await page.getByRole("button", { name: VIDEO }).first().click();
+      await shot("workbench");
+    },
+  },
 ];

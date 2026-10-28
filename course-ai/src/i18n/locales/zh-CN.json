@@ -731,7 +731,11 @@
       "accentPurple": "紫",
       "accentGreen": "翠绿",
       "accentOrange": "橙",
-      "accentRed": "红"
+      "accentRed": "红",
+      "density": "界面密度",
+      "densityComfortable": "舒适",
+      "densityCompact": "紧凑",
+      "densityFootnote": "紧凑会收窄侧栏、列表、卡片与文稿的留白，一屏多放几行；只在用鼠标或触控板时生效。"
     },
     "studyReminder": {
       "title": "学习提醒",

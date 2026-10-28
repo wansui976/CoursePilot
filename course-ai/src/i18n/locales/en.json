@@ -732,7 +732,11 @@
       "accentPurple": "Purple",
       "accentGreen": "Green",
       "accentOrange": "Orange",
-      "accentRed": "Red"
+      "accentRed": "Red",
+      "density": "Density",
+      "densityComfortable": "Comfortable",
+      "densityCompact": "Compact",
+      "densityFootnote": "Compact tightens the sidebar, lists, cards and transcript so more fits on screen. Applies only with a mouse or trackpad."
     },
     "studyReminder": {
       "title": "Study Reminder",

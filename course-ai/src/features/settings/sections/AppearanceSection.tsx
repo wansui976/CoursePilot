@@ -9,6 +9,7 @@ import {
   readingFontStack,
   useReadingFont,
 } from "@/stores/readingFont";
+import { DENSITIES, useDensity } from "@/stores/density";
 import { Select, Group, Row, StackRow } from "@/features/settings/primitives";
 import { isIOS } from "@/lib/platform";
 
@@ -17,7 +18,43 @@ function isMacDesktop() {
   return typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navigator.userAgent) && !isIOS();
 }
 
-/** 外观：主题、强调色、阅读字体与界面语言。 */
+/** 几档互斥选项的分段按钮（阅读字号、界面密度）。 */
+function Segmented<K extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { key: K; label: string }[];
+  value: K;
+  onChange: (key: K) => void;
+}) {
+  return (
+    <div role="group" aria-label={label} className="inline-flex rounded-md border border-[var(--border-subtle)] p-0.5">
+      {options.map((option) => {
+        const selected = value === option.key;
+        return (
+          <button
+            key={option.key}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(option.key)}
+            className={`ca-touch-44 rounded-[5px] px-3 py-1 text-xs transition-colors ${
+              selected
+                ? "bg-[var(--surface-card-hover)] font-medium text-[var(--text-strong)]"
+                : "text-[var(--text-muted)] hover:text-[var(--text-strong)]"
+            }`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 外观：主题、强调色、阅读字体、界面密度与界面语言。 */
 const THEME_OPTIONS: { key: ThemePref; i18nKey: string }[] = [
   { key: "light", i18nKey: "settings.theme.light" },
   { key: "dark", i18nKey: "settings.theme.dark" },
@@ -68,6 +105,8 @@ export function AppearanceSection() {
   const setReadingFont = useReadingFont((s) => s.setFont);
   const readingSize = useReadingFont((s) => s.size);
   const setReadingSize = useReadingFont((s) => s.setSize);
+  const density = useDensity((s) => s.density);
+  const setDensity = useDensity((s) => s.setDensity);
   // 量一次即可：本机字体在应用运行期间不会变。
   const [fontAvailable] = useState(() =>
     Object.fromEntries(READING_FONTS.map((option) => [option.key, isReadingFontAvailable(option.key)])),
@@ -234,30 +273,23 @@ export function AppearanceSection() {
           </div>
         </StackRow>
         <Row label={t("settings.appearance.readingSize")}>
-          <div
-            role="group"
-            aria-label={t("settings.appearance.readingSize")}
-            className="inline-flex rounded-md border border-[var(--border-subtle)] p-0.5"
-          >
-            {READING_SIZES.map((option) => {
-              const selected = readingSize === option.key;
-              return (
-                <button
-                  key={option.key}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => setReadingSize(option.key)}
-                  className={`ca-touch-44 rounded-[5px] px-3 py-1 text-xs transition-colors ${
-                    selected
-                      ? "bg-[var(--surface-card-hover)] font-medium text-[var(--text-strong)]"
-                      : "text-[var(--text-muted)] hover:text-[var(--text-strong)]"
-                  }`}
-                >
-                  {t(option.i18nKey)}
-                </button>
-              );
-            })}
-          </div>
+          <Segmented
+            label={t("settings.appearance.readingSize")}
+            options={READING_SIZES.map((option) => ({ key: option.key, label: t(option.i18nKey) }))}
+            value={readingSize}
+            onChange={setReadingSize}
+          />
+        </Row>
+      </Group>
+
+      <Group header={t("settings.appearance.density")} footnote={t("settings.appearance.densityFootnote")}>
+        <Row label={t("settings.appearance.density")}>
+          <Segmented
+            label={t("settings.appearance.density")}
+            options={DENSITIES.map((option) => ({ key: option.key, label: t(option.i18nKey) }))}
+            value={density}
+            onChange={setDensity}
+          />
         </Row>
       </Group>
 

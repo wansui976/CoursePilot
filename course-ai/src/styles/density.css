@@ -1,0 +1,46 @@
+/* 界面密度「紧凑」（设置 → 外观，stores/density.ts）。
+   只收留白和行高，不缩图标与字号：缩图标只会让按钮更难点、信息量并不会变多。
+   课程页的「紧凑网格」是另一回事（一排多放几张卡），两者互不覆盖。
+   只对精确指针生效——触屏上缩小行高等于缩小点按目标。 */
+@media (pointer: fine) {
+  /* 侧栏：导航与课程行 */
+  :root[data-density="compact"] :is(.ca-side-item, .ca-nav-item, .ca-nav-button) {
+    min-height: 28px;
+  }
+  :root[data-density="compact"] .ca-side-group {
+    gap: 0;
+  }
+
+  /* 页面标题区 */
+  :root[data-density="compact"] .ca-view-header {
+    padding: 12px 24px 10px;
+  }
+
+  /* 课程页：卡片、列表行、继续学习 */
+  :root[data-density="compact"] .ca-grid:not([data-density="compact"]) {
+    gap: 14px;
+  }
+  :root[data-density="compact"] .ca-card-body {
+    padding: 8px 12px 9px;
+    gap: 3px;
+  }
+  :root[data-density="compact"] .ca-row .row-button {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+  :root[data-density="compact"] .ca-resume-card {
+    padding: 8px;
+  }
+
+  /* 工作台：章节时间线、文稿逐句行 */
+  :root[data-density="compact"] .ca-chapter {
+    padding-top: 4px;
+    padding-bottom: 4px;
+    row-gap: 0;
+  }
+  :root[data-density="compact"] .ca-transcript-text {
+    padding-top: 1px;
+    padding-bottom: 1px;
+    line-height: 1.55;
+  }
+}
