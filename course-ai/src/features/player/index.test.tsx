@@ -518,7 +518,7 @@ describe("VideoPlayer iOS gestures", () => {
       });
       // 1.5x 已是叠加后的有效速度；Apple 播放内核长按仍封顶 2x。
       expect(setRate).toHaveBeenLastCalledWith(2);
-      expect(pitchValue).toBe(false);
+      expect(pitchValue).toBe(true);
       // 临时快进不能污染控制栏里的基础倍速。
       expect(screen.getByRole("button", { name: "倍速，当前 1.0x" })).toBeInTheDocument();
 
@@ -630,7 +630,7 @@ describe("VideoPlayer iOS gestures", () => {
           setRate(v);
         },
       });
-      // 变速不变调在扫描期间要临时关掉（WKWebView 切倍速时重建变调管线会卡顿）。
+      // 长按 2x 期间必须保持变速不变调，否则音调明显升高。
       let pitchValue = true;
       Object.defineProperty(video, "preservesPitch", {
         configurable: true,
@@ -648,7 +648,7 @@ describe("VideoPlayer iOS gestures", () => {
       });
 
       expect(setRate).toHaveBeenCalledWith(2);
-      expect(pitchValue).toBe(false);
+      expect(pitchValue).toBe(true);
       expect(screen.getByText("2x 快进中")).toBeInTheDocument();
 
       fireEvent.keyUp(window, { key: "ArrowRight" });

@@ -104,7 +104,6 @@ type GestureState = {
   startY: number;
   startTime: number;
   startRate: number;
-  startPreservesPitch: boolean;
   startVolume: number;
   startBrightness: number;
   mode: GestureMode;
@@ -273,7 +272,6 @@ export function VideoPlayer({
     timer: number;
     interval?: number;
     prevRate?: number;
-    prevPitch?: boolean;
   } | null>(null);
 
   const { data: queriedSegments } = useQuery(queries.transcripts(videoId));
@@ -364,6 +362,8 @@ export function VideoPlayer({
     // 媒体资源加载会把 playbackRate 还原为 defaultPlaybackRate；两者一起更新，
     // 切到目标倍速相同的新视频时也不会悄悄掉回 1x。
     video.defaultPlaybackRate = effectiveRate;
+    // 任何倍速（含长按 2x）都保持变速不变调，否则音调会明显升高。
+    video.preservesPitch = true;
     if (video.playbackRate !== effectiveRate) video.playbackRate = effectiveRate;
   }, [effectiveRate, src]);
 
@@ -460,7 +460,6 @@ export function VideoPlayer({
       startY: event.clientY,
       startTime: video?.currentTime ?? 0,
       startRate: video?.playbackRate ?? rate,
-      startPreservesPitch: video?.preservesPitch ?? true,
       startVolume: volume,
       startBrightness: brightness,
       mode: "idle",
@@ -484,8 +483,6 @@ export function VideoPlayer({
       if (current.swiped || current.longPressActive) return;
       current.longPressActive = true;
       // 长按只临时改播放器的有效倍速，不能把已经叠过智能倍率的值写回基础 rate。
-      // 先关变调可避免 WKWebView 重建音频管线时的明显停顿。
-      activeVideo.preservesPitch = false;
       const next = Math.min(APPLE_MAX_PLAYBACK_RATE, current.startRate * 2);
       activeVideo.playbackRate = next;
       setGestureHint({ kind: "rate", value: next });
@@ -550,10 +547,7 @@ export function VideoPlayer({
     const ady = Math.abs(dy);
     if (gesture.longPressActive) {
       const video = ref.current;
-      if (video) {
-        video.playbackRate = gesture.startRate;
-        video.preservesPitch = gesture.startPreservesPitch;
-      }
+      if (video) video.playbackRate = gesture.startRate;
       setGestureHint(null);
       revealControls();
     } else if (gesture.mode === "scrub" || (gesture.swiped && adx > ady)) {
@@ -581,10 +575,7 @@ export function VideoPlayer({
     clearGestureTimer(gesture);
     if (gesture.longPressActive) {
       const video = ref.current;
-      if (video) {
-        video.playbackRate = gesture.startRate;
-        video.preservesPitch = gesture.startPreservesPitch;
-      }
+      if (video) video.playbackRate = gesture.startRate;
       setGestureHint(null);
     }
     gestureRef.current = null;
@@ -766,7 +757,6 @@ export function VideoPlayer({
       const video = ref.current;
       if (scan.engaged) {
         if (video && scan.prevRate != null) video.playbackRate = scan.prevRate;
-        if (video && scan.prevPitch != null) video.preservesPitch = scan.prevPitch;
         setGestureHint(null);
       } else if (commitTap && video) {
         video.currentTime =
@@ -809,10 +799,6 @@ export function VideoPlayer({
             scan.engaged = true;
             if (scan.action === "seekForward") {
               scan.prevRate = v.playbackRate;
-              // 先关「变速不变调」再变速：WKWebView 切换倍速时要重建音频变调
-              // 管线并重对音画，按下/松开各卡一下。扫描期间音调略升，换取无卡顿。
-              scan.prevPitch = v.preservesPitch;
-              v.preservesPitch = false;
               v.playbackRate = KEY_HOLD_RATE;
               // 暂停中长按 = 直接以倍速开播（对齐 B 站）。
               if (v.paused) void v.play();
