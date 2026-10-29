@@ -310,12 +310,28 @@ async fn provider_for(state: &AppState, task: AiTask) -> AppResult<(crate::llm::
     })
 }
 
+/// 精华压缩版的段落；还没生成过时返回 null。
+#[tauri::command]
+pub async fn cmd_get_highlights(
+    state: State<'_, AppState>,
+    video_id: String,
+) -> AppResult<Option<Vec<crate::pipeline::highlights::HighlightSegment>>> {
+    crate::pipeline::highlights::get_highlights(&state.db, &video_id).await
+}
+
 #[tauri::command]
 pub async fn cmd_generate_ai(
     state: State<'_, AppState>,
     video_id: String,
-    task: String, // "chapters" | "notes" | "summary" | "quiz" | "mindmap"
+    task: String, // "chapters" | "notes" | "summary" | "quiz" | "mindmap" | "highlights"
 ) -> AppResult<()> {
+    // 精华压缩版不单设模型路由：和摘要一样是「通读讲稿、给出判断」的活，跟摘要用同一个模型。
+    if task == "highlights" {
+        let _registration = register_ai_generation(&state, &video_id, &task)?;
+        let (provider, model) = provider_for(&state, AiTask::Summary).await?;
+        crate::pipeline::highlights::generate_highlights(&state.db, &provider, &model, &video_id).await?;
+        return Ok(());
+    }
     let ai_task = match task.as_str() {
         "chapters" => AiTask::Chapters,
         "notes" => AiTask::Notes,

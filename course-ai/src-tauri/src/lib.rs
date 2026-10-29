@@ -17,7 +17,7 @@ pub mod sync;
 mod usage_log;
 
 use crate::commands::ai::{
-    cmd_generate_ai, cmd_get_chapters, cmd_get_llm_profiles, cmd_get_mindmap, cmd_get_notes,
+    cmd_generate_ai, cmd_get_chapters, cmd_get_highlights, cmd_get_llm_profiles, cmd_get_mindmap, cmd_get_notes,
     cmd_get_quiz, cmd_get_summary, cmd_has_api_key, cmd_save_llm_profiles, cmd_save_notes,
     cmd_set_api_key, cmd_stale_ai_artifacts,
 };
@@ -309,6 +309,7 @@ pub fn run() {
             cmd_read_note_image,
             cmd_get_quiz,
             cmd_get_mindmap,
+            cmd_get_highlights,
             cmd_get_summary,
             cmd_stale_ai_artifacts,
             cmd_generate_ai,

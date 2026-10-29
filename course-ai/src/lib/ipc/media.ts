@@ -1,6 +1,7 @@
 /** 单个视频的处理流水线与产物：任务、讲稿、AI 产物、课件、片段、导出、弹幕评论。 */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { HighlightSegment } from "../types";
 import type {
   AskEvent,
   Chapter,
@@ -110,6 +111,9 @@ export const ai = {
     invoke("cmd_get_quiz", { videoId }),
   getMindmap: (videoId: string): Promise<string | null> =>
     invoke("cmd_get_mindmap", { videoId }),
+  /** 精华压缩版的段落；还没生成过时为 null。 */
+  getHighlights: (videoId: string): Promise<HighlightSegment[] | null> =>
+    invoke("cmd_get_highlights", { videoId }),
   ragQuery: (
     videoId: string,
     query: string,

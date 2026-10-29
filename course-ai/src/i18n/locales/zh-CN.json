@@ -1727,7 +1727,8 @@
       "slides-ocr": "识别课件文字",
       "handout": "生成讲义",
       "concepts-analyze": "分析知识点",
-      "concepts-summarize": "生成课程总览"
+      "concepts-summarize": "生成课程总览",
+      "highlights": "生成精华版"
     }
   },
   "findExplanation": {
@@ -1771,5 +1772,38 @@
     "next": "下一段",
     "finish": "看完了",
     "stop": "结束依次播放"
+  },
+  "highlights": {
+    "title": "精华版",
+    "mode": "水分段",
+    "strength": "力度",
+    "modes": {
+      "off": "正常",
+      "fast": "快放",
+      "skip": "跳过"
+    },
+    "strengths": {
+      "1": "轻",
+      "2": "中",
+      "3": "激进"
+    },
+    "savedMinutes": "省 {{count}} 分钟",
+    "savedSeconds": "省 {{count}} 秒",
+    "generate": "生成精华版",
+    "generateHint": "让 AI 标出课务、闲聊、重复讲解这类可以快放或跳过的段落",
+    "generating": "正在标出水分段…",
+    "generateFailed": "没成功，再试一次",
+    "skipped": "已跳过 {{seconds}} 秒 · {{reason}}",
+    "fastForwarding": "快放中 · {{reason}}",
+    "undo": "撤回",
+    "keep": "这段有用",
+    "hover": "水分 · {{reason}}",
+    "kind": {
+      "repeat": "重复讲解",
+      "offtopic": "离题",
+      "chitchat": "闲聊",
+      "admin": "课务通知",
+      "filler": "过渡"
+    }
   }
 }

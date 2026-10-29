@@ -148,6 +148,25 @@ pub fn mindmap_request(model: &str, transcript: &str) -> ChatRequest {
     )
 }
 
+/// 精华压缩版：标出可以快放 / 跳过的段落。宁可漏标，不可错标——标错一段讲解，
+/// 用户就会在不知情的情况下漏掉真正要学的内容。
+pub fn highlights_request(model: &str, transcript: &str) -> ChatRequest {
+    base(
+        "highlights",
+        model,
+        "你是课程剪辑助手，帮学习者找出一节课里可以快放或跳过、又不影响学懂的段落。只输出 JSON 数组，不要代码围栏。",
+        transcript,
+        "找出这节课里的「水分段」，输出 JSON 数组，每项 {\"start\":\"mm:ss\",\"end\":\"mm:ss\",\
+         \"kind\":类型,\"level\":1到3,\"reason\":\"不超过 12 字的理由\"}。要求：\
+         1. kind 只能是：admin（课务通知、点名、布置作业）、chitchat（闲聊、离题故事）、\
+            repeat（把刚讲过的内容原样再讲一遍）、filler（长段过渡、口头禅、等待、调试设备）、offtopic（与本课主题无关的展开）。\
+         2. 绝对不要标：定义、公式与推导、第一次出现的例子、结论与总结、易错点提醒、老师强调「这里要考」的地方。\
+         3. level：1 = 很确定可以跳；2 = 大概率可以；3 = 可能可以（例如同一知识点的第二个类似例子）。\
+         4. start / end 照抄讲稿里该段第一行与最后一行行首的时间，不要编造；每段至少 10 秒。\
+         5. 宁可少标，不要错标；整节课都很紧凑就输出 []。",
+    )
+}
+
 pub fn summary_request(model: &str, transcript: &str) -> ChatRequest {
     base(
         "summary",
@@ -341,6 +360,16 @@ mod tests {
         assert!(user.contains("跳过"));
         // 解析收成一句话，这是输出侧最大的一笔。
         assert!(user.contains("只写一句"));
+    }
+
+    #[test]
+    fn highlights_prompt_never_marks_core_content_and_prefers_missing_to_wrong() {
+        let req = highlights_request("m", "[00:01] 主题");
+        let user = &req.messages[0].content;
+        assert!(user.contains("绝对不要标"));
+        assert!(user.contains("宁可少标"));
+        assert!(user.contains("mm:ss"));
+        assert!(req.cacheable_context.as_ref().unwrap().contains("主题"));
     }
 
     #[test]

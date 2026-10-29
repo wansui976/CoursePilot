@@ -38,6 +38,47 @@ export function StageNotice({ children, align }: { children: string; align: "cen
   );
 }
 
+/** 带一个按钮的提示（精华版跳过后的「撤回」、快放时的「这段有用」）。按钮要能点，所以不穿透。 */
+export function StageActionNotice({
+  text,
+  actionLabel,
+  onAction,
+  onDismiss,
+}: {
+  text: string;
+  actionLabel: string;
+  onAction: () => void;
+  onDismiss: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      onClick={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      className="absolute left-1/2 top-6 z-30 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full bg-[var(--surface-stage-overlay)] py-1 pl-3 pr-1 text-xs font-medium text-white"
+    >
+      <span className="min-w-0 truncate">{text}</span>
+      <button
+        type="button"
+        onClick={onAction}
+        className="ca-touch-44 flex-none rounded-full bg-white/15 px-2.5 py-0.5 hover:bg-white/25"
+      >
+        {actionLabel}
+      </button>
+      <button
+        type="button"
+        aria-label={t("common.close")}
+        onClick={onDismiss}
+        className="ca-touch-44 grid h-5 w-5 flex-none place-items-center rounded-full text-white/60 hover:text-white"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 export function GestureHintOverlay({ hint }: { hint: GestureHint }) {
   const { t } = useTranslation();
   return (

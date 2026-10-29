@@ -13,6 +13,7 @@ export type TaskKind =
   | "chapters"
   | "quiz"
   | "mindmap"
+  | "highlights"
   | "notes"
   | "slides-extract"
   | "slides-ocr"
@@ -51,6 +52,7 @@ export function studyTargetFor(kind: TaskKind): StudyTarget | null {
   switch (kind) {
     case "summary":
     case "chapters":
+    case "highlights":
       return { tab: "overview" };
     case "notes":
       return { tab: "notes" };

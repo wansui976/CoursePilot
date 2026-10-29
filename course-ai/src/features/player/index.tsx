@@ -32,12 +32,14 @@ import {
   type GestureHint,
 } from "./playerPrefs";
 import { usePlayerKeyboard } from "./usePlayerKeyboard";
+import { useHighlights } from "./useHighlights";
 import { useIosGestures, type TapState } from "./useIosGestures";
 import {
   AudioStage,
   DecodeFailureCard,
   GestureHintOverlay,
   PlayFlash,
+  StageActionNotice,
   StageNotice,
   type TranscodeStatus,
 } from "./StageOverlays";
@@ -217,6 +219,11 @@ export function VideoPlayer({
     resetKey: videoId,
     maxEffectiveRate: applePlaybackEngine ? APPLE_MAX_PLAYBACK_RATE : undefined,
   });
+  // 精华压缩版：水分段快放或跳过（优先级：跳过 > 快放 > 智能倍速）。
+  const highlights = useHighlights(videoId, {
+    maxRate: applePlaybackEngine ? APPLE_MAX_PLAYBACK_RATE : undefined,
+  });
+  const { rateFor: highlightRateFor, mode: highlightMode, segments: highlightSegments } = highlights;
   const effectiveRate = applePlaybackEngine
     ? Math.min(APPLE_MAX_PLAYBACK_RATE, rate * smartRate.multiplier)
     : rate * smartRate.multiplier;
@@ -494,13 +501,17 @@ export function VideoPlayer({
     // 智能倍速是在用户选的倍速之上叠加的倍率，所以这里生效的是两者之积。
     const video = ref.current;
     if (!video || gestureRef.current?.longPressActive) return;
+    // 正在快放水分段：倍速由 onTimeUpdate 按段决定，这里不去改回来。
+    const override = highlightRateFor(video.currentTime * 1000);
     // 媒体资源加载会把 playbackRate 还原为 defaultPlaybackRate；两者一起更新，
     // 切到目标倍速相同的新视频时也不会悄悄掉回 1x。
     video.defaultPlaybackRate = effectiveRate;
     // 任何倍速（含长按 2x）都保持变速不变调，否则音调会明显升高。
     video.preservesPitch = true;
-    if (video.playbackRate !== effectiveRate) video.playbackRate = effectiveRate;
-  }, [effectiveRate, gestureRef, src]);
+    const target = override ?? effectiveRate;
+    if (video.playbackRate !== target) video.playbackRate = target;
+    // highlightRateFor 读的是 ref，档位 / 段落变化时跟着 mode、segments 重新套一次。
+  }, [effectiveRate, gestureRef, src, highlightMode, highlightSegments, highlightRateFor]);
 
   const keyScanRef = usePlayerKeyboard(ref, segmentsRef, {
     videoId,
@@ -581,12 +592,18 @@ export function VideoPlayer({
             // 记下的也是旧时间。所有跳转（拖进度条、快进快退、点章节 / 文稿）都经过这里。
             onSeeking={(event) => setCurrentMs(Math.floor(event.currentTarget.currentTime * 1000))}
             onTimeUpdate={(event) => {
-              // 跳停顿：落在无声区间里就直接跃过去，跳完这一轮不再按旧位置记进度。
+              // 精华版跳过档、跳停顿：落在要跳的区间里就直接跃过去，跳完这一轮不再按旧位置记进度。
+              if (highlights.handleTimeUpdate(event.currentTarget)) return;
               if (silenceSkip.handleTimeUpdate(event.currentTarget)) return;
               const t = event.currentTarget.currentTime;
               // 长按快进时播放器的 playbackRate 由手势直接改，这时别去抢。
               if (!keyScanRef.current?.engaged && !gestureRef.current?.longPressActive) {
                 smartRate.update(t * 1000, rate);
+                // 精华版快放档：进出水分段时切倍速（只改播放器的有效倍速，不动用户选的基础倍速）。
+                const target = highlights.rateFor(t * 1000) ?? effectiveRate;
+                if (Math.abs(event.currentTarget.playbackRate - target) > 0.01) {
+                  event.currentTarget.playbackRate = target;
+                }
               }
               setCurrentMs(Math.floor(t * 1000));
               // 每 5 秒（或回退时）记录一次进度，避免频繁写 localStorage。
@@ -696,7 +713,17 @@ export function VideoPlayer({
             />
           )}
           {smartRate.notice && <StageNotice align="right">{smartRate.notice}</StageNotice>}
-          {silenceSkip.notice && <StageNotice align="center">{silenceSkip.notice}</StageNotice>}
+          {silenceSkip.notice && !highlights.notice && (
+            <StageNotice align="center">{silenceSkip.notice}</StageNotice>
+          )}
+          {highlights.notice && (
+            <StageActionNotice
+              text={highlights.notice.text}
+              actionLabel={highlights.notice.actionLabel}
+              onAction={highlights.notice.onAction}
+              onDismiss={highlights.dismissNotice}
+            />
+          )}
           {gestureHint && <GestureHintOverlay hint={gestureHint} />}
           {decodeFailure !== null && (
             <DecodeFailureCard
@@ -762,6 +789,7 @@ export function VideoPlayer({
           <ProgressBar
             videoId={videoId}
             skipRanges={silenceSkip.ranges}
+            highlightSegments={highlights.mode === "off" ? undefined : highlights.segments}
             danmaku={danmakuOn ? danmaku : undefined}
             onSeek={(ms) => {
               if (ref.current) ref.current.currentTime = ms / 1000;
@@ -781,6 +809,15 @@ export function VideoPlayer({
               skipSilenceAvailable={silenceSkip.available}
               skipSilenceLoading={silenceSkip.loading}
               skipRanges={silenceSkip.ranges}
+              highlights={{
+                available: highlights.available,
+                generating: highlights.generating,
+                generateError: highlights.generateError,
+                mode: highlights.mode,
+                strength: highlights.strength,
+                savedMs: highlights.savedMs(effectiveRate),
+                onGenerate: highlights.generate,
+              }}
               cropOn={cropOn}
               cropInsets={cropInsets}
               fullscreen={fullscreen}

@@ -714,3 +714,17 @@ li[data-active] > .ca-chapter .ca-chapter-time {
   background: var(--accent-weak);
   outline: none;
 }
+
+/* 精华版水分段（进度条上）：斜纹。与跳停顿的实心灰区分开，一眼看出「这段会快放 / 跳过」。 */
+.ca-highlight-stripes {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgb(251 191 36 / 0.75) 0 3px,
+    rgb(251 191 36 / 0.25) 3px 6px
+  );
+}
+
+/* 文稿里精华版标出的水分句：变淡但仍可读、可点（判断错了用户要能一眼看出来）。 */
+.ca-transcript-filler .ca-transcript-text {
+  opacity: 0.55;
+}

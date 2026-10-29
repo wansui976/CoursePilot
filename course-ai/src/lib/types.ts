@@ -444,3 +444,13 @@ export interface ExplanationResult {
   hits: ExplanationHit[];
   concepts: ExplanationConcept[];
 }
+
+/** 精华压缩版的一段：与后端 pipeline::highlights::HighlightSegment 对应。 */
+export interface HighlightSegment {
+  start_ms: number;
+  end_ms: number;
+  kind: "repeat" | "offtopic" | "chitchat" | "admin" | "filler";
+  /** 1 = 很确定可以跳；2 = 大概率；3 = 可能。 */
+  level: 1 | 2 | 3;
+  reason: string;
+}

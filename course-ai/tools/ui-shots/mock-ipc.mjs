@@ -243,6 +243,12 @@ export function installMockIpc({ theme, safeArea }) {
         { concept_id: "k2", name: "梯度下降", video_id: videos[2].id, start_ms: 60_000 },
       ],
     }),
+    // 精华版：一段闲聊、一段课务、一段重复讲解（各档力度都有东西可看）。
+    cmd_get_highlights: () => [
+      { start_ms: 95_000, end_ms: 150_000, kind: "chitchat", level: 1, reason: "聊上周的球赛" },
+      { start_ms: 600_000, end_ms: 660_000, kind: "repeat", level: 2, reason: "把公式又念了一遍" },
+      { start_ms: 900_000, end_ms: 960_000, kind: "admin", level: 1, reason: "布置作业" },
+    ],
     // __shot-slow-ai：生成一直不返回，用来拍「后台任务」进行中的样子。
     cmd_generate_ai: () => {
       try {

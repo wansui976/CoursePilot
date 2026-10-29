@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import type { SkipRange } from "@/lib/silenceSkip";
+import type { HighlightSegment } from "@/lib/types";
 import type { DanmakuEntry } from "@/lib/types";
 import { danmakuHeat, heatAreaPath, heatPeaks } from "@/lib/danmakuHeat";
 
@@ -20,14 +21,19 @@ const NO_DANMAKU: DanmakuEntry[] = [];
  * 跳停顿段灰显（这部分播放时会直接跃过）。
  * 传入弹幕时在轨道上方画弹幕热度曲线，高峰处打点、可点击跳转，悬停显示该处弹幕数。
  */
+const NO_HIGHLIGHTS: HighlightSegment[] = [];
+
 export function ProgressBar({
   videoId,
   skipRanges,
+  highlightSegments = NO_HIGHLIGHTS,
   danmaku = NO_DANMAKU,
   onSeek,
 }: {
   videoId: string;
   skipRanges: SkipRange[];
+  /** 精华版开着时传入：水分段画斜纹，悬停说明为什么可以快放 / 跳过。 */
+  highlightSegments?: HighlightSegment[];
   /** 弹幕开着时传入；不足以成曲线（太少）时不画。 */
   danmaku?: DanmakuEntry[];
   onSeek: (ms: number) => void;
@@ -71,6 +77,10 @@ export function ProgressBar({
           ? chapters[chapters.length - 1]
           : null))
       : null;
+  const hoverHighlight =
+    hoverMs != null
+      ? highlightSegments.find((segment) => segment.start_ms <= hoverMs && hoverMs < segment.end_ms)
+      : undefined;
   const hoverDanmakuCount =
     heat && hoverMs != null
       ? heat.counts[Math.min(heat.counts.length - 1, Math.floor(hoverMs / heat.binMs))]
@@ -183,6 +193,18 @@ export function ProgressBar({
             className="ca-fill-video-grad absolute inset-y-0 left-0 rounded-full"
             style={{ width: `${progressPercent}%` }}
           />
+          {/* 精华版的水分段：斜纹，和跳停顿的实心灰区分开。 */}
+          {highlightSegments.map((segment) => (
+            <div
+              key={`hl-${segment.start_ms}`}
+              data-testid="highlight-segment"
+              className="ca-highlight-stripes absolute top-0 h-full"
+              style={{
+                left: `${pct(segment.start_ms)}%`,
+                width: `${Math.max(0.5, pct(segment.end_ms) - pct(segment.start_ms))}%`,
+              }}
+            />
+          ))}
           {/* 跳停顿段灰显：这部分播放时会直接跃过。 */}
           {skipRanges.map((range, index) => (
             <div
@@ -222,6 +244,13 @@ export function ProgressBar({
           >
             {hoverChapter && (
               <span className="max-w-full truncate text-xs font-medium">{hoverChapter.title}</span>
+            )}
+            {hoverHighlight && (
+              <span className="max-w-full truncate text-xs text-amber-200">
+                {t("highlights.hover", {
+                  reason: hoverHighlight.reason || t(`highlights.kind.${hoverHighlight.kind}`),
+                })}
+              </span>
             )}
             <span className="text-xs tabular-nums text-white/85">
               {formatMs(hoverMs)}

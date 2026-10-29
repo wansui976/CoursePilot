@@ -42,6 +42,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import type { HighlightMode, HighlightStrength } from "@/lib/highlights";
+import { useHighlightPrefs } from "@/stores/highlightPrefs";
 
 const SPEEDS = [2, 1.5, 1.25, 1, 0.75, 0.5];
 const CAPTION_MODES: CaptionMode[] = ["original", "bilingual", "translation"];
@@ -95,6 +97,79 @@ function SectionLabel({ children }: { children: ReactNode }) {
     >
       {children}
     </div>
+  );
+}
+
+export type HighlightControls = {
+  /** 生成过（哪怕一段都没有）。 */
+  available: boolean;
+  generating: boolean;
+  generateError: unknown;
+  mode: HighlightMode;
+  strength: HighlightStrength;
+  /** 当前档位与力度下能省的真实时间（毫秒）。 */
+  savedMs: number;
+  onGenerate: () => void;
+};
+
+function minutesLabel(ms: number, t: (key: string, options?: Record<string, unknown>) => string) {
+  const minutes = ms / 60_000;
+  return minutes >= 1
+    ? t("highlights.savedMinutes", { count: Math.round(minutes) })
+    : t("highlights.savedSeconds", { count: Math.round(ms / 1000) });
+}
+
+/** 设置菜单里的「精华版」：档位（关 / 快放 / 跳过）、力度与能省多少；没生成过就给生成按钮。 */
+function HighlightSection({ highlights }: { highlights: HighlightControls }) {
+  const { t } = useTranslation();
+  const setMode = useHighlightPrefs((state) => state.setMode);
+  const setStrength = useHighlightPrefs((state) => state.setStrength);
+  return (
+    <>
+      <SectionLabel>
+        {t("highlights.title")}
+        {highlights.available && highlights.mode !== "off" && highlights.savedMs > 0 && (
+          <span className="ml-1.5 font-normal text-[var(--video-accent)]">
+            {minutesLabel(highlights.savedMs, t)}
+          </span>
+        )}
+      </SectionLabel>
+      {highlights.available ? (
+        <>
+          <ChoiceRow
+            label={t("highlights.mode")}
+            options={["off", "fast", "skip"] as const}
+            value={highlights.mode}
+            optionLabel={(mode) => t(`highlights.modes.${mode}`)}
+            onChange={setMode}
+          />
+          {highlights.mode !== "off" && (
+            <ChoiceRow
+              label={t("highlights.strength")}
+              options={["1", "2", "3"] as const}
+              value={String(highlights.strength) as "1" | "2" | "3"}
+              optionLabel={(level) => t(`highlights.strengths.${level}`)}
+              onChange={(level) => setStrength(Number(level) as HighlightStrength)}
+            />
+          )}
+        </>
+      ) : (
+        <button
+          type="button"
+          role="menuitem"
+          tabIndex={-1}
+          disabled={highlights.generating}
+          title={t("highlights.generateHint")}
+          className={menuItemClass}
+          onClick={highlights.onGenerate}
+        >
+          {highlights.generating ? t("highlights.generating") : t("highlights.generate")}
+          {highlights.generateError != null && !highlights.generating && (
+            <span className="ml-auto text-xs font-normal text-red-300">{t("highlights.generateFailed")}</span>
+          )}
+        </button>
+      )}
+    </>
   );
 }
 
@@ -191,6 +266,7 @@ export function Controls({
   skipSilenceAvailable,
   skipSilenceLoading,
   skipRanges,
+  highlights,
   cropOn,
   cropInsets,
   fullscreen,
@@ -223,6 +299,8 @@ export function Controls({
   skipSilenceAvailable: boolean;
   skipSilenceLoading: boolean;
   skipRanges: SkipRange[];
+  /** 精华压缩版：没传就不显示这一节（例如还没有文稿）。 */
+  highlights?: HighlightControls;
   cropOn: boolean;
   cropInsets: Insets;
   fullscreen: boolean;
@@ -491,6 +569,7 @@ export function Controls({
           </button>
         </div>
       )}
+      {highlights && <HighlightSection highlights={highlights} />}
       <button
         type="button"
         role="menuitemcheckbox"

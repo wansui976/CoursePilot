@@ -547,4 +547,23 @@ export const scenes = [
       await shot("queue");
     },
   },
+  {
+    // 精华版：播放设置里切到「跳过」→ 进度条斜纹、文稿水分句变淡。
+    name: "highlights",
+    // 手机上控制栏要先点画面唤出，设置菜单走另一套；这里只拍桌面与平板。
+    devices: ["desktop", "tablet"],
+    run: async ({ page, shot }) => {
+      await openVideo(page);
+      const stage = page.getByLabel("视频播放区").first();
+      await stage.hover().catch(() => {});
+      await page.getByRole("button", { name: "播放设置" }).first().click();
+      await page.getByRole("menuitemradio", { name: "跳过" }).click();
+      await shot("menu");
+      await page.keyboard.press("Escape");
+      const tab = page.getByRole("tab", { name: /文稿/ });
+      if (await tab.count()) await tab.first().click();
+      await stage.hover().catch(() => {});
+      await shot("transcript");
+    },
+  },
 ];

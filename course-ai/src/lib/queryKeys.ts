@@ -7,7 +7,7 @@
  */
 
 /** 后端流水线里会产出、并按 `[产物名, videoId]` 缓存的 AI 产物（与后端 TRACKED_ARTIFACTS 一致）。 */
-export type ArtifactKind = "chapters" | "summary" | "notes" | "quiz" | "mindmap";
+export type ArtifactKind = "chapters" | "summary" | "notes" | "quiz" | "mindmap" | "highlights";
 
 export const qk = {
   courses: () => ["courses"] as const,

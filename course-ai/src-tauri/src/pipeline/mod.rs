@@ -14,6 +14,7 @@ pub mod deepseek_ocr;
 pub mod download;
 pub mod explain;
 pub mod handout;
+pub mod highlights;
 pub mod media_kind;
 pub mod ocr;
 pub mod playable;

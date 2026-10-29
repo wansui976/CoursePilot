@@ -1734,7 +1734,8 @@
       "slides-ocr": "Slide text recognition",
       "handout": "Handout",
       "concepts-analyze": "Concept analysis",
-      "concepts-summarize": "Course overview"
+      "concepts-summarize": "Course overview",
+      "highlights": "Highlights"
     }
   },
   "findExplanation": {
@@ -1778,5 +1779,38 @@
     "next": "Next clip",
     "finish": "Done",
     "stop": "Stop the queue"
+  },
+  "highlights": {
+    "title": "Highlights",
+    "mode": "Filler",
+    "strength": "Strength",
+    "modes": {
+      "off": "Normal",
+      "fast": "Speed up",
+      "skip": "Skip"
+    },
+    "strengths": {
+      "1": "Light",
+      "2": "Medium",
+      "3": "Bold"
+    },
+    "savedMinutes": "saves {{count}} min",
+    "savedSeconds": "saves {{count}}s",
+    "generate": "Make highlights",
+    "generateHint": "Let AI mark admin notes, chit-chat and repeats that you can speed through or skip",
+    "generating": "Marking filler…",
+    "generateFailed": "Failed — try again",
+    "skipped": "Skipped {{seconds}}s · {{reason}}",
+    "fastForwarding": "Speeding up · {{reason}}",
+    "undo": "Undo",
+    "keep": "Keep this",
+    "hover": "Filler · {{reason}}",
+    "kind": {
+      "repeat": "Repeat",
+      "offtopic": "Off-topic",
+      "chitchat": "Chit-chat",
+      "admin": "Admin notes",
+      "filler": "Filler"
+    }
   }
 }

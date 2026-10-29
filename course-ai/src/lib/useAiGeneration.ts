@@ -3,7 +3,7 @@ import { taskMeta } from "@/lib/backgroundTasks";
 import { qk } from "@/lib/queryKeys";
 import { ipc } from "@/lib/ipc";
 
-export type GeneratedArtifact = "summary" | "chapters" | "quiz" | "mindmap";
+export type GeneratedArtifact = "summary" | "chapters" | "quiz" | "mindmap" | "highlights";
 
 type GenerationSnapshot = {
   id: number;

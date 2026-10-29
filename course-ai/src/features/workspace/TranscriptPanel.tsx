@@ -31,6 +31,8 @@ import type { TranscriptSegment } from "@/lib/types";
 import { findActiveSegmentIndex } from "@/lib/transcript";
 import { TRANSLATION_LANGS, useCaptionPrefs, useTranslationLang } from "@/stores/captionPrefs";
 import type { TranslateProgress } from "@/lib/ipc";
+import { activeSegments } from "@/lib/highlights";
+import { useHighlightPrefs } from "@/stores/highlightPrefs";
 
 // 手动滚动后暂停「跟随播放自动居中」的时长；停手超过该窗口才恢复跟随。
 const FOLLOW_PAUSE_MS = 4000;
@@ -93,9 +95,16 @@ const TranscriptRow = memo(function TranscriptRow({
   translation,
   onSeek,
   onEdit,
+  fillerReason,
+  fillerStartMs,
+  onKeepFiller,
 }: {
   index: number;
   segment: TranscriptSegment;
+  /** 落在精华版水分段里：整行变淡；fillerStartMs 只给该段第一行，在它上方标一句理由与「这段有用」。 */
+  fillerReason?: string;
+  fillerStartMs?: number;
+  onKeepFiller?: (startMs: number) => void;
   /** 双语 / 译文模式下这一句的译文，显示在原文下方。 */
   translation?: string;
   active: boolean;
@@ -108,7 +117,21 @@ const TranscriptRow = memo(function TranscriptRow({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="px-3 py-0.5">
+    <div className={`px-3 py-0.5 ${fillerReason ? "ca-transcript-filler" : ""}`}>
+      {fillerReason && fillerStartMs != null && (
+        <div className="mb-0.5 flex items-center gap-1.5 px-2 pt-1 ca-t-2xs">
+          <span className="rounded-full bg-amber-400/15 px-1.5 text-amber-700 dark:text-amber-300">
+            {t("highlights.hover", { reason: fillerReason })}
+          </span>
+          <button
+            type="button"
+            onClick={() => onKeepFiller?.(fillerStartMs)}
+            className="ca-touch-44 text-[var(--text-muted)] underline-offset-2 hover:text-[var(--text-strong)] hover:underline"
+          >
+            {t("highlights.keep")}
+          </button>
+        </div>
+      )}
       <div
         data-row={index}
         className={`group relative rounded ${
@@ -175,6 +198,38 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
   const transcriptQuery = useQuery(queries.transcripts(videoId));
   const segments = transcriptQuery.data ?? EMPTY_SEGMENTS;
   const requestSeek = usePlayer((s) => s.requestSeek);
+  // 精华版开着时，水分段里的句子变淡，并在每段第一句上标出理由（与播放器同一份数据）。
+  const highlightMode = useHighlightPrefs((state) => state.mode);
+  const highlightStrength = useHighlightPrefs((state) => state.strength);
+  const keptFillers = useHighlightPrefs((state) => state.kept[videoId]);
+  const { data: highlightData } = useQuery({
+    queryKey: qk.artifact("highlights", videoId),
+    queryFn: () => ipc.ai.getHighlights(videoId),
+    enabled: highlightMode !== "off",
+  });
+  const fillerRows = useMemo(() => {
+    const rows = new Map<number, { reason: string; segmentStart: number; startMs?: number }>();
+    if (highlightMode === "off" || !highlightData) return rows;
+    const active = activeSegments(highlightData, highlightStrength, keptFillers ?? []);
+    let cursor = 0;
+    segments.forEach((row, index) => {
+      while (cursor < active.length && active[cursor].end_ms <= row.start_ms) cursor += 1;
+      const filler = active[cursor];
+      if (!filler || row.start_ms < filler.start_ms) return;
+      const reason = filler.reason || t(`highlights.kind.${filler.kind}`);
+      const first = rows.get(index - 1)?.segmentStart !== filler.start_ms;
+      rows.set(index, {
+        reason,
+        segmentStart: filler.start_ms,
+        ...(first ? { startMs: filler.start_ms } : {}),
+      });
+    });
+    return rows;
+  }, [highlightData, highlightMode, highlightStrength, keptFillers, segments, t]);
+  const keepFiller = useCallback(
+    (startMs: number) => useHighlightPrefs.getState().keep(videoId, startMs),
+    [videoId],
+  );
   // 字幕翻译：译文存在本地库里，播放器字幕和这里的双语文稿共用。
   const captionMode = useCaptionPrefs((s) => s.mode);
   const translationLang = useTranslationLang(segments);
@@ -849,6 +904,9 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
               }
               onSeek={requestSeek}
               onEdit={startEdit}
+              fillerReason={fillerRows.get(index)?.reason}
+              fillerStartMs={fillerRows.get(index)?.startMs}
+              onKeepFiller={keepFiller}
             />
           );
             })}
