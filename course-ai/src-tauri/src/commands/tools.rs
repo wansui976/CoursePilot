@@ -178,6 +178,54 @@ pub async fn cmd_ocr_region(
     .await
 }
 
+/// 拍题识字：对一张图（data URL，截图或手机拍的照片）跑当前设置的 OCR 引擎，返回识别文字。
+/// 「拍题找讲解」先让用户核对这段文字（公式最容易认错），再拿去检索。
+#[tauri::command]
+pub async fn cmd_ocr_image(state: State<'_, AppState>, image: String) -> AppResult<String> {
+    let bytes = crate::pipeline::slide_match::decode_data_url(&image)
+        .ok_or_else(|| AppError::Other("图片读不出来，换一张 PNG / JPEG 试试".into()))?;
+    match resolve_ocr_backend(&state.db).await.as_str() {
+        "aliyun" => {
+            let config = aliyun_ocr_config(&state.db).await?;
+            return aliyun_ocr::run_aliyun_ocr(
+                &bytes,
+                &config.access_key_id,
+                &config.access_key_secret,
+                &config.ocr_type,
+            )
+            .await;
+        }
+        "deepseek" => {
+            let config = deepseek_ocr_config(&state.db).await?;
+            return deepseek_ocr::run_deepseek_ocr(&bytes, &config.api_key, &config.base_url, &config.model)
+                .await;
+        }
+        _ => {}
+    }
+    // 本地引擎认文件：落到临时目录，认完删掉。
+    let ext = if image.starts_with("data:image/jpeg") { "jpg" } else { "png" };
+    let path = std::env::temp_dir().join(format!("courseai-ocr-{}.{ext}", uuid::Uuid::new_v4()));
+    tokio::fs::write(&path, &bytes).await?;
+    let langs = ocr_langs(&state.db).await;
+    let result = ocr::run_ocr_on_image(&path, &langs).await;
+    let _ = tokio::fs::remove_file(&path).await;
+    result
+}
+
+/// 拍题找讲解：题目文字（可选附原图）在整门课里讲在哪。见 pipeline::explain。
+#[tauri::command]
+pub async fn cmd_find_explanations(
+    state: State<'_, AppState>,
+    course_id: String,
+    text: String,
+    image: Option<String>,
+) -> AppResult<crate::pipeline::explain::ExplanationResult> {
+    if text.trim().is_empty() && image.is_none() {
+        return Err(AppError::Other("先拍一道题，或者输入题目文字".into()));
+    }
+    crate::pipeline::explain::find_explanations(&state.db, &course_id, &text, image.as_deref()).await
+}
+
 /// 下载 B 站 / URL 视频到课程目录并登记。可选清晰度上限与字幕轨。
 /// 排进后台下载队列并等它下完（助手导入用）；给了 `request_id` 时，
 /// 进度另外走 `url-import:<request_id>` 事件。

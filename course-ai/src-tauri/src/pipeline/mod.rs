@@ -12,6 +12,7 @@ pub mod concepts;
 pub mod crop_detect;
 pub mod deepseek_ocr;
 pub mod download;
+pub mod explain;
 pub mod handout;
 pub mod media_kind;
 pub mod ocr;

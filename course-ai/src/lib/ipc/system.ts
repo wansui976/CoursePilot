@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   DevLogEntry,
+  ExplanationResult,
   LlmUsageTotals,
   PlaylistInfo,
   ProbeResult,
@@ -99,6 +100,15 @@ export const tools = {
     h = 0,
   ): Promise<string> =>
     invoke("cmd_ocr_region", { videoId, atMs, x, y, w, h }),
+  /** 对一张图（data URL）跑当前设置的 OCR 引擎：拍题找讲解先认出题目文字。 */
+  ocrImage: (image: string): Promise<string> => invoke("cmd_ocr_image", { image }),
+  /** 拍题找讲解：题目文字（可选附原图）在整门课里讲在哪。 */
+  findExplanations: (
+    courseId: string,
+    text: string,
+    image?: string | null,
+  ): Promise<ExplanationResult> =>
+    invoke("cmd_find_explanations", { courseId, text, ...(image ? { image } : {}) }),
   importBilibili: async (
     courseId: string,
     url: string,

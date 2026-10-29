@@ -70,7 +70,7 @@ use crate::commands::sync::{
     cmd_sync_status,
 };
 use crate::commands::tools::{
-    cmd_bilibili_login_state, cmd_has_bilibili_cookies, cmd_import_bilibili, cmd_ocr_region,
+    cmd_bilibili_login_state, cmd_find_explanations, cmd_has_bilibili_cookies, cmd_import_bilibili, cmd_ocr_image, cmd_ocr_region,
     cmd_probe_bilibili, cmd_probe_playlist, cmd_set_bilibili_cookies,
 };
 use crate::commands::transcripts::{cmd_list_transcripts, cmd_update_transcript};
@@ -344,6 +344,8 @@ pub fn run() {
             cmd_cancel_rag_query,
             cmd_search_transcript,
             cmd_ocr_region,
+            cmd_ocr_image,
+            cmd_find_explanations,
             cmd_import_bilibili,
             cmd_enqueue_downloads,
             cmd_cancel_download,

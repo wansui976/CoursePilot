@@ -1094,8 +1094,11 @@
       "makeCard": "做成复习卡",
       "cardSaved": "已加入复习",
       "cardFailed": "没存上，再试一次",
-      "guideTranscript": "带我一步步理解这段文稿{{source}}：\n\n{{text}}"
-    }
+      "guideTranscript": "带我一步步理解这段文稿{{source}}：\n\n{{text}}",
+      "solveProblem": "带我一步步解这道题，先别告诉我答案：\n\n{{text}}"
+    },
+    "solveProblem": "这道题怎么做？请讲清楚思路，并告诉我课程里在哪讲过：\n\n{{text}}",
+    "problemInImage": "（见图中的题目）"
   },
   "assistantTools": {
     "list_courses": "查看课程",
@@ -1726,5 +1729,47 @@
       "concepts-analyze": "分析知识点",
       "concepts-summarize": "生成课程总览"
     }
+  },
+  "findExplanation": {
+    "title": "找讲解",
+    "entry": "找讲解",
+    "entryHint": "拍一道题或贴一张截图，找到这门课里讲它的地方",
+    "fromAssistant": "在整门课里找讲解",
+    "back": "上一步",
+    "pickDesktop": "把题目截图拖到这里，或直接 ⌘V / Ctrl+V 粘贴",
+    "pickMobile": "拍一道题，或从相册选一张",
+    "chooseImage": "选择图片",
+    "takePhoto": "拍照",
+    "fromAlbum": "从相册选",
+    "typeInstead": "没有图？直接输入题目",
+    "cropHint": "一页上有好几道题时，拖动框出要找的那一道。",
+    "useWhole": "用整张图",
+    "useSelection": "用框住的部分",
+    "problemImage": "题目图片",
+    "problemText": "题目文字",
+    "recognizing": "正在识别文字…",
+    "textPlaceholder": "输入或粘贴题目文字",
+    "checkText": "公式和符号最容易认错，核对一下再找。",
+    "search": "找讲解",
+    "results": "讲这道题的地方",
+    "playInOrder": "依次播放这 {{count}} 段（约 {{minutes}} 分钟）",
+    "concepts": "涉及知识点",
+    "strong": "最相关",
+    "possible": "可能相关",
+    "byPicture": "画面对上课件第 {{page}} 页",
+    "bySlideText": "课件第 {{page}} 页的文字",
+    "byTranscript": "老师讲到",
+    "slidePage": "课件第 {{page}} 页",
+    "emptyTitle": "这门课里没找到讲这道题的地方",
+    "emptyDescription": "可能是课上没讲，或者题目文字没认准。可以让 AI 助手带你一起解。",
+    "solveWithGuide": "用引导模式一起解",
+    "askAssistant": "问 AI 助手"
+  },
+  "clipQueue": {
+    "label": "依次播放",
+    "progress": "第 {{index}} / {{total}} 段",
+    "next": "下一段",
+    "finish": "看完了",
+    "stop": "结束依次播放"
   }
 }

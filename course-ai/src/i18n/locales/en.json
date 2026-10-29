@@ -1096,8 +1096,11 @@
       "makeCard": "Make a review card",
       "cardSaved": "Added to review",
       "cardFailed": "Couldn't save — try again",
-      "guideTranscript": "Guide me step by step through this transcript excerpt{{source}}:\n\n{{text}}"
-    }
+      "guideTranscript": "Guide me step by step through this transcript excerpt{{source}}:\n\n{{text}}",
+      "solveProblem": "Guide me through this problem step by step — don't give me the answer yet:\n\n{{text}}"
+    },
+    "solveProblem": "How do I solve this? Explain the approach and tell me where the course covers it:\n\n{{text}}",
+    "problemInImage": "(see the problem in the image)"
   },
   "assistantTools": {
     "list_courses": "View courses",
@@ -1733,5 +1736,47 @@
       "concepts-analyze": "Concept analysis",
       "concepts-summarize": "Course overview"
     }
+  },
+  "findExplanation": {
+    "title": "Find the explanation",
+    "entry": "Find explanation",
+    "entryHint": "Snap a problem or paste a screenshot to find where this course covers it",
+    "fromAssistant": "Find in this course",
+    "back": "Back",
+    "pickDesktop": "Drop a screenshot of the problem here, or paste with ⌘V / Ctrl+V",
+    "pickMobile": "Snap a problem, or pick one from your photos",
+    "chooseImage": "Choose image",
+    "takePhoto": "Take photo",
+    "fromAlbum": "From photos",
+    "typeInstead": "No image? Type the problem instead",
+    "cropHint": "If the page has several problems, drag to box the one you want.",
+    "useWhole": "Use whole image",
+    "useSelection": "Use selection",
+    "problemImage": "Problem image",
+    "problemText": "Problem text",
+    "recognizing": "Recognizing text…",
+    "textPlaceholder": "Type or paste the problem",
+    "checkText": "Formulas and symbols are easy to misread — check before searching.",
+    "search": "Find explanation",
+    "results": "Where this is covered",
+    "playInOrder": "Play these {{count}} clips in order (~{{minutes}} min)",
+    "concepts": "Concepts",
+    "strong": "Best match",
+    "possible": "Possible match",
+    "byPicture": "Matches slide {{page}}",
+    "bySlideText": "Text on slide {{page}}",
+    "byTranscript": "Lecture",
+    "slidePage": "Slide {{page}}",
+    "emptyTitle": "Couldn't find this in the course",
+    "emptyDescription": "It may not be covered, or the text wasn't recognized well. The assistant can work through it with you.",
+    "solveWithGuide": "Solve it in guided mode",
+    "askAssistant": "Ask the assistant"
+  },
+  "clipQueue": {
+    "label": "Clip queue",
+    "progress": "Clip {{index}} of {{total}}",
+    "next": "Next clip",
+    "finish": "Done",
+    "stop": "Stop the queue"
   }
 }

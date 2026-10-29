@@ -230,6 +230,19 @@ export function installMockIpc({ theme, safeArea }) {
       }, 50);
       return null;
     },
+    // 拍题找讲解：识字给一段题目文字，检索给两段最相关 + 一段可能相关。
+    cmd_ocr_image: () => "设损失函数 L(w)=(w-3)²，学习率 η=1.2，从 w=0 开始做梯度下降，参数会怎样变化？",
+    cmd_find_explanations: () => ({
+      hits: [
+        { video_id: videos[2].id, video_title: videos[2].title, start_ms: 430_000, end_ms: 520_000, snippet: "学习率太大时，每一步都越过谷底，在两侧来回震荡，甚至发散。", slide_image: null, slide_page: null, matched_by: "text", strong: true },
+        { video_id: videos[2].id, video_title: videos[2].title, start_ms: 180_000, end_ms: 230_000, snippet: "更新公式：w ← w − η·∇L(w)，步长由学习率和梯度共同决定。", slide_image: null, slide_page: null, matched_by: "text", strong: true },
+        { video_id: videos[1].id, video_title: videos[1].title, start_ms: 600_000, end_ms: 640_000, snippet: "最小二乘的损失是一个开口向上的抛物面。", slide_image: null, slide_page: null, matched_by: "text", strong: false },
+      ],
+      concepts: [
+        { concept_id: "k1", name: "学习率", video_id: videos[2].id, start_ms: 420_000 },
+        { concept_id: "k2", name: "梯度下降", video_id: videos[2].id, start_ms: 60_000 },
+      ],
+    }),
     // __shot-slow-ai：生成一直不返回，用来拍「后台任务」进行中的样子。
     cmd_generate_ai: () => {
       try {

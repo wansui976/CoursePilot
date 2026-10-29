@@ -529,4 +529,22 @@ export const scenes = [
       await shot("done");
     },
   },
+  {
+    // 拍题找讲解：课程页「找讲解」→ 手打题目 → 结果 → 依次播放 → 工作台顶部的队列条。
+    name: "find-explanation",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await openCourse(page);
+      await page.getByRole("button", { name: "找讲解" }).first().click();
+      await shot("pick");
+      await page.getByRole("button", { name: "没有图？直接输入题目" }).click();
+      await page.getByPlaceholder("输入或粘贴题目文字").fill("学习率 η=1.2 时梯度下降会怎样？");
+      await page.getByRole("dialog").getByRole("button", { name: "找讲解" }).click();
+      await page.getByRole("list", { name: "讲这道题的地方" }).waitFor({ timeout: 4000 });
+      await shot("results");
+      await page.getByRole("button", { name: /依次播放这/ }).click();
+      await page.getByRole("region", { name: "依次播放" }).waitFor({ timeout: 6000 });
+      await shot("queue");
+    },
+  },
 ];

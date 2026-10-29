@@ -9,6 +9,7 @@ import type { Course, Video } from "@/lib/types";
 import { displayTitle } from "@/lib/videoTitle";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { TabsPanel } from "./TabsPanel";
+import { ClipQueueBar } from "./ClipQueueBar";
 import { WorkspaceLayout } from "./WorkspaceLayout";
 import { allowsNotesSplit } from "./workbenchLayout";
 
@@ -107,6 +108,7 @@ export function VideoWorkbench({
               </div>
             </header>
           )}
+          <ClipQueueBar />
           <div className="ca-stage-wrap">
             {isPhoneDevice && (
               <button

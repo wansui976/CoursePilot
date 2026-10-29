@@ -1359,6 +1359,21 @@ pub async fn keyword_search_scope(
     query: &str,
     limit: usize,
 ) -> AppResult<Vec<Citation>> {
+    Ok(keyword_search_scope_scored(db, videos, query, limit)
+        .await?
+        .into_iter()
+        .map(|(_, citation)| citation)
+        .collect())
+}
+
+/// 同 [`keyword_search_scope`]，但每条带上得分（按词的 IDF 加权）。
+/// 「拍题找讲解」要按相对得分区分「最相关 / 可能相关」并丢掉太弱的命中。
+pub async fn keyword_search_scope_scored(
+    db: &Db,
+    videos: &[(String, String)],
+    query: &str,
+    limit: usize,
+) -> AppResult<Vec<(f64, Citation)>> {
     let mut loaded: Vec<(String, String, Vec<TranscriptSegment>, Vec<SlidePage>)> =
         Vec::with_capacity(videos.len());
     let mut builder = TermWeights::builder(query_terms(query));
@@ -1393,7 +1408,8 @@ pub async fn keyword_search_scope(
         }
     }
     rank_hits(&mut hits);
-    Ok(to_citations(hits, limit))
+    let scores: Vec<f64> = hits.iter().take(limit).map(|hit| hit.score).collect();
+    Ok(scores.into_iter().zip(to_citations(hits, limit)).collect())
 }
 
 /// 把毫秒格式化成 mm:ss（或含小时 h:mm:ss），用于上下文里给 LLM 标注出处。

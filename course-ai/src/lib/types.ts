@@ -416,3 +416,31 @@ export interface AssistantContext {
   video_id?: string | null;
   position_ms?: number | null;
 }
+
+/** 拍题找讲解的一处结果：与后端 pipeline::explain::ExplanationHit 对应。 */
+export interface ExplanationHit {
+  video_id: string;
+  video_title: string;
+  start_ms: number;
+  end_ms: number;
+  /** 命中的那句字幕 / 课件文字；画面命中时为空。 */
+  snippet: string;
+  slide_image: string | null;
+  slide_page: number | null;
+  /** picture：画面对上了课件页；text：题目文字命中。 */
+  matched_by: "picture" | "text";
+  /** 「最相关」还是「可能相关」。 */
+  strong: boolean;
+}
+
+export interface ExplanationConcept {
+  concept_id: string;
+  name: string;
+  video_id: string | null;
+  start_ms: number | null;
+}
+
+export interface ExplanationResult {
+  hits: ExplanationHit[];
+  concepts: ExplanationConcept[];
+}

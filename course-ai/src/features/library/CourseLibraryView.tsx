@@ -9,6 +9,7 @@ import {
   FolderPlus,
   LayoutGrid,
   Lightbulb,
+  ScanSearch,
   List,
   Loader2,
   MoreHorizontal,
@@ -41,6 +42,8 @@ import { canRecorrect } from "@/lib/videoActions";
 import type { Video, VideoListItem } from "@/lib/types";
 import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
+import { useFindExplanation } from "@/stores/findExplanation";
+import { imageFilesFromClipboard, prepareAssistantImage } from "@/lib/assistantImages";
 import { WATCHED_RATIO, readLastVideoId, readPlaybackProgress } from "@/lib/playback";
 import { useJobs } from "@/stores/jobs";
 import { isActiveDownload, useDownloads } from "@/stores/downloads";
@@ -167,6 +170,48 @@ export function CourseLibraryView({
   } = useQuery(queries.videos(selectedCourseId));
   const { data: courses = [] } = useQuery(queries.courses());
   const selectedCourse = courses.find((course) => course.id === selectedCourseId);
+
+  // 课程页上直接粘贴 / 拖进一张图片：当成「拍题找讲解」。输入框里粘贴、已经开着对话框时不接。
+  useEffect(() => {
+    if (!selectedCourseId) return;
+    const courseId = selectedCourseId;
+    const openWith = async (file: File) => {
+      try {
+        useFindExplanation.getState().open(courseId, await prepareAssistantImage(file));
+      } catch {
+        useFindExplanation.getState().open(courseId);
+      }
+    };
+    const busy = (target: EventTarget | null) =>
+      useFindExplanation.getState().request != null ||
+      document.querySelector('[aria-modal="true"]') != null ||
+      (target instanceof HTMLElement &&
+        (target.isContentEditable || target.closest("input, textarea, [contenteditable]") != null));
+    const onPaste = (event: ClipboardEvent) => {
+      if (busy(event.target)) return;
+      const file = imageFilesFromClipboard(event.clipboardData)[0];
+      if (!file) return;
+      event.preventDefault();
+      void openWith(file);
+    };
+    const onDragOver = (event: DragEvent) => {
+      if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
+    };
+    const onDrop = (event: DragEvent) => {
+      const file = Array.from(event.dataTransfer?.files ?? []).find((item) => item.type.startsWith("image/"));
+      if (!file || busy(event.target)) return;
+      event.preventDefault();
+      void openWith(file);
+    };
+    window.addEventListener("paste", onPaste);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("paste", onPaste);
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, [selectedCourseId]);
   const [view, setView] = useState<LibraryView>(readInitialView);
   // 网格卡片密度（舒适/紧凑）：只影响网格列宽，切到列表视图无意义但保留记忆。
   const [gridDensity, setGridDensity] = useState<GridDensity>(readGridDensity);
@@ -1020,6 +1065,18 @@ export function CourseLibraryView({
                 >
                   <Lightbulb className="h-4 w-4" />
                   {t("home.knowledgePoints")}
+                </Button>
+              )}
+              {videos.length > 0 && selectedCourseId && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => useFindExplanation.getState().open(selectedCourseId)}
+                  title={t("findExplanation.entryHint")}
+                  className="ca-touch-44"
+                >
+                  <ScanSearch className="h-4 w-4" />
+                  {t("findExplanation.entry")}
                 </Button>
               )}
               <ImportVideoButton courseId={selectedCourseId} />

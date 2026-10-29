@@ -46,6 +46,7 @@ import { isMobile, isTablet } from "@/lib/platform";
 import { formatMs } from "@/lib/time";
 import { useAssistantUi } from "@/stores/assistant";
 import { useInlineAsk } from "@/stores/inlineAsk";
+import { useFindExplanation } from "@/stores/findExplanation";
 import { useTheme } from "@/stores/theme";
 import { usePanelWindowing } from "./usePanelWindowing";
 import { ConversationHistory } from "./ConversationHistory";
@@ -523,11 +524,24 @@ export function AssistantPanel({
       pendingInlineAsk.startMs == null
         ? ""
         : `（${formatMs(pendingInlineAsk.startMs)}）`;
-    const draft = t(
-      pendingInlineAsk.mode === "socratic" ? "assistant.socratic.guideTranscript" : "assistant.explainTranscript",
-      { source, text: pendingInlineAsk.text },
-    );
-    if (pendingInlineAsk.mode === "socratic") setSocratic(true);
+    const guided = pendingInlineAsk.mode === "socratic";
+    const draft =
+      pendingInlineAsk.template === "problem"
+        ? t(guided ? "assistant.socratic.solveProblem" : "assistant.solveProblem", {
+            text: pendingInlineAsk.text || t("assistant.problemInImage"),
+          })
+        : t(guided ? "assistant.socratic.guideTranscript" : "assistant.explainTranscript", {
+            source,
+            text: pendingInlineAsk.text,
+          });
+    if (guided) setSocratic(true);
+    if (pendingInlineAsk.images?.length) {
+      setAttachments(
+        pendingInlineAsk.images
+          .slice(0, MAX_ASSISTANT_IMAGES)
+          .map((dataUrl) => ({ id: crypto.randomUUID(), dataUrl })),
+      );
+    }
     recent.stopBrowsing();
     setInput((current) =>
       current.trim() ? `${current.trimEnd()}\n\n${draft}` : draft,
@@ -1505,6 +1519,11 @@ export function AssistantPanel({
           onCancelEdit={cancelEdit}
           socratic={socratic}
           onToggleSocratic={toggleSocratic}
+          onFindInCourse={
+            context.course_id && attachments.length > 0
+              ? () => useFindExplanation.getState().open(context.course_id!, attachments[0].dataUrl)
+              : undefined
+          }
         />
       )}
     </aside>

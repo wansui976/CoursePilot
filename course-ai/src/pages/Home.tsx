@@ -34,6 +34,10 @@ import { accentVars, useTheme } from "@/stores/theme";
 import { transitionToLibrary, transitionToVideo } from "@/lib/viewTransition";
 import { studyTargetFor, type TaskMeta } from "@/lib/backgroundTasks";
 import { useStudyNav } from "@/stores/studyNav";
+import { useFindExplanation } from "@/stores/findExplanation";
+import { useClipQueue } from "@/stores/clipQueue";
+import { useInlineAsk } from "@/stores/inlineAsk";
+import { FindExplanationDialog } from "@/features/library/FindExplanationDialog";
 import { BackgroundTasksButton, TaskCompletionNotices } from "@/features/shell/BackgroundTasks";
 import { useAssistantUi } from "@/stores/assistant";
 import { useHomeRoute } from "@/app/homeRoute";
@@ -323,6 +327,7 @@ export function Home() {
   // 跨视频跳转（课程级搜索点到本课程其它视频）：打开目标视频，
   // 具体 seek 由目标播放器加载完成后消费 pendingSeek。
   const pendingSeek = usePlayer((s) => s.pendingSeek);
+  const findRequest = useFindExplanation((state) => state.request);
   // 助手要知道「播到哪儿了」，「跳到刚才那句」这类话才落得下去。
   const playerMs = usePlayer((s) => s.currentMs);
   const assistantContext = buildAssistantContext(selectedCourseId, selectedVideo, playerMs);
@@ -419,6 +424,27 @@ export function Home() {
   function isWatchingTask(task: TaskMeta) {
     if (task.videoId) return task.videoId === selectedVideoId && mainView === "library";
     return mainView === "concepts" && task.courseId === selectedCourseId;
+  }
+
+  // 打开视频并跳到某一刻：当前视频直接 seek（pendingSeek 只在加载时消费），别的视频走 pendingSeek。
+  function openVideoAt(videoId: string, ms: number) {
+    runAfterWorkspaceTransient(() => {
+      setKnowledgeReturn(null);
+      const target = Math.max(0, ms);
+      if (videoId === selectedVideoId) {
+        go({ view: "library" });
+        usePlayer.getState().clearPendingSeek();
+        usePlayer.getState().requestSeek(target);
+      } else {
+        usePlayer.getState().requestOpenAt(videoId, target);
+      }
+    });
+  }
+
+  // 拍题找讲解：结果里点一段从它开头往前 3 秒播起，给一点上下文。
+  function openExplanationAt(videoId: string, ms: number) {
+    useClipQueue.getState().clear();
+    openVideoAt(videoId, ms - 3000);
   }
 
   function openSettingsCategory(category: string) {
@@ -576,6 +602,7 @@ export function Home() {
     openQueuedVideo,
     openMainView,
     openSettingsCategory,
+    openVideoAt,
     closeToLibrary: closeMainOverlays,
     resumeStudy,
     reviewJump,
@@ -636,6 +663,36 @@ export function Home() {
       {/* 手机没有侧栏：后台任务的入口浮在底栏上方。 */}
       {isPhoneDevice && !isWorkbenchView && (
         <BackgroundTasksButton variant="floating" onOpenTask={openTask} />
+      )}
+      {findRequest && (
+        <FindExplanationDialog
+          key={findRequest.nonce}
+          courseId={findRequest.courseId}
+          initialImage={findRequest.image}
+          onClose={() => useFindExplanation.getState().close()}
+          onOpenAt={openExplanationAt}
+          onPlayInOrder={(hits) => {
+            const items = hits.map((hit) => ({
+              videoId: hit.video_id,
+              videoTitle: hit.video_title,
+              startMs: Math.max(0, hit.start_ms - 3000),
+            }));
+            useClipQueue.getState().start(items);
+            openVideoAt(items[0].videoId, items[0].startMs);
+          }}
+          onSolveWithGuide={(text, image) =>
+            useInlineAsk.getState().askAbout(text, null, "socratic", {
+              template: "problem",
+              ...(image ? { images: [image] } : {}),
+            })
+          }
+          onAskAssistant={(text, image) =>
+            useInlineAsk.getState().askAbout(text, null, undefined, {
+              template: "problem",
+              ...(image ? { images: [image] } : {}),
+            })
+          }
+        />
       )}
       <TaskCompletionNotices
         isWatching={isWatchingTask}

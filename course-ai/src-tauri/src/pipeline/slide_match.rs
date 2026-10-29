@@ -557,6 +557,58 @@ pub async fn describe_matches(
     ))
 }
 
+/// 一张图在整门课的课件页里对上的结果（结构化，给「拍题找讲解」用）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CourseSlideMatch {
+    pub video_id: String,
+    pub video_title: String,
+    pub page_no: i64,
+    pub start_ms: i64,
+    pub image_path: String,
+    /// true：画面确定是这一页；false：只是像。
+    pub confident: bool,
+}
+
+/// 把一张图（data URL）和整门课已抽取的课件页按画面比对，返回确定 / 可能对上的页。
+/// 读不出画面、课程还没有课件页、或者都对不上时返回空。
+pub async fn match_course_slides(
+    db: &crate::db::Db,
+    image: &str,
+    course_id: &str,
+) -> Vec<CourseSlideMatch> {
+    let image = image.to_string();
+    let query = tokio::task::spawn_blocking(move || {
+        decode_data_url(&image).and_then(|bytes| signature_from_bytes(&bytes))
+    })
+    .await
+    .ok()
+    .flatten();
+    if query.is_none() {
+        return Vec::new();
+    }
+    let slides = load_slides(db, None, Some(course_id)).await;
+    let ranked = rank_all(&[query], &slides).await.pop().unwrap_or_default();
+    let (pages, confident) = match judge(&ranked) {
+        Verdict::Found(pages) => (pages, true),
+        Verdict::Possible(pages) => (pages, false),
+        Verdict::None => return Vec::new(),
+    };
+    pages
+        .into_iter()
+        .map(|i| {
+            let slide = &slides[i];
+            CourseSlideMatch {
+                video_id: slide.video_id.clone(),
+                video_title: slide.video_title.clone(),
+                page_no: slide.page_no,
+                start_ms: slide.start_ms,
+                image_path: slide.image_path.clone(),
+                confident,
+            }
+        })
+        .collect()
+}
+
 /// 对每张截图在一批课件页里排序。解码课件图和比对都放到阻塞线程里。
 async fn rank_all(queries: &[Option<Signature>], slides: &[SlideRow]) -> Vec<Vec<(usize, f32)>> {
     if slides.is_empty() {

@@ -7,7 +7,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { AtSign, Check, ChevronDown, GraduationCap, ImagePlus, PenLine, Send, Square, X } from "lucide-react";
+import { AtSign, Check, ChevronDown, GraduationCap, ImagePlus, PenLine, ScanSearch, Send, Square, X } from "lucide-react";
 import { imageFilesFromClipboard, type AssistantImage } from "@/lib/assistantImages";
 import { AssistantModelPicker } from "./AssistantModelPicker";
 import { matchSlashCommands, slashQuery, type SlashCommand } from "./slashCommands";
@@ -53,6 +53,7 @@ export function AssistantComposer({
   onCancelEdit,
   socratic = false,
   onToggleSocratic,
+  onFindInCourse,
 }: {
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   input: string;
@@ -84,6 +85,8 @@ export function AssistantComposer({
   /** 引导（苏格拉底）模式开着：输入框描边换成强调色，提示语也换成「说说你的想法」。 */
   socratic?: boolean;
   onToggleSocratic?: () => void;
+  /** 附了图且在某门课里：把第一张图交给「拍题找讲解」，在整门课里找讲它的地方。 */
+  onFindInCourse?: () => void;
 }) {
   const { t } = useTranslation();
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
@@ -297,6 +300,16 @@ export function AssistantComposer({
               index={previewing}
               onClose={() => setPreviewing(null)}
             />
+            {onFindInCourse && (
+              <button
+                type="button"
+                onClick={onFindInCourse}
+                className="ca-touch-44 inline-flex items-center gap-1 self-end rounded-full bg-[var(--surface-card)] px-2 py-0.5 ca-t-2xs text-[var(--text-muted)] transition-colors hover:text-[var(--accent-text)]"
+              >
+                <ScanSearch className="h-3 w-3" aria-hidden="true" />
+                {t("findExplanation.fromAssistant")}
+              </button>
+            )}
           </div>
         )}
         <textarea
