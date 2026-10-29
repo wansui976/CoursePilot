@@ -19,6 +19,7 @@ const {
   review,
   nextDueAt,
   videoProgress,
+  masterySummary,
 } = vi.hoisted(() => ({
   dailyTotals: vi.fn(),
   courseTotals: vi.fn(),
@@ -32,6 +33,7 @@ const {
   review: vi.fn(),
   nextDueAt: vi.fn(),
   videoProgress: vi.fn(),
+  masterySummary: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({
   ipc: {
@@ -45,6 +47,7 @@ vi.mock("@/lib/ipc", () => ({
     },
     courses: { list: listCourses },
     srs: { countDue, weakConcepts, dueByConcept, dueByCourse, review },
+    feynman: { masterySummary },
   },
 }));
 
@@ -86,6 +89,7 @@ describe("Dashboard", () => {
     review.mockReset().mockResolvedValue(undefined);
     nextDueAt.mockReset().mockResolvedValue(null);
     videoProgress.mockReset().mockResolvedValue([]);
+    masterySummary.mockReset().mockResolvedValue([0, 0]);
     localStorage.clear();
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
@@ -117,6 +121,12 @@ describe("Dashboard", () => {
 
     fireEvent.click(card.closest("button")!);
     expect(onOpenCourse).toHaveBeenCalledWith("c1");
+  });
+
+  it("summarises how many concepts have been explained clearly", async () => {
+    masterySummary.mockResolvedValue([3, 8]);
+    renderDashboard();
+    expect(await screen.findByText("已能讲清 3 / 8 个知识点")).toBeInTheDocument();
   });
 
   it("shows a continue-learning entry with progress and resumes on click", async () => {

@@ -1347,6 +1347,8 @@
     "reached": "Goal reached",
     "recentReviews": "{{reviews}} cards reviewed in past 7 days · {{rate}}% good rate",
     "srsIntro": "Spaced repetition · cards auto-generated from quizzes",
+    "masteredTitle": "Feynman explanation",
+    "masteredSummary": "{{mastered}} of {{total}} concepts explained clearly",
     "shareWeekly": "Weekly card",
     "shareWeeklyBusy": "Creating…",
     "shareWeeklyTitle": "Create a shareable image of your last 7 days"
@@ -1847,6 +1849,8 @@
     "cardsSaved": "Added {{count}} review card(s)",
     "cardsFailed": "Couldn't save — try again",
     "cardFront": "In your own words: {{point}}",
+    "chapterEndText": "Finished “{{chapter}}”? Explain it in your own words?",
+    "chapterEndAction": "Explain it",
     "guideMe": "Guide me through my mistakes",
     "guidePrompt": "When explaining “{{topic}}” I got this wrong: {{wrong}}. Don't tell me the answer — guide me step by step to see where I went wrong.",
     "masteredBadge": "Can explain"

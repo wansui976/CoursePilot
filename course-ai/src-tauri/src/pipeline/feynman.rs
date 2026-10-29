@@ -347,6 +347,24 @@ pub async fn mastered_keys(db: &Db, keys: &[String]) -> AppResult<Vec<String>> {
     Ok(mastered)
 }
 
+/// 学习仪表盘的「已能讲清」汇总：所有未删除课程里的知识点，以及其中已讲清的个数。
+///
+/// 仪表盘不按课程拆开请求：课程一多，逐课取知识、再逐课查费曼会打出几十个 IPC。
+pub async fn mastery_summary(db: &Db) -> AppResult<(usize, usize)> {
+    let concept_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT c.id FROM concepts c JOIN courses co ON co.id=c.course_id
+         WHERE co.deleted_at IS NULL",
+    )
+    .fetch_all(&db.pool)
+    .await?;
+    let keys: Vec<String> = concept_ids
+        .iter()
+        .map(|id| format!("concept:{id}"))
+        .collect();
+    let mastered = mastered_keys(db, &keys).await?.len();
+    Ok((mastered, keys.len()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,5 +414,43 @@ mod tests {
             FeynmanTopic::Range { video_id: "v".into(), start_ms: 5, end_ms: 9, title: "t".into() }.key(),
             "range:v:5"
         );
+    }
+    #[tokio::test]
+    async fn mastery_summary_counts_only_attempts_that_explain_clearly() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        for (id, name) in [("k1", "梯度下降"), ("k2", "学习率")] {
+            sqlx::query("INSERT INTO concepts(id,course_id,name,created_at) VALUES(?,?,?,0)")
+                .bind(id)
+                .bind(&course.id)
+                .bind(name)
+                .execute(&db.pool)
+                .await
+                .unwrap();
+        }
+        // k1 最近一次：讲到 2/2、没有讲错 → 已能讲清；k2 没有复述记录。
+        let result = serde_json::json!({
+            "covered":[{"point":"a","quote":"a"},{"point":"b","quote":"b"}],
+            "missed":[],
+            "wrong":[],
+            "comment":"ok"
+        });
+        sqlx::query(
+            "INSERT INTO feynman_attempts(id,topic_key,explanation,result_json,created_at)
+             VALUES('a1','concept:k1','讲了一遍',?,1)",
+        )
+        .bind(result.to_string())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        assert_eq!(mastery_summary(&db).await.unwrap(), (1, 2));
     }
 }

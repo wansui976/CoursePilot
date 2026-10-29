@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  BadgeCheck,
   Check,
   Play,
   Share2,
@@ -274,6 +275,11 @@ export function Dashboard({
   const dueByCourseQuery = useQuery({
     queryKey: qk.srs.dueByCourse(),
     queryFn: () => ipc.srs.dueByCourse(),
+  });
+  const masteryQuery = useQuery({
+    queryKey: ["feynman-mastery-summary"],
+    queryFn: () => ipc.feynman.masterySummary(),
+    staleTime: 60_000,
   });
   const progressRowsQuery = useQuery({
     queryKey: qk.stats.videoProgress(),
@@ -656,6 +662,21 @@ export function Dashboard({
               </div>
             </section>
             </div>
+          )}
+
+          {masteryQuery.data && masteryQuery.data[1] > 0 && (
+            <section
+              aria-label={t("dashboard.masteredTitle")}
+              className="flex items-center gap-2 border-y border-[var(--border-faint)] py-3 text-sm text-[var(--text-normal)]"
+            >
+              <BadgeCheck className="h-4 w-4 flex-none text-[var(--status-ok)]" aria-hidden="true" />
+              <span>
+                {t("dashboard.masteredSummary", {
+                  mastered: masteryQuery.data[0],
+                  total: masteryQuery.data[1],
+                })}
+              </span>
+            </section>
           )}
 
           {weakQuery.isError ? (

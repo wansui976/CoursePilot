@@ -19,6 +19,7 @@ import { usePlayer } from "@/stores/player";
 import { useNoteCapture } from "@/stores/noteCapture";
 import { CaptionOverlay } from "./CaptionOverlay";
 import { Controls } from "./Controls";
+import { ChapterFeynmanPrompt } from "./ChapterFeynmanPrompt";
 import { DanmakuOverlay } from "./DanmakuOverlay";
 import { useCaptionPrefs, useTranslationLang } from "@/stores/captionPrefs";
 import { MiniProgress, ProgressBar } from "./ProgressBar";
@@ -742,6 +743,7 @@ export function VideoPlayer({
               {cropNotice}
             </div>
           )}
+          <ChapterFeynmanPrompt videoId={videoId} chapters={chapters} />
         </div>
         {/* 字幕定位相对「舞台」区域（含黑边），因此可拖到整个舞台内任意处，不限于视频画面框。
             控制栏悬浮遮住舞台底部 controlsHeight 像素：字幕**常年**避开该占位区，

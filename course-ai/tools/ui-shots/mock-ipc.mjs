@@ -252,6 +252,7 @@ export function installMockIpc({ theme, safeArea }) {
     // 费曼复述：讲到两点、漏一点、讲错一处。
     cmd_feynman_attempts: () => [],
     cmd_feynman_mastered: () => [],
+    cmd_feynman_mastery_summary: () => [3, 8],
     cmd_feynman_evaluate: ({ explanation }) => ({
       id: "f1",
       topic_key: "range:x:0",

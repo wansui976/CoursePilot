@@ -314,6 +314,7 @@ pub fn run() {
             crate::commands::feynman::cmd_feynman_evaluate,
             crate::commands::feynman::cmd_feynman_attempts,
             crate::commands::feynman::cmd_feynman_mastered,
+            crate::commands::feynman::cmd_feynman_mastery_summary,
             cmd_get_summary,
             cmd_stale_ai_artifacts,
             cmd_generate_ai,

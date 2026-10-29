@@ -75,6 +75,14 @@ pub async fn cmd_feynman_attempts(
     feynman::attempts(&state.db, &topic_key, 5).await
 }
 
+/// 学习仪表盘汇总：全部知识点里「已经能讲清」的有几个。
+#[tauri::command]
+pub async fn cmd_feynman_mastery_summary(
+    state: State<'_, AppState>,
+) -> AppResult<(usize, usize)> {
+    feynman::mastery_summary(&state.db).await
+}
+
 /// 这些话题里哪些「已经能讲清」（知识点页的徽章）。
 #[tauri::command]
 pub async fn cmd_feynman_mastered(

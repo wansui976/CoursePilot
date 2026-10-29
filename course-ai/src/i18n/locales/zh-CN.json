@@ -1344,6 +1344,8 @@
     "reached": "已达标",
     "recentReviews": "最近 7 天复习 {{reviews}} 张 · 良好率 {{rate}}%",
     "srsIntro": "间隔重复 · 出题自动生成卡片",
+    "masteredTitle": "费曼复述",
+    "masteredSummary": "已能讲清 {{mastered}} / {{total}} 个知识点",
     "shareWeekly": "周报图",
     "shareWeeklyBusy": "生成中…",
     "shareWeeklyTitle": "把最近 7 天的学习情况生成一张分享图"
@@ -1840,6 +1842,8 @@
     "cardsSaved": "已加入 {{count}} 张复习卡",
     "cardsFailed": "没存上，再试一次",
     "cardFront": "用自己的话讲讲：{{point}}",
+    "chapterEndText": "「{{chapter}}」讲完了，用自己的话讲一遍？",
+    "chapterEndAction": "讲一讲",
     "guideMe": "讲错的地方引导我改",
     "guidePrompt": "我在复述「{{topic}}」时这样讲错了：{{wrong}}。别直接告诉我答案，一步步引导我想明白错在哪。",
     "masteredBadge": "已能讲清"

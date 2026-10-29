@@ -171,6 +171,8 @@ export const feynman = {
     invoke("cmd_feynman_attempts", { topicKey }),
   mastered: (topicKeys: string[]): Promise<string[]> =>
     invoke("cmd_feynman_mastered", { topicKeys }),
+  /** [已能讲清, 知识点总数]：学习仪表盘汇总用。 */
+  masterySummary: (): Promise<[number, number]> => invoke("cmd_feynman_mastery_summary"),
 };
 
 /** 与后端 FeynmanTopic::key 一致：同一话题的多次复述按它归在一起。 */
