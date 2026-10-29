@@ -1,13 +1,14 @@
 /* 工具类与小动效：字阶、页签与手风琴淡入、实色按钮受光面、渐变填充、模态与卡片过渡。 */
 
-/* 字阶工具类：显式字号+行高，替代散落的 text-[13px]/[15px] 等。 */
-.ca-app .ca-t-2xs { font-size: var(--fs-2xs); line-height: var(--lh-2xs); }
-.ca-app .ca-t-xs { font-size: var(--fs-xs); line-height: var(--lh-xs); }
-.ca-app .ca-t-sm { font-size: var(--fs-sm); line-height: var(--lh-sm); }
-.ca-app .ca-t-md { font-size: var(--fs-md); line-height: var(--lh-md); }
-.ca-app .ca-t-lg { font-size: var(--fs-lg); line-height: var(--lh-lg); }
-.ca-app .ca-t-xl { font-size: var(--fs-xl); line-height: var(--lh-xl); }
-.ca-app .ca-t-2xl { font-size: var(--fs-2xl); line-height: var(--lh-2xl); }
+/* 字阶工具类：显式字号+行高，替代散落的 text-[13px]/[15px] 等。
+   挂在 body 上的浮层（对话框、手机上的弹层菜单）不在 .ca-app 里，也要生效；:is 取最高权重，与原来一致。 */
+:is(.ca-app, body) .ca-t-2xs { font-size: var(--fs-2xs); line-height: var(--lh-2xs); }
+:is(.ca-app, body) .ca-t-xs { font-size: var(--fs-xs); line-height: var(--lh-xs); }
+:is(.ca-app, body) .ca-t-sm { font-size: var(--fs-sm); line-height: var(--lh-sm); }
+:is(.ca-app, body) .ca-t-md { font-size: var(--fs-md); line-height: var(--lh-md); }
+:is(.ca-app, body) .ca-t-lg { font-size: var(--fs-lg); line-height: var(--lh-lg); }
+:is(.ca-app, body) .ca-t-xl { font-size: var(--fs-xl); line-height: var(--lh-xl); }
+:is(.ca-app, body) .ca-t-2xl { font-size: var(--fs-2xl); line-height: var(--lh-2xl); }
 
 /* 学习标签切换：内容变为活动时轻微淡入，补上此前「无过渡的瞬切」。只动透明度不位移。 */
 @keyframes ca-fade-in {
