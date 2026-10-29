@@ -1812,5 +1812,43 @@
       "admin": "Admin notes",
       "filler": "Filler"
     }
+  },
+  "feynman": {
+    "title": "Explain it: {{topic}}",
+    "entry": "Explain it to me",
+    "entryChapter": "Explain it: {{title}}",
+    "prompt": "Explain “{{topic}}” as if to a classmate who hasn't learned it. I'll compare it with the course and show what you covered and missed.",
+    "tapToSpeak": "Tap to start, tap again when you're done",
+    "recording": "Listening {{elapsed}} / {{max}}",
+    "transcribing": "Transcribing…",
+    "startRecording": "Start recording",
+    "stopRecording": "Stop recording",
+    "typeInstead": "Can't talk right now? Type instead",
+    "speakInstead": "Speak instead",
+    "placeholder": "Explain it in your own words…",
+    "yourExplanation": "Your explanation",
+    "micError": {
+      "denied": "Microphone access was denied. Turn it on in system settings, or just type.",
+      "unavailable": "The microphone isn't available here — typing works just as well.",
+      "failed": "Recording failed. Try again or type."
+    },
+    "check": "Check against the course",
+    "checking": "Checking against the course…",
+    "lastTime": "Last time: {{count}}/{{total}} points",
+    "coverage": "Covered {{count}} of {{total}} points",
+    "filled": "You filled {{count}} gap(s) from last time",
+    "wrongTitle": "What was wrong",
+    "missedTitle": "What you missed",
+    "missed": "Missed: {{point}}",
+    "rewatch": "Rewatch {{time}}",
+    "allClear": "Complete and accurate — nothing missed, nothing wrong.",
+    "retry": "Explain again",
+    "makeCards": "Make {{count}} review card(s) from the gaps",
+    "cardsSaved": "Added {{count}} review card(s)",
+    "cardsFailed": "Couldn't save — try again",
+    "cardFront": "In your own words: {{point}}",
+    "guideMe": "Guide me through my mistakes",
+    "guidePrompt": "When explaining “{{topic}}” I got this wrong: {{wrong}}. Don't tell me the answer — guide me step by step to see where I went wrong.",
+    "masteredBadge": "Can explain"
   }
 }

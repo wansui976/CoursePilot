@@ -1,3 +1,4 @@
+import { useFeynman } from "@/stores/feynman";
 import { taskMeta } from "@/lib/backgroundTasks";
 import {
   useCallback,
@@ -17,11 +18,13 @@ import { useMutation, useMutationState, useQuery, useQueryClient } from "@tansta
 import type { TFunction } from "i18next";
 import {
   Brain,
+  Check,
   ChevronDown,
   FileText,
   Layers,
   Lightbulb,
   MessageCircle,
+  Mic,
   Play,
   RefreshCw,
   Search,
@@ -566,6 +569,17 @@ export function ConceptsPanel({
   const topicCount = knowledge?.groups.length ?? 0;
   const query = deferredSearch.trim().toLocaleLowerCase();
   const groups = useMemo(() => filterGroups(knowledge?.groups ?? [], query), [knowledge?.groups, query]);
+  // 「已能讲清」徽章：最近一次费曼复述没讲错、讲到八成以上要点的知识点。
+  const conceptKeys = useMemo(
+    () => (knowledge?.groups ?? []).flatMap((group) => group.concepts.map((concept) => `concept:${concept.id}`)),
+    [knowledge?.groups],
+  );
+  const { data: masteredKeys } = useQuery({
+    queryKey: ["feynman-mastered", courseId, conceptKeys],
+    queryFn: () => ipc.feynman.mastered(conceptKeys),
+    enabled: conceptKeys.length > 0,
+  });
+  const mastered = useMemo(() => new Set(masteredKeys ?? []), [masteredKeys]);
   const busy = analyzePending || summarizePending;
   const hasKnowledge = allConcepts.length > 0;
   // 过滤后仍在列的知识点数：搜索时告诉用户命中了多少，而不是只剩下一堆卡片。
@@ -1086,8 +1100,14 @@ export function ConceptsPanel({
                                   }`}
                                 >
                                   <span className="min-w-0 flex-1">
-                                    <span className="block break-words text-sm font-medium text-[var(--text-strong)]">
+                                    <span className="flex flex-wrap items-center gap-x-1.5 break-words text-sm font-medium text-[var(--text-strong)]">
                                       {highlightQuery(concept.name, query)}
+                                      {mastered.has(`concept:${concept.id}`) && (
+                                        <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--status-ok-bg)] px-1.5 ca-t-2xs font-medium text-[var(--status-ok)]">
+                                          <Check className="h-3 w-3" aria-hidden="true" />
+                                          {t("feynman.masteredBadge")}
+                                        </span>
+                                      )}
                                     </span>
                                     {concept.summary && (
                                       <span className="mt-1 block line-clamp-1 text-xs leading-5 text-[var(--text-muted)]">
@@ -1135,6 +1155,24 @@ export function ConceptsPanel({
                                         {t("concepts.noExplanation")}
                                       </p>
                                     )}
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() =>
+                                        useFeynman
+                                          .getState()
+                                          .open(
+                                            { kind: "concept", concept_id: concept.id },
+                                            concept.name,
+                                            concept.occurrences[0]?.video_id ?? null,
+                                          )
+                                      }
+                                      className="ca-touch-44 mt-2 gap-1.5 bg-[var(--surface-card)]"
+                                    >
+                                      <Mic className="h-3.5 w-3.5" />
+                                      {t("feynman.entry")}
+                                    </Button>
                                     <ConceptSources
                                       concept={concept}
                                       query={query}

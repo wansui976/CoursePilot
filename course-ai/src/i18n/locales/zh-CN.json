@@ -1805,5 +1805,43 @@
       "admin": "课务通知",
       "filler": "过渡"
     }
+  },
+  "feynman": {
+    "title": "讲给我听：{{topic}}",
+    "entry": "讲给我听",
+    "entryChapter": "讲给我听：{{title}}",
+    "prompt": "假装在给一个没学过的同学讲「{{topic}}」。讲完我会对照课程，告诉你讲到了什么、漏了什么。",
+    "tapToSpeak": "点一下开始讲，讲完再点一下",
+    "recording": "正在听 {{elapsed}} / {{max}}",
+    "transcribing": "正在转成文字…",
+    "startRecording": "开始录音",
+    "stopRecording": "停止录音",
+    "typeInstead": "不方便出声？打字也行",
+    "speakInstead": "改用说的",
+    "placeholder": "用自己的话讲一讲…",
+    "yourExplanation": "你讲的内容",
+    "micError": {
+      "denied": "麦克风权限被拒绝了。可以去系统设置里打开，或者直接打字。",
+      "unavailable": "这台设备上用不了麦克风，打字也一样。",
+      "failed": "录音没成功，再试一次或者打字。"
+    },
+    "check": "对照课程看看",
+    "checking": "正在对照课程…",
+    "lastTime": "上次讲到 {{count}}/{{total}} 个要点",
+    "coverage": "讲到 {{count}} / {{total}} 个要点",
+    "filled": "这次补上了上次漏掉的 {{count}} 点",
+    "wrongTitle": "讲错的地方",
+    "missedTitle": "漏掉的要点",
+    "missed": "漏了：{{point}}",
+    "rewatch": "回看 {{time}}",
+    "allClear": "讲得很完整，没有漏也没有错。",
+    "retry": "再讲一遍",
+    "makeCards": "漏掉的 {{count}} 点做成复习卡",
+    "cardsSaved": "已加入 {{count}} 张复习卡",
+    "cardsFailed": "没存上，再试一次",
+    "cardFront": "用自己的话讲讲：{{point}}",
+    "guideMe": "讲错的地方引导我改",
+    "guidePrompt": "我在复述「{{topic}}」时这样讲错了：{{wrong}}。别直接告诉我答案，一步步引导我想明白错在哪。",
+    "masteredBadge": "已能讲清"
   }
 }

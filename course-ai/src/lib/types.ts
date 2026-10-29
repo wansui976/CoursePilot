@@ -454,3 +454,23 @@ export interface HighlightSegment {
   level: 1 | 2 | 3;
   reason: string;
 }
+
+/** 费曼复述的话题：课程知识点，或视频里的一段（一章）。 */
+export type FeynmanTopic =
+  | { kind: "concept"; concept_id: string }
+  | { kind: "range"; video_id: string; start_ms: number; end_ms: number; title: string };
+
+export interface FeynmanResult {
+  covered: { point: string; quote: string }[];
+  missed: { point: string; video_id: string | null; ref_ms: number | null }[];
+  wrong: { quote: string; correction: string; video_id: string | null; ref_ms: number | null }[];
+  comment: string;
+}
+
+export interface FeynmanAttempt {
+  id: string;
+  topic_key: string;
+  explanation: string;
+  result: FeynmanResult;
+  created_at: number;
+}

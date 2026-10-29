@@ -249,6 +249,24 @@ export function installMockIpc({ theme, safeArea }) {
       { start_ms: 600_000, end_ms: 660_000, kind: "repeat", level: 2, reason: "把公式又念了一遍" },
       { start_ms: 900_000, end_ms: 960_000, kind: "admin", level: 1, reason: "布置作业" },
     ],
+    // 费曼复述：讲到两点、漏一点、讲错一处。
+    cmd_feynman_attempts: () => [],
+    cmd_feynman_mastered: () => [],
+    cmd_feynman_evaluate: ({ explanation }) => ({
+      id: "f1",
+      topic_key: "range:x:0",
+      explanation,
+      created_at: now,
+      result: {
+        covered: [
+          { point: "沿负梯度方向一步步更新参数", quote: "每一步都沿着负梯度的方向走一小步" },
+          { point: "步长由学习率决定", quote: "走多远由学习率决定" },
+        ],
+        missed: [{ point: "学习率过大会在谷底两侧震荡", video_id: videos[2].id, ref_ms: 430_000 }],
+        wrong: [{ quote: "学习率越大收敛越快", correction: "过大反而会震荡甚至发散，太小才是收敛慢", video_id: videos[2].id, ref_ms: 450_000 }],
+        comment: "更新方向和步长讲清楚了，再补上学习率过大会怎样。",
+      },
+    }),
     // __shot-slow-ai：生成一直不返回，用来拍「后台任务」进行中的样子。
     cmd_generate_ai: () => {
       try {

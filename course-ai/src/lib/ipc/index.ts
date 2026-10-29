@@ -5,7 +5,8 @@
 import { app, sync, secrets, dev, notify, settings, whisper, backup, tools } from "./system";
 import { downloads } from "./downloads";
 import { courses, videos, trash, subscriptions } from "./library";
-import { srs, stats, concepts } from "./study";
+import { srs, stats, concepts, feynman } from "./study";
+export { feynmanTopicKey } from "./study";
 import { assistant } from "./assistant";
 import { pipeline, transcripts, ai, slides, clips, exporting, danmaku, translation } from "./media";
 
@@ -19,6 +20,7 @@ export const ipc = {
   trash,
   subscriptions,
   srs,
+  feynman,
   stats,
   concepts,
   secrets,

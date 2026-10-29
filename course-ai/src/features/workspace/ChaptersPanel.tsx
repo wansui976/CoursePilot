@@ -2,7 +2,8 @@ import { useState } from "react";
 import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Mic } from "lucide-react";
+import { useFeynman } from "@/stores/feynman";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import { ErrorNote } from "@/ui/ErrorNote";
@@ -136,6 +137,22 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
                     <span className="ca-chapter-time">{formatMs(c.start_ms)}</span>
                     <span className="ca-chapter-title">{c.title}</span>
                     {c.summary && <span className="ca-chapter-summary ca-prose">{c.summary}</span>}
+                  </button>
+                  {/* 费曼复述：讲完一章，用自己的话讲一遍。悬停 / 聚焦时浮出，触屏常显。 */}
+                  <button
+                    type="button"
+                    aria-label={t("feynman.entryChapter", { title: c.title })}
+                    title={t("feynman.entryChapter", { title: c.title })}
+                    onClick={() =>
+                      useFeynman.getState().open(
+                        { kind: "range", video_id: videoId, start_ms: c.start_ms, end_ms: c.end_ms, title: c.title },
+                        c.title,
+                        videoId,
+                      )
+                    }
+                    className="ca-chapter-feynman ca-touch-44"
+                  >
+                    <Mic className="h-3.5 w-3.5" />
                   </button>
                 </li>
               ))}

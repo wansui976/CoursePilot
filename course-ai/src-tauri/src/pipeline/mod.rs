@@ -13,6 +13,7 @@ pub mod crop_detect;
 pub mod deepseek_ocr;
 pub mod download;
 pub mod explain;
+pub mod feynman;
 pub mod handout;
 pub mod highlights;
 pub mod media_kind;
@@ -134,6 +135,86 @@ fn whisper_language_or_default(value: Option<String>) -> String {
     value
         .filter(|language| !language.trim().is_empty())
         .unwrap_or_else(|| "zh".into())
+}
+
+async fn setting(db: &crate::db::Db, key: &str) -> AppResult<Option<String>> {
+    Ok(sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key=?")
+        .bind(key)
+        .fetch_optional(&db.pool)
+        .await?)
+}
+
+/// 识别一小段录音（费曼复述：用户对着麦克风讲的一两分钟），返回整段文字。
+///
+/// 走用户在设置里选的同一个识别引擎，但不经过视频处理流水线：没有任务、没有进度、
+/// 不落库、不纠错。桌面先用 ffmpeg 转成引擎要的格式；手机上没有 ffmpeg，
+/// 录音本身（AAC / WebM）直接交给云端引擎。
+pub async fn transcribe_clip(
+    app: &tauri::AppHandle,
+    db: &crate::db::Db,
+    input: &Path,
+    mime: &str,
+    work_dir: &Path,
+) -> AppResult<String> {
+    let backend = asr_backend_or_default(setting(db, "asr_backend").await?);
+    let mobile = matches!(std::env::consts::OS, "ios" | "android");
+    let (audio_path, audio_mime, audio_format, _temp) = if mobile {
+        if backend == AsrBackend::Whisper {
+            return Err(AppError::Config(
+                "手机上没有本地 Whisper，请在设置 → 语音识别里选云端引擎；也可以直接打字".into(),
+            ));
+        }
+        let format = if mime.contains("webm") { "webm" } else { "m4a" };
+        (input.to_path_buf(), mime.to_string(), format.to_string(), None)
+    } else {
+        let purpose = match backend {
+            AsrBackend::Whisper => audio::AudioPurpose::Whisper,
+            AsrBackend::Volcengine => audio::AudioPurpose::CloudAsr(audio::CloudAsrProvider::Volcengine),
+            AsrBackend::Aliyun => audio::AudioPurpose::CloudAsr(audio::CloudAsrProvider::Aliyun),
+        };
+        let prepared = audio::prepare_for_asr(app, input, work_dir, purpose).await?;
+        let path = prepared.path.clone();
+        let (mime, format) = (prepared.mime.clone(), prepared.format.clone());
+        (path, mime, format, Some(audio::TempAudio::new(&prepared)))
+    };
+
+    let json = match backend {
+        AsrBackend::Whisper => {
+            let model_id = setting(db, "whisper_model")
+                .await?
+                .unwrap_or_else(|| "large-v3-turbo".into());
+            let app_data = app.path().app_data_dir().map_err(|e| AppError::Config(format!("app_data_dir: {e}")))?;
+            let (_, model_path) = select_whisper_model(&app_data, &model_id).ok_or_else(|| {
+                AppError::Config("还没有可用的 Whisper 模型（设置 → 语音识别 下载一个）".into())
+            })?;
+            let lang = whisper_language_or_default(setting(db, "asr_language").await?);
+            asr::run_whisper(&audio_path, &model_path, Some(&lang), None).await?
+        }
+        AsrBackend::Volcengine => {
+            let app_id = setting(db, "volcengine_asr_app_id").await?.unwrap_or_default();
+            let token = crate::llm::keychain::get_secret_or_legacy(db, "volcengine_asr_access_token")
+                .await?
+                .unwrap_or_default();
+            volcengine_auc::run_volcengine_file(&audio_path, &app_id, &token, None, &audio_format).await?
+        }
+        AsrBackend::Aliyun => {
+            let api_key = crate::llm::keychain::get_secret_or_legacy(db, "dashscope_api_key")
+                .await?
+                .unwrap_or_default();
+            let model = setting(db, "aliyun_asr_model")
+                .await?
+                .unwrap_or_else(|| aliyun_asr::DEFAULT_MODEL.to_string());
+            let language = setting(db, "asr_language").await?;
+            aliyun_asr::run_aliyun(&audio_path, &audio_mime, &api_key, &model, language.as_deref(), None).await?
+        }
+    };
+    Ok(json
+        .transcription
+        .iter()
+        .map(|segment| segment.text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(""))
 }
 
 /// 这次处理能不能直接用自带字幕，从而整个跳过语音识别。

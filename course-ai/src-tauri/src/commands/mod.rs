@@ -8,6 +8,7 @@ pub mod courses;
 pub mod transcode;
 pub mod danmaku;
 pub mod export;
+pub mod feynman;
 pub mod note_history;
 pub mod note_images;
 pub mod notify;

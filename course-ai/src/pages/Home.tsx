@@ -38,6 +38,8 @@ import { useFindExplanation } from "@/stores/findExplanation";
 import { useClipQueue } from "@/stores/clipQueue";
 import { useInlineAsk } from "@/stores/inlineAsk";
 import { FindExplanationDialog } from "@/features/library/FindExplanationDialog";
+import { FeynmanDialog } from "@/features/knowledge/FeynmanDialog";
+import { useFeynman } from "@/stores/feynman";
 import { BackgroundTasksButton, TaskCompletionNotices } from "@/features/shell/BackgroundTasks";
 import { useAssistantUi } from "@/stores/assistant";
 import { useHomeRoute } from "@/app/homeRoute";
@@ -328,6 +330,7 @@ export function Home() {
   // 具体 seek 由目标播放器加载完成后消费 pendingSeek。
   const pendingSeek = usePlayer((s) => s.pendingSeek);
   const findRequest = useFindExplanation((state) => state.request);
+  const feynmanRequest = useFeynman((state) => state.request);
   // 助手要知道「播到哪儿了」，「跳到刚才那句」这类话才落得下去。
   const playerMs = usePlayer((s) => s.currentMs);
   const assistantContext = buildAssistantContext(selectedCourseId, selectedVideo, playerMs);
@@ -692,6 +695,17 @@ export function Home() {
               ...(image ? { images: [image] } : {}),
             })
           }
+        />
+      )}
+      {feynmanRequest && (
+        <FeynmanDialog
+          key={feynmanRequest.nonce}
+          topic={feynmanRequest.topic}
+          title={feynmanRequest.title}
+          cardVideoId={feynmanRequest.cardVideoId}
+          onClose={() => useFeynman.getState().close()}
+          onOpenAt={openVideoAt}
+          onGuide={(text) => useInlineAsk.getState().askAbout(text, null, "socratic")}
         />
       )}
       <TaskCompletionNotices

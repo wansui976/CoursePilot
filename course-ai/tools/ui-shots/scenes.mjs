@@ -566,4 +566,25 @@ export const scenes = [
       await shot("transcript");
     },
   },
+  {
+    // 费曼复述：章节行尾「讲给我听」→ 打字讲一遍 → 对照结果。
+    name: "feynman",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await openVideo(page);
+      const mic = page.getByRole("button", { name: /^讲给我听：/ }).first();
+      await mic.locator("xpath=..").hover();
+      await mic.click();
+      await page.getByRole("dialog").waitFor({ timeout: 4000 });
+      await shot("speak");
+      const typeInstead = page.getByRole("button", { name: "不方便出声？打字也行" });
+      if (await typeInstead.count()) await typeInstead.click();
+      await page
+        .getByLabel("你讲的内容")
+        .fill("梯度下降就是每一步都沿着负梯度的方向走一小步，走多远由学习率决定。学习率越大收敛越快。");
+      await page.getByRole("button", { name: "对照课程看看" }).click();
+      await page.getByText(/讲到 2 \/ 3 个要点/).waitFor({ timeout: 4000 });
+      await shot("result");
+    },
+  },
 ];

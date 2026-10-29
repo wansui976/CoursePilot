@@ -4,6 +4,8 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   AskEvent,
   ChatMessage,
+  FeynmanAttempt,
+  FeynmanTopic,
 } from "../types";
 import type {
   DueCard,
@@ -159,3 +161,19 @@ export const concepts = {
   cancelChat: (requestId: string): Promise<void> =>
     invoke("cmd_cancel_rag_query", { requestId }),
 };
+
+/** 费曼复述：录音转文字、评估一次复述、取历次复述、哪些话题已经能讲清。 */
+export const feynman = {
+  transcribe: (audio: string): Promise<string> => invoke("cmd_transcribe_clip", { audio }),
+  evaluate: (topic: FeynmanTopic, explanation: string): Promise<FeynmanAttempt> =>
+    invoke("cmd_feynman_evaluate", { topic, explanation }),
+  attempts: (topicKey: string): Promise<FeynmanAttempt[]> =>
+    invoke("cmd_feynman_attempts", { topicKey }),
+  mastered: (topicKeys: string[]): Promise<string[]> =>
+    invoke("cmd_feynman_mastered", { topicKeys }),
+};
+
+/** 与后端 FeynmanTopic::key 一致：同一话题的多次复述按它归在一起。 */
+export function feynmanTopicKey(topic: FeynmanTopic): string {
+  return topic.kind === "concept" ? `concept:${topic.concept_id}` : `range:${topic.video_id}:${topic.start_ms}`;
+}
