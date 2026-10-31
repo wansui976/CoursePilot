@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -72,9 +72,22 @@ export function FeynmanDialog({
   });
   /** 进入这次复述之前的最近一次：「再讲一遍」后拿来对比补上了什么。 */
   const [previous, setPrevious] = useState<FeynmanAttempt | null>(null);
+  // 上次的结果必须从库里恢复：关闭对话框/切走页面回来时，不能只剩一个「开始录音」。
+  // 不在第一次拿到空缓存时就「恢复完毕」——评估后紧接关闭时，新结果的 refetch
+  // 可能晚一步回来；这里允许空结果之后再来数据时补上，点「再讲一遍」才明确停止恢复。
+  const composingRef = useRef(false);
   useEffect(() => {
-    if (history.data && previous === null && !attempt) setPrevious(history.data[0] ?? null);
-  }, [attempt, history.data, previous]);
+    if (composingRef.current || attempt || !history.data) return;
+    const [latest, older] = history.data;
+    if (!latest) return;
+    // 手头有未提交草稿：继续讲这份草稿，只把最近一次拿来当对比基线。
+    if (text.trim()) {
+      setPrevious(latest);
+      return;
+    }
+    setAttempt(latest);
+    setPrevious(older ?? null);
+  }, [attempt, history.data, text]);
 
   const transcribe = useMutation({
     mutationFn: (audio: string) => ipc.feynman.transcribe(audio),
@@ -110,6 +123,7 @@ export function FeynmanDialog({
             onClose();
           }}
           onRetry={() => {
+            composingRef.current = true;
             setPrevious(attempt);
             setAttempt(null);
             setText("");
@@ -121,6 +135,11 @@ export function FeynmanDialog({
             onClose();
           }}
         />
+      ) : history.isPending && !text.trim() ? (
+        <div role="status" className="flex items-center justify-center gap-2 py-10 text-sm text-[var(--text-muted)]">
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+          {t("common.loading")}
+        </div>
       ) : (
         <div className="mt-3 space-y-3">
           <p className="text-sm text-[var(--text-normal)]">{t("feynman.prompt", { topic: title })}</p>

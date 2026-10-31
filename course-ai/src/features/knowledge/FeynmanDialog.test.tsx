@@ -98,6 +98,29 @@ describe("FeynmanDialog", () => {
     expect(handlers.onGuide).toHaveBeenCalledWith(expect.stringContaining("学习率越大越好"));
   });
 
+  it("重新打开时展示上次保存的结果，而不是回到录音界面", async () => {
+    mockIpc.feynman.attempts.mockResolvedValue([attempt()]);
+    const first = renderDialog();
+    expect(await screen.findByText("讲到 1 / 2 个要点")).toBeInTheDocument();
+    first.unmount();
+
+    renderDialog();
+    // 结果来自 feynman_attempts，不需要重新评估；「再讲一遍」仍能开始新的一次。
+    expect(await screen.findByText("讲到 1 / 2 个要点")).toBeInTheDocument();
+    expect(screen.getByText("漏了：学习率过大会震荡")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "再讲一遍" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "开始录音" })).not.toBeInTheDocument();
+  });
+
+  it("有未提交草稿时优先回到草稿，而不是旧结果", async () => {
+    mockIpc.feynman.attempts.mockResolvedValue([attempt()]);
+    localStorage.setItem("course-ai-feynman-draft:concept:k1", "这份还没提交");
+
+    renderDialog();
+    expect(await screen.findByLabelText("你讲的内容")).toHaveValue("这份还没提交");
+    expect(screen.queryByText("讲到 1 / 2 个要点")).not.toBeInTheDocument();
+  });
+
   it("再讲一遍：数出这次补上了上次漏掉的几点", async () => {
     renderDialog();
     await explain("第一次讲解");
