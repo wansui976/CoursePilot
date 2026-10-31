@@ -305,6 +305,9 @@ pub async fn evaluate(
     .bind(attempt.created_at)
     .execute(&db.pool)
     .await?;
+    // 顺手清掉话题已经不在的旧记录（概念重新分析、视频清空）：这是一次写入，
+    // 挪在复述路径上，读接口（徽章、仪表盘）就不用为了清理去抢写锁。
+    prune_orphan_attempts(db).await?;
     Ok(attempt)
 }
 
@@ -332,14 +335,18 @@ pub async fn attempts(db: &Db, topic_key: &str, limit: i64) -> AppResult<Vec<Fey
         .collect())
 }
 
-/// 一批话题里「已经能讲清」的：最近一次复述没讲错、且讲到了至少八成要点。
+/// 一次复述算不算「已经能讲清」：没讲错，且讲到了至少八成要点。
+fn clearly_explained(result: &FeynmanResult) -> bool {
+    let total = result.covered.len() + result.missed.len();
+    total > 0 && result.wrong.is_empty() && result.covered.len() * 5 >= total * 4
+}
+
+/// 一批话题里「已经能讲清」的：最近一次复述符合 [`clearly_explained`]。
 pub async fn mastered_keys(db: &Db, keys: &[String]) -> AppResult<Vec<String>> {
     let mut mastered = Vec::new();
     for key in keys {
         if let Some(latest) = attempts(db, key, 1).await?.into_iter().next() {
-            let result = &latest.result;
-            let total = result.covered.len() + result.missed.len();
-            if total > 0 && result.wrong.is_empty() && result.covered.len() * 5 >= total * 4 {
+            if clearly_explained(&latest.result) {
                 mastered.push(key.clone());
             }
         }
@@ -349,20 +356,44 @@ pub async fn mastered_keys(db: &Db, keys: &[String]) -> AppResult<Vec<String>> {
 
 /// 学习仪表盘的「已能讲清」汇总：所有未删除课程里的知识点，以及其中已讲清的个数。
 ///
-/// 仪表盘不按课程拆开请求：课程一多，逐课取知识、再逐课查费曼会打出几十个 IPC。
+/// 一次查询取齐每个知识点最近一次的复述结果（相关子查询按 `ix_feynman_topic` 走索引），
+/// 不再逐知识点发一次 SQL：课程一多，N+1 会把仪表盘拖成几十上百次往返。
 pub async fn mastery_summary(db: &Db) -> AppResult<(usize, usize)> {
-    let concept_ids: Vec<String> = sqlx::query_scalar(
-        "SELECT c.id FROM concepts c JOIN courses co ON co.id=c.course_id
+    let latest: Vec<Option<String>> = sqlx::query_scalar(
+        "SELECT (SELECT a.result_json FROM feynman_attempts a
+                 WHERE a.topic_key = 'concept:' || c.id
+                 ORDER BY a.created_at DESC, a.id DESC LIMIT 1)
+         FROM concepts c JOIN courses co ON co.id = c.course_id
          WHERE co.deleted_at IS NULL",
     )
     .fetch_all(&db.pool)
     .await?;
-    let keys: Vec<String> = concept_ids
+    let total = latest.len();
+    let mastered = latest
         .iter()
-        .map(|id| format!("concept:{id}"))
-        .collect();
-    let mastered = mastered_keys(db, &keys).await?.len();
-    Ok((mastered, keys.len()))
+        .flatten()
+        .filter(|json| {
+            serde_json::from_str::<FeynmanResult>(json).is_ok_and(|result| clearly_explained(&result))
+        })
+        .count();
+    Ok((mastered, total))
+}
+
+/// 清掉「话题已经不存在」的复述记录：概念重新分析、知识点被删、视频/课程清空，
+/// 都会让 `topic_key` 指向一个不再存在的 id。表很小，在写入复述记录时顺手清一次，
+/// 读接口（徽章 / 仪表盘）保持只读，不必为了清理去抢写锁。
+pub async fn prune_orphan_attempts(db: &Db) -> AppResult<u64> {
+    let result = sqlx::query(
+        "DELETE FROM feynman_attempts
+         WHERE (topic_key LIKE 'concept:%'
+                AND substr(topic_key, 9) NOT IN (SELECT id FROM concepts))
+            OR (topic_key LIKE 'range:%'
+                AND instr(substr(topic_key, 7), ':') > 0
+                AND substr(topic_key, 7, instr(substr(topic_key, 7), ':') - 1) NOT IN (SELECT id FROM videos))",
+    )
+    .execute(&db.pool)
+    .await?;
+    Ok(result.rows_affected())
 }
 
 #[cfg(test)]
@@ -452,5 +483,58 @@ mod tests {
         .unwrap();
 
         assert_eq!(mastery_summary(&db).await.unwrap(), (1, 2));
+    }
+
+    #[tokio::test]
+    async fn orphan_attempts_are_pruned_so_the_table_does_not_grow_forever() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO videos(id,course_id,title,source_type,file_path,data_dir,created_at)
+             VALUES('v1',?,'t','local','/v.mp4','/d',0)",
+        )
+        .bind(&course.id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO concepts(id,course_id,name,created_at) VALUES('k1',?,'k',0)")
+            .bind(&course.id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        // 两个话题还在（知识点 k1、视频 v1），两个已经不存在。
+        let now = chrono::Utc::now().timestamp_millis();
+        for (id, key) in [
+            ("a1", "concept:k1"),
+            ("a2", "concept:gone"),
+            ("a3", "range:v1:0"),
+            ("a4", "range:gone:0"),
+        ] {
+            sqlx::query(
+                "INSERT INTO feynman_attempts(id,topic_key,explanation,result_json,created_at)
+                 VALUES(?,?,'x','{}',?)",
+            )
+            .bind(id)
+            .bind(key)
+            .bind(now)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(prune_orphan_attempts(&db).await.unwrap(), 2);
+        let left: Vec<String> =
+            sqlx::query_scalar("SELECT topic_key FROM feynman_attempts ORDER BY id")
+                .fetch_all(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(left, ["concept:k1", "range:v1:0"]);
     }
 }

@@ -413,6 +413,13 @@ async fn replace_course_concepts_on_connection(
     explanations: &HashMap<String, ConceptExplanation>,
 ) -> AppResult<()> {
     let now = chrono::Utc::now().timestamp_millis();
+    // 重新分析会给每个概念换一个新 uuid。先把旧的 id→名字 记下来，
+    // 插完新的再按同名把费曼复述记录迁过去——否则用户「已能讲清」的记录全变成孤儿。
+    let previous: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, name FROM concepts WHERE course_id=?")
+            .bind(course_id)
+            .fetch_all(&mut *connection)
+            .await?;
     sqlx::query(
         "DELETE FROM concept_occurrences
          WHERE concept_id IN (SELECT id FROM concepts WHERE course_id=?)",
@@ -424,6 +431,7 @@ async fn replace_course_concepts_on_connection(
         .bind(course_id)
         .execute(&mut *connection)
         .await?;
+    let mut by_name: HashMap<String, String> = HashMap::new();
     for c in merged {
         let id = Uuid::new_v4().to_string();
         // 解释按归一化名匹配（与分析阶段用同一份合并结果，名字一致）。
@@ -440,6 +448,7 @@ async fn replace_course_concepts_on_connection(
         .bind(now)
         .execute(&mut *connection)
         .await?;
+        by_name.insert(c.name.clone(), id.clone());
         for (video_id, start_ms) in &c.occurrences {
             sqlx::query(
                 "INSERT OR IGNORE INTO concept_occurrences(concept_id,video_id,start_ms)
@@ -450,6 +459,25 @@ async fn replace_course_concepts_on_connection(
             .bind(start_ms)
             .execute(&mut *connection)
             .await?;
+        }
+    }
+    for (old_id, name) in &previous {
+        let old_key = format!("concept:{old_id}");
+        match by_name.get(name) {
+            Some(new_id) => {
+                sqlx::query("UPDATE feynman_attempts SET topic_key=? WHERE topic_key=?")
+                    .bind(format!("concept:{new_id}"))
+                    .bind(&old_key)
+                    .execute(&mut *connection)
+                    .await?;
+            }
+            // 这一轮合并掉了这个知识点：它的复述记录已经没有对照的原文，直接清掉。
+            None => {
+                sqlx::query("DELETE FROM feynman_attempts WHERE topic_key=?")
+                    .bind(&old_key)
+                    .execute(&mut *connection)
+                    .await?;
+            }
         }
     }
     Ok(())
@@ -2323,6 +2351,65 @@ mod tests {
         assert_eq!(list[0].occurrences[0].video_title, "第一讲");
         assert_eq!(list[0].occurrences[1].video_title, "第二讲");
         assert_eq!(list[1].name, "乙概念");
+    }
+
+    #[tokio::test]
+    async fn reanalyzing_keeps_feynman_attempts_attached_to_the_same_concept_name() {
+        let db = fresh_db().await;
+        let course = create_course(&db, "c".into(), "/tmp/c".into())
+            .await
+            .unwrap();
+        let v1 = seed_video(&db, &course.id, "第一讲", 0).await;
+        replace_course_concepts(
+            &db,
+            &course.id,
+            &[
+                MergedConcept { name: "甲概念".into(), occurrences: vec![(v1.clone(), 1000)] },
+                MergedConcept { name: "乙概念".into(), occurrences: vec![(v1.clone(), 2000)] },
+            ],
+        )
+        .await
+        .unwrap();
+        let old: Vec<(String, String)> =
+            sqlx::query_as("SELECT id, name FROM concepts WHERE course_id=? ORDER BY name")
+                .bind(&course.id)
+                .fetch_all(&db.pool)
+                .await
+                .unwrap();
+        for (index, (id, _)) in old.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO feynman_attempts(id,topic_key,explanation,result_json,created_at)
+                 VALUES(?,?,'讲过了','{}',?)",
+            )
+            .bind(format!("a{index}"))
+            .bind(format!("concept:{id}"))
+            .bind(index as i64)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        }
+
+        // 重新分析：甲概念还在（换了新 id），乙概念被合并掉。
+        replace_course_concepts(
+            &db,
+            &course.id,
+            &[MergedConcept { name: "甲概念".into(), occurrences: vec![(v1, 1000)] }],
+        )
+        .await
+        .unwrap();
+
+        let new_id: String =
+            sqlx::query_scalar("SELECT id FROM concepts WHERE course_id=? AND name='甲概念'")
+                .bind(&course.id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        let keys: Vec<String> =
+            sqlx::query_scalar("SELECT topic_key FROM feynman_attempts ORDER BY id")
+                .fetch_all(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(keys, [format!("concept:{new_id}")], "同名的复述要迁到新 id，合并掉的删除");
     }
 
     #[tokio::test]
