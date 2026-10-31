@@ -7,24 +7,27 @@ import type { FeynmanResult } from "@/lib/types";
 
 export type MarkedPiece = { text: string; kind: "plain" | "covered" | "wrong"; note?: string };
 
-/** 引语对不上原文时，去掉首尾标点再找一次（模型照抄时常多一个句号）。 */
-function locate(text: string, quote: string, from: number): number {
+/** 在原文里找引语；对不上时去掉首尾标点再找一次（模型照抄时常多一个句号）。 */
+function findQuote(text: string, quote: string, from: number): { at: number; length: number } | null {
   const trimmed = quote.trim();
-  if (!trimmed) return -1;
+  if (!trimmed) return null;
   const exact = text.indexOf(trimmed, from);
-  if (exact >= 0) return exact;
+  if (exact >= 0) return { at: exact, length: trimmed.length };
   const loose = trimmed.replace(/^[\s，。、！？,.!?「」"“”]+|[\s，。、！？,.!?「」"“”]+$/g, "");
-  return loose.length >= 2 ? text.indexOf(loose, from) : -1;
+  if (loose.length < 2) return null;
+  const at = text.indexOf(loose, from);
+  return at >= 0 ? { at, length: loose.length } : null;
 }
 
 export function markExplanation(text: string, result: FeynmanResult): MarkedPiece[] {
   type Span = { start: number; end: number; kind: "covered" | "wrong"; note?: string };
   const spans: Span[] = [];
   const add = (quote: string, kind: Span["kind"], note?: string) => {
-    const at = locate(text, quote, 0);
-    if (at < 0) return;
-    const length = text.indexOf(quote.trim(), at) === at ? quote.trim().length : quote.trim().replace(/^[\s，。、！？,.!?「」"“”]+|[\s，。、！？,.!?「」"“”]+$/g, "").length;
-    const span = { start: at, end: at + length, kind, note };
+    // 同一句话可能被两个要点引用（复制粘贴式的引语）：先往后找，找不到再从头找。
+    const after = spans.length > 0 ? Math.max(...spans.map((span) => span.end)) : 0;
+    const found = findQuote(text, quote, after) ?? findQuote(text, quote, 0);
+    if (!found) return;
+    const span = { start: found.at, end: found.at + found.length, kind, note };
     // 讲错优先：和已有的讲对片段重叠时，讲错的那段盖过去。
     if (spans.some((other) => other.start < span.end && span.start < other.end)) {
       if (kind !== "wrong") return;
@@ -82,8 +85,44 @@ export function filledGaps(previous: FeynmanResult, current: FeynmanResult): str
     .filter((point) => current.covered.some((covered) => samePoint(point, covered.point)));
 }
 
-/** 覆盖率：讲到的要点 / 全部要点（讲到 + 漏掉）。 */
+/** 覆盖率：讲到的要点 / 全部要点（讲到 + 漏掉）。没有要点时返回 0，界面据此不画圆环。 */
 export function coverage(result: FeynmanResult): number {
   const total = result.covered.length + result.missed.length;
   return total === 0 ? 0 : result.covered.length / total;
+}
+
+/** 要点的总数：0 表示模型没给出要点（只说讲错了哪句），界面别显示 0/0。 */
+export function pointCount(result: FeynmanResult): number {
+  return result.covered.length + result.missed.length;
+}
+
+/**
+ * 复述草稿：讲了两三分钟、评估失败或者中途关掉对话框时，讲的内容不能丢。
+ * 按话题各存一份，讲成功（或点「再讲一遍」清空）就删掉。
+ */
+const DRAFT_PREFIX = "course-ai-feynman-draft:";
+
+export function readFeynmanDraft(topicKey: string): string {
+  try {
+    return localStorage.getItem(DRAFT_PREFIX + topicKey) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function writeFeynmanDraft(topicKey: string, text: string): void {
+  try {
+    if (text.trim()) localStorage.setItem(DRAFT_PREFIX + topicKey, text);
+    else localStorage.removeItem(DRAFT_PREFIX + topicKey);
+  } catch {
+    // 存不下只是关掉对话框后草稿没了，不影响这次评估。
+  }
+}
+
+export function clearFeynmanDraft(topicKey: string): void {
+  try {
+    localStorage.removeItem(DRAFT_PREFIX + topicKey);
+  } catch {
+    // 同上。
+  }
 }

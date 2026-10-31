@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { FeynmanResult } from "@/lib/types";
-import { coverage, filledGaps, markExplanation, samePoint } from "./feynman";
+import {
+  clearFeynmanDraft,
+  coverage,
+  filledGaps,
+  markExplanation,
+  readFeynmanDraft,
+  samePoint,
+  writeFeynmanDraft,
+} from "./feynman";
 
 const result = (over: Partial<FeynmanResult>): FeynmanResult => ({
   covered: [],
@@ -42,5 +50,33 @@ describe("feynman", () => {
     expect(filledGaps(previous, current)).toEqual(["学习率过大会震荡"]);
     expect(coverage(current)).toBe(0.5);
     expect(coverage(result({}))).toBe(0);
+  });
+
+  it("同一句话被两个要点引用时，第二处也要标到", () => {
+    const text = "先算梯度。先算梯度。再更新参数。";
+    const pieces = markExplanation(
+      text,
+      result({
+        covered: [
+          { point: "第一步", quote: "先算梯度。" },
+          { point: "第二步", quote: "先算梯度。" },
+        ],
+      }),
+    );
+    const covered = pieces.filter((piece) => piece.kind === "covered").map((piece) => piece.text);
+    expect(covered).toEqual(["先算梯度。", "先算梯度。"]);
+    expect(pieces.map((piece) => piece.text).join("")).toBe(text);
+  });
+
+  it("复述草稿按话题保存，讲成功 / 清空时删掉", () => {
+    const key = "concept:k1";
+    expect(readFeynmanDraft(key)).toBe("");
+    writeFeynmanDraft(key, "我理解的梯度下降是……");
+    expect(readFeynmanDraft(key)).toContain("梯度下降");
+    writeFeynmanDraft(key, "   ");
+    expect(readFeynmanDraft(key)).toBe("");
+    writeFeynmanDraft(key, "草稿");
+    clearFeynmanDraft(key);
+    expect(readFeynmanDraft(key)).toBe("");
   });
 });

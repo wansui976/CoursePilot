@@ -14,10 +14,19 @@ import {
   Square,
 } from "lucide-react";
 import { feynmanTopicKey, ipc } from "@/lib/ipc";
-import { coverage, filledGaps, markExplanation } from "@/lib/feynman";
+import {
+  clearFeynmanDraft,
+  coverage,
+  filledGaps,
+  markExplanation,
+  pointCount,
+  readFeynmanDraft,
+  writeFeynmanDraft,
+} from "@/lib/feynman";
 import { formatMs } from "@/lib/time";
 import type { FeynmanAttempt, FeynmanTopic } from "@/lib/types";
 import { canRecord, MAX_RECORDING_MS, useRecorder } from "@/lib/useRecorder";
+import { usePlayer } from "@/stores/player";
 import { Modal } from "@/ui/dialog";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
@@ -46,8 +55,16 @@ export function FeynmanDialog({
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const topicKey = feynmanTopicKey(topic);
+  // 打开就暂停：接下来的录音不能把正在讲的课一起录进去。
+  useEffect(() => {
+    usePlayer.getState().requestPause();
+  }, []);
   const [mode, setMode] = useState<"speak" | "type">(() => (canRecord() ? "speak" : "type"));
-  const [text, setText] = useState("");
+  // 讲完之前关掉对话框 / 评估失败时，讲的内容要还在：按话题存一份草稿。
+  const [text, setText] = useState(() => readFeynmanDraft(topicKey));
+  useEffect(() => {
+    writeFeynmanDraft(topicKey, text);
+  }, [topicKey, text]);
   const [attempt, setAttempt] = useState<FeynmanAttempt | null>(null);
   const history = useQuery({
     queryKey: ["feynman-attempts", topicKey],
@@ -67,8 +84,11 @@ export function FeynmanDialog({
     mutationFn: () => ipc.feynman.evaluate(topic, text),
     onSuccess: (result) => {
       setAttempt(result);
+      clearFeynmanDraft(topicKey);
       void queryClient.invalidateQueries({ queryKey: ["feynman-attempts", topicKey] });
       void queryClient.invalidateQueries({ queryKey: ["feynman-mastered"] });
+      // 仪表盘的汇总用的是另一个 key，不复用「mastered」的前缀。
+      void queryClient.invalidateQueries({ queryKey: ["feynman-mastery-summary"] });
     },
   });
 
@@ -252,7 +272,7 @@ function FeynmanResultView({
 }) {
   const { t } = useTranslation();
   const { result } = attempt;
-  const total = result.covered.length + result.missed.length;
+  const total = pointCount(result);
   const filled = previous ? filledGaps(previous.result, result) : [];
   const pieces = markExplanation(attempt.explanation, result);
   const [cards, setCards] = useState<"idle" | "saving" | "saved" | "failed">("idle");
@@ -271,15 +291,20 @@ function FeynmanResultView({
   return (
     <div className="mt-3 space-y-3">
       <div className="flex items-center gap-3">
-        <ProgressRing value={coverage(result)} size={52} stroke={5}>
-          <span className="text-xs font-semibold tabular-nums text-[var(--text-strong)]">
-            {result.covered.length}/{total}
-          </span>
-        </ProgressRing>
+        {/* 只有「讲错了哪句」、没有要点的复述：别显示 0/0 这种像出错的数字。 */}
+        {total > 0 && (
+          <ProgressRing value={coverage(result)} size={52} stroke={5}>
+            <span className="text-xs font-semibold tabular-nums text-[var(--text-strong)]">
+              {result.covered.length}/{total}
+            </span>
+          </ProgressRing>
+        )}
         <div className="min-w-0">
-          <p className="text-sm font-medium text-[var(--text-strong)]">
-            {t("feynman.coverage", { count: result.covered.length, total })}
-          </p>
+          {total > 0 && (
+            <p className="text-sm font-medium text-[var(--text-strong)]">
+              {t("feynman.coverage", { count: result.covered.length, total })}
+            </p>
+          )}
           {result.comment && <p className="ca-prose text-xs text-[var(--text-muted)]">{result.comment}</p>}
           {filled.length > 0 && (
             <p className="mt-0.5 text-xs font-medium text-[var(--status-ok)]">
@@ -334,7 +359,7 @@ function FeynmanResultView({
           ))}
         </ul>
       )}
-      {result.missed.length === 0 && result.wrong.length === 0 && (
+      {total > 0 && result.missed.length === 0 && result.wrong.length === 0 && (
         <p className="flex items-center gap-1.5 text-sm text-[var(--status-ok)]">
           <CircleCheck className="h-4 w-4" />
           {t("feynman.allClear")}

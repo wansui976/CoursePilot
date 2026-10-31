@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FeynmanAttempt } from "@/lib/types";
+import { usePlayer } from "@/stores/player";
 import { FeynmanDialog } from "./FeynmanDialog";
 
 const { mockIpc } = vi.hoisted(() => ({
@@ -33,12 +34,12 @@ const attempt = (over: Partial<FeynmanAttempt["result"]> = {}, explanation = "�
 
 function renderDialog() {
   const handlers = { onClose: vi.fn(), onOpenAt: vi.fn(), onGuide: vi.fn() };
-  render(
+  const rendered = render(
     <QueryClientProvider client={new QueryClient()}>
       <FeynmanDialog topic={{ kind: "concept", concept_id: "k1" }} title="梯度下降" cardVideoId="v3" {...handlers} />
     </QueryClientProvider>,
   );
-  return handlers;
+  return { ...handlers, unmount: rendered.unmount };
 }
 
 async function explain(text: string) {
@@ -51,9 +52,29 @@ async function explain(text: string) {
 describe("FeynmanDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     mockIpc.feynman.attempts.mockResolvedValue([]);
     mockIpc.feynman.evaluate.mockResolvedValue(attempt());
     mockIpc.srs.addCard.mockResolvedValue("c1");
+  });
+
+  it("打开对话框先请求暂停播放：不能把正在讲的课录进麦克风", () => {
+    const before = usePlayer.getState().pauseRequest;
+    renderDialog();
+    expect(usePlayer.getState().pauseRequest).toBe(before + 1);
+  });
+
+  it("没提交就关掉对话框：讲稿按话题留着，再打开还在", async () => {
+    const first = renderDialog();
+    fireEvent.change(await screen.findByLabelText("你讲的内容"), {
+      target: { value: "我理解的梯度下降是每次沿着负梯度走一小步" },
+    });
+    first.unmount();
+
+    renderDialog();
+    expect(await screen.findByLabelText("你讲的内容")).toHaveValue(
+      "我理解的梯度下降是每次沿着负梯度走一小步",
+    );
   });
 
   it("打字讲一遍 → 看到覆盖率、讲错与漏掉的点，点回看跳到原片", async () => {

@@ -50,6 +50,10 @@ export function useRecorder() {
   const frameRef = useRef(0);
   const startedAtRef = useRef(0);
   const resolveRef = useRef<((dataUrl: string | null) => void) | null>(null);
+  /** 正在等 getUserMedia：先占位，避免权限弹窗期间并发两路流。 */
+  const startingRef = useRef(false);
+  /** 组件还在不在：权限弹窗期间关掉对话框时，拿到的流要立刻还回去。 */
+  const mountedRef = useRef(true);
   /** 到三分钟自动停下时没人在等 stop()：录到的东西放在这里，调用方取走。 */
   const [autoClip, setAutoClip] = useState<string | null>(null);
 
@@ -63,83 +67,115 @@ export function useRecorder() {
   }, []);
 
   useEffect(
-    () => () => {
-      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
-      teardown();
+    () => {
+      mountedRef.current = true;
+      return () => {
+        mountedRef.current = false;
+        if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+        teardown();
+      };
     },
     [teardown],
   );
 
   const start = useCallback(async () => {
+    // 权限弹窗可能停留好几秒，这期间再点一次不能再起一路 getUserMedia。
+    if (startingRef.current) return;
     if (!canRecord()) {
       setState({ status: "error", reason: "unavailable" });
       return;
     }
-    let stream: MediaStream;
+    startingRef.current = true;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (error) {
-      const name = (error as DOMException)?.name;
-      setState({
-        status: "error",
-        reason: name === "NotAllowedError" || name === "SecurityError" ? "denied" : "unavailable",
-      });
-      return;
-    }
-    streamRef.current = stream;
-    const mimeType = pickMimeType((type) => MediaRecorder.isTypeSupported?.(type) ?? false);
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-    };
-    recorder.onstop = () => {
-      teardown();
-      const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
-      const resolve = resolveRef.current;
-      resolveRef.current = null;
-      setState({ status: "idle" });
-      if (blob.size === 0) {
-        resolve?.(null);
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (error) {
+        if (!mountedRef.current) return;
+        const name = (error as DOMException)?.name;
+        setState({
+          status: "error",
+          reason: name === "NotAllowedError" || name === "SecurityError" ? "denied" : "unavailable",
+        });
         return;
       }
-      blobToDataUrl(blob).then(
-        (url) => (resolve ? resolve(url) : setAutoClip(url)),
-        () => resolve?.(null),
-      );
-    };
-    recorderRef.current = recorder;
-
-    // 波形：分析器取音量，每帧推一格。拿不到 AudioContext 也照样录，只是没有波形。
-    try {
-      const context = new AudioContext();
-      audioContextRef.current = context;
-      const analyser = context.createAnalyser();
-      analyser.fftSize = 256;
-      context.createMediaStreamSource(stream).connect(analyser);
-      const buffer = new Uint8Array(analyser.fftSize);
-      let lastPush = 0;
-      const tick = (now: number) => {
-        analyser.getByteTimeDomainData(buffer);
-        let peak = 0;
-        for (const value of buffer) peak = Math.max(peak, Math.abs(value - 128) / 128);
-        const elapsed = Date.now() - startedAtRef.current;
-        if (now - lastPush > 80) {
-          lastPush = now;
-          setLevels((current) => [...current.slice(1), Math.min(1, peak * 1.6)]);
-          setState({ status: "recording", elapsedMs: elapsed });
-        }
-        if (elapsed >= MAX_RECORDING_MS && recorder.state === "recording") recorder.stop();
-        frameRef.current = requestAnimationFrame(tick);
+      // 权限弹窗期间对话框已经关了，或者已经有一段在录：把刚拿到的流还回去，
+      // 否则这段麦克风没人 stop，会一直亮着。
+      if (!mountedRef.current || recorderRef.current?.state === "recording") {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      streamRef.current = stream;
+      const mimeType = pickMimeType((type) => MediaRecorder.isTypeSupported?.(type) ?? false);
+      let recorder: MediaRecorder;
+      try {
+        recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      } catch {
+        // 编码不支持时别把流留在那儿。
+        stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        if (mountedRef.current) setState({ status: "error", reason: "failed" });
+        return;
+      }
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
       };
-      frameRef.current = requestAnimationFrame(tick);
-    } catch {
-      // 没有波形不影响录音。
-    }
+      recorder.onstop = () => {
+        teardown();
+        if (recorderRef.current === recorder) recorderRef.current = null;
+        const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
+        const resolve = resolveRef.current;
+        resolveRef.current = null;
+        if (!mountedRef.current) {
+          resolve?.(null);
+          return;
+        }
+        setState({ status: "idle" });
+        if (blob.size === 0) {
+          resolve?.(null);
+          return;
+        }
+        blobToDataUrl(blob).then(
+          (url) => (resolve ? resolve(url) : setAutoClip(url)),
+          () => resolve?.(null),
+        );
+      };
+      recorderRef.current = recorder;
 
-    startedAtRef.current = Date.now();
-    recorder.start(1000);
-    setState({ status: "recording", elapsedMs: 0 });
+      // 波形：分析器取音量，每帧推一格。拿不到 AudioContext 也照样录，只是没有波形。
+      try {
+        const context = new AudioContext();
+        audioContextRef.current = context;
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 256;
+        context.createMediaStreamSource(stream).connect(analyser);
+        const buffer = new Uint8Array(analyser.fftSize);
+        let lastPush = 0;
+        const tick = (now: number) => {
+          analyser.getByteTimeDomainData(buffer);
+          let peak = 0;
+          for (const value of buffer) peak = Math.max(peak, Math.abs(value - 128) / 128);
+          const elapsed = Date.now() - startedAtRef.current;
+          if (now - lastPush > 80) {
+            lastPush = now;
+            setLevels((current) => [...current.slice(1), Math.min(1, peak * 1.6)]);
+            setState({ status: "recording", elapsedMs: elapsed });
+          }
+          if (elapsed >= MAX_RECORDING_MS && recorder.state === "recording") recorder.stop();
+          frameRef.current = requestAnimationFrame(tick);
+        };
+        frameRef.current = requestAnimationFrame(tick);
+      } catch {
+        // 没有波形不影响录音。
+      }
+
+      startedAtRef.current = Date.now();
+      recorder.start(1000);
+      setState({ status: "recording", elapsedMs: 0 });
+    } finally {
+      startingRef.current = false;
+    }
   }, [teardown]);
 
   /** 停止录音，交出录到的 data URL（没录到东西返回 null）。 */
