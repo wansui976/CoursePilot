@@ -16,12 +16,12 @@ const segments = [
   { start_ms: 300_000, end_ms: 330_000, kind: "repeat", level: 3, reason: "" },
 ];
 
-function setup(maxRate?: number) {
+function setup(maxRate?: number, baseRate?: number) {
   const client = new QueryClient();
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  return renderHook(() => useHighlights("v1", { maxRate }), { wrapper });
+  return renderHook(() => useHighlights("v1", { maxRate, baseRate }), { wrapper });
 }
 
 function fakeVideo(currentTime: number) {
@@ -83,5 +83,30 @@ describe("useHighlights", () => {
     await waitFor(() => expect(result.current.available).toBe(true));
     expect(result.current.handleTimeUpdate(fakeVideo(65))).toBe(false);
     expect(result.current.rateFor(70_000)).toBeNull();
+  });
+
+  it("跳过档：手动拖进水分段时放过这一整段，别把「后退」弹回去", async () => {
+    useHighlightPrefs.setState({ mode: "skip" });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.available).toBe(true));
+
+    // 用户拖进度条 / 按 ← 落到 65s：播放器在 onSeeking 里 noteSeek。
+    act(() => result.current.noteSeek());
+    const seeked = fakeVideo(65);
+    expect(result.current.handleTimeUpdate(seeked)).toBe(false);
+    expect(seeked.currentTime).toBe(65);
+    // 继续在这一段里播：仍然放行，直到段尾。
+    expect(result.current.handleTimeUpdate(fakeVideo(70))).toBe(false);
+    // 离开这一段之后恢复跳过：下一次自然播进新的水分段照跳。
+    expect(result.current.handleTimeUpdate(fakeVideo(200))).toBe(false);
+  });
+
+  it("快放档：基础倍速已经比快放档快时不降速，也不冒充「快放中」", async () => {
+    useHighlightPrefs.setState({ mode: "fast", strength: 3 });
+    // 用户本来就开着 2x + 智能倍速 1.5 → 有效 3x，快放档只有 2.5x。
+    const { result } = setup(undefined, 3);
+    await waitFor(() => expect(result.current.available).toBe(true));
+    expect(result.current.rateFor(70_000)).toBeNull();
+    expect(result.current.notice).toBeNull();
   });
 });

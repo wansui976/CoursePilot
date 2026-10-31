@@ -112,6 +112,15 @@ export function VideoPlayer({
     if (!videoId) return;
     return () => syncPlaybackProgress(videoId);
   }, [videoId]);
+  // 费曼复述要录音：打开对话框时先暂停，免得麦克风把正在讲的课录进去。
+  // 以挂载时的值为基准：对话框是在别的页面打开的（播放器没挂载）时，不该等视频一打开就暂停。
+  const pauseRequest = usePlayer((s) => s.pauseRequest);
+  const handledPauseRef = useRef(pauseRequest);
+  useEffect(() => {
+    if (pauseRequest === handledPauseRef.current) return;
+    handledPauseRef.current = pauseRequest;
+    ref.current?.pause();
+  }, [pauseRequest]);
   // 父组件每次渲染都传一个新的内联回调；放进 ref，免得轮询跟着父组件重渲染一遍遍重启。
   const onTranscodedRef = useRef(onTranscoded);
   onTranscodedRef.current = onTranscoded;
@@ -221,8 +230,12 @@ export function VideoPlayer({
     maxEffectiveRate: applePlaybackEngine ? APPLE_MAX_PLAYBACK_RATE : undefined,
   });
   // 精华压缩版：水分段快放或跳过（优先级：跳过 > 快放 > 智能倍速）。
+  // 传入有效倍速：基础倍速已经比快放档快时，快放档不能把它降下来。
   const highlights = useHighlights(videoId, {
     maxRate: applePlaybackEngine ? APPLE_MAX_PLAYBACK_RATE : undefined,
+    baseRate: applePlaybackEngine
+      ? Math.min(APPLE_MAX_PLAYBACK_RATE, rate * smartRate.multiplier)
+      : rate * smartRate.multiplier,
   });
   const { rateFor: highlightRateFor, mode: highlightMode, segments: highlightSegments } = highlights;
   const effectiveRate = applePlaybackEngine
@@ -591,7 +604,11 @@ export function VideoPlayer({
             // 一开始跳转就把时间改成目标位置，不等跳转完成：没缓冲到的位置要先拉一段数据，
             // Android 上常要一两秒，这期间进度条会弹回原处、时间还是旧的，此时点「标记起点」
             // 记下的也是旧时间。所有跳转（拖进度条、快进快退、点章节 / 文稿）都经过这里。
-            onSeeking={(event) => setCurrentMs(Math.floor(event.currentTarget.currentTime * 1000))}
+            onSeeking={(event) => {
+              setCurrentMs(Math.floor(event.currentTarget.currentTime * 1000));
+              // 用户自己选了位置：跳过档这一帧不要把他弹走（连按后退才退得回去）。
+              highlights.noteSeek();
+            }}
             onTimeUpdate={(event) => {
               // 精华版跳过档、跳停顿：落在要跳的区间里就直接跃过去，跳完这一轮不再按旧位置记进度。
               if (highlights.handleTimeUpdate(event.currentTarget)) return;
@@ -811,15 +828,20 @@ export function VideoPlayer({
               skipSilenceAvailable={silenceSkip.available}
               skipSilenceLoading={silenceSkip.loading}
               skipRanges={silenceSkip.ranges}
-              highlights={{
-                available: highlights.available,
-                generating: highlights.generating,
-                generateError: highlights.generateError,
-                mode: highlights.mode,
-                strength: highlights.strength,
-                savedMs: highlights.savedMs(effectiveRate),
-                onGenerate: highlights.generate,
-              }}
+              // 还没有文稿就没什么可标的：整节不显示，别让用户点了生成才收到一条失败提示。
+              highlights={
+                segments.length > 0
+                  ? {
+                      available: highlights.available,
+                      generating: highlights.generating,
+                      generateError: highlights.generateError,
+                      mode: highlights.mode,
+                      strength: highlights.strength,
+                      savedMs: highlights.savedMs(effectiveRate),
+                      onGenerate: highlights.generate,
+                    }
+                  : undefined
+              }
               cropOn={cropOn}
               cropInsets={cropInsets}
               fullscreen={fullscreen}
