@@ -1843,6 +1843,9 @@
     "title": "Explain it: {{topic}}",
     "entry": "Explain it to me",
     "entryChapter": "Explain it: {{title}}",
+    "entryChapters": "Feynman explanation",
+    "chapterPickerTitle": "Feynman explanation",
+    "chapterPickerHint": "Pick a chapter and explain it in your own words. I'll compare it with the captions and show what you missed.",
     "prompt": "Explain “{{topic}}” as if to a classmate who hasn't learned it. I'll compare it with the course and show what you covered and missed.",
     "tapToSpeak": "Tap to start, tap again when you're done",
     "recording": "Listening {{elapsed}} / {{max}}",
@@ -1875,6 +1878,7 @@
     "cardFront": "In your own words: {{point}}",
     "chapterEndText": "Finished “{{chapter}}”? Explain it in your own words?",
     "chapterEndAction": "Explain it",
+    "chapterEndNever": "Don't ask again",
     "guideMe": "Guide me through my mistakes",
     "guidePrompt": "When explaining “{{topic}}” I got this wrong: {{wrong}}. Don't tell me the answer — guide me step by step to see where I went wrong.",
     "masteredBadge": "Can explain"

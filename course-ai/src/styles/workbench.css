@@ -728,34 +728,3 @@ li[data-active] > .ca-chapter .ca-chapter-time {
 .ca-transcript-filler .ca-transcript-text {
   opacity: 0.55;
 }
-
-/* 章节行尾的「讲给我听」：平时收起，悬停 / 键盘聚焦时浮出；触屏没有悬停，常显。 */
-.ca-chapter-feynman {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  color: var(--text-muted);
-  opacity: 0;
-  transition: opacity var(--dur-fast);
-}
-
-.ca-chapter-timeline > li:hover .ca-chapter-feynman,
-.ca-chapter-feynman:focus-visible {
-  opacity: 1;
-}
-
-.ca-chapter-feynman:hover {
-  color: var(--accent-text);
-  background: var(--surface-card-hover);
-}
-
-@media (hover: none) {
-  .ca-chapter-feynman {
-    opacity: 1;
-  }
-}

@@ -31,6 +31,7 @@ describe("ChapterFeynmanPrompt", () => {
   beforeEach(() => {
     useFeynman.setState({ request: null });
     usePlayer.setState({ videoId: "v1", currentMs: 9_000, durationMs: 20_000 });
+    localStorage.clear();
   });
 
   it("offers Explain it when playback naturally reaches the chapter end", () => {
@@ -55,14 +56,47 @@ describe("ChapterFeynmanPrompt", () => {
     expect(screen.queryByText(/讲完了/)).not.toBeInTheDocument();
   });
 
-  it("shows at most once per chapter", () => {
-    render(<ChapterFeynmanPrompt videoId="v1" chapters={chapters} />);
+  it("shows at most once per video, even across remounts", () => {
+    const first = render(<ChapterFeynmanPrompt videoId="v1" chapters={chapters} />);
     act(() => usePlayer.setState({ currentMs: 10_500 }));
     expect(screen.getByText(/「开场」讲完了/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
 
-    act(() => usePlayer.setState({ currentMs: 10_600 }));
-    act(() => usePlayer.setState({ currentMs: 10_700 }));
+    // 同一视频的下一章自然播完，也不再打扰。
+    act(() => usePlayer.setState({ currentMs: 19_500 }));
+    act(() => usePlayer.setState({ currentMs: 20_050 }));
+    expect(screen.queryByText(/讲完了/)).not.toBeInTheDocument();
+
+    first.unmount();
+    usePlayer.setState({ currentMs: 9_000 });
+    render(<ChapterFeynmanPrompt videoId="v1" chapters={chapters} />);
+    act(() => usePlayer.setState({ currentMs: 10_500 }));
     expect(screen.queryByText(/「开场」讲完了/)).not.toBeInTheDocument();
+  });
+
+  it("a different video gets its own single prompt", () => {
+    const first = render(<ChapterFeynmanPrompt videoId="v1" chapters={chapters} />);
+    act(() => usePlayer.setState({ currentMs: 10_500 }));
+    first.unmount();
+
+    usePlayer.setState({ currentMs: 9_000 });
+    render(<ChapterFeynmanPrompt videoId="v2" chapters={chapters} />);
+    act(() => usePlayer.setState({ currentMs: 10_500 }));
+    expect(screen.getByText(/「开场」讲完了/)).toBeInTheDocument();
+  });
+
+  it("不再提示 permanently turns the prompt off", () => {
+    const first = render(<ChapterFeynmanPrompt videoId="v1" chapters={chapters} />);
+    act(() => usePlayer.setState({ currentMs: 10_500 }));
+    fireEvent.click(screen.getByRole("button", { name: "不再提示" }));
+    expect(screen.queryByText(/讲完了/)).not.toBeInTheDocument();
+    first.unmount();
+
+    // 换一个从没提示过的视频，也不应再出现。
+    usePlayer.setState({ currentMs: 9_000 });
+    render(<ChapterFeynmanPrompt videoId="v2" chapters={chapters} />);
+    act(() => usePlayer.setState({ currentMs: 10_500 }));
+    expect(screen.queryByText(/讲完了/)).not.toBeInTheDocument();
+    expect(localStorage.getItem("course-ai-feynman-chapter-prompt-off")).toBe("1");
   });
 });

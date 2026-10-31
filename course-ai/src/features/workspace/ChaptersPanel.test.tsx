@@ -1,11 +1,11 @@
 import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChaptersPanel } from "./ChaptersPanel";
 
-const { mockIpc, player } = vi.hoisted(() => ({
+const { mockIpc, player, feynman } = vi.hoisted(() => ({
   mockIpc: {
     ai: {
       getChapters: vi.fn(),
@@ -13,9 +13,13 @@ const { mockIpc, player } = vi.hoisted(() => ({
     },
   },
   player: { requestSeek: vi.fn() },
+  feynman: { open: vi.fn() },
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
+vi.mock("@/stores/feynman", () => ({
+  useFeynman: { getState: () => feynman },
+}));
 vi.mock("@/stores/player", () => {
   const usePlayer = (selector: (s: typeof player) => unknown) => selector(player);
   usePlayer.getState = () => player;
@@ -41,6 +45,8 @@ describe("ChaptersPanel", () => {
     mockIpc.ai.getChapters.mockReset();
     mockIpc.ai.generate.mockReset();
     player.requestSeek.mockReset();
+    feynman.open.mockReset();
+    localStorage.clear();
   });
 
   it("shows a loading skeleton instead of the empty state while chapters load", () => {
@@ -74,6 +80,28 @@ describe("ChaptersPanel", () => {
     await waitFor(() => {
       expect(player.requestSeek).toHaveBeenCalledWith(5000);
     });
+  });
+
+  it("offers one text button to pick a chapter instead of a mic on every chapter", async () => {
+    mockIpc.ai.getChapters.mockResolvedValue([
+      { id: "c1", start_ms: 0, end_ms: 10_000, title: "开场", summary: "介绍" },
+      { id: "c2", start_ms: 10_000, end_ms: 20_000, title: "第二讲", summary: "继续" },
+    ]);
+    renderChaptersPanel();
+
+    const entry = await screen.findByRole("button", { name: "费曼复述" });
+    expect(screen.getAllByRole("button", { name: "费曼复述" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /讲给我听/ })).not.toBeInTheDocument();
+
+    fireEvent.click(entry);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /第二讲/ }));
+
+    expect(feynman.open).toHaveBeenCalledWith(
+      { kind: "range", video_id: "video-1", start_ms: 10_000, end_ms: 20_000, title: "第二讲" },
+      "第二讲",
+      "video-1",
+    );
   });
 
   it("shows a retryable read error instead of the empty state or generation entry", async () => {

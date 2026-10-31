@@ -2,10 +2,11 @@ import { useState } from "react";
 import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Mic } from "lucide-react";
+import { ChevronDown, GraduationCap } from "lucide-react";
 import { useFeynman } from "@/stores/feynman";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
+import { Modal } from "@/ui/dialog";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { PanelEmptyState } from "@/ui/empty-state";
 import { TextSkeleton } from "@/ui/skeleton";
@@ -45,6 +46,7 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
   const requestSeek = usePlayer((s) => s.requestSeek);
   const [collapsed, setCollapsed] = useState(loadCollapsed);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const {
     data: chapters = [],
     isLoading,
@@ -57,6 +59,21 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
   const activeIndex = usePlayer((s) =>
     s.videoId === videoId ? activeChapterIndex(chapters, s.currentMs) : -1,
   );
+
+  const explainChapter = (chapter: (typeof chapters)[number]) => {
+    setPickerOpen(false);
+    useFeynman.getState().open(
+      {
+        kind: "range",
+        video_id: videoId,
+        start_ms: chapter.start_ms,
+        end_ms: chapter.end_ms,
+        title: chapter.title,
+      },
+      chapter.title,
+      videoId,
+    );
+  };
 
   return (
     // 收回后只剩标题条（shrink-0 + mt-auto 贴底），整块高度让给上方摘要；
@@ -95,6 +112,19 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
       {!collapsed && !isError && (
         <PanelActions
           inline
+          leading={
+            chapters.length > 0 ? (
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                aria-expanded={pickerOpen}
+                onClick={() => setPickerOpen(true)}
+                className="ca-touch-44 whitespace-nowrap rounded-md px-1.5 py-1 text-xs font-medium text-[var(--accent-text)] transition hover:bg-[var(--surface-card-hover)]"
+              >
+                {t("feynman.entryChapters")}
+              </button>
+            ) : undefined
+          }
           onRegenerate={generate.start}
           regenerating={generate.isPending}
           hasContent={chapters.length > 0}
@@ -139,28 +169,43 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
                     <span className="ca-chapter-title">{c.title}</span>
                     {c.summary && <span className="ca-chapter-summary ca-prose">{c.summary}</span>}
                   </button>
-                  {/* 费曼复述：讲完一章，用自己的话讲一遍。悬停 / 聚焦时浮出，触屏常显。 */}
-                  <button
-                    type="button"
-                    aria-label={t("feynman.entryChapter", { title: c.title })}
-                    title={t("feynman.entryChapter", { title: c.title })}
-                    onClick={() =>
-                      useFeynman.getState().open(
-                        { kind: "range", video_id: videoId, start_ms: c.start_ms, end_ms: c.end_ms, title: c.title },
-                        c.title,
-                        videoId,
-                      )
-                    }
-                    className="ca-chapter-feynman ca-touch-44"
-                  >
-                    <Mic className="h-3.5 w-3.5" />
-                  </button>
                 </li>
               ))}
             </ol>
           )}
         </div>
       )}
+      <Modal
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        title={t("feynman.chapterPickerTitle")}
+        icon={<GraduationCap className="h-4 w-4 text-[var(--accent-text)]" />}
+        size="md"
+      >
+        <p className="mt-2 text-sm text-[var(--text-muted)]">{t("feynman.chapterPickerHint")}</p>
+        <div className="mt-3 max-h-[60vh] space-y-1 overflow-y-auto">
+          {chapters.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => explainChapter(c)}
+              className="ca-touch-44 flex w-full items-start gap-3 rounded-lg px-2 py-2 text-left transition hover:bg-[var(--surface-card-hover)]"
+            >
+              <span className="ca-tabular flex-none pt-0.5 text-xs text-[var(--text-faint)]">
+                {formatMs(c.start_ms)}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-[var(--text-strong)]">{c.title}</span>
+                {c.summary && (
+                  <span className="mt-0.5 block text-xs leading-relaxed text-[var(--text-muted)]">
+                    {c.summary}
+                  </span>
+                )}
+              </span>
+            </button>
+          ))}
+        </div>
+      </Modal>
     </div>
   );
 }

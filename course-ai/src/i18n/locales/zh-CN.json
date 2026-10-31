@@ -1836,6 +1836,9 @@
     "title": "讲给我听：{{topic}}",
     "entry": "讲给我听",
     "entryChapter": "讲给我听：{{title}}",
+    "entryChapters": "费曼复述",
+    "chapterPickerTitle": "费曼复述",
+    "chapterPickerHint": "选一章，用自己的话讲一遍，我会对照字幕告诉你漏了什么。",
     "prompt": "假装在给一个没学过的同学讲「{{topic}}」。讲完我会对照课程，告诉你讲到了什么、漏了什么。",
     "tapToSpeak": "点一下开始讲，讲完再点一下",
     "recording": "正在听 {{elapsed}} / {{max}}",
@@ -1868,6 +1871,7 @@
     "cardFront": "用自己的话讲讲：{{point}}",
     "chapterEndText": "「{{chapter}}」讲完了，用自己的话讲一遍？",
     "chapterEndAction": "讲一讲",
+    "chapterEndNever": "不再提示",
     "guideMe": "讲错的地方引导我改",
     "guidePrompt": "我在复述「{{topic}}」时这样讲错了：{{wrong}}。别直接告诉我答案，一步步引导我想明白错在哪。",
     "masteredBadge": "已能讲清"
