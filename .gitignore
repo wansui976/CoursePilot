@@ -1,59 +1,125 @@
-# OS
+# =============================================================================
+# CoursePilot — 不入库清单
+#
+# 判断标准只有四条：
+#   1. 可再生成（依赖、编译产物）      2. 只对本机有意义（编辑器、个人配置）
+#   3. 含隐私 / 凭据（cookie、env）    4. 大二进制（安装包、视频、模型）
+# 需要全队共享的配置用 ! 显式放行，例如 course-ai/.vscode/extensions.json。
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. 操作系统 / 编辑器
+# -----------------------------------------------------------------------------
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+**/.vscode/*
+!**/.vscode/extensions.json
+*.suo
+*.sw?
+*.swp
 
-# Tauri / Rust
-**/target/
-**/.cargo/
-
-# Node
+# -----------------------------------------------------------------------------
+# 2. Node / 前端
+# -----------------------------------------------------------------------------
 node_modules/
 .pnpm-store/
 dist/
 dist-ssr/
-
-# Vite
 .vite/
-
-# Editor
-.vscode/*
-!.vscode/extensions.json
-.idea/
-
-# Env / secrets
-.env
-.env.local
+coverage/
+*.local
 *.log
-*cookies*.txt
-*Cookies*.txt
 
-# App data
+# -----------------------------------------------------------------------------
+# 3. Rust / Tauri 编译产物
+# -----------------------------------------------------------------------------
+**/target/
+**/.cargo/
+
+# Tauri 自动生成，不要手改、不要入库
+course-ai/src-tauri/gen/schemas/
+course-ai/src-tauri/gen/android/app/src/main/**/generated/
+course-ai/src-tauri/ios/.tauri/
+
+# iOS / macOS 原生构建（Externals 由 pod install 重建，build 是 Xcode 产物）
+course-ai/src-tauri/gen/apple/build/
+course-ai/src-tauri/gen/apple/Externals/
+**/xcuserdata/
+
+# 应用运行数据
 .courseai/
 
-# Downloaded release sidecars
+# -----------------------------------------------------------------------------
+# 4. 下载 / 交叉编译的二进制（约 88 MB）
+# -----------------------------------------------------------------------------
+# ffmpeg / yt-dlp / whisper-cli 等 sidecar：由 CI 或脚本按需下载
 course-ai/src-tauri/binaries/*
 !course-ai/src-tauri/binaries/.gitkeep
 
-# dav1d 的 iOS 静态库（1.3MB，交叉编译产物）：按本仓库对二进制的惯例不入库，
-# 需要时用 course-ai/scripts/build-dav1d-ios.sh 生成。头文件照常入库。
+# dav1d iOS 静态库（约 1.3 MB）：course-ai/scripts/build-dav1d-ios.sh 生成，头文件照常入库
 course-ai/src-tauri/gen/apple/vendor/dav1d/lib/**/*.a
 
-# Local helper scripts
-course-ai/scripts/
+# -----------------------------------------------------------------------------
+# 5. 安装包 / 发布产物 —— 一律走 GitHub Releases
+# -----------------------------------------------------------------------------
+*.ipa
+*.dmg
+*.msi
+*.apk
+*.aab
+*.AppImage
+*.deb
+*.rpm
+release/
+exports/
 
-# Local Codex/Superpowers scratch state
+# -----------------------------------------------------------------------------
+# 6. 凭据 / 隐私（公开仓库最容易出事的一类）
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*_cookies*.txt
+*cookies*.txt
+*Cookies*.txt
+*.pem
+*.p12
+*.mobileprovision
+*.keystore
+*.jks
+
+# -----------------------------------------------------------------------------
+# 7. 本地 AI 工具状态 / 个人草稿
+# -----------------------------------------------------------------------------
+.claude/
+**/.claude/
+# 若要共享 Claude 配置，改用 .claude/settings.json 或 .mcp.json，并给上面两条加例外
+.superpowers/
 **/.superpowers/
 .worktrees/
-
-# Local resume drafts
-CoursePilot-项目简历.md
-
-# 设计文档与实施计划：本地留存，不进仓库
-docs/
-
-# Local AI session metadata / scratch
+.trae/
 deepseek.json
-course-ai/src-tauri/.claude/
+zcode_export/
+zcode_export.py
 
-# Claude Code 本地权限配置（个人、按机器）
-.claude/settings.local.json
+# -----------------------------------------------------------------------------
+# 8. 本地实验 / 素材
+# -----------------------------------------------------------------------------
+# Remotion 宣传片（128 MB：渲染产物 69 MB + TTS 音频 57 MB），本地私有
+promo-video/
+# pnpm 界面截图输出
+course-ai/ui-shots/
+ui-shots-baseline/
+# 本地 Whisper 转写实验（含个人视频路径与逐字稿）
+transcripts/
+# 临时脚本；正式脚本 build-dav1d-ios.sh / reinstall-ios-ipa.sh 正常入库
+course-ai/scripts/local/
+
+# -----------------------------------------------------------------------------
+# 9. 设计文档 / 个人材料（本地留存；想公开时把 docs/ 改成 /docs/ 再单独决定）
+# -----------------------------------------------------------------------------
+docs/
+CoursePilot-项目简历.md
