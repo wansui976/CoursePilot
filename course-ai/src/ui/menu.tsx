@@ -82,8 +82,9 @@ export function Menu({
       data-sheet={sheet || undefined}
       className={cn("ca-menu", sheet ? "ca-menu-sheet" : className)}
       onKeyDown={handleKeyDown}
-      onPointerDown={sheet ? (event) => event.stopPropagation() : undefined}
       {...props}
+      // 展开在 props 之后：手机上必须截住 pointerdown，否则点菜单项会被当成「点外面」立刻关掉。
+      onPointerDown={sheet ? (event) => event.stopPropagation() : props.onPointerDown}
     >
       {children}
     </div>

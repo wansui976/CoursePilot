@@ -642,6 +642,7 @@ export function AssistantPanel({
     suggestedQuestion?: string,
     rememberQuestion = true,
     imagesOverride?: string[],
+    modeOverride?: "socratic" | null,
   ) {
     const fromInput = suggestedQuestion === undefined;
     const pendingImages = fromInput ? attachmentsRef.current : [];
@@ -666,6 +667,16 @@ export function AssistantPanel({
       setEditing(null);
     }
     const baseTurns = editedTurn ? turns.filter((turn) => turn.id !== editedTurn.id) : turns;
+    // 「重新回答 / 编辑重发」沿用那一轮原来的模式：用户已经开着引导问出来的回答，
+    // 重答时不该悄悄变成普通问答（反之亦然）；新提问才看当前开关。
+    const requestMode: "socratic" | null =
+      modeOverride !== undefined
+        ? modeOverride
+        : editedTurn
+          ? (editedTurn.mode ?? null)
+          : socratic
+            ? "socratic"
+            : null;
     // 防御：同一问题不该出现两个「处理中」回合（曾出现过一问题显示两条「正在整理结果」）。
     // 个别触发路径（如 Enter 与发送按钮竞态、重开面板残留）会重复创建 pending 回合，
     // 其中一条收尾、另一条永远卡在整理态。遇到已存在同问题的 pending 回合就不再重复发起。
@@ -726,7 +737,7 @@ export function AssistantPanel({
           actionResults: [],
           pending: true,
           context: { ...askContext },
-          ...(socratic ? { mode: "socratic" as const } : {}),
+          ...(requestMode === "socratic" ? { mode: "socratic" as const } : {}),
           ...(images.length > 0 ? { images, imageCount: images.length } : {}),
         },
       ].slice(-MAX_RENDERED_TURNS),
@@ -743,7 +754,7 @@ export function AssistantPanel({
         historyAtSend,
         requestId,
         stream.onEvent,
-        { images, profileId: modelProfileId, ...(socratic ? { mode: "socratic" as const } : {}) },
+        { images, profileId: modelProfileId, ...(requestMode === "socratic" ? { mode: "socratic" as const } : {}) },
       );
       if (!mountedRef.current) return;
       stream.flush();
@@ -905,7 +916,8 @@ export function AssistantPanel({
     historyRef.current = before;
     setHistory(before);
     setTurns((previous) => previous.filter((item) => item.id !== turn.id));
-    void send(turn.question, false, images);
+    // 原轮是引导模式就还按引导重答，别因为用户此刻关掉了开关而变成普通问答。
+    void send(turn.question, false, images, turn.mode ?? null);
   }
 
   /**
@@ -1461,7 +1473,8 @@ export function AssistantPanel({
               onExecutionStart={(id, actions) => beginActionExecution(id, actions, conversationEpoch)}
               onExecutionEnd={endActionExecution}
               onApplied={onActionApplied}
-              onPickReply={(reply) => void send(reply)}
+              // 点的是引导卡上的选项：这一轮必须继续走引导，哪怕用户刚把开关关掉。
+              onPickReply={(reply) => void send(reply, true, undefined, "socratic")}
               onMakeCard={makeGuidedCard}
             />
           </div>

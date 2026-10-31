@@ -214,7 +214,14 @@ export function AssistantTurn({
   const { t } = useTranslation();
   // 引导模式：回答末尾的结构块不显示原文，画成下面那张卡。
   const socratic = turn.mode === "socratic" ? splitSocratic(turn.answer) : null;
-  const shownAnswer = socratic ? socratic.text : turn.answer;
+  // 结构块坏了 / 还没闭合、正文又是空的：整轮不能变成空白，按普通回答显示原文。
+  const shownAnswer = socratic
+    ? socratic.text.trim() || socratic.block
+      ? socratic.text
+      : turn.answer
+    : turn.answer;
+  // 正文和结构块都没有：这一轮确实什么都没显示出来，得给一句提示和重试入口。
+  const nothingVisible = !shownAnswer.trim() && !socratic?.block;
 
   return (
     <div className="space-y-2">
@@ -306,7 +313,10 @@ export function AssistantTurn({
           {socratic?.block && !turn.pending && (
             <SocraticCard
               block={socratic.block}
-              interactive={isLast && !busy && !actionExecutionBusy && Boolean(onPickReply)}
+              cardKey={turn.id}
+              interactive={
+                isLast && !busy && !actionExecutionBusy && !editing && Boolean(onPickReply)
+              }
               canMakeCard={hasVideoContext && Boolean(onMakeCard)}
               onPick={(reply) => onPickReply?.(reply)}
               onSeek={(ms) => onSeek(turn, ms)}
@@ -402,14 +412,14 @@ export function AssistantTurn({
           一模一样，而它其实是查得太久被截断了，换个具体点的问法就能过去。
           正文空着的时候顺带把重新回答放在这儿：那排悬停按钮挂在回答上，
           恰恰是最需要重试的这种情况反而没有入口。 */}
-      {!turn.pending && (turn.hitTurnLimit || (!turn.answer && !turn.canceled)) && (
+      {!turn.pending && (turn.hitTurnLimit || (nothingVisible && !turn.canceled)) && (
         <div className="flex items-start gap-1.5 border-l-2 border-[var(--border-strong)] pl-2 ca-t-2xs text-[var(--text-muted)]">
           <span className="min-w-0 flex-1 break-words">
             {turn.hitTurnLimit
               ? t("assistant.turnLimitFallback")
               : t("assistant.emptyAnswerFallback")}
           </span>
-          {!turn.answer && isLast && (
+          {nothingVisible && isLast && (
             <Button
               size="sm"
               variant="ghost"

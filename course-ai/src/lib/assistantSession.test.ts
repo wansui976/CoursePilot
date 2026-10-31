@@ -67,6 +67,27 @@ describe("assistantSession", () => {
     expect(session.turns.map((turn) => turn.imageCount)).toEqual([undefined, undefined, 4]);
   });
 
+  it("引导模式跟着会话与轮次一起保存，坏值丢掉", () => {
+    const serialized = serializeAssistantSession({
+      turns: [
+        { id: "a", question: "q", answer: "a", actions: [], tools: [], canceled: false, actionResults: [], mode: "socratic" },
+        { id: "b", question: "q", answer: "a", actions: [], tools: [], canceled: false, actionResults: [] },
+      ],
+      history: [],
+      draft: "",
+      mode: "socratic",
+    });
+    const restored = deserializeAssistantSession(serialized);
+    expect(restored.mode).toBe("socratic");
+    expect(restored.turns.map((turn) => turn.mode)).toEqual(["socratic", undefined]);
+
+    const bad = deserializeAssistantSession(
+      JSON.stringify({ mode: "plain", turns: [{ id: "c", question: "q", answer: "a", mode: "whatever" }] }),
+    );
+    expect(bad.mode).toBeUndefined();
+    expect(bad.turns[0].mode).toBeUndefined();
+  });
+
   it("serializes and restores a session without depending on the fixed storage key", () => {
     const serialized = serializeAssistantSession(
       {

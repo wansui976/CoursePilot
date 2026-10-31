@@ -75,7 +75,13 @@ export function splitSocratic(answer: string): { text: string; block: SocraticBl
 
 /** 给人看的回答正文：引导模式去掉结构块（复制、存笔记、导出对话都用它）。 */
 export function visibleAnswer(turn: { answer: string; mode?: "socratic" }): string {
-  return turn.mode === "socratic" ? splitSocratic(turn.answer).text : turn.answer;
+  if (turn.mode !== "socratic") return turn.answer;
+  const { text, block } = splitSocratic(turn.answer);
+  if (text.trim()) return text;
+  // 结构块没闭合 / JSON 坏了：正文被剥空，但整段回答还在——复制空字符串最糟。
+  if (!block) return turn.answer;
+  // 只有结构、没有正文：把收尾的结论与要点当作可复制的正文。
+  return [block.answer ?? "", ...block.summary].filter(Boolean).join("\n");
 }
 
 /**

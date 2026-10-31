@@ -237,6 +237,8 @@ function useSheetDrag({ enabled, onDismiss }: { enabled: boolean; onDismiss: () 
       start.id = -1;
       const elapsed = Math.max(1, performance.now() - start.t);
       if (start.dy > SHEET_DISMISS_PX || start.dy / elapsed > SHEET_DISMISS_VELOCITY) {
+        // 先清掉 inline transform：退场动画从 translateY(0) 起播，带着拖动偏移会先弹回顶部再下滑。
+        setOffset(0, false);
         onDismiss();
         return;
       }

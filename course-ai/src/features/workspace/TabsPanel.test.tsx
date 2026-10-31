@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "@/lib/ipc";
 import { writeVideoResumeState } from "@/lib/resumeState";
 import { useNoteCapture } from "@/stores/noteCapture";
+import { useStudyNav } from "@/stores/studyNav";
 import { TabsPanel } from "./TabsPanel";
 
 vi.mock("./AiViewPanel", () => ({
@@ -44,6 +45,7 @@ function renderPanel(split = false) {
 describe("TabsPanel", () => {
   beforeEach(() => {
     localStorage.clear();
+    useStudyNav.setState({ request: null });
     transcriptPanel.mockClear();
     // 徽标 mock 归零：badge 测试里的 mockResolvedValue 会改写下游测试的 tab 可访问名。
     vi.mocked(ipc.ai.getQuiz).mockResolvedValue(null);
@@ -246,5 +248,26 @@ describe("TabsPanel", () => {
     );
 
     await waitFor(() => expect(transcriptPanel).toHaveBeenCalledTimes(1));
+  });
+
+  it("后台任务的请求落地后就被消费，不会把以后的打开钉在那一页", () => {
+    useStudyNav.getState().open("video-1", { tab: "transcript" });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <TabsPanel videoId="video-1" />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole("tab", { name: "文稿" })).toHaveAttribute("data-state", "active");
+    // 落地即消费：下次打开读的是用户记住的页签，不是这次任务的页签。
+    expect(useStudyNav.getState().request).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "笔记" }));
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <TabsPanel key="remount" videoId="video-1" />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole("tab", { name: "笔记" })).toHaveAttribute("data-state", "active");
   });
 });

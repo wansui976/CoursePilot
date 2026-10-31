@@ -66,4 +66,40 @@ describe("viewTransition", () => {
     expect(document.documentElement.dataset.vtNav).toBeUndefined();
     expect(stage?.style.viewTransitionName).toBe("");
   });
+
+  it("startViewTransition 同步抛错时照常导航，并清掉共享元素名", () => {
+    stubMatchMedia(false);
+    document.body.innerHTML = `<div data-vt-stage=""></div>`;
+    document.startViewTransition = () => {
+      throw new Error("boom");
+    };
+    const navigate = vi.fn();
+    transitionToLibrary(null, navigate);
+    expect(navigate).toHaveBeenCalledTimes(1);
+    const stage = document.querySelector<HTMLElement>("[data-vt-stage]");
+    expect(stage?.style.viewTransitionName).toBe("");
+    expect(document.documentElement.dataset.vtNav).toBeUndefined();
+  });
+
+  it("等不到目标 DOM 时按超时放行，不会把导航卡死", async () => {
+    vi.useFakeTimers();
+    try {
+      stubMatchMedia(false);
+      document.body.innerHTML = `<div data-vt-stage=""></div>`;
+      let update: (() => Promise<void>) | undefined;
+      // @ts-expect-error 测试替身：finished 永不落定，只能靠超时兜底
+      document.startViewTransition = (cb: () => Promise<void>) => {
+        update = cb;
+        return { finished: new Promise<void>(() => {}) };
+      };
+      const navigate = vi.fn();
+      transitionToLibrary(null, navigate);
+      const pending = update!();
+      await vi.advanceTimersByTimeAsync(600);
+      await pending;
+      expect(navigate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

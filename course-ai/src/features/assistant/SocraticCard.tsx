@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Eye, GraduationCap, Lightbulb, Plus } from "lucide-react";
+import { withClickableTimestamps } from "@/lib/clickableTimestamps";
+import { guidedCardSaved, markGuidedCardSaved } from "@/lib/guidedCards";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import type { SocraticBlock } from "./socratic";
 
@@ -14,6 +16,7 @@ export function SocraticCard({
   block,
   interactive,
   canMakeCard,
+  cardKey,
   onPick,
   onSeek,
   onMakeCard,
@@ -22,6 +25,8 @@ export function SocraticCard({
   interactive: boolean;
   /** 有视频上下文时才能建卡（复习卡挂在视频上）。 */
   canMakeCard: boolean;
+  /** 这一轮的 id：记住已经建过卡，切会话 / 重启后不重复建。 */
+  cardKey?: string;
   onPick: (reply: string) => void;
   onSeek: (ms: number) => void;
   onMakeCard: () => Promise<void>;
@@ -29,7 +34,11 @@ export function SocraticCard({
   const { t } = useTranslation();
   const [hintsShown, setHintsShown] = useState(0);
   const [answerShown, setAnswerShown] = useState(false);
-  const [cardState, setCardState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [cardState, setCardState] = useState<"idle" | "saving" | "saved" | "failed">(() =>
+    cardKey && guidedCardSaved(cardKey) ? "saved" : "idle",
+  );
+  // 只有「说着说着推出来了」才有东西可做卡：空总结 + 空结论建出来是一张空白卡。
+  const hasCardContent = block.summary.length > 0 || Boolean(block.answer);
 
   if (block.done) {
     return (
@@ -43,19 +52,22 @@ export function SocraticCard({
         </p>
         {block.summary.length > 0 && (
           <ol className="ca-prose mt-1.5 list-decimal space-y-1 pl-5 text-sm text-[var(--text-normal)]">
-            {block.summary.map((point) => (
-              <li key={point}>{point}</li>
+            {block.summary.map((point, index) => (
+              <li key={point}>{withClickableTimestamps(point, onSeek, `summary-${index}`)}</li>
             ))}
           </ol>
         )}
-        {canMakeCard && (
+        {canMakeCard && hasCardContent && (
           <button
             type="button"
             disabled={cardState === "saving" || cardState === "saved"}
             onClick={() => {
               setCardState("saving");
               onMakeCard().then(
-                () => setCardState("saved"),
+                () => {
+                  if (cardKey) markGuidedCardSaved(cardKey);
+                  setCardState("saved");
+                },
                 () => setCardState("failed"),
               );
             }}
@@ -134,7 +146,7 @@ export function SocraticCard({
           <Lightbulb className="mt-0.5 h-3 w-3 flex-none text-[var(--status-warn)]" aria-hidden="true" />
           <span>
             <span className="mr-1 text-[var(--text-muted)]">{t("assistant.socratic.hintN", { n: index + 1 })}</span>
-            {hint}
+            {withClickableTimestamps(hint, onSeek, `hint-${index}`)}
           </span>
         </p>
       ))}

@@ -5,7 +5,7 @@ import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs";
-import { pendingStudyTarget, useStudyNav } from "@/stores/studyNav";
+import { pendingStudyRequest, useStudyNav, type StudyNavRequest } from "@/stores/studyNav";
 import { TextSkeleton } from "@/ui/skeleton";
 import { useNoteCapture } from "@/stores/noteCapture";
 import {
@@ -96,13 +96,23 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
   // 存量恢复：练习已并入「更多」，读到旧值 "quiz" 时落到更多并直接定位练习视图。
   const [restored] = useState(() => readVideoResumeState(videoId));
   // 从后台任务点进来时，直接落在那项结果所在的页签。
-  const [requested] = useState(() => pendingStudyTarget(videoId));
+  const [initialRequest] = useState<StudyNavRequest | null>(() => pendingStudyRequest(videoId));
   const [activeTab, setActiveTab] = useState<Tab>(() =>
-    requested
-      ? requested.tab
+    initialRequest
+      ? initialRequest.target.tab
       : restored.activeTab === "quiz"
         ? "more"
         : (restored.activeTab as Tab | null) ?? "overview",
+  );
+  // 「更多」里的二级视图请求（题目 / 导图 / 课件）：面板可能是刚被这条请求拉起来的，
+  // 那时 MoreStudyPanel 还没挂载、收不到事件，所以把落点当作 prop 传下去（nonce 用于重复请求）。
+  const [moreViewRequest, setMoreViewRequest] = useState<{
+    view: "quiz" | "slides" | "mindmap";
+    nonce: number;
+  } | null>(() =>
+    initialRequest?.target.tab === "more"
+      ? { view: initialRequest.target.moreView, nonce: initialRequest.nonce }
+      : null,
   );
   const restoredQuizView = restored.activeTab === "quiz";
   // 保活：记录访问过的标签。访问过的面板用 forceMount 常驻 DOM（非活动时隐藏），
@@ -130,6 +140,11 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
     [videoId],
   );
 
+  // 请求落地即消费：否则这个视频以后每次打开都会被钉在这次任务的页签上。
+  useEffect(() => {
+    if (initialRequest) useStudyNav.getState().consume(initialRequest.nonce);
+  }, [initialRequest]);
+
   // 「记一笔」：切到笔记（分栏时笔记本来就常驻在右边，不用切）。
   useEffect(
     () =>
@@ -141,14 +156,22 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
     [videoId, split, changeTab],
   );
 
-  // 面板开着时收到「去某一页」的请求：当场切过去。
+  // 面板开着时收到「去某一页」的请求：当场切过去，再把它消费掉。
   useEffect(
     () =>
       useStudyNav.subscribe((state, previous) => {
         const request = state.request;
         if (!request || request === previous.request || request.videoId !== videoId) return;
-        if (split && request.target.tab === "notes") return;
+        if (request.target.tab === "more") {
+          setMoreViewRequest({ view: request.target.moreView, nonce: request.nonce });
+        }
+        if (split && request.target.tab === "notes") {
+          // 分栏时笔记常驻在右边，这条请求本来就已经满足。
+          useStudyNav.getState().consume(request.nonce);
+          return;
+        }
         changeTab(request.target.tab);
+        useStudyNav.getState().consume(request.nonce);
       }),
     [videoId, split, changeTab],
   );
@@ -183,9 +206,8 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
       node: (
         <MoreStudyPanel
           videoId={videoId}
-          initialView={
-            requested?.tab === "more" ? requested.moreView : restoredQuizView ? "quiz" : undefined
-          }
+          viewRequest={moreViewRequest}
+          initialView={restoredQuizView ? "quiz" : undefined}
         />
       ),
     },

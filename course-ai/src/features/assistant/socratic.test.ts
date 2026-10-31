@@ -65,4 +65,14 @@ describe("guidedTopic / visibleAnswer", () => {
     expect(visibleAnswer({ answer: block(false), mode: "socratic" })).toBe("x");
     expect(visibleAnswer({ answer: block(false) })).toContain("```socratic");
   });
+
+  it("结构块没闭合 / JSON 坏掉时不能把整轮复制成空", () => {
+    // 只有块、块还坏了：正文被剥空，退回原文，至少让人能复制到自己真正说过的话。
+    const broken = "```socratic\n{坏的}";
+    expect(visibleAnswer({ answer: broken, mode: "socratic" })).toBe(broken);
+    // 块合法但只有结构、没有正文：复制结论与要点。
+    const onlyBlock = '```socratic\n{"done":true,"summary":["要点一"],"answer":"结论"}\n```';
+    expect(visibleAnswer({ answer: onlyBlock, mode: "socratic" })).toBe("结论\n要点一");
+    expect(visibleAnswer({ answer: block(false), mode: "socratic" })).not.toContain("```");
+  });
 });

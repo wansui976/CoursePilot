@@ -103,6 +103,12 @@ describe("Modal 在手机上呈现为底部弹层", () => {
     expect(lockedChange).not.toHaveBeenCalled();
   });
 
+  it("手机上按 Escape 也能关掉弹层", () => {
+    const onOpenChange = renderSheet(false);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it("桌面默认居中", () => {
     render(
       <Modal open onOpenChange={vi.fn()} title="下载">

@@ -1,5 +1,4 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { useStudyNav } from "@/stores/studyNav";
 import { useTranslation } from "react-i18next";
 import { TextSkeleton } from "@/ui/skeleton";
 
@@ -36,26 +35,25 @@ const MORE_VIEW_KEYS: MoreView[] = [
 ];
 // 与一级 tab 同款图标语言（下划线式 + 图标），二级导航不再用另一套药丸样式。
 
-/** initialView：上层把存量「练习」一级标签迁进来时，落点直接定位到练习视图。 */
+/**
+ * initialView：上层把存量「练习」一级标签迁进来时，落点直接定位到练习视图。
+ * viewRequest：后台任务的「去导图 / 题目 / 课件」请求。面板可能是被这条请求刚拉起来的，
+ * 那时再订阅事件已经晚了，所以由上层的 prop 驱动（nonce 变了就是新请求）。
+ */
 export function MoreStudyPanel({
   videoId,
   initialView,
+  viewRequest,
 }: {
   videoId: string;
   initialView?: MoreView;
+  viewRequest?: { view: MoreView; nonce: number } | null;
 }) {
   const { t } = useTranslation();
-  const [view, setView] = useState<MoreView>(initialView ?? "quiz");
-  // 「去导图 / 题目 / 课件」的请求：面板已开着时当场切二级视图。
-  useEffect(
-    () =>
-      useStudyNav.subscribe((state, previous) => {
-        const request = state.request;
-        if (!request || request === previous.request || request.videoId !== videoId) return;
-        if (request.target.tab === "more") setView(request.target.moreView);
-      }),
-    [videoId],
-  );
+  const [view, setView] = useState<MoreView>(viewRequest?.view ?? initialView ?? "quiz");
+  useEffect(() => {
+    if (viewRequest) setView(viewRequest.view);
+  }, [viewRequest]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
