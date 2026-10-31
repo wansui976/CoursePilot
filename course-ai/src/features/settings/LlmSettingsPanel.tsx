@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { Check, ChevronDown, Eye, EyeOff, LoaderCircle, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/ui/button";
+import { Select } from "@/ui/select";
+import { Switch } from "@/ui/switch";
 import { ipc } from "@/lib/ipc";
 import { LLM_PRESETS, presetFor } from "@/lib/llmPresets";
 import type { LlmProfile, ModelInfo, ModelList, ProviderKind } from "@/lib/types";
@@ -437,18 +439,18 @@ export function LlmSettingsPanel({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <select
+        <Select
           aria-label={t("llmSettings.preset")}
           value={presetKey}
           onChange={(event) => setPresetKey(event.target.value)}
-          className={`${FIELD} max-w-56 flex-1`}
+          className="max-w-56 flex-1"
         >
           {LLM_PRESETS.map((preset) => (
             <option key={preset.key} value={preset.key}>
               {preset.custom ? t("llmSettings.customPreset") : preset.name}
             </option>
           ))}
-        </select>
+        </Select>
         <Button size="sm" variant="outline" onClick={add} data-tour="llm-add">
           <Plus className="h-3.5 w-3.5" />
           {t("llmSettings.add")}
@@ -520,9 +522,8 @@ export function LlmSettingsPanel({
               <span className="mb-1 block text-xs text-[var(--text-muted)]">
                 {t("llmSettings.protocol")}
               </span>
-              <select
+              <Select
                 aria-label={t("llmSettings.protocol")}
-                className={FIELD}
                 value={p.kind}
                 onChange={(e) => update(p.id, { kind: e.target.value as ProviderKind })}
               >
@@ -531,7 +532,7 @@ export function LlmSettingsPanel({
                     {t(`llmSettings.protocols.${kind}`)}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
 
             <input
@@ -628,9 +629,13 @@ export function LlmSettingsPanel({
               </div>
             ) : null}
 
-            <details className="rounded-lg border border-[var(--border-faint)] px-3 py-1.5">
-              <summary className="cursor-pointer select-none text-xs text-[var(--text-muted)]">
-                {t("llmSettings.advanced")}
+            <details className="group rounded-lg border border-[var(--border-faint)] px-3 py-1.5">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-xs text-[var(--text-muted)] [&::-webkit-details-marker]:hidden">
+                <span>{t("llmSettings.advanced")}</span>
+                <ChevronDown
+                  aria-hidden="true"
+                  className="h-3.5 w-3.5 flex-none transition-transform group-open:rotate-180"
+                />
               </summary>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 {p.kind === "azure_openai" && (
@@ -709,16 +714,16 @@ export function LlmSettingsPanel({
                     onChange={(e) => update(p.id, { models_path: e.target.value || null })}
                   />
                 </label>
-                <label className="flex items-center gap-2 text-xs text-[var(--text-normal)] sm:col-span-2">
-                  <input
-                    type="checkbox"
+                <div className="flex items-center justify-between gap-3 text-xs text-[var(--text-normal)] sm:col-span-2">
+                  <span>{t("llmSettings.noKeyRequired")}</span>
+                  <Switch
+                    aria-label={t("llmSettings.noKeyRequired")}
                     checked={!needsKey}
-                    onChange={(e) =>
-                      update(p.id, { key_required: e.target.checked ? false : true })
+                    onCheckedChange={(next) =>
+                      update(p.id, { key_required: next ? false : true })
                     }
                   />
-                  {t("llmSettings.noKeyRequired")}
-                </label>
+                </div>
               </div>
             </details>
 
