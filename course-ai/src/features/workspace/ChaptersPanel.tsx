@@ -64,6 +64,7 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
     // 展开时线在摘要和章节之间（与原摘要 border-b 同一位置），
     // 收回时线贴着底栏上缘，不再有孤零零浮在中间的线。
     <div
+      data-tour="chapters"
       data-chapters-collapsed={collapsed ? true : undefined}
       className={`relative flex flex-col ${
         collapsed ? "mt-auto shrink-0 border-t border-[var(--border-subtle)]" : "min-h-0 flex-1"

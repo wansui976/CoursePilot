@@ -4,9 +4,9 @@ import { create } from "zustand";
  * 新手引导：每组引导（课程库、课程页、工作台……）只出现一次，看过的记在 localStorage。
  * 同一时刻只让一组引导露面：先挂载、先找到锚点的那组占住 active，别的等它结束。
  */
-export type TourId = "library" | "course" | "workbench";
+export type TourId = "library" | "course" | "courseFeatures" | "workbench";
 
-export const TOUR_IDS: TourId[] = ["library", "course", "workbench"];
+export const TOUR_IDS: TourId[] = ["library", "course", "courseFeatures", "workbench"];
 const STORAGE_KEY = "course-ai-tours-seen";
 
 function readSeen(): Set<TourId> {

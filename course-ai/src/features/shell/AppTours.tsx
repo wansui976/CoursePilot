@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { HomeLocation } from "@/app/homeRoute";
+import { toggleShortcutLabel } from "@/features/assistant/assistantPanelModel";
 import { isMobile } from "@/lib/platform";
 import { coarsePointer } from "@/lib/useContainerWidth";
 import { keyLabel, useShortcuts } from "@/stores/shortcuts";
@@ -13,21 +14,26 @@ const LINKS = {
 };
 
 /**
- * 三组新手引导，各自只出现一次（见 stores/tours）：
+ * 四组新手引导，各自只出现一次（见 stores/tours）：
  * - 课程库：还没有任何课程时——先带着配大模型、配语音识别（会跳进设置对应的分类），
  *   最后回到课程库建课程、导入；
  * - 课程页：课程里还没有视频时——导入；
- * - 工作台：第一次打开视频时——学习资料、记一笔、划选文稿、专注阅读。
+ * - 课程页（有视频）：第一次在课程页看到视频时——拍题找讲解、知识点；
+ * - 工作台：第一次打开视频时——学习资料、记一笔、划选文稿、AI 助手（含引导模式）、
+ *   费曼复述、精华版、专注阅读。
  * 什么时候算「该出现」由 Home 判断；锚点不在当前布局里的步骤会被跳过。
  */
 export function AppTours({
   library,
   course,
+  courseFeatures,
   workbench,
   navigate,
 }: {
   library: boolean;
   course: boolean;
+  /** 课程页上已经有视频：介绍拍题找讲解、知识点。 */
+  courseFeatures: boolean;
   workbench: boolean;
   /** 跳页面。由 Home 包一层「离开设置前先问未保存的大模型配置」的保护。 */
   navigate: (patch: Partial<HomeLocation>) => void;
@@ -38,6 +44,7 @@ export function AppTours({
   // 触屏上多半没有键盘：改成说笔记里的「记一笔」按钮
   const touch = coarsePointer();
   const mobile = isMobile();
+  const assistantKey = toggleShortcutLabel();
 
   return (
     <>
@@ -104,6 +111,26 @@ export function AppTours({
         ]}
       />
       <Tour
+        id="courseFeatures"
+        enabled={courseFeatures}
+        steps={[
+          {
+            anchor: "find-explain",
+            placement: "bottom",
+            wide: true,
+            title: t("tour.courseFeatures.findExplain.title"),
+            body: t("tour.courseFeatures.findExplain.body"),
+          },
+          {
+            anchor: "concepts",
+            placement: "bottom",
+            wide: true,
+            title: t("tour.courseFeatures.concepts.title"),
+            body: t("tour.courseFeatures.concepts.body"),
+          },
+        ]}
+      />
+      <Tour
         id="workbench"
         enabled={workbench}
         delay={1200}
@@ -126,6 +153,31 @@ export function AppTours({
             anchor: "tab-transcript",
             title: t("tour.workbench.transcript.title"),
             body: t("tour.workbench.transcript.body"),
+          },
+          {
+            anchor: "assistant",
+            placement: "right",
+            wide: true,
+            title: t("tour.workbench.assistant.title"),
+            body: touch
+              ? t("tour.workbench.assistant.bodyTouch")
+              : t("tour.workbench.assistant.body", { key: assistantKey }),
+          },
+          {
+            anchor: "chapters",
+            placement: "left",
+            wide: true,
+            title: t("tour.workbench.feynman.title"),
+            body: t("tour.workbench.feynman.body"),
+          },
+          {
+            anchor: "player-stage",
+            placement: "bottom",
+            wide: true,
+            title: t("tour.workbench.highlights.title"),
+            body: touch
+              ? t("tour.workbench.highlights.bodyTouch")
+              : t("tour.workbench.highlights.body"),
           },
           {
             anchor: "reading-focus",

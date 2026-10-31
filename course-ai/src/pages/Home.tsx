@@ -734,7 +734,7 @@ export function Home() {
           isPhoneDevice && !showSettings && !showRecycleBin && !showDevConsole && !showDashboard
         }
       />
-      {/* 新手引导：课程库空着、课程里还没视频、第一次进工作台，各出现一次。 */}
+      {/* 新手引导：课程库空着、课程里还没视频、课程页有了视频、第一次进工作台，各出现一次。 */}
       <AppTours
         library={mainView === "library" && !selectedCourseId && coursesLoaded && courses.length === 0}
         course={
@@ -743,6 +743,14 @@ export function Home() {
           !isWorkbenchView &&
           videosLoaded &&
           videos.length === 0 &&
+          downloadCount === 0
+        }
+        courseFeatures={
+          mainView === "library" &&
+          !!selectedCourseId &&
+          !isWorkbenchView &&
+          videosLoaded &&
+          videos.length > 0 &&
           downloadCount === 0
         }
         workbench={isWorkbenchView}

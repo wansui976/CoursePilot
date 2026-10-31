@@ -1061,6 +1061,7 @@ export function CourseLibraryView({
                   variant="ghost"
                   size="sm"
                   onClick={onOpenConcepts}
+                  data-tour="concepts"
                   className="ca-touch-44"
                 >
                   <Lightbulb className="h-4 w-4" />
@@ -1073,6 +1074,7 @@ export function CourseLibraryView({
                   size="sm"
                   onClick={() => useFindExplanation.getState().open(selectedCourseId)}
                   title={t("findExplanation.entryHint")}
+                  data-tour="find-explain"
                   className="ca-touch-44"
                 >
                   <ScanSearch className="h-4 w-4" />

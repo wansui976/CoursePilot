@@ -1697,6 +1697,16 @@
         "body": "Upload local video or audio, or paste a Bilibili / YouTube link. Imports are transcribed and slides are captured automatically; with an LLM they become notes too."
       }
     },
+    "courseFeatures": {
+      "findExplain": {
+        "title": "Snap a problem, find where it’s taught",
+        "body": "Snap a photo, paste a screenshot, or type the problem — it searches this course’s transcript and slides for where it’s explained, and can play those clips in order. Pasting an image on the course page works too."
+      },
+      "concepts": {
+        "title": "Knowledge: this course’s concept map",
+        "body": "Every concept pulled from the videos, with an explanation and where it’s taught; each one can be explained back with “Explain it to me” and gets a check once you do."
+      }
+    },
     "workbench": {
       "tabs": {
         "title": "Your study materials live here",
@@ -1709,6 +1719,20 @@
       "transcript": {
         "title": "Select a line in the transcript",
         "body": "Highlight any text to ask AI about it, quote it to your notes, or make a cloze card."
+      },
+      "assistant": {
+        "title": "Stuck? Ask the AI assistant",
+        "body": "Click here (or press {{key}}). It has read this course’s transcript and slides, and timestamps in its answers are clickable. Turn on “Guide” and it won’t hand you the answer — it asks you step by step. Selecting a transcript line and choosing “Guide me through this” works too.",
+        "bodyTouch": "Tap here. It has read this course’s transcript and slides, and timestamps in its answers are clickable. Turn on “Guide” and it won’t hand you the answer — it asks you step by step."
+      },
+      "feynman": {
+        "title": "Explain it to find the gaps",
+        "body": "Open Chapters — every row has a mic. Explain the chapter in your own words; the AI checks only against the course text, shows what you missed or got wrong, and links back to the exact moment. Concepts you explain clearly get a “Can explain” check."
+      },
+      "highlights": {
+        "title": "Speed up or skip the filler",
+        "body": "Open Highlights in the player settings: the AI marks admin talk, chit-chat and repeated explanations. Speed them up or skip them, see how many minutes it saves, and undo anything it gets wrong.",
+        "bodyTouch": "Tap the video to show the controls, then open Highlights in the settings: the AI marks admin talk, chit-chat and repeated explanations — speed them up or skip them, and it shows how many minutes it saves."
       },
       "focus": {
         "title": "Need to concentrate?",
