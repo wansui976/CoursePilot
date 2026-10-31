@@ -18,7 +18,7 @@ mod usage_log;
 
 use crate::commands::ai::{
     cmd_generate_ai, cmd_get_chapters, cmd_get_highlights, cmd_get_llm_profiles, cmd_get_mindmap, cmd_get_notes,
-    cmd_get_quiz, cmd_get_summary, cmd_has_api_key, cmd_save_llm_profiles, cmd_save_notes,
+    cmd_get_quiz, cmd_get_summary, cmd_has_api_key, cmd_list_models, cmd_save_llm_profiles, cmd_save_notes,
     cmd_set_api_key, cmd_stale_ai_artifacts,
 };
 use crate::commands::app::{cmd_check_update, cmd_exit_app};
@@ -298,6 +298,7 @@ pub fn run() {
             cmd_update_clip,
             cmd_delete_clip,
             cmd_get_llm_profiles,
+            cmd_list_models,
             cmd_save_llm_profiles,
             cmd_set_api_key,
             cmd_has_api_key,

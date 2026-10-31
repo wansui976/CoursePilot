@@ -1,6 +1,11 @@
 pub mod agent;
+pub mod anthropic;
+pub mod catalog;
 pub mod factory;
+pub mod gemini;
 pub mod keychain;
+pub mod models;
+pub mod ollama;
 pub mod openai;
 pub mod profiles;
 pub mod prompts;
@@ -142,6 +147,23 @@ impl ChatRequest {
             tools: Vec::new(),
             label: "other",
         }
+    }
+}
+
+/// 某个 Profile 这次请求该用的 Key。
+///
+/// - 存了非空 Key → 用它；
+/// - 协议不需要 Key（Ollama）→ 空串；
+/// - 需要 Key 但没配 → None，调用方按「未配置」处理。
+pub async fn api_key_for(
+    db: &crate::db::Db,
+    profile: &profiles::LlmProfile,
+) -> AppResult<Option<String>> {
+    let key = keychain::get_api_key(db, &profile.id).await?;
+    match key {
+        Some(key) if !key.trim().is_empty() => Ok(Some(key)),
+        _ if !profile.requires_key() => Ok(Some(String::new())),
+        _ => Ok(None),
     }
 }
 
@@ -455,6 +477,33 @@ pub enum Provider {
         api_key: String,
         client: reqwest::Client,
     },
+    /// Anthropic Messages API。
+    Anthropic {
+        base_url: String,
+        api_key: String,
+        client: reqwest::Client,
+        max_tokens: u32,
+    },
+    /// Google Gemini 原生 API。
+    Gemini {
+        base_url: String,
+        api_key: String,
+        client: reqwest::Client,
+        max_tokens: Option<u32>,
+    },
+    /// 本地 Ollama（不需要 Key）。
+    Ollama {
+        base_url: String,
+        client: reqwest::Client,
+    },
+    /// Azure OpenAI：deployment + api-version。
+    Azure {
+        endpoint: String,
+        api_key: String,
+        api_version: String,
+        deployment: String,
+        client: reqwest::Client,
+    },
     /// 测试 / 离线用：返回预置内容。
     Mock { canned: String },
     /// 测试用：按剧本逐次返回，可以模拟「先要求调工具、再作答」。
@@ -492,36 +541,62 @@ pub enum Provider {
 
 impl Provider {
     pub async fn complete(&self, req: &ChatRequest) -> AppResult<ChatResponse> {
-        match self {
+        let response = match self {
             Provider::OpenAi {
                 base_url,
                 api_key,
                 client,
+            } => openai::complete(base_url, api_key, client, req).await?,
+            Provider::Anthropic {
+                base_url,
+                api_key,
+                client,
+                max_tokens,
+            } => anthropic::complete(base_url, api_key, client, req, *max_tokens).await?,
+            Provider::Gemini {
+                base_url,
+                api_key,
+                client,
+                max_tokens,
+            } => gemini::complete(base_url, api_key, client, req, *max_tokens).await?,
+            Provider::Ollama { base_url, client } => ollama::complete(base_url, client, req).await?,
+            Provider::Azure {
+                endpoint,
+                api_key,
+                api_version,
+                deployment,
+                client,
             } => {
-                let response = openai::complete(base_url, api_key, client, req).await?;
-                // 端点报了用量才记。没报就什么都不记——把「没报」当成「零消耗」
-                // 会让命中率算出来是假的。
-                if let Some(usage) = &response.usage {
-                    crate::usage_log::record(req.label, &req.model, usage);
-                }
-                Ok(response)
+                openai::complete_at(
+                    &azure_chat_url(endpoint, deployment, api_version),
+                    openai::Auth::Header("api-key", api_key),
+                    client,
+                    req,
+                    "Azure OpenAI",
+                )
+                .await?
             }
-            Provider::Mock { canned } => Ok(ChatResponse {
+            Provider::Mock { canned } => ChatResponse {
                 content: canned.clone(),
                 tool_calls: Vec::new(),
                 usage: None,
-            }),
+            },
             Provider::Scripted { steps } => {
                 let mut steps = steps.lock().unwrap_or_else(|e| e.into_inner());
                 if steps.is_empty() {
-                    Err(crate::error::AppError::Other("剧本已用尽".into()))
-                } else {
-                    Ok(steps.remove(0))
+                    return Err(crate::error::AppError::Other("剧本已用尽".into()));
                 }
+                steps.remove(0)
             }
-            Provider::Failing { .. } => Err(self.canned_failure()),
-            Provider::Flaky { .. } => self.flaky_step(),
+            Provider::Failing { .. } => return Err(self.canned_failure()),
+            Provider::Flaky { .. } => self.flaky_step()?,
+        };
+        // 端点报了用量才记。没报就什么都不记——把「没报」当成「零消耗」
+        // 会让命中率算出来是假的。
+        if let Some(usage) = &response.usage {
+            crate::usage_log::record(req.label, &req.model, usage);
         }
+        Ok(response)
     }
 
     /// `Flaky` 端点这一次调用：还有失败额度就失败（并置位 `cancel_on_fail`），
@@ -595,22 +670,61 @@ impl Provider {
         cancel: &AtomicBool,
         on_piece: &mut (dyn FnMut(StreamPiece) + Send),
     ) -> AppResult<StreamOutcome> {
-        match self {
+        let outcome = match self {
             Provider::OpenAi {
                 base_url,
                 api_key,
                 client,
-            } => openai::complete_stream(base_url, api_key, client, req, cancel, on_piece).await,
+            } => openai::complete_stream(base_url, api_key, client, req, cancel, on_piece).await?,
+            Provider::Anthropic {
+                base_url,
+                api_key,
+                client,
+                max_tokens,
+            } => {
+                anthropic::complete_stream(base_url, api_key, client, req, *max_tokens, cancel, on_piece)
+                    .await?
+            }
+            Provider::Gemini {
+                base_url,
+                api_key,
+                client,
+                max_tokens,
+            } => {
+                gemini::complete_stream(base_url, api_key, client, req, *max_tokens, cancel, on_piece)
+                    .await?
+            }
+            Provider::Ollama { base_url, client } => {
+                ollama::complete_stream(base_url, client, req, cancel, on_piece).await?
+            }
+            Provider::Azure {
+                endpoint,
+                api_key,
+                api_version,
+                deployment,
+                client,
+            } => {
+                openai::complete_stream_at(
+                    &azure_chat_url(endpoint, deployment, api_version),
+                    openai::Auth::Header("api-key", api_key),
+                    client,
+                    req,
+                    cancel,
+                    on_piece,
+                    "Azure OpenAI",
+                )
+                .await?
+            }
             Provider::Scripted { .. } | Provider::Flaky { .. } => {
                 // Flaky 与 Scripted 流式行为一致：失败发生在正文吐出之前，
                 // 成功时把整条应答一次性发出——重点在「调用会不会失败」，不在逐字。
                 let response = self.complete(req).await?;
                 on_piece(StreamPiece::Content(&response.content));
-                Ok(StreamOutcome {
+                StreamOutcome {
                     content: response.content,
                     tool_calls: response.tool_calls,
                     usage: response.usage,
-                })
+                }
             }
             Provider::Mock { canned } => {
                 let mut acc = String::new();
@@ -627,19 +741,20 @@ impl Provider {
                     on_piece(StreamPiece::Content(&piece));
                     acc.push_str(&piece);
                 }
-                Ok(StreamOutcome {
+                StreamOutcome {
                     content: acc,
                     tool_calls: Vec::new(),
                     usage: None,
-                })
+                }
             }
-            Provider::Failing { .. } => Err(self.canned_failure()),
+            Provider::Failing { .. } => return Err(self.canned_failure()),
+        };
+        if let Some(usage) = &outcome.usage {
+            crate::usage_log::record(req.label, &req.model, usage);
         }
+        Ok(outcome)
     }
 
-    pub fn supports_vision(&self) -> bool {
-        false
-    }
 
     /// 文本嵌入。OpenAI 兼容端点用 `/embeddings`；
     /// Mock 返回确定性向量（相似文本→相似向量），便于离线单测 RAG。
@@ -650,12 +765,44 @@ impl Provider {
                 api_key,
                 client,
             } => openai::embed(base_url, api_key, client, model, inputs).await,
+            Provider::Azure {
+                endpoint,
+                api_key,
+                api_version,
+                client,
+                ..
+            } => {
+                // Azure 的嵌入也按 deployment 走；`model` 参数就是嵌入 deployment 名。
+                let url = format!(
+                    "{}/openai/deployments/{}/embeddings?api-version={}",
+                    endpoint.trim_end_matches('/'),
+                    model,
+                    api_version
+                );
+                openai::embed_at(&url, openai::Auth::Header("api-key", api_key), client, model, inputs)
+                    .await
+            }
+            Provider::Anthropic { .. } | Provider::Gemini { .. } | Provider::Ollama { .. } => {
+                Err(crate::error::AppError::Other(
+                    "这个协议暂不支持文本嵌入；检索仍会使用关键词回退".into(),
+                ))
+            }
             Provider::Mock { .. } | Provider::Scripted { .. } | Provider::Flaky { .. } => {
                 Ok(inputs.iter().map(|s| mock_embed(s)).collect())
             }
             Provider::Failing { .. } => Err(self.canned_failure()),
         }
     }
+}
+
+/// Azure 的对话地址：deployment 决定路由，api-version 决定协议版本。
+pub(crate) fn azure_chat_url(endpoint: &str, deployment: &str, api_version: &str) -> String {
+    format!(
+        "{}/openai/deployments/{}/chat/completions?api-version={}",
+        endpoint.trim_end_matches('/'),
+        deployment,
+        api_version
+    )
 }
 
 /// 确定性伪嵌入：把文本散列进固定维向量并归一化。仅用于离线测试。
@@ -672,6 +819,14 @@ pub fn mock_embed(text: &str) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn azure_url_includes_deployment_and_version() {
+        assert_eq!(
+            azure_chat_url("https://x.openai.azure.com/", "dep", "2024-10-21"),
+            "https://x.openai.azure.com/openai/deployments/dep/chat/completions?api-version=2024-10-21"
+        );
+    }
 
     #[tokio::test]
     async fn mock_provider_returns_canned() {

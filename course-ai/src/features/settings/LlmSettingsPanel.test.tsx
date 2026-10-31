@@ -14,6 +14,7 @@ const { mockIpc } = vi.hoisted(() => ({
       saveProfiles: vi.fn(),
       setApiKey: vi.fn(),
       hasApiKey: vi.fn(),
+      listModels: vi.fn(),
     },
     settings: { get: vi.fn() },
   },
@@ -37,12 +38,29 @@ describe("LlmSettingsPanel", () => {
     mockIpc.ai.saveProfiles.mockReset();
     mockIpc.ai.setApiKey.mockReset();
     mockIpc.ai.hasApiKey.mockReset();
+    mockIpc.ai.listModels.mockReset();
     mockIpc.settings.get.mockReset();
     confirmMock.mockReset();
     mockIpc.ai.getProfiles.mockResolvedValue([profile]);
     mockIpc.ai.saveProfiles.mockResolvedValue(undefined);
     mockIpc.ai.setApiKey.mockResolvedValue(undefined);
     mockIpc.ai.hasApiKey.mockResolvedValue(false);
+    mockIpc.ai.listModels.mockResolvedValue({
+      models: [
+        {
+          id: "gpt-4o-mini",
+          context_window: 128000,
+          max_output_tokens: 16384,
+          input_price: 0.15,
+          output_price: 0.6,
+          capabilities: { vision: true, tools: true, json: true, reasoning: false },
+          source: "catalog",
+        },
+      ],
+      cached: false,
+      fetched_at: Date.now(),
+      source: "live",
+    });
     mockIpc.settings.get.mockResolvedValue(null);
   });
 
@@ -126,6 +144,46 @@ describe("LlmSettingsPanel", () => {
     await waitFor(() => expect(mockIpc.ai.saveProfiles).toHaveBeenCalledOnce());
     expect(await screen.findByText("已保存")).toBeInTheDocument();
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
+  });
+
+  it("fetches models and shows context, price and capabilities", async () => {
+    render(<LlmSettingsPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "获取模型" }));
+
+    await waitFor(() =>
+      expect(mockIpc.ai.listModels).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "p1", model: "gpt-4o-mini" }),
+        null,
+        false,
+      ),
+    );
+    expect(await screen.findByText("上下文 128K")).toBeInTheDocument();
+    expect(screen.getByText(/输入 \$0.15 \/ 输出 \$0.60/)).toBeInTheDocument();
+    expect(screen.getByText("工具")).toBeInTheDocument();
+    expect(screen.getByText("视觉")).toBeInTheDocument();
+    expect(screen.getByText("元数据来自内置目录")).toBeInTheDocument();
+
+    // 再点一下绕过缓存。
+    fireEvent.click(screen.getByRole("button", { name: "刷新模型" }));
+    await waitFor(() =>
+      expect(mockIpc.ai.listModels).toHaveBeenLastCalledWith(expect.anything(), null, true),
+    );
+  });
+
+  it("adds a profile from the selected preset", async () => {
+    render(<LlmSettingsPanel />);
+    await screen.findByLabelText("配置名称");
+
+    fireEvent.change(screen.getByLabelText("预设"), { target: { value: "anthropic" } });
+    fireEvent.click(screen.getByRole("button", { name: "新增" }));
+
+    await waitFor(() => expect(screen.getAllByLabelText("配置名称")).toHaveLength(2));
+    const names = screen.getAllByLabelText("配置名称");
+    expect(names[names.length - 1]).toHaveValue("Anthropic");
+    const protocols = screen.getAllByLabelText("协议");
+    expect(protocols[protocols.length - 1]).toHaveValue("anthropic");
+    const baseUrls = screen.getAllByLabelText("Base URL");
+    expect(baseUrls[baseUrls.length - 1]).toHaveValue("https://api.anthropic.com");
   });
 
   it("exposes a discard action that restores the persisted draft", async () => {

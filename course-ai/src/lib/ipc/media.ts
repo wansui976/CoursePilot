@@ -12,6 +12,7 @@ import type {
   DanmakuEntry,
   Job,
   LlmProfile,
+  ModelList,
   RagAnswer,
   Screenshot,
   Slide,
@@ -86,6 +87,17 @@ export const ai = {
     invoke("cmd_set_api_key", { profileId, apiKey }),
   hasApiKey: (profileId: string): Promise<boolean> =>
     invoke("cmd_has_api_key", { profileId }),
+  /** 按协议拉取模型列表（带内置目录元数据与 24h 缓存）；`apiKey` 用于还没保存的草稿。 */
+  listModels: (
+    profile: LlmProfile,
+    apiKey?: string | null,
+    refresh = false,
+  ): Promise<ModelList> =>
+    invoke("cmd_list_models", {
+      profile,
+      ...(apiKey ? { apiKey } : {}),
+      refresh,
+    }),
   generate: (videoId: string, task: string): Promise<void> =>
     invoke("cmd_generate_ai", { videoId, task }),
   getChapters: (videoId: string): Promise<Chapter[]> =>

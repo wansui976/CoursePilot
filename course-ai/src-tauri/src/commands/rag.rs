@@ -2,7 +2,6 @@ use crate::commands::courses::AppState;
 use crate::commands::settings::get_setting;
 use crate::error::{AppError, AppResult};
 use crate::llm::factory::build_provider;
-use crate::llm::keychain;
 use crate::llm::profiles::{parse_profiles, parse_routing, resolve_profile, AiTask};
 use crate::llm::ChatMessage;
 use crate::pipeline::rag;
@@ -28,7 +27,7 @@ async fn rag_provider(state: &AppState) -> AppResult<(crate::llm::Provider, Stri
     let profile = resolve_profile(&profiles, &routing, AiTask::Rag)
         .ok_or_else(|| AppError::Config("尚未配置任何 LLM Profile（设置 → LLM）".into()))?
         .clone();
-    let key = keychain::get_api_key(&state.db, &profile.id)
+    let key = crate::llm::api_key_for(&state.db, &profile)
         .await?
         .ok_or_else(|| AppError::Config(format!("Profile「{}」未设置 API Key", profile.name)))?;
     let chat_model = profile.model.clone();

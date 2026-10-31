@@ -22,7 +22,7 @@ fn body_snippet(body: &str) -> String {
 /// 其余 4xx——密钥不对、余额不足、模型名写错、请求体超限——再发一遍还是同一句话。
 /// 之所以要区分：上游的退避重试是为网络抖动准备的，拿它去撞一个 402，只会让用户
 /// 多等三轮退避，最后拿到一模一样的答复。5xx 归入可重试，服务端故障常常是暂时的。
-fn http_error(what: &str, status: reqwest::StatusCode, body: &str) -> AppError {
+pub(crate) fn http_error(what: &str, status: reqwest::StatusCode, body: &str) -> AppError {
     // 账号层面的三种状态直接说人话，并且放在最前面。原样甩一段
     // `{"error":{"message":"Insufficient Balance",...}}` 出去，用户得自己去翻译；
     // 而这条消息会一路传到流水线的步骤列表里，那里没有第二次解释的机会。
@@ -334,6 +334,22 @@ fn parse_tool_calls(message: &Value) -> Vec<crate::llm::ToolCall> {
         .collect()
 }
 
+/// 请求鉴权方式：OpenAI 用 Bearer，Azure 用 `api-key` 头。
+#[derive(Clone, Copy)]
+pub(crate) enum Auth<'a> {
+    Bearer(&'a str),
+    Header(&'a str, &'a str),
+}
+
+impl<'a> Auth<'a> {
+    fn apply(self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match self {
+            Auth::Bearer(key) => request.bearer_auth(key),
+            Auth::Header(name, value) => request.header(name, value),
+        }
+    }
+}
+
 pub async fn complete(
     base_url: &str,
     api_key: &str,
@@ -341,9 +357,19 @@ pub async fn complete(
     req: &ChatRequest,
 ) -> AppResult<ChatResponse> {
     let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
-    let resp = client
-        .post(url)
-        .bearer_auth(api_key)
+    complete_at(&url, Auth::Bearer(api_key), client, req, "OpenAI").await
+}
+
+/// 发到指定 URL（Azure 的 deployment 路径也走这里），错误文案用 `label` 标出真实协议。
+pub(crate) async fn complete_at(
+    url: &str,
+    auth: Auth<'_>,
+    client: &reqwest::Client,
+    req: &ChatRequest,
+    label: &str,
+) -> AppResult<ChatResponse> {
+    let resp = auth
+        .apply(client.post(url))
         .json(&build_openai_body(req))
         .send()
         .await
@@ -357,7 +383,7 @@ pub async fn complete(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(http_error("OpenAI", status, &body));
+        return Err(http_error(label, status, &body));
     }
     let body = resp.text().await.map_err(request_error)?;
     let v = parse_json_response(&body, &content_type)?;
@@ -395,9 +421,18 @@ pub async fn embed(
     inputs: &[String],
 ) -> AppResult<Vec<Vec<f32>>> {
     let url = format!("{}/embeddings", normalize_openai_base_url(base_url));
-    let resp = client
-        .post(url)
-        .bearer_auth(api_key)
+    embed_at(&url, Auth::Bearer(api_key), client, model, inputs).await
+}
+
+pub(crate) async fn embed_at(
+    url: &str,
+    auth: Auth<'_>,
+    client: &reqwest::Client,
+    model: &str,
+    inputs: &[String],
+) -> AppResult<Vec<Vec<f32>>> {
+    let resp = auth
+        .apply(client.post(url))
         .json(&build_embeddings_body(model, inputs))
         .send()
         .await
@@ -526,10 +561,22 @@ pub async fn complete_stream(
     on_piece: &mut (dyn FnMut(StreamPiece) + Send),
 ) -> AppResult<StreamOutcome> {
     let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
+    complete_stream_at(&url, Auth::Bearer(api_key), client, req, cancel, on_piece, "OpenAI").await
+}
+
+/// 流式请求的 URL/鉴权可替换版本：Azure 的 deployment 地址也走这里。
+pub(crate) async fn complete_stream_at(
+    url: &str,
+    auth: Auth<'_>,
+    client: &reqwest::Client,
+    req: &ChatRequest,
+    cancel: &AtomicBool,
+    on_piece: &mut (dyn FnMut(StreamPiece) + Send),
+    label: &str,
+) -> AppResult<StreamOutcome> {
     let body = build_streaming_body(req);
-    let resp = client
-        .post(url)
-        .bearer_auth(api_key)
+    let resp = auth
+        .apply(client.post(url))
         .header(CONTENT_TYPE, "application/json")
         // 显式声明接收 SSE：部分 OpenAI 兼容服务/反向代理只有在收到该头时才真正流式，
         // 否则会把整个响应缓冲后一次返回（表现为「答案一次性蹦出、不逐字」）。
@@ -544,7 +591,7 @@ pub async fn complete_stream(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(http_error("OpenAI", status, &text));
+        return Err(http_error(label, status, &text));
     }
     let mut state = StreamState::default();
     let mut stream = resp.bytes_stream();
@@ -570,15 +617,10 @@ pub async fn complete_stream(
             }
         }
     }
-    let outcome = state.finish()?;
-    // 与非流式同一条规矩：端点报了才记。助手走流式之后，这里是它唯一的记账点。
-    if let Some(usage) = &outcome.usage {
-        crate::usage_log::record(req.label, &req.model, usage);
-    }
-    Ok(outcome)
+    state.finish()
 }
 
-enum StreamWait<T> {
+pub(crate) enum StreamWait<T> {
     Item(T),
     End,
     Canceled,
@@ -587,7 +629,7 @@ enum StreamWait<T> {
 /// 等下一块网络数据时也定期看取消标志。
 ///
 /// 只在拿到 chunk 后检查会漏掉最需要取消的情况：连接已经建立，但服务端一直不再发送数据。
-async fn next_stream_item_or_cancel<S>(stream: &mut S, cancel: &AtomicBool) -> StreamWait<S::Item>
+pub(crate) async fn next_stream_item_or_cancel<S>(stream: &mut S, cancel: &AtomicBool) -> StreamWait<S::Item>
 where
     S: futures_util::Stream + Unpin,
 {

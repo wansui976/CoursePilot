@@ -74,6 +74,8 @@ pub async fn save_llm_profiles(
             if let Err(err) = keychain::delete_api_key(db, &old.id).await {
                 tracing::warn!(profile_id = %old.id, %err, "failed to delete orphaned api key");
             }
+            // 配置都删了，它的模型清单缓存也没有意义。
+            let _ = crate::llm::models::invalidate(db, &old.id).await;
         }
     }
 
@@ -118,12 +120,38 @@ pub async fn cmd_set_api_key(
     profile_id: String,
     api_key: String,
 ) -> AppResult<()> {
-    keychain::set_api_key(&state.db, &profile_id, &api_key).await
+    keychain::set_api_key(&state.db, &profile_id, &api_key).await?;
+    // 换了 Key，能看到的模型可能就变了：旧缓存不能继续用。
+    crate::llm::models::invalidate(&state.db, &profile_id).await?;
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn cmd_has_api_key(state: State<'_, AppState>, profile_id: String) -> AppResult<bool> {
+    // Ollama 这类不需要 Key 的协议，界面上就该显示「已配置」。
+    if let Ok(profiles) = parse_profiles(get_setting(&state.db, "llm_profiles").await?.as_deref()) {
+        if profiles
+            .iter()
+            .find(|profile| profile.id == profile_id)
+            .is_some_and(|profile| !profile.requires_key())
+        {
+            return Ok(true);
+        }
+    }
     keychain::has_api_key(&state.db, &profile_id).await
+}
+
+/// 获取某个配置可用的模型列表（带目录元数据与缓存）。
+///
+/// `api_key` 是设置页里刚输入、还没保存的 Key；为空时用钥匙串里已保存的。
+#[tauri::command]
+pub async fn cmd_list_models(
+    state: State<'_, AppState>,
+    profile: LlmProfile,
+    api_key: Option<String>,
+    refresh: Option<bool>,
+) -> AppResult<crate::llm::models::ModelList> {
+    crate::llm::models::list(&state.db, &profile, api_key, refresh.unwrap_or(false)).await
 }
 
 // ---------- read AI products ----------
@@ -262,7 +290,7 @@ pub async fn resolved_provider_for_db(
     let Some(profile) = resolve_profile(&profiles, &routing, task).cloned() else {
         return Ok(None);
     };
-    let Some(key) = keychain::get_api_key(db, &profile.id).await? else {
+    let Some(key) = crate::llm::api_key_for(db, &profile).await? else {
         return Ok(None);
     };
     Ok(Some(ResolvedProvider {
@@ -286,7 +314,7 @@ pub async fn provider_for_profile(
             "所选模型已不在配置里，请在助手里重新选择".into(),
         ));
     };
-    let Some(key) = keychain::get_api_key(db, &profile.id).await? else {
+    let Some(key) = crate::llm::api_key_for(db, &profile).await? else {
         return Err(AppError::Config(format!(
             "模型「{}」还没有填 API Key（设置 → 大模型）",
             profile.name

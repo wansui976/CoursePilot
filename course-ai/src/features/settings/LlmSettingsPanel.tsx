@@ -1,21 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
-import { Check, Eye, EyeOff, Plus } from "lucide-react";
+import { Check, ChevronDown, Eye, EyeOff, LoaderCircle, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/ui/button";
 import { ipc } from "@/lib/ipc";
-import type { LlmProfile } from "@/lib/types";
+import { LLM_PRESETS, presetFor } from "@/lib/llmPresets";
+import type { LlmProfile, ModelInfo, ModelList, ProviderKind } from "@/lib/types";
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
-// 现在只剩 OpenAI 兼容一种通道，所以默认地址也只剩一个。
-// Claude 仍然能用：把地址换成 Anthropic 的 OpenAI 兼容层即可，Key 和模型名照旧。
-const DEFAULT_BASE = "https://api.openai.com/v1";
-
 const FIELD =
   "w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] outline-none transition placeholder:text-[var(--text-faint)]";
+
+const PROTOCOLS: ProviderKind[] = ["openai", "anthropic", "gemini", "ollama", "azure_openai"];
 
 // 当前默认模型用 routing 实现：把所有任务都路由到选中的 profile。
 const ROUTING_TASKS = [
@@ -43,6 +42,16 @@ interface LlmDraft {
   keys: Record<string, string>;
   activeId: string | null;
   manualRouting: Record<string, string>;
+}
+
+/** 一个 profile 的模型列表 / 拉取状态。获取模型不算「未保存修改」。 */
+interface ModelState {
+  models: ModelInfo[];
+  fetchedAt?: number;
+  cached?: boolean;
+  note?: string;
+  error?: string;
+  loading?: boolean;
 }
 
 export interface LlmSettingsActions {
@@ -75,6 +84,43 @@ function draftSignature(draft: LlmDraft): string {
   return JSON.stringify(draft);
 }
 
+function requiresKey(profile: LlmProfile): boolean {
+  return profile.key_required ?? profile.kind !== "ollama";
+}
+
+function formatTokens(value?: number | null): string | null {
+  if (value == null || value <= 0) return null;
+  if (value >= 1_000_000) {
+    const millions = value / 1_000_000;
+    return `${Number.isInteger(millions) ? millions : millions.toFixed(1)}M`;
+  }
+  if (value >= 1_000) return `${Math.round(value / 1_000)}K`;
+  return String(value);
+}
+
+function formatPrice(value?: number | null): string | null {
+  if (value == null) return null;
+  if (value === 0) return "$0";
+  const decimals = value >= 0.1 ? 2 : 3;
+  return `$${value.toFixed(decimals)}`;
+}
+
+function agoLabel(t: (key: string, options?: Record<string, unknown>) => string, at: number): string {
+  const minutes = Math.floor((Date.now() - at) / 60_000);
+  if (minutes < 1) return t("llmSettings.meta.justNow");
+  if (minutes < 60) return t("llmSettings.meta.minutesAgo", { count: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return t("llmSettings.meta.hoursAgo", { count: hours });
+  return t("llmSettings.meta.daysAgo", { count: Math.floor(hours / 24) });
+}
+
+const SOURCE_LABEL_KEYS: Record<string, string> = {
+  provider: "llmSettings.meta.sourceProvider",
+  catalog: "llmSettings.meta.sourceCatalog",
+  "provider+catalog": "llmSettings.meta.sourceMixed",
+  unknown: "llmSettings.meta.sourceUnknown",
+};
+
 export function LlmSettingsPanel({
   onDirtyChange,
   onRegisterActions,
@@ -91,6 +137,8 @@ export function LlmSettingsPanel({
   const [savedMsg, setSavedMsg] = useState("");
   const [savedIsError, setSavedIsError] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [presetKey, setPresetKey] = useState("custom");
+  const [modelState, setModelState] = useState<Record<string, ModelState>>({});
   const savedDraftRef = useRef<LlmDraft | null>(null);
   const currentDraft = useMemo(
     () => makeDraft(profiles, keys, activeId, manualRouting),
@@ -156,6 +204,7 @@ export function LlmSettingsPanel({
         setManualRouting(manual);
         setHasKey(flags);
         setKeys({});
+        setModelState({});
         savedDraftRef.current = makeDraft(ps, {}, active, manual);
         setLoadError("");
       } catch (error) {
@@ -169,17 +218,67 @@ export function LlmSettingsPanel({
 
   function update(id: string, patch: Partial<LlmProfile>) {
     clearSaveFeedback();
+    // 地址 / 协议 / 版本变了，之前拉到的模型清单就不算数了。
+    if (["kind", "base_url", "api_version", "models_path"].some((field) => field in patch)) {
+      setModelState((state) => {
+        if (!state[id]) return state;
+        const next = { ...state };
+        delete next[id];
+        return next;
+      });
+    }
     setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   }
 
   function add() {
     clearSaveFeedback();
+    const preset = presetFor(presetKey);
     const id = uid();
-    setProfiles((ps) => [
-      ...ps,
-      { id, name: t("llmSettings.newProfile"), kind: "openai", base_url: DEFAULT_BASE, model: "gpt-4o-mini" },
-    ]);
+    const profile: LlmProfile = {
+      id,
+      name: preset.custom ? t("llmSettings.newProfile") : preset.name,
+      kind: preset.kind,
+      base_url: preset.base_url,
+      model: preset.model,
+      ...(preset.api_version ? { api_version: preset.api_version } : {}),
+      ...(preset.keyRequired === false ? { key_required: false } : {}),
+    };
+    setProfiles((ps) => [...ps, profile]);
     setActiveId((current) => current ?? id);
+  }
+
+  async function fetchModels(profile: LlmProfile, refresh: boolean) {
+    const id = profile.id;
+    setModelState((state) => ({
+      ...state,
+      [id]: { ...(state[id] ?? { models: [] }), loading: true, error: undefined },
+    }));
+    try {
+      const list: ModelList = await ipc.ai.listModels(profile, keys[id] ?? null, refresh);
+      setModelState((state) => ({
+        ...state,
+        [id]: {
+          models: list.models,
+          fetchedAt: list.fetched_at,
+          cached: list.cached,
+          note: list.note ?? undefined,
+          loading: false,
+        },
+      }));
+      // 模型名还空着就顺手填第一个，省得用户再点一次。
+      if (!profile.model.trim() && list.models[0]) {
+        update(id, { model: list.models[0].id });
+      }
+    } catch (error) {
+      setModelState((state) => ({
+        ...state,
+        [id]: {
+          ...(state[id] ?? { models: [] }),
+          loading: false,
+          error: String(error),
+        },
+      }));
+    }
   }
 
   // 删除已保存的配置是破坏性操作（保存后连同 Key 路由一起消失）：先确认。
@@ -277,9 +376,79 @@ export function LlmSettingsPanel({
   const effectiveActive =
     activeId && profiles.some((p) => p.id === activeId) ? activeId : profiles[0]?.id ?? null;
 
+  function renderModelMeta(profile: LlmProfile) {
+    const state = modelState[profile.id];
+    if (!state) return null;
+    const info = state.models.find((model) => model.id === profile.model.trim());
+    const badges = [
+      info?.capabilities.tools ? t("llmSettings.meta.tools") : null,
+      info?.capabilities.vision ? t("llmSettings.meta.vision") : null,
+      info?.capabilities.json ? t("llmSettings.meta.json") : null,
+      info?.capabilities.reasoning ? t("llmSettings.meta.reasoning") : null,
+    ].filter(Boolean) as string[];
+    return (
+      <div className="mt-1 space-y-1 text-xs text-[var(--text-muted)]">
+        {info && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {formatTokens(info.context_window) && (
+              <span>{t("llmSettings.meta.context", { value: formatTokens(info.context_window) })}</span>
+            )}
+            {(info.input_price != null || info.output_price != null) && (
+              <span>
+                {t("llmSettings.meta.price", {
+                  input: formatPrice(info.input_price) ?? "—",
+                  output: formatPrice(info.output_price) ?? "—",
+                })}
+              </span>
+            )}
+            {badges.length > 0 && (
+              <span className="flex flex-wrap gap-1">
+                {badges.map((badge) => (
+                  <span
+                    key={badge}
+                    className="rounded bg-[var(--surface-card)] px-1.5 py-0.5 text-[var(--text-normal)]"
+                  >
+                    {badge}
+                  </span>
+                ))}
+              </span>
+            )}
+            {info.source === "unknown" && <span>{t("llmSettings.meta.unknown")}</span>}
+          </div>
+        )}
+        {state.fetchedAt != null && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>{t(SOURCE_LABEL_KEYS[state.models.find((m) => m.id === profile.model.trim())?.source ?? "unknown"] ?? "llmSettings.meta.sourceUnknown")}</span>
+            <span>·</span>
+            <span>{t("llmSettings.meta.fetched", { when: agoLabel(t, state.fetchedAt) })}</span>
+            {state.cached && <span>· {t("llmSettings.meta.cached")}</span>}
+          </div>
+        )}
+        {state.note && <p className="leading-relaxed">{state.note}</p>}
+        {state.error && (
+          <p role="alert" className="text-[var(--status-err)]">
+            {t("llmSettings.fetchFailed", { error: state.error })}
+          </p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          aria-label={t("llmSettings.preset")}
+          value={presetKey}
+          onChange={(event) => setPresetKey(event.target.value)}
+          className={`${FIELD} max-w-56 flex-1`}
+        >
+          {LLM_PRESETS.map((preset) => (
+            <option key={preset.key} value={preset.key}>
+              {preset.custom ? t("llmSettings.customPreset") : preset.name}
+            </option>
+          ))}
+        </select>
         <Button size="sm" variant="outline" onClick={add} data-tour="llm-add">
           <Plus className="h-3.5 w-3.5" />
           {t("llmSettings.add")}
@@ -300,6 +469,9 @@ export function LlmSettingsPanel({
       )}
       {profiles.map((p) => {
         const isActive = effectiveActive === p.id;
+        const state = modelState[p.id];
+        const models = state?.models ?? [];
+        const needsKey = requiresKey(p);
         return (
           <div
             key={p.id}
@@ -343,6 +515,25 @@ export function LlmSettingsPanel({
                 onChange={(e) => update(p.id, { name: e.target.value })}
               />
             </div>
+
+            <label className="block">
+              <span className="mb-1 block text-xs text-[var(--text-muted)]">
+                {t("llmSettings.protocol")}
+              </span>
+              <select
+                aria-label={t("llmSettings.protocol")}
+                className={FIELD}
+                value={p.kind}
+                onChange={(e) => update(p.id, { kind: e.target.value as ProviderKind })}
+              >
+                {PROTOCOLS.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {t(`llmSettings.protocols.${kind}`)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
             <input
               aria-label="Base URL"
               className={FIELD}
@@ -350,45 +541,186 @@ export function LlmSettingsPanel({
               placeholder="Base URL"
               onChange={(e) => update(p.id, { base_url: e.target.value })}
             />
-            <input
-              aria-label={t("llmSettings.modelName")}
-              className={FIELD}
-              value={p.model}
-              placeholder={t("llmSettings.modelPlaceholder")}
-              onChange={(e) => update(p.id, { model: e.target.value })}
-            />
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <input
-                  aria-label="API Key"
-                  type={showKey[p.id] ? "text" : "password"}
-                  className={`${FIELD} pr-10`}
-                  value={keys[p.id] ?? ""}
-                  placeholder={
-                    hasKey[p.id] ? "••••••" : "API Key"
-                  }
-                  onChange={(e) => {
-                    clearSaveFeedback();
-                    setKeys((k) => ({ ...k, [p.id]: e.target.value }));
-                  }}
-                />
-                <button
-                  type="button"
-                  aria-label={showKey[p.id] ? t("llmSettings.hideKey") : t("llmSettings.showKey")}
-                  title={showKey[p.id] ? t("llmSettings.hideLabel") : t("llmSettings.showLabel")}
-                  onClick={() => setShowKey((s) => ({ ...s, [p.id]: !s[p.id] }))}
-                  className="ca-touch-44 ca-workbench-touch absolute right-2 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded text-[var(--text-muted)] transition hover:text-[var(--text-strong)]"
+            {p.kind === "azure_openai" && (
+              <p className="text-xs leading-relaxed text-[var(--text-muted)]">
+                {t("llmSettings.baseUrlHintAzure")}
+              </p>
+            )}
+            {!needsKey && (
+              <p className="text-xs leading-relaxed text-[var(--text-muted)]">
+                {t("llmSettings.baseUrlHintOllama")}
+              </p>
+            )}
+
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <input
+                    aria-label={t("llmSettings.modelName")}
+                    className={FIELD}
+                    value={p.model}
+                    list={`llm-models-${p.id}`}
+                    placeholder={t("llmSettings.modelPlaceholder")}
+                    onChange={(e) => update(p.id, { model: e.target.value })}
+                  />
+                  <datalist id={`llm-models-${p.id}`}>
+                    {models.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {formatTokens(model.context_window) ?? model.id}
+                      </option>
+                    ))}
+                  </datalist>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-none gap-1.5"
+                  disabled={state?.loading}
+                  onClick={() => void fetchModels(p, Boolean(state?.fetchedAt))}
                 >
-                  {showKey[p.id] ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                </button>
+                  {state?.loading ? (
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                  ) : state?.fetchedAt ? (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  )}
+                  {state?.loading
+                    ? t("llmSettings.fetchingModels")
+                    : state?.fetchedAt
+                      ? t("llmSettings.refreshModels")
+                      : t("llmSettings.fetchModels")}
+                </Button>
               </div>
-              {hasKey[p.id] && !keys[p.id] && (
-                <span className="inline-flex flex-none items-center gap-1 rounded-full bg-[var(--status-ok-bg)] px-2 py-1 text-xs font-medium text-[var(--status-ok)]">
-                  <Check className="h-3 w-3" />
-                  {t("llmSettings.configured")}
-                </span>
-              )}
+              {renderModelMeta(p)}
             </div>
+
+            {needsKey ? (
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <input
+                    aria-label="API Key"
+                    type={showKey[p.id] ? "text" : "password"}
+                    className={`${FIELD} pr-10`}
+                    value={keys[p.id] ?? ""}
+                    placeholder={hasKey[p.id] ? "••••••" : "API Key"}
+                    onChange={(e) => {
+                      clearSaveFeedback();
+                      setKeys((k) => ({ ...k, [p.id]: e.target.value }));
+                    }}
+                  />
+                  <button
+                    type="button"
+                    aria-label={showKey[p.id] ? t("llmSettings.hideKey") : t("llmSettings.showKey")}
+                    title={showKey[p.id] ? t("llmSettings.hideLabel") : t("llmSettings.showLabel")}
+                    onClick={() => setShowKey((s) => ({ ...s, [p.id]: !s[p.id] }))}
+                    className="ca-touch-44 ca-workbench-touch absolute right-2 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded text-[var(--text-muted)] transition hover:text-[var(--text-strong)]"
+                  >
+                    {showKey[p.id] ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
+                {hasKey[p.id] && !keys[p.id] && (
+                  <span className="inline-flex flex-none items-center gap-1 rounded-full bg-[var(--status-ok-bg)] px-2 py-1 text-xs font-medium text-[var(--status-ok)]">
+                    <Check className="h-3 w-3" />
+                    {t("llmSettings.configured")}
+                  </span>
+                )}
+              </div>
+            ) : null}
+
+            <details className="rounded-lg border border-[var(--border-faint)] px-3 py-1.5">
+              <summary className="cursor-pointer select-none text-xs text-[var(--text-muted)]">
+                {t("llmSettings.advanced")}
+              </summary>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {p.kind === "azure_openai" && (
+                  <>
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-[var(--text-muted)]">
+                        {t("llmSettings.apiVersion")}
+                      </span>
+                      <input
+                        aria-label={t("llmSettings.apiVersion")}
+                        className={FIELD}
+                        value={p.api_version ?? ""}
+                        placeholder="2024-10-21"
+                        onChange={(e) => update(p.id, { api_version: e.target.value || null })}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-[var(--text-muted)]">
+                        {t("llmSettings.deployment")}
+                      </span>
+                      <input
+                        aria-label={t("llmSettings.deployment")}
+                        className={FIELD}
+                        value={p.deployment ?? ""}
+                        placeholder={p.model}
+                        onChange={(e) => update(p.id, { deployment: e.target.value || null })}
+                      />
+                    </label>
+                  </>
+                )}
+                <label className="block">
+                  <span className="mb-1 block text-xs text-[var(--text-muted)]">
+                    {t("llmSettings.contextOverride")}
+                  </span>
+                  <input
+                    aria-label={t("llmSettings.contextOverride")}
+                    type="number"
+                    min={1}
+                    className={FIELD}
+                    value={p.context_window ?? ""}
+                    placeholder="128000"
+                    onChange={(e) =>
+                      update(p.id, {
+                        context_window: e.target.value ? Number(e.target.value) : null,
+                      })
+                    }
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs text-[var(--text-muted)]">
+                    {t("llmSettings.maxOutput")}
+                  </span>
+                  <input
+                    aria-label={t("llmSettings.maxOutput")}
+                    type="number"
+                    min={1}
+                    className={FIELD}
+                    value={p.max_output_tokens ?? ""}
+                    placeholder="8192"
+                    onChange={(e) =>
+                      update(p.id, {
+                        max_output_tokens: e.target.value ? Number(e.target.value) : null,
+                      })
+                    }
+                  />
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="mb-1 block text-xs text-[var(--text-muted)]">
+                    {t("llmSettings.modelsPath")}
+                  </span>
+                  <input
+                    aria-label={t("llmSettings.modelsPath")}
+                    className={FIELD}
+                    value={p.models_path ?? ""}
+                    placeholder="models"
+                    onChange={(e) => update(p.id, { models_path: e.target.value || null })}
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-xs text-[var(--text-normal)] sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={!needsKey}
+                    onChange={(e) =>
+                      update(p.id, { key_required: e.target.checked ? false : true })
+                    }
+                  />
+                  {t("llmSettings.noKeyRequired")}
+                </label>
+              </div>
+            </details>
 
             <Button
               className="text-xs text-[var(--text-muted)] transition hover:text-[var(--status-err)]"

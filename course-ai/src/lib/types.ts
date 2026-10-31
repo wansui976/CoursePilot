@@ -171,8 +171,8 @@ export interface Job {
   finished_at: number | null;
 }
 
-/** 只剩 OpenAI 兼容一种通道。Claude 走 Anthropic 的兼容层地址，同样是这个类型。 */
-export type ProviderKind = "openai";
+/** 出站协议。老配置里的 "anthropic" 现在按原生 Messages API 走。 */
+export type ProviderKind = "openai" | "anthropic" | "gemini" | "ollama" | "azure_openai";
 
 export interface LlmProfile {
   id: string;
@@ -180,6 +180,48 @@ export interface LlmProfile {
   kind: ProviderKind;
   base_url: string;
   model: string;
+  /** Azure 的 api-version。 */
+  api_version?: string | null;
+  /** Azure 的 deployment 名；不填用 model。 */
+  deployment?: string | null;
+  /** 列模型接口的路径覆盖。 */
+  models_path?: string | null;
+  /** 模型目录里没有这个模型时手工指定上下文长度。 */
+  context_window?: number | null;
+  /** 单次输出上限（Anthropic 必填、Gemini 可选）。 */
+  max_output_tokens?: number | null;
+  /** 是否必须填 API Key；Ollama 默认不需要。 */
+  key_required?: boolean | null;
+}
+
+export interface ModelCapabilities {
+  vision: boolean;
+  tools: boolean;
+  json: boolean;
+  reasoning: boolean;
+}
+
+/** 一个可选模型及其实测/目录元数据。 */
+export interface ModelInfo {
+  id: string;
+  display_name?: string | null;
+  /** 上下文窗口（token）。 */
+  context_window?: number | null;
+  max_output_tokens?: number | null;
+  /** USD / 1M tokens 的参考价。 */
+  input_price?: number | null;
+  output_price?: number | null;
+  capabilities: ModelCapabilities;
+  /** provider / catalog / provider+catalog / unknown */
+  source: string;
+}
+
+export interface ModelList {
+  models: ModelInfo[];
+  cached: boolean;
+  fetched_at: number;
+  source: string;
+  note?: string | null;
 }
 
 export interface ChatMessage {
