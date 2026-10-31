@@ -72,11 +72,19 @@ export function FindExplanationDialog({
   async function acceptFile(file: File) {
     setPickError(null);
     try {
-      setStep({ kind: "crop", src: await prepareAssistantImage(file) });
+      const src = await prepareAssistantImage(file);
+      // 换了一张图就是换了一道题：上一张的识别文字（可能还改过）不能留下来，
+      // 否则会拿旧题的文字配新图去检索。
+      setText("");
+      ocr.reset();
+      setStep({ kind: "crop", src });
     } catch (error) {
       setPickError(error);
     }
   }
+  // 粘贴监听只随步骤重挂，用 ref 取到最新的 acceptFile，不必把它塞进 effect 依赖。
+  const acceptFileRef = useRef<(file: File) => void>(() => {});
+  acceptFileRef.current = (file) => void acceptFile(file);
 
   // 选图这一步：直接 ⌘V 粘贴截图。
   useEffect(() => {
@@ -85,7 +93,7 @@ export function FindExplanationDialog({
       const file = imageFilesFromClipboard(event.clipboardData)[0];
       if (!file) return;
       event.preventDefault();
-      void acceptFile(file);
+      acceptFileRef.current(file);
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);

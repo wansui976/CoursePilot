@@ -203,6 +203,8 @@ export function Home() {
 
 
   function openVideo(videoId: string) {
+    // 手动打开一个视频 = 结束「依次播放这几段」：否则顶上那条「第 1/3 段」会跟着跑到无关的视频里。
+    useClipQueue.getState().clear();
     runAfterWorkspaceTransient(() => {
       // 记录「该课程最近打开的视频」，回到课程库时给「继续上次」横幅。
       // 用视频自己的 course_id（队列打开跨课程视频时 selectedCourseId 还是旧值）。
