@@ -544,10 +544,16 @@ pub async fn migrate_context_fingerprints(db: &Db) -> AppResult<usize> {
 
 // ---------- 输入预算 ----------
 
-/// 直接整篇送进 Prompt 的上限（字符）。绝大多数单节课在这以下。
+/// 模型目录里查不到上下文时的默认预算（字符）。保守值，避免把小窗口模型撑爆。
 const CONTEXT_BUDGET_CHARS: usize = 20_000;
-/// 超预算时的分块大小。
+/// 预算上限（字符）：再大的窗口也只送这么多，避免单次请求过大、费用失控。
+const MAX_CONTEXT_BUDGET_CHARS: usize = 400_000;
+/// 预算下限（字符）：小窗口模型也至少留这么多。
+const MIN_CONTEXT_BUDGET_CHARS: usize = 4_000;
+/// 超预算时的分块上限（字符）；小窗口模型会按自己的预算缩小。
 const DIGEST_CHUNK_CHARS: usize = 12_000;
+/// 分块下限。
+const MIN_DIGEST_CHUNK_CHARS: usize = 2_000;
 /// 每一块提要允许重试多少次。网络抖动用重试兜，而不是放宽「每块都要成功」这条要求。
 /// 每块的重试次数与退避（秒）。
 ///
@@ -567,6 +573,19 @@ const DIGEST_CHUNK_BACKOFF_SECS: &[u64] = &[2, 6, 15];
 /// 试过 tokio 的假时钟，但它会连带把 sqlx 连接池的获取超时也一起跳掉。
 #[cfg(test)]
 const DIGEST_CHUNK_BACKOFF_SECS: &[u64] = &[0, 0, 0];
+
+/// 讲稿直接进 Prompt 的字符预算：跟随模型上下文。
+///
+/// 目录里查不到就退回 20K（保守，不会把小窗口模型撑爆）。上下文是 token；
+/// 中英混排按 1 token ≈ 1 字符保守折算，只把窗口的 60% 给讲稿，其余留给系统提示、
+/// 工具定义和输出。上限 400K 字符，避免超大窗口模型一次吞掉整份长讲座。
+fn context_budget_chars(model: &str) -> usize {
+    match crate::llm::catalog::lookup(model).and_then(|entry| entry.context) {
+        Some(tokens) => (tokens as usize * 3 / 5)
+            .clamp(MIN_CONTEXT_BUDGET_CHARS, MAX_CONTEXT_BUDGET_CHARS),
+        None => CONTEXT_BUDGET_CHARS,
+    }
+}
 
 /// 送进各生成任务的讲稿，以及它所基于的**原始讲稿**指纹。
 ///
@@ -665,7 +684,7 @@ pub async fn budgeted_context(
 ) -> AppResult<LectureInput> {
     let full = lecture_context(db, video_id).await?;
     let fingerprint = context_fingerprint(&full);
-    if full.chars().count() <= CONTEXT_BUDGET_CHARS {
+    if full.chars().count() <= context_budget_chars(model) {
         return Ok(LectureInput {
             context: full,
             fingerprint,
@@ -737,7 +756,11 @@ async fn build_digest(
         None => (fallback_provider, fallback_model, None),
     };
 
-    let chunks = crate::pipeline::rag::split_by_chars(full, DIGEST_CHUNK_CHARS);
+    // 分块也跟随提要模型：小窗口模型不能塞 12K 字符的块。
+    let chunk_chars = context_budget_chars(model)
+        .min(DIGEST_CHUNK_CHARS)
+        .max(MIN_DIGEST_CHUNK_CHARS);
+    let chunks = crate::pipeline::rag::split_by_chars(full, chunk_chars);
     if chunks.is_empty() {
         return Err(AppError::Other("讲稿为空，无法生成提要".into()));
     }
@@ -1283,6 +1306,36 @@ mod tests {
             .unwrap();
         // 短片不压缩：内容与讲稿逐字相同（这也是五个任务命中前缀缓存的前提）。
         assert_eq!(input.context, lecture_context(&db, &vid).await.unwrap());
+    }
+
+    #[test]
+    fn transcript_budget_follows_the_model_context_window() {
+        assert_eq!(context_budget_chars("m"), CONTEXT_BUDGET_CHARS);
+        assert_eq!(context_budget_chars("gpt-4o"), 76_800);
+        assert_eq!(
+            context_budget_chars("claude-sonnet-4-6"),
+            MAX_CONTEXT_BUDGET_CHARS,
+            "超大窗口要封顶，避免一次请求过大"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_large_context_model_skips_the_digest_for_a_medium_lecture() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        seed_long_transcript(&db, &vid, 500).await;
+        let full = lecture_context(&db, &vid).await.unwrap();
+        assert!(full.chars().count() > CONTEXT_BUDGET_CHARS);
+        assert!(
+            full.chars().count() <= context_budget_chars("gpt-4o"),
+            "这份讲稿要在 128K 模型的预算以内才测得到「不压缩」"
+        );
+        let provider = Provider::Mock {
+            canned: "不该被用到".into(),
+        };
+        let input = budgeted_context(&db, &provider, "gpt-4o", &vid, None)
+            .await
+            .unwrap();
+        assert_eq!(input.context, full, "预算够大时整篇直送，不再压缩");
     }
 
     #[tokio::test]
