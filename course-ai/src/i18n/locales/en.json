@@ -201,7 +201,9 @@
     "transcoding": "Transcoding on this device… {{percent}}%",
     "transcodeFailed": "On-device transcoding failed. You can try again.",
     "transcodeRetry": "Retry transcoding",
-    "transcodeDone": "Transcoding finished, opening…"
+    "transcodeDone": "Transcoding finished, opening…",
+    "transcodeStuck": "Transcoding finished, but the player still couldn't open it. Reload it below.",
+    "transcodeReopen": "Reload"
   },
   "morePanel": {
     "quiz": "Quiz",

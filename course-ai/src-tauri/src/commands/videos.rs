@@ -1045,16 +1045,21 @@ pub async fn cmd_media_url(
 ///
 /// 播放器只在 `<video>` 报错之后问一次：那时用户已经看到「放不了」，多这一趟换来一句
 /// 能看懂的原因（而不是一块黑屏）。正常播放完全不碰它。
+///
+/// 读的是**实际交给播放器的那份**：转过码以后原件还是 AV1，但播放器拿到的是
+/// `playable.mp4`。还按原件报 `av01`，会把用户重新引回已经解决过的方向。
 #[tauri::command]
 pub async fn cmd_video_codec(
     state: State<'_, AppState>,
     video_id: String,
 ) -> AppResult<Option<String>> {
-    let (file_path, _) = live_video_paths(&state.db, &video_id).await?;
-    Ok(
-        crate::pipeline::playable::video_codec(std::path::Path::new(&file_path))
-            .map(|codec| String::from_utf8_lossy(&codec).to_string()),
-    )
+    let (file_path, data_dir) = live_video_paths(&state.db, &video_id).await?;
+    let path = crate::pipeline::playable::cached_playable(
+        std::path::Path::new(&file_path),
+        std::path::Path::new(&data_dir),
+    );
+    Ok(crate::pipeline::playable::video_codec(&path)
+        .map(|codec| String::from_utf8_lossy(&codec).to_string()))
 }
 
 /// 视频封面（首帧）字节，前端转 blob 显示。首次调用时用 ffmpeg 截首帧并缓存。

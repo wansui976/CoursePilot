@@ -201,7 +201,9 @@
     "transcoding": "正在本机转码 {{percent}}%…",
     "transcodeFailed": "本机转码失败，可以重试一次。",
     "transcodeRetry": "重试转码",
-    "transcodeDone": "转码完成，正在打开…"
+    "transcodeDone": "转码完成，正在打开…",
+    "transcodeStuck": "转码完成了，但播放器还是没能打开。点下面重新加载一次。",
+    "transcodeReopen": "重新加载"
   },
   "morePanel": {
     "quiz": "练习",

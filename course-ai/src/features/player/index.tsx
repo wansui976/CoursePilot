@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cropStyle } from "@/lib/blackBars";
 import { useSilenceSkip } from "@/lib/useSilenceSkip";
@@ -73,7 +73,7 @@ export function VideoPlayer({
   immersive?: boolean;
   onFullscreenChange?: (fullscreen: boolean) => void;
   /** 本机转码完成：外层重新取一次 mediaUrl（此刻 data_dir 里已经有 playable.mp4）。 */
-  onTranscoded?: () => void;
+  onTranscoded?: () => void | Promise<unknown>;
 }) {
   const { t } = useTranslation();
   const regionRef = useRef<HTMLDivElement>(null);
@@ -91,10 +91,23 @@ export function VideoPlayer({
   // 端上转码进度（只 iOS 会真有这个状态）。解码失败后开始轮询：
   // 后端在 cmd_media_url 里已经点火，这里只负责显示进度和转完后的刷新。
   const [transcode, setTranscode] = useState<TranscodeStatus | null>(null);
+  // 换源用的「代」：+1 让 <video> 重挂一次。只指望 src 变化不够——mediaUrl 的
+  // `?v=` 取的是文件 mtime，URL 没变、或者元素还停在 0×0（AV1 在 WKWebView 上
+  // 就是这样，不报 error）时，WebKit 不一定重新走一遍加载流程，卡片就会永远停在
+  // 「转码完成，正在打开…」。新元素一定会重新请求。
+  const [mediaEpoch, setMediaEpoch] = useState(0);
+  // 这条视频是否已经为「转码完成」自动换过一次源：换过还打不开就不再自动重挂，
+  // 否则会和 onError 形成一个每秒重载的循环。
+  const autoReloadedRef = useRef(false);
   useEffect(() => {
     setAudioOnly(false);
     setDecodeFailure(null);
+    setTranscode(null);
   }, [src]);
+  useEffect(() => {
+    autoReloadedRef.current = false;
+    setTranscode(null);
+  }, [videoId]);
   // 把「播放中时长」记入学习事件日志（供仪表盘统计 / 间隔重复排期）。
   useWatchLogger(videoId, playing);
   // 「记一笔」（快捷键或笔记面板的按钮）：先暂停，写字时视频别往前跑。
@@ -124,6 +137,16 @@ export function VideoPlayer({
   // 父组件每次渲染都传一个新的内联回调；放进 ref，免得轮询跟着父组件重渲染一遍遍重启。
   const onTranscodedRef = useRef(onTranscoded);
   onTranscodedRef.current = onTranscoded;
+  // 换到转码产物：先让外层重新取一次 mediaUrl（后端会把媒体服务里这条视频的路径
+  // 指向 playable.mp4），**取完之后**再重挂 <video>。重挂太早会在注册表更新前
+  // 又请求到原件，白失败一轮。
+  const reopenSource = useCallback(() => {
+    setDecodeFailure(null);
+    const pending = onTranscodedRef.current?.();
+    void Promise.resolve(pending).finally(() => {
+      setMediaEpoch((epoch) => epoch + 1);
+    });
+  }, []);
   useEffect(() => {
     if (decodeFailure === null) return;
     let cancelled = false;
@@ -134,7 +157,13 @@ export function VideoPlayer({
         if (cancelled) return;
         setTranscode(status);
         if (status.state === "done") {
-          onTranscodedRef.current?.();
+          if (!autoReloadedRef.current) {
+            autoReloadedRef.current = true;
+            reopenSource();
+          } else {
+            // 已经换过一次源还是打不开：给一个能点的出口，而不是永远「正在打开」。
+            setTranscode({ state: "stuck", percent: 100 });
+          }
           return;
         }
       } catch {
@@ -147,7 +176,7 @@ export function VideoPlayer({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [decodeFailure, videoId]);
+  }, [decodeFailure, videoId, reopenSource]);
 
   const [rate, setRate] = useState(loadPlaybackRate);
   const silenceSkip = useSilenceSkip(videoId);
@@ -582,6 +611,9 @@ export function VideoPlayer({
           }
         >
           <video
+            // 转码完成 / 换视频时整块重挂：同一个元素在失败状态上只改 src，WKWebView
+            // 有时不会重新走加载流程（见 mediaEpoch 的注释）。
+            key={`${src}#${mediaEpoch}`}
             ref={ref}
             aria-label={t("videoPlayer.player")}
             data-theme-heavy=""
@@ -751,6 +783,7 @@ export function VideoPlayer({
               onRetryTranscode={() => {
                 void ipc.videos.startTranscode(videoId).then(setTranscode).catch(() => undefined);
               }}
+              onReopen={reopenSource}
             />
           )}
           {playFlash && (

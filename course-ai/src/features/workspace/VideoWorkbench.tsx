@@ -131,12 +131,14 @@ export function VideoWorkbench({
                   />
                 </div>
               ) : mediaSrc ? (
+                // onTranscoded 把 refetch 的 Promise 交回去：播放器等它完成（媒体服务的
+                // 注册表已指向 playable.mp4）再重挂 <video>，免得抢在更新前又请求到原件。
                 <VideoPlayer
                   src={mediaSrc}
                   videoId={video.id}
                   immersive={isIOS()}
                   onFullscreenChange={onFullscreenChange}
-                  onTranscoded={() => void refetchMediaSrc()}
+                  onTranscoded={() => refetchMediaSrc()}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center bg-black text-sm text-white/40">

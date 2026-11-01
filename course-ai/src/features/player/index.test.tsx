@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VideoPlayer } from "./.";
 import i18n from "@/i18n";
@@ -45,6 +45,7 @@ vi.mock("@/lib/platform", () => ({
 function renderPlayer(
   immersive = true,
   onFullscreenChange?: (fullscreen: boolean) => void,
+  onTranscoded?: () => void,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -56,6 +57,7 @@ function renderPlayer(
         videoId="video-1"
         immersive={immersive}
         onFullscreenChange={onFullscreenChange}
+        onTranscoded={onTranscoded}
       />
     </QueryClientProvider>,
   );
@@ -100,6 +102,49 @@ describe("VideoPlayer iOS gestures", () => {
 
     expect(await screen.findByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
     expect(await screen.findByRole("alert")).toHaveTextContent("正在本机转码");
+  });
+
+  it("转码完成后重挂播放器、退掉解码失败卡片，而不是只改 src", async () => {
+    (ipc.videos.transcodeStatus as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ state: "done", percent: 100 });
+    const onTranscoded = vi.fn();
+    renderPlayer(true, undefined, onTranscoded);
+    const before = document.querySelector("video")!;
+    Object.defineProperty(before, "error", { configurable: true, value: { code: 4 } });
+
+    await act(async () => {
+      fireEvent.error(before);
+    });
+
+    await waitFor(() => expect(onTranscoded).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    // 新元素：同一个元素停在 0×0 / 失败状态时，只改 src 未必会让 WebKit 重新加载。
+    expect(document.querySelector("video")).not.toBe(before);
+  });
+
+  it("换过源还是打不开时给出重试，而不是永远停在「正在打开」", async () => {
+    (ipc.videos.transcodeStatus as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ state: "done", percent: 100 });
+    const onTranscoded = vi.fn();
+    renderPlayer(true, undefined, onTranscoded);
+    const first = document.querySelector("video")!;
+    Object.defineProperty(first, "error", { configurable: true, value: { code: 4 } });
+    await act(async () => {
+      fireEvent.error(first);
+    });
+    await waitFor(() => expect(onTranscoded).toHaveBeenCalledTimes(1));
+
+    // 重挂后的元素仍然打不开（产物有问题 / 媒体服务没起来）：给一个能点的出口。
+    const second = document.querySelector("video")!;
+    Object.defineProperty(second, "error", { configurable: true, value: { code: 4 } });
+    await act(async () => {
+      fireEvent.error(second);
+    });
+
+    const alert = await screen.findByRole("alert");
+    await waitFor(() => expect(alert).toHaveTextContent("播放器还是没能打开"));
+    fireEvent.click(within(alert).getByRole("button", { name: "重新加载" }));
+    await waitFor(() => expect(onTranscoded).toHaveBeenCalledTimes(2));
   });
 
   it("解码失败时把编码说出来，而不是留一块黑屏", async () => {

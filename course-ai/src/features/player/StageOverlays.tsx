@@ -106,13 +106,19 @@ export function DecodeFailureCard({
   codec,
   transcode,
   onRetryTranscode,
+  onReopen,
 }: {
   /** 空串 = 还在查编码；"unknown" = 查不到。 */
   codec: string;
   transcode: TranscodeStatus | null;
   onRetryTranscode: () => void;
+  /** 转码已完成但播放器还是没打开：重挂 <video> 再试一次。 */
+  onReopen: () => void;
 }) {
   const { t } = useTranslation();
+  // 转码完成 → 换源；换过还是打不开就落到 stuck，给一个能点的出口，
+  // 不能只留一句「正在打开」把人晾在那儿。
+  const reopenable = transcode?.state === "stuck";
   return (
     <div
       role="alert"
@@ -124,11 +130,13 @@ export function DecodeFailureCard({
           ? t("videoPlayer.transcoding", { percent: transcode.percent })
           : transcode?.state === "done"
             ? t("videoPlayer.transcodeDone")
-            : transcode?.state === "failed"
-              ? t("videoPlayer.transcodeFailed")
-              : codec && codec !== "unknown"
-                ? t("videoPlayer.decodeFailedCodec", { codec })
-                : t("videoPlayer.decodeFailedGeneric")}
+            : transcode?.state === "stuck"
+              ? t("videoPlayer.transcodeStuck")
+              : transcode?.state === "failed"
+                ? t("videoPlayer.transcodeFailed")
+                : codec && codec !== "unknown"
+                  ? t("videoPlayer.decodeFailedCodec", { codec })
+                  : t("videoPlayer.decodeFailedGeneric")}
       </p>
       {transcode?.state === "running" && (
         <div
@@ -144,13 +152,13 @@ export function DecodeFailureCard({
           />
         </div>
       )}
-      {transcode?.state === "failed" && (
+      {(transcode?.state === "failed" || reopenable) && (
         <button
           type="button"
-          onClick={onRetryTranscode}
+          onClick={reopenable ? onReopen : onRetryTranscode}
           className="ca-touch-44 self-start rounded-md bg-white/15 px-2.5 py-1 text-xs font-medium text-white"
         >
-          {t("videoPlayer.transcodeRetry")}
+          {reopenable ? t("videoPlayer.transcodeReopen") : t("videoPlayer.transcodeRetry")}
         </button>
       )}
     </div>
