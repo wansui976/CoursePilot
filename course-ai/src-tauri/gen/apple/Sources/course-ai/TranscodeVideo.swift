@@ -87,12 +87,12 @@ private final class Writer {
         }
         // 还没准备好就硬写会抛 ObjC 异常（这个异常 Swift 接不住，直接闪退），只能放弃。
         guard input.isReadyForMoreMediaData else {
-            trace("encoder never became ready at frame \(frames)")
+            trace("encoder never became ready at frame \(frames)", always: true)
             failed = true
             return
         }
         guard let buffer = makePixelBuffer(frame) else {
-            trace("pixel buffer failed at frame \(frames) (bitdepth \(frame.bitdepth))")
+            trace("pixel buffer failed at frame \(frames) (bitdepth \(frame.bitdepth))", always: true)
             failed = true
             return
         }
@@ -106,7 +106,7 @@ private final class Writer {
             frames += 1
             lastPts = pts
         } else {
-            trace("append failed at frame \(frames): \(writer.error.map(String.init(describing:)) ?? "")")
+            trace("append failed at frame \(frames): \(writer.error.map(String.init(describing:)) ?? "")", always: true)
             failed = true
         }
     }
@@ -179,10 +179,15 @@ private final class Writer {
 
 
 /// 阶段跟踪：写到 Documents/transcode-trace.log。真机上 NSLog 进不了 syslog，
-/// 卡住时只有落盘的记录能说明停在哪儿。只在调试构建里写：正式版不该往用户的
-/// 「文件」App 里塞一个只增不减的日志。
-private func trace(_ message: String) {
-    #if DEBUG
+/// 卡住时只有落盘的记录能说明停在哪儿。
+///
+/// 成功的阶段只在调试构建里写；**跟失败有关的行正式版也写**——否则用户只看到一句
+/// 「转码失败」，真机上没法定（Release 的 IPA 会 strip 掉导出符号，端上转码就曾经
+/// 这样一声不响地全部失败）。
+private func trace(_ message: String, always: Bool = false) {
+    #if !DEBUG
+    if !always { return }
+    #endif
     guard let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
     let url = directory.appendingPathComponent("transcode-trace.log")
     let line = "\(Date().timeIntervalSince1970) \(message)\n"
@@ -194,7 +199,6 @@ private func trace(_ message: String) {
     } else {
         try? data.write(to: url)
     }
-    #endif
 }
 
 /// 转码入口。返回值：0 成功；负数为错误码。
@@ -299,7 +303,7 @@ public func courseai_transcode_video(
             currentProgress = Int32(min(99, max(1, samples * 100 / estimatedFrames)))
         }
     }
-    trace("samples done: \(samples), frames \(sink.frames), decode \(decodeError)")
+    trace("samples done: \(samples), frames \(sink.frames), decode \(decodeError)", always: true)
     if decodeError == 0, !sink.failed {
         _ = dav1d_decoder_flush(decoder, callback, box)
     }
@@ -309,7 +313,7 @@ public func courseai_transcode_video(
     writer.finishWriting { done.signal() }
     done.wait()
 
-    trace("writer finished status \(writer.status.rawValue) frames \(sink.frames) duplicates \(sink.skippedNonMonotonic)")
+    trace("writer finished status \(writer.status.rawValue) frames \(sink.frames) duplicates \(sink.skippedNonMonotonic)", always: true)
     if decodeError != 0 || sink.failed {
         try? FileManager.default.removeItem(at: partial)
         return decodeError != 0 ? -13 : -14
@@ -333,13 +337,13 @@ public func courseai_transcode_video(
 private func muxAudio(videoOnly: URL, from source: AVURLAsset, into destination: URL) -> Bool {
     let videoAsset = AVURLAsset(url: videoOnly)
     guard let sourceVideo = videoAsset.tracks(withMediaType: .video).first else {
-        trace("mux: no video track in transcoded file")
+        trace("mux: no video track in transcoded file", always: true)
         return false
     }
     let composition = AVMutableComposition()
     guard let videoTrack = composition.addMutableTrack(
         withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
-        trace("mux: cannot add video track")
+        trace("mux: cannot add video track", always: true)
         return false
     }
     do {
@@ -356,17 +360,17 @@ private func muxAudio(videoOnly: URL, from source: AVURLAsset, into destination:
             trace("mux: no audio in source")
         }
     } catch {
-        trace("mux insert failed: \(error)")
+        trace("mux insert failed: \(error)", always: true)
         return false
     }
 
     guard let export = AVAssetExportSession(
         asset: composition, presetName: AVAssetExportPresetPassthrough) else {
-        trace("mux: export session nil")
+        trace("mux: export session nil", always: true)
         return false
     }
     guard export.supportedFileTypes.contains(.mp4) else {
-        trace("mux: mp4 unsupported \(export.supportedFileTypes)")
+        trace("mux: mp4 unsupported \(export.supportedFileTypes)", always: true)
         return false
     }
     // 先导出到旁边的临时文件，成功后再改名成 playable.mp4：Rust 那边只要见到
@@ -380,7 +384,7 @@ private func muxAudio(videoOnly: URL, from source: AVURLAsset, into destination:
     let done = DispatchSemaphore(value: 0)
     export.exportAsynchronously { done.signal() }
     done.wait()
-    trace("mux: export status \(export.status.rawValue) \(export.error.map(String.init(describing:)) ?? "")")
+    trace("mux: export status \(export.status.rawValue) \(export.error.map(String.init(describing:)) ?? "")", always: true)
     guard export.status == .completed else {
         try? FileManager.default.removeItem(at: exporting)
         return false
@@ -389,7 +393,7 @@ private func muxAudio(videoOnly: URL, from source: AVURLAsset, into destination:
         try? FileManager.default.removeItem(at: destination)
         try FileManager.default.moveItem(at: exporting, to: destination)
     } catch {
-        trace("mux: rename failed \(error)")
+        trace("mux: rename failed \(error)", always: true)
         try? FileManager.default.removeItem(at: exporting)
         return false
     }

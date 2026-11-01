@@ -209,7 +209,8 @@ pub fn run() {
                 ));
                 // 调试用：Documents/transcode-now.txt 里写一个 video_id，启动时就转它。
                 // 真机验证转码链路时用——否则每改一版都要人拿手指点一次视频。
-                #[cfg(all(target_os = "ios", debug_assertions))]
+                // 正式版也留着：端上转码出问题时要能在不碰 UI 的情况下复现一次。
+                #[cfg(target_os = "ios")]
                 {
                     let probe_handle = handle.clone();
                     tauri::async_runtime::spawn(async move {

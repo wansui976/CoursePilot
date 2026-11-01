@@ -133,15 +133,50 @@ impl TranscodeJobs {
 mod ffi {
     use std::ffi::CString;
     use std::os::raw::{c_char, c_int};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::OnceLock;
 
     /// 转码实现在 App target 的 Swift 里（TranscodeVideo.swift 用 @_cdecl 导出）。
     ///
-    /// 不能直接 `extern "C"` 声明：Rust 这边编的是 cdylib/staticlib，链接发生在
-    /// Swift 目标文件之前，声明了就是 undefined symbol。dlsym 在**运行时**从主程序里
-    /// 找符号，正好绕开这个顺序问题。
+    /// **不能只靠 dlsym**：Release 的 IPA 在导出时会 strip 掉导出符号
+    /// （ExportOptions 的 `stripSwiftSymbols`，实测装到手机上整张导出表只剩
+    /// `__mh_execute_header`），`dlsym` 一个都找不到，端上转码会被判成
+    /// 「这个版本没编入」，点重试也永远失败。所以 Swift 在 `+load` 里把两个
+    /// 函数指针主动递进来（见 TranscodeVideo.swift 的 CourseAITranscodeBridge），
+    /// dlsym 只留作兜底。
     type TranscodeFn = unsafe extern "C" fn(*const c_char, *const c_char) -> c_int;
     type ProgressFn = unsafe extern "C" fn() -> c_int;
+
+    static REGISTERED_RUN: AtomicUsize = AtomicUsize::new(0);
+    static REGISTERED_PROGRESS: AtomicUsize = AtomicUsize::new(0);
+
+    /// Swift 启动时（`+load`）调用：把转码入口和进度函数登记进来。
+    #[no_mangle]
+    pub extern "C" fn courseai_register_transcode(
+        run: Option<TranscodeFn>,
+        progress: Option<ProgressFn>,
+    ) {
+        if let Some(run) = run {
+            REGISTERED_RUN.store(run as usize, Ordering::Release);
+        }
+        if let Some(progress) = progress {
+            REGISTERED_PROGRESS.store(progress as usize, Ordering::Release);
+        }
+    }
+
+    fn registered_run() -> Option<TranscodeFn> {
+        match REGISTERED_RUN.load(Ordering::Acquire) {
+            0 => None,
+            address => Some(unsafe { std::mem::transmute::<usize, TranscodeFn>(address) }),
+        }
+    }
+
+    fn registered_progress() -> Option<ProgressFn> {
+        match REGISTERED_PROGRESS.load(Ordering::Acquire) {
+            0 => None,
+            address => Some(unsafe { std::mem::transmute::<usize, ProgressFn>(address) }),
+        }
+    }
 
     fn lookup<T: Copy>(name: &[u8]) -> Option<T> {
         unsafe {
@@ -156,12 +191,12 @@ mod ffi {
 
     fn transcode_fn() -> Option<TranscodeFn> {
         static FN: OnceLock<Option<TranscodeFn>> = OnceLock::new();
-        *FN.get_or_init(|| lookup(b"courseai_transcode_video\0"))
+        *FN.get_or_init(|| registered_run().or_else(|| lookup(b"courseai_transcode_video\0")))
     }
 
     fn progress_fn() -> Option<ProgressFn> {
         static FN: OnceLock<Option<ProgressFn>> = OnceLock::new();
-        *FN.get_or_init(|| lookup(b"courseai_transcode_progress\0"))
+        *FN.get_or_init(|| registered_progress().or_else(|| lookup(b"courseai_transcode_progress\0")))
     }
 
     pub fn run(source: &str, destination: &str) -> Result<(), String> {
