@@ -186,8 +186,6 @@ export interface LlmProfile {
   deployment?: string | null;
   /** 列模型接口的路径覆盖。 */
   models_path?: string | null;
-  /** 模型目录里没有这个模型时手工指定上下文长度。 */
-  context_window?: number | null;
   /** 单次输出上限（Anthropic 必填、Gemini 可选）。 */
   max_output_tokens?: number | null;
   /** 是否必须填 API Key；Ollama 默认不需要。 */

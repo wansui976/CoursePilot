@@ -668,25 +668,10 @@ export function LlmSettingsPanel({
                 )}
                 <label className="block">
                   <span className="mb-1 block text-xs text-[var(--text-muted)]">
-                    {t("llmSettings.contextOverride")}
-                  </span>
-                  <input
-                    aria-label={t("llmSettings.contextOverride")}
-                    type="number"
-                    min={1}
-                    className={FIELD}
-                    value={p.context_window ?? ""}
-                    placeholder="128000"
-                    onChange={(e) =>
-                      update(p.id, {
-                        context_window: e.target.value ? Number(e.target.value) : null,
-                      })
-                    }
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs text-[var(--text-muted)]">
                     {t("llmSettings.maxOutput")}
+                  </span>
+                  <span className="mb-1 block text-[11px] leading-relaxed text-[var(--text-faint)]">
+                    {t("llmSettings.maxOutputHint")}
                   </span>
                   <input
                     aria-label={t("llmSettings.maxOutput")}
@@ -705,6 +690,9 @@ export function LlmSettingsPanel({
                 <label className="block sm:col-span-2">
                   <span className="mb-1 block text-xs text-[var(--text-muted)]">
                     {t("llmSettings.modelsPath")}
+                  </span>
+                  <span className="mb-1 block text-[11px] leading-relaxed text-[var(--text-faint)]">
+                    {t("llmSettings.modelsPathHint")}
                   </span>
                   <input
                     aria-label={t("llmSettings.modelsPath")}

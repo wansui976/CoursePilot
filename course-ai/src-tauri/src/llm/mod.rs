@@ -476,6 +476,8 @@ pub enum Provider {
         base_url: String,
         api_key: String,
         client: reqwest::Client,
+        /// 用户显式设置的输出上限；None = 让模型用自身最大预算。
+        max_tokens: Option<u32>,
     },
     /// Anthropic Messages API。
     Anthropic {
@@ -495,6 +497,7 @@ pub enum Provider {
     Ollama {
         base_url: String,
         client: reqwest::Client,
+        max_tokens: Option<u32>,
     },
     /// Azure OpenAI：deployment + api-version。
     Azure {
@@ -503,6 +506,7 @@ pub enum Provider {
         api_version: String,
         deployment: String,
         client: reqwest::Client,
+        max_tokens: Option<u32>,
     },
     /// 测试 / 离线用：返回预置内容。
     Mock { canned: String },
@@ -546,7 +550,8 @@ impl Provider {
                 base_url,
                 api_key,
                 client,
-            } => openai::complete(base_url, api_key, client, req).await?,
+                max_tokens,
+            } => openai::complete(base_url, api_key, client, req, *max_tokens).await?,
             Provider::Anthropic {
                 base_url,
                 api_key,
@@ -559,19 +564,25 @@ impl Provider {
                 client,
                 max_tokens,
             } => gemini::complete(base_url, api_key, client, req, *max_tokens).await?,
-            Provider::Ollama { base_url, client } => ollama::complete(base_url, client, req).await?,
+            Provider::Ollama {
+                base_url,
+                client,
+                max_tokens,
+            } => ollama::complete(base_url, client, req, *max_tokens).await?,
             Provider::Azure {
                 endpoint,
                 api_key,
                 api_version,
                 deployment,
                 client,
+                max_tokens,
             } => {
                 openai::complete_at(
                     &azure_chat_url(endpoint, deployment, api_version),
                     openai::Auth::Header("api-key", api_key),
                     client,
                     req,
+                    *max_tokens,
                     "Azure OpenAI",
                 )
                 .await?
@@ -675,7 +686,11 @@ impl Provider {
                 base_url,
                 api_key,
                 client,
-            } => openai::complete_stream(base_url, api_key, client, req, cancel, on_piece).await?,
+                max_tokens,
+            } => {
+                openai::complete_stream(base_url, api_key, client, req, cancel, on_piece, *max_tokens)
+                    .await?
+            }
             Provider::Anthropic {
                 base_url,
                 api_key,
@@ -694,8 +709,12 @@ impl Provider {
                 gemini::complete_stream(base_url, api_key, client, req, *max_tokens, cancel, on_piece)
                     .await?
             }
-            Provider::Ollama { base_url, client } => {
-                ollama::complete_stream(base_url, client, req, cancel, on_piece).await?
+            Provider::Ollama {
+                base_url,
+                client,
+                max_tokens,
+            } => {
+                ollama::complete_stream(base_url, client, req, cancel, on_piece, *max_tokens).await?
             }
             Provider::Azure {
                 endpoint,
@@ -703,6 +722,7 @@ impl Provider {
                 api_version,
                 deployment,
                 client,
+                max_tokens,
             } => {
                 openai::complete_stream_at(
                     &azure_chat_url(endpoint, deployment, api_version),
@@ -711,6 +731,7 @@ impl Provider {
                     req,
                     cancel,
                     on_piece,
+                    *max_tokens,
                     "Azure OpenAI",
                 )
                 .await?
@@ -764,6 +785,7 @@ impl Provider {
                 base_url,
                 api_key,
                 client,
+                ..
             } => openai::embed(base_url, api_key, client, model, inputs).await,
             Provider::Azure {
                 endpoint,

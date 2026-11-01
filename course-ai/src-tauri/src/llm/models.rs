@@ -108,6 +108,17 @@ fn join(base: &str, path: &str) -> String {
     format!("{}/{}", base.trim_end_matches('/'), path.trim_start_matches('/'))
 }
 
+/// 列模型地址：允许填完整 URL（例如各家网关的自定义路径），否则拼在 base 后面。
+fn resolve_endpoint(base: &str, path: Option<&str>, fallback: impl FnOnce() -> String) -> String {
+    match path {
+        Some(path) if path.starts_with("http://") || path.starts_with("https://") => {
+            path.to_string()
+        }
+        Some(path) => join(base, path),
+        None => fallback(),
+    }
+}
+
 fn http_error(protocol: &str, status: reqwest::StatusCode, body: &str) -> AppError {
     let snippet: String = body.chars().take(400).collect();
     let kind = if status == reqwest::StatusCode::UNAUTHORIZED
@@ -248,10 +259,7 @@ async fn fetch_openai(
         profile.base_url.trim()
     };
     let base = crate::llm::openai::normalize_openai_base_url(input);
-    let url = match path_override(profile) {
-        Some(path) => join(&base, &path),
-        None => join(&base, "models"),
-    };
+    let url = resolve_endpoint(&base, path_override(profile).as_deref(), || join(&base, "models"));
     let mut request = http.get(url);
     if let Some(key) = key {
         request = request.bearer_auth(key);
@@ -268,10 +276,9 @@ async fn fetch_anthropic(
     let base = base(profile, "https://api.anthropic.com");
     let base = base.trim_end_matches("/messages").trim_end_matches('/').to_string();
     let base = if base.ends_with("/v1") { base } else { format!("{base}/v1") };
-    let url = match path_override(profile) {
-        Some(path) => join(&base, &path),
-        None => format!("{base}/models?limit=1000"),
-    };
+    let url = resolve_endpoint(&base, path_override(profile).as_deref(), || {
+        format!("{base}/models?limit=1000")
+    });
     let mut request = http.get(url).header("anthropic-version", "2023-06-01");
     if let Some(key) = key {
         request = request.header("x-api-key", key);
@@ -291,10 +298,9 @@ async fn fetch_gemini(
     } else {
         format!("{base}/v1beta")
     };
-    let url = match path_override(profile) {
-        Some(path) => join(&base, &path),
-        None => format!("{base}/models?pageSize=1000"),
-    };
+    let url = resolve_endpoint(&base, path_override(profile).as_deref(), || {
+        format!("{base}/models?pageSize=1000")
+    });
     let mut request = http.get(url);
     if let Some(key) = key {
         request = request.header("x-goog-api-key", key);
@@ -305,10 +311,7 @@ async fn fetch_gemini(
 
 async fn fetch_ollama(http: &reqwest::Client, profile: &LlmProfile) -> AppResult<Vec<Provided>> {
     let base = base(profile, "http://127.0.0.1:11434");
-    let url = match path_override(profile) {
-        Some(path) => join(&base, &path),
-        None => join(&base, "api/tags"),
-    };
+    let url = resolve_endpoint(&base, path_override(profile).as_deref(), || join(&base, "api/tags"));
     let value = get_json(http.get(url), "Ollama").await?;
     Ok(parse_ollama_models(&value))
 }
@@ -328,10 +331,9 @@ async fn fetch_azure(
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .unwrap_or("2024-10-21");
-    let url = match path_override(profile) {
-        Some(path) => join(&endpoint, &path),
-        None => format!("{endpoint}/openai/models?api-version={version}"),
-    };
+    let url = resolve_endpoint(&endpoint, path_override(profile).as_deref(), || {
+        format!("{endpoint}/openai/models?api-version={version}")
+    });
     let mut request = http.get(url);
     if let Some(key) = key {
         request = request.header("api-key", key);
@@ -541,12 +543,11 @@ pub(crate) fn enrich(profile: &LlmProfile, provided: Provided) -> ModelInfo {
             reasoning: entry.is_some_and(|e| e.reasoning),
         };
     }
-    let profile_context = profile.context_window;
     let models_in_catalog = entry.is_some();
     ModelInfo {
         id: provided.id,
         display_name: provided.display_name,
-        context_window: provided.context.or_else(|| profile_context).or(entry.and_then(|e| e.context)),
+        context_window: provided.context.or(entry.and_then(|e| e.context)),
         max_output_tokens: provided
             .max_output
             .or(profile.max_output_tokens)
@@ -663,6 +664,22 @@ mod tests {
         assert_eq!(unknown.context_window, Some(8192));
         assert_eq!(unknown.input_price, None);
         assert_eq!(unknown.source, "provider");
+    }
+
+    #[test]
+    fn models_path_accepts_relative_or_full_url() {
+        assert_eq!(
+            resolve_endpoint("https://api.example.com/v1", Some("models"), || "unused".into()),
+            "https://api.example.com/v1/models"
+        );
+        assert_eq!(
+            resolve_endpoint("https://api.example.com/v1", Some("https://gw.example.com/models"), || "unused".into()),
+            "https://gw.example.com/models"
+        );
+        assert_eq!(
+            resolve_endpoint("https://api.example.com/v1", None, || "https://api.example.com/v1/models".into()),
+            "https://api.example.com/v1/models"
+        );
     }
 
     #[test]

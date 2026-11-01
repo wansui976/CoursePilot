@@ -24,6 +24,7 @@ pub fn build_provider(profile: &LlmProfile, api_key: String) -> Provider {
             base_url: profile.base_url.clone(),
             api_key,
             client,
+            max_tokens: profile.max_output_tokens,
         },
         ProviderKind::Anthropic => Provider::Anthropic {
             base_url: profile.base_url.clone(),
@@ -41,6 +42,7 @@ pub fn build_provider(profile: &LlmProfile, api_key: String) -> Provider {
         ProviderKind::Ollama => Provider::Ollama {
             base_url: profile.base_url.clone(),
             client,
+            max_tokens: profile.max_output_tokens,
         },
         ProviderKind::AzureOpenai => Provider::Azure {
             endpoint: profile.base_url.clone(),
@@ -56,6 +58,7 @@ pub fn build_provider(profile: &LlmProfile, api_key: String) -> Provider {
                 .filter(|name| !name.trim().is_empty())
                 .unwrap_or_else(|| profile.model.clone()),
             client,
+            max_tokens: profile.max_output_tokens,
         },
     }
 }
@@ -128,6 +131,25 @@ mod tests {
         };
         assert_eq!(api_version, "2025-01-01");
         assert_eq!(deployment, "custom");
+    }
+
+    #[test]
+    fn output_limit_reaches_every_protocol() {
+        for kind in [
+            ProviderKind::Openai,
+            ProviderKind::Ollama,
+            ProviderKind::AzureOpenai,
+        ] {
+            let mut p = profile(kind);
+            p.max_output_tokens = Some(2048);
+            let max_tokens = match build_provider(&p, "k".into()) {
+                Provider::OpenAi { max_tokens, .. }
+                | Provider::Ollama { max_tokens, .. }
+                | Provider::Azure { max_tokens, .. } => max_tokens,
+                _ => unreachable!("protocol picked above returns one of these three"),
+            };
+            assert_eq!(max_tokens, Some(2048), "{kind:?}");
+        }
     }
 
     #[test]

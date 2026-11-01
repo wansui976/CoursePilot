@@ -178,6 +178,14 @@ fn parse_json_response(body: &str, content_type: &str) -> AppResult<Value> {
 /// DeepSeek/OpenAI 按消息前缀自动缓存，同一视频的多个 AI 任务字幕逐字节相同，
 /// 把它当共享前缀，后续任务即可命中缓存（约便宜 4 倍），不再每个任务重算整篇字幕。
 pub fn build_openai_body(req: &ChatRequest) -> Value {
+    build_openai_body_with(req, None)
+}
+
+/// 与 [`build_openai_body`] 相同，但允许调用方显式给一个输出上限。
+///
+/// 默认不传 max_tokens（让模型用自身最大预算，避免截断长 JSON）；只有 profile 里
+/// 明确设置了「单次输出上限」才写进请求体。兼容端点大多认 `max_tokens`。
+pub fn build_openai_body_with(req: &ChatRequest, max_tokens: Option<u32>) -> Value {
     let mut messages: Vec<Value> = Vec::new();
     let system = match (&req.system, &req.cacheable_context) {
         (Some(s), Some(c)) => Some(format!("{c}\n\n{s}")),
@@ -191,9 +199,8 @@ pub fn build_openai_body(req: &ChatRequest) -> Value {
     for m in &req.messages {
         messages.push(message_body(m));
     }
-    // 不发 max_tokens：OpenAI 规范里它可选，省略后模型用自身的最大输出预算，
-    // 免得我们写死的上限把长输出（出题/纠错的 JSON）截断。
-    // ChatRequest 上原本有这个字段，但没有任何通道读它，已删——别再加回来。
+    // 默认不发 max_tokens：OpenAI 规范里它可选，省略后模型用自身的最大输出预算，
+    // 免得我们写死的上限把长输出（出题/纠错的 JSON）截断。用户显式配置时才写进去。
     let mut body = json!({
         "model": req.model,
         "messages": messages,
@@ -203,6 +210,9 @@ pub fn build_openai_body(req: &ChatRequest) -> Value {
     // 既不影响前缀缓存，也不会让某些兼容端点因为多了个空数组而报错。
     if !req.tools.is_empty() {
         body["tools"] = Value::Array(req.tools.iter().map(tool_body).collect());
+    }
+    if let Some(max_tokens) = max_tokens {
+        body["max_tokens"] = json!(max_tokens);
     }
     body
 }
@@ -355,9 +365,10 @@ pub async fn complete(
     api_key: &str,
     client: &reqwest::Client,
     req: &ChatRequest,
+    max_tokens: Option<u32>,
 ) -> AppResult<ChatResponse> {
     let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
-    complete_at(&url, Auth::Bearer(api_key), client, req, "OpenAI").await
+    complete_at(&url, Auth::Bearer(api_key), client, req, max_tokens, "OpenAI").await
 }
 
 /// 发到指定 URL（Azure 的 deployment 路径也走这里），错误文案用 `label` 标出真实协议。
@@ -366,11 +377,12 @@ pub(crate) async fn complete_at(
     auth: Auth<'_>,
     client: &reqwest::Client,
     req: &ChatRequest,
+    max_tokens: Option<u32>,
     label: &str,
 ) -> AppResult<ChatResponse> {
     let resp = auth
         .apply(client.post(url))
-        .json(&build_openai_body(req))
+        .json(&build_openai_body_with(req, max_tokens))
         .send()
         .await
         .map_err(request_error)?;
@@ -543,8 +555,8 @@ pub fn parse_openai_sse_line(line: &str) -> SseEvent {
 
 /// 流式请求体。单独拎出来是为了能被测试直接检查：include_usage 一旦掉了，
 /// 流里就不再带用量，而这种缺失不会报错，只会静悄悄不记账。
-fn build_streaming_body(req: &ChatRequest) -> Value {
-    let mut body = build_openai_body(req);
+fn build_streaming_body(req: &ChatRequest, max_tokens: Option<u32>) -> Value {
+    let mut body = build_openai_body_with(req, max_tokens);
     body["stream"] = json!(true);
     // 不开这个，流式响应里根本不带 usage——助手改走流式之后 token 账就会凭空消失。
     // 不支持的端点会忽略它，那时与今天一样「没报就不记」。
@@ -559,9 +571,11 @@ pub async fn complete_stream(
     req: &ChatRequest,
     cancel: &AtomicBool,
     on_piece: &mut (dyn FnMut(StreamPiece) + Send),
+    max_tokens: Option<u32>,
 ) -> AppResult<StreamOutcome> {
     let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
-    complete_stream_at(&url, Auth::Bearer(api_key), client, req, cancel, on_piece, "OpenAI").await
+    complete_stream_at(&url, Auth::Bearer(api_key), client, req, cancel, on_piece, max_tokens, "OpenAI")
+        .await
 }
 
 /// 流式请求的 URL/鉴权可替换版本：Azure 的 deployment 地址也走这里。
@@ -572,9 +586,10 @@ pub(crate) async fn complete_stream_at(
     req: &ChatRequest,
     cancel: &AtomicBool,
     on_piece: &mut (dyn FnMut(StreamPiece) + Send),
+    max_tokens: Option<u32>,
     label: &str,
 ) -> AppResult<StreamOutcome> {
-    let body = build_streaming_body(req);
+    let body = build_streaming_body(req, max_tokens);
     let resp = auth
         .apply(client.post(url))
         .header(CONTENT_TYPE, "application/json")
@@ -1123,7 +1138,7 @@ mod tests {
             tools: Vec::new(),
             label: "assistant",
         };
-        let body = build_streaming_body(&req);
+        let body = build_streaming_body(&req, None);
         assert_eq!(body["stream"], serde_json::json!(true));
         assert_eq!(
             body["stream_options"]["include_usage"],
@@ -1343,6 +1358,14 @@ mod tests {
         // OpenAI 规范 max_tokens 可选；不发送，避免人为截断长输出。
         let body = build_openai_body(&sample_req());
         assert!(body.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn explicit_max_tokens_is_sent_for_both_plain_and_streaming_requests() {
+        let req = sample_req();
+        assert_eq!(build_openai_body_with(&req, Some(4096))["max_tokens"], 4096);
+        assert_eq!(build_streaming_body(&req, Some(2048))["max_tokens"], 2048);
+        assert!(build_streaming_body(&req, None).get("max_tokens").is_none());
     }
 
     #[test]

@@ -57,9 +57,6 @@ pub struct LlmProfile {
     /// 列模型接口的路径覆盖（默认按协议取）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub models_path: Option<String>,
-    /// 手工覆盖的上下文长度（模型目录里没有这个模型时用）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_window: Option<u32>,
     /// 单次输出上限；Anthropic / Gemini 会把它写进请求，缺省用协议默认值。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,

@@ -66,12 +66,17 @@ fn message_value(message: &ChatMessage) -> Value {
     value
 }
 
-pub fn build_body(req: &ChatRequest, stream: bool) -> Value {
+pub fn build_body(req: &ChatRequest, stream: bool, max_tokens: Option<u32>) -> Value {
+    let mut options = json!({ "temperature": crate::llm::round_temperature(req.temperature) });
+    if let Some(max_tokens) = max_tokens {
+        // Ollama 的输出上限叫 num_predict（-1 = 无限）。
+        options["num_predict"] = json!(max_tokens);
+    }
     let mut body = json!({
         "model": req.model,
         "messages": req.messages.iter().map(message_value).collect::<Vec<_>>(),
         "stream": stream,
-        "options": { "temperature": crate::llm::round_temperature(req.temperature) },
+        "options": options,
     });
     if !req.tools.is_empty() {
         body["tools"] = json!(
@@ -155,10 +160,11 @@ pub async fn complete(
     base_url: &str,
     client: &reqwest::Client,
     req: &ChatRequest,
+    max_tokens: Option<u32>,
 ) -> AppResult<ChatResponse> {
     let response = client
         .post(chat_url(base_url))
-        .json(&build_body(req, false))
+        .json(&build_body(req, false, max_tokens))
         .send()
         .await
         .map_err(|error| {
@@ -182,10 +188,11 @@ pub async fn complete_stream(
     req: &ChatRequest,
     cancel: &AtomicBool,
     on_piece: &mut (dyn FnMut(StreamPiece) + Send),
+    max_tokens: Option<u32>,
 ) -> AppResult<StreamOutcome> {
     let response = client
         .post(chat_url(base_url))
-        .json(&build_body(req, true))
+        .json(&build_body(req, true, max_tokens))
         .send()
         .await
         .map_err(|error| AppError::Other(format!("连不上 Ollama（{base_url}）：{error}")))?;
@@ -286,15 +293,22 @@ mod tests {
 
     #[test]
     fn maps_images_tool_calls_and_tools() {
-        let body = build_body(&sample_request(false), false);
+        let body = build_body(&sample_request(false), false, None);
         assert_eq!(body["model"], "llama3.1:8b");
         assert_eq!(body["stream"], false);
+        assert!(body["options"].get("num_predict").is_none());
         let messages = body["messages"].as_array().unwrap();
         assert_eq!(messages[0]["images"][0], "AA==");
         assert_eq!(messages[1]["tool_calls"][0]["function"]["name"], "seek");
         assert_eq!(messages[1]["tool_calls"][0]["function"]["arguments"]["ms"], 1200);
         assert_eq!(messages[2]["role"], "tool");
         assert_eq!(body["tools"][0]["function"]["name"], "seek");
+    }
+
+    #[test]
+    fn max_output_tokens_become_num_predict() {
+        let body = build_body(&sample_request(false), true, Some(4096));
+        assert_eq!(body["options"]["num_predict"], 4096);
     }
 
     #[test]
