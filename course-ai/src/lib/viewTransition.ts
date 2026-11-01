@@ -84,11 +84,17 @@ function run(direction: Direction, from: HTMLElement | null, update: () => Promi
   let fallback = 0;
   const state = {
     cleanup: () => {
+      // 新过渡已经接管：旧 transition 的 finished 回调不能再删 vtNav 或摘同名元素，
+      // 否则快速连续导航会把新过渡的方向标记和共享元素一起清掉。
+      if (running !== state) {
+        window.clearTimeout(fallback);
+        return;
+      }
       for (const element of named) element.style.viewTransitionName = "";
       named.clear();
       delete root.dataset.vtNav;
       window.clearTimeout(fallback);
-      if (running === state) running = null;
+      running = null;
     },
   };
   running = state;

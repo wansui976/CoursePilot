@@ -35,7 +35,10 @@ export function ClipQueueBar() {
         type="button"
         onClick={() => {
           const next = useClipQueue.getState().next();
-          if (next) shell.openVideoAt(next.videoId, next.startMs);
+          if (next) {
+            // 这是队列自己的导航，不能清空队列。
+            shell.openVideoAt(next.videoId, next.startMs, { keepClipQueue: true });
+          }
         }}
         className="ca-touch-44 inline-flex flex-none items-center gap-1 rounded-md px-2 py-1 font-medium text-[var(--accent-text)] hover:bg-[var(--accent-weak-2)]"
       >

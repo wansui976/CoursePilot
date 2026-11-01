@@ -18,6 +18,8 @@ import { Button } from "@/ui/button";
 import { humanizeError } from "@/lib/errors";
 import { bilibiliLoginStateOnce, probeImport } from "@/lib/importProbeCache";
 import { ipc } from "@/lib/ipc";
+import { clearTasksForScope } from "@/lib/backgroundTasks";
+import { useTaskNotices } from "@/lib/taskNotices";
 import { notesCoordinator } from "@/lib/notesCoordinator";
 import { titleRepeatsUrl } from "@/lib/sourceUrl";
 import type { AssistantAction } from "@/lib/types";
@@ -60,6 +62,10 @@ const TITLE_TIMEOUT_MS = 20_000;
  * 按前缀失效：卡片不知道视频属于哪门课，`["videos"]` 能盖住所有 `["videos", *]`。
  */
 async function refreshAfter(action: Proposal, queryClient: QueryClient) {
+  if (action.kind === "propose_delete") {
+    clearTasksForScope(queryClient, { videoId: action.video_id });
+    useTaskNotices.getState().clearScope({ videoId: action.video_id });
+  }
   switch (action.kind) {
     case "propose_rename":
     case "propose_import":

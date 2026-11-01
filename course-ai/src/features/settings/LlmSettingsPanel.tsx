@@ -682,7 +682,9 @@ export function LlmSettingsPanel({
                     placeholder="8192"
                     onChange={(e) =>
                       update(p.id, {
-                        max_output_tokens: e.target.value ? Number(e.target.value) : null,
+                        max_output_tokens: e.target.value
+                          ? Math.max(1, Math.floor(Number(e.target.value)))
+                          : null,
                       })
                     }
                   />

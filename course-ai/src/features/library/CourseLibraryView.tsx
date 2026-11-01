@@ -37,6 +37,8 @@ import { Button } from "@/ui/button";
 import { Skeleton } from "@/ui/skeleton";
 import { Menu, MenuItem } from "@/ui/menu";
 import { ipc } from "@/lib/ipc";
+import { clearTasksForScope } from "@/lib/backgroundTasks";
+import { useTaskNotices } from "@/lib/taskNotices";
 import { stageMessage } from "@/lib/pipelineProgress";
 import { canRecorrect } from "@/lib/videoActions";
 import type { Video, VideoListItem } from "@/lib/types";
@@ -376,6 +378,9 @@ export function CourseLibraryView({
     );
     if (!ok) return;
     await ipc.videos.delete(videoId);
+    // 删掉的视频不该再出现在后台任务/完成提示里（「查看」会打开失败）。
+    clearTasksForScope(queryClient, { videoId });
+    useTaskNotices.getState().clearScope({ videoId });
     onVideoDeleted(videoId);
     await queryClient.invalidateQueries({ queryKey: qk.videos.list(selectedCourseId) });
     await queryClient.invalidateQueries({ queryKey: qk.trash() });

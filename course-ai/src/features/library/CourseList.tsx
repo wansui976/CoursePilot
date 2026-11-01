@@ -16,7 +16,9 @@ import {
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
-import type { Course } from "@/lib/types";
+import { clearTasksForScope } from "@/lib/backgroundTasks";
+import { useTaskNotices } from "@/lib/taskNotices";
+import type { Course, Video } from "@/lib/types";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { Skeleton } from "@/ui/skeleton";
 import { isIOS, pickDirectoryPath } from "@/lib/mobileFiles";
@@ -219,6 +221,10 @@ export function CourseList({
   const remove = useMutation({
     mutationFn: (id: string) => ipc.courses.delete(id),
     onSuccess: (_data, id) => {
+      const videos = queryClient.getQueryData<Video[]>(qk.videos.list(id)) ?? [];
+      const videoIds = videos.map((video) => video.id);
+      clearTasksForScope(queryClient, { courseId: id, videoIds });
+      useTaskNotices.getState().clearScope({ courseId: id, videoIds });
       queryClient.invalidateQueries({ queryKey: qk.courses() });
       if (id === selectedCourseId) {
         const next = courses.find((course) => course.id !== id);

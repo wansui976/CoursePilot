@@ -68,7 +68,10 @@ describe("useHighlights", () => {
     });
     expect(rate).toBe(2);
     expect(result.current.notice?.text).toBe("快放中 · 聊周末");
-    expect(result.current.rateFor(200_000)).toBeNull();
+    act(() => {
+      expect(result.current.rateFor(200_000)).toBeNull();
+    });
+    expect(result.current.notice).toBeNull();
     // 没写理由的段落用类型名。
     act(() => {
       result.current.rateFor(310_000);

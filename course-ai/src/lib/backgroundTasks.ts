@@ -70,6 +70,28 @@ export function studyTargetFor(kind: TaskKind): StudyTarget | null {
   }
 }
 
+/**
+ * 删除视频/课程后，把对应的后台任务从 mutation 缓存里摘掉。
+ *
+ * 后端请求未必能中断（已经发出去的 paid 请求），但列表和完成提示不能再指向一个
+ * 已删除的对象；否则「查看」会打开失败。
+ */
+export function clearTasksForScope(
+  queryClient: QueryClient,
+  scope: { videoId?: string; videoIds?: string[]; courseId?: string },
+): void {
+  const ids = new Set(scope.videoIds ?? []);
+  if (scope.videoId) ids.add(scope.videoId);
+  const cache = queryClient.getMutationCache();
+  for (const mutation of cache.getAll()) {
+    const task = readTaskMeta(mutation.options.meta);
+    if (!task) continue;
+    const hitVideo = task.videoId ? ids.has(task.videoId) : false;
+    const hitCourse = scope.courseId ? task.courseId === scope.courseId : false;
+    if (hitVideo || hitCourse) cache.remove(mutation);
+  }
+}
+
 /** 正在跑的后台任务，按开始时间排列。 */
 export function useBackgroundTasks(): BackgroundTask[] {
   return useMutationState({

@@ -6,7 +6,7 @@ import { formatMs } from "@/lib/time";
  * 显示时把它换成节点后面一枚可点的小时间，点了跳过去。老导图没有时间戳，照常显示。
  */
 
-const TRAILING_STAMP = /\s*\[(\d{1,3}:\d{2}(?::\d{2})?)\]\s*$/;
+const TRAILING_STAMP = /\s*\[(\d{1,3}:[0-5]\d(?::[0-5]\d)?)\]\s*$/;
 
 interface MindmapNode {
   content?: string;

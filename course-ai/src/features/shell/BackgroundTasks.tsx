@@ -10,6 +10,7 @@ import {
   type TaskMeta,
   type TaskNotice,
 } from "@/lib/backgroundTasks";
+import { NOTICE_MS, useTaskNotices } from "@/lib/taskNotices";
 import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { Menu, MenuItem } from "@/ui/menu";
@@ -153,8 +154,6 @@ function TaskRow({ task, now, onClick }: { task: BackgroundTask; now: number; on
   );
 }
 
-const NOTICE_MS = 6000;
-const MAX_NOTICES = 3;
 
 /**
  * 任务跑完的提示。用户正看着结果（就在那个视频 / 知识点页）时不打扰，
@@ -171,12 +170,13 @@ export function TaskCompletionNotices({
   /** 底部被底栏占掉的高度（px）。 */
   bottomOffset: number;
 }) {
-  const [notices, setNotices] = useState<TaskNotice[]>([]);
-  const dismiss = (id: number) => setNotices((current) => current.filter((notice) => notice.id !== id));
+  const notices = useTaskNotices((state) => state.notices);
+  const dismiss = useTaskNotices((state) => state.dismiss);
+  const push = useTaskNotices((state) => state.push);
 
   useTaskCompletion((notice) => {
     if (notice.ok && isWatching(notice)) return;
-    setNotices((current) => [...current, notice].slice(-MAX_NOTICES));
+    push(notice);
     window.setTimeout(() => dismiss(notice.id), NOTICE_MS);
   });
 

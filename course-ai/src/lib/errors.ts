@@ -146,6 +146,16 @@ export function errorFixFor(error: unknown): ErrorFix | null {
   const raw = error instanceof Error ? error.message : typeof error === "string" ? error : "";
   const s = raw.toLowerCase();
   if (!s.trim()) return null;
+  // 余额不足 / 配额 / 限流不是「去设置里填 Key」能解决的，别把人引到设置页。
+  if (
+    hasStatus(s, 402) ||
+    hasStatus(s, 429) ||
+    s.includes("quota") ||
+    s.includes("insufficient balance") ||
+    s.includes("余额")
+  ) {
+    return null;
+  }
   const configLike =
     s.includes("api key") ||
     s.includes("apikey") ||

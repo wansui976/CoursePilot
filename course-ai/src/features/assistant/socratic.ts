@@ -81,7 +81,11 @@ export function visibleAnswer(turn: { answer: string; mode?: "socratic" }): stri
   // 结构块没闭合 / JSON 坏了：正文被剥空，但整段回答还在——复制空字符串最糟。
   if (!block) return turn.answer;
   // 只有结构、没有正文：把收尾的结论与要点当作可复制的正文。
-  return [block.answer ?? "", ...block.summary].filter(Boolean).join("\n");
+  const visible = [block.answer ?? "", ...block.summary].filter(Boolean).join("\n");
+  if (visible.trim()) return visible;
+  // 连结论都还没有（只有选项/提示）：复制这些，别让「复制」得到空字符串。
+  const fallback = [...block.options, ...block.hints].filter(Boolean).join("\n");
+  return fallback.trim() ? fallback : turn.answer;
 }
 
 /**

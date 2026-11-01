@@ -298,8 +298,9 @@ export function VideoPlayer({
   }, [sortedSegments, translationByIdx]);
 
   useLayoutEffect(() => {
+    // 转码完成 / 换视频会重挂 <video>，属性要重新补上。
     ref.current?.setAttribute("webkit-playsinline", "true");
-  }, []);
+  }, [src, mediaEpoch]);
 
   // 跟踪控制栏高度，供字幕避让（控制栏内容/换行时高度会变）。
   useEffect(() => {
@@ -319,11 +320,13 @@ export function VideoPlayer({
   }, [seekRequest]);
 
 
+  // 转码完成 / 换视频会按 key 重挂 <video>，新元素回到默认音量；这些状态变化也要
+  // 重新应用，否则用户静音后会突然出声。
   useEffect(() => {
     if (!ref.current) return;
     ref.current.volume = volume;
     ref.current.muted = muted || volume === 0;
-  }, [muted, volume]);
+  }, [muted, volume, src, mediaEpoch]);
 
   const isIosImmersive = immersive && isIOS();
 
@@ -700,6 +703,9 @@ export function VideoPlayer({
               // 某些 WebKit 版本在资源加载后才重置速率；metadata 到达时再兜底应用一次。
               video.defaultPlaybackRate = effectiveRate;
               video.playbackRate = effectiveRate;
+              // 重挂后的元素可能已经把音量重置成默认值，metadata 到了再兜一次。
+              video.volume = volume;
+              video.muted = muted || volume === 0;
               setDurationMs(Math.floor(video.duration * 1000));
               // 记录总时长，供首页显示「时长 + 进度条」（DB 里 duration_ms 常为空）。
               if (Number.isFinite(video.duration) && video.duration > 0) {
@@ -712,16 +718,29 @@ export function VideoPlayer({
                 video.currentTime = Math.max(0, pending.ms / 1000);
                 usePlayer.getState().clearPendingSeek();
               } else {
-                // 断点续播：恢复上次离开的位置。
-                const saved = Number(localStorage.getItem(posKey(videoId)));
-                if (
-                  Number.isFinite(saved) &&
-                  saved > 2 &&
-                  video.duration &&
-                  saved < video.duration - RESUME_TAIL_GUARD
-                ) {
-                  video.currentTime = saved;
-                  lastSavedRef.current = saved;
+                // 重挂（转码完成）时播放器状态还在 store 里：先恢复当前进度，
+                // 别退回几秒前的 localStorage 断点。
+                const live = usePlayer.getState();
+                const restoredLive =
+                  live.videoId === videoId &&
+                  live.currentMs > 2 &&
+                  Boolean(video.duration) &&
+                  live.currentMs / 1000 < video.duration - RESUME_TAIL_GUARD;
+                if (restoredLive) {
+                  video.currentTime = live.currentMs / 1000;
+                  lastSavedRef.current = live.currentMs / 1000;
+                } else {
+                  // 断点续播：恢复上次离开的位置。
+                  const saved = Number(localStorage.getItem(posKey(videoId)));
+                  if (
+                    Number.isFinite(saved) &&
+                    saved > 2 &&
+                    video.duration &&
+                    saved < video.duration - RESUME_TAIL_GUARD
+                  ) {
+                    video.currentTime = saved;
+                    lastSavedRef.current = saved;
+                  }
                 }
               }
             }}

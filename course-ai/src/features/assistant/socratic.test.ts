@@ -66,6 +66,11 @@ describe("guidedTopic / visibleAnswer", () => {
     expect(visibleAnswer({ answer: block(false) })).toContain("```socratic");
   });
 
+  it("只有选项/提示的结构块也要能复制出内容", () => {
+    const answer = '```socratic\n{"options":["会震荡","下降更快"],"hints":["想想步子太大"],"done":false}\n```';
+    expect(visibleAnswer({ answer, mode: "socratic" })).toBe("会震荡\n下降更快\n想想步子太大");
+  });
+
   it("结构块没闭合 / JSON 坏掉时不能把整轮复制成空", () => {
     // 只有块、块还坏了：正文被剥空，退回原文，至少让人能复制到自己真正说过的话。
     const broken = "```socratic\n{坏的}";

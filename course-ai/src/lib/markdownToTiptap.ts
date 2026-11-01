@@ -2,7 +2,14 @@
 // LLM 也可能写成 hh:mm:ss。统一按「从右到左每段 ×60」折算成毫秒。
 export function parseTimestamp(clock: string): number {
   const parts = clock.split(":").map(Number);
-  if (parts.some((n) => Number.isNaN(n))) return 0;
+  // 秒位 0–59、分钟位 0–59（hh:mm:ss 时）、分钟位最多三位（mm:ss 时长视频）。
+  // 以前 [99:99] 会被算成 6039 秒直接拿去 seek。
+  if (parts.length < 2 || parts.length > 3) return 0;
+  if (parts.some((n) => !Number.isInteger(n) || n < 0)) return 0;
+  const seconds = parts[parts.length - 1];
+  if (seconds > 59) return 0;
+  if (parts.length === 3 && parts[1] > 59) return 0;
+  if (parts[0] > (parts.length === 3 ? 99 : 999)) return 0;
   return parts.reduce((acc, n) => acc * 60 + n, 0) * 1000;
 }
 

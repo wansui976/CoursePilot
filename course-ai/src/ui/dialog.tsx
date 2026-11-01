@@ -2,6 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import { useOptionalShell } from "@/app/shell";
 import { useKeyboardInset } from "@/lib/useKeyboardInset";
+import { prefersReducedMotion } from "@/lib/viewTransition";
 import { cn } from "@/lib/utils";
 
 const SIZE = {
@@ -162,7 +163,7 @@ export function Modal({
                 onPointerDown={drag.onPointerDown}
                 onPointerMove={drag.onPointerMove}
                 onPointerUp={drag.onPointerUp}
-                onPointerCancel={drag.onPointerUp}
+                onPointerCancel={drag.onPointerCancel}
                 className="sticky top-0 z-10 -mx-4 mb-1 flex touch-none justify-center bg-[var(--surface-panel)] pb-2 pt-2.5"
               >
                 <span className="h-1 w-10 rounded-full bg-[var(--border-control)]" />
@@ -209,7 +210,8 @@ function useSheetDrag({ enabled, onDismiss }: { enabled: boolean; onDismiss: () 
   function setOffset(dy: number, animate: boolean) {
     const el = contentRef.current;
     if (!el) return;
-    el.style.transition = animate ? "transform 0.2s cubic-bezier(0.2, 0, 0, 1)" : "none";
+    el.style.transition =
+      animate && !prefersReducedMotion() ? "transform 0.2s cubic-bezier(0.2, 0, 0, 1)" : "none";
     el.style.transform = dy > 0 ? `translateY(${dy}px)` : "";
   }
 
@@ -242,6 +244,12 @@ function useSheetDrag({ enabled, onDismiss }: { enabled: boolean; onDismiss: () 
         onDismiss();
         return;
       }
+      setOffset(0, true);
+    },
+    /** pointercancel 是「手势被系统打断」，不是松手：回弹，不能按位移/速度误关闭。 */
+    onPointerCancel(event: ReactPointerEvent<HTMLDivElement>) {
+      if (event.pointerId !== start.id) return;
+      start.id = -1;
       setOffset(0, true);
     },
   };

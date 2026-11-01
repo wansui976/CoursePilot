@@ -3,8 +3,9 @@ import "@/i18n";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider, useMutation } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { taskMeta, type TaskMeta } from "@/lib/backgroundTasks";
+import { useTaskNotices } from "@/lib/taskNotices";
 import { BackgroundTasksButton, TaskCompletionNotices } from "./BackgroundTasks";
 
 function deferred() {
@@ -36,6 +37,10 @@ function setup(isWatching: (task: TaskMeta) => boolean = () => false) {
 }
 
 describe("BackgroundTasks", () => {
+  beforeEach(() => {
+    useTaskNotices.setState({ notices: [] });
+  });
+
   it("有任务在跑时出现入口，列表里点一项打开那项任务", async () => {
     const { onOpenTask } = setup();
     const trigger = await screen.findByRole("button", { name: /后台任务/ });
@@ -56,6 +61,16 @@ describe("BackgroundTasks", () => {
     expect(await screen.findByText("生成摘要已完成")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "查看" }));
     expect(onOpenTask).toHaveBeenCalled();
+  });
+
+  it("删除视频后清掉它残留的完成提示", async () => {
+    const { gate } = setup();
+    await screen.findByRole("button", { name: /后台任务/ });
+    await act(async () => gate.resolve());
+    expect(await screen.findByText("生成摘要已完成")).toBeInTheDocument();
+
+    act(() => useTaskNotices.getState().clearScope({ videoId: "v1" }));
+    expect(screen.queryByText("生成摘要已完成")).not.toBeInTheDocument();
   });
 
   it("用户正看着结果时不打扰", async () => {

@@ -58,14 +58,21 @@ export function useHighlights(
   const announcedRef = useRef<number | null>(null);
   const [notice, setNotice] = useState<HighlightNotice | null>(null);
   const timerRef = useRef<number | undefined>(undefined);
+  /** 当前提示是快放还是跳过：倍速覆盖失效时要能只清掉快放那条。 */
+  const noticeKindRef = useRef<"fast" | "skip" | null>(null);
 
-  const show = useCallback((next: HighlightNotice) => {
+  const show = useCallback((next: HighlightNotice, kind: "fast" | "skip") => {
     window.clearTimeout(timerRef.current);
+    noticeKindRef.current = kind;
     setNotice(next);
-    timerRef.current = window.setTimeout(() => setNotice(null), NOTICE_MS);
+    timerRef.current = window.setTimeout(() => {
+      noticeKindRef.current = null;
+      setNotice(null);
+    }, NOTICE_MS);
   }, []);
   const dismiss = useCallback(() => {
     window.clearTimeout(timerRef.current);
+    noticeKindRef.current = null;
     setNotice(null);
   }, []);
   useEffect(() => () => window.clearTimeout(timerRef.current), []);
@@ -74,6 +81,7 @@ export function useHighlights(
     seekTokenRef.current = 0;
     handledSeekTokenRef.current = 0;
     suppressUntilRef.current = 0;
+    noticeKindRef.current = null;
     setNotice(null);
   }, [videoId]);
 
@@ -124,7 +132,7 @@ export function useHighlights(
           video.currentTime = segment.start_ms / 1000;
           dismiss();
         },
-      });
+      }, "skip");
       return true;
     },
     [dismiss, keep, reasonOf, show, t],
@@ -133,10 +141,15 @@ export function useHighlights(
   /** 快放档：此刻该用的倍速；不在水分段、没开快放、或本来就比基础倍速快时返回 null。 */
   const rateFor = useCallback(
     (ms: number): number | null => {
-      if (modeRef.current !== "fast" || !fasterRef.current) return null;
+      if (modeRef.current !== "fast" || !fasterRef.current) {
+        // 倍速覆盖被取消（换回基础倍速 / 基础倍速已经更快）：别把「快放中」留在屏幕上。
+        if (noticeKindRef.current === "fast") dismiss();
+        return null;
+      }
       const segment = segmentAt(segmentsRef.current, ms);
       if (!segment) {
         announcedRef.current = null;
+        if (noticeKindRef.current === "fast") dismiss();
         return null;
       }
       if (announcedRef.current !== segment.start_ms) {
@@ -148,7 +161,7 @@ export function useHighlights(
             keep(segment);
             dismiss();
           },
-        });
+        }, "fast");
       }
       return fastRate;
     },

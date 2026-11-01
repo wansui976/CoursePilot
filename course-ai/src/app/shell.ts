@@ -40,7 +40,11 @@ export interface Shell {
   openQueuedVideo: (video: Video) => void;
   openMainView: (view: "settings" | "recycle" | "dev" | "dashboard") => void;
   /** 打开某个视频并跳到某一刻（当前视频直接 seek）。 */
-  openVideoAt: (videoId: string, ms: number) => void;
+  openVideoAt: (
+    videoId: string,
+    ms: number,
+    options?: { keepClipQueue?: boolean },
+  ) => void;
   /** 直接打开设置里的某个分类（报错旁的「去设置」）。 */
   openSettingsCategory: (category: string) => void;
   closeToLibrary: () => void;

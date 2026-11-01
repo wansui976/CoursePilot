@@ -202,9 +202,10 @@ export function Home() {
   );
 
 
-  function openVideo(videoId: string) {
+  function openVideo(videoId: string, options?: { keepClipQueue?: boolean }) {
     // 手动打开一个视频 = 结束「依次播放这几段」：否则顶上那条「第 1/3 段」会跟着跑到无关的视频里。
-    useClipQueue.getState().clear();
+    // 队列自己的「下一段」跨视频时也走 openVideo，必须由调用方明确要求保留队列。
+    if (!options?.keepClipQueue) useClipQueue.getState().clear();
     runAfterWorkspaceTransient(() => {
       // 记录「该课程最近打开的视频」，回到课程库时给「继续上次」横幅。
       // 用视频自己的 course_id（队列打开跨课程视频时 selectedCourseId 还是旧值）。
@@ -338,7 +339,7 @@ export function Home() {
   const assistantContext = buildAssistantContext(selectedCourseId, selectedVideo, playerMs);
   useEffect(() => {
     if (pendingSeek && pendingSeek.videoId !== selectedVideoId) {
-      openVideo(pendingSeek.videoId);
+      openVideo(pendingSeek.videoId, { keepClipQueue: pendingSeek.keepClipQueue });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingSeek]);
@@ -432,7 +433,11 @@ export function Home() {
   }
 
   // 打开视频并跳到某一刻：当前视频直接 seek（pendingSeek 只在加载时消费），别的视频走 pendingSeek。
-  function openVideoAt(videoId: string, ms: number) {
+  function openVideoAt(
+    videoId: string,
+    ms: number,
+    options?: { keepClipQueue?: boolean },
+  ) {
     runAfterWorkspaceTransient(() => {
       setKnowledgeReturn(null);
       const target = Math.max(0, ms);
@@ -441,7 +446,7 @@ export function Home() {
         usePlayer.getState().clearPendingSeek();
         usePlayer.getState().requestSeek(target);
       } else {
-        usePlayer.getState().requestOpenAt(videoId, target);
+        usePlayer.getState().requestOpenAt(videoId, target, options);
       }
     });
   }
@@ -683,7 +688,8 @@ export function Home() {
               startMs: Math.max(0, hit.start_ms - 3000),
             }));
             useClipQueue.getState().start(items);
-            openVideoAt(items[0].videoId, items[0].startMs);
+            // 跨视频的第一段也要保留刚启动的队列，否则「下一段」会立刻消失。
+            openVideoAt(items[0].videoId, items[0].startMs, { keepClipQueue: true });
           }}
           onSolveWithGuide={(text, image) =>
             useInlineAsk.getState().askAbout(text, null, "socratic", {

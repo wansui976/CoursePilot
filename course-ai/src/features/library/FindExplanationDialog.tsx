@@ -172,7 +172,7 @@ export function FindExplanationDialog({
           <div className="flex justify-end">
             <Button
               variant="primary"
-              disabled={(!text.trim() && !step.image) || search.isPending}
+              disabled={(!text.trim() && !step.image) || ocr.isPending || search.isPending}
               onClick={() => search.mutate({ image: step.image })}
               className="gap-1.5"
             >

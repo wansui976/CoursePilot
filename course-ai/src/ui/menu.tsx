@@ -96,7 +96,11 @@ export function Menu({
         aria-hidden="true"
         className="ca-menu-scrim"
         onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => onClose?.()}
+        onClick={() => {
+          onClose?.();
+          // 点遮罩收起后焦点回到触发按钮，别丢到 body 上。
+          triggerRef?.current?.focus();
+        }}
       />
       {menu}
     </>,

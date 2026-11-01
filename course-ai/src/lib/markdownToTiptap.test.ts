@@ -14,6 +14,12 @@ describe("parseTimestamp", () => {
   it("parses hh:mm:ss to ms", () => {
     expect(parseTimestamp("01:45:30")).toBe((1 * 3600 + 45 * 60 + 30) * 1000);
   });
+
+  it("rejects out-of-range seconds/minutes instead of seeking to a bogus time", () => {
+    expect(parseTimestamp("99:99")).toBe(0);
+    expect(parseTimestamp("01:60")).toBe(0);
+    expect(parseTimestamp("01:99:30")).toBe(0);
+  });
 });
 
 describe("markdownToTiptap", () => {
