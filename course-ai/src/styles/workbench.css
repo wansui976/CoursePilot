@@ -86,7 +86,10 @@
    不再垫一块黑色圆底（YouTube 手机版同款）。点按区仍是 44px。 */
 .ca-back-fab {
   position: absolute;
-  z-index: 5;
+  /* 必须高过舞台里那层 iOS 手势层（absolute inset-0 z-10）：它铺满整个画面，
+     返回键若压在它下面，看着在、点下去全被手势层吃掉（iPad 竖屏实测点不动）。
+     15 刚好在它之上，仍让提示条（z-20）与解码失败卡（z-30）压在上面。 */
+  z-index: 15;
   left: max(4px, var(--safe-left));
   top: 4px;
   display: grid;
