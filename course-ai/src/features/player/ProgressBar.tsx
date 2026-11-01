@@ -198,6 +198,8 @@ export function ProgressBar({
             <div
               key={`hl-${segment.start_ms}`}
               data-testid="highlight-segment"
+              // 斜纹是「这段会快放 / 跳过」的功能标记，不是装饰。
+              data-allow-gradient=""
               className="ca-highlight-stripes absolute top-0 h-full"
               style={{
                 left: `${pct(segment.start_ms)}%`,

@@ -28,6 +28,8 @@ async function openCourse(page) {
 async function openVideo(page) {
   await openCourse(page);
   await page.getByRole("button", { name: VIDEO }).first().click();
+  // 打开视频走共享元素过渡，工作台要等过渡回调里的导航落地才出现。
+  await page.locator("[data-video-player]").first().waitFor({ timeout: 5000 });
 }
 
 /** 切到笔记：平板竖屏分栏时笔记常驻右边，没有这个标签。 */
@@ -567,15 +569,15 @@ export const scenes = [
     },
   },
   {
-    // 费曼复述：章节行尾「讲给我听」→ 打字讲一遍 → 对照结果。
+    // 费曼复述：章节标题行「费曼复述」选一章 → 打字讲一遍 → 对照结果。
     name: "feynman",
     devices: ALL,
     run: async ({ page, shot }) => {
       await openVideo(page);
-      const mic = page.getByRole("button", { name: /^讲给我听：/ }).first();
-      await mic.locator("xpath=..").hover();
-      await mic.click();
-      await page.getByRole("dialog").waitFor({ timeout: 4000 });
+      // 章节标题行「费曼复述」→ 选一章。
+      await page.getByRole("button", { name: "费曼复述" }).first().click();
+      await page.getByRole("dialog").getByRole("button").filter({ hasText: "梯度与最速下降方向" }).first().click();
+      await page.getByRole("dialog").filter({ hasText: "讲给我听" }).waitFor({ timeout: 4000 });
       await shot("speak");
       const typeInstead = page.getByRole("button", { name: "不方便出声？打字也行" });
       if (await typeInstead.count()) await typeInstead.click();

@@ -1067,10 +1067,12 @@ export function CourseLibraryView({
                   size="sm"
                   onClick={onOpenConcepts}
                   data-tour="concepts"
+                  title={t("home.knowledgePoints")}
                   className="ca-touch-44"
                 >
                   <Lightbulb className="h-4 w-4" />
-                  {t("home.knowledgePoints")}
+                  {/* 窄屏只留图标：顶栏放不下三段文字，「导入」会被挤到第二行。 */}
+                  <span className="max-sm:sr-only">{t("home.knowledgePoints")}</span>
                 </Button>
               )}
               {videos.length > 0 && selectedCourseId && (
@@ -1083,7 +1085,7 @@ export function CourseLibraryView({
                   className="ca-touch-44"
                 >
                   <ScanSearch className="h-4 w-4" />
-                  {t("findExplanation.entry")}
+                  <span className="max-sm:sr-only">{t("findExplanation.entry")}</span>
                 </Button>
               )}
               <ImportVideoButton courseId={selectedCourseId} />

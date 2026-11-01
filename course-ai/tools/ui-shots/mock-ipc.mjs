@@ -60,7 +60,7 @@ export function installMockIpc({ theme, safeArea }) {
     localStorage.setItem("course-ai-last-video:c1", "v3");
     // 新手引导默认记为看过，免得气泡挡住其他截图；只有 tour 场景打开它。
     if (localStorage.getItem("__shot-tours") === "1") localStorage.removeItem("course-ai-tours-seen");
-    else localStorage.setItem("course-ai-tours-seen", JSON.stringify(["library", "course", "workbench"]));
+    else localStorage.setItem("course-ai-tours-seen", JSON.stringify(["library", "course", "courseFeatures", "workbench"]));
   } catch {
     // 隐私模式等存储不可用：只是少了进度条，不影响截图。
   }

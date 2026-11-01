@@ -120,7 +120,7 @@ const TranscriptRow = memo(function TranscriptRow({
     <div className={`px-3 py-0.5 ${fillerReason ? "ca-transcript-filler" : ""}`}>
       {fillerReason && fillerStartMs != null && (
         <div className="mb-0.5 flex items-center gap-1.5 px-2 pt-1 ca-t-2xs">
-          <span className="rounded-full bg-amber-400/15 px-1.5 text-amber-700 dark:text-amber-300">
+          <span className="rounded-full bg-[var(--status-warn-bg)] px-1.5 text-[var(--status-warn)]">
             {t("highlights.hover", { reason: fillerReason })}
           </span>
           <button

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, GraduationCap } from "lucide-react";
+import { ChevronDown, Mic, GraduationCap } from "lucide-react";
 import { useFeynman } from "@/stores/feynman";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
@@ -119,8 +119,11 @@ export function ChaptersPanel({ videoId }: { videoId: string }) {
                 aria-haspopup="dialog"
                 aria-expanded={pickerOpen}
                 onClick={() => setPickerOpen(true)}
-                className="ca-touch-44 whitespace-nowrap rounded-md px-1.5 py-1 text-xs font-medium text-[var(--accent-text)] transition hover:bg-[var(--surface-card-hover)]"
+                title={t("feynman.chapterPickerHint")}
+                // 面板标题行的次要入口：与「重新生成」同一层级，灰阶 + 图标，不用强调色抢主内容。
+                className="ca-touch-44 inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-xs text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
               >
+                <Mic className="h-3.5 w-3.5" aria-hidden="true" />
                 {t("feynman.entryChapters")}
               </button>
             ) : undefined
