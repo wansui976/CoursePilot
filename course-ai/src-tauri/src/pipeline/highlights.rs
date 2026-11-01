@@ -103,16 +103,46 @@ pub fn parse_highlights(
         .collect();
     segments.sort_by_key(|segment| segment.start_ms);
 
-    // 重叠的并成一段：把握取更确定的那个，理由留先出现的。
+    // 重叠段按「每一小段取覆盖它的最确定等级」拆开。
+    //
+    // 不能整段取 min(level)：A（低置信，level 3）和 B（高置信，level 1）重叠时，
+    // A 没重叠的那部分也会被染成 level 1；用户按「轻度跳过」会把 A 里的正课跳过。
+    // 边界扫描能保住各段自己的置信度，相邻且等级/类型相同的区间再合回去。
+    let mut boundaries: Vec<i64> = segments
+        .iter()
+        .flat_map(|segment| [segment.start_ms, segment.end_ms])
+        .collect();
+    boundaries.sort_unstable();
+    boundaries.dedup();
     let mut merged: Vec<HighlightSegment> = Vec::new();
-    for segment in segments {
-        match merged.last_mut() {
-            Some(previous) if segment.start_ms <= previous.end_ms => {
-                previous.end_ms = previous.end_ms.max(segment.end_ms);
-                previous.level = previous.level.min(segment.level);
-            }
-            _ => merged.push(segment),
+    for pair in boundaries.windows(2) {
+        let (start, end) = (pair[0], pair[1]);
+        if end <= start {
+            continue;
         }
+        let Some(best) = segments
+            .iter()
+            .filter(|segment| segment.start_ms <= start && segment.end_ms >= end)
+            .min_by_key(|segment| (segment.level, segment.start_ms))
+        else {
+            continue;
+        };
+        if let Some(previous) = merged.last_mut() {
+            if previous.end_ms == start
+                && previous.level == best.level
+                && previous.kind == best.kind
+            {
+                previous.end_ms = end;
+                continue;
+            }
+        }
+        merged.push(HighlightSegment {
+            start_ms: start,
+            end_ms: end,
+            kind: best.kind.clone(),
+            level: best.level,
+            reason: best.reason.clone(),
+        });
     }
 
     // 封顶：总时长超过全片的 45% 时，从把握最小、最长的开始丢。
@@ -221,15 +251,23 @@ mod tests {
     }
 
     #[test]
-    fn overlapping_segments_merge_keeping_the_more_certain_level() {
+    fn overlapping_segments_keep_each_part_s_own_level() {
         let content = r#"[
           {"start":"01:00","end":"02:00","kind":"repeat","level":3,"reason":"再举一例"},
           {"start":"01:40","end":"03:00","kind":"chitchat","level":1,"reason":"闲聊"}
         ]"#;
         let segments = parse_highlights(content, &sentences(), Some(600_000)).unwrap();
-        assert_eq!(segments.len(), 1);
-        assert_eq!(segments[0].level, 1);
-        assert_eq!(segments[0].end_ms, 189_500);
+        // 重叠处归高置信的 B；A 自己没重叠的前半段仍是 level 3，不能被一起染成 1。
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].start_ms, 60_000);
+        assert_eq!(segments[0].level, 3);
+        assert_eq!(segments[0].kind, "repeat");
+        assert_eq!(segments[1].level, 1);
+        assert_eq!(segments[1].end_ms, 189_500);
+        assert_eq!(
+            segments[0].end_ms, segments[1].start_ms,
+            "拆分后必须首尾相接，不能留缝"
+        );
     }
 
     #[test]

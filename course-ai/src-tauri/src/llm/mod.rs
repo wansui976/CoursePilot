@@ -150,6 +150,24 @@ impl ChatRequest {
     }
 }
 
+/// 流式请求必须在收到协议自己的结束事件后才算成功。
+///
+/// 网络静默断流（没有 message_stop / finishReason / done）时，半截回答不能当完整
+/// 结果写进笔记和题库——用户在界面上看不出区别。
+pub(crate) fn ensure_stream_finished(
+    finished: bool,
+    canceled: bool,
+    protocol: &str,
+) -> AppResult<()> {
+    if finished || canceled {
+        Ok(())
+    } else {
+        Err(crate::error::AppError::Other(format!(
+            "{protocol} 流在结束标记之前就断了，这次回答不完整"
+        )))
+    }
+}
+
 /// 某个 Profile 这次请求该用的 Key。
 ///
 /// - 存了非空 Key → 用它；
@@ -841,6 +859,16 @@ pub fn mock_embed(text: &str) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stream_without_its_end_event_is_an_error() {
+        assert!(ensure_stream_finished(true, false, "Anthropic").is_ok());
+        // 用户主动停止：已经吐出来的部分照常返回。
+        assert!(ensure_stream_finished(false, true, "Anthropic").is_ok());
+        let error = ensure_stream_finished(false, false, "Anthropic").unwrap_err();
+        assert!(error.to_string().contains("Anthropic"), "错误要标出协议");
+        assert!(error.to_string().contains("不完整"));
+    }
 
     #[test]
     fn azure_url_includes_deployment_and_version() {

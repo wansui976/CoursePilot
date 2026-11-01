@@ -72,9 +72,22 @@ pub fn build_body(req: &ChatRequest, stream: bool, max_tokens: Option<u32>) -> V
         // Ollama 的输出上限叫 num_predict（-1 = 无限）。
         options["num_predict"] = json!(max_tokens);
     }
+    // Ollama 的 /api/chat 把系统提示当一条普通 system 消息；不讲它拼进去，
+    // 所有任务指令和字幕上下文都会被丢掉（只剩用户那句问题）。
+    let system = match (&req.system, &req.cacheable_context) {
+        (Some(system), Some(context)) => Some(format!("{context}\n\n{system}")),
+        (Some(system), None) => Some(system.clone()),
+        (None, Some(context)) => Some(context.clone()),
+        (None, None) => None,
+    };
+    let mut messages: Vec<Value> = Vec::new();
+    if let Some(system) = system {
+        messages.push(json!({ "role": "system", "content": system }));
+    }
+    messages.extend(req.messages.iter().map(message_value));
     let mut body = json!({
         "model": req.model,
-        "messages": req.messages.iter().map(message_value).collect::<Vec<_>>(),
+        "messages": messages,
         "stream": stream,
         "options": options,
     });
@@ -205,12 +218,15 @@ pub async fn complete_stream(
     let mut tools = ToolCallAccumulator::default();
     let mut tool_index = 0usize;
     let mut usage = None;
+    let mut finished = false;
+    let mut canceled = false;
     let mut stream = response.bytes_stream();
     let mut buffer: Vec<u8> = Vec::new();
     'outer: loop {
         match next_stream_item_or_cancel(&mut stream, cancel).await {
             super::openai::StreamWait::Item(chunk) => {
                 if cancel.load(Ordering::SeqCst) {
+                    canceled = true;
                     break;
                 }
                 let bytes = chunk.map_err(|error| AppError::Other(format!("Ollama 流中断：{error}")))?;
@@ -242,20 +258,26 @@ pub async fn complete_stream(
                     if let Some(reason) = value.get("done_reason").and_then(Value::as_str) {
                         if !reason.is_empty() {
                             usage = usage_of(&value);
+                            finished = true;
                             break 'outer;
                         }
                     }
                     if value.get("done").and_then(Value::as_bool) == Some(true) {
                         usage = usage_of(&value);
+                        finished = true;
                         break 'outer;
                     }
                 }
                 tokio::task::yield_now().await;
             }
             super::openai::StreamWait::End => break,
-            super::openai::StreamWait::Canceled => break,
+            super::openai::StreamWait::Canceled => {
+                canceled = true;
+                break;
+            }
         }
     }
+    crate::llm::ensure_stream_finished(finished, canceled, "Ollama")?;
     Ok(StreamOutcome {
         content,
         tool_calls: tools.finish(),
@@ -303,6 +325,17 @@ mod tests {
         assert_eq!(messages[1]["tool_calls"][0]["function"]["arguments"]["ms"], 1200);
         assert_eq!(messages[2]["role"], "tool");
         assert_eq!(body["tools"][0]["function"]["name"], "seek");
+    }
+
+    #[test]
+    fn system_and_cached_context_are_sent_as_a_system_message() {
+        let mut req = sample_request(false);
+        req.system = Some("你是助手".into());
+        req.cacheable_context = Some("讲稿".into());
+        let body = build_body(&req, false, None);
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert_eq!(body["messages"][0]["content"], "讲稿\n\n你是助手");
+        assert_eq!(body["messages"][1]["role"], "user");
     }
 
     #[test]

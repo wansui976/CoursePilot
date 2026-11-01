@@ -115,10 +115,13 @@ pub async fn run_ocr_on_image(image: &Path, langs: &str) -> AppResult<String> {
         // 写失败（tesseract 提前退出、关了管道）不在这里报：退出码和 stderr 才说明了原因。
         let _ = stdin.write_all(&image_bytes).await;
     }
-    let output = child
-        .wait_with_output()
-        .await
-        .map_err(|e| AppError::Pipeline(format!("tesseract wait: {e}")))?;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        child.wait_with_output(),
+    )
+    .await
+    .map_err(|_| AppError::Pipeline("tesseract 超时（30 秒），这张图先跳过".into()))?
+    .map_err(|e| AppError::Pipeline(format!("tesseract wait: {e}")))?;
     if !output.status.success() {
         return Err(AppError::Pipeline(format!(
             "tesseract failed: {}",
@@ -132,17 +135,26 @@ pub async fn run_ocr_on_image(image: &Path, langs: &str) -> AppResult<String> {
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub async fn run_ocr_on_image(image: &Path, _langs: &str) -> AppResult<String> {
     let image = image.to_path_buf();
-    tokio::task::spawn_blocking(move || super::apple_vision::recognize_text(&image))
-        .await
-        .map_err(|error| AppError::Pipeline(format!("Apple Vision task failed: {error}")))?
+    // Vision 是同步的；卡住时不能让整条课件流水线无限等下去。
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        tokio::task::spawn_blocking(move || super::apple_vision::recognize_text(&image)),
+    )
+    .await
+    .map_err(|_| AppError::Pipeline("本地 OCR 超时（30 秒），这张图先跳过".into()))?
+    .map_err(|error| AppError::Pipeline(format!("Apple Vision task failed: {error}")))?
 }
 
 /// Android 使用随应用打包的 ML Kit 中文识别模型。
 #[cfg(target_os = "android")]
 pub async fn run_ocr_on_image(image: &Path, _langs: &str) -> AppResult<String> {
-    crate::mobile_files::recognize_image_text(image.to_string_lossy().into_owned())
-        .await
-        .map_err(AppError::Pipeline)
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        crate::mobile_files::recognize_image_text(image.to_string_lossy().into_owned()),
+    )
+    .await
+    .map_err(|_| AppError::Pipeline("本地 OCR 超时（30 秒），这张图先跳过".into()))?
+    .map_err(AppError::Pipeline)
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

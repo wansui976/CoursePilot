@@ -549,7 +549,7 @@ const CONTEXT_BUDGET_CHARS: usize = 20_000;
 /// 预算上限（字符）：再大的窗口也只送这么多，避免单次请求过大、费用失控。
 const MAX_CONTEXT_BUDGET_CHARS: usize = 400_000;
 /// 预算下限（字符）：小窗口模型也至少留这么多。
-const MIN_CONTEXT_BUDGET_CHARS: usize = 4_000;
+const MIN_CONTEXT_BUDGET_CHARS: usize = 2_000;
 /// 超预算时的分块上限（字符）；小窗口模型会按自己的预算缩小。
 const DIGEST_CHUNK_CHARS: usize = 12_000;
 /// 分块下限。
@@ -585,6 +585,12 @@ fn context_budget_chars(model: &str) -> usize {
             .clamp(MIN_CONTEXT_BUDGET_CHARS, MAX_CONTEXT_BUDGET_CHARS),
         None => CONTEXT_BUDGET_CHARS,
     }
+}
+
+/// 提要缓存的键：讲稿指纹 + 模型 + 预算。只算讲稿会让大窗口模型生成的长提要被
+/// 小窗口模型复用，压缩后的讲稿仍可能超上下文。
+fn digest_cache_key(fingerprint: &str, model: &str, budget: usize) -> String {
+    format!("{fingerprint}|{model}|{budget}")
 }
 
 /// 送进各生成任务的讲稿，以及它所基于的**原始讲稿**指纹。
@@ -684,14 +690,18 @@ pub async fn budgeted_context(
 ) -> AppResult<LectureInput> {
     let full = lecture_context(db, video_id).await?;
     let fingerprint = context_fingerprint(&full);
-    if full.chars().count() <= context_budget_chars(model) {
+    let budget = context_budget_chars(model);
+    // 提要与模型/预算绑定：大窗口模型生成的长提要不能被小窗口模型复用，
+    // 否则「压缩过」的讲稿仍然可能超上下文。指纹本身仍只算原始讲稿，供产物过期判断。
+    let digest_key = digest_cache_key(&fingerprint.0, model, budget);
+    if full.chars().count() <= budget {
         return Ok(LectureInput {
             context: full,
             fingerprint,
         });
     }
 
-    if let Some(cached) = cached_digest(db, video_id, &fingerprint.0).await? {
+    if let Some(cached) = cached_digest(db, video_id, &digest_key).await? {
         return Ok(LectureInput {
             context: cached,
             fingerprint,
@@ -707,7 +717,7 @@ pub async fn budgeted_context(
            generated_at=excluded.generated_at",
     )
     .bind(video_id)
-    .bind(&fingerprint.0)
+    .bind(&digest_key)
     .bind(&digest)
     .bind(chrono::Utc::now().timestamp_millis())
     .execute(&db.pool)
@@ -1317,6 +1327,16 @@ mod tests {
             MAX_CONTEXT_BUDGET_CHARS,
             "超大窗口要封顶，避免一次请求过大"
         );
+        // 4096 token 的老模型：不能被 4K 的下限反向撑爆。
+        assert_eq!(context_budget_chars("llama2"), 2_457);
+    }
+
+    #[test]
+    fn digest_cache_key_separates_models_and_budgets() {
+        let key = digest_cache_key("fp", "m", 20_000);
+        assert_eq!(key, digest_cache_key("fp", "m", 20_000));
+        assert_ne!(key, digest_cache_key("fp", "gpt-4o", 76_800));
+        assert_ne!(key, digest_cache_key("fp", "m", 4_000));
     }
 
     #[tokio::test]

@@ -370,10 +370,12 @@ pub async fn complete_stream(
     let mut state = StreamState::default();
     let mut stream = response.bytes_stream();
     let mut buffer: Vec<u8> = Vec::new();
+    let mut canceled = false;
     'outer: loop {
         match next_stream_item_or_cancel(&mut stream, cancel).await {
             super::openai::StreamWait::Item(chunk) => {
                 if cancel.load(Ordering::SeqCst) {
+                    canceled = true;
                     break;
                 }
                 let bytes = chunk.map_err(|error| AppError::Other(format!("Anthropic 流中断：{error}")))?;
@@ -386,12 +388,16 @@ pub async fn complete_stream(
                 tokio::task::yield_now().await;
             }
             super::openai::StreamWait::End => break,
-            super::openai::StreamWait::Canceled => break,
+            super::openai::StreamWait::Canceled => {
+                canceled = true;
+                break;
+            }
         }
     }
     if let Some(error) = state.error {
         return Err(AppError::Other(error));
     }
+    crate::llm::ensure_stream_finished(state.finished, canceled, "Anthropic")?;
     Ok(StreamOutcome {
         content: state.content,
         tool_calls: state.tools.finish(),

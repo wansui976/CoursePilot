@@ -308,6 +308,17 @@ pub async fn evaluate(
     // 顺手清掉话题已经不在的旧记录（概念重新分析、视频清空）：这是一次写入，
     // 挪在复述路径上，读接口（徽章、仪表盘）就不用为了清理去抢写锁。
     prune_orphan_attempts(db).await?;
+    // 评估期间概念可能被重新分析：刚写入的 topic_key 若已失效，会立刻被上面这轮清掉。
+    // 不能默默返回成功——前端会以为复述保存了，实际上什么都没留下。
+    let saved: Option<String> = sqlx::query_scalar("SELECT id FROM feynman_attempts WHERE id=?")
+        .bind(&attempt.id)
+        .fetch_optional(&db.pool)
+        .await?;
+    if saved.is_none() {
+        return Err(AppError::Other(
+            "这个话题在复述期间被重新分析了，这次结果没能保存，请重试".into(),
+        ));
+    }
     Ok(attempt)
 }
 
