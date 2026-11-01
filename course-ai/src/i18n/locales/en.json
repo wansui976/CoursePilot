@@ -1778,7 +1778,7 @@
       },
       "feynman": {
         "title": "Explain it to find the gaps",
-        "body": "Open Chapters — every row has a mic. Explain the chapter in your own words; the AI checks only against the course text, shows what you missed or got wrong, and links back to the exact moment. Concepts you explain clearly get a “Can explain” check."
+        "body": "In the Key chapters header, “Feynman explanation” lets you pick a chapter and explain it in your own words (speak or type). The AI checks only against the course text, shows what you missed or got wrong, and links back to the exact moment. You'll also get a gentle nudge when a chapter ends."
       },
       "highlights": {
         "title": "Speed up or skip the filler",
