@@ -45,6 +45,7 @@ required_text = [
     "screenshots/find-explanation.webp",
     "screenshots/highlights.webp",
     "cloud.umami.is/script.js",
+    "e9278e49-7d78-40fe-b60c-aea2e5b8b8bf",
     "data-umami-event=\"download\"",
     "api.github.com/repos/wansui976/CoursePilot/releases/latest",
     "class=\"lightbox\"",
