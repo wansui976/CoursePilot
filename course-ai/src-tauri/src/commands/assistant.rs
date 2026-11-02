@@ -26,7 +26,8 @@ use tauri::{Emitter, State};
 const ASSISTANT_SYSTEM: &str = "你是这个课程学习应用里的助手，帮用户查找内容、跳转、\
 整理素材。使用用户提问的语言，简洁，先说结论。严格遵守：\
 1. 涉及具体课程或视频时，**先用工具查真实 id**，不要凭印象或猜测填 id。\
-   用户说「这个视频」时指的是他正在看的那个，上下文里给了。\
+   用户说「这个视频」时指的是他正在看的那个，上下文里给了；对话里可能有好几条「（界面状态：…）」，\
+   以离当前提问最近的那条为准，更早的只说明当时在看什么。\
 2. 改名、删除、改设置、导入视频这几件事，你调用工具后**只是生成了一张待确认的卡片**，\
    并没有真的做。所以要说「已经帮你准备好，确认一下就生效」，\
    绝对不要说「已经改好了/已经删了」。\
@@ -63,6 +64,11 @@ const SOCRATIC_RULES: &str = "\n\n【引导模式】用户打开了引导模式�
 const CONTEXT_PREFIX: &str = "（界面状态：";
 const MAX_HISTORY_USER_TURNS: usize = 8;
 const MAX_HISTORY_CHARS: usize = 48_000;
+/// 超限压缩时只留这么多：压完留出余量，接下来几轮只往后追加、前缀不变，
+/// 端点的前缀缓存才命得中。压到刚好卡线的话，从此每一轮都要挤掉一组、重写一次摘要，
+/// 摘要之后的整段历史每轮都按全价重算，还要多付一次摘要调用。
+const COMPACT_KEEP_TURNS: usize = MAX_HISTORY_USER_TURNS / 2;
+const COMPACT_KEEP_CHARS: usize = MAX_HISTORY_CHARS / 2;
 /// 压缩历史的输入上限：溢出的老组拼接后先截到这个长度再送去摘要，
 /// 避免超长的老组把摘要请求自己撑爆。
 const MAX_DIGEST_INPUT_CHARS: usize = 24_000;
@@ -157,10 +163,11 @@ pub struct AssistantReply {
     pub history: Vec<ChatMessage>,
 }
 
-/// 把界面状态拼成一句话塞进对话开头。
+/// 把界面状态拼成一句话，放在本轮提问前面。
 ///
-/// 放在 user 轮而不是 system：它每次都在变，混进 system 会把稳定前缀打散，
-/// 端点的自动前缀缓存就命不中了——删掉 Anthropic 之后我们只剩这一层缓存。
+/// 放在 user 轮而不是 system：它每次都在变，混进 system 会把稳定前缀打散，缓存就命不中了。
+/// 也正因为要保住前缀，旧的这一行留在历史里原地不动（系统提示交代以最近一条为准），
+/// 而不是每轮删掉——从中间删一条，上一轮的全部内容（连同工具结果）就得按全价重算一遍。
 ///
 /// 名称和 id 一起给：只给 id 的话，模型想知道用户在看什么就得先调一轮 list_courses /
 /// list_videos。名称查不到（已删除、库出错）就只给 id，不为它打断整轮提问。
@@ -189,9 +196,7 @@ const MATCH_SLIDES_TOOL: &str = "match_slides";
 
 /// 界面状态和附图比对结果合成一条上下文消息。
 ///
-/// 必须以 `CONTEXT_PREFIX` 开头：下一轮 `prepare_history` 靠它把旧的上下文整条剥掉。
-/// 比对结果只对发图的那一轮有意义，跟着界面状态一起剥掉正合适——模型对图的结论
-/// 已经写在它这一轮的回答里了。
+/// 必须以 `CONTEXT_PREFIX` 开头：`prepare_history` 靠它认出这条并把它和后面的提问归成一组。
 fn context_message(context: Option<String>, slide_matches: Option<String>) -> Option<String> {
     match (context, slide_matches) {
         (None, None) => None,
@@ -267,7 +272,14 @@ fn message_chars(message: &ChatMessage) -> usize {
             .unwrap_or(0)
 }
 
+fn is_context_message(message: &ChatMessage) -> bool {
+    message.role == "user" && message.content.starts_with(CONTEXT_PREFIX)
+}
+
+/// 一组 = 若干条界面状态（可以没有）+ 一条用户提问 + 之后的回答与工具往返。
 fn valid_history_group(messages: &[ChatMessage]) -> bool {
+    let leading_context = messages.iter().take_while(|m| is_context_message(m)).count();
+    let messages = &messages[leading_context..];
     if messages.len() < 2
         || messages
             .first()
@@ -310,29 +322,33 @@ fn valid_history_group(messages: &[ChatMessage]) -> bool {
     pending_tool_calls.is_empty()
 }
 
-/// 只保留最近、结构完整的用户轮次，并移除旧的动态界面状态。
+/// 只保留最近、结构完整的用户轮次。
 ///
 /// 历史由界面回传，不能默认角色与工具消息结构可信。每组必须从 user 开始，assistant
-/// tool_call 必须在下一条非 tool 消息前全部配对；异常组整体丢弃。旧的「当前视频」则必须
-/// 每轮替换，否则切过视频后模型会同时看到好几个互相冲突的“当前”。
+/// tool_call 必须在下一条非 tool 消息前全部配对；异常组整体丢弃。
+///
+/// 旧的界面状态留在原处、跟着它那一轮的提问走：每轮删掉再补新的，等于从中间改写历史，
+/// 上一轮整轮内容都命不中前缀缓存。「以最近一条为准」交给系统提示交代。
 ///
 /// 放不下的最老组不再直接丢弃：压成一条摘要组（user + assistant）留在最前，模型还能
-/// 记得之前聊过什么。摘要失败则维持现状截断——少一点上下文不妨碍回答，为它打断整轮
-/// 提问不划算。
+/// 记得之前聊过什么。一旦要压，就压到 `COMPACT_KEEP_*` 留出余量（见那里的说明）。
+/// 摘要失败则维持现状截断——少一点上下文不妨碍回答，为它打断整轮提问不划算。
 async fn prepare_history(
     history: Vec<ChatMessage>,
     provider: &crate::llm::Provider,
     model: &str,
 ) -> Vec<ChatMessage> {
     let mut groups = Vec::new();
-    let mut current = Vec::new();
+    let mut current: Vec<ChatMessage> = Vec::new();
     for mut message in history {
-        if message.role == "user" && message.content.starts_with(CONTEXT_PREFIX) {
-            continue;
-        }
         // 图片只随发出它的那一轮发送；界面回传的历史里不该有，有也不信。
         message.images.clear();
-        if message.role == "user" {
+        // 界面状态开启新的一组；紧跟其后的提问并进同一组，而不是再切一刀。
+        let joins_context = message.role == "user"
+            && !is_context_message(&message)
+            && !current.is_empty()
+            && current.iter().all(is_context_message);
+        if message.role == "user" && !joins_context {
             if valid_history_group(&current) {
                 groups.push(std::mem::take(&mut current));
             } else {
@@ -347,12 +363,22 @@ async fn prepare_history(
         groups.push(current);
     }
 
+    let total_chars: usize = groups.iter().flatten().map(message_chars).sum();
+    let fits = groups.len() <= MAX_HISTORY_USER_TURNS && total_chars <= MAX_HISTORY_CHARS;
+    let (turn_cap, char_cap) = if fits {
+        (MAX_HISTORY_USER_TURNS, MAX_HISTORY_CHARS)
+    } else {
+        (COMPACT_KEEP_TURNS, COMPACT_KEEP_CHARS)
+    };
     let mut kept = Vec::new();
     let mut kept_chars = 0;
     let mut overflow: Vec<Vec<ChatMessage>> = Vec::new();
+    // 从新往老收；一组放不下，比它更老的也都进摘要——留下的必须是连续的最近几轮。
     for group in groups.into_iter().rev() {
         let group_chars: usize = group.iter().map(message_chars).sum();
-        if kept.len() >= MAX_HISTORY_USER_TURNS || kept_chars + group_chars > MAX_HISTORY_CHARS {
+        // 最近一轮只受总上限约束：它往往就是用户正在追问的那一轮，别因为留余量把它压掉。
+        let cap = if kept.is_empty() { MAX_HISTORY_CHARS } else { char_cap };
+        if !overflow.is_empty() || kept.len() >= turn_cap || kept_chars + group_chars > cap {
             overflow.push(group);
             continue;
         }
@@ -912,22 +938,67 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn old_interface_context_is_replaced_instead_of_accumulating() {
+    async fn old_interface_context_stays_in_place_so_the_cached_prefix_survives() {
+        let history = vec![
+            ChatMessage::user("（界面状态：当前视频 id=old）"),
+            ChatMessage::user("这个讲了什么"),
+            ChatMessage::assistant("旧回答"),
+        ];
+        let prepared = prepare_history(history.clone(), &mock_provider("摘要"), "m").await;
+        // 原样保留、顺序不变：从中间删掉它，上一轮整轮都命不中前缀缓存。
+        assert_eq!(prepared.len(), 3);
+        for (kept, original) in prepared.iter().zip(&history) {
+            assert_eq!(kept.role, original.role);
+            assert_eq!(kept.content, original.content);
+        }
+        assert!(valid_history_group(&prepared), "界面状态 + 提问 + 回答是一组合法的历史");
+        assert!(ASSISTANT_SYSTEM.contains("以离当前提问最近的那条为准"));
+    }
+
+    #[tokio::test]
+    async fn a_dangling_interface_context_without_a_question_is_dropped() {
         let prepared = prepare_history(
             vec![
-                ChatMessage::user("（界面状态：当前视频 id=old）"),
-                ChatMessage::user("这个讲了什么"),
-                ChatMessage::assistant("旧回答"),
+                ChatMessage::user("（界面状态：当前视频 id=a）"),
+                ChatMessage::user("（界面状态：当前视频 id=b）"),
+                ChatMessage::user("问题"),
+                ChatMessage::assistant("回答"),
             ],
             &mock_provider("摘要"),
             "m",
         )
         .await;
-        assert_eq!(prepared.len(), 2);
-        assert_eq!(prepared[0].content, "这个讲了什么");
-        assert!(prepared
-            .iter()
-            .all(|message| !message.content.starts_with(CONTEXT_PREFIX)));
+        assert_eq!(prepared.len(), 3);
+        assert!(prepared[0].content.contains("id=b"));
+        assert_eq!(prepared[1].content, "问题");
+    }
+
+    #[tokio::test]
+    async fn after_compaction_the_next_turns_only_append_to_the_same_prefix() {
+        let mut history = Vec::new();
+        for index in 0..MAX_HISTORY_USER_TURNS + 1 {
+            history.push(ChatMessage::user(format!("问题 {index}")));
+            history.push(ChatMessage::assistant(format!("回答 {index}")));
+        }
+        let first = prepare_history(history, &mock_provider("早先要点"), "m").await;
+        // 下一轮界面把压好的历史 + 新的一轮传回来：不该再压一次，前缀要逐条不变。
+        let failing = crate::llm::Provider::Failing {
+            permanent: false,
+            message: "不该再调摘要".into(),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let mut next = first.clone();
+        next.push(ChatMessage::user("新问题"));
+        next.push(ChatMessage::assistant("新回答"));
+        let second = prepare_history(next, &failing, "m").await;
+        assert_eq!(second.len(), first.len() + 2);
+        for (a, b) in first.iter().zip(&second) {
+            assert_eq!(a.role, b.role);
+            assert_eq!(a.content, b.content);
+        }
+        if let crate::llm::Provider::Failing { calls, .. } = &failing {
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        }
     }
 
     #[tokio::test]
@@ -975,21 +1046,24 @@ mod tests {
             history.push(ChatMessage::assistant(format!("回答 {index}")));
         }
 
-        let prepared = prepare_history(history, &mock_provider("更早的对话要点：用户问过 0 和 1"), "m").await;
-        // 溢出的最老两组压成一条摘要组（user + assistant）留在最前，
-        // 后面仍是完整的最近 MAX 组——user 轮数 = MAX + 1（摘要组算一轮）。
+        let prepared = prepare_history(history, &mock_provider("更早的对话要点：用户问过 0 到 5"), "m").await;
+        // 超限后压到留出余量：溢出的老组压成一条摘要组（user + assistant）留在最前，
+        // 后面是完整的最近 COMPACT_KEEP_TURNS 组——user 轮数 = KEEP + 1（摘要组算一轮）。
         assert_eq!(
             prepared
                 .iter()
                 .filter(|message| message.role == "user")
                 .count(),
-            MAX_HISTORY_USER_TURNS + 1
+            COMPACT_KEEP_TURNS + 1
         );
         assert_eq!(prepared[0].role, "user");
         assert!(prepared[0].content.contains("摘要"), "摘要组要有背景声明");
         assert_eq!(prepared[1].role, "assistant");
-        assert_eq!(prepared[1].content, "更早的对话要点：用户问过 0 和 1");
-        assert_eq!(prepared[2].content, "问题 2");
+        assert_eq!(prepared[1].content, "更早的对话要点：用户问过 0 到 5");
+        assert_eq!(
+            prepared[2].content,
+            format!("问题 {}", MAX_HISTORY_USER_TURNS + 2 - COMPACT_KEEP_TURNS)
+        );
         assert_eq!(prepared[3].role, "assistant");
         assert_eq!(prepared[4].role, "tool");
         assert_eq!(
@@ -1035,7 +1109,7 @@ mod tests {
             history.push(ChatMessage::assistant(format!("回答 {index}")));
         }
 
-        // 摘要调用失败：维持现状截断，只留最近的 MAX 组，不打断整轮提问。
+        // 摘要调用失败：维持现状截断，只留最近的 KEEP 组，不打断整轮提问。
         let failing = crate::llm::Provider::Failing {
             permanent: false,
             message: "压缩端点不可用".into(),
@@ -1047,9 +1121,12 @@ mod tests {
                 .iter()
                 .filter(|message| message.role == "user")
                 .count(),
-            MAX_HISTORY_USER_TURNS
+            COMPACT_KEEP_TURNS
         );
-        assert_eq!(prepared[0].content, "问题 1");
+        assert_eq!(
+            prepared[0].content,
+            format!("问题 {}", MAX_HISTORY_USER_TURNS + 1 - COMPACT_KEEP_TURNS)
+        );
 
         // 模型回了空摘要：同样当作失败，维持截断。
         let prepared = prepare_history(history, &mock_provider(""), "m").await;
@@ -1058,9 +1135,12 @@ mod tests {
                 .iter()
                 .filter(|message| message.role == "user")
                 .count(),
-            MAX_HISTORY_USER_TURNS
+            COMPACT_KEEP_TURNS
         );
-        assert_eq!(prepared[0].content, "问题 1");
+        assert_eq!(
+            prepared[0].content,
+            format!("问题 {}", MAX_HISTORY_USER_TURNS + 1 - COMPACT_KEEP_TURNS)
+        );
     }
 
     fn outcome(messages: Vec<ChatMessage>) -> crate::llm::agent::AgentOutcome {
@@ -1195,7 +1275,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slide_match_notes_are_dropped_with_the_ui_context_next_turn() {
+    async fn slide_match_notes_stay_with_their_turn_like_the_ui_context() {
         let with_context = context_message(
             Some(format!("{CONTEXT_PREFIX}当前视频 id=v1）")),
             Some("（附图比对：附图就是课件第 2 页）".into()),
@@ -1215,7 +1295,11 @@ mod tests {
                 "m",
             )
             .await;
-            assert!(prepared.iter().all(|m| !m.content.contains("附图比对")));
+            // 和界面状态一起原地留在它那一轮：比对结论只有一两行，而删掉它就是改写历史中段，
+            // 上一轮整轮都命不中前缀缓存。图片本身不跟回来（见下一个测试）。
+            assert_eq!(prepared.len(), 3);
+            assert!(prepared[0].content.contains("附图比对"));
+            assert_eq!(prepared[1].content, "这页在哪讲的");
         }
         assert_eq!(context_message(None, None), None);
     }

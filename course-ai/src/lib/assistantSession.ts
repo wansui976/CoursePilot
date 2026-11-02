@@ -17,6 +17,9 @@ const MAX_TOOL_CALL_ID_CHARS = 256;
 const MAX_TOOLS_PER_TURN = 50;
 const MAX_HISTORY_USER_TURNS = 8;
 const MAX_HISTORY_CHARS = 48_000;
+/** 内存里那份历史的兜底上限，见 boundTrustedAssistantHistory。 */
+const TRUSTED_HISTORY_USER_TURNS = MAX_HISTORY_USER_TURNS + 1;
+const TRUSTED_HISTORY_CHARS = MAX_HISTORY_CHARS * 4;
 const MAX_ACTION_RESULTS = 50;
 const MAX_ACTION_RESULT_CHARS = 2_000;
 const MAX_CHECKPOINT_TARGETS = 12;
@@ -470,6 +473,10 @@ function readMessage(value: unknown): AssistantMessage | null {
   };
 }
 
+function isContextMessage(message: AssistantMessage) {
+  return message.role === "user" && message.content.startsWith(CONTEXT_PREFIX);
+}
+
 function messageChars(message: AssistantMessage) {
   return (
     message.role.length +
@@ -510,10 +517,17 @@ export function boundAssistantHistory(values: unknown[]): AssistantMessage[] {
 
   for (const value of values) {
     const message = readMessage(value);
-    // 和后端 prepare_history 一样，旧界面状态每轮都会被当前状态替换，既不持久化，
-    // 也不占用户轮次预算。
-    if (message?.role === "user" && message.content.startsWith(CONTEXT_PREFIX)) continue;
+    // 和后端 prepare_history 一样：旧界面状态留在原处，和紧跟其后的提问算同一组。
+    // 删掉它等于改写历史中段，恢复会话后的第一轮就整段命不中模型端的前缀缓存。
     if (message?.role === "user") {
+      const joinsContext =
+        !isContextMessage(message) &&
+        current !== null &&
+        current.messages.every(isContextMessage);
+      if (joinsContext) {
+        current!.messages.push(message);
+        continue;
+      }
       if (current) groups.push(current);
       current = { messages: [message], invalid: false };
     } else if (current) {
@@ -523,10 +537,18 @@ export function boundAssistantHistory(values: unknown[]): AssistantMessage[] {
   }
   if (current) groups.push(current);
 
-  const valid = groups.filter(
-    (group) =>
-      !group.invalid && group.messages.length > 1 && validHistoryGroup(group.messages),
-  );
+  const valid = groups.filter((group) => {
+    const body = group.messages.slice(
+      group.messages.findIndex((message) => !isContextMessage(message)),
+    );
+    return (
+      !group.invalid &&
+      group.messages.some((message) => !isContextMessage(message)) &&
+      body.length > 1 &&
+      body[0].role === "user" &&
+      validHistoryGroup(body)
+    );
+  });
   const kept: AssistantMessage[][] = [];
   let keptChars = 0;
   for (let index = valid.length - 1; index >= 0; index -= 1) {
@@ -540,31 +562,39 @@ export function boundAssistantHistory(values: unknown[]): AssistantMessage[] {
   return kept.flat();
 }
 
-/** 后端刚返回的历史已经过结构校验，只需按同一用户轮次/字符预算裁剪。 */
+/**
+ * 后端刚返回的历史已经过结构校验，这里只兜一个防止无限增长的上限。
+ *
+ * 上限故意比后端宽：后端按 MAX 轮/字整理完再追加刚问的这一轮，回来的历史本来就会
+ * 超出一点。这里要是按同一条线卡，每轮都会从最老的一端挤掉一组——历史前缀每轮都变，
+ * 模型端的前缀缓存一次都命不中。什么时候压、压成什么样交给后端（它会留出余量再压）。
+ * 界面状态同理留在原处，跟着它那一轮的提问走。
+ */
 export function boundTrustedAssistantHistory(history: AssistantMessage[]): AssistantMessage[] {
-  const messages = history.filter(
-    (message) => !(message.role === "user" && message.content.startsWith(CONTEXT_PREFIX)),
-  );
-  const userStarts = messages.flatMap((message, index) =>
-    message.role === "user" ? [index] : [],
-  );
-  let start = messages.length;
-  let end = messages.length;
+  const userStarts = history.flatMap((message, index) => {
+    if (message.role !== "user") return [];
+    const previous = history[index - 1];
+    const joinsContext =
+      !isContextMessage(message) && previous !== undefined && isContextMessage(previous);
+    return joinsContext ? [] : [index];
+  });
+  let start = history.length;
+  let end = history.length;
   let keptTurns = 0;
   let keptChars = 0;
   for (let index = userStarts.length - 1; index >= 0; index -= 1) {
-    if (keptTurns >= MAX_HISTORY_USER_TURNS) break;
+    if (keptTurns >= TRUSTED_HISTORY_USER_TURNS) break;
     const candidate = userStarts[index];
-    const groupChars = messages
+    const groupChars = history
       .slice(candidate, end)
       .reduce((sum, message) => sum + messageChars(message), 0);
-    if (keptChars + groupChars > MAX_HISTORY_CHARS) break;
+    if (keptChars + groupChars > TRUSTED_HISTORY_CHARS) break;
     start = candidate;
     end = candidate;
     keptTurns += 1;
     keptChars += groupChars;
   }
-  return start === messages.length ? [] : messages.slice(start);
+  return start === history.length ? [] : history.slice(start);
 }
 
 /**

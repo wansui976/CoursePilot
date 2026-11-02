@@ -5,7 +5,8 @@
 //! - `max_tokens` 必填；
 //! - 工具结果是 **user 轮次** 里的 `tool_result` 块，不是 role=tool；
 //! - 工具调用在 assistant 的 `tool_use` 块里，入参是对象而不是 JSON 字符串；
-//! - 流式是具名事件 + `content_block_delta`。
+//! - 流式是具名事件 + `content_block_delta`；
+//! - **不做自动前缀缓存**：要命中缓存必须显式打 `cache_control` 断点（见 [`build_body`]）。
 
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -115,21 +116,61 @@ fn build_messages(req: &ChatRequest) -> Vec<Value> {
     out
 }
 
-pub fn build_body(req: &ChatRequest, max_tokens: u32) -> Value {
-    let system = match (&req.system, &req.cacheable_context) {
-        (Some(system), Some(context)) => Some(format!("{context}\n\n{system}")),
-        (Some(system), None) => Some(system.clone()),
-        (None, Some(context)) => Some(context.clone()),
-        (None, None) => None,
+fn ephemeral() -> Value {
+    json!({ "type": "ephemeral" })
+}
+
+/// 在最后一条消息的最后一个内容块上打缓存断点。纯文本内容先改写成单个 text 块——
+/// 断点只能挂在块上。空文本块不能挂断点（服务端会拒收整个请求），这种就不打。
+fn mark_last_block(messages: &mut [Value]) {
+    let Some(content) = messages.last_mut().map(|message| &mut message["content"]) else {
+        return;
     };
+    if let Some(text) = content.as_str().map(str::to_owned) {
+        if text.is_empty() {
+            return;
+        }
+        *content = json!([{ "type": "text", "text": text }]);
+    }
+    if let Some(block) = content.as_array_mut().and_then(|blocks| blocks.last_mut()) {
+        if block.get("type").and_then(Value::as_str) == Some("text")
+            && block.get("text").and_then(Value::as_str).is_some_and(str::is_empty)
+        {
+            return;
+        }
+        block["cache_control"] = ephemeral();
+    }
+}
+
+/// Anthropic 的缓存是显式的：不打 `cache_control` 断点，每次请求都按全价重算整个输入。
+/// 前缀顺序是 tools → system → messages，断点之前的部分整体缓存（最多 4 个断点，
+/// 不足最小长度——Sonnet/Opus 1024、Haiku 2048 token——的断点服务端直接忽略）：
+///
+/// 1. 讲稿块（cacheable_context）：同一视频的摘要/章节/笔记/出题/脑图/精华版共用它；
+/// 2. 系统指令末尾：连同前面的工具定义一起，跨对话、跨轮次都不变；
+/// 3. 最后一条消息：只在多轮（带工具或带历史）时打。工具循环的下一轮、下一次追问都以
+///    这一轮的全部内容为前缀；单轮任务的用户消息每次都不一样（纠错批次、提要块），
+///    在那上面打断点只会按 1.25 倍白付一次写入费。
+pub fn build_body(req: &ChatRequest, max_tokens: u32) -> Value {
+    let mut system: Vec<Value> = Vec::new();
+    if let Some(context) = req.cacheable_context.as_deref().filter(|text| !text.is_empty()) {
+        system.push(json!({ "type": "text", "text": context, "cache_control": ephemeral() }));
+    }
+    if let Some(text) = req.system.as_deref().filter(|text| !text.is_empty()) {
+        system.push(json!({ "type": "text", "text": text, "cache_control": ephemeral() }));
+    }
+    let mut messages = build_messages(req);
+    if !req.tools.is_empty() || req.messages.len() > 1 {
+        mark_last_block(&mut messages);
+    }
     let mut body = json!({
         "model": req.model,
         "max_tokens": max_tokens,
-        "messages": build_messages(req),
+        "messages": messages,
         "temperature": crate::llm::round_temperature(req.temperature),
     });
-    if let Some(system) = system {
-        body["system"] = Value::String(system);
+    if !system.is_empty() {
+        body["system"] = Value::Array(system);
     }
     if !req.tools.is_empty() {
         body["tools"] = Value::Array(
@@ -192,22 +233,19 @@ pub fn parse_response(value: &Value) -> AppResult<ChatResponse> {
 
 fn usage_of(usage: Option<&Value>) -> Option<Usage> {
     let usage = usage?;
-    let prompt = usage.get("input_tokens").and_then(Value::as_i64).unwrap_or(0);
-    let completion = usage.get("output_tokens").and_then(Value::as_i64).unwrap_or(0);
+    let count = |key: &str| usage.get(key).and_then(Value::as_i64).unwrap_or(0);
+    // Anthropic 的 input_tokens 只是断点之后、没进缓存的那一截；读缓存和写缓存各报各的。
+    // 收敛成 OpenAI 的口径：prompt 是输入总量，cached 只算**读**到的。写缓存按 1.25 倍计费，
+    // 原来把它也算成「命中」，结果「每次都在写、从来没读到」反倒显示成高命中率。
+    let read = count("cache_read_input_tokens");
+    let prompt = count("input_tokens") + read + count("cache_creation_input_tokens");
+    let completion = count("output_tokens");
     if prompt == 0 && completion == 0 {
         return None;
     }
-    let cached = usage
-        .get("cache_read_input_tokens")
-        .and_then(Value::as_i64)
-        .unwrap_or(0)
-        + usage
-            .get("cache_creation_input_tokens")
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
     Some(Usage {
         prompt_tokens: prompt,
-        cached_tokens: cached,
+        cached_tokens: read,
         completion_tokens: completion,
         reasoning_tokens: 0,
     })
@@ -442,7 +480,8 @@ mod tests {
         let body = build_body(&request_body(false), 4096);
         assert_eq!(body["model"], "claude-sonnet-4-6");
         assert_eq!(body["max_tokens"], 4096);
-        assert_eq!(body["system"], "讲稿\n\n你是助手");
+        assert_eq!(body["system"][0]["text"], "讲稿");
+        assert_eq!(body["system"][1]["text"], "你是助手");
         let messages = body["messages"].as_array().unwrap();
         assert_eq!(messages[0]["role"], "user");
         assert_eq!(messages[0]["content"][0]["type"], "text");
@@ -479,9 +518,59 @@ mod tests {
         assert_eq!(parsed.tool_calls[0].name, "seek");
         assert_eq!(parsed.tool_calls[0].arguments, r#"{"ms":1200}"#);
         let usage = parsed.usage.unwrap();
-        assert_eq!(usage.prompt_tokens, 100);
+        // 输入总量 = 未缓存 100 + 读缓存 60 + 写缓存 10；只有读到的算命中。
+        assert_eq!(usage.prompt_tokens, 170);
         assert_eq!(usage.completion_tokens, 20);
-        assert_eq!(usage.cached_tokens, 70);
+        assert_eq!(usage.cached_tokens, 60);
+    }
+
+    #[test]
+    fn cache_writes_alone_are_not_reported_as_hits() {
+        let value = json!({
+            "content": [{"type": "text", "text": "好"}],
+            "usage": {"input_tokens": 5, "output_tokens": 1, "cache_creation_input_tokens": 3000}
+        });
+        let usage = parse_response(&value).unwrap().usage.unwrap();
+        assert_eq!(usage.prompt_tokens, 3005);
+        assert_eq!(usage.cached_tokens, 0);
+    }
+
+    #[test]
+    fn marks_cache_breakpoints_on_transcript_system_and_last_turn() {
+        let body = build_body(&request_body(false), 4096);
+        assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(body["system"][1]["cache_control"]["type"], "ephemeral");
+        // 多轮：最后一条（并进 user 轮的工具结果）也打断点，下一轮以它为前缀。
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages[2]["content"][0]["cache_control"]["type"], "ephemeral");
+        assert!(messages[0]["content"][1].get("cache_control").is_none());
+        let breakpoints = body.to_string().matches("cache_control").count();
+        assert!(breakpoints <= 4, "Anthropic 最多 4 个断点，实际 {breakpoints}");
+    }
+
+    #[test]
+    fn single_turn_tasks_do_not_pay_to_cache_their_unique_message() {
+        let mut req = ChatRequest::text("claude-sonnet-4-6", Some("纠错规则".into()), vec![
+            ChatMessage::user("这一批独一无二的字幕"),
+        ]);
+        req.cacheable_context = None;
+        let body = build_body(&req, 4096);
+        assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(body["messages"][0]["content"], "这一批独一无二的字幕");
+    }
+
+    #[test]
+    fn multi_turn_plain_text_tail_is_wrapped_into_a_block_for_the_breakpoint() {
+        let req = ChatRequest::text("claude-sonnet-4-6", None, vec![
+            ChatMessage::user("问"),
+            ChatMessage::assistant("答"),
+            ChatMessage::user("追问"),
+        ]);
+        let body = build_body(&req, 4096);
+        assert!(body.get("system").is_none());
+        let last = &body["messages"][2]["content"];
+        assert_eq!(last[0]["text"], "追问");
+        assert_eq!(last[0]["cache_control"]["type"], "ephemeral");
     }
 
     #[test]

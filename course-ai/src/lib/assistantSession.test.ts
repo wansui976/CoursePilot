@@ -5,6 +5,7 @@ import {
   clearAssistantSession,
   deserializeAssistantSession,
   getAssistantInteractionState,
+  boundTrustedAssistantHistory,
   historyBeforeLastQuestion,
   MAX_ASSISTANT_ANSWER_CHARS,
   MAX_ASSISTANT_REASONING_CHARS,
@@ -762,9 +763,35 @@ describe("assistantSession", () => {
     );
 
     const history = readAssistantSession().history;
-    expect(history.filter((message) => message.role === "user")).toHaveLength(8);
-    expect(history[0].content).toBe("问题 2");
-    expect(history.every((message) => !message.content.startsWith("（界面状态："))).toBe(true);
+    const questions = history.filter(
+      (message) => message.role === "user" && !message.content.startsWith("（界面状态："),
+    );
+    expect(questions).toHaveLength(8);
+    // 界面状态跟着它那一轮的提问留在原处：删掉会改写历史中段，前缀缓存整段失效。
+    expect(history[0].content).toBe("（界面状态：当前视频 id=v2）");
+    expect(history[1].content).toBe("问题 2");
+  });
+});
+
+describe("boundTrustedAssistantHistory", () => {
+  const turn = (index: number) => [
+    { role: "user" as const, content: `（界面状态：当前视频 id=v${index}）` },
+    { role: "user" as const, content: `问题 ${index}` },
+    { role: "assistant" as const, content: `回答 ${index}` },
+  ];
+
+  it("后端整理完再追加一轮的历史原样保留：每轮挤掉最老一组会让前缀缓存一次都命不中", () => {
+    // 后端最多留 8 轮再加上刚问的这一轮。
+    const history = Array.from({ length: 9 }, (_, index) => turn(index)).flat();
+    expect(boundTrustedAssistantHistory(history)).toEqual(history);
+  });
+
+  it("真失控时才从最老的一端整轮裁掉，界面状态跟着它那一轮的提问走", () => {
+    const history = Array.from({ length: 12 }, (_, index) => turn(index)).flat();
+    const bounded = boundTrustedAssistantHistory(history);
+    expect(bounded[0].content).toBe("（界面状态：当前视频 id=v3）");
+    expect(bounded[1].content).toBe("问题 3");
+    expect(bounded[bounded.length - 1].content).toBe("回答 11");
   });
 });
 

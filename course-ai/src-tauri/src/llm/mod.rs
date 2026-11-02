@@ -118,10 +118,10 @@ pub struct ChatRequest {
     pub system: Option<String>,
     /// 大段字幕上下文：拼进 system 的最前面，让同一视频的多个任务共用同一段前缀。
     ///
-    /// 原来这里是「Anthropic 显式标 cache 块、OpenAI 靠前缀自动缓存」两套。去掉 Anthropic
-    /// 之后只剩后者——**缓存从显式变成了隐式**：命不命中由端点自己决定，我们既不声明也
-    /// 收不到反馈。换到不做自动前缀缓存的兼容端点时，那几个共用讲稿的任务会悄悄贵好几倍，
-    /// 而且没有任何信号。字段保留，因为「把稳定的大块放最前面」这件事仍然是对的。
+    /// 各协议的缓存方式不同：OpenAI / DeepSeek / Gemini 按前缀自动缓存，靠的就是
+    /// 「稳定的大块放最前面」；Anthropic 不自动缓存，要在这一块上显式打 `cache_control`
+    /// 断点（见 `anthropic::build_body`）。命中多少看 `Usage::cached_tokens`，按档汇总在
+    /// 开发控制台的用量统计里。
     pub cacheable_context: Option<String>,
     pub messages: Vec<ChatMessage>,
     pub temperature: f32,
