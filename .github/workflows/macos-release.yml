@@ -10,6 +10,14 @@ on:
         description: Existing release tag to upload macOS assets to
         required: true
         default: v0.1.1
+      arch:
+        description: 要编的架构（给已发布的版本补包时只选缺的那个，别把已有的包重编覆盖掉）
+        type: choice
+        default: all
+        options:
+          - all
+          - aarch64
+          - x64
 
 permissions:
   contents: write
@@ -22,6 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
 
     steps:
       - name: Checkout
@@ -38,6 +47,22 @@ jobs:
           fi
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      # 两个架构都在对应的原生机器上编：sidecar 脚本按 rustc 的 host 取 ffmpeg、编 whisper-cli，
+      # 产物能在构建机上直接跑一遍自检。DMG 文件名自带架构（aarch64 / x64），上传不会互相覆盖。
+      - name: Pick architectures
+        id: matrix
+        env:
+          ARCH: ${{ inputs.arch || 'all' }}
+        shell: bash
+        run: |
+          all='[{"arch":"aarch64","runner":"macos-15"},{"arch":"x64","runner":"macos-15-intel"}]'
+          if [[ "$ARCH" == "all" ]]; then
+            matrix="$all"
+          else
+            matrix="$(jq -c --arg arch "$ARCH" 'map(select(.arch == $arch))' <<<"$all")"
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
       - name: Create or update release
         env:
@@ -60,23 +85,27 @@ jobs:
   build-macos:
     name: Build macOS DMG (${{ matrix.arch }})
     needs: create-release
-    # 两个架构都在对应的原生机器上编：sidecar 脚本按 rustc 的 host 取 ffmpeg、编 whisper-cli，
-    # 产物能在构建机上直接跑一遍自检。DMG 文件名自带架构（aarch64 / x64），上传不会互相覆盖。
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: aarch64
-            runner: macos-15
-          - arch: x64
-            runner: macos-15-intel
+        include: ${{ fromJSON(needs.create-release.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     env:
       RELEASE_TAG: ${{ needs.create-release.outputs.tag }}
 
     steps:
-      - name: Checkout
+      # 手动给旧版本补包时，应用代码取那个 tag，补出来的包和当初发布的是同一份代码；
+      # 构建脚本仍取这次运行的提交（.github/ci 下）：旧 tag 上的脚本可能还不认新加的架构。
+      - name: Checkout release tag
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Checkout build scripts
+        uses: actions/checkout@v4
+        with:
+          path: .github/ci
+          sparse-checkout: .github/scripts
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -106,10 +135,10 @@ jobs:
           path: |
             course-ai/src-tauri/binaries/whisper-cli-*
             course-ai/src-tauri/binaries/.whisper-cli-*.tag
-          key: whisper-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/scripts/prepare-macos-sidecars.sh') }}
+          key: whisper-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/ci/.github/scripts/prepare-macos-sidecars.sh') }}
 
       - name: Prepare macOS sidecars
-        run: ./.github/scripts/prepare-macos-sidecars.sh
+        run: ./.github/ci/.github/scripts/prepare-macos-sidecars.sh
 
       - name: Build macOS bundles
         working-directory: course-ai
