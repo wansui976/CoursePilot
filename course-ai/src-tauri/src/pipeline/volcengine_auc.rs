@@ -5,7 +5,10 @@
 //!   1. POST /submit 上传整段音频（base64），拿到由 X-Api-Request-Id 标识的任务；
 //!   2. POST /query 轮询，直到 X-Api-Status-Code = 20000000（完成）拿结果。
 //!
-//! 鉴权同样是 App Key + Access Key 两段头；资源 ID 用 volc.bigasr.auc。
+//! 鉴权同样是 App Key + Access Key 两段头；资源 ID 随模型版本而变——这一条最容易踩：
+//! 控制台开通「豆包录音文件识别模型2.0」时资源 ID 是 `volc.seedasr.auc`，开通 1.0 才是
+//! `volc.bigasr.auc`。用错不会被当成参数错误，而是 403 + `45000030 requested resource
+//! not granted`，看着像 App ID / Token 填错了（见下面 RESOURCE_ID_V2 的说明）。
 //! 对「处理已录好的课程视频」这个场景，比流式协议更稳、更简单。
 
 use crate::error::{AppError, AppResult};
@@ -16,12 +19,27 @@ use crate::sidecar::{resolve, FFMPEG};
 use futures_util::stream::StreamExt;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 use uuid::Uuid;
 
 const SUBMIT_URL: &str = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit";
 const QUERY_URL: &str = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query";
-const RESOURCE_ID: &str = "volc.bigasr.auc";
+/// 「豆包录音文件识别模型2.0」的资源 ID。控制台现在默认开通、也默认售卖 2.0，
+/// 所以先试它。
+const RESOURCE_ID_V2: &str = "volc.seedasr.auc";
+/// 「豆包录音文件识别模型1.0」的资源 ID。老账号、旧版控制台开通的是这个。
+///
+/// 这两个 ID 和「有没有开通服务」是绑死的一对：开通了 2.0 却发 1.0 的 ID，服务端
+/// 不会说「模型版本不对」，而是回 HTTP 403 + 业务码 45000030 `requested resource
+/// not granted`——和 App ID / Token 填错长得一模一样。真实反馈就是被它带偏的：
+/// 反复核对 App ID 与 Access Token 都没问题，其实只是 ID 差了半截。
+const RESOURCE_ID_V1: &str = "volc.bigasr.auc";
+/// 资源没授权给这个 App 时，服务端回的业务码。
+const STATUS_RESOURCE_NOT_GRANTED: &str = "45000030";
+/// 本进程内已经试通过的那个资源 ID。分段识别会并发提交十几段，没有它的话每一段
+/// 都要先撞一次 403 再回退——白打十几次日志，还白等回退重试。
+static RESOLVED_RESOURCE_ID: OnceLock<&'static str> = OnceLock::new();
 const STATUS_SUCCESS: &str = "20000000";
 /// 正在处理 / 排队中：只有这两个码才值得继续等。
 const STATUS_PROCESSING: &str = "20000001";
@@ -57,13 +75,17 @@ fn asr_client() -> reqwest::Client {
 /// 所以只有「提交本身没成功」才允许整段重来。
 enum RecognizeFailure {
     BeforeSubmit(AppError),
+    /// 提交被明确拒绝，且换个说法去问也是同一个答复：App ID / Token 不对、资源没授权。
+    ///
+    /// 这类失败再提交一百遍也不会变好，回退重试只是把同一条错误多打印两遍。
+    Rejected(AppError),
     AfterSubmit(AppError),
 }
 
 impl RecognizeFailure {
     fn into_error(self) -> AppError {
         match self {
-            Self::BeforeSubmit(error) | Self::AfterSubmit(error) => error,
+            Self::BeforeSubmit(error) | Self::Rejected(error) | Self::AfterSubmit(error) => error,
         }
     }
 
@@ -245,39 +267,65 @@ async fn recognize_bytes(
     format: &str,
 ) -> Result<WhisperJson, RecognizeFailure> {
     let request_id = Uuid::new_v4().to_string();
+    let body = build_submit_body(&request_id, &base64_encode(audio_bytes), context, format);
 
     // ---- 1. 提交任务 ----
-    let body = build_submit_body(&request_id, &base64_encode(audio_bytes), context, format);
-    let resp = client
-        .post(SUBMIT_URL)
-        .header("X-Api-App-Key", app_id)
-        .header("X-Api-Access-Key", access_token)
-        .header("X-Api-Resource-Id", RESOURCE_ID)
-        .header("X-Api-Request-Id", &request_id)
-        .header("X-Api-Sequence", "-1")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|error| {
-            RecognizeFailure::BeforeSubmit(AppError::Pipeline(format!(
-                "volcengine submit: {error}"
-            )))
-        })?;
-    let status = header_value(&resp, STATUS_HEADER);
-    let message = header_value(&resp, MESSAGE_HEADER);
-    if status.as_deref() != Some(STATUS_SUCCESS) {
-        return Err(RecognizeFailure::BeforeSubmit(submit_error(
-            "submit",
-            status,
-            message,
-            resp.status(),
-        )));
+    // 403 + 45000030 只说明「这个资源 ID 没授权给这个 App」，换个版本重发是安全的：
+    // 请求根本没被受理，没建任务、没计费。所以先按 2.0 试，被拒就退回 1.0。
+    let mut accepted: Option<&'static str> = None;
+    let mut rejection: Option<AppError> = None;
+    for resource_id in resource_candidates(RESOLVED_RESOURCE_ID.get().copied()) {
+        let resp = match client
+            .post(SUBMIT_URL)
+            .header("X-Api-App-Key", app_id)
+            .header("X-Api-Access-Key", access_token)
+            .header("X-Api-Resource-Id", resource_id)
+            .header("X-Api-Request-Id", &request_id)
+            .header("X-Api-Sequence", "-1")
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(error) => {
+                return Err(RecognizeFailure::BeforeSubmit(AppError::Pipeline(format!(
+                    "volcengine submit: {error}"
+                ))))
+            }
+        };
+        let status = header_value(&resp, STATUS_HEADER);
+        let message = header_value(&resp, MESSAGE_HEADER);
+        if status.as_deref() == Some(STATUS_SUCCESS) {
+            let _ = RESOLVED_RESOURCE_ID.set(resource_id);
+            accepted = Some(resource_id);
+            break;
+        }
+        let http = resp.status();
+        let not_granted = is_resource_not_granted(status.as_deref(), message.as_deref());
+        let error = submit_error("submit", status, message, http, resource_id);
+        if not_granted {
+            rejection = Some(error);
+            continue;
+        }
+        // Token 错、App ID 错：换个资源 ID 去问也是同一个答复，回退重试同样没意义。
+        return Err(
+            if http == reqwest::StatusCode::UNAUTHORIZED || http == reqwest::StatusCode::FORBIDDEN {
+                RecognizeFailure::Rejected(error)
+            } else {
+                RecognizeFailure::BeforeSubmit(error)
+            },
+        );
     }
+    let Some(resource_id) = accepted else {
+        return Err(RecognizeFailure::Rejected(rejection.unwrap_or_else(|| {
+            AppError::Pipeline("volcengine submit 失败：资源未授权".into())
+        })));
+    };
 
     // ---- 2. 轮询结果 ----
     // 从这里开始，云端任务已经存在并计费：无论出什么事都只能报错，不能换个
     // request_id 重来（那会变成第二个任务、第二笔账，原任务还在跑）。
-    poll_until_done(client, app_id, access_token, &request_id)
+    poll_until_done(client, app_id, access_token, resource_id, &request_id)
         .await
         .map_err(RecognizeFailure::AfterSubmit)
 }
@@ -321,6 +369,7 @@ async fn poll_until_done(
     client: &reqwest::Client,
     app_id: &str,
     access_token: &str,
+    resource_id: &str,
     request_id: &str,
 ) -> AppResult<WhisperJson> {
     let mut hiccups = 0u32;
@@ -330,7 +379,7 @@ async fn poll_until_done(
             .timeout(QUERY_TIMEOUT)
             .header("X-Api-App-Key", app_id)
             .header("X-Api-Access-Key", access_token)
-            .header("X-Api-Resource-Id", RESOURCE_ID)
+            .header("X-Api-Resource-Id", resource_id)
             .header("X-Api-Request-Id", request_id)
             .header("X-Api-Sequence", "-1")
             .json(&json!({}))
@@ -385,7 +434,13 @@ async fn poll_until_done(
             PollAction::Hiccup => {
                 hiccups += 1;
                 if hiccups > MAX_QUERY_HICCUPS {
-                    return Err(submit_error("query", status, message, resp.status()));
+                    return Err(submit_error(
+                        "query",
+                        status,
+                        message,
+                        resp.status(),
+                        resource_id,
+                    ));
                 }
                 tracing::warn!(
                     request_id,
@@ -396,7 +451,13 @@ async fn poll_until_done(
                 tokio::time::sleep(POLL_INTERVAL).await;
             }
             PollAction::Fatal => {
-                return Err(submit_error("query", status, message, resp.status()));
+                return Err(submit_error(
+                    "query",
+                    status,
+                    message,
+                    resp.status(),
+                    resource_id,
+                ));
             }
         }
     }
@@ -604,17 +665,46 @@ fn submit_error(
     status: Option<String>,
     message: Option<String>,
     http: reqwest::StatusCode,
+    resource_id: &str,
 ) -> AppError {
     let status = status.unwrap_or_else(|| http.as_u16().to_string());
     let message = message.unwrap_or_default();
-    let hint = if http.as_u16() == 401 || http.as_u16() == 403 {
+    // 45000030 是最容易被误判的一条：它长得和鉴权失败一模一样（403 + not granted），
+    // 真正原因却是「资源 ID 和开通的模型版本对不上」。所以提示里必须把两个 ID 都点明，
+    // 否则用户只会去反复核对 App ID / Token —— 核对到天亮也没用。
+    let hint = if is_resource_not_granted(Some(&status), Some(&message)) {
+        "（资源未授权：模型版本对不上，不是 App ID / Access Token 写错。\
+         开通「豆包录音文件识别模型2.0」要发 volc.seedasr.auc，开通 1.0 才是 \
+         volc.bigasr.auc；应用会自动依次试这两个。两个都被拒时请确认这个 App ID 就是\
+         开通了该服务的那个应用，且账号已实名）"
+    } else if http == reqwest::StatusCode::UNAUTHORIZED || http == reqwest::StatusCode::FORBIDDEN {
         "（鉴权失败：请核对 App ID / Access Token，并确认控制台已开通「录音文件识别大模型」）"
     } else {
         ""
     };
     AppError::Pipeline(format!(
-        "volcengine {stage} 失败：状态码 {status} {message}{hint}"
+        "volcengine {stage} 失败：状态码 {status} {message}（resource_id={resource_id}）{hint}"
     ))
+}
+
+/// 服务端是不是说「这个资源 ID 没授权给这个 App」。
+///
+/// 除业务码外还认消息文本：网关拦下来时有时只回 HTTP 403，不带 `X-Api-Status-Code`。
+fn is_resource_not_granted(status: Option<&str>, message: Option<&str>) -> bool {
+    status == Some(STATUS_RESOURCE_NOT_GRANTED)
+        || message.is_some_and(|text| text.contains("not granted"))
+}
+
+/// 这次提交按什么顺序试资源 ID：本进程里已经试通过的那个排最前，另一个当回退。
+///
+/// 分段识别会并发提交十几段，记住结果能让后面的段一次成功，不必每段先撞一次 403。
+fn resource_candidates(resolved: Option<&'static str>) -> Vec<&'static str> {
+    let mut ids = vec![RESOURCE_ID_V2, RESOURCE_ID_V1];
+    if let Some(known) = resolved {
+        ids.retain(|id| *id != known);
+        ids.insert(0, known);
+    }
+    ids
 }
 
 fn header_value(resp: &reqwest::Response, name: &str) -> Option<String> {
@@ -724,6 +814,65 @@ mod tests {
         // 提交成功之后的任何失败（查询超时、解析出错）都不能重来：任务已经在云端
         // 跑着并计费，换个 request_id 重来会变成第二个任务、第二笔账。
         assert!(!RecognizeFailure::AfterSubmit(AppError::Pipeline("x".into())).is_resubmittable());
+        // 资源没授权 / Token 不对：再提交一百遍也是同一句话，不必回退重试。
+        assert!(!RecognizeFailure::Rejected(AppError::Pipeline("x".into())).is_resubmittable());
+    }
+
+    #[test]
+    fn both_model_versions_are_tried_with_the_new_one_first() {
+        // 控制台现在默认开通 2.0，所以先试 volc.seedasr.auc；被拒再退 1.0。
+        // 反过来先试 1.0 的话，新账号每次都要先吃一个 403。
+        assert_eq!(
+            resource_candidates(None),
+            vec![RESOURCE_ID_V2, RESOURCE_ID_V1]
+        );
+        assert_eq!(RESOURCE_ID_V2, "volc.seedasr.auc");
+        assert_eq!(RESOURCE_ID_V1, "volc.bigasr.auc");
+        // 已经试通过的那个排最前——分段识别十几段并发提交，别每段都先撞一次 403。
+        assert_eq!(
+            resource_candidates(Some(RESOURCE_ID_V1)),
+            vec![RESOURCE_ID_V1, RESOURCE_ID_V2]
+        );
+        // 两个都还在候选里：授权被改过（比如 1.0 到期、2.0 开通）时仍能自愈。
+        assert_eq!(resource_candidates(Some(RESOURCE_ID_V2)).len(), 2);
+    }
+
+    #[test]
+    fn a_not_granted_reply_is_told_apart_from_a_credential_typo() {
+        // 真实遇到的那一条：403 + 45000030 + "requested resource not granted"。
+        assert!(is_resource_not_granted(
+            Some("45000030"),
+            Some("[resource_id=volc.bigasr.auc] requested resource not granted")
+        ));
+        // 网关只回 HTTP 403、没带业务码头时，靠消息文本也要认出来。
+        assert!(is_resource_not_granted(
+            None,
+            Some("[resource_id=volc.bigasr.auc] requested resource not granted")
+        ));
+        // 别的 4 开头错误（参数错）不是资源问题，不该触发换版本重试。
+        assert!(!is_resource_not_granted(
+            Some("45000001"),
+            Some("invalid request")
+        ));
+        assert!(!is_resource_not_granted(None, None));
+    }
+
+    #[test]
+    fn the_not_granted_error_names_both_resource_ids() {
+        // 报错只写「鉴权失败，请核对 App ID / Token」会把用户带到死胡同：
+        // 真实原因只是模型版本和资源 ID 对不上。提示里必须直接给出两个 ID。
+        let error = submit_error(
+            "submit",
+            Some("45000030".into()),
+            Some("[resource_id=volc.bigasr.auc] requested resource not granted".into()),
+            reqwest::StatusCode::FORBIDDEN,
+            RESOURCE_ID_V1,
+        )
+        .to_string();
+        assert!(error.contains("volc.seedasr.auc"), "{error}");
+        assert!(error.contains("volc.bigasr.auc"), "{error}");
+        assert!(error.contains("45000030"), "{error}");
+        assert!(error.contains("模型版本"), "{error}");
     }
 
     #[test]
