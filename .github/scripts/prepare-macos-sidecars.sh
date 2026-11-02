@@ -55,8 +55,11 @@ codesign --force --sign - "$ytdlp"
 
 # whisper-cli（本地转写）：whisper.cpp 没有 macOS 的命令行预编译包，从源码编。
 # 与 Windows 用同一个版本（prepare-windows-sidecars.ps1 里的 b5454），参数行为一致。
-# - 静态链接、Metal 着色器嵌进二进制：只依赖系统框架，拷进 .app 就能用；
-# - GGML_NATIVE=OFF：不按构建机的 CPU 特性编，换台 Apple Silicon 也能跑；
+# - 静态链接、（Apple 芯片版的）Metal 着色器嵌进二进制：只依赖系统框架，拷进 .app 就能用；
+# - GGML_NATIVE=OFF：不按构建机的 CPU 特性编，换台机器也能跑；
+# - Intel 版不开 Metal：ggml 的 Metal 后端只对 Apple 芯片的 GPU 调过，Intel 核显 / AMD 独显上
+#   会报错或出乱码，走 CPU。指令集按 AVX2 + FMA + F16C 编——macOS 14 支持的 Intel Mac（2018 年起）
+#   都有，不开 AVX-512（大多数机型没有）；
 # - 最低系统版本与应用一致（tauri.macos.conf.json 的 minimumSystemVersion）。
 #   Homebrew 的 whisper-cpp 是按构建机系统版本编的，在更老的 macOS 上会拒绝启动，不能直接拷。
 # 产物旁边留一个版本戳：同版本已经编过（本机重跑、CI 命中缓存）就跳过。
@@ -70,13 +73,20 @@ else
   whisper_src="$(mktemp -d)/whisper.cpp"
   echo "Building whisper-cli $WHISPER_CPP_TAG for $target (macOS >= $MACOS_MIN_VERSION)"
   git clone --quiet --depth 1 --branch "$WHISPER_CPP_TAG" https://github.com/ggml-org/whisper.cpp.git "$whisper_src"
+  case "$target" in
+    aarch64-apple-darwin)
+      whisper_arch_flags=(-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON)
+      ;;
+    x86_64-apple-darwin)
+      whisper_arch_flags=(-DGGML_METAL=OFF -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON)
+      ;;
+  esac
   cmake -S "$whisper_src" -B "$whisper_src/build" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOS_MIN_VERSION" \
     -DBUILD_SHARED_LIBS=OFF \
     -DGGML_NATIVE=OFF \
-    -DGGML_METAL=ON \
-    -DGGML_METAL_EMBED_LIBRARY=ON \
+    "${whisper_arch_flags[@]}" \
     -DWHISPER_BUILD_TESTS=OFF \
     -DWHISPER_BUILD_SERVER=OFF \
     -DWHISPER_SDL2=OFF \

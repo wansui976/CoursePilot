@@ -113,7 +113,7 @@ CoursePilot 就是为这个问题而生的。不管是 B 站上的公开课、�
 
 | 平台 | 安装包 | 说明 |
 | --- | --- | --- |
-| macOS（Apple Silicon） | [`.dmg`](https://github.com/wansui976/CoursePilot/releases/latest) | 已内置 ffmpeg、whisper.cpp 等依赖 |
+| macOS（Apple Silicon / Intel） | [`.dmg`](https://github.com/wansui976/CoursePilot/releases/latest) | Apple 芯片选 `aarch64`，Intel 选 `x64`；已内置 ffmpeg、whisper.cpp 等依赖 |
 | Windows（x64） | [`.exe` / `.msi`](https://github.com/wansui976/CoursePilot/releases/latest) | 已内置依赖 |
 | Android（arm64） | [`.apk`](https://github.com/wansui976/CoursePilot/releases/latest) | 语音识别、OCR 走云端；暂时只能导入本地视频 |
 | iOS / iPadOS | [`.ipa`](https://github.com/wansui976/CoursePilot/releases/latest)（未签名） | 需要自签安装；同上，暂时只能导入本地视频 |

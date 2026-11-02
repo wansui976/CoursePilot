@@ -89,7 +89,7 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 
 | Platform | Installer | Notes |
 | --- | --- | --- |
-| macOS (Apple Silicon) | [`.dmg`](https://github.com/wansui976/CoursePilot/releases/latest) | ffmpeg, whisper.cpp, etc. bundled |
+| macOS (Apple Silicon / Intel) | [`.dmg`](https://github.com/wansui976/CoursePilot/releases/latest) | `aarch64` for Apple silicon, `x64` for Intel; ffmpeg, whisper.cpp, etc. bundled |
 | Windows (x64) | [`.exe` / `.msi`](https://github.com/wansui976/CoursePilot/releases/latest) | Dependencies bundled |
 | Android (arm64) | [`.apk`](https://github.com/wansui976/CoursePilot/releases/latest) | Cloud ASR / OCR; local video import only for now |
 | iOS / iPadOS | [`.ipa`](https://github.com/wansui976/CoursePilot/releases/latest) (unsigned) | Sideload it yourself; local video import only for now |

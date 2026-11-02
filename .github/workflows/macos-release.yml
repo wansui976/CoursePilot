@@ -15,25 +15,30 @@ permissions:
   contents: write
 
 jobs:
-  build-macos:
-    name: Build macOS DMG
-    runs-on: macos-15
+  # 先建好 release（带 .github/release-notes/<tag>.md 的说明），再开始漫长的构建：
+  # 两个架构的构建、Windows 那边的 tauri-action 发现 release 已存在就只上传资产，不会抢着创建。
+  create-release:
+    name: Create or update release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Resolve release tag
+        id: tag
         shell: bash
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            echo "RELEASE_TAG=${{ inputs.tag }}" >> "$GITHUB_ENV"
+            tag="${{ inputs.tag }}"
           else
-            echo "RELEASE_TAG=${GITHUB_REF_NAME%%+*}" >> "$GITHUB_ENV"
+            tag="${GITHUB_REF_NAME%%+*}"
           fi
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      # 先建好 release（带 .github/release-notes/<tag>.md 的说明），再开始漫长的构建：
-      # Windows 那边的 tauri-action 发现 release 已存在就只上传资产，两边不会抢着创建。
       - name: Create or update release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -51,6 +56,27 @@ jobs:
             gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
               --title "CoursePilot ${RELEASE_TAG}" --generate-notes --verify-tag
           fi
+
+  build-macos:
+    name: Build macOS DMG (${{ matrix.arch }})
+    needs: create-release
+    # 两个架构都在对应的原生机器上编：sidecar 脚本按 rustc 的 host 取 ffmpeg、编 whisper-cli，
+    # 产物能在构建机上直接跑一遍自检。DMG 文件名自带架构（aarch64 / x64），上传不会互相覆盖。
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    env:
+      RELEASE_TAG: ${{ needs.create-release.outputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
