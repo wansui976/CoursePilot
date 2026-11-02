@@ -11,11 +11,12 @@ python3 -m http.server 8000   # 然后打开 http://localhost:8000
 
 ## 截图资产
 
-页面里的产品图都是真实 CoursePilot 界面截图（2026-10，v0.2.0 之后的新界面），统一放在 `screenshots/`：
+页面里的产品图都是真实 CoursePilot 界面截图，统一放在 `screenshots/`：
 
 - `workbench-overview.webp`、`slides.webp`、`assistant.webp`：首屏、课件、提问三处大图。
+- `feynman` / `guided` / `find-explanation` / `highlights`：「v0.3.8 新功能」轮播的四张图，与仓库 `assets/screenshots/` 同名文件一致（演示课程「机器学习导论」）。
 - `mindmap` / `notes` / `quiz` / `concepts` / `dashboard` / `dark-mode`：「界面一览」画廊。每张都有完整截图（点开看）和一张 4:3 的 `*-thumb.webp` 局部缩略图（卡片里显示）。
-- 其余（`library`、`transcript`、`settings`）供仓库根目录 README 使用。
+- 其余（`library`、`transcript`、`settings`）暂未在主页使用。
 
 由截图派生的三张 PNG：
 
@@ -40,6 +41,19 @@ python3 website/generate_mock_screenshots.py
 - 两张主产品图带低幅度 parallax 和极淡高光扫过。
 - 顶部黑色导航在滚动后切到 frosted / translucent 状态。
 - `prefers-reduced-motion: reduce` 下关闭 reveal、parallax 和高光，只保留静态页面。
+
+## 交互
+
+- **新功能轮播**（`[data-showcase]`）：分段控件切换截图，进度条走完自动下一项；不在视口、鼠标悬停、页面切到后台时暂停，手动点过就不再自动轮播；左右方向键可切换；reduced-motion 下不自动轮播。没有 JS 时四项依次排开。
+- **截图放大**：「界面一览」卡片和新功能截图点开在页内 `<dialog>` 里看大图，Esc 或点遮罩关闭。
+- **下载卡片**：按访客系统推荐安装包（Windows / Android / iOS 看 UA；Mac 用 `userAgentData` 的架构或 WebGL 显卡名区分 Apple 芯片和 Intel，分不出来就显示「怎么看芯片」的提示）。版本号、文件大小和直链从 GitHub API 的最新 release 取（会话内缓存一次），取不到时卡片仍指向 release 页。新增平台时同步改卡片的 `data-asset`（按文件名结尾匹配）。
+
+## 访问统计（Umami Cloud）
+
+`<head>` 里的加载代码默认不启用，在 [Umami Cloud](https://cloud.umami.is) 添加站点 `wansui976.github.io` 后，把 Website ID 填进 `UMAMI_WEBSITE_ID` 即可。不用 Cookie、不收集个人信息；`data-domains` 只统计正式站点，本地预览不计数。
+
+- **自定义事件**：`download`（属性 `platform`：`mac-arm` / `mac-intel` / `windows` / `windows-msi` / `android` / `ios` / `auto`）、`github`（属性 `from`）、`hero-download`、`hero-whats-new`、`changelog`。
+- **渠道来源**：B 站、抖音、微信这类 App 打开链接时通常不带来源，发链接时加上 `?utm_source=bilibili`（或 `xiaohongshu`、`zhihu`、`v2ex`…），Umami 会按 UTM 参数分组。
 
 ## 验证
 
@@ -66,12 +80,11 @@ https://wansui976.github.io/CoursePilot/
 
 这页是营销主页，距离正式上架还差几块**必备资产**，下面是清单：
 
-1. **真实下载链接**：`#download` 区里两个 `store-badge` 的 `href="#"` 是占位，拿到 App Store / Google Play 链接后替换。建议同时换成两家的**官方徽章图**（当前用的是简化版图标，仅作排版占位）。
+1. **商店链接**：上架后在 `#download` 区加上 App Store / Google Play 的**官方徽章**和链接（目前手机版走 GitHub release 的 apk / ipa）。
 2. **隐私政策 / 使用条款页**：两家商店审核都**强制要求隐私政策 URL**。footer 与导航里的「隐私政策 / 使用条款」目前指向锚点，需替换为真实页面（可在 `website/` 下新增 `privacy.html`、`terms.html`）。
 3. **产品截图**：当前 `promo-hero.png`、`promo-workbench.png`、`og-image.png` 已可用于介绍页与分享卡片；上架商店前仍建议换成带真实运行数据的设备截图。
 4. **OG 分享图**：`<meta property="og:image">` 指向 `./og-image.png`，已生成 1200×630 方向的分享图。
-5. **GitHub / 联系方式**：footer 的开源与联系链接待填真实地址。
-6. **域名与 theme-color**：按品牌确认。
+5. **域名与 theme-color**：按品牌确认。
 
 ## 设计令牌来源
 

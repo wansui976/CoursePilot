@@ -6,7 +6,7 @@
     <title>CoursePilot — 把课程视频变成真正记得住的东西</title>
     <meta
       name="description"
-      content="开源的 AI 网课学习工具：导入本地或 B 站课程视频，自动转写、笔记、章节、课件截图、脑图、练习题、知识点抽取、间隔复习，还有一个能帮你操作应用的 AI 助手。本地优先，数据在你手里。"
+      content="开源的 AI 网课学习工具：导入本地或 B 站课程视频，自动转写、笔记、章节、课件截图、脑图、练习题、知识点和间隔复习；费曼复述检验你是否真的讲得清，拍一道题就能找到课里讲它的地方。本地优先，数据在你手里。"
     />
     <meta name="theme-color" content="#000000" />
 
@@ -15,7 +15,7 @@
     <meta property="og:title" content="CoursePilot — 把课程视频变成真正记得住的东西" />
     <meta
       property="og:description"
-      content="自动转写、笔记、章节、课件截图、脑图、练习题、知识点抽取、间隔复习，还有 AI 助手帮你操作应用。本地优先，数据在你手里。"
+      content="自动转写、笔记、课件截图、脑图、练习题、间隔复习，还有费曼复述、拍题找讲解和能帮你操作应用的 AI 助手。本地优先，数据在你手里。"
     />
     <meta property="og:url" content="https://wansui976.github.io/CoursePilot/" />
     <meta property="og:image" content="https://wansui976.github.io/CoursePilot/og-image.png" />
@@ -23,6 +23,29 @@
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:image" content="https://wansui976.github.io/CoursePilot/og-image.png" />
+    <link rel="icon" type="image/png" href="./favicon.png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+
+    <script>
+      document.documentElement.classList.add("js");
+    </script>
+
+    <!-- 访问统计：Umami Cloud（开源、不用 Cookie、不收集个人信息）。
+         填上 Umami 后台「Websites → Edit」里的 Website ID 即生效；留空则不加载。
+         data-domains 限定只统计正式站点，本地预览不计数。
+         下载、GitHub 等按钮上的 data-umami-event 会记成自定义事件；渠道来源用 ?utm_source=bilibili 这类参数区分。 -->
+    <script>
+      (function () {
+        var UMAMI_WEBSITE_ID = "";
+        if (!UMAMI_WEBSITE_ID) return;
+        var s = document.createElement("script");
+        s.defer = true;
+        s.src = "https://cloud.umami.is/script.js";
+        s.setAttribute("data-website-id", UMAMI_WEBSITE_ID);
+        s.setAttribute("data-domains", "wansui976.github.io");
+        document.head.appendChild(s);
+      })();
+    </script>
 
     <!-- SF Pro 的开源替身 Inter（Apple 设备上 system-ui 会优先解析为真正的 SF Pro） -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -726,13 +749,13 @@
         font-size: 15px;
         line-height: 1.5;
         letter-spacing: -0.2px;
-        color: var(--body-muted);
+        color: var(--ink-muted-80);
       }
       .feature-cols .glyph {
         width: 30px;
         height: 30px;
         margin-bottom: var(--s-sm);
-        color: var(--primary-on-dark);
+        color: var(--primary);
       }
 
       /* ---------------- 工具卡网格（18px 圆角 + 1px 发丝线） ---------------- */
@@ -769,48 +792,9 @@
         color: var(--ink-muted-80);
       }
 
-      /* ---------------- 下载徽章 ---------------- */
-      .store-row {
-        display: flex;
-        gap: var(--s-sm);
-        flex-wrap: wrap;
-        justify-content: center;
-        margin-top: var(--s-md);
-      }
-      .store-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        background: var(--ink);
-        color: #fff;
-        border-radius: var(--r-md);
-        padding: 10px 18px;
-        min-width: 190px;
-        transition: transform 0.12s ease;
-      }
-      .store-badge:active {
-        transform: scale(0.96);
-      }
-      .store-badge svg {
-        width: 24px;
-        height: 24px;
-        flex: 0 0 auto;
-      }
-      .store-badge .sb-top {
-        font-size: 11px;
-        line-height: 1.1;
-        opacity: 0.85;
-        letter-spacing: 0;
-      }
-      .store-badge .sb-main {
-        font-size: 18px;
-        font-weight: 600;
-        line-height: 1.1;
-        letter-spacing: -0.3px;
-      }
-
       /* ---------------- 页脚（parchment、密排链接） ---------------- */
       .footer {
+        border-top: 1px solid var(--hairline);
         background: var(--parchment);
         color: var(--ink-muted-80);
         padding: 64px 22px 40px;
@@ -848,6 +832,364 @@
         color: var(--ink-muted-48);
       }
 
+      /* ---------------- 首屏「新版本」胶囊 ---------------- */
+      .new-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 5px 14px 5px 5px;
+        border-radius: var(--r-pill);
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(0, 0, 0, 0.06);
+        backdrop-filter: saturate(180%) blur(12px);
+        -webkit-backdrop-filter: saturate(180%) blur(12px);
+        color: var(--ink-muted-80);
+        font-size: 14px;
+        letter-spacing: -0.224px;
+        transition: background-color 0.2s ease, transform 0.2s ease;
+      }
+      .new-pill:hover {
+        background: #fff;
+        transform: translateY(-1px);
+      }
+      .new-pill__tag {
+        background: var(--primary);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 3px 9px;
+        border-radius: var(--r-pill);
+        letter-spacing: 0;
+      }
+      .new-pill::after {
+        content: "›";
+        color: var(--primary);
+        font-size: 17px;
+        line-height: 1;
+      }
+
+      /* ---------------- 新功能轮播（分段控件 + 截图舞台） ---------------- */
+      .showcase {
+        width: min(1120px, 100%);
+        margin: var(--s-xl) auto 0;
+      }
+      .showcase__tabs {
+        display: inline-flex;
+        gap: 2px;
+        padding: 3px;
+        border-radius: var(--r-pill);
+        background: var(--parchment);
+        max-width: 100%;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .showcase__tabs::-webkit-scrollbar {
+        display: none;
+      }
+      .showcase__tab {
+        position: relative;
+        flex: 0 0 auto;
+        border: 0;
+        background: transparent;
+        color: var(--ink-muted-80);
+        font: inherit;
+        font-size: 14px;
+        letter-spacing: -0.224px;
+        padding: 8px 18px 10px;
+        border-radius: var(--r-pill);
+        cursor: pointer;
+        overflow: hidden;
+        transition: background-color 0.25s ease, color 0.25s ease, box-shadow 0.25s ease;
+      }
+      .showcase__tab:hover {
+        color: var(--ink);
+      }
+      .showcase__tab[aria-selected="true"] {
+        background: var(--canvas);
+        color: var(--ink);
+        font-weight: 600;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+      .showcase__tab:focus-visible {
+        outline: 2px solid var(--primary-focus);
+        outline-offset: 2px;
+      }
+      /* 选中的那一格底部有一条细进度条，走完自动切到下一项 */
+      .showcase__bar {
+        position: absolute;
+        left: 18px;
+        right: 18px;
+        bottom: 4px;
+        height: 2px;
+        border-radius: 2px;
+        background: transparent;
+        overflow: hidden;
+      }
+      .showcase__bar i {
+        display: block;
+        height: 100%;
+        width: 100%;
+        background: var(--primary);
+        transform: scaleX(0);
+        transform-origin: 0 50%;
+      }
+      .showcase__tab[aria-selected="true"] .showcase__bar {
+        background: rgba(0, 102, 204, 0.12);
+      }
+      .showcase.is-playing .showcase__tab[aria-selected="true"] .showcase__bar i {
+        animation: showcaseProgress var(--showcase-duration, 7s) linear forwards;
+      }
+      .showcase.is-paused .showcase__tab[aria-selected="true"] .showcase__bar i {
+        animation-play-state: paused;
+      }
+      @keyframes showcaseProgress {
+        to {
+          transform: scaleX(1);
+        }
+      }
+      .showcase__panels {
+        display: grid;
+        margin-top: var(--s-xl);
+      }
+      .showcase__panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--s-lg);
+      }
+      html.js .showcase__panel {
+        grid-area: 1 / 1;
+        opacity: 0;
+        visibility: hidden;
+        transform: translate3d(0, 16px, 0) scale(0.99);
+        transition:
+          opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+          transform 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+          visibility 0s linear 0.6s;
+      }
+      html.js .showcase__panel.is-active {
+        opacity: 1;
+        visibility: visible;
+        transform: none;
+        transition:
+          opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+          transform 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+          visibility 0s;
+      }
+      /* 没有 JS 时四项依次排开，不藏内容 */
+      html:not(.js) .showcase__tabs {
+        display: none;
+      }
+      html:not(.js) .showcase__panels {
+        gap: var(--s-section);
+      }
+      .showcase__copy {
+        max-width: 680px;
+      }
+      .showcase__copy h3 {
+        font-family: var(--font-display);
+        font-size: 28px;
+        font-weight: 600;
+        line-height: 1.14;
+        letter-spacing: -0.2px;
+        margin-bottom: var(--s-xs);
+      }
+      .showcase__copy p {
+        font-size: 17px;
+        color: var(--ink-muted-80);
+      }
+      .showcase__shot {
+        width: 100%;
+        border-radius: var(--r-lg);
+        overflow: hidden;
+        box-shadow: var(--product-shadow);
+        background: var(--canvas);
+        cursor: zoom-in;
+      }
+      .showcase__shot img {
+        width: 100%;
+        height: auto;
+      }
+      .showcase__more {
+        margin-top: var(--s-xl);
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: var(--s-xs) var(--s-lg);
+        color: var(--ink-muted-80);
+        font-size: 14px;
+      }
+      .showcase__more span::before {
+        content: "✓ ";
+        color: var(--primary);
+        font-weight: 600;
+      }
+
+      /* ---------------- 下载：按平台列出安装包 ---------------- */
+      .platform-grid {
+        width: min(1040px, 100%);
+        margin-top: var(--s-lg);
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: var(--s-sm);
+        text-align: left;
+      }
+      .platform {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 18px 16px 16px;
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-lg);
+        background: var(--canvas);
+        color: var(--ink);
+        transition:
+          border-color 0.2s ease,
+          transform 0.2s ease,
+          box-shadow 0.2s ease;
+      }
+      .platform:hover {
+        border-color: var(--primary);
+        transform: translateY(-2px);
+        box-shadow: 0 10px 28px -14px rgba(0, 0, 0, 0.25);
+      }
+      .platform__os {
+        font-size: 12px;
+        color: var(--ink-muted-48);
+      }
+      .platform strong {
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: -0.374px;
+      }
+      .platform__file {
+        font-size: 12px;
+        color: var(--ink-muted-48);
+      }
+      .platform__get {
+        margin-top: auto;
+        padding-top: 10px;
+        font-size: 14px;
+        color: var(--primary);
+      }
+      .platform__get::after {
+        content: " ↓";
+      }
+      .platform__badge {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        display: none;
+        font-size: 11px;
+        font-weight: 600;
+        color: #fff;
+        background: var(--primary);
+        padding: 2px 8px;
+        border-radius: var(--r-pill);
+      }
+      .platform.is-recommended {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 1px var(--primary);
+      }
+      .platform.is-recommended .platform__badge {
+        display: block;
+      }
+      .install-notes {
+        width: min(760px, 100%);
+        margin-top: var(--s-md);
+        text-align: left;
+        font-size: 14px;
+        color: var(--ink-muted-80);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-md);
+        padding: 12px 16px;
+      }
+      .install-notes summary {
+        cursor: pointer;
+        color: var(--ink);
+      }
+      .install-notes ul {
+        margin: 8px 0 0 18px;
+        line-height: 1.6;
+      }
+      .install-notes code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        background: var(--parchment);
+        padding: 1px 5px;
+        border-radius: var(--r-xs);
+      }
+
+      /* ---------------- 截图放大查看 ---------------- */
+      .lightbox {
+        border: 0;
+        padding: 0;
+        margin: auto;
+        background: transparent;
+        max-width: min(1400px, 94vw);
+        max-height: 92vh;
+        overflow: visible;
+      }
+      .lightbox::backdrop {
+        background: rgba(0, 0, 0, 0.72);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+      }
+      .lightbox[open] {
+        animation: lightboxIn 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      @keyframes lightboxIn {
+        from {
+          opacity: 0;
+          transform: scale(0.96);
+        }
+      }
+      .lightbox img {
+        max-width: 100%;
+        max-height: 84vh;
+        width: auto;
+        margin: 0 auto;
+        border-radius: var(--r-md);
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+      }
+      .lightbox__caption {
+        margin-top: var(--s-sm);
+        text-align: center;
+        color: rgba(255, 255, 255, 0.86);
+        font-size: 14px;
+      }
+      .lightbox__close {
+        position: absolute;
+        top: -14px;
+        right: -14px;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        border: 0;
+        background: #fff;
+        color: var(--ink);
+        font-size: 20px;
+        line-height: 34px;
+        cursor: pointer;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+      }
+      .asset-card {
+        transition:
+          transform 0.25s ease,
+          box-shadow 0.25s ease;
+      }
+      .asset-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 16px 36px -20px rgba(0, 0, 0, 0.35);
+      }
+      .asset-card img {
+        transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .asset-card:hover img {
+        transform: scale(1.03);
+      }
+
       /* ---------------- 响应式 ---------------- */
       @media (max-width: 833px) {
         .global-nav__links {
@@ -883,6 +1225,15 @@
         .workflow {
           grid-template-columns: 1fr;
         }
+        .platform-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .showcase__copy h3 {
+          font-size: 22px;
+        }
+        .showcase__tab {
+          padding: 8px 14px 10px;
+        }
       }
       @media (max-width: 480px) {
         .hero-display {
@@ -891,8 +1242,12 @@
         .card-grid {
           grid-template-columns: 1fr;
         }
-        .store-badge {
-          flex: 1;
+        .platform {
+          padding: 14px 12px 12px;
+        }
+        .lightbox__close {
+          top: -44px;
+          right: 0;
         }
       }
 
@@ -916,6 +1271,10 @@
         }
         .product-shot::after {
           display: none;
+        }
+        .showcase .showcase__tab[aria-selected="true"] .showcase__bar i {
+          animation: none !important;
+          transform: scaleX(1);
         }
         * {
           transition: none !important;
@@ -959,14 +1318,17 @@
       <section class="tile tile--parchment" data-hero-section style="position: relative; overflow: hidden;">
         <div class="aurora" aria-hidden="true"></div>
         <div class="tile__inner" style="position: relative; z-index: 1;">
+          <a class="new-pill" href="#whats-new" data-animate="hero" style="--motion-delay: 40ms" data-umami-event="hero-whats-new">
+            <span class="new-pill__tag">v0.3.8</span>费曼复述、引导模式、拍题找讲解
+          </a>
           <p class="eyebrow" data-animate="hero" style="--motion-delay: 80ms">CoursePilot</p>
           <h1 class="hero-display" data-animate="hero" style="--motion-delay: 160ms">把课程视频变成<br />真正记得住的东西。</h1>
           <p class="lead" data-animate="hero" style="--motion-delay: 240ms">
-            拖进来一个视频，CoursePilot 会转写字幕、生成笔记和脑图、抽取课件、出练习题。然后用知识点和间隔复习帮你真正记住它。还有一个 AI 助手，用自然语言就能操作整个应用。
+            拖进来一个视频，CoursePilot 会转写字幕、生成笔记和脑图、截下课件、出练习题，再用知识点、间隔复习和费曼复述帮你真正记住它。
           </p>
           <div class="cta-row" data-animate="hero" style="--motion-delay: 320ms">
-            <a class="btn-pill" href="#download" data-magnetic>查看下载方式</a>
-            <a class="btn-pill btn-dark-link" href="https://github.com/wansui976/CoursePilot" data-magnetic>GitHub 源码</a>
+            <a class="btn-pill" href="#download" data-magnetic data-umami-event="hero-download">免费下载</a>
+            <a class="btn-pill btn-dark-link" href="https://github.com/wansui976/CoursePilot" data-magnetic data-umami-event="github" data-umami-event-from="hero">GitHub 源码</a>
             <a class="text-link" href="#workbench">看看流程</a>
           </div>
           <p class="caption" data-animate="hero" style="--motion-delay: 380ms">macOS · Windows · iPhone · iPad · Android · 资料存在本地 · AI 功能使用你自己的 API Key</p>
@@ -978,60 +1340,68 @@
         </div>
       </section>
 
-      <!-- ============ v0.3.0 新功能 ============ -->
+      <!-- ============ v0.3.8 新功能 ============ -->
       <section class="tile tile--light" id="whats-new">
         <div class="tile__inner">
-          <p class="eyebrow" data-animate>v0.3.0 新功能</p>
-          <h2 class="display-lg" data-animate>看得更爽，学得更全，也更好分享。</h2>
-        </div>
-        <div class="card-grid" data-animate>
-          <div class="ucard" data-animate style="--motion-delay: 60ms">
-            <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M3 17l4-6 4 3 4-7 6 10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><path d="M3 20h18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <h3>弹幕热度曲线</h3>
-            <p>进度条上方画出弹幕密度，最热的几处打点，点一下就跳到「高能」片段。</p>
-          </div>
-          <div class="ucard" data-animate style="--motion-delay: 120ms">
-            <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="5" y="3" width="14" height="18" rx="2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><path d="M9 8h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <h3>讲义一键成 PDF</h3>
-            <p>每页课件配上这一页老师讲的要点，按章节排好，在浏览器里直接存成 PDF。</p>
-          </div>
-          <div class="ucard" data-animate style="--motion-delay: 180ms">
-            <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><path d="M4 15l4-4 4 4 3-3 5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <h3>分享图</h3>
-            <p>笔记长图、脑图图片、学习周报，1080px 宽，发小红书、朋友圈正合适。</p>
-          </div>
-          <div class="ucard" data-animate style="--motion-delay: 240ms">
-            <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M4 6h8M8 4v2c0 4-2 7-4 8M6 10c1 2 3 4 6 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><path d="M13 20l4-9 4 9M14.5 17h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <h3>双语字幕</h3>
-            <p>字幕翻成中 / 英 / 日 / 韩，播放器在原文、双语、译文之间切换，外语课也能跟上。</p>
-          </div>
-          <div class="ucard" data-animate style="--motion-delay: 300ms">
-            <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M5 11a8 8 0 018 8M5 5a14 14 0 0114 14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><circle cx="6" cy="18" r="1.5" fill="currentColor" />
-            </svg>
-            <h3>订阅合集</h3>
-            <p>导入播放列表时勾选订阅，有新视频自动导入并开始处理，追更不用再手动搬运。</p>
-          </div>
-          <div class="ucard" data-animate style="--motion-delay: 360ms">
-            <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M9 18V6l10-2v12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><circle cx="6.5" cy="18" r="2.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><circle cx="16.5" cy="16" r="2.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <h3>YouTube、播客与音频</h3>
-            <p>YouTube、播客链接和本地 mp3 / m4a 都能导入；公式在课件、笔记和题目里统一渲染成 LaTeX。</p>
+          <p class="eyebrow" data-animate>v0.3.8 新功能</p>
+          <h2 class="display-lg" data-animate>不只看过，还要讲得出来。</h2>
+          <div class="showcase" data-showcase data-animate>
+            <div class="showcase__tabs" role="tablist" aria-label="v0.3.8 新功能">
+              <button class="showcase__tab" type="button" role="tab" id="tab-feynman" aria-controls="panel-feynman" aria-selected="true">费曼复述<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-guided" aria-controls="panel-guided" aria-selected="false" tabindex="-1">引导模式<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-find" aria-controls="panel-find" aria-selected="false" tabindex="-1">拍题找讲解<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-highlights" aria-controls="panel-highlights" aria-selected="false" tabindex="-1">精华版<span class="showcase__bar"><i></i></span></button>
+            </div>
+            <div class="showcase__panels">
+              <figure class="showcase__panel is-active" id="panel-feynman" role="tabpanel" aria-labelledby="tab-feynman">
+                <figcaption class="showcase__copy">
+                  <h3>讲一遍，才知道漏了什么。</h3>
+                  <p>选一章，对着麦克风用自己的话讲（也可以打字）。AI 只对照课程原文，标出讲到、漏掉和讲错的地方，每一条都能一键回看原片；漏掉的点直接做成复习卡。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/feynman.webp" width="1600" height="1000" loading="lazy" alt="费曼复述结果：讲到 2/3 个要点，讲对的原话标绿、讲错的划波浪线，下面列出讲错的正确说法和漏掉的要点，各带回看时间" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-guided" role="tabpanel" aria-labelledby="tab-guided">
+                <figcaption class="showcase__copy">
+                  <h3>不给答案，陪你想明白。</h3>
+                  <p>AI 助手打开「引导」后不直接揭晓，而是一步步反问：有可点的选项、逐级提示、折叠的答案和步骤进度，想通之后再给总结。文稿里选中一段也能「引导我理解」。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/guided.webp" width="1600" height="1000" loading="lazy" alt="引导模式：AI 不直接给答案，而是反问一步，下方有步骤进度、可点的选项、逐级提示和揭晓答案" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-find" role="tabpanel" aria-labelledby="tab-find">
+                <figcaption class="showcase__copy">
+                  <h3>拍一道题，找到老师讲它的那几段。</h3>
+                  <p>手机拍照、粘贴截图或拖进来，框出那道题，就列出这门课里讲它的地方：画面对上课件、文字命中字幕、涉及哪些知识点。可以「依次播放这几段」，也能交给引导模式一起解。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/find-explanation.webp" width="1600" height="1000" loading="lazy" alt="找讲解结果：依次播放这 2 段、涉及的知识点，以及按「最相关 / 可能相关」排好的讲解片段" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-highlights" role="tabpanel" aria-labelledby="tab-highlights">
+                <figcaption class="showcase__copy">
+                  <h3>水分段，快放或者跳过。</h3>
+                  <p>AI 标出课务通知、闲聊和重复讲解，播放设置里选快放或跳过，轻 / 中 / 激进三档。进度条上画出斜纹，标题旁告诉你能省几分钟，跳过了也能一键撤回。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/highlights.webp" width="1600" height="1000" loading="lazy" alt="播放设置里的精华版：水分段 正常 / 快放 / 跳过、力度 轻 / 中 / 激进，标题旁显示能省 3 分钟，进度条上画出斜纹" />
+                </div>
+              </figure>
+            </div>
+            <div class="showcase__more">
+              <span>五种大模型协议、11 个服务商预设</span>
+              <span>AI 助手可切换模型、粘贴截图提问</span>
+              <span>后台任务随时可查</span>
+              <span>紧凑密度与中文排版</span>
+            </div>
           </div>
         </div>
       </section>
 
       <!-- ============ AI 学习资料（dark） ============ -->
-      <section class="tile tile--dark spotlight" id="features">
+      <section class="tile tile--parchment spotlight" id="features">
         <div class="tile__inner">
           <p class="eyebrow" data-animate>学习资料</p>
           <h2 class="display-lg" data-animate>视频看完，资料也整理好了。</h2>
@@ -1115,14 +1485,14 @@
             <div class="workflow__step" data-animate style="--motion-delay: 300ms">
               <span>05</span>
               <strong>复习</strong>
-              <p>间隔复习知识点，搜索文稿，向课程提问。</p>
+              <p>间隔复习、费曼复述，向课程提问。</p>
             </div>
           </div>
         </div>
       </section>
 
       <!-- ============ 课件提取（dark） ============ -->
-      <section class="tile tile--dark-2">
+      <section class="tile tile--parchment">
         <div class="tile__inner">
           <p class="eyebrow" data-animate>课件</p>
           <h2 class="display-lg" data-animate>课件翻到哪，它就存到哪。</h2>
@@ -1150,7 +1520,7 @@
       </section>
 
       <!-- ============ 课程问答（parchment） ============ -->
-      <section class="tile tile--parchment">
+      <section class="tile tile--light">
         <div class="tile__inner">
           <p class="eyebrow" data-animate>提问</p>
           <h2 class="display-lg" data-animate>直接问这门课。</h2>
@@ -1165,12 +1535,12 @@
       </section>
 
       <!-- ============ AI 助手（dark） ============ -->
-      <section class="tile tile--dark spotlight">
+      <section class="tile tile--parchment spotlight">
         <div class="tile__inner">
           <p class="eyebrow" data-animate>AI 助手</p>
           <h2 class="display-lg" data-animate>说一句话，它帮你做。</h2>
           <p class="lead" data-animate>
-            屏幕角落的悬浮球，点开就是一个能帮你操作应用的 AI 助手。搜 B 站找视频、新建和管理课程、跳转到指定位置、查看学习进度和薄弱知识点——用自然语言说就行，不用翻菜单。
+            屏幕角落的悬浮球，点开就是一个能帮你操作应用的 AI 助手。搜 B 站找视频、新建和管理课程、跳转到指定位置、查看学习进度和薄弱知识点，把聊天内容整理成笔记——用自然语言说就行，不用翻菜单。
           </p>
           <div class="qa-demo" data-animate>
             <div class="qa-demo__row">
@@ -1188,12 +1558,12 @@
               <p>新建课程、追加笔记这类会改数据的操作，先弹确认卡，你点头它才动手；工具调用过程用大白话解释，每一步都有成功 / 失败标签。</p>
             </div>
             <div class="capability">
-              <strong>了解你的学习进度。</strong>
-              <p>助手可以读取你的学习进度、待复习内容和薄弱知识点，基于真实数据给建议。</p>
+              <strong>截图也能问。</strong>
+              <p>粘贴一张课件截图，它按画面在课里找到对应那一页，告诉你几分几秒讲的。模型随时切换，回答里的时间戳都能点。</p>
             </div>
             <div class="capability">
-              <strong>聊完直接进笔记。</strong>
-              <p>把对话里有用的内容整理成笔记，确认后追加进视频笔记。会话跨重启保留，随时接着上次聊。</p>
+              <strong>想自己想明白？</strong>
+              <p>打开「引导」，它一步步反问、给提示，等你想通了再总结；想通的地方一键做成复习卡。</p>
             </div>
           </div>
         </div>
@@ -1205,7 +1575,7 @@
           <p class="eyebrow" data-animate>学习闭环</p>
           <h2 class="display-lg" data-animate>看完不是终点，记住才是。</h2>
           <p class="lead" data-animate>
-            学习仪表盘追踪你的学习热力图、完成度和薄弱主题。每日目标设了就有反馈。间隔复习按 FSRS-4.5 调度，知识点自动抽取和合并——从看到记，形成闭环。
+            学习仪表盘追踪你的学习热力图、完成度和薄弱主题；间隔复习按 FSRS-4.5 调度；看完一章还能做费曼复述，讲清楚的知识点会标成「已能讲清」。从看到记，再到讲得出来。
           </p>
           <div class="feature-cols" data-animate>
             <div data-animate style="--motion-delay: 70ms">
@@ -1237,12 +1607,12 @@
       </section>
 
       <!-- ============ 播放器（dark-2） ============ -->
-      <section class="tile tile--dark-2">
+      <section class="tile tile--parchment">
         <div class="tile__inner">
           <p class="eyebrow" data-animate>播放器</p>
           <h2 class="display-lg" data-animate>不只是播放，是学习。</h2>
           <p class="lead" data-animate>
-            跳停顿、智能倍速、收藏片段、长按快扫、字幕浮层——播放器为长课程学习专门设计。
+            精华版、跳停顿、智能倍速、收藏片段、长按快扫、字幕浮层——播放器为长课程学习专门设计。
           </p>
           <div class="feature-cols" data-animate>
             <div data-animate style="--motion-delay: 70ms">
@@ -1264,8 +1634,8 @@
               <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
               </svg>
-              <h3>收藏片段</h3>
-              <p>两次点击框出一段，记个笔记，随时跳回。方向键长按进入快扫，短按 ±5 秒。字幕浮层可在画面内自由拖动。</p>
+              <h3>精华版</h3>
+              <p>课务通知、闲聊、重复讲解这类水分段快放或跳过，进度条上一眼看到省了几分钟；标过「这段有用」的不再处理。</p>
             </div>
           </div>
           <div class="capability-band" data-animate>
@@ -1281,6 +1651,58 @@
               <strong>去黑边，画面更大。</strong>
               <p>自动识别视频自带的黑边并裁掉，课件截图同样先去黑边再识别。</p>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 还有这些（v0.3.0 起陆续加入） ============ -->
+      <section class="tile tile--light" id="more">
+        <div class="tile__inner">
+          <p class="eyebrow" data-animate>还有这些</p>
+          <h2 class="display-lg" data-animate>看得更爽，学得更全，也更好分享。</h2>
+        </div>
+        <div class="card-grid" data-animate>
+          <div class="ucard" data-animate style="--motion-delay: 60ms">
+            <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M3 17l4-6 4 3 4-7 6 10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><path d="M3 20h18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <h3>弹幕热度曲线</h3>
+            <p>进度条上方画出弹幕密度，最热的几处打点，点一下就跳到「高能」片段。</p>
+          </div>
+          <div class="ucard" data-animate style="--motion-delay: 120ms">
+            <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="5" y="3" width="14" height="18" rx="2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><path d="M9 8h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <h3>讲义一键成 PDF</h3>
+            <p>每页课件配上这一页老师讲的要点，按章节排好，在浏览器里直接存成 PDF。</p>
+          </div>
+          <div class="ucard" data-animate style="--motion-delay: 180ms">
+            <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><path d="M4 15l4-4 4 4 3-3 5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <h3>分享图</h3>
+            <p>笔记长图、脑图图片、学习周报，1080px 宽，发小红书、朋友圈正合适。</p>
+          </div>
+          <div class="ucard" data-animate style="--motion-delay: 240ms">
+            <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 6h8M8 4v2c0 4-2 7-4 8M6 10c1 2 3 4 6 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><path d="M13 20l4-9 4 9M14.5 17h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <h3>双语字幕</h3>
+            <p>字幕翻成中 / 英 / 日 / 韩，播放器在原文、双语、译文之间切换，外语课也能跟上。</p>
+          </div>
+          <div class="ucard" data-animate style="--motion-delay: 300ms">
+            <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M5 11a8 8 0 018 8M5 5a14 14 0 0114 14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><circle cx="6" cy="18" r="1.5" fill="currentColor" />
+            </svg>
+            <h3>订阅合集</h3>
+            <p>导入播放列表时勾选订阅，有新视频自动导入并开始处理，追更不用再手动搬运。</p>
+          </div>
+          <div class="ucard" data-animate style="--motion-delay: 360ms">
+            <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M9 18V6l10-2v12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><circle cx="6.5" cy="18" r="2.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><circle cx="16.5" cy="16" r="2.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <h3>YouTube、播客与音频</h3>
+            <p>YouTube、播客链接和本地 mp3 / m4a 都能导入；公式在课件、笔记和题目里统一渲染成 LaTeX。</p>
           </div>
         </div>
       </section>
@@ -1320,7 +1742,7 @@
               <path d="M8 11V8a4 4 0 018 0v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
             </svg>
             <h3>用你自己的 Key</h3>
-            <p>大模型、云端识别和云端 OCR 都填你自己的 API Key，并存进系统钥匙串。</p>
+            <p>OpenAI 兼容、Anthropic、Gemini、Ollama、Azure 五种协议，11 个服务商预设；Key 存进系统钥匙串，用 Ollama 还能完全本地跑。</p>
           </div>
           <div class="ucard" data-animate style="--motion-delay: 300ms">
             <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1396,43 +1818,72 @@
       </section>
 
       <!-- ============ 下载 ============ -->
-      <section class="tile tile--dark spotlight" id="download">
+      <section class="tile tile--parchment" id="download">
         <div class="tile__inner">
           <h2 class="display-lg" data-animate>下载，拖进第一节课。</h2>
-          <p class="lead" data-animate>桌面版安装包已内置 ffmpeg、whisper.cpp 等依赖，装好就能用。移动版正在准备上架。</p>
+          <p class="lead" data-animate>桌面版已内置 ffmpeg、whisper.cpp 等依赖，装好就能用；手机版的语音识别和 OCR 走云端。</p>
           <div class="cta-row" data-animate>
-            <a class="btn-pill" href="https://github.com/wansui976/CoursePilot/releases/latest" data-magnetic>下载最新版本</a>
-            <a class="btn-pill btn-dark-link" href="https://github.com/wansui976/CoursePilot" data-magnetic>GitHub 源码</a>
+            <a class="btn-pill" href="https://github.com/wansui976/CoursePilot/releases/latest" data-primary-download data-magnetic data-umami-event="download" data-umami-event-platform="auto">下载最新版本</a>
+            <a class="btn-pill btn-dark-link" href="https://github.com/wansui976/CoursePilot" data-magnetic data-umami-event="github" data-umami-event-from="download">GitHub 源码</a>
           </div>
-          <p class="caption" data-animate>macOS（Apple Silicon / Intel，.dmg）· Windows（x64，.exe / .msi）· 开源 MIT</p>
-          <div class="store-row" data-animate>
-            <a class="store-badge" href="#" aria-label="App Store 版本即将上线">
-              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M17.05 12.04c-.03-2.6 2.12-3.85 2.22-3.91-1.21-1.77-3.09-2.01-3.76-2.04-1.6-.16-3.12.94-3.93.94-.81 0-2.06-.92-3.39-.89-1.74.03-3.35 1.01-4.25 2.57-1.81 3.14-.46 7.79 1.3 10.34.86 1.25 1.88 2.65 3.22 2.6 1.29-.05 1.78-.84 3.34-.84 1.55 0 2 .84 3.37.81 1.39-.02 2.27-1.27 3.12-2.53.98-1.45 1.39-2.85 1.41-2.93-.03-.01-2.7-1.04-2.73-4.12z" />
-                <path d="M14.6 4.66c.71-.86 1.19-2.06 1.06-3.26-1.02.04-2.26.68-2.99 1.54-.66.76-1.23 1.98-1.08 3.15 1.14.09 2.3-.58 3.01-1.43z" />
-              </svg>
-              <span>
-                <span class="sb-top">Download on the</span>
-                <span class="sb-main">App Store</span>
-              </span>
+          <p class="caption" data-animate><span data-release-version>最新版本</span> · 免费开源（MIT） · <a href="https://github.com/wansui976/CoursePilot/releases" data-umami-event="changelog">更新日志</a></p>
+          <div class="platform-grid" data-animate>
+            <a class="platform" href="https://github.com/wansui976/CoursePilot/releases/latest" data-platform="mac-arm" data-asset="_aarch64.dmg" data-umami-event="download" data-umami-event-platform="mac-arm">
+              <span class="platform__badge">推荐</span>
+              <span class="platform__os">macOS</span>
+              <strong>Apple 芯片</strong>
+              <span class="platform__file" data-file>M1 及更新 · .dmg</span>
+              <span class="platform__get">下载</span>
             </a>
-            <a class="store-badge" href="#" aria-label="Google Play 版本即将上线">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 3.5l9.5 8.5L4 20.5z" fill="#34a853" />
-                <path d="M4 3.5l7 7 2.5-2.2L5.4 2.8A1.6 1.6 0 004 3.5z" fill="#ea4335" />
-                <path d="M4 20.5l7-7 2.5 2.2-8.1 5.5A1.6 1.6 0 014 20.5z" fill="#fbbc04" />
-                <path d="M13.5 12l4.4-2.5c1-.6 1-1.9 0-2.5L13.5 12l4.4 2.5c1-.6 1-1.9 0-2.5z" fill="#4285f4" />
-              </svg>
-              <span>
-                <span class="sb-top">GET IT ON</span>
-                <span class="sb-main">Google Play</span>
-              </span>
+            <a class="platform" href="https://github.com/wansui976/CoursePilot/releases/latest" data-platform="mac-intel" data-asset="_x64.dmg" data-umami-event="download" data-umami-event-platform="mac-intel">
+              <span class="platform__badge">推荐</span>
+              <span class="platform__os">macOS</span>
+              <strong>Intel 芯片</strong>
+              <span class="platform__file" data-file>2018 年后机型 · .dmg</span>
+              <span class="platform__get">下载</span>
+            </a>
+            <a class="platform" href="https://github.com/wansui976/CoursePilot/releases/latest" data-platform="windows" data-asset="_x64-setup.exe" data-umami-event="download" data-umami-event-platform="windows">
+              <span class="platform__badge">推荐</span>
+              <span class="platform__os">Windows</span>
+              <strong>Windows 10 / 11</strong>
+              <span class="platform__file" data-file>x64 · .exe</span>
+              <span class="platform__get">下载</span>
+            </a>
+            <a class="platform" href="https://github.com/wansui976/CoursePilot/releases/latest" data-platform="android" data-asset="-release.apk" data-umami-event="download" data-umami-event-platform="android">
+              <span class="platform__badge">推荐</span>
+              <span class="platform__os">Android</span>
+              <strong>Android 7+</strong>
+              <span class="platform__file" data-file>arm64 · .apk</span>
+              <span class="platform__get">下载</span>
+            </a>
+            <a class="platform" href="https://github.com/wansui976/CoursePilot/releases/latest" data-platform="ios" data-asset="_unsigned.ipa" data-umami-event="download" data-umami-event-platform="ios">
+              <span class="platform__badge">推荐</span>
+              <span class="platform__os">iPhone / iPad</span>
+              <strong>iOS 17+</strong>
+              <span class="platform__file" data-file>需自签 · .ipa</span>
+              <span class="platform__get">下载</span>
             </a>
           </div>
-          <p class="caption">iOS / Android 版即将上线 · 喜欢的话欢迎到 GitHub 点个 Star ⭐</p>
+          <p class="caption" data-mac-hint hidden>不确定 Mac 是哪种芯片？点左上角  →「关于本机」：写着 Apple M 系列选 Apple 芯片版，写着 Intel 选 Intel 版。</p>
+          <details class="install-notes" data-animate>
+            <summary>安装包暂未签名，打开时被拦下怎么办？</summary>
+            <ul>
+              <li>macOS 提示「已损坏，无法打开」：在终端运行 <code>xattr -cr /Applications/course-ai.app</code> 再打开。</li>
+              <li>Windows 出现 SmartScreen：点「更多信息 → 仍要运行」。也可以用 <a href="https://github.com/wansui976/CoursePilot/releases/latest" data-umami-event="download" data-umami-event-platform="windows-msi">.msi 安装包</a>。</li>
+              <li>Android：在系统设置里允许「安装未知来源应用」。</li>
+              <li>iOS / iPadOS：用 AltStore、Sideloadly 等工具以自己的 Apple ID 签名安装；自签安装时 iCloud 同步不可用。</li>
+            </ul>
+          </details>
+          <p class="caption">App Store / Google Play 版本正在准备 · 喜欢的话欢迎到 GitHub 点个 Star ⭐</p>
         </div>
       </section>
     </main>
+
+    <dialog class="lightbox" aria-label="截图预览">
+      <button class="lightbox__close" type="button" aria-label="关闭">×</button>
+      <img alt="" />
+      <p class="lightbox__caption"></p>
+    </dialog>
 
     <!-- ============ 页脚 ============ -->
     <footer class="footer">
@@ -1440,8 +1891,9 @@
         <div class="footer__cols">
           <div class="footer__col">
             <h4>产品</h4>
+            <a href="#whats-new">新功能</a>
             <a href="#features">学习资料</a>
-            <a href="#workbench">学习工作台</a>
+            <a href="#workbench">处理流程</a>
             <a href="#gallery">界面一览</a>
             <a href="#download">下载</a>
           </div>
@@ -1455,14 +1907,13 @@
           <div class="footer__col">
             <h4>支持</h4>
             <a href="#privacy">隐私说明</a>
-            <a href="#download">上架状态</a>
             <a href="https://github.com/wansui976/CoursePilot/issues">反馈问题</a>
           </div>
           <div class="footer__col">
             <h4>开源</h4>
             <a href="https://github.com/wansui976/CoursePilot">GitHub</a>
             <a href="https://github.com/wansui976/CoursePilot/releases">更新日志</a>
-            <a href="../LICENSE">许可证 (MIT)</a>
+            <a href="https://github.com/wansui976/CoursePilot/blob/main/LICENSE">许可证 (MIT)</a>
           </div>
         </div>
         <p class="footer__legal">
@@ -1813,6 +2264,236 @@
           btn.addEventListener("pointermove", onMagnet, { passive: true });
           btn.addEventListener("pointerleave", offMagnet);
         });
+      })();
+
+      // ---- 新功能轮播：分段控件切换截图，进度条走完自动下一项 ----
+      (function () {
+        const root = document.querySelector("[data-showcase]");
+        if (!root) return;
+        const tabs = Array.from(root.querySelectorAll('[role="tab"]'));
+        const panels = tabs.map((tab) => document.getElementById(tab.getAttribute("aria-controls")));
+        let current = 0;
+        let inView = false;
+        let hovering = false;
+        let userPicked = false; // 手动点过就不再自动轮播
+
+        function select(index, focus) {
+          current = (index + tabs.length) % tabs.length;
+          tabs.forEach((tab, i) => {
+            const on = i === current;
+            tab.setAttribute("aria-selected", String(on));
+            tab.tabIndex = on ? 0 : -1;
+            panels[i].classList.toggle("is-active", on);
+          });
+          if (focus) tabs[current].focus();
+          // 重新挂上动画类，让新选中那格的进度条从头走
+          root.classList.remove("is-playing");
+          void root.offsetWidth;
+          syncPlayback();
+        }
+
+        function syncPlayback() {
+          const canPlay = !userPicked && !reducedMotionQuery.matches;
+          root.classList.toggle("is-playing", canPlay);
+          root.classList.toggle("is-paused", canPlay && (!inView || hovering || document.hidden));
+        }
+
+        tabs.forEach((tab, i) => {
+          tab.addEventListener("click", () => {
+            userPicked = true;
+            select(i);
+          });
+          tab.querySelector(".showcase__bar i").addEventListener("animationend", () => {
+            if (i === current) select(current + 1);
+          });
+        });
+        root.querySelector('[role="tablist"]').addEventListener("keydown", (event) => {
+          const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+          if (!step) return;
+          event.preventDefault();
+          userPicked = true;
+          select(current + step, true);
+        });
+        root.addEventListener("pointerenter", () => {
+          hovering = true;
+          syncPlayback();
+        });
+        root.addEventListener("pointerleave", () => {
+          hovering = false;
+          syncPlayback();
+        });
+        document.addEventListener("visibilitychange", syncPlayback);
+        new IntersectionObserver(
+          (entries) => {
+            inView = entries[0].isIntersecting;
+            syncPlayback();
+          },
+          { threshold: 0.35 }
+        ).observe(root);
+        syncPlayback();
+      })();
+
+      // ---- 截图放大查看：界面一览的卡片、新功能截图 ----
+      (function () {
+        const dialog = document.querySelector(".lightbox");
+        if (!dialog || typeof dialog.showModal !== "function") return;
+        const img = dialog.querySelector("img");
+        const caption = dialog.querySelector(".lightbox__caption");
+
+        function open(src, alt, text) {
+          img.src = src;
+          img.alt = alt || "";
+          caption.textContent = text || "";
+          dialog.showModal();
+        }
+
+        document.querySelectorAll('.asset-card[href$=".webp"]').forEach((card) => {
+          card.addEventListener("click", (event) => {
+            event.preventDefault();
+            const thumb = card.querySelector("img");
+            const title = card.querySelector("strong");
+            open(card.getAttribute("href"), thumb && thumb.alt, title && title.textContent);
+          });
+        });
+        document.querySelectorAll("[data-zoom]").forEach((shot) => {
+          shot.addEventListener("click", () => {
+            const pic = shot.querySelector("img");
+            const panel = shot.closest(".showcase__panel");
+            const title = panel && panel.querySelector("h3");
+            open(pic.currentSrc || pic.src, pic.alt, title && title.textContent);
+          });
+        });
+        dialog.querySelector(".lightbox__close").addEventListener("click", () => dialog.close());
+        // 点图片以外的遮罩处关闭
+        dialog.addEventListener("click", (event) => {
+          if (event.target === dialog) dialog.close();
+        });
+        dialog.addEventListener("close", () => img.removeAttribute("src"));
+      })();
+
+      // ---- 下载：按访客系统推荐安装包；版本号和直链取自 GitHub 最新 release，取不到就留在 release 页 ----
+      (function () {
+        const cards = Array.from(document.querySelectorAll(".platform[data-platform]"));
+        if (!cards.length) return;
+        const primary = document.querySelector("[data-primary-download]");
+        const macHint = document.querySelector("[data-mac-hint]");
+        const LABELS = {
+          "mac-arm": "下载 Mac 版（Apple 芯片）",
+          "mac-intel": "下载 Mac 版（Intel）",
+          windows: "下载 Windows 版",
+          android: "下载 Android 版",
+          ios: "下载 iOS 版（需自签）",
+        };
+        let detected = null;
+
+        function macArchFromWebGL() {
+          try {
+            const gl = document.createElement("canvas").getContext("webgl");
+            const ext = gl && gl.getExtension("WEBGL_debug_renderer_info");
+            const renderer = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : "";
+            if (/Apple M\d/.test(renderer)) return "arm";
+            if (/Intel|AMD|Radeon|NVIDIA/i.test(renderer)) return "x86";
+          } catch (e) {
+            /* 拿不到显卡信息就当不确定 */
+          }
+          return null;
+        }
+
+        async function detectPlatform() {
+          const ua = navigator.userAgent;
+          const platform = navigator.platform || "";
+          if (/Android/i.test(ua)) return "android";
+          // iPadOS 桌面模式的 UA 伪装成 Mac，靠触摸点数区分
+          if (/iPhone|iPad|iPod/.test(ua) || (platform === "MacIntel" && navigator.maxTouchPoints > 1)) return "ios";
+          if (/Win/.test(platform) || /Windows/.test(ua)) return "windows";
+          if (!/Mac/.test(platform)) return null;
+          let arch = null;
+          try {
+            if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+              arch = (await navigator.userAgentData.getHighEntropyValues(["architecture"])).architecture || null;
+            }
+          } catch (e) {
+            /* 部分浏览器拒绝高熵信息 */
+          }
+          arch = arch || macArchFromWebGL();
+          if (arch === "arm") return "mac-arm";
+          if (arch === "x86") return "mac-intel";
+          return "mac";
+        }
+
+        function applyRecommendation() {
+          if (!detected) return;
+          if (detected === "mac") {
+            if (macHint) macHint.hidden = false;
+            return;
+          }
+          const card = cards.find((c) => c.dataset.platform === detected);
+          if (!card) return;
+          card.classList.add("is-recommended");
+          if (primary) {
+            primary.textContent = LABELS[detected];
+            primary.href = card.href;
+            primary.setAttribute("data-umami-event-platform", detected);
+          }
+        }
+
+        function applyRelease(release) {
+          const assets = release.assets || [];
+          const find = (suffix) => assets.find((a) => a.name.endsWith(suffix));
+          cards.forEach((card) => {
+            const asset = find(card.dataset.asset);
+            if (!asset) return;
+            card.href = asset.browser_download_url;
+            const file = card.querySelector("[data-file]");
+            if (file) file.textContent += ` · ${Math.round(asset.size / 1048576)} MB`;
+          });
+          const msi = find(".msi");
+          const msiLink = document.querySelector('[data-umami-event-platform="windows-msi"]');
+          if (msi && msiLink) msiLink.href = msi.browser_download_url;
+          document.querySelectorAll("[data-release-version]").forEach((el) => {
+            el.textContent = `当前版本 ${release.tag_name}`;
+          });
+          applyRecommendation(); // 直链换好后同步主按钮
+        }
+
+        detectPlatform().then((platform) => {
+          detected = platform;
+          applyRecommendation();
+        });
+
+        const CACHE_KEY = "coursepilot-latest-release";
+        try {
+          const cached = JSON.parse(sessionStorage.getItem(CACHE_KEY) || "null");
+          if (cached) {
+            applyRelease(cached);
+            return;
+          }
+        } catch (e) {
+          /* 缓存不可用就直接请求 */
+        }
+        fetch("https://api.github.com/repos/wansui976/CoursePilot/releases/latest", {
+          headers: { Accept: "application/vnd.github+json" },
+        })
+          .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+          .then((release) => {
+            const slim = {
+              tag_name: release.tag_name,
+              assets: (release.assets || []).map((a) => ({
+                name: a.name,
+                size: a.size,
+                browser_download_url: a.browser_download_url,
+              })),
+            };
+            try {
+              sessionStorage.setItem(CACHE_KEY, JSON.stringify(slim));
+            } catch (e) {
+              /* 忽略 */
+            }
+            applyRelease(slim);
+          })
+          .catch(() => {
+            /* 限流或离线：卡片继续指向 release 页 */
+          });
       })();
     </script>
   </body>

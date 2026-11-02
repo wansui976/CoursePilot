@@ -37,6 +37,18 @@ required_text = [
     "hero-word",
     "scroll-progress",
     "ScrollTrigger.create",
+    "费曼复述",
+    "拍题找讲解",
+    "data-showcase",
+    "screenshots/feynman.webp",
+    "screenshots/guided.webp",
+    "screenshots/find-explanation.webp",
+    "screenshots/highlights.webp",
+    "cloud.umami.is/script.js",
+    "data-umami-event=\"download\"",
+    "api.github.com/repos/wansui976/CoursePilot/releases/latest",
+    "class=\"lightbox\"",
+    "favicon.png",
 ]
 
 missing = [text for text in required_text if text not in html]
@@ -48,6 +60,13 @@ if html.count("var(--primary)") < 8:
 
 if html.count("data-animate") < 12:
     raise SystemExit("Expected restrained scroll reveal hooks across product page sections")
+
+for platform in ["mac-arm", "mac-intel", "windows", "android", "ios"]:
+    if f'data-platform="{platform}"' not in html:
+        raise SystemExit(f"Missing download card for {platform}")
+
+if 'href="#"' in html:
+    raise SystemExit("Found placeholder links (href=\"#\")")
 
 if html.count("data-parallax") < 2:
     raise SystemExit("Expected subtle parallax hooks on primary product shots")
