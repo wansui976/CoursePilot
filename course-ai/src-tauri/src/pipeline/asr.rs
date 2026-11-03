@@ -169,7 +169,7 @@ const COMMA_SPLIT_MS: i64 = 6_000;
 const TAIL_MERGE_MS: i64 = 1_500;
 
 /// whisper 的特殊 token（[_BEG_]、[_TT_123] 之类），不是正文。
-fn is_special_token(text: &str) -> bool {
+pub(crate) fn is_special_token(text: &str) -> bool {
     let text = text.trim();
     text.starts_with("[_") && text.ends_with(']')
 }
@@ -350,6 +350,9 @@ pub async fn run_whisper(
     }
     command
         .args(["-oj", "-ojf", "-pp"])
+        // 不拿上一段的输出当提示（whisper-cli 默认带上文）。长讲座里一旦认错一句，
+        // 它会顺着自己的错往下写，同一句话循环十几段；断掉上文，错误就只停在那一段。
+        .args(["-mc", "0"])
         // whisper-cli 默认只用 4 线程，多核机器大量算力被闲置。
         // 按机器实际核数放开，转写显著提速（GPU 构建下也能加快非 GPU 部分）。
         .args(["-t", &whisper_threads().to_string()]);
@@ -365,7 +368,29 @@ pub async fn run_whisper(
     let raw = std::fs::read_to_string(&json_path)?;
     let mut json = parse_whisper_json(&raw)?;
     simplify_mandarin(&mut json, language, detected_language(&raw).as_deref());
+    clean_hallucinations(audio, &mut json).await;
     Ok(json)
+}
+
+/// 去掉 Whisper 在长静音里编出来的字、循环和复读（规则见 `whisper_cleanup`）。
+/// 静音探测只读音轨，一小时的课几秒钟；探测失败就只按文本规则清理，不影响转写结果。
+async fn clean_hallucinations(audio: &Path, json: &mut WhisperJson) {
+    use crate::pipeline::{silence, whisper_cleanup};
+    let silences = silence::detect_silences(
+        audio,
+        None,
+        silence::DEFAULT_NOISE_DB,
+        whisper_cleanup::LONG_SILENCE_MS,
+    )
+    .await
+    .unwrap_or_else(|error| {
+        tracing::warn!(%error, "静音探测失败，Whisper 幻觉清理只按文本规则");
+        Vec::new()
+    });
+    let report = whisper_cleanup::clean(json, &silences);
+    if report.changed() {
+        tracing::info!(?report, "清理了 Whisper 幻觉");
+    }
 }
 
 /// whisper-cli 的 JSON 里记着它认定的语言（`-l auto` 时就是自动检测的结果）。

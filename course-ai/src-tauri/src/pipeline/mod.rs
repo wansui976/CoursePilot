@@ -30,6 +30,7 @@ pub mod transcript_correction;
 pub mod translate;
 pub mod volcengine_asr;
 pub mod volcengine_auc;
+pub mod whisper_cleanup;
 
 use crate::commands::courses::AppState;
 use crate::commands::videos::Video;
