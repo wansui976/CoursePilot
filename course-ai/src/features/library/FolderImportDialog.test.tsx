@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { FolderVideo } from "@/lib/ipc";
 import { FolderImportDialog } from "./FolderImportDialog";
 
 const { addLocalBatch } = vi.hoisted(() => ({ addLocalBatch: vi.fn() }));
@@ -15,13 +16,13 @@ const videos = [
   { path: "/f/part10.mp4", name: "part10" },
 ];
 
-function renderDialog(onClose = vi.fn()) {
+function renderDialog(onClose = vi.fn(), list: FolderVideo[] = videos) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
     <QueryClientProvider client={qc}>
-      <FolderImportDialog courseId="c1" videos={videos} onClose={onClose} />
+      <FolderImportDialog courseId="c1" videos={list} onClose={onClose} />
     </QueryClientProvider>,
   );
   return { onClose };
@@ -46,6 +47,20 @@ describe("FolderImportDialog", () => {
       ]),
     );
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("B 站缓存目录和普通文件一起列出、打上标记，导入时按目录路径传回去", async () => {
+    renderDialog(vi.fn(), [
+      { path: "/f/part1.mp4", name: "part1" },
+      { path: "/bili/111", name: "P1 线性回归", bilibili_cache: true },
+    ]);
+    expect(screen.getAllByText("B站缓存")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "导入 (2)" }));
+
+    await waitFor(() =>
+      expect(addLocalBatch).toHaveBeenCalledWith("c1", ["/f/part1.mp4", "/bili/111"]),
+    );
   });
 
   it("stays open and lists the files that could not be imported", async () => {

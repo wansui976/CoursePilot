@@ -1229,6 +1229,8 @@
   },
   "folderImport": {
     "title": "导入文件夹视频",
+    "bilibiliCache": "B站缓存",
+    "bilibiliCacheHint": "B 站客户端里缓存好的视频：导入时把音视频合成一个文件，缓存本身不动",
     "found": "找到 {{count}} 个视频，已导入过的会自动跳过。",
     "deselectAll": "全不选",
     "selectAll": "全选",

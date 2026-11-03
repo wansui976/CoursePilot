@@ -302,6 +302,9 @@ pub async fn add_local_video(
 pub struct FolderVideo {
     pub path: String,
     pub name: String,
+    /// 这一项是 B 站客户端的缓存目录（导入时先合成成 mp4），不是单个文件。
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub bilibili_cache: bool,
 }
 
 /// 自然序比较：让 "part2" 排在 "part10" 之前（数字段按数值、非数字段按字符）。
@@ -374,11 +377,23 @@ pub fn scan_folder(dir: &Path) -> AppResult<Vec<FolderVideo>> {
             FolderVideo {
                 path: path.to_string_lossy().to_string(),
                 name: display_title_from_path(&path),
+                bilibili_cache: false,
             },
         ));
     }
     out.sort_by(|a, b| natural_cmp(&a.0, &b.0));
-    Ok(out.into_iter().map(|(_, v)| v).collect())
+    let mut videos: Vec<FolderVideo> = out.into_iter().map(|(_, v)| v).collect();
+    // B 站客户端的缓存目录（选中的就是它、或者它在下面几层里）：每一 P 列成一项。
+    videos.extend(
+        crate::pipeline::bilibili_cache::find_entries(dir)
+            .into_iter()
+            .map(|entry| FolderVideo {
+                path: entry.dir.to_string_lossy().to_string(),
+                name: entry.title,
+                bilibili_cache: true,
+            }),
+    );
+    Ok(videos)
 }
 
 /// 批量导入的结果：导进来的视频，加上没导进来的文件和原因。
@@ -791,14 +806,44 @@ pub async fn cmd_add_local_batch(
     paths: Vec<String>,
 ) -> AppResult<BatchImport> {
     let roots = DataRoots::load(&app, &state.db).await?;
-    let imported =
+    // B 站缓存目录先合成成 mp4（写在存储位置下，缓存本身不动），再和普通文件一样导入。
+    let cache_root = roots.preferred.clone().unwrap_or_else(|| roots.fallback.clone());
+    let (paths, cache_failures) = resolve_bilibili_caches(paths, &cache_root).await;
+    let mut imported =
         add_local_batch(&state.db, &course_id, paths, |video| roots.for_video(video)).await?;
+    imported.failed.splice(0..0, cache_failures);
     // 批量导入同样在后台触发黑边探测（并发由 crop_detect 的信号量限住）。
     for video in &imported.videos {
         crate::pipeline::spawn_crop_detection(app.clone(), video.id.clone());
         start_transcode_if_needed(&app, video);
     }
     Ok(imported)
+}
+
+/// 把清单里的 B 站缓存目录换成合成好的 mp4；合成失败的带着原目录路径报回去
+/// （界面按路径找回这一项的名字）。普通文件原样放行。
+async fn resolve_bilibili_caches(
+    paths: Vec<String>,
+    root: &Path,
+) -> (Vec<String>, Vec<ImportFailure>) {
+    use crate::pipeline::bilibili_cache;
+    let mut files = Vec::with_capacity(paths.len());
+    let mut failed = Vec::new();
+    for path in paths {
+        let dir = Path::new(&path);
+        let Some(entry) = dir.is_dir().then(|| bilibili_cache::read_entry(dir)).flatten() else {
+            files.push(path);
+            continue;
+        };
+        match bilibili_cache::remux(&entry, root).await {
+            Ok(file) => files.push(file.to_string_lossy().into_owned()),
+            Err(error) => failed.push(ImportFailure {
+                path,
+                error: error.to_string(),
+            }),
+        }
+    }
+    (files, failed)
 }
 
 /// 导入后如果这条视频的编码在本机放不出来，就在后台转一份 H.264（`data_dir/playable.mp4`）。
@@ -1338,6 +1383,49 @@ mod tests {
             })
             .collect();
         assert_eq!(files, vec!["part1.mkv", "part2.mp4", "part10.mp4"]);
+        assert!(found.iter().all(|v| !v.bilibili_cache));
+    }
+
+    #[tokio::test]
+    async fn scan_folder_also_lists_bilibili_client_caches_below_it() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("intro.mp4"), b"x").unwrap();
+        let cache = dir.path().join("bilibili/111");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(
+            cache.join("videoInfo.json"),
+            r#"{"title":"线性回归","groupTitle":"机器学习导论","p":1,"cid":111}"#,
+        )
+        .unwrap();
+        std::fs::write(cache.join("111-1-30080.m4s"), b"v").unwrap();
+        std::fs::write(cache.join("111-1-30280.m4s"), b"a").unwrap();
+
+        let found = scan_folder(dir.path()).unwrap();
+        let names: Vec<&str> = found.iter().map(|v| v.name.as_str()).collect();
+        assert_eq!(names, ["intro.mp4", "P1 线性回归"]);
+        assert!(found[1].bilibili_cache);
+        assert_eq!(std::path::Path::new(&found[1].path), cache);
+    }
+
+    #[tokio::test]
+    async fn a_cache_that_cannot_be_remuxed_is_reported_under_its_own_path() {
+        let dir = tempdir().unwrap();
+        let cache = dir.path().join("222");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("videoInfo.json"), r#"{"title":"坏缓存","cid":222}"#).unwrap();
+        // 没有 ftyp 的旧格式 / 没缓存完：读不出流。
+        std::fs::write(cache.join("222-1-30080.m4s"), b"not an mp4").unwrap();
+        let plain = dir.path().join("a.mp4").to_string_lossy().into_owned();
+        let cache_path = cache.to_string_lossy().into_owned();
+
+        let (files, failed) = resolve_bilibili_caches(
+            vec![plain.clone(), cache_path.clone()],
+            &dir.path().join("out"),
+        )
+        .await;
+        assert_eq!(files, vec![plain]);
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].path, cache_path);
     }
 
     #[tokio::test]

@@ -72,6 +72,8 @@ export interface CloudSyncProbeStopResult {
 export interface FolderVideo {
   path: string;
   name: string;
+  /** B 站客户端的缓存目录：导入时先把音视频合成成一个 mp4。 */
+  bilibili_cache?: boolean;
 }
 
 /** 批量导入的结果：导进来的视频，加上没导进来的文件和原因。 */

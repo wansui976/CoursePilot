@@ -7,6 +7,7 @@ pub mod asr;
 pub mod asr_cache;
 pub mod assistant;
 pub mod audio;
+pub mod bilibili_cache;
 pub mod bilibili_extra;
 pub mod concepts;
 pub mod crop_detect;

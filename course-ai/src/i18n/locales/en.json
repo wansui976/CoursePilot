@@ -1231,6 +1231,8 @@
   },
   "folderImport": {
     "title": "Import Folder Videos",
+    "bilibiliCache": "Bilibili cache",
+    "bilibiliCacheHint": "Downloaded in the Bilibili app: audio and video are merged into one file on import; the cache itself is left untouched",
     "found": "Found {{count}} videos — already imported ones will be skipped.",
     "deselectAll": "Deselect all",
     "selectAll": "Select all",

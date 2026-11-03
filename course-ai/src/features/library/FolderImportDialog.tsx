@@ -110,6 +110,14 @@ export function FolderImportDialog({
               <span className="min-w-0 flex-1 truncate text-sm text-[var(--text-normal)]">
                 {v.name}
               </span>
+              {v.bilibili_cache && (
+                <span
+                  className="flex-none rounded bg-[var(--surface-card-hover)] px-1.5 py-0.5 text-[11px] text-[var(--text-muted)]"
+                  title={t("folderImport.bilibiliCacheHint")}
+                >
+                  {t("folderImport.bilibiliCache")}
+                </span>
+              )}
             </label>
           </li>
         ))}
