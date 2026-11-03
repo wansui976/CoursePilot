@@ -46,7 +46,9 @@ pub const MODELS: &[ModelInfo] = &[
         id: "large-v3-turbo",
         display_name: "Large v3 Turbo (q5_0, 574MB)",
         size_bytes: 574_000_000,
-        url: "https://modelscope.cn/models/cjc1887415157/whisper.cpp/resolve/master/ggml-large-v3-turbo-q5_0.bin",
+        // 上面那个仓库没有 turbo（这个地址一直是 404，选它的人下载必失败）。换成另一个
+        // ModelScope 镜像：文件大小和首尾各 2MB 的哈希都与 HuggingFace 上 ggerganov 的原文件一致。
+        url: "https://modelscope.cn/models/OllmOne/whisper.cpp/resolve/master/ggml-large-v3-turbo-q5_0.bin",
     },
 ];
 
