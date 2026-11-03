@@ -23,7 +23,6 @@ pub mod ocr;
 pub mod playable;
 pub mod rag;
 pub mod search_terms;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod sherpa_asr;
 pub mod silence;
 pub mod slide_match;
@@ -100,7 +99,8 @@ fn asr_backend_for_os(value: Option<String>, os: &str) -> AsrBackend {
     match value.as_deref().map(str::trim) {
         Some("volcengine") => AsrBackend::Volcengine,
         Some("aliyun") => AsrBackend::Aliyun,
-        Some("whisper") if !is_mobile_os(os) => AsrBackend::Whisper,
+        // 「本地识别」：桌面上 Whisper 和 sherpa 模型都能用，手机上只有 sherpa 模型（SenseVoice / Qwen3-ASR）。
+        Some("whisper") => AsrBackend::Whisper,
         _ => default_asr_backend_for_os(os),
     }
 }
@@ -185,7 +185,6 @@ async fn run_local_model(
 ) -> AppResult<asr::WhisperJson> {
     match model {
         LocalModel::Whisper { path, .. } => asr::run_whisper(audio, path, Some(language), progress).await,
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         LocalModel::Sherpa(model) => {
             let job = sherpa_asr::SherpaJob {
                 audio: audio.to_path_buf(),
@@ -195,11 +194,6 @@ async fn run_local_model(
                 language: Some(language.to_string()),
             };
             sherpa_asr::transcribe(job, progress).await
-        }
-        #[cfg(any(target_os = "android", target_os = "ios"))]
-        LocalModel::Sherpa(_) => {
-            let _ = app_data;
-            Err(AppError::Config("手机上暂不支持本地识别，请在设置 → 语音识别里选云端引擎".into()))
         }
     }
 }
@@ -231,12 +225,8 @@ pub async fn transcribe_clip(
 ) -> AppResult<String> {
     let backend = asr_backend_or_default(setting(db, "asr_backend").await?);
     let mobile = matches!(std::env::consts::OS, "ios" | "android");
-    let (audio_path, audio_mime, audio_format, _temp) = if mobile {
-        if backend == AsrBackend::Whisper {
-            return Err(AppError::Config(
-                "手机上没有本地 Whisper，请在设置 → 语音识别里选云端引擎；也可以直接打字".into(),
-            ));
-        }
+    // 手机上没有 ffmpeg：本地识别由原生桥把录音解成 WAV；云端引擎直接收录音本身（AAC / WebM）。
+    let (audio_path, audio_mime, audio_format, _temp) = if mobile && backend != AsrBackend::Whisper {
         let format = if mime.contains("webm") { "webm" } else { "m4a" };
         (input.to_path_buf(), mime.to_string(), format.to_string(), None)
     } else {
@@ -2283,9 +2273,10 @@ mod tests {
             asr_backend_for_os(Some("volcengine".into()), "android"),
             AsrBackend::Volcengine
         );
+        // 手机上也能选本地识别了（sherpa 模型）。
         assert_eq!(
             asr_backend_for_os(Some("whisper".into()), "ios"),
-            AsrBackend::Aliyun
+            AsrBackend::Whisper
         );
     }
 

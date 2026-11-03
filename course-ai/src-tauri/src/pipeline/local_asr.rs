@@ -215,6 +215,105 @@ pub fn missing_files(app_data: &Path, model: &'static SherpaModel) -> Vec<(PathB
 }
 
 // ---------------------------------------------------------------------------
+// WAV：桌面上 ffmpeg 已经转好 16kHz 单声道；手机上原生桥导出的是视频原本的采样率和声道数
+// （44.1 / 48kHz 立体声居多），读的时候再混成单声道、重采样。这里只管解析，重采样在 sherpa_asr。
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WavFormat {
+    pub channels: u16,
+    pub sample_rate: u32,
+    pub bits: u16,
+    /// 32 位浮点样本（format tag 3，或扩展头里的浮点子格式）。
+    pub float: bool,
+    pub data_offset: u64,
+    pub data_len: u64,
+}
+
+impl WavFormat {
+    pub fn block_align(&self) -> usize {
+        self.channels as usize * (self.bits as usize / 8)
+    }
+}
+
+fn le16(b: &[u8], at: usize) -> Option<u16> {
+    Some(u16::from_le_bytes(b.get(at..at + 2)?.try_into().ok()?))
+}
+
+fn le32(b: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(b.get(at..at + 4)?.try_into().ok()?))
+}
+
+/// 解析 WAV 头（`head` 是文件开头一段，足够覆盖到 data 块的起点即可）。
+/// 只认 16 位整数和 32 位浮点 PCM；data 块声明的长度超过文件就按文件实际长度算
+/// （边写边封口的 WAV 常把长度写成 0 或 0xFFFFFFFF）。
+pub fn parse_wav_header(head: &[u8], file_len: u64) -> Option<WavFormat> {
+    if head.get(0..4)? != b"RIFF" || head.get(8..12)? != b"WAVE" {
+        return None;
+    }
+    let mut at = 12;
+    let mut fmt: Option<(u16, u16, u32, u16)> = None;
+    while at + 8 <= head.len() {
+        let id = &head[at..at + 4];
+        let size = le32(head, at + 4)? as usize;
+        let body = at + 8;
+        if id == b"fmt " {
+            let mut tag = le16(head, body)?;
+            let channels = le16(head, body + 2)?;
+            let rate = le32(head, body + 4)?;
+            let bits = le16(head, body + 14)?;
+            if tag == 0xFFFE {
+                // WAVE_FORMAT_EXTENSIBLE：真正的格式在子格式 GUID 的前两个字节。
+                tag = le16(head, body + 24)?;
+            }
+            fmt = Some((tag, channels, rate, bits));
+        } else if id == b"data" {
+            let (tag, channels, sample_rate, bits) = fmt?;
+            let float = tag == 3 && bits == 32;
+            if !(tag == 1 && bits == 16) && !float || channels == 0 || sample_rate == 0 {
+                return None;
+            }
+            let available = file_len.saturating_sub(body as u64);
+            let declared = size as u64;
+            let data_len = if declared == 0 || declared > available { available } else { declared };
+            return Some(WavFormat {
+                channels,
+                sample_rate,
+                bits,
+                float,
+                data_offset: body as u64,
+                data_len,
+            });
+        }
+        // 块按偶数字节对齐。
+        at = body + size + (size & 1);
+    }
+    None
+}
+
+/// 一段交错的多声道样本混成单声道浮点（-1..1）。末尾不满一帧的字节丢掉。
+pub fn frames_to_mono(bytes: &[u8], format: &WavFormat) -> Vec<f32> {
+    let channels = format.channels as usize;
+    let width = format.bits as usize / 8;
+    bytes
+        .chunks_exact(format.block_align())
+        .map(|frame| {
+            let sum: f32 = frame
+                .chunks_exact(width)
+                .map(|sample| {
+                    if format.float {
+                        f32::from_le_bytes(sample.try_into().unwrap())
+                    } else {
+                        i16::from_le_bytes(sample.try_into().unwrap()) as f32 / 32768.0
+                    }
+                })
+                .sum();
+            sum / channels as f32
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
 // 识别结果 → 文稿行。纯函数，各平台都编译，方便测。
 // ---------------------------------------------------------------------------
 
@@ -368,6 +467,59 @@ mod tests {
         assert!(SENSE_VOICE.supports_language("zh"));
         assert!(!SENSE_VOICE.supports_language("fr"));
         assert!(QWEN3_ASR.supports_language("fr"));
+    }
+
+    fn wav_bytes(channels: u16, rate: u32, samples: &[i16], extra_chunk: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        let data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(b"WAVE");
+        out.extend_from_slice(b"fmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&channels.to_le_bytes());
+        out.extend_from_slice(&rate.to_le_bytes());
+        out.extend_from_slice(&(rate * channels as u32 * 2).to_le_bytes());
+        out.extend_from_slice(&(channels * 2).to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        if extra_chunk {
+            // ffmpeg 会在 data 前塞一个 LIST 块；奇数长度要补一个字节。
+            out.extend_from_slice(b"LIST");
+            out.extend_from_slice(&3u32.to_le_bytes());
+            out.extend_from_slice(b"abc\0");
+        }
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&data);
+        out
+    }
+
+    #[test]
+    fn parses_android_style_stereo_wav_and_downmixes_it() {
+        let bytes = wav_bytes(2, 44_100, &[16_384, 0, -16_384, -16_384], true);
+        let format = parse_wav_header(&bytes, bytes.len() as u64).unwrap();
+        assert_eq!((format.channels, format.sample_rate, format.bits, format.float), (2, 44_100, 16, false));
+        assert_eq!(format.data_len, 8);
+        let mono = frames_to_mono(&bytes[format.data_offset as usize..], &format);
+        assert_eq!(mono, vec![0.25, -0.5]);
+    }
+
+    #[test]
+    fn data_length_written_as_zero_or_too_large_falls_back_to_the_file_size() {
+        let mut bytes = wav_bytes(1, 16_000, &[1, 2, 3], false);
+        let data_size_at = bytes.len() - 6 - 4;
+        bytes[data_size_at..data_size_at + 4].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+        let format = parse_wav_header(&bytes, bytes.len() as u64).unwrap();
+        assert_eq!(format.data_len, 6);
+    }
+
+    #[test]
+    fn rejects_formats_we_cannot_read() {
+        let mut bytes = wav_bytes(1, 16_000, &[1], false);
+        bytes[34] = 24; // 24 位
+        assert!(parse_wav_header(&bytes, bytes.len() as u64).is_none());
+        assert!(parse_wav_header(b"not a wav file at all", 21).is_none());
     }
 
     #[test]

@@ -15,9 +15,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.3.7</string>
+	<string>0.3.8</string>
 	<key>CFBundleVersion</key>
-	<string>0.3.7</string>
+	<string>0.3.8</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
@@ -29,10 +29,10 @@
 	<array>
 		<string>_http._tcp</string>
 	</array>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>费曼复述时录下你讲的话，转成文字后和课程内容对照</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>需要访问本地开发服务器以加载课程库界面</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>费曼复述时录下你讲的话，转成文字后和课程内容对照</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

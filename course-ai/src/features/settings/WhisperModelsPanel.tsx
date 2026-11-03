@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { ipc, type WhisperModel } from "@/lib/ipc";
-import { isMobile } from "@/lib/platform";
 
 type Row = [WhisperModel, boolean];
 
@@ -14,12 +13,8 @@ function formatBytes(bytes: number) {
   return `${bytes} B`;
 }
 
+/** 本地识别模型的下载清单。手机上后端只列 SenseVoice / Qwen3-ASR。 */
 export function WhisperModelsPanel() {
-  if (isMobile()) return null;
-  return <WhisperModelsPanelDesktop />;
-}
-
-function WhisperModelsPanelDesktop() {
   const { t } = useTranslation();
   const [rows, setRows] = useState<Row[]>([]);
   const [loadError, setLoadError] = useState("");

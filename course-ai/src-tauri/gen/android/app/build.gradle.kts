@@ -65,6 +65,11 @@ android {
             )
         }
     }
+    packaging {
+        // sherpa-onnx 的构建脚本把整个 jniLibs 都拷了过来；我们走 C API（Rust 绑定），
+        // 不用它的 Java 绑定，这个 4.6MB 的 JNI 库不必进安装包。
+        jniLibs.excludes.add("**/libsherpa-onnx-jni.so")
+    }
     kotlinOptions {
         jvmTarget = "1.8"
     }

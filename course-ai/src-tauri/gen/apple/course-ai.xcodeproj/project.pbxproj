@@ -8,9 +8,11 @@
 
 /* Begin PBXBuildFile section */
 		01C94543AB5A60D400F0FA6F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 7919E1277F043231350D350B /* LaunchScreen.storyboard */; };
+		3DBFDEE3EE06D00106086FC3 /* sherpa-onnx.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3CFA2704A40C01CEB882FE3B /* sherpa-onnx.xcframework */; };
 		429404F062B6E92834BE7841 /* TranscodeVideo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 801AF6124C4982A6934F629D /* TranscodeVideo.swift */; };
 		614952CA97648BFE458A15F0 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 8B92F7107AAAD22E5876F46C /* libapp.a */; };
 		7763ED898B64AF0BE98B3E5E /* CloudKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 84EFC626C1C20F24A827BBB0 /* CloudKit.framework */; };
+		86C19635779CB71BDE5FB1C0 /* sherpa-onnx.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 3CFA2704A40C01CEB882FE3B /* sherpa-onnx.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		86D2D1CC9D4B980BB666CA34 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8ACB6FE5A0AFBACEB2B621F2 /* MetalKit.framework */; };
 		A41A7F943E3389707C443AB8 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4C523DF21CC35F02AB80EAEB /* CoreGraphics.framework */; };
 		C43896CE771D0C09551C0AC6 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = F69052E1134D52D507625EE9 /* main.mm */; };
@@ -23,6 +25,20 @@
 		F44167AA4AD6BF9A48E3A080 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BF556E79CA712CC2C95EDA05 /* QuartzCore.framework */; };
 		FF1FFE2252D17A158BEE5647 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A0BE9B8E7D6536BE9400F02E /* UIKit.framework */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		7D201AB32AE876EAB3845A1C /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				86C19635779CB71BDE5FB1C0 /* sherpa-onnx.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		0070887AED9638790B8C6D49 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
@@ -45,24 +61,32 @@
 		30F213FAB00B59B7DD7120C7 /* slides.rs */ = {isa = PBXFileReference; path = slides.rs; sourceTree = "<group>"; };
 		3229471B21A12F50D64DDC12 /* retrieval_eval.rs */ = {isa = PBXFileReference; path = retrieval_eval.rs; sourceTree = "<group>"; };
 		328DD14B5DC83DC25E3DBAE3 /* sidecar.rs */ = {isa = PBXFileReference; path = sidecar.rs; sourceTree = "<group>"; };
+		34322B3917BF98733415B429 /* transcode.rs */ = {isa = PBXFileReference; path = transcode.rs; sourceTree = "<group>"; };
 		3CC0459CA2D96C08CE7D3501 /* transcript_correction.rs */ = {isa = PBXFileReference; path = transcript_correction.rs; sourceTree = "<group>"; };
+		3CFA2704A40C01CEB882FE3B /* sherpa-onnx.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "sherpa-onnx.xcframework"; path = "../../sherpa-onnx.xcframework"; sourceTree = "<group>"; };
 		3D78A72EF688091EA5C2FBB8 /* cloud_sync.rs */ = {isa = PBXFileReference; path = cloud_sync.rs; sourceTree = "<group>"; };
 		3F0B586F1EE23B9760183758 /* courses.rs */ = {isa = PBXFileReference; path = courses.rs; sourceTree = "<group>"; };
 		40F72876CBE465AEDFE5D867 /* sync.rs */ = {isa = PBXFileReference; path = sync.rs; sourceTree = "<group>"; };
+		44B9726A7B1CC11DDBBAAC4B /* local_asr.rs */ = {isa = PBXFileReference; path = local_asr.rs; sourceTree = "<group>"; };
 		4631503326FB1A474DBBBAB2 /* downloads.rs */ = {isa = PBXFileReference; path = downloads.rs; sourceTree = "<group>"; };
 		4C523DF21CC35F02AB80EAEB /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		4D249D891C5C0D04C0074343 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
+		51D1239F0A8DAAFC72808AE0 /* whisper_cleanup.rs */ = {isa = PBXFileReference; path = whisper_cleanup.rs; sourceTree = "<group>"; };
 		53E9A89565B82A527937D720 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		54F7158007E928EA1DE59837 /* videos.rs */ = {isa = PBXFileReference; path = videos.rs; sourceTree = "<group>"; };
 		571B045A449EA6FDCC0C1443 /* clips.rs */ = {isa = PBXFileReference; path = clips.rs; sourceTree = "<group>"; };
 		576CCC7D0403F49B783A0D40 /* silence.rs */ = {isa = PBXFileReference; path = silence.rs; sourceTree = "<group>"; };
+		5E8BE5AE6A92999620BA8110 /* bilibili_cache.rs */ = {isa = PBXFileReference; path = bilibili_cache.rs; sourceTree = "<group>"; };
+		5EC998DFDA51237D7BB057CA /* feynman.rs */ = {isa = PBXFileReference; path = feynman.rs; sourceTree = "<group>"; };
 		62BF5B4CB615CBAAD548E376 /* playable.rs */ = {isa = PBXFileReference; path = playable.rs; sourceTree = "<group>"; };
 		65306C450127E868FCED992A /* srs.rs */ = {isa = PBXFileReference; path = srs.rs; sourceTree = "<group>"; };
 		654E237CFF1EB4BBD2D61248 /* subtitle.rs */ = {isa = PBXFileReference; path = subtitle.rs; sourceTree = "<group>"; };
+		68898FB511AA8FBF0BDD714F /* anthropic.rs */ = {isa = PBXFileReference; path = anthropic.rs; sourceTree = "<group>"; };
 		6A548B63B67F6C4C322EC4F8 /* course-ai_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "course-ai_iOS.entitlements"; sourceTree = "<group>"; };
 		6BAEF70551F2F12F62CEB0B7 /* aliyun_asr.rs */ = {isa = PBXFileReference; path = aliyun_asr.rs; sourceTree = "<group>"; };
 		6C1F75C09E8838E085A125C1 /* note_images.rs */ = {isa = PBXFileReference; path = note_images.rs; sourceTree = "<group>"; };
 		6C2869C566554E105AE92321 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		6C8CBEBDDCF6BF262374192A /* slide_match.rs */ = {isa = PBXFileReference; path = slide_match.rs; sourceTree = "<group>"; };
 		6CAAAC53F16794282D6DFF69 /* handout.rs */ = {isa = PBXFileReference; path = handout.rs; sourceTree = "<group>"; };
 		6D0A26B8137D8146B4BEEF72 /* ocr.rs */ = {isa = PBXFileReference; path = ocr.rs; sourceTree = "<group>"; };
 		6DC997CACC15EF1D6E18D8BF /* danmaku.rs */ = {isa = PBXFileReference; path = danmaku.rs; sourceTree = "<group>"; };
@@ -78,6 +102,7 @@
 		839D6BD7531FB4E2F6964DD1 /* export.rs */ = {isa = PBXFileReference; path = export.rs; sourceTree = "<group>"; };
 		84EFC626C1C20F24A827BBB0 /* CloudKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CloudKit.framework; path = System/Library/Frameworks/CloudKit.framework; sourceTree = SDKROOT; };
 		8827E60C96389E9C0390A81D /* asr.rs */ = {isa = PBXFileReference; path = asr.rs; sourceTree = "<group>"; };
+		8A25B99123CB983CE0B85EE4 /* ollama.rs */ = {isa = PBXFileReference; path = ollama.rs; sourceTree = "<group>"; };
 		8A3C957650B6D5E1727452E9 /* backup.rs */ = {isa = PBXFileReference; path = backup.rs; sourceTree = "<group>"; };
 		8A3D2A2DEC94D09711D6324F /* concepts.rs */ = {isa = PBXFileReference; path = concepts.rs; sourceTree = "<group>"; };
 		8ACB6FE5A0AFBACEB2B621F2 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
@@ -96,9 +121,11 @@
 		A4745C607647C457546B30CF /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
 		A5E66A3D54D6F217FB270829 /* assistant.rs */ = {isa = PBXFileReference; path = assistant.rs; sourceTree = "<group>"; };
 		A69292E349BF266D832BE341 /* keychain.rs */ = {isa = PBXFileReference; path = keychain.rs; sourceTree = "<group>"; };
+		A943F4E9FB284D1E54205527 /* highlights.rs */ = {isa = PBXFileReference; path = highlights.rs; sourceTree = "<group>"; };
 		A97DBABFC852D7848DDEFE2A /* transcripts.rs */ = {isa = PBXFileReference; path = transcripts.rs; sourceTree = "<group>"; };
 		B809B40E30CBCC20973D68F4 /* factory.rs */ = {isa = PBXFileReference; path = factory.rs; sourceTree = "<group>"; };
 		B92E36528DDA3661AB5250EB /* rag.rs */ = {isa = PBXFileReference; path = rag.rs; sourceTree = "<group>"; };
+		BB38ECDF465C849E0213C0F0 /* gemini.rs */ = {isa = PBXFileReference; path = gemini.rs; sourceTree = "<group>"; };
 		BCF9E8B50D0C2BE657EF43DF /* prompts.rs */ = {isa = PBXFileReference; path = prompts.rs; sourceTree = "<group>"; };
 		BF27086E65A4E874EEE47737 /* export.rs */ = {isa = PBXFileReference; path = export.rs; sourceTree = "<group>"; };
 		BF556E79CA712CC2C95EDA05 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
@@ -114,21 +141,27 @@
 		CE3BB58B5EE568F9FC1AF520 /* apply.rs */ = {isa = PBXFileReference; path = apply.rs; sourceTree = "<group>"; };
 		CF82B4FDD98B808DFB2361E2 /* subscriptions.rs */ = {isa = PBXFileReference; path = subscriptions.rs; sourceTree = "<group>"; };
 		D001F9B6B5902764627E74BA /* slides.rs */ = {isa = PBXFileReference; path = slides.rs; sourceTree = "<group>"; };
+		D1A9CAE6A6855F8E468582B8 /* catalog.rs */ = {isa = PBXFileReference; path = catalog.rs; sourceTree = "<group>"; };
 		D431B794A9518EC545D3FE66 /* ai.rs */ = {isa = PBXFileReference; path = ai.rs; sourceTree = "<group>"; };
 		D6BD509ED3D00CCADA7EE378 /* course-ai_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "course-ai_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		DA0F32E7A5233AA418A29A5E /* notify.rs */ = {isa = PBXFileReference; path = notify.rs; sourceTree = "<group>"; };
 		DA520912A4876407C5F394F6 /* translate.rs */ = {isa = PBXFileReference; path = translate.rs; sourceTree = "<group>"; };
 		DB4C67C402A987A0D1A22A4E /* download.rs */ = {isa = PBXFileReference; path = download.rs; sourceTree = "<group>"; };
 		DB7195B2CDC8FE97C9AD2C84 /* media_server.rs */ = {isa = PBXFileReference; path = media_server.rs; sourceTree = "<group>"; };
+		DD41EB3CB56EA3C04E342D73 /* feynman.rs */ = {isa = PBXFileReference; path = feynman.rs; sourceTree = "<group>"; };
 		DD478A730AA0F12D0031D59B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		DEB55E2E6C754F7EF8040688 /* explain.rs */ = {isa = PBXFileReference; path = explain.rs; sourceTree = "<group>"; };
 		DFA0DAEA98617AFC52F42090 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		E01F542A5DABDD39349F6A92 /* translate.rs */ = {isa = PBXFileReference; path = translate.rs; sourceTree = "<group>"; };
 		E78FBB9EBAF5858E3A0BB5EC /* media_kind.rs */ = {isa = PBXFileReference; path = media_kind.rs; sourceTree = "<group>"; };
 		E95154D128D808DFFEAB822B /* asr_cache.rs */ = {isa = PBXFileReference; path = asr_cache.rs; sourceTree = "<group>"; };
+		E9B97954F2254190D7D8C5AC /* model_catalog.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = model_catalog.json; sourceTree = "<group>"; };
+		F3D8E4C389E05E460DAEFEB9 /* models.rs */ = {isa = PBXFileReference; path = models.rs; sourceTree = "<group>"; };
 		F5332C17DC2E800F68C378D7 /* bilibili_extra.rs */ = {isa = PBXFileReference; path = bilibili_extra.rs; sourceTree = "<group>"; };
 		F59F6059FCCAB83361FAE97F /* spool.rs */ = {isa = PBXFileReference; path = spool.rs; sourceTree = "<group>"; };
 		F69052E1134D52D507625EE9 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
 		FA28BBD8C329BA9E441FD794 /* Decoder.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Decoder.h; sourceTree = "<group>"; };
+		FA98FEEF3478DD3B1EB207B2 /* sherpa_asr.rs */ = {isa = PBXFileReference; path = sherpa_asr.rs; sourceTree = "<group>"; };
 		FB4F96FF2592D11BDB558EDF /* outbox.rs */ = {isa = PBXFileReference; path = outbox.rs; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -138,6 +171,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				614952CA97648BFE458A15F0 /* libapp.a in Frameworks */,
+				3DBFDEE3EE06D00106086FC3 /* sherpa-onnx.xcframework in Frameworks */,
 				A41A7F943E3389707C443AB8 /* CoreGraphics.framework in Frameworks */,
 				7763ED898B64AF0BE98B3E5E /* CloudKit.framework in Frameworks */,
 				EB19DD653C12FA2791D04580 /* Metal.framework in Frameworks */,
@@ -156,9 +190,15 @@
 			isa = PBXGroup;
 			children = (
 				8E0F636A3FAD108D815C61AE /* agent.rs */,
+				68898FB511AA8FBF0BDD714F /* anthropic.rs */,
+				D1A9CAE6A6855F8E468582B8 /* catalog.rs */,
 				B809B40E30CBCC20973D68F4 /* factory.rs */,
+				BB38ECDF465C849E0213C0F0 /* gemini.rs */,
 				A69292E349BF266D832BE341 /* keychain.rs */,
 				2A5B42B186D8E17E37817751 /* mod.rs */,
+				E9B97954F2254190D7D8C5AC /* model_catalog.json */,
+				F3D8E4C389E05E460DAEFEB9 /* models.rs */,
+				8A25B99123CB983CE0B85EE4 /* ollama.rs */,
 				719310A7319B8C54B4D74FE4 /* openai.rs */,
 				198DF8065B8D238CDAEDB4DD /* profiles.rs */,
 				BCF9E8B50D0C2BE657EF43DF /* prompts.rs */,
@@ -176,6 +216,7 @@
 				8ACB6FE5A0AFBACEB2B621F2 /* MetalKit.framework */,
 				BF556E79CA712CC2C95EDA05 /* QuartzCore.framework */,
 				6C2869C566554E105AE92321 /* Security.framework */,
+				3CFA2704A40C01CEB882FE3B /* sherpa-onnx.xcframework */,
 				A0BE9B8E7D6536BE9400F02E /* UIKit.framework */,
 				53E9A89565B82A527937D720 /* WebKit.framework */,
 			);
@@ -193,12 +234,17 @@
 				8827E60C96389E9C0390A81D /* asr.rs */,
 				A5E66A3D54D6F217FB270829 /* assistant.rs */,
 				0E48D0CF1F0D3C511CE71A7A /* audio.rs */,
+				5E8BE5AE6A92999620BA8110 /* bilibili_cache.rs */,
 				F5332C17DC2E800F68C378D7 /* bilibili_extra.rs */,
 				8A3D2A2DEC94D09711D6324F /* concepts.rs */,
 				C1A960C0267BE7D9802CCD98 /* crop_detect.rs */,
 				2E4B5D560C219251DC5B4665 /* deepseek_ocr.rs */,
 				DB4C67C402A987A0D1A22A4E /* download.rs */,
+				DEB55E2E6C754F7EF8040688 /* explain.rs */,
+				DD41EB3CB56EA3C04E342D73 /* feynman.rs */,
 				6CAAAC53F16794282D6DFF69 /* handout.rs */,
+				A943F4E9FB284D1E54205527 /* highlights.rs */,
+				44B9726A7B1CC11DDBBAAC4B /* local_asr.rs */,
 				E78FBB9EBAF5858E3A0BB5EC /* media_kind.rs */,
 				A4745C607647C457546B30CF /* mod.rs */,
 				6D0A26B8137D8146B4BEEF72 /* ocr.rs */,
@@ -206,7 +252,9 @@
 				B92E36528DDA3661AB5250EB /* rag.rs */,
 				3229471B21A12F50D64DDC12 /* retrieval_eval.rs */,
 				7049CD751003CB2A92A4F253 /* search_terms.rs */,
+				FA98FEEF3478DD3B1EB207B2 /* sherpa_asr.rs */,
 				2A1C802311B91762FAE36447 /* silence.rs */,
+				6C8CBEBDDCF6BF262374192A /* slide_match.rs */,
 				D001F9B6B5902764627E74BA /* slides.rs */,
 				A38A959212824D05C0C07BCA /* subscriptions.rs */,
 				654E237CFF1EB4BBD2D61248 /* subtitle.rs */,
@@ -214,6 +262,7 @@
 				E01F542A5DABDD39349F6A92 /* translate.rs */,
 				90049C97D1F548FA2D8D7E90 /* volcengine_asr.rs */,
 				92D623BCDD4486B71EF0F4D3 /* volcengine_auc.rs */,
+				51D1239F0A8DAAFC72808AE0 /* whisper_cleanup.rs */,
 			);
 			path = pipeline;
 			sourceTree = "<group>";
@@ -230,6 +279,7 @@
 				3F0B586F1EE23B9760183758 /* courses.rs */,
 				6DC997CACC15EF1D6E18D8BF /* danmaku.rs */,
 				839D6BD7531FB4E2F6964DD1 /* export.rs */,
+				5EC998DFDA51237D7BB057CA /* feynman.rs */,
 				280A4D285008854E15B2FD55 /* mod.rs */,
 				03F0F1EBE1AAEF9CF5E8C548 /* note_history.rs */,
 				6C1F75C09E8838E085A125C1 /* note_images.rs */,
@@ -243,6 +293,7 @@
 				CF82B4FDD98B808DFB2361E2 /* subscriptions.rs */,
 				40F72876CBE465AEDFE5D867 /* sync.rs */,
 				6FB5D474D7F2076122D14B01 /* tools.rs */,
+				34322B3917BF98733415B429 /* transcode.rs */,
 				A97DBABFC852D7848DDEFE2A /* transcripts.rs */,
 				DA520912A4876407C5F394F6 /* translate.rs */,
 				54F7158007E928EA1DE59837 /* videos.rs */,
@@ -363,6 +414,7 @@
 				8AA12058D0C4786770AF44D9 /* Sources */,
 				DBBCA7F43F7AB6F1009CC48F /* Resources */,
 				FEF7190088B09805F79F6F2B /* Frameworks */,
+				7D201AB32AE876EAB3845A1C /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -534,6 +586,7 @@
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"\".\"",
+					"\"../..\"",
 				);
 				HEADER_SEARCH_PATHS = "$(inherited) $(SRCROOT)/vendor/dav1d/include";
 				INFOPLIST_FILE = "course-ai_iOS/Info.plist";
@@ -635,6 +688,7 @@
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"\".\"",
+					"\"../..\"",
 				);
 				HEADER_SEARCH_PATHS = "$(inherited) $(SRCROOT)/vendor/dav1d/include";
 				INFOPLIST_FILE = "course-ai_iOS/Info.plist";

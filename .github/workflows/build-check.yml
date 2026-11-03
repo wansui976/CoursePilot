@@ -142,10 +142,18 @@ jobs:
         run: |
           brew install meson ninja
           ./course-ai/scripts/build-dav1d-ios.sh
+      - name: Prepare sherpa-onnx xcframework
+        # 本地识别（SenseVoice / Qwen3-ASR）的 iOS 库：Xcode 规划构建时就要看到它。
+        run: ./course-ai/scripts/prepare-sherpa-ios.sh
       - name: Build for iOS Simulator
         # 模拟器构建用本机临时签名，不需要证书与描述文件。
+        # SHERPA_ONNX_LIB_DIR 是上面给 macOS 主机测试设的 macOS 库，iOS 交叉编译不能用；
+        # rust-cache 不缓存 sherpa-onnx-sys 下载的库，删掉它的构建记录让构建脚本重跑。
         working-directory: course-ai
-        run: pnpm tauri ios build --target aarch64-sim --debug --ci
+        run: |
+          unset SHERPA_ONNX_LIB_DIR
+          find src-tauri/target -type d -path '*/build/sherpa-onnx-sys-*' -prune -exec rm -rf {} + 2>/dev/null || true
+          pnpm tauri ios build --target aarch64-sim --debug --ci
 
   android:
     name: Android (debug APK)
@@ -182,8 +190,11 @@ jobs:
         working-directory: course-ai
         run: pnpm install --frozen-lockfile
       - name: Build debug APK
+        # rust-cache 不缓存 sherpa-onnx-sys 下载的库（本地识别用），删掉它的构建记录让构建脚本重跑、重新拷 .so。
         working-directory: course-ai
-        run: pnpm tauri android build --debug --apk --target aarch64 --ci
+        run: |
+          find src-tauri/target -type d -path '*/build/sherpa-onnx-sys-*' -prune -exec rm -rf {} + 2>/dev/null || true
+          pnpm tauri android build --debug --apk --target aarch64 --ci
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:

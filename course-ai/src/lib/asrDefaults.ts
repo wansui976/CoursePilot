@@ -7,7 +7,8 @@ export function defaultAsrBackend() {
 export function normalizeAsrBackend(value: string | null | undefined) {
   const trimmed = value?.trim();
   if (trimmed === "aliyun" || trimmed === "volcengine") return trimmed;
-  if (!isMobile() && trimmed === "whisper") return trimmed;
+  // 「本地识别」手机上也能选了：那里只有 SenseVoice / Qwen3-ASR，没有 Whisper。
+  if (trimmed === "whisper") return trimmed;
   return defaultAsrBackend();
 }
 

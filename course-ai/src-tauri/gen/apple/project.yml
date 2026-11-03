@@ -52,8 +52,10 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleShortVersionString: 0.1.4
-        CFBundleVersion: "0.1.4"
+        # 版本号由 tauri ios build 按 tauri.conf.json 写回 Info.plist；这里跟着当前版本，免得重新生成工程时倒退。
+        CFBundleShortVersionString: 0.3.8
+        CFBundleVersion: "0.3.8"
+        NSMicrophoneUsageDescription: 费曼复述时录下你讲的话，转成文字后和课程内容对照
         NSLocalNetworkUsageDescription: 需要访问本地开发服务器以加载课程库界面
         NSBonjourServices:
           - _http._tcp
@@ -97,6 +99,10 @@ targets:
     dependencies:
       - framework: libapp.a
         embed: false
+      # sherpa-onnx（本地中文识别）：动态 framework，要嵌进 app 并签名。由 scripts/prepare-sherpa-ios.sh 准备。
+      - framework: ../../sherpa-onnx.xcframework
+        embed: true
+        codeSign: true
       - sdk: CoreGraphics.framework
       - sdk: CloudKit.framework
       - sdk: Metal.framework

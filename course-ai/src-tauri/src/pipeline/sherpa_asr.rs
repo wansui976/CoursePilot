@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use sherpa_onnx::{
-    OfflineRecognizer, OfflineRecognizerConfig, OfflineQwen3ASRModelConfig, OfflineSenseVoiceModelConfig,
-    SileroVadModelConfig, VadModelConfig, VoiceActivityDetector, Wave,
+    LinearResampler, OfflineRecognizer, OfflineRecognizerConfig, OfflineQwen3ASRModelConfig,
+    OfflineSenseVoiceModelConfig, SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
 };
 
 use super::asr::{Offsets, WhisperJson, WhisperSegment};
@@ -112,15 +112,8 @@ pub async fn transcribe(job: SherpaJob, progress: super::ai::Progress<'_>) -> Ap
 }
 
 fn transcribe_blocking(job: &SherpaJob, done: &AtomicU64, stop: &AtomicBool) -> AppResult<WhisperJson> {
-    let wave = Wave::read(&job.audio.to_string_lossy())
-        .ok_or_else(|| AppError::Pipeline(format!("读不了音频：{}", job.audio.display())))?;
-    if wave.sample_rate() != SAMPLE_RATE {
-        return Err(AppError::Pipeline(format!(
-            "本地识别要 16kHz 音频，拿到的是 {} Hz",
-            wave.sample_rate()
-        )));
-    }
-    let samples = wave.samples();
+    let samples = load_16k_mono(&job.audio, stop)?;
+    let samples = samples.as_slice();
     let started = std::time::Instant::now();
     let segments = speech_segments(&job.vad, samples, stop)?;
     let vad_s = started.elapsed().as_secs_f64();
@@ -140,7 +133,7 @@ fn transcribe_blocking(job: &SherpaJob, done: &AtomicU64, stop: &AtomicBool) -> 
             .iter()
             .map(|&(start, end)| {
                 let stream = recognizer.create_stream();
-                stream.accept_waveform(SAMPLE_RATE, &samples[start..end]);
+                stream.accept_waveform(SAMPLE_RATE, &to_f32(&samples[start..end]));
                 stream
             })
             .collect();
@@ -170,8 +163,65 @@ fn transcribe_blocking(job: &SherpaJob, done: &AtomicU64, stop: &AtomicBool) -> 
     Ok(WhisperJson { transcription: out })
 }
 
+fn to_f32(samples: &[i16]) -> Vec<f32> {
+    samples.iter().map(|&s| s as f32 / 32768.0).collect()
+}
+
+/// 读 WAV，混成单声道、重采样到 16kHz，存成 i16（一小时的课 115MB，存 f32 要翻倍——手机上要省着用）。
+/// 边读边转，不把原始文件整个读进内存：手机导出的 48kHz 立体声一小时就是 660MB。
+fn load_16k_mono(path: &Path, stop: &AtomicBool) -> AppResult<Vec<i16>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)
+        .map_err(|error| AppError::Pipeline(format!("读不了音频 {}：{error}", path.display())))?;
+    let file_len = file.metadata()?.len();
+    let mut head = vec![0u8; 64 * 1024];
+    let read = file.read(&mut head)?;
+    head.truncate(read);
+    let format = local_asr::parse_wav_header(&head, file_len).ok_or_else(|| {
+        AppError::Pipeline("本地识别只认 16 位或 32 位浮点的 PCM WAV，这份音频读不了".into())
+    })?;
+    let resampler = (format.sample_rate != SAMPLE_RATE as u32)
+        .then(|| LinearResampler::create(format.sample_rate as i32, SAMPLE_RATE))
+        .flatten();
+    if format.sample_rate != SAMPLE_RATE as u32 && resampler.is_none() {
+        return Err(AppError::Pipeline(format!("没法把 {} Hz 的音频重采样到 16kHz", format.sample_rate)));
+    }
+    file.seek(SeekFrom::Start(format.data_offset))?;
+    let mut reader = std::io::BufReader::new(file).take(format.data_len);
+    let estimate = format.data_len / format.block_align() as u64 * SAMPLE_RATE as u64 / format.sample_rate as u64;
+    let mut out: Vec<i16> = Vec::with_capacity(estimate as usize + SAMPLE_RATE as usize);
+    let mut push = |samples: &[f32]| {
+        out.extend(samples.iter().map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16));
+    };
+    // 一次读一秒左右，按整帧切。
+    let block = format.block_align() * format.sample_rate as usize;
+    let mut buf = vec![0u8; block];
+    let mut carry: Vec<u8> = Vec::new();
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            return Err(AppError::Pipeline("已取消".into()));
+        }
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        carry.extend_from_slice(&buf[..n]);
+        let whole = carry.len() / format.block_align() * format.block_align();
+        let mono = local_asr::frames_to_mono(&carry[..whole], &format);
+        carry.drain(..whole);
+        match &resampler {
+            Some(r) => push(&r.resample(&mono, false)),
+            None => push(&mono),
+        }
+    }
+    if let Some(r) = &resampler {
+        push(&r.resample(&[], true));
+    }
+    Ok(out)
+}
+
 /// silero VAD 切出语音段，返回采样点区间。
-fn speech_segments(vad_model: &Path, samples: &[f32], stop: &AtomicBool) -> AppResult<Vec<(usize, usize)>> {
+fn speech_segments(vad_model: &Path, samples: &[i16], stop: &AtomicBool) -> AppResult<Vec<(usize, usize)>> {
     let config = VadModelConfig {
         silero_vad: SileroVadModelConfig {
             model: Some(vad_model.to_string_lossy().into_owned()),
@@ -204,7 +254,7 @@ fn speech_segments(vad_model: &Path, samples: &[f32], stop: &AtomicBool) -> AppR
         if i % 1000 == 0 && stop.load(Ordering::SeqCst) {
             return Err(AppError::Pipeline("已取消".into()));
         }
-        vad.accept_waveform(window);
+        vad.accept_waveform(&to_f32(window));
         drain(&vad, &mut segments);
     }
     vad.flush();
@@ -310,6 +360,54 @@ mod tests {
         assert!(to_segments("<|zh|><|nospeech|>", &[], None, 0, 1_000).is_empty());
     }
 
+    fn write_wav(path: &Path, channels: u16, rate: u32, frames: usize, value: impl Fn(usize) -> i16) {
+        let mut data = Vec::with_capacity(frames * channels as usize * 2);
+        for i in 0..frames {
+            for _ in 0..channels {
+                data.extend_from_slice(&value(i).to_le_bytes());
+            }
+        }
+        let mut out = Vec::new();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&channels.to_le_bytes());
+        out.extend_from_slice(&rate.to_le_bytes());
+        out.extend_from_slice(&(rate * channels as u32 * 2).to_le_bytes());
+        out.extend_from_slice(&(channels * 2).to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&data);
+        std::fs::write(path, out).unwrap();
+    }
+
+    #[test]
+    fn phone_style_48k_stereo_comes_out_as_16k_mono_of_the_same_length() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audio.wav");
+        // 3 秒 440Hz 正弦，48kHz 立体声（手机原生桥导出的样子）。
+        write_wav(&path, 2, 48_000, 144_000, |i| {
+            ((i as f32 * 440.0 * std::f32::consts::TAU / 48_000.0).sin() * 16_000.0) as i16
+        });
+        let samples = load_16k_mono(&path, &AtomicBool::new(false)).unwrap();
+        assert!((samples.len() as i64 - 48_000).abs() < 400, "{}", samples.len());
+        let peak = samples.iter().map(|s| s.unsigned_abs()).max().unwrap();
+        assert!((14_000..18_000).contains(&peak), "峰值保住，没被混音或重采样削掉：{peak}");
+    }
+
+    #[test]
+    fn desktop_16k_mono_is_read_as_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audio.wav");
+        write_wav(&path, 1, 16_000, 1_000, |i| i as i16);
+        let samples = load_16k_mono(&path, &AtomicBool::new(false)).unwrap();
+        assert_eq!(samples.len(), 1_000);
+        assert_eq!(samples[999], 998); // 只有 i16 → f32 → i16 的舍入
+    }
+
     #[test]
     fn thread_count_stays_in_range() {
         assert!((2..=8).contains(&threads()));
@@ -340,6 +438,23 @@ mod tests {
             .status()
             .unwrap();
         assert!(status.success());
+
+        // 手机导出的是原采样率立体声：再转一份 48kHz 立体声，两种输入都要认得。
+        let stereo = work.path().join("stereo.wav");
+        let ffmpeg = crate::sidecar::resolve(&crate::sidecar::FFMPEG, None).unwrap();
+        assert!(std::process::Command::new(&ffmpeg)
+            .args(["-v", "error", "-y", "-i"]).arg(&wav)
+            .args(["-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le"]).arg(&stereo)
+            .status().unwrap().success());
+        let stereo_job = SherpaJob {
+            audio: stereo,
+            model: &local_asr::SENSE_VOICE,
+            model_dir: local_asr::model_dir(&app_data, &local_asr::SENSE_VOICE),
+            vad: local_asr::vad_path(&app_data),
+            language: Some("zh".into()),
+        };
+        let stereo_text: String = transcribe(stereo_job, None).await.unwrap().transcription.iter().map(|s| s.text.clone()).collect();
+        assert!(stereo_text.contains("梯度下降"), "{stereo_text}");
 
         let job = SherpaJob {
             audio: wav.clone(),

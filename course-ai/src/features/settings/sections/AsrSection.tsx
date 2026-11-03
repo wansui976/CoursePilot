@@ -58,7 +58,7 @@ export function AsrSection({ form }: { form: SettingsForm }) {
               value={asrBackend}
               onChange={(event) => void changeAsrBackend(event.target.value)}
             >
-              {!mobile && <option value="whisper">{t("settings.asr.localWhisper")}</option>}
+              <option value="whisper">{t("settings.asr.localWhisper")}</option>
               <option value="volcengine">{t("settings.asr.volcengine")}</option>
               <option value="aliyun">{t("settings.asr.aliyun")}</option>
             </Select>
@@ -126,12 +126,12 @@ export function AsrSection({ form }: { form: SettingsForm }) {
         </Row>
       </Group>
 
-      {!mobile && asrBackend === "whisper" && (
+      {asrBackend === "whisper" && (
         <Group header={t("settings.asr.whisperTitle")}>
           <Row
             label={t("settings.asr.defaultModel")}
             htmlFor="whisper-model"
-            hint={t("settings.asr.localModelHint")}
+            hint={t(mobile ? "settings.asr.localModelHintMobile" : "settings.asr.localModelHint")}
           >
             <div className="w-full sm:w-56">
               <Select
@@ -141,11 +141,16 @@ export function AsrSection({ form }: { form: SettingsForm }) {
               >
                 <option value="sensevoice">{t("settings.asr.senseVoice")}</option>
                 <option value="qwen3-asr">{t("settings.asr.qwen3Asr")}</option>
-                <option value="tiny">Whisper tiny</option>
-                <option value="base">Whisper base</option>
-                <option value="small">Whisper small</option>
-                <option value="medium">Whisper medium</option>
-                <option value="large-v3-turbo">Whisper large-v3-turbo</option>
+                {/* 手机上没有 whisper-cli。 */}
+                {!mobile && (
+                  <>
+                    <option value="tiny">Whisper tiny</option>
+                    <option value="base">Whisper base</option>
+                    <option value="small">Whisper small</option>
+                    <option value="medium">Whisper medium</option>
+                    <option value="large-v3-turbo">Whisper large-v3-turbo</option>
+                  </>
+                )}
               </Select>
             </div>
           </Row>

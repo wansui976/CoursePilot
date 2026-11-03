@@ -77,6 +77,10 @@ jobs:
           brew install meson ninja
           ./course-ai/scripts/build-dav1d-ios.sh
 
+      - name: Prepare sherpa-onnx xcframework
+        # 本地识别（SenseVoice / Qwen3-ASR）的 iOS 库：Xcode 规划构建时就要看到它。
+        run: ./course-ai/scripts/prepare-sherpa-ios.sh
+
       - name: Detect signing certificate
         env:
           APPLE_CERTIFICATE: "${{ secrets.APPLE_CERTIFICATE }}"
@@ -135,6 +139,8 @@ jobs:
         working-directory: course-ai
         shell: bash
         run: |
+          # 上面 macOS 侧车脚本设的是 macOS 版 sherpa-onnx 库，iOS 交叉编译不能用。
+          unset SHERPA_ONNX_LIB_DIR
           CI=true pnpm tauri ios build
           echo "IPA_SOURCE=course-ai/src-tauri/gen/apple/build/arm64/course-ai.ipa" >> "$GITHUB_ENV"
           echo "IPA_KIND=iOS" >> "$GITHUB_ENV"
@@ -145,6 +151,8 @@ jobs:
         if: env.IOS_SIGNED != 'true'
         shell: bash
         run: |
+          # 上面 macOS 侧车脚本设的是 macOS 版 sherpa-onnx 库，iOS 交叉编译不能用。
+          unset SHERPA_ONNX_LIB_DIR
           (cd course-ai && CI=true pnpm tauri ios build --no-sign --ci)
           ipa=$(find course-ai/src-tauri/gen/apple/build -name "*.ipa" -type f | head -n 1)
           if [[ -z "$ipa" ]]; then

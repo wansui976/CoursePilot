@@ -117,26 +117,23 @@ pub async fn prepare_for_asr(
     }
 }
 
-#[cfg(target_os = "android")]
+/// 手机上的本地识别（SenseVoice / Qwen3-ASR）：原生桥导出 WAV。iOS 导出时就是 16kHz 单声道；
+/// Android 保留原采样率和声道数，读的时候再混音、重采样（sherpa_asr::load_16k_mono）。
+#[cfg(any(target_os = "android", target_os = "ios"))]
 async fn prepare_whisper_audio(
-    _app: &tauri::AppHandle,
-    _video: &Path,
-    _out_dir: &Path,
+    app: &tauri::AppHandle,
+    video: &Path,
+    out_dir: &Path,
 ) -> AppResult<PreparedAudio> {
-    Err(AppError::Config(
-        "Android 暂不支持本地 Whisper，请在设置里选择火山或阿里云云端 ASR".into(),
-    ))
-}
-
-#[cfg(target_os = "ios")]
-async fn prepare_whisper_audio(
-    _app: &tauri::AppHandle,
-    _video: &Path,
-    _out_dir: &Path,
-) -> AppResult<PreparedAudio> {
-    Err(AppError::Config(
-        "iOS 暂不支持本地 Whisper，请在设置里选择阿里云云端 ASR".into(),
-    ))
+    let exported = crate::mobile_files::export_audio_for_asr(
+        app.clone(),
+        video.to_string_lossy().to_string(),
+        out_dir.to_string_lossy().to_string(),
+        "wav".to_string(),
+    )
+    .await
+    .map_err(AppError::Pipeline)?;
+    Ok(PreparedAudio::new(exported.path, exported.mime, exported.format))
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

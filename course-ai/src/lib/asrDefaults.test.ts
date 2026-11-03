@@ -18,7 +18,7 @@ describe("ASR defaults", () => {
     expect(asrBackendOrDefault(null)).toBe("aliyun");
   });
 
-  it("defaults iOS to Aliyun cloud ASR but preserves Volcengine", async () => {
+  it("defaults iOS to Aliyun cloud ASR but keeps an explicit Volcengine or on-device choice", async () => {
     vi.stubGlobal("navigator", { userAgent: "iPhone" });
 
     const { asrBackendOrDefault, defaultAsrBackend } = await import("./asrDefaults");
@@ -26,7 +26,8 @@ describe("ASR defaults", () => {
     expect(defaultAsrBackend()).toBe("aliyun");
     expect(asrBackendOrDefault(undefined)).toBe("aliyun");
     expect(asrBackendOrDefault("volcengine")).toBe("volcengine");
-    expect(asrBackendOrDefault("whisper")).toBe("aliyun");
+    // 手机上也能选本地识别了（SenseVoice / Qwen3-ASR），选了就要留着。
+    expect(asrBackendOrDefault("whisper")).toBe("whisper");
   });
 
   it("keeps desktop default on local Whisper", async () => {

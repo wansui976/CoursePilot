@@ -793,7 +793,7 @@
       "volcengine": "火山录音文件识别",
       "aliyun": "阿里云 DashScope 录音文件识别",
       "language": "识别语言",
-      "languageHintMobile": "移动端使用云端 ASR，自动识别语言",
+      "languageHintMobile": "对本地识别与阿里云 paraformer-v2 / fun-asr 生效；火山及通义千问 ASR 为自动识别",
       "languageHintDesktop": "对本地识别与阿里云 paraformer-v2 / fun-asr 生效；火山及通义千问 ASR 为自动识别",
       "autoDetect": "自动检测",
       "zh": "中文",
@@ -813,6 +813,7 @@
       "defaultModel": "识别模型",
       "senseVoice": "SenseVoice（中文推荐）",
       "qwen3Asr": "Qwen3-ASR（中文高精度）",
+      "localModelHintMobile": "手机上推荐 SenseVoice：模型 240MB，识别时约占 350MB 内存，一小时的课几分钟转完，不联网、不花钱。Qwen3-ASR 更准，但要约 2.5GB 内存，只建议在内存大的 iPad 上用。",
       "localModelHint": "中文课用 SenseVoice：又快又准。Qwen3-ASR 更准一些，但慢 4–5 倍、要 4GB 内存。英文或中英混杂多的课用 Whisper large-v3-turbo。选的模型没下载时，会先用已下载的其他模型。",
       "modelDownload": "模型下载",
       "volcengineTitle": "火山引擎",
@@ -1723,7 +1724,7 @@
       "asr": {
         "title": "语音识别：火山引擎或阿里云，二选一",
         "body": "不配的话会用本地识别（中文课推荐下载 SenseVoice）；云端识别不占电脑资源，手机上只能用云端。",
-        "bodyMobile": "手机上只能用云端识别，配好其中一个才能转写字幕。",
+        "bodyMobile": "不配的话，可以在「语音识别」里选「本地识别」并下载 SenseVoice（240MB，不联网也能转写）；云端识别不占手机电量。",
         "volc": "火山引擎：开通 <link>录音文件识别大模型版</link>，拿到 App ID 和 Access Token；「识别后端」选「火山录音文件识别」，填好后点「保存火山 ASR 凭证」",
         "aliyun": "阿里云：在 <link>百炼控制台</link> 开通语音识别，创建百炼 API Key（<code>sk-</code> 开头）；「识别后端」选「阿里云 DashScope 录音文件识别」，填好后点「保存百炼 API Key」"
       },
