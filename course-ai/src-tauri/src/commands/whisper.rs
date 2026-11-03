@@ -219,7 +219,13 @@ async fn download_sherpa_model(
     Ok(())
 }
 
-/// 依次下载这些文件；每个文件按顺序试它的下载源，一个源失败就换下一个。
+/// 换着下载源试几轮。慢网上一个源下到一半断掉很常见：每次都从已经下好的地方接着下，
+/// 所以多试几轮的代价很小。
+const DOWNLOAD_ROUNDS: usize = 3;
+/// 这么久一个字节都没收到就当连接卡死了，断开换下一个源（已下的部分留着续传）。
+const STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// 依次下载这些文件。每个文件轮流试它的下载源，失败就换下一个、断点续传，最多 DOWNLOAD_ROUNDS 轮。
 async fn download_files(
     client: &reqwest::Client,
     label: &str,
@@ -230,15 +236,17 @@ async fn download_files(
     for (path, file) in files {
         let mut last_error = String::new();
         let mut ok = false;
-        for url in file.urls {
-            match fetch_verified(client, url, &path, file, |got| progress(finished + got)).await {
-                Ok(()) => {
-                    ok = true;
-                    break;
-                }
-                Err(error) => {
-                    tracing::warn!(%url, %error, "模型文件下载失败，换下一个源");
-                    last_error = error.to_string();
+        'rounds: for _ in 0..DOWNLOAD_ROUNDS {
+            for url in file.urls {
+                match fetch_verified(client, url, &path, file, |got| progress(finished + got)).await {
+                    Ok(()) => {
+                        ok = true;
+                        break 'rounds;
+                    }
+                    Err(error) => {
+                        tracing::warn!(%url, %error, "模型文件下载中断，换下一个源接着下");
+                        last_error = error.to_string();
+                    }
                 }
             }
         }
@@ -254,7 +262,15 @@ async fn download_files(
     Ok(())
 }
 
-/// 从一个源下一个文件到 `<path>.part`，大小和 SHA-256 都对上才改名成 `path`。
+fn part_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".part");
+    path.with_file_name(name)
+}
+
+/// 从一个源把文件下到 `<path>.part`：已经有一截就用 Range 接着下（各个源的内容按哈希核对过是同一份，
+/// 换源续传也没问题）。下满了核对大小和 SHA-256，对上才改名成 `path`；对不上说明这份是坏的，删掉重来。
+/// 中途出错（断线、卡住）不删已下的部分，留给下一次续传。
 async fn fetch_verified(
     client: &reqwest::Client,
     url: &str,
@@ -263,40 +279,79 @@ async fn fetch_verified(
     progress: impl Fn(u64),
 ) -> AppResult<()> {
     use sha2::{Digest, Sha256};
+    use tokio::io::AsyncReadExt;
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|error| AppError::Other(error.to_string()))?
-        .error_for_status()
-        .map_err(|error| AppError::Other(error.to_string()))?;
-    let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(".part");
-    let tmp = path.with_file_name(name);
-    let mut out = tokio::fs::File::create(&tmp).await?;
+    let tmp = part_path(path);
+
+    // 续传前把已下的部分喂进哈希。
     let mut hasher = Sha256::new();
-    let mut received = 0_u64;
-    let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let bytes = chunk.map_err(|error| AppError::Other(error.to_string()))?;
-        hasher.update(&bytes);
-        out.write_all(&bytes).await?;
-        received += bytes.len() as u64;
-        if received > file.size {
-            break;
+    let mut have = 0_u64;
+    if let Ok(mut existing) = tokio::fs::File::open(&tmp).await {
+        let mut buf = vec![0u8; 1 << 20];
+        loop {
+            let n = existing.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+            have += n as u64;
         }
-        progress(received);
     }
-    out.flush().await?;
-    drop(out);
+    if have > file.size {
+        tokio::fs::remove_file(&tmp).await?;
+        hasher = Sha256::new();
+        have = 0;
+    }
+
+    if have < file.size {
+        let mut request = client.get(url);
+        if have > 0 {
+            request = request.header(reqwest::header::RANGE, format!("bytes={have}-"));
+        }
+        let resp = request
+            .send()
+            .await
+            .map_err(|error| AppError::Other(error.to_string()))?
+            .error_for_status()
+            .map_err(|error| AppError::Other(error.to_string()))?;
+        let mut out = if have > 0 && resp.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+            tokio::fs::OpenOptions::new().append(true).open(&tmp).await?
+        } else {
+            // 没要 Range，或者这个源不支持 Range、把整份又发了一遍：从头写。
+            hasher = Sha256::new();
+            have = 0;
+            tokio::fs::File::create(&tmp).await?
+        };
+        progress(have);
+        let mut stream = resp.bytes_stream();
+        loop {
+            let next = tokio::time::timeout(STALL_TIMEOUT, stream.next())
+                .await
+                .map_err(|_| AppError::Other(format!("{} 下载卡住超过 {} 秒", file.path, STALL_TIMEOUT.as_secs())))?;
+            let Some(chunk) = next else { break };
+            let bytes = chunk.map_err(|error| AppError::Other(error.to_string()))?;
+            hasher.update(&bytes);
+            out.write_all(&bytes).await?;
+            have += bytes.len() as u64;
+            if have > file.size {
+                break;
+            }
+            progress(have);
+        }
+        out.flush().await?;
+        drop(out);
+        if have < file.size {
+            return Err(AppError::Other(format!("{} 只下到 {have} / {} 字节，连接就断了", file.path, file.size)));
+        }
+    }
+
     let digest = format!("{:x}", hasher.finalize());
-    if received != file.size || digest != file.sha256 {
+    if have != file.size || digest != file.sha256 {
         let _ = tokio::fs::remove_file(&tmp).await;
         return Err(AppError::Other(format!(
-            "{} 校验不通过（大小 {received}，期望 {}）",
+            "{} 校验不通过（大小 {have}，期望 {}）",
             file.path, file.size
         )));
     }
@@ -331,20 +386,45 @@ mod tests {
         );
     }
 
-    /// 本地起一个只会回固定内容的 HTTP 服务：路径以 /404 开头回 404，其余回 `body`。
-    async fn serve(body: &'static [u8]) -> String {
+    /// 本地起一个 HTTP 服务回 `body`：路径 /404… 回 404；/half… 声称整份、只发一半就断开；
+    /// 其余照 Range 头回 206（没有 Range 回 200）。收到的每个 Range 头记在返回的列表里。
+    async fn serve(body: &'static [u8]) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let ranges = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
+        let seen = ranges.clone();
         tokio::spawn(async move {
             loop {
                 let Ok((mut socket, _)) = listener.accept().await else { return };
+                let seen = seen.clone();
                 tokio::spawn(async move {
-                    let mut buf = [0u8; 2048];
+                    let mut buf = [0u8; 4096];
                     let n = socket.read(&mut buf).await.unwrap_or(0);
-                    let request = String::from_utf8_lossy(&buf[..n]);
+                    let request = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let from = request
+                        .lines()
+                        .find_map(|line| line.to_ascii_lowercase().strip_prefix("range: bytes=").map(str::to_owned))
+                        .map(|range| {
+                            seen.lock().unwrap().push(range.clone());
+                            range.trim_end_matches('-').trim().parse::<usize>().unwrap()
+                        });
                     let reply = if request.starts_with("GET /404") {
                         b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+                    } else if request.starts_with("GET /half") {
+                        let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+                        r.extend_from_slice(&body[..body.len() / 2]);
+                        r
+                    } else if let Some(from) = from {
+                        let mut r = format!(
+                            "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {from}-{}/{}\r\nConnection: close\r\n\r\n",
+                            body.len() - from,
+                            body.len() - 1,
+                            body.len()
+                        )
+                        .into_bytes();
+                        r.extend_from_slice(&body[from..]);
+                        r
                     } else {
                         let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
                         r.extend_from_slice(body);
@@ -354,7 +434,7 @@ mod tests {
                 });
             }
         });
-        format!("http://{addr}")
+        (format!("http://{addr}"), ranges)
     }
 
     fn leak_file(path: &'static str, body: &[u8], urls: Vec<String>) -> &'static local_asr::ModelFile {
@@ -370,7 +450,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failing_source_falls_through_to_the_next_and_the_file_lands_verified() {
-        let base = serve(b"model bytes").await;
+        let (base, _) = serve(b"model bytes").await;
         let file = leak_file("m/model.onnx", b"model bytes", vec![format!("{base}/404/a"), format!("{base}/ok/a")]);
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("m/model.onnx");
@@ -385,7 +465,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_mirror_serving_different_bytes_is_rejected_and_leaves_nothing_behind() {
-        let base = serve(b"tampered!!!").await;
+        let (base, _) = serve(b"tampered!!!").await;
         let file = leak_file("model.onnx", b"model bytes", vec![format!("{base}/ok/a")]);
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("model.onnx");
@@ -408,6 +488,36 @@ mod tests {
         download_files(&reqwest::Client::new(), "SenseVoice", missing, |_| {}).await.unwrap();
         assert!(local_asr::is_installed(dir.path(), &local_asr::SENSE_VOICE));
         eprintln!("下载 + 校验用时 {:.0}s", started.elapsed().as_secs_f64());
+    }
+
+    #[tokio::test]
+    async fn a_dropped_connection_resumes_from_where_it_stopped_on_the_next_source() {
+        const BODY: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+        let (base, ranges) = serve(BODY).await;
+        // 第一个源发到一半就断；第二个源应该带着 Range 从断点接着下，而不是从头。
+        let file = leak_file("model.onnx", BODY, vec![format!("{base}/half/a"), format!("{base}/ok/a")]);
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("model.onnx");
+        download_files(&reqwest::Client::new(), "测试模型", vec![(target.clone(), file)], |_| {})
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), BODY);
+        assert_eq!(*ranges.lock().unwrap(), vec![format!("{}-", BODY.len() / 2)]);
+    }
+
+    #[tokio::test]
+    async fn a_leftover_partial_file_is_continued_not_restarted() {
+        const BODY: &[u8] = b"the whole model file";
+        let (base, ranges) = serve(BODY).await;
+        let file = leak_file("model.onnx", BODY, vec![format!("{base}/ok/a")]);
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("model.onnx");
+        std::fs::write(part_path(&target), &BODY[..8]).unwrap();
+        download_files(&reqwest::Client::new(), "测试模型", vec![(target.clone(), file)], |_| {})
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), BODY);
+        assert_eq!(*ranges.lock().unwrap(), vec!["8-".to_string()]);
     }
 
     #[test]
