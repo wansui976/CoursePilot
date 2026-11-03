@@ -820,6 +820,7 @@
       "appIdPlaceholder": "控制台「应用」的 App ID",
       "saveVolcCreds": "保存火山 ASR 凭证",
       "hotwords": "热词",
+      "localHotwordsHint": "Qwen3-ASR 会优先认出这些词（和火山引擎共用一份）。只写课里真会讲到的术语——写了没讲的词，模型可能会往文稿里硬塞。",
       "hotwordsHint": "一行一个（也可用逗号/顿号分隔），最多 5000 词；专有名词、人名、术语",
       "hotwordsPlaceholder": "勒沙特列原理\n焓变\n范德华力",
       "context": "上下文",

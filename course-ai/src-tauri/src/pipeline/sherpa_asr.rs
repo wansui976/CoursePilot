@@ -68,6 +68,8 @@ pub struct SherpaJob {
     pub vad: PathBuf,
     /// 设置里的识别语言（zh / en / auto…）。
     pub language: Option<String>,
+    /// 热词（ASCII 逗号分隔，见 local_asr::qwen3_hotwords）。只有 Qwen3-ASR 用得上，SenseVoice 不支持。
+    pub hotwords: Option<String>,
 }
 
 /// 丢弃时置位：异步那边被取消，识别线程就在下一段之前停下。
@@ -281,14 +283,14 @@ fn recognizer_config(job: &SherpaJob) -> OfflineRecognizerConfig {
         }
         SherpaKind::Qwen3Asr => {
             config.feat_config.feature_dim = 128;
-            config.model_config.qwen3_asr = qwen3_config(dir);
+            config.model_config.qwen3_asr = qwen3_config(dir, job.hotwords.clone());
         }
     }
     config
 }
 
 /// 默认的 max_total_len=512 / max_new_tokens=128 会把 20 秒以上的段悄悄截掉（sherpa-onnx #4034），放宽。
-fn qwen3_config(dir: &Path) -> OfflineQwen3ASRModelConfig {
+fn qwen3_config(dir: &Path, hotwords: Option<String>) -> OfflineQwen3ASRModelConfig {
     let path = |name: &str| Some(dir.join(name).to_string_lossy().into_owned());
     OfflineQwen3ASRModelConfig {
         conv_frontend: path("conv_frontend.onnx"),
@@ -297,6 +299,7 @@ fn qwen3_config(dir: &Path) -> OfflineQwen3ASRModelConfig {
         tokenizer: path("tokenizer"),
         max_total_len: 2048,
         max_new_tokens: 512,
+        hotwords,
         ..Default::default()
     }
 }
@@ -452,6 +455,7 @@ mod tests {
             model_dir: local_asr::model_dir(&app_data, &local_asr::SENSE_VOICE),
             vad: local_asr::vad_path(&app_data),
             language: Some("zh".into()),
+            hotwords: None,
         };
         let stereo_text: String = transcribe(stereo_job, None).await.unwrap().transcription.iter().map(|s| s.text.clone()).collect();
         assert!(stereo_text.contains("梯度下降"), "{stereo_text}");
@@ -462,6 +466,7 @@ mod tests {
             model_dir: local_asr::model_dir(&app_data, &local_asr::SENSE_VOICE),
             vad: local_asr::vad_path(&app_data),
             language: Some("zh".into()),
+            hotwords: None,
         };
         let json = transcribe(job, None).await.unwrap();
         let text: String = json.transcription.iter().map(|s| s.text.as_str()).collect();
@@ -489,6 +494,7 @@ mod tests {
             model_dir: local_asr::model_dir(&app_data, model),
             vad: local_asr::vad_path(&app_data),
             language: Some("zh".into()),
+            hotwords: None,
         };
         let started = std::time::Instant::now();
         let json = transcribe(job, None).await.unwrap();

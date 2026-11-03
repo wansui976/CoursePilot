@@ -23,6 +23,7 @@ export function AsrSection({ form }: { form: SettingsForm }) {
     volcengineSavedErr,
     volcengineHotwords,
     setVolcengineHotwords,
+    saveSetting,
     volcengineContext,
     setVolcengineContext,
     volcengineCtxSaved,
@@ -154,6 +155,22 @@ export function AsrSection({ form }: { form: SettingsForm }) {
               </Select>
             </div>
           </Row>
+          {model === "qwen3-asr" && (
+            <StackRow
+              label={t("settings.asr.hotwords")}
+              htmlFor="local-asr-hotwords"
+              hint={t("settings.asr.localHotwordsHint")}
+            >
+              <textarea
+                id="local-asr-hotwords"
+                className={`${FIELD} min-h-[72px] resize-y`}
+                value={volcengineHotwords}
+                placeholder={t("settings.asr.hotwordsPlaceholder")}
+                onChange={(event) => setVolcengineHotwords(event.target.value)}
+                onBlur={() => void saveSetting("volcengine_asr_hotwords", volcengineHotwords.trim())}
+              />
+            </StackRow>
+          )}
           <StackRow label={t("settings.asr.modelDownload")}>
             <WhisperModelsPanel />
           </StackRow>

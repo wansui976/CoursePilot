@@ -181,6 +181,7 @@ async fn run_local_model(
     model: &LocalModel,
     audio: &Path,
     language: &str,
+    hotwords: &[String],
     progress: ai::Progress<'_>,
 ) -> AppResult<asr::WhisperJson> {
     match model {
@@ -192,6 +193,7 @@ async fn run_local_model(
                 model_dir: local_asr::model_dir(app_data, model),
                 vad: local_asr::vad_path(app_data),
                 language: Some(language.to_string()),
+                hotwords: local_asr::qwen3_hotwords(hotwords),
             };
             sherpa_asr::transcribe(job, progress).await
         }
@@ -251,7 +253,8 @@ pub async fn transcribe_clip(
             let model = select_local_model(&app_data, &model_id, &lang).ok_or_else(|| {
                 AppError::Config("还没有可用的本地识别模型（设置 → 语音识别 下载一个）".into())
             })?;
-            run_local_model(&app_data, &model, &audio_path, &lang, None).await?
+            let hotwords = split_terms(&setting(db, "volcengine_asr_hotwords").await?.unwrap_or_default());
+            run_local_model(&app_data, &model, &audio_path, &lang, &hotwords, None).await?
         }
         AsrBackend::Volcengine => {
             let app_id = setting(db, "volcengine_asr_app_id").await?.unwrap_or_default();
@@ -579,7 +582,9 @@ async fn run_all(
                     );
                 }
             };
-            run_local_model(&app_data, &model, &audio_path, &lang, Some(&sink)).await
+            // 用户的热词表（和火山引擎共用一份）：只有 Qwen3-ASR 用得上。
+            let hotwords = split_terms(&setting(&db, "volcengine_asr_hotwords").await?.unwrap_or_default());
+            run_local_model(&app_data, &model, &audio_path, &lang, &hotwords, Some(&sink)).await
         }
         AsrBackend::Volcengine => {
             let app_id = sqlx::query_scalar::<_, String>(

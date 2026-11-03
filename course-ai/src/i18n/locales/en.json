@@ -821,6 +821,7 @@
       "appIdPlaceholder": "Console App ID",
       "saveVolcCreds": "Save Volcengine ASR credentials",
       "hotwords": "Hotwords",
+      "localHotwordsHint": "Qwen3-ASR favors these terms (shared with Volcengine). Only list terms the lectures actually use — words that never come up may get forced into the transcript.",
       "hotwordsHint": "One per line (or comma-separated), max 5000; proper nouns, names, terms",
       "hotwordsPlaceholder": "Le Chatelier's principle\nEnthalpy\nVan der Waals force",
       "context": "Context",

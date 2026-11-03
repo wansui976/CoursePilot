@@ -214,6 +214,35 @@ pub fn missing_files(app_data: &Path, model: &'static SherpaModel) -> Vec<(PathB
     missing
 }
 
+/// 交给 Qwen3-ASR 的热词：最多这么多个、拼起来最多这么长。热词进的是模型的提示，
+/// 太长会挤占生成预算；也别贪多——实测给了课里没讲的词，模型会往文稿里硬塞（docs/asr-benchmark）。
+const MAX_HOTWORDS: usize = 100;
+const MAX_HOTWORDS_CHARS: usize = 1000;
+
+/// 用户的热词表 → Qwen3-ASR 要的格式（ASCII 逗号分隔）。词里的逗号会把一个词拆成两个，去掉；
+/// 超出上限的丢弃（保留靠前的，用户通常把最要紧的写在前面）。没有热词返回 None。
+pub fn qwen3_hotwords(terms: &[String]) -> Option<String> {
+    let mut out = String::new();
+    let mut count = 0;
+    for term in terms {
+        let term: String = term.chars().filter(|c| !matches!(c, ',' | '，')).collect();
+        let term = term.trim();
+        if term.is_empty() {
+            continue;
+        }
+        let extra = term.chars().count() + usize::from(!out.is_empty());
+        if count == MAX_HOTWORDS || out.chars().count() + extra > MAX_HOTWORDS_CHARS {
+            break;
+        }
+        if !out.is_empty() {
+            out.push(',');
+        }
+        out.push_str(term);
+        count += 1;
+    }
+    (!out.is_empty()).then_some(out)
+}
+
 // ---------------------------------------------------------------------------
 // WAV：桌面上 ffmpeg 已经转好 16kHz 单声道；手机上原生桥导出的是视频原本的采样率和声道数
 // （44.1 / 48kHz 立体声居多），读的时候再混成单声道、重采样。这里只管解析，重采样在 sherpa_asr。
@@ -520,6 +549,17 @@ mod tests {
         bytes[34] = 24; // 24 位
         assert!(parse_wav_header(&bytes, bytes.len() as u64).is_none());
         assert!(parse_wav_header(b"not a wav file at all", 21).is_none());
+    }
+
+    #[test]
+    fn hotwords_are_joined_with_ascii_commas_and_capped() {
+        let terms: Vec<String> = ["勒沙特列原理", " 焓变 ", "", "a,b"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(qwen3_hotwords(&terms).as_deref(), Some("勒沙特列原理,焓变,ab"));
+        assert_eq!(qwen3_hotwords(&[]), None);
+        let many: Vec<String> = (0..500).map(|i| format!("术语{i}")).collect();
+        let joined = qwen3_hotwords(&many).unwrap();
+        assert_eq!(joined.split(',').count(), MAX_HOTWORDS);
+        assert!(joined.chars().count() <= MAX_HOTWORDS_CHARS);
     }
 
     #[test]
