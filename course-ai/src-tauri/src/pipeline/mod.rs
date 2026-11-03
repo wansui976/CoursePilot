@@ -17,11 +17,14 @@ pub mod explain;
 pub mod feynman;
 pub mod handout;
 pub mod highlights;
+pub mod local_asr;
 pub mod media_kind;
 pub mod ocr;
 pub mod playable;
 pub mod rag;
 pub mod search_terms;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod sherpa_asr;
 pub mod silence;
 pub mod slide_match;
 pub mod slides;
@@ -122,15 +125,83 @@ fn volcengine_upload_mode_for_os(os: &str) -> VolcengineUploadMode {
     }
 }
 
-fn select_whisper_model(app_data: &Path, preferred_id: &str) -> Option<(String, PathBuf)> {
-    let preferred_path = crate::commands::whisper::model_path(app_data, preferred_id);
-    if crate::commands::whisper::is_model_available(&preferred_path) {
-        return Some((preferred_id.to_string(), preferred_path));
+/// 本地识别这次用哪个模型。
+#[derive(Debug)]
+pub(crate) enum LocalModel {
+    Whisper { id: String, path: PathBuf },
+    Sherpa(&'static local_asr::SherpaModel),
+}
+
+impl LocalModel {
+    fn id(&self) -> &str {
+        match self {
+            LocalModel::Whisper { id, .. } => id,
+            LocalModel::Sherpa(model) => model.id,
+        }
     }
-    crate::commands::whisper::MODELS.iter().find_map(|model| {
-        let path = crate::commands::whisper::model_path(app_data, model.id);
-        crate::commands::whisper::is_model_available(&path).then(|| (model.id.to_string(), path))
-    })
+}
+
+/// 没选过模型时的默认值：中文讲课上 SenseVoice 比 Whisper large-v3-turbo 准一倍、快三倍
+/// （docs/asr-benchmark）。没装它也不要紧——下面会退到已经装好的任何一个模型。
+pub(crate) const DEFAULT_LOCAL_MODEL: &str = "sensevoice";
+
+/// 选中的装好了、也认得这门课的语言就用它；否则退到别的已装模型：选的是 sherpa 模型就先找
+/// 另一个 sherpa 模型，选的是 Whisper 就先找别的 Whisper（与原来的回退一致），最后再跨过去。
+fn select_local_model(app_data: &Path, preferred_id: &str, language: &str) -> Option<LocalModel> {
+    let sherpa = |model: &'static local_asr::SherpaModel| {
+        (local_asr::is_installed(app_data, model) && model.supports_language(language))
+            .then_some(LocalModel::Sherpa(model))
+    };
+    let whisper = |id: &str| {
+        let path = crate::commands::whisper::model_path(app_data, id);
+        crate::commands::whisper::is_model_available(&path).then(|| LocalModel::Whisper {
+            id: id.to_string(),
+            path,
+        })
+    };
+    let preferred = match local_asr::find(preferred_id) {
+        Some(model) => sherpa(model),
+        None => whisper(preferred_id),
+    };
+    if preferred.is_some() {
+        return preferred;
+    }
+    let any_sherpa = || local_asr::MODELS.iter().copied().find_map(sherpa);
+    let any_whisper = || crate::commands::whisper::MODELS.iter().find_map(|model| whisper(model.id));
+    if local_asr::find(preferred_id).is_some() {
+        any_sherpa().or_else(any_whisper)
+    } else {
+        any_whisper().or_else(any_sherpa)
+    }
+}
+
+/// 用选好的本地模型识别一段 16kHz 单声道 WAV。
+async fn run_local_model(
+    app_data: &Path,
+    model: &LocalModel,
+    audio: &Path,
+    language: &str,
+    progress: ai::Progress<'_>,
+) -> AppResult<asr::WhisperJson> {
+    match model {
+        LocalModel::Whisper { path, .. } => asr::run_whisper(audio, path, Some(language), progress).await,
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        LocalModel::Sherpa(model) => {
+            let job = sherpa_asr::SherpaJob {
+                audio: audio.to_path_buf(),
+                model,
+                model_dir: local_asr::model_dir(app_data, model),
+                vad: local_asr::vad_path(app_data),
+                language: Some(language.to_string()),
+            };
+            sherpa_asr::transcribe(job, progress).await
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        LocalModel::Sherpa(_) => {
+            let _ = app_data;
+            Err(AppError::Config("手机上暂不支持本地识别，请在设置 → 语音识别里选云端引擎".into()))
+        }
+    }
 }
 
 fn whisper_language_or_default(value: Option<String>) -> String {
@@ -184,13 +255,13 @@ pub async fn transcribe_clip(
         AsrBackend::Whisper => {
             let model_id = setting(db, "whisper_model")
                 .await?
-                .unwrap_or_else(|| "large-v3-turbo".into());
+                .unwrap_or_else(|| DEFAULT_LOCAL_MODEL.into());
             let app_data = app.path().app_data_dir().map_err(|e| AppError::Config(format!("app_data_dir: {e}")))?;
-            let (_, model_path) = select_whisper_model(&app_data, &model_id).ok_or_else(|| {
-                AppError::Config("还没有可用的 Whisper 模型（设置 → 语音识别 下载一个）".into())
-            })?;
             let lang = whisper_language_or_default(setting(db, "asr_language").await?);
-            asr::run_whisper(&audio_path, &model_path, Some(&lang), None).await?
+            let model = select_local_model(&app_data, &model_id, &lang).ok_or_else(|| {
+                AppError::Config("还没有可用的本地识别模型（设置 → 语音识别 下载一个）".into())
+            })?;
+            run_local_model(&app_data, &model, &audio_path, &lang, None).await?
         }
         AsrBackend::Volcengine => {
             let app_id = setting(db, "volcengine_asr_app_id").await?.unwrap_or_default();
@@ -467,32 +538,7 @@ async fn run_all(
                 sqlx::query_scalar("SELECT value FROM settings WHERE key='whisper_model'")
                     .fetch_optional(&db.pool)
                     .await?
-                    .unwrap_or_else(|| "large-v3-turbo".into());
-            let app_data = app.path().app_data_dir().expect("app_data_dir");
-            let Some((active_model_id, model_path)) = select_whisper_model(&app_data, &model_id)
-            else {
-                return fail_asr(
-                    &app,
-                    &db,
-                    &video_id,
-                    &asr_job.id,
-                    "no valid whisper model installed. Open Settings -> Whisper to download one."
-                        .to_string(),
-                )
-                .await;
-            };
-            if active_model_id != model_id {
-                emit_running_progress(
-                    &app,
-                    &db,
-                    &video_id,
-                    &asr_job.id,
-                    0.08,
-                    &format!("使用可用模型：{active_model_id}"),
-                )
-                .await?;
-            }
-
+                    .unwrap_or_else(|| DEFAULT_LOCAL_MODEL.into());
             let lang = whisper_language_or_default(
                 sqlx::query_scalar::<_, String>(
                     "SELECT value FROM settings WHERE key='asr_language'",
@@ -500,9 +546,32 @@ async fn run_all(
                 .fetch_optional(&db.pool)
                 .await?,
             );
-            let message = format!("Whisper 识别中（{lang}）");
+            let app_data = app.path().app_data_dir().expect("app_data_dir");
+            let Some(model) = select_local_model(&app_data, &model_id, &lang) else {
+                return fail_asr(
+                    &app,
+                    &db,
+                    &video_id,
+                    &asr_job.id,
+                    "还没有可用的本地识别模型：打开 设置 → 语音识别 下载一个（中文课推荐 SenseVoice）".to_string(),
+                )
+                .await;
+            };
+            if model.id() != model_id {
+                emit_running_progress(
+                    &app,
+                    &db,
+                    &video_id,
+                    &asr_job.id,
+                    0.08,
+                    &format!("使用可用模型：{}", model.id()),
+                )
+                .await?;
+            }
+
+            let message = format!("本地识别中（{}，{lang}）", model.id());
             emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.18, &message).await?;
-            // whisper-cli 边转边报，铺进 0.18–0.88：长课本地转写要好几分钟，
+            // 识别边做边报，铺进 0.18–0.88：长课本地转写要好几分钟，
             // 此前从开始到转完一直停在 18%。
             let sink = {
                 let app = app.clone();
@@ -520,7 +589,7 @@ async fn run_all(
                     );
                 }
             };
-            asr::run_whisper(&audio_path, &model_path, Some(&lang), Some(&sink)).await
+            run_local_model(&app_data, &model, &audio_path, &lang, Some(&sink)).await
         }
         AsrBackend::Volcengine => {
             let app_id = sqlx::query_scalar::<_, String>(
@@ -2114,9 +2183,47 @@ mod tests {
         let tiny = crate::commands::whisper::model_path(dir.path(), "tiny");
         std::fs::write(&tiny, b"lmggtest").unwrap();
 
-        let (id, path) = select_whisper_model(dir.path(), "base").unwrap();
+        let Some(LocalModel::Whisper { id, path }) = select_local_model(dir.path(), "base", "zh") else {
+            panic!("应该退到装好的 tiny");
+        };
         assert_eq!(id, "tiny");
         assert_eq!(path, tiny);
+    }
+
+    fn install_sherpa(app_data: &Path, model: &local_asr::SherpaModel) {
+        let dir = local_asr::model_dir(app_data, model);
+        for file in model.files {
+            let path = dir.join(file.path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::File::create(&path).unwrap().set_len(file.size).unwrap();
+        }
+        let vad = local_asr::vad_path(app_data);
+        std::fs::File::create(&vad).unwrap().set_len(local_asr::VAD.size).unwrap();
+    }
+
+    #[test]
+    fn local_model_selection_prefers_the_choice_then_its_own_family() {
+        let dir = tempdir().unwrap();
+        let app = dir.path();
+        let tiny = crate::commands::whisper::model_path(app, "tiny");
+        std::fs::create_dir_all(tiny.parent().unwrap()).unwrap();
+        std::fs::write(&tiny, b"lmggtest").unwrap();
+        install_sherpa(app, &local_asr::SENSE_VOICE);
+
+        // 选中且装好、语言也认得：就用它。
+        assert!(matches!(select_local_model(app, "sensevoice", "zh"), Some(LocalModel::Sherpa(m)) if m.id == "sensevoice"));
+        // 选了没装的 Qwen3-ASR：先找另一个 sherpa 模型。
+        assert!(matches!(select_local_model(app, "qwen3-asr", "zh"), Some(LocalModel::Sherpa(m)) if m.id == "sensevoice"));
+        // SenseVoice 不认法语：退到 Whisper。
+        assert!(matches!(select_local_model(app, "sensevoice", "fr"), Some(LocalModel::Whisper { id, .. }) if id == "tiny"));
+        // 选了没装的 Whisper：先找别的 Whisper（原来的行为），不跳到 sherpa。
+        assert!(matches!(select_local_model(app, "large-v3-turbo", "zh"), Some(LocalModel::Whisper { id, .. }) if id == "tiny"));
+    }
+
+    #[test]
+    fn nothing_installed_means_no_local_model() {
+        let dir = tempdir().unwrap();
+        assert!(select_local_model(dir.path(), DEFAULT_LOCAL_MODEL, "zh").is_none());
     }
 
     #[test]

@@ -116,7 +116,8 @@ export function useSettingsForm() {
     };
     const requests = [
       load("default_storage_root", (value) => setRoot(value ?? "")),
-      load("whisper_model", (value) => setModel(value ?? "large-v3-turbo")),
+      // 和后端 DEFAULT_LOCAL_MODEL 一致：中文课上 SenseVoice 比 Whisper 准、快。
+      load("whisper_model", (value) => setModel(value ?? "sensevoice")),
       load("asr_backend", (value) => setAsrBackend(normalizeAsrBackend(value))),
       load("asr_language", (value) => setAsrLanguage(value ?? "zh")),
       load("asr_correction_concurrency", (value) => setCorrectionConcurrency(value ?? "8")),

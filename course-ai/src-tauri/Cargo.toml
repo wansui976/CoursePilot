@@ -52,6 +52,11 @@ tauri-plugin-single-instance = "2"
 ferrous-opencc = { version = "0.4", default-features = false, features = ["t2s-conversion"] }
 # 启动失败时弹原生错误框（tauri-plugin-dialog 已带进来；它的阻塞弹窗在主线程上会死锁）。
 rfd = { version = "0.16", default-features = false }
+# 本地语音识别的第二条通道（SenseVoice / Qwen3-ASR）：官方 Rust 绑定，构建时下载预编译库。
+# 用动态库而不是默认的静态库：同一段 10 分钟的课，官方静态库识别要 20 秒，动态库 7 秒（静态库里的
+# ONNX Runtime 编得慢）。动态库随安装包带：macOS 进 Contents/Frameworks，Windows 放在 exe 旁边，
+# 由 .github/scripts/prepare-*-sidecars 准备。先只接桌面，手机另做。
+sherpa-onnx = { version = "2.0.1", default-features = false, features = ["shared"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2 = "0.6.4"

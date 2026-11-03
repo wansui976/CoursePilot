@@ -113,8 +113,43 @@ if [[ "$whisper_minos" != "$MACOS_MIN_VERSION" ]]; then
   exit 1
 fi
 
+# sherpa-onnx 动态库（本地中文识别 SenseVoice / Qwen3-ASR）：Rust 绑定构建时自己下一份链接用，这里再取
+# 同一版本的官方包打进 .app 的 Contents/Frameworks（tauri.macos.conf.json 的 frameworks，build.rs 加了
+# 对应的 rpath）。版本必须和 Cargo.lock 里的 sherpa-onnx-sys 一致，否则运行时符号对不上。
+SHERPA_ONNX_VERSION="2.0.1"
+locked_sherpa="$(awk '/^name = "sherpa-onnx-sys"$/ { getline; gsub(/version = |"/, ""); print }' "$repo_root/course-ai/src-tauri/Cargo.lock")"
+if [[ "$locked_sherpa" != "$SHERPA_ONNX_VERSION" ]]; then
+  echo "Cargo.lock 里 sherpa-onnx-sys 是 $locked_sherpa，这里打包的是 $SHERPA_ONNX_VERSION：两边要一起升级" >&2
+  exit 1
+fi
+case "$target" in
+  aarch64-apple-darwin)
+    sherpa_asset="sherpa-onnx-v$SHERPA_ONNX_VERSION-osx-arm64-shared-lib"
+    sherpa_sha256="e2d57ad9c83803d6c48f259caa66e44879bd4c4724c61f0d51a277b411bffb1d"
+    ;;
+  x86_64-apple-darwin)
+    sherpa_asset="sherpa-onnx-v$SHERPA_ONNX_VERSION-osx-x64-shared-lib"
+    sherpa_sha256="be9042971c5d1b14da76a960534d2a8cdb6f0e5e02f5e1dc8bddff8576359bdd"
+    ;;
+esac
+sherpa_dir="$binary_dir/sherpa-onnx"
+echo "Downloading $sherpa_asset"
+curl -L --fail --retry 5 --retry-delay 3 --retry-all-errors \
+  -o "$binary_dir/$sherpa_asset.tar.bz2" \
+  "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$SHERPA_ONNX_VERSION/$sherpa_asset.tar.bz2"
+echo "$sherpa_sha256  $binary_dir/$sherpa_asset.tar.bz2" | shasum -a 256 -c -
+rm -rf "$sherpa_dir" "$binary_dir/$sherpa_asset"
+tar -xjf "$binary_dir/$sherpa_asset.tar.bz2" -C "$binary_dir"
+mkdir -p "$sherpa_dir"
+cp "$binary_dir/$sherpa_asset/lib/libsherpa-onnx-c-api.dylib" "$binary_dir/$sherpa_asset/lib/libonnxruntime.dylib" "$sherpa_dir/"
+rm -rf "$binary_dir/$sherpa_asset" "$binary_dir/$sherpa_asset.tar.bz2"
+for lib in "$sherpa_dir"/*.dylib; do
+  xattr -c "$lib" 2>/dev/null || true
+  codesign --force --sign - "$lib"
+done
+
 echo "Prepared macOS sidecars:"
 "$ffmpeg" -version | sed -n '1,2p'
 "$ytdlp" --version
 "$whisper" --help 2>&1 | sed -n '1,2p'
-ls -lh "$ffmpeg" "$ytdlp" "$whisper"
+ls -lh "$ffmpeg" "$ytdlp" "$whisper" "$sherpa_dir"/*.dylib

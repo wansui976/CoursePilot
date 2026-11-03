@@ -1,5 +1,12 @@
 fn main() {
     println!("cargo:rerun-if-changed=migrations");
+    // sherpa-onnx 的动态库在安装包里放在 Contents/Frameworks（tauri.macos.conf.json 的 frameworks）。
+    // 它自己的构建脚本只加了 @loader_path（开发时库就在可执行文件旁边），装好的 .app 里还得找这里。
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path/../Frameworks");
+        // 依赖的构建脚本加的链接参数不会传到本包；不在 .app 里直接跑可执行文件时（库就在旁边）靠这一条。
+        println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path");
+    }
     #[cfg(target_os = "macos")]
     prepare_ios_plugin_api();
     #[cfg(target_os = "macos")]

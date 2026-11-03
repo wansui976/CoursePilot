@@ -111,6 +111,21 @@ describe("处理队列的整体进度", () => {
     ).toBe("AI 纠正文稿 3/12 段");
   });
 
+  it("本地识别的进度带上模型名，英文界面也翻得出来", () => {
+    const job: StageJob = {
+      stage: "asr",
+      status: "running",
+      progress: 0.4,
+      message: "本地识别中（sensevoice，zh）",
+    };
+    expect(stageMessage(job)).toBe("本地识别中（sensevoice，zh）");
+    expect(stageMessage(job, i18n.getFixedT("en"))).toBe("Transcribing locally (sensevoice, zh)");
+    // 旧版本留在任务记录里的文案照样认得。
+    expect(
+      stageMessage({ ...job, message: "Whisper 识别中（zh）" }, i18n.getFixedT("en")),
+    ).toBe("Transcribing with Whisper (zh)");
+  });
+
   it("什么都没有时是 0，不是 NaN", () => {
     expect(overallProgress({})).toBe(0);
     expect(stageMessage(currentStage({}))).toBe("等待中");

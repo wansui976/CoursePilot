@@ -102,5 +102,27 @@ foreach ($lang in @("eng", "chi_sim")) {
   }
 }
 
+# sherpa-onnx 动态库（本地中文识别 SenseVoice / Qwen3-ASR）：DLL 放在 binaries/ 下，由
+# tauri.windows.conf.json 的 "binaries/*.dll" 装到 exe 旁边。版本要和 Cargo.lock 里的 sherpa-onnx-sys 一致。
+$sherpaVersion = "2.0.1"
+$cargoLock = Join-Path $repoRoot "course-ai\src-tauri\Cargo.lock"
+$lockedSherpa = (Select-String -Path $cargoLock -Pattern '^name = "sherpa-onnx-sys"$' -Context 0,1).Context.PostContext[0] -replace 'version = |"', ''
+if ($lockedSherpa -ne $sherpaVersion) {
+  throw "Cargo.lock 里 sherpa-onnx-sys 是 $lockedSherpa，这里打包的是 $sherpaVersion：两边要一起升级"
+}
+$sherpaAsset = "sherpa-onnx-v$sherpaVersion-win-x64-shared-MT-Release-lib"
+$sherpaArchive = Join-Path $tempDir "$sherpaAsset.tar.bz2"
+Download-File "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$sherpaVersion/$sherpaAsset.tar.bz2" $sherpaArchive
+$sherpaHash = (Get-FileHash -Algorithm SHA256 $sherpaArchive).Hash.ToLower()
+if ($sherpaHash -ne "afa4de3ca4ab0afd53bb4aab40d28ee15608364b549ffc0fe0caf6489bfc39a5") {
+  throw "sherpa-onnx archive hash mismatch: $sherpaHash"
+}
+$sherpaOut = Join-Path $tempDir "sherpa-onnx"
+New-Item -ItemType Directory -Force -Path $sherpaOut | Out-Null
+tar -xjf $sherpaArchive -C $sherpaOut
+Get-ChildItem -Path (Join-Path $sherpaOut $sherpaAsset) -Recurse -Filter "*.dll" | ForEach-Object {
+  Copy-Item $_.FullName (Join-Path $binaryDir $_.Name) -Force
+}
+
 Write-Host "Prepared sidecars:"
 Get-ChildItem -Path $binaryDir -Recurse | Select-Object FullName, Length

@@ -108,6 +108,9 @@ function localizedDetail(detail: string, t: Translate): string | undefined {
   }
   match = detail.match(/^使用可用模型：(.+)$/);
   if (match) return t("pipelineProgress.details.usingModel", { model: match[1] });
+  match = detail.match(/^本地识别中（(.+)，(.+)）$/);
+  if (match) return t("pipelineProgress.details.localAsr", { model: match[1], language: match[2] });
+  // 旧版本留在任务记录里的文案。
   match = detail.match(/^Whisper 识别中（(.+)）$/);
   if (match) return t("pipelineProgress.details.whisperAsr", { language: match[1] });
   match = detail.match(/^云端识别中（阿里云 (.+)）$/);

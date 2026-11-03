@@ -1,10 +1,18 @@
 {
   "bundle": {
-    "externalBin": ["binaries/ffmpeg", "binaries/yt-dlp", "binaries/whisper-cli"],
+    "externalBin": [
+      "binaries/ffmpeg",
+      "binaries/yt-dlp",
+      "binaries/whisper-cli"
+    ],
     "macOS": {
       "hardenedRuntime": false,
       "minimumSystemVersion": "14.0",
-      "entitlements": "Entitlements.plist"
+      "entitlements": "Entitlements.plist",
+      "frameworks": [
+        "binaries/sherpa-onnx/libsherpa-onnx-c-api.dylib",
+        "binaries/sherpa-onnx/libonnxruntime.dylib"
+      ]
     }
   }
 }

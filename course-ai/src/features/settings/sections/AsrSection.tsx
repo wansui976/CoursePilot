@@ -128,18 +128,24 @@ export function AsrSection({ form }: { form: SettingsForm }) {
 
       {!mobile && asrBackend === "whisper" && (
         <Group header={t("settings.asr.whisperTitle")}>
-          <Row label={t("settings.asr.defaultModel")} htmlFor="whisper-model">
-            <div className="w-full sm:w-44">
+          <Row
+            label={t("settings.asr.defaultModel")}
+            htmlFor="whisper-model"
+            hint={t("settings.asr.localModelHint")}
+          >
+            <div className="w-full sm:w-56">
               <Select
                 id="whisper-model"
                 value={model}
                 onChange={(event) => void changeModel(event.target.value)}
               >
-                <option value="tiny">tiny</option>
-                <option value="base">base</option>
-                <option value="small">small</option>
-                <option value="medium">medium</option>
-                <option value="large-v3-turbo">large-v3-turbo</option>
+                <option value="sensevoice">{t("settings.asr.senseVoice")}</option>
+                <option value="qwen3-asr">{t("settings.asr.qwen3Asr")}</option>
+                <option value="tiny">Whisper tiny</option>
+                <option value="base">Whisper base</option>
+                <option value="small">Whisper small</option>
+                <option value="medium">Whisper medium</option>
+                <option value="large-v3-turbo">Whisper large-v3-turbo</option>
               </Select>
             </div>
           </Row>
