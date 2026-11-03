@@ -120,8 +120,17 @@ if ($sherpaHash -ne "afa4de3ca4ab0afd53bb4aab40d28ee15608364b549ffc0fe0caf6489bf
 $sherpaOut = Join-Path $tempDir "sherpa-onnx"
 New-Item -ItemType Directory -Force -Path $sherpaOut | Out-Null
 tar -xjf $sherpaArchive -C $sherpaOut
-Get-ChildItem -Path (Join-Path $sherpaOut $sherpaAsset) -Recurse -Filter "*.dll" | ForEach-Object {
+# binaries/sherpa-onnx 放整个 lib 目录（链接要 .lib 导入库，运行要 .dll），DLL 另拷一份到 binaries/ 下打进安装包。
+$sherpaLib = Join-Path $binaryDir "sherpa-onnx"
+if (Test-Path $sherpaLib) { Remove-Item -Recurse -Force $sherpaLib }
+Copy-Item -Recurse (Join-Path $sherpaOut "$sherpaAsset\lib") $sherpaLib
+Get-ChildItem -Path $sherpaLib -Filter "*.dll" | ForEach-Object {
   Copy-Item $_.FullName (Join-Path $binaryDir $_.Name) -Force
+}
+# 链接也用这份库：Rust 绑定自己下的那份在 target/sherpa-onnx-prebuilt，CI 的 rust-cache 不缓存它，
+# 缓存回来的构建记录又让它的构建脚本不再重跑——链接时就找不到 sherpa-onnx-c-api.lib（LNK1181）。
+if ($env:GITHUB_ENV) {
+  "SHERPA_ONNX_LIB_DIR=$sherpaLib" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 }
 
 Write-Host "Prepared sidecars:"

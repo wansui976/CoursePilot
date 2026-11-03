@@ -147,6 +147,11 @@ for lib in "$sherpa_dir"/*.dylib; do
   xattr -c "$lib" 2>/dev/null || true
   codesign --force --sign - "$lib"
 done
+# 链接也用这份库：Rust 绑定自己下的那份放在 target/sherpa-onnx-prebuilt，CI 的 rust-cache 不缓存它，
+# 而缓存回来的构建记录又让它的构建脚本不再重跑——链接时就找不到库（LNK1181 / ld 找不到 -lsherpa-onnx-c-api）。
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+  echo "SHERPA_ONNX_LIB_DIR=$sherpa_dir" >> "$GITHUB_ENV"
+fi
 
 echo "Prepared macOS sidecars:"
 "$ffmpeg" -version | sed -n '1,2p'
