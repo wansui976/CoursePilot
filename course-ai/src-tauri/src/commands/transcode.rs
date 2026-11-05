@@ -284,6 +284,14 @@ pub fn plan(path: &std::path::Path, data_dir: &str) -> Option<std::path::PathBuf
     Some(std::path::Path::new(data_dir).join("playable.mp4"))
 }
 
+/// 转码产物在、非空、而且读得出这台设备放得了的编码，才算转好了。
+pub fn transcoded_ready(target: &std::path::Path) -> bool {
+    std::fs::metadata(target).map(|meta| meta.len() > 0).unwrap_or(false)
+        && crate::pipeline::playable::video_codec(target)
+            .map(crate::pipeline::playable::codec_playable_here)
+            .unwrap_or(false)
+}
+
 /// 点火一次转码。`retry` 为 false 时（导入、点开视频）失败过的不再自动重转——
 /// 10-bit 这类注定失败的片子每次点开都重解一遍整片，几分钟的 CPU 和电全白费；
 /// 用户点「重试」才传 true。
@@ -304,13 +312,7 @@ pub fn ensure_transcode(
     if target.is_file() {
         // 缓存可能是崩溃/中断留下的半成品（甚至是 0 字节）。只有读到可播放的编码才算数，
         // 否则删掉重转 —— 不然用户会一直黑屏，而且没有任何提示。
-        let usable = std::fs::metadata(&target)
-            .map(|meta| meta.len() > 0)
-            .unwrap_or(false)
-            && crate::pipeline::playable::video_codec(&target)
-                .map(crate::pipeline::playable::codec_playable_here)
-                .unwrap_or(false);
-        if usable {
+        if transcoded_ready(&target) {
             return Ok(());
         }
         let _ = std::fs::remove_file(&target);

@@ -101,9 +101,50 @@ pub enum ExtractEvent {
     },
 }
 
+/// 课件从哪个文件里截。
+///
+/// iOS 上 AV1 原件 AVFoundation 打不开（截帧报「Cannot Open」，整次提取作废），而导入时已经在转
+/// `data_dir/playable.mp4`：等它转完就用它截。转码失败或没转起来就直说原因，不要甩一个 AVFoundation 错误码。
+/// 其他平台（以及不需要转码的视频）直接用原件。
+async fn slide_source(
+    app: &tauri::AppHandle,
+    video: &crate::commands::videos::Video,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> AppResult<std::path::PathBuf> {
+    let original = std::path::PathBuf::from(&video.file_path);
+    #[cfg(target_os = "ios")]
+    if let Some(target) = crate::commands::transcode::plan(&original, &video.data_dir) {
+        use crate::commands::transcode::{ensure_transcode, transcoded_ready, TranscodeJobs};
+        use tauri::Manager;
+        let jobs = app.try_state::<std::sync::Arc<TranscodeJobs>>().map(|jobs| jobs.inner().clone());
+        if let Some(jobs) = &jobs {
+            let _ = ensure_transcode(jobs.clone(), &video.id, &video.file_path, &video.data_dir, false);
+        }
+        loop {
+            if transcoded_ready(&target) {
+                return Ok(target);
+            }
+            if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(AppError::Pipeline("已取消".into()));
+            }
+            if !jobs.as_ref().is_some_and(|jobs| jobs.is_running(&video.id)) {
+                return Err(AppError::Pipeline(
+                    "这个视频是 AV1 编码，这台设备直接解不了；端上转码没成功，课件截不出来。\
+                     在视频页重试转码，转好后再提取课件"
+                        .into(),
+                ));
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    }
+    let _ = (app, cancel);
+    Ok(original)
+}
+
 /// 提取课件页的核心流程，供命令与导入后的自动流水线共用：调用方给取消标志与进度回调，
 /// 这里只管「按帧变化找页 → 落盘 → 写库 → 清理旧页」。
 pub async fn extract_slides_for_video(
+    app: &tauri::AppHandle,
     state: &AppState,
     video_id: &str,
     threshold: Option<f64>,
@@ -122,8 +163,9 @@ pub async fn extract_slides_for_video(
     let extraction_root = Path::new(&video.data_dir)
         .join("slide-extractions")
         .join(Uuid::new_v4().to_string());
+    let source = slide_source(app, &video, cancel).await?;
     let extracted = slides::extract_slides(
-        Path::new(&video.file_path),
+        &source,
         &extraction_root,
         slides::ExtractOptions {
             block_delta: threshold,
@@ -185,7 +227,7 @@ pub async fn cmd_extract_slides(
         }
     };
     let result =
-        extract_slides_for_video(&state, &video_id, threshold, &cancel, &mut on_progress).await;
+        extract_slides_for_video(&app, &state, &video_id, threshold, &cancel, &mut on_progress).await;
     if let Some(id) = &request_id {
         state.unregister_cancel(id, &cancel);
     }

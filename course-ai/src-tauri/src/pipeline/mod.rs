@@ -964,6 +964,7 @@ async fn run_slides_stage(
             );
         };
         match crate::commands::slides::extract_slides_for_video(
+            app,
             &state,
             video_id,
             None,
