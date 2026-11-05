@@ -107,11 +107,21 @@ function localizedDetail(detail: string, t: Translate): string | undefined {
     });
   }
   match = detail.match(/^内存不够跑 (.+)，改用 (.+)$/);
-  if (match) return t("pipelineProgress.details.lowMemoryFallback", { wanted: match[1], model: match[2] });
+  if (match) {
+    return t("pipelineProgress.details.lowMemoryFallback", {
+      wanted: localModelName(match[1]),
+      model: localModelName(match[2]),
+    });
+  }
   match = detail.match(/^使用可用模型：(.+)$/);
-  if (match) return t("pipelineProgress.details.usingModel", { model: match[1] });
+  if (match) return t("pipelineProgress.details.usingModel", { model: localModelName(match[1]) });
   match = detail.match(/^本地识别中（(.+)，(.+)）$/);
-  if (match) return t("pipelineProgress.details.localAsr", { model: match[1], language: match[2] });
+  if (match) {
+    return t("pipelineProgress.details.localAsr", {
+      model: localModelName(match[1]),
+      language: asrLanguageName(match[2], t),
+    });
+  }
   // 旧版本留在任务记录里的文案。
   match = detail.match(/^Whisper 识别中（(.+)）$/);
   if (match) return t("pipelineProgress.details.whisperAsr", { language: match[1] });
@@ -120,6 +130,20 @@ function localizedDetail(detail: string, t: Translate): string | undefined {
   match = detail.match(/^提取到 (\d+) 页课件$/);
   if (match) return t("pipelineProgress.details.slidesExtracted", { count: Number(match[1]) });
   return undefined;
+}
+
+/** 后端报的是模型 id（sensevoice、large-v3-turbo…），界面上换成产品名。 */
+function localModelName(id: string): string {
+  if (id === "sensevoice") return "SenseVoice";
+  if (id === "qwen3-asr") return "Qwen3-ASR";
+  return /^(tiny|base|small|medium|large)/.test(id) ? `Whisper ${id}` : id;
+}
+
+/** 后端报的是语言代码（zh、auto…），界面上换成语言名；认不出的原样显示。 */
+function asrLanguageName(code: string, t: Translate): string {
+  const key = code === "auto" ? "settings.asr.autoDetect" : `settings.asr.${code}`;
+  const name = t(key);
+  return name === key ? code : name;
 }
 
 export interface StageJob {

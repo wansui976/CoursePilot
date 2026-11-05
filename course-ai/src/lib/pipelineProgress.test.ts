@@ -118,12 +118,16 @@ describe("处理队列的整体进度", () => {
       progress: 0.4,
       message: "本地识别中（sensevoice，zh）",
     };
-    expect(stageMessage(job)).toBe("本地识别中（sensevoice，zh）");
-    expect(stageMessage(job, i18n.getFixedT("en"))).toBe("Transcribing locally (sensevoice, zh)");
+    // 模型 id、语言代码换成界面上的名字。
+    expect(stageMessage(job, i18n.getFixedT("zh-CN"))).toBe("本地识别中（SenseVoice，中文）");
+    expect(stageMessage(job, i18n.getFixedT("en"))).toBe("Transcribing locally (SenseVoice, Chinese)");
+    expect(
+      stageMessage({ ...job, message: "本地识别中（large-v3-turbo，auto）" }, i18n.getFixedT("zh-CN")),
+    ).toBe("本地识别中（Whisper large-v3-turbo，自动检测）");
     // 手机内存放不下选中的模型时换了一个，要说清原因。
     expect(
       stageMessage({ ...job, message: "内存不够跑 qwen3-asr，改用 sensevoice" }, i18n.getFixedT("en")),
-    ).toBe("Not enough memory for qwen3-asr, using sensevoice");
+    ).toBe("Not enough memory for Qwen3-ASR, using SenseVoice");
     // 旧版本留在任务记录里的文案照样认得。
     expect(
       stageMessage({ ...job, message: "Whisper 识别中（zh）" }, i18n.getFixedT("en")),

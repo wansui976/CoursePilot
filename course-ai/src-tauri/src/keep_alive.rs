@@ -142,6 +142,18 @@ impl Drop for Hold {
 }
 
 /// 登记一项长任务。`key` 用来对上之后的 [`report`]（处理视频用视频 id）。
+/// 视频标题多半就是文件名，通知里去掉扩展名。
+fn display_name(name: String) -> String {
+    const EXTS: &[&str] = &[
+        ".mp4", ".mkv", ".mov", ".webm", ".flv", ".avi", ".m4v", ".mp3", ".m4a", ".wav",
+    ];
+    let lower = name.to_lowercase();
+    match EXTS.iter().find(|ext| lower.ends_with(*ext)) {
+        Some(ext) if name.len() > ext.len() => name[..name.len() - ext.len()].to_string(),
+        _ => name,
+    }
+}
+
 pub fn hold(kind: Kind, key: impl Into<String>, name: impl Into<String>) -> Hold {
     let mut registry = registry().lock().unwrap_or_else(|p| p.into_inner());
     registry.next += 1;
@@ -151,7 +163,7 @@ pub fn hold(kind: Kind, key: impl Into<String>, name: impl Into<String>) -> Hold
         Entry {
             kind,
             key: key.into(),
-            name: name.into(),
+            name: display_name(name.into()),
             parts: BTreeMap::new(),
             detail: String::new(),
             touched: id,
@@ -345,6 +357,17 @@ mod tests {
         let status = registry.status();
         assert_eq!(status.title, "正在转码");
         assert_eq!(status.progress, -1.0);
+    }
+
+    #[test]
+    fn titles_drop_the_file_extension() {
+        assert_eq!(
+            display_name("03 梯度下降的直觉.mp4".into()),
+            "03 梯度下降的直觉"
+        );
+        assert_eq!(display_name("Lecture.MKV".into()), "Lecture");
+        assert_eq!(display_name("第一讲".into()), "第一讲");
+        assert_eq!(display_name(".mp4".into()), ".mp4");
     }
 
     #[test]

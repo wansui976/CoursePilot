@@ -220,7 +220,12 @@ async fn download_sherpa_model(
                 model.id,
                 "download",
                 received as f64 / total as f64,
-                &format!("{:.0} / {:.0} MB", received as f64 / 1e6, total as f64 / 1e6),
+                // 和设置里模型清单的大小一样按 1024² 算，两边对得上。
+                &format!(
+                    "{:.0} / {:.0} MB",
+                    received as f64 / 1048576.0,
+                    total as f64 / 1048576.0
+                ),
             );
         }
         app.emit(
