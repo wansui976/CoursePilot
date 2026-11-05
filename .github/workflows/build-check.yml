@@ -153,6 +153,8 @@ jobs:
         run: |
           unset SHERPA_ONNX_LIB_DIR
           find src-tauri/target -type d -path '*/build/sherpa-onnx-sys-*' -prune -exec rm -rf {} + 2>/dev/null || true
+          # 它下载解压的目录也删掉：rust-cache 会把目录留下、里面的库却不在，构建脚本见目录在就不重下，接着找不到库。
+          rm -rf src-tauri/target/sherpa-onnx-prebuilt
           pnpm tauri ios build --target aarch64-sim --debug --ci
 
   android:
@@ -194,6 +196,8 @@ jobs:
         working-directory: course-ai
         run: |
           find src-tauri/target -type d -path '*/build/sherpa-onnx-sys-*' -prune -exec rm -rf {} + 2>/dev/null || true
+          # 它下载解压的目录也删掉：rust-cache 会把目录留下、里面的库却不在，构建脚本见目录在就不重下，接着找不到库。
+          rm -rf src-tauri/target/sherpa-onnx-prebuilt
           pnpm tauri android build --debug --apk --target aarch64 --ci
       - name: Upload APK
         uses: actions/upload-artifact@v4
