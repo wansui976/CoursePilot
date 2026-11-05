@@ -84,6 +84,7 @@
       "requestingNotes": "正在请求模型整理笔记",
       "savingNotes": "正在写入笔记",
       "usingModel": "正在使用可用模型：{{model}}",
+      "lowMemoryFallback": "内存不够跑 {{wanted}}，改用 {{model}}",
       "whisperAsr": "Whisper 识别中（{{language}}）",
       "localAsr": "本地识别中（{{model}}，{{language}}）",
       "aliyunAsr": "正在通过阿里云 {{model}} 识别",
@@ -1365,6 +1366,8 @@
     "loadError": "模型列表加载失败：{{error}}",
     "retry": "重试",
     "installed": "已安装",
+    "lowMemory": "这台设备内存不够",
+    "lowMemoryHint": "识别时会被系统强制关掉；选了它也会自动改用 SenseVoice",
     "downloading": "{{percent}}%",
     "download": "下载"
   },

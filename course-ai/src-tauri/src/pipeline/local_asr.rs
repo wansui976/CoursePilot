@@ -40,6 +40,9 @@ pub struct SherpaModel {
     pub files: &'static [ModelFile],
     /// 支持的识别语言；`None` 表示设置里的语言都支持。
     pub languages: Option<&'static [&'static str]>,
+    /// 识别时进程至少还得能再用这么多内存（MB）。手机上按这个挡：iPad（4GB）上跑 Qwen3-ASR，
+    /// 进程涨到 2867MB 就被系统按单进程上限杀掉，应用直接闪退。
+    pub min_free_mb: u64,
 }
 
 macro_rules! urls {
@@ -75,6 +78,8 @@ pub const SENSE_VOICE: SherpaModel = SherpaModel {
         },
     ],
     languages: Some(&["zh", "en", "ja", "ko", "yue", "auto"]),
+    // 桌面实测峰值 330MB（含应用本身）。
+    min_free_mb: 600,
 };
 
 pub const QWEN3_ASR: SherpaModel = SherpaModel {
@@ -142,6 +147,8 @@ pub const QWEN3_ASR: SherpaModel = SherpaModel {
         },
     ],
     languages: None,
+    // 桌面实测峰值 2.5GB；iPad（4GB）上进程到 2867MB 被杀。留些余量。
+    min_free_mb: 3_000,
 };
 
 /// 切句用的 silero VAD，所有 sherpa 模型共用一份，装在 `<app_data>/asr/` 下。
@@ -180,10 +187,48 @@ impl SherpaModel {
         self.files.iter().map(|file| file.size).sum::<u64>() + VAD.size
     }
 
+    /// `available_mb` 是此刻进程还能用的内存；不知道（桌面上不查）就当够。
+    pub fn fits_memory(&self, available_mb: Option<u64>) -> bool {
+        available_mb.is_none_or(|mb| mb >= self.min_free_mb)
+    }
+
     pub fn supports_language(&self, language: &str) -> bool {
         self.languages
             .is_none_or(|languages| languages.contains(&language))
     }
+}
+
+/// 此刻进程还能再用多少内存（MB）。只在手机上查：
+/// - iOS：`os_proc_available_memory()`——离被系统按单进程上限杀掉还差多少，正是要的数；
+/// - Android：`/proc/meminfo` 的 MemAvailable（Android 原生内存没有单进程上限，看整机）。
+/// 桌面上返回 None：内存大、还有交换区，不挡。
+pub fn available_memory_mb() -> Option<u64> {
+    #[cfg(target_os = "ios")]
+    {
+        extern "C" {
+            fn os_proc_available_memory() -> usize;
+        }
+        // SAFETY: libSystem 提供的无参查询函数（iOS 13+），没有前置条件。
+        let bytes = unsafe { os_proc_available_memory() };
+        return (bytes > 0).then(|| bytes as u64 / (1024 * 1024));
+    }
+    #[cfg(target_os = "android")]
+    {
+        let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+        return parse_mem_available_mb(&meminfo);
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+/// `/proc/meminfo` 里的 `MemAvailable:  1234567 kB` → MB。
+pub fn parse_mem_available_mb(meminfo: &str) -> Option<u64> {
+    meminfo
+        .lines()
+        .find_map(|line| line.strip_prefix("MemAvailable:"))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|kb| kb.parse::<u64>().ok())
+        .map(|kb| kb / 1024)
 }
 
 /// 文件在、大小对得上就算装好了。哈希只在下载时校验一次：每次打开设置页都把
@@ -489,6 +534,23 @@ mod tests {
         std::fs::write(model.join("model.int8.onnx"), b"partial").unwrap();
         let missing: Vec<&str> = missing_files(app_data, &SENSE_VOICE).iter().map(|(_, f)| f.path).collect();
         assert_eq!(missing, ["model.int8.onnx", "silero_vad.onnx"]);
+    }
+
+    #[test]
+    fn qwen3_is_refused_when_the_process_cannot_grow_that_much() {
+        // iPad Pro 11"（4GB）：单进程上限约 2.87GB，扣掉应用自己已经占的，剩不到 Qwen3 要的。
+        assert!(!QWEN3_ASR.fits_memory(Some(2_400)));
+        assert!(SENSE_VOICE.fits_memory(Some(2_400)));
+        assert!(QWEN3_ASR.fits_memory(Some(5_000)));
+        // 桌面不查。
+        assert!(QWEN3_ASR.fits_memory(None));
+    }
+
+    #[test]
+    fn reads_mem_available_from_proc_meminfo() {
+        let meminfo = "MemTotal:        5823456 kB\nMemFree:          123456 kB\nMemAvailable:    2097152 kB\n";
+        assert_eq!(parse_mem_available_mb(meminfo), Some(2048));
+        assert_eq!(parse_mem_available_mb("MemTotal: 1 kB"), None);
     }
 
     #[test]

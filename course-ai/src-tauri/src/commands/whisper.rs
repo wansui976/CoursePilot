@@ -15,6 +15,8 @@ pub struct ModelInfo {
     pub display_name: &'static str,
     pub size_bytes: u64,
     pub url: &'static str,
+    /// 这台设备此刻放得下它（手机上按可用内存判断；桌面上总是 true）。
+    pub fits_memory: bool,
 }
 
 pub const MODELS: &[ModelInfo] = &[
@@ -23,24 +25,28 @@ pub const MODELS: &[ModelInfo] = &[
         display_name: "Tiny (75MB)",
         size_bytes: 77_700_000,
         url: "https://modelscope.cn/models/cjc1887415157/whisper.cpp/resolve/master/ggml-tiny.bin",
+        fits_memory: true,
     },
     ModelInfo {
         id: "base",
         display_name: "Base (142MB)",
         size_bytes: 148_000_000,
         url: "https://modelscope.cn/models/cjc1887415157/whisper.cpp/resolve/master/ggml-base.bin",
+        fits_memory: true,
     },
     ModelInfo {
         id: "small",
         display_name: "Small (466MB)",
         size_bytes: 488_000_000,
         url: "https://modelscope.cn/models/cjc1887415157/whisper.cpp/resolve/master/ggml-small.bin",
+        fits_memory: true,
     },
     ModelInfo {
         id: "medium",
         display_name: "Medium (1.5GB)",
         size_bytes: 1_530_000_000,
         url: "https://modelscope.cn/models/cjc1887415157/whisper.cpp/resolve/master/ggml-medium.bin",
+        fits_memory: true,
     },
     ModelInfo {
         id: "large-v3-turbo",
@@ -49,6 +55,7 @@ pub const MODELS: &[ModelInfo] = &[
         // 上面那个仓库没有 turbo（这个地址一直是 404，选它的人下载必失败）。换成另一个
         // ModelScope 镜像：文件大小和首尾各 2MB 的哈希都与 HuggingFace 上 ggerganov 的原文件一致。
         url: "https://modelscope.cn/models/OllmOne/whisper.cpp/resolve/master/ggml-large-v3-turbo-q5_0.bin",
+        fits_memory: true,
     },
 ];
 
@@ -77,6 +84,7 @@ pub async fn cmd_list_whisper_models(app: tauri::AppHandle) -> AppResult<Vec<(Mo
         .path()
         .app_data_dir()
         .map_err(|error| AppError::Config(error.to_string()))?;
+    let available_mb = local_asr::available_memory_mb();
     // SenseVoice / Qwen3-ASR 排前面：中文课上它们比 Whisper 准得多（docs/asr-benchmark）。
     let sherpa = local_asr::MODELS.iter().map(|model| {
         (
@@ -85,6 +93,7 @@ pub async fn cmd_list_whisper_models(app: tauri::AppHandle) -> AppResult<Vec<(Mo
                 display_name: model.display_name,
                 size_bytes: model.download_size(),
                 url: model.files[0].urls[0],
+                fits_memory: model.fits_memory(available_mb),
             },
             local_asr::is_installed(&data_dir, model),
         )

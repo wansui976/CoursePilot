@@ -119,6 +119,14 @@ export function WhisperModelsPanel() {
                     {t("whisperModels.installed")}
                   </span>
                 )}
+                {model.fits_memory === false && (
+                  <span
+                    className="inline-flex items-center rounded-full bg-[var(--status-warn-bg)] px-1.5 py-0.5 text-xs font-medium text-[var(--status-warn)]"
+                    title={t("whisperModels.lowMemoryHint")}
+                  >
+                    {t("whisperModels.lowMemory")}
+                  </span>
+                )}
               </span>
               {!installed && (
                 <Button

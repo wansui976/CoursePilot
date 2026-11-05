@@ -6,6 +6,8 @@ export interface WhisperModel {
   display_name: string;
   size_bytes: number;
   url: string;
+  /** 这台设备放得下（手机上按可用内存判断）。旧后端没有这个字段，当作放得下。 */
+  fits_memory?: boolean;
 }
 
 export interface NativeCloudSyncStatus {

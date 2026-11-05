@@ -148,9 +148,13 @@ pub(crate) const DEFAULT_LOCAL_MODEL: &str = "sensevoice";
 /// 选中的装好了、也认得这门课的语言就用它；否则退到别的已装模型：选的是 sherpa 模型就先找
 /// 另一个 sherpa 模型，选的是 Whisper 就先找别的 Whisper（与原来的回退一致），最后再跨过去。
 fn select_local_model(app_data: &Path, preferred_id: &str, language: &str) -> Option<LocalModel> {
+    // 手机上看内存：装好了、认得语言，还得放得下——否则 iOS 直接把应用杀掉（闪退）。
+    let available_mb = local_asr::available_memory_mb();
     let sherpa = |model: &'static local_asr::SherpaModel| {
-        (local_asr::is_installed(app_data, model) && model.supports_language(language))
-            .then_some(LocalModel::Sherpa(model))
+        (local_asr::is_installed(app_data, model)
+            && model.supports_language(language)
+            && model.fits_memory(available_mb))
+        .then_some(LocalModel::Sherpa(model))
     };
     let whisper = |id: &str| {
         let path = crate::commands::whisper::model_path(app_data, id);
@@ -551,15 +555,18 @@ async fn run_all(
                 .await;
             };
             if model.id() != model_id {
-                emit_running_progress(
-                    &app,
-                    &db,
-                    &video_id,
-                    &asr_job.id,
-                    0.08,
-                    &format!("使用可用模型：{}", model.id()),
-                )
-                .await?;
+                // 选的模型装好了却放不下（手机内存不够）要说清楚，不然用户会以为选择没生效。
+                let low_memory = local_asr::find(&model_id).is_some_and(|wanted| {
+                    local_asr::is_installed(&app_data, wanted)
+                        && !wanted.fits_memory(local_asr::available_memory_mb())
+                });
+                let message = if low_memory {
+                    format!("内存不够跑 {model_id}，改用 {}", model.id())
+                } else {
+                    format!("使用可用模型：{}", model.id())
+                };
+                tracing::info!(%model_id, chosen = model.id(), low_memory, "本地识别换了模型");
+                emit_running_progress(&app, &db, &video_id, &asr_job.id, 0.08, &message).await?;
             }
 
             let message = format!("本地识别中（{}，{lang}）", model.id());

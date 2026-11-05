@@ -84,6 +84,7 @@
       "requestingNotes": "Asking the model to organize notes",
       "savingNotes": "Saving notes",
       "usingModel": "Using available model: {{model}}",
+      "lowMemoryFallback": "Not enough memory for {{wanted}}, using {{model}}",
       "whisperAsr": "Transcribing with Whisper ({{language}})",
       "localAsr": "Transcribing locally ({{model}}, {{language}})",
       "aliyunAsr": "Transcribing with Alibaba Cloud {{model}}",
@@ -1368,6 +1369,8 @@
     "loadError": "Failed to load model list: {{error}}",
     "retry": "Retry",
     "installed": "Installed",
+    "lowMemory": "Not enough memory on this device",
+    "lowMemoryHint": "The system would force-quit the app while transcribing; SenseVoice is used instead even if you pick this",
     "downloading": "{{percent}}%",
     "download": "Download"
   },

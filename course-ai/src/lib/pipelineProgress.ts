@@ -106,6 +106,8 @@ function localizedDetail(detail: string, t: Translate): string | undefined {
       total: Number(match[2]),
     });
   }
+  match = detail.match(/^内存不够跑 (.+)，改用 (.+)$/);
+  if (match) return t("pipelineProgress.details.lowMemoryFallback", { wanted: match[1], model: match[2] });
   match = detail.match(/^使用可用模型：(.+)$/);
   if (match) return t("pipelineProgress.details.usingModel", { model: match[1] });
   match = detail.match(/^本地识别中（(.+)，(.+)）$/);
