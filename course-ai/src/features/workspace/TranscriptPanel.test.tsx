@@ -252,7 +252,7 @@ describe("TranscriptPanel", () => {
     renderTranscriptPanel();
     await screen.findByText("00:01");
 
-    // 触屏没有 hover：按钮靠 .ca-transcript-edit 在 pointer:coarse 下强制可见。
+    // 触屏没有 hover：.ca-transcript-edit 在 pointer:coarse 下只在当前句（data-active）上露出来。
     const editButtons = screen.getAllByRole("button", { name: "编辑这句文稿" });
     expect(editButtons[0]).toHaveClass(
       "ca-transcript-edit",
@@ -262,6 +262,20 @@ describe("TranscriptPanel", () => {
       "hover:bg-transparent",
       "focus-visible:opacity-100",
     );
+  });
+
+  it("marks only the current sentence so touch screens show just one edit button", async () => {
+    renderTranscriptPanel();
+    await screen.findByText("00:01");
+    const scroller = screen.getByLabelText("文稿内容滚动区");
+
+    act(() => usePlayer.getState().setCurrentMs(21_500));
+
+    await waitFor(() => expect(scroller.querySelectorAll("[data-active]")).toHaveLength(1));
+    const active = scroller.querySelector<HTMLElement>("[data-active]")!;
+    expect(active.getAttribute("data-row")).toBe("20");
+    // 当前句里的纠错按钮就是这一句的，触屏上只露这一支。
+    expect(active.querySelector(".ca-transcript-edit")).not.toBeNull();
   });
 
   it("recenters every active sentence even while it is fully visible", async () => {

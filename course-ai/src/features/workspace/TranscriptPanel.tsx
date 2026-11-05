@@ -134,6 +134,8 @@ const TranscriptRow = memo(function TranscriptRow({
       )}
       <div
         data-row={index}
+        // 触屏上只有当前句露出纠错按钮（styles/responsive.css）。
+        data-active={active ? "" : undefined}
         className={`group relative rounded ${
           active
             ? "bg-[var(--accent-weak-2)]"

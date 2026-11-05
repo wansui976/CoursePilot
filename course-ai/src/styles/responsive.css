@@ -333,13 +333,19 @@
     min-height: 48px;
   }
 
-  /* 文稿行的纠错按钮桌面上悬停才出现；触屏没有 hover，必须常显。 */
+  /* 文稿行的纠错按钮桌面上悬停才出现；触屏没有 hover，只在当前句（点过、显示成强调色的那行）
+     上露出来——每行都挂一支铅笔太乱。其余行连点都点不到，免得点句子跳转时误点进编辑。 */
   .ca-transcript-edit {
-    opacity: 1;
+    pointer-events: none;
   }
 
-  /* 常显之后它会压在折行文字的行尾上：给正文让出按钮那一列。 */
-  .ca-transcript-text {
+  [data-active] > .ca-transcript-edit {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* 露出来之后它会压在折行文字的行尾上：只给当前句的正文让出按钮那一列。 */
+  [data-active] > .ca-transcript-text {
     padding-right: 44px;
   }
 
