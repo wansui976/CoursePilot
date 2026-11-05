@@ -28,26 +28,19 @@ const VAD_WINDOW: usize = 512;
 /// 单段语音上限。Qwen3-ASR 的生成预算按这个长度留（见 `qwen3_config`）。
 const MAX_SPEECH_SECONDS: f32 = 20.0;
 
-/// 识别线程数。Apple Silicon 上取性能核数（M4 是 4）：实测 4 线程 6.9 秒、5 线程 8.1 秒、8 线程 7.7 秒——
-/// 多出来的线程落到能效核上，拖慢整批。其他机器取一半核数，2–8 之间。
-fn threads() -> i32 {
-    static THREADS: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
-    *THREADS.get_or_init(|| {
-        if let Some(n) = std::env::var("CP_ASR_THREADS").ok().and_then(|v| v.parse().ok()) {
-            return n;
-        }
-        #[cfg(target_os = "macos")]
-        if let Some(n) = performance_cores() {
-            return n.clamp(2, 8);
-        }
-        std::thread::available_parallelism()
-            .map(|n| (n.get() / 2).clamp(2, 8))
-            .unwrap_or(4) as i32
-    })
+/// 能放心占满的核数。Apple Silicon 上取性能核数（M4 是 4），其他机器取一半核数，2–8 之间。
+fn core_budget() -> usize {
+    #[cfg(target_os = "macos")]
+    if let Some(n) = performance_cores() {
+        return n.clamp(2, 8);
+    }
+    std::thread::available_parallelism()
+        .map(|n| (n.get() / 2).clamp(2, 8))
+        .unwrap_or(4)
 }
 
 #[cfg(target_os = "macos")]
-fn performance_cores() -> Option<i32> {
+fn performance_cores() -> Option<usize> {
     let out = std::process::Command::new("/usr/sbin/sysctl")
         .args(["-n", "hw.perflevel0.physicalcpu"])
         .output()
@@ -55,10 +48,28 @@ fn performance_cores() -> Option<i32> {
     String::from_utf8_lossy(&out.stdout).trim().parse().ok()
 }
 
-/// 一段一段识别，不批量：批量解码要把一批里的段补齐到最长那段，实测 SenseVoice 一批 4 段比
-/// 逐段慢近一倍；Qwen3-ASR 批量还要多吃几 GB 内存。
-fn batch_size(_kind: SherpaKind) -> usize {
-    std::env::var("CP_ASR_BATCH").ok().and_then(|v| v.parse().ok()).unwrap_or(1)
+/// 几路同时解码、每路几个线程。几路共用同一个识别器（权重只占一份内存），各自领下一段。
+///
+/// 一路时 ONNX Runtime 吃不满 CPU（段与段之间、算子之间都有空档），多开几路能把空档填上。
+/// M4 上一节 17 分钟的课：
+/// - SenseVoice 3 路 × 2 线程：14.1 → 11.9 秒。它不是逐字生成的，线程数不影响结果，输出逐字一致。
+/// - Qwen3-ASR 2 路 × 原来的线程数：114 → 95 秒，输出逐字一致。它逐字生成，每路线程数一变，
+///   浮点误差就可能让个别字走另一条路（3 路 × 2 线程 100 秒，但错误率 10.5% → 11.6%），
+///   所以每路线程数保持不变，只加路数。多一路约多占 0.4 GB；手机上内存本来就紧，只开一路。
+fn parallelism(kind: SherpaKind) -> (usize, i32) {
+    let env = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<usize>().ok());
+    let budget = core_budget();
+    let mobile = cfg!(any(target_os = "android", target_os = "ios"));
+    let (workers, threads) = match kind {
+        SherpaKind::SenseVoice => {
+            let workers = (budget - 1).clamp(1, 3);
+            (workers, (budget * 3 / 2 / workers).clamp(1, 4))
+        }
+        SherpaKind::Qwen3Asr => (if mobile { 1 } else { 2 }, budget),
+    };
+    let workers = env("CP_ASR_WORKERS").unwrap_or(workers).max(1);
+    let threads = env("CP_ASR_THREADS").unwrap_or(threads).max(1);
+    (workers, threads as i32)
 }
 
 pub struct SherpaJob {
@@ -120,41 +131,20 @@ fn transcribe_blocking(job: &SherpaJob, done: &AtomicU64, stop: &AtomicBool) -> 
     let segments = speech_segments(&job.vad, samples, stop)?;
     let vad_s = started.elapsed().as_secs_f64();
 
-    let recognizer = OfflineRecognizer::create(&recognizer_config(job))
+    let (workers, threads) = parallelism(job.model.kind);
+    let recognizer = OfflineRecognizer::create(&recognizer_config(job, threads))
         .ok_or_else(|| AppError::Pipeline(format!("加载 {} 失败，模型文件可能不完整，重新下载试试", job.model.display_name)))?;
 
     let load_s = started.elapsed().as_secs_f64() - vad_s;
-    let mut out = Vec::new();
-    let batch = batch_size(job.model.kind);
-    let mut finished = 0;
-    for chunk in segments.chunks(batch) {
-        if stop.load(Ordering::SeqCst) {
-            return Err(AppError::Pipeline("已取消".into()));
-        }
-        let streams: Vec<_> = chunk
-            .iter()
-            .map(|&(start, end)| {
-                let stream = recognizer.create_stream();
-                stream.accept_waveform(SAMPLE_RATE, &to_f32(&samples[start..end]));
-                stream
-            })
-            .collect();
-        recognizer.decode_multiple_streams(&streams.iter().collect::<Vec<_>>());
-        for (stream, &(start, end)) in streams.iter().zip(chunk) {
-            if let Some(result) = stream.get_result() {
-                let start_ms = start as i64 * 1000 / SAMPLE_RATE as i64;
-                let end_ms = end as i64 * 1000 / SAMPLE_RATE as i64;
-                out.extend(to_segments(&result.text, &result.tokens, result.timestamps.as_deref(), start_ms, end_ms));
-            }
-        }
-        finished += chunk.len();
-        done.store((finished as f64 / segments.len() as f64).to_bits(), Ordering::Relaxed);
-    }
+    let results = decode_parallel(&recognizer, samples, &segments, workers, done, stop)?;
+    let out: Vec<WhisperSegment> = results.into_iter().flatten().collect();
     let audio_s = samples.len() as f64 / SAMPLE_RATE as f64;
     let total_s = started.elapsed().as_secs_f64();
     tracing::info!(
         model = job.model.id,
         segments = segments.len(),
+        workers,
+        threads,
         audio_s,
         vad_s,
         load_s,
@@ -163,6 +153,49 @@ fn transcribe_blocking(job: &SherpaJob, done: &AtomicU64, stop: &AtomicBool) -> 
         "本地识别完成"
     );
     Ok(WhisperJson { transcription: out })
+}
+
+/// `workers` 路同时解码，每路从队列里领下一段，结果按段的顺序放回去。
+fn decode_parallel(
+    recognizer: &OfflineRecognizer,
+    samples: &[i16],
+    segments: &[(usize, usize)],
+    workers: usize,
+    done: &AtomicU64,
+    stop: &AtomicBool,
+) -> AppResult<Vec<Vec<WhisperSegment>>> {
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let finished = std::sync::atomic::AtomicUsize::new(0);
+    let results: std::sync::Mutex<Vec<Vec<WhisperSegment>>> =
+        std::sync::Mutex::new((0..segments.len()).map(|_| Vec::new()).collect());
+    std::thread::scope(|scope| {
+        for _ in 0..workers.min(segments.len()).max(1) {
+            scope.spawn(|| loop {
+                if stop.load(Ordering::SeqCst) {
+                    return;
+                }
+                let index = next.fetch_add(1, Ordering::SeqCst);
+                let Some(&(start, end)) = segments.get(index) else {
+                    return;
+                };
+                let stream = recognizer.create_stream();
+                stream.accept_waveform(SAMPLE_RATE, &to_f32(&samples[start..end]));
+                recognizer.decode(&stream);
+                if let Some(result) = stream.get_result() {
+                    let start_ms = start as i64 * 1000 / SAMPLE_RATE as i64;
+                    let end_ms = end as i64 * 1000 / SAMPLE_RATE as i64;
+                    let lines = to_segments(&result.text, &result.tokens, result.timestamps.as_deref(), start_ms, end_ms);
+                    results.lock().unwrap()[index] = lines;
+                }
+                let count = finished.fetch_add(1, Ordering::SeqCst) + 1;
+                done.store((count as f64 / segments.len() as f64).to_bits(), Ordering::Relaxed);
+            });
+        }
+    });
+    if stop.load(Ordering::SeqCst) {
+        return Err(AppError::Pipeline("已取消".into()));
+    }
+    Ok(results.into_inner().unwrap())
 }
 
 fn to_f32(samples: &[i16]) -> Vec<f32> {
@@ -264,11 +297,11 @@ fn speech_segments(vad_model: &Path, samples: &[i16], stop: &AtomicBool) -> AppR
     Ok(segments)
 }
 
-fn recognizer_config(job: &SherpaJob) -> OfflineRecognizerConfig {
+fn recognizer_config(job: &SherpaJob, threads: i32) -> OfflineRecognizerConfig {
     let dir = &job.model_dir;
     let path = |name: &str| Some(dir.join(name).to_string_lossy().into_owned());
     let mut config = OfflineRecognizerConfig::default();
-    config.model_config.num_threads = threads();
+    config.model_config.num_threads = threads;
     config.model_config.provider = Some("cpu".into());
     match job.model.kind {
         SherpaKind::SenseVoice => {
@@ -412,8 +445,12 @@ mod tests {
     }
 
     #[test]
-    fn thread_count_stays_in_range() {
-        assert!((2..=8).contains(&threads()));
+    fn parallelism_stays_in_range() {
+        for kind in [SherpaKind::SenseVoice, SherpaKind::Qwen3Asr] {
+            let (workers, threads) = parallelism(kind);
+            assert!((1..=3).contains(&workers), "{workers}");
+            assert!((1..=8).contains(&threads), "{threads}");
+        }
     }
 
     /// 真跑一遍：本机装了 SenseVoice 才跑（`<app_data>/asr/`），用 macOS 的 say 合成两句中文中间夹 8 秒静音。
