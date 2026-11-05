@@ -589,4 +589,71 @@ export const scenes = [
       await shot("result");
     },
   },
+  {
+    // 本地识别：SenseVoice / Qwen3-ASR 的模型清单，选了 Qwen3-ASR 时的热词框。
+    name: "local-asr",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => {
+        localStorage.setItem(
+          "__shot-settings",
+          JSON.stringify({
+            asr_backend: "whisper",
+            whisper_model: "qwen3-asr",
+            asr_language: "zh",
+            volcengine_asr_hotwords: "梯度下降, 反向传播, 损失函数, Transformer, softmax, 正则化",
+          }),
+        );
+      });
+      await page.reload({ waitUntil: "networkidle" });
+      await nav(page, "设置", "设置");
+      await page.getByRole("button", { name: "语音识别" }).first().click();
+      await page.getByText("本地识别模型").first().waitFor({ timeout: 4000 });
+      await shot();
+      await page.getByText("本地识别模型").first().evaluate((el) => el.scrollIntoView({ block: "center" }));
+      await shot("models");
+    },
+  },
+  {
+    // 手机内存放不下 Qwen3-ASR：模型清单上标出来。
+    name: "local-asr-lowmem",
+    devices: ["phone"],
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => {
+        localStorage.setItem("__shot-lowmem", "1");
+        localStorage.setItem("__shot-settings", JSON.stringify({ asr_backend: "whisper", whisper_model: "sensevoice" }));
+      });
+      await page.reload({ waitUntil: "networkidle" });
+      await nav(page, "设置", "设置");
+      await page.getByRole("button", { name: "语音识别" }).first().click();
+      await page.getByText("本地识别模型").first().evaluate((el) => el.scrollIntoView({ block: "center" }));
+      await shot();
+    },
+  },
+  {
+    // 处理队列：本地识别进行中。
+    name: "local-asr-queue",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-local-asr", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await nav(page, "处理队列", "队列");
+      await page.getByText(/本地识别/).first().waitFor({ timeout: 4000 });
+      await shot();
+    },
+  },
+  {
+    // 导入文件夹：认出 B 站客户端的离线缓存。
+    name: "bilibili-cache",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-folder", "/Users/demo/Movies/bilibili"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openCourse(page);
+      await page.getByRole("button", { name: /^导入/ }).first().click();
+      await page.getByRole("menuitem", { name: /导入整个文件夹/ }).click();
+      await page.getByRole("dialog", { name: "导入文件夹视频" }).waitFor({ timeout: 4000 });
+      await shot();
+    },
+  },
 ];

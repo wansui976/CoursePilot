@@ -208,10 +208,28 @@ export function installMockIpc({ theme, safeArea }) {
       window.__shareImages.push({ fileName, pngBase64 });
       return `/Users/demo/Desktop/${fileName}.png`;
     },
-    cmd_list_whisper_models: () => [
-      [{ id: "large-v3-turbo", display_name: "large-v3-turbo（推荐）", size_bytes: 1_620_000_000, url: "" }, true],
-      [{ id: "medium", display_name: "medium", size_bytes: 1_530_000_000, url: "" }, false],
-      [{ id: "small", display_name: "small", size_bytes: 488_000_000, url: "" }, false],
+    // 手机上后端只列 sherpa 模型；__shot-lowmem 时 Qwen3-ASR 标成「内存不够」。
+    cmd_list_whisper_models: () => {
+      const mobile = /iPhone|iPad|Android/.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
+      const lowMem = localStorage.getItem("__shot-lowmem") === "1";
+      const sherpa = [
+        [{ id: "sensevoice", display_name: "SenseVoice（中文推荐 · 快）", size_bytes: 240_000_000, url: "", fits_memory: true }, true],
+        [{ id: "qwen3-asr", display_name: "Qwen3-ASR 0.6B（中文高精度）", size_bytes: 988_000_000, url: "", fits_memory: !lowMem }, !lowMem],
+      ];
+      if (mobile) return sherpa;
+      return [
+        ...sherpa,
+        [{ id: "large-v3-turbo", display_name: "Whisper large-v3-turbo", size_bytes: 1_620_000_000, url: "" }, false],
+        [{ id: "small", display_name: "Whisper small", size_bytes: 488_000_000, url: "" }, false],
+      ];
+    },
+    // 「导入整个文件夹」选中的是 B 站客户端的缓存目录。
+    cmd_scan_folder: () => [
+      ...[
+        "P1 绪论：什么是机器学习", "P2 线性回归与最小二乘", "P3 梯度下降的直觉", "P4 逻辑回归与分类",
+        "P5 正则化与偏差方差", "P6 神经网络入门",
+      ].map((name, i) => ({ path: `/Users/demo/Movies/bilibili/${3_000_001 + i}`, name: `吴恩达机器学习 ${name}`, bilibili_cache: true })),
+      { path: "/Users/demo/Movies/bilibili/课堂录屏 第7周.mp4", name: "课堂录屏 第7周.mp4" },
     ],
     // 助手：回放一条完整回答。__shot-guided 时回一段引导模式的回答（带结构块）。
     cmd_assistant_ask: ({ requestId, query }) => {
@@ -312,7 +330,7 @@ export function installMockIpc({ theme, safeArea }) {
     },
     cmd_list_jobs: ({ videoId }) =>
       videoId === "v7"
-        ? [{ id: "j1", video_id: "v7", stage: "asr", status: "running", progress: 0.46, message: "语音识别中", created_at: now, updated_at: now }]
+        ? [{ id: "j1", video_id: "v7", stage: "asr", status: "running", progress: 0.46, message: localStorage.getItem("__shot-local-asr") === "1" ? "本地识别中（sensevoice，zh）" : "语音识别中", created_at: now, updated_at: now }]
         : [],
     cmd_list_transcripts: () => transcript,
     cmd_get_chapters: () => chapters,
@@ -340,7 +358,14 @@ export function installMockIpc({ theme, safeArea }) {
     cmd_get_screenshots: () => [],
     cmd_list_clips: () => [],
     cmd_video_skips: () => [],
-    cmd_get_setting: () => null,
+    // 场景可在 __shot-settings 里放一组设置值（如本地识别选了哪个模型）。
+    cmd_get_setting: ({ key }) => {
+      try {
+        return JSON.parse(localStorage.getItem("__shot-settings") || "{}")[key] ?? null;
+      } catch {
+        return null;
+      }
+    },
     cmd_has_secret: () => false,
     cmd_has_api_key: () => false,
     cmd_get_llm_profiles: () => [],
@@ -405,6 +430,7 @@ export function installMockIpc({ theme, safeArea }) {
         listeners.set(args.event, list);
         return args.handler;
       }
+      if (cmd === "plugin:dialog|open") return localStorage.getItem("__shot-folder");
       if (cmd.startsWith("plugin:")) return null;
       const handler = handlers[cmd];
       if (handler) return handler(args ?? {});
