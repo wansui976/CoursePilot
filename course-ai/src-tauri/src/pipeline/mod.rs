@@ -312,6 +312,9 @@ async fn run_all(
         .bind(&video_id)
         .fetch_one(&db.pool)
         .await?;
+    // 手机上锁屏、切走也接着跑；各阶段进度经 jobs::emit_update 报过去。
+    let _keep_alive =
+        crate::keep_alive::hold(crate::keep_alive::Kind::Processing, &video_id, &video.title);
 
     sqlx::query("UPDATE videos SET processed_status='processing' WHERE id=?")
         .bind(&video_id)

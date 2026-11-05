@@ -63,6 +63,9 @@ targets:
           NSAllowsLocalNetworking: true
         UIBackgroundModes:
           - remote-notification
+        # 处理视频、下载模型时锁屏或切走接着跑（iOS 26 的 BGContinuedProcessingTask，见 KeepAlive.swift）。
+        BGTaskSchedulerPermittedIdentifiers:
+          - $(PRODUCT_BUNDLE_IDENTIFIER).processing
     # 不声明 iCloud / 远程推送能力：代码里没有用到（云同步走自己的传输，通知是本地的），
     # 而个人开发团队根本签不了这两项——带着它们连真机都装不上：
     #   "Personal development teams ... do not support the Push Notifications and iCloud capabilities"

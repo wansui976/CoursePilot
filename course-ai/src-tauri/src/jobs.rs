@@ -164,6 +164,7 @@ pub struct JobEvent {
 }
 
 pub fn emit_update(app: &AppHandle, event: JobEvent) {
+    crate::keep_alive::report_job(&event.video_id, &event.stage, &event.status, event.progress);
     app.emit("job:update", event).ok();
 }
 

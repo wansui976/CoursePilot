@@ -70,6 +70,14 @@ class RecognizeImageTextArgs {
 }
 
 @InvokeArg
+class KeepAliveArgs {
+  var active: Boolean = false
+  var title: String = ""
+  var detail: String = ""
+  var progress: Double = -1.0
+}
+
+@InvokeArg
 class ShareFileArgs {
   lateinit var sourcePath: String
   lateinit var mime: String
@@ -276,6 +284,28 @@ class MobileFilesPlugin(private val activity: Activity) : Plugin(activity) {
       result.put("left", (insets?.left ?: 0) / density.toDouble())
       invoke.resolve(result)
     }
+  }
+
+  // 长任务期间的前台服务，见 KeepAliveService。
+  @Command
+  fun setKeepAlive(invoke: Invoke) {
+    val args = invoke.parseArgs(KeepAliveArgs::class.java)
+    activity.runOnUiThread {
+      KeepAliveService.update(
+        activity,
+        args.active,
+        KeepAliveService.State(args.title, args.detail, args.progress),
+      )
+      invoke.resolve()
+    }
+  }
+
+  // 按流量计费的网络（手机数据、个人热点、Wi-Fi 标了计费）。
+  @Command
+  fun networkInfo(invoke: Invoke) {
+    val connectivity = activity.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+      as android.net.ConnectivityManager
+    invoke.resolve(JSObject().apply { put("metered", connectivity.isActiveNetworkMetered) })
   }
 
   // 根页面按返回：照 Android 12 起系统对根 Activity 的默认做法退到后台，不结束进程——

@@ -209,7 +209,20 @@ async fn download_sherpa_model(
         .connect_timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|error| AppError::Other(error.to_string()))?;
+    let _keep_alive = crate::keep_alive::hold(
+        crate::keep_alive::Kind::ModelDownload,
+        model.id,
+        model.display_name,
+    );
     let emit = |received: u64, done: bool| {
+        if total > 0 {
+            crate::keep_alive::report(
+                model.id,
+                "download",
+                received as f64 / total as f64,
+                &format!("{:.0} / {:.0} MB", received as f64 / 1e6, total as f64 / 1e6),
+            );
+        }
         app.emit(
             "whisper:download",
             DownloadEvent {

@@ -256,6 +256,19 @@ pub async fn pick_and_persist_file<R: Runtime>(
     }
 }
 
+/// 把长任务的状态交给原生层（见 [`crate::keep_alive`]）。在 keep-alive 线程里同步调用。
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn set_keep_alive(status: &crate::keep_alive::Status) -> Result<(), String> {
+    let app = APP_HANDLE
+        .get()
+        .ok_or_else(|| "mobile-files app handle not initialized".to_string())?;
+    app.state::<MobileFiles<tauri::Wry>>()
+        .0
+        .run_mobile_plugin::<serde_json::Value>("setKeepAlive", status)
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn share_file<R: Runtime>(
     app: AppHandle<R>,

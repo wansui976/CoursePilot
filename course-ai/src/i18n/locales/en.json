@@ -1372,7 +1372,11 @@
     "lowMemory": "Not enough memory on this device",
     "lowMemoryHint": "The system would force-quit the app while transcribing; SenseVoice is used instead even if you pick this",
     "downloading": "{{percent}}%",
-    "download": "Download"
+    "download": "Download",
+    "meteredConfirm": "You are on mobile data (or a metered network). {{name}} is about {{size}}. Download now? You can also wait for Wi-Fi.",
+    "meteredConfirmTitle": "Download over mobile data?",
+    "meteredConfirmOk": "Download now",
+    "meteredConfirmCancel": "Wait for Wi-Fi"
   },
   "llmSettings": {
     "add": "Add",

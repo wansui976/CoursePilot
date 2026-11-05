@@ -66,6 +66,21 @@ final class MobileFilesPlugin: Plugin {
   /// 再留一遍——底部导航下面平白空出一截，内容也被提前截断。
   override public func load(webview: WKWebView) {
     webview.scrollView.contentInsetAdjustmentBehavior = .never
+    _ = NetworkStatus.shared
+  }
+
+  @objc public func setKeepAlive(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(KeepAliveArgs.self)
+    DispatchQueue.main.async {
+      KeepAliveController.shared.update(args)
+    }
+    invoke.resolve()
+  }
+
+  @objc public func networkInfo(_ invoke: Invoke) throws {
+    workQueue.async {
+      invoke.resolve(["metered": NetworkStatus.shared.metered])
+    }
   }
 
   @objc public func persistPickedFile(_ invoke: Invoke) throws {

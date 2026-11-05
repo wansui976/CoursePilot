@@ -242,6 +242,11 @@ pub fn spawn_transcode(
         move || {
             // 排队：拿到锁才开始转，避免几条视频同时解码。
             let _permit = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let _keep_alive = crate::keep_alive::hold(
+                crate::keep_alive::Kind::Transcode,
+                format!("transcode:{video_id}"),
+                "",
+            );
             *jobs.active.lock().unwrap() = Some(video_id.clone());
             #[cfg(target_os = "ios")]
             let outcome = ffi::run(&source, &destination).map(|()| {
@@ -266,7 +271,14 @@ pub fn spawn_transcode(
     tauri::async_runtime::spawn(async move {
         while jobs.is_running(&video_id) {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            jobs.report_progress(&video_id, &progress, ffi::progress());
+            let percent = ffi::progress();
+            jobs.report_progress(&video_id, &progress, percent);
+            crate::keep_alive::report(
+                &format!("transcode:{video_id}"),
+                "transcode",
+                percent as f64 / 100.0,
+                &format!("转码 {percent}%"),
+            );
         }
     });
 }

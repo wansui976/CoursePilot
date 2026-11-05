@@ -7,6 +7,7 @@ pub mod downloads;
 pub mod error;
 pub mod export;
 pub mod jobs;
+pub mod keep_alive;
 pub mod llm;
 pub mod media_server;
 pub mod mobile_files;

@@ -24,6 +24,7 @@ fn main() {
                         "share_file",
                         "system_bar_insets",
                         "move_task_to_back",
+                        "network_info",
                     ])
                     .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
             )

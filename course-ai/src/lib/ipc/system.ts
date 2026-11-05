@@ -24,6 +24,8 @@ export const app = {
   exit: (): Promise<void> => invoke("cmd_exit_app"),
   // Android 的 AppPlugin 接管了系统返回键；根页面没有可退层级时退到后台（不结束进程）。
   moveToBackground: (): Promise<void> => invoke("plugin:mobile-files|move_task_to_back"),
+  // 手机上现在连的是不是按流量计费的网络（手机数据、热点、低数据模式）。只在手机上调。
+  networkInfo: (): Promise<{ metered: boolean }> => invoke("plugin:mobile-files|network_info"),
   // 问一次 GitHub 上的最新版本（只取版本号和发布页地址）。
   checkUpdate: (): Promise<UpdateCheck> => invoke("cmd_check_update"),
 };

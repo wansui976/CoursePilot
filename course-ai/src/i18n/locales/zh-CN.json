@@ -1369,7 +1369,11 @@
     "lowMemory": "这台设备内存不够",
     "lowMemoryHint": "识别时会被系统强制关掉；选了它也会自动改用 SenseVoice",
     "downloading": "{{percent}}%",
-    "download": "下载"
+    "download": "下载",
+    "meteredConfirm": "现在用的是移动数据（或按流量计费的网络）。{{name}} 约 {{size}}，确定现在下载吗？也可以连上 Wi-Fi 再下。",
+    "meteredConfirmTitle": "用流量下载？",
+    "meteredConfirmOk": "现在下载",
+    "meteredConfirmCancel": "等 Wi-Fi"
   },
   "llmSettings": {
     "add": "新增",

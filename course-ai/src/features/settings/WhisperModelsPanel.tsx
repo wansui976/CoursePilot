@@ -1,9 +1,11 @@
 import { listen } from "@tauri-apps/api/event";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { ipc, type WhisperModel } from "@/lib/ipc";
+import { isMobile } from "@/lib/platform";
 
 type Row = [WhisperModel, boolean];
 
@@ -55,7 +57,31 @@ export function WhisperModelsPanel() {
     };
   }, [refresh]);
 
-  async function downloadModel(id: string) {
+  /** 手机上用流量下几百 MB 的模型前先问一句。查不出网络类型就不拦。 */
+  async function confirmMeteredDownload(model: WhisperModel) {
+    if (!isMobile()) return true;
+    const metered = await ipc.app
+      .networkInfo()
+      .then((info) => info.metered)
+      .catch(() => false);
+    if (!metered) return true;
+    return confirmDialog(
+      t("whisperModels.meteredConfirm", {
+        name: model.display_name,
+        size: formatBytes(model.size_bytes),
+      }),
+      {
+        title: t("whisperModels.meteredConfirmTitle"),
+        kind: "warning",
+        okLabel: t("whisperModels.meteredConfirmOk"),
+        cancelLabel: t("whisperModels.meteredConfirmCancel"),
+      },
+    );
+  }
+
+  async function downloadModel(model: WhisperModel) {
+    const id = model.id;
+    if (!(await confirmMeteredDownload(model))) return;
     setDownloadErrors((current) => {
       const next = { ...current };
       delete next[id];
@@ -133,7 +159,7 @@ export function WhisperModelsPanel() {
                   size="sm"
                   variant="outline"
                   disabled={downloading}
-                  onClick={() => void downloadModel(model.id)}
+                  onClick={() => void downloadModel(model)}
                 >
                   {downloading
                     ? t("whisperModels.downloading", { percent: pct })
@@ -145,7 +171,7 @@ export function WhisperModelsPanel() {
               <ErrorNote
                 className="mt-2"
                 error={downloadErrors[model.id]}
-                onRetry={() => void downloadModel(model.id)}
+                onRetry={() => void downloadModel(model)}
               />
             )}
           </div>

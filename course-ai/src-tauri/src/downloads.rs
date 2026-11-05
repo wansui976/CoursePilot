@@ -383,6 +383,8 @@ async fn run_job(app: AppHandle, job_id: String) {
     if job.status != "queued" {
         return;
     }
+    let _keep_alive =
+        crate::keep_alive::hold(crate::keep_alive::Kind::Download, &job_id, &job.title);
 
     if let Some(updated) =
         app.state::<DownloadQueue>()
@@ -396,6 +398,18 @@ async fn run_job(app: AppHandle, job_id: String) {
     let progress_id = job_id.clone();
     let progress_event = spec.progress_event.clone();
     let on_event = move |event: DownloadEvent| {
+        if let DownloadEvent::Progress {
+            downloaded,
+            total: Some(total),
+            ..
+        } = &event
+        {
+            if *total > 0 {
+                let fraction = *downloaded as f64 / *total as f64;
+                let detail = format!("下载 {}%", (fraction * 100.0).round() as i64);
+                crate::keep_alive::report(&progress_id, "download", fraction, &detail);
+            }
+        }
         if let Some(name) = &progress_event {
             let _ = progress_app.emit(name, event.clone());
         }
