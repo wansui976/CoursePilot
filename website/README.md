@@ -14,6 +14,7 @@ python3 -m http.server 8000   # 然后打开 http://localhost:8000
 页面里的产品图都是真实 CoursePilot 界面截图，统一放在 `screenshots/`：
 
 - `workbench-overview.webp`、`slides.webp`、`assistant.webp`：首屏、课件、提问三处大图。
+- `local-asr` / `mobile-local-asr` / `keep-alive` / `bilibili-cache`：「v0.3.9 新功能」轮播的四张图，与仓库 `assets/screenshots/` 同名文件一致。界面来自截图工具（`course-ai/tools/ui-shots` 的 `local-asr*`、`bilibili-cache` 场景），`keep-alive` 右侧的 Android 通知栏是模拟器上的真实截图。
 - `feynman` / `guided` / `find-explanation` / `highlights`：「v0.3.8 新功能」轮播的四张图，与仓库 `assets/screenshots/` 同名文件一致（演示课程「机器学习导论」）。
 - `mindmap` / `notes` / `quiz` / `concepts` / `dashboard` / `dark-mode`：「界面一览」画廊。每张都有完整截图（点开看）和一张 4:3 的 `*-thumb.webp` 局部缩略图（卡片里显示）。
 - 其余（`library`、`transcript`、`settings`）暂未在主页使用。

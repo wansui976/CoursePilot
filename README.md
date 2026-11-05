@@ -41,9 +41,21 @@ CoursePilot 就是为这个问题而生的。不管是 B 站上的公开课、�
 - 📺 **B 站友好**：贴链接就下载，整个播放列表 / 合集批量导入，弹幕和评论区也一并带下来；还能订阅合集，有新视频自动导入。
 - 🌍 **不止 B 站**：YouTube、播客等链接和本地音频（mp3 / m4a…）也能导入；外语课一键翻译字幕，看双语。
 - 📤 **好用也好分享**：一键导出「课件 + 讲解要点」讲义 PDF，笔记、脑图、学习周报都能生成分享图。
+- 🎙️ **不联网也能转写**：内置 SenseVoice / Qwen3-ASR 本地识别，中文讲课的错误率只有 Whisper base 的 1/4～1/5；电脑、iPhone、iPad、Android 都能跑。
 - 🔒 **数据在你手里**：资料全部存在本地，用你自己的 API Key（存在系统钥匙串里）；只用本地转写和 OCR 的话可以完全离线。
 
-## 🆕 最近更新（v0.3.8）
+## 🆕 最近更新（v0.3.9）
+
+- **本地识别换代：SenseVoice / Qwen3-ASR**：在三段带人工转写的中文讲课录音上，SenseVoice 错误率 3.6%、Qwen3-ASR 2.5%，原来默认的 Whisper base 是 13.4%；SenseVoice 转 10 分钟音频只要十几秒。默认改用 SenseVoice（240 MB）；Qwen3-ASR（940 MB）更准，还能读「热词」（和火山引擎共用一份），课里的术语认得更稳。英文或中英混杂多的课仍可选 Whisper large-v3-turbo。完整对比见 [`docs/asr-benchmark`](course-ai/docs/asr-benchmark/REPORT.md)。
+- **手机也能本地转写**：iPhone、iPad、Android 上都能选「本地识别」，不联网、不花钱——iPad 上一节 28 分钟的课 2 分半转完。内存放不下 Qwen3-ASR 的设备会在模型清单上标出来，选了也会自动改用 SenseVoice，不会闪退。
+- **锁屏、切走也接着跑**：手机上处理视频、下载模型时，Android 通知栏里一条进度、熄屏照样跑；iPhone / iPad 处理期间不自动锁屏，iOS 26 起切到别的 App 也能接着跑，锁屏上看得到进度。
+- **从 B 站客户端缓存导入**：「导入整个文件夹」认得 B 站电脑客户端的离线缓存，以及从手机拷出来的 `download` 目录。每一 P 列成一项、按分 P 排好；导入时把音视频原样合成一个 mp4，缓存本身不动。
+- **Whisper 不再复读、不在静音里编字**：长讲座里一句话循环十几遍，长停顿里冒出「请不吝点赞 订阅 转发」「字幕由 Amara.org 社区提供」这类幻觉，现在会被认出来清掉。
+- **模型下载更稳**：先走国内镜像，断了从断点接着下、卡住 30 秒自动换源，每个文件校验 SHA-256；手机上用流量下载前会先问一句。
+- **其他**：火山录音文件识别按模型版本自动选资源 ID，不再写死 1.0；手机文稿里只在当前句露出纠错按钮；iPhone / iPad 上 AV1 视频的课件从转码后的文件里截，不再失败。
+
+<details>
+<summary>v0.3.8 的更新</summary>
 
 - **费曼复述**：「重点章节」标题行的「费曼复述」——选一章，对着麦克风讲（或打字），AI 只对照课程原文指出讲到 / 漏掉 / 讲错的地方，每一条都能一键回看原片；漏掉的点一键做成复习卡，讲错的交给引导模式。看完一章会轻轻提示「讲一讲」，知识点页和学习仪表盘标出「已能讲清」。
 - **AI 助手引导模式**：打开「引导」后不直接给答案，一步步反问；回答下方有可点的选项、逐级提示、折叠的答案和步骤进度，想明白后给出总结，可一键做成复习卡。文稿里选中一段也能「引导我理解」。
@@ -53,6 +65,8 @@ CoursePilot 就是为这个问题而生的。不管是 B 站上的公开课、�
 - **全局后台任务**：生成摘要、导图、讲义、提取课件这类活在后台跑时，侧栏会出现入口，列出「哪个视频 · 在做什么 · 已用时」，点一下直达结果；跑完时如果你不在那个页面会提示一声。
 - **界面**：打开视频时封面放大成播放器、返回时缩回原处；手机上的对话框和菜单改成底部弹层；外观里新增「紧凑」密度；AI 回答、文稿、题目统一中文排版；导图节点带时间，点了跳回视频；配置类报错旁有「去设置」直达。
 - **修复**：长按 → 2 倍速时音调变高；iPhone / iPad 竖屏左上角返回键点不动；release 包里端上转码找不到入口；转码完成后播放器卡在「正在打开」。
+
+</details>
 
 <details>
 <summary>更早的更新（v0.3.1 – v0.3.7）</summary>
@@ -73,6 +87,14 @@ CoursePilot 就是为这个问题而生的。不管是 B 站上的公开课、�
 ## 📸 看看它长什么样
 
 <table>
+  <tr>
+    <td width="50%"><b>v0.3.9 · 本地识别：SenseVoice / Qwen3-ASR</b><br><img src="assets/screenshots/local-asr.webp" alt="设置里的本地识别：识别模型选 Qwen3-ASR，热词框里填着课程术语，下面的模型清单列出 SenseVoice、Qwen3-ASR 和 Whisper 各自的大小与是否已安装"></td>
+    <td width="50%"><b>v0.3.9 · 手机本地转写，锁屏也接着跑</b><br><img src="assets/screenshots/keep-alive.webp" alt="左边是手机处理队列里「本地识别中（SenseVoice，中文）」46%，右边是 Android 通知栏里「正在处理 03 梯度下降的直觉 · 语音识别 41%」的进度条"></td>
+  </tr>
+  <tr>
+    <td><b>v0.3.9 · 内存不够的手机自动改用 SenseVoice</b><br><img src="assets/screenshots/mobile-local-asr.webp" alt="两台 iPhone：一台选了 Qwen3-ASR 并填好热词，另一台的模型清单在 Qwen3-ASR 旁标着「这台设备内存不够」"></td>
+    <td><b>v0.3.9 · 从 B 站客户端缓存导入</b><br><img src="assets/screenshots/bilibili-cache.webp" alt="导入文件夹视频：列出吴恩达机器学习 P1 到 P6，每项标着「B站缓存」，最后一项是普通的课堂录屏"></td>
+  </tr>
   <tr>
     <td width="50%"><b>v0.3.8 · 费曼复述：讲一遍，看漏了什么</b><br><img src="assets/screenshots/feynman.webp" alt="费曼复述结果：讲到 2/3 个要点，原话里讲对的标绿、讲错的划波浪线，下面列出讲错的正确说法和漏掉的要点，各带回看时间"></td>
     <td width="50%"><b>v0.3.8 · AI 助手引导模式</b><br><img src="assets/screenshots/guided.webp" alt="引导模式：AI 不直接给答案，而是反问一步，下方有步骤进度、可点的选项、逐级提示和揭晓答案"></td>
@@ -107,15 +129,15 @@ CoursePilot 就是为这个问题而生的。不管是 B 站上的公开课、�
   </tr>
 </table>
 
-<sub>标了 v0.3.8 的四张来自界面截图工具的示例课程「机器学习导论」（演示数据）；其余截图来自 v0.3.6 的真实界面，课程是 B 站公开课「袁东申论领跑营」，所有学习资料均由 CoursePilot 自动生成。</sub>
+<sub>标了 v0.3.8 / v0.3.9 的截图来自界面截图工具的示例课程「机器学习导论」（演示数据），其中 Android 通知栏是模拟器上的真实截图；其余截图来自 v0.3.6 的真实界面，课程是 B 站公开课「袁东申论领跑营」，所有学习资料均由 CoursePilot 自动生成。</sub>
 
 ## 🚀 下载安装
 
 | 平台 | 安装包 | 说明 |
 | --- | --- | --- |
-| macOS（Apple Silicon / Intel） | [`.dmg`](https://github.com/wansui976/CoursePilot/releases/latest) | Apple 芯片选 `aarch64`，Intel 选 `x64`；已内置 ffmpeg、whisper.cpp 等依赖 |
+| macOS（Apple Silicon / Intel） | [`.dmg`](https://github.com/wansui976/CoursePilot/releases/latest) | Apple 芯片选 `aarch64`，Intel 选 `x64`；已内置 ffmpeg、whisper.cpp、sherpa-onnx 等依赖 |
 | Windows（x64） | [`.exe` / `.msi`](https://github.com/wansui976/CoursePilot/releases/latest) | 已内置依赖 |
-| Android（arm64） | [`.apk`](https://github.com/wansui976/CoursePilot/releases/latest) | 语音识别、OCR 走云端；暂时只能导入本地视频 |
+| Android（arm64） | [`.apk`](https://github.com/wansui976/CoursePilot/releases/latest) | 语音识别可选本地（SenseVoice / Qwen3-ASR）或云端；暂时只能导入本地视频 |
 | iOS / iPadOS | [`.ipa`](https://github.com/wansui976/CoursePilot/releases/latest)（未签名） | 需要自签安装；同上，暂时只能导入本地视频 |
 
 > [!NOTE]
@@ -134,7 +156,7 @@ CoursePilot 就是为这个问题而生的。不管是 B 站上的公开课、�
 <details>
 <summary><b>想要更好的识别效果？</b>（云端语音识别 / OCR）</summary>
 
-- **语音识别**：本地 whisper.cpp 开箱即用，但效果明显不如云端。建议在 **设置 → 语音识别** 配火山引擎或阿里云 DashScope，详见下方「云端服务怎么配」。
+- **语音识别**：中文课用本地的 SenseVoice 就够准（在 **设置 → 语音识别 → 本地识别** 下载，240 MB），要更准选 Qwen3-ASR 并填上课里的术语当热词。不想占电脑 / 手机算力，或者课程很长，可以配火山引擎或阿里云 DashScope，详见下方「云端服务怎么配」。
 - **OCR**：默认用本地 tesseract。课件文字复杂时，可以在 **设置 → 课件 / OCR** 切到阿里云 OCR 或 DeepSeek 视觉模型。
 
 </details>
@@ -146,10 +168,11 @@ CoursePilot 就是为这个问题而生的。不管是 B 站上的公开课、�
 ### 导入与处理
 
 - **课程库**：按课程文件夹归类视频，拖拽排序；支持本地视频和音频、B 站 / YouTube / 播客等链接、批量导入文件夹和播放列表 / 合集。
+- **B 站客户端缓存**：「导入整个文件夹」选 B 站电脑客户端的缓存目录，或从手机拷出来的 `download` 目录，每一 P 按顺序列出来；导入时把音视频原样合成 mp4（不转码），缓存目录只读不改。
 - **后台下载**：B 站 / 网络视频导入后在后台下，关掉弹窗、切换页面都不中断；处理队列里集中显示百分比和速度，可以取消、重试。B 站 CDN 中途断流时自动降一档清晰度重下；登录凭证过期时说明原因，重新导入 cookies 就能接着下。
 - **订阅合集**：导入播放列表时可以顺手订阅，之后有新视频自动导入并开始处理（每次检查最多 3 集，优先用自带字幕）；在课程菜单的「订阅更新」里管理。
 - **后台排队处理**：视频导入后自动依次走完所有步骤，进度实时显示，随时能暂停，失败了可以单独续跑；一批下完后最多同时处理 2 个。
-- **听写字幕**：本地 whisper.cpp，或火山引擎、阿里云云端识别（阿里云支持 `qwen3-asr-flash-filetrans` / `fun-asr` / `paraformer-v2` 三个模型，移动端默认走阿里云）。识别完自动纠错，口头禅、错别字、吞字都会清理掉；云端识别支持断点续跑。手动改了字幕之后，基于旧稿生成的笔记、章节等会自动标成「已过期」，提醒你重新生成。
+- **听写字幕**：本地识别（SenseVoice、Qwen3-ASR 走 sherpa-onnx，先用 VAD 切掉静音再识别；英文课可选 whisper.cpp），或火山引擎、阿里云云端识别（阿里云支持 `qwen3-asr-flash-filetrans` / `fun-asr` / `paraformer-v2` 三个模型）。本地模型从国内镜像下载、可断点续传；Whisper 的复读和静音幻觉会自动清掉。识别完自动纠错，口头禅、错别字、吞字都会清理掉；云端识别支持断点续跑。手动改了字幕之后，基于旧稿生成的笔记、章节等会自动标成「已过期」，提醒你重新生成。
 - **课件截取和 OCR**：按画面变化比例判断换页，截取动画稳定后的那一帧，跳过纯色页和转场，还会先裁掉视频自带的黑边。截图整批 OCR（本地 tesseract、阿里云 OCR 或 DeepSeek 视觉模型），和语音识别并行处理。
 
 ### AI 学习资料
@@ -238,7 +261,8 @@ CoursePilot 就是为这个问题而生的。不管是 B 站上的公开课、�
 | 能力 | 桌面（macOS / Windows） | 移动端（iOS / Android） |
 | --- | --- | --- |
 | 音频抽取 / 课件截取 | ffmpeg | 原生 AVFoundation / MediaMetadataRetriever |
-| 本地语音识别 | whisper.cpp | 走云端识别 |
+| 本地语音识别 | SenseVoice / Qwen3-ASR（sherpa-onnx）、whisper.cpp | SenseVoice / Qwen3-ASR（sherpa-onnx）；内存不够时自动改用 SenseVoice |
+| 后台处理 | — | Android 前台服务 + 通知栏进度；iOS 处理时不锁屏，iOS 26 起切走也接着跑 |
 | 网络视频下载 | yt-dlp（后台下载队列） | 暂时只能导入本地文件 |
 | 设备解不了的编码 | — | iOS 上把 AV1 自动转成 H.264（dav1d + VideoToolbox） |
 | 本地 OCR | tesseract | 走云端识别（阿里云 / DeepSeek） |
@@ -255,7 +279,7 @@ CoursePilot 就是为这个问题而生的。不管是 B 站上的公开课、�
 
 ## 🛠️ 从源码构建
 
-**技术栈**：Tauri 2 · React 19 + TypeScript + Vite + Tailwind CSS · Rust + SQLite（sqlx）· ffmpeg / whisper.cpp / yt-dlp / tesseract · FSRS-4.5
+**技术栈**：Tauri 2 · React 19 + TypeScript + Vite + Tailwind CSS · Rust + SQLite（sqlx）· ffmpeg / whisper.cpp / sherpa-onnx / yt-dlp / tesseract · FSRS-4.5
 
 需要 Node.js 20+、pnpm、Rust stable 和 Tauri 的系统依赖。macOS 上先装媒体工具：
 
@@ -328,9 +352,9 @@ cd src-tauri && cargo test   # 后端测试
    - 填入百炼 API Key，点「保存百炼 API Key」。
 4. 导入一个视频试跑。处理队列里出现「云端识别中（阿里云 …）」，就说明这条链路通了。
 
-**它是怎么跑的**：桌面端把音轨抽成 16 kHz 单声道 WAV，再压成 32 kbps MP3；移动端导出 M4A（AAC）。音频以 base64 `data:` URI 随请求提交，不需要先传 OSS；服务端异步转写，完成后应用下载 JSON 结果。整段一次提交，失败重试会重新识别（没有火山引擎那样的分段断点续跑）。音频会上传到阿里云，想完全离线请选本地 Whisper。
+**它是怎么跑的**：桌面端把音轨抽成 16 kHz 单声道 WAV，再压成 32 kbps MP3；移动端导出 M4A（AAC）。音频以 base64 `data:` URI 随请求提交，不需要先传 OSS；服务端异步转写，完成后应用下载 JSON 结果。整段一次提交，失败重试会重新识别（没有火山引擎那样的分段断点续跑）。音频会上传到阿里云，想完全离线请选本地识别。
 
-**限制**：官方异步接口本身允许单个文件 ≤ 2 GB、时长 ≤ 12 小时，但应用把整段音频 base64 内联在请求里，会撞上阿里云 JSON 单个字符串 **28,000,000 字符**的上限（实测，超了返回 HTTP 400）。按默认 32 kbps MP3 计算大约 **87 分钟**；更长的课程请先切成几段再导入，或改用本地 Whisper。应用会在上传前检查体积并直接报错，不会白传。轮询间隔 3 秒、最长等 30 分钟。费用按识别时长记在你自己的阿里云账号上。
+**限制**：官方异步接口本身允许单个文件 ≤ 2 GB、时长 ≤ 12 小时，但应用把整段音频 base64 内联在请求里，会撞上阿里云 JSON 单个字符串 **28,000,000 字符**的上限（实测，超了返回 HTTP 400）。按默认 32 kbps MP3 计算大约 **87 分钟**；更长的课程请先切成几段再导入，或改用本地识别。应用会在上传前检查体积并直接报错，不会白传。轮询间隔 3 秒、最长等 30 分钟。费用按识别时长记在你自己的阿里云账号上。
 
 **常见报错**：
 
@@ -340,7 +364,7 @@ cd src-tauri && cargo test   # 后端测试
 | `Model not exist`、HTTP 400 | 模型名不对，或账号 / 地域没开通这个模型。 |
 | `SUCCESS_WITH_NO_VALID_FRAGMENT` | 这段音频里没检测到人声（纯音乐、静音），不是 Key 的问题。 |
 | 一直 `PENDING` 或 30 分钟超时 | 音频太长或排队中，稍后重试；也可以换 `paraformer-v2`。 |
-| 上传很慢 | 整段音频要上传，长课在跨境网络下会明显变慢；可先切短或换本地 Whisper。 |
+| 上传很慢 | 整段音频要上传，长课在跨境网络下会明显变慢；可先切短或换本地识别。 |
 
 > 2026-10-26 实测（华北 2 / 北京）：三个模型都能用 base64 data URI 跑通，MP3 与 M4A 均被接受；错误 Key 返回 401，错误模型返回 400，纯静音返回 `SUCCESS_WITH_NO_VALID_FRAGMENT`。完整记录见 [`course-ai/tools/aliyun-asr/availability-2026-10-26.md`](course-ai/tools/aliyun-asr/availability-2026-10-26.md)。
 
@@ -367,7 +391,7 @@ cd src-tauri && cargo test   # 后端测试
 - **AI 功能都是灰的？** 先在 **设置 → 大模型** 配好 API Key，章节、摘要、笔记、问答都依赖它。
 - **课程问答需要配 embeddings 吗？** 不需要。问答直接按相关性挑出字幕段落交给大模型；文稿搜索是本地关键词匹配，也不需要额外配置。
 - **阿里云 OCR 和 DashScope 语音识别的凭证能通用吗？** 不能。OCR 用 AccessKey ID / Secret，DashScope 用 API Key，两套别混用；百炼里不同地域的 API Key 也不通用。
-- **阿里云语音识别报「没有检测到语音」？** 说明接口和 Key 都是通的，只是这段音频里没有人声。纯音乐、静音视频或音轨损坏时会这样，可以改用视频自带字幕或本地 Whisper。
+- **阿里云语音识别报「没有检测到语音」？** 说明接口和 Key 都是通的，只是这段音频里没有人声。纯音乐、静音视频或音轨损坏时会这样，可以改用视频自带字幕或本地识别。
 - **从备份恢复后 AI 不能用了？** API Key 存在系统钥匙串里、不进备份文件，恢复后需要重新填一次。
 
 ## 🤝 参与和支持

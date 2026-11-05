@@ -6,7 +6,7 @@
     <title>CoursePilot — 把课程视频变成真正记得住的东西</title>
     <meta
       name="description"
-      content="开源的 AI 网课学习工具：导入本地或 B 站课程视频，自动转写、笔记、章节、课件截图、脑图、练习题、知识点和间隔复习；费曼复述检验你是否真的讲得清，拍一道题就能找到课里讲它的地方。本地优先，数据在你手里。"
+      content="开源的 AI 网课学习工具：导入本地或 B 站课程视频，自动转写、笔记、章节、课件截图、脑图、练习题、知识点和间隔复习；费曼复述检验你是否真的讲得清，拍一道题就能找到课里讲它的地方；内置 SenseVoice / Qwen3-ASR 本地识别，电脑和手机都能离线转写。本地优先，数据在你手里。"
     />
     <meta name="theme-color" content="#000000" />
 
@@ -1319,7 +1319,7 @@
         <div class="aurora" aria-hidden="true"></div>
         <div class="tile__inner" style="position: relative; z-index: 1;">
           <a class="new-pill" href="#whats-new" data-animate="hero" style="--motion-delay: 40ms" data-umami-event="hero-whats-new">
-            <span class="new-pill__tag">v0.3.8</span>费曼复述、引导模式、拍题找讲解
+            <span class="new-pill__tag">v0.3.9</span>不联网也能转写：SenseVoice / Qwen3-ASR，手机也能跑
           </a>
           <p class="eyebrow" data-animate="hero" style="--motion-delay: 80ms">CoursePilot</p>
           <h1 class="hero-display" data-animate="hero" style="--motion-delay: 160ms">把课程视频变成<br />真正记得住的东西。</h1>
@@ -1340,8 +1340,68 @@
         </div>
       </section>
 
-      <!-- ============ v0.3.8 新功能 ============ -->
+      <!-- ============ v0.3.9 新功能 ============ -->
       <section class="tile tile--light" id="whats-new">
+        <div class="tile__inner">
+          <p class="eyebrow" data-animate>v0.3.9 新功能</p>
+          <h2 class="display-lg" data-animate>不联网，也能把课听写下来。</h2>
+          <div class="showcase" data-showcase data-animate>
+            <div class="showcase__tabs" role="tablist" aria-label="v0.3.9 新功能">
+              <button class="showcase__tab" type="button" role="tab" id="tab-local-asr" aria-controls="panel-local-asr" aria-selected="true">本地识别<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-mobile-asr" aria-controls="panel-mobile-asr" aria-selected="false" tabindex="-1">手机转写<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-keep-alive" aria-controls="panel-keep-alive" aria-selected="false" tabindex="-1">锁屏接着跑<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-bili-cache" aria-controls="panel-bili-cache" aria-selected="false" tabindex="-1">B 站缓存导入<span class="showcase__bar"><i></i></span></button>
+            </div>
+            <div class="showcase__panels">
+              <figure class="showcase__panel is-active" id="panel-local-asr" role="tabpanel" aria-labelledby="tab-local-asr">
+                <figcaption class="showcase__copy">
+                  <h3>错字少到原来的四分之一。</h3>
+                  <p>内置 SenseVoice 和 Qwen3-ASR。三段中文讲课实测，SenseVoice 错误率 3.6%、Qwen3-ASR 2.5%，原来的 Whisper base 是 13.4%；SenseVoice 十几秒转完 10 分钟。Qwen3-ASR 还能读热词，课里的术语认得更稳。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/local-asr.webp" width="1600" height="1000" loading="lazy" alt="设置里的本地识别：识别模型选 Qwen3-ASR，热词框里填着课程术语，下面的模型清单列出 SenseVoice、Qwen3-ASR 和 Whisper 各自的大小与是否已安装" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-mobile-asr" role="tabpanel" aria-labelledby="tab-mobile-asr">
+                <figcaption class="showcase__copy">
+                  <h3>手机上转写，不花一分钱。</h3>
+                  <p>iPhone、iPad、Android 都能选「本地识别」，不联网、不用配 Key。iPad 上一节 28 分钟的课两分半转完。内存放不下 Qwen3-ASR 的设备会在清单上标出来，选了也会自动改用 SenseVoice。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/mobile-local-asr.webp" width="1600" height="1000" loading="lazy" alt="两台 iPhone：一台选了 Qwen3-ASR 并填好热词，另一台的模型清单在 Qwen3-ASR 旁标着「这台设备内存不够」" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-keep-alive" role="tabpanel" aria-labelledby="tab-keep-alive">
+                <figcaption class="showcase__copy">
+                  <h3>放下手机，它接着跑。</h3>
+                  <p>处理视频、下载模型时，Android 通知栏里一条进度，熄屏照样跑；iPhone / iPad 处理期间不自动锁屏，iOS 26 起切到别的 App 也能接着跑。用流量下载大模型前，会先问你一句。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/keep-alive.webp" width="1600" height="1000" loading="lazy" alt="左边是手机处理队列里「本地识别中（SenseVoice，中文）」46%，右边是 Android 通知栏里「正在处理 03 梯度下降的直觉 · 语音识别 41%」的进度条" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-bili-cache" role="tabpanel" aria-labelledby="tab-bili-cache">
+                <figcaption class="showcase__copy">
+                  <h3>缓存过的 B 站课，直接导进来。</h3>
+                  <p>「导入整个文件夹」认得 B 站电脑客户端的离线缓存，也认得从手机拷出来的 download 目录。每一 P 按顺序列好，导入时把音视频原样合成一个 mp4，缓存本身不动。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/bilibili-cache.webp" width="1600" height="1000" loading="lazy" alt="导入文件夹视频：列出吴恩达机器学习 P1 到 P6，每项标着「B站缓存」，最后一项是普通的课堂录屏" />
+                </div>
+              </figure>
+            </div>
+            <div class="showcase__more">
+              <span>Whisper 不再复读、不在静音里编字</span>
+              <span>模型下载断点续传、自动换源</span>
+              <span>用流量下载前先确认</span>
+              <span>火山识别自动适配资源 ID</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ v0.3.8 新功能 ============ -->
+      <section class="tile tile--parchment" id="v038">
         <div class="tile__inner">
           <p class="eyebrow" data-animate>v0.3.8 新功能</p>
           <h2 class="display-lg" data-animate>不只看过，还要讲得出来。</h2>
@@ -1470,7 +1530,7 @@
             <div class="workflow__step" data-animate style="--motion-delay: 120ms">
               <span>02</span>
               <strong>转写</strong>
-              <p>本地 whisper.cpp，或火山、阿里云 DashScope。</p>
+              <p>本地 SenseVoice / Qwen3-ASR / Whisper，或火山、阿里云 DashScope。</p>
             </div>
             <div class="workflow__step" data-animate style="--motion-delay: 180ms">
               <span>03</span>
@@ -1821,7 +1881,7 @@
       <section class="tile tile--parchment" id="download">
         <div class="tile__inner">
           <h2 class="display-lg" data-animate>下载，拖进第一节课。</h2>
-          <p class="lead" data-animate>桌面版已内置 ffmpeg、whisper.cpp 等依赖，装好就能用；手机版的语音识别和 OCR 走云端。</p>
+          <p class="lead" data-animate>桌面版已内置 ffmpeg、whisper.cpp、sherpa-onnx 等依赖，装好就能用；手机版也能本地转写，OCR 走云端。</p>
           <div class="cta-row" data-animate>
             <a class="btn-pill" href="https://github.com/wansui976/CoursePilot/releases/latest" data-primary-download data-magnetic data-umami-event="download" data-umami-event-platform="auto">下载最新版本</a>
             <a class="btn-pill btn-dark-link" href="https://github.com/wansui976/CoursePilot" data-magnetic data-umami-event="github" data-umami-event-from="download">GitHub 源码</a>
@@ -1917,7 +1977,7 @@
           </div>
         </div>
         <p class="footer__legal">
-          CoursePilot 把课程视频变成真正记得住的东西——自动转写、笔记、知识点、间隔复习，还有 AI 助手。云端语音识别、大模型和 OCR 需要在应用内配置对应服务的 API Key。<br />
+          CoursePilot 把课程视频变成真正记得住的东西——自动转写、笔记、知识点、间隔复习，还有 AI 助手。大模型、云端语音识别和 OCR 需要在应用内配置对应服务的 API Key；本地识别不用。<br />
           App Store 与 App Store 标识、Google Play 与 Google Play 标识分别为 Apple Inc. 与 Google LLC 的商标。<br />
           © <span id="year">2026</span> CoursePilot. 保留所有权利。
         </p>
@@ -2266,10 +2326,8 @@
         });
       })();
 
-      // ---- 新功能轮播：分段控件切换截图，进度条走完自动下一项 ----
-      (function () {
-        const root = document.querySelector("[data-showcase]");
-        if (!root) return;
+      // ---- 新功能轮播：分段控件切换截图，进度条走完自动下一项（每一版一个轮播，各自独立） ----
+      document.querySelectorAll("[data-showcase]").forEach(function (root) {
         const tabs = Array.from(root.querySelectorAll('[role="tab"]'));
         const panels = tabs.map((tab) => document.getElementById(tab.getAttribute("aria-controls")));
         let current = 0;
@@ -2331,7 +2389,7 @@
           { threshold: 0.35 }
         ).observe(root);
         syncPlayback();
-      })();
+      });
 
       // ---- 截图放大查看：界面一览的卡片、新功能截图 ----
       (function () {

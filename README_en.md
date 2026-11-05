@@ -40,10 +40,27 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 - 📺 **Bilibili-friendly** — paste a link to download, batch-import playlists or collections, keep the danmaku and comment threads, and follow collections so new videos import themselves.
 - 🌍 **Beyond Bilibili** — YouTube, podcast links and local audio (mp3, m4a…) work too, and foreign-language lectures get one-click translated, bilingual subtitles.
 - 📤 **Made to share** — export a slide-by-slide handout as PDF, and turn notes, mind maps or your study week into share-ready images.
+- 🎙️ **Transcribe without a network** — built-in SenseVoice / Qwen3-ASR local recognition makes a quarter to a fifth of the errors of Whisper base on Chinese lectures, and runs on Mac, Windows, iPhone, iPad and Android.
 - 🔒 **Your data stays yours** — everything lives on your device and uses your own API keys (stored in the system keychain). It runs fully offline with local transcription and OCR.
 
-## 🆕 Recent updates (v0.3.1 – v0.3.6)
+## 🆕 Recent updates (v0.3.9)
 
+- **New local speech recognition: SenseVoice / Qwen3-ASR** — on three hand-transcribed Chinese lecture recordings, SenseVoice gets 3.6% of words wrong and Qwen3-ASR 2.5%, against 13.4% for Whisper base, the old default. SenseVoice transcribes 10 minutes of audio in a dozen seconds. It is the new default (240 MB); Qwen3-ASR (940 MB) is more accurate and reads a hotword list (shared with Volcengine), so course terminology comes out right. Whisper large-v3-turbo is still there for English or heavily mixed lectures. Full comparison in [`docs/asr-benchmark`](course-ai/docs/asr-benchmark/REPORT.md).
+- **Local transcription on phones** — iPhone, iPad and Android can pick "Local recognition": offline and free. A 28-minute lecture takes two and a half minutes on an iPad. Devices without enough memory for Qwen3-ASR get a note in the model list and fall back to SenseVoice instead of crashing.
+- **Keeps going when the screen locks** — on Android, processing videos and downloading models runs as a foreground service with a progress notification, even with the screen off. iPhone and iPad keep the screen awake while processing, and on iOS 26 work continues after you switch apps, with progress on the lock screen.
+- **Import from the Bilibili app's cache** — "Import a whole folder" recognizes the offline cache of the Bilibili desktop client and the `download` folder copied off a phone. Every part is listed in order; on import the audio and video streams are remuxed into one mp4 without re-encoding, and the cache itself is left untouched.
+- **Whisper stops looping and inventing text in silence** — a sentence repeated a dozen times, or "please like and subscribe" style phrases appearing in long pauses, are now detected and removed.
+- **Sturdier model downloads** — mirrors in China first; resumes where it stopped, switches source after 30 seconds without data, and verifies SHA-256 for every file. Phones ask before downloading over mobile data.
+- **Also** — Volcengine file transcription picks the right resource ID for the model version; on touch screens only the current transcript line shows the correction button; slides of AV1 videos on iPhone / iPad are captured from the transcoded file.
+
+<details>
+<summary>v0.3.8 and earlier</summary>
+
+- **Feynman retelling (v0.3.8)** — explain a chapter in your own words (by voice or text); the AI compares it with the lecture only and marks what you covered, missed or got wrong, each with a jump back to the video.
+- **Guided mode (v0.3.8)** — the assistant asks you step by step instead of handing over the answer, with options, graded hints and a progress bar.
+- **Find the explanation for a problem (v0.3.8)** — photograph or paste a homework problem and get the parts of the course that explain it, ready to play in sequence.
+- **Highlights cut (v0.3.8)** — the AI marks admin notices, small talk and repetition; fast-forward or skip them.
+- **LLM settings (v0.3.8)** — OpenAI-compatible, Anthropic, Gemini, Ollama and Azure OpenAI protocols with 11 provider presets and a model picker.
 - **Easier note-taking** — press `N` while watching to jot a note; select transcript text and choose “Quote to notes” to add it with its timestamp; paste, drop, or capture the current video frame as an image; a formatting bar is always at hand and pasted Markdown turns into formatting; notes keep a version history and warn you before a large deletion.
 - **Focus reading** — the study panel fills the workbench with the text centered while the video keeps playing. Pick Song / Hei / Kai / FangSong reading fonts in three sizes, with proper CJK typesetting.
 - **New player bar** — controls float over the video; the progress bar is split at chapters and shows the chapter name on hover; click to play/pause, double-click for full screen; smart speed, silence skipping, black-bar cropping and caption size/background all live under “Playback settings”.
@@ -52,11 +69,22 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 - **Phones and tablets** — releases now include an Android APK and an (unsigned) iOS / iPadOS package; tablets in portrait split the study area with notes pinned on the right; AV1 videos an iPhone or iPad can't decode are transcoded to H.264 on the device.
 - **Windows** — local transcription, slide OCR and database backups were tested on a clean Windows 11; no more console windows popping up during processing.
 
+
+</details>
+
 Full notes for every version are on the [Releases](https://github.com/wansui976/CoursePilot/releases) page.
 
 ## 📸 Screenshots
 
 <table>
+  <tr>
+    <td width="50%"><b>v0.3.9 · Local recognition: SenseVoice / Qwen3-ASR</b><br><img src="assets/screenshots/local-asr.webp" alt="Local recognition settings: Qwen3-ASR selected, course terms in the hotword box, and the model list with SenseVoice, Qwen3-ASR and Whisper sizes and install state"></td>
+    <td width="50%"><b>v0.3.9 · Transcribe on the phone, even with the screen locked</b><br><img src="assets/screenshots/keep-alive.webp" alt="Left: the phone's processing queue transcribing locally with SenseVoice at 46%. Right: an Android notification showing processing progress at 41%"></td>
+  </tr>
+  <tr>
+    <td><b>v0.3.9 · Low-memory phones fall back to SenseVoice</b><br><img src="assets/screenshots/mobile-local-asr.webp" alt="Two iPhones: one with Qwen3-ASR and hotwords set, the other marking Qwen3-ASR as needing more memory than the device has"></td>
+    <td><b>v0.3.9 · Import from the Bilibili app's cache</b><br><img src="assets/screenshots/bilibili-cache.webp" alt="Folder import listing parts P1 to P6 of a course, each tagged as Bilibili cache, plus an ordinary screen recording"></td>
+  </tr>
   <tr>
     <td width="50%"><b>New player bar and playback settings</b><br><img src="assets/screenshots/player.webp" alt="Floating player bar with a chapter-segmented progress bar and the current chapter name; the playback settings menu holds smart speed, silence skipping, black-bar cropping, and caption size and background"></td>
     <td width="50%"><b>Select transcript text, send it to your notes</b><br><img src="assets/screenshots/transcript.webp" alt="Transcript following playback; selecting a line shows Ask AI / Quote to notes / Make cloze card"></td>
@@ -89,9 +117,9 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 
 | Platform | Installer | Notes |
 | --- | --- | --- |
-| macOS (Apple Silicon / Intel) | [`.dmg`](https://github.com/wansui976/CoursePilot/releases/latest) | `aarch64` for Apple silicon, `x64` for Intel; ffmpeg, whisper.cpp, etc. bundled |
+| macOS (Apple Silicon / Intel) | [`.dmg`](https://github.com/wansui976/CoursePilot/releases/latest) | `aarch64` for Apple silicon, `x64` for Intel; ffmpeg, whisper.cpp, sherpa-onnx, etc. bundled |
 | Windows (x64) | [`.exe` / `.msi`](https://github.com/wansui976/CoursePilot/releases/latest) | Dependencies bundled |
-| Android (arm64) | [`.apk`](https://github.com/wansui976/CoursePilot/releases/latest) | Cloud ASR / OCR; local video import only for now |
+| Android (arm64) | [`.apk`](https://github.com/wansui976/CoursePilot/releases/latest) | Local (SenseVoice / Qwen3-ASR) or cloud ASR; local video import only for now |
 | iOS / iPadOS | [`.ipa`](https://github.com/wansui976/CoursePilot/releases/latest) (unsigned) | Sideload it yourself; local video import only for now |
 
 > [!NOTE]
@@ -110,7 +138,7 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 <details>
 <summary><b>Want better recognition?</b> (cloud ASR / OCR)</summary>
 
-- **Speech recognition**: local whisper.cpp works out of the box but is noticeably weaker than cloud ASR. Set up Volcengine or Alibaba DashScope in **Settings → Speech Recognition** (see "Cloud services" below).
+- **Speech recognition**: for Chinese lectures the local SenseVoice model is accurate enough (download it under **Settings → Speech Recognition → Local recognition**, 240 MB); for more accuracy pick Qwen3-ASR and add the course's terms as hotwords. To spare your computer or phone, or for very long lectures, set up Volcengine or Alibaba DashScope (see "Cloud services" below).
 - **OCR**: local tesseract by default. For dense slides, switch to Alibaba Cloud OCR or the DeepSeek vision model in **Settings → Slides / OCR**.
 
 </details>
@@ -122,10 +150,11 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 ### Import & processing
 
 - **Course library** — organize videos into course folders with drag-and-drop ordering. Import local video or audio, Bilibili / YouTube / podcast links, or batch-import folders and playlists/collections.
+- **Bilibili app cache** — point "Import a whole folder" at the Bilibili desktop client's cache or a phone's `download` folder; every part is listed in order and remuxed into an mp4 (no re-encoding) without touching the cache.
 - **Background downloads** — Bilibili / web videos download in the background; closing the dialog or switching pages doesn't stop them. The processing queue shows percentage and speed and lets you cancel or retry. When Bilibili's CDN cuts the stream mid-download, it retries one quality step lower; if your login cookies have expired it says so, and re-importing cookies resumes the download.
 - **Followed collections** — follow a playlist while importing it; new videos are imported and processed automatically (up to 3 per check, preferring built-in subtitles). Manage them under “Subscriptions” in the course menu.
 - **Background queue** — every imported video runs through all steps automatically, with live progress. Pause anytime; retry just the failed step. After a batch download, at most two videos process at once.
-- **Transcription** — local whisper.cpp or cloud ASR (Volcengine, Alibaba). An LLM then cleans up filler words, typos, and swallowed syllables. Cloud ASR resumes from checkpoints. If you edit a transcript, materials generated from the old version are marked outdated.
+- **Transcription** — local recognition (SenseVoice and Qwen3-ASR via sherpa-onnx, with VAD skipping silence; whisper.cpp for English lectures) or cloud ASR (Volcengine, Alibaba). Local models download from mirrors with resume; Whisper's loops and silence hallucinations are cleaned up automatically. An LLM then cleans up filler words, typos, and swallowed syllables. Cloud ASR resumes from checkpoints. If you edit a transcript, materials generated from the old version are marked outdated.
 - **Slide extraction & OCR** — detects page turns by frame-difference ratio, captures the stable frame after animations, skips solid-color and transition frames, and crops black bars first. Batch OCR runs through local tesseract, Alibaba Cloud OCR, or the DeepSeek vision model, in parallel with speech recognition.
 
 ### AI study materials
@@ -207,7 +236,8 @@ ASR and slide extraction run in parallel. Each step's progress shows in the proc
 | Capability | Desktop (macOS / Windows) | Mobile (iOS / Android) |
 | --- | --- | --- |
 | Audio extraction / slide capture | ffmpeg | Native AVFoundation / MediaMetadataRetriever |
-| Local ASR | whisper.cpp | Cloud ASR |
+| Local ASR | SenseVoice / Qwen3-ASR (sherpa-onnx), whisper.cpp | SenseVoice / Qwen3-ASR (sherpa-onnx); falls back to SenseVoice when memory is short |
+| Background processing | — | Android foreground service with a progress notification; iOS keeps the screen awake, and from iOS 26 continues after you switch apps |
 | Online video download | yt-dlp (background download queue) | Local files only for now |
 | Codecs the device can't decode | — | iOS transcodes AV1 to H.264 (dav1d + VideoToolbox) |
 | Local OCR | tesseract | Cloud OCR (Alibaba / DeepSeek) |
@@ -224,7 +254,7 @@ ASR and slide extraction run in parallel. Each step's progress shows in the proc
 
 ## 🛠️ Build from source
 
-**Stack**: Tauri 2 · React 19 + TypeScript + Vite + Tailwind CSS · Rust + SQLite (sqlx) · ffmpeg / whisper.cpp / yt-dlp / tesseract · FSRS-4.5
+**Stack**: Tauri 2 · React 19 + TypeScript + Vite + Tailwind CSS · Rust + SQLite (sqlx) · ffmpeg / whisper.cpp / sherpa-onnx / yt-dlp / tesseract · FSRS-4.5
 
 You'll need Node.js 20+, pnpm, Rust stable, and Tauri's system prerequisites. On macOS, install the media tools first:
 
@@ -284,9 +314,9 @@ Android and iOS use this backend by default. On desktop, choose "Alibaba Cloud D
    - Paste the API key and click **Save Bailian API Key**.
 4. Import a video. Once the processing queue shows "Transcribing with Alibaba Cloud …", the path works.
 
-**How it works**: the desktop app extracts 16 kHz mono WAV, converts it to 32 kbps MP3, and mobile exports M4A (AAC). Audio is submitted inline as a base64 `data:` URI (no OSS upload needed); the app polls the async task and downloads the JSON result. The whole track is submitted at once, so a retry starts over (unlike Volcengine's per-chunk resume). Audio is uploaded to Alibaba Cloud — choose local Whisper if you need fully offline processing.
+**How it works**: the desktop app extracts 16 kHz mono WAV, converts it to 32 kbps MP3, and mobile exports M4A (AAC). Audio is submitted inline as a base64 `data:` URI (no OSS upload needed); the app polls the async task and downloads the JSON result. The whole track is submitted at once, so a retry starts over (unlike Volcengine's per-chunk resume). Audio is uploaded to Alibaba Cloud — choose local recognition if you need fully offline processing.
 
-**Limits**: the official async API itself allows up to 2 GB / 12 hours per file, but the app inlines the whole audio as base64 in one request, which hits Alibaba Cloud's **28,000,000-character** JSON string limit (tested; HTTP 400 beyond that). At the default 32 kbps MP3 that is roughly **87 minutes**. Split longer lectures before importing, or use local Whisper. The app checks the size before uploading and fails fast instead of wasting the upload. Polling runs every 3 seconds for up to 30 minutes. Billing is by transcribed duration on your own Alibaba Cloud account.
+**Limits**: the official async API itself allows up to 2 GB / 12 hours per file, but the app inlines the whole audio as base64 in one request, which hits Alibaba Cloud's **28,000,000-character** JSON string limit (tested; HTTP 400 beyond that). At the default 32 kbps MP3 that is roughly **87 minutes**. Split longer lectures before importing, or use local recognition. The app checks the size before uploading and fails fast instead of wasting the upload. Polling runs every 3 seconds for up to 30 minutes. Billing is by transcribed duration on your own Alibaba Cloud account.
 
 **Troubleshooting**:
 
@@ -296,7 +326,7 @@ Android and iOS use this backend by default. On desktop, choose "Alibaba Cloud D
 | `Model not exist`, HTTP 400 | Wrong model name, or the model is not enabled for this account/region. |
 | `SUCCESS_WITH_NO_VALID_FRAGMENT` | No speech was detected (music-only or silent audio); the key is fine. |
 | Stuck in `PENDING` or times out after 30 minutes | The audio is long or queued; retry later, or switch to `paraformer-v2`. |
-| Upload is slow | The whole track is uploaded; cross-border networks can be slow. Split the lecture or use local Whisper. |
+| Upload is slow | The whole track is uploaded; cross-border networks can be slow. Split the lecture or use local recognition. |
 
 > Tested on 2026-10-26 (Beijing region): all three models worked with base64 data URIs, MP3 and M4A were accepted, a bad key returned 401, an unknown model returned 400, and silence returned `SUCCESS_WITH_NO_VALID_FRAGMENT`. Full record: [`course-ai/tools/aliyun-asr/availability-2026-10-26.md`](course-ai/tools/aliyun-asr/availability-2026-10-26.md).
 
@@ -323,7 +353,7 @@ In **Settings → Slides / OCR**, choose "DeepSeek Vision (AI)" and fill in the 
 - **AI features are greyed out?** Add an API key in **Settings → LLM** first. Chapters, summaries, notes, and Q&A all depend on it.
 - **Does Q&A need embeddings?** No. Q&A selects relevant transcript passages and sends them to the LLM, and transcript search is local keyword matching, so there's nothing extra to configure.
 - **Can Alibaba OCR and DashScope ASR share credentials?** No. OCR uses an AccessKey ID/Secret, while DashScope uses an API key; API keys are also region-specific.
-- **DashScope says "no speech detected"?** The endpoint and key are fine; the audio simply has no human speech (music-only, silent, or a broken track). Use built-in subtitles or local Whisper for those.
+- **DashScope says "no speech detected"?** The endpoint and key are fine; the audio simply has no human speech (music-only, silent, or a broken track). Use built-in subtitles or local recognition for those.
 - **AI stopped working after restoring a backup?** API keys live in the system keychain, not in backups, so re-enter them after restoring.
 
 ## 🤝 Contributing & support
