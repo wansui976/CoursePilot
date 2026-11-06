@@ -314,9 +314,9 @@ Android and iOS use this backend by default. On desktop, choose "Alibaba Cloud D
    - Paste the API key and click **Save Bailian API Key**.
 4. Import a video. Once the processing queue shows "Transcribing with Alibaba Cloud …", the path works.
 
-**How it works**: the desktop app extracts 16 kHz mono WAV, converts it to 32 kbps MP3, and mobile exports M4A (AAC). Audio is submitted inline as a base64 `data:` URI (no OSS upload needed); the app polls the async task and downloads the JSON result. The whole track is submitted at once, so a retry starts over (unlike Volcengine's per-chunk resume). Audio is uploaded to Alibaba Cloud — choose local recognition if you need fully offline processing.
+**How it works**: the desktop app extracts 16 kHz mono WAV, converts it to 32 kbps MP3, and mobile exports M4A (AAC). Audio is first uploaded to Model Studio's temporary storage (deleted after 48 hours) and the `oss://` address is handed to the recognition API, so you don't need your own OSS bucket; the app polls the async task and downloads the JSON result. The whole track is submitted at once, so a retry starts over (unlike Volcengine's per-chunk resume). Audio is uploaded to Alibaba Cloud — choose local recognition if you need fully offline processing.
 
-**Limits**: the official async API itself allows up to 2 GB / 12 hours per file, but the app inlines the whole audio as base64 in one request, which hits Alibaba Cloud's **28,000,000-character** JSON string limit (tested; HTTP 400 beyond that). At the default 32 kbps MP3 that is roughly **87 minutes**. Split longer lectures before importing, or use local recognition. The app checks the size before uploading and fails fast instead of wasting the upload. Polling runs every 3 seconds for up to 30 minutes. Billing is by transcribed duration on your own Alibaba Cloud account.
+**Limits**: temporary storage takes files up to 1 GB (about 70 hours of the desktop's 32 kbps audio, still over ten hours of a phone's export) and the recognition API accepts up to 12 hours, so ordinary lectures never hit a limit. Before v0.3.9 the whole audio was inlined as base64 in the request and hit the 28,000,000-character JSON string limit — about 87 minutes on desktop and barely 20 on a phone; the app still falls back to that when the temporary-storage upload fails and the audio is small. Polling runs every 3 seconds for up to 60 minutes. Billing is by transcribed duration on your own Alibaba Cloud account.
 
 **Troubleshooting**:
 
@@ -326,7 +326,7 @@ Android and iOS use this backend by default. On desktop, choose "Alibaba Cloud D
 | `Model not exist`, HTTP 400 | Wrong model name, or the model is not enabled for this account/region. |
 | `SUCCESS_WITH_NO_VALID_FRAGMENT` | No speech was detected (music-only or silent audio); the key is fine. |
 | Stuck in `PENDING` or times out after 30 minutes | The audio is long or queued; retry later, or switch to `paraformer-v2`. |
-| Upload is slow | The whole track is uploaded; cross-border networks can be slow. Split the lecture or use local recognition. |
+| Upload is slow | The whole track is uploaded to Alibaba Cloud's temporary storage first; slow networks make long lectures slow. Use local recognition instead. |
 
 > Tested on 2026-10-26 (Beijing region): all three models worked with base64 data URIs, MP3 and M4A were accepted, a bad key returned 401, an unknown model returned 400, and silence returned `SUCCESS_WITH_NO_VALID_FRAGMENT`. Full record: [`course-ai/tools/aliyun-asr/availability-2026-10-26.md`](course-ai/tools/aliyun-asr/availability-2026-10-26.md).
 
