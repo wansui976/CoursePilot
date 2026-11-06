@@ -6,12 +6,15 @@
 //!   2. GET  .../tasks/{task_id} 轮询，直到 task_status=SUCCEEDED；
 //!   3. 下载 transcription_url 指向的 JSON，映射成内部字幕结构。
 //!
-//! 本地文件没有公网 URL，改用 base64 data URI 传入。
+//! 本地文件没有公网 URL：先传到百炼的**临时存储**（官方「上传本地文件获取临时 URL」：
+//! getPolicy 拿上传凭证 → 表单直传 OSS → 得到 48 小时有效的 `oss://` 地址，单文件最大
+//! 1 GB），提交时带 `X-DashScope-OssResourceResolve: enable` 让服务端认这个地址。
+//! 见 https://help.aliyun.com/zh/model-studio/get-temporary-file-url 。
 //!
-//! **data URI 已实测可用**：官方文档只写 `file_url` 必须公网可访问，没有承诺支持
-//! base64 data URI；2026-10-26 实测三个模型都接受，服务端会把 data URI 落到自己的
-//! OSS 再转写（记录见 `tools/aliyun-asr/availability-2026-10-26.md`）。代价是整段
-//! 音频随请求上传、没有分片，超长课程在慢网络下会很慢。
+//! 原来是把整段音频编成 base64 data URI 塞进提交请求（2026-10-26 实测三个模型都接受，
+//! 记录见 `tools/aliyun-asr/availability-2026-10-26.md`），但服务端 JSON 单个字符串有
+//! 2800 万字符的上限：桌面端 32 kbps 约 87 分钟、手机导出的高码率音频 20 多分钟就到顶。
+//! 现在 data URI 只在临时存储上传失败、而文件又放得下时兜底。
 //!
 //! 字段名按模型区分：qwen3 用单数 `file_url` / `parameters.language`，fun-asr 与
 //! paraformer 用复数 `file_urls` / `language_hints`，见 [`uses_singular_file_url`]。
@@ -24,6 +27,11 @@ use std::path::Path;
 use std::time::Duration;
 
 const SUBMIT_URL: &str = "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription";
+const UPLOAD_POLICY_URL: &str = "https://dashscope.aliyuncs.com/api/v1/uploads";
+/// 临时存储单个文件的上限（官方文档写 1 GB；getPolicy 返回的 max_file_size_mb 为准）。
+const DEFAULT_MAX_UPLOAD_MB: u64 = 1024;
+/// 上传整段音频的超时。一小时的课桌面端约 14 MB，手机导出的音频可能上百 MB。
+const UPLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const TASK_URL_PREFIX: &str = "https://dashscope.aliyuncs.com/api/v1/tasks/";
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 const MAX_POLLS: u32 = 600; // 3s × 600 ≈ 30 分钟上限
@@ -64,20 +72,33 @@ pub async fn run_aliyun(
         .map(str::trim)
         .filter(|value| !value.is_empty() && *value != "auto");
 
-    // 先在本地卡体积，别把几十 MB 传完才被服务端的 JSON 字符串上限拒掉。
-    let size = tokio::fs::metadata(audio).await?.len() as usize;
-    ensure_fits_data_uri(size, duration_ms)?;
-
-    let bytes = tokio::fs::read(audio).await?;
-    let data_uri = audio_data_uri(mime, &bytes);
+    let size = tokio::fs::metadata(audio).await?.len();
     let client = reqwest::Client::new();
 
-    // ---- 1. 提交任务 ----
-    let resp = client
+    // ---- 1. 音频传到百炼临时存储，拿 oss:// 地址 ----
+    let (file_url, via_oss) = match upload_to_temp_storage(&client, api_key, model, audio, mime, size).await {
+        Ok(url) => (url, true),
+        Err(error) => {
+            // 临时存储不通（网络、账号没开这个能力……）：放得下的话还走原来的 data URI，
+            // 放不下就把上传失败的原因报出来——那才是要解决的问题。
+            fallback_to_data_uri(&error, size as usize, duration_ms)?;
+            tracing::warn!("阿里云临时存储上传失败：{error}；音频不大，改为随请求直接提交");
+            let bytes = tokio::fs::read(audio).await?;
+            (audio_data_uri(mime, &bytes), false)
+        }
+    };
+
+    // ---- 2. 提交任务 ----
+    let mut request = client
         .post(SUBMIT_URL)
         .bearer_auth(api_key)
-        .header("X-DashScope-Async", "enable")
-        .json(&build_submit_body(model, &data_uri, language))
+        .header("X-DashScope-Async", "enable");
+    if via_oss {
+        // 没有这个头，服务端不认 oss:// 地址，报「URL 无效」。
+        request = request.header("X-DashScope-OssResourceResolve", "enable");
+    }
+    let resp = request
+        .json(&build_submit_body(model, &file_url, language))
         .send()
         .await
         .map_err(|error| AppError::Pipeline(format!("dashscope submit: {error}")))?;
@@ -92,7 +113,7 @@ pub async fn run_aliyun(
         .ok_or_else(|| dashscope_error("submit", &payload, http))?
         .to_string();
 
-    // ---- 2. 轮询任务 ----
+    // ---- 3. 轮询任务 ----
     let task_url = format!("{TASK_URL_PREFIX}{task_id}");
     for _ in 0..MAX_POLLS {
         let resp = client
@@ -125,6 +146,113 @@ pub async fn run_aliyun(
     ))
 }
 
+/// getPolicy 返回的上传凭证（表单直传 OSS 用）。
+#[derive(Debug, PartialEq)]
+struct UploadPolicy {
+    policy: String,
+    signature: String,
+    upload_dir: String,
+    upload_host: String,
+    oss_access_key_id: String,
+    x_oss_object_acl: String,
+    x_oss_forbid_overwrite: String,
+    max_file_size_mb: u64,
+}
+
+fn parse_upload_policy(payload: &Value) -> Option<UploadPolicy> {
+    let data = payload.get("data")?;
+    let text = |name: &str| data.get(name).and_then(Value::as_str).map(str::to_string);
+    Some(UploadPolicy {
+        policy: text("policy")?,
+        signature: text("signature")?,
+        upload_dir: text("upload_dir")?,
+        upload_host: text("upload_host")?,
+        oss_access_key_id: text("oss_access_key_id")?,
+        x_oss_object_acl: text("x_oss_object_acl").unwrap_or_else(|| "private".into()),
+        x_oss_forbid_overwrite: text("x_oss_forbid_overwrite").unwrap_or_else(|| "true".into()),
+        max_file_size_mb: data
+            .get("max_file_size_mb")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_MAX_UPLOAD_MB),
+    })
+}
+
+/// 把本地音频传到百炼临时存储，返回 `oss://` 地址（48 小时有效）。
+async fn upload_to_temp_storage(
+    client: &reqwest::Client,
+    api_key: &str,
+    model: &str,
+    audio: &Path,
+    mime: &str,
+    size: u64,
+) -> AppResult<String> {
+    let resp = client
+        .get(UPLOAD_POLICY_URL)
+        .query(&[("action", "getPolicy"), ("model", model)])
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|error| AppError::Pipeline(format!("dashscope 获取上传凭证: {error}")))?;
+    let http = resp.status();
+    let payload: Value = resp
+        .json()
+        .await
+        .map_err(|error| AppError::Pipeline(format!("dashscope 上传凭证解析: {error}")))?;
+    let policy =
+        parse_upload_policy(&payload).ok_or_else(|| dashscope_error("getPolicy", &payload, http))?;
+    if size > policy.max_file_size_mb * 1024 * 1024 {
+        return Err(AppError::Permanent(format!(
+            "音频有 {:.0} MB，超过阿里云临时存储单个文件 {} MB 的上限；请把视频切成几段再导入",
+            size as f64 / 1_048_576.0,
+            policy.max_file_size_mb
+        )));
+    }
+    let ext = audio.extension().and_then(|e| e.to_str()).unwrap_or("bin");
+    let key = format!("{}/{}.{ext}", policy.upload_dir.trim_end_matches('/'), uuid::Uuid::new_v4());
+    let bytes = tokio::fs::read(audio).await?;
+    let file = reqwest::multipart::Part::bytes(bytes)
+        .file_name(format!("audio.{ext}"))
+        .mime_str(mime)
+        .map_err(|error| AppError::Pipeline(format!("dashscope 上传: {error}")))?;
+    // file 必须是最后一个字段（OSS 表单上传的规矩），其余顺序随意。
+    let form = reqwest::multipart::Form::new()
+        .text("OSSAccessKeyId", policy.oss_access_key_id)
+        .text("Signature", policy.signature)
+        .text("policy", policy.policy)
+        .text("x-oss-object-acl", policy.x_oss_object_acl)
+        .text("x-oss-forbid-overwrite", policy.x_oss_forbid_overwrite)
+        .text("key", key.clone())
+        .text("success_action_status", "200")
+        .part("file", file);
+    let resp = client
+        .post(&policy.upload_host)
+        .timeout(UPLOAD_TIMEOUT)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|error| AppError::Pipeline(format!("dashscope 上传音频: {error}")))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AppError::Pipeline(format!(
+            "dashscope 上传音频失败：HTTP {status} {}",
+            body.chars().take(300).collect::<String>()
+        )));
+    }
+    Ok(format!("oss://{key}"))
+}
+
+/// 临时存储传不上去时，还能不能退回 data URI：放得下就退，放不下就把两个原因一起报。
+fn fallback_to_data_uri(upload_error: &AppError, size: usize, duration_ms: Option<i64>) -> AppResult<()> {
+    if let AppError::Permanent(_) = upload_error {
+        // 超过临时存储上限之类：data URI 只会更放不下。
+        return Err(AppError::Permanent(upload_error.to_string()));
+    }
+    ensure_fits_data_uri(size, duration_ms).map_err(|too_big| {
+        AppError::Pipeline(format!("上传到阿里云临时存储失败（{upload_error}）；{too_big}"))
+    })
+}
+
 /// base64 会膨胀 4/3，服务端又把 data URI 当一个 JSON 字符串解析，所以能提交的
 /// 原始音频有硬上限。超过时直接报错，并给出真实时长和替代方案。
 ///
@@ -145,7 +273,7 @@ pub fn ensure_fits_data_uri(audio_bytes: usize, duration_ms: Option<i64>) -> App
     Err(AppError::Permanent(format!(
         "音频太大：{length}，base64 后会超过阿里云单次请求的 {} 字符上限。\
          移动端导出的音频码率更高，同样时长会更早触顶；请把视频/音频切成几段再导入，\
-         或改用本地 Whisper。",
+         或改用本地识别。",
         MAX_DATA_URI_CHARS
     )))
 }
@@ -353,7 +481,7 @@ mod tests {
         assert!(err.contains("约 22 分钟"), "{err}");
         assert!(!err.contains("32 kbps"), "{err}");
         assert!(err.contains("28000000"), "{err}");
-        assert!(err.contains("本地 Whisper"), "{err}");
+        assert!(err.contains("本地识别"), "{err}");
     }
 
     #[test]
@@ -457,20 +585,38 @@ mod tests {
         assert!(!err.contains("config error"), "{err}");
     }
 
-    #[tokio::test]
-    async fn oversized_file_is_rejected_before_any_upload() {
-        // 稀疏文件，不真占 22MB；重点是 run_aliyun 在读文件、发请求之前就返回。
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("big.mp3");
-        std::fs::File::create(&path)
-            .unwrap()
-            .set_len(22_000_000)
-            .unwrap();
-        let err = run_aliyun(&path, "audio/mpeg", "sk-test", DEFAULT_MODEL, None, None)
-            .await
+    #[test]
+    fn a_failed_upload_falls_back_to_a_data_uri_only_when_the_audio_fits() {
+        let network = AppError::Pipeline("dashscope 获取上传凭证: timeout".into());
+        assert!(fallback_to_data_uri(&network, 5_000_000, None).is_ok());
+        let err = fallback_to_data_uri(&network, 40_000_000, Some(90 * 60_000))
             .unwrap_err()
             .to_string();
+        assert!(err.contains("上传到阿里云临时存储失败"), "{err}");
+        assert!(err.contains("timeout"), "{err}");
         assert!(err.contains("音频太大"), "{err}");
+        // 超过临时存储上限：不该再试更小的 data URI。
+        let too_big = AppError::Permanent("音频有 2000 MB，超过阿里云临时存储".into());
+        assert!(fallback_to_data_uri(&too_big, 100, None).is_err());
+    }
+
+    #[test]
+    fn the_upload_policy_is_read_from_the_documented_fields() {
+        let payload = json!({
+            "request_id": "r",
+            "data": {
+                "policy": "p", "signature": "s", "upload_dir": "dashscope-instant/abc/2026-11-05/xyz",
+                "upload_host": "https://dashscope-file-xxx.oss-cn-beijing.aliyuncs.com",
+                "expire_in_seconds": 300, "max_file_size_mb": 1024, "capacity_limit_mb": 999999999,
+                "oss_access_key_id": "LTAI", "x_oss_object_acl": "private", "x_oss_forbid_overwrite": "true"
+            }
+        });
+        let policy = parse_upload_policy(&payload).unwrap();
+        assert_eq!(policy.upload_host, "https://dashscope-file-xxx.oss-cn-beijing.aliyuncs.com");
+        assert_eq!(policy.max_file_size_mb, 1024);
+        assert_eq!(policy.oss_access_key_id, "LTAI");
+        // Key 不对时没有 data，报 DashScope 原本的错误。
+        assert!(parse_upload_policy(&json!({"code": "InvalidApiKey", "message": "bad"})).is_none());
     }
 
     /// 真网测试：默认不跑，配置好 Key 与一段音频后手动执行

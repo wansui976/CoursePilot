@@ -22,7 +22,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 chrono = { version = "0.4", features = ["serde"] }
 flate2 = "1.1.9"
 futures-util = "0.3"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "multipart"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
