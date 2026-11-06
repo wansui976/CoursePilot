@@ -38,6 +38,10 @@ export function humanizeError(error: unknown, language?: string): string {
           ? ""
           : String(error);
   if (!raw.trim()) return translated("unknown", locale);
+  // 后端的配置类错误（AppError::Config）本来就是写给用户看的中文说明，原样显示。
+  // 套用下面的关键词归类反而会说错：「有模型在下载……」会被归成「视频下载失败，请检查链接」。
+  const configMessage = raw.match(/^config error:\s*([\s\S]+)$/)?.[1]?.trim();
+  if (configMessage && /[\u4e00-\u9fff]/.test(configMessage)) return configMessage;
   const s = raw.toLowerCase();
 
   // B站登录态失效 / 触发风控（HTTP 412）——放在通用 403/forbidden 之前判断。
@@ -128,7 +132,11 @@ export function humanizeError(error: unknown, language?: string): string {
     return translated("ffmpeg", locale);
   }
   // yt-dlp / 下载类失败（放在具体分支之后兜底）。
-  if (s.includes("yt-dlp") || s.includes("download") || s.includes("下载")) {
+  // 识别模型下载失败另有说明（哪个文件、所有下载源都失败了），不能说成「视频下载失败、检查链接」。
+  if (
+    s.includes("yt-dlp") ||
+    ((s.includes("download") || s.includes("下载")) && !s.includes("模型") && !s.includes("model"))
+  ) {
     return translated("download", locale);
   }
   return raw;

@@ -138,4 +138,15 @@ describe("errorFixFor", () => {
     expect(errorFixFor("not found: video a4028f3c-401b")).toBeNull();
     expect(errorFixFor(null)).toBeNull();
   });
+
+  it("passes human-written config errors through instead of guessing a category", () => {
+    expect(
+      humanizeError("config error: 有模型在下载或视频在处理，等它们结束后再换存放位置", "zh-CN"),
+    ).toBe("有模型在下载或视频在处理，等它们结束后再换存放位置");
+  });
+
+  it("does not call a failed model download a broken video link", () => {
+    const message = "SenseVoice 的 model.int8.onnx 所有下载源都失败了：timeout";
+    expect(humanizeError(message, "zh-CN")).not.toContain("链接");
+  });
 });

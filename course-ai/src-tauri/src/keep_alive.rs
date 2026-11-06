@@ -129,6 +129,12 @@ fn registry() -> &'static Mutex<Registry> {
     REGISTRY.get_or_init(Default::default)
 }
 
+/// 这一类任务此刻有没有在进行（比如换模型目录前，确认没有模型在下载、没有视频在识别）。
+pub fn is_active(kind: Kind) -> bool {
+    let registry = registry().lock().unwrap_or_else(|p| p.into_inner());
+    registry.entries.values().any(|entry| entry.kind == kind)
+}
+
 /// 守卫：丢掉即表示这项任务结束（正常完成、失败、被取消都一样）。
 #[must_use]
 pub struct Hold(u64);
@@ -308,6 +314,16 @@ fn forward(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_active_follows_holds_of_that_kind() {
+        let key = "is-active-test";
+        assert!(!registry().lock().unwrap().entries.values().any(|e| e.key == key));
+        let hold = hold(Kind::ModelDownload, key, "测试");
+        assert!(is_active(Kind::ModelDownload));
+        drop(hold);
+        assert!(!registry().lock().unwrap().entries.values().any(|e| e.key == key));
+    }
     use std::sync::mpsc::channel;
     use std::sync::Arc;
 

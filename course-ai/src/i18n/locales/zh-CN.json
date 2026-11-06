@@ -1438,7 +1438,13 @@
     "meteredConfirm": "现在用的是移动数据（或按流量计费的网络）。{{name}} 约 {{size}}，确定现在下载吗？也可以连上 Wi-Fi 再下。",
     "meteredConfirmTitle": "用流量下载？",
     "meteredConfirmOk": "现在下载",
-    "meteredConfirmCancel": "等 Wi-Fi"
+    "meteredConfirmCancel": "等 Wi-Fi",
+    "location": "存放位置",
+    "locationDefault": "（默认）",
+    "changeLocation": "更改位置…",
+    "resetLocation": "恢复默认位置",
+    "moving": "正在搬移模型 {{percent}}%",
+    "locationHint": "已下载的模型会一起搬过去；C 盘空间紧张时可以换到别的盘"
   },
   "llmSettings": {
     "add": "新增",

@@ -85,7 +85,9 @@ use crate::commands::videos::{
     cmd_update_video_title, cmd_video_cover,
 };
 use crate::commands::transcode::{cmd_start_transcode, cmd_transcode_status};
-use crate::commands::whisper::{cmd_download_whisper_model, cmd_list_whisper_models};
+use crate::commands::whisper::{
+    cmd_download_whisper_model, cmd_get_models_dir, cmd_list_whisper_models, cmd_set_models_dir,
+};
 use crate::db::Db;
 use crate::dev_log::{cmd_clear_dev_logs, cmd_get_dev_logs};
 use crate::downloads::{
@@ -287,6 +289,8 @@ pub fn run() {
             cmd_clear_llm_usage,
             cmd_list_whisper_models,
             cmd_download_whisper_model,
+            cmd_get_models_dir,
+            cmd_set_models_dir,
             cmd_list_jobs,
             cmd_process_video,
             cmd_cancel_processing,

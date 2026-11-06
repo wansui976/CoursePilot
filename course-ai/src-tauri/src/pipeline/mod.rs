@@ -19,6 +19,7 @@ pub mod handout;
 pub mod highlights;
 pub mod local_asr;
 pub mod media_kind;
+pub mod model_store;
 pub mod ocr;
 pub mod playable;
 pub mod quiz;
@@ -148,7 +149,10 @@ pub(crate) const DEFAULT_LOCAL_MODEL: &str = "sensevoice";
 
 /// 选中的装好了、也认得这门课的语言就用它；否则退到别的已装模型：选的是 sherpa 模型就先找
 /// 另一个 sherpa 模型，选的是 Whisper 就先找别的 Whisper（与原来的回退一致），最后再跨过去。
-fn select_local_model(app_data: &Path, preferred_id: &str, language: &str) -> Option<LocalModel> {
+///
+/// `models_root` 是模型存放目录（用户可以换到别的盘）。
+fn select_local_model(models_root: &Path, preferred_id: &str, language: &str) -> Option<LocalModel> {
+    let app_data = models_root;
     // 手机上看内存：装好了、认得语言，还得放得下——否则 iOS 直接把应用杀掉（闪退）。
     let available_mb = local_asr::available_memory_mb();
     let sherpa = |model: &'static local_asr::SherpaModel| {
@@ -254,6 +258,7 @@ pub async fn transcribe_clip(
                 .await?
                 .unwrap_or_else(|| DEFAULT_LOCAL_MODEL.into());
             let app_data = app.path().app_data_dir().map_err(|e| AppError::Config(format!("app_data_dir: {e}")))?;
+            let app_data = model_store::models_root(db, &app_data).await?;
             let lang = whisper_language_or_default(setting(db, "asr_language").await?);
             let model = select_local_model(&app_data, &model_id, &lang).ok_or_else(|| {
                 AppError::Config("还没有可用的本地识别模型（设置 → 语音识别 下载一个）".into())
@@ -548,6 +553,10 @@ async fn run_all(
                 .await?,
             );
             let app_data = app.path().app_data_dir().expect("app_data_dir");
+            // 模型存放目录可以换到别的盘；读不到设置就按默认目录找，不为它让整次识别失败。
+            let app_data = model_store::models_root(&db, &app_data)
+                .await
+                .unwrap_or(app_data);
             let Some(model) = select_local_model(&app_data, &model_id, &lang) else {
                 return fail_asr(
                     &app,

@@ -1,10 +1,10 @@
 import { listen } from "@tauri-apps/api/event";
-import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
+import { confirm as confirmDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
-import { ipc, type WhisperModel } from "@/lib/ipc";
+import { ipc, type ModelsDir, type WhisperModel } from "@/lib/ipc";
 import { isMobile } from "@/lib/platform";
 
 type Row = [WhisperModel, boolean];
@@ -13,6 +13,86 @@ function formatBytes(bytes: number) {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
   if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
   return `${bytes} B`;
+}
+
+/**
+ * 模型存放位置。Windows 上默认在 C 盘的 AppData，模型一两个 G，可以换到别的盘；
+ * 换的时候已下载的模型跟着搬过去（跨盘要复制一会儿，显示进度）。手机上没有可选的目录，不显示。
+ */
+function ModelsLocation({ onMoved }: { onMoved: () => void }) {
+  const { t } = useTranslation();
+  const [dir, setDir] = useState<ModelsDir | null>(null);
+  const [moving, setMoving] = useState<{ copied: number; total: number } | null>(null);
+  const [error, setError] = useState<unknown>(null);
+
+  const load = useCallback(() => {
+    void ipc.whisper
+      .modelsDir()
+      .then(setDir)
+      .catch(() => {});
+  }, []);
+  useEffect(load, [load]);
+
+  useEffect(() => {
+    const unlisten = listen<{ copied: number; total: number }>("models:move", (event) => {
+      setMoving(event.payload);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  async function change(path: string | null) {
+    setError(null);
+    setMoving({ copied: 0, total: dir?.size_bytes ?? 0 });
+    try {
+      setDir(await ipc.whisper.setModelsDir(path));
+      onMoved();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setMoving(null);
+    }
+  }
+
+  async function pick() {
+    const picked = await openDialog({ directory: true, multiple: false });
+    if (typeof picked === "string" && picked) await change(picked);
+  }
+
+  if (!dir) return null;
+  const pct = moving && moving.total > 0 ? Math.floor((moving.copied / moving.total) * 100) : 0;
+  return (
+    <div className="mb-2 space-y-1 border-b border-[var(--border-subtle)] pb-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-[var(--text-muted)]">{t("whisperModels.location")}</span>
+        <span
+          className="min-w-0 flex-1 truncate font-[family-name:var(--mono)] text-[var(--text-normal)]"
+          title={dir.path}
+        >
+          {dir.path}
+        </span>
+        <span className="text-[var(--text-faint)]">
+          {dir.is_default ? t("whisperModels.locationDefault") : null}
+          {dir.size_bytes > 0 ? ` · ${formatBytes(dir.size_bytes)}` : ""}
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="outline" disabled={!!moving} onClick={() => void pick()}>
+          {moving
+            ? t("whisperModels.moving", { percent: pct })
+            : t("whisperModels.changeLocation")}
+        </Button>
+        {!dir.is_default && (
+          <Button size="sm" variant="ghost" disabled={!!moving} onClick={() => void change(null)}>
+            {t("whisperModels.resetLocation")}
+          </Button>
+        )}
+        <span className="text-xs text-[var(--text-faint)]">{t("whisperModels.locationHint")}</span>
+      </div>
+      {error != null && <ErrorNote error={error} />}
+    </div>
+  );
 }
 
 /** 本地识别模型的下载清单。手机上后端只列 SenseVoice / Qwen3-ASR。 */
@@ -113,6 +193,7 @@ export function WhisperModelsPanel() {
       <h4 className="mb-1 text-xs font-medium text-[var(--text-muted)]">
         {t("whisperModels.title")}
       </h4>
+      {!isMobile() && <ModelsLocation onMoved={() => void refresh()} />}
       {loadError && (
         <div
           role="alert"

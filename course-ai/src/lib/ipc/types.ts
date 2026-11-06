@@ -10,6 +10,14 @@ export interface WhisperModel {
   fits_memory?: boolean;
 }
 
+export interface ModelsDir {
+  path: string;
+  is_default: boolean;
+  default_path: string;
+  /** 这个目录里已下载的模型一共多大。 */
+  size_bytes: number;
+}
+
 export interface NativeCloudSyncStatus {
   accountStatus: string;
   started: boolean;

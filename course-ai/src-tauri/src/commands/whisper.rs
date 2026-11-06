@@ -1,6 +1,6 @@
 use crate::commands::courses::AppState;
 use crate::error::{AppError, AppResult};
-use crate::pipeline::{asr, local_asr};
+use crate::pipeline::{asr, local_asr, model_store};
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -76,33 +76,145 @@ pub fn is_model_available(path: &Path) -> bool {
     asr::is_probably_whisper_model(path)
 }
 
+/// 清单里的一项（内置模型来自 `MODELS` / `local_asr::MODELS`）。
+#[derive(Debug, Clone, Serialize)]
+pub struct ListedModel {
+    pub id: String,
+    pub display_name: String,
+    pub size_bytes: u64,
+    pub url: String,
+    pub fits_memory: bool,
+}
+
+impl From<&ModelInfo> for ListedModel {
+    fn from(model: &ModelInfo) -> Self {
+        ListedModel {
+            id: model.id.into(),
+            display_name: model.display_name.into(),
+            size_bytes: model.size_bytes,
+            url: model.url.into(),
+            fits_memory: model.fits_memory,
+        }
+    }
+}
+
+fn app_data(app: &tauri::AppHandle) -> AppResult<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .map_err(|error| AppError::Config(error.to_string()))
+}
+
 #[tauri::command]
-pub async fn cmd_list_whisper_models(app: tauri::AppHandle) -> AppResult<Vec<(ModelInfo, bool)>> {
+pub async fn cmd_list_whisper_models(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<(ListedModel, bool)>> {
     // 手机上没有 whisper-cli，只列 sherpa 模型。
     let mobile = is_mobile_os(std::env::consts::OS);
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| AppError::Config(error.to_string()))?;
+    let root = model_store::models_root(&state.db, &app_data(&app)?).await?;
     let available_mb = local_asr::available_memory_mb();
     // SenseVoice / Qwen3-ASR 排前面：中文课上它们比 Whisper 准得多（docs/asr-benchmark）。
     let sherpa = local_asr::MODELS.iter().map(|model| {
         (
-            ModelInfo {
-                id: model.id,
-                display_name: model.display_name,
+            ListedModel {
+                id: model.id.into(),
+                display_name: model.display_name.into(),
                 size_bytes: model.download_size(),
-                url: model.files[0].urls[0],
+                url: model.files[0].urls[0].into(),
                 fits_memory: model.fits_memory(available_mb),
             },
-            local_asr::is_installed(&data_dir, model),
+            local_asr::is_installed(&root, model),
         )
     });
     let whisper = MODELS.iter().filter(|_| !mobile).map(|model| {
-        let path = model_path(&data_dir, model.id);
-        (model.clone(), is_model_available(&path))
+        let path = model_path(&root, model.id);
+        (ListedModel::from(model), is_model_available(&path))
     });
     Ok(sherpa.chain(whisper).collect())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelsDir {
+    pub path: String,
+    pub is_default: bool,
+    pub default_path: String,
+    /// 当前目录里已下载的模型一共多大。
+    pub size_bytes: u64,
+}
+
+#[tauri::command]
+pub async fn cmd_get_models_dir(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<ModelsDir> {
+    let default = app_data(&app)?;
+    let root = model_store::models_root(&state.db, &default).await?;
+    Ok(ModelsDir {
+        is_default: root == default,
+        size_bytes: tokio::task::spawn_blocking({
+            let root = root.clone();
+            move || model_store::models_size(&root)
+        })
+        .await
+        .unwrap_or(0),
+        path: root.to_string_lossy().to_string(),
+        default_path: default.to_string_lossy().to_string(),
+    })
+}
+
+#[derive(Serialize, Clone)]
+struct MoveEvent {
+    copied: u64,
+    total: u64,
+}
+
+/// 换模型存放目录，已下载的模型跟着搬过去。`path` 为空 = 恢复默认（应用数据目录）。
+///
+/// 有模型在下载、有视频在处理时不换：正在写的文件被搬走，下载会断、识别会读到一半的模型。
+/// 先搬、搬完再改设置：中途失败时设置还指着旧目录，旧目录里的模型原封不动。
+#[tauri::command]
+pub async fn cmd_set_models_dir(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    path: Option<String>,
+) -> AppResult<ModelsDir> {
+    use crate::keep_alive::{is_active, Kind};
+    if is_active(Kind::ModelDownload) || is_active(Kind::Processing) {
+        return Err(AppError::Config(
+            "有模型在下载或视频在处理，等它们结束后再换存放位置".into(),
+        ));
+    }
+    let default = app_data(&app)?;
+    let old_root = model_store::models_root(&state.db, &default).await?;
+    let new_root = match path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(path) => PathBuf::from(path),
+        None => default.clone(),
+    };
+    if new_root != old_root {
+        model_store::validate_new_root(&new_root, &old_root)?;
+        let _keep_alive = crate::keep_alive::hold(Kind::ModelDownload, "move-models", "搬移识别模型");
+        let (from, to, handle) = (old_root.clone(), new_root.clone(), app.clone());
+        tokio::task::spawn_blocking(move || {
+            let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+            model_store::move_models(&from, &to, |copied, total| {
+                // 复制按 4 MB 一块报进度，限个流，免得每秒往前端发几百个事件。
+                if copied == total || last.elapsed() >= std::time::Duration::from_millis(200) {
+                    last = std::time::Instant::now();
+                    handle.emit("models:move", MoveEvent { copied, total }).ok();
+                }
+            })
+        })
+        .await
+        .map_err(|e| AppError::Other(format!("搬移模型的任务异常退出：{e}")))?
+        .map_err(|e| AppError::Other(format!("搬移模型失败（原来的模型都还在）：{e}")))?;
+    }
+    let value = if new_root == default {
+        String::new()
+    } else {
+        new_root.to_string_lossy().to_string()
+    };
+    crate::commands::settings::set_setting(&state.db, model_store::MODELS_DIR_SETTING, &value).await?;
+    cmd_get_models_dir(app, state).await
 }
 
 #[derive(Serialize, Clone)]
@@ -117,13 +229,11 @@ struct DownloadEvent {
 #[tauri::command]
 pub async fn cmd_download_whisper_model(
     app: tauri::AppHandle,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
     id: String,
 ) -> AppResult<()> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| AppError::Config(error.to_string()))?;
+    // 下到用户选的模型存放目录（可能在别的盘）。
+    let data_dir = model_store::models_root(&state.db, &app_data(&app)?).await?;
     if let Some(model) = local_asr::find(&id) {
         return download_sherpa_model(&app, &data_dir, model).await;
     }
@@ -141,6 +251,12 @@ pub async fn cmd_download_whisper_model(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    // 登记成「模型下载中」：下载期间不允许换存放目录。
+    let _keep_alive = crate::keep_alive::hold(
+        crate::keep_alive::Kind::ModelDownload,
+        info.id,
+        info.display_name,
+    );
 
     let client = reqwest::Client::builder()
         .user_agent(DOWNLOAD_USER_AGENT)

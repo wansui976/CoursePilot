@@ -4,18 +4,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { WhisperModelsPanel } from "./WhisperModelsPanel";
 
-const { mockIpc, platform, confirmDialog } = vi.hoisted(() => ({
+const { mockIpc, platform, confirmDialog, openDialog } = vi.hoisted(() => ({
   mockIpc: {
-    whisper: { list: vi.fn(), download: vi.fn() },
+    whisper: { list: vi.fn(), download: vi.fn(), modelsDir: vi.fn(), setModelsDir: vi.fn() },
     app: { networkInfo: vi.fn() },
   },
   platform: { mobile: false },
   confirmDialog: vi.fn(),
+  openDialog: vi.fn(),
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@/lib/platform", () => ({ isMobile: () => platform.mobile }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: confirmDialog }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: confirmDialog, open: openDialog }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => undefined),
 }));
@@ -26,7 +27,65 @@ describe("WhisperModelsPanel", () => {
     mockIpc.whisper.download.mockReset();
     mockIpc.app.networkInfo.mockReset();
     confirmDialog.mockReset();
+    openDialog.mockReset();
+    mockIpc.whisper.modelsDir.mockReset().mockResolvedValue({
+      path: "C:\\Users\\me\\AppData\\Roaming\\dev.courseai.app",
+      is_default: true,
+      default_path: "C:\\Users\\me\\AppData\\Roaming\\dev.courseai.app",
+      size_bytes: 1_200_000_000,
+    });
+    mockIpc.whisper.setModelsDir.mockReset();
     platform.mobile = false;
+  });
+
+  it("shows where models live and moves them to a folder the user picks", async () => {
+    mockIpc.whisper.list.mockResolvedValue([[sensevoice, true]]);
+    openDialog.mockResolvedValue("D:\\CoursePilotModels");
+    mockIpc.whisper.setModelsDir.mockResolvedValue({
+      path: "D:\\CoursePilotModels",
+      is_default: false,
+      default_path: "C:\\Users\\me\\AppData\\Roaming\\dev.courseai.app",
+      size_bytes: 1_200_000_000,
+    });
+
+    render(<WhisperModelsPanel />);
+    expect(await screen.findByText(/AppData/)).toBeInTheDocument();
+    expect(screen.getByText(/（默认） · 1\.1 GB/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "更改位置…" }));
+
+    await waitFor(() => expect(mockIpc.whisper.setModelsDir).toHaveBeenCalledWith("D:\\CoursePilotModels"));
+    expect(await screen.findByText("D:\\CoursePilotModels")).toBeInTheDocument();
+    // 搬完重新拉清单，已装状态按新目录算。
+    await waitFor(() => expect(mockIpc.whisper.list).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "恢复默认位置" }));
+    await waitFor(() => expect(mockIpc.whisper.setModelsDir).toHaveBeenLastCalledWith(null));
+  });
+
+  it("does not move anything when the folder picker is cancelled, and shows move errors", async () => {
+    mockIpc.whisper.list.mockResolvedValue([[sensevoice, true]]);
+    openDialog.mockResolvedValueOnce(null);
+    render(<WhisperModelsPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "更改位置…" }));
+    await waitFor(() => expect(openDialog).toHaveBeenCalled());
+    expect(mockIpc.whisper.setModelsDir).not.toHaveBeenCalled();
+
+    openDialog.mockResolvedValueOnce("E:\\models");
+    // 和真实的 invoke 一样，后端 AppError::Config 到前端是带前缀的字符串。
+    mockIpc.whisper.setModelsDir.mockRejectedValueOnce(
+      "config error: 有模型在下载或视频在处理，等它们结束后再换存放位置",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "更改位置…" }));
+    expect(await screen.findByText(/等它们结束后再换存放位置/)).toBeInTheDocument();
+  });
+
+  it("does not offer a models location on phones", async () => {
+    platform.mobile = true;
+    mockIpc.whisper.list.mockResolvedValue([[sensevoice, true]]);
+    render(<WhisperModelsPanel />);
+    await screen.findByText("SenseVoice");
+    expect(screen.queryByRole("button", { name: "更改位置…" })).not.toBeInTheDocument();
+    expect(mockIpc.whisper.modelsDir).not.toHaveBeenCalled();
   });
 
   const sensevoice = {

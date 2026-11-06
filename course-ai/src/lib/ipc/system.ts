@@ -12,6 +12,7 @@ import type {
 import type {
   UpdateCheck,
   WhisperModel,
+  ModelsDir,
   CloudSyncProbeAccountChangeResult,
   CloudSyncStatus,
   CloudSyncProbeArmResult,
@@ -80,6 +81,11 @@ export const whisper = {
     invoke("cmd_list_whisper_models"),
   download: (id: string): Promise<void> =>
     invoke("cmd_download_whisper_model", { id }),
+  /** 识别模型存放在哪（可以换到别的盘，Windows 上默认在 C 盘）。 */
+  modelsDir: (): Promise<ModelsDir> => invoke("cmd_get_models_dir"),
+  /** 换存放目录，已下载的模型跟着搬过去（进度见 `models:move` 事件）；null = 恢复默认。 */
+  setModelsDir: (path: string | null): Promise<ModelsDir> =>
+    invoke("cmd_set_models_dir", { path }),
 };
 
 export const backup = {
