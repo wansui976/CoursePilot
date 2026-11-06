@@ -6,7 +6,13 @@ import { WhisperModelsPanel } from "./WhisperModelsPanel";
 
 const { mockIpc, platform, confirmDialog, openDialog } = vi.hoisted(() => ({
   mockIpc: {
-    whisper: { list: vi.fn(), download: vi.fn(), modelsDir: vi.fn(), setModelsDir: vi.fn() },
+    whisper: {
+      list: vi.fn(),
+      download: vi.fn(),
+      modelsDir: vi.fn(),
+      setModelsDir: vi.fn(),
+      deleteLegacyModels: vi.fn(),
+    },
     app: { networkInfo: vi.fn() },
   },
   platform: { mobile: false },
@@ -33,8 +39,10 @@ describe("WhisperModelsPanel", () => {
       is_default: true,
       default_path: "C:\\Users\\me\\AppData\\Roaming\\dev.courseai.app",
       size_bytes: 1_200_000_000,
+      legacy_bytes: 0,
     });
     mockIpc.whisper.setModelsDir.mockReset();
+    mockIpc.whisper.deleteLegacyModels.mockReset();
     platform.mobile = false;
   });
 
@@ -46,6 +54,7 @@ describe("WhisperModelsPanel", () => {
       is_default: false,
       default_path: "C:\\Users\\me\\AppData\\Roaming\\dev.courseai.app",
       size_bytes: 1_200_000_000,
+      legacy_bytes: 0,
     });
 
     render(<WhisperModelsPanel />);
@@ -77,6 +86,35 @@ describe("WhisperModelsPanel", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "更改位置…" }));
     expect(await screen.findByText(/等它们结束后再换存放位置/)).toBeInTheDocument();
+  });
+
+  it("offers to delete old model files that are no longer used, after confirming", async () => {
+    mockIpc.whisper.list.mockResolvedValue([[sensevoice, true]]);
+    mockIpc.whisper.modelsDir.mockResolvedValue({
+      path: "C:\\models",
+      is_default: true,
+      default_path: "C:\\models",
+      size_bytes: 2_000_000_000,
+      legacy_bytes: 1_100_000_000,
+    });
+    mockIpc.whisper.deleteLegacyModels.mockResolvedValue({
+      path: "C:\\models",
+      is_default: true,
+      default_path: "C:\\models",
+      size_bytes: 900_000_000,
+      legacy_bytes: 0,
+    });
+    confirmDialog.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+    render(<WhisperModelsPanel />);
+    expect(await screen.findByText(/旧版模型文件 1\.0 GB 已不再使用/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "删除旧模型" }));
+    await waitFor(() => expect(confirmDialog).toHaveBeenCalledTimes(1));
+    expect(mockIpc.whisper.deleteLegacyModels).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "删除旧模型" }));
+    await waitFor(() => expect(mockIpc.whisper.deleteLegacyModels).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText(/已不再使用/)).not.toBeInTheDocument());
   });
 
   it("does not offer a models location on phones", async () => {

@@ -86,6 +86,8 @@ export const whisper = {
   /** 换存放目录，已下载的模型跟着搬过去（进度见 `models:move` 事件）；null = 恢复默认。 */
   setModelsDir: (path: string | null): Promise<ModelsDir> =>
     invoke("cmd_set_models_dir", { path }),
+  /** 删掉不再使用的旧模型文件。 */
+  deleteLegacyModels: (): Promise<ModelsDir> => invoke("cmd_delete_legacy_models"),
 };
 
 export const backup = {

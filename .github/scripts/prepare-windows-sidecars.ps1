@@ -40,6 +40,34 @@ Copy-FirstMatch $ffmpegOut "ffmpeg.exe" (Join-Path $binaryDir "ffmpeg-$target.ex
 # yt-dlp
 Download-File "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" (Join-Path $binaryDir "yt-dlp-$target.exe")
 
+# llama-server（本地识别 Qwen3-ASR 用的引擎，llama.cpp）：官方的 Windows Vulkan 预编译包。
+# Vulkan 在 NVIDIA、AMD、Intel 显卡上都能用，显卡驱动自带运行库，用户不用装 CUDA。
+# CPU 后端按指令集拆成多个 ggml-cpu-*.dll、Vulkan 后端单独一个 ggml-vulkan.dll，运行时按需加载：
+# 没有 Vulkan 驱动的机器加载 Vulkan 后端失败，照样用 CPU 跑。
+# 只拷识别要用的文件（llama-server 和它加载的库），其余几十个命令行工具不要。
+# 与 macOS 用同一个版本（prepare-macos-sidecars.sh 的 LLAMA_CPP_TAG）。升级时一起改版本号和哈希。
+$llamaTag = if ($env:LLAMA_CPP_TAG) { $env:LLAMA_CPP_TAG } else { "b12167" }
+$llamaSha256 = "f99b2fc83d93f4a36778e5966600c8a4a36e8a3a6660521601317c02f974ca9d"
+$llamaZip = Join-Path $tempDir "llama.zip"
+$llamaOut = Join-Path $tempDir "llama"
+Download-File "https://github.com/ggml-org/llama.cpp/releases/download/$llamaTag/llama-$llamaTag-bin-win-vulkan-x64.zip" $llamaZip
+if (-not $env:LLAMA_CPP_TAG) {
+  $actual = (Get-FileHash -Algorithm SHA256 $llamaZip).Hash.ToLower()
+  if ($actual -ne $llamaSha256) {
+    throw "llama.cpp $llamaTag zip SHA-256 mismatch: $actual"
+  }
+}
+Expand-Archive -Path $llamaZip -DestinationPath $llamaOut -Force
+Copy-FirstMatch $llamaOut "llama-server.exe" (Join-Path $binaryDir "llama-server-$target.exe")
+Get-ChildItem -Path $llamaOut -Filter "*.dll" -Recurse |
+  Where-Object { $_.Name -notmatch '^llama-.+-impl\.dll$' -or $_.Name -eq 'llama-server-impl.dll' } |
+  ForEach-Object { Copy-Item $_.FullName (Join-Path $binaryDir $_.Name) -Force }
+foreach ($required in @("llama-server-impl.dll", "llama.dll", "mtmd.dll", "ggml.dll", "ggml-base.dll", "ggml-vulkan.dll", "ggml-cpu-x64.dll")) {
+  if (-not (Test-Path (Join-Path $binaryDir $required))) {
+    throw "llama.cpp package is missing $required"
+  }
+}
+
 # 打进安装包的原生程序是 MSVC 编的，依赖 VC++ 运行库（还有 OpenMP 的 vcomp140）。
 # 干净的 Windows 默认没装运行库，程序一启动就报 0xc0000135（找不到 DLL）。
 # 从 runner 上 Visual Studio 的可再发行目录拷 x64 版本，和 exe 放在一起。

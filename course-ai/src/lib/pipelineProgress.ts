@@ -115,6 +115,17 @@ function localizedDetail(detail: string, t: Translate): string | undefined {
   }
   match = detail.match(/^使用可用模型：(.+)$/);
   if (match) return t("pipelineProgress.details.usingModel", { model: localModelName(match[1]) });
+  // 桌面上的 Qwen3-ASR 会带上跑在哪：「本地识别中（qwen3-asr，zh，GPU：Apple M4）」。
+  match = detail.match(/^本地识别中（([^，]+)，([^，]+)，(GPU：.+|CPU)）$/);
+  if (match) {
+    return t("pipelineProgress.details.localAsrDevice", {
+      model: localModelName(match[1]),
+      language: asrLanguageName(match[2], t),
+      device: match[3].startsWith("GPU：")
+        ? t("pipelineProgress.details.gpuDevice", { name: match[3].slice("GPU：".length) })
+        : match[3],
+    });
+  }
   match = detail.match(/^本地识别中（(.+)，(.+)）$/);
   if (match) {
     return t("pipelineProgress.details.localAsr", {

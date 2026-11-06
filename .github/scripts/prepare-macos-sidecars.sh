@@ -53,6 +53,67 @@ chmod 755 "$ytdlp"
 xattr -c "$ytdlp" 2>/dev/null || true
 codesign --force --sign - "$ytdlp"
 
+# llama-server（本地识别 Qwen3-ASR 用的引擎，llama.cpp）。官方 macOS 包拆成一堆 @rpath 动态库，
+# 塞进 .app 还得处理加载路径；这里从源码静态编一个只依赖系统框架的单文件：
+# - Apple 芯片版开 Metal（GPU），着色器嵌进二进制；Intel 版不开——ggml 的 Metal 后端只对 Apple 芯片调过，
+#   Intel 核显 / AMD 独显上会出错，走 CPU（指令集按 AVX2 + FMA + F16C，macOS 14 支持的 Intel Mac 都有）；
+# - GGML_NATIVE=OFF：不按构建机的 CPU 特性编，换台机器也能跑；最低系统版本与应用一致；
+# - 不要网页界面（只当识别引擎用）：默认会在编译时从 Hugging Face 下载界面资源，构建机连不上就失败。
+# 与 Windows 用同一个 llama.cpp 版本（prepare-windows-sidecars.ps1）。产物旁留版本戳，同版本编过就跳过。
+LLAMA_CPP_TAG="${LLAMA_CPP_TAG:-b12167}"
+MACOS_MIN_VERSION="14.0"
+llama="$binary_dir/llama-server-$target"
+llama_stamp="$binary_dir/.llama-server-$target.tag"
+if [[ -x "$llama" && "$(cat "$llama_stamp" 2>/dev/null)" == "$LLAMA_CPP_TAG@$MACOS_MIN_VERSION" ]]; then
+  echo "llama-server $LLAMA_CPP_TAG already built, skipping"
+else
+  llama_src="$(mktemp -d)/llama.cpp"
+  echo "Building llama-server $LLAMA_CPP_TAG for $target (macOS >= $MACOS_MIN_VERSION)"
+  git clone --quiet --depth 1 --branch "$LLAMA_CPP_TAG" https://github.com/ggml-org/llama.cpp.git "$llama_src"
+  case "$target" in
+    aarch64-apple-darwin)
+      llama_arch_flags=(-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON)
+      ;;
+    x86_64-apple-darwin)
+      llama_arch_flags=(-DGGML_METAL=OFF -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON)
+      ;;
+  esac
+  cmake -S "$llama_src" -B "$llama_src/build" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOS_MIN_VERSION" \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DGGML_NATIVE=OFF \
+    -DGGML_BLAS=OFF \
+    "${llama_arch_flags[@]}" \
+    -DLLAMA_CURL=OFF \
+    -DLLAMA_OPENSSL=OFF \
+    -DLLAMA_BUILD_TESTS=OFF \
+    -DLLAMA_BUILD_EXAMPLES=OFF \
+    -DLLAMA_BUILD_SERVER=ON \
+    -DLLAMA_BUILD_UI=OFF \
+    -DLLAMA_USE_PREBUILT_UI=OFF
+  cmake --build "$llama_src/build" --target llama-server --config Release -j "$(sysctl -n hw.ncpu)"
+  cp "$llama_src/build/bin/llama-server" "$llama"
+  rm -rf "$llama_src"
+  chmod 755 "$llama"
+  xattr -c "$llama" 2>/dev/null || true
+  codesign --force --sign - "$llama"
+  echo "$LLAMA_CPP_TAG@$MACOS_MIN_VERSION" > "$llama_stamp"
+fi
+
+# 打进安装包前确认：只链接系统库（/usr/lib、/System），最低系统版本对得上。
+non_system_libs="$(otool -L "$llama" | tail -n +2 | awk '{print $1}' | grep -vE '^(/usr/lib/|/System/)' || true)"
+if [[ -n "$non_system_libs" ]]; then
+  echo "llama-server links non-system libraries, it would break on users' machines:" >&2
+  echo "$non_system_libs" >&2
+  exit 1
+fi
+llama_minos="$(otool -l "$llama" | awk '/LC_BUILD_VERSION/{found=1} found && /minos/{print $2; exit}')"
+if [[ "$llama_minos" != "$MACOS_MIN_VERSION" ]]; then
+  echo "llama-server minimum macOS is $llama_minos, expected $MACOS_MIN_VERSION" >&2
+  exit 1
+fi
+
 # sherpa-onnx 动态库（本地中文识别 SenseVoice / Qwen3-ASR）：Rust 绑定构建时自己下一份链接用，这里再取
 # 同一版本的官方包打进 .app 的 Contents/Frameworks（tauri.macos.conf.json 的 frameworks，build.rs 加了
 # 对应的 rpath）。版本必须和 Cargo.lock 里的 sherpa-onnx-sys 一致，否则运行时符号对不上。
@@ -96,4 +157,5 @@ fi
 echo "Prepared macOS sidecars:"
 "$ffmpeg" -version | sed -n '1,2p'
 "$ytdlp" --version
-ls -lh "$ffmpeg" "$ytdlp" "$sherpa_dir"/*.dylib
+"$llama" --version 2>&1 | tail -n 2
+ls -lh "$ffmpeg" "$ytdlp" "$llama" "$sherpa_dir"/*.dylib

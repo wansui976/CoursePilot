@@ -16,6 +16,8 @@ export interface ModelsDir {
   default_path: string;
   /** 这个目录里已下载的模型一共多大。 */
   size_bytes: number;
+  /** 其中已经不再使用的旧模型（Whisper、桌面上的旧版 Qwen3-ASR）占多少。 */
+  legacy_bytes: number;
 }
 
 export interface NativeCloudSyncStatus {

@@ -56,6 +56,8 @@ pub struct ModelsDir {
     pub default_path: String,
     /// 当前目录里已下载的模型一共多大。
     pub size_bytes: u64,
+    /// 其中已经不再使用的旧模型（Whisper、桌面上的 sherpa 版 Qwen3-ASR）占多少，可以一键删掉。
+    pub legacy_bytes: u64,
 }
 
 #[tauri::command]
@@ -65,17 +67,39 @@ pub async fn cmd_get_models_dir(
 ) -> AppResult<ModelsDir> {
     let default = app_data(&app)?;
     let root = model_store::models_root(&state.db, &default).await?;
+    let (size_bytes, legacy_bytes) = tokio::task::spawn_blocking({
+        let root = root.clone();
+        move || {
+            let legacy = model_store::legacy_dirs(&root).iter().map(|d| model_store::dir_size(d)).sum();
+            (model_store::models_size(&root), legacy)
+        }
+    })
+    .await
+    .unwrap_or((0, 0));
     Ok(ModelsDir {
         is_default: root == default,
-        size_bytes: tokio::task::spawn_blocking({
-            let root = root.clone();
-            move || model_store::models_size(&root)
-        })
-        .await
-        .unwrap_or(0),
+        size_bytes,
+        legacy_bytes,
         path: root.to_string_lossy().to_string(),
         default_path: default.to_string_lossy().to_string(),
     })
+}
+
+/// 删掉不再使用的旧模型（见 `model_store::legacy_dirs`）。正在处理视频、下载模型时不删。
+#[tauri::command]
+pub async fn cmd_delete_legacy_models(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<ModelsDir> {
+    use crate::keep_alive::{is_active, Kind};
+    if is_active(Kind::ModelDownload) || is_active(Kind::Processing) {
+        return Err(AppError::Config("有模型在下载或视频在处理，等它们结束后再删".into()));
+    }
+    let root = model_store::models_root(&state.db, &app_data(&app)?).await?;
+    for dir in model_store::legacy_dirs(&root) {
+        tokio::fs::remove_dir_all(&dir).await?;
+    }
+    cmd_get_models_dir(app, state).await
 }
 
 #[derive(Serialize, Clone)]

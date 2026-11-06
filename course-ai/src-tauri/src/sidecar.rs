@@ -13,6 +13,12 @@ pub const FFMPEG: BinarySpec = BinarySpec {
     candidates_on_path: &["ffmpeg"],
 };
 
+/// llama.cpp 的 llama-server：桌面上跑 Qwen3-ASR（能用 GPU）。
+pub const LLAMA_SERVER: BinarySpec = BinarySpec {
+    name: "llama-server",
+    candidates_on_path: &["llama-server"],
+};
+
 pub const TESSERACT: BinarySpec = BinarySpec {
     name: "tesseract",
     candidates_on_path: &["tesseract"],

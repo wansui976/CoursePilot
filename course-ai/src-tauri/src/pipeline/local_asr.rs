@@ -13,11 +13,15 @@
 
 use std::path::{Path, PathBuf};
 
-/// sherpa-onnx 能跑的模型种类（决定识别器怎么配）。
+/// 本地识别模型的种类（决定用哪个引擎、识别器怎么配）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SherpaKind {
+    /// sherpa-onnx 跑。
     SenseVoice,
+    /// sherpa-onnx 跑的 int8 版（手机上用）。
     Qwen3Asr,
+    /// llama.cpp 跑的官方 GGUF 版（桌面上用，能走 GPU，见 `llama_asr`）。
+    Qwen3AsrGguf,
 }
 
 /// 模型里的一个文件。`path` 是相对模型目录的路径，下载源依次尝试。
@@ -82,7 +86,46 @@ pub const SENSE_VOICE: SherpaModel = SherpaModel {
     min_free_mb: 600,
 };
 
-pub const QWEN3_ASR: SherpaModel = SherpaModel {
+/// Qwen3-ASR 在各平台上用哪一版：桌面用 llama.cpp 跑的 GGUF（能用 GPU），手机用 sherpa-onnx 的 int8 版。
+/// 两版 id 相同，设置里的选择不用改；文件不同，各装各的目录。
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub const QWEN3_ASR: SherpaModel = QWEN3_ASR_SHERPA;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub const QWEN3_ASR: SherpaModel = QWEN3_ASR_GGUF;
+
+/// 桌面上的 Qwen3-ASR：官方 GGUF（ggml-org/Qwen3-ASR-0.6B-GGUF，Q8_0），由 llama-server 跑。
+/// 原来桌面也用下面那份 sherpa int8 版，换过来以后它的目录不再使用，设置里可以一键删掉。
+pub const QWEN3_ASR_GGUF: SherpaModel = SherpaModel {
+    id: "qwen3-asr",
+    display_name: "Qwen3-ASR 0.6B（更准 · 支持 GPU 加速）",
+    kind: SherpaKind::Qwen3AsrGguf,
+    dir: "qwen3-asr-0.6b-q8_0-gguf",
+    files: &[
+        ModelFile {
+            path: crate::pipeline::llama_asr::MODEL_FILE,
+            sha256: "bca259818b50ca7c4c05e9bdb35a5dc04fa039653a6d6f3f0f331f96f6aa1971",
+            size: 804_749_248,
+            urls: urls![
+                "https://modelscope.cn/models/ggml-org/Qwen3-ASR-0.6B-GGUF/resolve/master/Qwen3-ASR-0.6B-Q8_0.gguf",
+                "https://huggingface.co/ggml-org/Qwen3-ASR-0.6B-GGUF/resolve/main/Qwen3-ASR-0.6B-Q8_0.gguf",
+            ],
+        },
+        ModelFile {
+            path: crate::pipeline::llama_asr::MMPROJ_FILE,
+            sha256: "41a342b5e4c514e968cb756de6cd1b7be39eff43c44c57a2ef5fc6522e36603d",
+            size: 214_392_480,
+            urls: urls![
+                "https://modelscope.cn/models/ggml-org/Qwen3-ASR-0.6B-GGUF/resolve/master/mmproj-Qwen3-ASR-0.6B-Q8_0.gguf",
+                "https://huggingface.co/ggml-org/Qwen3-ASR-0.6B-GGUF/resolve/main/mmproj-Qwen3-ASR-0.6B-Q8_0.gguf",
+            ],
+        },
+    ],
+    languages: None,
+    // 桌面上不按内存挡（见 fits_memory）；这里只是给个量级：模型约 1GB，跑起来约 1.5GB。
+    min_free_mb: 2_000,
+};
+
+pub const QWEN3_ASR_SHERPA: SherpaModel = SherpaModel {
     id: "qwen3-asr",
     display_name: "Qwen3-ASR 0.6B（中文高精度）",
     kind: SherpaKind::Qwen3Asr,
@@ -538,9 +581,10 @@ mod tests {
     #[test]
     fn qwen3_is_refused_when_the_process_cannot_grow_that_much() {
         // iPad Pro 11"（4GB）：单进程上限约 2.87GB，扣掉应用自己已经占的，剩不到 Qwen3 要的。
-        assert!(!QWEN3_ASR.fits_memory(Some(2_400)));
+        // 按内存挡只在手机上发生，手机上用的是 sherpa 版。
+        assert!(!QWEN3_ASR_SHERPA.fits_memory(Some(2_400)));
         assert!(SENSE_VOICE.fits_memory(Some(2_400)));
-        assert!(QWEN3_ASR.fits_memory(Some(5_000)));
+        assert!(QWEN3_ASR_SHERPA.fits_memory(Some(5_000)));
         // 桌面不查。
         assert!(QWEN3_ASR.fits_memory(None));
     }

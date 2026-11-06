@@ -15,6 +15,8 @@ export function AsrSection({ form }: { form: SettingsForm }) {
     asrLanguage,
     correctionConcurrency,
     subtitleAutocorrect,
+    asrGpu,
+    changeAsrGpu,
     volcengineAppId,
     setVolcengineAppId,
     volcengineToken,
@@ -145,6 +147,20 @@ export function AsrSection({ form }: { form: SettingsForm }) {
               </Select>
             </div>
           </Row>
+          {/* 桌面上的 Qwen3-ASR 由 llama.cpp 跑，能用显卡；手机和 SenseVoice 都只用 CPU。 */}
+          {model === "qwen3-asr" && !mobile && (
+            <Row
+              label={t("settings.asr.gpu")}
+              htmlFor="asr-gpu"
+              hint={t("settings.asr.gpuHint")}
+            >
+              <Switch
+                id="asr-gpu"
+                checked={asrGpu}
+                onCheckedChange={(next) => void changeAsrGpu(next)}
+              />
+            </Row>
+          )}
           {model === "qwen3-asr" && (
             <StackRow
               label={t("settings.asr.hotwords")}

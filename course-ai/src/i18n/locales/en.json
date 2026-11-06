@@ -90,7 +90,9 @@
       "aliyunAsr": "Transcribing with Alibaba Cloud {{model}}",
       "slidesExtracted": "Extracted {{count}} slide pages",
       "interruptedByRestart": "Processing was interrupted when the app restarted. Retry this task.",
-      "canceled": "Canceled"
+      "canceled": "Canceled",
+      "localAsrDevice": "Transcribing locally ({{model}}, {{language}}, {{device}})",
+      "gpuDevice": "GPU: {{name}}"
     }
   },
   "videoPlayer": {
@@ -872,7 +874,7 @@
       "senseVoice": "SenseVoice (best for Chinese)",
       "qwen3Asr": "Qwen3-ASR (most accurate Chinese)",
       "localModelHintMobile": "SenseVoice is recommended on phones: a 240 MB model that uses about 350 MB of RAM and transcribes an hour-long lecture in minutes, offline and free. Qwen3-ASR is more accurate but needs about 2.5 GB of RAM — only use it on an iPad with plenty of memory.",
-      "localModelHint": "SenseVoice is fast and accurate for Chinese lectures. Qwen3-ASR is a bit more accurate and also handles English and 30+ other languages — use it for English or heavily mixed lectures — but it is 4–5× slower and needs 4 GB of RAM. If the chosen model isn't downloaded, another downloaded model is used.",
+      "localModelHint": "SenseVoice is fast and accurate for Chinese lectures. Qwen3-ASR is a bit more accurate and also handles English and 30+ other languages, so use it for English or heavily mixed lectures. On the CPU it is 2–3× slower than SenseVoice; turn on GPU acceleration to speed it up. If the chosen model isn't downloaded, another downloaded model is used.",
       "modelDownload": "Model download",
       "volcengineTitle": "Volcengine",
       "appIdPlaceholder": "Console App ID",
@@ -889,7 +891,9 @@
       "aliyunModel": "Recognition model",
       "qwen3AsrFlash": "Qwen3-ASR-Flash-Filetrans",
       "aliyunApiKey": "Bailian API Key",
-      "saveAliyunKey": "Save Bailian API Key"
+      "saveAliyunKey": "Save Bailian API Key",
+      "gpu": "GPU acceleration",
+      "gpuHint": "Transcribe on the graphics card, 2–3× faster: on Windows any NVIDIA, AMD or Intel GPU works (no CUDA install needed); on Mac it uses Apple silicon. Falls back to the CPU when no usable GPU is found; the progress text shows which device was used."
     },
     "llm": {
       "title": "LLM",
@@ -1447,7 +1451,11 @@
     "changeLocation": "Change location…",
     "resetLocation": "Use default location",
     "moving": "Moving models {{percent}}%",
-    "locationHint": "Downloaded models move with it — handy when the system drive is short on space"
+    "locationHint": "Downloaded models move with it — handy when the system drive is short on space",
+    "legacy": "{{size}} of old model files are no longer used (Whisper, old Qwen3-ASR)",
+    "deleteLegacy": "Delete old models",
+    "deleteLegacyConfirm": "Delete old model files that are no longer used to free {{size}}. These are Whisper and the old Qwen3-ASR build; current transcription is unaffected.",
+    "deleteLegacyOk": "Delete"
   },
   "llmSettings": {
     "add": "Add",

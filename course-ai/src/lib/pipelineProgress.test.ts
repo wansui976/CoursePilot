@@ -134,6 +134,24 @@ describe("处理队列的整体进度", () => {
     ).toBe("Transcribing with Whisper (zh)");
   });
 
+  it("桌面 Qwen3-ASR 的进度带上实际用的显卡或 CPU", () => {
+    const job: StageJob = {
+      stage: "asr",
+      status: "running",
+      progress: 0.4,
+      message: "本地识别中（qwen3-asr，zh，GPU：NVIDIA GeForce RTX 3060）",
+    };
+    expect(stageMessage(job, i18n.getFixedT("zh-CN"))).toBe(
+      "本地识别中（Qwen3-ASR，中文，GPU：NVIDIA GeForce RTX 3060）",
+    );
+    expect(stageMessage(job, i18n.getFixedT("en"))).toBe(
+      "Transcribing locally (Qwen3-ASR, Chinese, GPU: NVIDIA GeForce RTX 3060)",
+    );
+    expect(
+      stageMessage({ ...job, message: "本地识别中（qwen3-asr，auto，CPU）" }, i18n.getFixedT("en")),
+    ).toBe("Transcribing locally (Qwen3-ASR, Auto-detect, CPU)");
+  });
+
   it("什么都没有时是 0，不是 NaN", () => {
     expect(overallProgress({})).toBe(0);
     expect(stageMessage(currentStage({}))).toBe("等待中");

@@ -65,7 +65,7 @@ fn parallelism(kind: SherpaKind) -> (usize, i32) {
             let workers = (budget - 1).clamp(1, 3);
             (workers, (budget * 3 / 2 / workers).clamp(1, 4))
         }
-        SherpaKind::Qwen3Asr => (if mobile { 1 } else { 2 }, budget),
+        SherpaKind::Qwen3Asr | SherpaKind::Qwen3AsrGguf => (if mobile { 1 } else { 2 }, budget),
     };
     let workers = env("CP_ASR_WORKERS").unwrap_or(workers).max(1);
     let threads = env("CP_ASR_THREADS").unwrap_or(threads).max(1);
@@ -84,7 +84,7 @@ pub struct SherpaJob {
 }
 
 /// 丢弃时置位：异步那边被取消，识别线程就在下一段之前停下。
-struct StopOnDrop(Arc<AtomicBool>);
+pub(crate) struct StopOnDrop(pub(crate) Arc<AtomicBool>);
 
 impl Drop for StopOnDrop {
     fn drop(&mut self) {
@@ -204,7 +204,7 @@ fn to_f32(samples: &[i16]) -> Vec<f32> {
 
 /// 读 WAV，混成单声道、重采样到 16kHz，存成 i16（一小时的课 115MB，存 f32 要翻倍——手机上要省着用）。
 /// 边读边转，不把原始文件整个读进内存：手机导出的 48kHz 立体声一小时就是 660MB。
-fn load_16k_mono(path: &Path, stop: &AtomicBool) -> AppResult<Vec<i16>> {
+pub(crate) fn load_16k_mono(path: &Path, stop: &AtomicBool) -> AppResult<Vec<i16>> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = std::fs::File::open(path)
         .map_err(|error| AppError::Pipeline(format!("读不了音频 {}：{error}", path.display())))?;
@@ -256,7 +256,7 @@ fn load_16k_mono(path: &Path, stop: &AtomicBool) -> AppResult<Vec<i16>> {
 }
 
 /// silero VAD 切出语音段，返回采样点区间。
-fn speech_segments(vad_model: &Path, samples: &[i16], stop: &AtomicBool) -> AppResult<Vec<(usize, usize)>> {
+pub(crate) fn speech_segments(vad_model: &Path, samples: &[i16], stop: &AtomicBool) -> AppResult<Vec<(usize, usize)>> {
     let config = VadModelConfig {
         silero_vad: SileroVadModelConfig {
             model: Some(vad_model.to_string_lossy().into_owned()),
@@ -314,7 +314,8 @@ fn recognizer_config(job: &SherpaJob, threads: i32) -> OfflineRecognizerConfig {
                 use_itn: true,
             };
         }
-        SherpaKind::Qwen3Asr => {
+        // GGUF 版不走 sherpa（见 `llama_asr`），走到这里说明调用方分派错了；按 int8 版配，加载会明确报错。
+        SherpaKind::Qwen3Asr | SherpaKind::Qwen3AsrGguf => {
             config.feat_config.feature_dim = 128;
             config.model_config.qwen3_asr = qwen3_config(dir, job.hotwords.clone());
         }
@@ -338,7 +339,7 @@ fn qwen3_config(dir: &Path, hotwords: Option<String>) -> OfflineQwen3ASRModelCon
 }
 
 /// 一段识别结果 → 一句一行的文稿段。
-fn to_segments(
+pub(crate) fn to_segments(
     raw: &str,
     tokens: &[String],
     timestamps: Option<&[f32]>,

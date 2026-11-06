@@ -3,6 +3,7 @@
     "externalBin": [
       "binaries/ffmpeg",
       "binaries/yt-dlp",
+      "binaries/llama-server",
       "binaries/tesseract"
     ],
     "resources": {

@@ -90,7 +90,9 @@
       "aliyunAsr": "正在通过阿里云 {{model}} 识别",
       "slidesExtracted": "已提取 {{count}} 页课件",
       "interruptedByRestart": "应用已重启，处理被中断，请重试",
-      "canceled": "已取消"
+      "canceled": "已取消",
+      "localAsrDevice": "本地识别中（{{model}}，{{language}}，{{device}}）",
+      "gpuDevice": "GPU：{{name}}"
     }
   },
   "videoPlayer": {
@@ -871,7 +873,7 @@
       "senseVoice": "SenseVoice（中文推荐）",
       "qwen3Asr": "Qwen3-ASR（中文高精度）",
       "localModelHintMobile": "手机上推荐 SenseVoice：模型 240MB，识别时约占 350MB 内存，一小时的课几分钟转完，不联网、不花钱。Qwen3-ASR 更准，但要约 2.5GB 内存，只建议在内存大的 iPad 上用。",
-      "localModelHint": "中文课用 SenseVoice：又快又准。Qwen3-ASR 更准一些，也认得英语等 30 多种语言，适合英文课和中英混杂多的课，但慢 4–5 倍、要 4GB 内存。选的模型没下载时，会先用已下载的其他模型。",
+      "localModelHint": "中文课用 SenseVoice：又快又准。Qwen3-ASR 更准一些，也认得英语等 30 多种语言，适合英文课和中英混杂多的课，在 CPU 上比 SenseVoice 慢 2–3 倍，可以开 GPU 加速。选的模型没下载时，会先用已下载的其他模型。",
       "modelDownload": "模型下载",
       "volcengineTitle": "火山引擎",
       "appIdPlaceholder": "控制台「应用」的 App ID",
@@ -888,7 +890,9 @@
       "aliyunModel": "识别模型",
       "qwen3AsrFlash": "千问3-ASR-Flash-Filetrans",
       "aliyunApiKey": "百炼 API Key",
-      "saveAliyunKey": "保存百炼 API Key"
+      "saveAliyunKey": "保存百炼 API Key",
+      "gpu": "GPU 加速",
+      "gpuHint": "用显卡识别，快两到三倍：Windows 上 NVIDIA、AMD、Intel 显卡都能用（不用装 CUDA），Mac 上用 Apple 芯片。没有可用的显卡时自动用 CPU；识别进度里会显示实际用的是哪块显卡。"
     },
     "llm": {
       "title": "大模型",
@@ -1444,7 +1448,11 @@
     "changeLocation": "更改位置…",
     "resetLocation": "恢复默认位置",
     "moving": "正在搬移模型 {{percent}}%",
-    "locationHint": "已下载的模型会一起搬过去；C 盘空间紧张时可以换到别的盘"
+    "locationHint": "已下载的模型会一起搬过去；C 盘空间紧张时可以换到别的盘",
+    "legacy": "旧版模型文件 {{size}} 已不再使用（Whisper、旧版 Qwen3-ASR）",
+    "deleteLegacy": "删除旧模型",
+    "deleteLegacyConfirm": "删除不再使用的旧模型文件，可以腾出 {{size}}。这些是 Whisper 和旧版 Qwen3-ASR 的模型，删掉不影响现在的识别。",
+    "deleteLegacyOk": "删除"
   },
   "llmSettings": {
     "add": "新增",

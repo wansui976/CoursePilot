@@ -2,7 +2,8 @@
   "bundle": {
     "externalBin": [
       "binaries/ffmpeg",
-      "binaries/yt-dlp"
+      "binaries/yt-dlp",
+      "binaries/llama-server"
     ],
     "macOS": {
       "hardenedRuntime": false,

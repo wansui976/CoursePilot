@@ -48,6 +48,8 @@ export function useSettingsForm() {
   const [asrLanguage, setAsrLanguage] = useState("zh");
   const [correctionConcurrency, setCorrectionConcurrency] = useState("8");
   const [subtitleAutocorrect, setSubtitleAutocorrect] = useState(true);
+  // 本地识别用不用 GPU（只影响桌面上的 Qwen3-ASR）。默认开：没有可用显卡时引擎自己退回 CPU。
+  const [asrGpu, setAsrGpu] = useState(true);
   const [slidesAutoExtract, setSlidesAutoExtract] = useState(true);
   const [volcengineAppId, setVolcengineAppId] = useState("");
   const [volcengineToken, setVolcengineToken] = useState("");
@@ -128,6 +130,7 @@ export function useSettingsForm() {
       load("asr_language", (value) => setAsrLanguage(value ?? "zh")),
       load("asr_correction_concurrency", (value) => setCorrectionConcurrency(value ?? "8")),
       load("subtitle_autocorrect", (value) => setSubtitleAutocorrect(value !== "false")),
+      load("asr_gpu", (value) => setAsrGpu(value !== "false")),
       load("slides_auto_extract", (value) => setSlidesAutoExtract(value !== "off")),
       load("volcengine_asr_app_id", (value) => setVolcengineAppId(value ?? "")),
       load("volcengine_asr_hotwords", (value) => setVolcengineHotwords(value ?? "")),
@@ -201,6 +204,11 @@ export function useSettingsForm() {
       : "8";
     setCorrectionConcurrency(next);
     await saveSetting("asr_correction_concurrency", next);
+  }
+
+  async function changeAsrGpu(value: boolean) {
+    setAsrGpu(value);
+    await saveSetting("asr_gpu", value ? "true" : "false");
   }
 
   async function changeSubtitleAutocorrect(value: boolean) {
@@ -354,6 +362,7 @@ export function useSettingsForm() {
     setCorrectionConcurrency,
     subtitleAutocorrect,
     setSubtitleAutocorrect,
+    asrGpu,
     slidesAutoExtract,
     setSlidesAutoExtract,
     volcengineAppId,
@@ -423,6 +432,7 @@ export function useSettingsForm() {
     changeCorrectionConcurrency,
     normalizeCorrectionConcurrency,
     changeSubtitleAutocorrect,
+    changeAsrGpu,
     changeSlidesAutoExtract,
     saveVolcengineKey,
     saveVolcengineContext,

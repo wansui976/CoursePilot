@@ -55,6 +55,27 @@ function ModelsLocation({ onMoved }: { onMoved: () => void }) {
     }
   }
 
+  // 不再支持 Whisper、桌面上 Qwen3-ASR 换了引擎之后，旧模型文件还占着地方（可能好几个 G）。
+  async function removeLegacy() {
+    if (!dir) return;
+    const ok = await confirmDialog(
+      t("whisperModels.deleteLegacyConfirm", { size: formatBytes(dir.legacy_bytes) }),
+      {
+        title: t("whisperModels.deleteLegacy"),
+        kind: "warning",
+        okLabel: t("whisperModels.deleteLegacyOk"),
+        cancelLabel: t("common.cancel"),
+      },
+    );
+    if (!ok) return;
+    setError(null);
+    try {
+      setDir(await ipc.whisper.deleteLegacyModels());
+    } catch (e) {
+      setError(e);
+    }
+  }
+
   async function pick() {
     const picked = await openDialog({ directory: true, multiple: false });
     if (typeof picked === "string" && picked) await change(picked);
@@ -90,6 +111,14 @@ function ModelsLocation({ onMoved }: { onMoved: () => void }) {
         )}
         <span className="text-xs text-[var(--text-faint)]">{t("whisperModels.locationHint")}</span>
       </div>
+      {dir.legacy_bytes > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
+          <span>{t("whisperModels.legacy", { size: formatBytes(dir.legacy_bytes) })}</span>
+          <Button size="sm" variant="ghost" disabled={!!moving} onClick={() => void removeLegacy()}>
+            {t("whisperModels.deleteLegacy")}
+          </Button>
+        </div>
+      )}
       {error != null && <ErrorNote error={error} />}
     </div>
   );

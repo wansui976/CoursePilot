@@ -17,6 +17,7 @@ pub mod explain;
 pub mod feynman;
 pub mod handout;
 pub mod highlights;
+pub mod llama_asr;
 pub mod local_asr;
 pub mod media_kind;
 pub mod model_store;
@@ -163,6 +164,11 @@ fn select_local_model(models_root: &Path, preferred_id: &str, language: &str) ->
         .or_else(|| local_asr::MODELS.iter().copied().find_map(usable))
 }
 
+/// 本地识别用不用 GPU（设置项 `asr_gpu`，默认开）。只影响桌面上的 Qwen3-ASR（llama.cpp）。
+async fn asr_use_gpu(db: &crate::db::Db) -> bool {
+    setting(db, "asr_gpu").await.ok().flatten().as_deref() != Some("false")
+}
+
 /// 用选好的本地模型识别一段 16kHz 单声道 WAV。
 async fn run_local_model(
     models_root: &Path,
@@ -170,9 +176,22 @@ async fn run_local_model(
     audio: &Path,
     language: &str,
     hotwords: &[String],
+    use_gpu: bool,
     progress: ai::Progress<'_>,
 ) -> AppResult<asr::WhisperJson> {
     match model {
+        LocalModel::Sherpa(model) if model.kind == local_asr::SherpaKind::Qwen3AsrGguf => {
+            let job = llama_asr::LlamaJob {
+                audio: audio.to_path_buf(),
+                model_dir: local_asr::model_dir(models_root, model),
+                vad: local_asr::vad_path(models_root),
+                language: Some(language.to_string()),
+                hotwords: local_asr::qwen3_hotwords(hotwords),
+                use_gpu,
+            };
+            let silent = |_: f64, _: &str| {};
+            llama_asr::transcribe(job, progress.unwrap_or(&silent)).await
+        }
         LocalModel::Sherpa(model) => {
             let job = sherpa_asr::SherpaJob {
                 audio: audio.to_path_buf(),
@@ -242,7 +261,8 @@ pub async fn transcribe_clip(
                 AppError::Config("还没有可用的本地识别模型（设置 → 语音识别 下载一个）".into())
             })?;
             let hotwords = split_terms(&setting(db, "volcengine_asr_hotwords").await?.unwrap_or_default());
-            run_local_model(&app_data, &model, &audio_path, &lang, &hotwords, None).await?
+            let use_gpu = asr_use_gpu(db).await;
+            run_local_model(&app_data, &model, &audio_path, &lang, &hotwords, use_gpu, None).await?
         }
         AsrBackend::Volcengine => {
             let app_id = setting(db, "volcengine_asr_app_id").await?.unwrap_or_default();
@@ -568,7 +588,15 @@ async fn run_all(
                 let app = app.clone();
                 let video_id = video_id.clone();
                 let job_id = asr_job.id.clone();
-                move |at: f64, _: &str| {
+                let model_id = model.id().to_string();
+                let lang = lang.clone();
+                move |at: f64, device: &str| {
+                    // 引擎报了跑在哪（「GPU：Apple M4」/「CPU」）就带上，让人看得出 GPU 加速有没有生效。
+                    let shown = if device.is_empty() {
+                        message.clone()
+                    } else {
+                        format!("本地识别中（{model_id}，{lang}，{device}）")
+                    };
                     emit_stage(
                         &app,
                         &video_id,
@@ -576,13 +604,14 @@ async fn run_all(
                         "asr",
                         "running",
                         0.18 + 0.70 * at,
-                        Some(&message),
+                        Some(&shown),
                     );
                 }
             };
             // 用户的热词表（和火山引擎共用一份）：只有 Qwen3-ASR 用得上。
             let hotwords = split_terms(&setting(&db, "volcengine_asr_hotwords").await?.unwrap_or_default());
-            run_local_model(&app_data, &model, &audio_path, &lang, &hotwords, Some(&sink)).await
+            let use_gpu = asr_use_gpu(&db).await;
+            run_local_model(&app_data, &model, &audio_path, &lang, &hotwords, use_gpu, Some(&sink)).await
         }
         AsrBackend::Volcengine => {
             let app_id = sqlx::query_scalar::<_, String>(

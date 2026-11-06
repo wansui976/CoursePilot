@@ -86,7 +86,8 @@ use crate::commands::videos::{
 };
 use crate::commands::transcode::{cmd_start_transcode, cmd_transcode_status};
 use crate::commands::whisper::{
-    cmd_download_whisper_model, cmd_get_models_dir, cmd_list_whisper_models, cmd_set_models_dir,
+    cmd_delete_legacy_models, cmd_download_whisper_model, cmd_get_models_dir,
+    cmd_list_whisper_models, cmd_set_models_dir,
 };
 use crate::db::Db;
 use crate::dev_log::{cmd_clear_dev_logs, cmd_get_dev_logs};
@@ -291,6 +292,7 @@ pub fn run() {
             cmd_download_whisper_model,
             cmd_get_models_dir,
             cmd_set_models_dir,
+            cmd_delete_legacy_models,
             cmd_list_jobs,
             cmd_process_video,
             cmd_cancel_processing,

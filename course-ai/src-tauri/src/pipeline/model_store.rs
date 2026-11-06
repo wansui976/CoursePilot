@@ -49,6 +49,24 @@ pub fn validate_new_root(new_root: &Path, old_root: &Path) -> AppResult<()> {
     Ok(())
 }
 
+/// 已经不再使用、可以删掉的旧模型目录（存在的才列）：
+/// - `whisper/`：不再支持 Whisper 之后，下过的 Whisper 模型都没用了；
+/// - 桌面上的 sherpa 版 Qwen3-ASR：桌面改用 llama.cpp 跑 GGUF 版以后，它就不再加载了（手机上照用，不算）。
+pub fn legacy_dirs(root: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![root.join("whisper")];
+    if !cfg!(any(target_os = "android", target_os = "ios")) {
+        dirs.push(crate::pipeline::local_asr::model_dir(
+            root,
+            &crate::pipeline::local_asr::QWEN3_ASR_SHERPA,
+        ));
+    }
+    dirs.into_iter().filter(|dir| dir.is_dir()).collect()
+}
+
+pub fn dir_size(dir: &Path) -> u64 {
+    files_under(dir).iter().map(|(_, len)| len).sum()
+}
+
 /// 旧目录下已有的模型一共多大（字节）。
 pub fn models_size(root: &Path) -> u64 {
     MODEL_SUBDIRS
@@ -207,6 +225,21 @@ mod tests {
         assert!(!old.join("whisper").exists());
         // 没有残留的临时文件。
         assert!(!new.join("whisper/ggml-tiny.bin.moving").exists());
+    }
+
+    #[test]
+    fn legacy_dirs_are_listed_only_when_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert!(legacy_dirs(root).is_empty());
+        write(&root.join("whisper/ggml-base.bin"), &[1; 100]);
+        let old_qwen = crate::pipeline::local_asr::model_dir(root, &crate::pipeline::local_asr::QWEN3_ASR_SHERPA);
+        write(&old_qwen.join("decoder.int8.onnx"), &[2; 300]);
+        // 还在用的模型不能算进去。
+        write(&root.join("asr/silero_vad.onnx"), &[3; 50]);
+        let legacy = legacy_dirs(root);
+        assert_eq!(legacy, vec![root.join("whisper"), old_qwen]);
+        assert_eq!(legacy.iter().map(|d| dir_size(d)).sum::<u64>(), 400);
     }
 
     #[test]
