@@ -79,7 +79,8 @@ describe("LlmSettingsPanel", () => {
     const models = screen.getAllByLabelText("模型名");
     // 嵌入模型不能聊天：跳过 nomic-embed-text，默认选 qwen2.5:7b。
     expect(models[models.length - 1]).toHaveValue("qwen2.5:7b");
-    expect(screen.getAllByLabelText("Base URL").at(-1)).toHaveValue("http://127.0.0.1:11434");
+    const urls = screen.getAllByLabelText("Base URL");
+    expect(urls[urls.length - 1]).toHaveValue("http://127.0.0.1:11434");
     // 加上之后提示就收起，不再重复劝。
     expect(screen.queryByText(/检测到本机正在运行的 Ollama/)).not.toBeInTheDocument();
   });
