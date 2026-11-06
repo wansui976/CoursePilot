@@ -246,7 +246,19 @@
     "deleteCourseTitle": "Delete Course",
     "cancel": "Cancel",
     "allWatched": "All watched",
-    "subscriptions": "Subscriptions"
+    "subscriptions": "Subscriptions",
+    "color": "Color",
+    "colorNone": "No color",
+    "colors": {
+      "red": "Red",
+      "orange": "Orange",
+      "yellow": "Yellow",
+      "green": "Green",
+      "teal": "Teal",
+      "blue": "Blue",
+      "purple": "Purple",
+      "pink": "Pink"
+    }
   },
   "recycleBin": {
     "title": "Recycle Bin",

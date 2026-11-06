@@ -377,6 +377,55 @@
   text-overflow: ellipsis;
 }
 
+/* 课程「…」菜单里的颜色行：第一格「不标颜色」，其余按 --course-* 色板。 */
+.ca-course-colors {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  padding: 4px 6px;
+}
+
+.ca-color-swatch {
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+}
+
+.ca-color-swatch::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--swatch);
+}
+
+/* 「不标」：空心圈加一道斜杠。 */
+.ca-color-swatch[data-none]::before {
+  background: linear-gradient(
+    135deg,
+    transparent calc(50% - 0.75px),
+    var(--text-3) calc(50% - 0.75px) calc(50% + 0.75px),
+    transparent calc(50% + 0.75px)
+  );
+  box-shadow: inset 0 0 0 1.5px var(--text-3);
+}
+
+.ca-color-swatch[aria-checked="true"]::before {
+  outline: 2px solid var(--swatch, var(--text-2));
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+.ca-color-swatch:hover {
+  background: var(--surface-card-hover);
+}
+}
+
+.ca-color-swatch:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
 /* 课程条目右侧的集数/进度（12集·46% / ✓）。 */
 .course-meta {
   flex: 0 0 auto;

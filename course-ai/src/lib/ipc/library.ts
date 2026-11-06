@@ -4,6 +4,7 @@ import type { CropStatus } from "../blackBars";
 import type { SkipRange } from "../silenceSkip";
 import type {
   Course,
+  CourseColor,
   RelinkResult,
   TrashedVideo,
   Video,
@@ -41,6 +42,11 @@ export const courses = {
     invoke("cmd_rename_course", { id, name }),
   relinkRoot: (courseId: string, newRoot: string): Promise<RelinkResult> =>
     invoke("cmd_relink_course_root", { courseId, newRoot }),
+  // 手动排序：orderedIds 须为全部课程 id 的新顺序。
+  reorder: (orderedIds: string[]): Promise<void> =>
+    invoke("cmd_reorder_courses", { orderedIds }),
+  setColor: (id: string, color: CourseColor | null): Promise<void> =>
+    invoke("cmd_set_course_color", { id, color }),
 };
 
 export const videos = {

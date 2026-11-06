@@ -1,8 +1,20 @@
 import { confirm as confirmDialog, message as messageDialog } from "@tauri-apps/plugin-dialog";
+import {
+  closestCenter,
+  DndContext,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
 import { FolderOpen, MoreHorizontal, Pencil, Rss, Trash2 } from "lucide-react";
 import { SubscriptionsDialog } from "./SubscriptionsDialog";
+import { nextOrder } from "./SortableVideos";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Fragment,
@@ -10,6 +22,8 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
+  type HTMLAttributes,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
@@ -18,10 +32,37 @@ import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
 import { clearTasksForScope } from "@/lib/backgroundTasks";
 import { useTaskNotices } from "@/lib/taskNotices";
-import type { Course, Video } from "@/lib/types";
+import { COURSE_COLORS, type Course, type CourseColor, type Video } from "@/lib/types";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { Skeleton } from "@/ui/skeleton";
 import { isIOS, pickDirectoryPath } from "@/lib/mobileFiles";
+import { cn } from "@/lib/utils";
+
+/** 课程「…」菜单里可聚焦的条目：普通项和颜色格。 */
+// 单个选择器而不是逗号列表：保证按文档顺序返回（方向键依赖这个顺序）。
+const MENU_ITEMS = '[role^="menuitem"]:not(:disabled)';
+
+/** 可拖动排序的课程行：直接挂在 `.ca-nav-item` 上，不多包一层，保住相邻分隔线的选择器。 */
+function SortableCourseItem({
+  id,
+  className,
+  style,
+  children,
+  ...rest
+}: { id: string } & HTMLAttributes<HTMLDivElement>) {
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      {...rest}
+      className={cn(className, isDragging && "z-10 opacity-60")}
+      style={{ ...style, transform: CSS.Transform.toString(transform), transition }}
+      {...listeners}
+    >
+      {children}
+    </div>
+  );
+}
 
 function nextCourseName(courses: { name: string }[], t: (key: string, opts?: Record<string, unknown>) => string) {
   const names = new Set(courses.map((course) => course.name));
@@ -185,7 +226,7 @@ export function CourseList({
   useEffect(() => {
     if (!menuFor || !menuAnchor) return;
     menuRef.current
-      ?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')
+      ?.querySelector<HTMLButtonElement>(MENU_ITEMS)
       ?.focus();
   }, [menuAnchor, menuFor]);
 
@@ -248,6 +289,54 @@ export function CourseList({
       await messageDialog(lines.join("\n"), { title: t("courseList.relinkRoot") });
     },
   });
+
+  // 拖动排序：鼠标位移 8px 才算拖，保住单击；触屏长按 250ms，不和滚动、iOS 左滑菜单抢手势。
+  // 不用 PointerSensor——它把手指横滑也当成拖动，左滑出菜单就失灵了。
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+  );
+  const reorder = useMutation({
+    mutationFn: (orderedIds: string[]) => ipc.courses.reorder(orderedIds),
+    // 乐观更新：松手就按新顺序渲染；后端失败时拉回真实顺序。
+    onMutate: (orderedIds) => {
+      queryClient.setQueryData<Course[]>(qk.courses(), (old) => {
+        if (!old) return old;
+        const byId = new Map(old.map((course) => [course.id, course]));
+        const next = orderedIds.flatMap((id) => byId.get(id) ?? []);
+        return next.length === old.length ? next : old;
+      });
+    },
+    onError: () => void queryClient.invalidateQueries({ queryKey: qk.courses() }),
+  });
+  const recolor = useMutation({
+    mutationFn: ({ id, color }: { id: string; color: CourseColor | null }) =>
+      ipc.courses.setColor(id, color),
+    onMutate: ({ id, color }) => {
+      queryClient.setQueryData<Course[]>(qk.courses(), (old) =>
+        old?.map((course) => (course.id === id ? { ...course, color } : course)),
+      );
+    },
+    onError: () => void queryClient.invalidateQueries({ queryKey: qk.courses() }),
+  });
+  // 工作台里选中课程下面挂着视频列表，拖课程会连带拖乱它；改名时那一行是输入框。
+  const sortDisabled = Boolean(selectedCourseExtra) || renamingId !== null || courses.length < 2;
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over) return;
+    const ordered = nextOrder(
+      courses.map((course) => course.id),
+      String(active.id),
+      String(over.id),
+    );
+    if (ordered) reorder.mutate(ordered);
+  }
+
+  function chooseColor(id: string, color: CourseColor | null) {
+    closeMenuAndRestoreFocus();
+    recolor.mutate({ id, color });
+  }
 
   function startRename(id: string, name: string) {
     renameOriginRef.current = menuButtonRefs.current.get(id) ?? null;
@@ -312,87 +401,103 @@ export function CourseList({
 
   return (
     <>
-      {courses.map((course) => {
-        // 队列是当前视图时，课程不再算「选中」，避免与队列项同时高亮。
-        const selected = course.id === selectedCourseId && !queueOpen;
-        if (renamingId === course.id) {
-          return (
-            <Fragment key={course.id}>
-              <input
-                aria-label={t("courseList.renameCourse")}
-                autoFocus
-                value={renameDraft}
-                onChange={(e) => setRenameDraft(e.target.value)}
-                onBlur={commitRename}
-                disabled={rename.isPending}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") commitRename();
-                  if (e.key === "Escape") {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    cancelRenameAndRestoreFocus();
-                  }
-                }}
-                className="w-full rounded-md border border-[var(--accent-text)] bg-[var(--surface-input)] px-2.5 py-2 text-sm text-[var(--text-strong)] outline-none"
-              />
-              {rename.isError && rename.variables?.id === course.id && (
-                <ErrorNote className="mx-1 mt-1" error={rename.error} />
-              )}
-              {selected && selectedCourseExtra}
-            </Fragment>
-          );
-        }
-        return (
-          <Fragment key={course.id}>
-            <div
-              className={`ca-nav-item group relative ${selected ? "active" : ""}`}
-              style={{ touchAction: "pan-y" }}
-              onPointerDown={(event) => startSwipe(course.id, event)}
-              onPointerMove={(event) => trackSwipe(course.id, event)}
-              onPointerUp={endSwipe}
-              onPointerCancel={endSwipe}
-            >
-              <button
-                onClick={() => onSelect(course.id)}
-                aria-current={selected ? "page" : undefined}
-                className="ca-nav-button"
-              >
-                <FolderOpen className="ic h-4 w-4" />
-                <span className="nm">{course.name}</span>
-                {renderCourseMeta(course)}
-              </button>
-              <button
-                aria-label={t("courseList.courseActions")}
-                aria-haspopup="menu"
-                aria-expanded={menuFor === course.id}
-                aria-controls={menuFor === course.id ? `course-actions-${course.id}` : undefined}
-                data-course-menu
-                // 常显（iOS）时按钮仍占位；否则悬停时叠在集数上方，不挤占课程名的宽度。
-                data-persistent={isIOS() || undefined}
-                ref={(el) => {
-                  if (el) menuButtonRefs.current.set(course.id, el);
-                  else menuButtonRefs.current.delete(course.id);
-                }}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (menuFor === course.id) closeMenu();
-                  else openMenuFor(course.id, e.currentTarget);
-                }}
-                className={`ca-touch-44 mr-1 grid h-9 w-9 flex-none place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card)] hover:text-[var(--text-strong)] ${
-                  isIOS() || menuFor === course.id || swipedCourseId === course.id
-                    ? "opacity-100"
-                    : // 键盘聚焦本行时也显现（group-focus-within），否则 Tab 到的是不可见控件。
-                      "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-                }`}
-              >
-                <MoreHorizontal className="h-5 w-5" />
-              </button>
-            </div>
-            {selected && selectedCourseExtra}
-          </Fragment>
-        );
-      })}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext
+          items={courses.map((course) => course.id)}
+          strategy={verticalListSortingStrategy}
+          disabled={sortDisabled}
+        >
+          {courses.map((course) => {
+            // 队列是当前视图时，课程不再算「选中」，避免与队列项同时高亮。
+            const selected = course.id === selectedCourseId && !queueOpen;
+            if (renamingId === course.id) {
+              return (
+                <Fragment key={course.id}>
+                  <input
+                    aria-label={t("courseList.renameCourse")}
+                    autoFocus
+                    value={renameDraft}
+                    onChange={(e) => setRenameDraft(e.target.value)}
+                    onBlur={commitRename}
+                    disabled={rename.isPending}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitRename();
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        cancelRenameAndRestoreFocus();
+                      }
+                    }}
+                    className="w-full rounded-md border border-[var(--accent-text)] bg-[var(--surface-input)] px-2.5 py-2 text-sm text-[var(--text-strong)] outline-none"
+                  />
+                  {rename.isError && rename.variables?.id === course.id && (
+                    <ErrorNote className="mx-1 mt-1" error={rename.error} />
+                  )}
+                  {selected && selectedCourseExtra}
+                </Fragment>
+              );
+            }
+            return (
+              <Fragment key={course.id}>
+                <SortableCourseItem
+                  id={course.id}
+                  className={`ca-nav-item group relative ${selected ? "active" : ""}`}
+                  style={{ touchAction: "pan-y" }}
+                  onPointerDown={(event) => startSwipe(course.id, event)}
+                  onPointerMove={(event) => trackSwipe(course.id, event)}
+                  onPointerUp={endSwipe}
+                  onPointerCancel={endSwipe}
+                >
+                  <button
+                    onClick={() => onSelect(course.id)}
+                    aria-current={selected ? "page" : undefined}
+                    className="ca-nav-button"
+                  >
+                    <FolderOpen
+                      className="ic h-4 w-4"
+                      data-color={course.color ?? undefined}
+                      style={course.color ? { color: `var(--course-${course.color})` } : undefined}
+                    />
+                    <span className="nm">{course.name}</span>
+                    {renderCourseMeta(course)}
+                  </button>
+                  <button
+                    aria-label={t("courseList.courseActions")}
+                    aria-haspopup="menu"
+                    aria-expanded={menuFor === course.id}
+                    aria-controls={menuFor === course.id ? `course-actions-${course.id}` : undefined}
+                    data-course-menu
+                    // 常显（iOS）时按钮仍占位；否则悬停时叠在集数上方，不挤占课程名的宽度。
+                    data-persistent={isIOS() || undefined}
+                    ref={(el) => {
+                      if (el) menuButtonRefs.current.set(course.id, el);
+                      else menuButtonRefs.current.delete(course.id);
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    // 拖动传感器听的是 mousedown / touchstart：从「…」按钮起手不算拖课程。
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onTouchStart={(event) => event.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (menuFor === course.id) closeMenu();
+                      else openMenuFor(course.id, e.currentTarget);
+                    }}
+                    className={`ca-touch-44 mr-1 grid h-9 w-9 flex-none place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card)] hover:text-[var(--text-strong)] ${
+                      isIOS() || menuFor === course.id || swipedCourseId === course.id
+                        ? "opacity-100"
+                        : // 键盘聚焦本行时也显现（group-focus-within），否则 Tab 到的是不可见控件。
+                          "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+                    }`}
+                  >
+                    <MoreHorizontal className="h-5 w-5" />
+                  </button>
+                </SortableCourseItem>
+                {selected && selectedCourseExtra}
+              </Fragment>
+            );
+          })}
+        </SortableContext>
+      </DndContext>
       {courses.length === 0 &&
         (coursesError ? (
           // 课程加载失败：显示错误 + 重试，而不是伪装成「还没有课程」。
@@ -409,8 +514,11 @@ export function CourseList({
             {t("courseList.noCourses")}
           </div>
         ))}
-      {(remove.isError || relink.isError) && (
-        <ErrorNote className="mx-2 my-1" error={remove.error ?? relink.error} />
+      {(remove.isError || relink.isError || reorder.isError || recolor.isError) && (
+        <ErrorNote
+          className="mx-2 my-1"
+          error={remove.error ?? relink.error ?? reorder.error ?? recolor.error}
+        />
       )}
       {openCourse &&
         menuAnchor &&
@@ -429,13 +537,11 @@ export function CourseList({
               role="menu"
               aria-label={t("courseList.courseActions")}
               data-course-menu
-              className="fixed z-[61] w-40 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 shadow-[var(--shadow-pop)]"
+              className="fixed z-[61] w-48 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 shadow-[var(--shadow-pop)]"
               style={menuPosition(menuAnchor)}
               onKeyDown={(event) => {
                 const items = Array.from(
-                  event.currentTarget.querySelectorAll<HTMLButtonElement>(
-                    '[role="menuitem"]:not(:disabled)',
-                  ),
+                  event.currentTarget.querySelectorAll<HTMLButtonElement>(MENU_ITEMS),
                 );
                 const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
                 let nextIndex: number | null = null;
@@ -475,6 +581,33 @@ export function CourseList({
                 <Pencil className="h-4 w-4" />
                 {t("courseList.rename")}
               </button>
+              <div role="group" aria-label={t("courseList.color")} className="ca-course-colors">
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  tabIndex={-1}
+                  aria-checked={!openCourse.color}
+                  aria-label={t("courseList.colorNone")}
+                  title={t("courseList.colorNone")}
+                  data-none
+                  className="ca-color-swatch"
+                  onClick={() => chooseColor(openCourse.id, null)}
+                />
+                {COURSE_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    role="menuitemradio"
+                    tabIndex={-1}
+                    aria-checked={openCourse.color === color}
+                    aria-label={t(`courseList.colors.${color}`)}
+                    title={t(`courseList.colors.${color}`)}
+                    className="ca-color-swatch"
+                    style={{ "--swatch": `var(--course-${color})` } as CSSProperties}
+                    onClick={() => chooseColor(openCourse.id, color)}
+                  />
+                ))}
+              </div>
               <button
                 role="menuitem"
                 tabIndex={-1}
@@ -521,8 +654,8 @@ export function CourseList({
 }
 
 // 菜单 fixed 定位：贴触发按钮右下角展开；下方空间不足则向上翻，并夹在视口内。
-const MENU_WIDTH = 160;
-const MENU_HEIGHT_EST = 148;
+const MENU_WIDTH = 192;
+const MENU_HEIGHT_EST = 224;
 function menuPosition(anchor: DOMRect): { left: number; top: number } {
   const viewportH = typeof window !== "undefined" ? window.innerHeight : 768;
   const left = Math.max(8, anchor.right - MENU_WIDTH);

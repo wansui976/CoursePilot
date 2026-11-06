@@ -7,7 +7,24 @@ export interface Course {
   updated_at: number;
   /** 课程下的视频数（未删除）。后端列表接口聚合返回。 */
   video_count: number;
+  /** 手动排序位置，越小越靠前；null = 还没排过（排最前）。列表接口已按它排好。 */
+  sort_order: number | null;
+  /** 颜色标记；null = 不标。 */
+  color: CourseColor | null;
 }
+
+/** 课程颜色标记的预设色板，与后端 COURSE_COLORS 一致。 */
+export const COURSE_COLORS = [
+  "red",
+  "orange",
+  "yellow",
+  "green",
+  "teal",
+  "blue",
+  "purple",
+  "pink",
+] as const;
+export type CourseColor = (typeof COURSE_COLORS)[number];
 
 export interface Video {
   id: string;

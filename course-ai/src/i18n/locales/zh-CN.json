@@ -246,7 +246,19 @@
     "deleteCourseTitle": "删除课程",
     "cancel": "取消",
     "allWatched": "已全部看完",
-    "subscriptions": "订阅更新"
+    "subscriptions": "订阅更新",
+    "color": "颜色",
+    "colorNone": "不标颜色",
+    "colors": {
+      "red": "红色",
+      "orange": "橙色",
+      "yellow": "黄色",
+      "green": "绿色",
+      "teal": "青色",
+      "blue": "蓝色",
+      "purple": "紫色",
+      "pink": "粉色"
+    }
   },
   "recycleBin": {
     "title": "回收站",

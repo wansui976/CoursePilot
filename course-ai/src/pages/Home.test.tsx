@@ -86,6 +86,8 @@ const course: Course = {
   created_at: 1,
   updated_at: 1,
   video_count: 1,
+  sort_order: null,
+  color: null,
 };
 
 const otherCourse: Course = {
@@ -96,6 +98,8 @@ const otherCourse: Course = {
   created_at: 1,
   updated_at: 1,
   video_count: 1,
+  sort_order: null,
+  color: null,
 };
 
 const video: Video = {
@@ -277,8 +281,11 @@ describe("Home", () => {
 
     expect(await screen.findByRole("heading", { name: "课程视频" })).toBeInTheDocument();
     expect(screen.getByText("选择课程后导入或管理视频")).toBeInTheDocument();
-    const emptyState = screen.getByRole("status");
-    expect(within(emptyState).getByRole("heading", { name: "还没有课程" })).toBeInTheDocument();
+    // 侧栏的拖动排序也挂着一个 status 播报区：按空态自己的标题找它。
+    const emptyState = screen
+      .getByRole("heading", { name: "还没有课程" })
+      .closest<HTMLElement>('[role="status"]')!;
+    expect(emptyState).toHaveClass("ca-empty-state");
     expect(
       within(emptyState).getByRole("button", { name: "添加课程文件夹" }),
     ).toBeInTheDocument();
@@ -308,12 +315,11 @@ describe("Home", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
 
-    await new Promise((r) => setTimeout(r, 30));
-    const roles = screen.queryAllByRole("status");
-    console.log("DEBUG statuses:", roles.map((el) => el.className + " | " + (el.getAttribute("aria-label") ?? "")));
-    const emptyState = await screen.findByRole("status");
+    // 侧栏的拖动排序也挂着一个 status 播报区：按空态自己的标题找它。
+    const emptyState = (await screen.findByRole("heading", { name: "还没有视频" })).closest<HTMLElement>(
+      '[role="status"]',
+    )!;
     expect(emptyState).toHaveClass("ca-empty-state");
-    expect(within(emptyState).getByRole("heading", { name: "还没有视频" })).toBeInTheDocument();
     // 空态就地给「导入」入口，新用户不用去找右上角的按钮。
     expect(within(emptyState).getByRole("button", { name: "导入" })).toBeInTheDocument();
   });

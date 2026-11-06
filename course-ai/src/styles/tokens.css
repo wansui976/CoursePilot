@@ -94,6 +94,16 @@
   --topic-4: #db2777;
   --topic-5: #65a30d;
 
+  /* 课程颜色标记：侧栏课程图标与色板用，键名与后端 COURSE_COLORS 一致。同样只上小面积图形。 */
+  --course-red: #dc2626;
+  --course-orange: #ea580c;
+  --course-yellow: #ca8a04;
+  --course-green: #16a34a;
+  --course-teal: #0d9488;
+  --course-blue: #2563eb;
+  --course-purple: #9333ea;
+  --course-pink: #db2777;
+
   --scrollbar-thumb: #e0e2e8;
   --scrollbar-thumb-hover: #d0d3da;
 
@@ -160,6 +170,15 @@
   --topic-3: #c4b5fd;
   --topic-4: #f9a8d4;
   --topic-5: #bef264;
+
+  --course-red: #f87171;
+  --course-orange: #fb923c;
+  --course-yellow: #facc15;
+  --course-green: #4ade80;
+  --course-teal: #2dd4bf;
+  --course-blue: #60a5fa;
+  --course-purple: #c084fc;
+  --course-pink: #f472b6;
 
   --scrollbar-thumb: rgb(255 255 255 / 0.14);
   --scrollbar-thumb-hover: rgb(255 255 255 / 0.26);

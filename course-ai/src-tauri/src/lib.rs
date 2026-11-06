@@ -32,7 +32,7 @@ use crate::commands::concepts::{
 };
 use crate::commands::courses::{
     cmd_create_course, cmd_delete_course, cmd_list_courses, cmd_relink_course_root,
-    cmd_rename_course, AppState,
+    cmd_rename_course, cmd_reorder_courses, cmd_set_course_color, AppState,
 };
 use crate::commands::danmaku::{cmd_get_comments, cmd_get_danmaku};
 use crate::commands::export::{
@@ -260,6 +260,8 @@ pub fn run() {
             cmd_list_courses,
             cmd_delete_course,
             cmd_rename_course,
+            cmd_reorder_courses,
+            cmd_set_course_color,
             cmd_relink_course_root,
             cmd_restore_video,
             cmd_purge_video,

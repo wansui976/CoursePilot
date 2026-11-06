@@ -85,7 +85,16 @@ pub struct Course {
     pub updated_at: i64,
     /// 课程下的视频数（未删除）。列表查询时聚合，新建时恒为 0。
     pub video_count: i64,
+    /// 手动排序位置，越小越靠前；None = 还没排过（新建或旧版本同步来的），排最前。
+    pub sort_order: Option<i64>,
+    /// 颜色标记，取值见 COURSE_COLORS；None = 不标。
+    pub color: Option<String>,
 }
+
+/// 课程颜色标记的预设色板（前端按键名映射到具体色值）。
+pub const COURSE_COLORS: &[&str] = &[
+    "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink",
+];
 
 pub async fn create_course(db: &Db, name: String, root_path: String) -> AppResult<Course> {
     let name = name.trim();
@@ -94,14 +103,19 @@ pub async fn create_course(db: &Db, name: String, root_path: String) -> AppResul
     }
     let now = Utc::now().timestamp_millis();
     let id = Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO courses (id,name,root_path,created_at,updated_at) VALUES (?,?,?,?,?)")
-        .bind(&id)
-        .bind(name)
-        .bind(&root_path)
-        .bind(now)
-        .bind(now)
-        .execute(&db.pool)
-        .await?;
+    // 新课程排在最前：比现有最小的位置再小 1。
+    let sort_order: i64 = sqlx::query_scalar(
+        "INSERT INTO courses (id,name,root_path,created_at,updated_at,sort_order)
+         VALUES (?,?,?,?,?,(SELECT COALESCE(MIN(sort_order), 0) - 1 FROM courses))
+         RETURNING sort_order",
+    )
+    .bind(&id)
+    .bind(name)
+    .bind(&root_path)
+    .bind(now)
+    .bind(now)
+    .fetch_one(&db.pool)
+    .await?;
     Ok(Course {
         id,
         name: name.to_string(),
@@ -110,6 +124,8 @@ pub async fn create_course(db: &Db, name: String, root_path: String) -> AppResul
         created_at: now,
         updated_at: now,
         video_count: 0,
+        sort_order: Some(sort_order),
+        color: None,
     })
 }
 
@@ -117,8 +133,10 @@ pub async fn list_courses(db: &Db) -> AppResult<Vec<Course>> {
     Ok(sqlx::query_as::<_, Course>(
         "SELECT c.id,c.name,c.root_path,c.cover_image,c.created_at,c.updated_at,
                 (SELECT COUNT(*) FROM videos v WHERE v.course_id=c.id AND v.deleted_at IS NULL)
-                AS video_count
-         FROM courses c WHERE c.deleted_at IS NULL ORDER BY c.updated_at DESC",
+                AS video_count,
+                c.sort_order,c.color
+         FROM courses c WHERE c.deleted_at IS NULL
+         ORDER BY c.sort_order IS NOT NULL, c.sort_order, c.updated_at DESC",
     )
     .fetch_all(&db.pool)
     .await?)
@@ -173,6 +191,60 @@ pub async fn rename_course(db: &Db, id: String, name: String) -> AppResult<()> {
     let result =
         sqlx::query("UPDATE courses SET name=?, updated_at=? WHERE id=? AND deleted_at IS NULL")
             .bind(name)
+            .bind(Utc::now().timestamp_millis())
+            .bind(&id)
+            .execute(&db.pool)
+            .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound(format!("course {id}")));
+    }
+    Ok(())
+}
+
+/// 按拖放后的顺序重排课程。要求提交全部未删除课程，防止过期列表覆盖别处的新课程。
+/// 只改位置变了的课程，并拨它们的 updated_at（意图组的同步时钟）。
+pub async fn reorder_courses(db: &Db, ordered_ids: Vec<String>) -> AppResult<()> {
+    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let current: Vec<(String, Option<i64>)> =
+        sqlx::query_as("SELECT id, sort_order FROM courses WHERE deleted_at IS NULL")
+            .fetch_all(&mut *tx)
+            .await?;
+    let mut current_ids: Vec<&str> = current.iter().map(|(id, _)| id.as_str()).collect();
+    let mut requested: Vec<&str> = ordered_ids.iter().map(String::as_str).collect();
+    current_ids.sort_unstable();
+    requested.sort_unstable();
+    if current_ids != requested {
+        return Err(AppError::Other("课程列表已变化，请刷新后重试".into()));
+    }
+    let old: HashMap<&str, Option<i64>> =
+        current.iter().map(|(id, order)| (id.as_str(), *order)).collect();
+    let now = Utc::now().timestamp_millis();
+    for (index, id) in ordered_ids.iter().enumerate() {
+        let index = index as i64;
+        if old.get(id.as_str()).copied().flatten() == Some(index) {
+            continue;
+        }
+        sqlx::query("UPDATE courses SET sort_order=?, updated_at=? WHERE id=?")
+            .bind(index)
+            .bind(now)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// 设置或清除课程的颜色标记。
+pub async fn set_course_color(db: &Db, id: String, color: Option<String>) -> AppResult<()> {
+    if let Some(color) = &color {
+        if !COURSE_COLORS.contains(&color.as_str()) {
+            return Err(AppError::Other(format!("未知的颜色：{color}")));
+        }
+    }
+    let result =
+        sqlx::query("UPDATE courses SET color=?, updated_at=? WHERE id=? AND deleted_at IS NULL")
+            .bind(&color)
             .bind(Utc::now().timestamp_millis())
             .bind(&id)
             .execute(&db.pool)
@@ -395,6 +467,23 @@ pub async fn cmd_rename_course(
     rename_course(&state.db, id, name).await
 }
 
+#[tauri::command]
+pub async fn cmd_reorder_courses(
+    state: State<'_, AppState>,
+    ordered_ids: Vec<String>,
+) -> AppResult<()> {
+    reorder_courses(&state.db, ordered_ids).await
+}
+
+#[tauri::command]
+pub async fn cmd_set_course_color(
+    state: State<'_, AppState>,
+    id: String,
+    color: Option<String>,
+) -> AppResult<()> {
+    set_course_color(&state.db, id, color).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,6 +491,57 @@ mod tests {
     async fn fresh_db() -> Db {
         let db_path = crate::db::test_db_path("courses");
         Db::connect_and_migrate(&db_path).await.unwrap()
+    }
+
+    async fn names(db: &Db) -> Vec<String> {
+        list_courses(db)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|course| course.name)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn new_courses_go_first_and_manual_order_sticks() {
+        let db = fresh_db().await;
+        let a = create_course(&db, "A".into(), "/a".into()).await.unwrap();
+        let b = create_course(&db, "B".into(), "/b".into()).await.unwrap();
+        let c = create_course(&db, "C".into(), "/c".into()).await.unwrap();
+        assert_eq!(names(&db).await, ["C", "B", "A"]);
+
+        reorder_courses(&db, vec![a.id.clone(), c.id.clone(), b.id.clone()])
+            .await
+            .unwrap();
+        assert_eq!(names(&db).await, ["A", "C", "B"]);
+        // 改名不再把课程顶到最前。
+        rename_course(&db, b.id.clone(), "B2".into()).await.unwrap();
+        assert_eq!(names(&db).await, ["A", "C", "B2"]);
+        // 之后新建的仍在最前。
+        create_course(&db, "D".into(), "/d".into()).await.unwrap();
+        assert_eq!(names(&db).await, ["D", "A", "C", "B2"]);
+    }
+
+    #[tokio::test]
+    async fn reorder_rejects_stale_list() {
+        let db = fresh_db().await;
+        let a = create_course(&db, "A".into(), "/a".into()).await.unwrap();
+        create_course(&db, "B".into(), "/b".into()).await.unwrap();
+        let err = reorder_courses(&db, vec![a.id]).await.unwrap_err();
+        assert!(err.to_string().contains("课程列表已变化"), "{err}");
+        assert_eq!(names(&db).await, ["B", "A"]);
+    }
+
+    #[tokio::test]
+    async fn course_color_is_validated_and_clearable() {
+        let db = fresh_db().await;
+        let a = create_course(&db, "A".into(), "/a".into()).await.unwrap();
+        set_course_color(&db, a.id.clone(), Some("blue".into())).await.unwrap();
+        assert_eq!(list_courses(&db).await.unwrap()[0].color.as_deref(), Some("blue"));
+        assert!(set_course_color(&db, a.id.clone(), Some("#fff".into())).await.is_err());
+        set_course_color(&db, a.id.clone(), None).await.unwrap();
+        assert_eq!(list_courses(&db).await.unwrap()[0].color, None);
+        assert!(set_course_color(&db, "missing".into(), None).await.is_err());
     }
 
     #[tokio::test]

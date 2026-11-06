@@ -179,6 +179,8 @@ const course: Course = {
   created_at: 1,
   updated_at: 1,
   video_count: 1,
+  sort_order: null,
+  color: null,
 };
 
 const video: Video = {

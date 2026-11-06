@@ -13,6 +13,8 @@ const { mockIpc } = vi.hoisted(() => ({
       rename: vi.fn(),
       delete: vi.fn(),
       relinkRoot: vi.fn(),
+      reorder: vi.fn(),
+      setColor: vi.fn(),
     },
   },
 }));
@@ -21,8 +23,8 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: vi.fn(), message: vi.fn()
 vi.mock("@/lib/mobileFiles", () => ({ isIOS: () => false, pickDirectoryPath: vi.fn() }));
 
 const courses = [
-  { id: "c1", name: "申论课程", root_path: "/a", cover_image: null, created_at: 1, updated_at: 1, video_count: 3 },
-  { id: "c2", name: "行测课程", root_path: "/b", cover_image: null, created_at: 2, updated_at: 2, video_count: 5 },
+  { id: "c1", name: "申论课程", root_path: "/a", cover_image: null, created_at: 1, updated_at: 1, video_count: 3, sort_order: 0, color: null },
+  { id: "c2", name: "行测课程", root_path: "/b", cover_image: null, created_at: 2, updated_at: 2, video_count: 5, sort_order: 1, color: "teal" },
 ];
 
 function renderList(overrides: Partial<Parameters<typeof CourseList>[0]> = {}) {
@@ -42,6 +44,8 @@ describe("CourseList", () => {
     mockIpc.courses.rename.mockReset().mockResolvedValue(undefined);
     mockIpc.courses.delete.mockReset().mockResolvedValue(undefined);
     mockIpc.courses.relinkRoot.mockReset();
+    mockIpc.courses.reorder.mockReset().mockResolvedValue(undefined);
+    mockIpc.courses.setColor.mockReset().mockResolvedValue(undefined);
   });
 
   it("marks the selected course with aria-current=page and leaves others unset", async () => {
@@ -89,7 +93,8 @@ describe("CourseList", () => {
     fireEvent.click(trigger);
 
     const menu = await screen.findByRole("menu", { name: "课程操作" });
-    const items = screen.getAllByRole("menuitem");
+    // 普通项和颜色格都在方向键的轮转里，按文档顺序。
+    const items = Array.from(menu.querySelectorAll<HTMLElement>('[role^="menuitem"]'));
     await waitFor(() => expect(items[0]).toHaveFocus());
 
     fireEvent.keyDown(items[0], { key: "ArrowDown" });
@@ -298,5 +303,81 @@ describe("CourseList", () => {
     expect(prompt).toContain("/courses/second");
     expect(prompt).toContain("视频：8 个");
     await waitFor(() => expect(mockIpc.courses.delete).toHaveBeenCalledWith("c2"));
+  });
+
+  it("tints the course icon with its color mark", async () => {
+    const { container } = renderList();
+    await screen.findByRole("button", { name: /行测课程/ });
+    const icons = container.querySelectorAll(".ca-nav-button .ic");
+    expect(icons[0]).not.toHaveAttribute("data-color");
+    expect(icons[1]).toHaveAttribute("data-color", "teal");
+  });
+
+  it("sets and clears a course color from the actions menu", async () => {
+    renderList();
+    const [first, second] = await screen.findAllByRole("button", { name: "课程操作" });
+    fireEvent.click(first);
+    expect(screen.getByRole("menuitemradio", { name: "不标颜色" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "蓝色" }));
+    await waitFor(() => expect(mockIpc.courses.setColor).toHaveBeenCalledWith("c1", "blue"));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    fireEvent.click(second);
+    expect(screen.getByRole("menuitemradio", { name: "青色" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "不标颜色" }));
+    await waitFor(() => expect(mockIpc.courses.setColor).toHaveBeenCalledWith("c2", null));
+  });
+
+  it("reaches the color swatches with the arrow keys", async () => {
+    renderList();
+    fireEvent.click((await screen.findAllByRole("button", { name: "课程操作" }))[0]);
+    const menu = screen.getByRole("menu");
+    expect(screen.getByRole("menuitem", { name: /重命名/ })).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(screen.getByRole("menuitemradio", { name: "不标颜色" })).toHaveFocus();
+  });
+
+  it("reorders courses by dragging and shows the new order right away", async () => {
+    // jsdom 没有布局：给每一行一个竖排的位置，拖放的碰撞检测才有依据。
+    const rows = new Map<string, number>([["申论课程", 0], ["行测课程", 1]]);
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const name = [...rows.keys()].find((n) => this.textContent?.includes(n));
+        const index = this.classList.contains("ca-nav-item") && name ? rows.get(name)! : 0;
+        const top = index * 40;
+        return { x: 0, y: top, top, left: 0, right: 200, bottom: top + 40, width: 200, height: 40, toJSON: () => ({}) } as DOMRect;
+      });
+    try {
+      renderList();
+      const first = (await screen.findByRole("button", { name: /申论课程/ })).closest(".ca-nav-item")!;
+      fireEvent.mouseDown(first, { button: 0, clientX: 20, clientY: 20 });
+      fireEvent.mouseMove(document, { clientX: 20, clientY: 40 });
+      fireEvent.mouseMove(document, { clientX: 20, clientY: 62 });
+      fireEvent.mouseUp(document, { clientX: 20, clientY: 62 });
+      await waitFor(() => expect(mockIpc.courses.reorder).toHaveBeenCalledWith(["c2", "c1"]));
+      const names = screen
+        .getAllByRole("button", { name: /课程$/ })
+        .map((button) => button.textContent);
+      expect(names).toEqual(["行测课程", "申论课程"]);
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  it("does not start a course drag from the actions button", async () => {
+    renderList();
+    const trigger = (await screen.findAllByRole("button", { name: "课程操作" }))[0];
+    fireEvent.mouseDown(trigger, { button: 0, clientX: 20, clientY: 20 });
+    fireEvent.mouseMove(document, { clientX: 20, clientY: 80 });
+    fireEvent.mouseUp(document, { clientX: 20, clientY: 80 });
+    await act(async () => {});
+    expect(mockIpc.courses.reorder).not.toHaveBeenCalled();
   });
 });

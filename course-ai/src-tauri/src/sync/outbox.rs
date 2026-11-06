@@ -211,17 +211,26 @@ pub(crate) async fn payload_for(
 ) -> AppResult<Option<Value>> {
     let payload = match record_type {
         "Course" => {
-            type CourseSyncRow = (String, String, i64, i64, Option<i64>, i64);
+            type CourseSyncRow = (
+                String,
+                String,
+                i64,
+                i64,
+                Option<i64>,
+                i64,
+                Option<i64>,
+                Option<String>,
+            );
             let row: Option<CourseSyncRow> = sqlx::query_as(
                 "SELECT id,name,created_at,updated_at,deleted_at,
-                        COALESCE(trash_changed_at, deleted_at, created_at)
+                        COALESCE(trash_changed_at, deleted_at, created_at),sort_order,color
                  FROM courses WHERE id=?",
             )
             .bind(record_id)
             .fetch_optional(&mut **tx)
             .await?;
             row.map(
-                |(id, name, created_at, updated_at, deleted_at, trash_changed_at)| {
+                |(id, name, created_at, updated_at, deleted_at, trash_changed_at, sort_order, color)| {
                     json!({
                         "id": id,
                         "name": name,
@@ -230,6 +239,9 @@ pub(crate) async fn payload_for(
                         "deletedAt": deleted_at,
                         // 删除态字段组自己的 LWW 钟；意图编辑不拨它。合并律见 docs。
                         "trashChangedAt": trash_changed_at,
+                        // 与名字同属意图组，共用 updatedAt 这只钟。
+                        "sortOrder": sort_order,
+                        "color": color,
                     })
                 },
             )

@@ -375,24 +375,42 @@ async fn save_course(
     let trash_at = payload_i64(payload, "trashChangedAt")
         .or(deleted_at)
         .unwrap_or(created_at);
+    // 排序与颜色是后加的字段：旧版本发来的包里没有这两个键，此时保留本地值，
+    // 而不是当成「清空」。键在但值为 null 才是真的清空。
+    let sort_order: Option<Option<i64>> = payload.get("sortOrder").map(Value::as_i64);
+    let color: Option<Option<String>> = payload.get("color").map(|value| {
+        value
+            .as_str()
+            .filter(|color| crate::commands::courses::COURSE_COLORS.contains(color))
+            .map(str::to_string)
+    });
 
-    type LocalCourse = (String, i64, i64, Option<i64>, i64);
+    type LocalCourse = (String, i64, i64, Option<i64>, i64, Option<i64>, Option<String>);
     let local: Option<LocalCourse> = sqlx::query_as(
         "SELECT name, created_at, updated_at, deleted_at,
-                COALESCE(trash_changed_at, deleted_at, created_at)
+                COALESCE(trash_changed_at, deleted_at, created_at), sort_order, color
          FROM courses WHERE id=?",
     )
     .bind(&envelope.record_id)
     .fetch_optional(&mut **tx)
     .await?;
 
-    let Some((local_name, local_created, local_updated, local_deleted, local_trash_at)) = local
+    let Some((
+        local_name,
+        local_created,
+        local_updated,
+        local_deleted,
+        local_trash_at,
+        local_order,
+        local_color,
+    )) = local
     else {
         // 首次见到：整包落地。root_path 是本机文件系统的事实，同步不携带，占位为空；
         // 用户之后在本机导入时再落到实处。
         sqlx::query(
-            "INSERT INTO courses(id,name,root_path,created_at,updated_at,deleted_at,trash_changed_at)
-             VALUES (?,?,'',?,?,?,?)",
+            "INSERT INTO courses(id,name,root_path,created_at,updated_at,deleted_at,trash_changed_at,
+                                 sort_order,color)
+             VALUES (?,?,'',?,?,?,?,?,?)",
         )
         .bind(&envelope.record_id)
         .bind(&name)
@@ -400,23 +418,32 @@ async fn save_course(
         .bind(updated_at)
         .bind(deleted_at)
         .bind(trash_at)
+        .bind(sort_order.flatten())
+        .bind(color.flatten())
         .execute(&mut **tx)
         .await?;
         return Ok(Outcome::Applied);
     };
 
     let mut changed = false;
-    // 意图组：名字。
+    // 意图组：名字、排序位置、颜色。
+    let sort_order = sort_order.unwrap_or(local_order);
+    let color = color.unwrap_or_else(|| local_color.clone());
     if remote_newer(
         updated_at,
         &envelope.version.device,
         local_updated,
         own_device,
-    ) && (local_name != name || local_updated != updated_at)
+    ) && (local_name != name
+        || local_updated != updated_at
+        || local_order != sort_order
+        || local_color != color)
     {
-        sqlx::query("UPDATE courses SET name=?, updated_at=? WHERE id=?")
+        sqlx::query("UPDATE courses SET name=?, updated_at=?, sort_order=?, color=? WHERE id=?")
             .bind(&name)
             .bind(updated_at)
+            .bind(sort_order)
+            .bind(&color)
             .bind(&envelope.record_id)
             .execute(&mut **tx)
             .await?;
@@ -1500,6 +1527,72 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(name, "远端新名");
+    }
+
+    #[tokio::test]
+    async fn course_order_and_color_sync_and_survive_old_payloads() {
+        let (db_b, dir_b, _) = device().await;
+        let (db_a, _dir_a, incoming_a) = device().await;
+        let (course, _video) = seed_video(&db_b, dir_b.path()).await;
+        crate::commands::courses::set_course_color(&db_b, course.clone(), Some("teal".into()))
+            .await
+            .unwrap();
+        ship(&db_b, &db_a, &incoming_a).await;
+        let read = |db: &Db| {
+            let pool = db.pool.clone();
+            let course = course.clone();
+            async move {
+                sqlx::query_as::<_, (Option<i64>, Option<String>)>(
+                    "SELECT sort_order, color FROM courses WHERE id=?",
+                )
+                .bind(&course)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        let (order_b, _) = read(&db_b).await;
+        assert_eq!(read(&db_a).await, (order_b, Some("teal".into())));
+
+        // 本地刚改过颜色，updated_at 是真实的「现在」；远端的戳要比它晚才算新。
+        let t = chrono::Utc::now().timestamp_millis() + 60_000;
+        // 新版本发来的位置和颜色：照收。
+        let newer = envelope(
+            "Course",
+            &course,
+            SyncOperation::Save,
+            t,
+            json!({"name":"课","createdAt":1,"updatedAt":t,"deletedAt":null,"trashChangedAt":1,
+                   "sortOrder":7,"color":"pink"}),
+        );
+        write_envelope(&incoming_a, "newer", &newer);
+        apply_incoming(&db_a, &incoming_a, None).await.unwrap();
+        assert_eq!(read(&db_a).await, (Some(7), Some("pink".into())));
+
+        // 旧版本只改了名、包里没有这两个键：保留本地位置和颜色。
+        let old_client = envelope(
+            "Course",
+            &course,
+            SyncOperation::Save,
+            t + 1,
+            json!({"name":"旧版改名","createdAt":1,"updatedAt":t + 1,"deletedAt":null,"trashChangedAt":1}),
+        );
+        write_envelope(&incoming_a, "old", &old_client);
+        apply_incoming(&db_a, &incoming_a, None).await.unwrap();
+        assert_eq!(read(&db_a).await, (Some(7), Some("pink".into())));
+
+        // 显式 null = 清掉颜色；不认识的颜色也当没有。
+        let cleared = envelope(
+            "Course",
+            &course,
+            SyncOperation::Save,
+            t + 2,
+            json!({"name":"旧版改名","createdAt":1,"updatedAt":t + 2,"deletedAt":null,"trashChangedAt":1,
+                   "sortOrder":7,"color":null}),
+        );
+        write_envelope(&incoming_a, "cleared", &cleared);
+        apply_incoming(&db_a, &incoming_a, None).await.unwrap();
+        assert_eq!(read(&db_a).await, (Some(7), None));
     }
 
     #[tokio::test]

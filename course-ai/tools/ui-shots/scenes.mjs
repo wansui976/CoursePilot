@@ -79,6 +79,35 @@ export const scenes = [
     },
   },
   {
+    // 课程「…」菜单：颜色行（第二门课已标青色）。
+    name: "course-menu",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      if (!(await sidebarShell(page))) await nav(page, "课程", "课程");
+      const row = page.locator(".ca-nav .ca-nav-item", { hasText: "线性代数的本质" }).first();
+      await row.hover();
+      await row.getByRole("button", { name: "课程操作" }).click();
+      await shot();
+    },
+  },
+  {
+    // 侧栏拖动排序：把第一门课拖到最后，拍拖动中和松手后。
+    name: "course-drag",
+    run: async ({ page, shot }) => {
+      const rows = page.locator(".ca-nav .ca-nav-item");
+      const from = await rows.nth(0).boundingBox();
+      const to = await rows.nth(2).boundingBox();
+      const x = from.x + 60;
+      await page.mouse.move(x, from.y + from.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(x, from.y + from.height / 2 + 12, { steps: 3 });
+      await page.mouse.move(x, to.y + to.height / 2 + 6, { steps: 10 });
+      await shot("dragging");
+      await page.mouse.up();
+      await shot("dropped");
+    },
+  },
+  {
     name: "card-menu",
     devices: ALL,
     run: async ({ page, shot }) => {

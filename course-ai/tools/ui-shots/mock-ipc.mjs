@@ -34,9 +34,9 @@ export function installMockIpc({ theme, safeArea }) {
 
   // —— 课程与视频 ——
   const courses = [
-    { id: "c1", name: "机器学习导论", root_path: "/Courses/ML", cover_image: null, created_at: now, updated_at: now, video_count: 9 },
-    { id: "c2", name: "线性代数的本质", root_path: "/Courses/LA", cover_image: null, created_at: now, updated_at: now, video_count: 6 },
-    { id: "c3", name: "操作系统：三个简单部分", root_path: "/Courses/OS", cover_image: null, created_at: now, updated_at: now, video_count: 12 },
+    { id: "c1", name: "机器学习导论", root_path: "/Courses/ML", cover_image: null, created_at: now, updated_at: now, video_count: 9, sort_order: 0, color: null },
+    { id: "c2", name: "线性代数的本质", root_path: "/Courses/LA", cover_image: null, created_at: now, updated_at: now, video_count: 6, sort_order: 1, color: "teal" },
+    { id: "c3", name: "操作系统：三个简单部分", root_path: "/Courses/OS", cover_image: null, created_at: now, updated_at: now, video_count: 12, sort_order: 2, color: "orange" },
   ];
   const titles = [
     "01 什么是机器学习", "02 线性回归与最小二乘", "03 梯度下降的直觉", "04 逻辑回归与分类",
@@ -303,6 +303,15 @@ export function installMockIpc({ theme, safeArea }) {
         // 存储不可用：按有课处理
       }
       return courses;
+    },
+    cmd_reorder_courses: ({ orderedIds }) => {
+      const byId = new Map(courses.map((course) => [course.id, course]));
+      courses.splice(0, courses.length, ...orderedIds.map((id) => byId.get(id)));
+      courses.forEach((course, index) => (course.sort_order = index));
+    },
+    cmd_set_course_color: ({ id, color }) => {
+      const course = courses.find((c) => c.id === id);
+      if (course) course.color = color;
     },
     cmd_list_videos: ({ courseId }) => (courseId === "c1" ? videos : []),
     cmd_video_cover: ({ videoId }) => cover(videoId),
