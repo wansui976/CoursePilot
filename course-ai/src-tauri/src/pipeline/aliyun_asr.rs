@@ -34,7 +34,7 @@ const DEFAULT_MAX_UPLOAD_MB: u64 = 1024;
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const TASK_URL_PREFIX: &str = "https://dashscope.aliyuncs.com/api/v1/tasks/";
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
-const MAX_POLLS: u32 = 600; // 3s × 600 ≈ 30 分钟上限
+const MAX_POLLS: u32 = 1200; // 3s × 1200 ≈ 60 分钟上限：几小时的长课也够转完
 
 /// 服务端 JSON 解析器对单个字符串的上限（`StreamReadConstraints.getMaxStringLength()`）。
 /// data URI 是 JSON 里的一个字符串，超过它整次请求会以 HTTP 400 被拒——而且是在
@@ -142,7 +142,7 @@ pub async fn run_aliyun(
         }
     }
     Err(AppError::Pipeline(
-        "dashscope 录音文件识别轮询超时（超过 30 分钟仍未完成）".into(),
+        "dashscope 录音文件识别轮询超时（超过 60 分钟仍未完成）".into(),
     ))
 }
 
@@ -627,9 +627,10 @@ mod tests {
     async fn live_aliyun_transcribes_a_local_file() {
         let key = std::env::var("DASHSCOPE_API_KEY").expect("DASHSCOPE_API_KEY");
         let audio = std::env::var("ALIYUN_ASR_AUDIO").expect("ALIYUN_ASR_AUDIO");
+        let mime = if audio.ends_with(".wav") { "audio/wav" } else { "audio/mpeg" };
         let json = run_aliyun(
             Path::new(&audio),
-            "audio/mpeg",
+            mime,
             &key,
             DEFAULT_MODEL,
             Some("zh"),
@@ -650,6 +651,22 @@ mod tests {
                 .any(|segment| !segment.tokens.is_empty()),
             "enable_words=true should return word timestamps"
         );
+    }
+
+    /// 真网测试：音频确实传到了临时存储（而不是悄悄退回了 data URI）。
+    /// `cargo test --lib live_aliyun_upload -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "需要网络、DASHSCOPE_API_KEY 和 ALIYUN_ASR_AUDIO"]
+    async fn live_aliyun_upload_returns_an_oss_url() {
+        let key = std::env::var("DASHSCOPE_API_KEY").expect("DASHSCOPE_API_KEY");
+        let audio = std::env::var("ALIYUN_ASR_AUDIO").expect("ALIYUN_ASR_AUDIO");
+        let path = Path::new(&audio);
+        let size = std::fs::metadata(path).unwrap().len();
+        let url = upload_to_temp_storage(&reqwest::Client::new(), &key, DEFAULT_MODEL, path, "audio/mpeg", size)
+            .await
+            .expect("upload");
+        eprintln!("uploaded {size} bytes → {url}");
+        assert!(url.starts_with("oss://"), "{url}");
     }
 
     #[test]
