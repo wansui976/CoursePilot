@@ -48,7 +48,7 @@ jobs:
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      # 两个架构都在对应的原生机器上编：sidecar 脚本按 rustc 的 host 取 ffmpeg、编 whisper-cli，
+      # 两个架构都在对应的原生机器上编：sidecar 脚本按 rustc 的 host 取 ffmpeg、sherpa-onnx，
       # 产物能在构建机上直接跑一遍自检。DMG 文件名自带架构（aarch64 / x64），上传不会互相覆盖。
       - name: Pick architectures
         id: matrix
@@ -126,16 +126,6 @@ jobs:
       - name: Install frontend dependencies
         working-directory: course-ai
         run: pnpm install --frozen-lockfile
-
-      - name: Restore whisper-cli build
-        # whisper-cli 由 prepare-macos-sidecars.sh 从源码编（几分钟）；脚本不变就复用上次的产物，
-        # 脚本见到同版本的产物和版本戳会跳过编译。
-        uses: actions/cache@v4
-        with:
-          path: |
-            course-ai/src-tauri/binaries/whisper-cli-*
-            course-ai/src-tauri/binaries/.whisper-cli-*.tag
-          key: whisper-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/ci/.github/scripts/prepare-macos-sidecars.sh') }}
 
       - name: Prepare macOS sidecars
         run: ./.github/ci/.github/scripts/prepare-macos-sidecars.sh

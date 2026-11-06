@@ -40,22 +40,9 @@ Copy-FirstMatch $ffmpegOut "ffmpeg.exe" (Join-Path $binaryDir "ffmpeg-$target.ex
 # yt-dlp
 Download-File "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" (Join-Path $binaryDir "yt-dlp-$target.exe")
 
-# whisper.cpp
-$whisperZip = Join-Path $tempDir "whisper.zip"
-$whisperOut = Join-Path $tempDir "whisper"
-# 固定版本：whisper.cpp 自 v1.9.3 起把预编译包发在 bNNNN 构建版里，打了 vX.Y.Z 的
-# 「latest」release 没有资产，latest/download 会 404。升级时把这里换成新的构建号。
-$whisperTag = if ($env:WHISPER_CPP_TAG) { $env:WHISPER_CPP_TAG } else { "b5454" }
-Download-File "https://github.com/ggml-org/whisper.cpp/releases/download/$whisperTag/whisper-bin-x64.zip" $whisperZip
-Expand-Archive -Path $whisperZip -DestinationPath $whisperOut -Force
-Copy-FirstMatch $whisperOut "whisper-cli.exe" (Join-Path $binaryDir "whisper-cli-$target.exe")
-Get-ChildItem -Path $whisperOut -Filter "*.dll" -Recurse | ForEach-Object {
-  Copy-Item $_.FullName (Join-Path $binaryDir $_.Name) -Force
-}
-
-# whisper.cpp 的预编译包是 MSVC 编的，依赖 VC++ 运行库（ggml-base 还要 OpenMP 的 vcomp140）。
-# 干净的 Windows 默认没装运行库，whisper-cli 一启动就报 0xc0000135（找不到 DLL），
-# 本地转写整个不可用。从 runner 上 Visual Studio 的可再发行目录拷 x64 版本，和 exe 放在一起。
+# 打进安装包的原生程序是 MSVC 编的，依赖 VC++ 运行库（还有 OpenMP 的 vcomp140）。
+# 干净的 Windows 默认没装运行库，程序一启动就报 0xc0000135（找不到 DLL）。
+# 从 runner 上 Visual Studio 的可再发行目录拷 x64 版本，和 exe 放在一起。
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
 $vsRoot = & $vswhere -latest -products * -property installationPath
 $redistRoot = Get-ChildItem -Path (Join-Path $vsRoot "VC\Redist\MSVC") -Directory |

@@ -17,6 +17,9 @@ import {
 import { defaultAsrBackend, normalizeAsrBackend } from "@/lib/asrDefaults";
 import { defaultOcrBackend, normalizeOcrBackend } from "@/lib/ocrDefaults";
 
+/** 本地识别能选的模型（设置项 `whisper_model` 的取值，键名是早期 Whisper 时代留下的）。 */
+const LOCAL_MODELS = ["sensevoice", "qwen3-asr"];
+
 /** 查询某项凭证「是否已配置」（只回布尔、不回读明文），供密钥字段旁显示「已配置」。
  *  refresh() 在保存成功后调用，把状态刷新为最新。 */
 function useSecretConfigured(name: string) {
@@ -116,8 +119,11 @@ export function useSettingsForm() {
     };
     const requests = [
       load("default_storage_root", (value) => setRoot(value ?? "")),
-      // 和后端 DEFAULT_LOCAL_MODEL 一致：中文课上 SenseVoice 比 Whisper 准、快。
-      load("whisper_model", (value) => setModel(value ?? "sensevoice")),
+      // 和后端 DEFAULT_LOCAL_MODEL 一致。设置里可能还存着已经不支持的 Whisper 模型（tiny、base…），
+      // 下拉框里没有这些选项，显示成默认的 SenseVoice——后端识别时也是退到已装的模型。
+      load("whisper_model", (value) =>
+        setModel(value && LOCAL_MODELS.includes(value) ? value : "sensevoice"),
+      ),
       load("asr_backend", (value) => setAsrBackend(normalizeAsrBackend(value))),
       load("asr_language", (value) => setAsrLanguage(value ?? "zh")),
       load("asr_correction_concurrency", (value) => setCorrectionConcurrency(value ?? "8")),

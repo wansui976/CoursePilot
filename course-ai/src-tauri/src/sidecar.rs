@@ -13,11 +13,6 @@ pub const FFMPEG: BinarySpec = BinarySpec {
     candidates_on_path: &["ffmpeg"],
 };
 
-pub const WHISPER: BinarySpec = BinarySpec {
-    name: "whisper-cli",
-    candidates_on_path: &["whisper-cli", "whisper-cpp", "main"],
-};
-
 pub const TESSERACT: BinarySpec = BinarySpec {
     name: "tesseract",
     candidates_on_path: &["tesseract"],
@@ -196,7 +191,7 @@ mod tests {
 
     #[test]
     fn windows_bundle_puts_dlls_next_to_sidecars() {
-        // whisper-cli.exe / tesseract.exe 装在安装目录根部；Windows 只在 exe 所在目录
+        // tesseract.exe 等原生程序装在安装目录根部；Windows 只在 exe 所在目录
         // 和系统目录里找依赖 DLL，DLL 放进 binaries\ 子目录会让它们一启动就崩溃。
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let tauri_config =

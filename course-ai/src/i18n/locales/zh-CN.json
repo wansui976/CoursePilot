@@ -871,7 +871,7 @@
       "senseVoice": "SenseVoice（中文推荐）",
       "qwen3Asr": "Qwen3-ASR（中文高精度）",
       "localModelHintMobile": "手机上推荐 SenseVoice：模型 240MB，识别时约占 350MB 内存，一小时的课几分钟转完，不联网、不花钱。Qwen3-ASR 更准，但要约 2.5GB 内存，只建议在内存大的 iPad 上用。",
-      "localModelHint": "中文课用 SenseVoice：又快又准。Qwen3-ASR 更准一些，但慢 4–5 倍、要 4GB 内存。英文或中英混杂多的课用 Whisper large-v3-turbo。选的模型没下载时，会先用已下载的其他模型。",
+      "localModelHint": "中文课用 SenseVoice：又快又准。Qwen3-ASR 更准一些，也认得英语等 30 多种语言，适合英文课和中英混杂多的课，但慢 4–5 倍、要 4GB 内存。选的模型没下载时，会先用已下载的其他模型。",
       "modelDownload": "模型下载",
       "volcengineTitle": "火山引擎",
       "appIdPlaceholder": "控制台「应用」的 App ID",

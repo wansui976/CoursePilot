@@ -142,16 +142,6 @@ export function AsrSection({ form }: { form: SettingsForm }) {
               >
                 <option value="sensevoice">{t("settings.asr.senseVoice")}</option>
                 <option value="qwen3-asr">{t("settings.asr.qwen3Asr")}</option>
-                {/* 手机上没有 whisper-cli。 */}
-                {!mobile && (
-                  <>
-                    <option value="tiny">Whisper tiny</option>
-                    <option value="base">Whisper base</option>
-                    <option value="small">Whisper small</option>
-                    <option value="medium">Whisper medium</option>
-                    <option value="large-v3-turbo">Whisper large-v3-turbo</option>
-                  </>
-                )}
               </Select>
             </div>
           </Row>

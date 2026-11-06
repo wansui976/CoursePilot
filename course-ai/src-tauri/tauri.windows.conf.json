@@ -3,7 +3,6 @@
     "externalBin": [
       "binaries/ffmpeg",
       "binaries/yt-dlp",
-      "binaries/whisper-cli",
       "binaries/tesseract"
     ],
     "resources": {

@@ -1,6 +1,6 @@
 use crate::commands::courses::AppState;
 use crate::error::{AppError, AppResult};
-use crate::pipeline::{asr, local_asr, model_store};
+use crate::pipeline::{local_asr, model_store};
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -9,93 +9,15 @@ use tokio::io::AsyncWriteExt;
 
 const DOWNLOAD_USER_AGENT: &str = "CourseAI/0.1 (https://dev.courseai.app)";
 
-#[derive(Debug, Clone, Serialize)]
-pub struct ModelInfo {
-    pub id: &'static str,
-    pub display_name: &'static str,
-    pub size_bytes: u64,
-    pub url: &'static str,
-    /// 这台设备此刻放得下它（手机上按可用内存判断；桌面上总是 true）。
-    pub fits_memory: bool,
-}
-
-pub const MODELS: &[ModelInfo] = &[
-    ModelInfo {
-        id: "tiny",
-        display_name: "Tiny (75MB)",
-        size_bytes: 77_700_000,
-        url: "https://modelscope.cn/models/cjc1887415157/whisper.cpp/resolve/master/ggml-tiny.bin",
-        fits_memory: true,
-    },
-    ModelInfo {
-        id: "base",
-        display_name: "Base (142MB)",
-        size_bytes: 148_000_000,
-        url: "https://modelscope.cn/models/cjc1887415157/whisper.cpp/resolve/master/ggml-base.bin",
-        fits_memory: true,
-    },
-    ModelInfo {
-        id: "small",
-        display_name: "Small (466MB)",
-        size_bytes: 488_000_000,
-        url: "https://modelscope.cn/models/cjc1887415157/whisper.cpp/resolve/master/ggml-small.bin",
-        fits_memory: true,
-    },
-    ModelInfo {
-        id: "medium",
-        display_name: "Medium (1.5GB)",
-        size_bytes: 1_530_000_000,
-        url: "https://modelscope.cn/models/cjc1887415157/whisper.cpp/resolve/master/ggml-medium.bin",
-        fits_memory: true,
-    },
-    ModelInfo {
-        id: "large-v3-turbo",
-        display_name: "Large v3 Turbo (q5_0, 574MB)",
-        size_bytes: 574_000_000,
-        // 上面那个仓库没有 turbo（这个地址一直是 404，选它的人下载必失败）。换成另一个
-        // ModelScope 镜像：文件大小和首尾各 2MB 的哈希都与 HuggingFace 上 ggerganov 的原文件一致。
-        url: "https://modelscope.cn/models/OllmOne/whisper.cpp/resolve/master/ggml-large-v3-turbo-q5_0.bin",
-        fits_memory: true,
-    },
-];
-
-fn is_mobile_os(os: &str) -> bool {
-    os == "android" || os == "ios"
-}
-
-pub fn model_path(app_data: &Path, id: &str) -> PathBuf {
-    let file_name = MODELS
-        .iter()
-        .find(|model| model.id == id)
-        .and_then(|model| model.url.rsplit('/').next())
-        .unwrap_or("ggml-unknown.bin");
-    app_data.join("whisper").join(file_name)
-}
-
-pub fn is_model_available(path: &Path) -> bool {
-    asr::is_probably_whisper_model(path)
-}
-
-/// 清单里的一项（内置模型来自 `MODELS` / `local_asr::MODELS`）。
+/// 清单里的一项。
 #[derive(Debug, Clone, Serialize)]
 pub struct ListedModel {
     pub id: String,
     pub display_name: String,
     pub size_bytes: u64,
     pub url: String,
+    /// 这台设备此刻放得下它（手机上按可用内存判断；桌面上总是 true）。
     pub fits_memory: bool,
-}
-
-impl From<&ModelInfo> for ListedModel {
-    fn from(model: &ModelInfo) -> Self {
-        ListedModel {
-            id: model.id.into(),
-            display_name: model.display_name.into(),
-            size_bytes: model.size_bytes,
-            url: model.url.into(),
-            fits_memory: model.fits_memory,
-        }
-    }
 }
 
 fn app_data(app: &tauri::AppHandle) -> AppResult<PathBuf> {
@@ -109,8 +31,6 @@ pub async fn cmd_list_whisper_models(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<(ListedModel, bool)>> {
-    // 手机上没有 whisper-cli，只列 sherpa 模型。
-    let mobile = is_mobile_os(std::env::consts::OS);
     let root = model_store::models_root(&state.db, &app_data(&app)?).await?;
     let available_mb = local_asr::available_memory_mb();
     // SenseVoice / Qwen3-ASR 排前面：中文课上它们比 Whisper 准得多（docs/asr-benchmark）。
@@ -126,11 +46,7 @@ pub async fn cmd_list_whisper_models(
             local_asr::is_installed(&root, model),
         )
     });
-    let whisper = MODELS.iter().filter(|_| !mobile).map(|model| {
-        let path = model_path(&root, model.id);
-        (ListedModel::from(model), is_model_available(&path))
-    });
-    Ok(sherpa.chain(whisper).collect())
+    Ok(sherpa.collect())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -226,6 +142,7 @@ struct DownloadEvent {
     error: Option<String>,
 }
 
+/// 下载一个本地识别模型（命令名沿用早期 Whisper 时代的叫法，前端还在用）。
 #[tauri::command]
 pub async fn cmd_download_whisper_model(
     app: tauri::AppHandle,
@@ -234,78 +151,8 @@ pub async fn cmd_download_whisper_model(
 ) -> AppResult<()> {
     // 下到用户选的模型存放目录（可能在别的盘）。
     let data_dir = model_store::models_root(&state.db, &app_data(&app)?).await?;
-    if let Some(model) = local_asr::find(&id) {
-        return download_sherpa_model(&app, &data_dir, model).await;
-    }
-    if is_mobile_os(std::env::consts::OS) {
-        return Err(AppError::Config(
-            "手机上没有 Whisper，本地识别请下载 SenseVoice 或 Qwen3-ASR".into(),
-        ));
-    }
-    let info = MODELS
-        .iter()
-        .find(|model| model.id == id)
-        .ok_or_else(|| AppError::NotFound(format!("model {id}")))?
-        .clone();
-    let path = model_path(&data_dir, info.id);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    // 登记成「模型下载中」：下载期间不允许换存放目录。
-    let _keep_alive = crate::keep_alive::hold(
-        crate::keep_alive::Kind::ModelDownload,
-        info.id,
-        info.display_name,
-    );
-
-    let client = reqwest::Client::builder()
-        .user_agent(DOWNLOAD_USER_AGENT)
-        .build()
-        .map_err(|error| AppError::Other(error.to_string()))?;
-    let resp = client
-        .get(info.url)
-        .send()
-        .await
-        .map_err(|error| AppError::Other(error.to_string()))?
-        .error_for_status()
-        .map_err(|error| AppError::Other(error.to_string()))?;
-    let total = resp.content_length().unwrap_or(info.size_bytes);
-    let mut stream = resp.bytes_stream();
-    let tmp = path.with_extension("bin.part");
-    let mut file = tokio::fs::File::create(&tmp).await?;
-    let mut received = 0_u64;
-    while let Some(chunk) = stream.next().await {
-        let bytes = chunk.map_err(|error| AppError::Other(error.to_string()))?;
-        file.write_all(&bytes).await?;
-        received += bytes.len() as u64;
-        app.emit(
-            "whisper:download",
-            DownloadEvent {
-                id: info.id.into(),
-                received,
-                total,
-                done: false,
-                error: None,
-            },
-        )
-        .ok();
-    }
-    file.flush().await?;
-    drop(file);
-    asr::validate_whisper_model(&tmp)?;
-    tokio::fs::rename(&tmp, &path).await?;
-    app.emit(
-        "whisper:download",
-        DownloadEvent {
-            id: info.id.into(),
-            received,
-            total,
-            done: true,
-            error: None,
-        },
-    )
-    .ok();
-    Ok(())
+    let model = local_asr::find(&id).ok_or_else(|| AppError::NotFound(format!("model {id}")))?;
+    download_sherpa_model(&app, &data_dir, model).await
 }
 
 /// 下载一个 sherpa 模型缺的文件（含共用的 VAD）。
@@ -505,29 +352,6 @@ async fn fetch_verified(
 mod tests {
     use super::*;
 
-    #[test]
-    fn model_registry_has_required_ids() {
-        let ids: Vec<&str> = MODELS.iter().map(|model| model.id).collect();
-        for required in ["tiny", "base", "small", "medium", "large-v3-turbo"] {
-            assert!(ids.contains(&required), "missing {required}");
-        }
-    }
-
-    #[test]
-    fn model_path_uses_app_data() {
-        let path = model_path(&PathBuf::from("/tmp/app"), "tiny");
-        assert_eq!(path, PathBuf::from("/tmp/app/whisper/ggml-tiny.bin"));
-    }
-
-    #[test]
-    fn turbo_model_path_keeps_quantized_file_name() {
-        let path = model_path(&PathBuf::from("/tmp/app"), "large-v3-turbo");
-        assert_eq!(
-            path,
-            PathBuf::from("/tmp/app/whisper/ggml-large-v3-turbo-q5_0.bin")
-        );
-    }
-
     /// 本地起一个 HTTP 服务回 `body`：路径 /404… 回 404；/half… 声称整份、只发一半就断开；
     /// 其余照 Range 头回 206（没有 Range 回 200）。收到的每个 Range 头记在返回的列表里。
     async fn serve(body: &'static [u8]) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
@@ -662,14 +486,4 @@ mod tests {
         assert_eq!(*ranges.lock().unwrap(), vec!["8-".to_string()]);
     }
 
-    #[test]
-    fn invalid_html_model_is_not_available() {
-        let dir = tempfile::tempdir().unwrap();
-        let app_data = dir.path();
-        let path = model_path(app_data, "base");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, b"<!DOCTYPE HTML><html>403 Forbidden</html>").unwrap();
-
-        assert!(!is_model_available(&path));
-    }
 }

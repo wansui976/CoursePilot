@@ -130,63 +130,42 @@ fn volcengine_upload_mode_for_os(os: &str) -> VolcengineUploadMode {
 /// 本地识别这次用哪个模型。
 #[derive(Debug)]
 pub(crate) enum LocalModel {
-    Whisper { id: String, path: PathBuf },
     Sherpa(&'static local_asr::SherpaModel),
 }
 
 impl LocalModel {
     fn id(&self) -> &str {
         match self {
-            LocalModel::Whisper { id, .. } => id,
             LocalModel::Sherpa(model) => model.id,
         }
     }
 }
 
-/// 没选过模型时的默认值：中文讲课上 SenseVoice 比 Whisper large-v3-turbo 准一倍、快三倍
-/// （docs/asr-benchmark）。没装它也不要紧——下面会退到已经装好的任何一个模型。
+/// 没选过模型时的默认值：中文讲课上 SenseVoice 又快又准（docs/asr-benchmark）。
+/// 没装它也不要紧——下面会退到已经装好的任何一个模型。
 pub(crate) const DEFAULT_LOCAL_MODEL: &str = "sensevoice";
 
-/// 选中的装好了、也认得这门课的语言就用它；否则退到别的已装模型：选的是 sherpa 模型就先找
-/// 另一个 sherpa 模型，选的是 Whisper 就先找别的 Whisper（与原来的回退一致），最后再跨过去。
+/// 选中的装好了、也认得这门课的语言就用它；否则退到别的已装模型。
 ///
+/// 设置里可能还存着已经不支持的 Whisper 模型（tiny、base…），找不到就当没选，同样退到已装的模型。
 /// `models_root` 是模型存放目录（用户可以换到别的盘）。
 fn select_local_model(models_root: &Path, preferred_id: &str, language: &str) -> Option<LocalModel> {
-    let app_data = models_root;
     // 手机上看内存：装好了、认得语言，还得放得下——否则 iOS 直接把应用杀掉（闪退）。
     let available_mb = local_asr::available_memory_mb();
-    let sherpa = |model: &'static local_asr::SherpaModel| {
-        (local_asr::is_installed(app_data, model)
+    let usable = |model: &'static local_asr::SherpaModel| {
+        (local_asr::is_installed(models_root, model)
             && model.supports_language(language)
             && model.fits_memory(available_mb))
         .then_some(LocalModel::Sherpa(model))
     };
-    let whisper = |id: &str| {
-        let path = crate::commands::whisper::model_path(app_data, id);
-        crate::commands::whisper::is_model_available(&path).then(|| LocalModel::Whisper {
-            id: id.to_string(),
-            path,
-        })
-    };
-    let preferred = match local_asr::find(preferred_id) {
-        Some(model) => sherpa(model),
-        None => whisper(preferred_id),
-    };
-    if preferred.is_some() {
-        return preferred;
-    }
-    let any_sherpa = || local_asr::MODELS.iter().copied().find_map(sherpa);
-    let any_whisper = || crate::commands::whisper::MODELS.iter().find_map(|model| whisper(model.id));
-    if local_asr::find(preferred_id).is_some() {
-        any_sherpa().or_else(any_whisper)
-    } else {
-        any_whisper().or_else(any_sherpa)
-    }
+    local_asr::find(preferred_id)
+        .and_then(usable)
+        .or_else(|| local_asr::MODELS.iter().copied().find_map(usable))
 }
 
 /// 用选好的本地模型识别一段 16kHz 单声道 WAV。
 async fn run_local_model(
-    app_data: &Path,
+    models_root: &Path,
     model: &LocalModel,
     audio: &Path,
     language: &str,
@@ -194,13 +173,12 @@ async fn run_local_model(
     progress: ai::Progress<'_>,
 ) -> AppResult<asr::WhisperJson> {
     match model {
-        LocalModel::Whisper { path, .. } => asr::run_whisper(audio, path, Some(language), progress).await,
         LocalModel::Sherpa(model) => {
             let job = sherpa_asr::SherpaJob {
                 audio: audio.to_path_buf(),
                 model,
-                model_dir: local_asr::model_dir(app_data, model),
-                vad: local_asr::vad_path(app_data),
+                model_dir: local_asr::model_dir(models_root, model),
+                vad: local_asr::vad_path(models_root),
                 language: Some(language.to_string()),
                 hotwords: local_asr::qwen3_hotwords(hotwords),
             };
@@ -1900,9 +1878,7 @@ pub async fn cmd_cancel_processing(app: AppHandle, video_id: String) -> AppResul
 mod tests {
     use super::*;
     use crate::commands::courses::create_course;
-    use crate::commands::transcripts::list_segments;
     use crate::commands::videos::add_local_video;
-    use std::process::Command;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -2028,13 +2004,6 @@ mod tests {
         assert!(position("slides") < position("slides_ocr"));
     }
 
-    fn tiny_model_path() -> Option<std::path::PathBuf> {
-        let home = std::env::var("HOME").ok()?;
-        let path = std::path::Path::new(&home)
-            .join("Library/Application Support/dev.courseai.app/whisper/ggml-tiny.bin");
-        path.is_file().then_some(path)
-    }
-
     #[tokio::test]
     async fn startup_recovery_keeps_interrupted_work_visible_until_dismissed() {
         let dir = tempdir().unwrap();
@@ -2125,85 +2094,6 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn core_pipeline_extracts_asr_and_stores_transcript_when_model_available() {
-        let model = match tiny_model_path() {
-            Some(path) => path,
-            None => {
-                eprintln!("skipping: no downloaded ggml-tiny.bin model");
-                return;
-            }
-        };
-        let fixture_audio = std::path::Path::new(
-            "/opt/homebrew/Cellar/whisper-cpp/1.8.5/share/whisper-cpp/jfk.wav",
-        );
-        if which::which("ffmpeg").is_err()
-            || which::which("whisper-cli").is_err()
-            || !fixture_audio.is_file()
-        {
-            eprintln!("skipping: ffmpeg, whisper-cli, or jfk.wav fixture missing");
-            return;
-        }
-
-        let dir = tempdir().unwrap();
-        let db = crate::db::Db::connect_and_migrate(&dir.path().join("test.db"))
-            .await
-            .unwrap();
-        let video_path = dir.path().join("jfk.mp4");
-        let ffmpeg = Command::new("ffmpeg")
-            .args(["-y", "-f", "lavfi", "-i", "color=c=black:s=320x180:d=11"])
-            .args(["-i"])
-            .arg(fixture_audio)
-            .args(["-shortest", "-c:v", "libx264", "-c:a", "aac"])
-            .arg(&video_path)
-            .output()
-            .expect("ffmpeg fixture");
-        assert!(
-            ffmpeg.status.success(),
-            "ffmpeg fixture failed: {}",
-            String::from_utf8_lossy(&ffmpeg.stderr)
-        );
-
-        let course = create_course(&db, "fixture".into(), dir.path().to_string_lossy().into())
-            .await
-            .unwrap();
-        let video = add_local_video(&db, &course.id, video_path, None)
-            .await
-            .unwrap();
-        let audio_path = audio::extract_audio(
-            std::path::Path::new(&video.file_path),
-            std::path::Path::new(&video.data_dir),
-        )
-        .await
-        .unwrap();
-        let whisper = asr::run_whisper(&audio_path, &model, Some("en"), None)
-            .await
-            .unwrap();
-        let inserted = asr::store_transcripts(&db, &video.id, &whisper)
-            .await
-            .unwrap();
-        let rows = list_segments(&db, &video.id).await.unwrap();
-
-        assert!(inserted > 0, "expected at least one transcript segment");
-        assert!(rows.iter().any(|row| row.text.contains("country")));
-    }
-
-    #[test]
-    fn selected_invalid_model_falls_back_to_available_model() {
-        let dir = tempdir().unwrap();
-        let base = crate::commands::whisper::model_path(dir.path(), "base");
-        std::fs::create_dir_all(base.parent().unwrap()).unwrap();
-        std::fs::write(&base, b"<!DOCTYPE HTML><html>403 Forbidden</html>").unwrap();
-        let tiny = crate::commands::whisper::model_path(dir.path(), "tiny");
-        std::fs::write(&tiny, b"lmggtest").unwrap();
-
-        let Some(LocalModel::Whisper { id, path }) = select_local_model(dir.path(), "base", "zh") else {
-            panic!("应该退到装好的 tiny");
-        };
-        assert_eq!(id, "tiny");
-        assert_eq!(path, tiny);
-    }
-
     fn install_sherpa(app_data: &Path, model: &local_asr::SherpaModel) {
         let dir = local_asr::model_dir(app_data, model);
         for file in model.files {
@@ -2216,22 +2106,21 @@ mod tests {
     }
 
     #[test]
-    fn local_model_selection_prefers_the_choice_then_its_own_family() {
+    fn local_model_selection_prefers_the_choice_then_any_installed_model() {
         let dir = tempdir().unwrap();
         let app = dir.path();
-        let tiny = crate::commands::whisper::model_path(app, "tiny");
-        std::fs::create_dir_all(tiny.parent().unwrap()).unwrap();
-        std::fs::write(&tiny, b"lmggtest").unwrap();
         install_sherpa(app, &local_asr::SENSE_VOICE);
 
         // 选中且装好、语言也认得：就用它。
         assert!(matches!(select_local_model(app, "sensevoice", "zh"), Some(LocalModel::Sherpa(m)) if m.id == "sensevoice"));
-        // 选了没装的 Qwen3-ASR：先找另一个 sherpa 模型。
+        // 选了没装的 Qwen3-ASR：退到装好的 SenseVoice。
         assert!(matches!(select_local_model(app, "qwen3-asr", "zh"), Some(LocalModel::Sherpa(m)) if m.id == "sensevoice"));
-        // SenseVoice 不认法语：退到 Whisper。
-        assert!(matches!(select_local_model(app, "sensevoice", "fr"), Some(LocalModel::Whisper { id, .. }) if id == "tiny"));
-        // 选了没装的 Whisper：先找别的 Whisper（原来的行为），不跳到 sherpa。
-        assert!(matches!(select_local_model(app, "large-v3-turbo", "zh"), Some(LocalModel::Whisper { id, .. }) if id == "tiny"));
+        // 设置里还存着已经不支持的 Whisper 模型：当没选，用装好的模型，而不是报「没有可用模型」。
+        for stale in ["tiny", "base", "large-v3-turbo"] {
+            assert!(matches!(select_local_model(app, stale, "zh"), Some(LocalModel::Sherpa(m)) if m.id == "sensevoice"));
+        }
+        // SenseVoice 不认法语、又没装别的：没有能用的本地模型。
+        assert!(select_local_model(app, "sensevoice", "fr").is_none());
     }
 
     #[test]

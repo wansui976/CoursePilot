@@ -510,9 +510,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_ids_do_not_collide_with_whisper_models() {
+    fn registry_files_are_pinned_and_mirrored_in_china() {
         for model in MODELS {
-            assert!(crate::commands::whisper::MODELS.iter().all(|w| w.id != model.id));
             assert!(model.files.iter().all(|f| f.sha256.len() == 64 && !f.urls.is_empty()));
             assert!(model.files.iter().all(|f| f.urls[0].starts_with("https://modelscope.cn/")), "国内镜像排第一");
         }
