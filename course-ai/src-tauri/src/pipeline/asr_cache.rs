@@ -70,6 +70,70 @@ impl ChunkCache<'_> {
         .bind(chrono::Utc::now().timestamp_millis())
         .execute(&self.db.pool)
         .await;
+        // 结果到手，记着的任务号也就没用了。
+        self.clear_pending(audio).await;
+    }
+}
+
+/// 「已经提交、还没拿到结果」的任务和结果存在同一张表里，键加这个后缀，
+/// 结果读取（`get`）解析不了它，不会把它当成文稿。
+const PENDING_SUFFIX: &str = ":pending";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PendingTask {
+    request_id: String,
+    resource_id: String,
+}
+
+impl ChunkCache<'_> {
+    /// 这段音频上次提交过、还没等到结果的任务（request_id, resource_id）。
+    ///
+    /// 提交成功那一刻钱就付了；之后断网、被限流太久、App 被杀，原来只能整段重新提交、
+    /// 再付一次。记下任务号，下次先去问那个任务。
+    pub async fn get_pending(&self, audio: &[u8]) -> Option<(String, String)> {
+        let key = chunk_key(audio, &self.params) + PENDING_SUFFIX;
+        let row: String = sqlx::query_scalar(
+            "SELECT transcript_json FROM asr_chunk_results WHERE video_id=? AND chunk_key=?",
+        )
+        .bind(self.video_id)
+        .bind(&key)
+        .fetch_optional(&self.db.pool)
+        .await
+        .ok()
+        .flatten()?;
+        let task: PendingTask = serde_json::from_str(&row).ok()?;
+        Some((task.request_id, task.resource_id))
+    }
+
+    pub async fn put_pending(&self, audio: &[u8], request_id: &str, resource_id: &str) {
+        let Ok(payload) = serde_json::to_string(&PendingTask {
+            request_id: request_id.into(),
+            resource_id: resource_id.into(),
+        }) else {
+            return;
+        };
+        let key = chunk_key(audio, &self.params) + PENDING_SUFFIX;
+        let _ = sqlx::query(
+            "INSERT INTO asr_chunk_results(video_id,chunk_key,transcript_json,created_at)
+             VALUES (?,?,?,?)
+             ON CONFLICT(video_id,chunk_key) DO UPDATE SET
+               transcript_json=excluded.transcript_json, created_at=excluded.created_at",
+        )
+        .bind(self.video_id)
+        .bind(&key)
+        .bind(&payload)
+        .bind(chrono::Utc::now().timestamp_millis())
+        .execute(&self.db.pool)
+        .await;
+    }
+
+    pub async fn clear_pending(&self, audio: &[u8]) {
+        let key = chunk_key(audio, &self.params) + PENDING_SUFFIX;
+        let _ = sqlx::query("DELETE FROM asr_chunk_results WHERE video_id=? AND chunk_key=?")
+            .bind(self.video_id)
+            .bind(&key)
+            .execute(&self.db.pool)
+            .await;
     }
 }
 
@@ -191,5 +255,35 @@ mod tests {
     fn the_key_cannot_be_collided_by_shifting_the_boundary() {
         // 音频和参数直接拼起来取哈希的话，("ab","c") 和 ("a","bc") 会得到同一个键。
         assert_ne!(chunk_key(b"ab", "c"), chunk_key(b"a", "bc"));
+    }
+
+    #[tokio::test]
+    async fn a_submitted_task_is_remembered_until_its_result_arrives() {
+        let (db, video_id, _dir) = seed().await;
+        let cache = ChunkCache {
+            db: &db,
+            video_id: &video_id,
+            params: "volcengine|ctx".into(),
+        };
+        let audio = b"chunk-bytes";
+        assert!(cache.get_pending(audio).await.is_none());
+        cache.put_pending(audio, "req-1", "volc.seedasr.auc").await;
+        assert_eq!(
+            cache.get_pending(audio).await,
+            Some(("req-1".to_string(), "volc.seedasr.auc".to_string()))
+        );
+        // 记着的任务号不会被当成文稿读出来。
+        assert!(cache.get(audio).await.is_none());
+        // 换了参数（比如热词）就不是同一个任务。
+        let other = ChunkCache {
+            db: &db,
+            video_id: &video_id,
+            params: "volcengine|other".into(),
+        };
+        assert!(other.get_pending(audio).await.is_none());
+        // 结果到手后任务号清掉。
+        cache.put(audio, &transcript("好")).await;
+        assert!(cache.get_pending(audio).await.is_none());
+        assert!(cache.get(audio).await.is_some());
     }
 }

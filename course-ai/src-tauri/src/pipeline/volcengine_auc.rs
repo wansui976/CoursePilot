@@ -49,16 +49,108 @@ const STATUS_QUEUED: &str = "20000002";
 /// 原来把 2000000x 一律当「处理中」，于是这个**终态**会被一直轮询到超时——
 /// 30 分钟一段，外面还包着两次重试，一段静音能拖掉 90 分钟。
 const STATUS_SILENT: &str = "20000003";
+/// 「quota exceeded」：后面跟着超的是哪一类额度。`types:qps` / 并发是限流——等一等、
+/// 放慢就好；别的类型（时长、资源包）是额度真用完了，等多久都不会好。
+const STATUS_QUOTA_EXCEEDED: &str = "45000292";
 const STATUS_HEADER: &str = "X-Api-Status-Code";
 const MESSAGE_HEADER: &str = "X-Api-Message";
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
-const MAX_POLLS: u32 = 600; // 3s × 600 ≈ 30 分钟上限
+/// 轮询的总时长上限（从提交成功算起）。被限流时每次要多等一会儿，按次数算上限的话
+/// 会被拉得很长，所以按墙上时间算。
+const POLL_DEADLINE: Duration = Duration::from_secs(30 * 60);
+/// 被限流后再问之前，最多等这么久。
+const MAX_THROTTLE_BACKOFF: Duration = Duration::from_secs(30);
+/// 提交被限流时最多再提交几次。限流拒掉的提交没建任务、不计费，多试几次没有代价。
+const MAX_THROTTLED_SUBMITS: u32 = 8;
 /// 单个 HTTP 请求的上限。没有它时，一次卡死的连接可以挂到天荒地老，
 /// 所谓「30 分钟上限」只是轮询次数上限，根本不是真的 deadline。
 const SUBMIT_TIMEOUT: Duration = Duration::from_secs(300);
 const QUERY_TIMEOUT: Duration = Duration::from_secs(60);
 /// 轮询期间允许连续多少次网络抖动。超过就放弃这一段——但**不会**重新提交。
 const MAX_QUERY_HICCUPS: u32 = 5;
+
+/// 所有火山请求（各分段的提交和轮询）共用的节拍器。
+///
+/// 平时不限速；一旦服务端说「QPS 超了」，就给请求之间加上间隔并逐次翻倍，之后每成功
+/// 一次就收窄一点。分段识别好几路一起轮询，单靠各路自己退避，一放开又一起撞上去——
+/// 只有大家排同一个队才真的把总请求率降下来。
+struct Pacer {
+    next: std::time::Instant,
+    gap: Duration,
+}
+
+const PACER_MIN_GAP: Duration = Duration::from_millis(500);
+const PACER_MAX_GAP: Duration = Duration::from_secs(5);
+
+impl Pacer {
+    fn new(now: std::time::Instant) -> Self {
+        Pacer {
+            next: now,
+            gap: Duration::ZERO,
+        }
+    }
+
+    /// 占一个发送时刻，返回还要等多久。
+    fn reserve(&mut self, now: std::time::Instant) -> Duration {
+        let at = self.next.max(now);
+        self.next = at + self.gap;
+        at - now
+    }
+
+    fn throttled(&mut self) {
+        self.gap = (self.gap * 2).clamp(PACER_MIN_GAP, PACER_MAX_GAP);
+    }
+
+    fn succeeded(&mut self) {
+        self.gap = self.gap.mul_f32(0.85);
+        if self.gap < Duration::from_millis(50) {
+            self.gap = Duration::ZERO;
+        }
+    }
+}
+
+fn pacer() -> &'static std::sync::Mutex<Pacer> {
+    static PACER: OnceLock<std::sync::Mutex<Pacer>> = OnceLock::new();
+    PACER.get_or_init(|| std::sync::Mutex::new(Pacer::new(std::time::Instant::now())))
+}
+
+/// 发请求之前排队。
+async fn pace() {
+    let wait = pacer()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .reserve(std::time::Instant::now());
+    if !wait.is_zero() {
+        tokio::time::sleep(wait).await;
+    }
+}
+
+fn pace_throttled() {
+    pacer()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .throttled();
+}
+
+fn pace_succeeded() {
+    pacer()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .succeeded();
+}
+
+/// 服务端是不是在说「请求太频繁」（QPS / 并发超限）。这不是请求本身有问题，
+/// 等一会儿、放慢再问就好。
+fn is_rate_limited(status: Option<&str>, message: Option<&str>, http: reqwest::StatusCode) -> bool {
+    let message = message.unwrap_or_default().to_ascii_lowercase();
+    let throttle_words =
+        message.contains("qps") || message.contains("concurren") || message.contains("rate limit");
+    match status {
+        Some(STATUS_QUOTA_EXCEEDED) => throttle_words || message.is_empty(),
+        Some(code) if code.starts_with('2') => false,
+        _ => http == reqwest::StatusCode::TOO_MANY_REQUESTS || throttle_words,
+    }
+}
 
 /// 带请求超时的客户端。两个阶段的超时不同：提交要上传整段 base64 音频，慢得多。
 fn asr_client() -> reqwest::Client {
@@ -75,6 +167,8 @@ fn asr_client() -> reqwest::Client {
 /// 所以只有「提交本身没成功」才允许整段重来。
 enum RecognizeFailure {
     BeforeSubmit(AppError),
+    /// 提交被限流拒掉了：任务没建、没计费，等一会儿再提交是安全的。
+    Throttled(AppError),
     /// 提交被明确拒绝，且换个说法去问也是同一个答复：App ID / Token 不对、资源没授权。
     ///
     /// 这类失败再提交一百遍也不会变好，回退重试只是把同一条错误多打印两遍。
@@ -85,12 +179,15 @@ enum RecognizeFailure {
 impl RecognizeFailure {
     fn into_error(self) -> AppError {
         match self {
-            Self::BeforeSubmit(error) | Self::Rejected(error) | Self::AfterSubmit(error) => error,
+            Self::BeforeSubmit(error)
+            | Self::Throttled(error)
+            | Self::Rejected(error)
+            | Self::AfterSubmit(error) => error,
         }
     }
 
     fn is_resubmittable(&self) -> bool {
-        matches!(self, Self::BeforeSubmit(_))
+        matches!(self, Self::BeforeSubmit(_) | Self::Throttled(_))
     }
 }
 
@@ -101,24 +198,31 @@ const MAX_RETRIES: u32 = 2;
 
 /// 整段上传识别（短音频、关闭分段，或 Android 无 ffmpeg 切片时用）。内部带指数回退
 /// 重试两次。`format` 必须与音频真实容器一致（wav / mp3 …），会写进提交体的 audio.format。
+///
+/// 传了 `cache` 时和分段识别一样断点续跑：认完的结果、已经提交但还没拿到结果的任务
+/// 都记下来，下次不必再付一次钱。
 pub async fn run_volcengine_file(
     audio: &Path,
     app_id: &str,
     access_token: &str,
     context: Option<&str>,
     format: &str,
+    cache: Option<&crate::pipeline::asr_cache::ChunkCache<'_>>,
 ) -> AppResult<WhisperJson> {
     let (app_id, access_token) = check_credentials(app_id, access_token)?;
     let audio_bytes = tokio::fs::read(audio).await?;
     let client = asr_client();
-    recognize_bytes_with_retry(
-        &client,
-        &app_id,
-        &access_token,
-        &audio_bytes,
-        context,
-        format,
-    )
+    cached_or_recognize(&audio_bytes, cache, || {
+        recognize_bytes_with_retry(
+            &client,
+            &app_id,
+            &access_token,
+            &audio_bytes,
+            context,
+            format,
+            cache,
+        )
+    })
     .await
 }
 
@@ -178,6 +282,7 @@ pub async fn run_volcengine_file_chunked(
                 &bytes,
                 context.as_deref(),
                 "mp3",
+                cache,
             )
         })
         .await;
@@ -203,6 +308,7 @@ pub async fn run_volcengine_file_chunked(
                     &bytes,
                     context.as_deref(),
                     "mp3",
+                    cache,
                 )
             })
             .await?;
@@ -265,7 +371,24 @@ async fn recognize_bytes(
     audio_bytes: &[u8],
     context: Option<&str>,
     format: &str,
+    cache: Option<&crate::pipeline::asr_cache::ChunkCache<'_>>,
 ) -> Result<WhisperJson, RecognizeFailure> {
+    // ---- 0. 上次已经提交过、钱也付了，只是没等到结果？先去问那个任务 ----
+    if let Some(cache) = cache {
+        if let Some((request_id, resource_id)) = cache.get_pending(audio_bytes).await {
+            tracing::info!(%request_id, "这段音频上次已经提交过，先查那个任务，不再重复提交");
+            match poll_until_done(client, app_id, access_token, &resource_id, &request_id).await {
+                Ok(json) => return Ok(json),
+                // 服务端不认这个任务了（过期、被清理）：只能重新提交。
+                Err(failure) if failure.task_gone => {
+                    tracing::warn!(%request_id, "上次的任务查不到了：{}；重新提交", failure.error);
+                    cache.clear_pending(audio_bytes).await;
+                }
+                Err(failure) => return Err(RecognizeFailure::AfterSubmit(failure.error)),
+            }
+        }
+    }
+
     let request_id = Uuid::new_v4().to_string();
     let body = build_submit_body(&request_id, &base64_encode(audio_bytes), context, format);
 
@@ -275,6 +398,7 @@ async fn recognize_bytes(
     let mut accepted: Option<&'static str> = None;
     let mut rejection: Option<AppError> = None;
     for resource_id in resource_candidates(RESOLVED_RESOURCE_ID.get().copied()) {
+        pace().await;
         let resp = match client
             .post(SUBMIT_URL)
             .header("X-Api-App-Key", app_id)
@@ -297,10 +421,22 @@ async fn recognize_bytes(
         let message = header_value(&resp, MESSAGE_HEADER);
         if status.as_deref() == Some(STATUS_SUCCESS) {
             let _ = RESOLVED_RESOURCE_ID.set(resource_id);
+            pace_succeeded();
             accepted = Some(resource_id);
             break;
         }
         let http = resp.status();
+        // 限流拒掉的提交没建任务、没计费：放慢节拍，交给外层等一会儿再提交。
+        if is_rate_limited(status.as_deref(), message.as_deref(), http) {
+            pace_throttled();
+            return Err(RecognizeFailure::Throttled(submit_error(
+                "submit",
+                status,
+                message,
+                http,
+                resource_id,
+            )));
+        }
         let not_granted = is_resource_not_granted(status.as_deref(), message.as_deref());
         let error = submit_error("submit", status, message, http, resource_id);
         if not_granted {
@@ -325,9 +461,15 @@ async fn recognize_bytes(
     // ---- 2. 轮询结果 ----
     // 从这里开始，云端任务已经存在并计费：无论出什么事都只能报错，不能换个
     // request_id 重来（那会变成第二个任务、第二笔账，原任务还在跑）。
+    // 先把任务记下来：这次没等到结果（断网、被限流太久、App 被杀），下次直接接着查。
+    if let Some(cache) = cache {
+        cache
+            .put_pending(audio_bytes, &request_id, resource_id)
+            .await;
+    }
     poll_until_done(client, app_id, access_token, resource_id, &request_id)
         .await
-        .map_err(RecognizeFailure::AfterSubmit)
+        .map_err(|failure| RecognizeFailure::AfterSubmit(failure.error))
 }
 
 /// 拿到一个查询状态码之后该怎么办。
@@ -341,6 +483,8 @@ enum PollAction {
     KeepWaiting,
     /// 服务端自己出错了。这一次没问到，但任务还在跑——记一次抖动，接着问。
     Hiccup,
+    /// 问得太勤被限流了。任务照样在跑，放慢再问。
+    Throttled,
     /// 参数错、鉴权失败之类：再问一百遍也是同一个答复。
     Fatal,
 }
@@ -350,7 +494,18 @@ enum PollAction {
 /// 关键是别把 5 开头的当终态。那类错误（真实遇到的是 55000000，网关取不到到后端的
 /// 连接）几秒后就自愈，而放弃的代价极不对称：这段音频已经付过钱了，扔掉要重付一次。
 /// 网关有时只返回 HTTP 状态而没有业务状态头；这时 429/5xx 也属于可恢复抖动。
-fn classify_poll_status(status: Option<&str>, http: reqwest::StatusCode) -> PollAction {
+///
+/// 限流（QPS 超了）单独一类：它是 4 开头的，按上面的规矩会被当成终态——真实遇到过：
+/// 分段识别几路一起轮询，一次「quota exceeded types:qps」就把整个视频判失败，
+/// 而每一段都已经提交、扣过额度了。
+fn classify_poll_status(
+    status: Option<&str>,
+    message: Option<&str>,
+    http: reqwest::StatusCode,
+) -> PollAction {
+    if is_rate_limited(status, message, http) {
+        return PollAction::Throttled;
+    }
     match status {
         Some(STATUS_SUCCESS) => PollAction::Take,
         Some(STATUS_SILENT) => PollAction::Silent,
@@ -364,16 +519,35 @@ fn classify_poll_status(status: Option<&str>, http: reqwest::StatusCode) -> Poll
     }
 }
 
-/// 轮询同一个 request_id 直到出结果。网络抖动就地重试，绝不换 id。
+/// 轮询失败。`task_gone`：服务端明确答复了一个终态错误（任务不存在、参数错……），
+/// 这个 request_id 再问也没用；其余（网络、服务端错误、限流太久、超时）任务可能还在跑。
+struct PollFailure {
+    error: AppError,
+    task_gone: bool,
+}
+
+impl PollFailure {
+    fn retryable(error: AppError) -> Self {
+        PollFailure {
+            error,
+            task_gone: false,
+        }
+    }
+}
+
+/// 轮询同一个 request_id 直到出结果。网络抖动、限流就地重试，绝不换 id。
 async fn poll_until_done(
     client: &reqwest::Client,
     app_id: &str,
     access_token: &str,
     resource_id: &str,
     request_id: &str,
-) -> AppResult<WhisperJson> {
+) -> Result<WhisperJson, PollFailure> {
+    let started = std::time::Instant::now();
     let mut hiccups = 0u32;
-    for _ in 0..MAX_POLLS {
+    let mut throttles = 0u32;
+    while started.elapsed() < POLL_DEADLINE {
+        pace().await;
         let sent = client
             .post(QUERY_URL)
             .timeout(QUERY_TIMEOUT)
@@ -395,9 +569,9 @@ async fn poll_until_done(
             Err(error) => {
                 hiccups += 1;
                 if hiccups > MAX_QUERY_HICCUPS {
-                    return Err(AppError::Pipeline(format!(
+                    return Err(PollFailure::retryable(AppError::Pipeline(format!(
                         "volcengine query 连续 {MAX_QUERY_HICCUPS} 次失败：{error}"
-                    )));
+                    ))));
                 }
                 tracing::warn!("volcengine query 第 {hiccups} 次网络失败：{error}；稍后再查");
                 tokio::time::sleep(POLL_INTERVAL).await;
@@ -406,12 +580,15 @@ async fn poll_until_done(
         };
         let status = header_value(&resp, STATUS_HEADER);
         let message = header_value(&resp, MESSAGE_HEADER);
-        match classify_poll_status(status.as_deref(), resp.status()) {
+        match classify_poll_status(status.as_deref(), message.as_deref(), resp.status()) {
             PollAction::Take => {
+                pace_succeeded();
                 let payload: Value = resp.json().await.map_err(|error| {
-                    AppError::Pipeline(format!("volcengine query decode: {error}"))
+                    PollFailure::retryable(AppError::Pipeline(format!(
+                        "volcengine query decode: {error}"
+                    )))
                 })?;
-                return response_payload_to_transcript(&payload);
+                return response_payload_to_transcript(&payload).map_err(PollFailure::retryable);
             }
             // 服务端说这段没有人说话。这是终态，不是「还在处理」：接着轮询只会
             // 一路等到超时。返回空字幕即可——长音频是分段识别的，中间夹一段静音
@@ -424,7 +601,25 @@ async fn poll_until_done(
             }
             PollAction::KeepWaiting => {
                 hiccups = 0;
+                throttles = 0;
+                pace_succeeded();
                 tokio::time::sleep(POLL_INTERVAL).await;
+            }
+            // 问得太勤了。任务还在跑、钱已经付了，这时放弃最亏：放慢大家的节拍，
+            // 自己也退避一会儿再问（3、6、12……最多 30 秒），直到总时长上限。
+            PollAction::Throttled => {
+                pace_throttled();
+                throttles += 1;
+                let backoff = (POLL_INTERVAL * 2u32.saturating_pow(throttles.min(5)))
+                    .min(MAX_THROTTLE_BACKOFF);
+                tracing::warn!(
+                    request_id,
+                    "volcengine query 被限流（{}：{}）；{:?} 后再查",
+                    status.as_deref().unwrap_or(""),
+                    message.as_deref().unwrap_or(""),
+                    backoff
+                );
+                tokio::time::sleep(backoff).await;
             }
             // 服务端自己出错。这和上面「查询请求根本没发出去」是同一件事：这一次没
             // 问到结果，任务却还在云端跑着；区别只是失败被裹在一个 HTTP 200 里报回来，
@@ -434,13 +629,13 @@ async fn poll_until_done(
             PollAction::Hiccup => {
                 hiccups += 1;
                 if hiccups > MAX_QUERY_HICCUPS {
-                    return Err(submit_error(
+                    return Err(PollFailure::retryable(submit_error(
                         "query",
                         status,
                         message,
                         resp.status(),
                         resource_id,
-                    ));
+                    )));
                 }
                 tracing::warn!(
                     request_id,
@@ -451,19 +646,16 @@ async fn poll_until_done(
                 tokio::time::sleep(POLL_INTERVAL).await;
             }
             PollAction::Fatal => {
-                return Err(submit_error(
-                    "query",
-                    status,
-                    message,
-                    resp.status(),
-                    resource_id,
-                ));
+                return Err(PollFailure {
+                    error: submit_error("query", status, message, resp.status(), resource_id),
+                    task_gone: true,
+                });
             }
         }
     }
-    Err(AppError::Pipeline(
-        "volcengine 录音文件识别轮询超时（超过 30 分钟仍未返回结果）".into(),
-    ))
+    Err(PollFailure::retryable(AppError::Pipeline(
+        "volcengine 录音文件识别轮询超时（超过 30 分钟仍未返回结果）；任务已经记下，重新处理时会接着查，不会重复扣费".into(),
+    )))
 }
 
 /// 先看这一片之前认过没有；没有才真的去认，认完记下来。
@@ -497,6 +689,7 @@ where
 ///
 /// **只重试提交阶段的失败**。提交成功之后的任何失败都直接上报：那时云端任务已经
 /// 建好并开始计费，重来一遍等于同一段音频付两次钱，而且两个任务会并行跑。
+#[allow(clippy::too_many_arguments)] // 凭证/音频/上下文/格式/缓存各有其义。
 async fn recognize_bytes_with_retry(
     client: &reqwest::Client,
     app_id: &str,
@@ -504,11 +697,33 @@ async fn recognize_bytes_with_retry(
     audio_bytes: &[u8],
     context: Option<&str>,
     format: &str,
+    cache: Option<&crate::pipeline::asr_cache::ChunkCache<'_>>,
 ) -> AppResult<WhisperJson> {
     let mut attempt = 0u32;
+    let mut throttled = 0u32;
     loop {
-        match recognize_bytes(client, app_id, access_token, audio_bytes, context, format).await {
+        match recognize_bytes(
+            client,
+            app_id,
+            access_token,
+            audio_bytes,
+            context,
+            format,
+            cache,
+        )
+        .await
+        {
             Ok(value) => return Ok(value),
+            // 提交被限流：没建任务、没计费，多等几次也不花钱。
+            Err(RecognizeFailure::Throttled(error)) if throttled < MAX_THROTTLED_SUBMITS => {
+                throttled += 1;
+                let backoff = (Duration::from_secs(5) * 2u32.saturating_pow(throttled.min(3)))
+                    .min(MAX_THROTTLE_BACKOFF);
+                tracing::warn!(
+                    "volcengine 提交被限流（第 {throttled} 次）：{error}；{backoff:?} 后再提交"
+                );
+                tokio::time::sleep(backoff).await;
+            }
             Err(failure) => {
                 if !failure.is_resubmittable() || attempt >= MAX_RETRIES {
                     return Err(failure.into_error());
@@ -677,6 +892,10 @@ fn submit_error(
          开通「豆包录音文件识别模型2.0」要发 volc.seedasr.auc，开通 1.0 才是 \
          volc.bigasr.auc；应用会自动依次试这两个。两个都被拒时请确认这个 App ID 就是\
          开通了该服务的那个应用，且账号已实名）"
+    } else if is_rate_limited(Some(&status), Some(&message), http) {
+        "（请求太频繁，超过了账号的 QPS 限制；已经自动放慢重试仍不行时，把设置里的分段并发数调小）"
+    } else if status == STATUS_QUOTA_EXCEEDED {
+        "（账号的识别额度用完了：请到火山引擎控制台查看资源包 / 余额）"
     } else if http == reqwest::StatusCode::UNAUTHORIZED || http == reqwest::StatusCode::FORBIDDEN {
         "（鉴权失败：请核对 App ID / Access Token，并确认控制台已开通「录音文件识别大模型」）"
     } else {
@@ -898,11 +1117,11 @@ mod tests {
         // 几秒后自愈。原来任何不认识的状态码都当场判死——而这一段音频已经付过钱了，
         // 放弃等于把它扔掉，重来还要再付一次；接着问只花几秒。
         assert_eq!(
-            classify_poll_status(Some("55000000"), reqwest::StatusCode::OK),
+            classify_poll_status(Some("55000000"), None, reqwest::StatusCode::OK),
             PollAction::Hiccup
         );
         assert_eq!(
-            classify_poll_status(Some("55000031"), reqwest::StatusCode::BAD_GATEWAY),
+            classify_poll_status(Some("55000031"), None, reqwest::StatusCode::BAD_GATEWAY),
             PollAction::Hiccup
         );
     }
@@ -912,50 +1131,132 @@ mod tests {
         // 4 开头是我们自己的问题（参数错、鉴权失败、音频格式不对），再问一百遍
         // 也是同一个答复。把它也当抖动的话，一个必败的请求要空转到轮询上限才收场。
         assert_eq!(
-            classify_poll_status(Some("45000001"), reqwest::StatusCode::OK),
+            classify_poll_status(Some("45000001"), None, reqwest::StatusCode::OK),
             PollAction::Fatal
         );
         assert_eq!(
-            classify_poll_status(Some("45000151"), reqwest::StatusCode::BAD_GATEWAY),
+            classify_poll_status(Some("45000151"), None, reqwest::StatusCode::BAD_GATEWAY),
             PollAction::Fatal
         );
         // 正常响应没有业务状态码，或请求本身被拒绝，都没有可等待的任务状态。
         assert_eq!(
-            classify_poll_status(None, reqwest::StatusCode::OK),
+            classify_poll_status(None, None, reqwest::StatusCode::OK),
             PollAction::Fatal
         );
         assert_eq!(
-            classify_poll_status(None, reqwest::StatusCode::UNAUTHORIZED),
+            classify_poll_status(None, None, reqwest::StatusCode::UNAUTHORIZED),
             PollAction::Fatal
         );
     }
 
     #[test]
+    fn being_rate_limited_is_waited_out_not_a_verdict() {
+        // 真实遇到的那一条：分段识别几路一起轮询，查询被限流。
+        assert_eq!(
+            classify_poll_status(
+                Some("45000292"),
+                Some("quota exceeded for types: qps"),
+                reqwest::StatusCode::OK
+            ),
+            PollAction::Throttled
+        );
+        assert_eq!(
+            classify_poll_status(None, None, reqwest::StatusCode::TOO_MANY_REQUESTS),
+            PollAction::Throttled
+        );
+        // 同一个码、超的是别的额度（资源包 / 时长用完）：等多久都不会好。
+        assert_eq!(
+            classify_poll_status(
+                Some("45000292"),
+                Some("quota exceeded for types: duration"),
+                reqwest::StatusCode::OK
+            ),
+            PollAction::Fatal
+        );
+    }
+
+    #[test]
+    fn the_quota_errors_explain_what_ran_out() {
+        let qps = submit_error(
+            "query",
+            Some("45000292".into()),
+            Some("quota exceeded for types: qps".into()),
+            reqwest::StatusCode::OK,
+            RESOURCE_ID_V2,
+        )
+        .to_string();
+        assert!(qps.contains("QPS"), "{qps}");
+        let used_up = submit_error(
+            "submit",
+            Some("45000292".into()),
+            Some("quota exceeded for types: duration".into()),
+            reqwest::StatusCode::OK,
+            RESOURCE_ID_V2,
+        )
+        .to_string();
+        assert!(used_up.contains("额度用完"), "{used_up}");
+    }
+
+    #[test]
+    fn the_pacer_spaces_requests_after_a_throttle_and_relaxes_after_successes() {
+        let t0 = std::time::Instant::now();
+        let mut pacer = Pacer::new(t0);
+        // 平时不限速。
+        assert_eq!(pacer.reserve(t0), Duration::ZERO);
+        assert_eq!(pacer.reserve(t0), Duration::ZERO);
+        pacer.throttled();
+        pacer.throttled();
+        assert_eq!(pacer.gap, Duration::from_secs(1));
+        // 同一时刻三个请求排队：依次错开一个间隔。
+        let waits: Vec<_> = (0..3).map(|_| pacer.reserve(t0)).collect();
+        assert_eq!(
+            waits,
+            vec![
+                Duration::ZERO,
+                Duration::from_secs(1),
+                Duration::from_secs(2)
+            ]
+        );
+        for _ in 0..40 {
+            pacer.succeeded();
+        }
+        assert_eq!(pacer.gap, Duration::ZERO);
+        for _ in 0..20 {
+            pacer.throttled();
+        }
+        assert_eq!(pacer.gap, PACER_MAX_GAP);
+    }
+
+    #[test]
+    fn a_throttled_submit_may_be_resubmitted() {
+        assert!(RecognizeFailure::Throttled(AppError::Pipeline("x".into())).is_resubmittable());
+    }
+
+    #[test]
     fn an_http_gateway_failure_without_a_business_status_is_a_hiccup() {
         for http in [
-            reqwest::StatusCode::TOO_MANY_REQUESTS,
             reqwest::StatusCode::INTERNAL_SERVER_ERROR,
             reqwest::StatusCode::BAD_GATEWAY,
             reqwest::StatusCode::SERVICE_UNAVAILABLE,
             reqwest::StatusCode::GATEWAY_TIMEOUT,
         ] {
-            assert_eq!(classify_poll_status(None, http), PollAction::Hiccup);
+            assert_eq!(classify_poll_status(None, None, http), PollAction::Hiccup);
         }
     }
 
     #[test]
     fn the_four_known_statuses_keep_their_meaning() {
         assert_eq!(
-            classify_poll_status(Some(STATUS_SUCCESS), reqwest::StatusCode::OK),
+            classify_poll_status(Some(STATUS_SUCCESS), None, reqwest::StatusCode::OK),
             PollAction::Take
         );
         assert_eq!(
-            classify_poll_status(Some(STATUS_SILENT), reqwest::StatusCode::OK),
+            classify_poll_status(Some(STATUS_SILENT), None, reqwest::StatusCode::OK),
             PollAction::Silent
         );
         for code in [STATUS_PROCESSING, STATUS_QUEUED] {
             assert_eq!(
-                classify_poll_status(Some(code), reqwest::StatusCode::OK),
+                classify_poll_status(Some(code), None, reqwest::StatusCode::OK),
                 PollAction::KeepWaiting
             );
         }

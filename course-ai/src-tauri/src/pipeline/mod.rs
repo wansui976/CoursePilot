@@ -265,7 +265,7 @@ pub async fn transcribe_clip(
             let token = crate::llm::keychain::get_secret_or_legacy(db, "volcengine_asr_access_token")
                 .await?
                 .unwrap_or_default();
-            volcengine_auc::run_volcengine_file(&audio_path, &app_id, &token, None, &audio_format).await?
+            volcengine_auc::run_volcengine_file(&audio_path, &app_id, &token, None, &audio_format, None).await?
         }
         AsrBackend::Aliyun => {
             let api_key = crate::llm::keychain::get_secret_or_legacy(db, "dashscope_api_key")
@@ -669,6 +669,14 @@ async fn run_all(
                     .filter(|line| !line.is_empty()),
             );
             let context = volcengine_auc::build_context_json(&hotwords, &context_lines);
+            // 断点续跑：认完的结果、已经提交（付过钱）还没等到结果的任务都落库，
+            // 中途退出（点停、崩溃、关机、被限流太久）时下次直接取回或接着查。
+            // 识别参数拌进键里，改了热词/上下文就不会命中。
+            let cache = asr_cache::ChunkCache {
+                db: &db,
+                video_id: &video_id,
+                params: format!("volcengine-auc|{}", context.as_deref().unwrap_or_default()),
+            };
 
             match volcengine_upload_mode_for_os(std::env::consts::OS) {
                 VolcengineUploadMode::WholeFile => {
@@ -684,6 +692,7 @@ async fn run_all(
                             &access_token,
                             context.as_deref(),
                             &prepared_audio.format,
+                            Some(&cache),
                         ),
                         Some(&sink),
                         CLOUD_ASR_CREEP,
@@ -701,17 +710,6 @@ async fn run_all(
                         "云端分段识别中（火山引擎）",
                     )
                     .await?;
-                    // 断点续跑：分片认完就落库，中途退出（点停、崩溃、关机）时
-                    // 已经付过钱的那些分片下次直接取回，不用从第一片重来。
-                    // 识别参数拌进键里，改了热词/上下文就不会命中。
-                    let cache = asr_cache::ChunkCache {
-                        db: &db,
-                        video_id: &video_id,
-                        params: format!(
-                            "volcengine-auc|{}",
-                            context.as_deref().unwrap_or_default()
-                        ),
-                    };
                     // 分段陆续认完，把进度铺进 0.28–0.88：两小时的课切出二十多段，
                     // 此前从开始识别到全部认完一直停在 28%。
                     let sink = asr_progress_sink(&app, &video_id, &asr_job.id, 0.28, 0.88);
