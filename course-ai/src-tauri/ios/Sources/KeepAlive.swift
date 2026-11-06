@@ -53,13 +53,9 @@ final class KeepAliveController {
     UIApplication.shared.isIdleTimerDisabled = state.active
     if state.active {
       beginLegacy()
-      if #available(iOS 26.0, *) {
-        startOrUpdateContinued()
-      }
+      continuedStart()
     } else {
-      if #available(iOS 26.0, *) {
-        finishContinued()
-      }
+      continuedFinish()
       endLegacy()
     }
   }
@@ -78,6 +74,25 @@ final class KeepAliveController {
     legacyTask = .invalid
   }
 
+  // BGContinuedProcessingTask 是 iOS 26 SDK（Xcode 26）才有的类型。旧 Xcode 编的包里没有这部分，
+  // 只剩关自动锁屏和 30 秒宽限——这样旧工具链也编得过，不至于整个构建失败。
+  private func continuedStart() {
+    #if compiler(>=6.2)
+      if #available(iOS 26.0, *) {
+        startOrUpdateContinued()
+      }
+    #endif
+  }
+
+  private func continuedFinish() {
+    #if compiler(>=6.2)
+      if #available(iOS 26.0, *) {
+        finishContinued()
+      }
+    #endif
+  }
+
+  #if compiler(>=6.2)
   @available(iOS 26.0, *)
   private func startOrUpdateContinued() {
     if let task = continuedTask as? BGContinuedProcessingTask {
@@ -151,6 +166,7 @@ final class KeepAliveController {
     continuedTask = nil
     continuedSubmitted = false
   }
+  #endif
 
   private var subtitle: String {
     state.detail.isEmpty ? "CoursePilot" : state.detail

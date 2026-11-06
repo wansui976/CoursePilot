@@ -95,6 +95,10 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      # 镜像默认是 Xcode 16.4；iOS 26 的后台续跑（BGContinuedProcessingTask）只有 iOS 26 SDK 里才有，
+      # 用旧 Xcode 编出来的包里没有这项功能。
+      - name: Select Xcode 26
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app && xcodebuild -version
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
