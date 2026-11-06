@@ -629,10 +629,10 @@
     "addingToReview": "Adding…",
     "addToReview": "Add to daily review",
     "showAnswer": "Show answer",
-    "answerLabel": "Answer: ",
-    "jumpTo": "▶ Jump to {{time}}",
+    "answerLabel": "Answer",
+    "jumpTo": "Rewatch {{time}}",
     "progress": "Question {{current}}/{{total}}",
-    "summaryTitle": "Practice complete",
+    "summaryTitle": "Set finished",
     "summaryDetail": "{{correct}} of {{total}} correct",
     "answeredCount": "Answered {{count}}/{{total}}",
     "summaryPartial": ", {{partial}} partly correct",
@@ -656,8 +656,7 @@
       "correct": "Fix the error",
       "short": "Short answer"
     },
-    "setLabel": "{{style}} · {{time}} · {{count}} questions",
-    "legacySet": "First set · {{count}} questions",
+    "legacySet": "First set",
     "setPicker": "Choose a question set",
     "newSet": "New set",
     "generating": "Generating…",
@@ -676,17 +675,27 @@
       "partial": "Partly correct",
       "wrong": "Not yet"
     },
-    "referenceLabel": "Reference answer: ",
+    "referenceLabel": "Reference answer",
     "dialog": {
       "title": "Generate a new set",
       "styleLabel": "Question style",
       "courseRules": "Requirements for this course",
       "courseRulesPlaceholder": "e.g. more calculation questions; exam-style wording",
       "courseRulesHint": "Only applies to this course; requirements for every course live in Settings → Study.",
-      "replace": "Replace the existing questions (by default the new set is added and old ones are kept)",
+      "replace": "Replace existing questions",
       "cancel": "Cancel",
-      "start": "Generate"
-    }
+      "start": "Generate",
+      "replaceHint": "By default the new questions are added as another set and the old ones stay"
+    },
+    "questionCount": "{{count}} questions",
+    "questionNumber": "Question {{n}}",
+    "outcome": {
+      "correct": "Correct",
+      "partial": "Partly correct",
+      "wrong": "Wrong",
+      "skip": "Answer viewed"
+    },
+    "explanationLabel": "Why"
   },
   "summary": {
     "expandTitle": "Expand summary",

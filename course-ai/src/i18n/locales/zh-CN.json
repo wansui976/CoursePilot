@@ -628,10 +628,10 @@
     "addingToReview": "加入中…",
     "addToReview": "加入每日复习",
     "showAnswer": "显示答案",
-    "answerLabel": "答案：",
-    "jumpTo": "▶ 跳到 {{time}}",
+    "answerLabel": "答案",
+    "jumpTo": "回看 {{time}}",
     "progress": "第 {{current}}/{{total}} 题",
-    "summaryTitle": "本组练习完成",
+    "summaryTitle": "这套做完了",
     "summaryDetail": "共 {{total}} 题，答对 {{correct}} 题",
     "answeredCount": "已答 {{count}}/{{total}}",
     "summaryPartial": "，部分正确 {{partial}} 题",
@@ -655,8 +655,7 @@
       "correct": "找错改错",
       "short": "简答"
     },
-    "setLabel": "{{style}} · {{time}} · {{count}} 题",
-    "legacySet": "最初的一套 · {{count}} 题",
+    "legacySet": "最初的一套",
     "setPicker": "选择题目套",
     "newSet": "再出一套",
     "generating": "出题中…",
@@ -675,17 +674,27 @@
       "partial": "部分正确",
       "wrong": "还不对"
     },
-    "referenceLabel": "参考答案：",
+    "referenceLabel": "参考答案",
     "dialog": {
       "title": "出一套新题",
       "styleLabel": "出题风格",
       "courseRules": "本课程的出题要求",
       "courseRulesPlaceholder": "比如：多出计算题；按考研真题的风格；题干里不要出现英文",
       "courseRulesHint": "只对这门课生效；所有课程通用的要求在 设置 → 学习 里写。",
-      "replace": "替换掉现有的题目（默认追加为新的一套，旧题保留）",
+      "replace": "替换现有题目",
       "cancel": "取消",
-      "start": "出题"
-    }
+      "start": "出题",
+      "replaceHint": "默认把新题追加为新的一套，旧题保留"
+    },
+    "questionCount": "{{count}} 题",
+    "questionNumber": "第 {{n}} 题",
+    "outcome": {
+      "correct": "答对",
+      "partial": "部分正确",
+      "wrong": "答错",
+      "skip": "看了答案"
+    },
+    "explanationLabel": "解析"
   },
   "summary": {
     "expandTitle": "展开整体摘要",

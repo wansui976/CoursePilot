@@ -66,7 +66,7 @@ describe("QuizPanel", () => {
     await waitFor(() =>
       expect(mockIpc.srs.generate).toHaveBeenCalledWith("video-1"),
     );
-    expect(await screen.findByText("已加入复习")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "已加入复习" })).toBeInTheDocument();
   });
 
   it("grades answers as they are picked and shows a summary once all are answered", async () => {
@@ -78,7 +78,7 @@ describe("QuizPanel", () => {
     );
     renderQuizPanel();
 
-    await screen.findByText("第 1/2 题");
+    await screen.findByText("已答 0/2");
     // 第 1 题选「正确」（对），第 2 题也选「正确」（错）。
     fireEvent.click(screen.getAllByRole("button", { name: "正确" })[0]);
     expect(screen.getByText("已答 1/2")).toBeInTheDocument();
@@ -140,7 +140,7 @@ describe("QuizPanel", () => {
     renderQuizPanel();
 
     fireEvent.click(await screen.findByRole("button", { name: "显示答案" }));
-    expect(await screen.findByText(/答案：/)).toBeInTheDocument();
+    expect(await screen.findByText("答案", { exact: true })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "正确" })).toBeDisabled();
     expect(screen.getByText(/共 1 题，答对 0 题/)).toBeInTheDocument();
   });
@@ -176,7 +176,7 @@ describe("QuizPanel", () => {
     );
     expect(await screen.findByText("部分正确")).toBeInTheDocument();
     expect(screen.getByText("说出过大会震荡")).toBeInTheDocument();
-    expect(screen.getByText(/参考答案：/)).toBeInTheDocument();
+    expect(screen.getByText("参考答案")).toBeInTheDocument();
     expect(screen.getByText(/部分正确 1 题/)).toBeInTheDocument();
   });
 
@@ -191,8 +191,8 @@ describe("QuizPanel", () => {
 
     expect(await screen.findByText("新一套的题")).toBeInTheDocument();
     expect(screen.queryByText("最早的旧题")).not.toBeInTheDocument();
-    const picker = screen.getByRole("combobox", { name: "选择题目套" });
-    fireEvent.change(picker, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "选择题目套" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /最初的一套/ }));
     expect(await screen.findByText("最早的旧题")).toBeInTheDocument();
   });
 
@@ -202,7 +202,8 @@ describe("QuizPanel", () => {
     );
     renderQuizPanel();
 
-    fireEvent.click(await screen.findByRole("button", { name: "删除这套题" }));
+    fireEvent.click(await screen.findByRole("button", { name: "选择题目套" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "删除这套题" }));
     await waitFor(() => expect(mockIpc.ai.deleteQuizSet).toHaveBeenCalledWith("video-1", "s1"));
   });
 
@@ -241,7 +242,7 @@ describe("QuizPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
 
     await waitFor(() => expect(mockIpc.srs.generate).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("已加入复习")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "已加入复习" })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -286,11 +287,12 @@ describe("QuizPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "显示答案" }));
 
     await waitFor(() => {
-      expect(container.querySelectorAll(".katex").length).toBeGreaterThanOrEqual(5);
+      // 题干 1 + 选项 2 + 解析 1；选择题的答案标在选项上，不再另写一遍。
+      expect(container.querySelectorAll(".katex").length).toBeGreaterThanOrEqual(4);
     });
   });
 
-  it("uses the theme status token for the revealed answer", async () => {
+  it("marks the right answer with the theme status token", async () => {
     mockIpc.ai.getQuiz.mockResolvedValue(
       JSON.stringify([
         { type: "judge", stem: "地球是圆的", answer: true },
@@ -300,9 +302,9 @@ describe("QuizPanel", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "显示答案" }));
 
-    // 答案色走主题 token（深浅主题对比都达标），不硬编码 tailwind 绿。
-    expect((await screen.findByText(/答案：/)).closest("div")).toHaveClass(
-      "text-[var(--status-ok)]",
+    // 对的那一项走主题 token 的底色（深浅主题对比都达标），不硬编码 tailwind 绿。
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /正确/ })).toHaveClass("bg-[var(--status-ok-bg)]"),
     );
   });
 
@@ -348,7 +350,8 @@ describe("QuizPanel", () => {
 
     expect(await screen.findByText("地球是圆的")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "显示答案" }));
-    expect(await screen.findByText(/答案：/)).toHaveTextContent("答案：正确");
+    expect(await screen.findByText("答案", { exact: true })).toBeInTheDocument();
+    expect(screen.getAllByText("正确").length).toBeGreaterThanOrEqual(2);
   });
 
   it("题目装在自己的滚动区里，而不是被标签页容器裁掉", async () => {
@@ -389,13 +392,14 @@ describe("QuizPanel", () => {
     );
   });
 
-  it("有题目时按钮是「重新生成」，不是「生成」", async () => {
+  it("有题目时顶上是「再出一套」，不再有右下角的重新生成按钮", async () => {
     mockIpc.ai.getQuiz.mockResolvedValue(
       JSON.stringify([{ type: "judge", stem: "地球是圆的", answer: true }]),
     );
     renderQuizPanel();
 
-    expect(await screen.findByRole("button", { name: "重新生成" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "再出一套" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重新生成" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "生成" })).not.toBeInTheDocument();
   });
 
@@ -425,14 +429,14 @@ describe("QuizPanel", () => {
     const { rerender } = render(ui("video-1"));
 
     fireEvent.click(await screen.findByRole("button", { name: "显示答案" }));
-    expect(await screen.findByText(/答案：/)).toBeInTheDocument();
+    expect(await screen.findByText("答案", { exact: true })).toBeInTheDocument();
 
     rerender(ui("video-2"));
 
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "显示答案" })).toBeInTheDocument(),
     );
-    expect(screen.queryByText(/答案：/)).not.toBeInTheDocument();
+    expect(screen.queryByText("答案", { exact: true })).not.toBeInTheDocument();
   });
 
   it("hides revealed answers when the same video's regenerated quiz arrives", async () => {
@@ -446,11 +450,11 @@ describe("QuizPanel", () => {
     renderQuizPanel();
 
     fireEvent.click(await screen.findByRole("button", { name: "显示答案" }));
-    expect(await screen.findByText(/答案：/)).toBeInTheDocument();
+    expect(await screen.findByText("答案", { exact: true })).toBeInTheDocument();
 
-    // 有题时「重新生成」打开出题对话框，勾上「替换」就是原来的重新生成。
-    fireEvent.click(screen.getByRole("button", { name: "重新生成" }));
-    fireEvent.click(await screen.findByRole("checkbox", { name: /替换掉现有的题目/ }));
+    // 有题时从「再出一套」进出题对话框，打开「替换」就是原来的重新生成。
+    fireEvent.click(screen.getByRole("button", { name: "再出一套" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "替换现有题目" }));
     fireEvent.click(screen.getByRole("button", { name: "出题" }));
     await waitFor(() =>
       expect(mockIpc.ai.generate).toHaveBeenCalledWith("video-1", "quiz", { style: "apply", append: false }),
@@ -460,7 +464,7 @@ describe("QuizPanel", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "显示答案" })).toBeInTheDocument(),
     );
-    expect(screen.queryByText(/答案：/)).not.toBeInTheDocument();
+    expect(screen.queryByText("答案", { exact: true })).not.toBeInTheDocument();
   });
 
   it("does not reuse revealed indexes when the query cache receives a new quiz", async () => {
@@ -470,12 +474,12 @@ describe("QuizPanel", () => {
     const { queryClient } = renderQuizPanel();
 
     fireEvent.click(await screen.findByRole("button", { name: "显示答案" }));
-    expect(await screen.findByText(/答案：/)).toBeInTheDocument();
+    expect(await screen.findByText("答案", { exact: true })).toBeInTheDocument();
 
     act(() => queryClient.setQueryData(["quiz", "video-1"], newQuiz));
 
     expect(await screen.findByText("外部更新的新题")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "显示答案" })).toBeInTheDocument();
-    expect(screen.queryByText(/答案：/)).not.toBeInTheDocument();
+    expect(screen.queryByText("答案", { exact: true })).not.toBeInTheDocument();
   });
 });
