@@ -135,8 +135,8 @@ CoursePilot 就是为这个问题而生的。不管是 B 站上的公开课、�
 
 | 平台 | 安装包 | 说明 |
 | --- | --- | --- |
-| macOS（Apple Silicon / Intel） | [`.dmg`](https://github.com/wansui976/CoursePilot/releases/latest) | Apple 芯片选 `aarch64`，Intel 选 `x64`；已内置 ffmpeg、whisper.cpp、sherpa-onnx 等依赖 |
-| Windows（x64） | [`.exe` / `.msi`](https://github.com/wansui976/CoursePilot/releases/latest) | 已内置依赖 |
+| macOS（Apple Silicon / Intel） | [`.dmg`](https://github.com/wansui976/CoursePilot/releases/latest) | Apple 芯片选 `aarch64`，Intel 选 `x64`；已内置 ffmpeg、llama.cpp、sherpa-onnx 等依赖 |
+| Windows（x64） | [`.exe` / `.msi`](https://github.com/wansui976/CoursePilot/releases/latest) | 已内置依赖；本地 Qwen3-ASR 可用显卡（Vulkan）加速 |
 | Android（arm64） | [`.apk`](https://github.com/wansui976/CoursePilot/releases/latest) | 语音识别可选本地（SenseVoice / Qwen3-ASR）或云端；暂时只能导入本地视频 |
 | iOS / iPadOS | [`.ipa`](https://github.com/wansui976/CoursePilot/releases/latest)（未签名） | 需要自签安装；同上，暂时只能导入本地视频 |
 
@@ -156,7 +156,7 @@ CoursePilot 就是为这个问题而生的。不管是 B 站上的公开课、�
 <details>
 <summary><b>想要更好的识别效果？</b>（云端语音识别 / OCR）</summary>
 
-- **语音识别**：中文课用本地的 SenseVoice 就够准（在 **设置 → 语音识别 → 本地识别** 下载，240 MB），要更准选 Qwen3-ASR 并填上课里的术语当热词。不想占电脑 / 手机算力，或者课程很长，可以配火山引擎或阿里云 DashScope，详见下方「云端服务怎么配」。
+- **语音识别**：中文课用本地的 SenseVoice 就够准（在 **设置 → 语音识别 → 本地识别** 下载，240 MB），要更准选 Qwen3-ASR 并填上课里的术语当热词。电脑上的 Qwen3-ASR 会用显卡加速（Mac 走 Metal，Windows 走 Vulkan，N 卡、A 卡、核显都行），没有能用的显卡就自动改用 CPU。模型默认存在应用数据目录，C 盘紧张的话可以在同一页把「模型存放位置」换到别的盘，已下载的模型会一起搬过去。不想占电脑 / 手机算力，或者课程很长，可以配火山引擎或阿里云 DashScope，详见下方「云端服务怎么配」。
 - **OCR**：默认用本地 tesseract。课件文字复杂时，可以在 **设置 → 课件 / OCR** 切到阿里云 OCR 或 DeepSeek 视觉模型。
 
 </details>
@@ -172,7 +172,7 @@ CoursePilot 就是为这个问题而生的。不管是 B 站上的公开课、�
 - **后台下载**：B 站 / 网络视频导入后在后台下，关掉弹窗、切换页面都不中断；处理队列里集中显示百分比和速度，可以取消、重试。B 站 CDN 中途断流时自动降一档清晰度重下；登录凭证过期时说明原因，重新导入 cookies 就能接着下。
 - **订阅合集**：导入播放列表时可以顺手订阅，之后有新视频自动导入并开始处理（每次检查最多 3 集，优先用自带字幕）；在课程菜单的「订阅更新」里管理。
 - **后台排队处理**：视频导入后自动依次走完所有步骤，进度实时显示，随时能暂停，失败了可以单独续跑；一批下完后最多同时处理 2 个。
-- **听写字幕**：本地识别（SenseVoice、Qwen3-ASR 走 sherpa-onnx，先用 VAD 切掉静音再识别；英文课可选 whisper.cpp），或火山引擎、阿里云云端识别（阿里云支持 `qwen3-asr-flash-filetrans` / `fun-asr` / `paraformer-v2` 三个模型）。本地模型从国内镜像下载、可断点续传；Whisper 的复读和静音幻觉会自动清掉。识别完自动纠错，口头禅、错别字、吞字都会清理掉；云端识别支持断点续跑。手动改了字幕之后，基于旧稿生成的笔记、章节等会自动标成「已过期」，提醒你重新生成。
+- **听写字幕**：本地识别（SenseVoice 走 sherpa-onnx；Qwen3-ASR 在电脑上走 llama.cpp、可用显卡加速，手机上走 sherpa-onnx；都先用 VAD 切掉静音再识别），或火山引擎、阿里云云端识别（阿里云支持 `qwen3-asr-flash-filetrans` / `fun-asr` / `paraformer-v2` 三个模型）。本地模型从国内镜像下载、可断点续传；识别结果里的复读和静音幻觉会自动清掉。识别完自动纠错，口头禅、错别字、吞字都会清理掉；云端识别支持断点续跑。手动改了字幕之后，基于旧稿生成的笔记、章节等会自动标成「已过期」，提醒你重新生成。
 - **课件截取和 OCR**：按画面变化比例判断换页，截取动画稳定后的那一帧，跳过纯色页和转场，还会先裁掉视频自带的黑边。截图整批 OCR（本地 tesseract、阿里云 OCR 或 DeepSeek 视觉模型），和语音识别并行处理。
 
 ### AI 学习资料
@@ -261,7 +261,7 @@ CoursePilot 就是为这个问题而生的。不管是 B 站上的公开课、�
 | 能力 | 桌面（macOS / Windows） | 移动端（iOS / Android） |
 | --- | --- | --- |
 | 音频抽取 / 课件截取 | ffmpeg | 原生 AVFoundation / MediaMetadataRetriever |
-| 本地语音识别 | SenseVoice / Qwen3-ASR（sherpa-onnx）、whisper.cpp | SenseVoice / Qwen3-ASR（sherpa-onnx）；内存不够时自动改用 SenseVoice |
+| 本地语音识别 | SenseVoice（sherpa-onnx）/ Qwen3-ASR（llama.cpp，支持显卡加速） | SenseVoice / Qwen3-ASR（sherpa-onnx）；内存不够时自动改用 SenseVoice |
 | 后台处理 | — | Android 前台服务 + 通知栏进度；iOS 处理时不锁屏，iOS 26 起切走也接着跑 |
 | 网络视频下载 | yt-dlp（后台下载队列） | 暂时只能导入本地文件 |
 | 设备解不了的编码 | — | iOS 上把 AV1 自动转成 H.264（dav1d + VideoToolbox） |
@@ -279,12 +279,12 @@ CoursePilot 就是为这个问题而生的。不管是 B 站上的公开课、�
 
 ## 🛠️ 从源码构建
 
-**技术栈**：Tauri 2 · React 19 + TypeScript + Vite + Tailwind CSS · Rust + SQLite（sqlx）· ffmpeg / whisper.cpp / sherpa-onnx / yt-dlp / tesseract · FSRS-4.5
+**技术栈**：Tauri 2 · React 19 + TypeScript + Vite + Tailwind CSS · Rust + SQLite（sqlx）· ffmpeg / llama.cpp / sherpa-onnx / yt-dlp / tesseract · FSRS-4.5
 
 需要 Node.js 20+、pnpm、Rust stable 和 Tauri 的系统依赖。macOS 上先装媒体工具：
 
 ```bash
-brew install ffmpeg whisper-cpp tesseract yt-dlp
+brew install ffmpeg llama.cpp tesseract yt-dlp
 ```
 
 ```bash

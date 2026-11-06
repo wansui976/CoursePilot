@@ -1,7 +1,7 @@
 # CourseAI Desktop
 
 Phase 1 MVP for a local course-video learning assistant. The app imports local
-videos, extracts audio with ffmpeg, runs local whisper.cpp ASR or cloud ASR
+videos, extracts audio with ffmpeg, runs local ASR (SenseVoice via sherpa-onnx, Qwen3-ASR via llama.cpp) or cloud ASR
 (Volcengine / Alibaba Cloud DashScope), and displays a clickable transcript
 synced to video playback.
 
@@ -10,15 +10,15 @@ synced to video playback.
 - Node.js 20 or newer and pnpm
 - Rust stable and Tauri desktop prerequisites for your OS
 - `ffmpeg` on `$PATH`
-- `whisper-cli` from whisper.cpp on `$PATH` for ASR processing
+- `llama-server` from llama.cpp for local Qwen3-ASR (bundled from `binaries/`, or on `$PATH` in dev)
 
 On macOS, the intended setup is:
 
 ```bash
-brew install ffmpeg whisper-cpp
+brew install ffmpeg llama.cpp
 ```
 
-The in-app model downloader uses a ModelScope mirror for GGML model files so
+The in-app model downloader uses a ModelScope mirror for model files so
 first setup remains usable on networks where Hugging Face is slow or
 unreachable.
 
@@ -53,7 +53,7 @@ async task is polled every 3 seconds for up to 30 minutes.
 Alibaba Cloud parses the data URI as a single JSON string and caps it at
 28,000,000 characters, which is roughly 87 minutes at 32 kbps. Files over that
 limit are rejected locally before upload; split longer lectures or use local
-Whisper.
+recognition.
 
 Run the live end-to-end check (downloads Aliyun's public sample, tests all three
 models by default; the key is never printed):
@@ -70,10 +70,10 @@ is in [tools/aliyun-asr/availability-2026-10-26.md](tools/aliyun-asr/availabilit
 
 - Course folders and local video import
 - SQLite persistence through the Rust backend
-- ffmpeg audio extraction and whisper.cpp transcript generation
+- ffmpeg audio extraction and local transcript generation
 - Processing job progress events
 - Custom video player with clickable transcript timestamps
-- Whisper model download manager
+- Local ASR model download manager
 - Default storage root and model settings
 
 ## Phase 2 Scope (AI core)

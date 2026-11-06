@@ -117,8 +117,8 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 
 | Platform | Installer | Notes |
 | --- | --- | --- |
-| macOS (Apple Silicon / Intel) | [`.dmg`](https://github.com/wansui976/CoursePilot/releases/latest) | `aarch64` for Apple silicon, `x64` for Intel; ffmpeg, whisper.cpp, sherpa-onnx, etc. bundled |
-| Windows (x64) | [`.exe` / `.msi`](https://github.com/wansui976/CoursePilot/releases/latest) | Dependencies bundled |
+| macOS (Apple Silicon / Intel) | [`.dmg`](https://github.com/wansui976/CoursePilot/releases/latest) | `aarch64` for Apple silicon, `x64` for Intel; ffmpeg, llama.cpp, sherpa-onnx, etc. bundled |
+| Windows (x64) | [`.exe` / `.msi`](https://github.com/wansui976/CoursePilot/releases/latest) | Dependencies bundled; local Qwen3-ASR can use the GPU (Vulkan) |
 | Android (arm64) | [`.apk`](https://github.com/wansui976/CoursePilot/releases/latest) | Local (SenseVoice / Qwen3-ASR) or cloud ASR; local video import only for now |
 | iOS / iPadOS | [`.ipa`](https://github.com/wansui976/CoursePilot/releases/latest) (unsigned) | Sideload it yourself; local video import only for now |
 
@@ -138,7 +138,7 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 <details>
 <summary><b>Want better recognition?</b> (cloud ASR / OCR)</summary>
 
-- **Speech recognition**: for Chinese lectures the local SenseVoice model is accurate enough (download it under **Settings → Speech Recognition → Local recognition**, 240 MB); for more accuracy pick Qwen3-ASR and add the course's terms as hotwords. To spare your computer or phone, or for very long lectures, set up Volcengine or Alibaba DashScope (see "Cloud services" below).
+- **Speech recognition**: for Chinese lectures the local SenseVoice model is accurate enough (download it under **Settings → Speech Recognition → Local recognition**, 240 MB); for more accuracy pick Qwen3-ASR and add the course's terms as hotwords. On a computer, Qwen3-ASR runs on the GPU (Metal on Mac, Vulkan on Windows: NVIDIA, AMD and integrated graphics all work) and falls back to the CPU when no usable GPU is found. Models live in the app data folder by default; if drive C is short on space, change the model **Location** on the same page and the downloaded models move with it. To spare your computer or phone, or for very long lectures, set up Volcengine or Alibaba DashScope (see "Cloud services" below).
 - **OCR**: local tesseract by default. For dense slides, switch to Alibaba Cloud OCR or the DeepSeek vision model in **Settings → Slides / OCR**.
 
 </details>
@@ -154,7 +154,7 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 - **Background downloads** — Bilibili / web videos download in the background; closing the dialog or switching pages doesn't stop them. The processing queue shows percentage and speed and lets you cancel or retry. When Bilibili's CDN cuts the stream mid-download, it retries one quality step lower; if your login cookies have expired it says so, and re-importing cookies resumes the download.
 - **Followed collections** — follow a playlist while importing it; new videos are imported and processed automatically (up to 3 per check, preferring built-in subtitles). Manage them under “Subscriptions” in the course menu.
 - **Background queue** — every imported video runs through all steps automatically, with live progress. Pause anytime; retry just the failed step. After a batch download, at most two videos process at once.
-- **Transcription** — local recognition (SenseVoice and Qwen3-ASR via sherpa-onnx, with VAD skipping silence; whisper.cpp for English lectures) or cloud ASR (Volcengine, Alibaba). Local models download from mirrors with resume; Whisper's loops and silence hallucinations are cleaned up automatically. An LLM then cleans up filler words, typos, and swallowed syllables. Cloud ASR resumes from checkpoints. If you edit a transcript, materials generated from the old version are marked outdated.
+- **Transcription** — local recognition (SenseVoice via sherpa-onnx; Qwen3-ASR via llama.cpp with GPU acceleration on computers and via sherpa-onnx on phones; VAD skips silence first) or cloud ASR (Volcengine, Alibaba). Local models download from mirrors with resume; repeated lines and silence hallucinations are cleaned up automatically. An LLM then cleans up filler words, typos, and swallowed syllables. Cloud ASR resumes from checkpoints. If you edit a transcript, materials generated from the old version are marked outdated.
 - **Slide extraction & OCR** — detects page turns by frame-difference ratio, captures the stable frame after animations, skips solid-color and transition frames, and crops black bars first. Batch OCR runs through local tesseract, Alibaba Cloud OCR, or the DeepSeek vision model, in parallel with speech recognition.
 
 ### AI study materials
@@ -236,7 +236,7 @@ ASR and slide extraction run in parallel. Each step's progress shows in the proc
 | Capability | Desktop (macOS / Windows) | Mobile (iOS / Android) |
 | --- | --- | --- |
 | Audio extraction / slide capture | ffmpeg | Native AVFoundation / MediaMetadataRetriever |
-| Local ASR | SenseVoice / Qwen3-ASR (sherpa-onnx), whisper.cpp | SenseVoice / Qwen3-ASR (sherpa-onnx); falls back to SenseVoice when memory is short |
+| Local ASR | SenseVoice (sherpa-onnx) / Qwen3-ASR (llama.cpp, GPU-accelerated) | SenseVoice / Qwen3-ASR (sherpa-onnx); falls back to SenseVoice when memory is short |
 | Background processing | — | Android foreground service with a progress notification; iOS keeps the screen awake, and from iOS 26 continues after you switch apps |
 | Online video download | yt-dlp (background download queue) | Local files only for now |
 | Codecs the device can't decode | — | iOS transcodes AV1 to H.264 (dav1d + VideoToolbox) |
@@ -254,12 +254,12 @@ ASR and slide extraction run in parallel. Each step's progress shows in the proc
 
 ## 🛠️ Build from source
 
-**Stack**: Tauri 2 · React 19 + TypeScript + Vite + Tailwind CSS · Rust + SQLite (sqlx) · ffmpeg / whisper.cpp / sherpa-onnx / yt-dlp / tesseract · FSRS-4.5
+**Stack**: Tauri 2 · React 19 + TypeScript + Vite + Tailwind CSS · Rust + SQLite (sqlx) · ffmpeg / llama.cpp / sherpa-onnx / yt-dlp / tesseract · FSRS-4.5
 
 You'll need Node.js 20+, pnpm, Rust stable, and Tauri's system prerequisites. On macOS, install the media tools first:
 
 ```bash
-brew install ffmpeg whisper-cpp tesseract yt-dlp
+brew install ffmpeg llama.cpp tesseract yt-dlp
 ```
 
 ```bash
