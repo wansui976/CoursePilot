@@ -19,7 +19,7 @@ mod usage_log;
 
 use crate::commands::ai::{
     cmd_generate_ai, cmd_get_chapters, cmd_get_highlights, cmd_get_llm_profiles, cmd_get_mindmap, cmd_get_notes,
-    cmd_get_quiz, cmd_get_summary, cmd_has_api_key, cmd_list_models, cmd_save_llm_profiles, cmd_save_notes,
+    cmd_delete_quiz_set, cmd_get_quiz, cmd_get_quiz_course_rules, cmd_get_summary, cmd_grade_quiz_answer, cmd_set_quiz_course_rules, cmd_has_api_key, cmd_list_models, cmd_save_llm_profiles, cmd_save_notes,
     cmd_set_api_key, cmd_stale_ai_artifacts,
 };
 use crate::commands::app::{cmd_check_update, cmd_exit_app};
@@ -311,6 +311,10 @@ pub fn run() {
             cmd_save_note_image,
             cmd_read_note_image,
             cmd_get_quiz,
+            cmd_delete_quiz_set,
+            cmd_grade_quiz_answer,
+            cmd_get_quiz_course_rules,
+            cmd_set_quiz_course_rules,
             cmd_get_mindmap,
             cmd_get_highlights,
             crate::commands::feynman::cmd_transcribe_clip,

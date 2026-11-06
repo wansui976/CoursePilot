@@ -83,7 +83,11 @@ pub fn quiz_to_anki(questions_json: &str) -> AppResult<String> {
         if stem.is_empty() {
             continue;
         }
-        let mut front = stem.to_string();
+        let mut front = if q["type"].as_str() == Some("correct") {
+            format!("找出这句话的错误并改正：{stem}")
+        } else {
+            stem.to_string()
+        };
         if let Some(options) = q["options"].as_array() {
             for (i, opt) in options.iter().enumerate() {
                 if let Some(text) = opt.as_str() {

@@ -627,18 +627,65 @@
     "addedToReview": "已加入复习",
     "addingToReview": "加入中…",
     "addToReview": "加入每日复习",
-    "hideAnswer": "隐藏答案",
     "showAnswer": "显示答案",
     "answerLabel": "答案：",
     "jumpTo": "▶ 跳到 {{time}}",
     "progress": "第 {{current}}/{{total}} 题",
-    "ratedCount": "已评 {{count}}/{{total}}",
-    "selfCorrect": "答对",
-    "selfWrong": "答错",
-    "selfSkip": "跳过",
     "summaryTitle": "本组练习完成",
-    "summaryDetail": "共 {{total}} 题，答对 {{correct}} 题。",
-    "retrySelfReview": "重新自评"
+    "summaryDetail": "共 {{total}} 题，答对 {{correct}} 题",
+    "answeredCount": "已答 {{count}}/{{total}}",
+    "summaryPartial": "，部分正确 {{partial}} 题",
+    "retrySet": "重做这套",
+    "styles": {
+      "recall": "记忆巩固",
+      "apply": "理解应用",
+      "correct": "找错改错",
+      "contrast": "易混辨析"
+    },
+    "styleHints": {
+      "recall": "考课上讲的定义、结论和步骤",
+      "apply": "课上没出现过的新情境，用学过的原理判断",
+      "correct": "给一句带错的话，找出错处并改正",
+      "contrast": "把容易混淆的概念放在一起分辨"
+    },
+    "types": {
+      "single": "单选",
+      "multi": "多选",
+      "judge": "判断",
+      "correct": "找错改错",
+      "short": "简答"
+    },
+    "setLabel": "{{style}} · {{time}} · {{count}} 题",
+    "legacySet": "最初的一套 · {{count}} 题",
+    "setPicker": "选择题目套",
+    "newSet": "再出一套",
+    "generating": "出题中…",
+    "deleteSet": "删除这套题",
+    "deleteSetConfirm": "删除这套题（{{count}} 题）？已经加入每日复习的卡片不受影响。",
+    "optionsLabel": "选项",
+    "submit": "提交",
+    "submitGrade": "提交批改",
+    "grading": "批改中…",
+    "placeholders": {
+      "correct": "指出错在哪，并写出正确的说法",
+      "short": "写下你的回答"
+    },
+    "verdict": {
+      "correct": "答对了",
+      "partial": "部分正确",
+      "wrong": "还不对"
+    },
+    "referenceLabel": "参考答案：",
+    "dialog": {
+      "title": "出一套新题",
+      "styleLabel": "出题风格",
+      "courseRules": "本课程的出题要求",
+      "courseRulesPlaceholder": "比如：多出计算题；按考研真题的风格；题干里不要出现英文",
+      "courseRulesHint": "只对这门课生效；所有课程通用的要求在 设置 → 学习 里写。",
+      "replace": "替换掉现有的题目（默认追加为新的一套，旧题保留）",
+      "cancel": "取消",
+      "start": "出题"
+    }
   },
   "summary": {
     "expandTitle": "展开整体摘要",
@@ -893,6 +940,15 @@
       "tourHint": "各页面的功能提示看过一次就不再出现，可以在这里让它们重新显示。",
       "tourReset": "重新显示",
       "tourResetDone": "已重置，打开对应页面时会再出现"
+    },
+    "quiz": {
+      "title": "出题",
+      "defaultStyle": "默认出题风格",
+      "defaultStyleHint": "视频处理完自动出题时用这个风格；在练习面板里「再出一套」时可以另选。",
+      "prompt": "出题要求（所有课程）",
+      "promptHint": "每次出题都会带上，优先满足；只想对某门课生效的要求，在练习面板的「再出一套」里写。",
+      "promptPlaceholder": "比如：多出需要自己推理的题；选项不要一眼就能排除；题干用中文",
+      "saved": "已保存"
     }
   },
   "assistant": {

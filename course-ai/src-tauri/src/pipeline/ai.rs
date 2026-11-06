@@ -236,6 +236,10 @@ pub enum QuizKind {
     Single,
     Multi,
     Judge,
+    /// 找错改错：题干是一段带一处错误的陈述，作答要指出错处并改正；answer 是改正后的说法。
+    Correct,
+    /// 简答：answer 是参考答案，key_points 是判分要点。
+    Short,
 }
 
 impl QuizKind {
@@ -244,6 +248,8 @@ impl QuizKind {
             "single" => Some(Self::Single),
             "multi" | "multiple" => Some(Self::Multi),
             "judge" | "boolean" | "truefalse" | "true_false" => Some(Self::Judge),
+            "correct" | "fix" | "correction" | "error_correction" => Some(Self::Correct),
+            "short" | "short_answer" | "open" => Some(Self::Short),
             _ => None,
         }
     }
@@ -262,6 +268,21 @@ pub struct QuizQuestion {
     pub explanation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ref_ms: Option<i64>,
+    /// 选择题每个选项各一句：对的为什么对，错的错在哪（对应哪种误解）。和 options 一一对应。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub option_notes: Option<Vec<String>>,
+    /// 改错 / 简答题的判分要点。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_points: Option<Vec<String>>,
+    /// 属于哪一套题（「再出一套」时追加在后面，按它分组）。旧题库里没有这几个字段。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set_id: Option<String>,
+    /// 这套题的出题风格（recall / apply / correct / contrast）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
+    /// 这套题的生成时间（毫秒）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -330,7 +351,17 @@ fn validate_question(raw: &serde_json::Value) -> Option<QuizQuestion> {
             };
             (Some(options), answer)
         }
+        // 改错 / 简答：要自己写，答案是一段文字（改正后的说法 / 参考答案）。
+        QuizKind::Correct | QuizKind::Short => (None, QuizAnswer::One(non_empty_string(Some(answer_raw))?)),
     };
+    // 逐项解析和选项对不上就不要：错位的解析比没有更糟（说的是另一个选项）。
+    let option_notes = options.as_ref().and_then(|options| {
+        let notes = raw.get("option_notes").map(string_list).unwrap_or_default();
+        (notes.len() == options.len()).then_some(notes)
+    });
+    let key_points = matches!(kind, QuizKind::Correct | QuizKind::Short)
+        .then(|| raw.get("key_points").map(string_list).unwrap_or_default())
+        .filter(|points| !points.is_empty());
 
     Some(QuizQuestion {
         kind,
@@ -342,12 +373,22 @@ fn validate_question(raw: &serde_json::Value) -> Option<QuizQuestion> {
             .get("ref_ms")
             .and_then(serde_json::Value::as_i64)
             .filter(|ms| *ms >= 0),
+        option_notes,
+        key_points,
+        set_id: None,
+        style: None,
+        set_at: None,
     })
 }
 
 /// 逐题校验后落库。坏题丢掉、好题留下；一道都不剩才算失败——
 /// 模型偶尔写坏一道，不该让整套题白生成。
 pub fn validate_quiz_json(content: &str) -> AppResult<String> {
+    serde_json::to_string(&validate_quiz(content)?).map_err(AppError::Json)
+}
+
+/// 同 [`validate_quiz_json`]，返回题目本身（追加一套题时要先打上套别再合并）。
+pub fn validate_quiz(content: &str) -> AppResult<Vec<QuizQuestion>> {
     let v: serde_json::Value = parse_lenient_json(content)?;
     let Some(items) = v.as_array() else {
         return Err(AppError::Other("quiz output is not a JSON array".into()));
@@ -364,7 +405,7 @@ pub fn validate_quiz_json(content: &str) -> AppResult<String> {
     if questions.is_empty() {
         return Err(AppError::Other("出题结果里没有一道形状合法的题目".into()));
     }
-    serde_json::to_string(&questions).map_err(AppError::Json)
+    Ok(questions)
 }
 
 pub async fn store_chapters(db: &Db, video_id: &str, drafts: &[ChapterDraft]) -> AppResult<usize> {
@@ -866,26 +907,50 @@ pub async fn generate_quiz(
     video_id: &str,
     progress: Progress<'_>,
 ) -> AppResult<()> {
+    // 流水线自动出题：设置里的默认风格，替换掉旧题。
+    generate_quiz_with(db, provider, model, video_id, None, false, progress).await
+}
+
+/// 出一套题。`style` 不传就用设置里的默认风格；`append` 为真时接在已有题目后面
+/// （「再出一套」），否则替换掉全部。全局出题要求和本课程的要求都会带上。
+pub async fn generate_quiz_with(
+    db: &Db,
+    provider: &Provider,
+    model: &str,
+    video_id: &str,
+    style: Option<&str>,
+    append: bool,
+    progress: Progress<'_>,
+) -> AppResult<()> {
     report(progress, AT_CONTEXT, "准备讲稿");
+    let prefs = crate::pipeline::quiz::load_prefs(db, video_id, style).await?;
     // 提要占进度条的前半截；短讲稿不压提要，这一段会一闪而过。
     let prep = scoped(progress, AT_CONTEXT, AT_REQUEST);
     let input = budgeted_context(db, provider, model, video_id, Some(&prep)).await?;
     let transcript = &input.context;
-    let req = crate::llm::prompts::quiz_request(model, transcript);
+    let req = crate::llm::prompts::quiz_request(model, transcript, prefs.style.id(), &prefs.extra);
     report(progress, AT_REQUEST, "正在请求模型出题");
     let resp = provider.complete(&req).await?;
     report(progress, AT_PARSE, "校验题目");
-    let json = validate_quiz_json(&resp.content)?;
+    let fresh = validate_quiz(&resp.content)?;
     report(progress, AT_STORE, "写入题库");
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut tx = db.pool.begin().await?;
+    let existing: Option<String> = sqlx::query_scalar("SELECT questions_json FROM quizzes WHERE video_id=?")
+        .bind(video_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let json = crate::pipeline::quiz::merge_set(existing.as_deref(), fresh, prefs.style, now, append)?;
     sqlx::query(
         "INSERT INTO quizzes(video_id,questions_json,generated_at) VALUES (?,?,?)
          ON CONFLICT(video_id) DO UPDATE SET questions_json=excluded.questions_json, generated_at=excluded.generated_at",
     )
     .bind(video_id)
     .bind(json)
-    .bind(chrono::Utc::now().timestamp_millis())
-    .execute(&db.pool)
+    .bind(now)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     record_artifact_source(db, video_id, "quiz", &input.fingerprint).await?;
     Ok(())
 }
@@ -1617,6 +1682,33 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["stem"], "好题");
         assert_eq!(items[0]["ref_ms"], 1200);
+    }
+
+    #[test]
+    fn correction_and_short_answer_questions_are_kept_with_their_key_points() {
+        let raw = r#"[
+            {"type":"correct","stem":"学习率越大收敛越快。","answer":"学习率过大会震荡甚至发散。","key_points":["指出「越大越快」是错的","说出过大会震荡"],"ref_ms":430000},
+            {"type":"short","stem":"为什么要做特征缩放？","answer":"让各维梯度尺度一致","options":["不该有"]},
+            {"type":"correct","stem":"没有答案"}
+        ]"#;
+        let questions = validate_quiz(raw).unwrap();
+        assert_eq!(questions.len(), 2, "缺答案的改错题丢掉");
+        assert_eq!(questions[0].kind, QuizKind::Correct);
+        assert_eq!(questions[0].key_points.as_ref().unwrap().len(), 2);
+        assert_eq!(questions[1].kind, QuizKind::Short);
+        assert!(questions[1].options.is_none(), "简答题不带选项");
+        assert!(questions[1].key_points.is_none());
+    }
+
+    #[test]
+    fn option_notes_are_kept_only_when_they_line_up_with_the_options() {
+        let raw = r#"[
+            {"type":"single","stem":"q1","options":["a","b"],"answer":"a","option_notes":["对：……","错：……"]},
+            {"type":"single","stem":"q2","options":["a","b","c"],"answer":"a","option_notes":["只有一句"]}
+        ]"#;
+        let questions = validate_quiz(raw).unwrap();
+        assert_eq!(questions[0].option_notes.as_ref().unwrap().len(), 2);
+        assert!(questions[1].option_notes.is_none(), "对不上的逐项解析不要，免得张冠李戴");
     }
 
     #[test]

@@ -5,19 +5,25 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QuizPanel } from "./QuizPanel";
 
-const { mockIpc } = vi.hoisted(() => ({
+const { mockIpc, confirmDialog } = vi.hoisted(() => ({
   mockIpc: {
     ai: {
       getQuiz: vi.fn(),
       generate: vi.fn(),
+      deleteQuizSet: vi.fn(),
+      gradeQuizAnswer: vi.fn(),
+      getQuizCourseRules: vi.fn(),
+      setQuizCourseRules: vi.fn(),
     },
     srs: {
       generate: vi.fn(),
     },
   },
+  confirmDialog: vi.fn(),
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: confirmDialog }));
 
 function renderQuizPanel() {
   const queryClient = new QueryClient({
@@ -42,6 +48,11 @@ describe("QuizPanel", () => {
     mockIpc.ai.getQuiz.mockReset();
     mockIpc.ai.generate.mockReset().mockResolvedValue(undefined);
     mockIpc.srs.generate.mockReset().mockResolvedValue(1);
+    mockIpc.ai.deleteQuizSet.mockReset().mockResolvedValue(undefined);
+    mockIpc.ai.gradeQuizAnswer.mockReset();
+    mockIpc.ai.getQuizCourseRules.mockReset().mockResolvedValue("");
+    mockIpc.ai.setQuizCourseRules.mockReset().mockResolvedValue(undefined);
+    confirmDialog.mockReset().mockResolvedValue(true);
   });
 
   it("adds the quiz to spaced-repetition review", async () => {
@@ -58,7 +69,7 @@ describe("QuizPanel", () => {
     expect(await screen.findByText("已加入复习")).toBeInTheDocument();
   });
 
-  it("rates questions and shows a summary once all are rated", async () => {
+  it("grades answers as they are picked and shows a summary once all are answered", async () => {
     mockIpc.ai.getQuiz.mockResolvedValue(
       JSON.stringify([
         { type: "judge", stem: "地球是圆的", answer: true },
@@ -68,18 +79,151 @@ describe("QuizPanel", () => {
     renderQuizPanel();
 
     await screen.findByText("第 1/2 题");
-    // 自评每题：第 1 题答对，第 2 题答错。
-    const firstCorrect = screen.getAllByRole("button", { name: "答对" })[0];
-    fireEvent.click(firstCorrect);
-    expect(screen.getByText("已评 1/2")).toBeInTheDocument();
+    // 第 1 题选「正确」（对），第 2 题也选「正确」（错）。
+    fireEvent.click(screen.getAllByRole("button", { name: "正确" })[0]);
+    expect(screen.getByText("已答 1/2")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "正确" })[1]);
 
-    const secondWrong = screen.getAllByRole("button", { name: "答错" })[1];
-    fireEvent.click(secondWrong);
+    expect(await screen.findByText(/共 2 题，答对 1 题/)).toBeInTheDocument();
+    // 答过的题锁住，不能改选。
+    expect(screen.getAllByRole("button", { name: "错误" })[0]).toBeDisabled();
+    // 重做这套：清掉作答。
+    fireEvent.click(screen.getByRole("button", { name: "重做这套" }));
+    expect(screen.getByText("已答 0/2")).toBeInTheDocument();
+  });
 
-    // 全部自评后出现小结：答对 1 题。
-    expect(await screen.findByText("共 2 题，答对 1 题。")).toBeInTheDocument();
-    // 有答错 → 提供重新自评。
-    expect(screen.getByRole("button", { name: "重新自评" })).toBeInTheDocument();
+  it("explains every option once a choice question is answered", async () => {
+    mockIpc.ai.getQuiz.mockResolvedValue(
+      JSON.stringify([
+        {
+          type: "single",
+          stem: "学习率过大会怎样",
+          options: ["收敛更快", "来回震荡"],
+          answer: "来回震荡",
+          option_notes: ["错：这是把步长和速度混为一谈", "对：步子太大越过谷底"],
+          explanation: "依据：07:10",
+        },
+      ]),
+    );
+    renderQuizPanel();
+
+    const wrong = await screen.findByRole("button", { name: /收敛更快/ });
+    expect(screen.queryByText(/把步长和速度混为一谈/)).not.toBeInTheDocument();
+    fireEvent.click(wrong);
+
+    expect(await screen.findByText(/把步长和速度混为一谈/)).toBeInTheDocument();
+    expect(screen.getByText(/步子太大越过谷底/)).toBeInTheDocument();
+    expect(screen.getByText(/答对 0 题/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /来回震荡/ })).toBeDisabled();
+  });
+
+  it("checks a multiple-choice answer only after submitting the whole selection", async () => {
+    mockIpc.ai.getQuiz.mockResolvedValue(
+      JSON.stringify([
+        { type: "multi", stem: "哪些是正则化", options: ["L1", "L2", "Dropout", "加大学习率"], answer: ["L1", "L2", "Dropout"] },
+      ]),
+    );
+    renderQuizPanel();
+
+    const submit = await screen.findByRole("button", { name: "提交" });
+    expect(submit).toBeDisabled();
+    for (const name of [/L1/, /L2/, /Dropout/]) fireEvent.click(screen.getByRole("button", { name }));
+    expect(screen.getByText("已答 0/1")).toBeInTheDocument();
+    fireEvent.click(submit);
+    expect(await screen.findByText(/共 1 题，答对 1 题/)).toBeInTheDocument();
+  });
+
+  it("peeking at the answer ends the question so it cannot be answered afterwards", async () => {
+    mockIpc.ai.getQuiz.mockResolvedValue(
+      JSON.stringify([{ type: "judge", stem: "地球是圆的", answer: true }]),
+    );
+    renderQuizPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "显示答案" }));
+    expect(await screen.findByText(/答案：/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "正确" })).toBeDisabled();
+    expect(screen.getByText(/共 1 题，答对 0 题/)).toBeInTheDocument();
+  });
+
+  it("sends a written answer for grading and shows the verdict", async () => {
+    const question = {
+      type: "correct",
+      stem: "学习率越大收敛越快。",
+      answer: "学习率过大会震荡甚至发散。",
+      key_points: ["指出越大越快是错的"],
+      ref_ms: 430000,
+    };
+    mockIpc.ai.getQuiz.mockResolvedValue(JSON.stringify([question]));
+    mockIpc.ai.gradeQuizAnswer.mockResolvedValue({
+      verdict: "partial",
+      feedback: "错处找对了，改法不完整",
+      missed: ["说出过大会震荡"],
+    });
+    renderQuizPanel();
+
+    const box = await screen.findByRole("textbox", { name: "指出错在哪，并写出正确的说法" });
+    const submit = screen.getByRole("button", { name: "提交批改" });
+    expect(submit).toBeDisabled();
+    fireEvent.change(box, { target: { value: "不是越大越快" } });
+    fireEvent.click(submit);
+
+    await waitFor(() =>
+      expect(mockIpc.ai.gradeQuizAnswer).toHaveBeenCalledWith(
+        "video-1",
+        expect.objectContaining({ type: "correct", stem: "学习率越大收敛越快。", key_points: ["指出越大越快是错的"] }),
+        "不是越大越快",
+      ),
+    );
+    expect(await screen.findByText("部分正确")).toBeInTheDocument();
+    expect(screen.getByText("说出过大会震荡")).toBeInTheDocument();
+    expect(screen.getByText(/参考答案：/)).toBeInTheDocument();
+    expect(screen.getByText(/部分正确 1 题/)).toBeInTheDocument();
+  });
+
+  it("shows the newest set by default and switches between sets", async () => {
+    mockIpc.ai.getQuiz.mockResolvedValue(
+      JSON.stringify([
+        { type: "judge", stem: "最早的旧题", answer: true },
+        { type: "judge", stem: "新一套的题", answer: true, set_id: "s2", style: "apply", set_at: 1_700_000_000_000 },
+      ]),
+    );
+    renderQuizPanel();
+
+    expect(await screen.findByText("新一套的题")).toBeInTheDocument();
+    expect(screen.queryByText("最早的旧题")).not.toBeInTheDocument();
+    const picker = screen.getByRole("combobox", { name: "选择题目套" });
+    fireEvent.change(picker, { target: { value: "" } });
+    expect(await screen.findByText("最早的旧题")).toBeInTheDocument();
+  });
+
+  it("deletes the shown set after confirming", async () => {
+    mockIpc.ai.getQuiz.mockResolvedValue(
+      JSON.stringify([{ type: "judge", stem: "题", answer: true, set_id: "s1", style: "recall", set_at: 1 }]),
+    );
+    renderQuizPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "删除这套题" }));
+    await waitFor(() => expect(mockIpc.ai.deleteQuizSet).toHaveBeenCalledWith("video-1", "s1"));
+  });
+
+  it("generates a new set with the chosen style and saves this course's rules", async () => {
+    mockIpc.ai.getQuiz.mockResolvedValue(
+      JSON.stringify([{ type: "judge", stem: "题", answer: true }]),
+    );
+    mockIpc.ai.getQuizCourseRules.mockResolvedValue("旧要求");
+    renderQuizPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "再出一套" }));
+    const rules = await screen.findByRole("textbox", { name: "本课程的出题要求" });
+    await waitFor(() => expect(rules).toHaveValue("旧要求"));
+    fireEvent.click(screen.getByRole("radio", { name: /找错改错/ }));
+    fireEvent.change(rules, { target: { value: "多出计算题" } });
+    fireEvent.click(screen.getByRole("button", { name: "出题" }));
+
+    await waitFor(() =>
+      expect(mockIpc.ai.generate).toHaveBeenCalledWith("video-1", "quiz", { style: "correct", append: true }),
+    );
+    expect(mockIpc.ai.setQuizCourseRules).toHaveBeenCalledWith("video-1", "多出计算题");
   });
 
   it("shows and retries an add-to-review failure", async () => {
@@ -204,7 +348,7 @@ describe("QuizPanel", () => {
 
     expect(await screen.findByText("地球是圆的")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "显示答案" }));
-    expect(await screen.findByText(/正确/)).toBeInTheDocument();
+    expect(await screen.findByText(/答案：/)).toHaveTextContent("答案：正确");
   });
 
   it("题目装在自己的滚动区里，而不是被标签页容器裁掉", async () => {
@@ -304,7 +448,13 @@ describe("QuizPanel", () => {
     fireEvent.click(await screen.findByRole("button", { name: "显示答案" }));
     expect(await screen.findByText(/答案：/)).toBeInTheDocument();
 
+    // 有题时「重新生成」打开出题对话框，勾上「替换」就是原来的重新生成。
     fireEvent.click(screen.getByRole("button", { name: "重新生成" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: /替换掉现有的题目/ }));
+    fireEvent.click(screen.getByRole("button", { name: "出题" }));
+    await waitFor(() =>
+      expect(mockIpc.ai.generate).toHaveBeenCalledWith("video-1", "quiz", { style: "apply", append: false }),
+    );
 
     expect(await screen.findByText("新题")).toBeInTheDocument();
     await waitFor(() =>

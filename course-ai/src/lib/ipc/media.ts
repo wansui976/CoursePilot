@@ -1,7 +1,7 @@
 /** 单个视频的处理流水线与产物：任务、讲稿、AI 产物、课件、片段、导出、弹幕评论。 */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { HighlightSegment } from "../types";
+import type { HighlightSegment, QuizGrade, QuizQuestion, QuizStyle } from "../types";
 import type {
   AskEvent,
   Chapter,
@@ -98,8 +98,22 @@ export const ai = {
       ...(apiKey ? { apiKey } : {}),
       refresh,
     }),
-  generate: (videoId: string, task: string): Promise<void> =>
-    invoke("cmd_generate_ai", { videoId, task }),
+  // options 只有出题用：风格、是否接在已有题目后面（「再出一套」）。
+  generate: (
+    videoId: string,
+    task: string,
+    options?: { style?: QuizStyle; append?: boolean },
+  ): Promise<void> =>
+    invoke("cmd_generate_ai", options ? { videoId, task, options } : { videoId, task }),
+  deleteQuizSet: (videoId: string, setId: string): Promise<void> =>
+    invoke("cmd_delete_quiz_set", { videoId, setId }),
+  gradeQuizAnswer: (videoId: string, question: QuizQuestion, answer: string): Promise<QuizGrade> =>
+    invoke("cmd_grade_quiz_answer", { videoId, question, answer }),
+  /** 这个视频所在课程的出题要求（同课程共用）。 */
+  getQuizCourseRules: (videoId: string): Promise<string> =>
+    invoke("cmd_get_quiz_course_rules", { videoId }),
+  setQuizCourseRules: (videoId: string, rules: string): Promise<void> =>
+    invoke("cmd_set_quiz_course_rules", { videoId, rules }),
   getChapters: (videoId: string): Promise<Chapter[]> =>
     invoke("cmd_get_chapters", { videoId }),
   getNotes: (videoId: string): Promise<string | null> =>

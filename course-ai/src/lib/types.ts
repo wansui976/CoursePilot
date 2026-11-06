@@ -248,13 +248,32 @@ export interface Chapter {
 
 export type AiTask = "chapters" | "notes" | "quiz" | "mindmap";
 
+/** 出题风格：记忆巩固 / 理解应用 / 找错改错 / 易混辨析。 */
+export type QuizStyle = "recall" | "apply" | "correct" | "contrast";
+
 export interface QuizQuestion {
-  type: "single" | "multi" | "judge";
+  /** correct：找错改错（题干是一句带错的话，answer 是改正后的说法）；short：简答。 */
+  type: "single" | "multi" | "judge" | "correct" | "short";
   stem: string;
   options?: string[];
   answer: string | string[] | boolean;
   explanation?: string;
   ref_ms?: number;
+  /** 与 options 一一对应：每个选项为什么对 / 错在哪。 */
+  option_notes?: string[];
+  /** 改错 / 简答题的判分要点。 */
+  key_points?: string[];
+  /** 属于哪一套题（旧题库里没有）。 */
+  set_id?: string;
+  style?: QuizStyle;
+  set_at?: number;
+}
+
+/** 改错 / 简答题的判分结果。 */
+export interface QuizGrade {
+  verdict: "correct" | "partial" | "wrong";
+  feedback: string;
+  missed: string[];
 }
 
 export interface Slide {

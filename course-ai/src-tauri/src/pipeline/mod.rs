@@ -21,6 +21,7 @@ pub mod local_asr;
 pub mod media_kind;
 pub mod ocr;
 pub mod playable;
+pub mod quiz;
 pub mod rag;
 pub mod search_terms;
 pub mod sherpa_asr;

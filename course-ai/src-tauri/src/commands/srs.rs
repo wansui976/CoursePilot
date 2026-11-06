@@ -660,7 +660,14 @@ async fn upsert_quiz_card(
         }
     }
     let source_ms = question.get("ref_ms").and_then(|value| value.as_i64());
+    // 卡片 id 仍按题干算（改了说明文字不该变成新卡）。
     let card_id = quiz_card_id(video_id, stem);
+    // 改错题的题干本身是一句错话：卡片正面不点明的话，复习时会把它当成结论记住。
+    let front = if question.get("type").and_then(Value::as_str) == Some("correct") {
+        format!("找出这句话的错误并改正：{stem}")
+    } else {
+        stem.to_string()
+    };
 
     sqlx::query(
         "INSERT INTO cards(id,video_id,course_id,kind,front,back,source_ms,created_at)
@@ -671,7 +678,7 @@ async fn upsert_quiz_card(
     .bind(&card_id)
     .bind(video_id)
     .bind(course_id)
-    .bind(stem)
+    .bind(&front)
     .bind(&back)
     .bind(source_ms)
     .bind(now)

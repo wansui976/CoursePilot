@@ -2,6 +2,10 @@ import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-q
 import { taskMeta } from "@/lib/backgroundTasks";
 import { qk } from "@/lib/queryKeys";
 import { ipc } from "@/lib/ipc";
+import type { QuizStyle } from "@/lib/types";
+
+/** 出题的附加选项：风格、是否接在已有题目后面。其余产物不带。 */
+export type GenerateOptions = { style?: QuizStyle; append?: boolean };
 
 export type GeneratedArtifact = "summary" | "chapters" | "quiz" | "mindmap" | "highlights";
 
@@ -50,10 +54,11 @@ export function useAiGeneration(videoId: string, artifact: GeneratedArtifact) {
     undefined,
   );
 
-  const mutation = useMutation<void, unknown, void>({
+  const mutation = useMutation<void, unknown, GenerateOptions | undefined>({
     mutationKey,
     meta: taskMeta(artifact, { videoId }),
-    mutationFn: () => ipc.ai.generate(videoId, artifact),
+    mutationFn: (options) =>
+      options ? ipc.ai.generate(videoId, artifact, options) : ipc.ai.generate(videoId, artifact),
     gcTime: Infinity,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.artifact(artifact, videoId) });
@@ -63,7 +68,13 @@ export function useAiGeneration(videoId: string, artifact: GeneratedArtifact) {
     },
   });
 
+  // start 不带参数：它常被直接交给 onClick，带参数的话点击事件会被当成选项传下去。
   function start() {
+    startWith(undefined);
+  }
+
+  /** 出题用：带上风格、是否追加一套。 */
+  function startWith(options: GenerateOptions | undefined) {
     if (
       latest?.status === "pending" ||
       starting.has(guardKey) ||
@@ -74,11 +85,12 @@ export function useAiGeneration(videoId: string, artifact: GeneratedArtifact) {
       return;
     }
     starting.add(guardKey);
-    mutation.mutate();
+    mutation.mutate(options);
   }
 
   return {
     start,
+    startWith,
     isPending: latest?.status === "pending",
     isError: latest?.status === "error",
     error: latest?.status === "error" ? latest.error : null,

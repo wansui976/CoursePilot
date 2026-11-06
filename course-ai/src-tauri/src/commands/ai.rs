@@ -229,6 +229,79 @@ pub async fn cmd_get_quiz(
     )
 }
 
+/// 删掉一套题（`set_id` 为空串是旧题库里那批没有套别的题）。全删光了就把题库清空。
+#[tauri::command]
+pub async fn cmd_delete_quiz_set(
+    state: State<'_, AppState>,
+    video_id: String,
+    set_id: String,
+) -> AppResult<()> {
+    let mut tx = state.db.pool.begin().await?;
+    let raw: Option<String> = sqlx::query_scalar("SELECT questions_json FROM quizzes WHERE video_id=?")
+        .bind(&video_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let Some(raw) = raw else { return Ok(()) };
+    match crate::pipeline::quiz::remove_set(&raw, &set_id)? {
+        Some(left) => {
+            sqlx::query("UPDATE quizzes SET questions_json=? WHERE video_id=?")
+                .bind(left)
+                .bind(&video_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        None => {
+            sqlx::query("DELETE FROM quizzes WHERE video_id=?")
+                .bind(&video_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn course_of_video(state: &AppState, video_id: &str) -> AppResult<String> {
+    sqlx::query_scalar::<_, String>("SELECT course_id FROM videos WHERE id=?")
+        .bind(video_id)
+        .fetch_optional(&state.db.pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))
+}
+
+/// 这个视频所在课程的出题要求（同一门课的视频共用一份）。
+#[tauri::command]
+pub async fn cmd_get_quiz_course_rules(state: State<'_, AppState>, video_id: String) -> AppResult<String> {
+    let course_id = course_of_video(&state, &video_id).await?;
+    Ok(crate::commands::settings::get_setting(&state.db, &crate::pipeline::quiz::course_rules_key(&course_id))
+        .await?
+        .unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn cmd_set_quiz_course_rules(
+    state: State<'_, AppState>,
+    video_id: String,
+    rules: String,
+) -> AppResult<()> {
+    let course_id = course_of_video(&state, &video_id).await?;
+    let rules: String = rules.trim().chars().take(2000).collect();
+    crate::commands::settings::set_setting(&state.db, &crate::pipeline::quiz::course_rules_key(&course_id), &rules)
+        .await
+}
+
+/// 改错 / 简答题判分。`question` 是题库里那道题的原始 JSON。
+#[tauri::command]
+pub async fn cmd_grade_quiz_answer(
+    state: State<'_, AppState>,
+    video_id: String,
+    question: serde_json::Value,
+    answer: String,
+) -> AppResult<crate::pipeline::quiz::QuizGrade> {
+    let (provider, model) = provider_for(&state, AiTask::Quiz).await?;
+    crate::pipeline::quiz::grade_answer(&state.db, &provider, &model, &video_id, &question, &answer).await
+}
+
 #[tauri::command]
 pub async fn cmd_get_summary(
     state: State<'_, AppState>,
@@ -347,12 +420,23 @@ pub async fn cmd_get_highlights(
     crate::pipeline::highlights::get_highlights(&state.db, &video_id).await
 }
 
+/// 生成时的附加选项。目前只有出题用：风格，以及是否接在已有题目后面（「再出一套」）。
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateOptions {
+    pub style: Option<String>,
+    #[serde(default)]
+    pub append: bool,
+}
+
 #[tauri::command]
 pub async fn cmd_generate_ai(
     state: State<'_, AppState>,
     video_id: String,
     task: String, // "chapters" | "notes" | "summary" | "quiz" | "mindmap" | "highlights"
+    options: Option<GenerateOptions>,
 ) -> AppResult<()> {
+    let options = options.unwrap_or_default();
     // 精华压缩版不单设模型路由：和摘要一样是「通读讲稿、给出判断」的活，跟摘要用同一个模型。
     if task == "highlights" {
         let _registration = register_ai_generation(&state, &video_id, &task)?;
@@ -379,7 +463,18 @@ pub async fn cmd_generate_ai(
         }
         AiTask::Notes => ai::generate_notes(&db, &provider, &model, &video_id, None).await?,
         AiTask::Summary => ai::generate_summary(&db, &provider, &model, &video_id, None).await?,
-        AiTask::Quiz => ai::generate_quiz(&db, &provider, &model, &video_id, None).await?,
+        AiTask::Quiz => {
+            ai::generate_quiz_with(
+                &db,
+                &provider,
+                &model,
+                &video_id,
+                options.style.as_deref(),
+                options.append,
+                None,
+            )
+            .await?
+        }
         AiTask::Mindmap => ai::generate_mindmap(&db, &provider, &model, &video_id, None).await?,
         AiTask::Rag => {
             return Err(AppError::Other(

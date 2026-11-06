@@ -107,29 +107,100 @@ pub fn note_snippet_request(model: &str, topic: &str, points: &str) -> ChatReque
     }
 }
 
-pub fn quiz_request(model: &str, transcript: &str) -> ChatRequest {
+/// 各出题风格要考什么、出哪些题型。键与 `pipeline::quiz::QuizStyle::id` 一致。
+fn quiz_style_rules(style: &str) -> &'static str {
+    match style {
+        "apply" => "风格：理解应用。出 5-7 道题，题型用 single / multi / judge，可以有 1-2 道 short。\
+                    题干要设置**课上没出现过的新情境**（新例子、新数据、换一个领域的类比），\
+                    但判断依据必须是课上讲过的原理：学生只靠回忆老师的原话答不出来，理解了原理才答得对。\
+                    ref_ms 指向讲这条原理的那一行，explanation 说明怎样用这条原理推出答案。",
+        "correct" => "风格：找错改错。出 4-6 道 correct 题，再加 1-2 道 judge。\
+                      correct 的题干是一段**只含一处错误**的陈述，错误要是学这部分时真会犯的：\
+                      概念混淆、条件遗漏、因果颠倒、公式或步骤用错、把特例当通例。不要错在错别字或无关细节上。\
+                      answer 写改正后的完整说法；key_points 写 1-3 条判分要点（错在哪、应改成什么）；\
+                      explanation 一句话说明错因。",
+        "contrast" => "风格：易混辨析。出 5-7 道题，题型用 single / multi / judge。\
+                       每道题围绕课上一组容易混淆的概念、条件或方法，问在具体情形下该用哪个、两者差在哪；\
+                       干扰项就是它的「近亲」。",
+        // recall：记忆巩固
+        _ => "风格：记忆巩固。出 5-8 道题，题型用 single / multi / judge，覆盖不同章节，\
+              考定义、结论、条件和步骤的准确理解；题干尽量给具体情境，问该怎么判断或怎么处理。",
+    }
+}
+
+/// 出题。`style` 见 [`quiz_style_rules`]；`extra` 是用户写的出题要求（全局 + 本课程），可为空。
+pub fn quiz_request(model: &str, transcript: &str, style: &str, extra: &str) -> ChatRequest {
+    let extra = extra.trim();
+    let extra = if extra.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\n用户的出题要求（优先满足；但不能违反上面的输出格式，也不能出讲稿依据不了的题）：\n{extra}"
+        )
+    };
+    let user = format!(
+        "{style_rules}\n\n\
+         输出 JSON 数组，每项字段：\
+         type（single 单选 | multi 多选 | judge 判断 | correct 找错改错 | short 简答）、stem 题干、\
+         options（只有 single / multi 有，字符串数组）、\
+         answer（single 为选项原文字符串，multi 为选项原文数组，judge 为 true 或 false，correct / short 为一段文字）、\
+         option_notes（只有 single / multi 有，与 options 一一对应，每项一句：对的为什么对，错的错在哪、对应哪种误解）、\
+         key_points（只有 correct / short 有，1-3 条判分要点）、\
+         explanation（一句话，指出依据在讲稿的哪个说法上；不要复述题干，不要展开教学）、\
+         ref_ms（依据所在讲稿行的毫秒时间，照抄，不要编造）。\n\
+         要求：\
+         1. 每道题的答案都必须能从讲稿推出来；讲稿依据不了的题不要出。\
+         2. 干扰项要「像真的」：是学这部分时真会产生的误解或易混点（可以不是老师原话，但讲稿内容要能判它错）；\
+            和正确项长短、句式、专业程度相近；不要用「以上都对 / 以上都不对」，不要只有错误项带「一定、总是、从不」这类绝对词；\
+            正确项的位置要分散。造不出像样干扰项的考点，改出判断题或跳过——不要编一眼能排除的选项凑数。\
+         3. single 至少 4 个选项；multi 有 2 个及以上正确项；judge、correct、short 不要给 options。\
+         4. answer 必须与 options 完全一致（用选项原文，不要用字母 A/B/C）。\
+         5. 题干、选项、解析里的{formula}JSON 字符串里的反斜杠要写成两个（\\\\）。{extra}",
+        style_rules = quiz_style_rules(style),
+        formula = formula_rule!(),
+    );
     base(
         "quiz",
         model,
-        "你是应试类网课的出题助手。只输出 JSON 数组，不要解释或代码围栏。",
+        "你是网课的出题助手，出的题要逼学生动脑，而不是只考记不记得老师说过什么。只输出 JSON 数组，不要解释或代码围栏。",
         transcript,
-        concat!(
-            "紧扣视频真正讲到的考点出 5-8 道题，覆盖不同章节。输出 JSON 数组，每项 \
-         {\"type\":\"single\"|\"multi\"|\"judge\",\"stem\":题干,\
-         \"options\":[字符串...],\"answer\":单选为字符串/多选为字符串数组/判断为 true|false,\
-         \"explanation\":一句话说明依据,\"ref_ms\":该考点在讲稿里的毫秒时间}。要求：\
-         1. 考「会不会用」，不考「记不记得住」：题干给一个具体情境，问该怎么判断或怎么处理。\
-         2. 干扰项必须是**老师明确讲过的易混点**；讲稿里没提到的混淆点不要造。\
-            造不出合格干扰项的考点，改出判断题，或者跳过——不要为了凑题数编一眼能排除的选项。\
-         3. single 至少 4 个选项；multi 有 2 个及以上正确项；judge 不要给 options。\
-         4. answer 必须与 options 完全一致（用选项原文，不要用字母 A/B/C）。\
-         5. explanation 只写一句：指出依据在讲稿的哪个说法上。不要复述题干，不要展开教学。\
-         6. ref_ms 取自相关讲稿行的毫秒时间，不要编造。\
-         7. 题干、选项、解析里的",
-            formula_rule!(),
-            "JSON 字符串里的反斜杠要写成两个（\\\\）。"
-        ),
+        &user,
     )
+}
+
+/// 给改错 / 简答题判分。`excerpt` 是题目依据附近的讲稿（可为空）。
+pub fn quiz_grade_request(model: &str, kind: &str, question: &str, reference: &str, key_points: &[String], explanation: &str, excerpt: &str, answer: &str) -> ChatRequest {
+    let task = if kind == "correct" {
+        "这是一道找错改错题：学生要指出题干里那处错误，并给出正确说法。没指出真正的错处就是 wrong；\
+         指出了错处但改得不对或不完整是 partial。"
+    } else {
+        "这是一道简答题：按判分要点看学生答到了几条。全答到是 correct，答到一部分是 partial，没答到或说错是 wrong。"
+    };
+    let points = if key_points.is_empty() {
+        "（无，按参考答案判）".to_string()
+    } else {
+        key_points.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n")
+    };
+    let excerpt = if excerpt.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n\n课程原文（判分以此为准）：\n{excerpt}")
+    };
+    ChatRequest {
+        model: model.to_string(),
+        system: Some(
+            "你是阅卷老师。只依据题目、参考答案和课程原文判分；意思对就算对，不抠字眼和措辞。只输出 JSON，不要代码围栏。".into(),
+        ),
+        cacheable_context: None,
+        messages: vec![ChatMessage::user(format!(
+            "{task}\n\n题目：{question}\n参考答案：{reference}\n判分要点：\n{points}\n解析：{explanation}{excerpt}\n\n学生的回答：{answer}\n\n\
+             输出 {{\"verdict\":\"correct\"|\"partial\"|\"wrong\",\"feedback\":\"一两句：对在哪、错在哪\",\"missed\":[\"没答到或答错的要点\"]}}。\
+             feedback 直接对学生说，不要复述题目；答对了 missed 给空数组。"
+        ))],
+        temperature: 0.0,
+        tools: Vec::new(),
+        label: "quiz_grade",
+    }
 }
 
 pub fn mindmap_request(model: &str, transcript: &str) -> ChatRequest {
@@ -321,7 +392,7 @@ mod tests {
         for req in [
             chapters_request("m", t),
             notes_request("m", t),
-            quiz_request("m", t),
+            quiz_request("m", t, "recall", ""),
             mindmap_request("m", t),
             summary_request("m", t),
         ] {
@@ -352,14 +423,31 @@ mod tests {
 
     #[test]
     fn quiz_prompt_would_rather_skip_than_pad() {
-        let req = quiz_request("m", "[00:01] 讲了两个易混概念");
+        let req = quiz_request("m", "[00:01] 讲了两个易混概念", "recall", "");
         let user = &req.messages[0].content;
-        // 干扰项必须来自老师讲过的易混点；造不出来就降级或跳过，
-        // 不要为了凑题数编一眼能排除的选项——那种题既费 token 又没有复习价值。
-        assert!(user.contains("老师明确讲过的易混点"));
+        // 造不出像样的干扰项就降级或跳过，不要为了凑题数编一眼能排除的选项。
+        assert!(user.contains("一眼能排除"));
         assert!(user.contains("跳过"));
-        // 解析收成一句话，这是输出侧最大的一笔。
-        assert!(user.contains("只写一句"));
+        // 答案必须能从讲稿推出来——放宽干扰项来源之后，这条是防编造的底线。
+        assert!(user.contains("必须能从讲稿推出来"));
+        // 每个选项各一句解析，答错时告诉学生错在哪。
+        assert!(user.contains("option_notes"));
+        assert!(!user.contains("用户的出题要求"), "没写要求时不该出现这一段");
+    }
+
+    #[test]
+    fn quiz_styles_and_user_rules_reach_the_prompt() {
+        let apply = quiz_request("m", "t", "apply", "");
+        assert!(apply.messages[0].content.contains("课上没出现过的新情境"));
+        let fix = quiz_request("m", "t", "correct", "");
+        assert!(fix.messages[0].content.contains("只含一处错误"));
+        let contrast = quiz_request("m", "t", "contrast", "");
+        assert!(contrast.messages[0].content.contains("易混辨析"));
+        let custom = quiz_request("m", "t", "recall", "多出计算题\n按考研真题风格");
+        let user = &custom.messages[0].content;
+        assert!(user.contains("用户的出题要求"));
+        assert!(user.contains("多出计算题"));
+        assert!(user.contains("不能违反上面的输出格式"));
     }
 
     #[test]
@@ -438,7 +526,7 @@ mod tests {
     #[test]
     fn study_material_prompts_ask_for_latex_formulas() {
         let notes = notes_request("m", "t");
-        let quiz = quiz_request("m", "t");
+        let quiz = quiz_request("m", "t", "recall", "");
         let summary = summary_request("m", "t");
         let snippet = note_snippet_request("m", "topic", "points");
         for text in [

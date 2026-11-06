@@ -628,18 +628,65 @@
     "addedToReview": "Added to review",
     "addingToReview": "Adding…",
     "addToReview": "Add to daily review",
-    "hideAnswer": "Hide answer",
     "showAnswer": "Show answer",
     "answerLabel": "Answer: ",
     "jumpTo": "▶ Jump to {{time}}",
     "progress": "Question {{current}}/{{total}}",
-    "ratedCount": "Rated {{count}}/{{total}}",
-    "selfCorrect": "Correct",
-    "selfWrong": "Wrong",
-    "selfSkip": "Skip",
     "summaryTitle": "Practice complete",
-    "summaryDetail": "{{total}} questions, {{correct}} correct.",
-    "retrySelfReview": "Re-rate"
+    "summaryDetail": "{{correct}} of {{total}} correct",
+    "answeredCount": "Answered {{count}}/{{total}}",
+    "summaryPartial": ", {{partial}} partly correct",
+    "retrySet": "Redo this set",
+    "styles": {
+      "recall": "Recall",
+      "apply": "Apply",
+      "correct": "Find the error",
+      "contrast": "Tell apart"
+    },
+    "styleHints": {
+      "recall": "Definitions, conclusions and steps from the lecture",
+      "apply": "New situations not shown in class, judged with what you learned",
+      "correct": "A statement with one mistake: find it and fix it",
+      "contrast": "Concepts that are easy to mix up, side by side"
+    },
+    "types": {
+      "single": "Single",
+      "multi": "Multiple",
+      "judge": "True/False",
+      "correct": "Fix the error",
+      "short": "Short answer"
+    },
+    "setLabel": "{{style}} · {{time}} · {{count}} questions",
+    "legacySet": "First set · {{count}} questions",
+    "setPicker": "Choose a question set",
+    "newSet": "New set",
+    "generating": "Generating…",
+    "deleteSet": "Delete this set",
+    "deleteSetConfirm": "Delete this set ({{count}} questions)? Cards already added to daily review stay.",
+    "optionsLabel": "Options",
+    "submit": "Submit",
+    "submitGrade": "Submit for grading",
+    "grading": "Grading…",
+    "placeholders": {
+      "correct": "Say what is wrong and write the correct statement",
+      "short": "Write your answer"
+    },
+    "verdict": {
+      "correct": "Correct",
+      "partial": "Partly correct",
+      "wrong": "Not yet"
+    },
+    "referenceLabel": "Reference answer: ",
+    "dialog": {
+      "title": "Generate a new set",
+      "styleLabel": "Question style",
+      "courseRules": "Requirements for this course",
+      "courseRulesPlaceholder": "e.g. more calculation questions; exam-style wording",
+      "courseRulesHint": "Only applies to this course; requirements for every course live in Settings → Study.",
+      "replace": "Replace the existing questions (by default the new set is added and old ones are kept)",
+      "cancel": "Cancel",
+      "start": "Generate"
+    }
   },
   "summary": {
     "expandTitle": "Expand summary",
@@ -894,6 +941,15 @@
       "tourHint": "Tips on each page show only once. Bring them back here.",
       "tourReset": "Show again",
       "tourResetDone": "Reset — they'll show again when you open each page."
+    },
+    "quiz": {
+      "title": "Quizzes",
+      "defaultStyle": "Default question style",
+      "defaultStyleHint": "Used when questions are generated automatically after processing; you can pick another with “New set” in the quiz panel.",
+      "prompt": "Question requirements (all courses)",
+      "promptHint": "Sent with every quiz request and followed first. For a single course, write them under “New set” in the quiz panel.",
+      "promptPlaceholder": "e.g. more questions that need reasoning; no options that are obviously wrong",
+      "saved": "Saved"
     }
   },
   "assistant": {

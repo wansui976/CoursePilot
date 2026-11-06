@@ -351,7 +351,44 @@ export function installMockIpc({ theme, safeArea }) {
     cmd_capture_frame: ({ videoId, atMs }) => ({ id: 1, video_id: videoId, image_path: `/shots/${atMs}.jpg`, at_ms: atMs, created_at: now }),
     cmd_read_slide_image: ({ videoId }) => cover(videoId),
     cmd_capture_frame_image: ({ videoId }) => cover(videoId),
-    cmd_get_quiz: () => null,
+    // __shot-quiz：两套题（最初的一套 + 理解应用），覆盖单选、多选、判断、改错、简答。
+    cmd_get_quiz: () =>
+      localStorage.getItem("__shot-quiz") === "1"
+        ? JSON.stringify([
+            { type: "judge", stem: "梯度下降每一步都沿负梯度方向更新参数。", answer: true, explanation: "讲稿：沿着负梯度的方向走一小步。", ref_ms: 180000 },
+            {
+              type: "single", set_id: "s2", style: "apply", set_at: now - 3_600_000,
+              stem: "训练一个房价模型时，损失曲线前几轮大幅上下跳动、始终降不下去。最可能的原因和处理是：",
+              options: ["数据量太少，应该先多收集数据", "学习率过大，在谷底两侧来回越过，应调小学习率", "模型太简单，应该加深网络", "迭代轮数不够，应该多训练几轮"],
+              answer: "学习率过大，在谷底两侧来回越过，应调小学习率",
+              option_notes: ["错：数据少会过拟合，但不会让损失上下跳动", "对：步长太大会越过最低点，在两侧来回震荡", "错：模型简单是欠拟合，损失会降得慢而不是来回跳", "错：震荡时多训练也降不下去，问题在步长"],
+              explanation: "依据：07:10 老师讲学习率过大会在谷底两侧震荡。", ref_ms: 430000,
+            },
+            {
+              type: "multi", set_id: "s2", style: "apply", set_at: now - 3_600_000,
+              stem: "下面哪些做法能缓解上题的震荡？",
+              options: ["把学习率调小", "使用学习率衰减", "增大批量大小", "把学习率调大"],
+              answer: ["把学习率调小", "使用学习率衰减", "增大批量大小"],
+              option_notes: ["对：直接缩小步长", "对：先大步后小步，后期稳定", "对：梯度估计更稳，抖动更小", "错：步长更大只会震荡得更厉害"],
+              explanation: "依据：08:20 学习率与批量的讨论。", ref_ms: 500000,
+            },
+            {
+              type: "correct", set_id: "s2", style: "apply", set_at: now - 3_600_000,
+              stem: "学习率越大，梯度下降收敛得越快。",
+              answer: "学习率过大反而会震荡甚至发散；学习率太小才是收敛慢。",
+              key_points: ["指出「越大越快」是错的", "说出过大会震荡或发散"],
+              explanation: "依据：07:10。", ref_ms: 430000,
+            },
+            {
+              type: "short", set_id: "s2", style: "apply", set_at: now - 3_600_000,
+              stem: "为什么特征尺度差别很大时，梯度下降会走「之」字形？",
+              answer: "各方向曲率差别大，等高线呈细长椭圆，梯度方向偏向陡的一侧，来回折返。",
+              key_points: ["等高线细长", "梯度方向不指向最低点"], ref_ms: 610000,
+            },
+          ])
+        : null,
+    cmd_get_quiz_course_rules: () => "多出需要计算的题；题干用中文",
+    cmd_grade_quiz_answer: () => ({ verdict: "partial", feedback: "错处找对了：不是越大越快。但还要说出过大会怎样。", missed: ["学习率过大会震荡甚至发散"] }),
     cmd_get_mindmap: () => mindmap,
     cmd_stale_ai_artifacts: () => [],
     cmd_get_slides: () => [],

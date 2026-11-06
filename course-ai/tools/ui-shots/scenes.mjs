@@ -656,4 +656,28 @@ export const scenes = [
       await shot();
     },
   },
+  {
+    // 练习：作答、逐项解析、改错题判分、「再出一套」对话框。
+    name: "quiz",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-quiz", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openVideo(page);
+      await page.getByRole("tab", { name: /更多/ }).click();
+      await page.getByText(/损失曲线前几轮/).waitFor({ timeout: 5000 });
+      await shot();
+      await page.getByRole("button", { name: /数据量太少/ }).click();
+      await shot("answered");
+      const box = page.getByRole("textbox", { name: "指出错在哪，并写出正确的说法" });
+      await box.scrollIntoViewIfNeeded();
+      await box.fill("不是越大越快，太大反而不好");
+      await page.getByRole("button", { name: "提交批改" }).first().click();
+      await page.getByText("部分正确").first().waitFor({ timeout: 3000 });
+      await shot("graded");
+      await page.getByRole("button", { name: "再出一套" }).click();
+      await page.getByRole("dialog").waitFor();
+      await shot("new-set");
+    },
+  },
 ];
