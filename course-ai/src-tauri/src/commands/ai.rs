@@ -154,6 +154,12 @@ pub async fn cmd_list_models(
     crate::llm::models::list(&state.db, &profile, api_key, refresh.unwrap_or(false)).await
 }
 
+/// 本机 Ollama 检测：在跑就返回已装的模型名（可能为空列表），没在跑返回 None。
+#[tauri::command]
+pub async fn cmd_detect_ollama() -> AppResult<Option<Vec<String>>> {
+    Ok(crate::llm::models::detect_local_ollama().await)
+}
+
 // ---------- read AI products ----------
 
 #[derive(Serialize, sqlx::FromRow)]

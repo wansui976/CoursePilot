@@ -1,7 +1,7 @@
 import "@/i18n";
 import "@testing-library/jest-dom/vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   LlmSettingsPanel,
   type LlmSettingsActions,
@@ -15,6 +15,7 @@ const { mockIpc } = vi.hoisted(() => ({
       setApiKey: vi.fn(),
       hasApiKey: vi.fn(),
       listModels: vi.fn(),
+      detectOllama: vi.fn(),
     },
     settings: { get: vi.fn() },
   },
@@ -62,6 +63,49 @@ describe("LlmSettingsPanel", () => {
       source: "live",
     });
     mockIpc.settings.get.mockResolvedValue(null);
+    mockIpc.ai.detectOllama.mockReset().mockResolvedValue(null);
+  });
+
+  it("detects a running local Ollama and adds it in one click, picking a chat model", async () => {
+    mockIpc.ai.detectOllama.mockResolvedValue(["nomic-embed-text:latest", "qwen2.5:7b"]);
+    render(<LlmSettingsPanel />);
+
+    const banner = await screen.findByText(/检测到本机正在运行的 Ollama，已装 2 个模型/);
+    expect(banner).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "添加本机 Ollama" }));
+
+    const names = screen.getAllByLabelText("配置名称");
+    expect(names[names.length - 1]).toHaveValue("Ollama（本机）");
+    const models = screen.getAllByLabelText("模型名");
+    // 嵌入模型不能聊天：跳过 nomic-embed-text，默认选 qwen2.5:7b。
+    expect(models[models.length - 1]).toHaveValue("qwen2.5:7b");
+    expect(screen.getAllByLabelText("Base URL").at(-1)).toHaveValue("http://127.0.0.1:11434");
+    // 加上之后提示就收起，不再重复劝。
+    expect(screen.queryByText(/检测到本机正在运行的 Ollama/)).not.toBeInTheDocument();
+  });
+
+  it("says how to pull a model when Ollama is running but empty", async () => {
+    mockIpc.ai.detectOllama.mockResolvedValue([]);
+    render(<LlmSettingsPanel />);
+    expect(await screen.findByText(/还没有下载模型/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "添加本机 Ollama" })).not.toBeInTheDocument();
+  });
+
+  it("does not mention Ollama when it is not running or already configured", async () => {
+    render(<LlmSettingsPanel />);
+    await screen.findByLabelText("配置名称");
+    await waitFor(() => expect(mockIpc.ai.detectOllama).toHaveBeenCalled());
+    expect(screen.queryByText(/检测到本机/)).not.toBeInTheDocument();
+
+    mockIpc.ai.detectOllama.mockResolvedValue(["qwen2.5:7b"]);
+    mockIpc.ai.getProfiles.mockResolvedValue([
+      { id: "o1", name: "我的 Ollama", kind: "ollama", base_url: "http://127.0.0.1:11434", model: "qwen2.5:7b" },
+    ]);
+    cleanup();
+    render(<LlmSettingsPanel />);
+    await screen.findByDisplayValue("我的 Ollama");
+    await waitFor(() => expect(mockIpc.ai.detectOllama).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/检测到本机正在运行的 Ollama/)).not.toBeInTheDocument();
   });
 
   it("labels every profile input for accessibility", async () => {

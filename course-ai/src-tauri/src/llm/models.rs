@@ -316,6 +316,31 @@ async fn fetch_ollama(http: &reqwest::Client, profile: &LlmProfile) -> AppResult
     Ok(parse_ollama_models(&value))
 }
 
+/// 本机默认地址上的 Ollama 在不在跑、装了哪些模型。没在跑（连不上、超时、不是 Ollama）返回 None。
+///
+/// 只探 127.0.0.1:11434 这一个默认地址、1.5 秒超时：这是打开设置页时顺手做的检测，
+/// 不能让没装 Ollama 的人干等。手机上不探——Ollama 跑在电脑上，手机的本机地址上不会有它。
+pub async fn detect_local_ollama() -> Option<Vec<String>> {
+    if matches!(std::env::consts::OS, "ios" | "android") {
+        return None;
+    }
+    detect_ollama_at(LOCAL_OLLAMA).await
+}
+
+async fn detect_ollama_at(base: &str) -> Option<Vec<String>> {
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(1500))
+        .no_proxy()
+        .build()
+        .ok()?;
+    let value = get_json(http.get(format!("{base}/api/tags")), "Ollama").await.ok()?;
+    // 不是 Ollama 的服务碰巧占了这个端口：没有 models 数组就当没检测到。
+    value.get("models")?.as_array()?;
+    Some(parse_ollama_models(&value).into_iter().map(|model| model.id).collect())
+}
+
+pub const LOCAL_OLLAMA: &str = "http://127.0.0.1:11434";
+
 async fn fetch_azure(
     http: &reqwest::Client,
     profile: &LlmProfile,
@@ -575,6 +600,57 @@ fn enrich_all(profile: &LlmProfile, provided: Vec<Provided>) -> Vec<ModelInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 回一段固定 HTTP 响应的一次性本机服务，返回它的地址。
+    async fn serve_once(status: &'static str, body: &'static str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = [0u8; 2048];
+                let _ = socket.read(&mut buf).await;
+                let reply = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(reply.as_bytes()).await;
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn a_running_ollama_reports_its_installed_models() {
+        let base = serve_once(
+            "200 OK",
+            r#"{"models":[{"name":"qwen2.5:7b"},{"name":"nomic-embed-text:latest"}]}"#,
+        )
+        .await;
+        assert_eq!(
+            detect_ollama_at(&base).await,
+            Some(vec!["qwen2.5:7b".to_string(), "nomic-embed-text:latest".to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn ollama_running_without_models_is_still_detected() {
+        let base = serve_once("200 OK", r#"{"models":[]}"#).await;
+        assert_eq!(detect_ollama_at(&base).await, Some(Vec::new()));
+    }
+
+    #[tokio::test]
+    async fn something_else_on_the_port_or_nothing_at_all_is_not_ollama() {
+        let base = serve_once("200 OK", r#"{"hello":"world"}"#).await;
+        assert_eq!(detect_ollama_at(&base).await, None);
+        let base = serve_once("404 Not Found", "").await;
+        assert_eq!(detect_ollama_at(&base).await, None);
+        // 端口上没人听：连不上就是没在跑。
+        let free = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = free.local_addr().unwrap();
+        drop(free);
+        assert_eq!(detect_ollama_at(&format!("http://{addr}")).await, None);
+    }
 
     #[test]
     fn openai_lists_parse_ids_and_rich_metadata() {

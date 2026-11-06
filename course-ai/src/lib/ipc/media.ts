@@ -87,6 +87,8 @@ export const ai = {
     invoke("cmd_set_api_key", { profileId, apiKey }),
   hasApiKey: (profileId: string): Promise<boolean> =>
     invoke("cmd_has_api_key", { profileId }),
+  /** 本机默认地址上的 Ollama：在跑就给出已装的模型名（可能为空），没在跑为 null。 */
+  detectOllama: (): Promise<string[] | null> => invoke("cmd_detect_ollama"),
   /** 按协议拉取模型列表（带内置目录元数据与 24h 缓存）；`apiKey` 用于还没保存的草稿。 */
   listModels: (
     profile: LlmProfile,

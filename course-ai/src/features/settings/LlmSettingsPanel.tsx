@@ -141,6 +141,8 @@ export function LlmSettingsPanel({
   const [saving, setSaving] = useState(false);
   const [presetKey, setPresetKey] = useState("custom");
   const [modelState, setModelState] = useState<Record<string, ModelState>>({});
+  // 本机 Ollama 检测结果：null = 没检测到（或还没检测完）。
+  const [localOllama, setLocalOllama] = useState<string[] | null>(null);
   const savedDraftRef = useRef<LlmDraft | null>(null);
   const currentDraft = useMemo(
     () => makeDraft(profiles, keys, activeId, manualRouting),
@@ -230,6 +232,40 @@ export function LlmSettingsPanel({
       });
     }
     setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  }
+
+  // 打开设置时顺手看一眼本机有没有 Ollama 在跑。很多人已经用 Ollama 拉好了模型，
+  // 却不知道这里能直接接上；检测到了就给一个一键添加，省得自己去查地址、填模型名。
+  useEffect(() => {
+    let cancelled = false;
+    void ipc.ai
+      .detectOllama()
+      .then((models) => {
+        if (!cancelled) setLocalOllama(models);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function addLocalOllama(models: string[]) {
+    clearSaveFeedback();
+    const preset = presetFor("ollama");
+    const id = uid();
+    // 嵌入模型（nomic-embed-text 之类）不能聊天，默认挑第一个不是嵌入的。
+    const chat = models.find((name) => !/embed/i.test(name)) ?? models[0] ?? preset.model;
+    const profile: LlmProfile = {
+      id,
+      name: t("llmSettings.localOllamaName"),
+      kind: "ollama",
+      base_url: preset.base_url,
+      model: chat,
+      key_required: false,
+    };
+    setProfiles((ps) => [...ps, profile]);
+    setActiveId((current) => current ?? id);
+    void fetchModels(profile, false);
   }
 
   function add() {
@@ -456,6 +492,24 @@ export function LlmSettingsPanel({
           {t("llmSettings.add")}
         </Button>
       </div>
+      {localOllama && !profiles.some((profile) => profile.kind === "ollama") && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-xs text-[var(--text-normal)]"
+        >
+          <span className="min-w-0 flex-1 leading-relaxed">
+            {localOllama.length > 0
+              ? t("llmSettings.localOllamaFound", { count: localOllama.length })
+              : t("llmSettings.localOllamaNoModels")}
+          </span>
+          {localOllama.length > 0 && (
+            <Button size="sm" variant="outline" onClick={() => addLocalOllama(localOllama)}>
+              <Plus className="h-3.5 w-3.5" />
+              {t("llmSettings.localOllamaAdd")}
+            </Button>
+          )}
+        </div>
+      )}
       {loadError && (
         <p
           role="alert"

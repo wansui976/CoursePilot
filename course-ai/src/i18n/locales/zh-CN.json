@@ -1510,7 +1510,11 @@
     "deleteConfirm": "删除配置「{{name}}」？",
     "deleteTitle": "删除 LLM 配置",
     "deleteLabel": "删除",
-    "cancel": "取消"
+    "cancel": "取消",
+    "localOllamaName": "Ollama（本机）",
+    "localOllamaFound": "检测到本机正在运行的 Ollama，已装 {{count}} 个模型，可以直接用，不用重新下载、也不用填 Key。",
+    "localOllamaNoModels": "检测到本机的 Ollama，但还没有下载模型。在终端运行 ollama pull qwen2.5:7b 之类的命令拉一个模型后，再回来添加。",
+    "localOllamaAdd": "添加本机 Ollama"
   },
   "devConsole": {
     "back": "返回",

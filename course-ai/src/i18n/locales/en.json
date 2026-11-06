@@ -1519,7 +1519,12 @@
     "deleteConfirm": "Delete profile \"{{name}}\"?",
     "deleteTitle": "Delete LLM Profile",
     "deleteLabel": "Delete",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "localOllamaName": "Ollama (this computer)",
+    "localOllamaFound_one": "Ollama is running on this computer with {{count}} model installed. Use it directly — no re-download, no API key.",
+    "localOllamaFound_other": "Ollama is running on this computer with {{count}} models installed. Use them directly — no re-download, no API key.",
+    "localOllamaNoModels": "Ollama is running on this computer but has no models yet. Run something like `ollama pull qwen2.5:7b` in a terminal, then come back to add it.",
+    "localOllamaAdd": "Add local Ollama"
   },
   "devConsole": {
     "back": "Back",
