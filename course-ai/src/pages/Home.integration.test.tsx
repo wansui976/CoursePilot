@@ -41,6 +41,7 @@ const { mockIpc } = vi.hoisted(() => ({
       saveProfiles: vi.fn(),
       setApiKey: vi.fn(),
       hasApiKey: vi.fn(),
+      detectOllama: vi.fn(),
       buildEmbeddings: vi.fn(),
       ragQuery: vi.fn(),
       getChapters: vi.fn(),
@@ -276,6 +277,7 @@ describe("Home selected-video integration", () => {
     mockIpc.ai.saveProfiles.mockResolvedValue(undefined);
     mockIpc.ai.setApiKey.mockResolvedValue(undefined);
     mockIpc.ai.hasApiKey.mockResolvedValue(false);
+    mockIpc.ai.detectOllama.mockResolvedValue(null);
     mockIpc.slides.list.mockResolvedValue([]);
     mockIpc.slides.screenshots.mockResolvedValue([]);
     mockIpc.srs.weakConcepts.mockResolvedValue([]);
