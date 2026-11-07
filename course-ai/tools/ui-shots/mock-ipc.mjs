@@ -368,6 +368,31 @@ export function installMockIpc({ theme, safeArea }) {
       });
       videos.sort((a, b) => a.order_index - b.order_index);
     },
+    // 搜索：标题子串 + 一条写死的笔记命中 + 两条文稿命中（演示「也搜文稿」打开后的样子）。
+    cmd_search_course: ({ courseId, folderId, query }) => {
+      if (courseId !== "c1") return { hits: [], transcripts_included: true };
+      const scope = (video) => !folderId || !withFolders() || video.folder_id === folderId;
+      const q = query.toLowerCase();
+      const hits = videos.filter(scope).flatMap((video) => {
+        const titleMatch = video.title.toLowerCase().includes(q);
+        const note = video.id === "v2" && "梯度".includes(q) ? "…最小二乘也可以用梯度下降来解，学习率选得太大会发散…" : null;
+        const lines =
+          video.id === "v3" && q === "梯度"
+            ? [
+                { start_ms: 63_000, snippet: "梯度就是函数在当前点增长最快的方向" },
+                { start_ms: 245_000, snippet: "所以我们沿着负梯度方向走一小步" },
+              ]
+            : [];
+        if (!titleMatch && !note && !lines.length) return [];
+        return [{
+          video_id: video.id, title: video.title, folder_id: withFolders() ? video.folder_id : null,
+          title_match: titleMatch, note_snippet: note, transcript_hits: lines,
+          transcript_count: lines.length ? 7 : 0,
+        }];
+      });
+      hits.sort((a, b) => Number(b.title_match) - Number(a.title_match));
+      return { hits, transcripts_included: true };
+    },
     cmd_list_videos: ({ courseId }) =>
       courseId === "c1"
         ? videos.map((video) => (withFolders() ? video : { ...video, folder_id: null }))

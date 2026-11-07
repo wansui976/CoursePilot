@@ -1000,6 +1000,12 @@
       "promptHint": "Sent with every quiz request and followed first. For a single course, write them under “New set” in the quiz panel.",
       "promptPlaceholder": "e.g. more questions that need reasoning; no options that are obviously wrong",
       "saved": "Saved"
+    },
+    "search": {
+      "title": "Course search",
+      "footnote": "The search box on the course page looks through video titles and notes in the current folder and all folders under it.",
+      "transcripts": "Also search transcripts",
+      "transcriptsHint": "Include subtitle transcripts; clicking a result jumps to that line. Every lecture that mentions the word will match, so expect many more results."
     }
   },
   "assistant": {
@@ -1801,6 +1807,19 @@
     "done": "Done",
     "deleteSelected": "Delete selected",
     "deleteSelectedConfirm": "Delete the {{count}} selected items?\n{{videos}} videos will move to the recycle bin and can be restored within 30 days; selected folders are deleted together with their subfolders."
+  },
+  "search": {
+    "results": "Search results",
+    "inNotes": "Notes",
+    "jumpTo": "Jump to {{time}} in {{title}}",
+    "moreInTranscript": "{{count}} more in the transcript",
+    "searching": "Searching",
+    "placeholder": "Search titles and notes",
+    "placeholderAll": "Search titles, notes and transcripts",
+    "placeholderInFolder": "Search titles and notes in “{{name}}”",
+    "placeholderInFolderAll": "Search titles, notes and transcripts in “{{name}}”",
+    "noMatch": "No title or note mentions “{{query}}”. To search transcripts too, turn on “Also search transcripts” in Settings → Study.",
+    "noMatchAll": "No title, note or transcript mentions “{{query}}”."
   },
   "shareCard": {
     "tagline": "Turn course videos into something you remember",

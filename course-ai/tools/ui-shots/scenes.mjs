@@ -157,6 +157,19 @@ export const scenes = [
     },
   },
   {
+    // 课程页搜索：标题命中在前，笔记 / 文稿命中带上下文和时间点，关键词高亮。
+    name: "search",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-folders", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openCourse(page);
+      await page.getByLabel("搜索本课程视频").fill("梯度");
+      await page.getByRole("list", { name: "搜索结果" }).waitFor();
+      await shot();
+    },
+  },
+  {
     // 拖着视频悬停在文件夹上：文件夹卡描边高亮。
     name: "folder-drop",
     run: async ({ page, shot }) => {

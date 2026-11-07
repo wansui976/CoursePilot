@@ -14,6 +14,7 @@ pub mod note_history;
 pub mod note_images;
 pub mod notify;
 pub mod rag;
+pub mod search;
 pub mod settings;
 pub mod silence;
 pub mod slides;

@@ -71,6 +71,25 @@ export interface Folder {
   updated_at: number;
 }
 
+/** 课程搜索的一条结果：一个视频，以及它在标题 / 笔记 / 文稿里的命中。 */
+export interface SearchHit {
+  video_id: string;
+  title: string;
+  folder_id: string | null;
+  title_match: boolean;
+  /** 笔记里第一处命中的上下文（已去掉 Markdown 符号）；没命中为 null。 */
+  note_snippet: string | null;
+  /** 文稿命中的前几条；transcript_count 是总数。 */
+  transcript_hits: { start_ms: number; snippet: string }[];
+  transcript_count: number;
+}
+
+export interface SearchResult {
+  hits: SearchHit[];
+  /** 这次是否也搜了文稿（跟随设置「也搜文稿」）。 */
+  transcripts_included: boolean;
+}
+
 /** 树上的一项：文件夹或视频。移动、排序接口用它指认对象。 */
 export interface ItemRef {
   kind: "folder" | "video";

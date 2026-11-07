@@ -10,6 +10,7 @@ import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { displayTitle } from "@/lib/videoTitle";
 import { useJobs } from "@/stores/jobs";
 import { useAssistantUi } from "@/stores/assistant";
+import { usePlayer } from "@/stores/player";
 
 const { mockIpc, confirmMock } = vi.hoisted(() => ({
   confirmMock: vi.fn(),
@@ -33,6 +34,7 @@ const { mockIpc, confirmMock } = vi.hoisted(() => ({
       delete: vi.fn(),
       move: vi.fn(),
       reorder: vi.fn(),
+      search: vi.fn(),
     },
     pipeline: {
       process: vi.fn(),
@@ -166,6 +168,7 @@ describe("Home", () => {
     mockIpc.folders.reorder.mockReset().mockResolvedValue(undefined);
     mockIpc.folders.move.mockReset().mockResolvedValue(undefined);
     mockIpc.folders.create.mockReset();
+    mockIpc.folders.search.mockReset().mockResolvedValue({ hits: [], transcripts_included: false });
     mockIpc.pipeline.process.mockResolvedValue(undefined);
     mockIpc.pipeline.dismiss.mockReset().mockResolvedValue(undefined);
     mockIpc.pipeline.jobs.mockReset().mockResolvedValue([]);
@@ -1507,7 +1510,7 @@ describe("Home", () => {
     );
   });
 
-  it("filters videos by title from the topbar search box", async () => {
+  it("searches titles and notes from the topbar box and jumps to transcript hits", async () => {
     const video2: Video = {
       ...video,
       id: "video-2",
@@ -1517,28 +1520,71 @@ describe("Home", () => {
     mockIpc.videos.list.mockImplementation(async (courseId: string) =>
       courseId === "course-1" ? [video, video2] : [],
     );
+    const hit = (id: string, title: string, extra: object = {}) => ({
+      video_id: id,
+      title,
+      folder_id: null,
+      title_match: false,
+      note_snippet: null,
+      transcript_hits: [],
+      transcript_count: 0,
+      ...extra,
+    });
+    mockIpc.folders.search.mockImplementation(async (_course: string, _folder: string | null, query: string) => {
+      if (query === "第二课") {
+        return { hits: [hit("video-2", video2.title, { title_match: true })], transcripts_included: false };
+      }
+      if (query === "底层逻辑") {
+        return {
+          hits: [
+            hit("video-1", video.title, {
+              title_match: true,
+              note_snippet: "…先讲清底层逻辑再做题…",
+              transcript_hits: [{ start_ms: 125_000, snippet: "所谓底层逻辑就是" }],
+              transcript_count: 4,
+            }),
+          ],
+          transcripts_included: true,
+        };
+      }
+      return { hits: [], transcripts_included: false };
+    });
+    const openAt = vi.spyOn(usePlayer.getState(), "requestOpenAt");
 
     await renderHome();
-
     fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
     await screen.findByText(displayTitle(video2.title));
 
     const search = screen.getByLabelText("搜索本课程视频");
+    expect(search).toHaveAttribute("placeholder", "搜索标题和笔记");
     fireEvent.change(search, { target: { value: "第二课" } });
-    expect(screen.queryByText(displayTitle(video.title))).not.toBeInTheDocument();
-    expect(screen.getByText(displayTitle(video2.title))).toBeInTheDocument();
+    const results = await screen.findByRole("list", { name: "搜索结果" });
+    expect(within(results).getByRole("button", { name: `打开视频：${displayTitle(video2.title)}` })).toBeInTheDocument();
+    expect(within(results).queryByText(/底层逻辑/)).not.toBeInTheDocument();
+    expect(mockIpc.folders.search).toHaveBeenLastCalledWith("course-1", null, "第二课");
+    // 搜索结果里没有拖动排序，也不出批量选择。
+    expect(screen.queryByRole("button", { name: "选择" })).not.toBeInTheDocument();
 
-    // 过滤态下排序无意义（子集顺序映射不回全量）：菜单里的上移/下移也不给。
-    // 「0」同时命中「01.…」「02.…」两条（过滤按 displayTitle，不含扩展名）。
-    fireEvent.change(search, { target: { value: "0" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "视频操作" })[0]);
-    expect(screen.queryByRole("menuitem", { name: "下移" })).not.toBeInTheDocument();
+    // 笔记和文稿命中都带上下文，关键词高亮；文稿还有更多时给出数量。
+    fireEvent.change(search, { target: { value: "底层逻辑" } });
+    expect(await screen.findByText("笔记")).toBeInTheDocument();
+    const marks = (await screen.findAllByText("底层逻辑", { selector: "mark" })).length;
+    expect(marks).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText("文稿里还有 3 处")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: `跳到 ${displayTitle(video.title)} 的 02:05` }));
+    await waitFor(() => expect(openAt).toHaveBeenCalledWith("video-1", 125_000));
+    openAt.mockRestore();
+  });
 
-    // 无匹配给明确的空态，而不是一片空白。
-    fireEvent.change(search, { target: { value: "不存在的标题" } });
-    expect(screen.getByText("没有匹配的视频")).toBeInTheDocument();
+  it("explains how to include transcripts when nothing matches, and Escape clears the search", async () => {
+    mockIpc.folders.search.mockResolvedValue({ hits: [], transcripts_included: false });
+    await renderHome();
+    fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+    const search = await screen.findByLabelText("搜索本课程视频");
+    fireEvent.change(search, { target: { value: "不存在的词" } });
+    expect(await screen.findByText("没有匹配的视频")).toBeInTheDocument();
+    expect(screen.getByText(/打开「也搜文稿」/)).toBeInTheDocument();
 
-    // Escape 清空过滤。
     fireEvent.keyDown(search, { key: "Escape" });
     expect(await screen.findByText(displayTitle(video.title))).toBeInTheDocument();
   });

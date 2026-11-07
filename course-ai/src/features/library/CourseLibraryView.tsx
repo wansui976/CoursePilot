@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
@@ -60,6 +60,7 @@ import { LibraryOverview } from "./LibraryOverview";
 import { FolderItem, SelectMark } from "./FolderItem";
 import { MoveDialog, type MoveTarget } from "./MoveDialog";
 import { DroppableCrumb, LibraryDnd } from "./LibraryDnd";
+import { SearchResults } from "./SearchResults";
 import {
   childFolders,
   childVideos,
@@ -311,6 +312,25 @@ export function CourseLibraryView({
       )
     : levelVideos;
   const visibleFolders = normalizedQuery ? [] : levelFolders;
+
+  // 搜索走后端：标题 + 笔记，设置里打开「也搜文稿」时再加文稿。范围是当前这一层及其下所有子文件夹。
+  // 停顿 200ms 再发，打字时不每个字都查一次；上一次的结果先留着，不闪空。
+  const [searchTerm, setSearchTerm] = useState(normalizedQuery);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearchTerm(videoQuery.trim()), 200);
+    return () => window.clearTimeout(timer);
+  }, [videoQuery]);
+  const search = useQuery({
+    queryKey: qk.search.query(selectedCourseId, currentFolderId, searchTerm),
+    queryFn: () => ipc.folders.search(selectedCourseId!, currentFolderId, searchTerm),
+    enabled: !!selectedCourseId && searchTerm !== "" && normalizedQuery !== "",
+    placeholderData: keepPreviousData,
+  });
+  const { data: searchTranscripts = false } = useQuery({
+    queryKey: qk.searchTranscripts(),
+    queryFn: async () => (await ipc.settings.get("search_transcripts")) === "true",
+    enabled: !!selectedCourseId,
+  });
 
   // 下载中的占位行：属于当前课程、仍在下载，且匹配搜索词。完成后后端把视频登记进
   // 课程，占位行随之消失（done/canceled 不再算 active）。
@@ -1366,7 +1386,13 @@ export function CourseLibraryView({
                   <input
                     ref={librarySearchRef}
                     aria-label={t("home.searchVideos")}
-                    placeholder={t("home.searchVideos")}
+                    placeholder={
+                      currentFolder
+                        ? t(searchTranscripts ? "search.placeholderInFolderAll" : "search.placeholderInFolder", {
+                            name: currentFolder.name,
+                          })
+                        : t(searchTranscripts ? "search.placeholderAll" : "search.placeholder")
+                    }
                     className="tb-search ca-touch-44 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] py-2 pl-9 pr-9 text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:border-[var(--focus-ring)] [&::-webkit-search-cancel-button]:appearance-none"
                     value={videoQuery}
                     onChange={(event) => setVideoQuery(event.target.value)}
@@ -1448,7 +1474,7 @@ export function CourseLibraryView({
                   <span className="max-sm:sr-only">{t("findExplanation.entry")}</span>
                 </Button>
               )}
-              {(visibleFolders.length > 0 || visibleVideos.length > 0) && (
+              {!normalizedQuery && (visibleFolders.length > 0 || visibleVideos.length > 0) && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1535,13 +1561,36 @@ export function CourseLibraryView({
                 }
               />
             </div>
-          ) : normalizedQuery && visibleVideos.length === 0 && courseDownloads.length === 0 ? (
-            <div className="flex h-full min-h-[320px] items-center justify-center">
-              <EmptyState
-                title={t("home.noMatch")}
-                description={t("home.noMatchDesc", { query: videoQuery.trim() })}
+          ) : normalizedQuery ? (
+            search.isError ? (
+              <ErrorNote className="mx-4 my-3" error={search.error} onRetry={() => void search.refetch()} />
+            ) : !search.data ? (
+              <div className="flex justify-center py-10" role="status" aria-label={t("search.searching")}>
+                <Loader2 className="h-5 w-5 animate-spin text-[var(--text-faint)]" />
+              </div>
+            ) : search.data.hits.length === 0 ? (
+              <div className="flex h-full min-h-[320px] items-center justify-center">
+                <EmptyState
+                  title={t("home.noMatch")}
+                  description={
+                    search.data.transcripts_included
+                      ? t("search.noMatchAll", { query: videoQuery.trim() })
+                      : t("search.noMatch", { query: videoQuery.trim() })
+                  }
+                />
+              </div>
+            ) : (
+              <SearchResults
+                hits={search.data.hits}
+                query={searchTerm}
+                folders={folders}
+                currentFolderId={currentFolderId}
+                onOpen={openVideo}
+                onOpenAt={(videoId, ms) =>
+                  selectedCourseId && onResume(selectedCourseId, videoId, ms / 1000)
+                }
               />
-            </div>
+            )
           ) : levelEmpty ? (
             <div className="flex h-full min-h-[320px] items-center justify-center">
               <EmptyState title={t("folders.empty")} description={t("folders.emptyHint")} />

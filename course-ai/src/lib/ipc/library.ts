@@ -7,6 +7,7 @@ import type {
   CourseColor,
   Folder,
   ItemRef,
+  SearchResult,
   RelinkResult,
   TrashedVideo,
   Video,
@@ -66,6 +67,9 @@ export const folders = {
   /** 拖动排序：items 须为该层现有的全部子项的新顺序。 */
   reorder: (courseId: string, folderId: string | null, items: ItemRef[]): Promise<void> =>
     invoke("cmd_reorder_container", { courseId, folderId, items }),
+  /** 在课程的某一层（含子文件夹；null = 整门课）里搜标题和笔记，设置打开时也搜文稿。 */
+  search: (courseId: string, folderId: string | null, query: string): Promise<SearchResult> =>
+    invoke("cmd_search_course", { courseId, folderId, query }),
 };
 
 export const videos = {

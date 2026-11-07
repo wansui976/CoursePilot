@@ -10,9 +10,22 @@ import type { QuizStyle } from "@/lib/types";
 const DEFAULT_STYLE_KEY = "quiz_default_style";
 const PROMPT_KEY = "quiz_custom_prompt";
 
-/** 学习提醒，以及出题的默认风格和全局出题要求。 */
+const SEARCH_TRANSCRIPTS_KEY = "search_transcripts";
+
+/** 学习提醒、课程页搜索范围，以及出题的默认风格和全局出题要求。 */
 export function StudySection() {
   const { t } = useTranslation();
+  // 课程页搜索默认只搜标题和笔记；打开后也搜文稿。课程页回来时会重新读取，不用另行通知。
+  const [searchTranscripts, setSearchTranscripts] = useState(false);
+  async function toggleSearchTranscripts(on: boolean) {
+    setSearchTranscripts(on);
+    try {
+      await ipc.settings.set(SEARCH_TRANSCRIPTS_KEY, on ? "true" : "false");
+    } catch (error) {
+      setSearchTranscripts(!on);
+      setStatus({ text: String(error), error: true });
+    }
+  }
   const [remindOn, setRemindOn] = useState(() => readReminderEnabled());
   const [style, setStyle] = useState<QuizStyle>("recall");
   const [prompt, setPrompt] = useState("");
@@ -21,9 +34,14 @@ export function StudySection() {
 
   useEffect(() => {
     let alive = true;
-    void Promise.all([ipc.settings.get(DEFAULT_STYLE_KEY), ipc.settings.get(PROMPT_KEY)])
-      .then(([savedStyle, saved]) => {
+    void Promise.all([
+      ipc.settings.get(DEFAULT_STYLE_KEY),
+      ipc.settings.get(PROMPT_KEY),
+      ipc.settings.get(SEARCH_TRANSCRIPTS_KEY),
+    ])
+      .then(([savedStyle, saved, transcripts]) => {
         if (!alive) return;
+        setSearchTranscripts(transcripts === "true");
         const known = QUIZ_STYLES.find((one) => one === savedStyle);
         if (known) setStyle(known);
         setPrompt(saved ?? "");
@@ -64,6 +82,20 @@ export function StudySection() {
             aria-label={t("settings.studyReminder.label")}
             checked={remindOn}
             onCheckedChange={(next) => void toggleReminder(next)}
+          />
+        </Row>
+      </Group>
+      <Group header={t("settings.search.title")} footnote={t("settings.search.footnote")}>
+        <Row
+          label={t("settings.search.transcripts")}
+          hint={t("settings.search.transcriptsHint")}
+          htmlFor="search-transcripts"
+        >
+          <Switch
+            id="search-transcripts"
+            aria-label={t("settings.search.transcripts")}
+            checked={searchTranscripts}
+            onCheckedChange={(next) => void toggleSearchTranscripts(next)}
           />
         </Row>
       </Group>

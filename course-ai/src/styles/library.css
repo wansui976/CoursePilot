@@ -1037,3 +1037,94 @@ article[data-selected] {
   color: var(--text-1);
 }
 
+/* ---------- 课程页搜索结果 ---------- */
+
+.ca-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0 16px;
+}
+
+.ca-search-hit {
+  border: 1px solid var(--border-faint);
+  border-radius: var(--r-lg);
+  background: var(--surface-card);
+  padding: 8px;
+}
+
+.ca-search-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.ca-search-title {
+  display: block;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ca-search-path {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.ca-search-line {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--text-2);
+}
+
+@media (hover: hover) {
+.ca-search-head:hover,
+.ca-search-jump:hover {
+  background: var(--surface-card-hover);
+}
+}
+
+.ca-search-tag {
+  flex: none;
+  min-width: 3.2em;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.ca-search-jump .ca-search-tag {
+  color: var(--accent-text);
+}
+
+.ca-search-results mark {
+  border-radius: 2px;
+  padding: 0 1px;
+  background: var(--accent-weak);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.ca-search-more {
+  margin: 2px 0 0 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+

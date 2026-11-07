@@ -30,6 +30,7 @@ use crate::commands::concepts::{
     cmd_analyze_course_concepts, cmd_cancel_course_analysis, cmd_course_knowledge_chat_stream,
     cmd_generate_course_knowledge, cmd_get_course_knowledge, cmd_list_course_concepts,
 };
+use crate::commands::search::cmd_search_course;
 use crate::commands::folders::{
     cmd_create_folder, cmd_delete_folder, cmd_list_folders, cmd_move_items, cmd_rename_folder,
     cmd_reorder_container, cmd_set_folder_color,
@@ -272,6 +273,7 @@ pub fn run() {
             cmd_delete_folder,
             cmd_move_items,
             cmd_reorder_container,
+            cmd_search_course,
             cmd_set_course_color,
             cmd_relink_course_root,
             cmd_restore_video,

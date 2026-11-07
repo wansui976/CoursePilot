@@ -12,6 +12,13 @@ export type ArtifactKind = "chapters" | "summary" | "notes" | "quiz" | "mindmap"
 export const qk = {
   courses: () => ["courses"] as const,
   folders: (courseId: string | null) => ["folders", courseId] as const,
+  search: {
+    all: () => ["course-search"] as const,
+    query: (courseId: string | null, folderId: string | null, query: string) =>
+      ["course-search", courseId, folderId, query] as const,
+  },
+  /** 搜索时是否也搜文稿（设置项 search_transcripts）。 */
+  searchTranscripts: () => ["setting", "search_transcripts"] as const,
   videos: {
     all: () => ["videos"] as const,
     list: (courseId: string | null) => ["videos", courseId] as const,

@@ -999,6 +999,12 @@
       "promptHint": "每次出题都会带上，优先满足；只想对某门课生效的要求，在练习面板的「再出一套」里写。",
       "promptPlaceholder": "比如：多出需要自己推理的题；选项不要一眼就能排除；题干用中文",
       "saved": "已保存"
+    },
+    "search": {
+      "title": "课程页搜索",
+      "footnote": "课程页顶部的搜索框默认搜视频标题和笔记，范围是当前文件夹及其下所有子文件夹。",
+      "transcripts": "也搜文稿",
+      "transcriptsHint": "连字幕文稿一起搜，点结果可直接跳到那一句。讲到这个词的每一讲都会命中，结果会多不少。"
     }
   },
   "assistant": {
@@ -1787,6 +1793,19 @@
     "done": "完成",
     "deleteSelected": "删除所选",
     "deleteSelectedConfirm": "删除所选的 {{count}} 项？\n共 {{videos}} 个视频会移入回收站，可在 30 天内恢复；选中的文件夹连同子文件夹一并删除。"
+  },
+  "search": {
+    "results": "搜索结果",
+    "inNotes": "笔记",
+    "jumpTo": "跳到 {{title}} 的 {{time}}",
+    "moreInTranscript": "文稿里还有 {{count}} 处",
+    "searching": "正在搜索",
+    "placeholder": "搜索标题和笔记",
+    "placeholderAll": "搜索标题、笔记和文稿",
+    "placeholderInFolder": "在「{{name}}」里搜索标题和笔记",
+    "placeholderInFolderAll": "在「{{name}}」里搜索标题、笔记和文稿",
+    "noMatch": "标题和笔记里都没有「{{query}}」。想连文稿一起搜，可以在 设置 → 学习 里打开「也搜文稿」。",
+    "noMatchAll": "标题、笔记和文稿里都没有「{{query}}」。"
   },
   "shareCard": {
     "tagline": "把课程视频变成真正记得住的东西",
