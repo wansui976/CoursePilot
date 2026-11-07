@@ -78,12 +78,15 @@ struct CachedModels {
 }
 
 fn fingerprint(profile: &LlmProfile) -> String {
+    // deployment 也算进去：Azure 改 deployment 后清单（或那个手填部署名的提示）会变，
+    // 漏掉它就会继续拿旧缓存，设置页看起来像没改成功。
     format!(
-        "{:?}|{}|{:?}|{:?}",
+        "{:?}|{}|{:?}|{:?}|{:?}",
         profile.kind,
         profile.base_url.trim(),
         profile.api_version,
-        profile.models_path
+        profile.models_path,
+        profile.deployment
     )
 }
 
@@ -154,9 +157,13 @@ pub async fn list(
         }
     }
 
+    // Key 只在协议真的需要时从钥匙串读。不再「先读出来再判断」：
+    // 对 Ollama 这类免 Key 协议，读出来既没必要，也让「草稿 id 撞上已存配置」
+    // 多了一条把 Key 取出来的路径。
     let key = match api_key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty()) {
         Some(key) => Some(key),
-        None => keychain::get_api_key(db, &profile.id).await?,
+        None if profile.requires_key() => keychain::get_api_key(db, &profile.id).await?,
+        None => None,
     }
     .filter(|key| !key.is_empty());
     if profile.requires_key() && key.is_none() {
@@ -186,6 +193,59 @@ pub async fn list(
         source: "live".into(),
         note,
     })
+}
+
+/// 设置页拿「草稿配置」来列模型时，决定真正该用哪份配置发请求。
+///
+/// 钥匙串里的 Key 属于**已保存**的那份配置。草稿里的 base_url / 协议是前端可改的，
+/// 直接拿来用就等于：谁能让 WebView 执行一段脚本，谁就能指定一个地址、借已存的 Key
+/// 发一次请求，把 Key 以 Authorization 头的形式送到自己手里。设置页里改错地址后点
+/// 「获取模型」也会把旧 Key 发给新主机，同样不该无声发生。
+///
+/// 规则：
+/// - 显式带了 Key：用草稿（Key 是用户刚输入的，发到哪由自己负责）；
+/// - 没带 Key 且草稿与已保存配置的连接信息一致：用已保存的配置（请求仍然发往原地址）；
+/// - 没带 Key 但连接信息变了：拒绝，要求重新输入 Key；
+/// - 草稿本身不需要 Key（Ollama / 显式关掉免 Key）：允许草稿，`list` 也不会去读钥匙串。
+pub fn resolve_for_listing(
+    draft: &LlmProfile,
+    saved: Option<&LlmProfile>,
+    has_explicit_key: bool,
+) -> AppResult<LlmProfile> {
+    if has_explicit_key || !draft.requires_key() {
+        return Ok(draft.clone());
+    }
+    match saved {
+        Some(saved) if same_connection(saved, draft) => Ok(saved.clone()),
+        Some(_) => Err(AppError::Config(
+            "地址或协议已修改：请重新输入 API Key 后再获取模型".into(),
+        )),
+        None => Ok(draft.clone()),
+    }
+}
+
+/// 两份配置是否会向同一个地址、按同一种协议发请求。
+/// 模型名和展示名不算连接信息：改模型不该逼用户重新输一遍 Key。
+pub fn same_connection(a: &LlmProfile, b: &LlmProfile) -> bool {
+    let url = |profile: &LlmProfile| {
+        profile
+            .base_url
+            .trim()
+            .trim_end_matches('/')
+            .to_string()
+    };
+    let opt = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    a.kind == b.kind
+        && url(a) == url(b)
+        && opt(&a.api_version) == opt(&b.api_version)
+        && opt(&a.deployment) == opt(&b.deployment)
+        && opt(&a.models_path) == opt(&b.models_path)
 }
 
 pub async fn invalidate(db: &Db, profile_id: &str) -> AppResult<()> {
@@ -768,5 +828,61 @@ mod tests {
         let before = fingerprint(&profile);
         profile.base_url = "https://b".into();
         assert_ne!(before, fingerprint(&profile));
+    }
+
+    #[test]
+    fn cache_fingerprint_changes_when_azure_deployment_changes() {
+        let mut profile = LlmProfile {
+            kind: ProviderKind::AzureOpenai,
+            base_url: "https://x.openai.azure.com".into(),
+            deployment: Some("a".into()),
+            ..Default::default()
+        };
+        let before = fingerprint(&profile);
+        profile.deployment = Some("b".into());
+        assert_ne!(before, fingerprint(&profile));
+    }
+
+    fn openai_profile(id: &str, base_url: &str) -> LlmProfile {
+        LlmProfile {
+            id: id.into(),
+            name: id.into(),
+            kind: ProviderKind::Openai,
+            base_url: base_url.into(),
+            model: "m".into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn listing_never_uses_a_saved_key_for_a_changed_draft_endpoint() {
+        let saved = openai_profile("p", "https://api.example.com/v1");
+
+        // 地址没变：用已保存的配置，请求仍然发往原地址。
+        let mut draft = saved.clone();
+        draft.model = "another-model".into();
+        let resolved = resolve_for_listing(&draft, Some(&saved), false).unwrap();
+        assert_eq!(resolved.base_url, "https://api.example.com/v1");
+        assert_eq!(resolved.model, "m");
+
+        // 地址变了、又没重新输 Key：拒绝，别把已存 Key 发到新地址。
+        let mut changed = saved.clone();
+        changed.base_url = "https://attacker.example/v1".into();
+        let error = resolve_for_listing(&changed, Some(&saved), false).unwrap_err();
+        assert!(error.to_string().contains("重新输入"));
+
+        // 显式输入了 Key：允许用草稿（用户知道 Key 会发到哪）。
+        let resolved = resolve_for_listing(&changed, Some(&saved), true).unwrap();
+        assert_eq!(resolved.base_url, "https://attacker.example/v1");
+    }
+
+    #[test]
+    fn listing_allows_a_draft_that_does_not_need_a_key() {
+        let local = LlmProfile {
+            key_required: Some(false),
+            ..openai_profile("local", "http://127.0.0.1:1234/v1")
+        };
+        let resolved = resolve_for_listing(&local, None, false).unwrap();
+        assert_eq!(resolved.base_url, "http://127.0.0.1:1234/v1");
     }
 }

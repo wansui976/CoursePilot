@@ -66,9 +66,13 @@ pub struct LlmProfile {
 }
 
 impl LlmProfile {
-    /// 本地 Ollama 没有鉴权；其余协议默认要 Key（也可以显式关掉）。
+    /// 本地 Ollama 没有鉴权通道：`Provider::Ollama` 根本不发 Key，所以它永远不需要。
+    /// 其余协议默认要 Key（也可以显式关掉）。
     pub fn requires_key(&self) -> bool {
-        self.key_required.unwrap_or(self.kind != ProviderKind::Ollama)
+        if self.kind == ProviderKind::Ollama {
+            return false;
+        }
+        self.key_required.unwrap_or(true)
     }
 
     /// 列模型时要用的路径覆盖。
@@ -88,7 +92,6 @@ pub struct TaskRouting {
     pub quiz: Option<String>,
     pub mindmap: Option<String>,
     pub rag: Option<String>,
-    pub vision_ocr: Option<String>,
     /// 字幕 AI 纠错。原来这一步不走路由，而是「拿配置列表里第一个有 Key 的」，
     /// 于是用户选好的模型被绕开——可能发去了非预期的服务商，也算在别人账上。
     pub correction: Option<String>,
@@ -150,6 +153,9 @@ pub fn resolve_profile<'a>(
         if let Some(p) = profiles.iter().find(|p| &p.id == id) {
             return Some(p);
         }
+        // 路由里写着一个已经不存在的配置。回退到第一个是为了让老配置继续能用，
+        // 但这意味着请求可能换到另一家服务商、算在另一个账号上——至少留下日志。
+        tracing::warn!(profile_id = %id, ?task, "routed llm profile no longer exists; falling back to the first profile");
     }
     profiles.first()
 }
@@ -233,11 +239,13 @@ mod tests {
     }
 
     #[test]
-    fn ollama_does_not_require_a_key_unless_asked() {
+    fn ollama_never_requires_a_key() {
+        // Provider::Ollama 没有鉴权通道，key_required 对它只能是摆设；
+        // 允许它变成 true 只会让用户填一把永远不会被发出去的 Key。
         let mut p = profile("a");
         p.kind = ProviderKind::Ollama;
         assert!(!p.requires_key());
         p.key_required = Some(true);
-        assert!(p.requires_key());
+        assert!(!p.requires_key());
     }
 }

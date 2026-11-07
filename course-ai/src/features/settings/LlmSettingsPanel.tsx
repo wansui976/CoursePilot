@@ -26,7 +26,6 @@ const ROUTING_TASKS = [
   "quiz",
   "mindmap",
   "rag",
-  "vision_ocr",
   // 字幕纠错。原来它不走路由，而是「拿列表里第一个有 Key 的」，
   // 于是这里选的模型对它不生效——字幕可能被发去另一家、算在另一个账上。
   "correction",
@@ -87,7 +86,22 @@ function draftSignature(draft: LlmDraft): string {
 }
 
 function requiresKey(profile: LlmProfile): boolean {
-  return profile.key_required ?? profile.kind !== "ollama";
+  // Ollama 的 Provider 没有鉴权通道，key_required 对它只能是摆设。
+  if (profile.kind === "ollama") return false;
+  return profile.key_required ?? true;
+}
+
+/** 是否会向同一个地址、按同一种协议发请求；与后端 `models::same_connection` 对齐。 */
+function sameConnection(a: LlmProfile, b: LlmProfile): boolean {
+  const url = (value: string) => value.trim().replace(/\/+$/, "");
+  const opt = (value?: string | null) => (value ?? "").trim();
+  return (
+    a.kind === b.kind &&
+    url(a.base_url) === url(b.base_url) &&
+    opt(a.api_version) === opt(b.api_version) &&
+    opt(a.deployment) === opt(b.deployment) &&
+    opt(a.models_path) === opt(b.models_path)
+  );
 }
 
 function formatTokens(value?: number | null): string | null {
@@ -136,6 +150,10 @@ export function LlmSettingsPanel({
   // 手工配过的任务路由（目前只有 digest）。保存时要原样带回去，不能被「当前默认模型」冲掉。
   const [manualRouting, setManualRouting] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState("");
+  // 加载完成前 profiles 还是空的。没有这个闸门，用户在这一小段时间（或加载失败后）
+  // 点保存，就会用空列表覆盖掉磁盘上的全部配置与 Key。
+  const [loading, setLoading] = useState(true);
+  const [reloadToken, setReloadToken] = useState(0);
   const [savedMsg, setSavedMsg] = useState("");
   const [savedIsError, setSavedIsError] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -169,6 +187,17 @@ export function LlmSettingsPanel({
 
   useEffect(() => {
     let cancelled = false;
+    // 重新加载期间先收回编辑权：profiles 还是旧值/空值时保存，等于把磁盘上的配置
+    // 按眼前这份半成品覆盖掉。
+    savedDraftRef.current = null;
+    setLoading(true);
+    setLoadError("");
+    setKeys({});
+    setHasKey({});
+    setShowKey({});
+    setModelState({});
+    setSavedMsg("");
+    setSavedIsError(false);
     void (async () => {
       try {
         const ps = await ipc.ai.getProfiles();
@@ -195,35 +224,46 @@ export function LlmSettingsPanel({
             // routing JSON 损坏时忽略，用第一个；IPC 读取错误则交给外层显示。
           }
         }
-        // 标记哪些配置已存有 API Key → 输入框显示掩码。
+        if (cancelled) return;
+        // 先把配置放出来、结束加载态，再查 Key。`hasApiKey` 在部分平台可能很慢
+        // （钥匙串/凭证管理器），不能让它挡住编辑与保存。加载完成后配置已经完整，
+        // 此时保存是安全的；标志位晚一点补上只影响输入框显示「已配置」。
+        setProfiles(ps);
+        setActiveId(active);
+        setManualRouting(manual);
+        savedDraftRef.current = makeDraft(ps, {}, active, manual);
+        setLoading(false);
+
         const flags: Record<string, boolean> = {};
         await Promise.all(
           ps.map(async (p) => {
             flags[p.id] = await ipc.ai.hasApiKey(p.id).catch(() => false);
           }),
         );
-        if (cancelled) return;
-        setProfiles(ps);
-        setActiveId(active);
-        setManualRouting(manual);
-        setHasKey(flags);
-        setKeys({});
-        setModelState({});
-        savedDraftRef.current = makeDraft(ps, {}, active, manual);
-        setLoadError("");
+        if (!cancelled) setHasKey(flags);
       } catch (error) {
-        if (!cancelled) setLoadError(t("llmSettings.loadError", { error: String(error) }));
+        if (cancelled) return;
+        setProfiles([]);
+        setActiveId(null);
+        setManualRouting({});
+        savedDraftRef.current = null;
+        setLoading(false);
+        setLoadError(t("llmSettings.loadError", { error: String(error) }));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, [reloadToken, t]);
 
   function update(id: string, patch: Partial<LlmProfile>) {
     clearSaveFeedback();
-    // 地址 / 协议 / 版本变了，之前拉到的模型清单就不算数了。
-    if (["kind", "base_url", "api_version", "models_path"].some((field) => field in patch)) {
+    // 地址 / 协议 / 版本 / 部署名变了，之前拉到的模型清单就不算数了。
+    if (
+      ["kind", "base_url", "api_version", "models_path", "deployment"].some(
+        (field) => field in patch,
+      )
+    ) {
       setModelState((state) => {
         if (!state[id]) return state;
         const next = { ...state };
@@ -231,7 +271,15 @@ export function LlmSettingsPanel({
         return next;
       });
     }
-    setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    setProfiles((ps) =>
+      ps.map((p) => {
+        if (p.id !== id) return p;
+        const next = { ...p, ...patch };
+        // Ollama 没有鉴权通道，别把“必须填 Key”留在配置里。
+        if (next.kind === "ollama") next.key_required = null;
+        return next;
+      }),
+    );
   }
 
   // 打开设置时顺手看一眼本机有没有 Ollama 在跑。很多人已经用 Ollama 拉好了模型，
@@ -329,8 +377,31 @@ export function LlmSettingsPanel({
     });
     if (!ok) return;
     clearSaveFeedback();
-    setProfiles((ps) => ps.filter((p) => p.id !== profile.id));
-    setActiveId((current) => (current === profile.id ? null : current));
+    const remaining = profiles.filter((p) => p.id !== profile.id);
+    setProfiles(remaining);
+    // 删掉的正好是当前默认：把默认交给剩下的第一个，别留下 activeId=null
+    // 而界面又把第一个显示成默认的分裂状态（保存时会把路由写成空）。
+    setActiveId((current) =>
+      current === profile.id ? (remaining[0]?.id ?? null) : current,
+    );
+    // 草稿里刚输入的 Key 跟着配置一起丢掉。否则保存时会把一把属于已删配置的
+    // Key 写进钥匙串，永远没人再引用它。
+    setKeys((current) => {
+      if (!(profile.id in current)) return current;
+      const next = { ...current };
+      delete next[profile.id];
+      return next;
+    });
+    setShowKey((current) => {
+      const next = { ...current };
+      delete next[profile.id];
+      return next;
+    });
+    setModelState((current) => {
+      const next = { ...current };
+      delete next[profile.id];
+      return next;
+    });
   }
 
   function clearSaveFeedback() {
@@ -348,43 +419,100 @@ export function LlmSettingsPanel({
     clearSaveFeedback();
   }
 
+  function validationError(draft: LlmDraft): string | null {
+    for (const profile of draft.profiles) {
+      const name = profile.name.trim() || t("llmSettings.unnamed");
+      if (!profile.name.trim()) return t("llmSettings.validationName");
+      if (!profile.model.trim()) {
+        return t("llmSettings.validationModel", { name });
+      }
+      // 其余协议留空会落到各自官方地址；OpenAI 兼容 / Azure 没有可靠默认值，
+      // 空着要等到真正请求时才报一句「relative URL without a base」。
+      if (
+        (profile.kind === "openai" || profile.kind === "azure_openai") &&
+        !profile.base_url.trim()
+      ) {
+        return t("llmSettings.validationBaseUrl", { name });
+      }
+      if (
+        profile.max_output_tokens != null &&
+        (!Number.isFinite(profile.max_output_tokens) ||
+          profile.max_output_tokens < 1 ||
+          profile.max_output_tokens > 1_000_000)
+      ) {
+        return t("llmSettings.validationMaxOutput", { name });
+      }
+      // 已存 Key 只属于旧地址：改了连接信息又没重新输入 Key，后端会拒绝保存。
+      // 在前端先说清楚，省得用户点了保存才看到一条错误。
+      const saved = savedDraftRef.current?.profiles.find((p) => p.id === profile.id);
+      if (
+        saved &&
+        profile.kind !== "ollama" &&
+        !sameConnection(saved, profile) &&
+        hasKey[profile.id] &&
+        !draft.keys[profile.id]
+      ) {
+        return t("llmSettings.validationKeyAfterChange", { name });
+      }
+    }
+    return null;
+  }
+
   async function save(): Promise<boolean> {
+    // 加载中/加载失败时 profiles 不是磁盘上的真实状态，保存只会把它覆盖掉。
+    if (loading || loadError || !savedDraftRef.current) return false;
+
     const draftToSave = makeDraft(profiles, keys, activeId, manualRouting);
+    const problem = validationError(draftToSave);
+    if (problem) {
+      setSavedMsg(problem);
+      setSavedIsError(true);
+      return false;
+    }
+
+    // 当前默认：activeId 失效（例如刚删掉它）时和界面显示保持一致，用第一个。
+    const active =
+      (draftToSave.activeId &&
+      draftToSave.profiles.some((p) => p.id === draftToSave.activeId)
+        ? draftToSave.activeId
+        : draftToSave.profiles[0]?.id) ?? null;
+    const routing: Record<string, string> = {};
+    if (active) {
+      for (const task of ROUTING_TASKS) routing[task] = active;
+    }
+    // 手工 digest 路由必须在 `if (active)` 外面恢复：删掉当前默认配置后 active 为 null，
+    // 但它不该跟着被清掉。
+    for (const task of TASKS_KEEPING_MANUAL_ROUTING) {
+      const manual = draftToSave.manualRouting[task];
+      if (manual && draftToSave.profiles.some((p) => p.id === manual)) {
+        routing[task] = manual;
+      }
+    }
+    // 只保存仍属于现存配置的 Key：删掉刚填过 Key 的新配置后，草稿里可能还留着它。
+    const keysToSave = Object.fromEntries(
+      Object.entries(draftToSave.keys).filter(([id]) =>
+        draftToSave.profiles.some((p) => p.id === id),
+      ),
+    );
+
     setSaving(true);
     try {
-      const routing: Record<string, string> = {};
-      if (
-        draftToSave.activeId &&
-        draftToSave.profiles.some((p) => p.id === draftToSave.activeId)
-      ) {
-        for (const task of ROUTING_TASKS) routing[task] = draftToSave.activeId;
-        // 保住手工配的 digest 路由：原来这里把所有任务一律重写成 activeId，
-        // 于是「给提要单独挂个便宜模型」的配置会在下次改任何设置时被悄悄覆盖。
-        for (const task of TASKS_KEEPING_MANUAL_ROUTING) {
-          const manual = draftToSave.manualRouting[task];
-          if (manual && draftToSave.profiles.some((p) => p.id === manual)) {
-            routing[task] = manual;
-          }
-        }
-      }
+      // 一次 IPC 提交配置与 Key：后端先写 Key 再落库，Key 失败时配置不会先保存。
       await ipc.ai.saveProfiles(
         JSON.stringify(draftToSave.profiles),
         JSON.stringify(routing),
+        keysToSave,
       );
-      for (const [id, key] of Object.entries(draftToSave.keys)) {
-        if (key) await ipc.ai.setApiKey(id, key);
-      }
+      setActiveId(active);
       setHasKey((flags) => {
         const next = { ...flags };
-        for (const [id, key] of Object.entries(draftToSave.keys)) {
-          if (key) next[id] = true;
-        }
+        for (const id of Object.keys(keysToSave)) next[id] = true;
         return next;
       });
       // 只清掉本次实际保存的 Key；若保存途中又输入了新值，它仍作为未保存草稿保留。
       setKeys((current) => {
         const next = { ...current };
-        for (const [id, key] of Object.entries(draftToSave.keys)) {
+        for (const [id, key] of Object.entries(keysToSave)) {
           if (next[id] === key) delete next[id];
         }
         return next;
@@ -392,7 +520,7 @@ export function LlmSettingsPanel({
       savedDraftRef.current = makeDraft(
         draftToSave.profiles,
         {},
-        draftToSave.activeId,
+        active,
         draftToSave.manualRouting,
       );
       setSavedMsg(t("llmSettings.saved"));
@@ -487,12 +615,21 @@ export function LlmSettingsPanel({
             </option>
           ))}
         </Select>
-        <Button size="sm" variant="outline" onClick={add} data-tour="llm-add">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={add}
+          disabled={loading || Boolean(loadError) || saving}
+          data-tour="llm-add"
+        >
           <Plus className="h-3.5 w-3.5" />
           {t("llmSettings.add")}
         </Button>
       </div>
-      {localOllama && !profiles.some((profile) => profile.kind === "ollama") && (
+      {!loading &&
+        !loadError &&
+        localOllama &&
+        !profiles.some((profile) => profile.kind === "ollama") && (
         <div
           role="status"
           className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-xs text-[var(--text-normal)]"
@@ -510,25 +647,34 @@ export function LlmSettingsPanel({
           )}
         </div>
       )}
-      {loadError && (
-        <p
-          role="alert"
-          className="rounded-lg border border-[var(--status-err)] bg-[var(--status-err-bg)] px-3 py-2 text-xs text-[var(--status-err)]"
-        >
-          {loadError}
+      {loading && (
+        <p role="status" className="py-2 text-xs leading-relaxed text-[var(--text-muted)]">
+          {t("llmSettings.loading")}
         </p>
       )}
-      {!loadError && profiles.length === 0 && (
+      {loadError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--status-err)] bg-[var(--status-err-bg)] px-3 py-2 text-xs text-[var(--status-err)]"
+        >
+          <span className="min-w-0 flex-1">{loadError}</span>
+          <Button size="sm" variant="outline" onClick={() => setReloadToken((n) => n + 1)}>
+            {t("llmSettings.retry")}
+          </Button>
+        </div>
+      )}
+      {!loading && !loadError && profiles.length === 0 && (
         <p className="py-2 text-xs leading-relaxed text-[var(--text-muted)]">
           {t("llmSettings.emptyHint")}
         </p>
       )}
-      {profiles.map((p) => {
-        const isActive = effectiveActive === p.id;
-        const state = modelState[p.id];
-        const models = state?.models ?? [];
-        const needsKey = requiresKey(p);
-        return (
+      {!loading &&
+        profiles.map((p) => {
+          const isActive = effectiveActive === p.id;
+          const state = modelState[p.id];
+          const models = state?.models ?? [];
+          const needsKey = requiresKey(p);
+          return (
           <div
             key={p.id}
             className={`space-y-2 rounded-xl border bg-[var(--surface-input)] p-3 transition ${
@@ -758,16 +904,18 @@ export function LlmSettingsPanel({
                     onChange={(e) => update(p.id, { models_path: e.target.value || null })}
                   />
                 </label>
-                <div className="flex items-center justify-between gap-3 text-xs text-[var(--text-normal)] sm:col-span-2">
-                  <span>{t("llmSettings.noKeyRequired")}</span>
-                  <Switch
-                    aria-label={t("llmSettings.noKeyRequired")}
-                    checked={!needsKey}
-                    onCheckedChange={(next) =>
-                      update(p.id, { key_required: next ? false : true })
-                    }
-                  />
-                </div>
+                {p.kind !== "ollama" && (
+                  <div className="flex items-center justify-between gap-3 text-xs text-[var(--text-normal)] sm:col-span-2">
+                    <span>{t("llmSettings.noKeyRequired")}</span>
+                    <Switch
+                      aria-label={t("llmSettings.noKeyRequired")}
+                      checked={!needsKey}
+                      onCheckedChange={(next) =>
+                        update(p.id, { key_required: next ? false : true })
+                      }
+                    />
+                  </div>
+                )}
               </div>
             </details>
 
@@ -785,7 +933,7 @@ export function LlmSettingsPanel({
         <Button
           size="sm"
           variant={dirty ? "primary" : "default"}
-          disabled={saving}
+          disabled={saving || loading || Boolean(loadError)}
           onClick={() => void save()}
         >
           {saving ? t("llmSettings.saving") : t("llmSettings.save")}

@@ -287,13 +287,17 @@ export interface ChatMessage {
   content: string;
 }
 
+/** 与后端 `llm::profiles::TaskRouting` 保持一致；缺字段表示回退到第一个配置。 */
 export interface TaskRouting {
   notes: string | null;
   chapters: string | null;
+  summary: string | null;
   quiz: string | null;
   mindmap: string | null;
   rag: string | null;
-  vision_ocr: string | null;
+  correction: string | null;
+  digest: string | null;
+  assistant: string | null;
 }
 
 export interface Chapter {

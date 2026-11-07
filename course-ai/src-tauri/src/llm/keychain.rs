@@ -223,6 +223,10 @@ async fn write_secret(
     account: &str,
     value: &str,
 ) -> AppResult<()> {
+    // 从聊天窗口/文档里复制 Key 经常带首尾空白或换行。原样存下去，
+    // 拼进 Authorization 头时会变成非法的 header value，报的是一句
+    // 「builder error」，用户根本看不出是多了个空格。
+    let value = value.trim();
     if keyring.write(account, value).await {
         return set_setting(db, account, "").await;
     }
@@ -234,7 +238,11 @@ async fn write_secret(
 /// 原先先问钥匙串，钥匙串答「没有这一条」就直接返回空，落在表里的密钥于是再也读不到：
 /// 设置页显示「未配置」，处理时报缺凭证，明文却一直留在库里。
 async fn read_secret(keyring: &impl Keyring, db: &Db, account: &str) -> AppResult<Option<String>> {
-    if let Some(plain) = get_setting(db, account).await?.filter(|v| !v.is_empty()) {
+    if let Some(plain) = get_setting(db, account)
+        .await?
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
         if keyring.write(account, &plain).await {
             set_setting(db, account, "").await?;
         }
@@ -244,7 +252,8 @@ async fn read_secret(keyring: &impl Keyring, db: &Db, account: &str) -> AppResul
         .read(account)
         .await
         .flatten()
-        .filter(|v| !v.is_empty()))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty()))
 }
 
 /// 只判断有没有、不取密钥本身（理由见 `SystemKeyring::exists`），供设置页显示「已配置」。
@@ -252,7 +261,7 @@ async fn read_secret(keyring: &impl Keyring, db: &Db, account: &str) -> AppResul
 async fn has_secret(keyring: &impl Keyring, db: &Db, account: &str) -> AppResult<bool> {
     if get_setting(db, account)
         .await?
-        .is_some_and(|v| !v.is_empty())
+        .is_some_and(|value| !value.trim().is_empty())
     {
         return Ok(true);
     }
@@ -320,7 +329,8 @@ pub async fn get_secret_or_legacy(db: &Db, name: &str) -> AppResult<Option<Strin
     }
     Ok(get_setting(db, name)
         .await?
-        .filter(|v| !v.trim().is_empty()))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty()))
 }
 
 #[cfg(test)]
@@ -427,6 +437,18 @@ mod tests {
         assert!(!has_api_key(&db, "p1").await.unwrap());
         set_api_key(&db, "p1", "sk-secret").await.unwrap();
         assert!(has_api_key(&db, "p1").await.unwrap());
+        assert_eq!(
+            get_api_key(&db, "p1").await.unwrap(),
+            Some("sk-secret".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn keys_are_trimmed_before_storage() {
+        // 从聊天窗口/文档复制来的 Key 经常带换行；原样存下去会让 Authorization
+        // 头变成非法值，报一句看不懂的 builder error。
+        let (_dir, db) = test_db().await;
+        set_api_key(&db, "p1", "  sk-secret\n").await.unwrap();
         assert_eq!(
             get_api_key(&db, "p1").await.unwrap(),
             Some("sk-secret".into())

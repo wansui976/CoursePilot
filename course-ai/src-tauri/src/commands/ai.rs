@@ -3,9 +3,12 @@ use crate::commands::settings::get_setting;
 use crate::error::{AppError, AppResult};
 use crate::llm::factory::build_provider;
 use crate::llm::keychain;
-use crate::llm::profiles::{parse_profiles, parse_routing, resolve_profile, AiTask, LlmProfile};
+use crate::llm::profiles::{
+    parse_profiles, parse_routing, resolve_profile, AiTask, LlmProfile, ProviderKind,
+};
 use crate::pipeline::ai;
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::State;
@@ -54,34 +57,88 @@ pub async fn cmd_save_llm_profiles(
     state: State<'_, AppState>,
     profiles_json: String,
     routing_json: String,
+    keys: Option<HashMap<String, String>>,
 ) -> AppResult<()> {
-    save_llm_profiles(&state.db, &profiles_json, &routing_json).await
+    save_llm_config(
+        &state.db,
+        &profiles_json,
+        &routing_json,
+        keys.unwrap_or_default(),
+    )
+    .await
 }
 
+/// 兼容旧调用：不携带 Key 的保存。
 pub async fn save_llm_profiles(
     db: &crate::db::Db,
     profiles_json: &str,
     routing_json: &str,
 ) -> AppResult<()> {
-    let profiles = parse_profiles(Some(profiles_json))?;
-    parse_routing(Some(routing_json))?;
+    save_llm_config(db, profiles_json, routing_json, HashMap::new()).await
+}
 
-    // 密钥可能存在系统钥匙串里（表内无行可枚举），所以先对比新旧 profile
-    // 列表，把被移除的 profile 的密钥一并删掉；清理失败不阻塞保存。
+/// 保存整份大模型配置：先校验、再写 Key、最后落库。
+///
+/// 顺序是有意的：
+/// - Key 写失败时配置不落库，界面不会出现「配置已经保存、Key 没存上」的分裂；
+/// - 被删配置的 Key 在事务提交后才删，事务失败时旧 Key 仍在，不会「配置还在、Key 没了」。
+///
+/// 跨钥匙串和 SQLite 没有真正的事务；DB 在 Key 之后失败时，新配置的 Key 可能成为
+/// 孤儿（已存在的配置则是 Key 更新、配置未更新）。这是罕见路径，优先保证常见路径
+/// （钥匙串写失败）不产生半保存状态。
+pub async fn save_llm_config(
+    db: &crate::db::Db,
+    profiles_json: &str,
+    routing_json: &str,
+    keys: HashMap<String, String>,
+) -> AppResult<()> {
+    let profiles = normalize_profiles(parse_profiles(Some(profiles_json))?);
+    parse_routing(Some(routing_json))?;
+    validate_profiles(&profiles)?;
+
+    // 只允许给本次保存里存在的配置写 Key：前端删掉配置后残留的草稿 Key，
+    // 不能借这条路径在钥匙串里留下无人引用的条目。
+    if let Some(unknown) = keys
+        .keys()
+        .find(|id| !profiles.iter().any(|profile| &profile.id == *id))
+    {
+        return Err(AppError::Config(format!(
+            "配置 {unknown} 不在本次保存的列表中，不能给它写 Key"
+        )));
+    }
+
+    // 已存 Key 只属于旧地址。改了连接信息（协议 / 地址 / 版本 / deployment / 列模型路径）
+    // 又不在本次提交里重新给 Key，等于让旧 Key 跟着新地址走：AI 任务会把它发到新地址，
+    // 注入脚本也能借「改地址 → 触发一次生成」把 Key 送到自己手里。
+    // 必须重新输入 Key 才能保存，和「获取模型」用同一道边界。
     let old_profiles = parse_profiles(get_setting(db, "llm_profiles").await?.as_deref())?;
-    for old in &old_profiles {
-        if !profiles.iter().any(|profile| profile.id == old.id) {
-            if let Err(err) = keychain::delete_api_key(db, &old.id).await {
-                tracing::warn!(profile_id = %old.id, %err, "failed to delete orphaned api key");
-            }
-            // 配置都删了，它的模型清单缓存也没有意义。
-            let _ = crate::llm::models::invalidate(db, &old.id).await;
+    for profile in &profiles {
+        if keys.contains_key(&profile.id) || profile.kind == ProviderKind::Ollama {
+            continue;
+        }
+        let Some(old) = old_profiles.iter().find(|old| old.id == profile.id) else {
+            continue;
+        };
+        if crate::llm::models::same_connection(old, profile) {
+            continue;
+        }
+        if keychain::has_api_key(db, &profile.id).await? {
+            return Err(AppError::Config(format!(
+                "配置「{}」的地址或协议已修改：请重新填写 API Key 再保存（旧 Key 不会被发到新地址）",
+                profile.name
+            )));
         }
     }
 
+    for (profile_id, key) in &keys {
+        keychain::set_api_key(db, profile_id, key).await?;
+    }
+
+    let profiles_json = serde_json::to_string(&profiles)?;
+
     let mut tx = db.pool.begin().await?;
     for (key, value) in [
-        ("llm_profiles", profiles_json),
+        ("llm_profiles", profiles_json.as_str()),
         ("llm_task_routing", routing_json),
     ] {
         sqlx::query(
@@ -111,6 +168,86 @@ pub async fn save_llm_profiles(
     }
 
     tx.commit().await?;
+
+    // 配置已经落库，再清理被删配置的 Key 与模型缓存；清理失败只记日志。
+    for old in &old_profiles {
+        if !profiles.iter().any(|profile| profile.id == old.id) {
+            if let Err(err) = keychain::delete_api_key(db, &old.id).await {
+                tracing::warn!(profile_id = %old.id, %err, "failed to delete orphaned api key");
+            }
+            // 配置都删了，它的模型清单缓存也没有意义。
+            let _ = crate::llm::models::invalidate(db, &old.id).await;
+        }
+    }
+    Ok(())
+}
+
+fn normalize_profiles(profiles: Vec<LlmProfile>) -> Vec<LlmProfile> {
+    profiles.into_iter().map(normalize_profile).collect()
+}
+
+fn normalize_profile(mut profile: LlmProfile) -> LlmProfile {
+    profile.name = profile.name.trim().to_string();
+    profile.base_url = profile.base_url.trim().trim_end_matches('/').to_string();
+    profile.model = profile.model.trim().to_string();
+    profile.api_version = trimmed(profile.api_version);
+    profile.deployment = trimmed(profile.deployment);
+    profile.models_path = trimmed(profile.models_path);
+    // Ollama 没有鉴权通道，这个开关对它没有意义：清掉，免得界面给了「填了 Key 就会用」的错觉。
+    if profile.kind == ProviderKind::Ollama {
+        profile.key_required = None;
+    }
+    profile
+}
+
+fn trimmed(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn validate_profiles(profiles: &[LlmProfile]) -> AppResult<()> {
+    let mut ids = HashSet::new();
+    for profile in profiles {
+        if profile.id.trim().is_empty() {
+            return Err(AppError::Config("大模型配置缺少 id".into()));
+        }
+        if !ids.insert(profile.id.as_str()) {
+            return Err(AppError::Config(format!(
+                "大模型配置 id 重复：{}",
+                profile.id
+            )));
+        }
+        if profile.name.is_empty() {
+            return Err(AppError::Config("大模型配置的名称不能为空".into()));
+        }
+        if profile.model.is_empty() {
+            return Err(AppError::Config(format!(
+                "配置「{}」的模型名不能为空",
+                profile.name
+            )));
+        }
+        // 其余协议留空会落到各自官方地址；OpenAI 兼容 / Azure 没有可靠的默认值，
+        // 空着只会在真正请求时变成「relative URL without a base」。
+        if matches!(
+            profile.kind,
+            ProviderKind::Openai | ProviderKind::AzureOpenai
+        ) && profile.base_url.is_empty()
+        {
+            return Err(AppError::Config(format!(
+                "配置「{}」需要填写 Base URL",
+                profile.name
+            )));
+        }
+        if let Some(max) = profile.max_output_tokens {
+            if max == 0 || max > 1_000_000 {
+                return Err(AppError::Config(format!(
+                    "配置「{}」的单次输出上限需要在 1 到 1000000 之间",
+                    profile.name
+                )));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -120,6 +257,14 @@ pub async fn cmd_set_api_key(
     profile_id: String,
     api_key: String,
 ) -> AppResult<()> {
+    // 只允许给已保存的配置写 Key：否则每次“新增后又删掉”都会在钥匙串里留下一条
+    // 永远没人引用的密钥。真正的批量保存走 `save_llm_config`，它在同一份列表里校验。
+    let profiles = parse_profiles(get_setting(&state.db, "llm_profiles").await?.as_deref())?;
+    if !profiles.iter().any(|profile| profile.id == profile_id) {
+        return Err(AppError::Config(
+            "这个配置已经不存在，请刷新设置后重试".into(),
+        ));
+    }
     keychain::set_api_key(&state.db, &profile_id, &api_key).await?;
     // 换了 Key，能看到的模型可能就变了：旧缓存不能继续用。
     crate::llm::models::invalidate(&state.db, &profile_id).await?;
@@ -144,6 +289,8 @@ pub async fn cmd_has_api_key(state: State<'_, AppState>, profile_id: String) -> 
 /// 获取某个配置可用的模型列表（带目录元数据与缓存）。
 ///
 /// `api_key` 是设置页里刚输入、还没保存的 Key；为空时用钥匙串里已保存的。
+/// 用已存 Key 前会核对草稿与已保存配置的连接信息，避免把 Key 发到草稿里新填的地址
+/// （见 `models::resolve_for_listing`）。
 #[tauri::command]
 pub async fn cmd_list_models(
     state: State<'_, AppState>,
@@ -151,6 +298,10 @@ pub async fn cmd_list_models(
     api_key: Option<String>,
     refresh: Option<bool>,
 ) -> AppResult<crate::llm::models::ModelList> {
+    let profiles = parse_profiles(get_setting(&state.db, "llm_profiles").await?.as_deref())?;
+    let saved = profiles.iter().find(|saved| saved.id == profile.id);
+    let has_explicit_key = api_key.as_deref().is_some_and(|key| !key.trim().is_empty());
+    let profile = crate::llm::models::resolve_for_listing(&profile, saved, has_explicit_key)?;
     crate::llm::models::list(&state.db, &profile, api_key, refresh.unwrap_or(false)).await
 }
 
@@ -599,7 +750,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn saving_profiles_removes_orphaned_api_keys_atomically() {
+    async fn saving_profiles_removes_orphaned_api_keys_after_commit() {
         let dir = tempdir().unwrap();
         let db = Db::connect_and_migrate(&dir.path().join("t.db"))
             .await
@@ -624,9 +775,10 @@ mod tests {
             get_setting(&db, "llmXkeyYunrelated").await.unwrap(),
             Some("keep-me".into())
         );
+        // 存进去的是规范化后的紧凑 JSON，字段顺序由结构体决定。
         assert_eq!(
             get_setting(&db, "llm_profiles").await.unwrap().as_deref(),
-            Some(profiles)
+            Some(r#"[{"id":"kept","name":"Kept","kind":"openai","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini"}]"#)
         );
         assert_eq!(
             get_setting(&db, "llm_task_routing")
@@ -635,5 +787,156 @@ mod tests {
                 .as_deref(),
             Some(routing)
         );
+    }
+
+    #[tokio::test]
+    async fn saving_profiles_writes_keys_from_the_same_call_and_trims_them() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let profiles = r#"[{"id":"kept","name":"Kept","kind":"openai","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini"}]"#;
+        let mut keys = HashMap::new();
+        keys.insert("kept".to_string(), "  sk-new\n".to_string());
+
+        save_llm_config(&db, profiles, r#"{"notes":"kept"}"#, keys)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            keychain::get_api_key(&db, "kept").await.unwrap(),
+            Some("sk-new".into())
+        );
+        let stored = parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref())
+            .unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].model, "gpt-4o-mini");
+    }
+
+    #[tokio::test]
+    async fn saving_profiles_rejects_keys_for_profiles_that_are_not_in_the_list() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let profiles = r#"[{"id":"kept","name":"Kept","kind":"openai","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini"}]"#;
+        let mut keys = HashMap::new();
+        keys.insert("ghost".to_string(), "sk-orphan".to_string());
+
+        let error = save_llm_config(&db, profiles, "{}", keys)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("ghost"));
+        assert!(!keychain::has_api_key(&db, "ghost").await.unwrap());
+        assert!(parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref())
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn changing_the_endpoint_without_a_new_key_is_rejected() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let original = r#"[{"id":"p1","name":"P","kind":"openai","base_url":"https://api.example.com/v1","model":"m"}]"#;
+        save_llm_profiles(&db, original, "{}").await.unwrap();
+        keychain::set_api_key(&db, "p1", "sk-original").await.unwrap();
+
+        let moved = r#"[{"id":"p1","name":"P","kind":"openai","base_url":"https://attacker.example/v1","model":"m"}]"#;
+        let error = save_llm_profiles(&db, moved, "{}").await.unwrap_err();
+        assert!(error.to_string().contains("重新填写 API Key"));
+
+        // 被拒绝时旧配置和旧 Key 都原样保留。
+        let stored =
+            parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref()).unwrap();
+        assert_eq!(stored[0].base_url, "https://api.example.com/v1");
+        assert_eq!(
+            keychain::get_api_key(&db, "p1").await.unwrap(),
+            Some("sk-original".into())
+        );
+
+        // 重新输入 Key 后允许保存，Key 也跟着换掉。
+        let mut keys = HashMap::new();
+        keys.insert("p1".to_string(), "sk-new".to_string());
+        save_llm_config(&db, moved, "{}", keys).await.unwrap();
+        let stored =
+            parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref()).unwrap();
+        assert_eq!(stored[0].base_url, "https://attacker.example/v1");
+        assert_eq!(
+            keychain::get_api_key(&db, "p1").await.unwrap(),
+            Some("sk-new".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn saving_profiles_rejects_incomplete_or_ambiguous_profiles() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+
+        let no_model = r#"[{"id":"a","name":"A","kind":"openai","base_url":"https://api.openai.com/v1","model":"  "}]"#;
+        let error = save_llm_profiles(&db, no_model, "{}").await.unwrap_err();
+        assert!(error.to_string().contains("模型名"));
+
+        let no_base_url = r#"[{"id":"a","name":"A","kind":"openai","base_url":"","model":"m"}]"#;
+        let error = save_llm_profiles(&db, no_base_url, "{}").await.unwrap_err();
+        assert!(error.to_string().contains("Base URL"));
+
+        let duplicate = r#"[
+          {"id":"a","name":"A","kind":"openai","base_url":"https://x","model":"m"},
+          {"id":"a","name":"B","kind":"openai","base_url":"https://x","model":"m"}
+        ]"#;
+        let error = save_llm_profiles(&db, duplicate, "{}").await.unwrap_err();
+        assert!(error.to_string().contains("重复"));
+
+        // 校验失败不能留下半份配置。
+        assert!(parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref())
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn keyless_profiles_never_send_a_stored_key() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        set_setting(
+            &db,
+            "llm_profiles",
+            r#"[{"id":"local","name":"Local","kind":"openai","base_url":"http://127.0.0.1:1234/v1","model":"m","key_required":false}]"#,
+        )
+        .await
+        .unwrap();
+        // 之前存过一把 Key；用户后来把「需要 Key」关掉了，它就不该再被发出去。
+        keychain::set_api_key(&db, "local", "sk-old").await.unwrap();
+
+        let profiles =
+            parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref()).unwrap();
+        assert_eq!(
+            crate::llm::api_key_for(&db, &profiles[0]).await.unwrap(),
+            Some(String::new())
+        );
+    }
+
+    #[tokio::test]
+    async fn saving_profiles_normalizes_strings_and_drops_the_meaningless_ollama_key_flag() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let profiles = r#"[{"id":"o","name":"  Ollama  ","kind":"ollama","base_url":"http://127.0.0.1:11434/","model":" qwen2.5:7b ","key_required":true}]"#;
+
+        save_llm_profiles(&db, profiles, "{}").await.unwrap();
+
+        let stored = parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref())
+            .unwrap();
+        assert_eq!(stored[0].name, "Ollama");
+        assert_eq!(stored[0].base_url, "http://127.0.0.1:11434");
+        assert_eq!(stored[0].model, "qwen2.5:7b");
+        assert!(stored[0].key_required.is_none());
+        assert!(!stored[0].requires_key());
     }
 }

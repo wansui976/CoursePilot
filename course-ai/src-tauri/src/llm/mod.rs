@@ -177,12 +177,17 @@ pub async fn api_key_for(
     db: &crate::db::Db,
     profile: &profiles::LlmProfile,
 ) -> AppResult<Option<String>> {
-    let key = keychain::get_api_key(db, &profile.id).await?;
-    match key {
-        Some(key) if !key.trim().is_empty() => Ok(Some(key)),
-        _ if !profile.requires_key() => Ok(Some(String::new())),
-        _ => Ok(None),
+    // 不需要 Key 的协议（Ollama / 显式关掉 Key）就不该再碰钥匙串。
+    // 否则用户把「需要 Key」关掉之后，旧 Key 仍会被悄悄拼进请求发出去。
+    if !profile.requires_key() {
+        return Ok(Some(String::new()));
     }
+    let key = keychain::get_api_key(db, &profile.id).await?;
+    Ok(key
+        // 老版本可能把带换行/空格的 Key 存进了库里；trim 之后再发，
+        // 否则拼进 header 会变成 builder error。
+        .filter(|key| !key.trim().is_empty())
+        .map(|key| key.trim().to_string()))
 }
 
 /// 把 temperature 量化到 2 位小数再发给服务端。

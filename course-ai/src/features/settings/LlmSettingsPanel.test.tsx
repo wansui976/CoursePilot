@@ -251,4 +251,119 @@ describe("LlmSettingsPanel", () => {
     expect(name).toHaveValue(profile.name);
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
   });
+
+  it("does not let a failed load overwrite the saved config", async () => {
+    mockIpc.ai.getProfiles.mockRejectedValueOnce(new Error("db locked"));
+    render(<LlmSettingsPanel />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("db locked");
+    const save = screen.getByRole("button", { name: "保存" });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(mockIpc.ai.saveProfiles).not.toHaveBeenCalled();
+
+    // 重试成功后恢复编辑，错误条消失。
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(await screen.findByLabelText("配置名称")).toHaveValue(profile.name);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps manual digest routing when the active profile is removed", async () => {
+    mockIpc.ai.getProfiles.mockResolvedValue([
+      profile,
+      {
+        id: "p2",
+        name: "便宜配置",
+        kind: "openai" as const,
+        base_url: "https://api.deepseek.com",
+        model: "deepseek-chat",
+      },
+    ]);
+    mockIpc.settings.get.mockResolvedValue(
+      JSON.stringify({ notes: "p1", digest: "p2" }),
+    );
+    confirmMock.mockResolvedValue(true);
+    render(<LlmSettingsPanel />);
+
+    await screen.findByDisplayValue(profile.name);
+    fireEvent.click(screen.getAllByRole("button", { name: "删除" })[0]);
+    await waitFor(() =>
+      expect(screen.queryByDisplayValue(profile.name)).not.toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(mockIpc.ai.saveProfiles).toHaveBeenCalledOnce());
+    const routing = JSON.parse(mockIpc.ai.saveProfiles.mock.calls[0][1]);
+    // 默认跟着剩下的第一个走，但手工配的 digest 不能被一起冲掉。
+    expect(routing.notes).toBe("p2");
+    expect(routing.digest).toBe("p2");
+  });
+
+  it("sends typed keys in the same save call as the profiles", async () => {
+    render(<LlmSettingsPanel />);
+
+    const keyInput = await screen.findByLabelText("API Key");
+    fireEvent.change(keyInput, { target: { value: "sk-draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(mockIpc.ai.saveProfiles).toHaveBeenCalledOnce());
+    expect(mockIpc.ai.saveProfiles.mock.calls[0][2]).toEqual({ p1: "sk-draft" });
+  });
+
+  it("blocks saving a profile with an empty model name", async () => {
+    render(<LlmSettingsPanel />);
+    await screen.findByLabelText("配置名称");
+
+    fireEvent.click(screen.getByRole("button", { name: "新增" }));
+    await waitFor(() => expect(screen.getAllByLabelText("配置名称")).toHaveLength(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(await screen.findByText(/模型名不能为空/)).toBeInTheDocument();
+    expect(mockIpc.ai.saveProfiles).not.toHaveBeenCalled();
+  });
+
+  it("asks for the key again when an endpoint with a stored key is changed", async () => {
+    mockIpc.ai.hasApiKey.mockResolvedValue(true);
+    render(<LlmSettingsPanel />);
+    await screen.findByText("已配置");
+
+    fireEvent.change(screen.getByLabelText("Base URL"), {
+      target: { value: "https://attacker.example/v1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(await screen.findByText(/重新填写 API Key/)).toBeInTheDocument();
+    expect(mockIpc.ai.saveProfiles).not.toHaveBeenCalled();
+
+    // 输入新 Key 后允许保存，Key 与配置一起提交。
+    fireEvent.change(screen.getByLabelText("API Key"), {
+      target: { value: "sk-new" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(mockIpc.ai.saveProfiles).toHaveBeenCalledOnce());
+    expect(mockIpc.ai.saveProfiles.mock.calls[0][2]).toEqual({ p1: "sk-new" });
+  });
+
+  it("does not keep a key for a profile deleted before saving", async () => {
+    confirmMock.mockResolvedValue(true);
+    render(<LlmSettingsPanel />);
+    await screen.findByLabelText("配置名称");
+
+    fireEvent.click(screen.getByRole("button", { name: "新增" }));
+    await waitFor(() => expect(screen.getAllByLabelText("配置名称")).toHaveLength(2));
+    const keyInputs = screen.getAllByLabelText("API Key");
+    fireEvent.change(keyInputs[keyInputs.length - 1], {
+      target: { value: "sk-orphan" },
+    });
+    const deletes = screen.getAllByRole("button", { name: "删除" });
+    fireEvent.click(deletes[deletes.length - 1]);
+    await waitFor(() => expect(screen.getAllByLabelText("配置名称")).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(mockIpc.ai.saveProfiles).toHaveBeenCalledOnce());
+    expect(mockIpc.ai.saveProfiles.mock.calls[0][2]).toEqual({});
+    const savedProfiles = JSON.parse(mockIpc.ai.saveProfiles.mock.calls[0][0]);
+    expect(savedProfiles.map((saved: { id: string }) => saved.id)).toEqual(["p1"]);
+  });
 });

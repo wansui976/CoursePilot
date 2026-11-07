@@ -81,8 +81,13 @@ export const translation = {
 
 export const ai = {
   getProfiles: (): Promise<LlmProfile[]> => invoke("cmd_get_llm_profiles"),
-  saveProfiles: (profilesJson: string, routingJson: string): Promise<void> =>
-    invoke("cmd_save_llm_profiles", { profilesJson, routingJson }),
+  /** 一次提交配置、路由和本次新输入的 Key；后端先写 Key 再落库。 */
+  saveProfiles: (
+    profilesJson: string,
+    routingJson: string,
+    keys: Record<string, string> = {},
+  ): Promise<void> =>
+    invoke("cmd_save_llm_profiles", { profilesJson, routingJson, keys }),
   setApiKey: (profileId: string, apiKey: string): Promise<void> =>
     invoke("cmd_set_api_key", { profileId, apiKey }),
   hasApiKey: (profileId: string): Promise<boolean> =>

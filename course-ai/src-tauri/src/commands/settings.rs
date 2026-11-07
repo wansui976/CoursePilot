@@ -35,6 +35,23 @@ fn reject_secret_key(key: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// 不含密钥、但决定「已存的 Key 会发到哪」的配置键。
+///
+/// 它们只能由 `cmd_save_llm_profiles` 写：通用写接口要是能改 `llm_profiles` 的
+/// base_url，注入脚本就可以改完地址再触发一次 AI 任务，把钥匙串里的 Key 发到
+/// 自己指定的主机——和直接读 `llm_key_*` 等价。读取仍允许，设置页要读路由。
+const WRITE_PROTECTED_KEYS: &[&str] = &["llm_profiles", "llm_task_routing"];
+
+fn reject_protected_write(key: &str) -> AppResult<()> {
+    reject_secret_key(key)?;
+    if WRITE_PROTECTED_KEYS.contains(&key) {
+        return Err(AppError::Other(format!(
+            "设置项 {key} 需要通过大模型配置接口保存，不能走通用设置接口"
+        )));
+    }
+    Ok(())
+}
+
 pub async fn set_setting(db: &Db, key: &str, value: &str) -> AppResult<()> {
     sqlx::query(
         "INSERT INTO settings(key,value) VALUES(?,?)
@@ -64,7 +81,8 @@ pub async fn cmd_set_setting(
 ) -> AppResult<()> {
     // 写也挡：从通用接口塞一个 `llm_key_*` 进去会绕过密钥存储该做的事
     // （清掉同名的历史明文），也让前端多出一条能往凭证里写东西的路。
-    reject_secret_key(&key)?;
+    // 大模型配置也挡：改 base_url 等于改「已存 Key 会发到哪」。
+    reject_protected_write(&key)?;
     set_setting(&state.db, &key, &value).await
 }
 
@@ -139,5 +157,16 @@ mod tests {
         let error = reject_secret_key("llm_key_p1").unwrap_err().to_string();
         assert!(error.contains("llm_key_p1"));
         assert!(reject_secret_key("asr_backend").is_ok());
+    }
+
+    #[test]
+    fn generic_setting_writes_cannot_rewrite_llm_profiles_or_routing() {
+        // 这两个键不含密钥，但决定已存的 Key 发到哪：允许通用写接口改 profile 的
+        // base_url，等于给了注入脚本一条把 Key 发出去的等价路径。
+        assert!(reject_protected_write("llm_profiles").is_err());
+        assert!(reject_protected_write("llm_task_routing").is_err());
+        // 其他设置照常可写；读取路由仍允许（设置页与助手都要读）。
+        assert!(reject_protected_write("asr_backend").is_ok());
+        assert!(reject_secret_key("llm_task_routing").is_ok());
     }
 }
