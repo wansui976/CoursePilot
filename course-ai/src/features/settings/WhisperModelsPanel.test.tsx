@@ -12,6 +12,7 @@ const { mockIpc, platform, confirmDialog, openDialog } = vi.hoisted(() => ({
       modelsDir: vi.fn(),
       setModelsDir: vi.fn(),
       deleteLegacyModels: vi.fn(),
+      deleteModel: vi.fn(),
     },
     app: { networkInfo: vi.fn() },
   },
@@ -43,6 +44,7 @@ describe("WhisperModelsPanel", () => {
     });
     mockIpc.whisper.setModelsDir.mockReset();
     mockIpc.whisper.deleteLegacyModels.mockReset();
+    mockIpc.whisper.deleteModel.mockReset();
     platform.mobile = false;
   });
 
@@ -240,5 +242,42 @@ describe("WhisperModelsPanel", () => {
     await waitFor(() => expect(mockIpc.whisper.download).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
     expect(download).toBeEnabled();
+  });
+
+  it("deletes an installed model after confirming, and refreshes the list and the used space", async () => {
+    const qwen = { ...sensevoice, id: "qwen3-asr", display_name: "Qwen3-ASR 0.6B", size_bytes: 1_020_000_000 };
+    mockIpc.whisper.list.mockResolvedValueOnce([[sensevoice, true], [qwen, true]]);
+    render(<WhisperModelsPanel />);
+    const remove = await screen.findByRole("button", { name: "删除 Qwen3-ASR 0.6B" });
+    // 没装的才有「下载」，装了的才有「删除」。
+    expect(screen.queryByRole("button", { name: "下载" })).not.toBeInTheDocument();
+
+    // 取消确认：什么都不删。
+    confirmDialog.mockResolvedValueOnce(false);
+    fireEvent.click(remove);
+    await waitFor(() => expect(confirmDialog).toHaveBeenCalledTimes(1));
+    expect(confirmDialog.mock.calls[0][0]).toContain("约 973 MB");
+    expect(mockIpc.whisper.deleteModel).not.toHaveBeenCalled();
+
+    confirmDialog.mockResolvedValueOnce(true);
+    mockIpc.whisper.deleteModel.mockResolvedValueOnce(undefined);
+    mockIpc.whisper.list.mockResolvedValueOnce([[sensevoice, true], [qwen, false]]);
+    const dirLoads = mockIpc.whisper.modelsDir.mock.calls.length;
+    fireEvent.click(remove);
+    await waitFor(() => expect(mockIpc.whisper.deleteModel).toHaveBeenCalledWith("qwen3-asr"));
+    expect(await screen.findByRole("button", { name: "下载" })).toBeInTheDocument();
+    // 上面的「已用空间」跟着重读。
+    await waitFor(() => expect(mockIpc.whisper.modelsDir.mock.calls.length).toBeGreaterThan(dirLoads));
+  });
+
+  it("shows why a model could not be deleted", async () => {
+    mockIpc.whisper.list.mockResolvedValue([[sensevoice, true]]);
+    confirmDialog.mockResolvedValue(true);
+    mockIpc.whisper.deleteModel.mockRejectedValueOnce(
+      "config error: 有模型在下载或视频在处理，等它们结束后再删",
+    );
+    render(<WhisperModelsPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "删除 SenseVoice" }));
+    expect(await screen.findByText(/等它们结束后再删/)).toBeInTheDocument();
   });
 });

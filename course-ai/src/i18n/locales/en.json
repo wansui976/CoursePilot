@@ -1499,7 +1499,12 @@
     "legacy": "{{size}} of old model files are no longer used (Whisper, old Qwen3-ASR)",
     "deleteLegacy": "Delete old models",
     "deleteLegacyConfirm": "Delete old model files that are no longer used to free {{size}}. These are Whisper and the old Qwen3-ASR build; current transcription is unaffected.",
-    "deleteLegacyOk": "Delete"
+    "deleteLegacyOk": "Delete",
+    "deleteModel": "Delete {{name}}",
+    "deleteTitle": "Delete model",
+    "deleteConfirm": "Delete “{{name}}”? This frees about {{size}}; you can download it again later.\nIf it’s the model currently selected for recognition, local recognition switches to another downloaded model.",
+    "deleteOk": "Delete",
+    "deleting": "Deleting…"
   },
   "llmSettings": {
     "add": "Add",

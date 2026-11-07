@@ -19,7 +19,7 @@ function formatBytes(bytes: number) {
  * 模型存放位置。Windows 上默认在 C 盘的 AppData，模型一两个 G，可以换到别的盘；
  * 换的时候已下载的模型跟着搬过去（跨盘要复制一会儿，显示进度）。手机上没有可选的目录，不显示。
  */
-function ModelsLocation({ onMoved }: { onMoved: () => void }) {
+function ModelsLocation({ onMoved, version }: { onMoved: () => void; version: number }) {
   const { t } = useTranslation();
   const [dir, setDir] = useState<ModelsDir | null>(null);
   const [moving, setMoving] = useState<{ copied: number; total: number } | null>(null);
@@ -31,7 +31,8 @@ function ModelsLocation({ onMoved }: { onMoved: () => void }) {
       .then(setDir)
       .catch(() => {});
   }, []);
-  useEffect(load, [load]);
+  // version 变了（删了 / 下好了模型）就重读一遍，上面显示的总大小跟着变。
+  useEffect(load, [load, version]);
 
   useEffect(() => {
     const unlisten = listen<{ copied: number; total: number }>("models:move", (event) => {
@@ -134,6 +135,8 @@ export function WhisperModelsPanel() {
   >({});
   const [startingDownloads, setStartingDownloads] = useState<Set<string>>(() => new Set());
   const [downloadErrors, setDownloadErrors] = useState<Record<string, unknown>>({});
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [dirVersion, setDirVersion] = useState(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -159,7 +162,10 @@ export function WhisperModelsPanel() {
         ...current,
         [event.payload.id]: event.payload,
       }));
-      if (event.payload.done) void refresh();
+      if (event.payload.done) {
+        void refresh();
+        setDirVersion((version) => version + 1);
+      }
     });
     return () => {
       void unlisten.then((fn) => fn());
@@ -217,12 +223,44 @@ export function WhisperModelsPanel() {
     }
   }
 
+  // 不需要的模型删掉腾地方（Qwen3-ASR 一个就 1 GB）。识别正读着它的时候后端会拒绝。
+  async function deleteModel(model: WhisperModel) {
+    const ok = await confirmDialog(
+      t("whisperModels.deleteConfirm", {
+        name: model.display_name,
+        size: formatBytes(model.size_bytes),
+      }),
+      {
+        title: t("whisperModels.deleteTitle"),
+        kind: "warning",
+        okLabel: t("whisperModels.deleteOk"),
+        cancelLabel: t("common.cancel"),
+      },
+    );
+    if (!ok) return;
+    setDownloadErrors((current) => {
+      const next = { ...current };
+      delete next[model.id];
+      return next;
+    });
+    setDeleting(model.id);
+    try {
+      await ipc.whisper.deleteModel(model.id);
+      await refresh();
+      setDirVersion((version) => version + 1);
+    } catch (error) {
+      setDownloadErrors((current) => ({ ...current, [model.id]: error }));
+    } finally {
+      setDeleting(null);
+    }
+  }
+
   return (
     <div className="space-y-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] p-3">
       <h4 className="mb-1 text-xs font-medium text-[var(--text-muted)]">
         {t("whisperModels.title")}
       </h4>
-      {!isMobile() && <ModelsLocation onMoved={() => void refresh()} />}
+      {!isMobile() && <ModelsLocation onMoved={() => void refresh()} version={dirVersion} />}
       {loadError && (
         <div
           role="alert"
@@ -264,7 +302,18 @@ export function WhisperModelsPanel() {
                   </span>
                 )}
               </span>
-              {!installed && (
+              {installed ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-[var(--status-err)]"
+                  aria-label={t("whisperModels.deleteModel", { name: model.display_name })}
+                  disabled={deleting === model.id}
+                  onClick={() => void deleteModel(model)}
+                >
+                  {deleting === model.id ? t("whisperModels.deleting") : t("whisperModels.deleteOk")}
+                </Button>
+              ) : (
                 <Button
                   size="sm"
                   variant="outline"

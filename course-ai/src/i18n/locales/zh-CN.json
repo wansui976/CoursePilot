@@ -1496,7 +1496,12 @@
     "legacy": "旧版模型文件 {{size}} 已不再使用（Whisper、旧版 Qwen3-ASR）",
     "deleteLegacy": "删除旧模型",
     "deleteLegacyConfirm": "删除不再使用的旧模型文件，可以腾出 {{size}}。这些是 Whisper 和旧版 Qwen3-ASR 的模型，删掉不影响现在的识别。",
-    "deleteLegacyOk": "删除"
+    "deleteLegacyOk": "删除",
+    "deleteModel": "删除 {{name}}",
+    "deleteTitle": "删除识别模型",
+    "deleteConfirm": "删除「{{name}}」？可以腾出约 {{size}}，以后要用得重新下载。\n如果它正是当前选用的识别模型，本地识别会改用另一个已下载的模型。",
+    "deleteOk": "删除",
+    "deleting": "删除中…"
   },
   "llmSettings": {
     "add": "新增",

@@ -56,6 +56,7 @@ export function installMockIpc({ theme, safeArea }) {
   ];
   const chapterOf = ["f1", "f1", "f1", "f1", "f2", "f2", "f3", null, null];
   videos.forEach((video, i) => (video.folder_id = chapterOf[i]));
+  const deletedModels = new Set();
   const withFolders = () => {
     try {
       return localStorage.getItem("__shot-folders") === "1";
@@ -224,20 +225,24 @@ export function installMockIpc({ theme, safeArea }) {
       return `/Users/demo/Desktop/${fileName}.png`;
     },
     // 手机上后端只列 sherpa 模型；__shot-lowmem 时 Qwen3-ASR 标成「内存不够」。
+    // 本地识别只有 SenseVoice / Qwen3-ASR（Whisper 已不再支持）。删掉的模型在这一会话里记成未安装。
     cmd_list_whisper_models: () => {
-      const mobile = /iPhone|iPad|Android/.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
       const lowMem = localStorage.getItem("__shot-lowmem") === "1";
-      const sherpa = [
-        [{ id: "sensevoice", display_name: "SenseVoice（中文推荐 · 快）", size_bytes: 240_000_000, url: "", fits_memory: true }, true],
-        [{ id: "qwen3-asr", display_name: "Qwen3-ASR 0.6B（中文高精度）", size_bytes: 988_000_000, url: "", fits_memory: !lowMem }, !lowMem],
-      ];
-      if (mobile) return sherpa;
       return [
-        ...sherpa,
-        [{ id: "large-v3-turbo", display_name: "Whisper large-v3-turbo", size_bytes: 1_620_000_000, url: "" }, false],
-        [{ id: "small", display_name: "Whisper small", size_bytes: 488_000_000, url: "" }, false],
+        [{ id: "sensevoice", display_name: "SenseVoice（中文推荐 · 快）", size_bytes: 240_000_000, url: "", fits_memory: true }, !deletedModels.has("sensevoice")],
+        [{ id: "qwen3-asr", display_name: "Qwen3-ASR 0.6B（更准 · 支持 GPU 加速）", size_bytes: 1_020_000_000, url: "", fits_memory: !lowMem }, !lowMem && !deletedModels.has("qwen3-asr")],
       ];
     },
+    cmd_delete_asr_model: ({ id }) => {
+      deletedModels.add(id);
+    },
+    cmd_get_models_dir: () => ({
+      path: "/Users/demo/Library/Application Support/dev.courseai.app",
+      is_default: true,
+      default_path: "/Users/demo/Library/Application Support/dev.courseai.app",
+      size_bytes: (deletedModels.has("sensevoice") ? 0 : 240_000_000) + (deletedModels.has("qwen3-asr") ? 0 : 1_020_000_000),
+      legacy_bytes: 0,
+    }),
     // 「导入整个文件夹」选中的是 B 站客户端的缓存目录。
     cmd_scan_folder: () => [
       ...[

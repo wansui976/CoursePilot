@@ -102,6 +102,33 @@ pub async fn cmd_delete_legacy_models(
     cmd_get_models_dir(app, state).await
 }
 
+/// 删掉一个已下载的识别模型（只删它自己的目录；几个模型共用的 VAD 很小，留着）。
+/// 和删旧模型同一个规矩：有模型在下载、有视频在处理时不删——识别可能正读着它。
+pub async fn delete_model(root: &Path, id: &str) -> AppResult<()> {
+    use crate::keep_alive::{is_active, Kind};
+    if is_active(Kind::ModelDownload) || is_active(Kind::Processing) {
+        return Err(AppError::Config("有模型在下载或视频在处理，等它们结束后再删".into()));
+    }
+    let model = local_asr::find(id).ok_or_else(|| AppError::NotFound(format!("model {id}")))?;
+    let dir = local_asr::model_dir(root, model);
+    match tokio::fs::remove_dir_all(&dir).await {
+        Ok(()) => Ok(()),
+        // 已经不在了：结果一样，不算错。
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[tauri::command]
+pub async fn cmd_delete_asr_model(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<()> {
+    let root = model_store::models_root(&state.db, &app_data(&app)?).await?;
+    delete_model(&root, &id).await
+}
+
 #[derive(Serialize, Clone)]
 struct MoveEvent {
     copied: u64,
@@ -375,6 +402,29 @@ async fn fetch_verified(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn deleting_a_model_removes_only_its_own_files() {
+        let root = tempfile::tempdir().unwrap();
+        let sense = local_asr::find("sensevoice").unwrap();
+        let qwen = local_asr::find("qwen3-asr").unwrap();
+        for model in [sense, qwen] {
+            let dir = local_asr::model_dir(root.path(), model);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("model.bin"), b"x").unwrap();
+        }
+        let vad = local_asr::vad_path(root.path());
+        std::fs::write(&vad, b"vad").unwrap();
+
+        delete_model(root.path(), "qwen3-asr").await.unwrap();
+        assert!(!local_asr::model_dir(root.path(), qwen).exists());
+        // 另一个模型和共用的 VAD 都还在。
+        assert!(local_asr::model_dir(root.path(), sense).join("model.bin").exists());
+        assert!(vad.exists());
+        // 再删一次（已经不在了）不报错；不认识的模型报错。
+        delete_model(root.path(), "qwen3-asr").await.unwrap();
+        assert!(delete_model(root.path(), "no-such-model").await.is_err());
+    }
 
     /// 本地起一个 HTTP 服务回 `body`：路径 /404… 回 404；/half… 声称整份、只发一半就断开；
     /// 其余照 Range 头回 206（没有 Range 回 200）。收到的每个 Range 头记在返回的列表里。
