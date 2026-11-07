@@ -71,6 +71,21 @@ export function FolderItem({
     />
   );
   const countText = t("folders.videoCount", { count });
+  // 拼图随视频数变：1 张满铺、2 张左右、3 张一大两小、4 张以上 2×2——一眼看出是「一摞」。
+  // 角标表明这是文件夹（网格卡上还带视频数）；标了颜色的文件夹，图标是那个颜色（底色不变，保证数字的对比度）。
+  const cover = (frame: string, withCount: boolean) => (
+    <span className={cn(frame, "ca-folder-cover")} data-tiles={Math.min(covers.length, 4)}>
+      {covers.slice(0, 4).map((videoId) => (
+        <span key={videoId} className="ca-course-tile">
+          <VideoCover videoId={videoId} className="absolute inset-0 h-full w-full" />
+        </span>
+      ))}
+      <span className="ca-folder-badge" data-color={folder.color ?? undefined}>
+        <FolderIcon aria-hidden="true" className="h-3.5 w-3.5" style={badgeIconStyle(folder.color)} />
+        {withCount && <span aria-hidden="true">{count}</span>}
+      </span>
+    </span>
+  );
 
   const body = renaming ? (
     <FolderRenameField folder={folder} onDone={actions.onFinishRename} />
@@ -85,19 +100,7 @@ export function FolderItem({
       {covers.length === 0 ? (
         <span className="ca-thumb ca-folder-thumb">{icon("h-11 w-11")}</span>
       ) : (
-        // 拼图随视频数变：1 张满铺、2 张左右、3 张一大两小、4 张以上 2×2——一眼看出是「一摞」。
-        <span className="ca-thumb ca-folder-cover" data-tiles={Math.min(covers.length, 4)}>
-          {covers.slice(0, 4).map((videoId) => (
-            <span key={videoId} className="ca-course-tile">
-              <VideoCover videoId={videoId} className="absolute inset-0 h-full w-full" />
-            </span>
-          ))}
-          {/* 角标表明这是文件夹、里面有几个视频；标了颜色的文件夹，图标是那个颜色（底色不变，保证数字的对比度）。 */}
-          <span className="ca-folder-badge" data-color={folder.color ?? undefined}>
-            <FolderIcon aria-hidden="true" className="h-3.5 w-3.5" style={badgeIconStyle(folder.color)} />
-            <span aria-hidden="true">{count}</span>
-          </span>
-        </span>
+        cover("ca-thumb", true)
       )}
       <span className="ca-card-body">
         <span className="ca-card-title">{folder.name}</span>
@@ -115,7 +118,12 @@ export function FolderItem({
       onClick={actions.onOpen}
     >
       <span className="row-main">
-        <span className="row-thumb ca-folder-thumb">{icon("h-5 w-5")}</span>
+        {covers.length === 0 ? (
+          <span className="row-thumb ca-folder-thumb">{icon("h-5 w-5")}</span>
+        ) : (
+          // 列表行的缩略图也是拼图；视频数已经写在「进度」列，角标只留图标。
+          cover("row-thumb", false)
+        )}
         <span className="row-name">
           <span className="t">{folder.name}</span>
           <span className="s">{countText}</span>

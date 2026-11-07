@@ -920,6 +920,20 @@
   backdrop-filter: blur(6px);
 }
 
+/* 列表行的小缩略图：角标缩小、贴角。 */
+.row-thumb .ca-folder-badge {
+  left: 4px;
+  bottom: 4px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 5px;
+}
+
+.row-thumb .ca-folder-badge svg {
+  width: 12px;
+  height: 12px;
+}
+
 /* 拖着视频悬停在文件夹上：描一圈强调色，表示松手就放进去。 */
 .ca-folder[data-drop-target] {
   outline: 2px solid var(--accent);
