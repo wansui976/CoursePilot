@@ -244,6 +244,11 @@ pub enum OcrEvent {
 // 同时最多识别几页。云端是网络往返、本地是 CPU 进程，都不宜放开跑。
 const OCR_CONCURRENCY: usize = 3;
 
+/// 单页 OCR 的总时限（各引擎自己的超时之外再兜一层）。一批三页是一起等的：任何一页
+/// 卡住不返回，整批、整条课件支线、以及排在它后面的 AI 步骤就全卡住，用户看到的是
+/// 「课件做完就停在 50%」。云端视觉模型自己给了 120 秒，这里留一点余量。
+const OCR_PAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(150);
+
 /// 一次批量识别的结果。
 ///
 /// 原来这里只返回「认出文字的页数」，于是**部分失败根本传不出去**：只要有一页成功，
@@ -331,35 +336,45 @@ pub async fn ocr_slides_for_video(
             let deepseek = deepseek.as_ref();
             let langs = langs.as_str();
             async move {
-                let text = if let Some(config) = deepseek {
-                    match tokio::fs::read(path).await {
-                        Ok(bytes) => {
-                            deepseek_ocr::run_deepseek_ocr(
-                                &bytes,
-                                &config.api_key,
-                                &config.base_url,
-                                &config.model,
-                            )
-                            .await
+                let recognize = async {
+                    if let Some(config) = deepseek {
+                        match tokio::fs::read(path).await {
+                            Ok(bytes) => {
+                                deepseek_ocr::run_deepseek_ocr(
+                                    &bytes,
+                                    &config.api_key,
+                                    &config.base_url,
+                                    &config.model,
+                                )
+                                .await
+                            }
+                            Err(error) => Err(AppError::Io(error)),
                         }
-                        Err(error) => Err(AppError::Io(error)),
-                    }
-                } else if let Some(config) = aliyun {
-                    match tokio::fs::read(path).await {
-                        Ok(bytes) => {
-                            aliyun_ocr::run_aliyun_ocr(
-                                &bytes,
-                                &config.access_key_id,
-                                &config.access_key_secret,
-                                &config.ocr_type,
-                            )
-                            .await
+                    } else if let Some(config) = aliyun {
+                        match tokio::fs::read(path).await {
+                            Ok(bytes) => {
+                                aliyun_ocr::run_aliyun_ocr(
+                                    &bytes,
+                                    &config.access_key_id,
+                                    &config.access_key_secret,
+                                    &config.ocr_type,
+                                )
+                                .await
+                            }
+                            Err(error) => Err(AppError::Io(error)),
                         }
-                        Err(error) => Err(AppError::Io(error)),
+                    } else {
+                        ocr::run_ocr_on_image(Path::new(path), langs).await
                     }
-                } else {
-                    ocr::run_ocr_on_image(Path::new(path), langs).await
                 };
+                let text = tokio::time::timeout(OCR_PAGE_TIMEOUT, recognize)
+                    .await
+                    .unwrap_or_else(|_| {
+                        Err(AppError::Pipeline(format!(
+                            "识别这一页超过 {} 秒没有结果，先跳过",
+                            OCR_PAGE_TIMEOUT.as_secs()
+                        )))
+                    });
                 (*id, path.as_str(), text)
             }
         });

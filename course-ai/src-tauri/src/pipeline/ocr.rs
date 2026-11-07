@@ -111,16 +111,26 @@ pub async fn run_ocr_on_image(image: &Path, langs: &str) -> AppResult<String> {
     let mut child = cmd
         .spawn()
         .map_err(|e| AppError::Pipeline(format!("tesseract spawn: {e}")))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        // 写失败（tesseract 提前退出、关了管道）不在这里报：退出码和 stderr 才说明了原因。
-        let _ = stdin.write_all(&image_bytes).await;
-    }
+    // 写图和等结果放在同一个 30 秒时限里：原来写 stdin 不计时，tesseract 不读输入时
+    // 管道写满就永远卡在这一步，后面的超时根本轮不到。写放到单独的任务里，超时后
+    // child 被丢掉（kill_on_drop）、管道随之关闭，写的那一头也就跟着出错退出。
+    let writer = child.stdin.take().map(|mut stdin| {
+        tokio::spawn(async move {
+            // 写失败（tesseract 提前退出、关了管道）不在这里报：退出码和 stderr 才说明了原因。
+            let _ = stdin.write_all(&image_bytes).await;
+        })
+    });
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         child.wait_with_output(),
     )
     .await
-    .map_err(|_| AppError::Pipeline("tesseract 超时（30 秒），这张图先跳过".into()))?
+    .map_err(|_| {
+        if let Some(writer) = &writer {
+            writer.abort();
+        }
+        AppError::Pipeline("tesseract 超时（30 秒），这张图先跳过".into())
+    })?
     .map_err(|e| AppError::Pipeline(format!("tesseract wait: {e}")))?;
     if !output.status.success() {
         return Err(AppError::Pipeline(format!(

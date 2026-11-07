@@ -309,6 +309,7 @@ async fn run_all(
     video_id: String,
     slides_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     slides_done: tokio::sync::oneshot::Sender<()>,
+    slides_abort: SlidesAbort,
 ) -> AppResult<()> {
     let state = app.state::<AppState>();
     let db = state.db.clone();
@@ -350,10 +351,13 @@ async fn run_all(
         let db = db.clone();
         let video_id = video_id.clone();
         let jobs_list = jobs_list.clone();
-        tauri::async_runtime::spawn(async move {
+        let task = tauri::async_runtime::spawn(async move {
             run_slides_stage(&app, &db, &video_id, &jobs_list, &slides_cancel).await;
             let _ = slides_done.send(());
-        })
+        });
+        // 取消时要能直接掐掉这条支线：它是单独起的任务，中止主任务不会连带它。
+        *slides_abort.lock().unwrap() = Some(task.inner().abort_handle());
+        task
     };
 
     let backend = asr_backend_or_default(
@@ -1684,7 +1688,15 @@ struct ProcessingTask {
     handle: tauri::async_runtime::JoinHandle<()>,
     slides_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     slides_done: tokio::sync::oneshot::Receiver<()>,
+    slides_abort: SlidesAbort,
 }
+
+/// 课件支线任务的中止句柄：支线起了以后由 run_all 填进来。
+type SlidesAbort = std::sync::Arc<std::sync::Mutex<Option<tokio::task::AbortHandle>>>;
+
+/// 停止处理时，给主任务 / 课件支线各自收口的时间。课件支线看到取消标志会把已认出的页
+/// 留在库里、把步骤标成「已取消」；等不到就直接中止（子进程 kill_on_drop 跟着被杀）。
+const STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl ProcessingTasks {
     fn video_ids(&self) -> Vec<String> {
@@ -1720,17 +1732,25 @@ pub fn is_processing(app: &AppHandle, video_id: &str) -> bool {
         .contains_key(video_id)
 }
 
+/// 停掉某视频正在跑的处理。**必须在有限时间内返回**：调用方（取消、删除、重新处理）
+/// 都拿着全局的 transition 锁，原来这里无限期地等课件支线收口——某一页 OCR 卡住时
+/// 支线永远不收口，锁永远不放，之后的取消、删除全部挂住，只能重启应用。
 async fn stop_processing_task(task: ProcessingTask) {
     let ProcessingTask {
         handle,
         slides_cancel,
         slides_done,
+        slides_abort,
         ..
     } = task;
     slides_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
     handle.abort();
-    let _ = handle.await;
-    let _ = slides_done.await;
+    let _ = tokio::time::timeout(STOP_GRACE, handle).await;
+    if tokio::time::timeout(STOP_GRACE, slides_done).await.is_err() {
+        if let Some(abort) = slides_abort.lock().unwrap().take() {
+            abort.abort();
+        }
+    }
 }
 
 #[tauri::command]
@@ -1819,6 +1839,8 @@ pub async fn cmd_process_video(app: AppHandle, video_id: String) -> AppResult<()
     let slides_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let task_slides_cancel = slides_cancel.clone();
     let (slides_done_tx, slides_done_rx) = tokio::sync::oneshot::channel::<()>();
+    let slides_abort: SlidesAbort = Default::default();
+    let task_slides_abort = slides_abort.clone();
     let handle = tauri::async_runtime::spawn(async move {
         let _ = start_rx.await;
         if let Err(error) = run_all(
@@ -1826,6 +1848,7 @@ pub async fn cmd_process_video(app: AppHandle, video_id: String) -> AppResult<()
             task_video.clone(),
             task_slides_cancel,
             slides_done_tx,
+            task_slides_abort,
         )
         .await
         {
@@ -1842,6 +1865,7 @@ pub async fn cmd_process_video(app: AppHandle, video_id: String) -> AppResult<()
             handle,
             slides_cancel,
             slides_done: slides_done_rx,
+            slides_abort,
         },
     );
     let _ = start_tx.send(());
@@ -1977,10 +2001,53 @@ mod tests {
             handle,
             slides_cancel,
             slides_done: slides_done_rx,
+            slides_abort: Default::default(),
         })
         .await;
 
         assert!(slides_exited.load(Ordering::SeqCst));
+    }
+
+    /// 课件支线卡在一页 OCR 上、根本不看取消标志时，停止处理也必须在有限时间内返回，
+    /// 并把这条支线掐掉——否则调用方拿着的 transition 锁永远不放，取消、删除全部挂住。
+    #[tokio::test]
+    async fn stopping_processing_task_aborts_a_stuck_slides_branch() {
+        let (slides_done_tx, slides_done_rx) = tokio::sync::oneshot::channel::<()>();
+        let dropped = Arc::new(AtomicBool::new(false));
+        struct SetOnDrop(Arc<AtomicBool>);
+        impl Drop for SetOnDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let guard = SetOnDrop(dropped.clone());
+        let stuck = tauri::async_runtime::spawn(async move {
+            let _guard = guard;
+            let _done = slides_done_tx; // 永远不发、也不提前放掉
+            std::future::pending::<()>().await;
+        });
+        let slides_abort: SlidesAbort = Default::default();
+        *slides_abort.lock().unwrap() = Some(stuck.inner().abort_handle());
+        let handle = tauri::async_runtime::spawn(std::future::pending::<()>());
+
+        let started = std::time::Instant::now();
+        stop_processing_task(ProcessingTask {
+            run_id: "run".into(),
+            handle,
+            slides_cancel: Arc::new(AtomicBool::new(false)),
+            slides_done: slides_done_rx,
+            slides_abort,
+        })
+        .await;
+        assert!(started.elapsed() < STOP_GRACE * 3, "{:?}", started.elapsed());
+        // 被中止的任务会把自己的局部变量丢掉：守卫的 Drop 证明支线确实停了。
+        for _ in 0..50 {
+            if dropped.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(dropped.load(Ordering::SeqCst), "卡住的课件支线没有被中止");
     }
 
     #[tokio::test]
