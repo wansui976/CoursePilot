@@ -66,6 +66,7 @@ pub async fn enqueue_local_snapshot(db: &Db) -> AppResult<()> {
     let mut tx = db.pool.begin().await?;
     for (record_type, table, id_column) in [
         ("Course", "courses", "id"),
+        ("Folder", "folders", "id"),
         ("Video", "videos", "id"),
         ("Note", "notes", "video_id"),
         ("NoteImage", "note_images", "id"),

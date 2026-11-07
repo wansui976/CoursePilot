@@ -246,6 +246,31 @@ pub(crate) async fn payload_for(
                 },
             )
         }
+        "Folder" => {
+            type FolderSyncRow = (String, String, Option<String>, String, Option<String>, i64, i64, i64);
+            let row: Option<FolderSyncRow> = sqlx::query_as(
+                "SELECT id,course_id,parent_id,name,color,order_index,created_at,updated_at
+                 FROM folders WHERE id=?",
+            )
+            .bind(record_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+            row.map(
+                |(id, course_id, parent_id, name, color, order_index, created_at, updated_at)| {
+                    json!({
+                        "id": id,
+                        "courseID": course_id,
+                        "parentID": parent_id,
+                        "name": name,
+                        "color": color,
+                        "orderIndex": order_index,
+                        "createdAt": created_at,
+                        // 名字、上级、位置、颜色、所属课程整组的 LWW 钟。
+                        "updatedAt": updated_at,
+                    })
+                },
+            )
+        }
         "Video" => {
             type VideoSyncRow = (
                 String,
@@ -260,12 +285,13 @@ pub(crate) async fn payload_for(
                 Option<i64>,
                 i64,
                 i64,
+                Option<String>,
             );
             let row: Option<VideoSyncRow> = sqlx::query_as(
                 "SELECT id,course_id,title,source_type,source_uri,content_fingerprint,
                         duration_ms,order_index,created_at,deleted_at,
                         CASE WHEN sync_updated_at>0 THEN sync_updated_at ELSE created_at END,
-                        COALESCE(trash_changed_at, deleted_at, created_at)
+                        COALESCE(trash_changed_at, deleted_at, created_at),folder_id
                  FROM videos WHERE id=?",
             )
             .bind(record_id)
@@ -285,10 +311,13 @@ pub(crate) async fn payload_for(
                     deleted_at,
                     updated_at,
                     trash_changed_at,
+                    folder_id,
                 )| {
                     json!({
                         "id": id,
                         "courseID": course_id,
+                        // 所在文件夹，与标题/归属/排序同属意图组。null = 课程根目录。
+                        "folderID": folder_id,
                         "title": title,
                         "sourceType": source_type,
                         "sourceURI": source_uri,

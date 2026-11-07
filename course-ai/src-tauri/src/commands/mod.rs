@@ -9,6 +9,7 @@ pub mod transcode;
 pub mod danmaku;
 pub mod export;
 pub mod feynman;
+pub mod folders;
 pub mod note_history;
 pub mod note_images;
 pub mod notify;

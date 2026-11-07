@@ -38,6 +38,8 @@ pub struct Video {
     pub crop_bottom: Option<f64>,
     pub crop_left: Option<f64>,
     pub created_at: i64,
+    /// 所在文件夹；None = 课程根目录。界面列表接口会把指向已不存在文件夹的归一成 None。
+    pub folder_id: Option<String>,
 }
 
 fn percent_decode(input: &str) -> Cow<'_, str> {
@@ -271,6 +273,7 @@ pub async fn add_local_video(
         crop_bottom: None,
         crop_left: None,
         created_at: now,
+        folder_id: None,
     };
 
     sqlx::query(
@@ -463,7 +466,7 @@ pub struct VideoListItem {
 
 /// 供界面使用的视频列表。比 `list_videos` 多一列「有没有文稿」。
 pub async fn list_videos_for_ui(db: &Db, course_id: &str) -> AppResult<Vec<VideoListItem>> {
-    Ok(sqlx::query_as::<_, VideoListItem>(
+    let mut videos = sqlx::query_as::<_, VideoListItem>(
         "SELECT v.*, EXISTS(SELECT 1 FROM transcripts t WHERE t.video_id=v.id) AS has_transcript
          FROM videos v
          WHERE v.course_id=? AND v.deleted_at IS NULL
@@ -471,7 +474,12 @@ pub async fn list_videos_for_ui(db: &Db, course_id: &str) -> AppResult<Vec<Video
     )
     .bind(course_id)
     .fetch_all(&db.pool)
-    .await?)
+    .await?;
+    crate::commands::folders::normalize_video_folders(db, course_id, &mut videos, |item| {
+        &mut item.video.folder_id
+    })
+    .await?;
+    Ok(videos)
 }
 
 /// 手动排序：按 ordered_ids 的顺序重写该课程视频的 order_index（0,1,2…）。

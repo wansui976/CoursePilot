@@ -113,6 +113,7 @@ fn is_supported(record_type: &str) -> bool {
     matches!(
         record_type,
         "Course"
+            | "Folder"
             | "Video"
             | "Note"
             | "NoteImage"
@@ -126,7 +127,7 @@ fn is_supported(record_type: &str) -> bool {
 fn type_rank(record_type: &str) -> u8 {
     match record_type {
         "Course" => 0,
-        "Video" => 1,
+        "Folder" | "Video" => 1,
         _ => 2,
     }
 }
@@ -250,6 +251,7 @@ async fn apply_save(
 ) -> AppResult<Outcome> {
     match envelope.record_type.as_str() {
         "Course" => save_course(tx, own_device, envelope).await,
+        "Folder" => save_folder(tx, own_device, envelope).await,
         "Video" => save_video(tx, own_device, envelope, video_data_root, report).await,
         "Note" => save_note(tx, own_device, envelope, report).await,
         "Clip" => save_clip(tx, own_device, envelope).await,
@@ -320,6 +322,16 @@ async fn apply_delete(
                         .fetch_optional(&mut **tx)
                         .await?;
                 ("cards", "id", stamp)
+            }
+            // 文件夹没有回收站：本地之后又改过（戳更晚）就不删，我们的保存会把它送回对端。
+            // 里面的视频由它们各自的回收站信封处理；指向已删文件夹的视频按根目录显示。
+            "Folder" => {
+                let stamp: Option<i64> =
+                    sqlx::query_scalar("SELECT updated_at FROM folders WHERE id=?")
+                        .bind(&envelope.record_id)
+                        .fetch_optional(&mut **tx)
+                        .await?;
+                ("folders", "id", stamp)
             }
             "VideoProgress" => {
                 let stamp: Option<i64> =
@@ -481,6 +493,90 @@ async fn save_course(
     })
 }
 
+// ---------- 文件夹 ----------
+
+/// 文件夹整组一只钟（updated_at）：名字、上级、位置、颜色、所属课程。
+/// 课程还没到就驻留；上级还没到不驻留——读取时把找不到的上级当根目录。
+async fn save_folder(
+    tx: &mut Transaction<'_, Sqlite>,
+    own_device: &str,
+    envelope: &SyncEnvelope,
+) -> AppResult<Outcome> {
+    let payload = &envelope.payload;
+    let course_id = payload_str(payload, "courseID")
+        .ok_or_else(|| AppError::Config("folder payload missing courseID".into()))?;
+    let course_exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM courses WHERE id=?)")
+        .bind(&course_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    if !course_exists {
+        return Ok(Outcome::Parked);
+    }
+    let name = payload_str(payload, "name")
+        .ok_or_else(|| AppError::Config("folder payload missing name".into()))?;
+    let parent_id = payload_str(payload, "parentID");
+    let color = payload_str(payload, "color")
+        .filter(|color| crate::commands::courses::COURSE_COLORS.contains(&color.as_str()));
+    let order_index = payload_i64(payload, "orderIndex").unwrap_or(0);
+    let created_at = payload_i64(payload, "createdAt").unwrap_or(envelope.updated_at);
+    let updated_at = payload_i64(payload, "updatedAt").unwrap_or(created_at);
+
+    type LocalFolder = (String, Option<String>, String, Option<String>, i64, i64);
+    let local: Option<LocalFolder> = sqlx::query_as(
+        "SELECT course_id, parent_id, name, color, order_index, updated_at FROM folders WHERE id=?",
+    )
+    .bind(&envelope.record_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some((local_course, local_parent, local_name, local_color, local_order, local_updated)) =
+        local
+    else {
+        sqlx::query(
+            "INSERT INTO folders(id,course_id,parent_id,name,color,order_index,created_at,updated_at)
+             VALUES (?,?,?,?,?,?,?,?)",
+        )
+        .bind(&envelope.record_id)
+        .bind(&course_id)
+        .bind(&parent_id)
+        .bind(&name)
+        .bind(&color)
+        .bind(order_index)
+        .bind(created_at)
+        .bind(updated_at)
+        .execute(&mut **tx)
+        .await?;
+        return Ok(Outcome::Applied);
+    };
+    if remote_newer(
+        updated_at,
+        &envelope.version.device,
+        local_updated,
+        own_device,
+    ) && (local_course != course_id
+        || local_parent != parent_id
+        || local_name != name
+        || local_color != color
+        || local_order != order_index
+        || local_updated != updated_at)
+    {
+        sqlx::query(
+            "UPDATE folders SET course_id=?, parent_id=?, name=?, color=?, order_index=?, updated_at=?
+             WHERE id=?",
+        )
+        .bind(&course_id)
+        .bind(&parent_id)
+        .bind(&name)
+        .bind(&color)
+        .bind(order_index)
+        .bind(updated_at)
+        .bind(&envelope.record_id)
+        .execute(&mut **tx)
+        .await?;
+        return Ok(Outcome::Applied);
+    }
+    Ok(Outcome::Skipped)
+}
+
 // ---------- 视频 ----------
 
 async fn save_video(
@@ -508,6 +604,10 @@ async fn save_video(
     let fingerprint = payload_str(payload, "contentFingerprint");
     let duration_ms = payload_i64(payload, "durationMs");
     let order_index = payload_i64(payload, "orderIndex").unwrap_or(0);
+    // 旧版本的包里没有 folderID：保留本地值；键在而值为 null 才是「移到根目录」。
+    let folder_id: Option<Option<String>> = payload
+        .get("folderID")
+        .map(|value| value.as_str().map(str::to_string));
     let created_at = payload_i64(payload, "createdAt").unwrap_or(envelope.updated_at);
     let updated_at = payload_i64(payload, "updatedAt")
         .filter(|value| *value > 0)
@@ -527,13 +627,14 @@ async fn save_video(
         i64,
         i64,
         i64,
+        Option<String>,
     );
     let local: Option<LocalVideo> = sqlx::query_as(
         "SELECT title, course_id, order_index, duration_ms, content_fingerprint,
                 deleted_at,
                 CASE WHEN sync_updated_at>0 THEN sync_updated_at ELSE created_at END,
                 COALESCE(trash_changed_at, deleted_at, created_at),
-                created_at
+                created_at, folder_id
          FROM videos WHERE id=?",
     )
     .bind(&envelope.record_id)
@@ -552,8 +653,9 @@ async fn save_video(
         sqlx::query(
             "INSERT INTO videos(id,course_id,title,source_type,source_uri,file_path,
                                 duration_ms,order_index,data_dir,processed_status,created_at,
-                                deleted_at,content_fingerprint,sync_updated_at,trash_changed_at)
-             VALUES (?,?,?,?,?,'',?,?,?,'pending',?,?,?,?,?)",
+                                deleted_at,content_fingerprint,sync_updated_at,trash_changed_at,
+                                folder_id)
+             VALUES (?,?,?,?,?,'',?,?,?,'pending',?,?,?,?,?,?)",
         )
         .bind(&envelope.record_id)
         .bind(&course_id)
@@ -568,6 +670,7 @@ async fn save_video(
         .bind(&fingerprint)
         .bind(updated_at)
         .bind(trash_at)
+        .bind(folder_id.clone().flatten())
         .execute(&mut **tx)
         .await?;
         return Ok(Outcome::Applied);
@@ -582,23 +685,30 @@ async fn save_video(
         local_updated,
         local_trash_at,
         _local_created,
+        local_folder,
     ) = local;
+    let folder_id = folder_id.unwrap_or_else(|| local_folder.clone());
 
     let mut changed = false;
-    // 意图组：标题、归属、排序一起走。
+    // 意图组：标题、归属、文件夹、排序一起走。
     if remote_newer(
         updated_at,
         &envelope.version.device,
         local_updated,
         own_device,
-    ) && (local_title != title || local_course != course_id || local_order != order_index)
+    ) && (local_title != title
+        || local_course != course_id
+        || local_order != order_index
+        || local_folder != folder_id)
     {
         sqlx::query(
-            "UPDATE videos SET title=?, course_id=?, order_index=?, sync_updated_at=? WHERE id=?",
+            "UPDATE videos SET title=?, course_id=?, order_index=?, folder_id=?, sync_updated_at=?
+             WHERE id=?",
         )
         .bind(&title)
         .bind(&course_id)
         .bind(order_index)
+        .bind(&folder_id)
         .bind(updated_at)
         .bind(&envelope.record_id)
         .execute(&mut **tx)
@@ -1527,6 +1637,126 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(name, "远端新名");
+    }
+
+    #[tokio::test]
+    async fn course_color_changed_after_first_sync_still_ships() {
+        let (db_b, dir_b, _) = device().await;
+        let (db_a, _dir_a, incoming_a) = device().await;
+        let (course, _video) = seed_video(&db_b, dir_b.path()).await;
+        ship(&db_b, &db_a, &incoming_a).await;
+        crate::commands::courses::set_course_color(&db_b, course.clone(), Some("purple".into()))
+            .await
+            .unwrap();
+        assert!(outbox_count(&db_b).await > 0, "改颜色必须进出件队列");
+        ship(&db_b, &db_a, &incoming_a).await;
+        let color: Option<String> = sqlx::query_scalar("SELECT color FROM courses WHERE id=?")
+            .bind(&course)
+            .fetch_one(&db_a.pool)
+            .await
+            .unwrap();
+        assert_eq!(color.as_deref(), Some("purple"));
+    }
+
+    #[tokio::test]
+    async fn folders_and_video_placement_sync_both_ways() {
+        use crate::commands::folders::{
+            create_folder, delete_folder, list_folders, move_items, ItemKind, ItemRef,
+        };
+        let (db_b, dir_b, incoming_b) = device().await;
+        let (db_a, _dir_a, incoming_a) = device().await;
+        let (course, video) = seed_video(&db_b, dir_b.path()).await;
+        let ch = create_folder(&db_b, &course, None, "第1章").await.unwrap();
+        let sub = create_folder(&db_b, &course, Some(ch.id.clone()), "1.1").await.unwrap();
+        move_items(
+            &db_b,
+            &course,
+            Some(sub.id.clone()),
+            vec![ItemRef {
+                kind: ItemKind::Video,
+                id: video.clone(),
+            }],
+        )
+        .await
+        .unwrap();
+        let report = ship(&db_b, &db_a, &incoming_a).await;
+        assert_eq!(report.parked, 0, "{report:?}");
+        let folders = list_folders(&db_a, &course).await.unwrap();
+        let names: Vec<(&str, Option<&str>)> = folders
+            .iter()
+            .map(|folder| (folder.name.as_str(), folder.parent_id.as_deref()))
+            .collect();
+        assert_eq!(names, [("第1章", None), ("1.1", Some(ch.id.as_str()))]);
+        let folder_of = |db: &Db| {
+            let pool = db.pool.clone();
+            let video = video.clone();
+            async move {
+                sqlx::query_scalar::<_, Option<String>>("SELECT folder_id FROM videos WHERE id=?")
+                    .bind(&video)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(folder_of(&db_a).await, Some(sub.id.clone()));
+        assert_eq!(outbox_count(&db_a).await, 0, "apply 不得产生回声外发");
+
+        // 旧版本只改了标题，包里没有 folderID：文件夹不变。
+        let t = chrono::Utc::now().timestamp_millis() + 60_000;
+        let old_client = envelope(
+            "Video",
+            &video,
+            SyncOperation::Save,
+            t,
+            json!({"courseID": course, "title": "旧版改名", "sourceType": "local", "orderIndex": 2,
+                   "createdAt": 1, "updatedAt": t, "deletedAt": null, "trashChangedAt": 1}),
+        );
+        write_envelope(&incoming_a, "old", &old_client);
+        apply_incoming(&db_a, &incoming_a, None).await.unwrap();
+        assert_eq!(folder_of(&db_a).await, Some(sub.id.clone()));
+
+        // A 删掉整章：文件夹删除和视频进回收站都传回 B。
+        delete_folder(&db_a, &ch.id).await.unwrap();
+        ship(&db_a, &db_b, &incoming_b).await;
+        assert!(list_folders(&db_b, &course).await.unwrap().is_empty());
+        let trashed: bool = sqlx::query_scalar("SELECT deleted_at IS NOT NULL FROM videos WHERE id=?")
+            .bind(&video)
+            .fetch_one(&db_b.pool)
+            .await
+            .unwrap();
+        assert!(trashed);
+    }
+
+    #[tokio::test]
+    async fn folder_waits_for_its_course() {
+        let (db_a, _dir_a, incoming_a) = device().await;
+        let t = chrono::Utc::now().timestamp_millis();
+        let folder = envelope(
+            "Folder",
+            "f-1",
+            SyncOperation::Save,
+            t,
+            json!({"courseID": "c-late", "parentID": null, "name": "章", "color": null,
+                   "orderIndex": 0, "createdAt": t, "updatedAt": t}),
+        );
+        write_envelope(&incoming_a, "folder", &folder);
+        let report = apply_incoming(&db_a, &incoming_a, None).await.unwrap();
+        assert_eq!(report.parked, 1);
+        let course = envelope(
+            "Course",
+            "c-late",
+            SyncOperation::Save,
+            t,
+            json!({"name": "课", "createdAt": t, "updatedAt": t, "deletedAt": null, "trashChangedAt": t}),
+        );
+        write_envelope(&incoming_a, "course", &course);
+        let report = apply_incoming(&db_a, &incoming_a, None).await.unwrap();
+        assert_eq!(report.parked, 0, "{report:?}");
+        let name: String = sqlx::query_scalar("SELECT name FROM folders WHERE id='f-1'")
+            .fetch_one(&db_a.pool)
+            .await
+            .unwrap();
+        assert_eq!(name, "章");
     }
 
     #[tokio::test]
