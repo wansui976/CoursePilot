@@ -1055,9 +1055,10 @@ article[data-selected] {
   outline-offset: 2px;
 }
 
-/* 列表行紧挨着：描边往里收，相邻两行选中时不叠在一起。 */
+/* 列表行紧挨着：选中用浅强调色底，而不是一圈圈描边叠在一起。 */
 .ca-row[data-selected] {
-  outline-offset: -2px;
+  outline: none;
+  background: var(--accent-weak);
 }
 
 
