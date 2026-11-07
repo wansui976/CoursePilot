@@ -11,6 +11,13 @@ export const queries = {
   courses: () =>
     queryOptions({ queryKey: qk.courses(), queryFn: ipc.courses.list }),
 
+  folders: (courseId: string | null) =>
+    queryOptions({
+      queryKey: qk.folders(courseId),
+      queryFn: () => ipc.folders.list(courseId!),
+      enabled: !!courseId,
+    }),
+
   videos: (courseId: string | null) =>
     queryOptions({
       queryKey: qk.videos.list(courseId),

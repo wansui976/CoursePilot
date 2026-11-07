@@ -260,6 +260,28 @@
       "pink": "Pink"
     }
   },
+  "folders": {
+    "newFolder": "New folder",
+    "open": "Open folder {{name}}",
+    "actions": "Folder actions",
+    "rename": "Rename",
+    "name": "Folder name",
+    "moveTo": "Move to…",
+    "delete": "Delete folder",
+    "videoCount": "{{count}} videos",
+    "deleteConfirm": "Delete folder “{{name}}”?",
+    "deleteConfirmWithVideos": "Delete folder “{{name}}”?\nIts {{count}} videos will move to the recycle bin and can be restored within 30 days (they come back to the course root).",
+    "breadcrumb": "Folder path",
+    "up": "Up one level",
+    "empty": "This folder is empty",
+    "emptyHint": "Drag videos onto a folder, or choose “Move to…” from a video’s ⋯ menu",
+    "moveTitle": "Move {{count}} items to…",
+    "moveCourse": "Course",
+    "moveDestination": "Destination",
+    "courseRoot": "Course root",
+    "currentLevel": "Current",
+    "moveHere": "Move here"
+  },
   "recycleBin": {
     "title": "Recycle Bin",
     "description": "Deleted videos are kept for 30 days before permanent removal; you can restore them anytime.",

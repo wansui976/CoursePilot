@@ -51,6 +51,28 @@ export interface Video {
   crop_left?: number | null;
   // B 站分 P 的 cid：弹幕接口按它寻址；导入时反查到会落回库里。
   bilibili_cid?: string | null;
+  /** 所在文件夹；null = 课程根目录（指向已不存在文件夹的由后端归一成 null）。 */
+  folder_id?: string | null;
+}
+
+/** 课程里的文件夹（纯逻辑分组，不动磁盘文件）。 */
+export interface Folder {
+  id: string;
+  course_id: string;
+  /** 上级文件夹；null = 课程根目录。后端已归一化（不悬空、不成环）。 */
+  parent_id: string | null;
+  name: string;
+  color: CourseColor | null;
+  /** 与同课程视频共用的先序编号：同一层按它排就是界面顺序。 */
+  order_index: number;
+  created_at: number;
+  updated_at: number;
+}
+
+/** 树上的一项：文件夹或视频。移动、排序接口用它指认对象。 */
+export interface ItemRef {
+  kind: "folder" | "video";
+  id: string;
 }
 
 /** 一条弹幕。按 start_ms 排期，mode 决定滚动/顶部/底部。 */

@@ -11,6 +11,7 @@ export type ArtifactKind = "chapters" | "summary" | "notes" | "quiz" | "mindmap"
 
 export const qk = {
   courses: () => ["courses"] as const,
+  folders: (courseId: string | null) => ["folders", courseId] as const,
   videos: {
     all: () => ["videos"] as const,
     list: (courseId: string | null) => ["videos", courseId] as const,

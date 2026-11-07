@@ -47,6 +47,21 @@ describe("useHomeRoute", () => {
     expect(router.state.location.pathname).toBe("/");
   });
 
+  it("keeps the folder within a course and drops it when the course changes", async () => {
+    const { current, router } = await renderProbe();
+    act(() => current().go({ courseId: "c1", folderId: "f1" }));
+    expect(router.state.location.search).toMatchObject({ course: "c1", folder: "f1" });
+    // 打开视频、回到课程：文件夹还在，返回时回到原来那一层。
+    act(() => current().go({ videoId: "v1" }));
+    expect(current()).toMatchObject({ courseId: "c1", folderId: "f1", videoId: "v1" });
+    act(() => current().go({ videoId: null }));
+    expect(current().folderId).toBe("f1");
+    // 换课程没指定文件夹：回到新课程的根目录。
+    act(() => current().go({ courseId: "c2" }));
+    expect(current()).toMatchObject({ courseId: "c2", folderId: null });
+    expect(router.state.location.search).not.toHaveProperty("folder");
+  });
+
   it("keeps the video session when an overlay view opens and closes", async () => {
     const { current, router } = await renderProbe();
     act(() => current().go({ courseId: "c1", videoId: "v1" }));

@@ -5,6 +5,8 @@ import type { SkipRange } from "../silenceSkip";
 import type {
   Course,
   CourseColor,
+  Folder,
+  ItemRef,
   RelinkResult,
   TrashedVideo,
   Video,
@@ -49,6 +51,23 @@ export const courses = {
     invoke("cmd_set_course_color", { id, color }),
 };
 
+export const folders = {
+  list: (courseId: string): Promise<Folder[]> => invoke("cmd_list_folders", { courseId }),
+  create: (courseId: string, parentId: string | null, name: string): Promise<Folder> =>
+    invoke("cmd_create_folder", { courseId, parentId, name }),
+  rename: (id: string, name: string): Promise<void> => invoke("cmd_rename_folder", { id, name }),
+  setColor: (id: string, color: CourseColor | null): Promise<void> =>
+    invoke("cmd_set_folder_color", { id, color }),
+  /** 连同子文件夹一起删；里面的视频进回收站。 */
+  delete: (id: string): Promise<void> => invoke("cmd_delete_folder", { id }),
+  /** 移到目标课程的某一层（null = 根目录），排在该层最后；可跨课程。 */
+  move: (courseId: string, folderId: string | null, items: ItemRef[]): Promise<void> =>
+    invoke("cmd_move_items", { courseId, folderId, items }),
+  /** 拖动排序：items 须为该层现有的全部子项的新顺序。 */
+  reorder: (courseId: string, folderId: string | null, items: ItemRef[]): Promise<void> =>
+    invoke("cmd_reorder_container", { courseId, folderId, items }),
+};
+
 export const videos = {
   list: (courseId: string): Promise<VideoListItem[]> =>
     invoke("cmd_list_videos", { courseId }),
@@ -90,9 +109,6 @@ export const videos = {
   delete: (id: string): Promise<void> => invoke("cmd_delete_video", { id }),
   restore: (id: string): Promise<void> => invoke("cmd_restore_video", { id }),
   purge: (id: string): Promise<void> => invoke("cmd_purge_video", { id }),
-  // 手动排序：orderedIds 须为该课程当前全部视频 id 的新顺序。
-  reorder: (courseId: string, orderedIds: string[]): Promise<void> =>
-    invoke("cmd_reorder_videos", { courseId, orderedIds }),
   // 可跳过的停顿区间。首次调用会扫一遍音轨（只解码音频），之后直接读库。
   skips: (videoId: string): Promise<SkipRange[]> =>
     invoke("cmd_video_skips", { videoId }),

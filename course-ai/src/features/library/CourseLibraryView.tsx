@@ -19,6 +19,8 @@ import {
   X,
   ArrowDown,
   ArrowUp,
+  ChevronRight,
+  FolderInput,
   Pencil,
   Trash2,
   Wand2,
@@ -27,7 +29,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { useCreateCourse } from "@/features/library/CourseList";
 import { ImportVideoButton } from "@/features/library/ImportVideoDialog";
-import { SortableVideoItem, SortableVideos } from "@/features/library/SortableVideos";
+import { SortableVideoItem } from "@/features/library/SortableVideos";
 import { VideoCover } from "@/features/library/VideoCover";
 import { Badge, type BadgeTone } from "@/ui/badge";
 import { EmptyState } from "@/ui/empty-state";
@@ -41,7 +43,7 @@ import { clearTasksForScope } from "@/lib/backgroundTasks";
 import { useTaskNotices } from "@/lib/taskNotices";
 import { stageMessage } from "@/lib/pipelineProgress";
 import { canRecorrect } from "@/lib/videoActions";
-import type { Video, VideoListItem } from "@/lib/types";
+import type { CourseColor, Folder, ItemRef, Video, VideoListItem } from "@/lib/types";
 import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { useFindExplanation } from "@/stores/findExplanation";
@@ -54,6 +56,21 @@ import type { DownloadJob } from "@/lib/ipc";
 import type { ProcessingQueue } from "./useProcessingQueue";
 import type { Recorrection } from "./useRecorrection";
 import { LibraryOverview } from "./LibraryOverview";
+import { FolderItem } from "./FolderItem";
+import { MoveDialog, type MoveTarget } from "./MoveDialog";
+import { DroppableCrumb, LibraryDnd } from "./LibraryDnd";
+import {
+  childFolders,
+  childVideos,
+  containerOrder,
+  crumbKey,
+  folderKey,
+  folderPath,
+  nextFolderName,
+  subtreeFolderIds,
+  videoCountIn,
+  videoKey,
+} from "./folderTree";
 
 const statusLabelKey = {
   pending: "home.statusPending",
@@ -109,6 +126,8 @@ function lastVisibleMenu() {
  */
 export function CourseLibraryView({
   courseId,
+  folderId,
+  onFolderChange,
   videoQuery,
   onVideoQueryChange,
   isPhoneDevice,
@@ -123,6 +142,9 @@ export function CourseLibraryView({
   onTransientCloseChange,
 }: {
   courseId: string | null;
+  /** 课程里当前打开的文件夹；null = 根目录。由路由持有：打开视频再返回、系统返回都能回到原层。 */
+  folderId: string | null;
+  onFolderChange: (folderId: string | null) => void;
   videoQuery: string;
   onVideoQueryChange: (query: string) => void;
   isPhoneDevice: boolean;
@@ -172,6 +194,20 @@ export function CourseLibraryView({
   } = useQuery(queries.videos(selectedCourseId));
   const { data: courses = [] } = useQuery(queries.courses());
   const selectedCourse = courses.find((course) => course.id === selectedCourseId);
+  const { data: folders = [], isPending: foldersPending } = useQuery(
+    queries.folders(selectedCourseId),
+  );
+  // 当前文件夹已不在（被删了、或同步删掉了）：回到根目录。加载完之前先按路由里的算，不闪回根。
+  const folderGone =
+    folderId !== null && !foldersPending && !folders.some((folder) => folder.id === folderId);
+  const currentFolderId = folderGone ? null : folderId;
+  useEffect(() => {
+    if (folderGone) onFolderChange(null);
+  }, [folderGone, onFolderChange]);
+  const currentPath = folderPath(folders, currentFolderId);
+  const currentFolder = currentPath[currentPath.length - 1] ?? null;
+  const levelFolders = childFolders(folders, currentFolderId);
+  const levelVideos = childVideos(videos, currentFolderId);
 
   // 课程页上直接粘贴 / 拖进一张图片：当成「拍题找讲解」。输入框里粘贴、已经开着对话框时不接。
   useEffect(() => {
@@ -267,12 +303,13 @@ export function CourseLibraryView({
   }, [librarySearchVisible]);
 
   const normalizedQuery = videoQuery.trim().toLowerCase();
-  // 过滤只影响展示；排序、菜单上移/下移等按全量 videos 计算。
+  // 搜索跨整门课（不分文件夹）；不搜时只看当前这一层。排序、上移 / 下移按这一层的全量计算。
   const visibleVideos = normalizedQuery
     ? videos.filter((video) =>
         displayTitle(video.title).toLowerCase().includes(normalizedQuery),
       )
-    : videos;
+    : levelVideos;
+  const visibleFolders = normalizedQuery ? [] : levelFolders;
 
   // 下载中的占位行：属于当前课程、仍在下载，且匹配搜索词。完成后后端把视频登记进
   // 课程，占位行随之消失（done/canceled 不再算 active）。
@@ -283,29 +320,120 @@ export function CourseLibraryView({
       .filter((job): job is DownloadJob => {
         if (!job || job.courseId !== selectedCourseId) return false;
         if (!isActiveDownload(job.status)) return false;
-        if (!normalizedQuery) return true;
+        if (!normalizedQuery) return currentFolderId === null;
         return job.title.toLowerCase().includes(normalizedQuery);
       });
-  }, [downloadOrder, downloadsById, normalizedQuery, selectedCourseId]);
+  }, [currentFolderId, downloadOrder, downloadsById, normalizedQuery, selectedCourseId]);
 
-  const reorderVideos = useMutation({
-    mutationFn: (orderedIds: string[]) =>
-      ipc.videos.reorder(selectedCourseId!, orderedIds),
-    // 乐观更新：拖放一松手就按新顺序渲染；后端失败时 onError 拉回真实顺序。
-    onMutate: (orderedIds) => {
-      queryClient.setQueryData<Video[]>(["videos", selectedCourseId], (old) => {
+  const refreshCourse = useCallback(
+    (courseIds: (string | null)[]) =>
+      Promise.all(
+        [...new Set(courseIds)].flatMap((id) => [
+          queryClient.invalidateQueries({ queryKey: qk.folders(id) }),
+          queryClient.invalidateQueries({ queryKey: qk.videos.list(id) }),
+        ]),
+      ),
+    [queryClient],
+  );
+
+  // 这一层的排序：文件夹在前、视频在后，整层一起交给后端（它会整课重编号）。
+  const reorderLevel = useMutation({
+    mutationFn: ({ folderIds, videoIds }: { folderIds: string[]; videoIds: string[] }) =>
+      ipc.folders.reorder(selectedCourseId!, currentFolderId, containerOrder(folderIds, videoIds)),
+    // 乐观更新：松手就按新顺序渲染。视频在全课列表里各回各的槽位，文件夹沿用原来那几个号。
+    onMutate: ({ folderIds, videoIds }) => {
+      queryClient.setQueryData<VideoListItem[]>(qk.videos.list(selectedCourseId), (old) => {
         if (!old) return old;
         const byId = new Map(old.map((video) => [video.id, video]));
-        const next = orderedIds.flatMap((id) => byId.get(id) ?? []);
-        return next.length === old.length ? next : old;
+        const queue = videoIds.flatMap((id) => byId.get(id) ?? []);
+        const moved = new Set(videoIds);
+        return old.map((video) => (moved.has(video.id) ? (queue.shift() ?? video) : video));
+      });
+      queryClient.setQueryData<Folder[]>(qk.folders(selectedCourseId), (old) => {
+        if (!old) return old;
+        const slots = folderIds
+          .map((id) => old.find((folder) => folder.id === id)?.order_index ?? 0)
+          .sort((a, b) => a - b);
+        return old.map((folder) => {
+          const index = folderIds.indexOf(folder.id);
+          return index < 0 ? folder : { ...folder, order_index: slots[index] };
+        });
       });
     },
-    onError: () => {
-      void queryClient.invalidateQueries({
-        queryKey: qk.videos.list(selectedCourseId),
-      });
+    onSettled: () => refreshCourse([selectedCourseId]),
+  });
+
+  // 移动（拖到文件夹 / 面包屑，或「移动到…」）：可跨课程。
+  const [moveRequest, setMoveRequest] = useState<ItemRef[] | null>(null);
+  const moveItems = useMutation({
+    mutationFn: ({ items, target }: { items: ItemRef[]; target: MoveTarget }) =>
+      ipc.folders.move(target.courseId, target.folderId, items),
+    onSuccess: async (_data, { target }) => {
+      setMoveRequest(null);
+      await refreshCourse([selectedCourseId, target.courseId]);
+      await queryClient.invalidateQueries({ queryKey: qk.courses() });
+    },
+    onError: () => void refreshCourse([selectedCourseId]),
+  });
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const createFolder = useMutation({
+    mutationFn: () =>
+      ipc.folders.create(
+        selectedCourseId!,
+        currentFolderId,
+        nextFolderName(levelFolders, t("folders.newFolder")),
+      ),
+    // 像 Finder：新建后立刻进入改名。
+    onSuccess: async (folder) => {
+      await refreshCourse([selectedCourseId]);
+      setRenamingFolderId(folder.id);
     },
   });
+  const folderEdit = useMutation({
+    mutationFn: async (
+      edit: { id: string; name: string } | { id: string; color: CourseColor | null },
+    ) => {
+      if ("name" in edit) await ipc.folders.rename(edit.id, edit.name);
+      else await ipc.folders.setColor(edit.id, edit.color);
+    },
+    onSettled: () => refreshCourse([selectedCourseId]),
+  });
+
+  async function deleteFolder(folder: Folder) {
+    const count = videoCountIn(folders, videos, folder.id);
+    const ok = await confirmDialog(
+      count > 0
+        ? t("folders.deleteConfirmWithVideos", { name: folder.name, count })
+        : t("folders.deleteConfirm", { name: folder.name }),
+      {
+        title: t("folders.delete"),
+        kind: "warning",
+        okLabel: t("home.deleteLabel"),
+        cancelLabel: t("home.cancel"),
+      },
+    );
+    if (!ok) return;
+    const subtree = subtreeFolderIds(folders, folder.id);
+    const videoIds = videos
+      .filter((video) => video.folder_id && subtree.has(video.folder_id))
+      .map((video) => video.id);
+    await ipc.folders.delete(folder.id);
+    for (const videoId of videoIds) {
+      clearTasksForScope(queryClient, { videoId });
+      useTaskNotices.getState().clearScope({ videoId });
+      onVideoDeleted(videoId);
+    }
+    if (currentFolderId && subtree.has(currentFolderId)) onFolderChange(folder.parent_id);
+    await refreshCourse([selectedCourseId]);
+    await queryClient.invalidateQueries({ queryKey: qk.trash() });
+  }
+
+  function openFolder(id: string | null) {
+    setVideoQuery("");
+    onFolderChange(id);
+  }
 
   function changeView(next: LibraryView) {
     setView(next);
@@ -412,14 +540,14 @@ export function CourseLibraryView({
   // 菜单要按「有没有文稿」在「重新纠错」和「开始处理」之间选，所以收的是列表条目而不是裸 Video。
   function videoMenu(video: VideoListItem) {
     if (openMenuVideoId !== video.id) return null;
-    const index = videos.findIndex((item) => item.id === video.id);
-    // 拖拽排序的键盘/无障碍替代：与相邻项交换位置，走同一个乐观更新 mutation。
+    const index = levelVideos.findIndex((item) => item.id === video.id);
+    // 拖拽排序的键盘/无障碍替代：在这一层里与相邻视频交换位置，走同一个乐观更新 mutation。
     const moveTo = (targetIndex: number) => {
       setOpenMenuVideoId(null);
-      const ids = videos.map((item) => item.id);
+      const ids = levelVideos.map((item) => item.id);
       const [moved] = ids.splice(index, 1);
       ids.splice(targetIndex, 0, moved);
-      reorderVideos.mutate(ids);
+      reorderLevel.mutate({ folderIds: levelFolders.map((folder) => folder.id), videoIds: ids });
     };
     return (
       <Menu
@@ -447,12 +575,23 @@ export function CourseLibraryView({
             {t("home.moveUp")}
           </MenuItem>
         )}
-        {!normalizedQuery && index !== -1 && index < videos.length - 1 && (
+        {!normalizedQuery && index !== -1 && index < levelVideos.length - 1 && (
           <MenuItem className="ca-touch-44 flex items-center gap-2" onClick={() => moveTo(index + 1)}>
             <ArrowDown aria-hidden="true" className="h-4 w-4 flex-none text-[var(--text-3)]" />
             {t("home.moveDown")}
           </MenuItem>
         )}
+        <MenuItem
+          className="ca-touch-44 flex items-center gap-2"
+          onClick={() => {
+            setOpenMenuVideoId(null);
+            moveItems.reset();
+            setMoveRequest([{ kind: "video", id: video.id }]);
+          }}
+        >
+          <FolderInput aria-hidden="true" className="h-4 w-4 flex-none text-[var(--text-3)]" />
+          {t("folders.moveTo")}
+        </MenuItem>
         <MenuItem
           className="ca-touch-44 flex items-center gap-2"
           disabled={canRecorrect(video) && recorrect.isPending}
@@ -863,7 +1002,7 @@ export function CourseLibraryView({
   // 「继续学习」hero 卡：该课程最近打开、且看了但没看完的视频，一键回到工作台
   // （播放器自带断点续播）。搜索过滤时不显示（那会儿用户在找别的）。
   function renderContinueBanner() {
-    if (!selectedCourseId || normalizedQuery) return null;
+    if (!selectedCourseId || normalizedQuery || currentFolderId) return null;
     const lastId = readLastVideoId(selectedCourseId);
     if (!lastId) return null;
     const lastVideo = videos.find((video) => video.id === lastId);
@@ -957,7 +1096,87 @@ export function CourseLibraryView({
       );
     }
 
+    const courseEmpty = videos.length === 0 && folders.length === 0 && !hasCourseDownloads;
+    const levelEmpty =
+      !normalizedQuery &&
+      visibleFolders.length === 0 &&
+      visibleVideos.length === 0 &&
+      courseDownloads.length === 0;
+    const dragDisabled =
+      renamingVideo !== null || renamingFolderId !== null || normalizedQuery !== "";
+
+    function renderFolder(folder: Folder) {
+      return (
+        <SortableVideoItem key={folder.id} id={folderKey(folder.id)}>
+          <FolderItem
+            folder={folder}
+            count={videoCountIn(folders, videos, folder.id)}
+            layout={view}
+            dropTarget={dropTarget === folderKey(folder.id)}
+            renaming={renamingFolderId === folder.id}
+            actions={{
+              onOpen: () => openFolder(folder.id),
+              onStartRename: () => setRenamingFolderId(folder.id),
+              onFinishRename: (name) => {
+                setRenamingFolderId(null);
+                if (name && name !== folder.name) folderEdit.mutate({ id: folder.id, name });
+              },
+              onColor: (color) => folderEdit.mutate({ id: folder.id, color }),
+              onMove: () => {
+                moveItems.reset();
+                setMoveRequest([{ kind: "folder", id: folder.id }]);
+              },
+              onDelete: () => void deleteFolder(folder),
+            }}
+          />
+        </SortableVideoItem>
+      );
+    }
+
+    // 文件夹里的面包屑：课程名 › 第2章 › 2.1。上级各级可点、也能接住拖放（往上移）。
+    function renderCrumbs() {
+      if (!currentFolder || !selectedCourse) return null;
+      const ancestors: { id: string | null; name: string }[] = [
+        { id: null, name: selectedCourse.name },
+        ...currentPath.slice(0, -1).map((folder) => ({ id: folder.id, name: folder.name })),
+      ];
+      return (
+        <nav aria-label={t("folders.breadcrumb")} className="ca-crumbs">
+          {ancestors.map((crumb) => (
+            <span key={crumb.id ?? "root"} className="ca-crumb">
+              <DroppableCrumb
+                id={crumbKey(crumb.id)}
+                highlighted={dropTarget === crumbKey(crumb.id)}
+              >
+                <button type="button" onClick={() => openFolder(crumb.id)}>
+                  {crumb.name}
+                </button>
+              </DroppableCrumb>
+              <ChevronRight aria-hidden="true" className="h-3 w-3 flex-none" />
+            </span>
+          ))}
+          <span aria-current="page" className="ca-crumb-current">
+            {currentFolder.name}
+          </span>
+          <span aria-hidden="true"> · </span>
+          <span>{t("folders.videoCount", { count: videoCountIn(folders, videos, currentFolder.id) })}</span>
+        </nav>
+      );
+    }
+
     return (
+      <LibraryDnd
+        folderIds={visibleFolders.map((folder) => folder.id)}
+        videoIds={visibleVideos.map((video) => video.id)}
+        layout={view}
+        disabled={dragDisabled}
+        onReorder={(folderIds, videoIds) => reorderLevel.mutate({ folderIds, videoIds })}
+        onMove={(item, target) => {
+          if (target === currentFolderId || !selectedCourseId) return;
+          moveItems.mutate({ items: [item], target: { courseId: selectedCourseId, folderId: target } });
+        }}
+        onTargetChange={setDropTarget}
+      >
       <div className="ca-main-col">
         <header className="ca-topbar">
           <div className="tb-lead">
@@ -965,18 +1184,29 @@ export function CourseLibraryView({
               <button
                 type="button"
                 className="hamb"
-                onClick={onBackToCourses}
-                title={t("home.backToLibrary")}
-                aria-label={t("home.backToLibrary")}
+                // 在文件夹里：返回上一级；在课程根目录：回课程列表。
+                onClick={
+                  currentFolder ? () => openFolder(currentFolder.parent_id) : onBackToCourses
+                }
+                title={currentFolder ? t("folders.up") : t("home.backToLibrary")}
+                aria-label={currentFolder ? t("folders.up") : t("home.backToLibrary")}
               >
                 <ChevronLeft className="h-5 w-5" />
               </button>
             )}
             <div className="tb-titles">
-              {/* h1 给课程名（用户关心「我在哪个课程」），数量降为副标题。 */}
-              <h1>{selectedCourse ? selectedCourse.name : t("home.courseVideos")}</h1>
+              {/* h1 给课程名（用户关心「我在哪个课程」），数量降为副标题。进了文件夹则是文件夹名，副标题换成面包屑。 */}
+              <h1>
+                {currentFolder
+                  ? currentFolder.name
+                  : selectedCourse
+                    ? selectedCourse.name
+                    : t("home.courseVideos")}
+              </h1>
               <div className="sub">
-                {selectedCourse ? (
+                {currentFolder ? (
+                  renderCrumbs()
+                ) : selectedCourse ? (
                   <>
                     {t("home.videoCount", { count: videos.length })}
                     {watchedCount > 0 && (
@@ -1088,6 +1318,17 @@ export function CourseLibraryView({
                   <span className="max-sm:sr-only">{t("findExplanation.entry")}</span>
                 </Button>
               )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => createFolder.mutate()}
+                disabled={createFolder.isPending}
+                title={t("folders.newFolder")}
+                className="ca-touch-44"
+              >
+                <FolderPlus className="h-4 w-4" />
+                <span className="max-sm:sr-only">{t("folders.newFolder")}</span>
+              </Button>
               <ImportVideoButton courseId={selectedCourseId} />
             </div>
           )}
@@ -1116,8 +1357,7 @@ export function CourseLibraryView({
                 className="max-w-md"
               />
             </div>
-          ) : !selectedCourseId ||
-            (videos.length === 0 && !hasCourseDownloads) ? (
+          ) : !selectedCourseId || courseEmpty ? (
             <div className="flex h-full min-h-[320px] items-center justify-center">
               <EmptyState
                 title={selectedCourseId ? t("home.noVideos") : t("home.noCourses")}
@@ -1152,54 +1392,64 @@ export function CourseLibraryView({
                 }
               />
             </div>
-          ) : visibleVideos.length === 0 && courseDownloads.length === 0 ? (
+          ) : normalizedQuery && visibleVideos.length === 0 && courseDownloads.length === 0 ? (
             <div className="flex h-full min-h-[320px] items-center justify-center">
               <EmptyState
                 title={t("home.noMatch")}
                 description={t("home.noMatchDesc", { query: videoQuery.trim() })}
               />
             </div>
+          ) : levelEmpty ? (
+            <div className="flex h-full min-h-[320px] items-center justify-center">
+              <EmptyState title={t("folders.empty")} description={t("folders.emptyHint")} />
+            </div>
           ) : view === "list" ? (
-            <SortableVideos
-              ids={visibleVideos.map((video) => video.id)}
-              layout="list"
-              // 过滤态禁用拖拽：子集顺序映射不回全量，后端也会按 id 全集校验拒绝。
-              disabled={renamingVideo !== null || normalizedQuery !== ""}
-              onReorder={(orderedIds) => reorderVideos.mutate(orderedIds)}
-            >
-              <div className="ca-list">
-                <div className="ca-list-head">
-                  <span>{t("home.colName")}</span>
-                  <span className="h-progress">{t("home.colProgress")}</span>
-                  <span className="h-dur">{t("home.colDuration")}</span>
-                </div>
-                {courseDownloads.map(renderDownloadListRow)}
-                {visibleVideos.map((video) => (
-                  <SortableVideoItem key={video.id} id={video.id}>
-                    {renderVideoListRow(video)}
-                  </SortableVideoItem>
-                ))}
+            <div className="ca-list">
+              <div className="ca-list-head">
+                <span>{t("home.colName")}</span>
+                <span className="h-progress">{t("home.colProgress")}</span>
+                <span className="h-dur">{t("home.colDuration")}</span>
               </div>
-            </SortableVideos>
+              {visibleFolders.map(renderFolder)}
+              {courseDownloads.map(renderDownloadListRow)}
+              {visibleVideos.map((video) => (
+                <SortableVideoItem key={video.id} id={videoKey(video.id)}>
+                  {renderVideoListRow(video)}
+                </SortableVideoItem>
+              ))}
+            </div>
           ) : (
-            <SortableVideos
-              ids={visibleVideos.map((video) => video.id)}
-              layout="grid"
-              disabled={renamingVideo !== null || normalizedQuery !== ""}
-              onReorder={(orderedIds) => reorderVideos.mutate(orderedIds)}
-            >
-              <div className="ca-grid" data-density={gridDensity} aria-label={t("home.videoGrid")}>
-                {courseDownloads.map(renderDownloadGridCard)}
-                {visibleVideos.map((video) => (
-                  <SortableVideoItem key={video.id} id={video.id}>
-                    {renderVideoGridCard(video)}
-                  </SortableVideoItem>
-                ))}
-              </div>
-            </SortableVideos>
+            <div className="ca-grid" data-density={gridDensity} aria-label={t("home.videoGrid")}>
+              {visibleFolders.map(renderFolder)}
+              {courseDownloads.map(renderDownloadGridCard)}
+              {visibleVideos.map((video) => (
+                <SortableVideoItem key={video.id} id={videoKey(video.id)}>
+                  {renderVideoGridCard(video)}
+                </SortableVideoItem>
+              ))}
+            </div>
           )}
+          {(moveItems.isError || reorderLevel.isError || folderEdit.isError || createFolder.isError) &&
+            !moveRequest && (
+              <ErrorNote
+                className="mx-4 my-3"
+                error={moveItems.error ?? reorderLevel.error ?? folderEdit.error ?? createFolder.error}
+              />
+            )}
         </div>
       </div>
+      {moveRequest && selectedCourseId && (
+        <MoveDialog
+          open
+          items={moveRequest}
+          from={{ courseId: selectedCourseId, folderId: currentFolderId }}
+          pending={moveItems.isPending}
+          error={moveItems.error}
+          onCancel={() => setMoveRequest(null)}
+          onConfirm={(target) => moveItems.mutate({ items: moveRequest, target })}
+        />
+      )}
+      </LibraryDnd>
     );
   }
 

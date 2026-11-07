@@ -85,7 +85,7 @@ use crate::commands::translate::{
 use crate::commands::videos::{
     cmd_add_local_batch, cmd_add_local_video, cmd_cancel_crop_detect, cmd_delete_video,
     cmd_ensure_crop, cmd_ensure_playable, cmd_list_trash, cmd_list_videos, cmd_media_url, cmd_video_codec,
-    cmd_purge_trash, cmd_purge_video, cmd_reorder_videos, cmd_restore_video, cmd_scan_folder,
+    cmd_purge_trash, cmd_purge_video, cmd_restore_video, cmd_scan_folder,
     cmd_update_video_title, cmd_video_cover,
 };
 use crate::commands::transcode::{cmd_start_transcode, cmd_transcode_status};
@@ -276,7 +276,6 @@ pub fn run() {
             cmd_relink_course_root,
             cmd_restore_video,
             cmd_purge_video,
-            cmd_reorder_videos,
             cmd_purge_trash,
             cmd_list_trash,
             cmd_add_local_video,

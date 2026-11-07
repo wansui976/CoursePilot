@@ -4,7 +4,7 @@
  */
 import { app, sync, secrets, dev, notify, settings, whisper, backup, tools } from "./system";
 import { downloads } from "./downloads";
-import { courses, videos, trash, subscriptions } from "./library";
+import { courses, folders, videos, trash, subscriptions } from "./library";
 import { srs, stats, concepts, feynman } from "./study";
 export { feynmanTopicKey } from "./study";
 import { assistant } from "./assistant";
@@ -16,6 +16,7 @@ export const ipc = {
   app,
   sync,
   courses,
+  folders,
   videos,
   trash,
   subscriptions,

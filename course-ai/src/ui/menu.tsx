@@ -22,7 +22,8 @@ export function Menu({
     if (!menuRef.current) return [];
     return Array.from(
       menuRef.current.querySelectorAll<HTMLElement>(
-        '[role="menuitem"]:not(:disabled):not([aria-disabled="true"])',
+        // 前缀匹配：menuitemradio（如颜色格）也在方向键轮转里。单个选择器保证按文档顺序。
+        '[role^="menuitem"]:not(:disabled):not([aria-disabled="true"])',
       ),
     );
   }, []);

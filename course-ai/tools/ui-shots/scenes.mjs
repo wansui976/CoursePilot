@@ -91,6 +91,56 @@ export const scenes = [
     },
   },
   {
+    // 课程内文件夹：根目录（两章 + 两个散落的视频）、进入第2章（面包屑 + 子文件夹）、文件夹菜单、移动对话框。
+    name: "folders",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-folders", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openCourse(page);
+      await page.getByRole("button", { name: "打开文件夹 第1章 基础" }).waitFor();
+      await shot("root");
+      await page.getByRole("button", { name: "列表视图" }).click();
+      await shot("root-list");
+      await page.getByRole("button", { name: "网格视图" }).click();
+      await page.getByRole("button", { name: "打开文件夹 第2章 神经网络" }).click();
+      await page.getByRole("navigation", { name: "文件夹路径" }).waitFor();
+      await shot("inside");
+      const card = page.locator(".ca-folder").first();
+      await card.hover();
+      await card.getByRole("button", { name: "文件夹操作" }).click();
+      await shot("menu");
+      await page.keyboard.press("Escape");
+      const video = page.locator("article.ca-card:not(.ca-folder)").first();
+      await video.hover();
+      await video.getByRole("button", { name: "视频操作" }).click();
+      await page.getByRole("menuitem", { name: "移动到…" }).click();
+      await page.getByRole("dialog").waitFor();
+      await shot("move-dialog");
+    },
+  },
+  {
+    // 拖着视频悬停在文件夹上：文件夹卡描边高亮。
+    name: "folder-drop",
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-folders", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openCourse(page);
+      const folder = page.getByRole("button", { name: "打开文件夹 第1章 基础" });
+      await folder.waitFor();
+      const video = page.locator("article.ca-card:not(.ca-folder)").first();
+      const from = await video.boundingBox();
+      const to = await folder.boundingBox();
+      await page.mouse.move(from.x + 60, from.y + 60);
+      await page.mouse.down();
+      await page.mouse.move(from.x + 70, from.y + 70, { steps: 3 });
+      await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 10 });
+      await shot("hover");
+      await page.mouse.up();
+      await shot("dropped");
+    },
+  },
+  {
     // 侧栏拖动排序：把第一门课拖到最后，拍拖动中和松手后。
     name: "course-drag",
     run: async ({ page, shot }) => {

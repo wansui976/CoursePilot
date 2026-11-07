@@ -260,6 +260,28 @@
       "pink": "粉色"
     }
   },
+  "folders": {
+    "newFolder": "新建文件夹",
+    "open": "打开文件夹 {{name}}",
+    "actions": "文件夹操作",
+    "rename": "重命名",
+    "name": "文件夹名称",
+    "moveTo": "移动到…",
+    "delete": "删除文件夹",
+    "videoCount": "{{count}} 个视频",
+    "deleteConfirm": "删除文件夹「{{name}}」？",
+    "deleteConfirmWithVideos": "删除文件夹「{{name}}」？\n里面的 {{count}} 个视频会移入回收站，可在 30 天内恢复（恢复后回到课程根目录）。",
+    "breadcrumb": "文件夹路径",
+    "up": "返回上一级",
+    "empty": "这个文件夹是空的",
+    "emptyHint": "把视频拖到文件夹上，或在视频的「⋯」菜单里选「移动到…」",
+    "moveTitle": "移动 {{count}} 项到…",
+    "moveCourse": "课程",
+    "moveDestination": "目标位置",
+    "courseRoot": "课程根目录",
+    "currentLevel": "当前位置",
+    "moveHere": "移到这里"
+  },
   "recycleBin": {
     "title": "回收站",
     "description": "删除的视频保留 30 天，到期自动清除；期间可恢复",

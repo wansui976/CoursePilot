@@ -4,7 +4,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { createAppRouter } from "@/app/router";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Course, Video } from "@/lib/types";
+import type { Course, Folder, Video } from "@/lib/types";
 import { durKey, posKey } from "@/lib/playback";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { displayTitle } from "@/lib/videoTitle";
@@ -24,6 +24,14 @@ const { mockIpc, confirmMock } = vi.hoisted(() => ({
       cover: vi.fn(),
       updateTitle: vi.fn(),
       delete: vi.fn(),
+    },
+    folders: {
+      list: vi.fn(),
+      create: vi.fn(),
+      rename: vi.fn(),
+      setColor: vi.fn(),
+      delete: vi.fn(),
+      move: vi.fn(),
       reorder: vi.fn(),
     },
     pipeline: {
@@ -154,8 +162,10 @@ describe("Home", () => {
     mockIpc.videos.cover.mockResolvedValue([]);
     mockIpc.videos.updateTitle.mockResolvedValue({ ...video, title: "重命名.mp4" });
     mockIpc.videos.delete.mockResolvedValue(undefined);
-    mockIpc.videos.reorder.mockReset();
-    mockIpc.videos.reorder.mockResolvedValue(undefined);
+    mockIpc.folders.list.mockReset().mockResolvedValue([]);
+    mockIpc.folders.reorder.mockReset().mockResolvedValue(undefined);
+    mockIpc.folders.move.mockReset().mockResolvedValue(undefined);
+    mockIpc.folders.create.mockReset();
     mockIpc.pipeline.process.mockResolvedValue(undefined);
     mockIpc.pipeline.dismiss.mockReset().mockResolvedValue(undefined);
     mockIpc.pipeline.jobs.mockReset().mockResolvedValue([]);
@@ -1301,6 +1311,108 @@ describe("Home", () => {
     expect(search).toHaveFocus();
   });
 
+  describe("folders inside a course", () => {
+    const chapter: Folder = {
+      id: "ch1",
+      course_id: "course-1",
+      parent_id: null,
+      name: "第1章",
+      color: null,
+      order_index: 0,
+      created_at: 1,
+      updated_at: 1,
+    };
+    const inside: Video = {
+      ...video,
+      id: "video-2",
+      title: "1.1 PN结.mp4",
+      order_index: 1,
+      folder_id: "ch1",
+    };
+
+    beforeEach(() => {
+      mockIpc.folders.list.mockImplementation(async (courseId: string) =>
+        courseId === "course-1" ? [chapter] : [],
+      );
+      mockIpc.videos.list.mockImplementation(async (courseId: string) =>
+        courseId === "course-1" ? [{ ...video, order_index: 2 }, inside] : [],
+      );
+    });
+
+    it("shows folders first, opens one, and the breadcrumb leads back", async () => {
+      await renderHome();
+      fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+      const open = await screen.findByRole("button", { name: "打开文件夹 第1章" });
+      // 根目录：文件夹 + 根目录的视频；文件夹里的视频不在这一层。
+      expect(screen.getByText(displayTitle(video.title))).toBeInTheDocument();
+      expect(screen.queryByText(displayTitle(inside.title))).not.toBeInTheDocument();
+      expect(within(open).getByText("1 个视频")).toBeInTheDocument();
+
+      fireEvent.click(open);
+      expect(await screen.findByRole("heading", { name: "第1章" })).toBeInTheDocument();
+      expect(screen.getByText(displayTitle(inside.title))).toBeInTheDocument();
+      expect(screen.queryByText(displayTitle(video.title))).not.toBeInTheDocument();
+
+      const crumbs = screen.getByRole("navigation", { name: "文件夹路径" });
+      fireEvent.click(within(crumbs).getByRole("button", { name: "申论课程" }));
+      expect(await screen.findByRole("heading", { name: "申论课程" })).toBeInTheDocument();
+      expect(screen.getByText(displayTitle(video.title))).toBeInTheDocument();
+    });
+
+    it("creates a folder on the current level and goes straight into renaming it", async () => {
+      const created: Folder = { ...chapter, id: "new", name: "新建文件夹", order_index: 3 };
+      mockIpc.folders.create.mockResolvedValue(created);
+      mockIpc.folders.rename.mockResolvedValue(undefined);
+      await renderHome();
+      fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+      await screen.findByRole("button", { name: "打开文件夹 第1章" });
+      mockIpc.folders.list.mockResolvedValue([chapter, created]);
+
+      fireEvent.click(screen.getByRole("button", { name: "新建文件夹" }));
+      await waitFor(() =>
+        expect(mockIpc.folders.create).toHaveBeenCalledWith("course-1", null, "新建文件夹"),
+      );
+      const name = await screen.findByRole("textbox", { name: "文件夹名称" });
+      expect(name).toHaveFocus();
+      fireEvent.change(name, { target: { value: "第2章" } });
+      fireEvent.keyDown(name, { key: "Enter" });
+      await waitFor(() => expect(mockIpc.folders.rename).toHaveBeenCalledWith("new", "第2章"));
+    });
+
+    it("moves a video into a folder from its menu", async () => {
+      await renderHome();
+      fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+      await screen.findByRole("button", { name: "打开文件夹 第1章" });
+      fireEvent.click(screen.getAllByRole("button", { name: "视频操作" })[0]);
+      fireEvent.click(screen.getByRole("menuitem", { name: "移动到…" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "移动 1 项到…" });
+      // 当前就在根目录：根目录这一项不可选。
+      expect(within(dialog).getByRole("radio", { name: /课程根目录/ })).toBeDisabled();
+      fireEvent.click(await within(dialog).findByRole("radio", { name: "第1章" }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "移到这里" }));
+      await waitFor(() =>
+        expect(mockIpc.folders.move).toHaveBeenCalledWith("course-1", "ch1", [
+          { kind: "video", id: "video-1" },
+        ]),
+      );
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    });
+
+    it("deletes a folder after a confirmation that mentions its videos", async () => {
+      confirmMock.mockResolvedValue(true);
+      mockIpc.folders.delete.mockResolvedValue(undefined);
+      await renderHome();
+      fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+      await screen.findByRole("button", { name: "打开文件夹 第1章" });
+      fireEvent.click(screen.getByRole("button", { name: "文件夹操作" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "删除文件夹" }));
+      await waitFor(() => expect(mockIpc.folders.delete).toHaveBeenCalledWith("ch1"));
+      const calls = confirmMock.mock.calls;
+      expect(calls[calls.length - 1]?.[0]).toContain("1 个视频会移入回收站");
+    });
+  });
+
   it("offers move up/down in the video menu as a keyboard-accessible reorder path", async () => {
     // 拖拽排序没有键盘替代（刻意去掉了 dnd-kit 的键盘支持），菜单里补上移/下移。
     const video2: Video = {
@@ -1323,10 +1435,11 @@ describe("Home", () => {
     expect(screen.queryByRole("menuitem", { name: "上移" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitem", { name: "下移" }));
 
+    // 排序以「一层」为单位：根目录（null）这一层的全部子项。
     await waitFor(() =>
-      expect(mockIpc.videos.reorder).toHaveBeenCalledWith("course-1", [
-        "video-2",
-        "video-1",
+      expect(mockIpc.folders.reorder).toHaveBeenCalledWith("course-1", null, [
+        { kind: "video", id: "video-2" },
+        { kind: "video", id: "video-1" },
       ]),
     );
   });

@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useHomeRoute } from "@/app/homeRoute";
 import { useShell } from "@/app/shell";
 import { ConceptsPanel } from "@/features/knowledge/ConceptsPanel";
@@ -19,8 +20,9 @@ import { VideoWorkbench } from "@/features/workspace/VideoWorkbench";
 /** `/`：选了视频是工作台；窄屏根层是整屏课程列表；否则是课程库（总览或某门课）。 */
 export function LibraryRouteView() {
   const shell = useShell();
-  const { courseId, videoId, go } = useHomeRoute();
+  const { courseId, folderId, videoId, go } = useHomeRoute();
   const { selectedVideo, knowledgeReturn } = shell;
+  const changeFolder = useCallback((id: string | null) => go({ folderId: id }), [go]);
 
   if (selectedVideo) {
     return (
@@ -55,6 +57,8 @@ export function LibraryRouteView() {
     <CourseLibraryView
       key={courseId ?? "none"}
       courseId={courseId}
+      folderId={folderId}
+      onFolderChange={changeFolder}
       videoQuery={shell.videoQuery}
       onVideoQueryChange={shell.setVideoQuery}
       isPhoneDevice={shell.isPhoneDevice}

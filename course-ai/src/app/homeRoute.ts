@@ -23,12 +23,14 @@ export const VIEW_PATHS = {
   dev: "/dev",
 } as const satisfies Record<MainView, string>;
 
-/** 课程 / 视频选择跨视图保留，放在 search 里。 */
-export type HomeSearch = { course?: string; video?: string };
+/** 课程 / 文件夹 / 视频选择跨视图保留，放在 search 里。 */
+export type HomeSearch = { course?: string; folder?: string; video?: string };
 
 export type HomeLocation = {
   view: MainView;
   courseId: string | null;
+  /** 课程里当前打开的文件夹；null = 课程根目录。换课程时自动回到根目录。 */
+  folderId: string | null;
   videoId: string | null;
   /** 设置页当前分类（`/settings/$category`）；null 表示设置根层，其它视图恒为 null。
    *  取值是否合法由设置页自己判定，路由层只搬运字符串。 */
@@ -40,7 +42,7 @@ const SETTINGS_CATEGORY_PREFIX = `${VIEW_PATHS.settings}/`;
 export function validateHomeSearch(search: Record<string, unknown>): HomeSearch {
   const pick = (value: unknown) =>
     typeof value === "string" && value ? value : undefined;
-  return { course: pick(search.course), video: pick(search.video) };
+  return { course: pick(search.course), folder: pick(search.folder), video: pick(search.video) };
 }
 
 const VIEW_BY_PATH = new Map<string, MainView>(
@@ -58,6 +60,7 @@ function toHomeLocation(location: {
   return {
     view: settingsCategory ? "settings" : (VIEW_BY_PATH.get(location.pathname) ?? "library"),
     courseId: search.course ?? null,
+    folderId: search.folder ?? null,
     videoId: search.video ?? null,
     settingsCategory,
   };
@@ -76,6 +79,8 @@ export function useHomeRoute() {
     (patch: Partial<HomeLocation>) => {
       const current = toHomeLocation(router.latestLocation);
       const next = { ...current, ...patch };
+      // 文件夹属于课程：换了课程而没指定文件夹，就回到新课程的根目录。
+      if (patch.folderId === undefined && next.courseId !== current.courseId) next.folderId = null;
       // 分类只属于设置页：离开设置即清空；从别的视图进入设置默认回到根层。
       if (next.view !== "settings") next.settingsCategory = null;
       else if (patch.settingsCategory === undefined && current.view !== "settings") {
@@ -84,6 +89,7 @@ export function useHomeRoute() {
       if (
         next.view === current.view &&
         next.courseId === current.courseId &&
+        next.folderId === current.folderId &&
         next.videoId === current.videoId &&
         next.settingsCategory === current.settingsCategory
       ) {
@@ -91,6 +97,7 @@ export function useHomeRoute() {
       }
       const search = {
         course: next.courseId ?? undefined,
+        folder: (next.courseId && next.folderId) || undefined,
         video: next.videoId ?? undefined,
       };
       if (next.settingsCategory) {

@@ -22,7 +22,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
   type HTMLAttributes,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -32,7 +31,9 @@ import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
 import { clearTasksForScope } from "@/lib/backgroundTasks";
 import { useTaskNotices } from "@/lib/taskNotices";
-import { COURSE_COLORS, type Course, type CourseColor, type Video } from "@/lib/types";
+import type { Course, CourseColor, Video } from "@/lib/types";
+import { ColorSwatches } from "./ColorSwatches";
+import { colorStyle } from "./colorStyle";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { Skeleton } from "@/ui/skeleton";
 import { isIOS, pickDirectoryPath } from "@/lib/mobileFiles";
@@ -456,7 +457,7 @@ export function CourseList({
                     <FolderOpen
                       className="ic h-4 w-4"
                       data-color={course.color ?? undefined}
-                      style={course.color ? { color: `var(--course-${course.color})` } : undefined}
+                      style={colorStyle(course.color)}
                     />
                     <span className="nm">{course.name}</span>
                     {renderCourseMeta(course)}
@@ -581,33 +582,10 @@ export function CourseList({
                 <Pencil className="h-4 w-4" />
                 {t("courseList.rename")}
               </button>
-              <div role="group" aria-label={t("courseList.color")} className="ca-course-colors">
-                <button
-                  type="button"
-                  role="menuitemradio"
-                  tabIndex={-1}
-                  aria-checked={!openCourse.color}
-                  aria-label={t("courseList.colorNone")}
-                  title={t("courseList.colorNone")}
-                  data-none
-                  className="ca-color-swatch"
-                  onClick={() => chooseColor(openCourse.id, null)}
-                />
-                {COURSE_COLORS.map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    role="menuitemradio"
-                    tabIndex={-1}
-                    aria-checked={openCourse.color === color}
-                    aria-label={t(`courseList.colors.${color}`)}
-                    title={t(`courseList.colors.${color}`)}
-                    className="ca-color-swatch"
-                    style={{ "--swatch": `var(--course-${color})` } as CSSProperties}
-                    onClick={() => chooseColor(openCourse.id, color)}
-                  />
-                ))}
-              </div>
+              <ColorSwatches
+                value={openCourse.color}
+                onChange={(color) => chooseColor(openCourse.id, color)}
+              />
               <button
                 role="menuitem"
                 tabIndex={-1}

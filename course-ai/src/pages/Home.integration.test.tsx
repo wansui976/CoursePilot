@@ -14,6 +14,7 @@ const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
     app: { exit: vi.fn(), moveToBackground: vi.fn() },
     courses: { list: vi.fn(), create: vi.fn(), rename: vi.fn() },
+    folders: { list: vi.fn() },
     videos: {
       list: vi.fn(),
       addLocal: vi.fn(),
@@ -253,6 +254,7 @@ describe("Home selected-video integration", () => {
     mockIpc.app.exit.mockReset().mockResolvedValue(undefined);
     mockIpc.app.moveToBackground.mockReset().mockResolvedValue(undefined);
     mockIpc.videos.list.mockResolvedValue([video]);
+    mockIpc.folders.list.mockResolvedValue([]);
     mockIpc.videos.mediaUrl.mockResolvedValue("http://127.0.0.1:1234/m/video-1");
     mockIpc.videos.cover.mockResolvedValue([]);
     mockIpc.pipeline.jobs.mockResolvedValue([]);

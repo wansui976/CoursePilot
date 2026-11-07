@@ -482,43 +482,6 @@ pub async fn list_videos_for_ui(db: &Db, course_id: &str) -> AppResult<Vec<Video
     Ok(videos)
 }
 
-/// 手动排序：按 ordered_ids 的顺序重写该课程视频的 order_index（0,1,2…）。
-/// ordered_ids 必须与该课程当前未删除视频的 id 集合完全一致（不多、不少、不重复），
-/// 否则拒绝——防止并发导入/删除后按过期列表覆盖掉新视频的位置。
-pub async fn reorder_videos(db: &Db, course_id: &str, ordered_ids: Vec<String>) -> AppResult<()> {
-    // Lock out concurrent imports/deletes before validating the submitted id set.
-    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
-    let mut current: Vec<String> =
-        sqlx::query_scalar("SELECT id FROM videos WHERE course_id=? AND deleted_at IS NULL")
-            .bind(course_id)
-            .fetch_all(&mut *tx)
-            .await?;
-    let mut requested = ordered_ids.clone();
-    current.sort();
-    requested.sort();
-    if current != requested {
-        return Err(AppError::Other("视频列表已变化，请刷新后重试".into()));
-    }
-
-    for (index, id) in ordered_ids.iter().enumerate() {
-        let result = sqlx::query(
-            "UPDATE videos SET order_index=?, sync_updated_at=?
-             WHERE id=? AND course_id=? AND deleted_at IS NULL",
-        )
-        .bind(index as i64)
-        .bind(Utc::now().timestamp_millis())
-        .bind(id)
-        .bind(course_id)
-        .execute(&mut *tx)
-        .await?;
-        if result.rows_affected() != 1 {
-            return Err(AppError::Other("视频列表已变化，请刷新后重试".into()));
-        }
-    }
-    tx.commit().await?;
-    Ok(())
-}
-
 /// 回收站保留天数；到期后由 purge_expired_trash 永久删除。
 pub const TRASH_RETENTION_DAYS: i64 = 30;
 const DAY_MS: i64 = 86_400_000;
@@ -997,15 +960,6 @@ pub async fn cmd_purge_video(
 ) -> AppResult<()> {
     crate::pipeline::cancel_processing(&app, &id).await?;
     purge_video(&state.db, &id).await
-}
-
-#[tauri::command]
-pub async fn cmd_reorder_videos(
-    state: State<'_, AppState>,
-    course_id: String,
-    ordered_ids: Vec<String>,
-) -> AppResult<()> {
-    reorder_videos(&state.db, &course_id, ordered_ids).await
 }
 
 #[tauri::command]
@@ -1893,48 +1847,6 @@ mod tests {
             ids.push(video.id);
         }
         ids
-    }
-
-    #[tokio::test]
-    async fn reorder_videos_persists_new_order() {
-        let dir = tempdir().unwrap();
-        let (db, course_id, first_id) = seed_video(&dir).await;
-        let ids = seed_more_videos(&dir, &db, &course_id, &first_id, 2).await;
-
-        let reversed: Vec<String> = ids.iter().rev().cloned().collect();
-        reorder_videos(&db, &course_id, reversed.clone())
-            .await
-            .unwrap();
-
-        let listed: Vec<String> = list_videos(&db, &course_id)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|video| video.id)
-            .collect();
-        assert_eq!(listed, reversed);
-    }
-
-    #[tokio::test]
-    async fn reorder_videos_rejects_stale_id_list() {
-        let dir = tempdir().unwrap();
-        let (db, course_id, first_id) = seed_video(&dir).await;
-        let ids = seed_more_videos(&dir, &db, &course_id, &first_id, 1).await;
-
-        // 缺一个 id（并发删除后按旧列表提交）→ 拒绝，顺序不变。
-        let stale = vec![ids[0].clone()];
-        assert!(reorder_videos(&db, &course_id, stale).await.is_err());
-        // 重复 id 凑够数量也不行。
-        let duplicated = vec![ids[0].clone(), ids[0].clone()];
-        assert!(reorder_videos(&db, &course_id, duplicated).await.is_err());
-
-        let listed: Vec<String> = list_videos(&db, &course_id)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|video| video.id)
-            .collect();
-        assert_eq!(listed, ids);
     }
 
     #[tokio::test]

@@ -48,6 +48,21 @@ export function installMockIpc({ theme, safeArea }) {
     file_path: `/Courses/ML/${title}.mp4`, duration_ms: (18 + i * 4) * 60_000 + 23_000, width: 1920, height: 1080,
     order_index: i, data_dir: "", processed_status: statuses[i], created_at: now, has_transcript: statuses[i] === "done",
   }));
+  // 文件夹场景：第 1–4 讲在「第1章 基础」，5–7 讲在「第2章 神经网络」（其下再分一层），8、9 讲留在根目录。
+  const folders = [
+    { id: "f1", course_id: "c1", parent_id: null, name: "第1章 基础", color: "blue", order_index: 0, created_at: now, updated_at: now },
+    { id: "f2", course_id: "c1", parent_id: null, name: "第2章 神经网络", color: "teal", order_index: 5, created_at: now, updated_at: now },
+    { id: "f3", course_id: "c1", parent_id: "f2", name: "2.1 反向传播", color: null, order_index: 8, created_at: now, updated_at: now },
+  ];
+  const chapterOf = ["f1", "f1", "f1", "f1", "f2", "f2", "f3", null, null];
+  videos.forEach((video, i) => (video.folder_id = chapterOf[i]));
+  const withFolders = () => {
+    try {
+      return localStorage.getItem("__shot-folders") === "1";
+    } catch {
+      return false;
+    }
+  };
   // 看片进度：前两集看完，第三集 42%，第五集 15%；上次看到第三集。
   const progress = { v1: 1, v2: 1, v3: 0.42, v5: 0.15 };
   try {
@@ -313,7 +328,47 @@ export function installMockIpc({ theme, safeArea }) {
       const course = courses.find((c) => c.id === id);
       if (course) course.color = color;
     },
-    cmd_list_videos: ({ courseId }) => (courseId === "c1" ? videos : []),
+    // __shot-folders：机器学习导论分成两章（文件夹场景用），其余场景保持平铺。
+    cmd_list_folders: ({ courseId }) => (courseId === "c1" && withFolders() ? folders : []),
+    cmd_create_folder: ({ courseId, parentId, name }) => {
+      const folder = {
+        id: `f${folders.length + 1}`, course_id: courseId, parent_id: parentId, name, color: null,
+        order_index: 100 + folders.length, created_at: now, updated_at: now,
+      };
+      folders.push(folder);
+      return folder;
+    },
+    cmd_rename_folder: ({ id, name }) => {
+      const folder = folders.find((f) => f.id === id);
+      if (folder) folder.name = name;
+    },
+    cmd_set_folder_color: ({ id, color }) => {
+      const folder = folders.find((f) => f.id === id);
+      if (folder) folder.color = color;
+    },
+    cmd_delete_folder: ({ id }) => {
+      const index = folders.findIndex((f) => f.id === id);
+      if (index >= 0) folders.splice(index, 1);
+    },
+    cmd_move_items: ({ folderId, items }) => {
+      for (const item of items) {
+        const list = item.kind === "folder" ? folders : videos;
+        const row = list.find((x) => x.id === item.id);
+        if (row && item.kind === "folder") row.parent_id = folderId;
+        if (row && item.kind === "video") row.folder_id = folderId;
+      }
+    },
+    cmd_reorder_container: ({ items }) => {
+      items.forEach((item, index) => {
+        const row = (item.kind === "folder" ? folders : videos).find((x) => x.id === item.id);
+        if (row) row.order_index = index;
+      });
+      videos.sort((a, b) => a.order_index - b.order_index);
+    },
+    cmd_list_videos: ({ courseId }) =>
+      courseId === "c1"
+        ? videos.map((video) => (withFolders() ? video : { ...video, folder_id: null }))
+        : [],
     cmd_video_cover: ({ videoId }) => cover(videoId),
     cmd_media_url: ({ videoId }) => mediaUrl(videoId),
     cmd_list_processing_videos: () => [videos[6]],
