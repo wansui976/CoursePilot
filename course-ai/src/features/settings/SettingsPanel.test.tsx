@@ -208,6 +208,20 @@ describe("SettingsPanel", () => {
     expect(screen.getByText(/不包含视频、音频、课件图片和本地模型/)).toBeInTheDocument();
   });
 
+  it("loads and saves how many videos are processed at once", async () => {
+    mockIpc.settings.get.mockImplementation(async (key: string) =>
+      key === "processing_concurrency" ? "3" : null,
+    );
+    render(<SettingsPanel onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole("button", { name: "语音识别" }));
+    const select = await screen.findByLabelText("同时处理的视频数");
+    await waitFor(() => expect(select).toHaveValue("3"));
+    fireEvent.change(select, { target: { value: "1" } });
+    await waitFor(() =>
+      expect(mockIpc.settings.set).toHaveBeenCalledWith("processing_concurrency", "1"),
+    );
+  });
+
   it("normalizes an invalid correction concurrency on blur", async () => {
     render(<SettingsPanel onClose={() => undefined} />);
 

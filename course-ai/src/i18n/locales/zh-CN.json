@@ -92,7 +92,9 @@
       "interruptedByRestart": "应用已重启，处理被中断，请重试",
       "canceled": "已取消",
       "localAsrDevice": "本地识别中（{{model}}，{{language}}，{{device}}）",
-      "gpuDevice": "GPU：{{name}}"
+      "gpuDevice": "GPU：{{name}}",
+      "waitingForLocalAsr": "排队等待本地识别（另一个视频正在识别）",
+      "waitingForSlot": "排队等待处理（同时最多 {{limit}} 个视频）"
     }
   },
   "videoPlayer": {
@@ -1006,7 +1008,13 @@
       "transcripts": "也搜文稿",
       "transcriptsHint": "连字幕文稿一起搜，点结果可直接跳到那一句。讲到这个词的每一讲都会命中，结果会多不少。"
     },
-    "hintFor": "「{{label}}」的说明"
+    "hintFor": "「{{label}}」的说明",
+    "processing": {
+      "title": "处理队列",
+      "concurrency": "同时处理的视频数",
+      "concurrencyHint": "同时最多处理几个视频，其余按点「开始处理」的先后排队。数越大总体越快，但电脑越卡。本地语音识别另外一次只跑一个视频（显卡和 CPU 都让给它），其余视频的课件、AI 步骤照常并行。",
+      "videos": "{{count}} 个"
+    }
   },
   "assistant": {
     "toggleAssistant": "切换 AI 助手",

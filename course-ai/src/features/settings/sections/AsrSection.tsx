@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/ui/button";
 import { Switch } from "@/ui/switch";
 import { WhisperModelsPanel } from "@/features/settings/WhisperModelsPanel";
+import { ProcessingConcurrency } from "@/features/settings/ProcessingConcurrency";
 import { FIELD, Select, Group, Row, StackRow, SavedBadge, type RowTag } from "@/features/settings/primitives";
 import type { SettingsForm } from "@/features/settings/useSettingsForm";
 import { isMobile } from "@/lib/platform";
@@ -131,6 +132,7 @@ export function AsrSection({ form }: { form: SettingsForm }) {
           />
         </Row>
       </Group>
+      <ProcessingConcurrency />
 
       {asrBackend === "whisper" && (
         <Group header={t("settings.asr.whisperTitle")}>

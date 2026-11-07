@@ -169,7 +169,17 @@ async fn asr_use_gpu(db: &crate::db::Db) -> bool {
     setting(db, "asr_gpu").await.ok().flatten().as_deref() != Some("false")
 }
 
-/// 用选好的本地模型识别一段 16kHz 单声道 WAV。
+/// 本地识别同一时刻只跑一个视频。
+///
+/// 一个 Qwen3-ASR（llama-server，4 路并发）已经能把显卡吃满；几个视频同时识别时，后起的
+/// 抢不到显存会退回 CPU——用户看到的是「GPU 没启动」，整台电脑卡住，总耗时反而更长。
+/// SenseVoice 跑在 CPU 上，同时跑几份也只是互相抢核。排队一个个来，其余视频的课件、
+/// AI 步骤照常并行。
+static LOCAL_ASR: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
+#[allow(clippy::too_many_arguments)]
+/// 用选好的本地模型识别一段 16kHz 单声道 WAV。前面有视频在本地识别时先排队，
+/// 排队期间调用一次 `on_wait`（流水线拿它把「排队等待本地识别」报给界面）。
 async fn run_local_model(
     models_root: &Path,
     model: &LocalModel,
@@ -178,7 +188,20 @@ async fn run_local_model(
     hotwords: &[String],
     use_gpu: bool,
     progress: ai::Progress<'_>,
+    on_wait: Option<&(dyn Fn() + Send + Sync)>,
 ) -> AppResult<asr::WhisperJson> {
+    let _permit = match LOCAL_ASR.try_acquire() {
+        Ok(permit) => permit,
+        Err(_) => {
+            if let Some(on_wait) = on_wait {
+                on_wait();
+            }
+            LOCAL_ASR
+                .acquire()
+                .await
+                .map_err(|_| AppError::Pipeline("本地识别队列已关闭".into()))?
+        }
+    };
     match model {
         LocalModel::Sherpa(model) if model.kind == local_asr::SherpaKind::Qwen3AsrGguf => {
             let job = llama_asr::LlamaJob {
@@ -262,7 +285,8 @@ pub async fn transcribe_clip(
             })?;
             let hotwords = split_terms(&setting(db, "volcengine_asr_hotwords").await?.unwrap_or_default());
             let use_gpu = asr_use_gpu(db).await;
-            run_local_model(&app_data, &model, &audio_path, &lang, &hotwords, use_gpu, None).await?
+            run_local_model(&app_data, &model, &audio_path, &lang, &hotwords, use_gpu, None, None)
+                .await?
         }
         AsrBackend::Volcengine => {
             let app_id = setting(db, "volcengine_asr_app_id").await?.unwrap_or_default();
@@ -304,6 +328,126 @@ fn subtitle_shortcut(subtitle_path: Option<&str>) -> Option<std::path::PathBuf> 
     path.is_file().then_some(path)
 }
 
+/// 排队等本地识别时报给界面的话（前端按原文匹配做翻译）。
+const LOCAL_ASR_WAITING: &str = "排队等待本地识别";
+/// 同时处理的视频数（设置项），默认 2。
+const PROCESSING_CONCURRENCY_KEY: &str = "processing_concurrency";
+pub const DEFAULT_PROCESSING_CONCURRENCY: usize = 2;
+const MAX_PROCESSING_CONCURRENCY: usize = 6;
+
+async fn processing_limit(db: &crate::db::Db) -> usize {
+    setting(db, PROCESSING_CONCURRENCY_KEY)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(DEFAULT_PROCESSING_CONCURRENCY)
+        .clamp(1, MAX_PROCESSING_CONCURRENCY)
+}
+
+/// 视频处理的排队闸口：同时最多 N 个视频在跑（设置项，默认 2），其余按点「开始处理」的
+/// 先后排队。原来不设上限：一次导入十几个视频就同时抽十几份音轨、起十几个识别，电脑卡死。
+///
+/// 先来先服务：只有排在队首的才能进；进不去的等「有人离开」的通知（兜底每两秒再看一眼，
+/// 用户在设置里把上限调大了也能及时放行）。排队中被取消（任务被中止）时票据自动作废。
+#[derive(Default)]
+struct ProcessingGate {
+    state: std::sync::Mutex<GateState>,
+    changed: tokio::sync::Notify,
+}
+
+#[derive(Default)]
+struct GateState {
+    running: usize,
+    waiting: std::collections::VecDeque<u64>,
+    next_ticket: u64,
+}
+
+/// 排队的票据。放行前丢掉 = 离开队伍；放行后丢掉 = 让出名额。
+struct GateTicket<'a> {
+    gate: &'a ProcessingGate,
+    ticket: u64,
+    admitted: bool,
+}
+
+impl ProcessingGate {
+    fn join(&self) -> GateTicket<'_> {
+        let mut state = self.state.lock().unwrap();
+        let ticket = state.next_ticket;
+        state.next_ticket += 1;
+        state.waiting.push_back(ticket);
+        GateTicket {
+            gate: self,
+            ticket,
+            admitted: false,
+        }
+    }
+}
+
+impl GateTicket<'_> {
+    /// 轮到了就放行（返回 None）；否则返回前面还有几个视频在排。
+    fn try_admit(&mut self, limit: usize) -> Option<usize> {
+        let mut state = self.gate.state.lock().unwrap();
+        let ahead = state
+            .waiting
+            .iter()
+            .position(|ticket| *ticket == self.ticket)
+            .unwrap_or(0);
+        if ahead == 0 && state.running < limit {
+            state.waiting.pop_front();
+            state.running += 1;
+            self.admitted = true;
+            drop(state);
+            // 队首换人了：让下一个也看一眼（上限可能还有空位）。
+            self.gate.changed.notify_waiters();
+            return None;
+        }
+        Some(ahead)
+    }
+
+    /// 等到轮到自己。`limit` 每轮重读（设置可能被改），`on_wait` 报「前面还有几个」。
+    async fn admit<F, Fut>(&mut self, limit: F, mut on_wait: impl FnMut(usize, usize))
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = usize>,
+    {
+        let mut reported = None;
+        loop {
+            let changed = self.gate.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let cap = limit().await;
+            let Some(ahead) = self.try_admit(cap) else {
+                return;
+            };
+            if reported != Some((ahead, cap)) {
+                on_wait(ahead, cap);
+                reported = Some((ahead, cap));
+            }
+            tokio::select! {
+                _ = changed => {}
+                _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {}
+            }
+        }
+    }
+}
+
+impl Drop for GateTicket<'_> {
+    fn drop(&mut self) {
+        let mut state = self.gate.state.lock().unwrap();
+        if self.admitted {
+            state.running = state.running.saturating_sub(1);
+        } else {
+            state.waiting.retain(|ticket| *ticket != self.ticket);
+        }
+        drop(state);
+        self.gate.changed.notify_waiters();
+    }
+}
+
+static PROCESSING_GATE: std::sync::LazyLock<ProcessingGate> =
+    std::sync::LazyLock::new(ProcessingGate::default);
+
 async fn run_all(
     app: AppHandle,
     video_id: String,
@@ -321,11 +465,6 @@ async fn run_all(
     let _keep_alive =
         crate::keep_alive::hold(crate::keep_alive::Kind::Processing, &video_id, &video.title);
 
-    sqlx::query("UPDATE videos SET processed_status='processing' WHERE id=?")
-        .bind(&video_id)
-        .execute(&db.pool)
-        .await?;
-
     let jobs_list = jobs::ensure_jobs(&db, &video_id).await?;
     for job in &jobs_list {
         emit_update(
@@ -340,6 +479,41 @@ async fn run_all(
             },
         );
     }
+
+    // 排队：同时处理的视频数有上限，轮到了才开工。排队期间把「排队等待处理」挂在第一个
+    // 还没做完的阶段上（界面显示的就是它）；只发事件不落库，开工后自然被真实进度覆盖。
+    let mut ticket = PROCESSING_GATE.join();
+    let first_open = ["crop", "audio", "slides", "asr"]
+        .iter()
+        .find_map(|stage| {
+            jobs_list
+                .iter()
+                .find(|job| job.stage == *stage && job.status != "done")
+        })
+        .cloned();
+    ticket
+        .admit(
+            || processing_limit(&db),
+            |_ahead, limit| {
+                if let Some(job) = &first_open {
+                    emit_stage(
+                        &app,
+                        &video_id,
+                        &job.id,
+                        &job.stage,
+                        "pending",
+                        job.progress,
+                        Some(&format!("排队等待处理（同时最多 {limit} 个视频）")),
+                    );
+                }
+            },
+        )
+        .await;
+
+    sqlx::query("UPDATE videos SET processed_status='processing' WHERE id=?")
+        .bind(&video_id)
+        .execute(&db.pool)
+        .await?;
 
     // 黑边探测排最前：课件提取要按裁完的几何降采样采样帧，必须在它之前收口。
     // 平时导入后的后台任务已写好缓存，这一步通常只是标 done 跳过。
@@ -615,7 +789,33 @@ async fn run_all(
             // 用户的热词表（和火山引擎共用一份）：只有 Qwen3-ASR 用得上。
             let hotwords = split_terms(&setting(&db, "volcengine_asr_hotwords").await?.unwrap_or_default());
             let use_gpu = asr_use_gpu(&db).await;
-            run_local_model(&app_data, &model, &audio_path, &lang, &hotwords, use_gpu, Some(&sink)).await
+            let on_wait = {
+                let app = app.clone();
+                let video_id = video_id.clone();
+                let job_id = asr_job.id.clone();
+                move || {
+                    emit_stage(
+                        &app,
+                        &video_id,
+                        &job_id,
+                        "asr",
+                        "running",
+                        0.18,
+                        Some(LOCAL_ASR_WAITING),
+                    );
+                }
+            };
+            run_local_model(
+                &app_data,
+                &model,
+                &audio_path,
+                &lang,
+                &hotwords,
+                use_gpu,
+                Some(&sink),
+                Some(&on_wait),
+            )
+            .await
         }
         AsrBackend::Volcengine => {
             let app_id = sqlx::query_scalar::<_, String>(
@@ -2010,6 +2210,65 @@ mod tests {
 
     /// 课件支线卡在一页 OCR 上、根本不看取消标志时，停止处理也必须在有限时间内返回，
     /// 并把这条支线掐掉——否则调用方拿着的 transition 锁永远不放，取消、删除全部挂住。
+    #[tokio::test]
+    async fn processing_gate_admits_in_order_up_to_the_limit() {
+        let gate = ProcessingGate::default();
+        let mut first = gate.join();
+        let mut second = gate.join();
+        let mut third = gate.join();
+        assert_eq!(first.try_admit(1), None);
+        // 名额满了：第二个排在队首但进不去；第三个前面还有一个。
+        assert_eq!(second.try_admit(1), Some(0));
+        assert_eq!(third.try_admit(1), Some(1));
+        // 第一个做完让出名额，第二个进去；第三个仍要等。
+        drop(first);
+        assert_eq!(second.try_admit(1), None);
+        assert_eq!(third.try_admit(1), Some(0));
+        // 上限调大，不用等别人做完也能进。
+        assert_eq!(third.try_admit(2), None);
+        assert_eq!(gate.state.lock().unwrap().running, 2);
+    }
+
+    #[tokio::test]
+    async fn a_canceled_waiter_leaves_the_queue() {
+        let gate = ProcessingGate::default();
+        let mut running = gate.join();
+        assert_eq!(running.try_admit(1), None);
+        let waiting = gate.join();
+        let mut later = gate.join();
+        assert_eq!(later.try_admit(1), Some(1));
+        // 排队中被取消：票据丢掉就离队，后面的人往前挪。
+        drop(waiting);
+        assert_eq!(later.try_admit(1), Some(0));
+        drop(running);
+        assert_eq!(later.try_admit(1), None);
+    }
+
+    #[tokio::test]
+    async fn waiting_for_the_gate_wakes_up_when_a_slot_frees() {
+        let gate: &'static ProcessingGate = Box::leak(Box::default());
+        let mut holder = gate.join();
+        assert_eq!(holder.try_admit(1), None);
+        let waits = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = waits.clone();
+        let waiter = tokio::spawn(async move {
+            let mut ticket = gate.join();
+            ticket
+                .admit(|| async { 1 }, move |ahead, limit| seen.lock().unwrap().push((ahead, limit)))
+                .await;
+            ticket
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!waiter.is_finished());
+        assert_eq!(*waits.lock().unwrap(), [(0, 1)]);
+        let started = std::time::Instant::now();
+        drop(holder);
+        let ticket = waiter.await.unwrap();
+        // 靠通知唤醒，不用等两秒的兜底轮询。
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        assert!(ticket.admitted);
+    }
+
     #[tokio::test]
     async fn stopping_processing_task_aborts_a_stuck_slides_branch() {
         let (slides_done_tx, slides_done_rx) = tokio::sync::oneshot::channel::<()>();

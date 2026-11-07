@@ -134,6 +134,17 @@ describe("处理队列的整体进度", () => {
     ).toBe("Transcribing with Whisper (zh)");
   });
 
+  it("says a video is queued, for a free processing slot or for local recognition", () => {
+    const job = { stage: "crop", status: "pending", progress: 0, message: "排队等待处理（同时最多 2 个视频）" };
+    expect(stageMessage(job, i18n.getFixedT("zh-CN"))).toBe("排队等待处理（同时最多 2 个视频）");
+    expect(stageMessage(job, i18n.getFixedT("en"))).toBe("Queued (up to 2 videos at once)");
+    const asr = { stage: "asr", status: "running", progress: 0.18, message: "排队等待本地识别" };
+    expect(stageMessage(asr, i18n.getFixedT("zh-CN"))).toBe("排队等待本地识别（另一个视频正在识别）");
+    expect(stageMessage(asr, i18n.getFixedT("en"))).toBe(
+      "Waiting for local recognition (another video is being recognized)",
+    );
+  });
+
   it("桌面 Qwen3-ASR 的进度带上实际用的显卡或 CPU", () => {
     const job: StageJob = {
       stage: "asr",

@@ -51,6 +51,7 @@ const DETAIL_LABEL_KEY: Record<string, string> = {
   "导入 B站自带字幕": "pipelineProgress.details.importingBilibiliSubtitles",
   "正在 AI 纠正字幕": "pipelineProgress.details.correctingSubtitles",
   "准备识别引擎": "pipelineProgress.details.preparingAsr",
+  "排队等待本地识别": "pipelineProgress.details.waitingForLocalAsr",
   "切分音频，准备分段上传": "pipelineProgress.details.splittingAudio",
   "云端识别中（火山引擎）": "pipelineProgress.details.volcengineAsr",
   "云端分段识别中（火山引擎）": "pipelineProgress.details.volcengineChunkedAsr",
@@ -85,7 +86,11 @@ function localizedDetail(detail: string, t: Translate): string | undefined {
   const exactKey = DETAIL_LABEL_KEY[detail];
   if (exactKey) return t(exactKey);
 
-  let match = detail.match(/^AI 纠正文稿 (\d+)\/(\d+) 段$/);
+  let match = detail.match(/^排队等待处理（同时最多 (\d+) 个视频）$/);
+  if (match) {
+    return t("pipelineProgress.details.waitingForSlot", { limit: Number(match[1]) });
+  }
+  match = detail.match(/^AI 纠正文稿 (\d+)\/(\d+) 段$/);
   if (match) {
     return t("pipelineProgress.details.correctingTranscriptProgress", {
       done: Number(match[1]),

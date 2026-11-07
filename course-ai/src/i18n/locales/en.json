@@ -92,7 +92,9 @@
       "interruptedByRestart": "Processing was interrupted when the app restarted. Retry this task.",
       "canceled": "Canceled",
       "localAsrDevice": "Transcribing locally ({{model}}, {{language}}, {{device}})",
-      "gpuDevice": "GPU: {{name}}"
+      "gpuDevice": "GPU: {{name}}",
+      "waitingForLocalAsr": "Waiting for local recognition (another video is being recognized)",
+      "waitingForSlot": "Queued (up to {{limit}} videos at once)"
     }
   },
   "videoPlayer": {
@@ -1007,7 +1009,13 @@
       "transcripts": "Also search transcripts",
       "transcriptsHint": "Include subtitle transcripts; clicking a result jumps to that line. Every lecture that mentions the word will match, so expect many more results."
     },
-    "hintFor": "About “{{label}}”"
+    "hintFor": "About “{{label}}”",
+    "processing": {
+      "title": "Processing queue",
+      "concurrency": "Videos processed at once",
+      "concurrencyHint": "How many videos are processed at the same time; the rest wait in the order you started them. Higher is faster overall but makes the computer busier. Local speech recognition always runs one video at a time (it gets the GPU and CPU to itself); slides and AI steps of other videos keep going in parallel.",
+      "videos": "{{count}}"
+    }
   },
   "assistant": {
     "toggleAssistant": "Toggle AI assistant",
