@@ -1,7 +1,7 @@
 import "@/i18n";
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ImportVideoButton } from "./ImportVideoDialog";
 
@@ -44,14 +44,14 @@ vi.mock("@/lib/platform", () => ({
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
-function renderButton() {
+function renderButton(onCreateFolder?: () => void) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
 
   render(
     <QueryClientProvider client={queryClient}>
-      <ImportVideoButton courseId="course-1" />
+      <ImportVideoButton courseId="course-1" onCreateFolder={onCreateFolder} />
     </QueryClientProvider>,
   );
 }
@@ -127,6 +127,22 @@ describe("ImportVideoButton", () => {
     await waitFor(() =>
       expect(addLocalMock).toHaveBeenCalledWith("course-1", "/tmp/clip.mov", 12_345),
     );
+  });
+
+  it("offers creating a folder last, only when the page asks for it", () => {
+    renderButton();
+    fireEvent.click(screen.getByRole("button", { name: "导入" }));
+    expect(screen.queryByRole("menuitem", { name: /新建文件夹/ })).not.toBeInTheDocument();
+    cleanup();
+
+    const onCreateFolder = vi.fn();
+    renderButton(onCreateFolder);
+    fireEvent.click(screen.getByRole("button", { name: "导入" }));
+    const items = screen.getAllByRole("menuitem");
+    expect(items[items.length - 1]).toHaveTextContent("新建文件夹");
+    fireEvent.click(items[items.length - 1]);
+    expect(onCreateFolder).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
   it("opens an announced menu and focuses its first item", async () => {

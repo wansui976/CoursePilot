@@ -64,7 +64,12 @@ const settingsExitRequestMock = vi.hoisted(() =>
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: confirmMock }));
 vi.mock("@/features/library/ImportVideoDialog", () => ({
-  ImportVideoButton: () => <button>导入</button>,
+  ImportVideoButton: ({ onCreateFolder }: { onCreateFolder?: () => void }) => (
+    <>
+      <button>导入</button>
+      {onCreateFolder && <button onClick={onCreateFolder}>新建文件夹</button>}
+    </>
+  ),
 }));
 vi.mock("@/features/workspace/RagSearchPanel", () => ({
   RagSearchPanel: () => <input aria-label="课程问答" placeholder="向这节课提问或搜索文稿" />,
@@ -1371,6 +1376,7 @@ describe("Home", () => {
       await screen.findByRole("button", { name: "打开文件夹 第1章" });
       mockIpc.folders.list.mockResolvedValue([chapter, created]);
 
+      // 「新建文件夹」收在「导入」菜单里（这里的导入按钮是桩，直接给出那一项）。
       fireEvent.click(screen.getByRole("button", { name: "新建文件夹" }));
       await waitFor(() =>
         expect(mockIpc.folders.create).toHaveBeenCalledWith("course-1", null, "新建文件夹"),

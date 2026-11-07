@@ -262,6 +262,7 @@
   },
   "folders": {
     "newFolder": "新建文件夹",
+    "newFolderHint": "在当前位置建一个文件夹，按章节整理视频",
     "open": "打开文件夹 {{name}}",
     "actions": "文件夹操作",
     "rename": "重命名",

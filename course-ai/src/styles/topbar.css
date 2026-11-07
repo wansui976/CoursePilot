@@ -9,10 +9,23 @@
 }
 
 .tb-lead {
+  /* 标题区可以收窄（让出位置给右侧工具条，长课程名 / 面包屑截断），但至少留 240px；
+     放不下时才整行换到工具条下面。 */
+  flex: 1 1 240px;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* 标题行右端的文字操作（手机上的「选择」/「取消」）。 */
+.tb-lead-action {
+  margin-left: auto;
+  flex: none;
+  min-height: 44px;
+  padding: 0 4px;
+  font-size: var(--fs-md);
+  color: var(--accent-text);
 }
 
 /* 窄屏课程页的返回：只是一个箭头，不再是描边白底的方块；左边让出图标自身的留白，
@@ -43,6 +56,9 @@
 }
 
 .tb-titles h1 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   /* 课程库是根视图：给 Apple 式大标题（28px/紧字距），与次级视图 20px 的
      ViewHeader 拉开层级；窄屏由下方 bucket 覆盖降到 fs-xl。 */
   font-size: var(--fs-2xl);

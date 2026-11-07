@@ -6,6 +6,7 @@ import { IconButton } from "@/ui/icon-button";
 import { Menu, MenuItem } from "@/ui/menu";
 import { cn } from "@/lib/utils";
 import { ColorSwatches } from "./ColorSwatches";
+import { VideoCover } from "./VideoCover";
 import { colorStyle } from "./colorStyle";
 
 export type FolderActions = {
@@ -26,6 +27,7 @@ export type FolderActions = {
 export function FolderItem({
   folder,
   count,
+  covers = [],
   layout,
   dropTarget,
   renaming,
@@ -36,6 +38,8 @@ export function FolderItem({
   folder: Folder;
   /** 文件夹里（含子文件夹）的视频数。 */
   count: number;
+  /** 文件夹里按教材顺序的前几个视频：网格卡片的封面拼图（与课程卡同一套 2×2 语言）。 */
+  covers?: string[];
   layout: "grid" | "list";
   dropTarget: boolean;
   renaming: boolean;
@@ -78,7 +82,23 @@ export function FolderItem({
       aria-pressed={selecting ? selected : undefined}
       onClick={actions.onOpen}
     >
-      <span className="ca-thumb ca-folder-thumb">{icon("h-11 w-11")}</span>
+      {covers.length === 0 ? (
+        <span className="ca-thumb ca-folder-thumb">{icon("h-11 w-11")}</span>
+      ) : (
+        // 拼图随视频数变：1 张满铺、2 张左右、3 张一大两小、4 张以上 2×2——一眼看出是「一摞」。
+        <span className="ca-thumb ca-folder-cover" data-tiles={Math.min(covers.length, 4)}>
+          {covers.slice(0, 4).map((videoId) => (
+            <span key={videoId} className="ca-course-tile">
+              <VideoCover videoId={videoId} className="absolute inset-0 h-full w-full" />
+            </span>
+          ))}
+          {/* 角标表明这是文件夹、里面有几个视频；标了颜色的文件夹，图标是那个颜色（底色不变，保证数字的对比度）。 */}
+          <span className="ca-folder-badge" data-color={folder.color ?? undefined}>
+            <FolderIcon aria-hidden="true" className="h-3.5 w-3.5" style={badgeIconStyle(folder.color)} />
+            <span aria-hidden="true">{count}</span>
+          </span>
+        </span>
+      )}
       <span className="ca-card-body">
         <span className="ca-card-title">{folder.name}</span>
         <span className="ca-card-meta">
@@ -185,6 +205,11 @@ export function FolderItem({
       )}
     </article>
   );
+}
+
+// 角标是深色半透明底：用暗色主题那档更亮的色值，图标在两种主题下都看得清。
+function badgeIconStyle(color: Folder["color"]) {
+  return color ? { color: `var(--course-${color}-on-dark)` } : undefined;
 }
 
 /** 选择模式下卡片左上角的勾选标记（装饰；状态由按钮的 aria-pressed 表达）。 */

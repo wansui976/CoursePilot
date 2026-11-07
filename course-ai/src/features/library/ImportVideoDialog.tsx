@@ -4,6 +4,7 @@ import {
   Download,
   FileVideo,
   FolderInput,
+  FolderPlus,
   ListVideo,
   Plus,
 } from "lucide-react";
@@ -38,7 +39,14 @@ const PlaylistImportDialog = lazy(() =>
 );
 
 /** 单一「导入」入口：点开后可选「上传本地视频」或「下载网络视频（B 站 / 链接）」。 */
-export function ImportVideoButton({ courseId }: { courseId: string }) {
+export function ImportVideoButton({
+  courseId,
+  onCreateFolder,
+}: {
+  courseId: string;
+  /** 给了就在菜单最后加一项「新建文件夹」：往课程里「添加」的入口都收在这一个按钮里。 */
+  onCreateFolder?: () => void;
+}) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -258,6 +266,30 @@ export function ImportVideoButton({ courseId }: { courseId: string }) {
                     </span>
                     <span className="block text-xs text-[var(--text-muted)]">
                       {t("import.importPlaylistHint")}
+                    </span>
+                  </span>
+                </button>
+              </>
+            )}
+            {onCreateFolder && (
+              <>
+                <div className="my-1 border-t border-[var(--border-faint)]" />
+                <button
+                  role="menuitem"
+                  tabIndex={-1}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onCreateFolder();
+                  }}
+                  className="ca-touch-44 flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-[var(--surface-card-hover)]"
+                >
+                  <FolderPlus className="mt-0.5 h-4 w-4 flex-none text-primary" />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-[var(--text-strong)]">
+                      {t("folders.newFolder")}
+                    </span>
+                    <span className="block text-xs text-[var(--text-muted)]">
+                      {t("folders.newFolderHint")}
                     </span>
                   </span>
                 </button>

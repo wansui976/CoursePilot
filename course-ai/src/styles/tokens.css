@@ -103,6 +103,15 @@
   --course-blue: #2563eb;
   --course-purple: #9333ea;
   --course-pink: #db2777;
+  /* 深色底上的小图标（如文件夹封面上的角标）：两种主题都用亮的一档。 */
+  --course-red-on-dark: #f87171;
+  --course-orange-on-dark: #fb923c;
+  --course-yellow-on-dark: #facc15;
+  --course-green-on-dark: #4ade80;
+  --course-teal-on-dark: #2dd4bf;
+  --course-blue-on-dark: #60a5fa;
+  --course-purple-on-dark: #c084fc;
+  --course-pink-on-dark: #f472b6;
 
   --scrollbar-thumb: #e0e2e8;
   --scrollbar-thumb-hover: #d0d3da;

@@ -951,15 +951,18 @@ export function CourseLibraryView({
               videoId={video.id}
               className="absolute inset-0 h-full w-full"
             />
-            {/* 悬停快捷播放：整卡本就是一个可点按钮，这里只做视觉 affordance（装饰，不嵌套真按钮）。 */}
-            <span
-              aria-hidden="true"
-              className="ca-card-play pointer-events-none absolute inset-0 z-10 grid place-items-center"
-            >
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white ring-1 ring-white/25 backdrop-blur-sm">
-                <Play className="h-6 w-6 fill-current" />
+            {/* 悬停快捷播放：整卡本就是一个可点按钮，这里只做视觉 affordance（装饰，不嵌套真按钮）。
+                选择模式下点卡片是勾选，不画播放按钮。 */}
+            {!selecting && (
+              <span
+                aria-hidden="true"
+                className="ca-card-play pointer-events-none absolute inset-0 z-10 grid place-items-center"
+              >
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white ring-1 ring-white/25 backdrop-blur-sm">
+                  <Play className="h-6 w-6 fill-current" />
+                </span>
               </span>
-            </span>
+            )}
             {/* 「已处理」是常态，不再每张卡都挂徽标；只有待处理/处理中/失败才提示。 */}
             {displayStatus(video) !== "done" && <span className="st">{statusBadge(video)}</span>}
             {/* 时长未知就不显示角标：假的「00:00」会让人以为视频是空的。 */}
@@ -1250,8 +1253,20 @@ export function CourseLibraryView({
       visibleFolders.length === 0 &&
       visibleVideos.length === 0 &&
       courseDownloads.length === 0;
+    const canSelect = !normalizedQuery && (visibleFolders.length > 0 || visibleVideos.length > 0);
     const dragDisabled =
       selecting || renamingVideo !== null || renamingFolderId !== null || normalizedQuery !== "";
+
+    // 文件夹卡的封面：它里面（含子文件夹）按教材顺序的前 4 个视频。
+    function folderCovers(folderId: string) {
+      const inside = subtreeFolderIds(folders, folderId);
+      const ids: string[] = [];
+      for (const video of videos) {
+        if (video.folder_id && inside.has(video.folder_id)) ids.push(video.id);
+        if (ids.length === 4) break;
+      }
+      return ids;
+    }
 
     function renderFolder(folder: Folder) {
       return (
@@ -1259,6 +1274,7 @@ export function CourseLibraryView({
           <FolderItem
             folder={folder}
             count={videoCountIn(folders, videos, folder.id)}
+            covers={folderCovers(folder.id)}
             layout={view}
             dropTarget={dropTarget === folderKey(folder.id)}
             renaming={renamingFolderId === folder.id}
@@ -1374,6 +1390,17 @@ export function CourseLibraryView({
                 )}
               </div>
             </div>
+            {/* 手机：「选择」放在标题行右端（iOS 的习惯位置），选择中变成「取消」。 */}
+            {isPhoneDevice && canSelect && (
+              <button
+                type="button"
+                className="tb-lead-action"
+                aria-pressed={selecting}
+                onClick={() => (selecting ? exitSelection() : setSelecting(true))}
+              >
+                {selecting ? t("common.cancel") : t("library.select")}
+              </button>
+            )}
           </div>
           {selectedCourseId && (
             <div className="tb-actions">
@@ -1474,7 +1501,7 @@ export function CourseLibraryView({
                   <span className="max-sm:sr-only">{t("findExplanation.entry")}</span>
                 </Button>
               )}
-              {!normalizedQuery && (visibleFolders.length > 0 || visibleVideos.length > 0) && (
+              {!isPhoneDevice && canSelect && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1487,18 +1514,10 @@ export function CourseLibraryView({
                   <span className="max-sm:sr-only">{t("library.select")}</span>
                 </Button>
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => createFolder.mutate()}
-                disabled={createFolder.isPending}
-                title={t("folders.newFolder")}
-                className="ca-touch-44"
-              >
-                <FolderPlus className="h-4 w-4" />
-                <span className="max-sm:sr-only">{t("folders.newFolder")}</span>
-              </Button>
-              <ImportVideoButton courseId={selectedCourseId} />
+              <ImportVideoButton
+                courseId={selectedCourseId}
+                onCreateFolder={() => createFolder.mutate()}
+              />
             </div>
           )}
         </header>
@@ -1537,7 +1556,10 @@ export function CourseLibraryView({
                 }
                 action={
                   selectedCourseId ? (
-                    <ImportVideoButton courseId={selectedCourseId} />
+                    <ImportVideoButton
+                      courseId={selectedCourseId}
+                      onCreateFolder={() => createFolder.mutate()}
+                    />
                   ) : (
                     <div className="flex flex-col items-center gap-2">
                       <Button

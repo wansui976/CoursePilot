@@ -437,8 +437,8 @@ button.ca-nav-disclosure:hover {
 
 .ca-color-swatch::before {
   content: "";
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   border-radius: 999px;
   background: var(--swatch);
 }
@@ -455,7 +455,26 @@ button.ca-nav-disclosure:hover {
 }
 
 .ca-color-swatch[aria-checked="true"]::before {
-  outline: 2px solid var(--swatch, var(--text-2));
+  outline: 1.5px solid var(--swatch, var(--text-2));
+  outline-offset: 1.5px;
+}
+
+/* 手机的底部操作弹层：格子更大，好点。 */
+.ca-menu-sheet .ca-course-colors {
+  padding: 6px 4px;
+}
+
+.ca-menu-sheet .ca-color-swatch {
+  height: 44px;
+}
+
+.ca-menu-sheet .ca-color-swatch::before {
+  width: 20px;
+  height: 20px;
+}
+
+.ca-menu-sheet .ca-color-swatch[aria-checked="true"]::before {
+  outline-width: 2px;
   outline-offset: 2px;
 }
 

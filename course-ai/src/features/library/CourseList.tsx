@@ -38,6 +38,8 @@ import { useSidebarExpanded } from "./useSidebarExpanded";
 import { folderPath } from "./folderTree";
 import { colorStyle } from "./colorStyle";
 import { ErrorNote } from "@/ui/ErrorNote";
+import { Menu, MenuItem } from "@/ui/menu";
+import { useOptionalShell } from "@/app/shell";
 import { Skeleton } from "@/ui/skeleton";
 import { isIOS, pickDirectoryPath } from "@/lib/mobileFiles";
 import { cn } from "@/lib/utils";
@@ -154,6 +156,8 @@ export function CourseList({
   const anyFolders = courses.some((course) => (course.folder_count ?? 0) > 0);
 
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  // 叠放布局（手机）用底部操作弹层，和应用里其它菜单一致。
+  const menuSheet = Boolean(useOptionalShell()?.isPhoneDevice);
   const [subscriptionsFor, setSubscriptionsFor] = useState<{ id: string; name: string } | null>(null);
   // 打开时记录触发按钮的屏幕坐标：菜单 portal 到 body 用 fixed 定位，
   // 不再被 `.ca-nav`（overflow-y:auto）滚动容器裁掉。
@@ -418,6 +422,48 @@ export function CourseList({
     swipeStart.current = null;
   }
 
+  // 菜单项与视频 / 文件夹菜单同款：图标是次要灰，危险操作放最后并用分隔线隔开。
+  function renderMenuItems(course: Course) {
+    const icon = "h-4 w-4 flex-none text-[var(--text-3)]";
+    return (
+      <>
+        <MenuItem
+          className="ca-touch-44 flex items-center gap-2"
+          onClick={() => startRename(course.id, course.name)}
+        >
+          <Pencil aria-hidden="true" className={icon} />
+          {t("courseList.rename")}
+        </MenuItem>
+        <ColorSwatches value={course.color} onChange={(color) => chooseColor(course.id, color)} />
+        <MenuItem
+          className="ca-touch-44 flex items-center gap-2"
+          onClick={() => void handleRelinkRoot(course.id, course.name)}
+        >
+          <FolderOpen aria-hidden="true" className={icon} />
+          {t("courseList.relinkRoot")}
+        </MenuItem>
+        <MenuItem
+          className="ca-touch-44 flex items-center gap-2"
+          onClick={() => {
+            setSubscriptionsFor({ id: course.id, name: course.name });
+            closeMenu();
+          }}
+        >
+          <Rss aria-hidden="true" className={icon} />
+          {t("courseList.subscriptions")}
+        </MenuItem>
+        <MenuItem
+          tone="danger"
+          className="ca-touch-44 mt-1 flex items-center gap-2 border-t border-[var(--border-subtle)] pt-2.5"
+          onClick={() => void confirmDelete(course)}
+        >
+          <Trash2 aria-hidden="true" className="h-4 w-4 flex-none" />
+          {t("courseList.delete")}
+        </MenuItem>
+      </>
+    );
+  }
+
   const openCourse = courses.find((course) => course.id === menuFor) ?? null;
 
   return (
@@ -567,103 +613,76 @@ export function CourseList({
       )}
       {openCourse &&
         menuAnchor &&
-        createPortal(
-          <>
-            {/* 透明背板：点菜单外区域即关闭。z-[60]/[61] 明确高于侧栏(40)/底栏(45)/
-                全屏(50) 等所有 z token，避免 portal 到 body 后被它们盖住。 */}
-            <div
-              data-course-menu-backdrop
-              className="fixed inset-0 z-[60]"
-              onClick={closeMenu}
-            />
-            <div
-              ref={menuRef}
-              id={`course-actions-${openCourse.id}`}
-              role="menu"
-              aria-label={t("courseList.courseActions")}
-              data-course-menu
-              className="fixed z-[61] w-48 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] py-1 shadow-[var(--shadow-pop)]"
-              style={menuPosition(menuAnchor)}
-              onKeyDown={(event) => {
-                const items = Array.from(
-                  event.currentTarget.querySelectorAll<HTMLButtonElement>(MENU_ITEMS),
-                );
-                const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
-                let nextIndex: number | null = null;
-
-                if (event.key === "Tab") {
-                  closeMenu();
-                  return;
-                } else if (event.key === "ArrowDown") {
-                  nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % items.length;
-                } else if (event.key === "ArrowUp") {
-                  nextIndex = currentIndex < 0
-                    ? items.length - 1
-                    : (currentIndex - 1 + items.length) % items.length;
-                } else if (event.key === "Home") {
-                  nextIndex = 0;
-                } else if (event.key === "End") {
-                  nextIndex = items.length - 1;
-                } else if (event.key === "Escape") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  closeMenuAndRestoreFocus();
-                  return;
-                }
-
-                if (nextIndex != null && items[nextIndex]) {
-                  event.preventDefault();
-                  items[nextIndex].focus();
-                }
-              }}
-            >
-              <button
-                role="menuitem"
-                tabIndex={-1}
-                onClick={() => startRename(openCourse.id, openCourse.name)}
-                className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
-              >
-                <Pencil className="h-4 w-4" />
-                {t("courseList.rename")}
-              </button>
-              <ColorSwatches
-                value={openCourse.color}
-                onChange={(color) => chooseColor(openCourse.id, color)}
+        (menuSheet ? (
+          // 手机：和视频 / 文件夹菜单一样，从底部弹出操作弹层。
+          <Menu
+            id={`course-actions-${openCourse.id}`}
+            aria-label={t("courseList.courseActions")}
+            data-course-menu
+            onClose={closeMenuAndRestoreFocus}
+            triggerRef={{ current: menuButtonRefs.current.get(openCourse.id) ?? null }}
+          >
+            {renderMenuItems(openCourse)}
+          </Menu>
+        ) : (
+          createPortal(
+            <>
+              {/* 透明背板：点菜单外区域即关闭。z-[60]/[61] 明确高于侧栏(40)/底栏(45)/
+                  全屏(50) 等所有 z token，避免 portal 到 body 后被它们盖住。 */}
+              <div
+                data-course-menu-backdrop
+                className="fixed inset-0 z-[60]"
+                onClick={closeMenu}
               />
-              <button
-                role="menuitem"
-                tabIndex={-1}
-                onClick={() => void handleRelinkRoot(openCourse.id, openCourse.name)}
-                className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
-              >
-                <FolderOpen className="h-4 w-4" />
-                {t("courseList.relinkRoot")}
-              </button>
-              <button
-                role="menuitem"
-                tabIndex={-1}
-                onClick={() => {
-                  setSubscriptionsFor({ id: openCourse.id, name: openCourse.name });
-                  closeMenu();
+              {/* 桌面：挂到 body 上、按「⋯」按钮的位置 fixed 定位（侧栏是滚动容器，会裁掉菜单），
+                  外观用通用菜单的 ca-menu，与视频 / 文件夹菜单一致。 */}
+              <div
+                ref={menuRef}
+                id={`course-actions-${openCourse.id}`}
+                role="menu"
+                aria-label={t("courseList.courseActions")}
+                data-course-menu
+                className="ca-menu fixed z-[61] w-48"
+                style={menuPosition(menuAnchor)}
+                onKeyDown={(event) => {
+                  const items = Array.from(
+                    event.currentTarget.querySelectorAll<HTMLButtonElement>(MENU_ITEMS),
+                  );
+                  const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+                  let nextIndex: number | null = null;
+
+                  if (event.key === "Tab") {
+                    closeMenu();
+                    return;
+                  } else if (event.key === "ArrowDown") {
+                    nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % items.length;
+                  } else if (event.key === "ArrowUp") {
+                    nextIndex = currentIndex < 0
+                      ? items.length - 1
+                      : (currentIndex - 1 + items.length) % items.length;
+                  } else if (event.key === "Home") {
+                    nextIndex = 0;
+                  } else if (event.key === "End") {
+                    nextIndex = items.length - 1;
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeMenuAndRestoreFocus();
+                    return;
+                  }
+
+                  if (nextIndex != null && items[nextIndex]) {
+                    event.preventDefault();
+                    items[nextIndex].focus();
+                  }
                 }}
-                className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-normal)] hover:bg-[var(--surface-card-hover)]"
               >
-                <Rss className="h-4 w-4" />
-                {t("courseList.subscriptions")}
-              </button>
-              <button
-                role="menuitem"
-                tabIndex={-1}
-                onClick={() => void confirmDelete(openCourse)}
-                className="ca-touch-44 flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--status-err)] hover:bg-[var(--surface-card-hover)]"
-              >
-                <Trash2 className="h-4 w-4" />
-                {t("courseList.delete")}
-              </button>
-            </div>
-          </>,
-          document.body,
-        )}
+                {renderMenuItems(openCourse)}
+              </div>
+            </>,
+            document.body,
+          )
+        ))}
       {subscriptionsFor && (
         <SubscriptionsDialog
           courseId={subscriptionsFor.id}

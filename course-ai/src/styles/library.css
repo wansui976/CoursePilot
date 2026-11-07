@@ -870,6 +870,54 @@
   color: var(--text-3);
 }
 
+/* 有视频的文件夹：封面是里面前几个视频的拼图（与课程卡同一套 2×2 语言），比例仍随视频卡 16:9，
+   网格行对得齐。 */
+.ca-folder-cover {
+  display: grid;
+  grid-template: 1fr / 1fr;
+  /* .ca-thumb 是为单个图标居中写的 align-items:center；拼图的瓦片要撑满格子，否则高度为 0。 */
+  place-items: stretch;
+  gap: 2px;
+  background: var(--bg-sunken);
+}
+
+.ca-folder-cover[data-tiles="2"] {
+  grid-template: 1fr / 1fr 1fr;
+}
+
+.ca-folder-cover[data-tiles="3"] {
+  grid-template: 1fr 1fr / 2fr 1fr;
+}
+
+.ca-folder-cover[data-tiles="3"] > :first-child {
+  grid-row: 1 / 3;
+}
+
+.ca-folder-cover[data-tiles="4"] {
+  grid-template: 1fr 1fr / 1fr 1fr;
+}
+
+/* 左下角的文件夹角标：没标颜色是半透明深底白图标，标了颜色就用那个颜色。 */
+.ca-folder-badge {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 1;
+  height: 22px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  backdrop-filter: blur(6px);
+}
+
 /* 拖着视频悬停在文件夹上：描一圈强调色，表示松手就放进去。 */
 .ca-folder[data-drop-target] {
   outline: 2px solid var(--accent);
@@ -883,10 +931,16 @@
 /* 文件夹里的副标题：课程名 › 第2章 › 2.1 · 3 个视频。 */
 .ca-crumbs {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 2px;
   min-width: 0;
+  overflow: hidden;
+}
+
+/* 窄屏副标题本来就允许折行：面包屑也跟着折，别截掉。 */
+.ca-app[data-bucket="compact"] .ca-crumbs,
+.ca-app[data-bucket="medium"] .ca-crumbs {
+  flex-wrap: wrap;
 }
 
 .ca-crumb {
@@ -920,6 +974,10 @@
 }
 
 .ca-crumb-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-1);
   font-weight: 500;
 }
@@ -1002,10 +1060,6 @@ article[data-selected] {
   outline-offset: -2px;
 }
 
-/* 选择模式下点卡片是勾选，不是播放：悬停的播放按钮不出现。 */
-[data-selecting] .ca-card-play {
-  display: none;
-}
 
 /* 底部的批量操作条：贴在主栏底部，选择模式下常驻。 */
 .ca-select-bar {
@@ -1039,18 +1093,20 @@ article[data-selected] {
 
 /* ---------- 课程页搜索结果 ---------- */
 
+/* 与列表视图同一套语言：不套卡片框，条目之间一道发丝线。 */
 .ca-search-results {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 4px 0 16px;
+  padding: 0 0 16px;
 }
 
 .ca-search-hit {
-  border: 1px solid var(--border-faint);
-  border-radius: var(--r-lg);
-  background: var(--surface-card);
-  padding: 8px;
+  padding: 8px 0 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.ca-search-hit:last-child {
+  border-bottom: 0;
 }
 
 .ca-search-head {

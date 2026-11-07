@@ -262,6 +262,7 @@
   },
   "folders": {
     "newFolder": "New folder",
+    "newFolderHint": "Create a folder here to group videos by chapter",
     "open": "Open folder {{name}}",
     "actions": "Folder actions",
     "rename": "Rename",

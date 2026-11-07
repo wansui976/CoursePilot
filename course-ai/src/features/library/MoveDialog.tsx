@@ -6,6 +6,7 @@ import { queries } from "@/lib/queries";
 import type { Folder, ItemRef } from "@/lib/types";
 import { Modal } from "@/ui/dialog";
 import { Button } from "@/ui/button";
+import { Select } from "@/ui/select";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { cn } from "@/lib/utils";
 import { colorStyle } from "./colorStyle";
@@ -91,9 +92,9 @@ export function MoveDialog({
       <div className="flex flex-col gap-3">
         <label className="flex items-center gap-2 text-sm text-[var(--text-2)]">
           <span className="flex-none">{t("folders.moveCourse")}</span>
-          <select
+          <Select
             aria-label={t("folders.moveCourse")}
-            className="ca-touch-44 min-w-0 flex-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-2 py-1.5 text-sm text-[var(--text-strong)]"
+            className="min-w-0 flex-1"
             value={courseId}
             onChange={(event) => {
               setCourseId(event.target.value);
@@ -105,7 +106,7 @@ export function MoveDialog({
                 {course.name}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <div
           role="radiogroup"
