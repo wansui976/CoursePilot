@@ -17,7 +17,7 @@ export function StorageSection({ form }: { form: SettingsForm }) {
     <>
       <Group
         header={t("settings.storage.title")}
-        footnote={t("settings.storage.footnote")}
+        hint={t("settings.storage.footnote")}
       >
         <StackRow label={t("settings.storage.defaultRoot")}>
           <div className="flex items-center gap-2">
@@ -35,7 +35,7 @@ export function StorageSection({ form }: { form: SettingsForm }) {
       </Group>
       <Group
         header={t("settings.storage.security")}
-        footnote={t("settings.storage.securityFootnote")}
+        hint={t("settings.storage.securityFootnote")}
       >
         <Row
           label={t("backup.label")}

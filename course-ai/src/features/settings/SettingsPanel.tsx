@@ -256,7 +256,7 @@ export function SettingsPanel({
               {activeCategory === "courseware" && <CoursewareSection form={form} />}
               {activeCategory === "about" && <AboutSection />}
               {activeCategory === "dev" && (
-                <Group header={t("settings.dev.title")} footnote={t("settings.dev.footnote")}>
+                <Group header={t("settings.dev.title")} hint={t("settings.dev.footnote")}>
                   <StackRow>
                     <Button
                       variant="outline"

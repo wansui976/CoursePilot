@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { ipc, type ModelsDir, type WhisperModel } from "@/lib/ipc";
+import { HintButton } from "./primitives";
 import { isMobile } from "@/lib/platform";
 
 type Row = [WhisperModel, boolean];
@@ -87,7 +88,10 @@ function ModelsLocation({ onMoved, version }: { onMoved: () => void; version: nu
   return (
     <div className="mb-2 space-y-1 border-b border-[var(--border-subtle)] pb-2">
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="text-[var(--text-muted)]">{t("whisperModels.location")}</span>
+        <span className="flex items-center gap-1 text-[var(--text-muted)]">
+          {t("whisperModels.location")}
+          <HintButton label={t("whisperModels.location")} hint={t("whisperModels.locationHint")} />
+        </span>
         <span
           className="min-w-0 flex-1 truncate font-[family-name:var(--mono)] text-[var(--text-normal)]"
           title={dir.path}
@@ -110,7 +114,6 @@ function ModelsLocation({ onMoved, version }: { onMoved: () => void; version: nu
             {t("whisperModels.resetLocation")}
           </Button>
         )}
-        <span className="text-xs text-[var(--text-faint)]">{t("whisperModels.locationHint")}</span>
       </div>
       {dir.legacy_bytes > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">

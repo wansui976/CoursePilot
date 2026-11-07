@@ -10,21 +10,28 @@ export const FIELD =
 /** 设置页的下拉框与其它表单共用 ui/select（去掉原生外观、自绘箭头）。 */
 export { Select } from "@/ui/select";
 
+/**
+ * 一组设置。hint 是对整组的说明，收进标题旁的 ⓘ；footnote 只留给要一直看得见的反馈
+ * （如「已保存」），说明文字不要再写成脚注。
+ */
 export function Group({
   header,
+  hint,
   footnote,
   children,
 }: {
   header?: string;
+  hint?: ReactNode;
   footnote?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="mb-7">
       {header && (
-        <h3 className="mb-2 px-4 ca-t-sm font-semibold text-[var(--text-muted)]">
-          {header}
-        </h3>
+        <div className="mb-2 flex items-center gap-1 px-4">
+          <h3 className="ca-t-sm font-semibold text-[var(--text-muted)]">{header}</h3>
+          {hint && <HintButton label={header} hint={hint} />}
+        </div>
       )}
       <div className="divide-y divide-[var(--border-faint)] overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)]">
         {children}
@@ -43,7 +50,7 @@ export function Group({
  * 弹层挂到 body 上、按按钮的位置 fixed 定位：设置分组卡片是 overflow:hidden，放在行里会被裁掉。
  * 点外面、按 Esc、页面滚动都会收起（滚动后位置就对不上了，不如直接收）。
  */
-function HintButton({ label, hint }: { label: string; hint: ReactNode }) {
+export function HintButton({ label, hint }: { label: string; hint: ReactNode }) {
   const { t } = useTranslation();
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -124,15 +131,20 @@ function HintButton({ label, hint }: { label: string; hint: ReactNode }) {
  * 说明（hint）是「这一项是干什么的」，收进 ⓘ；状态（status）是「现在怎么样」——密钥配没配、
  * 检查更新的结果、刚操作完的反馈——藏起来就等于没告诉用户，始终写在标签下。
  */
+/** 标签旁的小标签：一两个字的状态（「已配置」「未配置」），比一行小字省地方、一眼能看到。 */
+export type RowTag = { text: string; tone?: "ok" | "neutral" };
+
 function RowLabel({
   label,
   hint,
   status,
+  tag,
   htmlFor,
 }: {
   label: string;
   hint?: ReactNode;
   status?: ReactNode;
+  tag?: RowTag;
   htmlFor?: string;
 }) {
   return (
@@ -145,6 +157,11 @@ function RowLabel({
           {label}
         </label>
         {hint && <HintButton label={label} hint={hint} />}
+        {tag && (
+          <span className="ca-row-tag" data-tone={tag.tone ?? "neutral"}>
+            {tag.text}
+          </span>
+        )}
       </div>
       {status && <p className="mt-0.5 text-xs leading-relaxed text-[var(--text-muted)]">{status}</p>}
     </>
@@ -156,19 +173,21 @@ export function Row({
   label,
   hint,
   status,
+  tag,
   htmlFor,
   children,
 }: {
   label: string;
   hint?: ReactNode;
   status?: ReactNode;
+  tag?: RowTag;
   htmlFor?: string;
   children: ReactNode;
 }) {
   return (
     <div className="flex min-h-[44px] flex-col gap-1.5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <div className="min-w-0">
-        <RowLabel label={label} hint={hint} status={status} htmlFor={htmlFor} />
+        <RowLabel label={label} hint={hint} status={status} tag={tag} htmlFor={htmlFor} />
       </div>
       <div className="w-full sm:w-auto sm:flex-none">{children}</div>
     </div>

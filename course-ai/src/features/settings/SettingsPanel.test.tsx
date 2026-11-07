@@ -148,10 +148,10 @@ describe("SettingsPanel", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "语音识别" }));
 
-    // 已配置的密钥字段在提示里回显「已配置」，即使输入框为空也让用户确信已存。
-    expect(
-      await screen.findByText("已配置 · 留空 = 不修改"),
-    ).toBeInTheDocument();
+    // 已配置的密钥字段在标签旁挂「已配置」，即使输入框为空也让用户确信已存；
+    // 「留空 = 不修改」这类说明收进 ⓘ。
+    expect((await screen.findAllByText("已配置")).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/留空 = 不修改/)).not.toBeInTheDocument();
     expect(mockIpc.secrets.has).toHaveBeenCalledWith("volcengine_asr_access_token");
   });
 
@@ -198,6 +198,9 @@ describe("SettingsPanel", () => {
 
     expect(screen.getByText("完整数据库备份")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "备份到文件…" })).toBeInTheDocument();
+    // 整组的安全提醒收在分组标题旁的 ⓘ 里。
+    expect(screen.queryByText(/备份包含已保存的 API 密钥/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "「数据安全」的说明" }));
     expect(screen.getByText(/备份包含已保存的 API 密钥/)).toBeInTheDocument();
     // 「包含什么」是说明，收在标签旁的 ⓘ 里，点开才看得到。
     expect(screen.queryByText(/不包含视频、音频、课件图片和本地模型/)).not.toBeInTheDocument();

@@ -3,12 +3,15 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/ui/button";
 import { Switch } from "@/ui/switch";
 import { AUTO_SENSITIVITY, DEFAULT_SLIDES_SENSITIVITY } from "@/lib/slides";
-import { FIELD, Select, Group, Row, StackRow, SavedBadge } from "@/features/settings/primitives";
+import { FIELD, Select, Group, Row, StackRow, SavedBadge, type RowTag } from "@/features/settings/primitives";
 import type { SettingsForm } from "@/features/settings/useSettingsForm";
 
 /** 课件提取与文字识别。 */
 export function CoursewareSection({ form }: { form: SettingsForm }) {
   const { t } = useTranslation();
+  // 密钥配没配：标签旁一个小标签，一眼看得到；「留空 = 不修改」之类的说明收进 ⓘ。
+  const keyTag = (configured: boolean): RowTag =>
+    configured ? { text: t("settings.configured"), tone: "ok" } : { text: t("settings.notConfigured") };
   const {
     slidesAutoExtract,
     ocrBackend,
@@ -90,11 +93,8 @@ export function CoursewareSection({ form }: { form: SettingsForm }) {
             <Row
               label="AccessKey Secret"
               htmlFor="aliyun-ocr-secret"
-              status={
-                ocrSecret2.configured
-                  ? t("settings.ocr.aliyunSecretConfigured")
-                  : t("settings.ocr.aliyunSecretNotConfigured")
-              }
+              tag={keyTag(ocrSecret2.configured)}
+              hint={t("settings.ocr.aliyunSecretHint")}
             >
               <input
                 id="aliyun-ocr-secret"
@@ -152,11 +152,8 @@ export function CoursewareSection({ form }: { form: SettingsForm }) {
             <Row
               label={t("settings.ocr.deepseekApiKey")}
               htmlFor="deepseek-ocr-key"
-              status={
-                deepseekSecret.configured
-                  ? t("settings.ocr.deepseekConfigured")
-                  : t("settings.ocr.deepseekNotConfigured")
-              }
+              tag={keyTag(deepseekSecret.configured)}
+              hint={t("settings.ocr.deepseekKeyHint")}
             >
               <input
                 id="deepseek-ocr-key"

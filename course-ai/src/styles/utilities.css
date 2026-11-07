@@ -426,3 +426,20 @@
   }
 }
 
+/* 设置项标签旁的小状态标签（「已配置」「未配置」）。 */
+.ca-row-tag {
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 1.5;
+  background: var(--surface-card-hover);
+  color: var(--text-muted);
+}
+
+.ca-row-tag[data-tone="ok"] {
+  background: var(--status-ok-bg);
+  color: var(--status-ok);
+}
+

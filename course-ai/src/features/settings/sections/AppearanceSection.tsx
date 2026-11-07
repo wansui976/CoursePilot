@@ -226,7 +226,7 @@ export function AppearanceSection() {
 
       <Group
         header={t("settings.appearance.readingFont")}
-        footnote={
+        hint={
           <>
             {t("settings.appearance.readingFontFootnote")}
             {/* macOS 的楷体、仿宋是「可选下载」的系统字体：告诉用户去哪儿拿。 */}
@@ -282,7 +282,7 @@ export function AppearanceSection() {
         </Row>
       </Group>
 
-      <Group header={t("settings.appearance.density")} footnote={t("settings.appearance.densityFootnote")}>
+      <Group header={t("settings.appearance.density")} hint={t("settings.appearance.densityFootnote")}>
         <Row label={t("settings.appearance.density")}>
           <Segmented
             label={t("settings.appearance.density")}

@@ -75,7 +75,7 @@ export function StudySection() {
 
   return (
     <>
-      <Group header={t("settings.studyReminder.title")} footnote={t("settings.studyReminder.footnote")}>
+      <Group header={t("settings.studyReminder.title")} hint={t("settings.studyReminder.footnote")}>
         <Row label={t("settings.studyReminder.label")} hint={t("settings.studyReminder.hint")} htmlFor="study-reminder">
           <Switch
             id="study-reminder"
@@ -85,7 +85,7 @@ export function StudySection() {
           />
         </Row>
       </Group>
-      <Group header={t("settings.search.title")} footnote={t("settings.search.footnote")}>
+      <Group header={t("settings.search.title")} hint={t("settings.search.footnote")}>
         <Row
           label={t("settings.search.transcripts")}
           hint={t("settings.search.transcriptsHint")}

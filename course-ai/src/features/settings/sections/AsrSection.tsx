@@ -2,13 +2,16 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/ui/button";
 import { Switch } from "@/ui/switch";
 import { WhisperModelsPanel } from "@/features/settings/WhisperModelsPanel";
-import { FIELD, Select, Group, Row, StackRow, SavedBadge } from "@/features/settings/primitives";
+import { FIELD, Select, Group, Row, StackRow, SavedBadge, type RowTag } from "@/features/settings/primitives";
 import type { SettingsForm } from "@/features/settings/useSettingsForm";
 import { isMobile } from "@/lib/platform";
 
 /** 语音识别引擎、凭证与字幕纠错。 */
 export function AsrSection({ form }: { form: SettingsForm }) {
   const { t } = useTranslation();
+  // 密钥配没配：标签旁一个小标签，一眼看得到；「留空 = 不修改」之类的说明收进 ⓘ。
+  const keyTag = (configured: boolean): RowTag =>
+    configured ? { text: t("settings.configured"), tone: "ok" } : { text: t("settings.notConfigured") };
   const {
     model,
     asrBackend,
@@ -198,7 +201,8 @@ export function AsrSection({ form }: { form: SettingsForm }) {
           <Row
             label="Access Token"
             htmlFor="volcengine-asr-token"
-            status={volcSecret.configured ? t("settings.configured") : t("settings.notConfigured")}
+            tag={keyTag(volcSecret.configured)}
+            hint={t("settings.keyKeepHint")}
           >
             <input
               id="volcengine-asr-token"
@@ -284,7 +288,8 @@ export function AsrSection({ form }: { form: SettingsForm }) {
           <Row
             label={t("settings.asr.aliyunApiKey")}
             htmlFor="dashscope-key"
-            status={dashSecret.configured ? t("settings.configured") : t("settings.notConfigured")}
+            tag={keyTag(dashSecret.configured)}
+            hint={t("settings.keyKeepHint")}
           >
             <input
               id="dashscope-key"
