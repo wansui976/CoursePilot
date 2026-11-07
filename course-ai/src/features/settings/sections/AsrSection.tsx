@@ -198,7 +198,7 @@ export function AsrSection({ form }: { form: SettingsForm }) {
           <Row
             label="Access Token"
             htmlFor="volcengine-asr-token"
-            hint={volcSecret.configured ? t("settings.configured") : t("settings.notConfigured")}
+            status={volcSecret.configured ? t("settings.configured") : t("settings.notConfigured")}
           >
             <input
               id="volcengine-asr-token"
@@ -284,7 +284,7 @@ export function AsrSection({ form }: { form: SettingsForm }) {
           <Row
             label={t("settings.asr.aliyunApiKey")}
             htmlFor="dashscope-key"
-            hint={dashSecret.configured ? t("settings.configured") : t("settings.notConfigured")}
+            status={dashSecret.configured ? t("settings.configured") : t("settings.notConfigured")}
           >
             <input
               id="dashscope-key"

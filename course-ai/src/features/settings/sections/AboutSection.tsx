@@ -64,7 +64,7 @@ export function AboutSection() {
       <Row label={t("settings.about.version")}>
         <span className="ca-t-sm tabular-nums text-[var(--text-muted)]">{running ?? "…"}</span>
       </Row>
-      <Row label={t("settings.about.update")} hint={status}>
+      <Row label={t("settings.about.update")} status={status}>
         <Button
           variant="outline"
           size="sm"
@@ -91,7 +91,8 @@ export function AboutSection() {
       </Row>
       <Row
         label={t("settings.about.tour")}
-        hint={toursReset ? t("settings.about.tourResetDone") : t("settings.about.tourHint")}
+        hint={t("settings.about.tourHint")}
+        status={toursReset ? t("settings.about.tourResetDone") : undefined}
       >
         <Button
           variant="outline"

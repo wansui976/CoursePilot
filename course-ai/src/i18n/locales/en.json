@@ -1007,7 +1007,8 @@
       "footnote": "The search box on the course page looks through video titles and notes in the current folder and all folders under it.",
       "transcripts": "Also search transcripts",
       "transcriptsHint": "Include subtitle transcripts; clicking a result jumps to that line. Every lecture that mentions the word will match, so expect many more results."
-    }
+    },
+    "hintFor": "About “{{label}}”"
   },
   "assistant": {
     "toggleAssistant": "Toggle AI assistant",

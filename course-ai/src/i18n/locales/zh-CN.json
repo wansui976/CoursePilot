@@ -1006,7 +1006,8 @@
       "footnote": "课程页顶部的搜索框默认搜视频标题和笔记，范围是当前文件夹及其下所有子文件夹。",
       "transcripts": "也搜文稿",
       "transcriptsHint": "连字幕文稿一起搜，点结果可直接跳到那一句。讲到这个词的每一讲都会命中，结果会多不少。"
-    }
+    },
+    "hintFor": "「{{label}}」的说明"
   },
   "assistant": {
     "toggleAssistant": "切换 AI 助手",

@@ -199,6 +199,9 @@ describe("SettingsPanel", () => {
     expect(screen.getByText("完整数据库备份")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "备份到文件…" })).toBeInTheDocument();
     expect(screen.getByText(/备份包含已保存的 API 密钥/)).toBeInTheDocument();
+    // 「包含什么」是说明，收在标签旁的 ⓘ 里，点开才看得到。
+    expect(screen.queryByText(/不包含视频、音频、课件图片和本地模型/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "「完整数据库备份」的说明" }));
     expect(screen.getByText(/不包含视频、音频、课件图片和本地模型/)).toBeInTheDocument();
   });
 

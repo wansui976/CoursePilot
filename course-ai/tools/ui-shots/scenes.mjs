@@ -739,6 +739,11 @@ export const scenes = [
       await page.getByRole("button", { name: "语音识别" }).first().click();
       await page.getByText("本地识别模型").first().waitFor({ timeout: 4000 });
       await shot();
+      // 设置项的说明收在 ⓘ 里：点开一个看弹层。
+      await page.getByRole("button", { name: "「识别模型」的说明" }).click();
+      await page.getByRole("note").waitFor();
+      await shot("hint");
+      await page.keyboard.press("Escape");
       await page.getByText("本地识别模型").first().evaluate((el) => el.scrollIntoView({ block: "center" }));
       await shot("models");
     },

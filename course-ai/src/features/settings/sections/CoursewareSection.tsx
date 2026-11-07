@@ -90,7 +90,7 @@ export function CoursewareSection({ form }: { form: SettingsForm }) {
             <Row
               label="AccessKey Secret"
               htmlFor="aliyun-ocr-secret"
-              hint={
+              status={
                 ocrSecret2.configured
                   ? t("settings.ocr.aliyunSecretConfigured")
                   : t("settings.ocr.aliyunSecretNotConfigured")
@@ -152,7 +152,7 @@ export function CoursewareSection({ form }: { form: SettingsForm }) {
             <Row
               label={t("settings.ocr.deepseekApiKey")}
               htmlFor="deepseek-ocr-key"
-              hint={
+              status={
                 deepseekSecret.configured
                   ? t("settings.ocr.deepseekConfigured")
                   : t("settings.ocr.deepseekNotConfigured")

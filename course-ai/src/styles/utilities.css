@@ -376,3 +376,53 @@
     animation: ca-notice-in 0.2s cubic-bezier(0.2, 0, 0, 1);
   }
 }
+
+/* 设置项标签旁的 ⓘ：点开弹出说明。按钮本身很小，触控区靠负边距外扩到 28px。 */
+.ca-hint-button {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: -4px 0;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--text-faint);
+  transition: color 0.12s, background 0.12s;
+}
+
+@media (hover: hover) {
+.ca-hint-button:hover {
+  color: var(--text-2);
+  background: var(--surface-card-hover);
+}
+}
+
+.ca-hint-button[aria-expanded="true"] {
+  color: var(--accent-text);
+}
+
+.ca-hint-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* 说明弹层：与菜单同一套浮层外观（面板底色、发丝边、浮层阴影）。 */
+.ca-hint-pop {
+  position: fixed;
+  z-index: 70;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md, 8px);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-hint-pop {
+    animation: ca-overlay-in 0.14s ease;
+  }
+}
+
