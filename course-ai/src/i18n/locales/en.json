@@ -1792,7 +1792,15 @@
     "courseVideos": "{{count}} videos",
     "courseEmpty": "No videos yet",
     "courseWatched": "{{count}} watched",
-    "courseAllWatched": "All watched"
+    "courseAllWatched": "All watched",
+    "select": "Select",
+    "selectItem": "Select {{name}}",
+    "selectionActions": "Bulk actions",
+    "selectedCount": "{{count}} selected",
+    "selectAll": "Select all",
+    "done": "Done",
+    "deleteSelected": "Delete selected",
+    "deleteSelectedConfirm": "Delete the {{count}} selected items?\n{{videos}} videos will move to the recycle bin and can be restored within 30 days; selected folders are deleted together with their subfolders."
   },
   "shareCard": {
     "tagline": "Turn course videos into something you remember",

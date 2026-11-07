@@ -959,3 +959,81 @@
   color: var(--text-faint);
 }
 
+/* ---------- 批量选择 ---------- */
+
+/* 选择模式下的勾选框：网格卡片放右上角（「⋯」按钮的位置，此时它已隐藏；左上角留给状态徽标）。 */
+.ca-select-mark {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  border: 1.5px solid rgb(255 255 255 / 0.9);
+  background: rgb(0 0 0 / 0.28);
+  color: var(--on-accent);
+  pointer-events: none;
+}
+
+.ca-row .ca-select-mark {
+  top: 50%;
+  left: auto;
+  right: 18px;
+  transform: translateY(-50%);
+  border-color: var(--border-strong);
+  background: var(--surface-input);
+}
+
+.ca-select-mark[data-on] {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+article[data-selected] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 列表行紧挨着：描边往里收，相邻两行选中时不叠在一起。 */
+.ca-row[data-selected] {
+  outline-offset: -2px;
+}
+
+/* 选择模式下点卡片是勾选，不是播放：悬停的播放按钮不出现。 */
+[data-selecting] .ca-card-play {
+  display: none;
+}
+
+/* 底部的批量操作条：贴在主栏底部，选择模式下常驻。 */
+.ca-select-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0 16px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-lg);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-pop);
+}
+
+/* 手机：右下角浮着助手按钮，操作条给它让出位置。 */
+.ca-app[data-shell="stacked"] .ca-select-bar {
+  margin-right: 84px;
+  flex-wrap: nowrap;
+}
+
+.ca-select-count {
+  margin-right: auto;
+  padding: 0 6px;
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+}
+

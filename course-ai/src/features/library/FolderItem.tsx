@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Folder as FolderIcon, FolderInput, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
 import type { CourseColor, Folder } from "@/lib/types";
@@ -9,7 +9,8 @@ import { ColorSwatches } from "./ColorSwatches";
 import { colorStyle } from "./colorStyle";
 
 export type FolderActions = {
-  onOpen: () => void;
+  /** 点卡片：平时是打开；选择模式下（或按着 ⌘/Ctrl/Shift）由调用方改成勾选。 */
+  onOpen: (event: ReactMouseEvent) => void;
   onStartRename: () => void;
   /** 提交改名；null = 取消。 */
   onFinishRename: (name: string | null) => void;
@@ -28,6 +29,8 @@ export function FolderItem({
   layout,
   dropTarget,
   renaming,
+  selecting = false,
+  selected = false,
   actions,
 }: {
   folder: Folder;
@@ -36,6 +39,9 @@ export function FolderItem({
   layout: "grid" | "list";
   dropTarget: boolean;
   renaming: boolean;
+  /** 批量选择模式：卡片变成勾选开关，不出「⋯」菜单。 */
+  selecting?: boolean;
+  selected?: boolean;
   actions: FolderActions;
 }) {
   const { t } = useTranslation();
@@ -68,7 +74,8 @@ export function FolderItem({
     <button
       type="button"
       className="block w-full text-left"
-      aria-label={t("folders.open", { name: folder.name })}
+      aria-label={selecting ? t("library.selectItem", { name: folder.name }) : t("folders.open", { name: folder.name })}
+      aria-pressed={selecting ? selected : undefined}
       onClick={actions.onOpen}
     >
       <span className="ca-thumb ca-folder-thumb">{icon("h-11 w-11")}</span>
@@ -83,7 +90,8 @@ export function FolderItem({
     <button
       type="button"
       className="row-button"
-      aria-label={t("folders.open", { name: folder.name })}
+      aria-label={selecting ? t("library.selectItem", { name: folder.name }) : t("folders.open", { name: folder.name })}
+      aria-pressed={selecting ? selected : undefined}
       onClick={actions.onOpen}
     >
       <span className="row-main">
@@ -102,9 +110,11 @@ export function FolderItem({
     <article
       className={cn(layout === "grid" ? "ca-card" : "ca-row", "ca-folder group relative")}
       data-drop-target={dropTarget || undefined}
+      data-selected={selected || undefined}
     >
       {body}
-      {!renaming && (
+      {selecting && <SelectMark selected={selected} />}
+      {!renaming && !selecting && (
         <IconButton
           ref={triggerRef}
           type="button"
@@ -174,6 +184,15 @@ export function FolderItem({
         </Menu>
       )}
     </article>
+  );
+}
+
+/** 选择模式下卡片左上角的勾选标记（装饰；状态由按钮的 aria-pressed 表达）。 */
+export function SelectMark({ selected }: { selected: boolean }) {
+  return (
+    <span className="ca-select-mark" data-on={selected || undefined} aria-hidden="true">
+      {selected && <Check className="h-3 w-3" />}
+    </span>
   );
 }
 

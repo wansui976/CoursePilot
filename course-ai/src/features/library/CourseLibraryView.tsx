@@ -19,6 +19,7 @@ import {
   X,
   ArrowDown,
   ArrowUp,
+  CheckSquare,
   ChevronRight,
   FolderInput,
   Pencil,
@@ -56,7 +57,7 @@ import type { DownloadJob } from "@/lib/ipc";
 import type { ProcessingQueue } from "./useProcessingQueue";
 import type { Recorrection } from "./useRecorrection";
 import { LibraryOverview } from "./LibraryOverview";
-import { FolderItem } from "./FolderItem";
+import { FolderItem, SelectMark } from "./FolderItem";
 import { MoveDialog, type MoveTarget } from "./MoveDialog";
 import { DroppableCrumb, LibraryDnd } from "./LibraryDnd";
 import {
@@ -370,6 +371,7 @@ export function CourseLibraryView({
       ipc.folders.move(target.courseId, target.folderId, items),
     onSuccess: async (_data, { target }) => {
       setMoveRequest(null);
+      exitSelection();
       await refreshCourse([selectedCourseId, target.courseId]);
       await queryClient.invalidateQueries({ queryKey: qk.courses() });
     },
@@ -428,6 +430,112 @@ export function CourseLibraryView({
     if (currentFolderId && subtree.has(currentFolderId)) onFolderChange(folder.parent_id);
     await refreshCourse([selectedCourseId]);
     await queryClient.invalidateQueries({ queryKey: qk.trash() });
+  }
+
+  // ---------- 批量选择 ----------
+  // 键是拖放用的 f:/v: 前缀键，文件夹和视频同在一个集合里。换课程 / 换层时清空。
+  const [selecting, setSelecting] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const selectionAnchor = useRef<string | null>(null);
+  const exitSelection = useCallback(() => {
+    setSelecting(false);
+    setSelectedKeys(new Set());
+    selectionAnchor.current = null;
+  }, []);
+  useEffect(() => {
+    exitSelection();
+  }, [exitSelection, selectedCourseId, currentFolderId]);
+  useEffect(() => {
+    if (!selecting) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape" || document.querySelector('[aria-modal="true"]')) return;
+      event.preventDefault();
+      exitSelection();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [exitSelection, selecting]);
+
+  /** 卡片点击：选择模式下、或按着 ⌘/Ctrl/Shift 时是勾选（Shift 选一段），否则执行默认动作。 */
+  function clickItem(
+    event: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; preventDefault: () => void },
+    key: string,
+    open: () => void,
+  ) {
+    const modified = event.metaKey || event.ctrlKey || event.shiftKey;
+    if (!selecting && !modified) {
+      open();
+      return;
+    }
+    event.preventDefault();
+    const order = [
+      ...visibleFolders.map((folder) => folderKey(folder.id)),
+      ...visibleVideos.map((video) => videoKey(video.id)),
+    ];
+    setSelecting(true);
+    setSelectedKeys((current) => {
+      const next = new Set(current);
+      const anchor = selectionAnchor.current;
+      if (event.shiftKey && anchor && order.includes(anchor)) {
+        const [from, to] = [order.indexOf(anchor), order.indexOf(key)].sort((a, b) => a - b);
+        for (const item of order.slice(from, to + 1)) next.add(item);
+      } else if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+    if (!event.shiftKey) selectionAnchor.current = key;
+  }
+
+  const selectedItems: ItemRef[] = [...selectedKeys].flatMap((key): ItemRef[] => {
+    if (key.startsWith("f:")) return [{ kind: "folder" as const, id: key.slice(2) }];
+    if (key.startsWith("v:")) return [{ kind: "video" as const, id: key.slice(2) }];
+    return [];
+  });
+
+  async function deleteSelected() {
+    const folderIds = selectedItems.filter((item) => item.kind === "folder").map((item) => item.id);
+    // 选中的视频若本就在选中的文件夹里，删文件夹时已一并进回收站。
+    const covered = new Set(folderIds.flatMap((id) => [...subtreeFolderIds(folders, id)]));
+    const videoIds = selectedItems
+      .filter((item) => item.kind === "video")
+      .map((item) => item.id)
+      .filter((id) => {
+        const folderId = videos.find((video) => video.id === id)?.folder_id;
+        return !(folderId && covered.has(folderId));
+      });
+    const trashed = videos
+      .filter((video) =>
+        videoIds.includes(video.id) || (video.folder_id ? covered.has(video.folder_id) : false),
+      )
+      .map((video) => video.id);
+    const ok = await confirmDialog(
+      t("library.deleteSelectedConfirm", { count: selectedItems.length, videos: trashed.length }),
+      {
+        title: t("library.deleteSelected"),
+        kind: "warning",
+        okLabel: t("home.deleteLabel"),
+        cancelLabel: t("home.cancel"),
+      },
+    );
+    if (!ok) return;
+    try {
+      for (const id of folderIds) {
+        if (folders.some((folder) => folder.id === id)) await ipc.folders.delete(id);
+      }
+      for (const id of videoIds) await ipc.videos.delete(id);
+    } finally {
+      for (const videoId of trashed) {
+        clearTasksForScope(queryClient, { videoId });
+        useTaskNotices.getState().clearScope({ videoId });
+        onVideoDeleted(videoId);
+      }
+      exitSelection();
+      await refreshCourse([selectedCourseId]);
+      await queryClient.invalidateQueries({ queryKey: qk.trash() });
+    }
   }
 
   function openFolder(id: string | null) {
@@ -806,11 +914,17 @@ export function CourseLibraryView({
       <article
         key={video.id}
         className="ca-card group relative"
+        data-selected={selectedKeys.has(videoKey(video.id)) || undefined}
       >
         <button
           className="block w-full text-left"
-          aria-label={t("home.openVideo", { title: displayTitle(video.title) })}
-          onClick={() => openVideo(video.id)}
+          aria-label={
+            selecting
+              ? t("library.selectItem", { name: displayTitle(video.title) })
+              : t("home.openVideo", { title: displayTitle(video.title) })
+          }
+          aria-pressed={selecting ? selectedKeys.has(videoKey(video.id)) : undefined}
+          onClick={(event) => clickItem(event, videoKey(video.id), () => openVideo(video.id))}
         >
           <span className="ca-thumb" data-vt-video={video.id}>
             <VideoCover
@@ -849,7 +963,11 @@ export function CourseLibraryView({
             {renderVideoMetaLine(video, progress, durationMs)}
           </span>
         </button>
-        {videoOptionsButton(video)}
+        {selecting ? (
+          <SelectMark selected={selectedKeys.has(videoKey(video.id))} />
+        ) : (
+          videoOptionsButton(video)
+        )}
         {videoMenu(video)}
         {videoRenameBox(video)}
       </article>
@@ -926,11 +1044,17 @@ export function CourseLibraryView({
       <article
         key={video.id}
         className="ca-row group relative"
+        data-selected={selectedKeys.has(videoKey(video.id)) || undefined}
       >
         <button
           className="row-button"
-          aria-label={t("home.openVideo", { title: displayTitle(video.title) })}
-          onClick={() => openVideo(video.id)}
+          aria-label={
+            selecting
+              ? t("library.selectItem", { name: displayTitle(video.title) })
+              : t("home.openVideo", { title: displayTitle(video.title) })
+          }
+          aria-pressed={selecting ? selectedKeys.has(videoKey(video.id)) : undefined}
+          onClick={(event) => clickItem(event, videoKey(video.id), () => openVideo(video.id))}
         >
           <span className="row-main">
             <span className="row-thumb" data-vt-video={video.id}>
@@ -960,7 +1084,11 @@ export function CourseLibraryView({
           {renderListProgressCell(video, progress)}
           <span className="c-dur">{durationText}</span>
         </button>
-        {videoOptionsButton(video)}
+        {selecting ? (
+          <SelectMark selected={selectedKeys.has(videoKey(video.id))} />
+        ) : (
+          videoOptionsButton(video)
+        )}
         {videoMenu(video)}
         {videoRenameBox(video)}
       </article>
@@ -1103,7 +1231,7 @@ export function CourseLibraryView({
       visibleVideos.length === 0 &&
       courseDownloads.length === 0;
     const dragDisabled =
-      renamingVideo !== null || renamingFolderId !== null || normalizedQuery !== "";
+      selecting || renamingVideo !== null || renamingFolderId !== null || normalizedQuery !== "";
 
     function renderFolder(folder: Folder) {
       return (
@@ -1114,8 +1242,10 @@ export function CourseLibraryView({
             layout={view}
             dropTarget={dropTarget === folderKey(folder.id)}
             renaming={renamingFolderId === folder.id}
+            selecting={selecting}
+            selected={selectedKeys.has(folderKey(folder.id))}
             actions={{
-              onOpen: () => openFolder(folder.id),
+              onOpen: (event) => clickItem(event, folderKey(folder.id), () => openFolder(folder.id)),
               onStartRename: () => setRenamingFolderId(folder.id),
               onFinishRename: (name) => {
                 setRenamingFolderId(null);
@@ -1318,6 +1448,19 @@ export function CourseLibraryView({
                   <span className="max-sm:sr-only">{t("findExplanation.entry")}</span>
                 </Button>
               )}
+              {(visibleFolders.length > 0 || visibleVideos.length > 0) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-pressed={selecting}
+                  onClick={() => (selecting ? exitSelection() : setSelecting(true))}
+                  title={t("library.select")}
+                  className="ca-touch-44"
+                >
+                  <CheckSquare className="h-4 w-4" />
+                  <span className="max-sm:sr-only">{t("library.select")}</span>
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -1404,7 +1547,7 @@ export function CourseLibraryView({
               <EmptyState title={t("folders.empty")} description={t("folders.emptyHint")} />
             </div>
           ) : view === "list" ? (
-            <div className="ca-list">
+            <div className="ca-list" data-selecting={selecting || undefined}>
               <div className="ca-list-head">
                 <span>{t("home.colName")}</span>
                 <span className="h-progress">{t("home.colProgress")}</span>
@@ -1419,7 +1562,12 @@ export function CourseLibraryView({
               ))}
             </div>
           ) : (
-            <div className="ca-grid" data-density={gridDensity} aria-label={t("home.videoGrid")}>
+            <div
+              className="ca-grid"
+              data-density={gridDensity}
+              data-selecting={selecting || undefined}
+              aria-label={t("home.videoGrid")}
+            >
               {visibleFolders.map(renderFolder)}
               {courseDownloads.map(renderDownloadGridCard)}
               {visibleVideos.map((video) => (
@@ -1437,6 +1585,52 @@ export function CourseLibraryView({
               />
             )}
         </div>
+        {selecting && (
+          <div className="ca-select-bar" role="toolbar" aria-label={t("library.selectionActions")}>
+            <span className="ca-select-count" aria-live="polite">
+              {t("library.selectedCount", { count: selectedItems.length })}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                setSelectedKeys(
+                  new Set([
+                    ...visibleFolders.map((folder) => folderKey(folder.id)),
+                    ...visibleVideos.map((video) => videoKey(video.id)),
+                  ]),
+                )
+              }
+            >
+              {t("library.selectAll")}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={selectedItems.length === 0}
+              onClick={() => {
+                moveItems.reset();
+                setMoveRequest(selectedItems);
+              }}
+            >
+              <FolderInput className="h-4 w-4" />
+              <span className="max-sm:sr-only">{t("folders.moveTo")}</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={selectedItems.length === 0}
+              className="text-[var(--status-err)]"
+              onClick={() => void deleteSelected()}
+            >
+              <Trash2 className="h-4 w-4" />
+              <span className="max-sm:sr-only">{t("home.delete")}</span>
+            </Button>
+            <Button size="sm" onClick={exitSelection}>
+              {t("library.done")}
+            </Button>
+          </div>
+        )}
       </div>
       {moveRequest && selectedCourseId && (
         <MoveDialog

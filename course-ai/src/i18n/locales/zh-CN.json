@@ -1778,7 +1778,15 @@
     "courseVideos": "{{count}} 个视频",
     "courseEmpty": "还没有视频",
     "courseWatched": "已看完 {{count}} 个",
-    "courseAllWatched": "全部看完"
+    "courseAllWatched": "全部看完",
+    "select": "选择",
+    "selectItem": "选择 {{name}}",
+    "selectionActions": "批量操作",
+    "selectedCount": "已选 {{count}} 项",
+    "selectAll": "全选",
+    "done": "完成",
+    "deleteSelected": "删除所选",
+    "deleteSelectedConfirm": "删除所选的 {{count}} 项？\n共 {{videos}} 个视频会移入回收站，可在 30 天内恢复；选中的文件夹连同子文件夹一并删除。"
   },
   "shareCard": {
     "tagline": "把课程视频变成真正记得住的东西",

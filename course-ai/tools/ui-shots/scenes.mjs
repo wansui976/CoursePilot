@@ -139,6 +139,24 @@ export const scenes = [
     },
   },
   {
+    // 批量选择：选中一个文件夹和两个视频，底部出现操作条。
+    name: "selection",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-folders", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openCourse(page);
+      await page.getByRole("button", { name: "打开文件夹 第1章 基础" }).waitFor();
+      await page.getByRole("button", { name: "选择", exact: true }).click();
+      await page.getByRole("button", { name: "选择 第2章 神经网络" }).click();
+      await page.getByRole("button", { name: /^选择 08/ }).click();
+      await page.getByRole("button", { name: /^选择 09/ }).click();
+      await shot();
+      await page.getByRole("button", { name: "列表视图" }).click();
+      await shot("list");
+    },
+  },
+  {
     // 拖着视频悬停在文件夹上：文件夹卡描边高亮。
     name: "folder-drop",
     run: async ({ page, shot }) => {

@@ -1399,6 +1399,69 @@ describe("Home", () => {
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     });
 
+    it("selects with ⌘-click and shift-click, then moves the selection in one go", async () => {
+      const extra: Video = { ...video, id: "video-3", title: "补充.mp4", order_index: 3 };
+      mockIpc.videos.list.mockImplementation(async (courseId: string) =>
+        courseId === "course-1" ? [{ ...video, order_index: 2 }, inside, extra] : [],
+      );
+      await renderHome();
+      fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+      const folderCard = await screen.findByRole("button", { name: "打开文件夹 第1章" });
+      // ⌘-click 不打开文件夹，而是进入选择模式并选中它。
+      fireEvent.click(folderCard, { metaKey: true });
+      expect(await screen.findByText("已选 1 项")).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "第1章" })).not.toBeInTheDocument();
+      // Shift-click 最后一个视频：从文件夹到它整段选上（文件夹 + 两个根目录视频）。
+      fireEvent.click(screen.getByRole("button", { name: `选择 ${displayTitle(extra.title)}` }), {
+        shiftKey: true,
+      });
+      expect(screen.getByText("已选 3 项")).toBeInTheDocument();
+      // 选择模式下普通点击也是勾选 / 取消。
+      fireEvent.click(screen.getByRole("button", { name: `选择 ${displayTitle(video.title)}` }));
+      expect(screen.getByText("已选 2 项")).toBeInTheDocument();
+
+      const bar = screen.getByRole("toolbar", { name: "批量操作" });
+      fireEvent.click(within(bar).getByRole("button", { name: /移动到/ }));
+      const dialog = await screen.findByRole("dialog", { name: "移动 2 项到…" });
+      // 被移动的文件夹自己不能作为目标。
+      expect(await within(dialog).findByRole("radio", { name: "第1章" })).toBeDisabled();
+      fireEvent.change(within(dialog).getByRole("combobox", { name: "课程" }), {
+        target: { value: "course-2" },
+      });
+      fireEvent.click(within(dialog).getByRole("radio", { name: /课程根目录/ }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "移到这里" }));
+      await waitFor(() =>
+        expect(mockIpc.folders.move).toHaveBeenCalledWith(
+          "course-2",
+          null,
+          expect.arrayContaining([
+            { kind: "folder", id: "ch1" },
+            { kind: "video", id: "video-3" },
+          ]),
+        ),
+      );
+      await waitFor(() => expect(screen.queryByRole("toolbar", { name: "批量操作" })).not.toBeInTheDocument());
+    });
+
+    it("deletes a selection once, without trashing a video twice", async () => {
+      confirmMock.mockResolvedValue(true);
+      mockIpc.folders.delete.mockResolvedValue(undefined);
+      await renderHome();
+      fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+      await screen.findByRole("button", { name: "打开文件夹 第1章" });
+      fireEvent.click(screen.getByRole("button", { name: "选择" }));
+      fireEvent.click(screen.getByRole("button", { name: "选择 第1章" }));
+      fireEvent.click(screen.getByRole("button", { name: `选择 ${displayTitle(video.title)}` }));
+      const bar = screen.getByRole("toolbar", { name: "批量操作" });
+      fireEvent.click(within(bar).getByRole("button", { name: "删除" }));
+      await waitFor(() => expect(mockIpc.folders.delete).toHaveBeenCalledWith("ch1"));
+      await waitFor(() => expect(mockIpc.videos.delete).toHaveBeenCalledWith("video-1"));
+      // 文件夹里的 video-2 由删文件夹带走，不再单独删。
+      expect(mockIpc.videos.delete).not.toHaveBeenCalledWith("video-2");
+      const calls = confirmMock.mock.calls;
+      expect(calls[calls.length - 1]?.[0]).toContain("共 2 个视频会移入回收站");
+    });
+
     it("deletes a folder after a confirmation that mentions its videos", async () => {
       confirmMock.mockResolvedValue(true);
       mockIpc.folders.delete.mockResolvedValue(undefined);
