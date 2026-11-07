@@ -377,6 +377,50 @@
   text-overflow: ellipsis;
 }
 
+/* 侧栏文件夹树：展开箭头占一个固定槽，没有子项的行留空槽保持对齐。 */
+.ca-nav-disclosure {
+  flex: 0 0 18px;
+  height: 24px;
+  margin-left: 4px;
+  margin-right: -8px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--text-3);
+}
+
+@media (hover: hover) {
+button.ca-nav-disclosure:hover {
+  color: var(--text-1);
+  background: var(--surface-card-hover);
+}
+}
+
+.ca-nav-tree,
+.ca-nav-tree ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ca-nav-folder {
+  min-height: 30px;
+}
+
+.ca-nav-folder .ca-nav-button {
+  min-height: 30px;
+}
+
+/* 工作台侧栏视频列表里的章节名（课程分了文件夹时）。 */
+.ca-side-video-group {
+  padding: 8px 10px 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 课程「…」菜单里的颜色行：第一格「不标颜色」，其余按 --course-* 色板。 */
 .ca-course-colors {
   display: grid;

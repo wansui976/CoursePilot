@@ -120,6 +120,25 @@ export const scenes = [
     },
   },
   {
+    // 侧栏文件夹树：展开课程、展开第2章，从侧栏打开 2.1；再打开一个视频看工作台里的章节分组。
+    name: "sidebar-tree",
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-folders", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await page.getByRole("button", { name: "展开 机器学习导论" }).click();
+      await page.getByRole("button", { name: "展开 第2章 神经网络" }).click();
+      await shot("expanded");
+      await page.getByRole("button", { name: "2.1 反向传播", exact: true }).click();
+      await page.getByRole("navigation", { name: "文件夹路径" }).waitFor();
+      await shot("open-folder");
+      await page.getByRole("button", { name: /反向传播推导/ }).first().click();
+      await page.locator("[data-video-player]").first().waitFor({ timeout: 5000 });
+      const expand = page.getByRole("button", { name: "展开侧栏" });
+      if (await expand.isVisible().catch(() => false)) await expand.click();
+      await shot("workbench");
+    },
+  },
+  {
     // 拖着视频悬停在文件夹上：文件夹卡描边高亮。
     name: "folder-drop",
     run: async ({ page, shot }) => {

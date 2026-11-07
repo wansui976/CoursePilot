@@ -33,6 +33,9 @@ import { clearTasksForScope } from "@/lib/backgroundTasks";
 import { useTaskNotices } from "@/lib/taskNotices";
 import type { Course, CourseColor, Video } from "@/lib/types";
 import { ColorSwatches } from "./ColorSwatches";
+import { CourseFolderTree, Disclosure } from "./CourseFolderTree";
+import { useSidebarExpanded } from "./useSidebarExpanded";
+import { folderPath } from "./folderTree";
 import { colorStyle } from "./colorStyle";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { Skeleton } from "@/ui/skeleton";
@@ -105,6 +108,7 @@ export function useCreateCourse() {
 /** 课程列表:条目 + `…` 菜单(重命名/重选根目录/删除)+ iOS 左滑出菜单 + 空态。 */
 export function CourseList({
   selectedCourseId,
+  selectedFolderId = null,
   selectedCourseWatchedRatio,
   onSelect,
   onClearSelection,
@@ -113,9 +117,12 @@ export function CourseList({
   onTransientCloseChange,
 }: {
   selectedCourseId: string | null;
+  /** 选中课程里当前打开的文件夹；null = 课程根目录。 */
+  selectedFolderId?: string | null;
   /** 选中课程已看完比例（0-1）；null = 没有数据（仅显示集数）。 */
   selectedCourseWatchedRatio?: number | null;
-  onSelect: (id: string) => void;
+  /** 选中课程（folderId 缺省 = 课程根目录），或直接打开它的某个文件夹。 */
+  onSelect: (id: string, folderId?: string | null) => void;
   onClearSelection?: () => void;
   queueOpen?: boolean;
   /** 渲染在「选中课程」条目正下方(工作台内联视频列表插槽)。 */
@@ -132,6 +139,19 @@ export function CourseList({
     error: coursesErrorObj,
     refetch: refetchCourses,
   } = useQuery(queries.courses());
+
+  // 侧栏文件夹树：展开状态只记在本机。课程页里进了某个文件夹，就把通往它的各级展开。
+  const { expanded, toggle: toggleExpanded, open: openExpanded } = useSidebarExpanded();
+  const { data: selectedFolders = [] } = useQuery({
+    ...queries.folders(selectedCourseId),
+    enabled: !!selectedCourseId && !!selectedFolderId,
+  });
+  useEffect(() => {
+    if (!selectedCourseId || !selectedFolderId || !selectedFolders.length) return;
+    const ancestors = folderPath(selectedFolders, selectedFolderId).slice(0, -1);
+    openExpanded([selectedCourseId, ...ancestors.map((folder) => folder.id)]);
+  }, [openExpanded, selectedCourseId, selectedFolderId, selectedFolders]);
+  const anyFolders = courses.some((course) => (course.folder_count ?? 0) > 0);
 
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [subscriptionsFor, setSubscriptionsFor] = useState<{ id: string; name: string } | null>(null);
@@ -411,6 +431,11 @@ export function CourseList({
           {courses.map((course) => {
             // 队列是当前视图时，课程不再算「选中」，避免与队列项同时高亮。
             const selected = course.id === selectedCourseId && !queueOpen;
+            const treeOpen = (course.folder_count ?? 0) > 0 && expanded.has(course.id);
+            // 工作台里选中课程下面挂的是视频列表，就不再叠一棵文件夹树。
+            const showTree = treeOpen && !(selected && selectedCourseExtra);
+            // 进了某个文件夹且树是展开的：高亮落在文件夹那一行，课程行不再同时高亮。
+            const rowActive = selected && !(selectedFolderId && showTree);
             if (renamingId === course.id) {
               return (
                 <Fragment key={course.id}>
@@ -442,16 +467,26 @@ export function CourseList({
               <Fragment key={course.id}>
                 <SortableCourseItem
                   id={course.id}
-                  className={`ca-nav-item group relative ${selected ? "active" : ""}`}
+                  className={`ca-nav-item group relative ${rowActive ? "active" : ""}`}
                   style={{ touchAction: "pan-y" }}
                   onPointerDown={(event) => startSwipe(course.id, event)}
                   onPointerMove={(event) => trackSwipe(course.id, event)}
                   onPointerUp={endSwipe}
                   onPointerCancel={endSwipe}
                 >
+                  {anyFolders &&
+                    ((course.folder_count ?? 0) > 0 ? (
+                      <Disclosure
+                        label={course.name}
+                        expanded={treeOpen}
+                        onToggle={() => toggleExpanded(course.id)}
+                      />
+                    ) : (
+                      <span className="ca-nav-disclosure" aria-hidden="true" />
+                    ))}
                   <button
                     onClick={() => onSelect(course.id)}
-                    aria-current={selected ? "page" : undefined}
+                    aria-current={rowActive ? "page" : undefined}
                     className="ca-nav-button"
                   >
                     <FolderOpen
@@ -494,6 +529,15 @@ export function CourseList({
                   </button>
                 </SortableCourseItem>
                 {selected && selectedCourseExtra}
+                {showTree && (
+                  <CourseFolderTree
+                    courseId={course.id}
+                    selectedFolderId={selected ? selectedFolderId : null}
+                    expanded={expanded}
+                    onToggle={toggleExpanded}
+                    onOpen={(folderId) => onSelect(course.id, folderId)}
+                  />
+                )}
               </Fragment>
             );
           })}

@@ -280,7 +280,10 @@
     "moveDestination": "目标位置",
     "courseRoot": "课程根目录",
     "currentLevel": "当前位置",
-    "moveHere": "移到这里"
+    "moveHere": "移到这里",
+    "expand": "展开 {{name}}",
+    "collapse": "收起 {{name}}",
+    "treeLabel": "文件夹"
   },
   "recycleBin": {
     "title": "回收站",

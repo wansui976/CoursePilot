@@ -89,6 +89,8 @@ pub struct Course {
     pub sort_order: Option<i64>,
     /// 颜色标记，取值见 COURSE_COLORS；None = 不标。
     pub color: Option<String>,
+    /// 课程里的文件夹数。侧栏据此决定要不要给展开箭头。
+    pub folder_count: i64,
 }
 
 /// 课程颜色标记的预设色板（前端按键名映射到具体色值）。
@@ -126,6 +128,7 @@ pub async fn create_course(db: &Db, name: String, root_path: String) -> AppResul
         video_count: 0,
         sort_order: Some(sort_order),
         color: None,
+        folder_count: 0,
     })
 }
 
@@ -134,7 +137,8 @@ pub async fn list_courses(db: &Db) -> AppResult<Vec<Course>> {
         "SELECT c.id,c.name,c.root_path,c.cover_image,c.created_at,c.updated_at,
                 (SELECT COUNT(*) FROM videos v WHERE v.course_id=c.id AND v.deleted_at IS NULL)
                 AS video_count,
-                c.sort_order,c.color
+                c.sort_order,c.color,
+                (SELECT COUNT(*) FROM folders f WHERE f.course_id=c.id) AS folder_count
          FROM courses c WHERE c.deleted_at IS NULL
          ORDER BY c.sort_order IS NOT NULL, c.sort_order, c.updated_at DESC",
     )

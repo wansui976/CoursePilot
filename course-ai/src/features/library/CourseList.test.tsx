@@ -16,6 +16,7 @@ const { mockIpc } = vi.hoisted(() => ({
       reorder: vi.fn(),
       setColor: vi.fn(),
     },
+    folders: { list: vi.fn() },
   },
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
@@ -46,6 +47,8 @@ describe("CourseList", () => {
     mockIpc.courses.relinkRoot.mockReset();
     mockIpc.courses.reorder.mockReset().mockResolvedValue(undefined);
     mockIpc.courses.setColor.mockReset().mockResolvedValue(undefined);
+    mockIpc.folders.list.mockReset().mockResolvedValue([]);
+    window.localStorage.removeItem("course-ai-sidebar-expanded");
   });
 
   it("marks the selected course with aria-current=page and leaves others unset", async () => {
@@ -366,6 +369,9 @@ describe("CourseList", () => {
         .getAllByRole("button", { name: /课程$/ })
         .map((button) => button.textContent);
       expect(names).toEqual(["行测课程", "申论课程"]);
+      // dnd-kit 拖完后在 document 上挂着吞 click 的监听，50ms 后才撤；等它撤掉，
+      // 否则会吞掉下一个测试的第一次点击。
+      await act(() => new Promise((resolve) => setTimeout(resolve, 60)));
     } finally {
       rect.mockRestore();
     }
@@ -379,5 +385,59 @@ describe("CourseList", () => {
     fireEvent.mouseUp(document, { clientX: 20, clientY: 80 });
     await act(async () => {});
     expect(mockIpc.courses.reorder).not.toHaveBeenCalled();
+  });
+
+  describe("folder tree", () => {
+    const folder = (id: string, parent: string | null, order: number, name: string) => ({
+      id,
+      course_id: "c1",
+      parent_id: parent,
+      name,
+      color: null,
+      order_index: order,
+      created_at: 1,
+      updated_at: 1,
+    });
+
+    beforeEach(() => {
+      mockIpc.courses.list.mockResolvedValue([{ ...courses[0], folder_count: 2 }, courses[1]]);
+      mockIpc.folders.list.mockResolvedValue([
+        folder("ch1", null, 0, "第1章"),
+        folder("s11", "ch1", 1, "1.1 节"),
+      ]);
+    });
+
+    it("only offers a disclosure on courses that have folders, and remembers it", async () => {
+      const onSelect = vi.fn();
+      const { unmount } = renderList({ onSelect, selectedCourseId: null });
+      const toggle = await screen.findByRole("button", { name: "展开 申论课程" });
+      expect(screen.queryByRole("button", { name: "展开 行测课程" })).not.toBeInTheDocument();
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+      fireEvent.click(toggle);
+      const chapter = await screen.findByRole("button", { name: "第1章" });
+      // 展开课程不等于选中它。
+      expect(onSelect).not.toHaveBeenCalled();
+      // 子文件夹默认收着，展开第1章才看得到。
+      expect(screen.queryByRole("button", { name: "1.1 节" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "展开 第1章" }));
+      fireEvent.click(await screen.findByRole("button", { name: "1.1 节" }));
+      expect(onSelect).toHaveBeenCalledWith("c1", "s11");
+      fireEvent.click(chapter);
+      expect(onSelect).toHaveBeenCalledWith("c1", "ch1");
+
+      // 重新挂载：展开状态还在。
+      unmount();
+      renderList({ selectedCourseId: null });
+      expect(await screen.findByRole("button", { name: "1.1 节" })).toBeInTheDocument();
+    });
+
+    it("opens the path to the folder shown on the course page and highlights it", async () => {
+      renderList({ selectedCourseId: "c1", selectedFolderId: "s11" });
+      const current = await screen.findByRole("button", { name: "1.1 节" });
+      expect(current).toHaveAttribute("aria-current", "page");
+      // 高亮落在文件夹上，课程行不再同时是「当前页」。
+      expect(screen.getByRole("button", { name: "申论课程" })).not.toHaveAttribute("aria-current");
+    });
   });
 });

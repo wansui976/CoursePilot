@@ -14,7 +14,8 @@ export function CourseSidebar({
   className,
 }: {
   selectedCourseId: string | null;
-  onSelect: (id: string) => void;
+  /** 打开课程（folderId 缺省 = 根目录）；侧栏文件夹树里点文件夹会带上它。 */
+  onSelect: (id: string, folderId?: string | null) => void;
   onClearSelection?: () => void;
   onOpenRecycleBin?: () => void;
   onTransientCloseChange?: (close: (() => void) | null) => void;

@@ -11,6 +11,8 @@ export interface Course {
   sort_order: number | null;
   /** 颜色标记；null = 不标。 */
   color: CourseColor | null;
+  /** 课程里的文件夹数（侧栏据此决定要不要给展开箭头）。旧数据 / 测试桩里可能没有。 */
+  folder_count?: number;
 }
 
 /** 课程颜色标记的预设色板，与后端 COURSE_COLORS 一致。 */

@@ -34,7 +34,8 @@ export interface Shell {
   videoQuery: string;
   setVideoQuery: (query: string) => void;
 
-  selectCourse: (courseId: string) => void;
+  /** 打开课程（folderId 缺省 = 根目录）。 */
+  selectCourse: (courseId: string, folderId?: string | null) => void;
   clearCourseSelection: () => void;
   openVideo: (videoId: string) => void;
   openQueuedVideo: (video: Video) => void;

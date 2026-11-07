@@ -77,6 +77,7 @@ export function Home() {
   const {
     view: mainView,
     courseId: selectedCourseId,
+    folderId: selectedFolderId,
     videoId: selectedVideoId,
     go,
   } = useHomeRoute();
@@ -471,10 +472,11 @@ export function Home() {
     openVideo(video.id);
   }
 
-  function selectCourse(id: string) {
+  // 点课程 = 回到它的根目录（哪怕已经在这门课的某个文件夹里）；侧栏文件夹树会带上 folderId。
+  function selectCourse(id: string, folderId: string | null = null) {
     runAfterWorkspaceTransient(() => {
       setKnowledgeReturn(null);
-      go({ view: "library", courseId: id, videoId: null });
+      go({ view: "library", courseId: id, folderId, videoId: null });
       setVideoQuery("");
     });
   }
@@ -651,6 +653,7 @@ export function Home() {
               nav={shellNav}
               onToggleCollapsed={() => toggleSidebarCollapsed()}
               selectedCourseId={selectedCourseId}
+              selectedFolderId={selectedFolderId}
               selectedCourseWatchedRatio={
                 selectedCourseId && videos.length > 0
                   ? watchedCount / videos.length

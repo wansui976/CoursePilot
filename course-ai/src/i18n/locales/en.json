@@ -280,7 +280,10 @@
     "moveDestination": "Destination",
     "courseRoot": "Course root",
     "currentLevel": "Current",
-    "moveHere": "Move here"
+    "moveHere": "Move here",
+    "expand": "Expand {{name}}",
+    "collapse": "Collapse {{name}}",
+    "treeLabel": "Folders"
   },
   "recycleBin": {
     "title": "Recycle Bin",

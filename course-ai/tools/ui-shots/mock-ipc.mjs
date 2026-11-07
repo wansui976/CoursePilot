@@ -317,7 +317,10 @@ export function installMockIpc({ theme, safeArea }) {
       } catch {
         // 存储不可用：按有课处理
       }
-      return courses;
+      return courses.map((course) => ({
+        ...course,
+        folder_count: course.id === "c1" && withFolders() ? folders.length : 0,
+      }));
     },
     cmd_reorder_courses: ({ orderedIds }) => {
       const byId = new Map(courses.map((course) => [course.id, course]));

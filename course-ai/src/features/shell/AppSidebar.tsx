@@ -13,7 +13,10 @@ import {
   Trash2,
   type LucideIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { queries } from "@/lib/queries";
+import { folderPath } from "@/features/library/folderTree";
 import { useTranslation } from "react-i18next";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { CourseList, useCreateCourse } from "@/features/library/CourseList";
@@ -63,6 +66,7 @@ export function AppSidebar({
   nav,
   onToggleCollapsed,
   selectedCourseId,
+  selectedFolderId = null,
   selectedCourseWatchedRatio,
   onSelectCourse,
   onClearCourseSelection,
@@ -74,9 +78,10 @@ export function AppSidebar({
   /** 折叠侧栏：侧栏头部的收起按钮。 */
   onToggleCollapsed: () => void;
   selectedCourseId: string | null;
+  selectedFolderId?: string | null;
   /** 选中课程已看完比例（0-1）；null = 没有数据（侧栏不显示进度）。 */
   selectedCourseWatchedRatio?: number | null;
-  onSelectCourse: (id: string) => void;
+  onSelectCourse: (id: string, folderId?: string | null) => void;
   onClearCourseSelection?: () => void;
   videos?: Video[];
   selectedVideoId?: string | null;
@@ -86,6 +91,10 @@ export function AppSidebar({
   const { createCourse, creatingCourse, createError } = useCreateCourse();
   const assistantUnread = useAssistantUi((state) => state.unread);
   const inWorkbench = nav.view === "workbench";
+  const { data: folders = [] } = useQuery({
+    ...queries.folders(selectedCourseId),
+    enabled: inWorkbench && !!selectedCourseId,
+  });
 
   return (
     <aside aria-label={t("nav.courseSidebar")} className="ca-side">
@@ -177,6 +186,7 @@ export function AppSidebar({
       <div className="ca-nav">
         <CourseList
           selectedCourseId={selectedCourseId}
+          selectedFolderId={selectedFolderId}
           selectedCourseWatchedRatio={selectedCourseWatchedRatio}
           onSelect={onSelectCourse}
           onClearSelection={onClearCourseSelection}
@@ -184,16 +194,29 @@ export function AppSidebar({
           selectedCourseExtra={
             inWorkbench ? (
               <div className="ca-side-videos" aria-label={t("nav.courseVideoList")}>
-                {videos.map((video) => (
-                  <button
-                    key={video.id}
-                    type="button"
-                    className={`ca-side-video ${video.id === selectedVideoId ? "on" : ""}`}
-                    aria-current={video.id === selectedVideoId ? "page" : undefined}
-                    onClick={() => onOpenVideo?.(video.id)}
-                  >
-                    <span className="nm">{displayTitle(video.title)}</span>
-                  </button>
+                {videos.map((video, index) => (
+                  <Fragment key={video.id}>
+                    {/* 课程分了文件夹：列表按教材顺序排，换章节时插一行章节名（只读）。 */}
+                    {folders.length > 0 &&
+                      (index === 0 ||
+                        (videos[index - 1].folder_id ?? null) !== (video.folder_id ?? null)) && (
+                        <div className="ca-side-video-group" role="presentation">
+                          {video.folder_id
+                            ? folderPath(folders, video.folder_id)
+                                .map((folder) => folder.name)
+                                .join(" › ")
+                            : t("folders.courseRoot")}
+                        </div>
+                      )}
+                    <button
+                      type="button"
+                      className={`ca-side-video ${video.id === selectedVideoId ? "on" : ""}`}
+                      aria-current={video.id === selectedVideoId ? "page" : undefined}
+                      onClick={() => onOpenVideo?.(video.id)}
+                    >
+                      <span className="nm">{displayTitle(video.title)}</span>
+                    </button>
+                  </Fragment>
                 ))}
                 {videos.length === 0 && (
                   <div className="ca-side-videos-empty">{t("nav.noCourseVideos")}</div>
