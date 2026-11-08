@@ -244,7 +244,7 @@
     "relinkResult": "已重连 {{relinked}}/{{total}} 个视频",
     "relinkMissing": "缺失 {{count}} 个：{{names}}",
     "relinkAmbiguous": "重名跳过 {{count}} 个：{{names}}",
-    "deleteCourseConfirm": "删除课程「{{name}}」？\n位置：{{path}}\n视频：{{count}} 个\n\n该课程下的视频会移入回收站，可在 30 天内恢复；彻底删除后才会释放空间。",
+    "deleteCourseConfirm": "删除课程「{{name}}」？\n位置：{{path}}\n视频：{{count}} 个\n\n该课程下的视频会移入回收站，可在 30 天内恢复；彻底删除后会释放处理产物（桌面端不会删除你导入的原视频文件）。",
     "deleteCourseTitle": "删除课程",
     "cancel": "取消",
     "allWatched": "已全部看完",
@@ -273,7 +273,7 @@
     "delete": "删除文件夹",
     "videoCount": "{{count}} 个视频",
     "deleteConfirm": "删除文件夹「{{name}}」？",
-    "deleteConfirmWithVideos": "删除文件夹「{{name}}」？\n里面的 {{count}} 个视频会移入回收站，可在 30 天内恢复（恢复后回到课程根目录）；彻底删除后才会释放空间。",
+    "deleteConfirmWithVideos": "删除文件夹「{{name}}」？\n里面的 {{count}} 个视频会移入回收站，可在 30 天内恢复（恢复后回到课程根目录）；彻底删除后会释放处理产物（桌面端不会删除你导入的原视频文件）。",
     "breadcrumb": "文件夹路径",
     "up": "返回上一级",
     "empty": "这个文件夹是空的",
@@ -1677,7 +1677,7 @@
     "delete": "删除",
     "openVideo": "打开视频：{{title}}",
     "watchedPercent": "已观看 {{percent}}%",
-    "deleteConfirm": "删除这个视频？\n它会移入回收站，可在 30 天内恢复；彻底删除后才会释放空间。",
+    "deleteConfirm": "删除这个视频？\n它会移入回收站，可在 30 天内恢复；彻底删除后会释放处理产物（桌面端不会删除你导入的原视频文件）。",
     "deleteTitle": "删除视频",
     "deleteLabel": "删除",
     "continueLast": "继续上次",
@@ -1835,7 +1835,7 @@
     "selectAll": "全选",
     "done": "完成",
     "deleteSelected": "删除所选",
-    "deleteSelectedConfirm": "删除所选的 {{count}} 项？\n共 {{videos}} 个视频会移入回收站，可在 30 天内恢复；选中的文件夹连同子文件夹一并删除。彻底删除后才会释放空间。"
+    "deleteSelectedConfirm": "删除所选的 {{count}} 项？\n共 {{videos}} 个视频会移入回收站，可在 30 天内恢复；选中的文件夹连同子文件夹一并删除。彻底删除后会释放处理产物（桌面端不会删除你导入的原视频文件）。"
   },
   "search": {
     "results": "搜索结果",

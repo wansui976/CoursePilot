@@ -653,6 +653,27 @@ async fn remaining_file_paths(db: &Db) -> Option<HashSet<String>> {
         .map(|paths| paths.into_iter().collect())
 }
 
+/// 桌面端从网络下载的文件：视频/字幕是应用写进课程目录的，永久删除时一并清掉。
+/// 只删仍在课程根目录下的那一个；用户移动/改名过就留着，不扩大删除范围。
+fn remove_downloaded_file(file_path: &str, course_root: &str) {
+    let path = Path::new(file_path);
+    let root = Path::new(course_root);
+    if !path.is_absolute() || !root.is_absolute() {
+        return;
+    }
+    let (Ok(canonical), Ok(root)) = (path.canonicalize(), root.canonicalize()) else {
+        return;
+    };
+    if !canonical.is_file() || !canonical.starts_with(&root) {
+        return;
+    }
+    if let Err(error) = std::fs::remove_file(&canonical) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(file_path, %error, "删除下载文件失败");
+        }
+    }
+}
+
 /// 永久删除单个视频（连带其转写/笔记等衍生数据，经 FK 级联）。
 pub async fn purge_video(
     db: &Db,
@@ -660,15 +681,22 @@ pub async fn purge_video(
     owned_media_roots: &[PathBuf],
 ) -> AppResult<()> {
     let mut tx = db.pool.begin().await?;
-    let (course_id, data_dir, file_path) = sqlx::query_as::<_, (String, String, String)>(
-        "DELETE FROM videos
-         WHERE id=? AND deleted_at IS NOT NULL
-         RETURNING course_id,data_dir,file_path",
-    )
-    .bind(id)
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or_else(|| AppError::NotFound(format!("trashed video {id}")))?;
+    let (course_id, data_dir, file_path, source_type, subtitle_path) =
+        sqlx::query_as::<_, (String, String, String, String, Option<String>)>(
+            "DELETE FROM videos
+             WHERE id=? AND deleted_at IS NOT NULL
+             RETURNING course_id,data_dir,file_path,source_type,subtitle_path",
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("trashed video {id}")))?;
+    // 课程行可能在本事务里被删掉；先把根目录取出来，下载文件的归属判断要用。
+    let course_root: Option<String> =
+        sqlx::query_scalar("SELECT root_path FROM courses WHERE id=?")
+            .bind(&course_id)
+            .fetch_optional(&mut *tx)
+            .await?;
     sqlx::query(
         "DELETE FROM courses
          WHERE id=? AND deleted_at IS NOT NULL
@@ -683,6 +711,14 @@ pub async fn purge_video(
     remove_video_data_dir(&data_dir, id);
     if file_is_still_referenced(db, &file_path).await == Some(false) {
         remove_owned_video_file(&file_path, owned_media_roots);
+        if source_type != "local" {
+            if let Some(root) = course_root.as_deref() {
+                remove_downloaded_file(&file_path, root);
+                if let Some(subtitle) = subtitle_path.as_deref() {
+                    remove_downloaded_file(subtitle, root);
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -704,8 +740,10 @@ pub async fn list_trashed(db: &Db) -> AppResult<Vec<TrashedVideo>> {
 /// 清空回收站：永久删除全部软删视频，再删掉没有任何视频的已软删课程。返回清除数量。
 pub async fn purge_trash(db: &Db, owned_media_roots: &[PathBuf]) -> AppResult<u64> {
     let mut tx = db.pool.begin().await?;
-    let doomed: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT id,data_dir,file_path FROM videos WHERE deleted_at IS NOT NULL",
+    let doomed: Vec<(String, String, String, String, Option<String>, String)> = sqlx::query_as(
+        "SELECT v.id,v.data_dir,v.file_path,v.source_type,v.subtitle_path,c.root_path
+         FROM videos v JOIN courses c ON v.course_id=c.id
+         WHERE v.deleted_at IS NOT NULL",
     )
     .fetch_all(&mut *tx)
     .await?;
@@ -721,13 +759,19 @@ pub async fn purge_trash(db: &Db, owned_media_roots: &[PathBuf]) -> AppResult<u6
     .await?;
     tx.commit().await?;
     let remaining = remaining_file_paths(db).await;
-    for (id, data_dir, file_path) in &doomed {
+    for (id, data_dir, file_path, source_type, subtitle_path, course_root) in &doomed {
         remove_video_data_dir(data_dir, id);
         if remaining
             .as_ref()
             .is_some_and(|paths| !paths.contains(file_path))
         {
             remove_owned_video_file(file_path, owned_media_roots);
+            if source_type != "local" {
+                remove_downloaded_file(file_path, course_root);
+                if let Some(subtitle) = subtitle_path.as_deref() {
+                    remove_downloaded_file(subtitle, course_root);
+                }
+            }
         }
     }
     Ok(result.rows_affected())
@@ -737,9 +781,10 @@ pub async fn purge_trash(db: &Db, owned_media_roots: &[PathBuf]) -> AppResult<u6
 pub async fn purge_expired_trash(db: &Db, owned_media_roots: &[PathBuf]) -> AppResult<u64> {
     let cutoff = Utc::now().timestamp_millis() - TRASH_RETENTION_DAYS * DAY_MS;
     let mut tx = db.pool.begin().await?;
-    let doomed: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT id,data_dir,file_path FROM videos
-         WHERE deleted_at IS NOT NULL AND deleted_at < ?",
+    let doomed: Vec<(String, String, String, String, Option<String>, String)> = sqlx::query_as(
+        "SELECT v.id,v.data_dir,v.file_path,v.source_type,v.subtitle_path,c.root_path
+         FROM videos v JOIN courses c ON v.course_id=c.id
+         WHERE v.deleted_at IS NOT NULL AND v.deleted_at < ?",
     )
     .bind(cutoff)
     .fetch_all(&mut *tx)
@@ -757,13 +802,19 @@ pub async fn purge_expired_trash(db: &Db, owned_media_roots: &[PathBuf]) -> AppR
     .await?;
     tx.commit().await?;
     let remaining = remaining_file_paths(db).await;
-    for (id, data_dir, file_path) in &doomed {
+    for (id, data_dir, file_path, source_type, subtitle_path, course_root) in &doomed {
         remove_video_data_dir(data_dir, id);
         if remaining
             .as_ref()
             .is_some_and(|paths| !paths.contains(file_path))
         {
             remove_owned_video_file(file_path, owned_media_roots);
+            if source_type != "local" {
+                remove_downloaded_file(file_path, course_root);
+                if let Some(subtitle) = subtitle_path.as_deref() {
+                    remove_downloaded_file(subtitle, course_root);
+                }
+            }
         }
     }
     Ok(result.rows_affected())
@@ -1357,6 +1408,74 @@ mod tests {
         assert!(!data_dir.exists(), "派生目录要跟着一起清掉");
         // 用户自己的视频文件是导入进来的，不归我们删。
         assert!(video_file.is_file());
+    }
+
+    #[tokio::test]
+    async fn purging_a_downloaded_video_removes_the_file_from_the_course_root() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course_root = dir.path().join("课程");
+        std::fs::create_dir_all(&course_root).unwrap();
+        let file = course_root.join("下载的课.mp4");
+        std::fs::write(&file, b"downloaded").unwrap();
+        let subtitle = course_root.join("下载的课.zh.srt");
+        std::fs::write(&subtitle, b"subtitle").unwrap();
+        let course = create_course(&db, "c".into(), course_root.to_string_lossy().into())
+            .await
+            .unwrap();
+        let video = add_local_video(&db, &course.id, file.clone(), None)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE videos SET source_type='url', subtitle_path=? WHERE id=?",
+        )
+        .bind(subtitle.to_string_lossy().to_string())
+        .bind(&video.id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        delete_video(&db, &video.id).await.unwrap();
+
+        purge_video(&db, &video.id, &[]).await.unwrap();
+
+        assert!(!file.exists(), "应用下载进课程目录的文件应随永久删除清掉");
+        assert!(!subtitle.exists(), "下载的字幕也要一起清掉");
+    }
+
+    #[tokio::test]
+    async fn emptying_the_trash_frees_downloaded_files_too() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course_root = dir.path().join("课程");
+        std::fs::create_dir_all(&course_root).unwrap();
+        let course = create_course(&db, "c".into(), course_root.to_string_lossy().into())
+            .await
+            .unwrap();
+        let mut files = Vec::new();
+        for name in ["a.mp4", "b.mp4"] {
+            let file = course_root.join(name);
+            std::fs::write(&file, b"downloaded").unwrap();
+            let video = add_local_video(&db, &course.id, file.clone(), None)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE videos SET source_type='bilibili' WHERE id=?")
+                .bind(&video.id)
+                .execute(&db.pool)
+                .await
+                .unwrap();
+            delete_video(&db, &video.id).await.unwrap();
+            files.push(file);
+        }
+
+        purge_trash(&db, &[]).await.unwrap();
+
+        for file in files {
+            assert!(!file.exists());
+        }
     }
 
     /// 手机端导入：原生选择器把文件复制进应用私有目录，这份副本归应用所有。
