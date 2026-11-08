@@ -51,6 +51,7 @@ use crate::commands::rag::{
     cmd_cancel_rag_query, cmd_rag_query, cmd_rag_query_stream, cmd_search_transcript,
 };
 use crate::commands::settings::{cmd_get_setting, cmd_has_secret, cmd_set_secret, cmd_set_setting};
+use crate::commands::storage::{cmd_cleanup_orphan_media, cmd_storage_usage};
 use crate::commands::silence::cmd_video_skips;
 use crate::commands::slides::{
     cmd_cancel_slides_extract, cmd_cancel_slides_ocr, cmd_capture_frame, cmd_capture_frame_image,
@@ -232,6 +233,8 @@ pub fn run() {
                 handle.manage(media);
                 // 窗口要等 setup 跑完才出现，慢的善后放到后台，别拖慢启动。
                 // 启动快照用 VACUUM INTO，与并发写入互不影响。
+                let owned_media_roots =
+                    crate::storage::owned_media_roots(&handle).unwrap_or_default();
                 tauri::async_runtime::spawn(async move {
                     if database_existed {
                         match crate::backup::create_startup_snapshot(&db, &data_dir).await {
@@ -242,7 +245,9 @@ pub fn run() {
                         }
                     }
                     // 启动时清理过期回收站（超过保留期的视频永久删除）。
-                    if let Err(error) = crate::commands::videos::purge_expired_trash(&db).await {
+                    if let Err(error) =
+                        crate::commands::videos::purge_expired_trash(&db, &owned_media_roots).await
+                    {
                         tracing::warn!("purge expired trash failed: {error}");
                     }
                 });
@@ -298,6 +303,8 @@ pub fn run() {
             cmd_get_setting,
             cmd_set_secret,
             cmd_has_secret,
+            cmd_storage_usage,
+            cmd_cleanup_orphan_media,
             cmd_get_dev_logs,
             cmd_clear_dev_logs,
             cmd_llm_usage,

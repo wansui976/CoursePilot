@@ -597,3 +597,21 @@ export interface FeynmanAttempt {
   result: FeynmanResult;
   created_at: number;
 }
+
+/** 应用私有目录的存储占用（字节）；用于设置 → 存储。 */
+export interface StorageUsage {
+  total_bytes: number;
+  video_bytes: number;
+  derived_bytes: number;
+  trash_video_bytes: number;
+  trash_derived_bytes: number;
+  trashed_count: number;
+  other_bytes: number;
+}
+
+/** 清理未引用媒体的结果（字节）；用于设置 → 存储。 */
+export interface CleanupResult {
+  deleted_files: number;
+  deleted_dirs: number;
+  freed_bytes: number;
+}

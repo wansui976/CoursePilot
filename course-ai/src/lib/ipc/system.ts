@@ -2,11 +2,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  CleanupResult,
   DevLogEntry,
   ExplanationResult,
   LlmUsageTotals,
   PlaylistInfo,
   ProbeResult,
+  StorageUsage,
   Video,
 } from "../types";
 import type {
@@ -29,6 +31,11 @@ export const app = {
   networkInfo: (): Promise<{ metered: boolean }> => invoke("plugin:mobile-files|network_info"),
   // 问一次 GitHub 上的最新版本（只取版本号和发布页地址）。
   checkUpdate: (): Promise<UpdateCheck> => invoke("cmd_check_update"),
+  // 应用私有目录的占用明细（设置 → 存储）。手机上用来解释空间去哪了。
+  storageUsage: (): Promise<StorageUsage> => invoke("cmd_storage_usage"),
+  // 清掉升级前删除视频留下的、已经没有数据库行引用的媒体副本。
+  cleanupOrphanMedia: (): Promise<CleanupResult> =>
+    invoke("cmd_cleanup_orphan_media"),
 };
 
 export const sync = {

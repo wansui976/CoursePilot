@@ -19,6 +19,86 @@ pub fn sibling_data_root_writable(video_file: &Path) -> bool {
     std::fs::create_dir_all(sibling_data_root(video_file)).is_ok()
 }
 
+/// 统计占用的根：Android 的 app data 就是包私有目录（`/data/user/0/<pkg>`），
+/// 已经是全部；iOS 的 app data 是 `Library/Application Support/<bundle-id>`，
+/// 上一级 `Application Support` 才把同级的 `picked` 也包进来。
+/// 桌面端只统计 app data。**只用于统计，不用于删除**。
+#[cfg(target_os = "android")]
+pub fn app_usage_roots(app_data: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![app_data.to_path_buf()];
+    // Tauri 的 app data 在部分版本是 `<pkg>/files`，`picked` 在 `<pkg>/picked`；
+    // 包根则已经包含 picked，不再重复加。
+    if app_data.file_name().and_then(|name| name.to_str()) == Some("files") {
+        if let Some(parent) = app_data.parent() {
+            roots.push(parent.join("picked"));
+        }
+    }
+    roots
+}
+
+#[cfg(target_os = "ios")]
+pub fn app_usage_roots(app_data: &Path) -> Vec<PathBuf> {
+    app_data
+        .parent()
+        .map(|parent| vec![parent.to_path_buf()])
+        .unwrap_or_else(|| vec![app_data.to_path_buf()])
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn app_usage_roots(app_data: &Path) -> Vec<PathBuf> {
+    vec![app_data.to_path_buf()]
+}
+
+/// 移动端由应用自己复制/生成的媒体目录；永久删除视频时可以连文件一起删。
+///
+/// 桌面端返回空：导入的是用户自己的文件，只删派生目录，不能碰原片。
+///
+/// Android 的 app data 就是包根，`picked` 在它下面；iOS 的 `picked` 与 app data
+/// 同级，需要单独加进来。统计可以宽，删除必须窄——不把整个包目录交给删除逻辑。
+#[cfg(target_os = "android")]
+pub fn owned_media_roots(app: &tauri::AppHandle) -> crate::error::AppResult<Vec<PathBuf>> {
+    use tauri::Manager;
+
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| crate::error::AppError::Config(format!("app_data_dir: {error}")))?;
+    let mut roots = vec![app_data.clone()];
+    // 不同 Tauri/系统版本下 app data 可能是包根，也可能是 `<pkg>/files`；
+    // 两种都把同级的 picked 带上（不存在时删除逻辑自然不会命中）。
+    if let Some(parent) = app_data.parent() {
+        let picked = parent.join("picked");
+        if picked != app_data {
+            roots.push(picked);
+        }
+    }
+    Ok(roots)
+}
+
+#[cfg(target_os = "ios")]
+pub fn owned_media_roots(app: &tauri::AppHandle) -> crate::error::AppResult<Vec<PathBuf>> {
+    use tauri::Manager;
+
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| crate::error::AppError::Config(format!("app_data_dir: {error}")))?;
+    let mut roots = vec![app_data.clone()];
+    if let Some(parent) = app_data.parent() {
+        let picked = parent.join("picked");
+        if picked != app_data {
+            roots.push(picked);
+        }
+    }
+    Ok(roots)
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn owned_media_roots(app: &tauri::AppHandle) -> crate::error::AppResult<Vec<PathBuf>> {
+    let _ = app;
+    Ok(Vec::new())
+}
+
 /// iOS 应用沙盒路径里的固定段：`…/Containers/Data/Application/<UUID>/…`。
 ///
 /// 应用每次更新或重装，`<UUID>` 都会换一个（数据会跟着搬过去），而库里存的是绝对路径——

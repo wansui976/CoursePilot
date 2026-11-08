@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use std::borrow::Cow;
 // Path 被 scan_folder / cmd_scan_folder（文件夹批量导入）无条件使用，故不再 gate。
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 use tauri::State;
@@ -595,13 +596,74 @@ fn remove_video_data_dir(data_dir: &str, video_id: &str) {
     }
 }
 
+/// 删掉属于应用自己的视频文件。
+///
+/// 只处理 `owned_roots` 里的路径：移动端导入时原生选择器会把文件复制进应用私有目录，
+/// 这份副本跟着视频走；桌面端 `owned_roots` 为空，用户的原片永远不碰。
+/// 先 canonicalize 再比较，防止 `..` 或软链接把删除目标带出应用沙盒。
+fn remove_owned_video_file(file_path: &str, owned_roots: &[PathBuf]) {
+    if owned_roots.is_empty() {
+        return;
+    }
+    let path = Path::new(file_path);
+    if !path.is_absolute() {
+        return;
+    }
+    let Ok(canonical) = path.canonicalize() else {
+        return;
+    };
+    if !canonical.is_file() {
+        return;
+    }
+    let owned = owned_roots.iter().any(|root| {
+        root.canonicalize()
+            .map(|root| canonical.starts_with(root))
+            .unwrap_or(false)
+    });
+    if !owned {
+        return;
+    }
+    if let Err(error) = std::fs::remove_file(&canonical) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(file_path, %error, "删除视频文件失败");
+        }
+    }
+}
+
+/// 这个文件还有没有别的视频行引用？
+///
+/// 回收站里的行和重新导入的活动行可能指向同一个文件（同一文件先删后导）。
+/// 删文件前必须再问一次库，否则会把仍在用的视频删坏。
+/// 查询失败返回 None，调用方宁可不删。
+async fn file_is_still_referenced(db: &Db, file_path: &str) -> Option<bool> {
+    sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM videos WHERE file_path=?)")
+        .bind(file_path)
+        .fetch_one(&db.pool)
+        .await
+        .ok()
+        .map(|exists| exists != 0)
+}
+
+/// 清空回收站后一次性取出还活着的文件路径；失败返回 None（调用方跳过文件删除）。
+async fn remaining_file_paths(db: &Db) -> Option<HashSet<String>> {
+    sqlx::query_scalar::<_, String>("SELECT file_path FROM videos")
+        .fetch_all(&db.pool)
+        .await
+        .ok()
+        .map(|paths| paths.into_iter().collect())
+}
+
 /// 永久删除单个视频（连带其转写/笔记等衍生数据，经 FK 级联）。
-pub async fn purge_video(db: &Db, id: &str) -> AppResult<()> {
+pub async fn purge_video(
+    db: &Db,
+    id: &str,
+    owned_media_roots: &[PathBuf],
+) -> AppResult<()> {
     let mut tx = db.pool.begin().await?;
-    let (course_id, data_dir) = sqlx::query_as::<_, (String, String)>(
+    let (course_id, data_dir, file_path) = sqlx::query_as::<_, (String, String, String)>(
         "DELETE FROM videos
          WHERE id=? AND deleted_at IS NOT NULL
-         RETURNING course_id,data_dir",
+         RETURNING course_id,data_dir,file_path",
     )
     .bind(id)
     .fetch_optional(&mut *tx)
@@ -619,6 +681,9 @@ pub async fn purge_video(db: &Db, id: &str) -> AppResult<()> {
     tx.commit().await?;
     // 先提交再删文件：反过来的话，事务万一失败，库里还留着行、文件却已经没了。
     remove_video_data_dir(&data_dir, id);
+    if file_is_still_referenced(db, &file_path).await == Some(false) {
+        remove_owned_video_file(&file_path, owned_media_roots);
+    }
     Ok(())
 }
 
@@ -637,12 +702,13 @@ pub async fn list_trashed(db: &Db) -> AppResult<Vec<TrashedVideo>> {
 }
 
 /// 清空回收站：永久删除全部软删视频，再删掉没有任何视频的已软删课程。返回清除数量。
-pub async fn purge_trash(db: &Db) -> AppResult<u64> {
+pub async fn purge_trash(db: &Db, owned_media_roots: &[PathBuf]) -> AppResult<u64> {
     let mut tx = db.pool.begin().await?;
-    let doomed: Vec<(String, String)> =
-        sqlx::query_as("SELECT id,data_dir FROM videos WHERE deleted_at IS NOT NULL")
-            .fetch_all(&mut *tx)
-            .await?;
+    let doomed: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT id,data_dir,file_path FROM videos WHERE deleted_at IS NOT NULL",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
     let result = sqlx::query("DELETE FROM videos WHERE deleted_at IS NOT NULL")
         .execute(&mut *tx)
         .await?;
@@ -654,18 +720,26 @@ pub async fn purge_trash(db: &Db) -> AppResult<u64> {
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    for (id, data_dir) in &doomed {
+    let remaining = remaining_file_paths(db).await;
+    for (id, data_dir, file_path) in &doomed {
         remove_video_data_dir(data_dir, id);
+        if remaining
+            .as_ref()
+            .is_some_and(|paths| !paths.contains(file_path))
+        {
+            remove_owned_video_file(file_path, owned_media_roots);
+        }
     }
     Ok(result.rows_affected())
 }
 
 /// 清理过期回收站：删除超过保留期的视频，再删掉没有任何视频的已软删课程。
-pub async fn purge_expired_trash(db: &Db) -> AppResult<u64> {
+pub async fn purge_expired_trash(db: &Db, owned_media_roots: &[PathBuf]) -> AppResult<u64> {
     let cutoff = Utc::now().timestamp_millis() - TRASH_RETENTION_DAYS * DAY_MS;
     let mut tx = db.pool.begin().await?;
-    let doomed: Vec<(String, String)> = sqlx::query_as(
-        "SELECT id,data_dir FROM videos WHERE deleted_at IS NOT NULL AND deleted_at < ?",
+    let doomed: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT id,data_dir,file_path FROM videos
+         WHERE deleted_at IS NOT NULL AND deleted_at < ?",
     )
     .bind(cutoff)
     .fetch_all(&mut *tx)
@@ -682,8 +756,15 @@ pub async fn purge_expired_trash(db: &Db) -> AppResult<u64> {
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    for (id, data_dir) in &doomed {
+    let remaining = remaining_file_paths(db).await;
+    for (id, data_dir, file_path) in &doomed {
         remove_video_data_dir(data_dir, id);
+        if remaining
+            .as_ref()
+            .is_some_and(|paths| !paths.contains(file_path))
+        {
+            remove_owned_video_file(file_path, owned_media_roots);
+        }
     }
     Ok(result.rows_affected())
 }
@@ -959,18 +1040,27 @@ pub async fn cmd_purge_video(
     id: String,
 ) -> AppResult<()> {
     crate::pipeline::cancel_processing(&app, &id).await?;
-    purge_video(&state.db, &id).await
+    let owned = crate::storage::owned_media_roots(&app)?;
+    purge_video(&state.db, &id, &owned).await
 }
 
 #[tauri::command]
-pub async fn cmd_purge_trash(state: State<'_, AppState>) -> AppResult<u64> {
-    purge_trash(&state.db).await
+pub async fn cmd_purge_trash(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<u64> {
+    let owned = crate::storage::owned_media_roots(&app)?;
+    purge_trash(&state.db, &owned).await
 }
 
 #[tauri::command]
-pub async fn cmd_list_trash(state: State<'_, AppState>) -> AppResult<Vec<TrashedVideo>> {
+pub async fn cmd_list_trash(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<TrashedVideo>> {
     // 列表前先清掉过期项，保证用户看到的都是仍可恢复的。
-    purge_expired_trash(&state.db).await?;
+    let owned = crate::storage::owned_media_roots(&app)?;
+    purge_expired_trash(&state.db, &owned).await?;
     list_trashed(&state.db).await
 }
 
@@ -1262,11 +1352,193 @@ mod tests {
             trashed_video_with_data(&db, &course.id, video_file.to_str().unwrap()).await;
         assert!(data_dir.join("audio.wav").is_file());
 
-        purge_video(&db, &id).await.unwrap();
+        purge_video(&db, &id, &[]).await.unwrap();
 
         assert!(!data_dir.exists(), "派生目录要跟着一起清掉");
         // 用户自己的视频文件是导入进来的，不归我们删。
         assert!(video_file.is_file());
+    }
+
+    /// 手机端导入：原生选择器把文件复制进应用私有目录，这份副本归应用所有。
+    async fn trashed_mobile_video(
+        db: &Db,
+        course_id: &str,
+        app_root: &Path,
+        name: &str,
+    ) -> (String, PathBuf, PathBuf) {
+        let picked = app_root.join("picked").join("videos");
+        std::fs::create_dir_all(&picked).unwrap();
+        let file = picked.join(name);
+        std::fs::write(&file, b"mobile copy").unwrap();
+        let video = add_local_video(
+            db,
+            course_id,
+            file.clone(),
+            Some(app_root.join("videos")),
+        )
+        .await
+        .unwrap();
+        let data_dir = PathBuf::from(&video.data_dir);
+        std::fs::write(data_dir.join("audio.wav"), b"wav").unwrap();
+        sqlx::query("UPDATE videos SET deleted_at=1 WHERE id=?")
+            .bind(&video.id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        (video.id, file, data_dir)
+    }
+
+    #[tokio::test]
+    async fn purging_a_mobile_video_removes_its_private_copy_too() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let app_root = dir.path().join("app");
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let (id, file, data_dir) =
+            trashed_mobile_video(&db, &course.id, &app_root, "第一讲.mp4").await;
+        assert!(file.is_file());
+
+        purge_video(&db, &id, &[app_root.clone()]).await.unwrap();
+
+        assert!(!file.exists(), "应用私有目录里的副本要跟着视频一起删");
+        assert!(!data_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn purging_a_trashed_copy_keeps_a_file_still_used_by_an_active_video() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let app_root = dir.path().join("app");
+        let picked = app_root.join("picked").join("videos");
+        std::fs::create_dir_all(&picked).unwrap();
+        let file = picked.join("共享.mp4");
+        std::fs::write(&file, b"same file").unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+
+        let first = add_local_video(
+            &db,
+            &course.id,
+            file.clone(),
+            Some(app_root.join("videos")),
+        )
+        .await
+        .unwrap();
+        delete_video(&db, &first.id).await.unwrap();
+        // 同一文件在删除后又导入了一次：新的活动行仍指着这个文件。
+        let second = add_local_video(
+            &db,
+            &course.id,
+            file.clone(),
+            Some(app_root.join("videos")),
+        )
+        .await
+        .unwrap();
+        assert_ne!(first.id, second.id);
+
+        purge_video(&db, &first.id, &[app_root.clone()]).await.unwrap();
+        assert!(file.is_file(), "活动视频还在用这个文件，不能删");
+
+        delete_video(&db, &second.id).await.unwrap();
+        purge_video(&db, &second.id, &[app_root]).await.unwrap();
+        assert!(!file.exists(), "最后一个引用也没了才删文件");
+    }
+
+    #[tokio::test]
+    async fn emptying_the_trash_keeps_files_used_by_active_videos() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let app_root = dir.path().join("app");
+        let picked = app_root.join("picked").join("videos");
+        std::fs::create_dir_all(&picked).unwrap();
+        let file = picked.join("还在用.mp4");
+        std::fs::write(&file, b"same file").unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+
+        let trashed = add_local_video(
+            &db,
+            &course.id,
+            file.clone(),
+            Some(app_root.join("videos")),
+        )
+        .await
+        .unwrap();
+        delete_video(&db, &trashed.id).await.unwrap();
+        add_local_video(
+            &db,
+            &course.id,
+            file.clone(),
+            Some(app_root.join("videos")),
+        )
+        .await
+        .unwrap();
+
+        purge_trash(&db, std::slice::from_ref(&app_root)).await.unwrap();
+
+        assert!(file.is_file(), "清空回收站也不能删活动视频还在用的文件");
+    }
+
+    #[tokio::test]
+    async fn purging_never_deletes_a_file_outside_the_owned_roots() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let app_root = dir.path().join("app");
+        std::fs::create_dir_all(&app_root).unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        // 用户自己的文件不在应用私有目录里：即使调用方误传了 owned root 也不能删。
+        let user_file = dir.path().join("我的课件.mp4");
+        std::fs::write(&user_file, b"user file").unwrap();
+        let video = add_local_video(&db, &course.id, user_file.clone(), None)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE videos SET deleted_at=1 WHERE id=?")
+            .bind(&video.id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        purge_video(&db, &video.id, &[app_root]).await.unwrap();
+
+        assert!(user_file.is_file(), "owned root 之外的用户文件不能被删");
+    }
+
+    #[tokio::test]
+    async fn emptying_the_trash_frees_mobile_private_copies() {
+        let dir = tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let app_root = dir.path().join("app");
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let mut files = Vec::new();
+        for name in ["a.mp4", "b.mp4"] {
+            let (_, file, _) =
+                trashed_mobile_video(&db, &course.id, &app_root, name).await;
+            files.push(file);
+        }
+
+        assert_eq!(purge_trash(&db, &[app_root]).await.unwrap(), 2);
+
+        for file in files {
+            assert!(!file.exists(), "清空回收站要把副本一起释放");
+        }
     }
 
     #[tokio::test]
@@ -1287,7 +1559,7 @@ mod tests {
             dirs.push(data_dir);
         }
 
-        assert_eq!(purge_trash(&db).await.unwrap(), 2);
+        assert_eq!(purge_trash(&db, &[]).await.unwrap(), 2);
 
         for data_dir in dirs {
             assert!(!data_dir.exists());
@@ -1682,7 +1954,7 @@ mod tests {
 
         let restore_err = restore_video(&db, &video_id).await.unwrap_err();
         assert!(matches!(restore_err, AppError::NotFound(_)));
-        let purge_err = purge_video(&db, &video_id).await.unwrap_err();
+        let purge_err = purge_video(&db, &video_id, &[]).await.unwrap_err();
         assert!(matches!(purge_err, AppError::NotFound(_)));
         assert_eq!(list_videos(&db, &course_id).await.unwrap().len(), 1);
     }
@@ -1695,7 +1967,7 @@ mod tests {
             .await
             .unwrap();
 
-        purge_video(&db, &video_id).await.unwrap();
+        purge_video(&db, &video_id, &[]).await.unwrap();
 
         let course_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM courses WHERE id=?")
             .bind(course_id)
@@ -1858,7 +2130,7 @@ mod tests {
             delete_video(&db, id).await.unwrap();
         }
 
-        let removed = purge_trash(&db).await.unwrap();
+        let removed = purge_trash(&db, &[]).await.unwrap();
         assert_eq!(removed, 2);
         assert!(list_trashed(&db).await.unwrap().is_empty());
         assert!(list_videos(&db, &course_id).await.unwrap().is_empty());
@@ -1876,7 +2148,7 @@ mod tests {
             .execute(&db.pool)
             .await
             .unwrap();
-        let removed = purge_expired_trash(&db).await.unwrap();
+        let removed = purge_expired_trash(&db, &[]).await.unwrap();
         assert_eq!(removed, 1);
         assert!(list_trashed(&db).await.unwrap().is_empty());
     }

@@ -16,15 +16,23 @@ const { mockIpc } = vi.hoisted(() => ({
       set: vi.fn(),
       has: vi.fn(),
     },
+    app: {
+      storageUsage: vi.fn(),
+      cleanupOrphanMedia: vi.fn(),
+    },
+    trash: {
+      purgeAll: vi.fn(),
+    },
     notify: vi.fn(),
   },
 }));
 const { pickDirectoryPathMock } = vi.hoisted(() => ({
   pickDirectoryPathMock: vi.fn(),
 }));
-const { saveFileMock, shareFileMock } = vi.hoisted(() => ({
+const { saveFileMock, shareFileMock, confirmMock } = vi.hoisted(() => ({
   saveFileMock: vi.fn(),
   shareFileMock: vi.fn(),
+  confirmMock: vi.fn(),
 }));
 const mockUseContainerWidth = vi.hoisted(() => ({
   useContainerWidth: vi.fn(() => "wide"),
@@ -45,7 +53,11 @@ vi.mock("@/lib/mobileFiles", () => ({
 }));
 vi.mock("@/lib/useContainerWidth", () => mockUseContainerWidth);
 vi.mock("@/lib/platform", () => mockPlatform);
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: saveFileMock }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn(),
+  save: saveFileMock,
+  confirm: confirmMock,
+}));
 vi.mock("./WhisperModelsPanel", () => ({
   WhisperModelsPanel: () => <div>Whisper 下载</div>,
 }));
@@ -88,6 +100,20 @@ describe("SettingsPanel", () => {
     mockIpc.secrets.has.mockResolvedValue(false);
     pickDirectoryPathMock.mockResolvedValue("/data/user/0/dev.courseai.app.debug/storage");
     mockIpc.notify.mockReset().mockResolvedValue(undefined);
+    mockIpc.app.storageUsage.mockReset().mockResolvedValue({
+      total_bytes: 1_073_741_824,
+      video_bytes: 104_857_600,
+      derived_bytes: 209_715_200,
+      trash_video_bytes: 209_715_200,
+      trash_derived_bytes: 104_857_600,
+      trashed_count: 2,
+      other_bytes: 444_596_224,
+    });
+    mockIpc.trash.purgeAll.mockReset().mockResolvedValue(2);
+    mockIpc.app.cleanupOrphanMedia
+      .mockReset()
+      .mockResolvedValue({ deleted_files: 1, deleted_dirs: 1, freed_bytes: 1_048_576 });
+    confirmMock.mockReset().mockResolvedValue(true);
     saveFileMock.mockReset().mockResolvedValue("/tmp/CoursePilot-backup.db");
     shareFileMock.mockReset().mockResolvedValue(undefined);
     llmActionsMock.save.mockReset().mockResolvedValue(true);
@@ -155,7 +181,7 @@ describe("SettingsPanel", () => {
     expect(mockIpc.secrets.has).toHaveBeenCalledWith("volcengine_asr_access_token");
   });
 
-  it("saves the app-data storage root on Android", async () => {
+  it("saves the default storage root on desktop", async () => {
     render(<SettingsPanel onClose={() => undefined} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "存储" }));
@@ -170,6 +196,27 @@ describe("SettingsPanel", () => {
         "/data/user/0/dev.courseai.app.debug/storage",
       ),
     );
+  });
+
+  it("shows usage and hides the unusable root picker on mobile", async () => {
+    mockPlatform.isMobile.mockReturnValue(true);
+    render(<SettingsPanel onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "存储" }));
+
+    expect(await screen.findByText("存储占用")).toBeInTheDocument();
+    expect(await screen.findByText("1.0 GB")).toBeInTheDocument();
+    expect(screen.getByText("2 个视频")).toBeInTheDocument();
+    // 手机上的目录是应用私有的，系统文件管理器访问不到，也不该再给一个无效的选择器。
+    expect(screen.queryByRole("button", { name: "选择" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "清空回收站" }));
+    await waitFor(() => expect(confirmMock).toHaveBeenCalled());
+    await waitFor(() => expect(mockIpc.trash.purgeAll).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "清理" }));
+    await waitFor(() => expect(mockIpc.app.cleanupOrphanMedia).toHaveBeenCalled());
+    expect(await screen.findByText(/已清理 1.0 MB/)).toBeInTheDocument();
   });
 
   it("clears the storage root back to the default", async () => {
