@@ -292,6 +292,8 @@ pnpm test                    # frontend tests
 cd src-tauri && cargo test   # backend tests
 ```
 
+Want to contribute? See [CONTRIBUTING.md](CONTRIBUTING.md) (in Chinese; PRs in English are welcome too).
+
 ```text
 .
 ├── assets/screenshots/ # README screenshots

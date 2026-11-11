@@ -318,6 +318,8 @@ pnpm test               # 前端测试
 cd src-tauri && cargo test   # 后端测试
 ```
 
+想参与开发的话请先看 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 ```text
 .
 ├── assets/screenshots/ # README 截图
