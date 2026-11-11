@@ -399,6 +399,13 @@ pub async fn cmd_delete_quiz_set(
         .fetch_optional(&mut *tx)
         .await?;
     let Some(raw) = raw else { return Ok(()) };
+    // 这套题做成的复习卡也删掉：否则复习里还会出现题库里已经没有的题。
+    for stem in crate::pipeline::quiz::orphaned_stems(&raw, &set_id)? {
+        sqlx::query("DELETE FROM cards WHERE id=?")
+            .bind(crate::commands::srs::quiz_card_id(&video_id, &stem))
+            .execute(&mut *tx)
+            .await?;
+    }
     match crate::pipeline::quiz::remove_set(&raw, &set_id)? {
         Some(left) => {
             sqlx::query("UPDATE quizzes SET questions_json=? WHERE video_id=?")

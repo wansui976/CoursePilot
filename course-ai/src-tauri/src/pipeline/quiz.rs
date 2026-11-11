@@ -65,10 +65,7 @@ pub struct QuizPrefs {
 }
 
 async fn setting(db: &Db, key: &str) -> AppResult<Option<String>> {
-    Ok(sqlx::query_scalar("SELECT value FROM settings WHERE key=?")
-        .bind(key)
-        .fetch_optional(&db.pool)
-        .await?)
+    crate::commands::settings::get_setting(db, key).await
 }
 
 /// 读出这次出题的风格（传了就用传的，否则用设置里的默认）和要求（全局 + 视频所在课程）。
@@ -164,6 +161,22 @@ pub fn remove_set(existing: &str, set_id: &str) -> AppResult<Option<String>> {
         return Ok(None);
     }
     Ok(Some(serde_json::to_string(&kept)?))
+}
+
+/// 删掉这一套之后不再出现的题干（别的套里还有同样题干的不算）。删套时用它清掉对应的复习卡。
+pub fn orphaned_stems(existing: &str, set_id: &str) -> AppResult<Vec<String>> {
+    let items: Vec<Value> = serde_json::from_str(existing)?;
+    let stem = |item: &Value| item.get("stem").and_then(Value::as_str).map(str::to_string);
+    let kept: std::collections::HashSet<String> =
+        items.iter().filter(|item| set_key(item) != set_id).filter_map(stem).collect();
+    let mut gone: Vec<String> = items
+        .iter()
+        .filter(|item| set_key(item) == set_id)
+        .filter_map(stem)
+        .filter(|s| !kept.contains(s))
+        .collect();
+    gone.dedup();
+    Ok(gone)
 }
 
 /// 改错 / 简答题的判分结果。
@@ -328,6 +341,11 @@ mod tests {
         assert_eq!(items[0]["stem"], "b");
         let second = sets_of(&left)[0].clone();
         assert_eq!(remove_set(&left, &second).unwrap(), None, "删光了返回 None");
+        // 删一套时，只有别的套里没有的题干才算没了（复习卡跟着删）。
+        let dup = r#"[{"type":"judge","stem":"同一道","answer":true,"set_id":"a"},
+                     {"type":"judge","stem":"只在 b","answer":true,"set_id":"b"},
+                     {"type":"judge","stem":"同一道","answer":true,"set_id":"b"}]"#;
+        assert_eq!(orphaned_stems(dup, "b").unwrap(), vec!["只在 b".to_string()]);
         // 旧题库那批没有套别的题，用空串删。
         let legacy = r#"[{"type":"judge","stem":"旧","answer":true}]"#;
         assert_eq!(remove_set(legacy, "").unwrap(), None);
