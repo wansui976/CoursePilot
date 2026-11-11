@@ -53,8 +53,8 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         # 版本号由 tauri ios build 按 tauri.conf.json 写回 Info.plist；这里跟着当前版本，免得重新生成工程时倒退。
-        CFBundleShortVersionString: 0.3.9
-        CFBundleVersion: "0.3.9"
+        CFBundleShortVersionString: 0.4.0
+        CFBundleVersion: "0.4.0"
         NSMicrophoneUsageDescription: 费曼复述时录下你讲的话，转成文字后和课程内容对照
         NSLocalNetworkUsageDescription: 需要访问本地开发服务器以加载课程库界面
         NSBonjourServices:
