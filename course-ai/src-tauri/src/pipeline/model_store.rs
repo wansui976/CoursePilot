@@ -28,14 +28,26 @@ pub async fn models_root(db: &Db, app_data: &Path) -> AppResult<PathBuf> {
     Ok(root_from_setting(value.as_deref(), app_data))
 }
 
+/// 两个路径是不是同一个文件夹：大小写不同（Windows / APFS 不区分）、经过符号链接、
+/// `/tmp` 和 `/private/tmp` 这类写法都算同一个。不存在的路径按字面比。
+pub fn same_dir(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
 /// 新目录能不能用：要是绝对路径、能建出来、能写；也不能是旧目录里装模型的子目录本身，
 /// 否则搬过去等于把目录搬进自己里面。
 pub fn validate_new_root(new_root: &Path, old_root: &Path) -> AppResult<()> {
     if !new_root.is_absolute() {
         return Err(AppError::Config("请选择一个完整的文件夹路径".into()));
     }
+    let canonical_new = std::fs::canonicalize(new_root).unwrap_or_else(|_| new_root.to_path_buf());
     for sub in MODEL_SUBDIRS {
-        if new_root.starts_with(old_root.join(sub)) {
+        let inner = old_root.join(sub);
+        let canonical_inner = std::fs::canonicalize(&inner).unwrap_or(inner.clone());
+        if new_root.starts_with(&inner) || canonical_new.starts_with(&canonical_inner) {
             return Err(AppError::Config(
                 "不能选现在存放模型的那个文件夹里面，请换一个文件夹".into(),
             ));
@@ -97,8 +109,11 @@ fn files_under(dir: &Path) -> Vec<(PathBuf, u64)> {
 /// 把旧目录下的模型搬到新目录。`progress(已搬字节, 总字节)`。
 ///
 /// 同一块盘上直接改名，瞬间完成；跨盘（C: → D:）只能复制，几个 G 要一会儿，所以报进度。
-/// 复制是「全部复制成功再删旧的」：中途失败时旧目录原封不动，新目录里多出来的半截下次会被覆盖。
+/// 复制是「全部复制成功再删旧的」：所有子目录都复制完才删旧目录，中途失败时旧目录原封不动，
+/// 新目录里多出来的半截下次会被覆盖。
 /// 新目录里已经有同名同大小的文件就跳过（比如之前搬过一半，或者两边都下过同一个模型）。
+/// 新旧其实是同一个文件夹（换了个写法）时什么也不做——否则「跳过同样的文件、再删掉旧的」
+/// 删的就是新的。
 pub fn move_models(
     old_root: &Path,
     new_root: &Path,
@@ -107,12 +122,20 @@ pub fn move_models(
     let total = models_size(old_root);
     let mut copied = 0_u64;
     progress(0, total);
+    if same_dir(old_root, new_root) {
+        progress(total, total);
+        return Ok(());
+    }
+    let mut copied_dirs = Vec::new();
     for sub in MODEL_SUBDIRS {
         let from = old_root.join(sub);
         if !from.is_dir() {
             continue;
         }
         let to = new_root.join(sub);
+        if same_dir(&from, &to) {
+            continue;
+        }
         if !to.exists() {
             if let Some(parent) = to.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -137,6 +160,9 @@ pub fn move_models(
             copied += len;
             progress(copied, total);
         }
+        copied_dirs.push(from);
+    }
+    for from in copied_dirs {
         std::fs::remove_dir_all(&from)?;
     }
     progress(total, total);
@@ -240,6 +266,37 @@ mod tests {
         let legacy = legacy_dirs(root);
         assert_eq!(legacy, vec![root.join("whisper"), old_qwen]);
         assert_eq!(legacy.iter().map(|d| dir_size(d)).sum::<u64>(), 400);
+    }
+
+    #[test]
+    fn the_same_folder_written_differently_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("Models");
+        write(&real.join("asr/sense-voice/model.int8.onnx"), &[2; 300]);
+        // 经过一个符号链接指向同一个文件夹（大小写不同、/tmp 与 /private/tmp 同理）。
+        let alias = dir.path().join("models-link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        #[cfg(not(unix))]
+        let alias = real.clone();
+        assert!(same_dir(&real, &alias));
+        move_models(&real, &alias, |_, _| {}).unwrap();
+        assert!(real.join("asr/sense-voice/model.int8.onnx").is_file(), "模型不能被删掉");
+    }
+
+    #[test]
+    fn a_failed_copy_leaves_every_old_model_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("app");
+        let new = dir.path().join("elsewhere");
+        write(&old.join("whisper/ggml-base.bin"), &[1; 100]);
+        write(&old.join("asr/silero_vad.onnx"), &[3; 50]);
+        // 新目录里 asr 已经是个文件：whisper 复制完之后，asr 一定复制失败。
+        write(&new.join("whisper/placeholder"), b"x");
+        write(&new.join("asr"), b"not a dir");
+        assert!(move_models(&old, &new, |_, _| {}).is_err());
+        assert!(old.join("whisper/ggml-base.bin").is_file(), "已经复制过去的也还留在原处");
+        assert!(old.join("asr/silero_vad.onnx").is_file());
     }
 
     #[test]

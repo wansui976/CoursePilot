@@ -157,7 +157,7 @@ pub async fn cmd_set_models_dir(
         Some(path) => PathBuf::from(path),
         None => default.clone(),
     };
-    if new_root != old_root {
+    if !model_store::same_dir(&new_root, &old_root) {
         model_store::validate_new_root(&new_root, &old_root)?;
         let _keep_alive = crate::keep_alive::hold(Kind::ModelDownload, "move-models", "搬移识别模型");
         let (from, to, handle) = (old_root.clone(), new_root.clone(), app.clone());
