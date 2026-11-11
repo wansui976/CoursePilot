@@ -32,6 +32,8 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 ## ✨ Highlights
 
 - 🎬 **One lecture, a full study kit** — chapters, overview, illustrated notes, mind map, quiz, and knowledge points, all generated automatically, editable, and exportable.
+- ✍️ **Quizzes that make you think** — beyond recall: new situations the lecture never showed, find-the-error and short-answer questions. Choices are graded as you click, every option explains why it is right or wrong, and written answers are graded by the AI against the transcript. Write your own quiz rules.
+- 🗂️ **Folders inside a course** — multi-level chapters, drag to organize, move or delete in bulk, and search titles, notes and transcripts in the current folder.
 - 🖼️ **Slides included** — detects page turns, captures every slide, and OCRs it, so formulas and definitions that are shown but never spoken still reach the AI.
 - 💬 **Answers with sources** — ask about one video or a whole course; answers cite `[mm:ss]` timestamps and slide pages you can click to jump back.
 - 📝 **Take notes as you watch** — press `N` to jot a note (the video pauses and a timestamp is inserted), or select transcript text and send it to your notes. Notes hold images and one-click video frame captures, and keep a version history.
@@ -43,7 +45,16 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 - 🎙️ **Transcribe without a network** — built-in SenseVoice / Qwen3-ASR local recognition makes a quarter to a fifth of the errors of Whisper base on Chinese lectures, and runs on Mac, Windows, iPhone, iPad and Android.
 - 🔒 **Your data stays yours** — everything lives on your device and uses your own API keys (stored in the system keychain). It runs fully offline with local transcription and OCR.
 
-## 🆕 Recent updates (v0.3.9)
+## 🆕 Recent updates (v0.4.0)
+
+- **Quizzes rebuilt to make you think** — four styles: Recall, Apply (new situations not shown in class, judged with what you learned), Find the error, and Tell apart. Two new question types: find-the-error and short answer. Wrong options are misconceptions people really have, similar in length and wording to the right one, and every option explains why it is right or wrong. Single-choice and true/false are graded on click; written answers are graded by the AI against the transcript (correct / partly correct / not yet, with what you missed). "New set" adds questions and keeps the old ones; write rules for every course in **Settings → Study** and for one course under "New set".
+- **Course folders** — multi-level folders inside a course: create, rename, color, delete; drop a video on a folder to file it, or "Move to…" another course. The sidebar expands courses into a folder tree. Select in bulk (⌘/Ctrl-click, Shift-click) to move or delete, and search titles and notes in the current folder (optionally transcripts too, jumping straight to the moment). Courses in the sidebar can be reordered and colored.
+- **GPU for local recognition** — desktop Qwen3-ASR now runs on llama.cpp: Metal on Mac, Vulkan on Windows (NVIDIA, AMD and integrated GPUs), CPU when no GPU works. Move the model folder to another drive or delete single models. Whisper is gone (three to four times the errors of SenseVoice on Chinese lectures; Qwen3-ASR covers English and 30+ languages).
+- **Also** — a processing queue (set how many videos run at once; local recognition runs one at a time instead of fighting over GPU memory); local Ollama is detected and added in one click; deleting videos really frees space (the app's copies on phones, the app's downloads on desktop — your own originals stay); setting explanations moved behind ⓘ.
+- **Fixes** — processing stuck after slide OCR and impossible to stop; saving LLM settings before they loaded could overwrite them, and a saved key is now only sent to the address it was saved with.
+
+<details>
+<summary>v0.3.9</summary>
 
 - **New local speech recognition: SenseVoice / Qwen3-ASR** — on three hand-transcribed Chinese lecture recordings, SenseVoice gets 3.6% of words wrong and Qwen3-ASR 2.5%, against 13.4% for Whisper base, the old default. SenseVoice transcribes 10 minutes of audio in a dozen seconds. It is the new default (240 MB); Qwen3-ASR (940 MB) is more accurate and reads a hotword list (shared with Volcengine), so course terminology comes out right. Whisper large-v3-turbo is still there for English or heavily mixed lectures. Full comparison in [`docs/asr-benchmark`](course-ai/docs/asr-benchmark/REPORT.md).
 - **Local transcription on phones** — iPhone, iPad and Android can pick "Local recognition": offline and free. A 28-minute lecture takes two and a half minutes on an iPad. Devices without enough memory for Qwen3-ASR get a note in the model list and fall back to SenseVoice instead of crashing.
@@ -52,6 +63,8 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 - **Whisper stops looping and inventing text in silence** — a sentence repeated a dozen times, or "please like and subscribe" style phrases appearing in long pauses, are now detected and removed.
 - **Sturdier model downloads** — mirrors in China first; resumes where it stopped, switches source after 30 seconds without data, and verifies SHA-256 for every file. Phones ask before downloading over mobile data.
 - **Also** — Volcengine file transcription picks the right resource ID for the model version; on touch screens only the current transcript line shows the correction button; slides of AV1 videos on iPhone / iPad are captured from the transcoded file.
+
+</details>
 
 <details>
 <summary>v0.3.8 and earlier</summary>
@@ -77,6 +90,14 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 ## 📸 Screenshots
 
 <table>
+  <tr>
+    <td width="50%"><b>v0.4.0 · Quizzes graded on click, every option explained</b><br><img src="assets/screenshots/quiz-answered.webp" alt="An Apply-style question: the wrong pick marked red with a cross, the right one green with a check, a one-line reason under each option, then the explanation and a rewatch link"></td>
+    <td width="50%"><b>v0.4.0 · New set: pick a style, write this course's rules</b><br><img src="assets/screenshots/quiz-new-set.webp" alt="The new-set dialog with four styles, this course's quiz requirements and a replace switch"></td>
+  </tr>
+  <tr>
+    <td><b>v0.4.0 · Chapters as folders</b><br><img src="assets/screenshots/course-folders.webp" alt="A course page with two chapter folders whose covers are mosaics of their videos"></td>
+    <td><b>v0.4.0 · GPU-accelerated Qwen3-ASR, models on any drive</b><br><img src="assets/screenshots/gpu-asr.webp" alt="Speech recognition settings: processing queue, Qwen3-ASR, GPU switch, hotwords, model folder with change and delete"></td>
+  </tr>
   <tr>
     <td width="50%"><b>v0.3.9 · Local recognition: SenseVoice / Qwen3-ASR</b><br><img src="assets/screenshots/local-asr.webp" alt="Local recognition settings: Qwen3-ASR selected, course terms in the hotword box, and the model list with SenseVoice, Qwen3-ASR and Whisper sizes and install state"></td>
     <td width="50%"><b>v0.3.9 · Transcribe on the phone, even with the screen locked</b><br><img src="assets/screenshots/keep-alive.webp" alt="Left: the phone's processing queue transcribing locally with SenseVoice at 46%. Right: an Android notification showing processing progress at 41%"></td>
@@ -149,7 +170,7 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 
 ### Import & processing
 
-- **Course library** — organize videos into course folders with drag-and-drop ordering. Import local video or audio, Bilibili / YouTube / podcast links, or batch-import folders and playlists/collections.
+- **Course library** — organize videos into courses, with multi-level folders inside a course (drag to organize, colors, bulk move / delete, move across courses) and a folder tree in the sidebar; search titles, notes and transcripts in the current folder. Import local video or audio, Bilibili / YouTube / podcast links, or batch-import folders and playlists/collections.
 - **Bilibili app cache** — point "Import a whole folder" at the Bilibili desktop client's cache or a phone's `download` folder; every part is listed in order and remuxed into an mp4 (no re-encoding) without touching the cache.
 - **Background downloads** — Bilibili / web videos download in the background; closing the dialog or switching pages doesn't stop them. The processing queue shows percentage and speed and lets you cancel or retry. When Bilibili's CDN cuts the stream mid-download, it retries one quality step lower; if your login cookies have expired it says so, and re-importing cookies resumes the download.
 - **Followed collections** — follow a playlist while importing it; new videos are imported and processed automatically (up to 3 per check, preferring built-in subtitles). Manage them under “Subscriptions” in the course menu.
@@ -160,6 +181,7 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 ### AI study materials
 
 - **One-click generation** — chapters, overview, notes, quizzes, and mind maps, generated from the transcript plus slide text. All editable.
+- **Quizzes** — four styles (Recall / Apply / Find the error / Tell apart) and five question types (single, multiple, true/false, find-the-error, short answer). Choices are graded on click with per-option explanations; find-the-error and short answers are graded by the AI against the transcript. "New set" adds more, and quiz rules can be written in Settings (all courses) and the quiz panel (this course).
 - **Knowledge points** — extracted from every video, with duplicates and synonyms merged into a course-wide list. Each point gets an explanation, AI Q&A, progress tracking, and a shortcut to add flashcards.
 - **Full-text search** — searches transcripts and slide text across videos and jumps straight to the moment. Chinese search uses bigram tokenization weighted by rarity, so natural-language questions match too.
 - **Subtitle translation** — your LLM translates subtitles into Chinese, English, Japanese or Korean, aligned line by line; after edits only the changed lines are re-translated.

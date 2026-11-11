@@ -1319,7 +1319,7 @@
         <div class="aurora" aria-hidden="true"></div>
         <div class="tile__inner" style="position: relative; z-index: 1;">
           <a class="new-pill" href="#whats-new" data-animate="hero" style="--motion-delay: 40ms" data-umami-event="hero-whats-new">
-            <span class="new-pill__tag">v0.3.9</span>不联网也能转写：SenseVoice / Qwen3-ASR，手机也能跑
+            <span class="new-pill__tag">v0.4.0</span>练习题逼你动脑、课程分文件夹、本地识别用上显卡
           </a>
           <p class="eyebrow" data-animate="hero" style="--motion-delay: 80ms">CoursePilot</p>
           <h1 class="hero-display" data-animate="hero" style="--motion-delay: 160ms">把课程视频变成<br />真正记得住的东西。</h1>
@@ -1340,8 +1340,68 @@
         </div>
       </section>
 
-      <!-- ============ v0.3.9 新功能 ============ -->
+      <!-- ============ v0.4.0 新功能 ============ -->
       <section class="tile tile--light" id="whats-new">
+        <div class="tile__inner">
+          <p class="eyebrow" data-animate>v0.4.0 新功能</p>
+          <h2 class="display-lg" data-animate>不只考记性，还要会用。</h2>
+          <div class="showcase" data-showcase data-animate>
+            <div class="showcase__tabs" role="tablist" aria-label="v0.4.0 新功能">
+              <button class="showcase__tab" type="button" role="tab" id="tab-quiz" aria-controls="panel-quiz" aria-selected="true">练习题<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-quiz-set" aria-controls="panel-quiz-set" aria-selected="false" tabindex="-1">再出一套<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-folders" aria-controls="panel-folders" aria-selected="false" tabindex="-1">课程文件夹<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-gpu" aria-controls="panel-gpu" aria-selected="false" tabindex="-1">显卡加速<span class="showcase__bar"><i></i></span></button>
+            </div>
+            <div class="showcase__panels">
+              <figure class="showcase__panel is-active" id="panel-quiz" role="tabpanel" aria-labelledby="tab-quiz">
+                <figcaption class="showcase__copy">
+                  <h3>点了就判，每个选项都讲清错在哪。</h3>
+                  <p>错误选项是学这部分时真会犯的误解，不再一眼就能排除。单选、判断点了就判；找错改错、简答写完交给 AI 对照讲稿批改，告诉你答对了几成、漏了什么。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/quiz-answered.webp" width="1600" height="1000" loading="lazy" alt="理解应用风格的单选题：选错的一项标红打叉、正确项标绿打勾，每个选项下面一句为什么对或错，下方是解析和回看时间" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-quiz-set" role="tabpanel" aria-labelledby="tab-quiz-set">
+                <figcaption class="showcase__copy">
+                  <h3>出什么题，你说了算。</h3>
+                  <p>四种风格：记忆巩固、理解应用（课上没出现过的新情境）、找错改错、易混辨析。「再出一套」追加新题，旧题留着；所有课程通用的要求写在设置里，只对这门课的写在这里。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/quiz-new-set.webp" width="1600" height="1000" loading="lazy" alt="出一套新题对话框：四种出题风格、本课程的出题要求和替换现有题目开关" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-folders" role="tabpanel" aria-labelledby="tab-folders">
+                <figcaption class="showcase__copy">
+                  <h3>一门课，按章节整理。</h3>
+                  <p>课程里建多级文件夹，拖进去就整理好；⌘ / Shift 批量选，一次移动或删除；在当前章节里搜标题、笔记，打开后还能搜文稿、直接跳到那一刻。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/course-folders.webp" width="1600" height="1000" loading="lazy" alt="课程页里第1章、第2章两个文件夹卡片，封面是里面视频的拼图" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-gpu" role="tabpanel" aria-labelledby="tab-gpu">
+                <figcaption class="showcase__copy">
+                  <h3>Qwen3-ASR 用上显卡。</h3>
+                  <p>电脑上的 Qwen3-ASR 换成 llama.cpp：Mac 走 Metal，Windows 走 Vulkan，没有能用的显卡自动改用 CPU。模型可以放到别的盘、单独删除；处理排队，本地识别一次只跑一个。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/gpu-asr.webp" width="1600" height="1000" loading="lazy" alt="语音识别设置：同时处理的视频数、Qwen3-ASR、GPU 加速开关、热词，以及模型存放位置、更改位置和删除" />
+                </div>
+              </figure>
+            </div>
+            <div class="showcase__more">
+              <span>批量选择、课内搜索</span>
+              <span>侧栏文件夹树、课程标色</span>
+              <span>检测本机 Ollama</span>
+              <span>删除视频真正释放空间</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ v0.3.9 新功能 ============ -->
+      <section class="tile tile--parchment" id="v039">
         <div class="tile__inner">
           <p class="eyebrow" data-animate>v0.3.9 新功能</p>
           <h2 class="display-lg" data-animate>不联网，也能把课听写下来。</h2>
@@ -1391,70 +1451,10 @@
               </figure>
             </div>
             <div class="showcase__more">
-              <span>Whisper 不再复读、不在静音里编字</span>
+              <span>阿里云识别长课不再受限</span>
               <span>模型下载断点续传、自动换源</span>
               <span>用流量下载前先确认</span>
               <span>火山识别自动适配资源 ID</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ============ v0.3.8 新功能 ============ -->
-      <section class="tile tile--parchment" id="v038">
-        <div class="tile__inner">
-          <p class="eyebrow" data-animate>v0.3.8 新功能</p>
-          <h2 class="display-lg" data-animate>不只看过，还要讲得出来。</h2>
-          <div class="showcase" data-showcase data-animate>
-            <div class="showcase__tabs" role="tablist" aria-label="v0.3.8 新功能">
-              <button class="showcase__tab" type="button" role="tab" id="tab-feynman" aria-controls="panel-feynman" aria-selected="true">费曼复述<span class="showcase__bar"><i></i></span></button>
-              <button class="showcase__tab" type="button" role="tab" id="tab-guided" aria-controls="panel-guided" aria-selected="false" tabindex="-1">引导模式<span class="showcase__bar"><i></i></span></button>
-              <button class="showcase__tab" type="button" role="tab" id="tab-find" aria-controls="panel-find" aria-selected="false" tabindex="-1">拍题找讲解<span class="showcase__bar"><i></i></span></button>
-              <button class="showcase__tab" type="button" role="tab" id="tab-highlights" aria-controls="panel-highlights" aria-selected="false" tabindex="-1">精华版<span class="showcase__bar"><i></i></span></button>
-            </div>
-            <div class="showcase__panels">
-              <figure class="showcase__panel is-active" id="panel-feynman" role="tabpanel" aria-labelledby="tab-feynman">
-                <figcaption class="showcase__copy">
-                  <h3>讲一遍，才知道漏了什么。</h3>
-                  <p>选一章，对着麦克风用自己的话讲（也可以打字）。AI 只对照课程原文，标出讲到、漏掉和讲错的地方，每一条都能一键回看原片；漏掉的点直接做成复习卡。</p>
-                </figcaption>
-                <div class="showcase__shot" data-zoom>
-                  <img src="./screenshots/feynman.webp" width="1600" height="1000" loading="lazy" alt="费曼复述结果：讲到 2/3 个要点，讲对的原话标绿、讲错的划波浪线，下面列出讲错的正确说法和漏掉的要点，各带回看时间" />
-                </div>
-              </figure>
-              <figure class="showcase__panel" id="panel-guided" role="tabpanel" aria-labelledby="tab-guided">
-                <figcaption class="showcase__copy">
-                  <h3>不给答案，陪你想明白。</h3>
-                  <p>AI 助手打开「引导」后不直接揭晓，而是一步步反问：有可点的选项、逐级提示、折叠的答案和步骤进度，想通之后再给总结。文稿里选中一段也能「引导我理解」。</p>
-                </figcaption>
-                <div class="showcase__shot" data-zoom>
-                  <img src="./screenshots/guided.webp" width="1600" height="1000" loading="lazy" alt="引导模式：AI 不直接给答案，而是反问一步，下方有步骤进度、可点的选项、逐级提示和揭晓答案" />
-                </div>
-              </figure>
-              <figure class="showcase__panel" id="panel-find" role="tabpanel" aria-labelledby="tab-find">
-                <figcaption class="showcase__copy">
-                  <h3>拍一道题，找到老师讲它的那几段。</h3>
-                  <p>手机拍照、粘贴截图或拖进来，框出那道题，就列出这门课里讲它的地方：画面对上课件、文字命中字幕、涉及哪些知识点。可以「依次播放这几段」，也能交给引导模式一起解。</p>
-                </figcaption>
-                <div class="showcase__shot" data-zoom>
-                  <img src="./screenshots/find-explanation.webp" width="1600" height="1000" loading="lazy" alt="找讲解结果：依次播放这 2 段、涉及的知识点，以及按「最相关 / 可能相关」排好的讲解片段" />
-                </div>
-              </figure>
-              <figure class="showcase__panel" id="panel-highlights" role="tabpanel" aria-labelledby="tab-highlights">
-                <figcaption class="showcase__copy">
-                  <h3>水分段，快放或者跳过。</h3>
-                  <p>AI 标出课务通知、闲聊和重复讲解，播放设置里选快放或跳过，轻 / 中 / 激进三档。进度条上画出斜纹，标题旁告诉你能省几分钟，跳过了也能一键撤回。</p>
-                </figcaption>
-                <div class="showcase__shot" data-zoom>
-                  <img src="./screenshots/highlights.webp" width="1600" height="1000" loading="lazy" alt="播放设置里的精华版：水分段 正常 / 快放 / 跳过、力度 轻 / 中 / 激进，标题旁显示能省 3 分钟，进度条上画出斜纹" />
-                </div>
-              </figure>
-            </div>
-            <div class="showcase__more">
-              <span>五种大模型协议、11 个服务商预设</span>
-              <span>AI 助手可切换模型、粘贴截图提问</span>
-              <span>后台任务随时可查</span>
-              <span>紧凑密度与中文排版</span>
             </div>
           </div>
         </div>
@@ -1530,7 +1530,7 @@
             <div class="workflow__step" data-animate style="--motion-delay: 120ms">
               <span>02</span>
               <strong>转写</strong>
-              <p>本地 SenseVoice / Qwen3-ASR / Whisper，或火山、阿里云 DashScope。</p>
+              <p>本地 SenseVoice / Qwen3-ASR（电脑上能用显卡），或火山、阿里云 DashScope。</p>
             </div>
             <div class="workflow__step" data-animate style="--motion-delay: 180ms">
               <span>03</span>
@@ -1881,7 +1881,7 @@
       <section class="tile tile--parchment" id="download">
         <div class="tile__inner">
           <h2 class="display-lg" data-animate>下载，拖进第一节课。</h2>
-          <p class="lead" data-animate>桌面版已内置 ffmpeg、whisper.cpp、sherpa-onnx 等依赖，装好就能用；手机版也能本地转写，OCR 走云端。</p>
+          <p class="lead" data-animate>桌面版已内置 ffmpeg、llama.cpp、sherpa-onnx 等依赖，装好就能用；手机版也能本地转写，OCR 走云端。</p>
           <div class="cta-row" data-animate>
             <a class="btn-pill" href="https://github.com/wansui976/CoursePilot/releases/latest" data-primary-download data-magnetic data-umami-event="download" data-umami-event-platform="auto">下载最新版本</a>
             <a class="btn-pill btn-dark-link" href="https://github.com/wansui976/CoursePilot" data-magnetic data-umami-event="github" data-umami-event-from="download">GitHub 源码</a>
