@@ -311,7 +311,8 @@ pub async fn import_url_with(
     } else {
         "url"
     };
-    sqlx::query("UPDATE videos SET source_type=?, source_uri=? WHERE id=?")
+    // app_owned_file：这份文件是应用在这台设备上下载的，永久删除时可以一并删掉。
+    sqlx::query("UPDATE videos SET source_type=?, source_uri=?, app_owned_file=1 WHERE id=?")
         .bind(source_type)
         .bind(&url)
         .bind(&video.id)

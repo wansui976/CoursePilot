@@ -397,7 +397,8 @@ pub async fn relink_course_root(
     for (id, outcome) in &outcomes {
         match outcome {
             MatchOutcome::Relinked(path) => {
-                sqlx::query("UPDATE videos SET file_path=? WHERE id=?")
+                // 指向的是用户自己文件夹里的文件：不再算应用下载的，永久删除时不能删它。
+                sqlx::query("UPDATE videos SET file_path=?, app_owned_file=0 WHERE id=?")
                     .bind(path.to_string_lossy().to_string())
                     .bind(id)
                     .execute(&mut *tx)

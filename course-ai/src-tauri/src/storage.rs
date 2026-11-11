@@ -56,7 +56,7 @@ pub fn app_usage_roots(app_data: &Path) -> Vec<PathBuf> {
 ///
 /// Android 的 app data 就是包根，`picked` 在它下面；iOS 的 `picked` 与 app data
 /// 同级，需要单独加进来。统计可以宽，删除必须窄——不把整个包目录交给删除逻辑。
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn owned_media_roots(app: &tauri::AppHandle) -> crate::error::AppResult<Vec<PathBuf>> {
     use tauri::Manager;
 
@@ -67,24 +67,6 @@ pub fn owned_media_roots(app: &tauri::AppHandle) -> crate::error::AppResult<Vec<
     let mut roots = vec![app_data.clone()];
     // 不同 Tauri/系统版本下 app data 可能是包根，也可能是 `<pkg>/files`；
     // 两种都把同级的 picked 带上（不存在时删除逻辑自然不会命中）。
-    if let Some(parent) = app_data.parent() {
-        let picked = parent.join("picked");
-        if picked != app_data {
-            roots.push(picked);
-        }
-    }
-    Ok(roots)
-}
-
-#[cfg(target_os = "ios")]
-pub fn owned_media_roots(app: &tauri::AppHandle) -> crate::error::AppResult<Vec<PathBuf>> {
-    use tauri::Manager;
-
-    let app_data = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| crate::error::AppError::Config(format!("app_data_dir: {error}")))?;
-    let mut roots = vec![app_data.clone()];
     if let Some(parent) = app_data.parent() {
         let picked = parent.join("picked");
         if picked != app_data {
