@@ -202,6 +202,19 @@ async fn run_local_model(
                 .map_err(|_| AppError::Pipeline("本地识别队列已关闭".into()))?
         }
     };
+    run_local_model_now(models_root, model, audio, language, hotwords, use_gpu, progress).await
+}
+
+/// 不排队，直接识别（调用方已经拿到名额，或者确定不会和别的识别抢资源）。
+async fn run_local_model_now(
+    models_root: &Path,
+    model: &LocalModel,
+    audio: &Path,
+    language: &str,
+    hotwords: &[String],
+    use_gpu: bool,
+    progress: ai::Progress<'_>,
+) -> AppResult<asr::WhisperJson> {
     match model {
         LocalModel::Sherpa(model) if model.kind == local_asr::SherpaKind::Qwen3AsrGguf => {
             let job = llama_asr::LlamaJob {
@@ -285,8 +298,22 @@ pub async fn transcribe_clip(
             })?;
             let hotwords = split_terms(&setting(db, "volcengine_asr_hotwords").await?.unwrap_or_default());
             let use_gpu = asr_use_gpu(db).await;
-            run_local_model(&app_data, &model, &audio_path, &lang, &hotwords, use_gpu, None, None)
-                .await?
+            // 有视频正在本地识别时，一两分钟的录音不排在整节课后面干等：装了 SenseVoice 就用它
+            // 马上转——它跑在 CPU 上、几秒钟，不去抢正在识别的显卡；没装才排队。
+            let busy = LOCAL_ASR.available_permits() == 0;
+            let quick = busy
+                .then(|| select_local_model(&app_data, DEFAULT_LOCAL_MODEL, &lang))
+                .flatten()
+                .filter(|m| matches!(m, LocalModel::Sherpa(s) if s.kind == local_asr::SherpaKind::SenseVoice));
+            match quick {
+                Some(quick) => {
+                    run_local_model_now(&app_data, &quick, &audio_path, &lang, &hotwords, false, None).await?
+                }
+                None => {
+                    run_local_model(&app_data, &model, &audio_path, &lang, &hotwords, use_gpu, None, None)
+                        .await?
+                }
+            }
         }
         AsrBackend::Volcengine => {
             let app_id = setting(db, "volcengine_asr_app_id").await?.unwrap_or_default();
@@ -509,6 +536,9 @@ async fn run_all(
             },
         )
         .await;
+    // 名额由主流程和课件支线共同持有：识别失败等提前返回时，课件支线还在跑（OCR 很吃资源），
+    // 名额要等它也收口才让出去，否则失败的视频会一个接一个放进来，OCR 全部挤在一起跑。
+    let slot = std::sync::Arc::new(ticket);
 
     sqlx::query("UPDATE videos SET processed_status='processing' WHERE id=?")
         .bind(&video_id)
@@ -525,9 +555,11 @@ async fn run_all(
         let db = db.clone();
         let video_id = video_id.clone();
         let jobs_list = jobs_list.clone();
+        let slot = slot.clone();
         let task = tauri::async_runtime::spawn(async move {
             run_slides_stage(&app, &db, &video_id, &jobs_list, &slides_cancel).await;
             let _ = slides_done.send(());
+            drop(slot);
         });
         // 取消时要能直接掐掉这条支线：它是单独起的任务，中止主任务不会连带它。
         *slides_abort.lock().unwrap() = Some(task.inner().abort_handle());
@@ -2227,6 +2259,21 @@ mod tests {
         // 上限调大，不用等别人做完也能进。
         assert_eq!(third.try_admit(2), None);
         assert_eq!(gate.state.lock().unwrap().running, 2);
+    }
+
+    #[tokio::test]
+    async fn a_shared_slot_is_freed_only_when_the_slides_branch_lets_go_too() {
+        let gate = ProcessingGate::default();
+        let mut first = gate.join();
+        assert_eq!(first.try_admit(1), None);
+        let slot = std::sync::Arc::new(first);
+        let slides = slot.clone();
+        let mut next = gate.join();
+        // 主流程提前失败返回了，课件支线还拿着名额：后面的视频不能进来。
+        drop(slot);
+        assert_eq!(next.try_admit(1), Some(0));
+        drop(slides);
+        assert_eq!(next.try_admit(1), None);
     }
 
     #[tokio::test]
