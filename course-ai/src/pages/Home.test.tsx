@@ -1452,6 +1452,19 @@ describe("Home", () => {
       await waitFor(() => expect(screen.queryByRole("toolbar", { name: "批量操作" })).not.toBeInTheDocument());
     });
 
+    it("leaves selection mode when a search starts, so select-all cannot reach hidden videos", async () => {
+      await renderHome();
+      fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+      await screen.findByRole("button", { name: "打开文件夹 第1章" });
+      fireEvent.click(screen.getByRole("button", { name: "选择" }));
+      expect(screen.getByRole("toolbar", { name: "批量操作" })).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText("搜索本课程视频"), { target: { value: "申论" } });
+      await waitFor(() => expect(screen.queryByRole("toolbar", { name: "批量操作" })).not.toBeInTheDocument());
+      // 清掉搜索也不会回到之前的选择。
+      fireEvent.change(screen.getByLabelText("搜索本课程视频"), { target: { value: "" } });
+      expect(screen.queryByText(/已选/)).not.toBeInTheDocument();
+    });
+
     it("deletes a selection once, without trashing a video twice", async () => {
       confirmMock.mockResolvedValue(true);
       mockIpc.folders.delete.mockResolvedValue(undefined);

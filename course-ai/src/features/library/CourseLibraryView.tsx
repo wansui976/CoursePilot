@@ -465,6 +465,11 @@ export function CourseLibraryView({
   useEffect(() => {
     exitSelection();
   }, [exitSelection, selectedCourseId, currentFolderId]);
+  // 搜索时屏幕上是搜索结果（当前这一层及子文件夹），不是可勾选的卡片：留在选择模式的话，
+  // 「全选」会按标题选中整门课里看不见的视频，一删就进了回收站。开始搜索就退出选择。
+  useEffect(() => {
+    if (normalizedQuery) exitSelection();
+  }, [exitSelection, normalizedQuery]);
   useEffect(() => {
     if (!selecting) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -1656,7 +1661,7 @@ export function CourseLibraryView({
               />
             )}
         </div>
-        {selecting && (
+        {selecting && !normalizedQuery && (
           <div className="ca-select-bar" role="toolbar" aria-label={t("library.selectionActions")}>
             <span className="ca-select-count" aria-live="polite">
               {t("library.selectedCount", { count: selectedItems.length })}
