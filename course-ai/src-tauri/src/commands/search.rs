@@ -138,18 +138,10 @@ fn contains_ascii_ci(text: &str, query: &str) -> bool {
 
 /// 文件夹自己加上它下面所有层级的文件夹（parent 已由 list_folders 归一化）。
 fn subtree(folders: &[Folder], root: &str) -> HashSet<String> {
-    let mut out = HashSet::from([root.to_string()]);
-    loop {
-        let before = out.len();
-        for folder in folders {
-            if folder.parent_id.as_ref().is_some_and(|p| out.contains(p)) {
-                out.insert(folder.id.clone());
-            }
-        }
-        if out.len() == before {
-            return out;
-        }
-    }
+    crate::commands::folders::subtree_of(
+        root,
+        folders.iter().map(|folder| (folder.id.as_str(), folder.parent_id.as_deref())),
+    )
 }
 
 pub async fn search_course(

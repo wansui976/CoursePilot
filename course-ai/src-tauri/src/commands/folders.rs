@@ -181,18 +181,7 @@ impl CourseTree {
 
     /// 文件夹自己加上它下面所有层级的文件夹。
     fn subtree_folders(&self, root: &str) -> HashSet<String> {
-        let mut out = HashSet::from([root.to_string()]);
-        loop {
-            let before = out.len();
-            for (id, parent) in &self.folder_parent {
-                if parent.as_ref().is_some_and(|p| out.contains(p)) {
-                    out.insert(id.clone());
-                }
-            }
-            if out.len() == before {
-                return out;
-            }
-        }
+        subtree_of(root, self.folder_parent.iter().map(|(id, parent)| (id.as_str(), parent.as_deref())))
     }
 
     /// 先序编号：`keys` 覆盖兄弟之间的排序键（移动 / 拖动排序时用）。
@@ -530,8 +519,79 @@ pub async fn move_items(
         }
     }
     renumber_course(&mut tx, target_course, &keys, now).await?;
+    let moved_videos: Vec<&str> = relocated
+        .iter()
+        .filter(|(item, _)| item.kind == ItemKind::Video)
+        .map(|(item, _)| item.id.as_str())
+        .collect();
+    if sources.iter().any(|source| source != target_course) {
+        detach_course_knowledge(&mut tx, target_course, &sources, &moved_videos).await?;
+    }
     tx.commit().await?;
     Ok(())
+}
+
+/// 视频换了课程：按课程归属的学习数据跟着收拾。
+///
+/// - 复习卡：查询按视频现在的课程归类（见 srs），这里把本机的 course_id 也改过来；
+/// - 知识点是按课程建的：移走的视频从原课程的知识点里摘掉，摘空的知识点删掉；
+///   新课程要重新分析知识点才会收进它们；
+/// - 两边的课程知识概览都作废，下次打开时重新生成。
+async fn detach_course_knowledge(
+    tx: &mut sqlx::SqliteConnection,
+    target_course: &str,
+    sources: &[String],
+    moved_videos: &[&str],
+) -> AppResult<()> {
+    for video_id in moved_videos {
+        sqlx::query("UPDATE cards SET course_id=? WHERE video_id=? AND course_id IS NOT ?")
+            .bind(target_course)
+            .bind(video_id)
+            .bind(target_course)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "DELETE FROM concept_occurrences WHERE video_id=?
+             AND concept_id IN (SELECT id FROM concepts WHERE course_id <> ?)",
+        )
+        .bind(video_id)
+        .bind(target_course)
+        .execute(&mut *tx)
+        .await?;
+    }
+    for course in sources.iter().filter(|source| *source != target_course) {
+        sqlx::query(
+            "DELETE FROM concepts WHERE course_id=?
+             AND NOT EXISTS (SELECT 1 FROM concept_occurrences o WHERE o.concept_id = concepts.id)",
+        )
+        .bind(course)
+        .execute(&mut *tx)
+        .await?;
+    }
+    for course in sources.iter().map(String::as_str).chain([target_course]) {
+        sqlx::query("DELETE FROM course_knowledge_overviews WHERE course_id=?")
+            .bind(course)
+            .execute(&mut *tx)
+            .await?;
+    }
+    Ok(())
+}
+
+/// 文件夹自己加上它下面所有层级的文件夹。`edges` 是（文件夹，上级）；成环的部分不会无限展开。
+pub(crate) fn subtree_of<'a>(root: &str, edges: impl Iterator<Item = (&'a str, Option<&'a str>)>) -> HashSet<String> {
+    let edges: Vec<(&str, Option<&str>)> = edges.collect();
+    let mut out = HashSet::from([root.to_string()]);
+    loop {
+        let before = out.len();
+        for (id, parent) in &edges {
+            if parent.is_some_and(|p| out.contains(p)) {
+                out.insert((*id).to_string());
+            }
+        }
+        if out.len() == before {
+            return out;
+        }
+    }
 }
 
 /// 拖动排序：`ordered` 必须正好是该层（None = 根目录）现有的全部子项。
@@ -859,6 +919,52 @@ mod tests {
             ["already", "ch/", "  sub/", "    b", "  a"]
         );
         let _ = keep;
+    }
+
+    #[tokio::test]
+    async fn moving_a_video_to_another_course_takes_its_review_and_concepts_along() {
+        let db = fresh_db().await;
+        let src = create_course(&db, "src".into(), "/s".into()).await.unwrap().id;
+        let dst = create_course(&db, "dst".into(), "/d".into()).await.unwrap().id;
+        let moved = video(&db, &src, "moved").await;
+        let stays = video(&db, &src, "stays").await;
+        for (id, vid) in [("card-moved", &moved), ("card-stays", &stays)] {
+            sqlx::query("INSERT INTO cards(id,video_id,course_id,kind,front,back,created_at) VALUES (?,?,?,'quiz','f','b',0)")
+                .bind(id).bind(vid).bind(&src).execute(&db.pool).await.unwrap();
+        }
+        // 「梯度」两个视频都讲到；「卷积」只有要移走的视频讲到。
+        for (cid, name) in [("k-grad", "梯度"), ("k-conv", "卷积")] {
+            sqlx::query("INSERT INTO concepts(id,course_id,name) VALUES (?,?,?)")
+                .bind(cid).bind(&src).bind(name).execute(&db.pool).await.unwrap();
+        }
+        for (cid, vid) in [("k-grad", &moved), ("k-grad", &stays), ("k-conv", &moved)] {
+            sqlx::query("INSERT INTO concept_occurrences(concept_id,video_id,start_ms) VALUES (?,?,0)")
+                .bind(cid).bind(vid).execute(&db.pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO course_knowledge_overviews(course_id,content_json,source_fingerprint,generated_at) VALUES (?,'{}','x',0)")
+            .bind(&src).execute(&db.pool).await.unwrap();
+
+        move_items(&db, &dst, None, vec![v(&moved)]).await.unwrap();
+
+        let card_course: String = sqlx::query_scalar("SELECT course_id FROM cards WHERE id='card-moved'")
+            .fetch_one(&db.pool).await.unwrap();
+        assert_eq!(card_course, dst);
+        let concepts: Vec<String> = sqlx::query_scalar("SELECT name FROM concepts ORDER BY name")
+            .fetch_all(&db.pool).await.unwrap();
+        assert_eq!(concepts, ["梯度"], "只剩移走的视频讲到的知识点删掉了");
+        let occ: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM concept_occurrences WHERE video_id=?")
+            .bind(&moved).fetch_one(&db.pool).await.unwrap();
+        assert_eq!(occ, 0);
+        let overviews: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM course_knowledge_overviews")
+            .fetch_one(&db.pool).await.unwrap();
+        assert_eq!(overviews, 0);
+        // 别的设备同步来的卡片还带着原课程：复习队列仍按视频现在的课程归类。
+        sqlx::query("UPDATE cards SET course_id=? WHERE id='card-moved'").bind(&src).execute(&db.pool).await.unwrap();
+        sqlx::query("INSERT INTO card_schedule(card_id,due_at,ease,interval_days,reps,lapses) VALUES ('card-moved',0,0,0,0,0)")
+            .execute(&db.pool).await.unwrap();
+        let due = crate::commands::srs::due_cards_for_course(&db, 1, &dst, 10).await.unwrap();
+        assert_eq!(due.len(), 1);
+        assert!(crate::commands::srs::due_cards_for_course(&db, 1, &src, 10).await.unwrap().is_empty());
     }
 
     #[tokio::test]

@@ -353,6 +353,9 @@ async fn course_occurrences_by_video(db: &Db, course_id: &str) -> AppResult<OccB
 }
 
 /// 某课程「每个概念的待复习卡片数」，按归类规则现算。只返回 due>0 的概念。
+///
+/// 卡片属于哪门课以它所在视频**现在**的课程为准：视频可以移到别的课程，而卡片按 id
+/// 同步、到了对端不会更新 course_id，靠卡片自己那一列会让它留在原课程的复习里。
 pub async fn due_counts_by_concept(
     db: &Db,
     course_id: &str,
@@ -365,7 +368,7 @@ pub async fn due_counts_by_concept(
          FROM cards c JOIN card_schedule s ON s.card_id = c.id
          LEFT JOIN videos v ON v.id = c.video_id
          LEFT JOIN courses course ON course.id = COALESCE(v.course_id, c.course_id)
-         WHERE c.course_id = ? AND s.due_at <= ?
+         WHERE COALESCE(v.course_id, c.course_id) = ? AND s.due_at <= ?
            AND (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
            AND (COALESCE(v.course_id, c.course_id) IS NULL
                 OR (course.id IS NOT NULL AND course.deleted_at IS NULL))",
@@ -403,7 +406,7 @@ pub async fn due_cards_for_concept(
          LEFT JOIN quizzes q ON q.video_id = c.video_id
          LEFT JOIN videos v ON v.id = c.video_id
          LEFT JOIN courses course ON course.id = COALESCE(v.course_id, c.course_id)
-         WHERE c.course_id = ? AND s.due_at <= ?
+         WHERE COALESCE(v.course_id, c.course_id) = ? AND s.due_at <= ?
            AND (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
            AND (COALESCE(v.course_id, c.course_id) IS NULL
                 OR (course.id IS NOT NULL AND course.deleted_at IS NULL))
@@ -591,7 +594,7 @@ fn string_array(value: &Value) -> Option<Vec<String>> {
 /// 于是它继承了上一道题的到期时间、复习次数和 FSRS 稳定度——你会看到一道从没见过
 /// 的题被排到三个月后，或者一道刚出的新题显示「你已经很熟了」。按内容编 id 之后，
 /// 题目没变就还是同一张卡（该保留的排期保留），题目变了就是新卡（立即到期）。
-fn quiz_card_id(video_id: &str, stem: &str) -> String {
+pub(crate) fn quiz_card_id(video_id: &str, stem: &str) -> String {
     // 只做空白归一：换行/缩进的微调不该让一道题变成新卡。
     let normalized: String = stem.split_whitespace().collect::<Vec<_>>().join(" ");
     let digest = format!("{:x}", Sha256::digest(normalized.as_bytes()));
