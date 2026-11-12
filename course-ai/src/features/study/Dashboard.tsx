@@ -35,6 +35,7 @@ import {
   readDailyGoalMin,
   relativeDay,
   reviewTotals,
+  recentStudiedDays,
   weeklyMs,
   writeDailyGoalMin,
   type HeatCell,
@@ -340,6 +341,7 @@ export function Dashboard({
     [daily, today],
   );
   const week = useMemo(() => weeklyMs(daily, today), [daily, today]);
+  const lastWeekDays = useMemo(() => recentStudiedDays(daily, today, 7), [daily, today]);
   const heatmap = useMemo(
     () => heatmapGrid(daily, today, heatmapWeeks),
     [daily, heatmapWeeks, today],
@@ -644,8 +646,18 @@ export function Dashboard({
               <div className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-[var(--text-strong)]">
                 {formatDuration(week)}
               </div>
-              <div className="mt-1 text-xs leading-tight text-[var(--text-muted)]">
+              <div className="mt-1 text-xs text-[var(--text-muted)]">
                 {t("dashboard.weekGoal", { duration: formatDuration(weekGoalMs), percent: weekGoalPercent })}
+              </div>
+              {/* 三块底下都有一条同高的指示：今日、本周是目标进度，连续学习是最近 7 天学没学。 */}
+              <div
+                aria-hidden="true"
+                className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--surface-card-active)]"
+              >
+                <div
+                  className="ca-fill-grad h-full rounded-full"
+                  style={{ width: `${Math.min(100, weekGoalPercent)}%` }}
+                />
               </div>
             </section>
 
@@ -657,8 +669,24 @@ export function Dashboard({
               <div className="mt-1 flex items-center gap-1.5 text-2xl font-semibold tabular-nums tracking-tight text-[var(--text-strong)]">
                 {t("dashboard.streakDays", { days: streak })}
               </div>
-              <div className="mt-1 text-xs leading-tight text-[var(--text-muted)]">
+              <div className="mt-1 text-xs text-[var(--text-muted)]">
                 {todayWatched > 0 || todayReviews > 0 ? t("dashboard.studiedToday") : t("dashboard.notStudiedToday")}
+              </div>
+              <div
+                role="img"
+                aria-label={t("dashboard.lastWeekDays", {
+                  count: lastWeekDays.filter(Boolean).length,
+                })}
+                className="mt-1.5 flex h-1 gap-1"
+              >
+                {lastWeekDays.map((studied, index) => (
+                  <span
+                    key={index}
+                    className={`h-full flex-1 rounded-full ${
+                      studied ? "ca-fill-grad" : "bg-[var(--surface-card-active)]"
+                    }`}
+                  />
+                ))}
               </div>
             </section>
             </div>

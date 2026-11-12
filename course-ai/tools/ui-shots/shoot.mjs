@@ -61,6 +61,8 @@ const SAFE_AREAS = {
 /** kind 决定场景里走哪套导航（desktop = 侧栏/rail，phone/tablet = 底部 Tab 的入口判断在场景里按可见性做）。 */
 const DEVICES = {
   desktop: { kind: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 },
+  // 大屏外接显示器：看内容在宽窗口里是靠左还是居中、行是不是拉得太长。
+  wide: { kind: "desktop", viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 },
   phone: { kind: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, ...touch },
   tablet: { kind: "tablet", viewport: { width: 820, height: 1180 }, deviceScaleFactor: 2, ...touch },
   // —— 按真实平台身份模拟（UA + 触屏 + 横竖屏），走到 iOS / Android / Windows 专属分支 ——

@@ -131,6 +131,11 @@ export function LibraryOverview({
                       {t("home.watchedPercentShort", { percent: Math.round(resume!.ratio * 100) })}
                     </span>
                   </span>
+                  {/* 只有一张时显示（见 .ca-resume-row 的样式）；整张卡本身就是按钮，这只是个提示。 */}
+                  <span className="ca-resume-go" aria-hidden="true">
+                    <Play className="h-3.5 w-3.5 fill-current" />
+                    {t("library.resumeGo")}
+                  </span>
                 </button>
               ))}
             </div>

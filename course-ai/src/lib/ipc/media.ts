@@ -44,6 +44,9 @@ export const pipeline = {
   jobs: (videoId: string): Promise<Job[]> =>
     invoke("cmd_list_jobs", { videoId }),
   active: (): Promise<Video[]> => invoke("cmd_list_processing_videos"),
+  /** 整条流水线都做完的视频，按完成时间倒序（队列页的「最近完成」）。 */
+  recent: (limit = 5): Promise<(Video & { finished_at: number })[]> =>
+    invoke("cmd_list_recent_processed_videos", { limit }),
 };
 
 export const transcripts = {

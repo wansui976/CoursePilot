@@ -1,6 +1,9 @@
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ipc, type DownloadJob } from "@/lib/ipc";
+import { queries } from "@/lib/queries";
+import { qk } from "@/lib/queryKeys";
 import { describeDownloadJob, jobPercent } from "@/lib/downloadProgress";
 import { looksLikeCookieError, pickBilibiliCookies } from "@/lib/bilibiliCookies";
 import { isBilibiliUrl } from "@/lib/sourceUrl";
@@ -49,6 +52,23 @@ export function ProcessingQueueView({
         }),
     [downloadOrder, downloadsById, t],
   );
+  const { data: recentVideos } = useQuery({
+    queryKey: qk.recentProcessed(),
+    queryFn: () => ipc.pipeline.recent(5),
+  });
+  const { data: courses } = useQuery(queries.courses());
+  const recent = useMemo(() => {
+    const names = new Map((courses ?? []).map((course) => [course.id, course.name]));
+    // 还在队列里的（比如刚做完、正停在 100% 那一秒）不重复列。
+    const queued = new Set(queue.queuedVideos.map((video) => video.id));
+    return (recentVideos ?? [])
+      .filter((video) => !queued.has(video.id))
+      .map((video) => ({
+        video,
+        courseName: names.get(video.course_id) ?? null,
+        finishedAt: video.finished_at,
+      }));
+  }, [courses, queue.queuedVideos, recentVideos]);
   const items = queue.queuedVideos.map((video) => {
     const active = queue.activeJobFor(video.id);
     const jobLoadState = queue.jobLoadStateByVideo[video.id];
@@ -74,6 +94,7 @@ export function ProcessingQueueView({
     <ProcessingQueuePanel
       items={items}
       downloads={downloads}
+      recent={recent}
       onCancelDownload={(id) => {
         void ipc.downloads.cancel(id).catch(() => {});
       }}

@@ -1,10 +1,11 @@
 import { useTranslation } from "react-i18next";
-import { Download, KeyRound, Loader2, RotateCcw, Trash2, X } from "lucide-react";
+import { CheckCircle2, ChevronRight, Download, KeyRound, Loader2, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { ViewHeader } from "@/ui/view-header";
 import { displayTitle } from "@/lib/videoTitle";
+import { formatRelativeTime } from "@/lib/time";
 import type { Video } from "@/lib/types";
 import type { DownloadJob } from "@/lib/ipc";
 
@@ -32,6 +33,13 @@ export type DownloadQueueItem = {
   canCancel: boolean;
 };
 
+/** 「最近完成」里的一行：整条流水线都做完的视频。 */
+export type RecentQueueItem = {
+  video: Video;
+  courseName: string | null;
+  finishedAt: number;
+};
+
 export type DismissState = {
   isError: boolean;
   isPending: boolean;
@@ -43,6 +51,7 @@ export type DismissState = {
 export function ProcessingQueuePanel({
   items,
   downloads,
+  recent = [],
   onCancelDownload,
   onRetryDownload,
   onReimportCookies,
@@ -63,6 +72,7 @@ export function ProcessingQueuePanel({
 }: {
   items: QueueItem[];
   downloads: DownloadQueueItem[];
+  recent?: RecentQueueItem[];
   onCancelDownload: (id: string) => void;
   onRetryDownload: (id: string) => void;
   onReimportCookies: (id: string) => void;
@@ -117,7 +127,9 @@ export function ProcessingQueuePanel({
           </>
         }
       />
+      {/* 限宽居中，与学习面板同宽：大屏上进度条不再拉满一千多像素，百分比和「取消」贴着标题。 */}
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
+        <div className="mx-auto w-full max-w-3xl">
         {error && (
           <ErrorNote className="mb-4" error={errorObj} onRetry={onRetryLoad} />
         )}
@@ -129,12 +141,14 @@ export function ProcessingQueuePanel({
             <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
             {t("home.queueLoading")}
           </div>
-        ) : totalCount === 0 && !error ? (
+        ) : totalCount === 0 && !error && recent.length === 0 ? (
           <div className="flex h-full min-h-[240px] items-center justify-center">
             <EmptyState
               title={t("home.queueEmpty")}
             />
           </div>
+        ) : totalCount === 0 && !error ? (
+          <p className="py-2 text-sm text-[var(--text-muted)]">{t("home.queueIdle")}</p>
         ) : totalCount > 0 ? (
           // 平铺的列表：上下发丝线分隔，不再每个任务一张带框带影的卡片。
           <div className="flex w-full flex-col">
@@ -340,6 +354,46 @@ export function ProcessingQueuePanel({
             })}
           </div>
         ) : null}
+        {recent.length > 0 && !(loading && items.length === 0) && (
+          <section aria-labelledby="queue-recent" className="mt-9">
+            <h2
+              id="queue-recent"
+              className="mb-2 text-xs font-medium text-[var(--text-muted)]"
+            >
+              {t("home.queueRecent")}
+            </h2>
+            <ul className="flex flex-col">
+              {recent.map(({ video, courseName, finishedAt }) => (
+                <li key={video.id} className="border-t border-[var(--border-faint)] last:border-b">
+                  <button
+                    type="button"
+                    onClick={() => onOpenVideo(video)}
+                    className="group flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-[var(--surface-card-hover)]"
+                  >
+                    <CheckCircle2
+                      className="h-4 w-4 shrink-0 text-[var(--status-ok)]"
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm text-[var(--text-strong)]">
+                        {displayTitle(video.title)}
+                      </span>
+                      <span className="block truncate text-xs text-[var(--text-muted)]">
+                        {courseName ? `${courseName} · ` : ""}
+                        {t("home.queueFinishedAt", { time: formatRelativeTime(finishedAt) })}
+                      </span>
+                    </span>
+                    <ChevronRight
+                      className="h-4 w-4 shrink-0 text-[var(--text-faint)] opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100"
+                      aria-hidden="true"
+                    />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        </div>
       </div>
     </div>
   );

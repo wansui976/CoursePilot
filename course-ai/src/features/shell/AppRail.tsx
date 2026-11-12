@@ -1,11 +1,10 @@
 import {
-  ArrowLeft,
-  ChevronRight,
   ClipboardList,
   LayoutDashboard,
   Library,
   MessageSquareText,
   Moon,
+  PanelLeftOpen,
   Settings,
   Sun,
   Trash2,
@@ -18,12 +17,15 @@ import { BackgroundTasksButton } from "./BackgroundTasks";
 /**
  * 侧栏收起时的细 rail：只有图标，入口与展开的侧栏一一对应（见 ShellNav）。
  * 侧栏展开时不渲染——同一组入口不在两列里重复出现。
+ *
+ * 分三段：展开侧栏 ｜ 去哪儿（课程库、学习面板、队列、助手）｜ 系统（主题、回收站、设置）。
+ * 工作台里的「返回」不放在这里：此前它是一个左箭头，紧挨着上面展开侧栏的右箭头，
+ * 两个长得很像；现在侧栏收起时返回按钮在视频标题左边（VideoWorkbench），这一格换回课程库。
+ * 展开按钮也换成侧栏图标，不再是箭头。
  */
 export function AppRail({ nav, onExpandSidebar }: { nav: ShellNav; onExpandSidebar: () => void }) {
   const assistantUnread = useAssistantUi((state) => state.unread);
   const { t } = useTranslation();
-  const inWorkbench = nav.view === "workbench";
-
   return (
     <nav className="ca-rail" aria-label={t("nav.toolbar")}>
       <button
@@ -32,20 +34,16 @@ export function AppRail({ nav, onExpandSidebar }: { nav: ShellNav; onExpandSideb
         aria-label={t("nav.expandSidebar")}
         onClick={onExpandSidebar}
       >
-        <ChevronRight className="h-[18px] w-[18px]" />
+        <PanelLeftOpen className="h-[18px] w-[18px]" />
       </button>
       <div className="rail-divider" aria-hidden="true" />
       <button
         className={`rail-btn ${nav.libraryHomeActive ? "active" : ""}`}
-        data-tip={inWorkbench ? t("nav.backToLibrary") : t("nav.libraryHome")}
-        aria-label={inWorkbench ? t("nav.backToLibrary") : t("nav.libraryHome")}
-        onClick={inWorkbench ? nav.onBackToLibrary : nav.onGoLibraryHome}
+        data-tip={t("nav.libraryHome")}
+        aria-label={t("nav.libraryHome")}
+        onClick={nav.onGoLibraryHome}
       >
-        {inWorkbench ? (
-          <ArrowLeft className="h-[18px] w-[18px]" />
-        ) : (
-          <Library className="h-[18px] w-[18px]" />
-        )}
+        <Library className="h-[18px] w-[18px]" />
       </button>
       <button
         className={`rail-btn ${nav.dashboardOpen ? "active" : ""}`}
@@ -80,6 +78,7 @@ export function AppRail({ nav, onExpandSidebar }: { nav: ShellNav; onExpandSideb
       </button>
       <BackgroundTasksButton variant="rail" onOpenTask={nav.onOpenTask} />
       <div className="rail-sp" />
+      <div className="rail-divider" aria-hidden="true" />
       <button
         className="rail-btn"
         data-tip={nav.themeToggleLabel}

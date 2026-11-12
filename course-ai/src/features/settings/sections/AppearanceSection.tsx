@@ -282,8 +282,9 @@ export function AppearanceSection() {
         </Row>
       </Group>
 
-      <Group header={t("settings.appearance.density")} hint={t("settings.appearance.densityFootnote")}>
-        <Row label={t("settings.appearance.density")}>
+      {/* 密度和语言各只有一项：此前各占一个分组，分组标题和行标签写着同一个词。合成一组。 */}
+      <Group header={t("settings.appearance.interface")}>
+        <Row label={t("settings.appearance.density")} hint={t("settings.appearance.densityFootnote")}>
           <Segmented
             label={t("settings.appearance.density")}
             options={DENSITIES.map((option) => ({ key: option.key, label: t(option.i18nKey) }))}
@@ -291,9 +292,6 @@ export function AppearanceSection() {
             onChange={setDensity}
           />
         </Row>
-      </Group>
-
-      <Group header={t("settings.appearance.language")}>
         <Row label={t("settings.appearance.language")} htmlFor="app-language">
           <Select
             id="app-language"

@@ -635,11 +635,46 @@
   color: var(--text-1);
 }
 
-/* 继续学习：每门课一张横卡，封面 + 课程名 + 视频名 + 位置。 */
+/* 继续学习：每门课一张横卡，封面 + 课程名 + 视频名 + 位置。
+   auto-fit：两三张时一起铺满整行，不在右边留空轨道；只有一张时它独占一行，
+   换成更大的封面和右侧的「继续」，不再是左上角一张 360px 的小卡。 */
 .ca-resume-row {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.ca-resume-go {
+  display: none;
+}
+
+.ca-resume-row:not(:has(> :nth-child(2))) .ca-resume-card {
+  gap: 18px;
+  padding: 14px 20px 14px 14px;
+}
+
+.ca-resume-row:not(:has(> :nth-child(2))) .ca-resume-cover {
+  width: 176px;
+}
+
+.ca-resume-row:not(:has(> :nth-child(2))) .ca-resume-title {
+  margin-top: 3px;
+  font-size: var(--fs-md);
+  line-height: var(--lh-md);
+}
+
+.ca-resume-row:not(:has(> :nth-child(2))) .ca-resume-go {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent-text);
+  background: var(--accent-weak);
+  transition: background 0.16s;
 }
 
 .ca-resume-card {
@@ -838,6 +873,9 @@
   }
   .ca-resume-card:hover .ca-resume-play > svg {
     background: rgb(0 0 0 / 0.72);
+  }
+  .ca-resume-card:hover .ca-resume-go {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
   }
   .ca-course-tile img,
   .ca-resume-cover img {

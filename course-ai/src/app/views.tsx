@@ -34,6 +34,7 @@ export function LibraryRouteView() {
         shellWide={shell.shellWide}
         availableWidth={shell.workbenchAvailableWidth}
         backToConceptName={knowledgeReturn?.navigationState.conceptName ?? null}
+        showBackButton={shell.sidebarCollapsed}
         onReturnToKnowledge={shell.returnToKnowledge}
         onReturnFromVideo={shell.returnFromVideo}
         onFullscreenChange={shell.setVideoFullscreen}

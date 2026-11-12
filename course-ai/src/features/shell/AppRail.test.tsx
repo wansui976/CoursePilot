@@ -56,10 +56,12 @@ describe("AppRail (collapsed sidebar)", () => {
     expect(nav.onGoLibraryHome).toHaveBeenCalledTimes(1);
   });
 
-  it("workbench view: the library entry goes back to the library", () => {
+  it("workbench view: the library entry is the course hub, not a back arrow", () => {
+    // 返回挪到了视频标题左边（VideoWorkbench）；rail 里不再有一个和「展开侧栏」长得很像的箭头。
     const { nav } = renderRail({ view: "workbench" });
-    fireEvent.click(screen.getByRole("button", { name: "返回课程库" }));
-    expect(nav.onBackToLibrary).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "返回课程库" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "回到课程库首页" }));
+    expect(nav.onGoLibraryHome).toHaveBeenCalledTimes(1);
   });
 
   it("shows the queue entry with badge only in the library view", () => {

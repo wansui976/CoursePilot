@@ -598,6 +598,7 @@ export function Home() {
   const shell: Shell = {
     isPhoneDevice,
     shellWide,
+    sidebarCollapsed: !isPhoneDevice && sidebarIsCollapsed,
     workbenchAvailableWidth,
     showCourseListScreen,
     courseVideos: videos,

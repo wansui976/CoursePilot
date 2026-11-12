@@ -279,6 +279,19 @@
     var(--surface-app);
 }
 
+/* 卡片放在视觉中心（约 40% 高处）而不是几何中线：上下两段留白按 2 : 3 分。
+   居中时题目和评分按钮的重心落在中线偏下，上面空出近一半。屏幕矮、内容长时
+   两段留白都缩到 0，照常滚动。 */
+.ca-review-center::before,
+.ca-review-center::after {
+  content: "";
+  flex: 2 1 0;
+}
+
+.ca-review-center::after {
+  flex-grow: 3;
+}
+
 /* 阅读区：笔记、摘要、复习卡片等「读」的内容用衬线与更松的行距（参考 Apple 图书 / Readwise）。
    界面控件不挂这个类。 */
 .ca-reading {

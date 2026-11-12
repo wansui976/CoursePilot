@@ -20,6 +20,8 @@ export type KnowledgeReturnState = {
 export interface Shell {
   isPhoneDevice: boolean;
   shellWide: boolean;
+  /** 桌面侧栏收起成只有图标的 rail：工作台在视频标题左边补一个返回。 */
+  sidebarCollapsed: boolean;
   workbenchAvailableWidth: number;
   /** 窄屏「课程」Tab 根层：整屏课程列表代替课程库。 */
   showCourseListScreen: boolean;

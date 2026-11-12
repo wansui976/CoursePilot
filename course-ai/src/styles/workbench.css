@@ -60,6 +60,14 @@
   gap: 12px;
 }
 
+/* 视频标题左边的返回：只在侧栏收起时出现，和标题两行（面包屑 + 标题）垂直居中。 */
+.wb-back {
+  flex: none;
+  align-self: center;
+  margin-left: -10px;
+  margin-right: -4px;
+}
+
 .wb-title {
   min-width: 0;
   color: var(--text-1);
@@ -447,6 +455,14 @@ li[data-active] > .ca-chapter::before {
   line-height: var(--lh-sm);
   font-variant-numeric: tabular-nums;
   color: var(--text-4);
+}
+
+/* 章节标题和小结用阅读字体，与上面「本讲要点」的摘要同一种字：两块同属概览，
+   此前一块衬线一块无衬线，像两个产品拼起来的。时间戳仍是界面字体、等宽数字。
+   用户在设置里把阅读字体换成黑体时，两块一起变。 */
+.ca-chapter-title,
+.ca-chapter-summary {
+  font-family: var(--font-reading);
 }
 
 .ca-chapter-title {

@@ -52,6 +52,19 @@ function lastDays(rows: DayTotal[], today: string, days: number): DayTotal[] {
   return rows.filter((r) => r.day >= from && r.day <= today);
 }
 
+/** 最近 days 天（含今天）每天有没有学习，从最早一天排到今天。 */
+export function recentStudiedDays(rows: DayTotal[], today: string, days = 7): boolean[] {
+  const studied = new Set(rows.filter(isStudiedDay).map((r) => r.day));
+  const d = new Date(`${today}T00:00:00`);
+  d.setDate(d.getDate() - (days - 1));
+  const out: boolean[] = [];
+  for (let i = 0; i < days; i++) {
+    out.push(studied.has(localDay(d)));
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
+
 /** 最近 7 天（含今天）的观看毫秒合计。 */
 export function weeklyMs(rows: DayTotal[], today: string): number {
   return lastDays(rows, today, 7).reduce((sum, r) => sum + r.watched_ms, 0);

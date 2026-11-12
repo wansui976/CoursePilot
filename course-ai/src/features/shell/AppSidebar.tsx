@@ -1,12 +1,12 @@
 import {
   ArrowLeft,
-  ChevronLeft,
   ClipboardList,
   LayoutDashboard,
   Library,
   Loader2,
   MessageSquareText,
   Moon,
+  PanelLeftClose,
   Plus,
   Settings,
   Sun,
@@ -107,7 +107,7 @@ export function AppSidebar({
           className="ca-icon-btn ca-side-mini"
           onClick={onToggleCollapsed}
         >
-          <ChevronLeft className="h-4 w-4" />
+          <PanelLeftClose className="h-4 w-4" />
         </button>
       </div>
 

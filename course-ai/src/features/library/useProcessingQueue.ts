@@ -289,6 +289,7 @@ export function useProcessingQueue({
           queryClient.setQueryData<Video[]>(qk.processingVideos(), (items) =>
             items?.filter((item) => item.id !== videoId),
           );
+          void queryClient.invalidateQueries({ queryKey: qk.recentProcessed() });
         }, DONE_LINGER_MS),
       );
     }

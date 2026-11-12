@@ -45,6 +45,8 @@ use crate::jobs::{self, emit_update, JobEvent};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
+use serde::Serialize;
+use sqlx::FromRow;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2012,6 +2014,44 @@ async fn list_processing_videos_for_queue(
     Ok(videos)
 }
 
+/// 处理队列页下方的「最近完成」：整条流水线都已结束（没有排队、在跑或失败的步骤）的视频，
+/// 按最后一步做完的时间倒序。队列里只剩一两条时页面不至于空着，也方便回到刚处理好的课。
+#[derive(Debug, Serialize, FromRow)]
+pub struct RecentProcessed {
+    #[sqlx(flatten)]
+    #[serde(flatten)]
+    pub video: Video,
+    pub finished_at: i64,
+}
+
+#[tauri::command]
+pub async fn cmd_list_recent_processed_videos(
+    app: AppHandle,
+    limit: Option<i64>,
+) -> AppResult<Vec<RecentProcessed>> {
+    let db = app.state::<AppState>().db.clone();
+    list_recent_processed(&db, limit.unwrap_or(5).clamp(1, 20)).await
+}
+
+async fn list_recent_processed(db: &crate::db::Db, limit: i64) -> AppResult<Vec<RecentProcessed>> {
+    Ok(sqlx::query_as(
+        "SELECT v.*, j.finished_at AS finished_at
+           FROM videos v
+           JOIN (SELECT video_id, MAX(finished_at) AS finished_at
+                   FROM processing_jobs
+                  GROUP BY video_id
+                 HAVING SUM(status IN ('pending', 'running', 'failed')) = 0
+                    AND SUM(status = 'done') > 0
+                    AND MAX(finished_at) IS NOT NULL) j ON j.video_id = v.id
+          WHERE v.deleted_at IS NULL AND v.processed_status = 'done'
+          ORDER BY j.finished_at DESC
+          LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(&db.pool)
+    .await?)
+}
+
 /// Hide a failed queue item persistently without deleting the video or its diagnostic jobs.
 #[tauri::command]
 pub async fn cmd_dismiss_processing_video(app: AppHandle, video_id: String) -> AppResult<()> {
@@ -2465,6 +2505,61 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn recent_processed_lists_only_fully_finished_videos_newest_first() {
+        let dir = tempdir().unwrap();
+        let db = crate::db::Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let mut ids = Vec::new();
+        for name in ["older", "newer", "still-running", "failed-step"] {
+            let path = dir.path().join(format!("{name}.mp4"));
+            std::fs::write(&path, b"x").unwrap();
+            let video = add_local_video(&db, &course.id, path, None).await.unwrap();
+            sqlx::query("UPDATE videos SET processed_status='done' WHERE id=?")
+                .bind(&video.id)
+                .execute(&db.pool)
+                .await
+                .unwrap();
+            for job in jobs::ensure_jobs(&db, &video.id).await.unwrap() {
+                jobs::finish(&db, &job.id).await.unwrap();
+            }
+            ids.push(video.id);
+        }
+        let set_finished = |id: String, at: i64| {
+            let db = db.clone();
+            async move {
+                sqlx::query("UPDATE processing_jobs SET finished_at=? WHERE video_id=?")
+                    .bind(at)
+                    .bind(id)
+                    .execute(&db.pool)
+                    .await
+                    .unwrap();
+            }
+        };
+        set_finished(ids[0].clone(), 1_000).await;
+        set_finished(ids[1].clone(), 2_000).await;
+        sqlx::query("UPDATE processing_jobs SET status='running' WHERE video_id=? AND stage='quiz'")
+            .bind(&ids[2])
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE processing_jobs SET status='failed' WHERE video_id=? AND stage='notes'")
+            .bind(&ids[3])
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        let recent = list_recent_processed(&db, 5).await.unwrap();
+        let got: Vec<&str> = recent.iter().map(|item| item.video.id.as_str()).collect();
+        assert_eq!(got, vec![ids[1].as_str(), ids[0].as_str()]);
+        assert_eq!(recent[0].finished_at, 2_000);
+        assert_eq!(list_recent_processed(&db, 1).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

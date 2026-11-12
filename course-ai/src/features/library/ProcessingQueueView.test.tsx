@@ -1,5 +1,7 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import type { DownloadJob } from "@/lib/ipc";
@@ -21,12 +23,21 @@ const { mockIpc, calls, pickBilibiliCookies } = vi.hoisted(() => {
         remove: vi.fn(async () => {}),
         retry: vi.fn(async () => {}),
       },
-      pipeline: { cancel: vi.fn(async () => {}) },
+      pipeline: {
+        cancel: vi.fn(async () => {}),
+        recent: vi.fn(async (): Promise<unknown[]> => []),
+      },
+      courses: { list: vi.fn(async () => [{ id: "c1", name: "机器学习导论" }]) },
     },
   };
 });
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
+
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return rtlRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 vi.mock("@/lib/bilibiliCookies", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/bilibiliCookies")>()),
   pickBilibiliCookies,
@@ -99,6 +110,27 @@ describe("ProcessingQueueView", () => {
       expect(calls).toEqual(["downloads.cancelAll", "queue.cancelAllProcessing"]),
     );
     expect(mockIpc.downloads.cancel).not.toHaveBeenCalled();
+  });
+
+  it("lists recently finished videos under the queue and opens one on click", async () => {
+    useDownloads.setState({ byId: {}, order: [] });
+    const finished = {
+      id: "v9",
+      course_id: "c1",
+      title: "03 梯度下降的直觉",
+      finished_at: Date.now() - 6 * 60_000,
+    };
+    mockIpc.pipeline.recent.mockResolvedValueOnce([finished]);
+    const onOpenVideo = vi.fn();
+    render(<ProcessingQueueView queue={fakeQueue()} onBack={vi.fn()} onOpenVideo={onOpenVideo} />);
+
+    const section = await screen.findByRole("region", { name: "最近完成" });
+    expect(section).toHaveTextContent("机器学习导论");
+    expect(section).toHaveTextContent("6 分钟前完成");
+    // 有最近完成时，空队列不再是一整页的「暂无正在处理的视频」大空状态。
+    expect(screen.queryByText(/导入或处理视频后会出现在这里/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /梯度下降的直觉/ }));
+    expect(onOpenVideo).toHaveBeenCalledWith(expect.objectContaining({ id: "v9" }));
   });
 
   function showFailed(job: Partial<DownloadJob>) {

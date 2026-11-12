@@ -262,7 +262,7 @@ export function ReviewSession({
       </header>
 
       <div className="ca-review-stage min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-        <div className="mx-auto flex min-h-full w-full max-w-xl items-center">
+        <div className="ca-review-center mx-auto flex min-h-full w-full max-w-xl flex-col">
           <div className="w-full">
           {isLoading ? (
             <p className="text-center text-sm text-[var(--text-faint)]">{t("review.loading")}</p>

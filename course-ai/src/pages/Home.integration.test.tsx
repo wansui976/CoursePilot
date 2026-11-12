@@ -315,7 +315,8 @@ describe("Home selected-video integration", () => {
 
     expect(container.firstElementChild).toHaveAttribute("data-bucket", "wide");
     expect(screen.getByRole("region", { name: "学习工作台" })).toBeInTheDocument();
-    expect(screen.getByText(displayTitle(video.title))).toBeInTheDocument();
+    // 标题也会出现在助手空状态的「正在看」里，这里只认工作台的标题。
+    expect(screen.getByRole("heading", { name: displayTitle(video.title) })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "概览" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "文稿" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "笔记" })).toBeInTheDocument();

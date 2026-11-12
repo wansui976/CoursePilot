@@ -405,6 +405,11 @@ export function installMockIpc({ theme, safeArea }) {
     cmd_video_cover: ({ videoId }) => cover(videoId),
     cmd_media_url: ({ videoId }) => mediaUrl(videoId),
     cmd_list_processing_videos: () => [videos[6]],
+    cmd_list_recent_processed_videos: () =>
+      [videos[2], videos[1], videos[0]].map((video, i) => ({
+        ...video,
+        finished_at: now - [6, 95, 60 * 26][i] * 60_000,
+      })),
     // 下载占位只在专门场景里打开，避免改动其他截图的基准。
     cmd_list_downloads: () => {
       try {

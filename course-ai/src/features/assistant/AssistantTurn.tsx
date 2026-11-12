@@ -1,6 +1,10 @@
 import { memo, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowDown,
+  Library,
+  PlayCircle,
+  FolderOpen,
   Check,
   ChevronRight,
   Copy,
@@ -16,6 +20,8 @@ import { AssistantToolChips } from "./AssistantToolChips";
 import { getAssistantInteractionState } from "@/lib/assistantSession";
 import type { AssistantAction, AssistantContext } from "@/lib/types";
 import { renderMarkdown } from "@/lib/renderMarkdown";
+import { queries } from "@/lib/queries";
+import { displayTitle } from "@/lib/videoTitle";
 import { loadTurnImages } from "@/lib/assistantImageStore";
 import { ImageLightbox } from "./ImageLightbox";
 import { SocraticCard } from "./SocraticCard";
@@ -29,6 +35,7 @@ import {
   bracketBareTimestamps,
   formatElapsed,
 } from "./turnModel";
+import { formatPosition } from "./assistantPanelModel";
 
 /**
  * 助手面板的单轮问答渲染与空态。
@@ -123,6 +130,34 @@ function TurnImages({ turn }: { turn: Turn }) {
   );
 }
 
+/** 空状态上方那句「现在对着什么问」：视频标题 + 课程 + 播放位置，或者当前课程、全部课程。 */
+function useContextTitle(context: AssistantContext) {
+  const { t } = useTranslation();
+  const { data: courses } = useQuery({ ...queries.courses(), enabled: !!context.course_id });
+  const { data: videos } = useQuery(queries.videos(context.video_id ? (context.course_id ?? null) : null));
+  const courseName = courses?.find((course) => course.id === context.course_id)?.name ?? null;
+  if (context.video_id) {
+    const video = videos?.find((item) => item.id === context.video_id);
+    const position =
+      context.position_ms != null && context.position_ms > 0 ? formatPosition(context.position_ms) : null;
+    return {
+      icon: PlayCircle,
+      eyebrow: t("assistant.contextWatching"),
+      title: video ? displayTitle(video.title) : t("assistant.scopeCurrentVideo"),
+      meta: [courseName, position].filter(Boolean).join(" · "),
+    };
+  }
+  if (context.course_id) {
+    return {
+      icon: FolderOpen,
+      eyebrow: t("assistant.contextCourse"),
+      title: courseName ?? t("assistant.scopeCurrentCourse"),
+      meta: "",
+    };
+  }
+  return { icon: Library, eyebrow: t("assistant.contextAll"), title: t("assistant.scopeAllCourses"), meta: "" };
+}
+
 export function AssistantEmptyState({
   scopeLabel,
   context,
@@ -135,25 +170,40 @@ export function AssistantEmptyState({
   onSend: (prompt: string) => void;
 }) {
   const { t } = useTranslation();
+  const scope = useContextTitle(context);
+  const ScopeIcon = scope.icon;
   return (
-    // 空状态贴着输入框：一行灰字说明能问什么，下面几句可以直接点的示例问题。
-    // 不再是「大标题 + 带边框的建议列表 + 每行一个 ↗」——那是 AI 产品空状态的标准件。
-    <div className="flex min-h-full flex-col justify-end gap-2 px-1 pb-1">
-      <p className="ca-t-sm leading-relaxed text-[var(--text-muted)]">
-        {t("assistant.greetingHint", { scope: scopeLabel })}
-      </p>
-      <div className="flex flex-col items-start">
-        {suggestionsFor(context, t).map((suggestion) => (
-          <button
-            key={suggestion.prompt}
-            type="button"
-            disabled={actionExecutionBusy}
-            onClick={() => onSend(suggestion.prompt)}
-            className="ca-touch-44 -mx-2 rounded-md px-2 py-1 text-left text-sm text-[var(--text-normal)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
-          >
-            {suggestion.label}
-          </button>
-        ))}
+    // 上半截原本整片空白：放一句「现在对着什么问」，打开就知道问的是哪个视频的哪一刻。
+    // 下面贴着输入框是能问什么的说明和几个示例问题；示例做成胶囊按钮，一眼看得出能点。
+    // 仍然不是「大标题 + 带边框的建议列表 + 每行一个 ↗」那套 AI 产品空状态标准件。
+    <div className="flex min-h-full flex-col gap-4 px-1 pb-1">
+      <div className="flex flex-1 flex-col items-center justify-center gap-1.5 py-6 text-center">
+        <ScopeIcon className="mb-1 h-6 w-6 text-[var(--text-faint)]" aria-hidden="true" />
+        <p className="ca-t-2xs font-medium uppercase tracking-wide text-[var(--text-faint)]">{scope.eyebrow}</p>
+        <p className="max-w-[18rem] text-sm font-medium leading-snug text-[var(--text-strong)] [overflow-wrap:anywhere]">
+          {scope.title}
+        </p>
+        {scope.meta && (
+          <p className="ca-t-2xs tabular-nums text-[var(--text-muted)]">{scope.meta}</p>
+        )}
+      </div>
+      <div className="flex flex-col gap-2.5">
+        <p className="ca-t-sm leading-relaxed text-[var(--text-muted)]">
+          {t("assistant.greetingHint", { scope: scopeLabel })}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {suggestionsFor(context, t).map((suggestion) => (
+            <button
+              key={suggestion.prompt}
+              type="button"
+              disabled={actionExecutionBusy}
+              onClick={() => onSend(suggestion.prompt)}
+              className="ca-touch-44 inline-flex items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-3 py-1 text-left text-sm text-[var(--text-normal)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
+            >
+              {suggestion.label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

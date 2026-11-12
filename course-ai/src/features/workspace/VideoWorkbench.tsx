@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft } from "lucide-react";
+import { ArrowLeft, ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { VideoPlayer } from "@/features/player";
 import { ipc } from "@/lib/ipc";
@@ -22,6 +22,7 @@ export function VideoWorkbench({
   shellWide,
   availableWidth,
   backToConceptName,
+  showBackButton = false,
   onReturnToKnowledge,
   onReturnFromVideo,
   onFullscreenChange,
@@ -35,6 +36,8 @@ export function VideoWorkbench({
   availableWidth: number;
   /** 从知识点跳进来时的知识点名：标题条多一个「回到知识点」。 */
   backToConceptName: string | null;
+  /** 侧栏收起时为 true：rail 里没有返回，标题左边补一个。 */
+  showBackButton?: boolean;
   onReturnToKnowledge: () => void;
   onReturnFromVideo: () => void;
   onFullscreenChange: (fullscreen: boolean) => void;
@@ -70,6 +73,19 @@ export function VideoWorkbench({
           {!isPhoneDevice && (
             <header className="ca-wb-head">
               <div className="wb-title-row">
+                {/* 侧栏收起时这里放一个明确的返回：收起后的 rail 只剩图标，返回箭头混在一排
+                    入口里、又紧挨着展开侧栏的箭头，不好找。侧栏展开时侧栏顶上已经有「返回课程库」。 */}
+                {showBackButton && !backToConceptName && (
+                  <button
+                    type="button"
+                    onClick={onReturnFromVideo}
+                    aria-label={t("nav.backToLibrary")}
+                    title={t("nav.backToLibrary")}
+                    className="wb-back ca-icon-btn"
+                  >
+                    <ArrowLeft className="h-[18px] w-[18px]" />
+                  </button>
+                )}
                 {backToConceptName && (
                   <button
                     type="button"
