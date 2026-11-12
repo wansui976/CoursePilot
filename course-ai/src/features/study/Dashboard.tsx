@@ -455,6 +455,8 @@ export function Dashboard({
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]">
       <ViewHeader
         title={t("dashboard.title")}
+        level="root"
+        className="ca-view-header--column"
         onBack={onClose}
         backLabel={t("dashboard.back")}
         actions={

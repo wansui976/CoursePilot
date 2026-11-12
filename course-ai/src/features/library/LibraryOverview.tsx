@@ -1,6 +1,6 @@
 import { useQueries } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { FolderPlus, Loader2, Play } from "lucide-react";
+import { FolderPlus, LibraryBig, Loader2, Play } from "lucide-react";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { queries } from "@/lib/queries";
@@ -8,6 +8,7 @@ import { WATCHED_RATIO, readLastVideoId, readPlaybackProgress } from "@/lib/play
 import { formatMs } from "@/lib/time";
 import type { Course, VideoListItem } from "@/lib/types";
 import { displayTitle } from "@/lib/videoTitle";
+import { colorStyle } from "./colorStyle";
 import { UpdateNotice } from "./UpdateNotice";
 import { VideoCover } from "./VideoCover";
 
@@ -67,7 +68,7 @@ export function LibraryOverview({
   const resumable = summaries.filter((summary) => summary.resume).slice(0, RESUME_LIMIT);
 
   return (
-    <div className="ca-main-col">
+    <div className="ca-main-col ca-overview">
       <header className="ca-topbar">
         <div className="tb-lead">
           <div className="tb-titles">
@@ -161,12 +162,18 @@ export function LibraryOverview({
                   <span
                     className="ca-course-cover"
                     data-tiles={covers.length >= MOSAIC ? MOSAIC : covers.length > 0 ? 1 : 0}
+                    data-color={covers.length === 0 ? (course.color ?? undefined) : undefined}
+                    style={covers.length === 0 ? colorStyle(course.color) : undefined}
                   >
                     {covers.length === 0 ? (
-                      // 没有视频封面：像一本书的封面，中性底色上用阅读字体写课程名。
-                      <span className="ca-course-initial" aria-hidden="true">
-                        {course.name}
-                      </span>
+                      // 没有视频封面：一张有意设计的占位封面——用户给课程标的颜色做淡底，
+                      // 左上一个图标、左下课程名。没标颜色时是中性灰。
+                      <>
+                        <LibraryBig className="ca-course-glyph" aria-hidden="true" />
+                        <span className="ca-course-initial" aria-hidden="true">
+                          {course.name}
+                        </span>
+                      </>
                     ) : (
                       (covers.length >= MOSAIC ? covers : covers.slice(0, 1)).map((video) => (
                         <span key={video.id} className="ca-course-tile">

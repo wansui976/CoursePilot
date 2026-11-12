@@ -622,6 +622,19 @@
 }
 
 /* ===== 课程库首页（有课程、未选中时）===== */
+/* 课程库首页限宽居中：大屏上三五张课程卡不再全堆在左边、右侧空一大片，
+   与学习面板、设置的居中内容区是同一种对齐。用内边距而不是 max-width 做，
+   滚动条仍贴在主区最右边。 */
+.ca-overview {
+  --overview-gutter: max(34px, calc((100% - 1120px) / 2));
+}
+
+.ca-overview > .ca-topbar,
+.ca-overview > .ca-scroll {
+  padding-left: var(--overview-gutter);
+  padding-right: var(--overview-gutter);
+}
+
 .ca-overview-section {
   margin-bottom: 32px;
 }
@@ -759,6 +772,12 @@
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 
+/* 三门课及以上时改用 auto-fit：一行没排满也把卡片拉宽铺满，不在右边留一条空轨道。
+   只有一两门课时保持 auto-fill——否则仅有的一张卡会被拉成整行那么宽。 */
+.ca-course-grid:has(> :nth-child(3)) {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
 .ca-course-card {
   min-width: 0;
   display: flex;
@@ -789,27 +808,47 @@
   grid-template-rows: 1fr 1fr;
 }
 
-/* 还没有视频封面的课程：像书的封面——中性冷灰底，左下角用阅读字体写课程名。
-   不再按课程名随机取色相（粉底、绿底一字排开很俗）。 */
+/* 还没有视频封面的课程：一张有意设计的占位封面。
+   此前是中性灰底 + 衬线灰字，和旁边的四宫格拼图卡并排时像「图没加载出来」。
+   现在底色取用户给这门课标的颜色（淡淡一层，color 由 colorStyle 写在元素上），
+   左上一个图标、左下课程名，课程名用界面字体。
+   这不是当初去掉的「按课程名随机取色相」：颜色是用户自己标的，与侧栏的文件夹图标同色；
+   没标颜色的课仍是中性灰。 */
 .ca-course-cover[data-tiles="0"] {
-  place-items: end start;
+  grid-template-rows: auto 1fr;
+  place-items: start;
   padding: 16px 18px;
+  color: var(--text-3);
   background: var(--bg-sunken);
 }
 
+.ca-course-cover[data-tiles="0"][data-color] {
+  background: color-mix(in srgb, currentColor 13%, var(--bg-panel));
+}
+
+.ca-course-glyph {
+  width: 22px;
+  height: 22px;
+  opacity: 0.75;
+}
+
 .ca-course-cover[data-tiles="0"] .ca-course-initial {
+  align-self: end;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  max-width: 90%;
-  font-family: var(--font-reading);
-  font-size: 19px;
+  max-width: 92%;
+  font-size: var(--fs-lg);
   font-weight: 600;
   line-height: 1.35;
-  letter-spacing: 0;
+  letter-spacing: -0.01em;
   color: var(--text-2);
   text-shadow: none;
+}
+
+.ca-course-cover[data-tiles="0"][data-color] .ca-course-initial {
+  color: color-mix(in srgb, currentColor 55%, var(--text-1));
 }
 
 .ca-course-tile {

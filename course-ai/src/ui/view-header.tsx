@@ -16,6 +16,7 @@ export function ViewHeader({
   onBack,
   backLabel,
   actions,
+  level = "secondary",
   className,
 }: {
   title: ReactNode;
@@ -23,11 +24,13 @@ export function ViewHeader({
   onBack?: () => void;
   backLabel?: string;
   actions?: ReactNode;
+  /** root：侧栏一级入口（学习面板、处理队列、设置），与课程库同款的大标题、坐在页面底色上。 */
+  level?: "root" | "secondary";
   className?: string;
 }) {
   const { t } = useTranslation();
   return (
-    <header className={cn("ca-view-header", className)}>
+    <header className={cn("ca-view-header", className)} data-level={level}>
       {onBack ? (
         <button
           type="button"

@@ -14,6 +14,28 @@
   flex: none;
 }
 
+/* 一级入口（学习面板、处理队列、设置）：与课程库顶栏同一副长相——28px 大标题直接坐在
+   页面底色上，没有白色横条和分隔线，内边距也对齐 .ca-topbar。此前这三页用的是次级
+   头部（白条 + 20px），和同为侧栏一级入口的课程库并排切换时像两个应用。 */
+.ca-view-header[data-level="root"] {
+  padding: 24px 34px 16px;
+  border-bottom-color: transparent;
+  background: transparent;
+}
+
+.ca-view-header[data-level="root"] .ca-view-title {
+  font-size: var(--fs-2xl);
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+/* 桌面侧栏布局下，一级入口不显示返回箭头：左边的侧栏一直在，这三页本身就是侧栏里的
+   一级项，没有「上一级」可回；留着箭头反而把标题顶离左缘，和课程库的标题对不齐。
+   窄屏叠放布局没有常驻侧栏，箭头照常显示。只是不显示，按钮和它的行为都还在。 */
+.ca-app[data-shell="sidebar"] .ca-view-header[data-level="root"] > .ca-icon-btn {
+  display: none;
+}
+
 .ca-view-header-text {
   /* 基准 0：窄屏换行模式下标题区自己收缩、描述折行，操作按钮留在同一行；
      只有操作区本身放不下时才会被挤到第二行。 */
@@ -49,4 +71,20 @@
 .ca-app[data-bucket="medium"] .ca-view-header {
   flex-wrap: wrap;
   padding: 12px 16px;
+}
+
+/* 窄屏：大标题降回 20px，与课程库顶栏在窄屏的处理一致。 */
+.ca-app[data-bucket="compact"] .ca-view-header[data-level="root"] .ca-view-title,
+.ca-app[data-bucket="medium"] .ca-view-header[data-level="root"] .ca-view-title {
+  font-size: var(--fs-xl);
+  line-height: var(--lh-xl);
+}
+
+/* 内容限宽居中的一级页（学习面板、处理队列，内容区 max-w-3xl = 768px）：标题和右侧操作
+   也收进同一列，跟课程库首页一样标题与内容左缘对齐；不然大屏上标题贴在最左、
+   内容在中间、按钮在最右，一页里三条对齐线。窄窗口回落到原来的 34px 内边距。 */
+.ca-view-header--column[data-level="root"] {
+  --column-gutter: max(34px, calc((100% - 768px) / 2));
+  padding-left: var(--column-gutter);
+  padding-right: var(--column-gutter);
 }

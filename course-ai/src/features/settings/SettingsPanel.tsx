@@ -158,7 +158,12 @@ export function SettingsPanel({
       ref={settingsRef}
       className="relative flex h-full min-h-0 flex-1 flex-col bg-[var(--surface-app)] text-[var(--text-normal)]"
     >
-      <ViewHeader title={headerTitle} onBack={onHeaderBack} backLabel={t("settings.back")} />
+      <ViewHeader
+        title={headerTitle}
+        level={inDetail ? "secondary" : "root"}
+        onBack={onHeaderBack}
+        backLabel={t("settings.back")}
+      />
 
       {/* 侧栏分类 + 右侧分组卡片；竖屏改为「分类列表 → 下钻」 */}
       <div className="flex min-h-0 flex-1">

@@ -104,6 +104,8 @@ export function ProcessingQueuePanel({
     >
       <ViewHeader
         title={t("home.queueLabel")}
+        level="root"
+        className="ca-view-header--column"
         onBack={onBack}
         backLabel={t("home.queueBack")}
         actions={
