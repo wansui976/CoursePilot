@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
@@ -427,7 +427,7 @@ function OutcomeTag({ outcome }: { outcome: Outcome }) {
 }
 
 /** 选项前的圆形字母；作答后换成对 / 错的图标。 */
-function OptionBadge({ letter, state }: { letter: string; state: "idle" | "picked" | "right" | "wrong" | "dim" }) {
+function OptionBadge({ letter, state, pop = false }: { letter: string; state: "idle" | "picked" | "right" | "wrong" | "dim"; pop?: boolean }) {
   const look = {
     idle: "border border-[var(--border-strong)] text-[var(--text-muted)]",
     dim: "border border-[var(--border-subtle)] text-[var(--text-faint)]",
@@ -436,7 +436,7 @@ function OptionBadge({ letter, state }: { letter: string; state: "idle" | "picke
     wrong: "bg-[var(--status-err)] text-[var(--on-status-err)]",
   }[state];
   return (
-    <span className={`mt-px grid h-5 w-5 flex-none place-items-center rounded-full text-[11px] font-semibold ${look}`} aria-hidden="true">
+    <span className={`mt-px grid h-5 w-5 flex-none place-items-center rounded-full text-[11px] font-semibold ${look}${pop && (state === "right" || state === "wrong") ? " ca-answer-pop" : ""}`} aria-hidden="true">
       {state === "right" ? <Check className="h-3 w-3" strokeWidth={3} /> : state === "wrong" ? <X className="h-3 w-3" strokeWidth={3} /> : letter}
     </span>
   );
@@ -463,6 +463,14 @@ function QuestionCard({
 }) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState<number[]>([]);
+  // 刚作答的片刻：对错图标弹出、选错的行晃一下。过后摘掉，否则页签切走再切回来
+  // （display:none → 显示会重播 CSS 动画）每道做过的题都要再晃一遍。
+  const [fresh, setFresh] = useState(false);
+  useEffect(() => {
+    if (!fresh) return;
+    const timer = window.setTimeout(() => setFresh(false), 700);
+    return () => window.clearTimeout(timer);
+  }, [fresh]);
   // 作答过或者看过答案都算这道题结束了：先看答案再点选项不能算答对。
   const answered = Boolean(state.outcome);
   const written = q.type === "correct" || q.type === "short";
@@ -473,6 +481,7 @@ function QuestionCard({
       setDraft((current) => (current.includes(j) ? current.filter((one) => one !== j) : [...current, j]));
       return;
     }
+    setFresh(true);
     onChange({ picked: [j], outcome: q.options[j] === q.answer ? "correct" : "wrong" });
   }
 
@@ -480,6 +489,7 @@ function QuestionCard({
     if (!q.options || draft.length === 0) return;
     const chosen = draft.map((j) => q.options![j]);
     const expected = Array.isArray(q.answer) ? q.answer : [String(q.answer)];
+    setFresh(true);
     onChange({ picked: draft, outcome: sameSet(chosen, expected) ? "correct" : "wrong" });
   }
 
@@ -532,9 +542,9 @@ function QuestionCard({
                   aria-pressed={picked}
                   disabled={answered}
                   onClick={() => pickOption(j)}
-                  className={`${ROW} disabled:cursor-default ${rowLook(picked, right)}`}
+                  className={`${ROW} disabled:cursor-default ${rowLook(picked, right)}${fresh && answered && picked && !right ? " ca-answer-shake" : ""}`}
                 >
-                  <OptionBadge letter={String.fromCharCode(65 + j)} state={badgeState(picked, right)} />
+                  <OptionBadge letter={String.fromCharCode(65 + j)} state={badgeState(picked, right)} pop={fresh} />
                   <span className="ca-prose min-w-0 flex-1">
                     <MathText text={opt} />
                     {note && (
@@ -561,8 +571,11 @@ function QuestionCard({
                 type="button"
                 aria-pressed={picked}
                 disabled={answered}
-                onClick={() => onChange({ judged: value, outcome: right ? "correct" : "wrong" })}
-                className={`${ROW} items-center justify-center disabled:cursor-default ${rowLook(picked, right)}`}
+                onClick={() => {
+                  setFresh(true);
+                  onChange({ judged: value, outcome: right ? "correct" : "wrong" });
+                }}
+                className={`${ROW} items-center justify-center disabled:cursor-default ${rowLook(picked, right)}${fresh && answered && picked && !right ? " ca-answer-shake" : ""}`}
               >
                 {value ? <Check className="h-4 w-4" aria-hidden="true" /> : <X className="h-4 w-4" aria-hidden="true" />}
                 {value ? t("quiz.correct") : t("quiz.incorrect")}

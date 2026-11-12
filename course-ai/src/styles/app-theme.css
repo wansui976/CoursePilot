@@ -51,6 +51,14 @@
   --dur: 0.18s;
   --dur-slow: 0.28s;
   --ease: cubic-bezier(.22, .61, .36, 1);
+  /* 进场（快起慢停）、退场（慢起快走）与回弹。别处别再裸写 cubic-bezier。
+     --ease-spring 默认是个带一点过冲的贝塞尔；支持 linear() 的内核在下面换成真弹簧曲线
+     （阻尼比 0.68，过冲约 5%）。只用在小东西上：开关圆点、浮层弹出、选中指示——
+     大块内容回弹会显得轻浮。 */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.3, 1.35, 0.5, 1);
+  --dur-spring: 0.42s;
   /* 字阶（scoped，勿放 @theme 以免覆盖 Tailwind 全局 text-*）。
      映射参考：--fs-2xs≈text-[11px]＝text-xs，--fs-xs≈text-xs，--fs-sm≈text-sm，
      --fs-md≈text-[15px]，--fs-lg≈text-[17px]，--fs-xl≈text-[20px]，--fs-2xl≈text-[28px]。 */
@@ -68,6 +76,19 @@
   --lh-lg: 1.4;
   --lh-xl: 1.3;
   --lh-2xl: 1.25;
+}
+
+/* macOS 14.0–14.2 的 WebKit 不认 linear()：整条声明在那里无效，所以用 @supports 包住，
+   不认的内核停在上面的贝塞尔兜底。 */
+@supports (transition-timing-function: linear(0, 1)) {
+  :root,
+  .ca-app {
+    --ease-spring: linear(
+      0, 0.049, 0.167, 0.317, 0.475, 0.622, 0.749, 0.852, 0.931, 0.986, 1.023,
+      1.044, 1.053, 1.054, 1.05, 1.042, 1.034, 1.025, 1.018, 1.011, 1.006, 1.003, 1
+    );
+    --dur-spring: 0.5s;
+  }
 }
 
 /* 应用外壳本身的布局；只属于 .ca-app，不能跟着上面的令牌挂到 :root（否则 <html> 也变成网格）。 */

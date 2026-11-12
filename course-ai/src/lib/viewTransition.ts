@@ -14,8 +14,10 @@
 
 const HERO_NAME = "ca-hero";
 const COMMIT_TIMEOUT_MS = 400;
-/** finished 迟迟不落定时的兜底收尾（动画 0.36s + 余量）。 */
+/** finished 迟迟不落定时的兜底收尾（动画最长 0.44s + 余量）。从动画真正开始（ready）算起。 */
 const CLEANUP_FALLBACK_MS = 1200;
+/** 动画一直没开始（快照迟迟拍不完）时的总兜底。 */
+const START_GUARD_MS = 4000;
 
 type Direction = "open" | "close";
 
@@ -116,7 +118,30 @@ function run(direction: Direction, from: HTMLElement | null, update: () => Promi
     return;
   }
   transition.finished.then(state.cleanup, state.cleanup);
-  fallback = window.setTimeout(state.cleanup, CLEANUP_FALLBACK_MS);
+  // 兜底计时从动画开始那一刻算，而不是从发起导航算：拍快照可能就要花掉几百毫秒，
+  // 从头算的话兜底会在动画半途把方向标记和共享元素名摘掉——过渡当场退回默认的
+  // 交叉淡化，已经淡掉的旧画面又闪回来。
+  fallback = window.setTimeout(state.cleanup, START_GUARD_MS);
+  transition.ready?.then(
+    () => {
+      if (running !== state) return;
+      window.clearTimeout(fallback);
+      fallback = window.setTimeout(state.cleanup, CLEANUP_FALLBACK_MS);
+    },
+    () => {},
+  );
+}
+
+/**
+ * 纯音频源（没有画面轨的 <video>）在拍旧快照前先藏起来。
+ * WebKit 给带 <video> 的页面拍快照时要等一帧视频画面；音频永远等不到，于是卡满 1 秒
+ * 超时才开始过渡——整个界面冻住一秒。画面本来就是空的（舞台上盖着音频卡片），
+ * visibility:hidden 不改变快照的样子，也不停声音；舞台随后就卸载，不用还原。
+ */
+function hideFramelessVideos(root: HTMLElement): void {
+  for (const video of root.querySelectorAll("video")) {
+    if (video.videoWidth === 0 && video.videoHeight === 0) video.style.visibility = "hidden";
+  }
 }
 
 /** 从课程库打开视频：封面 → 播放器舞台。 */
@@ -140,7 +165,9 @@ export function transitionToLibrary(videoId: string | null, navigate: () => void
     navigate();
     return;
   }
-  run("close", stage(), async () => {
+  const from = stage();
+  if (from) hideFramelessVideos(from);
+  run("close", from, async () => {
     navigate();
     await waitFor(() => stage() == null, COMMIT_TIMEOUT_MS);
     const cover = videoId ? coverFor(videoId) : null;

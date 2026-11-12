@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useContainerPixelWidth } from "@/lib/useContainerWidth";
 import { SPLIT_NOTES_MIN_WIDTH } from "./workbenchLayout";
 import { queries } from "@/lib/queries";
@@ -197,6 +197,29 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [changeTab, tabKeys]);
 
+  // 滑动下划线：量出当前页签在页签条里的位置和宽度，交给 CSS 做位移 + 伸缩。
+  // 页签文字会变（角标数字晚到、换语言、选中加粗），所以每个页签都挂 ResizeObserver。
+  const tabStripRef = useRef<HTMLDivElement>(null);
+  const [ink, setInk] = useState<{ x: number; w: number } | null>(null);
+  const tabKeySignature = tabKeys.join(",");
+  useLayoutEffect(() => {
+    const strip = tabStripRef.current;
+    if (!strip) return;
+    const measure = () => {
+      const active = strip.querySelector<HTMLElement>('[role="tab"][data-state="active"]');
+      // 量不到（面板被隐藏、测试环境没有布局）就保持原样，别把线收成 0 宽再长回来。
+      if (!active || active.offsetWidth === 0) return;
+      const next = { x: active.offsetLeft, w: active.offsetWidth };
+      setInk((current) => (current && current.x === next.x && current.w === next.w ? current : next));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(strip);
+    for (const tab of strip.querySelectorAll('[role="tab"]')) observer.observe(tab);
+    return () => observer.disconnect();
+  }, [shownTab, tabKeySignature]);
+
   const panels: { tab: Tab; node: React.ReactNode }[] = [
     { tab: "overview", node: <AiViewPanel videoId={videoId} /> },
     { tab: "transcript", node: <TranscriptPanel videoId={videoId} /> },
@@ -223,7 +246,13 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
       {/* 分段控件：macOS 式凹槽轨道 + 选中丸，取代下划线 tab。面板拖窄时轨道横向
           滚动；核心任务保持一级可见，低频资料统一收进「更多」。 */}
       <TabsList className="ca-study-tabs-band block">
-        <div className="ca-study-tabs" data-tour="study-tabs">
+        <div
+          ref={tabStripRef}
+          className="ca-study-tabs"
+          data-tour="study-tabs"
+          data-ink={ink ? "" : undefined}
+          style={ink ? ({ "--ink-x": `${ink.x}px`, "--ink-w": ink.w } as React.CSSProperties) : undefined}
+        >
           {tabKeys.map((tab) => {
             return (
               <TabsTrigger
@@ -238,6 +267,7 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
               </TabsTrigger>
             );
           })}
+          {ink && <span aria-hidden="true" className="ca-study-tabs-ink" />}
         </div>
       </TabsList>
       {panels

@@ -1,12 +1,12 @@
 import { cn } from "@/lib/utils";
 
-/** 单块骨架占位（脉冲动画在减少动效偏好下由全局规则自动停掉）。 */
+/** 单块骨架占位（扫光动画见 motion.css 的 .ca-skeleton；减少动效偏好下由全局规则自动停掉）。 */
 export function Skeleton({ className }: { className?: string }) {
   return (
     <div
       aria-hidden="true"
       className={cn(
-        "animate-pulse rounded-md bg-[var(--surface-card-hover)]",
+        "ca-skeleton rounded-md bg-[var(--surface-card-hover)]",
         className,
       )}
     />

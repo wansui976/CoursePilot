@@ -55,7 +55,7 @@ describe("ChaptersPanel", () => {
     const { container } = renderChaptersPanel();
 
     expect(screen.queryByText(/还没有章节/)).not.toBeInTheDocument();
-    expect(container.querySelector(".animate-pulse")).toBeInTheDocument();
+    expect(container.querySelector(".ca-skeleton")).toBeInTheDocument();
   });
 
   it("shows the empty state only after loading resolves with no chapters", async () => {

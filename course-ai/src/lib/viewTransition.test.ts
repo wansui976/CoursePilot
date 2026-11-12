@@ -102,4 +102,39 @@ describe("viewTransition", () => {
       vi.useRealTimers();
     }
   });
+
+  it("返回课程库前把没有画面轨的 <video> 藏起来（WebKit 拍快照会为它空等 1 秒）", () => {
+    stubMatchMedia(false);
+    // jsdom 里 <video> 的 videoWidth / videoHeight 恒为 0，正好就是纯音频源的样子。
+    document.body.innerHTML = `<div data-vt-stage=""><video></video></div>`;
+    const video = document.querySelector("video")!;
+    // @ts-expect-error 测试替身
+    document.startViewTransition = () => ({ finished: new Promise<void>(() => {}) });
+    transitionToLibrary(null, vi.fn());
+    expect(video.style.visibility).toBe("hidden");
+  });
+
+  it("兜底收尾从动画开始算起：快照拍得慢也不会在动画半途摘掉方向标记", async () => {
+    vi.useFakeTimers();
+    try {
+      stubMatchMedia(false);
+      document.body.innerHTML = `<div data-vt-stage=""></div>`;
+      let ready!: () => void;
+      // @ts-expect-error 测试替身：finished 永不落定，只看兜底计时
+      document.startViewTransition = () => ({
+        finished: new Promise<void>(() => {}),
+        ready: new Promise<void>((resolve) => (ready = resolve)),
+      });
+      transitionToLibrary(null, vi.fn());
+      // 快照花了 1 秒才拍完；旧实现的 1200ms 兜底此时只剩 200ms。
+      await vi.advanceTimersByTimeAsync(1000);
+      ready();
+      await vi.advanceTimersByTimeAsync(600);
+      expect(document.documentElement.dataset.vtNav).toBe("close");
+      await vi.advanceTimersByTimeAsync(700);
+      expect(document.documentElement.dataset.vtNav).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -53,6 +53,7 @@ export function ProgressRing({
           r={r}
           fill="none"
           stroke={`url(#${gradId})`}
+          className="ca-progress-ring-arc"
           strokeWidth={stroke}
           strokeLinecap="round"
           strokeDasharray={circumference}

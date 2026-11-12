@@ -140,11 +140,11 @@
      新加的对话框不会因为忘记加类就退回硬切。手搓的 role="dialog"（如就地改名框）
      没有 data-state，选不中，不受影响。 */
   [role="dialog"][data-state="open"] {
-    animation: ca-dialog-in 0.18s var(--ease, cubic-bezier(0.22, 0.61, 0.36, 1));
+    animation: ca-dialog-in 0.18s var(--ease);
   }
 
   [role="dialog"][data-state="closed"] {
-    animation: ca-dialog-out 0.14s var(--ease, cubic-bezier(0.22, 0.61, 0.36, 1));
+    animation: ca-dialog-out 0.14s var(--ease);
   }
 }
 
@@ -169,11 +169,11 @@
 
 @media (prefers-reduced-motion: no-preference) {
   [role="dialog"][data-presentation="sheet"][data-state="open"] {
-    animation: ca-sheet-in 0.26s cubic-bezier(0.2, 0, 0, 1);
+    animation: ca-sheet-in 0.26s var(--ease-out);
   }
 
   [role="dialog"][data-presentation="sheet"][data-state="closed"] {
-    animation: ca-sheet-out 0.18s cubic-bezier(0.4, 0, 1, 1);
+    animation: ca-sheet-out 0.18s var(--ease-in);
   }
 }
 
@@ -193,7 +193,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .ca-card-enter {
-    animation: ca-card-enter 0.16s var(--ease, cubic-bezier(0.22, 0.61, 0.36, 1))
+    animation: ca-card-enter 0.16s var(--ease)
       backwards;
   }
 
@@ -360,7 +360,7 @@
   }
 
   .ca-menu.ca-menu-sheet {
-    animation: ca-sheet-in 0.24s cubic-bezier(0.2, 0, 0, 1);
+    animation: ca-sheet-in 0.24s var(--ease-out);
   }
 }
 
@@ -386,7 +386,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .ca-task-notice {
-    animation: ca-notice-in 0.2s cubic-bezier(0.2, 0, 0, 1);
+    animation: ca-notice-in var(--dur-spring) var(--ease-spring) backwards;
   }
 }
 
@@ -435,7 +435,8 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .ca-hint-pop {
-    animation: ca-overlay-in 0.14s ease;
+    transform-origin: 50% 0;
+    animation: ca-pop-in var(--dur-spring) var(--ease-spring) backwards;
   }
 }
 

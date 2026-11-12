@@ -54,7 +54,7 @@ html.theme-circle-vt::view-transition-old(root) {
 }
 
 html.theme-circle-vt::view-transition-new(root) {
-  animation: ca-theme-circle-reveal 0.6s cubic-bezier(0.2, 0, 0, 1) both;
+  animation: ca-theme-circle-reveal 0.6s var(--ease-out) both;
   z-index: 2147483646;
 }
 
@@ -141,24 +141,63 @@ html.theme-circle-vt::view-transition-new(root) {
 /* 课程库 ⇄ 工作台的共享元素过渡（lib/viewTransition.ts）。
    封面与播放器舞台用同一个名字 ca-hero 配对：位置和尺寸由浏览器插值，
    新旧两张快照都按 cover 铺满，比例不同时裁边而不是拉伸变形。
-   其余页面内容只做一次短促的交叉淡化，不抢主角。 */
+
+   两个方向分开编排——它们不是同一段动画倒着放：
+   - 打开（封面 → 舞台）0.44s：东西在变大，给足减速段，落定才稳。封面放大后会糊，
+     所以前 40% 就淡掉、让播放器画面尽早接手。
+   - 返回（舞台 → 封面）0.36s：离开要比进入利落。舞台缩小时画面是越缩越清楚的，
+     所以先留着它缩一段（「视频缩回卡片」），后半程再换成封面。
+   圆角跟着走：封面是圆角、舞台是直角，用 clip-path 在两者之间过渡，
+   不至于一张直角图片直到最后一帧才突然被卡片裁出圆角。 */
 html[data-vt-nav]::view-transition-group(ca-hero) {
-  animation-duration: 0.36s;
-  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  animation-timing-function: var(--ease-out);
   z-index: 10;
 }
+html[data-vt-nav="open"]::view-transition-group(ca-hero) {
+  animation-duration: 0.44s;
+}
+html[data-vt-nav="close"]::view-transition-group(ca-hero) {
+  animation-duration: 0.36s;
+}
+/* plus-lighter 要显式写：浏览器默认是靠一条内置动画挂上它的，下面用 animation 换掉
+   淡入淡出的同时也把它换掉了——两张快照退回普通叠加，交叉淡化的中段整块发透，
+   能透过飞行中的画面看到后面的卡片。显式相加后，两张的不透明度之和始终是 1。 */
 html[data-vt-nav]::view-transition-old(ca-hero),
 html[data-vt-nav]::view-transition-new(ca-hero) {
   height: 100%;
   object-fit: cover;
+  mix-blend-mode: plus-lighter;
 }
-/* 旧快照（起点那张图）放大后会糊：前 40% 就淡掉，让终点画面尽早接手，而不是全程两张叠着。 */
-html[data-vt-nav]::view-transition-old(ca-hero) {
-  animation: ca-vt-hero-out 0.36s cubic-bezier(0.2, 0, 0, 1) both;
+
+html[data-vt-nav="open"]::view-transition-image-pair(ca-hero) {
+  animation: ca-vt-hero-square 0.44s var(--ease-out) both;
 }
-html[data-vt-nav]::view-transition-new(ca-hero) {
-  animation: ca-vt-hero-in 0.36s cubic-bezier(0.2, 0, 0, 1) both;
+html[data-vt-nav="close"]::view-transition-image-pair(ca-hero) {
+  animation: ca-vt-hero-round 0.36s var(--ease-out) both;
 }
+@keyframes ca-vt-hero-square {
+  from { clip-path: inset(0 round var(--r-lg)); }
+  to { clip-path: inset(0 round 0px); }
+}
+@keyframes ca-vt-hero-round {
+  from { clip-path: inset(0 round 0px); }
+  to { clip-path: inset(0 round var(--r-lg)); }
+}
+
+html[data-vt-nav="open"]::view-transition-old(ca-hero) {
+  animation: ca-vt-hero-out 0.44s linear both;
+}
+html[data-vt-nav="open"]::view-transition-new(ca-hero) {
+  animation: ca-vt-hero-in 0.44s linear both;
+}
+html[data-vt-nav="close"]::view-transition-old(ca-hero) {
+  animation: ca-vt-hero-out-late 0.36s linear both;
+}
+html[data-vt-nav="close"]::view-transition-new(ca-hero) {
+  animation: ca-vt-hero-in-late 0.36s linear both;
+}
+/* 透明度走 linear：位移用的减速曲线前段极陡，拿来淡出的话封面几十毫秒就没了，
+   看到的只是一个黑框在变大，认不出它是从哪张卡片来的。 */
 @keyframes ca-vt-hero-out {
   from { opacity: 1; }
   40%, to { opacity: 0; }
@@ -167,7 +206,262 @@ html[data-vt-nav]::view-transition-new(ca-hero) {
   from { opacity: 0; }
   30%, to { opacity: 1; }
 }
+@keyframes ca-vt-hero-out-late {
+  from, 25% { opacity: 1; }
+  70%, to { opacity: 0; }
+}
+@keyframes ca-vt-hero-in-late {
+  from, 25% { opacity: 0; }
+  70%, to { opacity: 1; }
+}
+
+/* 页面其余部分：新页面盖在旧页面上淡入，旧页面垫在底下不动透明度。
+   默认的交叉淡化（两张都半透明、plus-lighter 相加）在这里有个破绽：新页面快照里
+   舞台 / 封面的位置是个洞（那块被单独拎出去飞了），旧页面一淡掉，洞里露出的就是
+   画布底色——浅色主题下封面周围会闪一圈白。旧页面垫底，洞里看到的始终是旧页面。
+   另加一点纵深：进视频时课程库往前推 1.5%，返回时课程库从 1.5% 退回原位。 */
 html[data-vt-nav]::view-transition-old(root),
 html[data-vt-nav]::view-transition-new(root) {
-  animation-duration: 0.22s;
+  mix-blend-mode: normal;
+}
+html[data-vt-nav="open"]::view-transition-old(root) {
+  animation: ca-vt-push-in 0.44s var(--ease-out) both;
+}
+html[data-vt-nav="open"]::view-transition-new(root) {
+  animation: ca-vt-root-in 0.26s var(--ease) both;
+}
+html[data-vt-nav="close"]::view-transition-old(root) {
+  animation: none;
+}
+html[data-vt-nav="close"]::view-transition-new(root) {
+  animation: ca-vt-pull-back 0.36s var(--ease-out) both;
+}
+@keyframes ca-vt-root-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes ca-vt-push-in {
+  from { transform: scale(1); }
+  to { transform: scale(1.015); }
+}
+@keyframes ca-vt-pull-back {
+  from { opacity: 0; transform: scale(1.015); }
+  60% { opacity: 1; }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* ===================== 浮层弹出 =====================
+   桌面菜单、说明气泡此前是硬切（手机上的贴底弹层另有 ca-sheet-in）。从触发点方向
+   略缩着弹出来，落定时带一点回弹——浮层是小东西，回弹不显轻浮。
+   backwards：结束后不留 transform，菜单里的 fixed 子元素（改名框等）不会被困住。 */
+@keyframes ca-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.95);
+  }
+  35% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-menu:not(.ca-menu-sheet) {
+    transform-origin: 50% 0;
+    animation: ca-pop-in var(--dur-spring) var(--ease-spring) backwards;
+  }
+}
+
+/* ===================== 骨架屏扫光 =====================
+   原先是整块明暗脉冲，几十块一起闪像在报错。换成一道从左到右的微光：读作「正在来」。
+   光带是伪元素的 transform，不动 background-position（那个每帧重绘）。
+   减弱动效时动画被压平，伪元素停在屏外，骨架就是一块静止的灰。 */
+@keyframes ca-shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  60%,
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.ca-skeleton {
+  position: relative;
+  overflow: hidden;
+}
+
+.ca-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--surface-panel) 70%, transparent),
+    transparent
+  );
+  animation: ca-shimmer 1.8s var(--ease) infinite;
+}
+
+/* ===================== 进度条 =====================
+   处理进度、今日目标、课程完成度：数值变了就滑过去，不再一格一格跳。
+   播放器的 seek 条不在此列（它用 .ca-fill-video-grad，必须跟手）。
+   首次挂载没有「上一个值」，不会从 0 长出来。 */
+.ca-fill-grad,
+.ca-meta-progress i,
+.ca-sub-progress i,
+.ca-course-progress > i,
+.ca-thumb .ov-bar > i,
+.row-thumb .ov-bar > i {
+  transition: width 0.4s var(--ease-out);
+}
+
+.ca-progress-ring-arc {
+  transition: stroke-dashoffset 0.5s var(--ease-out);
+}
+
+/* ===================== 学习面板页签：滑动下划线 =====================
+   选中线原先画在每个页签自己身上（inset box-shadow），换页签时一边灭一边亮。
+   现在是一条独立的线，在页签之间滑过去并伸缩到新页签的宽度（TabsPanel 量出位置写进
+   --ink-x / --ink-w）。量不到（未布局、测试环境）时不渲染这条线，退回各自的下划线。 */
+.ca-study-tabs {
+  position: relative;
+}
+
+.ca-study-tabs-ink {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 2px;
+  background: var(--text-1);
+  pointer-events: none;
+  transform-origin: 0 50%;
+  transform: translateX(var(--ink-x, 0px)) scaleX(var(--ink-w, 0));
+  transition: transform var(--dur-slow) var(--ease-out);
+}
+
+.ca-study-tabs[data-ink] .ca-study-tab[data-state="active"] {
+  box-shadow: inset 0 -2px 0 transparent;
+}
+
+/* ===================== 开关 =====================
+   圆点滑到另一头时带回弹；按住时圆点被「捏扁」变宽（iOS 开关的手感），松手弹回。
+   圆点的位置是 Tailwind 的 translate 属性，这里只接管它的过渡曲线。 */
+.ca-switch > span {
+  transition:
+    translate var(--dur-spring) var(--ease-spring),
+    width var(--dur) var(--ease-out);
+}
+
+/* 按住时位置与宽度同速收放：位置若还走 0.5s 的弹簧，变宽的圆点会先顶出药丸右缘。 */
+.ca-switch:active > span {
+  width: 20px;
+  transition:
+    translate var(--dur) var(--ease-out),
+    width var(--dur) var(--ease-out);
+}
+
+.ca-switch[aria-checked="true"]:active > span {
+  translate: 15px 0;
+}
+
+/* ===================== 底部 Tab =====================
+   选中的图标轻轻弹起一点。用状态过渡而不是关键帧：首屏不会无缘无故跳一下。 */
+.ca-bottom-tab-btn svg {
+  transition: transform var(--dur-spring) var(--ease-spring);
+}
+
+.ca-bottom-tab-btn.on svg {
+  transform: translateY(-1px) scale(1.1);
+}
+
+/* ===================== 答题反馈 =====================
+   选完那一下：对错图标弹出来；选错的那一行左右晃两下（「不对」的通用手势）。
+   只在刚作答的片刻挂上（QuizPanel 的 fresh），切走再切回来不会重播。 */
+@keyframes ca-answer-pop {
+  from {
+    transform: scale(0.5);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes ca-answer-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-5px);
+  }
+  45% {
+    transform: translateX(4px);
+  }
+  70% {
+    transform: translateX(-2px);
+  }
+  88% {
+    transform: translateX(1px);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ca-answer-pop {
+    animation: ca-answer-pop var(--dur-spring) var(--ease-spring);
+  }
+
+  .ca-answer-shake {
+    animation: ca-answer-shake 0.36s ease-out;
+  }
+}
+
+/* ===================== 卡片网格 / 列表的错峰入场 =====================
+   进课程、进文件夹、切网格/列表时，卡片按顺序一张接一张浮上来（每张晚 28ms）。
+   几个要点：
+   - 只有前 16 个播：一屏之外的卡片反正看不见，几百张同时提层反而掉帧；第 17 个起直接出现。
+   - 骨架屏（role="status"）不播，否则「骨架错峰一遍、真卡片再错峰一遍」。
+   - 动的是网格的直接子元素（拖拽排序的外壳）。dnd-kit 的位移写在它的行内 transform 上，
+     动画期间会被盖住，但入场只有零点几秒，且 backwards 结束后不留 transform。
+   - 从工作台返回时封面还在做共享元素过渡：过渡组每帧跟随新元素的实时位置，
+     卡片自己上浮不会让封面落点错位（已在 Chromium 与 WebKit 实测）。
+   - 调换顺序会改 nth-child，从而改已播完动画的 delay——早已结束的动画不受影响。 */
+@keyframes ca-stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 延迟规则的选择器必须与上面那条等权重（都带 :not(.ca-list-head)）并排在它后面：
+   animation 简写会把 delay 重置成 0，权重低一档就全体同时入场。 */
+@media (prefers-reduced-motion: no-preference) {
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(-n + 16):not(.ca-list-head) {
+    animation: ca-stagger-in 0.34s var(--ease-out) backwards;
+  }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(2):not(.ca-list-head) { animation-delay: 28ms; }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(3):not(.ca-list-head) { animation-delay: 56ms; }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(4):not(.ca-list-head) { animation-delay: 84ms; }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(5):not(.ca-list-head) { animation-delay: 112ms; }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(6):not(.ca-list-head) { animation-delay: 140ms; }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(7):not(.ca-list-head) { animation-delay: 168ms; }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(8):not(.ca-list-head) { animation-delay: 196ms; }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(9):not(.ca-list-head) { animation-delay: 224ms; }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(10):not(.ca-list-head) { animation-delay: 252ms; }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(11):not(.ca-list-head) { animation-delay: 280ms; }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(12):not(.ca-list-head) { animation-delay: 308ms; }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(13):not(.ca-list-head) { animation-delay: 336ms; }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(14):not(.ca-list-head) { animation-delay: 364ms; }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(15):not(.ca-list-head) { animation-delay: 392ms; }
+  :is(.ca-grid, .ca-course-grid, .ca-list):not([role="status"]) > :nth-child(16):not(.ca-list-head) { animation-delay: 420ms; }
 }
