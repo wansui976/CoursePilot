@@ -15,6 +15,9 @@ export type JobLoadState =
 /** 怀疑队列项对应的视频已被删除时，先等这么久再向后端核实（给后端写好 failed 状态的时间）。 */
 export const GONE_VERIFY_DELAY_MS = 2_000;
 
+/** 处理完的视频在队列里多停这么久（让用户看到 100%）再移出。 */
+export const DONE_LINGER_MS = 1_200;
+
 /** 后端对已删除/不存在的视频统一返回 `not found: video <id>`。 */
 function isVideoGone(error: unknown) {
   const text = error instanceof Error ? error.message : String(error);
@@ -252,26 +255,53 @@ export function useProcessingQueue({
     });
   }, [jobsByVideo, queryClient, selectedCourseId]);
 
-  // 处理完成（asr 完成或被取消）后把视频移出处理队列；失败的保留以显示错误。
-  // 留一点时间让用户看到 100% 再消失。后端续跑的 AI 任务在后台继续，不影响视频已可用。
+  // 处理完成（整条流水线做完或被取消）后把视频移出处理队列；失败的保留以显示错误。
+  // 留一点时间让用户看到 100% 再消失。
+  //
+  // 每个视频一个计时器，不随依赖变化清掉：同时处理几个视频时，别的视频的进度事件比
+  // 这 1.2 秒来得勤，每来一条就重新计时的话，做完的那条永远停在 100%。
+  // 只有它又开始处理、或已经不在队列里时才撤掉。
+  const doneTimersRef = useRef<Map<string, number>>(new Map());
   useEffect(() => {
-    const timers: number[] = [];
-    queuedVideos.forEach((video) => {
-      const active = activeJobFor(video.id);
-      if (active?.status === "done" || active?.status === "canceled") {
-        timers.push(
-          window.setTimeout(() => {
-            setQueuedVideos((items) =>
-              items.filter((item) => item.id !== video.id),
-            );
-          }, 1200),
-        );
-      }
-    });
-    return () => timers.forEach((timer) => window.clearTimeout(timer));
+    const timers = doneTimersRef.current;
+    const finished = new Set(
+      queuedVideos
+        .filter((video) => {
+          const status = activeJobFor(video.id)?.status;
+          return status === "done" || status === "canceled";
+        })
+        .map((video) => video.id),
+    );
+    for (const [videoId, timer] of timers) {
+      if (finished.has(videoId)) continue;
+      window.clearTimeout(timer);
+      timers.delete(videoId);
+    }
+    for (const videoId of finished) {
+      if (timers.has(videoId)) continue;
+      timers.set(
+        videoId,
+        window.setTimeout(() => {
+          timers.delete(videoId);
+          setQueuedVideos((items) => items.filter((item) => item.id !== videoId));
+          // 缓存里的 active 列表是处理中拉的（启动、切回窗口都会重新拉），还带着它；
+          // 不一并删掉，上面的「恢复」会马上把它加回队列，要手动刷新才消失。
+          queryClient.setQueryData<Video[]>(qk.processingVideos(), (items) =>
+            items?.filter((item) => item.id !== videoId),
+          );
+        }, DONE_LINGER_MS),
+      );
+    }
     // activeJobFor 只读 jobsByVideo，已在依赖里；它本身每次渲染重建，加进去反而每帧重跑。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobsByVideo, queuedVideos]);
+  }, [jobsByVideo, queuedVideos, queryClient]);
+  useEffect(() => {
+    const timers = doneTimersRef.current;
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+      timers.clear();
+    };
+  }, []);
 
   function startProcessing(video: Video) {
     const videoId = video.id;
