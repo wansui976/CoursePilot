@@ -1452,6 +1452,29 @@ describe("Home", () => {
       await waitFor(() => expect(screen.queryByRole("toolbar", { name: "批量操作" })).not.toBeInTheDocument());
     });
 
+    it("starts processing every unprocessed video in a selection, folders included (#8)", async () => {
+      const done: Video = { ...video, id: "video-4", title: "已处理.mp4", order_index: 4, processed_status: "done" };
+      const deep: Video = { ...video, id: "video-5", title: "1.2 二极管.mp4", order_index: 5, folder_id: "ch1", processed_status: "failed" };
+      mockIpc.videos.list.mockImplementation(async (courseId: string) =>
+        courseId === "course-1" ? [{ ...video, order_index: 2 }, inside, done, deep] : [],
+      );
+      mockIpc.pipeline.process.mockClear();
+      await renderHome();
+      fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+      await screen.findByRole("button", { name: "打开文件夹 第1章" });
+      fireEvent.click(screen.getByRole("button", { name: "选择" }));
+      const bar = screen.getByRole("toolbar", { name: "批量操作" });
+      expect(within(bar).getByRole("button", { name: "开始处理 0 个" })).toBeDisabled();
+      fireEvent.click(within(bar).getByRole("button", { name: "全选" }));
+      // 根目录的待处理视频 + 文件夹里的待处理和失败的；已处理完的不算。
+      fireEvent.click(within(bar).getByRole("button", { name: "开始处理 3 个" }));
+      await waitFor(() => expect(mockIpc.pipeline.process).toHaveBeenCalledTimes(3));
+      expect(mockIpc.pipeline.process.mock.calls.map(([id]) => id).sort()).toEqual(
+        ["video-1", "video-2", "video-5"].sort(),
+      );
+      expect(screen.queryByRole("toolbar", { name: "批量操作" })).not.toBeInTheDocument();
+    });
+
     it("leaves selection mode when a search starts, so select-all cannot reach hidden videos", async () => {
       await renderHome();
       fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));

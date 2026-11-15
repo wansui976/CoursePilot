@@ -520,6 +520,29 @@ export function CourseLibraryView({
     return [];
   });
 
+  /**
+   * 所选里能「开始处理」的视频：直接选中的，加上选中文件夹（连同子文件夹）里的，
+   * 去掉已处理完、正在处理 / 排队中的。一门课在第一层全选，就是整门课没处理的都排进去。
+   * 后端按「同时处理的视频数」排队，一次点几十个也只会同时跑那几个。
+   */
+  function processableSelection(): Video[] {
+    const folderIds = selectedItems.filter((item) => item.kind === "folder").map((item) => item.id);
+    const covered = new Set(folderIds.flatMap((id) => [...subtreeFolderIds(folders, id)]));
+    const picked = new Set(selectedItems.filter((item) => item.kind === "video").map((item) => item.id));
+    return videos.filter((video) => {
+      const inSelection = picked.has(video.id) || (video.folder_id ? covered.has(video.folder_id) : false);
+      if (!inSelection) return false;
+      const status = displayStatus(video);
+      return status === "pending" || status === "failed";
+    });
+  }
+
+  function processSelected() {
+    const targets = processableSelection();
+    for (const video of targets) startProcessing(video);
+    exitSelection();
+  }
+
   async function deleteSelected() {
     const folderIds = selectedItems.filter((item) => item.kind === "folder").map((item) => item.id);
     // 选中的视频若本就在选中的文件夹里，删文件夹时已一并进回收站。
@@ -1680,6 +1703,28 @@ export function CourseLibraryView({
             >
               {t("library.selectAll")}
             </Button>
+            {(() => {
+              const processable = processableSelection().length;
+              return (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={processable === 0}
+                  title={
+                    processable === 0 && selectedItems.length > 0
+                      ? t("library.processSelectedNone")
+                      : undefined
+                  }
+                  aria-label={t("library.processSelected", { count: processable })}
+                  onClick={processSelected}
+                >
+                  <Play className="h-4 w-4" />
+                  <span className="max-sm:sr-only">
+                    {t("library.processSelected", { count: processable })}
+                  </span>
+                </Button>
+              );
+            })()}
             <Button
               variant="ghost"
               size="sm"

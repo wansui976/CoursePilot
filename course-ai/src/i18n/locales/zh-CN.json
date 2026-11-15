@@ -1844,6 +1844,8 @@
     "selectAll": "全选",
     "done": "完成",
     "deleteSelected": "删除所选",
+    "processSelected": "开始处理 {{count}} 个",
+    "processSelectedNone": "所选的视频都已处理或正在处理",
     "deleteSelectedConfirm": "删除所选的 {{count}} 项？\n共 {{videos}} 个视频会移入回收站，可在 30 天内恢复；选中的文件夹连同子文件夹一并删除。彻底删除后会释放处理产物（桌面端不会删除你导入的原视频文件）。"
   },
   "search": {

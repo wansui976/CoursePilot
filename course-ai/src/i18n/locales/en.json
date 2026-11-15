@@ -1858,6 +1858,8 @@
     "selectAll": "Select all",
     "done": "Done",
     "deleteSelected": "Delete selected",
+    "processSelected": "Process {{count}}",
+    "processSelectedNone": "The selected videos are already processed or in progress",
     "deleteSelectedConfirm": "Delete the {{count}} selected items?\n{{videos}} videos will move to the recycle bin and can be restored within 30 days; selected folders are deleted together with their subfolders. Derived files are freed after permanent deletion (on desktop, the original video files you imported are kept)."
   },
   "search": {
