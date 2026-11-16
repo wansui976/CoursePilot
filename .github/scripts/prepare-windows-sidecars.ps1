@@ -46,8 +46,8 @@ Download-File "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.
 # 没有 Vulkan 驱动的机器加载 Vulkan 后端失败，照样用 CPU 跑。
 # 只拷识别要用的文件（llama-server 和它加载的库），其余几十个命令行工具不要。
 # 与 macOS 用同一个版本（prepare-macos-sidecars.sh 的 LLAMA_CPP_TAG）。升级时一起改版本号和哈希。
-$llamaTag = if ($env:LLAMA_CPP_TAG) { $env:LLAMA_CPP_TAG } else { "b12167" }
-$llamaSha256 = "f99b2fc83d93f4a36778e5966600c8a4a36e8a3a6660521601317c02f974ca9d"
+$llamaTag = if ($env:LLAMA_CPP_TAG) { $env:LLAMA_CPP_TAG } else { "b12428" }
+$llamaSha256 = "598b0672b20784752a6fbea3b73523f0905f094326b13b0d734ee47e94e6b986"
 $llamaZip = Join-Path $tempDir "llama.zip"
 $llamaOut = Join-Path $tempDir "llama"
 Download-File "https://github.com/ggml-org/llama.cpp/releases/download/$llamaTag/llama-$llamaTag-bin-win-vulkan-x64.zip" $llamaZip

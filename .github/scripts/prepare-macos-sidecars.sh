@@ -60,7 +60,7 @@ codesign --force --sign - "$ytdlp"
 # - GGML_NATIVE=OFF：不按构建机的 CPU 特性编，换台机器也能跑；最低系统版本与应用一致；
 # - 不要网页界面（只当识别引擎用）：默认会在编译时从 Hugging Face 下载界面资源，构建机连不上就失败。
 # 与 Windows 用同一个 llama.cpp 版本（prepare-windows-sidecars.ps1）。产物旁留版本戳，同版本编过就跳过。
-LLAMA_CPP_TAG="${LLAMA_CPP_TAG:-b12167}"
+LLAMA_CPP_TAG="${LLAMA_CPP_TAG:-b12428}"
 MACOS_MIN_VERSION="14.0"
 llama="$binary_dir/llama-server-$target"
 llama_stamp="$binary_dir/.llama-server-$target.tag"
