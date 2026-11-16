@@ -2728,7 +2728,8 @@ describe("确认卡", () => {
     await screen.findByText("已生效");
     expect(screen.getAllByRole("status")).toHaveLength(1);
     expect(screen.getByRole("status")).toHaveTextContent("操作状态更新：已完成改名：第一讲");
-    expect(screen.getByText("已生效")).toHaveFocus();
+    // 焦点在渲染之后的 effect 里才移过去；慢的 CI 机器上 findByText 返回时它可能还没跑，要等一下。
+    await waitFor(() => expect(screen.getByText("已生效")).toHaveFocus());
 
     await ask("完成了吗");
     await waitFor(() => {
