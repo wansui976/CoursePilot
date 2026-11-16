@@ -93,6 +93,7 @@ use crate::commands::videos::{
 use crate::commands::transcode::{cmd_start_transcode, cmd_transcode_status};
 use crate::commands::whisper::{
     cmd_delete_asr_model, cmd_delete_legacy_models, cmd_download_whisper_model, cmd_get_models_dir,
+    cmd_delete_paddle_ocr, cmd_download_paddle_ocr, cmd_paddle_ocr_status,
     cmd_list_whisper_models, cmd_set_models_dir,
 };
 use crate::db::Db;
@@ -155,6 +156,7 @@ pub fn run() {
             tauri::async_runtime::block_on(async move {
                 let data_dir = handle.path().app_data_dir().expect("app_data_dir");
                 std::fs::create_dir_all(&data_dir).expect("create app data dir");
+                crate::pipeline::model_store::remember_app_data(&data_dir);
                 let db_path = data_dir.join("courseai.db");
                 match crate::backup::apply_pending_restore(&data_dir, &db_path).await {
                     Ok(true) => tracing::info!("applied pending database restore before opening SQLite"),
@@ -316,6 +318,9 @@ pub fn run() {
             cmd_set_models_dir,
             cmd_delete_legacy_models,
             cmd_delete_asr_model,
+            cmd_paddle_ocr_status,
+            cmd_download_paddle_ocr,
+            cmd_delete_paddle_ocr,
             cmd_list_jobs,
             cmd_process_video,
             cmd_cancel_processing,

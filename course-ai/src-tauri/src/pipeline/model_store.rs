@@ -10,8 +10,24 @@ use crate::error::{AppError, AppResult};
 
 /// 用户选的模型存放目录（绝对路径）。空或没设置 = 应用数据目录。
 pub const MODELS_DIR_SETTING: &str = "models_dir";
-/// 存放目录下真正装模型的子目录。换目录时只搬这两个，应用数据目录里的别的东西不动。
-const MODEL_SUBDIRS: [&str; 2] = ["whisper", "asr"];
+/// 存放目录下真正装模型的子目录。换目录时只搬这几个，应用数据目录里的别的东西不动。
+const MODEL_SUBDIRS: [&str; 3] = ["whisper", "asr", "ocr"];
+
+/// 应用数据目录，启动时记下。课件 OCR 这类只拿得到数据库、拿不到 AppHandle 的地方
+/// 靠它找到模型存放目录。
+static APP_DATA: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+pub fn remember_app_data(dir: &Path) {
+    let _ = APP_DATA.set(dir.to_path_buf());
+}
+
+/// 当前的模型存放目录（按设置；启动前调用拿不到应用数据目录时报错）。
+pub async fn current_models_root(db: &Db) -> AppResult<PathBuf> {
+    let app_data = APP_DATA
+        .get()
+        .ok_or_else(|| AppError::Config("应用数据目录还没准备好".into()))?;
+    models_root(db, app_data).await
+}
 
 /// 按设置值算出模型根目录。设置值不是绝对路径（被手改坏了）就当没设置。
 pub fn root_from_setting(value: Option<&str>, app_data: &Path) -> PathBuf {

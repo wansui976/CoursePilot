@@ -15,6 +15,7 @@ import type {
   UpdateCheck,
   WhisperModel,
   ModelsDir,
+  PaddleOcrStatus,
   CloudSyncProbeAccountChangeResult,
   CloudSyncStatus,
   CloudSyncProbeArmResult,
@@ -97,6 +98,14 @@ export const whisper = {
   deleteModel: (id: string): Promise<void> => invoke("cmd_delete_asr_model", { id }),
   /** 删掉不再使用的旧模型文件。 */
   deleteLegacyModels: (): Promise<ModelsDir> => invoke("cmd_delete_legacy_models"),
+};
+
+export const ocrModel = {
+  status: (): Promise<PaddleOcrStatus> => invoke("cmd_paddle_ocr_status"),
+  /** 下载（进度见 `ocr-model:download` 事件，字段同语音识别模型的下载事件）。 */
+  download: (): Promise<void> => invoke("cmd_download_paddle_ocr"),
+  /** 删掉模型；设置里正选着 PaddleOCR 时后端会改回本地 OCR。 */
+  remove: (): Promise<void> => invoke("cmd_delete_paddle_ocr"),
 };
 
 export const backup = {

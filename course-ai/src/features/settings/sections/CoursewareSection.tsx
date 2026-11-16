@@ -5,6 +5,8 @@ import { Switch } from "@/ui/switch";
 import { AUTO_SENSITIVITY, DEFAULT_SLIDES_SENSITIVITY } from "@/lib/slides";
 import { FIELD, Select, Group, Row, StackRow, SavedBadge, type RowTag } from "@/features/settings/primitives";
 import type { SettingsForm } from "@/features/settings/useSettingsForm";
+import { PaddleOcrModelRow } from "@/features/settings/PaddleOcrModelRow";
+import { usePaddleOcrStatus } from "@/features/settings/usePaddleOcrStatus";
 
 /** 课件提取与文字识别。 */
 export function CoursewareSection({ form }: { form: SettingsForm }) {
@@ -43,6 +45,7 @@ export function CoursewareSection({ form }: { form: SettingsForm }) {
     saveOcrCreds,
     saveDeepseekOcr,
   } = form;
+  const paddle = usePaddleOcrStatus();
 
   return (
     <>
@@ -57,11 +60,23 @@ export function CoursewareSection({ form }: { form: SettingsForm }) {
               onChange={(event) => void changeOcrBackend(event.target.value)}
             >
               <option value="local">{t("settings.ocr.localOcr")}</option>
+              {/* 只有桌面有；手机上用系统 OCR。 */}
+              {(paddle.status?.available || ocrBackend === "paddle") && (
+                <option value="paddle">{t("settings.ocr.paddleOcr")}</option>
+              )}
               <option value="aliyun">{t("settings.ocr.aliyunOcr")}</option>
               <option value="deepseek">{t("settings.ocr.deepseekOcr")}</option>
             </Select>
           </div>
         </Row>
+
+        {ocrBackend === "paddle" && paddle.status?.available && (
+          <PaddleOcrModelRow
+            status={paddle.status}
+            onChanged={paddle.refresh}
+            onRemoved={() => void changeOcrBackend("local")}
+          />
+        )}
 
         {ocrBackend === "aliyun" && (
           <>

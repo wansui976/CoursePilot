@@ -22,6 +22,9 @@ fn normalize_ocr_backend(value: &str) -> Option<&'static str> {
         "local" | "tesseract" => Some("local"),
         "aliyun" => Some("aliyun"),
         "deepseek" => Some("deepseek"),
+        // PaddleOCR 只在桌面上有；手机上（同步过来的设置）按系统本地 OCR 走。
+        "paddle" if cfg!(any(target_os = "android", target_os = "ios")) => Some("local"),
+        "paddle" => Some("paddle"),
         _ => None,
     }
 }
@@ -101,6 +104,18 @@ pub async fn deepseek_ocr_config(db: &crate::db::Db) -> AppResult<DeepSeekOcrCon
 }
 
 /// 本地 Tesseract 回退引擎的语言包设置。
+/// 本地 OCR 认一张图：设置选了 PaddleOCR 就用它，否则用系统 / Tesseract（按平台）。
+pub async fn run_local_ocr(db: &crate::db::Db, image: &Path, langs: &str) -> AppResult<String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if resolve_ocr_backend(db).await == "paddle" {
+        let root = crate::pipeline::model_store::current_models_root(db).await?;
+        return crate::pipeline::paddle_ocr::recognize_file(&root, image).await;
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let _ = db;
+    ocr::run_ocr_on_image(image, langs).await
+}
+
 pub async fn ocr_langs(db: &crate::db::Db) -> String {
     get_setting(db, "ocr_langs")
         .await
@@ -168,14 +183,14 @@ pub async fn cmd_ocr_region(
     }
 
     let langs = ocr_langs(&state.db).await;
-    ocr::run_ocr(
+    let image = ocr::grab_frame(
         Path::new(&video.file_path),
         Path::new(&video.data_dir),
         at_ms,
         rect,
-        &langs,
     )
-    .await
+    .await?;
+    run_local_ocr(&state.db, &image, &langs).await
 }
 
 /// 拍题识字：对一张图（data URL，截图或手机拍的照片）跑当前设置的 OCR 引擎，返回识别文字。
@@ -207,7 +222,7 @@ pub async fn cmd_ocr_image(state: State<'_, AppState>, image: String) -> AppResu
     let path = std::env::temp_dir().join(format!("courseai-ocr-{}.{ext}", uuid::Uuid::new_v4()));
     tokio::fs::write(&path, &bytes).await?;
     let langs = ocr_langs(&state.db).await;
-    let result = ocr::run_ocr_on_image(&path, &langs).await;
+    let result = run_local_ocr(&state.db, &path, &langs).await;
     let _ = tokio::fs::remove_file(&path).await;
     result
 }
@@ -426,6 +441,7 @@ mod tests {
         assert_eq!(normalize_ocr_backend(" tesseract "), Some("local"));
         assert_eq!(normalize_ocr_backend("aliyun"), Some("aliyun"));
         assert_eq!(normalize_ocr_backend("deepseek"), Some("deepseek"));
+        assert_eq!(normalize_ocr_backend("paddle"), Some("paddle"));
         assert_eq!(normalize_ocr_backend("unknown"), None);
     }
 }

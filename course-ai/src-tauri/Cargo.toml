@@ -60,6 +60,10 @@ tauri-plugin-single-instance = "2"
 ferrous-opencc = { version = "0.4", default-features = false, features = ["t2s-conversion"] }
 # 启动失败时弹原生错误框（tauri-plugin-dialog 已带进来；它的阻塞弹窗在主线程上会死锁）。
 rfd = { version = "0.16", default-features = false }
+# PaddleOCR（PP-OCRv5）本地 OCR：动态加载 sherpa-onnx 已经带着的 onnxruntime（1.28），不另打一份。
+# api-22 = 要求的 ORT C API 最低版本，比打包的 1.28 低就能用；升 sherpa-onnx 时别把这里调到比它高。
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-22"] }
+imageproc = { version = "0.27", default-features = false }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2 = "0.6.4"

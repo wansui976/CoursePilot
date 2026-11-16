@@ -373,3 +373,11 @@ export interface UpdateCheck {
   /** 发布页地址：更新说明和各平台的安装包。 */
   url: string;
 }
+
+/** 课件 OCR 的 PaddleOCR 模型（只在桌面上有）。 */
+export type PaddleOcrStatus = {
+  available: boolean;
+  installed: boolean;
+  downloadSize: number;
+  sizeOnDisk: number;
+};

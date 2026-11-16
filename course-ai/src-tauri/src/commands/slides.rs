@@ -364,7 +364,7 @@ pub async fn ocr_slides_for_video(
                             Err(error) => Err(AppError::Io(error)),
                         }
                     } else {
-                        ocr::run_ocr_on_image(Path::new(path), langs).await
+                        crate::commands::tools::run_local_ocr(&state.db, Path::new(path), langs).await
                     }
                 };
                 let text = tokio::time::timeout(OCR_PAGE_TIMEOUT, recognize)

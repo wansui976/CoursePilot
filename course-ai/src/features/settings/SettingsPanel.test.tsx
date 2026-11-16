@@ -1,5 +1,5 @@
 import "@/i18n";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsPanel } from "./SettingsPanel";
 
@@ -24,6 +24,11 @@ const { mockIpc } = vi.hoisted(() => ({
       purgeAll: vi.fn(),
     },
     notify: vi.fn(),
+    ocrModel: {
+      status: vi.fn(),
+      download: vi.fn(),
+      remove: vi.fn(),
+    },
   },
 }));
 const { pickDirectoryPathMock } = vi.hoisted(() => ({
@@ -47,6 +52,7 @@ const llmActionsMock = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 vi.mock("@/lib/mobileFiles", () => ({
   pickDirectoryPath: pickDirectoryPathMock,
   shareFile: shareFileMock,
@@ -114,6 +120,14 @@ describe("SettingsPanel", () => {
       .mockReset()
       .mockResolvedValue({ deleted_files: 1, deleted_dirs: 1, freed_bytes: 1_048_576 });
     confirmMock.mockReset().mockResolvedValue(true);
+    mockIpc.ocrModel.status.mockReset().mockResolvedValue({
+      available: true,
+      installed: false,
+      downloadSize: 21_524_894,
+      sizeOnDisk: 0,
+    });
+    mockIpc.ocrModel.download.mockReset().mockResolvedValue(undefined);
+    mockIpc.ocrModel.remove.mockReset().mockResolvedValue(undefined);
     saveFileMock.mockReset().mockResolvedValue("/tmp/CoursePilot-backup.db");
     shareFileMock.mockReset().mockResolvedValue(undefined);
     llmActionsMock.save.mockReset().mockResolvedValue(true);
@@ -456,6 +470,42 @@ describe("SettingsPanel", () => {
     expect(kai).toHaveAttribute("aria-pressed", "true");
     expect(localStorage.getItem("course-ai-reading-font")).toBe("kai");
     expect(document.documentElement.style.getPropertyValue("--font-reading")).toContain('"Kaiti SC"');
+  });
+
+  it("offers PaddleOCR on desktop: download, then delete switches back to local OCR (#8)", async () => {
+    render(<SettingsPanel onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole("button", { name: "课件 / OCR" }));
+    const engine = await screen.findByLabelText("OCR 引擎");
+    await waitFor(() =>
+      expect(within(engine).getByRole("option", { name: /PaddleOCR/ })).toBeInTheDocument(),
+    );
+    fireEvent.change(engine, { target: { value: "paddle" } });
+    await waitFor(() => expect(mockIpc.settings.set).toHaveBeenCalledWith("ocr_backend", "paddle"));
+    expect(await screen.findByText("还没下载（21 MB）")).toBeInTheDocument();
+
+    mockIpc.ocrModel.status.mockResolvedValue({
+      available: true,
+      installed: true,
+      downloadSize: 21_524_894,
+      sizeOnDisk: 21_524_894,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "下载" }));
+    await waitFor(() => expect(mockIpc.ocrModel.download).toHaveBeenCalled());
+    expect(await screen.findByText("已下载 · 21 MB")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    await waitFor(() => expect(mockIpc.ocrModel.remove).toHaveBeenCalled());
+    await waitFor(() => expect(mockIpc.settings.set).toHaveBeenCalledWith("ocr_backend", "local"));
+    expect(screen.getByLabelText("OCR 引擎")).toHaveValue("local");
+  });
+
+  it("hides PaddleOCR where the platform uses the system OCR", async () => {
+    mockIpc.ocrModel.status.mockResolvedValue({ available: false, installed: false, downloadSize: 0, sizeOnDisk: 0 });
+    render(<SettingsPanel onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole("button", { name: "课件 / OCR" }));
+    const engine = await screen.findByLabelText("OCR 引擎");
+    await waitFor(() => expect(mockIpc.ocrModel.status).toHaveBeenCalled());
+    expect(within(engine).queryByRole("option", { name: /PaddleOCR/ })).not.toBeInTheDocument();
   });
 
   it("lets users choose DeepSeek Vision OCR and save model, base URL, and API key", async () => {

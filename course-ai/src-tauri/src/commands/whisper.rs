@@ -129,6 +129,106 @@ pub async fn cmd_delete_asr_model(
     delete_model(&root, &id).await
 }
 
+/// 课件 OCR 用的 PaddleOCR 模型（只在桌面上有）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaddleOcrStatus {
+    /// 这个平台能不能用（手机上用系统 OCR，没有这一项）。
+    pub available: bool,
+    pub installed: bool,
+    pub download_size: u64,
+    /// 已经下到本机的大小（含下了一半的）。
+    pub size_on_disk: u64,
+}
+
+#[tauri::command]
+pub async fn cmd_paddle_ocr_status(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<PaddleOcrStatus> {
+    paddle::status(&app, &state).await
+}
+
+/// 下载 PaddleOCR 模型（两个 onnx + 字典，约 21MB）。进度走 `ocr-model:download` 事件，
+/// 下载、校验、续传和语音识别模型是同一套。
+#[tauri::command]
+pub async fn cmd_download_paddle_ocr(app: tauri::AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    paddle::download(&app, &state).await
+}
+
+/// 删掉 PaddleOCR 模型。设置里正选着它的话改回系统 OCR，免得下一页课件直接报「模型还没下载」。
+#[tauri::command]
+pub async fn cmd_delete_paddle_ocr(app: tauri::AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    paddle::delete(&app, &state).await
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod paddle {
+    use super::*;
+    use crate::pipeline::paddle_ocr;
+
+    pub async fn status(app: &tauri::AppHandle, state: &AppState) -> AppResult<PaddleOcrStatus> {
+        let root = model_store::models_root(&state.db, &app_data(app)?).await?;
+        Ok(PaddleOcrStatus {
+            available: true,
+            installed: paddle_ocr::is_installed(&root),
+            download_size: paddle_ocr::download_size(),
+            size_on_disk: model_store::dir_size(&paddle_ocr::model_dir(&root)),
+        })
+    }
+
+    pub async fn download(app: &tauri::AppHandle, state: &AppState) -> AppResult<()> {
+        let root = model_store::models_root(&state.db, &app_data(app)?).await?;
+        let missing = paddle_ocr::missing_files(&root);
+        let total: u64 = missing.iter().map(|(_, file)| file.size).sum();
+        let client = reqwest::Client::builder()
+            .user_agent(DOWNLOAD_USER_AGENT)
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|error| AppError::Other(error.to_string()))?;
+        let emit = |received: u64, done: bool| {
+            app.emit(
+                "ocr-model:download",
+                DownloadEvent { id: "paddle".into(), received, total, done, error: None },
+            )
+            .ok();
+        };
+        download_files(&client, paddle_ocr::DISPLAY_NAME, missing, |received| emit(received, false)).await?;
+        emit(total, true);
+        Ok(())
+    }
+
+    pub async fn delete(app: &tauri::AppHandle, state: &AppState) -> AppResult<()> {
+        let root = model_store::models_root(&state.db, &app_data(app)?).await?;
+        let dir = paddle_ocr::model_dir(&root);
+        if dir.exists() {
+            tokio::fs::remove_dir_all(&dir).await?;
+        }
+        if crate::commands::tools::resolve_ocr_backend(&state.db).await == "paddle" {
+            crate::commands::settings::set_setting(&state.db, "ocr_backend", "local").await?;
+        }
+        Ok(())
+    }
+}
+
+/// 手机上用系统 OCR（Apple Vision / ML Kit），没有 PaddleOCR。
+#[cfg(any(target_os = "android", target_os = "ios"))]
+mod paddle {
+    use super::*;
+
+    pub async fn status(_app: &tauri::AppHandle, _state: &AppState) -> AppResult<PaddleOcrStatus> {
+        Ok(PaddleOcrStatus { available: false, installed: false, download_size: 0, size_on_disk: 0 })
+    }
+
+    pub async fn download(_app: &tauri::AppHandle, _state: &AppState) -> AppResult<()> {
+        Err(AppError::Other("这台设备用系统自带的 OCR，不需要下载 PaddleOCR".into()))
+    }
+
+    pub async fn delete(_app: &tauri::AppHandle, _state: &AppState) -> AppResult<()> {
+        Ok(())
+    }
+}
+
 #[derive(Serialize, Clone)]
 struct MoveEvent {
     copied: u64,
@@ -402,6 +502,33 @@ async fn fetch_verified(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 端到端：用应用自己的下载代码把 PaddleOCR 模型下到临时目录，设置选 paddle，
+    /// 再走课件 OCR 用的同一个入口认一张图。要联网、要 onnxruntime：
+    /// `ORT_DYLIB_PATH=target/debug/libonnxruntime.dylib PADDLE_OCR_IMAGE=slide.png cargo test --lib paddle_end_to_end -- --ignored`
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[tokio::test]
+    #[ignore]
+    async fn paddle_end_to_end() {
+        use crate::pipeline::paddle_ocr;
+        let Ok(image) = std::env::var("PADDLE_OCR_IMAGE") else { return };
+        let app_data = tempfile::tempdir().unwrap();
+        let db = crate::db::Db::connect_and_migrate(&app_data.path().join("t.db")).await.unwrap();
+        model_store::remember_app_data(app_data.path());
+        let root = model_store::current_models_root(&db).await.unwrap();
+        assert!(!paddle_ocr::is_installed(&root));
+        let client = reqwest::Client::builder().user_agent(DOWNLOAD_USER_AGENT).build().unwrap();
+        download_files(&client, paddle_ocr::DISPLAY_NAME, paddle_ocr::missing_files(&root), |_| {})
+            .await
+            .unwrap();
+        assert!(paddle_ocr::is_installed(&root));
+        crate::commands::settings::set_setting(&db, "ocr_backend", "paddle").await.unwrap();
+        let text = crate::commands::tools::run_local_ocr(&db, std::path::Path::new(&image), "chi_sim+eng")
+            .await
+            .unwrap();
+        eprintln!("{text}");
+        assert!(text.contains("梯度下降"), "{text}");
+    }
 
     #[tokio::test]
     async fn deleting_a_model_removes_only_its_own_files() {

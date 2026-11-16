@@ -22,6 +22,8 @@ pub mod local_asr;
 pub mod media_kind;
 pub mod model_store;
 pub mod ocr;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod paddle_ocr;
 pub mod playable;
 pub mod quiz;
 pub mod rag;
