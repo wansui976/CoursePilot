@@ -22,7 +22,7 @@ use crate::commands::ai::{
     cmd_delete_quiz_set, cmd_get_quiz, cmd_get_quiz_course_rules, cmd_get_summary, cmd_grade_quiz_answer, cmd_set_quiz_course_rules, cmd_detect_ollama, cmd_has_api_key, cmd_list_models, cmd_save_llm_profiles, cmd_save_notes,
     cmd_set_api_key, cmd_stale_ai_artifacts,
 };
-use crate::commands::app::{cmd_check_update, cmd_exit_app};
+use crate::commands::app::{cmd_check_update, cmd_exit_app, cmd_updater_check, cmd_updater_install};
 use crate::commands::assistant::{cmd_assistant_ask, cmd_cancel_assistant};
 use crate::commands::backup::{cmd_backup_database, cmd_restore_database};
 use crate::commands::clips::{cmd_add_clip, cmd_delete_clip, cmd_list_clips, cmd_update_clip};
@@ -142,6 +142,9 @@ pub fn run() {
             let _ = window.set_focus();
         }
     }));
+    // 应用内自动更新（只有桌面）。
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -273,6 +276,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             cmd_exit_app,
             cmd_check_update,
+            cmd_updater_check,
+            cmd_updater_install,
             cmd_create_course,
             cmd_list_courses,
             cmd_delete_course,

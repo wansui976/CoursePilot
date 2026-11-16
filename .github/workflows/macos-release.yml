@@ -142,7 +142,12 @@ jobs:
 
       - name: Build macOS bundles
         working-directory: course-ai
-        run: pnpm tauri build --bundles app,dmg
+        env:
+          # 应用内自动更新：给 .app.tar.gz 签名（公钥在 tauri.conf.json 的 plugins.updater）。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        # 更新包只在发布时出（Build Check 没有私钥）。
+        run: pnpm tauri build --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":true}}'
 
       - name: Upload macOS DMG to release
         env:
@@ -152,3 +157,20 @@ jobs:
             course-ai/src-tauri/target/release/bundle/dmg/course-ai_*.dmg \
             --clobber \
             --repo "$GITHUB_REPOSITORY"
+
+      # 两个架构的更新包同名（course-ai.app.tar.gz），带上版本和架构再传，免得互相覆盖。
+      - name: Upload updater bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          dir=course-ai/src-tauri/target/release/bundle/macos
+          name="course-ai_${version}_${{ matrix.arch }}.app.tar.gz"
+          cp "$dir/course-ai.app.tar.gz" "$name"
+          cp "$dir/course-ai.app.tar.gz.sig" "$name.sig"
+          gh release upload "$RELEASE_TAG" "$name" "$name.sig" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Update latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/ci/.github/scripts/updater-manifest.py "$RELEASE_TAG"

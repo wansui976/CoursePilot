@@ -49,5 +49,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUyMEUzMkJFQzBCOUUxOTcKUldTWDRibkF2aklPNHI5MGdpVDNXaXpBbmZHcFRxcnp3WThqdXVWSk8xRTNxV3daUkJiVTZNOFcK",
+      "endpoints": [
+        "https://github.com/wansui976/CoursePilot/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

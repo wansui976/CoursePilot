@@ -7,6 +7,74 @@ pub fn cmd_exit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// 应用内自动更新查到的新版本（只有桌面；手机上走商店 / 自签，仍用下面的 GitHub 检查）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdate {
+    pub version: String,
+    pub current: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct UpdateProgress {
+    downloaded: u64,
+    total: Option<u64>,
+}
+
+/// 查一次有没有签过名的新版本（latest.json）。没有返回 None。
+/// 和 `cmd_check_update` 不同：这里查到的版本可以直接下载安装，签名对不上的包不会被装。
+#[tauri::command]
+pub async fn cmd_updater_check(app: tauri::AppHandle) -> AppResult<Option<AppUpdate>> {
+    #[cfg(desktop)]
+    {
+        use tauri_plugin_updater::UpdaterExt;
+        let failed = |error: tauri_plugin_updater::Error| AppError::Other(format!("检查更新失败：{error}"));
+        let update = app.updater().map_err(failed)?.check().await.map_err(failed)?;
+        Ok(update.map(|update| AppUpdate { version: update.version, current: update.current_version }))
+    }
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        Ok(None)
+    }
+}
+
+/// 下载、校验签名、安装，然后重启。进度走 `updater:progress` 事件（downloaded / total 字节）。
+/// Windows 上安装器以 passive 模式运行（只显示进度条），装完由安装器重新打开应用。
+#[tauri::command]
+pub async fn cmd_updater_install(app: tauri::AppHandle) -> AppResult<()> {
+    #[cfg(desktop)]
+    {
+        use tauri::Emitter;
+        use tauri_plugin_updater::UpdaterExt;
+        let failed = |error: tauri_plugin_updater::Error| AppError::Other(format!("更新失败：{error}"));
+        let update = app
+            .updater()
+            .map_err(failed)?
+            .check()
+            .await
+            .map_err(failed)?
+            .ok_or_else(|| AppError::Other("已经是最新版本".into()))?;
+        let mut downloaded = 0u64;
+        update
+            .download_and_install(
+                |chunk, total| {
+                    downloaded += chunk as u64;
+                    let _ = app.emit("updater:progress", UpdateProgress { downloaded, total });
+                },
+                || {},
+            )
+            .await
+            .map_err(failed)?;
+        app.restart();
+    }
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        Err(AppError::Other("手机上请到发布页下载新版本".into()))
+    }
+}
+
 /// GitHub 上最新的正式版：`/releases/latest` 不含草稿和预发布版。
 const LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/wansui976/CoursePilot/releases/latest";

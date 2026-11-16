@@ -85,9 +85,15 @@ jobs:
         uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 应用内自动更新：用这把私钥给安装包签名（公钥在 tauri.conf.json 的 plugins.updater）。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: course-ai
           tauriScript: pnpm tauri
+          # 只在发布时出更新包（Build Check 没有私钥）。latest.json 由下面的脚本合并三个平台再写。
+          args: --config {"bundle":{"createUpdaterArtifacts":true}}
+          includeUpdaterJson: false
           tagName: ${{ env.RELEASE_TAG }}
           releaseName: CoursePilot ${{ env.RELEASE_TAG }}
           releaseBody: |
@@ -95,3 +101,20 @@ jobs:
           releaseDraft: false
           prerelease: false
           assetNamePattern: CoursePilot_[version]_[platform]_[arch][setup][ext]
+
+      # 签名文件按上传的安装包重命名再传：latest.json 靠「安装包名 + .sig」找到它。
+      - name: Upload updater signature
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          sig=$(ls course-ai/src-tauri/target/release/bundle/nsis/*-setup.exe.sig | head -1)
+          cp "$sig" "CoursePilot_${version}_windows_x64-setup.exe.sig"
+          gh release upload "$RELEASE_TAG" "CoursePilot_${version}_windows_x64-setup.exe.sig" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Update latest.json
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python .github/scripts/updater-manifest.py "$RELEASE_TAG"

@@ -1934,6 +1934,12 @@
     "restore": "Restore this version"
   },
   "update": {
+    "install": "Update now",
+    "installing": "Downloading {{percent}}%",
+    "installingUnknown": "Downloading…",
+    "busyConfirm": "Videos are still processing. Updating restarts the app and interrupts them; you'll need to retry them from the processing queue. Update now?",
+    "busyTitle": "Update CoursePilot",
+    "failed": "The automatic update didn't work: {{error}}. You can download it from the release page.",
     "available": "CoursePilot {{version}} is out",
     "view": "See what's new",
     "ignore": "Don't remind me about this version"
