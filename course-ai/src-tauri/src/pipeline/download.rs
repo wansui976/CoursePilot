@@ -965,10 +965,15 @@ mod tests {
 
     #[test]
     fn a_course_on_an_unplugged_drive_is_reported_as_such() {
+        // `/Volumes/<卷名>` 是 macOS 的外置盘挂载方式；别的平台上这条检查不报（Windows 看盘符，
+        // 见 missing_drive）。这条断言只在 macOS 上成立——Windows CI 上跑出来过。
+        #[cfg(target_os = "macos")]
         assert_eq!(
             unmounted_volume(Path::new("/Volumes/courseai-no-such-drive/网课")),
             Some("courseai-no-such-drive".into())
         );
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(unmounted_volume(Path::new("/Volumes/courseai-no-such-drive/网课")), None);
         assert_eq!(unmounted_volume(Path::new("/Users/someone/网课")), None);
         assert_eq!(unmounted_volume(Path::new("/Volumes")), None);
         assert_eq!(unmounted_volume(Path::new("Volumes/x/y")), None);
