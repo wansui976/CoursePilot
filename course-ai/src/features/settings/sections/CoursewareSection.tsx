@@ -147,7 +147,7 @@ export function CoursewareSection({ form }: { form: SettingsForm }) {
                 type="text"
                 className={`${FIELD} w-full sm:w-64`}
                 value={deepseekModel}
-                placeholder="deepseek-v4-flash-vision-exp"
+                placeholder="deepseek-flash"
                 onChange={(event) => setDeepseekModel(event.target.value)}
               />
             </Row>

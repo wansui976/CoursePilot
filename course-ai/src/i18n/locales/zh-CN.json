@@ -1602,7 +1602,7 @@
     "profileName": "配置名称",
     "profileNamePlaceholder": "名称",
     "modelName": "模型名",
-    "modelPlaceholder": "模型名（如 gpt-4o / claude-sonnet-4-6）",
+    "modelPlaceholder": "模型名（如 gpt-5.4-mini / claude-sonnet-5-5）",
     "showKey": "显示 API Key",
     "hideKey": "隐藏 API Key",
     "showLabel": "显示",

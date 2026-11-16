@@ -359,7 +359,7 @@ Android and iOS use this backend by default. On desktop, choose "Alibaba Cloud D
 <details>
 <summary><b>DeepSeek vision (OCR)</b></summary>
 
-In **Settings → Slides / OCR**, choose "DeepSeek Vision (AI)" and fill in the Base URL (default `https://api.deepseek.com`), the model (default `deepseek-v4-flash-vision-exp`), and an API key. This key is stored separately from your LLM profile keys.
+In **Settings → Slides / OCR**, choose "DeepSeek Vision (AI)" and fill in the Base URL (default `https://api.deepseek.com`), the model (default `deepseek-flash`), and an API key. This key is stored separately from your LLM profile keys.
 
 </details>
 

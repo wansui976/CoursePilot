@@ -69,7 +69,7 @@ export function useSettingsForm() {
   const [ocrSecret, setOcrSecret] = useState("");
   const [ocrSaved, setOcrSaved] = useState("");
   const [ocrSavedErr, setOcrSavedErr] = useState(false);
-  const [deepseekModel, setDeepseekModel] = useState("deepseek-v4-flash-vision-exp");
+  const [deepseekModel, setDeepseekModel] = useState("deepseek-flash");
   const [deepseekBaseUrl, setDeepseekBaseUrl] = useState("https://api.deepseek.com");
   const [deepseekKey, setDeepseekKey] = useState("");
   const [deepseekSaved, setDeepseekSaved] = useState("");
@@ -142,7 +142,7 @@ export function useSettingsForm() {
       load("aliyun_ocr_type", (value) => setOcrType(value ?? "Advanced")),
       load("aliyun_ocr_access_key_id", (value) => setOcrKeyId(value ?? "")),
       load("deepseek_ocr_model", (value) =>
-        setDeepseekModel(value ?? "deepseek-v4-flash-vision-exp"),
+        setDeepseekModel(value ?? "deepseek-flash"),
       ),
       load("deepseek_ocr_base_url", (value) =>
         setDeepseekBaseUrl(value ?? "https://api.deepseek.com"),

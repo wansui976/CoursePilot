@@ -2,7 +2,8 @@
 //!
 //! 参考 https://api-docs.deepseek.com/zh-cn/guides/vision 。走 OpenAI 兼容的
 //! `/chat/completions` 端点，图片以 base64 data URL 内联进 user 消息；
-//! `deepseek-v4-flash-vision-exp` 是当前支持的视觉模型。
+//! `deepseek-flash`（DeepSeek-V4.1-Flash）支持看图。原来的 `deepseek-v4-flash-vision-exp` 已退役，
+//! 官方仍接受这个旧名字、转给 deepseek-flash 处理，所以设置里存着旧名字的也照常能用。
 //! 与阿里云 OCR 一样，这是「引擎不可用则整批停」的路径，凭据缺失/鉴权失败应尽快报错。
 
 use crate::error::{AppError, AppResult};
@@ -11,7 +12,7 @@ use reqwest::header::CONTENT_TYPE;
 use serde_json::{json, Value};
 
 /// 默认视觉模型。
-pub const DEFAULT_MODEL: &str = "deepseek-v4-flash-vision-exp";
+pub const DEFAULT_MODEL: &str = "deepseek-flash";
 /// DeepSeek OpenAI 兼容端点。`/chat/completions` 直接挂在根路径上。
 pub const DEFAULT_BASE_URL: &str = "https://api.deepseek.com";
 
@@ -176,7 +177,7 @@ mod tests {
 
     #[test]
     fn default_constants_match_deepseek_vision() {
-        assert_eq!(DEFAULT_MODEL, "deepseek-v4-flash-vision-exp");
+        assert_eq!(DEFAULT_MODEL, "deepseek-flash");
         assert_eq!(DEFAULT_BASE_URL, "https://api.deepseek.com");
     }
 
