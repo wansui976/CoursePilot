@@ -32,6 +32,7 @@ import {
   usesApplePlaybackEngine,
   type GestureHint,
 } from "./playerPrefs";
+import { applyVolume, canBoost, isBoosted, readCourseVolume, writeCourseVolume } from "./volume";
 import { usePlayerKeyboard } from "./usePlayerKeyboard";
 import { useHighlights } from "./useHighlights";
 import { useIosGestures, type TapState } from "./useIosGestures";
@@ -64,12 +65,15 @@ const EMPTY_DANMAKU: DanmakuEntry[] = [];
 export function VideoPlayer({
   src,
   videoId,
+  courseId = null,
   immersive = false,
   onFullscreenChange,
   onTranscoded,
 }: {
   src: string;
   videoId: string;
+  /** 所属课程：每门课记住自己的音量。 */
+  courseId?: string | null;
   immersive?: boolean;
   onFullscreenChange?: (fullscreen: boolean) => void;
   /** 本机转码完成：外层重新取一次 mediaUrl（此刻 data_dir 里已经有 playable.mp4）。 */
@@ -180,7 +184,18 @@ export function VideoPlayer({
 
   const [rate, setRate] = useState(loadPlaybackRate);
   const silenceSkip = useSilenceSkip(videoId);
-  const [volume, setVolume] = useState(1);
+  const [volume, setVolume] = useState(() => readCourseVolume(courseId) ?? 1);
+  // 换课时换成那门课上次的音量；同一门课里换视频音量不变。
+  const volumeCourseRef = useRef(courseId);
+  useEffect(() => {
+    if (volumeCourseRef.current === courseId) return;
+    volumeCourseRef.current = courseId;
+    setVolume(readCourseVolume(courseId) ?? 1);
+  }, [courseId]);
+  useEffect(() => {
+    // 0 不记：静音靠静音键，下次打开这门课不该是一片寂静。
+    if (volume > 0) writeCourseVolume(volumeCourseRef.current, volume);
+  }, [volume]);
   const [muted, setMuted] = useState(false);
   const [captionsOn, setCaptionsOn] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
@@ -324,8 +339,7 @@ export function VideoPlayer({
   // 重新应用，否则用户静音后会突然出声。
   useEffect(() => {
     if (!ref.current) return;
-    ref.current.volume = volume;
-    ref.current.muted = muted || volume === 0;
+    applyVolume(ref.current, volume, muted);
   }, [muted, volume, src, mediaEpoch]);
 
   const isIosImmersive = immersive && isIOS();
@@ -565,6 +579,8 @@ export function VideoPlayer({
     setGestureHint,
     setMuted,
     setVolume,
+    volume,
+    revealVolumeHint: (value) => revealGestureHint("volume", value),
     setCaptionsOn,
     toggleFullscreen,
   });
@@ -618,6 +634,8 @@ export function VideoPlayer({
             // 有时不会重新走加载流程（见 mediaEpoch 的注释）。
             key={`${src}#${mediaEpoch}`}
             ref={ref}
+            // 本地媒体服务带 CORS 头：以 CORS 方式加载，音量调过 100% 时才能接进 Web Audio 放大。
+            crossOrigin={canBoost(src) ? "anonymous" : undefined}
             aria-label={t("videoPlayer.player")}
             data-theme-heavy=""
             src={src}
@@ -704,8 +722,7 @@ export function VideoPlayer({
               video.defaultPlaybackRate = effectiveRate;
               video.playbackRate = effectiveRate;
               // 重挂后的元素可能已经把音量重置成默认值，metadata 到了再兜一次。
-              video.volume = volume;
-              video.muted = muted || volume === 0;
+              applyVolume(video, volume, muted);
               setDurationMs(Math.floor(video.duration * 1000));
               // 记录总时长，供首页显示「时长 + 进度条」（DB 里 duration_ms 常为空）。
               if (Number.isFinite(video.duration) && video.duration > 0) {
@@ -766,7 +783,8 @@ export function VideoPlayer({
               syncPlaybackProgress(videoId);
             }}
             onVolumeChange={(event) => {
-              setVolume(event.currentTarget.volume);
+              // 放大时元素音量是 1、真正的倍数在 Web Audio 里：别拿元素的 1 盖掉 150%。
+              if (!isBoosted(event.currentTarget)) setVolume(event.currentTarget.volume);
               setMuted(event.currentTarget.muted);
             }}
           />

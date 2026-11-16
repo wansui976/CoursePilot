@@ -4,6 +4,7 @@ import { usePlayer } from "@/stores/player";
 import { useNoteCapture } from "@/stores/noteCapture";
 import { actionForKey, normalizeKey, useShortcuts } from "@/stores/shortcuts";
 import { keyBelongsToTarget, type GestureHint } from "./playerPrefs";
+import { clampVolume } from "./volume";
 
 const KEY_HOLD_MS = 200;
 const KEY_HOLD_RATE = 2;
@@ -24,6 +25,10 @@ type KeyboardHandlers = {
   setGestureHint: (hint: GestureHint | null) => void;
   setMuted: Dispatch<SetStateAction<boolean>>;
   setVolume: Dispatch<SetStateAction<number>>;
+  /** 当前音量（0..maxVolume），方向键调音量时用来算新值、在画面上提示。 */
+  volume: number;
+  /** 在画面中央短暂显示「音量 xx%」，过一会儿自己消失。 */
+  revealVolumeHint: (value: number) => void;
   setCaptionsOn: Dispatch<SetStateAction<boolean>>;
   toggleFullscreen: () => void;
 };
@@ -99,7 +104,6 @@ export function usePlayerKeyboard(
       if (!action) return;
       event.preventDefault();
       const h = handlersRef.current;
-      const clamp = (v: number) => Math.min(1, Math.max(0, v));
       switch (action) {
         case "playPause":
           if (video.paused) {
@@ -143,12 +147,16 @@ export function usePlayerKeyboard(
           jumpSubtitle(video, segmentsRef.current, 1);
           break;
         case "volumeUp":
-          h.setMuted(false);
-          h.setVolume((v) => clamp(v + 0.1));
+        case "volumeDown": {
+          // 每次 ±10%，桌面最多到 200%；画面上提示当前音量，不然按了看不出变化。
+          const next = clampVolume(
+            Math.round((h.volume + (action === "volumeUp" ? 0.1 : -0.1)) * 10) / 10,
+          );
+          if (action === "volumeUp") h.setMuted(false);
+          h.setVolume(next);
+          h.revealVolumeHint(next);
           break;
-        case "volumeDown":
-          h.setVolume((v) => clamp(v - 0.1));
-          break;
+        }
         case "mute":
           h.setMuted((v) => !v);
           break;

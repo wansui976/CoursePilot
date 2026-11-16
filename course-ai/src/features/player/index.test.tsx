@@ -46,6 +46,7 @@ function renderPlayer(
   immersive = true,
   onFullscreenChange?: (fullscreen: boolean) => void,
   onTranscoded?: () => void,
+  courseId: string | null = null,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -55,6 +56,7 @@ function renderPlayer(
       <VideoPlayer
         src="http://127.0.0.1:1234/m/abc"
         videoId="video-1"
+        courseId={courseId}
         immersive={immersive}
         onFullscreenChange={onFullscreenChange}
         onTranscoded={onTranscoded}
@@ -787,5 +789,53 @@ describe("VideoPlayer iOS gestures", () => {
       Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetDesc);
       Object.defineProperty(Element.prototype, "clientHeight", clientDesc);
     }
+  });
+});
+
+describe("VideoPlayer volume (#7)", () => {
+  beforeEach(() => {
+    localStorage.removeItem("course-ai-volume:course-a");
+    localStorage.removeItem("course-ai-volume:course-b");
+  });
+
+  // 桌面控制栏要悬停才展开，测试里按隐藏元素去找。
+  const slider = () => screen.getByRole("slider", { name: "音量", hidden: true }) as HTMLInputElement;
+
+  it("lets desktop go past 100% with the arrow keys and shows the level", () => {
+    platform.mobile = false;
+    renderPlayer(false, undefined, undefined, "course-a");
+    expect(slider().max).toBe("2");
+    for (let i = 0; i < 12; i++) fireEvent.keyDown(document, { key: "ArrowUp" });
+    // 100% 起按 12 下，封顶 200%。
+    expect(slider()).toHaveValue("2");
+    expect(screen.getByText(/音量 200%/)).toBeInTheDocument();
+    // jsdom 没有 Web Audio：放大接不上时元素音量停在 100%，不会抛错。
+    expect((screen.getByLabelText("课程视频播放器") as HTMLVideoElement).volume).toBe(1);
+  });
+
+  it("keeps phones at 100% at most", () => {
+    platform.mobile = true;
+    renderPlayer(false);
+    expect(slider().max).toBe("1");
+    fireEvent.keyDown(document, { key: "ArrowUp" });
+    expect(slider()).toHaveValue("1");
+  });
+
+  it("remembers the volume per course", () => {
+    platform.mobile = false;
+    const first = renderPlayer(false, undefined, undefined, "course-a");
+    fireEvent.keyDown(document, { key: "ArrowDown" });
+    fireEvent.keyDown(document, { key: "ArrowDown" });
+    expect(slider()).toHaveValue("0.8");
+    first.unmount();
+
+    // 另一门课没调过：还是 100%。
+    const other = renderPlayer(false, undefined, undefined, "course-b");
+    expect(slider()).toHaveValue("1");
+    other.unmount();
+
+    // 回到第一门课：沿用上次的 80%。
+    renderPlayer(false, undefined, undefined, "course-a");
+    expect(slider()).toHaveValue("0.8");
   });
 });

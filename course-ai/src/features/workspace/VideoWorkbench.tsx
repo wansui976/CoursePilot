@@ -152,6 +152,7 @@ export function VideoWorkbench({
                 <VideoPlayer
                   src={mediaSrc}
                   videoId={video.id}
+                  courseId={video.course_id}
                   immersive={isIOS()}
                   onFullscreenChange={onFullscreenChange}
                   onTranscoded={() => refetchMediaSrc()}

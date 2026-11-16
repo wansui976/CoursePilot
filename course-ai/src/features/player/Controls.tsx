@@ -3,6 +3,7 @@ import {
   prevSkipPreviewMs,
   type SkipRange,
 } from "@/lib/silenceSkip";
+import { maxVolume } from "./volume";
 import { formatMs } from "@/lib/time";
 import type { Insets } from "@/lib/blackBars";
 import type { Chapter } from "@/lib/types";
@@ -366,7 +367,8 @@ export function Controls({
   // 设置齿轮上的小圆点：有「会改变播放行为」的开关开着，提醒一眼。
   const playbackTweaked = smartRate || skipSilence || (cropOn && hasCrop);
   const audible = !muted && volume > 0;
-  const volumePercent = audible ? Math.min(100, Math.max(0, volume * 100)) : 0;
+  const volumeMax = maxVolume();
+  const volumePercent = audible ? Math.min(100, Math.max(0, (volume / volumeMax) * 100)) : 0;
 
   const smartRateTitle = smartRateAvailable
     ? t("videoPlayer.smartRateHint")
@@ -666,9 +668,11 @@ export function Controls({
             aria-label={t("videoPlayer.volume")}
             type="range"
             min={0}
-            max={1}
+            max={volumeMax}
             step={0.05}
             value={audible ? volume : 0}
+            aria-valuetext={`${Math.round((audible ? volume : 0) * 100)}%`}
+            title={`${Math.round((audible ? volume : 0) * 100)}%`}
             onChange={(event) => onVolume(Number(event.target.value))}
             className="course-video-volume ml-1 mr-2 w-[60px]"
             style={
