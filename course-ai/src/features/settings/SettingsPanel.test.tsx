@@ -195,6 +195,26 @@ describe("SettingsPanel", () => {
     expect(mockIpc.secrets.has).toHaveBeenCalledWith("volcengine_asr_access_token");
   });
 
+  it("offers Qwen3-ASR 1.7B on desktop with the GPU switch and hotwords, but not on phones", async () => {
+    mockIpc.settings.get.mockImplementation(async (key: string) =>
+      key === "asr_backend" ? "whisper" : key === "whisper_model" ? "qwen3-asr" : null,
+    );
+    const view = render(<SettingsPanel onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole("button", { name: "语音识别" }));
+    const model = await screen.findByLabelText("识别模型");
+    fireEvent.change(model, { target: { value: "qwen3-asr-1.7b" } });
+    await waitFor(() => expect(mockIpc.settings.set).toHaveBeenCalledWith("whisper_model", "qwen3-asr-1.7b"));
+    expect(await screen.findByLabelText("GPU 加速")).toBeInTheDocument();
+    expect(screen.getByLabelText("热词")).toBeInTheDocument();
+    view.unmount();
+
+    mockPlatform.isMobile.mockReturnValue(true);
+    render(<SettingsPanel onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole("button", { name: "语音识别" }));
+    const phoneModel = await screen.findByLabelText("识别模型");
+    expect(within(phoneModel).queryByRole("option", { name: /1\.7B/ })).not.toBeInTheDocument();
+  });
+
   it("saves the default storage root on desktop", async () => {
     render(<SettingsPanel onClose={() => undefined} />);
 

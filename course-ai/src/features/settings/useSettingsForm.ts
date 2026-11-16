@@ -18,7 +18,7 @@ import { defaultAsrBackend, normalizeAsrBackend } from "@/lib/asrDefaults";
 import { defaultOcrBackend, normalizeOcrBackend } from "@/lib/ocrDefaults";
 
 /** 本地识别能选的模型（设置项 `whisper_model` 的取值，键名是早期 Whisper 时代留下的）。 */
-const LOCAL_MODELS = ["sensevoice", "qwen3-asr"];
+const LOCAL_MODELS = ["sensevoice", "qwen3-asr", "qwen3-asr-1.7b"];
 
 /** 查询某项凭证「是否已配置」（只回布尔、不回读明文），供密钥字段旁显示「已配置」。
  *  refresh() 在保存成功后调用，把状态刷新为最新。 */

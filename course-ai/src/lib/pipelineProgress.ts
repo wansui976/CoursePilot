@@ -152,6 +152,7 @@ function localizedDetail(detail: string, t: Translate): string | undefined {
 function localModelName(id: string): string {
   if (id === "sensevoice") return "SenseVoice";
   if (id === "qwen3-asr") return "Qwen3-ASR";
+  if (id === "qwen3-asr-1.7b") return "Qwen3-ASR 1.7B";
   return /^(tiny|base|small|medium|large)/.test(id) ? `Whisper ${id}` : id;
 }
 

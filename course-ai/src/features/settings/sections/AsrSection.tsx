@@ -149,11 +149,15 @@ export function AsrSection({ form }: { form: SettingsForm }) {
               >
                 <option value="sensevoice">{t("settings.asr.senseVoice")}</option>
                 <option value="qwen3-asr">{t("settings.asr.qwen3Asr")}</option>
+                {/* 1.7B 只在电脑上有：手机内存放不下。 */}
+                {(!mobile || model === "qwen3-asr-1.7b") && (
+                  <option value="qwen3-asr-1.7b">{t("settings.asr.qwen3Asr17b")}</option>
+                )}
               </Select>
             </div>
           </Row>
           {/* 桌面上的 Qwen3-ASR 由 llama.cpp 跑，能用显卡；手机和 SenseVoice 都只用 CPU。 */}
-          {model === "qwen3-asr" && !mobile && (
+          {model.startsWith("qwen3-asr") && !mobile && (
             <Row
               label={t("settings.asr.gpu")}
               htmlFor="asr-gpu"
@@ -166,7 +170,7 @@ export function AsrSection({ form }: { form: SettingsForm }) {
               />
             </Row>
           )}
-          {model === "qwen3-asr" && (
+          {model.startsWith("qwen3-asr") && (
             <StackRow
               label={t("settings.asr.hotwords")}
               htmlFor="local-asr-hotwords"

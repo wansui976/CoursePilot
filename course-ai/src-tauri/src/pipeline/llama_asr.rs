@@ -22,10 +22,6 @@ use super::asr::{WhisperJson, WhisperSegment};
 use super::sherpa_asr;
 use crate::error::{AppError, AppResult};
 
-/// GGUF 主模型和音频编码器（mmproj）的文件名，装在模型目录里。
-pub const MODEL_FILE: &str = "Qwen3-ASR-0.6B-Q8_0.gguf";
-pub const MMPROJ_FILE: &str = "mmproj-Qwen3-ASR-0.6B-Q8_0.gguf";
-
 /// 同时识别几段，llama-server 开同样多的槽位。VAD 按停顿切，5 分钟的课切出九十来段，每段请求
 /// 都有固定开销，多开几路能把它摊掉。M4 上 5 分钟讲课：GPU 2 路 14.0 秒、4 路 12.6 秒；
 /// CPU 2 路 24.3 秒、4 路 22.5 秒。0.6B 模型每路只多占几十 MB。
@@ -40,6 +36,8 @@ const SEGMENT_TIMEOUT: Duration = Duration::from_secs(180);
 
 pub struct LlamaJob {
     pub audio: PathBuf,
+    /// 哪个 Qwen3-ASR（0.6B / 1.7B）：files[0] 是主模型 GGUF，files[1] 是音频编码器（mmproj）。
+    pub model: &'static super::local_asr::SherpaModel,
     pub model_dir: PathBuf,
     pub vad: PathBuf,
     /// 设置里的识别语言（zh / en / auto…），只用来决定要不要转简体。模型自己认语言。
@@ -79,8 +77,8 @@ pub async fn transcribe(
         return Ok(WhisperJson { transcription: Vec::new() });
     }
 
-    let model = job.model_dir.join(MODEL_FILE);
-    let mmproj = job.model_dir.join(MMPROJ_FILE);
+    let model = job.model_dir.join(job.model.files[0].path);
+    let mmproj = job.model_dir.join(job.model.files[1].path);
     // GPU 起不来（驱动太旧、显存不够、Vulkan 运行库坏了）就换 CPU 再起一次，不让整次识别失败。
     let server = match LlamaServer::start(&model, &mmproj, job.use_gpu).await {
         Ok(server) => server,
@@ -427,7 +425,8 @@ mod tests {
         assert_eq!(wav.len(), 44 + 6);
     }
 
-    /// 手动跑：`LLAMA_E2E_WAV=<16k wav> [LLAMA_E2E_CPU=1] LLAMA_E2E_OUT=<txt> cargo test --release --lib
+    /// 手动跑：`LLAMA_E2E_WAV=<16k wav> [LLAMA_E2E_CPU=1] [LLAMA_E2E_MODEL=qwen3-asr-1.7b]
+    /// [LLAMA_E2E_MODEL_DIR=<dir>] LLAMA_E2E_OUT=<txt> cargo test --release --lib
     /// llama_asr::tests::real_lecture -- --ignored --nocapture`，PATH 里要有 llama-server，
     /// 模型装在 `~/Library/Application Support/dev.courseai.app/asr/` 下。
     #[tokio::test]
@@ -436,10 +435,18 @@ mod tests {
         let wav = PathBuf::from(std::env::var("LLAMA_E2E_WAV").expect("LLAMA_E2E_WAV"));
         let app = PathBuf::from(std::env::var("HOME").unwrap())
             .join("Library/Application Support/dev.courseai.app");
-        let model = &crate::pipeline::local_asr::QWEN3_ASR_GGUF;
+        // LLAMA_E2E_MODEL=qwen3-asr-1.7b：换大号模型。
+        let model = std::env::var("LLAMA_E2E_MODEL")
+            .ok()
+            .and_then(|id| crate::pipeline::local_asr::find(&id))
+            .unwrap_or(&crate::pipeline::local_asr::QWEN3_ASR_GGUF);
         let job = LlamaJob {
             audio: wav,
-            model_dir: crate::pipeline::local_asr::model_dir(&app, model),
+            model,
+            // LLAMA_E2E_MODEL_DIR：模型不在应用数据目录里时指过去。
+            model_dir: std::env::var_os("LLAMA_E2E_MODEL_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| crate::pipeline::local_asr::model_dir(&app, model)),
             vad: crate::pipeline::local_asr::vad_path(&app),
             language: Some("zh".into()),
             hotwords: None,

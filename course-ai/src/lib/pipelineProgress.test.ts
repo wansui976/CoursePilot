@@ -161,6 +161,9 @@ describe("处理队列的整体进度", () => {
     expect(
       stageMessage({ ...job, message: "本地识别中（qwen3-asr，auto，CPU）" }, i18n.getFixedT("en")),
     ).toBe("Transcribing locally (Qwen3-ASR, Auto-detect, CPU)");
+    expect(
+      stageMessage({ ...job, message: "本地识别中（qwen3-asr-1.7b，zh，GPU：Apple M4）" }, i18n.getFixedT("zh-CN")),
+    ).toBe("本地识别中（Qwen3-ASR 1.7B，中文，GPU：Apple M4）");
   });
 
   it("什么都没有时是 0，不是 NaN", () => {

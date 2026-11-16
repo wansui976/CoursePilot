@@ -163,8 +163,12 @@ fn select_local_model(models_root: &Path, preferred_id: &str, language: &str) ->
             && model.fits_memory(available_mb))
         .then_some(LocalModel::Sherpa(model))
     };
+    // 选了 1.7B 却还没下载（或放不下）：先退到 0.6B，它和 1.7B 最像（同样有标点、认热词）；
+    // 再按清单顺序找一个能用的。
+    let next_best = (preferred_id == local_asr::QWEN3_ASR_17B.id).then_some(&local_asr::QWEN3_ASR);
     local_asr::find(preferred_id)
         .and_then(usable)
+        .or_else(|| next_best.and_then(usable))
         .or_else(|| local_asr::MODELS.iter().copied().find_map(usable))
 }
 
@@ -223,6 +227,7 @@ async fn run_local_model_now(
         LocalModel::Sherpa(model) if model.kind == local_asr::SherpaKind::Qwen3AsrGguf => {
             let job = llama_asr::LlamaJob {
                 audio: audio.to_path_buf(),
+                model,
                 model_dir: local_asr::model_dir(models_root, model),
                 vad: local_asr::vad_path(models_root),
                 language: Some(language.to_string()),
@@ -2602,6 +2607,23 @@ mod tests {
         }
         let vad = local_asr::vad_path(app_data);
         std::fs::File::create(&vad).unwrap().set_len(local_asr::VAD.size).unwrap();
+    }
+
+    #[test]
+    fn choosing_qwen3_asr_1_7b_without_it_falls_back_to_0_6b_before_sensevoice() {
+        let dir = tempdir().unwrap();
+        let app = dir.path();
+        install_sherpa(app, &local_asr::SENSE_VOICE);
+        install_sherpa(app, &local_asr::QWEN3_ASR);
+        // 1.7B 还没下载：退到同类的 0.6B，而不是清单里排第一的 SenseVoice。
+        assert!(matches!(select_local_model(app, "qwen3-asr-1.7b", "zh"), Some(LocalModel::Sherpa(m)) if m.id == "qwen3-asr"));
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            install_sherpa(app, &local_asr::QWEN3_ASR_17B);
+            assert!(matches!(select_local_model(app, "qwen3-asr-1.7b", "zh"), Some(LocalModel::Sherpa(m)) if m.id == "qwen3-asr-1.7b"));
+            // 两个 Qwen 各装各的目录，文件名也不同。
+            assert_ne!(local_asr::model_dir(app, &local_asr::QWEN3_ASR), local_asr::model_dir(app, &local_asr::QWEN3_ASR_17B));
+        }
     }
 
     #[test]

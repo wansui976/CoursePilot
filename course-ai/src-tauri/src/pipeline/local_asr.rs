@@ -102,7 +102,7 @@ pub const QWEN3_ASR_GGUF: SherpaModel = SherpaModel {
     dir: "qwen3-asr-0.6b-q8_0-gguf",
     files: &[
         ModelFile {
-            path: crate::pipeline::llama_asr::MODEL_FILE,
+            path: "Qwen3-ASR-0.6B-Q8_0.gguf",
             sha256: "bca259818b50ca7c4c05e9bdb35a5dc04fa039653a6d6f3f0f331f96f6aa1971",
             size: 804_749_248,
             urls: urls![
@@ -111,7 +111,7 @@ pub const QWEN3_ASR_GGUF: SherpaModel = SherpaModel {
             ],
         },
         ModelFile {
-            path: crate::pipeline::llama_asr::MMPROJ_FILE,
+            path: "mmproj-Qwen3-ASR-0.6B-Q8_0.gguf",
             sha256: "41a342b5e4c514e968cb756de6cd1b7be39eff43c44c57a2ef5fc6522e36603d",
             size: 214_392_480,
             urls: urls![
@@ -123,6 +123,39 @@ pub const QWEN3_ASR_GGUF: SherpaModel = SherpaModel {
     languages: None,
     // 桌面上不按内存挡（见 fits_memory）；这里只是给个量级：模型约 1GB，跑起来约 1.5GB。
     min_free_mb: 2_000,
+};
+
+/// 桌面上可选的大号 Qwen3-ASR（ggml-org/Qwen3-ASR-1.7B-GGUF，Q8_0），同样由 llama-server 跑。
+/// docs/asr-benchmark 实测（M4）：大陆普通话错误率 2.02%（0.6B 2.40%），中英混杂 8.24%（0.6B 8.87%）；
+/// 10 分钟音频 GPU 约 50 秒（0.6B 约 25 秒）、纯 CPU 约 100 秒；峰值内存 4GB 左右。下载 2.5GB。
+/// 只给桌面：手机内存放不下。文件名和 0.6B 不同，各装各的目录。
+pub const QWEN3_ASR_17B: SherpaModel = SherpaModel {
+    id: "qwen3-asr-1.7b",
+    display_name: "Qwen3-ASR 1.7B（最准 · 建议有显卡）",
+    kind: SherpaKind::Qwen3AsrGguf,
+    dir: "qwen3-asr-1.7b-q8_0-gguf",
+    files: &[
+        ModelFile {
+            path: "Qwen3-ASR-1.7B-Q8_0.gguf",
+            sha256: "58e22d0532d4eacaf034cfac17a6fed159f37c41390c710186783be439d1fc57",
+            size: 2_165_034_944,
+            urls: urls![
+                "https://modelscope.cn/models/ggml-org/Qwen3-ASR-1.7B-GGUF/resolve/master/Qwen3-ASR-1.7B-Q8_0.gguf",
+                "https://huggingface.co/ggml-org/Qwen3-ASR-1.7B-GGUF/resolve/main/Qwen3-ASR-1.7B-Q8_0.gguf",
+            ],
+        },
+        ModelFile {
+            path: "mmproj-Qwen3-ASR-1.7B-Q8_0.gguf",
+            sha256: "46c1d533af3f354ceb37ce855dbceff7da7fa7cf1e6a523df3b13440bd164c0d",
+            size: 355_709_344,
+            urls: urls![
+                "https://modelscope.cn/models/ggml-org/Qwen3-ASR-1.7B-GGUF/resolve/master/mmproj-Qwen3-ASR-1.7B-Q8_0.gguf",
+                "https://huggingface.co/ggml-org/Qwen3-ASR-1.7B-GGUF/resolve/main/mmproj-Qwen3-ASR-1.7B-Q8_0.gguf",
+            ],
+        },
+    ],
+    languages: None,
+    min_free_mb: 4_000,
 };
 
 pub const QWEN3_ASR_SHERPA: SherpaModel = SherpaModel {
@@ -206,7 +239,10 @@ pub const VAD: ModelFile = ModelFile {
     ],
 };
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub const MODELS: &[&SherpaModel] = &[&SENSE_VOICE, &QWEN3_ASR];
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub const MODELS: &[&SherpaModel] = &[&SENSE_VOICE, &QWEN3_ASR, &QWEN3_ASR_17B];
 
 pub fn find(id: &str) -> Option<&'static SherpaModel> {
     MODELS.iter().copied().find(|model| model.id == id)
