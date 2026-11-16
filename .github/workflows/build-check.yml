@@ -157,8 +157,14 @@ jobs:
         # 存在；同时也让每次推送都验证一遍发布脚本（下载地址失效会在这里先暴露）。
         run: ./.github/scripts/prepare-macos-sidecars.sh
       - name: Rust tests
+        # rust-cache 不缓存 sherpa-onnx-sys 下载的库，缓存命中时它的构建脚本又不重跑——测试程序就找不到
+        # libsherpa-onnx-c-api.dylib。删掉它的构建记录让构建脚本重跑。Rust 1.100 起构建目录改成
+        # build/<包名>/<哈希>/（原来是 build/<包名>-<哈希>/），两种都要匹配。
         working-directory: course-ai/src-tauri
-        run: cargo test --lib
+        run: |
+          find target -type d \( -path '*/build/sherpa-onnx-sys-*' -o -path '*/build/sherpa-onnx-sys' \) -prune -exec rm -rf {} + 2>/dev/null || true
+          rm -rf target/sherpa-onnx-prebuilt
+          cargo test --lib
       - name: Restore dav1d (AV1 decoder for on-device transcode)
         # 静态库不入库（见 .gitignore），每次按脚本编；按脚本内容缓存，脚本不变就直接复用。
         uses: actions/cache@v4
@@ -181,7 +187,7 @@ jobs:
         working-directory: course-ai
         run: |
           unset SHERPA_ONNX_LIB_DIR
-          find src-tauri/target -type d -path '*/build/sherpa-onnx-sys-*' -prune -exec rm -rf {} + 2>/dev/null || true
+          find src-tauri/target -type d \( -path '*/build/sherpa-onnx-sys-*' -o -path '*/build/sherpa-onnx-sys' \) -prune -exec rm -rf {} + 2>/dev/null || true
           # 它下载解压的目录也删掉：rust-cache 会把目录留下、里面的库却不在，构建脚本见目录在就不重下，接着找不到库。
           rm -rf src-tauri/target/sherpa-onnx-prebuilt
           pnpm tauri ios build --target aarch64-sim --debug --ci
@@ -222,9 +228,10 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build debug APK
         # rust-cache 不缓存 sherpa-onnx-sys 下载的库（本地识别用），删掉它的构建记录让构建脚本重跑、重新拷 .so。
+        # Rust 1.100 起构建目录是 build/<包名>/<哈希>/（原来 build/<包名>-<哈希>/），两种都匹配。
         working-directory: course-ai
         run: |
-          find src-tauri/target -type d -path '*/build/sherpa-onnx-sys-*' -prune -exec rm -rf {} + 2>/dev/null || true
+          find src-tauri/target -type d \( -path '*/build/sherpa-onnx-sys-*' -o -path '*/build/sherpa-onnx-sys' \) -prune -exec rm -rf {} + 2>/dev/null || true
           # 它下载解压的目录也删掉：rust-cache 会把目录留下、里面的库却不在，构建脚本见目录在就不重下，接着找不到库。
           rm -rf src-tauri/target/sherpa-onnx-prebuilt
           pnpm tauri android build --debug --apk --target aarch64 --ci
