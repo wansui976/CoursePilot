@@ -123,7 +123,7 @@ describe("SettingsPanel", () => {
     mockIpc.ocrModel.status.mockReset().mockResolvedValue({
       available: true,
       installed: false,
-      downloadSize: 21_524_894,
+      downloadSize: 31_114_837,
       sizeOnDisk: 0,
     });
     mockIpc.ocrModel.download.mockReset().mockResolvedValue(undefined);
@@ -481,17 +481,17 @@ describe("SettingsPanel", () => {
     );
     fireEvent.change(engine, { target: { value: "paddle" } });
     await waitFor(() => expect(mockIpc.settings.set).toHaveBeenCalledWith("ocr_backend", "paddle"));
-    expect(await screen.findByText("还没下载（21 MB）")).toBeInTheDocument();
+    expect(await screen.findByText("还没下载（30 MB）")).toBeInTheDocument();
 
     mockIpc.ocrModel.status.mockResolvedValue({
       available: true,
       installed: true,
-      downloadSize: 21_524_894,
-      sizeOnDisk: 21_524_894,
+      downloadSize: 31_114_837,
+      sizeOnDisk: 31_114_837,
     });
     fireEvent.click(screen.getByRole("button", { name: "下载" }));
     await waitFor(() => expect(mockIpc.ocrModel.download).toHaveBeenCalled());
-    expect(await screen.findByText("已下载 · 21 MB")).toBeInTheDocument();
+    expect(await screen.findByText("已下载 · 30 MB")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     await waitFor(() => expect(mockIpc.ocrModel.remove).toHaveBeenCalled());

@@ -149,7 +149,7 @@ pub async fn cmd_paddle_ocr_status(
     paddle::status(&app, &state).await
 }
 
-/// 下载 PaddleOCR 模型（两个 onnx + 字典，约 21MB）。进度走 `ocr-model:download` 事件，
+/// 下载 PaddleOCR 模型（两个 onnx + 字典，约 30MB）。进度走 `ocr-model:download` 事件，
 /// 下载、校验、续传和语音识别模型是同一套。
 #[tauri::command]
 pub async fn cmd_download_paddle_ocr(app: tauri::AppHandle, state: State<'_, AppState>) -> AppResult<()> {

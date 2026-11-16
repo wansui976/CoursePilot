@@ -1,8 +1,13 @@
-//! PaddleOCR（PP-OCRv5 mobile）本地 OCR，只在桌面上用。
+//! PaddleOCR（PP-OCRv6 small）本地 OCR，只在桌面上用。
 //!
 //! Windows 上本地 OCR 原来只有 Tesseract，认中文课件错字多、整行漏认是常事；Mac 上的 Apple Vision
-//! 已经不错，但也有人想要和 Windows 一样的结果。PP-OCRv5 mobile 两个模型加字典一共 21MB，
-//! CPU 上一页课件一两秒。
+//! 已经不错，但也有人想要和 Windows 一样的结果。
+//!
+//! 为什么是 v6 small：合成课件（1080p 原图 + 缩到 720p 再 JPEG 压缩的「视频帧」，黑体 / 宋体 /
+//! 深色底 / 中英混排小字，共 1168 字）实测字错率 v5 mobile 2.40%、v6 small 0.26%、v6 medium 0.17%；
+//! 每页耗时（M 系列 CPU、release）219 / 281 / 1352 ms。v5 在压缩过的视频帧上会整字漏掉
+//! （「行为」认成「为」），v6 small 只错标点。medium 准一点点，但慢 5 倍、模型 139MB，不值。
+//! 两个模型加字典一共 30MB。
 //!
 //! 推理用 sherpa-onnx 已经带着的那份 onnxruntime（`ort` 的 load-dynamic）：安装包不多一个运行库，
 //! 进程里也只有一份 ORT。
@@ -23,42 +28,46 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// 装在 `<模型存放目录>/ocr/<DIR>/` 下，和语音识别模型共用「模型存放位置」。
-pub const DIR: &str = "ppocrv5-mobile";
-pub const DISPLAY_NAME: &str = "PaddleOCR PP-OCRv5";
+pub const DIR: &str = "ppocrv6-small";
+pub const DISPLAY_NAME: &str = "PaddleOCR PP-OCRv6";
 
 macro_rules! urls {
     ($($url:expr),+ $(,)?) => { &[$($url),+] };
 }
 
+/// 模型用 PaddlePaddle 官方发布的 ONNX（ModelScope 与 Hugging Face 上是同一份，哈希一致）；
+/// 字典在官方包里是嵌在 inference.yml 里的，这里取 RapidOCR 整理成的同一份 txt（逐项核对过）。
 pub const FILES: &[ModelFile] = &[
     ModelFile {
         path: "det.onnx",
-        sha256: "4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae",
-        size: 4_819_576,
+        sha256: "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e",
+        size: 9_880_512,
         urls: urls![
-            "https://modelscope.cn/models/RapidAI/RapidOCR/resolve/master/onnx/PP-OCRv5/det/ch_PP-OCRv5_det_mobile.onnx",
-            "https://huggingface.co/ogkalu/ppocr-v5-onnx/resolve/main/ch_PP-OCRv5_mobile_det.onnx",
+            "https://modelscope.cn/models/PaddlePaddle/PP-OCRv6_small_det_onnx/resolve/master/inference.onnx",
+            "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx/resolve/main/inference.onnx",
         ],
     },
     ModelFile {
         path: "rec.onnx",
-        sha256: "5825fc7ebf84ae7a412be049820b4d86d77620f204a041697b0494669b1742c5",
-        size: 16_631_306,
+        sha256: "5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634",
+        size: 21_159_378,
         urls: urls![
-            "https://modelscope.cn/models/RapidAI/RapidOCR/resolve/master/onnx/PP-OCRv5/rec/ch_PP-OCRv5_rec_mobile.onnx",
-            "https://huggingface.co/ogkalu/ppocr-v5-onnx/resolve/main/ch_PP-OCRv5_rec_mobile_infer.onnx",
+            "https://modelscope.cn/models/PaddlePaddle/PP-OCRv6_small_rec_onnx/resolve/master/inference.onnx",
+            "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx/resolve/main/inference.onnx",
         ],
     },
     ModelFile {
-        path: "ppocrv5_dict.txt",
-        sha256: "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b",
-        size: 74_012,
+        path: "ppocrv6_dict.txt",
+        sha256: "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d",
+        size: 74_947,
         urls: urls![
-            "https://modelscope.cn/models/RapidAI/RapidOCR/resolve/master/paddle/PP-OCRv5/rec/ch_PP-OCRv5_rec_mobile/ppocrv5_dict.txt",
-            "https://huggingface.co/ogkalu/ppocr-v5-onnx/resolve/main/ppocrv5_dict.txt",
+            "https://modelscope.cn/models/RapidAI/RapidOCR/resolve/master/paddle/PP-OCRv6/rec/PP-OCRv6_rec_small/ppocrv6_dict.txt",
+            "https://huggingface.co/ogkalu/ppocr-v6-onnx/resolve/main/PP-OCRv6_small_rec.txt",
         ],
     },
 ];
+
+const DICT_FILE: &str = "ppocrv6_dict.txt";
 
 pub fn model_dir(models_root: &Path) -> PathBuf {
     models_root.join("ocr").join(DIR)
@@ -160,7 +169,7 @@ impl PaddleOcr {
                 .and_then(|mut builder| builder.commit_from_file(dir.join(name)))
                 .map_err(|error| AppError::Pipeline(format!("加载 PaddleOCR 模型 {name} 失败：{error}")))
         };
-        let dict_text = std::fs::read_to_string(dir.join("ppocrv5_dict.txt"))?;
+        let dict_text = std::fs::read_to_string(dir.join(DICT_FILE))?;
         let mut dict: Vec<String> = dict_text
             .lines()
             .map(|line| line.trim_end_matches('\r').to_string())
@@ -267,9 +276,10 @@ pub async fn recognize_file(models_root: &Path, image: &Path) -> AppResult<Strin
 /// 检测输入的长边上限。课件常是 1920×1080，字小：960（PaddleOCR 默认）会漏掉页脚小字，
 /// 再大 CPU 上就慢了。
 const DET_MAX_SIDE: u32 = 1280;
-const DET_THRESH: f32 = 0.3;
-const BOX_THRESH: f32 = 0.6;
-const UNCLIP_RATIO: f32 = 1.5;
+// 下面三个照 PP-OCRv6 官方 inference.yml 的 DBPostProcess（v5 是 0.3 / 0.6 / 1.5）。
+const DET_THRESH: f32 = 0.2;
+const BOX_THRESH: f32 = 0.45;
+const UNCLIP_RATIO: f32 = 1.4;
 const MIN_BOX_SIDE: f32 = 3.0;
 const MAX_CANDIDATES: usize = 1000;
 
@@ -286,7 +296,13 @@ fn det_size(width: u32, height: u32) -> (u32, u32) {
 }
 
 /// 概率图 → 原图坐标里的四边形（左上、右上、右下、左下），从上到下排好。
-fn boxes_from_map(prob: &[f32], map_w: u32, map_h: u32, scale_x: f32, scale_y: f32) -> Vec<[(f32, f32); 4]> {
+fn boxes_from_map(
+    prob: &[f32],
+    map_w: u32,
+    map_h: u32,
+    scale_x: f32,
+    scale_y: f32,
+) -> Vec<[(f32, f32); 4]> {
     let mask = GrayImage::from_fn(map_w, map_h, |x, y| {
         Luma([if prob[(y * map_w + x) as usize] > DET_THRESH { 255 } else { 0 }])
     });
@@ -516,7 +532,7 @@ mod tests {
     }
 
     /// 真模型、真运行库跑一张合成的课件图。模型不在本机时跳过：
-    /// `PADDLE_OCR_MODELS=/path/to/ppocrv5-mobile cargo test --lib paddle_ocr -- --ignored`
+    /// `PADDLE_OCR_MODELS=/path/to/ppocrv6-small cargo test --lib paddle_ocr -- --ignored`
     #[test]
     #[ignore]
     fn reads_a_rendered_slide() {
@@ -528,5 +544,31 @@ mod tests {
         let text = engine.recognize(&picture).unwrap();
         eprintln!("{:?}\n---\n{text}", started.elapsed());
         assert!(text.contains("梯度下降"), "{text}");
+    }
+
+    /// 测速 / 测准：`PADDLE_OCR_BENCH=模型目录;...`，`PADDLE_OCR_IMAGES=图1,图2,...`。
+    /// 每张图打印一行 JSON：{"model","image","ms","text"}，准确率在外面算。
+    #[test]
+    #[ignore]
+    fn bench_models() {
+        let (Ok(models), Ok(images)) = (std::env::var("PADDLE_OCR_BENCH"), std::env::var("PADDLE_OCR_IMAGES")) else {
+            return;
+        };
+        for spec in models.split(';').filter(|s| !s.is_empty()) {
+            let engine = PaddleOcr::load(Path::new(spec)).expect("load");
+            // 预热一次：第一次推理要分配内存、编译图，不算进耗时。
+            let first = images.split(',').next().unwrap();
+            let _ = engine.recognize(&image::open(first).unwrap().to_rgb8());
+            for path in images.split(',') {
+                let picture = image::open(path).unwrap().to_rgb8();
+                let started = std::time::Instant::now();
+                let text = engine.recognize(&picture).unwrap();
+                let ms = started.elapsed().as_millis();
+                println!(
+                    "BENCH {}",
+                    serde_json::json!({ "model": spec, "image": path, "ms": ms, "text": text })
+                );
+            }
+        }
     }
 }
