@@ -504,14 +504,16 @@ mod tests {
     use super::*;
 
     /// 端到端：用应用自己的下载代码把 PaddleOCR 模型下到临时目录，设置选 paddle，
-    /// 再走课件 OCR 用的同一个入口认一张图。要联网、要 onnxruntime：
-    /// `ORT_DYLIB_PATH=target/debug/libonnxruntime.dylib PADDLE_OCR_IMAGE=slide.png cargo test --lib paddle_end_to_end -- --ignored`
+    /// 再走课件 OCR 用的同一个入口认一张图（默认 tests/fixtures/ocr-slide.png）。要联网、要 onnxruntime：
+    /// `ORT_DYLIB_PATH=target/debug/libonnxruntime.dylib cargo test --lib paddle_end_to_end -- --ignored`。
+    /// CI 的 Windows 任务也跑它（build-check.yml），我们没有 Windows 机器，这是 Windows 上唯一的实测。
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[tokio::test]
     #[ignore]
     async fn paddle_end_to_end() {
         use crate::pipeline::paddle_ocr;
-        let Ok(image) = std::env::var("PADDLE_OCR_IMAGE") else { return };
+        let image = std::env::var("PADDLE_OCR_IMAGE")
+            .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/ocr-slide.png").to_string());
         let app_data = tempfile::tempdir().unwrap();
         let db = crate::db::Db::connect_and_migrate(&app_data.path().join("t.db")).await.unwrap();
         model_store::remember_app_data(app_data.path());
