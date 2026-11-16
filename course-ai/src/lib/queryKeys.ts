@@ -25,6 +25,10 @@ export const qk = {
   },
   processingVideos: () => ["processing-videos"] as const,
   recentProcessed: () => ["recent-processed"] as const,
+  aiUsage: {
+    all: () => ["ai-usage"] as const,
+    video: (videoId: string) => ["ai-usage", "video", videoId] as const,
+  },
   pipelineJobs: (videoId: string) => ["pipeline-jobs", videoId] as const,
   trash: () => ["trash"] as const,
   mediaUrl: {

@@ -3,7 +3,8 @@
   "source": "LiteLLM model_prices_and_context_window.json",
   "fetchedAt": "2026-10-31",
   "priceUnit": "USD per 1M tokens",
-  "note": "Context/pricing/capability reference. Prices are USD per 1M tokens and may change; the provider API is the source of truth."
+  "note": "Context/pricing/capability reference. Prices are USD per 1M tokens and may change; the provider API is the source of truth. cache_read = price for prompt tokens served from the provider's prefix cache (exact-key matches only).",
+  "cacheReadFetchedAt": "2026-11-15"
  },
  "models": {
   "MiniMaxAI/MiniMax-M2.7": {
@@ -221,7 +222,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.5
   },
   "claude-fable-5": {
    "context": 1000000,
@@ -231,7 +233,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 1.0
   },
   "claude-fable-5-1": {
    "context": 1000000,
@@ -241,7 +244,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.25
   },
   "claude-haiku-4-5": {
    "context": 200000,
@@ -251,7 +255,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.1
   },
   "claude-haiku-5-5": {
    "context": 1000000,
@@ -261,7 +266,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.01
   },
   "claude-mythos-5": {
    "context": 1000000,
@@ -271,7 +277,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 1.0
   },
   "claude-mythos-5-1": {
    "context": 1000000,
@@ -281,7 +288,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.25
   },
   "claude-mythos-preview": {
    "context": 1000000,
@@ -291,7 +299,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 1.0
   },
   "claude-opus-4-5": {
    "context": 200000,
@@ -301,7 +310,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.5
   },
   "claude-opus-4-6": {
    "context": 1000000,
@@ -311,7 +321,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.5
   },
   "claude-opus-4-7": {
    "context": 1000000,
@@ -321,7 +332,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.5
   },
   "claude-opus-4-8": {
    "context": 1000000,
@@ -331,7 +343,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.5
   },
   "claude-opus-5": {
    "context": 1000000,
@@ -341,7 +354,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.5
   },
   "claude-opus-5-5": {
    "context": 1000000,
@@ -351,7 +365,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.2
   },
   "claude-sonnet-4-5": {
    "context": 200000,
@@ -361,7 +376,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.3
   },
   "claude-sonnet-4-6": {
    "context": 1000000,
@@ -371,7 +387,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.3
   },
   "claude-sonnet-5": {
    "context": 1000000,
@@ -381,7 +398,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.2
   },
   "claude-sonnet-5-5": {
    "context": 1000000,
@@ -391,7 +409,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.1
   },
   "codegeex4": {
    "context": 32768,
@@ -457,7 +476,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.4
   },
   "daybreak-red-latest": {
    "context": 400000,
@@ -467,7 +487,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 1.25
   },
   "deep-research-max-preview-04-2026": {
    "context": 1048576,
@@ -489,7 +510,8 @@
    "input": 2.0,
    "output": 12.0,
    "vision": true,
-   "json": true
+   "json": true,
+   "cache_read": 0.2
   },
   "deepseek-ai/DeepSeek-R1-0528": {
    "context": 163840,
@@ -574,7 +596,8 @@
    "input": 0.28,
    "output": 0.42,
    "tools": true,
-   "json": true
+   "json": true,
+   "cache_read": 0.028
   },
   "deepseek-coder": {
    "context": 128000,
@@ -601,7 +624,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.006
   },
   "deepseek-r1": {
    "context": 131072,
@@ -617,7 +641,8 @@
    "input": 0.28,
    "output": 0.42,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.028
   },
   "deepseek-v3": {
    "context": 65536,
@@ -656,7 +681,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.006
   },
   "deepseek-v4-flash-0731": {
    "context": 1000000,
@@ -675,7 +701,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.006
   },
   "deepseek-v4-pro": {
    "context": 1000000,
@@ -684,7 +711,8 @@
    "output": 4.8,
    "tools": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.044
   },
   "devstral-latest": {
    "context": 256000,
@@ -1054,7 +1082,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.03
   },
   "gemini-2.5-flash-lite": {
    "context": 1048576,
@@ -1064,7 +1093,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.01
   },
   "gemini-2.5-pro": {
    "context": 1048576,
@@ -1074,13 +1104,15 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.125
   },
   "gemini-2.5-pro-preview-tts": {
    "context": 8192,
    "max_output": 16384,
    "input": 1.0,
-   "output": 20.0
+   "output": 20.0,
+   "cache_read": 0.125
   },
   "gemini-3-flash-preview": {
    "context": 1048576,
@@ -1090,7 +1122,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.05
   },
   "gemini-3-pro-preview": {
    "context": 1048576,
@@ -1110,7 +1143,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.025
   },
   "gemini-3.1-flash-lite-preview": {
    "context": 1048576,
@@ -1120,7 +1154,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.025
   },
   "gemini-3.1-pro-preview": {
    "context": 1048576,
@@ -1130,7 +1165,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.2
   },
   "gemini-3.1-pro-preview-customtools": {
    "context": 1048576,
@@ -1140,7 +1176,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.2
   },
   "gemini-3.5-flash": {
    "context": 1048576,
@@ -1150,7 +1187,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.15
   },
   "gemini-3.5-flash-lite": {
    "context": 1048576,
@@ -1160,7 +1198,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.03
   },
   "gemini-3.6-flash": {
    "context": 1048576,
@@ -1170,7 +1209,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.075
   },
   "gemini-3.7-flash": {
    "context": 1048576,
@@ -1180,7 +1220,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.075
   },
   "gemini-3.8-flash": {
    "context": 1048576,
@@ -1190,7 +1231,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.075
   },
   "gemini-3.8-flash-cyber": {
    "context": 1048576,
@@ -1199,7 +1241,8 @@
    "output": 7.5,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.15
   },
   "gemini-4-argon": {
    "context": 1048576,
@@ -1236,7 +1279,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.03
   },
   "gemini-flash-latest": {
    "context": 1048576,
@@ -1246,7 +1290,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.075
   },
   "gemini-flash-lite-latest": {
    "context": 1048576,
@@ -1256,7 +1301,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.03
   },
   "gemini-gemma-2-27b-it": {
    "context": 8192,
@@ -1306,7 +1352,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.2
   },
   "gemini-robotics-er-2-preview": {
    "context": 131072,
@@ -1316,7 +1363,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.1
   },
   "gemini-robotics-er-2-streaming-preview": {
    "context": 131072,
@@ -1686,7 +1734,8 @@
    "output": 8.0,
    "tools": true,
    "vision": true,
-   "json": true
+   "json": true,
+   "cache_read": 0.5
   },
   "gpt-4.1-mini": {
    "context": 1047576,
@@ -1695,7 +1744,8 @@
    "output": 1.6,
    "tools": true,
    "vision": true,
-   "json": true
+   "json": true,
+   "cache_read": 0.1
   },
   "gpt-4.1-nano": {
    "context": 1047576,
@@ -1704,7 +1754,8 @@
    "output": 0.4,
    "tools": true,
    "vision": true,
-   "json": true
+   "json": true,
+   "cache_read": 0.025
   },
   "gpt-4.5-preview": {
    "context": 128000,
@@ -1722,7 +1773,8 @@
    "output": 10.0,
    "tools": true,
    "vision": true,
-   "json": true
+   "json": true,
+   "cache_read": 1.25
   },
   "gpt-4o-audio-preview": {
    "context": 128000,
@@ -1738,7 +1790,8 @@
    "output": 0.6,
    "tools": true,
    "vision": true,
-   "json": true
+   "json": true,
+   "cache_read": 0.075
   },
   "gpt-4o-mini-audio-preview": {
    "context": 128000,
@@ -1754,7 +1807,8 @@
    "output": 0.6,
    "tools": true,
    "vision": true,
-   "json": true
+   "json": true,
+   "cache_read": 0.075
   },
   "gpt-4o-search-preview": {
    "context": 128000,
@@ -1763,7 +1817,8 @@
    "output": 10.0,
    "tools": true,
    "vision": true,
-   "json": true
+   "json": true,
+   "cache_read": 1.25
   },
   "gpt-5": {
    "context": 272000,
@@ -1773,7 +1828,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.125
   },
   "gpt-5-chat": {
    "context": 128000,
@@ -1782,7 +1838,8 @@
    "output": 10.0,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.125
   },
   "gpt-5-chat-latest": {
    "context": 128000,
@@ -1792,7 +1849,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.125
   },
   "gpt-5-codex": {
    "context": 272000,
@@ -1802,7 +1860,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.125
   },
   "gpt-5-mini": {
    "context": 272000,
@@ -1812,7 +1871,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.025
   },
   "gpt-5-nano": {
    "context": 272000,
@@ -1822,7 +1882,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.005
   },
   "gpt-5-pro": {
    "context": 272000,
@@ -1841,7 +1902,8 @@
    "output": 10.0,
    "tools": true,
    "vision": true,
-   "json": true
+   "json": true,
+   "cache_read": 0.125
   },
   "gpt-5.1": {
    "context": 272000,
@@ -1851,7 +1913,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.125
   },
   "gpt-5.1-chat": {
    "context": 111616,
@@ -1870,7 +1933,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.125
   },
   "gpt-5.1-codex": {
    "context": 272000,
@@ -1880,7 +1944,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.125
   },
   "gpt-5.1-codex-max": {
    "context": 272000,
@@ -1890,7 +1955,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.125
   },
   "gpt-5.1-codex-mini": {
    "context": 272000,
@@ -1900,7 +1966,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.025
   },
   "gpt-5.2": {
    "context": 272000,
@@ -1910,7 +1977,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.175
   },
   "gpt-5.2-chat": {
    "context": 111616,
@@ -1928,7 +1996,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.175
   },
   "gpt-5.2-codex": {
    "context": 272000,
@@ -1938,7 +2007,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.175
   },
   "gpt-5.2-pro": {
    "context": 272000,
@@ -1966,7 +2036,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.175
   },
   "gpt-5.3-codex": {
    "context": 272000,
@@ -1976,7 +2047,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.175
   },
   "gpt-5.4": {
    "context": 922000,
@@ -1986,7 +2058,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.25
   },
   "gpt-5.4-mini": {
    "context": 272000,
@@ -1996,7 +2069,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.075
   },
   "gpt-5.4-nano": {
    "context": 272000,
@@ -2006,7 +2080,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.02
   },
   "gpt-5.4-pro": {
    "context": 922000,
@@ -2025,17 +2100,20 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.5
   },
   "gpt-5.5-cyber": {
    "input": 12.5,
    "output": 75.0,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 1.25
   },
   "gpt-5.5-cyber-preview": {
    "input": 12.5,
    "output": 75.0,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 1.25
   },
   "gpt-5.5-pro": {
    "context": 1050000,
@@ -2054,7 +2132,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.4
   },
   "gpt-5.6-cyber": {
    "context": 400000,
@@ -2064,7 +2143,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 1.25
   },
   "gpt-5.6-luna": {
    "context": 922000,
@@ -2074,7 +2154,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.02
   },
   "gpt-5.6-sol": {
    "context": 922000,
@@ -2084,7 +2165,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.4
   },
   "gpt-5.6-terra": {
    "context": 922000,
@@ -2094,7 +2176,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.2
   },
   "gpt-6-astra": {
    "context": 922000,
@@ -2104,7 +2187,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 1.0
   },
   "gpt-6-luna": {
    "context": 922000,
@@ -2114,7 +2198,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.01
   },
   "gpt-6-rosalind": {
    "context": 922000,
@@ -2124,7 +2209,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 1.5
   },
   "gpt-6-sol": {
    "context": 922000,
@@ -2134,7 +2220,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.2
   },
   "gpt-6.1-sol": {
    "context": 922000,
@@ -2144,7 +2231,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.1
   },
   "gpt-6.1-terra": {
    "context": 922000,
@@ -2154,7 +2242,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.05
   },
   "gpt-audio": {
    "context": 128000,
@@ -2195,7 +2284,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.4
   },
   "gpt-daybreak-red-latest": {
    "context": 400000,
@@ -2205,7 +2295,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 1.25
   },
   "gpt-oss:120b-cloud": {
    "context": 131072,
@@ -2219,11 +2310,13 @@
   },
   "gpt-rosalind-discovery": {
    "input": 5.0,
-   "output": 25.0
+   "output": 25.0,
+   "cache_read": 0.5
   },
   "gpt-rosalind-research": {
    "input": 5.0,
-   "output": 25.0
+   "output": 25.0,
+   "cache_read": 0.5
   },
   "grok-4.20": {
    "context": 1000000,
@@ -3380,7 +3473,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 7.5
   },
   "o1-mini": {
    "context": 128000,
@@ -3408,7 +3502,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.5
   },
   "o3-deep-research": {
    "context": 200000,
@@ -3418,7 +3513,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 2.5
   },
   "o3-mini": {
    "context": 200000,
@@ -3427,7 +3523,8 @@
    "output": 4.4,
    "tools": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.55
   },
   "o3-pro": {
    "context": 200000,
@@ -3447,7 +3544,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.275
   },
   "o4-mini-deep-research": {
    "context": 200000,
@@ -3455,7 +3553,8 @@
    "input": 2.0,
    "output": 8.0,
    "vision": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.5
   },
   "open-mistral-nemo": {
    "context": 128000,
@@ -4191,7 +4290,8 @@
    "output": 2.5,
    "tools": true,
    "vision": true,
-   "json": true
+   "json": true,
+   "cache_read": 0.2
   },
   "xai/grok-4.20-reasoning": {
    "context": 2000000,
@@ -4201,7 +4301,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.2
   },
   "xai/grok-4.3": {
    "context": 200000,
@@ -4211,7 +4312,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.2
   },
   "xai/grok-4.6": {
    "context": 524288,
@@ -4221,7 +4323,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.5
   },
   "xai/grok-4.7": {
    "context": 524288,
@@ -4231,7 +4334,8 @@
    "tools": true,
    "vision": true,
    "json": true,
-   "reasoning": true
+   "reasoning": true,
+   "cache_read": 0.5
   },
   "zai-glm-5": {
    "context": 1048576,

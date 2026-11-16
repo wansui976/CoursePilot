@@ -381,3 +381,26 @@ export type PaddleOcrStatus = {
   downloadSize: number;
   sizeOnDisk: number;
 };
+
+/** 一组大模型用量（按用途 / 模型 / 课程分组，或某个视频的合计）。花费是按参考价估算的 USD。 */
+export type AiUsageRow = {
+  key: string;
+  name: string | null;
+  calls: number;
+  promptTokens: number;
+  cachedTokens: number;
+  completionTokens: number;
+  costUsd: number;
+  /** 查不到价格、没算进花费的调用次数。 */
+  unpricedCalls: number;
+};
+
+export type AiUsageSummary = {
+  sinceMs: number;
+  total: AiUsageRow;
+  byLabel: AiUsageRow[];
+  byModel: AiUsageRow[];
+  byCourse: AiUsageRow[];
+  monthCostUsd: number;
+  budgetUsd: number | null;
+};

@@ -463,7 +463,11 @@ pub async fn cmd_grade_quiz_answer(
     answer: String,
 ) -> AppResult<crate::pipeline::quiz::QuizGrade> {
     let (provider, model) = provider_for(&state, AiTask::Quiz).await?;
-    crate::pipeline::quiz::grade_answer(&state.db, &provider, &model, &video_id, &question, &answer).await
+    crate::usage_log::scoped(
+        crate::usage_log::UsageScope::video(&video_id),
+        crate::pipeline::quiz::grade_answer(&state.db, &provider, &model, &video_id, &question, &answer),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -598,6 +602,17 @@ pub async fn cmd_generate_ai(
     state: State<'_, AppState>,
     video_id: String,
     task: String, // "chapters" | "notes" | "summary" | "quiz" | "mindmap" | "highlights"
+    options: Option<GenerateOptions>,
+) -> AppResult<()> {
+    // 手动生成的用量也记到这个视频上。
+    let scope = crate::usage_log::UsageScope::video(&video_id);
+    crate::usage_log::scoped(scope, generate_ai(state, video_id, task, options)).await
+}
+
+async fn generate_ai(
+    state: State<'_, AppState>,
+    video_id: String,
+    task: String,
     options: Option<GenerateOptions>,
 ) -> AppResult<()> {
     let options = options.unwrap_or_default();

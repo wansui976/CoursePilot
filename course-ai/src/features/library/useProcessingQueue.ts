@@ -231,6 +231,8 @@ export function useProcessingQueue({
       if (jobs.asr?.status === "done" && !generatedAfterAsr.current.has(asrKey)) {
         generatedAfterAsr.current.add(asrKey);
         queryClient.invalidateQueries({ queryKey: qk.videos.all() });
+        // 字幕纠错的花费在识别完成时已经记下了。
+        queryClient.invalidateQueries({ queryKey: qk.aiUsage.all() });
       }
       for (const stage of ["slides", "slides_ocr"] as const) {
         const key = `${videoId}:${stage}`;
@@ -250,6 +252,7 @@ export function useProcessingQueue({
           generatedAfterAsr.current.add(key);
           queryClient.invalidateQueries({ queryKey: qk.artifact(stage, videoId) });
           queryClient.invalidateQueries({ queryKey: qk.videos.list(selectedCourseId) });
+          queryClient.invalidateQueries({ queryKey: qk.aiUsage.all() });
         }
       }
     });

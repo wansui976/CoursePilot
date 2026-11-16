@@ -75,13 +75,10 @@ pub async fn cmd_analyze_course_concepts(
                 },
             );
         };
-        let result = concepts::analyze_course_concepts(
-            &db,
-            &provider,
-            &chat_model,
-            &course_id,
-            &cancel,
-            &mut on_progress,
+        // 后台任务不继承调用方的范围，在这里包：知识分析的用量记到这门课上。
+        let result = crate::usage_log::scoped(
+            crate::usage_log::UsageScope::course(&course_id),
+            concepts::analyze_course_concepts(&db, &provider, &chat_model, &course_id, &cancel, &mut on_progress),
         )
         .await;
         match result {
@@ -137,7 +134,11 @@ pub async fn cmd_generate_course_knowledge(
     course_id: String,
 ) -> AppResult<()> {
     let (provider, chat_model) = concepts_provider(&state).await?;
-    concepts::generate_course_knowledge(&state.db, &provider, &chat_model, &course_id).await
+    crate::usage_log::scoped(
+        crate::usage_log::UsageScope::course(&course_id),
+        concepts::generate_course_knowledge(&state.db, &provider, &chat_model, &course_id),
+    )
+    .await
 }
 
 /// 以整门课程的总览+知识点为背景的流式问答。命令立即返回、活儿丢后台跑，token 与最终结果

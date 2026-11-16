@@ -405,6 +405,21 @@ export function installMockIpc({ theme, safeArea }) {
     cmd_video_cover: ({ videoId }) => cover(videoId),
     cmd_media_url: ({ videoId }) => mediaUrl(videoId),
     cmd_list_processing_videos: () => [videos[6]],
+    cmd_ai_usage_summary: () => {
+      const row = (key, name, cost, calls = 6, prompt = 182_000, cached = 141_000, out = 9_800) => ({
+        key, name, calls, promptTokens: prompt, cachedTokens: cached, completionTokens: out, costUsd: cost, unpricedCalls: 0,
+      });
+      return {
+        sinceMs: now - 30 * 86_400_000,
+        total: row("", null, 0.86, 214, 3_960_000, 3_020_000, 241_000),
+        byLabel: [row("correction", null, 0.31, 96), row("notes", null, 0.18, 22), row("quiz", null, 0.14, 24), row("chapters", null, 0.09, 22), row("summary", null, 0.07, 22), row("mindmap", null, 0.05, 22), row("assistant", null, 0.02, 6)],
+        byCourse: [row("c1", "机器学习导论", 0.71, 170), row("c2", "线性代数的本质", 0.13, 38), row("", null, 0.02, 6)],
+        byModel: [row("deepseek-flash", null, 0.86, 214)],
+        monthCostUsd: 0.86,
+        budgetUsd: 5,
+      };
+    },
+    cmd_video_ai_usage: () => ({ key: "", name: null, calls: 31, promptTokens: 612_000, cachedTokens: 488_000, completionTokens: 41_000, costUsd: 0.093, unpricedCalls: 0 }),
     cmd_list_recent_processed_videos: () =>
       [videos[2], videos[1], videos[0]].map((video, i) => ({
         ...video,

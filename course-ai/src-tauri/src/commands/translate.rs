@@ -30,14 +30,9 @@ pub async fn cmd_translate_transcript(
     let mut on_progress = |done: usize, total: usize| {
         let _ = app.emit(&event, TranslateEvent::Progress { done, total });
     };
-    let result = translate_video(
-        &state.db,
-        &provider,
-        &model,
-        &video_id,
-        &lang,
-        &cancel,
-        &mut on_progress,
+    let result = crate::usage_log::scoped(
+        crate::usage_log::UsageScope::video(&video_id),
+        translate_video(&state.db, &provider, &model, &video_id, &lang, &cancel, &mut on_progress),
     )
     .await;
     state.unregister_cancel(&request_id, &cancel);

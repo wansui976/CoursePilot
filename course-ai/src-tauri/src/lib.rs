@@ -108,7 +108,7 @@ use crate::pipeline::{
     cmd_list_recent_processed_videos,
     cmd_process_video, cmd_recorrect_transcript, ProcessingTasks,
 };
-use crate::usage_log::{cmd_clear_llm_usage, cmd_llm_usage};
+use crate::usage_log::{cmd_ai_usage_summary, cmd_clear_llm_usage, cmd_llm_usage, cmd_video_ai_usage};
 use tauri::Manager;
 
 /// 启动时无法继续：先告诉用户原因再退出。setup 跑在不能 unwind 的回调里，
@@ -175,6 +175,10 @@ pub fn run() {
                         db_path.display()
                     )),
                 };
+                crate::usage_log::attach_db(db.clone());
+                if let Err(error) = crate::usage_log::prune(&db).await {
+                    tracing::warn!(%error, "清理一年前的大模型用量记录失败");
+                }
                 // iOS 每次更新 / 重装应用，沙盒路径里的 UUID 都会变，库里存的绝对路径要跟着改。
                 #[cfg(target_os = "ios")]
                 if let Some(current_root) =
@@ -311,6 +315,8 @@ pub fn run() {
             cmd_get_dev_logs,
             cmd_clear_dev_logs,
             cmd_llm_usage,
+            cmd_ai_usage_summary,
+            cmd_video_ai_usage,
             cmd_clear_llm_usage,
             cmd_list_whisper_models,
             cmd_download_whisper_model,

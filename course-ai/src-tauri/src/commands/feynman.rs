@@ -63,7 +63,11 @@ pub async fn cmd_feynman_evaluate(
     let (provider, model) = crate::commands::ai::provider_for_db(&state.db, AiTask::Summary)
         .await?
         .ok_or_else(|| AppError::Config("尚未配置可用的大模型（设置 → 大模型）".into()))?;
-    feynman::evaluate(&state.db, &provider, &model, &topic, &explanation).await
+    let scope = match &topic {
+        feynman::FeynmanTopic::Range { video_id, .. } => crate::usage_log::UsageScope::video(video_id),
+        feynman::FeynmanTopic::Concept { .. } => crate::usage_log::UsageScope::default(),
+    };
+    crate::usage_log::scoped(scope, feynman::evaluate(&state.db, &provider, &model, &topic, &explanation)).await
 }
 
 /// 某个话题最近的几次复述（新的在前），给「再讲一遍」做对比。

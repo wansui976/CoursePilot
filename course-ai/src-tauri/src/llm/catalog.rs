@@ -23,6 +23,10 @@ pub struct CatalogEntry {
     /// 输出价格，USD / 1M tokens。
     #[serde(default)]
     pub output: Option<f64>,
+    /// 命中前缀缓存的输入价格，USD / 1M tokens（scripts/catalog-add-cache-price.py 补的）。
+    /// 没有时按普通输入价算——宁可估高，不估低。
+    #[serde(default)]
+    pub cache_read: Option<f64>,
     #[serde(default)]
     pub tools: bool,
     #[serde(default)]

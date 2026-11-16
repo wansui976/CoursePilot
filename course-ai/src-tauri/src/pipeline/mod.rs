@@ -63,6 +63,8 @@ enum TranscriptCorrectionOutcome {
     Applied,
     NoProvider,
     Failed,
+    /// 本月 AI 花费到了预算，自动纠错跳过。
+    OverBudget,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,6 +85,9 @@ fn asr_done_message(count: usize, outcome: TranscriptCorrectionOutcome) -> Strin
         }
         TranscriptCorrectionOutcome::Failed => {
             format!("{count} segments；AI 纠错失败，已保留原始文稿")
+        }
+        TranscriptCorrectionOutcome::OverBudget => {
+            format!("{count} segments；本月 AI 预算已用完，当前为原始文稿")
         }
     }
 }
@@ -650,7 +655,7 @@ async fn run_all(
 
         // 是否对字幕走 AI 纠错：视频级偏好（导入时勾选）> 全局开关，再要求有可用大模型。
         let autocorrect = subtitle::autocorrect_enabled(&db, &video_id).await?;
-        let correct = if autocorrect {
+        let correct = if autocorrect && crate::usage_log::over_budget_message(&db).await.is_none() {
             crate::commands::ai::provider_for_db(&db, crate::llm::profiles::AiTask::Correction)
                 .await?
         } else {
@@ -1039,12 +1044,13 @@ async fn run_all(
             if let Err(error) = asr_cache::clear(&db, &video_id).await {
                 tracing::warn!(%error, "清理分片识别缓存失败");
             }
-            let final_message = match crate::commands::ai::provider_for_db(
-                &db,
-                crate::llm::profiles::AiTask::Correction,
-            )
-            .await?
-            {
+            let over_budget = crate::usage_log::over_budget_message(&db).await.is_some();
+            let provider = if over_budget {
+                None
+            } else {
+                crate::commands::ai::provider_for_db(&db, crate::llm::profiles::AiTask::Correction).await?
+            };
+            let final_message = match provider {
                 Some((provider, model)) => {
                     emit_running_progress(
                         &app,
@@ -1074,6 +1080,7 @@ async fn run_all(
                         }
                     }
                 }
+                None if over_budget => asr_done_message(count, TranscriptCorrectionOutcome::OverBudget),
                 None => asr_done_message(count, TranscriptCorrectionOutcome::NoProvider),
             };
             jobs::update_progress(&db, &asr_job.id, 1.0, Some(&final_message)).await?;
@@ -1699,6 +1706,12 @@ async fn run_ai_followups(
                 continue;
             }
         };
+        // 本月 AI 花费到了预算：自动生成先停下（用户自己点「生成」照常能跑）。
+        if let Some(msg) = crate::usage_log::over_budget_message(db).await {
+            let _ = jobs::cancel(db, &job.id, &msg).await;
+            emit_stage(app, video_id, &job.id, stage, "canceled", 0.0, Some(&msg));
+            continue;
+        }
         if halted_profiles.contains(&resolved.profile_id) {
             // 标成 canceled 而不是 failed：它没失败，是这个 Profile 已经确定不可用，根本没发请求。
             let _ = jobs::cancel(db, &job.id, AI_HALTED_MESSAGE).await;
@@ -2122,12 +2135,17 @@ pub async fn cmd_process_video(app: AppHandle, video_id: String) -> AppResult<()
     let task_slides_abort = slides_abort.clone();
     let handle = tauri::async_runtime::spawn(async move {
         let _ = start_rx.await;
-        if let Err(error) = run_all(
-            task_app.clone(),
-            task_video.clone(),
-            task_slides_cancel,
-            slides_done_tx,
-            task_slides_abort,
+        // 这次处理里的大模型调用（纠错、章节、摘要…）都记到这个视频上（设置里的「用量与花费」）。
+        let scope = crate::usage_log::UsageScope::video(&task_video);
+        if let Err(error) = crate::usage_log::scoped(
+            scope,
+            run_all(
+                task_app.clone(),
+                task_video.clone(),
+                task_slides_cancel,
+                slides_done_tx,
+                task_slides_abort,
+            ),
         )
         .await
         {

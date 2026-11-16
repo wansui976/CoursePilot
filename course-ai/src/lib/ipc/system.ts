@@ -16,6 +16,8 @@ import type {
   WhisperModel,
   ModelsDir,
   PaddleOcrStatus,
+  AiUsageRow,
+  AiUsageSummary,
   CloudSyncProbeAccountChangeResult,
   CloudSyncStatus,
   CloudSyncProbeArmResult,
@@ -71,6 +73,12 @@ export const dev = {
   // 各档 LLM 调用的累计 token 用量（进程内统计，重启即清空）。
   llmUsage: (): Promise<LlmUsageTotals[]> => invoke("cmd_llm_usage"),
   clearLlmUsage: (): Promise<void> => invoke("cmd_clear_llm_usage"),
+};
+
+/** 落库的大模型用量与估算花费（设置 → 大模型 → 用量与花费；视频概览底下那一行）。 */
+export const aiUsage = {
+  summary: (days = 30): Promise<AiUsageSummary> => invoke("cmd_ai_usage_summary", { days }),
+  video: (videoId: string): Promise<AiUsageRow> => invoke("cmd_video_ai_usage", { videoId }),
 };
 
 // 发一条系统桌面通知（学习提醒）。触发时机与去重由前端决定。

@@ -628,7 +628,7 @@ impl Provider {
         // 端点报了用量才记。没报就什么都不记——把「没报」当成「零消耗」
         // 会让命中率算出来是假的。
         if let Some(usage) = &response.usage {
-            crate::usage_log::record(req.label, &req.model, usage);
+            crate::usage_log::record(req.label, &req.model, usage, matches!(self, Provider::Ollama { .. }));
         }
         Ok(response)
     }
@@ -794,7 +794,7 @@ impl Provider {
             Provider::Failing { .. } => return Err(self.canned_failure()),
         };
         if let Some(usage) = &outcome.usage {
-            crate::usage_log::record(req.label, &req.model, usage);
+            crate::usage_log::record(req.label, &req.model, usage, matches!(self, Provider::Ollama { .. }));
         }
         Ok(outcome)
     }

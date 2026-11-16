@@ -5,6 +5,7 @@ import { ViewHeader } from "@/ui/view-header";
 import { Button } from "@/ui/button";
 import { Modal } from "@/ui/dialog";
 import { LlmSettingsPanel, type LlmSettingsActions } from "./LlmSettingsPanel";
+import { AiUsageSection } from "./AiUsageSection";
 import { useContainerWidth } from "@/lib/useContainerWidth";
 import { CATEGORY_META, SETTINGS_CATEGORIES, type SettingsCategory } from "./categories";
 import { Group, StackRow } from "./primitives";
@@ -258,6 +259,7 @@ export function SettingsPanel({
                   </StackRow>
                 </Group>
               )}
+              {activeCategory === "llm" && <AiUsageSection />}
               {activeCategory === "courseware" && <CoursewareSection form={form} />}
               {activeCategory === "about" && <AboutSection />}
               {activeCategory === "dev" && (

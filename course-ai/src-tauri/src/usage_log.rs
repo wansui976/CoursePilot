@@ -1,17 +1,22 @@
-//! 进程内 LLM 用量统计：每次调用花了多少 token、其中多少命中了前缀缓存、
-//! 以及有多少是计费在输出里却被我们丢掉的「思考」token。按档聚合，供开发控制台查看。
+//! LLM 用量统计，两份：
 //!
-//! 取舍与 dev_log 一致：进程内聚合，重启即清空、零持久化。要回答的几个问题——
-//! 五个产物有没有共享讲稿前缀、字幕纠错改成局部替换之后输出降了多少、是不是在为
-//! 推理模型丢掉的思考过程付钱——都在一次处理里就看得出来，不值得为它加一张会无限长的表。
+//! - **进程内按档聚合**（`totals`）：每次调用花了多少 token、多少命中了前缀缓存、多少是
+//!   计费却被丢掉的「思考」token。给开发控制台看，重启即清空。
+//! - **逐次落库**（`llm_usage` 表）：带上调用时所在的视频 / 课程，按参考价估算花费。
+//!   给设置里的「用量与花费」和每个视频的「这节课 AI 花了多少」用，也用来卡每月预算。
+//!   调用发生在哪个视频 / 课程，靠 [`scoped`] 设的任务内范围（tokio task-local）传过来，
+//!   不用把 id 塞进每一个请求。
 //!
 //! 只覆盖非流式调用（`Provider::complete`）。流式那条要拿到用量得额外声明
 //! `stream_options.include_usage`，而那会改动请求体，对严格的兼容端点是个风险；
 //! 而且真正费钱的批量活（五个产物、字幕纠错、提要）本来就都走非流式。
 
+use crate::db::Db;
+use crate::error::AppResult;
 use crate::llm::Usage;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Mutex, OnceLock};
 
 /// 某一档（可能跨多个模型）的累计用量。
@@ -36,9 +41,107 @@ fn store() -> &'static Mutex<HashMap<Key, UsageTotals>> {
     STORE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// 这次调用算在哪：处理某个视频时是 video_id，课程级任务是 course_id，都没有就是「其他」。
+#[derive(Debug, Clone, Default)]
+pub struct UsageScope {
+    pub video_id: Option<String>,
+    pub course_id: Option<String>,
+}
+
+impl UsageScope {
+    pub fn video(video_id: &str) -> Self {
+        Self { video_id: Some(video_id.to_string()), course_id: None }
+    }
+    pub fn course(course_id: &str) -> Self {
+        Self { video_id: None, course_id: Some(course_id.to_string()) }
+    }
+}
+
+tokio::task_local! {
+    static SCOPE: UsageScope;
+}
+
+/// 在这个范围里跑 `fut`：里面（同一个任务内）发生的大模型调用都记到这个视频 / 课程上。
+/// 注意 `spawn` 出去的子任务不继承，要在子任务里再包一层。
+pub async fn scoped<F: Future>(scope: UsageScope, fut: F) -> F::Output {
+    SCOPE.scope(scope, fut).await
+}
+
+fn current_scope() -> UsageScope {
+    SCOPE.try_with(Clone::clone).unwrap_or_default()
+}
+
+/// 启动时交进来的数据库：`record` 是同步调用，拿不到 State，落库靠它。
+static DB: OnceLock<Db> = OnceLock::new();
+
+pub fn attach_db(db: Db) {
+    let _ = DB.set(db);
+}
+
+/// 按参考价估算一次调用的花费（USD）。命中缓存的输入按缓存价（目录里没有就按普通输入价），
+/// 输出里包含思考 token（各家都按输出计费）。查不到价格返回 None——「不知道」不是「免费」。
+pub fn estimate_cost_usd(model: &str, usage: &Usage) -> Option<f64> {
+    let entry = crate::llm::catalog::lookup(model)?;
+    let (input, output) = (entry.input?, entry.output?);
+    let cached = usage.cached_tokens.clamp(0, usage.prompt_tokens.max(0));
+    let fresh = usage.prompt_tokens.max(0) - cached;
+    let cache_price = entry.cache_read.unwrap_or(input);
+    Some(
+        (fresh as f64 * input + cached as f64 * cache_price + usage.completion_tokens.max(0) as f64 * output)
+            / 1_000_000.0,
+    )
+}
+
 /// 记一次调用。端点没报用量时不要调用它——那样会把「没报」记成「零消耗」，
-/// 命中率算出来是假的。
-pub fn record(label: &str, model: &str, usage: &Usage) {
+/// 命中率算出来是假的。`local` = 本机模型（Ollama），不花钱。
+pub fn record(label: &str, model: &str, usage: &Usage, local: bool) {
+    persist(label, model, usage, local);
+    aggregate(label, model, usage);
+}
+
+fn persist(label: &str, model: &str, usage: &Usage, local: bool) {
+    let Some(db) = DB.get().cloned() else { return };
+    let scope = current_scope();
+    let cost = if local { Some(0.0) } else { estimate_cost_usd(model, usage) };
+    let (label, model, usage) = (label.to_string(), model.to_string(), *usage);
+    // 写库不挡调用方：调用方正等着拿模型的回答往下走。写失败只记日志，用量少一行不影响功能。
+    tauri::async_runtime::spawn(async move {
+        let at = chrono::Utc::now().timestamp_millis();
+        if let Err(error) = insert(&db, at, &scope, &label, &model, &usage, cost).await {
+            tracing::warn!(%error, "记录大模型用量失败");
+        }
+    });
+}
+
+pub async fn insert(
+    db: &Db,
+    at: i64,
+    scope: &UsageScope,
+    label: &str,
+    model: &str,
+    usage: &Usage,
+    cost_usd: Option<f64>,
+) -> AppResult<()> {
+    sqlx::query(
+        "INSERT INTO llm_usage(at,video_id,course_id,label,model,prompt_tokens,cached_tokens,
+           completion_tokens,reasoning_tokens,cost_usd) VALUES (?,?,?,?,?,?,?,?,?,?)",
+    )
+    .bind(at)
+    .bind(&scope.video_id)
+    .bind(&scope.course_id)
+    .bind(label)
+    .bind(model)
+    .bind(usage.prompt_tokens)
+    .bind(usage.cached_tokens)
+    .bind(usage.completion_tokens)
+    .bind(usage.reasoning_tokens)
+    .bind(cost_usd)
+    .execute(&db.pool)
+    .await?;
+    Ok(())
+}
+
+fn aggregate(label: &str, model: &str, usage: &Usage) {
     let mut guard = store().lock().unwrap_or_else(|e| e.into_inner());
     let entry = guard
         .entry((label.to_string(), model.to_string()))
@@ -85,6 +188,155 @@ pub async fn cmd_clear_llm_usage() -> crate::error::AppResult<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------- 落库的用量：查询与预算
+
+/// 每月预算（USD），设置项；空或 0 = 不设。
+pub const BUDGET_SETTING: &str = "ai_monthly_budget_usd";
+
+#[derive(Debug, Clone, Default, Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageRow {
+    /// 分组键：档位 / 模型 / 课程 id（课程那组另带名字）。
+    pub key: String,
+    pub name: Option<String>,
+    pub calls: i64,
+    pub prompt_tokens: i64,
+    pub cached_tokens: i64,
+    pub completion_tokens: i64,
+    /// 能估出价格的那部分调用的花费合计。
+    pub cost_usd: f64,
+    /// 查不到价格、没算进花费的调用次数。
+    pub unpriced_calls: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSummary {
+    pub since_ms: i64,
+    pub total: UsageRow,
+    pub by_label: Vec<UsageRow>,
+    pub by_model: Vec<UsageRow>,
+    pub by_course: Vec<UsageRow>,
+    /// 本自然月（本地时区）到现在的花费。
+    pub month_cost_usd: f64,
+    pub budget_usd: Option<f64>,
+}
+
+const SUMS: &str = "COUNT(*) AS calls, COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
+    COALESCE(SUM(cached_tokens),0) AS cached_tokens, COALESCE(SUM(completion_tokens),0) AS completion_tokens,
+    COALESCE(SUM(cost_usd),0.0) AS cost_usd, COALESCE(SUM(cost_usd IS NULL),0) AS unpriced_calls";
+
+/// 本地时区的本月 1 日 0 点（毫秒）。
+pub fn month_start_ms(now: chrono::DateTime<chrono::Local>) -> i64 {
+    use chrono::{Datelike, TimeZone};
+    chrono::Local
+        .with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0)
+        .earliest()
+        .map(|t| t.timestamp_millis())
+        .unwrap_or(0)
+}
+
+pub async fn month_cost_usd(db: &Db) -> AppResult<f64> {
+    let since = month_start_ms(chrono::Local::now());
+    Ok(sqlx::query_scalar("SELECT COALESCE(SUM(cost_usd),0.0) FROM llm_usage WHERE at>=?")
+        .bind(since)
+        .fetch_one(&db.pool)
+        .await?)
+}
+
+pub async fn budget_usd(db: &Db) -> Option<f64> {
+    crate::commands::settings::get_setting(db, BUDGET_SETTING)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)
+}
+
+/// 本月花费到了预算就返回说明（给流水线跳过自动 AI 步骤用）；没设预算或没超返回 None。
+/// 只管自动跑的步骤：用户自己点「生成」「提问」时照常执行。
+pub async fn over_budget_message(db: &Db) -> Option<String> {
+    let budget = budget_usd(db).await?;
+    let spent = month_cost_usd(db).await.ok()?;
+    (spent >= budget).then(|| {
+        format!(
+            "已跳过：本月 AI 花费约 ${spent:.2}，已到预算 ${budget:.2}。可在 设置 → 大模型 调高预算，或在各面板里手动生成。"
+        )
+    })
+}
+
+async fn grouped(db: &Db, since: i64, select_key: &str, join: &str, group: &str) -> AppResult<Vec<UsageRow>> {
+    let sql = format!(
+        "SELECT {select_key}, {SUMS} FROM llm_usage u {join} WHERE u.at>=? GROUP BY {group}
+         ORDER BY cost_usd DESC, prompt_tokens DESC"
+    );
+    Ok(sqlx::query_as(&sql).bind(since).fetch_all(&db.pool).await?)
+}
+
+pub async fn summary(db: &Db, days: i64) -> AppResult<UsageSummary> {
+    let now = chrono::Utc::now().timestamp_millis();
+    let since = now - days.clamp(1, 3650) * 86_400_000;
+    let total: UsageRow = sqlx::query_as(&format!(
+        "SELECT '' AS key, NULL AS name, {SUMS} FROM llm_usage u WHERE u.at>=?"
+    ))
+    .bind(since)
+    .fetch_one(&db.pool)
+    .await?;
+    let by_label = grouped(db, since, "u.label AS key, NULL AS name", "", "u.label").await?;
+    let by_model = grouped(db, since, "u.model AS key, NULL AS name", "", "u.model").await?;
+    // 视频的课程现查：视频可能被移到别的课程。删掉的课程 / 视频归到「其他」。
+    let by_course = grouped(
+        db,
+        since,
+        "COALESCE(c.id,'') AS key, c.name AS name",
+        "LEFT JOIN videos v ON v.id=u.video_id
+         LEFT JOIN courses c ON c.id=COALESCE(v.course_id,u.course_id)",
+        "COALESCE(c.id,'')",
+    )
+    .await?;
+    Ok(UsageSummary {
+        since_ms: since,
+        total,
+        by_label,
+        by_model,
+        by_course,
+        month_cost_usd: month_cost_usd(db).await?,
+        budget_usd: budget_usd(db).await,
+    })
+}
+
+pub async fn video_usage(db: &Db, video_id: &str) -> AppResult<UsageRow> {
+    Ok(sqlx::query_as(&format!(
+        "SELECT '' AS key, NULL AS name, {SUMS} FROM llm_usage u WHERE u.video_id=?"
+    ))
+    .bind(video_id)
+    .fetch_one(&db.pool)
+    .await?)
+}
+
+/// 只留一年：一节课几十次调用，几年下来也就几万行，但没必要无限长。
+pub async fn prune(db: &Db) -> AppResult<()> {
+    let cutoff = chrono::Utc::now().timestamp_millis() - 365 * 86_400_000;
+    sqlx::query("DELETE FROM llm_usage WHERE at<?").bind(cutoff).execute(&db.pool).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cmd_ai_usage_summary(
+    state: tauri::State<'_, crate::commands::courses::AppState>,
+    days: Option<i64>,
+) -> AppResult<UsageSummary> {
+    summary(&state.db, days.unwrap_or(30)).await
+}
+
+#[tauri::command]
+pub async fn cmd_video_ai_usage(
+    state: tauri::State<'_, crate::commands::courses::AppState>,
+    video_id: String,
+) -> AppResult<UsageRow> {
+    video_usage(&state.db, &video_id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,9 +353,9 @@ mod tests {
     #[test]
     fn totals_accumulate_per_label_and_model() {
         clear();
-        record("notes", "deepseek-chat", &usage(1000, 0, 300, 0));
-        record("notes", "deepseek-chat", &usage(1000, 900, 280, 0));
-        record("quiz", "deepseek-chat", &usage(1000, 900, 400, 0));
+        record("notes", "deepseek-chat", &usage(1000, 0, 300, 0), false);
+        record("notes", "deepseek-chat", &usage(1000, 900, 280, 0), false);
+        record("quiz", "deepseek-chat", &usage(1000, 900, 400, 0), false);
 
         let totals = totals();
         let notes = totals.iter().find(|t| t.label == "notes").unwrap();
@@ -120,8 +372,8 @@ mod tests {
     fn the_same_label_on_a_different_model_is_counted_separately() {
         // 换了模型缓存就不共享了，混在一起算命中率会把问题盖掉。
         clear();
-        record("notes", "model-a", &usage(100, 0, 10, 0));
-        record("notes", "model-b", &usage(100, 0, 10, 0));
+        record("notes", "model-a", &usage(100, 0, 10, 0), false);
+        record("notes", "model-b", &usage(100, 0, 10, 0), false);
 
         assert_eq!(totals().len(), 2);
         clear();
@@ -132,11 +384,66 @@ mod tests {
         // 推理模型的思考过程按输出计费，而我们只读正式回答、把它整个丢掉。
         // 不单独记的话，这笔钱在账面上和有用的输出长得一模一样。
         clear();
-        record("correction", "reasoner", &usage(500, 0, 900, 800));
+        record("correction", "reasoner", &usage(500, 0, 900, 800), false);
 
         let totals = totals();
         assert_eq!(totals[0].completion_tokens, 900);
         assert_eq!(totals[0].reasoning_tokens, 800);
         clear();
+    }
+
+    #[test]
+    fn cost_counts_cache_hits_at_the_cache_price() {
+        // deepseek-flash：输入 0.3、缓存 0.006、输出 1.2（USD / 百万 token）。
+        let cost = estimate_cost_usd("deepseek-flash", &usage(1_000_000, 900_000, 100_000, 0)).unwrap();
+        let expected = (100_000.0 * 0.3 + 900_000.0 * 0.006 + 100_000.0 * 1.2) / 1_000_000.0;
+        assert!((cost - expected).abs() < 1e-9, "{cost} vs {expected}");
+        // 没有缓存价的模型按普通输入价算（宁可估高）；查不到价格的是「未知」，不是 0。
+        assert!(estimate_cost_usd("no-such-model-xyz", &usage(10, 0, 10, 0)).is_none());
+    }
+
+    #[tokio::test]
+    async fn scope_is_visible_inside_and_gone_outside() {
+        let inside = scoped(UsageScope::video("v1"), async { current_scope() }).await;
+        assert_eq!(inside.video_id.as_deref(), Some("v1"));
+        assert!(current_scope().video_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn summary_groups_by_course_through_the_video_and_budget_trips_at_the_limit() {
+        use crate::commands::courses::create_course;
+        use crate::commands::videos::add_local_video;
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        let course = create_course(&db, "机器学习".into(), dir.path().to_string_lossy().into()).await.unwrap();
+        let path = dir.path().join("v.mp4");
+        std::fs::write(&path, b"x").unwrap();
+        let video = add_local_video(&db, &course.id, path, None).await.unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        let u = usage(1000, 0, 100, 0);
+        insert(&db, now, &UsageScope::video(&video.id), "notes", "m", &u, Some(0.30)).await.unwrap();
+        insert(&db, now, &UsageScope::video(&video.id), "quiz", "m", &u, Some(0.20)).await.unwrap();
+        insert(&db, now, &UsageScope::default(), "assistant", "m", &u, None).await.unwrap();
+        // 一年多以前的不算进「最近 30 天」。
+        insert(&db, now - 400 * 86_400_000, &UsageScope::video(&video.id), "notes", "m", &u, Some(9.0)).await.unwrap();
+
+        let s = summary(&db, 30).await.unwrap();
+        assert_eq!(s.total.calls, 3);
+        assert!((s.total.cost_usd - 0.5).abs() < 1e-9);
+        assert_eq!(s.total.unpriced_calls, 1);
+        let ml = s.by_course.iter().find(|r| r.key == course.id).unwrap();
+        assert_eq!(ml.name.as_deref(), Some("机器学习"));
+        assert_eq!(ml.calls, 2);
+        assert!(s.by_course.iter().any(|r| r.key.is_empty() && r.calls == 1), "不属于课程的归到「其他」");
+        assert_eq!(video_usage(&db, &video.id).await.unwrap().calls, 3);
+
+        assert!(over_budget_message(&db).await.is_none(), "没设预算不拦");
+        crate::commands::settings::set_setting(&db, BUDGET_SETTING, "1").await.unwrap();
+        assert!(over_budget_message(&db).await.is_none(), "本月 $0.50 < $1");
+        crate::commands::settings::set_setting(&db, BUDGET_SETTING, "0.5").await.unwrap();
+        assert!(over_budget_message(&db).await.unwrap().contains("$0.50"));
+
+        prune(&db).await.unwrap();
+        assert_eq!(video_usage(&db, &video.id).await.unwrap().calls, 2, "一年前的清掉了");
     }
 }
