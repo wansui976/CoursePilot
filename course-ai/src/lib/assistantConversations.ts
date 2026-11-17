@@ -1,3 +1,4 @@
+import { durableStorage } from "./durableStore";
 import {
   boundAssistantPromptHistory,
   deserializeAssistantSession,
@@ -271,7 +272,7 @@ function parseIndex(serialized: string): ConversationIndexReadResult {
 
 function readConversationIndex(): ConversationIndexReadResult {
   try {
-    const serialized = localStorage.getItem(INDEX_STORAGE_KEY);
+    const serialized = durableStorage.getItem(INDEX_STORAGE_KEY);
     return serialized === null ? { status: "missing" } : parseIndex(serialized);
   } catch {
     return { status: "corrupt", state: emptyAssistantConversationsState() };
@@ -289,7 +290,7 @@ function serializeIndex(state: AssistantConversationsState) {
 
 function persistIndex(state: AssistantConversationsState) {
   try {
-    localStorage.setItem(INDEX_STORAGE_KEY, serializeIndex(state));
+    durableStorage.setItem(INDEX_STORAGE_KEY, serializeIndex(state));
     return true;
   } catch {
     return false;
@@ -315,7 +316,7 @@ export function assistantConversationStorageKey(id: string) {
 
 function persistConversationSnapshot(id: string, session: AssistantSession, now: number) {
   try {
-    localStorage.setItem(assistantConversationStorageKey(id), serializeAssistantSession(session, now));
+    durableStorage.setItem(assistantConversationStorageKey(id), serializeAssistantSession(session, now));
     return true;
   } catch {
     return false;
@@ -331,7 +332,7 @@ function readConversationSession(id: string, now: number): ReadConversationSessi
   const volatile = volatileConversationSessions.get(id);
   if (volatile) return { session: volatile, recyclable: isEmptySession(volatile) };
   try {
-    const serialized = localStorage.getItem(assistantConversationStorageKey(id));
+    const serialized = durableStorage.getItem(assistantConversationStorageKey(id));
     if (serialized === null) return { session: EMPTY_SESSION, recyclable: false };
     const value = JSON.parse(serialized) as unknown;
     // 只有本模块写出的完整快照才能被判定为空。损坏或旧格式的数据宁可保留，
@@ -386,7 +387,7 @@ function findReusableEmptyConversation(
 
 function removeConversationSnapshot(id: string) {
   try {
-    localStorage.removeItem(assistantConversationStorageKey(id));
+    durableStorage.removeItem(assistantConversationStorageKey(id));
   } catch {
     // 会话索引仍然可用；孤立快照以后不会再被读取。
   }
@@ -698,7 +699,7 @@ export function deleteAssistantConversation(
 
 export function readRecentAssistantQuestions(): string[] {
   try {
-    const serialized = localStorage.getItem(RECENT_QUESTIONS_STORAGE_KEY);
+    const serialized = durableStorage.getItem(RECENT_QUESTIONS_STORAGE_KEY);
     if (!serialized) return [];
     const value = JSON.parse(serialized) as unknown;
     return Array.isArray(value) ? boundAssistantPromptHistory(value) : [];
@@ -710,7 +711,7 @@ export function readRecentAssistantQuestions(): string[] {
 export function writeRecentAssistantQuestions(questions: unknown[]): string[] {
   const bounded = boundAssistantPromptHistory(questions);
   try {
-    localStorage.setItem(RECENT_QUESTIONS_STORAGE_KEY, JSON.stringify(bounded));
+    durableStorage.setItem(RECENT_QUESTIONS_STORAGE_KEY, JSON.stringify(bounded));
   } catch {
     // 输入历史不可用时不影响发送。
   }

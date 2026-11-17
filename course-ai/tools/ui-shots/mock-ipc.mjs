@@ -546,6 +546,8 @@ export function installMockIpc({ theme, safeArea }) {
       { course_id: "c1", course_name: "机器学习导论", video_id: "v3", video_title: "03 梯度下降的直觉.mp4", last_ts: now - 3_600_000 },
     ],
     cmd_course_video_ids: () => videos.map((v) => [v.course_id, v.id]),
+    cmd_client_store_load: () => [],
+    cmd_client_store_put: () => null,
     cmd_video_progress: () =>
       videos.filter((v) => progress[v.id]).map((v) => ({ video_id: v.id, position_ms: Math.round(v.duration_ms * progress[v.id]), duration_ms: v.duration_ms, course_id: v.course_id, updated_at: now - 86_400_000 })),
     cmd_count_due: () => 12,

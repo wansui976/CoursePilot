@@ -63,6 +63,7 @@ use crate::commands::srs::{
     cmd_due_cards_by_concept, cmd_generate_cards, cmd_generate_cards_for_concept, cmd_review_card,
     cmd_weak_concepts,
 };
+use crate::commands::client_store::{cmd_client_store_load, cmd_client_store_put};
 use crate::commands::stats::{
     cmd_continue_learning, cmd_course_totals, cmd_course_video_ids, cmd_daily_totals,
     cmd_log_watch, cmd_next_due_at, cmd_save_video_progress, cmd_video_progress,
@@ -427,6 +428,8 @@ pub fn run() {
             cmd_next_due_at,
             cmd_save_video_progress,
             cmd_video_progress,
+            cmd_client_store_load,
+            cmd_client_store_put,
             cmd_analyze_course_concepts,
             cmd_cancel_course_analysis,
             cmd_list_course_concepts,

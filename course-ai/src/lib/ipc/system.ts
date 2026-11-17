@@ -185,3 +185,12 @@ export const tools = {
   hasBilibiliCookies: (): Promise<boolean> =>
     invoke("cmd_has_bilibili_cookies"),
 };
+
+/** 界面层长期数据（库里的 client_store 表）：按键存前端序列化好的文本。 */
+export const clientStore = {
+  load: (prefixes: string[]): Promise<[string, string][]> =>
+    invoke("cmd_client_store_load", { prefixes }),
+  /** 值为 null 表示删除该键；整批一个事务。 */
+  put: (entries: [string, string | null][]): Promise<void> =>
+    invoke("cmd_client_store_put", { entries }),
+};

@@ -1,3 +1,4 @@
+import { durableStorage } from "./durableStore";
 import type {
   AssistantAction,
   AssistantContext,
@@ -732,7 +733,7 @@ export function serializeAssistantSession(session: AssistantSession, now = Date.
 
 export function readAssistantSession(now = Date.now()): AssistantSession {
   try {
-    return deserializeAssistantSession(localStorage.getItem(STORAGE_KEY), now);
+    return deserializeAssistantSession(durableStorage.getItem(STORAGE_KEY), now);
   } catch {
     return EMPTY_SESSION;
   }
@@ -740,7 +741,7 @@ export function readAssistantSession(now = Date.now()): AssistantSession {
 
 export function writeAssistantSession(session: AssistantSession, now = Date.now()) {
   try {
-    localStorage.setItem(STORAGE_KEY, serializeAssistantSession(session, now));
+    durableStorage.setItem(STORAGE_KEY, serializeAssistantSession(session, now));
   } catch {
     // 本地存储只是连续性增强；不可用时当前会话仍应正常工作。
   }
@@ -748,7 +749,7 @@ export function writeAssistantSession(session: AssistantSession, now = Date.now(
 
 export function clearAssistantSession() {
   try {
-    localStorage.removeItem(STORAGE_KEY);
+    durableStorage.removeItem(STORAGE_KEY);
   } catch {
     // 同上，清理失败不应阻塞新对话。
   }
