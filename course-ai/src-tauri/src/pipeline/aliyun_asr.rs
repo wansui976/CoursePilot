@@ -34,6 +34,11 @@ const DEFAULT_MAX_UPLOAD_MB: u64 = 1024;
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const TASK_URL_PREFIX: &str = "https://dashscope.aliyuncs.com/api/v1/tasks/";
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
+/// 提交、轮询、取结果这类小请求的超时。此前客户端没设任何超时：连接半路挂住时，
+/// 这个视频会一直占着处理名额（同时只跑两个），排在后面的全部干等，直到手动取消。
+/// 上传整段音频的那一个请求另用 UPLOAD_TIMEOUT 覆盖。
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_POLLS: u32 = 1200; // 3s × 1200 ≈ 60 分钟上限：几小时的长课也够转完
 
 /// 服务端 JSON 解析器对单个字符串的上限（`StreamReadConstraints.getMaxStringLength()`）。
@@ -73,7 +78,11 @@ pub async fn run_aliyun(
         .filter(|value| !value.is_empty() && *value != "auto");
 
     let size = tokio::fs::metadata(audio).await?.len();
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .map_err(|error| AppError::Pipeline(format!("构造 HTTP 客户端失败: {error}")))?;
 
     // ---- 1. 音频传到百炼临时存储，拿 oss:// 地址 ----
     let (file_url, via_oss) = match upload_to_temp_storage(&client, api_key, model, audio, mime, size).await {

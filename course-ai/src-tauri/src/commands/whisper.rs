@@ -181,11 +181,7 @@ mod paddle {
         let root = model_store::models_root(&state.db, &app_data(app)?).await?;
         let missing = paddle_ocr::missing_files(&root);
         let total: u64 = missing.iter().map(|(_, file)| file.size).sum();
-        let client = reqwest::Client::builder()
-            .user_agent(DOWNLOAD_USER_AGENT)
-            .connect_timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|error| AppError::Other(error.to_string()))?;
+        let client = download_client(DOWNLOAD_STALL_TIMEOUT)?;
         let emit = |received: u64, done: bool| {
             app.emit(
                 "ocr-model:download",
@@ -318,11 +314,7 @@ async fn download_sherpa_model(
 ) -> AppResult<()> {
     let missing = local_asr::missing_files(data_dir, model);
     let total: u64 = missing.iter().map(|(_, file)| file.size).sum();
-    let client = reqwest::Client::builder()
-        .user_agent(DOWNLOAD_USER_AGENT)
-        .connect_timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|error| AppError::Other(error.to_string()))?;
+    let client = download_client(DOWNLOAD_STALL_TIMEOUT)?;
     let _keep_alive = crate::keep_alive::hold(
         crate::keep_alive::Kind::ModelDownload,
         model.id,
@@ -362,6 +354,21 @@ async fn download_sherpa_model(
 /// 换着下载源试几轮。慢网上一个源下到一半断掉很常见：每次都从已经下好的地方接着下，
 /// 所以多试几轮的代价很小。
 const DOWNLOAD_ROUNDS: usize = 3;
+
+/// 下载中途多久收不到一个字节就算这个源卡住了。卡住和断线一样处理：已下的部分留着，
+/// 换下一个源接着续传。此前只有连接超时，源在半路不吐数据时进度条就永远停在那里。
+const DOWNLOAD_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// 模型下载用的客户端：连接 15 秒连不上算失败；连上以后 `stall` 内一个字节都没收到也算失败。
+/// 不设总超时——几百 MB 的模型在慢网络上下半小时是正常的。
+fn download_client(stall: std::time::Duration) -> AppResult<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent(DOWNLOAD_USER_AGENT)
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(stall)
+        .build()
+        .map_err(|error| AppError::Other(error.to_string()))
+}
 /// 这么久一个字节都没收到就当连接卡死了，断开换下一个源（已下的部分留着续传）。
 const STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -580,6 +587,13 @@ mod tests {
                         });
                     let reply = if request.starts_with("GET /404") {
                         b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+                    } else if request.starts_with("GET /stall") {
+                        // 发出响应头和一半内容后既不发也不断开：模拟半路卡死的源。
+                        let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+                        r.extend_from_slice(&body[..body.len() / 2]);
+                        let _ = socket.write_all(&r).await;
+                        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                        return;
                     } else if request.starts_with("GET /half") {
                         let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
                         r.extend_from_slice(&body[..body.len() / 2]);
@@ -630,6 +644,25 @@ mod tests {
         assert_eq!(std::fs::read(&target).unwrap(), b"model bytes");
         assert_eq!(*seen.lock().unwrap().last().unwrap(), 11);
         assert!(!dir.path().join("m/model.onnx.part").exists());
+    }
+
+    #[tokio::test]
+    async fn a_source_that_stalls_midway_times_out_and_the_next_source_resumes_it() {
+        let (base, ranges) = serve(b"model bytes").await;
+        let file = leak_file("model.onnx", b"model bytes", vec![format!("{base}/stall/a"), format!("{base}/ok/a")]);
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("model.onnx");
+        let client = download_client(std::time::Duration::from_millis(300)).unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            download_files(&client, "测试模型", vec![(target.clone(), file)], |_| {}),
+        )
+        .await
+        .expect("卡住的源必须超时放手，而不是一直等下去")
+        .unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"model bytes");
+        // 第二个源从卡住时已下到的位置接着下。
+        assert_eq!(ranges.lock().unwrap().as_slice(), ["5-"]);
     }
 
     #[tokio::test]
