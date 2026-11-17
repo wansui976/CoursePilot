@@ -140,7 +140,7 @@ export function AssistantModelPicker({
   ];
 
   return (
-    <div ref={menuRef} className="relative min-w-0">
+    <div ref={menuRef} className="relative flex min-w-0">
       <button
         ref={triggerRef}
         type="button"

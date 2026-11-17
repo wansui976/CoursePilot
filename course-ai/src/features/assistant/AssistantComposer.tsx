@@ -329,7 +329,7 @@ export function AssistantComposer({
           }
           className="ca-ask-input block max-h-24 w-full resize-none bg-transparent px-2.5 pb-0 pt-2 text-sm text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)]"
         />
-        <div className="flex items-end gap-2 px-1.5 pb-1.5 pt-1">
+        <div className="flex items-center gap-2 px-1.5 pb-1.5 pt-1">
           <button
             type="button"
             aria-label={t("assistant.attachImage")}
@@ -353,8 +353,11 @@ export function AssistantComposer({
               if (files.length) onAddImages(files);
             }}
           />
-          <div className="flex min-w-0 flex-1 items-end gap-1">
-            <div ref={scopeMenuRef} className="relative min-w-0 flex-shrink">
+          {/* 窄屏放不下三个标签时换到第二行，而不是把「当前视频 · 11:04」「默认模型」截成省略号。
+              包标签的 div 用 flex：块级 div 里的 inline-flex 按钮会带上行高的下沿空隙，和旁边的
+              「引导」对不齐。 */}
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+            <div ref={scopeMenuRef} className="relative flex min-w-0">
               <button
                 ref={scopeTriggerRef}
                 type="button"
