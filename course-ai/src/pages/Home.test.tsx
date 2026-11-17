@@ -1552,6 +1552,56 @@ describe("Home", () => {
     );
   });
 
+  it("sorts a level by the lecture numbers in its titles, and can undo it", async () => {
+    // 后端按收到的顺序存；这里让列表跟着变，刷新后看到的就是排好的顺序。
+    let listed: Video[] = [
+      { ...video, id: "v10", title: "第十讲 总结.mp4", order_index: 0 },
+      { ...video, id: "v2", title: "第二讲 方法.mp4", order_index: 1 },
+      { ...video, id: "v1", title: "第一讲 绪论.mp4", order_index: 2 },
+    ];
+    mockIpc.videos.list.mockImplementation(async (courseId: string) =>
+      courseId === "course-1" ? listed : [],
+    );
+    mockIpc.folders.reorder.mockImplementation(
+      async (_course: string, _folder: string | null, items: { id: string }[]) => {
+        listed = items.map(({ id }, order_index) => ({ ...listed.find((v) => v.id === id)!, order_index }));
+      },
+    );
+
+    await renderHome();
+    fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "按讲次排序" }));
+    await waitFor(() =>
+      expect(mockIpc.folders.reorder).toHaveBeenLastCalledWith("course-1", null, [
+        { kind: "video", id: "v1" },
+        { kind: "video", id: "v2" },
+        { kind: "video", id: "v10" },
+      ]),
+    );
+
+    // 排好了：按钮变成「撤销排序」，点了回到原来的顺序。
+    fireEvent.click(await screen.findByRole("button", { name: "撤销排序" }));
+    await waitFor(() =>
+      expect(mockIpc.folders.reorder).toHaveBeenLastCalledWith("course-1", null, [
+        { kind: "video", id: "v10" },
+        { kind: "video", id: "v2" },
+        { kind: "video", id: "v1" },
+      ]),
+    );
+    expect(await screen.findByRole("button", { name: "按讲次排序" })).toBeInTheDocument();
+  });
+
+  it("does not offer lecture sorting when the order is already right", async () => {
+    const video2: Video = { ...video, id: "video-2", title: "02.第二课.mp4", order_index: 1 };
+    mockIpc.videos.list.mockImplementation(async (courseId: string) =>
+      courseId === "course-1" ? [video, video2] : [],
+    );
+    await renderHome();
+    fireEvent.click(await screen.findByRole("button", { name: /^申论课程/ }));
+    await screen.findByText(displayTitle(video2.title));
+    expect(screen.queryByRole("button", { name: "按讲次排序" })).not.toBeInTheDocument();
+  });
+
   it("searches titles and notes from the topbar box and jumps to transcript hits", async () => {
     const video2: Video = {
       ...video,

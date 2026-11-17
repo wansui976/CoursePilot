@@ -11,6 +11,7 @@ import {
   Lightbulb,
   ScanSearch,
   List,
+  ListOrdered,
   Loader2,
   MoreHorizontal,
   Play,
@@ -24,6 +25,7 @@ import {
   FolderInput,
   Pencil,
   Trash2,
+  Undo2,
   Wand2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -40,6 +42,7 @@ import { Button } from "@/ui/button";
 import { Skeleton } from "@/ui/skeleton";
 import { Menu, MenuItem } from "@/ui/menu";
 import { ipc } from "@/lib/ipc";
+import { lectureOrder } from "@/lib/lectureOrder";
 import { clearTasksForScope } from "@/lib/backgroundTasks";
 import { useTaskNotices } from "@/lib/taskNotices";
 import { stageMessage } from "@/lib/pipelineProgress";
@@ -92,6 +95,10 @@ const statusTone: Record<Video["processed_status"], BadgeTone> = {
   done: "success",
   failed: "danger",
 };
+
+function sameOrder(a: readonly string[], b: readonly string[]) {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
 
 const VIEW_STORAGE_KEY = "course-ai-home-view";
 const GRID_DENSITY_KEY = "course-ai-grid-density";
@@ -390,6 +397,26 @@ export function CourseLibraryView({
     },
     onSettled: () => refreshCourse([selectedCourseId]),
   });
+
+  // 按标题里的讲次（P03、第十二讲、Lecture 3、03 开头）重排这一层：一次性动作，之后照样能拖。
+  // 顺序已经对了就不给这个按钮；排完给「撤销」，直到这一层的顺序又被改动。
+  const levelVideoIds = levelVideos.map((video) => video.id);
+  const lectureSorted = lectureOrder(
+    levelVideos.map((video) => ({ id: video.id, title: displayTitle(video.title) })),
+  );
+  const [sortUndo, setSortUndo] = useState<{ before: string[]; after: string[] } | null>(null);
+  const canSortByLecture = lectureSorted !== null && !sameOrder(lectureSorted, levelVideoIds);
+  const canUndoSort = sortUndo !== null && sameOrder(sortUndo.after, levelVideoIds);
+  function sortByLecture() {
+    if (!lectureSorted) return;
+    setSortUndo({ before: levelVideoIds, after: lectureSorted });
+    reorderLevel.mutate({ folderIds: levelFolders.map((folder) => folder.id), videoIds: lectureSorted });
+  }
+  function undoSort() {
+    if (!sortUndo) return;
+    setSortUndo(null);
+    reorderLevel.mutate({ folderIds: levelFolders.map((folder) => folder.id), videoIds: sortUndo.before });
+  }
 
   // 移动（拖到文件夹 / 面包屑，或「移动到…」）：可跨课程。
   const [moveRequest, setMoveRequest] = useState<ItemRef[] | null>(null);
@@ -1507,6 +1534,21 @@ export function CourseLibraryView({
                     </button>
                   )}
                 </div>
+              )}
+              {!normalizedQuery && !selecting && (canUndoSort || canSortByLecture) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={canUndoSort ? undoSort : sortByLecture}
+                  disabled={reorderLevel.isPending}
+                  title={canUndoSort ? t("library.undoSort") : t("library.sortByLectureHint")}
+                  className="ca-touch-44"
+                >
+                  {canUndoSort ? <Undo2 className="h-4 w-4" /> : <ListOrdered className="h-4 w-4" />}
+                  <span className="max-sm:sr-only">
+                    {canUndoSort ? t("library.undoSort") : t("library.sortByLecture")}
+                  </span>
+                </Button>
               )}
               {videos.length > 0 && (
                 // 次要入口：无边框的文字按钮。顶栏右侧只留「导入」一个描边按钮，不再是一排方框。
