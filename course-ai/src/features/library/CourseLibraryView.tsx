@@ -1796,9 +1796,13 @@ export function CourseLibraryView({
               <Trash2 className="h-4 w-4" />
               <span className="max-sm:sr-only">{t("home.delete")}</span>
             </Button>
-            <Button size="sm" onClick={exitSelection}>
-              {t("library.done")}
-            </Button>
+            {/* 手机 / 平板的标题行右端已经有「取消」退出选择；操作条再放一个「完成」只会把左边的
+                「已选 N 项」挤成一字一行。 */}
+            {!isPhoneDevice && (
+              <Button size="sm" onClick={exitSelection}>
+                {t("library.done")}
+              </Button>
+            )}
           </div>
         )}
       </div>

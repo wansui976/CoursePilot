@@ -1180,7 +1180,12 @@ article[data-selected] {
 
 .ca-select-count {
   margin-right: auto;
+  min-width: 0;
+  overflow: hidden;
   padding: 0 6px;
+  /* 挤不下时宁可省略，也不要竖着一字一行。 */
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--fs-sm);
   color: var(--text-1);
 }
