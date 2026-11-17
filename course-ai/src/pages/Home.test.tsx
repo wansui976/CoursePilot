@@ -694,7 +694,8 @@ describe("Home", () => {
     await waitFor(() => expect(mockIpc.pipeline.jobs).toHaveBeenCalledWith(video.id));
     fireEvent.click(screen.getByRole("button", { name: "处理队列" }));
 
-    const queuePage = screen.getByLabelText("处理队列页面");
+    // 一级视图是按需加载的：等它挂上。
+    const queuePage = await screen.findByLabelText("处理队列页面");
     expect(within(queuePage).getByText(displayTitle(video.title))).toBeInTheDocument();
     expect(within(queuePage).getByText("恢复中的识别任务")).toBeInTheDocument();
     expect(within(queuePage).getByText("35%")).toBeInTheDocument();
@@ -707,7 +708,7 @@ describe("Home", () => {
     await renderHome();
 
     fireEvent.click(screen.getByRole("button", { name: "处理队列" }));
-    const queuePage = screen.getByLabelText("处理队列页面");
+    const queuePage = await screen.findByLabelText("处理队列页面");
 
     expect(await within(queuePage).findByRole("alert")).toHaveTextContent(
       "processing queue unavailable",
@@ -730,7 +731,7 @@ describe("Home", () => {
     const rail = await screen.findByRole("complementary", { name: "课程侧栏" });
 
     fireEvent.click(within(rail).getByRole("button", { name: "设置" }));
-    expect(screen.getByText("设置面板")).toBeInTheDocument();
+    expect(await screen.findByText("设置面板")).toBeInTheDocument();
 
     fireEvent.click(within(rail).getByRole("button", { name: "学习面板" }));
 
@@ -741,7 +742,7 @@ describe("Home", () => {
     act(() => continuation());
 
     expect(screen.queryByText("设置面板")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "学习面板" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "学习面板" })).toBeInTheDocument();
   });
 
   it("guards course selection while settings has an unresolved draft", async () => {
@@ -781,7 +782,7 @@ describe("Home", () => {
 
     await waitFor(() => expect(mockIpc.pipeline.jobs).toHaveBeenCalledWith(video.id));
     fireEvent.click(screen.getByRole("button", { name: "处理队列" }));
-    const queuePage = screen.getByLabelText("处理队列页面");
+    const queuePage = await screen.findByLabelText("处理队列页面");
 
     expect(await within(queuePage).findByText("任务进度读取失败")).toBeInTheDocument();
     expect(within(queuePage).getByRole("alert")).toHaveTextContent(

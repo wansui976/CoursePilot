@@ -419,7 +419,8 @@ describe("Home selected-video integration", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^Downloads/ }));
     fireEvent.click(screen.getByRole("button", { name: "队列" }));
 
-    expect(screen.getByLabelText("处理队列页面")).toBeInTheDocument();
+    // 一级视图是按需加载的：等它挂上。
+    expect(await screen.findByLabelText("处理队列页面")).toBeInTheDocument();
 
     await waitFor(() => expect(mockBackButtonPress.onBackButtonPress).toHaveBeenCalled());
     const handler = mockBackButtonPress.onBackButtonPress.mock.calls[
@@ -1046,7 +1047,7 @@ describe("Home selected-video integration", () => {
     await screen.findByText(displayTitle(video.title));
     fireEvent.click(screen.getByRole("button", { name: "知识点" }));
 
-    expect(screen.getByLabelText("课程知识页面")).toBeInTheDocument();
+    expect(await screen.findByLabelText("课程知识页面")).toBeInTheDocument();
 
     await waitFor(() => expect(mockBackButtonPress.onBackButtonPress).toHaveBeenCalled());
     const handler = mockBackButtonPress.onBackButtonPress.mock.calls[

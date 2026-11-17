@@ -1,9 +1,50 @@
-import { Fragment, type ReactNode } from "react";
-import katex from "katex";
-import "katex/dist/katex.min.css";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { MATH_RE } from "@/lib/markdownToTiptap";
 
-function renderMath(latex: string, display: boolean): string {
+type Katex = typeof import("katex").default;
+
+// KaTeX（连同它的样式和字体）是启动包里最大的一块，而绝大多数文字里根本没有公式。
+// 所以第一次真遇到公式时才加载；加载那一下（本地几十毫秒）先显示公式原文。
+// 应用空闲时会预先加载一次（preloadKatex），实际使用中基本看不到这一下。
+let katexLib: Katex | null = null;
+let katexLoading: Promise<Katex> | null = null;
+
+export function loadKatex(): Promise<Katex> {
+  katexLoading ??= Promise.all([import("katex"), import("katex/dist/katex.min.css")]).then(
+    ([module]) => (katexLib = module.default),
+  );
+  return katexLoading;
+}
+
+/** 空闲时预加载 KaTeX，不占启动的关键路径。 */
+export function preloadKatex() {
+  const start = () => void loadKatex().catch(() => {});
+  if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+    window.requestIdleCallback(start, { timeout: 5000 });
+  } else {
+    setTimeout(start, 3000);
+  }
+}
+
+function useKatex(needed: boolean): Katex | null {
+  const [lib, setLib] = useState<Katex | null>(katexLib);
+  useEffect(() => {
+    if (!needed || lib) return;
+    let alive = true;
+    void loadKatex()
+      .then((loaded) => {
+        if (alive) setLib(loaded);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [needed, lib]);
+  return lib ?? katexLib;
+}
+
+function renderMath(katex: Katex | null, latex: string, display: boolean): string {
+  if (!katex) return "";
   try {
     return katex.renderToString(latex, {
       displayMode: display,
@@ -31,6 +72,7 @@ export function MathText({
 }) {
   const nodes: ReactNode[] = [];
   const re = new RegExp(MATH_RE.source, "g");
+  const katex = useKatex(new RegExp(MATH_RE.source).test(text));
   let last = 0;
   let match: RegExpExecArray | null;
   let i = 0;
@@ -49,7 +91,7 @@ export function MathText({
     }
     const display = match[1] !== undefined || match[3] !== undefined;
     const latex = (match[1] ?? match[2] ?? match[3] ?? match[4] ?? "").trim();
-    const html = renderMath(latex, display);
+    const html = renderMath(katex, latex, display);
     if (html) {
       nodes.push(
         <span
@@ -59,7 +101,7 @@ export function MathText({
         />,
       );
     } else {
-      // 渲染失败时退回显示原始公式文本。
+      // 渲染失败（或 KaTeX 还在加载）时显示原始公式文本。
       nodes.push(<Fragment key={`m-${i}`}>{match[0]}</Fragment>);
     }
     last = match.index + match[0].length;

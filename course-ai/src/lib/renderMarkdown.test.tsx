@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import i18n from "@/i18n";
 import { renderInlineMarkdown, renderMarkdown } from "./renderMarkdown";
 
@@ -72,14 +72,14 @@ describe("renderMarkdown", () => {
     expect(getByText("三级").className).toContain("font-semibold");
   });
 
-  it("keeps KaTeX math and clickable timestamps working inside markdown", () => {
+  it("keeps KaTeX math and clickable timestamps working inside markdown", async () => {
     const onSeek = vi.fn();
     const { container } = renderMd(
       "- 公式 \\(E=mc^2\\) 在 [00:05]",
       onSeek,
     );
-    // 公式经 KaTeX 渲染。
-    expect(container.querySelector(".katex")).not.toBeNull();
+    // 公式经 KaTeX 渲染（KaTeX 按需加载，等它到位）。
+    await waitFor(() => expect(container.querySelector(".katex")).not.toBeNull());
     // 时间戳渲染成可点击按钮。
     const tsBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("00:05"),

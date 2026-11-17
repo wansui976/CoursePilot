@@ -1,16 +1,36 @@
-import { useCallback } from "react";
+import { lazy, Suspense, useCallback, type ReactNode } from "react";
 import { useHomeRoute } from "@/app/homeRoute";
 import { useShell } from "@/app/shell";
-import { ConceptsPanel } from "@/features/knowledge/ConceptsPanel";
 import { CourseLibraryView } from "@/features/library/CourseLibraryView";
 import { CourseSidebar } from "@/features/library/CourseSidebar";
-import { ProcessingQueueView } from "@/features/library/ProcessingQueueView";
-import { RecycleBin } from "@/features/library/RecycleBin";
 import { isSettingsCategory } from "@/features/settings/categories";
-import { DevConsole } from "@/features/settings/DevConsole";
-import { SettingsPanel } from "@/features/settings/SettingsPanel";
-import { Dashboard } from "@/features/study/Dashboard";
 import { VideoWorkbench } from "@/features/workspace/VideoWorkbench";
+
+// 课程库 / 工作台是启动就要的，留在主包；其余一级视图点进去才加载，首屏少解析一大截
+// （学习面板连着复习会话、知识点连着费曼复述、设置连着各分类和模型管理）。
+const ConceptsPanel = lazy(() =>
+  import("@/features/knowledge/ConceptsPanel").then((m) => ({ default: m.ConceptsPanel })),
+);
+const ProcessingQueueView = lazy(() =>
+  import("@/features/library/ProcessingQueueView").then((m) => ({ default: m.ProcessingQueueView })),
+);
+const RecycleBin = lazy(() =>
+  import("@/features/library/RecycleBin").then((m) => ({ default: m.RecycleBin })),
+);
+const DevConsole = lazy(() =>
+  import("@/features/settings/DevConsole").then((m) => ({ default: m.DevConsole })),
+);
+const SettingsPanel = lazy(() =>
+  import("@/features/settings/SettingsPanel").then((m) => ({ default: m.SettingsPanel })),
+);
+const Dashboard = lazy(() =>
+  import("@/features/study/Dashboard").then((m) => ({ default: m.Dashboard })),
+);
+
+/** 懒加载视图的占位：本地读文件只要几十毫秒，留空比闪一下骨架更安静。 */
+function Lazy({ children }: { children: ReactNode }) {
+  return <Suspense fallback={null}>{children}</Suspense>;
+}
 
 /**
  * 各路由的主区视图。外壳（Home）负责 rail / 侧栏 / 底栏 / 助手，主区就是这里的 <Outlet />。
@@ -85,40 +105,46 @@ export function ConceptsRouteView() {
   const { courseId } = useHomeRoute();
   if (shell.selectedVideo || !courseId) return <LibraryRouteView />;
   return (
-    <ConceptsPanel
-      courseId={courseId}
-      courseName={shell.selectedCourse?.name}
-      onClose={shell.closeConcepts}
-      onJump={shell.conceptJump}
-      initialNavigationState={
-        shell.knowledgeReturn?.courseId === courseId
-          ? shell.knowledgeReturn.navigationState
-          : null
-      }
-    />
+    <Lazy>
+      <ConceptsPanel
+        courseId={courseId}
+        courseName={shell.selectedCourse?.name}
+        onClose={shell.closeConcepts}
+        onJump={shell.conceptJump}
+        initialNavigationState={
+          shell.knowledgeReturn?.courseId === courseId
+            ? shell.knowledgeReturn.navigationState
+            : null
+        }
+      />
+    </Lazy>
   );
 }
 
 export function QueueRouteView() {
   const shell = useShell();
   return (
-    <ProcessingQueueView
-      queue={shell.queue}
-      onBack={shell.goBackOneLevel}
-      onOpenVideo={shell.openQueuedVideo}
-    />
+    <Lazy>
+      <ProcessingQueueView
+        queue={shell.queue}
+        onBack={shell.goBackOneLevel}
+        onOpenVideo={shell.openQueuedVideo}
+      />
+    </Lazy>
   );
 }
 
 export function DashboardRouteView() {
   const shell = useShell();
   return (
-    <Dashboard
-      onClose={shell.closeToLibrary}
-      onOpenCourse={shell.selectCourse}
-      onResume={shell.resumeStudy}
-      onJump={shell.reviewJump}
-    />
+    <Lazy>
+      <Dashboard
+        onClose={shell.closeToLibrary}
+        onOpenCourse={shell.selectCourse}
+        onResume={shell.resumeStudy}
+        onJump={shell.reviewJump}
+      />
+    </Lazy>
   );
 }
 
@@ -126,23 +152,33 @@ export function SettingsRouteView() {
   const shell = useShell();
   const { settingsCategory, go } = useHomeRoute();
   return (
-    <SettingsPanel
-      category={isSettingsCategory(settingsCategory) ? settingsCategory : null}
-      onCategoryChange={(category) => go({ settingsCategory: category })}
-      onClose={shell.closeToLibrary}
-      onOpenDevConsole={() => shell.openMainView("dev")}
-      onRegisterExitRequest={shell.registerSettingsExitRequest}
-      onRegisterBackRequest={shell.registerSettingsBackRequest}
-    />
+    <Lazy>
+      <SettingsPanel
+        category={isSettingsCategory(settingsCategory) ? settingsCategory : null}
+        onCategoryChange={(category) => go({ settingsCategory: category })}
+        onClose={shell.closeToLibrary}
+        onOpenDevConsole={() => shell.openMainView("dev")}
+        onRegisterExitRequest={shell.registerSettingsExitRequest}
+        onRegisterBackRequest={shell.registerSettingsBackRequest}
+      />
+    </Lazy>
   );
 }
 
 export function RecycleRouteView() {
   const shell = useShell();
-  return <RecycleBin onClose={shell.closeToLibrary} />;
+  return (
+    <Lazy>
+      <RecycleBin onClose={shell.closeToLibrary} />
+    </Lazy>
+  );
 }
 
 export function DevRouteView() {
   const { go } = useHomeRoute();
-  return <DevConsole onClose={() => go({ view: "settings", settingsCategory: "dev" })} />;
+  return (
+    <Lazy>
+      <DevConsole onClose={() => go({ view: "settings", settingsCategory: "dev" })} />
+    </Lazy>
+  );
 }

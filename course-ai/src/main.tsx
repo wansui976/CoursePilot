@@ -8,6 +8,7 @@ import { startDownloadListener } from "@/stores/downloads";
 import { startNativeInsets } from "@/lib/nativeInsets";
 import { startPlaybackHydration } from "@/lib/playback";
 import { flushDurableStore, loadDurableStore } from "@/lib/durableStore";
+import { preloadKatex } from "@/ui/MathText";
 
 startJobListener();
 startDownloadListener();
@@ -18,6 +19,8 @@ startPlaybackHydration();
 // 助手对话记录存在库里：先读进内存再渲染（助手面板挂载时同步读它）。
 // 读不到或超过 3 秒就照旧用 localStorage，不会卡住启动。
 void loadDurableStore().finally(() => {
+  // 公式渲染库不在启动包里：首屏出来以后、空闲时再加载。
+  preloadKatex();
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
       <App />
