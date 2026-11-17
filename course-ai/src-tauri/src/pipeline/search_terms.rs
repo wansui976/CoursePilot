@@ -103,6 +103,26 @@ impl TermWeights {
         }
     }
 
+    /// 由已经数好的 df（每个词元出现在几篇里）和总篇数直接得到权重。
+    /// 材料在库里、由 SQL 去数的时候用它，省得把每一篇都搬出来过一遍 builder。
+    pub fn from_counts(terms: Vec<String>, df: Vec<usize>, documents: usize) -> TermWeights {
+        debug_assert_eq!(terms.len(), df.len());
+        let n = documents as f64;
+        let idf = df
+            .iter()
+            .map(|df| {
+                let df = *df as f64;
+                (1.0 + (n - df + 0.5) / (df + 0.5)).ln()
+            })
+            .collect();
+        TermWeights {
+            terms,
+            idf,
+            df,
+            documents,
+        }
+    }
+
     /// 切出来的词元原样（挑摘要行、拼提示词时要用）。
     pub fn terms(&self) -> &[String] {
         &self.terms
@@ -202,21 +222,14 @@ impl TermWeightsBuilder {
     }
 
     pub fn finish(self) -> TermWeights {
-        let n = self.documents as f64;
-        let idf = self
-            .df
-            .iter()
-            .map(|df| {
-                let df = *df as f64;
-                (1.0 + (n - df + 0.5) / (df + 0.5)).ln()
-            })
-            .collect();
-        TermWeights {
-            terms: self.terms,
-            idf,
-            df: self.df,
-            documents: self.documents,
-        }
+        TermWeights::from_counts(self.terms, self.df, self.documents)
+    }
+
+    /// 只喂了命中的那几篇、总篇数另外数好时用：df 照常，总篇数换成真实的 `documents`。
+    /// 没喂进来的篇一个词元都不含，不影响任何 df。
+    pub fn finish_with_total(self, documents: usize) -> TermWeights {
+        debug_assert!(documents >= self.documents);
+        TermWeights::from_counts(self.terms, self.df, documents.max(self.documents))
     }
 }
 

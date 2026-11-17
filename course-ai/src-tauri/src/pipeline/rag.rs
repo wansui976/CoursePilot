@@ -1368,7 +1368,149 @@ pub async fn keyword_search_scope(
 
 /// 同 [`keyword_search_scope`]，但每条带上得分（按词的 IDF 加权）。
 /// 「拍题找讲解」要按相对得分区分「最相关 / 可能相关」并丢掉太弱的命中。
+///
+/// 匹配交给 SQLite 做，只把命中的段落和课件页取回来打分。此前是把范围内每个视频的
+/// 全部字幕和课件逐行搬进内存再匹配：100 个一小时的视频（约 9 万段）一次提问要 2–3 秒、
+/// 300 个要 12 秒，时间几乎全花在逐行搬数据上；SQLite 原地扫同样的文本只要零点几秒。
+///
+/// 结果与逐篇搬出来算完全一致（有对拍测试）：
+/// - 总篇数只数行数；df（出现在几篇里）在取回的命中篇里数——含某词元的一篇必然在其中；
+/// - 命中的那几篇取回来后仍用 [`TermWeights::score`] 打分，规则一处定义；
+/// - 返回顺序按「范围里视频的先后 → 字幕段在前、课件页在后 → 各自原有顺序」，
+///   与旧实现一样，得分相同时的先后也不变。
+///
+/// 已知差别：SQL 这一步只对 ASCII 字母不分大小写，所以非 ASCII 的大写字母（如希腊字母 Σ）
+/// 写成大写的那一篇会被漏掉。中文没有大小写，英文是 ASCII，不受影响。
 pub async fn keyword_search_scope_scored(
+    db: &Db,
+    videos: &[(String, String)],
+    query: &str,
+    limit: usize,
+) -> AppResult<Vec<(f64, Citation)>> {
+    let terms = query_terms(query);
+    if terms.is_empty() || videos.is_empty() {
+        return Ok(Vec::new());
+    }
+    let scope = serde_json::to_string(&videos.iter().map(|(id, _)| id).collect::<Vec<_>>())
+        .map_err(|error| crate::error::AppError::Other(error.to_string()))?;
+    let order: std::collections::HashMap<&str, (usize, &str)> = videos
+        .iter()
+        .enumerate()
+        .map(|(index, (id, title))| (id.as_str(), (index, title.as_str())))
+        .collect();
+
+    // 每个词元一个过滤条件，和 Rust 侧 to_lowercase().contains() 对齐：
+    // - 不含 ASCII 字母的词元（中文二字组、数字）没有大小写，直接 instr，不必转小写；
+    // - 含 ASCII 字母的用 LIKE：SQLite 的 LIKE 本来就对 ASCII 不分大小写，也不用 lower()
+    //   给每一行每个词元各复制一遍文本。% _ \ 转义掉，按字面匹配。
+    let mut binds: Vec<String> = Vec::with_capacity(terms.len());
+    let mut filters: Vec<String> = Vec::with_capacity(terms.len());
+    for term in &terms {
+        let n = binds.len() + 2;
+        if term.bytes().any(|byte| byte.is_ascii_alphabetic()) {
+            let escaped = term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+            binds.push(format!("%{escaped}%"));
+            filters.push(format!("{{col}} LIKE ?{n} ESCAPE '\\'"));
+        } else {
+            binds.push(term.clone());
+            filters.push(format!("instr({{col}}, ?{n}) > 0"));
+        }
+    }
+    let any_hit = |column: &str| filters.join(" OR ").replace("{col}", column);
+    const SCOPE: &str = "video_id IN (SELECT value FROM json_each(?1))";
+    // 课件页与 list_slide_pages 取的是同一批：OCR 文字非空的页。
+    const PAGES: &str = "ocr_text IS NOT NULL AND TRIM(ocr_text) <> ''";
+
+    // 总篇数只数行、不读正文，走 video_id 索引。
+    let segment_total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM transcripts WHERE {SCOPE}"))
+        .bind(&scope)
+        .fetch_one(&db.pool)
+        .await?;
+    let page_total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM slides WHERE {SCOPE} AND {PAGES}"))
+        .bind(&scope)
+        .fetch_one(&db.pool)
+        .await?;
+
+    let segment_sql = format!(
+        "SELECT video_id, segment_idx, start_ms, end_ms, text FROM transcripts
+         WHERE {SCOPE} AND ({})",
+        any_hit("text")
+    );
+    let mut segment_query = sqlx::query_as::<_, (String, i64, i64, i64, String)>(&segment_sql).bind(&scope);
+    for bind in &binds {
+        segment_query = segment_query.bind(bind);
+    }
+    let page_sql = format!(
+        "SELECT video_id, page_no, start_ms, end_ms, image_path, ocr_text FROM slides
+         WHERE {SCOPE} AND {PAGES} AND ({})",
+        any_hit("ocr_text")
+    );
+    let mut page_query =
+        sqlx::query_as::<_, (String, i64, i64, Option<i64>, String, String)>(&page_sql).bind(&scope);
+    for bind in &binds {
+        page_query = page_query.bind(bind);
+    }
+    let segment_rows = segment_query.fetch_all(&db.pool).await?;
+    let page_rows = page_query.fetch_all(&db.pool).await?;
+
+    // df 只需要数命中的那几篇：含某个词元的一篇必然命中了「任一词元」，已经在取回来的里面。
+    // 用 builder 数，规则和逐篇搬出来时一字不差；没取回来的那些只计入总篇数。
+    let mut builder = TermWeights::builder(terms.clone());
+    for (_, _, _, _, text) in &segment_rows {
+        builder.add_document([text.as_str()]);
+    }
+    for (_, _, _, _, _, ocr_text) in &page_rows {
+        builder.add_document([ocr_text.as_str()]);
+    }
+    let weights = builder.finish_with_total((segment_total + page_total) as usize);
+
+    // (视频在范围里的位置, 0=字幕/1=课件, 原有顺序) → 与旧实现逐视频追加的先后一致。
+    let mut keyed: Vec<((usize, u8, i64), Hit)> = Vec::new();
+    for (vid, segment_idx, start_ms, end_ms, text) in segment_rows {
+        let Some(&(index, title)) = order.get(vid.as_str()) else { continue };
+        let score = weights.score(&text);
+        if score > 0.0 {
+            keyed.push((
+                (index, 0, segment_idx),
+                Hit {
+                    score,
+                    start_ms,
+                    end_ms,
+                    text,
+                    slide: None,
+                    video: Some((vid.clone(), title.to_string())),
+                },
+            ));
+        }
+    }
+    for (vid, page_no, start_ms, end_ms, image_path, ocr_text) in page_rows {
+        let Some(&(index, title)) = order.get(vid.as_str()) else { continue };
+        let score = weights.score(&ocr_text);
+        if score > 0.0 {
+            let page = SlidePage {
+                page_no,
+                start_ms,
+                end_ms,
+                image_path,
+                ocr_text,
+            };
+            keyed.push((
+                (index, 1, page_no),
+                slide_hit(score, page, &weights, Some((vid.clone(), title.to_string()))),
+            ));
+        }
+    }
+    keyed.sort_by_key(|(key, _)| *key);
+    let mut hits: Vec<Hit> = keyed.into_iter().map(|(_, hit)| hit).collect();
+    rank_hits(&mut hits);
+    let scores: Vec<f64> = hits.iter().take(limit).map(|hit| hit.score).collect();
+    Ok(scores.into_iter().zip(to_citations(hits, limit)).collect())
+}
+
+/// 旧实现：把范围内每个视频的全部字幕和课件读进内存再打分。留作对拍基准——
+/// 新实现必须和它给出一模一样的结果。
+#[cfg(test)]
+async fn keyword_search_scope_scored_reference(
     db: &Db,
     videos: &[(String, String)],
     query: &str,
@@ -2153,6 +2295,92 @@ mod tests {
         rank_hits(&mut hits);
         // 同样命中时课件页排前面：写在片子上的术语比听写下来的更可靠。
         assert_eq!(hits[0].text, "板书");
+    }
+
+    /// 新实现（SQL 里匹配、只取命中的回来）与旧实现（全部搬出来算）逐条对拍：
+    /// 得分、顺序、引用内容都必须一模一样，包括同分时的先后。
+    #[tokio::test]
+    async fn sql_side_scope_search_matches_the_in_memory_reference_exactly() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        let course = crate::commands::courses::create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        // 词表故意小：大量同分、大量重复命中，最能暴露排序上的差别。
+        let pieces = [
+            "梯度", "下降", "学习率", "太大", "反向", "传播", "损失", "函数", "SGD", "Adam", "ReLU", "的", "是",
+            "会", "震荡", "收敛", "Batch", "噪声", "100%", "a_b", " ",
+        ];
+        let mut seed = 11u64;
+        let mut rnd = move |n: usize| {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) as usize) % n
+        };
+        let mut videos = Vec::new();
+        for i in 0..6 {
+            let path = dir.path().join(format!("{i}.mp4"));
+            std::fs::write(&path, b"x").unwrap();
+            let video = crate::commands::videos::add_local_video(&db, &course.id, path, None).await.unwrap();
+            for k in 0..60i64 {
+                let text: String = (0..1 + rnd(6)).map(|_| pieces[rnd(pieces.len())]).collect();
+                sqlx::query("INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)")
+                    .bind(&video.id)
+                    .bind(k)
+                    .bind((k % 7) * 1000)
+                    .bind((k % 7) * 1000 + 900)
+                    .bind(text)
+                    .execute(&db.pool)
+                    .await
+                    .unwrap();
+            }
+            for k in 0..8i64 {
+                let ocr: Option<String> = match k {
+                    0 => None,
+                    1 => Some("   ".into()),
+                    _ => Some((0..2 + rnd(8)).map(|_| pieces[rnd(pieces.len())]).collect::<Vec<_>>().join("\n")),
+                };
+                sqlx::query("INSERT INTO slides(video_id,page_no,start_ms,end_ms,image_path,ocr_text) VALUES (?,?,?,?,?,?)")
+                    .bind(&video.id)
+                    .bind(k)
+                    .bind((k % 3) * 1000)
+                    .bind(if k % 2 == 0 { Some((k % 3) * 1000 + 500) } else { None })
+                    .bind(format!("p{k}.png"))
+                    .bind(ocr)
+                    .execute(&db.pool)
+                    .await
+                    .unwrap();
+            }
+            videos.push((video.id.clone(), format!("第{i}讲")));
+        }
+        // 范围不按插入顺序给，确认「范围里的先后」才是决定因素。
+        videos.reverse();
+        let (mut compared_hits, mut slide_hits) = (0usize, 0usize);
+        for query in [
+            "学习率太大会怎样",
+            "反向传播",
+            "sgd 和 adam",
+            "ADAM",
+            "100%",
+            "a_b",
+            "什么",
+            "梯",
+            "完全不相关的问题",
+        ] {
+            for limit in [3, 50] {
+                let new = keyword_search_scope_scored(&db, &videos, query, limit).await.unwrap();
+                let old = keyword_search_scope_scored_reference(&db, &videos, query, limit).await.unwrap();
+                compared_hits += old.len();
+                slide_hits += old.iter().filter(|(_, c)| c.slide_page.is_some()).count();
+                assert_eq!(
+                    serde_json::to_string(&new).unwrap(),
+                    serde_json::to_string(&old).unwrap(),
+                    "query={query} limit={limit}"
+                );
+            }
+        }
+        // 对拍不能是两边都空：确实比到了大量字幕和课件命中。
+        assert!(compared_hits > 200 && slide_hits > 10, "{compared_hits} {slide_hits}");
+        assert!(keyword_search_scope_scored(&db, &[], "梯度", 5).await.unwrap().is_empty());
     }
 
     #[tokio::test]
