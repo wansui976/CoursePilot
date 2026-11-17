@@ -42,14 +42,23 @@ struct ContextLine {
 /// 递进式动画（bullet 一条条出现）会让相邻页共享绝大部分文字，逐页原样拼进上下文
 /// 会让板书内容的字数超过讲稿本身、且几乎全是重复，把真正的信息淹掉。只保留新增行，
 /// 顺带把「逐条出现」还原成一次完整的要点列表。纯函数，可单测。
+///
+/// OCR 认出来的碎渣也在这里丢掉：页码、坐标轴刻度这类只有数字的行，单个字，只有符号的行
+/// （箭头、分隔线、项目符号、认错的边框）。它们对模型没有信息量，长课里攒起来却不少。
 pub fn new_slide_lines(previous: &[String], current: &str) -> Vec<String> {
     current
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
+        .filter(|line| is_informative_slide_line(line))
         .filter(|line| !previous.iter().any(|seen| seen == line))
         .map(str::to_string)
         .collect()
+}
+
+/// 至少两个字、且至少有一个字母或汉字（`is_alphabetic` 含汉字）。
+/// 只看形状不看内容：水印、「关注点赞」这类按词过滤容易误杀正文，不做。
+fn is_informative_slide_line(line: &str) -> bool {
+    line.chars().count() >= 2 && line.chars().any(char::is_alphabetic)
 }
 
 /// 从 transcripts 表拼出 "[mm:ss] text" 多行文本。
@@ -1162,6 +1171,16 @@ mod tests {
             vec!["似然函数".to_string()]
         );
         assert!(new_slide_lines(&previous, "先验与后验").is_empty());
+    }
+
+    #[test]
+    fn new_slide_lines_drop_ocr_debris_but_keep_short_real_text() {
+        let page = "12\n0 10 20 30\n→\n———\n• •\n|\n梯度下降\nx = y + 1\nAI\n∑x\n第3章";
+        assert_eq!(
+            new_slide_lines(&[], page),
+            vec!["梯度下降", "x = y + 1", "AI", "∑x", "第3章"],
+            "页码、刻度、单字、纯符号行丢掉；两个字的词、公式留着"
+        );
     }
 
     #[tokio::test]
