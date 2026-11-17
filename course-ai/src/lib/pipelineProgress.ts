@@ -77,6 +77,7 @@ const DETAIL_LABEL_KEY: Record<string, string> = {
   "正在请求模型整理笔记": "pipelineProgress.details.requestingNotes",
   "写入笔记": "pipelineProgress.details.savingNotes",
   "已取消": "pipelineProgress.details.canceled",
+  "已跳过：设置里关掉了自动生成，需要时可在面板里手动生成": "pipelineProgress.details.autoGenerateOff",
   "应用已重启，处理被中断，请重试": "pipelineProgress.details.interruptedByRestart",
 };
 

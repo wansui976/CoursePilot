@@ -91,6 +91,7 @@
       "slidesExtracted": "已提取 {{count}} 页课件",
       "interruptedByRestart": "应用已重启，处理被中断，请重试",
       "canceled": "已取消",
+      "autoGenerateOff": "已跳过：设置里关掉了自动生成",
       "localAsrDevice": "本地识别中（{{model}}，{{language}}，{{device}}）",
       "gpuDevice": "GPU：{{name}}",
       "waitingForLocalAsr": "排队等待本地识别（另一个视频正在识别）",
@@ -960,7 +961,9 @@
     },
     "llm": {
       "title": "大模型",
-      "profilesGroup": "模型配置"
+      "profilesGroup": "模型配置",
+      "autoGenerate": "处理完自动生成",
+      "autoGenerateHint": "视频处理完后自动让大模型生成哪些内容。关掉的不会发请求、不花钱，处理进度里显示为已跳过；需要时在对应面板里点「生成」照样可以。"
     },
     "ocr": {
       "title": "图文识别 (OCR)",

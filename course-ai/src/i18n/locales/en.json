@@ -91,6 +91,7 @@
       "slidesExtracted": "Extracted {{count}} slide pages",
       "interruptedByRestart": "Processing was interrupted when the app restarted. Retry this task.",
       "canceled": "Canceled",
+      "autoGenerateOff": "Skipped: automatic generation is off in Settings",
       "localAsrDevice": "Transcribing locally ({{model}}, {{language}}, {{device}})",
       "gpuDevice": "GPU: {{name}}",
       "waitingForLocalAsr": "Waiting for local recognition (another video is being recognized)",
@@ -961,7 +962,9 @@
     },
     "llm": {
       "title": "LLM",
-      "profilesGroup": "Model profiles"
+      "profilesGroup": "Model profiles",
+      "autoGenerate": "Generate automatically after processing",
+      "autoGenerateHint": "Which items the model generates on its own once a video finishes processing. Switched-off items send no request and cost nothing; they show as skipped in the progress view, and you can still generate them from their panel."
     },
     "ocr": {
       "title": "OCR",

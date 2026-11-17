@@ -44,7 +44,7 @@ use crate::commands::courses::AppState;
 use crate::commands::videos::Video;
 use crate::error::{AppError, AppResult};
 use crate::jobs::{self, emit_update, JobEvent};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 use serde::Serialize;
@@ -1654,6 +1654,21 @@ fn remember_failed_profile(
 ///
 /// 唯一的例外是账号级的错误。余额耗尽时，剩下四个任务会各自把讲稿重新分块压缩一遍，
 /// 再撞上同一个 402——用户等来的是五条一模一样的报错，和五轮白花的时间。
+/// 导入后自动生成哪些 AI 产物（设置项，JSON：`{"quiz":false,"mindmap":false}`）。
+/// 只记关掉的；没写的、读不出来的都算开——老用户升级后行为不变。
+const AUTO_AI_TASKS_KEY: &str = "auto_ai_tasks";
+const AUTO_AI_OFF_MESSAGE: &str = "已跳过：设置里关掉了自动生成，需要时可在面板里手动生成";
+
+async fn auto_ai_disabled_stages(db: &crate::db::Db) -> HashSet<String> {
+    crate::commands::settings::get_setting(db, AUTO_AI_TASKS_KEY)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<HashMap<String, bool>>(&raw).ok())
+        .map(|flags| flags.into_iter().filter(|(_, on)| !on).map(|(stage, _)| stage).collect())
+        .unwrap_or_default()
+}
+
 async fn run_ai_followups(
     app: &AppHandle,
     db: &crate::db::Db,
@@ -1663,6 +1678,7 @@ async fn run_ai_followups(
     use crate::llm::profiles::AiTask;
     let mut halted_profiles = HashSet::new();
     let mut halted_dependency_profile = None;
+    let disabled_stages = auto_ai_disabled_stages(db).await;
     for (stage, task) in [
         ("chapters", AiTask::Chapters),
         ("summary", AiTask::Summary),
@@ -1676,6 +1692,13 @@ async fn run_ai_followups(
         // 断点续跑：该步骤已完成则跳过，不重复调用大模型（也避免重复写库）。
         if job.status == "done" {
             emit_stage(app, video_id, &job.id, stage, "done", 1.0, None);
+            continue;
+        }
+        // 用户在设置里关掉了这个产物：不发请求、不花钱。按「跳过」收尾（和没配模型、超预算一样），
+        // 视频照常算处理完；以后打开开关再处理，或在面板里点生成都还能补上。
+        if disabled_stages.contains(stage) {
+            let _ = jobs::cancel(db, &job.id, AUTO_AI_OFF_MESSAGE).await;
+            emit_stage(app, video_id, &job.id, stage, "canceled", 0.0, Some(AUTO_AI_OFF_MESSAGE));
             continue;
         }
         if halted_dependency_profile.is_some() {
@@ -2419,6 +2442,26 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         assert!(dropped.load(Ordering::SeqCst), "卡住的课件支线没有被中止");
+    }
+
+    #[tokio::test]
+    async fn only_explicitly_disabled_ai_stages_are_skipped() {
+        let dir = tempdir().unwrap();
+        let db = crate::db::Db::connect_and_migrate(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        assert!(auto_ai_disabled_stages(&db).await.is_empty(), "没设置过：全部自动生成");
+
+        crate::commands::settings::set_setting(&db, AUTO_AI_TASKS_KEY, r#"{"quiz":false,"mindmap":false,"notes":true}"#)
+            .await
+            .unwrap();
+        let off = auto_ai_disabled_stages(&db).await;
+        assert_eq!(off.len(), 2);
+        assert!(off.contains("quiz") && off.contains("mindmap"));
+
+        // 存坏了不能把所有产物都关掉。
+        crate::commands::settings::set_setting(&db, AUTO_AI_TASKS_KEY, "not json").await.unwrap();
+        assert!(auto_ai_disabled_stages(&db).await.is_empty());
     }
 
     #[tokio::test]
