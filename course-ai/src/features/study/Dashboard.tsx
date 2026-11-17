@@ -11,7 +11,7 @@ import {
   Share2,
 } from "lucide-react";
 import { ipc, type DueCard } from "@/lib/ipc";
-import { isWatchedThrough, readPlaybackProgress } from "@/lib/playback";
+import { isWatchedThrough, readPlaybackProgress, usePlaybackRevision } from "@/lib/playback";
 import { formatCountdown } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { ErrorNote } from "@/ui/ErrorNote";
@@ -216,6 +216,8 @@ export function Dashboard({
   onResume: (courseId: string, videoId: string, positionSec: number) => void;
   onJump: (card: DueCard) => void;
 }) {
+  // 进度从库里回填（换设备、同步下来）后重新渲染：进度是渲染期直接读本地缓存的。
+  usePlaybackRevision((state) => state.revision);
   const { t, i18n } = useTranslation();
   const today = localDay(new Date());
   const fromTs = Date.now() - LOOKBACK_DAYS * 86_400_000;

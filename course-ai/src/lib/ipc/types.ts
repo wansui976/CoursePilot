@@ -149,6 +149,10 @@ export interface VideoProgress {
   video_id: string;
   position_ms: number;
   duration_ms: number | null;
+  /** 所属课程。 */
+  course_id: string;
+  /** 最后写入时刻（毫秒；同步来的保留对端时刻）。 */
+  updated_at: number;
 }
 
 /** 学习统计：每门课累计观看毫秒与最近学习时刻。 */

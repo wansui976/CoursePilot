@@ -9,7 +9,12 @@ import { useSilenceSkip } from "@/lib/useSilenceSkip";
 import { useSmartRate } from "@/lib/useSmartRate";
 import { ipc } from "@/lib/ipc";
 import { useVideoCrop } from "./useVideoCrop";
-import { posKey, durKey, syncPlaybackProgress } from "@/lib/playback";
+import {
+  posKey,
+  syncPlaybackProgress,
+  writePlaybackDuration,
+  writePlaybackPosition,
+} from "@/lib/playback";
 import { isIOS, isMobile } from "@/lib/platform";
 import { findActiveSegmentIndex } from "@/lib/transcript";
 import type { DanmakuEntry, TranscriptSegment } from "@/lib/types";
@@ -686,9 +691,9 @@ export function VideoPlayer({
                   // 看到尾部：记成整段时长（= 已看完）。以前是删掉记录，于是「已看完」
                   // 角标和仪表盘完成度反而永远不出现——看完一讲把它算成没看。
                   // 续播那边本来就会跳过尾部附近的位置，不会再从末尾开始播。
-                  localStorage.setItem(posKey(videoId), String(dur));
+                  writePlaybackPosition(videoId, dur);
                 } else if (t > 2) {
-                  localStorage.setItem(posKey(videoId), String(t));
+                  writePlaybackPosition(videoId, t);
                 }
               }
             }}
@@ -726,7 +731,7 @@ export function VideoPlayer({
               setDurationMs(Math.floor(video.duration * 1000));
               // 记录总时长，供首页显示「时长 + 进度条」（DB 里 duration_ms 常为空）。
               if (Number.isFinite(video.duration) && video.duration > 0) {
-                localStorage.setItem(durKey(videoId), String(video.duration));
+                writePlaybackDuration(videoId, video.duration);
               }
               // 跨视频跳转优先：若有落在本视频的 pendingSeek（课程级搜索点来的），
               // 直接跳到该处、消费掉，压过断点续播。
@@ -776,7 +781,7 @@ export function VideoPlayer({
               if (t > 2) {
                 // 尾部附近按「看完」记（同 onTimeUpdate）。
                 const saved = dur && t > dur - RESUME_TAIL_GUARD ? dur : t;
-                localStorage.setItem(posKey(videoId), String(saved));
+                writePlaybackPosition(videoId, saved);
                 lastSavedRef.current = saved;
               }
               // 暂停是同步进库的好时机：完成度以库里那份为准。

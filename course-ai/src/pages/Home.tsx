@@ -23,7 +23,12 @@ import {
   dispatchAssistantNavigation,
   reconcileAssistantAction,
 } from "@/lib/assistantHome";
-import { WATCHED_RATIO, readPlaybackProgress, writeLastVideoId } from "@/lib/playback";
+import {
+  WATCHED_RATIO,
+  readPlaybackProgress,
+  usePlaybackRevision,
+  writeLastVideoId,
+} from "@/lib/playback";
 import { useStudyReminder } from "@/lib/useStudyReminder";
 import { isTablet } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
@@ -73,6 +78,8 @@ function readSidebarCollapsed(): SidebarCollapsed {
 
 
 export function Home() {
+  // 进度从库里回填（换设备、同步下来）后重新渲染：进度是渲染期直接读本地缓存的。
+  usePlaybackRevision((state) => state.revision);
   // 主区视图与课程/视频选择都由路由承载（见 app/homeRoute）；视图互斥由路径天然保证。
   const {
     view: mainView,

@@ -3380,6 +3380,8 @@ mod tests {
             video_id: "v1".into(),
             position_ms: 9_949,
             duration_ms: Some(10_000),
+            course_id: "c1".into(),
+            updated_at: 0,
         };
         assert!(!watched_through(&progress));
         progress.position_ms = 9_950;

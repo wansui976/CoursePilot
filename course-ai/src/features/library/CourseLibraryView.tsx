@@ -49,7 +49,12 @@ import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { useFindExplanation } from "@/stores/findExplanation";
 import { imageFilesFromClipboard, prepareAssistantImage } from "@/lib/assistantImages";
-import { WATCHED_RATIO, readLastVideoId, readPlaybackProgress } from "@/lib/playback";
+import {
+  WATCHED_RATIO,
+  readLastVideoId,
+  readPlaybackProgress,
+  usePlaybackRevision,
+} from "@/lib/playback";
 import { useJobs } from "@/stores/jobs";
 import { isActiveDownload, useDownloads } from "@/stores/downloads";
 import { jobPercent } from "@/lib/downloadProgress";
@@ -160,6 +165,8 @@ export function CourseLibraryView({
   onResume: (courseId: string, videoId: string, positionSec: number) => void;
   onTransientCloseChange?: (close: (() => HTMLElement | null) | null) => void;
 }) {
+  // 进度从库里回填（换设备、同步下来）后重新渲染：进度是渲染期直接读本地缓存的。
+  usePlaybackRevision((state) => state.revision);
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const selectedCourseId = courseId;

@@ -223,6 +223,10 @@ pub struct VideoProgress {
     pub position_ms: i64,
     /// 播放器读到的真实时长；videos.duration_ms 常为空，故单独存。
     pub duration_ms: Option<i64>,
+    /// 所属课程。前端据此把别的设备上最近看的视频认作这门课的「继续学习」。
+    pub course_id: String,
+    /// 最后写入时刻（毫秒；同步来的保留对端时刻）。前端拿它和本地缓存比新旧。
+    pub updated_at: i64,
 }
 
 /// 记一个视频的播放进度（幂等覆盖）。
@@ -253,7 +257,7 @@ pub async fn save_video_progress(
 /// 所有未删除视频的播放进度（供仪表盘算完成度）。
 pub async fn video_progress(db: &Db) -> AppResult<Vec<VideoProgress>> {
     Ok(sqlx::query_as(
-        "SELECT p.video_id, p.position_ms, p.duration_ms
+        "SELECT p.video_id, p.position_ms, p.duration_ms, v.course_id, p.updated_at
          FROM video_progress p JOIN videos v ON v.id = p.video_id
          WHERE v.deleted_at IS NULL",
     )

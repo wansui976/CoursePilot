@@ -4,7 +4,12 @@ import { FolderPlus, LibraryBig, Loader2, Play } from "lucide-react";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { queries } from "@/lib/queries";
-import { WATCHED_RATIO, readLastVideoId, readPlaybackProgress } from "@/lib/playback";
+import {
+  WATCHED_RATIO,
+  readLastVideoId,
+  readPlaybackProgress,
+  usePlaybackRevision,
+} from "@/lib/playback";
 import { formatMs } from "@/lib/time";
 import type { Course, VideoListItem } from "@/lib/types";
 import { displayTitle } from "@/lib/videoTitle";
@@ -57,6 +62,8 @@ export function LibraryOverview({
   creatingCourse: boolean;
   createError: Error | null;
 }) {
+  // 进度从库里回填（换设备、同步下来）后重新渲染：进度是渲染期直接读本地缓存的。
+  usePlaybackRevision((state) => state.revision);
   const { t } = useTranslation();
   const lists = useQueries({
     queries: courses.map((course) => queries.videos(course.id)),
