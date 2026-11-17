@@ -51,7 +51,7 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 - **PaddleOCR on-device OCR** — pick PP-OCRv6 in Settings → Slides / OCR (30 MB download, fully offline). It reads Chinese slides far better than Tesseract — especially worth it on Windows.
 - **More accurate local recognition** — desktop can use Qwen3-ASR 1.7B, about a sixth fewer errors than 0.6B on Mandarin; best with a GPU.
 - **See what AI costs** — Settings → LLM → Usage & cost shows this month's spend broken down by task, course and model; set a monthly budget and automatic generation pauses when it's reached.
-- **Also** — start processing a whole selection at once; volume up to 200%, remembered per course; large-screen layout, a "recently finished" list in the queue, and a friendlier assistant empty state.
+- **Also** — start processing a whole selection at once; volume remembered per course (up to 200% on Windows); large-screen layout, a "recently finished" list in the queue, and a friendlier assistant empty state.
 - **Fix** — videos stuck at 100% in the processing queue until you refreshed.
 
 <details>

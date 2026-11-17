@@ -44,7 +44,11 @@ export function persistDanmakuEnabled(enabled: boolean) {
 }
 
 export function usesApplePlaybackEngine() {
-  if (isIOS()) return true;
+  return isIOS() || isMacWebKit();
+}
+
+/** macOS 上的 WKWebView（Tauri 在 Mac 上的内核），不是 Chromium 系的浏览器。 */
+export function isMacWebKit() {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent ?? "";
   return (

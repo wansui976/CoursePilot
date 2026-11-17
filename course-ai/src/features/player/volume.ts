@@ -1,25 +1,34 @@
 import { isMobile } from "@/lib/platform";
+import { isMacWebKit } from "./playerPrefs";
 
 /**
- * 播放器音量：桌面能放大到 200%（网课录音常常很小声，系统音量开满也听不清），
+ * 播放器音量：Windows 上能放大到 200%（网课录音常常很小声，系统音量开满也听不清），
  * 每门课记住自己的音量（不同老师的录音响度差很多，换课不用再去调系统音量）。
  *
  * <video>.volume 最多只有 1。超过 100% 时把声音接进 Web Audio：元素音量开满，
  * 再由 GainNode 放大，后面跟一个限幅器，放大后的峰值不至于削波刺耳。
- * 只在桌面、并且第一次调到 100% 以上时才接——接进去之后这个元素的声音就一直走
- * Web Audio（同一个元素只能接一次），没必要的话不去动它。手机不接：手机有实体音量键，
- * 而且走 Web Audio 会影响锁屏 / 后台播放。
+ * 只在第一次调到 100% 以上时才接——接进去之后这个元素的声音就一直走
+ * Web Audio（同一个元素只能接一次），没必要的话不去动它。
  *
- * 实测（Chrome 与 Playwright WebKit，媒体在另一个端口、带 CORS 头）：放大 1 / 1.5 / 2 倍
- * 的输出电平都是原来的 1 / 1.5 / 2 倍；不带 crossOrigin 加载的接进去是静音（所以 boostFor
- * 先看 crossOrigin）。WebKit 在播放途中接入时约有 0.25 秒没声音，之后一直正常——只在
- * 第一次调过 100% 的那一下。
+ * 只在 Windows（WebView2 / Chromium）上放大，Mac 和手机最多 100%：
+ * - Mac 的 WKWebView 把元素接进 Web Audio 之后，只要不是 1 倍速，输出大约每秒断 3 毫秒
+ *   （实测 2x：30 秒里 29 次，1x 只有零星几次），听起来就是倍速时一卡一卡、吞字。
+ *   接上就拆不掉，调回 100% 也照样卡，所以干脆不接。
+ * - 手机有实体音量键，而且走 Web Audio 会影响锁屏 / 后台播放。
+ *
+ * 实测（Chrome，媒体在另一个端口、带 CORS 头）：放大 1 / 1.5 / 2 倍的输出电平都是原来的
+ * 1 / 1.5 / 2 倍；不带 crossOrigin 加载的接进去是静音（所以 boostFor 先看 crossOrigin）。
  */
 
 const STORAGE_PREFIX = "course-ai-volume:";
 
+/** 能不能放大到 100% 以上：见文件头，只有 Windows 的 WebView2 可以。 */
+function boostSupported(): boolean {
+  return !isMobile() && !isMacWebKit();
+}
+
 export function maxVolume(): number {
-  return isMobile() ? 1 : 2;
+  return boostSupported() ? 2 : 1;
 }
 
 export function clampVolume(value: number): number {
@@ -49,7 +58,7 @@ export function writeCourseVolume(courseId: string | null | undefined, value: nu
 
 /** 本地媒体服务的地址：带 CORS 头，可以用 crossOrigin="anonymous" 加载、接进 Web Audio。 */
 export function canBoost(src: string): boolean {
-  return !isMobile() && /^http:\/\/127\.0\.0\.1:\d+\//.test(src);
+  return boostSupported() && /^http:\/\/127\.0\.0\.1:\d+\//.test(src);
 }
 
 type Boost = { context: AudioContext; gain: GainNode };

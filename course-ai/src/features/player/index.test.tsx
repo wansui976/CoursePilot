@@ -813,6 +813,28 @@ describe("VideoPlayer volume (#7)", () => {
     expect((screen.getByLabelText("课程视频播放器") as HTMLVideoElement).volume).toBe(1);
   });
 
+  it("keeps the Mac app at 100% and off Web Audio (WKWebView stutters at 2x once boosted)", () => {
+    platform.mobile = false;
+    const ua = vi
+      .spyOn(navigator, "userAgent", "get")
+      .mockReturnValue(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+      );
+    try {
+      localStorage.setItem("course-ai-volume:course-a", "1.5");
+      renderPlayer(false, undefined, undefined, "course-a");
+      expect(slider().max).toBe("1");
+      // 以前在 Windows 存下的 150% 也收回 100%。
+      expect(slider()).toHaveValue("1");
+      fireEvent.keyDown(document, { key: "ArrowUp" });
+      expect(slider()).toHaveValue("1");
+      // 不以 CORS 方式加载：Mac 上不会接进 Web Audio，按 v0.4.0 的方式播放。
+      expect(screen.getByLabelText("课程视频播放器")).not.toHaveAttribute("crossorigin");
+    } finally {
+      ua.mockRestore();
+    }
+  });
+
   it("keeps phones at 100% at most", () => {
     platform.mobile = true;
     renderPlayer(false);
