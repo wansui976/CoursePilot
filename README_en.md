@@ -45,13 +45,25 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 - 🎙️ **Transcribe without a network** — built-in SenseVoice / Qwen3-ASR local recognition makes a quarter to a fifth of the errors of Whisper base on Chinese lectures, and runs on Mac, Windows, iPhone, iPad and Android.
 - 🔒 **Your data stays yours** — everything lives on your device and uses your own API keys (stored in the system keychain). It runs fully offline with local transcription and OCR.
 
-## 🆕 Recent updates (v0.4.0)
+## 🆕 Recent updates (v0.4.1)
+
+- **One-click updates on desktop** — from this version on, the update notice has an "Update now" button: it downloads, verifies the signature, installs and restarts. No more release-page downloads, and no more "damaged" warning on macOS. Getting from v0.4.0 to this version is still a manual install.
+- **PaddleOCR on-device OCR** — pick PP-OCRv6 in Settings → Slides / OCR (30 MB download, fully offline). It reads Chinese slides far better than Tesseract — especially worth it on Windows.
+- **More accurate local recognition** — desktop can use Qwen3-ASR 1.7B, about a sixth fewer errors than 0.6B on Mandarin; best with a GPU.
+- **See what AI costs** — Settings → LLM → Usage & cost shows this month's spend broken down by task, course and model; set a monthly budget and automatic generation pauses when it's reached.
+- **Also** — start processing a whole selection at once; volume up to 200%, remembered per course; large-screen layout, a "recently finished" list in the queue, and a friendlier assistant empty state.
+- **Fix** — videos stuck at 100% in the processing queue until you refreshed.
+
+<details>
+<summary>v0.4.0</summary>
 
 - **Quizzes rebuilt to make you think** — four styles: Recall, Apply (new situations not shown in class, judged with what you learned), Find the error, and Tell apart. Two new question types: find-the-error and short answer. Wrong options are misconceptions people really have, similar in length and wording to the right one, and every option explains why it is right or wrong. Single-choice and true/false are graded on click; written answers are graded by the AI against the transcript (correct / partly correct / not yet, with what you missed). "New set" adds questions and keeps the old ones; write rules for every course in **Settings → Study** and for one course under "New set".
 - **Course folders** — multi-level folders inside a course: create, rename, color, delete; drop a video on a folder to file it, or "Move to…" another course. The sidebar expands courses into a folder tree. Select in bulk (⌘/Ctrl-click, Shift-click) to move or delete, and search titles and notes in the current folder (optionally transcripts too, jumping straight to the moment). Courses in the sidebar can be reordered and colored.
 - **GPU for local recognition** — desktop Qwen3-ASR now runs on llama.cpp: Metal on Mac, Vulkan on Windows (NVIDIA, AMD and integrated GPUs), CPU when no GPU works. Move the model folder to another drive or delete single models. Whisper is gone (three to four times the errors of SenseVoice on Chinese lectures; Qwen3-ASR covers English and 30+ languages).
 - **Also** — a processing queue (set how many videos run at once; local recognition runs one at a time instead of fighting over GPU memory); local Ollama is detected and added in one click; deleting videos really frees space (the app's copies on phones, the app's downloads on desktop — your own originals stay); setting explanations moved behind ⓘ.
 - **Fixes** — processing stuck after slide OCR and impossible to stop; saving LLM settings before they loaded could overwrite them, and a saved key is now only sent to the address it was saved with.
+
+</details>
 
 <details>
 <summary>v0.3.9</summary>
@@ -160,7 +172,7 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 <summary><b>Want better recognition?</b> (cloud ASR / OCR)</summary>
 
 - **Speech recognition**: for Chinese lectures the local SenseVoice model is accurate enough (download it under **Settings → Speech Recognition → Local recognition**, 240 MB); for more accuracy pick Qwen3-ASR and add the course's terms as hotwords. On a computer, Qwen3-ASR runs on the GPU (Metal on Mac, Vulkan on Windows: NVIDIA, AMD and integrated graphics all work) and falls back to the CPU when no usable GPU is found. Models live in the app data folder by default; if drive C is short on space, change the model **Location** on the same page and the downloaded models move with it. To spare your computer or phone, or for very long lectures, set up Volcengine or Alibaba DashScope (see "Cloud services" below).
-- **OCR**: local tesseract by default. For dense slides, switch to Alibaba Cloud OCR or the DeepSeek vision model in **Settings → Slides / OCR**.
+- **OCR**: the system OCR by default (Vision on macOS / iOS, ML Kit on Android, tesseract on Windows). On desktop, switching to PaddleOCR in **Settings → Slides / OCR** (30 MB download) reads Chinese slides much better; Alibaba Cloud OCR and the DeepSeek vision model are also available.
 
 </details>
 
@@ -176,7 +188,7 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 - **Followed collections** — follow a playlist while importing it; new videos are imported and processed automatically (up to 3 per check, preferring built-in subtitles). Manage them under “Subscriptions” in the course menu.
 - **Background queue** — every imported video runs through all steps automatically, with live progress. Pause anytime; retry just the failed step. After a batch download, at most two videos process at once.
 - **Transcription** — local recognition (SenseVoice via sherpa-onnx; Qwen3-ASR via llama.cpp with GPU acceleration on computers and via sherpa-onnx on phones; VAD skips silence first) or cloud ASR (Volcengine, Alibaba). Local models download from mirrors with resume; repeated lines and silence hallucinations are cleaned up automatically. An LLM then cleans up filler words, typos, and swallowed syllables. Cloud ASR resumes from checkpoints. If you edit a transcript, materials generated from the old version are marked outdated.
-- **Slide extraction & OCR** — detects page turns by frame-difference ratio, captures the stable frame after animations, skips solid-color and transition frames, and crops black bars first. Batch OCR runs through local tesseract, Alibaba Cloud OCR, or the DeepSeek vision model, in parallel with speech recognition.
+- **Slide extraction & OCR** — detects page turns by frame-difference ratio, captures the stable frame after animations, skips solid-color and transition frames, and crops black bars first. Batch OCR runs through the on-device OCR (system OCR or PaddleOCR), Alibaba Cloud OCR, or the DeepSeek vision model, in parallel with speech recognition.
 
 ### AI study materials
 
@@ -262,7 +274,7 @@ ASR and slide extraction run in parallel. Each step's progress shows in the proc
 | Background processing | — | Android foreground service with a progress notification; iOS keeps the screen awake, and from iOS 26 continues after you switch apps |
 | Online video download | yt-dlp (background download queue) | Local files only for now |
 | Codecs the device can't decode | — | iOS transcodes AV1 to H.264 (dav1d + VideoToolbox) |
-| Local OCR | tesseract | Cloud OCR (Alibaba / DeepSeek) |
+| Local OCR | PaddleOCR (PP-OCRv6, optional download) / Vision on macOS / tesseract | Vision on iOS / ML Kit on Android; cloud OCR also available (Alibaba / DeepSeek) |
 | Key storage | macOS Keychain / Windows Credential Manager | System keychain |
 | Cross-device sync | macOS (Apple CloudKit) | iOS (Apple CloudKit) |
 
