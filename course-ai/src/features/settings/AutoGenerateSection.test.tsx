@@ -21,16 +21,18 @@ describe("AutoGenerateSection", () => {
     render(<AutoGenerateSection />);
     await waitFor(() => expect(mockIpc.settings.get).toHaveBeenCalledWith("auto_ai_tasks"));
     for (const name of ["章节", "摘要", "笔记", "出题", "脑图"]) {
-      expect(screen.getByRole("switch", { name })).toBeChecked();
+      expect(screen.getByRole("button", { name })).toHaveAttribute("aria-pressed", "true");
     }
   });
 
   it("reads saved switches and writes the whole set back when one is flipped", async () => {
     mockIpc.settings.get.mockResolvedValue(JSON.stringify({ quiz: false }));
     render(<AutoGenerateSection />);
-    await waitFor(() => expect(screen.getByRole("switch", { name: "出题" })).not.toBeChecked());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "出题" })).toHaveAttribute("aria-pressed", "false"),
+    );
 
-    fireEvent.click(screen.getByRole("switch", { name: "脑图" }));
+    fireEvent.click(screen.getByRole("button", { name: "脑图" }));
     await waitFor(() =>
       expect(mockIpc.settings.set).toHaveBeenCalledWith(
         "auto_ai_tasks",
@@ -39,13 +41,13 @@ describe("AutoGenerateSection", () => {
     );
   });
 
-  it("puts the switch back when saving fails", async () => {
+  it("restores the choice when saving fails", async () => {
     mockIpc.settings.get.mockResolvedValue(null);
     mockIpc.settings.set.mockRejectedValue(new Error("disk full"));
     render(<AutoGenerateSection />);
-    const notes = await screen.findByRole("switch", { name: "笔记" });
+    const notes = await screen.findByRole("button", { name: "笔记" });
     fireEvent.click(notes);
     expect(await screen.findByText(/disk full/)).toBeInTheDocument();
-    expect(notes).toBeChecked();
+    expect(notes).toHaveAttribute("aria-pressed", "true");
   });
 });

@@ -398,10 +398,13 @@ export function installMockIpc({ theme, safeArea }) {
       hits.sort((a, b) => Number(b.title_match) - Number(a.title_match));
       return { hits, transcripts_included: true };
     },
-    cmd_list_videos: ({ courseId }) =>
-      courseId === "c1"
-        ? videos.map((video) => (withFolders() ? video : { ...video, folder_id: null }))
-        : [],
+    // __shot-shuffled：课程里的视频顺序被打乱（拍「按讲次排序」按钮）。
+    cmd_list_videos: ({ courseId }) => {
+      if (courseId !== "c1") return [];
+      const list = videos.map((video) => (withFolders() ? video : { ...video, folder_id: null }));
+      if (localStorage.getItem("__shot-shuffled") !== "1") return list;
+      return [7, 2, 0, 5, 1, 8, 3, 6, 4].map((i, order_index) => ({ ...list[i], order_index }));
+    },
     cmd_video_cover: ({ videoId }) => cover(videoId),
     cmd_media_url: ({ videoId }) => mediaUrl(videoId),
     cmd_list_processing_videos: () => [videos[6]],
@@ -419,6 +422,11 @@ export function installMockIpc({ theme, safeArea }) {
         budgetUsd: 5,
       };
     },
+    cmd_deepseek_balance: () => ({
+      profileName: "DeepSeek",
+      isAvailable: true,
+      balances: [{ currency: "CNY", total: "86.40", granted: "10.00", toppedUp: "76.40" }],
+    }),
     cmd_video_ai_usage: () => ({ key: "", name: null, calls: 31, promptTokens: 612_000, cachedTokens: 488_000, completionTokens: 41_000, costUsd: 0.093, unpricedCalls: 0 }),
     cmd_list_recent_processed_videos: () =>
       [videos[2], videos[1], videos[0]].map((video, i) => ({

@@ -70,6 +70,18 @@ export const scenes = [
     },
   },
   {
+    // 导入后顺序乱了：顶栏出现「按讲次排序」，排完变成「撤销排序」。
+    name: "lecture-sort",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-shuffled", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openCourse(page);
+      await page.getByRole("button", { name: "按讲次排序" }).waitFor();
+      await shot();
+    },
+  },
+  {
     name: "course-list",
     devices: ALL,
     run: async ({ page, shot }) => {
