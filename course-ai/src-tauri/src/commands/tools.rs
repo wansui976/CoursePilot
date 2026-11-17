@@ -423,9 +423,9 @@ pub async fn cmd_set_bilibili_cookies(
         .app_data_dir()
         .map_err(|e| crate::error::AppError::Config(format!("app_data_dir: {e}")))?;
     let dest_dir = app_data.join("cookies");
-    std::fs::create_dir_all(&dest_dir)?;
+    tokio::fs::create_dir_all(&dest_dir).await?;
     let dest = dest_dir.join("bilibili.txt");
-    std::fs::copy(&file_path, &dest)?;
+    tokio::fs::copy(&file_path, &dest).await?;
     crate::commands::settings::set_setting(&state.db, "bilibili_cookies", &dest.to_string_lossy())
         .await
 }

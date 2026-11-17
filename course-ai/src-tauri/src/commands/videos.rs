@@ -175,13 +175,18 @@ async fn stabilize_mobile_video_file(
         .map_err(|error| AppError::Config(format!("app_data_dir: {error}")))?
         .join("picked")
         .join("videos");
-    std::fs::create_dir_all(&directory)?;
+    tokio::fs::create_dir_all(&directory).await?;
     let preferred_name = source
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("video");
     let destination = unique_stable_video_path(&directory, preferred_name);
-    std::fs::copy(&source, &destination)?;
+    // 手机上选的视频动辄上 GB：异步复制，不占着异步运行时的工作线程（同步复制期间，
+    // 同一线程上排队的其它命令——包括界面的查询——都得干等）。复制失败删掉半截文件。
+    if let Err(error) = tokio::fs::copy(&source, &destination).await {
+        let _ = tokio::fs::remove_file(&destination).await;
+        return Err(error.into());
+    }
     let stable_path = destination.to_string_lossy().to_string();
     sqlx::query("UPDATE videos SET file_path=? WHERE id=?")
         .bind(&stable_path)
