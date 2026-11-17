@@ -20,7 +20,7 @@ pub struct ListedModel {
     pub fits_memory: bool,
 }
 
-fn app_data(app: &tauri::AppHandle) -> AppResult<PathBuf> {
+pub(crate) fn app_data(app: &tauri::AppHandle) -> AppResult<PathBuf> {
     app.path()
         .app_data_dir()
         .map_err(|error| AppError::Config(error.to_string()))
@@ -281,12 +281,12 @@ pub async fn cmd_set_models_dir(
 }
 
 #[derive(Serialize, Clone)]
-struct DownloadEvent {
-    id: String,
-    received: u64,
-    total: u64,
-    done: bool,
-    error: Option<String>,
+pub(crate) struct DownloadEvent {
+    pub(crate) id: String,
+    pub(crate) received: u64,
+    pub(crate) total: u64,
+    pub(crate) done: bool,
+    pub(crate) error: Option<String>,
 }
 
 /// 下载一个本地识别模型（命令名沿用早期 Whisper 时代的叫法，前端还在用）。
@@ -357,11 +357,11 @@ const DOWNLOAD_ROUNDS: usize = 3;
 
 /// 下载中途多久收不到一个字节就算这个源卡住了。卡住和断线一样处理：已下的部分留着，
 /// 换下一个源接着续传。此前只有连接超时，源在半路不吐数据时进度条就永远停在那里。
-const DOWNLOAD_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+pub(crate) const DOWNLOAD_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// 模型下载用的客户端：连接 15 秒连不上算失败；连上以后 `stall` 内一个字节都没收到也算失败。
 /// 不设总超时——几百 MB 的模型在慢网络上下半小时是正常的。
-fn download_client(stall: std::time::Duration) -> AppResult<reqwest::Client> {
+pub(crate) fn download_client(stall: std::time::Duration) -> AppResult<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent(DOWNLOAD_USER_AGENT)
         .connect_timeout(std::time::Duration::from_secs(15))
@@ -373,7 +373,7 @@ fn download_client(stall: std::time::Duration) -> AppResult<reqwest::Client> {
 const STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// 依次下载这些文件。每个文件轮流试它的下载源，失败就换下一个、断点续传，最多 DOWNLOAD_ROUNDS 轮。
-async fn download_files(
+pub(crate) async fn download_files(
     client: &reqwest::Client,
     label: &str,
     files: Vec<(PathBuf, &'static local_asr::ModelFile)>,

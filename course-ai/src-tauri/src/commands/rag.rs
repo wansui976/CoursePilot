@@ -199,7 +199,7 @@ pub async fn cmd_search_transcript(
     query: String,
 ) -> AppResult<Vec<rag::Citation>> {
     let videos = resolve_scope(&state.db, &video_id, &scope).await?;
-    rag::keyword_search_scope(&state.db, &videos, &query, 30).await
+    rag::hybrid_search_scope(&state.db, &videos, &query, 30, false).await
 }
 
 #[cfg(test)]

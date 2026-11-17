@@ -1925,7 +1925,7 @@ impl AssistantTools<'_> {
         Ok(ToolOutcome::ok(listed))
     }
 
-    /// 按 scope 做一次纯关键词检索。抽出来是为了让语义兜底能复用同一段逻辑。
+    /// 按 scope 做一次检索（课程 / 全部范围开了语义检索时会按意思补充）。抽出来是为了让语义兜底能复用同一段逻辑。
     async fn search_once(
         &self,
         scope: &str,
@@ -1970,7 +1970,8 @@ impl AssistantTools<'_> {
                         videos.push((video.id, video.title));
                     }
                 }
-                crate::pipeline::rag::keyword_search_scope(self.db, &videos, query, 8).await
+                // 关键词命中了才按意思补充；零命中照旧交给下面的改写兜底。
+                crate::pipeline::rag::hybrid_search_scope(self.db, &videos, query, 8, true).await
             }
             other => {
                 return Err(ToolOutcome::failed(format!(

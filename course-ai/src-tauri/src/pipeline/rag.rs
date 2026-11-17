@@ -12,6 +12,7 @@ use crate::error::AppResult;
 use crate::llm::{ChatMessage, ChatRequest, Provider, StreamPiece};
 // 中文问句切词元与课程问答那边共用同一套：两处对「什么算命中」的理解必须一致。
 use crate::pipeline::search_terms::{query_terms, TermWeights};
+use crate::pipeline::semantic;
 use serde::Serialize;
 use std::sync::atomic::AtomicBool;
 
@@ -649,6 +650,185 @@ const NOT_COVERED_SYSTEM: &str = "这节课的字幕和课件里都没有讲到�
 请先用一句「视频里没有讲到这个内容。」开头，另起一段用你自己的知识尽量回答，\
 并在该段开头标注「（以下回答来自大模型，非视频内容）」；不要编造时间戳。";
 
+// ---------------------------------------------------------------------------
+// 语义检索（按意思找）的补充。
+//
+// 关键词检索是主干，「这节课没讲到」也只由它判定：关键词一条都没召回时照旧走改写兜底、
+// 最后说没讲到——向量永远能给出「最像的几段」，拿它来判断「讲没讲到」就等于设了一个
+// 相似度阈值，这正是这里一直避免的事。所以向量只在关键词**已经召回了东西**时，
+// 再补几段意思相近、但用词对不上的片段进来。
+
+/// 单视频问答：最多补几段、补多少字。
+const SEMANTIC_EXTRA_WINDOWS: usize = 3;
+const SEMANTIC_EXTRA_CHARS: usize = 1_500;
+/// 语义补充的窗口前后各多带这么久（关键词窗口是 30 秒；块本身已经有一百多字）。
+const SEMANTIC_PAD_MS: i64 = 10_000;
+/// 课程级问答：最多补几段。
+const SEMANTIC_EXTRA_SCOPE_LINES: usize = 6;
+
+/// 往单视频的检索结果里补语义命中的窗口（和已有窗口重叠的跳过），之后仍按时间排好。
+fn augment_with_semantic(retrieved: &mut Retrieved, segments: &[TranscriptSegment], hits: &[semantic::SemanticHit]) {
+    if retrieved.is_empty() {
+        return;
+    }
+    let mut added = 0usize;
+    let mut used = 0usize;
+    for hit in hits {
+        if added >= SEMANTIC_EXTRA_WINDOWS {
+            break;
+        }
+        let start = hit.chunk.start_ms - SEMANTIC_PAD_MS;
+        let end = hit.chunk.end_ms + SEMANTIC_PAD_MS;
+        let overlaps = retrieved
+            .windows
+            .iter()
+            .any(|window| window.start_ms < hit.chunk.end_ms && window.end_ms > hit.chunk.start_ms);
+        if overlaps {
+            continue;
+        }
+        let inside: Vec<&TranscriptSegment> = segments
+            .iter()
+            .filter(|seg| seg.end_ms > start && seg.start_ms < end)
+            .collect();
+        let Some(first) = inside.first() else { continue };
+        let text = inside
+            .iter()
+            .map(|seg| format!("[{}] {}", mmss(seg.start_ms), seg.text.trim()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let size = text.chars().count();
+        if used + size > SEMANTIC_EXTRA_CHARS && used > 0 {
+            break;
+        }
+        used += size;
+        added += 1;
+        retrieved.windows.push(Window {
+            score: 0.0,
+            start_ms: first.start_ms,
+            end_ms: end,
+            text,
+        });
+    }
+    retrieved.windows.sort_by_key(|window| window.start_ms);
+}
+
+/// 课程级问答：往已经装配好的上下文里补几段语义命中（同一视频里已经有引用落在这一块里的跳过）。
+fn augment_scope_with_semantic(
+    context: &mut String,
+    citations: &mut Vec<Citation>,
+    titles: &std::collections::HashMap<String, String>,
+    hits: &[semantic::SemanticHit],
+) {
+    if context.is_empty() {
+        return;
+    }
+    let mut added = 0usize;
+    for hit in hits {
+        if added >= SEMANTIC_EXTRA_SCOPE_LINES {
+            break;
+        }
+        let covered = citations.iter().any(|citation| {
+            citation.video_id.as_deref() == Some(hit.video_id.as_str())
+                && citation.start_ms >= hit.chunk.start_ms
+                && citation.start_ms <= hit.chunk.end_ms
+        });
+        if covered {
+            continue;
+        }
+        let Some(title) = titles.get(&hit.video_id) else { continue };
+        context.push_str(&format!("\n〈{} {}〉{}", title, mmss(hit.chunk.start_ms), hit.chunk.text));
+        citations.push(Citation {
+            index: 0,
+            text: hit.chunk.text.clone(),
+            start_ms: hit.chunk.start_ms,
+            end_ms: hit.chunk.end_ms,
+            video_id: Some(hit.video_id.clone()),
+            video_title: Some(title.clone()),
+            slide_image: None,
+            slide_page: None,
+        });
+        added += 1;
+    }
+    let renumbered = renumber(std::mem::take(citations));
+    *citations = renumbered;
+}
+
+/// 搜索结果里一条语义命中最多显示多少字。
+const SEMANTIC_SNIPPET_CHARS: usize = 140;
+/// RRF 的平滑常数（取通行的 60）。
+const RRF_K: f64 = 60.0;
+
+/// 课程级 / 全库搜索：关键词结果和语义结果按名次融合（RRF）。没开语义检索时等同关键词搜索。
+///
+/// 一条关键词命中如果落在某个语义命中的块里，两边的分合在一起、显示关键词那条（更精确）；
+/// 只有语义命中的显示那一块讲稿。课件页只来自关键词那边。
+///
+/// `need_keyword_hit`：为 true 时关键词一条都没命中就直接返回空——调用方（助手的搜索工具）
+/// 要靠「零命中」去走改写兜底、判断「没讲到」，不能让向量总能凑出几条把这个信号盖掉。
+/// 搜索面板是给人浏览的，传 false：用词对不上也能按意思找到。
+pub async fn hybrid_search_scope(
+    db: &Db,
+    videos: &[(String, String)],
+    query: &str,
+    limit: usize,
+    need_keyword_hit: bool,
+) -> AppResult<Vec<Citation>> {
+    let keyword = keyword_search_scope_scored(db, videos, query, limit.max(50)).await?;
+    if need_keyword_hit && keyword.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<String> = videos.iter().map(|(id, _)| id.clone()).collect();
+    let semantic_hits = semantic::search_or_skip(db, &ids, query, limit.max(30)).await;
+    if semantic_hits.is_empty() {
+        return Ok(renumber(keyword.into_iter().take(limit).map(|(_, citation)| citation).collect()));
+    }
+    let titles: std::collections::HashMap<&str, &str> =
+        videos.iter().map(|(id, title)| (id.as_str(), title.as_str())).collect();
+    let rrf = |rank: usize| 1.0 / (RRF_K + rank as f64 + 1.0);
+
+    // (融合分, 引用, 关键词名次——同分时让关键词靠前的先出)
+    let mut fused: Vec<(f64, Citation, usize)> = Vec::new();
+    let mut semantic_used = vec![false; semantic_hits.len()];
+    for (rank, (_, citation)) in keyword.into_iter().enumerate() {
+        let mut score = rrf(rank);
+        if citation.slide_page.is_none() {
+            if let Some(position) = semantic_hits.iter().enumerate().position(|(i, hit)| {
+                !semantic_used[i]
+                    && citation.video_id.as_deref() == Some(hit.video_id.as_str())
+                    && citation.start_ms >= hit.chunk.start_ms
+                    && citation.start_ms <= hit.chunk.end_ms
+            }) {
+                semantic_used[position] = true;
+                score += rrf(position);
+            }
+        }
+        fused.push((score, citation, rank));
+    }
+    for (position, hit) in semantic_hits.iter().enumerate() {
+        if semantic_used[position] {
+            continue;
+        }
+        let text: String = hit.chunk.text.chars().take(SEMANTIC_SNIPPET_CHARS).collect();
+        let text = if hit.chunk.text.chars().count() > SEMANTIC_SNIPPET_CHARS { format!("{text}…") } else { text };
+        fused.push((
+            rrf(position),
+            Citation {
+                index: 0,
+                text,
+                start_ms: hit.chunk.start_ms,
+                end_ms: hit.chunk.end_ms,
+                video_id: Some(hit.video_id.clone()),
+                video_title: titles.get(hit.video_id.as_str()).map(|title| title.to_string()),
+                slide_image: None,
+                slide_page: None,
+            },
+            usize::MAX,
+        ));
+    }
+    fused.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.2.cmp(&b.2)));
+    Ok(renumber(fused.into_iter().take(limit).map(|(_, citation, _)| citation).collect()))
+}
+
 /// 检索式问答（非流式）：召回相关讲稿窗口与课件页，只喂这些片段。
 pub async fn answer(
     db: &Db,
@@ -661,7 +841,7 @@ pub async fn answer(
     let segments = list_segments(db, video_id).await?;
     let pages = list_slide_pages(db, video_id).await?;
     let never = AtomicBool::new(false);
-    let retrieved = retrieve_or_expand(
+    let mut retrieved = retrieve_or_expand(
         provider,
         chat_model,
         &segments,
@@ -672,6 +852,10 @@ pub async fn answer(
         &mut |_| {},
     )
     .await;
+    if !retrieved.is_empty() {
+        let hits = semantic::search_or_skip(db, &[video_id.to_string()], query, SEMANTIC_EXTRA_WINDOWS * 2).await;
+        augment_with_semantic(&mut retrieved, &segments, &hits);
+    }
     let messages = build_chat_messages(history, query);
     let (system, context) = ask_context(&retrieved);
     let req = ask_request(chat_model, system, context, messages);
@@ -777,7 +961,7 @@ pub async fn answer_stream(
     });
     let segments = list_segments(db, video_id).await?;
     let pages = list_slide_pages(db, video_id).await?;
-    let retrieved = {
+    let mut retrieved = {
         // 改写要多花一个来回，界面上不能干等着什么都不说。
         let mut notify = |note: ExpandNote| {
             on_event(AskEvent::Status {
@@ -800,6 +984,10 @@ pub async fn answer_stream(
         )
         .await
     };
+    if !retrieved.is_empty() {
+        let hits = semantic::search_or_skip(db, &[video_id.to_string()], query, SEMANTIC_EXTRA_WINDOWS * 2).await;
+        augment_with_semantic(&mut retrieved, &segments, &hits);
+    }
     let citations = retrieved_citations(&retrieved);
     if !citations.is_empty() {
         on_event(AskEvent::Citations {
@@ -1054,7 +1242,7 @@ pub async fn course_answer_stream(
         per_video.push((vid.clone(), title.clone(), segs));
         per_video_pages.push((vid.clone(), title.clone(), pages));
     }
-    let (context, citations) = {
+    let (mut context, mut citations) = {
         let mut notify = |note: ExpandNote| {
             on_event(AskEvent::Status {
                 text: match note {
@@ -1076,6 +1264,12 @@ pub async fn course_answer_stream(
         )
         .await
     };
+    if !context.is_empty() {
+        let ids: Vec<String> = videos.iter().map(|(id, _)| id.clone()).collect();
+        let hits = semantic::search_or_skip(db, &ids, query, SEMANTIC_EXTRA_SCOPE_LINES * 2).await;
+        let titles: std::collections::HashMap<String, String> = videos.iter().cloned().collect();
+        augment_scope_with_semantic(&mut context, &mut citations, &titles, &hits);
+    }
     let messages = build_chat_messages(history, query);
 
     // 命中为空：全课程的字幕和课件都没讲到，退回模型自身知识兜底（不发 Citations）。
@@ -2381,6 +2575,107 @@ mod tests {
         // 对拍不能是两边都空：确实比到了大量字幕和课件命中。
         assert!(compared_hits > 200 && slide_hits > 10, "{compared_hits} {slide_hits}");
         assert!(keyword_search_scope_scored(&db, &[], "梯度", 5).await.unwrap().is_empty());
+    }
+
+    fn seg_at(idx: i64, start_ms: i64, text: &str) -> TranscriptSegment {
+        TranscriptSegment { id: idx, video_id: "v".into(), segment_idx: idx, start_ms, end_ms: start_ms + 5_000, text: text.into() }
+    }
+
+    fn hit_at(video: &str, start_ms: i64, end_ms: i64, text: &str) -> semantic::SemanticHit {
+        semantic::SemanticHit {
+            video_id: video.into(),
+            chunk: semantic::Chunk { idx: 0, first_segment: 0, last_segment: 0, start_ms, end_ms, text: text.into() },
+            score: 0.9,
+        }
+    }
+
+    #[test]
+    fn semantic_windows_only_supplement_a_keyword_answer_and_skip_overlaps() {
+        let segments = vec![seg_at(0, 0, "学习率太大会震荡"), seg_at(1, 600_000, "步子迈小一点更稳"), seg_at(2, 1_200_000, "无关")];
+        // 关键词一条没召回：「没讲到」由关键词判定，向量不能把它翻过来。
+        let mut empty = Retrieved { windows: Vec::new(), slides: Vec::new() };
+        augment_with_semantic(&mut empty, &segments, &[hit_at("v", 600_000, 605_000, "步子迈小一点更稳")]);
+        assert!(empty.is_empty());
+
+        let mut retrieved = Retrieved {
+            windows: vec![Window { score: 1.0, start_ms: 0, end_ms: 35_000, text: "[00:00] 学习率太大会震荡".into() }],
+            slides: Vec::new(),
+        };
+        augment_with_semantic(
+            &mut retrieved,
+            &segments,
+            &[hit_at("v", 0, 5_000, "学习率太大会震荡"), hit_at("v", 600_000, 605_000, "步子迈小一点更稳")],
+        );
+        assert_eq!(retrieved.windows.len(), 2, "重叠的那块跳过，不重叠的补进来");
+        assert!(retrieved.windows[1].text.contains("步子迈小一点更稳"));
+        assert!(retrieved.windows[0].start_ms < retrieved.windows[1].start_ms, "补完仍按时间排");
+    }
+
+    #[test]
+    fn semantic_lines_supplement_course_context_without_repeating_cited_spots() {
+        let titles: std::collections::HashMap<String, String> = [("v".to_string(), "第3讲".to_string())].into();
+        let mut context = String::new();
+        let mut citations = Vec::new();
+        augment_scope_with_semantic(&mut context, &mut citations, &titles, &[hit_at("v", 0, 5_000, "x")]);
+        assert!(context.is_empty() && citations.is_empty(), "课程里关键词没命中时不补");
+
+        let mut context = "〈第3讲 00:01〉学习率".to_string();
+        let mut citations = vec![Citation {
+            index: 1, text: "学习率".into(), start_ms: 1_000, end_ms: 2_000,
+            video_id: Some("v".into()), video_title: Some("第3讲".into()), slide_image: None, slide_page: None,
+        }];
+        augment_scope_with_semantic(
+            &mut context,
+            &mut citations,
+            &titles,
+            &[hit_at("v", 0, 5_000, "已经引用过的一块"), hit_at("v", 60_000, 65_000, "步子迈小一点")],
+        );
+        assert_eq!(citations.len(), 2);
+        assert_eq!(citations[1].text, "步子迈小一点");
+        assert_eq!(citations.iter().map(|c| c.index).collect::<Vec<_>>(), [1, 2]);
+        assert!(context.contains("〈第3讲 01:00〉步子迈小一点"));
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_finds_by_meaning_but_the_assistant_still_sees_zero_keyword_hits() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        semantic::test_support::use_fake_cloud(&db).await;
+        let course = crate::commands::courses::create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let path = dir.path().join("a.mp4");
+        std::fs::write(&path, b"x").unwrap();
+        let video = crate::commands::videos::add_local_video(&db, &course.id, path, None).await.unwrap();
+        let pad = "。".repeat(semantic::CHUNK_MIN_CHARS);
+        for (i, line) in ["学习率设得太大，参数会来回震荡", "模型在训练集上死记硬背"].iter().enumerate() {
+            sqlx::query("INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)")
+                .bind(&video.id)
+                .bind(i as i64)
+                .bind(i as i64 * 60_000)
+                .bind(i as i64 * 60_000 + 50_000)
+                .bind(format!("{line}{pad}"))
+                .execute(&db.pool)
+                .await
+                .unwrap();
+        }
+        semantic::index_video_now(&db, &video.id).await.unwrap();
+        let videos = vec![(video.id.clone(), "第1讲".to_string())];
+
+        // 「泛化」一个字都没在讲稿里出现过：关键词零命中，按意思能找到第二段。
+        // 向量检索没有阈值，两块都会列出来；意思对上的那块排第一。
+        let found = hybrid_search_scope(&db, &videos, "泛化能力差怎么办", 5, false).await.unwrap();
+        assert_eq!(found.len(), 2);
+        assert!(found[0].text.starts_with("模型在训练集上死记硬背"));
+        assert_eq!(found[0].video_title.as_deref(), Some("第1讲"));
+        assert!(hybrid_search_scope(&db, &videos, "泛化能力差怎么办", 5, true).await.unwrap().is_empty());
+
+        // 关键词命中时：命中的那条在前，意思相近的另一段补在后面。
+        let mixed = hybrid_search_scope(&db, &videos, "学习率和泛化", 5, true).await.unwrap();
+        assert_eq!(mixed.len(), 2);
+        assert!(mixed[0].text.contains("学习率"));
+        assert!(mixed[1].text.contains("死记硬背"));
+        assert_eq!(mixed.iter().map(|c| c.index).collect::<Vec<_>>(), [1, 2]);
     }
 
     #[tokio::test]

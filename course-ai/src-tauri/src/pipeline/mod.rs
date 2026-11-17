@@ -28,6 +28,7 @@ pub mod playable;
 pub mod quiz;
 pub mod rag;
 pub mod search_terms;
+pub mod semantic;
 pub mod sherpa_asr;
 pub mod silence;
 pub mod slide_match;

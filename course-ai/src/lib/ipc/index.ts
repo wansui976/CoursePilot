@@ -15,6 +15,7 @@ import {
   backup,
   tools,
   clientStore,
+  semantic,
 } from "./system";
 import { downloads } from "./downloads";
 import { courses, folders, videos, trash, subscriptions } from "./library";
@@ -29,6 +30,7 @@ export const ipc = {
   app,
   sync,
   clientStore,
+  semantic,
   courses,
   folders,
   videos,

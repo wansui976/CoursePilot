@@ -417,3 +417,40 @@ export type DeepSeekBalance = {
   isAvailable: boolean;
   balances: { currency: string; total: string; granted: string; toppedUp: string }[];
 };
+
+/** 设置 → 语义检索：一个本地嵌入模型。 */
+export type SemanticLocalModel = {
+  id: string;
+  name: string;
+  description: string;
+  size: number;
+  installed: boolean;
+  sizeOnDisk: number;
+};
+
+/** 后台建语义索引的进度（`semantic-index:progress` 事件也是这个形状）。 */
+export type SemanticIndexProgress = {
+  running: boolean;
+  pending: number;
+  done: number;
+  currentTitle: string | null;
+  lastError: string | null;
+};
+
+export type SemanticBackend = "off" | "local" | "cloud";
+
+export type SemanticStatus = {
+  backend: SemanticBackend;
+  localSupported: boolean;
+  localModel: string | null;
+  cloudProfile: string | null;
+  cloudModel: string | null;
+  models: SemanticLocalModel[];
+  /** 设置齐全、真能算向量。 */
+  active: boolean;
+  indexed: number;
+  total: number;
+  progress: SemanticIndexProgress;
+};
+
+export type SemanticTest = { dimensions: number; millis: number };

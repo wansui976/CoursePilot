@@ -25,6 +25,9 @@ import type {
   CloudSyncProbeStatus,
   CloudSyncProbeStopResult,
   UrlImportEvent,
+  SemanticBackend,
+  SemanticStatus,
+  SemanticTest,
 } from "./types";
 
 export const app = {
@@ -196,4 +199,23 @@ export const clientStore = {
   /** 值为 null 表示删除该键；整批一个事务。 */
   put: (entries: [string, string | null][]): Promise<void> =>
     invoke("cmd_client_store_put", { entries }),
+};
+
+/** 设置 → 语义检索（按意思找）。 */
+export const semantic = {
+  status: (): Promise<SemanticStatus> => invoke("cmd_semantic_status"),
+  save: (config: {
+    backend: SemanticBackend;
+    localModel: string | null;
+    cloudProfile: string | null;
+    cloudModel: string | null;
+  }): Promise<void> => invoke("cmd_semantic_save", config),
+  /** 下载本地嵌入模型（进度见 `semantic-model:download` 事件）。 */
+  downloadModel: (id: string): Promise<void> => invoke("cmd_semantic_download_model", { id }),
+  deleteModel: (id: string): Promise<void> => invoke("cmd_semantic_delete_model", { id }),
+  /** 用当前设置算一句话，确认接口通、模型名对。 */
+  test: (): Promise<SemanticTest> => invoke("cmd_semantic_test"),
+  rebuild: (): Promise<void> => invoke("cmd_semantic_rebuild"),
+  /** 上一轮出错停下后，接着把没建的建完。 */
+  resume: (): Promise<void> => invoke("cmd_semantic_resume"),
 };

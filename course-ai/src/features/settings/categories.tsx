@@ -7,6 +7,7 @@ export type SettingsCategory =
   | "storage"
   | "asr"
   | "llm"
+  | "semantic"
   | "courseware"
   | "about"
   | "dev";
@@ -21,6 +22,7 @@ export const CATEGORY_META: Record<
   storage: { i18nKey: "settings.categories.storage" },
   asr: { i18nKey: "settings.categories.asr" },
   llm: { i18nKey: "settings.categories.llm" },
+  semantic: { i18nKey: "settings.categories.semantic" },
   courseware: { i18nKey: "settings.categories.courseware" },
   about: { i18nKey: "settings.categories.about" },
   dev: { i18nKey: "settings.categories.dev" },
@@ -34,6 +36,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   "storage",
   "asr",
   "llm",
+  "semantic",
   "courseware",
   "about",
   "dev",
