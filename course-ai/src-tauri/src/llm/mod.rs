@@ -566,7 +566,30 @@ pub enum Provider {
     },
 }
 
+/// 是不是直连 DeepSeek 官方 API。只认这个主机：经别家（硅基流动、OpenRouter…）转的
+/// DeepSeek 模型按那家的价收费，没有官方的峰谷价。
+pub fn is_deepseek_official(base_url: &str) -> bool {
+    reqwest::Url::parse(base_url.trim())
+        .ok()
+        .and_then(|url| url.host_str().map(|host| host.eq_ignore_ascii_case("api.deepseek.com")))
+        .unwrap_or(false)
+}
+
 impl Provider {
+    /// 这个端点的调用怎么计价（记用量和花费用）。DeepSeek 的 Anthropic 兼容入口也在官方主机上。
+    pub fn billing(&self) -> crate::usage_log::Billing {
+        use crate::usage_log::Billing;
+        match self {
+            Provider::Ollama { .. } => Billing::Local,
+            Provider::OpenAi { base_url, .. } | Provider::Anthropic { base_url, .. }
+                if is_deepseek_official(base_url) =>
+            {
+                Billing::DeepSeek
+            }
+            _ => Billing::Catalog,
+        }
+    }
+
     pub async fn complete(&self, req: &ChatRequest) -> AppResult<ChatResponse> {
         let response = match self {
             Provider::OpenAi {
@@ -628,7 +651,7 @@ impl Provider {
         // 端点报了用量才记。没报就什么都不记——把「没报」当成「零消耗」
         // 会让命中率算出来是假的。
         if let Some(usage) = &response.usage {
-            crate::usage_log::record(req.label, &req.model, usage, matches!(self, Provider::Ollama { .. }));
+            crate::usage_log::record(req.label, &req.model, usage, self.billing());
         }
         Ok(response)
     }
@@ -794,7 +817,7 @@ impl Provider {
             Provider::Failing { .. } => return Err(self.canned_failure()),
         };
         if let Some(usage) = &outcome.usage {
-            crate::usage_log::record(req.label, &req.model, usage, matches!(self, Provider::Ollama { .. }));
+            crate::usage_log::record(req.label, &req.model, usage, self.billing());
         }
         Ok(outcome)
     }
@@ -864,6 +887,36 @@ pub fn mock_embed(text: &str) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_official_deepseek_host_gets_deepseek_billing() {
+        use crate::usage_log::Billing;
+        let openai = |base_url: &str| Provider::OpenAi {
+            base_url: base_url.into(),
+            api_key: String::new(),
+            client: reqwest::Client::new(),
+            max_tokens: None,
+        };
+        assert_eq!(openai("https://api.deepseek.com").billing(), Billing::DeepSeek);
+        assert_eq!(openai("https://API.DeepSeek.com/v1/").billing(), Billing::DeepSeek);
+        assert_eq!(openai("https://api.siliconflow.cn/v1").billing(), Billing::Catalog);
+        // 主机名里带 deepseek 字样的别家网关不算。
+        assert_eq!(openai("https://api.deepseek.com.example.org").billing(), Billing::Catalog);
+        assert_eq!(openai("not a url").billing(), Billing::Catalog);
+        let anthropic = Provider::Anthropic {
+            base_url: "https://api.deepseek.com/anthropic".into(),
+            api_key: String::new(),
+            client: reqwest::Client::new(),
+            max_tokens: 1024,
+        };
+        assert_eq!(anthropic.billing(), Billing::DeepSeek);
+        let ollama = Provider::Ollama {
+            base_url: "http://localhost:11434".into(),
+            client: reqwest::Client::new(),
+            max_tokens: None,
+        };
+        assert_eq!(ollama.billing(), Billing::Local);
+    }
 
     #[test]
     fn a_stream_without_its_end_event_is_an_error() {

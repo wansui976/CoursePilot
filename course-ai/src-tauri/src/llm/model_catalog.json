@@ -707,8 +707,8 @@
   "deepseek-v4-pro": {
    "context": 1000000,
    "max_output": 393216,
-   "input": 2.4,
-   "output": 4.8,
+   "input": 1.32,
+   "output": 3.96,
    "tools": true,
    "json": true,
    "reasoning": true,

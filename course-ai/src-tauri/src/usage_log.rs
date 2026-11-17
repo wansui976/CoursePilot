@@ -78,35 +78,85 @@ pub fn attach_db(db: Db) {
     let _ = DB.set(db);
 }
 
-/// 按参考价估算一次调用的花费（USD）。命中缓存的输入按缓存价（目录里没有就按普通输入价），
+/// 这次调用按哪种方式计价。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Billing {
+    /// 本机模型（Ollama），不花钱。
+    Local,
+    /// 直连 DeepSeek 官方（api.deepseek.com）：按官方价表、分高峰 / 空闲时段算。
+    DeepSeek,
+    /// 其余：按模型目录里的参考价。
+    Catalog,
+}
+
+/// DeepSeek 官方**高峰**价（USD / 百万 token）：(未命中缓存的输入, 命中缓存的输入, 输出)。
+/// 空闲时段一律半价。来源 https://api-docs.deepseek.com/quick_start/pricing（2026-11 核对）。
+/// 老名字（deepseek-v4-flash 等）已由 Flash 提供服务、按 Flash 计费，所以不是 Pro 就按 Flash。
+fn deepseek_peak_price(model: &str) -> (f64, f64, f64) {
+    if model.to_ascii_lowercase().contains("-pro") {
+        (1.32, 0.044, 3.96)
+    } else {
+        (0.3, 0.006, 1.2)
+    }
+}
+
+/// DeepSeek 的高峰时段：北京时间周一至周五 9:00–12:00、14:00–18:00，即 UTC 01–04、06–10 点。
+/// 都落在同一个 UTC 日里，按 UTC 判星期就和北京时间一致，不用时区库。
+/// 法定节假日官方也按空闲价，但我们不知道哪天放假——那几天按高峰算，宁可估高。
+pub fn deepseek_is_peak(at: chrono::DateTime<chrono::Utc>) -> bool {
+    use chrono::{Datelike, Timelike};
+    if at.weekday().number_from_monday() > 5 {
+        return false;
+    }
+    matches!(at.hour(), 1..=3 | 6..=9)
+}
+
+fn priced(fresh: i64, cached: i64, completion: i64, (input, cache, output): (f64, f64, f64)) -> f64 {
+    (fresh as f64 * input + cached as f64 * cache + completion as f64 * output) / 1_000_000.0
+}
+
+/// 估算一次调用的花费（USD）。命中缓存的输入按缓存价（目录里没有就按普通输入价），
 /// 输出里包含思考 token（各家都按输出计费）。查不到价格返回 None——「不知道」不是「免费」。
-pub fn estimate_cost_usd(model: &str, usage: &Usage) -> Option<f64> {
-    let entry = crate::llm::catalog::lookup(model)?;
-    let (input, output) = (entry.input?, entry.output?);
+pub fn estimate_cost_usd(
+    model: &str,
+    usage: &Usage,
+    billing: Billing,
+    at: chrono::DateTime<chrono::Utc>,
+) -> Option<f64> {
     let cached = usage.cached_tokens.clamp(0, usage.prompt_tokens.max(0));
     let fresh = usage.prompt_tokens.max(0) - cached;
-    let cache_price = entry.cache_read.unwrap_or(input);
-    Some(
-        (fresh as f64 * input + cached as f64 * cache_price + usage.completion_tokens.max(0) as f64 * output)
-            / 1_000_000.0,
-    )
+    let completion = usage.completion_tokens.max(0);
+    match billing {
+        Billing::Local => Some(0.0),
+        Billing::DeepSeek => {
+            let (input, cache, output) = deepseek_peak_price(model);
+            let factor = if deepseek_is_peak(at) { 1.0 } else { 0.5 };
+            Some(priced(fresh, cached, completion, (input * factor, cache * factor, output * factor)))
+        }
+        Billing::Catalog => {
+            let entry = crate::llm::catalog::lookup(model)?;
+            let (input, output) = (entry.input?, entry.output?);
+            Some(priced(fresh, cached, completion, (input, entry.cache_read.unwrap_or(input), output)))
+        }
+    }
 }
 
 /// 记一次调用。端点没报用量时不要调用它——那样会把「没报」记成「零消耗」，
-/// 命中率算出来是假的。`local` = 本机模型（Ollama），不花钱。
-pub fn record(label: &str, model: &str, usage: &Usage, local: bool) {
-    persist(label, model, usage, local);
+/// 命中率算出来是假的。
+pub fn record(label: &str, model: &str, usage: &Usage, billing: Billing) {
+    persist(label, model, usage, billing);
     aggregate(label, model, usage);
 }
 
-fn persist(label: &str, model: &str, usage: &Usage, local: bool) {
+fn persist(label: &str, model: &str, usage: &Usage, billing: Billing) {
     let Some(db) = DB.get().cloned() else { return };
     let scope = current_scope();
-    let cost = if local { Some(0.0) } else { estimate_cost_usd(model, usage) };
+    let now = chrono::Utc::now();
+    let cost = estimate_cost_usd(model, usage, billing, now);
     let (label, model, usage) = (label.to_string(), model.to_string(), *usage);
     // 写库不挡调用方：调用方正等着拿模型的回答往下走。写失败只记日志，用量少一行不影响功能。
     tauri::async_runtime::spawn(async move {
-        let at = chrono::Utc::now().timestamp_millis();
+        let at = now.timestamp_millis();
         if let Err(error) = insert(&db, at, &scope, &label, &model, &usage, cost).await {
             tracing::warn!(%error, "记录大模型用量失败");
         }
@@ -350,12 +400,19 @@ mod tests {
         }
     }
 
+    /// 这几条测试都读写同一个进程级的聚合表，并行跑会互相 clear 掉对方的数据。
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn totals_accumulate_per_label_and_model() {
+        let _serial = serial();
         clear();
-        record("notes", "deepseek-chat", &usage(1000, 0, 300, 0), false);
-        record("notes", "deepseek-chat", &usage(1000, 900, 280, 0), false);
-        record("quiz", "deepseek-chat", &usage(1000, 900, 400, 0), false);
+        record("notes", "deepseek-chat", &usage(1000, 0, 300, 0), Billing::Catalog);
+        record("notes", "deepseek-chat", &usage(1000, 900, 280, 0), Billing::Catalog);
+        record("quiz", "deepseek-chat", &usage(1000, 900, 400, 0), Billing::Catalog);
 
         let totals = totals();
         let notes = totals.iter().find(|t| t.label == "notes").unwrap();
@@ -371,9 +428,10 @@ mod tests {
     #[test]
     fn the_same_label_on_a_different_model_is_counted_separately() {
         // 换了模型缓存就不共享了，混在一起算命中率会把问题盖掉。
+        let _serial = serial();
         clear();
-        record("notes", "model-a", &usage(100, 0, 10, 0), false);
-        record("notes", "model-b", &usage(100, 0, 10, 0), false);
+        record("notes", "model-a", &usage(100, 0, 10, 0), Billing::Catalog);
+        record("notes", "model-b", &usage(100, 0, 10, 0), Billing::Catalog);
 
         assert_eq!(totals().len(), 2);
         clear();
@@ -383,8 +441,9 @@ mod tests {
     fn reasoning_tokens_are_tracked_separately_from_the_answer() {
         // 推理模型的思考过程按输出计费，而我们只读正式回答、把它整个丢掉。
         // 不单独记的话，这笔钱在账面上和有用的输出长得一模一样。
+        let _serial = serial();
         clear();
-        record("correction", "reasoner", &usage(500, 0, 900, 800), false);
+        record("correction", "reasoner", &usage(500, 0, 900, 800), Billing::Catalog);
 
         let totals = totals();
         assert_eq!(totals[0].completion_tokens, 900);
@@ -392,14 +451,56 @@ mod tests {
         clear();
     }
 
+    fn utc(s: &str) -> chrono::DateTime<chrono::Utc> {
+        s.parse().unwrap()
+    }
+
     #[test]
     fn cost_counts_cache_hits_at_the_cache_price() {
-        // deepseek-flash：输入 0.3、缓存 0.006、输出 1.2（USD / 百万 token）。
-        let cost = estimate_cost_usd("deepseek-flash", &usage(1_000_000, 900_000, 100_000, 0)).unwrap();
+        // deepseek-flash 的目录价：输入 0.3、缓存 0.006、输出 1.2（USD / 百万 token）。
+        let at = utc("2026-11-17T02:00:00Z");
+        let cost = estimate_cost_usd("deepseek-flash", &usage(1_000_000, 900_000, 100_000, 0), Billing::Catalog, at)
+            .unwrap();
         let expected = (100_000.0 * 0.3 + 900_000.0 * 0.006 + 100_000.0 * 1.2) / 1_000_000.0;
         assert!((cost - expected).abs() < 1e-9, "{cost} vs {expected}");
         // 没有缓存价的模型按普通输入价算（宁可估高）；查不到价格的是「未知」，不是 0。
-        assert!(estimate_cost_usd("no-such-model-xyz", &usage(10, 0, 10, 0)).is_none());
+        assert!(estimate_cost_usd("no-such-model-xyz", &usage(10, 0, 10, 0), Billing::Catalog, at).is_none());
+        // 本机模型不花钱，哪怕目录里有同名模型的价。
+        assert_eq!(estimate_cost_usd("deepseek-flash", &usage(10, 0, 10, 0), Billing::Local, at), Some(0.0));
+    }
+
+    #[test]
+    fn deepseek_peak_hours_follow_beijing_weekdays() {
+        // 2026-11-17 是周二。北京 9:00 = UTC 01:00。
+        assert!(!deepseek_is_peak(utc("2026-11-17T00:59:00Z")), "北京 8:59 还是空闲");
+        assert!(deepseek_is_peak(utc("2026-11-17T01:00:00Z")), "北京 9:00 进高峰");
+        assert!(deepseek_is_peak(utc("2026-11-17T03:59:00Z")), "北京 11:59");
+        assert!(!deepseek_is_peak(utc("2026-11-17T04:00:00Z")), "北京 12:00 午间空闲");
+        assert!(deepseek_is_peak(utc("2026-11-17T06:00:00Z")), "北京 14:00");
+        assert!(!deepseek_is_peak(utc("2026-11-17T10:00:00Z")), "北京 18:00 收工");
+        assert!(!deepseek_is_peak(utc("2026-11-21T02:00:00Z")), "周六北京 10:00 也是空闲");
+        // 北京周一凌晨 = UTC 周日傍晚，空闲。
+        assert!(!deepseek_is_peak(utc("2026-11-22T17:00:00Z")));
+    }
+
+    #[test]
+    fn deepseek_official_is_half_price_off_peak_and_pro_has_its_own_table() {
+        let u = usage(1_000_000, 0, 1_000_000, 0);
+        let peak = utc("2026-11-17T02:00:00Z");
+        let idle = utc("2026-11-17T12:00:00Z");
+        let flash_peak = estimate_cost_usd("deepseek-flash", &u, Billing::DeepSeek, peak).unwrap();
+        assert!((flash_peak - 1.5).abs() < 1e-9, "{flash_peak}");
+        let flash_idle = estimate_cost_usd("deepseek-flash", &u, Billing::DeepSeek, idle).unwrap();
+        assert!((flash_idle - 0.75).abs() < 1e-9, "{flash_idle}");
+        // 老名字按 Flash 计费。
+        let legacy = estimate_cost_usd("deepseek-v4-flash", &u, Billing::DeepSeek, idle).unwrap();
+        assert!((legacy - flash_idle).abs() < 1e-9);
+        let pro_peak = estimate_cost_usd("deepseek-v4-pro", &u, Billing::DeepSeek, peak).unwrap();
+        assert!((pro_peak - (1.32 + 3.96)).abs() < 1e-9, "{pro_peak}");
+        // 缓存价也减半。
+        let cached = estimate_cost_usd("deepseek-flash", &usage(1_000_000, 1_000_000, 0, 0), Billing::DeepSeek, idle)
+            .unwrap();
+        assert!((cached - 0.003).abs() < 1e-9, "{cached}");
     }
 
     #[tokio::test]

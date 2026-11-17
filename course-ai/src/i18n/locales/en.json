@@ -2170,7 +2170,7 @@
   },
   "aiUsage": {
     "title": "Usage & cost",
-    "footnote": "Estimated from public list prices; your provider's bill is authoritative. Discounts such as DeepSeek's off-peak half price are not included. Local models (Ollama) are free.",
+    "footnote": "Estimated from public list prices; your provider's bill is authoritative. Calls made directly to DeepSeek's official API use its peak and off-peak prices (Chinese public holidays count as peak, so those days are slightly overestimated). Local models (Ollama) are free.",
     "month": "This month",
     "monthOf": "{{spent}} of {{budget}} budget",
     "budget": "Monthly budget (USD)",
