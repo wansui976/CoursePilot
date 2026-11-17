@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ipc, type AiUsageRow, type AiUsageSummary } from "@/lib/ipc";
+import { ipc, type AiUsageRow, type AiUsageSummary, type DeepSeekBalance } from "@/lib/ipc";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { FIELD, Group, Row, Select, StackRow } from "@/features/settings/primitives";
 import { formatTokens, formatUsd } from "@/lib/aiUsageFormat";
 
 const BUDGET_KEY = "ai_monthly_budget_usd";
+
+const CURRENCY_SIGN: Record<string, string> = { CNY: "¥", USD: "$" };
+const money = (currency: string, amount: string) =>
+  CURRENCY_SIGN[currency] ? `${CURRENCY_SIGN[currency]}${amount}` : `${amount} ${currency}`;
 
 /**
  * 设置 → 大模型 下面的「用量与花费」：本月花了多少、每月预算，按用途 / 课程 / 模型拆开看。
@@ -29,6 +33,23 @@ export function AiUsageSection() {
     void load();
   }, [load]);
   const refetch = load;
+  // DeepSeek 余额：没配 DeepSeek 官方的模型时后端返回 null，这一行就不显示。查失败不挡别的。
+  const [balance, setBalance] = useState<DeepSeekBalance | null>(null);
+  const [balanceError, setBalanceError] = useState("");
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const value = await ipc.aiUsage.deepseekBalance();
+        if (alive) setBalance(value);
+      } catch (err) {
+        if (alive) setBalanceError(String(err));
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [budget, setBudget] = useState("");
   const [savedBudget, setSavedBudget] = useState("");
   useEffect(() => {
@@ -127,6 +148,32 @@ export function AiUsageSection() {
           )}
         </div>
       </Row>
+      {(balance || balanceError) && (
+        <Row
+          label={t("aiUsage.deepseekBalance")}
+          hint={t("aiUsage.deepseekBalanceHint")}
+          status={
+            balanceError ? (
+              <span className="text-[var(--status-err)]">{balanceError}</span>
+            ) : balance && !balance.isAvailable ? (
+              <span className="text-[var(--status-err)]">{t("aiUsage.deepseekUnavailable")}</span>
+            ) : (
+              balance?.balances
+                .filter((info) => Number(info.granted) > 0)
+                .map((info) => t("aiUsage.deepseekGranted", { amount: money(info.currency, info.granted) }))
+                .join(" · ") || undefined
+            )
+          }
+        >
+          {balance && (
+            <span className="text-sm font-semibold tabular-nums text-[var(--text-strong)]">
+              {balance.balances.length > 0
+                ? balance.balances.map((info) => money(info.currency, info.total)).join(" · ")
+                : "—"}
+            </span>
+          )}
+        </Row>
+      )}
       <Row label={t("aiUsage.budget")} hint={t("aiUsage.budgetHint")} htmlFor="ai-monthly-budget">
         <input
           id="ai-monthly-budget"

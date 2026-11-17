@@ -387,6 +387,98 @@ pub async fn cmd_video_ai_usage(
     video_usage(&state.db, &video_id).await
 }
 
+// ---------------------------------------------------------------- DeepSeek 账户余额
+
+/// 只发往这个固定地址，不拿配置里的 base_url 拼：Key 不会因为配置写错被发到别处。
+const DEEPSEEK_BALANCE_URL: &str = "https://api.deepseek.com/user/balance";
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BalanceInfo {
+    pub currency: String,
+    pub total: String,
+    pub granted: String,
+    pub topped_up: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeepSeekBalance {
+    /// 查的是哪个模型配置的 Key（同时配了几个 DeepSeek 账号时好分辨）。
+    pub profile_name: String,
+    /// 余额够不够继续调用。
+    pub is_available: bool,
+    pub balances: Vec<BalanceInfo>,
+}
+
+/// 解析 `GET /user/balance` 的回复。金额官方给的就是字符串（"110.00"），原样保留。
+fn parse_deepseek_balance(profile_name: &str, body: &serde_json::Value) -> AppResult<DeepSeekBalance> {
+    let infos = body["balance_infos"]
+        .as_array()
+        .ok_or_else(|| crate::error::AppError::Other("DeepSeek 余额接口返回的格式不认识".into()))?;
+    let text = |info: &serde_json::Value, key: &str| info[key].as_str().unwrap_or("0").to_string();
+    Ok(DeepSeekBalance {
+        profile_name: profile_name.to_string(),
+        is_available: body["is_available"].as_bool().unwrap_or(false),
+        balances: infos
+            .iter()
+            .map(|info| BalanceInfo {
+                currency: info["currency"].as_str().unwrap_or("CNY").to_string(),
+                total: text(info, "total_balance"),
+                granted: text(info, "granted_balance"),
+                topped_up: text(info, "topped_up_balance"),
+            })
+            .collect(),
+    })
+}
+
+/// 第一个直连 DeepSeek 官方、填了 Key 的模型配置；没有就是 None（界面上不显示余额这一行）。
+async fn deepseek_profile(db: &Db) -> AppResult<Option<(String, String)>> {
+    use crate::llm::profiles::{parse_profiles, ProviderKind};
+    let profiles = parse_profiles(crate::commands::settings::get_setting(db, "llm_profiles").await?.as_deref())?;
+    for profile in profiles {
+        if !matches!(profile.kind, ProviderKind::Openai | ProviderKind::Anthropic)
+            || !crate::llm::is_deepseek_official(&profile.base_url)
+        {
+            continue;
+        }
+        if let Some(key) = crate::llm::api_key_for(db, &profile).await?.filter(|key| !key.is_empty()) {
+            return Ok(Some((profile.name, key)));
+        }
+    }
+    Ok(None)
+}
+
+/// 查 DeepSeek 账户余额。没配 DeepSeek 官方的模型就返回 None。
+#[tauri::command]
+pub async fn cmd_deepseek_balance(
+    state: tauri::State<'_, crate::commands::courses::AppState>,
+) -> AppResult<Option<DeepSeekBalance>> {
+    use crate::error::AppError;
+    let Some((profile_name, key)) = deepseek_profile(&state.db).await? else {
+        return Ok(None);
+    };
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    let response = client
+        .get(DEEPSEEK_BALANCE_URL)
+        .bearer_auth(key)
+        .send()
+        .await
+        .map_err(|e| AppError::Other(format!("查询 DeepSeek 余额失败：{e}")))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(AppError::Other(format!("查询 DeepSeek 余额失败（HTTP {}）", status.as_u16())));
+    }
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| AppError::Other(format!("DeepSeek 余额接口返回的格式不认识：{e}")))?;
+    parse_deepseek_balance(&profile_name, &body).map(Some)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,6 +593,49 @@ mod tests {
         let cached = estimate_cost_usd("deepseek-flash", &usage(1_000_000, 1_000_000, 0, 0), Billing::DeepSeek, idle)
             .unwrap();
         assert!((cached - 0.003).abs() < 1e-9, "{cached}");
+    }
+
+    #[test]
+    fn parses_the_official_balance_reply() {
+        let body = serde_json::json!({
+            "is_available": true,
+            "balance_infos": [
+                {"currency": "CNY", "total_balance": "110.00", "granted_balance": "10.00", "topped_up_balance": "100.00"}
+            ]
+        });
+        let parsed = parse_deepseek_balance("DeepSeek", &body).unwrap();
+        assert!(parsed.is_available);
+        assert_eq!(parsed.profile_name, "DeepSeek");
+        assert_eq!(
+            parsed.balances,
+            vec![BalanceInfo {
+                currency: "CNY".into(),
+                total: "110.00".into(),
+                granted: "10.00".into(),
+                topped_up: "100.00".into(),
+            }]
+        );
+        assert!(parse_deepseek_balance("x", &serde_json::json!({"error": "bad"})).is_err());
+    }
+
+    #[tokio::test]
+    async fn balance_only_uses_a_key_from_an_official_deepseek_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        assert!(deepseek_profile(&db).await.unwrap().is_none(), "没配模型");
+
+        let profiles = serde_json::json!([
+            {"id": "sf", "name": "硅基流动", "kind": "openai", "base_url": "https://api.siliconflow.cn/v1", "model": "deepseek-ai/DeepSeek-V3"},
+            {"id": "ds-nokey", "name": "DeepSeek 备用", "kind": "openai", "base_url": "https://api.deepseek.com", "model": "deepseek-flash"},
+            {"id": "ds", "name": "DeepSeek", "kind": "anthropic", "base_url": "https://api.deepseek.com/anthropic", "model": "deepseek-flash"}
+        ]);
+        crate::commands::settings::set_setting(&db, "llm_profiles", &profiles.to_string()).await.unwrap();
+        crate::llm::keychain::set_api_key(&db, "sf", "sk-siliconflow").await.unwrap();
+        assert!(deepseek_profile(&db).await.unwrap().is_none(), "别家网关的 Key 不能拿去查 DeepSeek");
+
+        crate::llm::keychain::set_api_key(&db, "ds", "sk-deepseek").await.unwrap();
+        let (name, key) = deepseek_profile(&db).await.unwrap().unwrap();
+        assert_eq!((name.as_str(), key.as_str()), ("DeepSeek", "sk-deepseek"), "跳过没填 Key 的那个");
     }
 
     #[tokio::test]

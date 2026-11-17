@@ -109,7 +109,9 @@ use crate::pipeline::{
     cmd_list_recent_processed_videos,
     cmd_process_video, cmd_recorrect_transcript, ProcessingTasks,
 };
-use crate::usage_log::{cmd_ai_usage_summary, cmd_clear_llm_usage, cmd_llm_usage, cmd_video_ai_usage};
+use crate::usage_log::{
+    cmd_ai_usage_summary, cmd_clear_llm_usage, cmd_deepseek_balance, cmd_llm_usage, cmd_video_ai_usage,
+};
 use tauri::Manager;
 
 /// 启动时无法继续：先告诉用户原因再退出。setup 跑在不能 unwind 的回调里，
@@ -323,6 +325,7 @@ pub fn run() {
             cmd_llm_usage,
             cmd_ai_usage_summary,
             cmd_video_ai_usage,
+            cmd_deepseek_balance,
             cmd_clear_llm_usage,
             cmd_list_whisper_models,
             cmd_download_whisper_model,

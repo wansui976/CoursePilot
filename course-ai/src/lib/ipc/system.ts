@@ -18,6 +18,7 @@ import type {
   PaddleOcrStatus,
   AiUsageRow,
   AiUsageSummary,
+  DeepSeekBalance,
   CloudSyncProbeAccountChangeResult,
   CloudSyncStatus,
   CloudSyncProbeArmResult,
@@ -83,6 +84,8 @@ export const dev = {
 export const aiUsage = {
   summary: (days = 30): Promise<AiUsageSummary> => invoke("cmd_ai_usage_summary", { days }),
   video: (videoId: string): Promise<AiUsageRow> => invoke("cmd_video_ai_usage", { videoId }),
+  /** 没配 DeepSeek 官方的模型时是 null。 */
+  deepseekBalance: (): Promise<DeepSeekBalance | null> => invoke("cmd_deepseek_balance"),
 };
 
 // 发一条系统桌面通知（学习提醒）。触发时机与去重由前端决定。

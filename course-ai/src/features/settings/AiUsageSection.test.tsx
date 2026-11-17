@@ -8,7 +8,7 @@ import { VideoAiUsage } from "@/features/workspace/VideoAiUsage";
 
 const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
-    aiUsage: { summary: vi.fn(), video: vi.fn() },
+    aiUsage: { summary: vi.fn(), video: vi.fn(), deepseekBalance: vi.fn() },
     settings: { get: vi.fn(), set: vi.fn() },
   },
 }));
@@ -31,6 +31,7 @@ describe("AiUsageSection", () => {
     await i18n.changeLanguage("zh-CN");
     mockIpc.settings.get.mockReset().mockResolvedValue("5");
     mockIpc.settings.set.mockReset().mockResolvedValue(undefined);
+    mockIpc.aiUsage.deepseekBalance.mockReset().mockResolvedValue(null);
     mockIpc.aiUsage.summary.mockReset().mockResolvedValue({
       sinceMs: 0,
       total: row("", null, 0.42, { unpricedCalls: 2 }),
@@ -53,6 +54,40 @@ describe("AiUsageSection", () => {
     expect(screen.getByText("其他（助手、未归属）")).toBeInTheDocument();
     expect(screen.getAllByText(/缓存命中 75%/).length).toBeGreaterThan(0);
     expect(screen.getByText("2 次调用查不到价格，未计入")).toBeInTheDocument();
+  });
+
+  it("hides the DeepSeek balance row when no official DeepSeek profile is set up", async () => {
+    render(<AiUsageSection />);
+    await screen.findByText("$0.42 / 预算 $5.00");
+    expect(mockIpc.aiUsage.deepseekBalance).toHaveBeenCalled();
+    expect(screen.queryByText("DeepSeek 余额")).not.toBeInTheDocument();
+  });
+
+  it("shows the DeepSeek balance with its granted part, and warns when it has run out", async () => {
+    mockIpc.aiUsage.deepseekBalance.mockResolvedValue({
+      profileName: "DeepSeek",
+      isAvailable: true,
+      balances: [{ currency: "CNY", total: "110.00", granted: "10.00", toppedUp: "100.00" }],
+    });
+    const { unmount } = render(<AiUsageSection />);
+    expect(await screen.findByText("¥110.00")).toBeInTheDocument();
+    expect(screen.getByText("含赠送 ¥10.00")).toBeInTheDocument();
+    unmount();
+
+    mockIpc.aiUsage.deepseekBalance.mockResolvedValue({
+      profileName: "DeepSeek",
+      isAvailable: false,
+      balances: [{ currency: "CNY", total: "0.00", granted: "0.00", toppedUp: "0.00" }],
+    });
+    render(<AiUsageSection />);
+    expect(await screen.findByText("余额不足，调用会失败，请先充值")).toBeInTheDocument();
+  });
+
+  it("shows a failed balance lookup in its own row without hiding the spend", async () => {
+    mockIpc.aiUsage.deepseekBalance.mockRejectedValue("查询 DeepSeek 余额失败（HTTP 401）");
+    render(<AiUsageSection />);
+    expect(await screen.findByText("查询 DeepSeek 余额失败（HTTP 401）")).toBeInTheDocument();
+    expect(screen.getByText("$0.42 / 预算 $5.00")).toBeInTheDocument();
   });
 
   it("saves the budget, and clearing it means no limit", async () => {

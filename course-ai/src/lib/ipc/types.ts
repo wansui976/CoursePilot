@@ -408,3 +408,12 @@ export type AiUsageSummary = {
   monthCostUsd: number;
   budgetUsd: number | null;
 };
+
+/** DeepSeek 账户余额（`GET /user/balance`）。金额是官方给的字符串，如 "110.00"。 */
+export type DeepSeekBalance = {
+  /** 查的是哪个模型配置的 Key。 */
+  profileName: string;
+  /** 余额够不够继续调用。 */
+  isAvailable: boolean;
+  balances: { currency: string; total: string; granted: string; toppedUp: string }[];
+};
