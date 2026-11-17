@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { Brain, Check, Lightbulb, PenLine, Scale, Sparkles, type LucideIcon } from "lucide-react";
+import { Brain, Check, Lightbulb, ListPlus, PenLine, Scale, type LucideIcon } from "lucide-react";
 import { Modal } from "@/ui/dialog";
 import { Button } from "@/ui/button";
 import { Switch } from "@/ui/switch";
@@ -70,7 +70,7 @@ export function QuizSetDialog({
         if (!next) onClose();
       }}
       title={t("quiz.dialog.title")}
-      icon={<Sparkles className="h-4 w-4" />}
+      icon={<ListPlus className="h-4 w-4" />}
       size="md"
     >
       <fieldset className="mt-2">
@@ -130,8 +130,7 @@ export function QuizSetDialog({
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>
           {t("quiz.dialog.cancel")}
         </Button>
-        <Button type="button" variant="primary" size="sm" onClick={() => void start()} disabled={saving} className="gap-1.5">
-          <Sparkles className="h-3.5 w-3.5" />
+        <Button type="button" variant="primary" size="sm" onClick={() => void start()} disabled={saving}>
           {t("quiz.dialog.start")}
         </Button>
       </div>

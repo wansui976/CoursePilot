@@ -11,7 +11,8 @@ import {
   CircleDashed,
   Eye,
   RotateCcw,
-  Sparkles,
+  ListPlus,
+  Loader2,
   Trash2,
   X,
 } from "lucide-react";
@@ -326,7 +327,11 @@ export function QuizPanel({ videoId }: { videoId: string }) {
                   disabled={generate.isPending}
                   className="ca-touch-44 flex-none gap-1.5 text-[var(--accent-text)] hover:text-[var(--accent-text)]"
                 >
-                  <Sparkles className={`h-3.5 w-3.5 ${generate.isPending ? "animate-pulse" : ""}`} />
+                  {generate.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <ListPlus className="h-3.5 w-3.5" />
+                  )}
                   {generate.isPending ? t("quiz.generating") : t("quiz.newSet")}
                 </Button>
               </div>
