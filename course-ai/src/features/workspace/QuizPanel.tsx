@@ -27,7 +27,7 @@ import { Button } from "@/ui/button";
 import { MathText } from "@/ui/MathText";
 import { Menu, MenuItem } from "@/ui/menu";
 import { ProgressRing } from "@/ui/ProgressRing";
-import { PanelActions, GenerateEmptyAction } from "./PanelActions";
+import { GenerateEmptyAction } from "./PanelActions";
 import { useAiGeneration } from "@/lib/useAiGeneration";
 import { QUIZ_STYLES } from "@/lib/quizStyles";
 import { QuizSetDialog } from "./QuizSetDialog";
@@ -399,10 +399,8 @@ export function QuizPanel({ videoId }: { videoId: string }) {
           </>
         )}
       </div>
-      {/* 有题时「再出一套」就在顶上，右下角的重新生成按钮只会挡住最后一题的按钮。 */}
-      {!isError && !current && (
-        <PanelActions onRegenerate={generate.start} regenerating={generate.isPending} hasContent={false} />
-      )}
+      {/* 不挂右下角的「生成 / 重新生成」：有题时「再出一套」就在顶上，没题时空状态里有「开始生成」——
+          再浮一个只会和助手按钮叠在一起，还挡住最后一题。 */}
       <QuizSetDialog
         videoId={videoId}
         open={dialogOpen}

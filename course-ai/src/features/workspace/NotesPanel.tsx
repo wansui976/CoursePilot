@@ -519,7 +519,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       <div
         ref={scrollerRef}
         aria-label={t("notes.scrollArea")}
-        className="min-h-0 flex-1 overflow-y-auto pb-12"
+        className="ca-panel-actions-clearance min-h-0 flex-1 overflow-y-auto"
         onScroll={rememberNotesScroll}
       >
         {notesQuery.isPending && !localDraft ? (

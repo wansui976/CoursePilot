@@ -889,7 +889,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
                     <X className="h-3 w-3" />
                     {t("transcript.cancel")}
                   </Button>
-                  <span className="text-[var(--text-faint)]">{t("transcript.saveShortcut")}</span>
+                  <span className="ca-kbd-hint text-[var(--text-faint)]">{t("transcript.saveShortcut")}</span>
                 </div>
               </div>
             </div>

@@ -255,13 +255,13 @@ describe("QuizPanel", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("题库读取失败");
     expect(screen.queryByText(/还没有题目/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "生成" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "开始生成" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
 
     await waitFor(() => expect(mockIpc.ai.getQuiz).toHaveBeenCalledTimes(2));
     expect(await screen.findByText(/还没有题目/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "生成" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始生成" })).toBeInTheDocument();
   });
 
   it("renders LaTeX math in quiz stems, options, and explanations", async () => {
@@ -378,14 +378,13 @@ describe("QuizPanel", () => {
     expect(scroller.parentElement).toHaveClass("h-full", "flex-col");
   });
 
-  it("还没有题目时也给得出生成按钮", async () => {
-    // 空状态的文案一直写着「也可点右下角生成」，而这个面板从来没挂过那组按钮——
-    // 加载中和空题库都是提前 return 的，恰恰绕过了最需要它的那两个状态。
+  it("还没有题目时空状态里给出生成按钮，不再在右下角另浮一个", async () => {
     mockIpc.ai.getQuiz.mockResolvedValue(null);
     renderQuizPanel();
 
     expect(await screen.findByText(/还没有题目/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    expect(screen.queryByRole("button", { name: "生成" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "开始生成" }));
 
     await waitFor(() =>
       expect(mockIpc.ai.generate).toHaveBeenCalledWith("video-1", "quiz"),
@@ -409,7 +408,7 @@ describe("QuizPanel", () => {
     renderQuizPanel();
 
     await screen.findByText(/还没有题目/);
-    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    fireEvent.click(screen.getByRole("button", { name: "开始生成" }));
 
     expect(await screen.findByText(/模型没配好/)).toBeInTheDocument();
   });

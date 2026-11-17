@@ -465,7 +465,11 @@ export function ReviewSession({
                   disabled={Boolean(choiceData && selectedOptions.length === 0)}
                   className="ca-touch-44 mx-auto mt-10 flex min-w-40"
                 >
-                  {choiceData ? t("review.submitAnswer") : t("review.showAnswer")}
+                  {/* 包成一段：按钮是 flex，提示若单独成项会被 gap 拉开，和全角括号叠出一大块空白。 */}
+                  <span>
+                    {choiceData ? t("review.submitAnswer") : t("review.showAnswer")}
+                    <span className="ca-kbd-hint">{t("review.spaceHint")}</span>
+                  </span>
                 </Button>
               )}
             </div>

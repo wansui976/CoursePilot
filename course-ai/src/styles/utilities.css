@@ -257,6 +257,15 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 键盘快捷键提示（「空格」、1–4、⌘Enter）：纯触屏设备（手机、没接键盘的 iPad）没有键盘，
+   提示只是噪音。看 any-pointer：iPad 接了妙控键盘 / 触控板时有 fine 指针，照常显示。 */
+@media not all and (any-pointer: fine) {
+  .ca-kbd-hint,
+  .ca-grade-key {
+    display: none;
+  }
+}
+
 .ca-grade-key {
   position: absolute;
   top: 6px;

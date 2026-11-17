@@ -373,6 +373,10 @@ export const scenes = [
       await shot();
       await page.getByRole("button", { name: "更多格式" }).click();
       await shot("more");
+      // 滚到底：最后一行要露在右下角悬浮操作条上面，不能被它压住。
+      await page.keyboard.press("Escape");
+      await page.getByLabel("笔记内容滚动区").first().evaluate((node) => node.scrollTo(0, node.scrollHeight));
+      await shot("end");
     },
   },
   {
