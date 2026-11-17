@@ -225,6 +225,26 @@ function auditLayout() {
     if (rect.width <= 1 || rect.height <= 1) continue;
     if (el.scrollWidth > el.clientWidth + 1) issues.push(`${describe(el)} 文字被截断却没有省略号`);
   }
+  // 第三类之二：文字被挤成一字一行——容器给的宽度不到两个字，几个字竖着往下排
+  // （手机批量选择的「已选 3 项」就这样过）。三个字以上、排成三行以上才算，
+  // 免得把本来就窄的数字、图标旁的短标签算进来。
+  for (const el of document.querySelectorAll("body *")) {
+    const text = [...el.childNodes]
+      .filter((n) => n.nodeType === Node.TEXT_NODE)
+      .map((n) => n.textContent)
+      .join("")
+      .replace(/\s+/g, "");
+    if ([...text].length < 3) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 1 || rect.height <= 1) continue;
+    const style = getComputedStyle(el);
+    if (style.writingMode.startsWith("vertical")) continue;
+    const fontSize = parseFloat(style.fontSize);
+    const lineHeight = parseFloat(style.lineHeight) || fontSize * 1.2;
+    if (rect.width < fontSize * 2.2 && rect.height >= lineHeight * 2.8) {
+      issues.push(`${describe(el)} 文字被挤成一字一行（宽 ${Math.round(rect.width)}px）`);
+    }
+  }
   // 第四类：文字与背景对比度过低（< 3:1）。背景取最近的不透明底色；途中遇到渐变或
   // 图片背景就跳过（算不准）。禁用态与仅供读屏的文字不算。
   // 计算样式里的颜色可能是 oklab()/oklch()/color-mix() 等：画到 1px 画布上再读回 RGBA，
