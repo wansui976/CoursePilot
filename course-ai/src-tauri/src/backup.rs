@@ -179,7 +179,7 @@ async fn stage_database_restore_locked(
     let temporary = pending_dir.join(format!(".{PENDING_RESTORE_FILE}.{}.tmp", Uuid::new_v4()));
     remove_sqlite_files(&temporary);
     let stage_result = async {
-        std::fs::copy(source, &temporary)?;
+        export_database_file(source, &temporary).await?;
         let copied =
             inspect_database_file(&temporary, Some(current_user_version), "待恢复文件").await?;
         if copied.schema_version != source_info.schema_version
@@ -235,6 +235,30 @@ async fn stage_database_restore_locked(
 struct DatabaseInfo {
     schema_version: i64,
     sqlite_user_version: i64,
+}
+
+/// 把一个数据库文件（不是当前在用的那个）导出成一份独立的完整文件。
+///
+/// 不能直接拷文件：WAL 模式的库，最近的提交可能还在旁边的 -wal 里没并回主文件，
+/// 只拷主文件就丢了这部分（缺迁移记录、缺最近的笔记）。让 SQLite 自己读——它会连 -wal
+/// 一起读——再 VACUUM INTO 写成一个不依赖旁路文件的新库。
+async fn export_database_file(source: &Path, destination: &Path) -> AppResult<()> {
+    let options = SqliteConnectOptions::new()
+        .filename(source)
+        .read_only(true)
+        .create_if_missing(false);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .map_err(|error| AppError::Other(format!("恢复文件不是可读取的 SQLite 数据库：{error}")))?;
+    let result = sqlx::query("VACUUM INTO ?")
+        .bind(destination.to_string_lossy().as_ref())
+        .execute(&pool)
+        .await;
+    pool.close().await;
+    result?;
+    Ok(())
 }
 
 async fn inspect_database_file(
@@ -953,6 +977,31 @@ mod tests {
             .join(PENDING_RESTORE_DIR)
             .join(PENDING_RESTORE_MANIFEST)
             .exists());
+    }
+
+    /// 用户选来恢复的是一份 WAL 模式的库，而且最近的提交还在 -wal 里没并回主文件
+    /// （比如从另一台电脑直接拷来的、对方当时开着应用）。恢复后这些提交必须都在。
+    #[tokio::test]
+    async fn restoring_a_wal_database_keeps_commits_still_in_its_wal_file() {
+        let dir = tempdir().unwrap();
+        let live_path = dir.path().join("courseai.db");
+        let live = database_with_marker(&live_path, "current").await;
+        let source_path = dir.path().join("copied-from-elsewhere.db");
+        let source = Db::connect_and_migrate(&source_path).await.unwrap();
+        sqlx::query("PRAGMA journal_mode=WAL").execute(&source.pool).await.unwrap();
+        sqlx::query("PRAGMA wal_autocheckpoint=0").execute(&source.pool).await.unwrap();
+        sqlx::query("INSERT INTO settings(key,value) VALUES('restore-marker','only-in-wal')")
+            .execute(&source.pool)
+            .await
+            .unwrap();
+        let wal = PathBuf::from(format!("{}-wal", source_path.to_string_lossy()));
+        assert!(wal.metadata().unwrap().len() > 0, "前提：提交还在 -wal 里");
+
+        stage_database_restore(&live, &source_path, dir.path()).await.unwrap();
+        live.pool.close().await;
+        assert!(apply_pending_restore(dir.path(), &live_path).await.unwrap());
+        assert_eq!(read_setting(&live_path, "restore-marker").await, Some("only-in-wal".into()));
+        source.pool.close().await;
     }
 
     #[tokio::test]

@@ -16,17 +16,14 @@ impl Db {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        let (journal, synchronous) = journal_settings();
         let opts = SqliteConnectOptions::new()
             .filename(db_path)
             .create_if_missing(true)
             .foreign_keys(true)
-            // sqlx 默认 WAL。WAL 依赖 -shm 共享内存(mmap)在多个连接间协调可见性，
-            // 而 iOS 沙箱里 -shm 的 mmap 不可靠:一个池连接写入的值，另一个池连接读不到，
-            // 表现为「设置保存后、关掉再打开就空了」(桌面/Android 的 WAL 正常,故只在 iOS 复现)。
-            // 改用回滚日志(TRUNCATE):靠文件锁协调,读连接直接读主库文件,跨连接读写在 iOS 上也一致。
-            .journal_mode(SqliteJournalMode::Truncate)
-            .synchronous(SqliteSynchronous::Full)
-            // 回滚日志下写者持独占锁,多连接并发时给等待窗口,避免直接 SQLITE_BUSY 报错。
+            .journal_mode(journal)
+            .synchronous(synchronous)
+            // 写者提交时其它连接要等一下，给个等待窗口，避免直接 SQLITE_BUSY 报错。
             .busy_timeout(Duration::from_secs(5));
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
@@ -69,6 +66,26 @@ pub fn test_db_path(prefix: &str) -> std::path::PathBuf {
     });
     let _ = std::fs::create_dir_all(&root);
     root.join(format!("{prefix}-{}.db", uuid::Uuid::new_v4()))
+}
+
+/// 日志模式按平台定。
+///
+/// iOS：回滚日志（TRUNCATE）+ FULL。WAL 依赖 -shm 共享内存（mmap）在多个连接间协调可见性，
+/// iOS 沙箱里出现过「一个池连接写入的设置、另一个池连接读不到」——保存后关掉再打开就空了
+/// （dd83fc8）。回滚日志靠文件锁协调，读连接直接读主库文件。
+///
+/// 其它平台：WAL + NORMAL（这些平台在那次修复之前一直是 WAL，没出过这个问题）。回滚日志下
+/// 每次提交都要拿独占锁、刷好几次盘，后台写库（识别结果、建索引、保存进度）时界面的查询
+/// 得等着：实测同样的读写混合，读的 p99 从 5ms 降到 0.8ms、最慢一次从 36ms 降到 5ms，
+/// 小写入快三倍——这还是在刷盘很便宜的 Mac 上，Windows 和安卓的慢盘上差得更多。
+/// WAL 下 NORMAL 只在掉电时可能丢最后几笔提交，不会损坏库。
+/// 备份（VACUUM INTO）、恢复（替换前关库、替换后清 -wal/-shm）本来就按 WAL 写的。
+fn journal_settings() -> (SqliteJournalMode, SqliteSynchronous) {
+    if cfg!(target_os = "ios") {
+        (SqliteJournalMode::Truncate, SqliteSynchronous::Full)
+    } else {
+        (SqliteJournalMode::Wal, SqliteSynchronous::Normal)
+    }
 }
 
 #[cfg(test)]
@@ -129,9 +146,10 @@ mod tests {
         assert_eq!(value.0, "bar");
     }
 
-    // 不要回到 WAL：WAL 的 -shm 共享内存在 iOS 沙箱里不可靠，会导致跨连接读不到刚写入的设置。
+    // iOS 不要回到 WAL：-shm 共享内存在 iOS 沙箱里不可靠，会导致跨连接读不到刚写入的设置。
+    // 其它平台用 WAL，后台写库时界面的读不被挡住。
     #[tokio::test]
-    async fn uses_rollback_journal_not_wal() {
+    async fn journal_mode_is_rollback_on_ios_and_wal_elsewhere() {
         let dir = tempdir().unwrap();
         let db = Db::connect_and_migrate(&dir.path().join("test.db"))
             .await
@@ -140,7 +158,8 @@ mod tests {
             .fetch_one(&db.pool)
             .await
             .unwrap();
-        assert_eq!(mode.0.to_lowercase(), "truncate");
+        let expected = if cfg!(target_os = "ios") { "truncate" } else { "wal" };
+        assert_eq!(mode.0.to_lowercase(), expected);
     }
 
     // 复现该 bug 的本质：写在一个池连接、读在另一个池连接，必须读到刚写的值。
