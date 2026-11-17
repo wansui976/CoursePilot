@@ -275,9 +275,13 @@ export const scenes = [
       await page.reload({ waitUntil: "networkidle" });
       await page.getByRole("button", { name: /^线性代数的本质/ }).first().click();
       await walk("course");
-      // 手机上进了课程页就看不到课程列表了：回首页再打开视频
+      // 手机上进了课程页就看不到课程列表了：回首页再进有视频的课。有视频的课页面还有一段引导
+      // （找讲解 / 知识点）——不先走完，平板上它的气泡正好盖在要点的视频卡上。
       await page.reload({ waitUntil: "networkidle" });
-      await openVideo(page);
+      await openCourse(page);
+      if (await bubble.waitFor({ timeout: 3000 }).then(() => true, () => false)) await walk("course-videos");
+      await page.getByRole("button", { name: VIDEO }).first().click();
+      await page.locator("[data-video-player]").first().waitFor({ timeout: 5000 });
       await walk("workbench");
       await page.evaluate(() => localStorage.removeItem("__shot-tours"));
     },
