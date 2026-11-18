@@ -28,6 +28,8 @@ import type {
   SemanticBackend,
   SemanticStatus,
   SemanticTest,
+  RemoteSyncReport,
+  RemoteSyncStatus,
 } from "./types";
 
 export const app = {
@@ -218,4 +220,16 @@ export const semantic = {
   rebuild: (): Promise<void> => invoke("cmd_semantic_rebuild"),
   /** 上一轮出错停下后，接着把没建的建完。 */
   resume: (): Promise<void> => invoke("cmd_semantic_resume"),
+};
+
+/** 设置 → 多设备同步（网盘 / WebDAV）。密码传 null 表示沿用已保存的。 */
+type RemoteSyncDraft = { url: string; folder: string; user: string; password: string | null };
+export const remoteSync = {
+  status: (): Promise<RemoteSyncStatus> => invoke("cmd_remote_sync_status"),
+  /** 返回网盘上已有几台设备。 */
+  test: (draft: RemoteSyncDraft): Promise<number> => invoke("cmd_remote_sync_test", draft),
+  save: (draft: RemoteSyncDraft): Promise<void> => invoke("cmd_remote_sync_save", draft),
+  setEnabled: (enabled: boolean): Promise<void> => invoke("cmd_remote_sync_set_enabled", { enabled }),
+  now: (): Promise<RemoteSyncReport> => invoke("cmd_remote_sync_now"),
+  nudge: (): Promise<void> => invoke("cmd_remote_sync_nudge"),
 };

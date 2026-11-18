@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { createAppRouter } from "@/app/router";
 import { startSubscriptionListener } from "@/app/subscriptionEvents";
+import { startRemoteSyncListener } from "@/app/remoteSyncEvents";
 // 启动即应用已保存的阅读字体（模块加载时写 --font-reading），不必等打开设置页。
 import "@/stores/readingFont";
 import "@/stores/density";
@@ -9,6 +10,7 @@ import "@/stores/density";
 const queryClient = new QueryClient();
 const router = createAppRouter();
 startSubscriptionListener(queryClient);
+startRemoteSyncListener(queryClient);
 
 export default function App() {
   return (

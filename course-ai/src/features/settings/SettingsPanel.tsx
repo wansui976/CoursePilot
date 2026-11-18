@@ -13,6 +13,7 @@ import { Group, StackRow } from "./primitives";
 import { useSettingsForm } from "./useSettingsForm";
 import { AboutSection } from "./sections/AboutSection";
 import { SemanticSection } from "./sections/SemanticSection";
+import { RemoteSyncSection } from "./sections/RemoteSyncSection";
 import { AppearanceSection } from "./sections/AppearanceSection";
 import { AsrSection } from "./sections/AsrSection";
 import { CoursewareSection } from "./sections/CoursewareSection";
@@ -263,6 +264,7 @@ export function SettingsPanel({
               )}
               {activeCategory === "llm" && <AutoGenerateSection />}
               {activeCategory === "llm" && <AiUsageSection />}
+              {activeCategory === "sync" && <RemoteSyncSection />}
               {activeCategory === "semantic" && <SemanticSection />}
               {activeCategory === "courseware" && <CoursewareSection form={form} />}
               {activeCategory === "about" && <AboutSection />}

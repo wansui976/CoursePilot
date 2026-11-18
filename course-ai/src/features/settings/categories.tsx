@@ -5,6 +5,7 @@ export type SettingsCategory =
   | "study"
   | "shortcuts"
   | "storage"
+  | "sync"
   | "asr"
   | "llm"
   | "semantic"
@@ -20,6 +21,7 @@ export const CATEGORY_META: Record<
   study: { i18nKey: "settings.categories.study" },
   shortcuts: { i18nKey: "settings.categories.shortcuts" },
   storage: { i18nKey: "settings.categories.storage" },
+  sync: { i18nKey: "settings.categories.sync" },
   asr: { i18nKey: "settings.categories.asr" },
   llm: { i18nKey: "settings.categories.llm" },
   semantic: { i18nKey: "settings.categories.semantic" },
@@ -34,6 +36,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   "study",
   "shortcuts",
   "storage",
+  "sync",
   "asr",
   "llm",
   "semantic",

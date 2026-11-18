@@ -802,6 +802,7 @@
       "study": "Study",
       "shortcuts": "Shortcuts",
       "storage": "Storage",
+      "sync": "Sync",
       "asr": "Speech Recognition",
       "llm": "LLM",
       "semantic": "Semantic search",
@@ -1036,6 +1037,45 @@
       "inactive": "Not ready yet: download the on-device model, or pick a profile and enter a model name.",
       "rebuild": "Rebuild index",
       "rebuildConfirm": "Delete every index for the current model and rebuild from scratch? This takes a while with many videos, and a cloud endpoint will bill again."
+    },
+    "remoteSync": {
+      "connectionGroup": "Cloud drive",
+      "connectionHint": "Sync your study data between computer and phone through your own WebDAV drive. Use the same drive and folder on every device. Synced: courses and folders, video entries, notes (with images), clips, review cards, study history, playback progress. Not synced: video files, transcripts and AI-generated content — importing the same video file on another device links it to the synced entry automatically.",
+      "provider": "Service",
+      "providers": {
+        "jianguoyun": "Jianguoyun (Nutstore)",
+        "nextcloud": "Nextcloud / Synology etc.",
+        "custom": "Other WebDAV"
+      },
+      "url": "WebDAV address",
+      "urlHint": {
+        "jianguoyun": "Jianguoyun's WebDAV address is always https://dav.jianguoyun.com/dav/.",
+        "nextcloud": "Nextcloud shows it under Files → Settings, like https://your-server/remote.php/dav/files/username/.",
+        "custom": "The WebDAV address from your service (starting with http:// or https://)."
+      },
+      "user": "Account",
+      "password": "Password",
+      "passwordHintJianguoyun": "Jianguoyun needs an app password: web → Account → Security → Third-party apps → Add. Not your login password.",
+      "passwordKept": "Saved (leave empty to keep)",
+      "folder": "Folder on the drive",
+      "folderHint": "Sync data lives in this folder; use the same one on every device. Created if missing.",
+      "save": "Save",
+      "saved": "Saved",
+      "test": "Test connection",
+      "testOk": "Connected · {{count}} device(s) already on the drive",
+      "syncGroup": "Sync",
+      "syncHint": "Once on, syncs every 3 minutes and whenever the app comes back to the foreground. The first sync uploads everything already on this device, which can take a few rounds.",
+      "enable": "Sync",
+      "needConfig": "Fill in and save the drive first",
+      "lastSync": "Last sync",
+      "never": "Never",
+      "syncing": "Syncing…",
+      "pending": "{{count}} change(s) waiting to upload",
+      "syncNow": "Sync now",
+      "devicesGroup": "Devices",
+      "thisDevice": "This device",
+      "noDevices": "No other devices on the drive yet. Enter the same drive and folder in CoursePilot on another device and turn sync on.",
+      "seen": "Last synced {{time}}"
     },
     "courseware": {
       "title": "Slide Extraction",

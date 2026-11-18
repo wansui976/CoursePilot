@@ -801,6 +801,7 @@
       "study": "学习",
       "shortcuts": "快捷键",
       "storage": "存储",
+      "sync": "多设备同步",
       "asr": "语音识别",
       "llm": "大模型",
       "semantic": "语义检索",
@@ -1035,6 +1036,45 @@
       "inactive": "还不能用：本机模型需要先下载，云端接口需要选好配置并填写模型名。",
       "rebuild": "重建索引",
       "rebuildConfirm": "删掉当前模型的全部索引并从头重建？视频多时要一段时间；用云端接口会重新计费。"
+    },
+    "remoteSync": {
+      "connectionGroup": "网盘",
+      "connectionHint": "用你自己的 WebDAV 网盘在电脑和手机之间同步学习数据。每台设备填同一个网盘、同一个文件夹即可。同步：课程和文件夹、视频条目、笔记（含图片）、片段、复习卡、学习记录、播放进度。不同步：视频文件、字幕和 AI 生成的内容——在另一台设备上导入同一个视频文件，会自动对上同步过来的那一条。",
+      "provider": "服务",
+      "providers": {
+        "jianguoyun": "坚果云",
+        "nextcloud": "Nextcloud / 群晖等",
+        "custom": "其它 WebDAV"
+      },
+      "url": "WebDAV 地址",
+      "urlHint": {
+        "jianguoyun": "坚果云的 WebDAV 地址固定是 https://dav.jianguoyun.com/dav/，一般不用改。",
+        "nextcloud": "Nextcloud 在「文件 → 设置」里能看到 WebDAV 地址，形如 https://你的服务器/remote.php/dav/files/用户名/。",
+        "custom": "填服务给的 WebDAV 地址（http:// 或 https:// 开头）。"
+      },
+      "user": "账号",
+      "password": "密码",
+      "passwordHintJianguoyun": "坚果云要用「第三方应用密码」：网页版 → 账户信息 → 安全选项 → 第三方应用管理 → 添加应用，生成的那串密码。不是登录密码。",
+      "passwordKept": "已保存（留空不改）",
+      "folder": "网盘里的文件夹",
+      "folderHint": "同步数据放在这个文件夹里，每台设备要填同一个。没有会自动建。",
+      "save": "保存",
+      "saved": "已保存",
+      "test": "测试连接",
+      "testOk": "已连上 · 网盘上已有 {{count}} 台设备",
+      "syncGroup": "同步",
+      "syncHint": "打开后每 3 分钟同步一轮，应用回到前台时也会同步。第一次会把这台设备上已有的数据全部传上去，数据多时要几轮。",
+      "enable": "开启同步",
+      "needConfig": "先填好网盘并保存",
+      "lastSync": "上次同步",
+      "never": "还没同步过",
+      "syncing": "正在同步…",
+      "pending": "还有 {{count}} 条改动等着上传",
+      "syncNow": "立即同步",
+      "devicesGroup": "设备",
+      "thisDevice": "这台设备",
+      "noDevices": "网盘上还没有别的设备。在另一台设备的 CoursePilot 里填同一个网盘和文件夹并打开同步，就会出现在这里。",
+      "seen": "上次同步 {{time}}"
     },
     "courseware": {
       "title": "课件提取",

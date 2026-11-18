@@ -454,3 +454,39 @@ export type SemanticStatus = {
 };
 
 export type SemanticTest = { dimensions: number; millis: number };
+
+/** 设置 → 多设备同步：网盘上看到的另一台设备。 */
+export type RemoteSyncDevice = {
+  deviceId: string;
+  name: string | null;
+  platform: string | null;
+  seenAt: number;
+};
+
+export type RemoteSyncReport = {
+  pushed: number;
+  pulled: number;
+  applied: number;
+  parked: number;
+  pending: number;
+};
+
+export type RemoteSyncRunState = {
+  running: boolean;
+  lastSuccessAt: number | null;
+  lastError: string | null;
+  lastReport: RemoteSyncReport | null;
+};
+
+export type RemoteSyncStatus = {
+  enabled: boolean;
+  url: string;
+  folder: string;
+  user: string;
+  hasPassword: boolean;
+  deviceId: string;
+  deviceName: string;
+  pending: number;
+  devices: RemoteSyncDevice[];
+  state: RemoteSyncRunState;
+};

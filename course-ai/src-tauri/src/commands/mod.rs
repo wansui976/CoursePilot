@@ -15,6 +15,7 @@ pub mod note_history;
 pub mod note_images;
 pub mod notify;
 pub mod rag;
+pub mod remote_sync;
 pub mod search;
 pub mod semantic;
 pub mod settings;

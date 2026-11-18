@@ -64,6 +64,10 @@ use crate::commands::srs::{
     cmd_weak_concepts,
 };
 use crate::commands::client_store::{cmd_client_store_load, cmd_client_store_put};
+use crate::commands::remote_sync::{
+    cmd_remote_sync_now, cmd_remote_sync_nudge, cmd_remote_sync_save, cmd_remote_sync_set_enabled,
+    cmd_remote_sync_status, cmd_remote_sync_test,
+};
 use crate::commands::semantic::{
     cmd_semantic_delete_model, cmd_semantic_download_model, cmd_semantic_rebuild, cmd_semantic_resume,
     cmd_semantic_save, cmd_semantic_status, cmd_semantic_test,
@@ -246,6 +250,8 @@ pub fn run() {
                 }
                 // 语义检索的后台建索引：没开就什么都不做。
                 crate::pipeline::semantic::init(handle.clone(), db.clone());
+                // 网盘同步（WebDAV）的后台轮询：没开就只是定时看一眼设置。
+                crate::sync::remote::init(handle.clone(), db.clone());
                 let media = crate::media_server::start()
                     .await
                     .expect("media server start");
@@ -446,6 +452,12 @@ pub fn run() {
             cmd_semantic_test,
             cmd_semantic_rebuild,
             cmd_semantic_resume,
+            cmd_remote_sync_status,
+            cmd_remote_sync_test,
+            cmd_remote_sync_save,
+            cmd_remote_sync_set_enabled,
+            cmd_remote_sync_now,
+            cmd_remote_sync_nudge,
             cmd_analyze_course_concepts,
             cmd_cancel_course_analysis,
             cmd_list_course_concepts,
