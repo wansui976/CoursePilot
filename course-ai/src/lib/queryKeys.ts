@@ -34,6 +34,8 @@ export const qk = {
   mediaUrl: {
     all: () => ["media-url"] as const,
     video: (videoId: string | undefined) => ["media-url", videoId] as const,
+    /** 本机没有文件时，从局域网里的电脑转发的播放地址。 */
+    lan: (videoId: string | undefined) => ["media-url", "lan", videoId] as const,
   },
 
   // —— 单个视频的资料 ——

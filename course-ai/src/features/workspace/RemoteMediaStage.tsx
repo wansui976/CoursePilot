@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
-import { CloudDownload, Loader2 } from "lucide-react";
+import { CloudDownload, Loader2, Wifi } from "lucide-react";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { ipc, type RemoteSyncDownloadEvent } from "@/lib/ipc";
@@ -15,8 +15,19 @@ const formatMb = (bytes: number) => `${Math.max(1, Math.round(bytes / MB))} MB`;
  * 视频条目是从别的设备同步过来的、这台设备上还没有文件时，舞台上显示这个，而不是让播放器报错。
  * 网盘上有就给「从网盘下载」（带进度，断了可以接着下）；没有就说明要先在有文件的那台设备上传。
  * 字幕、笔记、AI 内容这些照常在右边看——它们已经同步过来了。
+ *
+ * 舞台出现之前（和同时）工作台已经在局域网里找过开着「局域网直连播放」的电脑；找到了就直接播，
+ * 不会显示这里。这里给一句提示和「再找一次」。
  */
-export function RemoteMediaStage({ video }: { video: Video }) {
+export function RemoteMediaStage({
+  video,
+  lanChecking = false,
+  onRetryLan,
+}: {
+  video: Video;
+  lanChecking?: boolean;
+  onRetryLan?: () => void;
+}) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [progress, setProgress] = useState<{ received: number; total: number } | null>(null);
@@ -95,6 +106,24 @@ export function RemoteMediaStage({ video }: { video: Video }) {
         )
       )}
       {error != null && <ErrorNote className="w-full max-w-md text-left" error={error} onRetry={() => void download()} />}
+      {onRetryLan && (
+        <div className="flex max-w-sm flex-col items-center gap-1.5 border-t border-white/10 pt-4">
+          {lanChecking ? (
+            <p className="ca-t-xs flex items-center gap-1.5 text-white/55">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              {t("remoteMedia.lanChecking")}
+            </p>
+          ) : (
+            <>
+              <p className="ca-t-xs text-white/45">{t("remoteMedia.lanHint")}</p>
+              <Button size="sm" variant="ghost" className="text-white/75" onClick={onRetryLan}>
+                <Wifi className="h-3.5 w-3.5" />
+                {t("remoteMedia.lanRetry")}
+              </Button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

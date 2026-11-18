@@ -30,6 +30,7 @@ import type {
   SemanticTest,
   RemoteSyncReport,
   RemoteSyncStatus,
+  LanShareStatus,
 } from "./types";
 
 export const app = {
@@ -239,4 +240,11 @@ export const remoteSync = {
   downloadVideo: (videoId: string): Promise<string> => invoke("cmd_remote_sync_download_video", { videoId }),
   /** 移除网盘上的另一台设备：它的数据留着（折成一份底稿），只是不再列出。 */
   retireDevice: (deviceId: string): Promise<void> => invoke("cmd_remote_sync_retire_device", { deviceId }),
+};
+
+export const lanShare = {
+  status: (): Promise<LanShareStatus> => invoke("cmd_lan_share_status"),
+  setEnabled: (enabled: boolean): Promise<LanShareStatus> => invoke("cmd_lan_share_set_enabled", { enabled }),
+  /** 本机没有文件时，在局域网里找一台有的设备；找到了返回本机转发的播放地址，否则 null。 */
+  streamUrl: (videoId: string): Promise<string | null> => invoke("cmd_lan_stream_url", { videoId }),
 };

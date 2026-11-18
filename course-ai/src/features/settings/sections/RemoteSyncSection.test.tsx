@@ -17,6 +17,12 @@ const { mockIpc, mockConfirm } = vi.hoisted(() => ({
       nudge: vi.fn(),
       retireDevice: vi.fn(),
     },
+    lanShare: {
+      status: vi.fn(() =>
+        Promise.resolve({ supported: true, enabled: false, running: false, port: null, addresses: [], error: null }),
+      ),
+      setEnabled: vi.fn(),
+    },
   },
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: mockConfirm }));

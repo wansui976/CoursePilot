@@ -56,7 +56,7 @@ const SETTING_TIDY_PENDING: &str = "remote_sync_tidy_pending";
 const BATCH_MAX_BYTES: usize = 8 * 1024 * 1024;
 
 pub const DEFAULT_FOLDER: &str = "CoursePilot";
-const DEVICES_DIR: &str = "sync-v1/devices/";
+pub const DEVICES_DIR: &str = "sync-v1/devices/";
 /// 一个批次最多装多少条变更。笔记图片的变更比较大，别让单个文件过大。
 const BATCH_LIMIT: i64 = 100;
 /// 一轮最多上传多少个批次（第一次开启时全量数据可能很多，分几轮传完）。
@@ -210,6 +210,8 @@ struct Prepared {
     dirs_ready: bool,
     clock_checked: Option<std::time::Instant>,
     device_info_written: bool,
+    /// 上次写到网盘上的局域网地址（`Some(None)` = 已经删掉了；None = 这次运行还没管过）。
+    lan_published: Option<Option<crate::lan_share::Advert>>,
 }
 
 fn prepared() -> &'static Mutex<std::collections::HashMap<String, Prepared>> {
@@ -278,9 +280,33 @@ pub async fn run_once(db: &Db, config: &RemoteConfig, spool_root: &Path, video_r
             last_sync_at: chrono::Utc::now().timestamp_millis(),
         };
         dav.put(&format!("{own_dir}device.json"), serde_json::to_vec(&info)?).await?;
-        prepared().lock().unwrap().entry(key).or_default().device_info_written = true;
+        prepared().lock().unwrap().entry(key.clone()).or_default().device_info_written = true;
+    }
+    // 测试里不碰：局域网共享是进程里全局的，并行的测试打开它会改变这里的请求数。
+    if crate::lan_share::supported() && !cfg!(test) {
+        publish_lan(&dav, &own_dir, &key, crate::lan_share::advert()).await;
     }
     Ok(report)
+}
+
+/// 局域网直连播放的地址写到网盘上自己的文件夹里（变了才写；关掉了就删掉）。出错只记日志，下一轮再试。
+async fn publish_lan(dav: &WebDav, own_dir: &str, key: &str, desired: Option<crate::lan_share::Advert>) {
+    let published = prepared().lock().unwrap().entry(key.to_string()).or_default().lan_published.clone();
+    if published.as_ref() == Some(&desired) {
+        return;
+    }
+    let path = format!("{own_dir}{}", crate::lan_share::ADVERT_FILE);
+    let result = match &desired {
+        Some(advert) => match serde_json::to_vec(advert) {
+            Ok(bytes) => dav.put(&path, bytes).await,
+            Err(error) => Err(error.into()),
+        },
+        None => dav.delete(&path).await,
+    };
+    match result {
+        Ok(()) => prepared().lock().unwrap().entry(key.to_string()).or_default().lan_published = Some(desired),
+        Err(error) => tracing::warn!(%error, "局域网地址没能写到网盘上"),
+    }
 }
 
 /// 下一个批次序号。重装应用后本地计数归零，而别的设备按文件名记游标——新批次的名字必须
@@ -1536,6 +1562,35 @@ mod tests {
         set_setting(&pc.db, SETTING_MEDIA_ORPHANS, &serde_json::json!({ used.clone(): week_ago }).to_string()).await.unwrap();
         assert_eq!(collect_media_garbage(&pc.db, &dav, &present).await.unwrap(), 0);
         assert!(exists(&used));
+    }
+
+    #[tokio::test]
+    async fn the_lan_address_is_published_only_when_it_changes_and_removed_when_sharing_stops() {
+        let (url, store) = test_server::start().await;
+        let config = config(&url);
+        let pc = Device::new("pc").await;
+        pc.sync(&config).await.unwrap();
+        let pc_id = device_id(&pc.db).await;
+        let dav = config.client().unwrap();
+        let own_dir = format!("{DEVICES_DIR}{pc_id}/");
+        let key = prepared_key(&config, &pc_id);
+        let advert = crate::lan_share::Advert {
+            addresses: vec!["192.168.1.5".into()],
+            port: 47321,
+            token: "t".repeat(64),
+            cert_sha256: "c".repeat(64),
+        };
+        let lan_puts = || store.lock().unwrap().requests.iter().filter(|r| r.ends_with("/lan.json")).count();
+
+        publish_lan(&dav, &own_dir, &key, Some(advert.clone())).await;
+        assert!(remote_files(&store, &pc_id).contains(&"lan.json".to_string()));
+        publish_lan(&dav, &own_dir, &key, Some(advert.clone())).await;
+        assert_eq!(lan_puts(), 1, "没变就不再写");
+        let moved = crate::lan_share::Advert { addresses: vec!["192.168.1.9".into()], ..advert };
+        publish_lan(&dav, &own_dir, &key, Some(moved)).await;
+        assert_eq!(lan_puts(), 2, "地址变了重写");
+        publish_lan(&dav, &own_dir, &key, None).await;
+        assert!(!remote_files(&store, &pc_id).contains(&"lan.json".to_string()), "关掉共享后删掉");
     }
 
     #[tokio::test]

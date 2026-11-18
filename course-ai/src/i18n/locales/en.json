@@ -1038,6 +1038,14 @@
       "rebuild": "Rebuild index",
       "rebuildConfirm": "Delete every index for the current model and rebuild from scratch? This takes a while with many videos, and a cloud endpoint will bill again."
     },
+    "lanShare": {
+      "group": "Play over local network",
+      "hint": "On the same Wi‑Fi, a phone or another computer opening a video it has no file for streams it straight from this computer: nothing is uploaded to the drive and nothing takes up space on the phone. Devices connected to the same drive find this computer automatically, with no pairing code. The connection is encrypted and only trusts this computer's certificate. CoursePilot needs to be running here; the first time on Windows you'll be asked to allow network access — allow it on private networks.",
+      "toggle": "Let devices on the same Wi‑Fi play videos stored on this computer",
+      "runningAt": "On · {{address}}",
+      "noNetwork": "On, but not connected to a network right now",
+      "mobileHint": "Turn on \"Play over local network\" under Settings → Sync on your computer. Then, when this device is on the same Wi‑Fi, videos whose files are only on the computer play straight from it without downloading."
+    },
     "remoteSync": {
       "connectionGroup": "Cloud drive",
       "connectionHint": "Sync your study data between computer and phone through your own WebDAV drive. Use the same drive and folder on every device. Synced: courses and folders, video entries, notes (with images), clips, review cards, study history, playback progress, plus transcripts and AI-generated content (chapters, summaries, quizzes, mind maps, highlights, concepts). Video files have their own switch below.",
@@ -2322,6 +2330,9 @@
     "checking": "Checking the drive",
     "download": "Download from drive ({{size}})",
     "downloading": "Downloading",
-    "progress": "{{received}} / {{total}}"
+    "progress": "{{received}} / {{total}}",
+    "lanChecking": "Looking for a computer on your network that has this video…",
+    "lanHint": "If a computer has \"Play over local network\" turned on and is on the same Wi‑Fi as this device, you can play directly without downloading.",
+    "lanRetry": "Search the local network again"
   }
 }

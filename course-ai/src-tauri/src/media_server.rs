@@ -9,14 +9,34 @@
 //! 来提供视频，`<video>` 指向 http://127.0.0.1:port/...，绕开 asset 协议。
 //!
 //! 安全：只服务显式注册过的文件（video_id → 路径），不暴露任意路径读取。
+//!
+//! 本机没有文件、但同一个局域网里的电脑上有（lan_share.rs）：注册的是那台电脑的地址，
+//! 这里把 `<video>` 的 Range 请求原样转过去。播放器永远只连 127.0.0.1，不用放宽 CSP，
+//! 访问电脑用的口令和证书校验也都留在 Rust 这边。
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::TcpListener;
 
-type Registry = Arc<Mutex<HashMap<String, PathBuf>>>;
+/// 一个视频从哪来：本机文件，或局域网里另一台设备。
+#[derive(Clone)]
+pub enum Source {
+    File(PathBuf),
+    Remote(RemoteSource),
+}
+
+#[derive(Clone)]
+pub struct RemoteSource {
+    /// 那台设备上这个视频的完整地址（https://192.168.1.5:47321/v/<id>）。
+    pub url: String,
+    pub token: String,
+    /// 钉住了那台设备证书的客户端。
+    pub client: reqwest::Client,
+}
+
+type Registry = Arc<Mutex<HashMap<String, Source>>>;
 
 #[derive(Clone)]
 pub struct MediaServer {
@@ -26,7 +46,11 @@ pub struct MediaServer {
 
 impl MediaServer {
     pub fn register(&self, id: &str, path: PathBuf) {
-        self.registry.lock().unwrap().insert(id.to_string(), path);
+        self.registry.lock().unwrap().insert(id.to_string(), Source::File(path));
+    }
+
+    pub fn register_remote(&self, id: &str, source: RemoteSource) {
+        self.registry.lock().unwrap().insert(id.to_string(), Source::Remote(source));
     }
 
     pub fn url(&self, id: &str) -> String {
@@ -66,14 +90,23 @@ pub async fn start() -> std::io::Result<MediaServer> {
     Ok(server)
 }
 
-async fn handle(mut stream: TcpStream, registry: Registry) -> std::io::Result<()> {
-    // 读取请求头（到 \r\n\r\n 为止；头部很小）。
+/// 一个请求的头部里我们关心的部分。
+pub(crate) struct RequestHead {
+    pub method: String,
+    pub target: String,
+    pub range: Option<String>,
+    pub host: Option<String>,
+    pub authorization: Option<String>,
+}
+
+/// 读请求头（到 \r\n\r\n 为止；头部很小，超过 16 KB 就不读了）。连接没发东西就关了返回 None。
+pub(crate) async fn read_head<S: AsyncRead + Unpin>(stream: &mut S) -> std::io::Result<Option<RequestHead>> {
     let mut buf = Vec::new();
     let mut tmp = [0_u8; 1024];
     loop {
         let n = stream.read(&mut tmp).await?;
         if n == 0 {
-            return Ok(());
+            return Ok(None);
         }
         buf.extend_from_slice(&tmp[..n]);
         if buf.windows(4).any(|w| w == b"\r\n\r\n") || buf.len() > 16384 {
@@ -82,53 +115,72 @@ async fn handle(mut stream: TcpStream, registry: Registry) -> std::io::Result<()
     }
     let head = String::from_utf8_lossy(&buf);
     let mut lines = head.lines();
-    let request_line = lines.next().unwrap_or("");
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next().unwrap_or("");
-    let target = parts.next().unwrap_or("");
-    let mut range_header: Option<String> = None;
-    let mut host_header: Option<String> = None;
+    let mut parts = lines.next().unwrap_or("").split_whitespace();
+    let mut request = RequestHead {
+        method: parts.next().unwrap_or("").to_string(),
+        target: parts.next().unwrap_or("").to_string(),
+        range: None,
+        host: None,
+        authorization: None,
+    };
     for line in lines {
         if let Some(value) = strip_prefix_ci(line, "range:") {
-            range_header = Some(value.trim().to_string());
+            request.range = Some(value.trim().to_string());
         } else if let Some(value) = strip_prefix_ci(line, "host:") {
-            host_header = Some(value.trim().to_string());
+            request.host = Some(value.trim().to_string());
+        } else if let Some(value) = strip_prefix_ci(line, "authorization:") {
+            request.authorization = Some(value.trim().to_string());
         }
     }
+    Ok(Some(request))
+}
+
+pub(crate) async fn respond_empty<S: AsyncWrite + Unpin>(stream: &mut S, status: &str) {
+    let _ = stream
+        .write_all(format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes())
+        .await;
+}
+
+async fn handle<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, registry: Registry) -> std::io::Result<()> {
+    let Some(request) = read_head(&mut stream).await? else { return Ok(()) };
 
     // 只认发往本机地址的请求。挡的是 DNS 重绑定：别的网页把自己的域名解析到 127.0.0.1，
     // 浏览器会把这个服务当成「同源」，就能用 fetch 读走视频。那时请求的 Host 头是对方的域名。
-    if !host_is_loopback(host_header.as_deref()) {
-        let _ = stream
-            .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-            .await;
+    if !host_is_loopback(request.host.as_deref()) {
+        respond_empty(&mut stream, "403 Forbidden").await;
         return Ok(());
     }
 
     // URL 上可能带 ?v=…（文件换了要换 URL 才会重新加载），查询串不参与 id 匹配。
-    let target = target.split('?').next().unwrap_or(target);
+    let target = request.target.split('?').next().unwrap_or(&request.target);
     let id = target.strip_prefix("/m/").unwrap_or("");
-    let path = registry.lock().unwrap().get(id).cloned();
-    let Some(path) = path else {
-        let _ = stream
-            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-            .await;
-        return Ok(());
-    };
+    let source = registry.lock().unwrap().get(id).cloned();
+    match source {
+        Some(Source::File(path)) => serve_file(&mut stream, &path, &request.method, request.range.as_deref()).await,
+        Some(Source::Remote(remote)) => proxy(&mut stream, &remote, &request.method, request.range.as_deref()).await,
+        None => {
+            respond_empty(&mut stream, "404 Not Found").await;
+            Ok(())
+        }
+    }
+}
 
-    let mut file = match tokio::fs::File::open(&path).await {
+/// 回一个文件（支持 Range、HEAD）。本机媒体服务和局域网共享都用它。
+pub(crate) async fn serve_file<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    path: &Path,
+    method: &str,
+    range_header: Option<&str>,
+) -> std::io::Result<()> {
+    let mut file = match tokio::fs::File::open(path).await {
         Ok(file) => file,
         Err(_) => {
-            let _ = stream
-                .write_all(
-                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                )
-                .await;
+            respond_empty(stream, "404 Not Found").await;
             return Ok(());
         }
     };
     let total = file.metadata().await?.len();
-    let (start, end) = parse_range(range_header.as_deref(), total);
+    let (start, end) = parse_range(range_header, total);
     let len = end + 1 - start;
     let partial = range_header.is_some();
     let status = if partial {
@@ -145,7 +197,7 @@ async fn handle(mut stream: TcpStream, registry: Registry) -> std::io::Result<()
          Cache-Control: no-store\r\n\
          Access-Control-Allow-Origin: *\r\n\
          Connection: close\r\n",
-        ct = content_type(&path),
+        ct = content_type(path),
     );
     if partial {
         header.push_str(&format!("Content-Range: bytes {start}-{end}/{total}\r\n"));
@@ -172,6 +224,53 @@ async fn handle(mut stream: TcpStream, registry: Registry) -> std::io::Result<()
             break; // 客户端断开（seek 会断流），正常。
         }
         remaining -= n as u64;
+    }
+    let _ = stream.flush().await;
+    Ok(())
+}
+
+/// 把 `<video>` 的请求转给局域网里的那台设备，回应原样（状态、长度、Range）转回来。
+async fn proxy<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    remote: &RemoteSource,
+    method: &str,
+    range_header: Option<&str>,
+) -> std::io::Result<()> {
+    let head = method.eq_ignore_ascii_case("HEAD");
+    let method = if head { reqwest::Method::HEAD } else { reqwest::Method::GET };
+    let mut request = remote.client.request(method, &remote.url).bearer_auth(&remote.token);
+    if let Some(range) = range_header {
+        request = request.header(reqwest::header::RANGE, range);
+    }
+    let mut response = match request.send().await {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::warn!(%error, "局域网里的设备连不上了");
+            respond_empty(stream, "502 Bad Gateway").await;
+            return Ok(());
+        }
+    };
+    let status = response.status();
+    let mut header = format!(
+        "HTTP/1.1 {} {}\r\nAccept-Ranges: bytes\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n",
+        status.as_u16(),
+        status.canonical_reason().unwrap_or(""),
+    );
+    for name in [reqwest::header::CONTENT_TYPE, reqwest::header::CONTENT_LENGTH, reqwest::header::CONTENT_RANGE] {
+        if let Some(value) = response.headers().get(&name).and_then(|value| value.to_str().ok()) {
+            header.push_str(&format!("{name}: {value}\r\n"));
+        }
+    }
+    header.push_str("\r\n");
+    stream.write_all(header.as_bytes()).await?;
+    if head {
+        let _ = stream.flush().await;
+        return Ok(());
+    }
+    while let Ok(Some(chunk)) = response.chunk().await {
+        if stream.write_all(&chunk).await.is_err() {
+            break; // 播放器换了位置、断开了这条：正常。
+        }
     }
     let _ = stream.flush().await;
     Ok(())
@@ -215,7 +314,7 @@ pub fn parse_range(header: Option<&str>, total: u64) -> (u64, u64) {
     }
 }
 
-fn content_type(path: &Path) -> &'static str {
+pub(crate) fn content_type(path: &Path) -> &'static str {
     match path
         .extension()
         .and_then(|e| e.to_str())

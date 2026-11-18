@@ -58,6 +58,14 @@ export function VideoWorkbench({
     // 从别的设备同步过来、本机还没有文件：不去要播放地址，舞台上给「从网盘下载」。
     enabled: hasLocalFile,
   });
+  // 本机没有文件：先在局域网里找开着「局域网直连播放」的电脑，找到了直接串流，不用下载。
+  const lanStream = useQuery({
+    queryKey: qk.mediaUrl.lan(video.id),
+    queryFn: () => ipc.lanShare.streamUrl(video.id),
+    enabled: !hasLocalFile,
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
   // 本集在课程中的位置（从 1 起）；队列打开的跨课程视频不在当前列表里时为 0，不显示。
   const videoPosition = courseVideos.findIndex((item) => item.id === video.id) + 1;
   const backLabel = backToConceptName
@@ -143,7 +151,22 @@ export function VideoWorkbench({
             )}
             <div className="ca-stage">
               {!hasLocalFile ? (
-                <RemoteMediaStage video={video} />
+                lanStream.data ? (
+                  <VideoPlayer
+                    src={lanStream.data}
+                    videoId={video.id}
+                    courseId={video.course_id}
+                    immersive={isIOS()}
+                    onFullscreenChange={onFullscreenChange}
+                    onTranscoded={() => lanStream.refetch()}
+                  />
+                ) : (
+                  <RemoteMediaStage
+                    video={video}
+                    lanChecking={lanStream.isFetching}
+                    onRetryLan={() => void lanStream.refetch()}
+                  />
+                )
               ) : mediaSrcError ? (
                 <div className="flex h-full items-center justify-center bg-black p-4">
                   <ErrorNote

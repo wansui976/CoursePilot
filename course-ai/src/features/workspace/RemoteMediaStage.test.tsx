@@ -14,11 +14,11 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(()
 
 const video = { id: "v1", course_id: "c1", title: "01 概括", file_path: "" } as unknown as Video;
 
-function renderStage() {
+function renderStage(props: { lanChecking?: boolean; onRetryLan?: () => void } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <RemoteMediaStage video={video} />
+      <RemoteMediaStage video={video} {...props} />
     </QueryClientProvider>,
   );
 }
@@ -48,5 +48,19 @@ describe("RemoteMediaStage", () => {
     mockIpc.remoteSync.mediaSize.mockRejectedValue(new Error("还没设置多设备同步"));
     renderStage();
     expect(await screen.findByText(/连上同一个网盘/)).toBeInTheDocument();
+  });
+
+  it("局域网里正在找电脑时显示进度，没找到时可以再找一次", async () => {
+    mockIpc.remoteSync.mediaSize.mockResolvedValue(null);
+    const retry = vi.fn();
+    const { rerender } = renderStage({ lanChecking: true, onRetryLan: retry });
+    expect(await screen.findByText("正在局域网里找有这个视频的电脑…")).toBeInTheDocument();
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <RemoteMediaStage video={video} lanChecking={false} onRetryLan={retry} />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "在局域网里再找一次" }));
+    expect(retry).toHaveBeenCalled();
   });
 });

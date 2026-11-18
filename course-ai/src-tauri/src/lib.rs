@@ -8,6 +8,7 @@ pub mod error;
 pub mod export;
 pub mod jobs;
 pub mod keep_alive;
+pub mod lan_share;
 pub mod llm;
 pub mod media_server;
 pub mod mobile_files;
@@ -69,6 +70,7 @@ use crate::commands::remote_sync::{
     cmd_remote_sync_status, cmd_remote_sync_test, cmd_remote_sync_set_upload_media,
     cmd_remote_sync_media_size, cmd_remote_sync_download_video, cmd_remote_sync_retire_device,
 };
+use crate::commands::lan_share::{cmd_lan_share_set_enabled, cmd_lan_share_status, cmd_lan_stream_url};
 use crate::commands::semantic::{
     cmd_semantic_delete_model, cmd_semantic_download_model, cmd_semantic_rebuild, cmd_semantic_resume,
     cmd_semantic_save, cmd_semantic_status, cmd_semantic_test,
@@ -257,6 +259,15 @@ pub fn run() {
                     .await
                     .expect("media server start");
                 handle.manage(media);
+                // 局域网直连播放：上次开着的话接着开（只有电脑上有）。
+                if crate::lan_share::supported() && crate::lan_share::is_enabled(&db).await {
+                    let lan_db = db.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(error) = crate::lan_share::start(lan_db).await {
+                            tracing::warn!(%error, "局域网直连播放没能打开");
+                        }
+                    });
+                }
                 // 窗口要等 setup 跑完才出现，慢的善后放到后台，别拖慢启动。
                 // 启动快照用 VACUUM INTO，与并发写入互不影响。
                 let owned_media_roots =
@@ -463,6 +474,9 @@ pub fn run() {
             cmd_remote_sync_media_size,
             cmd_remote_sync_download_video,
             cmd_remote_sync_retire_device,
+            cmd_lan_share_status,
+            cmd_lan_share_set_enabled,
+            cmd_lan_stream_url,
             cmd_analyze_course_concepts,
             cmd_cancel_course_analysis,
             cmd_list_course_concepts,

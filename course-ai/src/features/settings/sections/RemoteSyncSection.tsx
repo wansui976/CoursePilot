@@ -9,6 +9,7 @@ import { Switch } from "@/ui/switch";
 import { ipc, type RemoteSyncMediaState, type RemoteSyncRunState, type RemoteSyncStatus } from "@/lib/ipc";
 import { formatRelativeTime } from "@/lib/time";
 import { FIELD, Group, Row, SavedBadge, Select, StackRow } from "@/features/settings/primitives";
+import { LanShareGroup } from "./LanShareGroup";
 
 /** 常见的 WebDAV 服务。选了就把地址填好；自定义时自己填。 */
 const PROVIDERS = [
@@ -318,6 +319,8 @@ export function RemoteSyncSection() {
           <ErrorNote className="mx-4 mb-3" error={status.media.lastError} />
         )}
       </Group>
+
+      {status.enabled && <LanShareGroup />}
 
       <Group header={t("settings.remoteSync.devicesGroup")}>
         <Row label={status.deviceName} status={t("settings.remoteSync.thisDevice")}>

@@ -499,6 +499,17 @@ export type RemoteSyncMediaState = {
   lastError: string | null;
 };
 
+/** 局域网直连播放（只有电脑上能开）。 */
+export type LanShareStatus = {
+  supported: boolean;
+  enabled: boolean;
+  running: boolean;
+  port: number | null;
+  /** 这台电脑在局域网里的地址（开着时才有）。 */
+  addresses: string[];
+  error: string | null;
+};
+
 /** 从网盘下载视频的进度（`remote-sync:download` 事件）。 */
 export type RemoteSyncDownloadEvent = {
   videoId: string;
