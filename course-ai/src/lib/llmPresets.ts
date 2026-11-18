@@ -95,6 +95,30 @@ export const LLM_PRESETS: LlmPreset[] = [
     base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     model: "qwen3.5-plus",
   },
+  // 百炼 / 千问AI平台的 Token Plan（订阅套餐，Key 以 sk-sp- 开头）有自己的地址，按量的 Key
+  // 和地址在这里都用不了。这两个接口不提供模型列表，「获取模型」会给出官方文档里的已知
+  // 模型（含百炼托管的 DeepSeek）。
+  {
+    key: "bailian-token-plan",
+    name: "阿里云百炼 Token Plan",
+    kind: "openai",
+    base_url: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    model: "deepseek-v4.1-flash",
+  },
+  {
+    key: "qianwen",
+    name: "千问AI平台（qianwenai.com）",
+    kind: "openai",
+    base_url: "https://maas.qianwenaiapi.com/compatible-mode/v1",
+    model: "qwen3.8-flash",
+  },
+  {
+    key: "qianwen-token-plan",
+    name: "千问AI平台 Token Plan",
+    kind: "openai",
+    base_url: "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
+    model: "deepseek-v4.1-flash",
+  },
   {
     key: "siliconflow",
     name: "SiliconFlow",

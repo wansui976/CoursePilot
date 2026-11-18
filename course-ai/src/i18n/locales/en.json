@@ -1654,7 +1654,7 @@
     "profileName": "Profile name",
     "profileNamePlaceholder": "Name",
     "modelName": "Model name",
-    "modelPlaceholder": "Model name (e.g. gpt-5.4-mini / claude-sonnet-5-5)",
+    "modelPlaceholder": "Model name (you can type any, e.g. gpt-5.4-mini / deepseek-v4.1-flash)",
     "showKey": "Show API Key",
     "hideKey": "Hide API Key",
     "showLabel": "Show",

@@ -276,6 +276,9 @@ async fn write_cache(db: &Db, key: &str, cached: &CachedModels) -> AppResult<()>
 async fn fetch(profile: &LlmProfile, key: Option<&str>) -> AppResult<(Vec<Provided>, Option<String>)> {
     let http = client()?;
     let (mut models, note) = match profile.kind {
+        ProviderKind::Openai if is_aliyun(&profile.base_url) => {
+            with_aliyun_known_models(fetch_openai(&http, profile, key).await, &profile.base_url, key)?
+        }
         ProviderKind::Openai => (fetch_openai(&http, profile, key).await?, None),
         ProviderKind::Anthropic => (fetch_anthropic(&http, profile, key).await?, None),
         ProviderKind::Gemini => (fetch_gemini(&http, profile, key).await?, None),
@@ -285,6 +288,99 @@ async fn fetch(profile: &LlmProfile, key: Option<&str>) -> AppResult<(Vec<Provid
     models.sort_by(|a, b| a.id.cmp(&b.id));
     models.dedup_by(|a, b| a.id == b.id);
     Ok((models, note))
+}
+
+// ---------- 阿里云（百炼 / 千问AI平台）----------
+//
+// 它们的 OpenAI 兼容接口在「列模型」这件事上靠不住：按量的 /models 只列千问自家的模型，
+// 百炼上托管的 DeepSeek 不在里面；Token Plan（sk-sp- 开头的 Key）的接口干脆不提供 /models。
+// 于是用户明明有 DeepSeek 的额度，在下拉框里却找不到，以为不能用。
+// 这里按官方文档补上已知的模型；具体能调哪些以账号 / 套餐为准，模型名也一直可以手填。
+
+/// 百炼上能调的 DeepSeek 模型。来源：百炼「DeepSeek API 参考」与「Token Plan 个人版订阅与权益」
+/// （2026-11 核对）。不带日期后缀的 deepseek-v4-flash 只在 Token Plan 团队版和按量里有，也列上。
+const ALIYUN_HOSTED_MODELS: &[&str] = &[
+    "deepseek-v4.1-flash",
+    "deepseek-v4.1-flash-1017",
+    "deepseek-v4-pro",
+    "deepseek-v4-pro-0813",
+    "deepseek-v4-flash-0731",
+    "deepseek-v4-flash",
+];
+
+/// 接口不给列表时（Token Plan）再补上的千问模型（同一批官方文档里出现的）。
+const ALIYUN_QWEN_FALLBACK: &[&str] = &["qwen3.8-max", "qwen3.8-flash", "qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash"];
+
+/// 是不是阿里云的大模型接口：百炼（dashscope / maas.aliyuncs.com）或千问AI平台（qianwenaiapi.com）。
+fn is_aliyun(base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base_url.trim()) else { return false };
+    let Some(host) = url.host_str() else { return false };
+    let host = host.to_ascii_lowercase();
+    let under = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
+    under("dashscope.aliyuncs.com")
+        || under("dashscope-intl.aliyuncs.com")
+        || under("maas.aliyuncs.com")
+        || under("qianwenaiapi.com")
+}
+
+fn known_model(id: &str) -> Provided {
+    Provided {
+        id: id.to_string(),
+        display_name: None,
+        context: None,
+        max_output: None,
+        input: None,
+        output: None,
+        capabilities: None,
+    }
+}
+
+/// 把接口列出来的模型和已知模型合在一起，并说明补了什么。
+/// 接口报鉴权错误时照原样报（Key 不对不该被一份清单掩盖），别的失败（多半是没有 /models）
+/// 退回已知清单。
+fn with_aliyun_known_models(
+    listed: AppResult<Vec<Provided>>,
+    base_url: &str,
+    key: Option<&str>,
+) -> AppResult<(Vec<Provided>, Option<String>)> {
+    match listed {
+        Ok(mut models) => {
+            let missing: Vec<&str> = ALIYUN_HOSTED_MODELS
+                .iter()
+                .copied()
+                .filter(|id| !models.iter().any(|model| model.id == *id))
+                .collect();
+            if missing.is_empty() {
+                return Ok((models, None));
+            }
+            models.extend(missing.iter().map(|id| known_model(id)));
+            Ok((
+                models,
+                Some("阿里云的模型列表里没有百炼托管的 DeepSeek，已按官方文档补上；能不能调以你的账号或套餐为准。列表里没有的模型也可以直接输入模型名。".into()),
+            ))
+        }
+        Err(error) => {
+            let message = error.to_string();
+            if message.contains("鉴权失败") {
+                let token_plan_key = key.is_some_and(|key| key.trim().starts_with("sk-sp-"));
+                if token_plan_key && !base_url.contains("token-plan") {
+                    return Err(AppError::Config(
+                        "这是 Token Plan 的 Key（sk-sp- 开头），要配 Token Plan 专用地址：百炼是 https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1，千问AI平台是 https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1".into(),
+                    ));
+                }
+                return Err(error);
+            }
+            let models = ALIYUN_QWEN_FALLBACK
+                .iter()
+                .chain(ALIYUN_HOSTED_MODELS)
+                .map(|id| known_model(id))
+                .collect();
+            Ok((
+                models,
+                Some("这个接口不提供模型列表（Token Plan 就是这样），下面是官方文档里列出的模型；能不能调以你的套餐为准，也可以直接输入模型名。".into()),
+            ))
+        }
+    }
 }
 
 fn path_override(profile: &LlmProfile) -> Option<String> {
@@ -884,5 +980,50 @@ mod tests {
         };
         let resolved = resolve_for_listing(&local, None, false).unwrap();
         assert_eq!(resolved.base_url, "http://127.0.0.1:1234/v1");
+    }
+
+    #[test]
+    fn aliyun_endpoints_are_recognised() {
+        for url in [
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            "https://ws-123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            "https://maas.qianwenaiapi.com/compatible-mode/v1",
+            "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
+        ] {
+            assert!(is_aliyun(url), "{url}");
+        }
+        for url in ["https://api.deepseek.com", "https://evil.example/dashscope.aliyuncs.com", "https://aliyuncs.com.evil.example/v1", "not a url"] {
+            assert!(!is_aliyun(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn aliyun_listing_gets_hosted_deepseek_added_and_says_so() {
+        let (models, note) =
+            with_aliyun_known_models(Ok(vec![known_model("qwen3.8-flash"), known_model("deepseek-v4-pro")]), "https://dashscope.aliyuncs.com/compatible-mode/v1", None)
+                .unwrap();
+        let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
+        assert!(ids.contains(&"qwen3.8-flash") && ids.contains(&"deepseek-v4.1-flash"));
+        assert_eq!(ids.iter().filter(|id| **id == "deepseek-v4-pro").count(), 1, "已列出的不重复补");
+        assert!(note.unwrap().contains("DeepSeek"));
+    }
+
+    #[test]
+    fn token_plan_without_a_model_list_falls_back_to_the_documented_models() {
+        let missing = Err(http_error("OpenAI 兼容", reqwest::StatusCode::NOT_FOUND, "no such route"));
+        let (models, note) = with_aliyun_known_models(missing, "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1", Some("sk-sp-x")).unwrap();
+        assert!(models.iter().any(|model| model.id == "deepseek-v4.1-flash"));
+        assert!(models.iter().any(|model| model.id == "qwen3.8-max"));
+        assert!(note.unwrap().contains("直接输入模型名"));
+    }
+
+    #[test]
+    fn auth_errors_are_not_hidden_and_a_token_plan_key_on_the_wrong_address_is_explained() {
+        let denied = || Err(http_error("OpenAI 兼容", reqwest::StatusCode::UNAUTHORIZED, "invalid key"));
+        let error = with_aliyun_known_models(denied(), "https://dashscope.aliyuncs.com/compatible-mode/v1", Some("sk-sp-abc")).unwrap_err();
+        assert!(error.to_string().contains("token-plan"), "{error}");
+        let error = with_aliyun_known_models(denied(), "https://dashscope.aliyuncs.com/compatible-mode/v1", Some("sk-abc")).unwrap_err();
+        assert!(error.to_string().contains("鉴权失败"), "{error}");
     }
 }
