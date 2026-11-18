@@ -55,15 +55,21 @@ const BATCH_LIMIT: i64 = 100;
 const MAX_BATCHES_PER_RUN: usize = 50;
 /// 和服务器时钟允许的最大偏差。
 const MAX_CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
-/// 后台多久同步一轮。
-const INTERVAL: Duration = Duration::from_secs(180);
+/// 后台同步的间隔：有改动时 3 分钟一轮；连续没有改动就逐步放慢，最长 30 分钟。
+/// 本机一有改动（每分钟在本地看一眼出件箱，不发请求）就在半分钟内推出去，不等这个间隔。
+const MIN_INTERVAL: Duration = Duration::from_secs(180);
+const MAX_INTERVAL: Duration = Duration::from_secs(1800);
+const LOCAL_CHECK: Duration = Duration::from_secs(60);
+const LOCAL_DEBOUNCE: Duration = Duration::from_secs(30);
+/// 和服务器对时多久做一次（钟不会几分钟就歪）。
+const CLOCK_CHECK_EVERY: Duration = Duration::from_secs(3600);
 
 pub const STATUS_EVENT: &str = "remote-sync:status";
 pub const MEDIA_EVENT: &str = "remote-sync:media";
 pub const DOWNLOAD_EVENT: &str = "remote-sync:download";
 pub const SETTING_UPLOAD_MEDIA: &str = "remote_sync_upload_media";
 /// 视频上传多久检查一轮（数据同步成功后也会立刻检查）。
-const MEDIA_INTERVAL: Duration = Duration::from_secs(600);
+const MEDIA_INTERVAL: Duration = Duration::from_secs(1800);
 pub const APPLIED_EVENT: &str = "remote-sync:applied";
 
 #[derive(Debug, Clone)]
@@ -189,15 +195,45 @@ async fn check_clock(dav: &WebDav) -> AppResult<()> {
 
 /// 同步一轮。`spool_root` 是本地进件目录所在（应用数据目录下的 sync/），`video_root`
 /// 是同步过来的视频条目放数据目录的地方。
+/// 这次运行里对每个网盘做过的准备（建文件夹、对时、写设备信息）。空闲的一轮不必再做一遍：
+/// 坚果云这类服务按请求数限频，每轮少发几个请求，3 分钟一轮也不至于被限流。
+#[derive(Default)]
+struct Prepared {
+    dirs_ready: bool,
+    clock_checked: Option<std::time::Instant>,
+    device_info_written: bool,
+}
+
+fn prepared() -> &'static Mutex<std::collections::HashMap<String, Prepared>> {
+    static PREPARED: OnceLock<Mutex<std::collections::HashMap<String, Prepared>>> = OnceLock::new();
+    PREPARED.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn prepared_key(config: &RemoteConfig, device_id: &str) -> String {
+    format!("{}\0{}\0{}\0{device_id}", config.url, config.folder, config.user)
+}
+
 pub async fn run_once(db: &Db, config: &RemoteConfig, spool_root: &Path, video_root: &Path) -> AppResult<RunReport> {
     let dav = config.client()?;
-    check_clock(&dav).await?;
     let identity = identity::ensure_sync_identity(db).await?;
     let device_id = identity.device_id.clone();
     let own_dir = format!("{DEVICES_DIR}{device_id}/");
     let batches_dir = format!("{own_dir}batches/");
-    dav.ensure_root().await?;
-    dav.ensure_dir(&batches_dir).await?;
+    let key = prepared_key(config, &device_id);
+    let (clock_due, dirs_ready) = {
+        let mut map = prepared().lock().unwrap();
+        let entry = map.entry(key.clone()).or_default();
+        (entry.clock_checked.is_none_or(|at| at.elapsed() >= CLOCK_CHECK_EVERY), entry.dirs_ready)
+    };
+    if clock_due {
+        check_clock(&dav).await?;
+        prepared().lock().unwrap().entry(key.clone()).or_default().clock_checked = Some(std::time::Instant::now());
+    }
+    if !dirs_ready {
+        dav.ensure_root().await?;
+        dav.ensure_dir(&batches_dir).await?;
+        prepared().lock().unwrap().entry(key.clone()).or_default().dirs_ready = true;
+    }
 
     // 第一次开启：本机已有的数据全部排进出件箱（出件箱只记开启同步内核之后的改动）。
     if !identity.bootstrap_complete {
@@ -222,13 +258,18 @@ pub async fn run_once(db: &Db, config: &RemoteConfig, spool_root: &Path, video_r
     report.parked = applied.parked;
     report.pending = outbox::pending_count(db).await?;
 
-    let info = DeviceInfo {
-        device_id: device_id.clone(),
-        name: device_label(),
-        platform: platform_code().into(),
-        last_sync_at: chrono::Utc::now().timestamp_millis(),
-    };
-    dav.put(&format!("{own_dir}device.json"), serde_json::to_vec(&info)?).await?;
+    // 设备信息（名字、最近同步时间）只在推了新改动、或这次运行还没写过时更新。
+    let written = prepared().lock().unwrap().entry(key.clone()).or_default().device_info_written;
+    if report.pushed > 0 || !written {
+        let info = DeviceInfo {
+            device_id: device_id.clone(),
+            name: device_label(),
+            platform: platform_code().into(),
+            last_sync_at: chrono::Utc::now().timestamp_millis(),
+        };
+        dav.put(&format!("{own_dir}device.json"), serde_json::to_vec(&info)?).await?;
+        prepared().lock().unwrap().entry(key).or_default().device_info_written = true;
+    }
     Ok(report)
 }
 
@@ -315,10 +356,6 @@ async fn pull(db: &Db, dav: &WebDav, own_device: &str, incoming: &Path) -> AppRe
                 .bind(&device.name)
                 .fetch_optional(&db.pool)
                 .await?;
-        let info: Option<DeviceInfo> = match dav.get(&format!("{device_dir}device.json")).await {
-            Ok(bytes) => serde_json::from_slice(&bytes).ok(),
-            Err(_) => None,
-        };
         let mut batches: Vec<String> = dav
             .list(&format!("{device_dir}batches/"))
             .await?
@@ -329,6 +366,14 @@ async fn pull(db: &Db, dav: &WebDav, own_device: &str, incoming: &Path) -> AppRe
             .filter(|name| cursor.as_deref().is_none_or(|cursor| name.as_str() > cursor))
             .collect();
         batches.sort();
+        if batches.is_empty() {
+            // 这台设备没有新东西：不读它的设备信息，省一个请求。
+            continue;
+        }
+        let info: Option<DeviceInfo> = match dav.get(&format!("{device_dir}device.json")).await {
+            Ok(bytes) => serde_json::from_slice(&bytes).ok(),
+            Err(_) => None,
+        };
         let mut last = cursor.clone();
         for name in batches {
             let bytes = dav.get(&format!("{device_dir}batches/{name}")).await?;
@@ -574,14 +619,33 @@ pub fn init(app: tauri::AppHandle, db: Db) {
         engine.restore_state().await;
         // 启动后稍等一下再同步，别和启动时的其它工作抢。
         tokio::time::sleep(Duration::from_secs(8)).await;
+        let mut interval = MIN_INTERVAL;
         loop {
-            let _ = engine.run_if_enabled().await;
+            let busy = match engine.run_if_enabled().await {
+                Ok(Some(report)) => report.pushed > 0 || report.pulled > 0 || report.applied > 0,
+                // 没开同步、或者出错：照常放慢，别在出错时反复打服务器。
+                _ => false,
+            };
+            interval = next_interval(interval, busy);
+            // 这一轮之后出件箱里还剩多少（推失败、或者没开同步）：只有比这多了才算本机有新改动，
+            // 免得断网时每分半钟就去撞一次服务器。
+            let baseline = outbox::pending_count(&engine.db).await.unwrap_or(0);
             tokio::select! {
-                _ = engine.wake.notified() => {}
-                _ = tokio::time::sleep(INTERVAL) => {}
+                _ = engine.wake.notified() => interval = MIN_INTERVAL,
+                _ = tokio::time::sleep(interval) => {}
+                _ = engine.local_change(baseline) => interval = MIN_INTERVAL,
             }
         }
     });
+}
+
+/// 下一轮等多久：这一轮有东西进出就回到最短间隔，否则翻倍，封顶 30 分钟。
+fn next_interval(current: Duration, busy: bool) -> Duration {
+    if busy {
+        MIN_INTERVAL
+    } else {
+        (current * 2).min(MAX_INTERVAL)
+    }
 }
 
 /// 让后台尽快同步一轮（回到前台、刚改完设置）。
@@ -689,11 +753,23 @@ impl Engine {
         self.app.emit(STATUS_EVENT, snapshot).ok();
     }
 
-    async fn run_if_enabled(&self) -> AppResult<()> {
+    async fn run_if_enabled(&self) -> AppResult<Option<RunReport>> {
         if !is_enabled(&self.db).await? {
-            return Ok(());
+            return Ok(None);
         }
-        self.run().await.map(|_| ())
+        self.run().await.map(Some)
+    }
+
+    /// 等到本机有新的待上传改动（只查本地出件箱，不发网络请求），再等半分钟把连着的几下改动攒一起。
+    async fn local_change(&self, baseline: i64) {
+        loop {
+            tokio::time::sleep(LOCAL_CHECK).await;
+            let enabled = is_enabled(&self.db).await.unwrap_or(false);
+            if enabled && outbox::pending_count(&self.db).await.unwrap_or(0) > baseline {
+                tokio::time::sleep(LOCAL_DEBOUNCE).await;
+                return;
+            }
+        }
     }
 
     async fn run(&self) -> AppResult<RunReport> {
@@ -727,7 +803,10 @@ impl Engine {
                 if report.applied > 0 {
                     self.app.emit(APPLIED_EVENT, report.applied).ok();
                 }
-                self.media_wake.notify_one();
+                // 推了改动（可能有新导入的视频）才叫上传任务看一眼网盘；空闲的一轮不去列视频文件夹。
+                if report.pushed > 0 {
+                    self.media_wake.notify_one();
+                }
                 // 首次全量一轮传不完：接着传，不等下一个周期。
                 if report.pending > 0 && report.pushed > 0 {
                     self.wake.notify_one();
@@ -756,6 +835,8 @@ pub(crate) mod test_server {
         pub dirs: BTreeSet<String>,
         /// 服务器时钟相对真实时间的偏移（毫秒），用来测「时钟歪了」。
         pub clock_offset_ms: i64,
+        /// 收到的请求（方法 + 路径），用来数一轮同步发了几个请求。
+        pub requests: Vec<String>,
     }
 
     pub async fn start() -> (String, Arc<Mutex<Store>>) {
@@ -797,6 +878,7 @@ pub(crate) mod test_server {
                         .map(|url| url.path().to_string());
                     let (status, response_body) = {
                         let mut store = store.lock().unwrap();
+                        store.requests.push(format!("{method} {path}"));
                         if method == "MOVE" {
                             match (store.files.remove(&path), destination) {
                                 (Some(bytes), Some(to)) => {
@@ -1081,6 +1163,37 @@ mod tests {
         for chunk in &chunks {
             assert!(serde_json::to_vec(chunk).unwrap().len() <= BATCH_MAX_BYTES + 3 * 1024 * 1024 + 64);
         }
+    }
+
+    #[test]
+    fn idle_rounds_back_off_to_thirty_minutes_and_activity_resets_it() {
+        let mut interval = MIN_INTERVAL;
+        let mut seen = Vec::new();
+        for _ in 0..6 {
+            interval = next_interval(interval, false);
+            seen.push(interval.as_secs() / 60);
+        }
+        assert_eq!(seen, [6, 12, 24, 30, 30, 30]);
+        assert_eq!(next_interval(MAX_INTERVAL, true), MIN_INTERVAL);
+    }
+
+    #[tokio::test]
+    async fn an_idle_round_only_lists_the_drive() {
+        let (url, store) = test_server::start().await;
+        let config = config(&url);
+        let pc = Device::new("pc").await;
+        let phone = Device::new("phone").await;
+        crate::commands::courses::create_course(&pc.db, "a".into(), "/tmp".into()).await.unwrap();
+        pc.sync(&config).await.unwrap();
+        phone.sync(&config).await.unwrap();
+        pc.sync(&config).await.unwrap();
+
+        store.lock().unwrap().requests.clear();
+        let report = pc.sync(&config).await.unwrap();
+        assert_eq!((report.pushed, report.pulled), (0, 0));
+        let requests = store.lock().unwrap().requests.clone();
+        assert!(requests.iter().all(|request| request.starts_with("PROPFIND")), "{requests:?}");
+        assert_eq!(requests.len(), 2, "列设备 + 列另一台设备的批次：{requests:?}");
     }
 
     #[tokio::test]
