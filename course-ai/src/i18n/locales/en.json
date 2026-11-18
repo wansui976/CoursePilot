@@ -1040,7 +1040,7 @@
     },
     "remoteSync": {
       "connectionGroup": "Cloud drive",
-      "connectionHint": "Sync your study data between computer and phone through your own WebDAV drive. Use the same drive and folder on every device. Synced: courses and folders, video entries, notes (with images), clips, review cards, study history, playback progress. Not synced: video files, transcripts and AI-generated content — importing the same video file on another device links it to the synced entry automatically.",
+      "connectionHint": "Sync your study data between computer and phone through your own WebDAV drive. Use the same drive and folder on every device. Synced: courses and folders, video entries, notes (with images), clips, review cards, study history, playback progress, plus transcripts and AI-generated content (chapters, summaries, quizzes, mind maps, highlights, concepts). Video files are not synced.",
       "provider": "Service",
       "providers": {
         "jianguoyun": "Jianguoyun (Nutstore)",

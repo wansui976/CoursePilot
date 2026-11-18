@@ -121,13 +121,15 @@ fn is_supported(record_type: &str) -> bool {
             | "Card"
             | "StudyEvent"
             | "VideoProgress"
-    )
+    ) || crate::sync::content::is_content(record_type)
 }
 
 fn type_rank(record_type: &str) -> u8 {
     match record_type {
         "Course" => 0,
         "Folder" | "Video" => 1,
+        // 知识点的出处指向视频：排在其它内容后面，同一批里视频先落地。
+        crate::sync::content::COURSE_KNOWLEDGE => 3,
         _ => 2,
     }
 }
@@ -259,7 +261,18 @@ async fn apply_save(
         "StudyEvent" => save_event(tx, envelope).await,
         "NoteImage" => save_note_image(tx, envelope).await,
         "VideoProgress" => save_progress(tx, own_device, envelope).await,
+        other if crate::sync::content::is_content(other) => {
+            Ok(content_outcome(crate::sync::content::save(tx, envelope).await?))
+        }
         other => Err(AppError::Config(format!("unsupported sync record {other}"))),
+    }
+}
+
+fn content_outcome(outcome: crate::sync::content::ContentOutcome) -> Outcome {
+    match outcome {
+        crate::sync::content::ContentOutcome::Applied => Outcome::Applied,
+        crate::sync::content::ContentOutcome::Skipped => Outcome::Skipped,
+        crate::sync::content::ContentOutcome::Parked => Outcome::Parked,
     }
 }
 
@@ -274,6 +287,10 @@ async fn apply_delete(
 ) -> AppResult<Outcome> {
     let (table, id_column, local_stamp): (&str, &str, Option<i64>) =
         match envelope.record_type.as_str() {
+            // 生成内容整条后写胜，删除同样按戳比较。
+            other if crate::sync::content::is_content(other) => {
+                return Ok(content_outcome(crate::sync::content::delete(tx, envelope).await?));
+            }
             // 事件是不可变事实，任何删除都不接受。
             "StudyEvent" => return Ok(Outcome::Skipped),
             // 图片内容不可变、只随视频一起删；历史版本还可能引用它。

@@ -209,6 +209,9 @@ pub(crate) async fn payload_for(
     record_type: &str,
     record_id: &str,
 ) -> AppResult<Option<Value>> {
+    if crate::sync::content::is_content(record_type) {
+        return crate::sync::content::payload(tx, record_type, record_id).await;
+    }
     let payload = match record_type {
         "Course" => {
             type CourseSyncRow = (

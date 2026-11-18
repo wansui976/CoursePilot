@@ -42,6 +42,10 @@ pub const SECRET_PASSWORD: &str = "remote_sync_password";
 const SETTING_NEXT_SEQ: &str = "remote_sync_next_seq";
 const SETTING_LAST_SUCCESS: &str = "remote_sync_last_success";
 const SETTING_LAST_ERROR: &str = "remote_sync_last_error";
+/// 字幕和生成内容是后来才纳入同步的：已经开过同步的设备也要把这部分补推一次。
+const SETTING_CONTENT_SNAPSHOT: &str = "remote_sync_content_snapshot";
+/// 单个批次文件的大小上限。一份字幕带逐字时间能有一两 MB，别让一个批次大到几百 MB。
+const BATCH_MAX_BYTES: usize = 8 * 1024 * 1024;
 
 pub const DEFAULT_FOLDER: &str = "CoursePilot";
 const DEVICES_DIR: &str = "sync-v1/devices/";
@@ -197,6 +201,10 @@ pub async fn run_once(db: &Db, config: &RemoteConfig, spool_root: &Path, video_r
             .execute(&db.pool)
             .await?;
     }
+    if get_setting(db, SETTING_CONTENT_SNAPSHOT).await?.as_deref() != Some("1") {
+        crate::sync::content::enqueue_snapshot(db).await?;
+        set_setting(db, SETTING_CONTENT_SNAPSHOT, "1").await?;
+    }
 
     let mut report = RunReport::default();
     report.pushed = push(db, &dav, &batches_dir).await?;
@@ -235,6 +243,22 @@ async fn next_seq(db: &Db, dav: &WebDav, batches_dir: &str) -> AppResult<u64> {
     Ok(local.max(remote))
 }
 
+/// 按体积把一批变更切成几个文件：每个不超过 BATCH_MAX_BYTES（单条就超的自己一个文件）。
+fn split_by_size(envelopes: &[SyncEnvelope]) -> AppResult<Vec<Vec<SyncEnvelope>>> {
+    let mut chunks: Vec<Vec<SyncEnvelope>> = Vec::new();
+    let mut size = 0usize;
+    for envelope in envelopes {
+        let bytes = serde_json::to_vec(envelope)?.len() + 1;
+        if chunks.is_empty() || (size + bytes > BATCH_MAX_BYTES && !chunks.last().unwrap().is_empty()) {
+            chunks.push(Vec::new());
+            size = 0;
+        }
+        chunks.last_mut().unwrap().push(envelope.clone());
+        size += bytes;
+    }
+    Ok(chunks)
+}
+
 fn batch_name(seq: u64) -> String {
     format!("{seq:012}.json")
 }
@@ -250,25 +274,28 @@ async fn push(db: &Db, dav: &WebDav, batches_dir: &str) -> AppResult<usize> {
         if envelopes.is_empty() {
             break;
         }
-        let bytes = serde_json::to_vec(&envelopes)?;
-        if let Err(error) = dav.put(&format!("{batches_dir}{}", batch_name(seq)), bytes).await {
-            let message = error.to_string();
-            for envelope in &envelopes {
-                let _ = outbox::release_failed(db, &envelope.record_type, &envelope.record_id, &envelope.version, &message).await;
+        let chunks = split_by_size(&envelopes)?;
+        for (index, chunk) in chunks.iter().enumerate() {
+            if let Err(error) = dav.put(&format!("{batches_dir}{}", batch_name(seq)), serde_json::to_vec(chunk)?).await {
+                // 这一块和后面还没传的都放回出件箱；前面已经传上去的已经确认过了。
+                let message = error.to_string();
+                for envelope in chunks[index..].iter().flatten() {
+                    let _ = outbox::release_failed(db, &envelope.record_type, &envelope.record_id, &envelope.version, &message).await;
+                }
+                return Err(error);
             }
-            return Err(error);
-        }
-        seq += 1;
-        set_setting(db, SETTING_NEXT_SEQ, &seq.to_string()).await?;
-        for envelope in &envelopes {
-            let cleared =
-                outbox::acknowledge(db, &envelope.record_type, &envelope.record_id, &envelope.version, None).await?;
-            // 笔记要记下「和对端达成一致」时的内容，之后两边都改才能判成并发、保留双方。
-            if cleared && envelope.record_type == "Note" {
-                apply::record_acked_note_basis(db, &envelope.record_id, envelope.updated_at).await?;
+            seq += 1;
+            set_setting(db, SETTING_NEXT_SEQ, &seq.to_string()).await?;
+            for envelope in chunk {
+                let cleared =
+                    outbox::acknowledge(db, &envelope.record_type, &envelope.record_id, &envelope.version, None).await?;
+                // 笔记要记下「和对端达成一致」时的内容，之后两边都改才能判成并发、保留双方。
+                if cleared && envelope.record_type == "Note" {
+                    apply::record_acked_note_basis(db, &envelope.record_id, envelope.updated_at).await?;
+                }
             }
+            pushed += chunk.len();
         }
-        pushed += envelopes.len();
     }
     Ok(pushed)
 }
@@ -686,6 +713,88 @@ mod tests {
         assert_eq!((again.pushed, again.pulled), (0, 0), "{again:?}");
         let again = phone.sync(&config).await.unwrap();
         assert_eq!((again.pushed, again.pulled), (0, 0), "{again:?}");
+    }
+
+    #[tokio::test]
+    async fn transcripts_and_generated_content_follow_the_video_to_the_phone() {
+        let (url, _store) = test_server::start().await;
+        let config = config(&url);
+        let pc = Device::new("pc").await;
+        let phone = Device::new("phone").await;
+        let course = crate::commands::courses::create_course(&pc.db, "申论".into(), pc.dir.path().to_string_lossy().into()).await.unwrap();
+        let file = pc.dir.path().join("01.mp4");
+        std::fs::write(&file, b"x").unwrap();
+        let video = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None).await.unwrap();
+        let exec = |sql: &'static str| {
+            let db = pc.db.clone();
+            let id = video.id.clone();
+            async move { sqlx::query(sql).bind(id).execute(&db.pool).await.unwrap(); }
+        };
+        for i in 0..3 {
+            sqlx::query("INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text,words_json) VALUES (?,?,?,?,?,?)")
+                .bind(&video.id).bind(i).bind(i * 1000).bind(i * 1000 + 900).bind(format!("第{i}句")).bind(Some("[]"))
+                .execute(&pc.db.pool).await.unwrap();
+        }
+        exec("INSERT INTO summaries(video_id,content_md,generated_at) VALUES (?,'摘要 v1',1)").await;
+        exec("INSERT INTO chapters(video_id,title,summary,start_ms,end_ms,order_index) VALUES (?,'开头','引入',0,900,0)").await;
+        exec("INSERT INTO quizzes(video_id,questions_json,generated_at) VALUES (?,'[1,2]',1)").await;
+        exec("INSERT INTO ai_artifact_sources(video_id,artifact,fingerprint,generated_at) VALUES (?,'summary','fp-1',1)").await;
+        sqlx::query("INSERT INTO concepts(id,course_id,name,created_at,explanation) VALUES ('k1',?,'概括题',1,'讲解')")
+            .bind(&course.id).execute(&pc.db.pool).await.unwrap();
+        sqlx::query("INSERT INTO concept_occurrences(concept_id,video_id,start_ms) VALUES ('k1',?,1000)")
+            .bind(&video.id).execute(&pc.db.pool).await.unwrap();
+
+        pc.sync(&config).await.unwrap();
+        let report = phone.sync(&config).await.unwrap();
+        assert_eq!(report.parked, 0, "{report:?}");
+
+        let segments: Vec<String> = sqlx::query_scalar("SELECT text FROM transcripts WHERE video_id=? ORDER BY segment_idx")
+            .bind(&video.id).fetch_all(&phone.db.pool).await.unwrap();
+        assert_eq!(segments, ["第0句", "第1句", "第2句"]);
+        let summary: String = sqlx::query_scalar("SELECT content_md FROM summaries WHERE video_id=?").bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        assert_eq!(summary, "摘要 v1");
+        let fingerprint: String = sqlx::query_scalar("SELECT fingerprint FROM ai_artifact_sources WHERE video_id=? AND artifact='summary'")
+            .bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        assert_eq!(fingerprint, "fp-1", "过期判断靠的指纹一起过来");
+        let chapters: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chapters WHERE video_id=?").bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        assert_eq!(chapters, 1);
+        let quiz: String = sqlx::query_scalar("SELECT questions_json FROM quizzes WHERE video_id=?").bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        assert_eq!(quiz, "[1,2]");
+        let occurrence: i64 = sqlx::query_scalar("SELECT start_ms FROM concept_occurrences WHERE concept_id='k1' AND video_id=?")
+            .bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        assert_eq!(occurrence, 1000, "知识点 id 不变，出处指向同一个视频");
+        // 合并进来的内容不会再被当成本机改动发回去。
+        assert_eq!(crate::sync::outbox::pending_count(&phone.db).await.unwrap(), 0);
+
+        // 手机上重新生成摘要，回到电脑；电脑那边的字幕不受影响。
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        sqlx::query("UPDATE summaries SET content_md='摘要 v2', generated_at=2 WHERE video_id=?")
+            .bind(&video.id).execute(&phone.db.pool).await.unwrap();
+        phone.sync(&config).await.unwrap();
+        pc.sync(&config).await.unwrap();
+        let summary: String = sqlx::query_scalar("SELECT content_md FROM summaries WHERE video_id=?").bind(&video.id).fetch_one(&pc.db.pool).await.unwrap();
+        assert_eq!(summary, "摘要 v2");
+        let segments: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transcripts WHERE video_id=?").bind(&video.id).fetch_one(&pc.db.pool).await.unwrap();
+        assert_eq!(segments, 3);
+    }
+
+    #[test]
+    fn large_batches_are_split_into_files_under_the_size_limit() {
+        let big = "字".repeat(3 * 1024 * 1024 / 3);
+        let envelope = |id: &str| SyncEnvelope::new(
+            "Transcript".into(),
+            id.into(),
+            crate::sync::envelope::SyncOperation::Save,
+            crate::sync::envelope::SyncVersion { counter: 1, device: "d".into() },
+            1,
+            serde_json::json!({"segments": [[0, 0, 1, big]]}),
+        );
+        let chunks = split_by_size(&[envelope("a"), envelope("b"), envelope("c"), envelope("d")]).unwrap();
+        assert!(chunks.len() >= 2, "{}", chunks.len());
+        assert_eq!(chunks.iter().map(Vec::len).sum::<usize>(), 4);
+        for chunk in &chunks {
+            assert!(serde_json::to_vec(chunk).unwrap().len() <= BATCH_MAX_BYTES + 3 * 1024 * 1024 + 64);
+        }
     }
 
     #[tokio::test]
