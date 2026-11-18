@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ShellContext, type Shell } from "@/app/shell";
 import { Menu, MenuItem } from "./menu";
 
-const phoneShell = { isPhoneDevice: true } as unknown as Shell;
+const phoneShell = { isPhoneDevice: true, compactOverlays: true } as unknown as Shell;
 
 describe("Menu 在手机上呈现为底部弹层", () => {
   it("挂到 body，点菜单项不会触发调用方的「点外面收起」", () => {

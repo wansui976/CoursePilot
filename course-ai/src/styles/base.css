@@ -47,6 +47,14 @@ select:focus-visible {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 28%, transparent);
 }
 
+/* 菜单项的焦点用整行底色表示（和系统菜单一样），不画描边。菜单一打开就把焦点放在第一项上，
+   从笔记编辑器（可编辑区一直算键盘焦点）点开时第一项也会命中 :focus-visible，
+   描边就成了触屏上凭空出现的一个蓝框。 */
+.ca-menu-item:focus-visible {
+  outline: none;
+  background: var(--bg-sunken);
+}
+
 /* 提问输入框：外层药丸已用 focus-within 显示聚焦，内层 input 不再叠加主色焦点环/描边。 */
 .ca-ask-input:focus-visible {
   outline: none;

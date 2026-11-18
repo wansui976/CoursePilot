@@ -105,6 +105,21 @@
   flex: 0 0 auto;
 }
 
+/* 课程页的工具条（搜索 + 视图 + 知识点 + 找讲解 + 选择 + 导入）有 700 多宽，和标题并排要 1100 左右。
+   放不下时（iPad 横屏带侧栏、桌面窄窗口）原本是整块换到第二行、仍然靠右，搜索框和下面的
+   内容左缘对不上。放不下就干脆独占一行、从左边排起。 */
+.ca-course-topbar {
+  container: course-topbar / inline-size;
+}
+
+@container course-topbar (max-width: 1100px) {
+  .ca-course-topbar .tb-actions {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+}
+
 /* 现代滑条（iOS 风）：白色圆形滑块 + 阴影；已滑过段用强调色填充（--slider-fill
    由组件按当前值内联写入），未滑过段灰轨。深浅主题都保持白色滑块。 */
 .ca-slider {

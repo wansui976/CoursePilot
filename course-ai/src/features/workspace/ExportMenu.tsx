@@ -282,7 +282,7 @@ export function ExportMenu({
           role={msg.error ? "alert" : "status"}
           aria-live={msg.error ? "assertive" : "polite"}
           aria-atomic="true"
-          className={`absolute right-0 z-30 max-w-[min(320px,calc(100vw-1rem))] whitespace-normal break-words rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs shadow-[var(--shadow-pop)] ${popClass} ${
+          className={`absolute right-0 z-30 w-max max-w-[min(320px,calc(100vw-1rem))] whitespace-normal break-words rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs shadow-[var(--shadow-pop)] ${popClass} ${
             msg.error ? "text-[var(--status-err)]" : "text-[var(--status-ok)]"
           }`}
           title={msg.text}

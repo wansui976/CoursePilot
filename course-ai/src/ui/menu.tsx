@@ -75,7 +75,7 @@ export function Menu({
   // 叠放布局（手机）：菜单改成贴底的操作弹层，挂到 body 上，避免被卡片的 overflow 裁掉。
   // 调用方都按「点在菜单外」收起菜单（document 上的 pointerdown）；挂出去以后菜单不再是
   // 调用方容器的子孙，所以在菜单根上截住 pointerdown，点菜单项不会被当成点外面。
-  const sheet = Boolean(useOptionalShell()?.isPhoneDevice);
+  const sheet = Boolean(useOptionalShell()?.compactOverlays);
   const menu = (
     <div
       ref={menuRef}

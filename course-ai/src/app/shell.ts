@@ -19,6 +19,12 @@ export type KnowledgeReturnState = {
  */
 export interface Shell {
   isPhoneDevice: boolean;
+  /**
+   * 菜单、对话框改成贴底弹层：只在手机上（窄屏，或横屏矮到放不下浮层）。
+   * iPad 竖屏虽然也走底部 Tab（isPhoneDevice），但 800 多宽的屏上铺满整宽的弹层像放大的手机，
+   * 菜单贴着按钮弹、对话框居中更合适。
+   */
+  compactOverlays: boolean;
   shellWide: boolean;
   /** 桌面侧栏收起成只有图标的 rail：工作台在视频标题左边补一个返回。 */
   sidebarCollapsed: boolean;

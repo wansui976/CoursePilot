@@ -180,6 +180,8 @@ export function Home() {
   const shellWide = bucket === "wide" && !stackedPortrait;
   const tabletWide = tabletDevice && shellWide;
   const isPhoneDevice = !shellWide;
+  const compactOverlays =
+    isPhoneDevice && (bucket === "compact" || (typeof window !== "undefined" && window.innerHeight < 600));
   // 侧栏展开占 256px（导航与课程列表在同一列），收起后换成 56px 的图标 rail。
   // 宽度喂给工作台布局。
   const sidebarWidth = shellWide
@@ -604,6 +606,7 @@ export function Home() {
   };
   const shell: Shell = {
     isPhoneDevice,
+    compactOverlays,
     shellWide,
     sidebarCollapsed: !isPhoneDevice && sidebarIsCollapsed,
     workbenchAvailableWidth,

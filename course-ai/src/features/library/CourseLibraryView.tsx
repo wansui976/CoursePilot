@@ -1406,7 +1406,7 @@ export function CourseLibraryView({
         onTargetChange={setDropTarget}
       >
       <div className="ca-main-col">
-        <header className="ca-topbar">
+        <header className="ca-topbar ca-course-topbar">
           <div className="tb-lead">
             {isPhoneDevice && (
               <button

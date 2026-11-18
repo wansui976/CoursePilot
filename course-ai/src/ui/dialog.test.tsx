@@ -67,7 +67,7 @@ describe("Modal", () => {
 });
 
 describe("Modal 在手机上呈现为底部弹层", () => {
-  const phoneShell = { isPhoneDevice: true } as unknown as Shell;
+  const phoneShell = { isPhoneDevice: true, compactOverlays: true } as unknown as Shell;
 
   function renderSheet(locked: boolean, onOpenChange = vi.fn()) {
     render(

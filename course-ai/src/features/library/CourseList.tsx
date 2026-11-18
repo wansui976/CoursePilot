@@ -157,7 +157,7 @@ export function CourseList({
 
   const [menuFor, setMenuFor] = useState<string | null>(null);
   // 叠放布局（手机）用底部操作弹层，和应用里其它菜单一致。
-  const menuSheet = Boolean(useOptionalShell()?.isPhoneDevice);
+  const menuSheet = Boolean(useOptionalShell()?.compactOverlays);
   const [subscriptionsFor, setSubscriptionsFor] = useState<{ id: string; name: string } | null>(null);
   // 打开时记录触发按钮的屏幕坐标：菜单 portal 到 body 用 fixed 定位，
   // 不再被 `.ca-nav`（overflow-y:auto）滚动容器裁掉。

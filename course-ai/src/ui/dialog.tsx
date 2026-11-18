@@ -77,7 +77,7 @@ export function Modal({
   children: ReactNode;
 }) {
   const shell = useOptionalShell();
-  const sheet = presentation === "sheet" || (presentation === "auto" && Boolean(shell?.isPhoneDevice));
+  const sheet = presentation === "sheet" || (presentation === "auto" && Boolean(shell?.compactOverlays));
   const block = (event: Event) => {
     if (locked) event.preventDefault();
   };
