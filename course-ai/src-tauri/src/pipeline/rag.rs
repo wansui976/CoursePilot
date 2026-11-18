@@ -650,6 +650,77 @@ const NOT_COVERED_SYSTEM: &str = "这节课的字幕和课件里都没有讲到�
 请先用一句「视频里没有讲到这个内容。」开头，另起一段用你自己的知识尽量回答，\
 并在该段开头标注「（以下回答来自大模型，非视频内容）」；不要编造时间戳。";
 
+/// 带着整节讲稿提问时的系统提示。讲稿在 system 最前面（和产物生成共用的那段前缀），
+/// 这段指令跟在它后面；检索出的精确片段放在用户这一问里，不放进 system——
+/// system 一变，同一视频的追问就命不中缓存了。
+const LECTURE_ASK_SYSTEM: &str = "你是这节课的答疑助手。上面是这节课的完整讲稿\
+（很长的课给的是分段提要：每段要点加几句老师原话）。严格遵守：\
+1. 只根据讲稿和课件回答，可以把分散在不同时间的内容串起来讲；不要用你自己的知识补齐后混在一起讲。\
+2. 凡是来自课程的结论，都在该句话后面紧跟依据所在的 [mm:ss]，只用单个时间点，\
+   不要输出时间段或时间戳数组。用户这一问里如果附了「精确片段」，那里的时间更准，优先照抄；\
+   否则照抄讲稿行首的时间。\
+3. 标了 (板书) 的行是课件画面上认出来的文字，老师可能写了没念，同样算这节课讲过的内容；\
+   它是机器识别的，个别字符可能出错，明显不通时按上下文理解，不要照抄错字。\
+4. 这节课确实没讲到时，先用一句「视频里没有讲到这个内容。」开头，另起一段用你自己的知识尽量回答，\
+   并在该段开头标注「（以下回答来自大模型，非视频内容）」；这段不要编造时间戳。\
+5. 先给结论，再展开；不要复述问题，不要寒暄。";
+
+/// 这节课问答要不要带整节讲稿前缀。本机模型不带：免费，但两三万字的预填充在 CPU 上
+/// 要几十秒，小窗口还会被截断——检索那几段对它正合适。取前缀出错也只是退回检索。
+async fn lecture_prefix(db: &Db, provider: &Provider, model: &str, video_id: &str) -> Option<String> {
+    if provider.billing() == crate::usage_log::Billing::Local {
+        return None;
+    }
+    crate::pipeline::ai::ask_lecture_prefix(db, model, video_id)
+        .await
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, video_id, "读取问答用的讲稿前缀失败，退回检索");
+            None
+        })
+}
+
+/// 带讲稿前缀时的这一问：检索到的片段附在问题前面，供模型核对精确时间。
+fn lecture_question(retrieved: &Retrieved, query: &str) -> String {
+    if retrieved.is_empty() {
+        return query.to_string();
+    }
+    let mut blocks: Vec<String> = Vec::new();
+    if !retrieved.windows.is_empty() {
+        let joined = retrieved
+            .windows
+            .iter()
+            .map(|window| window.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n---\n");
+        blocks.push(format!(
+            "精确片段（按关键词从讲稿里检索出的原句，时间精确到几秒；段与段之间不连续）：\n{joined}"
+        ));
+    }
+    if !retrieved.slides.is_empty() {
+        let joined = retrieved
+            .slides
+            .iter()
+            .map(|slide| format!("[{}] 第 {} 页：{}", mmss(slide.start_ms), slide.page_no, slide.text))
+            .collect::<Vec<_>>()
+            .join("\n");
+        blocks.push(format!("相关课件页（时间是这页出现的时刻）：\n{joined}"));
+    }
+    format!("{}\n\n问题：{query}", blocks.join("\n\n"))
+}
+
+fn lecture_ask_request(
+    model: &str,
+    prefix: String,
+    history: &[ChatMessage],
+    retrieved: &Retrieved,
+    query: &str,
+) -> ChatRequest {
+    let mut messages = Vec::with_capacity(history.len() + 1);
+    messages.extend(history.iter().cloned());
+    messages.push(ChatMessage::user(lecture_question(retrieved, query)));
+    ask_request(model, LECTURE_ASK_SYSTEM, Some(prefix), messages)
+}
+
 // ---------------------------------------------------------------------------
 // 语义检索（按意思找）的补充。
 //
@@ -840,25 +911,25 @@ pub async fn answer(
 ) -> AppResult<RagAnswer> {
     let segments = list_segments(db, video_id).await?;
     let pages = list_slide_pages(db, video_id).await?;
-    let never = AtomicBool::new(false);
-    let mut retrieved = retrieve_or_expand(
-        provider,
-        chat_model,
-        &segments,
-        &pages,
-        query,
-        history,
-        &never,
-        &mut |_| {},
-    )
-    .await;
+    let prefix = lecture_prefix(db, provider, chat_model, video_id).await;
+    let mut retrieved = if prefix.is_some() {
+        // 有整节讲稿就不用「换个说法再搜」兜底：那一步多花一个来回，而模型已经看得到全文。
+        retrieve(&segments, &pages, query, history)
+    } else {
+        let never = AtomicBool::new(false);
+        retrieve_or_expand(provider, chat_model, &segments, &pages, query, history, &never, &mut |_| {}).await
+    };
     if !retrieved.is_empty() {
         let hits = semantic::search_or_skip(db, &[video_id.to_string()], query, SEMANTIC_EXTRA_WINDOWS * 2).await;
         augment_with_semantic(&mut retrieved, &segments, &hits);
     }
-    let messages = build_chat_messages(history, query);
-    let (system, context) = ask_context(&retrieved);
-    let req = ask_request(chat_model, system, context, messages);
+    let req = match prefix {
+        Some(prefix) => lecture_ask_request(chat_model, prefix, history, &retrieved, query),
+        None => {
+            let (system, context) = ask_context(&retrieved);
+            ask_request(chat_model, system, context, build_chat_messages(history, query))
+        }
+    };
     let answer = provider.complete(&req).await?.content;
 
     Ok(RagAnswer {
@@ -961,7 +1032,11 @@ pub async fn answer_stream(
     });
     let segments = list_segments(db, video_id).await?;
     let pages = list_slide_pages(db, video_id).await?;
-    let mut retrieved = {
+    let prefix = lecture_prefix(db, provider, chat_model, video_id).await;
+    let mut retrieved = if prefix.is_some() {
+        // 有整节讲稿就不用「换个说法再搜」兜底：那一步多花一个来回，而模型已经看得到全文。
+        retrieve(&segments, &pages, query, history)
+    } else {
         // 改写要多花一个来回，界面上不能干等着什么都不说。
         let mut notify = |note: ExpandNote| {
             on_event(AskEvent::Status {
@@ -994,9 +1069,13 @@ pub async fn answer_stream(
             citations: citations.clone(),
         });
     }
-    let messages = build_chat_messages(history, query);
-    let (system, context) = ask_context(&retrieved);
-    let req = ask_request(chat_model, system, context, messages);
+    let req = match prefix {
+        Some(prefix) => lecture_ask_request(chat_model, prefix, history, &retrieved, query),
+        None => {
+            let (system, context) = ask_context(&retrieved);
+            ask_request(chat_model, system, context, build_chat_messages(history, query))
+        }
+    };
     let raw = provider
         .complete_stream(&req, cancel, &mut |piece| match piece {
             StreamPiece::Content(d) => on_event(AskEvent::Token {
@@ -1958,6 +2037,56 @@ mod tests {
     }
 
     /// 一节讲梯度下降的课：老师说「局部极小值」，学生会问「为什么会卡住」。
+    #[tokio::test]
+    async fn with_the_whole_lecture_in_context_a_miss_costs_one_call_not_two() {
+        // 讲稿放得下就整节带上：关键词检索空手也不再「换个说法再搜」——那一步要多调一次模型，
+        // 而模型已经看得到全文。剧本只备一条答复，多调一次就会「剧本已用尽」。
+        let (db, vid, _d) = seed_gradient_lecture().await;
+        let provider = Provider::Scripted {
+            steps: std::sync::Mutex::new(vec![crate::llm::ChatResponse {
+                content: "因为陷入了局部极小值 [01:10]".into(),
+                tool_calls: Vec::new(),
+                usage: None,
+            }]),
+        };
+        let cancel = AtomicBool::new(false);
+        let mut events: Vec<AskEvent> = Vec::new();
+        let answer = answer_stream(&db, &provider, "m", &vid, "为什么会卡住", &[], &cancel, &mut |e| events.push(e))
+            .await
+            .unwrap();
+        assert_eq!(answer.answer, "因为陷入了局部极小值 [01:10]");
+        assert!(
+            !events.iter().any(|e| matches!(e, AskEvent::Status { text } if text.contains("换个说法"))),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn the_lecture_rides_in_front_of_the_system_and_snippets_ride_with_the_question() {
+        let retrieved = Retrieved {
+            windows: vec![Window {
+                score: 1.0,
+                start_ms: 70_000,
+                end_ms: 75_000,
+                text: "[01:10] 梯度下降会陷入局部极小值".into(),
+            }],
+            slides: Vec::new(),
+        };
+        let history = vec![ChatMessage::user("上一问"), ChatMessage::assistant("上一答")];
+        let req = lecture_ask_request("m", "讲稿前缀".into(), &history, &retrieved, "为什么会卡住");
+        // 讲稿走可缓存前缀，按任务变化的指令跟在后面；片段跟着这一问走，system 每问都一样。
+        assert_eq!(req.cacheable_context.as_deref(), Some("讲稿前缀"));
+        assert_eq!(req.system.as_deref(), Some(LECTURE_ASK_SYSTEM));
+        assert_eq!(req.messages.len(), 3);
+        let last = &req.messages.last().unwrap().content;
+        assert!(last.contains("[01:10] 梯度下降会陷入局部极小值"), "{last}");
+        assert!(last.ends_with("问题：为什么会卡住"), "{last}");
+        // 没检索到就只发问题本身，不挂一个空的「精确片段」标题。
+        let empty = Retrieved { windows: Vec::new(), slides: Vec::new() };
+        let bare = lecture_ask_request("m", "讲稿前缀".into(), &[], &empty, "讲了什么");
+        assert_eq!(bare.messages[0].content, "讲了什么");
+    }
+
     async fn seed_gradient_lecture() -> (Db, String, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db = Db::connect_and_migrate(&dir.path().join("t.db"))
@@ -2332,6 +2461,15 @@ mod tests {
     #[tokio::test]
     async fn a_reword_attempt_says_so_instead_of_silently_stalling() {
         let (db, vid, _d) = seed_gradient_lecture().await;
+        // 改写兜底只在没有整节讲稿前缀时走：讲稿超出预算、又没有缓存好的提要。
+        sqlx::query(
+            "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,99,900000,905000,?)",
+        )
+        .bind(&vid)
+        .bind("嗯".repeat(25_000))
+        .execute(&db.pool)
+        .await
+        .unwrap();
         let provider = Provider::Mock {
             canned: "局部极小值".into(),
         };

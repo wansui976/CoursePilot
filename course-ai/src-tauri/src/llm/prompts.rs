@@ -8,6 +8,22 @@ macro_rules! formula_rule {
     };
 }
 
+/// 一节课的讲稿作为请求最前面的共享前缀。
+///
+/// 摘要、章节、笔记、出题、脑图和这节课的问答都用它，而且必须**逐字节相同**：
+/// 服务商按前缀命中缓存，差一个字后面整段都要按全价重算。改这里的措辞会让所有
+/// 已热的缓存失效一次——不是不能改，但要知道代价。
+///
+/// 板书行与讲稿行的可信度不同，得让模型知道该信谁：定义/公式常常写在片子上，
+/// 老师念的时候会省略或口误；反过来 OCR 也可能认错字，明显不通时以讲稿为准。
+pub fn lecture_cacheable_context(transcript: &str) -> String {
+    format!(
+        "以下是课程视频的完整内容（每行格式 [mm:ss] 文本）。标了 (板书) 的行是课件页上\
+         认出来的文字，其余是老师讲的话。定义、公式、术语的写法以板书为准，\
+         理解、举例与推导以讲稿为准；板书文字可能有识别错漏，明显不通就以讲稿为准：\n{transcript}"
+    )
+}
+
 fn base(
     label: &'static str,
     model: &str,
@@ -18,13 +34,7 @@ fn base(
     ChatRequest {
         model: model.to_string(),
         system: Some(system.to_string()),
-        // 板书行与讲稿行的可信度不同，得让模型知道该信谁：定义/公式常常写在片子上，
-        // 老师念的时候会省略或口误；反过来 OCR 也可能认错字，明显不通时以讲稿为准。
-        cacheable_context: Some(format!(
-            "以下是课程视频的完整内容（每行格式 [mm:ss] 文本）。标了 (板书) 的行是课件页上\
-             认出来的文字，其余是老师讲的话。定义、公式、术语的写法以板书为准，\
-             理解、举例与推导以讲稿为准；板书文字可能有识别错漏，明显不通就以讲稿为准：\n{transcript}"
-        )),
+        cacheable_context: Some(lecture_cacheable_context(transcript)),
         messages: vec![ChatMessage::user(user)],
         temperature: 0.3,
         tools: Vec::new(),

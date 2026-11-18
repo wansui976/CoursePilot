@@ -393,6 +393,7 @@ async fn run_batch<'a, T: ToolBox>(
 fn forced_summary_request(
     model: &str,
     system: Option<&str>,
+    cacheable_context: Option<String>,
     messages: Vec<ChatMessage>,
 ) -> ChatRequest {
     let summary_system = match system {
@@ -402,7 +403,7 @@ fn forced_summary_request(
     ChatRequest {
         model: model.to_string(),
         system: Some(summary_system),
-        cacheable_context: None,
+        cacheable_context,
         messages,
         temperature: 0.2,
         // 空数组在 OpenAI 请求体里会被完全省略，兼容端点无法继续选择工具。
@@ -484,6 +485,22 @@ pub async fn run<T: ToolBox>(
     provider: &Provider,
     model: &str,
     system: Option<String>,
+    messages: Vec<ChatMessage>,
+    tools: &T,
+    cancel: &AtomicBool,
+    on_event: &mut (dyn FnMut(AgentEvent) + Send),
+) -> AppResult<AgentOutcome> {
+    run_with_prefix(provider, model, system, None, messages, tools, cancel, on_event).await
+}
+
+/// 同 [`run`]，但每一轮请求都在 system 最前面带上一段可缓存的前缀（如当前视频的讲稿）。
+/// 前缀每轮逐字节相同，第一轮之后都命中服务商的前缀缓存。
+#[allow(clippy::too_many_arguments)] // 在 run 的参数上多一个前缀，各有其义。
+pub async fn run_with_prefix<T: ToolBox>(
+    provider: &Provider,
+    model: &str,
+    system: Option<String>,
+    cacheable_context: Option<String>,
     mut messages: Vec<ChatMessage>,
     tools: &T,
     cancel: &AtomicBool,
@@ -504,7 +521,7 @@ pub async fn run<T: ToolBox>(
         let req = ChatRequest {
             model: model.to_string(),
             system: system.clone(),
-            cacheable_context: None,
+            cacheable_context: cacheable_context.clone(),
             messages: messages.clone(),
             temperature: 0.2,
             tools: specs.clone(),
@@ -601,7 +618,8 @@ pub async fn run<T: ToolBox>(
         on_event(AgentEvent::HitTurnLimit);
         let summary_turn = turns + 1;
         on_event(AgentEvent::TurnStarted(summary_turn));
-        let summary_req = forced_summary_request(model, system.as_deref(), messages.clone());
+        let summary_req =
+            forced_summary_request(model, system.as_deref(), cacheable_context.clone(), messages.clone());
         // 总结请求同样吃抖动重试：它是封顶后的最后一步，抖动把它打掉用户连兜底都没有。
         let summary = match complete_stream_with_retry(provider, &summary_req, cancel, on_event).await
         {
@@ -751,8 +769,11 @@ mod tests {
         let request = forced_summary_request(
             "m",
             Some("原系统提示"),
+            Some("讲稿前缀".into()),
             vec![ChatMessage::tool_result("c1", "检索结果")],
         );
+        // 收尾这一轮也要带着讲稿前缀：少了它，最后这次请求既命不中缓存、也看不到讲稿。
+        assert_eq!(request.cacheable_context.as_deref(), Some("讲稿前缀"));
 
         assert!(request.tools.is_empty());
         assert!(request

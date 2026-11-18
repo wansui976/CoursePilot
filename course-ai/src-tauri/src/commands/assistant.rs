@@ -191,6 +191,15 @@ fn context_line(context: &AssistantContext, names: &ContextNames) -> Option<Stri
     (!parts.is_empty()).then(|| format!("{CONTEXT_PREFIX}{}）", parts.join("，")))
 }
 
+/// 带了当前视频讲稿时，接在界面状态后面的一句说明。
+///
+/// 系统提示第 4 条要求「课程内容只依据工具读到的东西」；不说一声，模型会无视已经在
+/// 上下文里的讲稿，照旧先调工具去搜——白走一轮。说明放在这条上下文消息里而不是系统
+/// 提示里：系统提示要保持逐字节不变，才命得中缓存。
+const LECTURE_ATTACHED_NOTE: &str = "\n（system 开头附了当前视频的讲稿，和工具读到的同样算课程内容：\
+问这节课讲了什么、某个概念怎么讲的，直接据此回答，照抄行首的 [mm:ss]。讲稿是几十秒合并成一段的，\
+要精确到某句话的时间、看课件画面，或讲稿里找不到时，再用工具。）";
+
 /// 附图和课件页比对这一步在界面上显示成一次工具调用（它确实要花一两秒）。
 const MATCH_SLIDES_TOOL: &str = "match_slides";
 
@@ -611,16 +620,32 @@ pub async fn cmd_assistant_ask(
                 });
                 described
             };
-            if let Some(line) = context_message(context_line(&context, &names), slide_matches) {
+            // 选的是「当前视频」：带上这节课的讲稿（和笔记、出题生成时同一段前缀，直接命中
+            // 它们热好的缓存）。只取已有的：讲稿放不下又没有提要就不带，照旧靠工具检索。
+            let lecture_prefix = match &context.video_id {
+                Some(video_id) if provider.billing() != crate::usage_log::Billing::Local => {
+                    crate::pipeline::ai::ask_lecture_prefix(&db, &model, video_id)
+                        .await
+                        .unwrap_or_else(|error| {
+                            tracing::warn!(%error, "读取助手用的讲稿前缀失败，退回工具检索");
+                            None
+                        })
+                }
+                _ => None,
+            };
+            let line = context_line(&context, &names)
+                .map(|line| if lecture_prefix.is_some() { format!("{line}{LECTURE_ATTACHED_NOTE}") } else { line });
+            if let Some(line) = context_message(line, slide_matches) {
                 messages.push(ChatMessage::user(line));
             }
             messages.push(ChatMessage::user_with_images(&query, images));
 
             let tools = AssistantTools::new(&db, context);
-            let result = agent::run(
+            let result = agent::run_with_prefix(
                 &provider,
                 &model,
                 Some(system_prompt(socratic)),
+                lecture_prefix,
                 messages,
                 &tools,
                 &cancel,

@@ -779,6 +779,43 @@ pub async fn budgeted_context(
     })
 }
 
+/// 问答里讲稿前缀的上限（字符），约三小时讲座合并后的讲稿。
+///
+/// 产物生成按模型窗口给预算（大窗口模型上限 40 万字），那是一次性的；问答每问一次、
+/// 助手每转一轮都要带着它。前缀缓存命中时这点量几乎不花钱，可不是每家都缓存——
+/// 不缓存的端点上每轮按全价算，超长讲座就该退回提要或检索。
+const ASK_PREFIX_MAX_CHARS: usize = 60_000;
+
+/// 这节课问答要带的讲稿前缀：和摘要 / 笔记 / 出题生成时**逐字节相同**的那一段，
+/// 好让提问直接命中它们已经热好的前缀缓存。
+///
+/// **只取不造**：讲稿放得下就用全文；放不下就用产物生成时已经缓存好的提要；
+/// 都没有就返回 None，调用方退回纯检索。提问时绝不现场分块压缩——长课要好几分钟，
+/// 用户不能对着一个问题干等。
+pub async fn ask_lecture_prefix(db: &Db, model: &str, video_id: &str) -> AppResult<Option<String>> {
+    // 还没有文稿（没识别完、或识别失败）很正常，不是错误：没有前缀，照常走检索。
+    let full = match lecture_context(db, video_id).await {
+        Ok(full) => full,
+        Err(crate::error::AppError::NotFound(_)) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if full.trim().is_empty() {
+        return Ok(None);
+    }
+    let artifact_budget = context_budget_chars(model);
+    let ask_budget = artifact_budget.min(ASK_PREFIX_MAX_CHARS);
+    if full.chars().count() <= ask_budget {
+        return Ok(Some(crate::llm::prompts::lecture_cacheable_context(&full)));
+    }
+    // 提要按「讲稿指纹 + 模型 + 产物预算」缓存：换了模型、或字幕改过，都取不到，退回检索。
+    let fingerprint = context_fingerprint(&full);
+    let key = digest_cache_key(&fingerprint.0, model, artifact_budget);
+    Ok(cached_digest(db, video_id, &key)
+        .await?
+        .filter(|digest| digest.chars().count() <= ask_budget)
+        .map(|digest| crate::llm::prompts::lecture_cacheable_context(&digest)))
+}
+
 async fn cached_digest(db: &Db, video_id: &str, fingerprint: &str) -> AppResult<Option<String>> {
     let row: Option<(String, String)> =
         sqlx::query_as("SELECT fingerprint,content FROM transcript_digests WHERE video_id=?")
@@ -1440,6 +1477,62 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(input.context, full, "预算够大时整篇直送，不再压缩");
+    }
+
+    #[tokio::test]
+    async fn the_ask_prefix_is_byte_for_byte_the_one_the_notes_were_generated_with() {
+        // 问答要直接命中摘要 / 笔记 / 出题已经热好的前缀缓存，差一个字都不行。
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let full = lecture_context(&db, &vid).await.unwrap();
+        let prefix = ask_lecture_prefix(&db, "m", &vid).await.unwrap().unwrap();
+        let notes = crate::llm::prompts::notes_request("m", &full);
+        assert_eq!(Some(prefix), notes.cacheable_context);
+    }
+
+    #[tokio::test]
+    async fn a_long_lecture_rides_on_its_cached_digest_and_never_builds_one_at_question_time() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        seed_long_transcript(&db, &vid, 500).await;
+        // 没有缓存好的提要：退回纯检索，而不是对着一个问题现场分块压缩好几分钟。
+        assert!(ask_lecture_prefix(&db, "m", &vid).await.unwrap().is_none());
+        let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transcript_digests WHERE video_id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, 0, "提问不该顺手生成提要");
+
+        // 产物生成时压好了提要：问答就用它，前缀和产物用的一致。
+        let provider = Provider::Mock { canned: "要点：这一块讲了什么。".into() };
+        let input = budgeted_context(&db, &provider, "m", &vid, None).await.unwrap();
+        let prefix = ask_lecture_prefix(&db, "m", &vid).await.unwrap().unwrap();
+        assert_eq!(prefix, crate::llm::prompts::lecture_cacheable_context(&input.context));
+
+        // 换成窗口更大的模型：全文放得下就用全文，不拿另一个模型压的提要凑数。
+        let full = lecture_context(&db, &vid).await.unwrap();
+        assert_eq!(
+            ask_lecture_prefix(&db, "gpt-4o", &vid).await.unwrap(),
+            Some(crate::llm::prompts::lecture_cacheable_context(&full))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_huge_window_does_not_mean_every_question_carries_a_four_hour_lecture() {
+        // 产物生成时 deepseek-flash 的预算有 40 万字，整篇照发（一次性的）；问答每问都带，
+        // 有个更紧的上限，超过又没有提要就退回检索。
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        seed_long_transcript(&db, &vid, 1_000).await;
+        let full = lecture_context(&db, &vid).await.unwrap();
+        assert!(full.chars().count() > ASK_PREFIX_MAX_CHARS);
+        assert!(full.chars().count() <= context_budget_chars("deepseek-flash"));
+        assert!(ask_lecture_prefix(&db, "deepseek-flash", &vid).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_lecture_with_no_transcript_has_no_prefix() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        sqlx::query("DELETE FROM transcripts WHERE video_id=?").bind(&vid).execute(&db.pool).await.unwrap();
+        assert!(ask_lecture_prefix(&db, "m", &vid).await.unwrap().is_none());
     }
 
     #[tokio::test]
