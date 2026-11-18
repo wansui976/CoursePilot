@@ -237,4 +237,6 @@ export const remoteSync = {
   mediaSize: (videoId: string): Promise<number | null> => invoke("cmd_remote_sync_media_size", { videoId }),
   /** 下载到本机，返回文件路径（进度见 `remote-sync:download` 事件）。 */
   downloadVideo: (videoId: string): Promise<string> => invoke("cmd_remote_sync_download_video", { videoId }),
+  /** 移除网盘上的另一台设备：它的数据留着（折成一份底稿），只是不再列出。 */
+  retireDevice: (deviceId: string): Promise<void> => invoke("cmd_remote_sync_retire_device", { deviceId }),
 };

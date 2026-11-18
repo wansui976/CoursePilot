@@ -2,14 +2,18 @@
 //! 之间同步学习数据。iCloud 那条只覆盖苹果设备，这条不挑系统。
 //!
 //! 同步什么沿用同步内核：课程 / 文件夹 / 视频条目、笔记（含图）、片段、复习卡、学习记录、
-//! 播放进度。视频文件、字幕、AI 生成内容不同步——另一台设备上导入同一个视频文件时，
-//! 会按内容指纹挂到同步过来的那一条上。
+//! 播放进度，以及字幕和 AI 生成的内容（content.rs）。视频文件另走一条：打开了「上传视频文件」
+//! 的设备把文件分块传到 `sync-v1/media/`，别的设备打开没有文件的视频时下载（media.rs）。
+//!
+//! 批次会一直累积：攒够了就压缩成一份底稿，旧批次删掉（compact.rs）。
 //!
 //! 网盘里的布局（每台设备只写自己的文件夹，从不覆盖别人的，所以不会互相踩）：
 //!
 //! ```text
 //! <用户选的文件夹>/sync-v1/devices/<设备 id>/device.json          设备名、系统、最近同步时间
 //! <用户选的文件夹>/sync-v1/devices/<设备 id>/batches/000000000001.json  一批变更（信封数组）
+//! <用户选的文件夹>/sync-v1/devices/<设备 id>/batches/base-000000000250.json  底稿清单（见 compact.rs）
+//! <用户选的文件夹>/sync-v1/devices/<设备 id>/base/<内容哈希>.json      底稿：批次压缩后每条记录一份
 //! ```
 //!
 //! 一轮同步：
@@ -32,6 +36,7 @@ use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::sync::envelope::SyncEnvelope;
 use crate::sync::webdav::WebDav;
+use crate::sync::compact::{self, batch_name, batch_seq, Listing};
 use crate::sync::{apply, identity, outbox};
 
 pub const SETTING_ENABLED: &str = "remote_sync_enabled";
@@ -44,6 +49,9 @@ const SETTING_LAST_SUCCESS: &str = "remote_sync_last_success";
 const SETTING_LAST_ERROR: &str = "remote_sync_last_error";
 /// 字幕和生成内容是后来才纳入同步的：已经开过同步的设备也要把这部分补推一次。
 const SETTING_CONTENT_SNAPSHOT: &str = "remote_sync_content_snapshot";
+/// 自己的批次最近一次压缩到第几批；还有旧文件没删完时记一个「待清理」。
+const SETTING_BASE_UPTO: &str = "remote_sync_base_upto";
+const SETTING_TIDY_PENDING: &str = "remote_sync_tidy_pending";
 /// 单个批次文件的大小上限。一份字幕带逐字时间能有一两 MB，别让一个批次大到几百 MB。
 const BATCH_MAX_BYTES: usize = 8 * 1024 * 1024;
 
@@ -247,8 +255,9 @@ pub async fn run_once(db: &Db, config: &RemoteConfig, spool_root: &Path, video_r
         set_setting(db, SETTING_CONTENT_SNAPSHOT, "1").await?;
     }
 
+    let own_cache = compact::Cache { root: &spool_root.join("own") };
     let mut report = RunReport::default();
-    report.pushed = push(db, &dav, &batches_dir).await?;
+    report.pushed = push(db, &dav, &batches_dir, &own_cache).await?;
 
     let incoming = spool_root.join("incoming");
     std::fs::create_dir_all(&incoming)?;
@@ -257,6 +266,7 @@ pub async fn run_once(db: &Db, config: &RemoteConfig, spool_root: &Path, video_r
     report.applied = applied.applied;
     report.parked = applied.parked;
     report.pending = outbox::pending_count(db).await?;
+    compact_own(db, &dav, &own_dir, &own_cache).await;
 
     // 设备信息（名字、最近同步时间）只在推了新改动、或这次运行还没写过时更新。
     let written = prepared().lock().unwrap().entry(key.clone()).or_default().device_info_written;
@@ -275,18 +285,16 @@ pub async fn run_once(db: &Db, config: &RemoteConfig, spool_root: &Path, video_r
 
 /// 下一个批次序号。重装应用后本地计数归零，而别的设备按文件名记游标——新批次的名字必须
 /// 比网盘上已有的都大，否则会被当成读过的跳掉。所以取本地计数和网盘上已有最大序号 + 1 的较大者。
+/// 批次压缩之后旧批次删了，所以网盘上的最大序号还要算上底稿覆盖到哪。
+///
+/// 顺便：别的设备把这台「移除」了（留了标记），而这台其实还在用——摘掉标记，重新出现在列表里。
 async fn next_seq(db: &Db, dav: &WebDav, batches_dir: &str) -> AppResult<u64> {
     let local: u64 = get_setting(db, SETTING_NEXT_SEQ).await?.and_then(|value| value.parse().ok()).unwrap_or(1);
-    let remote = dav
-        .list(batches_dir)
-        .await?
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|entry| entry.name.strip_suffix(".json")?.parse::<u64>().ok())
-        .max()
-        .map(|max| max + 1)
-        .unwrap_or(1);
-    Ok(local.max(remote))
+    let listing = Listing::parse(&dav.list(batches_dir).await?.unwrap_or_default());
+    if listing.retired {
+        dav.delete(&format!("{batches_dir}{}", compact::RETIRED_MARKER)).await?;
+    }
+    Ok(local.max(listing.max_seq() + 1))
 }
 
 /// 按体积把一批变更切成几个文件：每个不超过 BATCH_MAX_BYTES（单条就超的自己一个文件）。
@@ -305,11 +313,7 @@ fn split_by_size(envelopes: &[SyncEnvelope]) -> AppResult<Vec<Vec<SyncEnvelope>>
     Ok(chunks)
 }
 
-fn batch_name(seq: u64) -> String {
-    format!("{seq:012}.json")
-}
-
-async fn push(db: &Db, dav: &WebDav, batches_dir: &str) -> AppResult<usize> {
+async fn push(db: &Db, dav: &WebDav, batches_dir: &str, cache: &compact::Cache<'_>) -> AppResult<usize> {
     if outbox::pending_count(db).await? == 0 {
         return Ok(0);
     }
@@ -322,7 +326,8 @@ async fn push(db: &Db, dav: &WebDav, batches_dir: &str) -> AppResult<usize> {
         }
         let chunks = split_by_size(&envelopes)?;
         for (index, chunk) in chunks.iter().enumerate() {
-            if let Err(error) = dav.put(&format!("{batches_dir}{}", batch_name(seq)), serde_json::to_vec(chunk)?).await {
+            let bytes = serde_json::to_vec(chunk)?;
+            if let Err(error) = dav.put(&format!("{batches_dir}{}", batch_name(seq)), bytes.clone()).await {
                 // 这一块和后面还没传的都放回出件箱；前面已经传上去的已经确认过了。
                 let message = error.to_string();
                 for envelope in chunks[index..].iter().flatten() {
@@ -330,6 +335,8 @@ async fn push(db: &Db, dav: &WebDav, batches_dir: &str) -> AppResult<usize> {
                 }
                 return Err(error);
             }
+            // 留一份本地副本：以后压缩自己的批次时不用再从网盘下载。留不下也不要紧。
+            let _ = cache.store_batch(&batch_name(seq), &bytes);
             seq += 1;
             set_setting(db, SETTING_NEXT_SEQ, &seq.to_string()).await?;
             for envelope in chunk {
@@ -351,32 +358,54 @@ async fn pull(db: &Db, dav: &WebDav, own_device: &str, incoming: &Path) -> AppRe
     let mut pulled = 0;
     for device in devices.iter().filter(|entry| entry.is_dir && entry.name != own_device) {
         let device_dir = format!("{DEVICES_DIR}{}/", device.name);
-        let cursor: Option<String> =
-            sqlx::query_scalar("SELECT last_batch FROM sync_remote_cursors WHERE device_id=?")
+        let cursor: Option<(String, bool)> =
+            sqlx::query_as("SELECT last_batch, retired<>0 FROM sync_remote_cursors WHERE device_id=?")
                 .bind(&device.name)
                 .fetch_optional(&db.pool)
                 .await?;
-        let mut batches: Vec<String> = dav
-            .list(&format!("{device_dir}batches/"))
-            .await?
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|entry| !entry.is_dir && entry.name.ends_with(".json"))
-            .map(|entry| entry.name)
-            .filter(|name| cursor.as_deref().is_none_or(|cursor| name.as_str() > cursor))
+        let listing = compact::list(dav, &device_dir).await?;
+        if let Some((_, retired)) = &cursor {
+            if *retired != listing.retired {
+                sqlx::query("UPDATE sync_remote_cursors SET retired=? WHERE device_id=?")
+                    .bind(listing.retired)
+                    .bind(&device.name)
+                    .execute(&db.pool)
+                    .await?;
+            }
+        }
+        let position = cursor.as_ref().and_then(|(name, _)| batch_seq(name)).unwrap_or(0);
+        // 游标落在底稿覆盖范围里、中间的批次又已经删了（新设备、或者很久没同步）：先读底稿。
+        let base = listing
+            .latest_manifest()
+            .filter(|(upto, _)| position < *upto && !listing.has_all_between(position, *upto))
+            .map(|(upto, name)| (upto, name.to_string()));
+        let pending: Vec<(u64, String)> = listing
+            .batches
+            .range(base.as_ref().map(|(upto, _)| *upto).unwrap_or(position) + 1..)
+            .map(|(seq, name)| (*seq, name.clone()))
             .collect();
-        batches.sort();
-        if batches.is_empty() {
+        if base.is_none() && pending.is_empty() {
             // 这台设备没有新东西：不读它的设备信息，省一个请求。
             continue;
         }
-        let info: Option<DeviceInfo> = match dav.get(&format!("{device_dir}device.json")).await {
-            Ok(bytes) => serde_json::from_slice(&bytes).ok(),
-            Err(_) => None,
+        let info: Option<DeviceInfo> = match dav.get_optional(&format!("{device_dir}device.json")).await {
+            Ok(Some(bytes)) => serde_json::from_slice(&bytes).ok(),
+            _ => None,
         };
-        let mut last = cursor.clone();
-        for name in batches {
-            let bytes = dav.get(&format!("{device_dir}batches/{name}")).await?;
+        if let Some((upto, manifest)) = base {
+            // 底稿的某一份不见了：那台设备正好在重新压缩。这一轮先跳过它，下一轮重新列目录。
+            let Some((_, parts)) = compact::read_base(dav, &device_dir, &manifest).await? else { continue };
+            for (part, envelopes) in parts.iter().enumerate() {
+                for (index, envelope) in envelopes.iter().enumerate() {
+                    write_incoming(incoming, &format!("remote-{}-base{upto:012}-{part}-{index}", device.name), envelope)?;
+                }
+                pulled += envelopes.len();
+            }
+            save_cursor(db, &device.name, &batch_name(upto), info.as_ref()).await?;
+        }
+        for (_, name) in pending {
+            // 读的时候被压缩删掉了：下一轮重新列目录，会改读底稿。
+            let Some(bytes) = dav.get_optional(&format!("{device_dir}batches/{name}")).await? else { break };
             // 读坏了（上传还没写完、文件损坏）：停在这里，游标不往前走，下一轮再读。
             let Ok(envelopes) = serde_json::from_slice::<Vec<SyncEnvelope>>(&bytes) else {
                 tracing::warn!(device = %device.name, batch = %name, "同步批次读不出来，下一轮再试");
@@ -386,17 +415,30 @@ async fn pull(db: &Db, dav: &WebDav, own_device: &str, incoming: &Path) -> AppRe
                 write_incoming(incoming, &format!("remote-{}-{}-{index}", device.name, name.trim_end_matches(".json")), envelope)?;
             }
             pulled += envelopes.len();
-            last = Some(name.clone());
             // 每读完一批就记游标：信封已经落进进件目录（持久的），断在哪都能续上。
             save_cursor(db, &device.name, &name, info.as_ref()).await?;
         }
-        if last == cursor {
-            if let Some(cursor) = cursor {
-                save_cursor(db, &device.name, &cursor, info.as_ref()).await?;
-            }
-        }
     }
     Ok(pulled)
+}
+
+/// 自己的批次攒够了就压缩一次；上次没删完的旧文件接着删。出错只记日志——压缩不影响这一轮同步本身。
+async fn compact_own(db: &Db, dav: &WebDav, own_dir: &str, cache: &compact::Cache<'_>) {
+    let setting = |key| async move { get_setting(db, key).await.ok().flatten().and_then(|value| value.parse::<u64>().ok()) };
+    let last_pushed = setting(SETTING_NEXT_SEQ).await.unwrap_or(1).saturating_sub(1);
+    let base_upto = setting(SETTING_BASE_UPTO).await.unwrap_or(0);
+    let tidy_pending = setting(SETTING_TIDY_PENDING).await.unwrap_or(0) > 0;
+    if last_pushed.saturating_sub(base_upto) < compact::COMPACT_AFTER && !tidy_pending {
+        return;
+    }
+    match compact::compact(dav, own_dir, Some(cache)).await {
+        Ok(outcome) => {
+            tracing::info!(?outcome, "压缩了网盘上的同步批次");
+            let _ = set_setting(db, SETTING_BASE_UPTO, &outcome.base_upto.max(base_upto).to_string()).await;
+            let _ = set_setting(db, SETTING_TIDY_PENDING, if outcome.remaining > 0 { "1" } else { "0" }).await;
+        }
+        Err(error) => tracing::warn!(%error, "压缩网盘上的同步批次失败，下一轮再试"),
+    }
 }
 
 fn write_incoming(dir: &Path, stem: &str, envelope: &SyncEnvelope) -> AppResult<()> {
@@ -425,9 +467,38 @@ async fn save_cursor(db: &Db, device_id: &str, batch: &str, info: Option<&Device
     Ok(())
 }
 
+/// 「移除」网盘上的另一台设备：把它的批次全部折进底稿（它写过的数据留着，新设备照样能拿到），
+/// 删掉它的设备信息，留一个标记让所有设备都不再列出它。那台设备要是其实还在用，
+/// 下次推送时会自己摘掉标记、重新出现。
+pub async fn retire_device(db: &Db, config: &RemoteConfig, device_id: &str) -> AppResult<()> {
+    let own = identity::ensure_sync_identity(db).await?.device_id;
+    if device_id == own {
+        return Err(AppError::Config("不能移除这台设备自己".into()));
+    }
+    if device_id.is_empty() || !device_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err(AppError::Config("设备 id 不对".into()));
+    }
+    let dav = config.client()?;
+    let device_dir = format!("{DEVICES_DIR}{device_id}/");
+    // 旧文件一次最多删一百个，删不完接着删（移除是用户点的，不必等下一轮）。
+    for _ in 0..20 {
+        if compact::compact(&dav, &device_dir, None).await?.remaining == 0 {
+            break;
+        }
+    }
+    let marker = serde_json::json!({ "retiredAt": chrono::Utc::now().timestamp_millis(), "by": own });
+    dav.put(&format!("{device_dir}batches/{}", compact::RETIRED_MARKER), serde_json::to_vec(&marker)?).await?;
+    dav.delete(&format!("{device_dir}device.json")).await?;
+    sqlx::query("UPDATE sync_remote_cursors SET retired=1 WHERE device_id=?")
+        .bind(device_id)
+        .execute(&db.pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn known_devices(db: &Db) -> AppResult<Vec<RemoteDevice>> {
     let rows: Vec<(String, Option<String>, Option<String>, i64)> = sqlx::query_as(
-        "SELECT device_id, device_name, platform, seen_at FROM sync_remote_cursors ORDER BY seen_at DESC",
+        "SELECT device_id, device_name, platform, seen_at FROM sync_remote_cursors WHERE retired=0 ORDER BY seen_at DESC",
     )
     .fetch_all(&db.pool)
     .await?;
@@ -482,7 +553,52 @@ pub async fn upload_pass(
             uploaded += 1;
         }
     }
+    if keep_going() {
+        if let Err(error) = collect_media_garbage(db, &dav, &present).await {
+            tracing::warn!(%error, "清理网盘上没人用的视频文件失败，下次再试");
+        }
+    }
     Ok(uploaded)
+}
+
+const SETTING_MEDIA_ORPHANS: &str = "remote_sync_media_orphans";
+/// 网盘上的视频文件连续多久没有任何视频条目引用才删（另一台设备刚上传、条目还没同步过来时别误删）。
+const MEDIA_ORPHAN_GRACE_MS: i64 = 7 * 24 * 3600 * 1000;
+
+/// 删掉网盘上没有任何视频条目（含回收站里的）再引用的视频文件。只在这台设备最近一小时内
+/// 同步成功过时做：本地库要是好几天没同步，就不知道别的设备新加了哪些视频。
+async fn collect_media_garbage(db: &Db, dav: &WebDav, present: &std::collections::HashSet<String>) -> AppResult<usize> {
+    let now = chrono::Utc::now().timestamp_millis();
+    let last_success: i64 = get_setting(db, SETTING_LAST_SUCCESS).await?.and_then(|value| value.parse().ok()).unwrap_or(0);
+    if now - last_success > 3600 * 1000 {
+        return Ok(0);
+    }
+    let referenced: std::collections::HashSet<String> =
+        sqlx::query_scalar("SELECT content_fingerprint FROM videos WHERE content_fingerprint IS NOT NULL AND content_fingerprint<>''")
+            .fetch_all(&db.pool)
+            .await?
+            .into_iter()
+            .collect();
+    let mut orphans: std::collections::BTreeMap<String, i64> = get_setting(db, SETTING_MEDIA_ORPHANS)
+        .await?
+        .and_then(|value| serde_json::from_str(&value).ok())
+        .unwrap_or_default();
+    let unreferenced = |name: &String| {
+        name.len() == 64 && name.bytes().all(|byte| byte.is_ascii_hexdigit()) && !referenced.contains(name)
+    };
+    orphans.retain(|name, _| present.contains(name) && unreferenced(name));
+    let mut removed = 0;
+    for name in present.iter().filter(|name| unreferenced(name)) {
+        let since = *orphans.entry(name.clone()).or_insert(now);
+        if now - since >= MEDIA_ORPHAN_GRACE_MS {
+            dav.delete(&format!("{}{name}/", crate::sync::media::MEDIA_DIR)).await?;
+            orphans.remove(name);
+            UPLOADED.lock().unwrap().remove(name);
+            removed += 1;
+        }
+    }
+    set_setting(db, SETTING_MEDIA_ORPHANS, &serde_json::to_string(&orphans)?).await?;
+    Ok(removed)
 }
 
 /// 已经确认在网盘上的视频（本次运行内的缓存，省得每一轮都去问一遍清单）。
@@ -659,6 +775,16 @@ pub fn nudge() {
 pub async fn run_now() -> AppResult<RunReport> {
     let engine = ENGINE.get().cloned().ok_or_else(|| AppError::Other("同步还没准备好".into()))?;
     engine.run().await
+}
+
+/// 移除网盘上的另一台设备（设置页的「移除」）。和后台同步互斥，免得一边压缩一边读。
+pub async fn retire_now(device_id: &str) -> AppResult<()> {
+    let engine = ENGINE.get().cloned().ok_or_else(|| AppError::Other("同步还没准备好".into()))?;
+    let _guard = engine.lock.lock().await;
+    let config = saved_config(&engine.db)
+        .await?
+        .ok_or_else(|| AppError::Config("还没填网盘地址和账号".into()))?;
+    retire_device(&engine.db, &config, device_id).await
 }
 
 pub fn media_state() -> MediaState {
@@ -932,6 +1058,18 @@ pub(crate) mod test_server {
                 }
                 store.files.insert(path.to_string(), body);
                 ("201 Created", Vec::new())
+            }
+            "DELETE" => {
+                let dir = if path.ends_with('/') { path.to_string() } else { format!("{path}/") };
+                if store.files.remove(path).is_some() {
+                    ("204 No Content", Vec::new())
+                } else if store.dirs.contains(&dir) {
+                    store.dirs.retain(|d| !d.starts_with(&dir));
+                    store.files.retain(|f, _| !f.starts_with(&dir));
+                    ("204 No Content", Vec::new())
+                } else {
+                    ("404 Not Found", Vec::new())
+                }
             }
             "GET" => match store.files.get(path) {
                 Some(bytes) => ("200 OK", bytes.clone()),
@@ -1210,6 +1348,194 @@ mod tests {
         let batches: Vec<String> = store.lock().unwrap().files.keys().filter(|path| path.contains("/batches/")).cloned().collect();
         assert!(batches.iter().any(|path| path.ends_with("000000000002.json")), "{batches:?}");
         assert_eq!(batches.len(), 2, "没有覆盖已有的批次：{batches:?}");
+    }
+
+    fn remote_files(store: &Arc<Mutex<test_server::Store>>, device: &str) -> Vec<String> {
+        store
+            .lock()
+            .unwrap()
+            .files
+            .keys()
+            .filter_map(|path| path.split_once(&format!("/devices/{device}/")).map(|(_, rest)| rest.to_string()))
+            .collect()
+    }
+
+    async fn course_names(db: &Db) -> Vec<String> {
+        sqlx::query_scalar("SELECT name FROM courses WHERE deleted_at IS NULL ORDER BY name").fetch_all(&db.pool).await.unwrap()
+    }
+
+    async fn device_id(db: &Db) -> String {
+        identity::ensure_sync_identity(db).await.unwrap().device_id
+    }
+
+    /// 测试里攒 3 批就压缩（正式是 100 批）。
+    async fn push_rounds(device: &Device, config: &RemoteConfig, names: &[&str]) {
+        for name in names {
+            crate::commands::courses::create_course(&device.db, (*name).into(), "/tmp".into()).await.unwrap();
+            device.sync(config).await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn old_batches_are_folded_into_a_base_and_new_devices_still_get_everything() {
+        let (url, store) = test_server::start().await;
+        let config = config(&url);
+        let pc = Device::new("pc").await;
+        let phone = Device::new("phone").await;
+        let pc_id = device_id(&pc.db).await;
+
+        // 手机读过第一批，之后一直没同步。
+        push_rounds(&pc, &config, &["a"]).await;
+        phone.sync(&config).await.unwrap();
+        push_rounds(&pc, &config, &["b", "c"]).await;
+        // 又改了一次 a（和应用里改名一样，更新时间跟着变）：底稿里 a 只留最新的一份。
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        sqlx::query("UPDATE courses SET name='a2', updated_at=? WHERE name='a'")
+            .bind(chrono::Utc::now().timestamp_millis())
+            .execute(&pc.db.pool)
+            .await
+            .unwrap();
+        pc.sync(&config).await.unwrap();
+
+        let files = remote_files(&store, &pc_id);
+        assert!(files.iter().any(|f| f.starts_with("batches/base-")), "压缩出了底稿：{files:?}");
+        let remaining: Vec<u64> = files.iter().filter_map(|f| compact::batch_seq(f.strip_prefix("batches/")?)).collect();
+        assert_eq!(remaining, [4], "折进底稿（1~3）的批次删了，之后的那批留着：{files:?}");
+        let cached: Vec<String> = std::fs::read_dir(pc.dir.path().join("sync/own/batches"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(cached, ["000000000004.json"], "本地的批次副本也只留底稿之后的");
+
+        // 新设备：从底稿拿到全部。
+        let tablet = Device::new("tablet").await;
+        tablet.sync(&config).await.unwrap();
+        assert_eq!(course_names(&tablet.db).await, ["a2", "b", "c"]);
+        // 落后的手机：中间的批次没了，改读底稿。
+        phone.sync(&config).await.unwrap();
+        assert_eq!(course_names(&phone.db).await, ["a2", "b", "c"]);
+
+        // 压缩之后接着推的批次，序号接在底稿后面；别的设备照常读。
+        push_rounds(&pc, &config, &["d"]).await;
+        set_setting(&pc.db, SETTING_NEXT_SEQ, "1").await.unwrap(); // 模拟重装：本地序号丢了
+        push_rounds(&pc, &config, &["e"]).await;
+        phone.sync(&config).await.unwrap();
+        tablet.sync(&config).await.unwrap();
+        assert_eq!(course_names(&phone.db).await, ["a2", "b", "c", "d", "e"]);
+        assert_eq!(course_names(&tablet.db).await, ["a2", "b", "c", "d", "e"]);
+    }
+
+    #[tokio::test]
+    async fn compacting_again_only_uploads_the_parts_that_changed() {
+        let (url, store) = test_server::start().await;
+        let config = config(&url);
+        let pc = Device::new("pc").await;
+        let pc_id = device_id(&pc.db).await;
+        push_rounds(&pc, &config, &["a", "b", "c"]).await;
+        let first: Vec<String> = remote_files(&store, &pc_id).into_iter().filter(|f| f.starts_with("base/")).collect();
+        assert!(!first.is_empty());
+
+        store.lock().unwrap().requests.clear();
+        push_rounds(&pc, &config, &["d", "e", "f"]).await;
+        let puts: Vec<String> = store
+            .lock()
+            .unwrap()
+            .requests
+            .iter()
+            .filter_map(|request| request.strip_prefix("PUT ")?.rsplit_once("/base/").map(|(_, name)| format!("base/{name}")))
+            .collect();
+        assert!(!puts.is_empty(), "第二次压缩传了新的份");
+        assert!(puts.iter().all(|part| !first.contains(part)), "网盘上已有的份不重传：{puts:?} vs {first:?}");
+        // 网盘上留下的份正好是最新清单里列的那些（不再引用的旧份删了）。
+        let files = remote_files(&store, &pc_id);
+        let manifest_path = files.iter().filter(|f| f.starts_with("batches/base-")).max().unwrap().clone();
+        let manifest: compact::Manifest = serde_json::from_slice(
+            &store.lock().unwrap().files.iter().find(|(path, _)| path.ends_with(&manifest_path)).unwrap().1.clone(),
+        )
+        .unwrap();
+        let mut on_drive: Vec<String> = files.iter().filter_map(|f| f.strip_prefix("base/").map(str::to_string)).collect();
+        let mut listed = manifest.parts.clone();
+        on_drive.sort();
+        listed.sort();
+        assert_eq!(on_drive, listed);
+        let tablet = Device::new("tablet").await;
+        tablet.sync(&config).await.unwrap();
+        assert_eq!(course_names(&tablet.db).await, ["a", "b", "c", "d", "e", "f"]);
+    }
+
+    #[tokio::test]
+    async fn a_retired_device_disappears_but_its_data_stays_and_it_can_come_back() {
+        let (url, store) = test_server::start().await;
+        let config = config(&url);
+        let pc = Device::new("pc").await;
+        let old_phone = Device::new("phone").await;
+        let phone_id = device_id(&old_phone.db).await;
+        push_rounds(&old_phone, &config, &["只在旧手机上建的课"]).await;
+        pc.sync(&config).await.unwrap();
+        assert_eq!(known_devices(&pc.db).await.unwrap().len(), 1);
+
+        retire_device(&pc.db, &config, &phone_id).await.unwrap();
+        assert!(known_devices(&pc.db).await.unwrap().is_empty());
+        let files = remote_files(&store, &phone_id);
+        assert!(!files.contains(&"device.json".to_string()), "{files:?}");
+        assert!(files.iter().any(|f| f.starts_with("batches/base-")), "批次折进了底稿：{files:?}");
+        assert!(retire_device(&pc.db, &config, &device_id(&pc.db).await).await.is_err(), "不能移除自己");
+
+        // 新设备照样拿到旧手机写过的数据，而且不把它列出来。
+        let tablet = Device::new("tablet").await;
+        tablet.sync(&config).await.unwrap();
+        tablet.sync(&config).await.unwrap();
+        assert_eq!(course_names(&tablet.db).await, ["只在旧手机上建的课"]);
+        let listed: Vec<String> = known_devices(&tablet.db).await.unwrap().into_iter().map(|d| d.device_id).collect();
+        assert!(!listed.contains(&phone_id), "{listed:?}");
+
+        // 旧手机其实还在用：下次推送时摘掉标记，重新出现。
+        push_rounds(&old_phone, &config, &["又一门"]).await;
+        assert!(!remote_files(&store, &phone_id).iter().any(|f| f.ends_with(compact::RETIRED_MARKER)));
+        pc.sync(&config).await.unwrap();
+        let listed: Vec<String> = known_devices(&pc.db).await.unwrap().into_iter().map(|d| d.device_id).collect();
+        assert_eq!(listed, [phone_id]);
+        assert_eq!(course_names(&pc.db).await, ["又一门", "只在旧手机上建的课"]);
+    }
+
+    #[tokio::test]
+    async fn video_files_nobody_references_are_removed_after_a_week() {
+        let (url, store) = test_server::start().await;
+        let config = config(&url);
+        let pc = Device::new("pc").await;
+        pc.sync(&config).await.unwrap();
+        let dav = config.client().unwrap();
+        let orphan = "a".repeat(64);
+        let used = "b".repeat(64);
+        for name in [&orphan, &used] {
+            dav.ensure_dir(&format!("{}{name}/", crate::sync::media::MEDIA_DIR)).await.unwrap();
+            dav.put(&format!("{}{name}/manifest.json", crate::sync::media::MEDIA_DIR), b"{}".to_vec()).await.unwrap();
+        }
+        let course = crate::commands::courses::create_course(&pc.db, "c".into(), "/tmp".into()).await.unwrap();
+        let file = pc.dir.path().join("v.mp4");
+        std::fs::write(&file, b"x").unwrap();
+        let video = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None).await.unwrap();
+        sqlx::query("UPDATE videos SET content_fingerprint=? WHERE id=?").bind(&used).bind(&video.id).execute(&pc.db.pool).await.unwrap();
+        set_setting(&pc.db, SETTING_LAST_SUCCESS, &chrono::Utc::now().timestamp_millis().to_string()).await.unwrap();
+        let present: std::collections::HashSet<String> = [orphan.clone(), used.clone()].into();
+        let exists = |name: &str| store.lock().unwrap().files.keys().any(|path| path.contains(name));
+
+        // 第一次看到没人引用：只记下来，不删。
+        assert_eq!(collect_media_garbage(&pc.db, &dav, &present).await.unwrap(), 0);
+        assert!(exists(&orphan));
+        // 过了一周还是没人引用：删掉。有人引用的不动。
+        let week_ago = chrono::Utc::now().timestamp_millis() - MEDIA_ORPHAN_GRACE_MS - 1;
+        set_setting(&pc.db, SETTING_MEDIA_ORPHANS, &serde_json::json!({ orphan.clone(): week_ago }).to_string()).await.unwrap();
+        assert_eq!(collect_media_garbage(&pc.db, &dav, &present).await.unwrap(), 1);
+        assert!(!exists(&orphan));
+        assert!(exists(&used));
+
+        // 本机很久没同步成功：不知道别的设备新加了什么，不删。
+        set_setting(&pc.db, SETTING_LAST_SUCCESS, "0").await.unwrap();
+        sqlx::query("UPDATE videos SET content_fingerprint=NULL").execute(&pc.db.pool).await.unwrap();
+        set_setting(&pc.db, SETTING_MEDIA_ORPHANS, &serde_json::json!({ used.clone(): week_ago }).to_string()).await.unwrap();
+        assert_eq!(collect_media_garbage(&pc.db, &dav, &present).await.unwrap(), 0);
+        assert!(exists(&used));
     }
 
     #[tokio::test]

@@ -154,3 +154,10 @@ pub async fn cmd_remote_sync_media_size(state: State<'_, AppState>, video_id: St
 pub async fn cmd_remote_sync_download_video(video_id: String) -> AppResult<String> {
     Ok(remote::download_now(&video_id).await?.to_string_lossy().into_owned())
 }
+
+/// 移除网盘上的另一台设备（不再用的旧手机、重装前的自己）。它写过的数据留在网盘上，
+/// 新设备照样能拿到；只是不再列出、它的旧批次合并成一份。
+#[tauri::command]
+pub async fn cmd_remote_sync_retire_device(device_id: String) -> AppResult<()> {
+    remote::retire_now(&device_id).await
+}

@@ -5,7 +5,8 @@ import i18n from "@/i18n";
 import type { RemoteSyncStatus } from "@/lib/ipc";
 import { RemoteSyncSection } from "./RemoteSyncSection";
 
-const { mockIpc } = vi.hoisted(() => ({
+const { mockIpc, mockConfirm } = vi.hoisted(() => ({
+  mockConfirm: vi.fn(),
   mockIpc: {
     remoteSync: {
       status: vi.fn(),
@@ -14,9 +15,11 @@ const { mockIpc } = vi.hoisted(() => ({
       setEnabled: vi.fn(),
       now: vi.fn(),
       nudge: vi.fn(),
+      retireDevice: vi.fn(),
     },
   },
 }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: mockConfirm }));
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 
@@ -89,5 +92,30 @@ describe("RemoteSyncSection", () => {
     expect(screen.getByText("安卓")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "立即同步" }));
     await waitFor(() => expect(mockIpc.remoteSync.now).toHaveBeenCalled());
+  });
+
+  it("移除另一台设备前先确认，取消就什么都不做", async () => {
+    mockIpc.remoteSync.status.mockResolvedValue(
+      status({
+        enabled: true,
+        url: "https://dav.jianguoyun.com/dav/",
+        user: "me",
+        hasPassword: true,
+        devices: [{ deviceId: "old-phone", name: "旧手机", platform: "android", seenAt: Date.now() - 90 * 86_400_000 }],
+      }),
+    );
+    mockIpc.remoteSync.retireDevice.mockResolvedValue(undefined);
+    render(<RemoteSyncSection />);
+    const button = await screen.findByRole("button", { name: "移除设备「旧手机」" });
+
+    mockConfirm.mockResolvedValueOnce(false);
+    fireEvent.click(button);
+    await waitFor(() => expect(mockConfirm).toHaveBeenCalledTimes(1));
+    expect(mockIpc.remoteSync.retireDevice).not.toHaveBeenCalled();
+
+    mockConfirm.mockResolvedValueOnce(true);
+    fireEvent.click(button);
+    await waitFor(() => expect(mockIpc.remoteSync.retireDevice).toHaveBeenCalledWith("old-phone"));
+    expect(String(mockConfirm.mock.calls[1][0])).toContain("不会丢");
   });
 });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { Laptop, Loader2, RefreshCw, Smartphone, Zap } from "lucide-react";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
@@ -39,7 +40,7 @@ export function RemoteSyncSection() {
   const [folder, setFolder] = useState("");
   const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState<"test" | "save" | "toggle" | "sync" | null>(null);
+  const [busy, setBusy] = useState<"test" | "save" | "toggle" | "sync" | "retire" | null>(null);
   const [actionError, setActionError] = useState<unknown>(null);
   const [testResult, setTestResult] = useState<number | null>(null);
   const [saved, setSaved] = useState(false);
@@ -136,6 +137,18 @@ export function RemoteSyncSection() {
 
   async function syncNow() {
     await act("sync", () => ipc.remoteSync.now());
+    await refresh();
+  }
+
+  async function retire(device: RemoteSyncStatus["devices"][number], name: string) {
+    const ok = await confirmDialog(t("settings.remoteSync.retireConfirm", { name }), {
+      title: t("settings.remoteSync.retireTitle"),
+      kind: "warning",
+      okLabel: t("settings.remoteSync.retire"),
+      cancelLabel: t("common.cancel"),
+    });
+    if (!ok) return;
+    await act("retire", () => ipc.remoteSync.retireDevice(device.deviceId));
     await refresh();
   }
 
@@ -315,19 +328,34 @@ export function RemoteSyncSection() {
             <p className="ca-t-xs leading-relaxed text-[var(--text-muted)]">{t("settings.remoteSync.noDevices")}</p>
           </StackRow>
         ) : (
-          status.devices.map((device) => (
-            <Row
-              key={device.deviceId}
-              label={device.name ?? device.deviceId.slice(0, 8)}
-              status={t("settings.remoteSync.seen", { time: formatRelativeTime(device.seenAt, Date.now(), i18n.language) })}
-            >
-              {MOBILE.has(device.platform ?? "") ? (
-                <Smartphone className="h-4 w-4 text-[var(--text-muted)]" aria-hidden="true" />
-              ) : (
-                <Laptop className="h-4 w-4 text-[var(--text-muted)]" aria-hidden="true" />
-              )}
-            </Row>
-          ))
+          status.devices.map((device) => {
+            const name = device.name ?? device.deviceId.slice(0, 8);
+            return (
+              <Row
+                key={device.deviceId}
+                label={name}
+                status={t("settings.remoteSync.seen", { time: formatRelativeTime(device.seenAt, Date.now(), i18n.language) })}
+              >
+                <div className="flex items-center gap-2">
+                  {MOBILE.has(device.platform ?? "") ? (
+                    <Smartphone className="h-4 w-4 text-[var(--text-muted)]" aria-hidden="true" />
+                  ) : (
+                    <Laptop className="h-4 w-4 text-[var(--text-muted)]" aria-hidden="true" />
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy != null}
+                    aria-label={t("settings.remoteSync.retireLabel", { name })}
+                    onClick={() => void retire(device, name)}
+                  >
+                    {busy === "retire" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {t("settings.remoteSync.retire")}
+                  </Button>
+                </div>
+              </Row>
+            );
+          })
         )}
       </Group>
     </>

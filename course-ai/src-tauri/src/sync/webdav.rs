@@ -181,6 +181,16 @@ impl WebDav {
         check(response.status(), "改名")
     }
 
+    /// 删一个文件或整个文件夹（WebDAV 删文件夹是连里面一起删）。本来就没有也算成功：
+    /// 两台设备同时清理同一样东西时，后到的那个不该报错。
+    pub async fn delete(&self, path: &str) -> AppResult<()> {
+        let response = self.request(Method::DELETE, path).send().await.map_err(network_error)?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(());
+        }
+        check(response.status(), "删除")
+    }
+
     /// 文件在不在（GET 不下载内容太重时用；这里只给小文件用 GET 判断）。
     pub async fn get_optional(&self, path: &str) -> AppResult<Option<Vec<u8>>> {
         let response = self.request(Method::GET, path).send().await.map_err(network_error)?;

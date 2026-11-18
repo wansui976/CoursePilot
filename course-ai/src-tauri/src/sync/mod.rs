@@ -1,4 +1,5 @@
 pub mod apply;
+pub mod compact;
 pub mod content;
 pub mod envelope;
 pub mod identity;

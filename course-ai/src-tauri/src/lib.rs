@@ -67,7 +67,7 @@ use crate::commands::client_store::{cmd_client_store_load, cmd_client_store_put}
 use crate::commands::remote_sync::{
     cmd_remote_sync_now, cmd_remote_sync_nudge, cmd_remote_sync_save, cmd_remote_sync_set_enabled,
     cmd_remote_sync_status, cmd_remote_sync_test, cmd_remote_sync_set_upload_media,
-    cmd_remote_sync_media_size, cmd_remote_sync_download_video,
+    cmd_remote_sync_media_size, cmd_remote_sync_download_video, cmd_remote_sync_retire_device,
 };
 use crate::commands::semantic::{
     cmd_semantic_delete_model, cmd_semantic_download_model, cmd_semantic_rebuild, cmd_semantic_resume,
@@ -462,6 +462,7 @@ pub fn run() {
             cmd_remote_sync_set_upload_media,
             cmd_remote_sync_media_size,
             cmd_remote_sync_download_video,
+            cmd_remote_sync_retire_device,
             cmd_analyze_course_concepts,
             cmd_cancel_course_analysis,
             cmd_list_course_concepts,
