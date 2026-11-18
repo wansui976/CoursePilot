@@ -253,7 +253,8 @@ export const scenes = [
     run: async ({ page, shot }) => {
       const bubble = page.locator(".ca-tour-bubble");
       const walk = async (prefix) => {
-        for (let i = 1; i <= 4; i += 1) {
+        // 步数按设备不同（平板工作台 6 步），多给几步余量，「知道了」就停。
+        for (let i = 1; i <= 8; i += 1) {
           await bubble.waitFor({ timeout: 4000 });
           await page.waitForTimeout(250);
           await shot(`${prefix}-${i}`);
