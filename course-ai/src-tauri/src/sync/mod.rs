@@ -2,6 +2,7 @@ pub mod apply;
 pub mod content;
 pub mod envelope;
 pub mod identity;
+pub mod media;
 pub mod outbox;
 pub mod probe;
 pub mod remote;

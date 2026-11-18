@@ -9,6 +9,8 @@ use std::time::Duration;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+/// 视频分块的单次上传 / 下载上限：64 MB 在 1 Mbps 的上行上也只要九分钟。
+const LARGE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Clone)]
 pub struct WebDav {
@@ -24,6 +26,8 @@ pub struct WebDav {
 pub struct Entry {
     pub name: String,
     pub is_dir: bool,
+    /// 文件大小（服务器给了才有）。
+    pub size: Option<u64>,
 }
 
 impl WebDav {
@@ -67,7 +71,7 @@ impl WebDav {
             .request(Method::from_bytes(b"PROPFIND").expect("valid method"), &dir)
             .header("Depth", "1")
             .header("Content-Type", "application/xml; charset=utf-8")
-            .body(r#"<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>"#)
+            .body(r#"<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/></d:prop></d:propfind>"#)
             .send()
             .await
             .map_err(network_error)?;
@@ -165,6 +169,48 @@ impl WebDav {
         check(response.status(), "上传")
     }
 
+    /// 把一个文件改名（先传成临时名、传完再改成正式名：别的设备永远读不到半截文件）。
+    pub async fn rename(&self, from: &str, to: &str) -> AppResult<()> {
+        let response = self
+            .request(Method::from_bytes(b"MOVE").expect("valid method"), from)
+            .header("Destination", self.url(to))
+            .header("Overwrite", "T")
+            .send()
+            .await
+            .map_err(network_error)?;
+        check(response.status(), "改名")
+    }
+
+    /// 文件在不在（GET 不下载内容太重时用；这里只给小文件用 GET 判断）。
+    pub async fn get_optional(&self, path: &str) -> AppResult<Option<Vec<u8>>> {
+        let response = self.request(Method::GET, path).send().await.map_err(network_error)?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        check(response.status(), "下载")?;
+        Ok(Some(response.bytes().await.map_err(network_error)?.to_vec()))
+    }
+
+    /// 大块上传（视频分块）：慢网络上一块要传好几分钟，单独放宽超时。
+    pub async fn put_large(&self, path: &str, bytes: Vec<u8>) -> AppResult<()> {
+        let response = self
+            .request(Method::PUT, path)
+            .header("Content-Type", "application/octet-stream")
+            .timeout(LARGE_TIMEOUT)
+            .body(bytes)
+            .send()
+            .await
+            .map_err(network_error)?;
+        check(response.status(), "上传视频")
+    }
+
+    /// 大块下载（视频分块）。
+    pub async fn get_large(&self, path: &str) -> AppResult<Vec<u8>> {
+        let response = self.request(Method::GET, path).timeout(LARGE_TIMEOUT).send().await.map_err(network_error)?;
+        check(response.status(), "下载视频")?;
+        Ok(response.bytes().await.map_err(network_error)?.to_vec())
+    }
+
     pub async fn get(&self, path: &str) -> AppResult<Vec<u8>> {
         let response = self.request(Method::GET, path).send().await.map_err(network_error)?;
         check(response.status(), "下载")?;
@@ -254,7 +300,8 @@ pub(crate) fn parse_propfind(xml: &str, own_path: &str) -> Vec<Entry> {
         let Some(name) = path.trim_end_matches('/').rsplit('/').next().filter(|name| !name.is_empty()) else {
             continue;
         };
-        entries.push(Entry { name: name.to_string(), is_dir });
+        let size = first_text(response, "getcontentlength").and_then(|value| value.trim().parse().ok());
+        entries.push(Entry { name: name.to_string(), is_dir, size });
     }
     entries
 }
@@ -335,15 +382,15 @@ mod tests {
 </d:multistatus>"#;
         assert_eq!(
             parse_propfind(jianguoyun, "/dav/CoursePilot/sync-v1/devices/"),
-            vec![Entry { name: "dev-a".into(), is_dir: true }, Entry { name: "dev-b".into(), is_dir: true }]
+            vec![Entry { name: "dev-a".into(), is_dir: true, size: None }, Entry { name: "dev-b".into(), is_dir: true, size: None }]
         );
         // Nextcloud 风格：D: 前缀；文件没有结尾斜杠，resourcetype 为空。
         let nextcloud = r#"<?xml version="1.0"?>
 <D:multistatus xmlns:D="DAV:"><D:response><D:href>https://cloud.example/remote.php/dav/files/u/CP/b/</D:href><D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat></D:response>
-<D:response><D:href>https://cloud.example/remote.php/dav/files/u/CP/b/000000000001.json</D:href><D:propstat><D:prop><D:resourcetype/></D:prop></D:propstat></D:response></D:multistatus>"#;
+<D:response><D:href>https://cloud.example/remote.php/dav/files/u/CP/b/000000000001.json</D:href><D:propstat><D:prop><D:resourcetype/><D:getcontentlength>2048</D:getcontentlength></D:prop></D:propstat></D:response></D:multistatus>"#;
         assert_eq!(
             parse_propfind(nextcloud, "/remote.php/dav/files/u/CP/b/"),
-            vec![Entry { name: "000000000001.json".into(), is_dir: false }]
+            vec![Entry { name: "000000000001.json".into(), is_dir: false, size: Some(2048) }]
         );
     }
 

@@ -1040,7 +1040,7 @@
     },
     "remoteSync": {
       "connectionGroup": "Cloud drive",
-      "connectionHint": "Sync your study data between computer and phone through your own WebDAV drive. Use the same drive and folder on every device. Synced: courses and folders, video entries, notes (with images), clips, review cards, study history, playback progress, plus transcripts and AI-generated content (chapters, summaries, quizzes, mind maps, highlights, concepts). Video files are not synced.",
+      "connectionHint": "Sync your study data between computer and phone through your own WebDAV drive. Use the same drive and folder on every device. Synced: courses and folders, video entries, notes (with images), clips, review cards, study history, playback progress, plus transcripts and AI-generated content (chapters, summaries, quizzes, mind maps, highlights, concepts). Video files have their own switch below.",
       "provider": "Service",
       "providers": {
         "jianguoyun": "Jianguoyun (Nutstore)",
@@ -1075,7 +1075,11 @@
       "devicesGroup": "Devices",
       "thisDevice": "This device",
       "noDevices": "No other devices on the drive yet. Enter the same drive and folder in CoursePilot on another device and turn sync on.",
-      "seen": "Last synced {{time}}"
+      "seen": "Last synced {{time}}",
+      "uploadMedia": "Upload video files",
+      "uploadMediaHint": "Uploads this device's videos to the drive in 64 MB pieces so other devices can download them. Videos are big: Jianguoyun's free plan allows only 1 GB of uploads a month (42 GB on Pro); for whole courses, Nextcloud, Synology or a large drive mounted via Alist works better. Turn this on only on the device that has the videos.",
+      "uploading": "Uploading: {{title}} ({{percent}}%)",
+      "uploadIdle": "Files already on the drive aren't re-uploaded; interrupted uploads resume from the missing piece"
     },
     "courseware": {
       "title": "Slide Extraction",
@@ -2305,5 +2309,15 @@
       "assistant": "AI assistant",
       "other": "Other"
     }
+  },
+  "remoteMedia": {
+    "title": "The video file isn't on this device",
+    "available": "This video was synced from another device and its file is on your drive. Transcript, notes and AI content are already here on the right.",
+    "notUploaded": "This video was synced from another device, but its file isn't on the drive yet. On the device that has it, turn on Settings → Sync → Upload video files; once uploaded you can download it here.",
+    "noSync": "This video was synced from another device. To watch it here, connect the same drive under Settings → Sync.",
+    "checking": "Checking the drive",
+    "download": "Download from drive ({{size}})",
+    "downloading": "Downloading",
+    "progress": "{{received}} / {{total}}"
   }
 }

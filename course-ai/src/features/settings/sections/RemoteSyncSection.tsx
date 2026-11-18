@@ -5,7 +5,7 @@ import { Laptop, Loader2, RefreshCw, Smartphone, Zap } from "lucide-react";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { Switch } from "@/ui/switch";
-import { ipc, type RemoteSyncRunState, type RemoteSyncStatus } from "@/lib/ipc";
+import { ipc, type RemoteSyncMediaState, type RemoteSyncRunState, type RemoteSyncStatus } from "@/lib/ipc";
 import { formatRelativeTime } from "@/lib/time";
 import { FIELD, Group, Row, SavedBadge, Select, StackRow } from "@/features/settings/primitives";
 
@@ -76,6 +76,16 @@ export function RemoteSyncSection() {
       void unlisten.then((fn) => fn());
     };
   }, [refresh]);
+
+  // 视频上传进度：每传完一块发一次。
+  useEffect(() => {
+    const unlisten = listen<RemoteSyncMediaState>("remote-sync:media", (event) => {
+      setStatus((current) => (current ? { ...current, media: event.payload } : current));
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
 
   if (!status) {
     return loadError ? <ErrorNote error={loadError} onRetry={() => void refresh()} /> : null;
@@ -263,6 +273,36 @@ export function RemoteSyncSection() {
         )}
         {status.enabled && run.lastError && !run.running && (
           <ErrorNote className="mx-4 mb-3" error={run.lastError} onRetry={() => void syncNow()} />
+        )}
+        {status.enabled && (
+          <Row
+            label={t("settings.remoteSync.uploadMedia")}
+            hint={t("settings.remoteSync.uploadMediaHint")}
+            htmlFor="remote-sync-upload-media"
+            status={
+              status.uploadMedia
+                ? status.media.uploading
+                  ? t("settings.remoteSync.uploading", {
+                      title: status.media.uploading.title,
+                      percent:
+                        status.media.uploading.total > 0
+                          ? Math.floor((status.media.uploading.sent / status.media.uploading.total) * 100)
+                          : 0,
+                    })
+                  : t("settings.remoteSync.uploadIdle")
+                : undefined
+            }
+          >
+            <Switch
+              id="remote-sync-upload-media"
+              checked={status.uploadMedia}
+              aria-label={t("settings.remoteSync.uploadMedia")}
+              onCheckedChange={(next) => void act("toggle", () => ipc.remoteSync.setUploadMedia(next)).then(refresh)}
+            />
+          </Row>
+        )}
+        {status.enabled && status.uploadMedia && status.media.lastError && !status.media.uploading && (
+          <ErrorNote className="mx-4 mb-3" error={status.media.lastError} />
         )}
       </Group>
 

@@ -489,4 +489,21 @@ export type RemoteSyncStatus = {
   pending: number;
   devices: RemoteSyncDevice[];
   state: RemoteSyncRunState;
+  uploadMedia: boolean;
+  media: RemoteSyncMediaState;
+};
+
+/** 视频上传进度（`remote-sync:media` 事件也是这个形状）。 */
+export type RemoteSyncMediaState = {
+  uploading: { videoId: string; title: string; sent: number; total: number } | null;
+  lastError: string | null;
+};
+
+/** 从网盘下载视频的进度（`remote-sync:download` 事件）。 */
+export type RemoteSyncDownloadEvent = {
+  videoId: string;
+  received: number;
+  total: number;
+  done: boolean;
+  error: string | null;
 };

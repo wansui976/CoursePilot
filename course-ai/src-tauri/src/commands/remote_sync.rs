@@ -3,7 +3,7 @@
 use crate::commands::courses::AppState;
 use crate::commands::settings::{get_setting, set_setting};
 use crate::error::{AppError, AppResult};
-use crate::sync::remote::{self, RemoteConfig, RemoteDevice, RunReport, RunState};
+use crate::sync::remote::{self, MediaState, RemoteConfig, RemoteDevice, RunReport, RunState};
 use serde::Serialize;
 use tauri::State;
 
@@ -20,6 +20,8 @@ pub struct RemoteSyncStatus {
     pub pending: i64,
     pub devices: Vec<RemoteDevice>,
     pub state: RunState,
+    pub upload_media: bool,
+    pub media: MediaState,
 }
 
 #[tauri::command]
@@ -42,6 +44,8 @@ pub async fn cmd_remote_sync_status(state: State<'_, AppState>) -> AppResult<Rem
         pending: crate::sync::outbox::pending_count(db).await?,
         devices: remote::known_devices(db).await?,
         state: remote::state(),
+        upload_media: get_setting(db, remote::SETTING_UPLOAD_MEDIA).await?.as_deref() == Some("true"),
+        media: remote::media_state(),
     })
 }
 
@@ -122,4 +126,31 @@ pub async fn cmd_remote_sync_now() -> AppResult<RunReport> {
 pub async fn cmd_remote_sync_nudge() -> AppResult<()> {
     remote::nudge();
     Ok(())
+}
+
+/// 开 / 关「上传这台设备上的视频文件」。关掉时正在传的视频传完当前这一块就停。
+#[tauri::command]
+pub async fn cmd_remote_sync_set_upload_media(state: State<'_, AppState>, enabled: bool) -> AppResult<()> {
+    set_setting(&state.db, remote::SETTING_UPLOAD_MEDIA, if enabled { "true" } else { "false" }).await?;
+    if enabled {
+        remote::nudge_media();
+    } else {
+        remote::stop_media_upload();
+    }
+    Ok(())
+}
+
+/// 网盘上有没有这个视频的文件（有的话多大）。没配网盘时报配置错误。
+#[tauri::command]
+pub async fn cmd_remote_sync_media_size(state: State<'_, AppState>, video_id: String) -> AppResult<Option<u64>> {
+    let config = remote::saved_config(&state.db)
+        .await?
+        .ok_or_else(|| AppError::Config("还没设置多设备同步（设置 → 多设备同步）".into()))?;
+    remote::remote_media_size(&state.db, &config, &video_id).await
+}
+
+/// 从网盘下载这个视频到本机。进度走 remote-sync:download 事件。返回本机文件路径。
+#[tauri::command]
+pub async fn cmd_remote_sync_download_video(video_id: String) -> AppResult<String> {
+    Ok(remote::download_now(&video_id).await?.to_string_lossy().into_owned())
 }

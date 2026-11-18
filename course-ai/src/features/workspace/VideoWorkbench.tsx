@@ -10,6 +10,7 @@ import { displayTitle } from "@/lib/videoTitle";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { TabsPanel } from "./TabsPanel";
 import { ClipQueueBar } from "./ClipQueueBar";
+import { RemoteMediaStage } from "./RemoteMediaStage";
 import { WorkspaceLayout } from "./WorkspaceLayout";
 import { allowsNotesSplit } from "./workbenchLayout";
 
@@ -43,6 +44,7 @@ export function VideoWorkbench({
   onFullscreenChange: (fullscreen: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const hasLocalFile = video.file_path !== "";
   // asset 协议在 macOS WKWebView 下放大文件会「有画面没声音」；改用本地 HTTP
   // 媒体服务（带 Range）提供视频，拿到 http://127.0.0.1 的 URL 再播。
   const {
@@ -53,6 +55,8 @@ export function VideoWorkbench({
   } = useQuery({
     queryKey: qk.mediaUrl.video(video.id),
     queryFn: () => ipc.videos.mediaUrl(video.id),
+    // 从别的设备同步过来、本机还没有文件：不去要播放地址，舞台上给「从网盘下载」。
+    enabled: hasLocalFile,
   });
   // 本集在课程中的位置（从 1 起）；队列打开的跨课程视频不在当前列表里时为 0，不显示。
   const videoPosition = courseVideos.findIndex((item) => item.id === video.id) + 1;
@@ -138,7 +142,9 @@ export function VideoWorkbench({
               </button>
             )}
             <div className="ca-stage">
-              {mediaSrcError ? (
+              {!hasLocalFile ? (
+                <RemoteMediaStage video={video} />
+              ) : mediaSrcError ? (
                 <div className="flex h-full items-center justify-center bg-black p-4">
                   <ErrorNote
                     className="w-full max-w-md"

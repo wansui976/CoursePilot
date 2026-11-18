@@ -1,0 +1,52 @@
+import "@testing-library/jest-dom/vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import i18n from "@/i18n";
+import type { Video } from "@/lib/types";
+import { RemoteMediaStage } from "./RemoteMediaStage";
+
+const { mockIpc } = vi.hoisted(() => ({
+  mockIpc: { remoteSync: { mediaSize: vi.fn(), downloadVideo: vi.fn() } },
+}));
+vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
+
+const video = { id: "v1", course_id: "c1", title: "01 概括", file_path: "" } as unknown as Video;
+
+function renderStage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <RemoteMediaStage video={video} />
+    </QueryClientProvider>,
+  );
+}
+
+describe("RemoteMediaStage", () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("zh-CN");
+    mockIpc.remoteSync.mediaSize.mockReset();
+    mockIpc.remoteSync.downloadVideo.mockReset().mockResolvedValue("/data/v1.mp4");
+  });
+
+  it("网盘上有文件：给出带大小的下载按钮", async () => {
+    mockIpc.remoteSync.mediaSize.mockResolvedValue(700 * 1024 * 1024);
+    renderStage();
+    fireEvent.click(await screen.findByRole("button", { name: "从网盘下载（700 MB）" }));
+    await waitFor(() => expect(mockIpc.remoteSync.downloadVideo).toHaveBeenCalledWith("v1"));
+  });
+
+  it("还没传到网盘：说明要去有文件的设备上打开上传，不给下载按钮", async () => {
+    mockIpc.remoteSync.mediaSize.mockResolvedValue(null);
+    renderStage();
+    expect(await screen.findByText(/上传视频文件/)).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("没连网盘：提示去设置里连上", async () => {
+    mockIpc.remoteSync.mediaSize.mockRejectedValue(new Error("还没设置多设备同步"));
+    renderStage();
+    expect(await screen.findByText(/连上同一个网盘/)).toBeInTheDocument();
+  });
+});

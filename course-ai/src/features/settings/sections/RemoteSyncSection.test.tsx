@@ -32,6 +32,8 @@ function status(overrides: Partial<RemoteSyncStatus> = {}): RemoteSyncStatus {
     pending: 0,
     devices: [],
     state: { running: false, lastSuccessAt: null, lastError: null, lastReport: null },
+    uploadMedia: false,
+    media: { uploading: null, lastError: null },
     ...overrides,
   };
 }

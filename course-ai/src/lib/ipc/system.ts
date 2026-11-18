@@ -232,4 +232,9 @@ export const remoteSync = {
   setEnabled: (enabled: boolean): Promise<void> => invoke("cmd_remote_sync_set_enabled", { enabled }),
   now: (): Promise<RemoteSyncReport> => invoke("cmd_remote_sync_now"),
   nudge: (): Promise<void> => invoke("cmd_remote_sync_nudge"),
+  setUploadMedia: (enabled: boolean): Promise<void> => invoke("cmd_remote_sync_set_upload_media", { enabled }),
+  /** 网盘上这个视频的文件大小；还没传上去返回 null。 */
+  mediaSize: (videoId: string): Promise<number | null> => invoke("cmd_remote_sync_media_size", { videoId }),
+  /** 下载到本机，返回文件路径（进度见 `remote-sync:download` 事件）。 */
+  downloadVideo: (videoId: string): Promise<string> => invoke("cmd_remote_sync_download_video", { videoId }),
 };

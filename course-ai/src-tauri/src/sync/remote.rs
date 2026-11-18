@@ -59,6 +59,11 @@ const MAX_CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
 const INTERVAL: Duration = Duration::from_secs(180);
 
 pub const STATUS_EVENT: &str = "remote-sync:status";
+pub const MEDIA_EVENT: &str = "remote-sync:media";
+pub const DOWNLOAD_EVENT: &str = "remote-sync:download";
+pub const SETTING_UPLOAD_MEDIA: &str = "remote_sync_upload_media";
+/// 视频上传多久检查一轮（数据同步成功后也会立刻检查）。
+const MEDIA_INTERVAL: Duration = Duration::from_secs(600);
 pub const APPLIED_EVENT: &str = "remote-sync:applied";
 
 #[derive(Debug, Clone)]
@@ -388,6 +393,105 @@ pub async fn known_devices(db: &Db) -> AppResult<Vec<RemoteDevice>> {
 }
 
 // ---------------------------------------------------------------------------
+// 视频文件
+
+/// 本机有文件、还没上传的视频逐个传到网盘。返回这一轮传完了几个。
+/// `progress(视频 id, 标题, 已传, 总共)`；`keep_going()` 为 false 时在块与块之间停下。
+pub async fn upload_pass(
+    db: &Db,
+    config: &RemoteConfig,
+    progress: &(dyn Fn(&str, &str, u64, u64) + Send + Sync),
+    keep_going: &(dyn Fn() -> bool + Send + Sync),
+) -> AppResult<usize> {
+    let dav = config.client()?;
+    let videos: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT id, title, file_path FROM videos WHERE deleted_at IS NULL AND file_path <> '' ORDER BY created_at",
+    )
+    .fetch_all(&db.pool)
+    .await?;
+    // 网盘上已经有哪些视频的文件夹：没有文件夹的肯定没传过，有的再看清单。少发请求（坚果云限频）。
+    let present: std::collections::HashSet<String> = dav
+        .list(crate::sync::media::MEDIA_DIR)
+        .await?
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|entry| entry.is_dir)
+        .map(|entry| entry.name)
+        .collect();
+    let mut uploaded = 0;
+    for (video_id, title, file_path) in videos {
+        if !keep_going() {
+            break;
+        }
+        if !Path::new(&file_path).is_file() {
+            continue;
+        }
+        let fingerprint = crate::sync::media::ensure_fingerprint(db, &video_id, &file_path).await?;
+        if present.contains(&fingerprint) && UPLOADED.lock().unwrap().contains(&fingerprint) {
+            continue;
+        }
+        let report = |sent: u64, total: u64| progress(&video_id, &title, sent, total);
+        let done = crate::sync::media::upload(&dav, &fingerprint, Path::new(&file_path), &report, keep_going).await?;
+        UPLOADED.lock().unwrap().insert(fingerprint);
+        if done {
+            uploaded += 1;
+        }
+    }
+    Ok(uploaded)
+}
+
+/// 已经确认在网盘上的视频（本次运行内的缓存，省得每一轮都去问一遍清单）。
+static UPLOADED: Mutex<std::collections::BTreeSet<String>> = Mutex::new(std::collections::BTreeSet::new());
+
+/// 网盘上有没有这个视频的文件（有的话多大）。
+pub async fn remote_media_size(db: &Db, config: &RemoteConfig, video_id: &str) -> AppResult<Option<u64>> {
+    let fingerprint: Option<String> = sqlx::query_scalar("SELECT content_fingerprint FROM videos WHERE id=?")
+        .bind(video_id)
+        .fetch_optional(&db.pool)
+        .await?
+        .flatten();
+    let Some(fingerprint) = fingerprint.filter(|value| !value.is_empty()) else { return Ok(None) };
+    let dav = config.client()?;
+    Ok(crate::sync::media::remote_manifest(&dav, &fingerprint).await?.map(|manifest| manifest.size))
+}
+
+/// 把网盘上的视频下到本机，挂到这个视频条目上，返回文件路径。
+pub async fn download_video(
+    db: &Db,
+    config: &RemoteConfig,
+    video_root: &Path,
+    video_id: &str,
+    progress: &(dyn Fn(u64, u64) + Send + Sync),
+) -> AppResult<PathBuf> {
+    let (title, fingerprint): (String, Option<String>) =
+        sqlx::query_as("SELECT title, content_fingerprint FROM videos WHERE id=? AND deleted_at IS NULL")
+            .bind(video_id)
+            .fetch_optional(&db.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    let fingerprint = fingerprint
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| AppError::Other("有这个视频文件的设备还没把它传到网盘（在那台设备上打开「上传视频文件」）".into()))?;
+    let dav = config.client()?;
+    let target_dir = video_root.join(video_id);
+    let path = crate::sync::media::download(
+        &dav,
+        &fingerprint,
+        &target_dir,
+        &crate::sync::media::safe_file_stem(&title),
+        progress,
+    )
+    .await?;
+    // file_path 是本机的事，不在同步的字段里，改它不会外发。
+    sqlx::query("UPDATE videos SET file_path=? WHERE id=?")
+        .bind(path.to_string_lossy().as_ref())
+        .bind(video_id)
+        .execute(&db.pool)
+        .await?;
+    Ok(path)
+}
+
+// ---------------------------------------------------------------------------
 // 后台调度
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -399,12 +503,42 @@ pub struct RunState {
     pub last_report: Option<RunReport>,
 }
 
+/// 视频上传的进度（设置页显示）。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaState {
+    pub uploading: Option<MediaProgress>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaProgress {
+    pub video_id: String,
+    pub title: String,
+    pub sent: u64,
+    pub total: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadProgress {
+    pub video_id: String,
+    pub received: u64,
+    pub total: u64,
+    pub done: bool,
+    pub error: Option<String>,
+}
+
 struct Engine {
     app: tauri::AppHandle,
     db: Db,
     wake: tokio::sync::Notify,
     lock: tokio::sync::Mutex<()>,
     state: Mutex<RunState>,
+    media_wake: tokio::sync::Notify,
+    media_state: Mutex<MediaState>,
+    downloading: Mutex<std::collections::HashSet<String>>,
 }
 
 static ENGINE: OnceLock<Arc<Engine>> = OnceLock::new();
@@ -419,9 +553,23 @@ pub fn init(app: tauri::AppHandle, db: Db) {
                 wake: tokio::sync::Notify::new(),
                 lock: tokio::sync::Mutex::new(()),
                 state: Mutex::new(RunState::default()),
+                media_wake: tokio::sync::Notify::new(),
+                media_state: Mutex::new(MediaState::default()),
+                downloading: Mutex::new(std::collections::HashSet::new()),
             })
         })
         .clone();
+    let media = engine.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        loop {
+            media.upload_media_if_enabled().await;
+            tokio::select! {
+                _ = media.media_wake.notified() => {}
+                _ = tokio::time::sleep(MEDIA_INTERVAL) => {}
+            }
+        }
+    });
     tauri::async_runtime::spawn(async move {
         engine.restore_state().await;
         // 启动后稍等一下再同步，别和启动时的其它工作抢。
@@ -449,11 +597,85 @@ pub async fn run_now() -> AppResult<RunReport> {
     engine.run().await
 }
 
+pub fn media_state() -> MediaState {
+    ENGINE.get().map(|engine| engine.media_state.lock().unwrap().clone()).unwrap_or_default()
+}
+
+/// 关掉视频上传时置 false：正在传的那个视频传完当前这一块就停。
+static UPLOAD_ALLOWED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn stop_media_upload() {
+    UPLOAD_ALLOWED.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// 设置改了（开 / 关视频上传）：上传任务马上看一眼。
+pub fn nudge_media() {
+    if let Some(engine) = ENGINE.get() {
+        engine.media_wake.notify_one();
+    }
+}
+
+/// 下载一个视频（设置页 / 播放器的「从网盘下载」）。进度走 DOWNLOAD_EVENT。
+pub async fn download_now(video_id: &str) -> AppResult<PathBuf> {
+    let engine = ENGINE.get().cloned().ok_or_else(|| AppError::Other("同步还没准备好".into()))?;
+    if !engine.downloading.lock().unwrap().insert(video_id.to_string()) {
+        return Err(AppError::Other("这个视频正在下载".into()));
+    }
+    let result = engine.download(video_id).await;
+    engine.downloading.lock().unwrap().remove(video_id);
+    let event = DownloadProgress {
+        video_id: video_id.to_string(),
+        received: 0,
+        total: 0,
+        done: true,
+        error: result.as_ref().err().map(|error| error.to_string()),
+    };
+    engine.app.emit(DOWNLOAD_EVENT, event).ok();
+    result
+}
+
 pub fn state() -> RunState {
     ENGINE.get().map(|engine| engine.state.lock().unwrap().clone()).unwrap_or_default()
 }
 
 impl Engine {
+    async fn download(&self, video_id: &str) -> AppResult<PathBuf> {
+        let config = saved_config(&self.db)
+            .await?
+            .ok_or_else(|| AppError::Config("还没填网盘地址和账号".into()))?;
+        let app_data = self.app.path().app_data_dir().map_err(|error| AppError::Config(error.to_string()))?;
+        let app = self.app.clone();
+        let id = video_id.to_string();
+        let report = move |received: u64, total: u64| {
+            app.emit(DOWNLOAD_EVENT, DownloadProgress { video_id: id.clone(), received, total, done: false, error: None }).ok();
+        };
+        download_video(&self.db, &config, &app_data.join("synced-videos"), video_id, &report).await
+    }
+
+    async fn upload_media_if_enabled(&self) {
+        let enabled = is_enabled(&self.db).await.unwrap_or(false)
+            && get_setting(&self.db, SETTING_UPLOAD_MEDIA).await.ok().flatten().as_deref() == Some("true");
+        if !enabled {
+            return;
+        }
+        let Ok(Some(config)) = saved_config(&self.db).await else { return };
+        let db = self.db.clone();
+        UPLOAD_ALLOWED.store(true, std::sync::atomic::Ordering::SeqCst);
+        let keep_going = || UPLOAD_ALLOWED.load(std::sync::atomic::Ordering::SeqCst);
+        let report = |video_id: &str, title: &str, sent: u64, total: u64| {
+            self.media_state.lock().unwrap().uploading =
+                Some(MediaProgress { video_id: video_id.into(), title: title.into(), sent, total });
+            self.app.emit(MEDIA_EVENT, self.media_state.lock().unwrap().clone()).ok();
+        };
+        let result = upload_pass(&db, &config, &report, &keep_going).await;
+        {
+            let mut state = self.media_state.lock().unwrap();
+            state.uploading = None;
+            state.last_error = result.as_ref().err().map(|error| error.to_string());
+        }
+        self.app.emit(MEDIA_EVENT, self.media_state.lock().unwrap().clone()).ok();
+    }
+
     async fn restore_state(&self) {
         let last_success_at = get_setting(&self.db, SETTING_LAST_SUCCESS).await.ok().flatten().and_then(|v| v.parse().ok());
         let last_error = get_setting(&self.db, SETTING_LAST_ERROR).await.ok().flatten().filter(|v| !v.is_empty());
@@ -505,6 +727,7 @@ impl Engine {
                 if report.applied > 0 {
                     self.app.emit(APPLIED_EVENT, report.applied).ok();
                 }
+                self.media_wake.notify_one();
                 // 首次全量一轮传不完：接着传，不等下一个周期。
                 if report.pending > 0 && report.pushed > 0 {
                     self.wake.notify_one();
@@ -567,9 +790,24 @@ pub(crate) mod test_server {
                     let mut parts = head.lines().next().unwrap_or("").split_whitespace();
                     let method = parts.next().unwrap_or("").to_string();
                     let path = parts.next().unwrap_or("").to_string();
+                    let destination = head
+                        .lines()
+                        .find_map(|line| line.to_ascii_lowercase().starts_with("destination:").then(|| line[12..].trim().to_string()))
+                        .and_then(|url| reqwest::Url::parse(&url).ok())
+                        .map(|url| url.path().to_string());
                     let (status, response_body) = {
                         let mut store = store.lock().unwrap();
-                        handle(&mut store, &method, &path, body)
+                        if method == "MOVE" {
+                            match (store.files.remove(&path), destination) {
+                                (Some(bytes), Some(to)) => {
+                                    store.files.insert(to, bytes);
+                                    ("201 Created", Vec::new())
+                                }
+                                _ => ("404 Not Found", Vec::new()),
+                            }
+                        } else {
+                            handle(&mut store, &method, &path, body)
+                        }
                     };
                     let offset = store.lock().unwrap().clock_offset_ms;
                     let date = (chrono::Utc::now() + chrono::Duration::milliseconds(offset)).to_rfc2822().replace("+0000", "GMT");
@@ -627,8 +865,8 @@ pub(crate) mod test_server {
                 for child in store.dirs.iter().filter(|d| *d != &dir && parent(d) == dir) {
                     xml.push_str(&format!("<d:response><d:href>{child}</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>"));
                 }
-                for file in store.files.keys().filter(|f| parent(f) == dir) {
-                    xml.push_str(&format!("<d:response><d:href>{file}</d:href><d:propstat><d:prop><d:resourcetype/></d:prop></d:propstat></d:response>"));
+                for (file, bytes) in store.files.iter().filter(|(f, _)| parent(f) == dir) {
+                    xml.push_str(&format!("<d:response><d:href>{file}</d:href><d:propstat><d:prop><d:resourcetype/><d:getcontentlength>{}</d:getcontentlength></d:prop></d:propstat></d:response>", bytes.len()));
                 }
                 xml.push_str("</d:multistatus>");
                 ("207 Multi-Status", xml.into_bytes())
@@ -765,6 +1003,9 @@ mod tests {
         assert_eq!(occurrence, 1000, "知识点 id 不变，出处指向同一个视频");
         // 合并进来的内容不会再被当成本机改动发回去。
         assert_eq!(crate::sync::outbox::pending_count(&phone.db).await.unwrap(), 0);
+        // 字幕到了，这条视频在手机上就是「已处理」，不会被再排去识别一遍。
+        let status: String = sqlx::query_scalar("SELECT processed_status FROM videos WHERE id=?").bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        assert_eq!(status, "done");
 
         // 手机上重新生成摘要，回到电脑；电脑那边的字幕不受影响。
         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -776,6 +1017,51 @@ mod tests {
         assert_eq!(summary, "摘要 v2");
         let segments: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transcripts WHERE video_id=?").bind(&video.id).fetch_one(&pc.db.pool).await.unwrap();
         assert_eq!(segments, 3);
+    }
+
+    #[tokio::test]
+    async fn a_video_file_goes_up_from_the_pc_and_down_to_the_phone() {
+        let (url, store) = test_server::start().await;
+        let config = config(&url);
+        let pc = Device::new("pc").await;
+        let phone = Device::new("phone").await;
+        let course = crate::commands::courses::create_course(&pc.db, "申论".into(), pc.dir.path().to_string_lossy().into()).await.unwrap();
+        let file = pc.dir.path().join("01 概括.mp4");
+        let content: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&file, &content).unwrap();
+        let video = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None).await.unwrap();
+        pc.sync(&config).await.unwrap();
+        phone.sync(&config).await.unwrap();
+
+        // 手机上还没有指纹（电脑没传过）：说清楚要先在电脑上传。
+        let error = download_video(&phone.db, &config, &phone.dir.path().join("synced-videos"), &video.id, &|_, _| {})
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("上传"), "{error}");
+
+        let sent = std::sync::Mutex::new(Vec::new());
+        let report = |_: &str, _: &str, done: u64, total: u64| sent.lock().unwrap().push((done, total));
+        assert_eq!(upload_pass(&pc.db, &config, &report, &|| true).await.unwrap(), 1);
+        assert_eq!(sent.lock().unwrap().last(), Some(&(300_000, 300_000)));
+        assert!(store.lock().unwrap().files.keys().any(|path| path.ends_with("/manifest.json")));
+        assert!(!store.lock().unwrap().files.keys().any(|path| path.ends_with(".uploading")), "临时名都改成了正式名");
+        // 再来一轮：已经在网盘上了，不重传。
+        assert_eq!(upload_pass(&pc.db, &config, &report, &|| true).await.unwrap(), 0);
+
+        // 指纹随视频条目同步到手机，手机按它下载。
+        pc.sync(&config).await.unwrap();
+        phone.sync(&config).await.unwrap();
+        assert_eq!(remote_media_size(&phone.db, &config, &video.id).await.unwrap(), Some(300_000));
+        let path = download_video(&phone.db, &config, &phone.dir.path().join("synced-videos"), &video.id, &|_, _| {})
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), content);
+        assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("mp4"));
+        let file_path: String = sqlx::query_scalar("SELECT file_path FROM videos WHERE id=?").bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        assert_eq!(file_path, path.to_string_lossy());
+        // 挂上文件是本机的事，不往外发。
+        assert_eq!(crate::sync::outbox::pending_count(&phone.db).await.unwrap(), 0);
     }
 
     #[test]

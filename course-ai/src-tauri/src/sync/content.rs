@@ -287,6 +287,11 @@ pub async fn save(tx: &mut Transaction<'_, Sqlite>, envelope: &SyncEnvelope) -> 
                 .execute(&mut **tx)
                 .await?;
             }
+            // 字幕到了，这台设备就不必再处理这个视频（同步过来的条目原本是「待处理」）。
+            sqlx::query("UPDATE videos SET processed_status='done' WHERE id=? AND processed_status IN ('pending','failed')")
+                .bind(id)
+                .execute(&mut **tx)
+                .await?;
         }
         "Chapters" => {
             sqlx::query("DELETE FROM chapters WHERE video_id=?").bind(id).execute(&mut **tx).await?;
