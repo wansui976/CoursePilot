@@ -72,7 +72,6 @@ export function LibraryOverview({
     summarize(course, lists[index]?.data ?? []),
   );
   const totalVideos = courses.reduce((sum, course) => sum + course.video_count, 0);
-  const resumable = summaries.filter((summary) => summary.resume).slice(0, RESUME_LIMIT);
 
   return (
     <div className="ca-main-col ca-overview">
@@ -107,48 +106,7 @@ export function LibraryOverview({
         {createError && <ErrorNote className="mb-4" error={createError} />}
         <UpdateNotice className="mb-4" />
 
-        {resumable.length > 0 && (
-          <section aria-labelledby="library-resume" className="ca-overview-section">
-            <h2 id="library-resume" className="ca-overview-heading">
-              {t("library.continueSection")}
-            </h2>
-            <div className="ca-resume-row">
-              {resumable.map(({ course, resume }) => (
-                <button
-                  key={course.id}
-                  type="button"
-                  className="ca-resume-card group"
-                  aria-label={t("home.continueLearning", { title: displayTitle(resume!.video.title) })}
-                  onClick={() => onResume(course.id, resume!.video.id, resume!.positionSec)}
-                >
-                  <span className="ca-resume-cover">
-                    <VideoCover videoId={resume!.video.id} className="absolute inset-0 h-full w-full" />
-                    <span className="ov-bar" aria-hidden="true">
-                      <i style={{ width: `${resume!.ratio * 100}%` }} />
-                    </span>
-                    <span className="ca-resume-play" aria-hidden="true">
-                      <Play className="h-4 w-4 fill-current" />
-                    </span>
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="ca-resume-course">{course.name}</span>
-                    <span className="ca-resume-title">{displayTitle(resume!.video.title)}</span>
-                    <span className="ca-resume-pos">
-                      {t("home.continueAt", { time: formatMs(Math.round(resume!.positionSec * 1000)) })}
-                      {" · "}
-                      {t("home.watchedPercentShort", { percent: Math.round(resume!.ratio * 100) })}
-                    </span>
-                  </span>
-                  {/* 只有一张时显示（见 .ca-resume-row 的样式）；整张卡本身就是按钮，这只是个提示。 */}
-                  <span className="ca-resume-go" aria-hidden="true">
-                    <Play className="h-3.5 w-3.5 fill-current" />
-                    {t("library.resumeGo")}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
+        <ResumeSection courses={courses} onResume={onResume} />
 
         <section aria-labelledby="library-courses" className="ca-overview-section">
           <h2 id="library-courses" className="ca-overview-heading">
@@ -215,5 +173,70 @@ export function LibraryOverview({
         </section>
       </div>
     </div>
+  );
+}
+
+/**
+ * 「继续学习」：每门课最近看到一半的那一集。课程库总览和平板竖屏的课程列表首屏共用。
+ * 都没有看到一半的就整段不显示。
+ */
+export function ResumeSection({
+  courses,
+  onResume,
+}: {
+  courses: Course[];
+  onResume: (courseId: string, videoId: string, positionSec: number) => void;
+}) {
+  usePlaybackRevision((state) => state.revision);
+  const { t } = useTranslation();
+  const lists = useQueries({
+    queries: courses.map((course) => queries.videos(course.id)),
+  });
+  const resumable = courses
+    .map((course, index) => summarize(course, lists[index]?.data ?? []))
+    .filter((summary) => summary.resume)
+    .slice(0, RESUME_LIMIT);
+  if (resumable.length === 0) return null;
+  return (
+    <section aria-labelledby="library-resume" className="ca-overview-section">
+      <h2 id="library-resume" className="ca-overview-heading">
+        {t("library.continueSection")}
+      </h2>
+      <div className="ca-resume-row">
+        {resumable.map(({ course, resume }) => (
+          <button
+            key={course.id}
+            type="button"
+            className="ca-resume-card group"
+            aria-label={t("home.continueLearning", { title: displayTitle(resume!.video.title) })}
+            onClick={() => onResume(course.id, resume!.video.id, resume!.positionSec)}
+          >
+            <span className="ca-resume-cover">
+              <VideoCover videoId={resume!.video.id} className="absolute inset-0 h-full w-full" />
+              <span className="ov-bar" aria-hidden="true">
+                <i style={{ width: `${resume!.ratio * 100}%` }} />
+              </span>
+              <span className="ca-resume-play" aria-hidden="true">
+                <Play className="h-4 w-4 fill-current" />
+              </span>
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="ca-resume-course">{course.name}</span>
+              <span className="ca-resume-title">{displayTitle(resume!.video.title)}</span>
+              <span className="ca-resume-pos">
+                {t("home.continueAt", { time: formatMs(Math.round(resume!.positionSec * 1000)) })}
+                {" · "}
+                {t("home.watchedPercentShort", { percent: Math.round(resume!.ratio * 100) })}
+              </span>
+            </span>
+            {/* 只有一张时显示（见 .ca-resume-row 的样式）；整张卡本身就是按钮，这只是个提示。 */}
+            <span className="ca-resume-go" aria-hidden="true">
+              <Play className="h-3.5 w-3.5 fill-current" />
+              {t("library.resumeGo")}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }

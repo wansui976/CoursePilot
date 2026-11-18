@@ -70,6 +70,7 @@ export function LibraryRouteView() {
         onClearSelection={shell.clearCourseSelection}
         onOpenRecycleBin={() => shell.openMainView("recycle")}
         onTransientCloseChange={shell.registerTransientClose}
+        onResume={shell.compactOverlays ? undefined : shell.resumeStudy}
       />
     );
   }

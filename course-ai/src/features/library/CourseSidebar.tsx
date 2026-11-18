@@ -1,7 +1,10 @@
 import { Loader2, Plus, Trash2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { queries } from "@/lib/queries";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { CourseList, useCreateCourse } from "./CourseList";
+import { ResumeSection } from "./LibraryOverview";
 import { cn } from "@/lib/utils";
 
 /** 窄屏「课程」Tab 的整屏课程列表：标题行（添加课程文件夹、回收站）+ CourseList。 */
@@ -11,6 +14,7 @@ export function CourseSidebar({
   onClearSelection,
   onOpenRecycleBin,
   onTransientCloseChange,
+  onResume,
   className,
 }: {
   selectedCourseId: string | null;
@@ -19,10 +23,16 @@ export function CourseSidebar({
   onClearSelection?: () => void;
   onOpenRecycleBin?: () => void;
   onTransientCloseChange?: (close: (() => void) | null) => void;
+  /**
+   * 给了就在课程列表上面加「继续学习」（平板竖屏）。平板上这一屏是 800 多宽的首页，
+   * 只有一列课程名、下面大半屏空着；手机上这一屏就是课程列表本身，不给。
+   */
+  onResume?: (courseId: string, videoId: string, positionSec: number) => void;
   className?: string;
 }) {
   const { t } = useTranslation();
   const { createCourse, creatingCourse, createError } = useCreateCourse();
+  const { data: courses = [] } = useQuery({ ...queries.courses(), enabled: Boolean(onResume) });
 
   return (
     <aside aria-label={t("nav.courseSidebar")} className={cn("ca-course-screen", className)}>
@@ -57,6 +67,7 @@ export function CourseSidebar({
         )}
       </div>
       {createError && <ErrorNote className="mb-3" error={createError} />}
+      {onResume && <ResumeSection courses={courses} onResume={onResume} />}
       <div className="ca-nav-label">{t("nav.myCourses")}</div>
       <div className="ca-nav">
         <CourseList
