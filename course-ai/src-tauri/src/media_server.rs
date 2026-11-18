@@ -34,6 +34,18 @@ impl MediaServer {
     }
 }
 
+/// Host 头是不是本机地址（带不带端口都行）。没有 Host 头的 HTTP/1.0 请求也放行：
+/// 浏览器总会带 Host，没带的只可能是本机程序直接连过来的。
+fn host_is_loopback(host: Option<&str>) -> bool {
+    let Some(host) = host else { return true };
+    let name = if let Some(rest) = host.strip_prefix('[') {
+        rest.split(']').next().unwrap_or("")
+    } else {
+        host.rsplit_once(':').map_or(host, |(name, _)| name)
+    };
+    matches!(name.to_ascii_lowercase().as_str(), "127.0.0.1" | "localhost" | "::1")
+}
+
 /// 绑定随机端口并在后台 accept 循环。返回带端口的句柄。
 pub async fn start() -> std::io::Result<MediaServer> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -75,10 +87,22 @@ async fn handle(mut stream: TcpStream, registry: Registry) -> std::io::Result<()
     let method = parts.next().unwrap_or("");
     let target = parts.next().unwrap_or("");
     let mut range_header: Option<String> = None;
+    let mut host_header: Option<String> = None;
     for line in lines {
         if let Some(value) = strip_prefix_ci(line, "range:") {
             range_header = Some(value.trim().to_string());
+        } else if let Some(value) = strip_prefix_ci(line, "host:") {
+            host_header = Some(value.trim().to_string());
         }
+    }
+
+    // 只认发往本机地址的请求。挡的是 DNS 重绑定：别的网页把自己的域名解析到 127.0.0.1，
+    // 浏览器会把这个服务当成「同源」，就能用 fetch 读走视频。那时请求的 Host 头是对方的域名。
+    if !host_is_loopback(host_header.as_deref()) {
+        let _ = stream
+            .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .await;
+        return Ok(());
     }
 
     // URL 上可能带 ?v=…（文件换了要换 URL 才会重新加载），查询串不参与 id 匹配。
@@ -286,5 +310,35 @@ mod tests {
              <video crossOrigin=anonymous> can read canvas pixels for \
              black-bar detection; got headers:\n{head}"
         );
+    }
+
+    #[test]
+    fn only_loopback_hosts_are_served() {
+        for ok in [Some("127.0.0.1"), Some("127.0.0.1:51234"), Some("localhost:80"), Some("LOCALHOST"), Some("[::1]:9000"), None] {
+            assert!(host_is_loopback(ok), "{ok:?}");
+        }
+        for bad in [Some("evil.example:51234"), Some("127.0.0.1.evil.example"), Some("localhost.evil.example:1"), Some("")] {
+            assert!(!host_is_loopback(bad), "{bad:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn requests_for_another_host_are_refused() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("clip.mp4");
+        std::fs::write(&path, b"fake-mp4-bytes").unwrap();
+        let server = start().await.unwrap();
+        server.register("vid1", path);
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", server.port)).await.unwrap();
+        stream
+            .write_all(b"GET /m/vid1 HTTP/1.1\r\nHost: rebound.example:8080\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).await.unwrap();
+        let text = String::from_utf8_lossy(&response);
+        assert!(text.starts_with("HTTP/1.1 403"), "{text}");
+        assert!(!text.contains("fake-mp4-bytes"));
     }
 }
