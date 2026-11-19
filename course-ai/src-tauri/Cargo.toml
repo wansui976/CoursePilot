@@ -60,6 +60,8 @@ sherpa-onnx = { version = "2.0.1", default-features = false, features = ["shared
 security-framework = "3"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+# 局域网直连播放要告诉手机这台电脑的真实网卡地址（不能问路由：TUN 代理会把默认路由抢走）。
+if-addrs = "0.15.0"
 tauri-plugin-single-instance = "2"
 # 应用内自动更新（只有桌面）：发布时 CI 用私钥签名，这里用 tauri.conf.json 里的公钥验。
 tauri-plugin-updater = "2"

@@ -2,7 +2,8 @@
 //! 不用先传到网盘再下载（坚果云免费版每月只能上传 1 GB，传不了几节课）。
 //!
 //! 电脑（打开了「局域网直连播放」）：
-//! - 在局域网上开一个 HTTPS 服务，只回答 `/v/<视频 id>`（支持 Range）和 `/ping`；
+//! - 在局域网上开一个 HTTPS 服务，只回答 `/v/<视频 id>`（支持 Range）、`/t/<视频 id>`
+//!   （手机放不了的编码就地转 H.264）和 `/ping`；
 //! - 证书是自签的，第一次打开时生成；访问要带随机口令；
 //! - 把「我的地址、端口、口令、证书指纹」写进网盘上自己的文件夹（`lan.json`）。
 //!
@@ -13,12 +14,17 @@
 //! 为什么借网盘配对：两台设备已经用同一个网盘账号同步了，不用再扫码、输配对码。能读这个网盘的人
 //! 本来就能读到全部学习数据，口令放在那里不扩大谁能看到什么。
 
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
 use crate::commands::settings::{get_setting, set_setting};
@@ -116,26 +122,60 @@ pub fn advert() -> Option<Advert> {
     })
 }
 
-/// 这台设备在局域网里的地址。用「连」一个外部地址的 UDP 套接字问系统会走哪块网卡——
-/// 不真的发包，也不用列网卡（各个系统的接口都不一样）。
+/// 这台设备在局域网里的地址：所有网卡上的 IPv4，去掉别的设备不可能连上的。
+///
+/// 不能再用「连一个外网地址，问系统会走哪块网卡」那一招：开着 Clash / Surge 这类 TUN 代理时，
+/// 默认路由被虚拟网卡接管，问出来的是 198.18.x.x 这样的假地址——手机照着连永远连不上。
 fn local_addresses() -> Vec<String> {
-    let mut found = Vec::new();
-    for probe in ["8.8.8.8:80", "192.168.0.1:80", "10.0.0.1:80"] {
-        let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") else { continue };
-        if socket.connect(probe).is_err() {
-            continue;
-        }
-        let Ok(address) = socket.local_addr() else { continue };
-        let ip = address.ip();
-        if ip.is_loopback() || ip.is_unspecified() {
-            continue;
-        }
-        let text = ip.to_string();
-        if !found.contains(&text) {
-            found.push(text);
-        }
+    // 手机切到后台就被系统挂起，当不了服务器，也就不用公布地址。
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    return Vec::new();
+
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    {
+        let Ok(interfaces) = if_addrs::get_if_addrs() else { return Vec::new() };
+        let mut found: Vec<String> = interfaces
+            .into_iter()
+            .filter_map(|interface| match interface.addr {
+                if_addrs::IfAddr::V4(v4) => Some((interface.name, interface.is_p2p, v4.ip)),
+                if_addrs::IfAddr::V6(_) => None,
+            })
+            .filter(|(name, point_to_point, ip)| shareable_ipv4(*ip) && !is_tunnel(name, *point_to_point))
+            .map(|(_, _, ip)| ip.to_string())
+            .collect();
+        // 固定顺序：网卡枚举顺序变了，写进网盘的内容（以及界面上的显示）不跟着跳。
+        found.sort();
+        found.dedup();
+        found
     }
-    found
+}
+
+/// 别的设备和这台电脑在同一个局域网里时，有可能连上的地址。
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn shareable_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    let [first, second, ..] = ip.octets();
+    !(ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_link_local() // 169.254/16：没拿到 DHCP 地址时的自配地址
+        || ip.is_multicast()
+        || ip.is_broadcast()
+        || first >= 240 // 保留段
+        // 198.18/15：Clash / Surge 等 TUN 代理的假 IP 段
+        || (first == 198 && (second == 18 || second == 19))
+        // 100.64/10：运营商级 NAT、Tailscale 等组网地址，不在同一个 Wi‑Fi 里
+        || (first == 100 && (64..=127).contains(&second)))
+}
+
+/// VPN / 点对点网卡上的地址不在「同一个局域网」里，公布了手机也连不上。
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn is_tunnel(name: &str, point_to_point: bool) -> bool {
+    if point_to_point {
+        return true;
+    }
+    let name = name.to_ascii_lowercase();
+    ["utun", "ipsec", "gif", "stf", "awdl", "llw", "ppp", "tun", "tap", "wg"]
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
 }
 
 struct Keys {
@@ -275,24 +315,309 @@ where
         respond_empty(&mut stream, "200 OK").await;
         return Ok(());
     }
+    // `/t/<id>`：手机放不了这条视频的编码，让电脑转一份 H.264。
+    // POST 点火（`?retry=1` 表示用户点了重试），GET 查进度；回的都是同一行 JSON。
+    if let Some(id) = target.strip_prefix("/t/").filter(|id| valid_video_id(id)) {
+        let state = if request.method.eq_ignore_ascii_case("POST") {
+            let retry = request
+                .target
+                .split_once('?')
+                .map(|(_, query)| query.split('&').any(|part| part == "retry=1"))
+                .unwrap_or(false);
+            server_start_transcode(db, id, retry).await
+        } else {
+            server_transcode_status(db, id).await
+        };
+        let body = serde_json::to_vec(&state).unwrap_or_default();
+        respond_json(&mut stream, "200 OK", &body).await;
+        return Ok(());
+    }
     let Some(id) = target.strip_prefix("/v/").filter(|id| valid_video_id(id)) else {
         respond_empty(&mut stream, "404 Not Found").await;
         return Ok(());
     };
     // 只给没在回收站、这台设备上有文件的视频。转过码的给转好的那份（手机多半也放不了原件的编码）。
-    let paths: Option<(String, String)> =
-        sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=? AND deleted_at IS NULL AND file_path<>''")
-            .bind(id)
-            .fetch_optional(&db.pool)
-            .await
-            .ok()
-            .flatten();
-    let Some((file_path, data_dir)) = paths else {
+    let Some((file_path, data_dir)) = server_video_info(db, id).await else {
         respond_empty(&mut stream, "404 Not Found").await;
         return Ok(());
     };
-    let path = crate::pipeline::playable::cached_playable(std::path::Path::new(&file_path), std::path::Path::new(&data_dir));
+    let path = crate::pipeline::playable::cached_playable(Path::new(&file_path), Path::new(&data_dir));
     serve_file(&mut stream, &path, &request.method, request.range.as_deref()).await
+}
+
+async fn respond_json<S: AsyncWrite + Unpin>(stream: &mut S, status: &str, body: &[u8]) {
+    let head = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    if stream.write_all(head.as_bytes()).await.is_ok() {
+        let _ = stream.write_all(body).await;
+        let _ = stream.flush().await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 电脑这一头：手机放不了的编码，在电脑上转成 H.264
+
+/// `/t/<id>` 回的一行状态，和播放器现有的转码 UI 同一套字段。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscodeState {
+    /// idle / running / done / failed
+    pub state: String,
+    /// 0–100，running 时是当前进度
+    pub percent: u32,
+}
+
+impl TranscodeState {
+    fn idle() -> Self {
+        Self { state: "idle".into(), percent: 0 }
+    }
+
+    fn running(percent: u32) -> Self {
+        Self { state: "running".into(), percent }
+    }
+
+    fn done() -> Self {
+        Self { state: "done".into(), percent: 100 }
+    }
+
+    fn failed() -> Self {
+        Self { state: "failed".into(), percent: 0 }
+    }
+}
+
+struct FfmpegJob {
+    percent: Arc<AtomicU32>,
+    /// 失败过的片子不自动重转：10-bit / 坏文件每次点开都重解一遍整片，几分钟的 CPU 白费。
+    /// 只有手机带 `?retry=1`（用户点了重试）才再做。
+    failed: bool,
+}
+
+fn ffmpeg_jobs() -> &'static Mutex<HashMap<String, FfmpegJob>> {
+    static JOBS: OnceLock<Mutex<HashMap<String, FfmpegJob>>> = OnceLock::new();
+    JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 电脑上同时只转一条：两三门课一起解 1080p 会把风扇拉满，也拖慢用户正在看的那条。
+fn ffmpeg_gate() -> &'static tokio::sync::Semaphore {
+    static GATE: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+    GATE.get_or_init(|| tokio::sync::Semaphore::new(1))
+}
+
+async fn server_video_info(db: &Db, id: &str) -> Option<(String, String)> {
+    if !valid_video_id(id) {
+        return None;
+    }
+    sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=? AND deleted_at IS NULL AND file_path<>''")
+        .bind(id)
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten()
+}
+
+fn playable_target(data_dir: &str) -> PathBuf {
+    Path::new(data_dir).join("playable.mp4")
+}
+
+/// 转好的成品：非空、而且真的是 H.264。0 字节或别的编码（比如以前只做了 faststart
+/// 转封装留下的 AV1 副本）都不算数。
+fn converted_ready(target: &Path) -> bool {
+    std::fs::metadata(target).map(|meta| meta.len() > 0).unwrap_or(false)
+        && matches!(
+            crate::pipeline::playable::video_codec(target),
+            Some(codec) if &codec == b"avc1" || &codec == b"avc3"
+        )
+}
+
+async fn server_transcode_status(db: &Db, id: &str) -> TranscodeState {
+    let from_jobs = {
+        let jobs = ffmpeg_jobs().lock().unwrap();
+        jobs.get(id).map(|job| {
+            if job.failed {
+                TranscodeState::failed()
+            } else {
+                let percent = job.percent.load(Ordering::Acquire);
+                if percent >= 100 {
+                    TranscodeState::done()
+                } else {
+                    TranscodeState::running(percent)
+                }
+            }
+        })
+    };
+    if let Some(state) = from_jobs {
+        return state;
+    }
+    // 进程重启过：任务表空了，但转好的成品还在磁盘上。
+    match server_video_info(db, id).await {
+        Some((_, data_dir)) if !data_dir.is_empty() && converted_ready(&playable_target(&data_dir)) => {
+            TranscodeState::done()
+        }
+        _ => TranscodeState::idle(),
+    }
+}
+
+async fn server_start_transcode(db: &Db, id: &str, retry: bool) -> TranscodeState {
+    let Some((file_path, data_dir)) = server_video_info(db, id).await else {
+        return TranscodeState::failed();
+    };
+    if data_dir.is_empty() {
+        return TranscodeState::failed();
+    }
+    let target = playable_target(&data_dir);
+    if converted_ready(&target) {
+        return TranscodeState::done();
+    }
+    // 「查有没有在转」和「登记」放在同一把锁里：手机连点两下不会起两份。
+    let percent = {
+        let mut jobs = ffmpeg_jobs().lock().unwrap();
+        if let Some(job) = jobs.get(id) {
+            if job.failed && !retry {
+                return TranscodeState::failed();
+            }
+            if !job.failed {
+                let percent = job.percent.load(Ordering::Acquire);
+                return if percent >= 100 {
+                    TranscodeState::done()
+                } else {
+                    TranscodeState::running(percent)
+                };
+            }
+        }
+        let percent = Arc::new(AtomicU32::new(1));
+        jobs.insert(id.to_string(), FfmpegJob { percent: percent.clone(), failed: false });
+        percent
+    };
+    let video_id = id.to_string();
+    tauri::async_runtime::spawn(async move {
+        let _permit = ffmpeg_gate().acquire().await.ok();
+        let outcome = run_ffmpeg(Path::new(&file_path), &target, &percent).await;
+        if let Err(error) = &outcome {
+            tracing::warn!(%error, %video_id, "电脑上转码失败");
+        }
+        if let Some(job) = ffmpeg_jobs().lock().unwrap().get_mut(&video_id) {
+            if outcome.is_ok() {
+                job.percent.store(100, Ordering::Release);
+            } else {
+                job.failed = true;
+                job.percent.store(0, Ordering::Release);
+            }
+        }
+    });
+    TranscodeState::running(1)
+}
+
+/// 用随包的 ffmpeg 转一份 H.264/AAC，写到 `data_dir/playable.mp4`（先写 `playable.partial.mp4`，
+/// 校验通过才换上）。`percent` 是给 `/t/<id>` 轮询看的进度。
+async fn run_ffmpeg(source: &Path, target: &Path, percent: &AtomicU32) -> Result<(), String> {
+    let ffmpeg = crate::sidecar::resolve(&crate::sidecar::FFMPEG, None)
+        .map_err(|error| format!("找不到 ffmpeg：{error}"))?;
+    let parent = target.parent().ok_or_else(|| "转码目录不存在".to_string())?;
+    tokio::fs::create_dir_all(parent)
+        .await
+        .map_err(|error| format!("转码目录创建失败：{error}"))?;
+    let partial = parent.join("playable.partial.mp4");
+    let _ = tokio::fs::remove_file(&partial).await;
+
+    let mut child = crate::sidecar::command(&ffmpeg)
+        .arg("-y")
+        .args(["-hide_banner", "-nostats", "-progress", "pipe:1", "-loglevel", "info"])
+        .arg("-i")
+        .arg(source)
+        .args(["-map", "0:v:0", "-map", "0:a:0?"])
+        .args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p"])
+        .args(["-c:a", "aac", "-b:a", "160k"])
+        .args(["-movflags", "+faststart"])
+        .arg(&partial)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("ffmpeg 启动失败：{error}"))?;
+
+    // 总时长只在 stderr 的 `Duration:` 里；`duration_ms` 这一列在库里大多是空的。
+    let total_us = Arc::new(AtomicU64::new(0));
+    let stderr = child.stderr.take().ok_or_else(|| "ffmpeg 没有 stderr".to_string())?;
+    let total_for_stderr = total_us.clone();
+    let stderr_task = tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if total_for_stderr.load(Ordering::Acquire) == 0 {
+                if let Some(parsed) = parse_ffmpeg_duration(&line) {
+                    total_for_stderr.store(parsed, Ordering::Release);
+                }
+            }
+            tracing::trace!(target: "lan_share", "{line}");
+        }
+    });
+
+    let stdout = child.stdout.take().ok_or_else(|| "ffmpeg 没有 stdout".to_string())?;
+    let mut lines = BufReader::new(stdout).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let Some(done_us) = parse_out_time_us(&line) else { continue };
+        let total = total_us.load(Ordering::Acquire);
+        if total > 0 {
+            percent.store(transcode_percent(done_us, total), Ordering::Release);
+        }
+    }
+
+    let status = child.wait().await.map_err(|error| format!("ffmpeg 退出状态读不到：{error}"))?;
+    let _ = stderr_task.await;
+    if !status.success() {
+        let _ = tokio::fs::remove_file(&partial).await;
+        return Err(format!("ffmpeg 退出码 {:?}", status.code()));
+    }
+    // 转出来的不是 H.264（源里没有视频轨、编码器异常）就别拿去顶掉缓存，手机照样放不了。
+    if !matches!(
+        crate::pipeline::playable::video_codec(&partial),
+        Some(codec) if &codec == b"avc1" || &codec == b"avc3"
+    ) {
+        let _ = tokio::fs::remove_file(&partial).await;
+        return Err("转码产物不是 H.264".into());
+    }
+    // Windows 上 rename 不覆盖已有文件，先删旧的（旧的那份本来就是放不了的编码）。
+    let _ = tokio::fs::remove_file(target).await;
+    tokio::fs::rename(&partial, target)
+        .await
+        .map_err(|error| format!("转码产物落盘失败：{error}"))?;
+    percent.store(100, Ordering::Release);
+    Ok(())
+}
+
+/// ffmpeg `-progress` 的一行：`out_time_us=1234567`（老版本叫 `out_time_ms`，单位同样是微秒）。
+fn parse_out_time_us(line: &str) -> Option<u64> {
+    let value = line
+        .strip_prefix("out_time_us=")
+        .or_else(|| line.strip_prefix("out_time_ms="))?;
+    value.trim().parse().ok()
+}
+
+/// stderr 上的 `Duration: 00:42:17.12, start: …`，换成微秒。
+fn parse_ffmpeg_duration(line: &str) -> Option<u64> {
+    let stamp = line
+        .split_once("Duration:")?
+        .1
+        .trim()
+        .split(&[',', ' '][..])
+        .next()
+        .filter(|stamp| !stamp.is_empty())?;
+    let mut parts = stamp.split(':');
+    let hours: u64 = parts.next()?.parse().ok()?;
+    let minutes: u64 = parts.next()?.parse().ok()?;
+    let seconds: f64 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((hours * 3600 + minutes * 60) * 1_000_000 + (seconds * 1_000_000.0).round() as u64)
+}
+
+/// 只往上走到 99：100 由转码真正落盘之后才写，免得用户看到 100% 却还是黑屏。
+fn transcode_percent(done_us: u64, total_us: u64) -> u32 {
+    if total_us == 0 {
+        return 0;
+    }
+    (done_us.saturating_mul(100) / total_us).min(99) as u32
 }
 
 // ---------------------------------------------------------------------------
@@ -444,6 +769,105 @@ pub async fn probe(adverts: &[Advert], video_id: &str) -> Option<RemoteSource> {
     None
 }
 
+/// 手机这一头记下的「这个视频在哪台电脑上」。转码请求得回到同一台电脑去问。
+fn sources() -> &'static Mutex<HashMap<String, RemoteSource>> {
+    static SOURCES: OnceLock<Mutex<HashMap<String, RemoteSource>>> = OnceLock::new();
+    SOURCES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn remember_source(video_id: &str, source: RemoteSource) {
+    sources().lock().unwrap().insert(video_id.to_string(), source);
+    // 重新打开这条视频等于重新开始：电脑那头进程重启过、任务表空了的话，还能再自动点一次。
+    transcode_requested().lock().unwrap().remove(video_id);
+}
+
+pub fn forget_source(video_id: &str) {
+    sources().lock().unwrap().remove(video_id);
+    transcode_requested().lock().unwrap().remove(video_id);
+}
+
+fn source_for(video_id: &str) -> Option<RemoteSource> {
+    sources().lock().unwrap().get(video_id).cloned()
+}
+
+/// 已经替用户点过一次转码的片子：播放器每秒轮询，不能每秒都发一次 POST。
+fn transcode_requested() -> &'static Mutex<HashSet<String>> {
+    static REQUESTED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    REQUESTED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// 视频地址是 `https://host:port/v/<id>`，转码接口是同机的 `/t/<id>`。
+fn transcode_url(source: &RemoteSource) -> Option<String> {
+    let (base, id) = source.url.rsplit_once("/v/")?;
+    Some(format!("{base}/t/{id}"))
+}
+
+/// 转码接口只回一行状态，正常是毫秒级；超时只是别把轮询挂死。
+const TRANSCODE_TIMEOUT: Duration = Duration::from_secs(10);
+
+async fn fetch_transcode_state(source: &RemoteSource, url: &str) -> Option<TranscodeState> {
+    let response = source
+        .client
+        .get(url)
+        .bearer_auth(&source.token)
+        .timeout(TRANSCODE_TIMEOUT)
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    response.json::<TranscodeState>().await.ok()
+}
+
+async fn request_transcode(source: &RemoteSource, url: &str, retry: bool) -> Option<TranscodeState> {
+    let mut request = source
+        .client
+        .post(url)
+        .bearer_auth(&source.token)
+        .timeout(TRANSCODE_TIMEOUT);
+    if retry {
+        request = request.query(&[("retry", "1")]);
+    }
+    let response = request.send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    response.json::<TranscodeState>().await.ok()
+}
+
+/// 手机问电脑：这条转到哪了。第一次问到 idle 就顺手点一次——播放器只在报了解码失败之后
+/// 才来轮询，这里就是局域网串流这条链路的自动转码点火点（本机播放是在 cmd_media_url 里点）。
+pub async fn phone_transcode_status(video_id: &str) -> Option<TranscodeState> {
+    let source = source_for(video_id)?;
+    let url = transcode_url(&source)?;
+    let state = fetch_transcode_state(&source, &url).await?;
+    if state.state != "idle" {
+        return Some(state);
+    }
+    let first = transcode_requested().lock().unwrap().insert(video_id.to_string());
+    if !first {
+        return Some(state);
+    }
+    match request_transcode(&source, &url, false).await {
+        Some(started) => Some(started),
+        None => {
+            // 这一次没点着（网络抖了一下）：下次轮询再试。
+            transcode_requested().lock().unwrap().remove(video_id);
+            Some(state)
+        }
+    }
+}
+
+/// 用户点了「重试转码」：带 `?retry=1`，让电脑清掉上次的失败记录再做一次。
+pub async fn phone_start_transcode(video_id: &str, retry: bool) -> Option<TranscodeState> {
+    let source = source_for(video_id)?;
+    let url = transcode_url(&source)?;
+    let state = request_transcode(&source, &url, retry).await?;
+    transcode_requested().lock().unwrap().insert(video_id.to_string());
+    Some(state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,6 +885,73 @@ mod tests {
         Advert { addresses: vec!["127.0.0.1".into()], port, token, cert_sha256 }
     }
 
+    /// 拼一个只带一条视频轨的最小 MP4：ftyp + moov/trak/mdia(hdlr)/minf/stbl/stsd。
+    fn write_mp4_with_codec(path: &Path, codec: &[u8; 4]) {
+        fn boxed(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+            let mut out = ((8 + payload.len()) as u32).to_be_bytes().to_vec();
+            out.extend_from_slice(kind);
+            out.extend_from_slice(payload);
+            out
+        }
+        let mut hdlr = vec![0_u8; 8];
+        hdlr.extend_from_slice(b"vide");
+        let mut stsd = vec![0_u8; 8]; // version/flags + entry_count
+        stsd.extend_from_slice(&16_u32.to_be_bytes());
+        stsd.extend_from_slice(codec);
+        let stbl = boxed(b"stbl", &boxed(b"stsd", &stsd));
+        let minf = boxed(b"minf", &stbl);
+        let mut mdia_payload = boxed(b"hdlr", &hdlr);
+        mdia_payload.extend_from_slice(&minf);
+        let moov = boxed(b"moov", &boxed(b"trak", &boxed(b"mdia", &mdia_payload)));
+        let mut file = boxed(b"ftyp", &[0_u8; 16]);
+        file.extend_from_slice(&moov);
+        std::fs::write(path, file).unwrap();
+    }
+
+    /// 真跑一遍 ffmpeg：转出来的成品要是 H.264、进度写到 100、不留下半成品。
+    /// 没打包 ffmpeg（或这台的 ffmpeg 没带 libx264）就跳过，别让这条依赖变成环境检查。
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ffmpeg_transcode_writes_a_playable_h264_copy() {
+        let Ok(ffmpeg) = crate::sidecar::resolve(&crate::sidecar::FFMPEG, None) else { return };
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.mp4");
+        let generated = crate::sidecar::command(&ffmpeg)
+            .args(["-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=160x120:rate=10"])
+            .args(["-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p"])
+            .arg(&source)
+            .status()
+            .await;
+        if !generated.map(|status| status.success()).unwrap_or(false) {
+            return;
+        }
+        let target = dir.path().join("playable.mp4");
+        let percent = AtomicU32::new(0);
+        run_ffmpeg(&source, &target, &percent).await.unwrap();
+        assert_eq!(percent.load(Ordering::Acquire), 100);
+        assert!(converted_ready(&target));
+        assert_eq!(crate::pipeline::playable::video_codec(&target), Some(*b"avc1"));
+        assert!(!dir.path().join("playable.partial.mp4").exists());
+    }
+
+    #[test]
+    fn transcode_progress_is_parsed_from_ffmpeg_output() {        assert_eq!(
+            parse_ffmpeg_duration("  Duration: 00:42:17.12, start: 0.000000, bitrate: 123 kb/s"),
+            Some((42 * 60 + 17) * 1_000_000 + 120_000)
+        );
+        assert_eq!(
+            parse_ffmpeg_duration("  Duration: N/A, start: 0.000000, bitrate: N/A"),
+            None
+        );
+        assert_eq!(parse_out_time_us("out_time_us=1234567"), Some(1_234_567));
+        // 老版本的 ffmpeg 只有 out_time_ms，单位同样是微秒。
+        assert_eq!(parse_out_time_us("out_time_ms=1234567"), Some(1_234_567));
+        assert_eq!(parse_out_time_us("out_time_us=N/A"), None);
+        assert_eq!(parse_out_time_us("progress=continue"), None);
+        assert_eq!(transcode_percent(30, 100), 30);
+        assert_eq!(transcode_percent(150, 100), 99, "100% 只在真正落盘后写");
+        assert_eq!(transcode_percent(10, 0), 0);
+    }
+
     #[test]
     fn secrets_compare_whole_strings_only() {
         assert!(same_secret("abc", "abc"));
@@ -469,6 +960,28 @@ mod tests {
         assert!(valid_video_id("6aba4963-1083-4117-ba11-e4de04111e67"));
         assert!(!valid_video_id("../etc/passwd"));
         assert!(!valid_video_id(""));
+    }
+
+    #[test]
+    fn only_addresses_another_device_could_reach_are_published() {
+        let ok = |ip: &str| shareable_ipv4(ip.parse().unwrap());
+        assert!(ok("10.83.186.220"));
+        assert!(ok("172.20.10.2")); // iPhone 热点
+        assert!(ok("192.168.1.5"));
+        // TUN 代理（Clash / Surge）的假地址：以前问路由得到的就是这种，手机永远连不上。
+        assert!(!ok("198.18.0.1"));
+        assert!(!ok("198.19.2.3"));
+        // 组网 / 运营商 NAT、回环、链路本地、组播、广播、保留段。
+        assert!(!ok("100.100.1.2"));
+        assert!(!ok("127.0.0.1"));
+        assert!(!ok("169.254.40.189"));
+        assert!(!ok("0.0.0.0"));
+        assert!(!ok("224.0.0.1"));
+        assert!(!ok("255.255.255.255"));
+        assert!(is_tunnel("utun4", false));
+        assert!(is_tunnel("wlan0", true));
+        assert!(!is_tunnel("en0", false));
+        assert!(!is_tunnel("wlp2s0", false));
     }
 
     // 一个测试里走完：start/stop 动的是进程里唯一的那个共享服务，分开写会互相踩。
@@ -494,6 +1007,37 @@ mod tests {
         assert_eq!(response.status(), 206);
         assert_eq!(response.headers()["content-range"], "bytes 4-7/16");
         assert_eq!(response.bytes().await.unwrap().as_ref(), b"4567");
+
+        // 手机问转码进度：还没转过是 idle；磁盘上已经有 H.264 成品就直接 done，不会再起 ffmpeg。
+        let client = pinned_client(&published.cert_sha256).unwrap();
+        let transcode = format!("https://127.0.0.1:{port}/t/{video_id}");
+        let state: serde_json::Value = client
+            .get(&transcode)
+            .bearer_auth(&published.token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(state["state"], "idle");
+        let (_, data_dir): (String, String) = sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
+            .bind(&video_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        write_mp4_with_codec(&playable_target(&data_dir), b"avc1");
+        let state: serde_json::Value = client
+            .post(&transcode)
+            .bearer_auth(&published.token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(state["state"], "done");
+        assert_eq!(state["percent"], 100);
 
         // 没有这个视频、口令不对、证书指纹不对：都找不到。
         assert!(probe(std::slice::from_ref(&local), "no-such-video").await.is_none());

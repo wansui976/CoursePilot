@@ -29,6 +29,15 @@ impl TranscodeStatus {
     }
 }
 
+impl From<crate::lan_share::TranscodeState> for TranscodeStatus {
+    fn from(state: crate::lan_share::TranscodeState) -> Self {
+        Self {
+            state: state.state,
+            percent: state.percent,
+        }
+    }
+}
+
 /// 转码任务表：video_id → 进度。进程内单例，跟着 AppState 走。
 #[derive(Default)]
 pub struct TranscodeJobs {
@@ -343,11 +352,24 @@ pub fn ensure_transcode(
 }
 
 #[tauri::command]
-pub fn cmd_transcode_status(
+pub async fn cmd_transcode_status(
+    state: tauri::State<'_, crate::commands::courses::AppState>,
     jobs: tauri::State<'_, Arc<TranscodeJobs>>,
     video_id: String,
-) -> TranscodeStatus {
-    jobs.status(&video_id)
+) -> AppResult<TranscodeStatus> {
+    // 本机有文件：看端上任务表。同步来的占位条目 file_path 是空的，本机没什么可转的。
+    let local = crate::commands::videos::live_video_paths(&state.db, &video_id)
+        .await
+        .ok()
+        .is_some_and(|(file_path, _)| !file_path.is_empty());
+    if local {
+        return Ok(jobs.status(&video_id));
+    }
+    // 局域网串流：问那台电脑转到哪了（第一次问会顺手点火，见 phone_transcode_status）。
+    if let Some(remote) = crate::lan_share::phone_transcode_status(&video_id).await {
+        return Ok(remote.into());
+    }
+    Ok(jobs.status(&video_id))
 }
 
 /// 手动触发一次转码（目前由 cmd_media_url 自动触发，命令留给「重试」按钮）。
@@ -359,6 +381,15 @@ pub async fn cmd_start_transcode(
 ) -> AppResult<TranscodeStatus> {
     let (file_path, data_dir) =
         crate::commands::videos::live_video_paths(&state.db, &video_id).await?;
+    if file_path.is_empty() {
+        // 文件只在局域网里那台电脑上：转码也在那边做，这里只把请求转过去。
+        return match crate::lan_share::phone_start_transcode(&video_id, true).await {
+            Some(remote) => Ok(remote.into()),
+            None => Err(AppError::Other(
+                "连不上局域网里那台电脑，暂时不能转码".into(),
+            )),
+        };
+    }
     ensure_transcode(jobs.inner().clone(), &video_id, &file_path, &data_dir, true)?;
     Ok(jobs.status(&video_id))
 }

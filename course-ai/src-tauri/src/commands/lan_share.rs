@@ -36,7 +36,13 @@ pub async fn cmd_lan_stream_url(
     if !crate::sync::remote::is_enabled(&state.db).await? {
         return Ok(None);
     }
-    let Some(source) = lan_share::find(&state.db, &config, &video_id).await? else { return Ok(None) };
+    let Some(source) = lan_share::find(&state.db, &config, &video_id).await? else {
+        // 电脑关机 / 换了网络：这条视频以后要转码时别再找那台已经连不上的。
+        lan_share::forget_source(&video_id);
+        return Ok(None);
+    };
+    // 记住是哪台电脑：播放器报解码失败后，转码请求要回到同一台电脑上。
+    lan_share::remember_source(&video_id, source.clone());
     media.register_remote(&video_id, source);
     // 每次换个查询串：上次那条转发要是断了，<video> 也会重新连。
     Ok(Some(format!("{}?lan={}", media.url(&video_id), chrono::Utc::now().timestamp_millis())))

@@ -103,7 +103,7 @@ describe("VideoPlayer iOS gestures", () => {
     });
 
     expect(await screen.findByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
-    expect(await screen.findByRole("alert")).toHaveTextContent("正在本机转码");
+    expect(await screen.findByRole("alert")).toHaveTextContent("正在转码");
   });
 
   it("转码完成后重挂播放器、退掉解码失败卡片，而不是只改 src", async () => {
