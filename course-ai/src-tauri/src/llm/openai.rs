@@ -374,7 +374,18 @@ pub async fn complete(
     max_tokens: Option<u32>,
 ) -> AppResult<ChatResponse> {
     let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
-    complete_at(&url, Auth::Bearer(api_key), client, req, max_tokens, "OpenAI").await
+    // 关思考的参数只发给 DeepSeek 官方：OpenAI 和多数兼容端点不认识它，会整个请求报 400。
+    let thinking_off = req.skip_thinking() && crate::llm::is_deepseek_official(base_url);
+    complete_at(&url, Auth::Bearer(api_key), client, req, max_tokens, "OpenAI", thinking_off).await
+}
+
+/// 非流式请求体。`thinking_off` 时带上 DeepSeek 的 `thinking: {type: disabled}`。
+pub fn build_complete_body(req: &ChatRequest, max_tokens: Option<u32>, thinking_off: bool) -> Value {
+    let mut body = build_openai_body_with(req, max_tokens);
+    if thinking_off {
+        body["thinking"] = json!({"type": "disabled"});
+    }
+    body
 }
 
 /// 发到指定 URL（Azure 的 deployment 路径也走这里），错误文案用 `label` 标出真实协议。
@@ -385,10 +396,11 @@ pub(crate) async fn complete_at(
     req: &ChatRequest,
     max_tokens: Option<u32>,
     label: &str,
+    thinking_off: bool,
 ) -> AppResult<ChatResponse> {
     let resp = auth
         .apply(client.post(url))
-        .json(&build_openai_body_with(req, max_tokens))
+        .json(&build_complete_body(req, max_tokens, thinking_off))
         .send()
         .await
         .map_err(request_error)?;
