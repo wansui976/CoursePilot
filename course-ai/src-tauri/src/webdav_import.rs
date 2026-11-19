@@ -388,6 +388,9 @@ pub async fn resolve(db: &Db, url: &str) -> AppResult<Option<(String, RemoteAuth
 fn http_client() -> AppResult<reqwest::Client> {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
+        // OpenList 挂的百度网盘默认把下载 302 到百度直链，超过约 20 MB 的文件要这个 UA 才给。
+        // 对别的 WebDAV 服务没影响；夸克自己带 UA，会盖掉它。账号密码跨站跳转时 reqwest 不会带过去。
+        .user_agent("pan.baidu.com")
         .build()
         .map_err(|error| AppError::Other(error.to_string()))
 }

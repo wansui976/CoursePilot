@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Folder, FileVideo, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, ExternalLink, Folder, FileVideo, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { Modal } from "@/ui/dialog";
@@ -34,6 +35,43 @@ const titleOf = (name: string) => name.replace(/\.[^.]+$/, "");
 type Draft = { id: string | null; preset: PresetKey; name: string; url: string; user: string; password: string };
 
 const emptyDraft = (): Draft => ({ id: null, preset: "openlist", name: "", url: "", user: "", password: "" });
+
+const OPENLIST_STEPS = ["install", "storage", "policy", "permission", "connect"] as const;
+const OPENLIST_LINKS: Partial<Record<(typeof OPENLIST_STEPS)[number], string>> = {
+  install: "https://github.com/OpenListTeam/OpenList-Desktop/releases",
+  storage: "https://api.oplist.org/",
+};
+
+/** 用 OpenList 把百度网盘 / 阿里云盘挂成 WebDAV 的步骤（选了 OpenList 才显示）。 */
+function OpenListGuide() {
+  const { t } = useTranslation();
+  return (
+    <details className="rounded-lg border border-[var(--border-faint)] px-3 py-2">
+      <summary className="ca-t-sm cursor-pointer font-medium text-[var(--text-strong)]">{t("webdavImport.openlistGuide.title")}</summary>
+      <ol className="ca-t-xs mt-2 list-decimal space-y-1.5 pl-5 leading-relaxed text-[var(--text-muted)]">
+        {OPENLIST_STEPS.map((step) => {
+          const link = OPENLIST_LINKS[step];
+          return (
+            <li key={step}>
+              {t(`webdavImport.openlistGuide.${step}`)}
+              {link && (
+                <button
+                  type="button"
+                  className="ml-1 inline-flex items-center gap-0.5 text-primary hover:underline"
+                  onClick={() => void openUrl(link)}
+                >
+                  {link.replace(/^https:\/\//, "").replace(/\/$/, "")}
+                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      <p className="ca-t-xs mt-2 leading-relaxed text-[var(--text-muted)]">{t("webdavImport.openlistGuide.others")}</p>
+    </details>
+  );
+}
 
 /** 添加 / 编辑一个网盘来源。 */
 function SourceForm({
@@ -101,6 +139,7 @@ function SourceForm({
         </select>
         <span className="ca-t-xs block leading-relaxed text-[var(--text-muted)]">{t(`webdavImport.presetHints.${draft.preset}`)}</span>
       </label>
+      {draft.preset === "openlist" && <OpenListGuide />}
       {quark ? (
         <textarea
           aria-label={t("webdavImport.cookie")}

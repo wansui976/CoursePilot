@@ -22,6 +22,8 @@ const { mockIpc, mockMobile } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@/lib/platform", () => ({ isMobile: () => mockMobile.value }));
+const { mockOpenUrl } = vi.hoisted(() => ({ mockOpenUrl: vi.fn() }));
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: mockOpenUrl }));
 
 const nas: WebDavSource = { id: "nas", kind: "webdav", name: "家里的 NAS", url: "http://nas:5244/dav/", user: "me", hasPassword: true, isSync: false };
 const dir = (name: string, path: string): WebDavEntry => ({ name, path, isDir: true, size: null, isVideo: false, url: "" });
@@ -128,5 +130,16 @@ describe("WebDavImportDialog", () => {
     fireEvent.click(await screen.findByRole("button", { name: /申论 2027/ }));
     await waitFor(() => expect(mockIpc.webdavImport.browse).toHaveBeenCalledWith("q", "fid-1"));
     expect(screen.getByRole("navigation", { name: "当前位置" })).toHaveTextContent("全部申论 2027");
+  });
+
+  it("选 OpenList 时有挂百度网盘的步骤，链接用系统浏览器打开", async () => {
+    mockIpc.webdavImport.sources.mockResolvedValue([]);
+    renderDialog();
+    fireEvent.click(await screen.findByText("怎么用 OpenList 挂百度网盘（5 步，一次就好）"));
+    expect(screen.getByText(/WebDAV 策略」选成「本地代理」/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /api\.oplist\.org/ }));
+    expect(mockOpenUrl).toHaveBeenCalledWith("https://api.oplist.org/");
+    fireEvent.change(screen.getByLabelText("网盘类型"), { target: { value: "jianguoyun" } });
+    expect(screen.queryByText("怎么用 OpenList 挂百度网盘（5 步，一次就好）")).not.toBeInTheDocument();
   });
 });

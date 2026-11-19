@@ -1524,7 +1524,16 @@
     "streamUnavailable": "This video is on a cloud drive this device isn't connected to yet. Add the same drive under Import → Import from a cloud drive.",
     "cookie": "Cookie",
     "cookiePlaceholder": "Paste the whole Cookie here",
-    "cookieKeep": "Leave empty to keep the cookie"
+    "cookieKeep": "Leave empty to keep the cookie",
+    "openlistGuide": {
+      "title": "How to mount Baidu Netdisk with OpenList (5 steps, once)",
+      "install": "Download and install OpenList Desktop (Windows and Mac) on your computer. On first launch, follow the guide to install the OpenList service, open the admin page at http://127.0.0.1:5244 and note the admin user name and password.",
+      "storage": "Admin page → Storages → Add → choose \"Baidu Netdisk\". To get the refresh token: open the address below, choose Baidu Netdisk, tick using OpenList's parameters, sign in to Baidu, paste the token back, and turn on \"use online api\" in the storage.",
+      "policy": "In the same storage, set \"WebDAV policy\" to \"Local proxy\" (most compatible; large files aren't blocked by Baidu). Any mount path works, e.g. /Baidu.",
+      "permission": "Admin page → Users → edit admin → tick \"WebDAV read\" under permissions.",
+      "connect": "Back here, use http://127.0.0.1:5244/dav/ as the address (on a phone, use the computer's LAN IP, e.g. http://192.168.1.5:5244/dav/), with your OpenList user name and password. When watching on a phone, the computer must be running OpenList on the same Wi‑Fi.",
+      "others": "Aliyun Drive, 115 and Tianyi Cloud work the same way — pick that storage type in step 2."
+    }
   },
   "bilibiliImport": {
     "title": "Download Online Video",

@@ -1522,7 +1522,16 @@
     "streamUnavailable": "这个视频在网盘上，这台设备还没连上能访问它的网盘：在「导入 → 从网盘导入」里添加同一个网盘。",
     "cookie": "Cookie",
     "cookiePlaceholder": "把复制的整段 Cookie 粘在这里",
-    "cookieKeep": "留空 = 不改 Cookie"
+    "cookieKeep": "留空 = 不改 Cookie",
+    "openlistGuide": {
+      "title": "怎么用 OpenList 挂百度网盘（5 步，一次就好）",
+      "install": "在电脑上下载安装 OpenList Desktop（Windows / Mac 都有），第一次打开按引导装好 OpenList 服务，打开管理页 http://127.0.0.1:5244，记下管理员账号和密码。",
+      "storage": "管理页 → 存储 → 添加 → 选「百度网盘」。刷新令牌这样拿：打开下面的网址，选百度网盘、勾上使用 OpenList 提供的参数，登录百度后复制令牌粘回去，并在存储里打开「使用 online api」。",
+      "policy": "同一个存储里把「WebDAV 策略」选成「本地代理」（兼容性最好，大文件也不会被百度挡）。挂载路径随意，比如 /百度网盘。",
+      "permission": "管理页 → 用户 → 编辑管理员 → 权限里勾上「WebDAV 读取」。",
+      "connect": "回到这里，地址填 http://127.0.0.1:5244/dav/（在手机上用就填电脑的局域网 IP，比如 http://192.168.1.5:5244/dav/），账号密码就是 OpenList 的。手机上看的时候，电脑要开着 OpenList、连着同一个 Wi‑Fi。",
+      "others": "阿里云盘、115、天翼云盘也一样，第 2 步选对应的存储类型。"
+    }
   },
   "bilibiliImport": {
     "title": "下载网络视频",
