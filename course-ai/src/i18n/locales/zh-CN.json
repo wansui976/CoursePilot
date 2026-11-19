@@ -2455,6 +2455,12 @@
       "other": "其他"
     }
   },
+  "lanShare": {
+    "downloadHint": "正在从电脑上边看边传。存到本机之后，断网也能看，也不占网盘额度。",
+    "downloadLocal": "存到本机",
+    "downloading": "正在存到本机 {{percent}}%",
+    "preparing": "正在准备…"
+  },
   "remoteMedia": {
     "title": "视频文件不在这台设备上",
     "available": "这个视频是从别的设备同步过来的，网盘上有它的文件。字幕、笔记和 AI 内容已经同步过来，可以在右边直接看。",

@@ -315,6 +315,28 @@ where
         respond_empty(&mut stream, "200 OK").await;
         return Ok(());
     }
+    // `/i/<id>`：这条视频电脑上会给哪份文件（大小、扩展名）。手机整段下载前先问一声：
+    // 转过码的话 `/v/` 给的是 playable.mp4，文件名也该这么叫，下下来才播得了。
+    if let Some(id) = target.strip_prefix("/i/").filter(|id| valid_video_id(id)) {
+        match server_video_info(db, id).await {
+            Some((file_path, data_dir)) => {
+                let path = crate::pipeline::playable::cached_playable(Path::new(&file_path), Path::new(&data_dir));
+                let info = VideoFileInfo {
+                    size: std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0),
+                    ext: path
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .map(|ext| ext.to_ascii_lowercase())
+                        .filter(|ext| !ext.is_empty() && ext.len() <= 8)
+                        .unwrap_or_else(|| "mp4".into()),
+                };
+                let body = serde_json::to_vec(&info).unwrap_or_default();
+                respond_json(&mut stream, "200 OK", &body).await;
+            }
+            None => respond_empty(&mut stream, "404 Not Found").await,
+        }
+        return Ok(());
+    }
     // `/t/<id>`：手机放不了这条视频的编码，让电脑转一份 H.264。
     // POST 点火（`?retry=1` 表示用户点了重试），GET 查进度；回的都是同一行 JSON。
     if let Some(id) = target.strip_prefix("/t/").filter(|id| valid_video_id(id)) {
@@ -358,6 +380,14 @@ async fn respond_json<S: AsyncWrite + Unpin>(stream: &mut S, status: &str, body:
 
 // ---------------------------------------------------------------------------
 // 电脑这一头：手机放不了的编码，在电脑上转成 H.264
+
+/// `/i/<id>` 回的：整段下载会拿到多大的文件、什么格式。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoFileInfo {
+    pub size: u64,
+    pub ext: String,
+}
 
 /// `/t/<id>` 回的一行状态，和播放器现有的转码 UI 同一套字段。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -862,6 +892,212 @@ pub async fn phone_start_transcode(video_id: &str, retry: bool) -> Option<Transc
     Some(state)
 }
 
+/// 这个视频在哪台电脑上：优先用串流时记下的那台，没有就按网盘上公布的地址再找一遍
+/// （比如 App 重启过，但文件已经下了一半）。
+async fn remote_source(db: &Db, video_id: &str) -> AppResult<RemoteSource> {
+    if let Some(source) = source_for(video_id) {
+        return Ok(source);
+    }
+    let config = crate::sync::remote::saved_config(db)
+        .await?
+        .ok_or_else(|| AppError::Config("还没连上网盘，找不到那台电脑".into()))?;
+    let source = find(db, &config, video_id).await?.ok_or_else(|| {
+        AppError::Other("连不上局域网里那台电脑：确认它开着「局域网直连播放」，而且和这台设备在同一个 Wi‑Fi".into())
+    })?;
+    remember_source(video_id, source.clone());
+    Ok(source)
+}
+
+/// 问电脑 `/i/<id>`：整段下载会是多大的文件、什么扩展名。老版本的电脑没有这个接口时给 None。
+async fn fetch_file_info(source: &RemoteSource) -> AppResult<Option<VideoFileInfo>> {
+    let Some((base, id)) = source.url.rsplit_once("/v/") else { return Ok(None) };
+    let response = source
+        .authorize(source.client.get(format!("{base}/i/{id}")))
+        .timeout(TRANSCODE_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| AppError::Other(error.to_string()))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        return Err(AppError::Other(format!("电脑回了个 {}，暂时不能下载", response.status())));
+    }
+    Ok(response.json::<VideoFileInfo>().await.ok())
+}
+
+/// 老版本的电脑没有 `/i/`：退一步用 HEAD 拿大小，扩展名按内容类型猜（电脑只认 mp4/webm）。
+async fn head_file_info(source: &RemoteSource) -> AppResult<Option<VideoFileInfo>> {
+    let response = source
+        .authorize(source.client.head(&source.url))
+        .timeout(TRANSCODE_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| AppError::Other(error.to_string()))?;
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    let ext = match response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "video/webm" => "webm",
+        "video/ogg" => "ogv",
+        "audio/mp4" => "m4a",
+        "audio/mpeg" => "mp3",
+        _ => "mp4",
+    };
+    Ok(response.content_length().filter(|size| *size > 0).map(|size| VideoFileInfo {
+        size,
+        ext: ext.into(),
+    }))
+}
+
+/// 手机把整段视频存到本机，返回文件路径。下到的就是刚在播的那一份：电脑转过码时
+/// `/v/` 给的是 playable.mp4，这里拿到的也是它。
+///
+/// 断点续传：`.part` 留着，下次从它已有的大小按 Range 接着要。下完核对大小再改名；
+/// `file_path` 是本机的事，不在同步字段里，改了不会外发。
+pub async fn download_video(
+    db: &Db,
+    video_root: &Path,
+    video_id: &str,
+    progress: &(dyn Fn(u64, u64) + Send + Sync),
+) -> AppResult<PathBuf> {
+    let title: String = sqlx::query_scalar("SELECT title FROM videos WHERE id=? AND deleted_at IS NULL")
+        .bind(video_id)
+        .fetch_optional(&db.pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    // 手机上整段下载动辄几分钟：iOS 申请后台继续跑，Android 起前台服务 + 唤醒锁，
+    // 免得锁屏后系统把 App 挂起，下到一半停了。
+    let _keep_alive = crate::keep_alive::hold(crate::keep_alive::Kind::Download, video_id, &title);
+    let report = |done: u64, total: u64| {
+        progress(done, total);
+        if total > 0 {
+            let fraction = done as f64 / total as f64;
+            let detail = format!("下载 {}%", (fraction * 100.0).round() as i64);
+            crate::keep_alive::report(video_id, "download", fraction, &detail);
+        }
+    };
+    let source = remote_source(db, video_id).await?;
+    // 电脑正在转码时 `/v/` 给的还是原片；转失败了多半也放不了。这会儿存下来，离线打开还是黑屏。
+    if let Some(url) = transcode_url(&source) {
+        if let Some(state) = fetch_transcode_state(&source, &url).await {
+            match state.state.as_str() {
+                "running" => {
+                    return Err(AppError::Other("电脑正在把这个视频转成这台设备能播的格式，转完再存".into()))
+                }
+                "failed" => {
+                    return Err(AppError::Other(
+                        "电脑上转码失败了，先在播放器里点「重试转码」，转好再存到本机".into(),
+                    ))
+                }
+                _ => {}
+            }
+        }
+    }
+    let info = match fetch_file_info(&source).await? {
+        Some(info) => info,
+        None => head_file_info(&source)
+            .await?
+            .ok_or_else(|| AppError::Other("电脑上找不到这个视频的文件，可能被移走或删掉了".into()))?,
+    };
+    if info.size == 0 {
+        return Err(AppError::Other("电脑上这个视频的文件是空的".into()));
+    }
+    let dir = video_root.join(video_id);
+    tokio::fs::create_dir_all(&dir).await?;
+    // 标题常常带着原文件的扩展名（「01.mp4」），再拼一次就成了 01.mp4.mp4。
+    let base = Path::new(&title)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.trim().is_empty())
+        .unwrap_or(&title);
+    let stem = crate::sync::media::safe_file_stem(base);
+    let target = dir.join(format!("{stem}.{}", info.ext));
+    // 已经下完了（比如上次成功但没刷新到界面）：直接算数。
+    if tokio::fs::metadata(&target).await.map(|meta| meta.len()).unwrap_or(0) == info.size {
+        record_local_path(db, video_id, &target).await?;
+        report(info.size, info.size);
+        return Ok(target);
+    }
+    let partial = dir.join(format!("{stem}.{}.part", info.ext));
+    let existing = tokio::fs::metadata(&partial).await.map(|meta| meta.len()).unwrap_or(0);
+    // 半截比整份还大：上次下的是另一份文件（比如电脑转完码换了源），从头来。
+    let have = if existing <= info.size { existing } else { 0 };
+    if have == info.size {
+        // 上次停在「下完了还没改名」：直接收尾，不再多要一遍。
+        tokio::fs::rename(&partial, &target).await?;
+        record_local_path(db, video_id, &target).await?;
+        report(info.size, info.size);
+        return Ok(target);
+    }
+
+    let mut request = source.authorize(source.client.get(&source.url));
+    if have > 0 {
+        request = request.header(reqwest::header::RANGE, format!("bytes={have}-"));
+    }
+    let mut response = request.send().await.map_err(|error| AppError::Other(error.to_string()))?;
+    let resumed = have > 0 && response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+    if !resumed && !response.status().is_success() {
+        return Err(AppError::Other(format!(
+            "电脑回了个 {}，暂时不能下载",
+            response.status()
+        )));
+    }
+    let mut written = if resumed { have } else { 0 };
+    let mut file = if resumed {
+        tokio::fs::OpenOptions::new().append(true).open(&partial).await?
+    } else {
+        tokio::fs::OpenOptions::new().create(true).write(true).truncate(true).open(&partial).await?
+    };
+    report(written, info.size);
+    let mut last_report = Instant::now();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                file.write_all(&chunk).await?;
+                written += chunk.len() as u64;
+                if last_report.elapsed() >= Duration::from_millis(150) {
+                    report(written, info.size);
+                    last_report = Instant::now();
+                }
+            }
+            Ok(None) => break,
+            Err(error) => {
+                // 已经写进 .part 的那截留着，下次接着下。
+                report(written, info.size);
+                return Err(AppError::Other(format!("下载中断了（已下 {written} / {} 字节）：{error}", info.size)));
+            }
+        }
+    }
+    if written != info.size {
+        report(written, info.size);
+        return Err(AppError::Other(format!(
+            "下载没下完（{written} / {} 字节），再点一次会接着下",
+            info.size
+        )));
+    }
+    tokio::fs::rename(&partial, &target).await?;
+    record_local_path(db, video_id, &target).await?;
+    report(info.size, info.size);
+    Ok(target)
+}
+
+async fn record_local_path(db: &Db, video_id: &str, path: &Path) -> AppResult<()> {
+    sqlx::query("UPDATE videos SET file_path=? WHERE id=?")
+        .bind(path.to_string_lossy().as_ref())
+        .bind(video_id)
+        .execute(&db.pool)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -991,7 +1227,7 @@ mod tests {
         // 口令和证书都对：找得到，Range 请求原样转回来。
         let source = probe(std::slice::from_ref(&local), &video_id).await.expect("找到了");
         let media = crate::media_server::start().await.unwrap();
-        media.register_remote(&video_id, source);
+        media.register_remote(&video_id, source.clone());
         let response = reqwest::Client::new()
             .get(media.url(&video_id))
             .header("Range", "bytes=4-7")
@@ -1001,6 +1237,35 @@ mod tests {
         assert_eq!(response.status(), 206);
         assert_eq!(response.headers()["content-range"], "bytes 4-7/16");
         assert_eq!(response.bytes().await.unwrap().as_ref(), b"4567");
+
+        // 整段下载到本机：本地先有半截 .part，从半截接着下；下完 file_path 指过去。
+        remember_source(&video_id, source.clone());
+        let title: String = sqlx::query_scalar("SELECT title FROM videos WHERE id=?")
+            .bind(&video_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        let stem = crate::sync::media::safe_file_stem(
+            std::path::Path::new(&title).file_stem().unwrap().to_str().unwrap(),
+        );
+        let phone_root = dir.path().join("phone");
+        let phone_dir = phone_root.join(&video_id);
+        std::fs::create_dir_all(&phone_dir).unwrap();
+        std::fs::write(phone_dir.join(format!("{stem}.mp4.part")), b"0123456789").unwrap();
+        let seen = std::sync::Mutex::new(Vec::new());
+        let downloaded = download_video(&db, &phone_root, &video_id, &|done, _| seen.lock().unwrap().push(done))
+            .await
+            .unwrap();
+        assert_eq!(downloaded.file_name().unwrap().to_string_lossy(), format!("{stem}.mp4"));
+        assert_eq!(std::fs::read(&downloaded).unwrap(), b"0123456789abcdef");
+        assert_eq!(seen.lock().unwrap().first(), Some(&10), "从已有的半截接着下，不从头再来");
+        assert!(!phone_dir.join(format!("{stem}.mp4.part")).exists());
+        let stored: String = sqlx::query_scalar("SELECT file_path FROM videos WHERE id=?")
+            .bind(&video_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, downloaded.to_string_lossy());
 
         // 手机问转码进度：还没转过是 idle；磁盘上已经有 H.264 成品就直接 done，不会再起 ffmpeg。
         let client = pinned_client(&published.cert_sha256).unwrap();

@@ -2469,6 +2469,12 @@
       "other": "Other"
     }
   },
+  "lanShare": {
+    "downloadHint": "Streaming from your computer. Save it here to keep it offline, without using your drive's quota.",
+    "downloadLocal": "Save to this device",
+    "downloading": "Saving to this device… {{percent}}%",
+    "preparing": "Preparing…"
+  },
   "remoteMedia": {
     "title": "The video file isn't on this device",
     "available": "This video was synced from another device and its file is on your drive. Transcript, notes and AI content are already here on the right.",

@@ -249,6 +249,8 @@ export const lanShare = {
   setEnabled: (enabled: boolean): Promise<LanShareStatus> => invoke("cmd_lan_share_set_enabled", { enabled }),
   /** 本机没有文件时，在局域网里找一台有的设备；找到了返回本机转发的播放地址，否则 null。 */
   streamUrl: (videoId: string): Promise<string | null> => invoke("cmd_lan_stream_url", { videoId }),
+  /** 把这个视频整段下到本机（进度见 `lan-share:download` 事件）；返回更新后的视频条目。 */
+  downloadVideo: (videoId: string): Promise<Video> => invoke("cmd_lan_download_video", { videoId }),
 };
 
 /** 从网盘（WebDAV）导入课程。「下载到本机」走下载队列（`downloads.enqueue`，地址就是网盘文件地址）。 */

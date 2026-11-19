@@ -578,6 +578,23 @@ pub async fn upload_pass(
         if present.contains(&fingerprint) && UPLOADED.lock().unwrap().contains(&fingerprint) {
             continue;
         }
+        // 局域网下载到的可能是电脑转好的副本（指纹还是原片的那一份）。真要上传前，
+        // 用文件本身再算一遍：别拿旧指纹把不一样的字节传上去，别的设备下完一核对就删了。
+        let actual = {
+            let path = PathBuf::from(&file_path);
+            tokio::task::spawn_blocking(move || crate::sync::media::quick_fingerprint(&path))
+                .await
+                .map_err(|error| AppError::Other(error.to_string()))??
+        };
+        let fingerprint = if actual == fingerprint {
+            fingerprint
+        } else if crate::sync::media::remote_manifest(&dav, &fingerprint).await?.is_some() {
+            // 网盘上已经有这个视频的一份原件：不用再把本机的副本传一份占额度。
+            UPLOADED.lock().unwrap().insert(fingerprint);
+            continue;
+        } else {
+            actual
+        };
         let report = |sent: u64, total: u64| progress(&video_id, &title, sent, total);
         let done = crate::sync::media::upload(&dav, &fingerprint, Path::new(&file_path), &report, keep_going).await?;
         UPLOADED.lock().unwrap().insert(fingerprint);
@@ -1314,6 +1331,41 @@ mod tests {
         assert_eq!(file_path, path.to_string_lossy());
         // 挂上文件是本机的事，不往外发。
         assert_eq!(crate::sync::outbox::pending_count(&phone.db).await.unwrap(), 0);
+    }
+
+    /// 局域网下载到的是电脑转好的 H.264 副本，视频条目里的指纹还是原片（AV1）的。
+    /// 上传时要按文件本身算指纹，不能拿原片指纹把不一样的字节传上去。
+    #[tokio::test]
+    async fn a_lan_downloaded_copy_is_uploaded_under_its_own_fingerprint() {
+        let (url, _store) = test_server::start().await;
+        let config = config(&url);
+        let phone = Device::new("phone").await;
+        let course = crate::commands::courses::create_course(&phone.db, "c".into(), phone.dir.path().to_string_lossy().into()).await.unwrap();
+        let file = phone.dir.path().join("01.mp4");
+        std::fs::write(&file, b"transcoded-h264-copy").unwrap();
+        let video = crate::commands::videos::add_local_video(&phone.db, &course.id, file.clone(), None).await.unwrap();
+        let original = "f".repeat(64);
+        sqlx::query("UPDATE videos SET content_fingerprint=? WHERE id=?")
+            .bind(&original)
+            .bind(&video.id)
+            .execute(&phone.db.pool)
+            .await
+            .unwrap();
+        // 先把同步目录建好（平时是正常同步建的），再单独跑上传。
+        phone.sync(&config).await.unwrap();
+
+        assert_eq!(upload_pass(&phone.db, &config, &|_, _, _, _| {}, &|| true).await.unwrap(), 1);
+        let actual = crate::sync::media::quick_fingerprint(&file).unwrap();
+        let dav = config.client().unwrap();
+        assert_ne!(actual, original, "前提：副本和原片不是同一份");
+        assert!(
+            crate::sync::media::remote_manifest(&dav, &actual).await.unwrap().is_some(),
+            "按文件真实的指纹传上去"
+        );
+        assert!(
+            crate::sync::media::remote_manifest(&dav, &original).await.unwrap().is_none(),
+            "没拿原片的指纹传不一样的字节"
+        );
     }
 
     #[test]

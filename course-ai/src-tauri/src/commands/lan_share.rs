@@ -2,9 +2,23 @@
 
 use crate::commands::courses::AppState;
 use crate::commands::settings::set_setting;
-use crate::error::AppResult;
+use crate::commands::videos::Video;
+use crate::error::{AppError, AppResult};
 use crate::lan_share::{self, Status};
-use tauri::State;
+use tauri::{Emitter, Manager, State};
+
+/// 局域网整段下载的进度。
+pub const DOWNLOAD_EVENT: &str = "lan-share:download";
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadProgress {
+    video_id: String,
+    downloaded: u64,
+    total: u64,
+    done: bool,
+    error: Option<String>,
+}
 
 #[tauri::command]
 pub async fn cmd_lan_share_status(state: State<'_, AppState>) -> AppResult<Status> {
@@ -46,4 +60,39 @@ pub async fn cmd_lan_stream_url(
     media.register_remote(&video_id, source);
     // 每次换个查询串：上次那条转发要是断了，<video> 也会重新连。
     Ok(Some(format!("{}?lan={}", media.url(&video_id), chrono::Utc::now().timestamp_millis())))
+}
+
+/// 把这个视频整段下到本机（从正连着的那台电脑）。下完以后离线也能看，也不再占网盘上传额度。
+/// 进度走 DOWNLOAD_EVENT；返回更新过 file_path 的视频条目。
+#[tauri::command]
+pub async fn cmd_lan_download_video(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    video_id: String,
+) -> AppResult<Video> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| AppError::Config(error.to_string()))?;
+    let emitter = app.clone();
+    let id = video_id.clone();
+    let report = move |downloaded: u64, total: u64| {
+        let _ = emitter.emit(
+            DOWNLOAD_EVENT,
+            DownloadProgress { video_id: id.clone(), downloaded, total, done: false, error: None },
+        );
+    };
+    let result = lan_share::download_video(&state.db, &app_data.join("synced-videos"), &video_id, &report).await;
+    let _ = app.emit(
+        DOWNLOAD_EVENT,
+        DownloadProgress {
+            video_id: video_id.clone(),
+            downloaded: 0,
+            total: 0,
+            done: true,
+            error: result.as_ref().err().map(|error| error.to_string()),
+        },
+    );
+    result?;
+    crate::commands::videos::get_video(&state.db, &video_id).await
 }

@@ -595,3 +595,12 @@ export type RemoteSyncDownloadEvent = {
   done: boolean;
   error: string | null;
 };
+
+/** 局域网整段下载的进度（`lan-share:download` 事件）。 */
+export type LanDownloadEvent = {
+  videoId: string;
+  downloaded: number;
+  total: number;
+  done: boolean;
+  error: string | null;
+};

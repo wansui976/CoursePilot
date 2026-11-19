@@ -12,6 +12,7 @@ import { TabsPanel } from "./TabsPanel";
 import { ClipQueueBar } from "./ClipQueueBar";
 import { RemoteMediaStage } from "./RemoteMediaStage";
 import { DriveDownloadBar } from "./DriveDownloadBar";
+import { LanDownloadBar } from "./LanDownloadBar";
 import { WorkspaceLayout } from "./WorkspaceLayout";
 import { allowsNotesSplit } from "./workbenchLayout";
 
@@ -144,7 +145,9 @@ export function VideoWorkbench({
             </header>
           )}
           <ClipQueueBar />
-          {remoteStream.data?.kind === "drive" && <DriveDownloadBar video={video} />}
+          {/* 存到本机之后文件就有了，这条不用再留着（下载完成会立刻刷新 video.file_path）。 */}
+          {!hasLocalFile && remoteStream.data?.kind === "drive" && <DriveDownloadBar video={video} />}
+          {!hasLocalFile && remoteStream.data?.kind === "lan" && <LanDownloadBar video={video} />}
           <div className="ca-stage-wrap">
             {isPhoneDevice && (
               <button
