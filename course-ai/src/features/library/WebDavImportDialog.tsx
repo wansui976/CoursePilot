@@ -1,11 +1,24 @@
 import { useMemo, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, ExternalLink, Folder, FileVideo, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  ChevronRight,
+  Cloud,
+  ExternalLink,
+  Folder,
+  FileVideo,
+  HardDriveDownload,
+  Home,
+  Loader2,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { Modal } from "@/ui/dialog";
+import { Select } from "@/ui/select";
 import { ipc, type WebDavEntry, type WebDavSource } from "@/lib/ipc";
 import { qk } from "@/lib/queryKeys";
 import { isMobile } from "@/lib/platform";
@@ -24,7 +37,7 @@ const PRESETS: { key: PresetKey; url: string }[] = [
 ];
 
 const FIELD =
-  "w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm outline-none focus:border-[var(--focus-ring)]";
+  "w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] outline-none transition placeholder:text-[var(--text-muted)] focus-visible:border-[var(--accent-text)]";
 
 const MB = 1024 * 1024;
 const formatSize = (bytes: number | null) =>
@@ -46,8 +59,11 @@ const OPENLIST_LINKS: Partial<Record<(typeof OPENLIST_STEPS)[number], string>> =
 function OpenListGuide() {
   const { t } = useTranslation();
   return (
-    <details className="rounded-lg border border-[var(--border-faint)] px-3 py-2">
-      <summary className="ca-t-sm cursor-pointer font-medium text-[var(--text-strong)]">{t("webdavImport.openlistGuide.title")}</summary>
+    <details className="group rounded-xl bg-[var(--surface-input)] px-3 py-2.5">
+      <summary className="ca-t-sm flex cursor-pointer list-none items-center gap-1.5 font-medium text-[var(--text-strong)] [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="h-4 w-4 flex-none text-[var(--text-muted)] transition-transform group-open:rotate-90" aria-hidden="true" />
+        {t("webdavImport.openlistGuide.title")}
+      </summary>
       <ol className="ca-t-xs mt-2 list-decimal space-y-1.5 pl-5 leading-relaxed text-[var(--text-muted)]">
         {OPENLIST_STEPS.map((step) => {
           const link = OPENLIST_LINKS[step];
@@ -118,12 +134,11 @@ function SourceForm({
   });
 
   return (
-    <div className="space-y-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3">
-      <label className="block space-y-1">
-        <span className="ca-t-xs text-[var(--text-muted)]">{t("webdavImport.kind")}</span>
-        <select
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <span className="ca-t-xs block font-medium text-[var(--text-muted)]">{t("webdavImport.kind")}</span>
+        <Select
           aria-label={t("webdavImport.kind")}
-          className={FIELD}
           value={draft.preset}
           onChange={(event) => {
             const preset = event.target.value as PresetKey;
@@ -136,10 +151,9 @@ function SourceForm({
               {t(`webdavImport.presets.${one.key}`)}
             </option>
           ))}
-        </select>
-        <span className="ca-t-xs block leading-relaxed text-[var(--text-muted)]">{t(`webdavImport.presetHints.${draft.preset}`)}</span>
-      </label>
-      {draft.preset === "openlist" && <OpenListGuide />}
+        </Select>
+        <p className="ca-t-xs leading-relaxed text-[var(--text-muted)]">{t(`webdavImport.presetHints.${draft.preset}`)}</p>
+      </div>
       {quark ? (
         <textarea
           aria-label={t("webdavImport.cookie")}
@@ -202,6 +216,8 @@ function SourceForm({
           {t("webdavImport.save")}
         </Button>
       </div>
+      {/* 教程放在表单后面：展开以后要填的框不会被挤到看不见的地方。 */}
+      {draft.preset === "openlist" && <OpenListGuide />}
     </div>
   );
 }
@@ -308,7 +324,8 @@ export function WebDavImportDialog({
       {sources.error && <ErrorNote error={sources.error} onRetry={() => void sources.refetch()} />}
 
       {(noSources || editing) && (
-        <div className="space-y-2">
+        // 表单（尤其展开 OpenList 教程时）可能比对话框高：在这里滚动，保存按钮总够得着。
+        <div className="-mx-1 min-h-0 flex-1 space-y-3 overflow-y-auto px-1 pb-1">
           {noSources && !editing && (
             <p className="ca-t-sm leading-relaxed text-[var(--text-muted)]">{t("webdavImport.intro")}</p>
           )}
@@ -329,9 +346,9 @@ export function WebDavImportDialog({
       {!noSources && !editing && active && (
         <div className="flex min-h-0 flex-1 flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <select
+            <Select
               aria-label={t("webdavImport.source")}
-              className={`${FIELD} w-auto min-w-0 flex-1`}
+              className="min-w-0 flex-1"
               value={active.id}
               onChange={(event) => switchSource(event.target.value)}
             >
@@ -342,7 +359,7 @@ export function WebDavImportDialog({
                     : source.name || (source.kind === "quark" ? t("webdavImport.presets.quark") : source.url)}
                 </option>
               ))}
-            </select>
+            </Select>
             {!active.isSync && (
               <>
                 <Button
@@ -383,13 +400,24 @@ export function WebDavImportDialog({
           </div>
 
           <nav aria-label={t("webdavImport.location")} className="ca-t-sm flex flex-wrap items-center gap-1 text-[var(--text-muted)]">
-            <button type="button" className="rounded px-1 hover:text-[var(--text-strong)]" onClick={() => goTo(0)}>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded px-1 hover:text-[var(--text-strong)]"
+              onClick={() => goTo(0)}
+            >
+              <Home className="h-3.5 w-3.5" aria-hidden="true" />
               {t("webdavImport.root")}
             </button>
             {trail.map((crumb, index) => (
               <span key={`${index}-${crumb.path}`} className="flex items-center gap-1">
                 <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-                <button type="button" className="rounded px-1 hover:text-[var(--text-strong)]" onClick={() => goTo(index + 1)}>
+                <button
+                  type="button"
+                  className={`max-w-[12rem] truncate rounded px-1 hover:text-[var(--text-strong)] ${
+                    index === trail.length - 1 ? "font-medium text-[var(--text-strong)]" : ""
+                  }`}
+                  onClick={() => goTo(index + 1)}
+                >
                   {crumb.name}
                 </button>
               </span>
@@ -411,9 +439,14 @@ export function WebDavImportDialog({
                 <input
                   type="checkbox"
                   checked={allChosen}
+                  ref={(node) => {
+                    if (node) node.indeterminate = chosen.length > 0 && !allChosen;
+                  }}
                   onChange={() => setSelected(allChosen ? new Set() : new Set(videos.map((entry) => entry.url)))}
                 />
-                {t("webdavImport.selectAll", { count: videos.length })}
+                {chosen.length > 0 && !allChosen
+                  ? t("webdavImport.selectedOf", { count: chosen.length, total: videos.length })
+                  : t("webdavImport.selectAll", { count: videos.length })}
               </label>
             )}
             <ul>
@@ -457,20 +490,29 @@ export function WebDavImportDialog({
 
           <fieldset className="grid gap-2 sm:grid-cols-2">
             <legend className="sr-only">{t("webdavImport.mode")}</legend>
-            {(["download", "stream"] as const).map((value) => (
+            {(["download", "stream"] as const).map((value) => {
+              const Icon = value === "download" ? HardDriveDownload : Cloud;
+              return (
               <label
                 key={value}
-                className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 ${
-                  mode === value ? "border-[var(--focus-ring)] bg-[var(--surface-card-hover)]" : "border-[var(--border-subtle)]"
+                className={`flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 transition-colors ${
+                  mode === value
+                    ? "border-[var(--accent-text)] bg-[var(--surface-card-hover)]"
+                    : "border-[var(--border-subtle)] hover:bg-[var(--surface-card-hover)]"
                 }`}
               >
-                <input type="radio" name="webdav-mode" className="mt-1" checked={mode === value} onChange={() => setMode(value)} />
+                <input type="radio" name="webdav-mode" className="sr-only" checked={mode === value} onChange={() => setMode(value)} />
+                <Icon
+                  className={`mt-0.5 h-4 w-4 flex-none ${mode === value ? "text-[var(--accent-text)]" : "text-[var(--text-muted)]"}`}
+                  aria-hidden="true"
+                />
                 <span className="min-w-0">
                   <span className="block text-sm font-medium text-[var(--text-strong)]">{t(`webdavImport.modes.${value}`)}</span>
                   <span className="ca-t-xs block leading-relaxed text-[var(--text-muted)]">{t(`webdavImport.modeHints.${value}`)}</span>
                 </span>
               </label>
-            ))}
+              );
+            })}
           </fieldset>
 
           {importing.error && <ErrorNote error={importing.error} />}
@@ -480,7 +522,7 @@ export function WebDavImportDialog({
             </Button>
             <Button variant="primary" disabled={chosen.length === 0 || importing.isPending} onClick={() => importing.mutate()}>
               {importing.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              {t("webdavImport.import", { count: chosen.length })}
+              {chosen.length === 0 ? t("webdavImport.pickFirst") : t("webdavImport.import", { count: chosen.length })}
             </Button>
           </div>
         </div>

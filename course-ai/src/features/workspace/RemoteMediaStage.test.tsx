@@ -63,4 +63,17 @@ describe("RemoteMediaStage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "在局域网里再找一次" }));
     expect(retry).toHaveBeenCalled();
   });
+
+  it("网盘「在线看」的视频：只说去连上那个网盘，不再说「从别的设备同步过来」", async () => {
+    mockIpc.remoteSync.mediaSize.mockResolvedValue(null);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const drive = { ...video, source_type: "url", source_uri: "http://192.168.1.5:5244/dav/%E8%AF%BE/01.mp4" } as unknown as Video;
+    render(
+      <QueryClientProvider client={client}>
+        <RemoteMediaStage video={drive} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText(/这台设备还没连上能访问它的网盘/)).toBeInTheDocument();
+    expect(screen.queryByText(/从别的设备同步过来/)).not.toBeInTheDocument();
+  });
 });

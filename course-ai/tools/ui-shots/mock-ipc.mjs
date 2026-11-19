@@ -466,12 +466,62 @@ export function installMockIpc({ theme, safeArea }) {
     // __shot-shuffled：课程里的视频顺序被打乱（拍「按讲次排序」按钮）。
     cmd_list_videos: ({ courseId }) => {
       if (courseId !== "c1") return [];
-      const list = videos.map((video) => (withFolders() ? video : { ...video, folder_id: null }));
+      // __shot-remote / __shot-drive：「03 梯度下降的直觉」这台设备上没有文件（从别的设备同步来 / 网盘在线看）。
+      const remote = localStorage.getItem("__shot-remote") === "1" || localStorage.getItem("__shot-drive") === "1";
+      const list = videos
+        .map((video) => (withFolders() ? video : { ...video, folder_id: null }))
+        .map((video) =>
+          remote && video.id === "v3"
+            ? { ...video, file_path: "", source_type: "url", source_uri: "http://192.168.1.5:5244/dav/%E8%AF%BE/03.mp4" }
+            : video,
+        );
       if (localStorage.getItem("__shot-shuffled") !== "1") return list;
       return [7, 2, 0, 5, 1, 8, 3, 6, 4].map((i, order_index) => ({ ...list[i], order_index }));
     },
     cmd_video_cover: ({ videoId }) => cover(videoId),
     cmd_media_url: ({ videoId }) => mediaUrl(videoId),
+    // —— 多设备同步 / 局域网直连播放 / 从网盘导入 ——
+    cmd_remote_sync_status: () => ({
+      enabled: true,
+      url: "https://dav.jianguoyun.com/dav/",
+      folder: "CoursePilot",
+      user: "me@example.com",
+      hasPassword: true,
+      deviceId: "d-mac",
+      deviceName: "Mac（MacBook-Pro）",
+      pending: 0,
+      devices: [
+        { deviceId: "d-win", name: "Windows（DESKTOP-7Q2）", platform: "windows", seenAt: now - 25 * 60_000 },
+        { deviceId: "d-phone", name: "安卓", platform: "android", seenAt: now - 3 * DAY },
+      ],
+      state: { running: false, lastSuccessAt: now - 4 * 60_000, lastError: null, lastReport: null },
+      uploadMedia: true,
+      media: { uploading: { videoId: "v5", title: "05 过拟合、正则化与偏差方差.mp4", sent: 180 * 1024 * 1024, total: 420 * 1024 * 1024 }, lastError: null },
+    }),
+    cmd_lan_share_status: () => ({ supported: true, enabled: true, running: true, port: 47321, addresses: ["192.168.1.5"], error: null }),
+    cmd_lan_stream_url: () => null,
+    cmd_remote_sync_media_size: () => 734 * 1024 * 1024,
+    cmd_webdav_stream_url: ({ videoId }) => (localStorage.getItem("__shot-drive") === "1" ? mediaUrl(videoId) : null),
+    cmd_webdav_sources: () => [
+      { id: "sync", kind: "webdav", name: "", url: "https://dav.jianguoyun.com/dav/", user: "me@example.com", hasPassword: true, isSync: true },
+      { id: "nas", kind: "webdav", name: "家里的 OpenList", url: "http://192.168.1.5:5244/dav/", user: "admin", hasPassword: true, isSync: false },
+      { id: "q", kind: "quark", name: "", url: "quark://", user: "", hasPassword: true, isSync: false },
+    ],
+    cmd_webdav_browse: ({ path }) => {
+      const dir = (name, p) => ({ name, path: p, isDir: true, size: null, isVideo: false, url: "" });
+      const file = (name, size, isVideo = true) => ({ name, path: `${path}${name}`, isDir: false, size: size * 1024 * 1024, isVideo, url: `http://192.168.1.5:5244/dav/${encodeURI(path + name)}` });
+      if (!path) return [dir("百度网盘", "百度网盘/"), dir("夸克", "夸克/"), dir("阿里云盘", "阿里云盘/")];
+      if (path === "百度网盘/") return [dir("2027 申论系统班", "百度网盘/2027 申论系统班/"), dir("行测资料分析", "百度网盘/行测资料分析/")];
+      return [
+        dir("讲义", `${path}讲义/`),
+        file("第01讲 概括题的作答逻辑.mp4", 412),
+        file("第02讲 归纳概括的要点提取.mp4", 389),
+        file("第03讲 综合分析：解释型题目.mp4", 455),
+        file("第04讲 综合分析：评价型题目.mp4", 431),
+        file("第10讲 大作文的结构与论证.mp4", 528),
+        file("课程说明.pdf", 2, false),
+      ];
+    },
     cmd_list_processing_videos: () => [videos[6]],
     cmd_ai_usage_summary: () => {
       const row = (key, name, cost, calls = 6, prompt = 182_000, cached = 141_000, out = 9_800) => ({

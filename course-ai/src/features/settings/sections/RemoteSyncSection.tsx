@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
@@ -8,6 +8,7 @@ import { ErrorNote } from "@/ui/ErrorNote";
 import { Switch } from "@/ui/switch";
 import { ipc, type RemoteSyncMediaState, type RemoteSyncRunState, type RemoteSyncStatus } from "@/lib/ipc";
 import { formatRelativeTime } from "@/lib/time";
+import { isMobile } from "@/lib/platform";
 import { FIELD, Group, Row, SavedBadge, Select, StackRow } from "@/features/settings/primitives";
 import { LanShareGroup } from "./LanShareGroup";
 
@@ -294,17 +295,19 @@ export function RemoteSyncSection() {
             hint={t("settings.remoteSync.uploadMediaHint")}
             htmlFor="remote-sync-upload-media"
             status={
-              status.uploadMedia
-                ? status.media.uploading
-                  ? t("settings.remoteSync.uploading", {
+              status.uploadMedia ? (
+                status.media.uploading ? (
+                  <UploadProgress
+                    label={t("settings.remoteSync.uploading", {
                       title: status.media.uploading.title,
-                      percent:
-                        status.media.uploading.total > 0
-                          ? Math.floor((status.media.uploading.sent / status.media.uploading.total) * 100)
-                          : 0,
-                    })
-                  : t("settings.remoteSync.uploadIdle")
-                : undefined
+                      percent: uploadPercent(status.media.uploading),
+                    })}
+                    percent={uploadPercent(status.media.uploading)}
+                  />
+                ) : (
+                  t("settings.remoteSync.uploadIdle")
+                )
+              ) : undefined
             }
           >
             <Switch
@@ -323,9 +326,11 @@ export function RemoteSyncSection() {
       {status.enabled && <LanShareGroup />}
 
       <Group header={t("settings.remoteSync.devicesGroup")}>
-        <Row label={status.deviceName} status={t("settings.remoteSync.thisDevice")}>
-          <Laptop className="h-4 w-4 text-[var(--text-muted)]" aria-hidden="true" />
-        </Row>
+        <DeviceRow
+          name={status.deviceName}
+          mobile={isMobile()}
+          status={t("settings.remoteSync.thisDevice")}
+        />
         {status.devices.length === 0 ? (
           <StackRow>
             <p className="ca-t-xs leading-relaxed text-[var(--text-muted)]">{t("settings.remoteSync.noDevices")}</p>
@@ -334,20 +339,16 @@ export function RemoteSyncSection() {
           status.devices.map((device) => {
             const name = device.name ?? device.deviceId.slice(0, 8);
             return (
-              <Row
+              <DeviceRow
                 key={device.deviceId}
-                label={name}
+                name={name}
+                mobile={MOBILE.has(device.platform ?? "")}
                 status={t("settings.remoteSync.seen", { time: formatRelativeTime(device.seenAt, Date.now(), i18n.language) })}
-              >
-                <div className="flex items-center gap-2">
-                  {MOBILE.has(device.platform ?? "") ? (
-                    <Smartphone className="h-4 w-4 text-[var(--text-muted)]" aria-hidden="true" />
-                  ) : (
-                    <Laptop className="h-4 w-4 text-[var(--text-muted)]" aria-hidden="true" />
-                  )}
+                action={
                   <Button
                     size="sm"
                     variant="ghost"
+                    className="text-[var(--text-muted)] hover:text-[var(--status-err)]"
                     disabled={busy != null}
                     aria-label={t("settings.remoteSync.retireLabel", { name })}
                     onClick={() => void retire(device, name)}
@@ -355,12 +356,61 @@ export function RemoteSyncSection() {
                     {busy === "retire" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                     {t("settings.remoteSync.retire")}
                   </Button>
-                </div>
-              </Row>
+                }
+              />
             );
           })
         )}
       </Group>
     </>
+  );
+}
+
+const uploadPercent = (uploading: { sent: number; total: number }) =>
+  uploading.total > 0 ? Math.floor((uploading.sent / uploading.total) * 100) : 0;
+
+/** 视频上传进度：一行字 + 一条细进度条（字说传的是哪个，条一眼看出走到哪了）。 */
+function UploadProgress({ label, percent }: { label: string; percent: number }) {
+  return (
+    <span className="block">
+      <span className="block truncate">{label}</span>
+      <span
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent}
+        className="mt-1.5 block h-1 w-full max-w-xs overflow-hidden rounded-full bg-[var(--border-subtle)]"
+      >
+        <span className="block h-full rounded-full bg-[var(--accent-text)] transition-[width] duration-500" style={{ width: `${percent}%` }} />
+      </span>
+    </span>
+  );
+}
+
+/** 设备列表的一行：左边是设备类型的图标，中间名字和状态，右边是操作（别的设备才有「移除」）。 */
+function DeviceRow({
+  name,
+  mobile,
+  status,
+  action,
+}: {
+  name: string;
+  mobile: boolean;
+  status: string;
+  action?: ReactNode;
+}) {
+  const Icon = mobile ? Smartphone : Laptop;
+  return (
+    <div className="flex min-h-[44px] items-center gap-3 px-4 py-3">
+      <span className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-[var(--surface-input)] text-[var(--text-muted)]">
+        <Icon className="h-4 w-4" aria-hidden="true" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium tracking-[-0.01em] text-[var(--text-strong)]">{name}</p>
+        <p className="mt-0.5 truncate text-xs text-[var(--text-muted)]">{status}</p>
+      </div>
+      {action}
+    </div>
   );
 }

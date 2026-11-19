@@ -519,6 +519,74 @@ export const scenes = [
     },
   },
   {
+    // 设置 → 多设备同步：连接、同步状态、视频上传进度、局域网直连播放、设备列表（带「移除」）。
+    name: "settings-sync",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await nav(page, "设置", "设置");
+      await page.getByRole("button", { name: "多设备同步" }).first().click();
+      await page.getByText("局域网直连播放").first().waitFor();
+      await shot();
+      // 滚到底看设备列表。
+      await page.evaluate(() => {
+        for (const el of document.querySelectorAll("*")) {
+          if (el.scrollHeight > el.clientHeight + 4 && getComputedStyle(el).overflowY !== "visible") el.scrollTop = el.scrollHeight;
+        }
+      });
+      await shot("bottom");
+    },
+  },
+  {
+    // 从网盘导入：根目录 → 课程文件夹（全选）→ 添加网盘（OpenList 教程展开）→ 夸克（贴 Cookie）。
+    name: "webdav-import",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await openCourse(page);
+      await page.getByRole("button", { name: "导入" }).first().click();
+      await page.getByRole("menuitem", { name: /从网盘导入/ }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByRole("button", { name: /百度网盘/ }).waitFor();
+      await shot();
+      await dialog.getByRole("button", { name: /百度网盘/ }).click();
+      await dialog.getByRole("button", { name: /2027 申论系统班/ }).click();
+      await dialog.getByText(/全选这里的/).click();
+      await shot("folder");
+      await dialog.getByRole("button", { name: "添加网盘" }).click();
+      await dialog.getByText(/怎么用 OpenList/).click();
+      await shot("add");
+      await dialog.getByLabel("网盘类型").selectOption("quark");
+      await shot("quark");
+    },
+  },
+  {
+    // 视频文件不在这台设备上：从网盘下载 / 在局域网里找电脑。
+    name: "remote-media",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-remote", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openCourse(page);
+      await page.getByRole("button", { name: VIDEO }).first().click();
+      await page.getByText("视频文件不在这台设备上").waitFor({ timeout: 5000 });
+      await page.getByRole("button", { name: /从网盘下载/ }).waitFor();
+      await shot();
+      await page.evaluate(() => localStorage.removeItem("__shot-remote"));
+    },
+  },
+  {
+    // 网盘「在线看」：播放器上方的「下载到本机」。
+    name: "drive-stream",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-drive", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openVideo(page);
+      await page.getByRole("button", { name: "下载到本机" }).waitFor();
+      await shot();
+      await page.evaluate(() => localStorage.removeItem("__shot-drive"));
+    },
+  },
+  {
     name: "dashboard",
     devices: ALL,
     run: async ({ page, shot }) => {

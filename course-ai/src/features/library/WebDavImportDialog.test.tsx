@@ -101,7 +101,10 @@ describe("WebDavImportDialog", () => {
     mockIpc.webdavImport.importStream.mockResolvedValue(["v1"]);
     const onClose = renderDialog();
     fireEvent.click(await screen.findByRole("button", { name: /申论 2027/ }));
-    fireEvent.click(await screen.findByLabelText(/第2讲\.mp4/));
+    await screen.findByText("第2讲.mp4");
+    expect(screen.getByRole("button", { name: "先选要导入的视频" })).toBeDisabled();
+    fireEvent.click(screen.getByLabelText(/第2讲\.mp4/));
+    expect(screen.getByText("已选 1 / 2 个视频")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /在线看/ })).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "导入 1 个视频" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());

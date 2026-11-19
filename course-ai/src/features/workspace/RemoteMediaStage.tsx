@@ -76,13 +76,15 @@ export function RemoteMediaStage({
       <CloudDownload className="h-10 w-10 text-white/50" aria-hidden="true" />
       <div className="max-w-sm space-y-1.5">
         <p className="ca-t-md font-medium">{t("remoteMedia.title")}</p>
-        {looksLikeDriveFile(video) && <p className="ca-t-sm text-white/70">{t("webdavImport.streamUnavailable")}</p>}
-        <p className="ca-t-sm text-white/55">
-          {size.isError
-            ? t("remoteMedia.noSync")
-            : size.data === null
-              ? t("remoteMedia.notUploaded")
-              : t("remoteMedia.available")}
+        {/* 网盘「在线看」的视频：说怎么连上那个网盘；不再接着说「从别的设备同步过来」那套，两段话互相打架。 */}
+        <p className="ca-t-sm leading-relaxed text-white/55">
+          {looksLikeDriveFile(video)
+            ? t("webdavImport.streamUnavailable")
+            : size.isError
+              ? t("remoteMedia.noSync")
+              : size.data === null
+                ? t("remoteMedia.notUploaded")
+                : t("remoteMedia.available")}
         </p>
       </div>
       {size.isPending && <Loader2 className="h-4 w-4 animate-spin text-white/50" aria-label={t("remoteMedia.checking")} />}
