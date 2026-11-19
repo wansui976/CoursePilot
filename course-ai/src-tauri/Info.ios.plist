@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- iOS 包的附加 Info.plist：Tauri 打包时合并进生成的工程。 -->
+<plist version="1.0">
+<dict>
+	<!-- 用数据线把课程视频拷进 iPad：Finder / Apple 设备里会显示这个 App 的「文稿」，
+	     拖进去之后在 App 里「导入 → 上传本地视频」从「我的 iPad → course-ai」选中。 -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+</dict>
+</plist>
