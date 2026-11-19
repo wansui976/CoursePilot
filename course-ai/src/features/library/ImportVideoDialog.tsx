@@ -19,7 +19,9 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { useAnchoredPosition } from "@/ui/anchoredPosition";
 import { qk } from "@/lib/queryKeys";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/ui/button";
@@ -57,6 +59,11 @@ export function ImportVideoButton({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+  // 菜单挂到 body 上、按窗口里剩下的空间选方向：课程页顶部的按钮靠左、空状态里的按钮靠下，
+  // 原来固定「右对齐、往下弹」，一个被内容区左缘裁掉，一个伸出窗口底部。
+  const menuStyle = useAnchoredPosition(menuOpen, triggerRef, menuRef);
+  // 导入失败的提示和菜单同一侧展开：按钮靠左时往右伸。
+  const [alignLeft, setAlignLeft] = useState(false);
   const [showBili, setShowBili] = useState(false);
   const [showPlaylist, setShowPlaylist] = useState(false);
   const [showDrive, setShowDrive] = useState(false);
@@ -174,22 +181,27 @@ export function ImportVideoButton({
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         aria-controls={menuOpen ? menuId : undefined}
-        onClick={() => setMenuOpen((o) => !o)}
+        onClick={() => {
+          const rect = triggerRef.current?.getBoundingClientRect();
+          if (rect) setAlignLeft(rect.left + rect.width / 2 < window.innerWidth / 2);
+          setMenuOpen((o) => !o);
+        }}
       >
         <Plus className="h-4 w-4" />
         {t("import.title")}
         <ChevronDown className="h-3.5 w-3.5 opacity-70" />
       </Button>
-      {menuOpen && (
+      {menuOpen && typeof document !== "undefined" && createPortal(
         <>
-          <div className="fixed inset-0 z-10" aria-hidden="true" />
+          <div className="fixed inset-0 z-40" aria-hidden="true" />
           <div
             ref={menuRef}
             id={menuId}
             role="menu"
             aria-label={t("import.title")}
             onKeyDown={handleMenuKeyDown}
-            className="absolute right-0 top-full z-20 mt-1.5 w-72 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-1.5 shadow-[var(--shadow-pop)]"
+            style={menuStyle}
+            className="z-50 w-72 max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel)] p-1.5 shadow-[var(--shadow-pop)]"
           >
             <button
               role="menuitem"
@@ -318,7 +330,8 @@ export function ImportVideoButton({
               </>
             )}
           </div>
-        </>
+        </>,
+        document.body,
       )}
       {showBili && (
         <Suspense fallback={null}>
@@ -362,7 +375,7 @@ export function ImportVideoButton({
         // 这里直接展示、保留「导入失败：」前缀，不再过一遍 humanizeError（会吞掉前缀）。
         <div
           role="alert"
-          className="absolute right-0 top-full z-20 mt-2 flex w-72 max-w-[calc(100vw-2rem)] items-start gap-2 rounded-lg bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)] shadow-[var(--shadow-pop)]"
+          className={`absolute ${alignLeft ? "left-0" : "right-0"} top-full z-20 mt-2 flex w-72 max-w-[calc(100vw-2rem)] items-start gap-2 rounded-lg bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)] shadow-[var(--shadow-pop)]`}
         >
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" />
           <span className="min-w-0 break-words">{t("import.importFailed", { error: importError })}</span>

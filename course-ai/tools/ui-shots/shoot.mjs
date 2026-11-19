@@ -63,6 +63,8 @@ const DEVICES = {
   desktop: { kind: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 },
   // 大屏外接显示器：看内容在宽窗口里是靠左还是居中、行是不是拉得太长。
   wide: { kind: "desktop", viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 },
+  // 笔记本上开得比较小的窗口：课程页工具条换行、空状态的按钮靠下，浮层最容易出界。
+  "desktop-small": { kind: "desktop", viewport: { width: 1000, height: 655 }, deviceScaleFactor: 2 },
   phone: { kind: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, ...touch },
   tablet: { kind: "tablet", viewport: { width: 820, height: 1180 }, deviceScaleFactor: 2, ...touch },
   // —— 按真实平台身份模拟（UA + 触屏 + 横竖屏），走到 iOS / Android / Windows 专属分支 ——

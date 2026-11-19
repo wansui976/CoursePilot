@@ -70,6 +70,29 @@ export const scenes = [
     },
   },
   {
+    // 课程页顶部的「导入」靠左：菜单要往右展开，不能被内容区左缘裁掉。
+    name: "import-menu",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await openCourse(page);
+      await page.getByRole("button", { name: "导入" }).first().click();
+      await page.getByRole("menu", { name: "导入" }).waitFor();
+      await shot();
+    },
+  },
+  {
+    // 空课程中间的「导入」靠下：菜单下面放不下要往上弹，不能伸出窗口。
+    name: "import-menu-empty",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await page.getByRole("button", { name: /^线性代数的本质/ }).first().click();
+      await page.getByText("还没有视频").waitFor();
+      await page.getByRole("button", { name: "导入" }).last().click();
+      await page.getByRole("menu", { name: "导入" }).waitFor();
+      await shot();
+    },
+  },
+  {
     // 导入后顺序乱了：顶栏出现「按讲次排序」，排完变成「撤销排序」。
     name: "lecture-sort",
     devices: ALL,
