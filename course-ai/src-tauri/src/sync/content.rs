@@ -7,6 +7,10 @@
 //!
 //! 本机的戳在 sync_content_stamps：本机改动由触发器记，合并对端版本时这里记成对端的戳。
 //! 「过期」标记靠的生成指纹（ai_artifact_sources）随内容一起带过去，两边判断一致。
+//!
+//! 视频封面（Cover）也走这里：它是从视频文件截出来的一帧，没有文件的设备自己截不出来。
+//! 封面不在表里，而是数据目录里的 cover.jpg——所以不靠触发器入队，截出新封面时由
+//! `enqueue_cover` 直接排进出件箱；收到时写进本机这个视频的数据目录。
 
 use crate::error::AppResult;
 use crate::sync::envelope::SyncEnvelope;
@@ -21,7 +25,12 @@ const VIDEO_TYPES: &[(&str, Option<&str>)] = &[
     ("Quiz", Some("quiz")),
     ("Mindmap", Some("mindmap")),
     ("Highlights", Some("highlights")),
+    ("Cover", None),
 ];
+
+pub const COVER: &str = "Cover";
+/// 封面比这还大就不同步（正常的封面几十 KB，这么大多半是出了什么问题）。
+const COVER_MAX_BYTES: u64 = 1024 * 1024;
 
 pub const COURSE_KNOWLEDGE: &str = "CourseKnowledge";
 
@@ -95,8 +104,85 @@ async fn source_of(tx: &mut Transaction<'_, Sqlite>, video_id: &str, artifact: O
         .unwrap_or(Value::Null))
 }
 
+/// 本机有文件的视频的封面路径（没有文件的设备不往外发封面：它的封面本来就是收来的）。
+async fn local_cover_path(tx: &mut Transaction<'_, Sqlite>, video_id: &str) -> AppResult<Option<std::path::PathBuf>> {
+    let row: Option<(String, String)> = sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
+        .bind(video_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+    Ok(row
+        .filter(|(file_path, data_dir)| !file_path.is_empty() && !data_dir.is_empty())
+        .map(|(_, data_dir)| std::path::Path::new(&data_dir).join("cover.jpg")))
+}
+
+/// 截出了新封面：排进出件箱（和触发器做的一样：入队 + 记本机戳）。
+pub async fn enqueue_cover(db: &crate::db::Db, video_id: &str) -> AppResult<()> {
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut tx = db.pool.begin().await?;
+    enqueue_covers_in(&mut tx, &[video_id.to_string()], now).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// 本机已经截好的封面全部排进出件箱（封面是后来才纳入同步的，已经开着同步的设备补推一次）。
+pub async fn enqueue_cover_snapshot(db: &crate::db::Db) -> AppResult<usize> {
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, data_dir FROM videos WHERE deleted_at IS NULL AND file_path<>'' AND data_dir<>''")
+            .fetch_all(&db.pool)
+            .await?;
+    let ids: Vec<String> = rows
+        .into_iter()
+        .filter(|(_, data_dir)| std::path::Path::new(data_dir).join("cover.jpg").is_file())
+        .map(|(id, _)| id)
+        .collect();
+    let mut tx = db.pool.begin().await?;
+    enqueue_covers_in(&mut tx, &ids, chrono::Utc::now().timestamp_millis()).await?;
+    tx.commit().await?;
+    Ok(ids.len())
+}
+
+async fn enqueue_covers_in(tx: &mut Transaction<'_, Sqlite>, ids: &[String], now: i64) -> AppResult<()> {
+    let device: String = sqlx::query_scalar("SELECT device_id FROM sync_device_state WHERE singleton=1")
+        .fetch_optional(&mut **tx)
+        .await?
+        .unwrap_or_default();
+    for id in ids {
+        sqlx::query(
+            "INSERT INTO sync_outbox(record_type,record_id,operation,changed_at) VALUES (?,?,'save',?)
+             ON CONFLICT(record_type,record_id) DO UPDATE SET operation='save',changed_at=excluded.changed_at,
+               attempts=0,leased_at=NULL,last_error=NULL,version_counter=NULL,version_device=NULL",
+        )
+        .bind(COVER)
+        .bind(id)
+        .bind(now)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO sync_content_stamps(record_type,record_id,updated_at,device) VALUES (?,?,?,?)
+             ON CONFLICT(record_type,record_id) DO UPDATE SET updated_at=excluded.updated_at, device=excluded.device",
+        )
+        .bind(COVER)
+        .bind(id)
+        .bind(now)
+        .bind(&device)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
 /// 出件：从本地表拼出整条记录。记录已经不存在（内容被删光）时返回 None，外发会转成删除。
 pub async fn payload(tx: &mut Transaction<'_, Sqlite>, record_type: &str, id: &str) -> AppResult<Option<Value>> {
+    if record_type == COVER {
+        let Some(path) = local_cover_path(tx, id).await? else { return Ok(None) };
+        let size = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+        if size == 0 || size > COVER_MAX_BYTES {
+            return Ok(None);
+        }
+        let bytes = std::fs::read(&path)?;
+        use base64::Engine as _;
+        return Ok(Some(json!({"videoID": id, "jpeg": base64::engine::general_purpose::STANDARD.encode(bytes)})));
+    }
     let source = source_of(tx, id, artifact_of(record_type)).await?;
     let value = match record_type {
         "Transcript" => {
@@ -272,6 +358,33 @@ pub async fn save(tx: &mut Transaction<'_, Sqlite>, envelope: &SyncEnvelope) -> 
         return Ok(ContentOutcome::Skipped);
     }
     match envelope.record_type.as_str() {
+        COVER => {
+            use base64::Engine as _;
+            let row: Option<(String, String)> = sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
+                .bind(id)
+                .fetch_optional(&mut **tx)
+                .await?;
+            let Some((file_path, data_dir)) = row.filter(|(_, data_dir)| !data_dir.is_empty()) else {
+                return Ok(ContentOutcome::Skipped);
+            };
+            let cover = std::path::Path::new(&data_dir).join("cover.jpg");
+            // 本机有文件、也已经截过封面：用自己的（同一个文件截出来的，没必要换）。
+            if !file_path.is_empty() && cover.is_file() {
+                return Ok(ContentOutcome::Skipped);
+            }
+            let Some(bytes) = payload
+                .get("jpeg")
+                .and_then(Value::as_str)
+                .and_then(|text| base64::engine::general_purpose::STANDARD.decode(text).ok())
+                .filter(|bytes| !bytes.is_empty())
+            else {
+                return Ok(ContentOutcome::Skipped);
+            };
+            std::fs::create_dir_all(&data_dir)?;
+            let temporary = cover.with_extension("jpg.sync-tmp");
+            std::fs::write(&temporary, &bytes)?;
+            std::fs::rename(&temporary, &cover)?;
+        }
         "Transcript" => {
             sqlx::query("DELETE FROM transcripts WHERE video_id=?").bind(id).execute(&mut **tx).await?;
             for segment in payload.get("segments").and_then(Value::as_array).into_iter().flatten() {

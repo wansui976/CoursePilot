@@ -49,6 +49,7 @@ const SETTING_LAST_SUCCESS: &str = "remote_sync_last_success";
 const SETTING_LAST_ERROR: &str = "remote_sync_last_error";
 /// 字幕和生成内容是后来才纳入同步的：已经开过同步的设备也要把这部分补推一次。
 const SETTING_CONTENT_SNAPSHOT: &str = "remote_sync_content_snapshot";
+const SETTING_COVER_SNAPSHOT: &str = "remote_sync_cover_snapshot";
 /// 自己的批次最近一次压缩到第几批；还有旧文件没删完时记一个「待清理」。
 const SETTING_BASE_UPTO: &str = "remote_sync_base_upto";
 const SETTING_TIDY_PENDING: &str = "remote_sync_tidy_pending";
@@ -255,6 +256,11 @@ pub async fn run_once(db: &Db, config: &RemoteConfig, spool_root: &Path, video_r
     if get_setting(db, SETTING_CONTENT_SNAPSHOT).await?.as_deref() != Some("1") {
         crate::sync::content::enqueue_snapshot(db).await?;
         set_setting(db, SETTING_CONTENT_SNAPSHOT, "1").await?;
+    }
+    // 封面比字幕更晚纳入同步：已经截好的封面补推一次。
+    if get_setting(db, SETTING_COVER_SNAPSHOT).await?.as_deref() != Some("1") {
+        crate::sync::content::enqueue_cover_snapshot(db).await?;
+        set_setting(db, SETTING_COVER_SNAPSHOT, "1").await?;
     }
 
     let own_cache = compact::Cache { root: &spool_root.join("own") };
@@ -1591,6 +1597,44 @@ mod tests {
         assert_eq!(lan_puts(), 2, "地址变了重写");
         publish_lan(&dav, &own_dir, &key, None).await;
         assert!(!remote_files(&store, &pc_id).contains(&"lan.json".to_string()), "关掉共享后删掉");
+    }
+
+    #[tokio::test]
+    async fn video_covers_follow_the_video_to_a_device_without_the_file() {
+        let (url, _store) = test_server::start().await;
+        let config = config(&url);
+        let pc = Device::new("pc").await;
+        let phone = Device::new("phone").await;
+        let course = crate::commands::courses::create_course(&pc.db, "c".into(), pc.dir.path().to_string_lossy().into()).await.unwrap();
+        let mut videos = Vec::new();
+        for name in ["01.mp4", "02.mp4"] {
+            let file = pc.dir.path().join(name);
+            std::fs::write(&file, b"x").unwrap();
+            videos.push(crate::commands::videos::add_local_video(&pc.db, &course.id, file, None).await.unwrap());
+        }
+        // 第一个视频开同步之前就截好了封面：首次同步补推。
+        std::fs::write(std::path::Path::new(&videos[0].data_dir).join("cover.jpg"), b"cover-one").unwrap();
+        pc.sync(&config).await.unwrap();
+        // 第二个之后才截（首页显示到它时）：截出来就排进同步。
+        std::fs::write(std::path::Path::new(&videos[1].data_dir).join("cover.jpg"), b"cover-two").unwrap();
+        crate::sync::content::enqueue_cover(&pc.db, &videos[1].id).await.unwrap();
+        pc.sync(&config).await.unwrap();
+
+        // 手机上没有文件也看得到封面。
+        phone.sync(&config).await.unwrap();
+        for (video, expected) in videos.iter().zip([b"cover-one".as_slice(), b"cover-two"]) {
+            let bytes = crate::commands::videos::video_cover_bytes(&phone.db, &video.id).await.unwrap();
+            assert_eq!(bytes, expected);
+        }
+        // 收来的封面不再推回去；没有文件、也还没收到封面的视频直接说没有（不去跑 ffmpeg）。
+        let again = phone.sync(&config).await.unwrap();
+        assert_eq!(again.pushed, 0, "{again:?}");
+        let file = pc.dir.path().join("03.mp4");
+        std::fs::write(&file, b"x").unwrap();
+        let third = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None).await.unwrap();
+        pc.sync(&config).await.unwrap();
+        phone.sync(&config).await.unwrap();
+        assert!(crate::commands::videos::video_cover_bytes(&phone.db, &third.id).await.is_err());
     }
 
     #[tokio::test]

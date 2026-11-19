@@ -1268,8 +1268,21 @@ pub async fn video_cover_bytes(db: &Db, video_id: &str) -> AppResult<Vec<u8>> {
             let _ = std::fs::remove_file(&cover_path);
         }
     }
+    let existing = std::path::Path::new(&data_dir).join("cover.jpg");
+    let had_cover = existing.is_file();
+    // 从别的设备同步过来、本机没有文件：封面要么已经随同步过来了，要么还没有——
+    // 没有文件截不出帧，别每次都白跑一趟 ffmpeg。
+    if file_path.is_empty() && !had_cover {
+        return Err(AppError::NotFound(format!("cover of {video_id}")));
+    }
     let cover =
         crate::pipeline::slides::ensure_cover(&source, std::path::Path::new(&data_dir)).await?;
+    // 刚截出的新封面：排进同步，没有这个文件的设备也能显示。
+    if !had_cover && !file_path.is_empty() {
+        if let Err(error) = crate::sync::content::enqueue_cover(db, video_id).await {
+            tracing::warn!(%error, "封面没能排进同步");
+        }
+    }
     Ok(tokio::fs::read(&cover).await?)
 }
 
