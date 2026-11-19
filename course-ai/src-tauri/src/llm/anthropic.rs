@@ -228,7 +228,13 @@ pub fn parse_response(value: &Value) -> AppResult<ChatResponse> {
         return Err(AppError::Other(format!("Anthropic 没有返回正文或工具调用：{value}")));
     }
     let usage = usage_of(value.get("usage"));
-    Ok(ChatResponse { content, tool_calls, usage })
+    let truncated = value.get("stop_reason").and_then(Value::as_str) == Some("max_tokens");
+    Ok(ChatResponse {
+        content,
+        tool_calls,
+        usage,
+        truncated,
+    })
 }
 
 fn usage_of(usage: Option<&Value>) -> Option<Usage> {

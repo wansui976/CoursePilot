@@ -194,6 +194,7 @@ mod tests {
             content: content.into(),
             tool_calls: Vec::new(),
             usage: None,
+            truncated: false,
         }
     }
 

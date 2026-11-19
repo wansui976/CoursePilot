@@ -543,6 +543,7 @@ pub async fn run_with_prefix<T: ToolBox>(
             content: streamed.content,
             tool_calls: streamed.tool_calls,
             usage: streamed.usage,
+            truncated: false,
         };
 
         if !response.content.trim().is_empty() {
@@ -731,6 +732,7 @@ mod tests {
             content: text.into(),
             tool_calls: Vec::new(),
             usage: None,
+            truncated: false,
         }
     }
 
@@ -739,6 +741,7 @@ mod tests {
             content: String::new(),
             tool_calls: calls,
             usage: None,
+            truncated: false,
         }
     }
 
@@ -965,6 +968,7 @@ mod tests {
                 content: "我先查一下".into(),
                 tool_calls: vec![call("c1", "probe", "{}")],
                 usage: None,
+                truncated: false,
             },
             says("查完了，答案是这个"),
         ]);
@@ -1570,6 +1574,7 @@ mod tests {
                 content: "我先查一下".into(),
                 tool_calls: vec![call("c1", "probe", "{}")],
                 usage: None,
+                truncated: false,
             },
             says("查完了"),
         ]);

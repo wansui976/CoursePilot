@@ -83,6 +83,7 @@ fn scripted_tools(calls: Vec<ToolCall>) -> ChatResponse {
         content: String::new(),
         tool_calls: calls,
         usage: None,
+        truncated: false,
     }
 }
 
@@ -92,6 +93,7 @@ fn scripted_answer() -> ChatResponse {
         content: "离线评测终答".into(),
         tool_calls: Vec::new(),
         usage: None,
+        truncated: false,
     }
 }
 

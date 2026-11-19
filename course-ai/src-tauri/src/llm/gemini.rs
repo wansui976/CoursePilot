@@ -221,6 +221,7 @@ pub fn parse_response(value: &Value) -> AppResult<ChatResponse> {
         content,
         tool_calls,
         usage: usage_of(value.get("usageMetadata")),
+        truncated: candidate.get("finishReason").and_then(Value::as_str) == Some("MAX_TOKENS"),
     })
 }
 

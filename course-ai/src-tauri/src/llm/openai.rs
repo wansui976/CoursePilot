@@ -280,10 +280,16 @@ pub fn parse_openai_response(v: &Value) -> AppResult<ChatResponse> {
     if content.is_none() && tool_calls.is_empty() {
         return Err(AppError::Other(format!("unexpected OpenAI response: {v}")));
     }
+    let finish_reason = v
+        .get("choices")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("finish_reason"))
+        .and_then(Value::as_str);
     Ok(ChatResponse {
         content: content.unwrap_or_default().to_string(),
         tool_calls,
         usage: parse_usage(v),
+        truncated: finish_reason == Some("length"),
     })
 }
 

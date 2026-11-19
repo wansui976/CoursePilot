@@ -166,6 +166,7 @@ pub fn parse_response(value: &Value) -> AppResult<ChatResponse> {
         content,
         tool_calls,
         usage: usage_of(value),
+        truncated: value.get("done_reason").and_then(Value::as_str) == Some("length"),
     })
 }
 

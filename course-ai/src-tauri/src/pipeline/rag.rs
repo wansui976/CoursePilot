@@ -2047,6 +2047,7 @@ mod tests {
                 content: "因为陷入了局部极小值 [01:10]".into(),
                 tool_calls: Vec::new(),
                 usage: None,
+                truncated: false,
             }]),
         };
         let cancel = AtomicBool::new(false);

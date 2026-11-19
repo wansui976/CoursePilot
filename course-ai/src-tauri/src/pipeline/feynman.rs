@@ -285,8 +285,7 @@ pub async fn evaluate(
     }
     let (text, videos) = material_text(&material);
     let req = feynman_request(model, &material.title, material.reference.as_deref(), &text, &explanation);
-    let content = provider.complete(&req).await?.content;
-    let result = parse_feynman(&content, &videos)?;
+    let result = crate::pipeline::ai::complete_parsed(provider, &req, |content| parse_feynman(content, &videos)).await?;
 
     let attempt = FeynmanAttempt {
         id: uuid::Uuid::new_v4().to_string(),

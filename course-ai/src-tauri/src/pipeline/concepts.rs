@@ -1674,10 +1674,7 @@ pub async fn analyze_course_concepts(
                 tools: Vec::new(),
                 label: "concept_extract",
             };
-            let extracted = match provider.complete(&req).await {
-                Ok(response) => parse_concepts_json(&response.content),
-                Err(error) => Err(error),
-            };
+            let extracted = crate::pipeline::ai::complete_parsed(provider, &req, parse_concepts_json).await;
             match extracted {
                 Ok(concepts) => {
                     chunk_ok += 1;

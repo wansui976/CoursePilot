@@ -465,13 +465,18 @@ pub enum StreamPiece<'a> {
     Reasoning(&'a str),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ChatResponse {
     pub content: String,
     /// 模型这一轮要求调的工具。非空时 `content` 通常是空的——它没在说话，在派活。
     pub tool_calls: Vec<ToolCall>,
     /// 服务端报的 token 用量。端点不报就是 None。
     pub usage: Option<Usage>,
+    /// 输出撞上了 max_tokens 被截掉（OpenAI `finish_reason: length`、Anthropic
+    /// `stop_reason: max_tokens`、Gemini `MAX_TOKENS`、Ollama `done_reason: length`）。
+    /// Markdown 产物截了也还能用一部分；要解析 JSON 的任务据此直接报「输出被截断」，
+    /// 不去解析半截 JSON、也不重问（同样的请求再问一次还是会截）。
+    pub truncated: bool,
 }
 
 /// 一次调用的 token 用量。
@@ -635,8 +640,7 @@ impl Provider {
             }
             Provider::Mock { canned } => ChatResponse {
                 content: canned.clone(),
-                tool_calls: Vec::new(),
-                usage: None,
+                ..ChatResponse::default()
             },
             Provider::Scripted { steps } => {
                 let mut steps = steps.lock().unwrap_or_else(|e| e.into_inner());
@@ -1000,5 +1004,54 @@ mod tests {
             .unwrap();
         assert_eq!(chunks, 0, "已取消则不产出");
         assert_eq!(full.content, "");
+    }
+}
+
+#[cfg(test)]
+mod truncation_tests {
+    use serde_json::json;
+
+    /// 四家的「撞上输出上限」各有各的写法；认错一家，半截 JSON 就会被当成格式错误去重问。
+    #[test]
+    fn every_provider_reports_output_cut_off_by_max_tokens() {
+        let openai = |reason: &str| {
+            super::openai::parse_openai_response(&json!({
+                "choices": [{"message": {"content": "[{\"a\":"}, "finish_reason": reason}]
+            }))
+            .unwrap()
+            .truncated
+        };
+        assert!(openai("length"));
+        assert!(!openai("stop"));
+
+        let anthropic = |reason: &str| {
+            super::anthropic::parse_response(&json!({
+                "content": [{"type": "text", "text": "[{\"a\":"}], "stop_reason": reason
+            }))
+            .unwrap()
+            .truncated
+        };
+        assert!(anthropic("max_tokens"));
+        assert!(!anthropic("end_turn"));
+
+        let gemini = |reason: &str| {
+            super::gemini::parse_response(&json!({
+                "candidates": [{"content": {"parts": [{"text": "[{\"a\":"}]}, "finishReason": reason}]
+            }))
+            .unwrap()
+            .truncated
+        };
+        assert!(gemini("MAX_TOKENS"));
+        assert!(!gemini("STOP"));
+
+        let ollama = |reason: &str| {
+            super::ollama::parse_response(&json!({
+                "message": {"role": "assistant", "content": "[{\"a\":"}, "done": true, "done_reason": reason
+            }))
+            .unwrap()
+            .truncated
+        };
+        assert!(ollama("length"));
+        assert!(!ollama("stop"));
     }
 }

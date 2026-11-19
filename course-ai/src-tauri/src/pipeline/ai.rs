@@ -307,32 +307,69 @@ fn fix_number_token(token: &str, millis_key: bool) -> String {
     format!("{sign}{int_part}{rest}")
 }
 
-/// 宽松解析 LLM 返回的 JSON：先严格解析，失败再修 LaTeX 反斜杠转义和写坏的数字后重试。
-/// 适用于含数学公式（LaTeX）的章节/出题等结构化输出。
+/// 宽松解析 LLM 返回的 JSON：先严格解析；失败再修 LaTeX 反斜杠转义和写坏的数字；
+/// 还不行，就当 JSON 前后夹着说明文字（「以下是章节划分：[…] 希望有帮助」），从每个
+/// `{` / `[` 起试着读出**一个**完整的值、后面的文字不管。适用于章节/出题等结构化输出。
 pub fn parse_lenient_json<T: serde::de::DeserializeOwned>(content: &str) -> AppResult<T> {
     let cleaned = strip_code_fence(content);
-    match serde_json::from_str(cleaned) {
-        Ok(value) => Ok(value),
-        Err(_) => serde_json::from_str(&repair_json_numbers(&repair_json_backslashes(cleaned)))
-            .map_err(AppError::Json),
+    if let Ok(value) = serde_json::from_str(cleaned) {
+        return Ok(value);
     }
+    let repaired = repair_json_numbers(&repair_json_backslashes(cleaned));
+    let repaired_error = match serde_json::from_str(&repaired) {
+        Ok(value) => return Ok(value),
+        Err(err) => err,
+    };
+    // 起点最多试 32 个：LaTeX 里的花括号很多，逐个试到底在长文本上是平方级。
+    for (index, _) in repaired.match_indices(['{', '[']).take(32) {
+        let mut values = serde_json::Deserializer::from_str(&repaired[index..]).into_iter::<T>();
+        if let Some(Ok(value)) = values.next() {
+            return Ok(value);
+        }
+    }
+    Err(AppError::Json(repaired_error))
 }
 
-/// 请求模型并解析结构化输出；解析不了就原样再请求一次。temperature 是 0.3，同样的坏写法
-/// 很少连着出两次：多花一次请求，总比整步失败、等用户发现了手动点重试强。
-async fn complete_parsed<T>(
+/// 请求模型并解析结构化输出。
+///
+/// - 输出撞上输出上限被截断：直接报错，不解析半截 JSON，也不重问（再问还是会截）。
+/// - 解析不了：把它上一次的输出和解析错误一起发回去让它改一次（temperature 0.3，
+///   再加上明确的错误提示，同样的坏写法很少连着出两次）。多花一次请求，总比整步失败、
+///   等用户发现了手动点重试强。
+pub(crate) async fn complete_parsed<T>(
     provider: &Provider,
     req: &crate::llm::ChatRequest,
     parse: impl Fn(&str) -> AppResult<T>,
 ) -> AppResult<T> {
     let resp = provider.complete(req).await?;
-    match parse(&resp.content) {
-        Ok(value) => Ok(value),
-        Err(err) => {
-            tracing::warn!(label = req.label, error = %err, "模型输出解析失败，重新请求一次");
-            parse(&provider.complete(req).await?.content)
-        }
+    ensure_not_truncated(&resp)?;
+    let err = match parse(&resp.content) {
+        Ok(value) => return Ok(value),
+        Err(err) => err,
+    };
+    tracing::warn!(label = req.label, error = %err, "模型输出解析失败，带上错误重问一次");
+    let mut retry = req.clone();
+    retry.messages.push(crate::llm::ChatMessage::assistant(resp.content));
+    retry.messages.push(crate::llm::ChatMessage::user(format!(
+        "你上一次的输出没法按要求解析：{err}。请按原来的要求重新完整输出一遍：只输出 JSON，\
+         不要任何解释、注释或代码围栏；数字直接写普通阿拉伯数字（不要前导零、不要写成 mm:ss）。"
+    )));
+    let resp = provider.complete(&retry).await?;
+    ensure_not_truncated(&resp)?;
+    parse(&resp.content).map_err(|second| {
+        AppError::Pipeline(format!("模型返回的结果格式不对，让它改了一次还是解析不了：{second}"))
+    })
+}
+
+fn ensure_not_truncated(resp: &crate::llm::ChatResponse) -> AppResult<()> {
+    if resp.truncated {
+        return Err(AppError::Permanent(
+            "模型输出达到单次输出上限被截断，结果不完整。可在 设置 → 大模型 → 高级 里调大\
+             「单次输出上限」，或换一个输出上限更大的模型。"
+                .into(),
+        ));
     }
+    Ok(())
 }
 
 #[derive(Debug, Serialize, serde::Deserialize)]
@@ -1888,13 +1925,53 @@ mod tests {
         assert_eq!(repair_json_numbers(valid), valid);
     }
 
-    #[tokio::test]
-    async fn chapters_retry_once_when_model_output_does_not_parse() {
-        let (db, vid, _d) = seed_video_with_transcript().await;
-        let provider = Provider::Mock { canned: "不是 JSON".into() };
-        let err = generate_chapters(&db, &provider, "m", &vid, None).await.unwrap_err();
-        assert!(matches!(err, AppError::Json(_)), "两次都坏才报错：{err:?}");
+    #[test]
+    fn finds_the_json_between_explanations() {
+        let raw = "好的，按 \\frac{a}{b} 的思路划分如下：\n\
+                   [{\"title\":\"开场\",\"start_ms\":0,\"end_ms\":5000}]\n以上共 1 章，希望有帮助 {如有需要}";
+        let drafts = parse_chapters(raw).unwrap();
+        assert_eq!(drafts.len(), 1);
+        assert_eq!(drafts[0].end_ms, 5000);
     }
+
+    fn scripted(replies: Vec<crate::llm::ChatResponse>) -> Provider {
+        Provider::Scripted { steps: std::sync::Mutex::new(replies) }
+    }
+
+    fn reply(content: &str) -> crate::llm::ChatResponse {
+        crate::llm::ChatResponse { content: content.into(), ..Default::default() }
+    }
+
+    #[tokio::test]
+    async fn chapters_ask_the_model_to_fix_unparseable_output_once() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let good = r#"[{"title":"开场","summary":"导论","start_ms":0,"end_ms":5000}]"#;
+        let provider = scripted(vec![reply("不是 JSON"), reply(good)]);
+        let n = generate_chapters(&db, &provider, "m", &vid, None).await.unwrap();
+        assert_eq!(n, 1);
+
+        let provider = scripted(vec![reply("不是 JSON"), reply("还不是"), reply(good)]);
+        let err = generate_chapters(&db, &provider, "m", &vid, None).await.unwrap_err();
+        assert!(err.to_string().contains("格式不对"), "只改一次，两次都坏才报错：{err}");
+    }
+
+    #[tokio::test]
+    async fn truncated_output_fails_at_once_with_a_clear_reason() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let cut = crate::llm::ChatResponse {
+            content: r#"[{"title":"开场","summary":"导"#.into(),
+            truncated: true,
+            ..Default::default()
+        };
+        let good = reply(r#"[{"title":"开场","summary":"","start_ms":0,"end_ms":5000}]"#);
+        let provider = scripted(vec![cut, good]);
+        let err = generate_chapters(&db, &provider, "m", &vid, None).await.unwrap_err();
+        assert!(matches!(err, AppError::Permanent(_)), "{err:?}");
+        assert!(err.to_string().contains("单次输出上限"), "{err}");
+        let Provider::Scripted { steps } = &provider else { unreachable!() };
+        assert_eq!(steps.lock().unwrap().len(), 1, "截断了不重问");
+    }
+
 
     #[test]
     fn parses_chapters_array() {
