@@ -9,6 +9,10 @@ import { ipc, type RemoteSyncDownloadEvent } from "@/lib/ipc";
 import type { Video } from "@/lib/types";
 
 const MB = 1024 * 1024;
+
+/** 看起来是网盘（WebDAV）上的文件：只用来决定提示怎么说。 */
+const looksLikeDriveFile = (video: Video) =>
+  video.source_type === "url" && /\/dav(\/|$)|remote\.php\/dav|:500[56]\//i.test(video.source_uri ?? "");
 const formatMb = (bytes: number) => `${Math.max(1, Math.round(bytes / MB))} MB`;
 
 /**
@@ -72,6 +76,7 @@ export function RemoteMediaStage({
       <CloudDownload className="h-10 w-10 text-white/50" aria-hidden="true" />
       <div className="max-w-sm space-y-1.5">
         <p className="ca-t-md font-medium">{t("remoteMedia.title")}</p>
+        {looksLikeDriveFile(video) && <p className="ca-t-sm text-white/70">{t("webdavImport.streamUnavailable")}</p>}
         <p className="ca-t-sm text-white/55">
           {size.isError
             ? t("remoteMedia.noSync")

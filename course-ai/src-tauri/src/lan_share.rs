@@ -30,7 +30,7 @@ use tokio::net::TcpListener;
 use crate::commands::settings::{get_setting, set_setting};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
-use crate::media_server::{read_head, respond_empty, serve_file, RemoteSource};
+use crate::media_server::{read_head, respond_empty, serve_file, RemoteAuth, RemoteSource};
 use crate::sync::remote::RemoteConfig;
 
 pub const SETTING_ENABLED: &str = "lan_share_enabled";
@@ -756,7 +756,7 @@ pub async fn probe(adverts: &[Advert], video_id: &str) -> Option<RemoteSource> {
             let token = advert.token.clone();
             attempts.spawn(async move {
                 let response = client.head(&url).bearer_auth(&token).timeout(PROBE_TIMEOUT).send().await.ok()?;
-                response.status().is_success().then_some(RemoteSource { url, token, client })
+                response.status().is_success().then_some(RemoteSource { url, auth: RemoteAuth::Bearer(token), client })
             });
         }
     }
@@ -807,9 +807,7 @@ const TRANSCODE_TIMEOUT: Duration = Duration::from_secs(10);
 
 async fn fetch_transcode_state(source: &RemoteSource, url: &str) -> Option<TranscodeState> {
     let response = source
-        .client
-        .get(url)
-        .bearer_auth(&source.token)
+        .authorize(source.client.get(url))
         .timeout(TRANSCODE_TIMEOUT)
         .send()
         .await
@@ -821,11 +819,7 @@ async fn fetch_transcode_state(source: &RemoteSource, url: &str) -> Option<Trans
 }
 
 async fn request_transcode(source: &RemoteSource, url: &str, retry: bool) -> Option<TranscodeState> {
-    let mut request = source
-        .client
-        .post(url)
-        .bearer_auth(&source.token)
-        .timeout(TRANSCODE_TIMEOUT);
+    let mut request = source.authorize(source.client.post(url)).timeout(TRANSCODE_TIMEOUT);
     if retry {
         request = request.query(&[("retry", "1")]);
     }

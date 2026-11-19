@@ -5,6 +5,7 @@ import {
   FileVideo,
   FolderInput,
   FolderPlus,
+  HardDriveDownload,
   ListVideo,
   Plus,
 } from "lucide-react";
@@ -34,6 +35,9 @@ const BilibiliImportDialog = lazy(() =>
 const FolderImportDialog = lazy(() =>
   import("./FolderImportDialog").then((m) => ({ default: m.FolderImportDialog })),
 );
+const WebDavImportDialog = lazy(() =>
+  import("./WebDavImportDialog").then((m) => ({ default: m.WebDavImportDialog })),
+);
 const PlaylistImportDialog = lazy(() =>
   import("./PlaylistImportDialog").then((m) => ({ default: m.PlaylistImportDialog })),
 );
@@ -55,6 +59,7 @@ export function ImportVideoButton({
   const menuId = useId();
   const [showBili, setShowBili] = useState(false);
   const [showPlaylist, setShowPlaylist] = useState(false);
+  const [showDrive, setShowDrive] = useState(false);
   const [folderVideos, setFolderVideos] = useState<FolderVideo[] | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   // 移动端无 yt-dlp sidecar / 无法扫描任意文件夹，隐藏「下载网络视频」「导入整个文件夹」入口。
@@ -228,6 +233,23 @@ export function ImportVideoButton({
               </button>
             )}
 
+            {/* 网盘导入：纯 HTTP，手机上也能用（在线看不占手机空间）。 */}
+            <button
+              role="menuitem"
+              tabIndex={-1}
+              onClick={() => {
+                setMenuOpen(false);
+                setShowDrive(true);
+              }}
+              className="ca-touch-44 flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-[var(--surface-card-hover)]"
+            >
+              <HardDriveDownload className="mt-0.5 h-4 w-4 flex-none text-primary" />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-[var(--text-strong)]">{t("import.fromDrive")}</span>
+                <span className="block text-xs text-[var(--text-muted)]">{t("import.fromDriveHint")}</span>
+              </span>
+            </button>
+
             {!mobile && (
               <>
                 <div className="my-1 border-t border-[var(--border-faint)]" />
@@ -313,6 +335,15 @@ export function ImportVideoButton({
             courseId={courseId}
             videos={folderVideos}
             onClose={() => setFolderVideos(null)}
+            returnFocusRef={triggerRef}
+          />
+        </Suspense>
+      )}
+      {showDrive && (
+        <Suspense fallback={null}>
+          <WebDavImportDialog
+            courseId={courseId}
+            onClose={() => setShowDrive(false)}
             returnFocusRef={triggerRef}
           />
         </Suspense>

@@ -499,6 +499,37 @@ export type RemoteSyncMediaState = {
   lastError: string | null;
 };
 
+/** 从网盘（WebDAV）导入：一个网盘来源。 */
+export type WebDavSource = {
+  id: string;
+  name: string;
+  url: string;
+  user: string;
+  hasPassword: boolean;
+  /** 同步用的网盘账号（在「多设备同步」里改，这里不能改、删）。 */
+  isSync: boolean;
+};
+
+/** 网盘里的一项。 */
+export type WebDavEntry = {
+  name: string;
+  /** 相对来源根目录的路径（文件夹以 / 结尾）。 */
+  path: string;
+  isDir: boolean;
+  size: number | null;
+  isVideo: boolean;
+  /** 文件的完整地址（文件夹为空）。 */
+  url: string;
+};
+
+/** 在线看的视频「下载到本机」的进度（`webdav-import:download` 事件）。 */
+export type WebDavDownloadEvent = {
+  videoId: string;
+  downloaded: number;
+  total: number | null;
+  done: boolean;
+};
+
 /** 局域网直连播放（只有电脑上能开）。 */
 export type LanShareStatus = {
   supported: boolean;

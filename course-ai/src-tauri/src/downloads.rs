@@ -620,7 +620,15 @@ pub async fn cmd_enqueue_downloads(
     if items.is_empty() {
         return Ok(Vec::new());
     }
-    let root_path = download_root(&state, &course_id).await?;
+    // 整批都是网盘（WebDAV）上的文件：不用 yt-dlp，手机上也能下。
+    let mut all_webdav = true;
+    for item in &items {
+        if crate::webdav_import::source_for_url(&state.db, &item.url).await?.is_none() {
+            all_webdav = false;
+            break;
+        }
+    }
+    let root_path = download_root(&state, &course_id, all_webdav).await?;
     let created = app.state::<DownloadQueue>().register(
         &course_id,
         &root_path,
@@ -640,7 +648,8 @@ pub async fn download_and_wait(
     progress_event: Option<String>,
 ) -> AppResult<Video> {
     let state = app.state::<AppState>();
-    let root_path = download_root(&state, &course_id).await?;
+    let webdav_only = crate::webdav_import::source_for_url(&state.db, &request.url).await?.is_some();
+    let root_path = download_root(&state, &course_id, webdav_only).await?;
     let queue = app.state::<DownloadQueue>();
     let (tx, rx) = tokio::sync::oneshot::channel();
     let created = queue.register(&course_id, &root_path, vec![(request, progress_event)]);
@@ -659,9 +668,9 @@ pub async fn download_and_wait(
     }
 }
 
-/// 下载要落到的课程目录；移动端不支持网络视频下载。
-async fn download_root(state: &AppState, course_id: &str) -> AppResult<String> {
-    if is_mobile_os() {
+/// 下载要落到的课程目录；移动端不支持网络视频下载（网盘文件除外）。
+async fn download_root(state: &AppState, course_id: &str, webdav_only: bool) -> AppResult<String> {
+    if is_mobile_os() && !webdav_only {
         return Err(AppError::Config(
             "移动端暂不支持 B 站 / 网络视频下载，请先在桌面端导入后同步到移动端".into(),
         ));

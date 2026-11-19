@@ -31,4 +31,5 @@ pub mod transcripts;
 pub mod subscriptions;
 pub mod translate;
 pub mod videos;
+pub mod webdav_import;
 pub mod whisper;

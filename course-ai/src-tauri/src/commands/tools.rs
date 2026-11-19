@@ -270,6 +270,49 @@ pub async fn cmd_import_bilibili(
     .await
 }
 
+/// 下载队列里的一集网盘视频：下到课程目录（课程没有目录时放应用数据目录），登记成本地视频。
+async fn import_webdav_file(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    course_id: &str,
+    url: String,
+    staging: Option<PathBuf>,
+    on_event: &(dyn Fn(download::DownloadEvent) + Send + Sync),
+    begin_import: &(dyn Fn() -> bool + Send + Sync),
+) -> AppResult<Video> {
+    use tauri::Manager;
+    let root_path: String =
+        sqlx::query_scalar("SELECT root_path FROM courses WHERE id=? AND deleted_at IS NULL")
+            .bind(course_id)
+            .fetch_optional(&state.db.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("course {course_id}")))?;
+    let out_dir = if root_path.trim().is_empty() {
+        app.path()
+            .app_data_dir()
+            .map_err(|error| AppError::Config(error.to_string()))?
+            .join("webdav-downloads")
+            .join(course_id)
+    } else {
+        PathBuf::from(&root_path)
+    };
+    // 课程没有目录时，下载队列按空目录拼出来的是相对路径：换到实际下载的地方。
+    let staging = staging
+        .filter(|path| path.is_absolute())
+        .unwrap_or_else(|| out_dir.join(".courseai-import").join(uuid::Uuid::new_v4().to_string()));
+    let file = crate::webdav_import::download(&state.db, &url, &out_dir, &staging, on_event, begin_import).await?;
+    let mut video = add_local_video(&state.db, course_id, file, None).await?;
+    sqlx::query("UPDATE videos SET source_type=?, source_uri=?, app_owned_file=1 WHERE id=?")
+        .bind(crate::webdav_import::SOURCE_TYPE)
+        .bind(&url)
+        .bind(&video.id)
+        .execute(&state.db.pool)
+        .await?;
+    video.source_type = crate::webdav_import::SOURCE_TYPE.into();
+    video.source_uri = Some(url);
+    Ok(video)
+}
+
 /// 下载并登记一个网络视频。`staging` 为 None 时用临时目录；后台下载队列传入自己的
 /// 固定目录，取消任务时据此清理半成品。进度事件一律走 `on_event`。
 /// `begin_import` 见 [`download::download`]：它返回 true 之后才开始挪文件、写库，
@@ -287,6 +330,10 @@ pub async fn import_url_with(
     on_event: &(dyn Fn(download::DownloadEvent) + Send + Sync),
     begin_import: &(dyn Fn() -> bool + Send + Sync),
 ) -> AppResult<Video> {
+    // 网盘（WebDAV）上的文件：不走 yt-dlp，直接按 HTTP 下（手机上也能下）。
+    if crate::webdav_import::source_for_url(&state.db, &url).await?.is_some() {
+        return import_webdav_file(&app, state, &course_id, url, staging, on_event, begin_import).await;
+    }
     if is_mobile_os(std::env::consts::OS) {
         return Err(crate::error::AppError::Config(
             "移动端暂不支持 B 站 / 网络视频下载，请先在桌面端导入后同步到移动端".into(),

@@ -9,6 +9,7 @@ pub mod export;
 pub mod jobs;
 pub mod keep_alive;
 pub mod lan_share;
+pub mod webdav_import;
 pub mod llm;
 pub mod media_server;
 pub mod mobile_files;
@@ -69,6 +70,10 @@ use crate::commands::remote_sync::{
     cmd_remote_sync_now, cmd_remote_sync_nudge, cmd_remote_sync_save, cmd_remote_sync_set_enabled,
     cmd_remote_sync_status, cmd_remote_sync_test, cmd_remote_sync_set_upload_media,
     cmd_remote_sync_media_size, cmd_remote_sync_download_video, cmd_remote_sync_retire_device,
+};
+use crate::commands::webdav_import::{
+    cmd_webdav_browse, cmd_webdav_download_video, cmd_webdav_import_stream, cmd_webdav_source_delete,
+    cmd_webdav_source_save, cmd_webdav_source_test, cmd_webdav_sources, cmd_webdav_stream_url,
 };
 use crate::commands::lan_share::{cmd_lan_share_set_enabled, cmd_lan_share_status, cmd_lan_stream_url};
 use crate::commands::semantic::{
@@ -475,6 +480,14 @@ pub fn run() {
             cmd_remote_sync_download_video,
             cmd_remote_sync_retire_device,
             cmd_lan_share_status,
+            cmd_webdav_sources,
+            cmd_webdav_source_save,
+            cmd_webdav_source_delete,
+            cmd_webdav_source_test,
+            cmd_webdav_browse,
+            cmd_webdav_import_stream,
+            cmd_webdav_stream_url,
+            cmd_webdav_download_video,
             cmd_lan_share_set_enabled,
             cmd_lan_stream_url,
             cmd_analyze_course_concepts,

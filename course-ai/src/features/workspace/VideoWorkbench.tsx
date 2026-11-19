@@ -11,6 +11,7 @@ import { ErrorNote } from "@/ui/ErrorNote";
 import { TabsPanel } from "./TabsPanel";
 import { ClipQueueBar } from "./ClipQueueBar";
 import { RemoteMediaStage } from "./RemoteMediaStage";
+import { DriveDownloadBar } from "./DriveDownloadBar";
 import { WorkspaceLayout } from "./WorkspaceLayout";
 import { allowsNotesSplit } from "./workbenchLayout";
 
@@ -58,10 +59,16 @@ export function VideoWorkbench({
     // 从别的设备同步过来、本机还没有文件：不去要播放地址，舞台上给「从网盘下载」。
     enabled: hasLocalFile,
   });
-  // 本机没有文件：先在局域网里找开着「局域网直连播放」的电脑，找到了直接串流，不用下载。
-  const lanStream = useQuery({
+  // 本机没有文件：网盘导入的「在线看」视频从网盘边下边播；不是的话在局域网里找开着
+  // 「局域网直连播放」的电脑。都找不到就给「从网盘下载」（RemoteMediaStage）。
+  const remoteStream = useQuery({
     queryKey: qk.mediaUrl.lan(video.id),
-    queryFn: () => ipc.lanShare.streamUrl(video.id),
+    queryFn: async (): Promise<{ src: string; kind: "drive" | "lan" } | null> => {
+      const drive = await ipc.webdavImport.streamUrl(video.id).catch(() => null);
+      if (drive) return { src: drive, kind: "drive" };
+      const lan = await ipc.lanShare.streamUrl(video.id);
+      return lan ? { src: lan, kind: "lan" } : null;
+    },
     enabled: !hasLocalFile,
     retry: false,
     staleTime: 5 * 60_000,
@@ -137,6 +144,7 @@ export function VideoWorkbench({
             </header>
           )}
           <ClipQueueBar />
+          {remoteStream.data?.kind === "drive" && <DriveDownloadBar video={video} />}
           <div className="ca-stage-wrap">
             {isPhoneDevice && (
               <button
@@ -151,20 +159,20 @@ export function VideoWorkbench({
             )}
             <div className="ca-stage">
               {!hasLocalFile ? (
-                lanStream.data ? (
+                remoteStream.data ? (
                   <VideoPlayer
-                    src={lanStream.data}
+                    src={remoteStream.data.src}
                     videoId={video.id}
                     courseId={video.course_id}
                     immersive={isIOS()}
                     onFullscreenChange={onFullscreenChange}
-                    onTranscoded={() => lanStream.refetch()}
+                    onTranscoded={() => remoteStream.refetch()}
                   />
                 ) : (
                   <RemoteMediaStage
                     video={video}
-                    lanChecking={lanStream.isFetching}
-                    onRetryLan={() => void lanStream.refetch()}
+                    lanChecking={remoteStream.isFetching}
+                    onRetryLan={() => void remoteStream.refetch()}
                   />
                 )
               ) : mediaSrcError ? (

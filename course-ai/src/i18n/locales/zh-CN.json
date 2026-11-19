@@ -1454,10 +1454,69 @@
     "downloadOnlineHint": "B 站 / YouTube / 播客等链接，可选清晰度与自带字幕",
     "importPlaylist": "导入播放列表 / 合集",
     "importPlaylistHint": "B 站合集·多 P / YouTube 播放列表，批量下载",
+    "fromDrive": "从网盘导入",
+    "fromDriveHint": "坚果云、群晖、Nextcloud，或用 OpenList 挂的百度 / 阿里 / 夸克网盘",
     "importFailed": "导入失败：{{error}}",
     "selectLocalVideo": "选择本地视频或音频",
     "noVideosInFolder": "该文件夹里没有可导入的视频或音频",
     "uploadHintMobile": "从「文件」中选择 mp4 / mov / mp3 / m4a…"
+  },
+  "webdavImport": {
+    "title": "从网盘导入",
+    "intro": "先连上一个网盘。坚果云、Nextcloud、群晖可以直接连；百度网盘、阿里云盘、夸克、115 这些先用 OpenList 挂出一个 WebDAV 地址再连。",
+    "kind": "网盘类型",
+    "presets": {
+      "openlist": "OpenList / AList（百度、阿里、夸克、115…）",
+      "jianguoyun": "坚果云",
+      "nextcloud": "Nextcloud",
+      "synology": "群晖 NAS",
+      "other": "其它 WebDAV"
+    },
+    "presetHints": {
+      "openlist": "在电脑或 NAS 上装好 OpenList，挂上你的网盘后，填它的 WebDAV 地址（默认端口 5244、路径 /dav/），账号密码是 OpenList 的。用户设置里要勾上「WebDAV 读取」。",
+      "jianguoyun": "密码填「第三方应用密码」（坚果云网页 → 账户信息 → 安全选项里生成），不是登录密码。",
+      "nextcloud": "地址在 Nextcloud 网页「文件 → 左下角设置」里能找到。",
+      "synology": "先在套件中心装好 WebDAV Server 并打开 HTTPS，地址一般是 https://NAS 地址:5006/。",
+      "other": "填网盘的 WebDAV 地址和账号密码。"
+    },
+    "urlPlaceholders": {
+      "openlist": "http://电脑或 NAS 的 IP:5244/dav/",
+      "jianguoyun": "https://dav.jianguoyun.com/dav/",
+      "nextcloud": "https://你的域名/remote.php/dav/files/用户名/",
+      "synology": "https://NAS 地址:5006/",
+      "other": "https://"
+    },
+    "url": "WebDAV 地址",
+    "user": "账号",
+    "password": "密码",
+    "passwordKeep": "留空 = 不改密码",
+    "name": "名字",
+    "namePlaceholder": "名字（选填，比如「家里的 NAS」）",
+    "test": "测试连接",
+    "testOk": "连上了，根目录下有 {{count}} 项",
+    "save": "保存",
+    "source": "网盘",
+    "syncSource": "同步用的网盘",
+    "addSource": "添加网盘",
+    "edit": "编辑这个网盘",
+    "delete": "删除这个网盘",
+    "location": "当前位置",
+    "root": "全部",
+    "empty": "这个文件夹里没有视频",
+    "selectAll": "全选这里的 {{count}} 个视频",
+    "mode": "导入方式",
+    "modes": {
+      "download": "下载到本机",
+      "stream": "在线看（不下载）"
+    },
+    "modeHints": {
+      "download": "下载到课程文件夹，能识别字幕、做笔记截图，断网也能看。",
+      "stream": "不占本机空间，打开时从网盘边下边播；要识别字幕时再下载到本机。"
+    },
+    "import": "导入 {{count}} 个视频",
+    "downloadLocal": "下载到本机",
+    "downloading": "正在下载 {{percent}}%",
+    "streamUnavailable": "这个视频在网盘上，这台设备还没连上能访问它的网盘：在「导入 → 从网盘导入」里添加同一个网盘。"
   },
   "bilibiliImport": {
     "title": "下载网络视频",

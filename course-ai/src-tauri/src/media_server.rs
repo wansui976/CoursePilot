@@ -29,11 +29,29 @@ pub enum Source {
 
 #[derive(Clone)]
 pub struct RemoteSource {
-    /// 那台设备上这个视频的完整地址（https://192.168.1.5:47321/v/<id>）。
+    /// 视频的完整地址：局域网里那台设备（https://192.168.1.5:47321/v/<id>），或 WebDAV 上的文件。
     pub url: String,
-    pub token: String,
-    /// 钉住了那台设备证书的客户端。
+    pub auth: RemoteAuth,
+    /// 局域网：钉住了那台设备证书的客户端；WebDAV：普通客户端。
     pub client: reqwest::Client,
+}
+
+/// 访问远端视频用的凭据。
+#[derive(Clone)]
+pub enum RemoteAuth {
+    /// 局域网直连播放的口令。
+    Bearer(String),
+    /// WebDAV 账号密码。
+    Basic { user: String, password: String },
+}
+
+impl RemoteSource {
+    pub fn authorize(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match &self.auth {
+            RemoteAuth::Bearer(token) => request.bearer_auth(token),
+            RemoteAuth::Basic { user, password } => request.basic_auth(user, Some(password)),
+        }
+    }
 }
 
 type Registry = Arc<Mutex<HashMap<String, Source>>>;
@@ -238,7 +256,7 @@ async fn proxy<S: AsyncWrite + Unpin>(
 ) -> std::io::Result<()> {
     let head = method.eq_ignore_ascii_case("HEAD");
     let method = if head { reqwest::Method::HEAD } else { reqwest::Method::GET };
-    let mut request = remote.client.request(method, &remote.url).bearer_auth(&remote.token);
+    let mut request = remote.authorize(remote.client.request(method, &remote.url));
     if let Some(range) = range_header {
         request = request.header(reqwest::header::RANGE, range);
     }

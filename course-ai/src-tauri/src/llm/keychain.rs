@@ -312,6 +312,11 @@ pub async fn get_secret(db: &Db, name: &str) -> AppResult<Option<String>> {
     read_secret(&SystemKeyring, db, &secret_setting(name)).await
 }
 
+/// 删掉一个通用密钥（比如删了一个网盘来源，它的密码也不该留着）。
+pub async fn delete_named_secret(db: &Db, name: &str) -> AppResult<()> {
+    delete_secret(&SystemKeyring, db, &secret_setting(name)).await
+}
+
 /// `get_secret_or_legacy` 是否有值，但不取密钥本身。
 pub async fn has_secret_or_legacy(db: &Db, name: &str) -> AppResult<bool> {
     if has_secret(&SystemKeyring, db, &secret_setting(name)).await? {

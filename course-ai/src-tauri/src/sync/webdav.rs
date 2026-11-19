@@ -1,7 +1,8 @@
 //! 最小的 WebDAV 客户端：列目录（PROPFIND Depth 1）、建目录（MKCOL）、上传（PUT）、下载（GET）。
 //!
 //! 只做同步需要的这几件事，兼容坚果云、Nextcloud、群晖、Alist 这类常见实现。
-//! 文件名都是我们自己起的（设备 id、批次序号），只含 ASCII，不需要做百分号解码。
+//! 同步用的文件名都是我们自己起的（只含 ASCII）；从网盘导入课程时要浏览用户自己的文件夹，
+//! 名字里有中文、空格，所以列出来的名字一律做百分号解码，拼路径时用 `encode_path` 编码。
 
 use crate::error::{AppError, AppResult};
 use reqwest::{Method, StatusCode};
@@ -260,6 +261,43 @@ fn ensure_trailing_slash(path: &str) -> String {
     }
 }
 
+/// 把「a/b 课/c.mp4」这样的路径按段编码成可以放进网址的样子。
+pub fn encode_path(path: &str) -> String {
+    let trailing = path.ends_with('/');
+    let mut out: Vec<String> = path.split('/').filter(|part| !part.is_empty()).map(encode_segment).collect();
+    if trailing && !out.is_empty() {
+        out.push(String::new());
+    }
+    out.join("/")
+}
+
+/// 百分号解码（解出来不是合法 UTF-8 时原样返回）。
+pub fn percent_decode(text: &str) -> String {
+    fn hex(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    }
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let (Some(high), Some(low)) = (hex(bytes[index + 1]), hex(bytes[index + 2])) {
+                out.push(high * 16 + low);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| text.to_string())
+}
+
 /// 用户填的文件夹名可能含中文或空格：按路径段做百分号编码。
 fn encode_segment(segment: &str) -> String {
     let mut out = String::new();
@@ -310,8 +348,9 @@ pub(crate) fn parse_propfind(xml: &str, own_path: &str) -> Vec<Entry> {
         let Some(name) = path.trim_end_matches('/').rsplit('/').next().filter(|name| !name.is_empty()) else {
             continue;
         };
+        let name = percent_decode(name);
         let size = first_text(response, "getcontentlength").and_then(|value| value.trim().parse().ok());
-        entries.push(Entry { name: name.to_string(), is_dir, size });
+        entries.push(Entry { name, is_dir, size });
     }
     entries
 }
@@ -380,6 +419,16 @@ fn find_close_tag(xml: &str, local: &str) -> Option<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_folder_names_round_trip_through_percent_encoding() {
+        assert_eq!(encode_path("网课/申论 2027/01 概括.mp4"), "%E7%BD%91%E8%AF%BE/%E7%94%B3%E8%AE%BA%202027/01%20%E6%A6%82%E6%8B%AC.mp4");
+        assert_eq!(encode_path("a/b/"), "a/b/");
+        assert_eq!(percent_decode("01%20%E6%A6%82%E6%8B%AC.mp4"), "01 概括.mp4");
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("%zz%E6"), "%zz%E6", "不完整的编码原样保留");
+        assert_eq!(percent_decode("已经是中文%"), "已经是中文%");
+    }
 
     #[test]
     fn propfind_responses_from_common_servers_parse() {

@@ -31,6 +31,8 @@ import type {
   RemoteSyncReport,
   RemoteSyncStatus,
   LanShareStatus,
+  WebDavEntry,
+  WebDavSource,
 } from "./types";
 
 export const app = {
@@ -247,4 +249,28 @@ export const lanShare = {
   setEnabled: (enabled: boolean): Promise<LanShareStatus> => invoke("cmd_lan_share_set_enabled", { enabled }),
   /** 本机没有文件时，在局域网里找一台有的设备；找到了返回本机转发的播放地址，否则 null。 */
   streamUrl: (videoId: string): Promise<string | null> => invoke("cmd_lan_stream_url", { videoId }),
+};
+
+/** 从网盘（WebDAV）导入课程。「下载到本机」走下载队列（`downloads.enqueue`，地址就是网盘文件地址）。 */
+export const webdavImport = {
+  sources: (): Promise<WebDavSource[]> => invoke("cmd_webdav_sources"),
+  saveSource: (source: {
+    id: string | null;
+    name: string;
+    url: string;
+    user: string;
+    password: string | null;
+  }): Promise<WebDavSource> => invoke("cmd_webdav_source_save", source),
+  deleteSource: (id: string): Promise<void> => invoke("cmd_webdav_source_delete", { id }),
+  /** 测连接；返回根目录下有几项。编辑已保存的来源时带 id，密码留空就用存着的。 */
+  testSource: (source: { id: string | null; url: string; user: string; password: string | null }): Promise<number> =>
+    invoke("cmd_webdav_source_test", source),
+  browse: (sourceId: string, path: string): Promise<WebDavEntry[]> => invoke("cmd_webdav_browse", { sourceId, path }),
+  /** 「在线看」导入：只建视频条目，返回新建的视频 id。 */
+  importStream: (courseId: string, items: { url: string; title: string }[]): Promise<string[]> =>
+    invoke("cmd_webdav_import_stream", { courseId, items }),
+  /** 在线看的视频的播放地址（本机转发）；不是网盘视频或没有来源时为 null。 */
+  streamUrl: (videoId: string): Promise<string | null> => invoke("cmd_webdav_stream_url", { videoId }),
+  /** 在线看的视频下载到本机（进度见 `webdav-import:download` 事件）。 */
+  downloadVideo: (videoId: string): Promise<Video> => invoke("cmd_webdav_download_video", { videoId }),
 };

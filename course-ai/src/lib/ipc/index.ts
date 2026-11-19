@@ -18,6 +18,7 @@ import {
   semantic,
   remoteSync,
   lanShare,
+  webdavImport,
 } from "./system";
 import { downloads } from "./downloads";
 import { courses, folders, videos, trash, subscriptions } from "./library";
@@ -35,6 +36,7 @@ export const ipc = {
   semantic,
   remoteSync,
   lanShare,
+  webdavImport,
   courses,
   folders,
   videos,
