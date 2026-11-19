@@ -299,6 +299,28 @@ describe("LlmSettingsPanel", () => {
     expect(routing.digest).toBe("p2");
   });
 
+  it("offers deep thinking only for the official DeepSeek API, off by default, and saves it", async () => {
+    mockIpc.ai.getProfiles.mockResolvedValue([
+      profile,
+      { id: "p2", name: "DeepSeek", kind: "openai" as const, base_url: "https://api.deepseek.com", model: "deepseek-flash" },
+    ]);
+    render(<LlmSettingsPanel />);
+    await screen.findByDisplayValue("DeepSeek");
+
+    // 只有 DeepSeek 那一个配置有这个开关，而且默认关。
+    const toggles = screen.getAllByRole("switch", { name: "深度思考" });
+    expect(toggles).toHaveLength(1);
+    expect(toggles[0]).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.click(toggles[0]);
+    expect(toggles[0]).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(mockIpc.ai.saveProfiles).toHaveBeenCalledOnce());
+    const saved = JSON.parse(mockIpc.ai.saveProfiles.mock.calls[0][0]);
+    expect(saved.find((p: { id: string }) => p.id === "p2").thinking).toBe(true);
+    expect(saved.find((p: { id: string }) => p.id === "p1").thinking).toBeUndefined();
+  });
+
   it("sends typed keys in the same save call as the profiles", async () => {
     render(<LlmSettingsPanel />);
 

@@ -25,6 +25,7 @@ pub fn build_provider(profile: &LlmProfile, api_key: String) -> Provider {
             api_key,
             client,
             max_tokens: profile.max_output_tokens,
+            thinking: profile.thinking.unwrap_or(false),
         },
         ProviderKind::Anthropic => Provider::Anthropic {
             base_url: profile.base_url.clone(),

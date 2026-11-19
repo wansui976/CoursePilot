@@ -645,7 +645,9 @@ export function installMockIpc({ theme, safeArea }) {
     },
     cmd_has_secret: () => false,
     cmd_has_api_key: () => false,
-    cmd_get_llm_profiles: () => [],
+    cmd_get_llm_profiles: () => [
+      { id: "p1", name: "DeepSeek", kind: "openai", base_url: "https://api.deepseek.com", model: "deepseek-flash" },
+    ],
     cmd_sync_status: () => ({ enabled: false, state: "idle" }),
     cmd_list_trash: () => [
       { ...videos[3], id: "t1", title: "旧版 04 逻辑回归.mp4", deleted_at: now - 2 * DAY, expires_at: now + 28 * DAY, course_name: "机器学习导论" },

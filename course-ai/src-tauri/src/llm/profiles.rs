@@ -63,6 +63,10 @@ pub struct LlmProfile {
     /// 是否必须填 API Key。Ollama 默认不需要；其它协议默认需要。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_required: Option<bool>,
+    /// 推理模型先思考再回答（设置 → 大模型里的「深度思考」）。缺省 = 关：思考按输出计费，
+    /// 笔记、摘要这类整理活儿用不着，开着花费是关掉的三四倍。目前只对 DeepSeek 官方生效。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<bool>,
 }
 
 impl LlmProfile {

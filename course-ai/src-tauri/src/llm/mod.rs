@@ -136,15 +136,6 @@ pub struct ChatRequest {
 }
 
 impl ChatRequest {
-    /// 这次调用要不要关掉推理模型的「思考」。
-    ///
-    /// DeepSeek Flash 这类模型默认先想再写，思考按输出计费：复习资料逐章改写时，思考占了
-    /// 输出的七成半（申论一门课 18 万 token），而这活儿是把现成的笔记重排、改写，用不着推理。
-    /// 只列改写、整理类的任务；排目录、出题、判分这些要动脑的照常思考。
-    pub fn skip_thinking(&self) -> bool {
-        matches!(self.label, "review_chapter")
-    }
-
     /// 纯文本请求（不带工具）。现有任务都走这里。
     pub fn text(model: &str, system: Option<String>, messages: Vec<ChatMessage>) -> Self {
         Self {
@@ -515,6 +506,8 @@ pub enum Provider {
         client: reqwest::Client,
         /// 用户显式设置的输出上限；None = 让模型用自身最大预算。
         max_tokens: Option<u32>,
+        /// 允许推理模型先思考（Profile 的「深度思考」，默认关）。
+        thinking: bool,
     },
     /// Anthropic Messages API。
     Anthropic {
@@ -611,7 +604,8 @@ impl Provider {
                 api_key,
                 client,
                 max_tokens,
-            } => openai::complete(base_url, api_key, client, req, *max_tokens).await?,
+                thinking,
+            } => openai::complete(base_url, api_key, client, req, *max_tokens, *thinking).await?,
             Provider::Anthropic {
                 base_url,
                 api_key,
@@ -747,8 +741,9 @@ impl Provider {
                 api_key,
                 client,
                 max_tokens,
+                thinking,
             } => {
-                openai::complete_stream(base_url, api_key, client, req, cancel, on_piece, *max_tokens)
+                openai::complete_stream(base_url, api_key, client, req, cancel, on_piece, *max_tokens, *thinking)
                     .await?
             }
             Provider::Anthropic {
@@ -793,6 +788,7 @@ impl Provider {
                     on_piece,
                     *max_tokens,
                     "Azure OpenAI",
+                    false,
                 )
                 .await?
             }
@@ -910,6 +906,7 @@ mod tests {
             api_key: String::new(),
             client: reqwest::Client::new(),
             max_tokens: None,
+            thinking: false,
         };
         assert_eq!(openai("https://api.deepseek.com").billing(), Billing::DeepSeek);
         assert_eq!(openai("https://API.DeepSeek.com/v1/").billing(), Billing::DeepSeek);
@@ -1063,29 +1060,5 @@ mod truncation_tests {
         };
         assert!(ollama("length"));
         assert!(!ollama("stop"));
-    }
-}
-
-#[cfg(test)]
-mod thinking_tests {
-    use super::{ChatMessage, ChatRequest};
-
-    fn request(label: &'static str) -> ChatRequest {
-        ChatRequest { label, ..ChatRequest::text("deepseek-flash", None, vec![ChatMessage::user("hi")]) }
-    }
-
-    /// 关思考只给改写类任务、只发给 DeepSeek 官方；别的任务和别家的请求体一个字节都不变。
-    #[test]
-    fn thinking_is_turned_off_only_for_rewriting_tasks() {
-        let chapter = request("review_chapter");
-        assert!(chapter.skip_thinking());
-        assert!(!request("review_outline").skip_thinking());
-        assert!(!request("quiz").skip_thinking());
-
-        let body = super::openai::build_complete_body(&chapter, None, true);
-        assert_eq!(body["thinking"], serde_json::json!({"type": "disabled"}));
-        let plain = super::openai::build_complete_body(&chapter, None, false);
-        assert!(plain.get("thinking").is_none());
-        assert_eq!(plain, super::openai::build_openai_body_with(&chapter, None));
     }
 }

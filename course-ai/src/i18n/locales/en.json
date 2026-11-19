@@ -1817,6 +1817,8 @@
     "deployment": "Deployment",
     "maxOutput": "Max output tokens (empty = model default)",
     "maxOutputHint": "Applied to Anthropic, Gemini, OpenAI-compatible and Ollama requests; leave empty to use the model's own limit.",
+    "thinking": "Deep thinking",
+    "thinkingHint": "Thinks before answering: more careful quizzes and grading, but slower — and thinking is billed as output, roughly 3–4× the cost. Notes and summaries don't need it. Assistant turns that use tools never think.",
     "modelsPath": "Models path (fetching only)",
     "modelsPathHint": "A relative path appended to the Base URL, or a full URL; only used when fetching models.",
     "noKeyRequired": "This endpoint needs no API key (local model)",

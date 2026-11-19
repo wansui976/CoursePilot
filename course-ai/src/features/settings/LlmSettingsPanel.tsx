@@ -137,6 +137,15 @@ const SOURCE_LABEL_KEYS: Record<string, string> = {
   unknown: "llmSettings.meta.sourceUnknown",
 };
 
+/** 直连 DeepSeek 官方（和后端 is_deepseek_official 同一个判断：只认这个主机）。 */
+function isDeepSeekOfficial(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl.trim()).hostname.toLowerCase() === "api.deepseek.com";
+  } catch {
+    return false;
+  }
+}
+
 export function LlmSettingsPanel({
   onDirtyChange,
   onRegisterActions,
@@ -795,6 +804,24 @@ export function LlmSettingsPanel({
               </div>
               {renderModelMeta(p)}
             </div>
+
+            {/* 「深度思考」只在能生效的地方出现：目前只有 DeepSeek 官方认关思考的参数，
+                别家端点不认它，发过去会整个请求报错，所以后端也只对 DeepSeek 官方发。 */}
+            {p.kind === "openai" && isDeepSeekOfficial(p.base_url) && (
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs text-[var(--text-normal)]">{t("llmSettings.thinking")}</p>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-[var(--text-faint)]">
+                    {t("llmSettings.thinkingHint")}
+                  </p>
+                </div>
+                <Switch
+                  aria-label={t("llmSettings.thinking")}
+                  checked={Boolean(p.thinking)}
+                  onCheckedChange={(next) => update(p.id, { thinking: next ? true : null })}
+                />
+              </div>
+            )}
 
             {needsKey ? (
               <div className="flex items-center gap-2">

@@ -250,6 +250,8 @@ export interface LlmProfile {
   max_output_tokens?: number | null;
   /** 是否必须填 API Key；Ollama 默认不需要。 */
   key_required?: boolean | null;
+  /** 推理模型先思考再回答；缺省为关（思考按输出计费）。目前只对 DeepSeek 官方生效。 */
+  thinking?: boolean | null;
 }
 
 export interface ModelCapabilities {

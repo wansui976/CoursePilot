@@ -1814,6 +1814,8 @@
     "deployment": "Deployment",
     "maxOutput": "单次输出上限（留空用模型默认）",
     "maxOutputHint": "Anthropic / Gemini / OpenAI 兼容 / Ollama 都会写进请求；留空则用模型自身上限。",
+    "thinking": "深度思考",
+    "thinkingHint": "先想再答：出题、判分更周全，但更慢；思考按输出计费，整体花费约是关闭时的 3–4 倍。笔记、摘要这类整理不需要它。调工具的助手对话始终不思考。",
     "modelsPath": "模型列表路径（仅用于获取模型）",
     "modelsPathHint": "可填相对路径（拼在 Base URL 后）或完整 URL；只影响「获取模型」。",
     "noKeyRequired": "该端点不需要 API Key（本地模型）",

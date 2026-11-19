@@ -372,11 +372,22 @@ pub async fn complete(
     client: &reqwest::Client,
     req: &ChatRequest,
     max_tokens: Option<u32>,
+    thinking: bool,
 ) -> AppResult<ChatResponse> {
     let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
-    // 关思考的参数只发给 DeepSeek 官方：OpenAI 和多数兼容端点不认识它，会整个请求报 400。
-    let thinking_off = req.skip_thinking() && crate::llm::is_deepseek_official(base_url);
+    let thinking_off = thinking_off(base_url, thinking, req);
     complete_at(&url, Auth::Bearer(api_key), client, req, max_tokens, "OpenAI", thinking_off).await
+}
+
+/// 这次请求要不要带上「关掉思考」。
+///
+/// - 只发给 DeepSeek 官方：OpenAI 和多数兼容端点不认识这个参数，会整个请求报 400。
+///   DeepSeek 的推理模型不带它就默认先思考，思考按输出价计费。
+/// - Profile 没开「深度思考」就关。
+/// - 带工具的请求一律关：DeepSeek 思考模式下调工具，后续请求必须把上一轮的
+///   `reasoning_content` 原样传回，否则报 400；助手的工具循环不回传它。
+pub fn thinking_off(base_url: &str, thinking: bool, req: &ChatRequest) -> bool {
+    crate::llm::is_deepseek_official(base_url) && (!thinking || !req.tools.is_empty())
 }
 
 /// 非流式请求体。`thinking_off` 时带上 DeepSeek 的 `thinking: {type: disabled}`。
@@ -582,6 +593,8 @@ fn build_streaming_body(req: &ChatRequest, max_tokens: Option<u32>) -> Value {
     body
 }
 
+// 参数一一对应请求的各个维度（地址、鉴权、取消、回调、上限、思考），包成结构体只是换个地方列。
+#[allow(clippy::too_many_arguments)]
 pub async fn complete_stream(
     base_url: &str,
     api_key: &str,
@@ -590,13 +603,17 @@ pub async fn complete_stream(
     cancel: &AtomicBool,
     on_piece: &mut (dyn FnMut(StreamPiece) + Send),
     max_tokens: Option<u32>,
+    thinking: bool,
 ) -> AppResult<StreamOutcome> {
     let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
-    complete_stream_at(&url, Auth::Bearer(api_key), client, req, cancel, on_piece, max_tokens, "OpenAI")
+    let thinking_off = thinking_off(base_url, thinking, req);
+    complete_stream_at(&url, Auth::Bearer(api_key), client, req, cancel, on_piece, max_tokens, "OpenAI", thinking_off)
         .await
 }
 
 /// 流式请求的 URL/鉴权可替换版本：Azure 的 deployment 地址也走这里。
+// 参数一一对应请求的各个维度（地址、鉴权、取消、回调、上限、思考），包成结构体只是换个地方列。
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn complete_stream_at(
     url: &str,
     auth: Auth<'_>,
@@ -606,8 +623,12 @@ pub(crate) async fn complete_stream_at(
     on_piece: &mut (dyn FnMut(StreamPiece) + Send),
     max_tokens: Option<u32>,
     label: &str,
+    thinking_off: bool,
 ) -> AppResult<StreamOutcome> {
-    let body = build_streaming_body(req, max_tokens);
+    let mut body = build_streaming_body(req, max_tokens);
+    if thinking_off {
+        body["thinking"] = json!({"type": "disabled"});
+    }
     let resp = auth
         .apply(client.post(url))
         .header(CONTENT_TYPE, "application/json")
@@ -755,6 +776,30 @@ impl StreamState {
 mod tests {
     use super::*;
     use crate::llm::ChatMessage;
+
+    /// 「深度思考」默认关：DeepSeek 官方的请求带 thinking disabled；开了才让它想，
+    /// 但带工具的请求照样关（不回传 reasoning_content 会 400）；别家端点一个字节都不变。
+    #[test]
+    fn thinking_is_off_by_default_and_only_ever_sent_to_deepseek() {
+        let plain = ChatRequest::text("deepseek-flash", None, vec![ChatMessage::user("hi")]);
+        let with_tools = ChatRequest {
+            tools: vec![crate::llm::ToolSpec {
+                name: "seek".into(),
+                description: "跳转".into(),
+                parameters: json!({"type": "object"}),
+            }],
+            ..plain.clone()
+        };
+        let deepseek = "https://api.deepseek.com";
+        assert!(thinking_off(deepseek, false, &plain));
+        assert!(!thinking_off(deepseek, true, &plain));
+        assert!(thinking_off(deepseek, true, &with_tools));
+        assert!(!thinking_off("https://api.openai.com/v1", false, &plain));
+        assert!(!thinking_off("https://api.siliconflow.cn/v1", false, &plain));
+
+        assert_eq!(build_complete_body(&plain, None, true)["thinking"], json!({"type": "disabled"}));
+        assert_eq!(build_complete_body(&plain, None, false), build_openai_body_with(&plain, None));
+    }
 
     #[test]
     fn account_level_failures_are_not_worth_retrying() {
