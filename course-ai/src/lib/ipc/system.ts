@@ -256,6 +256,7 @@ export const webdavImport = {
   sources: (): Promise<WebDavSource[]> => invoke("cmd_webdav_sources"),
   saveSource: (source: {
     id: string | null;
+    kind: "webdav" | "quark";
     name: string;
     url: string;
     user: string;
@@ -263,7 +264,13 @@ export const webdavImport = {
   }): Promise<WebDavSource> => invoke("cmd_webdav_source_save", source),
   deleteSource: (id: string): Promise<void> => invoke("cmd_webdav_source_delete", { id }),
   /** 测连接；返回根目录下有几项。编辑已保存的来源时带 id，密码留空就用存着的。 */
-  testSource: (source: { id: string | null; url: string; user: string; password: string | null }): Promise<number> =>
+  testSource: (source: {
+    id: string | null;
+    kind: "webdav" | "quark";
+    url: string;
+    user: string;
+    password: string | null;
+  }): Promise<number> =>
     invoke("cmd_webdav_source_test", source),
   browse: (sourceId: string, path: string): Promise<WebDavEntry[]> => invoke("cmd_webdav_browse", { sourceId, path }),
   /** 「在线看」导入：只建视频条目，返回新建的视频 id。 */

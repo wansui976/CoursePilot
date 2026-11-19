@@ -33,12 +33,14 @@ pub async fn cmd_webdav_sources(state: State<'_, AppState>) -> AppResult<Vec<Sou
 pub async fn cmd_webdav_source_save(
     state: State<'_, AppState>,
     id: Option<String>,
+    kind: Option<String>,
     name: String,
     url: String,
     user: String,
     password: Option<String>,
 ) -> AppResult<Source> {
-    webdav_import::save_source(&state.db, id, name, url, user, password).await
+    let kind = kind.unwrap_or_else(|| webdav_import::KIND_WEBDAV.into());
+    webdav_import::save_source(&state.db, id, kind, name, url, user, password).await
 }
 
 #[tauri::command]
@@ -51,13 +53,17 @@ pub async fn cmd_webdav_source_delete(state: State<'_, AppState>, id: String) ->
 pub async fn cmd_webdav_source_test(
     state: State<'_, AppState>,
     id: Option<String>,
+    kind: Option<String>,
     url: String,
     user: String,
     password: Option<String>,
 ) -> AppResult<usize> {
     match id {
         Some(id) => webdav_import::test_saved(&state.db, &id, Some(url), Some(user), password).await,
-        None => webdav_import::test(&url, &user, password.as_deref().unwrap_or_default()).await,
+        None => {
+            let kind = kind.unwrap_or_else(|| webdav_import::KIND_WEBDAV.into());
+            webdav_import::test(&kind, &url, &user, password.as_deref().unwrap_or_default()).await
+        }
     }
 }
 

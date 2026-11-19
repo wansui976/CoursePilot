@@ -11,10 +11,11 @@ import { isMobile } from "@/lib/platform";
 import { useDownloads } from "@/stores/downloads";
 
 type Mode = "download" | "stream";
-type PresetKey = "openlist" | "jianguoyun" | "nextcloud" | "synology" | "other";
+type PresetKey = "openlist" | "quark" | "jianguoyun" | "nextcloud" | "synology" | "other";
 
 const PRESETS: { key: PresetKey; url: string }[] = [
   { key: "openlist", url: "" },
+  { key: "quark", url: "" },
   { key: "jianguoyun", url: "https://dav.jianguoyun.com/dav/" },
   { key: "nextcloud", url: "" },
   { key: "synology", url: "" },
@@ -53,8 +54,17 @@ function SourceForm({
     setTested(null);
     setDraft((current) => ({ ...current, ...patch }));
   };
-  const complete = Boolean(draft.url.trim() && draft.user.trim() && (draft.password || hasSavedPassword));
-  const payload = () => ({ id: draft.id, url: draft.url.trim(), user: draft.user.trim(), password: draft.password || null });
+  const quark = draft.preset === "quark";
+  const complete = quark
+    ? Boolean(draft.password.trim() || hasSavedPassword)
+    : Boolean(draft.url.trim() && draft.user.trim() && (draft.password || hasSavedPassword));
+  const payload = () => ({
+    id: draft.id,
+    kind: quark ? ("quark" as const) : ("webdav" as const),
+    url: quark ? "" : draft.url.trim(),
+    user: quark ? "" : draft.user.trim(),
+    password: draft.password.trim() || null,
+  });
 
   const test = useMutation({
     mutationFn: () => ipc.webdavImport.testSource(payload()),
@@ -74,6 +84,7 @@ function SourceForm({
       <label className="block space-y-1">
         <span className="ca-t-xs text-[var(--text-muted)]">{t("webdavImport.kind")}</span>
         <select
+          aria-label={t("webdavImport.kind")}
           className={FIELD}
           value={draft.preset}
           onChange={(event) => {
@@ -90,6 +101,16 @@ function SourceForm({
         </select>
         <span className="ca-t-xs block leading-relaxed text-[var(--text-muted)]">{t(`webdavImport.presetHints.${draft.preset}`)}</span>
       </label>
+      {quark ? (
+        <textarea
+          aria-label={t("webdavImport.cookie")}
+          className={`${FIELD} h-24 font-mono text-xs`}
+          placeholder={hasSavedPassword ? t("webdavImport.cookieKeep") : t("webdavImport.cookiePlaceholder")}
+          value={draft.password}
+          onChange={(event) => set({ password: event.target.value })}
+        />
+      ) : (
+        <>
       <input
         aria-label={t("webdavImport.url")}
         className={FIELD}
@@ -116,6 +137,8 @@ function SourceForm({
           onChange={(event) => set({ password: event.target.value })}
         />
       </div>
+        </>
+      )}
       <input
         aria-label={t("webdavImport.name")}
         className={FIELD}
@@ -160,7 +183,9 @@ export function WebDavImportDialog({
     typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null,
   );
   const [sourceId, setSourceId] = useState<string | null>(null);
-  const [path, setPath] = useState("");
+  // 走过的文件夹（面包屑）：WebDAV 的 path 是相对路径，夸克的是文件夹 id，所以不从 path 拆名字。
+  const [trail, setTrail] = useState<{ name: string; path: string }[]>([]);
+  const path = trail.length > 0 ? trail[trail.length - 1].path : "";
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState<Mode>(isMobile() ? "stream" : "download");
   const [editing, setEditing] = useState<{ draft: Draft; hasSavedPassword: boolean } | null>(null);
@@ -180,18 +205,19 @@ export function WebDavImportDialog({
   const allChosen = videos.length > 0 && chosen.length === videos.length;
 
   function open(entry: WebDavEntry) {
-    setPath(entry.path);
+    setTrail((current) => [...current, { name: entry.name, path: entry.path }]);
     setSelected(new Set());
   }
 
-  function goTo(next: string) {
-    setPath(next);
+  /** 回到第 depth 层（0 = 根目录）。 */
+  function goTo(depth: number) {
+    setTrail((current) => current.slice(0, depth));
     setSelected(new Set());
   }
 
   function switchSource(id: string) {
     setSourceId(id);
-    setPath("");
+    setTrail([]);
     setSelected(new Set());
   }
 
@@ -199,7 +225,7 @@ export function WebDavImportDialog({
     mutationFn: (id: string) => ipc.webdavImport.deleteSource(id),
     onSuccess: async () => {
       setSourceId(null);
-      setPath("");
+      setTrail([]);
       await queryClient.invalidateQueries({ queryKey: ["webdav-sources"] });
     },
   });
@@ -223,10 +249,6 @@ export function WebDavImportDialog({
     },
   });
 
-  const crumbs = path
-    .split("/")
-    .filter(Boolean)
-    .map((name, index, parts) => ({ name, path: `${parts.slice(0, index + 1).join("/")}/` }));
 
   const noSources = sources.isSuccess && sources.data.length === 0;
 
@@ -276,7 +298,9 @@ export function WebDavImportDialog({
             >
               {sources.data?.map((source) => (
                 <option key={source.id} value={source.id}>
-                  {source.isSync ? t("webdavImport.syncSource") : source.name || source.url}
+                  {source.isSync
+                    ? t("webdavImport.syncSource")
+                    : source.name || (source.kind === "quark" ? t("webdavImport.presets.quark") : source.url)}
                 </option>
               ))}
             </select>
@@ -288,7 +312,14 @@ export function WebDavImportDialog({
                   aria-label={t("webdavImport.edit")}
                   onClick={() =>
                     setEditing({
-                      draft: { id: active.id, preset: "other", name: active.name, url: active.url, user: active.user, password: "" },
+                      draft: {
+                        id: active.id,
+                        preset: active.kind === "quark" ? "quark" : "other",
+                        name: active.name,
+                        url: active.url,
+                        user: active.user,
+                        password: "",
+                      },
                       hasSavedPassword: active.hasPassword,
                     })
                   }
@@ -313,13 +344,13 @@ export function WebDavImportDialog({
           </div>
 
           <nav aria-label={t("webdavImport.location")} className="ca-t-sm flex flex-wrap items-center gap-1 text-[var(--text-muted)]">
-            <button type="button" className="rounded px-1 hover:text-[var(--text-strong)]" onClick={() => goTo("")}>
+            <button type="button" className="rounded px-1 hover:text-[var(--text-strong)]" onClick={() => goTo(0)}>
               {t("webdavImport.root")}
             </button>
-            {crumbs.map((crumb) => (
-              <span key={crumb.path} className="flex items-center gap-1">
+            {trail.map((crumb, index) => (
+              <span key={`${index}-${crumb.path}`} className="flex items-center gap-1">
                 <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-                <button type="button" className="rounded px-1 hover:text-[var(--text-strong)]" onClick={() => goTo(crumb.path)}>
+                <button type="button" className="rounded px-1 hover:text-[var(--text-strong)]" onClick={() => goTo(index + 1)}>
                   {crumb.name}
                 </button>
               </span>
@@ -349,7 +380,7 @@ export function WebDavImportDialog({
             <ul>
               {entries.map((entry) =>
                 entry.isDir ? (
-                  <li key={entry.path}>
+                  <li key={`dir-${entry.path}`}>
                     <button
                       type="button"
                       className="ca-touch-44 flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--surface-card-hover)]"
@@ -361,7 +392,7 @@ export function WebDavImportDialog({
                     </button>
                   </li>
                 ) : (
-                  <li key={entry.path}>
+                  <li key={entry.url}>
                     <label className="ca-touch-44 flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--surface-card-hover)]">
                       <input
                         type="checkbox"

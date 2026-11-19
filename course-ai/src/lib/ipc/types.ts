@@ -502,6 +502,8 @@ export type RemoteSyncMediaState = {
 /** 从网盘（WebDAV）导入：一个网盘来源。 */
 export type WebDavSource = {
   id: string;
+  /** `webdav`，或 `quark`（夸克网盘，用网页版 Cookie）。 */
+  kind: "webdav" | "quark";
   name: string;
   url: string;
   user: string;

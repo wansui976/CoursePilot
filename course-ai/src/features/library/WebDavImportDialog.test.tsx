@@ -23,7 +23,7 @@ const { mockIpc, mockMobile } = vi.hoisted(() => ({
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@/lib/platform", () => ({ isMobile: () => mockMobile.value }));
 
-const nas: WebDavSource = { id: "nas", name: "家里的 NAS", url: "http://nas:5244/dav/", user: "me", hasPassword: true, isSync: false };
+const nas: WebDavSource = { id: "nas", kind: "webdav", name: "家里的 NAS", url: "http://nas:5244/dav/", user: "me", hasPassword: true, isSync: false };
 const dir = (name: string, path: string): WebDavEntry => ({ name, path, isDir: true, size: null, isVideo: false, url: "" });
 const file = (name: string, path: string, isVideo = true): WebDavEntry => ({
   name,
@@ -107,5 +107,26 @@ describe("WebDavImportDialog", () => {
       { url: "http://nas:5244/dav/%E7%94%B3%E8%AE%BA%202027/%E7%AC%AC2%E8%AE%B2.mp4", title: "第2讲" },
     ]);
     expect(mockIpc.downloads.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("夸克网盘：只要贴一份 Cookie，不要地址和账号", async () => {
+    const quark: WebDavSource = { id: "q", kind: "quark", name: "", url: "quark://", user: "", hasPassword: true, isSync: false };
+    mockIpc.webdavImport.sources.mockResolvedValueOnce([]).mockResolvedValue([quark]);
+    mockIpc.webdavImport.saveSource.mockResolvedValue(quark);
+    mockIpc.webdavImport.browse.mockResolvedValue([dir("申论 2027", "fid-1")]);
+    renderDialog();
+    fireEvent.change(await screen.findByLabelText("网盘类型"), { target: { value: "quark" } });
+    expect(screen.queryByLabelText("WebDAV 地址")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Cookie"), { target: { value: "b-user=1; __puus=abc" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(mockIpc.webdavImport.saveSource).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "quark", url: "", user: "", password: "b-user=1; __puus=abc" }),
+      ),
+    );
+    // 夸克按文件夹 id 进目录：面包屑记的是走过的名字。
+    fireEvent.click(await screen.findByRole("button", { name: /申论 2027/ }));
+    await waitFor(() => expect(mockIpc.webdavImport.browse).toHaveBeenCalledWith("q", "fid-1"));
+    expect(screen.getByRole("navigation", { name: "当前位置" })).toHaveTextContent("全部申论 2027");
   });
 });

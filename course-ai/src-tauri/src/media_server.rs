@@ -43,6 +43,8 @@ pub enum RemoteAuth {
     Bearer(String),
     /// WebDAV 账号密码。
     Basic { user: String, password: String },
+    /// 直接带上的请求头（夸克网盘的下载链接要带 Cookie、Referer、User-Agent）。
+    Headers(Vec<(String, String)>),
 }
 
 impl RemoteSource {
@@ -50,6 +52,9 @@ impl RemoteSource {
         match &self.auth {
             RemoteAuth::Bearer(token) => request.bearer_auth(token),
             RemoteAuth::Basic { user, password } => request.basic_auth(user, Some(password)),
+            RemoteAuth::Headers(headers) => {
+                headers.iter().fold(request, |request, (name, value)| request.header(name.as_str(), value.as_str()))
+            }
         }
     }
 }

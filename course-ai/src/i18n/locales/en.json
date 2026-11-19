@@ -1457,7 +1457,7 @@
     "importPlaylist": "Import playlist / collection",
     "importPlaylistHint": "Bilibili collection · multi-P / YouTube playlist, batch download",
     "fromDrive": "Import from a cloud drive",
-    "fromDriveHint": "Jianguoyun, Synology, Nextcloud, or Baidu / Aliyun / Quark via OpenList",
+    "fromDriveHint": "Jianguoyun, Synology, Quark Drive, or Baidu / Aliyun via OpenList",
     "importFailed": "Import failed: {{error}}",
     "selectLocalVideo": "Select local video or audio",
     "noVideosInFolder": "No importable video or audio in this folder",
@@ -1465,10 +1465,11 @@
   },
   "webdavImport": {
     "title": "Import from a cloud drive",
-    "intro": "Connect a drive first. Jianguoyun, Nextcloud and Synology connect directly; for Baidu Netdisk, Aliyun Drive, Quark or 115, expose them as WebDAV with OpenList first.",
+    "intro": "Connect a drive first. Jianguoyun, Nextcloud and Synology connect directly, and Quark Drive needs a cookie from its website; for Baidu Netdisk, Aliyun Drive or 115, expose them as WebDAV with OpenList first.",
     "kind": "Drive type",
     "presets": {
       "openlist": "OpenList / AList (Baidu, Aliyun, Quark, 115…)",
+      "quark": "Quark Drive (direct)",
       "jianguoyun": "Jianguoyun",
       "nextcloud": "Nextcloud",
       "synology": "Synology NAS",
@@ -1479,14 +1480,16 @@
       "jianguoyun": "Use an app password (Jianguoyun web → Account → Security), not your login password.",
       "nextcloud": "Find the address in Nextcloud web → Files → Settings (bottom left).",
       "synology": "Install WebDAV Server from Package Center and enable HTTPS; the address is usually https://your-nas:5006/.",
-      "other": "Enter the drive's WebDAV address, user name and password."
+      "other": "Enter the drive's WebDAV address, user name and password.",
+      "quark": "Quark has no developer platform, so this uses your web login: sign in at pan.quark.cn in a browser → press F12 → Network → reload, click any request → copy the whole Cookie request header and paste it below. The cookie expires after a while; copy it again then. Download speed for non-members is limited by Quark."
     },
     "urlPlaceholders": {
       "openlist": "http://computer-or-nas-ip:5244/dav/",
       "jianguoyun": "https://dav.jianguoyun.com/dav/",
       "nextcloud": "https://your-domain/remote.php/dav/files/username/",
       "synology": "https://your-nas:5006/",
-      "other": "https://"
+      "other": "https://",
+      "quark": ""
     },
     "url": "WebDAV address",
     "user": "User name",
@@ -1518,7 +1521,10 @@
     "import": "Import {{count}} videos",
     "downloadLocal": "Download to this device",
     "downloading": "Downloading {{percent}}%",
-    "streamUnavailable": "This video is on a cloud drive this device isn't connected to yet. Add the same drive under Import → Import from a cloud drive."
+    "streamUnavailable": "This video is on a cloud drive this device isn't connected to yet. Add the same drive under Import → Import from a cloud drive.",
+    "cookie": "Cookie",
+    "cookiePlaceholder": "Paste the whole Cookie here",
+    "cookieKeep": "Leave empty to keep the cookie"
   },
   "bilibiliImport": {
     "title": "Download Online Video",

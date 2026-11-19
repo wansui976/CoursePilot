@@ -14,6 +14,9 @@
 //! 网盘来源（按地址前缀认），同步过去的条目照样能在线看。
 //!
 //! 网盘来源存在设置里，密码进系统钥匙串。同步用的那个网盘账号自动算一个来源。
+//!
+//! 除了 WebDAV，还能直接连夸克网盘（见 quark.rs：用网页版的 Cookie，不是开放平台）。夸克的文件
+//! 记成 `quark://<文件 id>/<文件名>`，播放、下载前现取下载链接。
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -44,10 +47,20 @@ fn secret_name(id: &str) -> String {
     format!("webdav_import_password_{id}")
 }
 
+pub const KIND_WEBDAV: &str = "webdav";
+pub const KIND_QUARK: &str = "quark";
+const QUARK_SCHEME: &str = "quark://";
+
+fn default_kind() -> String {
+    KIND_WEBDAV.into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct StoredSource {
     id: String,
+    #[serde(default = "default_kind")]
+    kind: String,
     name: String,
     url: String,
     user: String,
@@ -58,6 +71,8 @@ struct StoredSource {
 #[serde(rename_all = "camelCase")]
 pub struct Source {
     pub id: String,
+    /// `webdav` 或 `quark`。
+    pub kind: String,
     pub name: String,
     pub url: String,
     pub user: String,
@@ -114,6 +129,7 @@ pub async fn list_sources(db: &Db) -> AppResult<Vec<Source>> {
     if let Some(config) = crate::sync::remote::saved_config(db).await? {
         sources.push(Source {
             id: SYNC_SOURCE_ID.into(),
+            kind: KIND_WEBDAV.into(),
             name: String::new(),
             url: normalize_base(&config.url).unwrap_or(config.url),
             user: config.user,
@@ -127,6 +143,7 @@ pub async fn list_sources(db: &Db) -> AppResult<Vec<Source>> {
             .is_some_and(|password| !password.is_empty());
         sources.push(Source {
             id: stored.id,
+            kind: stored.kind,
             name: stored.name,
             url: stored.url,
             user: stored.user,
@@ -137,29 +154,33 @@ pub async fn list_sources(db: &Db) -> AppResult<Vec<Source>> {
     Ok(sources)
 }
 
-/// 新建或修改一个来源。`password` 为 None / 空时不改已存的密码。
+/// 新建或修改一个来源。`secret`（WebDAV 的密码 / 夸克的 Cookie）为 None / 空时不改已存的。
 pub async fn save_source(
     db: &Db,
     id: Option<String>,
+    kind: String,
     name: String,
     url: String,
     user: String,
-    password: Option<String>,
+    secret: Option<String>,
 ) -> AppResult<Source> {
     if id.as_deref() == Some(SYNC_SOURCE_ID) {
         return Err(AppError::Config("同步用的网盘账号在「多设备同步」里改".into()));
     }
-    let url = normalize_base(&url)?;
+    let (kind, url, user) = match kind.as_str() {
+        KIND_QUARK => (KIND_QUARK.to_string(), QUARK_SCHEME.to_string(), String::new()),
+        _ => (KIND_WEBDAV.to_string(), normalize_base(&url)?, user.trim().to_string()),
+    };
     let mut sources = stored_sources(db).await?;
     let id = id.filter(|id| sources.iter().any(|source| &source.id == id)).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let stored = StoredSource { id: id.clone(), name: name.trim().to_string(), url, user: user.trim().to_string() };
+    let stored = StoredSource { id: id.clone(), kind, name: name.trim().to_string(), url, user };
     match sources.iter_mut().find(|source| source.id == id) {
         Some(existing) => *existing = stored,
         None => sources.push(stored),
     }
     write_sources(db, &sources).await?;
-    if let Some(password) = password.filter(|password| !password.is_empty()) {
-        crate::llm::keychain::set_secret(db, &secret_name(&id), &password).await?;
+    if let Some(secret) = secret.map(|secret| secret.trim().to_string()).filter(|secret| !secret.is_empty()) {
+        crate::llm::keychain::set_secret(db, &secret_name(&id), &secret).await?;
     }
     list_sources(db)
         .await?
@@ -176,26 +197,37 @@ pub async fn delete_source(db: &Db, id: &str) -> AppResult<()> {
     Ok(())
 }
 
-/// 一个来源的（根地址, 账号, 密码）。
-async fn credentials(db: &Db, id: &str) -> AppResult<(String, String, String)> {
+/// 一个来源的（类型, 根地址, 账号, 密码或 Cookie）。
+async fn credentials(db: &Db, id: &str) -> AppResult<(String, String, String, String)> {
     if id == SYNC_SOURCE_ID {
         let config = crate::sync::remote::saved_config(db)
             .await?
             .ok_or_else(|| AppError::Config("还没设置同步用的网盘".into()))?;
-        return Ok((normalize_base(&config.url)?, config.user, config.password));
+        return Ok((KIND_WEBDAV.into(), normalize_base(&config.url)?, config.user, config.password));
     }
     let stored = stored_sources(db)
         .await?
         .into_iter()
         .find(|source| source.id == id)
         .ok_or_else(|| AppError::NotFound(format!("网盘来源 {id}")))?;
-    let password = crate::llm::keychain::get_secret(db, &secret_name(id)).await?.unwrap_or_default();
-    Ok((stored.url, stored.user, password))
+    let secret = crate::llm::keychain::get_secret(db, &secret_name(id)).await?.unwrap_or_default();
+    Ok((stored.kind, stored.url, stored.user, secret))
 }
 
-/// 测一个（还没保存的）来源能不能连上：能列出根目录就算通。
-pub async fn test(url: &str, user: &str, password: &str) -> AppResult<usize> {
-    let dav = WebDav::new(&normalize_base(url)?, "", user, password)?;
+/// 夸克的接口顺手续了 Cookie：存回去，下次接着用新的。
+async fn keep_quark_cookie(db: &Db, id: &str, before: &str, client: &crate::quark::Client) {
+    let after = client.cookie();
+    if after != before {
+        let _ = crate::llm::keychain::set_secret(db, &secret_name(id), &after).await;
+    }
+}
+
+/// 测一个（还没保存的）来源能不能连上：能列出根目录就算通。返回根目录下有几项。
+pub async fn test(kind: &str, url: &str, user: &str, secret: &str) -> AppResult<usize> {
+    if kind == KIND_QUARK {
+        return Ok(crate::quark::Client::new(secret)?.list(crate::quark::ROOT).await?.len());
+    }
+    let dav = WebDav::new(&normalize_base(url)?, "", user, secret)?;
     let entries = dav
         .list("")
         .await?
@@ -203,13 +235,14 @@ pub async fn test(url: &str, user: &str, password: &str) -> AppResult<usize> {
     Ok(entries.len())
 }
 
-/// 测已保存的来源（编辑时密码留空 = 用存着的那个）。
-pub async fn test_saved(db: &Db, id: &str, url: Option<String>, user: Option<String>, password: Option<String>) -> AppResult<usize> {
-    let (saved_url, saved_user, saved_password) = credentials(db, id).await?;
+/// 测已保存的来源（编辑时密码 / Cookie 留空 = 用存着的那个）。
+pub async fn test_saved(db: &Db, id: &str, url: Option<String>, user: Option<String>, secret: Option<String>) -> AppResult<usize> {
+    let (kind, saved_url, saved_user, saved_secret) = credentials(db, id).await?;
     test(
+        &kind,
         &url.unwrap_or(saved_url),
         &user.unwrap_or(saved_user),
-        &password.filter(|password| !password.is_empty()).unwrap_or(saved_password),
+        &secret.filter(|secret| !secret.is_empty()).unwrap_or(saved_secret),
     )
     .await
 }
@@ -256,10 +289,35 @@ pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     }
 }
 
-/// 列一个文件夹：文件夹在前，其余按文件名的自然顺序。
+fn sort_entries(items: &mut [BrowseEntry]) {
+    items.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| natural_cmp(&a.name, &b.name)));
+}
+
+/// 列一个文件夹：文件夹在前，其余按文件名的自然顺序。`path` 是上一层给出的那一项的 `path`
+/// （WebDAV 是相对路径，夸克是文件夹 id），根目录为空。
 pub async fn browse(db: &Db, source_id: &str, path: &str) -> AppResult<Vec<BrowseEntry>> {
-    let (base, user, password) = credentials(db, source_id).await?;
-    let dav = WebDav::new(&base, "", &user, &password)?;
+    let (kind, base, user, secret) = credentials(db, source_id).await?;
+    if kind == KIND_QUARK {
+        let client = crate::quark::Client::new(&secret)?;
+        let fid = if path.is_empty() { crate::quark::ROOT } else { path };
+        let files = client.list(fid).await;
+        keep_quark_cookie(db, source_id, &secret, &client).await;
+        let mut items: Vec<BrowseEntry> = files?
+            .into_iter()
+            .filter(|file| !file.name.starts_with('.'))
+            .map(|file| BrowseEntry {
+                is_video: !file.is_dir && (file.is_video || is_video_name(&file.name)),
+                url: if file.is_dir { String::new() } else { format!("{QUARK_SCHEME}{}/{}", file.fid, encode_path(&file.name)) },
+                path: if file.is_dir { file.fid } else { String::new() },
+                name: file.name,
+                is_dir: file.is_dir,
+                size: file.size,
+            })
+            .collect();
+        sort_entries(&mut items);
+        return Ok(items);
+    }
+    let dav = WebDav::new(&base, "", &user, &secret)?;
     let dir = path.trim_matches('/');
     let prefix = if dir.is_empty() { String::new() } else { format!("{dir}/") };
     let entries = dav
@@ -281,20 +339,57 @@ pub async fn browse(db: &Db, source_id: &str, path: &str) -> AppResult<Vec<Brows
             }
         })
         .collect();
-    items.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| natural_cmp(&a.name, &b.name)));
+    sort_entries(&mut items);
     Ok(items)
 }
 
-/// 哪个来源能访问这个地址（按根地址前缀认，最长的优先）。返回（账号, 密码）。
-pub async fn source_for_url(db: &Db, url: &str) -> AppResult<Option<(String, String)>> {
+/// 能访问某个地址的来源。
+pub enum Access {
+    Basic { user: String, password: String },
+    Quark { source_id: String, cookie: String },
+}
+
+/// 哪个来源能访问这个地址：WebDAV 按根地址前缀认（最长的优先）；`quark://` 用第一个夸克来源。
+pub async fn source_for_url(db: &Db, url: &str) -> AppResult<Option<Access>> {
+    if url.starts_with(QUARK_SCHEME) {
+        for source in list_sources(db).await?.into_iter().filter(|source| source.kind == KIND_QUARK) {
+            let (_, _, _, cookie) = credentials(db, &source.id).await?;
+            if !cookie.is_empty() {
+                return Ok(Some(Access::Quark { source_id: source.id, cookie }));
+            }
+        }
+        return Ok(None);
+    }
     let mut best: Option<(usize, String, String)> = None;
-    for source in list_sources(db).await? {
+    for source in list_sources(db).await?.into_iter().filter(|source| source.kind == KIND_WEBDAV) {
         if url.starts_with(&source.url) && best.as_ref().is_none_or(|(length, _, _)| source.url.len() > *length) {
-            let (_, user, password) = credentials(db, &source.id).await?;
+            let (_, _, user, password) = credentials(db, &source.id).await?;
             best = Some((source.url.len(), user, password));
         }
     }
-    Ok(best.map(|(_, user, password)| (user, password)))
+    Ok(best.map(|(_, user, password)| Access::Basic { user, password }))
+}
+
+/// 地址 → 真正去拉的链接和要带的认证。夸克的下载链接有时效，每次现取。没有能访问它的来源时返回 None。
+pub async fn resolve(db: &Db, url: &str) -> AppResult<Option<(String, RemoteAuth)>> {
+    match source_for_url(db, url).await? {
+        None => Ok(None),
+        Some(Access::Basic { user, password }) => Ok(Some((url.to_string(), RemoteAuth::Basic { user, password }))),
+        Some(Access::Quark { source_id, cookie }) => {
+            let fid = url.trim_start_matches(QUARK_SCHEME).split('/').next().unwrap_or_default();
+            let client = crate::quark::Client::new(&cookie)?;
+            let link = client.download_url(fid).await;
+            keep_quark_cookie(db, &source_id, &cookie, &client).await;
+            Ok(Some((link?, RemoteAuth::Headers(client.download_headers()))))
+        }
+    }
+}
+
+fn http_client() -> AppResult<reqwest::Client> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| AppError::Other(error.to_string()))
 }
 
 fn file_name_of(url: &str) -> String {
@@ -332,20 +427,17 @@ pub async fn download(
     on_event: &(dyn Fn(DownloadEvent) + Send + Sync),
     begin_import: &(dyn Fn() -> bool + Send + Sync),
 ) -> AppResult<PathBuf> {
-    let (user, password) = source_for_url(db, url)
+    let (link, auth) = resolve(db, url)
         .await?
         .ok_or_else(|| AppError::Config("找不到能访问这个地址的网盘来源（是不是删掉了？）".into()))?;
     std::fs::create_dir_all(staging)?;
     std::fs::create_dir_all(out_dir)?;
     let name = file_name_of(url);
     let partial = staging.join(format!("{name}.part"));
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|error| AppError::Other(error.to_string()))?;
+    let source = RemoteSource { url: link, auth, client: http_client()? };
     // 断了接着下：已经下了的部分用 Range 续上（服务器不支持 Range 就从头来）。
     let mut downloaded = std::fs::metadata(&partial).map(|meta| meta.len()).unwrap_or(0);
-    let mut request = client.get(url).basic_auth(&user, Some(&password));
+    let mut request = source.authorize(source.client.get(&source.url));
     if downloaded > 0 {
         request = request.header(reqwest::header::RANGE, format!("bytes={downloaded}-"));
     }
@@ -463,12 +555,8 @@ pub async fn stream_source(db: &Db, video_id: &str) -> AppResult<Option<RemoteSo
     if source_type != SOURCE_TYPE || !file_path.is_empty() {
         return Ok(None);
     }
-    let Some((user, password)) = source_for_url(db, &url).await? else { return Ok(None) };
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|error| AppError::Other(error.to_string()))?;
-    Ok(Some(RemoteSource { url, auth: RemoteAuth::Basic { user, password }, client }))
+    let Some((link, auth)) = resolve(db, &url).await? else { return Ok(None) };
+    Ok(Some(RemoteSource { url: link, auth, client: http_client()? }))
 }
 
 /// 在线看的视频下载到本机：下完挂上文件，之后就和本地视频一样（能识别字幕、截封面）。
@@ -523,7 +611,7 @@ mod tests {
 
     async fn db_with_source(dir: &Path, url: &str) -> (Db, Source) {
         let db = Db::connect_and_migrate(&dir.join("t.db")).await.unwrap();
-        let source = save_source(&db, None, "家里的 NAS".into(), url.into(), "u".into(), Some("p".into())).await.unwrap();
+        let source = save_source(&db, None, KIND_WEBDAV.into(), "家里的 NAS".into(), url.into(), "u".into(), Some("p".into())).await.unwrap();
         (db, source)
     }
 
@@ -619,7 +707,7 @@ mod tests {
         let env = |key: &str| std::env::var(key).unwrap_or_else(|_| panic!("要设置 {key}"));
         let dir = tempfile::tempdir().unwrap();
         let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
-        let source = save_source(&db, None, "real".into(), env("COURSEPILOT_DAV_URL"), env("COURSEPILOT_DAV_USER"), Some(env("COURSEPILOT_DAV_PASSWORD")))
+        let source = save_source(&db, None, KIND_WEBDAV.into(), "real".into(), env("COURSEPILOT_DAV_URL"), env("COURSEPILOT_DAV_USER"), Some(env("COURSEPILOT_DAV_PASSWORD")))
             .await
             .unwrap();
         println!("连接测试：根目录 {} 项", test_saved(&db, &source.id, None, None, None).await.unwrap());
@@ -657,6 +745,57 @@ mod tests {
         assert_eq!(Some(size), entries.iter().find(|e| e.url == lessons[0].url).and_then(|e| e.size));
     }
 
+    // 只有这一个测试改夸克接口地址（进程里全局的）。
+    #[tokio::test]
+    async fn quark_lessons_can_be_browsed_streamed_and_downloaded_with_a_cookie() {
+        let (api, drive) = crate::quark::fake::start(&[
+            ("d1", "0", "申论 2027", true, b""),
+            ("f10", "d1", "第10讲.mp4", false, b"lesson-ten"),
+            ("f1", "d1", "第1讲 A&B.mp4", false, b"lesson-one"),
+            ("f9", "d1", "讲义.pdf", false, b"pdf"),
+        ])
+        .await;
+        crate::quark::set_api_base_for_tests(&api);
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+
+        // Cookie 不对：说清楚要重新复制。
+        let error = test(KIND_QUARK, "", "", "__puus=wrong").await.unwrap_err();
+        assert!(error.to_string().contains("Cookie"), "{error}");
+
+        let source = save_source(&db, None, KIND_QUARK.into(), "我的夸克".into(), String::new(), String::new(), Some("b-user=1; __puus=p1".into()))
+            .await
+            .unwrap();
+        assert_eq!((source.kind.as_str(), source.has_password), (KIND_QUARK, true));
+        let root = browse(&db, &source.id, "").await.unwrap();
+        assert_eq!(root.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["申论 2027"]);
+        // 接口续了 Cookie：存回去了，下一次请求用新的（旧的已经不认了）。
+        let saved = crate::llm::keychain::get_secret(&db, &secret_name(&source.id)).await.unwrap().unwrap();
+        assert_eq!(saved, "b-user=1; __puus=p2");
+        let lessons = browse(&db, &source.id, &root[0].path).await.unwrap();
+        let names: Vec<&str> = lessons.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["第1讲 A&B.mp4", "第10讲.mp4", "讲义.pdf"], "名字里的 &amp; 还原了，按讲数排");
+        assert!(lessons[0].is_video && !lessons[2].is_video);
+
+        // 在线看：现取下载链接，带着 Cookie / Referer 拉，Range 照转。
+        let course = crate::commands::courses::create_course(&db, "c".into(), dir.path().to_string_lossy().into()).await.unwrap();
+        let items: Vec<StreamItem> =
+            lessons.iter().filter(|e| e.is_video).map(|e| StreamItem { url: e.url.clone(), title: e.name.clone() }).collect();
+        import_streaming(&db, &dir.path().join("remote"), &course.id, &items).await.unwrap();
+        let video = crate::commands::videos::list_videos(&db, &course.id).await.unwrap().remove(0);
+        let media = crate::media_server::start().await.unwrap();
+        media.register_remote(&video.id, stream_source(&db, &video.id).await.unwrap().expect("能在线看"));
+        let response = reqwest::Client::new().get(media.url(&video.id)).header("Range", "bytes=7-9").send().await.unwrap();
+        assert_eq!(response.status(), 206);
+        assert_eq!(response.bytes().await.unwrap().as_ref(), b"one");
+
+        // 下载到本机：文件名用夸克上的名字。
+        let local = download_streamed(&db, &video.id, &dir.path().join("course"), &|_| {}).await.unwrap();
+        assert!(local.file_path.ends_with("第1讲 A&B.mp4"), "{}", local.file_path);
+        assert_eq!(std::fs::read(&local.file_path).unwrap(), b"lesson-one");
+        assert!(drive.lock().unwrap().downloads >= 2);
+    }
+
     #[tokio::test]
     async fn the_sync_account_is_a_source_that_cannot_be_edited_here() {
         let dir = tempfile::tempdir().unwrap();
@@ -668,6 +807,6 @@ mod tests {
         assert_eq!(sources.len(), 1);
         assert!(sources[0].is_sync);
         assert_eq!(sources[0].url, "https://dav.jianguoyun.com/dav/");
-        assert!(save_source(&db, Some(SYNC_SOURCE_ID.into()), "x".into(), "https://a/".into(), "u".into(), None).await.is_err());
+        assert!(save_source(&db, Some(SYNC_SOURCE_ID.into()), KIND_WEBDAV.into(), "x".into(), "https://a/".into(), "u".into(), None).await.is_err());
     }
 }

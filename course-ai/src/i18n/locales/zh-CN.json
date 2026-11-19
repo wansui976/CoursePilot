@@ -1455,7 +1455,7 @@
     "importPlaylist": "导入播放列表 / 合集",
     "importPlaylistHint": "B 站合集·多 P / YouTube 播放列表，批量下载",
     "fromDrive": "从网盘导入",
-    "fromDriveHint": "坚果云、群晖、Nextcloud，或用 OpenList 挂的百度 / 阿里 / 夸克网盘",
+    "fromDriveHint": "坚果云、群晖、夸克网盘，或用 OpenList 挂的百度 / 阿里网盘",
     "importFailed": "导入失败：{{error}}",
     "selectLocalVideo": "选择本地视频或音频",
     "noVideosInFolder": "该文件夹里没有可导入的视频或音频",
@@ -1463,10 +1463,11 @@
   },
   "webdavImport": {
     "title": "从网盘导入",
-    "intro": "先连上一个网盘。坚果云、Nextcloud、群晖可以直接连；百度网盘、阿里云盘、夸克、115 这些先用 OpenList 挂出一个 WebDAV 地址再连。",
+    "intro": "先连上一个网盘。坚果云、Nextcloud、群晖可以直接连，夸克网盘贴一份网页版的 Cookie 就行；百度网盘、阿里云盘、115 先用 OpenList 挂出一个 WebDAV 地址再连。",
     "kind": "网盘类型",
     "presets": {
       "openlist": "OpenList / AList（百度、阿里、夸克、115…）",
+      "quark": "夸克网盘（直接连）",
       "jianguoyun": "坚果云",
       "nextcloud": "Nextcloud",
       "synology": "群晖 NAS",
@@ -1477,14 +1478,16 @@
       "jianguoyun": "密码填「第三方应用密码」（坚果云网页 → 账户信息 → 安全选项里生成），不是登录密码。",
       "nextcloud": "地址在 Nextcloud 网页「文件 → 左下角设置」里能找到。",
       "synology": "先在套件中心装好 WebDAV Server 并打开 HTTPS，地址一般是 https://NAS 地址:5006/。",
-      "other": "填网盘的 WebDAV 地址和账号密码。"
+      "other": "填网盘的 WebDAV 地址和账号密码。",
+      "quark": "夸克没有开放平台，这里用网页版的登录状态：在浏览器里登录 pan.quark.cn → 按 F12 打开开发者工具 → 网络（Network）→ 刷新页面，点任意一个请求 → 在请求头里复制整段 Cookie，粘到下面。Cookie 过一阵子会失效，到时候再复制一次。非会员的下载速度由夸克限制。"
     },
     "urlPlaceholders": {
       "openlist": "http://电脑或 NAS 的 IP:5244/dav/",
       "jianguoyun": "https://dav.jianguoyun.com/dav/",
       "nextcloud": "https://你的域名/remote.php/dav/files/用户名/",
       "synology": "https://NAS 地址:5006/",
-      "other": "https://"
+      "other": "https://",
+      "quark": ""
     },
     "url": "WebDAV 地址",
     "user": "账号",
@@ -1516,7 +1519,10 @@
     "import": "导入 {{count}} 个视频",
     "downloadLocal": "下载到本机",
     "downloading": "正在下载 {{percent}}%",
-    "streamUnavailable": "这个视频在网盘上，这台设备还没连上能访问它的网盘：在「导入 → 从网盘导入」里添加同一个网盘。"
+    "streamUnavailable": "这个视频在网盘上，这台设备还没连上能访问它的网盘：在「导入 → 从网盘导入」里添加同一个网盘。",
+    "cookie": "Cookie",
+    "cookiePlaceholder": "把复制的整段 Cookie 粘在这里",
+    "cookieKeep": "留空 = 不改 Cookie"
   },
   "bilibiliImport": {
     "title": "下载网络视频",

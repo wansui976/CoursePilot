@@ -14,6 +14,7 @@ pub mod llm;
 pub mod media_server;
 pub mod mobile_files;
 pub mod pipeline;
+pub mod quark;
 pub mod sidecar;
 pub mod storage;
 pub mod sync;
