@@ -32,7 +32,7 @@ pub async fn create(
     auto_process: bool,
 ) -> AppResult<Subscription> {
     let now = chrono::Utc::now().timestamp_millis();
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     // 同一课程重复订阅同一个地址：沿用原来那条，只补记存量。
     let existing: Option<String> =
         sqlx::query_scalar("SELECT id FROM subscriptions WHERE course_id=? AND url=?")

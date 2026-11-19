@@ -33,7 +33,7 @@ pub async fn put(db: &Db, entries: &[(String, Option<String>)]) -> AppResult<()>
         return Ok(());
     }
     let now = chrono::Utc::now().timestamp_millis();
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     for (key, value) in entries {
         match value {
             Some(value) => {

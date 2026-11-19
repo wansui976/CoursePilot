@@ -15,7 +15,7 @@ pub struct SyncDeviceState {
 }
 
 pub async fn ensure_sync_identity(db: &Db) -> AppResult<SyncDeviceState> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     sqlx::query(
         "INSERT INTO sync_device_state(singleton,device_id,logical_clock,enabled,bootstrap_complete)
          VALUES (1,?,0,0,0)
@@ -63,7 +63,7 @@ pub async fn ensure_sync_identity(db: &Db) -> AppResult<SyncDeviceState> {
 
 pub async fn enqueue_local_snapshot(db: &Db) -> AppResult<()> {
     let now = Utc::now().timestamp_millis();
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     for (record_type, table, id_column) in [
         ("Course", "courses", "id"),
         ("Folder", "folders", "id"),

@@ -38,7 +38,7 @@ pub struct Job {
 }
 
 pub async fn ensure_jobs(db: &Db, video_id: &str) -> AppResult<Vec<Job>> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let mut output = Vec::new();
     for stage in STAGES {
         let id = Uuid::new_v4().to_string();

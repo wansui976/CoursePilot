@@ -821,7 +821,7 @@ async fn index_video(db: &Db, video_id: &str, guard: Option<(&Indexer, u64)>) ->
     if guard.is_some_and(|(indexer, generation)| indexer.stale(generation)) {
         return Ok(0);
     }
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     // 讲稿在算向量期间变了（重新识别、纠错）：这份向量对应的是旧讲稿，丢掉，等下一轮。
     // 在同一个事务里比，比完到提交之间讲稿不会再变。
     let now: Vec<(i64, String)> =

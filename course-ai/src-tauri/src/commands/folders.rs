@@ -345,7 +345,7 @@ pub async fn set_folder_color(db: &Db, id: &str, color: Option<String>) -> AppRe
 
 /// 文件夹（含各级子文件夹）里所有未删除的视频 id。删除前先拿来取消处理任务。
 pub async fn folder_video_ids(db: &Db, id: &str) -> AppResult<Vec<String>> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let course_id = folder_course(&mut tx, id).await?;
     let tree = CourseTree::load(&mut tx, &course_id).await?;
     let folders = tree.subtree_folders(id);

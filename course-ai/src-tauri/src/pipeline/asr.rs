@@ -82,7 +82,7 @@ async fn replace_segments_on_connection(
 /// 覆盖式写入 transcripts。删除和全部插入必须作为一个原子替换提交。
 pub async fn store_segments(db: &Db, video_id: &str, segs: &[StoredSegment]) -> AppResult<usize> {
     require_segments(segs)?;
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     replace_segments_on_connection(&mut tx, video_id, segs).await?;
     tx.commit().await?;
     Ok(segs.len())
@@ -138,7 +138,7 @@ pub async fn store_segments_with_backup(
             words_json: seg.words_json.clone(),
         })
         .collect();
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     sqlx::query(
         "INSERT INTO transcript_backups(video_id,source,segments_json,created_at)
          VALUES (?,?,?,?)",

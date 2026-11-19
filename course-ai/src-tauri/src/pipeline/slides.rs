@@ -746,7 +746,7 @@ fn keep_captured(
 }
 
 pub async fn store_slides(db: &Db, video_id: &str, frames: &[SlideFrame]) -> AppResult<usize> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     sqlx::query("DELETE FROM slides WHERE video_id=?")
         .bind(video_id)
         .execute(&mut *tx)

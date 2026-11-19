@@ -56,7 +56,7 @@ const SNAPSHOT_SOURCES: &[(&str, &str, &str)] = &[
 /// 否则之后比先后时，本机会把自己已经发出的内容当成更旧的。
 pub async fn enqueue_snapshot(db: &crate::db::Db) -> AppResult<()> {
     let now = chrono::Utc::now().timestamp_millis();
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let device: String = sqlx::query_scalar("SELECT device_id FROM sync_device_state WHERE singleton=1")
         .fetch_optional(&mut *tx)
         .await?
@@ -118,7 +118,7 @@ async fn local_cover_path(tx: &mut Transaction<'_, Sqlite>, video_id: &str) -> A
 /// 截出了新封面：排进出件箱（和触发器做的一样：入队 + 记本机戳）。
 pub async fn enqueue_cover(db: &crate::db::Db, video_id: &str) -> AppResult<()> {
     let now = chrono::Utc::now().timestamp_millis();
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     enqueue_covers_in(&mut tx, &[video_id.to_string()], now).await?;
     tx.commit().await?;
     Ok(())
@@ -135,7 +135,7 @@ pub async fn enqueue_cover_snapshot(db: &crate::db::Db) -> AppResult<usize> {
         .filter(|(_, data_dir)| std::path::Path::new(data_dir).join("cover.jpg").is_file())
         .map(|(id, _)| id)
         .collect();
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     enqueue_covers_in(&mut tx, &ids, chrono::Utc::now().timestamp_millis()).await?;
     tx.commit().await?;
     Ok(ids.len())

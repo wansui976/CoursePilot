@@ -163,7 +163,7 @@ pub async fn ensure_active_course(db: &Db, id: &str) -> AppResult<()> {
 /// 不直接 DELETE 课程行，否则 FK 级联会把回收站里的视频一并硬删除。
 pub async fn delete_course(db: &Db, id: String) -> AppResult<()> {
     let now = Utc::now().timestamp_millis();
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     sqlx::query(
         "UPDATE videos SET deleted_at=?, trash_changed_at=? WHERE course_id=? AND deleted_at IS NULL",
     )
@@ -377,7 +377,7 @@ pub async fn relink_course_root(
         .collect();
 
     let now = Utc::now().timestamp_millis();
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let result = sqlx::query(
         "UPDATE courses SET root_path=?, updated_at=?
          WHERE id=? AND deleted_at IS NULL",

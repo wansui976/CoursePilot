@@ -26,7 +26,7 @@ pub async fn pending_count(db: &Db) -> AppResult<i64> {
 pub async fn materialize_batch(db: &Db, limit: i64) -> AppResult<Vec<SyncEnvelope>> {
     let now = Utc::now().timestamp_millis();
     let lease_before = now - LEASE_MS;
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let rows: Vec<OutboxRow> = sqlx::query_as(
         "SELECT record_type,record_id,operation,changed_at,version_counter,version_device
          FROM sync_outbox
@@ -115,7 +115,7 @@ pub async fn acknowledge(
     version: &SyncVersion,
     change_tag: Option<&str>,
 ) -> AppResult<bool> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let result = sqlx::query(
         "DELETE FROM sync_outbox
          WHERE record_type=? AND record_id=? AND version_counter=? AND version_device=?",

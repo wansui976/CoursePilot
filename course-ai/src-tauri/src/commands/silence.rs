@@ -105,7 +105,7 @@ async fn store_silences(
     video_id: &str,
     ranges: &[silence::Silence],
 ) -> AppResult<()> {
-    let mut tx = state.db.pool.begin().await?;
+    let mut tx = state.db.begin_write().await?;
     sqlx::query("DELETE FROM video_silences WHERE video_id=?")
         .bind(video_id)
         .execute(&mut *tx)

@@ -138,7 +138,7 @@ pub async fn rebase_ios_container_paths(
     db: &crate::db::Db,
     current_root: &str,
 ) -> crate::error::AppResult<usize> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let mut changed = 0;
     for (table, column) in PATH_COLUMNS {
         let rows: Vec<(i64, String)> = sqlx::query_as(&format!(

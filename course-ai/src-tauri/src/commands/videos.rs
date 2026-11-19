@@ -552,7 +552,7 @@ pub async fn delete_video(db: &Db, id: &str) -> AppResult<()> {
 
 /// 从回收站恢复视频；若其课程也被软删除，一并恢复课程。
 pub async fn restore_video(db: &Db, id: &str) -> AppResult<()> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let now = Utc::now().timestamp_millis();
     let course_id = sqlx::query_scalar::<_, String>(
         "UPDATE videos SET deleted_at=NULL, trash_changed_at=?
@@ -716,7 +716,7 @@ pub async fn purge_video(
     id: &str,
     owned_media_roots: &[PathBuf],
 ) -> AppResult<()> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let (course_id, data_dir, file_path, app_owned, subtitle_path) =
         sqlx::query_as::<_, (String, String, String, bool, Option<String>)>(
             "DELETE FROM videos
@@ -773,7 +773,7 @@ pub async fn list_trashed(db: &Db) -> AppResult<Vec<TrashedVideo>> {
 
 /// 清空回收站：永久删除全部软删视频，再删掉没有任何视频的已软删课程。返回清除数量。
 pub async fn purge_trash(db: &Db, owned_media_roots: &[PathBuf]) -> AppResult<u64> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let doomed: Vec<DoomedVideo> = sqlx::query_as(
         "SELECT v.id,v.data_dir,v.file_path,v.app_owned_file AS app_owned,v.subtitle_path,c.root_path AS course_root
          FROM videos v JOIN courses c ON v.course_id=c.id
@@ -806,7 +806,7 @@ pub async fn purge_trash(db: &Db, owned_media_roots: &[PathBuf]) -> AppResult<u6
 /// 清理过期回收站：删除超过保留期的视频，再删掉没有任何视频的已软删课程。
 pub async fn purge_expired_trash(db: &Db, owned_media_roots: &[PathBuf]) -> AppResult<u64> {
     let cutoff = Utc::now().timestamp_millis() - TRASH_RETENTION_DAYS * DAY_MS;
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let doomed: Vec<DoomedVideo> = sqlx::query_as(
         "SELECT v.id,v.data_dir,v.file_path,v.app_owned_file AS app_owned,v.subtitle_path,c.root_path AS course_root
          FROM videos v JOIN courses c ON v.course_id=c.id

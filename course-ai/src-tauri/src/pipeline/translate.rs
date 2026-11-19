@@ -83,7 +83,7 @@ async fn store(
     segments: &[&TranscriptSegment],
     texts: &[String],
 ) -> AppResult<()> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     for (segment, text) in segments.iter().zip(texts) {
         sqlx::query(
             "INSERT INTO transcript_translations(video_id,segment_idx,lang,source_text,text) VALUES (?,?,?,?,?)

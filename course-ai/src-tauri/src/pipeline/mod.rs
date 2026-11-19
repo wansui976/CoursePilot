@@ -1935,7 +1935,7 @@ async fn mark_failed(db: &crate::db::Db, video_id: &str) -> AppResult<()> {
 
 pub async fn recover_interrupted_processing(db: &crate::db::Db) -> AppResult<()> {
     let now = chrono::Utc::now().timestamp_millis();
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     sqlx::query(
         "UPDATE processing_jobs
          SET status='failed', message='应用已重启，处理被中断，请重试', finished_at=?

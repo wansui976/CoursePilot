@@ -531,7 +531,7 @@ async fn rebind_probe_account(
     expected_previous: Option<&str>,
     account_id_hash: &str,
 ) -> AppResult<()> {
-    let mut transaction = db.pool.begin().await?;
+    let mut transaction = db.begin_write().await?;
     let stored: Option<String> =
         sqlx::query_scalar("SELECT account_id_hash FROM sync_device_state WHERE singleton=1")
             .fetch_one(&mut *transaction)

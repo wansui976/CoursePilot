@@ -198,7 +198,7 @@ async fn apply_one(
     video_data_root: Option<&Path>,
     report: &mut ApplyReport,
 ) -> AppResult<Outcome> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     // 回声抑制：这个事务里的写不进出件队列。置位与复位都在事务内——
     // 中途崩溃即整体回滚，不存在「闸门被留在关着」的中间态。
     sqlx::query("UPDATE sync_apply_guard SET applying=1 WHERE singleton=1")
@@ -1398,7 +1398,7 @@ pub async fn ensure_srs_baselines(db: &Db, now: i64) -> AppResult<usize> {
 
     let mut emitted = 0usize;
     for (card_id, created_at, course_id, video_id) in cards {
-        let mut tx = db.pool.begin().await?;
+        let mut tx = db.begin_write().await?;
         let folded = fold_schedule(&mut tx, &card_id, created_at).await?;
         type ScheduleRow = (f64, f64, i64, i64, i64, Option<i64>, i64);
         let current: Option<ScheduleRow> = sqlx::query_as(
@@ -1459,7 +1459,7 @@ pub async fn ensure_srs_baselines(db: &Db, now: i64) -> AppResult<usize> {
 /// 只在确认真的清掉出件项时调用——版本不匹配的过期确认说明本地又改过了，
 /// 那时当前内容不是达成一致的内容。
 pub async fn record_acked_note_basis(db: &Db, record_id: &str, stamp_ms: i64) -> AppResult<()> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let payload = crate::sync::outbox::payload_for(&mut tx, "Note", record_id).await?;
     let Some(payload) = payload else {
         tx.rollback().await?;
@@ -2059,7 +2059,7 @@ mod tests {
         assert!(local_json.contains("A 写的"), "败方全文在冲突表里");
 
         // 顺序编辑（基准与本地一致）不该记冲突：先把基准刷成本地当前内容再收一封更新的。
-        let mut tx = db_a.pool.begin().await.unwrap();
+        let mut tx = db_a.begin_write().await.unwrap();
         let payload = crate::sync::outbox::payload_for(&mut tx, "Note", &video)
             .await
             .unwrap()

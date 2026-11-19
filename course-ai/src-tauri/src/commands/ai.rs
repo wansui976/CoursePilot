@@ -136,7 +136,7 @@ pub async fn save_llm_config(
 
     let profiles_json = serde_json::to_string(&profiles)?;
 
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     for (key, value) in [
         ("llm_profiles", profiles_json.as_str()),
         ("llm_task_routing", routing_json),
@@ -393,7 +393,7 @@ pub async fn cmd_delete_quiz_set(
     video_id: String,
     set_id: String,
 ) -> AppResult<()> {
-    let mut tx = state.db.pool.begin().await?;
+    let mut tx = state.db.begin_write().await?;
     let raw: Option<String> = sqlx::query_scalar("SELECT questions_json FROM quizzes WHERE video_id=?")
         .bind(&video_id)
         .fetch_optional(&mut *tx)

@@ -215,13 +215,123 @@ pub fn repair_json_backslashes(input: &str) -> String {
     out
 }
 
-/// 宽松解析 LLM 返回的 JSON：先严格解析，失败再修复 LaTeX 反斜杠转义后重试。
+/// 修模型写坏的数字（只动字符串外面的值）：前导零 `012000`、`+3000`、全角数字、
+/// 结尾多个点 `12.`、缺整数部分 `.5`。`*_ms` 字段写成 `mm:ss` / `hh:mm:ss` 的换算成毫秒
+/// （章节的讲稿里只有 [mm:ss]，模型要自己换算成毫秒，最容易在这里写坏）；别的键下的
+/// 时间写法加上引号当字符串。千分位 `1,000` 跟数组里的逗号分不开，不修。仅在严格解析失败后兜底调用。
+pub fn repair_json_numbers(input: &str) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    let mut out = String::with_capacity(input.len() + 16);
+    let mut i = 0;
+    let mut in_string = false;
+    let mut string_buf = String::new();
+    let mut last_string = String::new();
+    let mut key = String::new();
+    let fold = |c: char| match c {
+        '０'..='９' => char::from_u32(c as u32 - '０' as u32 + '0' as u32).unwrap_or(c),
+        '：' => ':',
+        '．' => '.',
+        '＋' => '+',
+        '－' => '-',
+        _ => c,
+    };
+    while i < chars.len() {
+        let c = chars[i];
+        if in_string {
+            out.push(c);
+            match c {
+                '\\' => {
+                    if let Some(&next) = chars.get(i + 1) {
+                        out.push(next);
+                        string_buf.push(next);
+                        i += 1;
+                    }
+                }
+                '"' => {
+                    in_string = false;
+                    last_string = std::mem::take(&mut string_buf);
+                }
+                _ => string_buf.push(c),
+            }
+            i += 1;
+            continue;
+        }
+        let starts_number = matches!(fold(c), '0'..='9' | '+' | '-' | '.');
+        if !starts_number {
+            match c {
+                '"' => {
+                    in_string = true;
+                    string_buf.clear();
+                }
+                ':' => key = last_string.clone(),
+                _ => {}
+            }
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < chars.len() && matches!(fold(chars[i]), '0'..='9' | '+' | '-' | '.' | ':' | 'e' | 'E') {
+            i += 1;
+        }
+        let token: String = chars[start..i].iter().map(|&c| fold(c)).collect();
+        out.push_str(&fix_number_token(&token, key.ends_with("_ms")));
+    }
+    out
+}
+
+fn fix_number_token(token: &str, millis_key: bool) -> String {
+    if token.contains(':') {
+        let parts: Vec<&str> = token.split(':').collect();
+        let clock = (2..=3).contains(&parts.len())
+            && parts.iter().all(|p| !p.is_empty() && p.len() <= 2 && p.bytes().all(|b| b.is_ascii_digit()));
+        if clock && millis_key {
+            let seconds = parts.iter().fold(0i64, |acc, p| acc * 60 + p.parse::<i64>().unwrap_or(0));
+            return (seconds * 1000).to_string();
+        }
+        return format!("\"{token}\"");
+    }
+    let (sign, body) = match token.strip_prefix('-') {
+        Some(rest) => ("-", rest),
+        None => ("", token.strip_prefix('+').unwrap_or(token)),
+    };
+    // 整数部分 / 其余（小数、指数）分开处理；指数里的前导零 JSON 本来就允许。
+    let split = body.find(['.', 'e', 'E']).unwrap_or(body.len());
+    let (int_part, rest) = body.split_at(split);
+    if !int_part.bytes().all(|b| b.is_ascii_digit()) {
+        return token.to_string();
+    }
+    let trimmed = int_part.trim_start_matches('0');
+    let int_part = if trimmed.is_empty() { "0" } else { trimmed };
+    let rest = rest.strip_suffix('.').unwrap_or(rest);
+    format!("{sign}{int_part}{rest}")
+}
+
+/// 宽松解析 LLM 返回的 JSON：先严格解析，失败再修 LaTeX 反斜杠转义和写坏的数字后重试。
 /// 适用于含数学公式（LaTeX）的章节/出题等结构化输出。
 pub fn parse_lenient_json<T: serde::de::DeserializeOwned>(content: &str) -> AppResult<T> {
     let cleaned = strip_code_fence(content);
     match serde_json::from_str(cleaned) {
         Ok(value) => Ok(value),
-        Err(_) => serde_json::from_str(&repair_json_backslashes(cleaned)).map_err(AppError::Json),
+        Err(_) => serde_json::from_str(&repair_json_numbers(&repair_json_backslashes(cleaned)))
+            .map_err(AppError::Json),
+    }
+}
+
+/// 请求模型并解析结构化输出；解析不了就原样再请求一次。temperature 是 0.3，同样的坏写法
+/// 很少连着出两次：多花一次请求，总比整步失败、等用户发现了手动点重试强。
+async fn complete_parsed<T>(
+    provider: &Provider,
+    req: &crate::llm::ChatRequest,
+    parse: impl Fn(&str) -> AppResult<T>,
+) -> AppResult<T> {
+    let resp = provider.complete(req).await?;
+    match parse(&resp.content) {
+        Ok(value) => Ok(value),
+        Err(err) => {
+            tracing::warn!(label = req.label, error = %err, "模型输出解析失败，重新请求一次");
+            parse(&provider.complete(req).await?.content)
+        }
     }
 }
 
@@ -423,7 +533,7 @@ pub async fn store_chapters(db: &Db, video_id: &str, drafts: &[ChapterDraft]) ->
             "refusing to replace chapters with an empty result".into(),
         ));
     }
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     sqlx::query("DELETE FROM chapters WHERE video_id=?")
         .bind(video_id)
         .execute(&mut *tx)
@@ -937,9 +1047,8 @@ pub async fn generate_chapters(
     let transcript = &input.context;
     let req = crate::llm::prompts::chapters_request(model, transcript);
     report(progress, AT_REQUEST, "正在请求模型划分章节");
-    let resp = provider.complete(&req).await?;
+    let drafts = complete_parsed(provider, &req, parse_chapters).await?;
     report(progress, AT_PARSE, "解析章节");
-    let drafts = parse_chapters(&resp.content)?;
     report(progress, AT_STORE, "写入章节");
     let count = store_chapters(db, video_id, &drafts).await?;
     record_artifact_source(db, video_id, "chapters", &input.fingerprint).await?;
@@ -976,12 +1085,11 @@ pub async fn generate_quiz_with(
     let transcript = &input.context;
     let req = crate::llm::prompts::quiz_request(model, transcript, prefs.style.id(), &prefs.extra);
     report(progress, AT_REQUEST, "正在请求模型出题");
-    let resp = provider.complete(&req).await?;
+    let fresh = complete_parsed(provider, &req, validate_quiz).await?;
     report(progress, AT_PARSE, "校验题目");
-    let fresh = validate_quiz(&resp.content)?;
     report(progress, AT_STORE, "写入题库");
     let now = chrono::Utc::now().timestamp_millis();
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let existing: Option<String> = sqlx::query_scalar("SELECT questions_json FROM quizzes WHERE video_id=?")
         .bind(video_id)
         .fetch_optional(&mut *tx)
@@ -1758,6 +1866,34 @@ mod tests {
     fn strips_json_fence() {
         assert_eq!(strip_code_fence("```json\n[1,2]\n```"), "[1,2]");
         assert_eq!(strip_code_fence("[3]"), "[3]");
+    }
+
+    #[test]
+    fn repairs_broken_numbers_outside_strings() {
+        // 线上见过「json error: invalid number」：前导零、+号、全角、mm:ss 写进 *_ms。
+        let raw = "[{\"title\":\"第012讲 12:30 开始\",\"summary\":\"s\",\"start_ms\":012000,\"end_ms\":+30000},\n\
+                   {\"title\":\"B\",\"summary\":\"\",\"start_ms\":01:30,\"end_ms\":１:02:03}]";
+        let drafts = parse_chapters(raw).unwrap();
+        assert_eq!(drafts[0].title, "第012讲 12:30 开始", "字符串里的数字不动");
+        assert_eq!((drafts[0].start_ms, drafts[0].end_ms), (12_000, 30_000));
+        assert_eq!((drafts[1].start_ms, drafts[1].end_ms), (90_000, 3_723_000));
+
+        let v: serde_json::Value = parse_lenient_json(r#"{"a":.5,"b":12.,"c":-007,"d":0,"e":1e05,"at":12:30}"#).unwrap();
+        assert_eq!(v, serde_json::json!({"a":0.5,"b":12,"c":-7,"d":0,"e":1e5,"at":"12:30"}));
+    }
+
+    #[test]
+    fn number_repair_keeps_valid_json_and_escapes_intact() {
+        let valid = r#"[{"stem":"x \"01\" \\ y","n":0,"m":-0.25,"k":[1,2,3],"t":true,"z":null}]"#;
+        assert_eq!(repair_json_numbers(valid), valid);
+    }
+
+    #[tokio::test]
+    async fn chapters_retry_once_when_model_output_does_not_parse() {
+        let (db, vid, _d) = seed_video_with_transcript().await;
+        let provider = Provider::Mock { canned: "不是 JSON".into() };
+        let err = generate_chapters(&db, &provider, "m", &vid, None).await.unwrap_err();
+        assert!(matches!(err, AppError::Json(_)), "两次都坏才报错：{err:?}");
     }
 
     #[test]

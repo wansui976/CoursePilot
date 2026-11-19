@@ -684,7 +684,7 @@ pub async fn ensure_comments(
         }
     }
     let now = chrono::Utc::now().timestamp_millis();
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     sqlx::query("DELETE FROM video_comments WHERE video_id=?")
         .bind(video_id)
         .execute(&mut *tx)

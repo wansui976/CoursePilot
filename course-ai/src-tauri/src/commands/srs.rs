@@ -708,7 +708,7 @@ async fn upsert_quiz_card(
 /// 题目没变的卡保留排期、题目变了的算新卡立即到期；消失的题连同排期一起删掉。
 /// 返回卡片总数。
 pub async fn generate_cards_from_quiz(db: &Db, video_id: &str) -> AppResult<usize> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let raw: Option<String> =
         sqlx::query_scalar("SELECT questions_json FROM quizzes WHERE video_id=?")
             .bind(video_id)
@@ -782,7 +782,7 @@ pub async fn generate_cards_for_concept(
     }
 
     let by_video = course_occurrences_by_video(db, course_id).await?;
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let quizzes: Vec<(String, String)> = sqlx::query_as(
         "SELECT q.video_id, q.questions_json
          FROM quizzes q JOIN videos v ON v.id=q.video_id
@@ -821,7 +821,7 @@ pub async fn add_manual_card(
     back: &str,
     source_ms: Option<i64>,
 ) -> AppResult<String> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let course_id: Option<String> = sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
         .bind(video_id)
         .fetch_optional(&mut *tx)
@@ -949,7 +949,7 @@ async fn review_card_with_policy(
             "review rating must be between 1 and 4, got {rating}"
         )));
     }
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     let row: Option<(
         f64,
         f64,

@@ -489,7 +489,7 @@ pub async fn replace_course_concepts(
     course_id: &str,
     merged: &[MergedConcept],
 ) -> AppResult<usize> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     replace_course_concepts_on_connection(&mut tx, course_id, merged, &HashMap::new()).await?;
     tx.commit().await?;
     Ok(merged.len())
@@ -878,7 +878,7 @@ async fn store_knowledge_snapshot(
     snapshot: &StoredKnowledgeSnapshot,
     fingerprint: &str,
 ) -> AppResult<()> {
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     store_knowledge_snapshot_on_connection(&mut tx, course_id, snapshot, fingerprint).await?;
     tx.commit().await?;
     Ok(())
@@ -1790,7 +1790,7 @@ pub async fn analyze_course_concepts(
         return Err(AppError::Other("分析已取消".into()));
     }
 
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.begin_write().await?;
     replace_course_concepts_on_connection(&mut tx, course_id, &current_merged, &explanations)
         .await?;
     store_knowledge_snapshot_on_connection(
@@ -2690,7 +2690,7 @@ mod tests {
             },
         )]);
 
-        let mut tx = db.pool.begin().await.unwrap();
+        let mut tx = db.begin_write().await.unwrap();
         replace_course_concepts_on_connection(&mut tx, &course.id, &merged, &explanations)
             .await
             .unwrap();

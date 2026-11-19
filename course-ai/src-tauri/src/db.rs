@@ -42,6 +42,17 @@ impl Db {
         })
     }
 
+    /// 开一个写事务：`BEGIN IMMEDIATE`，开头就拿写锁。
+    ///
+    /// 默认的 `BEGIN` 是延迟的：先 SELECT 拿到读锁/读快照，等到第一句写才去要写锁。两条流水线
+    /// 同时「先读后写」时，WAL 下后提交的那个快照已过期（SQLITE_BUSY_SNAPSHOT），回滚日志下
+    /// 两边都拿着读锁互等（死锁）——两种情况 SQLite 都直接报 database is locked，**不走**
+    /// busy_timeout 的等待。IMMEDIATE 把争抢挪到 BEGIN 这一步，在这里排队是会等的。
+    /// 所有写库的事务都用它；纯读不需要事务。
+    pub async fn begin_write(&self) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>, sqlx::Error> {
+        self.pool.begin_with("BEGIN IMMEDIATE").await
+    }
+
     /// 返回当前应用数据库的实际文件路径，供一致性备份使用。
     pub fn path(&self) -> &Path {
         &self.path
@@ -357,5 +368,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(concepts_after_course_delete.0, 0);
+    }
+
+    /// 线上报过「(code: 5) database is locked」：两条视频的流水线同时「先读后写」（出题：
+    /// SELECT 旧题 → UPSERT），延迟事务下后写的那个直接报错、不等 busy_timeout。
+    #[tokio::test]
+    async fn concurrent_read_then_write_transactions_wait_instead_of_failing() {
+        let db = Db::connect_and_migrate(&test_db_path("begin-write")).await.unwrap();
+        sqlx::query("CREATE TABLE t(id TEXT PRIMARY KEY, v INTEGER)")
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        let run = |db: Db, id: &'static str, delay_ms: u64| async move {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            let mut tx = db.begin_write().await?;
+            let _: Option<i64> = sqlx::query_scalar("SELECT v FROM t WHERE id=?")
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await?;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            sqlx::query("INSERT INTO t(id,v) VALUES (?,1) ON CONFLICT(id) DO UPDATE SET v=v+1")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await
+        };
+        let (a, b) = tokio::join!(run(db.clone(), "a", 0), run(db.clone(), "b", 20));
+        a.unwrap();
+        b.unwrap();
+        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM t").fetch_one(&db.pool).await.unwrap();
+        assert_eq!(rows, 2);
     }
 }
