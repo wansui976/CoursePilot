@@ -420,6 +420,134 @@ fn free_path(dir: &Path, name: &str) -> PathBuf {
         .expect("总能找到空位")
 }
 
+const MB: u64 = 1024 * 1024;
+
+fn human_size(bytes: u64) -> String {
+    if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else {
+        format!("{} KB", bytes.div_ceil(1024))
+    }
+}
+/// 连着这么多次（重新取链接、从断点接着下）一个字节都没拿到才放弃。
+const MAX_FRUITLESS_ATTEMPTS: u32 = 6;
+/// 这么久一个字节都没收到，就当连接断了（换个连接接着下）。
+const STALL_TIMEOUT: Duration = Duration::from_secs(60);
+/// 断了以后等多久再连（第 n 次没进展就等 n 倍）。
+const RETRY_BACKOFF: Duration = if cfg!(test) { Duration::from_millis(5) } else { Duration::from_secs(2) };
+
+enum Transfer {
+    /// 下完了。
+    Finished,
+}
+
+enum Interrupted {
+    /// 账号不对、文件没了这类，重试也没用。
+    Fatal(AppError),
+    /// 连接断了、卡住了：从断点接着下。
+    Retry(String),
+}
+
+/// 把错误连同它底下的原因一起说出来（reqwest 只说「error decoding response body」，真正的原因在下一层）。
+fn describe(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(error) = current {
+        let text = error.to_string();
+        if !parts.iter().any(|part| part.contains(&text)) {
+            parts.push(text);
+        }
+        current = error.source();
+    }
+    let joined = parts.join("：");
+    let lower = joined.to_ascii_lowercase();
+    if ["connection closed", "connection reset", "unexpected eof", "end of file before message length"]
+        .iter()
+        .any(|pattern| lower.contains(pattern))
+    {
+        format!("连接被网盘那边断开了（{joined}）")
+    } else {
+        joined
+    }
+}
+
+/// 连一次、从 `downloaded` 接着往 `partial` 里写，直到下完或者断开。
+async fn transfer(
+    db: &Db,
+    url: &str,
+    partial: &Path,
+    downloaded: &mut u64,
+    total: &mut Option<u64>,
+    progress: &mut (dyn FnMut(u64, Option<u64>) + Send),
+) -> Result<Transfer, Interrupted> {
+    // 每次连接前现取链接：夸克的下载链接有时效，断开以后旧链接可能已经不认了。
+    let (link, auth) = match resolve(db, url).await {
+        Ok(Some(found)) => found,
+        Ok(None) => return Err(Interrupted::Fatal(AppError::Config("找不到能访问这个地址的网盘来源（是不是删掉了？）".into()))),
+        Err(AppError::Config(message)) => return Err(Interrupted::Fatal(AppError::Config(message))),
+        Err(error) => return Err(Interrupted::Retry(error.to_string())),
+    };
+    let client = http_client().map_err(Interrupted::Fatal)?;
+    let source = RemoteSource { url: link, auth, client };
+    let mut request = source.authorize(source.client.get(&source.url));
+    if *downloaded > 0 {
+        request = request.header(reqwest::header::RANGE, format!("bytes={downloaded}-"));
+    }
+    let mut response = request.send().await.map_err(|error| Interrupted::Retry(format!("连不上网盘：{}", describe(&error))))?;
+    let status = response.status();
+    if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE && *downloaded > 0 {
+        // 已经下全了（上次断在最后一刻）。
+        return Ok(Transfer::Finished);
+    }
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Err(Interrupted::Fatal(AppError::Config("网盘拒绝了：账号、密码或 Cookie 不对，或者没有这个文件的权限".into())));
+    }
+    if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Err(Interrupted::Retry(format!("网盘那边出错了：HTTP {status}")));
+    }
+    if !status.is_success() {
+        return Err(Interrupted::Fatal(AppError::Other(format!("从网盘下载失败：HTTP {status}"))));
+    }
+    let resumed = status == reqwest::StatusCode::PARTIAL_CONTENT && *downloaded > 0;
+    if !resumed {
+        // 服务器不认 Range：从头来。
+        *downloaded = 0;
+    }
+    let from_range = response
+        .headers()
+        .get(reqwest::header::CONTENT_RANGE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.rsplit('/').next())
+        .and_then(|value| value.parse::<u64>().ok());
+    if let Some(size) = from_range.or_else(|| response.content_length().map(|length| length + *downloaded)) {
+        *total = Some(size);
+    }
+    use std::io::Write as _;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(resumed)
+        .truncate(!resumed)
+        .open(partial)
+        .map_err(|error| Interrupted::Fatal(error.into()))?;
+    loop {
+        let chunk = match tokio::time::timeout(STALL_TIMEOUT, response.chunk()).await {
+            Err(_) => return Err(Interrupted::Retry(format!("{} 秒没收到数据", STALL_TIMEOUT.as_secs()))),
+            Ok(Err(error)) => return Err(Interrupted::Retry(describe(&error))),
+            Ok(Ok(None)) => break,
+            Ok(Ok(Some(chunk))) => chunk,
+        };
+        file.write_all(&chunk).map_err(|error| Interrupted::Fatal(error.into()))?;
+        *downloaded += chunk.len() as u64;
+        progress(*downloaded, *total);
+    }
+    file.flush().map_err(|error| Interrupted::Fatal(error.into()))?;
+    match *total {
+        Some(total) if *downloaded < total => Err(Interrupted::Retry("连接提前结束了".into())),
+        _ => Ok(Transfer::Finished),
+    }
+}
+
 /// 下载队列里的一集：从网盘下到 `staging`，下完挪进 `out_dir`。进度格式和链接导入一样。
 /// `begin_import` 返回 false 表示任务已被取消。
 pub async fn download(
@@ -430,55 +558,52 @@ pub async fn download(
     on_event: &(dyn Fn(DownloadEvent) + Send + Sync),
     begin_import: &(dyn Fn() -> bool + Send + Sync),
 ) -> AppResult<PathBuf> {
-    let (link, auth) = resolve(db, url)
-        .await?
-        .ok_or_else(|| AppError::Config("找不到能访问这个地址的网盘来源（是不是删掉了？）".into()))?;
     std::fs::create_dir_all(staging)?;
     std::fs::create_dir_all(out_dir)?;
     let name = file_name_of(url);
     let partial = staging.join(format!("{name}.part"));
-    let source = RemoteSource { url: link, auth, client: http_client()? };
-    // 断了接着下：已经下了的部分用 Range 续上（服务器不支持 Range 就从头来）。
+    // 已经下了的部分（上次断在这里、或者重试同一个任务）接着用。
     let mut downloaded = std::fs::metadata(&partial).map(|meta| meta.len()).unwrap_or(0);
-    let mut request = source.authorize(source.client.get(&source.url));
-    if downloaded > 0 {
-        request = request.header(reqwest::header::RANGE, format!("bytes={downloaded}-"));
-    }
-    let mut response = request.send().await.map_err(|error| AppError::Other(format!("连不上网盘：{error}")))?;
-    let status = response.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Err(AppError::Config("网盘拒绝了：账号或密码不对，或者没有这个文件的权限".into()));
-    }
-    if !status.is_success() {
-        return Err(AppError::Other(format!("从网盘下载失败：HTTP {status}")));
-    }
-    if status != reqwest::StatusCode::PARTIAL_CONTENT {
-        downloaded = 0;
-    }
-    let total = response.content_length().map(|length| length + downloaded);
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .append(downloaded > 0)
-        .truncate(downloaded == 0)
-        .open(&partial)?;
+    let mut total: Option<u64> = None;
     let started = Instant::now();
     let started_at = downloaded;
     let mut last_report = Instant::now() - Duration::from_secs(1);
-    use std::io::Write as _;
-    while let Some(chunk) = response.chunk().await.map_err(|error| AppError::Other(format!("下载中断：{error}")))? {
-        file.write_all(&chunk)?;
-        downloaded += chunk.len() as u64;
-        if last_report.elapsed() >= Duration::from_millis(400) {
-            last_report = Instant::now();
-            let seconds = started.elapsed().as_secs_f64().max(0.001);
-            let speed = (downloaded - started_at) as f64 / seconds;
-            let eta = total.filter(|_| speed > 0.0).map(|total| ((total.saturating_sub(downloaded)) as f64 / speed) as u64);
-            on_event(DownloadEvent::Progress { downloaded, total, speed: Some(speed), eta });
+    let mut fruitless = 0u32;
+    loop {
+        if total.is_some_and(|total| downloaded >= total) {
+            break;
+        }
+        let before = downloaded;
+        let attempt = transfer(db, url, &partial, &mut downloaded, &mut total, &mut |downloaded, total| {
+            if last_report.elapsed() >= Duration::from_millis(400) {
+                last_report = Instant::now();
+                let seconds = started.elapsed().as_secs_f64().max(0.001);
+                let speed = (downloaded - started_at.min(downloaded)) as f64 / seconds;
+                let eta = total.filter(|_| speed > 0.0).map(|total| ((total.saturating_sub(downloaded)) as f64 / speed) as u64);
+                on_event(DownloadEvent::Progress { downloaded, total, speed: Some(speed), eta });
+            }
+        })
+        .await;
+        match attempt {
+            Ok(Transfer::Finished) => break,
+            Err(Interrupted::Fatal(error)) => return Err(error),
+            Err(Interrupted::Retry(reason)) => {
+                // 有进展就接着下；连着好几次一个字节都没拿到才放弃。
+                fruitless = if downloaded > before { 0 } else { fruitless + 1 };
+                if fruitless >= MAX_FRUITLESS_ATTEMPTS {
+                    let progress = match total {
+                        Some(total) => format!("已下 {} / {}", human_size(downloaded), human_size(total)),
+                        None => format!("已下 {}", human_size(downloaded)),
+                    };
+                    return Err(AppError::Other(format!(
+                        "下载中断（{progress}，重试了 {MAX_FRUITLESS_ATTEMPTS} 次都没接上）：{reason}。稍后在下载队列里点重试，会从断开的地方接着下"
+                    )));
+                }
+                tracing::warn!(%reason, downloaded, "网盘下载断了，接着下");
+                tokio::time::sleep(RETRY_BACKOFF * fruitless.max(1)).await;
+            }
         }
     }
-    file.flush()?;
-    drop(file);
     on_event(DownloadEvent::Progress { downloaded, total: Some(downloaded), speed: None, eta: Some(0) });
     if !begin_import() {
         let _ = std::fs::remove_dir_all(staging);
@@ -792,11 +917,27 @@ mod tests {
         assert_eq!(response.status(), 206);
         assert_eq!(response.bytes().await.unwrap().as_ref(), b"one");
 
-        // 下载到本机：文件名用夸克上的名字。
+        // 下载到本机：文件名用夸克上的名字。下载连接半路断了两次：自动重取链接、从断点接着下。
+        drive.lock().unwrap().drop_next = 2;
+        drive.lock().unwrap().ranges.clear();
         let local = download_streamed(&db, &video.id, &dir.path().join("course"), &|_| {}).await.unwrap();
         assert!(local.file_path.ends_with("第1讲 A&B.mp4"), "{}", local.file_path);
         assert_eq!(std::fs::read(&local.file_path).unwrap(), b"lesson-one");
-        assert!(drive.lock().unwrap().downloads >= 2);
+        let ranges = drive.lock().unwrap().ranges.clone();
+        assert_eq!(ranges, [None, Some("bytes=5-".to_string()), Some("bytes=7-".to_string())], "接着断点下，不从头来");
+
+        // 一直断、一点进展都没有：放弃，并且说清楚下到哪了、为什么断。
+        let other = crate::commands::videos::list_videos(&db, &course.id).await.unwrap().remove(1);
+        drive.lock().unwrap().drop_next = usize::MAX;
+        let partial = dir.path().join("stuck");
+        std::fs::create_dir_all(&partial).unwrap();
+        std::fs::write(partial.join("第10讲.mp4.part"), b"lesson-te").unwrap();
+        let error = download(&db, &other.source_uri.clone().unwrap(), &dir.path().join("course"), &partial, &|_| {}, &|| true)
+            .await
+            .unwrap_err()
+            .to_string();
+        println!("{error}");
+        assert!(error.contains("已下 1 KB / 1 KB") && error.contains("连接被网盘那边断开了"), "{error}");
     }
 
     #[tokio::test]

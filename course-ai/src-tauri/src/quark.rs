@@ -217,6 +217,10 @@ pub(crate) mod fake {
         /// 接口认的 __puus（每次请求后换一个新的发回去）。
         pub puus: String,
         pub downloads: usize,
+        /// 接下来这么多次下载只发一半就断开（模拟夸克的下载连接半路被掐）。
+        pub drop_next: usize,
+        /// 收到的下载请求带的 Range（None = 没带）。
+        pub ranges: Vec<Option<String>>,
     }
 
     pub async fn start(files: &[(&str, &str, &str, bool, &[u8])]) -> (String, Arc<Mutex<Drive>>) {
@@ -227,6 +231,8 @@ pub(crate) mod fake {
                 .collect(),
             puus: "p1".into(),
             downloads: 0,
+            drop_next: 0,
+            ranges: Vec::new(),
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
@@ -264,6 +270,7 @@ pub(crate) mod fake {
                     let url = reqwest::Url::parse(&format!("http://x{target}")).unwrap();
                     let query: BTreeMap<String, String> = url.query_pairs().into_owned().collect();
                     let cookie = header("cookie:").unwrap_or_default();
+                    let mut truncate = false;
                     let (status, extra, payload) = {
                         let mut drive = drive.lock().unwrap();
                         let logged_in = cookie.contains(&format!("__puus={}", drive.puus));
@@ -298,6 +305,11 @@ pub(crate) mod fake {
                             }
                         } else if let Some(fid) = url.path().strip_prefix("/dl/") {
                             drive.downloads += 1;
+                            drive.ranges.push(header("range:"));
+                            if drive.drop_next > 0 {
+                                drive.drop_next -= 1;
+                                truncate = true;
+                            }
                             let bytes = drive.files.get(fid).map(|f| f.3.clone()).unwrap_or_default();
                             match header("range:").and_then(|r| r.strip_prefix("bytes=").map(str::to_string)) {
                                 Some(range) => {
@@ -315,7 +327,9 @@ pub(crate) mod fake {
                     };
                     let response = format!("HTTP/1.1 {status}\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n", payload.len());
                     let _ = socket.write_all(response.as_bytes()).await;
-                    let _ = socket.write_all(&payload).await;
+                    // 断开：说好的长度只发一半就关连接，客户端读到的就是「error decoding response body」。
+                    let sent = if truncate { payload.len() / 2 } else { payload.len() };
+                    let _ = socket.write_all(&payload[..sent]).await;
                 });
             }
         });
