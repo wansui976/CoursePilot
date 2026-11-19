@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Check, Folder as FolderIcon, FolderInput, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
 import type { CourseColor, Folder } from "@/lib/types";
 import { IconButton } from "@/ui/icon-button";
-import { Menu, MenuItem } from "@/ui/menu";
+import { Menu, MenuItem, MenuSeparator } from "@/ui/menu";
 import { cn } from "@/lib/utils";
 import { ColorSwatches } from "./ColorSwatches";
 import { VideoCover } from "./VideoCover";
@@ -198,9 +198,10 @@ export function FolderItem({
             <FolderInput aria-hidden="true" className="h-4 w-4 flex-none text-[var(--text-3)]" />
             {t("folders.moveTo")}
           </MenuItem>
+          <MenuSeparator />
           <MenuItem
             tone="danger"
-            className="ca-touch-44 mt-1 flex items-center gap-2 border-t border-[var(--border-subtle)] pt-2.5"
+            className="ca-touch-44 flex items-center gap-2"
             onClick={() => {
               setMenuOpen(false);
               actions.onDelete();

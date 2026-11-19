@@ -385,31 +385,56 @@
 /* 通用菜单放在 components 层：未分层的规则会压过 Tailwind 工具类（例如给菜单项加
    flex items-center 横排图标会失效），放进层里后调用方的工具类才能正常覆盖。 */
 @layer components {
+  /* 浮起来的一张小卡：四周留 5px，菜单项是缩进的圆角块（和系统菜单一样），
+     悬停时整块浅底而不是顶到边的一条。 */
   .ca-menu {
     overflow: hidden;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-md);
     border: 1px solid var(--line);
     background: var(--bg-panel);
-    padding: 4px 0;
+    padding: 5px;
+    min-width: 11rem;
     font-size: 14px;
-    box-shadow: var(--shadow-pop);
+    box-shadow: var(--shadow-pop), 0 0 0 0.5px rgb(0 0 0 / 0.02);
   }
 
   .ca-menu-item {
     display: block;
     width: 100%;
-    padding: 8px 12px;
+    border-radius: calc(var(--r-md) - 4px);
+    padding: 7px 10px;
     text-align: left;
     color: var(--text-1);
     transition: background 0.12s, color 0.12s;
+  }
+
+  /* 图标用次要色，字是主角；危险项的图标跟着字变红。 */
+  .ca-menu-item > svg {
+    color: var(--text-3);
   }
 
   .ca-menu-item:hover {
     background: var(--bg-sunken);
   }
 
-  .ca-menu-item.danger {
+  .ca-menu-item.danger,
+  .ca-menu-item.danger > svg {
     color: var(--status-err);
+  }
+
+  .ca-menu-item.danger:hover {
+    background: var(--status-err-bg);
+  }
+
+  .ca-menu-item:disabled {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  .ca-menu-sep {
+    height: 1px;
+    margin: 5px 6px;
+    background: var(--line);
   }
 }
 

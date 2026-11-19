@@ -83,8 +83,8 @@ describe("WebDavImportDialog", () => {
     mockIpc.downloads.enqueue.mockResolvedValue([]);
     const onClose = renderDialog();
     fireEvent.click(await screen.findByRole("button", { name: /申论 2027/ }));
-    expect(await screen.findByText("第1讲.mp4")).toBeInTheDocument();
-    expect(screen.queryByText("讲义.pdf")).not.toBeInTheDocument();
+    expect(await screen.findByLabelText("第1讲.mp4")).toBeInTheDocument();
+    expect(screen.queryByLabelText("讲义.pdf")).not.toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("全选这里的 2 个视频"));
     fireEvent.click(screen.getByRole("button", { name: "导入 2 个视频" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
@@ -101,8 +101,9 @@ describe("WebDavImportDialog", () => {
     mockIpc.webdavImport.importStream.mockResolvedValue(["v1"]);
     const onClose = renderDialog();
     fireEvent.click(await screen.findByRole("button", { name: /申论 2027/ }));
-    await screen.findByText("第2讲.mp4");
-    expect(screen.getByRole("button", { name: "先选要导入的视频" })).toBeDisabled();
+    await screen.findByLabelText("第2讲.mp4");
+    expect(screen.getByRole("button", { name: "导入" })).toBeDisabled();
+    expect(screen.getByText("勾选要导入的视频")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText(/第2讲\.mp4/));
     expect(screen.getByText("已选 1 / 2 个视频")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /在线看/ })).toBeChecked();
@@ -120,7 +121,7 @@ describe("WebDavImportDialog", () => {
     mockIpc.webdavImport.saveSource.mockResolvedValue(quark);
     mockIpc.webdavImport.browse.mockResolvedValue([dir("申论 2027", "fid-1")]);
     renderDialog();
-    fireEvent.change(await screen.findByLabelText("网盘类型"), { target: { value: "quark" } });
+    fireEvent.click(await screen.findByRole("radio", { name: /夸克网盘/ }));
     expect(screen.queryByLabelText("WebDAV 地址")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Cookie"), { target: { value: "b-user=1; __puus=abc" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -142,7 +143,7 @@ describe("WebDavImportDialog", () => {
     expect(screen.getByText(/WebDAV 策略」选成「本地代理」/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /api\.oplist\.org/ }));
     expect(mockOpenUrl).toHaveBeenCalledWith("https://api.oplist.org/");
-    fireEvent.change(screen.getByLabelText("网盘类型"), { target: { value: "jianguoyun" } });
+    fireEvent.click(screen.getByRole("radio", { name: /坚果云/ }));
     expect(screen.queryByText("怎么用 OpenList 挂百度网盘（5 步，一次就好）")).not.toBeInTheDocument();
   });
 });

@@ -128,3 +128,8 @@ export function MenuItem({
     />
   );
 }
+
+/** 菜单里的分隔线：把危险操作（删除）和常规操作隔开。左右缩进，和菜单项的圆角对齐。 */
+export function MenuSeparator() {
+  return <div role="separator" className="ca-menu-sep" />;
+}

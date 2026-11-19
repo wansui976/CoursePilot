@@ -552,9 +552,10 @@ export const scenes = [
       await dialog.getByText(/全选这里的/).click();
       await shot("folder");
       await dialog.getByRole("button", { name: "添加网盘" }).click();
-      await dialog.getByText(/怎么用 OpenList/).click();
       await shot("add");
-      await dialog.getByLabel("网盘类型").selectOption("quark");
+      await dialog.getByText(/怎么用 OpenList/).click();
+      await shot("guide");
+      await dialog.getByRole("radio", { name: /夸克网盘/ }).click();
       await shot("quark");
     },
   },

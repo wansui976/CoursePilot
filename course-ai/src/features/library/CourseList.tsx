@@ -38,7 +38,7 @@ import { useSidebarExpanded } from "./useSidebarExpanded";
 import { folderPath } from "./folderTree";
 import { colorStyle } from "./colorStyle";
 import { ErrorNote } from "@/ui/ErrorNote";
-import { Menu, MenuItem } from "@/ui/menu";
+import { Menu, MenuItem, MenuSeparator } from "@/ui/menu";
 import { useOptionalShell } from "@/app/shell";
 import { Skeleton } from "@/ui/skeleton";
 import { isIOS, pickDirectoryPath } from "@/lib/mobileFiles";
@@ -452,9 +452,10 @@ export function CourseList({
           <Rss aria-hidden="true" className={icon} />
           {t("courseList.subscriptions")}
         </MenuItem>
+        <MenuSeparator />
         <MenuItem
           tone="danger"
-          className="ca-touch-44 mt-1 flex items-center gap-2 border-t border-[var(--border-subtle)] pt-2.5"
+          className="ca-touch-44 flex items-center gap-2"
           onClick={() => void confirmDelete(course)}
         >
           <Trash2 aria-hidden="true" className="h-4 w-4 flex-none" />

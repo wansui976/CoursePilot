@@ -25,7 +25,7 @@ import { ErrorNote } from "@/ui/ErrorNote";
 import { Skeleton } from "@/ui/skeleton";
 import { Button } from "@/ui/button";
 import { MathText } from "@/ui/MathText";
-import { Menu, MenuItem } from "@/ui/menu";
+import { Menu, MenuItem, MenuSeparator } from "@/ui/menu";
 import { ProgressRing } from "@/ui/ProgressRing";
 import { GenerateEmptyAction } from "./PanelActions";
 import { useAiGeneration } from "@/lib/useAiGeneration";
@@ -288,9 +288,10 @@ export function QuizPanel({ videoId }: { videoId: string }) {
                           <span className="ca-t-2xs flex-none text-[var(--text-faint)]">{setMeta(set)}</span>
                         </MenuItem>
                       ))}
+                      <MenuSeparator />
                       <MenuItem
                         tone="danger"
-                        className="flex items-center gap-2 border-t border-[var(--border-faint)]"
+                        className="flex items-center gap-2"
                         disabled={removeSet.isPending}
                         onClick={() => {
                           setSetMenuOpen(false);

@@ -1510,12 +1510,12 @@
       "other": "其它 WebDAV"
     },
     "presetHints": {
-      "openlist": "在电脑或 NAS 上装好 OpenList，挂上你的网盘后，填它的 WebDAV 地址（默认端口 5244、路径 /dav/），账号密码是 OpenList 的。用户设置里要勾上「WebDAV 读取」。",
+      "openlist": "OpenList 能把百度、阿里、夸克、115 等网盘挂成一个 WebDAV 地址（默认 http://电脑 IP:5244/dav/），账号密码用 OpenList 的。第一次用看下面的步骤。",
       "jianguoyun": "密码填「第三方应用密码」（坚果云网页 → 账户信息 → 安全选项里生成），不是登录密码。",
       "nextcloud": "地址在 Nextcloud 网页「文件 → 左下角设置」里能找到。",
       "synology": "先在套件中心装好 WebDAV Server 并打开 HTTPS，地址一般是 https://NAS 地址:5006/。",
       "other": "填网盘的 WebDAV 地址和账号密码。",
-      "quark": "夸克没有开放平台，这里用网页版的登录状态：在浏览器里登录 pan.quark.cn → 按 F12 打开开发者工具 → 网络（Network）→ 刷新页面，点任意一个请求 → 在请求头里复制整段 Cookie，粘到下面。Cookie 过一阵子会失效，到时候再复制一次。非会员的下载速度由夸克限制。"
+      "quark": "夸克没有开放平台，用网页版的登录状态：浏览器登录 pan.quark.cn → F12 → 网络 → 刷新，点任一请求，复制请求头里整段 Cookie。过一阵子会失效，到时重新复制；非会员下载限速。"
     },
     "urlPlaceholders": {
       "openlist": "http://电脑或 NAS 的 IP:5244/dav/",
@@ -1529,7 +1529,7 @@
     "user": "账号",
     "password": "密码",
     "passwordKeep": "留空 = 不改密码",
-    "name": "名字",
+    "name": "显示名字（选填）",
     "namePlaceholder": "名字（选填，比如「家里的 NAS」）",
     "test": "测试连接",
     "testOk": "连上了，根目录下有 {{count}} 项",
@@ -1568,9 +1568,40 @@
       "connect": "回到这里，地址填 http://127.0.0.1:5244/dav/（在手机上用就填电脑的局域网 IP，比如 http://192.168.1.5:5244/dav/），账号密码就是 OpenList 的。手机上看的时候，电脑要开着 OpenList、连着同一个 Wi‑Fi。",
       "others": "阿里云盘、115、天翼云盘也一样，第 2 步选对应的存储类型。"
     },
-    "pickFirst": "先选要导入的视频",
+    "pickFirst": "勾选要导入的视频",
     "selectedOf": "已选 {{count}} / {{total}} 个视频",
-    "streaming": "正在从网盘在线播放"
+    "streaming": "正在从网盘在线播放",
+    "tiles": {
+      "openlist": {
+        "title": "OpenList",
+        "sub": "百度 / 阿里 / 115…"
+      },
+      "quark": {
+        "title": "夸克网盘",
+        "sub": "贴 Cookie 直连"
+      },
+      "jianguoyun": {
+        "title": "坚果云",
+        "sub": "WebDAV"
+      },
+      "nextcloud": {
+        "title": "Nextcloud",
+        "sub": "自建网盘"
+      },
+      "synology": {
+        "title": "群晖 NAS",
+        "sub": "WebDAV Server"
+      },
+      "other": {
+        "title": "其它",
+        "sub": "任意 WebDAV"
+      }
+    },
+    "addTitle": "添加网盘",
+    "editTitle": "编辑网盘",
+    "up": "上一层",
+    "summary": "已选 {{count}} 个 · {{size}}",
+    "importShort": "导入"
   },
   "bilibiliImport": {
     "title": "下载网络视频",

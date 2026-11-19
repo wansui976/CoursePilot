@@ -40,7 +40,7 @@ import { ErrorNote } from "@/ui/ErrorNote";
 import { IconButton } from "@/ui/icon-button";
 import { Button } from "@/ui/button";
 import { Skeleton } from "@/ui/skeleton";
-import { Menu, MenuItem } from "@/ui/menu";
+import { Menu, MenuItem, MenuSeparator } from "@/ui/menu";
 import { ipc } from "@/lib/ipc";
 import { lectureOrder } from "@/lib/lectureOrder";
 import { clearTasksForScope } from "@/lib/backgroundTasks";
@@ -807,9 +807,10 @@ export function CourseLibraryView({
             : t("home.startProcessing")}
         </MenuItem>
         {/* 危险操作放最后并用分隔线隔开，避免夹在常规操作中间被误点。 */}
+        <MenuSeparator />
         <MenuItem
           tone="danger"
-          className="ca-touch-44 mt-1 flex items-center gap-2 border-t border-[var(--border-subtle)] pt-2.5"
+          className="ca-touch-44 flex items-center gap-2"
           onClick={() => {
             setOpenMenuVideoId(null);
             void deleteVideo(video.id);

@@ -1512,12 +1512,12 @@
       "other": "Other WebDAV"
     },
     "presetHints": {
-      "openlist": "Install OpenList on a computer or NAS, mount your drives, then enter its WebDAV address (port 5244 and path /dav/ by default) with your OpenList account. Turn on \"WebDAV read\" for that user.",
+      "openlist": "OpenList exposes Baidu, Aliyun, Quark, 115 and more as one WebDAV address (http://computer-ip:5244/dav/ by default); use your OpenList account. First time? Follow the steps below.",
       "jianguoyun": "Use an app password (Jianguoyun web → Account → Security), not your login password.",
       "nextcloud": "Find the address in Nextcloud web → Files → Settings (bottom left).",
       "synology": "Install WebDAV Server from Package Center and enable HTTPS; the address is usually https://your-nas:5006/.",
       "other": "Enter the drive's WebDAV address, user name and password.",
-      "quark": "Quark has no developer platform, so this uses your web login: sign in at pan.quark.cn in a browser → press F12 → Network → reload, click any request → copy the whole Cookie request header and paste it below. The cookie expires after a while; copy it again then. Download speed for non-members is limited by Quark."
+      "quark": "Quark has no developer platform, so this uses your web login: sign in at pan.quark.cn → F12 → Network → reload, click any request and copy the whole Cookie header. It expires after a while; non-members are speed-limited."
     },
     "urlPlaceholders": {
       "openlist": "http://computer-or-nas-ip:5244/dav/",
@@ -1531,7 +1531,7 @@
     "user": "User name",
     "password": "Password",
     "passwordKeep": "Leave empty to keep the password",
-    "name": "Name",
+    "name": "Display name (optional)",
     "namePlaceholder": "Name (optional, e.g. \"Home NAS\")",
     "test": "Test connection",
     "testOk": "Connected — {{count}} items at the top level",
@@ -1570,9 +1570,40 @@
       "connect": "Back here, use http://127.0.0.1:5244/dav/ as the address (on a phone, use the computer's LAN IP, e.g. http://192.168.1.5:5244/dav/), with your OpenList user name and password. When watching on a phone, the computer must be running OpenList on the same Wi‑Fi.",
       "others": "Aliyun Drive, 115 and Tianyi Cloud work the same way — pick that storage type in step 2."
     },
-    "pickFirst": "Select videos to import",
+    "pickFirst": "Tick the videos to import",
     "selectedOf": "{{count}} of {{total}} videos selected",
-    "streaming": "Streaming from your cloud drive"
+    "streaming": "Streaming from your cloud drive",
+    "tiles": {
+      "openlist": {
+        "title": "OpenList",
+        "sub": "Baidu / Aliyun / 115…"
+      },
+      "quark": {
+        "title": "Quark Drive",
+        "sub": "Direct, via cookie"
+      },
+      "jianguoyun": {
+        "title": "Jianguoyun",
+        "sub": "WebDAV"
+      },
+      "nextcloud": {
+        "title": "Nextcloud",
+        "sub": "Self-hosted"
+      },
+      "synology": {
+        "title": "Synology NAS",
+        "sub": "WebDAV Server"
+      },
+      "other": {
+        "title": "Other",
+        "sub": "Any WebDAV"
+      }
+    },
+    "addTitle": "Add a drive",
+    "editTitle": "Edit drive",
+    "up": "Up one level",
+    "summary": "{{count}} selected · {{size}}",
+    "importShort": "Import"
   },
   "bilibiliImport": {
     "title": "Download Online Video",
