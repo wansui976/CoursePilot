@@ -6,6 +6,7 @@ pub mod client_store;
 pub mod clips;
 pub mod concepts;
 pub mod courses;
+pub mod review_book;
 pub mod transcode;
 pub mod danmaku;
 pub mod export;

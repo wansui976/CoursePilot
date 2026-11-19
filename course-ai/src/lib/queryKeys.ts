@@ -58,6 +58,7 @@ export const qk = {
   // —— 课程知识点 ——
   courseKnowledge: (courseId: string) => ["course-knowledge", courseId] as const,
   courseConcepts: (courseId: string) => ["course-concepts", courseId] as const,
+  reviewBook: (courseId: string) => ["review-book", courseId] as const,
 
   // —— 间隔复习 ——
   srs: {

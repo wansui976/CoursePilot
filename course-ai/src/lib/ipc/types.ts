@@ -323,6 +323,50 @@ export interface CourseKnowledge {
   stale: boolean;
 }
 
+/** 复习资料正文里一条出处编号指向的视频与时间。 */
+export interface ReviewSource {
+  video_id: string;
+  video_title: string;
+  start_ms: number | null;
+}
+
+/** 复习资料的一章。content_md 为 null：还没写成（看 error）。 */
+export interface ReviewChapter {
+  idx: number;
+  title: string;
+  intro: string;
+  content_md: string | null;
+  sources: Record<string, ReviewSource>;
+  error: string | null;
+  /** 写这版正文之后，这章用到的笔记有了变化。 */
+  stale: boolean;
+  generated_at: number | null;
+}
+
+/** 课程复习资料。还没生成过时 chapters 为空。 */
+export interface ReviewBook {
+  title: string | null;
+  generated_at: number | null;
+  chapters: ReviewChapter[];
+  /** 笔记小节有增减（加了视频等）：要重排目录才能把新内容放进来。 */
+  outline_stale: boolean;
+  videos_with_notes: number;
+  videos_without_notes: string[];
+}
+
+export type ReviewProgress = { stage: "outline" } | { stage: "chapters"; done: number; total: number };
+
+export interface ReviewOutcome {
+  written: number;
+  failed: number;
+  canceled: boolean;
+}
+
+export type ReviewEvent =
+  | { type: "progress"; progress: ReviewProgress }
+  | { type: "done"; outcome: ReviewOutcome }
+  | { type: "error"; message: string };
+
 /** 一句字幕的译文（按分句序号对齐讲稿）。 */
 export interface TranslationRow {
   segment_idx: number;

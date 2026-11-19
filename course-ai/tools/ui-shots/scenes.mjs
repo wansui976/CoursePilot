@@ -464,6 +464,19 @@ export const scenes = [
     },
   },
   {
+    name: "review-book",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await openCourse(page);
+      await page.getByRole("button", { name: "知识点" }).click();
+      await page.getByRole("tab", { name: "复习资料" }).click();
+      await page.getByRole("heading", { name: "梯度下降：让损失一步步变小" }).waitFor();
+      await shot();
+      await page.getByRole("heading", { name: "过拟合与正则化" }).scrollIntoViewIfNeeded();
+      await shot("later");
+    },
+  },
+  {
     name: "settings",
     devices: ALL,
     run: async ({ page, shot }) => {

@@ -148,6 +148,35 @@ describe("renderMarkdown", () => {
     expect(quotes[0].querySelector("strong")).toHaveTextContent("下山");
     expect(container.textContent).not.toContain(">");
   });
+
+  it("renders tables with inline formatting in cells", () => {
+    const seek = vi.fn();
+    const { container } = renderMd("## 本章速查\n\n| 考点 | 怎么答 |\n| --- | --- |\n| **学习率** | 先小后大 [12:30] |\n| 正则化 |\n\n之后", seek);
+    const table = container.querySelector("table")!;
+    expect(Array.from(table.querySelectorAll("th")).map((th) => th.textContent)).toEqual(["考点", "怎么答"]);
+    const rows = table.querySelectorAll("tbody tr");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].querySelector("strong")).toHaveTextContent("学习率");
+    expect(rows[1].querySelectorAll("td")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: /12:30/ }));
+    expect(seek).toHaveBeenCalledWith(750_000);
+    expect(container.textContent).not.toContain("| ---");
+    expect(screen.getByText("之后")).toBeInTheDocument();
+  });
+
+  it("hands [N017 12:30] source markers to renderSource, and leaves them as text otherwise", () => {
+    const renderSource = vi.fn((refs: { id: string; ms: number | null }[], key: string) => (
+      <span key={key} data-testid="src">{refs.map((r) => `${r.id}@${r.ms}`).join(",")}</span>
+    ));
+    const md = "- 沿负梯度走 [N017 12:30]，**学习率** [N003; N020 1:02:03]\n- 普通时间 [00:05]";
+    const { container } = render(<div>{renderMarkdown(md, vi.fn(), undefined, { renderSource })}</div>);
+    expect(screen.getAllByTestId("src").map((el) => el.textContent)).toEqual(["N017@750000", "N003@null,N020@3723000"]);
+    expect(container.textContent).not.toContain("[N017");
+    expect(screen.getByRole("button", { name: /00:05/ })).toBeInTheDocument();
+
+    const plain = render(<div data-testid="plain">{renderMarkdown("见 [N017 12:30]", vi.fn())}</div>);
+    expect(plain.getByTestId("plain")).toHaveTextContent("见 [N017 12:30]");
+  });
 });
 
 describe("renderInlineMarkdown", () => {

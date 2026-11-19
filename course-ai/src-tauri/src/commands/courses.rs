@@ -50,6 +50,11 @@ impl AppState {
         Some(flag)
     }
 
+    /// 这个 id 的任务是否还在跑（离开页面再回来时，界面据此接上进度）。
+    pub fn is_running(&self, id: &str) -> bool {
+        self.rag_cancels.lock().unwrap().contains_key(id)
+    }
+
     /// 置位对应请求的取消标志（通用；不存在则忽略）。问答与课程知识分析共用此登记表。
     pub fn cancel(&self, id: &str) {
         if let Some(flag) = self.rag_cancels.lock().unwrap().get(id) {

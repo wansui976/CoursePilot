@@ -331,6 +331,56 @@
   overflow-wrap: anywhere;
 }
 
+/* 复习资料正文里的出处标签：「第二讲 线性回归 12:30」，点一下回看那个视频的那一秒。
+   比正文小、颜色淡，一段话后面挂两三个也不抢正文；视频名太长截断，完整名字在 title 里。 */
+.ca-review-sources {
+  display: inline;
+}
+
+.ca-review-source {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  max-width: 15em;
+  margin: 0 2px;
+  padding: 0 6px;
+  border-radius: 6px;
+  vertical-align: 1px;
+  font-family: var(--font-app);
+  font-size: 11px;
+  line-height: 18px;
+  letter-spacing: 0;
+  color: var(--text-3);
+  background: var(--bg-sunken);
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+
+.ca-review-source-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@media (hover: hover) {
+  .ca-review-source:hover {
+    color: var(--accent-text);
+    background: var(--surface-card-hover);
+  }
+}
+
+/* Markdown 表格：每列至少几个字宽，窄屏上横向滚动，而不是把「学习率过大」挤成一字一行。
+   min-width 写在单元格里面的块上：CSS 没定义 min-width 对表格单元格本身的效果，WebKit 直接不认。 */
+.ca-md-cell {
+  min-width: 6em;
+}
+
+/* 复习资料的「## 小节」比界面标题大一档：一章里层次要分得清。 */
+.ca-review-chapter h2 {
+  margin-top: 1.4em;
+  font-size: calc(var(--md-size, 0.875rem) * 1.12);
+}
+
 /* 长文行宽：面板拉宽时正文不跟着一行拉满（中文约 42 字一行最舒服）。 */
 .ca-reading-measure {
   max-width: 42em;

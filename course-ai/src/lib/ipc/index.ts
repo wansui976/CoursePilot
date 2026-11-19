@@ -22,7 +22,7 @@ import {
 } from "./system";
 import { downloads } from "./downloads";
 import { courses, folders, videos, trash, subscriptions } from "./library";
-import { srs, stats, concepts, feynman } from "./study";
+import { srs, stats, concepts, feynman, reviewBook } from "./study";
 export { feynmanTopicKey } from "./study";
 import { assistant } from "./assistant";
 import { pipeline, transcripts, ai, slides, clips, exporting, danmaku, translation } from "./media";
@@ -46,6 +46,7 @@ export const ipc = {
   feynman,
   stats,
   concepts,
+  reviewBook,
   secrets,
   dev,
   notify,

@@ -19,6 +19,10 @@ import type {
   AnalyzeProgress,
   AnalyzeEvent,
   CourseKnowledge,
+  ReviewBook,
+  ReviewEvent,
+  ReviewOutcome,
+  ReviewProgress,
 } from "./types";
 
 export const srs = {
@@ -163,6 +167,46 @@ export const concepts = {
 };
 
 /** 费曼复述：录音转文字、评估一次复述、取历次复述、哪些话题已经能讲清。 */
+/** 课程复习资料：整门课的笔记按知识逻辑重排成分章的复习资料。 */
+export const reviewBook = {
+  get: (courseId: string): Promise<ReviewBook> => invoke("cmd_get_review_book", { courseId }),
+  /** 后台是否还在生成这门课的复习资料（离开页面再回来时接上进度）。 */
+  running: (courseId: string): Promise<boolean> => invoke("cmd_review_book_running", { courseId }),
+  /**
+   * 生成或更新。命令立即返回，进度与结果走 `review-book:<courseId>` 事件；这里等到结束才 resolve。
+   * `rewrite` 指定某章（从 0 起）时那章无论有没有变化都重写。
+   */
+  generate: async (
+    courseId: string,
+    rewrite: number | null,
+    onProgress: (progress: ReviewProgress) => void,
+  ): Promise<ReviewOutcome> => {
+    let resolveOutcome!: (outcome: ReviewOutcome) => void;
+    let rejectOutcome!: (error: unknown) => void;
+    const outcome = new Promise<ReviewOutcome>((res, rej) => {
+      resolveOutcome = res;
+      rejectOutcome = rej;
+    });
+    // 先注册监听再 invoke，避免漏掉早到的事件。
+    const unlisten = await listen<ReviewEvent>(`review-book:${courseId}`, (evt) => {
+      const e = evt.payload;
+      if (e.type === "progress") onProgress(e.progress);
+      else if (e.type === "done") resolveOutcome(e.outcome);
+      else rejectOutcome(new Error(e.message));
+    });
+    try {
+      await invoke("cmd_generate_review_book", { courseId, rewrite });
+      return await outcome;
+    } catch (err) {
+      rejectOutcome(err);
+      throw err;
+    } finally {
+      unlisten();
+    }
+  },
+  cancel: (courseId: string): Promise<void> => invoke("cmd_cancel_review_book", { courseId }),
+};
+
 export const feynman = {
   transcribe: (audio: string): Promise<string> => invoke("cmd_transcribe_clip", { audio }),
   evaluate: (topic: FeynmanTopic, explanation: string): Promise<FeynmanAttempt> =>

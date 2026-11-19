@@ -27,6 +27,7 @@ pub mod paddle_ocr;
 pub mod playable;
 pub mod quiz;
 pub mod rag;
+pub mod review_book;
 pub mod search_terms;
 pub mod semantic;
 pub mod sherpa_asr;

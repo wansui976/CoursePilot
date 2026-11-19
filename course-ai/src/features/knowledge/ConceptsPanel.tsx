@@ -48,6 +48,8 @@ import { renderMarkdown } from "@/lib/renderMarkdown";
 import { useContainerWidth } from "@/lib/useContainerWidth";
 import { ReviewSession } from "@/features/study/ReviewSession";
 import { CourseChatPanel } from "./CourseChatPanel";
+import { ReviewBookPanel } from "./ReviewBookPanel";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs";
 import { VideoCover } from "@/features/library/VideoCover";
 
 // 知识点解释跨多个视频，没有单一当前视频可跳转；解释里也不含 [mm:ss]，故用空 seek。
@@ -332,6 +334,19 @@ function ConceptSources({
 }
 
 /** 课程级知识页：总览、主题分组、可核验出处与按概念复习。 */
+type KnowledgeSection = "concepts" | "review";
+
+const sectionStorageKey = (courseId: string) => `ca.knowledge.section.${courseId}`;
+
+/** 「知识点 | 复习资料」按课程记在本次会话里：回看视频、从后台任务「查看」回来时还在原处。 */
+function readSection(courseId: string): KnowledgeSection {
+  try {
+    return sessionStorage.getItem(sectionStorageKey(courseId)) === "review" ? "review" : "concepts";
+  } catch {
+    return "concepts";
+  }
+}
+
 export function ConceptsPanel({
   courseId,
   courseName,
@@ -371,6 +386,15 @@ export function ConceptsPanel({
   const [reviewing, setReviewing] = useState<{ conceptId: string; name: string } | null>(null);
   // 课程 AI 问答抽屉是否展开（背景为整门课的总览+知识点）。
   const [chatOpen, setChatOpen] = useState(false);
+  const [section, setSection] = useState<KnowledgeSection>(() => readSection(courseId));
+  function changeSection(next: KnowledgeSection) {
+    setSection(next);
+    try {
+      sessionStorage.setItem(sectionStorageKey(courseId), next);
+    } catch {
+      // 存不了就只在这次挂载里记着。
+    }
+  }
   const compactChat = useContainerWidth(panelRef) === "compact";
   const chatToggleRef = useRef<HTMLButtonElement>(null);
   const chatCloseRef = useRef<HTMLButtonElement>(null);
@@ -696,7 +720,7 @@ export function ConceptsPanel({
         onBack={onClose}
         backLabel={t("concepts.backToVideos")}
         actions={
-          hasKnowledge ? (
+          hasKnowledge && section === "concepts" ? (
             <>
             <Button
               ref={chatToggleRef}
@@ -730,7 +754,25 @@ export function ConceptsPanel({
         }
       />
 
-      <div className="relative flex min-h-0 flex-1">
+      <Tabs
+        value={section}
+        onValueChange={(value) => changeSection(value === "review" ? "review" : "concepts")}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+      <TabsList aria-label={t("reviewBook.tabsLabel")} className="ca-study-tabs-band block">
+        <div className="ca-study-tabs">
+          <TabsTrigger value="concepts" className="ca-study-tab ca-touch-44">
+            {t("reviewBook.tabConcepts")}
+          </TabsTrigger>
+          <TabsTrigger value="review" className="ca-study-tab ca-touch-44">
+            {t("reviewBook.tabReview")}
+          </TabsTrigger>
+        </div>
+      </TabsList>
+      <TabsContent value="review" className="flex min-h-0 flex-1 focus-visible:outline-none">
+        <ReviewBookPanel courseId={courseId} onJump={(videoId, startMs) => onJump(videoId, startMs)} />
+      </TabsContent>
+      <TabsContent value="concepts" className="relative flex min-h-0 flex-1 focus-visible:outline-none">
         <div
           ref={mainScrollRef}
           className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-6"
@@ -1264,7 +1306,8 @@ export function ConceptsPanel({
               {chatBody}
             </aside>
           ))}
-      </div>
+      </TabsContent>
+      </Tabs>
 
       {reviewing && (
         <ReviewSession

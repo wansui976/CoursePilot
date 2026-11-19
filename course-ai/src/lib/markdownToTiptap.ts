@@ -235,18 +235,18 @@ function tryDisplayMathBlock(lines: string[], start: number): [Node, number] | n
 }
 
 /** 一行是不是表格行：以 | 开头/结尾。 */
-function isTableRow(line: string): boolean {
+export function isTableRow(line: string): boolean {
   const t = line.trim();
   return t.startsWith("|") && t.lastIndexOf("|") > 0;
 }
 
 /** 分隔行：|---|:--:|---| 这种只含 - : | 空格的行。 */
-function isTableDivider(line: string): boolean {
+export function isTableDivider(line: string): boolean {
   const t = line.trim();
   return isTableRow(t) && /^\|?[\s:\-|]+\|?$/.test(t) && t.includes("-");
 }
 
-function splitCells(line: string): string[] {
+export function splitCells(line: string): string[] {
   const t = line.trim().replace(/^\|/, "").replace(/\|$/, "");
   return t.split("|").map((c) => c.trim());
 }

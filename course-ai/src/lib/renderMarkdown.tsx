@@ -4,11 +4,58 @@ import { MathText } from "@/ui/MathText";
 import i18n from "@/i18n";
 import { withClickableTimestamps } from "@/lib/clickableTimestamps";
 import {
+  isTableDivider,
+  isTableRow,
+  splitCells,
   splitTrailingTimestampSources,
   type TimestampSource,
 } from "@/lib/markdownToTiptap";
 
-type Seek = (ms: number) => void;
+/** 正文里的一条出处：`[N017 12:30]` 里的编号与时间（没写时间为 null）。 */
+export interface SourceRef {
+  id: string;
+  ms: number | null;
+}
+
+/** 把一组出处（一对方括号里可以有好几条，用分号隔开）渲染成可点的标签。 */
+export type SourceRenderer = (refs: SourceRef[], key: string) => ReactNode;
+
+/**
+ * 跳转回调。可以顺带挂一个 `renderSource`：复习资料正文里的 `[N017 12:30]` 指向
+ * 「某个视频的某一秒」，靠它渲染成标签；其它地方不挂，这种写法就原样当文字。
+ * 挂在回调上而不是另加参数，是因为它要一路传到最里层的文字渲染，沿途每个函数都只带这一个参数。
+ */
+type Seek = ((ms: number) => void) & { renderSource?: SourceRenderer };
+
+const CLOCK = String.raw`\d{1,3}:\d{2}(?::\d{2})?`;
+const SOURCE_REF = String.raw`N\d{3,4}(?:\s+${CLOCK})?`;
+const SOURCE_RE = new RegExp(String.raw`\[(${SOURCE_REF}(?:;\s*${SOURCE_REF})*)\]`, "g");
+
+function parseClock(clock: string): number {
+  return clock.split(":").reduce((total, part) => total * 60 + Number(part), 0) * 1000;
+}
+
+/** 文字里的时间戳变成可点的跳转；挂了 renderSource 时先把出处标记切出来渲染成标签。 */
+function timestampsAndSources(text: string, onSeek: Seek, key: string): ReactNode[] {
+  const renderSource = onSeek.renderSource;
+  if (!renderSource || !text.includes("[N")) return withClickableTimestamps(text, onSeek, key);
+  const nodes: ReactNode[] = [];
+  let last = 0;
+  let index = 0;
+  for (const match of text.matchAll(SOURCE_RE)) {
+    const start = match.index ?? 0;
+    if (start > last) nodes.push(...withClickableTimestamps(text.slice(last, start), onSeek, `${key}-s${index}`));
+    const refs = match[1].split(";").map((part) => {
+      const [id, clock] = part.trim().split(/\s+/);
+      return { id, ms: clock ? parseClock(clock) : null };
+    });
+    nodes.push(<Fragment key={`${key}-src-${index}`}>{renderSource(refs, `${key}-src-${index}`)}</Fragment>);
+    last = start + match[0].length;
+    index += 1;
+  }
+  if (last < text.length) nodes.push(...withClickableTimestamps(text.slice(last), onSeek, `${key}-s${index}`));
+  return nodes;
+}
 
 /** 非公式片段里识别 **加粗** 与 [mm:ss] 时间戳。 */
 function boldAndTimestamps(text: string, onSeek: Seek, key: string): ReactNode[] {
@@ -23,13 +70,13 @@ function boldAndTimestamps(text: string, onSeek: Seek, key: string): ReactNode[]
           className="font-semibold text-[var(--text-strong)]"
         >
           {/* 加粗里也认时间戳：「**出现在 [11:04]**」这种强调句恰恰最常带时间点。 */}
-          {withClickableTimestamps(part.slice(2, -2), onSeek, `${key}-b${i}`)}
+          {timestampsAndSources(part.slice(2, -2), onSeek, `${key}-b${i}`)}
         </strong>,
       );
     } else {
       nodes.push(
         <Fragment key={`${key}-t-${i}`}>
-          {withClickableTimestamps(part, onSeek, `${key}-${i}`)}
+          {timestampsAndSources(part, onSeek, `${key}-${i}`)}
         </Fragment>,
       );
     }
@@ -121,7 +168,8 @@ type Block =
   | { kind: "ul"; items: string[] }
   | { kind: "ol"; items: string[] }
   | { kind: "quote"; text: string }
-  | { kind: "code"; lang: string; text: string };
+  | { kind: "code"; lang: string; text: string }
+  | { kind: "table"; header: string[]; rows: string[][] };
 
 type HeadingElement = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
 
@@ -138,7 +186,9 @@ function parseBlocks(md: string): Block[] {
   // 围栏代码块里的行原样收下，不认标题、列表、空行分段。流式输出时闭合的 ``` 还没到，
   // 就先把已到的部分当代码显示，等闭合了也不会跳变。
   let code: { lang: string; lines: string[] } | null = null;
-  for (const raw of md.split("\n")) {
+  const lines = md.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    const raw = lines[index];
     const fence = raw.trim().match(/^```\s*([\w+#.-]*)\s*$/);
     if (code) {
       if (fence && !fence[1]) {
@@ -158,6 +208,20 @@ function parseBlocks(md: string): Block[] {
     const t = line.trim();
     if (t === "") {
       flushPara();
+      continue;
+    }
+    // 表格：表头行后面紧跟 |---| 分隔行才算（和笔记编辑器的认法一致）。
+    if (isTableRow(t) && index + 1 < lines.length && isTableDivider(lines[index + 1])) {
+      flushPara();
+      const header = splitCells(t);
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length && isTableRow(lines[index])) {
+        rows.push(splitCells(lines[index]));
+        index += 1;
+      }
+      index -= 1;
+      blocks.push({ kind: "table", header, rows });
       continue;
     }
     const heading = t.match(/^(#{1,6})\s+(.*)$/);
@@ -209,9 +273,13 @@ export function renderInlineMarkdown(text: string, onSeek: Seek = () => {}): Rea
  */
 export function renderMarkdown(
   md: string,
-  onSeek: Seek,
+  seek: (ms: number) => void,
   trailing?: ReactNode,
+  options?: { renderSource?: SourceRenderer },
 ): ReactNode {
+  const onSeek: Seek = options?.renderSource
+    ? Object.assign((ms: number) => seek(ms), { renderSource: options.renderSource })
+    : seek;
   const blocks = parseBlocks(md);
   const lastIdx = blocks.length - 1;
 
@@ -233,6 +301,39 @@ export function renderMarkdown(
       return (
         <Fragment key={key}>
           <CodeBlock code={block.text} lang={block.lang} />
+          {tail}
+        </Fragment>
+      );
+    }
+    if (block.kind === "table") {
+      const width = Math.max(block.header.length, ...block.rows.map((row) => row.length));
+      const cells = (row: string[]) => Array.from({ length: width }, (_, i) => row[i] ?? "");
+      return (
+        <Fragment key={key}>
+          <div className="ca-md-table my-3 overflow-x-auto rounded-lg border border-[var(--border-subtle)]">
+            <table className="w-full border-collapse text-left text-[length:var(--md-size,0.875rem)] leading-relaxed">
+              <thead className="bg-[var(--surface-panel)]">
+                <tr>
+                  {cells(block.header).map((cell, i) => (
+                    <th key={i} className="border-b border-[var(--border-subtle)] px-3 py-2 align-bottom font-semibold text-[var(--text-strong)]">
+                      <div className="ca-md-cell">{inlineRich(cell, onSeek, `${key}-h${i}`)}</div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {block.rows.map((row, r) => (
+                  <tr key={r} className="border-b border-[var(--border-faint)] last:border-b-0">
+                    {cells(row).map((cell, i) => (
+                      <td key={i} className="px-3 py-2 align-top text-[var(--text-normal)]">
+                        <div className="ca-md-cell">{inlineRich(cell, onSeek, `${key}-${r}-${i}`)}</div>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {tail}
         </Fragment>
       );

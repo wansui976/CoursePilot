@@ -133,6 +133,71 @@ export function installMockIpc({ theme, safeArea }) {
 
   // —— 课程知识 ——
   const occ = (vid, title, min, excerpt) => ({ video_id: vid, video_title: title, start_ms: min * 60_000, end_ms: min * 60_000 + 40_000, excerpt });
+  // 复习资料：整门课笔记按知识逻辑重排的分章内容（出处 [N017 12:30] 渲染成可点的标签）。
+  const src = (video_id, video_title, start_ms) => ({ video_id, video_title, start_ms });
+  const reviewBook = {
+    title: "机器学习导论 · 期末复习",
+    generated_at: now - DAY,
+    outline_stale: false,
+    videos_with_notes: 6,
+    videos_without_notes: ["08 注意力机制", "09 课程总结"],
+    chapters: [
+      {
+        idx: 0, title: "梯度下降：让损失一步步变小", intro: "从损失函数的几何意义出发，弄清梯度下降每一步在做什么、步子该迈多大。",
+        sources: { N003: src("v3", "03 梯度下降的直觉", 180_000), N004: src("v3", "03 梯度下降的直觉", 420_000), N005: src("v3", "03 梯度下降的直觉", 660_000), N019: src("v7", "07 反向传播推导", 120_000) },
+        content_md: [
+          "## 学习目标",
+          "- 能用「下山」解释梯度下降的更新方向 [N003 03:12]",
+          "- 能判断学习率过大、过小时损失曲线的样子 [N004 07:40]",
+          "- 能说清批量、随机、小批量三种梯度下降的取舍 [N005 11:05]",
+          "",
+          "## 梯度与更新规则",
+          "**定义**：梯度指向函数值增长最快的方向，所以参数沿**负梯度**更新：\\(\\theta \\leftarrow \\theta - \\eta \\nabla L(\\theta)\\) [N003 03:12]",
+          "",
+          "- 梯度的**方向**决定往哪走，**大小**说明这里有多陡 [N003 04:30]",
+          "- 反向传播不是新的优化方法，只是高效地算出这个梯度 [N019 02:10]",
+          "",
+          "## 学习率：步子迈多大",
+          "- 太大：在谷底两侧来回**震荡**，甚至发散 [N004 07:40]",
+          "- 太小：收敛极慢，训练几轮几乎不动 [N004 08:15]",
+          "- 实践中先用较大学习率、后期逐步衰减 [N004 09:02]",
+          "",
+          "## 易混辨析",
+          "| 概念 | 区别 | 怎么判 |",
+          "| --- | --- | --- |",
+          "| 批量梯度下降 | 每步用全部样本 | 曲线平滑但每步很慢 |",
+          "| 随机梯度下降 | 每步一个样本 | 曲线抖动大，跳出局部极小 [N005 12:20] |",
+          "",
+          "## 本章速查",
+          "| 考点 | 怎么判 | 怎么答 |",
+          "| --- | --- | --- |",
+          "| 更新方向 | 问「往哪走」 | 沿负梯度 [N003 03:12] |",
+          "| 学习率过大 | 损失上下跳 | 震荡或发散，调小学习率 [N004 07:40] |",
+        ].join("\n"),
+        error: null, stale: false, generated_at: now - DAY,
+      },
+      {
+        idx: 1, title: "过拟合与正则化", intro: "模型越复杂越容易记住噪声，正则化给参数加惩罚把它拉回来。",
+        sources: { N011: src("v5", "05 过拟合、正则化与偏差方差", 90_000), N012: src("v5", "05 过拟合、正则化与偏差方差", 360_000) },
+        content_md: [
+          "## 学习目标",
+          "- 能区分欠拟合与过拟合 [N011 01:30]",
+          "- 能说清 L1 与 L2 正则的效果差异 [N012 06:00]",
+          "",
+          "## 偏差与方差",
+          "模型越复杂，**偏差越小，方差越大**；目标是在两者之间找平衡点 [N011 02:45]",
+        ].join("\n"),
+        error: null, stale: true, generated_at: now - DAY,
+      },
+      {
+        idx: 2, title: "神经网络与反向传播", intro: "",
+        sources: {}, content_md: null,
+        error: "模型输出达到单次输出上限被截断，结果不完整。可在 设置 → 大模型 → 高级 里调大「单次输出上限」。",
+        stale: false, generated_at: null,
+      },
+    ],
+  };
+
   const knowledge = {
     overview: "这门课从**线性模型**出发，经由**梯度下降**这一贯穿全课的优化手段，走到**神经网络**与**注意力机制**。前半程打地基，后半程看这些地基如何被组合成现代深度学习。",
     generated_at: now - 2 * DAY, covered_videos: 6, total_videos: 9, stale: false,
@@ -541,6 +606,11 @@ export function installMockIpc({ theme, safeArea }) {
       { id: 2, at_ms: now - 30_000, kind: "asr", video_id: "v7", request: "transcribe", response: "timeout", status: "error" },
     ],
     cmd_get_course_knowledge: ({ courseId }) => (courseId === "c1" ? knowledge : null),
+    cmd_get_review_book: ({ courseId }) =>
+      courseId === "c1"
+        ? reviewBook
+        : { title: null, generated_at: null, chapters: [], outline_stale: false, videos_with_notes: 2, videos_without_notes: [] },
+    cmd_review_book_running: () => false,
     cmd_list_course_concepts: ({ courseId }) => (courseId === "c1" ? knowledge.groups.flatMap((g) => g.concepts) : []),
     cmd_concept_due_counts: () => [{ concept_id: "k1", due: 2 }, { concept_id: "k3", due: 1 }],
     cmd_due_cards: () => dueCards,

@@ -19,7 +19,8 @@ export type TaskKind =
   | "slides-ocr"
   | "handout"
   | "concepts-analyze"
-  | "concepts-summarize";
+  | "concepts-summarize"
+  | "review-book";
 
 export type TaskMeta = {
   kind: TaskKind;
@@ -66,6 +67,7 @@ export function studyTargetFor(kind: TaskKind): StudyTarget | null {
       return { tab: "more", moreView: "slides" };
     case "concepts-analyze":
     case "concepts-summarize":
+    case "review-book":
       return null;
   }
 }
