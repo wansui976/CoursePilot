@@ -6,7 +6,7 @@
     <title>CoursePilot — 把课程视频变成真正记得住的东西</title>
     <meta
       name="description"
-      content="开源的 AI 网课学习工具：导入本地或 B 站课程视频，自动转写、笔记、章节、课件截图、脑图、练习题、知识点和间隔复习；费曼复述检验你是否真的讲得清，拍一道题就能找到课里讲它的地方；内置 SenseVoice / Qwen3-ASR 本地识别，电脑和手机都能离线转写。本地优先，数据在你手里。"
+      content="开源的 AI 网课学习工具：导入本地或 B 站课程视频，自动转写、笔记、章节、课件截图、脑图、练习题、知识点和间隔复习；费曼复述检验你是否真的讲得清，拍一道题就能找到课里讲它的地方；内置 SenseVoice / Qwen3-ASR 本地识别，电脑和手机都能离线转写；用自己的网盘在多台设备间同步，也能从网盘直接导入课程。本地优先，数据在你手里。"
     />
     <meta name="theme-color" content="#000000" />
 
@@ -1319,7 +1319,7 @@
         <div class="aurora" aria-hidden="true"></div>
         <div class="tile__inner" style="position: relative; z-index: 1;">
           <a class="new-pill" href="#whats-new" data-animate="hero" style="--motion-delay: 40ms" data-umami-event="hero-whats-new">
-            <span class="new-pill__tag">v0.4.1</span>电脑上一键更新、PaddleOCR 认课件更准、AI 花费看得见
+            <span class="new-pill__tag">v0.4.2</span>多设备网盘同步、手机直接播电脑上的视频、从网盘导入课程
           </a>
           <p class="eyebrow" data-animate="hero" style="--motion-delay: 80ms">CoursePilot</p>
           <h1 class="hero-display" data-animate="hero" style="--motion-delay: 160ms">把课程视频变成<br />真正记得住的东西。</h1>
@@ -1340,8 +1340,68 @@
         </div>
       </section>
 
-      <!-- ============ v0.4.0 新功能 ============ -->
+      <!-- ============ v0.4.2 新功能 ============ -->
       <section class="tile tile--light" id="whats-new">
+        <div class="tile__inner">
+          <p class="eyebrow" data-animate>v0.4.2 新功能</p>
+          <h2 class="display-lg" data-animate>换一台设备，接着学。</h2>
+          <div class="showcase" data-showcase data-animate>
+            <div class="showcase__tabs" role="tablist" aria-label="v0.4.2 新功能">
+              <button class="showcase__tab" type="button" role="tab" id="tab-sync" aria-controls="panel-sync" aria-selected="true">多设备同步<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-drive" aria-controls="panel-drive" aria-selected="false" tabindex="-1">从网盘导入<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-drive-add" aria-controls="panel-drive-add" aria-selected="false" tabindex="-1">百度 / 夸克<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-review-book" aria-controls="panel-review-book" aria-selected="false" tabindex="-1">复习资料<span class="showcase__bar"><i></i></span></button>
+            </div>
+            <div class="showcase__panels">
+              <figure class="showcase__panel is-active" id="panel-sync" role="tabpanel" aria-labelledby="tab-sync">
+                <figcaption class="showcase__copy">
+                  <h3>用你自己的网盘，四端同步。</h3>
+                  <p>填上坚果云（或 Nextcloud、群晖）的账号，进度、笔记、复习卡在 Windows、安卓、Mac、iOS 之间同步，字幕和 AI 生成的内容也一起过去。同一 Wi‑Fi 下，手机直接播放电脑上的视频，不用上传、不占手机空间。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/multi-device-sync.webp" width="1600" height="1000" loading="lazy" alt="设置里的多设备同步：开启同步、上次同步 4 分钟前、正在上传视频文件 42%，局域网直连播放已打开，设备列表里有这台 Mac、一台 Windows 和一台安卓" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-drive" role="tabpanel" aria-labelledby="tab-drive">
+                <figcaption class="showcase__copy">
+                  <h3>课在网盘里，直接导进来。</h3>
+                  <p>浏览网盘里的文件夹，勾选视频导成课程，按第 1、2、10 讲排好。下载到本机能识别字幕、断网也能看；选「在线看」就不占空间，打开时边下边播。手机上也能用。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/drive-import.webp" width="1600" height="1000" loading="lazy" alt="从网盘导入对话框：浏览到百度网盘下的 2027 申论系统班，按讲次排好的五个视频全部勾选，底部是下载到本机 / 在线看的切换" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-drive-add" role="tabpanel" aria-labelledby="tab-drive-add">
+                <figcaption class="showcase__copy">
+                  <h3>百度、阿里、夸克都能连。</h3>
+                  <p>坚果云、群晖、Nextcloud 直接填 WebDAV；夸克网盘贴一份网页版 Cookie 就能连；百度网盘、阿里云盘、115 用 OpenList 挂成 WebDAV，对话框里有五步教程。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/drive-add.webp" width="1600" height="1000" loading="lazy" alt="添加网盘：OpenList、夸克网盘、坚果云、Nextcloud、群晖 NAS、其它六种类型的卡片，下面是 WebDAV 地址、账号和密码" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-review-book" role="tabpanel" aria-labelledby="tab-review-book">
+                <figcaption class="showcase__copy">
+                  <h3>一门课的笔记，变成一本复习资料。</h3>
+                  <p>整门课的笔记按知识点重排成分章的复习资料：学习目标、要点和本章速查，容易混淆的概念还有辨析表；每条都能点回视频那一秒。改了笔记只重写受影响的章。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/review-book.webp" width="1600" height="1000" loading="lazy" alt="复习资料页：左边章节目录，右边第 1 章梯度下降的学习目标和要点，每条后面带着视频时间" />
+                </div>
+              </figure>
+            </div>
+            <div class="showcase__more">
+              <span>语义检索：按意思找</span>
+              <span>DeepSeek 深度思考开关</span>
+              <span>按讲次一键排序</span>
+              <span>自动生成可逐项关闭</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ v0.4.0 新功能 ============ -->
+      <section class="tile tile--light" id="whats-new-040">
         <div class="tile__inner">
           <p class="eyebrow" data-animate>v0.4.0 新功能</p>
           <h2 class="display-lg" data-animate>不只考记性，还要会用。</h2>
@@ -1525,7 +1585,7 @@
             <div class="workflow__step" data-animate style="--motion-delay: 60ms">
               <span>01</span>
               <strong>导入</strong>
-              <p>拖入本地视频，或粘贴 Bilibili / URL 下载。</p>
+              <p>拖入本地视频、粘贴 Bilibili / URL 下载，或者从网盘导入。</p>
             </div>
             <div class="workflow__step" data-animate style="--motion-delay: 120ms">
               <span>02</span>
@@ -1787,7 +1847,7 @@
               <path d="M4.5 7h.01M4.5 12h.01M4.5 17h.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
             </svg>
             <h3>跨设备同步</h3>
-            <p>通过 Apple CloudKit 在多台设备间同步学习记录，网络不好时自动驻留重试。</p>
+            <p>用你自己的网盘（坚果云、Nextcloud、群晖等）在 Windows、安卓、Mac、iOS 之间同步进度、笔记、复习卡和 AI 资料；同一 Wi‑Fi 下手机直接播放电脑上的视频，加密传输、不经过任何第三方服务器。</p>
           </div>
           <div class="ucard" data-animate style="--motion-delay: 180ms">
             <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">

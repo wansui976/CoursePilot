@@ -37,15 +37,27 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 - 🖼️ **Slides included** — detects page turns, captures every slide, and OCRs it, so formulas and definitions that are shown but never spoken still reach the AI.
 - 💬 **Answers with sources** — ask about one video or a whole course; answers cite `[mm:ss]` timestamps and slide pages you can click to jump back.
 - 📝 **Take notes as you watch** — press `N` to jot a note (the video pauses and a timestamp is inserted), or select transcript text and send it to your notes. Notes hold images and one-click video frame captures, and keep a version history.
-- 🧠 **Built for retention** — FSRS-4.5 spaced repetition, knowledge points merged across videos, a study heatmap, and weak-topic analysis.
+- 🧠 **Built for retention** — FSRS-4.5 spaced repetition, knowledge points merged across videos, chaptered review notes for a whole course, a study heatmap, and weak-topic analysis.
 - 🤖 **Run the app in plain language** — the AI assistant searches Bilibili, creates courses, checks your progress, and turns a chat into notes. It asks before changing anything.
 - 📺 **Bilibili-friendly** — paste a link to download, batch-import playlists or collections, keep the danmaku and comment threads, and follow collections so new videos import themselves.
 - 🌍 **Beyond Bilibili** — YouTube, podcast links and local audio (mp3, m4a…) work too, and foreign-language lectures get one-click translated, bilingual subtitles.
+- ☁️ **Courses on a cloud drive** — import straight from Jianguoyun, Synology or Nextcloud; Quark Drive connects with a pasted cookie, and Baidu / Aliyun work through OpenList. Download to the device or just stream.
+- 🔄 **Pick up on any device** — sync progress, notes, flashcards and AI materials between Windows, Android, Mac and iOS through your own cloud drive; on the same Wi‑Fi, a phone plays videos straight from your computer.
 - 📤 **Made to share** — export a slide-by-slide handout as PDF, and turn notes, mind maps or your study week into share-ready images.
 - 🎙️ **Transcribe without a network** — built-in SenseVoice / Qwen3-ASR local recognition makes a quarter to a fifth of the errors of Whisper base on Chinese lectures, and runs on Mac, Windows, iPhone, iPad and Android.
 - 🔒 **Your data stays yours** — everything lives on your device and uses your own API keys (stored in the system keychain). It runs fully offline with local transcription and OCR.
 
-## 🆕 Recent updates (v0.4.1)
+## 🆕 Recent updates (v0.4.2)
+
+- **Multi-device sync** — in Settings → Sync, sign in to Jianguoyun (or any WebDAV drive: Nextcloud, Synology…) and progress, notes and flashcards sync between Windows, Android, Mac and iOS. Transcripts, summaries, quizzes, mind maps and thumbnails come along, so another device doesn't have to transcribe or generate again. Video files can optionally be uploaded and downloaded on other devices in one click.
+- **Play over the local network** — turn it on on your computer, and phones and tablets on the same Wi‑Fi play its videos directly: nothing goes to the cloud drive and nothing takes space on the phone. Codecs the phone can't play are converted on the computer first, and a streamed video can be saved to the device.
+- **Import courses from a cloud drive** — browse folders on your drive and tick videos to import. Quark Drive connects with a cookie from its website; Baidu Netdisk, Aliyun Drive and 115 work through OpenList (a five-step guide is in the dialog). Download to the device or stream — on phones too.
+- **Semantic search and review notes** — find passages by meaning even when your words differ from the lecture's; turn a whole course's notes into chaptered review notes where every point links back to the moment in the video.
+- **Cheaper AI** — a "deep thinking" switch for DeepSeek (off by default); turn off individual auto-generated outputs (chapters / summary / notes / quiz / mind map); see your DeepSeek balance, with peak / off-peak pricing.
+- **Also** — sort a course by the lecture numbers in titles; faster startup; polished menus and import dialog. Fixed: progress missing after switching devices, assistant history filling up local storage, and "database is locked" when two videos processed at once.
+
+<details>
+<summary>v0.4.1</summary>
 
 - **One-click updates on desktop** — from this version on, the update notice has an "Update now" button: it downloads, verifies the signature, installs and restarts. No more release-page downloads, and no more "damaged" warning on macOS. Getting from v0.4.0 to this version is still a manual install.
 - **PaddleOCR on-device OCR** — pick PP-OCRv6 in Settings → Slides / OCR (30 MB download, fully offline). It reads Chinese slides far better than Tesseract — especially worth it on Windows.
@@ -53,6 +65,8 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 - **See what AI costs** — Settings → LLM → Usage & cost shows this month's spend broken down by task, course and model; set a monthly budget and automatic generation pauses when it's reached.
 - **Also** — start processing a whole selection at once; volume remembered per course (up to 200% on Windows); large-screen layout, a "recently finished" list in the queue, and a friendlier assistant empty state.
 - **Fix** — videos stuck at 100% in the processing queue until you refreshed.
+
+</details>
 
 <details>
 <summary>v0.4.0</summary>
@@ -103,6 +117,14 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 
 <table>
   <tr>
+    <td width="50%"><b>v0.4.2 · Multi-device sync and local-network playback</b><br><img src="assets/screenshots/multi-device-sync.webp" alt="Sync settings: sync on, last synced 4 minutes ago, a video uploading at 42%, local-network playback on at 192.168.1.5, and a device list with this Mac, a Windows PC and an Android phone"></td>
+    <td width="50%"><b>v0.4.2 · Import from a cloud drive, download or stream</b><br><img src="assets/screenshots/drive-import.webp" alt="The cloud-drive import dialog browsing a course folder on Baidu Netdisk, five lectures ticked in order, with the download / stream switch and 5 selected · 2.2 GB"></td>
+  </tr>
+  <tr>
+    <td><b>v0.4.2 · Add a drive: OpenList, Quark, Jianguoyun…</b><br><img src="assets/screenshots/drive-add.webp" alt="Add a drive: cards for OpenList, Quark Drive, Jianguoyun, Nextcloud, Synology NAS and other WebDAV, followed by the address, user name and password"></td>
+    <td><b>v0.4.2 · Course review notes that link back to the video</b><br><img src="assets/screenshots/review-book.webp" alt="The review notes tab: a chapter list on the left and chapter 1 on gradient descent on the right, with goals and points each followed by a video timestamp"></td>
+  </tr>
+  <tr>
     <td width="50%"><b>v0.4.0 · Quizzes graded on click, every option explained</b><br><img src="assets/screenshots/quiz-answered.webp" alt="An Apply-style question: the wrong pick marked red with a cross, the right one green with a check, a one-line reason under each option, then the explanation and a rewatch link"></td>
     <td width="50%"><b>v0.4.0 · New set: pick a style, write this course's rules</b><br><img src="assets/screenshots/quiz-new-set.webp" alt="The new-set dialog with four styles, this course's quiz requirements and a replace switch"></td>
   </tr>
@@ -144,7 +166,7 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
   </tr>
 </table>
 
-<sub>Screenshots are from the real v0.3.6 app. The course is a public Bilibili course (袁东申论领跑营, a Chinese civil-service essay course); all study materials were generated by CoursePilot.</sub>
+<sub>Screenshots marked v0.4.0 / v0.4.2 come from the UI screenshot tool's sample course (demo data); the rest are from the real v0.3.6 app. The course is a public Bilibili course (袁东申论领跑营, a Chinese civil-service essay course); all study materials were generated by CoursePilot.</sub>
 
 ## 🚀 Download
 
@@ -152,19 +174,19 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 | --- | --- | --- |
 | macOS (Apple Silicon / Intel) | [`.dmg`](https://github.com/wansui976/CoursePilot/releases/latest) | `aarch64` for Apple silicon, `x64` for Intel; ffmpeg, llama.cpp, sherpa-onnx, etc. bundled |
 | Windows (x64) | [`.exe` / `.msi`](https://github.com/wansui976/CoursePilot/releases/latest) | Dependencies bundled; local Qwen3-ASR can use the GPU (Vulkan) |
-| Android (arm64) | [`.apk`](https://github.com/wansui976/CoursePilot/releases/latest) | Local (SenseVoice / Qwen3-ASR) or cloud ASR; local video import only for now |
-| iOS / iPadOS | [`.ipa`](https://github.com/wansui976/CoursePilot/releases/latest) (unsigned) | Sideload it yourself; local video import only for now |
+| Android (arm64) | [`.apk`](https://github.com/wansui976/CoursePilot/releases/latest) | Local (SenseVoice / Qwen3-ASR) or cloud ASR; imports local videos and courses on cloud drives (Bilibili / web links download on desktop) |
+| iOS / iPadOS | [`.ipa`](https://github.com/wansui976/CoursePilot/releases/latest) (unsigned) | Sideload it yourself; imports as above |
 
 > [!NOTE]
 > The installers aren't signed yet:
 > - If macOS says the app "is damaged and can't be opened", run `xattr -cr /Applications/course-ai.app` and open it again.
 > - If Windows SmartScreen warns you, click **More info → Run anyway**.
 > - On Android, allow installing apps from unknown sources.
-> - Sign the iOS / iPadOS IPA with your own Apple ID using AltStore, Sideloadly, or similar. iCloud sync isn't available on self-signed installs.
+> - Sign the iOS / iPadOS IPA with your own Apple ID using AltStore, Sideloadly, or similar. iCloud sync isn't available on self-signed installs (cloud-drive sync still works).
 
 ### First run in three steps
 
-1. **Create a course and import videos** — drag in local files or paste a Bilibili link (downloads need a cookies file uploaded in Settings). You can also batch-import a folder or a whole playlist.
+1. **Create a course and import videos** — drag in local files or paste a Bilibili link (downloads need a cookies file uploaded in Settings). You can also batch-import a folder or a whole playlist, or import from a cloud drive.
 2. **Add an LLM** — in **Settings → LLM**, add any OpenAI-compatible API key (DeepSeek works). That unlocks every AI feature. Without one, local transcription, slide extraction, and OCR still work offline.
 3. **Let it process, then study** — skim the AI overview → read the notes and mind map → go through the transcript → ask questions → take the quiz and start spaced repetition.
 
@@ -183,6 +205,7 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 ### Import & processing
 
 - **Course library** — organize videos into courses, with multi-level folders inside a course (drag to organize, colors, bulk move / delete, move across courses) and a folder tree in the sidebar; search titles, notes and transcripts in the current folder. Import local video or audio, Bilibili / YouTube / podcast links, or batch-import folders and playlists/collections.
+- **Cloud drives** — import from any WebDAV drive (Jianguoyun, Synology, Nextcloud), Quark Drive (with a cookie), or Baidu / Aliyun through OpenList. Download to the device or stream; interrupted downloads resume on their own. A course out of order can be sorted by the lecture numbers in its titles.
 - **Bilibili app cache** — point "Import a whole folder" at the Bilibili desktop client's cache or a phone's `download` folder; every part is listed in order and remuxed into an mp4 (no re-encoding) without touching the cache.
 - **Background downloads** — Bilibili / web videos download in the background; closing the dialog or switching pages doesn't stop them. The processing queue shows percentage and speed and lets you cancel or retry. When Bilibili's CDN cuts the stream mid-download, it retries one quality step lower; if your login cookies have expired it says so, and re-importing cookies resumes the download.
 - **Followed collections** — follow a playlist while importing it; new videos are imported and processed automatically (up to 3 per check, preferring built-in subtitles). Manage them under “Subscriptions” in the course menu.
@@ -196,6 +219,8 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 - **Quizzes** — four styles (Recall / Apply / Find the error / Tell apart) and five question types (single, multiple, true/false, find-the-error, short answer). Choices are graded on click with per-option explanations; find-the-error and short answers are graded by the AI against the transcript. "New set" adds more, and quiz rules can be written in Settings (all courses) and the quiz panel (this course).
 - **Knowledge points** — extracted from every video, with duplicates and synonyms merged into a course-wide list. Each point gets an explanation, AI Q&A, progress tracking, and a shortcut to add flashcards.
 - **Full-text search** — searches transcripts and slide text across videos and jumps straight to the moment. Chinese search uses bigram tokenization weighted by rarity, so natural-language questions match too.
+- **Semantic search** — optional embeddings (a local model on desktop, or a cloud embeddings API) find passages by meaning when the wording differs from the lecture's.
+- **Review notes** — a whole course's notes regrouped by topic into chaptered review notes; every point links back to the moment in the video.
 - **Subtitle translation** — your LLM translates subtitles into Chinese, English, Japanese or Korean, aligned line by line; after edits only the changed lines are re-translated.
 - **Formulas** — slide OCR (DeepSeek vision), notes, summaries and quizzes write formulas as LaTeX, rendered with KaTeX.
 - **Handouts** — each slide with the key points said during it (transcript excerpts without an LLM), grouped by chapter, one click from PDF.
@@ -242,7 +267,8 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 
 ### Data & safety
 
-- **Cross-device sync** — Apple CloudKit syncs study records between Mac, iPhone, and iPad, retrying automatically on bad networks.
+- **Cross-device sync** — your own WebDAV drive (Jianguoyun, Nextcloud, Synology…) syncs courses, progress, notes, flashcards, transcripts and AI materials between Windows, Android, Mac and iOS; video files can optionally be uploaded. Apple CloudKit also syncs study records between Apple devices.
+- **Local-network playback** — on the same Wi‑Fi, phones and tablets play videos stored on your computer over an encrypted connection, without uploading anything.
 - **Backup & recycle bin** — one-click backup/restore of the whole database plus a daily automatic snapshot. Deleted items go to a recycle bin first and can be restored in bulk.
 - **Token usage** — every LLM call is logged with token counts, cache-hit rate, and reasoning tokens.
 
@@ -272,17 +298,19 @@ ASR and slide extraction run in parallel. Each step's progress shows in the proc
 | Audio extraction / slide capture | ffmpeg | Native AVFoundation / MediaMetadataRetriever |
 | Local ASR | SenseVoice (sherpa-onnx) / Qwen3-ASR (llama.cpp, GPU-accelerated) | SenseVoice / Qwen3-ASR (sherpa-onnx); falls back to SenseVoice when memory is short |
 | Background processing | — | Android foreground service with a progress notification; iOS keeps the screen awake, and from iOS 26 continues after you switch apps |
-| Online video download | yt-dlp (background download queue) | Local files only for now |
+| Online video download | yt-dlp (background download queue) | Bilibili / web links download on desktop; courses on cloud drives import directly |
 | Codecs the device can't decode | — | iOS transcodes AV1 to H.264 (dav1d + VideoToolbox) |
 | Local OCR | PaddleOCR (PP-OCRv6, optional download) / Vision on macOS / tesseract | Vision on iOS / ML Kit on Android; cloud OCR also available (Alibaba / DeepSeek) |
 | Key storage | macOS Keychain / Windows Credential Manager | System keychain |
-| Cross-device sync | macOS (Apple CloudKit) | iOS (Apple CloudKit) |
+| Cross-device sync | Cloud drive (WebDAV) across all four platforms; macOS can also use Apple CloudKit | Same; iOS can also use Apple CloudKit |
+| Local-network playback | Shares videos with devices on the same Wi‑Fi and converts codecs they can't play to H.264 | Plays videos straight from the computer, or saves them to the device |
 
 ## 🔒 Where your data lives
 
 - All study materials (database, transcripts, slide images, notes) are stored **on your own device**.
 - Cloud ASR, LLM, and OCR calls use **your own API keys**. They're kept in the system keychain, can't be read back from the UI, and never pass through a third-party relay.
 - With local transcription, slide extraction, and local OCR only, CoursePilot runs **fully offline**.
+- Multi-device sync lives in **your own cloud drive** and never goes through a CoursePilot server; local-network playback is encrypted and only between your own devices.
 
 ---
 
@@ -316,6 +344,32 @@ Want to contribute? See [CONTRIBUTING.md](CONTRIBUTING.md) (in Chinese; PRs in E
 ```
 
 ## ☁️ Cloud services
+
+<details>
+<summary><b>Multi-device sync (Jianguoyun / Nextcloud / Synology and other WebDAV)</b></summary>
+
+Open **Settings → Sync** and enter the same drive account and folder on every device, then turn on sync.
+
+1. **Jianguoyun**: pick Jianguoyun as the service; the user name is your login email and the password is an **app password** (Jianguoyun web → Account → Security), not your login password.
+2. **Nextcloud / Synology / Alist, etc.**: enter its WebDAV address, user name and password.
+3. Test the connection, save, and turn sync on. Changes on a device usually go up within a minute or two, and the app syncs again whenever it comes back to the foreground.
+
+Video files aren't uploaded by default. To watch on another device, turn on "Upload video files" on the computer that has them — videos take a lot of space and traffic (Jianguoyun's free plan uploads only 1 GB a month, so Nextcloud, Synology or a large drive mounted through OpenList suit whole courses better) — or turn on local-network playback so phones on the same Wi‑Fi play straight from the computer.
+
+</details>
+
+<details>
+<summary><b>Importing from a cloud drive (OpenList for Baidu / Aliyun, Quark Drive)</b></summary>
+
+On a course page, choose **Import → Import from a cloud drive**, add a drive, browse its folders and tick the videos.
+
+- **Jianguoyun, Nextcloud, Synology**: enter the WebDAV address and account; the drive you use for sync shows up automatically.
+- **Baidu Netdisk, Aliyun Drive, 115**: install [OpenList Desktop](https://github.com/OpenListTeam/OpenList-Desktop/releases) on your computer, add the storage (get the refresh token at [api.oplist.org](https://api.oplist.org/) with OpenList's parameters), set its "WebDAV policy" to "Local proxy", tick "WebDAV read" for the user, then use `http://127.0.0.1:5244/dav/` here (the computer's LAN IP on a phone). The dialog has the same five-step guide.
+- **Quark Drive**: sign in at pan.quark.cn in a browser → F12 → Network → reload, and paste the whole Cookie header of any request. The cookie expires after a while; copy it again then.
+
+Download speed for non-members is limited by the drive (Quark measured about 50 KB/s; Baidu and Aliyun also throttle third-party apps).
+
+</details>
 
 <details>
 <summary><b>DeepSeek (LLM)</b></summary>
